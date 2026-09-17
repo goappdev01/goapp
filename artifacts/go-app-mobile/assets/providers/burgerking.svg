@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect width="100" height="100" fill="#D62300"/>
+  <!-- Top bun -->
+  <path fill="#F5A623" d="M50 22 C30 22 18 30 18 38 L82 38 C82 30 70 22 50 22Z"/>
+  <rect x="18" y="38" width="64" height="8" rx="3" fill="#F5A623"/>
+  <!-- Lettuce -->
+  <rect x="14" y="48" width="72" height="6" rx="3" fill="#5DBB63"/>
+  <!-- Meat / patty -->
+  <rect x="16" y="56" width="68" height="8" rx="3" fill="#8B3A0F"/>
+  <!-- Bottom bun -->
+  <rect x="18" y="66" width="64" height="8" rx="3" fill="#F5A623"/>
+  <path fill="#F5A623" d="M18 74 C18 82 30 86 50 86 C70 86 82 82 82 74Z"/>
+</svg>
