@@ -17,17 +17,21 @@ import {
   Business,
   createAvailabilityWindow,
   createBookableItem,
-  createBusiness,
+  createOwnedBusiness as createBusiness,
   deleteAvailabilityWindow,
   deleteBookableItem,
-  getAvailabilityWindows,
-  getBookableItems,
-  getBusinesses,
+  getOwnedAvailabilityWindows as getAvailabilityWindows,
+  getOwnedBookableItems as getBookableItems,
+  getOwnedBusinesses as getBusinesses,
   saveAvailabilityWindow,
   saveBusiness,
   saveBookableItem,
 } from "@/data/booking";
 import { useLanguage } from "@/contexts/LanguageContext";
+
+function showSaveError(error: unknown) {
+  Alert.alert("Cambios sin guardar", error instanceof Error ? error.message : "Comprueba tu conexión e inténtalo de nuevo.");
+}
 
 const BG          = "#F7F8FA";
 const CARD        = "#FFFFFF";
@@ -234,16 +238,13 @@ export function GoBusinessContent({ onBack }: { onBack: () => void }) {
     let found = all[0] ?? null;
     if (!found) {
       found = await createBusiness({
-        name: "", category: "", location: "", phone: "",
-        bookingActive: true,
+        name: "Mi negocio", category: "", location: "", phone: "",
+        bookingActive: false,
         bookingColor: "#4A80BD",
         timezone: "Europe/Madrid",
       });
     }
-    if (!found.bookingActive) {
-      found = { ...found, bookingActive: true };
-      await saveBusiness(found);
-    }
+
     setBiz(found);
     const [its, wins] = await Promise.all([
       getBookableItems(found.id),
@@ -254,19 +255,19 @@ export function GoBusinessContent({ onBack }: { onBack: () => void }) {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load().catch(error => { setLoading(false); Alert.alert("No se pudo cargar el negocio", error instanceof Error ? error.message : "Comprueba tu sesión."); }); }, []);
 
   const saveBizField = async (field: keyof Business, value: any) => {
     if (!biz) return;
     const updated = { ...biz, [field]: value };
     setBiz(updated);
-    await saveBusiness(updated);
+    try { await saveBusiness(updated); } catch (error) { Alert.alert("Cambios sin guardar", error instanceof Error ? error.message : "Comprueba la conexión."); return; }
   };
 
   const addItem = async () => {
     if (!biz) return;
     const item = await createBookableItem({
-      businessId: biz.id, title: "", type: "",
+      businessId: biz.id, title: "Nuevo servicio", type: "",
       durationMinutes: 30, customerCapacity: 1, unitQuantity: 1,
       price: 0, paymentRequired: false, active: true, visible: true,
     });
@@ -276,14 +277,14 @@ export function GoBusinessContent({ onBack }: { onBack: () => void }) {
 
   const patchItem = async (updated: BookableItem) => {
     setItems(p => p.map(i => i.id === updated.id ? updated : i));
-    await saveBookableItem(updated);
+    try { await saveBookableItem(updated); } catch (error) { Alert.alert("Servicio sin guardar", error instanceof Error ? error.message : "Comprueba la conexión."); return; }
   };
 
   const removeItem = (id: string) => {
     Alert.alert(t("biz_remove_service"), t("biz_remove_service_confirm"), [
       { text: t("cancel"), style: "cancel" },
       { text: t("delete"), style: "destructive", onPress: async () => {
-        await deleteBookableItem(id);
+        try { await deleteBookableItem(id, biz?.id); } catch (error) { showSaveError(error); return; }
         setItems(p => p.filter(i => i.id !== id));
       }},
     ]);
@@ -301,11 +302,11 @@ export function GoBusinessContent({ onBack }: { onBack: () => void }) {
 
   const patchWindow = async (updated: AvailabilityWindow) => {
     setWindows(p => p.map(w => w.id === updated.id ? updated : w));
-    await saveAvailabilityWindow(updated);
+    try { await saveAvailabilityWindow(updated); } catch (error) { Alert.alert("Horario sin guardar", error instanceof Error ? error.message : "Comprueba la conexión."); return; }
   };
 
   const removeWindow = async (id: string) => {
-    await deleteAvailabilityWindow(id);
+    await deleteAvailabilityWindow(id, biz?.id);
     setWindows(p => p.filter(w => w.id !== id));
   };
 
@@ -377,7 +378,7 @@ export function GoBusinessContent({ onBack }: { onBack: () => void }) {
             />
           ))}
 
-          <TouchableOpacity onPress={addItem} activeOpacity={0.8} style={s.addBtn}>
+          <TouchableOpacity onPress={() => { void addItem().catch(showSaveError); }} activeOpacity={0.8} style={s.addBtn}>
             <Feather name="plus" size={18} color={ACCENT} />
             <Text style={s.addBtnTxt}>
               {items.length === 0 ? t("biz_add_first_service") : t("biz_add_another_service")}
@@ -393,11 +394,11 @@ export function GoBusinessContent({ onBack }: { onBack: () => void }) {
               key={w.id}
               win={w}
               onPatch={patchWindow}
-              onRemove={() => removeWindow(w.id)}
+              onRemove={() => { void removeWindow(w.id).catch(showSaveError); }}
             />
           ))}
 
-          <TouchableOpacity onPress={addWindow} activeOpacity={0.8} style={s.addBtn}>
+          <TouchableOpacity onPress={() => { void addWindow().catch(showSaveError); }} activeOpacity={0.8} style={s.addBtn}>
             <Feather name="plus" size={18} color={ACCENT} />
             <Text style={s.addBtnTxt}>
               {windows.length === 0 ? t("biz_add_schedule") : t("biz_add_another_schedule")}

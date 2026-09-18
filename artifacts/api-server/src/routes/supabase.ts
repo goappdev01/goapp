@@ -92,7 +92,7 @@ router.get("/auth/me", async (req: Request, res: Response) => {
 
 router.get("/businesses", async (req: Request, res: Response) => {
   const query = new URLSearchParams({
-    select: "id,name,description,address,timezone,booking_enabled,verified",
+    select: "id,name,description,address,timezone,booking_enabled,verified,ui_metadata",
     booking_enabled: "eq.true",
     order: "created_at.desc",
   });
@@ -104,7 +104,7 @@ router.get("/businesses", async (req: Request, res: Response) => {
 
 router.get("/businesses/:businessId/services", async (req: Request, res: Response) => {
   const query = new URLSearchParams({
-    select: "id,business_id,name,description,duration_minutes,price,currency,active",
+    select: "id,business_id,name,description,duration_minutes,price,currency,active,ui_metadata",
     business_id: `eq.${req.params.businessId}`,
     active: "eq.true",
     order: "name.asc",
@@ -117,7 +117,7 @@ router.get("/businesses/:businessId/services", async (req: Request, res: Respons
 
 router.get("/services", async (req: Request, res: Response) => {
   const query = new URLSearchParams({
-    select: "id,business_id,name,description,duration_minutes,price,currency,active",
+    select: "id,business_id,name,description,duration_minutes,price,currency,active,ui_metadata",
     active: "eq.true",
     order: "name.asc",
   });
@@ -245,8 +245,8 @@ router.post("/bookings", async (req: Request, res: Response) => {
 
 // Public bookable resources; visibility is enforced by Supabase RLS.
 for (const [resource, select] of [
-  ["staff", "id,business_id,display_name,active"],
-  ["availability", "id,business_id,staff_id,weekday,start_time,end_time,timezone,active"],
+  ["staff", "id,business_id,display_name,active,ui_metadata"],
+  ["availability", "id,business_id,staff_id,weekday,start_time,end_time,timezone,active,ui_metadata"],
 ]) {
   router.get(`/${resource}`, async (req: Request, res: Response) => {
     const query = new URLSearchParams({ select, active: "eq.true" });

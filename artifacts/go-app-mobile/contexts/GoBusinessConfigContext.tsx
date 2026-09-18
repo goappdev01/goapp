@@ -21,6 +21,8 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { Alert } from "react-native";
+import { onSessionChanged } from "@/lib/sessionEvents";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   initPlantillaItems,
@@ -30,17 +32,21 @@ import {
 } from "@/data/goSectorData";
 import {
   createAvailabilityWindow,
-  createBusiness,
+  createOwnedBusiness as createBusiness,
   createBookableItem,
   deleteAvailabilityWindow,
   deleteBookableItem,
-  getAvailabilityWindows,
-  getBookableItems,
-  getBusinesses,
+  getOwnedAvailabilityWindows as getAvailabilityWindows,
+  getOwnedBookableItems as getBookableItems,
+  getOwnedBusinesses as getBusinesses,
   saveAvailabilityWindow,
   saveBookableItem,
   saveBusiness,
-  getStaff,
+  getOwnedStaff as getStaff,
+  getAuthenticatedUserId,
+  getCloudConfiguration,
+  saveCloudConfiguration,
+  isCloudId,
   saveStaff,
   deleteStaff,
   type CancellationPolicy,
@@ -233,7 +239,7 @@ function sanitizePlantillaItems(
   );
   const cleanSchedules: Record<string, StaffScheduleConfig> = {};
   for (const [k, v] of Object.entries(staffSchedules ?? {})) {
-    if (validStableIds.size === 0 || validStableIds.has(k)) cleanSchedules[k] = v;
+    if (isCloudId(k) || validStableIds.size === 0 || validStableIds.has(k)) cleanSchedules[k] = v;
   }
 
   return { plantillaItems: cleanItems, staffSchedules: cleanSchedules };
@@ -269,7 +275,7 @@ function deriveCancellationPolicy(cfg: BusinessConfig): CancellationPolicy | und
 // Se ejecuta en cada arranque de la app (prevSigRef resetea a "" en cada mount).
 // Devuelve el businessId definitivo (existente o recién creado).
 
-async function ensureBookingRecord(cfg: BusinessConfig): Promise<string | null> {
+async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string) => Promise<void>, userId: string): Promise<string | null> {
   const name = cfg.businessName?.trim();
   if (!name) return cfg.businessId ?? null;
 
@@ -282,7 +288,7 @@ async function ensureBookingRecord(cfg: BusinessConfig): Promise<string | null> 
 
   const cancellationPolicy = deriveCancellationPolicy(cfg);
 
-  if (cfg.businessId) {
+  if (cfg.businessId && isCloudId(cfg.businessId)) {
     const all = await getBusinesses();
     const existing = all.find((b) => b.id === cfg.businessId);
     if (existing) {
@@ -292,42 +298,29 @@ async function ensureBookingRecord(cfg: BusinessConfig): Promise<string | null> 
         category,
         location,
         bookingColor: sectorColor,
-        bookingActive: true,
+        bookingActive: existing.bookingActive,
         cancellationPolicy,
         phone:    cfg.phone    ?? existing.phone ?? "",
         whatsapp: cfg.whatsapp ?? existing.whatsapp,
       });
       resolvedId = cfg.businessId;
     } else {
-      // Registro no encontrado pero businessId ya existe (p.ej. go_businesses_v1
-      // fue borrado manualmente). Reusar el ID fijo para no romper la referencia.
-      await saveBusiness({
-        id:            cfg.businessId,
-        name,
-        category,
-        location,
-        phone:         cfg.phone    ?? "",
-        whatsapp:      cfg.whatsapp,
-        bookingActive: true,
-        bookingColor:  sectorColor,
-        timezone:      "Europe/Madrid",
-        createdAt:     new Date().toISOString(),
-        cancellationPolicy,
-      });
-      resolvedId = cfg.businessId;
+      throw new Error("El negocio configurado no pertenece a esta cuenta. Vuelve a cargar la configuración.");
     }
   } else {
     const created = await createBusiness({
       name, category, location,
       phone:    cfg.phone    ?? "",
       whatsapp: cfg.whatsapp,
-      bookingActive: true,
+      bookingActive: false,
       bookingColor: sectorColor,
       timezone: "Europe/Madrid",
       cancellationPolicy,
-    });
+    }, userId);
     resolvedId = created.id;
   }
+
+  await onResolved(resolvedId);
 
   // ── Sincronizar BookableItems — reemplazo completo por título ──────────────
   // Operación full-replace: la lista config.services es la fuente de verdad.
@@ -347,7 +340,7 @@ async function ensureBookingRecord(cfg: BusinessConfig): Promise<string | null> 
       (i) => !desiredTitles.has(i.title.toLowerCase().trim())
     );
     for (const item of toDeleteItems) {
-      await deleteBookableItem(item.id);
+      await deleteBookableItem(item.id, resolvedId);
     }
 
     // Re-fetch after deletions to build an accurate title→item map
@@ -366,12 +359,14 @@ async function ensureBookingRecord(cfg: BusinessConfig): Promise<string | null> 
       const existing = titleToItem.get(key);
       if (existing) {
         const changed =
+          !existing.active ||
           existing.durationMinutes  !== svc.duration          ||
           existing.price            !== svc.price             ||
           existing.customerCapacity !== (svc.capacity ?? 1);
         if (changed) {
           await saveBookableItem({
             ...existing,
+            active: true,
             durationMinutes:  svc.duration,
             price:            svc.price,
             customerCapacity: svc.capacity ?? 1,
@@ -462,7 +457,7 @@ async function ensureBookingRecord(cfg: BusinessConfig): Promise<string | null> 
     // serviceIds updates are silently lost.
     const desiredIds = new Set(desiredStaff.map((s) => s.id));
     for (const s of existingStaff.filter((s) => !desiredIds.has(s.id))) {
-      await deleteStaff(s.id);
+      await deleteStaff(s.id, resolvedId);
     }
     for (const s of desiredStaff) {
       await saveStaff(s);
@@ -520,7 +515,7 @@ async function ensureBookingRecord(cfg: BusinessConfig): Promise<string | null> 
       }
     }
     for (const w of existingWindows.filter((w) => !w.staffId && !desiredBizKeys.has(winKey(undefined, w.weekday, w.shiftIndex ?? 0)))) {
-      await deleteAvailabilityWindow(w.id);
+      await deleteAvailabilityWindow(w.id, resolvedId);
     }
 
     // ── Ventanas de profesionales (staffId) ──────────────────────────────────
@@ -538,10 +533,13 @@ async function ensureBookingRecord(cfg: BusinessConfig): Promise<string | null> 
     const allStaffIds = new Set<string>(freshStaffForWindows.map(s => s.id));
     console.log("[ensureBookingRecord] allStaffIds reales (go_staff_v1) →", [...allStaffIds]);
     for (const stableId of allStaffIds) {
-      const schedCfg = staffSchedulesCfg[stableId];
+      const member = freshStaffForWindows.find(s => s.id === stableId);
+      const suffix = member ? `_staff_${member.name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "")}` : "";
+      const legacyKey = suffix ? Object.keys(staffSchedulesCfg).find(k => k.endsWith(suffix)) : undefined;
+      const schedCfg = staffSchedulesCfg[stableId] ?? (legacyKey ? staffSchedulesCfg[legacyKey] : undefined);
       if (!schedCfg || schedCfg.useCompanySchedule) {
         for (const w of existingWindows.filter((w) => w.staffId === stableId)) {
-          await deleteAvailabilityWindow(w.id);
+          await deleteAvailabilityWindow(w.id, resolvedId);
         }
       } else {
         const desiredStaffKeys = new Set<string>();
@@ -582,12 +580,12 @@ async function ensureBookingRecord(cfg: BusinessConfig): Promise<string | null> 
           }
         }
         for (const w of existingWindows.filter((w) => w.staffId === stableId && !desiredStaffKeys.has(winKey(stableId, w.weekday, w.shiftIndex ?? 0)))) {
-          await deleteAvailabilityWindow(w.id);
+          await deleteAvailabilityWindow(w.id, resolvedId);
         }
       }
     }
     for (const w of existingWindows.filter((w) => w.staffId && !allStaffIds.has(w.staffId!))) {
-      await deleteAvailabilityWindow(w.id);
+      await deleteAvailabilityWindow(w.id, resolvedId);
     }
   }
 
@@ -599,6 +597,15 @@ async function ensureBookingRecord(cfg: BusinessConfig): Promise<string | null> 
 export function GoBusinessConfigProvider({ children }: { children: React.ReactNode }) {
   const [config, setConfig] = useState<BusinessConfig>(DEFAULT_BUSINESS_CONFIG);
   const [loaded, setLoaded]   = useState(false);
+  const [sessionVersion, setSessionVersion] = useState(0);
+  const dirty = useRef(false);
+  const revision = useRef(0);
+  const configRef = useRef(config);
+  configRef.current = config;
+  const syncQueue = useRef(Promise.resolve());
+  const generation = useRef(0);
+  const storageKey = useRef(BUSINESS_CONFIG_KEY);
+  useEffect(() => onSessionChanged(() => { generation.current++; dirty.current = false; setLoaded(false); setConfig({ ...DEFAULT_BUSINESS_CONFIG }); setSessionVersion(v => v + 1); }), []);
 
   // Firma de los campos que controlan la sincronización. Evita escrituras
   // redundantes cuando config cambia por motivos ajenos (servicios, pasos, etc.).
@@ -607,7 +614,19 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   // ── Carga inicial ────────────────────────────────────────────────────────────
   useEffect(() => {
     (async () => {
+      const version = generation.current;
       try {
+        const userId = await getAuthenticatedUserId();
+        storageKey.current = userId ? `${BUSINESS_CONFIG_KEY}:${userId}` : BUSINESS_CONFIG_KEY;
+        if (userId) {
+          const cloud = await getCloudConfiguration<BusinessConfig>();
+          if (version !== generation.current) return;
+          const rawDraft = await AsyncStorage.getItem(storageKey.current);
+          const draft = rawDraft ? JSON.parse(rawDraft) : null;
+          setConfig({ ...DEFAULT_BUSINESS_CONFIG, ...(cloud ?? draft ?? {}) });
+          setLoaded(true);
+          return;
+        }
         const raw = await AsyncStorage.getItem(BUSINESS_CONFIG_KEY);
         if (raw) {
           const parsed = JSON.parse(raw) as Partial<BusinessConfig>;
@@ -700,67 +719,44 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
         }
         setConfig(migrated);
         AsyncStorage.setItem(BUSINESS_CONFIG_KEY, JSON.stringify(migrated)).catch(() => {});
-      } catch {}
-      setLoaded(true);
+      } catch (error) {
+        if (version === generation.current) Alert.alert("Configuración no cargada", "No se pudo consultar tu negocio. Comprueba la conexión e inicia sesión de nuevo.");
+        return;
+      }
+      if (version === generation.current) setLoaded(true);
     })();
-  }, []);
+  }, [sessionVersion]);
 
-  // ── Sincronización automática con go_businesses_v1 ──────────────────────────
-  //
-  // Se ejecuta cada vez que config cambia (después de la carga inicial).
-  // Solo actúa cuando la firma de los campos relevantes cambia, y solo
-  // cuando existe businessName.
-  //
-  // Flujo:
-  //   1. businessName vacío → no hay nada que sincronizar.
-  //   2. businessId presente → actualizar el registro existente en go_businesses_v1.
-  //   3. businessId ausente → crear registro, guardar el nuevo ID en config
-  //      (go_business_config_v1 y estado). Esto disparará el efecto una vez más,
-  //      que entrará en el caso 2 y terminará estable.
-
+  // Debounce edits and serialize synchronizations. Never upload an old draft on login.
   useEffect(() => {
-    if (!loaded) return;
-
-    const name = config.businessName?.trim();
-    if (!name) return;
-
-    // Incluye campos de horario y pago para que cambios en activeDays/openFrom/openTo/
-    // daySchedules, paymentMethod o cancelPolicy disparen re-sincronización completa.
-    const schedSig = JSON.stringify({
-      days:     [...(config.activeDays ?? [])].sort(),
-      from:     config.openFrom,
-      to:       config.openTo,
-      overrides: config.daySchedules,
-    });
-    // Incluye firma del staff para que cambios en profesionales/especialidades
-    // disparen ensureBookingRecord y sincronicen go_staff_v1.
-    // Solo se incluyen nombres válidos (>= 3 chars) para evitar disparos por parciales.
-    const staffSig = JSON.stringify(
-      (config.plantillaItems ?? []).flatMap((item) =>
-        (Array.isArray(item.staffNames) ? item.staffNames : [])
-          .map((n, i) => ({ n: typeof n === "string" ? n.trim() : "", svcs: (item.staffServices ?? [])[i] ?? [] }))
-          .filter(({ n }) => n.length >= 3)
-      )
-    );
-    const servicesSig = JSON.stringify(
-      (config.services ?? []).map((s) => `${s.name}|${s.duration}|${s.price}|${s.capacity ?? 1}`)
-    );
-    const staffSchedulesSig = JSON.stringify(config.staffSchedules ?? {});
-    const sig = `${config.businessId ?? ""}|${name}|${config.address ?? ""}|${config.subId ?? ""}|${config.sectorId ?? ""}|${schedSig}|${config.paymentMethod ?? "none"}|${config.cancelPolicy ?? 0}|${config.phone ?? ""}|${config.whatsapp ?? ""}|${staffSig}|${servicesSig}|${staffSchedulesSig}`;
-    if (sig === lastSyncSigRef.current) return;
-    lastSyncSigRef.current = sig;
-
-    (async () => {
-      try {
-        const resolvedId = await ensureBookingRecord(config);
-        if (resolvedId && resolvedId !== config.businessId) {
-          // Primer sync: se creó un registro nuevo. Persistir el ID en config.
-          const updated: BusinessConfig = { ...config, businessId: resolvedId };
-          setConfig(updated);
-          await AsyncStorage.setItem(BUSINESS_CONFIG_KEY, JSON.stringify(updated));
-        }
-      } catch {}
-    })();
+    if (!loaded || !dirty.current || !config.businessName?.trim()) return;
+    const version = generation.current;
+    const timer = setTimeout(() => {
+      syncQueue.current = syncQueue.current.then(async () => {
+        if (version !== generation.current || !dirty.current) return;
+        const snapshot = configRef.current;
+        const snapshotRevision = revision.current;
+        const userId = await getAuthenticatedUserId();
+        if (!userId) throw new Error("Inicia sesión para guardar la configuración de reservas.");
+        const resolvedId = await ensureBookingRecord(snapshot, async id => {
+          if (version !== generation.current) throw new Error("La cuenta ha cambiado.");
+          configRef.current = { ...configRef.current, businessId: id };
+          setConfig(prev => ({ ...prev, businessId: id }));
+          await AsyncStorage.setItem(storageKey.current, JSON.stringify(configRef.current));
+        }, userId);
+        if (version !== generation.current || !resolvedId) return;
+        const updated = { ...snapshot, businessId: resolvedId };
+        await saveCloudConfiguration(resolvedId, updated);
+        if (version !== generation.current) return;
+        setConfig(prev => ({ ...prev, businessId: resolvedId }));
+        configRef.current = { ...configRef.current, businessId: resolvedId };
+        await AsyncStorage.setItem(storageKey.current, JSON.stringify(configRef.current));
+        if (revision.current === snapshotRevision) dirty.current = false;
+      }).catch(error => {
+        if (version === generation.current) Alert.alert("No se guardaron todos los cambios", error instanceof Error ? error.message : "Comprueba tu conexión y vuelve a intentarlo.", [{ text: "Cerrar" }, { text: "Reintentar", onPress: () => setConfig(prev => ({ ...prev })) }]);
+      });
+    }, 800);
+    return () => clearTimeout(timer);
   }, [config, loaded]);
 
   // ── updateConfig ─────────────────────────────────────────────────────────────
@@ -770,9 +766,11 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   // que se activa automáticamente cuando el estado cambia.
 
   const updateConfig = useCallback((patch: Partial<BusinessConfig>) => {
+    dirty.current = true;
+    revision.current++;
     setConfig(prev => {
       const next = { ...prev, ...patch };
-      AsyncStorage.setItem(BUSINESS_CONFIG_KEY, JSON.stringify(next)).catch(() => {});
+      AsyncStorage.setItem(storageKey.current, JSON.stringify(next)).catch(() => {});
       return next;
     });
   }, []);
@@ -780,6 +778,8 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   // ── resetToSubActivity ───────────────────────────────────────────────────────
 
   const resetToSubActivity = useCallback((sectorId: string, subId: string) => {
+    dirty.current = true;
+    revision.current++;
     setConfig(prev => {
       // Only wipe plantillaItems and services when the user actually picks a
       // DIFFERENT sub-activity.  When confirming the same sub (e.g. re-opening
@@ -806,7 +806,7 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
         plantillaItems,
         services,
       };
-      AsyncStorage.setItem(BUSINESS_CONFIG_KEY, JSON.stringify(next)).catch(() => {});
+      AsyncStorage.setItem(storageKey.current, JSON.stringify(next)).catch(() => {});
       return next;
     });
   }, []);
@@ -816,10 +816,12 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   // El wizard arrancará desde cero con un objeto completamente limpio.
   // No confundir con resetToSubActivity (que solo limpia profesionales/servicios).
   const resetConfig = useCallback(async () => {
+    generation.current++;
+    dirty.current = false;
     const fresh: BusinessConfig = { ...DEFAULT_BUSINESS_CONFIG };
     // Limpiar ambos keys para evitar herencia de datos de la empresa anterior
     await Promise.all([
-      AsyncStorage.setItem(BUSINESS_CONFIG_KEY, JSON.stringify(fresh)),
+      AsyncStorage.setItem(storageKey.current, JSON.stringify(fresh)),
       AsyncStorage.removeItem('go_empresa_setup_v2'),
     ]);
     // Resetear la firma de sincronización para que el próximo save

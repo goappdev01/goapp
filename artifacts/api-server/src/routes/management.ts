@@ -4,10 +4,10 @@ import { bearerHeader, supabaseRequest } from "../lib/supabase";
 const router = Router();
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fields: Record<string, string[]> = {
-  businesses: ["name", "description", "address", "timezone", "booking_enabled"],
-  services: ["name", "description", "duration_minutes", "price", "currency", "active"],
-  staff: ["display_name", "active"],
-  availability: ["staff_id", "weekday", "start_time", "end_time", "timezone", "active"],
+  businesses: ["name", "description", "address", "timezone", "booking_enabled", "ui_metadata"],
+  services: ["name", "description", "duration_minutes", "price", "currency", "active", "ui_metadata"],
+  staff: ["display_name", "active", "ui_metadata"],
+  availability: ["staff_id", "weekday", "start_time", "end_time", "timezone", "active", "ui_metadata"],
 };
 function validTimezone(value: unknown) {
   if (typeof value !== "string") return false;
@@ -18,6 +18,7 @@ function validate(resource: string, body: unknown, creating: boolean): Record<st
   const data = body as Record<string, unknown>;
   if (!Object.keys(data).length || Object.keys(data).some(k => !fields[resource].includes(k))) return null;
   for (const [key, value] of Object.entries(data)) {
+    if (key === "ui_metadata" && (!value || typeof value !== "object" || Array.isArray(value) || JSON.stringify(value).length > 16000)) return null;
     if (["name", "display_name"].includes(key) && (typeof value !== "string" || !value.trim() || value.length > 200)) return null;
     if (["description", "address"].includes(key) && value !== null && (typeof value !== "string" || value.length > 4000)) return null;
     if (["active", "booking_enabled"].includes(key) && typeof value !== "boolean") return null;
@@ -108,4 +109,19 @@ for (const resource of ["services", "staff", "availability"]) {
     });
   }
 }
+router.get("/configuration", async (req, res) => {
+  await relay(res, await request(req, "business_settings?order=updated_at.desc&limit=1"));
+});
+router.put("/businesses/:businessId/configuration", async (req, res) => {
+  if (!await ownsBusiness(req, res)) return;
+  const payload = req.body?.payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) || JSON.stringify(payload).length > 64000) {
+    res.status(400).json({ error: "Configuración inválida." }); return;
+  }
+  const response = await supabaseRequest("/rest/v1/business_settings?on_conflict=business_id", {
+    method: "POST", headers: { ...bearerHeader(req.header("authorization")), "Content-Type": "application/json", Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({ business_id: req.params.businessId, payload }),
+  });
+  await relay(res, response, true);
+});
 export default router;
