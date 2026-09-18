@@ -83,22 +83,7 @@ router.get("/auth/me", async (req: Request, res: Response) => {
   const profileResponse = await supabaseRequest(`/rest/v1/profiles?${profileQuery}`, {
     headers: bearerHeader(authorization),
   });
-  let profiles = await profileResponse.json().catch(() => []);
-  const metadataRole = (user as { user_metadata?: { role?: string } }).user_metadata?.role;
-  const acceptedRoles = new Set(["usuario", "empresa", "admin", "trabajador", "proveedor", "partner", "franquicia"]);
-  const profile = Array.isArray(profiles) ? profiles[0] : null;
-  if (profile && acceptedRoles.has(metadataRole ?? "") && profile.role !== metadataRole) {
-    const roleResponse = await supabaseRequest(`/rest/v1/profiles?id=eq.${user.id}`, {
-      method: "PATCH",
-      headers: {
-        ...bearerHeader(authorization),
-        "Content-Type": "application/json",
-        Prefer: "return=minimal",
-      },
-      body: JSON.stringify({ role: metadataRole }),
-    });
-    if (roleResponse.ok) profiles = [{ ...profile, role: metadataRole }];
-  }
+  const profiles = await profileResponse.json().catch(() => []);
   res.status(profileResponse.ok ? 200 : profileResponse.status).json({
     user,
     profile: Array.isArray(profiles) ? (profiles[0] ?? null) : null,
