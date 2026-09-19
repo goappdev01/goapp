@@ -1,3 +1,4 @@
+import { notifySessionChanged } from "@/lib/sessionEvents";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
@@ -2874,6 +2875,7 @@ export default function HomeScreen() {
         });
         if (!response.ok) {
           await AsyncStorage.multiRemove(["go_supabase_session_v1", "go_account_type_v1"]);
+          notifySessionChanged();
           commitAccountType(null);
           return;
         }

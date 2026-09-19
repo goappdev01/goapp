@@ -1,3 +1,4 @@
+import { notifySessionChanged } from "@/lib/sessionEvents";
 import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -237,6 +238,7 @@ export function LoginRegisterPanel({
         setAuthError("Revisa tu correo para confirmar la cuenta y después inicia sesión.");
         return;
       }
+      notifySessionChanged();
       onSetAccountType(selectedRole);
       setAuthStep("role");
     } catch (error) {
@@ -273,7 +275,7 @@ export function LoginRegisterPanel({
 
   const handleLogout = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    AsyncStorage.removeItem("go_supabase_session_v1").catch(() => {});
+    AsyncStorage.removeItem("go_supabase_session_v1").then(notifySessionChanged).catch(() => {});
     onSetAccountType(null);
     setAuthStep("role");
     onClose();

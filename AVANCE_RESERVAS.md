@@ -18,7 +18,7 @@ Base: /api/supabase/manage
 
 Un negocio nuevo empieza con reservas desactivadas, zona Europe/Madrid por defecto. Los servicios del piloto usan EUR. El propietario procede de la sesión; el cliente no puede establecer owner_id, verified ni business_id de recursos mediante el cuerpo de las peticiones. Los horarios son intervalos dentro del mismo día, con precisión de minutos.
 
-Se mantienen las pantallas aprobadas. Esta entrega agrega operaciones del backend: aún falta conectar las escrituras de la interfaz empresarial, que siguen siendo locales. No se debe presentar esta entrega como un módulo completo para pilotos.
+Se mantienen las pantallas aprobadas. El asistente y las pantallas empresariales ya utilizan rutas de propietario para consultar y guardar negocios, servicios, profesionales y horarios. Los registros locales de demostración conservan su almacenamiento anterior. Falta validar el recorrido visual completo en Expo Go; no se debe presentar esta entrega como un módulo completo para pilotos.
 
 ## Aplicado en Supabase
 - Alta pública limitada a usuario/empresa. Roles privilegiados no se copian desde user_metadata.
@@ -37,9 +37,20 @@ Las tres migraciones de esta entrega ya están aplicadas en el proyecto xiyxziyj
 - Los pagos y las suscripciones no se han activado.
 
 ## Siguiente trabajo
-1. Conectar el formulario de configuración empresarial a estas rutas, incluyendo campos de interfaz todavía sin correspondencia en la base de datos.
+1. Verificar en Expo Go el asistente, su recuperación en otro dispositivo y las pantallas de edición con el API desplegado.
 2. Validar horarios de apertura y zonas horarias al reservar también en la base de datos; completar estados de gestión empresarial y renovación de sesión.
 3. Prueba completa de registro con correo, configuración, reserva y cancelación desde Expo Go; resolver errores TypeScript del móvil.
 4. Integración Stripe Connect en pruebas para anticipos 10/25/50/100%, además del pago fuera de GO. Activar suscripción solo tras definir las condiciones comerciales/fiscales.
 
 Este API aún no está desplegado en un servidor público. Las protecciones de base de datos sí están aplicadas.
+
+## Conexión móvil — siguiente entrega
+- El formulario empresarial consulta exclusivamente negocios de la cuenta autenticada. Un negocio nuevo comienza desactivado y no se reactiva por abrir una pantalla.
+- Se guardan teléfono, categoría, color y política configurada del negocio; atributos del servicio; especialidades del profesional; turnos y minutos del horario en ui_metadata. Estos datos no confieren permisos ni activan cobros.
+- business_settings guarda una copia privada del asistente bajo RLS. Al iniciar sesión se recupera la copia remota; los borradores locales se separan por usuario. Un inicio de sesión por sí solo no sube borradores antiguos.
+- Los guardados automáticos se agrupan tras 800 ms y se ejecutan en orden. Se conserva el ID del negocio tan pronto se crea para reutilizarlo si falla el resto. Hay aviso de fallo y opción de reintento. La sincronización de todos los recursos no es una transacción única: un fallo intermedio puede dejar cambios parciales, que deben reintentarse.
+- Eliminar servicios, profesionales u horarios los archiva; no borra sus referencias históricas. Las desactivaciones normales siguen siendo editables.
+- Las mutaciones UUID remotas no se sustituyen por un guardado local al fallar. Las llamadas de pago siguen pendientes.
+- Migración mobile_booking_fields aplicada en Supabase. Prueba de persistencia de configuración, campos adicionales y aislamiento entre propietarios aprobada mediante rollback. Asesor de seguridad sin avisos.
+- Tres suites automatizadas del API/capa de datos móvil aprobadas; TypeScript y build del API aprobados. El proyecto móvil aún tiene errores anteriores de TypeScript. No se ha ejecutado la prueba visual completa en Expo Go.
+- Esta entrega no despliega el API. Es necesario que Expo apunte con EXPO_PUBLIC_API_URL al backend actualizado para utilizar las nuevas rutas.

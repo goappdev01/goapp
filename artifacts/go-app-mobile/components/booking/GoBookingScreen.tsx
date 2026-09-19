@@ -41,16 +41,20 @@ import {
   createBookableItem,
   deleteAvailabilityWindow,
   deleteBookableItem,
-  getAvailabilityWindows,
-  getBookableItems,
-  getBusinesses,
+  getOwnedAvailabilityWindows as getAvailabilityWindows,
+  getOwnedBookableItems as getBookableItems,
+  getOwnedBusinesses as getBusinesses,
   saveBusiness,
   saveBookableItem,
   saveAvailabilityWindow,
-  createBusiness,
+  createOwnedBusiness as createBusiness,
 } from "@/data/booking";
 
 // ─── Tokens visuales ──────────────────────────────────────────────────────────
+
+function showSaveError(error: unknown) {
+  Alert.alert("Cambios sin guardar", error instanceof Error ? error.message : "Comprueba tu conexión e inténtalo de nuevo.");
+}
 
 const BG          = "#F7F8FA";
 const CARD        = "#FFFFFF";
@@ -215,7 +219,7 @@ function WeekSchedule({
   const applyPatch = useCallback(async (patch: Partial<Pick<AvailabilityWindow, "visibleStartHour" | "visibleStartMinute" | "visibleEndHour" | "visibleEndMinute" | "active">>) => {
     if (winForDay) {
       const updated = { ...winForDay, ...patch };
-      await saveAvailabilityWindow(updated);
+      try { await saveAvailabilityWindow(updated); } catch (error) { Alert.alert("Horario sin guardar", error instanceof Error ? error.message : "Comprueba la conexión."); return; }
       onWindowsChange(windows.map(w => w.id === updated.id ? updated : w));
     } else {
       const created = await createAvailabilityWindow({
@@ -807,16 +811,13 @@ export function GoBookingScreen({
     let found = all[0] ?? null;
     if (!found) {
       found = await createBusiness({
-        name: "", category: "", location: "", phone: "",
-        bookingActive: true,
+        name: "Mi negocio", category: "", location: "", phone: "",
+        bookingActive: false,
         bookingColor: "#3B82F6",
         timezone: "Europe/Madrid",
       });
     }
-    if (!found.bookingActive) {
-      found = { ...found, bookingActive: true };
-      await saveBusiness(found);
-    }
+
 
     // ── Auto-seed from template on fresh setup ────────────────────────────────
     const tpl = templateRef.current;
@@ -920,7 +921,7 @@ export function GoBookingScreen({
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load().catch(error => { setLoading(false); Alert.alert("No se pudo cargar el negocio", error instanceof Error ? error.message : "Comprueba tu sesión."); }); }, []);
 
   // ── External config sync: when config changes from outside (EmpresaConfigScreen,
   // EmpresaSetupGuide), seed booking.ts if items/windows are empty ───────────
@@ -948,7 +949,7 @@ export function GoBookingScreen({
           )
         );
         setItems(created);
-      })();
+      })().catch(showSaveError);
     }
 
     const configSched    = { activeDays: config.activeDays, openFrom: config.openFrom, openTo: config.openTo };
@@ -973,7 +974,7 @@ export function GoBookingScreen({
           )
         );
         setWindows(created);
-      })();
+      })().catch(showSaveError);
     }
   }, [config, biz, loading]);
 
@@ -982,7 +983,7 @@ export function GoBookingScreen({
     if (!b) return;
     const updated = { ...b, [field]: value };
     setBiz(updated);
-    await saveBusiness(updated);
+    try { await saveBusiness(updated); } catch (error) { Alert.alert("Cambios sin guardar", error instanceof Error ? error.message : "Comprueba la conexión."); return; }
   };
 
   const useCurrentLocation = async () => {
@@ -1016,7 +1017,7 @@ export function GoBookingScreen({
   const addItem = async () => {
     if (!biz) return;
     const item = await createBookableItem({
-      businessId: biz.id, title: "", type: "",
+      businessId: biz.id, title: "Nuevo servicio", type: "",
       durationMinutes: 30, customerCapacity: 1, unitQuantity: 1,
       price: 0, paymentRequired: false, active: true, visible: true,
     });
@@ -1029,7 +1030,7 @@ export function GoBookingScreen({
   const patchItem = async (updated: BookableItem) => {
     const newItems = items.map(i => i.id === updated.id ? updated : i);
     setItems(newItems);
-    await saveBookableItem(updated);
+    try { await saveBookableItem(updated); } catch (error) { Alert.alert("Servicio sin guardar", error instanceof Error ? error.message : "Comprueba la conexión."); return; }
     syncItemsToConfig(newItems);
   };
 
@@ -1037,7 +1038,7 @@ export function GoBookingScreen({
     Alert.alert("Eliminar servicio", "¿Eliminar este servicio?", [
       { text: "Cancelar", style: "cancel" },
       { text: "Eliminar", style: "destructive", onPress: async () => {
-        await deleteBookableItem(id);
+        try { await deleteBookableItem(id, biz?.id); } catch (error) { showSaveError(error); return; }
         const newItems = items.filter(i => i.id !== id);
         setItems(newItems);
         syncItemsToConfig(newItems);
@@ -1180,7 +1181,7 @@ export function GoBookingScreen({
             />
           ))}
 
-          <TouchableOpacity onPress={addItem} activeOpacity={0.8} style={s.addBtn}>
+          <TouchableOpacity onPress={() => { void addItem().catch(showSaveError); }} activeOpacity={0.8} style={s.addBtn}>
             <Feather name="plus" size={18} color={ACCENT} />
             <Text style={s.addBtnTxt}>
               {items.length === 0 ? "Añadir mi primer servicio" : "Añadir otro servicio"}
@@ -1210,7 +1211,7 @@ export function GoBookingScreen({
             onChange={async (p) => {
               const updated = { ...biz!, cancellationPolicy: p };
               setBiz(updated);
-              await saveBusiness(updated);
+              try { await saveBusiness(updated); } catch (error) { Alert.alert("Cambios sin guardar", error instanceof Error ? error.message : "Comprueba la conexión."); return; }
               Haptics.selectionAsync().catch(() => {});
             }}
           />
