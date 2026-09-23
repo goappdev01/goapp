@@ -81,7 +81,7 @@ export function PublicidadScreen({ guidanceLevel = 5 }: { guidanceLevel?: number
               </View>
               <Switch
                 value={slot.activo && globalActiva}
-                onValueChange={() => globalActiva && toggleSlot(i)}
+                onValueChange={() => { if (globalActiva) toggleSlot(i); }}
                 trackColor={{ false: "#E5E7EB", true: cfg.color + "66" }}
                 thumbColor={slot.activo && globalActiva ? cfg.color : "#9CA3AF"}
               />

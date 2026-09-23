@@ -57,35 +57,117 @@ import { trSector } from "@/data/goSectorTranslations";
 
 export type GoEntry = {
   id: string;
+  kind: "sent" | "received";
   intentKey: string;
   intentLabel: string;
   color: string;
   place: string;
   date: string;
+  // Fecha canónica YYYY-MM-DD. SOURCE OF TRUTH para programar,
+  // ordenar y transmitir el GO. El campo `date` (string humano)
+  // queda solo para visualizar en la UI clásica.
   dateISO: string;
   time: string;
   duration: string;
   contactName: string;
   phone: string;
-  whatsapp?: string;
   estado: "pendiente" | "aceptado" | "rechazado" | "propuesto" | "propuesta_pendiente";
+  createdAt?: number;
+  // Soft-delete: cuando es true el GO se mueve a la vista
+  // "Eliminados" del listado en lugar de borrarse de verdad. Desde
+  // ahí el usuario puede recuperarlo (volver a "pendiente") o
+  // aceptarlo (queda como "aceptado" y se restaura).
   deleted?: boolean;
+  // ── ENVÍO MÚLTIPLE + CUPO LIMITADO ─────────────────────────────
+  // Cuando el GO se envía a varias personas, cada destinatario
+  // queda registrado aquí con su propio estado. Si `recipients` no
+  // está definido o es vacío, el GO se comporta como un GO normal
+  // de un solo destinatario (compatibilidad con entries antiguos).
+  recipients?: Array<{
+    name: string;
+    phone: string;
+    estado: "pending" | "accepted" | "rejected" | "blocked_by_limit";
+  }>;
+  // Tope opcional de aceptados. Si está definido, en cuanto los
+  // `accepted` igualen este número, los pendientes restantes pasan
+  // a `blocked_by_limit` automáticamente y `cupoCerrado` se marca.
+  maxAccepted?: number;
+  // Marca interna que indica que el cupo está cerrado y no se
+  // aceptan más respuestas (para mostrar "Cupo completo").
+  cupoCerrado?: boolean;
+  // ── ACCIONES AVANZADAS ─────────────────────────────────────────
+  // Tipo de acción. Si no está definido, equivale a "GO" (compat).
+  //   · GO       → mensaje WhatsApp con fecha/hora y respuesta
+  //   · TAREA    → solo se registra, sin envío (no abre WhatsApp)
+  //   · LLAMADA  → abre el marcador del teléfono (tel:)
+  //   · WHATSAPP → idéntico a GO; alias para chats puntuales
+  type?: "GO" | "TAREA" | "LLAMADA" | "WHATSAPP" | "GO_BOOKING" | "GO_INTERNO" | "GO_EXT" | "TAREA_INTERNA" | "GO_RESERVA";
+  // Quién creó el GO. Si no está, se asume "Yo" (auto-creado).
+  createdBy?: string;
+  // A quién está asignada la EJECUCIÓN del GO. Si difiere del
+  // creador, el GO se considera "para terceros" y se muestra una
+  // etiqueta en la tarjeta. Si no está, se asume el ejecutor = creador.
+  assignedTo?: string;
+  // Programación: si `sendAt` existe y `scheduled === true`, el GO
+  // NO se envía hasta que `Date.now() >= sendAt`. El motor de envío
+  // (`scheduleGoSend`) se encarga de disparar el envío real cuando
+  // llega el momento, marcando `scheduled = false` y `sentAt`.
+  sendAt?: number;
+  sentAt?: number;
+  scheduled?: boolean;
+  // ── NOTAS LIBRES + GO GENÉRICO + PROPONER CAMBIO ───────────────
+  // Título operativo corto (máx 1 línea visual en tarjeta).
+  // Se muestra en la tarjeta y viaja en el mensaje al receptor.
   notes?: string;
+  // Nota interna — texto largo, contextual, no viaja con el GO salvo
+  // que sea NOTA_INTERNA. Solo visible en la ficha expandida.
+  detail?: string;
+  // Visibilidad del GO — controla quién puede ver esta entrada.
+  // 'publico': cualquier usuario.  'clientes': solo clientes autorizados.
+  // 'proveedores': solo proveedores.  'interno': solo miembros internos.
+  // 'privado': solo el creador (invisible para el resto).
+  visibility?: 'publico' | 'clientes' | 'proveedores' | 'interno' | 'privado';
+  // Sugerencia/recomendación seleccionada en el panel "Sugerir opciones".
+  // Viaja con el mensaje y queda guardada en la tarjeta del GO.
+  sugerencia?: string;
+  // Mensajes/notas asociados a este GO. Cada mensaje incluye quién
+  // lo envió, cuándo, y por qué canal. Nunca existe una nota sin goId.
+  messages?: Array<{
+    id: string;
+    text: string;
+    goId: string;
+    senderId: "yo" | string;
+    createdAt: number;
+    deliveryMode: "internal" | "whatsapp";
+  }>;
+  // ID compartido del chat interno de reserva. Vincula entradas de
+  // cliente y empresa que representan la misma reserva para que ambos
+  // lados lean y escriban en la misma conversación compartida.
+  sharedChatId?: string;
+  // Marca un GO sin categoría concreta. Cuando es true, el
+  // intentLabel se persiste como "GENÉRICO" y el color es neutro.
+  // Las `notes` actúan como descripción principal del GO.
   isGeneric?: boolean;
-  type?: string;
-  kind?: "sent" | "received";
-  professionalName?: string;
-  professionalId?: string;
-  bookingMessageToStaff?: string;
-  // Booking-specific fields — required for slot conflict detection
-  staffId?: string;       // ID del profesional; must match go_bookings_v1 to block duplicates
-  slotKey?: string;       // businessId|staffId|date|HH:MM|HH:MM — primary dedup key
-  businessId?: string;    // propagated from Booking
-  serviceId?: string;     // bookableItemId from Booking
-  bookingStatus?: string; // "confirmada" | "cancelada" | "pendiente"
-  startTime?: string;     // HH:MM start
-  endTime?: string;       // HH:MM end
-  // Propuesta de cambio bilateral — no mueve la tarjeta; genera ghost naranja.
+  // Propuesta de cambio del receptor. Si está poblada, el GO
+  // queda en estado funcional "proposed_change" (que se mapea al
+  // estado existente "propuesto" del modelo de aceptación, sin
+  // romper la lógica). El creador puede aceptar o rechazar la
+  // propuesta desde la tarjeta.
+  proposal?: {
+    date?: string;
+    dateISO?: string;
+    time?: string;
+    duration?: string;
+    place?: string;
+    note?: string;
+    proposedAt: number;
+  };
+  // Propuesta de cambio bilateral: guarda el nuevo slot sin mover la tarjeta.
+  // La entrada permanece en su hueco original; aparece un ghost naranja en el
+  // slot propuesto en ambos calendarios. Emisor → "Esperando respuesta".
+  // Receptor → botones Aceptar / Rechazar.
+  // Al aceptar: dateISO/date/time se actualizan al nuevo slot, se borra changeProposal.
+  // Al rechazar: se restauran los valores originales, se borra changeProposal.
   changeProposal?: {
     dateISO: string;
     date: string;
@@ -99,7 +181,50 @@ export type GoEntry = {
     originalTime: string;
     originalDuration?: string;
   };
+  // Vincula dos entries (cliente + empresa) a la misma reserva compartida.
   reservationId?: string;
+  // Estado compartido de la reserva GO_BOOKING — se sincroniza entre
+  // la entrada de cliente (go_booking_cli_<id>) y la de empresa
+  // (go_booking_prv_<id>) y con el registro en go_bookings_v1.
+  // Independiente del `estado` general del GO (pendiente/aceptado/rechazado).
+  bookingStatus?: "pendiente" | "confirmada" | "cancelada" | "cambio_pendiente" | "completada";
+  // ── TELEFONÍA BILATERAL ─────────────────────────────────────────
+  // Para GOs coordinados (enviados o recibidos) guardamos ambos extremos
+  // y la dirección desde el punto de vista del usuario actual.
+  // Esto permite calcular a quién enviar una propuesta de cambio sin
+  // depender de la lógica "sender ↔ receiver" del backend.
+  senderPhone?: string;
+  receiverPhone?: string;
+  direction?: "incoming" | "outgoing" | "self";
+  // ── ALERTAS Y RECORDATORIOS (BLOQUE 4) ────────────────────────
+  // `reminders` = lista de minutos antes del GO en los que se debe
+  // disparar una alerta. Por defecto [60, 15] (1h y 15min antes).
+  // Se permiten hasta 3 entradas. El motor (poll cada 30s) compara
+  // estos offsets con `dateISO + time` y dispara cuando llega el
+  // momento. Persistido tal cual.
+  reminders?: number[];
+  // Flag por GO. Si false, las alertas de este GO se silencian sin
+  // borrar la configuración (útil para un mute puntual).
+  notificationsEnabled?: boolean;
+  // Histórico de qué offsets ya se han disparado para este GO en
+  // esta instalación; evita re-disparar la misma alerta si el motor
+  // hace varios ticks dentro de la ventana de disparo.
+  firedReminderMins?: number[];
+  // Snooze: cuando el usuario pospone, guardamos un timestamp UNIX
+  // ms a partir del cual debe sonar UNA vez más, indistintamente
+  // de la fecha real del GO. Se limpia tras dispararse.
+  snoozeUntil?: number;
+
+  whatsapp?: string;
+  professionalName?: string;
+  professionalId?: string;
+  bookingMessageToStaff?: string;
+  staffId?: string;
+  slotKey?: string;
+  businessId?: string;
+  serviceId?: string;
+  startTime?: string;
+  endTime?: string;
 };
 
 // ── Badge label + color for each card type ─────────────────────────
@@ -137,6 +262,12 @@ export type BookingChatMessage = {
 };
 
 export type AgendaBoardProps = {
+  selection?: {
+    selectedIds: Set<string>;
+    setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>;
+    selectionMode: boolean;
+    setSelectionMode: React.Dispatch<React.SetStateAction<boolean>>;
+  };
   goLog: GoEntry[];
   selectedDateISO?: string;
   sortOrder?: "asc" | "desc";
@@ -522,6 +653,7 @@ function resolveEstado(
 }
 
 export function AgendaBoard({
+  selection,
   goLog,
   selectedDateISO,
   sortOrder = "asc",
@@ -750,10 +882,15 @@ export function AgendaBoard({
   const [placeExpandedId, setPlaceExpandedId] = useState<string | null>(null);
 
   // ── MULTI-SELECTION STATE ─────────────────────────────────────────
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [localSelectedIds, setLocalSelectedIds] = useState<Set<string>>(new Set());
+  const selectedIds = selection?.selectedIds ?? localSelectedIds;
+  const setSelectedIds = selection?.setSelectedIds ?? setLocalSelectedIds;
   const [bulkMovePicking, setBulkMovePicking] = useState(false);
-  const [selectionMode, setSelectionMode] = useState(false);
+  const [localSelectionMode, setLocalSelectionMode] = useState(false);
+  const selectionMode = selection?.selectionMode ?? localSelectionMode;
+  const setSelectionMode = selection?.setSelectionMode ?? setLocalSelectionMode;
   const isSelecting = selectionMode;
+  useEffect(() => { if (!selectionMode) setBulkMovePicking(false); }, [selectionMode]);
 
   const toggleSelect = useCallback((id: string) => {
     Haptics.selectionAsync().catch(() => {});
@@ -763,13 +900,13 @@ export function AgendaBoard({
       else next.add(id);
       return next;
     });
-  }, []);
+  }, [setSelectedIds]);
 
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
     setBulkMovePicking(false);
     setSelectionMode(false);
-  }, []);
+  }, [setSelectedIds, setSelectionMode]);
 
   const selectAllInCol = useCallback((items: GoEntry[]) => {
     Haptics.selectionAsync().catch(() => {});
@@ -2899,6 +3036,13 @@ export function AgendaOperativa({
   onShowHoursChange,
   onCalDayNightModeChange,
 }: FullProps) {
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+  }, []);
+  useEffect(() => { if (!visible) clearSelection(); }, [visible, clearSelection]);
   const { lang, t } = useLanguage();
   const monthNamesArr = lang === "en" ? MONTH_NAMES_EN : MONTH_NAMES_ES;
   const insets = useSafeAreaInsets();
@@ -3176,6 +3320,7 @@ export function AgendaOperativa({
 
         {/* ── Board — always visible in background ── */}
         <AgendaBoard
+          selection={{ selectedIds, setSelectedIds, selectionMode, setSelectionMode }}
           goLog={goLog}
           selectedDateISO={selectedDateISO}
           sortOrder={sortOrder}
@@ -3926,7 +4071,7 @@ const s = StyleSheet.create({
   bulkCount: {
     color: "#00e5ff",
     fontSize: 17,
-    fontFamily: "Inter_900Black", fontWeight: "900",
+    fontWeight: "900",
     fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
   },
   bulkCountLabel: {

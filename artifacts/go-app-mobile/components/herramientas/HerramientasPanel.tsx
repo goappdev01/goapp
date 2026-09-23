@@ -58,7 +58,7 @@ interface HerramientasPanelProps {
   setGuidanceLevel: (v: number) => void;
   effectiveGuidanceLevel: number;
   autoBoost: number;
-  showToast: (text: string, type?: string) => void;
+  showToast: (text: string, type?: "success" | "error" | "warning" | "info") => void;
   userMarket: Market;
   setUserMarket: (m: Market) => void;
   userRegion: string;
@@ -578,7 +578,7 @@ export function HerramientasPanel({
                 <TouchableOpacity
                   onPress={() => {
                     Haptics.selectionAsync().catch(() => {});
-                    setCalConfigVisible(v => !v);
+                    setCalConfigVisible(!calConfigVisible);
                   }}
                   activeOpacity={0.8}
                   style={[s.toggleSwitch, calConfigVisible && s.toggleSwitchOn]}

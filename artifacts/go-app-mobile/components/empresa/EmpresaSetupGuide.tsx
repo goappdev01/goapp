@@ -39,7 +39,8 @@ import {
 } from "@/data/goSectorData";
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { trSector, type Lang } from "@/data/goSectorTranslations";
+import { trSector } from "@/data/goSectorTranslations";
+import type { Lang } from "@/i18n/translations";
 
 // ─── Storage ────────────────────────────────────────────────────────────────
 

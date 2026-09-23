@@ -57,12 +57,12 @@ try {
         raw === "sound" || raw === "visual" || raw === "silent" ? raw : "sound";
 
       if (mode === "silent") {
-        return { shouldShowAlert: false, shouldPlaySound: false, shouldSetBadge: false };
+        return { shouldShowAlert: false, shouldShowBanner: false, shouldShowList: false, shouldPlaySound: false, shouldSetBadge: false };
       }
       if (mode === "visual") {
-        return { shouldShowAlert: true,  shouldPlaySound: false, shouldSetBadge: false };
+        return { shouldShowAlert: true, shouldShowBanner: true, shouldShowList: true,  shouldPlaySound: false, shouldSetBadge: false };
       }
-      return { shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: true };
+      return { shouldShowAlert: true, shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: true };
     },
   });
 } catch (_) {

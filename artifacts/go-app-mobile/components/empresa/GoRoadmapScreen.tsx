@@ -92,7 +92,6 @@ const ROADMAP_LABEL_EN: Record<string, string> = {
   recursos:        "Available resources",
   excedentes:      "Surpluses",
   donaciones:      "Available donations",
-  oportunidades:   "Social opportunities",
   salud:           "Health",
   transporte:      "Transport",
   desempleo:       "Unemployment",

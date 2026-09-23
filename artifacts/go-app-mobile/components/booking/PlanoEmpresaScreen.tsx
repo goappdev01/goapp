@@ -581,9 +581,9 @@ interface FloorElementViewProps {
   el: FloorElement;
   selected: boolean;
   isEditorMode: boolean;
-  canvasScale: Animated.SharedValue<number>;
-  canvasMaxW: Animated.SharedValue<number>;
-  canvasMaxH: Animated.SharedValue<number>;
+  canvasScale: import("react-native-reanimated").SharedValue<number>;
+  canvasMaxW: import("react-native-reanimated").SharedValue<number>;
+  canvasMaxH: import("react-native-reanimated").SharedValue<number>;
   onSelect: (id: string) => void;
   onDoubleTap: (id: string) => void;
   onDragEnd: (id: string, x: number, y: number) => void;
@@ -1246,7 +1246,7 @@ function formatBookingDateLabel(isoDate: string): string {
   if (isoDate === today)    return "Hoy";
   if (isoDate === tomorrow) return "Mañana";
   const d = new Date(isoDate + "T00:00:00");
-  return `${WEEKDAY_NAMES_ES[d.getDay()]} ${d.getDate()} ${BOOKING_MONTH_SHORT[d.getMonth()]}`;
+  return `${["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"][d.getDay()]} ${d.getDate()} ${BOOKING_MONTH_SHORT[d.getMonth()]}`;
 }
 
 // ── Client booking sheet ───────────────────────────────────────────────────────

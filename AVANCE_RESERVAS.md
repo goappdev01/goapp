@@ -39,7 +39,7 @@ Las tres migraciones de esta entrega ya están aplicadas en el proyecto xiyxziyj
 ## Siguiente trabajo
 1. Verificar en Expo Go el asistente, su recuperación en otro dispositivo y las pantallas de edición con el API desplegado.
 2. Validar horarios de apertura y zonas horarias al reservar también en la base de datos; completar estados de gestión empresarial y renovación de sesión.
-3. Prueba completa de registro con correo, configuración, reserva y cancelación desde Expo Go; resolver errores TypeScript del móvil.
+3. Prueba completa de registro con correo, configuración, reserva y cancelación desde Expo Go.
 4. Integración Stripe Connect en pruebas para anticipos 10/25/50/100%, además del pago fuera de GO. Activar suscripción solo tras definir las condiciones comerciales/fiscales.
 
 Este API aún no está desplegado en un servidor público. Las protecciones de base de datos sí están aplicadas.
@@ -52,5 +52,15 @@ Este API aún no está desplegado en un servidor público. Las protecciones de b
 - Eliminar servicios, profesionales u horarios los archiva; no borra sus referencias históricas. Las desactivaciones normales siguen siendo editables.
 - Las mutaciones UUID remotas no se sustituyen por un guardado local al fallar. Las llamadas de pago siguen pendientes.
 - Migración mobile_booking_fields aplicada en Supabase. Prueba de persistencia de configuración, campos adicionales y aislamiento entre propietarios aprobada mediante rollback. Asesor de seguridad sin avisos.
-- Tres suites automatizadas del API/capa de datos móvil aprobadas; TypeScript y build del API aprobados. El proyecto móvil aún tiene errores anteriores de TypeScript. No se ha ejecutado la prueba visual completa en Expo Go.
+- Tres suites automatizadas del API/capa de datos móvil aprobadas; TypeScript y build del API aprobados. Los errores TypeScript del móvil se corrigen en la entrega descrita abajo. No se ha ejecutado la prueba visual completa en Expo Go.
 - Esta entrega no despliega el API. Es necesario que Expo apunte con EXPO_PUBLIC_API_URL al backend actualizado para utilizar las nuevas rutas.
+
+
+## Corrección TypeScript del móvil — 19 septiembre 2026
+- Corregidos los 86 diagnósticos iniciales manteniendo strict y todos los archivos dentro de la comprobación.
+- Agenda y pantalla principal comparten GoEntry, incluidos los tipos de reserva y campos históricos opcionales. La ordenación tolera entradas antiguas sin createdAt.
+- Corregidos nombres de campos de reservas y planos, inicialización del mes, claves de traducción, iconos inexistentes y propiedades incompatibles con React Native.
+- El botón SELEC. controla la selección real de AgendaBoard y se limpia al cerrar. El selector de contactos del flujo rápido tiene implementación y alternativa manual.
+- Notificaciones conservan los modos silencioso, visual y sonido con las propiedades requeridas por la versión instalada de Expo.
+- Verificado: TypeScript móvil sin errores; tres pruebas automatizadas existentes del API/capa de datos móvil aprobadas; git diff --check correcto.
+- Pendiente: prueba visual en Expo Go y pruebas en dispositivos iOS/Android. La comprobación de tipos no equivale a publicación en tiendas ni a validación completa del flujo de reservas.

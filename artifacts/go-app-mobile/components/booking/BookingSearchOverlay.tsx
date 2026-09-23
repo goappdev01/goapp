@@ -159,7 +159,7 @@ function formatTime(isoDatetime: string): string {
 const DATE_DAY_KEYS   = ["day_sun","day_mon","day_tue","day_wed","day_thu","day_fri","day_sat"] as const;
 const DATE_MONTH_KEYS = ["month_jan","month_feb","month_mar","month_apr","month_may","month_jun","month_jul","month_aug","month_sep","month_oct","month_nov","month_dec"] as const;
 
-function formatDateLabel(dateISO: string, t: (key: string) => string): string {
+function formatDateLabel(dateISO: string, t: ReturnType<typeof useLanguage>["t"]): string {
   const today = formatISODate(getToday());
   const tomorrow = formatISODate(new Date(getToday().getTime() + 86_400_000));
   if (dateISO === today) return t("status_today");
@@ -1685,7 +1685,7 @@ export function BookingSearchOverlay({
             activeOpacity={1}
             onPress={handleBackOneLevel}
             style={{ position: "absolute", right: 0, top: "50%", bottom: 0, width: "25%", opacity: step === "confirmed" ? 0 : 1 }}
-            pointerEvents={step === "confirmed" ? "none" : "auto"}
+            disabled={step === "confirmed"}
           >
             <LinearGradient
               colors={["transparent", "rgba(255,255,255,0.18)"]}

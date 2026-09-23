@@ -225,7 +225,7 @@ function Avatar({ name, isGoUser, size = 44 }: { name: string; isGoUser: boolean
 function ChannelBadge({ isGoUser }: { isGoUser: boolean }) {
   return (
     <View style={[s.badge, isGoUser ? s.badgeGo : s.badgeWa]}>
-      <Text style={[s.badgeText, { color: isGoUser ? C.green : C.whatsapp }]} translate="no">
+      <Text style={[s.badgeText, { color: isGoUser ? C.green : C.whatsapp }]} {...(Platform.OS === "web" ? { translate: "no" as const } : {})}>
         {isGoUser ? "GO" : "WA"}
       </Text>
     </View>
@@ -428,9 +428,9 @@ export function MessagesScreen({
           >
             {/* Title — no back button here */}
             <View style={s.titleRow}>
-              <Text style={s.titleText} translate="no">MESSAGES</Text>
+              <Text style={s.titleText} {...(Platform.OS === "web" ? { translate: "no" as const } : {})}>MESSAGES</Text>
               <View style={s.titleBadge}>
-                <Text style={s.titleBadgeText} translate="no">GO</Text>
+                <Text style={s.titleBadgeText} {...(Platform.OS === "web" ? { translate: "no" as const } : {})}>GO</Text>
               </View>
             </View>
 
@@ -647,7 +647,7 @@ export function MessagesScreen({
                         style={[s.actionBtn, s.actionBtnGo]}
                         activeOpacity={0.8}
                       >
-                        <Text style={s.actionBtnLabelGo} translate="no">GO</Text>
+                        <Text style={s.actionBtnLabelGo} {...(Platform.OS === "web" ? { translate: "no" as const } : {})}>GO</Text>
                       </TouchableOpacity>
 
                       {/* ENVIAR — lower, closest to thumb, most used */}

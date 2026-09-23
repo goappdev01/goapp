@@ -63,7 +63,7 @@ const GOLD   = "#C4883A";
 const CFG_DAY_KEYS   = ["day_sun","day_mon","day_tue","day_wed","day_thu","day_fri","day_sat"] as const;
 const CFG_MONTH_KEYS = ["month_jan","month_feb","month_mar","month_apr","month_may","month_jun","month_jul","month_aug","month_sep","month_oct","month_nov","month_dec"] as const;
 
-function formatTodayLabel(tFn: (key: string) => string): string {
+function formatTodayLabel(tFn: ReturnType<typeof useLanguage>["t"]): string {
   const d = getToday();
   return `${tFn(CFG_DAY_KEYS[d.getDay()])} ${d.getDate()} ${tFn(CFG_MONTH_KEYS[d.getMonth()]).slice(0, 3)}`;
 }
@@ -196,6 +196,8 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
   const [pickerMonth, setPickerMonth] = useState(() => new Date().getMonth());
   const pickerSlide = useRef(new Animated.Value(700)).current;
 
+  const [calViewMonth, setCalViewMonth] = useState<string>(getCurrentYearMonth);
+
   const openMonthPicker = useCallback(() => {
     const [y, m] = calViewMonth.split("-").map(Number);
     setPickerYear(y);
@@ -266,7 +268,6 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
 
   // ── Calendar data — mismo key que AgendaOperativa (sin duplicar) ──────────
   const [goLog, setGoLog] = useState<GoEntry[]>([]);
-  const [calViewMonth, setCalViewMonth] = useState<string>(getCurrentYearMonth);
 
   // ── Config panel — mismos controles que el Calendario normal ──────────────
   const [configVisible, setConfigVisible] = useState<boolean>(false);
@@ -823,14 +824,14 @@ function ReservasList({
   const todayReservas = useMemo(() =>
     reservas
       .filter(r => r.date === today && r.status !== "cancelada")
-      .sort((a, b) => a.startTime.localeCompare(b.startTime)),
+      .sort((a, b) => a.time.localeCompare(b.time)),
     [reservas, today]
   );
 
   const upcomingReservas = useMemo(() =>
     reservas
       .filter(r => r.date > today && r.status !== "cancelada")
-      .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
       .slice(0, 8),
     [reservas, today]
   );
@@ -975,13 +976,13 @@ function ReservaRow({
       <View style={[rl.rowAccent, { backgroundColor: color }]} />
       <View style={rl.rowBody}>
         <View style={rl.rowTopLine}>
-          <Text style={[rl.rowTime, { color: timeColor }]}>{reserva.startTime}–{reserva.endTime}</Text>
+          <Text style={[rl.rowTime, { color: timeColor }]}>{reserva.time}</Text>
           {showDate && <Text style={[rl.rowDate, { color: dimColor }]}>{dateShort}</Text>}
           <View style={[rl.statusBadge, { backgroundColor: color + "22", borderColor: color + "55" }]}>
             <Text style={[rl.statusBadgeTxt, { color }]}>{reserva.status}</Text>
           </View>
         </View>
-        <Text style={[rl.rowGuest, { color: guestColor }]}>{reserva.guestName || "Cliente"}</Text>
+        <Text style={[rl.rowGuest, { color: guestColor }]}>{reserva.customerName || "Cliente"}</Text>
         {element && !compact && (
           <Text style={[rl.rowElement, { color: dimColor }]}>📍 {element.label}</Text>
         )}
