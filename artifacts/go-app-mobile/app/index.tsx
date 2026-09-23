@@ -1,3 +1,4 @@
+import type { GoEntry } from "@/components/AgendaOperativa";
 import { notifySessionChanged } from "@/lib/sessionEvents";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
@@ -778,7 +779,7 @@ const MARKET_ORBIT_DEEP_LEVELS: Partial<Record<Market, Partial<Record<string, Or
           brands: [
             { label: "SWEETGREEN", icon: "heart",        color: "#3D7C4F", url: "https://sweetgreen.com",     logoUri: IH("sweetgreen.com") },
             { label: "TENDER GREENS",icon: "heart",      color: "#5A7A3A", url: "https://tendergreens.com",   logoUri: IH("tendergreens.com") },
-            { label: "FRESHII",    icon: "leaf",         color: "#78C14C", url: "https://freshii.com",        logoUri: IH("freshii.com") },
+            { label: "FRESHII",    icon: "feather",         color: "#78C14C", url: "https://freshii.com",        logoUri: IH("freshii.com") },
             { label: "JUST SALAD", icon: "circle",       color: "#5A7A3A", url: "https://justsalad.com",      logoUri: IH("justsalad.com") },
             { label: "WHOLE FOODS",icon: "shopping-bag", color: "#00674B", url: "https://wholefoodsmarket.com",logoUri: IH("wholefoodsmarket.com") },
             { label: "PRESSED",    icon: "droplet",      color: "#3CB371", url: "https://pressed.com",        logoUri: IH("pressed.com") },
@@ -911,7 +912,7 @@ const MARKET_ORBIT_DEEP_LEVELS: Partial<Record<Market, Partial<Record<string, Or
             { label: "FOOD FEST",  icon: "calendar",    color: _L,        url: "https://maps.google.com/search?q=food+festival+uk", logoUri: undefined },
             { label: "EVENTBRITE", icon: "star",        color: "#F6682F", url: "https://eventbrite.co.uk/d/food", logoUri: SI("eventbrite") },
             { label: "BOROUGH MKT",icon: "home",        color: _L,        url: "https://boroughmarket.org.uk", logoUri: IH("boroughmarket.org.uk") },
-            { label: "FARMRS MKT", icon: "leaf",        color: _L,        url: "https://maps.google.com/search?q=farmers+market+uk", logoUri: undefined },
+            { label: "FARMRS MKT", icon: "feather",        color: _L,        url: "https://maps.google.com/search?q=farmers+market+uk", logoUri: undefined },
             { label: "FOOD TOUR",  icon: "map-pin",     color: _L,        url: "https://maps.google.com/search?q=food+tour+london", logoUri: undefined },
             { label: "POP-UP",     icon: "award",       color: _L,        url: "https://maps.google.com/search?q=pop+up+restaurant+london", logoUri: undefined },
             { label: "SUPPER CLUB",icon: "users",       color: _L,        url: "https://maps.google.com/search?q=supper+club+london", logoUri: undefined },
@@ -1000,7 +1001,7 @@ const MARKET_ORBIT_DEEP_LEVELS: Partial<Record<Market, Partial<Record<string, Or
           brands: [
             { label: "FOOD FEST",  icon: "calendar",    color: _L,        url: "https://maps.google.com/search?q=food+festival+france", logoUri: undefined },
             { label: "ÉVÉNEMENTS", icon: "star",        color: _L,        url: "https://maps.google.com/search?q=événements+food+paris", logoUri: undefined },
-            { label: "MARCHÉ BIO", icon: "leaf",        color: _L,        url: "https://maps.google.com/search?q=marché+bio+paris", logoUri: undefined },
+            { label: "MARCHÉ BIO", icon: "feather",        color: _L,        url: "https://maps.google.com/search?q=marché+bio+paris", logoUri: undefined },
             { label: "FOIRE GASTRO",icon: "award",      color: _L,        url: "https://maps.google.com/search?q=foire+gastronomique+france", logoUri: undefined },
             { label: "WINE EVENT", icon: "droplet",     color: _L,        url: "https://maps.google.com/search?q=wine+event+france", logoUri: undefined },
             { label: "FOOD TOUR",  icon: "map-pin",     color: _L,        url: "https://maps.google.com/search?q=food+tour+paris", logoUri: undefined },
@@ -1090,7 +1091,7 @@ const MARKET_ORBIT_DEEP_LEVELS: Partial<Record<Market, Partial<Record<string, Or
           brands: [
             { label: "EVENTOS",    icon: "calendar",    color: _L,        url: "https://maps.google.com/search?q=eventos+food+brasil", logoUri: undefined },
             { label: "GASTRÔ FEST",icon: "star",        color: _L,        url: "https://maps.google.com/search?q=festival+gastronomico+brasil", logoUri: undefined },
-            { label: "FEIRA ORGÂN.",icon: "leaf",       color: _L,        url: "https://maps.google.com/search?q=feira+organica+brasil", logoUri: undefined },
+            { label: "FEIRA ORGÂN.",icon: "feather",       color: _L,        url: "https://maps.google.com/search?q=feira+organica+brasil", logoUri: undefined },
             { label: "WINE BRASIL",icon: "droplet",     color: _L,        url: "https://maps.google.com/search?q=wine+festival+brasil", logoUri: undefined },
             { label: "FOOD TOUR",  icon: "map-pin",     color: _L,        url: "https://maps.google.com/search?q=food+tour+brasil", logoUri: undefined },
             { label: "POP-UP",     icon: "award",       color: _L,        url: "https://maps.google.com/search?q=pop-up+restaurante+brasil", logoUri: undefined },
@@ -1805,7 +1806,7 @@ function TesoButton({
 }
 
 /** Añade animación de escala TESO (spring) a cualquier botón existente sin cambiar su estilo visual. */
-function PressScale({ children, style }: { children: React.ReactElement; style?: any }) {
+function PressScale({ children, style }: { children: React.ReactElement<Pick<import("react-native").PressableProps, "onPressIn" | "onPressOut">>; style?: any }) {
   const anim = React.useRef(new Animated.Value(1)).current;
   return (
     <Animated.View style={[{ transform: [{ scale: anim }] }, style]}>
@@ -3265,166 +3266,7 @@ export default function HomeScreen() {
     readByEmpresa: boolean;
   };
 
-  const [goLog, setGoLog] = useState<Array<{
-    id: string;
-    kind: "sent" | "received";
-    intentKey: string;
-    intentLabel: string;
-    color: string;
-    place: string;
-    date: string;
-    // Fecha canónica YYYY-MM-DD. SOURCE OF TRUTH para programar,
-    // ordenar y transmitir el GO. El campo `date` (string humano)
-    // queda solo para visualizar en la UI clásica.
-    dateISO: string;
-    time: string;
-    duration: string;
-    contactName: string;
-    phone: string;
-    estado: "pendiente" | "aceptado" | "rechazado" | "propuesto" | "propuesta_pendiente";
-    createdAt: number;
-    // Soft-delete: cuando es true el GO se mueve a la vista
-    // "Eliminados" del listado en lugar de borrarse de verdad. Desde
-    // ahí el usuario puede recuperarlo (volver a "pendiente") o
-    // aceptarlo (queda como "aceptado" y se restaura).
-    deleted?: boolean;
-    // ── ENVÍO MÚLTIPLE + CUPO LIMITADO ─────────────────────────────
-    // Cuando el GO se envía a varias personas, cada destinatario
-    // queda registrado aquí con su propio estado. Si `recipients` no
-    // está definido o es vacío, el GO se comporta como un GO normal
-    // de un solo destinatario (compatibilidad con entries antiguos).
-    recipients?: Array<{
-      name: string;
-      phone: string;
-      estado: "pending" | "accepted" | "rejected" | "blocked_by_limit";
-    }>;
-    // Tope opcional de aceptados. Si está definido, en cuanto los
-    // `accepted` igualen este número, los pendientes restantes pasan
-    // a `blocked_by_limit` automáticamente y `cupoCerrado` se marca.
-    maxAccepted?: number;
-    // Marca interna que indica que el cupo está cerrado y no se
-    // aceptan más respuestas (para mostrar "Cupo completo").
-    cupoCerrado?: boolean;
-    // ── ACCIONES AVANZADAS ─────────────────────────────────────────
-    // Tipo de acción. Si no está definido, equivale a "GO" (compat).
-    //   · GO       → mensaje WhatsApp con fecha/hora y respuesta
-    //   · TAREA    → solo se registra, sin envío (no abre WhatsApp)
-    //   · LLAMADA  → abre el marcador del teléfono (tel:)
-    //   · WHATSAPP → idéntico a GO; alias para chats puntuales
-    type?: "GO" | "TAREA" | "LLAMADA" | "WHATSAPP";
-    // Quién creó el GO. Si no está, se asume "Yo" (auto-creado).
-    createdBy?: string;
-    // A quién está asignada la EJECUCIÓN del GO. Si difiere del
-    // creador, el GO se considera "para terceros" y se muestra una
-    // etiqueta en la tarjeta. Si no está, se asume el ejecutor = creador.
-    assignedTo?: string;
-    // Programación: si `sendAt` existe y `scheduled === true`, el GO
-    // NO se envía hasta que `Date.now() >= sendAt`. El motor de envío
-    // (`scheduleGoSend`) se encarga de disparar el envío real cuando
-    // llega el momento, marcando `scheduled = false` y `sentAt`.
-    sendAt?: number;
-    sentAt?: number;
-    scheduled?: boolean;
-    // ── NOTAS LIBRES + GO GENÉRICO + PROPONER CAMBIO ───────────────
-    // Título operativo corto (máx 1 línea visual en tarjeta).
-    // Se muestra en la tarjeta y viaja en el mensaje al receptor.
-    notes?: string;
-    // Nota interna — texto largo, contextual, no viaja con el GO salvo
-    // que sea NOTA_INTERNA. Solo visible en la ficha expandida.
-    detail?: string;
-    // Visibilidad del GO — controla quién puede ver esta entrada.
-    // 'publico': cualquier usuario.  'clientes': solo clientes autorizados.
-    // 'proveedores': solo proveedores.  'interno': solo miembros internos.
-    // 'privado': solo el creador (invisible para el resto).
-    visibility?: 'publico' | 'clientes' | 'proveedores' | 'interno' | 'privado';
-    // Sugerencia/recomendación seleccionada en el panel "Sugerir opciones".
-    // Viaja con el mensaje y queda guardada en la tarjeta del GO.
-    sugerencia?: string;
-    // Mensajes/notas asociados a este GO. Cada mensaje incluye quién
-    // lo envió, cuándo, y por qué canal. Nunca existe una nota sin goId.
-    messages?: Array<{
-      id: string;
-      text: string;
-      goId: string;
-      senderId: "yo" | string;
-      createdAt: number;
-      deliveryMode: "internal" | "whatsapp";
-    }>;
-    // ID compartido del chat interno de reserva. Vincula entradas de
-    // cliente y empresa que representan la misma reserva para que ambos
-    // lados lean y escriban en la misma conversación compartida.
-    sharedChatId?: string;
-    // Marca un GO sin categoría concreta. Cuando es true, el
-    // intentLabel se persiste como "GENÉRICO" y el color es neutro.
-    // Las `notes` actúan como descripción principal del GO.
-    isGeneric?: boolean;
-    // Propuesta de cambio del receptor. Si está poblada, el GO
-    // queda en estado funcional "proposed_change" (que se mapea al
-    // estado existente "propuesto" del modelo de aceptación, sin
-    // romper la lógica). El creador puede aceptar o rechazar la
-    // propuesta desde la tarjeta.
-    proposal?: {
-      date?: string;
-      dateISO?: string;
-      time?: string;
-      duration?: string;
-      place?: string;
-      note?: string;
-      proposedAt: number;
-    };
-    // Propuesta de cambio bilateral: guarda el nuevo slot sin mover la tarjeta.
-    // La entrada permanece en su hueco original; aparece un ghost naranja en el
-    // slot propuesto en ambos calendarios. Emisor → "Esperando respuesta".
-    // Receptor → botones Aceptar / Rechazar.
-    // Al aceptar: dateISO/date/time se actualizan al nuevo slot, se borra changeProposal.
-    // Al rechazar: se restauran los valores originales, se borra changeProposal.
-    changeProposal?: {
-      dateISO: string;
-      date: string;
-      time: string;
-      duration?: string;
-      place?: string;
-      note?: string;
-      proposedAt: number;
-      originalDateISO: string;
-      originalDate: string;
-      originalTime: string;
-      originalDuration?: string;
-    };
-    // Vincula dos entries (cliente + empresa) a la misma reserva compartida.
-    reservationId?: string;
-    // Estado compartido de la reserva GO_BOOKING — se sincroniza entre
-    // la entrada de cliente (go_booking_cli_<id>) y la de empresa
-    // (go_booking_prv_<id>) y con el registro en go_bookings_v1.
-    // Independiente del `estado` general del GO (pendiente/aceptado/rechazado).
-    bookingStatus?: "pendiente" | "confirmada" | "cancelada" | "cambio_pendiente" | "completada";
-    // ── TELEFONÍA BILATERAL ─────────────────────────────────────────
-    // Para GOs coordinados (enviados o recibidos) guardamos ambos extremos
-    // y la dirección desde el punto de vista del usuario actual.
-    // Esto permite calcular a quién enviar una propuesta de cambio sin
-    // depender de la lógica "sender ↔ receiver" del backend.
-    senderPhone?: string;
-    receiverPhone?: string;
-    direction?: "incoming" | "outgoing" | "self";
-    // ── ALERTAS Y RECORDATORIOS (BLOQUE 4) ────────────────────────
-    // `reminders` = lista de minutos antes del GO en los que se debe
-    // disparar una alerta. Por defecto [60, 15] (1h y 15min antes).
-    // Se permiten hasta 3 entradas. El motor (poll cada 30s) compara
-    // estos offsets con `dateISO + time` y dispara cuando llega el
-    // momento. Persistido tal cual.
-    reminders?: number[];
-    // Flag por GO. Si false, las alertas de este GO se silencian sin
-    // borrar la configuración (útil para un mute puntual).
-    notificationsEnabled?: boolean;
-    // Histórico de qué offsets ya se han disparado para este GO en
-    // esta instalación; evita re-disparar la misma alerta si el motor
-    // hace varios ticks dentro de la ventana de disparo.
-    firedReminderMins?: number[];
-    // Snooze: cuando el usuario pospone, guardamos un timestamp UNIX
-    // ms a partir del cual debe sonar UNA vez más, indistintamente
-    // de la fecha real del GO. Se limpia tras dispararse.
-    snoozeUntil?: number;
-  }>>([]);
+  const [goLog, setGoLog] = useState<GoEntry[]>([]);
   const [receivedDetailOpen, setReceivedDetailOpen] = useState(false);
   const [receivedDetailGo, setReceivedDetailGo] = useState<typeof goLog[number] | null>(null);
 
@@ -6600,7 +6442,7 @@ export default function HomeScreen() {
       raw,
       pending: pendingReasons.length > 0,
       pendingReasons,
-      followUp: generateFollowUp(pendingReasons),
+      followUp: generateFollowUp(pendingReasons) ?? undefined,
       interno,
     });
     setAiOpen(false);
@@ -8704,6 +8546,7 @@ export default function HomeScreen() {
       sentAt?: number;
       notes?: string;
       attachedNote?: string;
+      sugerencia?: string;
       isGeneric?: boolean;
       reminders?: number[];
       notificationsEnabled?: boolean;
@@ -8770,6 +8613,7 @@ export default function HomeScreen() {
     // ensuciar el almacenamiento ni cambiar la apariencia visual.
     if (extra?.notes && extra.notes.trim()) entry.notes = extra.notes.trim();
     if (extra?.attachedNote && extra.attachedNote.trim()) entry.attachedNote = extra.attachedNote.trim();
+    if (extra?.sugerencia?.trim()) entry.sugerencia = extra.sugerencia.trim();
     if (extra?.isGeneric === true) entry.isGeneric = true;
     // Visibilidad — siempre se guarda para filtrado posterior.
     entry.visibility = goVisibility || 'publico';
@@ -9472,7 +9316,7 @@ export default function HomeScreen() {
         // + reservas recibidas desde un proveedor GO (el usuario tiene una cita)
         if (!(g.kind === "sent" || (g.kind === "received" && g.type === "GO_BOOKING"))) return false;
         if (g.deleted) return false;
-        if (g.estado === "rechazado" || g.estado === "cancelado") return false;
+        if (g.estado === "rechazado" || g.bookingStatus === "cancelada") return false;
         // ── DEDUP CLI/PRV — cada reserva genera dos entradas (cli + prv).
         // Solo mostramos la perspectiva que corresponde al modo activo:
         //   · Usuario  → ve la entrada cliente  (go_booking_cli_*)
@@ -10744,6 +10588,35 @@ export default function HomeScreen() {
 
   // ── QD FLOW ADVANCE — avanza al siguiente componente real del flujo ────────
   // Usa refs para siempre ver los valores más recientes (sin stale closures).
+  const qdPickContactNative = async () => {
+    if (Platform.OS !== "web") {
+      try {
+        const { status } = await Contacts.requestPermissionsAsync();
+        if (status === "granted") {
+          const picked = await Contacts.presentContactPickerAsync();
+          if (picked) {
+            const name = (picked.name || "").trim();
+            const phoneNumber = (picked.phoneNumbers?.[0]?.number || "").replace(/[^\d+]/g, "");
+            qdCapContactNameRef.current = name;
+            qdCapPhoneRef.current = phoneNumber;
+            setContactName(name);
+            setPhone(phoneNumber);
+            await persistRecent(name, phoneNumber);
+            qdReturnToSelector();
+            return;
+          }
+        }
+      } catch {
+        showToast(t("toast_contacts_permission_denied"), "warning");
+      }
+    }
+    // Manual selection remains available on web, denial, and picker cancellation.
+    setNameDraft(qdCapContactNameRef.current);
+    setPhoneDraft(qdCapPhoneRef.current);
+    setMultiMode(false);
+    setContactOpen(true);
+  };
+
   const qdFlowAdvance = () => {
     const nextStep = qdFlowStepRef.current + 1;
     const queue = qdFlowQueueRef.current;
@@ -13302,12 +13175,13 @@ export default function HomeScreen() {
         backgroundColor="transparent"
       />
       {/* Background — cinematic Earth-from-space atmosphere */}
-      <Image
-        source={EARTH_BG}
-        style={StyleSheet.absoluteFill}
-        resizeMode="cover"
-        pointerEvents="none"
-      />
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <Image
+          source={EARTH_BG}
+          style={StyleSheet.absoluteFill}
+          resizeMode="cover"
+        />
+      </View>
       {/* Dark veil — preserves button readability, keeps cinematic depth */}
       <View
         style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(2,4,12,0.51)" }]}
@@ -21561,7 +21435,6 @@ export default function HomeScreen() {
           if (listFilter === "papelera") return "DELETED";
           if (listFilter === "pendiente") return "PENDING";
           if (listFilter === "aceptado") return "ACCEPTED";
-          if (listFilter === "rechazado") return "REJECTED";
           if (listFilter === "propuesta") return "CHANGE PROPOSALS";
           if (typeFilter === "TAREA_INTERNA") return "INTERNAL TASKS";
           if (typeFilter === "TAREA") return "TASKS";
@@ -22576,7 +22449,7 @@ export default function HomeScreen() {
           // El estado del GO NUNCA influye en la posición.
           const sortDir = goSortOrder === "desc" ? -1 : 1;
           const allOrdered = [...filtered].sort((a, b) => {
-            if (llamadasListOpen) return (a.createdAt - b.createdAt) * sortDir;
+            if (llamadasListOpen) return ((a.createdAt ?? 0) - (b.createdAt ?? 0)) * sortDir;
             const aDate = (a as any).dateISO || null;
             const bDate = (b as any).dateISO || null;
             // Items con fecha van ANTES que items sin fecha (siempre)
@@ -22590,10 +22463,10 @@ export default function HomeScreen() {
               if (aTime && bTime) return (aTime < bTime ? -1 : 1) * sortDir;
               if (aTime) return -sortDir;
               if (bTime) return sortDir;
-              return (a.createdAt - b.createdAt) * sortDir;
+              return ((a.createdAt ?? 0) - (b.createdAt ?? 0)) * sortDir;
             }
             // Ambos sin fecha — más antiguo arriba por defecto (orden natural mobile)
-            return (a.createdAt - b.createdAt) * sortDir;
+            return ((a.createdAt ?? 0) - (b.createdAt ?? 0)) * sortDir;
           });
           // En papelera: mostrar solo los 50 más recientes para evitar
           // acumulación masiva. El backend conserva el historial completo.

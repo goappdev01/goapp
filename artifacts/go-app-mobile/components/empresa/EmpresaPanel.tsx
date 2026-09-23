@@ -625,9 +625,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             ) : (
               <>
                 <Text style={s.headerTitle}>{moduloActual?.label ?? ""}</Text>
-                {modulo !== "empresa_config" && (
-                  <Text style={s.headerSub}>{moduloActual?.desc ?? ""}</Text>
-                )}
+                <Text style={s.headerSub}>{moduloActual?.desc ?? ""}</Text>
               </>
             )}
           </View>

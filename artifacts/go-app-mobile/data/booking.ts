@@ -1153,7 +1153,7 @@ export async function checkAndClaimBookingSlot(
     businessId:     candidate.businessId,
     staffId:        candidate.staffId        ?? undefined,
     professionalId: candidate.staffId        ?? undefined,
-    serviceId:      candidate.itemId         ?? undefined,
+    serviceId:      candidate.bookableItemId         ?? undefined,
     date:           candidate.startDatetime?.slice(0, 10),
     startTime:      candidate.startDatetime?.slice(11, 16),
     endTime:        candidate.endDatetime?.slice(11, 16),
@@ -2305,7 +2305,7 @@ export async function getAvailableReservationSlots(
     slots: result.map(s => ({
       time:    s.time,
       endTime: s.endDatetime?.slice(11, 16),
-      slotKey: s.slotKey,
+      slotKey: getBookingSlotKey({ businessId, staffId: s.professionalId, startDatetime: s.startDatetime, endDatetime: s.endDatetime }),
     })),
   });
   return result;

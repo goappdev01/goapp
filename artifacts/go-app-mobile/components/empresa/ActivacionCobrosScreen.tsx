@@ -445,7 +445,6 @@ export function ActivacionCobrosScreen({ visible, onClose, initialScreen = 1 }: 
                       key={item.label}
                       style={{
                         flexDirection: "row", alignItems: "center", gap: 12,
-                        backgroundColor: CARD,
                         borderRadius: 14, padding: 14, marginBottom: 10,
                         borderWidth: 1.5,
                         borderColor: item.ok ? GREEN + "30" : RED + "25",

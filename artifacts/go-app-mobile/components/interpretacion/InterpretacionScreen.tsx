@@ -543,7 +543,7 @@ function ContactoPendienteRow({
   if (!contacto) return null;
   const hasInterp = !!interpretacion;
   const estado = interpretacion?.estadoFinal ?? "pendiente";
-  const color = ESTADO_COMPAT_COLOR[estado as any];
+  const color = ESTADO_COMPAT_COLOR[estado];
 
   return (
     <View style={s.contactPendRow}>

@@ -67,7 +67,7 @@ type Props = {
 const PRV_DAY_KEYS   = ["day_sun","day_mon","day_tue","day_wed","day_thu","day_fri","day_sat"] as const;
 const PRV_MONTH_KEYS = ["month_jan","month_feb","month_mar","month_apr","month_may","month_jun","month_jul","month_aug","month_sep","month_oct","month_nov","month_dec"] as const;
 
-function buildDays(tFn: (key: string) => string) {
+function buildDays(tFn: ReturnType<typeof useLanguage>["t"]) {
   const today = new Date();
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(today);
@@ -1100,7 +1100,7 @@ export function GoProveedorReservaSheet({
         businessId:     result.booking.businessId,
         staffId:        result.booking.staffId      ?? undefined,
         professionalId: resolvedStaffId             ?? undefined,
-        serviceId:      result.booking.itemId       ?? undefined,
+        serviceId:      result.booking.bookableItemId       ?? undefined,
         date:           result.booking.startDatetime?.slice(0, 10),
         startTime:      result.booking.startDatetime?.slice(11, 16),
         endTime:        result.booking.endDatetime?.slice(11, 16),
@@ -1193,7 +1193,7 @@ export function GoProveedorReservaSheet({
           businessId:     result.booking.businessId,
           staffId:        result.booking.staffId      ?? undefined,
           professionalId: resolvedStaffId             ?? undefined,
-          serviceId:      result.booking.itemId       ?? undefined,
+          serviceId:      result.booking.bookableItemId       ?? undefined,
           date:           dateISO,
           startTime:      time,
           endTime:        undefined,
@@ -1210,7 +1210,7 @@ export function GoProveedorReservaSheet({
             businessId:     result.booking.businessId,
             staffId:        result.booking.staffId      ?? undefined,
             professionalId: resolvedStaffId             ?? undefined,
-            serviceId:      result.booking.itemId       ?? undefined,
+            serviceId:      result.booking.bookableItemId       ?? undefined,
             date:           dateISO,
             startTime:      time,
             endTime:        undefined,
