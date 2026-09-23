@@ -1,0 +1,15 @@
+FROM node:24-bookworm-slim AS build
+WORKDIR /app
+RUN npm install --global pnpm@10.17.1
+COPY . .
+RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN node artifacts/api-server/build.mjs
+
+FROM node:24-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=8080
+COPY --from=build --chown=node:node /app/artifacts/api-server/dist ./dist
+USER node
+EXPOSE 8080
+CMD ["node", "--enable-source-maps", "dist/index.mjs"]
