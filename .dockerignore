@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/dist
+**/.expo
+.metro-cache
+**/.cache
+**/.local
+**/.env
+**/.env.*
+**/supabase/.temp
+attached_assets
+**/static-build
