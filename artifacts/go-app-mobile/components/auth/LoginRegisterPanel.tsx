@@ -278,7 +278,6 @@ export function LoginRegisterPanel({
     AsyncStorage.removeItem("go_supabase_session_v1").then(notifySessionChanged).catch(() => {});
     onSetAccountType(null);
     setAuthStep("role");
-    onClose();
   };
 
   const currentOption = ROLE_OPTIONS.find(r => r.role === userAccountType);

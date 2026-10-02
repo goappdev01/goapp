@@ -2706,7 +2706,8 @@ export default function HomeScreen() {
   // null = no configurado (primer acceso / "LOGIN")
   // Persiste en AsyncStorage. Determina qué paneles se muestran automáticamente.
   const [userAccountType, setUserAccountType] = useState<AccountRole | null>(null);
-  const [goAuthOpen, setGoAuthOpen] = useState(false);
+  const [goAuthOpen, setGoAuthOpen] = useState(true);
+  const [authBootstrapComplete, setAuthBootstrapComplete] = useState(false);
   const [adminDashOpen, setAdminDashOpen] = useState(false);
 
   // ── VERIFICACIÓN EMPRESA ─────────────────────────────────────────────────
@@ -2818,16 +2819,9 @@ export default function HomeScreen() {
       .catch(() => {});
   }, []);
 
-  // Carga tipo de cuenta GO al montar
+  // Carga configuración de cuenta al montar. El rol ya no se hidrata aquí:
+  // un rol guardado sin una sesión real no debe saltarse el acceso.
   useEffect(() => {
-    AsyncStorage.getItem("go_account_type_v1")
-      .then((raw) => {
-        const valid: AccountRole[] = ["usuario","empresa","admin","trabajador","proveedor","partner","franquicia"];
-        if (raw && valid.includes(raw as AccountRole)) {
-          setUserAccountType(raw as AccountRole);
-        }
-      })
-      .catch(() => {});
     // Load empresa verification status
     loadVerification().then(setVerification).catch(() => {});
     // Load empresa setup progress for satellite guidance
@@ -2856,36 +2850,85 @@ export default function HomeScreen() {
     syncModeFromRole(role);
     if (role) {
       AsyncStorage.setItem("go_account_type_v1", role).catch(() => {});
+      setGoAuthOpen(false);
     } else {
       AsyncStorage.removeItem("go_account_type_v1").catch(() => {});
+      setGoAuthOpen(true);
     }
   };
 
-  // Hydrate the real Supabase session when available. The legacy role key is
-  // kept only as a visual fallback for older demo sessions.
+  // Resuelve la autenticación antes de mostrar el Landing. La clave de rol es
+  // solo información de presentación y nunca autentica por sí sola.
   useEffect(() => {
-    AsyncStorage.getItem("go_supabase_session_v1")
-      .then(async raw => {
-        if (!raw) return;
-        let session: { access_token?: string } | null = null;
-        try { session = JSON.parse(raw); } catch { session = null; }
-        if (!session?.access_token) return;
-        const apiBase = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "") ?? (process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}/api` : "/api");
-        const response = await fetch(`${apiBase}/supabase/auth/me`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-        if (!response.ok) {
-          await AsyncStorage.multiRemove(["go_supabase_session_v1", "go_account_type_v1"]);
-          notifySessionChanged();
-          commitAccountType(null);
+    let cancelled = false;
+    const validRoles: AccountRole[] = ["usuario", "empresa", "admin", "trabajador", "proveedor", "partner", "franquicia"];
+    const isValidRole = (value: unknown): value is AccountRole =>
+      typeof value === "string" && validRoles.includes(value as AccountRole);
+
+    const requireAuthentication = async () => {
+      await AsyncStorage.multiRemove(["go_supabase_session_v1", "go_account_type_v1"]);
+      notifySessionChanged();
+      if (!cancelled) commitAccountType(null);
+    };
+
+    (async () => {
+      try {
+        const [rawSession, rawRole] = await Promise.all([
+          AsyncStorage.getItem("go_supabase_session_v1"),
+          AsyncStorage.getItem("go_account_type_v1"),
+        ]);
+
+        let session: { access_token?: string; user?: { user_metadata?: { role?: unknown } } } | null = null;
+        try { session = rawSession ? JSON.parse(rawSession) : null; } catch { session = null; }
+
+        if (!session?.access_token) {
+          await requireAuthentication();
           return;
         }
-        const payload = await response.json();
-        const valid: AccountRole[] = ["usuario", "empresa", "admin", "trabajador", "proveedor", "partner", "franquicia"];
-        const role = payload.profile?.role;
-        if (valid.includes(role)) commitAccountType(role);
-      })
-      .catch(() => {});
+
+        let resolvedRole: AccountRole | null = isValidRole(rawRole)
+          ? rawRole
+          : isValidRole(session.user?.user_metadata?.role)
+            ? session.user.user_metadata.role
+            : null;
+
+        const apiBase = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "")
+          ?? (process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}/api` : "/api");
+        const canValidateRemotely = Platform.OS === "web" || !apiBase.startsWith("/");
+
+        if (canValidateRemotely) {
+          try {
+            const response = await fetch(`${apiBase}/supabase/auth/me`, {
+              headers: { Authorization: `Bearer ${session.access_token}` },
+            });
+            if (response.status === 401 || response.status === 403) {
+              await requireAuthentication();
+              return;
+            }
+            if (response.ok) {
+              const payload = await response.json();
+              if (isValidRole(payload.profile?.role)) resolvedRole = payload.profile.role;
+            }
+          } catch {
+            // Una caída temporal de red no invalida una sesión ya guardada.
+          }
+        }
+
+        if (!cancelled) {
+          if (resolvedRole) commitAccountType(resolvedRole);
+          else setGoAuthOpen(true);
+        }
+      } catch {
+        if (!cancelled) {
+          setUserAccountType(null);
+          setGoAuthOpen(true);
+        }
+      } finally {
+        if (!cancelled) setAuthBootstrapComplete(true);
+      }
+    })();
+
+    return () => { cancelled = true; };
   }, []);
 
   // Helper: guarda MI TELÉFONO GO y muestra feedback verde 1 segundo.
@@ -13159,6 +13202,15 @@ export default function HomeScreen() {
     ];
   };
 
+  if (!authBootstrapComplete || !modeLoaded) {
+    return (
+      <View style={{ flex: 1, backgroundColor: "#F7F6F2", alignItems: "center", justifyContent: "center" }}>
+        <StatusBar style="dark" />
+        <ActivityIndicator size="large" color="#4A80BD" />
+      </View>
+    );
+  }
+
   return (
     <GestureDetector gesture={universalSwipeGesture}>
     <View style={[styles.root, { paddingTop }]}>
@@ -19326,7 +19378,9 @@ export default function HomeScreen() {
       {/* ── AUTH GO — Login · Registro · Gestión de cuenta y rol ──────── */}
       <LoginRegisterPanel
         visible={goAuthOpen}
-        onClose={() => setGoAuthOpen(false)}
+        onClose={() => {
+          if (userAccountType !== null) setGoAuthOpen(false);
+        }}
         userAccountType={userAccountType}
         onSetAccountType={commitAccountType}
         onOpenPerfil={() => { setGoAuthOpen(false); setCuentaOpen(true); }}
