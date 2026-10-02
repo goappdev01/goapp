@@ -1205,7 +1205,7 @@ const { width: SW } = Dimensions.get("window");
 
 const g = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: BG,
     zIndex: 100,
     flexDirection: "column",

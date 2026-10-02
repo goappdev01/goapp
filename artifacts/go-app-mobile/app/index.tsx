@@ -7,7 +7,7 @@ import Svg, { Circle, Path as SvgPath } from "react-native-svg";
 import QRCode from "react-native-qrcode-svg";
 import { Accelerometer } from "expo-sensors";
 import * as Clipboard from "expo-clipboard";
-import * as Contacts from "expo-contacts";
+import * as Contacts from "expo-contacts/legacy";
 import * as Haptics from "expo-haptics";
 import * as Speech from "expo-speech";
 import { LinearGradient } from "expo-linear-gradient";
@@ -1664,7 +1664,7 @@ function SwipeableRow({
       <Animated.View
         pointerEvents="none"
         style={{
-          ...StyleSheet.absoluteFillObject,
+          ...StyleSheet.absoluteFill,
           backgroundColor: rightColor,
           opacity: rightHintOpacity,
           flexDirection: "row",
@@ -1681,7 +1681,7 @@ function SwipeableRow({
       <Animated.View
         pointerEvents="none"
         style={{
-          ...StyleSheet.absoluteFillObject,
+          ...StyleSheet.absoluteFill,
           backgroundColor: leftColor,
           opacity: leftHintOpacity,
           flexDirection: "row-reverse",
@@ -13171,8 +13171,6 @@ export default function HomeScreen() {
             ? "dark"
             : "light"
         }
-        translucent
-        backgroundColor="transparent"
       />
       {/* Background — cinematic Earth-from-space atmosphere */}
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -16234,7 +16232,7 @@ export default function HomeScreen() {
                           colors={gc}
                           start={{ x: 0.5, y: 0 }}
                           end={{ x: 0.5, y: 1 }}
-                          style={StyleSheet.absoluteFillObject}
+                          style={StyleSheet.absoluteFill}
                         />
                         <View
                           pointerEvents="none"

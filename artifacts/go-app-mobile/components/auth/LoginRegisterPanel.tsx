@@ -312,7 +312,7 @@ export function LoginRegisterPanel({
       transparent={false}
       onRequestClose={onClose}
     >
-      <StatusBar style="dark" translucent backgroundColor="transparent" />
+      <StatusBar style="dark" />
       <View style={[s.root, { paddingTop: insets.top }]} {...rightSwipePan.panHandlers}>
 
         {/* Zona de cierre — brillo derecho durante long-press */}

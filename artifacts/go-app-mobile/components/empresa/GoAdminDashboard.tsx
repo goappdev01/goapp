@@ -707,7 +707,7 @@ export function GoAdminDashboard({ visible, onClose }: Props) {
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
-      <StatusBar style="light" translucent backgroundColor="transparent" />
+      <StatusBar style="light" />
       <SafeAreaView style={s.root}>
 
         {/* ── Header ── */}

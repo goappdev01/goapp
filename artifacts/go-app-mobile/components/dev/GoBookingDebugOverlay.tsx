@@ -117,7 +117,7 @@ export function GoBookingDebugOverlay({
   const bookedIntervals = engineTrace?.bookedIntervals ?? [];
 
   return (
-    <View style={[StyleSheet.absoluteFillObject, { zIndex: 9999 }]}>
+    <View style={[StyleSheet.absoluteFill, { zIndex: 9999 }]}>
       <View style={{ flex: 1, backgroundColor: "#050505" }}>
 
         {/* ── Header ── */}
