@@ -2794,7 +2794,7 @@ export function AgendaBoard({
           <TouchableOpacity
             activeOpacity={1}
             onPress={() => { setBookingMsgEntry(null); setBookingMsgDraft(""); }}
-            style={{ ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.72)" }}
+            style={{ ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.72)" }}
           />
 
           <View style={{
@@ -3276,7 +3276,7 @@ export function AgendaOperativa({
 
   return (
     // box-none: the wrapper is invisible to touches; only the panel itself is interactive
-    <View style={[StyleSheet.absoluteFillObject, { pointerEvents: "box-none" }]}>
+    <View style={[StyleSheet.absoluteFill, { pointerEvents: "box-none" }]}>
       <ReAnimated.View
         style={[
           s.panel,

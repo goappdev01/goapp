@@ -179,7 +179,7 @@ function SwipeDeleteRow({
     <View style={{ position: "relative", overflow: "hidden" }}>
       <Animated.View
         pointerEvents="none"
-        style={[StyleSheet.absoluteFillObject, {
+        style={[StyleSheet.absoluteFill, {
           backgroundColor: C.red, opacity: bgOpacity,
           flexDirection: "row-reverse", alignItems: "center", paddingRight: 22,
         }]}
@@ -418,7 +418,7 @@ export function MessagesScreen({
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <View style={[s.root, { paddingTop: insets.top }]}>
         {/* Pure black background — no blue gradient */}
-        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: C.bg }]} pointerEvents="none" />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: C.bg }]} pointerEvents="none" />
 
         {/* ═══ LIST VIEW ═══════════════════════════════════════════════════ */}
         {view === "list" && (

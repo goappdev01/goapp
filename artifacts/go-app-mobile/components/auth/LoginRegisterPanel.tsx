@@ -278,7 +278,6 @@ export function LoginRegisterPanel({
     AsyncStorage.removeItem("go_supabase_session_v1").then(notifySessionChanged).catch(() => {});
     onSetAccountType(null);
     setAuthStep("role");
-    onClose();
   };
 
   const currentOption = ROLE_OPTIONS.find(r => r.role === userAccountType);
@@ -312,7 +311,7 @@ export function LoginRegisterPanel({
       transparent={false}
       onRequestClose={onClose}
     >
-      <StatusBar style="dark" translucent backgroundColor="transparent" />
+      <StatusBar style="dark" />
       <View style={[s.root, { paddingTop: insets.top }]} {...rightSwipePan.panHandlers}>
 
         {/* Zona de cierre — brillo derecho durante long-press */}

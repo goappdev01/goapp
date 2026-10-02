@@ -487,7 +487,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
       presentationStyle="fullScreen"
       onRequestClose={onClose}
     >
-      <StatusBar style="dark" translucent backgroundColor="transparent" />
+      <StatusBar style="dark" />
       <View style={[s.root, { paddingTop: insets.top }]} {...rightSwipePan.panHandlers}>
 
         {/* ── Drag handle — purely visual, no gesture ── */}
