@@ -3,6 +3,18 @@ import { bearerHeader, supabaseRequest } from "../lib/supabase";
 
 const router: IRouter = Router();
 
+type AuthPayload = {
+  access_token?: unknown;
+  refresh_token?: unknown;
+  expires_at?: unknown;
+  expires_in?: unknown;
+  user?: { id?: unknown };
+  error_code?: unknown;
+  code?: unknown;
+  msg?: unknown;
+  message?: unknown;
+};
+
 router.post("/auth/register", async (req: Request, res: Response) => {
   const { email, password, full_name, role } = req.body ?? {};
   if (typeof email !== "string" || typeof password !== "string" || password.length < 8) {
@@ -35,6 +47,39 @@ router.post("/auth/login", async (req: Request, res: Response) => {
   });
   const body = await response.text();
   res.status(response.status).type("application/json").send(body);
+});
+
+// Official GoTrue refresh grant. Never log or place refresh tokens in URLs.
+router.post("/auth/refresh", async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  const token = req.body?.refresh_token;
+  if (typeof token !== "string" || !token.trim()) {
+    res.status(400).json({ code: "REFRESH_TOKEN_REQUIRED", error: "Refresh token is required" });
+    return;
+  }
+  const response = await supabaseRequest("/auth/v1/token?grant_type=refresh_token", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: token }),
+  });
+  const payload = await response.json().catch(() => null) as AuthPayload | null;
+  if (!response.ok) {
+    const code = payload?.error_code ?? payload?.code;
+    const message = String(payload?.msg ?? payload?.message ?? "").toLowerCase();
+    const irrecoverable = [400, 401].includes(response.status) &&
+      (["refresh_token_not_found", "refresh_token_already_used", "session_not_found", "user_not_found", "invalid_grant"].includes(String(code))
+        || message.includes("invalid refresh token") || message.includes("refresh token not found"));
+    res.status(irrecoverable ? 401 : response.status).json({
+      code: irrecoverable ? "SESSION_UNRECOVERABLE" : "SESSION_REFRESH_FAILED",
+      error: irrecoverable ? "Session can no longer be refreshed" : "Session refresh unavailable",
+    });
+    return;
+  }
+  if (!payload?.access_token || !payload?.refresh_token || !payload?.user?.id) {
+    res.status(502).json({ code: "SESSION_REFRESH_FAILED", error: "Invalid session response" });
+    return;
+  }
+  res.json({ access_token: payload.access_token, refresh_token: payload.refresh_token,
+    expires_at: payload.expires_at, expires_in: payload.expires_in, user: payload.user });
 });
 
 router.post("/auth/recover", async (req: Request, res: Response) => {
