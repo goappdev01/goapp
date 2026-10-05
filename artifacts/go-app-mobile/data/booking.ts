@@ -198,7 +198,7 @@ async function getStoredSession(): Promise<StoredSupabaseSession | null> {
 
 export async function getAuthenticatedUserId(): Promise<string | null> {
   const session = await getStoredSession();
-  return session?.user?.id ?? null;
+  return session?.access_token ? session.user?.id ?? null : null;
 }
 
 function getApiBase(): string {

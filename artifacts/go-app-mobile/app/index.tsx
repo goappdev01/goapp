@@ -2710,6 +2710,15 @@ export default function HomeScreen() {
   const [authBootstrapComplete, setAuthBootstrapComplete] = useState(false);
   const [adminDashOpen, setAdminDashOpen] = useState(false);
 
+  const handleOpenOptions = () => {
+    if (userAccountType === null) {
+      setOptionsOpen(false);
+      setGoAuthOpen(true);
+      return;
+    }
+    setOptionsOpen(true);
+  };
+
   // ── VERIFICACIÓN EMPRESA ─────────────────────────────────────────────────
   // Empresa Básica (no verificada) → puede explorar y configurar.
   // Empresa Verificada → acceso a reservas públicas, marketplace, cobros, etc.
@@ -17179,7 +17188,7 @@ export default function HomeScreen() {
                 deg: 157.5,
                 icon: "settings",
                 label: t('orbit_tools'),
-                onPress: () => { Haptics.selectionAsync(); setOtrosOpen(false); setOptionsOpen(true); },
+                onPress: () => { Haptics.selectionAsync(); setOtrosOpen(false); handleOpenOptions(); },
               },
               // ─── LOGIN · CUENTA (202.5°) — acceso único al ecosistema GO ──
               {
@@ -17204,7 +17213,7 @@ export default function HomeScreen() {
                 contextLayer: [
                   {
                     replaceKey: "settings", icon: "settings", label: "CONFIG",
-                    onPress: () => { Haptics.selectionAsync(); setOtrosOpen(false); setOptionsOpen(true); setActiveSatCtx(null); },
+                    onPress: () => { Haptics.selectionAsync(); setOtrosOpen(false); handleOpenOptions(); setActiveSatCtx(null); },
                   },
                   {
                     replaceKey: "messages",

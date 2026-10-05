@@ -617,6 +617,13 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
       const version = generation.current;
       try {
         const userId = await getAuthenticatedUserId();
+        if (version !== generation.current) return;
+        if (!userId) {
+          storageKey.current = BUSINESS_CONFIG_KEY;
+          setConfig({ ...DEFAULT_BUSINESS_CONFIG });
+          setLoaded(true);
+          return;
+        }
         storageKey.current = userId ? `${BUSINESS_CONFIG_KEY}:${userId}` : BUSINESS_CONFIG_KEY;
         if (userId) {
           const cloud = await getCloudConfiguration<BusinessConfig>();
@@ -720,6 +727,14 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
         setConfig(migrated);
         AsyncStorage.setItem(BUSINESS_CONFIG_KEY, JSON.stringify(migrated)).catch(() => {});
       } catch (error) {
+        if (version !== generation.current) return;
+        const userId = await getAuthenticatedUserId();
+        if (version !== generation.current) return;
+        if (!userId) {
+          setConfig({ ...DEFAULT_BUSINESS_CONFIG });
+          setLoaded(true);
+          return;
+        }
         if (version === generation.current) Alert.alert("Configuración no cargada", "No se pudo consultar tu negocio. Comprueba la conexión e inicia sesión de nuevo.");
         return;
       }
