@@ -246,7 +246,7 @@ async function performSupabaseRequest<T>(
 }
 
 let managementWrites: Promise<unknown> = Promise.resolve();
-async function supabaseApiRequest<T>(path: string, init: RequestInit = {}, requireToken = false, expectedUserId?: string): Promise<T> {
+export async function supabaseApiRequest<T>(path: string, init: RequestInit = {}, requireToken = false, expectedUserId?: string): Promise<T> {
   const session = await getStoredSession();
   if (expectedUserId && session?.user?.id !== expectedUserId) throw new BookingAuthenticationError();
   const run = () => performSupabaseRequest<T>(path, init, requireToken, session);

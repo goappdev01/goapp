@@ -44,6 +44,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GUIDANCE_NAMES, GUIDANCE_NAMES_EN, type GuidanceConfig, getGuidanceConfig, swipeGuideMaxOpacity as computeSwipeMaxOpacity, computeAutoBoost } from "../utils/guidance";
 import { useGoMode } from "@/contexts/GoModeContext";
+import { useBusinessAccess } from "@/contexts/GoBusinessAccessContext";
+import { BusinessAccessGate } from "@/components/auth/BusinessAccessGate";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   runOnJS,
@@ -2582,6 +2584,10 @@ function GoDeepSpaceUpper() {
 }
 
 export default function HomeScreen() {
+  return <BusinessAccessGate><HomeScreenContent /></BusinessAccessGate>;
+}
+
+function HomeScreenContent() {
   const insets = useSafeAreaInsets();
   const { t, lang, locale, setLang } = useLanguage();
 
@@ -2700,7 +2706,10 @@ export default function HomeScreen() {
   // Fuente única de verdad para bifurcar toda la lógica, guías, onboarding,
   // sugerencias y módulos visibles. Se sincroniza automáticamente al cambiar
   // el tipo de cuenta y se persiste en AsyncStorage (go_active_mode_v1).
-  const { isBusinessMode, isUserMode, loaded: modeLoaded, setActiveMode, syncModeFromRole } = useGoMode();
+  const { isBusinessMode: requestedBusinessMode, loaded: modeLoaded, setActiveMode, syncModeFromRole } = useGoMode();
+  const businessAccess = useBusinessAccess();
+  const isBusinessMode = requestedBusinessMode && businessAccess.allowed;
+  const isUserMode = !isBusinessMode;
 
   // ── CUENTA GO — tipo de rol/acceso del usuario ───────────────────────────
   // null = no configurado (primer acceso / "LOGIN")
@@ -2720,8 +2729,7 @@ export default function HomeScreen() {
   };
 
   // ── VERIFICACIÓN EMPRESA ─────────────────────────────────────────────────
-  // Empresa Básica (no verificada) → puede explorar y configurar.
-  // Empresa Verificada → acceso a reservas públicas, marketplace, cobros, etc.
+  // Local document metadata never authorizes private business access.
   const [verification, setVerification] = useState<CuentaVerification>(EMPTY_VERIFICATION);
   const [verificacionOpen, setVerificacionOpen] = useState(false);
 
@@ -2854,9 +2862,9 @@ export default function HomeScreen() {
 
   // Helper: persiste el tipo de cuenta, actualiza estado y sincroniza el modo global.
   // syncModeFromRole deriva USER/BUSINESS desde el rol y persiste go_active_mode_v1.
-  const commitAccountType = (role: AccountRole | null) => {
+  const commitAccountType = (role: AccountRole | null, changeContext = true) => {
     setUserAccountType(role);
-    syncModeFromRole(role);
+    if (changeContext) syncModeFromRole(role);
     if (role) {
       AsyncStorage.setItem("go_account_type_v1", role).catch(() => {});
       setGoAuthOpen(false);
@@ -2935,7 +2943,7 @@ export default function HomeScreen() {
         }
 
         if (!cancelled) {
-          if (resolvedRole) commitAccountType(resolvedRole);
+          if (resolvedRole) commitAccountType(resolvedRole, false);
           else setGoAuthOpen(true);
         }
       } catch {
@@ -3346,7 +3354,11 @@ export default function HomeScreen() {
 
   // ── EMPRESA GO ───────────────────────────────────────────────────────────
   const { config: bCfg, loaded: bizLoaded, updateConfig: updateBizCfg } = useBusinessConfig();
-  const [empresaOpen, setEmpresaOpen] = useState(false);
+  const [empresaOpen, setEmpresaOpenState] = useState(false);
+  const setEmpresaOpen = (open: boolean) => {
+    if (open) setActiveMode("BUSINESS");
+    setEmpresaOpenState(open && businessAccess.allowed);
+  };
   const [empresaModulo, setEmpresaModulo] = useState<string>("home");
   const [activacionCobrosOpen, setActivacionCobrosOpen] = useState(false);
   const [activacionInitialScreen, setActivacionInitialScreen] = useState<1 | 2 | 3>(2);
@@ -19403,24 +19415,27 @@ export default function HomeScreen() {
         }}
         userAccountType={userAccountType}
         onSetAccountType={commitAccountType}
+        onSwitchContext={() => { setGoAuthOpen(false); setActiveMode(isBusinessMode ? "USER" : "BUSINESS"); }}
         onOpenPerfil={() => { setGoAuthOpen(false); setCuentaOpen(true); }}
         onOpenEmpresa={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
-        verification={verification}
-        onOpenVerificacion={() => { setGoAuthOpen(false); setVerificacionOpen(true); }}
-        onOpenAdmin={() => { setGoAuthOpen(false); setAdminDashOpen(true); }}
+        verification={{ ...verification, status: businessAccess.snapshot?.status === "verificada" ? "verified"
+          : businessAccess.snapshot?.status === "rechazada" ? "rejected"
+          : businessAccess.snapshot?.status === "pendiente_verificacion" ? "pending" : "none" }}
+        onOpenVerificacion={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
+        onOpenAdmin={() => { setGoAuthOpen(false); setActiveMode("BUSINESS"); if (businessAccess.allowed) setAdminDashOpen(true); }}
       />
 
-      <GoAdminDashboard
+      {businessAccess.allowed && <GoAdminDashboard
         visible={adminDashOpen}
         onClose={() => setAdminDashOpen(false)}
-      />
+      />}
 
       {/* ── VERIFICACIÓN EMPRESA — subida de documentos y estado ──────── */}
-      <VerificacionEmpresaPanel
+      {businessAccess.allowed && <VerificacionEmpresaPanel
         visible={verificacionOpen}
         onClose={() => setVerificacionOpen(false)}
         onVerificationChange={handleVerificationChange}
-      />
+      />}
 
       {/* ── CUENTA — Mi Perfil (panel completo con navegación GO) ──────── */}
       <PerfilPanel
@@ -26349,7 +26364,7 @@ export default function HomeScreen() {
       />
 
       {/* ── EMPRESA GO — Arquitectura económica completa ──────────────── */}
-      <EmpresaPanel
+      {businessAccess.allowed && <EmpresaPanel
         visible={empresaOpen}
         initialModulo={empresaModulo as any}
         onClose={() => { setEmpresaOpen(false); setEmpresaModulo("home"); }}
@@ -26371,12 +26386,12 @@ export default function HomeScreen() {
             updateBizCfg({ isBusinessActive: true, bookingEnabled: true });
           }
         }}
-      />
+      />}
 
       {/* ── ACTIVACIÓN COBROS — se renderiza aquí (nivel raíz) para evitar
           el problema de Modales anidados en iOS/Expo 54. Se muestra tras
           completar el wizard de 8 pasos de EmpresaConfigScreen. ── */}
-      <ActivacionCobrosScreen
+      {businessAccess.allowed && <ActivacionCobrosScreen
         visible={activacionCobrosOpen}
         initialScreen={activacionInitialScreen}
         onClose={() => {
@@ -26386,7 +26401,7 @@ export default function HomeScreen() {
           setEmpresaModulo("home");
           dismissEmpresaHint();
         }}
-      />
+      />}
 
 
       {/* ── GLOBO HUMANITY — botón independiente a la izquierda del GO ──

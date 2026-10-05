@@ -1,20 +1,11 @@
-import { useEffect, useState } from "react";
-import {
-  CuentaVerification,
-  EMPTY_VERIFICATION,
-  loadVerification,
-} from "@/data/cuenta";
+import { type CuentaVerification } from "@/data/cuenta";
+import { useBusinessAccess } from "@/contexts/GoBusinessAccessContext";
 
 /**
- * Reads empresa verification state from AsyncStorage on mount.
- * Used by screens that need to gate features without prop drilling.
+ * Reflects server authority. Local document uploads never grant permissions.
  */
 export function useVerification(): CuentaVerification {
-  const [verification, setVerification] = useState<CuentaVerification>(EMPTY_VERIFICATION);
-
-  useEffect(() => {
-    loadVerification().then(setVerification).catch(() => {});
-  }, []);
-
-  return verification;
+  const access = useBusinessAccess();
+  return { status: access.allowed ? "verified" : access.snapshot?.status === "rechazada" ? "rejected"
+    : access.snapshot?.business ? "pending" : "none" };
 }

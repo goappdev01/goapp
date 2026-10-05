@@ -59,17 +59,48 @@ async function relay(res: Response, response: Awaited<ReturnType<typeof request>
 async function ownsBusiness(req: Request, res: Response): Promise<boolean> {
   const id = String(req.params.businessId);
   if (!uuid.test(id)) { res.status(400).json({ error: "Identificador inválido." }); return false; }
-  const query = new URLSearchParams({ id: `eq.${id}`, owner_id: `eq.${res.locals.userId}`, select: "id,timezone" });
+  const query = new URLSearchParams({ id: `eq.${id}`, owner_id: `eq.${res.locals.userId}`, select: "id,timezone,verified" });
   const response = await request(req, `businesses?${query}`);
   if (!response.ok) { await relay(res, response); return false; }
   const rows = await response.json();
   if (!Array.isArray(rows) || !rows.length) { res.status(404).json({ error: "Negocio no encontrado." }); return false; }
+  if (rows[0].verified !== true) {
+    res.status(403).json({ error: "Empresa pendiente de verificación.", code: "BUSINESS_NOT_VERIFIED" }); return false;
+  }
   res.locals.businessTimezone = rows[0].timezone;
   return true;
 }
 router.get("/businesses", async (req, res) => {
   const query = new URLSearchParams({ owner_id: `eq.${res.locals.userId}`, order: "created_at.desc" });
-  await relay(res, await request(req, `businesses?${query}`));
+  const response = await request(req, `businesses?${query}`);
+  if (!response.ok) { await relay(res, response); return; }
+  const rows = await response.json() as { id: string }[];
+  if (!Array.isArray(rows)) { res.status(502).json({ error: "No se pudo comprobar tu empresa." }); return; }
+  if (!rows.length) { res.json([]); return; }
+  const verification = await request(req, "business_verification_requests?select=business_id,legal_name,tax_id,trading_name,address,status,rejection_reason");
+  if (!verification.ok) { await relay(res, verification); return; }
+  const requests = await verification.json() as { business_id: string }[];
+  if (!Array.isArray(requests)) { res.status(502).json({ error: "No se pudo comprobar tu empresa." }); return; }
+  res.json(rows.map(row => ({ ...row, verification_request: requests.find(item => item.business_id === row.id) ?? null })));
+});
+// Enrollment is the only pending-company write path. Supabase checks ownership
+// and fixes status to pending; the caller cannot supply approval or an owner ID.
+router.post("/enrollment", async (req, res) => {
+  const data = req.body;
+  const keys = ["business_id", "legal_name", "tax_id", "trading_name", "address"];
+  if (!data || typeof data !== "object" || Array.isArray(data)
+    || Object.keys(data).some(key => !keys.includes(key))
+    || (data.business_id !== undefined && (typeof data.business_id !== "string" || !uuid.test(data.business_id)))
+    || typeof data.legal_name !== "string" || data.legal_name.trim().length < 2 || data.legal_name.length > 200
+    || typeof data.tax_id !== "string" || data.tax_id.trim().length < 3 || data.tax_id.length > 32
+    || typeof data.address !== "string" || !data.address.trim() || data.address.length > 4000
+    || (data.trading_name !== undefined && (typeof data.trading_name !== "string" || data.trading_name.length > 200))) {
+    res.status(400).json({ error: "Completa correctamente la razón social, NIF/CIF y dirección." }); return;
+  }
+  await relay(res, await request(req, "rpc/submit_business_verification", "POST", {
+    p_business_id: data.business_id ?? null, p_legal_name: data.legal_name.trim(),
+    p_tax_id: data.tax_id.trim(), p_trading_name: data.trading_name?.trim() ?? "", p_address: data.address.trim(),
+  }), true);
 });
 router.post("/businesses", async (req, res) => {
   const data = validate("businesses", req.body, true);
@@ -110,7 +141,15 @@ for (const resource of ["services", "staff", "availability"]) {
   }
 }
 router.get("/configuration", async (req, res) => {
-  await relay(res, await request(req, "business_settings?order=updated_at.desc&limit=1"));
+  const query = new URLSearchParams({ owner_id: `eq.${res.locals.userId}`, verified: "eq.true", select: "id" });
+  const response = await request(req, `businesses?${query}`);
+  if (!response.ok) { await relay(res, response); return; }
+  const rows = await response.json() as { id: string }[];
+  if (!Array.isArray(rows)) { res.status(502).json({ error: "No se pudo comprobar tu empresa." }); return; }
+  if (!rows.length) { res.json([]); return; }
+  if (rows.some(row => !uuid.test(row.id))) { res.status(502).json({ error: "Negocio inválido." }); return; }
+  const settingsQuery = new URLSearchParams({ business_id: `in.(${rows.map(row => row.id).join(",")})`, order: "updated_at.desc", limit: "1" });
+  await relay(res, await request(req, `business_settings?${settingsQuery}`));
 });
 router.put("/businesses/:businessId/configuration", async (req, res) => {
   if (!await ownsBusiness(req, res)) return;
