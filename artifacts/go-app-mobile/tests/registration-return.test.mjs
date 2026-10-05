@@ -18,6 +18,7 @@ function find(root, predicate) {
 const effect = find(panel, node => ts.isCallExpression(node) && node.expression.getText(panel) === 'useEffect'
   && node.arguments[0]?.getText(panel).includes('continueRegistration'));
 const authenticate = find(panel, node => ts.isVariableDeclaration(node) && node.name.getText(panel) === 'handleAuthenticate');
+const emailChange = find(panel, node => ts.isVariableDeclaration(node) && node.name.getText(panel) === 'handleAuthEmailChange');
 const transpile = code => ts.transpileModule(code, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
@@ -29,11 +30,11 @@ const confirmed = { user: { id: 'test-user', email: pending.email, email_confirm
 const flush = () => new Promise(resolve => setImmediate(resolve));
 async function settle() { for (let i = 0; i < 5; i++) await flush(); }
 
-function fixture({ marker = null, storedSession = null, me = async () => Response.json(confirmed), registered = {}, registerStatus = 200 } = {}) {
+function fixture({ marker = null, storedSession = null, me = async () => Response.json(confirmed), registered = {}, registerStatus = 200, respondRegister } = {}) {
   const storage = new Map();
   if (marker) storage.set(pendingKey, JSON.stringify(marker));
   if (storedSession) storage.set(sessionKey, JSON.stringify(storedSession));
-  const requests = [], subscriptions = new Map(), sessionListeners = new Set();
+  const requests = [], logs = [], subscriptions = new Map(), sessionListeners = new Set();
   const state = { mode: 'register', step: 'credentials', email: pending.email, password: 'memory-only-password', role: 'usuario', account: null, error: 'old error' };
   const pendingRegistrationRef = { current: null };
   const authContextRef = { current: { visible: true, userAccountType: null, onSetAccountType: role => { state.account = role; authContextRef.current.userAccountType = role; } } };
@@ -49,23 +50,26 @@ function fixture({ marker = null, storedSession = null, me = async () => Respons
     exports: {}, process: { env: { EXPO_PUBLIC_API_URL: 'https://test.invalid/api' } },
     AbortController, setTimeout, clearTimeout,
     require: name => { assert.equal(name, '@react-native-async-storage/async-storage'); return { default: AsyncStorage }; },
-    AsyncStorage, AppState, pendingRegistrationRef, authContextRef,
+    AsyncStorage, AppState, pendingRegistrationRef, authContextRef, authInputRevisionRef: { current: 0 },
+    console: { warn: (...args) => logs.push(args) },
     Linking: { addEventListener: (_event, fn) => { subscriptions.set('url', fn); return { remove: () => subscriptions.delete('url') }; } },
     onSessionChanged: fn => { sessionListeners.add(fn); return () => sessionListeners.delete(fn); },
     notifySessionChanged: () => { sessionListeners.forEach(fn => fn()); },
-    fetch: async (url, init) => { requests.push({ url, init }); return url.endsWith('/auth/register') ? Response.json(registered, { status: registerStatus }) : me(); },
+    fetch: async (url, init) => { requests.push({ url, init }); return url.endsWith('/auth/register')
+      ? respondRegister ? respondRegister(init) : Response.json(registered, { status: registerStatus }) : me(); },
     authEmail: pending.email, authPassword: state.password, authName: 'New user', selectedRole: 'usuario', authMode: 'register',
     onSetAccountType: authContextRef.current.onSetAccountType,
     setAuthMode: value => { state.mode = value; }, setAuthStep: value => { state.step = value; },
-    setAuthEmail: value => { state.email = value; }, setAuthPassword: value => { state.password = value; },
-    setSelectedRole: value => { state.role = value; }, setAuthError: value => { state.error = value; }, setAuthBusy: () => {},
+    setAuthEmail: value => { state.email = value; context.authEmail = value; }, setAuthPassword: value => { state.password = value; },
+    setSelectedRole: value => { state.role = value; }, setAuthError: value => { state.error = value; }, setAuthBusy: value => { state.busy = value; },
   };
   vm.createContext(context); vm.runInContext(transpile(helperSource), context);
   Object.assign(context, context.exports);
   vm.runInContext(transpile(`globalThis.cleanup = (${effect.arguments[0].getText(panel)})();
-    globalThis.register = ${authenticate.initializer.getText(panel)};`), context);
+    globalThis.register = ${authenticate.initializer.getText(panel)};
+    globalThis.changeEmail = ${emailChange.initializer.getText(panel)};`), context);
   return {
-    state, storage, requests, context, subscriptions, sessionListeners, cleanup: context.cleanup, register: context.register,
+    state, storage, requests, logs, context, subscriptions, sessionListeners, cleanup: context.cleanup, register: context.register, changeEmail: context.changeEmail,
     async resume() { AppState.currentState = 'background'; subscriptions.get('state')('background'); AppState.currentState = 'inactive'; subscriptions.get('state')('inactive'); AppState.currentState = 'active'; subscriptions.get('state')('active'); await settle(); },
     async link(url = 'go-app://') { subscriptions.get('url')({ url }); await settle(); },
     mark(value = pending) { pendingRegistrationRef.current = value; storage.set(pendingKey, JSON.stringify(value)); },
@@ -165,4 +169,44 @@ test('registration that already returns a session preserves existing immediate a
   const f = fixture({ registered: session }); await settle(); await f.register();
   assert.equal(f.state.account, 'usuario'); assert.equal(f.state.step, 'role');
   assert.equal(f.storage.has(pendingKey), false); assert.equal(JSON.parse(f.storage.get(sessionKey)).access_token, session.access_token);
+});
+
+test('editing email clears the old error and a new submit uses the new email without automatic retries', async () => {
+  const f = fixture({ respondRegister: async () => f.requests.length === 1
+    ? Response.json({ code: 'over_email_send_rate_limit', msg: 'email rate limit exceeded' }, { status: 429 })
+    : Response.json({}) });
+  await settle(); await f.register();
+  assert.match(f.state.error, /límite temporal de envío de correos/); assert.equal(f.state.busy, false);
+  f.changeEmail('second@test.invalid');
+  assert.equal(f.state.error, null); assert.equal(f.requests.length, 1);
+  await f.register();
+  assert.equal(f.requests.length, 2);
+  assert.equal(JSON.parse(f.requests[1].init.body).email, 'second@test.invalid');
+  assert.match(f.state.error, /Revisa tu correo/); assert.equal(f.state.busy, false);
+});
+
+test('a real new rate limit remains an error for the new attempt with no session or fake success', async () => {
+  const f = fixture({ registered: { code: 'over_email_send_rate_limit', message: 'email rate limit exceeded' }, registerStatus: 429 });
+  await settle(); await f.register(); f.changeEmail('second@test.invalid'); await f.register();
+  assert.equal(f.requests.length, 2); assert.match(f.state.error, /límite temporal de envío de correos/);
+  assert.equal(f.state.busy, false); assert.equal(f.state.account, null);
+  assert.equal(f.storage.has(sessionKey), false); assert.equal(f.storage.has(pendingKey), false);
+  assert.equal(f.logs.length, 2);
+  assert.equal(f.logs[1][1].httpStatus, 429); assert.equal(f.logs[1][1].emailRateLimit, true);
+  assert.ok(!JSON.stringify(f.logs).includes('test.invalid')); assert.ok(!JSON.stringify(f.logs).includes('password'));
+});
+
+test('a late rejection for an edited email cannot restore the previous error', async () => {
+  let release; const response = new Promise(resolve => { release = resolve; });
+  const f = fixture({ respondRegister: () => response }); await settle();
+  const attempt = f.register(); f.changeEmail('second@test.invalid');
+  release(Response.json({ msg: 'email rate limit exceeded' }, { status: 429 })); await attempt;
+  assert.equal(f.state.error, null); assert.equal(f.state.busy, false); assert.equal(f.requests.length, 1);
+});
+
+test('editing away from an earlier pending registration does not resume the old account', async () => {
+  const f = fixture(); await settle(); f.mark(); f.changeEmail('second@test.invalid');
+  await f.resume();
+  assert.equal(f.storage.has(pendingKey), false); assert.equal(f.state.mode, 'register');
+  assert.equal(f.state.email, 'second@test.invalid'); assert.equal(f.requests.length, 0);
 });
