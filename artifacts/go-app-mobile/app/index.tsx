@@ -2857,6 +2857,17 @@ export default function HomeScreen() {
     }
   };
 
+  const handleProfileLogout = async () => {
+    try {
+      await AsyncStorage.multiRemove(["go_supabase_session_v1", "go_account_type_v1"]);
+      setCuentaOpen(false);
+      commitAccountType(null);
+      notifySessionChanged();
+    } catch {
+      console.warn("[auth] Could not complete local logout.");
+    }
+  };
+
   // Resuelve la autenticación antes de mostrar el Landing. La clave de rol es
   // solo información de presentación y nunca autentica por sí sola.
   useEffect(() => {
@@ -19405,6 +19416,7 @@ export default function HomeScreen() {
       {/* ── CUENTA — Mi Perfil (panel completo con navegación GO) ──────── */}
       <PerfilPanel
         visible={cuentaOpen}
+        onLogout={handleProfileLogout}
         onClose={() => setCuentaOpen(false)}
         onOpenEmpresa={() => { setCuentaOpen(false); setEmpresaOpen(true); }}
         onOpenHistorial={() => { setCuentaOpen(false); setTimeout(() => setHistorialPedidosOpen(true), 220); }}
