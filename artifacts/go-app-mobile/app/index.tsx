@@ -16339,7 +16339,7 @@ export default function HomeScreen() {
                       styles.goText,
                       modeOpen && styles.goTextChoose,
                       {
-                        color: !modeOpen && !rutasMode && !marketplaceCheckout ? "#FFD700" : "#ffffff",
+                        color: "#ffffff",
                         // V1 FIX · El texto interno del GO ("GO" / "ELIGE")
                         // se escala proporcionalmente con uiScaleFactor para
                         // que quepa cómodo cuando uiScale === "small"
