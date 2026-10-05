@@ -369,7 +369,7 @@ export function LoginRegisterPanel({
         body: JSON.stringify({ email }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error_description ?? payload.msg ?? payload.error ?? "No se pudo enviar el correo.");
+      if (!response.ok) throw new Error(authErrorMessage(payload, response.status, "No se pudo enviar el correo."));
       setAuthError("Si el email existe, recibirás instrucciones para restablecer la contraseña.");
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "No se pudo enviar el correo.");

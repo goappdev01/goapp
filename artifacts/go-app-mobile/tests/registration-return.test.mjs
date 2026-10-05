@@ -18,6 +18,7 @@ function find(root, predicate) {
 const effect = find(panel, node => ts.isCallExpression(node) && node.expression.getText(panel) === 'useEffect'
   && node.arguments[0]?.getText(panel).includes('continueRegistration'));
 const authenticate = find(panel, node => ts.isVariableDeclaration(node) && node.name.getText(panel) === 'handleAuthenticate');
+const recover = find(panel, node => ts.isVariableDeclaration(node) && node.name.getText(panel) === 'handleRecover');
 const emailChange = find(panel, node => ts.isVariableDeclaration(node) && node.name.getText(panel) === 'handleAuthEmailChange');
 const errorMessage = find(panel, node => ts.isFunctionDeclaration(node) && node.name?.text === 'authErrorMessage');
 const transpile = code => ts.transpileModule(code, {
@@ -69,9 +70,10 @@ function fixture({ marker = null, storedSession = null, me = async () => Respons
   vm.runInContext(transpile(`${errorMessage.getText(panel)}
     globalThis.cleanup = (${effect.arguments[0].getText(panel)})();
     globalThis.register = ${authenticate.initializer.getText(panel)};
+    globalThis.recover = ${recover.initializer.getText(panel)};
     globalThis.changeEmail = ${emailChange.initializer.getText(panel)};`), context);
   return {
-    state, storage, requests, logs, context, subscriptions, sessionListeners, cleanup: context.cleanup, register: context.register, changeEmail: context.changeEmail,
+    state, storage, requests, logs, context, subscriptions, sessionListeners, cleanup: context.cleanup, register: context.register, recover: context.recover, changeEmail: context.changeEmail,
     async resume() { AppState.currentState = 'background'; subscriptions.get('state')('background'); AppState.currentState = 'inactive'; subscriptions.get('state')('inactive'); AppState.currentState = 'active'; subscriptions.get('state')('active'); await settle(); },
     async link(url = 'go-app://') { subscriptions.get('url')({ url }); await settle(); },
     mark(value = pending) { pendingRegistrationRef.current = value; storage.set(pendingKey, JSON.stringify(value)); },
@@ -221,4 +223,20 @@ test('incorrect credentials always use one generic message without revealing acc
     assert.equal(f.state.account, null); assert.equal(f.storage.has(sessionKey), false);
     assert.equal(f.requests.length, 1); assert.ok(f.requests[0].url.endsWith('/auth/login'));
   }
+});
+
+test('password recovery localizes both rate-limit code and legacy message without retrying', async () => {
+  for (const payload of [{ code: 'over_email_send_rate_limit', message: 'email rate limit exceeded' }, { msg: 'email rate limit exceeded' }]) {
+    const f = fixture({ me: async () => Response.json(payload, { status: 429 }) });
+    await settle(); await f.recover();
+    assert.equal(f.state.error, 'Se ha alcanzado el límite temporal de envío de correos. Espera un poco y vuelve a intentarlo.');
+    assert.equal(f.requests.length, 1); assert.ok(f.requests[0].url.endsWith('/auth/recover'));
+    assert.equal(f.state.busy, false); assert.equal(f.storage.has(sessionKey), false);
+  }
+});
+
+test('successful recovery retains the existing non-enumerating message', async () => {
+  const f = fixture({ me: async () => Response.json({}) }); await settle(); await f.recover();
+  assert.equal(f.state.error, 'Si el email existe, recibirás instrucciones para restablecer la contraseña.');
+  assert.equal(f.requests.length, 1);
 });
