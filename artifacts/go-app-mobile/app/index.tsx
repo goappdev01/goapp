@@ -163,7 +163,7 @@ type IntentDef = {
   icon: keyof typeof Feather.glyphMap;
 };
 
-// ── TABLA CENTRAL DE COLORES GO ────────────────────────────────────
+// ── TABLA CENTRAL DE COLORES GO ───────────────────���────────────────
 // ÚNICA fuente de verdad para todos los colores del sistema.
 // INTENTS, GROUP_COLOR_OVERRIDES y ACTIVITY_DEFS derivan de aquí.
 // Para añadir un tipo nuevo: añadirlo SOLO aquí; se propaga a todo.
@@ -3572,7 +3572,7 @@ export default function HomeScreen() {
     // manual al confirmar el GO.
     contactPhone?: string;
     // Estado de la coincidencia de contacto:
-    //   'matched' → un único match exacto (auto-asignado)
+    //   'matched' → un ��nico match exacto (auto-asignado)
     //   'multi'   → varias coincidencias, el usuario elige
     //   'none'    → ninguna coincidencia, ofrecer crear
     //   undefined → no había nombre para buscar
@@ -5834,7 +5834,7 @@ export default function HomeScreen() {
   //
   // Regla única: GO no es una pantalla. Es el centro permanente de la
   // app que se ESCONDE temporalmente cuando una capa puntual (listado,
-  // calendario, contactos, mapa, "Llego tarde"…) toma el foco, y vuelve
+  // calendario, contactos, mapa, "Llego tarde"��) toma el foco, y vuelve
   // intacto cuando esa capa se cierra. El usuario nunca debe sentir que
   // ha "navegado" a otra pantalla — sólo que abrió y cerró una capa.
   //
@@ -6064,7 +6064,7 @@ export default function HomeScreen() {
     // Sólo una cláusula de duración explícita ("duración/durante X" o "X horas/min")
     // se considera duración. Evita capturar "a las 4 horas" (que sería hora).
     const reExplicit =
-      /\b(?:duraci[óo]n|durante|por)\s+(\d+(?:[.,]\d+)?)\s*(horas?|h|minutos?|mins?|m)\b/;
+      /\b(?:duraci[��o]n|durante|por)\s+(\d+(?:[.,]\d+)?)\s*(horas?|h|minutos?|mins?|m)\b/;
     const reBare =
       /\b(\d+(?:[.,]\d+)?)\s*(horas?|minutos?|mins?)\b/;
     const m = text.match(reExplicit) || text.match(reBare);
@@ -8387,7 +8387,7 @@ export default function HomeScreen() {
         // Telefonía bilateral para propuestas de cambio
         senderPhone:   userGoPhone  || "",
         receiverPhone: phoneVal     || "",
-        // Autoenvío si el número destino coincide con el propio número
+        // Autoenv��o si el número destino coincide con el propio número
         direction: (
           normalizePhoneForWhatsApp(phoneVal) &&
           normalizePhoneForWhatsApp(userGoPhone) &&
@@ -11206,7 +11206,7 @@ export default function HomeScreen() {
     }
     // ── 7. SELECCIÓN ACTIVA DEL GO — campos rellenos O categoría elegida ──
     // Cubre: tap en "Comida"/"Reunión" sin campos (categorySelected solo),
-    // campos parcialmente rellenos, o ambos juntos. Un toque → todo limpio.
+    // campos parcialmente rellenos, o ambos juntos. Un toque �� todo limpio.
     if (isActivelyCreating || categorySelected || otroSelected) {
       resetContactFields();
       setCategorySelected(false);
@@ -11546,7 +11546,7 @@ export default function HomeScreen() {
   //   │   · the orbit cluster lives here too,    │
   //   │     and other UI must avoid its box      │
   //   │                                          │
-  //   ├──────────────────────────────────────────┤  ← ACTION_BOTTOM_Y
+  //   ├────────────────────────────���─────────────┤  ← ACTION_BOTTOM_Y
   //   │  BOTTOM SAFE ZONE (110px, RESERVED)      │
   //   │   · navigation bar (action + loc rows)   │
   //   │   · NOTHING ELSE may enter this band     │
@@ -11999,7 +11999,7 @@ export default function HomeScreen() {
       setListGoVisible(false);
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════��═════
     // SISTEMA VISUAL V1 — CONGELADO
     // No modificar tamaños, posiciones ni proporciones sin instrucción
     // explícita del usuario.
@@ -12070,7 +12070,7 @@ export default function HomeScreen() {
         visualScale = Math.max(minScale, Math.min(visualScale, cappedScale));
       }
     }
-    // ────────────────────────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────��─────────────────────
 
     // ── Posición: centro visual entre título y panel ─────────────────────────
     //
@@ -12217,7 +12217,7 @@ export default function HomeScreen() {
       try {
         const raw = await AsyncStorage.getItem("go_ui_scale_v1");
         // Compatibilidad con instalaciones previas:
-        //   "small"          → "compacto"
+        //   "small"          ��� "compacto"
         //   "normal"/"large" → "estandar"
         if (raw === "compacto" || raw === "estandar" || raw === "grande") setUiScale(raw);
         else if (raw === "small") setUiScale("compacto");
@@ -16319,7 +16319,7 @@ export default function HomeScreen() {
                       styles.goText,
                       modeOpen && styles.goTextChoose,
                       {
-                        color: "#ffffff",
+                        color: !modeOpen && !rutasMode && !marketplaceCheckout ? "#FFD700" : "#ffffff",
                         // V1 FIX · El texto interno del GO ("GO" / "ELIGE")
                         // se escala proporcionalmente con uiScaleFactor para
                         // que quepa cómodo cuando uiScale === "small"
@@ -18130,7 +18130,7 @@ export default function HomeScreen() {
           // ── PARTICULAR ── Hasta 3 columnas inteligentes: desaparecen cuando el tutorial está completado
           (!tutGoRealizado || !tutReservaRealizada || !tutMarketplaceRealizado) ? (
             <View style={{ flexDirection: "row", gap: 4, alignItems: "flex-start" }}>
-              {/* ── COL 1 — Ejecuta acción ── visible hasta que el usuario haga 1 acción GO */}
+              {/* ── COL 1 — Ejecuta acción ─�� visible hasta que el usuario haga 1 acción GO */}
               {!tutGoRealizado && (
                 <View style={{ flex: 31 }}>
                   <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
@@ -26563,7 +26563,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* ── Estado pill ── */}
+          {/* ��─ Estado pill ── */}
           {calBookingDetailEntry && (() => {
             const e = calBookingDetailEntry as any;
             const confirmed = (e.bookingStatus || e.estado || "confirmada").toLowerCase() === "confirmada";
