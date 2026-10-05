@@ -50,3 +50,38 @@ Referencias: https://docs.railway.com/config-as-code/reference y https://docs.ra
 
 
 Verificado el 24 de septiembre de 2026: Railway SUCCESS; /api/healthz, /api/supabase/businesses y /api/supabase/services responden 200. /api/supabase/auth/me y /api/supabase/bookings sin token responden 401. Estas pruebas no sustituyen el recorrido de reserva con una cuenta real. No se ha contratado ni cambiado ningún plan de pago.
+
+## Redirección después de confirmar el correo
+
+El registro añade `redirect_to` únicamente a `/auth/v1/signup`. El destino estable
+es `https://goapp-api-production.up.railway.app/api/supabase/auth/email-confirmed`,
+servido por este backend. No depende de localhost ni de un Metro activo.
+
+Antes de probar el flujo real:
+
+1. Revisar y fusionar el PR, y desplegar este backend mediante el flujo autorizado.
+   Comprobar que `GET /api/supabase/auth/email-confirmed` responde 200.
+2. En Supabase > Authentication > URL Configuration > Redirect URLs, añadir
+   exactamente la URL HTTPS anterior. Si no está permitida, Supabase puede volver
+   a usar Site URL, incluido el antiguo localhost:3000.
+3. Revisar únicamente la plantilla Confirm signup: su enlace debe usar
+   `{{ .ConfirmationURL }}`. Un destino localhost o `{{ .SiteURL }}` fijado
+   directamente en esa plantilla no respetará el destino de registro.
+   No modificar la plantilla de recuperación de contraseña.
+4. Crear una cuenta de prueba nueva (la anterior ya está confirmada), abrir el
+   nuevo correo en iPhone, confirmar y comprobar que se llega al destino HTTPS.
+   Volver a Expo Go e iniciar sesión con esa misma cuenta.
+
+En Expo Go se vuelve manualmente a la app. En la APK piloto, el enlace
+`go-app://` abre la aplicación instalada usando el esquema existente en
+`artifacts/go-app-mobile/app.json`; después se inicia sesión normalmente.
+No se importa ni se reenvía a la app la sesión que Supabase pueda añadir al
+fragmento del enlace: la respuesta no se almacena en caché, no envía referentes
+y elimina del historial los parámetros/fragmentos sin registrarlos.
+
+No se modifica globalmente Site URL en este parche: también es el destino
+predeterminado del restablecimiento de contraseña y requiere una revisión
+separada antes de cambiarlo. Los correos ya emitidos conservan su enlace antiguo.
+
+Esta corrección queda pendiente de despliegue, configuración de Supabase y
+validación manual en iPhone/APK; un PR o un typecheck correcto no cierran la prueba.
