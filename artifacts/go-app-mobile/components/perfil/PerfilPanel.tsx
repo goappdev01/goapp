@@ -33,6 +33,7 @@ type SubScreen =
 interface PerfilPanelProps {
   visible: boolean;
   onClose: () => void;
+  onLogout: () => Promise<void>;
   onOpenEmpresa?: () => void;
   onOpenHistorial?: () => void;
   onSwitchMode?: () => void;
@@ -135,7 +136,7 @@ function DevRestoreNemesi() {
 
 // ─── Component ─────────────────────────────────────────────────────────────────
 
-export function PerfilPanel({ visible, onClose, onOpenEmpresa, onOpenHistorial, onSwitchMode, onResetTutorial }: PerfilPanelProps) {
+export function PerfilPanel({ visible, onClose, onLogout, onOpenEmpresa, onOpenHistorial, onSwitchMode, onResetTutorial }: PerfilPanelProps) {
   const insets = useSafeAreaInsets();
   const { lang, t } = useLanguage();
   const { alertMode } = useGoNotification();
@@ -392,7 +393,7 @@ export function PerfilPanel({ visible, onClose, onOpenEmpresa, onOpenHistorial, 
               <View style={s.dockDivider} />
 
               {/* Cerrar sesión */}
-              <TouchableOpacity activeOpacity={0.75} style={s.signOutBtn}>
+              <TouchableOpacity onPress={onLogout} activeOpacity={0.75} style={s.signOutBtn}>
                 <Feather name="log-out" size={14} color="#C25A5A" />
                 <Text style={s.signOutTxt}>{t("sign_out")}</Text>
               </TouchableOpacity>
