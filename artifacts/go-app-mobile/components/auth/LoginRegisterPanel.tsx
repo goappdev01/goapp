@@ -1,9 +1,12 @@
-import { notifySessionChanged } from "@/lib/sessionEvents";
-import React, { useRef, useState } from "react";
+import { notifySessionChanged, onSessionChanged } from "@/lib/sessionEvents";
+import { getConfirmedRegistrationRole, PENDING_REGISTRATION_KEY, readPendingRegistration, type PendingRegistration } from "@/lib/registrationReturn";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  AppState,
   Dimensions,
+  Linking,
   Modal,
   PanResponder,
   ScrollView,
@@ -116,6 +119,20 @@ interface Props {
 
 const { width: SW } = Dimensions.get("window");
 
+function authErrorMessage(payload: Record<string, unknown>, status: number, fallback: string): string {
+  const message = String(payload.error_description ?? payload.msg ?? payload.message ?? payload.error ?? fallback);
+  const code = payload.code ?? payload.error_code;
+  if (code === "invalid_credentials" || /invalid login credentials/i.test(message)) {
+    return "Correo o contraseña incorrectos.";
+  }
+  if (code === "over_email_send_rate_limit" || /email rate limit exceeded/i.test(message)) {
+    return "Se ha alcanzado el límite temporal de envío de correos. Espera un poco y vuelve a intentarlo.";
+  }
+  return status === 429
+    ? "Se ha alcanzado el límite temporal de solicitudes. Espera un poco y vuelve a intentarlo."
+    : message;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export function LoginRegisterPanel({
@@ -139,6 +156,80 @@ export function LoginRegisterPanel({
   const [authName, setAuthName] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const authInputRevisionRef = useRef(0);
+  const pendingRegistrationRef = useRef<PendingRegistration | null>(null);
+  const authContextRef = useRef({ visible, userAccountType, onSetAccountType });
+  authContextRef.current = { visible, userAccountType, onSetAccountType };
+
+  const handleAuthEmailChange = (value: string) => {
+    authInputRevisionRef.current++;
+    setAuthEmail(value);
+    setAuthError(null);
+    if (pendingRegistrationRef.current && pendingRegistrationRef.current.email !== value.trim().toLowerCase()) {
+      pendingRegistrationRef.current = null;
+      AsyncStorage.removeItem(PENDING_REGISTRATION_KEY).catch(() => {});
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    let returning = false;
+    let leftApp = AppState.currentState === "background";
+    const continueRegistration = async () => {
+      const pending = pendingRegistrationRef.current;
+      const context = authContextRef.current;
+      if (cancelled || returning || !pending || !context.visible || context.userAccountType !== null) return;
+      returning = true;
+      try {
+        const role = await getConfirmedRegistrationRole(pending);
+        if (cancelled || pendingRegistrationRef.current !== pending || authContextRef.current.userAccountType !== null) return;
+        await AsyncStorage.removeItem(PENDING_REGISTRATION_KEY).catch(() => {});
+        if (cancelled || pendingRegistrationRef.current !== pending || authContextRef.current.userAccountType !== null) return;
+        pendingRegistrationRef.current = null;
+        setSelectedRole(pending.role);
+        setAuthEmail(pending.email);
+        setAuthPassword("");
+        setAuthError(null);
+        if (role) {
+          notifySessionChanged();
+          authContextRef.current.onSetAccountType(role);
+          setAuthStep("role");
+        } else {
+          setAuthMode("login");
+          setAuthStep("credentials");
+        }
+      } finally {
+        returning = false;
+      }
+    };
+    const appStateSubscription = AppState.addEventListener("change", nextState => {
+      if (nextState === "background") leftApp = true;
+      if (nextState === "active" && leftApp) {
+        leftApp = false;
+        void continueRegistration();
+      }
+    });
+    const linkSubscription = Linking.addEventListener("url", ({ url }) => {
+      if (url.startsWith("go-app://")) void continueRegistration();
+    });
+    const unsubscribeSession = onSessionChanged(() => {
+      pendingRegistrationRef.current = null;
+      AsyncStorage.removeItem(PENDING_REGISTRATION_KEY).catch(() => {});
+    });
+    // Also restore the pending step if Expo Go reloads or an installed app
+    // is launched again by the existing go-app:// confirmation page link.
+    readPendingRegistration().then(pending => {
+      if (cancelled || !pending || pendingRegistrationRef.current || authContextRef.current.userAccountType !== null) return;
+      pendingRegistrationRef.current = pending;
+      if (AppState.currentState === "active") void continueRegistration();
+    });
+    return () => {
+      cancelled = true;
+      appStateSubscription.remove();
+      linkSubscription.remove();
+      unsubscribeSession();
+    };
+  }, []);
 
   const ROLE_OPTIONS = getRoleOptions(t);
 
@@ -208,6 +299,7 @@ export function LoginRegisterPanel({
   };
 
   const handleAuthenticate = async () => {
+    const inputRevision = authInputRevisionRef.current;
     const email = authEmail.trim().toLowerCase();
     if (!email || authPassword.length < 8) {
       setAuthError("Introduce un email válido y una contraseña de al menos 8 caracteres.");
@@ -227,7 +319,14 @@ export function LoginRegisterPanel({
         }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error_description ?? payload.msg ?? payload.error ?? "No se pudo autenticar la cuenta.");
+      if (inputRevision !== authInputRevisionRef.current) return;
+      if (!response.ok) {
+        const message = payload.error_description ?? payload.msg ?? payload.message ?? payload.error ?? "No se pudo autenticar la cuenta.";
+        const emailRateLimit = (payload.code ?? payload.error_code) === "over_email_send_rate_limit"
+          || /email rate limit exceeded/i.test(String(message));
+        console.warn("[auth] Solicitud rechazada", { operation: authMode, httpStatus: response.status, emailRateLimit });
+        throw new Error(authErrorMessage(payload, response.status, "No se pudo autenticar la cuenta."));
+      }
       if (payload.access_token) {
         await AsyncStorage.setItem("go_supabase_session_v1", JSON.stringify({
           access_token: payload.access_token,
@@ -235,6 +334,10 @@ export function LoginRegisterPanel({
           user: payload.user ?? null,
         }));
       } else if (authMode === "register") {
+        const pending = { email, role: selectedRole };
+        pendingRegistrationRef.current = pending;
+        // Persist only the pending navigation step, never a password.
+        await AsyncStorage.setItem(PENDING_REGISTRATION_KEY, JSON.stringify(pending)).catch(() => {});
         setAuthError("Revisa tu correo para confirmar la cuenta y después inicia sesión.");
         return;
       }
@@ -242,7 +345,9 @@ export function LoginRegisterPanel({
       onSetAccountType(selectedRole);
       setAuthStep("role");
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "No se pudo autenticar la cuenta.");
+      if (inputRevision === authInputRevisionRef.current) {
+        setAuthError(error instanceof Error ? error.message : "No se pudo autenticar la cuenta.");
+      }
     } finally {
       setAuthBusy(false);
     }
@@ -264,7 +369,7 @@ export function LoginRegisterPanel({
         body: JSON.stringify({ email }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error_description ?? payload.msg ?? payload.error ?? "No se pudo enviar el correo.");
+      if (!response.ok) throw new Error(authErrorMessage(payload, response.status, "No se pudo enviar el correo."));
       setAuthError("Si el email existe, recibirás instrucciones para restablecer la contraseña.");
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "No se pudo enviar el correo.");
@@ -325,19 +430,6 @@ export function LoginRegisterPanel({
             style={{ flex: 1 }}
           />
         </Animated.View>
-        <Animated.View pointerEvents="none" style={{
-          position: "absolute", right: 14, top: 0, bottom: 0,
-          alignItems: "center", justifyContent: "center",
-          opacity: edgeArmedAnim, transform: [{ scale: edgeArmedAnim }],
-        }}>
-          <View style={{ width: 36, height: 36, borderRadius: 18,
-            backgroundColor: "#4A80BD", borderWidth: 2.5, borderColor: "#fff",
-            alignItems: "center", justifyContent: "center",
-            shadowColor: "#4A80BD", shadowOpacity: 0.5, shadowRadius: 8, elevation: 8,
-          }}>
-            <Feather name="chevron-down" size={16} color="#fff" />
-          </View>
-        </Animated.View>
 
         {/* Handle pill */}
         <View style={s.handleZone}>
@@ -372,7 +464,7 @@ export function LoginRegisterPanel({
               {authMode === "register" && (
                 <TextInput value={authName} onChangeText={setAuthName} placeholder="Nombre completo" placeholderTextColor="#94A3B8" autoCapitalize="words" style={s.authInput} />
               )}
-              <TextInput value={authEmail} onChangeText={setAuthEmail} placeholder="Email" placeholderTextColor="#94A3B8" autoCapitalize="none" keyboardType="email-address" style={s.authInput} />
+              <TextInput value={authEmail} onChangeText={handleAuthEmailChange} placeholder="Email" placeholderTextColor="#94A3B8" autoCapitalize="none" keyboardType="email-address" style={s.authInput} />
               <TextInput value={authPassword} onChangeText={setAuthPassword} placeholder="Contraseña (mínimo 8 caracteres)" placeholderTextColor="#94A3B8" secureTextEntry style={s.authInput} />
               {authError && <Text style={s.authError}>{authError}</Text>}
               <TouchableOpacity onPress={handleAuthenticate} disabled={authBusy} activeOpacity={0.82} style={s.authPrimary}>
