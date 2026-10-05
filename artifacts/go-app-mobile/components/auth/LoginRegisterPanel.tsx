@@ -119,6 +119,20 @@ interface Props {
 
 const { width: SW } = Dimensions.get("window");
 
+function authErrorMessage(payload: Record<string, unknown>, status: number, fallback: string): string {
+  const message = String(payload.error_description ?? payload.msg ?? payload.message ?? payload.error ?? fallback);
+  const code = payload.code ?? payload.error_code;
+  if (code === "invalid_credentials" || /invalid login credentials/i.test(message)) {
+    return "Correo o contraseña incorrectos.";
+  }
+  if (code === "over_email_send_rate_limit" || /email rate limit exceeded/i.test(message)) {
+    return "Se ha alcanzado el límite temporal de envío de correos. Espera un poco y vuelve a intentarlo.";
+  }
+  return status === 429
+    ? "Se ha alcanzado el límite temporal de solicitudes. Espera un poco y vuelve a intentarlo."
+    : message;
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export function LoginRegisterPanel({
@@ -311,11 +325,7 @@ export function LoginRegisterPanel({
         const emailRateLimit = (payload.code ?? payload.error_code) === "over_email_send_rate_limit"
           || /email rate limit exceeded/i.test(String(message));
         console.warn("[auth] Solicitud rechazada", { operation: authMode, httpStatus: response.status, emailRateLimit });
-        throw new Error(emailRateLimit
-          ? "Se ha alcanzado el límite temporal de envío de correos. Espera un poco y vuelve a intentarlo."
-          : response.status === 429
-            ? "Se ha alcanzado el límite temporal de solicitudes. Espera un poco y vuelve a intentarlo."
-            : String(message));
+        throw new Error(authErrorMessage(payload, response.status, "No se pudo autenticar la cuenta."));
       }
       if (payload.access_token) {
         await AsyncStorage.setItem("go_supabase_session_v1", JSON.stringify({

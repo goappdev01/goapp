@@ -19,6 +19,7 @@ const effect = find(panel, node => ts.isCallExpression(node) && node.expression.
   && node.arguments[0]?.getText(panel).includes('continueRegistration'));
 const authenticate = find(panel, node => ts.isVariableDeclaration(node) && node.name.getText(panel) === 'handleAuthenticate');
 const emailChange = find(panel, node => ts.isVariableDeclaration(node) && node.name.getText(panel) === 'handleAuthEmailChange');
+const errorMessage = find(panel, node => ts.isFunctionDeclaration(node) && node.name?.text === 'authErrorMessage');
 const transpile = code => ts.transpileModule(code, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
@@ -65,7 +66,8 @@ function fixture({ marker = null, storedSession = null, me = async () => Respons
   };
   vm.createContext(context); vm.runInContext(transpile(helperSource), context);
   Object.assign(context, context.exports);
-  vm.runInContext(transpile(`globalThis.cleanup = (${effect.arguments[0].getText(panel)})();
+  vm.runInContext(transpile(`${errorMessage.getText(panel)}
+    globalThis.cleanup = (${effect.arguments[0].getText(panel)})();
     globalThis.register = ${authenticate.initializer.getText(panel)};
     globalThis.changeEmail = ${emailChange.initializer.getText(panel)};`), context);
   return {
@@ -209,4 +211,14 @@ test('editing away from an earlier pending registration does not resume the old 
   await f.resume();
   assert.equal(f.storage.has(pendingKey), false); assert.equal(f.state.mode, 'register');
   assert.equal(f.state.email, 'second@test.invalid'); assert.equal(f.requests.length, 0);
+});
+
+test('incorrect credentials always use one generic message without revealing account existence', async () => {
+  for (const email of ['existing@test.invalid', 'missing@test.invalid']) {
+    const f = fixture({ me: async () => Response.json({ code: 'invalid_credentials', msg: 'Invalid login credentials' }, { status: 400 }) });
+    await settle(); f.context.authMode = 'login'; f.changeEmail(email); await f.register();
+    assert.equal(f.state.error, 'Correo o contraseña incorrectos.');
+    assert.equal(f.state.account, null); assert.equal(f.storage.has(sessionKey), false);
+    assert.equal(f.requests.length, 1); assert.ok(f.requests[0].url.endsWith('/auth/login'));
+  }
 });
