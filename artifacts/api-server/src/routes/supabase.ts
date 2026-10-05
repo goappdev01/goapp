@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { bearerHeader, supabaseRequest } from "../lib/supabase";
 
@@ -15,6 +16,36 @@ type AuthPayload = {
   message?: unknown;
 };
 
+// Stable HTTPS destination for Expo Go and installed pilot builds.
+// Allow this exact URL in Supabase Auth > URL Configuration.
+const emailConfirmationUrl = "https://goapp-api-production.up.railway.app/api/supabase/auth/email-confirmed";
+const emailConfirmationScript = `
+const fragment = new URLSearchParams(window.location.hash.slice(1));
+const query = new URLSearchParams(window.location.search);
+const failed = fragment.has("error") || fragment.has("error_code") || query.has("error") || query.has("error_code");
+// Do not retain or forward session tokens that Supabase may append.
+window.history.replaceState(null, "", window.location.pathname);
+if (failed) {
+  document.getElementById("message").textContent = "El enlace no es válido o ha caducado. Si ya confirmaste tu cuenta, vuelve a GO e inicia sesión; si no, solicita un nuevo correo de confirmación.";
+}
+`;
+const emailConfirmationHtml = `<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>GO · Verificación de correo</title></head>
+<body><h1>Continúa en GO</h1>
+<p id="message">Después de confirmar tu correo, vuelve a GO e inicia sesión con tu cuenta.</p>
+<p>Si utilizas Expo Go en iPhone, vuelve manualmente a Expo Go.</p>
+<p>Si tienes instalada la aplicación piloto: <a href="go-app://">Abrir GO</a>.</p>
+<script>${emailConfirmationScript}</script></body></html>`;
+
+router.get("/auth/email-confirmed", (_req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  const scriptHash = createHash("sha256").update(emailConfirmationScript).digest("base64");
+  res.setHeader("Content-Security-Policy", `default-src 'none'; script-src 'sha256-${scriptHash}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`);
+  res.type("html").send(emailConfirmationHtml);
+});
+
 router.post("/auth/register", async (req: Request, res: Response) => {
   const { email, password, full_name, role } = req.body ?? {};
   if (typeof email !== "string" || typeof password !== "string" || password.length < 8) {
@@ -24,7 +55,7 @@ router.post("/auth/register", async (req: Request, res: Response) => {
   const acceptedRoles = new Set(["usuario", "empresa"]);
   const accountRole = acceptedRoles.has(role) ? role : "usuario";
 
-  const response = await supabaseRequest("/auth/v1/signup", {
+  const response = await supabaseRequest(`/auth/v1/signup?${new URLSearchParams({ redirect_to: emailConfirmationUrl })}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password, data: { full_name: full_name ?? null, role: accountRole } }),
