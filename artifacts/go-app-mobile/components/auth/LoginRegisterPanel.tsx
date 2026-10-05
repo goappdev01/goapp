@@ -395,19 +395,6 @@ export function LoginRegisterPanel({
             style={{ flex: 1 }}
           />
         </Animated.View>
-        <Animated.View pointerEvents="none" style={{
-          position: "absolute", right: 14, top: 0, bottom: 0,
-          alignItems: "center", justifyContent: "center",
-          opacity: edgeArmedAnim, transform: [{ scale: edgeArmedAnim }],
-        }}>
-          <View style={{ width: 36, height: 36, borderRadius: 18,
-            backgroundColor: "#4A80BD", borderWidth: 2.5, borderColor: "#fff",
-            alignItems: "center", justifyContent: "center",
-            shadowColor: "#4A80BD", shadowOpacity: 0.5, shadowRadius: 8, elevation: 8,
-          }}>
-            <Feather name="chevron-down" size={16} color="#fff" />
-          </View>
-        </Animated.View>
 
         {/* Handle pill */}
         <View style={s.handleZone}>
