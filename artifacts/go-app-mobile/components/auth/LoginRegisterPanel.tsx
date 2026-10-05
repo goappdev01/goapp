@@ -1,9 +1,12 @@
-import { notifySessionChanged } from "@/lib/sessionEvents";
-import React, { useRef, useState } from "react";
+import { notifySessionChanged, onSessionChanged } from "@/lib/sessionEvents";
+import { getConfirmedRegistrationRole, PENDING_REGISTRATION_KEY, readPendingRegistration, type PendingRegistration } from "@/lib/registrationReturn";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  AppState,
   Dimensions,
+  Linking,
   Modal,
   PanResponder,
   ScrollView,
@@ -139,6 +142,69 @@ export function LoginRegisterPanel({
   const [authName, setAuthName] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const pendingRegistrationRef = useRef<PendingRegistration | null>(null);
+  const authContextRef = useRef({ visible, userAccountType, onSetAccountType });
+  authContextRef.current = { visible, userAccountType, onSetAccountType };
+
+  useEffect(() => {
+    let cancelled = false;
+    let returning = false;
+    let leftApp = AppState.currentState === "background";
+    const continueRegistration = async () => {
+      const pending = pendingRegistrationRef.current;
+      const context = authContextRef.current;
+      if (cancelled || returning || !pending || !context.visible || context.userAccountType !== null) return;
+      returning = true;
+      try {
+        const role = await getConfirmedRegistrationRole(pending);
+        if (cancelled || pendingRegistrationRef.current !== pending || authContextRef.current.userAccountType !== null) return;
+        await AsyncStorage.removeItem(PENDING_REGISTRATION_KEY).catch(() => {});
+        if (cancelled || pendingRegistrationRef.current !== pending || authContextRef.current.userAccountType !== null) return;
+        pendingRegistrationRef.current = null;
+        setSelectedRole(pending.role);
+        setAuthEmail(pending.email);
+        setAuthPassword("");
+        setAuthError(null);
+        if (role) {
+          notifySessionChanged();
+          authContextRef.current.onSetAccountType(role);
+          setAuthStep("role");
+        } else {
+          setAuthMode("login");
+          setAuthStep("credentials");
+        }
+      } finally {
+        returning = false;
+      }
+    };
+    const appStateSubscription = AppState.addEventListener("change", nextState => {
+      if (nextState === "background") leftApp = true;
+      if (nextState === "active" && leftApp) {
+        leftApp = false;
+        void continueRegistration();
+      }
+    });
+    const linkSubscription = Linking.addEventListener("url", ({ url }) => {
+      if (url.startsWith("go-app://")) void continueRegistration();
+    });
+    const unsubscribeSession = onSessionChanged(() => {
+      pendingRegistrationRef.current = null;
+      AsyncStorage.removeItem(PENDING_REGISTRATION_KEY).catch(() => {});
+    });
+    // Also restore the pending step if Expo Go reloads or an installed app
+    // is launched again by the existing go-app:// confirmation page link.
+    readPendingRegistration().then(pending => {
+      if (cancelled || !pending || pendingRegistrationRef.current || authContextRef.current.userAccountType !== null) return;
+      pendingRegistrationRef.current = pending;
+      if (AppState.currentState === "active") void continueRegistration();
+    });
+    return () => {
+      cancelled = true;
+      appStateSubscription.remove();
+      linkSubscription.remove();
+      unsubscribeSession();
+    };
+  }, []);
 
   const ROLE_OPTIONS = getRoleOptions(t);
 
@@ -235,6 +301,10 @@ export function LoginRegisterPanel({
           user: payload.user ?? null,
         }));
       } else if (authMode === "register") {
+        const pending = { email, role: selectedRole };
+        pendingRegistrationRef.current = pending;
+        // Persist only the pending navigation step, never a password.
+        await AsyncStorage.setItem(PENDING_REGISTRATION_KEY, JSON.stringify(pending)).catch(() => {});
         setAuthError("Revisa tu correo para confirmar la cuenta y después inicia sesión.");
         return;
       }
