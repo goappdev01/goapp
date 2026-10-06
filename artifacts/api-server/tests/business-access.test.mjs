@@ -21,6 +21,7 @@ test('private management requires server verification while enrollment preserves
   const id = '11111111-1111-4111-8111-111111111111';
   const business = '22222222-2222-4222-8222-222222222222';
   let owned = true, verified = false, upstreamFailure = false;
+  let enrollmentReply, enrollmentConnectionFailure = false;
   const upstream = [], writes = [];
   globalThis.fetch = async (url, init) => {
     if (!String(url).startsWith(process.env.SUPABASE_URL)) return realFetch(url, init);
@@ -37,8 +38,10 @@ test('private management requires server verification while enrollment preserves
       return Response.json([{ business_id: business, status: 'rejected', legal_name: 'Real owner', tax_id: 'test-tax' }]);
     }
     if (route.pathname.endsWith('/submit_business_verification')) {
+      if (enrollmentConnectionFailure) throw new TypeError('Connection interrupted');
       const body = JSON.parse(init.body); writes.push(body);
       assert.deepEqual(Object.keys(body).sort(), ['p_address', 'p_business_id', 'p_legal_name', 'p_tax_id', 'p_trading_name'].sort());
+      if (enrollmentReply !== undefined) return Response.json(enrollmentReply);
       return Response.json([{ id: business, owner_id: id, verified: false }]);
     }
     if (route.pathname.endsWith('/business_settings')) {
@@ -80,6 +83,19 @@ test('private management requires server verification while enrollment preserves
     assert.equal(writes[0].p_business_id, null);
     await request('/enrollment', { ...enrollment, business_id: business });
     assert.equal(writes[1].p_business_id, business);
+    for (const invalid of [[], {}, [{ id: business, owner_id: id, verified: true }],
+      [{ id: business, owner_id: business, verified: false }], [{ id: 'invalid', owner_id: id, verified: false }]]) {
+      enrollmentReply = invalid;
+      const rejected = await request('/enrollment', enrollment);
+      assert.equal(rejected.status, 502);
+      assert.match((await rejected.json()).error, /No hemos podido confirmar tu solicitud/);
+    }
+    enrollmentReply = undefined;
+    enrollmentConnectionFailure = true;
+    const disconnected = await request('/enrollment', enrollment);
+    assert.equal(disconnected.status, 502);
+    assert.match((await disconnected.json()).error, /No hemos podido enviar tu solicitud/);
+    enrollmentConnectionFailure = false;
     verified = true;
     for (const resource of ['services', 'staff', 'availability']) {
       assert.equal((await request(`/businesses/${business}/${resource}`)).status, 200);
@@ -90,6 +106,7 @@ test('private management requires server verification while enrollment preserves
     assert.deepEqual(await (await request('/businesses')).json(), []);
     owned = true; upstreamFailure = true;
     assert.equal((await request(`/businesses/${business}/services`)).status, 502);
+    assert.equal((await request('/enrollment', enrollment)).status, 502);
   } finally {
     globalThis.fetch = realFetch;
     if (oldUrl === undefined) delete process.env.SUPABASE_URL; else process.env.SUPABASE_URL = oldUrl;
@@ -99,7 +116,7 @@ test('private management requires server verification while enrollment preserves
 });
 
 test('prepared SQL protects fiscal data and includes no client approval path', async () => {
-  const sql = await readFile('supabase/migrations/20261005190000_business_verification_access.sql', 'utf8');
+  const sql = await readFile('supabase/migrations/20261006064253_business_verification_access.sql', 'utf8');
   assert.match(sql, /verified set default false/);
   assert.match(sql, /booking_enabled set default false/);
   assert.match(sql, /check \(not booking_enabled or verified\)/);

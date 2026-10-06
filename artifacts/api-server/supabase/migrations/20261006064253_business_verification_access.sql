@@ -1,4 +1,4 @@
--- Prepared migration only. Do not apply to production as part of the batch.
+-- Applied to the GO Supabase project on 2026-10-06, migration 20261006064253.
 -- businesses.verified remains the sole approval authority, protected by the
 -- existing column grants. No user role or editable metadata grants approval.
 begin;
@@ -53,7 +53,7 @@ begin
   end if;
   if target.verified then raise exception 'Use verified business configuration' using errcode='42501'; end if;
   update public.businesses set name=coalesce(nullif(trim(p_trading_name),''),trim(p_legal_name)),
-    address=trim(p_address),booking_enabled=false where id=target.id returning * into target;
+    address=trim(p_address),booking_enabled=false,verified=false where id=target.id returning * into target;
   insert into public.business_verification_requests(business_id,legal_name,tax_id,trading_name,address,status)
   values(target.id,trim(p_legal_name),trim(p_tax_id),trim(coalesce(p_trading_name,'')),trim(p_address),'pending')
   on conflict(business_id) do update set legal_name=excluded.legal_name,tax_id=excluded.tax_id,

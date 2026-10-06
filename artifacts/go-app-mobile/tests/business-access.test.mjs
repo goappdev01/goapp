@@ -24,6 +24,7 @@ function dataFixture(rows = []) {
   const context = { exports: {}, require(name) {
     if (name === '@react-native-async-storage/async-storage') return { default: { getItem: async key => storage.get(key) ?? null } };
     if (name === './booking') return {
+      BookingApiError: class extends Error { constructor(message, status, code) { super(message); this.status = status; this.code = code; } },
       getAuthenticatedUserId: async () => { const s = JSON.parse(storage.get(sessionKey) ?? 'null'); return s?.access_token ? s.user.id : null; },
       isCloudId: value => typeof value === 'string' && /^[0-9a-f-]{36}$/i.test(value),
       supabaseApiRequest: async (...args) => { calls.push(args); return typeof rows === 'function' ? rows() : rows; },
@@ -89,7 +90,7 @@ test('server lookup uses the existing authenticated API; logout/new session inva
 });
 
 test('enrollment submits fiscal fields under the existing identity and stores no passwords or approval', async () => {
-  const f = dataFixture(); const data = { legal_name: 'Real company', tax_id: 'B12345678', trading_name: '', address: 'Real address' };
+  const f = dataFixture([{ id, verified: false }]); const data = { legal_name: 'Real company', tax_id: 'B12345678', trading_name: '', address: 'Real address' };
   await f.api.submitBusinessEnrollment(data, id);
   const [route, init, authenticated, owner] = f.calls[0];
   assert.equal(route, '/supabase/manage/enrollment'); assert.equal(init.method, 'POST');
@@ -196,4 +197,16 @@ test('pending-company logout waits for local deletion and returns to existing au
   const run = context.logout(); assert.deepEqual(events, [['remove', [sessionKey, 'go_account_type_v1']]]);
   barrier.resolve(); await run;
   assert.deepEqual(events.slice(1), [['role', null], ['changed']]);
+});
+
+test('enrollment requires a valid unverified acknowledgement and rejects a changed identity', async () => {
+  const data = { legal_name: 'Empresa real', tax_id: 'B12345678', trading_name: '', address: 'Dirección' };
+  for (const rows of [[], null, '<html>not an API</html>', [{ id, verified: true }], [{ id, verified: 'false' }], [{ id: 'bad', verified: false }]]) {
+    const f = dataFixture(rows);
+    await assert.rejects(f.api.submitBusinessEnrollment(data), error => error.code === 'ENROLLMENT_NOT_CONFIRMED');
+  }
+  const pending = deferred(), f = dataFixture(() => pending.promise);
+  const submitted = f.api.submitBusinessEnrollment(data);
+  await flush(); f.storage.delete(sessionKey); pending.resolve([{ id, verified: false }]);
+  await assert.rejects(submitted, error => error.code === 'ENROLLMENT_SESSION_CHANGED');
 });

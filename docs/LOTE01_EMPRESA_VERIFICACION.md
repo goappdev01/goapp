@@ -18,13 +18,13 @@ Estados del móvil: `sin_empresa`, `pendiente_verificacion`, `rechazada`, `verif
 - Express exige propiedad y verificación para recursos y configuración privados. La migración también restringe RLS para servicios, profesionales, horarios, configuración y reservas empresariales, incluido el acceso directo a Supabase.
 - La revisión manual por GO requiere administración confiable. El usuario autenticado no tiene permiso de modificar `businesses.verified`; no se añade ningún endpoint de autoaprobación. Rechazar una solicitud no concede acceso; solo un negocio con `verified=true` está aprobado.
 
-## Publicación pendiente — NO ejecutada
+## Publicación — estado del 6 de octubre de 2026
 
-La migración preparada es `artifacts/api-server/supabase/migrations/20261005190000_business_verification_access.sql`. No se ha aplicado SQL ni desplegado Railway durante este cambio.
+La migración `artifacts/api-server/supabase/migrations/20261006064253_business_verification_access.sql` ya está aplicada y registrada en el proyecto GO mediante la integración autorizada de Supabase. Se comprobó antes que las tablas empresariales estaban vacías y que sus columnas, RLS y políticas coincidían con la base esperada. No se borraron ni reescribieron datos existentes. Railway todavía no está desplegado para este cambio: falta su conexión administrativa.
 
-Orden posterior: revisar y probar la migración en un PostgreSQL/Supabase de pruebas; aplicar la migración mediante el procedimiento autorizado; publicar el backend que incorpora `/api/supabase/manage/enrollment`; probar de extremo a extremo antes de considerar completado el punto.
+Siguiente paso: publicar el backend de esta rama con `/api/supabase/manage/enrollment` mediante Railway autorizado; comprobar su versión y salud; enviar una solicitud real desde Expo Go y contrastarla con las filas persistidas antes de considerar completado el punto. No crear empresas ficticias para esa validación.
 
-El móvil puede comprobar ahora el bloqueo y regreso a Usuario usando el listado existente de negocios. La petición de alta no funcionará contra el backend remoto anterior: se muestra el error y no se simula éxito. El servidor antiguo tampoco incorpora todavía las nuevas restricciones de Express/RLS. No presentar el sistema completo de permisos como activo en producción hasta publicar ambas piezas.
+El móvil puede comprobar ahora el bloqueo y regreso a Usuario usando el listado existente de negocios. La petición de alta no funcionará contra el backend remoto anterior: se muestra el error y no se simula éxito. Las nuevas restricciones RLS ya están aplicadas; el servidor anterior todavía no incorpora el handler de alta ni las nuevas comprobaciones de Express. No presentar el flujo de alta como operativo hasta publicar y verificar el backend.
 
 ## Pruebas manuales
 
@@ -50,19 +50,29 @@ Móvil:
 - `artifacts/go-app-mobile/contexts/GoBusinessAccessContext.tsx`
 - `artifacts/go-app-mobile/contexts/GoBusinessConfigContext.tsx`
 - `artifacts/go-app-mobile/data/businessAccess.ts`
+- `artifacts/go-app-mobile/data/businessEnrollmentDraft.ts`
 - `artifacts/go-app-mobile/data/booking.ts`
 - `artifacts/go-app-mobile/hooks/useVerification.ts`
 - `artifacts/go-app-mobile/tests/business-access.test.mjs`
+- `artifacts/go-app-mobile/tests/business-enrollment.test.mjs`
 
 Backend y migración preparada:
 
 - `artifacts/api-server/src/routes/management.ts`
 - `artifacts/api-server/tests/management.test.mjs`
 - `artifacts/api-server/tests/business-access.test.mjs`
-- `artifacts/api-server/supabase/migrations/20261005190000_business_verification_access.sql`
+- `artifacts/api-server/supabase/migrations/20261006064253_business_verification_access.sql`
 
 Documentación: `docs/LOTE01_EMPRESA_VERIFICACION.md`.
 
 ## Validación local
 
-TypeScript móvil y backend: sin errores. Build existente del backend: correcto. Pruebas seleccionadas: 37 del móvil y 9 del backend, todas correctas, con respuestas simuladas. `git diff --check`: correcto. No se ha ejecutado la migración en PostgreSQL ni se han consultado cuentas reales para estas pruebas.
+TypeScript móvil y backend: sin errores. Build existente del backend: correcto. Pruebas seleccionadas: 44 del móvil y 9 del backend, todas correctas, con respuestas simuladas. `git diff --check`: correcto. La migración sí se ha ejecutado en PostgreSQL. Después se comprobaron tabla privada/RLS, permisos de la RPC, ausencia de permisos cliente para aprobar y valores iniciales false. Una llamada SQL sin identidad fue rechazada con 42501 y dejó ambas tablas sin filas. No se insertaron fixtures ni se simularon sesiones en producción.
+
+## Continuación de Alta de empresa
+
+Se conservaron y validaron los ajustes previos del formulario: borrador aislado por identidad/empresa, manejo del teclado en iPhone, envío único y borrado del borrador únicamente tras confirmar un registro real no verificado. El backend y el móvil rechazan respuestas vacías, identidades ajenas y cualquier confirmación que no indique verified=false. Los fallos de red mantienen los datos y no conceden permisos.
+
+El test empresarial del backend se encontró dañado (solo bytes nulos); se guardó una copia en la carpeta temporal del usuario y se recuperó la versión válida del commit fa776fe antes de ampliar sus casos de respuesta inválida y fallo de conexión.
+
+El asesor de Supabase advierte sobre la RPC SECURITY DEFINER accesible al rol authenticated. Su acceso es intencional y limitado: auth.uid() obligatorio, propiedad comprobada, search_path vacío, argumentos fiscales permitidos, bloqueo concurrente por identidad, sin parámetro de aprobación, EXECUTE revocado a PUBLIC/anon y sin permiso cliente de escritura sobre solicitudes o verified. [Descripción del aviso](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable). No se cambió la configuración de contraseñas por el aviso preexistente de protección de contraseñas filtradas.

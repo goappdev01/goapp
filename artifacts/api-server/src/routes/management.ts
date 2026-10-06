@@ -97,10 +97,31 @@ router.post("/enrollment", async (req, res) => {
     || (data.trading_name !== undefined && (typeof data.trading_name !== "string" || data.trading_name.length > 200))) {
     res.status(400).json({ error: "Completa correctamente la razón social, NIF/CIF y dirección." }); return;
   }
-  await relay(res, await request(req, "rpc/submit_business_verification", "POST", {
-    p_business_id: data.business_id ?? null, p_legal_name: data.legal_name.trim(),
-    p_tax_id: data.tax_id.trim(), p_trading_name: data.trading_name?.trim() ?? "", p_address: data.address.trim(),
-  }), true);
+  try {
+    // The RPC atomically stores the pending request and an unverified business.
+    const response = await request(req, "rpc/submit_business_verification", "POST", {
+      p_business_id: data.business_id ?? null, p_legal_name: data.legal_name.trim(),
+      p_tax_id: data.tax_id.trim(), p_trading_name: data.trading_name?.trim() ?? "", p_address: data.address.trim(),
+    });
+    const rows = await response.json().catch(() => null);
+    if (!response.ok) {
+      console.warn("[business-enrollment]", { stage: "rpc", status: response.status, code: rows && typeof rows === "object" && "code" in rows ? rows.code : undefined });
+      res.status([400, 401, 403, 409].includes(response.status) ? response.status : 502)
+        .json({ error: "No hemos podido enviar tu solicitud en este momento. Inténtalo de nuevo más tarde." });
+      return;
+    }
+    if (!Array.isArray(rows) || rows.length !== 1 || !rows[0] || !uuid.test(rows[0].id)
+      || rows[0].owner_id !== res.locals.userId || rows[0].verified !== false
+      || (data.business_id && rows[0].id !== data.business_id)) {
+      console.warn("[business-enrollment]", { stage: "acknowledgement", status: response.status });
+      res.status(502).json({ error: "No hemos podido confirmar tu solicitud. Inténtalo de nuevo más tarde." });
+      return;
+    }
+    res.status(response.status).json(rows);
+  } catch (cause) {
+    console.warn("[business-enrollment]", { stage: "rpc-connection", name: cause instanceof Error ? cause.name : undefined });
+    res.status(502).json({ error: "No hemos podido enviar tu solicitud en este momento. Inténtalo de nuevo más tarde." });
+  }
 });
 router.post("/businesses", async (req, res) => {
   const data = validate("businesses", req.body, true);
