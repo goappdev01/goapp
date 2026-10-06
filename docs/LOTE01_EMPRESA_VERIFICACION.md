@@ -20,11 +20,13 @@ Estados del móvil: `sin_empresa`, `pendiente_verificacion`, `rechazada`, `verif
 
 ## Publicación — estado del 6 de octubre de 2026
 
-La migración `artifacts/api-server/supabase/migrations/20261006064253_business_verification_access.sql` ya está aplicada y registrada en el proyecto GO mediante la integración autorizada de Supabase. Se comprobó antes que las tablas empresariales estaban vacías y que sus columnas, RLS y políticas coincidían con la base esperada. No se borraron ni reescribieron datos existentes. Railway todavía no está desplegado para este cambio: falta su conexión administrativa.
+La migración `artifacts/api-server/supabase/migrations/20261006064253_business_verification_access.sql` está aplicada y registrada en el proyecto GO mediante la integración autorizada de Supabase. Se comprobó antes que las tablas empresariales estaban vacías y que sus columnas, RLS y políticas coincidían con la base esperada. No se borraron ni reescribieron datos existentes.
 
-Siguiente paso: publicar el backend de esta rama con `/api/supabase/manage/enrollment` mediante Railway autorizado; comprobar su versión y salud; enviar una solicitud real desde Expo Go y contrastarla con las filas persistidas antes de considerar completado el punto. No crear empresas ficticias para esa validación.
+El backend está desplegado en el servicio existente `goapp-api`, entorno `production`, dominio `goapp-api-production.up.railway.app`. Railway confirma SUCCESS para el despliegue `2773afd8-5aa0-46ab-973e-370c4400986f`, desde el commit `fff549c8c297e868a8e69573c31a1198a91c74e5` de `batch/go-ux-2026-10-05`. Se fijó ese commit exclusivamente en este entorno, conservando Dockerfile, variables y dominio, para que los siguientes push del lote no desplieguen automáticamente. No se fusionó main.
 
-El móvil puede comprobar ahora el bloqueo y regreso a Usuario usando el listado existente de negocios. La petición de alta no funcionará contra el backend remoto anterior: se muestra el error y no se simula éxito. Las nuevas restricciones RLS ya están aplicadas; el servidor anterior todavía no incorpora el handler de alta ni las nuevas comprobaciones de Express. No presentar el flujo de alta como operativo hasta publicar y verificar el backend.
+El build Linux de Railway terminó correctamente. El servidor arrancó y su healthcheck pasó; GET `/api/healthz` devuelve 200 con `status=ok`. POST `/api/supabase/manage/enrollment` sin sesión devuelve 401; POST `/api/supabase/auth/refresh` vacío devuelve 400/REFRESH_TOKEN_REQUIRED. Estos controles comprueban salud y rechazo de acceso sin sesión; no demuestran por sí solos una inserción autenticada.
+
+La base conserva cero negocios y cero solicitudes después de estas comprobaciones: no se crearon fixtures ni sesiones artificiales. El recorrido positivo y su persistencia real quedan por confirmar enviando UNA solicitud real desde Expo Go y contrastando sus filas en Supabase (`verified=false`, reservas desactivadas y solicitud pendiente). El código publicado y la RPC aplicada realizan esa operación atómicamente; los tests locales verifican sus contratos con respuestas simuladas. No presentar esta prueba real como superada antes de observarla.
 
 ## Pruebas manuales
 
