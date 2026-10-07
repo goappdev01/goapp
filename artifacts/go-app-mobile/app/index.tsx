@@ -3819,7 +3819,8 @@ function HomeScreenContent() {
   const [cambiosOpen, setCambiosOpen] = useState(false);
   // Índice de la tarjeta activa en el carrusel de cambios propuestos
   const [cambiosCardIdx, setCambiosCardIdx] = useState(0);
-  const cambiosTouchStartRef = useRef(0);
+  const cambiosCardIdxRef = useRef(0);
+  const cambiosCardTotalRef = useRef(0);
   // Índice de la tarjeta activa en el carrusel de próximas acciones
   const [nextCardIdx, setNextCardIdx] = useState(0);
   // Ref para detectar swipe horizontal en el carrusel (legacy, kept for safety)
@@ -4444,7 +4445,12 @@ function HomeScreenContent() {
       onMoveShouldSetPanResponder: (_e, g) => {
         const absX = Math.abs(g.dx);
         const absY = Math.abs(g.dy);
-        return absX > 8 && absX > absY * 1.4;
+        return nextCardTotalRef.current > 1 && absX > 8 && absX > absY * 1.4;
+      },
+      onMoveShouldSetPanResponderCapture: (_e, g) => {
+        const absX = Math.abs(g.dx);
+        const absY = Math.abs(g.dy);
+        return nextCardTotalRef.current > 1 && absX > 8 && absX > absY * 1.4;
       },
       onPanResponderGrant: () => {
         // Stop any running animation and reset to 0 so the card never drifts
@@ -4481,6 +4487,31 @@ function HomeScreenContent() {
       onPanResponderTerminate: () => {
         nextCardSlideAnim.stopAnimation();
         nextCardSlideAnim.setValue(0);
+      },
+      onPanResponderTerminationRequest: () => false,
+    }),
+  ).current;
+
+  // Same horizontal-only negotiation as Próxima, across header and card.
+  // Taps and vertical gestures stay with the existing child/background controls.
+  const cambiosCardPanRef = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => {
+        return cambiosCardTotalRef.current > 1 && Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4;
+      },
+      onMoveShouldSetPanResponderCapture: (_e, g) => {
+        return cambiosCardTotalRef.current > 1 && Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4;
+      },
+      onPanResponderRelease: (_e, g) => {
+        const total = cambiosCardTotalRef.current;
+        const safeIdx = Math.min(cambiosCardIdxRef.current, total - 1);
+        const nextIdx = g.dx < -24 && safeIdx < total - 1 ? safeIdx + 1
+          : g.dx > 24 && safeIdx > 0 ? safeIdx - 1 : safeIdx;
+        if (nextIdx !== safeIdx) {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          setCambiosCardIdx(nextIdx);
+          Haptics.selectionAsync().catch(() => {});
+        }
       },
       onPanResponderTerminationRequest: () => false,
     }),
@@ -11267,7 +11298,7 @@ function HomeScreenContent() {
     () =>
       Gesture.Pan()
         .runOnJS(true)
-        .activeOffsetY([40, Infinity])
+        .activeOffsetY(40)
         .failOffsetX([-65, 65])
         .onStart((e) => {
           const w = Dimensions.get("window").width;
@@ -13703,6 +13734,8 @@ function HomeScreenContent() {
         const total   = allPendientes.length;
         const safeIdx = Math.min(cambiosCardIdx, total - 1);
         const item    = allPendientes[safeIdx];
+        cambiosCardIdxRef.current = safeIdx;
+        cambiosCardTotalRef.current = total;
 
         // ── ESTADO CERRADO — pastilla ──────────────────────────────────
         if (!cambiosOpen) {
@@ -13814,6 +13847,7 @@ function HomeScreenContent() {
           <View
             key="pendientes-open-panel"
             pointerEvents="box-none"
+            {...cambiosCardPanRef.panHandlers}
             onLayout={(e) => setPendingPanelH(e.nativeEvent.layout.height)}
             style={{
               position: "absolute",
@@ -13881,20 +13915,6 @@ function HomeScreenContent() {
 
             {/* Tarjeta: swipe ← → para navegar */}
             <View
-              onTouchStart={(e) => { cambiosTouchStartRef.current = e.nativeEvent.pageX; }}
-              onTouchEnd={(e) => {
-                const dx = e.nativeEvent.pageX - cambiosTouchStartRef.current;
-                if (Math.abs(dx) < 10) return;
-                if (dx < -24 && safeIdx < total - 1) {
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  setCambiosCardIdx(safeIdx + 1);
-                  Haptics.selectionAsync().catch(() => {});
-                } else if (dx > 24 && safeIdx > 0) {
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  setCambiosCardIdx(safeIdx - 1);
-                  Haptics.selectionAsync().catch(() => {});
-                }
-              }}
               style={{
                 borderRadius: Math.round(12 * uiScaleFactor),
                 backgroundColor: "rgba(15,15,18,0.94)",
@@ -19685,7 +19705,10 @@ function HomeScreenContent() {
           )}
           <Pressable onPress={() => setCalPanelOpen(false)} style={{ flex: 1 }}>
             {/* Header row: label izquierda + config toggle derecha */}
-            <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View
+              pointerEvents={showBookingFromCal ? "none" : "auto"}
+              style={{ opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+            >
               <Text style={{ color: "#ffffff", fontSize: 9, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.5, textShadowColor: "rgba(255,255,255,0.6)", textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 6 }}>
                 {calBgViewMode === "dia" ? t("cal_view_day") : t("cal_label_week")}
               </Text>
