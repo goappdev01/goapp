@@ -493,7 +493,7 @@ export function BookingSearchOverlay({
           .map((id) => all.find((b) => b.id === id))
           .filter((b): b is Business => !!b);
         setRecentBizs(ordered);
-      }).catch(() => {});
+      }).catch(() => { setRecentBizs([]); });
       Animated.spring(slideAnim, {
         toValue: 0,
         useNativeDriver: true,
@@ -520,28 +520,40 @@ export function BookingSearchOverlay({
       return;
     }
     setSearching(true);
+    let current = true;
     const timer = setTimeout(async () => {
-      const r = await searchBusinesses(query);
-      // Client-side sub-category filter
-      const filtered = selectedSubCategory
-        ? r.filter(b => {
-            if (b.category === selectedSubCategory) return true;
-            // Also match businesses whose category is the parent sector id
-            const parentSector = SECTORS.find(s => s.subs.some(sub => sub.id === selectedSubCategory));
-            return !!(parentSector && b.category === parentSector.id);
-          })
-        : r;
-      setResults(filtered);
-      setSearching(false);
+      try {
+        const r = await searchBusinesses(query);
+        // Client-side sub-category filter
+        const filtered = selectedSubCategory
+          ? r.filter(b => {
+              if (b.category === selectedSubCategory) return true;
+              // Also match businesses whose category is the parent sector id
+              const parentSector = SECTORS.find(s => s.subs.some(sub => sub.id === selectedSubCategory));
+              return !!(parentSector && b.category === parentSector.id);
+            })
+          : r;
+        if (current) setResults(filtered);
+      } catch (error) {
+        if (current) {
+          setResults([]);
+          Alert.alert("No se pudieron cargar negocios", error instanceof Error ? error.message : "Comprueba la conexión e inténtalo de nuevo.");
+        }
+      } finally {
+        if (current) setSearching(false);
+      }
     }, 300);
-    return () => clearTimeout(timer);
+    return () => { current = false; clearTimeout(timer); };
   }, [query, visible, step, selectedSubCategory]);
 
   useEffect(() => {
     if (!selectedBusiness) return;
-    getBookableItems(selectedBusiness.id).then((its) =>
+    getBookableItems(selectedBusiness.id, true).then((its) =>
       setItems(its.filter((i) => i.active && i.visible))
-    );
+    ).catch((error) => {
+      setItems([]);
+      Alert.alert("No se pudieron cargar servicios", error instanceof Error ? error.message : "Comprueba la conexión e inténtalo de nuevo.");
+    });
     getStaff(selectedBusiness.id).then((all) => {
       // ── Limpieza defensiva antes de pintar profesionales ──────────────────
       // 1. Eliminar registros sin id o con nombre < 3 chars (parciales legacy)
@@ -1738,7 +1750,8 @@ const s = StyleSheet.create({
     borderLeftWidth: 1,
     borderRightWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
-    maxHeight: SCREEN_H * 0.92,
+    // Lower the complete sheet, preserving its bottom dock and internal scroll.
+    maxHeight: SCREEN_H * 0.92 - 16,
     overflow: "hidden",
   },
   glowBorder: {

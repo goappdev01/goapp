@@ -325,7 +325,16 @@ function mapRemoteService(row: RemoteService): BookableItem {
   };
 }
 
+function localBookingDateTime(value: string): string {
+  const date = new Date(value);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 function mapRemoteBooking(row: RemoteBooking): Booking {
+  // The existing calendar/slot engine consumes device-local wall times.
+  const startsAt = localBookingDateTime(row.starts_at);
+  const endsAt = localBookingDateTime(row.ends_at);
   const status: BookingStatus = row.status === "PENDING"
     ? "HOLD"
     : row.status === "NO_SHOW"
@@ -337,8 +346,8 @@ function mapRemoteBooking(row: RemoteBooking): Booking {
     bookableItemId: row.service_id,
     customerId: row.customer_id,
     staffId: row.staff_id ?? undefined,
-    startDatetime: row.starts_at,
-    endDatetime: row.ends_at,
+    startDatetime: startsAt,
+    endDatetime: endsAt,
     unitsReserved: 1,
     peopleCount: 1,
     status,
@@ -347,8 +356,8 @@ function mapRemoteBooking(row: RemoteBooking): Booking {
     slotKey: getBookingSlotKey({
       businessId: row.business_id,
       staffId: row.staff_id ?? undefined,
-      startDatetime: row.starts_at,
-      endDatetime: row.ends_at,
+      startDatetime: startsAt,
+      endDatetime: endsAt,
     }),
   };
 }
@@ -359,8 +368,9 @@ function remoteBookingPayload(candidate: Omit<Booking, "id"> & { id?: string }, 
     service_id: candidate.bookableItemId,
     staff_id: candidate.staffId ?? null,
     customer_id: customerId,
-    starts_at: candidate.startDatetime,
-    ends_at: candidate.endDatetime,
+    // Slots use device-local wall time; send unambiguous instants to Express.
+    starts_at: new Date(candidate.startDatetime).toISOString(),
+    ends_at: new Date(candidate.endDatetime).toISOString(),
     status: candidate.status === "HOLD" ? "PENDING" : "CONFIRMED",
     notes: candidate.notes ?? null,
   };
@@ -370,6 +380,13 @@ async function createRemoteBooking(candidate: Omit<Booking, "id"> & { id?: strin
   const session = await getStoredSession();
   const customerId = session?.user?.id;
   if (!session?.access_token || !customerId) throw new BookingAuthenticationError();
+  if (!isCloudId(candidate.businessId) || !isCloudId(candidate.bookableItemId) ||
+      (candidate.staffId != null && !isCloudId(candidate.staffId))) {
+    throw new BookingApiError(
+      "Este negocio o servicio local no está disponible para reservas online. Selecciona un negocio publicado.",
+      400, "LOCAL_BOOKING_NOT_SUPPORTED",
+    );
+  }
   const payload = await supabaseApiRequest<RemoteBooking[] | RemoteBooking>(
     "/supabase/bookings",
     {
@@ -480,9 +497,10 @@ export async function getBusinesses(): Promise<Business[]> {
 }
 
 export async function getActivebusinesses(): Promise<Business[]> {
-  const all = await getBusinesses();
-  // Treat undefined/null bookingActive as active (legacy records may not have the field set)
-  return all.filter((b) => b.bookingActive !== false);
+  // Customer bookings require the live catalogue. Empty/error responses must
+  // never advertise local demo records as remotely reservable businesses.
+  const remote = await supabaseApiRequest<RemoteBusiness[]>("/supabase/businesses");
+  return remote.map(mapRemoteBusiness).filter((b) => isCloudId(b.id) && b.bookingActive !== false);
 }
 
 export async function saveBusiness(b: Business): Promise<void> {
@@ -517,6 +535,7 @@ export async function deleteBusiness(id: string): Promise<void> {
 
 export async function searchBusinesses(query: string): Promise<Business[]> {
   const all = await getActivebusinesses();
+  if (all.length === 0) return [];
   if (!query.trim()) return all;
 
   // Expandir con alias: "pizza" → ["pizza", "restaurante", "restauración", ...]
@@ -532,7 +551,7 @@ export async function searchBusinesses(query: string): Promise<Business[]> {
     );
 
   // Hacer lo mismo con los ítems reservables (servicios)
-  const allItems = await getBookableItems();
+  const allItems = await getBookableItems(undefined, true);
   const itemMatchIds = new Set(
     allItems
       .filter((item) =>
@@ -550,18 +569,19 @@ export async function searchBusinesses(query: string): Promise<Business[]> {
 
 // ── Bookable items ─────────────────────────────────────────────────────────────
 
-export async function getBookableItems(businessId?: string): Promise<BookableItem[]> {
+export async function getBookableItems(businessId?: string, remoteOnly = false): Promise<BookableItem[]> {
   const local = await loadAll<BookableItem>(KEY_BOOKABLE_ITEMS);
   try {
     const path = businessId
       ? `/supabase/services?business_id=${encodeURIComponent(businessId)}`
       : "/supabase/services";
     const remote = await supabaseApiRequest<RemoteService[]>(path);
-    if (remote.length > 0) {
+    if (remote.length > 0 || remoteOnly) {
       const mapped = remember(remote.map(mapRemoteService));
       return businessId ? mapped.filter((x) => x.businessId === businessId) : mapped;
     }
   } catch (error) {
+    if (remoteOnly) throw error;
     console.warn("[booking] No se pudieron cargar servicios remotos:", error);
   }
   const all = local;
