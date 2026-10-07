@@ -83,6 +83,12 @@ import { MessagesScreen } from "@/components/MessagesScreen";
 import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
+import {
+  hasFullLandingArchitecture,
+  isUserV1Landing,
+  visibleLandingContextAction,
+  visibleLandingSatelliteKeys,
+} from "@/components/landing/landingV1Visibility";
 import { ResiduosPanel } from "@/components/ResiduosPanel";
 import { PerfilPanel } from "@/components/perfil/PerfilPanel";
 import { HerramientasPanel } from "@/components/herramientas/HerramientasPanel";
@@ -2713,6 +2719,8 @@ function HomeScreenContent() {
   const adminAccess = useAdminAccess();
   const isBusinessMode = requestedBusinessMode && businessAccess.allowed;
   const isUserMode = !isBusinessMode;
+  const fullLandingArchitecture = hasFullLandingArchitecture(adminAccess.allowed);
+  const isUserV1Surface = isUserV1Landing(isUserMode, adminAccess.allowed);
 
   // ── CUENTA GO — tipo de rol/acceso del usuario ───────────────────────────
   // null = no configurado (primer acceso / "LOGIN")
@@ -3048,6 +3056,7 @@ function HomeScreenContent() {
   const [sortFeedbackVisible, setSortFeedbackVisible] = useState(false);
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [humanityOpen, setHumanityOpen] = useState(false);
+  useEffect(() => { if (!adminAccess.allowed) setHumanityOpen(false); }, [adminAccess.allowed]);
   const [initialMessagesContact, setInitialMessagesContact] = useState<{ name: string; phone: string } | null>(null);
   // ── RECORDATORIO (RECUÉRDAME) ────────────────────────────────────────────
   const [remindOpen, setRemindOpen] = useState(false);
@@ -3570,10 +3579,6 @@ function HomeScreenContent() {
   }, [marketplacePedidos, goResolveEvent]);
 
   const [rutasMode, setRutasMode] = useState(false);
-  const rutasModeRef = useRef(false);
-  const closeRutasModeRef = useRef<() => void>(() => {});
-  rutasModeRef.current = rutasMode;
-  closeRutasModeRef.current = () => setRutasMode(false);
 
   useEffect(() => {
     if (rutasMode) {
@@ -3667,8 +3672,6 @@ function HomeScreenContent() {
 
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const posRef = useRef({ x: 0, y: 0 }).current;
-  const draggingRef = useRef(false);
-  const [isDragging, setIsDragging] = useState(false);
   const idleBob = useRef(new Animated.Value(0)).current;
   const goldBreathAnim = useRef(new Animated.Value(0)).current;
   const backBtnAnim = useRef(new Animated.Value(0)).current;
@@ -3817,7 +3820,6 @@ function HomeScreenContent() {
   // tarjeta de próxima cita. Se resetea a null cuando la tarjeta deja
   // de renderizarse (ver useEffect que la limpia).
   const [nextAptBottomY, setNextAptBottomY] = useState<number | null>(null);
-  const [humanityPan, setHumanityPan] = useState({ x: 0, y: 0 });
   const [humanityObstacles, setHumanityObstacles] = useState<Record<string, HumanityRect>>({});
   const measureHumanityObstacle = (key: string, rect: HumanityRect) => {
     setHumanityObstacles(prev => JSON.stringify(prev[key]) === JSON.stringify(rect) ? prev : { ...prev, [key]: rect });
@@ -9169,6 +9171,12 @@ function HomeScreenContent() {
     setLlamadasListOpen(false);
   };
 
+  const startRelatedGoAction = (g: typeof goLog[number]) => {
+    setCambiosOpen(false);
+    setNextAptMinimized(true);
+    loadGoIntoForm(g);
+  };
+
   // Comparte (re-abre WhatsApp con el mismo mensaje del GO) para enviarlo
   // a otra persona. Si el GO no tiene teléfono, abre el chooser nativo
   // genérico para que el sistema decida la app destino.
@@ -11829,10 +11837,6 @@ function HomeScreenContent() {
       speed: 18,
       bounciness: 5,
     }).start();
-    AsyncStorage.setItem(
-      "go_floating_pos_v14",
-      JSON.stringify({ x: targetX, y: targetY }),
-    ).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handedness, minX, maxX, minY, maxY]);
 
@@ -11877,10 +11881,6 @@ function HomeScreenContent() {
       speed: 16,
       bounciness: 4,
     }).start();
-    AsyncStorage.setItem(
-      "go_floating_pos_v14",
-      JSON.stringify({ x: targetX, y: targetY }),
-    ).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiScale, minX, maxX, minY, maxY, handedness]);
 
@@ -11903,10 +11903,6 @@ function HomeScreenContent() {
       speed: 18,
       bounciness: 4,
     }).start();
-    AsyncStorage.setItem(
-      "go_floating_pos_v14",
-      JSON.stringify({ x: cx, y: cy }),
-    ).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [minX, maxX, minY, maxY, posReady]);
 
@@ -12624,44 +12620,23 @@ function HomeScreenContent() {
   }, [shakeAiEnabled, shakeAiSensitivity, shakeAiAction]);
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        // Bumped storage key so the new default (lower + thumb-side right) takes effect
-        // for users that already saved a previous position.
-        const raw = await AsyncStorage.getItem("go_floating_pos_v14");
-        // Default position: lowered (no lift) and pinned to the right (thumb zone).
-        let x = maxX;
-        let y = maxY;
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
-            x = clamp(parsed.x, minX, maxX);
-            y = clamp(parsed.y, minY, maxY);
-          }
-        }
-        if (!mounted) return;
-        posRef.x = x;
-        posRef.y = y;
-        pan.setValue({ x, y });
-        setPosReady(true);
-      } catch {
-        posRef.x = maxX;
-        posRef.y = maxY - 12;
-        pan.setValue({ x: maxX, y: maxY - 12 });
-        setPosReady(true);
-      }
-    })();
-    const sub = pan.addListener((v) => {
+    // Landing position is determined only by the existing handedness anchor
+    // and safe layout bounds. Legacy drag data remains untouched in storage.
+    const x = handedness === "right" ? maxX : minX;
+    const y = clamp(maxY, minY, maxY);
+    posRef.x = x;
+    posRef.y = y;
+    pan.setValue({ x, y });
+    setPosReady(true);
+  }, [handedness, minX, maxX, minY, maxY, pan, posRef]);
+
+  useEffect(() => {
+    const sub = pan.addListener(v => {
       posRef.x = v.x;
       posRef.y = v.y;
-      setHumanityPan({ x: v.x, y: v.y });
     });
-    return () => {
-      mounted = false;
-      pan.removeListener(sub);
-    };
-  }, []);
+    return () => pan.removeListener(sub);
+  }, [pan, posRef]);
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -12919,60 +12894,6 @@ function HomeScreenContent() {
     onLateDynamicEndJS,
   ]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onStartShouldSetPanResponderCapture: () => false,
-      onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8,
-      onMoveShouldSetPanResponderCapture: (_, g) =>
-        Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8,
-      onPanResponderGrant: () => {
-        draggingRef.current = true;
-        setIsDragging(true);
-        pan.setOffset({ x: posRef.x, y: posRef.y });
-        pan.setValue({ x: 0, y: 0 });
-        try {
-          Haptics.selectionAsync();
-        } catch {}
-      },
-      onPanResponderMove: (_e, g) => {
-        pan.x.setValue(g.dx);
-        pan.y.setValue(g.dy);
-      },
-      onPanResponderRelease: (_, g) => {
-        if (rutasModeRef.current && g.dy > 70 && Math.abs(g.dx) < 100) {
-          pan.flattenOffset();
-          draggingRef.current = false;
-          setIsDragging(false);
-          closeRutasModeRef.current();
-          return;
-        }
-        pan.flattenOffset();
-        const tx = clamp(posRef.x, minX, maxX);
-        const ty = clamp(posRef.y, minY, maxY);
-        Animated.spring(pan, {
-          toValue: { x: tx, y: ty },
-          useNativeDriver: true,
-          friction: 7,
-          tension: 60,
-        }).start(() => {
-          draggingRef.current = false;
-          setIsDragging(false);
-        });
-        AsyncStorage.setItem(
-          "go_floating_pos_v14",
-          JSON.stringify({ x: tx, y: ty }),
-        ).catch(() => {});
-      },
-      onPanResponderTerminate: () => {
-        pan.flattenOffset();
-        draggingRef.current = false;
-        setIsDragging(false);
-      },
-    }),
-  ).current;
-
   const ringStyle = {
     opacity: ring.interpolate({
       inputRange: [0, 0.001, 1],
@@ -13119,8 +13040,8 @@ function HomeScreenContent() {
     // Inner Animated.View: centered within the dock, translated by pan.
     //   pan = (0,0) → orbital center at dock center = bottom-right anchor.
     //   pan.x < 0 → moved left; pan.y < 0 → moved up.
-    // Overflow is visible — the orbital can be dragged beyond the dock
-    // bounds; touch delivery still works via the panResponder.
+    // Overflow remains visible. The Landing position is anchored and cannot
+    // be moved by touch; `pan` is reserved for existing safe-layout anchors.
     return (
       <View
         pointerEvents="box-none"
@@ -13133,7 +13054,6 @@ function HomeScreenContent() {
         }}
       >
         <Animated.View
-          {...panResponder.panHandlers}
           style={{
             position: "absolute",
             left: systemBoundingRadius - orbitWrapSize / 2,
@@ -13281,8 +13201,9 @@ function HomeScreenContent() {
   // Wait for visible panels to report their complete touch bounds.
   const humanityPanelsMeasured = humanityBlocks.every(rect => !!rect);
   const humanityPlacement = humanityPanelsMeasured && posReady ? placeHumanity({
-    cx: screen.width - dockRight - systemBoundingRadius + humanityPan.x,
-    cy: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + humanityPan.y,
+    // Use the configured static dock anchor, never the former draggable pan.
+    cx: screen.width - dockRight - systemBoundingRadius + (handedness === "right" ? maxX : minX),
+    cy: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 - Math.round(12 * uiScaleFactor),
     radius: orbitRadius, buttonSize: orbitBtnSize,
     satelliteRadius: microR, satelliteSize: microSz, count: INTENTS.length + 1,
     scale: uiScaleFactor,
@@ -13689,6 +13610,11 @@ function HomeScreenContent() {
                 setNextAptMinimized(false);
                 Haptics.selectionAsync().catch(() => {});
               }}
+              onLongPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                startRelatedGoAction(nextAppointment.g);
+              }}
+              delayLongPress={500}
               style={{
                 minWidth: 86,
                 maxWidth: 110,
@@ -13776,6 +13702,12 @@ function HomeScreenContent() {
                   setCambiosCardIdx(0);
                   Haptics.selectionAsync().catch(() => {});
                 }}
+                onLongPress={() => {
+                  if (item.kind !== "cambio") return;
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                  startRelatedGoAction(item.g);
+                }}
+                delayLongPress={500}
                 style={{
                   minWidth: 86,
                   maxWidth: PILL_MAX_W,
@@ -14464,7 +14396,7 @@ function HomeScreenContent() {
                 }}
                 onLongPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                  if (aChange) aChange.fn();
+                  startRelatedGoAction(g);
                 }}
                 delayLongPress={500}
                 accessibilityLabel="Tarjeta próxima cita — mantén para opciones avanzadas"
@@ -16060,13 +15992,7 @@ function HomeScreenContent() {
             alignItems: "center",
             justifyContent: "center",
             transform: [
-              {
-                translateY: idleBob.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0, -3],
-                }),
-              },
-              { scale: isDragging ? 1.03 : 1 },
+              { translateY: aiOpen ? idleBob.interpolate({ inputRange: [0, 1], outputRange: [0, -3] }) : 0 },
               { scale: kbScale },
               { scale: aiShrink },
             ],
@@ -16293,6 +16219,8 @@ function HomeScreenContent() {
               onPress={() => {
                 if (voiceActive) {
                   exitVoiceMode();
+                } else if (isUserV1Surface && !aiOpen) {
+                  openAi();
                 } else if (reservasOrbitalOpen) {
                   if (reservasOrbitalCat !== null) {
                     if (reservasOrbitalPage > 0) { setReservasOrbitalPage(p => p - 1); }
@@ -16493,7 +16421,7 @@ function HomeScreenContent() {
           {/* INTENT ORBIT — PremiumOrbitBtn with spring press scale
               TOQUE CORTO  → selecciona categoría GO (comportamiento original)
               PULSADO LARGO → abre segundo nivel comercial de esa órbita     */}
-          {orbitSecondLevel === null ? (
+          {!isUserV1Surface && (orbitSecondLevel === null ? (
             <>
               {rutasMode ? (
                 <>
@@ -17110,7 +17038,7 @@ function HomeScreenContent() {
                 ];
               })()}
             </>
-          )}
+          ))}
 
           {/* AQUÍ pulse ring around GO when locating — white, only visible
               while the AQUÍ animation is actually running (value > 0). */}
@@ -17160,6 +17088,7 @@ function HomeScreenContent() {
               icon: React.ComponentProps<typeof Feather>["name"];
               label: string;
               onPress: () => void;
+              v1Visible?: boolean;
             };
             type SatDef = {
               key: string;
@@ -17309,12 +17238,14 @@ function HomeScreenContent() {
                 contextLayer: [
                   {
                     replaceKey: "settings", icon: "settings", label: "CONFIG",
+                    v1Visible: true,
                     onPress: () => { Haptics.selectionAsync(); setOtrosOpen(false); handleOpenOptions(); setActiveSatCtx(null); },
                   },
                   {
                     replaceKey: "messages",
                     icon: userAccountType !== null ? AUTH_ROLE_ICONS[userAccountType] : "log-in",
                     label: userAccountType !== null ? t('account_label') : t('auth_login_short'),
+                    v1Visible: true,
                     onPress: () => {
                       Haptics.selectionAsync();
                       setOtrosOpen(false);
@@ -17497,21 +17428,30 @@ function HomeScreenContent() {
             // reducir el ruido visual. Al salir del Marketplace se restauran.
             const GO_EXEC_KEYS     = new Set(["contacts", "calendar", "map", "bell"]);
             const MARKET_EXEC_KEYS = new Set(["contacts", "calendar", "map", "bell", "messages", "payment"]);
-            const isMarketplace    = orbitSecondLevel !== null;
+            const isMarketplace    = orbitSecondLevel !== null && !isUserV1Surface;
             const goExecMode       = !rutasMode && !isMarketplace && (categorySelected || otroSelected || isActivelyCreating);
             // "payment" only surfaces inside Marketplace — never in normal/GO mode.
             // "settings" (TOOLS/AJUSTES) only surfaces outside Marketplace.
             // Both share deg:157.5; this filter guarantees only one is ever visible.
-            const visibleSatellites = isMarketplace
-              ? []
-              : goExecMode
-                ? satellites.filter(s => GO_EXEC_KEYS.has(s.key))
-                : satellites.filter(s => s.key !== "payment");
+            const v1SatelliteKeys = new Set(visibleLandingSatelliteKeys(
+              satellites.map(s => s.key),
+              isUserV1Surface,
+            ));
+            const visibleSatellites = isUserV1Surface
+              ? satellites.filter(s => v1SatelliteKeys.has(s.key))
+              : isMarketplace
+                ? []
+                : goExecMode
+                  ? satellites.filter(s => GO_EXEC_KEYS.has(s.key))
+                  : satellites.filter(s => s.key !== "payment");
 
             // Active context definition (null when no context open)
             const ctxSatDef = activeSatCtx !== null
               ? satellites.find(s => s.key === activeSatCtx) ?? null
               : null;
+            const visibleContextLayer = ctxSatDef?.contextLayer?.filter(cs =>
+              visibleLandingContextAction(isUserV1Surface, cs.v1Visible),
+            ) ?? [];
 
             // ── SINGLE-PASS RENDER — same positions always, state transforms ──
             // When a context layer is active:
@@ -17527,7 +17467,7 @@ function HomeScreenContent() {
                   const my  = cy + Math.sin(rad) * microR - microSz / 2;
 
                   const isOrigin   = activeSatCtx !== null && s.key === activeSatCtx;
-                  const ctxReplace = ctxSatDef?.contextLayer?.find(cs => cs.replaceKey === s.key);
+                  const ctxReplace = visibleContextLayer.find(cs => cs.replaceKey === s.key);
                   const isDimmed   = activeSatCtx !== null && !isOrigin && !ctxReplace;
 
                   // Visual memory: glow when this satellite's GO field is filled
@@ -18244,10 +18184,10 @@ function HomeScreenContent() {
       >
         {isUserMode && orbitSecondLevel === null ? (
           // ── PARTICULAR ── Hasta 3 columnas inteligentes: desaparecen cuando el tutorial está completado
-          (!tutGoRealizado || !tutReservaRealizada || !tutMarketplaceRealizado) ? (
+          (isUserV1Surface ? !tutReservaRealizada : (!tutGoRealizado || !tutReservaRealizada || !tutMarketplaceRealizado)) ? (
             <View style={{ flexDirection: "row", gap: 4, alignItems: "flex-start" }}>
               {/* ── COL 1 — Ejecuta acción ── visible hasta que el usuario haga 1 acción GO */}
-              {!tutGoRealizado && (
+              {!isUserV1Surface && !tutGoRealizado && (
                 <View style={{ flex: 31 }}>
                   <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
                     {lang === 'en' ? "1 · Execute action" : "1 · Ejecuta acción"}
@@ -18273,14 +18213,14 @@ function HomeScreenContent() {
                 </View>
               )}
               {/* Divider 1: solo si col 1 visible y hay algo más */}
-              {!tutGoRealizado && (!tutReservaRealizada || !tutMarketplaceRealizado) && (
+              {!isUserV1Surface && !tutGoRealizado && (!tutReservaRealizada || !tutMarketplaceRealizado) && (
                 <View style={{ width: 1, backgroundColor: "rgba(255,255,255,0.18)", alignSelf: "stretch", marginTop: 2 }} />
               )}
               {/* ── COL 2 — Reserva ── visible hasta que el usuario confirme 1 reserva */}
               {!tutReservaRealizada && (
-                <View style={{ flex: 31 }}>
+                <View style={{ flex: isUserV1Surface ? 1 : 31 }}>
                   <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "2 · Reservation" : "2 · Reserva"}
+                    {lang === 'en' ? `${isUserV1Surface ? "1" : "2"} · Reservation` : `${isUserV1Surface ? "1" : "2"} · Reserva`}
                   </Text>
                   <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 10.5, fontWeight: "700", marginTop: 3, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
                     {lang === 'en' ? "Tap Bookings" : "Pulsa Reservas"}
@@ -18297,14 +18237,19 @@ function HomeScreenContent() {
                   <Text style={{ color: "rgba(255,255,255,0.32)", fontSize: 9.5, fontWeight: "500", marginTop: 5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
                     {lang === 'en' ? "You can also choose a professional." : "También puedes elegir profesional."}
                   </Text>
+                  {isUserV1Surface && (
+                    <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 9.5, fontWeight: "600", marginTop: 5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                      {lang === 'en' ? "Tap GO to open the reservation assistant." : "Pulsa GO para abrir el asistente de reservas."}
+                    </Text>
+                  )}
                 </View>
               )}
               {/* Divider 2: solo si col 2 y col 3 ambas visibles */}
-              {!tutReservaRealizada && !tutMarketplaceRealizado && (
+              {!isUserV1Surface && !tutReservaRealizada && !tutMarketplaceRealizado && (
                 <View style={{ width: 1, backgroundColor: "rgba(255,255,255,0.18)", alignSelf: "stretch", marginTop: 2 }} />
               )}
               {/* ── COL 3 — Marketplace ── visible hasta que el usuario abra el Marketplace */}
-              {!tutMarketplaceRealizado && (
+              {!isUserV1Surface && !tutMarketplaceRealizado && (
                 <View style={{ flex: 38 }}>
                   <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
                     {lang === 'en' ? "3 · Buy" : "3 · Comprar"}
@@ -19195,7 +19140,7 @@ function HomeScreenContent() {
       </BottomSheet>
       {/* ── QR GO — panel de acceso y compartir ─────────────────────────── */}
       {(() => {
-        const QR_TYPES: { id: string; label: string; sub: string; icon: string; color: string }[] = [
+        const QR_TYPES: { id: string; label: string; sub: string; icon: string; color: string }[] = isUserV1Surface ? [] : [
           { id: "cliente",      label: "CLIENTE",      sub: "Reservas permitidas",         icon: "user",        color: "#60a5fa" },
           { id: "proveedor",    label: "PROVEEDOR",    sub: "Acceso franja proveedor",     icon: "truck",       color: "#a78bfa" },
           { id: "interno",      label: "INTERNO",      sub: "Acceso empresa ampliado",     icon: "shield",      color: "#34d399" },
@@ -19365,7 +19310,7 @@ function HomeScreenContent() {
               </View>
 
               {/* ── LEER QR CARTA — acceso al módulo de carta restaurante ── */}
-              <TouchableOpacity
+              {!isUserV1Surface && <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => {
                   Haptics.selectionAsync().catch(() => {});
@@ -19395,14 +19340,14 @@ function HomeScreenContent() {
                   </Text>
                 </View>
                 <Feather name="chevron-right" size={16} color="rgba(232,118,44,0.7)" />
-              </TouchableOpacity>
+              </TouchableOpacity>}
 
               {/* Separador */}
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 20 }}>
+              {!isUserV1Surface && <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 20 }}>
                 <View style={{ flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.08)" }} />
                 <Text style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, fontWeight: "700", letterSpacing: 2 }}>ACCESO ESPECÍFICO</Text>
                 <View style={{ flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.08)" }} />
-              </View>
+              </View>}
 
               {/* Tarjetas QR por tipo ──────────────────────────────── */}
               <View style={{ gap: 12, paddingBottom: 8 }}>
@@ -26492,7 +26437,7 @@ function HomeScreenContent() {
 
 
       {/* HUMANITY follows the upper-left of the orbit; label and hit area share the collision bounds. */}
-      {!anyOverlayOpen && !rutasMode && kbHeight === 0 && orbitSecondLevel === null && humanityPlacement && (
+      {fullLandingArchitecture && !anyOverlayOpen && !rutasMode && kbHeight === 0 && orbitSecondLevel === null && humanityPlacement && (
         <TouchableOpacity
           activeOpacity={0.82}
           onPress={() => {
@@ -26576,7 +26521,7 @@ function HomeScreenContent() {
 
       {/* ── HUMANITY GO — módulos globales del sistema ──────────────── */}
       <HumanityScreen
-        visible={humanityOpen}
+        visible={fullLandingArchitecture && humanityOpen}
         onClose={() => setHumanityOpen(false)}
       />
 
