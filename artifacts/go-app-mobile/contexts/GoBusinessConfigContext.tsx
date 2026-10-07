@@ -23,6 +23,7 @@ import React, {
 } from "react";
 import { Alert } from "react-native";
 import { onSessionChanged } from "@/lib/sessionEvents";
+import { useBusinessAccess } from "./GoBusinessAccessContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   initPlantillaItems,
@@ -595,6 +596,9 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function GoBusinessConfigProvider({ children }: { children: React.ReactNode }) {
+  const enterprise = useBusinessAccess();
+  const permission = useRef(false);
+  permission.current = enterprise.allowed;
   const [config, setConfig] = useState<BusinessConfig>(DEFAULT_BUSINESS_CONFIG);
   const [loaded, setLoaded]   = useState(false);
   const [sessionVersion, setSessionVersion] = useState(0);
@@ -613,6 +617,13 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
 
   // ── Carga inicial ────────────────────────────────────────────────────────────
   useEffect(() => {
+    generation.current++;
+    if (!enterprise.allowed) {
+      dirty.current = false;
+      setConfig({ ...DEFAULT_BUSINESS_CONFIG });
+      setLoaded(true);
+      return;
+    }
     (async () => {
       const version = generation.current;
       try {
@@ -740,15 +751,15 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
       }
       if (version === generation.current) setLoaded(true);
     })();
-  }, [sessionVersion]);
+  }, [sessionVersion, enterprise.allowed, enterprise.snapshot?.business?.id]);
 
   // Debounce edits and serialize synchronizations. Never upload an old draft on login.
   useEffect(() => {
-    if (!loaded || !dirty.current || !config.businessName?.trim()) return;
+    if (!permission.current || !loaded || !dirty.current || !config.businessName?.trim()) return;
     const version = generation.current;
     const timer = setTimeout(() => {
       syncQueue.current = syncQueue.current.then(async () => {
-        if (version !== generation.current || !dirty.current) return;
+        if (!permission.current || version !== generation.current || !dirty.current) return;
         const snapshot = configRef.current;
         const snapshotRevision = revision.current;
         const userId = await getAuthenticatedUserId();
@@ -781,6 +792,7 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   // que se activa automáticamente cuando el estado cambia.
 
   const updateConfig = useCallback((patch: Partial<BusinessConfig>) => {
+    if (!permission.current) return;
     dirty.current = true;
     revision.current++;
     setConfig(prev => {
@@ -793,6 +805,7 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   // ── resetToSubActivity ───────────────────────────────────────────────────────
 
   const resetToSubActivity = useCallback((sectorId: string, subId: string) => {
+    if (!permission.current) return;
     dirty.current = true;
     revision.current++;
     setConfig(prev => {
@@ -831,6 +844,7 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   // El wizard arrancará desde cero con un objeto completamente limpio.
   // No confundir con resetToSubActivity (que solo limpia profesionales/servicios).
   const resetConfig = useCallback(async () => {
+    if (!permission.current) return;
     generation.current++;
     dirty.current = false;
     const fresh: BusinessConfig = { ...DEFAULT_BUSINESS_CONFIG };

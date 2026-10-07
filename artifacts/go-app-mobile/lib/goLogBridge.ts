@@ -115,7 +115,7 @@ export async function syncBookingToGoLog(
 
   const dateISO  = booking.startDatetime.slice(0, 10);
   const startD   = new Date(booking.startDatetime);
-  const timeStr  = `${String(startD.getUTCHours()).padStart(2, "0")}:${String(startD.getUTCMinutes()).padStart(2, "0")}`;
+  const timeStr  = `${String(startD.getHours()).padStart(2, "0")}:${String(startD.getMinutes()).padStart(2, "0")}`;
   const durationMin = Math.round(
     (new Date(booking.endDatetime).getTime() - startD.getTime()) / 60_000
   );

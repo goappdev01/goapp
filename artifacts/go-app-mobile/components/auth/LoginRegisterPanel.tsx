@@ -108,6 +108,7 @@ interface Props {
   onClose: () => void;
   userAccountType: AccountRole | null;
   onSetAccountType: (role: AccountRole | null) => void;
+  onSwitchContext?: () => void;
   onOpenPerfil: () => void;
   onOpenEmpresa: () => void;
   // Verification (empresa accounts only)
@@ -140,6 +141,7 @@ export function LoginRegisterPanel({
   onClose,
   userAccountType,
   onSetAccountType,
+  onSwitchContext,
   onOpenPerfil,
   onOpenEmpresa,
   verification,
@@ -651,7 +653,7 @@ export function LoginRegisterPanel({
               {/* Cambiar tipo · Cerrar sesión */}
               <View style={s.secondaryRow}>
                 <TouchableOpacity
-                  onPress={() => { Haptics.selectionAsync().catch(() => {}); onSetAccountType(null); }}
+                  onPress={() => { Haptics.selectionAsync().catch(() => {}); onSwitchContext?.(); }}
                   activeOpacity={0.8}
                   style={s.secondaryBtn}
                 >

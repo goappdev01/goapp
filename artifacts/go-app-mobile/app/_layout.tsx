@@ -14,6 +14,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { GoModeProvider } from "@/contexts/GoModeContext";
+import { GoBusinessAccessProvider } from "@/contexts/GoBusinessAccessContext";
 import { GoNotificationProvider } from "@/contexts/GoNotificationContext";
 import { GoBusinessConfigProvider } from "@/contexts/GoBusinessConfigContext";
 import { GoPushInitializer } from "@/services/GoPushService";
@@ -65,6 +66,7 @@ export default function RootLayout() {
       <ErrorBoundary>
         <LanguageProvider>
           <GoModeProvider>
+            <GoBusinessAccessProvider>
             <GoBusinessConfigProvider>
               <GoNotificationProvider>
                 <GoPushInitializer />
@@ -77,6 +79,7 @@ export default function RootLayout() {
                 </GestureHandlerRootView>
               </GoNotificationProvider>
             </GoBusinessConfigProvider>
+            </GoBusinessAccessProvider>
           </GoModeProvider>
         </LanguageProvider>
       </ErrorBoundary>

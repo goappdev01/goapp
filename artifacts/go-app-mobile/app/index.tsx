@@ -44,6 +44,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GUIDANCE_NAMES, GUIDANCE_NAMES_EN, type GuidanceConfig, getGuidanceConfig, swipeGuideMaxOpacity as computeSwipeMaxOpacity, computeAutoBoost } from "../utils/guidance";
 import { useGoMode } from "@/contexts/GoModeContext";
+import { useBusinessAccess } from "@/contexts/GoBusinessAccessContext";
+import { BusinessAccessGate } from "@/components/auth/BusinessAccessGate";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
   runOnJS,
@@ -79,6 +81,7 @@ import {
 import { MessagesScreen } from "@/components/MessagesScreen";
 import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
+import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { ResiduosPanel } from "@/components/ResiduosPanel";
 import { PerfilPanel } from "@/components/perfil/PerfilPanel";
 import { HerramientasPanel } from "@/components/herramientas/HerramientasPanel";
@@ -2582,6 +2585,10 @@ function GoDeepSpaceUpper() {
 }
 
 export default function HomeScreen() {
+  return <BusinessAccessGate><HomeScreenContent /></BusinessAccessGate>;
+}
+
+function HomeScreenContent() {
   const insets = useSafeAreaInsets();
   const { t, lang, locale, setLang } = useLanguage();
 
@@ -2700,7 +2707,10 @@ export default function HomeScreen() {
   // Fuente única de verdad para bifurcar toda la lógica, guías, onboarding,
   // sugerencias y módulos visibles. Se sincroniza automáticamente al cambiar
   // el tipo de cuenta y se persiste en AsyncStorage (go_active_mode_v1).
-  const { isBusinessMode, isUserMode, loaded: modeLoaded, setActiveMode, syncModeFromRole } = useGoMode();
+  const { isBusinessMode: requestedBusinessMode, loaded: modeLoaded, setActiveMode, syncModeFromRole } = useGoMode();
+  const businessAccess = useBusinessAccess();
+  const isBusinessMode = requestedBusinessMode && businessAccess.allowed;
+  const isUserMode = !isBusinessMode;
 
   // ── CUENTA GO — tipo de rol/acceso del usuario ───────────────────────────
   // null = no configurado (primer acceso / "LOGIN")
@@ -2720,8 +2730,7 @@ export default function HomeScreen() {
   };
 
   // ── VERIFICACIÓN EMPRESA ─────────────────────────────────────────────────
-  // Empresa Básica (no verificada) → puede explorar y configurar.
-  // Empresa Verificada → acceso a reservas públicas, marketplace, cobros, etc.
+  // Local document metadata never authorizes private business access.
   const [verification, setVerification] = useState<CuentaVerification>(EMPTY_VERIFICATION);
   const [verificacionOpen, setVerificacionOpen] = useState(false);
 
@@ -2854,9 +2863,9 @@ export default function HomeScreen() {
 
   // Helper: persiste el tipo de cuenta, actualiza estado y sincroniza el modo global.
   // syncModeFromRole deriva USER/BUSINESS desde el rol y persiste go_active_mode_v1.
-  const commitAccountType = (role: AccountRole | null) => {
+  const commitAccountType = (role: AccountRole | null, changeContext = true) => {
     setUserAccountType(role);
-    syncModeFromRole(role);
+    if (changeContext) syncModeFromRole(role);
     if (role) {
       AsyncStorage.setItem("go_account_type_v1", role).catch(() => {});
       setGoAuthOpen(false);
@@ -2935,7 +2944,7 @@ export default function HomeScreen() {
         }
 
         if (!cancelled) {
-          if (resolvedRole) commitAccountType(resolvedRole);
+          if (resolvedRole) commitAccountType(resolvedRole, false);
           else setGoAuthOpen(true);
         }
       } catch {
@@ -3346,7 +3355,11 @@ export default function HomeScreen() {
 
   // ── EMPRESA GO ───────────────────────────────────────────────────────────
   const { config: bCfg, loaded: bizLoaded, updateConfig: updateBizCfg } = useBusinessConfig();
-  const [empresaOpen, setEmpresaOpen] = useState(false);
+  const [empresaOpen, setEmpresaOpenState] = useState(false);
+  const setEmpresaOpen = (open: boolean) => {
+    if (open) setActiveMode("BUSINESS");
+    setEmpresaOpenState(open && businessAccess.allowed);
+  };
   const [empresaModulo, setEmpresaModulo] = useState<string>("home");
   const [activacionCobrosOpen, setActivacionCobrosOpen] = useState(false);
   const [activacionInitialScreen, setActivacionInitialScreen] = useState<1 | 2 | 3>(2);
@@ -3793,6 +3806,11 @@ export default function HomeScreen() {
   // tarjeta de próxima cita. Se resetea a null cuando la tarjeta deja
   // de renderizarse (ver useEffect que la limpia).
   const [nextAptBottomY, setNextAptBottomY] = useState<number | null>(null);
+  const [humanityPan, setHumanityPan] = useState({ x: 0, y: 0 });
+  const [humanityObstacles, setHumanityObstacles] = useState<Record<string, HumanityRect>>({});
+  const measureHumanityObstacle = (key: string, rect: HumanityRect) => {
+    setHumanityObstacles(prev => JSON.stringify(prev[key]) === JSON.stringify(rect) ? prev : { ...prev, [key]: rect });
+  };
   const [nextAptPanelH, setNextAptPanelH] = useState(0);
   const [nextAptMinimized, setNextAptMinimized] = useState(true);
   // Altura del panel "Cambios pendientes" — para apilar sobre próxima visita.
@@ -3801,7 +3819,8 @@ export default function HomeScreen() {
   const [cambiosOpen, setCambiosOpen] = useState(false);
   // Índice de la tarjeta activa en el carrusel de cambios propuestos
   const [cambiosCardIdx, setCambiosCardIdx] = useState(0);
-  const cambiosTouchStartRef = useRef(0);
+  const cambiosCardIdxRef = useRef(0);
+  const cambiosCardTotalRef = useRef(0);
   // Índice de la tarjeta activa en el carrusel de próximas acciones
   const [nextCardIdx, setNextCardIdx] = useState(0);
   // Ref para detectar swipe horizontal en el carrusel (legacy, kept for safety)
@@ -4426,7 +4445,12 @@ export default function HomeScreen() {
       onMoveShouldSetPanResponder: (_e, g) => {
         const absX = Math.abs(g.dx);
         const absY = Math.abs(g.dy);
-        return absX > 8 && absX > absY * 1.4;
+        return nextCardTotalRef.current > 1 && absX > 8 && absX > absY * 1.4;
+      },
+      onMoveShouldSetPanResponderCapture: (_e, g) => {
+        const absX = Math.abs(g.dx);
+        const absY = Math.abs(g.dy);
+        return nextCardTotalRef.current > 1 && absX > 8 && absX > absY * 1.4;
       },
       onPanResponderGrant: () => {
         // Stop any running animation and reset to 0 so the card never drifts
@@ -4463,6 +4487,31 @@ export default function HomeScreen() {
       onPanResponderTerminate: () => {
         nextCardSlideAnim.stopAnimation();
         nextCardSlideAnim.setValue(0);
+      },
+      onPanResponderTerminationRequest: () => false,
+    }),
+  ).current;
+
+  // Same horizontal-only negotiation as Próxima, across header and card.
+  // Taps and vertical gestures stay with the existing child/background controls.
+  const cambiosCardPanRef = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => {
+        return cambiosCardTotalRef.current > 1 && Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4;
+      },
+      onMoveShouldSetPanResponderCapture: (_e, g) => {
+        return cambiosCardTotalRef.current > 1 && Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4;
+      },
+      onPanResponderRelease: (_e, g) => {
+        const total = cambiosCardTotalRef.current;
+        const safeIdx = Math.min(cambiosCardIdxRef.current, total - 1);
+        const nextIdx = g.dx < -24 && safeIdx < total - 1 ? safeIdx + 1
+          : g.dx > 24 && safeIdx > 0 ? safeIdx - 1 : safeIdx;
+        if (nextIdx !== safeIdx) {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          setCambiosCardIdx(nextIdx);
+          Haptics.selectionAsync().catch(() => {});
+        }
       },
       onPanResponderTerminationRequest: () => false,
     }),
@@ -11249,7 +11298,7 @@ export default function HomeScreen() {
     () =>
       Gesture.Pan()
         .runOnJS(true)
-        .activeOffsetY([40, Infinity])
+        .activeOffsetY(40)
         .failOffsetX([-65, 65])
         .onStart((e) => {
           const w = Dimensions.get("window").width;
@@ -11485,17 +11534,6 @@ export default function HomeScreen() {
   const orbitRadiusVisual = orbitRadius;
   const orbitWrapSize = (orbitRadius + orbitBtnSize / 2) * 2 + 12;
 
-  // ── HUMANITY DYNAMIC POSITION ────────────────────────────────────────
-  // When GO grows (uiScaleFactor > 1 = "grande"), the lower-left orbital
-  // satellites expand outward toward HUMANITY's corner.
-  // Lift HUMANITY upward (and nudge slightly further left) to maintain
-  // clear visual air between it and the satellite arc.
-  //   standard (1.00): +0 px — no change.
-  //   grande   (1.12): ≈ +22 px up, ≈ +8 px left.
-  //   compacto (0.83): +0 px — clamped at zero, no downward shift.
-  const humanityLift      = Math.round(Math.max(0, uiScaleFactor - 1.0) * orbitBtnSize * 2.5);
-  const humanityLeftNudge = Math.round(humanityLift * 0.35);
-
   // ── BOUNDING RADIUS REAL DEL SISTEMA ORBITAL ────────────────────────
   // Los micro-satélites funcionales (campana, mensajes, agenda, etc.)
   // orbitan a microR = orbitRadius + 31*scale, que supera al anillo de
@@ -11686,10 +11724,12 @@ export default function HomeScreen() {
     if (!willRenderHorizontal && nextAptBottomY !== null) {
       setNextAptBottomY(null);
     }
-    if (!willRenderHorizontal && nextAptPanelH !== 0) {
+    const willRenderExpanded =
+      !!nextAppointment && !anyOverlayOpen && !isActivelyCreating && !nextAptMinimized && !rutasMode;
+    if (!willRenderExpanded && nextAptPanelH !== 0) {
       setNextAptPanelH(0);
     }
-  }, [nextAppointment, anyOverlayOpen, useCompactNextApt, nextAptBottomY, nextAptPanelH]);
+  }, [nextAppointment, anyOverlayOpen, useCompactNextApt, nextAptBottomY, nextAptPanelH, isActivelyCreating, nextAptMinimized, rutasMode]);
 
   // Resetear el índice del carrusel si la lista cambia de tamaño
   // (p.ej. se elimina la tarjeta activa o llega una nueva).
@@ -12604,6 +12644,7 @@ export default function HomeScreen() {
     const sub = pan.addListener((v) => {
       posRef.x = v.x;
       posRef.y = v.y;
+      setHumanityPan({ x: v.x, y: v.y });
     });
     return () => {
       mounted = false;
@@ -13222,6 +13263,22 @@ export default function HomeScreen() {
     ];
   };
 
+  const humanityPanelOpen = !!nextAppointment && !isActivelyCreating && !nextAptMinimized;
+  const humanityBlocks = humanityPanelOpen
+    ? [humanityObstacles.next, humanityObstacles.transport]
+    : !!nextAppointment && !isActivelyCreating ? [humanityObstacles.pill] : [];
+  // Wait for visible panels to report their complete touch bounds.
+  const humanityPanelsMeasured = humanityBlocks.every(rect => !!rect);
+  const humanityPlacement = humanityPanelsMeasured && posReady ? placeHumanity({
+    cx: screen.width - dockRight - systemBoundingRadius + humanityPan.x,
+    cy: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + humanityPan.y,
+    radius: orbitRadius, buttonSize: orbitBtnSize,
+    satelliteRadius: microR, satelliteSize: microSz, count: INTENTS.length + 1,
+    scale: uiScaleFactor,
+    bounds: { x: insets.left + 8, y: (titleBottomLocalY ?? ACTION_TOP_Y) + 8, width: screen.width - insets.left - insets.right - 16, height: screen.height - insets.bottom - 8 - ((titleBottomLocalY ?? ACTION_TOP_Y) + 8) },
+    obstacles: humanityBlocks.filter((rect): rect is HumanityRect => !!rect),
+  }) : null;
+
   if (!authBootstrapComplete || !modeLoaded) {
     return (
       <View style={{ flex: 1, backgroundColor: "#F7F6F2", alignItems: "center", justifyContent: "center" }}>
@@ -13611,6 +13668,7 @@ export default function HomeScreen() {
         return (
           <View
             key="next-action-open-btn-wrap"
+            onLayout={(e) => measureHumanityObstacle("pill", e.nativeEvent.layout)}
             style={{ position: "absolute", ...proximaSideStyle, bottom: PROXIMA_BOTTOM, zIndex: 7 }}
           >
             <TouchableOpacity
@@ -13676,6 +13734,8 @@ export default function HomeScreen() {
         const total   = allPendientes.length;
         const safeIdx = Math.min(cambiosCardIdx, total - 1);
         const item    = allPendientes[safeIdx];
+        cambiosCardIdxRef.current = safeIdx;
+        cambiosCardTotalRef.current = total;
 
         // ── ESTADO CERRADO — pastilla ──────────────────────────────────
         if (!cambiosOpen) {
@@ -13740,7 +13800,13 @@ export default function HomeScreen() {
         // ── ESTADO ABIERTO — panel con tarjeta + swipe ────────────────
         const BTN_H   = Math.round(Math.min(80, Math.max(56, 64 * uiScaleFactor)));
         const BTN_W   = uiScale === "grande" ? Math.round(BTN_H * 1.18) : Math.round(BTN_H * 1.28);
-        const PANEL_W = 3 * BTN_W + 2 * Math.round(6 * uiScaleFactor);
+        // Reuse Próxima's measured information width without moving its grid.
+        const PANEL_W = Math.min(
+          screen.width - insets.left - insets.right - 2 * PANEL_EDGE,
+          proximaExpanded && humanityObstacles.next
+            ? humanityObstacles.next.width
+            : 3 * BTN_W + 2 * Math.round(6 * uiScaleFactor) + Math.round(96 * uiScaleFactor),
+        );
         const panelSideStyle = handedness === "right" ? { right: PANEL_EDGE } : { left: PANEL_EDGE };
         // Panel bottom: sit just above Próxima pill (PILL_H=46 + 8px gap) when pill
         // is showing, or above the full Próxima expanded panel, or at PROXIMA_BOTTOM.
@@ -13750,6 +13816,7 @@ export default function HomeScreen() {
           : proximaPillShowing
           ? PROXIMA_BOTTOM + _PILL_H + 8
           : PROXIMA_BOTTOM;
+        const panelMaxHeight = Math.max(0, screen.height - panelBottom - insets.top - Math.round(12 * uiScaleFactor));
 
         // Resolver datos de visualización según tipo
         let cardAccent   = ACCENT;
@@ -13787,14 +13854,17 @@ export default function HomeScreen() {
           <View
             key="pendientes-open-panel"
             pointerEvents="box-none"
+            {...cambiosCardPanRef.panHandlers}
             onLayout={(e) => setPendingPanelH(e.nativeEvent.layout.height)}
             style={{
               position: "absolute",
               ...panelSideStyle,
               width: PANEL_W,
               bottom: panelBottom,
-              // Never overflow above the safe area inset
-              maxHeight: Math.max(160, screen.height - panelBottom - (insets.top > 0 ? insets.top : 44) - 8),
+              // The shrinking scroll viewport contains overflow above Próxima;
+              // the header remains visible below the top safe-area margin.
+              maxHeight: panelMaxHeight,
+              minHeight: proximaExpanded ? panelMaxHeight : undefined,
               zIndex: 6,
               gap: Math.round(4 * uiScaleFactor),
             }}
@@ -13854,34 +13924,25 @@ export default function HomeScreen() {
 
             {/* Tarjeta: swipe ← → para navegar */}
             <View
-              onTouchStart={(e) => { cambiosTouchStartRef.current = e.nativeEvent.pageX; }}
-              onTouchEnd={(e) => {
-                const dx = e.nativeEvent.pageX - cambiosTouchStartRef.current;
-                if (Math.abs(dx) < 10) return;
-                if (dx < -24 && safeIdx < total - 1) {
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  setCambiosCardIdx(safeIdx + 1);
-                  Haptics.selectionAsync().catch(() => {});
-                } else if (dx > 24 && safeIdx > 0) {
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  setCambiosCardIdx(safeIdx - 1);
-                  Haptics.selectionAsync().catch(() => {});
-                }
-              }}
               style={{
+                flexShrink: 1,
                 borderRadius: Math.round(12 * uiScaleFactor),
                 backgroundColor: "rgba(15,15,18,0.94)",
                 borderWidth: 1.5,
                 borderColor: cardAccent + "55",
-                paddingHorizontal: Math.round(12 * uiScaleFactor),
-                paddingVertical: Math.round(10 * uiScaleFactor),
                 shadowColor: cardAccent,
                 shadowOpacity: 0.22,
                 shadowRadius: 8,
                 shadowOffset: { width: 0, height: 0 },
                 elevation: 3,
-                gap: Math.round(6 * uiScaleFactor),
+                overflow: "hidden",
               }}
+            >
+            <ScrollView
+              style={{ flexGrow: 0, flexShrink: 1 }}
+              contentContainerStyle={{ paddingHorizontal: Math.round(12 * uiScaleFactor), paddingVertical: Math.round(6 * uiScaleFactor), gap: Math.round(2 * uiScaleFactor) }}
+              directionalLockEnabled
+              showsVerticalScrollIndicator={false}
             >
               {/* Tipo de pendiente */}
               {item.kind === "cambio" && (() => {
@@ -13999,7 +14060,7 @@ export default function HomeScreen() {
 
               {/* Estado: CAMBIO enviado → solo mostrar "Esperando respuesta" */}
               {item.kind === "cambio" && isSent && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: Math.round(4 * uiScaleFactor), paddingVertical: Math.round(6 * uiScaleFactor) }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: Math.round(2 * uiScaleFactor), paddingVertical: Math.round(2 * uiScaleFactor) }}>
                   <Feather name="clock" size={Math.round(11 * uiScaleFactor)} color={ACCENT} />
                   <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>Esperando respuesta</Text>
                 </View>
@@ -14038,6 +14099,7 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                 </View>
               )}
+            </ScrollView>
             </View>
 
             {/* botón de cierre eliminado — lo gestiona el botón único flotante */}
@@ -14225,6 +14287,13 @@ export default function HomeScreen() {
         const row2Btns = ([aCall, aLate, aGo]   as (ActBtnDef | undefined)[]).filter((b): b is ActBtnDef => !!b);
         const numGridCols = Math.max(row1Btns.length, row2Btns.length);
         const PANEL_W = numGridCols * BTN_W + (numGridCols - 1) * ROW_GAP;
+        // The information card can use the unused space toward the opposite
+        // side without changing the action grid's width or anchor.
+        const INFO_W = Math.min(
+          screen.width - insets.left - insets.right - Math.round(24 * uiScaleFactor),
+          PANEL_W + Math.round(96 * uiScaleFactor),
+        );
+        const PANEL_ACTION_GAP = Math.round(12 * uiScaleFactor);
         // PROXIMA_V_EXTRA is frozen for all sizes.
         // User confirmed: "PANEL SUPERIOR → congelarlo, está perfecto".
         const PROXIMA_V_EXTRA = 0;
@@ -14238,7 +14307,16 @@ export default function HomeScreen() {
           <View
             key="proxima-abs-block"
             pointerEvents="box-none"
-            onLayout={(e) => setNextAptPanelH(e.nativeEvent.layout.height)}
+            onLayout={(e) => {
+              const rect = e.nativeEvent.layout;
+              setNextAptPanelH(rect.height);
+              // Include the restored info card overflowing the narrower grid.
+              const width = Math.max(rect.width, INFO_W);
+              measureHumanityObstacle("next", {
+                ...rect, width,
+                x: rect.x - (handedness === "right" ? width - rect.width : 0),
+              });
+            }}
             style={{
               position: "absolute",
               ...panelSideStyle,
@@ -14247,7 +14325,7 @@ export default function HomeScreen() {
               zIndex: 5,
             }}
           >
-            <View style={{ gap: Math.round(3 * uiScaleFactor) }}>
+            <View style={{ gap: PANEL_ACTION_GAP }}>
 
 
               {/* ── INDICADOR DE POSICIÓN + TARJETA — PanResponder unificado ──
@@ -14361,7 +14439,13 @@ export default function HomeScreen() {
               </View>
 
               {/* Caja info — pulsación larga para opciones avanzadas; swipe gestionado por PanResponder superior */}
-              <View style={{ position: "relative" }}>
+              <View
+                style={{
+                  position: "relative",
+                  width: INFO_W,
+                  alignSelf: handedness === "right" ? "flex-end" : "flex-start",
+                }}
+              >
               <Pressable
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -15136,6 +15220,7 @@ export default function HomeScreen() {
           Solo visible cuando el panel está abierto (!nextAptMinimized). */}
       {nextAppointment && !anyOverlayOpen && !isActivelyCreating && !nextAptMinimized && !rutasMode && kbHeight === 0 && (
         <View
+          onLayout={(e) => measureHumanityObstacle("transport", e.nativeEvent.layout)}
           style={(() => {
             // 4 buttons (paddingVertical:6 × 2 + ~22 content) + 3 gaps of 5
             const stripH = 4 * 34 + 3 * 5;
@@ -19403,24 +19488,27 @@ export default function HomeScreen() {
         }}
         userAccountType={userAccountType}
         onSetAccountType={commitAccountType}
+        onSwitchContext={() => { setGoAuthOpen(false); setActiveMode(isBusinessMode ? "USER" : "BUSINESS"); }}
         onOpenPerfil={() => { setGoAuthOpen(false); setCuentaOpen(true); }}
         onOpenEmpresa={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
-        verification={verification}
-        onOpenVerificacion={() => { setGoAuthOpen(false); setVerificacionOpen(true); }}
-        onOpenAdmin={() => { setGoAuthOpen(false); setAdminDashOpen(true); }}
+        verification={{ ...verification, status: businessAccess.snapshot?.status === "verificada" ? "verified"
+          : businessAccess.snapshot?.status === "rechazada" ? "rejected"
+          : businessAccess.snapshot?.status === "pendiente_verificacion" ? "pending" : "none" }}
+        onOpenVerificacion={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
+        onOpenAdmin={() => { setGoAuthOpen(false); setActiveMode("BUSINESS"); if (businessAccess.allowed) setAdminDashOpen(true); }}
       />
 
-      <GoAdminDashboard
+      {businessAccess.allowed && <GoAdminDashboard
         visible={adminDashOpen}
         onClose={() => setAdminDashOpen(false)}
-      />
+      />}
 
       {/* ── VERIFICACIÓN EMPRESA — subida de documentos y estado ──────── */}
-      <VerificacionEmpresaPanel
+      {businessAccess.allowed && <VerificacionEmpresaPanel
         visible={verificacionOpen}
         onClose={() => setVerificacionOpen(false)}
         onVerificationChange={handleVerificationChange}
-      />
+      />}
 
       {/* ── CUENTA — Mi Perfil (panel completo con navegación GO) ──────── */}
       <PerfilPanel
@@ -19632,7 +19720,10 @@ export default function HomeScreen() {
           )}
           <Pressable onPress={() => setCalPanelOpen(false)} style={{ flex: 1 }}>
             {/* Header row: label izquierda + config toggle derecha */}
-            <View style={{ paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+            <View
+              pointerEvents={showBookingFromCal ? "none" : "auto"}
+              style={{ opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+            >
               <Text style={{ color: "#ffffff", fontSize: 9, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.5, textShadowColor: "rgba(255,255,255,0.6)", textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 6 }}>
                 {calBgViewMode === "dia" ? t("cal_view_day") : t("cal_label_week")}
               </Text>
@@ -26349,7 +26440,7 @@ export default function HomeScreen() {
       />
 
       {/* ── EMPRESA GO — Arquitectura económica completa ──────────────── */}
-      <EmpresaPanel
+      {businessAccess.allowed && <EmpresaPanel
         visible={empresaOpen}
         initialModulo={empresaModulo as any}
         onClose={() => { setEmpresaOpen(false); setEmpresaModulo("home"); }}
@@ -26371,12 +26462,12 @@ export default function HomeScreen() {
             updateBizCfg({ isBusinessActive: true, bookingEnabled: true });
           }
         }}
-      />
+      />}
 
       {/* ── ACTIVACIÓN COBROS — se renderiza aquí (nivel raíz) para evitar
           el problema de Modales anidados en iOS/Expo 54. Se muestra tras
           completar el wizard de 8 pasos de EmpresaConfigScreen. ── */}
-      <ActivacionCobrosScreen
+      {businessAccess.allowed && <ActivacionCobrosScreen
         visible={activacionCobrosOpen}
         initialScreen={activacionInitialScreen}
         onClose={() => {
@@ -26386,16 +26477,11 @@ export default function HomeScreen() {
           setEmpresaModulo("home");
           dismissEmpresaHint();
         }}
-      />
+      />}
 
 
-      {/* ── GLOBO HUMANITY — botón independiente a la izquierda del GO ──
-          Mismo tamaño que los satélites orbitales (orbitBtnSize).
-          Se oculta cuando hay overlays abiertos, el teclado está arriba,
-          o el panel de próxima visita está expandido.
-          POSICIÓN DINÁMICA: humanityLift/humanityLeftNudge se calculan
-          arriba en el cuerpo del componente y se aplican aquí. */}
-      {!anyOverlayOpen && !rutasMode && kbHeight === 0 && nextAptMinimized && orbitSecondLevel === null && (
+      {/* HUMANITY follows the upper-left of the orbit; label and hit area share the collision bounds. */}
+      {!anyOverlayOpen && !rutasMode && kbHeight === 0 && orbitSecondLevel === null && humanityPlacement && (
         <TouchableOpacity
           activeOpacity={0.82}
           onPress={() => {
@@ -26404,11 +26490,11 @@ export default function HomeScreen() {
           }}
           style={{
             position: "absolute",
-            left: Math.max(insets.left + 14, 16) - humanityLeftNudge,
-            bottom: Math.max(insets.bottom + 14, 18) + humanityLift,
-            width: orbitBtnSize,
-            height: orbitBtnSize,
-            borderRadius: orbitBtnSize / 2,
+            left: humanityPlacement.x,
+            top: humanityPlacement.y,
+            width: humanityPlacement.width,
+            height: humanityPlacement.height,
+            borderRadius: humanityPlacement.globe / 2,
             zIndex: 9990,
             shadowColor: "#1d6fa8",
             shadowOpacity: 0.55,
@@ -26416,7 +26502,8 @@ export default function HomeScreen() {
             shadowOffset: { width: 0, height: 0 },
             elevation: 12,
             alignItems: "center",
-            justifyContent: "center",
+            justifyContent: "flex-start",
+            paddingTop: 5,
             overflow: "visible",
           }}
         >
@@ -26425,25 +26512,26 @@ export default function HomeScreen() {
             pointerEvents="none"
             style={{
               position: "absolute",
-              width: orbitBtnSize + 10,
-              height: orbitBtnSize + 10,
-              borderRadius: (orbitBtnSize + 10) / 2,
+              top: 2,
+              width: humanityPlacement.globe + 6,
+              height: humanityPlacement.globe + 6,
+              borderRadius: (humanityPlacement.globe + 6) / 2,
               borderWidth: 1.2,
               borderColor: "rgba(80,180,255,0.28)",
             }}
           />
           {/* Cinematic Earth globe — photorealistic satellite image */}
           <View style={{
-            width: orbitBtnSize,
-            height: orbitBtnSize,
-            borderRadius: orbitBtnSize / 2,
+            width: humanityPlacement.globe,
+            height: humanityPlacement.globe,
+            borderRadius: humanityPlacement.globe / 2,
             overflow: "hidden",
             borderWidth: 1,
             borderColor: "rgba(100,200,255,0.30)",
           }}>
             <Image
               source={require("../assets/images/humanity_globe.png")}
-              style={{ width: orbitBtnSize, height: orbitBtnSize }}
+              style={{ width: humanityPlacement.globe, height: humanityPlacement.globe }}
               resizeMode="cover"
             />
             {/* Atmospheric limb glow */}
@@ -26452,20 +26540,22 @@ export default function HomeScreen() {
               style={{
                 position: "absolute",
                 top: 0, left: 0, right: 0, bottom: 0,
-                borderRadius: orbitBtnSize / 2,
-                borderWidth: Math.round(orbitBtnSize * 0.055),
+                borderRadius: humanityPlacement.globe / 2,
+                borderWidth: Math.round(humanityPlacement.globe * 0.055),
                 borderColor: "rgba(80,180,255,0.22)",
               }}
             />
           </View>
           {/* Label */}
-          <Text style={{
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={{
             position: "absolute",
-            bottom: -Math.round(orbitBtnSize * 0.32),
+            bottom: 0,
+            width: "100%",
             color: "rgba(255,255,255,0.72)",
-            fontSize: Math.max(6, Math.round(orbitBtnSize * 0.105)),
+            fontSize: 9,
+            lineHeight: 12,
             fontWeight: "700",
-            letterSpacing: 0.8,
+            letterSpacing: 0.4,
             textAlign: "center",
           }}>
             HUMANITY
