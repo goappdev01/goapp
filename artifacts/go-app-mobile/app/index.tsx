@@ -81,6 +81,7 @@ import {
 import { MessagesScreen } from "@/components/MessagesScreen";
 import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
+import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { ResiduosPanel } from "@/components/ResiduosPanel";
 import { PerfilPanel } from "@/components/perfil/PerfilPanel";
 import { HerramientasPanel } from "@/components/herramientas/HerramientasPanel";
@@ -3805,6 +3806,11 @@ function HomeScreenContent() {
   // tarjeta de próxima cita. Se resetea a null cuando la tarjeta deja
   // de renderizarse (ver useEffect que la limpia).
   const [nextAptBottomY, setNextAptBottomY] = useState<number | null>(null);
+  const [humanityPan, setHumanityPan] = useState({ x: 0, y: 0 });
+  const [humanityObstacles, setHumanityObstacles] = useState<Record<string, HumanityRect>>({});
+  const measureHumanityObstacle = (key: string, rect: HumanityRect) => {
+    setHumanityObstacles(prev => JSON.stringify(prev[key]) === JSON.stringify(rect) ? prev : { ...prev, [key]: rect });
+  };
   const [nextAptPanelH, setNextAptPanelH] = useState(0);
   const [nextAptMinimized, setNextAptMinimized] = useState(true);
   // Altura del panel "Cambios pendientes" — para apilar sobre próxima visita.
@@ -11497,17 +11503,6 @@ function HomeScreenContent() {
   const orbitRadiusVisual = orbitRadius;
   const orbitWrapSize = (orbitRadius + orbitBtnSize / 2) * 2 + 12;
 
-  // ── HUMANITY DYNAMIC POSITION ────────────────────────────────────────
-  // When GO grows (uiScaleFactor > 1 = "grande"), the lower-left orbital
-  // satellites expand outward toward HUMANITY's corner.
-  // Lift HUMANITY upward (and nudge slightly further left) to maintain
-  // clear visual air between it and the satellite arc.
-  //   standard (1.00): +0 px — no change.
-  //   grande   (1.12): ≈ +22 px up, ≈ +8 px left.
-  //   compacto (0.83): +0 px — clamped at zero, no downward shift.
-  const humanityLift      = Math.round(Math.max(0, uiScaleFactor - 1.0) * orbitBtnSize * 2.5);
-  const humanityLeftNudge = Math.round(humanityLift * 0.35);
-
   // ── BOUNDING RADIUS REAL DEL SISTEMA ORBITAL ────────────────────────
   // Los micro-satélites funcionales (campana, mensajes, agenda, etc.)
   // orbitan a microR = orbitRadius + 31*scale, que supera al anillo de
@@ -11698,10 +11693,12 @@ function HomeScreenContent() {
     if (!willRenderHorizontal && nextAptBottomY !== null) {
       setNextAptBottomY(null);
     }
-    if (!willRenderHorizontal && nextAptPanelH !== 0) {
+    const willRenderExpanded =
+      !!nextAppointment && !anyOverlayOpen && !isActivelyCreating && !nextAptMinimized && !rutasMode;
+    if (!willRenderExpanded && nextAptPanelH !== 0) {
       setNextAptPanelH(0);
     }
-  }, [nextAppointment, anyOverlayOpen, useCompactNextApt, nextAptBottomY, nextAptPanelH]);
+  }, [nextAppointment, anyOverlayOpen, useCompactNextApt, nextAptBottomY, nextAptPanelH, isActivelyCreating, nextAptMinimized, rutasMode]);
 
   // Resetear el índice del carrusel si la lista cambia de tamaño
   // (p.ej. se elimina la tarjeta activa o llega una nueva).
@@ -12616,6 +12613,7 @@ function HomeScreenContent() {
     const sub = pan.addListener((v) => {
       posRef.x = v.x;
       posRef.y = v.y;
+      setHumanityPan({ x: v.x, y: v.y });
     });
     return () => {
       mounted = false;
@@ -13234,6 +13232,22 @@ function HomeScreenContent() {
     ];
   };
 
+  const humanityPanelOpen = !!nextAppointment && !isActivelyCreating && !nextAptMinimized;
+  const humanityBlocks = humanityPanelOpen
+    ? [humanityObstacles.next, humanityObstacles.transport]
+    : !!nextAppointment && !isActivelyCreating ? [humanityObstacles.pill] : [];
+  // Wait for visible panels to report their complete touch bounds.
+  const humanityPanelsMeasured = humanityBlocks.every(rect => !!rect);
+  const humanityPlacement = humanityPanelsMeasured && posReady ? placeHumanity({
+    cx: screen.width - dockRight - systemBoundingRadius + humanityPan.x,
+    cy: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + humanityPan.y,
+    radius: orbitRadius, buttonSize: orbitBtnSize,
+    satelliteRadius: microR, satelliteSize: microSz, count: INTENTS.length + 1,
+    scale: uiScaleFactor,
+    bounds: { x: insets.left + 8, y: (titleBottomLocalY ?? ACTION_TOP_Y) + 8, width: screen.width - insets.left - insets.right - 16, height: screen.height - insets.bottom - 8 - ((titleBottomLocalY ?? ACTION_TOP_Y) + 8) },
+    obstacles: humanityBlocks.filter((rect): rect is HumanityRect => !!rect),
+  }) : null;
+
   if (!authBootstrapComplete || !modeLoaded) {
     return (
       <View style={{ flex: 1, backgroundColor: "#F7F6F2", alignItems: "center", justifyContent: "center" }}>
@@ -13623,6 +13637,7 @@ function HomeScreenContent() {
         return (
           <View
             key="next-action-open-btn-wrap"
+            onLayout={(e) => measureHumanityObstacle("pill", e.nativeEvent.layout)}
             style={{ position: "absolute", ...proximaSideStyle, bottom: PROXIMA_BOTTOM, zIndex: 7 }}
           >
             <TouchableOpacity
@@ -14257,7 +14272,16 @@ function HomeScreenContent() {
           <View
             key="proxima-abs-block"
             pointerEvents="box-none"
-            onLayout={(e) => setNextAptPanelH(e.nativeEvent.layout.height)}
+            onLayout={(e) => {
+              const rect = e.nativeEvent.layout;
+              setNextAptPanelH(rect.height);
+              // Include the restored info card overflowing the narrower grid.
+              const width = Math.max(rect.width, INFO_W);
+              measureHumanityObstacle("next", {
+                ...rect, width,
+                x: rect.x - (handedness === "right" ? width - rect.width : 0),
+              });
+            }}
             style={{
               position: "absolute",
               ...panelSideStyle,
@@ -15161,6 +15185,7 @@ function HomeScreenContent() {
           Solo visible cuando el panel está abierto (!nextAptMinimized). */}
       {nextAppointment && !anyOverlayOpen && !isActivelyCreating && !nextAptMinimized && !rutasMode && kbHeight === 0 && (
         <View
+          onLayout={(e) => measureHumanityObstacle("transport", e.nativeEvent.layout)}
           style={(() => {
             // 4 buttons (paddingVertical:6 × 2 + ~22 content) + 3 gaps of 5
             const stripH = 4 * 34 + 3 * 5;
@@ -26417,13 +26442,8 @@ function HomeScreenContent() {
       />}
 
 
-      {/* ── GLOBO HUMANITY — botón independiente a la izquierda del GO ──
-          Mismo tamaño que los satélites orbitales (orbitBtnSize).
-          Se oculta cuando hay overlays abiertos, el teclado está arriba,
-          o el panel de próxima visita está expandido.
-          POSICIÓN DINÁMICA: humanityLift/humanityLeftNudge se calculan
-          arriba en el cuerpo del componente y se aplican aquí. */}
-      {!anyOverlayOpen && !rutasMode && kbHeight === 0 && nextAptMinimized && orbitSecondLevel === null && (
+      {/* HUMANITY follows the upper-left of the orbit; label and hit area share the collision bounds. */}
+      {!anyOverlayOpen && !rutasMode && kbHeight === 0 && orbitSecondLevel === null && humanityPlacement && (
         <TouchableOpacity
           activeOpacity={0.82}
           onPress={() => {
@@ -26432,11 +26452,11 @@ function HomeScreenContent() {
           }}
           style={{
             position: "absolute",
-            left: Math.max(insets.left + 14, 16) - humanityLeftNudge,
-            bottom: Math.max(insets.bottom + 14, 18) + humanityLift,
-            width: orbitBtnSize,
-            height: orbitBtnSize,
-            borderRadius: orbitBtnSize / 2,
+            left: humanityPlacement.x,
+            top: humanityPlacement.y,
+            width: humanityPlacement.width,
+            height: humanityPlacement.height,
+            borderRadius: humanityPlacement.globe / 2,
             zIndex: 9990,
             shadowColor: "#1d6fa8",
             shadowOpacity: 0.55,
@@ -26444,7 +26464,8 @@ function HomeScreenContent() {
             shadowOffset: { width: 0, height: 0 },
             elevation: 12,
             alignItems: "center",
-            justifyContent: "center",
+            justifyContent: "flex-start",
+            paddingTop: 5,
             overflow: "visible",
           }}
         >
@@ -26453,25 +26474,26 @@ function HomeScreenContent() {
             pointerEvents="none"
             style={{
               position: "absolute",
-              width: orbitBtnSize + 10,
-              height: orbitBtnSize + 10,
-              borderRadius: (orbitBtnSize + 10) / 2,
+              top: 2,
+              width: humanityPlacement.globe + 6,
+              height: humanityPlacement.globe + 6,
+              borderRadius: (humanityPlacement.globe + 6) / 2,
               borderWidth: 1.2,
               borderColor: "rgba(80,180,255,0.28)",
             }}
           />
           {/* Cinematic Earth globe — photorealistic satellite image */}
           <View style={{
-            width: orbitBtnSize,
-            height: orbitBtnSize,
-            borderRadius: orbitBtnSize / 2,
+            width: humanityPlacement.globe,
+            height: humanityPlacement.globe,
+            borderRadius: humanityPlacement.globe / 2,
             overflow: "hidden",
             borderWidth: 1,
             borderColor: "rgba(100,200,255,0.30)",
           }}>
             <Image
               source={require("../assets/images/humanity_globe.png")}
-              style={{ width: orbitBtnSize, height: orbitBtnSize }}
+              style={{ width: humanityPlacement.globe, height: humanityPlacement.globe }}
               resizeMode="cover"
             />
             {/* Atmospheric limb glow */}
@@ -26480,20 +26502,22 @@ function HomeScreenContent() {
               style={{
                 position: "absolute",
                 top: 0, left: 0, right: 0, bottom: 0,
-                borderRadius: orbitBtnSize / 2,
-                borderWidth: Math.round(orbitBtnSize * 0.055),
+                borderRadius: humanityPlacement.globe / 2,
+                borderWidth: Math.round(humanityPlacement.globe * 0.055),
                 borderColor: "rgba(80,180,255,0.22)",
               }}
             />
           </View>
           {/* Label */}
-          <Text style={{
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={{
             position: "absolute",
-            bottom: -Math.round(orbitBtnSize * 0.32),
+            bottom: 0,
+            width: "100%",
             color: "rgba(255,255,255,0.72)",
-            fontSize: Math.max(6, Math.round(orbitBtnSize * 0.105)),
+            fontSize: 9,
+            lineHeight: 12,
             fontWeight: "700",
-            letterSpacing: 0.8,
+            letterSpacing: 0.4,
             textAlign: "center",
           }}>
             HUMANITY

@@ -33,3 +33,14 @@ La cuadrícula de seis botones, transporte, handlers y anclajes permanecen igual
 - `git diff --check`: correcto; aviso de conversión LF/CRLF de Windows, sin errores de espacios.
 - Los bloques de ancho y separación recuperados coinciden con el worktree experimental. No se modificó ese worktree ni Metro, producción, esquema, autorización, autenticación o flujo de confirmación.
 - Pendientes: comparación visual en iPhone; reserva real bloqueada por la incompatibilidad de catálogo descrita y ausencia de negocio/servicio real autorizado.
+
+## Recuperación adicional del Landing — 07/10/2026
+
+Se actualizaron las referencias de origin y se revisaron todos los historiales disponibles. El commit b8254e5 conserva una selección de cambios del experimento visual, pero no incluye humanityPlacement.ts ni la recolocación de Humanity. Estos cambios están conservados en el working tree de goapp-expo57, basado en ae3e3d6; no se encontró un commit local/remoto que los contenga. No atribuirles un respaldo GitHub que el historial disponible no acredita.
+
+- Próxima ancha: ya recuperada y publicada en 5b0bf99. Se mantiene exactamente INFO_W, alineación y PANEL_ACTION_GAP; no se repite ni sustituye ese trabajo.
+- Humanity: se copia íntegro el helper conservado y se recupera su conexión con el centro orbital, las medidas de los paneles, el tamaño del globo y la etiqueta de una línea. Se conservan colores, efectos y acción actuales; no se importan otros cambios visuales del experimento. La medida de colisión incluye el ancho real de la ficha, aunque sobresalga de la cuadrícula estrecha.
+- Separación: el espaciado de apilado conservado es 8 por escala; no se inventa otro. Se encontró además un defecto preexistente en la limpieza de medidas: el efecto borraba nextAptPanelH en compacto aunque Próxima expandida siguiese renderizada. Esto desactivaba proximaExpanded y colocaba Cambios en el mismo anclaje inferior. Ahora se conserva la altura en todos los tamaños mientras el panel está visible y solo se borra cuando deja de estarlo. Los tests cubren ambos tamaños lógicos y los estados ocultos.
+- Metro activo: manifiesto de 8081 identifica este worktree y exposdk:57.0.0. No se reinició ni cambió Metro.
+- Validación: TypeScript móvil correcto; dos tests de recuperación correctos (altura y colisiones de Humanity para escalas 0.83/1/1.12, con paneles y sin ellos). El helper coincide byte por byte con el conservado. Los 357 handlers/opciones onPress, onLongPress, onPressIn, onPressOut, delayLongPress y hitSlop coinciden con HEAD anterior. Diff limitado al Landing, helper, test y esta bitácora; sin cambios funcionales ajenos, backend o producción.
+- Pendiente: comprobar visualmente en iPhone la ficha ancha, los tres bloques simultáneos y Humanity junto a Otro. No se da por superada esa observación humana mediante tests automáticos.

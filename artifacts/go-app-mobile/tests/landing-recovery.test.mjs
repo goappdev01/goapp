@@ -1,0 +1,73 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import vm from 'node:vm';
+
+const require = createRequire(path.join(process.cwd(), 'package.json'));
+const ts = require('typescript');
+const source = readFileSync('app/index.tsx', 'utf8');
+const home = ts.createSourceFile('index.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+function find(node, predicate) {
+  if (predicate(node)) return node;
+  let found;
+  ts.forEachChild(node, child => { if (!found) found = find(child, predicate); });
+  return found;
+}
+
+test('expanded Próxima keeps its measured height in every size; only hidden panels clear it', () => {
+  const effect = find(home, node => ts.isCallExpression(node)
+    && node.expression.getText(home) === 'useEffect'
+    && node.arguments[0]?.getText(home).includes('const willRenderHorizontal'));
+  assert.ok(effect);
+  const callback = effect.arguments[0].getText(home);
+  for (const useCompactNextApt of [true, false]) {
+    for (const overrides of [{}, { nextAptMinimized: true }, { anyOverlayOpen: true },
+      { isActivelyCreating: true }, { rutasMode: true }, { nextAppointment: null }]) {
+      const state = {
+        nextAppointment: {}, anyOverlayOpen: false, isActivelyCreating: false,
+        nextAptMinimized: false, rutasMode: false, useCompactNextApt,
+        nextAptBottomY: null, nextAptPanelH: 260, ...overrides,
+      };
+      const cleared = [];
+      vm.runInNewContext(`(${callback})()`, {
+        ...state, setNextAptBottomY() {}, setNextAptPanelH: value => cleared.push(value),
+      });
+      assert.deepEqual(cleared, Object.keys(overrides).length ? [0] : []);
+    }
+  }
+});
+
+test('recovered Humanity placement includes its label and avoids orbital and panel touch rectangles', () => {
+  const exports = {};
+  vm.runInNewContext(ts.transpileModule(
+    readFileSync('components/landing/humanityPlacement.ts', 'utf8'),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
+  ).outputText, { exports });
+  const { placeHumanity, overlapsHumanity } = exports;
+  for (const scale of [0.83, 1, 1.12]) {
+    const radius = Math.round(99 * scale), buttonSize = Math.round(65 * scale);
+    const satelliteRadius = radius + Math.round(35 * scale), satelliteSize = Math.round(50 * scale);
+    const bounds = { x: 8, y: 120, width: 374, height: 682 };
+    const cx = 390 - satelliteRadius - satelliteSize / 2;
+    const cy = 844 - 34 - 6 - ((radius + buttonSize / 2) * 2 + 12) / 2;
+    for (const obstacles of [[], [{ x: 18, y: 220, width: 354, height: 160 }]]) {
+      const result = placeHumanity({ cx, cy, radius, buttonSize, satelliteRadius,
+        satelliteSize, count: 7, bounds, obstacles, scale });
+      assert.ok(result, `space available at scale ${scale}`);
+      assert.ok(result.x + result.width / 2 < cx && result.y + result.height / 2 < cy);
+      assert.ok(result.x >= bounds.x && result.x + result.width <= bounds.x + bounds.width);
+      assert.ok(result.y >= bounds.y && result.y + result.height <= bounds.y + bounds.height);
+      assert.ok(result.height >= result.globe + 20);
+      const occupied = [...obstacles];
+      const add = (a, r, size) => occupied.push({ x: cx + Math.cos(a) * r - size / 2,
+        y: cy + Math.sin(a) * r - size / 2, width: size, height: size });
+      for (let i = 0; i < 7; i++) add(-Math.PI / 2 + i * 2 * Math.PI / 7, radius, buttonSize + 8);
+      for (let i = 0; i < 8; i++) add((-112.5 + i * 45) * Math.PI / 180, satelliteRadius, satelliteSize + 8);
+      assert.ok(occupied.every(rect => !overlapsHumanity(result, rect)));
+    }
+    assert.equal(placeHumanity({ cx, cy, radius, buttonSize, satelliteRadius,
+      satelliteSize, count: 7, bounds, obstacles: [bounds], scale }), null);
+  }
+});
