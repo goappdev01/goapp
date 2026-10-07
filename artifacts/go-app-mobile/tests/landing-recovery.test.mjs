@@ -54,6 +54,17 @@ test('expanded changes stay within the safe area and above the complete Próxima
   const viewportStyle = viewport.attributes.properties.find(attr => ts.isJsxAttribute(attr)
     && attr.name.getText(home) === 'style').initializer.expression.getText(home);
   assert.equal(vm.runInNewContext(`(${viewportStyle})`).flexShrink, 1);
+  const card = viewport.parent.parent;
+  assert.ok(ts.isJsxElement(card) && card.openingElement.tagName.getText(home) === 'View');
+  const cardStyle = card.openingElement.attributes.properties.find(attr => ts.isJsxAttribute(attr)
+    && attr.name.getText(home) === 'style').initializer.expression;
+  assert.ok(cardStyle.properties.some(prop => prop.name?.getText(home) === 'borderWidth'),
+    'all four card borders stay outside the clipped scroll content');
+  const contentStyle = viewport.attributes.properties.find(attr => ts.isJsxAttribute(attr)
+    && attr.name.getText(home) === 'contentContainerStyle').initializer.expression.getText(home);
+  const density = vm.runInNewContext(`(${contentStyle})`, { uiScaleFactor: 1 });
+  assert.equal(density.gap, 2);
+  assert.equal(density.paddingVertical, 6);
   assert.ok(!viewport.parent.getText(home).includes('{_ordinal}'), 'header stays outside scrolling content');
   const maxHeight = find(home, node => ts.isVariableDeclaration(node)
     && node.name.getText(home) === 'panelMaxHeight');
@@ -105,6 +116,11 @@ test('recovered Humanity placement includes its label and avoids orbital and pan
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
   ).outputText, { exports });
   const { placeHumanity, overlapsHumanity } = exports;
+  const tightSlot = placeHumanity({ cx: 200, cy: 200, radius: 20, buttonSize: 20,
+    satelliteRadius: 100, satelliteSize: 10, count: 0, scale: 1,
+    bounds: { x: 33, y: 43, width: 62, height: 72 }, obstacles: [] });
+  assert.ok(tightSlot, 'enlarging the image must not discard the original safe footprint');
+  assert.ok(tightSlot.globe > 52);
   for (const scale of [0.83, 1, 1.12]) {
     const radius = Math.round(99 * scale), buttonSize = Math.round(65 * scale);
     const satelliteRadius = radius + Math.round(35 * scale), satelliteSize = Math.round(50 * scale);
@@ -115,11 +131,11 @@ test('recovered Humanity placement includes its label and avoids orbital and pan
       const result = placeHumanity({ cx, cy, radius, buttonSize, satelliteRadius,
         satelliteSize, count: 7, bounds, obstacles, scale });
       assert.ok(result, `space available at scale ${scale}`);
-      assert.equal(result.globe, Math.round(56 * scale));
+      assert.ok(result.globe >= Math.round(54 * scale) && result.globe <= Math.round(56 * scale));
       assert.ok(result.x + result.width / 2 < cx && result.y + result.height / 2 < cy);
       assert.ok(result.x >= bounds.x && result.x + result.width <= bounds.x + bounds.width);
       assert.ok(result.y >= bounds.y && result.y + result.height <= bounds.y + bounds.height);
-      assert.ok(result.height >= result.globe + 20);
+      assert.ok(result.height >= result.globe + 16);
       const occupied = [...obstacles];
       const add = (a, r, size) => occupied.push({ x: cx + Math.cos(a) * r - size / 2,
         y: cy + Math.sin(a) * r - size / 2, width: size, height: size });

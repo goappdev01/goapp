@@ -13864,6 +13864,7 @@ function HomeScreenContent() {
               // The shrinking scroll viewport contains overflow above Próxima;
               // the header remains visible below the top safe-area margin.
               maxHeight: panelMaxHeight,
+              minHeight: proximaExpanded ? panelMaxHeight : undefined,
               zIndex: 6,
               gap: Math.round(4 * uiScaleFactor),
             }}
@@ -13922,26 +13923,26 @@ function HomeScreenContent() {
             })()}
 
             {/* Tarjeta: swipe ← → para navegar */}
-            <ScrollView
-              style={{ flexGrow: 0, flexShrink: 1 }}
-              directionalLockEnabled
-              showsVerticalScrollIndicator={false}
-            >
             <View
               style={{
+                flexShrink: 1,
                 borderRadius: Math.round(12 * uiScaleFactor),
                 backgroundColor: "rgba(15,15,18,0.94)",
                 borderWidth: 1.5,
                 borderColor: cardAccent + "55",
-                paddingHorizontal: Math.round(12 * uiScaleFactor),
-                paddingVertical: Math.round(10 * uiScaleFactor),
                 shadowColor: cardAccent,
                 shadowOpacity: 0.22,
                 shadowRadius: 8,
                 shadowOffset: { width: 0, height: 0 },
                 elevation: 3,
-                gap: Math.round(6 * uiScaleFactor),
+                overflow: "hidden",
               }}
+            >
+            <ScrollView
+              style={{ flexGrow: 0, flexShrink: 1 }}
+              contentContainerStyle={{ paddingHorizontal: Math.round(12 * uiScaleFactor), paddingVertical: Math.round(6 * uiScaleFactor), gap: Math.round(2 * uiScaleFactor) }}
+              directionalLockEnabled
+              showsVerticalScrollIndicator={false}
             >
               {/* Tipo de pendiente */}
               {item.kind === "cambio" && (() => {
@@ -14059,7 +14060,7 @@ function HomeScreenContent() {
 
               {/* Estado: CAMBIO enviado → solo mostrar "Esperando respuesta" */}
               {item.kind === "cambio" && isSent && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: Math.round(4 * uiScaleFactor), paddingVertical: Math.round(6 * uiScaleFactor) }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: Math.round(2 * uiScaleFactor), paddingVertical: Math.round(2 * uiScaleFactor) }}>
                   <Feather name="clock" size={Math.round(11 * uiScaleFactor)} color={ACCENT} />
                   <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>Esperando respuesta</Text>
                 </View>
@@ -14098,10 +14099,10 @@ function HomeScreenContent() {
                   </TouchableOpacity>
                 </View>
               )}
+            </ScrollView>
             </View>
 
             {/* botón de cierre eliminado — lo gestiona el botón único flotante */}
-            </ScrollView>
           </View>
         );
       })()}
