@@ -42,6 +42,17 @@ test('booking API validates ownership, durations, conflicts and cancellation', a
   const booking = { business_id:id, service_id:id, starts_at:'2035-01-01T10:00:00Z', ends_at:'2035-01-01T11:00:00Z' };
   try {
     assert.equal((await request('/bookings', booking, false)).status, 401);
+    // Local/demo catalogue IDs must not become real bookings or reach a write.
+    for (const fields of [
+      { business_id: 'demo_biz_padel' },
+      { service_id: 'local_service_1' },
+      { staff_id: 'nemesi-demo-v1_staff_isa' },
+    ]) {
+      const rejected = await request('/bookings', { ...booking, ...fields });
+      assert.equal(rejected.status, 400);
+      assert.equal((await rejected.json()).error, 'Invalid booking: check IDs, future dates, status and notes');
+    }
+    assert.equal(writes, 0);
     assert.equal((await request('/bookings', {...booking, ends_at:booking.starts_at})).status, 400);
     assert.equal((await request('/bookings', {...booking, customer_id:'another-user'})).status, 403);
     mode='wrong-service'; assert.equal((await request('/bookings', booking)).status, 400);

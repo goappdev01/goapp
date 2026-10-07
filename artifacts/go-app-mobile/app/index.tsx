@@ -14237,6 +14237,13 @@ function HomeScreenContent() {
         const row2Btns = ([aCall, aLate, aGo]   as (ActBtnDef | undefined)[]).filter((b): b is ActBtnDef => !!b);
         const numGridCols = Math.max(row1Btns.length, row2Btns.length);
         const PANEL_W = numGridCols * BTN_W + (numGridCols - 1) * ROW_GAP;
+        // The information card can use the unused space toward the opposite
+        // side without changing the action grid's width or anchor.
+        const INFO_W = Math.min(
+          screen.width - insets.left - insets.right - Math.round(24 * uiScaleFactor),
+          PANEL_W + Math.round(96 * uiScaleFactor),
+        );
+        const PANEL_ACTION_GAP = Math.round(12 * uiScaleFactor);
         // PROXIMA_V_EXTRA is frozen for all sizes.
         // User confirmed: "PANEL SUPERIOR → congelarlo, está perfecto".
         const PROXIMA_V_EXTRA = 0;
@@ -14259,7 +14266,7 @@ function HomeScreenContent() {
               zIndex: 5,
             }}
           >
-            <View style={{ gap: Math.round(3 * uiScaleFactor) }}>
+            <View style={{ gap: PANEL_ACTION_GAP }}>
 
 
               {/* ── INDICADOR DE POSICIÓN + TARJETA — PanResponder unificado ──
@@ -14373,7 +14380,13 @@ function HomeScreenContent() {
               </View>
 
               {/* Caja info — pulsación larga para opciones avanzadas; swipe gestionado por PanResponder superior */}
-              <View style={{ position: "relative" }}>
+              <View
+                style={{
+                  position: "relative",
+                  width: INFO_W,
+                  alignSelf: handedness === "right" ? "flex-end" : "flex-start",
+                }}
+              >
               <Pressable
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
