@@ -13820,8 +13820,8 @@ function HomeScreenContent() {
               ...panelSideStyle,
               width: PANEL_W,
               bottom: panelBottom,
-              // Never overflow above the safe area inset
-              maxHeight: Math.max(160, screen.height - panelBottom - (insets.top > 0 ? insets.top : 44) - 8),
+              // Keep the full content height above Próxima: a maxHeight here
+              // lets non-shrinking children overflow below this bottom anchor.
               zIndex: 6,
               gap: Math.round(4 * uiScaleFactor),
             }}

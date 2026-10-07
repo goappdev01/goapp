@@ -39,6 +39,36 @@ test('expanded Próxima keeps its measured height in every size; only hidden pan
   }
 });
 
+test('expanded changes use their natural height and remain above the complete Próxima panel', () => {
+  const panel = find(home, node => ts.isJsxOpeningElement(node)
+    && node.attributes.properties.some(attr => ts.isJsxAttribute(attr)
+      && attr.name.getText(home) === 'key'
+      && attr.initializer?.getText(home) === '"pendientes-open-panel"'));
+  assert.ok(panel);
+  const style = panel.attributes.properties.find(attr => ts.isJsxAttribute(attr)
+    && attr.name.getText(home) === 'style').initializer.expression;
+  assert.ok(!style.properties.some(prop => ['height', 'maxHeight'].includes(prop.name?.getText(home))));
+  const bottom = find(home, node => ts.isVariableDeclaration(node)
+    && node.name.getText(home) === 'panelBottom');
+  assert.ok(bottom);
+  for (const uiScaleFactor of [0.83, 1, 1.12]) {
+    for (const nextAptPanelH of [180, 260, 420]) {
+      for (const proposalHeight of [120, 240, 360]) {
+        const anchor = vm.runInNewContext(bottom.initializer.getText(home), {
+          proximaExpanded: true, PROXIMA_BOTTOM: 320, nextAptPanelH,
+          uiScaleFactor, proximaPillShowing: false, _PILL_H: 46,
+        });
+        const nextTop = 844 - 320 - nextAptPanelH;
+        const proposalTop = 844 - anchor - proposalHeight;
+        assert.equal(nextTop - (proposalTop + proposalHeight), Math.round(8 * uiScaleFactor));
+      }
+    }
+  }
+  assert.equal(vm.runInNewContext(bottom.initializer.getText(home), {
+    proximaExpanded: false, proximaPillShowing: false, PROXIMA_BOTTOM: 320,
+  }), 320, 'no extra gap when Próxima is absent');
+});
+
 test('recovered Humanity placement includes its label and avoids orbital and panel touch rectangles', () => {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(
