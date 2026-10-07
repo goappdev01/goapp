@@ -39,7 +39,7 @@ test('expanded Próxima keeps its measured height in every size; only hidden pan
   }
 });
 
-test('expanded changes use their natural height and remain above the complete Próxima panel', () => {
+test('expanded changes stay within the safe area and above the complete Próxima panel', () => {
   const panel = find(home, node => ts.isJsxOpeningElement(node)
     && node.attributes.properties.some(attr => ts.isJsxAttribute(attr)
       && attr.name.getText(home) === 'key'
@@ -47,7 +47,31 @@ test('expanded changes use their natural height and remain above the complete Pr
   assert.ok(panel);
   const style = panel.attributes.properties.find(attr => ts.isJsxAttribute(attr)
     && attr.name.getText(home) === 'style').initializer.expression;
-  assert.ok(!style.properties.some(prop => ['height', 'maxHeight'].includes(prop.name?.getText(home))));
+  assert.equal(style.properties.find(prop => prop.name?.getText(home) === 'maxHeight').initializer.getText(home), 'panelMaxHeight');
+  const viewport = find(panel.parent, node => ts.isJsxOpeningElement(node)
+    && node.tagName.getText(home) === 'ScrollView');
+  assert.ok(viewport, 'constrain the card contents instead of allowing them to overflow into Próxima');
+  const viewportStyle = viewport.attributes.properties.find(attr => ts.isJsxAttribute(attr)
+    && attr.name.getText(home) === 'style').initializer.expression.getText(home);
+  assert.equal(vm.runInNewContext(`(${viewportStyle})`).flexShrink, 1);
+  assert.ok(!viewport.parent.getText(home).includes('{_ordinal}'), 'header stays outside scrolling content');
+  const maxHeight = find(home, node => ts.isVariableDeclaration(node)
+    && node.name.getText(home) === 'panelMaxHeight');
+  let renderPanel = panel;
+  while (!ts.isArrowFunction(renderPanel)) renderPanel = renderPanel.parent;
+  const panelWidth = find(renderPanel, node => ts.isVariableDeclaration(node)
+    && node.name.getText(home) === 'PANEL_W');
+  for (const width of [320, 390, 430]) {
+    for (const measuredWidth of [266, 354]) {
+      for (const proximaExpanded of [true, false]) {
+        const context = { screen: { width }, insets: { left: 0, right: 0 }, PANEL_EDGE: 18,
+          proximaExpanded, humanityObstacles: { next: { width: measuredWidth } }, BTN_W: 82, uiScaleFactor: 1 };
+        const actualWidth = vm.runInNewContext(panelWidth.initializer.getText(home), context);
+        assert.ok(actualWidth <= width - 36, 'both horizontal safe margins remain inside the screen');
+        if (proximaExpanded) assert.equal(actualWidth, Math.min(width - 36, measuredWidth));
+      }
+    }
+  }
   const bottom = find(home, node => ts.isVariableDeclaration(node)
     && node.name.getText(home) === 'panelBottom');
   assert.ok(bottom);
@@ -59,8 +83,13 @@ test('expanded changes use their natural height and remain above the complete Pr
           uiScaleFactor, proximaPillShowing: false, _PILL_H: 46,
         });
         const nextTop = 844 - 320 - nextAptPanelH;
-        const proposalTop = 844 - anchor - proposalHeight;
-        assert.equal(nextTop - (proposalTop + proposalHeight), Math.round(8 * uiScaleFactor));
+        const cap = vm.runInNewContext(maxHeight.initializer.getText(home), {
+          screen: { height: 844 }, panelBottom: anchor, insets: { top: 59 }, uiScaleFactor,
+        });
+        const visibleHeight = Math.min(proposalHeight, cap);
+        const proposalTop = 844 - anchor - visibleHeight;
+        assert.ok(proposalTop >= 59 + Math.round(12 * uiScaleFactor));
+        assert.equal(nextTop - (proposalTop + visibleHeight), Math.round(8 * uiScaleFactor));
       }
     }
   }
@@ -86,6 +115,7 @@ test('recovered Humanity placement includes its label and avoids orbital and pan
       const result = placeHumanity({ cx, cy, radius, buttonSize, satelliteRadius,
         satelliteSize, count: 7, bounds, obstacles, scale });
       assert.ok(result, `space available at scale ${scale}`);
+      assert.equal(result.globe, Math.round(56 * scale));
       assert.ok(result.x + result.width / 2 < cx && result.y + result.height / 2 < cy);
       assert.ok(result.x >= bounds.x && result.x + result.width <= bounds.x + bounds.width);
       assert.ok(result.y >= bounds.y && result.y + result.height <= bounds.y + bounds.height);

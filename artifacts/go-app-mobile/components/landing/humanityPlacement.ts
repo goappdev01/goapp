@@ -8,7 +8,7 @@ export function placeHumanity({ cx, cy, radius, buttonSize, satelliteRadius, sat
   satelliteRadius: number; satelliteSize: number; count: number;
   bounds: HumanityRect; obstacles: HumanityRect[]; scale: number;
 }) {
-  const globe = Math.round(52 * scale);
+  const globe = Math.round(56 * scale);
   const width = Math.max(62, globe + 10), height = globe + 20;
   const occupied = [...obstacles];
   const add = (angle: number, r: number, size: number) => occupied.push({ x: cx + Math.cos(angle) * r - size / 2, y: cy + Math.sin(angle) * r - size / 2, width: size, height: size });
@@ -21,7 +21,7 @@ export function placeHumanity({ cx, cy, radius, buttonSize, satelliteRadius, sat
       const rect = { x: Math.round(cx - dx - width / 2), y: Math.round(cy - dy - height / 2), width, height };
       if (rect.x < bounds.x || rect.y < bounds.y || rect.x + width > bounds.x + bounds.width || rect.y + height > bounds.y + bounds.height) continue;
       if (occupied.some(o => overlapsHumanity(rect, o))) continue;
-      candidates.push({ rect, score: Math.hypot(dx - satelliteRadius * 1.12, dy - satelliteRadius * 0.90) });
+      candidates.push({ rect, score: Math.hypot(dx - satelliteRadius * 1.12, dy - (satelliteRadius * 0.90 + 16 * scale)) });
     }
   }
   candidates.sort((a, b) => a.score - b.score);

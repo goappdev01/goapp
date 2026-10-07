@@ -13800,7 +13800,13 @@ function HomeScreenContent() {
         // ── ESTADO ABIERTO — panel con tarjeta + swipe ────────────────
         const BTN_H   = Math.round(Math.min(80, Math.max(56, 64 * uiScaleFactor)));
         const BTN_W   = uiScale === "grande" ? Math.round(BTN_H * 1.18) : Math.round(BTN_H * 1.28);
-        const PANEL_W = 3 * BTN_W + 2 * Math.round(6 * uiScaleFactor);
+        // Reuse Próxima's measured information width without moving its grid.
+        const PANEL_W = Math.min(
+          screen.width - insets.left - insets.right - 2 * PANEL_EDGE,
+          proximaExpanded && humanityObstacles.next
+            ? humanityObstacles.next.width
+            : 3 * BTN_W + 2 * Math.round(6 * uiScaleFactor) + Math.round(96 * uiScaleFactor),
+        );
         const panelSideStyle = handedness === "right" ? { right: PANEL_EDGE } : { left: PANEL_EDGE };
         // Panel bottom: sit just above Próxima pill (PILL_H=46 + 8px gap) when pill
         // is showing, or above the full Próxima expanded panel, or at PROXIMA_BOTTOM.
@@ -13810,6 +13816,7 @@ function HomeScreenContent() {
           : proximaPillShowing
           ? PROXIMA_BOTTOM + _PILL_H + 8
           : PROXIMA_BOTTOM;
+        const panelMaxHeight = Math.max(0, screen.height - panelBottom - insets.top - Math.round(12 * uiScaleFactor));
 
         // Resolver datos de visualización según tipo
         let cardAccent   = ACCENT;
@@ -13854,8 +13861,9 @@ function HomeScreenContent() {
               ...panelSideStyle,
               width: PANEL_W,
               bottom: panelBottom,
-              // Keep the full content height above Próxima: a maxHeight here
-              // lets non-shrinking children overflow below this bottom anchor.
+              // The shrinking scroll viewport contains overflow above Próxima;
+              // the header remains visible below the top safe-area margin.
+              maxHeight: panelMaxHeight,
               zIndex: 6,
               gap: Math.round(4 * uiScaleFactor),
             }}
@@ -13914,6 +13922,11 @@ function HomeScreenContent() {
             })()}
 
             {/* Tarjeta: swipe ← → para navegar */}
+            <ScrollView
+              style={{ flexGrow: 0, flexShrink: 1 }}
+              directionalLockEnabled
+              showsVerticalScrollIndicator={false}
+            >
             <View
               style={{
                 borderRadius: Math.round(12 * uiScaleFactor),
@@ -14088,6 +14101,7 @@ function HomeScreenContent() {
             </View>
 
             {/* botón de cierre eliminado — lo gestiona el botón único flotante */}
+            </ScrollView>
           </View>
         );
       })()}
