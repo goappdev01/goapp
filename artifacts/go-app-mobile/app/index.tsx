@@ -23882,10 +23882,20 @@ function HomeScreenContent() {
 
 
 
-      {/* GO CHAT SCREEN — asistente IA visual (mock) */}
+      {/* GO CHAT SCREEN — asistente de reservas V1 */}
       <GOChatScreen
         visible={goChatOpen}
-        onClose={() => setGoChatOpen(false)}
+        handedness={handedness}
+        onHandednessChange={(value) => { setHandedness(value); AsyncStorage.setItem("go_handedness_v1", value).catch(() => {}); }}
+        onClose={() => {
+          setGoChatOpen(false);
+          AsyncStorage.getItem("go_log_v1").then(raw => {
+            if (raw) {
+              const entries = JSON.parse(raw);
+              if (Array.isArray(entries)) setGoLog(entries);
+            }
+          }).catch(() => {});
+        }}
       />
 
       {/* MENSAJES GO — pantalla de mensajería interna */}

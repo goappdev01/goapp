@@ -36,6 +36,14 @@
           "color": "#4A80BD",
           "defaultChannel": "go-alerts"
         }
+      ],
+      [
+        "expo-audio",
+        {
+          "enableBackgroundRecording": false,
+          "microphonePermission": "Permite que GO escuche tu solicitud de reserva.",
+          "enableBackgroundPlayback": false
+        }
       ]
     ],
     "experiments": {
