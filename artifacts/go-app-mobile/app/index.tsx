@@ -11316,6 +11316,7 @@ function HomeScreenContent() {
   const universalSwipeGesture = useMemo(
     () =>
       Gesture.Pan()
+        .enabled(!goAuthOpen)
         .runOnJS(true)
         .activeOffsetY(40)
         .failOffsetX([-65, 65])
@@ -11333,7 +11334,7 @@ function HomeScreenContent() {
           swipeHandlersRef.current.resetContactFields();
           swipeHandlersRef.current.setOtrosOpen(false);
         }),
-    [],
+    [goAuthOpen],
   );
 
   // Callback de guardar del flujo normal (creación/edición de GO).
@@ -13221,6 +13222,7 @@ function HomeScreenContent() {
   }
 
   return (
+    <>
     <GestureDetector gesture={universalSwipeGesture}>
     <View style={[styles.root, { paddingTop }]}>
       {/* Status bar — dark-content sobre paneles claros, light sobre el fondo oscuro GO */}
@@ -19436,24 +19438,6 @@ function HomeScreenContent() {
           etc.), por lo que cualquier valor seleccionado aquí se refleja
           en el flujo del GO sin reset alguno.
           ──────────────────────────────────────────────────────────── */}
-      {/* ── AUTH GO — Login · Registro · Gestión de cuenta y rol ──────── */}
-      <LoginRegisterPanel
-        visible={goAuthOpen}
-        onClose={() => {
-          if (userAccountType !== null) setGoAuthOpen(false);
-        }}
-        userAccountType={userAccountType}
-        onSetAccountType={commitAccountType}
-        onSwitchContext={() => { setGoAuthOpen(false); setActiveMode(isBusinessMode ? "USER" : "BUSINESS"); }}
-        onOpenPerfil={() => { setGoAuthOpen(false); setCuentaOpen(true); }}
-        onOpenEmpresa={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
-        verification={{ ...verification, status: businessAccess.snapshot?.status === "verificada" ? "verified"
-          : businessAccess.snapshot?.status === "rechazada" ? "rejected"
-          : businessAccess.snapshot?.status === "pendiente_verificacion" ? "pending" : "none" }}
-        onOpenVerificacion={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
-        onOpenAdmin={handleOpenAdmin}
-      />
-
       {adminAccess.allowed && <GoAdminDashboard
         visible={adminDashOpen}
         onClose={() => setAdminDashOpen(false)}
@@ -26756,6 +26740,24 @@ function HomeScreenContent() {
 
     </View>
     </GestureDetector>
+    {/* The account modal owns its touches; Landing gestures stay behind it. */}
+    <LoginRegisterPanel
+      visible={goAuthOpen}
+      onClose={() => {
+        if (userAccountType !== null) setGoAuthOpen(false);
+      }}
+      userAccountType={userAccountType}
+      onSetAccountType={commitAccountType}
+      onSwitchContext={() => { setGoAuthOpen(false); setActiveMode(isBusinessMode ? "USER" : "BUSINESS"); }}
+      onOpenPerfil={() => { setGoAuthOpen(false); setCuentaOpen(true); }}
+      onOpenEmpresa={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
+      verification={{ ...verification, status: businessAccess.snapshot?.status === "verificada" ? "verified"
+        : businessAccess.snapshot?.status === "rechazada" ? "rejected"
+        : businessAccess.snapshot?.status === "pendiente_verificacion" ? "pending" : "none" }}
+      onOpenVerificacion={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
+      onOpenAdmin={handleOpenAdmin}
+    />
+    </>
   );
 }
 
