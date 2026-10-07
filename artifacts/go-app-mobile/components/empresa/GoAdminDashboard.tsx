@@ -21,6 +21,7 @@ import { ZonasScreen }      from "./ZonasScreen";
 import { ConsumoScreen }    from "./ConsumoScreen";
 import { GoRoadmapScreen, RoadmapNode } from "./GoRoadmapScreen";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 
 const { width: SW } = Dimensions.get("window");
 
@@ -671,6 +672,7 @@ interface Props {
 }
 
 export function GoAdminDashboard({ visible, onClose }: Props) {
+  const adminAccess = useAdminAccess();
   const insets  = useSafeAreaInsets();
   const { lang } = useLanguage();
   const [section, setSection]           = useState<AdminSection>("overview");
@@ -704,6 +706,8 @@ export function GoAdminDashboard({ visible, onClose }: Props) {
     roadmapStack.length > 0   ? roadmapStack.map(n => n.label).join(" › ") :
     section !== "overview"    ? (lang === 'en' ? (currentSec?.sublabel_en ?? currentSec?.sublabel ?? "") : (currentSec?.sublabel ?? "")) :
                                 (lang === 'en' ? "Internal system control" : "Control interno del sistema");
+
+  if (!adminAccess.allowed) return null;
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>

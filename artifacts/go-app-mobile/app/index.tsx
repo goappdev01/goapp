@@ -45,6 +45,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GUIDANCE_NAMES, GUIDANCE_NAMES_EN, type GuidanceConfig, getGuidanceConfig, swipeGuideMaxOpacity as computeSwipeMaxOpacity, computeAutoBoost } from "../utils/guidance";
 import { useGoMode } from "@/contexts/GoModeContext";
 import { useBusinessAccess } from "@/contexts/GoBusinessAccessContext";
+import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { BusinessAccessGate } from "@/components/auth/BusinessAccessGate";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
@@ -2709,6 +2710,7 @@ function HomeScreenContent() {
   // el tipo de cuenta y se persiste en AsyncStorage (go_active_mode_v1).
   const { isBusinessMode: requestedBusinessMode, loaded: modeLoaded, setActiveMode, syncModeFromRole } = useGoMode();
   const businessAccess = useBusinessAccess();
+  const adminAccess = useAdminAccess();
   const isBusinessMode = requestedBusinessMode && businessAccess.allowed;
   const isUserMode = !isBusinessMode;
 
@@ -2719,6 +2721,14 @@ function HomeScreenContent() {
   const [goAuthOpen, setGoAuthOpen] = useState(true);
   const [authBootstrapComplete, setAuthBootstrapComplete] = useState(false);
   const [adminDashOpen, setAdminDashOpen] = useState(false);
+
+  useEffect(() => { if (!adminAccess.allowed) setAdminDashOpen(false); }, [adminAccess.allowed]);
+  const handleOpenAdmin = async () => {
+    if (await adminAccess.refresh()) {
+      setGoAuthOpen(false);
+      setAdminDashOpen(true);
+    }
+  };
 
   const handleOpenOptions = () => {
     if (userAccountType === null) {
@@ -2944,7 +2954,8 @@ function HomeScreenContent() {
         }
 
         if (!cancelled) {
-          if (resolvedRole) commitAccountType(resolvedRole, false);
+          // ADMIN is a separate server permission, never a local account context.
+          if (resolvedRole) commitAccountType(resolvedRole === "admin" ? "usuario" : resolvedRole, false);
           else setGoAuthOpen(true);
         }
       } catch {
@@ -19191,7 +19202,7 @@ function HomeScreenContent() {
           { id: "vip",          label: "VIP",          sub: "Acceso prioritario",          icon: "star",        color: "#fbbf24" },
           { id: "temporal",     label: "TEMPORAL",     sub: "Expira automáticamente",      icon: "clock",       color: "#f97316" },
           { id: "visita-unica", label: "VISITA ÚNICA", sub: "Válido una sola vez",         icon: "check-circle",color: "#ec4899" },
-          { id: "admin",        label: "ADMIN",        sub: "Solo cuentas autorizadas",    icon: "settings",    color: "#94a3b8" },
+          ...(adminAccess.allowed ? [{ id: "admin", label: "ADMIN", sub: "Solo cuentas autorizadas", icon: "settings", color: "#94a3b8" }] : []),
         ];
         const generalUrl = "https://go.app/join";
         const makeUrl = (type: string) => `https://go.app/join?type=${type}&t=${Date.now()}`;
@@ -19495,10 +19506,10 @@ function HomeScreenContent() {
           : businessAccess.snapshot?.status === "rechazada" ? "rejected"
           : businessAccess.snapshot?.status === "pendiente_verificacion" ? "pending" : "none" }}
         onOpenVerificacion={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
-        onOpenAdmin={() => { setGoAuthOpen(false); setActiveMode("BUSINESS"); if (businessAccess.allowed) setAdminDashOpen(true); }}
+        onOpenAdmin={handleOpenAdmin}
       />
 
-      {businessAccess.allowed && <GoAdminDashboard
+      {adminAccess.allowed && <GoAdminDashboard
         visible={adminDashOpen}
         onClose={() => setAdminDashOpen(false)}
       />}

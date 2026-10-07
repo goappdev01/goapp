@@ -21,6 +21,7 @@ import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getGuidanceConfig, swipeGuideMaxOpacity } from "@/utils/guidance";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 
 import { PlanScreen }        from "./PlanScreen";
@@ -303,6 +304,7 @@ function computeConfigProgress(cfg: typeof import("@/contexts/GoBusinessConfigCo
 export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, guidanceLevel = 5, onOpenVerificacion, onFinalizarWizard }: EmpresaPanelProps) {
   const insets  = useSafeAreaInsets();
   const { lang, t } = useLanguage();
+  const adminAccess = useAdminAccess();
   const { config: businessConfig, updateConfig, resetConfig } = useBusinessConfig();
   const verification = useVerification();
   const [modulo, setModulo] = useState<ModuloKey>("home");
@@ -320,7 +322,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   // Clave que cambia con cada «Nueva empresa» — fuerza remontaje limpio del wizard
   const [newEmpresaKey, setNewEmpresaKey] = useState(0);
 
-  const MODULOS = useMemo(() => getModulos(t), [t]);
+  const MODULOS = useMemo(() => getModulos(t).filter(m => m.key !== "admin" || adminAccess.allowed), [t, adminAccess.allowed]);
 
   useEffect(() => {
     if (!visible) return;
@@ -355,7 +357,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
 
   React.useEffect(() => {
     if (visible) {
-      const targetModulo = initialModulo ?? "home";
+      const targetModulo = initialModulo === "admin" && !adminAccess.allowed ? "home" : initialModulo ?? "home";
       setModulo(targetModulo);
       if (targetModulo !== "home") {
         const suite = SUITES.find(s => s.modules.includes(targetModulo as ModuloKey));
@@ -366,6 +368,10 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
       setCurrentSuite(null);
     }
   }, [visible, initialModulo]);
+
+  useEffect(() => {
+    if (modulo === "admin" && !adminAccess.allowed) setModulo("home");
+  }, [modulo, adminAccess.allowed]);
 
   // Refs para que el PanResponder acceda siempre al estado más reciente
   const moduloRef       = useRef(modulo);
@@ -451,6 +457,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   ).current;
 
   const goToModulo = (key: ModuloKey) => {
+    if (key === "admin" && !adminAccess.allowed) return;
     Animated.timing(slideAnim, {
       toValue: 1,
       duration: 200,
@@ -930,7 +937,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
               verification.status === "verified" ? (
                 <>
                   {modulo === "facturacion" && <FacturacionScreen guidanceLevel={guidanceLevel} />}
-                  {modulo === "admin"       && <AdminScreen       guidanceLevel={guidanceLevel} />}
+                  {modulo === "admin" && adminAccess.allowed && <AdminScreen guidanceLevel={guidanceLevel} />}
                   {modulo === "partners"    && <PartnersScreen    guidanceLevel={guidanceLevel} />}
                   {modulo === "publicidad"  && <PublicidadScreen  guidanceLevel={guidanceLevel} />}
                   {modulo === "sugerencias" && <SugerenciasScreen guidanceLevel={guidanceLevel} />}
