@@ -140,12 +140,22 @@ test('UTC transport crossing midnight returns the selected local calendar day an
   assert.equal(result.booking.endDatetime, '2035-10-07T01:30:00');
   const bridge = { exports: {}, Date: f.Date, console: { log() {}, warn() {} }, require(name) {
     if (name === '@/data/booking') return f.api;
+    if (name === './goLogStore') return goLogStore.exports;
+    if (name === './goTaskAccess') return taskAccess.exports;
     if (name === '@react-native-async-storage/async-storage') return { default: {
       getItem: async key => f.storage.get(key) ?? null,
       setItem: async (key, value) => f.storage.set(key, value),
     } };
     throw new Error(name);
   } };
+  const taskAccess = { ...bridge, exports: {} };
+  vm.runInNewContext(ts.transpileModule(readFileSync('lib/goTaskAccess.ts', 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, taskAccess);
+  const goLogStore = { ...bridge, exports: {} };
+  vm.runInNewContext(ts.transpileModule(readFileSync('lib/goLogStore.ts', 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, goLogStore);
   vm.runInNewContext(ts.transpileModule(readFileSync('lib/goLogBridge.ts', 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, bridge);

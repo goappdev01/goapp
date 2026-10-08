@@ -50,6 +50,7 @@ function fixture() {
     'react-native-gesture-handler': { Gesture: { Tap: () => chain, Pan: () => chain, Race: () => chain, Simultaneous: () => chain }, GestureDetector: 'GestureDetector', ScrollView: 'GHScrollView' },
     'react-native-reanimated': { default: { View: 'ReAnimated.View' }, useSharedValue: value => react.useRef({ value }).current, useAnimatedStyle: fn => fn(), withSpring: value => value, withTiming: value => value, runOnJS: fn => fn, interpolateColor: () => '#000' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, right: 0, left: 0, bottom: 0 }) },
+    '@/hooks/useGoLog': { useGoLog: () => react.useState([]) },
     '@/contexts/LanguageContext': { useLanguage: () => ({ lang: language, t: key => key }) },
     '@/contexts/GoBusinessConfigContext': { useBusinessConfig: () => ({ config: { plantillaItems: [], businessName: 'Test', subId: '' } }) },
     'expo-linear-gradient': { LinearGradient: 'LinearGradient' },
