@@ -24,7 +24,7 @@ import {
   type AvailableSlot,
   type Booking,
 } from "@/data/booking";
-import { syncBookingToGoLog } from "./goLogBridge";
+import { syncBookingToGoLog, updatePersonalGoLog } from "./goLogBridge";
 import { expandSearchTerms, normalize } from "@/data/goSearchAliases";
 
 export type Place = { label: string; latitude: number; longitude: number };
@@ -373,23 +373,12 @@ export async function cancelAssistantBooking(booking: Booking): Promise<void> {
   await cancelBooking(booking.id);
   // Keep the existing calendar projection in sync without another booking write.
   try {
-    const raw = await AsyncStorage.getItem("go_log_v1");
-    const entries = raw ? JSON.parse(raw) : [];
-    await AsyncStorage.setItem(
-      "go_log_v1",
-      JSON.stringify(
-        entries.map((entry: { reservationId?: string }) =>
-          entry.reservationId === booking.id
-            ? {
-                ...entry,
-                deleted: true,
-                estado: "rechazado",
-                bookingStatus: "cancelada",
-              }
-            : entry,
-        ),
-      ),
-    );
+    await updatePersonalGoLog(entries => ({
+      entries: entries.map(entry => entry.reservationId === booking.id
+        ? { ...entry, deleted: true, estado: "rechazado", bookingStatus: "cancelada" }
+        : entry),
+      result: undefined,
+    }));
   } catch (error) {
     console.warn("[assistant] No se pudo actualizar la agenda local", error);
   }

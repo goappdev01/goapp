@@ -26,6 +26,7 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useGoLog } from "@/hooks/useGoLog";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
@@ -267,7 +268,7 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
   }, [businessId]);
 
   // ── Calendar data — mismo key que AgendaOperativa (sin duplicar) ──────────
-  const [goLog, setGoLog] = useState<GoEntry[]>([]);
+  const [allGoLog, setGoLog] = useGoLog();
 
   // ── Config panel — mismos controles que el Calendario normal ──────────────
   const [configVisible, setConfigVisible] = useState<boolean>(false);
@@ -288,34 +289,30 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
     }).catch(() => {});
   }, []);
 
-  useEffect(() => {
-    AsyncStorage.getItem("go_log_v1").then(raw => {
-      if (!raw) return;
-      const all: GoEntry[] = JSON.parse(raw);
-      // Empresa calendar: each booking generates two go_log_v1 entries (cli + prv).
-      // Keep only ONE card per reservationId — prefer kind="sent" (provider card).
-      const seenById = new Map<string, { idx: number; isSent: boolean }>();
-      const deduped: GoEntry[] = [];
-      for (const e of all) {
-        const rid = (e as any).reservationId as string | undefined;
-        if (e.type === "GO_BOOKING" && rid) {
-          const existing = seenById.get(rid);
-          if (!existing) {
-            seenById.set(rid, { idx: deduped.length, isSent: e.kind === "sent" });
-            deduped.push(e);
-          } else if (e.kind === "sent" && !existing.isSent) {
-            // Upgrade: replace received card with the provider (sent) card
-            deduped[existing.idx] = e;
-            seenById.set(rid, { idx: existing.idx, isSent: true });
-          }
-          // else: skip duplicate
-        } else {
+  const goLog = useMemo(() => {
+    // Empresa calendar: each booking generates two go_log_v1 entries (cli + prv).
+    // Keep only ONE card per reservationId — prefer kind="sent" (provider card).
+    const seenById = new Map<string, { idx: number; isSent: boolean }>();
+    const deduped: GoEntry[] = [];
+    for (const e of allGoLog) {
+      const rid = (e as any).reservationId as string | undefined;
+      if (e.type === "GO_BOOKING" && rid) {
+        const existing = seenById.get(rid);
+        if (!existing) {
+          seenById.set(rid, { idx: deduped.length, isSent: e.kind === "sent" });
           deduped.push(e);
+        } else if (e.kind === "sent" && !existing.isSent) {
+          // Upgrade: replace received card with the provider (sent) card
+          deduped[existing.idx] = e;
+          seenById.set(rid, { idx: existing.idx, isSent: true });
         }
+        // else: skip duplicate
+      } else {
+        deduped.push(e);
       }
-      setGoLog(deduped);
-    }).catch(() => {});
-  }, []);
+    }
+    return deduped;
+  }, [allGoLog]);
 
   // ── Professional selector ─────────────────────────────────────────────────
   const [selectedPro, setSelectedPro] = useState<string>("Todos");
@@ -324,7 +321,6 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
   const handleChangeEstado = useCallback(async (id: string, estado: GoEntry["estado"]) => {
     setGoLog(prev => {
       const next = prev.map(e => e.id === id ? { ...e, estado } : e);
-      AsyncStorage.setItem("go_log_v1", JSON.stringify(next)).catch(() => {});
       return next;
     });
   }, []);
@@ -332,7 +328,6 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
   const handleDeleteItem = useCallback(async (id: string) => {
     setGoLog(prev => {
       const next = prev.filter(e => e.id !== id);
-      AsyncStorage.setItem("go_log_v1", JSON.stringify(next)).catch(() => {});
       return next;
     });
   }, []);

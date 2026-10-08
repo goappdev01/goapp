@@ -1,4 +1,6 @@
 import type { GoEntry } from "@/components/AgendaOperativa";
+import { useGoLog } from "@/hooks/useGoLog";
+import { readGoLog, flushGoLog, commitGoLogSnapshot } from "@/lib/goLogStore";
 import { notifySessionChanged } from "@/lib/sessionEvents";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
@@ -3338,7 +3340,7 @@ function HomeScreenContent() {
     readByEmpresa: boolean;
   };
 
-  const [goLog, setGoLog] = useState<GoEntry[]>([]);
+  const [goLog, setGoLog] = useGoLog();
   const [receivedDetailOpen, setReceivedDetailOpen] = useState(false);
   const [receivedDetailGo, setReceivedDetailGo] = useState<typeof goLog[number] | null>(null);
 
@@ -7938,8 +7940,8 @@ function HomeScreenContent() {
 
   const persistLog = async (next: typeof goLog) => {
     try {
-      const payload = JSON.stringify(next.slice(0, 200));
-      await AsyncStorage.setItem("go_log_v1", payload);
+      // setGoLog commits through the shared queue; never write a render snapshot.
+      await flushGoLog();
     } catch (e) {
       // Surface write errors in development so they don't disappear silently.
       if (__DEV__) console.error("[GO] persistLog failed:", e);
@@ -12350,9 +12352,8 @@ function HomeScreenContent() {
         }
       } catch {}
       try {
-        const raw = await AsyncStorage.getItem("go_log_v1");
-        if (raw) {
-          const parsed = JSON.parse(raw);
+        const parsed = await readGoLog();
+        {
           if (Array.isArray(parsed)) {
             // De-dup defensivo: si en el almacenamiento quedaron entries
             // legacy con ids duplicados (de versiones anteriores donde el
@@ -12393,7 +12394,7 @@ function HomeScreenContent() {
               // están ausentes, derivamos un valor seguro a partir de
               // `createdAt` (día en que se creó el GO) o caemos a HOY.
               const dateISO =
-                typeof legacy.dateISO === "string" && legacy.dateISO
+                typeof legacy.dateISO === "string"
                   ? legacy.dateISO
                   : formatISODate(
                       typeof legacy.createdAt === "number"
@@ -12473,9 +12474,8 @@ function HomeScreenContent() {
                 removedDuplicates: _purgedDupes.length,
                 keptEntries: _dedupedCleaned.length,
               });
-              await AsyncStorage.setItem("go_log_v1", JSON.stringify(_dedupedCleaned));
             }
-            setGoLog(_dedupedCleaned.slice(0, 200));
+            await commitGoLogSnapshot(parsed, _dedupedCleaned);
           }
         }
       } catch (e) {
@@ -20659,8 +20659,7 @@ function HomeScreenContent() {
             });
             if (!tutReservaRealizada) { setTutReservaRealizada(true); AsyncStorage.setItem("tutorial.reservaRealizada", "1").catch(() => {}); }
             try {
-              const raw = await AsyncStorage.getItem("go_log_v1");
-              const log: import("../components/AgendaOperativa").GoEntry[] = raw ? JSON.parse(raw) : [];
+              const log = await readGoLog();
               const startDate = new Date(booking.startDatetime);
               const dateISO = startDate.toISOString().slice(0, 10);
               const hh = String(startDate.getHours()).padStart(2, "0");
@@ -20885,8 +20884,7 @@ function HomeScreenContent() {
                   missingSlotKey: !_bk.slotKey,
                 });
               }
-              await AsyncStorage.setItem("go_log_v1", JSON.stringify(_finalLog));
-              setGoLog(_finalLog as any);
+              await commitGoLogSnapshot(log, _finalLog);
               await saveBooking({ ...booking, goEntryId: clientEntryId });
             } catch (err) {
               console.error("[ASYNC_STORAGE_WRITE] index.tsx onBookingConfirmed CATCH:", err);
@@ -23889,12 +23887,7 @@ function HomeScreenContent() {
         onHandednessChange={(value) => { setHandedness(value); AsyncStorage.setItem("go_handedness_v1", value).catch(() => {}); }}
         onClose={() => {
           setGoChatOpen(false);
-          AsyncStorage.getItem("go_log_v1").then(raw => {
-            if (raw) {
-              const entries = JSON.parse(raw);
-              if (Array.isArray(entries)) setGoLog(entries);
-            }
-          }).catch(() => {});
+          // IA already commits to the same observable GO record.
         }}
       />
 
@@ -26436,15 +26429,7 @@ function HomeScreenContent() {
           setGoProveedorOpen(false);
           setGoProveedorData(null);
           setDateISODraft(dateISO);
-          // Recarga goLog desde AsyncStorage para que la "Próxima visita" refleje
-          // la nueva reserva sin necesidad de reiniciar la app.
-          try {
-            const raw = await AsyncStorage.getItem("go_log_v1");
-            if (raw) {
-              const log = JSON.parse(raw);
-              setGoLog(log);
-            }
-          } catch { /* best-effort */ }
+          // The existing booking bridge publishes its committed projection.
           setCalOpen(true);
         }}
       />
