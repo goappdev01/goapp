@@ -1,16 +1,22 @@
 import React from "react";
-import { View, useWindowDimensions } from "react-native";
+import { View } from "react-native";
 import { DraggableFAB } from "@/components/DraggableFAB";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
-// Reserved space inside KeyboardAvoidingView prevents overlap with form and keyboard.
-export function AssistantCloseControls({ panel = false, disabled, onClose }: {
-  panel?: boolean; disabled: boolean; onClose: () => void;
+export function AssistantCloseControls({ panel = false, disabled, onClose, viewport, protectedBottom, topInset = 0 }: {
+  panel?: boolean;
+  disabled: boolean;
+  onClose: () => void;
+  viewport: { width: number; height: number };
+  protectedBottom: number;
+  topInset?: number;
 }) {
-  const { width } = useWindowDimensions();
-  return <View style={{ height: 60, backgroundColor: "#FFF" }}>
+  // Overlay only the content area: never cover the composer, send action or GO dock.
+  const height = viewport.height - protectedBottom;
+  if (height < 60) return null;
+  return <View pointerEvents="box-none" style={{ position: "absolute", top: topInset, left: 0, width: viewport.width, height }}>
     <DraggableFAB screenKey="booking-assistant" buttonKey={panel ? "panel-close" : "close"}
-      initialTop={8} initialRight={20} maxH={44} buttonWidth={44}
-      bounds={{ width, height: 60 }}>
+      initialBottom={12} initialRight={20} maxH={44} buttonWidth={44}
+      bounds={{ width: viewport.width, height }}>
       <GoCloseButton level={panel ? "panel" : "container"} disabled={disabled}
         accessibilityLabel={panel ? "Cerrar panel" : "Ir al Landing"} onPress={onClose} />
     </DraggableFAB>

@@ -163,13 +163,13 @@ test("the same GO appears once, remains circular at every size and routes zone d
     assert.ok(f.all.some(n => n.type === "Feather" && n.props.name === "zap"));
   }
 });
-test("panel and container reuse the black close control in reserved keyboard-avoiding space", () => {
+test("panel and container reuse one floating close without an additional footer row", () => {
   for (const panel of [null, "zone"]) {
     const f = screenFixture(panel);
     assert.equal(f.all.filter(n => n.props?.accessibilityLabel === (panel ? "Cerrar panel" : "Ir al Landing") && n.type === "TouchableOpacity" && n.props.style?.width === 44).length, 1);
     assert.ok(f.all.some(n => n.type === "KeyboardAvoidingView" && n.props.behavior === "padding"));
     const draggable = f.all.find(n => n.type === "DraggableFAB");
-    assert.equal(draggable.props.bounds.height, 60); assert.equal(draggable.props.maxH, 44);
+    assert.ok(draggable.props.bounds.height > 60); assert.equal(draggable.props.maxH, 44);
     assert.ok(!f.all.some(n => n.type === "Feather" && (n.props.name === "x" || n.props.name === "sliders")));
     const button = f.all.find(n => n.type === "TouchableOpacity" && n.props.style?.width === 44);
     let stopped = false; button.props.onPress({ stopPropagation() { stopped = true; } }); assert.equal(stopped, true);
@@ -183,21 +183,21 @@ test("zone uses Tools colors and exposes one existing microphone without a secon
   assert.ok(!JSON.stringify(f.tree).includes("Decir el lugar por voz"));
   assert.equal(ui.z.primary.backgroundColor, "#4A80BD");
 });
-function httpFixture(env = {}, fetch = async () => ({ status: 200, ok: true, json: async () => [cieza] })) {
+function httpFixture(env = {}, fetch = async () => ({ status: 200, ok: true, json: async () => [cieza] }), diagnostics = []) {
   return load("lib/bookingAssistant.ts", {
     "react-native": { Platform: { OS: "ios" } }, "@workspace/api-zod": model, "@/data/booking": {},
     "./goLogBridge": {}, "@/data/goSearchAliases": {},
     "@react-native-async-storage/async-storage": { default: { getItem: async () => null } }
-  }, { process: { env }, fetch, AbortSignal, Headers });
+  }, { process: { env }, fetch, AbortSignal, Headers, console: { info: (...args) => diagnostics.push(args) } });
 }
 test("Expo Go without an absolute API URL explains the missing configuration without fetching", async () => {
   let calls = 0; const api = httpFixture({}, async () => { calls++; });
-  await assert.rejects(api.resolvePlaces("Cieza"), /EXPO_PUBLIC_API_URL/); assert.equal(calls, 0);
+  await assert.rejects(api.resolvePlaces("Cieza"), /No he podido buscar/); assert.equal(calls, 0);
 });
 test("missing backend route and connection failure report different honest errors", async () => {
   const env = { EXPO_PUBLIC_API_URL: "https://example.test/api" };
-  await assert.rejects(httpFixture(env, async () => ({ status: 404 })).resolvePlaces("Cieza"), /HTTP 404/);
-  await assert.rejects(httpFixture(env, async () => { throw Error("offline"); }).resolvePlaces("Cieza"), /conectar con GO/);
+  await assert.rejects(httpFixture(env, async () => ({ status: 404 })).resolvePlaces("Cieza"), /No he podido buscar/);
+  await assert.rejects(httpFixture(env, async () => { throw Error("offline"); }).resolvePlaces("Cieza"), /No he podido buscar/);
 });
 test("configured lookup calls the existing backend route and returns its real coordinates", async () => {
   let url; const api = httpFixture({ EXPO_PUBLIC_API_URL: "https://example.test/api" }, async value => {
@@ -206,4 +206,30 @@ test("configured lookup calls the existing backend route and returns its real co
   const result = await api.resolvePlaces("Cieza");
   assert.equal(url, "https://example.test/api/booking-assistant/places?q=Cieza");
   assert.equal(result[0].longitude, cieza.longitude);
+});
+test("public API failures never expose configuration, server bodies, paths, URLs or credentials", async () => {
+  const diagnostics = [], sensitive = "EXPO_PUBLIC_API_URL https://private.example/api C:\\Users\\person\\keys token=secret";
+  const scenarios = [
+    httpFixture({}, undefined, diagnostics),
+    httpFixture({ EXPO_PUBLIC_API_URL: "https://private.example/api" }, async () => ({ ok: false, status: 500, json: async () => ({ error: sensitive }) }), diagnostics),
+    httpFixture({ EXPO_PUBLIC_API_URL: "https://private.example/api" }, async () => { throw Error(sensitive); }, diagnostics),
+    httpFixture({ EXPO_PUBLIC_API_URL: "https://private.example/api" }, async () => ({ ok: true, status: 200, json: async () => { throw Error(sensitive); } }), diagnostics),
+    httpFixture({ EXPO_PUBLIC_API_URL: "https://private.example/api" }, async () => ({ ok: true, status: 200, json: async () => ({ error: sensitive }) }), diagnostics),
+  ];
+  for (const api of scenarios) await assert.rejects(api.resolvePlaces("private search"), error => {
+    assert.match(error.message, /No he podido buscar/);
+    assert.doesNotMatch(error.message, /EXPO_|https?:|Users|secret|private|HTTP|API/); return true;
+  });
+  const logged = JSON.stringify(diagnostics);
+  assert.match(logged, /API_URL_MISSING/); assert.match(logged, /HTTP_FAILURE/);
+  assert.doesNotMatch(logged, /https?:|Users|secret|private|EXPO_PUBLIC/);
+});
+test("floating overlay stays above essential controls as keyboard and footer heights change", () => {
+  for (const height of [700, 350]) {
+    const tree = controls.AssistantCloseControls({ disabled: false, onClose() {}, viewport: { width: 390, height }, protectedBottom: 144 });
+    assert.equal(tree.props.style.position, "absolute"); assert.equal(tree.props.pointerEvents, "box-none");
+    const drag = tree.props.children[0]; assert.equal(drag.props.bounds.height, height - 144);
+    assert.equal(drag.props.initialBottom, 12); assert.equal(drag.props.buttonKey, "close");
+  }
+  assert.equal(controls.AssistantCloseControls({ disabled: false, onClose() {}, viewport: { width: 390, height: 180 }, protectedBottom: 144 }), null);
 });

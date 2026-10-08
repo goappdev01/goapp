@@ -49,43 +49,34 @@ const apiBase = () =>
   (process.env.EXPO_PUBLIC_DOMAIN
     ? "https://" + process.env.EXPO_PUBLIC_DOMAIN + "/api"
     : "/api");
-export async function assistantApi<T>(
-  path: string,
-  body?: unknown,
-): Promise<T> {
+export async function assistantApi<T>(path: string, body?: unknown): Promise<T> {
+  const operation = path.startsWith("/places") ? "places"
+    : path === "/transcribe" ? "voice" : "assistant";
+  const fail = (code: string, status?: number): never => {
+    // Internal diagnostics deliberately exclude URLs, query text, bodies and tokens.
+    console.info("[assistant-api]", { code, operation, ...(status ? { status } : {}) });
+    const message = status === 401 ? "Inicia sesión para continuar con GO."
+      : status === 429 ? "GO está recibiendo muchas solicitudes. Inténtalo de nuevo en unos momentos."
+      : operation === "places" ? "No he podido buscar esa ubicación ahora. Inténtalo de nuevo en unos momentos."
+      : operation === "voice" ? "No he podido procesar tu voz ahora. Puedes escribir o intentarlo de nuevo."
+      : "No he podido conectar con GO ahora. Inténtalo de nuevo en unos momentos.";
+    throw new Error(message);
+  };
   const base = apiBase();
-  if (Platform.OS !== "web" && !/^https?:\/\//i.test(base))
-    throw new Error("Falta configurar EXPO_PUBLIC_API_URL con la URL del backend de GO para Expo Go.");
+  if (Platform.OS !== "web" && !/^https?:\/\//i.test(base)) fail("API_URL_MISSING");
   let session: { access_token?: string } | null = null;
-  try {
-    session = JSON.parse(
-      (await AsyncStorage.getItem("go_supabase_session_v1")) || "null",
-    );
-  } catch {}
+  try { session = JSON.parse((await AsyncStorage.getItem("go_supabase_session_v1")) || "null"); } catch {}
   const response = await fetch(base + "/booking-assistant" + path, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(session?.access_token
-        ? { Authorization: "Bearer " + session.access_token }
-        : {}),
+      ...(session?.access_token ? { Authorization: "Bearer " + session.access_token } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: AbortSignal.timeout(35000),
-  }).catch(() => {
-    throw new Error(
-      "No se pudo conectar con GO. Revisa tu conexión e inténtalo de nuevo.",
-    );
-  });
-  if (response.status === 404)
-    throw new Error("La API configurada no ofrece este servicio de GO (HTTP 404). Revisa la URL y la versión del backend.");
-  const data = await response.json().catch(() => {
-    throw new Error("GO no está disponible ahora. Inténtalo de nuevo.");
-  });
-  if (!response.ok)
-    throw new Error(
-      data.error || "GO no está disponible ahora. Inténtalo de nuevo.",
-    );
+  }).catch(() => fail("NETWORK_UNAVAILABLE"));
+  if (!response.ok) fail("HTTP_FAILURE", response.status);
+  const data = await response.json().catch(() => fail("INVALID_RESPONSE"));
   return data as T;
 }
 export const localToday = () => {
@@ -128,9 +119,13 @@ export async function resolvePlaces(query: string): Promise<Place[]> {
   const data = await assistantApi<Place[]>(
     "/places?q=" + encodeURIComponent(query),
   );
+  if (!Array.isArray(data)) {
+    console.info("[assistant-api]", { code: "INVALID_PLACES_RESPONSE", operation: "places" });
+    throw new Error("No he podido buscar esa ubicación ahora. Inténtalo de nuevo en unos momentos.");
+  }
   const places = data.filter(
     (p) =>
-      typeof p.label === "string" &&
+      p && typeof p.label === "string" &&
       Number.isFinite(p.latitude) &&
       Number.isFinite(p.longitude),
   );

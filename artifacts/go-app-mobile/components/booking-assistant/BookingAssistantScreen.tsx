@@ -13,6 +13,7 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -63,6 +64,10 @@ export function BookingAssistantScreen({
 }: BookingAssistantProps) {
   const insets = useSafeAreaInsets();
   const goSize = uiScale === "compacto" ? 48 : uiScale === "grande" ? 72 : 64;
+  const window = useWindowDimensions();
+  const [viewport, setViewport] = useState({ width: window.width, height: window.height - insets.top - insets.bottom - 68 });
+  const [footerHeight, setFooterHeight] = useState(144);
+  const [headerHeight, setHeaderHeight] = useState(68);
   const a = useBookingAssistant();
   const go = useGoActions(a);
   const [input, setInput] = useState("");
@@ -315,7 +320,7 @@ export function BookingAssistantScreen({
           { paddingTop: insets.top, paddingBottom: insets.bottom },
         ]}
       >
-        <View style={s.header}>
+        <View style={s.header} onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)}>
           <View style={{ flex: 1 }}>
             <Text style={s.eyebrow}>GO · ASISTENTE</Text>
             <Text style={s.title}>¿Qué necesitas hacer?</Text>
@@ -333,7 +338,7 @@ export function BookingAssistantScreen({
           style={{ flex: 1 }}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1 }} onLayout={event => setViewport(event.nativeEvent.layout)}>
           <ScrollView
             ref={scroll}
             contentContainerStyle={s.conversation}
@@ -661,6 +666,7 @@ export function BookingAssistantScreen({
               </Text>
             </>
           )}
+          {!a.panel && <View onLayout={event => setFooterHeight(event.nativeEvent.layout.height)}>
           <View style={s.composer}>
             <TextInput
               accessibilityLabel="Solicitud a GO"
@@ -681,14 +687,15 @@ export function BookingAssistantScreen({
               disabled={!input.trim() || !!a.busy}
             />
           </View>
-          {!a.panel && dock}
-          {!a.panel && <AssistantCloseControls disabled={saving} onClose={close} />}
+          {dock}
+          </View>}
         {a.panel && (
           <BookingAssistantPanels
             a={panelState}
             go={go}
             bottom={0}
             dock={dock}
+            viewport={viewport}
             saving={saving}
             onClosePanel={() => { voice.abort(); a.invalidate(); a.setPanel(null); }}
             voiceStatus={voiceText || voice.error}
@@ -701,6 +708,9 @@ export function BookingAssistantScreen({
         )}
           </View>
         </KeyboardAvoidingView>
+        {!a.panel && <AssistantCloseControls disabled={saving} onClose={close}
+          viewport={{ width: viewport.width, height: viewport.height + headerHeight }}
+          protectedBottom={footerHeight} topInset={insets.top} />}
       </GestureHandlerRootView>
     </Modal>
   );

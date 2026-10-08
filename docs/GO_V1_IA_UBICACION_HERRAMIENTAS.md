@@ -1,5 +1,7 @@
 # GO V1 — IA, ubicación y Herramientas
 
+Actualización: las incidencias 11 y 12 sustituyen la fila reservada de cierre por una superposición y mantienen el diagnóstico técnico fuera de la interfaz. Véase [informe adicional](GO_V1_IA_INCIDENCIAS_11_12.md). El resto de este documento registra el estado del commit 4d4881b.
+
 Rama: `integration/go-v1-calendario-ia-landing`. Base revisada: `e8ba409`.
 Worktree: `C:\Users\Usuario\.codex\worktrees\go-v1-calendario-ia-landing\goapp-profile-logout`.
 

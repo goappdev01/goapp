@@ -1,5 +1,5 @@
 import { AssistantCloseControls } from "./AssistantCloseControls";
-import React from "react";
+import React, { useState } from "react";
 import {
   Linking,
   Platform,
@@ -27,6 +27,7 @@ export function BookingAssistantPanels({
   go,
   bottom,
   dock,
+  viewport,
   voiceStatus,
   saving,
   onClosePanel,
@@ -37,6 +38,7 @@ export function BookingAssistantPanels({
   go: ReturnType<typeof useGoActions>;
   bottom: number;
   dock: React.ReactNode;
+  viewport: { width: number; height: number };
   voiceStatus: string;
   saving: boolean;
   onClosePanel: () => void;
@@ -60,6 +62,7 @@ export function BookingAssistantPanels({
                     ? "Cancelar reserva"
                     : "Ayuda de GO";
   const disabled = !!a.busy;
+  const [dockHeight, setDockHeight] = useState(84);
   return (
     <View style={s.scrim}>
       <TouchableOpacity
@@ -371,8 +374,8 @@ export function BookingAssistantPanels({
           </Text>
         )}
       </View>
-      {dock}
-      <AssistantCloseControls panel disabled={saving} onClose={onClosePanel} />
+      <View onLayout={event => setDockHeight(event.nativeEvent.layout.height)}>{dock}</View>
+      <AssistantCloseControls panel disabled={saving} onClose={onClosePanel} viewport={viewport} protectedBottom={dockHeight} />
     </View>
   );
 }
