@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-test("assistant endpoints validate input, isolate credentials and cannot execute bookings", async () => {
+test("assistant endpoints validate input, isolate credentials and cannot execute bookings", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "go-assistant-"));
   const output = path.join(dir, "router.mjs");
   await build({
@@ -146,6 +146,52 @@ test("assistant endpoints validate input, isolate credentials and cannot execute
       ).status,
       400,
     );
+    const planContext = {
+      active: null, pending: null, selected: null, listTitle: null,
+      bookingDate: null, bookingTime: null,
+    };
+    await t.test("/plan rejects an oversized list title without a 500 or invalid plan", async () => {
+      const text = "crea una lista de " + "x".repeat(210);
+      assert.ok(text.length < 2000, "the request text itself is within its limit");
+      const previousCalls = calls.length;
+      for (const key of [undefined, "server-only-test-key"]) {
+        if (key) process.env.OPENAI_API_KEY = key;
+        else delete process.env.OPENAI_API_KEY;
+        const response = await post("/plan", { text, today: "2026-10-08", context: planContext }, true);
+        assert.equal(response.status, 422);
+        assert.equal(response.headers.get("Cache-Control"), "no-store");
+        const body = await response.json();
+        assert.match(body.error, /límites permitidos/);
+        assert.equal(body.plan, undefined);
+        assert.ok(!JSON.stringify(body).includes("ZodError"));
+        assert.ok(!JSON.stringify(body).includes("server-only-test-key"));
+      }
+      delete process.env.OPENAI_API_KEY;
+      assert.equal(calls.length, previousCalls, "no provider or auth call for an unrepresentable plan");
+    });
+    await t.test("/plan preserves normal requests and the existing title boundary", async () => {
+      const previousCalls = calls.length;
+      const response = await post("/plan", {
+        text: "recuérdame llamar a Nelson mañana a las 17:30",
+        today: "2026-10-08", context: planContext,
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.mode, "rules");
+      assert.equal(body.plan.actions[0].kind, "task");
+      assert.equal(body.plan.actions[0].operation, "create");
+      assert.equal(body.plan.actions[0].title, "llamar a Nelson");
+      assert.equal(body.plan.actions[0].date, "2026-10-09");
+      assert.equal(body.plan.actions[0].time, "17:30");
+      const boundary = await post("/plan", {
+        text: "crea una lista de " + "x".repeat(191), today: "2026-10-08", context: planContext,
+      });
+      assert.equal(boundary.status, 200);
+      const list = (await boundary.json()).plan.actions[0];
+      assert.equal(list.kind, "list");
+      assert.equal(list.title.length, 200, "the existing schema limit is unchanged");
+      assert.equal(calls.length, previousCalls);
+    });
     assert.equal((await post("/transcribe", {})).status, 503);
     process.env.OPENAI_API_KEY = "server-only-test-key";
     assert.equal((await post("/interpret", request)).status, 401);
