@@ -699,6 +699,7 @@ export function LoginRegisterPanel({
         )}
 
         {/* FAB close — draggable, posición guardada por pantalla */}
+        {userAccountType !== null && (
         <DraggableFAB
           screenKey="login-register"
           buttonKey="main"
@@ -713,6 +714,7 @@ export function LoginRegisterPanel({
             </View>
           </TouchableOpacity>
         </DraggableFAB>
+        )}
 
         <LinearGradient
           colors={["transparent", "rgba(0,0,0,0.04)"]}

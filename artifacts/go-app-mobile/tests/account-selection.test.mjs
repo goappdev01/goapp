@@ -27,6 +27,7 @@ function nodes(tree, predicate) {
 // mocked. Authentication/network operations are deliberately not exercised here.
 function panelFixture() {
   const slots = [], accountChanges = [], storageCalls = [];
+  let closeCalls = 0;
   let cursor = 0;
   const React = {
     createElement: (type, props, ...children) => ({ type, props: { ...props, children: children.flat(Infinity) } }),
@@ -67,10 +68,11 @@ function panelFixture() {
   } }).outputText, context);
   return {
     accountChanges, storageCalls,
-    render() {
+    get closeCalls() { return closeCalls; },
+    render(userAccountType = null) {
       cursor = 0;
-      return context.exports.LoginRegisterPanel({ visible: true, userAccountType: null,
-        onSetAccountType: role => accountChanges.push(role), onClose() {}, onOpenPerfil() {}, onOpenEmpresa() {} });
+      return context.exports.LoginRegisterPanel({ visible: true, userAccountType,
+        onSetAccountType: role => accountChanges.push(role), onClose() { closeCalls++; }, onOpenPerfil() {}, onOpenEmpresa() {} });
     },
   };
 }
@@ -113,5 +115,58 @@ test('the Landing recognizer is disabled during access and resumes when it close
     vm.runInNewContext(`(${callback.getText(home)})()`, { goAuthOpen, Gesture: { Pan: () => chain } });
     assert.equal(config.enabled?.[0], !goAuthOpen);
     assert.equal(config.activeOffsetY[0], 40, 'preserve the validated Landing swipe threshold');
+  }
+});
+
+
+function closeButtons(tree) {
+  return nodes(tree, node => node.type === 'DraggableFAB' && node.props.screenKey === 'login-register');
+}
+
+test('welcome and the welcome after an account is cleared have no close button', () => {
+  const fixture = panelFixture();
+  assert.equal(closeButtons(fixture.render()).length, 0);
+  assert.equal(closeButtons(fixture.render('usuario')).length, 1);
+  assert.equal(closeButtons(fixture.render(null)).length, 0);
+});
+
+for (const role of ['empresa', 'usuario']) {
+  test(role + ' login and registration retain their forms without an outer close button', () => {
+    const fixture = panelFixture();
+    const welcome = fixture.render();
+    nodes(welcome, node => node.type === 'TouchableOpacity' && node.props.key === role)[0].props.onPress();
+    const login = fixture.render();
+    assert.equal(closeButtons(login).length, 0);
+    assert.equal(nodes(login, node => node.type === 'TextInput').length, 2);
+    const registerLink = nodes(login, node => node.type === 'TouchableOpacity' &&
+      nodes(node, child => child.type === 'Text' && child.props.children.includes('¿No tienes cuenta? Regístrate')).length)[0];
+    assert.ok(registerLink);
+    registerLink.props.onPress();
+    const register = fixture.render();
+    assert.equal(closeButtons(register).length, 0);
+    assert.equal(nodes(register, node => node.type === 'TextInput').length, 3);
+    assert.ok(nodes(register, node => node.type === 'Text' && node.props.children.includes('Crea tu cuenta GO')).length);
+    assert.deepEqual(fixture.accountChanges, []);
+    assert.deepEqual(fixture.storageCalls, []);
+  });
+
+  test(role + ' account panel retains its working close button', () => {
+    const fixture = panelFixture();
+    const buttons = closeButtons(fixture.render(role));
+    assert.equal(buttons.length, 1);
+    const touchable = nodes(buttons[0], node => node.type === 'TouchableOpacity')[0];
+    touchable.props.onPress();
+    assert.equal(fixture.closeCalls, 1);
+  });
+}
+
+test('the real parent onClose still prevents exit without an account', () => {
+  const panel = find(home, node => ts.isJsxSelfClosingElement(node) && node.tagName.getText(home) === 'LoginRegisterPanel');
+  const attr = panel.attributes.properties.find(prop => prop.name?.getText(home) === 'onClose');
+  const callback = attr.initializer.expression.getText(home);
+  for (const userAccountType of [null, 'empresa', 'usuario']) {
+    const closes = [];
+    vm.runInNewContext('(' + callback + ')()', { userAccountType, setGoAuthOpen: value => closes.push(value) });
+    assert.deepEqual(closes, userAccountType === null ? [] : [false]);
   }
 });
