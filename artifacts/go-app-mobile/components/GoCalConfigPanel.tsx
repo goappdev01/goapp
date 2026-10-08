@@ -36,15 +36,15 @@ function chip(active: boolean) {
     paddingHorizontal: active ? 10 : 9,
     paddingVertical: 6,
     borderRadius: 8,
-    backgroundColor: active ? "rgba(255,255,255,0.13)" : "rgba(255,255,255,0.05)",
+    backgroundColor: active ? "rgba(255,255,255,0.20)" : "rgba(255,255,255,0.08)",
     borderWidth: 1,
-    borderColor: active ? "rgba(255,255,255,0.48)" : "rgba(255,255,255,0.13)",
+    borderColor: active ? "rgba(255,255,255,0.65)" : "rgba(255,255,255,0.28)",
   } as const;
 }
 
 function chipTxt(active: boolean) {
   return {
-    color: active ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.38)",
+    color: active ? "#ffffff" : "rgba(255,255,255,0.75)",
     fontSize: 10,
     fontWeight: "700" as const,
     letterSpacing: 0.5,
@@ -104,7 +104,7 @@ export function GoCalConfigPanel({
             <Feather
               name="calendar"
               size={9}
-              color={monthGridOpen ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.38)"}
+              color={monthGridOpen ? "#ffffff" : "rgba(255,255,255,0.75)"}
             />
             <Text style={chipTxt(monthGridOpen)} numberOfLines={1}>MES</Text>
           </TouchableOpacity>
@@ -119,7 +119,7 @@ export function GoCalConfigPanel({
           <Feather
             name="clock"
             size={9}
-            color={showHours ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.38)"}
+            color={showHours ? "#ffffff" : "rgba(255,255,255,0.75)"}
           />
           <Text style={chipTxt(showHours)} numberOfLines={1}>HORAS</Text>
         </TouchableOpacity>
@@ -155,8 +155,8 @@ export function GoCalConfigPanel({
           hitSlop={10}
           style={{
             width: 32, height: 32, borderRadius: 16,
-            backgroundColor: "rgba(255,255,255,0.07)",
-            borderWidth: 1, borderColor: "rgba(255,255,255,0.18)",
+            backgroundColor: "rgba(255,255,255,0.08)",
+            borderWidth: 1, borderColor: "rgba(255,255,255,0.28)",
             alignItems: "center", justifyContent: "center",
           }}
         >
@@ -187,7 +187,7 @@ export function GoCalConfigPanel({
               <Feather
                 name={icon}
                 size={9}
-                color={isActive ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.38)"}
+                color={isActive ? "#ffffff" : "rgba(255,255,255,0.75)"}
               />
               <Text style={chipTxt(isActive)} numberOfLines={1}>{label}</Text>
             </TouchableOpacity>

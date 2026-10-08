@@ -1853,7 +1853,7 @@ export function AgendaBoard({
                         { height: estadoH },
                         isActive
                           ? {
-                              backgroundColor: opt.color + "28",
+                              backgroundColor: opt.color,
                               borderColor: opt.color,
                               shadowColor: opt.color,
                               shadowOpacity: 0.65,
@@ -1871,7 +1871,7 @@ export function AgendaBoard({
                       <Feather
                         name={(isActive ? opt.icon : opt.iconInactive) as any}
                         size={estadoIcon}
-                        color={isActive ? opt.color : opt.color + "90"}
+                        color={isActive ? "#101018" : opt.color + "90"}
                       />
                     </TouchableOpacity>
                   );
@@ -2694,7 +2694,7 @@ export function AgendaBoard({
                             flex: 1, paddingVertical: 12,
                             borderRadius: 12, borderWidth: 1.5,
                             alignItems: "center", justifyContent: "center",
-                            backgroundColor: isActive ? opt.color + "22" : "rgba(255,255,255,0.04)",
+                            backgroundColor: isActive ? opt.color : "rgba(255,255,255,0.04)",
                             borderColor: isActive ? opt.color : opt.color + "55",
                           }}
                           activeOpacity={0.7}
@@ -2702,7 +2702,7 @@ export function AgendaBoard({
                           <Feather
                             name={(isActive ? opt.icon : opt.iconInactive) as any}
                             size={18}
-                            color={isActive ? opt.color : opt.color + "80"}
+                            color={isActive ? "#101018" : opt.color + "80"}
                           />
                         </TouchableOpacity>
                       );
@@ -3436,7 +3436,7 @@ export function AgendaOperativa({
                 hitSlop={8}
                 accessibilityLabel="Cerrar configuración"
               >
-                <Feather name="chevron-down" size={11} color="rgba(255,255,255,0.55)" />
+                <Feather name="chevron-down" size={11} color="rgba(255,255,255,0.85)" />
               </TouchableOpacity>
             </View>
           </View>
@@ -3479,8 +3479,8 @@ export function AgendaOperativa({
             hitSlop={8}
             accessibilityLabel={configPanelOpen ? "Cerrar configuración" : "Abrir configuración"}
           >
-            <Feather name="chevron-up" size={12} color={configPanelOpen ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.70)"} />
-            <Text style={[s.configToggleBtnText, configPanelOpen && { color: "rgba(255,255,255,0.30)" }]}>CONFIG.</Text>
+            <Feather name="chevron-up" size={12} color={configPanelOpen ? "#ffffff" : "rgba(255,255,255,0.85)"} />
+            <Text style={[s.configToggleBtnText, configPanelOpen && { color: "#ffffff" }]}>CONFIG.</Text>
           </TouchableOpacity>
         )}
 
@@ -4335,18 +4335,18 @@ const s = StyleSheet.create({
     height: 36,
     paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(255,255,255,0.28)",
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
   configBtnActive: {
-    backgroundColor: "rgba(255,255,255,0.14)",
-    borderColor: "rgba(255,255,255,0.40)",
+    backgroundColor: "rgba(255,255,255,0.20)",
+    borderColor: "rgba(255,255,255,0.65)",
   },
   configBtnText: {
-    color: "rgba(255,255,255,0.38)",
+    color: "rgba(255,255,255,0.75)",
     fontSize: 9,
     fontFamily: "Inter_900Black", fontWeight: "900" as const,
     letterSpacing: 0.6,
@@ -4364,9 +4364,9 @@ const s = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 6,
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
+    borderColor: "rgba(255,255,255,0.35)",
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
@@ -4384,11 +4384,11 @@ const s = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: "#0d1020",
     borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.22)",
+    borderColor: "rgba(255,255,255,0.45)",
     zIndex: 20,
   },
   configToggleBtnText: {
-    color: "rgba(255,255,255,0.45)",
+    color: "rgba(255,255,255,0.85)",
     fontSize: 8,
     fontFamily: "Inter_900Black", fontWeight: "900" as const,
     letterSpacing: 0.8,
