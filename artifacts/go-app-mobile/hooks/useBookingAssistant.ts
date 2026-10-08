@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -36,7 +36,6 @@ export type AssistantPanel =
   | "attach"
   | "actions"
   | "zone"
-  | "ergonomics"
   | "bookings"
   | "help"
   | "staff"
@@ -71,6 +70,12 @@ export function useBookingAssistant() {
   const [cancelTarget, setCancelTarget] = useState<Booking | null>(null);
   const [placeText, setPlaceText] = useState("");
   const [places, setPlaces] = useState<Place[]>([]);
+  const [placeBusy, setPlaceBusy] = useState(false);
+  const [placeNotice, setPlaceNotice] = useState("");
+  const [pendingPlace, setPendingPlace] = useState<(Place & { source: SearchZone["source"] }) | null>(null);
+  const placeGeneration = useRef(0);
+  const pendingPlaceRef = useRef<typeof pendingPlace>(null);
+  const placeQueryRef = useRef("");
   const [radiusText, setRadiusText] = useState("5");
   const [saveZone, setSaveZone] = useState(false);
   const awaiting = useRef<AwaitingField>(null);
@@ -102,6 +107,7 @@ export function useBookingAssistant() {
     if (token !== generation.current) throw new Error("REQUEST_CANCELLED");
   }
   function invalidate() {
+    cancelPlaceSearch();
     generation.current++;
     lock.current = false;
     setBusy("");
@@ -140,18 +146,25 @@ export function useBookingAssistant() {
     if (!permission.granted && askPermission)
       permission = await Location.requestForegroundPermissionsAsync();
     if (!permission.granted) return null;
-    const result =
-      (await Location.getLastKnownPositionAsync({ maxAge: 300000 })) ||
-      (await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      }));
-    return {
-      label: "Mi ubicación actual",
-      latitude: result.coords.latitude,
-      longitude: result.coords.longitude,
+    let result;
+    try {
+      result = (await Location.getLastKnownPositionAsync({ maxAge: 300000 })) ||
+        await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    } catch { throw new Error("No se pudieron obtener coordenadas. Revisa la ubicación del dispositivo o escribe la zona."); }
+    const { latitude, longitude } = result.coords;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180)
+      throw new Error("El dispositivo no ha devuelto coordenadas válidas. Puedes escribir la zona.");
+    let label = `GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+    if (askPermission) {
+      try {
+        const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
+        const resolved = address && [address.street, address.streetNumber, address.postalCode, address.city || address.subregion, address.country].filter(Boolean).join(", ");
+        if (resolved) label = resolved.slice(0, 200);
+      } catch { /* Coordinates remain real and visible when reverse geocoding fails. */ }
+    }
+    return { label, latitude, longitude,
       radiusKm: zoneRef.current?.radiusKm || req.current.radiusKm || 5,
-      source: "gps" as const,
-    };
+      source: "gps" as const };
   }
   async function advance(next: BookingRequest, token: number) {
     if (!next.serviceQuery && !next.businessQuery) {
@@ -377,17 +390,61 @@ export function useBookingAssistant() {
       await advance(next, token);
     });
   }
-  async function searchPlaces(text = placeText) {
-    await work("Resolviendo zona…", async (token) => {
-      const resolved = await resolvePlaces(text);
-      check(token);
-      setPlaces(resolved);
-      if (!resolved.length)
-        setNotice(
-          "No se encontraron zonas. Prueba con una población o código postal.",
-        );
-    });
+  function cancelPlaceSearch() {
+    placeGeneration.current++;
+    setPlaceBusy(false);
   }
+  function setPlaceQuery(text: string) {
+    cancelPlaceSearch();
+    placeQueryRef.current = "";
+    pendingPlaceRef.current = null;
+    setPendingPlace(null);
+    setPlaces([]);
+    setPlaceNotice("");
+    setPlaceText(text);
+  }
+  function pickPlace(place: Place, source: SearchZone["source"] = "manual") {
+    cancelPlaceSearch();
+    const selected = { ...place, source };
+    pendingPlaceRef.current = selected;
+    setPendingPlace(selected);
+    setPlaceText(place.label);
+    setPlaces([]);
+    setPlaceNotice(source === "gps" && place.label.startsWith("GPS:")
+      ? "Coordenadas obtenidas. No se pudo resolver la dirección; puedes aplicar estas coordenadas reales."
+      : "Ubicación seleccionada. Pulsa Aplicar para usarla en la búsqueda.");
+  }
+  async function searchPlaces(text = placeText) {
+    const token = ++placeGeneration.current;
+    const query = text.trim();
+    placeQueryRef.current = query;
+    pendingPlaceRef.current = null;
+    setPendingPlace(null);
+    setPlaces([]);
+    setPlaceNotice("");
+    if (query.length < 2) {
+      setPlaceBusy(false);
+      setPlaceNotice("Escribe al menos dos caracteres para buscar una ubicación.");
+      return;
+    }
+    setPlaceBusy(true);
+    try {
+      const resolved = await resolvePlaces(query);
+      if (token !== placeGeneration.current) return;
+      setPlaces(resolved);
+      if (!resolved.length) setPlaceNotice("No se encontraron zonas. Prueba con una población, dirección o código postal.");
+    } catch (error) {
+      if (token === placeGeneration.current)
+        setPlaceNotice(error instanceof Error ? error.message : "No se pudo buscar la ubicación. Inténtalo de nuevo.");
+    } finally { if (token === placeGeneration.current) setPlaceBusy(false); }
+  }
+  useEffect(() => {
+    if (panel !== "zone") { cancelPlaceSearch(); return; }
+    if (pendingPlaceRef.current || placeQueryRef.current === placeText.trim() || placeText.trim().length < 2) return;
+    const timer = setTimeout(() => { void searchPlaces(placeText); }, 400);
+    return () => clearTimeout(timer);
+  }, [placeText, panel]);
+  useEffect(() => () => { placeGeneration.current++; }, []);
   async function chooseZone(
     place: Place,
     source: SearchZone["source"] = "manual",
@@ -510,6 +567,11 @@ export function useBookingAssistant() {
     names,
     cancelTarget,
     placeText,
+    placeBusy,
+    placeNotice,
+    pendingPlace,
+    setPlaceQuery,
+    pickPlace,
     places,
     radiusText,
     saveZone,

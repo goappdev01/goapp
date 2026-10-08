@@ -1,3 +1,6 @@
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { AssistantCloseControls } from "./AssistantCloseControls";
+import { useGoDockPreference } from "@/hooks/useGoDockPreference";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -20,7 +23,6 @@ import { StatusBar } from "expo-status-bar";
 import {
   bookingDockOrder,
   searchZoneSchema,
-  type DockPosition,
 } from "@workspace/api-zod";
 import { assistantApi, localToday } from "@/lib/bookingAssistant";
 import {
@@ -42,6 +44,7 @@ import {
 } from "./BookingAssistantUI";
 
 export interface BookingAssistantProps {
+  uiScale?: "compacto" | "estandar" | "grande";
   visible: boolean;
   onClose: () => void;
   onBack?: () => void;
@@ -49,19 +52,21 @@ export interface BookingAssistantProps {
   onHandednessChange?: (value: "left" | "right") => void;
 }
 type Attachment = { name: string; uri: string; image: boolean };
-const DOCK_KEY = "go_booking_assistant_dock_v1";
+
 export function BookingAssistantScreen({
   visible,
   onClose,
   onBack,
   handedness = "right",
+  uiScale = "estandar",
   onHandednessChange,
 }: BookingAssistantProps) {
   const insets = useSafeAreaInsets();
+  const goSize = uiScale === "compacto" ? 48 : uiScale === "grande" ? 72 : 64;
   const a = useBookingAssistant();
   const go = useGoActions(a);
   const [input, setInput] = useState("");
-  const [position, setPosition] = useState<DockPosition>(handedness);
+  const { position } = useGoDockPreference(handedness, visible);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [slotCount, setSlotCount] = useState(8);
@@ -69,7 +74,7 @@ export function BookingAssistantScreen({
   const scroll = useRef<ScrollView>(null);
   const voice = useBookingVoice((text, isZone) => {
     if (isZone) {
-      a.setPlaceText(text);
+      a.setPlaceQuery(text);
       a.setPanel("zone");
       void a.searchPlaces(text);
     } else {
@@ -85,23 +90,8 @@ export function BookingAssistantScreen({
     }
     let cancelled = false;
     (async () => {
-      const [savedDock, savedZone] = await Promise.all([
-        AsyncStorage.getItem(DOCK_KEY),
-        AsyncStorage.getItem(ASSISTANT_ZONE_KEY),
-      ]);
+      const savedZone = await AsyncStorage.getItem(ASSISTANT_ZONE_KEY);
       if (cancelled) return;
-      try {
-        const dock = JSON.parse(savedDock || "null");
-        setPosition(
-          dock &&
-            dock.base === handedness &&
-            ["left", "center", "right"].includes(dock.position)
-            ? dock.position
-            : handedness,
-        );
-      } catch {
-        setPosition(handedness);
-      }
       if (!hydrated.current) {
         try {
           const parsed = searchZoneSchema.safeParse(
@@ -138,18 +128,6 @@ export function BookingAssistantScreen({
     // Auto-listen only when the existing screen is opened from Landing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
-  useEffect(() => {
-    AsyncStorage.getItem(DOCK_KEY)
-      .then((saved) => {
-        try {
-          const dock = JSON.parse(saved || "null");
-          setPosition(dock?.base === handedness ? dock.position : handedness);
-        } catch {
-          setPosition(handedness);
-        }
-      })
-      .catch(() => {});
-  }, [handedness]);
   function reset() {
     voice.abort();
     setAttachments([]);
@@ -161,22 +139,13 @@ export function BookingAssistantScreen({
     voice.abort();
     a.setNotice("");
     if (panel === "zone") {
-      a.setPlaceText(a.zone?.label || "");
+      a.setPlaceQuery(a.zone?.label || "");
+      if (a.zone) a.pickPlace(a.zone, a.zone.source);
       a.setRadiusText(String(a.zone?.radiusKm || a.request.radiusKm || 5));
       a.setPlaces([]);
       a.setSaveZone(false);
     }
     a.setPanel(panel);
-  }
-  function changePosition(value: DockPosition) {
-    setPosition(value);
-    const base = value === "center" ? handedness : value;
-    if (value !== "center") onHandednessChange?.(value);
-    void AsyncStorage.setItem(
-      DOCK_KEY,
-      JSON.stringify({ position: value, base }),
-    );
-    a.setPanel(null);
   }
   function send() {
     if (!input.trim() || a.busy) return;
@@ -258,7 +227,80 @@ export function BookingAssistantScreen({
         : "";
   const micDisabled =
     !!a.busy || voice.status === "preparing" || voice.status === "transcribing";
+  const saving = ["Guardando en GO…", "Confirmando reserva…", "Cancelando reserva…"].includes(a.busy);
   const panelState = { ...a, reset };
+  const dock = (
+          <View style={s.dock}>
+            {bookingDockOrder(position).map((key) =>
+              key === "go" ? (
+                <TouchableOpacity
+                  key={key}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    listening ? "Detener escucha y enviar" : "Escuchar con GO"
+                  }
+                  accessibilityState={{
+                    selected: listening,
+                    disabled: micDisabled,
+                  }}
+                  disabled={micDisabled}
+                  onPress={() => {
+                    if (listening) void voice.stop();
+                    else {
+                      const isZone = a.panel === "zone";
+                      if (!isZone) a.setPanel(null);
+                      void voice.start(isZone);
+                    }
+                  }}
+                  style={[s.dockButton, s.goButton, { width: goSize, minWidth: goSize, maxWidth: goSize, minHeight: goSize, height: goSize, borderRadius: goSize / 2, paddingVertical: goSize === 48 ? 2 : 6, gap: goSize === 48 ? 2 : 4 }, listening && s.listening]}
+                >
+                  <Feather
+                    name={listening ? "square" : "mic"}
+                    size={goSize === 48 ? 18 : 25}
+                    color={listening ? "#FFF" : "#142D2A"}
+                  />
+                  <Text style={[s.dockLabel, listening && { color: "#FFF" }]}>
+                    {listening ? "Parar" : "GO"}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  key={key}
+                  accessibilityRole="button"
+                  disabled={!!a.busy}
+                  onPress={() => openPanel(key as AssistantPanel)}
+                  style={s.dockButton}
+                >
+                  <Feather
+                    name={
+                      key === "menu"
+                        ? "menu"
+                        : key === "attach"
+                          ? "paperclip"
+                          : key === "actions"
+                            ? "zap"
+                            : "map-pin"
+                    }
+                    size={22}
+                    color="#163F60"
+                  />
+                  <Text style={s.dockLabel}>
+                    {key === "menu"
+                      ? "Menú"
+                      : key === "attach"
+                        ? "Adjuntar"
+                        : key === "actions"
+                          ? "Acciones"
+                          : "Zona"}
+                  </Text>
+                  {key === "zone" && a.zone && (
+                    <Text style={s.radiusLabel}>{a.zone.radiusKm} km</Text>
+                  )}
+                </TouchableOpacity>
+              ),
+            )}
+          </View>
+  );
   return (
     <Modal
       visible={visible}
@@ -267,7 +309,7 @@ export function BookingAssistantScreen({
       onRequestClose={() => (a.panel ? back() : close())}
     >
       <StatusBar style="dark" />
-      <View
+      <GestureHandlerRootView
         style={[
           s.root,
           { paddingTop: insets.top, paddingBottom: insets.bottom },
@@ -278,13 +320,7 @@ export function BookingAssistantScreen({
             <Text style={s.eyebrow}>GO · ASISTENTE</Text>
             <Text style={s.title}>¿Qué necesitas hacer?</Text>
           </View>
-          <IconButton
-            icon="sliders"
-            label="Posición del botón GO"
-            onPress={() => openPanel("ergonomics")}
-            disabled={!!a.busy}
-          />
-          {(a.panel || a.phase === "review" || onBack) && (
+          {!a.panel && (a.phase === "review" || onBack) && (
             <IconButton
               icon="chevron-down"
               label="Retroceder un paso"
@@ -292,20 +328,12 @@ export function BookingAssistantScreen({
               disabled={!!a.busy}
             />
           )}
-          <IconButton
-            icon="chevrons-down"
-            label="Ir al Landing"
-            onPress={close}
-            disabled={
-              a.busy === "Guardando en GO…" || a.busy === "Confirmando reserva…" ||
-              a.busy === "Cancelando reserva…"
-            }
-          />
         </View>
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
+          <View style={{ flex: 1 }}>
           <ScrollView
             ref={scroll}
             contentContainerStyle={s.conversation}
@@ -653,92 +681,27 @@ export function BookingAssistantScreen({
               disabled={!input.trim() || !!a.busy}
             />
           </View>
-          <View style={s.dock}>
-            {bookingDockOrder(position).map((key) =>
-              key === "go" ? (
-                <TouchableOpacity
-                  key={key}
-                  accessibilityRole="button"
-                  accessibilityLabel={
-                    listening ? "Detener escucha y enviar" : "Escuchar con GO"
-                  }
-                  accessibilityState={{
-                    selected: listening,
-                    disabled: micDisabled,
-                  }}
-                  disabled={micDisabled}
-                  onPress={() => {
-                    a.setPanel(null);
-                    void voice.toggle();
-                  }}
-                  style={[s.dockButton, s.goButton, listening && s.listening]}
-                >
-                  <Feather
-                    name={listening ? "square" : "mic"}
-                    size={25}
-                    color={listening ? "#FFF" : "#142D2A"}
-                  />
-                  <Text style={[s.dockLabel, listening && { color: "#FFF" }]}>
-                    {listening ? "Parar" : "GO"}
-                  </Text>
-                </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  key={key}
-                  accessibilityRole="button"
-                  disabled={!!a.busy}
-                  onPress={() => openPanel(key as AssistantPanel)}
-                  style={s.dockButton}
-                >
-                  <Feather
-                    name={
-                      key === "menu"
-                        ? "menu"
-                        : key === "attach"
-                          ? "paperclip"
-                          : key === "actions"
-                            ? "zap"
-                            : "map-pin"
-                    }
-                    size={22}
-                    color="#163F60"
-                  />
-                  <Text style={s.dockLabel}>
-                    {key === "menu"
-                      ? "Menú"
-                      : key === "attach"
-                        ? "Adjuntar"
-                        : key === "actions"
-                          ? "Acciones"
-                          : "Zona"}
-                  </Text>
-                  {key === "zone" && a.zone && (
-                    <Text style={s.radiusLabel}>{a.zone.radiusKm} km</Text>
-                  )}
-                </TouchableOpacity>
-              ),
-            )}
-          </View>
-        </KeyboardAvoidingView>
+          {!a.panel && dock}
+          {!a.panel && <AssistantCloseControls disabled={saving} onClose={close} />}
         {a.panel && (
           <BookingAssistantPanels
             a={panelState}
             go={go}
-            bottom={insets.bottom}
-            position={position}
-            setPosition={changePosition}
+            bottom={0}
+            dock={dock}
+            saving={saving}
+            onClosePanel={() => { voice.abort(); a.invalidate(); a.setPanel(null); }}
+            voiceStatus={voiceText || voice.error}
             attach={(kind) => void attach(kind)}
-            voicePlace={() => {
-              a.setPanel(null);
-              void voice.start(true);
-            }}
             viewReservation={() => {
               a.setPanel(null);
               scroll.current?.scrollToEnd({ animated: true });
             }}
           />
         )}
-      </View>
+          </View>
+        </KeyboardAvoidingView>
+      </GestureHandlerRootView>
     </Modal>
   );
 }

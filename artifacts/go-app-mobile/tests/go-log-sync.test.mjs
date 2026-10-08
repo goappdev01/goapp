@@ -215,6 +215,7 @@ test("cancelling a real booking updates the shared calendar without dropping per
     entry("projection", { type: "GO_RESERVA", reservationId: "booking-test" })]);
   let cancelled;
   const api = load("lib/bookingAssistant.ts", {
+    "react-native": { Platform: { OS: "web" } },
     "@workspace/api-zod": {},
     "@/data/booking": { cancelBooking: async id => { cancelled = id; } },
     "./goLogBridge": f.bridge,

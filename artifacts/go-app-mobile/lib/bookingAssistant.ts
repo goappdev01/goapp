@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   bookingRequestSchema,
@@ -52,13 +53,16 @@ export async function assistantApi<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  const base = apiBase();
+  if (Platform.OS !== "web" && !/^https?:\/\//i.test(base))
+    throw new Error("Falta configurar EXPO_PUBLIC_API_URL con la URL del backend de GO para Expo Go.");
   let session: { access_token?: string } | null = null;
   try {
     session = JSON.parse(
       (await AsyncStorage.getItem("go_supabase_session_v1")) || "null",
     );
   } catch {}
-  const response = await fetch(apiBase() + "/booking-assistant" + path, {
+  const response = await fetch(base + "/booking-assistant" + path, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       "Content-Type": "application/json",
@@ -73,6 +77,8 @@ export async function assistantApi<T>(
       "No se pudo conectar con GO. Revisa tu conexión e inténtalo de nuevo.",
     );
   });
+  if (response.status === 404)
+    throw new Error("La API configurada no ofrece este servicio de GO (HTTP 404). Revisa la URL y la versión del backend.");
   const data = await response.json().catch(() => {
     throw new Error("GO no está disponible ahora. Inténtalo de nuevo.");
   });

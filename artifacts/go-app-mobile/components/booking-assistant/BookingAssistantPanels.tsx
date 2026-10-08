@@ -1,3 +1,4 @@
+import { AssistantCloseControls } from "./AssistantCloseControls";
 import React from "react";
 import {
   Linking,
@@ -9,15 +10,14 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import type { DockPosition } from "@workspace/api-zod";
 import { useBookingAssistant } from "@/hooks/useBookingAssistant";
 import {
   Action,
   Choice,
-  IconButton,
   bookingDate,
   canCancel,
   s,
+  z,
 } from "./BookingAssistantUI";
 
 import { GO_TASK_CREATION_ONLY, type useGoActions } from "@/hooks/useGoActions";
@@ -26,19 +26,21 @@ export function BookingAssistantPanels({
   a,
   go,
   bottom,
-  position,
-  setPosition,
+  dock,
+  voiceStatus,
+  saving,
+  onClosePanel,
   attach,
-  voicePlace,
   viewReservation,
 }: {
   a: Assistant;
   go: ReturnType<typeof useGoActions>;
   bottom: number;
-  position: DockPosition;
-  setPosition: (p: DockPosition) => void;
+  dock: React.ReactNode;
+  voiceStatus: string;
+  saving: boolean;
+  onClosePanel: () => void;
   attach: (kind: "camera" | "photos" | "file") => void;
-  voicePlace: () => void;
   viewReservation: () => void;
 }) {
   const title =
@@ -50,8 +52,6 @@ export function BookingAssistantPanels({
           ? "Adjuntar referencia"
           : a.panel === "actions"
             ? "Acciones"
-            : a.panel === "ergonomics"
-              ? "Posición de GO"
               : a.panel === "bookings"
                 ? "Mis reservas"
                 : a.panel === "staff"
@@ -65,17 +65,11 @@ export function BookingAssistantPanels({
       <TouchableOpacity
         style={StyleSheet.absoluteFill}
         accessibilityLabel="Cerrar panel"
-        onPress={() => !disabled && a.setPanel(null)}
+        onPress={() => !saving && onClosePanel()}
       />
       <View style={[s.sheet, { paddingBottom: Math.max(16, bottom) }]}>
         <View style={s.sheetHeader}>
-          <Text style={s.sectionTitle}>{title}</Text>
-          <IconButton
-            icon="x"
-            label="Cerrar panel"
-            disabled={disabled}
-            onPress={() => a.setPanel(null)}
-          />
+          <Text style={a.panel === "zone" ? z.sectionTitle : s.sectionTitle}>{title}</Text>
         </View>
         <ScrollView keyboardShouldPersistTaps="handled">
           {a.panel === "menu" && (
@@ -115,48 +109,29 @@ export function BookingAssistantPanels({
               </Text>
             </>
           )}
-          {a.panel === "ergonomics" &&
-            (["right", "center", "left"] as DockPosition[]).map((value) => (
-              <Choice
-                key={value}
-                title={
-                  (value === "right"
-                    ? "Diestro · GO a la derecha"
-                    : value === "left"
-                      ? "Zurdo · GO a la izquierda"
-                      : "Central · GO en el centro") +
-                  (position === value ? " ✓" : "")
-                }
-                onPress={() => setPosition(value)}
-              />
-            ))}
           {a.panel === "zone" && (
             <>
-              <Text style={s.sectionTitle}>¿Dónde quieres buscar?</Text>
-              <Text style={s.caption}>
+              <Text style={z.sectionTitle}>¿Dónde quieres buscar?</Text>
+              <Text style={z.caption}>
                 Población, código postal, dirección o zona. Tú eliges el
                 destino.
               </Text>
               <TextInput
                 accessibilityLabel="Centro de búsqueda"
+                editable={!disabled}
                 value={a.placeText}
-                onChangeText={a.setPlaceText}
+                onChangeText={a.setPlaceQuery}
                 placeholder="Ej. Cieza o Gran Vía, Madrid"
-                placeholderTextColor="#56686B"
-                style={s.field}
+                placeholderTextColor="#6B7280"
+                style={z.field}
                 maxLength={200}
               />
-              <Action
-                text="Buscar ubicación"
+              <Action tools
+                text={a.placeBusy ? "Buscando ubicación…" : "Buscar ubicación"}
                 onPress={() => void a.searchPlaces()}
-                disabled={disabled || a.placeText.trim().length < 2}
+                disabled={disabled || a.placeBusy || a.placeText.trim().length < 2}
               />
-              <Action
-                text="Decir el lugar por voz"
-                onPress={voicePlace}
-                disabled={disabled}
-              />
-              <Action
+              <Action tools
                 text="Mi ubicación actual"
                 onPress={() =>
                   void a.work("Obteniendo ubicación…", async (token) => {
@@ -166,13 +141,23 @@ export function BookingAssistantPanels({
                       throw new Error(
                         "No hay permiso de ubicación. Puedes escribir la zona.",
                       );
-                    a.setPlaces([gps]);
-                    a.setPlaceText(gps.label);
+                    a.pickPlace(gps, "gps");
                   })
                 }
                 disabled={disabled}
               />
-              <Text style={s.sectionTitle}>¿Hasta qué distancia?</Text>
+              {!!(a.placeBusy || a.placeNotice) && <Text accessibilityLiveRegion="polite" style={z.caption}>
+                {a.placeBusy ? "Buscando ubicaciones…" : a.placeNotice}
+              </Text>}
+              {a.places.map((place, index) => <Choice tools key={place.label + index}
+                title={place.label} onPress={() => a.pickPlace(place)} disabled={disabled} />)}
+              {a.pendingPlace && <>
+                <Text style={z.sectionTitle}>Pendiente de aplicar: {a.pendingPlace.label}</Text>
+                <Action tools primary text="Aplicar a esta búsqueda" disabled={disabled}
+                  onPress={() => void a.chooseZone(a.pendingPlace!, a.pendingPlace!.source)} />
+              </>}
+              {a.zone && <Text style={z.caption}>Zona aplicada: {a.zone.label} · {a.zone.radiusKm} km</Text>}
+              <Text style={z.sectionTitle}>¿Hasta qué distancia?</Text>
               <View style={s.chips}>
                 {[0.5, 1, 2, 5, 10, 25].map((value) => (
                   <TouchableOpacity
@@ -182,54 +167,33 @@ export function BookingAssistantPanels({
                     }}
                     key={value}
                     style={[
-                      s.chip,
-                      Number(a.radiusText) === value && s.activeChip,
+                      s.chip, z.chip,
+                      Number(a.radiusText) === value && z.activeChip,
                     ]}
                     onPress={() => a.setRadiusText(String(value))}
                   >
-                    <Text style={s.chipText}>
+                    <Text style={z.chipText}>
                       {value === 0.5 ? "500 m" : value + " km"}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
-              <Text style={s.caption}>Personalizado (km)</Text>
+              <Text style={z.caption}>Personalizado (km)</Text>
               <TextInput
                 accessibilityLabel="Distancia personalizada en kilómetros"
                 value={a.radiusText}
                 onChangeText={a.setRadiusText}
                 keyboardType="decimal-pad"
-                style={s.field}
+                style={z.field}
                 placeholder="Personalizado (km)"
               />
-              <Action
+              <Action tools
                 text={
                   (a.saveZone ? "✓ " : "") + "Recordar como mi zona habitual"
                 }
                 onPress={() => a.setSaveZone((value) => !value)}
                 disabled={disabled}
               />
-              {a.places.map((place, index) => (
-                <Choice
-                  key={place.label + index}
-                  title={place.label}
-                  onPress={() =>
-                    void a.chooseZone(
-                      place,
-                      place.label === "Mi ubicación actual" ? "gps" : "manual",
-                    )
-                  }
-                  disabled={disabled}
-                />
-              ))}
-              {a.zone && !a.places.length && a.placeText === a.zone.label && (
-                <Action
-                  text="Aplicar a esta búsqueda"
-                  primary
-                  onPress={() => void a.chooseZone(a.zone!, a.zone!.source)}
-                  disabled={disabled}
-                />
-              )}
             </>
           )}
           {a.panel === "actions" && (
@@ -401,12 +365,14 @@ export function BookingAssistantPanels({
             </>
           )}
         </ScrollView>
-        {!!(a.busy || a.notice) && (
+        {!!(a.busy || a.notice || voiceStatus) && (
           <Text accessibilityLiveRegion="polite" style={s.statusText}>
-            {a.busy || a.notice}
+            {a.busy || a.notice || voiceStatus}
           </Text>
         )}
       </View>
+      {dock}
+      <AssistantCloseControls panel disabled={saving} onClose={onClosePanel} />
     </View>
   );
 }

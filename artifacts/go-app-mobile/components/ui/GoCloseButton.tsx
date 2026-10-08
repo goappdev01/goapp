@@ -3,16 +3,19 @@ import { StyleSheet, TouchableOpacity } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 type Props = {
+  disabled?: boolean;
   level: "panel" | "container";
   onPress: () => void;
   accessibilityLabel: string;
 };
 
 /** ↓ closes one open panel; ⇓ exits its containing screen. */
-export function GoCloseButton({ level, onPress, accessibilityLabel }: Props) {
+export function GoCloseButton({ level, onPress, accessibilityLabel, disabled = false }: Props) {
   return (
     <TouchableOpacity
       onPress={event => { event.stopPropagation(); onPress(); }}
+      disabled={disabled}
+      accessibilityState={{ disabled }}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       activeOpacity={0.75}

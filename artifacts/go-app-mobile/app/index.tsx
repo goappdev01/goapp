@@ -23968,6 +23968,7 @@ function HomeScreenContent() {
       {/* GO CHAT SCREEN — asistente de reservas V1 */}
       <GOChatScreen
         visible={goChatOpen}
+        uiScale={uiScale}
         handedness={handedness}
         onHandednessChange={(value) => { setHandedness(value); AsyncStorage.setItem("go_handedness_v1", value).catch(() => {}); }}
         onClose={() => {

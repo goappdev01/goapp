@@ -51,11 +51,13 @@ export function Action({
   text,
   onPress,
   primary = false,
+  tools = false,
   disabled = false,
 }: {
   text: string;
   onPress: () => void;
   primary?: boolean;
+  tools?: boolean;
   disabled?: boolean;
 }) {
   return (
@@ -63,20 +65,22 @@ export function Action({
       accessibilityRole="button"
       disabled={disabled}
       onPress={onPress}
-      style={[s.action, primary && s.primary, disabled && s.disabled]}
+      style={[s.action, tools && z.action, primary && (tools ? z.primary : s.primary), disabled && s.disabled]}
     >
-      <Text style={[s.actionText, primary && { color: "#FFF" }]}>{text}</Text>
+      <Text style={[s.actionText, tools && z.actionText, primary && { color: "#FFF" }]}>{text}</Text>
     </TouchableOpacity>
   );
 }
 export function Choice({
   title,
   subtitle,
+  tools = false,
   onPress,
   disabled = false,
 }: {
   title: string;
   subtitle?: string;
+  tools?: boolean;
   onPress: () => void;
   disabled?: boolean;
 }) {
@@ -85,11 +89,11 @@ export function Choice({
       accessibilityRole="button"
       onPress={onPress}
       disabled={disabled}
-      style={[s.choice, disabled && s.disabled]}
+      style={[s.choice, tools && z.choice, disabled && s.disabled]}
     >
       <View style={{ flex: 1 }}>
-        <Text style={s.choiceTitle}>{title}</Text>
-        {!!subtitle && <Text style={s.caption}>{subtitle}</Text>}
+        <Text style={[s.choiceTitle, tools && z.sectionTitle]}>{title}</Text>
+        {!!subtitle && <Text style={[s.caption, tools && z.caption]}>{subtitle}</Text>}
       </View>
       <Feather name="chevron-right" size={21} color="#163F60" />
     </TouchableOpacity>
@@ -263,7 +267,14 @@ export const s = StyleSheet.create({
   dockLabel: { fontSize: 11, fontWeight: "700", color: "#163F60" },
   radiusLabel: { fontSize: 10, color: "#39574B" },
   goButton: {
-    borderRadius: 30,
+    flex: 0,
+    flexGrow: 0,
+    flexShrink: 0,
+    width: 64,
+    minWidth: 64,
+    aspectRatio: 1,
+    overflow: "hidden",
+    borderRadius: 32,
     borderWidth: 2,
     borderColor: "#B28D24",
     maxWidth: 64,
@@ -282,7 +293,8 @@ export const s = StyleSheet.create({
     justifyContent: "flex-end",
   },
   sheet: {
-    maxHeight: "88%",
+    maxHeight: "85%",
+    flexShrink: 1,
     backgroundColor: "#FFF",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -336,4 +348,19 @@ export const s = StyleSheet.create({
     fontSize: 11,
     backgroundColor: "#FFF",
   },
+});
+
+// HERRAMIENTAS typography, colors and form geometry.
+export const z = StyleSheet.create({
+  sectionTitle: { fontFamily: "Inter_700Bold", fontSize: 16, color: "#111827", marginVertical: 8 },
+  caption: { fontFamily: "Inter_400Regular", fontSize: 13, lineHeight: 20, color: "#6B7280" },
+  field: { minHeight: 48, padding: 12, borderRadius: 12, borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.07)", backgroundColor: "#F7F8FA", fontFamily: "Inter_400Regular", fontSize: 15, color: "#111827", marginVertical: 8 },
+  action: { backgroundColor: "#F7F8FA", borderRadius: 12, borderWidth: 1, borderColor: "rgba(0,0,0,0.07)", padding: 16 },
+  actionText: { fontFamily: "Inter_600SemiBold", fontSize: 13, color: "#4A80BD" },
+  primary: { backgroundColor: "#4A80BD" },
+  choice: { borderColor: "rgba(0,0,0,0.07)", borderRadius: 16, padding: 16 },
+  chip: { backgroundColor: "#F7F8FA", borderColor: "rgba(0,0,0,0.07)" },
+  activeChip: { backgroundColor: "rgba(74,128,189,0.10)", borderColor: "#4A80BD" },
+  chipText: { fontFamily: "Inter_600SemiBold", color: "#111827" },
 });

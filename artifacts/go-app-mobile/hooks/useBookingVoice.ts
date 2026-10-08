@@ -153,6 +153,12 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
         return;
       }
       try {
+        const permission = await AudioModule.requestRecordingPermissionsAsync();
+        if (generation.current !== token) return;
+        if (!permission.granted)
+          throw new Error(
+            "Permite el acceso al micrófono o escribe tu solicitud.",
+          );
         const capabilities = await assistantApi<{ transcription: boolean }>(
           "/capabilities",
         );
@@ -166,12 +172,6 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
         if (!userId)
           throw new Error(
             "Inicia sesión desde tu perfil para usar la voz. También puedes escribir.",
-          );
-        const permission = await AudioModule.requestRecordingPermissionsAsync();
-        if (generation.current !== token) return;
-        if (!permission.granted)
-          throw new Error(
-            "Permite el acceso al micrófono o escribe tu solicitud.",
           );
         await withRecorder(async () => {
           if (generation.current !== token) return;

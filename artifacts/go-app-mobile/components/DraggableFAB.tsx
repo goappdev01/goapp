@@ -41,6 +41,8 @@ interface DraggableFABProps {
   initialBottom?: number;
   initialTop?: number;
   maxH?: number;
+  bounds?: { width: number; height: number };
+  buttonWidth?: number;
   children: React.ReactNode;
 }
 
@@ -51,14 +53,16 @@ export function DraggableFAB({
   initialBottom,
   initialTop,
   maxH = FAB_BTN,
+  bounds,
+  buttonWidth = FAB_BTN,
   children,
 }: DraggableFABProps) {
-  const { width: SW, height: SH } = Dimensions.get("window");
+  const { width: SW, height: SH } = bounds || Dimensions.get("window");
   const insets = useSafeAreaInsets();
   const storageKey = `fab_pos:${screenKey}:${buttonKey}`;
 
   // ── Compute initial (left, top) ──────────────────────────────────────────
-  const initLeft = SW - initialRight - FAB_BTN;
+  const initLeft = SW - initialRight - buttonWidth;
   const initTop =
     initialTop !== undefined
       ? initialTop
@@ -76,10 +80,10 @@ export function DraggableFAB({
   const isDragging = useSharedValue(false);
 
   // ── Safe area clamp bounds ───────────────────────────────────────────────
-  const minL = insets.left + EDGE;
-  const maxL = SW - insets.right - EDGE - FAB_BTN;
-  const minT = insets.top + EDGE;
-  const maxT = SH - insets.bottom - EDGE - maxH;
+  const minL = (bounds ? 0 : insets.left) + EDGE;
+  const maxL = SW - (bounds ? 0 : insets.right) - EDGE - buttonWidth;
+  const minT = (bounds ? 0 : insets.top) + EDGE;
+  const maxT = SH - (bounds ? 0 : insets.bottom) - EDGE - maxH;
 
   // ── Persist ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -94,6 +98,11 @@ export function DraggableFAB({
       }
     });
   }, [storageKey]);
+
+  useEffect(() => {
+    posL.value = Math.max(minL, Math.min(maxL, posL.value));
+    posT.value = Math.max(minT, Math.min(maxT, posT.value));
+  }, [minL, maxL, minT, maxT]);
 
   const savePos = useCallback(
     (l: number, t: number) => {

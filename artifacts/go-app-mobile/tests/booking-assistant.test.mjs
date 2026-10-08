@@ -198,6 +198,7 @@ function serviceFixture() {
   const api = load(
     "lib/bookingAssistant.ts",
     {
+      "react-native": { Platform: { OS: "web" } },
       "@workspace/api-zod": model,
       "@/data/booking": bookingApi,
       "./goLogBridge": {
@@ -438,7 +439,7 @@ test("web microphone starts, shows progressive text and sends once on second tou
 
 function nativeVoiceFixture({
   denied = false,
-  delayedPermission = false,
+  serverError = false, delayedPermission = false,
 } = {}) {
   const received = [];
   const deleted = [];
@@ -491,7 +492,10 @@ function nativeVoiceFixture({
     },
     "@/lib/bookingAssistant": {
       assistantApi: async (path, body) => {
-        if (path === "/capabilities") return { transcription: true };
+        if (path === "/capabilities") {
+          if (serverError) throw new Error("No se pudo conectar con GO.");
+          return { transcription: true };
+        }
         uploaded.push(body);
         return { text: "Cieza mañana" };
       },
@@ -577,4 +581,12 @@ test("web late events after abort cannot send or change a new listening session"
   await current().stop();
   end();
   assert.deepEqual(received, ["nuevo"]);
+});
+
+test("microphone permission denial is distinguished from an unavailable native voice backend", async () => {
+  const denied = nativeVoiceFixture({ denied: true, serverError: true });
+  await denied.render().start(); assert.match(denied.render().error, /micrófono/);
+  const offline = nativeVoiceFixture({ serverError: true });
+  await offline.render().start(); assert.match(offline.render().error, /conectar con GO/);
+  assert.equal(offline.recorder.starts, 0);
 });
