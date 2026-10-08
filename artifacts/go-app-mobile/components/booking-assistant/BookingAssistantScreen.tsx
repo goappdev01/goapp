@@ -333,6 +333,40 @@ export function BookingAssistantScreen({
                 </Text>
               </View>
             ))}
+            {go.manager.state && (
+              <View style={s.card}>
+                <Text style={s.sectionTitle}>{go.manager.state.command.operation === "delete" ? "Eliminar tarea" : "Modificar tarea"}</Text>
+                {!go.manager.state.selected ? go.manager.state.entries.map((entry, i) => (
+                  <Choice key={entry.id} title={(i + 1) + ". " + (entry.notes || "Sin título")}
+                    subtitle={(entry.dateISO || "Sin fecha") + " · " + (entry.time || "Sin hora") + " · " + entry.estado}
+                    disabled={!!a.busy} onPress={() => { voice.abort(); void go.manager.choose(entry.id); }} />
+                )) : (
+                  <>
+                    <Detail label="Tarea" value={go.manager.state.selected.notes || "Sin título"} />
+                    <Detail label="Día actual" value={go.manager.state.selected.dateISO || "Sin fecha"} />
+                    <Detail label="Hora actual" value={go.manager.state.selected.time || "Sin hora"} />
+                    {go.manager.state.command.operation === "update" && (
+                      <>
+                        <Detail label="Día después del cambio" value={go.manager.state.command.clearDate ? "Sin fecha"
+                          : go.manager.state.command.date || go.manager.state.selected.dateISO || "Sin fecha"} />
+                        <Detail label="Hora después del cambio" value={go.manager.state.command.times.length ? "Por confirmar"
+                          : go.manager.state.command.clearTime ? "Sin hora"
+                          : go.manager.state.command.time || go.manager.state.selected.time || "Sin hora"} />
+                      </>
+                    )}
+                    {go.manager.state.command.question ? <Text style={s.body}>{go.manager.state.command.question}</Text>
+                      : go.manager.state.command.times.length ? go.manager.state.command.times.map(time => (
+                        <Action key={time} text={"Confirmar cambio a las " + time} disabled={!!a.busy}
+                          onPress={() => { voice.abort(); void go.manager.confirm(time); }} />
+                      )) : (
+                        <Action text={go.manager.state.command.operation === "delete" ? "Confirmar eliminación" : "Confirmar cambios"}
+                          disabled={!!a.busy} onPress={() => { voice.abort(); void go.manager.confirm(); }} />
+                      )}
+                  </>
+                )}
+                <Text style={s.caption}>Puedes decir «cancelar» para descartar esta acción.</Text>
+              </View>
+            )}
             {go.review && (
               <View style={s.card}>
                 <Text style={s.sectionTitle}>Revisa la tarea</Text>

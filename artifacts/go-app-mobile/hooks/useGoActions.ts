@@ -1,3 +1,4 @@
+import { useTaskManagement } from "./useTaskManagement";
 import { useRef, useState } from "react";
 import {
   emptyGoAction, emptyGoContext, normalizeBookingText, parseBookingRequest, emptyBookingRequest,
@@ -31,6 +32,7 @@ export function useGoActions(a: BookingAssistant) {
   const dispatchLock = useRef(false);
   const setActive = (value: Active) => { current.current = value; setActiveState(value); };
   function reset() {
+    manager.reset();
     setReview(null);
     unresolved.current = { date: false, time: false, times: [] };
     pending.current = null;
@@ -40,8 +42,12 @@ export function useGoActions(a: BookingAssistant) {
     setChoices([]);
     setActive(null);
   }
+  const manager = useTaskManagement(a, () => {
+    pending.current = null; remainder.current = []; setReview(null); setChoices([]); setResult(null); setActive("task");
+  }, () => { reset(); a.reset(); });
   function start(kind: NonNullable<Active>) {
     if (a.lock.current) return;
+    manager.reset();
     if (GO_TASK_CREATION_ONLY && kind !== "task" && kind !== "event" && kind !== "booking") {
       a.setNotice("Ahora puedes crear tareas y actividades o buscar reservas.");
       return;
@@ -88,6 +94,7 @@ export function useGoActions(a: BookingAssistant) {
   }
   async function saveCreation(action: GoAction, token: number) {
     a.check(token);
+    if (!await manager.ensureAccount()) return;
     a.setBusy("Guardando en GO…");
     const saved = await savePersonalAction(action);
     a.check(token);
@@ -187,6 +194,8 @@ export function useGoActions(a: BookingAssistant) {
   }
   async function dispatch(text: string, useAI: boolean) {
     if (!text.trim() || dispatchLock.current || a.lock.current) return;
+    if (await manager.handle(text)) return;
+    if (dispatchLock.current || a.lock.current) return;
     const n = normalizeBookingText(stripGoAddress(text));
     if (reviewRef.current && /^(?:si|confirmar|confirmo|guardar|correcto)$/.test(n)) {
       a.say(text.trim(), "user");
@@ -254,5 +263,5 @@ export function useGoActions(a: BookingAssistant) {
       if (error instanceof Error && error.message !== "REQUEST_CANCELLED") a.setNotice(error.message);
     } finally { dispatchLock.current = false; }
   }
-  return { active, result, choices, pending, review, confirmTask, reset, start, resumeBooking, showLists, chooseList, dispatch };
+  return { manager, active, result, choices, pending, review, confirmTask, reset, start, resumeBooking, showLists, chooseList, dispatch };
 }

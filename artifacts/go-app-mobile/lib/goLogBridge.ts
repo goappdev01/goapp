@@ -279,7 +279,7 @@ export async function readPersonalGoLog(): Promise<GoEntry[]> {
   return entries;
 }
 export function updatePersonalGoLog<T>(
-  update: (entries: GoEntry[]) => { entries: GoEntry[]; result: T },
+  update: (entries: GoEntry[]) => { entries: GoEntry[]; result: T } | Promise<{ entries: GoEntry[]; result: T }>,
 ): Promise<T> {
   return updateGoLog(entries => {
     if (entries.some(entry => typeof entry.id !== "string"))

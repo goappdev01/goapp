@@ -1,3 +1,4 @@
+import { getTaskUser, isPersonalTask, type OwnedGoEntry } from "./goTaskAccess";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { GoEntry } from "@/components/AgendaOperativa";
 
@@ -47,10 +48,23 @@ export function flushGoLog(): Promise<void> {
 }
 /** The updater always receives the latest committed view, including manual edits. */
 export function updateGoLog<T>(
-  update: (entries: GoEntry[]) => { entries: GoEntry[]; result: T },
+  update: (entries: GoEntry[]) => { entries: GoEntry[]; result: T } | Promise<{ entries: GoEntry[]; result: T }>,
 ): Promise<T> {
   return enqueue(async () => {
-    const next = update(JSON.parse(JSON.stringify(snapshot)) as GoEntry[]);
+    const owner = await getTaskUser();
+    const before = new Map(snapshot.map(entry => [entry.id, entry as OwnedGoEntry]));
+    const ambiguousIds = before.size !== snapshot.length || snapshot.some(entry => typeof entry.id !== "string" || !entry.id);
+    const next = await update(JSON.parse(JSON.stringify(snapshot)) as GoEntry[]);
+    // Ownership comes from the active session, never from a conversational payload.
+    // Do not adopt legacy entries: their owner cannot be established safely.
+    next.entries = next.entries.map(entry => {
+      if (ambiguousIds) return entry; // Let existing hydration repair legacy IDs without assigning ownership.
+      const old = before.get(entry.id);
+      if (old?.ownerUserId) return { ...entry, ownerUserId: old.ownerUserId };
+      if (!old && isPersonalTask(entry) && owner) return { ...entry, ownerUserId: owner };
+      return entry;
+    });
+    if (await getTaskUser() !== owner) throw new Error("La cuenta ha cambiado. Vuelve a solicitar la acción.");
     if (!equal(next.entries, snapshot)) {
       await AsyncStorage.setItem(GO_LOG_KEY, JSON.stringify(next.entries));
       // Notify Landing only after storage acknowledges the write.

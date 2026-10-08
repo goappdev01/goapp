@@ -43,7 +43,7 @@ export type AssistantPanel =
   | "cancel"
   | null;
 const INTRO =
-  "¿Qué necesitas hacer?\nPuedo ayudarte con reservas y crear tareas o actividades para tu calendario. Dímelo o escríbelo aquí.";
+  "¿Qué necesitas hacer?\nPuedo ayudarte con reservas y gestionar tareas o actividades para tu calendario. Dímelo o escríbelo aquí.";
 export const ASSISTANT_ZONE_KEY = "go_booking_assistant_zone_v1";
 export function useBookingAssistant() {
   const [messages, setMessages] = useState([

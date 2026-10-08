@@ -93,7 +93,7 @@ export function BookingAssistantPanels({
           )}
           {a.panel === "help" && (
             <Text style={s.body}>
-              Di o escribe qué necesitas reservar o qué tarea quieres crear. Las tareas pueden quedar sin fecha ni hora. Si hay una hora ambigua, revisa el resumen antes de guardar. Zona permite
+              Di o escribe qué necesitas reservar o qué tarea quieres crear, consultar, cambiar o eliminar. Las tareas pueden quedar sin fecha ni hora. Revisa los cambios y confirma antes de eliminar. Zona permite
               elegir el centro y la distancia de búsqueda. Toca GO para hablar y
               vuelve a tocar para enviar. Selecciona una opción y confirma su
               resumen para crear la reserva. Si la voz no está disponible,

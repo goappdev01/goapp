@@ -41,6 +41,7 @@ function fixture(initial = []) {
   };
   const store = load("lib/goLogStore.ts", {
     "@react-native-async-storage/async-storage": { default: storage },
+    "./goTaskAccess": { getTaskUser: async () => null, isPersonalTask: () => true },
   });
   const bridge = load("lib/goLogBridge.ts", {
     "./goLogStore": store, "@/data/booking": { getBookingSlotKey: () => "slot-test" },

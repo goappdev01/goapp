@@ -6,6 +6,7 @@ import {
 import { getAuthenticatedUserId } from "@/data/booking";
 import { assistantApi, localToday } from "./bookingAssistant";
 import { readPersonalGoLog, updatePersonalGoLog } from "./goLogBridge";
+import { getTaskUser, type OwnedGoEntry } from "./goTaskAccess";
 import { formatDayLetterSlash } from "./time";
 
 export async function interpretGoActions(text: string, context: GoContext, useAI: boolean): Promise<GoPlan> {
@@ -59,13 +60,15 @@ export async function savePersonalAction(raw: GoAction, listId?: string): Promis
   if (action.kind !== "list" && action.operation !== "create") throw new Error("Este paso solo permite crear tareas o actividades.");
   const missing = personalActionMissing(action);
   if (missing) throw new Error(missing);
-  return updatePersonalGoLog<PersonalResult>(entries => {
+  const owner = await getTaskUser();
+  return updatePersonalGoLog<PersonalResult>(async entries => {
+    if (await getTaskUser() !== owner) throw new Error("La cuenta ha cambiado. Vuelve a solicitar la acción.");
     if (action.kind !== "list") {
       // Repeated voice/text deliveries share the same transaction and cannot
       // create another copy of a recently acknowledged assistant task.
       const now = Date.now();
       const existing = entries.find(entry =>
-        entry.id.startsWith("go_") && !entry.deleted && entry.estado !== "rechazado"
+        entry.id.startsWith("go_") && ((entry as OwnedGoEntry).ownerUserId || null) === owner && !entry.deleted && entry.estado !== "rechazado"
         && entry.type === (action.kind === "event" ? "GO_INTERNO" : "TAREA_INTERNA")
         && typeof entry.createdAt === "number" && now >= entry.createdAt && now - entry.createdAt < 300000
         && normalizeBookingText(entry.notes || "") === normalizeBookingText(action.title || "")
