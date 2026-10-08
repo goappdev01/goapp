@@ -472,7 +472,6 @@ export function LoginRegisterPanel({
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
-                textContentType={authMode === "login" ? "username" : "emailAddress"}
                 autoComplete={authMode === "login" ? "username" : "email"}
                 returnKeyType="next"
                 blurOnSubmit={false}
@@ -486,7 +485,6 @@ export function LoginRegisterPanel({
                 placeholder="Contraseña (mínimo 8 caracteres)"
                 placeholderTextColor="#94A3B8"
                 secureTextEntry
-                textContentType={authMode === "login" ? "password" : "newPassword"}
                 autoComplete={authMode === "login" ? "current-password" : "new-password"}
                 returnKeyType={authMode === "login" ? "go" : "done"}
                 onSubmitEditing={authMode === "login" ? handleAuthenticate : undefined}
