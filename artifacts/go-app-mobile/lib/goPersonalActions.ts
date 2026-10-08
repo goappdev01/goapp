@@ -56,10 +56,24 @@ export type PersonalResult = { entry: GoEntry; changed: boolean; kind: "event" |
 export async function savePersonalAction(raw: GoAction, listId?: string): Promise<PersonalResult> {
   const action = goActionSchema.parse(raw);
   if (!["event", "task", "list"].includes(action.kind)) throw new Error("Acción personal no compatible.");
+  if (action.kind !== "list" && action.operation !== "create") throw new Error("Este paso solo permite crear tareas o actividades.");
   const missing = personalActionMissing(action);
   if (missing) throw new Error(missing);
   return updatePersonalGoLog<PersonalResult>(entries => {
     if (action.kind !== "list") {
+      // Repeated voice/text deliveries share the same transaction and cannot
+      // create another copy of a recently acknowledged assistant task.
+      const now = Date.now();
+      const existing = entries.find(entry =>
+        entry.id.startsWith("go_") && !entry.deleted && entry.estado !== "rechazado"
+        && entry.type === (action.kind === "event" ? "GO_INTERNO" : "TAREA_INTERNA")
+        && typeof entry.createdAt === "number" && now >= entry.createdAt && now - entry.createdAt < 300000
+        && normalizeBookingText(entry.notes || "") === normalizeBookingText(action.title || "")
+        && entry.dateISO === (action.date || "") && entry.time === (action.time || "")
+        && entry.place === (action.place || "") && (entry.detail || "") === (action.detail || "")
+        && entry.duration === (action.durationMinutes ? action.durationMinutes + "min" : "")
+      );
+      if (existing) return { entries, result: { entry: existing, changed: false, kind: action.kind as "task" | "event" } };
       if (entries.length >= 200) throw new Error("Tu registro de GO está lleno. Revisa tus acciones antes de añadir otra.");
       const entry = newEntry(action);
       return { entries: [entry, ...entries], result: { entry, changed: true, kind: action.kind as "task" | "event" } };
@@ -94,7 +108,7 @@ export function describePersonalResult(result: PersonalResult, operation?: GoAct
   const { entry } = result;
   const heading = result.kind === "list"
     ? operation === "read" ? "Tu lista" : result.changed ? "Lista guardada en Notas" : "La lista no necesitaba cambios"
-    : result.kind === "event" ? "Añadido al Calendario" : "Tarea guardada";
+    : !result.changed ? "Esta tarea ya estaba guardada" : result.kind === "event" ? "Añadido al Calendario" : "Tarea guardada";
   return [
     heading + ": " + entry.notes,
     entry.dateISO ? entry.dateISO.split("-").reverse().join("/") + (entry.time ? " · " + entry.time : " · Sin hora") : null,

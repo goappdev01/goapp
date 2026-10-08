@@ -333,6 +333,25 @@ export function BookingAssistantScreen({
                 </Text>
               </View>
             ))}
+            {go.review && (
+              <View style={s.card}>
+                <Text style={s.sectionTitle}>Revisa la tarea</Text>
+                <Detail label="Título" value={go.review.action.title || ""} />
+                <Detail label="Tipo" value={go.review.action.kind === "event" ? "Actividad en calendario" : "Tarea interna"} />
+                <Detail label="Día" value={go.review.action.date?.split("-").reverse().join("/") || "Sin fecha"} />
+                <Detail label="Hora" value={go.review.times.length ? "Por confirmar" : go.review.action.time || "Sin hora"} />
+                {!!go.review.action.detail && <Text style={s.caption}>{go.review.action.detail}</Text>}
+                <Text style={s.body}>{go.review.reason}</Text>
+                {go.review.times.length ? go.review.times.map(time => (
+                  <Action key={time} text={"Guardar a las " + time} disabled={!!a.busy}
+                    onPress={() => { voice.abort(); void go.confirmTask(time); }} />
+                )) : (
+                  <Action text="Confirmar y guardar tarea" primary disabled={!!a.busy}
+                    onPress={() => { voice.abort(); void go.confirmTask(); }} />
+                )}
+                <Text style={s.caption}>Puedes aclararlo escribiendo o hablando con GO. Di «cancelar» para descartarlo.</Text>
+              </View>
+            )}
             {go.choices.map(entry => (
               <Choice key={entry.id} title={entry.notes || "Lista"}
                 subtitle={entry.detail || "Lista vacía"} disabled={!!a.busy}

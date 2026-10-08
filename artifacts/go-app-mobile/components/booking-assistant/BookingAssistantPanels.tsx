@@ -20,9 +20,11 @@ import {
   s,
 } from "./BookingAssistantUI";
 
+import { GO_TASK_CREATION_ONLY, type useGoActions } from "@/hooks/useGoActions";
 type Assistant = ReturnType<typeof useBookingAssistant>;
 export function BookingAssistantPanels({
   a,
+  go,
   bottom,
   position,
   setPosition,
@@ -31,6 +33,7 @@ export function BookingAssistantPanels({
   viewReservation,
 }: {
   a: Assistant;
+  go: ReturnType<typeof useGoActions>;
   bottom: number;
   position: DockPosition;
   setPosition: (p: DockPosition) => void;
@@ -55,7 +58,7 @@ export function BookingAssistantPanels({
                   ? "Profesional"
                   : a.panel === "cancel"
                     ? "Cancelar reserva"
-                    : "Ayuda de reservas";
+                    : "Ayuda de GO";
   const disabled = !!a.busy;
   return (
     <View style={s.scrim}>
@@ -83,14 +86,14 @@ export function BookingAssistantPanels({
                 onPress={() => void a.showBookings()}
               />
               <Action
-                text="Ayuda de reservas"
+                text="Ayuda de GO"
                 onPress={() => a.setPanel("help")}
               />
             </>
           )}
           {a.panel === "help" && (
             <Text style={s.body}>
-              Di o escribe qué quieres reservar, dónde y cuándo. Zona permite
+              Di o escribe qué necesitas reservar o qué tarea quieres crear. Las tareas pueden quedar sin fecha ni hora. Si hay una hora ambigua, revisa el resumen antes de guardar. Zona permite
               elegir el centro y la distancia de búsqueda. Toca GO para hablar y
               vuelve a tocar para enviar. Selecciona una opción y confirma su
               resumen para crear la reserva. Si la voz no está disponible,
@@ -231,7 +234,27 @@ export function BookingAssistantPanels({
           )}
           {a.panel === "actions" && (
             <>
-              {a.phase === "confirmed" && a.created ? (
+              {go.active === "task" || go.active === "event" ? (
+                <>
+                  <Action text={go.active === "task" ? "Crear otra tarea" : "Añadir otra actividad"}
+                    onPress={() => go.start(go.active as "task" | "event")} />
+                  <Text style={s.caption}>Tus acciones se encuentran en Tareas y, si tienen fecha, en Calendario.</Text>
+                </>
+              ) : go.active === "list" ? (
+                <>
+                  {!GO_TASK_CREATION_ONLY && <Action text="Abrir lista" onPress={() => void go.showLists()} />}
+                  <Action text="Crear otra lista" onPress={() => go.start("list")} />
+                  <Text style={s.caption}>Di qué elementos quieres añadir o quitar y el nombre de la lista.</Text>
+                </>
+              ) : go.active === null ? (
+                <>
+                  <Action text="Crear tarea" onPress={() => go.start("task")} />
+                  <Action text="Añadir al calendario" onPress={() => go.start("event")} />
+                  {!GO_TASK_CREATION_ONLY && <Action text="Crear lista" onPress={() => go.start("list")} />}
+                  {!GO_TASK_CREATION_ONLY && <Action text="Abrir lista" onPress={() => void go.showLists()} />}
+                  <Action text="Buscar una reserva" onPress={() => go.start("booking")} />
+                </>
+              ) : a.phase === "confirmed" && a.created ? (
                 <>
                   <Action text="Ver reserva" onPress={viewReservation} />
                   {canCancel(a.created) && (

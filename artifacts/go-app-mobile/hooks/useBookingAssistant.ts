@@ -43,7 +43,7 @@ export type AssistantPanel =
   | "cancel"
   | null;
 const INTRO =
-  "¿Qué quieres reservar?\nPuedo buscar negocios y actividades en la zona que elijas. Dime qué necesitas.";
+  "¿Qué necesitas hacer?\nPuedo ayudarte con reservas y crear tareas o actividades para tu calendario. Dímelo o escríbelo aquí.";
 export const ASSISTANT_ZONE_KEY = "go_booking_assistant_zone_v1";
 export function useBookingAssistant() {
   const [messages, setMessages] = useState([
@@ -334,9 +334,9 @@ export function useBookingAssistant() {
     lastPlace.current = zoneRef.current?.label || null;
     setMessages([{ id: id.current++, role: "assistant", text: INTRO }]);
   }
-  async function send(text: string, useAI: boolean) {
+  async function send(text: string, useAI: boolean, echo = true) {
     if (!text.trim() || lock.current) return;
-    say(text.trim(), "user");
+    if (echo) say(text.trim(), "user");
     const n = normalizeBookingText(text);
     if (/^(mis reservas|ver mis reservas)$/.test(n)) {
       await showBookings();
@@ -519,6 +519,7 @@ export function useBookingAssistant() {
     setPanel,
     setPhase,
     setNotice,
+    setBusy,
     setOption,
     setCancelTarget,
     setPlaceText,
