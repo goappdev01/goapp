@@ -99,6 +99,8 @@ interface GoReservasConfigScreenProps {
   onClose:                () => void;
   onOpenVerificacion?:    () => void;
   onOpenCalendarPanel?:   () => void;
+  onOpenGo?:              () => void;
+  onCreateTaskAtTime?:    (dateISO: string, timeHHMM: string) => void;
   onGoToLanding?:         () => void;
   dayNightMode?:          "claro" | "oscuro" | "mixto";
   onDayNightModeChange?:  (m: CalDayNightMode) => void;
@@ -119,7 +121,7 @@ function computeIsDark(mode?: "claro" | "oscuro" | "mixto"): boolean {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCalendarPanel, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed }: GoReservasConfigScreenProps) {
+export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed }: GoReservasConfigScreenProps) {
   const insets    = useSafeAreaInsets();
   const { config } = useBusinessConfig();
   const { lang, t }  = useLanguage();
@@ -555,6 +557,7 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
             showHours={calShowHours}
             calSizeKey={calSize}
             calDayNightMode={(dayNightMode ?? "mixto") as CalDayNightMode}
+            onCreateTaskAtTime={onCreateTaskAtTime}
             onChangeEstado={handleChangeEstado}
             onChangeMonth={dir => {
               setCalViewMonth(prev => {
@@ -614,6 +617,13 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
               style={g.fabBtn}
             >
               <Feather name="calendar" size={15} color="rgba(255,255,255,0.85)" />
+            </TouchableOpacity>
+          )}
+          {onOpenGo && (
+            <TouchableOpacity onPress={onOpenGo} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Open GO" : "Abrir GO"}
+              hitSlop={2} activeOpacity={0.8}
+              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: GOLD, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ color: "#17120B", fontSize: 15, fontWeight: "900" }}>GO</Text>
             </TouchableOpacity>
           )}
           {/* No internal panel is open here: only the container exit is shown. */}

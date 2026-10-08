@@ -1,7 +1,8 @@
 import type { GoEntry } from "@/components/AgendaOperativa";
 import { useGoLog } from "@/hooks/useGoLog";
-import { readGoLog, flushGoLog, commitGoLogSnapshot } from "@/lib/goLogStore";
-import { notifySessionChanged } from "@/lib/sessionEvents";
+import { readGoLog, flushGoLog, commitGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
+import { notifySessionChanged, onSessionChanged } from "@/lib/sessionEvents";
+import { getTaskUser, assertTaskUser } from "@/lib/goTaskAccess";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
@@ -3010,6 +3011,7 @@ function HomeScreenContent() {
   const [modeOpen, setModeOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [goChatOpen, setGoChatOpen] = useState(false);
+  const pendingCalendarGoRef = useRef(false);
   const [aiDraft, setAiDraft] = useState("");
   const [aiListening, setAiListening] = useState(false);
 
@@ -3222,6 +3224,11 @@ function HomeScreenContent() {
   }, []);
   // ── FIELD SELECTOR — pantalla de campos opcionales antes de crear nota/GO ─
   const [fieldSelectorOpen, setFieldSelectorOpen] = useState(false);
+  const calendarSlotDraftRef = useRef<{ ownerUserId: string; entryId?: string } | null>(null);
+  const calendarSlotOpeningRef = useRef(false);
+  const calendarSlotSavingRef = useRef(false);
+  const calendarSlotRequestRef = useRef(0);
+  const fieldSelectorSaveBusyRef = useRef(false);
   // Keep the calendar mounted beneath its existing task form.
   const calendarTaskContextRef = useRef<{
     dateISO: string; dateLabel: string;
@@ -4195,6 +4202,7 @@ function HomeScreenContent() {
     setCalBgViewMode(context.viewMode);
     setCalBgViewMonth(context.viewMonth);
     calendarTaskContextRef.current = null;
+    calendarSlotDraftRef.current = null;
     Keyboard.dismiss();
   };
   const closeCalendarTaskPanel = () => {
@@ -5937,6 +5945,14 @@ function HomeScreenContent() {
   };
 
   const openAi = () => {
+    if (pendingCalendarGoRef.current) return;
+    // iOS must finish dismissing Calendar before presenting the existing AI modal.
+    if (calOpen) {
+      pendingCalendarGoRef.current = true;
+      setCalOpen(false);
+      return;
+    }
+    if (goChatOpen) return;
     Haptics.selectionAsync();
     // Anclaje al sistema de tiempo global: refrescamos "now" en cada
     // apertura de la pantalla IA para que cualquier fecha relativa
@@ -5945,7 +5961,7 @@ function HomeScreenContent() {
     if (__DEV__) {
       console.log("[time] AI open @", now.toISOString());
     }
-    // GOChatScreen visual — IA real se conectará más adelante.
+    // GOChatScreen delegates to the integrated BookingAssistantScreen.
     setGoChatOpen(true);
     setAiDraft("");
     setAiOpen(false);
@@ -5958,6 +5974,19 @@ function HomeScreenContent() {
       startIaListening();
     }, 250);
   };
+
+  const completeCalendarGoOpen = () => {
+    if (!pendingCalendarGoRef.current) return;
+    pendingCalendarGoRef.current = false;
+    openAi();
+  };
+  useEffect(() => {
+    if (calOpen) return;
+    ++calendarSlotRequestRef.current;
+    calendarSlotOpeningRef.current = false;
+    // Android/web remove a hidden Modal during commit; onDismiss is iOS-only.
+    if (Platform.OS !== "ios") completeCalendarGoOpen();
+  }, [calOpen]);
 
   // V1 PROMPT 13 — SISTEMA DE CAPAS, NO PANTALLAS CLÁSICAS.
   //
@@ -8249,12 +8278,15 @@ function HomeScreenContent() {
     initialText?: string,
     initialDetail?: string,
     prefillDateISO?: string,
+    prefillTime?: string,
   ) => {
+    if (calendarSlotSavingRef.current) return;
+    const fromTimeSlot = prefillTime !== undefined;
     // ── NOTA EXTERNA DURANTE GO ACTIVO ─────────────────────────────────────
     // Si hay un GO en construcción (categoría elegida o campos ya rellenos),
     // la nota externa NO crea una entrada separada: se adjunta al GO activo
     // y viajará dentro del mismo envío. El botón central permanece "SEND GO".
-    if (kind === "NOTA_EXTERNA" && (isActivelyCreating || categorySelected)) {
+    if (!fromTimeSlot && kind === "NOTA_EXTERNA" && (isActivelyCreating || categorySelected)) {
       setAttachedExternalNote({
         title:  initialText   || "",
         detail: initialDetail || "",
@@ -8283,7 +8315,7 @@ function HomeScreenContent() {
     const hasPlace   = !!landingPlace;
     const hasDate    = !!(landingDate || landingDateISO);
 
-    if (kind === "NOTA_INTERNA" && hasPlace && hasDate) {
+    if (!fromTimeSlot && kind === "NOTA_INTERNA" && hasPlace && hasDate) {
       setNotesOpen(false);
       setQuickNoteText("");
       setQuickNoteDetail("");
@@ -8302,7 +8334,7 @@ function HomeScreenContent() {
       return;
     }
 
-    if (kind === "NOTA_EXTERNA" && hasContact && hasPlace && hasDate) {
+    if (!fromTimeSlot && kind === "NOTA_EXTERNA" && hasContact && hasPlace && hasDate) {
       setNotesOpen(false);
       setQuickNoteText("");
       setQuickNoteDetail("");
@@ -8328,6 +8360,7 @@ function HomeScreenContent() {
       ? { dateISO: dateISODraft, dateLabel: dateDraft, viewMode: calBgViewMode, viewMonth: calBgViewMonth }
       : null;
     qdOriginContextRef.current = { listOpen, notesOpen, agendaOpOpen };
+    fieldSelectorSaveBusyRef.current = false;
     setFieldSelectorKind(kind);
     setFieldSelectorText(initialText || "");
     setFieldSelectorDetail(initialDetail || "");
@@ -8335,16 +8368,16 @@ function HomeScreenContent() {
 
     // Pre-rellenar con datos Landing disponibles
     const landingPrefill: typeof fsFilledValues = {};
-    if (landingContact || landingPhone) {
+    if (!fromTimeSlot && (landingContact || landingPhone)) {
       landingPrefill.contactName = landingContact || undefined;
       landingPrefill.phone       = landingPhone   || undefined;
     }
-    if (landingDate || landingDateISO) {
+    if (!fromTimeSlot && (landingDate || landingDateISO)) {
       landingPrefill.date    = landingDate    || undefined;
       landingPrefill.dateISO = landingDateISO || undefined;
       landingPrefill.time    = landingTime    || undefined;
     }
-    if (landingPlace) {
+    if (!fromTimeSlot && landingPlace) {
       landingPrefill.place = landingPlace;
     }
 
@@ -8352,7 +8385,9 @@ function HomeScreenContent() {
       const todayISONow = formatISODate(getToday());
       const d = new Date(prefillDateISO + "T00:00:00");
       const dateLabel = prefillDateISO === todayISONow ? "HOY" : formatDayLabel(d);
-      setFsFilledValues({ ...landingPrefill, date: dateLabel, dateISO: prefillDateISO });
+      setFsFilledValues({ ...landingPrefill, date: dateLabel, dateISO: prefillDateISO,
+        ...(fromTimeSlot ? { time: prefillTime } : {}) });
+      if (fromTimeSlot) setFsPlaceDraft("");
     } else {
       setFsFilledValues(Object.keys(landingPrefill).length > 0 ? landingPrefill : {});
     }
@@ -8369,7 +8404,7 @@ function HomeScreenContent() {
     qdFlowActiveRef.current = false;
     setFieldSelectorOpen(true);
     // Persist draft immediately so content is never lost if user navigates away
-    AsyncStorage.setItem(
+    if (!fromTimeSlot) AsyncStorage.setItem(
       "go_task_draft_v1",
       JSON.stringify({ kind, text: initialText || "", detail: initialDetail || "" }),
     ).catch(() => {});
@@ -8381,8 +8416,47 @@ function HomeScreenContent() {
     setCalAddOpen(false);
   };
 
+  const openCalendarSlotTask = async (slotDateISO: string, slotTime: string) => {
+    if (fieldSelectorOpen || calendarSlotDraftRef.current || calendarSlotOpeningRef.current || calendarSlotSavingRef.current) return;
+    const request = ++calendarSlotRequestRef.current;
+    calendarSlotOpeningRef.current = true;
+    try {
+      const ownerUserId = await getTaskUser();
+      if (request !== calendarSlotRequestRef.current) return;
+      if (!ownerUserId) {
+        showToast(lang === "en" ? "Sign in to create your task." : "Inicia sesión para crear tu tarea.", "error");
+        return;
+      }
+      await assertTaskUser(ownerUserId);
+      if (request !== calendarSlotRequestRef.current) return;
+      calendarSlotDraftRef.current = { ownerUserId };
+      openFieldSelector("NOTA_INTERNA", "", "", slotDateISO, slotTime);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      if (request === calendarSlotRequestRef.current) calendarSlotOpeningRef.current = false;
+    }
+  };
+  useEffect(() => onSessionChanged(() => {
+    ++calendarSlotRequestRef.current;
+    calendarSlotOpeningRef.current = false;
+    if (!calendarSlotDraftRef.current) return;
+    closeFieldSelectorPanel();
+    setFieldSelectorText("");
+    setFieldSelectorDetail("");
+    setFsFilledValues({});
+  }), [closeFieldSelectorPanel]);
+
+  const commitCalendarSelectorEntry = async (entry: GoEntry, ownerUserId: string) => {
+    await updateGoLog(async entries => {
+      await assertTaskUser(ownerUserId);
+      if (entries.some(existing => existing.id === entry.id)) return { entries, result: undefined };
+      return { entries: [{ ...entry, ownerUserId }, ...entries].slice(0, 200), result: undefined };
+    });
+  };
+
   // ── CREAR ENTRADA DESDE EL FLUJO FIELD SELECTOR ──────────────────────────
-  const createEntryFromSelector = (
+  const createEntryFromSelector = async (
     kind: "GO_INTERNO" | "GO_EXTERNO" | "NOTA_INTERNA" | "NOTA_EXTERNA",
     text: string,
     contactNameVal: string,
@@ -8393,9 +8467,11 @@ function HomeScreenContent() {
     placeVal: string,
     detailVal?: string,
   ) => {
-    if (calendarTaskContextRef.current) closeFieldSelectorPanel();
+    const slotOwner = calendarSlotDraftRef.current?.ownerUserId;
+    if (calendarTaskContextRef.current && !slotOwner) closeFieldSelectorPanel();
     const now = Date.now();
-    const uid = makeUid();
+    const uid = calendarSlotDraftRef.current?.entryId || makeUid();
+    if (slotOwner && calendarSlotDraftRef.current) calendarSlotDraftRef.current.entryId = uid;
 
     if (kind === "NOTA_INTERNA") {
       const entry: any = {
@@ -8418,13 +8494,18 @@ function HomeScreenContent() {
         detail: detailVal || "",
         isGeneric: true,
       };
-      setGoLog((prev) => {
-        const next = [entry, ...prev].slice(0, 200);
-        persistLog(next);
-        return next;
-      });
+      if (slotOwner) {
+        await commitCalendarSelectorEntry(entry, slotOwner);
+        closeFieldSelectorPanel();
+      } else {
+        setGoLog((prev) => {
+          const next = [entry, ...prev].slice(0, 200);
+          persistLog(next);
+          return next;
+        });
+      }
       showToast(t('toast_internal_task_saved'), 'success');
-      AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
+      if (!slotOwner) AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
       if (isUserMode) setGoOnboardingCount(prev => { const next = prev + 1; AsyncStorage.setItem("go_onboarding_count_v1", String(next)).catch(() => {}); return next; });
       if (isUserMode && !tutGoRealizado) { setTutGoRealizado(true); AsyncStorage.setItem("tutorial.goRealizado", "1").catch(() => {}); }
 
@@ -8448,11 +8529,16 @@ function HomeScreenContent() {
         notes: text || "",
         isGeneric: false,
       };
-      setGoLog((prev) => {
-        const next = [entry, ...prev].slice(0, 200);
-        persistLog(next);
-        return next;
-      });
+      if (slotOwner) {
+        await commitCalendarSelectorEntry(entry, slotOwner);
+        closeFieldSelectorPanel();
+      } else {
+        setGoLog((prev) => {
+          const next = [entry, ...prev].slice(0, 200);
+          persistLog(next);
+          return next;
+        });
+      }
       // NO enviar automáticamente. Mostrar botón ENVIAR en zona TAREA del GO.
       const cleanPhone = normalizePhoneForWhatsApp(phoneVal);
       if (cleanPhone) {
@@ -8461,7 +8547,7 @@ function HomeScreenContent() {
       } else {
         showToast(t('toast_external_task_saved'), 'success');
       }
-      AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
+      if (!slotOwner) AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
       if (isUserMode) setGoOnboardingCount(prev => { const next = prev + 1; AsyncStorage.setItem("go_onboarding_count_v1", String(next)).catch(() => {}); return next; });
       if (isUserMode && !tutGoRealizado) { setTutGoRealizado(true); AsyncStorage.setItem("tutorial.goRealizado", "1").catch(() => {}); }
 
@@ -8491,7 +8577,7 @@ function HomeScreenContent() {
         return next;
       });
       showToast(t('toast_internal_go_saved'), 'success');
-      AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
+      if (!slotOwner) AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
 
     } else { // GO_EXTERNO
       const selIntent = INTENTS.find(i => i.key === fsActivityKey);
@@ -8552,7 +8638,7 @@ function HomeScreenContent() {
       } else {
         showToast(t('toast_external_go_saved'), 'success');
       }
-      AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
+      if (!slotOwner) AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
     }
   };
 
@@ -19621,6 +19707,7 @@ function HomeScreenContent() {
         visible={calOpen}
         transparent
         animationType="slide"
+        onDismiss={completeCalendarGoOpen}
         onRequestClose={() => {
           if (calendarTaskContextRef.current && fieldSelectorOpen) {
             closeFieldSelectorPanel();
@@ -19785,6 +19872,7 @@ function HomeScreenContent() {
                 highlightEntryId={calHighlightEntryId}
                 onMoveItem={moveGoToDay}
                 onOpenMoveFlow={openMoveFlow}
+                onCreateTaskAtTime={openCalendarSlotTask}
                 onAddEntry={(dateISO) => {
                   // Regla de flujo V1: solo abrir flujo de tarea si hay contacto seleccionado
                   const _hasContactAdd = !!(contactName.trim() || phone.trim());
@@ -21060,6 +21148,8 @@ function HomeScreenContent() {
             <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
               <GoReservasConfigScreen
                 onClose={() => setCalReservasOpen(false)}
+                onOpenGo={openAi}
+                onCreateTaskAtTime={openCalendarSlotTask}
                 dayNightMode={calBgDayNightMode}
                 onDayNightModeChange={(m) => { setCalBgDayNightMode(m); AsyncStorage.setItem("cal_day_night_mode_v1", m).catch(() => {}); }}
                 handedness={handedness}
@@ -26642,7 +26732,10 @@ function HomeScreenContent() {
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
                     {/* GUARDAR — izquierda, menos cómodo; guarda sin fecha/hora */}
                     <TouchableOpacity
-                      onPress={() => {
+                      onPress={async () => {
+                        const slotTask = !!calendarSlotDraftRef.current;
+                        if (fieldSelectorSaveBusyRef.current) return;
+                        if (slotTask) fieldSelectorSaveBusyRef.current = true;
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
                         if (qdReturnTimerRef.current) {
                           clearTimeout(qdReturnTimerRef.current);
@@ -26658,6 +26751,17 @@ function HomeScreenContent() {
                         const dateISO = fsFilledValues.dateISO     || "";
                         const time    = fsFilledValues.time        || "";
                         const place   = fsFilledValues.place       || "";
+                        if (slotTask) {
+                          calendarSlotSavingRef.current = true;
+                          try {
+                            await createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
+                          } catch (error) {
+                            fieldSelectorSaveBusyRef.current = false;
+                            calendarSlotSavingRef.current = false;
+                            showToast(error instanceof Error ? error.message : String(error), "error");
+                            return;
+                          }
+                        }
                         setFsFilledValues({});
                         setFsLocationExpanded(false);
                         setFsActivityKey(null);
@@ -26667,11 +26771,12 @@ function HomeScreenContent() {
                         setFieldSelectorOpen(false);
                         setFieldSelectorText("");
                         setFieldSelectorDetail("");
-                        createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
+                        if (!slotTask) void createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
                         const origin = qdOriginContextRef.current;
                         qdOriginContextRef.current = { listOpen: false, notesOpen: false, agendaOpOpen: false };
                         if (origin.listOpen) setListOpen(true);
                         if (origin.agendaOpOpen) setAgendaOpOpen(true);
+                        if (slotTask) calendarSlotSavingRef.current = false;
                       }}
                       style={{ paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#6ee7b7", alignItems: "center" }}
                     >

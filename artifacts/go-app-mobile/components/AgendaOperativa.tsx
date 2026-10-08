@@ -1,3 +1,5 @@
+import { useGoCalendarEntries } from "@/hooks/useGoCalendarEntries";
+import { GoCalendarSlot } from "@/components/ui/GoCalendarSlot";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Feather } from "@expo/vector-icons";
@@ -276,6 +278,7 @@ export type AgendaBoardProps = {
   onToggleSortOrder?: () => void;
   onSelectDay?: (dateISO: string) => void;
   onAddEntry?: (dateISO: string) => void;
+  onCreateTaskAtTime?: (dateISO: string, timeHHMM: string) => void;
   onSelectItem?: (item: GoEntry) => void;
   onMoveItem?: (id: string, newDateISO: string, newTime: string) => void;
   onOpenMoveFlow?: (itemId: string, toDateISO: string, fromDateISO: string, itemTime: string, isExternal: boolean) => void;
@@ -659,12 +662,13 @@ function resolveEstado(
 
 export function AgendaBoard({
   selection,
-  goLog,
+  goLog: calendarEntries,
   selectedDateISO,
   sortOrder = "asc",
   onToggleSortOrder,
   onSelectDay,
   onAddEntry,
+  onCreateTaskAtTime,
   onSelectItem,
   onMoveItem,
   onOpenMoveFlow,
@@ -697,6 +701,9 @@ export function AgendaBoard({
   onProposeProposal,
   onGoToLanding,
 }: AgendaBoardProps) {
+  const goLog = useGoCalendarEntries(calendarEntries);
+  const allowedEntryIdsRef = useRef(new Set<string>());
+  allowedEntryIdsRef.current = new Set(goLog.map(entry => entry.id));
   const todayISO = formatISODate(getToday());
   const { lang, t } = useLanguage();
   // Traduce intentKey estable ("comida", "viaje"…) → etiqueta localizada.
@@ -916,7 +923,8 @@ export function AgendaBoard({
 
   // ── MULTI-SELECTION STATE ─────────────────────────────────────────
   const [localSelectedIds, setLocalSelectedIds] = useState<Set<string>>(new Set());
-  const selectedIds = selection?.selectedIds ?? localSelectedIds;
+  const selectedIds = new Set([...(selection?.selectedIds ?? localSelectedIds)]
+    .filter(id => allowedEntryIdsRef.current.has(id)));
   const setSelectedIds = selection?.setSelectedIds ?? setLocalSelectedIds;
   const [bulkMovePicking, setBulkMovePicking] = useState(false);
   const [localSelectionMode, setLocalSelectionMode] = useState(false);
@@ -955,14 +963,14 @@ export function AgendaBoard({
   const handleBulkDelete = useCallback(() => {
     if (!onDeleteItem) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    selectedIds.forEach((id) => onDeleteItem(id));
+    selectedIds.forEach((id) => { if (allowedEntryIdsRef.current.has(id)) onDeleteItem(id); });
     clearSelection();
   }, [selectedIds, onDeleteItem, clearSelection]);
 
   const handleBulkMove = useCallback((dateISO: string) => {
     if (!onMoveItem) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    selectedIds.forEach((id) => onMoveItem(id, dateISO, ""));
+    selectedIds.forEach((id) => { if (allowedEntryIdsRef.current.has(id)) onMoveItem(id, dateISO, ""); });
     clearSelection();
   }, [selectedIds, onMoveItem, clearSelection]);
 
@@ -1220,6 +1228,7 @@ export function AgendaBoard({
 
   // Called on successful drop — compute final column and trigger onMoveItem
   const jsDropAt = useCallback((absX: number, itemId: string, itemTime: string) => {
+    if (!allowedEntryIdsRef.current.has(itemId)) { jsCancelDragRef.current(); return; }
     clearEdgeScroll();
     const relX = absX - boardX.current + scrollX.current;
     let targetCol: Column | undefined;
@@ -1245,6 +1254,7 @@ export function AgendaBoard({
       if (isMultiDrag && onMoveItemRef.current) {
         // Move all selected cards to the target column directly (no modal per card)
         currentSelectedIds.forEach((sid) => {
+          if (!allowedEntryIdsRef.current.has(sid)) return;
           onMoveItemRef.current!(sid, targetCol!.dateISO!, "");
         });
         setSelectedIds(new Set());
@@ -2272,7 +2282,7 @@ export function AgendaBoard({
                   const wxColor = slotWeather
                     ? getSlotIconColor(slotWeather.weatherCode, isNightSlot)
                     : "#b8c8f0";
-                  return (
+                  const row = (
                     <View key={slotStart} style={[
                       { minHeight: slotCards.length === 0 ? SLOT_H : undefined },
                       slotDayNightStyle(dnProgress),
@@ -2321,6 +2331,12 @@ export function AgendaBoard({
                       )}
                     </View>
                   );
+                  return slotCards.length === 0 && col.dateISO && onCreateTaskAtTime ? (
+                    <GoCalendarSlot key={slotStart} dateISO={col.dateISO} timeHHMM={label}
+                      disabled={isSelecting || !!dragItem} onPress={onCreateTaskAtTime}>
+                      {row}
+                    </GoCalendarSlot>
+                  ) : row;
                 })}
                 {/* ── Office mode: hidden late hours indicator ── */}
                 {officeMode && (
@@ -2374,7 +2390,7 @@ export function AgendaBoard({
 
   // ── FLOATING DRAG CARD ────────────────────────────────────────────
   const renderFloatCard = () => {
-    if (!dragItem) return null;
+    if (!dragItem || !allowedEntryIdsRef.current.has(dragItem.id)) return null;
     return (
       <ReAnimated.View style={floatCardStyle} pointerEvents="none">
         <View
