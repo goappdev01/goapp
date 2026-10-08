@@ -31,7 +31,8 @@ type SpeechWindow = {
   webkitSpeechRecognition?: new () => Recognition;
 };
 export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderStatus = useRef<(event: { hasError: boolean; isFinished: boolean; mediaServicesDidReset?: boolean; url?: string | null }) => void>(() => {});
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY, event => recorderStatus.current(event));
   const [status, setStatus] = useState<
     "idle" | "preparing" | "listening" | "transcribing"
   >("idle");
@@ -76,6 +77,14 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
     changeStatus("idle");
     setTranscript("");
   }, [changeStatus, cleanupNative, withRecorder]);
+  recorderStatus.current = event => {
+    if (event.url && event.url !== recorder.uri) return;
+    if (statusRef.current === "listening" && (event.hasError || event.isFinished || event.mediaServicesDidReset)) {
+      console.info("[assistant-voice]", { code: "CAPTURE_INTERRUPTED" });
+      abort();
+      setError("La grabación se ha interrumpido. Pulsa GO para intentarlo de nuevo o escribe tu solicitud.");
+    }
+  };
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
       if (
@@ -152,27 +161,18 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
         }
         return;
       }
+      let stage = "permission";
       try {
         const permission = await AudioModule.requestRecordingPermissionsAsync();
         if (generation.current !== token) return;
-        if (!permission.granted)
-          throw new Error(
-            "Permite el acceso al micrófono o escribe tu solicitud.",
-          );
-        const capabilities = await assistantApi<{ transcription: boolean }>(
-          "/capabilities",
-        );
-        if (generation.current !== token) return;
-        if (!capabilities.transcription)
-          throw new Error(
-            "La voz no está disponible ahora. Puedes escribir tu solicitud.",
-          );
-        const userId = await getAuthenticatedUserId();
-        if (generation.current !== token) return;
-        if (!userId)
-          throw new Error(
-            "Inicia sesión desde tu perfil para usar la voz. También puedes escribir.",
-          );
+        if (!permission.granted) {
+          console.info("[assistant-voice]", { code: "PERMISSION_DENIED" });
+          setError("Permite el acceso al micrófono o escribe tu solicitud.");
+          changeStatus("idle");
+          return;
+        }
+        console.info("[assistant-voice]", { code: "PERMISSION_GRANTED" });
+        stage = "recording";
         await withRecorder(async () => {
           if (generation.current !== token) return;
           await setAudioModeAsync({
@@ -185,6 +185,8 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
             return;
           }
           recorder.record();
+          if (!recorder.isRecording || !recorder.getStatus().isRecording) throw new Error("RECORDING_NOT_STARTED");
+          console.info("[assistant-voice]", { code: "CAPTURE_STARTED" });
           changeStatus("listening");
         });
       } catch (e) {
@@ -193,9 +195,10 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
           if (generation.current === token) await cleanupNative();
         });
         if (generation.current !== token) return;
-        setError(
-          e instanceof Error ? e.message : "No se pudo iniciar la escucha.",
-        );
+        console.info("[assistant-voice]", { code: "START_FAILED", stage });
+        setError(stage === "permission"
+          ? "No he podido comprobar el permiso del micrófono. Inténtalo de nuevo."
+          : "No he podido iniciar la grabación. Inténtalo de nuevo o escribe tu solicitud.");
         changeStatus("idle");
       }
     },
@@ -211,6 +214,8 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
     const token = generation.current;
     const zone = targetZone.current;
     let uri: string | null = null;
+    let stage = "recording";
+    let publicFailure = "No he podido finalizar la grabación. Inténtalo de nuevo o escribe tu solicitud.";
     changeStatus("transcribing");
     try {
       await withRecorder(async () => {
@@ -220,21 +225,45 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
         await setAudioModeAsync({ allowsRecording: false });
       });
       if (generation.current !== token) return;
-      if (!uri) throw new Error("No se ha grabado audio.");
+      if (!uri) throw new Error("RECORDING_MISSING");
       const info = await FileSystem.getInfoAsync(uri);
-      if (!info.exists || (info.size ?? 0) > 5000000)
-        throw new Error(
-          "La grabación es demasiado larga. Prueba con una solicitud más breve.",
-        );
+      if (!info.exists || !info.size) {
+        publicFailure = "No he podido obtener audio de la grabación. Pulsa GO para intentarlo de nuevo.";
+        throw new Error("EMPTY_RECORDING");
+      }
+      if (info.size > 5000000) {
+        publicFailure = "La grabación es demasiado larga. Prueba con una solicitud más breve.";
+        throw new Error("RECORDING_TOO_LARGE");
+      }
+      stage = "backend";
+      publicFailure = "Tu voz se ha grabado, pero no he podido procesarla ahora. Puedes escribir o intentarlo de nuevo.";
+      const capabilities = await assistantApi<{ transcription: boolean }>("/capabilities");
+      if (generation.current !== token) return;
+      if (capabilities.transcription !== true) {
+        publicFailure = "Tu voz se ha grabado, pero el dictado no está disponible ahora. Puedes escribir tu solicitud.";
+        throw new Error("TRANSCRIPTION_UNAVAILABLE");
+      }
+      const userId = await getAuthenticatedUserId();
+      if (generation.current !== token) return;
+      if (!userId) {
+        publicFailure = "Inicia sesión desde tu perfil para procesar tu voz. También puedes escribir.";
+        throw new Error("VOICE_SESSION_REQUIRED");
+      }
+      stage = "audio-read";
+      publicFailure = "No he podido leer tu grabación. Inténtalo de nuevo o escribe tu solicitud.";
       if (generation.current !== token) return;
       const audio = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
       if (generation.current !== token) return;
+      stage = "transcription";
+      publicFailure = "Tu voz se ha grabado, pero no he podido transcribirla ahora. Puedes escribir o intentarlo de nuevo.";
       const result = await assistantApi<{ text: string }>("/transcribe", {
         audio,
         mime: "audio/m4a",
       });
+      if (generation.current !== token) return;
+      if (typeof result.text !== "string") throw new Error("INVALID_TRANSCRIPTION");
       if (generation.current === token && result.text.trim())
         callback.current(result.text.trim(), zone);
       else if (generation.current === token)
@@ -242,8 +271,13 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
           "No he oído una solicitud. Pulsa GO para intentarlo de nuevo.",
         );
     } catch (e) {
-      if (generation.current === token)
-        setError(e instanceof Error ? e.message : "No se pudo transcribir.");
+      if (generation.current === token) {
+        console.info("[assistant-voice]", { code: "PROCESSING_FAILED", stage });
+        setError(publicFailure);
+        if (stage === "recording" && (!uri || recorder.isRecording)) await withRecorder(async () => {
+          if (generation.current === token) await cleanupNative();
+        });
+      }
     } finally {
       // Delete only this stopped recording; a later session may already be active.
       if (uri)
@@ -253,7 +287,7 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
         setTranscript("");
       }
     }
-  }, [recorder, changeStatus, withRecorder]);
+  }, [recorder, changeStatus, withRecorder, cleanupNative]);
   // Bound the recording without presenting countdowns or percentages.
   useEffect(() => {
     if (status !== "listening" || Platform.OS === "web") return;

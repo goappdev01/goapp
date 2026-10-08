@@ -370,7 +370,7 @@ export function BookingAssistantPanels({
         </ScrollView>
         {!!(a.busy || a.notice || voiceStatus) && (
           <Text accessibilityLiveRegion="polite" style={s.statusText}>
-            {a.busy || a.notice || voiceStatus}
+            {a.busy || voiceStatus || a.notice}
           </Text>
         )}
       </View>

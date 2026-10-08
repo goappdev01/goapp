@@ -440,10 +440,14 @@ test("web microphone starts, shows progressive text and sends once on second tou
 function nativeVoiceFixture({
   denied = false,
   serverError = false, delayedPermission = false,
+  recordingError = false, inactiveRecorder = false, transcriptionError = false,
+  transcriptionDisabled = false, noSession = false, emptyAudio = false,
 } = {}) {
   const received = [];
   const deleted = [];
   const uploaded = [];
+  const apiCalls = [];
+  let recorderStatus;
   let grant;
   const permission = delayedPermission
     ? new Promise((resolve) => {
@@ -458,13 +462,16 @@ function nativeVoiceFixture({
     async prepareToRecordAsync() {
       this.uri = "file://voice-" + (this.starts + 1) + ".m4a";
     },
+    getStatus() { return { isRecording: this.isRecording }; },
     record() {
-      this.isRecording = true;
+      if (recordingError) throw new Error("EXPO_PUBLIC_API_URL https://private.test token=secret");
+      this.isRecording = !inactiveRecorder;
       this.starts++;
     },
     async stop() {
       this.isRecording = false;
       this.stops++;
+      this.isRecording = false;
     },
   };
   const renderHook = hookFixture("hooks/useBookingVoice.ts", {
@@ -477,13 +484,13 @@ function nativeVoiceFixture({
       },
     },
     "expo-audio": {
-      useAudioRecorder: () => recorder,
+      useAudioRecorder: (_options, listener) => { recorderStatus = listener; return recorder; },
       RecordingPresets: { HIGH_QUALITY: {} },
       setAudioModeAsync: async () => {},
       AudioModule: { requestRecordingPermissionsAsync: () => permission },
     },
     "expo-file-system/legacy": {
-      getInfoAsync: async () => ({ exists: true, size: 200 }),
+      getInfoAsync: async () => ({ exists: true, size: emptyAudio ? 0 : 200 }),
       readAsStringAsync: async (uri) => "audio:" + uri,
       EncodingType: { Base64: "base64" },
       deleteAsync: async (uri) => {
@@ -492,20 +499,24 @@ function nativeVoiceFixture({
     },
     "@/lib/bookingAssistant": {
       assistantApi: async (path, body) => {
+        apiCalls.push(path);
         if (path === "/capabilities") {
           if (serverError) throw new Error("No se pudo conectar con GO.");
-          return { transcription: true };
+          return { transcription: !transcriptionDisabled };
         }
+        if (transcriptionError) throw new Error("https://private.test/transcribe token=secret");
         uploaded.push(body);
         return { text: "Cieza mañana" };
       },
     },
-    "@/data/booking": { getAuthenticatedUserId: async () => uuid(4) },
+    "@/data/booking": { getAuthenticatedUserId: async () => noSession ? null : uuid(4) },
   });
   return {
     recorder,
     received,
     uploaded,
+    apiCalls,
+    interrupt: (url = recorder.uri) => recorderStatus({ hasError: true, isFinished: true, url, error: "private technical error" }),
     deleted,
     grant: () => grant({ granted: true }),
     render: () => renderHook((text, zone) => received.push({ text, zone })),
@@ -587,6 +598,46 @@ test("microphone permission denial is distinguished from an unavailable native v
   const denied = nativeVoiceFixture({ denied: true, serverError: true });
   await denied.render().start(); assert.match(denied.render().error, /micrófono/);
   const offline = nativeVoiceFixture({ serverError: true });
-  await offline.render().start(); assert.match(offline.render().error, /conectar con GO/);
-  assert.equal(offline.recorder.starts, 0);
+  await offline.render().start(); assert.equal(offline.render().status, "listening");
+  assert.equal(offline.recorder.starts, 1); assert.equal(offline.apiCalls.length, 0);
+  await offline.render().stop(); assert.match(offline.render().error, /grabado.*procesarla/);
+  assert.equal(offline.received.length, 0); assert.equal(offline.uploaded.length, 0);
+});
+test("native capture starts without a backend or session, then fails honestly when transcription is unavailable", async () => {
+  for (const options of [{ transcriptionDisabled: true }, { noSession: true }]) {
+    const f = nativeVoiceFixture(options); await f.render().start();
+    assert.equal(f.recorder.isRecording, true); assert.equal(f.render().status, "listening");
+    assert.deepEqual(f.apiCalls, []);
+    await f.render().stop(); assert.equal(f.render().status, "idle");
+    assert.equal(f.recorder.isRecording, false); assert.equal(f.received.length, 0);
+    assert.equal(f.uploaded.length, 0); assert.ok(f.render().error.length > 0);
+    assert.ok(f.deleted.includes("file://voice-1.m4a"));
+  }
+});
+test("failed or inactive native recorder cannot claim to be listening or expose technical errors", async () => {
+  for (const options of [{ recordingError: true }, { inactiveRecorder: true }]) {
+    const f = nativeVoiceFixture(options); await f.render().start();
+    assert.equal(f.render().status, "idle"); assert.match(f.render().error, /iniciar la grabación/);
+    assert.doesNotMatch(f.render().error, /EXPO_|https?:|secret/); assert.equal(f.apiCalls.length, 0);
+  }
+});
+test("empty audio and failed transcription never dispatch invented conversation text", async () => {
+  for (const options of [{ emptyAudio: true }, { transcriptionError: true }]) {
+    const f = nativeVoiceFixture(options); await f.render().start(); await f.render().stop();
+    assert.equal(f.render().status, "idle"); assert.equal(f.received.length, 0);
+    assert.doesNotMatch(f.render().error, /EXPO_|https?:|secret/); assert.ok(f.render().error);
+    assert.equal(f.deleted.length, 1);
+  }
+});
+test("native recorder interruption stops the listening indicator and reports a clean error", async () => {
+  const f = nativeVoiceFixture(); await f.render().start(); f.interrupt();
+  await new Promise(setImmediate);
+  assert.equal(f.render().status, "idle"); assert.match(f.render().error, /interrumpido/);
+  assert.equal(f.received.length, 0); assert.equal(f.apiCalls.length, 0);
+});
+test("a late recorder event from an older file cannot cancel a new capture", async () => {
+  const f = nativeVoiceFixture(); await f.render().start(); await f.render().stop();
+  await f.render().start(); f.interrupt("file://voice-1.m4a");
+  assert.equal(f.render().status, "listening"); assert.equal(f.recorder.isRecording, true);
+  f.render().abort(); await new Promise(setImmediate);
 });

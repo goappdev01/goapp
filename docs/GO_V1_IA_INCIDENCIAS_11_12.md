@@ -1,5 +1,7 @@
 # GO V1 — Incidencias 11 y 12
 
+Continuación: [incidencia 13](GO_V1_IA_INCIDENCIA_13.md) separa la captura local del procesamiento y transcripción del backend, conservando estas correcciones.
+
 Continuación de `4d4881b`, rama `integration/go-v1-calendario-ia-landing`.
 Worktree: `C:\Users\Usuario\.codex\worktrees\go-v1-calendario-ia-landing\goapp-profile-logout`.
 

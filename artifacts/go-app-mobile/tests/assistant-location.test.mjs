@@ -138,10 +138,10 @@ function nodes(tree) {
 }
 function screenFixture(panel = null, size = "estandar", position = "right") {
   const f = fixture(); f.render().setPanel(panel); const a = f.render();
-  const starts = [], closed = [];
+  const starts = [], closed = [], effects = [];
   const voice = { status: "idle", error: "", transcript: "", abort() {}, start: async zone => starts.push(zone), stop: async () => {} };
   const api = load("components/booking-assistant/BookingAssistantScreen.tsx", {
-    react: reactModule, "react-native": native, "react-native-gesture-handler": { GestureHandlerRootView: "GestureHandlerRootView" },
+    react: { ...reactModule, useEffect: fn => effects.push(fn) }, "react-native": native, "react-native-gesture-handler": { GestureHandlerRootView: "GestureHandlerRootView" },
     "./AssistantCloseControls": controls, "@/hooks/useGoDockPreference": { useGoDockPreference: () => ({ position }) },
     "@expo/vector-icons": { Feather: "Feather" }, "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
     "@react-native-async-storage/async-storage": { default: {} }, "expo-image-picker": {}, "expo-document-picker": {}, "expo-status-bar": { StatusBar: "StatusBar" },
@@ -150,7 +150,7 @@ function screenFixture(panel = null, size = "estandar", position = "right") {
     "@/hooks/useBookingVoice": { useBookingVoice: () => voice }, "./BookingAssistantPanels": panels, "./BookingAssistantUI": ui,
   });
   const tree = api.BookingAssistantScreen({ visible: true, onClose: () => closed.push(true), uiScale: size });
-  return { tree, all: nodes(tree), starts, closed, a };
+  return { tree, all: nodes(tree), starts, closed, a, mount: () => effects.forEach(fn => fn()) };
 }
 test("the same GO appears once, remains circular at every size and routes zone dictation", async () => {
   for (const panel of [null, "zone"]) for (const size of ["compacto", "estandar", "grande"]) {
@@ -232,4 +232,10 @@ test("floating overlay stays above essential controls as keyboard and footer hei
     assert.equal(drag.props.initialBottom, 12); assert.equal(drag.props.buttonKey, "close");
   }
   assert.equal(controls.AssistantCloseControls({ disabled: false, onClose() {}, viewport: { width: 390, height: 180 }, protectedBottom: 144 }), null);
+});
+test("opening the assistant never activates the microphone before the user taps GO", async () => {
+  const f = screenFixture(); f.mount(); await new Promise(setImmediate);
+  assert.deepEqual(f.starts, []);
+  await f.all.find(n => n.props?.accessibilityLabel === "Escuchar con GO").props.onPress();
+  assert.deepEqual(f.starts, [false]);
 });

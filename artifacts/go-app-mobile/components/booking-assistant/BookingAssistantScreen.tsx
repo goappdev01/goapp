@@ -115,22 +115,13 @@ export function BookingAssistantScreen({
           if (!cancelled) setAiEnabled(c.interpretation);
         })
         .catch(() => {});
-      if (
-        !cancelled &&
-        !a.panel &&
-        a.phase !== "review" &&
-        a.phase !== "confirmed"
-      )
-        await voice.start();
-    })().catch(() => {
-      if (!cancelled) void voice.start();
-    });
+    })().catch(() => {});
     return () => {
       cancelled = true;
       a.invalidate();
       voice.abort();
     };
-    // Auto-listen only when the existing screen is opened from Landing.
+    // Hydrate the conversation on opening; only a GO tap starts microphone capture.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
   function reset() {
@@ -628,7 +619,7 @@ export function BookingAssistantScreen({
             <View style={s.status} accessibilityLiveRegion="polite">
               {!!a.busy && <ActivityIndicator size="small" color="#174D3C" />}
               <Text style={s.statusText}>
-                {a.busy || a.notice || voiceText || voice.error}
+                {a.busy || voiceText || voice.error || a.notice}
               </Text>
             </View>
           )}
