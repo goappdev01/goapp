@@ -24,6 +24,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { DraggableFAB } from "../DraggableFAB";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import {
   CuentaVerification,
   VerificationStatus,
@@ -44,15 +45,10 @@ export type AccountRole =
 // Public-facing account types (shown in onboarding).
 // Internal roles (admin, trabajador, proveedor, partner, franquicia)
 // are assigned programmatically and never shown in public selection.
-const PUBLIC_ROLES: AccountRole[] = ["usuario", "empresa"];
-
-// ── INTERNAL ADMIN FLAG ────────────────────────────────────────────────────────
-// Set to true to reveal the hidden ADMIN button in account type selection.
-// Keep false in production. Replace with real permission check when ready.
-export const IS_INTERNAL_ADMIN = true;
+const PUBLIC_ROLES: AccountRole[] = ["empresa", "usuario"];
 
 const EMPRESA_ROLES: AccountRole[] = [
-  "empresa", "admin", "trabajador", "proveedor", "partner", "franquicia",
+  "empresa", "trabajador", "proveedor", "partner", "franquicia",
 ];
 
 export function isEmpresaRole(role: AccountRole | null): boolean {
@@ -71,20 +67,20 @@ interface RoleOption {
 function getRoleOptions(t: (k: import("@/i18n/translations").TranslationKey) => string): RoleOption[] {
   return [
     {
-      role: "usuario",
-      icon: "user",
-      label: t("role_usuario_label"),
-      sublabel: t("role_usuario_sub"),
-      description: t("role_usuario_desc"),
-      color: "#4A80BD",
-    },
-    {
       role: "empresa",
       icon: "briefcase",
       label: t("role_empresa_label"),
       sublabel: t("role_empresa_sub"),
       description: t("role_empresa_desc"),
       color: "#3D9A84",
+    },
+    {
+      role: "usuario",
+      icon: "user",
+      label: t("role_usuario_label"),
+      sublabel: t("role_usuario_sub"),
+      description: t("role_usuario_desc"),
+      color: "#4A80BD",
     },
   ];
 }
@@ -150,6 +146,7 @@ export function LoginRegisterPanel({
 }: Props) {
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
+  const adminAccess = useAdminAccess();
   const [authStep, setAuthStep] = useState<"role" | "credentials">("role");
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [selectedRole, setSelectedRole] = useState<AccountRole>("usuario");
@@ -158,6 +155,7 @@ export function LoginRegisterPanel({
   const [authName, setAuthName] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const passwordInputRef = useRef<TextInput>(null);
   const authInputRevisionRef = useRef(0);
   const pendingRegistrationRef = useRef<PendingRegistration | null>(null);
   const authContextRef = useRef({ visible, userAccountType, onSetAccountType });
@@ -456,7 +454,7 @@ export function LoginRegisterPanel({
 
         {/* ── AUTH: credentials ── */}
         {userAccountType === null && authStep === "credentials" && (
-          <ScrollView style={s.scroll} contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+          <ScrollView style={s.scroll} contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="always">
             <View style={s.authForm}>
               <View style={s.welcomeIcon}>
                 <Feather name={selectedRole === "empresa" ? "briefcase" : "user"} size={28} color={selectedRole === "empresa" ? "#3D9A84" : "#4A80BD"} />
@@ -466,8 +464,32 @@ export function LoginRegisterPanel({
               {authMode === "register" && (
                 <TextInput value={authName} onChangeText={setAuthName} placeholder="Nombre completo" placeholderTextColor="#94A3B8" autoCapitalize="words" style={s.authInput} />
               )}
-              <TextInput value={authEmail} onChangeText={handleAuthEmailChange} placeholder="Email" placeholderTextColor="#94A3B8" autoCapitalize="none" keyboardType="email-address" style={s.authInput} />
-              <TextInput value={authPassword} onChangeText={setAuthPassword} placeholder="Contraseña (mínimo 8 caracteres)" placeholderTextColor="#94A3B8" secureTextEntry style={s.authInput} />
+              <TextInput
+                value={authEmail}
+                onChangeText={handleAuthEmailChange}
+                placeholder="Email"
+                placeholderTextColor="#94A3B8"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                autoComplete={authMode === "login" ? "username" : "email"}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => passwordInputRef.current?.focus()}
+                style={s.authInput}
+              />
+              <TextInput
+                ref={passwordInputRef}
+                value={authPassword}
+                onChangeText={setAuthPassword}
+                placeholder="Contraseña (mínimo 8 caracteres)"
+                placeholderTextColor="#94A3B8"
+                secureTextEntry
+                autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                returnKeyType={authMode === "login" ? "go" : "done"}
+                onSubmitEditing={authMode === "login" ? handleAuthenticate : undefined}
+                style={s.authInput}
+              />
               {authError && <Text style={s.authError}>{authError}</Text>}
               <TouchableOpacity onPress={handleAuthenticate} disabled={authBusy} activeOpacity={0.82} style={s.authPrimary}>
                 {authBusy ? <ActivityIndicator color="#fff" /> : <Text style={s.authPrimaryText}>{authMode === "login" ? "ENTRAR" : "CREAR CUENTA"}</Text>}
@@ -530,25 +552,6 @@ export function LoginRegisterPanel({
                 ))}
               </View>
 
-              {/* ADMIN — only visible when IS_INTERNAL_ADMIN = true */}
-              {IS_INTERNAL_ADMIN && (
-                <TouchableOpacity
-                  onPress={() => { onOpenAdmin?.(); onClose(); }}
-                  activeOpacity={0.78}
-                  style={s.adminCard}
-                >
-                  <View style={s.adminCardLeft}>
-                    <View style={s.adminCardIcon}>
-                      <Feather name="shield" size={18} color="#ef4444" />
-                    </View>
-                    <View>
-                      <Text style={s.adminCardLabel}>ADMIN</Text>
-                      <Text style={s.adminCardSub}>{t("admin_internal_sub")}</Text>
-                    </View>
-                  </View>
-                  <Feather name="chevron-right" size={16} color="#ef4444" />
-                </TouchableOpacity>
-              )}
             </View>
           </>
         )}
@@ -649,6 +652,26 @@ export function LoginRegisterPanel({
                   <View style={s.actionCardEmpty} />
                 )}
               </View>
+
+              {/* Internal entry exists only after normal login and server authorization. */}
+              {adminAccess.allowed && (
+                <TouchableOpacity
+                  onPress={() => { onOpenAdmin?.(); }}
+                  activeOpacity={0.78}
+                  style={s.adminCard}
+                >
+                  <View style={s.adminCardLeft}>
+                    <View style={s.adminCardIcon}>
+                      <Feather name="shield" size={18} color="#ef4444" />
+                    </View>
+                    <View>
+                      <Text style={s.adminCardLabel}>ADMIN</Text>
+                      <Text style={s.adminCardSub}>{t("admin_internal_sub")}</Text>
+                    </View>
+                  </View>
+                  <Feather name="chevron-right" size={16} color="#ef4444" />
+                </TouchableOpacity>
+              )}
 
               {/* Cambiar tipo · Cerrar sesión */}
               <View style={s.secondaryRow}>

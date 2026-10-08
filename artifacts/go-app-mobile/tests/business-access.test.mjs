@@ -165,11 +165,12 @@ test('all direct business entries and configuration effects use the same permiss
   const home = read('app/index.tsx'), config = read('contexts/GoBusinessConfigContext.tsx');
   assert.match(home, /return <BusinessAccessGate><HomeScreenContent \/><\/BusinessAccessGate>/);
   assert.match(home, /const isBusinessMode = requestedBusinessMode && businessAccess.allowed/);
-  for (const component of ['EmpresaPanel', 'GoAdminDashboard', 'VerificacionEmpresaPanel', 'ActivacionCobrosScreen']) {
+  for (const component of ['EmpresaPanel', 'VerificacionEmpresaPanel', 'ActivacionCobrosScreen']) {
     assert.match(home, new RegExp(`businessAccess\\.allowed && <${component}`));
   }
   assert.match(home, /if \(open\) setActiveMode\("BUSINESS"\)/);
-  assert.match(home, /commitAccountType\(resolvedRole, false\)/);
+  assert.match(home, /commitAccountType\(resolvedRole === "admin" \? "usuario" : resolvedRole, false\)/);
+  assert.match(home, /adminAccess.allowed && <GoAdminDashboard/);
   assert.match(home, /onSwitchContext=\{\(\) => \{ setGoAuthOpen\(false\); setActiveMode\(isBusinessMode \? "USER" : "BUSINESS"\)/);
   assert.match(config, /if \(!enterprise.allowed\)[\s\S]*?return;[\s\S]*?getCloudConfiguration/);
   assert.match(config, /if \(!permission.current\) return;/);

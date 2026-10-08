@@ -15,6 +15,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { GoModeProvider } from "@/contexts/GoModeContext";
 import { GoBusinessAccessProvider } from "@/contexts/GoBusinessAccessContext";
+import { GoAdminAccessProvider } from "@/contexts/GoAdminAccessContext";
 import { GoNotificationProvider } from "@/contexts/GoNotificationContext";
 import { GoBusinessConfigProvider } from "@/contexts/GoBusinessConfigContext";
 import { GoPushInitializer } from "@/services/GoPushService";
@@ -66,6 +67,7 @@ export default function RootLayout() {
       <ErrorBoundary>
         <LanguageProvider>
           <GoModeProvider>
+            <GoAdminAccessProvider>
             <GoBusinessAccessProvider>
             <GoBusinessConfigProvider>
               <GoNotificationProvider>
@@ -80,6 +82,7 @@ export default function RootLayout() {
               </GoNotificationProvider>
             </GoBusinessConfigProvider>
             </GoBusinessAccessProvider>
+            </GoAdminAccessProvider>
           </GoModeProvider>
         </LanguageProvider>
       </ErrorBoundary>
