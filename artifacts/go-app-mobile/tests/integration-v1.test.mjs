@@ -44,7 +44,7 @@ for (const [lang, expected] of [['es', ['TAREA INTERNA', 'TAREA EXTERNA']], ['en
       }).handle;
       handle(option.kind);
       assert.deepEqual(calls, [
-        ['text', ''], ['panel', false], ['calendar', false],
+        ['text', ''], ['panel', false],
         ['form', option.kind, 'Revisar piloto', '', '2026-10-20'],
       ]);
     }

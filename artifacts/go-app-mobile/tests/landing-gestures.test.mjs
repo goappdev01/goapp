@@ -94,7 +94,11 @@ test('calendar header remains laid out but invisible and untouchable throughout 
   assert.ok(opening);
   const attribute = name => opening.attributes.properties.find(attr => ts.isJsxAttribute(attr)
     && attr.name.getText(home) === name).initializer.expression.getText(home);
-  assert.ok(opening.parent.getText(home).includes('t("cal_label_week")'));
+  const selector = find(opening.parent, node => ts.isJsxSelfClosingElement(node)
+    && node.tagName.getText(home) === "GoCalendarViewSelector");
+  assert.ok(selector, "the existing view selector stays inside the protected calendar header");
+  assert.ok(selector.attributes.properties.some(attr => attr.name?.getText(home) === "value"
+    && attr.initializer?.getText(home) === "{calBgViewMode}"));
   assert.ok(opening.parent.getText(home).includes('setCalConfigVisible(true)'));
   for (const showBookingFromCal of [false, true, false]) {
     const context = { showBookingFromCal, insets: { top: 44 } };
