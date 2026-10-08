@@ -35,6 +35,8 @@ import { DraggableFAB } from "@/components/DraggableFAB";
 import { AgendaBoard } from "@/components/AgendaOperativa";
 import type { GoEntry, DensityKey, CalDayNightMode } from "@/components/AgendaOperativa";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
+import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
 import type { CalSizeKey } from "@/constants/goSizes";
 import {
   loadReservations,
@@ -240,6 +242,7 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
     if (!navigateToDayISO) return;
     setViewMode("calendario");
     setCalViewMonth(navigateToDayISO.slice(0, 7));
+    setReservasNavSelectedDay(navigateToDayISO);
     onNavigateDayConsumed?.();
   }, [navigateToDayISO]);
 
@@ -403,6 +406,9 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
         <View style={g.headerCenter}>
           <Text style={[g.headerTitle, { color: tk.text }]}>{lang === "en" ? "GO Bookings" : "GO Reservas"}</Text>
           <Text style={[g.headerSub, { color: tk.dim }]}>{formatTodayLabel(t)} · {lang === "en" ? "live" : "en tiempo real"}</Text>
+          {viewMode === "calendario" && (
+            <GoCalendarViewSelector value={calInnerView} onChange={setCalInnerView} />
+          )}
         </View>
         {/* CONFIG button — exact same style as the normal Calendar */}
         <TouchableOpacity
@@ -593,7 +599,7 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
       />
 
       {/* ── FABs flotantes — botones redondos, mismo sistema visual que el calendario ── */}
-      {!hideFAB && (
+      {!hideFAB && !monthPickerOpen && (
         <DraggableFAB
           screenKey="go_reservas"
           buttonKey="main"
@@ -601,42 +607,27 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
           initialBottom={insets.bottom + 24}
           maxH={140}
         >
+          <View style={{ gap: 8, alignItems: "center" }}>
           {/* ↑ Abre el selector mensual — solo en pestaña Calendario.
                Usa Modal propio para evitar conflictos z-order con el Modal padre. */}
           {viewMode === "calendario" && (
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={() => { Haptics.selectionAsync().catch(() => {}); openMonthPicker(); }}
-              hitSlop={10}
+              hitSlop={2}
               accessibilityLabel="Abrir calendario mensual"
               style={g.fabBtn}
             >
               <Feather name="calendar" size={15} color="rgba(255,255,255,0.85)" />
             </TouchableOpacity>
           )}
-          {/* ↓ Cerrar un nivel */}
-          <TouchableOpacity
-            activeOpacity={0.7}
+          {/* No internal panel is open here: only the container exit is shown. */}
+          <GoCloseButton
+            level="container"
             onPress={() => { Haptics.selectionAsync().catch(() => {}); onClose(); }}
-            hitSlop={10}
             accessibilityLabel={lang === "en" ? "Close GO Bookings" : "Cerrar GO Reservas"}
-            style={g.fabBtn}
-          >
-            <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.80)" />
-          </TouchableOpacity>
-          {/* ↓↓ Volver al Landing GO */}
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => { Haptics.selectionAsync().catch(() => {}); onGoToLanding ? onGoToLanding() : onClose(); }}
-            hitSlop={10}
-            accessibilityLabel="Volver al landing"
-            style={g.fabBtn}
-          >
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.80)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.80)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
+          />
+          </View>
         </DraggableFAB>
       )}
 
@@ -764,31 +755,20 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
                   alignItems: "center",
                 }}>
                   {/* ↓ Cerrar solo el calendario mensual → vuelve a GO Reservas */}
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    hitSlop={8}
+                  <GoCloseButton
+                    level="panel"
                     onPress={() => { Haptics.selectionAsync().catch(() => {}); closeMonthPicker(); }}
                     accessibilityLabel="Cerrar calendario mensual"
-                    style={g.fabBtn}
-                  >
-                    <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.80)" />
-                  </TouchableOpacity>
+                  />
                   {/* ↓↓ Salir directamente a Landing/Home */}
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    hitSlop={8}
+                  <GoCloseButton
+                    level="container"
                     onPress={() => {
                       Haptics.selectionAsync().catch(() => {});
                       closeMonthPicker(() => { onGoToLanding ? onGoToLanding() : onClose(); });
                     }}
                     accessibilityLabel="Volver al inicio"
-                    style={g.fabBtn}
-                  >
-                    <View style={{ alignItems: "center" }}>
-                      <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.80)" />
-                      <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.80)" style={{ marginTop: -5 }} />
-                    </View>
-                  </TouchableOpacity>
+                  />
                 </View>
               </Animated.View>
             </>
