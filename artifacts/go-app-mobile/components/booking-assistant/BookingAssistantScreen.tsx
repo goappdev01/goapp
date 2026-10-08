@@ -6,6 +6,7 @@ import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
+  Keyboard,
   Modal,
   Platform,
   ScrollView,
@@ -71,6 +72,8 @@ export function BookingAssistantScreen({
   const a = useBookingAssistant();
   const go = useGoActions(a);
   const [input, setInput] = useState("");
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const followEnd = useRef(true);
   const { position } = useGoDockPreference(handedness, visible);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [aiEnabled, setAiEnabled] = useState(false);
@@ -124,6 +127,19 @@ export function BookingAssistantScreen({
     // Hydrate the conversation on opening; only a GO tap starts microphone capture.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
+  useEffect(() => {
+    if (!visible) { setKeyboardVisible(false); return; }
+    setKeyboardVisible(Keyboard.isVisible());
+    const update = (shown: boolean) => (event: Parameters<typeof Keyboard.scheduleLayoutAnimation>[0]) => {
+      if (event.duration > 0) Keyboard.scheduleLayoutAnimation(event);
+      setKeyboardVisible(shown);
+    };
+    const subscriptions = [
+      Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", update(true)),
+      Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", update(false)),
+    ];
+    return () => subscriptions.forEach(subscription => subscription.remove());
+  }, [visible]);
   function reset() {
     voice.abort();
     setAttachments([]);
@@ -146,6 +162,7 @@ export function BookingAssistantScreen({
   function send() {
     if (!input.trim() || a.busy) return;
     voice.abort();
+    Keyboard.dismiss();
     const text = input;
     setInput("");
     void go.dispatch(text, aiEnabled);
@@ -308,7 +325,7 @@ export function BookingAssistantScreen({
       <GestureHandlerRootView
         style={[
           s.root,
-          { paddingTop: insets.top, paddingBottom: insets.bottom },
+          { paddingTop: insets.top, paddingBottom: keyboardVisible ? 0 : insets.bottom },
         ]}
       >
         <View style={s.header} onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)}>
@@ -332,11 +349,21 @@ export function BookingAssistantScreen({
           <View style={{ flex: 1 }} onLayout={event => setViewport(event.nativeEvent.layout)}>
           <ScrollView
             ref={scroll}
-            contentContainerStyle={s.conversation}
+            style={{ flex: 1 }}
+            contentContainerStyle={[s.conversation, { flexGrow: 1 }]}
+            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             keyboardShouldPersistTaps="handled"
-            onContentSizeChange={() =>
-              scroll.current?.scrollToEnd({ animated: true })
-            }
+            scrollEventThrottle={16}
+            onScroll={event => {
+              const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+              followEnd.current = contentSize.height - layoutMeasurement.height - contentOffset.y < 48;
+            }}
+            onLayout={() => {
+              if (followEnd.current) scroll.current?.scrollToEnd({ animated: false });
+            }}
+            onContentSizeChange={() => {
+              if (followEnd.current) scroll.current?.scrollToEnd({ animated: true });
+            }}
           >
             {a.messages.map((message) => (
               <View
@@ -678,14 +705,14 @@ export function BookingAssistantScreen({
               disabled={!input.trim() || !!a.busy}
             />
           </View>
-          {dock}
+          {!keyboardVisible && dock}
           </View>}
         {a.panel && (
           <BookingAssistantPanels
             a={panelState}
             go={go}
             bottom={0}
-            dock={dock}
+            dock={keyboardVisible ? null : dock}
             viewport={viewport}
             saving={saving}
             onClosePanel={() => { voice.abort(); a.invalidate(); a.setPanel(null); }}

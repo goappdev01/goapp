@@ -74,7 +74,7 @@ export function BookingAssistantPanels({
         <View style={s.sheetHeader}>
           <Text style={a.panel === "zone" ? z.sectionTitle : s.sectionTitle}>{title}</Text>
         </View>
-        <ScrollView keyboardShouldPersistTaps="handled">
+        <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
           {a.panel === "menu" && (
             <>
               <Action text="Nueva conversación" onPress={a.reset} />

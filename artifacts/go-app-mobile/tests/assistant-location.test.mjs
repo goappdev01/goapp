@@ -138,19 +138,55 @@ function nodes(tree) {
 }
 function screenFixture(panel = null, size = "estandar", position = "right") {
   const f = fixture(); f.render().setPanel(panel); const a = f.render();
-  const starts = [], closed = [], effects = [];
+  const starts = [], closed = [], effects = [], values = [], listeners = new Map(), dispatched = [], animations = [];
+  let cursor = 0, dismissals = 0;
+  const keyboard = {
+    isVisible: () => false,
+    addListener(name, fn) { listeners.set(name, fn); return { remove: () => listeners.delete(name) }; },
+    scheduleLayoutAnimation: event => animations.push(event),
+    dismiss() { dismissals++; },
+  };
+  const hooks = {
+    ...reactModule,
+    useState(value) {
+      const i = cursor++;
+      if (!(i in values)) values[i] = typeof value === "function" ? value() : value;
+      return [values[i], value => { values[i] = typeof value === "function" ? value(values[i]) : value; }];
+    },
+    useRef(value) { const i = cursor++; return values[i] ??= { current: value }; },
+    useEffect(fn, deps) {
+      const i = cursor++, old = values[i];
+      if (!old || deps.some((value, k) => !Object.is(value, old.deps[k]))) {
+        old?.cleanup?.();
+        const record = { deps }; values[i] = record;
+        effects.push(() => { record.cleanup = fn(); });
+      }
+    },
+  };
   const voice = { status: "idle", error: "", transcript: "", abort() {}, start: async zone => starts.push(zone), stop: async () => {} };
   const api = load("components/booking-assistant/BookingAssistantScreen.tsx", {
-    react: { ...reactModule, useEffect: fn => effects.push(fn) }, "react-native": native, "react-native-gesture-handler": { GestureHandlerRootView: "GestureHandlerRootView" },
+    react: hooks, "react-native": { ...native, Keyboard: keyboard }, "react-native-gesture-handler": { GestureHandlerRootView: "GestureHandlerRootView" },
     "./AssistantCloseControls": controls, "@/hooks/useGoDockPreference": { useGoDockPreference: () => ({ position }) },
     "@expo/vector-icons": { Feather: "Feather" }, "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
     "@react-native-async-storage/async-storage": { default: {} }, "expo-image-picker": {}, "expo-document-picker": {}, "expo-status-bar": { StatusBar: "StatusBar" },
     "@workspace/api-zod": model, "@/lib/bookingAssistant": {}, "@/hooks/useBookingAssistant": { useBookingAssistant: () => a },
-    "@/hooks/useGoActions": { useGoActions: () => ({ active: "task", choices: [], manager: { state: null } }) },
+    "@/hooks/useGoActions": { useGoActions: () => ({ active: "task", choices: [], manager: { state: null }, dispatch: async (...args) => dispatched.push(args) }) },
     "@/hooks/useBookingVoice": { useBookingVoice: () => voice }, "./BookingAssistantPanels": panels, "./BookingAssistantUI": ui,
   });
-  const tree = api.BookingAssistantScreen({ visible: true, onClose: () => closed.push(true), uiScale: size });
-  return { tree, all: nodes(tree), starts, closed, a, mount: () => effects.forEach(fn => fn()) };
+  const mount = () => effects.splice(0).forEach(fn => fn());
+  const render = (visible = true) => {
+    cursor = 0;
+    const tree = api.BookingAssistantScreen({ visible, onClose: () => closed.push(true), uiScale: size });
+    return { tree, all: nodes(tree) };
+  };
+  return { ...render(), starts, closed, a, dispatched, animations, listeners,
+    get dismissals() { return dismissals; }, mount,
+    render(visible = true) { const result = render(visible); mount(); return result; },
+    keyboard(shown, duration = 250) {
+      listeners.get(shown ? "keyboardWillShow" : "keyboardWillHide")?.({ duration });
+      return this.render();
+    },
+  };
 }
 test("the same GO appears once, remains circular at every size and routes zone dictation", async () => {
   for (const panel of [null, "zone"]) for (const size of ["compacto", "estandar", "grande"]) {
@@ -238,4 +274,84 @@ test("opening the assistant never activates the microphone before the user taps 
   assert.deepEqual(f.starts, []);
   await f.all.find(n => n.props?.accessibilityLabel === "Escuchar con GO").props.onPress();
   assert.deepEqual(f.starts, [false]);
+});
+const composer = view => view.all.find(n => n.type === "TextInput" && n.props.multiline);
+const conversation = view => view.all.find(n => n.type === "ScrollView" && n.props.onScroll);
+const goButtons = view => view.all.filter(n => n.props?.accessibilityLabel === "Escuchar con GO");
+const bottomInset = view => view.all.find(n => n.type === "GestureHandlerRootView").props.style.at(-1).paddingBottom;
+
+test("keyboard cycles reclaim the dock and safe inset, preserving multiline draft and all five controls", () => {
+  for (const size of ["compacto", "estandar", "grande"]) {
+    const f = screenFixture(null, size); f.mount();
+    const originalDock = f.all.find(n => n.type === "View" && n.props.style === ui.s.dock);
+    assert.equal(nodes(originalDock).filter(n => n.type === "TouchableOpacity").length, 5);
+    const draft = "Recordar la compra\nSin enviar todavía";
+    composer(f).props.onChangeText(draft);
+    for (let i = 0; i < 3; i++) {
+      const shown = f.keyboard(true);
+      assert.equal(goButtons(shown).length, 0);
+      assert.ok(!shown.all.some(n => n.type === "View" && n.props.style === ui.s.dock));
+      assert.equal(bottomInset(shown), 0);
+      assert.equal(composer(shown).props.value, draft);
+      assert.equal(conversation(shown).props.style.flex, 1);
+      const hidden = f.keyboard(false);
+      assert.equal(goButtons(hidden).length, 1);
+      assert.equal(bottomInset(hidden), 34);
+      assert.equal(composer(hidden).props.value, draft);
+    }
+    assert.equal(f.animations.length, 6);
+    assert.equal(f.dispatched.length, 0);
+  }
+});
+
+test("empty and long conversations support native drag and free-space dismissal without capturing child actions", () => {
+  const f = screenFixture(); f.mount();
+  f.a.messages = [];
+  let view = f.keyboard(true);
+  let scroll = conversation(view);
+  assert.equal(scroll.props.keyboardDismissMode, "interactive");
+  assert.equal(scroll.props.keyboardShouldPersistTaps, "handled");
+  assert.equal(scroll.props.contentContainerStyle.at(-1).flexGrow, 1);
+  assert.equal(scroll.props.onTouchStart, undefined);
+  f.a.messages = Array.from({ length: 100 }, (_, i) => ({ id: String(i), role: "user", text: "Mensaje largo ".repeat(80) }));
+  view = f.render(); scroll = conversation(view);
+  assert.equal(view.all.filter(n => n.type === "Text" && n.props.selectable).length, 100);
+  const positions = [];
+  scroll.props.ref.current = { scrollToEnd: options => positions.push(options) };
+  scroll.props.onScroll({ nativeEvent: { contentSize: { height: 10000 }, layoutMeasurement: { height: 250 }, contentOffset: { y: 1000 } } });
+  scroll.props.onLayout(); scroll.props.onContentSizeChange();
+  assert.equal(positions.length, 0, "resizing or new messages must not pull a reader away from earlier messages");
+  scroll.props.onScroll({ nativeEvent: { contentSize: { height: 10000 }, layoutMeasurement: { height: 250 }, contentOffset: { y: 9750 } } });
+  scroll.props.onLayout(); scroll.props.onContentSizeChange();
+  assert.equal(positions.length, 2, "a reader at the bottom follows the latest message");
+});
+
+test("only an accepted send dismisses the keyboard and dispatches the original draft once", async () => {
+  const f = screenFixture(); f.mount(); let view = f.keyboard(true);
+  const send = () => view.all.find(n => n.props?.accessibilityLabel === "Enviar solicitud");
+  send().props.onPress();
+  assert.equal(f.dismissals, 0);
+  composer(view).props.onChangeText("Comprar pan\nmañana");
+  view = f.render(); f.a.busy = "Guardando en GO…"; view = f.render();
+  send().props.onPress(); assert.equal(f.dismissals, 0);
+  f.a.busy = ""; view = f.render(); send().props.onPress();
+  await new Promise(setImmediate);
+  assert.equal(f.dismissals, 1);
+  assert.equal(f.dispatched.length, 1);
+  assert.equal(f.dispatched[0][0], "Comprar pan\nmañana");
+  view = f.keyboard(false);
+  assert.equal(composer(view).props.value, "");
+  assert.equal(goButtons(view).length, 1);
+});
+
+test("zone panel hides the same dock and keyboard listeners are removed on closing", () => {
+  const f = screenFixture("zone"); f.mount();
+  const shown = f.keyboard(true);
+  assert.equal(goButtons(shown).length, 0);
+  const panelScroll = shown.all.filter(n => n.type === "ScrollView").at(-1);
+  assert.equal(panelScroll.props.keyboardDismissMode, "interactive");
+  assert.equal(panelScroll.props.keyboardShouldPersistTaps, "handled");
+  assert.equal(goButtons(f.keyboard(false, 0)).length, 1);
+  f.render(false);
+  assert.equal(f.listeners.size, 0);
 });
