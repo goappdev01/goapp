@@ -28,6 +28,7 @@ import {
   useBookingAssistant,
   type AssistantPanel,
 } from "@/hooks/useBookingAssistant";
+import { useGoActions } from "@/hooks/useGoActions";
 import { useBookingVoice } from "@/hooks/useBookingVoice";
 import { BookingAssistantPanels } from "./BookingAssistantPanels";
 import {
@@ -58,6 +59,7 @@ export function BookingAssistantScreen({
 }: BookingAssistantProps) {
   const insets = useSafeAreaInsets();
   const a = useBookingAssistant();
+  const go = useGoActions(a);
   const [input, setInput] = useState("");
   const [position, setPosition] = useState<DockPosition>(handedness);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -72,7 +74,7 @@ export function BookingAssistantScreen({
       void a.searchPlaces(text);
     } else {
       setInput("");
-      void a.send(text, aiEnabled);
+      void go.dispatch(text, aiEnabled);
     }
   });
   useEffect(() => {
@@ -152,6 +154,7 @@ export function BookingAssistantScreen({
     voice.abort();
     setAttachments([]);
     setInput("");
+    go.reset();
     a.reset();
   }
   function openPanel(panel: AssistantPanel) {
@@ -180,16 +183,17 @@ export function BookingAssistantScreen({
     voice.abort();
     const text = input;
     setInput("");
-    void a.send(text, aiEnabled);
+    void go.dispatch(text, aiEnabled);
   }
   function close() {
-    if (a.busy === "Confirmando reserva…" || a.busy === "Cancelando reserva…")
+    if (a.busy === "Guardando en GO…" || a.busy === "Confirmando reserva…" || a.busy === "Cancelando reserva…")
       return;
     a.invalidate();
     voice.abort();
     onClose();
   }
   function back() {
+    if (a.busy) return;
     if (a.panel) a.setPanel(null);
     else if (a.phase === "review") {
       a.setOption(null);
@@ -271,8 +275,8 @@ export function BookingAssistantScreen({
       >
         <View style={s.header}>
           <View style={{ flex: 1 }}>
-            <Text style={s.eyebrow}>GO · RESERVAS</Text>
-            <Text style={s.title}>Tu próxima reserva</Text>
+            <Text style={s.eyebrow}>GO · ASISTENTE</Text>
+            <Text style={s.title}>¿Qué necesitas hacer?</Text>
           </View>
           <IconButton
             icon="sliders"
@@ -293,7 +297,7 @@ export function BookingAssistantScreen({
             label="Ir al Landing"
             onPress={close}
             disabled={
-              a.busy === "Confirmando reserva…" ||
+              a.busy === "Guardando en GO…" || a.busy === "Confirmando reserva…" ||
               a.busy === "Cancelando reserva…"
             }
           />
@@ -329,6 +333,22 @@ export function BookingAssistantScreen({
                 </Text>
               </View>
             ))}
+            {go.choices.map(entry => (
+              <Choice key={entry.id} title={entry.notes || "Lista"}
+                subtitle={entry.detail || "Lista vacía"} disabled={!!a.busy}
+                onPress={() => void go.chooseList(entry)} />
+            ))}
+            {go.result && go.active !== "booking" && (
+              <Text style={s.caption}>
+                Guardado en GO en este dispositivo. {go.result.kind === "list"
+                  ? "Puedes consultar y editar la lista desde tus notas."
+                  : "Las acciones con fecha aparecen en tu calendario; las demás, en tus tareas."}
+              </Text>
+            )}
+            {go.active !== "booking" && !!(a.request.serviceQuery || a.created) && (
+              <Action text="Volver a la reserva" onPress={go.resumeBooking} disabled={!!a.busy} />
+            )}
+            {go.active === "booking" && <>
             {!!(a.request.serviceQuery || a.zone) && (
               <View style={s.card}>
                 <Text style={s.sectionTitle}>Tu búsqueda</Text>
@@ -516,6 +536,7 @@ export function BookingAssistantScreen({
                 )}
               </View>
             )}
+            </>}
           </ScrollView>
           {!!(a.busy || voiceText || a.notice || voice.error) && (
             <View style={s.status} accessibilityLiveRegion="polite">
@@ -554,17 +575,17 @@ export function BookingAssistantScreen({
                 ))}
               </ScrollView>
               <Text style={s.attachmentHint}>
-                Referencia adjunta. Describe qué necesitas reservar a partir de
+                Referencia adjunta. Describe qué necesitas hacer a partir de
                 ella.
               </Text>
             </>
           )}
           <View style={s.composer}>
             <TextInput
-              accessibilityLabel="Solicitud de reserva"
+              accessibilityLabel="Solicitud a GO"
               value={input}
               onChangeText={setInput}
-              placeholder="Escribe qué quieres reservar…"
+              placeholder="Escribe a GO…"
               placeholderTextColor="#56686B"
               style={s.input}
               multiline
@@ -649,6 +670,7 @@ export function BookingAssistantScreen({
         {a.panel && (
           <BookingAssistantPanels
             a={panelState}
+            go={go}
             bottom={insets.bottom}
             position={position}
             setPosition={changePosition}
