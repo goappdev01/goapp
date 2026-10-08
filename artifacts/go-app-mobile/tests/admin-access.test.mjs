@@ -32,16 +32,21 @@ function dataFixture(reply) {
 }
 
 test('ADMIN permission requires the authenticated server response for the same current identity', async () => {
-  const f = dataFixture({ userId, role: 'admin', allowed: true });
+  const f = dataFixture({ userId, role: 'admin', allowed: true, level: 'technical', permissions: ['admin.access', 'diagnostics'] });
   assert.deepEqual(plain(await f.api.getAdminAccess()), { userId, allowed: true });
   assert.deepEqual(plain(f.calls[0]), ['/supabase/admin/access', {}, true, userId]);
   for (const reply of [{ userId, role: 'usuario', allowed: true }, { userId, role: 'admin', allowed: 'true' },
-    { userId: 'another-user', role: 'admin', allowed: true }, null, '<html>']) {
+    { userId: 'another-user', role: 'admin', allowed: true },
+    { userId, role: 'admin', allowed: true },
+    { userId, role: 'admin', allowed: true, level: 'technical', permissions: ['admin.access', 'ownership.manage'] },
+    { userId, role: 'admin', allowed: true, level: 'owner', permissions: [] }, null, '<html>']) {
     await assert.rejects(dataFixture(reply).api.getAdminAccess(), /authorization response/);
   }
   f.storage.delete(key);
   assert.deepEqual(plain(await f.api.getAdminAccess()), { userId: null, allowed: false });
   assert.equal(f.calls.length, 1);
+  assert.equal((await dataFixture({ userId, role: 'admin', allowed: true, level: 'owner',
+    permissions: ['admin.access', 'memberships.manage', 'ownership.manage'] }).api.getAdminAccess()).allowed, true);
 });
 
 test('denials and temporary failures never erase a session; stale session responses cannot grant ADMIN', async () => {
