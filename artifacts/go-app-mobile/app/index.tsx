@@ -20091,8 +20091,8 @@ function HomeScreenContent() {
             {/* ── PANEL CREACIÓN RÁPIDA — idéntico al de Listados ── */}
             {calQuickCreateOpen && (() => {
               const calQuickCreateOptions = [
-                { kind: "NOTA_INTERNA" as const, label: "INTERNAL TASK", icon: "file-text" as const, color: "#7c3aed", iconOn: "#ffffff" },
-                { kind: "NOTA_EXTERNA" as const, label: "EXTERNAL TASK", icon: "file-text" as const, color: "#f97316", iconOn: "#ffffff" },
+                { kind: "NOTA_INTERNA" as const, label: t('label_task_internal').toUpperCase(), icon: "file-text" as const, color: "#7c3aed", iconOn: "#ffffff" },
+                { kind: "NOTA_EXTERNA" as const, label: t('label_task_external').toUpperCase(), icon: "file-text" as const, color: "#f97316", iconOn: "#ffffff" },
               ];
               const handleCalQuickCreate = (kind: "NOTA_INTERNA" | "NOTA_EXTERNA") => {
                 Haptics.selectionAsync().catch(() => {});
