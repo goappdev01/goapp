@@ -155,6 +155,7 @@ export function LoginRegisterPanel({
   const [authName, setAuthName] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const passwordInputRef = useRef<TextInput>(null);
   const authInputRevisionRef = useRef(0);
   const pendingRegistrationRef = useRef<PendingRegistration | null>(null);
   const authContextRef = useRef({ visible, userAccountType, onSetAccountType });
@@ -453,7 +454,7 @@ export function LoginRegisterPanel({
 
         {/* ── AUTH: credentials ── */}
         {userAccountType === null && authStep === "credentials" && (
-          <ScrollView style={s.scroll} contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+          <ScrollView style={s.scroll} contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="always">
             <View style={s.authForm}>
               <View style={s.welcomeIcon}>
                 <Feather name={selectedRole === "empresa" ? "briefcase" : "user"} size={28} color={selectedRole === "empresa" ? "#3D9A84" : "#4A80BD"} />
@@ -463,8 +464,34 @@ export function LoginRegisterPanel({
               {authMode === "register" && (
                 <TextInput value={authName} onChangeText={setAuthName} placeholder="Nombre completo" placeholderTextColor="#94A3B8" autoCapitalize="words" style={s.authInput} />
               )}
-              <TextInput value={authEmail} onChangeText={handleAuthEmailChange} placeholder="Email" placeholderTextColor="#94A3B8" autoCapitalize="none" keyboardType="email-address" style={s.authInput} />
-              <TextInput value={authPassword} onChangeText={setAuthPassword} placeholder="Contraseña (mínimo 8 caracteres)" placeholderTextColor="#94A3B8" secureTextEntry style={s.authInput} />
+              <TextInput
+                value={authEmail}
+                onChangeText={handleAuthEmailChange}
+                placeholder="Email"
+                placeholderTextColor="#94A3B8"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                textContentType={authMode === "login" ? "username" : "emailAddress"}
+                autoComplete={authMode === "login" ? "username" : "email"}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => passwordInputRef.current?.focus()}
+                style={s.authInput}
+              />
+              <TextInput
+                ref={passwordInputRef}
+                value={authPassword}
+                onChangeText={setAuthPassword}
+                placeholder="Contraseña (mínimo 8 caracteres)"
+                placeholderTextColor="#94A3B8"
+                secureTextEntry
+                textContentType={authMode === "login" ? "password" : "newPassword"}
+                autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                returnKeyType={authMode === "login" ? "go" : "done"}
+                onSubmitEditing={authMode === "login" ? handleAuthenticate : undefined}
+                style={s.authInput}
+              />
               {authError && <Text style={s.authError}>{authError}</Text>}
               <TouchableOpacity onPress={handleAuthenticate} disabled={authBusy} activeOpacity={0.82} style={s.authPrimary}>
                 {authBusy ? <ActivityIndicator color="#fff" /> : <Text style={s.authPrimaryText}>{authMode === "login" ? "ENTRAR" : "CREAR CUENTA"}</Text>}
