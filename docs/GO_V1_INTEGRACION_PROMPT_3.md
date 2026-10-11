@@ -1,4 +1,4 @@
-# Prompt 3 — Integración Landing + IA + Calendario
+Prompt 3 — Integración Landing + IA + Calendario
 
 Fecha: 2026-10-08. Validación local automatizada; sin Expo Go, push ni despliegue.
 

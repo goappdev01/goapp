@@ -11,6 +11,7 @@ import { Feather } from "@expo/vector-icons";
 import { ORBITAS_CATALOGO, MOCK_ZONAS, MOCK_PARTNERS } from "@/data/mockEconomia";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
+import { useGoView } from "@/contexts/GoViewContext";
 import { orbitName } from "@/utils/orbitI18n";
 
 const NIVEL_COMERCIAL_EN: Record<string, string> = {
@@ -63,9 +64,10 @@ const MOCK_PROMOS = [
 
 export function AdminScreen({ guidanceLevel: _g = 5 }: { guidanceLevel?: number }) {
   const adminAccess = useAdminAccess();
+  const goView = useGoView();
   const { lang } = useLanguage();
   const [seccionAbierta, setSeccionAbierta] = useState<Seccion | null>("precios_orbitas");
-  if (!adminAccess.allowed) return null;
+  if (!adminAccess.allowed || !goView.isAdminView) return null;
 
   const SECCIONES: Array<{ key: Seccion; label: string; icon: keyof typeof Feather.glyphMap; color: string }> = [
     { key: "precios_orbitas",      label: lang === 'en' ? "Orbit prices"        : "Precios órbitas",     icon: "layers",      color: "#8b5cf6" },

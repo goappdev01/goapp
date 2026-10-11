@@ -83,7 +83,7 @@ function renderFragment(node, globals = {}) {
     React: { createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }) },
     View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', Feather: 'Feather',
     MaterialCommunityIcons: 'MaterialCommunityIcons', GoCloseButton: 'GoCloseButton',
-    lang: 'es', isBusinessMode: false, calQuickCreateOpen: false, calConfigVisible: false, ...globals,
+    lang: 'es', isBusinessMode: false, demoCustomerCalendarSelected: false, calQuickCreateOpen: false, calConfigVisible: false, ...globals,
   }).tree;
 }
 test('bottom controls emphasize RESERVAR, fit a narrow viewport and retain every action', () => {
@@ -122,6 +122,9 @@ test('root has no redundant panel close and floats have a reserved space outside
   assert.equal(tree.props.style.flexDirection, 'row');
   assert.ok(tree.props.style.bottom - globals.overlayPanelHeight + calendar.props.style.height + calendar.props.hitSlop < viewport.paddingBottom);
   assert.ok(tree.props.style.bottom > globals.overlayPanelHeight);
+  const demoTree = renderFragment(byId('calendar-floating-controls'), { ...globals, demoCustomerCalendarSelected: true });
+  assert.deepEqual(nodes(demoTree, n => n.type === 'GoCloseButton').map(n => n.props.level), ['container']);
+  assert.equal(nodes(demoTree, n => n.type === 'TouchableOpacity').length, 0, 'DEMO keeps its container exit without exposing the personal calendar shortcut');
 });
 test('one existing form is embedded in Calendar while the agenda stays mounted', () => {
   const body = find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'renderFieldSelector').getText(ast);

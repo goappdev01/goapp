@@ -55,7 +55,7 @@ test('central GO tap on public User V1 opens the existing AI entry once', () => 
     && n.initializer?.expression?.getText(ast).includes('isUserV1Surface && !aiOpen'));
   let opens = 0;
   const action = evaluate('exports.action = ' + attr.initializer.expression.getText(ast), {
-    voiceActive: false, isUserV1Surface: true, aiOpen: false, openAi: () => opens++,
+    voiceActive: false, isUserV1Surface: true, aiOpen: false, openAi: listen => { assert.equal(listen, true); opens++; },
   }).action;
   action();
   assert.equal(opens, 1);

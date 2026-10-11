@@ -16,7 +16,11 @@ import { LanguageProvider } from "@/contexts/LanguageContext";
 import { GoModeProvider } from "@/contexts/GoModeContext";
 import { GoBusinessAccessProvider } from "@/contexts/GoBusinessAccessContext";
 import { GoAdminAccessProvider } from "@/contexts/GoAdminAccessContext";
+import { GoViewProvider } from "@/contexts/GoViewContext";
 import { GoNotificationProvider } from "@/contexts/GoNotificationContext";
+import { OwnerBusinessDemoProvider } from "@/contexts/OwnerBusinessDemoContext";
+import { OwnerContextSurface } from "@/components/debug/OwnerContextIndicator";
+import { DEFAULT_BUSINESS_CONFIG } from "@/contexts/GoBusinessConfigContext";
 import { GoBusinessConfigProvider } from "@/contexts/GoBusinessConfigContext";
 import { GoPushInitializer } from "@/services/GoPushService";
 import { seedDemoBusinessIfNeeded, syncConfigToBusinessRegistry } from "@/data/seedDemoData";
@@ -68,20 +72,26 @@ export default function RootLayout() {
         <LanguageProvider>
           <GoModeProvider>
             <GoAdminAccessProvider>
+            <GoViewProvider>
+            <OwnerBusinessDemoProvider initialConfig={DEFAULT_BUSINESS_CONFIG}>
             <GoBusinessAccessProvider>
             <GoBusinessConfigProvider>
               <GoNotificationProvider>
                 <GoPushInitializer />
                 <GestureHandlerRootView style={{ flex: 1 }}>
                   <KeyboardProvider>
+                    <OwnerContextSurface>
                     <Stack screenOptions={{ headerShown: false }}>
                       <Stack.Screen name="index" />
                     </Stack>
+                    </OwnerContextSurface>
                   </KeyboardProvider>
                 </GestureHandlerRootView>
               </GoNotificationProvider>
             </GoBusinessConfigProvider>
             </GoBusinessAccessProvider>
+            </OwnerBusinessDemoProvider>
+            </GoViewProvider>
             </GoAdminAccessProvider>
           </GoModeProvider>
         </LanguageProvider>

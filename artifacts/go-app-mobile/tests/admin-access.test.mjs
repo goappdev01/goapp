@@ -33,7 +33,7 @@ function dataFixture(reply) {
 
 test('ADMIN permission requires the authenticated server response for the same current identity', async () => {
   const f = dataFixture({ userId, role: 'admin', allowed: true, level: 'technical', permissions: ['admin.access', 'diagnostics'] });
-  assert.deepEqual(plain(await f.api.getAdminAccess()), { userId, allowed: true });
+  assert.deepEqual(plain(await f.api.getAdminAccess()), { userId, allowed: true, level: 'technical', permissions: ['admin.access', 'diagnostics'] });
   assert.deepEqual(plain(f.calls[0]), ['/supabase/admin/access', {}, true, userId]);
   for (const reply of [{ userId, role: 'usuario', allowed: true }, { userId, role: 'admin', allowed: 'true' },
     { userId: 'another-user', role: 'admin', allowed: true },
@@ -43,7 +43,7 @@ test('ADMIN permission requires the authenticated server response for the same c
     await assert.rejects(dataFixture(reply).api.getAdminAccess(), /authorization response/);
   }
   f.storage.delete(key);
-  assert.deepEqual(plain(await f.api.getAdminAccess()), { userId: null, allowed: false });
+  assert.deepEqual(plain(await f.api.getAdminAccess()), { userId: null, allowed: false, level: null, permissions: [] });
   assert.equal(f.calls.length, 1);
   assert.equal((await dataFixture({ userId, role: 'admin', allowed: true, level: 'owner',
     permissions: ['admin.access', 'memberships.manage', 'ownership.manage'] }).api.getAdminAccess()).allowed, true);
@@ -65,7 +65,7 @@ function providerFixture() {
   const slots = [], listeners = new Set(), requests = []; let cursor = 0, effects = [], appListener;
   const React = { createContext: () => ({ Provider: 'provider' }),
     createElement: (type, props, ...children) => ({ type, props, children }),
-    useState(initial) { const i = cursor++; if (!slots[i]) slots[i] = { value: initial }; return [slots[i].value, v => { slots[i].value = v; }]; },
+    useState(initial) { const i = cursor++; if (!slots[i]) slots[i] = { value: typeof initial === 'function' ? initial() : initial }; return [slots[i].value, v => { slots[i].value = typeof v === 'function' ? v(slots[i].value) : v; }]; },
     useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
     useCallback(callback) { const i = cursor++; return slots[i] ??= callback; },
     useEffect(callback, deps) { const i = cursor++; if (!slots[i] || deps.some((v, n) => v !== slots[i].deps[n])) {
@@ -111,16 +111,21 @@ test('public account selection is Empresa then Usuario; every existing ADMIN ent
   assert.doesNotMatch(auth, /IS_INTERNAL_ADMIN/);
   const setup = auth.slice(auth.indexOf('{/* ── SETUP:'), auth.indexOf('{/* ── ACTIVE ACCOUNT'));
   assert.doesNotMatch(setup, /onOpenAdmin|adminCard|>ADMIN</);
-  assert.match(auth, /adminAccess.allowed && \(/);
+  assert.match(auth, /ownerSelector \|\| \(userAccountType === null && authStep === "role"\)/);
+  assert.match(auth, /userAccountType !== null && !ownerSelector/);
+  assert.match(auth, /adminAccess.allowed && !goView.isOwner && \(/);
+  assert.match(auth, /if \(viewBusy \|\| !goView.isOwner \|\| !onSelectOwnerView\) return/);
+  assert.match(auth, /testIDPrefix="owner-view"/);
+  assert.match(auth, /disabled=\{viewBusy \|\| !goView.isOwner\}/);
   const home = read('app/index.tsx');
   assert.match(home, /if \(await adminAccess.refresh\(\)\)/);
-  assert.match(home, /adminAccess.allowed && <GoAdminDashboard/);
+  assert.match(home, /adminAccess.allowed && goView.isAdminView && <GoAdminDashboard/);
   assert.match(home, /resolvedRole === "admin" \? "usuario" : resolvedRole/);
   const panel = read('components/empresa/EmpresaPanel.tsx');
-  assert.match(panel, /filter\(m => m.key !== "admin" \|\| adminAccess.allowed\)/);
-  assert.match(panel, /if \(key === "admin" && !adminAccess.allowed\) return/);
-  assert.match(panel, /initialModulo === "admin" && !adminAccess.allowed \? "home"/);
+  assert.match(panel, /filter\(m => m.key !== "admin" \|\| canOpenAdmin\)/);
+  assert.match(panel, /if \(key === "admin" && !canOpenAdmin\) return/);
+  assert.match(panel, /requested === "admin" && !canOpenAdmin/);
   for (const file of ['AdminScreen', 'GoAdminDashboard']) {
-    assert.match(read(`components/empresa/${file}.tsx`), /if \(!adminAccess.allowed\) return null/);
+    assert.match(read(`components/empresa/${file}.tsx`), /if \(!adminAccess.allowed \|\| !goView.isAdminView\) return null/);
   }
 });

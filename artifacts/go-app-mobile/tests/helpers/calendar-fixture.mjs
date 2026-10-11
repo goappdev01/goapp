@@ -4,6 +4,10 @@ import path from "node:path";
 import vm from "node:vm";
 const require = createRequire(path.join(process.cwd(), "package.json"));
 const ts = require("typescript");
+const translatedFloorLabels = {};
+vm.runInNewContext(ts.transpileModule(readFileSync("i18n/translations.ts", "utf8"), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: translatedFloorLabels });
 
 // Run the real calendar components with deterministic native adapters. Keep hook
 // state across renders so navigation and closing are tested without remounting.
@@ -45,6 +49,7 @@ export function fixture({ now } = {}) {
   const mocks = {
     react: { ...react, default: react },
     'react-native': native,
+    '@/components/debug/OwnerContextIndicator': { OwnerContextModal: 'Modal' },
     '@expo/vector-icons': { Feather: 'Feather' },
     'expo-haptics': { selectionAsync: async () => {}, impactAsync: async () => {}, ImpactFeedbackStyle: { Light: 'light' } },
     '@react-native-async-storage/async-storage': { default: { getItem: async () => null, setItem: async () => {} } },
@@ -53,7 +58,7 @@ export function fixture({ now } = {}) {
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, right: 0, left: 0, bottom: 0 }) },
     '@/hooks/useGoLog': { useGoLog: () => react.useState([]) },
     '@/hooks/useGoCalendarEntries': { useGoCalendarEntries: entries => entries },
-    '@/contexts/LanguageContext': { useLanguage: () => ({ lang: language, t: key => key }) },
+    '@/contexts/LanguageContext': { useLanguage: () => ({ lang: language, t: key => key.startsWith("floor_") ? (translatedFloorLabels.translations[language]?.[key] ?? key) : key }) },
     '@/contexts/GoBusinessConfigContext': { useBusinessConfig: () => ({ config: { plantillaItems: [], businessName: 'Test', subId: '' } }) },
     'expo-linear-gradient': { LinearGradient: 'LinearGradient' },
     './PlanoEmpresaScreen': { PlanoEmpresaScreen: 'PlanoEmpresaScreen' },

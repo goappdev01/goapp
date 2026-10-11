@@ -48,6 +48,7 @@ import {
 export interface BookingAssistantProps {
   uiScale?: "compacto" | "estandar" | "grande";
   visible: boolean;
+  listenRequest?: number;
   onClose: () => void;
   onBack?: () => void;
   handedness?: "left" | "right";
@@ -57,12 +58,14 @@ type Attachment = { name: string; uri: string; image: boolean };
 
 export function BookingAssistantScreen({
   visible,
+  listenRequest,
   onClose,
   onBack,
   handedness = "right",
   uiScale = "estandar",
   onHandednessChange,
 }: BookingAssistantProps) {
+  const consumedListenRequest = useRef<number | undefined>(undefined);
   const insets = useSafeAreaInsets();
   const goSize = uiScale === "compacto" ? 48 : uiScale === "grande" ? 72 : 64;
   const window = useWindowDimensions();
@@ -317,6 +320,11 @@ export function BookingAssistantScreen({
   return (
     <Modal
       visible={visible}
+      onShow={() => {
+        if (!visible || listenRequest === undefined || consumedListenRequest.current === listenRequest) return;
+        consumedListenRequest.current = listenRequest;
+        void voice.start();
+      }}
       animationType="slide"
       presentationStyle="fullScreen"
       onRequestClose={() => (a.panel ? back() : close())}

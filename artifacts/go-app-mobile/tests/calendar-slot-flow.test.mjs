@@ -37,7 +37,7 @@ function flowFixture(initial = []) {
   Object.assign(scope, {
     Error, lang: "es", calendarSlotOpeningRef: { current: false }, calendarSlotRequestRef: { current: 0 },
     calendarSlotSavingRef: { current: false }, calendarSlotDraftRef: { current: null },
-    fieldSelectorSaveBusyRef: { current: false }, pendingCalendarGoRef: { current: false },
+    fieldSelectorSaveBusyRef: { current: false }, pendingCalendarGoRef: { current: false }, pendingCalendarGoListenRef: { current: false }, goChatListenSequence: { current: 0 },
     getTaskUser: access.getTaskUser, assertTaskUser: access.assertTaskUser, updateGoLog: store.updateGoLog,
     makeUid: () => "go_slot_" + (++serial), t: key => key, isUserMode: false,
     showToast: (...args) => calls.push(["toast", ...args]),
@@ -47,7 +47,7 @@ function flowFixture(initial = []) {
     aiDraftBaseRef: { current: "" }, startIaListening() {},
     setTimeout: callback => { calls.push(["timer", callback]); return 1; },
   });
-  for (const name of ["GoChatOpen", "AiDraft", "AiOpen", "AiListening", "Time", "Duration", "Date", "DateISO"]) {
+  for (const name of ["GoChatOpen", "GoChatListenRequest", "AiDraft", "AiOpen", "AiListening", "Time", "Duration", "Date", "DateISO"]) {
     const key = name[0].toLowerCase() + name.slice(1);
     scope["set" + name] = value => { scope[key] = value; calls.push(["set" + name, value]); };
   }
@@ -266,4 +266,21 @@ test("Reservas forwards slots and GO to the existing handlers with a cluster tha
   const fab = nodes(tree, node => node.type === "DraggableFAB")[0];
   assert.ok(36 + 44 + 44 + cluster.props.style.gap * 2 <= fab.props.maxH);
   assert.ok(go.props.hitSlop * 2 < cluster.props.style.gap);
+});
+
+
+test("central GO requests one native listen while other entries remain silent", () => {
+  const f = flowFixture(); const { scope } = f;
+  scope.calOpen = false;
+  scope.openAi(true);
+  assert.equal(scope.goChatListenRequest, 1);
+  scope.openAi(true);
+  assert.equal(scope.goChatListenRequest, 1);
+  scope.goChatOpen = false;
+  scope.openAi();
+  assert.equal(scope.goChatListenRequest, undefined);
+  scope.goChatOpen = false;
+  scope.openAi(true);
+  assert.equal(scope.goChatListenRequest, 2);
+  assert.equal(f.calls.filter(call => call[0] === "timer").length, 0);
 });

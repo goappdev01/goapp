@@ -59,6 +59,7 @@ function fixture({ marker = null, storedSession = null, me = async () => Respons
     notifySessionChanged: () => { sessionListeners.forEach(fn => fn()); },
     fetch: async (url, init) => { requests.push({ url, init }); return url.endsWith('/auth/register')
       ? respondRegister ? respondRegister(init) : Response.json(registered, { status: registerStatus }) : me(); },
+    ownerLogin: false,
     authEmail: pending.email, authPassword: state.password, authName: 'New user', selectedRole: 'usuario', authMode: 'register',
     onSetAccountType: authContextRef.current.onSetAccountType,
     setAuthMode: value => { state.mode = value; }, setAuthStep: value => { state.step = value; },

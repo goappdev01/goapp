@@ -38,7 +38,7 @@ test('public User V1 uses a fail-closed surface policy and preserves only approv
 });
 
 test('Landing applies V1 gating without mounting hidden orbit or satellite hitboxes', () => {
-  assert.match(source, /isUserV1Landing\(isUserMode, adminAccess\.allowed\)/);
+  assert.match(source, /isUserV1Landing\(isUserMode, goView\.isAdminView\)/);
   assert.match(source, /!isUserV1Surface && \(orbitSecondLevel === null \?/);
   assert.match(source, /visibleLandingSatelliteKeys\(/);
   assert.match(source, /visibleLandingContextAction\(isUserV1Surface, cs\.v1Visible\)/);
@@ -48,7 +48,7 @@ test('Landing applies V1 gating without mounting hidden orbit or satellite hitbo
   assert.match(source, /cy: screen\.height - insets\.bottom - SYSTEM_MARGIN_Y - orbitWrapSize \/ 2 - Math\.round\(12 \* uiScaleFactor\)/);
   assert.doesNotMatch(source, /\bsetHumanityPan\b|\bhumanityPan\s*\./);
   assert.match(source, /const QR_TYPES:[^\n]+isUserV1Surface \? \[\] : \[/);
-  assert.match(source, /isUserV1Surface && !aiOpen[\s\S]*?openAi\(\)/);
+  assert.match(source, /isUserV1Surface && !aiOpen[\s\S]*?openAi\(true\)/);
   assert.doesNotMatch(source, /go_floating_pos_v14/);
   assert.doesNotMatch(source, /panResponder\.panHandlers/);
 });

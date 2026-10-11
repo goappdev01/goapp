@@ -2,12 +2,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BookingApiError, getAuthenticatedUserId, supabaseApiRequest } from "./booking";
 
 const sessionKey = "go_supabase_session_v1";
-export type AdminAccess = { userId: string | null; allowed: boolean };
+export type AdminLevel = "owner" | "technical";
+export type AdminAccess = { userId: string | null; allowed: boolean; level: AdminLevel | null; permissions: string[] };
 
 export async function getAdminAccess(): Promise<AdminAccess> {
   const before = await AsyncStorage.getItem(sessionKey);
   const userId = await getAuthenticatedUserId();
-  if (!userId) return { userId: null, allowed: false };
+  if (!userId) return { userId: null, allowed: false, level: null, permissions: [] };
   try {
     const access = await supabaseApiRequest<{ userId?: unknown; role?: unknown; allowed?: unknown; level?: unknown; permissions?: unknown }>(
       "/supabase/admin/access", {}, true, userId,
@@ -24,10 +25,10 @@ export async function getAdminAccess(): Promise<AdminAccess> {
       || !grants.every(p => typeof p === "string" && permitted.includes(p))) {
       throw new Error("Invalid ADMIN authorization response");
     }
-    return { userId, allowed: true };
+    return { userId, allowed: true, level: access.level as AdminLevel, permissions: [...grants] as string[] };
   } catch (error) {
     if (error instanceof BookingApiError && [401, 403].includes(error.status)) {
-      return { userId, allowed: false };
+      return { userId, allowed: false, level: null, permissions: [] };
     }
     throw error;
   }

@@ -163,7 +163,8 @@ function screenFixture(panel = null, size = "estandar", position = "right") {
       }
     },
   };
-  const voice = { status: "idle", error: "", transcript: "", abort() {}, start: async zone => starts.push(zone), stop: async () => {} };
+  let aborts = 0;
+  const voice = { status: "idle", error: "", transcript: "", abort() { aborts++; }, start: async zone => starts.push(zone), stop: async () => {} };
   const api = load("components/booking-assistant/BookingAssistantScreen.tsx", {
     react: hooks, "react-native": { ...native, Keyboard: keyboard }, "react-native-gesture-handler": { GestureHandlerRootView: "GestureHandlerRootView" },
     "./AssistantCloseControls": controls, "@/hooks/useGoDockPreference": { useGoDockPreference: () => ({ position }) },
@@ -174,14 +175,14 @@ function screenFixture(panel = null, size = "estandar", position = "right") {
     "@/hooks/useBookingVoice": { useBookingVoice: () => voice }, "./BookingAssistantPanels": panels, "./BookingAssistantUI": ui,
   });
   const mount = () => effects.splice(0).forEach(fn => fn());
-  const render = (visible = true) => {
+  const render = (visible = true, listenRequest) => {
     cursor = 0;
-    const tree = api.BookingAssistantScreen({ visible, onClose: () => closed.push(true), uiScale: size });
+    const tree = api.BookingAssistantScreen({ visible, listenRequest, onClose: () => closed.push(true), uiScale: size });
     return { tree, all: nodes(tree) };
   };
   return { ...render(), starts, closed, a, dispatched, animations, listeners,
-    get dismissals() { return dismissals; }, mount,
-    render(visible = true) { const result = render(visible); mount(); return result; },
+    get dismissals() { return dismissals; }, get aborts() { return aborts; }, mount,
+    render(visible = true, listenRequest) { const result = render(visible, listenRequest); mount(); return result; },
     keyboard(shown, duration = 250) {
       listeners.get(shown ? "keyboardWillShow" : "keyboardWillHide")?.({ duration });
       return this.render();
@@ -354,4 +355,26 @@ test("zone panel hides the same dock and keyboard listeners are removed on closi
   assert.equal(goButtons(f.keyboard(false, 0)).length, 1);
   f.render(false);
   assert.equal(f.listeners.size, 0);
+});
+
+
+test("assistant consumes each central GO listen request once only after presentation", async () => {
+  const f = screenFixture();
+  const modal = view => view.all.find(node => node.type === "Modal");
+  let view = f.render(true, 1);
+  assert.equal(f.starts.length, 0);
+  modal(view).props.onShow(); modal(view).props.onShow();
+  await new Promise(setImmediate);
+  assert.equal(f.starts.length, 1);
+  assert.equal(f.starts[0], undefined);
+  view = f.render(true, 1); modal(view).props.onShow();
+  assert.equal(f.starts.length, 1);
+  const aborts = f.aborts;
+  view = f.render(false, 2); modal(view).props.onShow();
+  assert.ok(f.aborts > aborts);
+  assert.equal(f.starts.length, 1);
+  view = f.render(true, undefined); modal(view).props.onShow();
+  assert.equal(f.starts.length, 1);
+  view = f.render(true, 2); modal(view).props.onShow();
+  assert.equal(f.starts.length, 2);
 });

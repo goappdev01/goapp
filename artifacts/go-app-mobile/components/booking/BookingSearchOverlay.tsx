@@ -48,6 +48,7 @@ import { syncBookingToGoLog } from "@/lib/goLogBridge";
 import { formatISODate, getToday } from "@/lib/time";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { MyBookingsList } from "@/components/booking/MyBookingsList";
+import type { DemoBookingRepository } from "@/data/demoBookingRepository";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -161,7 +162,8 @@ const DATE_MONTH_KEYS = ["month_jan","month_feb","month_mar","month_apr","month_
 
 function formatDateLabel(dateISO: string, t: ReturnType<typeof useLanguage>["t"]): string {
   const today = formatISODate(getToday());
-  const tomorrow = formatISODate(new Date(getToday().getTime() + 86_400_000));
+  const todayDate = getToday();
+  const tomorrow = formatISODate(new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() + 1, 12));
   if (dateISO === today) return t("status_today");
   if (dateISO === tomorrow) return t("status_tomorrow");
   const d = new Date(dateISO + "T00:00:00");
@@ -170,8 +172,9 @@ function formatDateLabel(dateISO: string, t: ReturnType<typeof useLanguage>["t"]
 
 function getDaysRange(count = 21): string[] {
   const days: string[] = [];
+  const today = getToday();
   for (let i = 0; i < count; i++) {
-    const d = new Date(getToday().getTime() + i * 86_400_000);
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i, 12);
     days.push(formatISODate(d));
   }
   return days;
@@ -317,6 +320,10 @@ const bc = StyleSheet.create({
 // ── Main overlay ───────────────────────────────────────────────────────────────
 
 export type BookingSearchOverlayProps = {
+  /** Owner-authorized local test data. Never falls back to live booking or agenda writes. */
+  demoRepository?: DemoBookingRepository;
+  initialBusinessId?: string;
+  onDemoGoToBooking?: (dateISO: string, timeHHMM: string, entryId: string) => void;
   visible: boolean;
   onClose: () => void;
   /** ↓↓ Cierra TODO el flujo y vuelve al Landing directamente (sin pasos intermedios). */
@@ -342,7 +349,13 @@ export function BookingSearchOverlay({
   onProviderSelected,
   onHoldCreated,
   onGoToBooking,
+  demoRepository,
+  initialBusinessId,
+  onDemoGoToBooking,
 }: BookingSearchOverlayProps) {
+  const cancelSelectedBooking = (id: string) => demoRepository
+    ? demoRepository.cancelBooking(id).catch(() => undefined)
+    : cancelBooking(id);
   const { t, lang } = useLanguage();
   const insets = useSafeAreaInsets();
   const slideAnim = useRef(new Animated.Value(SCREEN_H)).current;
@@ -451,6 +464,7 @@ export function BookingSearchOverlay({
   const [activeHold, setActiveHold] = useState<Booking | null>(null);
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const confirmInFlight = useRef(false);
   // Anti-doble-reserva: true cuando claimSlot o isSlotOccupied detectan conflicto
   const [slotTakenError, setSlotTakenError] = useState(false);
 
@@ -471,6 +485,7 @@ export function BookingSearchOverlay({
   };
 
   useEffect(() => {
+    let current = true;
     if (visible) {
       setStep("search");
       setQuery("");
@@ -486,14 +501,22 @@ export function BookingSearchOverlay({
       dragAnim.setValue(0);
       stepAnim.setValue(0);
       // Cargar negocios recientes
-      getRecentBusinessIds(5).then(async (ids) => {
-        if (ids.length === 0) { setRecentBizs([]); return; }
-        const all = await getActivebusinesses();
-        const ordered = ids
-          .map((id) => all.find((b) => b.id === id))
-          .filter((b): b is Business => !!b);
-        setRecentBizs(ordered);
-      }).catch(() => { setRecentBizs([]); });
+      if (demoRepository) {
+        demoRepository.getActiveBusinesses().then(all => {
+          if (!current) return;
+          setRecentBizs(all);
+          const initial = initialBusinessId && all.find(business => business.id === initialBusinessId);
+          if (initial) { setSelectedBusiness(initial); setStep("item"); }
+        }).catch(() => { if (current) setRecentBizs([]); });
+      } else {
+        getRecentBusinessIds(5).then(async (ids) => {
+          if (!current) return;
+          if (ids.length === 0) { setRecentBizs([]); return; }
+          const all = await getActivebusinesses();
+          const ordered = ids.map(id => all.find(business => business.id === id)).filter((business): business is Business => !!business);
+          if (current) setRecentBizs(ordered);
+        }).catch(() => { if (current) setRecentBizs([]); });
+      }
       Animated.spring(slideAnim, {
         toValue: 0,
         useNativeDriver: true,
@@ -508,7 +531,8 @@ export function BookingSearchOverlay({
         useNativeDriver: true,
       }).start();
     }
-  }, [visible]);
+    return () => { current = false; };
+  }, [visible, demoRepository, initialBusinessId]);
 
   useEffect(() => {
     if (!visible || step !== "search") return;
@@ -523,7 +547,7 @@ export function BookingSearchOverlay({
     let current = true;
     const timer = setTimeout(async () => {
       try {
-        const r = await searchBusinesses(query);
+        const r = await (demoRepository ? demoRepository.searchBusinesses(query) : searchBusinesses(query));
         // Client-side sub-category filter
         const filtered = selectedSubCategory
           ? r.filter(b => {
@@ -544,17 +568,17 @@ export function BookingSearchOverlay({
       }
     }, 300);
     return () => { current = false; clearTimeout(timer); };
-  }, [query, visible, step, selectedSubCategory]);
+  }, [query, visible, step, selectedSubCategory, demoRepository]);
 
   useEffect(() => {
     if (!selectedBusiness) return;
-    getBookableItems(selectedBusiness.id, true).then((its) =>
+    (demoRepository ? demoRepository.getBookableItems(selectedBusiness.id) : getBookableItems(selectedBusiness.id, true)).then((its) =>
       setItems(its.filter((i) => i.active && i.visible))
     ).catch((error) => {
       setItems([]);
       Alert.alert("No se pudieron cargar servicios", error instanceof Error ? error.message : "Comprueba la conexión e inténtalo de nuevo.");
     });
-    getStaff(selectedBusiness.id).then((all) => {
+    (demoRepository ? demoRepository.getStaff(selectedBusiness.id) : getStaff(selectedBusiness.id)).then((all) => {
       // ── Limpieza defensiva antes de pintar profesionales ──────────────────
       // 1. Eliminar registros sin id o con nombre < 3 chars (parciales legacy)
       // 2. Deduplicar por nombre normalizado
@@ -568,11 +592,11 @@ export function BookingSearchOverlay({
         seenNorm.add(norm);
         return true;
       });
-      console.log("PROFESSIONALS_SOURCE = go_staff_v1 businessId=" + selectedBusiness.id);
+      console.log("PROFESSIONALS_SOURCE = " + (demoRepository ? "owner_demo" : "go_staff_v1") + " businessId=" + selectedBusiness.id);
       console.log("PROFESSIONALS_RENDERED =", clean.map((s) => s.name));
       setStaffList(clean);
     }).catch(() => {});
-  }, [selectedBusiness]);
+  }, [selectedBusiness, demoRepository]);
 
   const loadSlots = useCallback(async () => {
     if (!selectedBusiness || !selectedItem) return;
@@ -585,7 +609,7 @@ export function BookingSearchOverlay({
       "| itemId →", selectedItem.id,
       "| date →", selectedDate,
       "| staffId usado →", staffId ?? "(sin profesional)");
-    const raw = await getAllSlots(
+    const raw = await (demoRepository?.getAllSlots ?? getAllSlots)(
       selectedBusiness.id,
       selectedItem.id,
       selectedDate,
@@ -602,7 +626,7 @@ export function BookingSearchOverlay({
     // y ese profesional tiene horario propio (useCompanySchedule=false),
     // filtramos los slots para que solo aparezcan los que caben dentro de
     // sus turnos. Los slots fuera de esos turnos no se muestran.
-    if (selectedStaff && selectedStaff !== "none") {
+    if (!demoRepository && selectedStaff && selectedStaff !== "none") {
       const weekdayJS = new Date(selectedDate + "T00:00:00").getDay();
       const staffShifts = await getStaffShiftsForDay(
         selectedBusiness.id,
@@ -619,7 +643,7 @@ export function BookingSearchOverlay({
 
     setSlots(raw);
     setLoadingSlots(false);
-  }, [selectedBusiness, selectedItem, selectedDate, selectedStaff]);
+  }, [selectedBusiness, selectedItem, selectedDate, selectedStaff, demoRepository]);
 
   useEffect(() => {
     if (step === "slots") loadSlots();
@@ -628,8 +652,10 @@ export function BookingSearchOverlay({
   const handleSelectBusiness = (b: Business) => {
     Haptics.selectionAsync().catch(() => {});
     setSelectedBusiness(b);
-    onProviderSelected?.(b);
-    recordBusinessVisit(b.id).catch(() => {});
+    if (!demoRepository) {
+      onProviderSelected?.(b);
+      recordBusinessVisit(b.id).catch(() => {});
+    }
     goToStep("item", "forward");
   };
 
@@ -664,10 +690,10 @@ export function BookingSearchOverlay({
       setSlotTakenError(false);
       // createHold llama a claimSlotOrReject internamente — READ→CHECK→WRITE atómico.
       // No hay pre-check por UI: el bloqueo vive en la capa de storage.
-      const result = await createHold({
+      const result = await (demoRepository?.createHold ?? createHold)({
         businessId: selectedBusiness.id,
         bookableItemId: selectedItem.id,
-        customerId: "me",
+        customerId: demoRepository?.ownerUserId ?? "me",
         staffId,
         startDatetime: slot.startDatetime,
         endDatetime: slot.endDatetime,
@@ -683,7 +709,7 @@ export function BookingSearchOverlay({
       setActiveHold(result.booking);
       goToStep("hold", "forward");
       // Notifica inmediatamente — sin esperar al polling de 3 min
-      onHoldCreated?.();
+      if (!demoRepository) onHoldCreated?.();
     } catch {
       loadSlots();
     }
@@ -703,90 +729,100 @@ export function BookingSearchOverlay({
       hasSelectedBusiness: !!selectedBusiness,
       hasSelectedItem: !!selectedItem,
     });
-    if (!activeHold || !selectedBusiness || !selectedItem) return;
-    setConfirming(true);
-    setSlotTakenError(false);
-
-    console.log("[BOOKING_CHECK_INPUT] handleConfirm (HOLD→CONFIRMED) →", {
-      holdId:        activeHold.id,
-      businessId:    activeHold.businessId,
-      staffId:       activeHold.staffId,
-      startDatetime: activeHold.startDatetime,
-      endDatetime:   activeHold.endDatetime,
-    });
-
-    // ── BLOQUEO ATÓMICO: claimSlot con self-replace (HOLD → CONFIRMED) ────────
-    // Pasa el mismo ID del HOLD → claimSlot lo salta en el check de conflictos
-    // y lo reemplaza en storage (upsert). Si otro booking coincide, devuelve ok:false.
-    let result;
+    if (!activeHold || !selectedBusiness || !selectedItem || confirmInFlight.current) return;
+    confirmInFlight.current = true;
     try {
-      result = await claimSlot({
-        ...activeHold,
-        status: "CONFIRMED",
-        holdExpiresAt: undefined,
+      setConfirming(true);
+      setSlotTakenError(false);
+
+      console.log("[BOOKING_CHECK_INPUT] handleConfirm (HOLD→CONFIRMED) →", {
+        holdId:        activeHold.id,
+        businessId:    activeHold.businessId,
+        staffId:       activeHold.staffId,
+        startDatetime: activeHold.startDatetime,
+        endDatetime:   activeHold.endDatetime,
       });
-    } catch (error) {
+
+      // ── BLOQUEO ATÓMICO: claimSlot con self-replace (HOLD → CONFIRMED) ────────
+      // Pasa el mismo ID del HOLD → claimSlot lo salta en el check de conflictos
+      // y lo reemplaza en storage (upsert). Si otro booking coincide, devuelve ok:false.
+      let result;
+      try {
+        result = await (demoRepository?.claimSlot ?? claimSlot)({
+          ...activeHold,
+          status: "CONFIRMED",
+          holdExpiresAt: undefined,
+        });
+      } catch (error) {
+        setConfirming(false);
+        if (
+          error instanceof BookingApiError &&
+          (error.status === 409 || error.code === "23P01" || error.code === "BOOKING_CONFLICT")
+        ) {
+          cancelSelectedBooking(activeHold.id).catch(() => {});
+          setActiveHold(null);
+          setSlotTakenError(true);
+          goToStep("slots", "back");
+          loadSlots();
+          return;
+        }
+        if (error instanceof Error) {
+          Alert.alert("No se pudo confirmar", error.message);
+        } else {
+          Alert.alert("No se pudo confirmar", "Inicia sesión e inténtalo de nuevo.");
+        }
+        return;
+      }
+
       setConfirming(false);
-      if (
-        error instanceof BookingApiError &&
-        (error.status === 409 || error.code === "23P01" || error.code === "BOOKING_CONFLICT")
-      ) {
-        cancelBooking(activeHold.id).catch(() => {});
+
+      if (!result.ok) {
+        // Slot ya ocupado por otra reserva — mostrar error, cancelar HOLD y volver a slots
+        cancelSelectedBooking(activeHold.id).catch(() => {});
         setActiveHold(null);
         setSlotTakenError(true);
         goToStep("slots", "back");
         loadSlots();
         return;
       }
-      if (error instanceof Error) {
-        Alert.alert("No se pudo confirmar", error.message);
+
+      const confirmed = result.booking;
+      setConfirmedBooking(confirmed);
+      // Derive professional info BEFORE callback so caller also receives it
+      const proNameForLog =
+        selectedStaff === null   ? undefined :
+        selectedStaff === "none" ? t("biz_no_preference") :
+        `${selectedStaff.emoji ?? "👤"} ${selectedStaff.name}`;
+      const proIdForLog =
+        selectedStaff === null || selectedStaff === "none" ? undefined :
+        selectedStaff.id;
+      if (demoRepository) {
+        // The local repository already projected this reservation to both DEMO calendars.
+        setActiveHold(null);
       } else {
-        Alert.alert("No se pudo confirmar", "Inicia sesión e inténtalo de nuevo.");
+        onBookingConfirmed?.(confirmed, selectedBusiness, selectedItem, proNameForLog);
+        syncBookingToGoLog(confirmed, selectedBusiness, selectedItem, proNameForLog, proIdForLog).catch(() => {});
       }
-      return;
+      goToStep("confirmed", "forward");
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } finally {
+      confirmInFlight.current = false;
+      setConfirming(false);
     }
-
-    setConfirming(false);
-
-    if (!result.ok) {
-      // Slot ya ocupado por otra reserva — mostrar error, cancelar HOLD y volver a slots
-      cancelBooking(activeHold.id).catch(() => {});
-      setActiveHold(null);
-      setSlotTakenError(true);
-      goToStep("slots", "back");
-      loadSlots();
-      return;
-    }
-
-    const confirmed = result.booking;
-    setConfirmedBooking(confirmed);
-    // Derive professional info BEFORE callback so caller also receives it
-    const proNameForLog =
-      selectedStaff === null   ? undefined :
-      selectedStaff === "none" ? t("biz_no_preference") :
-      `${selectedStaff.emoji ?? "👤"} ${selectedStaff.name}`;
-    const proIdForLog =
-      selectedStaff === null || selectedStaff === "none" ? undefined :
-      selectedStaff.id;
-    onBookingConfirmed?.(confirmed, selectedBusiness, selectedItem, proNameForLog);
-    // Auto-sync confirmed booking to GO log (with professional info)
-    syncBookingToGoLog(confirmed, selectedBusiness, selectedItem, proNameForLog, proIdForLog).catch(() => {});
-    goToStep("confirmed", "forward");
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   };
 
   const handleHoldExpired = () => {
-    if (activeHold) cancelBooking(activeHold.id);
+    if (activeHold) cancelSelectedBooking(activeHold.id);
     setActiveHold(null);
     goToStep("slots", "back");
     loadSlots();
   };
 
   const handleBack = () => {
-    if (step === "item") { goToStep("search", "back"); onProviderSelected?.(null); }
+    if (step === "item") { goToStep("search", "back"); if (!demoRepository) onProviderSelected?.(null); }
     else if (step === "slots") goToStep("item", "back");
     else if (step === "hold") {
-      if (activeHold) cancelBooking(activeHold.id);
+      if (activeHold) cancelSelectedBooking(activeHold.id);
       setActiveHold(null);
       goToStep("slots", "back");
     }
@@ -806,8 +842,8 @@ export function BookingSearchOverlay({
   };
 
   const handleClose = () => {
-    if (activeHold) cancelBooking(activeHold.id);
-    onProviderSelected?.(null);
+    if (activeHold) cancelSelectedBooking(activeHold.id);
+    if (!demoRepository) onProviderSelected?.(null);
     onClose();
   };
   handleCloseRef.current = handleClose;
@@ -824,8 +860,8 @@ export function BookingSearchOverlay({
     dragAnim.stopAnimation();
     stepAnim.stopAnimation();
     // Cancelar hold activo si existe
-    if (activeHold) cancelBooking(activeHold.id);
-    onProviderSelected?.(null);
+    if (activeHold) cancelSelectedBooking(activeHold.id);
+    if (!demoRepository) onProviderSelected?.(null);
     // Reset completo de estado interno para no dejar nada bloqueante en memoria
     setStep("search");
     setQuery("");
@@ -860,7 +896,7 @@ export function BookingSearchOverlay({
     Haptics.selectionAsync().catch(() => {});
     if (step === "confirmed") { handleClose(); return; }
     if (step === "hold") {
-      if (activeHold) cancelBooking(activeHold.id);
+      if (activeHold) cancelSelectedBooking(activeHold.id);
       setActiveHold(null);
       goToStep("slots", "back");
       return;
@@ -874,7 +910,7 @@ export function BookingSearchOverlay({
       return;
     }
     if (step === "professional") { goToStep("item", "back"); return; }
-    if (step === "item") { goToStep("search", "back"); onProviderSelected?.(null); return; }
+    if (step === "item") { goToStep("search", "back"); if (!demoRepository) onProviderSelected?.(null); return; }
     // step === "search"
     if (selectedSubCategory) { setSelectedSubCategory(null); setResults([]); return; }
     if (selectedCategory)    { setSelectedCategory(null); setSelectedSubCategory(null); setResults([]); return; }
@@ -970,6 +1006,7 @@ export function BookingSearchOverlay({
                 <View style={[s.actionDock, { paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 16) }]}>
 
                   <MyBookingsList
+                    demoRepository={demoRepository}
                     visible={
                       !keyboardVisible &&
                       query.length === 0 &&
@@ -1669,11 +1706,11 @@ export function BookingSearchOverlay({
                   }}
                   onPress={() => {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-                    if (confirmedBooking && onGoToBooking) {
-                      const dateISO   = confirmedBooking.startDatetime.slice(0, 10);
-                      const timeHHMM  = confirmedBooking.startDatetime.slice(11, 16);
-                      const entryId   = `go_booking_cli_${confirmedBooking.id}`;
-                      onGoToBooking(dateISO, timeHHMM, entryId);
+                    if (confirmedBooking) {
+                      const dateISO = confirmedBooking.startDatetime.slice(0, 10);
+                      const timeHHMM = confirmedBooking.startDatetime.slice(11, 16);
+                      if (demoRepository) onDemoGoToBooking?.(dateISO, timeHHMM, demoRepository.getCustomerEntries().find(entry => entry.reservationId === confirmedBooking.id)?.id ?? `demo_customer_${confirmedBooking.id}`);
+                      else onGoToBooking?.(dateISO, timeHHMM, `go_booking_cli_${confirmedBooking.id}`);
                     }
                     handleClose();
                   }}

@@ -21,9 +21,13 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Alert } from "react-native";
+import { Alert, AppState } from "react-native";
 import { onSessionChanged } from "@/lib/sessionEvents";
 import { useBusinessAccess } from "./GoBusinessAccessContext";
+import { useGoView } from "./GoViewContext";
+import { useAdminAccess } from "./GoAdminAccessContext";
+import type { BusinessDemoStore } from "@/data/businessDemoStore";
+import { useOwnerBusinessDemo } from "./OwnerBusinessDemoContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   initPlantillaItems,
@@ -99,6 +103,12 @@ export type BusinessConfig = {
   paymentMethod:    PaymentMethodId | null;
   isBusinessActive: boolean;
   businessId?:      string; // ID del registro vinculado en go_businesses_v1
+  countryCode?:     string;
+  mobile?:          string;
+  coordinates?:     { latitude: number; longitude: number };
+  phoneE164?:       string;
+  mobileE164?:      string;
+  whatsappE164?:    string;
   phone?:           string; // Teléfono fijo de contacto
   whatsapp?:        string; // Número WhatsApp de contacto
   staffSchedules?:  Record<string, StaffScheduleConfig>; // keyed by stable staff ID
@@ -132,6 +142,7 @@ export const DEFAULT_BUSINESS_CONFIG: BusinessConfig = {
 // ─── Context ──────────────────────────────────────────────────────────────────
 
 type GoBusinessConfigContextType = {
+  demo?: BusinessDemoStore;
   config:             BusinessConfig;
   loaded:             boolean;
   updateConfig:       (patch: Partial<BusinessConfig>) => void;
@@ -146,6 +157,34 @@ const GoBusinessConfigContext = createContext<GoBusinessConfigContextType>({
   resetToSubActivity: () => {},
   resetConfig:        async () => {},
 });
+
+/** Functional local DEMO, available only inside the currently authorized owner context. */
+export function GoBusinessPreviewProvider({ children }: { children: React.ReactNode }) {
+  const { isBusinessPreview } = useGoView();
+  const admin = useAdminAccess();
+  const { demo, loaded, config } = useOwnerBusinessDemo();
+  const report = useCallback((operation: Promise<void>) => {
+    void operation.catch(error => Alert.alert("Empresa DEMO", String(error)));
+  }, []);
+  const updateConfig = useCallback((patch: Partial<BusinessConfig>) => { if (demo) report(demo.updateConfig(patch)); }, [demo, report]);
+  const resetToSubActivity = useCallback((sectorId: string, subId: string) => {
+    if (!demo) return;
+    report(demo.transformConfig(prev => {
+      const changed = prev.subId !== subId;
+      return { ...prev, sectorId, subId,
+        plantillaItems: changed || prev.plantillaItems.length === 0 ? initPlantillaItems(subId) : prev.plantillaItems,
+        services: changed || prev.services.length === 0 ? (SUGGESTED_SERVICES[subId] ?? []).map(service => ({
+          name: service.name, duration: service.duration, price: service.price,
+        })) : prev.services,
+      };
+    }));
+  }, [demo, report]);
+  const resetConfig = useCallback(async () => { if (demo) await demo.reset(); }, [demo]);
+  if (!isBusinessPreview || !admin.isOwner || admin.checking || !demo || !loaded || !config) return null;
+  return <GoBusinessConfigContext.Provider value={{
+    config, loaded: true, updateConfig, resetToSubActivity, resetConfig, demo,
+  }}>{children}</GoBusinessConfigContext.Provider>;
+}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 

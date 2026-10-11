@@ -1,3 +1,8 @@
+import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
+import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
+import { getBusinessDemoSetupState } from "@/data/businessDemoStore";
+import { createDemoBookingRepository, createDemoCatalogBookingRepository } from "@/data/demoBookingRepository";
+import { DemoCustomerCalendar } from "@/components/booking/DemoCustomerCalendar";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import { useGoLog } from "@/hooks/useGoLog";
 import { readGoLog, flushGoLog, commitGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
@@ -29,7 +34,6 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   LayoutAnimation,
-  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -123,7 +127,9 @@ import { MarketplaceHistorialScreen, type RepeatExtras } from "@/components/mark
 import { GoQualitySheet } from "@/components/quality/GoQualitySheet";
 import { EmpresaPanel } from "@/components/empresa/EmpresaPanel";
 import { ActivacionCobrosScreen } from "@/components/empresa/ActivacionCobrosScreen";
-import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
+import { useBusinessConfig, GoBusinessPreviewProvider } from "@/contexts/GoBusinessConfigContext";
+import { useGoView } from "@/contexts/GoViewContext";
+import type { GoView } from "@/data/goViewPolicy";
 import { GoCartaScreen } from "@/components/carta/GoCartaScreen";
 import { GoProveedorReservaSheet, type ProveedorData } from "@/components/booking/GoProveedorReservaSheet";
 import {
@@ -2597,7 +2603,14 @@ function GoDeepSpaceUpper() {
 }
 
 export default function HomeScreen() {
-  return <BusinessAccessGate><HomeScreenContent /></BusinessAccessGate>;
+  const adminAccess = useAdminAccess();
+  const goView = useGoView();
+  const ownerIdentity = useRef<string | null>(null);
+  if (goView.isOwner && adminAccess.userId) ownerIdentity.current = adminAccess.userId;
+  else if (!adminAccess.checking || ownerIdentity.current !== adminAccess.userId) ownerIdentity.current = null;
+  // Keep presentation mounted during this owner's recheck; inner permissions still fail closed.
+  const ownerPresentation = goView.isOwner || (!!adminAccess.userId && adminAccess.checking && ownerIdentity.current === adminAccess.userId);
+  return ownerPresentation ? <HomeScreenContent /> : <BusinessAccessGate><HomeScreenContent /></BusinessAccessGate>;
 }
 
 function HomeScreenContent() {
@@ -2706,12 +2719,6 @@ function HomeScreenContent() {
   const [goSearchFilter, setGoSearchFilter] = useState<"sugeridos"|"cercanos"|"favoritos">("sugeridos");
   const [goSearchCtrlH, setGoSearchCtrlH] = useState(0);
   const [goSearchBusinesses, setGoSearchBusinesses] = useState<Business[]>([]);
-  useEffect(() => {
-    if (!goSearchOpen || !goSearchSub) { setGoSearchBusinesses([]); return; }
-    getBusinesses()
-      .then(all => setGoSearchBusinesses(all.filter(b => b.bookingActive !== false && b.category === goSearchSub.id)))
-      .catch(() => setGoSearchBusinesses([]));
-  }, [goSearchOpen, goSearchSub?.id]);
   // ── GO PROVEEDOR — pantalla de reserva orientada al cliente ─────────────
   const [goProveedorOpen, setGoProveedorOpen] = useState(false);
   const [goProveedorData, setGoProveedorData] = useState<ProveedorData | null>(null);
@@ -2722,10 +2729,37 @@ function HomeScreenContent() {
   const { isBusinessMode: requestedBusinessMode, loaded: modeLoaded, setActiveMode, syncModeFromRole } = useGoMode();
   const businessAccess = useBusinessAccess();
   const adminAccess = useAdminAccess();
-  const isBusinessMode = requestedBusinessMode && businessAccess.allowed;
+  const goView = useGoView();
+  const ownerDemo = useOwnerBusinessDemo();
+  const demoBookingRepository = useMemo(() => goView.view === "USER" && adminAccess.isOwner && !adminAccess.checking && ownerDemo.loaded && ownerDemo.demo
+    ? (ownerDemo.catalog ? createDemoCatalogBookingRepository(ownerDemo.catalog) : createDemoBookingRepository(ownerDemo.demo)) : undefined, [goView.view, adminAccess.isOwner, adminAccess.checking, ownerDemo.loaded, ownerDemo.demo, ownerDemo.catalog]);
+  const [demoCustomerCalendarSelected, setDemoCustomerCalendarSelected] = useState(false);
+  const [demoCalendarFocus, setDemoCalendarFocus] = useState<{ dateISO: string; timeHHMM: string; entryId: string; token: number }>();
+  const [demoInitialBusinessId, setDemoInitialBusinessId] = useState<string>();
+  const demoCalendarOwnerRef = useRef(adminAccess.userId);
+  useEffect(() => {
+    if (demoCalendarOwnerRef.current !== adminAccess.userId || goView.view !== "USER" || (!adminAccess.checking && !adminAccess.isOwner)) {
+      setDemoCustomerCalendarSelected(false); setDemoCalendarFocus(undefined); setDemoInitialBusinessId(undefined);
+    }
+    demoCalendarOwnerRef.current = adminAccess.userId;
+  }, [goView.view, adminAccess.userId, adminAccess.checking, adminAccess.isOwner]);
+  useEffect(() => {
+    if (!goSearchOpen || !goSearchSub || adminAccess.checking) { setGoSearchBusinesses([]); return; }
+    let active = true;
+    const query = demoBookingRepository ? demoBookingRepository.searchBusinesses(goSearchQuery) : getBusinesses();
+    void query.then(all => { if (active) setGoSearchBusinesses(all.filter(b => b.bookingActive !== false && b.category === goSearchSub.id)); })
+      .catch(() => { if (active) setGoSearchBusinesses([]); });
+    return () => { active = false; };
+  }, [goSearchOpen, goSearchSub?.id, demoBookingRepository, adminAccess.checking, demoBookingRepository ? goSearchQuery : null]);
+  // Visual selection never grants operational business permission.
+  const isBusinessMode = requestedBusinessMode && businessAccess.allowed && !adminAccess.checking && goView.view === "BUSINESS" && !goView.isBusinessPreview;
   const isUserMode = !isBusinessMode;
-  const fullLandingArchitecture = hasFullLandingArchitecture(adminAccess.allowed);
-  const isUserV1Surface = isUserV1Landing(isUserMode, adminAccess.allowed);
+  // Help follows the confirmed visual context; operational permissions remain separate.
+  const landingHelpReady = goView.loaded && !adminAccess.checking;
+  const showBusinessLandingHelp = landingHelpReady && goView.view === "BUSINESS" && (goView.isBusinessPreview || isBusinessMode);
+  const showPersonalLandingHelp = landingHelpReady && (goView.view === "USER" || goView.isAdminView);
+  const fullLandingArchitecture = hasFullLandingArchitecture(goView.isAdminView);
+  const isUserV1Surface = isUserV1Landing(isUserMode, goView.isAdminView);
 
   // ── CUENTA GO — tipo de rol/acceso del usuario ───────────────────────────
   // null = no configurado (primer acceso / "LOGIN")
@@ -2735,11 +2769,12 @@ function HomeScreenContent() {
   const [authBootstrapComplete, setAuthBootstrapComplete] = useState(false);
   const [adminDashOpen, setAdminDashOpen] = useState(false);
 
-  useEffect(() => { if (!adminAccess.allowed) setAdminDashOpen(false); }, [adminAccess.allowed]);
+  useEffect(() => { if (!goView.isAdminView && !adminAccess.checking) setAdminDashOpen(false); }, [goView.isAdminView, adminAccess.checking]);
   const handleOpenAdmin = async () => {
+    if (goView.isOwner) { await handleSelectOwnerView("ADMIN"); return; }
     if (await adminAccess.refresh()) {
       setGoAuthOpen(false);
-      setAdminDashOpen(true);
+      setTimeout(() => setAdminDashOpen(true), 350);
     }
   };
 
@@ -3011,6 +3046,9 @@ function HomeScreenContent() {
   const [modeOpen, setModeOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [goChatOpen, setGoChatOpen] = useState(false);
+  const [goChatListenRequest, setGoChatListenRequest] = useState<number | undefined>();
+  const goChatListenSequence = useRef(0);
+  const pendingCalendarGoListenRef = useRef(false);
   const pendingCalendarGoRef = useRef(false);
   const [aiDraft, setAiDraft] = useState("");
   const [aiListening, setAiListening] = useState(false);
@@ -3062,7 +3100,7 @@ function HomeScreenContent() {
   const [sortFeedbackVisible, setSortFeedbackVisible] = useState(false);
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [humanityOpen, setHumanityOpen] = useState(false);
-  useEffect(() => { if (!adminAccess.allowed) setHumanityOpen(false); }, [adminAccess.allowed]);
+  useEffect(() => { if (!goView.isAdminView && !adminAccess.checking) setHumanityOpen(false); }, [goView.isAdminView, adminAccess.checking]);
   const [initialMessagesContact, setInitialMessagesContact] = useState<{ name: string; phone: string } | null>(null);
   // ── RECORDATORIO (RECUÉRDAME) ────────────────────────────────────────────
   const [remindOpen, setRemindOpen] = useState(false);
@@ -3393,16 +3431,45 @@ function HomeScreenContent() {
   const { config: bCfg, loaded: bizLoaded, updateConfig: updateBizCfg } = useBusinessConfig();
   const [empresaOpen, setEmpresaOpenState] = useState(false);
   const setEmpresaOpen = (open: boolean) => {
-    if (open) setActiveMode("BUSINESS");
-    setEmpresaOpenState(open && businessAccess.allowed);
+    if (open && goView.isOwner && !goView.isBusinessPreview) { openOwnerContextSelector(); return; }
+    if (open && !goView.isBusinessPreview) setActiveMode("BUSINESS");
+    setEmpresaOpenState(open && (goView.isBusinessPreview || businessAccess.allowed));
   };
   const [empresaModulo, setEmpresaModulo] = useState<string>("home");
+  const ownerNavigationRevision = useRef(0);
+  useEffect(() => () => { ownerNavigationRevision.current++; }, []);
+  useEffect(() => { ownerNavigationRevision.current++; }, [adminAccess.userId]);
+  useEffect(() => {
+    if (!goView.isBusinessPreview && !businessAccess.allowed && !adminAccess.checking) setEmpresaOpenState(false);
+  }, [goView.isBusinessPreview, businessAccess.allowed, adminAccess.checking]);
+  const openOwnerContextSelector = () => {
+    ownerNavigationRevision.current++;
+    setAdminDashOpen(false); setEmpresaOpenState(false); setCuentaOpen(false);
+    setTimeout(() => setGoAuthOpen(true), 350);
+  };
+  const handleSelectOwnerView = async (next: GoView): Promise<boolean> => {
+    const revision = ++ownerNavigationRevision.current;
+    if (!await goView.selectOwnerView(next) || revision !== ownerNavigationRevision.current) return false;
+    // Keep session and drafts; dismiss only the previous context's panels.
+    setAdminDashOpen(false); setEmpresaOpenState(false); setHumanityOpen(false);
+    setOrbitSecondLevel(null); setOrbitSubIntentKey(null); setQrOpen(false); setCuentaOpen(false);
+    setGoAuthOpen(false);
+    if (next !== "USER") setTimeout(() => {
+      if (revision !== ownerNavigationRevision.current) return;
+      if (next === "ADMIN") setAdminDashOpen(true);
+      else { setEmpresaModulo("home"); setEmpresaOpenState(true); }
+    }, 350);
+    return true;
+  };
   const [activacionCobrosOpen, setActivacionCobrosOpen] = useState(false);
   const [activacionInitialScreen, setActivacionInitialScreen] = useState<1 | 2 | 3>(2);
   // Tracks completed setup steps (loaded from AsyncStorage) to drive satellite guidance
-  const [empresaSetupSteps, setEmpresaSetupSteps] = useState<number[]>([]);
+  const [storedEmpresaSetupSteps, setEmpresaSetupSteps] = useState<number[]>([]);
+  const empresaDemoSetup = ownerDemo.config ? getBusinessDemoSetupState(ownerDemo.config, ownerDemo.demo?.getSnapshot().plan) : null;
+  const empresaSetupSteps = goView.isBusinessPreview ? empresaDemoSetup?.steps.flatMap((done, index) => done ? [index] : []) ?? [] : storedEmpresaSetupSteps;
   // sectorId from setup state — truthy means empresa IS configured; suppresses all green onboarding UI
-  const [empresaSectorId, setEmpresaSectorId] = useState<string | null>(null);
+  const [storedEmpresaSectorId, setEmpresaSectorId] = useState<string | null>(null);
+  const empresaSectorId = goView.isBusinessPreview ? ownerDemo.config?.sectorId ?? null : storedEmpresaSectorId;
   // True once setup is complete and the "lista" message has been dismissed permanently
   const [empresaHelpDismissed, setEmpresaHelpDismissed] = useState(false);
 
@@ -3444,7 +3511,7 @@ function HomeScreenContent() {
   //   a) ActivacionCobrosScreen completó (isBusinessActive), O
   //   b) wizard 8/8 completado (completedSteps.length >= 8) — cubre installs
   //      existentes donde el seed guard impidió escribir isBusinessActive.
-  const empresaConfigurada = isBusinessMode && (
+  const empresaConfigurada = goView.isBusinessPreview ? ownerDemo.loaded && empresaDemoSetup?.ready === true : isBusinessMode && (
     bCfg.isBusinessActive ||
     (Array.isArray(bCfg.completedSteps) && bCfg.completedSteps.length >= 8)
   );
@@ -5944,11 +6011,12 @@ function HomeScreenContent() {
     setAiListening(false);
   };
 
-  const openAi = () => {
+  const openAi = (listenOnOpen = false) => {
     if (pendingCalendarGoRef.current) return;
     // iOS must finish dismissing Calendar before presenting the existing AI modal.
     if (calOpen) {
       pendingCalendarGoRef.current = true;
+      pendingCalendarGoListenRef.current = listenOnOpen;
       setCalOpen(false);
       return;
     }
@@ -5962,23 +6030,21 @@ function HomeScreenContent() {
       console.log("[time] AI open @", now.toISOString());
     }
     // GOChatScreen delegates to the integrated BookingAssistantScreen.
+    setGoChatListenRequest(listenOnOpen ? ++goChatListenSequence.current : undefined);
     setGoChatOpen(true);
     setAiDraft("");
     setAiOpen(false);
     setAiListening(false);
     aiDraftBaseRef.current = "";
-    // Auto-arranque del micrófono al abrir IA (estado "Escuchando…").
-    // Si el navegador/permiso no lo permite, el botón "Te escucho"
-    // queda disponible como fallback manual.
-    setTimeout(() => {
-      startIaListening();
-    }, 250);
+    // The current assistant consumes the central GO listening request on presentation.
   };
 
   const completeCalendarGoOpen = () => {
     if (!pendingCalendarGoRef.current) return;
     pendingCalendarGoRef.current = false;
-    openAi();
+    const listenOnOpen = pendingCalendarGoListenRef.current;
+    pendingCalendarGoListenRef.current = false;
+    openAi(listenOnOpen);
   };
   useEffect(() => {
     if (calOpen) return;
@@ -15708,7 +15774,7 @@ function HomeScreenContent() {
             <TouchableOpacity
               onPress={() => {
                 if (voiceActive) exitVoiceMode();
-                else openAi();
+                else openAi(true);
               }}
               onLongPress={() => {
                 if (!voiceActive) startVoiceMode();
@@ -16375,7 +16441,7 @@ function HomeScreenContent() {
                 if (voiceActive) {
                   exitVoiceMode();
                 } else if (isUserV1Surface && !aiOpen) {
-                  openAi();
+                  openAi(true);
                 } else if (reservasOrbitalOpen) {
                   if (reservasOrbitalCat !== null) {
                     if (reservasOrbitalPage > 0) { setReservasOrbitalPage(p => p - 1); }
@@ -18337,7 +18403,7 @@ function HomeScreenContent() {
           opacity: workGuideHideAnim,
         }}
       >
-        {isUserMode && orbitSecondLevel === null ? (
+        {showPersonalLandingHelp && orbitSecondLevel === null ? (
           // ── PARTICULAR ── Hasta 3 columnas inteligentes: desaparecen cuando el tutorial está completado
           (isUserV1Surface ? !tutReservaRealizada : (!tutGoRealizado || !tutReservaRealizada || !tutMarketplaceRealizado)) ? (
             <View style={{ flexDirection: "row", gap: 4, alignItems: "flex-start" }}>
@@ -18431,16 +18497,16 @@ function HomeScreenContent() {
               )}
             </View>
           ) : null
-        ) : isBusinessMode && !empresaConfigurada ? (
+        ) : showBusinessLandingHelp && !empresaConfigurada ? (
           // ── EMPRESA no configurada ── hint i18n
           <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 12, fontWeight: "700", letterSpacing: 1.0, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
             {t('biz_configure_hint')}
           </Text>
-        ) : isBusinessMode && empresaConfigurada && !workGuideDismissed ? (
+        ) : showBusinessLandingHelp && empresaConfigurada && !workGuideDismissed ? (
           // ── EMPRESA configurada ── hints de gestión empresarial i18n
           <View style={{ gap: 6 }}>
             <Text style={{ color: "rgba(255,255,255,0.92)", fontSize: 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-              {t('biz_manage_title')}
+              {goView.isBusinessPreview && ownerDemo.config?.businessName ? ownerDemo.config.businessName + ' · ' : ''}{t('biz_manage_title')}
             </Text>
             <Text style={{ color: "rgba(255,255,255,0.50)", fontSize: 10, fontWeight: "600", letterSpacing: 0.2, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
               {t('biz_add_services')}
@@ -19302,7 +19368,7 @@ function HomeScreenContent() {
           { id: "vip",          label: "VIP",          sub: "Acceso prioritario",          icon: "star",        color: "#fbbf24" },
           { id: "temporal",     label: "TEMPORAL",     sub: "Expira automáticamente",      icon: "clock",       color: "#f97316" },
           { id: "visita-unica", label: "VISITA ÚNICA", sub: "Válido una sola vez",         icon: "check-circle",color: "#ec4899" },
-          ...(adminAccess.allowed ? [{ id: "admin", label: "ADMIN", sub: "Solo cuentas autorizadas", icon: "settings", color: "#94a3b8" }] : []),
+          ...(goView.isAdminView ? [{ id: "admin", label: "ADMIN", sub: "Solo cuentas autorizadas", icon: "settings", color: "#94a3b8" }] : []),
         ];
         const generalUrl = "https://go.app/join";
         const makeUrl = (type: string) => `https://go.app/join?type=${type}&t=${Date.now()}`;
@@ -19591,9 +19657,10 @@ function HomeScreenContent() {
           etc.), por lo que cualquier valor seleccionado aquí se refleja
           en el flujo del GO sin reset alguno.
           ──────────────────────────────────────────────────────────── */}
-      {adminAccess.allowed && <GoAdminDashboard
+      {adminAccess.allowed && goView.isAdminView && <GoAdminDashboard
         visible={adminDashOpen}
         onClose={() => setAdminDashOpen(false)}
+        onOpenContext={goView.isOwner ? openOwnerContextSelector : undefined}
       />}
 
       {/* ── VERIFICACIÓN EMPRESA — subida de documentos y estado ──────── */}
@@ -19822,11 +19889,12 @@ function HomeScreenContent() {
           )}
           <Pressable onPress={() => setCalPanelOpen(false)} style={{ flex: 1 }}>
             {/* Header row: label izquierda + config toggle derecha */}
-            <View
+            {!demoCustomerCalendarSelected && (<View
               pointerEvents={showBookingFromCal ? "none" : "auto"}
               style={{ opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
             >
               <GoCalendarViewSelector value={calBgViewMode} onChange={changeCalendarView} />
+              {demoBookingRepository && <TouchableOpacity accessibilityRole="button" onPress={event => { event.stopPropagation(); setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{padding:8}}><Text style={{color:"#ff7474",fontSize:10,fontWeight:"700"}}>DEMO LOCAL</Text></TouchableOpacity>}
               <TouchableOpacity
                 onPress={(e) => { e.stopPropagation(); Haptics.selectionAsync(); setCalConfigVisible(true); }}
                 activeOpacity={0.7}
@@ -19836,11 +19904,13 @@ function HomeScreenContent() {
                 <Feather name={calConfigVisible ? "chevron-up" : "settings"} size={9} color="#ffffff" />
                 {!calConfigVisible && <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 8, fontWeight: "700", letterSpacing: 0.8 }}>CONFIG</Text>}
               </TouchableOpacity>
-            </View>
+            </View>)}
 
 
             <View testID="calendar-agenda-viewport" style={{ flex: 1, paddingBottom: 64 }}>
-            <AgendaBoard
+            {demoCustomerCalendarSelected ? (demoBookingRepository
+              ? <DemoCustomerCalendar repository={demoBookingRepository} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} />
+              : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
                 goLog={goLog.filter((e: any) => {
                   const id: string = e.id ?? "";
                   if (isUserMode     && id.startsWith("go_booking_prv_")) return false;
@@ -19995,7 +20065,7 @@ function HomeScreenContent() {
                     return next;
                   });
                 }}
-              />
+              />)}
             </View>
           </Pressable>
 
@@ -20026,7 +20096,7 @@ function HomeScreenContent() {
             testID="calendar-floating-controls"
             style={{ position: "absolute", right: Math.max(insets.right + 14, 14), bottom: overlayPanelHeight + 10, flexDirection: "row", alignItems: "center", gap: 8, zIndex: 30 }}
           >
-            <TouchableOpacity
+            {!demoCustomerCalendarSelected && (<TouchableOpacity
               onPress={() => {
                 Haptics.selectionAsync();
                 if (calFlow.isActive) {
@@ -20045,7 +20115,7 @@ function HomeScreenContent() {
               style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#0e0e10", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.60)", alignItems: "center", justifyContent: "center" }}
             >
               <Feather name="calendar" size={18} color="#ffffff" />
-            </TouchableOpacity>
+            </TouchableOpacity>)}
             {(calQuickCreateOpen || calConfigVisible) && (
               <GoCloseButton
                 level="panel"
@@ -20067,7 +20137,7 @@ function HomeScreenContent() {
           </View>}
 
           {/* ── ZONA INFERIOR — Selector de fecha/hora/duración ──────────── */}
-          <Pressable
+          {demoCustomerCalendarSelected ? <View style={{paddingHorizontal:16,paddingBottom:Math.max(insets.bottom,12),paddingTop:8,backgroundColor:"#0e0e14"}}><TouchableOpacity accessibilityRole="button" onPress={() => { setDemoInitialBusinessId(undefined); setShowBookingFromCal(true); }} style={{padding:12,borderRadius:12,backgroundColor:"#284d42"}}><Text style={{color:"#ffffff",fontWeight:"700",textAlign:"center"}}>{lang === "en" ? "New reservation · LOCAL DEMO" : "Nueva reserva · DEMO LOCAL"}</Text></TouchableOpacity></View> : (<Pressable
             style={[styles.sheet, { paddingBottom: isBusinessMode ? Math.max(paddingBottom - 22, 2) : Math.max(paddingBottom - 10, 0) }]}
             onPress={(e) => e.stopPropagation()}
             onLayout={(e) => {
@@ -20468,7 +20538,7 @@ function HomeScreenContent() {
               </>
             )}
 
-          </Pressable>
+          </Pressable>)}
 
         {/* ── MONTH GRID BOTTOM SHEET — slide up desde abajo ─────────────
             Se monta dentro del mismo Modal del calendario para heredar
@@ -20710,8 +20780,18 @@ function HomeScreenContent() {
 
         {/* ── GO BOOKING — búsqueda de proveedor y reserva ──────────── */}
         <BookingSearchOverlay
-          visible={showBookingFromCal}
-          onClose={() => setShowBookingFromCal(false)}
+          key={demoBookingRepository ? "demo_" + demoBookingRepository.ownerUserId : "real"}
+          visible={showBookingFromCal && !adminAccess.checking && (!demoInitialBusinessId || !!demoBookingRepository)}
+          demoRepository={demoBookingRepository}
+          initialBusinessId={demoInitialBusinessId}
+          onDemoGoToBooking={(dateISO, timeHHMM, entryId) => {
+            setShowBookingFromCal(false);
+            setDemoCalendarFocus({ dateISO, timeHHMM, entryId, token: Date.now() });
+            setDemoCustomerCalendarSelected(true);
+            setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid();
+            setCalOpen(true);
+          }}
+          onClose={() => { setShowBookingFromCal(false); setDemoInitialBusinessId(undefined); }}
           onDismissAll={() => {
             // Paso 1: cerrar el modal interior (BookingSearchOverlay) inmediatamente.
             // Como usa animationType="none", se desmonta en el siguiente frame.
@@ -20735,6 +20815,7 @@ function HomeScreenContent() {
             setCalHighlightEntryId(entryId);
           }}
           onBookingConfirmed={async (booking, biz, item, confirmedProfessionalName) => {
+            if (demoBookingRepository) return; // DEMO never writes tutorial, personal agenda or live booking keys.
             console.log("[ON_BOOKING_CONFIRMED_ENTER]", {
               timestamp: new Date().toISOString(),
               bookingId: booking?.id,
@@ -23968,6 +24049,7 @@ function HomeScreenContent() {
       {/* GO CHAT SCREEN — asistente de reservas V1 */}
       <GOChatScreen
         visible={goChatOpen}
+        listenRequest={goChatListenRequest}
         uiScale={uiScale}
         handedness={handedness}
         onHandednessChange={(value) => { setHandedness(value); AsyncStorage.setItem("go_handedness_v1", value).catch(() => {}); }}
@@ -25808,7 +25890,7 @@ function HomeScreenContent() {
           elevation: 24,
         };
         const allResults = goSearchBusinesses
-          .filter(b => !goSearchQuery || b.name.toLowerCase().includes(goSearchQuery.toLowerCase()))
+          .filter(b => !!demoBookingRepository || !goSearchQuery || b.name.toLowerCase().includes(goSearchQuery.toLowerCase()))
           .map(b => ({
             id: b.id,
             name: b.name,
@@ -25878,6 +25960,12 @@ function HomeScreenContent() {
                         setReservasOrbitalOpen(false);
                         setReservasOrbitalCat(null);
                         setReservasOrbitalPage(0);
+                        if (demoBookingRepository) {
+                          setDemoInitialBusinessId(provider.id);
+                          setCalOpen(true);
+                          setShowBookingFromCal(true);
+                          return;
+                        }
                         if (sub) {
                           setGoProveedorData({
                             name: provider.name,
@@ -26024,7 +26112,7 @@ function HomeScreenContent() {
       />
 
       {/* ── EMPRESA GO — Arquitectura económica completa ──────────────── */}
-      {businessAccess.allowed && <EmpresaPanel
+      {businessAccess.allowed && !goView.isOwner && goView.view === "BUSINESS" && !adminAccess.checking && <EmpresaPanel
         visible={empresaOpen}
         initialModulo={empresaModulo as any}
         onClose={() => { setEmpresaOpen(false); setEmpresaModulo("home"); }}
@@ -26048,10 +26136,15 @@ function HomeScreenContent() {
         }}
       />}
 
+      {goView.isBusinessPreview && <GoBusinessPreviewProvider>
+        <EmpresaPanel key={ownerDemo.demo?.businessId} visible={empresaOpen} previewReadOnly initialModulo="home"
+          onClose={() => setEmpresaOpenState(false)} onOpenContext={openOwnerContextSelector} />
+      </GoBusinessPreviewProvider>}
+
       {/* ── ACTIVACIÓN COBROS — se renderiza aquí (nivel raíz) para evitar
           el problema de Modales anidados en iOS/Expo 54. Se muestra tras
           completar el wizard de 8 pasos de EmpresaConfigScreen. ── */}
-      {businessAccess.allowed && <ActivacionCobrosScreen
+      {businessAccess.allowed && !goView.isOwner && goView.view === "BUSINESS" && !adminAccess.checking && <ActivacionCobrosScreen
         visible={activacionCobrosOpen}
         initialScreen={activacionInitialScreen}
         onClose={() => {
@@ -26392,7 +26485,7 @@ function HomeScreenContent() {
       }}
       userAccountType={userAccountType}
       onSetAccountType={commitAccountType}
-      onSwitchContext={() => { setGoAuthOpen(false); setActiveMode(isBusinessMode ? "USER" : "BUSINESS"); }}
+      onSwitchContext={() => { if (goView.isOwner || adminAccess.checking) return; setGoAuthOpen(false); setActiveMode(isBusinessMode ? "USER" : "BUSINESS"); }}
       onOpenPerfil={() => { setGoAuthOpen(false); setCuentaOpen(true); }}
       onOpenEmpresa={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
       verification={{ ...verification, status: businessAccess.snapshot?.status === "verificada" ? "verified"
@@ -26400,6 +26493,7 @@ function HomeScreenContent() {
         : businessAccess.snapshot?.status === "pendiente_verificacion" ? "pending" : "none" }}
       onOpenVerificacion={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
       onOpenAdmin={handleOpenAdmin}
+      onSelectOwnerView={handleSelectOwnerView}
     />
     </>
   );

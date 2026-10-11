@@ -6,6 +6,7 @@ import {
   getAuthenticatedUserId,
   getMyBookings,
 } from "@/data/booking";
+import type { DemoBookingRepository } from "@/data/demoBookingRepository";
 
 function formatBookingDate(booking: Booking): string {
   const date = booking.startDatetime.slice(0, 10);
@@ -28,7 +29,7 @@ function statusLabel(status: Booking["status"]): string {
   }
 }
 
-export function MyBookingsList({ visible }: { visible: boolean }) {
+export function MyBookingsList({ visible, demoRepository }: { visible: boolean; demoRepository?: DemoBookingRepository }) {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -36,8 +37,8 @@ export function MyBookingsList({ visible }: { visible: boolean }) {
     if (!visible) return;
     let cancelled = false;
     setLoading(true);
-    (async () => {
-      const customerId = await getAuthenticatedUserId();
+    const refresh = async () => {
+      const customerId = demoRepository ? demoRepository.ownerUserId : await getAuthenticatedUserId();
       if (!customerId) {
         if (!cancelled) {
           setBookings([]);
@@ -46,21 +47,19 @@ export function MyBookingsList({ visible }: { visible: boolean }) {
         return;
       }
       try {
-        const result = await getMyBookings(customerId);
+        const result = await (demoRepository ? demoRepository.getMyBookings(customerId) : getMyBookings(customerId));
         if (!cancelled) setBookings(result.slice(0, 3));
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })().catch(() => {
-      if (!cancelled) {
-        setBookings([]);
-        setLoading(false);
-      }
-    });
-    return () => {
-      cancelled = true;
     };
-  }, [visible]);
+    const safeRefresh = () => { void refresh().catch(() => {
+      if (!cancelled) { setBookings([]); setLoading(false); }
+    }); };
+    safeRefresh();
+    const unsubscribe = demoRepository?.store.subscribe(safeRefresh);
+    return () => { cancelled = true; unsubscribe?.(); };
+  }, [visible, demoRepository]);
 
   if (!visible || (!loading && bookings.length === 0)) return null;
 
