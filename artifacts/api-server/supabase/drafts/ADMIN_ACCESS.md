@@ -2,11 +2,11 @@
 
 ## Status and deployment prerequisites
 
-`admin_memberships.sql` is an **unapplied draft**, not a registered migration. No accounts have been assigned privileges. The Supabase CLI and a local PostgreSQL runtime are unavailable in this environment, so database execution/RLS tests remain pending.
+This document originally described the preparation stage. The SQL source remains here for review and recovery; this directory name does not establish the current state of any database. The 2026-10-12 consolidation does not apply SQL, activate accounts, or query the real deployment. See docs/GO_V1_CONSOLIDACION_2026-10-12.md for the current local validation and its limits.
 
 Before any deployment, inspect the target schema, register the approved draft with `supabase migration new admin_memberships`, and execute it in an isolated Supabase database. Do not deploy this backend without the schema: missing tables deny administrative access. The draft deliberately fails on existing object names rather than assuming compatibility or overwriting objects. It creates tables, policies, functions and a private schema; it does not alter profiles, auth identities, businesses or existing policies.
 
-`admin_memberships.test.sql` prepares rollback-only isolated database checks with generated fixture UUIDs and an explicit isolated-environment opt-in. It has **not** been executed here. Also validate with separate real test Usuario/Empresa identities: own-membership SELECT only; no direct INSERT/UPDATE/DELETE; anonymous RPC denied; normal/technical membership RPC denied; owner grants/modifies/revokes technical membership; owner target always rejected; revoked access denied with the same JWT; audit records retained. HTTP tests use mocked Supabase responses and do not replace database checks.
+`admin_memberships.test.sql` prepares rollback-only isolated database checks with generated fixture UUIDs and an explicit isolated-environment opt-in. The consolidation does not rerun these database tests; historical PostgreSQL checks do not substitute for Supabase deployment verification. Also validate with separate real test Usuario/Empresa identities: own-membership SELECT only; no direct INSERT/UPDATE/DELETE; anonymous RPC denied; normal/technical membership RPC denied; owner grants/modifies/revokes technical membership; owner target always rejected; revoked access denied with the same JWT; audit records retained. HTTP tests use mocked Supabase responses and do not replace database checks.
 
 Security references reviewed: [Supabase database functions](https://supabase.com/docs/guides/database/functions) and [RLS](https://supabase.com/docs/guides/database/postgres/row-level-security).
 

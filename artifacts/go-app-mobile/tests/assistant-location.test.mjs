@@ -173,6 +173,7 @@ function screenFixture(panel = null, size = "estandar", position = "right") {
     "@workspace/api-zod": model, "@/lib/bookingAssistant": {}, "@/hooks/useBookingAssistant": { useBookingAssistant: () => a },
     "@/hooks/useGoActions": { useGoActions: () => ({ active: "task", choices: [], manager: { state: null }, dispatch: async (...args) => dispatched.push(args) }) },
     "@/hooks/useBookingVoice": { useBookingVoice: () => voice }, "./BookingAssistantPanels": panels, "./BookingAssistantUI": ui,
+    "./ListeningIndicator": { ListeningIndicator: "ListeningIndicator", listeningPlacement: () => null },
   });
   const mount = () => effects.splice(0).forEach(fn => fn());
   const render = (visible = true, listenRequest) => {

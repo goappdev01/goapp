@@ -35,23 +35,24 @@ test('combined route registry preserves ADMIN authorization and the AI /plan end
   delete process.env.OPENAI_API_KEY;
   process.env.SUPABASE_URL = 'https://integration-test.invalid';
   process.env.SUPABASE_PUBLISHABLE_KEY = 'test-public';
-  let role = 'usuario', upstreamCalls = 0;
+  let membership = null, upstreamCalls = 0;
   globalThis.fetch = async (url, init) => {
     const parsed = new URL(url);
     assert.equal(parsed.origin, 'https://integration-test.invalid', 'no live upstream is contacted');
     assert.equal(init.headers.Authorization, 'Bearer test-token');
     upstreamCalls++;
     if (parsed.pathname === '/auth/v1/user') return Response.json({ id, user_metadata: { role: 'admin' } });
-    assert.equal(parsed.pathname, '/rest/v1/profiles');
-    assert.equal(parsed.searchParams.get('id'), 'eq.' + id);
-    return Response.json([{ id, role }]);
+    assert.equal(parsed.pathname, '/rest/v1/admin_memberships');
+    assert.equal(parsed.searchParams.get('user_id'), 'eq.' + id);
+    assert.equal(parsed.searchParams.get('select'), 'user_id,level,permissions,active');
+    return Response.json(membership ? [membership] : []);
   };
   const base = 'http://127.0.0.1:' + server.address().port + '/api';
   try {
     assert.equal((await realFetch(base + '/supabase/admin/access')).status, 401);
     const authorized = () => realFetch(base + '/supabase/admin/access', { headers: { Authorization: 'Bearer test-token' } });
     assert.equal((await authorized()).status, 403, 'editable metadata does not grant ADMIN');
-    role = 'admin';
+    membership = { user_id: id, level: 'owner', permissions: [], active: true };
     assert.equal((await authorized()).status, 200);
     const previousCalls = upstreamCalls;
     const response = await realFetch(base + '/booking-assistant/plan', {

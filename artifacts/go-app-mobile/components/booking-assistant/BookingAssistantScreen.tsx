@@ -34,6 +34,7 @@ import {
 } from "@/hooks/useBookingAssistant";
 import { useGoActions } from "@/hooks/useGoActions";
 import { useBookingVoice } from "@/hooks/useBookingVoice";
+import { ListeningIndicator, listeningPlacement } from "./ListeningIndicator";
 import { BookingAssistantPanels } from "./BookingAssistantPanels";
 import {
   Action,
@@ -83,6 +84,8 @@ export function BookingAssistantScreen({
   const [slotCount, setSlotCount] = useState(8);
   const hydrated = useRef(false);
   const scroll = useRef<ScrollView>(null);
+  const [conversationLayout, setConversationLayout] = useState({ width: 0, height: 0 });
+  const [conversationMeasurement, setConversationMeasurement] = useState({ height: 0, messages: -1 });
   const voice = useBookingVoice((text, isZone) => {
     if (isZone) {
       a.setPlaceQuery(text);
@@ -234,6 +237,9 @@ export function BookingAssistantScreen({
     });
   }
   const listening = voice.status === "listening";
+  const indicatorActive = visible && listening && !voice.error && !a.busy && !a.panel;
+  const indicatorPlacement = conversationMeasurement.messages === a.messages.length
+    ? listeningPlacement(conversationLayout.width, conversationLayout.height, conversationMeasurement.height, keyboardVisible) : null;
   const voiceText = listening
     ? voice.transcript || "GO está escuchando… Toca GO para terminar."
     : voice.status === "preparing"
@@ -355,6 +361,10 @@ export function BookingAssistantScreen({
           behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
           <View style={{ flex: 1 }} onLayout={event => setViewport(event.nativeEvent.layout)}>
+          <View testID="assistant-conversation-viewport" style={{ flex: 1 }} onLayout={event => {
+            const { width, height } = event.nativeEvent.layout;
+            setConversationLayout(previous => previous.width === width && previous.height === height ? previous : { width, height });
+          }}>
           <ScrollView
             ref={scroll}
             style={{ flex: 1 }}
@@ -373,6 +383,11 @@ export function BookingAssistantScreen({
               if (followEnd.current) scroll.current?.scrollToEnd({ animated: true });
             }}
           >
+            <View testID="assistant-conversation-content" style={{ gap: s.conversation.gap }} onLayout={event => {
+              const height = event.nativeEvent.layout.height + s.conversation.padding + s.conversation.paddingBottom;
+              setConversationMeasurement(previous => previous.height === height && previous.messages === a.messages.length
+                ? previous : { height, messages: a.messages.length });
+            }}>
             {a.messages.map((message) => (
               <View
                 key={message.id}
@@ -649,12 +664,20 @@ export function BookingAssistantScreen({
               </View>
             )}
             </>}
+            </View>
           </ScrollView>
+          {indicatorPlacement && (
+            <View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, top: indicatorPlacement.top, alignItems: "center" }}>
+              <ListeningIndicator active={indicatorActive} diameter={indicatorPlacement.diameter} />
+            </View>
+          )}
+          </View>
           {!!(a.busy || voiceText || a.notice || voice.error) && (
             <View style={s.status} accessibilityLiveRegion="polite">
+              {!indicatorPlacement && <ListeningIndicator active={indicatorActive} compact />}
               {!!a.busy && <ActivityIndicator size="small" color="#174D3C" />}
               <Text style={s.statusText}>
-                {a.busy || voiceText || voice.error || a.notice}
+                {a.busy || voice.error || (indicatorActive && !indicatorPlacement ? "Habla" : voiceText) || a.notice}
               </Text>
             </View>
           )}
