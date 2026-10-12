@@ -41,6 +41,8 @@ interface DraggableFABProps {
   initialBottom?: number;
   initialTop?: number;
   maxH?: number;
+  bounds?: { width: number; height: number };
+  buttonWidth?: number;
   children: React.ReactNode;
 }
 
@@ -51,14 +53,16 @@ export function DraggableFAB({
   initialBottom,
   initialTop,
   maxH = FAB_BTN,
+  bounds,
+  buttonWidth = FAB_BTN,
   children,
 }: DraggableFABProps) {
-  const { width: SW, height: SH } = Dimensions.get("window");
+  const { width: SW, height: SH } = bounds || Dimensions.get("window");
   const insets = useSafeAreaInsets();
   const storageKey = `fab_pos:${screenKey}:${buttonKey}`;
 
   // ── Compute initial (left, top) ──────────────────────────────────────────
-  const initLeft = SW - initialRight - FAB_BTN;
+  const initLeft = SW - initialRight - buttonWidth;
   const initTop =
     initialTop !== undefined
       ? initialTop
@@ -74,12 +78,13 @@ export function DraggableFAB({
   const scale = useSharedValue(1);
   const shadowOp = useSharedValue(0.18);
   const isDragging = useSharedValue(false);
+  const hasDragged = useSharedValue(false);
 
   // ── Safe area clamp bounds ───────────────────────────────────────────────
-  const minL = insets.left + EDGE;
-  const maxL = SW - insets.right - EDGE - FAB_BTN;
-  const minT = insets.top + EDGE;
-  const maxT = SH - insets.bottom - EDGE - maxH;
+  const minL = (bounds ? 0 : insets.left) + EDGE;
+  const maxL = Math.max(minL, SW - (bounds ? 0 : insets.right) - EDGE - buttonWidth);
+  const minT = (bounds ? 0 : insets.top) + EDGE;
+  const maxT = Math.max(minT, SH - (bounds ? 0 : insets.bottom) - EDGE - maxH);
 
   // ── Persist ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -87,17 +92,24 @@ export function DraggableFAB({
       if (!raw) return;
       try {
         const { l, t } = JSON.parse(raw) as { l: number; t: number };
-        posL.value = Math.max(minL, Math.min(maxL, l));
-        posT.value = Math.max(minT, Math.min(maxT, t));
+        if (!Number.isFinite(l) || !Number.isFinite(t) || hasDragged.value) return;
+        posL.value = bounds ? l : Math.max(minL, Math.min(maxL, l));
+        posT.value = bounds ? t : Math.max(minT, Math.min(maxT, t));
       } catch {
         // ignore corrupt data
       }
-    });
+    }).catch(() => console.info("[fab-preference]", { code: "READ_FAILED" }));
   }, [storageKey]);
+
+  useEffect(() => {
+    if (bounds) return; // Keep the chosen position while the keyboard temporarily clamps its display.
+    posL.value = Math.max(minL, Math.min(maxL, posL.value));
+    posT.value = Math.max(minT, Math.min(maxT, posT.value));
+  }, [minL, maxL, minT, maxT]);
 
   const savePos = useCallback(
     (l: number, t: number) => {
-      AsyncStorage.setItem(storageKey, JSON.stringify({ l, t }));
+      AsyncStorage.setItem(storageKey, JSON.stringify({ l, t })).catch(() => console.info("[fab-preference]", { code: "WRITE_FAILED" }));
     },
     [storageKey]
   );
@@ -107,11 +119,12 @@ export function DraggableFAB({
     () =>
       Gesture.Pan()
         .activateAfterLongPress(500)
-        .onStart(() => {
+        .onStart((event) => {
           "worklet";
           isDragging.value = true;
-          startL.value = posL.value;
-          startT.value = posT.value;
+          hasDragged.value = true;
+          startL.value = Math.max(minL, Math.min(maxL, posL.value)) - event.translationX;
+          startT.value = Math.max(minT, Math.min(maxT, posT.value)) - event.translationY;
           scale.value = withSpring(1.1, { damping: 10, stiffness: 180 });
           shadowOp.value = 0.42;
           runOnJS(Haptics.selectionAsync)();
@@ -140,8 +153,8 @@ export function DraggableFAB({
 
   // ── Animated style ───────────────────────────────────────────────────────
   const animStyle = useAnimatedStyle(() => ({
-    left: posL.value,
-    top: posT.value,
+    left: bounds ? Math.max(minL, Math.min(maxL, posL.value)) : posL.value,
+    top: bounds ? Math.max(minT, Math.min(maxT, posT.value)) : posT.value,
     transform: [{ scale: scale.value }],
     zIndex: isDragging.value ? 300 : 99,
     shadowOpacity: shadowOp.value,

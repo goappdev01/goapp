@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   View,
   Text,
-  Modal,
   PanResponder,
   ScrollView,
   TouchableOpacity,
@@ -13,6 +12,7 @@ import {
   Dimensions,
   Alert,
 } from "react-native";
+import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import { DraggableFAB } from "../DraggableFAB";
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
@@ -21,7 +21,13 @@ import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getGuidanceConfig, swipeGuideMaxOpacity } from "@/utils/guidance";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
+import { DemoCompanyManager } from "./DemoCompanyManager";
+import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
+import { useGoView } from "@/contexts/GoViewContext";
+import { getBusinessDemoSetupState } from "@/data/businessDemoStore";
+import { isBusinessPreviewModule } from "@/data/businessPreviewPolicy";
 
 import { PlanScreen }        from "./PlanScreen";
 import { OrbitasScreen }     from "./OrbitasScreen";
@@ -40,7 +46,7 @@ import { AgendaScreen }           from "@/components/agenda/AgendaScreen";
 import { OperativoScreen }        from "@/components/visitas/OperativoScreen";
 import { useVerification }   from "@/hooks/useVerification";
 import { VerifGateScreen }   from "@/components/auth/VerifGate";
-import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
+import { GoReservasConfigScreen, GoReservasDemoScreen } from "@/components/booking/GoReservasConfigScreen";
 import { GoDeportesScreen }       from "@/components/booking/GoDeportesScreen";
 import { EmpresaConfigScreen }    from "@/components/empresa/EmpresaConfigScreen";
 import { ActivacionCobrosScreen }  from "@/components/empresa/ActivacionCobrosScreen";
@@ -79,17 +85,17 @@ interface ModuloDef {
 }
 
 const getModulos = (t: (k: import("@/i18n/translations").TranslationKey) => string): ModuloDef[] => [
-  { key: "empresa_config",  label: "Set up business",             icon: "sliders",   color: "#4A80BD", desc: "8-step guided wizard to configure your business" },
-  { key: "reservas_config", label: t('mod_booking_label'),        icon: "calendar",  color: "#3D9A84", desc: "Floor plan + calendar · real-time bookings" },
+  { key: "empresa_config",  label: t("biz_panel_setup"),             icon: "sliders",   color: "#4A80BD", desc: t("biz_panel_setup_desc") },
+  { key: "reservas_config", label: t('mod_booking_label'),        icon: "calendar",  color: "#3D9A84", desc: t("biz_panel_booking_desc") },
   { key: "contactos",      label: t('mod_contactos_label'),      icon: "users",     color: "#3D9A84", desc: t('mod_contactos_desc')       },
   { key: "intenciones",    label: t('mod_intenciones_label'),    icon: "target",    color: "#7C69BE", desc: t('mod_intenciones_desc')     },
   { key: "disponibilidad", label: t('mod_disponibilidad_label'), icon: "send",      color: "#4A80BD", desc: t('mod_disponibilidad_desc')  },
   { key: "interpretacion", label: t('mod_interpretacion_label'), icon: "zap",       color: "#C4883A", desc: t('mod_interpretacion_desc')  },
   { key: "agenda",         label: t('mod_agenda_label'),         icon: "map",       color: "#3D9A84", desc: t('mod_agenda_desc')          },
   { key: "operativo",      label: t('mod_operativo_label'),      icon: "activity",  color: "#3D9A84", desc: t('mod_operativo_desc')       },
-  { key: "suscripcion",    label: "Suscripción GO Empresa",      icon: "credit-card",color: "#3D9A84", desc: "Plan, facturación y pago a la plataforma GO" },
+  { key: "suscripcion",    label: t("biz_panel_subscription"),      icon: "credit-card",color: "#3D9A84", desc: t("biz_panel_subscription_desc") },
   { key: "plan",           label: t('mod_plan_label'),           icon: "star",      color: "#C4883A", desc: t('mod_plan_desc')            },
-  { key: "orbitas",        label: "Módulos GO",                  icon: "layers",    color: "#7C69BE", desc: t('mod_orbitas_desc'),         badge: "7" },
+  { key: "orbitas",        label: t("biz_panel_module_label"),                  icon: "layers",    color: "#7C69BE", desc: t('mod_orbitas_desc'),         badge: "7" },
   { key: "facturacion",    label: t('mod_facturacion_label'),    icon: "file-text", color: "#4A80BD", desc: t('mod_facturacion_desc'),     badge: "1" },
   { key: "consumo",        label: t('mod_consumo_label'),        icon: "bar-chart-2",color: "#C97040",desc: t('mod_consumo_desc')         },
   { key: "zonas",          label: t('mod_zonas_label'),          icon: "map-pin",   color: "#C4883A", desc: t('mod_zonas_desc')           },
@@ -112,13 +118,13 @@ type SuiteDef = {
   modules: ModuloKey[];
 };
 
-const SUITES: SuiteDef[] = [
+const getSuites = (t: (key: import("@/i18n/translations").TranslationKey) => string): SuiteDef[] => [
   {
     key: "reservas",
     label: "GO Reservas",
     icon: "calendar",
     color: "#3D9A84",
-    desc: "Booking configuration and real-time operations",
+    desc: t("biz_suite_bookings_desc"),
     modules: ["empresa_config", "reservas_config"],
   },
   {
@@ -126,7 +132,7 @@ const SUITES: SuiteDef[] = [
     label: "GO Rutas",
     icon: "navigation",
     color: "#4A80BD",
-    desc: "Visits, routes and field agenda",
+    desc: t("biz_suite_routes_desc"),
     modules: ["agenda", "operativo", "zonas", "disponibilidad"],
   },
   {
@@ -134,7 +140,7 @@ const SUITES: SuiteDef[] = [
     label: "GO IA",
     icon: "cpu",
     color: "#7C69BE",
-    desc: "Interpretación, sugerencias y automatizaciones",
+    desc: t("biz_suite_ai_desc"),
     modules: ["interpretacion", "sugerencias", "intenciones"],
   },
   {
@@ -142,7 +148,7 @@ const SUITES: SuiteDef[] = [
     label: "GO Negocio",
     icon: "briefcase",
     color: "#C4883A",
-    desc: "Pagos, suscripción y módulos contratados",
+    desc: t("biz_suite_business_desc"),
     modules: ["suscripcion", "plan", "orbitas", "facturacion", "consumo", "partners", "publicidad"],
   },
   {
@@ -150,7 +156,7 @@ const SUITES: SuiteDef[] = [
     label: "GO Empresa",
     icon: "shield",
     color: "#C25A5A",
-    desc: "Administración, contactos y verificación",
+    desc: t("biz_suite_admin_desc"),
     modules: ["admin", "contactos"],
   },
 ];
@@ -245,6 +251,9 @@ interface EmpresaPanelProps {
    *  Si se proporciona, ActivacionCobrosScreen se renderiza desde el caller
    *  (fuera de este Modal) para evitar el problema de Modales anidados en iOS. */
   onFinalizarWizard?: () => void;
+  /** Owner-only isolated context; configuration/bookings use the DEMO adapter when available. */
+  previewReadOnly?: boolean;
+  onOpenContext?: () => void;
 }
 
 // Modules that require Empresa Verificada to access.
@@ -258,54 +267,43 @@ const GATED_MODULES = new Set<ModuloKey>([
   "operativo",    // panel operativo real
 ]);
 
-const GATE_LABELS: Partial<Record<ModuloKey, { feature: string; desc: string }>> = {
-  facturacion: { feature: "Facturación y cobros",    desc: "Genera facturas reales y procesa cobros de clientes." },
-  admin:       { feature: "Administración",           desc: "Gestiona precios, límites y configuración avanzada." },
-  partners:    { feature: "Partners y marketplace",   desc: "Conecta con partners y publica en el marketplace GO." },
-  publicidad:  { feature: "Publicidad y publicación", desc: "Publica tu empresa y servicios de forma visible en GO." },
-  sugerencias: { feature: "Automatizaciones",         desc: "Activa flujos automáticos y acciones avanzadas." },
-  operativo:   { feature: "Panel operativo",          desc: "Accede a métricas y paneles de operación en tiempo real." },
-};
+const getGateLabels = (t: (key: import("@/i18n/translations").TranslationKey) => string): Partial<Record<ModuloKey, { feature: string; desc: string }>> => ({
+  facturacion: { feature: t("biz_gate_billing"),    desc: t("biz_gate_billing_desc") },
+  admin:       { feature: t("biz_gate_admin"),           desc: t("biz_gate_admin_desc") },
+  partners:    { feature: t("biz_gate_partners"),   desc: t("biz_gate_partners_desc") },
+  publicidad:  { feature: t("biz_gate_publication"), desc: t("biz_gate_publication_desc") },
+  sugerencias: { feature: t("biz_gate_automation"),         desc: t("biz_gate_automation_desc") },
+  operativo:   { feature: t("biz_gate_operations"),          desc: t("biz_gate_operations_desc") },
+});
 
 // ─── Config progress helper ────────────────────────────────────────────────────
 
-function computeConfigProgress(cfg: typeof import("@/contexts/GoBusinessConfigContext").DEFAULT_BUSINESS_CONFIG) {
-  const done = new Set<number>(Array.isArray(cfg.completedSteps) ? cfg.completedSteps : []);
-  // Data-driven overrides: steps we can determine from existing data
-  if (cfg.businessName?.trim())        done.add(0);
-  if (cfg.address?.trim())             done.add(1);
-  if (cfg.plantillaItems?.length > 0)  done.add(3);
-  if (cfg.services?.length > 0)        done.add(4);
-  if (cfg.bookingEnabled)              done.add(7);
-
-  const ALL_STEPS = [0, 1, 2, 3, 4, 5, 6, 7];
-  const completed = ALL_STEPS.filter(i => done.has(i)).length;
-  const total     = ALL_STEPS.length;
-  // Next pending step (first gap), or -1 if all done
-  const nextStep  = ALL_STEPS.find(i => !done.has(i)) ?? -1;
-
-  let statusColor: string;
-  let statusDot:   string;
-  if (completed === total) {
-    statusColor = "#3D9A84";
-    statusDot   = "🟢";
-  } else if (completed >= 4) {
-    statusColor = "#F59E0B";
-    statusDot   = "🟡";
-  } else {
-    statusColor = "#EF4444";
-    statusDot   = "🔴";
-  }
-
-  return { completed, total, nextStep, statusColor, statusDot };
+function computeConfigProgress(cfg: typeof import("@/contexts/GoBusinessConfigContext").DEFAULT_BUSINESS_CONFIG, plan?: import("@/data/floorPlan").FloorPlan | null) {
+  const progress = getBusinessDemoSetupState(cfg, plan);
+  const statusColor = progress.ready ? "#3D9A84" : progress.completed >= 4 ? "#F59E0B" : "#EF4444";
+  const statusDot = progress.ready ? "🟢" : progress.completed >= 4 ? "🟡" : "🔴";
+  return { ...progress, statusColor, statusDot };
 }
 
-export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, guidanceLevel = 5, onOpenVerificacion, onFinalizarWizard }: EmpresaPanelProps) {
+export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, guidanceLevel = 5, onOpenVerificacion, onFinalizarWizard, previewReadOnly = false, onOpenContext }: EmpresaPanelProps) {
   const insets  = useSafeAreaInsets();
-  const { lang, t } = useLanguage();
-  const { config: businessConfig, updateConfig, resetConfig } = useBusinessConfig();
+  const { t, locale, lang } = useLanguage();
+  const SUITES = useMemo(() => getSuites(t), [t]);
+  const GATE_LABELS = useMemo(() => getGateLabels(t), [t]);
+  const adminAccess = useAdminAccess();
+  const { isBusinessPreview, isAdminView, isOwner } = useGoView();
+  const preview = previewReadOnly && isBusinessPreview;
+  const panelVisible = visible && (!previewReadOnly || isBusinessPreview);
+  const canOpenAdmin = !previewReadOnly && isAdminView && adminAccess.allowed;
+  const { config: businessConfig, updateConfig, resetConfig, demo: businessDemo } = useBusinessConfig();
+  const demo = preview && Boolean(businessDemo);
+  const { locationReturn, clearLocationReturn } = useOwnerBusinessDemo();
+  const closePanel = () => { if (demo) clearLocationReturn(); onClose(); };
+  const demoTitle = lang === "en" ? "Business DEMO · local data" : "Empresa DEMO · datos locales";
+  const showPreviewUnavailable = () => Alert.alert(demo ? demoTitle : t("biz_preview_title"),
+    demo ? (lang === "en" ? "This module has no isolated DEMO adapter yet." : "Este módulo todavía no dispone de un adaptador DEMO aislado.") : t("biz_preview_unavailable"));
   const verification = useVerification();
-  const [modulo, setModulo] = useState<ModuloKey>("home");
+  const [modulo, setModulo] = useState<ModuloKey>(() => demo && locationReturn ? "empresa_config" : "home");
   const slideAnim = useRef(new Animated.Value(0)).current;
 
   const guidanceCfg = useMemo(() => getGuidanceConfig(guidanceLevel), [guidanceLevel]);
@@ -319,17 +317,21 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   const [activacionVisible,  setActivacionVisible]  = useState(false);
   // Clave que cambia con cada «Nueva empresa» — fuerza remontaje limpio del wizard
   const [newEmpresaKey, setNewEmpresaKey] = useState(0);
+  const [demoManagerOpen, setDemoManagerOpen] = useState(false);
 
-  const MODULOS = useMemo(() => getModulos(t), [t]);
+  const MODULOS = useMemo(() => getModulos(t).filter(m => m.key !== "admin" || canOpenAdmin), [t, canOpenAdmin]);
 
   useEffect(() => {
-    if (!visible) return;
+    if (!panelVisible || previewReadOnly) return;
+    let active = true;
     AsyncStorage.getItem("go_empresa_open_count_v1").then((raw) => {
+      if (!active) return;
       const count = raw ? parseInt(raw, 10) + 1 : 1;
       AsyncStorage.setItem("go_empresa_open_count_v1", String(count)).catch(() => {});
       setEmpresaOpenCount(count);
     });
-  }, [visible]);
+    return () => { active = false; };
+  }, [panelVisible, previewReadOnly]);
 
   useEffect(() => {
     setSwipeDownOpacity(swipeGuideMaxOpacity(empresaOpenCount, guidanceCfg));
@@ -337,7 +339,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
 
   useEffect(() => {
     swipeDownLoop.current?.stop();
-    if (swipeDownOpacity <= 0 || !visible) {
+    if (swipeDownOpacity <= 0 || !panelVisible) {
       swipeDownAnim.setValue(0);
       return;
     }
@@ -349,13 +351,16 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
     );
     swipeDownLoop.current.start();
     return () => { swipeDownLoop.current?.stop(); };
-  }, [swipeDownOpacity, visible]);
+  }, [swipeDownOpacity, panelVisible]);
 
   const showBadges = guidanceCfg.labelOpacity(0) > 0;
 
   React.useEffect(() => {
-    if (visible) {
-      const targetModulo = initialModulo ?? "home";
+    if (panelVisible) {
+      // Read the breadcrumb only on an opening edge. Consuming it must not reset the restored module.
+      const requested = demo && locationReturn && locationReturn.userId === businessDemo?.getSnapshot().ownerUserId
+        ? locationReturn.module : initialModulo ?? "home";
+      const targetModulo = (requested === "admin" && !canOpenAdmin) || (previewReadOnly && !isBusinessPreviewModule(requested)) ? "home" : requested;
       setModulo(targetModulo);
       if (targetModulo !== "home") {
         const suite = SUITES.find(s => s.modules.includes(targetModulo as ModuloKey));
@@ -365,19 +370,24 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
       setModulo("home");
       setCurrentSuite(null);
     }
-  }, [visible, initialModulo]);
+  }, [panelVisible, initialModulo, previewReadOnly, canOpenAdmin]);
+
+  useEffect(() => {
+    if ((modulo === "admin" && !canOpenAdmin) || (previewReadOnly && !isBusinessPreviewModule(modulo))) setModulo("home");
+    if (previewReadOnly) setActivacionVisible(false);
+  }, [modulo, canOpenAdmin, previewReadOnly]);
 
   // Refs para que el PanResponder acceda siempre al estado más reciente
   const moduloRef       = useRef(modulo);
   const currentSuiteRef = useRef<SuiteKey | null>(null);
-  const onCloseRef      = useRef(onClose);
+  const onCloseRef      = useRef(closePanel);
   const goHomeRef       = useRef<() => void>(() => {});
   // Ref que EmpresaConfigScreen registra con su goPrev interno.
   // El FAB de una flecha lo llama para respetar la ruta real.
   const modulePrevRef   = useRef<(() => void) | null>(null);
   moduloRef.current       = modulo;
   currentSuiteRef.current = currentSuite;
-  onCloseRef.current      = onClose;
+  onCloseRef.current      = closePanel;
 
   // ── ZONA DERECHA (≥75% del ancho) ────────────────────────────────────────
   // Cierre DELIBERADO: requiere pulsación prolongada (1000 ms) ANTES del arrastre.
@@ -451,6 +461,10 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   ).current;
 
   const goToModulo = (key: ModuloKey) => {
+    if (demo && key !== "empresa_config") clearLocationReturn();
+    if (!panelVisible) return;
+    if (previewReadOnly && (!isBusinessPreviewModule(key) || (!demo && (key === "empresa_config" || key === "reservas_config")))) { showPreviewUnavailable(); return; }
+    if (key === "admin" && !canOpenAdmin) return;
     Animated.timing(slideAnim, {
       toValue: 1,
       duration: 200,
@@ -458,11 +472,12 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
     }).start(() => {
       setModulo(key);
       slideAnim.setValue(0);
-      try { onModuloChange?.(); } catch { /* silencioso */ }
+      try { if (!previewReadOnly) onModuloChange?.(); } catch { /* silencioso */ }
     });
   };
 
   const goHome = () => {
+    if (demo) clearLocationReturn();
     if (modulo !== "home") {
       // Module → suite sub-grid
       setModulo("home");
@@ -470,7 +485,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
       // Suite sub-grid → suite selector
       setCurrentSuite(null);
     }
-    try { onModuloChange?.(); } catch { /* silencioso */ }
+    try { if (!previewReadOnly) onModuloChange?.(); } catch { /* silencioso */ }
   };
   goHomeRef.current = goHome;
 
@@ -479,13 +494,52 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
 
   const fabBottom = insets.bottom + 24;
   const contentPadBottom = fabBottom + 80;
+  const fabButtons = (
+    <>
+          {/* Botón 1: volver un paso atrás en la ruta real
+               – Si EmpresaConfigScreen tiene registrado su goPrev → lo llama
+                 (navega por la ruta interna: paso→paso, activity→sector, etc.)
+               – Si no → goHome (módulo → suite home) */}
+          {(modulo !== "home" || currentSuite !== null) && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => {
+                if (modulo === "empresa_config" && modulePrevRef.current) {
+                  modulePrevRef.current();
+                } else {
+                  goHome();
+                }
+              }}
+              hitSlop={8}
+              accessibilityLabel={t("biz_panel_back")}
+              style={s.fabBtn}
+            >
+              <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
+            </TouchableOpacity>
+          )}
+          {/* Botón 2: cerrar todo el panel — doble flecha para distinguirlo */}
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={closePanel}
+            hitSlop={8}
+            accessibilityLabel={t("biz_panel_close")}
+            style={s.fabBtn}
+          >
+            <View style={{ alignItems: "center" }}>
+              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
+              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
+            </View>
+          </TouchableOpacity>
+    </>
+  );
 
+  if (previewReadOnly && !isBusinessPreview) return null;
   return (
     <Modal
-      visible={visible}
+      visible={panelVisible}
       animationType="slide"
       presentationStyle="fullScreen"
-      onRequestClose={onClose}
+      onRequestClose={closePanel}
     >
       <StatusBar style="dark" />
       <View style={[s.root, { paddingTop: insets.top }]} {...rightSwipePan.panHandlers}>
@@ -495,6 +549,15 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
           <View style={s.handlePill} />
         </View>
 
+        {preview && <Text style={[s.headerSub, { textAlign: "center", color: "#4A80BD", fontWeight: "700" }]}>{demo ? demoTitle : t("biz_preview_title")}</Text>}
+        {isOwner && onOpenContext && (
+          <TouchableOpacity onPress={() => { if (demo) clearLocationReturn(); onOpenContext(); }} accessibilityLabel={t("context_change")} style={{ alignSelf: "flex-end", paddingHorizontal: 18, paddingVertical: 8 }}>
+            <Text style={{ color: "#4A80BD", fontWeight: "700" }}>{t("context_change")}</Text>
+          </TouchableOpacity>
+        )}
+
+        {demo && modulo === "home" && currentSuite === null && <DemoCompanyManager open={demoManagerOpen} onOpenChange={setDemoManagerOpen} />}
+
         {/* ── Centered header — oculto en empresa_config (el asistente tiene su propia cabecera) ── */}
         {modulo !== "empresa_config" ? (
         <View style={s.header}>
@@ -502,7 +565,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             {modulo === "home" && currentSuite === null ? (
               <>
                 <Text style={s.headerTitle}>GO Empresa</Text>
-                <Text style={s.headerSub}>{MOCK_EMPRESA.nombre}</Text>
+                <Text style={s.headerSub}>{demo ? (businessConfig.businessName || demoTitle) : preview ? t("biz_preview_data") : MOCK_EMPRESA.nombre}</Text>
                 {/* Verification badge — derived from businessConfig + verification status */}
                 {(() => {
                   const st              = verification.status;
@@ -513,40 +576,45 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                   let label: string;
                   let sub: string;
 
-                  if (st === "verified") {
+                  if (preview) {
+                    color = "#4A80BD";
+                    label = demo ? (lang === "en" ? "Local test configuration" : "Configuración local de prueba") : t("biz_preview_read_only");
+                    sub = demo ? (lang === "en" ? "No real company is linked or verified" : "Sin vincular ni verificar empresas reales") : t("biz_preview_unlinked");
+                  } else if (st === "verified") {
                     color = "#10B981";
-                    label = "Empresa verificada";
-                    sub   = "Todas las funciones activas";
+                    label = t("biz_panel_verified");
+                    sub   = t("biz_panel_all_active");
                   } else if (st === "pending") {
                     color = "#F59E0B";
-                    label = "Verification sent";
-                    sub   = "Under review";
+                    label = t("biz_panel_verification_sent");
+                    sub   = t("biz_panel_under_review");
                   } else if (st === "rejected") {
                     color = "#EF4444";
-                    label = "Verification rejected";
-                    sub   = "Please resubmit your information";
+                    label = t("biz_panel_verification_rejected");
+                    sub   = t("biz_panel_resubmit");
                   } else if (isFullyConfigured) {
                     color = "#4A80BD";
-                    label = "Ready to verify";
-                    sub   = "Send your documents";
+                    label = t("biz_panel_ready_verify");
+                    sub   = t("biz_panel_send_documents");
                   } else if (isConfigured) {
                     color = "#F59E0B";
-                    label = "Configuration in progress";
-                    sub   = "Complete the configuration steps";
+                    label = t("biz_panel_config_progress");
+                    sub   = t("biz_panel_complete_steps");
                   } else {
                     color = "#9CA3AF";
-                    label = "Business not configured";
-                    sub   = "Configure your business to receive bookings";
+                    label = t("biz_panel_not_configured");
+                    sub   = t("biz_panel_configure_bookings");
                   }
 
                   return (
                     <TouchableOpacity
-                      activeOpacity={st === "verified" ? 1 : 0.8}
-                      onPress={st === "verified" ? undefined : () => {
-                        if (isFullyConfigured && onOpenVerificacion) {
+                      activeOpacity={!demo && (preview || st === "verified") ? 1 : 0.8}
+                      onPress={!demo && (preview || st === "verified") ? undefined : () => {
+                        if (previewReadOnly && !demo) { showPreviewUnavailable(); return; }
+                        if (!demo && isFullyConfigured && onOpenVerificacion) {
                           onOpenVerificacion();
                         } else {
-                          const { nextStep } = computeConfigProgress(businessConfig);
+                          const { nextStep } = computeConfigProgress(businessConfig, demo ? businessDemo?.getSnapshot().plan : undefined);
                           setConfigInitialStep(nextStep >= 0 ? nextStep : 0);
                           goToModulo("empresa_config");
                         }
@@ -558,7 +626,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                         <Text style={[s.verifTxt, { color }]}>{label}</Text>
                         <Text style={[s.verifSubTxt, { color: color + "CC" }]}>{sub}</Text>
                       </View>
-                      {st !== "verified" && (
+                      {!preview && st !== "verified" && (
                         <Feather name="chevron-right" size={11} color={color + "99"} />
                       )}
                     </TouchableOpacity>
@@ -569,16 +637,18 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                 <TouchableOpacity
                   activeOpacity={0.75}
                   onPress={() => {
+                    if (previewReadOnly && !demo) { showPreviewUnavailable(); return; }
+                    if (demo) { setDemoManagerOpen(true); return; }
                     Alert.alert(
-                      "New business",
-                      "Current configuration will be deleted and you will start from scratch. Previous business data cannot be recovered.",
+                      t("biz_panel_new"),
+                      t("biz_panel_reset_warning"),
                       [
-                        { text: "Cancel", style: "cancel" },
+                        { text: t("cancel"), style: "cancel" },
                         {
-                          text: "Create new",
+                          text: t("biz_panel_create_new"),
                           style: "destructive",
                           onPress: async () => {
-                            await resetConfig();
+                            if (demo) clearLocationReturn(); try { await resetConfig(); } catch (error) { Alert.alert(demoTitle, String(error)); return; }
                             setNewEmpresaKey(k => k + 1);
                             setConfigInitialStep(0);
                             goToModulo("empresa_config");
@@ -603,9 +673,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                   }}
                 >
                   <Feather name="plus" size={11} color="#4A80BD" />
-                  <Text style={{ fontSize: 11, fontWeight: "700", color: "#4A80BD", letterSpacing: 0.5 }}>
-                    New business
-                  </Text>
+                  <Text style={{ fontSize: 11, fontWeight: "700", color: "#4A80BD", letterSpacing: 0.5 }}>{t("biz_panel_new")}</Text>
                 </TouchableOpacity>
               </>
             ) : modulo === "home" && currentSuite !== null ? (
@@ -639,6 +707,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: contentPadBottom }}
           >
+            {!demo ? (
             <View style={s.empresaHero}>
               <View style={s.empresaHeroTop}>
                 <View style={[s.planPill, { backgroundColor: planColor + "22", borderColor: planColor + "44" }]}>
@@ -648,7 +717,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                   </Text>
                 </View>
                 <Text style={s.renovacionTxt}>
-                  {t('renews_label')} {MOCK_EMPRESA.proximaRenovacion}
+                  {t('renews_label')} {new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(MOCK_EMPRESA.proximaRenovacion + "T12:00:00"))}
                 </Text>
               </View>
 
@@ -671,11 +740,17 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                 />
               </View>
             </View>
+            ) : (
+              <View style={s.empresaHero}>
+                <Text style={{ color: "#EF4444", fontSize: 12, fontWeight: "700" }}>{lang === "en" ? "DEMO LOCAL · no real subscription or billing" : "DEMO LOCAL · sin suscripción ni facturación real"}</Text>
+                <Text style={[s.headerSub, { marginTop: 6 }]}>{businessConfig.businessName || demoTitle}</Text>
+              </View>
+            )}
 
             {currentSuite === null ? (
               // ── Suite selector ──────────────────────────────────────────
               <>
-                <Text style={s.secTitle}>GO PLATFORM</Text>
+                <Text style={s.secTitle}>{t("biz_panel_platform")}</Text>
                 <View style={s.suitesGrid}>
                   {SUITES.map((suite) => {
                     const suiteModules = MODULOS.filter(m => suite.modules.includes(m.key));
@@ -704,7 +779,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                           </View>
                           <View style={{ flex: 1 }}>
                             <Text style={[s.suiteLabel, { color: suite.color }]}>{suite.key === "reservas" ? t('mod_booking_label') : suite.label}</Text>
-                            <Text style={s.suiteDesc} numberOfLines={2}>{suite.key === "reservas" ? "Booking configuration and real-time operations" : suite.desc}</Text>
+                            <Text style={s.suiteDesc} numberOfLines={2}>{suite.key === "reservas" ? t("biz_suite_bookings_desc") : suite.desc}</Text>
                           </View>
                           <Feather name="chevron-right" size={16} color={suite.color + "80"} />
                         </View>
@@ -734,13 +809,14 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                 const progressFraction = completed / total;
                 return (
                   <>
-                    <Text style={s.secTitle}>GO BOOKINGS</Text>
+                    <Text style={s.secTitle}>{t("biz_panel_bookings")}</Text>
                     <View style={{ gap: 10 }}>
 
                       {/* ── Configuración ── */}
                       <TouchableOpacity
                         activeOpacity={0.88}
                         onPress={() => {
+                          if (previewReadOnly && !demo) { showPreviewUnavailable(); return; }
                           setConfigInitialStep(nextStep >= 0 ? nextStep : 0);
                           goToModulo("empresa_config");
                         }}
@@ -751,9 +827,9 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                             <Feather name="sliders" size={22} color={statusColor} />
                           </View>
                           <View style={{ flex: 1 }}>
-                            <Text style={[s.suiteLabel, { color: statusColor }]}>Configuration</Text>
+                            <Text style={[s.suiteLabel, { color: statusColor }]}>{t("biz_panel_configuration")}</Text>
                             <Text style={s.suiteDesc}>
-                              {statusDot} {completed}/{total} steps completed
+                              {statusDot} {t("biz_panel_steps_done").replace("__DONE__", String(completed)).replace("__TOTAL__", String(total))}
                             </Text>
                           </View>
                           <Feather name="chevron-right" size={16} color={statusColor + "80"} />
@@ -764,26 +840,22 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                         </View>
                         {/* Lista informativa en 2 columnas — sin apariencia de botón */}
                         {(() => {
-                          const done = new Set(Array.isArray(businessConfig.completedSteps) ? businessConfig.completedSteps : []);
-                          if (businessConfig.businessName?.trim()) done.add(0);
-                          if (businessConfig.address?.trim()) done.add(1);
-                          if (businessConfig.services?.length > 0) done.add(3);
-                          if (businessConfig.plantillaItems?.length > 0) done.add(4);
-                          if (businessConfig.bookingEnabled) done.add(7);
+                          const validSteps = getBusinessDemoSetupState(businessConfig, demo ? businessDemo?.getSnapshot().plan : undefined).steps;
+                          const done = new Set(validSteps.flatMap((valid, i) => valid ? [i] : []));
                           // Entrelazado: col izq = pasos 1-4, col dcha = pasos 5-8
                           // Row 1: Nombre   | Servicios
                           // Row 2: Ubicación | Reservas
                           // Row 3: Horarios  | Plano
                           // Row 4: Espacios  | Publicación
                           const items: { label: string; step: number }[] = [
-                            { label: "Name",       step: 0 },
-                            { label: "Services",   step: 3 },
-                            { label: "Location",   step: 1 },
-                            { label: "Bookings",   step: 5 },
-                            { label: "Schedule",   step: 2 },
-                            { label: "Floor plan", step: 6 },
-                            { label: "Spaces",     step: 4 },
-                            { label: "Publishing", step: 7 },
+                            { label: t("biz_panel_name"),       step: 0 },
+                            { label: t("biz_panel_services"),   step: 3 },
+                            { label: t("biz_panel_location"),   step: 1 },
+                            { label: t("biz_panel_booking_step"),   step: 5 },
+                            { label: t("biz_panel_schedule"),   step: 2 },
+                            { label: t("biz_panel_floor_plan"), step: 6 },
+                            { label: t("biz_panel_spaces"),     step: 4 },
+                            { label: t("biz_panel_publishing"), step: 7 },
                           ];
                           return (
                             <View style={{ flexDirection: "row", flexWrap: "wrap", marginTop: 10 }}>
@@ -802,7 +874,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                           );
                         })()}
                         <Text style={[s.suiteDesc, { marginTop: 8, color: statusColor, fontWeight: "700" }]}>
-                          {isAllDone ? "All set · tap to review" : `Continue at step ${(nextStep >= 0 ? nextStep : 0) + 1} →`}
+                          {isAllDone ? t("biz_panel_ready_review") : t("biz_panel_continue_step").replace("__STEP__", String((nextStep >= 0 ? nextStep : 0) + 1))}
                         </Text>
                       </TouchableOpacity>
 
@@ -817,13 +889,13 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                             <Feather name="calendar" size={22} color="#3D9A84" />
                           </View>
                           <View style={{ flex: 1 }}>
-                            <Text style={[s.suiteLabel, { color: "#3D9A84" }]}>Daily operations</Text>
-                            <Text style={s.suiteDesc}>Floor plan · calendar · real-time bookings</Text>
+                            <Text style={[s.suiteLabel, { color: "#3D9A84" }]}>{t("biz_panel_daily")}</Text>
+                            <Text style={s.suiteDesc}>{t("biz_panel_daily_desc")}</Text>
                           </View>
                           <Feather name="chevron-right" size={16} color="#3D9A8480" />
                         </View>
                         <View style={s.suiteChipsRow}>
-                          {["Floor plan","Calendar","Bookings","Occupancy","Tables/Cabins"].map(label => (
+                          {[t("biz_panel_floor_plan"),t("biz_panel_calendar"),t("biz_panel_booking_step"),t("biz_panel_occupancy"),t("biz_panel_tables")].map(label => (
                             <View key={label} style={[s.suiteChip, { borderColor: "#3D9A8430" }]}>
                               <Text style={[s.suiteChipTxt, { color: "#3D9A84" }]}>{label}</Text>
                             </View>
@@ -844,7 +916,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                             </View>
                             <View style={{ flex: 1 }}>
                               <Text style={[s.suiteLabel, { color: "#15803d" }]}>GO Deportes</Text>
-                              <Text style={s.suiteDesc}>Gestión de espacios deportivos · 34+ tipos</Text>
+                              <Text style={s.suiteDesc}>{t("biz_panel_sports_desc")}</Text>
                             </View>
                             <Feather name="chevron-right" size={16} color="#15803d80" />
                           </View>
@@ -869,7 +941,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                 const suiteModules = MODULOS.filter(m => suite.modules.includes(m.key));
                 return (
                   <>
-                    <Text style={s.secTitle}>MÓDULOS</Text>
+                    <Text style={s.secTitle}>{t("biz_panel_modules")}</Text>
                     <View style={s.modulosGrid}>
                       {suiteModules.map((m) => (
                         <TouchableOpacity
@@ -903,7 +975,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
               </Text>
             </View>
           </ScrollView>
-        ) : (
+        ) : (!previewReadOnly || isBusinessPreviewModule(modulo)) ? (
           <Animated.View
             style={[s.moduloView, {
               opacity:   slideAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
@@ -921,16 +993,16 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             {modulo === "orbitas"         && <OrbitasScreen     guidanceLevel={guidanceLevel} />}
             {modulo === "consumo"         && <ConsumoScreen     guidanceLevel={guidanceLevel} />}
             {modulo === "zonas"           && <ZonasScreen       guidanceLevel={guidanceLevel} />}
-            {modulo === "empresa_config"   && <EmpresaConfigScreen   key={`ec-${newEmpresaKey}`} onBack={goHome} onOpenVerificacion={onOpenVerificacion} onFinalizarConfig={() => { goHome(); if (onFinalizarWizard) { onFinalizarWizard(); } else { setActivacionVisible(true); } }} initialStep={configInitialStep} goPrevRef={modulePrevRef} />}
-            {modulo === "reservas_config"  && <GoReservasConfigScreen onClose={goHome} onOpenVerificacion={onOpenVerificacion} hideFAB={true} />}
+            {modulo === "empresa_config"   && <EmpresaConfigScreen   key={`ec-${newEmpresaKey}`} onBack={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} onFinalizarConfig={() => { goHome(); if (previewReadOnly) return; if (onFinalizarWizard) { onFinalizarWizard(); } else { setActivacionVisible(true); } }} initialStep={configInitialStep} goPrevRef={modulePrevRef} />}
+            {modulo === "reservas_config"  && (demo ? <GoReservasDemoScreen onClose={goHome} hideFAB={true} /> : <GoReservasConfigScreen onClose={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} hideFAB={true} />)}
             {modulo === "deportes_screen"  && <GoDeportesScreen onClose={goHome} onOpenBooking={(_id, _label, _emoji, _color) => { goToModulo("reservas_config"); }} onOpenVerificacion={onOpenVerificacion} />}
 
             {/* Gated modules — require Empresa Verificada */}
             {GATED_MODULES.has(modulo) && (
-              verification.status === "verified" ? (
+              (verification.status === "verified" || (preview && isBusinessPreviewModule(modulo))) ? (
                 <>
                   {modulo === "facturacion" && <FacturacionScreen guidanceLevel={guidanceLevel} />}
-                  {modulo === "admin"       && <AdminScreen       guidanceLevel={guidanceLevel} />}
+                  {modulo === "admin" && canOpenAdmin && <AdminScreen guidanceLevel={guidanceLevel} />}
                   {modulo === "partners"    && <PartnersScreen    guidanceLevel={guidanceLevel} />}
                   {modulo === "publicidad"  && <PublicidadScreen  guidanceLevel={guidanceLevel} />}
                   {modulo === "sugerencias" && <SugerenciasScreen guidanceLevel={guidanceLevel} />}
@@ -945,51 +1017,16 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
               )
             )}
           </Animated.View>
-        )}
+        ) : null}
 
         {/* ── FABs flotantes — arrastrable con long-press ──────────────────── */}
-        <DraggableFAB
-          screenKey="empresa"
-          buttonKey="main"
-          initialRight={20}
-          initialBottom={fabBottom}
-          maxH={90}
-        >
-          {/* Botón 1: volver un paso atrás en la ruta real
-               – Si EmpresaConfigScreen tiene registrado su goPrev → lo llama
-                 (navega por la ruta interna: paso→paso, activity→sector, etc.)
-               – Si no → goHome (módulo → suite home) */}
-          {(modulo !== "home" || currentSuite !== null) && (
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => {
-                if (modulo === "empresa_config" && modulePrevRef.current) {
-                  modulePrevRef.current();
-                } else {
-                  goHome();
-                }
-              }}
-              hitSlop={8}
-              accessibilityLabel="Volver al paso anterior"
-              style={s.fabBtn}
-            >
-              <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
-            </TouchableOpacity>
-          )}
-          {/* Botón 2: cerrar todo el panel — doble flecha para distinguirlo */}
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={onClose}
-            hitSlop={8}
-            accessibilityLabel="Cerrar todo"
-            style={s.fabBtn}
-          >
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
-        </DraggableFAB>
+        {previewReadOnly ? (
+          <View style={{ position: "absolute", right: 20, bottom: fabBottom, gap: 8 }}>{fabButtons}</View>
+        ) : (
+          <DraggableFAB screenKey="empresa" buttonKey="main" initialRight={20} initialBottom={fabBottom} maxH={90}>
+            {fabButtons}
+          </DraggableFAB>
+        )}
 
         {/* ── GUÍA GESTUAL DERECHA — indica zona de cerrar/minimizar ──────
             pointerEvents="none": puramente decorativa, nunca bloquea toques.
@@ -1012,10 +1049,10 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
       </View>
 
       {/* ── Fase de activación y cobros — independiente del asistente ── */}
-      <ActivacionCobrosScreen
+      {!previewReadOnly && <ActivacionCobrosScreen
         visible={activacionVisible}
         onClose={() => setActivacionVisible(false)}
-      />
+      />}
 
     </Modal>
   );

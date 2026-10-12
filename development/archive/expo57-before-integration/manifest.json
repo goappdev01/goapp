@@ -1,0 +1,97 @@
+{
+  "sourceHead": "ae3e3d6f381ff1e4aab92f1afc8906aaa3bcd962",
+  "sourceBranch": "refs/heads/experiment/landing-visual-variants",
+  "active": false,
+  "files": [
+    {
+      "originalPath": "artifacts/api-server/src/routes/supabase.ts",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/api-server/src/routes/supabase.ts",
+      "sha256": "c54d183692caaa728a18caf96202eb39913ad528477b7b5b1e09e81ae67368c1"
+    },
+    {
+      "originalPath": "artifacts/api-server/tests/mobile-sync.test.mjs",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/api-server/tests/mobile-sync.test.mjs",
+      "sha256": "38fe939d6d7488c541722018b01222170293e0b82de740f4e4a8489906e2b78d"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/.gitignore",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/.gitignore",
+      "sha256": "89cb1589918dcb0a07ec523196caf7386bf02eaef8e68858f8a5235d11f5fec3"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/app/index.tsx",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/app/index.tsx",
+      "sha256": "66763693d1289692e9f0d62c2d09486703b5bcdc8c3c5c888b366b8cc830bc61"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/components/auth/LoginRegisterPanel.tsx",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/components/auth/LoginRegisterPanel.tsx",
+      "sha256": "e69572714928395432ef7dbe2b9f415add7b8ffb419ecb687dec23e1abaa0977"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/components/herramientas/HerramientasPanel.tsx",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/components/herramientas/HerramientasPanel.tsx",
+      "sha256": "35258931dc9319b271d1894e44df2191723fe73fd2eee08d12a5e08f00e1dade"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/components/landing/LandingActionSurface.tsx",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/components/landing/LandingActionSurface.tsx",
+      "sha256": "dc2cabf4e01feb0013d64df93fa6faa30df0e7844efca705dba3d9e710297d70"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/components/landing/LandingSatelliteSurface.tsx",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/components/landing/LandingSatelliteSurface.tsx",
+      "sha256": "d67b262061d1b44eaed7a13af7b2f736ea93b309cc1ef4760a6d0c37802df171"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/components/landing/LandingVariantSelector.tsx",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/components/landing/LandingVariantSelector.tsx",
+      "sha256": "86c4231f6d74b977267a40d8756bb274de36c93f129c1abe9aa92ff04b0e30e7"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/components/landing/humanityPlacement.ts",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/components/landing/humanityPlacement.ts",
+      "sha256": "072e3904bad4fc6e30c93eac6b1d7fde8eee591549fa166ba94848e2c99e0df7"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/components/landing/landingVariant.ts",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/components/landing/landingVariant.ts",
+      "sha256": "afaeff3ce9e78f0b146c7275f9e4a7f9ff7f60dd94c3cbd49534ef28fbb06f44"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/components/landing/landingVisualThemes.ts",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/components/landing/landingVisualThemes.ts",
+      "sha256": "9ef0aed12d256a9179cdf1277084da2b5e22c795d132cd318bd1fa0de63db95c"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/data/booking.ts",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/data/booking.ts",
+      "sha256": "10a36a38ae0fbd5acd397628d7c488190a4f22fe1193e8f331eabd0c7d5443f4"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/expo-env.d.ts",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/expo-env.d.ts",
+      "sha256": "6fc02634da46d3edc5a88eec9173ba6bf709726be3cba83c73ebd8e859d5c147"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/hooks/useLandingVisualVariant.ts",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/hooks/useLandingVisualVariant.ts",
+      "sha256": "25f834d9922222d1fd65ddf4cea190cc55043b4c6d93c9d1831077e00a12dbc4"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/lib/mobileSession.ts",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/lib/mobileSession.ts",
+      "sha256": "97c7360fdac3a3c0b9b198a82acc6afa80df11f0631a3d3bccbc027eff86926a"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/lib/sessionEvents.ts",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/lib/sessionEvents.ts",
+      "sha256": "d253f71bc68c649d30de8d3a74921d7163b7a2f3c7631c3477658524f5e20024"
+    },
+    {
+      "originalPath": "artifacts/go-app-mobile/lib/sessionManager.ts",
+      "archivePath": "development/archive/expo57-before-integration/artifacts/go-app-mobile/lib/sessionManager.ts",
+      "sha256": "8d2ead7ba6b6eceed72fc71513f8a6df2940866601b82cb0ca035d5fc9a043fc"
+    }
+  ]
+}

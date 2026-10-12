@@ -1,3 +1,5 @@
+import { useGoCalendarEntries } from "@/hooks/useGoCalendarEntries";
+import { GoCalendarSlot } from "@/components/ui/GoCalendarSlot";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Feather } from "@expo/vector-icons";
@@ -54,6 +56,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { formatDayLabel, formatISODate, getDayOffset, getToday } from "../lib/time";
 import { CalSizeKey, getCalColumnW, DEFAULT_GO_RENDER_PRESET } from "../constants/goSizes";
 import { trSector } from "@/data/goSectorTranslations";
+import { GoCloseButton } from "./ui/GoCloseButton";
+import { GoCalendarViewSelector } from "./ui/GoCalendarViewSelector";
 
 export type GoEntry = {
   id: string;
@@ -274,6 +278,7 @@ export type AgendaBoardProps = {
   onToggleSortOrder?: () => void;
   onSelectDay?: (dateISO: string) => void;
   onAddEntry?: (dateISO: string) => void;
+  onCreateTaskAtTime?: (dateISO: string, timeHHMM: string) => void;
   onSelectItem?: (item: GoEntry) => void;
   onMoveItem?: (id: string, newDateISO: string, newTime: string) => void;
   onOpenMoveFlow?: (itemId: string, toDateISO: string, fromDateISO: string, itemTime: string, isExternal: boolean) => void;
@@ -502,18 +507,21 @@ interface DayColI18n {
 const DAY_COL_ES: DayColI18n = { today: "HOY", tomorrow: "MAÑANA", shortDays: SHORT_DAY_ES, deleted: "ELIMINADOS", pending: "PENDIENTES" };
 const DAY_COL_EN: DayColI18n = { today: "TODAY", tomorrow: "TMRW", shortDays: SHORT_DAY_EN, deleted: "DELETED", pending: "PENDING" };
 
-function getDayColumns(i18n: DayColI18n = DAY_COL_ES): Column[] {
+function getDayColumns(i18n: DayColI18n = DAY_COL_ES, startISO = formatISODate(getToday())): Column[] {
   const cols: Column[] = [
     { id: "retrasados", label: i18n.pending, isRetrasados: true },
   ];
   for (let i = 0; i <= 6; i++) {
-    const d = getDayOffset(i);
+    const d = new Date(startISO + "T00:00:00");
+    d.setDate(d.getDate() + i);
     const iso = formatISODate(d);
     const dayNum = d.getDate();
     const monNum = d.getMonth() + 1;
     const dayDate = `${String(dayNum).padStart(2, "0")}/${String(monNum).padStart(2, "0")}`;
-    const dayName = i === 0 ? i18n.today : i === 1 ? i18n.tomorrow : i18n.shortDays[d.getDay()];
-    const label = i === 0 ? i18n.today : i === 1 ? i18n.tomorrow : `${i18n.shortDays[d.getDay()]} ${dayDate}`;
+    const isToday = iso === formatISODate(getToday());
+    const isTomorrow = iso === formatISODate(getDayOffset(1));
+    const dayName = isToday ? i18n.today : isTomorrow ? i18n.tomorrow : i18n.shortDays[d.getDay()];
+    const label = isToday ? i18n.today : isTomorrow ? i18n.tomorrow : `${i18n.shortDays[d.getDay()]} ${dayDate}`;
     cols.push({ id: `day_${iso}`, label, dayName, dayDate, dateISO: iso });
   }
   cols.push({ id: "eliminados", label: i18n.deleted, isEliminados: true });
@@ -654,12 +662,13 @@ function resolveEstado(
 
 export function AgendaBoard({
   selection,
-  goLog,
+  goLog: calendarEntries,
   selectedDateISO,
   sortOrder = "asc",
   onToggleSortOrder,
   onSelectDay,
   onAddEntry,
+  onCreateTaskAtTime,
   onSelectItem,
   onMoveItem,
   onOpenMoveFlow,
@@ -692,6 +701,9 @@ export function AgendaBoard({
   onProposeProposal,
   onGoToLanding,
 }: AgendaBoardProps) {
+  const goLog = useGoCalendarEntries(calendarEntries);
+  const allowedEntryIdsRef = useRef(new Set<string>());
+  allowedEntryIdsRef.current = new Set(goLog.map(entry => entry.id));
   const todayISO = formatISODate(getToday());
   const { lang, t } = useLanguage();
   // Traduce intentKey estable ("comida", "viaje"…) → etiqueta localizada.
@@ -710,7 +722,20 @@ export function AgendaBoard({
   };
   const dayColI18n = lang === "en" ? DAY_COL_EN : DAY_COL_ES;
   const monthNamesArr = lang === "en" ? MONTH_NAMES_EN : MONTH_NAMES_ES;
-  const dayColumns = useMemo(() => getDayColumns(dayColI18n), [lang]);
+  const [weekStartISO, setWeekStartISO] = useState(selectedDateISO || todayISO);
+  const dayColumns = useMemo(() => getDayColumns(dayColI18n, weekStartISO), [lang, weekStartISO]);
+  useEffect(() => {
+    // Keep the existing window when selecting within it, preserving scroll context.
+    if (!selectedDateISO) return;
+    setWeekStartISO(current => {
+      const end = new Date(current + "T00:00:00");
+      end.setDate(end.getDate() + 6);
+      return selectedDateISO < current || selectedDateISO > formatISODate(end) ? selectedDateISO : current;
+    });
+  }, [selectedDateISO]);
+  useEffect(() => {
+    if (scrollToTodayToken !== 0) setWeekStartISO(todayISO);
+  }, [scrollToTodayToken]);
 
   // ── Booking chat modal (GO_BOOKING / GO_RESERVA entries) ─────────
   const [bookingMsgEntry, setBookingMsgEntry] = useState<GoEntry | null>(null);
@@ -781,7 +806,22 @@ export function AgendaBoard({
   }, []);
 
   // Month columns for mes_lineal mode
-  const activeMonth = calViewMonth ?? getCurrentYearMonth();
+  const [localMonth, setLocalMonth] = useState(calViewMonth ?? getCurrentYearMonth());
+  useEffect(() => {
+    if (calViewMonth) setLocalMonth(calViewMonth);
+  }, [calViewMonth]);
+  const activeMonth = onChangeMonth && calViewMonth ? calViewMonth : localMonth;
+  const changeMonth = (dir: 1 | -1) => {
+    Haptics.selectionAsync().catch(() => {});
+    if (onChangeMonth) onChangeMonth(dir);
+    if (!onChangeMonth || !calViewMonth) {
+      setLocalMonth(prev => {
+        const [year, month] = prev.split("-").map(Number);
+        const date = new Date(year, month - 1 + dir, 1);
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+      });
+    }
+  };
   const monthColumns = useMemo(
     () => getMonthColumns(activeMonth, dayColI18n.shortDays, dayColI18n.today),
     [activeMonth, lang]
@@ -883,7 +923,8 @@ export function AgendaBoard({
 
   // ── MULTI-SELECTION STATE ─────────────────────────────────────────
   const [localSelectedIds, setLocalSelectedIds] = useState<Set<string>>(new Set());
-  const selectedIds = selection?.selectedIds ?? localSelectedIds;
+  const selectedIds = new Set([...(selection?.selectedIds ?? localSelectedIds)]
+    .filter(id => allowedEntryIdsRef.current.has(id)));
   const setSelectedIds = selection?.setSelectedIds ?? setLocalSelectedIds;
   const [bulkMovePicking, setBulkMovePicking] = useState(false);
   const [localSelectionMode, setLocalSelectionMode] = useState(false);
@@ -922,14 +963,14 @@ export function AgendaBoard({
   const handleBulkDelete = useCallback(() => {
     if (!onDeleteItem) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    selectedIds.forEach((id) => onDeleteItem(id));
+    selectedIds.forEach((id) => { if (allowedEntryIdsRef.current.has(id)) onDeleteItem(id); });
     clearSelection();
   }, [selectedIds, onDeleteItem, clearSelection]);
 
   const handleBulkMove = useCallback((dateISO: string) => {
     if (!onMoveItem) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    selectedIds.forEach((id) => onMoveItem(id, dateISO, ""));
+    selectedIds.forEach((id) => { if (allowedEntryIdsRef.current.has(id)) onMoveItem(id, dateISO, ""); });
     clearSelection();
   }, [selectedIds, onMoveItem, clearSelection]);
 
@@ -1187,6 +1228,7 @@ export function AgendaBoard({
 
   // Called on successful drop — compute final column and trigger onMoveItem
   const jsDropAt = useCallback((absX: number, itemId: string, itemTime: string) => {
+    if (!allowedEntryIdsRef.current.has(itemId)) { jsCancelDragRef.current(); return; }
     clearEdgeScroll();
     const relX = absX - boardX.current + scrollX.current;
     let targetCol: Column | undefined;
@@ -1212,6 +1254,7 @@ export function AgendaBoard({
       if (isMultiDrag && onMoveItemRef.current) {
         // Move all selected cards to the target column directly (no modal per card)
         currentSelectedIds.forEach((sid) => {
+          if (!allowedEntryIdsRef.current.has(sid)) return;
           onMoveItemRef.current!(sid, targetCol!.dateISO!, "");
         });
         setSelectedIds(new Set());
@@ -1853,7 +1896,7 @@ export function AgendaBoard({
                         { height: estadoH },
                         isActive
                           ? {
-                              backgroundColor: opt.color + "28",
+                              backgroundColor: opt.color,
                               borderColor: opt.color,
                               shadowColor: opt.color,
                               shadowOpacity: 0.65,
@@ -1871,7 +1914,7 @@ export function AgendaBoard({
                       <Feather
                         name={(isActive ? opt.icon : opt.iconInactive) as any}
                         size={estadoIcon}
-                        color={isActive ? opt.color : opt.color + "90"}
+                        color={isActive ? "#101018" : opt.color + "90"}
                       />
                     </TouchableOpacity>
                   );
@@ -1990,7 +2033,14 @@ export function AgendaBoard({
               día quede SIEMPRE centrado respecto al ancho total de la columna.
               Los badges y indicadores usan position:"absolute" para no desplazar
               el contenido centrado.                                            */}
-          <View style={s.colHeaderContent}>
+          <TouchableOpacity
+            style={s.colHeaderContent}
+            disabled={!col.dateISO || !onSelectDay}
+            onPress={event => { event.stopPropagation(); if (col.dateISO) onSelectDay?.(col.dateISO); }}
+            accessibilityRole="button"
+            accessibilityLabel={col.label}
+            activeOpacity={0.75}
+          >
             <Text
               style={[
                 s.colHeaderDayName,
@@ -2106,7 +2156,7 @@ export function AgendaBoard({
                 </View>
               );
             })()}
-          </View>
+          </TouchableOpacity>
 
           {/* ── Badges — position absolute para no desplazar el contenido centrado ── */}
           {!col.isRetrasados && !col.isCustom && !col.isEliminados && items.length > 0 && (
@@ -2232,7 +2282,7 @@ export function AgendaBoard({
                   const wxColor = slotWeather
                     ? getSlotIconColor(slotWeather.weatherCode, isNightSlot)
                     : "#b8c8f0";
-                  return (
+                  const row = (
                     <View key={slotStart} style={[
                       { minHeight: slotCards.length === 0 ? SLOT_H : undefined },
                       slotDayNightStyle(dnProgress),
@@ -2281,6 +2331,12 @@ export function AgendaBoard({
                       )}
                     </View>
                   );
+                  return slotCards.length === 0 && col.dateISO && onCreateTaskAtTime ? (
+                    <GoCalendarSlot key={slotStart} dateISO={col.dateISO} timeHHMM={label}
+                      disabled={isSelecting || !!dragItem} onPress={onCreateTaskAtTime}>
+                      {row}
+                    </GoCalendarSlot>
+                  ) : row;
                 })}
                 {/* ── Office mode: hidden late hours indicator ── */}
                 {officeMode && (
@@ -2334,7 +2390,7 @@ export function AgendaBoard({
 
   // ── FLOATING DRAG CARD ────────────────────────────────────────────
   const renderFloatCard = () => {
-    if (!dragItem) return null;
+    if (!dragItem || !allowedEntryIdsRef.current.has(dragItem.id)) return null;
     return (
       <ReAnimated.View style={floatCardStyle} pointerEvents="none">
         <View
@@ -2386,10 +2442,10 @@ export function AgendaBoard({
       }}
     >
 
-      {/* Month navigation header — only for mes_lineal when NOT managed by outer bottom bar */}
-      {viewMode === "mes_lineal" && onChangeMonth === undefined && (
+      {/* Month navigation works with either the caller's month or a local fallback. */}
+      {viewMode === "mes_lineal" && (
         <View style={s.monthNavBar}>
-          <TouchableOpacity onPress={() => {}} hitSlop={12} style={s.monthNavBtn} activeOpacity={0.7}>
+          <TouchableOpacity onPress={event => { event.stopPropagation(); changeMonth(-1); }} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Previous month" : "Mes anterior"} style={s.monthNavBtn} activeOpacity={0.7}>
             <Feather name="chevron-left" size={18} color="#ffffff" />
           </TouchableOpacity>
           <Text style={s.monthNavTitle}>
@@ -2398,7 +2454,7 @@ export function AgendaBoard({
               return `${monthNamesArr[m - 1]} ${y}`;
             })()}
           </Text>
-          <TouchableOpacity onPress={() => {}} hitSlop={12} style={s.monthNavBtn} activeOpacity={0.7}>
+          <TouchableOpacity onPress={event => { event.stopPropagation(); changeMonth(1); }} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Next month" : "Mes siguiente"} style={s.monthNavBtn} activeOpacity={0.7}>
             <Feather name="chevron-right" size={18} color="#ffffff" />
           </TouchableOpacity>
         </View>
@@ -2694,7 +2750,7 @@ export function AgendaBoard({
                             flex: 1, paddingVertical: 12,
                             borderRadius: 12, borderWidth: 1.5,
                             alignItems: "center", justifyContent: "center",
-                            backgroundColor: isActive ? opt.color + "22" : "rgba(255,255,255,0.04)",
+                            backgroundColor: isActive ? opt.color : "rgba(255,255,255,0.04)",
                             borderColor: isActive ? opt.color : opt.color + "55",
                           }}
                           activeOpacity={0.7}
@@ -2702,7 +2758,7 @@ export function AgendaBoard({
                           <Feather
                             name={(isActive ? opt.icon : opt.iconInactive) as any}
                             size={18}
-                            color={isActive ? opt.color : opt.color + "80"}
+                            color={isActive ? "#101018" : opt.color + "80"}
                           />
                         </TouchableOpacity>
                       );
@@ -2756,22 +2812,18 @@ export function AgendaBoard({
 
               {/* ─── FAB CLOSE BUTTONS — flotantes, bottom-right del sheet ─── */}
               <View style={{ position: "absolute", right: 16, bottom: 20, gap: 8, alignItems: "center" }}>
-                <TouchableOpacity
-                  onPress={() => { onGoToLanding?.(); setExpandedBookingItem(null); setExpandedCardId(null); }}
-                  style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: "#0E0E0E", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center" }}
-                  activeOpacity={0.8}
-                  hitSlop={6}
-                >
-                  <Feather name="chevrons-down" size={15} color="rgba(255,255,255,0.50)" />
-                </TouchableOpacity>
-                <TouchableOpacity
+                {onGoToLanding && (
+                  <GoCloseButton
+                    level="container"
+                    accessibilityLabel={lang === "en" ? "Exit calendar" : "Salir del calendario"}
+                    onPress={() => { onGoToLanding(); setExpandedBookingItem(null); setExpandedCardId(null); }}
+                  />
+                )}
+                <GoCloseButton
+                  level="panel"
+                  accessibilityLabel={lang === "en" ? "Close reservation details" : "Cerrar detalle de reserva"}
                   onPress={() => { setExpandedBookingItem(null); setExpandedCardId(null); }}
-                  style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: "#0E0E0E", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center" }}
-                  activeOpacity={0.8}
-                  hitSlop={6}
-                >
-                  <Feather name="chevron-down" size={15} color="rgba(255,255,255,0.50)" />
-                </TouchableOpacity>
+                />
               </View>
             </View>
           )}
@@ -3044,6 +3096,10 @@ export function AgendaOperativa({
   }, []);
   useEffect(() => { if (!visible) clearSelection(); }, [visible, clearSelection]);
   const { lang, t } = useLanguage();
+  const [navigationDateISO, setNavigationDateISO] = useState(selectedDateISO || formatISODate(getToday()));
+  useEffect(() => {
+    if (selectedDateISO) setNavigationDateISO(selectedDateISO);
+  }, [selectedDateISO]);
   const monthNamesArr = lang === "en" ? MONTH_NAMES_EN : MONTH_NAMES_ES;
   const insets = useSafeAreaInsets();
   const screenH = Dimensions.get("window").height;
@@ -3301,20 +3357,14 @@ export function AgendaOperativa({
                 </TouchableOpacity>
               </View>
             )}
-            <Text style={[
-              s.headerSub,
-              !peekMode && retrasadoItems.length === 0 && calView === "mes_lineal" && { color: "#00e5ff" },
-            ]}>
-              {peekMode
-                ? t("cal_header_peek")
-                : retrasadoItems.length > 0
-                  ? `${retrasadoItems.length} ${t("cal_header_delayed")}`
-                  : calView === "mes_lineal"
-                    ? t("cal_header_monthly")
-                    : calView === "semana"
-                      ? t("cal_header_weekly")
-                      : t("cal_header_schedule")}
-            </Text>
+            {peekMode ? (
+              <Text style={s.headerSub}>{t("cal_header_peek")}</Text>
+            ) : (
+              <GoCalendarViewSelector value={calView} onChange={setCalView} />
+            )}
+            {!peekMode && retrasadoItems.length > 0 && (
+              <Text style={s.headerSub}>{`${retrasadoItems.length} ${t("cal_header_delayed")}`}</Text>
+            )}
           </View>
         </GestureDetector>
 
@@ -3322,10 +3372,10 @@ export function AgendaOperativa({
         <AgendaBoard
           selection={{ selectedIds, setSelectedIds, selectionMode, setSelectionMode }}
           goLog={goLog}
-          selectedDateISO={selectedDateISO}
+          selectedDateISO={navigationDateISO}
           sortOrder={sortOrder}
           onToggleSortOrder={onToggleSortOrder}
-          onSelectDay={onSelectDay}
+          onSelectDay={(iso) => { setNavigationDateISO(iso); onSelectDay?.(iso); }}
           onSelectItem={onSelectItem}
           onMoveItem={onMoveItem}
           onOpenMoveFlow={onOpenMoveFlow}
@@ -3429,15 +3479,11 @@ export function AgendaOperativa({
 
             {/* ── Cierre del panel — zona pulgar derecho ── */}
             <View style={s.configCloseRow}>
-              <TouchableOpacity
+              <GoCloseButton
+                level="panel"
                 onPress={() => { Haptics.selectionAsync().catch(() => {}); setConfigPanelOpen(false); }}
-                style={s.configCloseBtn}
-                activeOpacity={0.8}
-                hitSlop={8}
                 accessibilityLabel="Cerrar configuración"
-              >
-                <Feather name="chevron-down" size={11} color="rgba(255,255,255,0.55)" />
-              </TouchableOpacity>
+              />
             </View>
           </View>
         )}
@@ -3479,8 +3525,8 @@ export function AgendaOperativa({
             hitSlop={8}
             accessibilityLabel={configPanelOpen ? "Cerrar configuración" : "Abrir configuración"}
           >
-            <Feather name="chevron-up" size={12} color={configPanelOpen ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.70)"} />
-            <Text style={[s.configToggleBtnText, configPanelOpen && { color: "rgba(255,255,255,0.30)" }]}>CONFIG.</Text>
+            <Feather name="chevron-up" size={12} color={configPanelOpen ? "#ffffff" : "rgba(255,255,255,0.85)"} />
+            <Text style={[s.configToggleBtnText, configPanelOpen && { color: "#ffffff" }]}>CONFIG.</Text>
           </TouchableOpacity>
         )}
 
@@ -3645,19 +3691,20 @@ const s = StyleSheet.create({
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 8,
+    backgroundColor: "#0e0e10",
     borderBottomWidth: 1,
-    borderBottomColor: "rgba(0,0,0,0.06)",
+    borderBottomColor: "rgba(255,255,255,0.15)",
   },
   monthNavBtn: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
     borderRadius: 16,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: "#0e0e10",
     alignItems: "center",
     justifyContent: "center",
   },
   monthNavTitle: {
-    color: "#111827",
+    color: "#ffffff",
     fontSize: 13,
     fontFamily: "Inter_900Black", fontWeight: "900",
     letterSpacing: 1.2,
@@ -4335,18 +4382,18 @@ const s = StyleSheet.create({
     height: 36,
     paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "rgba(255,255,255,0.28)",
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
   configBtnActive: {
-    backgroundColor: "rgba(255,255,255,0.14)",
-    borderColor: "rgba(255,255,255,0.40)",
+    backgroundColor: "rgba(255,255,255,0.20)",
+    borderColor: "rgba(255,255,255,0.65)",
   },
   configBtnText: {
-    color: "rgba(255,255,255,0.38)",
+    color: "rgba(255,255,255,0.75)",
     fontSize: 9,
     fontFamily: "Inter_900Black", fontWeight: "900" as const,
     letterSpacing: 0.6,
@@ -4364,9 +4411,9 @@ const s = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 6,
-    backgroundColor: "rgba(255,255,255,0.05)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
+    borderColor: "rgba(255,255,255,0.35)",
     alignItems: "center" as const,
     justifyContent: "center" as const,
   },
@@ -4384,11 +4431,11 @@ const s = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: "#0d1020",
     borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.22)",
+    borderColor: "rgba(255,255,255,0.45)",
     zIndex: 20,
   },
   configToggleBtnText: {
-    color: "rgba(255,255,255,0.45)",
+    color: "rgba(255,255,255,0.85)",
     fontSize: 8,
     fontFamily: "Inter_900Black", fontWeight: "900" as const,
     letterSpacing: 0.8,

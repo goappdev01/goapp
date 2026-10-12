@@ -37,6 +37,8 @@ export type BookableItem = {
   customerCapacity: number; // how many people per unit
   unitQuantity: number; // how many identical units exist
   price: number;
+  currency?: string;
+  priceKnown?: boolean;
   paymentRequired: boolean;
   active: boolean;
   visible: boolean;
@@ -278,6 +280,7 @@ type RemoteService = {
   description?: string | null;
   duration_minutes: number;
   price?: number | string | null;
+  currency?: string;
   active?: boolean;
 };
 
@@ -319,6 +322,8 @@ function mapRemoteService(row: RemoteService): BookableItem {
     customerCapacity: row.ui_metadata?.customerCapacity ?? 1,
     unitQuantity: row.ui_metadata?.unitQuantity ?? 1,
     price: Number(row.price ?? 0),
+    currency: row.currency,
+    priceKnown: row.price != null,
     paymentRequired: row.ui_metadata?.paymentRequired ?? false,
     active: row.active !== false,
     visible: row.ui_metadata?.visible ?? row.active !== false,
@@ -1425,7 +1430,7 @@ export async function getAvailableSlots(
   dateISO: string, // "YYYY-MM-DD"
   staffId?: string,
 ): Promise<AvailableSlot[]> {
-  const item = (await getBookableItems(businessId)).find(
+  const item = (await getBookableItems(businessId, isCloudId(businessId))).find(
     (i) => i.id === bookableItemId
   );
   if (!item || !item.active || !item.visible) return [];
@@ -1545,7 +1550,7 @@ export async function getAllSlots(
   dateISO: string,
   staffId?: string,
 ): Promise<SlotWithStatus[]> {
-  const item = (await getBookableItems(businessId)).find(
+  const item = (await getBookableItems(businessId, isCloudId(businessId))).find(
     (i) => i.id === bookableItemId
   );
   if (!item || !item.active || !item.visible) return [];
@@ -2652,4 +2657,12 @@ export function computeRefundInfo(
     default:
       return { refundAmount: 0, refundPercent: 0, isFree: false, label: "Sin devolución" };
   }
+}
+
+/** Customer-only live reads; never hide a network failure behind a local cache. */
+export async function getLiveCustomerBookings(): Promise<Booking[]> {
+  const customerId = await getAuthenticatedUserId();
+  if (!customerId) throw new BookingAuthenticationError();
+  const rows = await supabaseApiRequest<RemoteBooking[]>("/supabase/bookings", {}, true);
+  return rows.filter(row => row.customer_id === customerId).map(mapRemoteBooking);
 }

@@ -1,3 +1,4 @@
+import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import { notifySessionChanged, onSessionChanged } from "@/lib/sessionEvents";
 import { getConfirmedRegistrationRole, PENDING_REGISTRATION_KEY, readPendingRegistration, type PendingRegistration } from "@/lib/registrationReturn";
 import React, { useEffect, useRef, useState } from "react";
@@ -7,7 +8,6 @@ import {
   AppState,
   Dimensions,
   Linking,
-  Modal,
   PanResponder,
   ScrollView,
   StyleSheet,
@@ -24,6 +24,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { DraggableFAB } from "../DraggableFAB";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
+import { useGoView } from "@/contexts/GoViewContext";
+import type { GoView } from "@/data/goViewPolicy";
+import { AccountContextSelector } from "./AccountContextSelector";
 import {
   CuentaVerification,
   VerificationStatus,
@@ -44,15 +48,10 @@ export type AccountRole =
 // Public-facing account types (shown in onboarding).
 // Internal roles (admin, trabajador, proveedor, partner, franquicia)
 // are assigned programmatically and never shown in public selection.
-const PUBLIC_ROLES: AccountRole[] = ["usuario", "empresa"];
-
-// ── INTERNAL ADMIN FLAG ────────────────────────────────────────────────────────
-// Set to true to reveal the hidden ADMIN button in account type selection.
-// Keep false in production. Replace with real permission check when ready.
-export const IS_INTERNAL_ADMIN = true;
+const PUBLIC_ROLES: AccountRole[] = ["empresa", "usuario"];
 
 const EMPRESA_ROLES: AccountRole[] = [
-  "empresa", "admin", "trabajador", "proveedor", "partner", "franquicia",
+  "empresa", "trabajador", "proveedor", "partner", "franquicia",
 ];
 
 export function isEmpresaRole(role: AccountRole | null): boolean {
@@ -71,20 +70,20 @@ interface RoleOption {
 function getRoleOptions(t: (k: import("@/i18n/translations").TranslationKey) => string): RoleOption[] {
   return [
     {
-      role: "usuario",
-      icon: "user",
-      label: t("role_usuario_label"),
-      sublabel: t("role_usuario_sub"),
-      description: t("role_usuario_desc"),
-      color: "#4A80BD",
-    },
-    {
       role: "empresa",
       icon: "briefcase",
       label: t("role_empresa_label"),
       sublabel: t("role_empresa_sub"),
       description: t("role_empresa_desc"),
       color: "#3D9A84",
+    },
+    {
+      role: "usuario",
+      icon: "user",
+      label: t("role_usuario_label"),
+      sublabel: t("role_usuario_sub"),
+      description: t("role_usuario_desc"),
+      color: "#4A80BD",
     },
   ];
 }
@@ -116,6 +115,7 @@ interface Props {
   onOpenVerificacion?: () => void;
   // Internal admin entry point
   onOpenAdmin?: () => void;
+  onSelectOwnerView?: (view: GoView) => Promise<boolean>;
 }
 
 const { width: SW } = Dimensions.get("window");
@@ -147,10 +147,29 @@ export function LoginRegisterPanel({
   verification,
   onOpenVerificacion,
   onOpenAdmin,
+  onSelectOwnerView,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { t } = useLanguage();
+  const adminAccess = useAdminAccess();
+  const goView = useGoView();
+  const [viewBusy, setViewBusy] = useState(false);
+  const [viewError, setViewError] = useState<string | null>(null);
+  const ownerSelectorIdentity = useRef<string | null>(null);
+  if (goView.isOwner && adminAccess.userId) ownerSelectorIdentity.current = adminAccess.userId;
+  else if (!adminAccess.checking || ownerSelectorIdentity.current !== adminAccess.userId) ownerSelectorIdentity.current = null;
+  // Retain only presentation during revalidation; buttons require current authority.
+  const ownerSelector = goView.isOwner || (!!adminAccess.userId && adminAccess.checking && ownerSelectorIdentity.current === adminAccess.userId);
+  const chooseOwnerView = async (next: GoView) => {
+    if (viewBusy || !goView.isOwner || !onSelectOwnerView) return;
+    setViewBusy(true); setViewError(null);
+    try {
+      if (!await onSelectOwnerView(next)) setViewError(t("context_access_error"));
+    } catch { setViewError(t("context_access_error")); }
+    finally { setViewBusy(false); }
+  };
   const [authStep, setAuthStep] = useState<"role" | "credentials">("role");
+  const [ownerLogin, setOwnerLogin] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [selectedRole, setSelectedRole] = useState<AccountRole>("usuario");
   const [authEmail, setAuthEmail] = useState("");
@@ -158,6 +177,7 @@ export function LoginRegisterPanel({
   const [authName, setAuthName] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const passwordInputRef = useRef<TextInput>(null);
   const authInputRevisionRef = useRef(0);
   const pendingRegistrationRef = useRef<PendingRegistration | null>(null);
   const authContextRef = useRef({ visible, userAccountType, onSetAccountType });
@@ -234,6 +254,14 @@ export function LoginRegisterPanel({
   }, []);
 
   const ROLE_OPTIONS = getRoleOptions(t);
+  const ownerOptions = (["ADMIN", "BUSINESS", "USER"] as const).map(view => ({
+    id: view,
+    label: view === "BUSINESS" ? t("role_empresa_label") + " DEMO" : t(view === "ADMIN" ? "role_admin_label" : "role_usuario_label"),
+    icon: (view === "ADMIN" ? "shield" : view === "BUSINESS" ? "briefcase" : "user") as RoleOption["icon"],
+    color: view === "ADMIN" ? "#C25A5A" : view === "BUSINESS" ? "#3D9A84" : "#4A80BD",
+    sublabel: t(view === "ADMIN" ? "admin_internal_sub" : view === "BUSINESS" ? "context_business_preview" : "role_usuario_sub"),
+    description: t(view === "ADMIN" ? "context_admin_description" : view === "BUSINESS" ? "context_business_description" : "role_usuario_desc"),
+  }));
 
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -295,6 +323,7 @@ export function LoginRegisterPanel({
 
   const handleSelectRole = (role: AccountRole) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setOwnerLogin(false);
     setSelectedRole(role);
     setAuthStep("credentials");
     setAuthError(null);
@@ -344,7 +373,10 @@ export function LoginRegisterPanel({
         return;
       }
       notifySessionChanged();
-      onSetAccountType(selectedRole);
+      if (ownerLogin) {
+        setAuthPassword("");
+        if (!payload.user?.id || !await adminAccess.refreshOwner(payload.user.id)) throw new Error(t("owner_login_denied"));
+      } else { onSetAccountType(selectedRole); }
       setAuthStep("role");
     } catch (error) {
       if (inputRevision === authInputRevisionRef.current) {
@@ -391,7 +423,7 @@ export function LoginRegisterPanel({
   const accentColor   = currentOption?.color ?? "#4A80BD";
   const fabBottom     = insets.bottom + 24;
 
-  const isEmpresa = isEmpresaRole(userAccountType);
+  const isEmpresa = goView.isOwner ? goView.view === "BUSINESS" : isEmpresaRole(userAccountType);
   const vStatus   = verification?.status ?? "none";
   const vColor    = verificationColor(vStatus);
   const vLabel    = vStatus === "verified" ? t("verif_status_verified")
@@ -455,19 +487,43 @@ export function LoginRegisterPanel({
         </View>
 
         {/* ── AUTH: credentials ── */}
-        {userAccountType === null && authStep === "credentials" && (
-          <ScrollView style={s.scroll} contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+        {!ownerSelector && userAccountType === null && authStep === "credentials" && (
+          <ScrollView style={s.scroll} contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="always">
             <View style={s.authForm}>
               <View style={s.welcomeIcon}>
                 <Feather name={selectedRole === "empresa" ? "briefcase" : "user"} size={28} color={selectedRole === "empresa" ? "#3D9A84" : "#4A80BD"} />
               </View>
               <Text style={s.welcomeTitle}>{authMode === "login" ? "Inicia sesión en GO" : "Crea tu cuenta GO"}</Text>
-              <Text style={s.welcomeSub}>{selectedRole === "empresa" ? "Cuenta Empresa" : "Cuenta Usuario"}</Text>
+              <Text style={s.welcomeSub}>{ownerLogin ? t("owner_login_label") : selectedRole === "empresa" ? "Cuenta Empresa" : "Cuenta Usuario"}</Text>
               {authMode === "register" && (
                 <TextInput value={authName} onChangeText={setAuthName} placeholder="Nombre completo" placeholderTextColor="#94A3B8" autoCapitalize="words" style={s.authInput} />
               )}
-              <TextInput value={authEmail} onChangeText={handleAuthEmailChange} placeholder="Email" placeholderTextColor="#94A3B8" autoCapitalize="none" keyboardType="email-address" style={s.authInput} />
-              <TextInput value={authPassword} onChangeText={setAuthPassword} placeholder="Contraseña (mínimo 8 caracteres)" placeholderTextColor="#94A3B8" secureTextEntry style={s.authInput} />
+              <TextInput
+                value={authEmail}
+                onChangeText={handleAuthEmailChange}
+                placeholder="Email"
+                placeholderTextColor="#94A3B8"
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                autoComplete={authMode === "login" ? "username" : "email"}
+                returnKeyType="next"
+                blurOnSubmit={false}
+                onSubmitEditing={() => passwordInputRef.current?.focus()}
+                style={s.authInput}
+              />
+              <TextInput
+                ref={passwordInputRef}
+                value={authPassword}
+                onChangeText={setAuthPassword}
+                placeholder="Contraseña (mínimo 8 caracteres)"
+                placeholderTextColor="#94A3B8"
+                secureTextEntry
+                autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                returnKeyType={authMode === "login" ? "go" : "done"}
+                onSubmitEditing={authMode === "login" ? handleAuthenticate : undefined}
+                style={s.authInput}
+              />
               {authError && <Text style={s.authError}>{authError}</Text>}
               <TouchableOpacity onPress={handleAuthenticate} disabled={authBusy} activeOpacity={0.82} style={s.authPrimary}>
                 {authBusy ? <ActivityIndicator color="#fff" /> : <Text style={s.authPrimaryText}>{authMode === "login" ? "ENTRAR" : "CREAR CUENTA"}</Text>}
@@ -477,9 +533,9 @@ export function LoginRegisterPanel({
                   <Text style={s.authSwitchText}>¿Olvidaste tu contraseña?</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity onPress={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(null); }} disabled={authBusy} style={s.authSwitch}>
+              {!ownerLogin && <TouchableOpacity onPress={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(null); }} disabled={authBusy} style={s.authSwitch}>
                 <Text style={s.authSwitchText}>{authMode === "login" ? "¿No tienes cuenta? Regístrate" : "Ya tengo una cuenta · Iniciar sesión"}</Text>
-              </TouchableOpacity>
+              </TouchableOpacity>}
               <TouchableOpacity onPress={() => setAuthStep("role")} disabled={authBusy} style={s.authBack}>
                 <Feather name="arrow-left" size={15} color="#64748B" />
                 <Text style={s.authBackText}>Cambiar tipo de cuenta</Text>
@@ -489,72 +545,56 @@ export function LoginRegisterPanel({
         )}
 
         {/* ── SETUP: no account ── */}
-        {userAccountType === null && authStep === "role" && (
+        {(ownerSelector || (userAccountType === null && authStep === "role")) && (
           <>
             <ScrollView
               style={s.scroll}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={s.welcomeScroll}
+              contentContainerStyle={[s.welcomeScroll, { justifyContent: "flex-start", paddingHorizontal: 0, paddingBottom: userAccountType !== null ? fabBottom + 60 : insets.bottom + 28 }]}
               keyboardShouldPersistTaps="handled"
             >
-              <View style={s.welcomeBlock}>
+              <View style={[s.welcomeBlock, { flexGrow: 1, justifyContent: "center", paddingHorizontal: 20 }]}>
                 <View style={s.welcomeIcon}>
                   <Feather name="zap" size={28} color="#4A80BD" />
                 </View>
                 <Text style={s.welcomeTitle}>{t("welcome_go_title")}</Text>
                 <Text style={s.welcomeSub}>{t("welcome_go_sub")}</Text>
                 <Text style={s.footerNote}>
-                  {t("welcome_change_note")}
+                  {t(ownerSelector ? "context_change_note" : "welcome_change_note")}
                 </Text>
               </View>
-            </ScrollView>
-
-            {/* Fixed bottom zone — ONLY public types */}
-            <View style={[s.bottomZone, { paddingBottom: insets.bottom + 28 }]}>
-              <Text style={s.sectionLabelPad}>{t("account_type_section")}</Text>
-              <View style={s.roleGrid}>
-                {ROLE_OPTIONS.map(opt => (
-                  <TouchableOpacity
-                    key={opt.role}
-                    onPress={() => handleSelectRole(opt.role)}
-                    activeOpacity={0.78}
-                    style={[s.roleCard, { borderColor: `${opt.color}35` }]}
-                  >
-                    <View style={[s.roleCardIcon, { backgroundColor: `${opt.color}14` }]}>
-                      <Feather name={opt.icon} size={22} color={opt.color} />
-                    </View>
-                    <Text style={s.roleCardLabel}>{opt.label}</Text>
-                    <Text style={s.roleCardSub}>{opt.sublabel}</Text>
-                    <Text style={s.roleCardDesc}>{opt.description}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* ADMIN — only visible when IS_INTERNAL_ADMIN = true */}
-              {IS_INTERNAL_ADMIN && (
-                <TouchableOpacity
-                  onPress={() => { onOpenAdmin?.(); onClose(); }}
-                  activeOpacity={0.78}
-                  style={s.adminCard}
-                >
-                  <View style={s.adminCardLeft}>
-                    <View style={s.adminCardIcon}>
-                      <Feather name="shield" size={18} color="#ef4444" />
-                    </View>
-                    <View>
-                      <Text style={s.adminCardLabel}>ADMIN</Text>
-                      <Text style={s.adminCardSub}>{t("admin_internal_sub")}</Text>
-                    </View>
+              {ownerSelector && (
+                <View style={{ marginTop: 24, gap: 12 }}>
+                  <Text style={s.sectionLabelPad}>{t("context_active").replace("__CONTEXT__", ownerOptions.find(option => option.id === goView.view)?.label.toUpperCase() ?? "")}</Text>
+                  <AccountContextSelector options={ownerOptions} selected={goView.view}
+                    disabled={viewBusy || !goView.isOwner} testIDPrefix="owner-view"
+                    onSelect={next => { void chooseOwnerView(next); }} />
+                  <Text style={[s.actionSub, { paddingHorizontal: 20 }]}>{t("context_preview_notice")}</Text>
+                  {(viewBusy || !goView.isOwner) && <ActivityIndicator accessibilityLabel={t("context_checking")} />}
+                  {viewError && <Text accessibilityRole="alert" style={s.authError}>{viewError}</Text>}
+                  <View style={[s.secondaryRow, { marginHorizontal: 20 }]}>
+                    <TouchableOpacity onPress={() => { onOpenPerfil(); onClose(); }} style={s.secondaryBtn}>
+                      <Text style={s.secondaryTxt}>{t("my_profile_label")}</Text>
+                    </TouchableOpacity>
+                    <View style={s.secondarySep} />
+                    <TouchableOpacity onPress={handleLogout} style={s.secondaryBtn}>
+                      <Text style={[s.secondaryTxt, { color: "#C25A5A" }]}>{t("sign_out")}</Text>
+                    </TouchableOpacity>
                   </View>
-                  <Feather name="chevron-right" size={16} color="#ef4444" />
-                </TouchableOpacity>
+                </View>
               )}
-            </View>
+              {!ownerSelector && <View style={[s.bottomZone, { paddingBottom: 0, marginTop: 18 }]}>
+              <Text style={s.sectionLabelPad}>{t("account_type_section")}</Text>
+              <AccountContextSelector options={ROLE_OPTIONS.map(option => ({ ...option, id: option.role }))}
+                testIDPrefix="account-role" onSelect={handleSelectRole} />
+              </View>}
+              {!ownerSelector && <TouchableOpacity testID="owner-direct-login" accessibilityRole="button" onPress={() => { setOwnerLogin(true); setAuthMode("login"); setAuthStep("credentials"); setAuthError(null); }} style={[s.secondaryBtn, { marginHorizontal: 20, marginTop: 12, padding: 14 }]}><Text style={s.secondaryTxt}>{t("owner_login_label")}</Text></TouchableOpacity>}
+            </ScrollView>
           </>
         )}
 
         {/* ── ACTIVE ACCOUNT ── */}
-        {userAccountType !== null && (
+        {userAccountType !== null && !ownerSelector && (
           <View style={{ flex: 1 }}>
 
             {/* ── TOP: spacer visual — nada interactivo arriba ── */}
@@ -578,7 +618,7 @@ export function LoginRegisterPanel({
               </View>
 
               {/* Verification status for empresa accounts */}
-              {isEmpresa && (
+              {isEmpresa && !goView.isBusinessPreview && (
                 <TouchableOpacity
                   style={[s.verificCard, { borderColor: `${vColor}28` }]}
                   onPress={() => { Haptics.selectionAsync().catch(() => {}); onOpenVerificacion?.(); onClose(); }}
@@ -650,6 +690,26 @@ export function LoginRegisterPanel({
                 )}
               </View>
 
+              {/* Technical ADMIN retains its private entry without owner controls. */}
+              {adminAccess.allowed && !goView.isOwner && (
+                <TouchableOpacity
+                  onPress={() => { onOpenAdmin?.(); }}
+                  activeOpacity={0.78}
+                  style={s.adminCard}
+                >
+                  <View style={s.adminCardLeft}>
+                    <View style={s.adminCardIcon}>
+                      <Feather name="shield" size={18} color="#ef4444" />
+                    </View>
+                    <View>
+                      <Text style={s.adminCardLabel}>ADMIN</Text>
+                      <Text style={s.adminCardSub}>{t("admin_internal_sub")}</Text>
+                    </View>
+                  </View>
+                  <Feather name="chevron-right" size={16} color="#ef4444" />
+                </TouchableOpacity>
+              )}
+
               {/* Cambiar tipo · Cerrar sesión */}
               <View style={s.secondaryRow}>
                 <TouchableOpacity
@@ -676,6 +736,7 @@ export function LoginRegisterPanel({
         )}
 
         {/* FAB close — draggable, posición guardada por pantalla */}
+        {userAccountType !== null && (
         <DraggableFAB
           screenKey="login-register"
           buttonKey="main"
@@ -690,6 +751,7 @@ export function LoginRegisterPanel({
             </View>
           </TouchableOpacity>
         </DraggableFAB>
+        )}
 
         <LinearGradient
           colors={["transparent", "rgba(0,0,0,0.04)"]}

@@ -9,11 +9,12 @@
  *                + selector de profesional: Todos · Empresa · Isa · Rosa · Juani · Antonio · Personal
  * ═══════════════════════════════════════════════════════════════════════════
  */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   Animated,
+  Alert,
   Dimensions,
-  Modal,
+
   PanResponder,
   Pressable,
   ScrollView,
@@ -26,21 +27,26 @@ import {
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useGoLog } from "@/hooks/useGoLog";
+import type { BusinessDemoStore } from "@/data/businessDemoStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
+import type { TranslationKey } from "@/i18n/translations";
 import { PlanoEmpresaScreen } from "./PlanoEmpresaScreen";
 import { DraggableFAB } from "@/components/DraggableFAB";
 import { AgendaBoard } from "@/components/AgendaOperativa";
 import type { GoEntry, DensityKey, CalDayNightMode } from "@/components/AgendaOperativa";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
+import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
 import type { CalSizeKey } from "@/constants/goSizes";
 import {
   loadReservations,
   loadFloorPlan,
   STATUS_COLORS,
-  STATUS_LABELS,
   type FloorReservation,
   type FloorElement,
 } from "@/data/floorPlan";
@@ -96,6 +102,8 @@ interface GoReservasConfigScreenProps {
   onClose:                () => void;
   onOpenVerificacion?:    () => void;
   onOpenCalendarPanel?:   () => void;
+  onOpenGo?:              () => void;
+  onCreateTaskAtTime?:    (dateISO: string, timeHHMM: string) => void;
   onGoToLanding?:         () => void;
   dayNightMode?:          "claro" | "oscuro" | "mixto";
   onDayNightModeChange?:  (m: CalDayNightMode) => void;
@@ -116,7 +124,33 @@ function computeIsDark(mode?: "claro" | "oscuro" | "mixto"): boolean {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCalendarPanel, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed }: GoReservasConfigScreenProps) {
+// Separate data wrappers share the same existing screen; DEMO never mounts the live agenda hook.
+export function GoReservasConfigScreen(props: GoReservasConfigScreenProps) {
+  const { demo } = useBusinessConfig();
+  if (demo) throw new Error("GO Reservas DEMO requiere su adaptador aislado.");
+  const [allGoLog, setGoLog] = useGoLog();
+  return useGoReservasContent({ ...props, allGoLog, setGoLog });
+}
+export function GoReservasDemoScreen(props: GoReservasConfigScreenProps) {
+  const { demo } = useBusinessConfig();
+  if (!demo) throw new Error("No hay un entorno DEMO autorizado.");
+  const snapshot = useSyncExternalStore(demo.subscribe, demo.getSnapshot);
+  const setGoLog = useCallback<React.Dispatch<React.SetStateAction<GoEntry[]>>>(update => {
+    void demo.updateEntries(update).catch(error => Alert.alert("Reservas DEMO", String(error)));
+  }, [demo]);
+  return useGoReservasContent({ ...props,
+    onOpenVerificacion: undefined, onOpenCalendarPanel: undefined, onOpenGo: undefined,
+    onCreateTaskAtTime: undefined, onGoToLanding: undefined, onDayNightModeChange: undefined,
+    allGoLog: snapshot.entries, setGoLog, demoStore: demo, demoSnapshot: snapshot,
+  });
+}
+
+function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot }: GoReservasConfigScreenProps & {
+  allGoLog: GoEntry[];
+  setGoLog: React.Dispatch<React.SetStateAction<GoEntry[]>>;
+  demoStore?: BusinessDemoStore;
+  demoSnapshot?: unknown;
+}) {
   const insets    = useSafeAreaInsets();
   const { config } = useBusinessConfig();
   const { lang, t }  = useLanguage();
@@ -134,7 +168,11 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
     return names;
   }, [config.plantillaItems]);
 
-  const isDark = computeIsDark(dayNightMode);
+  const [demoDayNightMode, setDemoDayNightMode] = useState<CalDayNightMode>("mixto");
+  const actualDayNightMode = demoStore ? demoDayNightMode : dayNightMode;
+  const calendarStorage = demoStore?.preferences ?? AsyncStorage;
+  const reportStorageError = (error: unknown) => { if (demoStore) Alert.alert("Calendario DEMO", String(error)); };
+  const isDark = computeIsDark(actualDayNightMode);
   const tk = isDark ? {
     bg:     "#0a0a0f",
     card:   "#16161e",
@@ -240,6 +278,7 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
     if (!navigateToDayISO) return;
     setViewMode("calendario");
     setCalViewMonth(navigateToDayISO.slice(0, 7));
+    setReservasNavSelectedDay(navigateToDayISO);
     onNavigateDayConsumed?.();
   }, [navigateToDayISO]);
 
@@ -248,7 +287,7 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
   const [elements,  setElements]  = useState<FloorElement[]>([]);
   const [loading,   setLoading]   = useState(true);
 
-  const businessId   = "my_business";
+  const businessId   = demoStore?.businessId ?? "my_business";
   const businessName = config.businessName?.trim() || "Mi negocio";
   const templateId   = config.subId ?? undefined;
 
@@ -256,18 +295,17 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
     let active = true;
     setLoading(true);
     Promise.all([
-      loadReservations(businessId).catch(() => [] as FloorReservation[]),
-      loadFloorPlan(businessId).then(p => p?.elements ?? []).catch(() => [] as FloorElement[]),
+      (demoStore ? demoStore.loadReservations(demoStore.planId) : loadReservations(businessId)).catch(error => { reportStorageError(error); return [] as FloorReservation[]; }),
+      (demoStore ? demoStore.loadFloorPlan(businessId) : loadFloorPlan(businessId)).then(p => p?.elements ?? []).catch(error => { reportStorageError(error); return [] as FloorElement[]; }),
     ]).then(([res, els]) => {
       if (!active) return;
       setReservas(res);
       setElements(els);
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [businessId]);
+  }, [businessId, demoStore, demoSnapshot]);
 
-  // ── Calendar data — mismo key que AgendaOperativa (sin duplicar) ──────────
-  const [goLog, setGoLog] = useState<GoEntry[]>([]);
+  // Calendar entries are supplied by the live wrapper or the owner-local DEMO adapter.
 
   // ── Config panel — mismos controles que el Calendario normal ──────────────
   const [configVisible, setConfigVisible] = useState<boolean>(false);
@@ -275,47 +313,46 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
   const [calShowHours,  setCalShowHours]  = useState<boolean>(true);
   const [calSize,       setCalSize]       = useState<CalSizeKey>("GO_CAL_SMALL");
 
-  // Carga desde los mismos keys que usa el Calendario (configuración compartida)
+  // Normal calendar preferences remain shared; DEMO preferences stay inside its own document.
   useEffect(() => {
-    AsyncStorage.getItem("cal_density").then(v => {
+    calendarStorage.getItem("cal_density").then(v => {
       if (v && (["auto","1h","30min","15min"] as const).includes(v as DensityKey)) setCalDensity(v as DensityKey);
     }).catch(() => {});
-    AsyncStorage.getItem("cal_show_hours").then(v => {
+    calendarStorage.getItem("cal_show_hours").then(v => {
       if (v !== null) setCalShowHours(v !== "false");
     }).catch(() => {});
-    AsyncStorage.getItem("go_cal_size_v1").then(v => {
+    calendarStorage.getItem("go_cal_size_v1").then(v => {
       if (v && (["GO_CAL_SMALL","GO_CAL_MEDIUM","GO_CAL_LARGE"] as const).includes(v as CalSizeKey)) setCalSize(v as CalSizeKey);
     }).catch(() => {});
-  }, []);
+    if (demoStore) calendarStorage.getItem("cal_day_night_mode_v1").then(value => {
+      if (value === "claro" || value === "oscuro" || value === "mixto") setDemoDayNightMode(value);
+    }).catch(reportStorageError);
+  }, [demoStore]);
 
-  useEffect(() => {
-    AsyncStorage.getItem("go_log_v1").then(raw => {
-      if (!raw) return;
-      const all: GoEntry[] = JSON.parse(raw);
-      // Empresa calendar: each booking generates two go_log_v1 entries (cli + prv).
-      // Keep only ONE card per reservationId — prefer kind="sent" (provider card).
-      const seenById = new Map<string, { idx: number; isSent: boolean }>();
-      const deduped: GoEntry[] = [];
-      for (const e of all) {
-        const rid = (e as any).reservationId as string | undefined;
-        if (e.type === "GO_BOOKING" && rid) {
-          const existing = seenById.get(rid);
-          if (!existing) {
-            seenById.set(rid, { idx: deduped.length, isSent: e.kind === "sent" });
-            deduped.push(e);
-          } else if (e.kind === "sent" && !existing.isSent) {
-            // Upgrade: replace received card with the provider (sent) card
-            deduped[existing.idx] = e;
-            seenById.set(rid, { idx: existing.idx, isSent: true });
-          }
-          // else: skip duplicate
-        } else {
+  const goLog = useMemo(() => {
+    // Empresa calendar: each booking generates two go_log_v1 entries (cli + prv).
+    // Keep only ONE card per reservationId — prefer kind="sent" (provider card).
+    const seenById = new Map<string, { idx: number; isSent: boolean }>();
+    const deduped: GoEntry[] = [];
+    for (const e of allGoLog) {
+      const rid = (e as any).reservationId as string | undefined;
+      if (e.type === "GO_BOOKING" && rid) {
+        const existing = seenById.get(rid);
+        if (!existing) {
+          seenById.set(rid, { idx: deduped.length, isSent: e.kind === "sent" });
           deduped.push(e);
+        } else if (e.kind === "sent" && !existing.isSent) {
+          // Upgrade: replace received card with the provider (sent) card
+          deduped[existing.idx] = e;
+          seenById.set(rid, { idx: existing.idx, isSent: true });
         }
+        // else: skip duplicate
+      } else {
+        deduped.push(e);
       }
-      setGoLog(deduped);
-    }).catch(() => {});
-  }, []);
+    }
+    return deduped;
+  }, [allGoLog]);
 
   // ── Professional selector ─────────────────────────────────────────────────
   const [selectedPro, setSelectedPro] = useState<string>("Todos");
@@ -324,18 +361,16 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
   const handleChangeEstado = useCallback(async (id: string, estado: GoEntry["estado"]) => {
     setGoLog(prev => {
       const next = prev.map(e => e.id === id ? { ...e, estado } : e);
-      AsyncStorage.setItem("go_log_v1", JSON.stringify(next)).catch(() => {});
       return next;
     });
-  }, []);
+  }, [setGoLog]);
 
   const handleDeleteItem = useCallback(async (id: string) => {
     setGoLog(prev => {
       const next = prev.filter(e => e.id !== id);
-      AsyncStorage.setItem("go_log_v1", JSON.stringify(next)).catch(() => {});
       return next;
     });
-  }, []);
+  }, [setGoLog]);
 
   const filteredLog = useMemo<GoEntry[]>(() => {
     if (selectedPro === "Todos") return goLog;
@@ -402,7 +437,10 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
         <View style={g.backBtn} />
         <View style={g.headerCenter}>
           <Text style={[g.headerTitle, { color: tk.text }]}>{lang === "en" ? "GO Bookings" : "GO Reservas"}</Text>
-          <Text style={[g.headerSub, { color: tk.dim }]}>{formatTodayLabel(t)} · {lang === "en" ? "live" : "en tiempo real"}</Text>
+          <Text style={[g.headerSub, { color: tk.dim }]}>{formatTodayLabel(t)} · {demoStore ? (lang === "en" ? "local DEMO" : "DEMO local") : lang === "en" ? "live" : "en tiempo real"}</Text>
+          {viewMode === "calendario" && (
+            <GoCalendarViewSelector value={calInnerView} onChange={setCalInnerView} />
+          )}
         </View>
         {/* CONFIG button — exact same style as the normal Calendar */}
         <TouchableOpacity
@@ -411,7 +449,7 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
           hitSlop={10}
           style={{
             flexDirection: "row", alignItems: "center", gap: 4,
-            paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9,
+            paddingHorizontal: 7, paddingVertical: 7, borderRadius: 9,
             backgroundColor: configVisible ? "rgba(74,128,189,0.18)" : "rgba(0,0,0,0.05)",
             borderWidth: 1,
             borderColor: configVisible ? "rgba(74,128,189,0.55)" : "rgba(0,0,0,0.10)",
@@ -423,8 +461,8 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
             color={configVisible ? "#4A80BD" : tk.gray}
           />
           {!configVisible && (
-            <Text style={{ color: tk.gray, fontSize: 8, fontWeight: "700", letterSpacing: 0.8 }}>
-              CONFIG
+            <Text style={{ color: tk.gray, fontSize: 10, fontWeight: "700", letterSpacing: 0.1 }}>
+              {t("floor_configuration")}
             </Text>
           )}
         </TouchableOpacity>
@@ -435,14 +473,14 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
         <View style={{ backgroundColor: tk.card, borderBottomWidth: 1, borderBottomColor: tk.border, paddingHorizontal: 12, paddingBottom: 10 }}>
           <GoCalConfigPanel
             density={calDensity}
-            onDensityChange={(d) => { setCalDensity(d); AsyncStorage.setItem("cal_density", d).catch(() => {}); }}
+            onDensityChange={(d) => { setCalDensity(d); calendarStorage.setItem("cal_density", d).catch(reportStorageError); }}
             timedTaskCount={goLog.filter(e => !e.deleted && e.estado !== "rechazado" && !!e.time).length}
             showHours={calShowHours}
-            onShowHoursChange={(v) => { setCalShowHours(v); AsyncStorage.setItem("cal_show_hours", String(v)).catch(() => {}); }}
-            dayNightMode={(dayNightMode ?? "mixto") as CalDayNightMode}
-            onDayNightModeChange={(m) => { onDayNightModeChange?.(m); AsyncStorage.setItem("cal_day_night_mode_v1", m).catch(() => {}); }}
+            onShowHoursChange={(v) => { setCalShowHours(v); calendarStorage.setItem("cal_show_hours", String(v)).catch(reportStorageError); }}
+            dayNightMode={(actualDayNightMode ?? "mixto") as CalDayNightMode}
+            onDayNightModeChange={(m) => { if (demoStore) setDemoDayNightMode(m); else onDayNightModeChange?.(m); calendarStorage.setItem("cal_day_night_mode_v1", m).catch(reportStorageError); }}
             calSize={calSize}
-            onCalSizeChange={(s) => { setCalSize(s); AsyncStorage.setItem("go_cal_size_v1", s).catch(() => {}); }}
+            onCalSizeChange={(s) => { setCalSize(s); calendarStorage.setItem("go_cal_size_v1", s).catch(reportStorageError); }}
             viewMode={calInnerView === "semana" ? "semana" : "dia"}
             onViewModeChange={(v) => setCalInnerView(v)}
             monthGridOpen={monthPickerOpen}
@@ -463,7 +501,7 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
               style={[g.modeTab, { backgroundColor: tk.bg, borderColor: tk.border }, active && { backgroundColor: BLUE, borderColor: BLUE }]}
             >
               <Feather name={m.icon} size={14} color={active ? "#fff" : tk.gray} />
-              <Text style={[g.modeTabTxt, { color: tk.gray }, active && { color: "#fff" }]}>
+              <Text style={[g.modeTabTxt, { color: tk.gray }, active && { color: "#fff" }]} adjustsFontSizeToFit minimumFontScale={0.8} numberOfLines={1}>
                 {m.key === "plano" ? t("view_mode_plano") : m.key === "split" ? t("view_mode_dividido") : t("view_mode_calendario")}
               </Text>
             </TouchableOpacity>
@@ -553,7 +591,8 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
             density={calDensity}
             showHours={calShowHours}
             calSizeKey={calSize}
-            calDayNightMode={(dayNightMode ?? "mixto") as CalDayNightMode}
+            calDayNightMode={(actualDayNightMode ?? "mixto") as CalDayNightMode}
+            onCreateTaskAtTime={onCreateTaskAtTime}
             onChangeEstado={handleChangeEstado}
             onChangeMonth={dir => {
               setCalViewMonth(prev => {
@@ -593,7 +632,7 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
       />
 
       {/* ── FABs flotantes — botones redondos, mismo sistema visual que el calendario ── */}
-      {!hideFAB && (
+      {!hideFAB && !monthPickerOpen && (
         <DraggableFAB
           screenKey="go_reservas"
           buttonKey="main"
@@ -601,42 +640,34 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
           initialBottom={insets.bottom + 24}
           maxH={140}
         >
+          <View style={{ gap: 8, alignItems: "center" }}>
           {/* ↑ Abre el selector mensual — solo en pestaña Calendario.
                Usa Modal propio para evitar conflictos z-order con el Modal padre. */}
           {viewMode === "calendario" && (
             <TouchableOpacity
               activeOpacity={0.7}
               onPress={() => { Haptics.selectionAsync().catch(() => {}); openMonthPicker(); }}
-              hitSlop={10}
-              accessibilityLabel="Abrir calendario mensual"
+              hitSlop={2}
+              accessibilityLabel={t("floor_month_open")}
               style={g.fabBtn}
             >
               <Feather name="calendar" size={15} color="rgba(255,255,255,0.85)" />
             </TouchableOpacity>
           )}
-          {/* ↓ Cerrar un nivel */}
-          <TouchableOpacity
-            activeOpacity={0.7}
+          {onOpenGo && (
+            <TouchableOpacity onPress={onOpenGo} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Open GO" : "Abrir GO"}
+              hitSlop={2} activeOpacity={0.8}
+              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: GOLD, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ color: "#17120B", fontSize: 15, fontWeight: "900" }}>GO</Text>
+            </TouchableOpacity>
+          )}
+          {/* No internal panel is open here: only the container exit is shown. */}
+          <GoCloseButton
+            level="container"
             onPress={() => { Haptics.selectionAsync().catch(() => {}); onClose(); }}
-            hitSlop={10}
             accessibilityLabel={lang === "en" ? "Close GO Bookings" : "Cerrar GO Reservas"}
-            style={g.fabBtn}
-          >
-            <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.80)" />
-          </TouchableOpacity>
-          {/* ↓↓ Volver al Landing GO */}
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => { Haptics.selectionAsync().catch(() => {}); onGoToLanding ? onGoToLanding() : onClose(); }}
-            hitSlop={10}
-            accessibilityLabel="Volver al landing"
-            style={g.fabBtn}
-          >
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.80)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.80)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
+          />
+          </View>
         </DraggableFAB>
       )}
 
@@ -764,31 +795,20 @@ export function GoReservasConfigScreen({ onClose, onOpenVerificacion, onOpenCale
                   alignItems: "center",
                 }}>
                   {/* ↓ Cerrar solo el calendario mensual → vuelve a GO Reservas */}
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    hitSlop={8}
+                  <GoCloseButton
+                    level="panel"
                     onPress={() => { Haptics.selectionAsync().catch(() => {}); closeMonthPicker(); }}
-                    accessibilityLabel="Cerrar calendario mensual"
-                    style={g.fabBtn}
-                  >
-                    <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.80)" />
-                  </TouchableOpacity>
+                    accessibilityLabel={t("floor_month_close")}
+                  />
                   {/* ↓↓ Salir directamente a Landing/Home */}
-                  <TouchableOpacity
-                    activeOpacity={0.7}
-                    hitSlop={8}
+                  <GoCloseButton
+                    level="container"
                     onPress={() => {
                       Haptics.selectionAsync().catch(() => {});
                       closeMonthPicker(() => { onGoToLanding ? onGoToLanding() : onClose(); });
                     }}
-                    accessibilityLabel="Volver al inicio"
-                    style={g.fabBtn}
-                  >
-                    <View style={{ alignItems: "center" }}>
-                      <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.80)" />
-                      <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.80)" style={{ marginTop: -5 }} />
-                    </View>
-                  </TouchableOpacity>
+                    accessibilityLabel={t("floor_home")}
+                  />
                 </View>
               </Animated.View>
             </>
@@ -823,15 +843,15 @@ function ReservasList({
 
   const todayReservas = useMemo(() =>
     reservas
-      .filter(r => r.date === today && r.status !== "cancelada")
+      .filter(r => ((r as FloorReservation & { dateISO?: string }).dateISO ?? r.date) === today && r.status !== "cancelada")
       .sort((a, b) => a.time.localeCompare(b.time)),
     [reservas, today]
   );
 
   const upcomingReservas = useMemo(() =>
     reservas
-      .filter(r => r.date > today && r.status !== "cancelada")
-      .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
+      .filter(r => ((r as FloorReservation & { dateISO?: string }).dateISO ?? r.date) > today && r.status !== "cancelada")
+      .sort((a, b) => ((a as FloorReservation & { dateISO?: string }).dateISO ?? a.date).localeCompare((b as FloorReservation & { dateISO?: string }).dateISO ?? b.date) || a.time.localeCompare(b.time))
       .slice(0, 8),
     [reservas, today]
   );
@@ -849,7 +869,7 @@ function ReservasList({
   if (loading) {
     return (
       <View style={rl.centered}>
-        <Text style={rl.dimTxt}>Cargando reservas…</Text>
+        <Text style={rl.dimTxt}>{t("floor_loading_bookings")}</Text>
       </View>
     );
   }
@@ -870,7 +890,7 @@ function ReservasList({
               <View key={st} style={[rl.statusPill, { borderColor: STATUS_COLORS[st as keyof typeof STATUS_COLORS] + "50" }]}>
                 <View style={[rl.statusDot, { backgroundColor: STATUS_COLORS[st as keyof typeof STATUS_COLORS] }]} />
                 <Text style={[rl.statusPillTxt, { color: STATUS_COLORS[st as keyof typeof STATUS_COLORS] }]}>
-                  {count} {STATUS_LABELS[st as keyof typeof STATUS_LABELS]}
+                  {count} {t(`floor_status_${st}` as TranslationKey)}
                 </Text>
               </View>
             ))}
@@ -886,7 +906,7 @@ function ReservasList({
                 <View style={[rl.elementDot, { backgroundColor: STATUS_COLORS[el.status] }]} />
                 <Text style={rl.elementLabel}>{el.label}</Text>
                 <Text style={[rl.elementStatus, { color: STATUS_COLORS[el.status] }]}>
-                  {STATUS_LABELS[el.status]}
+                  {t(`floor_status_${el.status}` as TranslationKey)}
                 </Text>
               </View>
             ))}
@@ -922,7 +942,7 @@ function ReservasList({
 
       {!compact && upcomingReservas.length > 0 && (
         <>
-          <Text style={[rl.sectionTitle, { marginTop: 16 }]}>PRÓXIMAS RESERVAS</Text>
+          <Text style={[rl.sectionTitle, { marginTop: 16 }]}>{t("floor_upcoming_bookings").toUpperCase()}</Text>
           {upcomingReservas.map(r => (
             <ReservaRow
               key={r.id}
@@ -962,8 +982,10 @@ function ReservaRow({
   compact?:  boolean;
   isDark?:   boolean;
 }) {
+  const { t } = useLanguage();
   const color = STATUS_ROW_COLORS[reserva.status] ?? DIM;
-  const dateShort = reserva.date.slice(5).replace("-", "/");
+  const bookingDate = (reserva as FloorReservation & { dateISO?: string }).dateISO ?? reserva.date;
+  const dateShort = /^\d{4}-\d{2}-\d{2}$/.test(bookingDate) ? bookingDate.slice(5).replace("-", "/") : bookingDate;
 
   const rowBg      = isDark ? "#1e1e2e" : CARD;
   const rowBorder  = isDark ? "rgba(255,255,255,0.10)" : BORDER;
@@ -979,10 +1001,10 @@ function ReservaRow({
           <Text style={[rl.rowTime, { color: timeColor }]}>{reserva.time}</Text>
           {showDate && <Text style={[rl.rowDate, { color: dimColor }]}>{dateShort}</Text>}
           <View style={[rl.statusBadge, { backgroundColor: color + "22", borderColor: color + "55" }]}>
-            <Text style={[rl.statusBadgeTxt, { color }]}>{reserva.status}</Text>
+            <Text style={[rl.statusBadgeTxt, { color }]}>{t(`floor_reservation_${reserva.status}` as TranslationKey)}</Text>
           </View>
         </View>
-        <Text style={[rl.rowGuest, { color: guestColor }]}>{reserva.customerName || "Cliente"}</Text>
+        <Text style={[rl.rowGuest, { color: guestColor }]}>{reserva.customerName || t("floor_client")}</Text>
         {element && !compact && (
           <Text style={[rl.rowElement, { color: dimColor }]}>📍 {element.label}</Text>
         )}
@@ -1019,7 +1041,7 @@ const g = StyleSheet.create({
     gap: 5, paddingVertical: 8, paddingHorizontal: 10,
     borderRadius: 10, borderWidth: 1, borderColor: BORDER, backgroundColor: BG,
   },
-  modeTabTxt:    { fontSize: 12, fontWeight: "700", color: GRAY },
+  modeTabTxt:    { fontSize: 12, fontWeight: "700", color: GRAY, flexShrink: 1, textAlign: "center" },
 
   proBar: {
     backgroundColor: CARD,

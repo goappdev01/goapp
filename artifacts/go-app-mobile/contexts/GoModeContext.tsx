@@ -6,7 +6,7 @@ export type GoMode = "USER" | "BUSINESS";
 const STORAGE_KEY = "go_active_mode_v1";
 const ACCOUNT_KEY = "go_account_type_v1";
 
-const EMPRESA_ROLES = new Set(["empresa", "admin", "trabajador", "proveedor", "partner", "franquicia"]);
+const EMPRESA_ROLES = new Set(["empresa", "trabajador", "proveedor", "partner", "franquicia"]);
 
 function modeFromRole(role: string | null): GoMode {
   if (!role) return "USER";

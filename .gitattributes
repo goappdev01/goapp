@@ -1,0 +1,3 @@
+# Preserve historical snapshots byte for byte; active source remains subject to diff checks.
+development/archive/expo57-before-integration/artifacts/** -text -diff
+development/archive/expo57-before-integration/*.patch -text -diff

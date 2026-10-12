@@ -1,3 +1,4 @@
+import { useGoDockPreference } from "@/hooks/useGoDockPreference";
 import React, { useRef, useState, useCallback } from "react";
 import {
   View,
@@ -85,6 +86,7 @@ export function HerramientasPanel({
   userRegion, setUserRegion,
 }: HerramientasPanelProps) {
   const insets = useSafeAreaInsets();
+  const dock = useGoDockPreference(handedness, visible);
   const { lang, setLang, t } = useLanguage();
 
   // Dropdown states
@@ -176,17 +178,19 @@ export function HerramientasPanel({
             <View style={[s.segRow, { marginTop: 10 }]}>
               {([
                 { k: "left"  as const, label: t("left_handed"),  icon: "←" },
+                { k: "center" as const, label: lang === "en" ? "Center" : "Centro", icon: "·" },
                 { k: "right" as const, label: t("right_handed"), icon: "→" },
               ]).map(({ k, label, icon }) => {
-                const active = handedness === k;
+                const active = dock.position === k;
                 return (
                   <TouchableOpacity
                     key={k}
                     onPress={() => {
-                      if (handedness !== k) {
+                      if (dock.position === k) return;
+                      void dock.setPosition(k, k === "center" ? handedness : k).then(() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                        toggleHandedness();
-                      }
+                        if (k !== "center" && handedness !== k) toggleHandedness();
+                      }).catch(() => showToast("No se pudo guardar la posición de GO.", "error"));
                     }}
                     activeOpacity={0.7}
                     style={[s.segBtn, active && s.segBtnActive]}

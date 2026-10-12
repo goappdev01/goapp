@@ -1,0 +1,790 @@
+diff --git a/artifacts/go-app-mobile/app/index.tsx b/artifacts/go-app-mobile/app/index.tsx
+index b26b261..831c6b1 100644
+--- a/artifacts/go-app-mobile/app/index.tsx
++++ b/artifacts/go-app-mobile/app/index.tsx
+@@ -82,6 +82,10 @@ import { HumanityScreen } from "@/components/HumanityScreen";
+ import { ResiduosPanel } from "@/components/ResiduosPanel";
+ import { PerfilPanel } from "@/components/perfil/PerfilPanel";
+ import { HerramientasPanel } from "@/components/herramientas/HerramientasPanel";
++import { LandingActionSurface } from "@/components/landing/LandingActionSurface";
++import { LandingSatelliteSurface } from "@/components/landing/LandingSatelliteSurface";
++import { useLandingVisualVariant } from "@/hooks/useLandingVisualVariant";
++import { getLandingVisualTheme, getOrbitVisualSurface, getCoreVisualGradient, type LandingVisualTheme } from "@/components/landing/landingVisualThemes";
+ import {
+   LoginRegisterPanel,
+   type AccountRole,
+@@ -1879,6 +1883,7 @@ function PremiumOrbitBtn({
+   fillLogo = false,
+   logoScale,
+   flat = false,
++  visualTheme,
+ }: {
+   color: string;
+   selected: boolean;
+@@ -1906,6 +1911,7 @@ function PremiumOrbitBtn({
+   fillLogo?: boolean;
+   logoScale?: number;
+   flat?: boolean;
++  visualTheme?: LandingVisualTheme;
+ }) {
+   const { t } = useLanguage();
+   const pressAnim = React.useRef(new Animated.Value(1)).current;
+@@ -1950,14 +1956,15 @@ function PremiumOrbitBtn({
+       }
+     : undefined;
+ 
+-  const gradColors: [string, string, string, string] = [
++  const visualSurface = getOrbitVisualSurface(visualTheme, color, selected);
++  const gradColors: [string, string, string, string] = visualSurface?.colors ?? [
+     _orbitLighten(color, 0.28),
+     _orbitLighten(color, 0.06),
+     _orbitDarken(color, 0.14),
+     _orbitDarken(color, 0.32),
+   ];
+-  const iconColor  = flat ? color : "#ffffff";
+-  const labelColor = flat ? color : (labelColorProp ?? "#ffffff");
++  const iconColor  = flat ? color : (visualSurface?.icon ?? "#ffffff");
++  const labelColor = flat ? color : (visualSurface?.label ?? labelColorProp ?? "#ffffff");
+ 
+   // Auto-scale font for long labels so words never break across lines.
+   // Only the specific orbit that has a long word shrinks — others stay normal.
+@@ -1987,10 +1994,10 @@ function PremiumOrbitBtn({
+           : [{ scale: pressAnim }],
+         opacity: dimmed ? 0.22 : 1,
+         shadowColor: "#000",
+-        shadowOpacity: 0.45,
+-        shadowRadius: 10,
++        shadowOpacity: visualTheme?.shadowOpacity ?? 0.45,
++        shadowRadius: visualTheme?.shadowRadius ?? 10,
+         shadowOffset: { width: 0, height: 0 },
+-        elevation: 8,
++        elevation: visualTheme ? 0 : 8,
+       }}
+     >
+       {/* Colored glow */}
+@@ -2001,7 +2008,7 @@ function PremiumOrbitBtn({
+           left: -3, right: -3, top: -3, bottom: -3,
+           borderRadius: 999,
+           shadowColor: color,
+-          shadowOpacity: dimmed ? 0 : selected ? 0.90 : 0.65,
++          shadowOpacity: dimmed ? 0 : visualTheme ? visualTheme.glowOpacity : selected ? 0.90 : 0.65,
+           shadowRadius:  selected ? 18 : 13,
+           shadowOffset: { width: 0, height: 0 },
+           elevation: 0,
+@@ -2048,9 +2055,12 @@ function PremiumOrbitBtn({
+           borderRadius: 999,
+           overflow: "hidden",
+           borderWidth: selected ? 2.5 : 1.5,
+-          borderColor: flat ? color : (selected ? color : "rgba(255,255,255,0.22)"),
++          borderColor: visualTheme ? "transparent" : visualSurface?.border ?? (flat ? color : (selected ? color : "rgba(255,255,255,0.22)")),
+         }}
+       >
++        {visualTheme ? (
++          <LandingActionSurface theme={visualTheme} icon={icon} label={label} size={size} color={color} selected={selected} />
++        ) : (<>
+         {flat ? (
+           <View
+             style={{
+@@ -2300,6 +2310,7 @@ function PremiumOrbitBtn({
+             }}
+           />
+         )}
++        </>)}
+       </TouchableOpacity>
+ 
+       {/* Universal hint — shows during LP hold, max 3 uses */}
+@@ -2584,6 +2595,7 @@ function GoDeepSpaceUpper() {
+ export default function HomeScreen() {
+   const insets = useSafeAreaInsets();
+   const { t, lang, locale, setLang } = useLanguage();
++  const { landingVariant, setLandingVariant } = useLandingVisualVariant();
+ 
+   const localizeLabel = (label: string): string => {
+     const map: Record<string, string> = {
+@@ -13202,6 +13214,13 @@ export default function HomeScreen() {
+     ];
+   };
+ 
++  // The experiment only paints the main Landing. Shared orbits in routes,
++  // commercial layers, IA and other panels retain their original appearance.
++  const landingTheme = !anyOverlayOpen && !voiceActive && !rutasMode
++    && orbitSecondLevel === null && !reservasOrbitalOpen && !marketplaceCheckout
++    ? getLandingVisualTheme(landingVariant)
++    : undefined;
++
+   if (!authBootstrapComplete || !modeLoaded) {
+     return (
+       <View style={{ flex: 1, backgroundColor: "#F7F6F2", alignItems: "center", justifyContent: "center" }}>
+@@ -13213,7 +13232,7 @@ export default function HomeScreen() {
+ 
+   return (
+     <GestureDetector gesture={universalSwipeGesture}>
+-    <View style={[styles.root, { paddingTop }]}>
++    <View style={[styles.root, { paddingTop }, landingTheme && { backgroundColor: landingTheme.background }]}>
+       {/* Status bar — dark-content sobre paneles claros, light sobre el fondo oscuro GO */}
+       <StatusBar
+         style={
+@@ -13228,23 +13247,23 @@ export default function HomeScreen() {
+       <View style={StyleSheet.absoluteFill} pointerEvents="none">
+         <Image
+           source={EARTH_BG}
+-          style={StyleSheet.absoluteFill}
++          style={[StyleSheet.absoluteFill, landingTheme && { opacity: landingTheme.earthOpacity }]}
+           resizeMode="cover"
+         />
+       </View>
+       {/* Dark veil — preserves button readability, keeps cinematic depth */}
+       <View
+-        style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(2,4,12,0.51)" }]}
++        style={[StyleSheet.absoluteFill, { backgroundColor: landingTheme?.veil ?? "rgba(2,4,12,0.51)" }]}
+         pointerEvents="none"
+       />
+       {/* Cinematic blue-black overlay — reduces background competition, restores GO as protagonist */}
+       <View
+-        style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(3,6,22,0.12)" }]}
++        style={[StyleSheet.absoluteFill, { backgroundColor: landingTheme?.tint ?? "rgba(3,6,22,0.12)" }]}
+         pointerEvents="none"
+       />
+       {/* Top-edge fade — softens transition to status bar */}
+       <LinearGradient
+-        colors={["rgba(2,4,12,0.72)", "transparent"]}
++        colors={[landingTheme?.topFade ?? "rgba(2,4,12,0.72)", "transparent"]}
+         start={{ x: 0.5, y: 0 }}
+         end={{ x: 0.5, y: 0.22 }}
+         style={StyleSheet.absoluteFill}
+@@ -13252,14 +13271,18 @@ export default function HomeScreen() {
+       />
+       {/* Bottom-edge fade — anchors the orbit in deep space */}
+       <LinearGradient
+-        colors={["transparent", "rgba(2,4,12,0.55)"]}
++        colors={["transparent", landingTheme?.bottomFade ?? "rgba(2,4,12,0.55)"]}
+         start={{ x: 0.5, y: 0.72 }}
+         end={{ x: 0.5, y: 1 }}
+         style={StyleSheet.absoluteFill}
+         pointerEvents="none"
+       />
+       {/* Deep space upper layer — paz, profundidad, silencio */}
+-      <GoDeepSpaceUpper />
++      {landingTheme ? (
++        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: landingTheme.spaceOpacity }]}>
++          <GoDeepSpaceUpper />
++        </View>
++      ) : <GoDeepSpaceUpper />}
+       {/* TEST COLOR FONDO — overlay de prueba de color para Landing */}
+       {!!screenBgColors.landing && (
+         <View
+@@ -16148,10 +16171,10 @@ export default function HomeScreen() {
+               ],
+               // Black drop-shadow for elevation depth (same as PremiumOrbitBtn)
+               shadowColor: "#000",
+-              shadowOpacity: voiceActive ? 0 : 0.45,
+-              shadowRadius: 10,
++              shadowOpacity: voiceActive ? 0 : landingTheme?.shadowOpacity ?? 0.45,
++              shadowRadius: landingTheme?.shadowRadius ?? 10,
+               shadowOffset: { width: 0, height: 4 },
+-              elevation: voiceActive ? 0 : 8,
++              elevation: landingTheme ? 0 : voiceActive ? 0 : 8,
+               // V1: GO siempre visible, sin dimming de aprendizaje.
+               opacity: 1,
+             }}
+@@ -16165,7 +16188,7 @@ export default function HomeScreen() {
+                   left: -3, right: -3, top: -3, bottom: -3,
+                   borderRadius: 999,
+                   shadowColor: goButtonColor,
+-                  shadowOpacity: 0.65,
++                  shadowOpacity: landingTheme?.glowOpacity ?? 0.65,
+                   shadowRadius: 13,
+                   shadowOffset: { width: 0, height: 0 },
+                   elevation: 0,
+@@ -16237,7 +16260,7 @@ export default function HomeScreen() {
+                       shadowOffset: { width: 0, height: 0 },
+                       elevation: 0,
+                       borderWidth: 2,
+-                      borderColor: "#ffffff",
++                      borderColor: landingTheme ? "transparent" : "#ffffff",
+                     },
+               ]}
+             >
+@@ -16269,8 +16292,11 @@ export default function HomeScreen() {
+                 <>
+                   {/* Gradient + overhead highlight — same visual system as PremiumOrbitBtn */}
+                   {(() => {
++                    if (landingTheme) return (
++                      <View pointerEvents="none" style={{ position: "absolute", width: goSize * 0.76, height: goSize * 0.64, borderRadius: landingTheme.variant === "profesional" ? 18 : 8, backgroundColor: getCoreVisualGradient(landingTheme, goButtonColor)[1], borderWidth: 1, borderColor: landingTheme.coreBorder, alignSelf: "center" }} />
++                    );
+                     const _ckColor = marketplaceCheckout?.brand.color ?? goButtonColor;
+-                    const gc: [string, string, string] = [
++                    const gc: [string, string, string] = landingTheme ? getCoreVisualGradient(landingTheme, _ckColor) : [
+                       _orbitLighten(_ckColor, 0.28),
+                       _ckColor,
+                       _orbitDarken(_ckColor, 0.32),
+@@ -16319,7 +16345,7 @@ export default function HomeScreen() {
+                       styles.goText,
+                       modeOpen && styles.goTextChoose,
+                       {
+-                        color: "#ffffff",
++                        color: landingTheme?.variant === "confianza" && !modeOpen && !rutasMode && !marketplaceCheckout ? "#FFD700" : landingTheme?.coreText ?? "#ffffff",
+                         // V1 FIX · El texto interno del GO ("GO" / "ELIGE")
+                         // se escala proporcionalmente con uiScaleFactor para
+                         // que quepa cómodo cuando uiScale === "small"
+@@ -16630,6 +16656,7 @@ export default function HomeScreen() {
+                   >
+                     <PremiumOrbitBtn
+                       color={it.color}
++                      visualTheme={landingTheme}
+                       selected={selected}
+                       dimmed={dimmed}
+                       onPress={() => {
+@@ -16684,6 +16711,7 @@ export default function HomeScreen() {
+                   >
+                     <PremiumOrbitBtn
+                       color="#9ca3af"
++                      visualTheme={landingTheme}
+                       selected={otroSelected}
+                       dimmed={categorySelected}
+                       onPress={() => {
+@@ -17468,6 +17496,7 @@ export default function HomeScreen() {
+                     ? satCtxAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] })
+                     : 1;
+ 
++                  const satelliteTheme = !ctxReplace && !isNoteStep && !isEmpresaSetupStep && !memActive && !activeSatCtx ? landingTheme : undefined;
+                   const borderColor = ctxReplace
+                     ? "rgba(255,255,255,0.65)"
+                     : isNoteStep
+@@ -17478,6 +17507,7 @@ export default function HomeScreen() {
+                     ? "#C9A84C"
+                     : rutasMode
+                     ? "rgba(255,255,255,0.52)"
++                    : satelliteTheme ? satelliteTheme.satelliteBorder
+                     : s.contextLayer
+                     ? "rgba(255,255,255,0.28)"
+                     : "rgba(255,255,255,0.22)";
+@@ -17490,11 +17520,11 @@ export default function HomeScreen() {
+                     ? "rgba(30,110,80,0.18)"
+                     : memActive
+                     ? "rgba(201,168,76,0.14)"
+-                    : "#080810";
++                    : satelliteTheme?.satelliteBackground ?? "#080810";
+ 
+                   const shadowColor  = isNoteStep ? "#b89cff" : isEmpresaSetupStep ? "#3DC88C" : memActive ? "#C9A84C" : rutasMode ? "#a5f3fc" : "#ffffff";
+-                  const shadowOpacity = ctxReplace ? 0.60 : isNoteStep ? 0.90 : isEmpresaSetupStep ? 0.85 : memActive ? 0.80 : rutasMode ? 0.55 : 0.32;
+-                  const shadowRadius  = ctxReplace ? 16   : isNoteStep ? 20   : isEmpresaSetupStep ? 20   : memActive ? 18   : rutasMode ? 12 : 7;
++                  const shadowOpacity = ctxReplace ? 0.60 : isNoteStep ? 0.90 : isEmpresaSetupStep ? 0.85 : memActive ? 0.80 : rutasMode ? 0.55 : satelliteTheme?.shadowOpacity ?? 0.32;
++                  const shadowRadius  = ctxReplace ? 16   : isNoteStep ? 20   : isEmpresaSetupStep ? 20   : memActive ? 18   : rutasMode ? 12 : satelliteTheme?.shadowRadius ?? 7;
+ 
+                   const _incSat = () => {
+                     setSatUseCounts(prev => {
+@@ -17771,20 +17801,22 @@ export default function HomeScreen() {
+                             width: microSz,
+                             height: microSz,
+                             borderRadius: microSz / 2,
+-                            backgroundColor: (isContactBtn || isCalendarBtn) ? "transparent" : bgColor,
++                            backgroundColor: satelliteTheme ? "transparent" : (isContactBtn || isCalendarBtn) ? "transparent" : bgColor,
+                             borderWidth: ctxReplace ? 1.8 : memActive ? 1.6 : s.contextLayer ? 1.4 : 1.2,
+-                            borderColor,
++                            borderColor: satelliteTheme ? "transparent" : borderColor,
+                             alignItems: "center",
+                             justifyContent: "center",
+                             shadowColor,
+-                            shadowOpacity,
++                            shadowOpacity: satelliteTheme ? 0 : shadowOpacity,
+                             shadowRadius,
+                             shadowOffset: { width: 0, height: 0 },
+-                            elevation: ctxReplace ? 10 : memActive ? 8 : 6,
++                            elevation: satelliteTheme ? 0 : ctxReplace ? 10 : memActive ? 8 : 6,
+                             overflow: "hidden",
+                           }}
+                         >
+-                          {isContactBtn ? (
++                          {satelliteTheme ? (
++                            <LandingSatelliteSurface theme={satelliteTheme} icon={displayIcon} label={displayLabel ?? ""} size={microSz} />
++                          ) : isContactBtn ? (
+                             <LinearGradient
+                               colors={["rgba(50,50,95,1)", "rgba(22,22,52,1)", "rgba(10,10,28,1)", "rgba(3,3,12,1)"]}
+                               start={{ x: 0.5, y: 0 }}
+@@ -19418,6 +19450,8 @@ export default function HomeScreen() {
+       />
+ 
+       <HerramientasPanel
++        landingVariant={landingVariant}
++        onLandingVariantChange={setLandingVariant}
+         visible={optionsOpen}
+         onClose={() => { commitUserPhone(); setOptionsOpen(false); }}
+         handedness={handedness}
+@@ -26390,8 +26424,8 @@ export default function HomeScreen() {
+             borderRadius: orbitBtnSize / 2,
+             zIndex: 9990,
+             shadowColor: "#1d6fa8",
+-            shadowOpacity: 0.55,
+-            shadowRadius: 14,
++            shadowOpacity: landingTheme?.shadowOpacity ?? 0.55,
++            shadowRadius: landingTheme?.shadowRadius ?? 14,
+             shadowOffset: { width: 0, height: 0 },
+             elevation: 12,
+             alignItems: "center",
+@@ -26408,7 +26442,7 @@ export default function HomeScreen() {
+               height: orbitBtnSize + 10,
+               borderRadius: (orbitBtnSize + 10) / 2,
+               borderWidth: 1.2,
+-              borderColor: "rgba(80,180,255,0.28)",
++              borderColor: landingTheme?.humanityRing ?? "rgba(80,180,255,0.28)",
+             }}
+           />
+           {/* Cinematic Earth globe — photorealistic satellite image */}
+@@ -26418,7 +26452,7 @@ export default function HomeScreen() {
+             borderRadius: orbitBtnSize / 2,
+             overflow: "hidden",
+             borderWidth: 1,
+-            borderColor: "rgba(100,200,255,0.30)",
++            borderColor: landingTheme?.humanityRing ?? "rgba(100,200,255,0.30)",
+           }}>
+             <Image
+               source={require("../assets/images/humanity_globe.png")}
+@@ -26433,7 +26467,7 @@ export default function HomeScreen() {
+                 top: 0, left: 0, right: 0, bottom: 0,
+                 borderRadius: orbitBtnSize / 2,
+                 borderWidth: Math.round(orbitBtnSize * 0.055),
+-                borderColor: "rgba(80,180,255,0.22)",
++                borderColor: landingTheme?.humanityLimb ?? "rgba(80,180,255,0.22)",
+               }}
+             />
+           </View>
+diff --git a/artifacts/go-app-mobile/components/herramientas/HerramientasPanel.tsx b/artifacts/go-app-mobile/components/herramientas/HerramientasPanel.tsx
+index e3da739..8af6382 100644
+--- a/artifacts/go-app-mobile/components/herramientas/HerramientasPanel.tsx
++++ b/artifacts/go-app-mobile/components/herramientas/HerramientasPanel.tsx
+@@ -11,6 +11,8 @@ import {
+   Dimensions,
+ } from "react-native";
+ import { GoDevPanel } from "@/components/dev/GoDevPanel";
++import { LandingVariantSelector } from "@/components/landing/LandingVariantSelector";
++import type { LandingVisualVariant } from "@/components/landing/landingVariant";
+ import { DraggableFAB } from "../DraggableFAB";
+ import { LinearGradient } from "expo-linear-gradient";
+ import { Feather } from "@expo/vector-icons";
+@@ -32,6 +34,8 @@ const GOLD_BDR= "rgba(196,136,58,0.35)";
+ interface HerramientasPanelProps {
+   visible: boolean;
+   onClose: () => void;
++  landingVariant: LandingVisualVariant;
++  onLandingVariantChange: (value: LandingVisualVariant) => void;
+   handedness: "left" | "right";
+   toggleHandedness: () => void;
+   uiScale: "compacto" | "estandar" | "grande";
+@@ -67,6 +71,7 @@ interface HerramientasPanelProps {
+ 
+ export function HerramientasPanel({
+   visible, onClose,
++  landingVariant, onLandingVariantChange,
+   handedness, toggleHandedness,
+   uiScale, setUiScale,
+   userGoPhoneDraft, setUserGoPhoneDraft,
+@@ -159,6 +164,13 @@ export function HerramientasPanel({
+           contentContainerStyle={{ paddingBottom: contentPadBottom }}
+           keyboardShouldPersistTaps="handled"
+         >
++          {__DEV__ && (
++            <LandingVariantSelector
++              value={landingVariant}
++              onChange={onLandingVariantChange}
++              onPreview={onClose}
++            />
++          )}
+ 
+           {/* ══════════════════════════════════════════════════════════
+               1 · PERSONALIZACIÓN
+diff --git a/artifacts/go-app-mobile/components/landing/LandingActionSurface.tsx b/artifacts/go-app-mobile/components/landing/LandingActionSurface.tsx
+new file mode 100644
+index 0000000..097b0df
+--- /dev/null
++++ b/artifacts/go-app-mobile/components/landing/LandingActionSurface.tsx
+@@ -0,0 +1,36 @@
++import React from "react";
++import { View, Text } from "react-native";
++import { Feather } from "@expo/vector-icons";
++import { getOrbitVisualSurface, type LandingVisualTheme } from "./landingVisualThemes";
++
++/** Paint only; the existing parent owns dimensions, gestures and accessibility. */
++export function LandingActionSurface({ theme, icon, label, size, color, selected }: {
++  theme: LandingVisualTheme;
++  icon: React.ComponentProps<typeof Feather>["name"];
++  label: string;
++  size: number;
++  color: string;
++  selected: boolean;
++}) {
++  const professional = theme.variant === "profesional";
++  const surface = getOrbitVisualSurface(theme, color, selected)!;
++  return (
++    <View pointerEvents="none" style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
++      <View style={{
++        width: size * 0.82, height: size * 0.64,
++        borderRadius: professional ? 12 : 4,
++        backgroundColor: professional ? surface.colors[0] : selected ? "#FFFFFF" : "rgba(237,241,244,0.94)",
++        borderWidth: selected ? 2 : professional ? 0.75 : 0,
++        borderColor: surface.border,
++        alignItems: "center", justifyContent: "center", gap: 3,
++        paddingHorizontal: 3,
++      }}>
++        <Feather name={icon} size={size * 0.25} color={surface.icon} />
++        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{
++          color: surface.label, fontFamily: "Inter_700Bold",
++          fontSize: size * 0.115, lineHeight: size * 0.16, textAlign: "center",
++        }}>{label}</Text>
++      </View>
++    </View>
++  );
++}
+diff --git a/artifacts/go-app-mobile/components/landing/LandingSatelliteSurface.tsx b/artifacts/go-app-mobile/components/landing/LandingSatelliteSurface.tsx
+new file mode 100644
+index 0000000..f537aea
+--- /dev/null
++++ b/artifacts/go-app-mobile/components/landing/LandingSatelliteSurface.tsx
+@@ -0,0 +1,33 @@
++import React from "react";
++import { View, Text } from "react-native";
++import { Feather } from "@expo/vector-icons";
++import type { LandingVisualTheme } from "./landingVisualThemes";
++
++/** Decorative content only: the parent retains its gestures and original hit area. */
++export function LandingSatelliteSurface({ theme, icon, label, size }: {
++  theme: LandingVisualTheme;
++  icon: React.ComponentProps<typeof Feather>["name"];
++  label: string;
++  size: number;
++}) {
++  const professional = theme.variant === "profesional";
++  return (
++    <View pointerEvents="none" style={{
++      width: size * 0.94,
++      height: size * 0.68,
++      borderRadius: professional ? size * 0.23 : 4,
++      backgroundColor: theme.satelliteBackground,
++      borderWidth: professional ? 0.75 : 0,
++      borderColor: theme.satelliteBorder,
++      alignItems: "center", justifyContent: "center",
++      gap: size * 0.035, paddingHorizontal: 2,
++    }}>
++      <Feather name={icon} size={size * 0.25} color={theme.satelliteIcon} />
++      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{
++        color: theme.satelliteText, fontFamily: "Inter_700Bold",
++        fontSize: size * 0.16, lineHeight: size * 0.20,
++        textAlign: "center", maxWidth: "100%", letterSpacing: 0,
++      }}>{label}</Text>
++    </View>
++  );
++}
+diff --git a/artifacts/go-app-mobile/components/landing/LandingVariantSelector.tsx b/artifacts/go-app-mobile/components/landing/LandingVariantSelector.tsx
+new file mode 100644
+index 0000000..380f44c
+--- /dev/null
++++ b/artifacts/go-app-mobile/components/landing/LandingVariantSelector.tsx
+@@ -0,0 +1,93 @@
++import React from "react";
++import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
++import { Feather } from "@expo/vector-icons";
++import {
++  LANDING_VISUAL_VARIANTS,
++  type LandingVisualVariant,
++} from "./landingVariant";
++
++interface LandingVariantSelectorProps {
++  value: LandingVisualVariant;
++  onChange: (value: LandingVisualVariant) => void;
++  onPreview: () => void;
++}
++
++export function LandingVariantSelector({ value, onChange, onPreview }: LandingVariantSelectorProps) {
++  if (!__DEV__) return null;
++
++  return (
++    <View style={s.section}>
++      <View style={s.heading}>
++        <Text style={s.headingText}>LANDING — PRUEBA VISUAL</Text>
++        <Text style={s.badge}>INTERNA</Text>
++      </View>
++      <View style={s.card}>
++        <Text style={s.intro}>Compara el aspecto de GO. Las acciones son las mismas.</Text>
++        <View accessibilityRole="radiogroup" accessibilityLabel="Variante visual del Landing" style={s.options}>
++          {LANDING_VISUAL_VARIANTS.map((option) => {
++            const selected = value === option.key;
++            return (
++              <TouchableOpacity
++                key={option.key}
++                onPress={() => onChange(option.key)}
++                activeOpacity={0.8}
++                accessibilityRole="radio"
++                accessibilityState={{ checked: selected }}
++                accessibilityLabel={`${option.label}. ${option.description}`}
++                accessibilityHint="Aplica esta variante visual al Landing"
++                style={[s.option, selected && s.optionSelected]}
++              >
++                <View style={[s.radio, selected && s.radioSelected]}>
++                  {selected && <View style={s.radioDot} />}
++                </View>
++                <View style={s.optionCopy}>
++                  <Text style={s.optionTitle}>{option.label}</Text>
++                  <Text style={s.optionDescription}>{option.description}</Text>
++                </View>
++                <View style={s.palette} accessible={false}>
++                  {option.colors.map((color) => (
++                    <View key={color} style={[s.swatch, { backgroundColor: color }]} />
++                  ))}
++                </View>
++              </TouchableOpacity>
++            );
++          })}
++        </View>
++        <TouchableOpacity
++          onPress={onPreview}
++          activeOpacity={0.8}
++          accessibilityRole="button"
++          accessibilityLabel="Ver Landing con la variante seleccionada"
++          style={s.previewButton}
++        >
++          <Feather name="eye" size={16} color="#FFFFFF" />
++          <Text style={s.previewLabel}>Ver Landing</Text>
++        </TouchableOpacity>
++        <Text style={s.hint}>Puedes volver a Actual en cualquier momento.</Text>
++      </View>
++    </View>
++  );
++}
++
++const s = StyleSheet.create({
++  section: { marginBottom: 16 },
++  heading: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10, marginLeft: 2 },
++  headingText: { color: "#6B7280", fontSize: 10, fontWeight: "900", letterSpacing: 1.2 },
++  badge: { color: "#366590", backgroundColor: "rgba(74,128,189,0.10)", fontSize: 9, fontWeight: "800", paddingVertical: 4, paddingHorizontal: 7, borderRadius: 6 },
++  card: { backgroundColor: "#FFFFFF", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "rgba(74,128,189,0.25)" },
++  intro: { color: "#4B5563", fontSize: 12, lineHeight: 18, marginBottom: 12 },
++  options: { gap: 8 },
++  option: { flexDirection: "row", alignItems: "center", minHeight: 76, padding: 12, gap: 10, borderRadius: 12, borderWidth: 1, borderColor: "#DDE3E9", backgroundColor: "#F7F8FA" },
++  optionSelected: { borderColor: "#4A80BD", backgroundColor: "#EEF4FB" },
++  radio: { width: 20, height: 20, borderRadius: 10, borderWidth: 1.5, borderColor: "#8B97A7", alignItems: "center", justifyContent: "center" },
++  radioSelected: { borderColor: "#4A80BD" },
++  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#4A80BD" },
++  optionCopy: { flex: 1 },
++  optionTitle: { color: "#111827", fontSize: 13, fontWeight: "700" },
++  optionDescription: { color: "#586575", fontSize: 11, lineHeight: 16, marginTop: 3 },
++  palette: { gap: 3 },
++  swatch: { width: 17, height: 12, borderRadius: 3, borderWidth: 0.5, borderColor: "rgba(0,0,0,0.12)" },
++  previewButton: { marginTop: 12, minHeight: 44, borderRadius: 11, backgroundColor: "#4A80BD", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, padding: 12 },
++  previewLabel: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
++  hint: { color: "#6B7280", fontSize: 10, lineHeight: 15, textAlign: "center", marginTop: 10 },
++});
+diff --git a/artifacts/go-app-mobile/components/landing/landingVariant.ts b/artifacts/go-app-mobile/components/landing/landingVariant.ts
+new file mode 100644
+index 0000000..1296d96
+--- /dev/null
++++ b/artifacts/go-app-mobile/components/landing/landingVariant.ts
+@@ -0,0 +1,31 @@
++export type LandingVisualVariant = "actual" | "profesional" | "confianza";
++
++export const LANDING_VISUAL_VARIANTS: ReadonlyArray<{
++  key: LandingVisualVariant;
++  label: string;
++  description: string;
++  colors: readonly [string, string, string];
++}> = [
++  {
++    key: "actual",
++    label: "Actual",
++    description: "Control · aspecto original de GO",
++    colors: ["#0B1120", "#D4AA3F", "#427ACC"],
++  },
++  {
++    key: "profesional",
++    label: "Profesional",
++    description: "Tierra tenue, superficies sobrias y acentos contenidos",
++    colors: ["#101B2C", "#263B50", "#BAA46D"],
++  },
++  {
++    key: "confianza",
++    label: "Máxima confianza",
++    description: "Fondo oscuro, contraste definido y acabado mate",
++    colors: ["#EDF2F5", "#16384A", "#3C7F87"],
++  },
++];
++
++export function isLandingVisualVariant(value: unknown): value is LandingVisualVariant {
++  return value === "actual" || value === "profesional" || value === "confianza";
++}
+diff --git a/artifacts/go-app-mobile/components/landing/landingVisualThemes.ts b/artifacts/go-app-mobile/components/landing/landingVisualThemes.ts
+new file mode 100644
+index 0000000..3617222
+--- /dev/null
++++ b/artifacts/go-app-mobile/components/landing/landingVisualThemes.ts
+@@ -0,0 +1,118 @@
++import type { LandingVisualVariant } from "./landingVariant";
++
++// Presentation only: no sizes, coordinates, gestures, routes or category state.
++// `actual` deliberately has no theme: the original values remain the control.
++export interface LandingVisualTheme {
++  variant: Exclude<LandingVisualVariant, "actual">;
++  background: string;
++  earthOpacity: number;
++  veil: string;
++  tint: string;
++  topFade: string;
++  bottomFade: string;
++  spaceOpacity: number;
++  shadowOpacity: number;
++  shadowRadius: number;
++  glowOpacity: number;
++  shineOuter: string;
++  shineInner: string;
++  coreBorder: string;
++  coreText: string;
++  satelliteBackground: string;
++  satelliteBorder: string;
++  satelliteText: string;
++  satelliteIcon: string;
++  satelliteGradient: [string, string, string, string];
++  humanityRing: string;
++  humanityLimb: string;
++}
++
++const PROFESSIONAL: LandingVisualTheme = {
++  variant: "profesional",
++  background: "#0D1725",
++  earthOpacity: 0.60,
++  veil: "rgba(8,18,31,0.34)",
++  tint: "rgba(16,32,48,0.24)",
++  topFade: "rgba(8,17,29,0.86)",
++  bottomFade: "rgba(8,17,29,0.68)",
++  spaceOpacity: 0.035,
++  shadowOpacity: 0.12,
++  shadowRadius: 7,
++  glowOpacity: 0,
++  shineOuter: "transparent",
++  shineInner: "transparent",
++  coreBorder: "#8596A7",
++  coreText: "#FFFFFF",
++  satelliteBackground: "rgba(23,38,53,0.96)",
++  satelliteBorder: "#536373",
++  satelliteText: "#EFF4FA",
++  satelliteIcon: "#C4D3DF",
++  satelliteGradient: ["#24364B", "#203146", "#1C2C40", "#18283A"],
++  humanityRing: "rgba(152,182,208,0.24)",
++  humanityLimb: "rgba(139,169,194,0.07)",
++};
++
++const CONFIDENCE: LandingVisualTheme = {
++  variant: "confianza",
++  background: "#152333",
++  earthOpacity: 0.22,
++  veil: "rgba(16,30,45,0.28)",
++  tint: "rgba(26,45,61,0.28)",
++  topFade: "rgba(17,31,46,0.76)",
++  bottomFade: "rgba(17,31,46,0.62)",
++  spaceOpacity: 0,
++  shadowOpacity: 0,
++  shadowRadius: 0,
++  glowOpacity: 0,
++  shineOuter: "transparent",
++  shineInner: "transparent",
++  coreBorder: "#B9C8D4",
++  coreText: "#172638",
++  satelliteBackground: "rgba(15,28,41,0.38)",
++  satelliteBorder: "#ADBCCB",
++  satelliteText: "#FFFFFF",
++  satelliteIcon: "#E1EBF3",
++  satelliteGradient: ["#EBF0F6", "#E7EDF4", "#E3EAF1", "#DFE7EF"],
++  humanityRing: "rgba(172,190,209,0.22)",
++  humanityLimb: "transparent",
++};
++
++export function getLandingVisualTheme(variant: LandingVisualVariant): LandingVisualTheme | undefined {
++  if (variant === "profesional") return PROFESSIONAL;
++  if (variant === "confianza") return CONFIDENCE;
++  return undefined;
++}
++
++// The original semantic category color is an input; GO_COLORS stays unchanged.
++function mixHex(color: string, target: string, amount: number): string {
++  const channels = [1, 3, 5].map(offset => {
++    const from = parseInt(color.slice(offset, offset + 2), 16);
++    const to = parseInt(target.slice(offset, offset + 2), 16);
++    return Math.round(from + (to - from) * amount).toString(16).padStart(2, "0");
++  });
++  return `#${channels.join("")}`;
++}
++
++export function getOrbitVisualSurface(theme: LandingVisualTheme | undefined, color: string, selected: boolean) {
++  if (!theme) return undefined;
++  const professional = theme.variant === "profesional";
++  const ink = mixHex(color, "#172638", 0.55);
++  const surface = professional ? (selected ? "#26394A" : "#172635") : (selected ? "#FFFFFF" : "#EDF1F4");
++  const colors: [string, string, string, string] = [surface, surface, surface, surface];
++  return {
++    colors,
++    icon: professional ? mixHex(color, "#FFFFFF", 0.38) : ink,
++    label: professional ? "#E6EDF3" : "#182B3A",
++    border: selected ? (professional ? "#FFFFFF" : ink) : (professional ? "#536373" : "#A9BAC7"),
++  };
++}
++
++export function getCoreVisualGradient(theme: LandingVisualTheme, color: string): [string, string, string] {
++  // Keep the intent hue recognizable without glossy or saturated surfaces.
++  if (theme.variant === "confianza") {
++    const surface = mixHex(color, "#E7EDF1", 0.91);
++    return [surface, surface, surface];
++  }
++  const base = mixHex(color, "#283341", 0.78);
++  return [mixHex(base, "#FFFFFF", 0.04), base, base];
++}
+diff --git a/artifacts/go-app-mobile/hooks/useLandingVisualVariant.ts b/artifacts/go-app-mobile/hooks/useLandingVisualVariant.ts
+new file mode 100644
+index 0000000..6b2e016
+--- /dev/null
++++ b/artifacts/go-app-mobile/hooks/useLandingVisualVariant.ts
+@@ -0,0 +1,48 @@
++import { useCallback, useEffect, useRef, useState } from "react";
++import AsyncStorage from "@react-native-async-storage/async-storage";
++import {
++  isLandingVisualVariant,
++  type LandingVisualVariant,
++} from "@/components/landing/landingVariant";
++
++const STORAGE_KEY = "go_landing_visual_variant_v1";
++
++/** Local development preference; production always renders the original Landing. */
++export function useLandingVisualVariant(): {
++  landingVariant: LandingVisualVariant;
++  setLandingVariant: (value: LandingVisualVariant) => void;
++} {
++  const [landingVariant, setVariant] = useState<LandingVisualVariant>("actual");
++  const selectedByUser = useRef(false);
++  const pendingWrite = useRef<Promise<void>>(Promise.resolve());
++
++  useEffect(() => {
++    if (!__DEV__) return;
++    let active = true;
++    AsyncStorage.getItem(STORAGE_KEY)
++      .then((saved) => {
++        // A slow read must never overwrite a selection already made in Herramientas.
++        if (active && !selectedByUser.current && isLandingVisualVariant(saved)) {
++          setVariant(saved);
++        }
++      })
++      .catch(() => {
++        // Storage is optional: the original Landing remains the safe default.
++      });
++    return () => { active = false; };
++  }, []);
++
++  const setLandingVariant = useCallback((value: LandingVisualVariant) => {
++    if (!__DEV__ || !isLandingVisualVariant(value)) return;
++    selectedByUser.current = true;
++    setVariant(value);
++    // Keep the last choice persisted even when several options are tapped quickly.
++    pendingWrite.current = pendingWrite.current
++      .then(() => AsyncStorage.setItem(STORAGE_KEY, value))
++      .catch(() => {
++        // Selection still works for this session if local persistence is unavailable.
++      });
++  }, []);
++
++  return { landingVariant: __DEV__ ? landingVariant : "actual", setLandingVariant };
++}

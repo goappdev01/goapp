@@ -335,7 +335,7 @@ export function useGoCalendarFlow() {
       setTime(`${String(h24).padStart(2, "0")}:${String(clockMins).padStart(2, "0")}`);
       if (isRelease) {
         clockLastHaptic.current = -1;
-        setTimeout(() => setClockPhase("minutes"), 120);
+        setClockPhase("minutes");
       }
     } else {
       const rawMins = Math.round(angle / 6) % 60;

@@ -21,7 +21,7 @@ import {
   Easing,
   Keyboard,
   KeyboardAvoidingView,
-  Modal,
+  NativeModules,
   Platform,
   ScrollView,
   Share,
@@ -33,6 +33,11 @@ import {
   View,
 } from "react-native";
 import * as Location from "expo-location";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { COUNTRY_CONFIGS, MARKET_STORAGE_KEY, type Market } from "@/utils/countryConfig";
+import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
+import { getBusinessDemoSetupState } from "@/data/businessDemoStore";
+import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import { PlanoEmpresaScreen } from "@/components/booking/PlanoEmpresaScreen";
@@ -67,6 +72,91 @@ import {
   type StaffScheduleConfig,
 } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+
+function blockDemoExternal(lang: string) {
+  Alert.alert(lang === "en" ? "Local business DEMO" : "Empresa DEMO local",
+    lang === "en" ? "This action uses an external service. Enter the test data manually; no real operation will run."
+      : "Esta acción utiliza un servicio externo. Introduce los datos de prueba manualmente; no se ejecutará ninguna operación real.");
+}
+
+// Local format validation does not prove number ownership or WhatsApp registration.
+export type BusinessPhoneCountry = "ES" | "US" | "GB" | "FR" | "BR";
+type BusinessPhoneKind = "landline" | "mobile" | "whatsapp";
+const PHONE_PLANS = {
+  ES: { prefix: "34", min: 9, max: 9, trunk: false },
+  US: { prefix: "1", min: 10, max: 10, trunk: false },
+  GB: { prefix: "44", min: 9, max: 10, trunk: true },
+  FR: { prefix: "33", min: 9, max: 9, trunk: true },
+  BR: { prefix: "55", min: 10, max: 11, trunk: false },
+} as const;
+const PHONE_COUNTRIES = Object.values(COUNTRY_CONFIGS).map(country => ({ ...country,
+  code: country.countryCode as BusinessPhoneCountry,
+  prefix: "+" + PHONE_PLANS[country.countryCode as BusinessPhoneCountry].prefix,
+}));
+const isPhoneCountry = (value: unknown): value is BusinessPhoneCountry => typeof value === "string" && Object.prototype.hasOwnProperty.call(PHONE_PLANS, value);
+export function resolveBusinessPhoneCountry(businessCountry?: string, deviceLocale?: string): BusinessPhoneCountry {
+  if (isPhoneCountry(businessCountry)) return businessCountry;
+  const pieces = (deviceLocale ?? "").replace(/_/g, "-").split("-");
+  const region = pieces.slice(1).find(part => /^[A-Z]{2}$/i.test(part))?.toUpperCase();
+  return isPhoneCountry(region) ? region : "ES";
+}
+export function nationalBusinessPhone(value: string, country: BusinessPhoneCountry): string {
+  const raw = (value ?? "").trim(), plan = PHONE_PLANS[country];
+  let digits = raw.replace(/\D/g, "");
+  if (raw.startsWith("+") && digits.startsWith(plan.prefix)) digits = digits.slice(plan.prefix.length);
+  else if (raw.startsWith("00") && digits.startsWith("00" + plan.prefix)) digits = digits.slice(2 + plan.prefix.length);
+  if (plan.trunk && digits.startsWith("0")) digits = digits.slice(1);
+  return digits;
+}
+export function validateBusinessPhone(value: string, country: BusinessPhoneCountry, kind: BusinessPhoneKind = "whatsapp") {
+  const raw = (value ?? "").trim(), plan = PHONE_PLANS[country], national = nationalBusinessPhone(raw, country);
+  if (!raw) return { valid: true, empty: true, national: "", international: "" };
+  let valid = /^[+\d\s().-]+$/.test(raw) && national.length >= plan.min && national.length <= plan.max;
+  if (country === "ES") valid = valid && (kind === "landline" ? /^[89]\d{8}$/ : kind === "mobile" ? /^[67]\d{8}$/ : /^[6789]\d{8}$/).test(national);
+  if (country === "US") valid = valid && /^[2-9]\d{2}[2-9]\d{6}$/.test(national);
+  if (country === "FR") valid = valid && (kind === "mobile" ? /^[67]\d{8}$/ : /^[1-9]\d{8}$/).test(national);
+  if (country === "GB" && kind === "mobile") valid = valid && /^7\d{9}$/.test(national);
+  if (country === "BR") valid = valid && /^[1-9]\d/.test(national) && (kind !== "mobile" || /^\d{2}9\d{8}$/.test(national));
+  if ((raw.startsWith("+") || raw.startsWith("00")) && national === raw.replace(/\D/g, "")) valid = false;
+  return { valid, empty: false, national, international: valid ? "+" + plan.prefix + national : "" };
+}
+export function businessPhoneInput(value: string, country: BusinessPhoneCountry): string {
+  const raw = value.trim(), digits = raw.replace(/\D/g, ""), prefix = PHONE_PLANS[country].prefix;
+  const foreign = raw.startsWith("+") ? !digits.startsWith(prefix) : raw.startsWith("00") && !digits.startsWith("00" + prefix);
+  return foreign || !/^[+\d\s().-]*$/.test(raw) ? value : nationalBusinessPhone(value, country);
+}
+export function businessPhoneError(value: string, country: BusinessPhoneCountry, kind: BusinessPhoneKind, lang: string): string {
+  const en = lang === "en", raw = value.trim(), national = nationalBusinessPhone(raw, country), plan = PHONE_PLANS[country];
+  if (validateBusinessPhone(value, country, kind).valid) return "";
+  if (!/^[+\d\s().-]+$/.test(raw)) return en ? "Use digits, spaces and a valid calling code." : "Utiliza cifras, espacios y un prefijo válido.";
+  if ((raw.startsWith("+") || raw.startsWith("00")) && national === raw.replace(/\D/g, "")) return en ? "The calling code does not match the selected country." : "El prefijo no corresponde al país seleccionado.";
+  if (national.length < plan.min || national.length > plan.max) return country === "ES" ? (en ? "Spanish numbers require 9 digits, excluding +34." : "El número español necesita 9 cifras, sin contar +34.") : (en ? "Check the number length for the selected country." : "Revisa la longitud del número para el país seleccionado.");
+  if (country === "ES" && kind === "landline") return en ? "Use a landline starting with 8 or 9. Put mobiles in Mobile." : "El fijo debe comenzar por 8 o 9. Introduce los móviles en Móvil.";
+  if (country === "ES" && kind === "mobile") return en ? "The mobile must start with 6 or 7. Put landlines in Landline." : "El móvil debe comenzar por 6 o 7. Introduce los fijos en Teléfono fijo.";
+  return en ? "The number format does not match the selected contact type." : "El formato no corresponde al tipo de teléfono seleccionado.";
+}
+
+type BusinessCoordinates = { latitude: number; longitude: number };
+type DeviceLocationAdapter = Pick<typeof Location, "requestForegroundPermissionsAsync" | "getCurrentPositionAsync" | "reverseGeocodeAsync" | "Accuracy">;
+export async function readBusinessDeviceLocation(adapter: DeviceLocationAdapter, options: {
+  allowAddressLookup: boolean;
+  onCoordinates: (coordinates: BusinessCoordinates) => void | Promise<void>;
+}): Promise<{ status: "denied" } | { status: "coordinates" | "address"; coordinates: BusinessCoordinates; address?: string }> {
+  if ((await adapter.requestForegroundPermissionsAsync()).status !== "granted") return { status: "denied" };
+  const position = await adapter.getCurrentPositionAsync({ accuracy: adapter.Accuracy.Balanced });
+  const coordinates = { latitude: position.coords.latitude, longitude: position.coords.longitude };
+  if (!Number.isFinite(coordinates.latitude) || !Number.isFinite(coordinates.longitude)
+    || Math.abs(coordinates.latitude) > 90 || Math.abs(coordinates.longitude) > 180) throw new Error("Invalid device coordinates");
+  await options.onCoordinates(coordinates);
+  if (options.allowAddressLookup) {
+    try {
+      const [geo] = await adapter.reverseGeocodeAsync(coordinates);
+      const address = [geo?.street, geo?.streetNumber, geo?.city, geo?.region].filter(Boolean).join(", ");
+      if (address) return { status: "address", coordinates, address };
+    } catch { /* Coordinates already persist; the user can enter an address manually. */ }
+  }
+  return { status: "coordinates", coordinates };
+}
 
 // ─── Visual tokens ────────────────────────────────────────────────────────────
 
@@ -140,18 +230,22 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
   const insets = useSafeAreaInsets();
   const { t, lang } = useLanguage();
   const STEPS = buildStepsCfg(t);
-  const { config, updateConfig, resetToSubActivity } = useBusinessConfig();
+  const { config, updateConfig, resetToSubActivity, demo } = useBusinessConfig();
+  const { locationReturn, consumeLocationReturn } = useOwnerBusinessDemo();
+  // Only a return from this owner's native GPS prompt skips the normal activity selector.
+  const resumeLocation = useRef(demo && locationReturn?.userId === demo.getSnapshot().ownerUserId ? locationReturn : undefined).current;
 
   // ── Fase previa de selección de actividad ────────────────────────────────────
-  // Siempre arranca en "activity" para que el usuario elija (o confirme) su
+  // El acceso normal arranca en "activity" para que el usuario elija (o confirme) su
   // sector y actividad antes de acceder a los 8 pasos.  Si sectorId/subId ya
   // existen de una sesión anterior aparecen pre-seleccionados, pero el flujo
-  // nunca salta directamente al paso 1 sin pasar por el selector.
-  const [phase, setPhase] = useState<"activity" | "steps">("activity");
+  // solo recupera una ruta previa tras el permiso GPS del mismo propietario.
+  const [phase, setPhase] = useState<"activity" | "steps">(() => resumeLocation?.phase ?? "activity");
   const [localSector, setLocalSector] = useState<Sector | null>(null);
 
-  const [currentStep,    setCurrentStep]    = useState(() => Math.min(Math.max(initialStep, 0), STEPS.length - 1));
+  const [currentStep,    setCurrentStep]    = useState(() => resumeLocation?.step ?? Math.min(Math.max(initialStep, 0), STEPS.length - 1));
   const [planoEditorOpen, setPlanoEditorOpen] = useState(false);
+  useEffect(() => { if (resumeLocation) consumeLocationReturn(resumeLocation.token); }, [resumeLocation, consumeLocationReturn]);
   // Paso Ubicación — protección: el botón Siguiente solo se activa cuando
   // el usuario ha visto la sección CONTACTO o ha rellenado al menos un campo.
   const [contactSectionSeen, setContactSectionSeen] = useState(false);
@@ -183,12 +277,42 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
   const hasContact = !!(config.phone?.trim() || config.whatsapp?.trim());
   const canProceed = currentStep !== 1 || hasContact || contactSectionSeen;
 
-  const advanceStep = () => {
-    const alreadyDone = Array.isArray(config.completedSteps) ? config.completedSteps : [];
-    if (!alreadyDone.includes(currentStep)) {
-      updateConfig({ completedSteps: [...alreadyDone, currentStep] });
-    }
-    if (isLast) { onFinalizarConfig ? onFinalizarConfig() : onBack(); } else { animateToStep(currentStep + 1); }
+  const advanceBusy = useRef(false);
+  const [isAdvancing, setIsAdvancing] = useState(false);
+  const advanceStep = async () => {
+    if (advanceBusy.current) return;
+    advanceBusy.current = true; setIsAdvancing(true);
+    try {
+      if (currentStep === 1) {
+        const country = resolveBusinessPhoneCountry(config.countryCode);
+        const validContacts = validateBusinessPhone(config.phone ?? "", country, "landline").valid
+          && validateBusinessPhone(config.mobile ?? "", country, "mobile").valid
+          && validateBusinessPhone(config.whatsapp ?? "", country, "whatsapp").valid;
+        if (!validContacts) throw new Error(lang === "en" ? "Check the contact numbers and their country/calling code." : "Revisa los números de contacto y su país/prefijo.");
+      }
+      if (demo) {
+        // Serialized after pending field edits: never announce completion before the data reaches disk.
+        await demo.transformConfig(current => {
+          const done = new Set(Array.isArray(current.completedSteps) ? current.completedSteps : []);
+          done.add(currentStep);
+          const next = { ...current, completedSteps: [...done] };
+          const progress = getBusinessDemoSetupState(next, demo.getSnapshot().plan);
+          if (!progress.steps[currentStep] || (isLast && !progress.ready)) {
+            const missing = isLast ? progress.nextStep : currentStep;
+            throw new Error(lang === "en" ? "Complete the required data in step " + (missing + 1) + " before continuing."
+              : "Completa los datos necesarios del paso " + (missing + 1) + " antes de continuar.");
+          }
+          return next;
+        });
+      } else {
+        const alreadyDone = Array.isArray(config.completedSteps) ? config.completedSteps : [];
+        if (!alreadyDone.includes(currentStep)) updateConfig({ completedSteps: [...alreadyDone, currentStep] });
+      }
+      if (isLast) { onFinalizarConfig ? onFinalizarConfig() : onBack(); } else { animateToStep(currentStep + 1); }
+    } catch (error) {
+      Alert.alert(lang === "en" ? "Configuration incomplete" : "Configuración incompleta",
+        error instanceof Error ? error.message : (lang === "en" ? "Could not save the configuration." : "No se pudo guardar la configuración."));
+    } finally { advanceBusy.current = false; setIsAdvancing(false); }
   };
 
   const goNext = () => {
@@ -303,7 +427,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
                 updateConfig({ subId: null });
               }
             }}
-            onSubConfirmed={() => { setCurrentStep(0); setPhase("steps"); }}
+            onSubConfirmed={() => { setCurrentStep(Math.min(Math.max(initialStep, 0), STEPS.length - 1)); setPhase("steps"); }}
           />
         </ScrollView>
 
@@ -366,9 +490,9 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
           </Animated.View>
 
           {/* Step progress pills — desplazables */}
-          <View style={c.stepsBar}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={c.stepsBar}>
             {STEPS.map((s, i) => {
-              const isDone   = i < currentStep;
+              const isDone   = demo ? getBusinessDemoSetupState(config, demo.getSnapshot().plan).steps[i] : (config.completedSteps ?? []).includes(i);
               const isActive = i === currentStep;
               const dotColor = isDone ? GREEN : (isActive ? s.color : "rgba(0,0,0,0.10)");
               return (
@@ -386,14 +510,14 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
                   </View>
                   <Text
                     style={[c.stepPillLabel, { color: isDone ? GREEN : (isActive ? s.color : DIM) }]}
-                    numberOfLines={1}
+                    numberOfLines={2}
                   >
                     {s.label}
                   </Text>
                 </TouchableOpacity>
               );
             })}
-          </View>
+          </ScrollView>
 
           {/* Step header card — desplazable */}
           <View style={[c.stepHeader, { borderLeftColor: step.color }]}>
@@ -429,7 +553,8 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
       <View style={[c.footer, { paddingBottom: insets.bottom + 12, justifyContent: "flex-end" }]}>
         <TouchableOpacity
           activeOpacity={canProceed ? 0.88 : 1}
-          onPress={canProceed ? goNext : undefined}
+          onPress={canProceed && !isAdvancing ? goNext : undefined}
+          disabled={isAdvancing}
           style={[c.nextBtn, {
             backgroundColor: canProceed ? GREEN : "rgba(0,0,0,0.10)",
             borderWidth: canProceed ? 0 : 1,
@@ -455,7 +580,9 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
         onRequestClose={() => setPlanoEditorOpen(false)}
       >
         <PlanoEmpresaScreen
-          businessId="my_business"
+          businessId={demo?.businessId ?? "my_business"}
+          hideFAB={Boolean(demo)}
+          showBackButton={true}
           businessName={config.businessName?.trim() || t("biz_my_business")}
           templateId={config.subId ?? undefined}
           onClose={() => setPlanoEditorOpen(false)}
@@ -501,87 +628,132 @@ function StepNombre() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function StepUbicacion() {
-  const { t } = useLanguage();
-  const { config, updateConfig } = useBusinessConfig();
-
-  const handleGPS = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") return;
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const { latitude, longitude } = pos.coords;
-      const [geo] = await Location.reverseGeocodeAsync({ latitude, longitude });
-      if (geo) {
-        const parts = [geo.street, geo.streetNumber, geo.city, geo.region].filter(Boolean);
-        updateConfig({ address: parts.join(", ") });
-      } else {
-        updateConfig({ address: `${latitude.toFixed(5)}, ${longitude.toFixed(5)}` });
-      }
-    } catch { /* ignore */ }
+  const { t, lang } = useLanguage();
+  const { saveDeviceCoordinates, beginLocationReturn, consumeLocationReturn, finishLocationReturn } = useOwnerBusinessDemo();
+  const { config, updateConfig, demo } = useBusinessConfig();
+  const [gpsBusy, setGpsBusy] = useState(false);
+  const gpsInFlight = useRef(false);
+  const stepMounted = useRef(true);
+  useEffect(() => { stepMounted.current = true; return () => { stepMounted.current = false; }; }, []);
+  const [fallbackCountry, setFallbackCountry] = useState<BusinessPhoneCountry>(() => {
+    const deviceLocale = NativeModules.SettingsManager?.settings?.AppleLocale
+      ?? NativeModules.I18nManager?.localeIdentifier ?? Intl.DateTimeFormat().resolvedOptions().locale;
+    return resolveBusinessPhoneCountry(config.countryCode, deviceLocale);
+  });
+  const country = isPhoneCountry(config.countryCode) ? config.countryCode : fallbackCountry;
+  const selectedCountry = PHONE_COUNTRIES.find(item => item.code === country)!;
+  useEffect(() => {
+    if (config.countryCode) return;
+    let active = true;
+    AsyncStorage.getItem(MARKET_STORAGE_KEY).then(market => {
+      if (!active || !market || !Object.prototype.hasOwnProperty.call(COUNTRY_CONFIGS, market)) return;
+      const regionalCountry = COUNTRY_CONFIGS[market as Market].countryCode;
+      if (isPhoneCountry(regionalCountry)) setFallbackCountry(regionalCountry);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [config.countryCode]);
+  const persist = async (patch: Partial<typeof config>) => {
+    if (demo) await demo.updateConfig(patch);
+    else updateConfig(patch);
   };
-
+  const handleGPS = async () => {
+    if (gpsInFlight.current) return;
+    gpsInFlight.current = true; setGpsBusy(true);
+    let returnToken: number | undefined;
+    try {
+      if (demo) returnToken = beginLocationReturn(demo.getSnapshot().ownerUserId);
+      const result = await readBusinessDeviceLocation(Location, {
+        // DEMO uses the device GPS; it does not contact an address lookup service.
+        allowAddressLookup: !demo,
+        onCoordinates: coordinates => demo
+          ? saveDeviceCoordinates(coordinates, demo.getSnapshot().ownerUserId, country, returnToken)
+          : persist({ coordinates, countryCode: country }),
+      });
+      if (!stepMounted.current) return;
+      if (result.status === "denied") {
+        Alert.alert(lang === "en" ? "Location permission denied" : "Permiso de ubicación denegado",
+          lang === "en" ? "You can enter the business address manually." : "Puedes introducir la dirección del negocio manualmente.");
+      } else if (result.status === "address") {
+        await persist({ address: result.address });
+      } else {
+        Alert.alert(lang === "en" ? "Coordinates saved" : "Coordenadas guardadas",
+          lang === "en" ? "Address lookup is unavailable here. Enter the address manually; the coordinates remain saved."
+            : "La conversión a dirección no está disponible aquí. Introduce la dirección manualmente; las coordenadas quedan guardadas.");
+      }
+    } catch {
+      if (!stepMounted.current) return;
+      Alert.alert(lang === "en" ? "Location unavailable" : "Ubicación no disponible",
+        lang === "en" ? "Could not obtain or save the device location. Enter the address manually."
+          : "No se pudo obtener o guardar la ubicación del dispositivo. Introduce la dirección manualmente.");
+    } finally {
+      if (returnToken !== undefined) {
+        if (stepMounted.current) consumeLocationReturn(returnToken);
+        finishLocationReturn(returnToken);
+      }
+      gpsInFlight.current = false;
+      if (stepMounted.current) setGpsBusy(false);
+    }
+  };
+  const selectCountry = () => Alert.alert(lang === "en" ? "Country and calling code" : "País y prefijo telefónico", undefined,
+    [...PHONE_COUNTRIES.map(item => ({ text: item.flag + " " + item.countryName + " " + item.prefix, onPress: () => {
+      setFallbackCountry(item.code);
+      updateConfig({ countryCode: item.code,
+        phoneE164: validateBusinessPhone(config.phone ?? "", item.code, "landline").international,
+        mobileE164: validateBusinessPhone(config.mobile ?? "", item.code, "mobile").international,
+        whatsappE164: validateBusinessPhone(config.whatsapp ?? "", item.code).international });
+    } })), { text: t("biz_cancel"), style: "cancel" as const }]);
+  const contacts: Array<{ field: "phone" | "mobile" | "whatsapp"; normalized: "phoneE164" | "mobileE164" | "whatsappE164"; kind: BusinessPhoneKind; label: string; icon: "phone" | "smartphone" | "message-circle"; color: string }> = [
+    { field: "phone", normalized: "phoneE164", kind: "landline", label: t("biz_landline"), icon: "phone", color: BLUE },
+    { field: "mobile", normalized: "mobileE164", kind: "mobile", label: lang === "en" ? "Mobile" : "Móvil", icon: "smartphone", color: BLUE },
+    { field: "whatsapp", normalized: "whatsappE164", kind: "whatsapp", label: t("biz_whatsapp_business"), icon: "message-circle", color: "#25D366" },
+  ];
   return (
     <View>
       <View style={c.sectionCard}>
-        <TextInput
-          style={c.nameInput}
-          value={config.address ?? ""}
-          onChangeText={v => updateConfig({ address: v })}
-          placeholder={t("biz_address_placeholder")}
-          placeholderTextColor={DIM}
-          returnKeyType="done"
-          autoFocus
-          maxLength={120}
-        />
+        <TextInput style={c.nameInput} value={config.address ?? ""} onChangeText={address => updateConfig({ address })}
+          placeholder={t("biz_address_placeholder")} placeholderTextColor={DIM} returnKeyType="done" autoFocus maxLength={120} />
+        {config.coordinates && <Text style={{ color: GRAY, fontSize: 12, marginTop: 8 }}>
+          {config.coordinates.latitude.toFixed(5)}, {config.coordinates.longitude.toFixed(5)}
+        </Text>}
       </View>
-
-      <TouchableOpacity activeOpacity={0.85} onPress={handleGPS} style={c.gpsBtn}>
-        <Feather name="navigation" size={15} color={GREEN} />
-        <Text style={c.gpsBtnTxt}>{t("biz_use_current_location")}</Text>
+      <TouchableOpacity activeOpacity={0.85} disabled={gpsBusy} onPress={handleGPS} style={[c.gpsBtn, gpsBusy && { opacity: 0.5 }]}>
+        <Feather name="navigation" size={15} color={GREEN} /><Text style={c.gpsBtnTxt}>{t("biz_use_current_location")}</Text>
       </TouchableOpacity>
-
-      {/* ── Contacto de empresa ─────────────────────────────────────────── */}
       <Text style={[c.sectionLabel, { marginBottom: 8 }]}>{t("biz_contact")}</Text>
-
-      <View style={c.sectionCard}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: "#4A80BD18", alignItems: "center", justifyContent: "center" }}>
-            <Feather name="phone" size={14} color="#4A80BD" />
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={lang === "en" ? "Choose phone country and calling code" : "Elegir país y prefijo telefónico"}
+        onPress={selectCountry} style={{ alignSelf: "flex-start", paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: BORDER, marginBottom: 12 }}>
+        <Text style={{ color: TEXT, fontSize: 13 }}>{selectedCountry.flag} {selectedCountry.countryName} {selectedCountry.prefix} ▾</Text>
+      </TouchableOpacity>
+      {contacts.map(contact => {
+        const value = config[contact.field] ?? "";
+        const checked = validateBusinessPhone(value, country, contact.kind);
+        return (
+          <View key={contact.field} style={c.sectionCard}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Feather name={contact.icon} size={18} color={contact.color} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={c.sectionLabel}>{contact.label}</Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Text style={{ color: GRAY, fontSize: 14 }}>{selectedCountry.prefix}</Text>
+                  <TextInput style={[c.nameInput, { flex: 1, minWidth: 0, marginTop: 2 }]} value={businessPhoneInput(value, country)}
+                    accessibilityLabel={contact.label} placeholder={lang === "en" ? "National number" : "Número nacional"} placeholderTextColor={DIM}
+                    keyboardType="phone-pad" textContentType="telephoneNumber" autoComplete="tel" returnKeyType="done" maxLength={64}
+                    onChangeText={input => {
+                      const national = businessPhoneInput(input, country), result = validateBusinessPhone(input, country, contact.kind);
+                      updateConfig({ [contact.field]: national, [contact.normalized]: result.international, countryCode: country });
+                    }} />
+                </View>
+                {!checked.valid && <Text accessibilityRole="alert" style={{ color: RED, fontSize: 12, marginTop: 5 }}>
+                  {businessPhoneError(value, country, contact.kind, lang)}
+                </Text>}
+              </View>
+            </View>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={c.sectionLabel}>{t("biz_landline")}</Text>
-            <TextInput
-              style={[c.nameInput, { marginTop: 2 }]}
-              value={config.phone ?? ""}
-              onChangeText={v => updateConfig({ phone: v })}
-              placeholder={t("biz_phone_placeholder")}
-              placeholderTextColor={DIM}
-              keyboardType="phone-pad"
-              returnKeyType="done"
-            />
-          </View>
-        </View>
-      </View>
-
-      <View style={c.sectionCard}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-          <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: "#25D36618", alignItems: "center", justifyContent: "center" }}>
-            <Feather name="message-circle" size={14} color="#25D366" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={c.sectionLabel}>{t("biz_whatsapp_business")}</Text>
-            <TextInput
-              style={[c.nameInput, { marginTop: 2 }]}
-              value={config.whatsapp ?? ""}
-              onChangeText={v => updateConfig({ whatsapp: v })}
-              placeholder={t("biz_whatsapp_placeholder")}
-              placeholderTextColor={DIM}
-              keyboardType="phone-pad"
-              returnKeyType="done"
-            />
-          </View>
-        </View>
-      </View>
+        );
+      })}
+      <Text style={{ color: GRAY, fontSize: 11, lineHeight: 16, marginBottom: 12 }}>
+        {lang === "en" ? "A valid number format does not confirm WhatsApp availability." : "Un formato válido no confirma que el número tenga WhatsApp."}
+      </Text>
     </View>
   );
 }
@@ -1777,7 +1949,7 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function StepServicios({ currentSector }: { currentSector: Sector | null }) {
-  const { config, updateConfig } = useBusinessConfig();
+  const { config, updateConfig, demo } = useBusinessConfig();
   const { t, lang } = useLanguage();
   const color = currentSector?.color ?? BLUE;
 
@@ -1816,6 +1988,7 @@ function StepServicios({ currentSector }: { currentSector: Sector | null }) {
 
   // ── OCR: launch image picker ────────────────────────────────────────────────
   const launchImagePicker = async (useCamera: boolean) => {
+    if (demo) { blockDemoExternal(lang); return; }
     try {
       if (useCamera) {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -1854,6 +2027,7 @@ function StepServicios({ currentSector }: { currentSector: Sector | null }) {
   };
 
   const handleImageImport = () => {
+    if (demo) { blockDemoExternal(lang); return; }
     Haptics.selectionAsync().catch(() => {});
     Alert.alert(
       "Importar tarifa",
@@ -1868,6 +2042,7 @@ function StepServicios({ currentSector }: { currentSector: Sector | null }) {
 
   // ── OCR: launch PDF picker ──────────────────────────────────────────────────
   const handlePdfImport = async () => {
+    if (demo) { blockDemoExternal(lang); return; }
     Haptics.selectionAsync().catch(() => {});
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -1887,6 +2062,7 @@ function StepServicios({ currentSector }: { currentSector: Sector | null }) {
 
   // ── OCR: launch URL import ──────────────────────────────────────────────────
   const handleUrlImport = () => {
+    if (demo) { blockDemoExternal(lang); return; }
     Haptics.selectionAsync().catch(() => {});
     setOcrSourceUri(null);
     setOcrIsPdf(false);
@@ -2047,14 +2223,14 @@ function StepServicios({ currentSector }: { currentSector: Sector | null }) {
       </View>
 
       {/* OCR Review Sheet */}
-      <GoOcrImportSheet
+      {!demo && <GoOcrImportSheet
         visible={ocrVisible}
         sourceUri={ocrSourceUri}
         isPdf={ocrIsPdf}
         isUrl={ocrIsUrl}
         onClose={() => { setOcrVisible(false); setOcrIsUrl(false); }}
         onImport={handleOcrImport}
-      />
+      />}
     </View>
   );
 }
@@ -2146,7 +2322,7 @@ function StepPublicar({
   onGoToStep?:         (step: number) => void;
   onGoToActivity?:     () => void;
 }) {
-  const { config } = useBusinessConfig();
+  const { config, demo } = useBusinessConfig();
   const { t, lang } = useLanguage();
   const [copied, setCopied] = useState(false);
 
@@ -2154,12 +2330,14 @@ function StepPublicar({
   const currentSub    = currentSector?.subs.find(s => s.id === config.subId);
 
   const handleShare = async () => {
+    if (demo) { blockDemoExternal(lang); return; }
     try {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       await Share.share({ message: `Reserva en mi negocio a través de GO:\n${MOCK_LINK}`, url: MOCK_LINK, title: "Reservar en GO" });
     } catch {}
   };
   const handleCopy = async () => {
+    if (demo) { blockDemoExternal(lang); return; }
     try {
       await Clipboard.setStringAsync(MOCK_LINK);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -2294,9 +2472,9 @@ function StepPublicar({
       {/* QR GO */}
       <View style={[c.sectionCard, { alignItems: "center", paddingVertical: 24 }]}>
         <View style={c.qrWrapper}>
-          <QRCode value={MOCK_LINK} size={150} backgroundColor="#FFFFFF" color="#111827" />
+          <QRCode value={demo ? `GO DEMO local · ${config.businessName || "Mi negocio"}` : MOCK_LINK} size={150} backgroundColor="#FFFFFF" color="#111827" />
         </View>
-        <Text style={c.qrLink}>{MOCK_LINK}</Text>
+        <Text style={c.qrLink}>{demo ? (lang === "en" ? "Local test · no public booking link" : "Prueba local · sin enlace público de reservas") : MOCK_LINK}</Text>
       </View>
 
       <TouchableOpacity activeOpacity={0.85} onPress={handleShare} style={[c.bigBtn, { backgroundColor: GOLD }]}>
@@ -2315,7 +2493,7 @@ function StepPublicar({
         </Text>
       </TouchableOpacity>
 
-      {onOpenVerificacion && (
+      {!demo && onOpenVerificacion && (
         <TouchableOpacity
           activeOpacity={0.8}
           onPress={() => { Haptics.selectionAsync().catch(() => {}); onOpenVerificacion(); }}
@@ -2401,10 +2579,10 @@ const c = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 8,
   },
-  stepPill:     { flex: 1, alignItems: "center", gap: 4 },
+  stepPill:     { width: 92, minHeight: 58, alignItems: "center", gap: 5, paddingHorizontal: 4 },
   stepDot:      { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   stepDotNum:   { fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", color: "#fff" },
-  stepPillLabel:{ fontSize: 8, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.3, textAlign: "center" },
+  stepPillLabel:{ fontSize: 10, lineHeight: 13, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.2, textAlign: "center" },
 
   contentWrap:  { flex: 1 },
   stepHeader:   {

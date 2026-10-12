@@ -3,7 +3,6 @@ import {
   Alert,
   Dimensions,
   Keyboard,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -14,6 +13,10 @@ import {
 } from "react-native";
 import { GestureDetector, Gesture } from "react-native-gesture-handler";
 import { DraggableFAB } from "../DraggableFAB";
+import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
+import { useLanguage } from "@/contexts/LanguageContext";
+import type { TranslationKey } from "@/i18n/translations";
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -35,10 +38,8 @@ import {
   FloorPlan,
   FloorReservation,
   STATUS_COLORS,
-  STATUS_LABELS,
   ELEMENT_DEFAULTS,
   ELEMENT_ICONS,
-  ELEMENT_LABELS,
   loadFloorPlan,
   saveFloorPlan,
   loadReservations,
@@ -550,6 +551,10 @@ function buildElementsFromPlantilla(
   return elements;
 }
 
+const floorStatusKey = (status: FloorElementStatus): TranslationKey => `floor_status_${status}`;
+const floorElementKey = (type: FloorElementType): TranslationKey => `floor_element_${type}`;
+const floorReservationKey = (status: FloorReservation["status"]): TranslationKey => `floor_reservation_${status}`;
+
 const statusOptions: FloorElementStatus[] = [
   "disponible", "reservado", "ocupado", "bloqueado", "mantenimiento", "pendiente",
 ];
@@ -906,14 +911,15 @@ function ElementTypeSelector({ visible, onSelect, onClose }: {
   onSelect: (type: FloorElementType) => void;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
   if (!visible) return null;
   return (
     <View style={sel.overlay} pointerEvents="box-none">
       <TouchableOpacity style={sel.backdrop} activeOpacity={1} onPress={onClose} />
       <View style={sel.sheet}>
         <View style={sel.handleBar} />
-        <Text style={sel.title}>ADD ELEMENT</Text>
-        <Text style={sel.sub}>What type of bookable space?</Text>
+        <Text style={sel.title}>{t("floor_add_element")}</Text>
+        <Text style={sel.sub}>{t("floor_element_question")}</Text>
         <View style={sel.grid}>
           {elementTypeItems.map(item => (
             <TouchableOpacity
@@ -929,12 +935,12 @@ function ElementTypeSelector({ visible, onSelect, onClose }: {
                   <Feather name={item.icon as any} size={22} color={item.color} />
                 )}
               </View>
-              <Text style={[sel.typeLabel, { color: item.color }, item.type === "habitacion" && { fontSize: 9.5 }]}>{item.label}</Text>
+              <Text style={[sel.typeLabel, { color: item.color }, item.type === "habitacion" && { fontSize: 9.5 }]}>{t(floorElementKey(item.type))}</Text>
             </TouchableOpacity>
           ))}
         </View>
         <TouchableOpacity style={sel.cancelBtn} onPress={onClose}>
-          <Text style={sel.cancelTxt}>Cancelar</Text>
+          <Text style={sel.cancelTxt}>{t("cancel")}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -952,6 +958,8 @@ function ElementEditor({ el, visible, onSave, onDelete, onDuplicate, onMassDupli
   onMassDuplicate: (id: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
+  const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState<FloorElement | null>(null);
   const [statusOpen, setStatusOpen] = useState(false);
   const kbOffset = useSharedValue(0);
@@ -974,6 +982,7 @@ function ElementEditor({ el, visible, onSave, onDelete, onDuplicate, onMassDupli
 
   const sheetAnim = useAnimatedStyle(() => ({
     transform: [{ translateY: -kbOffset.value }],
+    maxHeight: Math.max(140, SH - insets.top - kbOffset.value - 20),
   }));
 
   if (!visible || !draft) return null;
@@ -984,7 +993,7 @@ function ElementEditor({ el, visible, onSave, onDelete, onDuplicate, onMassDupli
     <View style={ed.overlay} pointerEvents="box-none">
       <TouchableOpacity style={ed.backdrop} activeOpacity={1} onPress={() => { Keyboard.dismiss(); onClose(); }} />
       <Animated.View style={[{ position: "absolute", bottom: 0, left: 0, right: 0 }, sheetAnim]}>
-        <View style={ed.sheet}>
+        <View style={[ed.sheet, { position: "relative", bottom: undefined, flexShrink: 1 }]}>
           <View style={ed.handleBar} />
 
           <ScrollView
@@ -1000,18 +1009,18 @@ function ElementEditor({ el, visible, onSave, onDelete, onDuplicate, onMassDupli
                 ) : (
                   <Feather name={(ELEMENT_ICONS[draft.type] ?? "star") as any} size={13} color={ACCENT} />
                 )}
-                <Text style={[ed.typePillTxt, { color: ACCENT }]}>{ELEMENT_LABELS[draft.type]}</Text>
+                <Text style={[ed.typePillTxt, { color: ACCENT }]}>{t(floorElementKey(draft.type))}</Text>
               </View>
-              <Text style={ed.editorHint}>Edición rápida</Text>
+              <Text style={ed.editorHint}>{t("floor_quick_edit")}</Text>
             </View>
 
             <View style={ed.fieldRow}>
-              <Text style={ed.fieldLabel}>Nombre</Text>
+              <Text style={ed.fieldLabel}>{t("floor_name")}</Text>
               <TextInput
                 style={ed.input}
                 value={draft.label}
                 onChangeText={v => setDraft(d => d ? { ...d, label: v } : d)}
-                placeholder="Ej: Mesa 1, VIP, Terraza…"
+                placeholder={t("floor_name_hint")}
                 placeholderTextColor={DIM}
                 returnKeyType="done"
                 autoFocus
@@ -1019,7 +1028,7 @@ function ElementEditor({ el, visible, onSave, onDelete, onDuplicate, onMassDupli
             </View>
 
             <View style={ed.fieldRow}>
-              <Text style={ed.fieldLabel}>Capacidad (personas)</Text>
+              <Text style={ed.fieldLabel}>{t("floor_capacity")}</Text>
               <View style={ed.numRow}>
                 <TouchableOpacity style={ed.numBtn} onPress={() => setDraft(d => d ? { ...d, capacity: Math.max(1, (d.capacity ?? 1) - 1) } : d)}>
                   <Feather name="minus" size={16} color={ACCENT} />
@@ -1033,13 +1042,13 @@ function ElementEditor({ el, visible, onSave, onDelete, onDuplicate, onMassDupli
 
             {/* Status */}
             <View style={ed.fieldRow}>
-              <Text style={ed.fieldLabel}>Estado</Text>
+              <Text style={ed.fieldLabel}>{t("floor_state")}</Text>
               <TouchableOpacity
                 style={[ed.statusPicker, { borderColor: statusColor + "88", backgroundColor: statusColor + "18" }]}
                 onPress={() => setStatusOpen(s => !s)}
               >
                 <View style={[ed.statusDot, { backgroundColor: statusColor }]} />
-                <Text style={[ed.statusTxt, { color: statusColor }]}>{STATUS_LABELS[draft.status]}</Text>
+                <Text style={[ed.statusTxt, { color: statusColor }]}>{t(floorStatusKey(draft.status))}</Text>
                 <Feather name={statusOpen ? "chevron-up" : "chevron-down"} size={14} color={statusColor} />
               </TouchableOpacity>
             </View>
@@ -1053,7 +1062,7 @@ function ElementEditor({ el, visible, onSave, onDelete, onDuplicate, onMassDupli
                     onPress={() => { setDraft(d => d ? { ...d, status: s } : d); setStatusOpen(false); }}
                   >
                     <View style={[ed.statusDot, { backgroundColor: STATUS_COLORS[s] }]} />
-                    <Text style={[ed.statusOptionTxt, { color: STATUS_COLORS[s] }]}>{STATUS_LABELS[s]}</Text>
+                    <Text style={[ed.statusOptionTxt, { color: STATUS_COLORS[s] }]}>{t(floorStatusKey(s))}</Text>
                     {draft.status === s && <Feather name="check" size={13} color={STATUS_COLORS[s]} />}
                   </TouchableOpacity>
                 ))}
@@ -1065,25 +1074,25 @@ function ElementEditor({ el, visible, onSave, onDelete, onDuplicate, onMassDupli
                 onPress={() => { onDuplicate(draft.id); onClose(); }}
               >
                 <Feather name="copy" size={14} color="#F59E0B" />
-                <Text style={[ed.actionTxt, { color: "#F59E0B" }]}>Duplicar</Text>
+                <Text style={[ed.actionTxt, { color: "#F59E0B" }]}>{t("floor_duplicate")}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[ed.actionBtn, { borderColor: "#8B5CF644", backgroundColor: "#8B5CF611" }]}
                 onPress={() => { onMassDuplicate(draft.id); onClose(); }}
               >
                 <Feather name="layers" size={14} color="#8B5CF6" />
-                <Text style={[ed.actionTxt, { color: "#8B5CF6" }]}>× Varios</Text>
+                <Text style={[ed.actionTxt, { color: "#8B5CF6" }]}>{t("floor_duplicate_many")}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[ed.actionBtn, { borderColor: DANGER + "44", backgroundColor: DANGER + "11" }]}
                 onPress={() => { onDelete(draft.id); onClose(); }}
               >
                 <Feather name="trash-2" size={14} color={DANGER} />
-                <Text style={[ed.actionTxt, { color: DANGER }]}>Eliminar</Text>
+                <Text style={[ed.actionTxt, { color: DANGER }]}>{t("floor_delete")}</Text>
               </TouchableOpacity>
             </View>
 
             <TouchableOpacity style={ed.saveBtn} onPress={() => { onSave(draft); onClose(); }}>
               <Feather name="check" size={16} color="#fff" />
-              <Text style={ed.saveTxt}>SAVE CHANGES</Text>
+              <Text style={ed.saveTxt}>{t("floor_save_changes")}</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -1100,6 +1109,7 @@ function MassDuplicateModal({ el, visible, onConfirm, onClose }: {
   onConfirm: (id: string, count: number) => void;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
   const [countStr, setCountStr] = useState("10");
 
   useEffect(() => { if (visible) setCountStr("10"); }, [visible]);
@@ -1120,12 +1130,12 @@ function MassDuplicateModal({ el, visible, onConfirm, onClose }: {
             <Feather name="layers" size={18} color="#8B5CF6" />
           </View>
           <View>
-            <Text style={md.title}>DUPLICAR EN MASA</Text>
+            <Text style={md.title}>{t("floor_mass_duplicate")}</Text>
             <Text style={md.sub}>"{el.label}"</Text>
           </View>
         </View>
 
-        <Text style={md.fieldLabel}>¿CUÁNTAS COPIAS?</Text>
+        <Text style={md.fieldLabel}>{t("floor_copy_count")}</Text>
         <View style={md.countRow}>
           <TouchableOpacity
             style={md.countBtn}
@@ -1152,13 +1162,13 @@ function MassDuplicateModal({ el, visible, onConfirm, onClose }: {
         </View>
 
         <View style={md.previewBox}>
-          <Text style={md.previewLabel}>SE CREARÁN</Text>
+          <Text style={md.previewLabel}>{t("floor_will_create")}</Text>
           <Text style={md.previewNames} numberOfLines={2}>
             {baseName} 1, {baseName} 2
             {count > 2 ? `, … ${baseName} ${count}` : ""}
           </Text>
           <Text style={md.previewHint}>
-            Distribuidas en cuadrícula · numeradas automáticamente
+            {t("floor_copy_hint")}
           </Text>
         </View>
 
@@ -1168,11 +1178,11 @@ function MassDuplicateModal({ el, visible, onConfirm, onClose }: {
           activeOpacity={0.85}
         >
           <Feather name="copy" size={16} color="#fff" />
-          <Text style={md.confirmTxt}>CREAR {count} COPIA{count !== 1 ? "S" : ""}</Text>
+          <Text style={md.confirmTxt}>{t("floor_create_copies").replace("__COUNT__", String(count))}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={md.cancelBtn} onPress={onClose}>
-          <Text style={md.cancelTxt}>Cancelar</Text>
+          <Text style={md.cancelTxt}>{t("cancel")}</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -1188,9 +1198,11 @@ function SelectedElementBar({ el, mode, onEdit, onBook, onDeselect }: {
   onBook: () => void;
   onDeselect: () => void;
 }) {
+  const { t } = useLanguage();
+  const { demo } = useBusinessConfig();
   if (!el) return null;
   const statusColor = STATUS_COLORS[el.status];
-  const canBook = el.status === "disponible";
+  const canBook = el.status === "disponible" || (Boolean(demo) && el.status === "reservado");
 
   return (
     <View style={seb.bar}>
@@ -1199,7 +1211,7 @@ function SelectedElementBar({ el, mode, onEdit, onBook, onDeselect }: {
         <Text style={seb.name} numberOfLines={1}>{el.label}</Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 }}>
           <View style={[seb.dot, { backgroundColor: statusColor }]} />
-          <Text style={[seb.status, { color: statusColor }]}>{STATUS_LABELS[el.status]}</Text>
+          <Text style={[seb.status, { color: statusColor }]}>{t(floorStatusKey(el.status))}</Text>
           {(el.capacity ?? 0) > 0 && (
             <Text style={seb.cap}>· {el.capacity}p</Text>
           )}
@@ -1211,7 +1223,7 @@ function SelectedElementBar({ el, mode, onEdit, onBook, onDeselect }: {
         {canBook && mode === "cliente" && (
           <TouchableOpacity style={seb.bookBtn} onPress={onBook} activeOpacity={0.85}>
             <Feather name="calendar" size={13} color="#fff" />
-            <Text style={seb.bookTxt}>Reservar</Text>
+            <Text style={seb.bookTxt}>{t("floor_book")}</Text>
           </TouchableOpacity>
         )}
         {mode === "editor" && (
@@ -1238,29 +1250,31 @@ function getBookingDays(count = 14): string[] {
   return days;
 }
 
-const BOOKING_MONTH_SHORT = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
-
-function formatBookingDateLabel(isoDate: string): string {
+function formatBookingDateLabel(isoDate: string, locale: string, t: ReturnType<typeof useLanguage>["t"]): string {
   const today    = formatISODate(getToday());
   const tomorrow = formatISODate(new Date(getToday().getTime() + 86_400_000));
-  if (isoDate === today)    return "Hoy";
-  if (isoDate === tomorrow) return "Mañana";
+  if (isoDate === today)    return t("status_today");
+  if (isoDate === tomorrow) return t("status_tomorrow");
   const d = new Date(isoDate + "T00:00:00");
-  return `${["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"][d.getDay()]} ${d.getDate()} ${BOOKING_MONTH_SHORT[d.getMonth()]}`;
+  return d.toLocaleDateString(locale, { weekday: "short", day: "numeric", month: "short" });
 }
 
 // ── Client booking sheet ───────────────────────────────────────────────────────
 
-function ClientBookingSheet({ el, planId, visible, onClose, onBooked }: {
+function ClientBookingSheet({ el, planId, visible, onClose, onBooked, demo = false }: {
   el: FloorElement | null;
   planId: string;
   visible: boolean;
   onClose: () => void;
-  onBooked: (r: FloorReservation) => void;
+  onBooked: (r: FloorReservation & { dateISO?: string }) => void | Promise<void>;
+  demo?: boolean;
 }) {
+  const { t, lang, locale } = useLanguage();
   const [name, setName]   = useState("");
   const [time, setTime]   = useState("");
   const [notes, setNotes] = useState("");
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
   const todayISO    = formatISODate(getToday());
   const [selectedDateISO, setSelectedDateISO] = useState(todayISO);
   const bookingDays = useMemo(() => getBookingDays(14), []);
@@ -1278,28 +1292,36 @@ function ClientBookingSheet({ el, planId, visible, onClose, onBooked }: {
   // Reset keyboard offset when sheet closes
   useEffect(() => { if (!visible) setKbOffset(0); }, [visible]);
 
+  const insets = useSafeAreaInsets();
   if (!visible || !el) return null;
 
-  const canBook     = el.status === "disponible";
+  const canBook = el.status === "disponible" || (demo && el.status === "reservado");
   const statusColor = STATUS_COLORS[el.status];
 
-  const handleConfirm = () => {
-    if (!name.trim()) { Alert.alert("Falta nombre", "Escribe tu nombre para reservar."); return; }
-    const r: FloorReservation = {
+  const handleConfirm = async () => {
+    if (demo && submittingRef.current) return;
+    if (!name.trim()) { Alert.alert(t("floor_missing_name"), t("floor_enter_name")); return; }
+    const r: FloorReservation & { dateISO?: string } = {
+      ...(demo ? { dateISO: selectedDateISO } : {}),
       id: makeReservationId(),
       planId,
       elementId:    el.id,
       customerName: name.trim(),
-      date:         formatBookingDateLabel(selectedDateISO),
+      date:         formatBookingDateLabel(selectedDateISO, locale, t),
       time:         time.trim(),
       notes:        notes.trim() || undefined,
       status:       "pendiente",
       createdAt:    Date.now(),
     };
-    onBooked(r);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    setName(""); setSelectedDateISO(todayISO); setTime(""); setNotes("");
-    onClose();
+    if (demo) { submittingRef.current = true; setSubmitting(true); }
+    try {
+      await onBooked(r);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setName(""); setSelectedDateISO(todayISO); setTime(""); setNotes("");
+      onClose();
+    } catch (error) {
+      Alert.alert(t("floor_booking_write_error"), error instanceof Error ? error.message : t("floor_retry"));
+    } finally { if (demo) { submittingRef.current = false; setSubmitting(false); } }
   };
 
   return (
@@ -1307,7 +1329,7 @@ function ClientBookingSheet({ el, planId, visible, onClose, onBooked }: {
       <TouchableOpacity style={cb.backdrop} activeOpacity={1} onPress={() => { Keyboard.dismiss(); onClose(); }} />
 
       {/* Sheet shifts up by keyboard height — same pattern used in notes/editor panels */}
-      <View style={[cb.sheet, { bottom: kbOffset, maxHeight: SH * 0.82 }]}>
+      <View style={[cb.sheet, { bottom: kbOffset, maxHeight: Math.max(140, SH - insets.top - kbOffset - 20) }]}>
         <View style={cb.handleBar} />
 
         {/* ScrollView keeps every field visible when keyboard is open */}
@@ -1321,18 +1343,20 @@ function ClientBookingSheet({ el, planId, visible, onClose, onBooked }: {
             <View style={[cb.statusDot, { backgroundColor: statusColor }]} />
             <Text style={cb.title}>{el.label}</Text>
             <View style={[cb.statusPill, { backgroundColor: statusColor + "22" }]}>
-              <Text style={[cb.statusLbl, { color: statusColor }]}>{STATUS_LABELS[el.status]}</Text>
+              <Text style={[cb.statusLbl, { color: statusColor }]}>{t(floorStatusKey(el.status))}</Text>
             </View>
           </View>
           <Text style={cb.sub}>
-            {ELEMENT_LABELS[el.type]} · {el.capacity ?? 1} persona{(el.capacity ?? 1) !== 1 ? "s" : ""}
+            {t(floorElementKey(el.type))} · {t("floor_people").replace("__COUNT__", String(el.capacity ?? 1))}
           </Text>
+
+          {demo && <Text style={cb.sub}>{t("floor_demo_manual_duration")}</Text>}
 
           {!canBook && (
             <View style={[cb.banner, { backgroundColor: statusColor + "22", borderColor: statusColor + "55" }]}>
               <Feather name="alert-circle" size={14} color={statusColor} />
               <Text style={[cb.bannerTxt, { color: statusColor }]}>
-                This space is currently {STATUS_LABELS[el.status].toLowerCase()}.
+                {t("floor_unavailable_status").replace("__STATUS__", t(floorStatusKey(el.status)).toLowerCase())}
               </Text>
             </View>
           )}
@@ -1340,13 +1364,13 @@ function ClientBookingSheet({ el, planId, visible, onClose, onBooked }: {
           {canBook && (
             <>
               <View style={cb.field}>
-                <Text style={cb.label}>Tu nombre</Text>
+                <Text style={cb.label}>{t("floor_your_name")}</Text>
                 <TextInput style={cb.input} value={name} onChangeText={setName}
-                  placeholder="Ana García" placeholderTextColor={DIM} returnKeyType="next" />
+                  placeholder={t("floor_guest_hint")} placeholderTextColor={DIM} returnKeyType="next" />
               </View>
               {/* Fecha — strip de días */}
               <View style={cb.field}>
-                <Text style={cb.label}>Fecha</Text>
+                <Text style={cb.label}>{t("floor_date")}</Text>
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -1363,7 +1387,7 @@ function ClientBookingSheet({ el, planId, visible, onClose, onBooked }: {
                         style={[cb.dateChip, active && cb.dateChipActive]}
                       >
                         <Text style={[cb.dateChipWeekday, active && cb.dateChipActiveTxt]}>
-                          {WEEKDAY_LETTERS_ES[dateObj.getDay()]}
+                          {lang === "es" ? WEEKDAY_LETTERS_ES[dateObj.getDay()] : ["S", "M", "T", "W", "T", "F", "S"][dateObj.getDay()]}
                         </Text>
                         <Text style={[cb.dateChipNum, active && cb.dateChipActiveTxt]}>
                           {dateObj.getDate()}
@@ -1376,7 +1400,7 @@ function ClientBookingSheet({ el, planId, visible, onClose, onBooked }: {
 
               {/* Hora — reloj visual GO */}
               <View style={cb.field}>
-                <Text style={cb.label}>Hora</Text>
+                <Text style={cb.label}>{t("floor_time")}</Text>
                 <GoTimeField
                   label=""
                   value={time}
@@ -1387,20 +1411,20 @@ function ClientBookingSheet({ el, planId, visible, onClose, onBooked }: {
                 />
               </View>
               <View style={cb.field}>
-                <Text style={cb.label}>Nota (opcional)</Text>
+                <Text style={cb.label}>{t("floor_note")}</Text>
                 <TextInput style={[cb.input, { height: 56 }]} value={notes} onChangeText={setNotes}
-                  placeholder="Cumpleaños, celíaco…" placeholderTextColor={DIM}
+                  placeholder={t("floor_note_hint")} placeholderTextColor={DIM}
                   multiline returnKeyType="done" />
               </View>
-              <TouchableOpacity style={cb.confirmBtn} onPress={handleConfirm} activeOpacity={0.85}>
+              <TouchableOpacity style={cb.confirmBtn} onPress={handleConfirm} activeOpacity={0.85} disabled={demo && submitting}>
                 <Feather name="check-circle" size={16} color="#fff" />
-                <Text style={cb.confirmTxt}>CONFIRMAR RESERVA</Text>
+                <Text style={cb.confirmTxt}>{t("floor_confirm_booking")}</Text>
               </TouchableOpacity>
             </>
           )}
 
           <TouchableOpacity style={cb.closeBtn} onPress={() => { Keyboard.dismiss(); onClose(); }}>
-            <Text style={cb.closeTxt}>Cancelar</Text>
+            <Text style={cb.closeTxt}>{t("cancel")}</Text>
           </TouchableOpacity>
         </ScrollView>
       </View>
@@ -1416,6 +1440,7 @@ function ReservationsList({ reservations, elements, visible, onClose }: {
   visible: boolean;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
   if (!visible) return null;
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -1423,7 +1448,7 @@ function ReservationsList({ reservations, elements, visible, onClose }: {
         <View style={{ backgroundColor: "#fff", borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: SH * 0.75 }}>
           <View style={{ width: 38, height: 4, borderRadius: 2, backgroundColor: "#ddd", alignSelf: "center", marginTop: 10, marginBottom: 14 }} />
           <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, marginBottom: 10 }}>
-            <Text style={{ flex: 1, fontSize: 16, fontWeight: "800", color: TEXT }}>Reservas del plano</Text>
+            <Text style={{ flex: 1, fontSize: 16, fontWeight: "800", color: TEXT }}>{t("floor_plan_bookings")}</Text>
             <TouchableOpacity onPress={onClose} hitSlop={8}>
               <Feather name="x" size={20} color={GRAY} />
             </TouchableOpacity>
@@ -1431,7 +1456,7 @@ function ReservationsList({ reservations, elements, visible, onClose }: {
           {reservations.length === 0 ? (
             <View style={{ alignItems: "center", paddingVertical: 40 }}>
               <Feather name="calendar" size={32} color={DIM} />
-              <Text style={{ color: DIM, fontSize: 14, marginTop: 10 }}>Sin reservas aún</Text>
+              <Text style={{ color: DIM, fontSize: 14, marginTop: 10 }}>{t("floor_no_bookings")}</Text>
             </View>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 30 }}>
@@ -1442,7 +1467,7 @@ function ReservationsList({ reservations, elements, visible, onClose }: {
                     <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 4 }}>
                       <Text style={{ flex: 1, fontWeight: "700", fontSize: 14, color: TEXT }}>{r.customerName}</Text>
                       <View style={{ backgroundColor: "#22C55E22", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 }}>
-                        <Text style={{ color: "#22C55E", fontSize: 10, fontWeight: "700" }}>{r.status.toUpperCase()}</Text>
+                        <Text style={{ color: "#22C55E", fontSize: 10, fontWeight: "700" }}>{t(floorReservationKey(r.status)).toUpperCase()}</Text>
                       </View>
                     </View>
                     <Text style={{ color: GRAY, fontSize: 12 }}>{el?.label ?? "—"} · {r.date} {r.time}</Text>
@@ -1465,6 +1490,7 @@ function TemplatesSheet({ visible, onApply, onClose }: {
   onApply: (tpl: BusinessTemplate) => void;
   onClose: () => void;
 }) {
+  const { t } = useLanguage();
   if (!visible) return null;
 
   return (
@@ -1476,8 +1502,8 @@ function TemplatesSheet({ visible, onApply, onClose }: {
           {/* Header */}
           <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 14, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: BORDER }}>
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 17, fontWeight: "900", color: TEXT, letterSpacing: 0.3 }}>📋 Plantillas</Text>
-              <Text style={{ fontSize: 12, color: GRAY, marginTop: 2 }}>Elige tu negocio y empieza ya</Text>
+              <Text style={{ fontSize: 17, fontWeight: "900", color: TEXT, letterSpacing: 0.3 }}>{t("floor_templates_heading")}</Text>
+              <Text style={{ fontSize: 12, color: GRAY, marginTop: 2 }}>{t("floor_templates_hint")}</Text>
             </View>
             <TouchableOpacity onPress={onClose} hitSlop={10}>
               <Feather name="x" size={20} color={GRAY} />
@@ -1539,6 +1565,8 @@ export interface PlanoEmpresaPanelProps {
   onNext?: () => void;
   /** Oculta el FAB flotante interno (usar cuando el padre ya tiene el suyo propio) */
   hideFAB?: boolean;
+  /** Full-screen wizard owns one explicit back control; embedded operation screens keep their parent control. */
+  showBackButton?: boolean;
 }
 
 // ── Inline reservations panel for split mode ────────────────────────────────
@@ -1552,20 +1580,21 @@ const RESERVATION_STATUS_COLORS: Record<"pendiente" | "confirmada" | "cancelada"
 function SplitReservationsPanel({
   reservations, elements, flex,
 }: { reservations: FloorReservation[]; elements: FloorElement[]; flex: number }) {
+  const { t } = useLanguage();
   const elementLabel = (id: string) =>
-    elements.find(e => e.id === id)?.label ?? "Espacio";
+    elements.find(e => e.id === id)?.label ?? t("floor_space");
 
   return (
     <View style={[sp.root, { flex }]}>
       <View style={sp.header}>
         <Feather name="calendar" size={14} color={ACCENT} />
-        <Text style={sp.headerTxt}>RESERVAS ACTIVAS</Text>
+        <Text style={sp.headerTxt}>{t("floor_active_bookings")}</Text>
         <Text style={sp.count}>{reservations.length}</Text>
       </View>
       {reservations.length === 0 ? (
         <View style={sp.empty}>
           <Feather name="check-circle" size={24} color={DIM} />
-          <Text style={sp.emptyTxt}>Sin reservas activas</Text>
+          <Text style={sp.emptyTxt}>{t("floor_no_active_bookings")}</Text>
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingHorizontal: 12, paddingBottom: 8 }}>
@@ -1584,14 +1613,17 @@ function SplitReservationsPanel({
   );
 }
 
-export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClose, onNext, hideFAB = false }: PlanoEmpresaPanelProps) {
+export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessName, templateId, onClose, onNext, hideFAB = false, showBackButton = false }: PlanoEmpresaPanelProps) {
   const insets = useSafeAreaInsets();
-  const { config: bizConfig } = useBusinessConfig();
+  const { t, lang } = useLanguage();
+  const { config: bizConfig, demo } = useBusinessConfig();
+  const businessId = demo?.businessId ?? requestedBusinessId;
+  const floorRepository = demo ?? { loadFloorPlan, saveFloorPlan, loadReservations, saveReservations };
 
   const [mode, setMode]                 = useState<"editor" | "cliente" | "split">("editor");
   const [splitRatio, setSplitRatio]     = useState(0.5);
   const [plan, setPlan]                 = useState<FloorPlan>({
-    id: makeFloorId(), businessId, elements: [], updatedAt: Date.now(),
+    id: demo?.planId ?? makeFloorId(), businessId, elements: [], updatedAt: Date.now(),
   });
   const [reservations, setReservations] = useState<FloorReservation[]>([]);
   const [selectedId, setSelectedId]     = useState<string | null>(null);
@@ -1800,8 +1832,12 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
 
   // ── Data ──────────────────────────────────────────────────────────────────────
 
+  const demoPlanSignature = demo ? JSON.stringify(demo.getSnapshot().plan) : null;
+  const demoReservationsSignature = demo ? JSON.stringify(demo.getSnapshot().reservations) : null;
   useEffect(() => {
-    loadFloorPlan(businessId).then(saved => {
+    let active = true;
+    floorRepository.loadFloorPlan(businessId).then(saved => {
+      if (!active) return;
       if (saved && saved.elements.length > 0) {
         // ── 1. Migrate pill widths so long names always fit ────────────────
         const migrated = saved.elements.map(el =>
@@ -1897,13 +1933,16 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
 
       // Sin plantilla → plan vacío centrado
       setTimeout(() => fitToElements([]), 350);
-    });
+    }).catch(error => { if (active && demo) Alert.alert("Plano DEMO", String(error)); });
+    return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [businessId]);
+  }, [businessId, demoPlanSignature]);
 
   useEffect(() => {
-    loadReservations(plan.id).then(setReservations);
-  }, [plan.id]);
+    let active = true;
+    floorRepository.loadReservations(plan.id).then(next => { if (active) setReservations(next); }).catch(error => { if (active && demo) Alert.alert("Reservas DEMO", String(error)); });
+    return () => { active = false; };
+  }, [plan.id, demoReservationsSignature]);
 
   const selectedEl = plan.elements.find(e => e.id === selectedId) ?? null;
 
@@ -1917,13 +1956,18 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
 
   // ── Actions ──────────────────────────────────────────────────────────────────
 
-  const handleSave = async () => {
+  const handleSave = async (): Promise<boolean> => {
     setSaving(true);
-    await saveFloorPlan(plan);
-    await saveReservations(plan.id, reservations);
-    setSaving(false);
-    setHasChanges(false);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    try {
+      await floorRepository.saveFloorPlan(plan);
+      await floorRepository.saveReservations(plan.id, reservations);
+      setHasChanges(false);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      return true;
+    } catch (error) {
+      Alert.alert(t("floor_plan_write_error"), error instanceof Error ? error.message : t("floor_retry"));
+      return false;
+    } finally { setSaving(false); }
   };
 
   const handlePickImage = async () => {
@@ -1936,9 +1980,9 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
   };
 
   const handleClearBackground = () => {
-    Alert.alert("Quitar imagen", "¿Quitar la imagen de fondo del plano?", [
-      { text: "Cancelar", style: "cancel" },
-      { text: "Quitar", style: "destructive", onPress: () => updatePlan(p => ({ ...p, backgroundImage: undefined })) },
+    Alert.alert(t("floor_remove_image"), t("floor_remove_image_confirm"), [
+      { text: t("cancel"), style: "cancel" },
+      { text: t("floor_remove"), style: "destructive", onPress: () => updatePlan(p => ({ ...p, backgroundImage: undefined })) },
     ]);
   };
 
@@ -1968,7 +2012,7 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
 
     const el: FloorElement = {
       id: makeElementId(), type,
-      label:    `${ELEMENT_LABELS[type]} ${n}`,
+      label:    `${t(floorElementKey(type))} ${n}`,
       capacity: defaults.capacity ?? 2,
       x, y,
       width:    elW,
@@ -1983,7 +2027,7 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     // Auto-refit so the new element is always large and centred
     setTimeout(() => fitToElements(nextElements), 120);
-  }, [plan.elements, updatePlan, fitToElements]);
+  }, [plan.elements, updatePlan, fitToElements, t]);
 
   const handleDragEnd = useCallback((id: string, x: number, y: number) => {
     updatePlan(p => ({
@@ -2098,29 +2142,32 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
     };
     if (plan.elements.length > 0) {
       Alert.alert(
-        "Aplicar plantilla",
-        `Se reemplazarán los ${plan.elements.length} elemento${plan.elements.length !== 1 ? "s" : ""} actuales con la plantilla «${tpl.name}». ¿Continuar?`,
+        t("floor_apply_template"),
+        t("floor_replace_template").replace("__COUNT__", String(plan.elements.length)).replace("__NAME__", tpl.name),
         [
-          { text: "Cancelar", style: "cancel" },
-          { text: "Aplicar", style: "destructive", onPress: doApply },
+          { text: t("cancel"), style: "cancel" },
+          { text: t("floor_apply"), style: "destructive", onPress: doApply },
         ]
       );
     } else {
       doApply();
     }
-  }, [plan.elements, updatePlan]);
+  }, [plan.elements, updatePlan, t]);
 
-  const handleBooked = useCallback((r: FloorReservation) => {
+  const handleBooked = useCallback(async (r: FloorReservation & { dateISO?: string }) => {
     const next = [r, ...reservations];
+    if (demo) {
+      await demo.saveFloorPlan(plan);
+      await demo.saveReservations(plan.id, next);
+    } else { void saveReservations(plan.id, next); }
     setReservations(next);
-    saveReservations(plan.id, next);
     updatePlan(p => ({
       ...p,
       elements: p.elements.map(e =>
         e.id === r.elementId ? { ...e, status: "reservado" as FloorElementStatus } : e
       ),
     }));
-  }, [reservations, plan.id, updatePlan]);
+  }, [reservations, plan, demo, updatePlan]);
 
   const handleBook = useCallback(() => {
     if (selectedEl) setClientBookEl(selectedEl);
@@ -2129,12 +2176,13 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <View style={[s.root, { paddingTop: insets.top }]}>
+    <View style={[s.root, { paddingTop: hideFAB && !showBackButton ? 0 : insets.top }]}>
 
       {/* ── Title strip (minimal, top) ── */}
-      <View style={s.titleStrip} pointerEvents="none">
-        <Text style={s.titleTxt}>PLANO</Text>
-        <Text style={s.subtitleTxt}>{businessName ?? "Mi Negocio"}</Text>
+      <View style={[s.titleStrip, showBackButton && { minHeight: 54 }]} pointerEvents="box-none">
+        {showBackButton && <View style={{ position: "absolute", left: 14, top: 4 }}><GoCloseButton level="panel" onPress={onClose} accessibilityLabel={t("floor_close")} /></View>}
+        <Text style={s.titleTxt}>{t("view_mode_plano")}</Text>
+        <Text style={s.subtitleTxt}>{businessName ?? t("floor_my_business")}</Text>
       </View>
 
       {/* ── Canvas area (+ inline reservations panel en modo dividido) ── */}
@@ -2181,7 +2229,7 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
 
             {/* Elements */}
             {(mode === "cliente"
-              ? plan.elements.filter(e => e.status === "disponible" && e.reservable)
+              ? plan.elements.filter(e => (e.status === "disponible" || (Boolean(demo) && e.status === "reservado")) && e.reservable)
               : plan.elements.filter(e => e.reservable !== false)
             ).map(el => (
               <FloorElementView
@@ -2202,18 +2250,18 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
 
             {/* Empty state */}
             {(mode === "cliente"
-              ? !plan.elements.some(e => e.status === "disponible" && e.reservable)
+              ? !plan.elements.some(e => (e.status === "disponible" || (Boolean(demo) && e.status === "reservado")) && e.reservable)
               : !plan.elements.some(e => e.reservable !== false)
             ) && (
               <View style={s.emptyCanvas}>
                 <Feather name={mode === "cliente" ? "check-circle" : "map"} size={36} color={DIM} />
                 <Text style={s.emptyTxt}>
-                  {mode === "cliente" ? "No availability now" : "Your floor plan is empty"}
+                  {mode === "cliente" ? t("floor_no_availability") : t("floor_empty")}
                 </Text>
                 <Text style={s.emptySub}>
                   {mode === "cliente"
-                    ? "All spaces are occupied or reserved. Contact the business."
-                    : "Tap «+ ELEMENT» below to add tables, rooms or any bookable space."
+                    ? t("floor_no_availability_hint")
+                    : t("floor_empty_hint")
                   }
                 </Text>
               </View>
@@ -2238,7 +2286,7 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
         ).map(st => (
           <View key={st} style={s.legendItem}>
             <View style={[s.legendDot, { backgroundColor: STATUS_COLORS[st] }]} />
-            <Text style={s.legendTxt}>{mode === "cliente" && st === "disponible" ? "Available spaces" : STATUS_LABELS[st]}</Text>
+            <Text style={s.legendTxt}>{mode === "cliente" && st === "disponible" ? t("floor_available_spaces") : t(floorStatusKey(st))}</Text>
           </View>
         ))}
       </View>
@@ -2253,7 +2301,7 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
       />
 
       {/* ── GO close FAB — arrastrable con long-press ── */}
-      {!hideFAB && (
+      {!hideFAB && !showBackButton && (
         <DraggableFAB
           screenKey="plano"
           buttonKey="close"
@@ -2262,6 +2310,8 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
           maxH={40}
         >
           <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={t("floor_close")}
             style={s.goFab}
             onPress={onClose}
             activeOpacity={0.85}
@@ -2269,7 +2319,6 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
           >
             <View style={{ alignItems: "center" }}>
               <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
             </View>
           </TouchableOpacity>
         </DraggableFAB>
@@ -2289,7 +2338,7 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
                   setSelectedId(null);
                   setShowEditor(false);
                   const els = m === "cliente"
-                    ? plan.elements.filter(e => e.status === "disponible" && e.reservable)
+                    ? plan.elements.filter(e => (e.status === "disponible" || (Boolean(demo) && e.status === "reservado")) && e.reservable)
                     : plan.elements.filter(e => e.reservable !== false);
                   setTimeout(() => fitToElements(els), 80);
                 }}
@@ -2300,8 +2349,8 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
                   size={13}
                   color={mode === m ? "#fff" : GRAY}
                 />
-                <Text style={[s.modeTxt, mode === m && s.modeTxtActive]} numberOfLines={1}>
-                  {m === "editor" ? "BUSINESS" : m === "cliente" ? "CLIENT" : "SPLIT"}
+                <Text style={[s.modeTxt, mode === m && s.modeTxtActive]}>
+                  {m === "editor" ? t("floor_business") : m === "cliente" ? t("floor_client") : t("view_mode_dividido")}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -2324,7 +2373,7 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
             activeOpacity={0.85}
           >
             <Feather name="plus" size={18} color="#fff" />
-            <Text style={s.addTxtFull}>+ ELEMENT</Text>
+            <Text style={s.addTxtFull}>{t("floor_add_button")}</Text>
           </TouchableOpacity>
         )}
 
@@ -2359,7 +2408,7 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
                     activeOpacity={0.85}
                   >
                     <Text style={{ fontSize: 14, lineHeight: 18 }}>{contextTpl.emoji}</Text>
-                    <Text style={s.tplTxt}>TEMPLATE</Text>
+                    <Text style={s.tplTxt}>{t("floor_template")}</Text>
                   </TouchableOpacity>
                 );
               }
@@ -2371,7 +2420,7 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
                   activeOpacity={0.85}
                 >
                   <Feather name="layers" size={14} color="#7C69BE" />
-                  <Text style={s.tplTxt}>TEMPLATES</Text>
+                  <Text style={s.tplTxt}>{t("floor_templates")}</Text>
                 </TouchableOpacity>
               );
             })()}
@@ -2387,17 +2436,17 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
             >
               <Feather name={saving ? "loader" : "save"} size={15} color={hasChanges ? "#fff" : GRAY} />
               <Text style={[s.saveTxt, !hasChanges && { color: GRAY }]}>
-                {saving ? "…" : "SAVE"}
+                {saving ? "…" : t("floor_save")}
               </Text>
             </TouchableOpacity>
           </View>
         )}
 
         {/* Row 2: client mode hint */}
-        {mode === "cliente" && plan.elements.some(e => e.status === "disponible") && (
+        {mode === "cliente" && plan.elements.some(e => e.status === "disponible" || (Boolean(demo) && e.status === "reservado")) && (
           <View style={s.clientHint}>
             <Feather name="map-pin" size={12} color={ACCENT} />
-            <Text style={s.clientHintTxt}>Tap a free space · double tap for more info</Text>
+            <Text style={s.clientHintTxt}>{t("floor_client_hint")}</Text>
           </View>
         )}
 
@@ -2405,10 +2454,10 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
         {onNext && (
           <TouchableOpacity
             style={s.nextStepBtn}
-            onPress={() => { if (hasChanges) handleSave(); onNext(); }}
+            onPress={async () => { if (demo) { if (!await handleSave()) return; } else if (hasChanges) { void handleSave(); } onNext(); }}
             activeOpacity={0.88}
           >
-            <Text style={s.nextStepTxt}>NEXT</Text>
+            <Text style={s.nextStepTxt}>{t("biz_next")}</Text>
             <Feather name="arrow-right" size={17} color="#fff" />
           </TouchableOpacity>
         )}
@@ -2447,6 +2496,7 @@ export function PlanoEmpresaScreen({ businessId, businessName, templateId, onClo
         visible={clientBookEl !== null}
         onClose={() => setClientBookEl(null)}
         onBooked={handleBooked}
+        demo={Boolean(demo)}
       />
 
       <ReservationsList
@@ -2471,7 +2521,7 @@ const s = StyleSheet.create({
   root:        { flex: 1, backgroundColor: BG },
 
   // Title strip
-  titleStrip:  { position: "absolute", top: 0, left: 0, right: 0, zIndex: 10, alignItems: "center", paddingTop: 10 },
+  titleStrip:  { alignItems: "center", paddingTop: 8, paddingBottom: 6, paddingHorizontal: 68 },
   titleTxt:    { fontSize: 11, fontWeight: "900", color: TEXT, letterSpacing: 2, opacity: 0.55 },
   subtitleTxt: { fontSize: 10, color: GRAY, marginTop: 1, opacity: 0.7 },
 
@@ -2500,9 +2550,9 @@ const s = StyleSheet.create({
   bottomBar:   { backgroundColor: CARD, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 10, paddingHorizontal: 14 },
   modeRow:       { flexDirection: "row", gap: 8, alignItems: "center", marginBottom: 8 },
   modeBtnGroup:  { flex: 1, flexDirection: "row", gap: 6 },
-  modeBtn:       { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 11, borderWidth: 1, borderColor: BORDER },
+  modeBtn:       { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, paddingHorizontal: 6, paddingVertical: 8, borderRadius: 11, borderWidth: 1, borderColor: BORDER },
   modeBtnActive: { backgroundColor: ACCENT, borderColor: ACCENT },
-  modeTxt:       { fontSize: 11, fontWeight: "700", color: GRAY, letterSpacing: 0.5, flexShrink: 1 },
+  modeTxt:       { fontSize: 11, fontWeight: "700", color: GRAY, letterSpacing: 0.2, flexShrink: 1, textAlign: "center" },
   modeTxtActive: { color: "#fff" },
   resListBtn:    { flexShrink: 0, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 11, backgroundColor: ACCENT + "18", borderWidth: 1, borderColor: ACCENT + "44" },
   resListTxt:    { fontSize: 12, fontWeight: "700", color: ACCENT },
@@ -2511,7 +2561,7 @@ const s = StyleSheet.create({
   addBtnFull:  { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: ACCENT, borderRadius: 14, paddingVertical: 13, marginBottom: 8 },
   addTxtFull:  { color: "#fff", fontWeight: "900", fontSize: 15, letterSpacing: 0.8 },
   // Editor: secondary row — tools + save
-  toolsRow:    { flexDirection: "row", gap: 8, alignItems: "center", marginBottom: 4 },
+  toolsRow:    { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 4 },
   toolBtn:     { width: 38, height: 38, borderRadius: 10, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: BORDER },
   tplBtn:      { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 9, borderRadius: 11, borderWidth: 1.5, borderColor: "#7C69BE44", backgroundColor: "#7C69BE11" },
   tplTxt:      { color: "#7C69BE", fontWeight: "800", fontSize: 11, letterSpacing: 0.4 },

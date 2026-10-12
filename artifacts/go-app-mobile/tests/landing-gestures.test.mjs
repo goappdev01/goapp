@@ -94,7 +94,11 @@ test('calendar header remains laid out but invisible and untouchable throughout 
   assert.ok(opening);
   const attribute = name => opening.attributes.properties.find(attr => ts.isJsxAttribute(attr)
     && attr.name.getText(home) === name).initializer.expression.getText(home);
-  assert.ok(opening.parent.getText(home).includes('t("cal_label_week")'));
+  const selector = find(opening.parent, node => ts.isJsxSelfClosingElement(node)
+    && node.tagName.getText(home) === "GoCalendarViewSelector");
+  assert.ok(selector, "the existing view selector stays inside the protected calendar header");
+  assert.ok(selector.attributes.properties.some(attr => attr.name?.getText(home) === "value"
+    && attr.initializer?.getText(home) === "{calBgViewMode}"));
   assert.ok(opening.parent.getText(home).includes('setCalConfigVisible(true)'));
   for (const showBookingFromCal of [false, true, false]) {
     const context = { showBookingFromCal, insets: { top: 44 } };
@@ -105,6 +109,17 @@ test('calendar header remains laid out but invisible and untouchable throughout 
   }
   const overlay = find(home, node => ts.isJsxSelfClosingElement(node)
     && node.tagName.getText(home) === 'BookingSearchOverlay');
-  assert.ok(overlay.attributes.properties.some(attr => ts.isJsxAttribute(attr)
-    && attr.name.getText(home) === 'visible' && attr.initializer.getText(home) === '{showBookingFromCal}'));
+  const visible = overlay.attributes.properties.find(attr => ts.isJsxAttribute(attr)
+    && attr.name.getText(home) === 'visible').initializer.expression.getText(home);
+  for (const [showBookingFromCal, checking, demoInitialBusinessId, demoBookingRepository, expected] of [
+    [true, false, null, null, true],
+    [false, false, null, null, false],
+    [true, true, null, null, false],
+    [true, false, 'demo-owner', null, false],
+    [true, false, 'demo-owner', {}, true],
+  ]) {
+    assert.equal(vm.runInNewContext(visible, {
+      showBookingFromCal, adminAccess: { checking }, demoInitialBusinessId, demoBookingRepository,
+    }), expected, 'opening keeps the calendar handoff and requires a live authorized DEMO adapter');
+  }
 });

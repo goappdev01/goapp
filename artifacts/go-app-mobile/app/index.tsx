@@ -1,8 +1,18 @@
+import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
+import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
+import { getBusinessDemoSetupState } from "@/data/businessDemoStore";
+import { createDemoBookingRepository, createDemoCatalogBookingRepository } from "@/data/demoBookingRepository";
+import { DemoCustomerCalendar } from "@/components/booking/DemoCustomerCalendar";
 import type { GoEntry } from "@/components/AgendaOperativa";
-import { notifySessionChanged } from "@/lib/sessionEvents";
-import { Feather, Ionicons } from "@expo/vector-icons";
+import { useGoLog } from "@/hooks/useGoLog";
+import { readGoLog, flushGoLog, commitGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
+import { notifySessionChanged, onSessionChanged } from "@/lib/sessionEvents";
+import { getTaskUser, assertTaskUser } from "@/lib/goTaskAccess";
+import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
+import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
 import Svg, { Circle, Path as SvgPath } from "react-native-svg";
 import QRCode from "react-native-qrcode-svg";
 import { Accelerometer } from "expo-sensors";
@@ -24,7 +34,6 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   LayoutAnimation,
-  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -45,6 +54,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GUIDANCE_NAMES, GUIDANCE_NAMES_EN, type GuidanceConfig, getGuidanceConfig, swipeGuideMaxOpacity as computeSwipeMaxOpacity, computeAutoBoost } from "../utils/guidance";
 import { useGoMode } from "@/contexts/GoModeContext";
 import { useBusinessAccess } from "@/contexts/GoBusinessAccessContext";
+import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { BusinessAccessGate } from "@/components/auth/BusinessAccessGate";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Reanimated, {
@@ -82,6 +92,12 @@ import { MessagesScreen } from "@/components/MessagesScreen";
 import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
+import {
+  hasFullLandingArchitecture,
+  isUserV1Landing,
+  visibleLandingContextAction,
+  visibleLandingSatelliteKeys,
+} from "@/components/landing/landingV1Visibility";
 import { ResiduosPanel } from "@/components/ResiduosPanel";
 import { PerfilPanel } from "@/components/perfil/PerfilPanel";
 import { HerramientasPanel } from "@/components/herramientas/HerramientasPanel";
@@ -111,7 +127,9 @@ import { MarketplaceHistorialScreen, type RepeatExtras } from "@/components/mark
 import { GoQualitySheet } from "@/components/quality/GoQualitySheet";
 import { EmpresaPanel } from "@/components/empresa/EmpresaPanel";
 import { ActivacionCobrosScreen } from "@/components/empresa/ActivacionCobrosScreen";
-import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
+import { useBusinessConfig, GoBusinessPreviewProvider } from "@/contexts/GoBusinessConfigContext";
+import { useGoView } from "@/contexts/GoViewContext";
+import type { GoView } from "@/data/goViewPolicy";
 import { GoCartaScreen } from "@/components/carta/GoCartaScreen";
 import { GoProveedorReservaSheet, type ProveedorData } from "@/components/booking/GoProveedorReservaSheet";
 import {
@@ -2585,7 +2603,14 @@ function GoDeepSpaceUpper() {
 }
 
 export default function HomeScreen() {
-  return <BusinessAccessGate><HomeScreenContent /></BusinessAccessGate>;
+  const adminAccess = useAdminAccess();
+  const goView = useGoView();
+  const ownerIdentity = useRef<string | null>(null);
+  if (goView.isOwner && adminAccess.userId) ownerIdentity.current = adminAccess.userId;
+  else if (!adminAccess.checking || ownerIdentity.current !== adminAccess.userId) ownerIdentity.current = null;
+  // Keep presentation mounted during this owner's recheck; inner permissions still fail closed.
+  const ownerPresentation = goView.isOwner || (!!adminAccess.userId && adminAccess.checking && ownerIdentity.current === adminAccess.userId);
+  return ownerPresentation ? <HomeScreenContent /> : <BusinessAccessGate><HomeScreenContent /></BusinessAccessGate>;
 }
 
 function HomeScreenContent() {
@@ -2694,12 +2719,6 @@ function HomeScreenContent() {
   const [goSearchFilter, setGoSearchFilter] = useState<"sugeridos"|"cercanos"|"favoritos">("sugeridos");
   const [goSearchCtrlH, setGoSearchCtrlH] = useState(0);
   const [goSearchBusinesses, setGoSearchBusinesses] = useState<Business[]>([]);
-  useEffect(() => {
-    if (!goSearchOpen || !goSearchSub) { setGoSearchBusinesses([]); return; }
-    getBusinesses()
-      .then(all => setGoSearchBusinesses(all.filter(b => b.bookingActive !== false && b.category === goSearchSub.id)))
-      .catch(() => setGoSearchBusinesses([]));
-  }, [goSearchOpen, goSearchSub?.id]);
   // ── GO PROVEEDOR — pantalla de reserva orientada al cliente ─────────────
   const [goProveedorOpen, setGoProveedorOpen] = useState(false);
   const [goProveedorData, setGoProveedorData] = useState<ProveedorData | null>(null);
@@ -2709,8 +2728,38 @@ function HomeScreenContent() {
   // el tipo de cuenta y se persiste en AsyncStorage (go_active_mode_v1).
   const { isBusinessMode: requestedBusinessMode, loaded: modeLoaded, setActiveMode, syncModeFromRole } = useGoMode();
   const businessAccess = useBusinessAccess();
-  const isBusinessMode = requestedBusinessMode && businessAccess.allowed;
+  const adminAccess = useAdminAccess();
+  const goView = useGoView();
+  const ownerDemo = useOwnerBusinessDemo();
+  const demoBookingRepository = useMemo(() => goView.view === "USER" && adminAccess.isOwner && !adminAccess.checking && ownerDemo.loaded && ownerDemo.demo
+    ? (ownerDemo.catalog ? createDemoCatalogBookingRepository(ownerDemo.catalog) : createDemoBookingRepository(ownerDemo.demo)) : undefined, [goView.view, adminAccess.isOwner, adminAccess.checking, ownerDemo.loaded, ownerDemo.demo, ownerDemo.catalog]);
+  const [demoCustomerCalendarSelected, setDemoCustomerCalendarSelected] = useState(false);
+  const [demoCalendarFocus, setDemoCalendarFocus] = useState<{ dateISO: string; timeHHMM: string; entryId: string; token: number }>();
+  const [demoInitialBusinessId, setDemoInitialBusinessId] = useState<string>();
+  const demoCalendarOwnerRef = useRef(adminAccess.userId);
+  useEffect(() => {
+    if (demoCalendarOwnerRef.current !== adminAccess.userId || goView.view !== "USER" || (!adminAccess.checking && !adminAccess.isOwner)) {
+      setDemoCustomerCalendarSelected(false); setDemoCalendarFocus(undefined); setDemoInitialBusinessId(undefined);
+    }
+    demoCalendarOwnerRef.current = adminAccess.userId;
+  }, [goView.view, adminAccess.userId, adminAccess.checking, adminAccess.isOwner]);
+  useEffect(() => {
+    if (!goSearchOpen || !goSearchSub || adminAccess.checking) { setGoSearchBusinesses([]); return; }
+    let active = true;
+    const query = demoBookingRepository ? demoBookingRepository.searchBusinesses(goSearchQuery) : getBusinesses();
+    void query.then(all => { if (active) setGoSearchBusinesses(all.filter(b => b.bookingActive !== false && b.category === goSearchSub.id)); })
+      .catch(() => { if (active) setGoSearchBusinesses([]); });
+    return () => { active = false; };
+  }, [goSearchOpen, goSearchSub?.id, demoBookingRepository, adminAccess.checking, demoBookingRepository ? goSearchQuery : null]);
+  // Visual selection never grants operational business permission.
+  const isBusinessMode = requestedBusinessMode && businessAccess.allowed && !adminAccess.checking && goView.view === "BUSINESS" && !goView.isBusinessPreview;
   const isUserMode = !isBusinessMode;
+  // Help follows the confirmed visual context; operational permissions remain separate.
+  const landingHelpReady = goView.loaded && !adminAccess.checking;
+  const showBusinessLandingHelp = landingHelpReady && goView.view === "BUSINESS" && (goView.isBusinessPreview || isBusinessMode);
+  const showPersonalLandingHelp = landingHelpReady && (goView.view === "USER" || goView.isAdminView);
+  const fullLandingArchitecture = hasFullLandingArchitecture(goView.isAdminView);
+  const isUserV1Surface = isUserV1Landing(isUserMode, goView.isAdminView);
 
   // ── CUENTA GO — tipo de rol/acceso del usuario ───────────────────────────
   // null = no configurado (primer acceso / "LOGIN")
@@ -2719,6 +2768,15 @@ function HomeScreenContent() {
   const [goAuthOpen, setGoAuthOpen] = useState(true);
   const [authBootstrapComplete, setAuthBootstrapComplete] = useState(false);
   const [adminDashOpen, setAdminDashOpen] = useState(false);
+
+  useEffect(() => { if (!goView.isAdminView && !adminAccess.checking) setAdminDashOpen(false); }, [goView.isAdminView, adminAccess.checking]);
+  const handleOpenAdmin = async () => {
+    if (goView.isOwner) { await handleSelectOwnerView("ADMIN"); return; }
+    if (await adminAccess.refresh()) {
+      setGoAuthOpen(false);
+      setTimeout(() => setAdminDashOpen(true), 350);
+    }
+  };
 
   const handleOpenOptions = () => {
     if (userAccountType === null) {
@@ -2944,7 +3002,8 @@ function HomeScreenContent() {
         }
 
         if (!cancelled) {
-          if (resolvedRole) commitAccountType(resolvedRole, false);
+          // ADMIN is a separate server permission, never a local account context.
+          if (resolvedRole) commitAccountType(resolvedRole === "admin" ? "usuario" : resolvedRole, false);
           else setGoAuthOpen(true);
         }
       } catch {
@@ -2987,6 +3046,10 @@ function HomeScreenContent() {
   const [modeOpen, setModeOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [goChatOpen, setGoChatOpen] = useState(false);
+  const [goChatListenRequest, setGoChatListenRequest] = useState<number | undefined>();
+  const goChatListenSequence = useRef(0);
+  const pendingCalendarGoListenRef = useRef(false);
+  const pendingCalendarGoRef = useRef(false);
   const [aiDraft, setAiDraft] = useState("");
   const [aiListening, setAiListening] = useState(false);
 
@@ -3037,6 +3100,7 @@ function HomeScreenContent() {
   const [sortFeedbackVisible, setSortFeedbackVisible] = useState(false);
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [humanityOpen, setHumanityOpen] = useState(false);
+  useEffect(() => { if (!goView.isAdminView && !adminAccess.checking) setHumanityOpen(false); }, [goView.isAdminView, adminAccess.checking]);
   const [initialMessagesContact, setInitialMessagesContact] = useState<{ name: string; phone: string } | null>(null);
   // ── RECORDATORIO (RECUÉRDAME) ────────────────────────────────────────────
   const [remindOpen, setRemindOpen] = useState(false);
@@ -3198,6 +3262,16 @@ function HomeScreenContent() {
   }, []);
   // ── FIELD SELECTOR — pantalla de campos opcionales antes de crear nota/GO ─
   const [fieldSelectorOpen, setFieldSelectorOpen] = useState(false);
+  const calendarSlotDraftRef = useRef<{ ownerUserId: string; entryId?: string } | null>(null);
+  const calendarSlotOpeningRef = useRef(false);
+  const calendarSlotSavingRef = useRef(false);
+  const calendarSlotRequestRef = useRef(0);
+  const fieldSelectorSaveBusyRef = useRef(false);
+  // Keep the calendar mounted beneath its existing task form.
+  const calendarTaskContextRef = useRef<{
+    dateISO: string; dateLabel: string;
+    viewMode: "dia" | "semana" | "mes_lineal"; viewMonth: string;
+  } | null>(null);
   const [fieldSelectorKind, setFieldSelectorKind] = useState<
     "GO_INTERNO" | "GO_EXTERNO" | "NOTA_INTERNA" | "NOTA_EXTERNA"
   >("NOTA_INTERNA");
@@ -3338,7 +3412,7 @@ function HomeScreenContent() {
     readByEmpresa: boolean;
   };
 
-  const [goLog, setGoLog] = useState<GoEntry[]>([]);
+  const [goLog, setGoLog] = useGoLog();
   const [receivedDetailOpen, setReceivedDetailOpen] = useState(false);
   const [receivedDetailGo, setReceivedDetailGo] = useState<typeof goLog[number] | null>(null);
 
@@ -3357,16 +3431,45 @@ function HomeScreenContent() {
   const { config: bCfg, loaded: bizLoaded, updateConfig: updateBizCfg } = useBusinessConfig();
   const [empresaOpen, setEmpresaOpenState] = useState(false);
   const setEmpresaOpen = (open: boolean) => {
-    if (open) setActiveMode("BUSINESS");
-    setEmpresaOpenState(open && businessAccess.allowed);
+    if (open && goView.isOwner && !goView.isBusinessPreview) { openOwnerContextSelector(); return; }
+    if (open && !goView.isBusinessPreview) setActiveMode("BUSINESS");
+    setEmpresaOpenState(open && (goView.isBusinessPreview || businessAccess.allowed));
   };
   const [empresaModulo, setEmpresaModulo] = useState<string>("home");
+  const ownerNavigationRevision = useRef(0);
+  useEffect(() => () => { ownerNavigationRevision.current++; }, []);
+  useEffect(() => { ownerNavigationRevision.current++; }, [adminAccess.userId]);
+  useEffect(() => {
+    if (!goView.isBusinessPreview && !businessAccess.allowed && !adminAccess.checking) setEmpresaOpenState(false);
+  }, [goView.isBusinessPreview, businessAccess.allowed, adminAccess.checking]);
+  const openOwnerContextSelector = () => {
+    ownerNavigationRevision.current++;
+    setAdminDashOpen(false); setEmpresaOpenState(false); setCuentaOpen(false);
+    setTimeout(() => setGoAuthOpen(true), 350);
+  };
+  const handleSelectOwnerView = async (next: GoView): Promise<boolean> => {
+    const revision = ++ownerNavigationRevision.current;
+    if (!await goView.selectOwnerView(next) || revision !== ownerNavigationRevision.current) return false;
+    // Keep session and drafts; dismiss only the previous context's panels.
+    setAdminDashOpen(false); setEmpresaOpenState(false); setHumanityOpen(false);
+    setOrbitSecondLevel(null); setOrbitSubIntentKey(null); setQrOpen(false); setCuentaOpen(false);
+    setGoAuthOpen(false);
+    if (next !== "USER") setTimeout(() => {
+      if (revision !== ownerNavigationRevision.current) return;
+      if (next === "ADMIN") setAdminDashOpen(true);
+      else { setEmpresaModulo("home"); setEmpresaOpenState(true); }
+    }, 350);
+    return true;
+  };
   const [activacionCobrosOpen, setActivacionCobrosOpen] = useState(false);
   const [activacionInitialScreen, setActivacionInitialScreen] = useState<1 | 2 | 3>(2);
   // Tracks completed setup steps (loaded from AsyncStorage) to drive satellite guidance
-  const [empresaSetupSteps, setEmpresaSetupSteps] = useState<number[]>([]);
+  const [storedEmpresaSetupSteps, setEmpresaSetupSteps] = useState<number[]>([]);
+  const empresaDemoSetup = ownerDemo.config ? getBusinessDemoSetupState(ownerDemo.config, ownerDemo.demo?.getSnapshot().plan) : null;
+  const empresaSetupSteps = goView.isBusinessPreview ? empresaDemoSetup?.steps.flatMap((done, index) => done ? [index] : []) ?? [] : storedEmpresaSetupSteps;
   // sectorId from setup state — truthy means empresa IS configured; suppresses all green onboarding UI
-  const [empresaSectorId, setEmpresaSectorId] = useState<string | null>(null);
+  const [storedEmpresaSectorId, setEmpresaSectorId] = useState<string | null>(null);
+  const empresaSectorId = goView.isBusinessPreview ? ownerDemo.config?.sectorId ?? null : storedEmpresaSectorId;
   // True once setup is complete and the "lista" message has been dismissed permanently
   const [empresaHelpDismissed, setEmpresaHelpDismissed] = useState(false);
 
@@ -3408,7 +3511,7 @@ function HomeScreenContent() {
   //   a) ActivacionCobrosScreen completó (isBusinessActive), O
   //   b) wizard 8/8 completado (completedSteps.length >= 8) — cubre installs
   //      existentes donde el seed guard impidió escribir isBusinessActive.
-  const empresaConfigurada = isBusinessMode && (
+  const empresaConfigurada = goView.isBusinessPreview ? ownerDemo.loaded && empresaDemoSetup?.ready === true : isBusinessMode && (
     bCfg.isBusinessActive ||
     (Array.isArray(bCfg.completedSteps) && bCfg.completedSteps.length >= 8)
   );
@@ -3559,10 +3662,6 @@ function HomeScreenContent() {
   }, [marketplacePedidos, goResolveEvent]);
 
   const [rutasMode, setRutasMode] = useState(false);
-  const rutasModeRef = useRef(false);
-  const closeRutasModeRef = useRef<() => void>(() => {});
-  rutasModeRef.current = rutasMode;
-  closeRutasModeRef.current = () => setRutasMode(false);
 
   useEffect(() => {
     if (rutasMode) {
@@ -3656,8 +3755,6 @@ function HomeScreenContent() {
 
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const posRef = useRef({ x: 0, y: 0 }).current;
-  const draggingRef = useRef(false);
-  const [isDragging, setIsDragging] = useState(false);
   const idleBob = useRef(new Animated.Value(0)).current;
   const goldBreathAnim = useRef(new Animated.Value(0)).current;
   const backBtnAnim = useRef(new Animated.Value(0)).current;
@@ -3806,7 +3903,6 @@ function HomeScreenContent() {
   // tarjeta de próxima cita. Se resetea a null cuando la tarjeta deja
   // de renderizarse (ver useEffect que la limpia).
   const [nextAptBottomY, setNextAptBottomY] = useState<number | null>(null);
-  const [humanityPan, setHumanityPan] = useState({ x: 0, y: 0 });
   const [humanityObstacles, setHumanityObstacles] = useState<Record<string, HumanityRect>>({});
   const measureHumanityObstacle = (key: string, rect: HumanityRect) => {
     setHumanityObstacles(prev => JSON.stringify(prev[key]) === JSON.stringify(rect) ? prev : { ...prev, [key]: rect });
@@ -4145,7 +4241,7 @@ function HomeScreenContent() {
         if (k === "cal_density" && (["auto","1h","30min","15min"] as string[]).includes(v))
           setCalBgDensity(v as "auto" | "1h" | "30min" | "15min");
         if (k === "cal_show_hours") setCalBgShowHours(v === "true");
-        if (k === "cal_view") { if (v === "semana" || v === "dia") setCalBgViewMode(v as "dia" | "semana"); }
+        if (k === "cal_view" && (v === "dia" || v === "semana" || v === "mes_lineal")) setCalBgViewMode(v);
         if (k === "cal_day_night_mode_v1" && (["claro","oscuro","mixto"] as string[]).includes(v))
           setCalBgDayNightMode(v as "claro" | "oscuro" | "mixto");
       }
@@ -4155,6 +4251,42 @@ function HomeScreenContent() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   });
+  const closeFieldSelectorPanel = () => {
+    setFieldSelectorOpen(false);
+    setFsLocationExpanded(false);
+    setFsPlaceDraft("");
+    const context = calendarTaskContextRef.current;
+    if (!context) return;
+    if (qdReturnTimerRef.current) {
+      clearTimeout(qdReturnTimerRef.current);
+      qdReturnTimerRef.current = null;
+    }
+    qdFlowActiveRef.current = false;
+    if (calFlow.isActive) calFlow.cancel();
+    setFieldSelectorOpen(false);
+    setDateISODraft(context.dateISO);
+    setDateDraft(context.dateLabel);
+    setCalBgViewMode(context.viewMode);
+    setCalBgViewMonth(context.viewMonth);
+    calendarTaskContextRef.current = null;
+    calendarSlotDraftRef.current = null;
+    Keyboard.dismiss();
+  };
+  const closeCalendarTaskPanel = () => {
+    setCalQuickCreateOpen(false);
+    if (calendarTaskContextRef.current) closeFieldSelectorPanel();
+  };
+  const changeCalendarView = (view: "dia" | "semana" | "mes_lineal") => {
+    setCalBgViewMode(view);
+    AsyncStorage.multiSet([["cal_view", view], ["go_cal_view_mode_v1", view]]).catch(() => {});
+  };
+  const navigateCalendarDay = (iso: string) => {
+    const label = iso === formatISODate(getToday()) ? "HOY" : formatDayLabel(new Date(iso + "T00:00:00"));
+    setDateISODraft(iso);
+    setDateDraft(label);
+    setCalBgViewMonth(iso.slice(0, 7));
+    setCalScrollToDateTarget({ dateISO: iso, timeHHMM: "", token: Date.now() });
+  };
   const calWeather = useWeatherContext();
   // monthGridYear/Month, clockOpen/Phase/H12/Mins/Period/clockLastHapticVal
   // viven ahora dentro del hook calFlow — se sincronizan a estado local
@@ -4524,7 +4656,10 @@ function HomeScreenContent() {
   const monthSlideX    = calFlow.monthSlideX;
 
   // closeMonthGrid delegado al hook (cierra con animación y actualiza step).
-  const closeMonthGrid = () => calFlow.closeMonthGridManual();
+  const closeMonthGrid = () => {
+    calFlow.closeMonthGridManual();
+    if (calendarTaskContextRef.current) setFieldSelectorOpen(true);
+  };
 
 
   // ── CLOCK BOTTOM SHEET ───────────────────────────────────────────────
@@ -5876,7 +6011,16 @@ function HomeScreenContent() {
     setAiListening(false);
   };
 
-  const openAi = () => {
+  const openAi = (listenOnOpen = false) => {
+    if (pendingCalendarGoRef.current) return;
+    // iOS must finish dismissing Calendar before presenting the existing AI modal.
+    if (calOpen) {
+      pendingCalendarGoRef.current = true;
+      pendingCalendarGoListenRef.current = listenOnOpen;
+      setCalOpen(false);
+      return;
+    }
+    if (goChatOpen) return;
     Haptics.selectionAsync();
     // Anclaje al sistema de tiempo global: refrescamos "now" en cada
     // apertura de la pantalla IA para que cualquier fecha relativa
@@ -5885,19 +6029,30 @@ function HomeScreenContent() {
     if (__DEV__) {
       console.log("[time] AI open @", now.toISOString());
     }
-    // GOChatScreen visual — IA real se conectará más adelante.
+    // GOChatScreen delegates to the integrated BookingAssistantScreen.
+    setGoChatListenRequest(listenOnOpen ? ++goChatListenSequence.current : undefined);
     setGoChatOpen(true);
     setAiDraft("");
     setAiOpen(false);
     setAiListening(false);
     aiDraftBaseRef.current = "";
-    // Auto-arranque del micrófono al abrir IA (estado "Escuchando…").
-    // Si el navegador/permiso no lo permite, el botón "Te escucho"
-    // queda disponible como fallback manual.
-    setTimeout(() => {
-      startIaListening();
-    }, 250);
+    // The current assistant consumes the central GO listening request on presentation.
   };
+
+  const completeCalendarGoOpen = () => {
+    if (!pendingCalendarGoRef.current) return;
+    pendingCalendarGoRef.current = false;
+    const listenOnOpen = pendingCalendarGoListenRef.current;
+    pendingCalendarGoListenRef.current = false;
+    openAi(listenOnOpen);
+  };
+  useEffect(() => {
+    if (calOpen) return;
+    ++calendarSlotRequestRef.current;
+    calendarSlotOpeningRef.current = false;
+    // Android/web remove a hidden Modal during commit; onDismiss is iOS-only.
+    if (Platform.OS !== "ios") completeCalendarGoOpen();
+  }, [calOpen]);
 
   // V1 PROMPT 13 — SISTEMA DE CAPAS, NO PANTALLAS CLÁSICAS.
   //
@@ -7938,8 +8093,8 @@ function HomeScreenContent() {
 
   const persistLog = async (next: typeof goLog) => {
     try {
-      const payload = JSON.stringify(next.slice(0, 200));
-      await AsyncStorage.setItem("go_log_v1", payload);
+      // setGoLog commits through the shared queue; never write a render snapshot.
+      await flushGoLog();
     } catch (e) {
       // Surface write errors in development so they don't disappear silently.
       if (__DEV__) console.error("[GO] persistLog failed:", e);
@@ -8189,12 +8344,15 @@ function HomeScreenContent() {
     initialText?: string,
     initialDetail?: string,
     prefillDateISO?: string,
+    prefillTime?: string,
   ) => {
+    if (calendarSlotSavingRef.current) return;
+    const fromTimeSlot = prefillTime !== undefined;
     // ── NOTA EXTERNA DURANTE GO ACTIVO ─────────────────────────────────────
     // Si hay un GO en construcción (categoría elegida o campos ya rellenos),
     // la nota externa NO crea una entrada separada: se adjunta al GO activo
     // y viajará dentro del mismo envío. El botón central permanece "SEND GO".
-    if (kind === "NOTA_EXTERNA" && (isActivelyCreating || categorySelected)) {
+    if (!fromTimeSlot && kind === "NOTA_EXTERNA" && (isActivelyCreating || categorySelected)) {
       setAttachedExternalNote({
         title:  initialText   || "",
         detail: initialDetail || "",
@@ -8223,7 +8381,7 @@ function HomeScreenContent() {
     const hasPlace   = !!landingPlace;
     const hasDate    = !!(landingDate || landingDateISO);
 
-    if (kind === "NOTA_INTERNA" && hasPlace && hasDate) {
+    if (!fromTimeSlot && kind === "NOTA_INTERNA" && hasPlace && hasDate) {
       setNotesOpen(false);
       setQuickNoteText("");
       setQuickNoteDetail("");
@@ -8242,7 +8400,7 @@ function HomeScreenContent() {
       return;
     }
 
-    if (kind === "NOTA_EXTERNA" && hasContact && hasPlace && hasDate) {
+    if (!fromTimeSlot && kind === "NOTA_EXTERNA" && hasContact && hasPlace && hasDate) {
       setNotesOpen(false);
       setQuickNoteText("");
       setQuickNoteDetail("");
@@ -8264,7 +8422,11 @@ function HomeScreenContent() {
     // ── APERTURA DEL SELECTOR — faltan datos ──────────────────────────────
     // Los campos ya rellenados en el Landing aparecerán iluminados/marcados
     // automáticamente a través de fsFilledValues.
+    calendarTaskContextRef.current = calOpen
+      ? { dateISO: dateISODraft, dateLabel: dateDraft, viewMode: calBgViewMode, viewMonth: calBgViewMonth }
+      : null;
     qdOriginContextRef.current = { listOpen, notesOpen, agendaOpOpen };
+    fieldSelectorSaveBusyRef.current = false;
     setFieldSelectorKind(kind);
     setFieldSelectorText(initialText || "");
     setFieldSelectorDetail(initialDetail || "");
@@ -8272,16 +8434,16 @@ function HomeScreenContent() {
 
     // Pre-rellenar con datos Landing disponibles
     const landingPrefill: typeof fsFilledValues = {};
-    if (landingContact || landingPhone) {
+    if (!fromTimeSlot && (landingContact || landingPhone)) {
       landingPrefill.contactName = landingContact || undefined;
       landingPrefill.phone       = landingPhone   || undefined;
     }
-    if (landingDate || landingDateISO) {
+    if (!fromTimeSlot && (landingDate || landingDateISO)) {
       landingPrefill.date    = landingDate    || undefined;
       landingPrefill.dateISO = landingDateISO || undefined;
       landingPrefill.time    = landingTime    || undefined;
     }
-    if (landingPlace) {
+    if (!fromTimeSlot && landingPlace) {
       landingPrefill.place = landingPlace;
     }
 
@@ -8289,7 +8451,9 @@ function HomeScreenContent() {
       const todayISONow = formatISODate(getToday());
       const d = new Date(prefillDateISO + "T00:00:00");
       const dateLabel = prefillDateISO === todayISONow ? "HOY" : formatDayLabel(d);
-      setFsFilledValues({ ...landingPrefill, date: dateLabel, dateISO: prefillDateISO });
+      setFsFilledValues({ ...landingPrefill, date: dateLabel, dateISO: prefillDateISO,
+        ...(fromTimeSlot ? { time: prefillTime } : {}) });
+      if (fromTimeSlot) setFsPlaceDraft("");
     } else {
       setFsFilledValues(Object.keys(landingPrefill).length > 0 ? landingPrefill : {});
     }
@@ -8306,7 +8470,7 @@ function HomeScreenContent() {
     qdFlowActiveRef.current = false;
     setFieldSelectorOpen(true);
     // Persist draft immediately so content is never lost if user navigates away
-    AsyncStorage.setItem(
+    if (!fromTimeSlot) AsyncStorage.setItem(
       "go_task_draft_v1",
       JSON.stringify({ kind, text: initialText || "", detail: initialDetail || "" }),
     ).catch(() => {});
@@ -8318,8 +8482,47 @@ function HomeScreenContent() {
     setCalAddOpen(false);
   };
 
+  const openCalendarSlotTask = async (slotDateISO: string, slotTime: string) => {
+    if (fieldSelectorOpen || calendarSlotDraftRef.current || calendarSlotOpeningRef.current || calendarSlotSavingRef.current) return;
+    const request = ++calendarSlotRequestRef.current;
+    calendarSlotOpeningRef.current = true;
+    try {
+      const ownerUserId = await getTaskUser();
+      if (request !== calendarSlotRequestRef.current) return;
+      if (!ownerUserId) {
+        showToast(lang === "en" ? "Sign in to create your task." : "Inicia sesión para crear tu tarea.", "error");
+        return;
+      }
+      await assertTaskUser(ownerUserId);
+      if (request !== calendarSlotRequestRef.current) return;
+      calendarSlotDraftRef.current = { ownerUserId };
+      openFieldSelector("NOTA_INTERNA", "", "", slotDateISO, slotTime);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "error");
+    } finally {
+      if (request === calendarSlotRequestRef.current) calendarSlotOpeningRef.current = false;
+    }
+  };
+  useEffect(() => onSessionChanged(() => {
+    ++calendarSlotRequestRef.current;
+    calendarSlotOpeningRef.current = false;
+    if (!calendarSlotDraftRef.current) return;
+    closeFieldSelectorPanel();
+    setFieldSelectorText("");
+    setFieldSelectorDetail("");
+    setFsFilledValues({});
+  }), [closeFieldSelectorPanel]);
+
+  const commitCalendarSelectorEntry = async (entry: GoEntry, ownerUserId: string) => {
+    await updateGoLog(async entries => {
+      await assertTaskUser(ownerUserId);
+      if (entries.some(existing => existing.id === entry.id)) return { entries, result: undefined };
+      return { entries: [{ ...entry, ownerUserId }, ...entries].slice(0, 200), result: undefined };
+    });
+  };
+
   // ── CREAR ENTRADA DESDE EL FLUJO FIELD SELECTOR ──────────────────────────
-  const createEntryFromSelector = (
+  const createEntryFromSelector = async (
     kind: "GO_INTERNO" | "GO_EXTERNO" | "NOTA_INTERNA" | "NOTA_EXTERNA",
     text: string,
     contactNameVal: string,
@@ -8330,8 +8533,11 @@ function HomeScreenContent() {
     placeVal: string,
     detailVal?: string,
   ) => {
+    const slotOwner = calendarSlotDraftRef.current?.ownerUserId;
+    if (calendarTaskContextRef.current && !slotOwner) closeFieldSelectorPanel();
     const now = Date.now();
-    const uid = makeUid();
+    const uid = calendarSlotDraftRef.current?.entryId || makeUid();
+    if (slotOwner && calendarSlotDraftRef.current) calendarSlotDraftRef.current.entryId = uid;
 
     if (kind === "NOTA_INTERNA") {
       const entry: any = {
@@ -8354,13 +8560,18 @@ function HomeScreenContent() {
         detail: detailVal || "",
         isGeneric: true,
       };
-      setGoLog((prev) => {
-        const next = [entry, ...prev].slice(0, 200);
-        persistLog(next);
-        return next;
-      });
+      if (slotOwner) {
+        await commitCalendarSelectorEntry(entry, slotOwner);
+        closeFieldSelectorPanel();
+      } else {
+        setGoLog((prev) => {
+          const next = [entry, ...prev].slice(0, 200);
+          persistLog(next);
+          return next;
+        });
+      }
       showToast(t('toast_internal_task_saved'), 'success');
-      AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
+      if (!slotOwner) AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
       if (isUserMode) setGoOnboardingCount(prev => { const next = prev + 1; AsyncStorage.setItem("go_onboarding_count_v1", String(next)).catch(() => {}); return next; });
       if (isUserMode && !tutGoRealizado) { setTutGoRealizado(true); AsyncStorage.setItem("tutorial.goRealizado", "1").catch(() => {}); }
 
@@ -8384,11 +8595,16 @@ function HomeScreenContent() {
         notes: text || "",
         isGeneric: false,
       };
-      setGoLog((prev) => {
-        const next = [entry, ...prev].slice(0, 200);
-        persistLog(next);
-        return next;
-      });
+      if (slotOwner) {
+        await commitCalendarSelectorEntry(entry, slotOwner);
+        closeFieldSelectorPanel();
+      } else {
+        setGoLog((prev) => {
+          const next = [entry, ...prev].slice(0, 200);
+          persistLog(next);
+          return next;
+        });
+      }
       // NO enviar automáticamente. Mostrar botón ENVIAR en zona TAREA del GO.
       const cleanPhone = normalizePhoneForWhatsApp(phoneVal);
       if (cleanPhone) {
@@ -8397,7 +8613,7 @@ function HomeScreenContent() {
       } else {
         showToast(t('toast_external_task_saved'), 'success');
       }
-      AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
+      if (!slotOwner) AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
       if (isUserMode) setGoOnboardingCount(prev => { const next = prev + 1; AsyncStorage.setItem("go_onboarding_count_v1", String(next)).catch(() => {}); return next; });
       if (isUserMode && !tutGoRealizado) { setTutGoRealizado(true); AsyncStorage.setItem("tutorial.goRealizado", "1").catch(() => {}); }
 
@@ -8427,7 +8643,7 @@ function HomeScreenContent() {
         return next;
       });
       showToast(t('toast_internal_go_saved'), 'success');
-      AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
+      if (!slotOwner) AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
 
     } else { // GO_EXTERNO
       const selIntent = INTENTS.find(i => i.key === fsActivityKey);
@@ -8488,7 +8704,7 @@ function HomeScreenContent() {
       } else {
         showToast(t('toast_external_go_saved'), 'success');
       }
-      AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
+      if (!slotOwner) AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
     }
   };
 
@@ -9156,6 +9372,12 @@ function HomeScreenContent() {
     }
     setListOpen(false);
     setLlamadasListOpen(false);
+  };
+
+  const startRelatedGoAction = (g: typeof goLog[number]) => {
+    setCambiosOpen(false);
+    setNextAptMinimized(true);
+    loadGoIntoForm(g);
   };
 
   // Comparte (re-abre WhatsApp con el mismo mensaje del GO) para enviarlo
@@ -11297,6 +11519,7 @@ function HomeScreenContent() {
   const universalSwipeGesture = useMemo(
     () =>
       Gesture.Pan()
+        .enabled(!goAuthOpen)
         .runOnJS(true)
         .activeOffsetY(40)
         .failOffsetX([-65, 65])
@@ -11314,7 +11537,7 @@ function HomeScreenContent() {
           swipeHandlersRef.current.resetContactFields();
           swipeHandlersRef.current.setOtrosOpen(false);
         }),
-    [],
+    [goAuthOpen],
   );
 
   // Callback de guardar del flujo normal (creación/edición de GO).
@@ -11326,7 +11549,7 @@ function HomeScreenContent() {
     setTime(r.time);
     setDuration(r.duration);
     setCalQuickCreateOpen(false);
-    setCalOpen(false);
+    if (!calendarTaskContextRef.current) setCalOpen(false);
     // ── QD FLOW intercept ───────────────────────────────────────────
     if (qdFlowActiveRef.current) {
       qdCapDateRef.current = r.dateDraft;
@@ -11451,6 +11674,24 @@ function HomeScreenContent() {
     }
     // Flujo normal: delegar al hook (dispara onSave si hay duración)
     calFlow.skip();
+  };
+  const exitCalendarContainer = () => {
+    const hasTaskLayer = !!calendarTaskContextRef.current || calQuickCreateOpen;
+    closeCalendarTaskPanel();
+    setCalConfigVisible(false);
+    setCalReservasOpen(false);
+    if (hasTaskLayer) {
+      calFlow.cancel();
+      setCalOpen(false);
+    } else if (pendingMoveCtxRef.current) {
+      cancelMoveFlow();
+      setCalOpen(false);
+    } else if (calFlow.step === "nav") {
+      calFlow.closeMonthGridManual();
+      setCalOpen(false);
+    } else {
+      saveCal();
+    }
   };
   calCloseRef.current = saveCal;
   calPanelCollapseRef.current = () => calFlow.cancel();
@@ -11818,10 +12059,6 @@ function HomeScreenContent() {
       speed: 18,
       bounciness: 5,
     }).start();
-    AsyncStorage.setItem(
-      "go_floating_pos_v14",
-      JSON.stringify({ x: targetX, y: targetY }),
-    ).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handedness, minX, maxX, minY, maxY]);
 
@@ -11866,10 +12103,6 @@ function HomeScreenContent() {
       speed: 16,
       bounciness: 4,
     }).start();
-    AsyncStorage.setItem(
-      "go_floating_pos_v14",
-      JSON.stringify({ x: targetX, y: targetY }),
-    ).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiScale, minX, maxX, minY, maxY, handedness]);
 
@@ -11892,10 +12125,6 @@ function HomeScreenContent() {
       speed: 18,
       bounciness: 4,
     }).start();
-    AsyncStorage.setItem(
-      "go_floating_pos_v14",
-      JSON.stringify({ x: cx, y: cy }),
-    ).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [minX, maxX, minY, maxY, posReady]);
 
@@ -12301,7 +12530,7 @@ function HomeScreenContent() {
       } catch {}
       try {
         const rawViewMode = await AsyncStorage.getItem("go_cal_view_mode_v1");
-        if (rawViewMode === "semana" || rawViewMode === "mes_lineal") setCalBgViewMode(rawViewMode);
+        if (rawViewMode === "dia" || rawViewMode === "semana" || rawViewMode === "mes_lineal") setCalBgViewMode(rawViewMode);
       } catch {}
       try {
         const rawList = await AsyncStorage.getItem("go_list_size_v1");
@@ -12350,9 +12579,8 @@ function HomeScreenContent() {
         }
       } catch {}
       try {
-        const raw = await AsyncStorage.getItem("go_log_v1");
-        if (raw) {
-          const parsed = JSON.parse(raw);
+        const parsed = await readGoLog();
+        {
           if (Array.isArray(parsed)) {
             // De-dup defensivo: si en el almacenamiento quedaron entries
             // legacy con ids duplicados (de versiones anteriores donde el
@@ -12393,7 +12621,7 @@ function HomeScreenContent() {
               // están ausentes, derivamos un valor seguro a partir de
               // `createdAt` (día en que se creó el GO) o caemos a HOY.
               const dateISO =
-                typeof legacy.dateISO === "string" && legacy.dateISO
+                typeof legacy.dateISO === "string"
                   ? legacy.dateISO
                   : formatISODate(
                       typeof legacy.createdAt === "number"
@@ -12473,9 +12701,8 @@ function HomeScreenContent() {
                 removedDuplicates: _purgedDupes.length,
                 keptEntries: _dedupedCleaned.length,
               });
-              await AsyncStorage.setItem("go_log_v1", JSON.stringify(_dedupedCleaned));
             }
-            setGoLog(_dedupedCleaned.slice(0, 200));
+            await commitGoLogSnapshot(parsed, _dedupedCleaned);
           }
         }
       } catch (e) {
@@ -12613,44 +12840,23 @@ function HomeScreenContent() {
   }, [shakeAiEnabled, shakeAiSensitivity, shakeAiAction]);
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        // Bumped storage key so the new default (lower + thumb-side right) takes effect
-        // for users that already saved a previous position.
-        const raw = await AsyncStorage.getItem("go_floating_pos_v14");
-        // Default position: lowered (no lift) and pinned to the right (thumb zone).
-        let x = maxX;
-        let y = maxY;
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (typeof parsed?.x === "number" && typeof parsed?.y === "number") {
-            x = clamp(parsed.x, minX, maxX);
-            y = clamp(parsed.y, minY, maxY);
-          }
-        }
-        if (!mounted) return;
-        posRef.x = x;
-        posRef.y = y;
-        pan.setValue({ x, y });
-        setPosReady(true);
-      } catch {
-        posRef.x = maxX;
-        posRef.y = maxY - 12;
-        pan.setValue({ x: maxX, y: maxY - 12 });
-        setPosReady(true);
-      }
-    })();
-    const sub = pan.addListener((v) => {
+    // Landing position is determined only by the existing handedness anchor
+    // and safe layout bounds. Legacy drag data remains untouched in storage.
+    const x = handedness === "right" ? maxX : minX;
+    const y = clamp(maxY, minY, maxY);
+    posRef.x = x;
+    posRef.y = y;
+    pan.setValue({ x, y });
+    setPosReady(true);
+  }, [handedness, minX, maxX, minY, maxY, pan, posRef]);
+
+  useEffect(() => {
+    const sub = pan.addListener(v => {
       posRef.x = v.x;
       posRef.y = v.y;
-      setHumanityPan({ x: v.x, y: v.y });
     });
-    return () => {
-      mounted = false;
-      pan.removeListener(sub);
-    };
-  }, []);
+    return () => pan.removeListener(sub);
+  }, [pan, posRef]);
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -12908,60 +13114,6 @@ function HomeScreenContent() {
     onLateDynamicEndJS,
   ]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
-      onStartShouldSetPanResponderCapture: () => false,
-      onMoveShouldSetPanResponder: (_, g) =>
-        Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8,
-      onMoveShouldSetPanResponderCapture: (_, g) =>
-        Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8,
-      onPanResponderGrant: () => {
-        draggingRef.current = true;
-        setIsDragging(true);
-        pan.setOffset({ x: posRef.x, y: posRef.y });
-        pan.setValue({ x: 0, y: 0 });
-        try {
-          Haptics.selectionAsync();
-        } catch {}
-      },
-      onPanResponderMove: (_e, g) => {
-        pan.x.setValue(g.dx);
-        pan.y.setValue(g.dy);
-      },
-      onPanResponderRelease: (_, g) => {
-        if (rutasModeRef.current && g.dy > 70 && Math.abs(g.dx) < 100) {
-          pan.flattenOffset();
-          draggingRef.current = false;
-          setIsDragging(false);
-          closeRutasModeRef.current();
-          return;
-        }
-        pan.flattenOffset();
-        const tx = clamp(posRef.x, minX, maxX);
-        const ty = clamp(posRef.y, minY, maxY);
-        Animated.spring(pan, {
-          toValue: { x: tx, y: ty },
-          useNativeDriver: true,
-          friction: 7,
-          tension: 60,
-        }).start(() => {
-          draggingRef.current = false;
-          setIsDragging(false);
-        });
-        AsyncStorage.setItem(
-          "go_floating_pos_v14",
-          JSON.stringify({ x: tx, y: ty }),
-        ).catch(() => {});
-      },
-      onPanResponderTerminate: () => {
-        pan.flattenOffset();
-        draggingRef.current = false;
-        setIsDragging(false);
-      },
-    }),
-  ).current;
-
   const ringStyle = {
     opacity: ring.interpolate({
       inputRange: [0, 0.001, 1],
@@ -13108,8 +13260,8 @@ function HomeScreenContent() {
     // Inner Animated.View: centered within the dock, translated by pan.
     //   pan = (0,0) → orbital center at dock center = bottom-right anchor.
     //   pan.x < 0 → moved left; pan.y < 0 → moved up.
-    // Overflow is visible — the orbital can be dragged beyond the dock
-    // bounds; touch delivery still works via the panResponder.
+    // Overflow remains visible. The Landing position is anchored and cannot
+    // be moved by touch; `pan` is reserved for existing safe-layout anchors.
     return (
       <View
         pointerEvents="box-none"
@@ -13122,7 +13274,6 @@ function HomeScreenContent() {
         }}
       >
         <Animated.View
-          {...panResponder.panHandlers}
           style={{
             position: "absolute",
             left: systemBoundingRadius - orbitWrapSize / 2,
@@ -13270,8 +13421,9 @@ function HomeScreenContent() {
   // Wait for visible panels to report their complete touch bounds.
   const humanityPanelsMeasured = humanityBlocks.every(rect => !!rect);
   const humanityPlacement = humanityPanelsMeasured && posReady ? placeHumanity({
-    cx: screen.width - dockRight - systemBoundingRadius + humanityPan.x,
-    cy: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + humanityPan.y,
+    // Use the configured static dock anchor, never the former draggable pan.
+    cx: screen.width - dockRight - systemBoundingRadius + (handedness === "right" ? maxX : minX),
+    cy: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 - Math.round(12 * uiScaleFactor),
     radius: orbitRadius, buttonSize: orbitBtnSize,
     satelliteRadius: microR, satelliteSize: microSz, count: INTENTS.length + 1,
     scale: uiScaleFactor,
@@ -13289,6 +13441,7 @@ function HomeScreenContent() {
   }
 
   return (
+    <>
     <GestureDetector gesture={universalSwipeGesture}>
     <View style={[styles.root, { paddingTop }]}>
       {/* Status bar — dark-content sobre paneles claros, light sobre el fondo oscuro GO */}
@@ -13678,6 +13831,11 @@ function HomeScreenContent() {
                 setNextAptMinimized(false);
                 Haptics.selectionAsync().catch(() => {});
               }}
+              onLongPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                startRelatedGoAction(nextAppointment.g);
+              }}
+              delayLongPress={500}
               style={{
                 minWidth: 86,
                 maxWidth: 110,
@@ -13765,6 +13923,12 @@ function HomeScreenContent() {
                   setCambiosCardIdx(0);
                   Haptics.selectionAsync().catch(() => {});
                 }}
+                onLongPress={() => {
+                  if (item.kind !== "cambio") return;
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                  startRelatedGoAction(item.g);
+                }}
+                delayLongPress={500}
                 style={{
                   minWidth: 86,
                   maxWidth: PILL_MAX_W,
@@ -14453,7 +14617,7 @@ function HomeScreenContent() {
                 }}
                 onLongPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                  if (aChange) aChange.fn();
+                  startRelatedGoAction(g);
                 }}
                 delayLongPress={500}
                 accessibilityLabel="Tarjeta próxima cita — mantén para opciones avanzadas"
@@ -15610,7 +15774,7 @@ function HomeScreenContent() {
             <TouchableOpacity
               onPress={() => {
                 if (voiceActive) exitVoiceMode();
-                else openAi();
+                else openAi(true);
               }}
               onLongPress={() => {
                 if (!voiceActive) startVoiceMode();
@@ -16049,13 +16213,7 @@ function HomeScreenContent() {
             alignItems: "center",
             justifyContent: "center",
             transform: [
-              {
-                translateY: idleBob.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0, -3],
-                }),
-              },
-              { scale: isDragging ? 1.03 : 1 },
+              { translateY: aiOpen ? idleBob.interpolate({ inputRange: [0, 1], outputRange: [0, -3] }) : 0 },
               { scale: kbScale },
               { scale: aiShrink },
             ],
@@ -16282,6 +16440,8 @@ function HomeScreenContent() {
               onPress={() => {
                 if (voiceActive) {
                   exitVoiceMode();
+                } else if (isUserV1Surface && !aiOpen) {
+                  openAi(true);
                 } else if (reservasOrbitalOpen) {
                   if (reservasOrbitalCat !== null) {
                     if (reservasOrbitalPage > 0) { setReservasOrbitalPage(p => p - 1); }
@@ -16482,7 +16642,7 @@ function HomeScreenContent() {
           {/* INTENT ORBIT — PremiumOrbitBtn with spring press scale
               TOQUE CORTO  → selecciona categoría GO (comportamiento original)
               PULSADO LARGO → abre segundo nivel comercial de esa órbita     */}
-          {orbitSecondLevel === null ? (
+          {!isUserV1Surface && (orbitSecondLevel === null ? (
             <>
               {rutasMode ? (
                 <>
@@ -17099,7 +17259,7 @@ function HomeScreenContent() {
                 ];
               })()}
             </>
-          )}
+          ))}
 
           {/* AQUÍ pulse ring around GO when locating — white, only visible
               while the AQUÍ animation is actually running (value > 0). */}
@@ -17149,6 +17309,7 @@ function HomeScreenContent() {
               icon: React.ComponentProps<typeof Feather>["name"];
               label: string;
               onPress: () => void;
+              v1Visible?: boolean;
             };
             type SatDef = {
               key: string;
@@ -17298,12 +17459,14 @@ function HomeScreenContent() {
                 contextLayer: [
                   {
                     replaceKey: "settings", icon: "settings", label: "CONFIG",
+                    v1Visible: true,
                     onPress: () => { Haptics.selectionAsync(); setOtrosOpen(false); handleOpenOptions(); setActiveSatCtx(null); },
                   },
                   {
                     replaceKey: "messages",
                     icon: userAccountType !== null ? AUTH_ROLE_ICONS[userAccountType] : "log-in",
                     label: userAccountType !== null ? t('account_label') : t('auth_login_short'),
+                    v1Visible: true,
                     onPress: () => {
                       Haptics.selectionAsync();
                       setOtrosOpen(false);
@@ -17486,21 +17649,30 @@ function HomeScreenContent() {
             // reducir el ruido visual. Al salir del Marketplace se restauran.
             const GO_EXEC_KEYS     = new Set(["contacts", "calendar", "map", "bell"]);
             const MARKET_EXEC_KEYS = new Set(["contacts", "calendar", "map", "bell", "messages", "payment"]);
-            const isMarketplace    = orbitSecondLevel !== null;
+            const isMarketplace    = orbitSecondLevel !== null && !isUserV1Surface;
             const goExecMode       = !rutasMode && !isMarketplace && (categorySelected || otroSelected || isActivelyCreating);
             // "payment" only surfaces inside Marketplace — never in normal/GO mode.
             // "settings" (TOOLS/AJUSTES) only surfaces outside Marketplace.
             // Both share deg:157.5; this filter guarantees only one is ever visible.
-            const visibleSatellites = isMarketplace
-              ? []
-              : goExecMode
-                ? satellites.filter(s => GO_EXEC_KEYS.has(s.key))
-                : satellites.filter(s => s.key !== "payment");
+            const v1SatelliteKeys = new Set(visibleLandingSatelliteKeys(
+              satellites.map(s => s.key),
+              isUserV1Surface,
+            ));
+            const visibleSatellites = isUserV1Surface
+              ? satellites.filter(s => v1SatelliteKeys.has(s.key))
+              : isMarketplace
+                ? []
+                : goExecMode
+                  ? satellites.filter(s => GO_EXEC_KEYS.has(s.key))
+                  : satellites.filter(s => s.key !== "payment");
 
             // Active context definition (null when no context open)
             const ctxSatDef = activeSatCtx !== null
               ? satellites.find(s => s.key === activeSatCtx) ?? null
               : null;
+            const visibleContextLayer = ctxSatDef?.contextLayer?.filter(cs =>
+              visibleLandingContextAction(isUserV1Surface, cs.v1Visible),
+            ) ?? [];
 
             // ── SINGLE-PASS RENDER — same positions always, state transforms ──
             // When a context layer is active:
@@ -17516,7 +17688,7 @@ function HomeScreenContent() {
                   const my  = cy + Math.sin(rad) * microR - microSz / 2;
 
                   const isOrigin   = activeSatCtx !== null && s.key === activeSatCtx;
-                  const ctxReplace = ctxSatDef?.contextLayer?.find(cs => cs.replaceKey === s.key);
+                  const ctxReplace = visibleContextLayer.find(cs => cs.replaceKey === s.key);
                   const isDimmed   = activeSatCtx !== null && !isOrigin && !ctxReplace;
 
                   // Visual memory: glow when this satellite's GO field is filled
@@ -18231,12 +18403,12 @@ function HomeScreenContent() {
           opacity: workGuideHideAnim,
         }}
       >
-        {isUserMode && orbitSecondLevel === null ? (
+        {showPersonalLandingHelp && orbitSecondLevel === null ? (
           // ── PARTICULAR ── Hasta 3 columnas inteligentes: desaparecen cuando el tutorial está completado
-          (!tutGoRealizado || !tutReservaRealizada || !tutMarketplaceRealizado) ? (
+          (isUserV1Surface ? !tutReservaRealizada : (!tutGoRealizado || !tutReservaRealizada || !tutMarketplaceRealizado)) ? (
             <View style={{ flexDirection: "row", gap: 4, alignItems: "flex-start" }}>
               {/* ── COL 1 — Ejecuta acción ── visible hasta que el usuario haga 1 acción GO */}
-              {!tutGoRealizado && (
+              {!isUserV1Surface && !tutGoRealizado && (
                 <View style={{ flex: 31 }}>
                   <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
                     {lang === 'en' ? "1 · Execute action" : "1 · Ejecuta acción"}
@@ -18262,14 +18434,14 @@ function HomeScreenContent() {
                 </View>
               )}
               {/* Divider 1: solo si col 1 visible y hay algo más */}
-              {!tutGoRealizado && (!tutReservaRealizada || !tutMarketplaceRealizado) && (
+              {!isUserV1Surface && !tutGoRealizado && (!tutReservaRealizada || !tutMarketplaceRealizado) && (
                 <View style={{ width: 1, backgroundColor: "rgba(255,255,255,0.18)", alignSelf: "stretch", marginTop: 2 }} />
               )}
               {/* ── COL 2 — Reserva ── visible hasta que el usuario confirme 1 reserva */}
               {!tutReservaRealizada && (
-                <View style={{ flex: 31 }}>
+                <View style={{ flex: isUserV1Surface ? 1 : 31 }}>
                   <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "2 · Reservation" : "2 · Reserva"}
+                    {lang === 'en' ? `${isUserV1Surface ? "1" : "2"} · Reservation` : `${isUserV1Surface ? "1" : "2"} · Reserva`}
                   </Text>
                   <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 10.5, fontWeight: "700", marginTop: 3, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
                     {lang === 'en' ? "Tap Bookings" : "Pulsa Reservas"}
@@ -18286,14 +18458,19 @@ function HomeScreenContent() {
                   <Text style={{ color: "rgba(255,255,255,0.32)", fontSize: 9.5, fontWeight: "500", marginTop: 5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
                     {lang === 'en' ? "You can also choose a professional." : "También puedes elegir profesional."}
                   </Text>
+                  {isUserV1Surface && (
+                    <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 9.5, fontWeight: "600", marginTop: 5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                      {lang === 'en' ? "Tap GO to open the reservation assistant." : "Pulsa GO para abrir el asistente de reservas."}
+                    </Text>
+                  )}
                 </View>
               )}
               {/* Divider 2: solo si col 2 y col 3 ambas visibles */}
-              {!tutReservaRealizada && !tutMarketplaceRealizado && (
+              {!isUserV1Surface && !tutReservaRealizada && !tutMarketplaceRealizado && (
                 <View style={{ width: 1, backgroundColor: "rgba(255,255,255,0.18)", alignSelf: "stretch", marginTop: 2 }} />
               )}
               {/* ── COL 3 — Marketplace ── visible hasta que el usuario abra el Marketplace */}
-              {!tutMarketplaceRealizado && (
+              {!isUserV1Surface && !tutMarketplaceRealizado && (
                 <View style={{ flex: 38 }}>
                   <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
                     {lang === 'en' ? "3 · Buy" : "3 · Comprar"}
@@ -18320,16 +18497,16 @@ function HomeScreenContent() {
               )}
             </View>
           ) : null
-        ) : isBusinessMode && !empresaConfigurada ? (
+        ) : showBusinessLandingHelp && !empresaConfigurada ? (
           // ── EMPRESA no configurada ── hint i18n
           <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 12, fontWeight: "700", letterSpacing: 1.0, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
             {t('biz_configure_hint')}
           </Text>
-        ) : isBusinessMode && empresaConfigurada && !workGuideDismissed ? (
+        ) : showBusinessLandingHelp && empresaConfigurada && !workGuideDismissed ? (
           // ── EMPRESA configurada ── hints de gestión empresarial i18n
           <View style={{ gap: 6 }}>
             <Text style={{ color: "rgba(255,255,255,0.92)", fontSize: 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-              {t('biz_manage_title')}
+              {goView.isBusinessPreview && ownerDemo.config?.businessName ? ownerDemo.config.businessName + ' · ' : ''}{t('biz_manage_title')}
             </Text>
             <Text style={{ color: "rgba(255,255,255,0.50)", fontSize: 10, fontWeight: "600", letterSpacing: 0.2, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
               {t('biz_add_services')}
@@ -19184,14 +19361,14 @@ function HomeScreenContent() {
       </BottomSheet>
       {/* ── QR GO — panel de acceso y compartir ─────────────────────────── */}
       {(() => {
-        const QR_TYPES: { id: string; label: string; sub: string; icon: string; color: string }[] = [
+        const QR_TYPES: { id: string; label: string; sub: string; icon: string; color: string }[] = isUserV1Surface ? [] : [
           { id: "cliente",      label: "CLIENTE",      sub: "Reservas permitidas",         icon: "user",        color: "#60a5fa" },
           { id: "proveedor",    label: "PROVEEDOR",    sub: "Acceso franja proveedor",     icon: "truck",       color: "#a78bfa" },
           { id: "interno",      label: "INTERNO",      sub: "Acceso empresa ampliado",     icon: "shield",      color: "#34d399" },
           { id: "vip",          label: "VIP",          sub: "Acceso prioritario",          icon: "star",        color: "#fbbf24" },
           { id: "temporal",     label: "TEMPORAL",     sub: "Expira automáticamente",      icon: "clock",       color: "#f97316" },
           { id: "visita-unica", label: "VISITA ÚNICA", sub: "Válido una sola vez",         icon: "check-circle",color: "#ec4899" },
-          { id: "admin",        label: "ADMIN",        sub: "Solo cuentas autorizadas",    icon: "settings",    color: "#94a3b8" },
+          ...(goView.isAdminView ? [{ id: "admin", label: "ADMIN", sub: "Solo cuentas autorizadas", icon: "settings", color: "#94a3b8" }] : []),
         ];
         const generalUrl = "https://go.app/join";
         const makeUrl = (type: string) => `https://go.app/join?type=${type}&t=${Date.now()}`;
@@ -19354,7 +19531,7 @@ function HomeScreenContent() {
               </View>
 
               {/* ── LEER QR CARTA — acceso al módulo de carta restaurante ── */}
-              <TouchableOpacity
+              {!isUserV1Surface && <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => {
                   Haptics.selectionAsync().catch(() => {});
@@ -19384,14 +19561,14 @@ function HomeScreenContent() {
                   </Text>
                 </View>
                 <Feather name="chevron-right" size={16} color="rgba(232,118,44,0.7)" />
-              </TouchableOpacity>
+              </TouchableOpacity>}
 
               {/* Separador */}
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 20 }}>
+              {!isUserV1Surface && <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 20 }}>
                 <View style={{ flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.08)" }} />
                 <Text style={{ color: "rgba(255,255,255,0.3)", fontSize: 10, fontWeight: "700", letterSpacing: 2 }}>ACCESO ESPECÍFICO</Text>
                 <View style={{ flex: 1, height: 1, backgroundColor: "rgba(255,255,255,0.08)" }} />
-              </View>
+              </View>}
 
               {/* Tarjetas QR por tipo ──────────────────────────────── */}
               <View style={{ gap: 12, paddingBottom: 8 }}>
@@ -19480,27 +19657,10 @@ function HomeScreenContent() {
           etc.), por lo que cualquier valor seleccionado aquí se refleja
           en el flujo del GO sin reset alguno.
           ──────────────────────────────────────────────────────────── */}
-      {/* ── AUTH GO — Login · Registro · Gestión de cuenta y rol ──────── */}
-      <LoginRegisterPanel
-        visible={goAuthOpen}
-        onClose={() => {
-          if (userAccountType !== null) setGoAuthOpen(false);
-        }}
-        userAccountType={userAccountType}
-        onSetAccountType={commitAccountType}
-        onSwitchContext={() => { setGoAuthOpen(false); setActiveMode(isBusinessMode ? "USER" : "BUSINESS"); }}
-        onOpenPerfil={() => { setGoAuthOpen(false); setCuentaOpen(true); }}
-        onOpenEmpresa={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
-        verification={{ ...verification, status: businessAccess.snapshot?.status === "verificada" ? "verified"
-          : businessAccess.snapshot?.status === "rechazada" ? "rejected"
-          : businessAccess.snapshot?.status === "pendiente_verificacion" ? "pending" : "none" }}
-        onOpenVerificacion={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
-        onOpenAdmin={() => { setGoAuthOpen(false); setActiveMode("BUSINESS"); if (businessAccess.allowed) setAdminDashOpen(true); }}
-      />
-
-      {businessAccess.allowed && <GoAdminDashboard
+      {adminAccess.allowed && goView.isAdminView && <GoAdminDashboard
         visible={adminDashOpen}
         onClose={() => setAdminDashOpen(false)}
+        onOpenContext={goView.isOwner ? openOwnerContextSelector : undefined}
       />}
 
       {/* ── VERIFICACIÓN EMPRESA — subida de documentos y estado ──────── */}
@@ -19614,7 +19774,16 @@ function HomeScreenContent() {
         visible={calOpen}
         transparent
         animationType="slide"
+        onDismiss={completeCalendarGoOpen}
         onRequestClose={() => {
+          if (calendarTaskContextRef.current && fieldSelectorOpen) {
+            closeFieldSelectorPanel();
+            return;
+          }
+          if (calQuickCreateOpen) {
+            closeCalendarTaskPanel();
+            return;
+          }
           // RUTA 2: dismiss during move flow = cancel (no save, no Landing update)
           if (pendingMoveCtxRef.current) {
             cancelMoveFlow();
@@ -19720,26 +19889,28 @@ function HomeScreenContent() {
           )}
           <Pressable onPress={() => setCalPanelOpen(false)} style={{ flex: 1 }}>
             {/* Header row: label izquierda + config toggle derecha */}
-            <View
+            {!demoCustomerCalendarSelected && (<View
               pointerEvents={showBookingFromCal ? "none" : "auto"}
               style={{ opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
             >
-              <Text style={{ color: "#ffffff", fontSize: 9, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.5, textShadowColor: "rgba(255,255,255,0.6)", textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 6 }}>
-                {calBgViewMode === "dia" ? t("cal_view_day") : t("cal_label_week")}
-              </Text>
+              <GoCalendarViewSelector value={calBgViewMode} onChange={changeCalendarView} />
+              {demoBookingRepository && <TouchableOpacity accessibilityRole="button" onPress={event => { event.stopPropagation(); setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{padding:8}}><Text style={{color:"#ff7474",fontSize:10,fontWeight:"700"}}>DEMO LOCAL</Text></TouchableOpacity>}
               <TouchableOpacity
                 onPress={(e) => { e.stopPropagation(); Haptics.selectionAsync(); setCalConfigVisible(true); }}
                 activeOpacity={0.7}
                 hitSlop={10}
                 style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: calConfigVisible ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: calConfigVisible ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.14)" }}
               >
-                <Feather name={calConfigVisible ? "chevron-up" : "settings"} size={9} color={calConfigVisible ? "rgba(255,255,255,0.80)" : "rgba(255,255,255,0.45)"} />
-                {!calConfigVisible && <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 8, fontWeight: "700", letterSpacing: 0.8 }}>CONFIG</Text>}
+                <Feather name={calConfigVisible ? "chevron-up" : "settings"} size={9} color="#ffffff" />
+                {!calConfigVisible && <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 8, fontWeight: "700", letterSpacing: 0.8 }}>CONFIG</Text>}
               </TouchableOpacity>
-            </View>
+            </View>)}
 
 
-            <AgendaBoard
+            <View testID="calendar-agenda-viewport" style={{ flex: 1, paddingBottom: 64 }}>
+            {demoCustomerCalendarSelected ? (demoBookingRepository
+              ? <DemoCustomerCalendar repository={demoBookingRepository} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} />
+              : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
                 goLog={goLog.filter((e: any) => {
                   const id: string = e.id ?? "";
                   if (isUserMode     && id.startsWith("go_booking_prv_")) return false;
@@ -19750,9 +19921,9 @@ function HomeScreenContent() {
                 calSizeKey={calSize}
                 sortOrder={goSortOrder}
                 onToggleSortOrder={toggleGoSortOrder}
-                selectedDateISO={dateISODraft}
-                viewMode={calBgViewMode as "semana" | "mes_lineal" | "dia"}
-                calViewMonth={calBgViewMonth}
+                selectedDateISO={calendarTaskContextRef.current?.dateISO ?? dateISODraft}
+                viewMode={calendarTaskContextRef.current?.viewMode ?? calBgViewMode}
+                calViewMonth={calendarTaskContextRef.current?.viewMonth ?? calBgViewMonth}
                 showHours={calBgShowHours}
                 density={calBgDensity}
                 calDayNightMode={calBgDayNightMode}
@@ -19771,6 +19942,7 @@ function HomeScreenContent() {
                 highlightEntryId={calHighlightEntryId}
                 onMoveItem={moveGoToDay}
                 onOpenMoveFlow={openMoveFlow}
+                onCreateTaskAtTime={openCalendarSlotTask}
                 onAddEntry={(dateISO) => {
                   // Regla de flujo V1: solo abrir flujo de tarea si hay contacto seleccionado
                   const _hasContactAdd = !!(contactName.trim() || phone.trim());
@@ -19784,6 +19956,7 @@ function HomeScreenContent() {
                   const d = new Date(dateISO + "T00:00:00");
                   const label = dateISO === todayISOCal ? "HOY" : formatDayLabel(d);
                   setDateISODraft(dateISO);
+                  setCalBgViewMonth(dateISO.slice(0, 7));
                   setDateDraft(label);
                   setDate(label);
                   setDateISO(dateISO);
@@ -19892,7 +20065,8 @@ function HomeScreenContent() {
                     return next;
                   });
                 }}
-              />
+              />)}
+            </View>
           </Pressable>
 
           {/* ── GUÍA GESTUAL DERECHA — indica zona de minimizar/cerrar ──────
@@ -19918,61 +20092,52 @@ function HomeScreenContent() {
           {/* ── BOTONES FLOTANTES — zona pulgar derecho ───────────────────
               CONFIG toggle + ↑↓ fecha.
               Solo visibles cuando el panel mensual está CERRADO y GO Reservas no está activo. */}
-          {!monthGridOpen && !calReservasOpen && <View
-            style={{
-              position: "absolute",
-              right: Math.max(insets.right + 14, 14),
-              bottom: overlayPanelHeight + 10,
-              gap: 8,
-              zIndex: 30,
-            }}
+          {!monthGridOpen && !calReservasOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <View
+            testID="calendar-floating-controls"
+            style={{ position: "absolute", right: Math.max(insets.right + 14, 14), bottom: overlayPanelHeight + 10, flexDirection: "row", alignItems: "center", gap: 8, zIndex: 30 }}
           >
-            {/* ↑ Fecha — abre selector de mes */}
-            <TouchableOpacity
+            {!demoCustomerCalendarSelected && (<TouchableOpacity
               onPress={() => {
                 Haptics.selectionAsync();
-                if (monthGridOpen) {
-                  closeMonthGrid();
-                  return;
-                }
                 if (calFlow.isActive) {
                   calFlow.openDateCorrection();
                 } else {
-                  const baseISO = dateISODraft || formatISODate(getToday());
                   calFlow.openForNav({
-                    initialDateISO: baseISO,
-                    onDaySelect: (iso) => {
-                      setCalScrollToDateTarget({ dateISO: iso, timeHHMM: "", token: Date.now() });
-                    },
+                    initialDateISO: dateISODraft || formatISODate(getToday()),
+                    onDaySelect: navigateCalendarDay,
                   });
                 }
               }}
+              accessibilityRole="button"
+              accessibilityLabel={lang === "en" ? "Open calendar" : "Abrir calendario"}
               activeOpacity={0.7}
-              hitSlop={10}
-              style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: monthGridOpen ? "rgba(255,255,255,0.10)" : "#0e0e10", borderWidth: 1.5, borderColor: monthGridOpen ? "rgba(255,255,255,0.60)" : "rgba(255,255,255,0.40)", alignItems: "center", justifyContent: "center" }}
+              hitSlop={2}
+              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "#0e0e10", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.60)", alignItems: "center", justifyContent: "center" }}
             >
-              <Feather name="calendar" size={14} color="rgba(255,255,255,0.80)" />
-            </TouchableOpacity>
-            {/* ↓ Guardar / cancelar */}
-            <TouchableOpacity
-              onPress={() => {
-                Haptics.selectionAsync();
-                if (pendingMoveCtxRef.current) {
-                  cancelMoveFlow();
-                } else {
-                  saveCal();
-                }
-              }}
-              activeOpacity={0.7}
-              hitSlop={10}
-              style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#0e0e10", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.28)", alignItems: "center", justifyContent: "center" }}
-            >
-              <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.80)" />
-            </TouchableOpacity>
+              <Feather name="calendar" size={18} color="#ffffff" />
+            </TouchableOpacity>)}
+            {(calQuickCreateOpen || calConfigVisible) && (
+              <GoCloseButton
+                level="panel"
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  if (calQuickCreateOpen) closeCalendarTaskPanel();
+                  else setCalConfigVisible(false);
+                }}
+                accessibilityLabel={calQuickCreateOpen
+                  ? (lang === "en" ? "Close new task" : "Cerrar Nueva tarea")
+                  : (lang === "en" ? "Close calendar settings" : "Cerrar configuración de Calendario")}
+              />
+            )}
+            <GoCloseButton
+              level="container"
+              onPress={() => { Haptics.selectionAsync(); exitCalendarContainer(); }}
+              accessibilityLabel={lang === "en" ? "Exit Calendar" : "Salir de Calendario"}
+            />
           </View>}
 
           {/* ── ZONA INFERIOR — Selector de fecha/hora/duración ──────────── */}
-          <Pressable
+          {demoCustomerCalendarSelected ? <View style={{paddingHorizontal:16,paddingBottom:Math.max(insets.bottom,12),paddingTop:8,backgroundColor:"#0e0e14"}}><TouchableOpacity accessibilityRole="button" onPress={() => { setDemoInitialBusinessId(undefined); setShowBookingFromCal(true); }} style={{padding:12,borderRadius:12,backgroundColor:"#284d42"}}><Text style={{color:"#ffffff",fontWeight:"700",textAlign:"center"}}>{lang === "en" ? "New reservation · LOCAL DEMO" : "Nueva reserva · DEMO LOCAL"}</Text></TouchableOpacity></View> : (<Pressable
             style={[styles.sheet, { paddingBottom: isBusinessMode ? Math.max(paddingBottom - 22, 2) : Math.max(paddingBottom - 10, 0) }]}
             onPress={(e) => e.stopPropagation()}
             onLayout={(e) => {
@@ -19992,7 +20157,7 @@ function HomeScreenContent() {
                 calSize={calSize}
                 onCalSizeChange={(s) => { setCalSize(s); AsyncStorage.setItem("go_cal_size_v1", s).catch(() => {}); }}
                 viewMode={calBgViewMode as "dia" | "semana"}
-                onViewModeChange={(v) => { setCalBgViewMode(v); AsyncStorage.setItem("cal_view", v).catch(() => {}); }}
+                onViewModeChange={changeCalendarView}
                 monthGridOpen={monthGridOpen}
                 onToggleMonthGrid={() => {
                   if (calFlow.monthGridOpen) {
@@ -20003,41 +20168,25 @@ function HomeScreenContent() {
                     const baseISO = dateISODraft || formatISODate(getToday());
                     calFlow.openForNav({
                       initialDateISO: baseISO,
-                      onDaySelect: (iso) => {
-                        setCalScrollToDateTarget({ dateISO: iso, timeHHMM: "", token: Date.now() });
-                      },
+                      onDaySelect: navigateCalendarDay,
                     });
                   }
                 }}
               />
             )}
-            {calConfigVisible && (
-              <View style={{ flexDirection: "row", justifyContent: "flex-end", paddingRight: 2, paddingBottom: 4 }}>
-                <TouchableOpacity
-                  onPress={() => { Haptics.selectionAsync(); setCalConfigVisible(false); }}
-                  activeOpacity={0.7}
-                  hitSlop={10}
-                  style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#0e0e10", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.28)", alignItems: "center", justifyContent: "center" }}
-                >
-                  <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.80)" />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Botones de acción — fija, sin scroll, una sola línea
-                justifyContent: "flex-end" → todo el conjunto anclado a la derecha.
-                Empresa: [+][HOY][MIS RESERVAS][RESERVAR][⚡]
-                Particular: [+][HOY][RESERVAR][⚡]  ← misma posición de RESERVAR y ⚡ */}
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingLeft: isBusinessMode ? 0 : 4, paddingRight: isBusinessMode ? 2 : 6, paddingTop: 2, marginBottom: 0 }}>
-              {/* + AÑADIR */}
+            {/* Acciones principales: Nueva tarea · HOY · RESERVAR · GO */}
+            <View testID="calendar-actions" style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingLeft: isBusinessMode ? 0 : 4, paddingRight: isBusinessMode ? 2 : 6, paddingTop: 2, marginBottom: 0 }}>
+              {/* NUEVA TAREA */}
               {!calQuickCreateOpen && (
                 <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={t("new_task_label")}
                   onPress={() => { Haptics.selectionAsync(); setCalQuickCreateOpen(true); }}
                   activeOpacity={0.7}
-                  hitSlop={10}
+                  hitSlop={2}
                   style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.14)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.55)", alignItems: "center", justifyContent: "center" }}
                 >
-                  <Feather name="plus" size={21} color="#ffffff" />
+                  <MaterialCommunityIcons name="note-edit-outline" size={21} color="#ffffff" />
                 </TouchableOpacity>
               )}
               {/* HOY — azul: dónde estoy */}
@@ -20047,32 +20196,23 @@ function HomeScreenContent() {
                   setCalScrollToTodayToken((t) => t + 1);
                 }}
                 activeOpacity={0.7}
-                hitSlop={10}
+                hitSlop={2}
                 style={{ paddingHorizontal: 10, height: 42, borderRadius: 21, backgroundColor: "rgba(74,128,189,0.12)", borderWidth: 1.5, borderColor: "rgba(74,128,189,0.55)", alignItems: "center", justifyContent: "center" }}
               >
                 <Text style={{ color: "#4A80BD", fontSize: 9, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.2 }}>{t('cal_today_btn')}</Text>
               </TouchableOpacity>
-              {/* MIS RESERVAS — verde: solo empresas */}
-              {isBusinessMode && (
-                <TouchableOpacity
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); setCalReservasOpen(true); }}
-                  activeOpacity={0.8}
-                  hitSlop={10}
-                  style={{ paddingHorizontal: 9, height: 42, borderRadius: 21, backgroundColor: "rgba(61,154,132,0.15)", borderWidth: 1.5, borderColor: "rgba(61,154,132,0.70)", alignItems: "center", justifyContent: "center" }}
-                >
-                  <Text style={{ color: "#3D9A84", fontSize: 7.5, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.6 }}>{t('biz_my_bookings')}</Text>
-                </TouchableOpacity>
-              )}
               {/* RESERVAR — amarillo: crear algo nuevo. Long-press → panel diagnóstico booking */}
               <TouchableOpacity
                 onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); setShowBookingFromCal(true); }}
                 onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {}); setDiagBookingOpen(true); }}
                 delayLongPress={800}
                 activeOpacity={0.8}
-                hitSlop={10}
-                style={{ paddingHorizontal: 9, height: 42, borderRadius: 21, backgroundColor: "rgba(200,160,55,0.13)", borderWidth: 1.5, borderColor: "rgba(200,160,55,0.60)", alignItems: "center", justifyContent: "center" }}
+                hitSlop={2}
+                accessibilityRole="button"
+                accessibilityLabel={t("biz_book_btn")}
+                style={{ flexGrow: 1, flexShrink: 1, minWidth: 104, maxWidth: 180, paddingHorizontal: 16, height: 52, borderRadius: 18, backgroundColor: "#C8A037", borderWidth: 1.5, borderColor: "#F8DF8B", alignItems: "center", justifyContent: "center" }}
               >
-                <Text style={{ color: "#C8A037", fontSize: 7.5, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.6 }}>{t("biz_book_btn").toUpperCase()}</Text>
+                <Text style={{ color: "#17120B", fontSize: 12, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.8 }}>{t("biz_book_btn").toUpperCase()}</Text>
               </TouchableOpacity>
               {/* IA */}
               <TouchableOpacity
@@ -20080,26 +20220,39 @@ function HomeScreenContent() {
                 onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); startVoiceMode(); }}
                 delayLongPress={400}
                 activeOpacity={0.8}
-                hitSlop={8}
-                accessibilityLabel="Abrir IA (mantén para voz)"
+                hitSlop={2}
+                accessibilityLabel={lang === "en" ? "Open GO (hold for voice)" : "Abrir GO (mantén para voz)"}
                 style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: GO_GOLD, alignItems: "center", justifyContent: "center", shadowColor: GO_GOLD, shadowOpacity: 0.55, shadowRadius: 10, elevation: 6 }}
               >
-                <Feather name="zap" size={21} color="#ffffff" />
+                <Text style={{ color: "#17120B", fontSize: 15, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.4 }}>GO</Text>
               </TouchableOpacity>
             </View>
+
+              {/* Acceso empresarial secundario: conserva su acción. */}
+              {isBusinessMode && (
+                <View style={{ alignItems: "flex-end", paddingTop: 6, paddingRight: 2 }}>
+                <TouchableOpacity
+                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); setCalReservasOpen(true); }}
+                  activeOpacity={0.8}
+                  hitSlop={2}
+                  style={{ paddingHorizontal: 9, height: 42, borderRadius: 21, backgroundColor: "rgba(61,154,132,0.15)", borderWidth: 1.5, borderColor: "rgba(61,154,132,0.70)", alignItems: "center", justifyContent: "center" }}
+                >
+                  <Text style={{ color: "#3D9A84", fontSize: 7.5, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.6 }}>{t('biz_my_bookings')}</Text>
+                </TouchableOpacity>
+                </View>
+              )}
 
             {/* ── PANEL CREACIÓN RÁPIDA — idéntico al de Listados ── */}
             {calQuickCreateOpen && (() => {
               const calQuickCreateOptions = [
-                { kind: "NOTA_INTERNA" as const, label: "INTERNAL TASK", icon: "file-text" as const, color: "#7c3aed", iconOn: "#ffffff" },
-                { kind: "NOTA_EXTERNA" as const, label: "EXTERNAL TASK", icon: "file-text" as const, color: "#f97316", iconOn: "#ffffff" },
+                { kind: "NOTA_INTERNA" as const, label: t('label_task_internal').toUpperCase(), icon: "file-text" as const, color: "#7c3aed", iconOn: "#ffffff" },
+                { kind: "NOTA_EXTERNA" as const, label: t('label_task_external').toUpperCase(), icon: "file-text" as const, color: "#f97316", iconOn: "#ffffff" },
               ];
               const handleCalQuickCreate = (kind: "NOTA_INTERNA" | "NOTA_EXTERNA") => {
                 Haptics.selectionAsync().catch(() => {});
                 const text = calQuickCreateText.trim();
                 setCalQuickCreateText("");
                 setCalQuickCreateOpen(false);
-                setCalOpen(false);
                 openFieldSelector(kind, text, "", dateISODraft || formatISODate(getToday()));
               };
               return (
@@ -20385,7 +20538,7 @@ function HomeScreenContent() {
               </>
             )}
 
-          </Pressable>
+          </Pressable>)}
 
         {/* ── MONTH GRID BOTTOM SHEET — slide up desde abajo ─────────────
             Se monta dentro del mismo Modal del calendario para heredar
@@ -20516,14 +20669,6 @@ function HomeScreenContent() {
                     </TouchableOpacity>
                     {/* Spacer derecho */}
                     <View style={{ flex: 1 }} />
-                    {/* ↓ — cierra el panel mensual */}
-                    <TouchableOpacity
-                      hitSlop={12}
-                      onPress={() => { Haptics.selectionAsync(); closeMonthGrid(); }}
-                      style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "#0a0a0a", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center" }}
-                    >
-                      <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.7)" />
-                    </TouchableOpacity>
                   </View>
 
                   {/* Cabecera Lun Mar Mié Jue Vie Sáb Dom */}
@@ -20617,6 +20762,13 @@ function HomeScreenContent() {
                       })}
                     </View>
                   ))}
+                  <View testID="calendar-month-closes" style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8, paddingTop: 8 }}>
+                    <GoCloseButton level="panel" onPress={() => {
+                      Haptics.selectionAsync();
+                      closeMonthGrid();
+                    }} accessibilityLabel={lang === "en" ? "Close month panel" : "Cerrar panel mensual"} />
+                    <GoCloseButton level="container" onPress={exitCalendarContainer} accessibilityLabel={lang === "en" ? "Exit Calendar" : "Salir de Calendario"} />
+                  </View>
                   </Animated.View>{/* fin contenido deslizante */}
 
                 </View>
@@ -20628,8 +20780,18 @@ function HomeScreenContent() {
 
         {/* ── GO BOOKING — búsqueda de proveedor y reserva ──────────── */}
         <BookingSearchOverlay
-          visible={showBookingFromCal}
-          onClose={() => setShowBookingFromCal(false)}
+          key={demoBookingRepository ? "demo_" + demoBookingRepository.ownerUserId : "real"}
+          visible={showBookingFromCal && !adminAccess.checking && (!demoInitialBusinessId || !!demoBookingRepository)}
+          demoRepository={demoBookingRepository}
+          initialBusinessId={demoInitialBusinessId}
+          onDemoGoToBooking={(dateISO, timeHHMM, entryId) => {
+            setShowBookingFromCal(false);
+            setDemoCalendarFocus({ dateISO, timeHHMM, entryId, token: Date.now() });
+            setDemoCustomerCalendarSelected(true);
+            setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid();
+            setCalOpen(true);
+          }}
+          onClose={() => { setShowBookingFromCal(false); setDemoInitialBusinessId(undefined); }}
           onDismissAll={() => {
             // Paso 1: cerrar el modal interior (BookingSearchOverlay) inmediatamente.
             // Como usa animationType="none", se desmonta en el siguiente frame.
@@ -20653,14 +20815,14 @@ function HomeScreenContent() {
             setCalHighlightEntryId(entryId);
           }}
           onBookingConfirmed={async (booking, biz, item, confirmedProfessionalName) => {
+            if (demoBookingRepository) return; // DEMO never writes tutorial, personal agenda or live booking keys.
             console.log("[ON_BOOKING_CONFIRMED_ENTER]", {
               timestamp: new Date().toISOString(),
               bookingId: booking?.id,
             });
             if (!tutReservaRealizada) { setTutReservaRealizada(true); AsyncStorage.setItem("tutorial.reservaRealizada", "1").catch(() => {}); }
             try {
-              const raw = await AsyncStorage.getItem("go_log_v1");
-              const log: import("../components/AgendaOperativa").GoEntry[] = raw ? JSON.parse(raw) : [];
+              const log = await readGoLog();
               const startDate = new Date(booking.startDatetime);
               const dateISO = startDate.toISOString().slice(0, 10);
               const hh = String(startDate.getHours()).padStart(2, "0");
@@ -20885,8 +21047,7 @@ function HomeScreenContent() {
                   missingSlotKey: !_bk.slotKey,
                 });
               }
-              await AsyncStorage.setItem("go_log_v1", JSON.stringify(_finalLog));
-              setGoLog(_finalLog as any);
+              await commitGoLogSnapshot(log, _finalLog);
               await saveBooking({ ...booking, goEntryId: clientEntryId });
             } catch (err) {
               console.error("[ASYNC_STORAGE_WRITE] index.tsx onBookingConfirmed CATCH:", err);
@@ -21068,6 +21229,8 @@ function HomeScreenContent() {
             <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
               <GoReservasConfigScreen
                 onClose={() => setCalReservasOpen(false)}
+                onOpenGo={openAi}
+                onCreateTaskAtTime={openCalendarSlotTask}
                 dayNightMode={calBgDayNightMode}
                 onDayNightModeChange={(m) => { setCalBgDayNightMode(m); AsyncStorage.setItem("cal_day_night_mode_v1", m).catch(() => {}); }}
                 handedness={handedness}
@@ -21085,6 +21248,7 @@ function HomeScreenContent() {
             </View>
           )}
 
+          {calendarTaskContextRef.current && fieldSelectorOpen && renderFieldSelector(true)}
         </View>
       </Modal>
 
@@ -23882,10 +24046,17 @@ function HomeScreenContent() {
 
 
 
-      {/* GO CHAT SCREEN — asistente IA visual (mock) */}
+      {/* GO CHAT SCREEN — asistente de reservas V1 */}
       <GOChatScreen
         visible={goChatOpen}
-        onClose={() => setGoChatOpen(false)}
+        listenRequest={goChatListenRequest}
+        uiScale={uiScale}
+        handedness={handedness}
+        onHandednessChange={(value) => { setHandedness(value); AsyncStorage.setItem("go_handedness_v1", value).catch(() => {}); }}
+        onClose={() => {
+          setGoChatOpen(false);
+          // IA already commits to the same observable GO record.
+        }}
       />
 
       {/* MENSAJES GO — pantalla de mensajería interna */}
@@ -25356,504 +25527,7 @@ function HomeScreenContent() {
       </Modal>
 
       {/* ── FIELD SELECTOR — selector de campos opcionales ─────────────────── */}
-      <Modal
-        visible={fieldSelectorOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => { setFieldSelectorOpen(false); setFsLocationExpanded(false); setFsPlaceDraft(""); }}
-        statusBarTranslucent
-      >
-        <KeyboardAvoidingView
-          style={{ flex: 1, justifyContent: "flex-end" }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-        >
-          <Pressable
-            style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
-            onPress={() => { setFieldSelectorOpen(false); setFsLocationExpanded(false); setFsPlaceDraft(""); }}
-          >
-            <View pointerEvents="none" style={{ opacity: 0.78 }}>
-              {renderGoOrbit(GO_SIZE_4, intent)}
-            </View>
-          </Pressable>
-          <Pressable onPress={(e) => { e.stopPropagation(); Keyboard.dismiss(); }}>
-            <View
-              style={{
-                backgroundColor: "#131316",
-                borderTopLeftRadius: 24,
-                borderTopRightRadius: 24,
-                paddingHorizontal: 18,
-                paddingTop: fsKbVisible ? 8 : 10,
-                paddingBottom: fsKbVisible ? 8 : Math.max(paddingBottom + 12, 28),
-              }}
-            >
-              {/* Header */}
-              {(() => {
-                const meta: Record<string, { label: string; icon: keyof typeof Feather.glyphMap; color: string }> = {
-                  GO_INTERNO:   { label: "GO INTERNO",   icon: "zap",       color: "#3b82f6" },
-                  GO_EXTERNO:   { label: "GO EXTERNO",   icon: "send",      color: "#10b981" },
-                  NOTA_INTERNA: { label: "INTERNAL TASK", icon: "file-text", color: "#7c3aed" },
-                  NOTA_EXTERNA: { label: "EXTERNAL TASK", icon: "file-text", color: "#f97316" },
-                };
-                const m = meta[fieldSelectorKind] ?? { label: "NEW", icon: "plus" as any, color: "#ffffff" };
-                return (
-                  <View style={{ flexDirection: "row", alignItems: "center", marginBottom: fsKbVisible ? 6 : 10 }}>
-                    <View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: m.color + "22", alignItems: "center", justifyContent: "center", marginRight: 9 }}>
-                      <Feather name={m.icon} size={14} color={m.color} />
-                    </View>
-                    <Text style={{ color: "#ffffff", fontSize: 13, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1 }}>{m.label}</Text>
-                  </View>
-                );
-              })()}
-
-              {/* DETALLES — campo principal; solo visible cuando no hay teclado o cuando este campo está enfocado */}
-              {(!fsKbVisible || fsFocusedField === "detail") && (
-                <TextInput
-                  value={fieldSelectorDetail}
-                  onChangeText={setFieldSelectorDetail}
-                  onFocus={() => setFsFocusedField("detail")}
-                  onBlur={() => setFsFocusedField(null)}
-                  placeholder={t('placeholder_task_details')}
-                  placeholderTextColor="rgba(255,255,255,0.38)"
-                  multiline
-                  scrollEnabled={false}
-                  textAlignVertical="top"
-                  style={{
-                    color: "#ffffff",
-                    fontSize: 13,
-                    lineHeight: 19,
-                    backgroundColor: "#1e1e22",
-                    borderRadius: 12,
-                    borderWidth: 1.5,
-                    borderColor: fieldSelectorDetail.trim() ? "rgba(167,139,250,0.70)" : "rgba(255,255,255,0.18)",
-                    paddingHorizontal: 14,
-                    paddingTop: 8,
-                    paddingBottom: 8,
-                    marginBottom: 8,
-                    minHeight: 40,
-                  }}
-                />
-              )}
-
-              {/* TÍTULO — solo visible cuando no hay teclado o cuando este campo está enfocado */}
-              {(!fsKbVisible || fsFocusedField === "title") && (
-                <>
-                  <Text style={{ color: "#ffffff", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.4, marginBottom: 4, marginLeft: 2 }}>
-                    TÍTULO
-                  </Text>
-                  <TextInput
-                    value={fieldSelectorText}
-                    onChangeText={setFieldSelectorText}
-                    onFocus={() => setFsFocusedField("title")}
-                    onBlur={() => setFsFocusedField(null)}
-                    placeholder={t('placeholder_operational')}
-                    placeholderTextColor="rgba(255,255,255,0.40)"
-                    maxLength={16}
-                    returnKeyType="done"
-                    numberOfLines={1}
-                    multiline={false}
-                    style={{
-                      color: "#ffffff",
-                      fontSize: 16,
-                      fontWeight: "700",
-                      backgroundColor: "#1e1e22",
-                      borderRadius: 12,
-                      borderWidth: 1.5,
-                      borderColor: fieldSelectorText.trim() ? "rgba(96,165,250,0.65)" : "rgba(255,255,255,0.18)",
-                      paddingHorizontal: 14,
-                      paddingTop: 10,
-                      paddingBottom: 10,
-                      marginBottom: 12,
-                    }}
-                  />
-                </>
-              )}
-
-
-              {/* UBICACIÓN — fila inline para todos los tipos (oculta mientras el teclado está abierto) */}
-              {!fsKbVisible && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                  {/* Botón MAPA — abre Google Maps para buscar */}
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      Haptics.selectionAsync().catch(() => {});
-                      const query = fsPlaceDraft.trim()
-                        ? encodeURIComponent(fsPlaceDraft.trim())
-                        : "";
-                      const url = query
-                        ? `https://www.google.com/maps/search/?api=1&query=${query}`
-                        : "https://www.google.com/maps/";
-                      Linking.openURL(url).catch(() => showToast(t('toast_maps_error'), "error"));
-                    }}
-                    style={[
-                      styles.locIconBtn,
-                      fsPlaceDraft.trim() ? { backgroundColor: "rgba(96,165,250,0.18)", borderColor: "rgba(96,165,250,0.60)" } : null,
-                    ]}
-                  >
-                    <Feather name="map" size={20} color="#ffffff" />
-                  </TouchableOpacity>
-
-                  {/* Input BUSCAR */}
-                  <View style={[
-                    styles.locInputWrap,
-                    fsPlaceDraft.trim() ? { backgroundColor: "rgba(96,165,250,0.12)", borderColor: "rgba(96,165,250,0.50)" } : null,
-                  ]}>
-                    <Feather name="search" size={14} color="rgba(255,255,255,0.75)" style={{ marginRight: 6 }} />
-                    <TextInput
-                      value={fsPlaceDraft}
-                      onChangeText={(v) => {
-                        setFsPlaceDraft(v);
-                        setFsFilledValues(prev => ({ ...prev, place: v || undefined }));
-                        qdCapPlaceRef.current = v;
-                      }}
-                      placeholder={t('placeholder_search')}
-                      placeholderTextColor="rgba(255,255,255,0.65)"
-                      style={styles.locInput}
-                      returnKeyType="search"
-                    />
-                    {!!fsPlaceDraft && (
-                      <TouchableOpacity
-                        onPress={() => {
-                          setFsPlaceDraft("");
-                          setFsFilledValues(prev => ({ ...prev, place: undefined }));
-                          qdCapPlaceRef.current = "";
-                          Haptics.selectionAsync().catch(() => {});
-                        }}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        style={{ paddingHorizontal: 4 }}
-                      >
-                        <Feather name="x" size={16} color="#ffffffcc" />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-
-                  {/* Botón AQUÍ — GPS aislado, no toca estado del Landing */}
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    disabled={fsLocating}
-                    onPress={async () => {
-                      try {
-                        setFsLocating(true);
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                        const perms = await Location.getForegroundPermissionsAsync();
-                        let status = perms.status;
-                        if (status !== "granted") {
-                          if (!perms.canAskAgain) { showToast(t('toast_location_denied')); return; }
-                          const req = await Location.requestForegroundPermissionsAsync();
-                          status = req.status;
-                          if (status !== "granted") { showToast(t('toast_location_denied')); return; }
-                        }
-                        let c: { lat: number; lng: number } | null = null;
-                        try {
-                          const last = await Location.getLastKnownPositionAsync({ maxAge: 1000 * 60 * 30 });
-                          if (last?.coords) c = { lat: last.coords.latitude, lng: last.coords.longitude };
-                        } catch {}
-                        if (!c) {
-                          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-                          c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                        }
-                        const text = await reverseGeocodeSafe(c);
-                        setFsPlaceDraft(text);
-                        setFsFilledValues(prev => ({ ...prev, place: text }));
-                        qdCapPlaceRef.current = text;
-                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-                      } catch {
-                        showToast(t('toast_location_error'), "error");
-                      } finally {
-                        setFsLocating(false);
-                      }
-                    }}
-                    style={[
-                      styles.locAquiBtn,
-                      fsPlaceDraft.trim() ? { backgroundColor: "rgba(96,165,250,0.18)", borderColor: "rgba(96,165,250,0.60)" } : null,
-                    ]}
-                  >
-                    {fsLocating ? (
-                      <ActivityIndicator size="small" color="#ffffff" />
-                    ) : (
-                      <>
-                        <Feather name="navigation" size={14} color="#ffffff" />
-                        <Text style={[styles.locAquiText, { color: "#ffffff" }]}>{t('location_here')}</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* ACTIVIDAD — botones GO y OTRO, solo GO EXTERNO */}
-              {fieldSelectorKind === "GO_EXTERNO" && !fsKbVisible && (() => {
-                const selIntent = INTENTS.find(i => i.key === fsActivityKey);
-                const isCustomAct = fsActivityKey === "custom" && !!fsCustomLabel.trim();
-                const actLabel = isCustomAct ? fsCustomLabel.trim() : (selIntent?.label ?? null);
-                const actColor = isCustomAct ? "#a78bfa" : (selIntent?.color ?? "#10b981");
-                return (
-                  <>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                      {/* GO — abre orbital completo */}
-                      <TouchableOpacity
-                        activeOpacity={0.8}
-                        onPress={() => { Haptics.selectionAsync().catch(() => {}); setFsCustomOpen(false); setFsOrbitalOpen(true); }}
-                        style={{
-                          flexDirection: "row", alignItems: "center", gap: 6,
-                          paddingVertical: 7, paddingHorizontal: 14, borderRadius: 20,
-                          backgroundColor: actLabel ? actColor + "22" : "rgba(16,185,129,0.10)",
-                          borderWidth: 1.5,
-                          borderColor: actLabel ? actColor : "rgba(16,185,129,0.45)",
-                        }}
-                      >
-                        <Text style={{ color: actLabel ? actColor : "#10b981", fontSize: 13, fontWeight: "900", letterSpacing: 2 }}>GO</Text>
-                        {actLabel && !isCustomAct && (
-                          <Text style={{ color: actColor, fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.8 }}>{actLabel.toUpperCase()}</Text>
-                        )}
-                      </TouchableOpacity>
-                      {/* OTRO — abre input personalizado */}
-                      <TouchableOpacity
-                        activeOpacity={0.8}
-                        onPress={() => { Haptics.selectionAsync().catch(() => {}); setFsOrbitalOpen(false); setFsCustomOpen(v => !v); }}
-                        style={{
-                          paddingVertical: 7, paddingHorizontal: 14, borderRadius: 20,
-                          backgroundColor: isCustomAct ? "rgba(167,139,250,0.14)" : "rgba(255,255,255,0.07)",
-                          borderWidth: 1.5,
-                          borderColor: isCustomAct ? "#a78bfa" : "rgba(255,255,255,0.18)",
-                        }}
-                      >
-                        <Text style={{ color: isCustomAct ? "#a78bfa" : "rgba(255,255,255,0.50)", fontSize: 11, fontWeight: "700", letterSpacing: 0.6 }}>
-                          {isCustomAct ? fsCustomLabel.toUpperCase() : "OTHER"}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                    {/* OTRO — input personalizado */}
-                    {fsCustomOpen && (
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                        <TextInput
-                          value={fsCustomLabel}
-                          onChangeText={setFsCustomLabel}
-                          placeholder={t('placeholder_specialty')}
-                          placeholderTextColor="rgba(255,255,255,0.35)"
-                          autoFocus
-                          returnKeyType="done"
-                          onSubmitEditing={() => { if (fsCustomLabel.trim()) setFsActivityKey("custom"); setFsCustomOpen(false); }}
-                          style={{
-                            flex: 1, color: "#ffffff", fontSize: 13,
-                            backgroundColor: "#1e1e22", borderRadius: 12, borderWidth: 1.5,
-                            borderColor: "rgba(167,139,250,0.50)", paddingHorizontal: 12, paddingVertical: 8,
-                          }}
-                        />
-                        <TouchableOpacity
-                          onPress={() => { Haptics.selectionAsync().catch(() => {}); if (fsCustomLabel.trim()) setFsActivityKey("custom"); setFsCustomOpen(false); }}
-                          style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#a78bfa", alignItems: "center", justifyContent: "center" }}
-                        >
-                          <Feather name="check" size={15} color="#ffffff" />
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                  </>
-                );
-              })()}
-
-              {/* Fila inferior: GUARDAR · FECHA/HORA · ↓ — todos los tipos */}
-              {!fsKbVisible && (() => {
-                const anyFilled = Boolean(fsFilledValues.date || fsFilledValues.time);
-                const openFechaHora = () => {
-                  Haptics.selectionAsync().catch(() => {});
-                  qdFlowActiveRef.current = true;
-                  qdCapContactNameRef.current = fsFilledValues.contactName || "";
-                  qdCapPhoneRef.current       = fsFilledValues.phone       || "";
-                  qdCapDateRef.current        = fsFilledValues.date        || "";
-                  qdCapDateISORef.current     = fsFilledValues.dateISO     || "";
-                  qdCapTimeRef.current        = fsFilledValues.time        || "";
-                  qdCapPlaceRef.current       = fsFilledValues.place       || "";
-                  setFieldSelectorOpen(false);
-                  setCalOpen(true);
-                  calFlow.open({
-                    startAt: "date",
-                    initialDateISO: fsFilledValues.dateISO || formatISODate(getToday()),
-                    initialDateDraft: fsFilledValues.date || "",
-                    initialTime: fsFilledValues.time || "",
-                    onSave: _handleCalFlowSave,
-                    onCancel: () => { setCalOpen(false); },
-                  });
-                };
-                return (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                    {/* GUARDAR — izquierda, menos cómodo; guarda sin fecha/hora */}
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                        if (qdReturnTimerRef.current) {
-                          clearTimeout(qdReturnTimerRef.current);
-                          qdReturnTimerRef.current = null;
-                        }
-                        qdFlowActiveRef.current = false;
-                        const kind = fieldSelectorKind;
-                        const text = fieldSelectorText.trim();
-                        const detail = fieldSelectorDetail;
-                        const contact = fsFilledValues.contactName || "";
-                        const phone   = fsFilledValues.phone       || "";
-                        const date    = fsFilledValues.date        || "";
-                        const dateISO = fsFilledValues.dateISO     || "";
-                        const time    = fsFilledValues.time        || "";
-                        const place   = fsFilledValues.place       || "";
-                        setFsFilledValues({});
-                        setFsLocationExpanded(false);
-                        setFsActivityKey(null);
-                        setFsOrbitalOpen(false);
-                        setFsCustomOpen(false);
-                        setFsCustomLabel("");
-                        setFieldSelectorOpen(false);
-                        setFieldSelectorText("");
-                        setFieldSelectorDetail("");
-                        createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
-                        const origin = qdOriginContextRef.current;
-                        qdOriginContextRef.current = { listOpen: false, notesOpen: false, agendaOpOpen: false };
-                        if (origin.listOpen) setListOpen(true);
-                        if (origin.agendaOpOpen) setAgendaOpOpen(true);
-                      }}
-                      style={{ paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#6ee7b7", alignItems: "center" }}
-                    >
-                      <Text style={{ color: "#000000", fontSize: 11, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>SAVE</Text>
-                    </TouchableOpacity>
-                    {/* FECHA / HORA — centro/derecha, más cómodo */}
-                    <TouchableOpacity
-                      onPress={openFechaHora}
-                      style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 9, borderRadius: 10, backgroundColor: anyFilled ? "rgba(34,197,94,0.15)" : "#1e1e22", borderWidth: 1.5, borderColor: anyFilled ? "#6ee7b7" : "rgba(255,255,255,0.18)" }}
-                    >
-                      <Feather name={anyFilled ? "check" : "calendar"} size={13} color={anyFilled ? "#6ee7b7" : "#ffffff"} />
-                      <Text style={{ color: anyFilled ? "#6ee7b7" : "#ffffff", fontSize: 12, fontWeight: "700" }}>{t('date_time_label')}</Text>
-                    </TouchableOpacity>
-                    {/* CONTACTO circular — solo TAREA EXTERNA y GO EXTERNO */}
-                    {(fieldSelectorKind === "NOTA_EXTERNA" || fieldSelectorKind === "GO_EXTERNO") && (() => {
-                      const contactFilled = Boolean(fsFilledValues.contactName || fsFilledValues.phone);
-                      return (
-                        <TouchableOpacity
-                          onPress={async () => {
-                            try {
-                              Haptics.selectionAsync().catch(() => {});
-                              const { status } = await Contacts.requestPermissionsAsync();
-                              if (status !== "granted") { showToast(t('toast_contacts_permission_denied')); return; }
-                              const picked = await Contacts.presentContactPickerAsync();
-                              if (!picked) return;
-                              const nameStr = (picked.name || "").trim();
-                              const telStr = (picked.phoneNumbers && picked.phoneNumbers[0]?.number) || "";
-                              const cleanTel = String(telStr).replace(/[^\d+]/g, "");
-                              setFsFilledValues(prev => ({ ...prev, contactName: nameStr || undefined, phone: cleanTel || undefined }));
-                              await persistRecent(nameStr, cleanTel).catch(() => {});
-                              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-                              showToast(t('toast_contact').replace('__NAME__', nameStr || cleanTel || t('word_contact')));
-                            } catch {
-                              showToast(t('toast_contacts_error'), "error");
-                            }
-                          }}
-                          hitSlop={6}
-                          style={{
-                            width: 38, height: 38, borderRadius: 19,
-                            backgroundColor: contactFilled ? "rgba(34,197,94,0.18)" : "#1e1e22",
-                            borderWidth: 1.5,
-                            borderColor: contactFilled ? "#6ee7b7" : "rgba(255,255,255,0.16)",
-                            alignItems: "center", justifyContent: "center",
-                          }}
-                        >
-                          <Feather name={contactFilled ? "check" : "user"} size={16} color={contactFilled ? "#6ee7b7" : "rgba(255,255,255,0.75)"} />
-                        </TouchableOpacity>
-                      );
-                    })()}
-                    {/* ↓ — bajar panel */}
-                    <TouchableOpacity
-                      onPress={() => { setFieldSelectorOpen(false); setFsLocationExpanded(false); setFsPlaceDraft(""); }}
-                      hitSlop={8}
-                      style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: "#1e1e22", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", alignItems: "center", justifyContent: "center" }}
-                    >
-                      <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.45)" />
-                    </TouchableOpacity>
-                  </View>
-                );
-              })()}
-
-              {/* GUARDAR — cierra teclado; visible cuando el teclado está abierto */}
-              {fsKbVisible && (
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    Keyboard.dismiss();
-                  }}
-                  style={{
-                    alignSelf: "flex-end",
-                    marginTop: 6,
-                    paddingVertical: 9,
-                    paddingHorizontal: 18,
-                    borderRadius: 10,
-                    backgroundColor: "#6ee7b7",
-                  }}
-                >
-                  <Text style={{ color: "#000000", fontSize: 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.8 }}>SAVE</Text>
-                </TouchableOpacity>
-              )}
-
-            </View>
-          </Pressable>
-
-          {/* ── ORBITAL COMPLETO — aparece al pulsar GO, flota sobre el panel ── */}
-          {fsOrbitalOpen && !fsKbVisible && (() => {
-            const goSz  = 80;
-            const orbR  = 68;
-            const btnSz = 44;
-            const wrapSz = (orbR + btnSz / 2) * 2 + 12; // 192
-            const iconSz  = Math.round(btnSz * 0.34);
-            const labelSz = Math.max(7, Math.round(btnSz * 0.155));
-            const activeC = INTENTS.find(i => i.key === fsActivityKey)?.color ?? "#10b981";
-            return (
-              <Pressable
-                style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "flex-end", paddingBottom: 260 }}
-                onPress={() => setFsOrbitalOpen(false)}
-              >
-                <Pressable onPress={e => e.stopPropagation()}>
-                  <View style={{ width: wrapSz, height: wrapSz }}>
-                    {/* Breathing glow */}
-                    <Animated.View pointerEvents="none" style={{ position: "absolute", left: wrapSz/2-(goSz+12)/2, top: wrapSz/2-(goSz+12)/2, width: goSz+12, height: goSz+12, borderRadius: (goSz+12)/2, borderWidth: 2.5, borderColor: activeC, opacity: goBreath.interpolate({ inputRange:[0,1], outputRange:[0.18,0.55] }), shadowColor: activeC, shadowOpacity: 0.25, shadowRadius: 6, shadowOffset: {width:0,height:0} }} />
-                    {/* Pulse 1 */}
-                    <Animated.View pointerEvents="none" style={{ position: "absolute", left: wrapSz/2-goSz/2, top: wrapSz/2-goSz/2, width: goSz, height: goSz, borderRadius: goSz/2, borderWidth: 1.5, borderColor: "#ffffff", opacity: goPulse1.interpolate({ inputRange:[0,0.15,1], outputRange:[0,0.30,0] }), transform:[{scale: goPulse1.interpolate({inputRange:[0,1],outputRange:[1,1.45]})}] }} />
-                    {/* Pulse 2 */}
-                    <Animated.View pointerEvents="none" style={{ position: "absolute", left: wrapSz/2-goSz/2, top: wrapSz/2-goSz/2, width: goSz, height: goSz, borderRadius: goSz/2, borderWidth: 1.2, borderColor: "#ffffff", opacity: goPulse2.interpolate({ inputRange:[0,0.15,1], outputRange:[0,0.22,0] }), transform:[{scale: goPulse2.interpolate({inputRange:[0,1],outputRange:[1,1.6]})}] }} />
-                    {/* Satellites */}
-                    {INTENTS.map((it, idx) => {
-                      const angle = -Math.PI / 2 + (idx * 2 * Math.PI) / INTENTS.length;
-                      const sel = it.key === fsActivityKey;
-                      const lx = wrapSz / 2 + Math.cos(angle) * orbR - btnSz / 2;
-                      const ly = wrapSz / 2 + Math.sin(angle) * orbR - btnSz / 2;
-                      return (
-                        <View key={it.key} style={{ position: "absolute", left: lx, top: ly }}>
-                          <PremiumOrbitBtn
-                            color={it.color}
-                            selected={sel}
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                              setFsActivityKey(it.key);
-                              setFsCustomLabel("");
-                              setFsOrbitalOpen(false);
-                            }}
-                            icon={it.icon as keyof typeof Feather.glyphMap}
-                            isComida={it.key === "comida"}
-                            label={it.label}
-                            size={btnSz}
-                            iconSize={iconSz}
-                            labelSize={labelSz}
-                            labelSpacing={0.5}
-                            paddingH={4}
-                          />
-                        </View>
-                      );
-                    })}
-                    {/* Center GO circle */}
-                    <View style={{ position: "absolute", left: wrapSz/2-goSz/2, top: wrapSz/2-goSz/2, width: goSz, height: goSz, borderRadius: goSz/2, backgroundColor: activeC, borderWidth: 2, borderColor: "#ffffff", alignItems: "center", justifyContent: "center", shadowColor: activeC, shadowOpacity: 0.7, shadowRadius: 22, shadowOffset: {width:0,height:0}, elevation: 12 }}>
-                      <Text style={{ fontSize: Math.round(goSz * 0.34), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 4, color: "#ffffff" }} {...noTranslate}>GO</Text>
-                    </View>
-                  </View>
-                </Pressable>
-              </Pressable>
-            );
-          })()}
-        </KeyboardAvoidingView>
-      </Modal>
+      {!calendarTaskContextRef.current && renderFieldSelector(false)}
 
       {/* ── QUICK DETAIL — el flujo ahora abre los componentes reales (contacto/cal/mapa) ── */}
       {/* Ver qdFlowAdvance() + intercepts en saveContact/saveCal/saveMap */}
@@ -26216,7 +25890,7 @@ function HomeScreenContent() {
           elevation: 24,
         };
         const allResults = goSearchBusinesses
-          .filter(b => !goSearchQuery || b.name.toLowerCase().includes(goSearchQuery.toLowerCase()))
+          .filter(b => !!demoBookingRepository || !goSearchQuery || b.name.toLowerCase().includes(goSearchQuery.toLowerCase()))
           .map(b => ({
             id: b.id,
             name: b.name,
@@ -26286,6 +25960,12 @@ function HomeScreenContent() {
                         setReservasOrbitalOpen(false);
                         setReservasOrbitalCat(null);
                         setReservasOrbitalPage(0);
+                        if (demoBookingRepository) {
+                          setDemoInitialBusinessId(provider.id);
+                          setCalOpen(true);
+                          setShowBookingFromCal(true);
+                          return;
+                        }
                         if (sub) {
                           setGoProveedorData({
                             name: provider.name,
@@ -26426,21 +26106,13 @@ function HomeScreenContent() {
           setGoProveedorOpen(false);
           setGoProveedorData(null);
           setDateISODraft(dateISO);
-          // Recarga goLog desde AsyncStorage para que la "Próxima visita" refleje
-          // la nueva reserva sin necesidad de reiniciar la app.
-          try {
-            const raw = await AsyncStorage.getItem("go_log_v1");
-            if (raw) {
-              const log = JSON.parse(raw);
-              setGoLog(log);
-            }
-          } catch { /* best-effort */ }
+          // The existing booking bridge publishes its committed projection.
           setCalOpen(true);
         }}
       />
 
       {/* ── EMPRESA GO — Arquitectura económica completa ──────────────── */}
-      {businessAccess.allowed && <EmpresaPanel
+      {businessAccess.allowed && !goView.isOwner && goView.view === "BUSINESS" && !adminAccess.checking && <EmpresaPanel
         visible={empresaOpen}
         initialModulo={empresaModulo as any}
         onClose={() => { setEmpresaOpen(false); setEmpresaModulo("home"); }}
@@ -26464,10 +26136,15 @@ function HomeScreenContent() {
         }}
       />}
 
+      {goView.isBusinessPreview && <GoBusinessPreviewProvider>
+        <EmpresaPanel key={ownerDemo.demo?.businessId} visible={empresaOpen} previewReadOnly initialModulo="home"
+          onClose={() => setEmpresaOpenState(false)} onOpenContext={openOwnerContextSelector} />
+      </GoBusinessPreviewProvider>}
+
       {/* ── ACTIVACIÓN COBROS — se renderiza aquí (nivel raíz) para evitar
           el problema de Modales anidados en iOS/Expo 54. Se muestra tras
           completar el wizard de 8 pasos de EmpresaConfigScreen. ── */}
-      {businessAccess.allowed && <ActivacionCobrosScreen
+      {businessAccess.allowed && !goView.isOwner && goView.view === "BUSINESS" && !adminAccess.checking && <ActivacionCobrosScreen
         visible={activacionCobrosOpen}
         initialScreen={activacionInitialScreen}
         onClose={() => {
@@ -26481,7 +26158,7 @@ function HomeScreenContent() {
 
 
       {/* HUMANITY follows the upper-left of the orbit; label and hit area share the collision bounds. */}
-      {!anyOverlayOpen && !rutasMode && kbHeight === 0 && orbitSecondLevel === null && humanityPlacement && (
+      {fullLandingArchitecture && !anyOverlayOpen && !rutasMode && kbHeight === 0 && orbitSecondLevel === null && humanityPlacement && (
         <TouchableOpacity
           activeOpacity={0.82}
           onPress={() => {
@@ -26565,7 +26242,7 @@ function HomeScreenContent() {
 
       {/* ── HUMANITY GO — módulos globales del sistema ──────────────── */}
       <HumanityScreen
-        visible={humanityOpen}
+        visible={fullLandingArchitecture && humanityOpen}
         onClose={() => setHumanityOpen(false)}
       />
 
@@ -26800,7 +26477,558 @@ function HomeScreenContent() {
 
     </View>
     </GestureDetector>
+    {/* The account modal owns its touches; Landing gestures stay behind it. */}
+    <LoginRegisterPanel
+      visible={goAuthOpen}
+      onClose={() => {
+        if (userAccountType !== null) setGoAuthOpen(false);
+      }}
+      userAccountType={userAccountType}
+      onSetAccountType={commitAccountType}
+      onSwitchContext={() => { if (goView.isOwner || adminAccess.checking) return; setGoAuthOpen(false); setActiveMode(isBusinessMode ? "USER" : "BUSINESS"); }}
+      onOpenPerfil={() => { setGoAuthOpen(false); setCuentaOpen(true); }}
+      onOpenEmpresa={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
+      verification={{ ...verification, status: businessAccess.snapshot?.status === "verificada" ? "verified"
+        : businessAccess.snapshot?.status === "rechazada" ? "rejected"
+        : businessAccess.snapshot?.status === "pendiente_verificacion" ? "pending" : "none" }}
+      onOpenVerificacion={() => { setGoAuthOpen(false); setEmpresaOpen(true); }}
+      onOpenAdmin={handleOpenAdmin}
+      onSelectOwnerView={handleSelectOwnerView}
+    />
+    </>
   );
+
+  // Reuse the same task form inside Calendar or in its original standalone modal.
+  function renderFieldSelector(embedded: boolean) {
+    const content = (
+      <KeyboardAvoidingView
+          style={{ flex: 1, justifyContent: "flex-end" }}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+        >
+          <Pressable
+            style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: embedded ? "rgba(0,0,0,0.42)" : "transparent" }}
+            onPress={closeFieldSelectorPanel}
+          >
+            {!embedded && (
+              <View pointerEvents="none" style={{ opacity: 0.78 }}>
+                {renderGoOrbit(GO_SIZE_4, intent)}
+              </View>
+            )}
+            {embedded && (
+              <View testID="calendar-task-closes" style={{ position: "absolute", right: Math.max(insets.right + 14, 14), bottom: 10, gap: 8 }}>
+                <GoCloseButton level="panel" onPress={closeFieldSelectorPanel} accessibilityLabel={lang === "en" ? "Close new task" : "Cerrar Nueva tarea"} />
+                <GoCloseButton level="container" onPress={exitCalendarContainer} accessibilityLabel={lang === "en" ? "Exit Calendar" : "Salir de Calendario"} />
+              </View>
+            )}
+          </Pressable>
+          <Pressable onPress={(e) => { e.stopPropagation(); Keyboard.dismiss(); }}>
+            <View
+              style={{
+                backgroundColor: "#131316",
+                borderTopLeftRadius: 24,
+                borderTopRightRadius: 24,
+                paddingHorizontal: 18,
+                paddingTop: fsKbVisible ? 8 : 10,
+                paddingBottom: fsKbVisible ? 8 : Math.max(paddingBottom + 12, 28),
+              }}
+            >
+              {/* Header */}
+              {(() => {
+                const meta: Record<string, { label: string; icon: keyof typeof Feather.glyphMap; color: string }> = {
+                  GO_INTERNO:   { label: "GO INTERNO",   icon: "zap",       color: "#3b82f6" },
+                  GO_EXTERNO:   { label: "GO EXTERNO",   icon: "send",      color: "#10b981" },
+                  NOTA_INTERNA: { label: "INTERNAL TASK", icon: "file-text", color: "#7c3aed" },
+                  NOTA_EXTERNA: { label: "EXTERNAL TASK", icon: "file-text", color: "#f97316" },
+                };
+                const m = meta[fieldSelectorKind] ?? { label: "NEW", icon: "plus" as any, color: "#ffffff" };
+                return (
+                  <View style={{ flexDirection: "row", alignItems: "center", marginBottom: fsKbVisible ? 6 : 10 }}>
+                    <View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: m.color + "22", alignItems: "center", justifyContent: "center", marginRight: 9 }}>
+                      <Feather name={m.icon} size={14} color={m.color} />
+                    </View>
+                    <Text style={{ color: "#ffffff", fontSize: 13, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1 }}>{m.label}</Text>
+                  </View>
+                );
+              })()}
+
+              {/* DETALLES — campo principal; solo visible cuando no hay teclado o cuando este campo está enfocado */}
+              {(!fsKbVisible || fsFocusedField === "detail") && (
+                <TextInput
+                  value={fieldSelectorDetail}
+                  onChangeText={setFieldSelectorDetail}
+                  onFocus={() => setFsFocusedField("detail")}
+                  onBlur={() => setFsFocusedField(null)}
+                  placeholder={t('placeholder_task_details')}
+                  placeholderTextColor="rgba(255,255,255,0.38)"
+                  multiline
+                  scrollEnabled={false}
+                  textAlignVertical="top"
+                  style={{
+                    color: "#ffffff",
+                    fontSize: 13,
+                    lineHeight: 19,
+                    backgroundColor: "#1e1e22",
+                    borderRadius: 12,
+                    borderWidth: 1.5,
+                    borderColor: fieldSelectorDetail.trim() ? "rgba(167,139,250,0.70)" : "rgba(255,255,255,0.18)",
+                    paddingHorizontal: 14,
+                    paddingTop: 8,
+                    paddingBottom: 8,
+                    marginBottom: 8,
+                    minHeight: 40,
+                  }}
+                />
+              )}
+
+              {/* TÍTULO — solo visible cuando no hay teclado o cuando este campo está enfocado */}
+              {(!fsKbVisible || fsFocusedField === "title") && (
+                <>
+                  <Text style={{ color: "#ffffff", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.4, marginBottom: 4, marginLeft: 2 }}>
+                    TÍTULO
+                  </Text>
+                  <TextInput
+                    value={fieldSelectorText}
+                    onChangeText={setFieldSelectorText}
+                    onFocus={() => setFsFocusedField("title")}
+                    onBlur={() => setFsFocusedField(null)}
+                    placeholder={t('placeholder_operational')}
+                    placeholderTextColor="rgba(255,255,255,0.40)"
+                    maxLength={16}
+                    returnKeyType="done"
+                    numberOfLines={1}
+                    multiline={false}
+                    style={{
+                      color: "#ffffff",
+                      fontSize: 16,
+                      fontWeight: "700",
+                      backgroundColor: "#1e1e22",
+                      borderRadius: 12,
+                      borderWidth: 1.5,
+                      borderColor: fieldSelectorText.trim() ? "rgba(96,165,250,0.65)" : "rgba(255,255,255,0.18)",
+                      paddingHorizontal: 14,
+                      paddingTop: 10,
+                      paddingBottom: 10,
+                      marginBottom: 12,
+                    }}
+                  />
+                </>
+              )}
+
+
+              {/* UBICACIÓN — fila inline para todos los tipos (oculta mientras el teclado está abierto) */}
+              {!fsKbVisible && (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  {/* Botón MAPA — abre Google Maps para buscar */}
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      Haptics.selectionAsync().catch(() => {});
+                      const query = fsPlaceDraft.trim()
+                        ? encodeURIComponent(fsPlaceDraft.trim())
+                        : "";
+                      const url = query
+                        ? `https://www.google.com/maps/search/?api=1&query=${query}`
+                        : "https://www.google.com/maps/";
+                      Linking.openURL(url).catch(() => showToast(t('toast_maps_error'), "error"));
+                    }}
+                    style={[
+                      styles.locIconBtn,
+                      fsPlaceDraft.trim() ? { backgroundColor: "rgba(96,165,250,0.18)", borderColor: "rgba(96,165,250,0.60)" } : null,
+                    ]}
+                  >
+                    <Feather name="map" size={20} color="#ffffff" />
+                  </TouchableOpacity>
+
+                  {/* Input BUSCAR */}
+                  <View style={[
+                    styles.locInputWrap,
+                    fsPlaceDraft.trim() ? { backgroundColor: "rgba(96,165,250,0.12)", borderColor: "rgba(96,165,250,0.50)" } : null,
+                  ]}>
+                    <Feather name="search" size={14} color="rgba(255,255,255,0.75)" style={{ marginRight: 6 }} />
+                    <TextInput
+                      value={fsPlaceDraft}
+                      onChangeText={(v) => {
+                        setFsPlaceDraft(v);
+                        setFsFilledValues(prev => ({ ...prev, place: v || undefined }));
+                        qdCapPlaceRef.current = v;
+                      }}
+                      placeholder={t('placeholder_search')}
+                      placeholderTextColor="rgba(255,255,255,0.65)"
+                      style={styles.locInput}
+                      returnKeyType="search"
+                    />
+                    {!!fsPlaceDraft && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setFsPlaceDraft("");
+                          setFsFilledValues(prev => ({ ...prev, place: undefined }));
+                          qdCapPlaceRef.current = "";
+                          Haptics.selectionAsync().catch(() => {});
+                        }}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        style={{ paddingHorizontal: 4 }}
+                      >
+                        <Feather name="x" size={16} color="#ffffffcc" />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Botón AQUÍ — GPS aislado, no toca estado del Landing */}
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    disabled={fsLocating}
+                    onPress={async () => {
+                      try {
+                        setFsLocating(true);
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                        const perms = await Location.getForegroundPermissionsAsync();
+                        let status = perms.status;
+                        if (status !== "granted") {
+                          if (!perms.canAskAgain) { showToast(t('toast_location_denied')); return; }
+                          const req = await Location.requestForegroundPermissionsAsync();
+                          status = req.status;
+                          if (status !== "granted") { showToast(t('toast_location_denied')); return; }
+                        }
+                        let c: { lat: number; lng: number } | null = null;
+                        try {
+                          const last = await Location.getLastKnownPositionAsync({ maxAge: 1000 * 60 * 30 });
+                          if (last?.coords) c = { lat: last.coords.latitude, lng: last.coords.longitude };
+                        } catch {}
+                        if (!c) {
+                          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                          c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                        }
+                        const text = await reverseGeocodeSafe(c);
+                        setFsPlaceDraft(text);
+                        setFsFilledValues(prev => ({ ...prev, place: text }));
+                        qdCapPlaceRef.current = text;
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                      } catch {
+                        showToast(t('toast_location_error'), "error");
+                      } finally {
+                        setFsLocating(false);
+                      }
+                    }}
+                    style={[
+                      styles.locAquiBtn,
+                      fsPlaceDraft.trim() ? { backgroundColor: "rgba(96,165,250,0.18)", borderColor: "rgba(96,165,250,0.60)" } : null,
+                    ]}
+                  >
+                    {fsLocating ? (
+                      <ActivityIndicator size="small" color="#ffffff" />
+                    ) : (
+                      <>
+                        <Feather name="navigation" size={14} color="#ffffff" />
+                        <Text style={[styles.locAquiText, { color: "#ffffff" }]}>{t('location_here')}</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* ACTIVIDAD — botones GO y OTRO, solo GO EXTERNO */}
+              {fieldSelectorKind === "GO_EXTERNO" && !fsKbVisible && (() => {
+                const selIntent = INTENTS.find(i => i.key === fsActivityKey);
+                const isCustomAct = fsActivityKey === "custom" && !!fsCustomLabel.trim();
+                const actLabel = isCustomAct ? fsCustomLabel.trim() : (selIntent?.label ?? null);
+                const actColor = isCustomAct ? "#a78bfa" : (selIntent?.color ?? "#10b981");
+                return (
+                  <>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                      {/* GO — abre orbital completo */}
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={() => { Haptics.selectionAsync().catch(() => {}); setFsCustomOpen(false); setFsOrbitalOpen(true); }}
+                        style={{
+                          flexDirection: "row", alignItems: "center", gap: 6,
+                          paddingVertical: 7, paddingHorizontal: 14, borderRadius: 20,
+                          backgroundColor: actLabel ? actColor + "22" : "rgba(16,185,129,0.10)",
+                          borderWidth: 1.5,
+                          borderColor: actLabel ? actColor : "rgba(16,185,129,0.45)",
+                        }}
+                      >
+                        <Text style={{ color: actLabel ? actColor : "#10b981", fontSize: 13, fontWeight: "900", letterSpacing: 2 }}>GO</Text>
+                        {actLabel && !isCustomAct && (
+                          <Text style={{ color: actColor, fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.8 }}>{actLabel.toUpperCase()}</Text>
+                        )}
+                      </TouchableOpacity>
+                      {/* OTRO — abre input personalizado */}
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={() => { Haptics.selectionAsync().catch(() => {}); setFsOrbitalOpen(false); setFsCustomOpen(v => !v); }}
+                        style={{
+                          paddingVertical: 7, paddingHorizontal: 14, borderRadius: 20,
+                          backgroundColor: isCustomAct ? "rgba(167,139,250,0.14)" : "rgba(255,255,255,0.07)",
+                          borderWidth: 1.5,
+                          borderColor: isCustomAct ? "#a78bfa" : "rgba(255,255,255,0.18)",
+                        }}
+                      >
+                        <Text style={{ color: isCustomAct ? "#a78bfa" : "rgba(255,255,255,0.50)", fontSize: 11, fontWeight: "700", letterSpacing: 0.6 }}>
+                          {isCustomAct ? fsCustomLabel.toUpperCase() : "OTHER"}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    {/* OTRO — input personalizado */}
+                    {fsCustomOpen && (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                        <TextInput
+                          value={fsCustomLabel}
+                          onChangeText={setFsCustomLabel}
+                          placeholder={t('placeholder_specialty')}
+                          placeholderTextColor="rgba(255,255,255,0.35)"
+                          autoFocus
+                          returnKeyType="done"
+                          onSubmitEditing={() => { if (fsCustomLabel.trim()) setFsActivityKey("custom"); setFsCustomOpen(false); }}
+                          style={{
+                            flex: 1, color: "#ffffff", fontSize: 13,
+                            backgroundColor: "#1e1e22", borderRadius: 12, borderWidth: 1.5,
+                            borderColor: "rgba(167,139,250,0.50)", paddingHorizontal: 12, paddingVertical: 8,
+                          }}
+                        />
+                        <TouchableOpacity
+                          onPress={() => { Haptics.selectionAsync().catch(() => {}); if (fsCustomLabel.trim()) setFsActivityKey("custom"); setFsCustomOpen(false); }}
+                          style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#a78bfa", alignItems: "center", justifyContent: "center" }}
+                        >
+                          <Feather name="check" size={15} color="#ffffff" />
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* Fila inferior: GUARDAR · FECHA/HORA · ↓ — todos los tipos */}
+              {!fsKbVisible && (() => {
+                const anyFilled = Boolean(fsFilledValues.date || fsFilledValues.time);
+                const openFechaHora = () => {
+                  Haptics.selectionAsync().catch(() => {});
+                  qdFlowActiveRef.current = true;
+                  qdCapContactNameRef.current = fsFilledValues.contactName || "";
+                  qdCapPhoneRef.current       = fsFilledValues.phone       || "";
+                  qdCapDateRef.current        = fsFilledValues.date        || "";
+                  qdCapDateISORef.current     = fsFilledValues.dateISO     || "";
+                  qdCapTimeRef.current        = fsFilledValues.time        || "";
+                  qdCapPlaceRef.current       = fsFilledValues.place       || "";
+                  setFieldSelectorOpen(false);
+                  setCalOpen(true);
+                  calFlow.open({
+                    startAt: "date",
+                    initialDateISO: fsFilledValues.dateISO || formatISODate(getToday()),
+                    initialDateDraft: fsFilledValues.date || "",
+                    initialTime: fsFilledValues.time || "",
+                    onSave: _handleCalFlowSave,
+                    onCancel: () => {
+                      if (calendarTaskContextRef.current) setFieldSelectorOpen(true);
+                      else setCalOpen(false);
+                    },
+                  });
+                };
+                return (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                    {/* GUARDAR — izquierda, menos cómodo; guarda sin fecha/hora */}
+                    <TouchableOpacity
+                      onPress={async () => {
+                        const slotTask = !!calendarSlotDraftRef.current;
+                        if (fieldSelectorSaveBusyRef.current) return;
+                        if (slotTask) fieldSelectorSaveBusyRef.current = true;
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        if (qdReturnTimerRef.current) {
+                          clearTimeout(qdReturnTimerRef.current);
+                          qdReturnTimerRef.current = null;
+                        }
+                        qdFlowActiveRef.current = false;
+                        const kind = fieldSelectorKind;
+                        const text = fieldSelectorText.trim();
+                        const detail = fieldSelectorDetail;
+                        const contact = fsFilledValues.contactName || "";
+                        const phone   = fsFilledValues.phone       || "";
+                        const date    = fsFilledValues.date        || "";
+                        const dateISO = fsFilledValues.dateISO     || "";
+                        const time    = fsFilledValues.time        || "";
+                        const place   = fsFilledValues.place       || "";
+                        if (slotTask) {
+                          calendarSlotSavingRef.current = true;
+                          try {
+                            await createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
+                          } catch (error) {
+                            fieldSelectorSaveBusyRef.current = false;
+                            calendarSlotSavingRef.current = false;
+                            showToast(error instanceof Error ? error.message : String(error), "error");
+                            return;
+                          }
+                        }
+                        setFsFilledValues({});
+                        setFsLocationExpanded(false);
+                        setFsActivityKey(null);
+                        setFsOrbitalOpen(false);
+                        setFsCustomOpen(false);
+                        setFsCustomLabel("");
+                        setFieldSelectorOpen(false);
+                        setFieldSelectorText("");
+                        setFieldSelectorDetail("");
+                        if (!slotTask) void createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
+                        const origin = qdOriginContextRef.current;
+                        qdOriginContextRef.current = { listOpen: false, notesOpen: false, agendaOpOpen: false };
+                        if (origin.listOpen) setListOpen(true);
+                        if (origin.agendaOpOpen) setAgendaOpOpen(true);
+                        if (slotTask) calendarSlotSavingRef.current = false;
+                      }}
+                      style={{ paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#6ee7b7", alignItems: "center" }}
+                    >
+                      <Text style={{ color: "#000000", fontSize: 11, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>SAVE</Text>
+                    </TouchableOpacity>
+                    {/* FECHA / HORA — centro/derecha, más cómodo */}
+                    <TouchableOpacity
+                      onPress={openFechaHora}
+                      style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 9, borderRadius: 10, backgroundColor: anyFilled ? "rgba(34,197,94,0.15)" : "#1e1e22", borderWidth: 1.5, borderColor: anyFilled ? "#6ee7b7" : "rgba(255,255,255,0.18)" }}
+                    >
+                      <Feather name={anyFilled ? "check" : "calendar"} size={13} color={anyFilled ? "#6ee7b7" : "#ffffff"} />
+                      <Text style={{ color: anyFilled ? "#6ee7b7" : "#ffffff", fontSize: 12, fontWeight: "700" }}>{t('date_time_label')}</Text>
+                    </TouchableOpacity>
+                    {/* CONTACTO circular — solo TAREA EXTERNA y GO EXTERNO */}
+                    {(fieldSelectorKind === "NOTA_EXTERNA" || fieldSelectorKind === "GO_EXTERNO") && (() => {
+                      const contactFilled = Boolean(fsFilledValues.contactName || fsFilledValues.phone);
+                      return (
+                        <TouchableOpacity
+                          onPress={async () => {
+                            try {
+                              Haptics.selectionAsync().catch(() => {});
+                              const { status } = await Contacts.requestPermissionsAsync();
+                              if (status !== "granted") { showToast(t('toast_contacts_permission_denied')); return; }
+                              const picked = await Contacts.presentContactPickerAsync();
+                              if (!picked) return;
+                              const nameStr = (picked.name || "").trim();
+                              const telStr = (picked.phoneNumbers && picked.phoneNumbers[0]?.number) || "";
+                              const cleanTel = String(telStr).replace(/[^\d+]/g, "");
+                              setFsFilledValues(prev => ({ ...prev, contactName: nameStr || undefined, phone: cleanTel || undefined }));
+                              await persistRecent(nameStr, cleanTel).catch(() => {});
+                              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                              showToast(t('toast_contact').replace('__NAME__', nameStr || cleanTel || t('word_contact')));
+                            } catch {
+                              showToast(t('toast_contacts_error'), "error");
+                            }
+                          }}
+                          hitSlop={6}
+                          style={{
+                            width: 38, height: 38, borderRadius: 19,
+                            backgroundColor: contactFilled ? "rgba(34,197,94,0.18)" : "#1e1e22",
+                            borderWidth: 1.5,
+                            borderColor: contactFilled ? "#6ee7b7" : "rgba(255,255,255,0.16)",
+                            alignItems: "center", justifyContent: "center",
+                          }}
+                        >
+                          <Feather name={contactFilled ? "check" : "user"} size={16} color={contactFilled ? "#6ee7b7" : "rgba(255,255,255,0.75)"} />
+                        </TouchableOpacity>
+                      );
+                    })()}
+                    {/* ↓ — bajar panel */}
+{!embedded && (
+                    <TouchableOpacity
+                      onPress={() => { setFieldSelectorOpen(false); setFsLocationExpanded(false); setFsPlaceDraft(""); }}
+                      hitSlop={8}
+                      style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: "#1e1e22", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", alignItems: "center", justifyContent: "center" }}
+                    >
+                      <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.45)" />
+                    </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })()}
+
+              {/* GUARDAR — cierra teclado; visible cuando el teclado está abierto */}
+              {fsKbVisible && (
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    Keyboard.dismiss();
+                  }}
+                  style={{
+                    alignSelf: "flex-end",
+                    marginTop: 6,
+                    paddingVertical: 9,
+                    paddingHorizontal: 18,
+                    borderRadius: 10,
+                    backgroundColor: "#6ee7b7",
+                  }}
+                >
+                  <Text style={{ color: "#000000", fontSize: 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.8 }}>SAVE</Text>
+                </TouchableOpacity>
+              )}
+
+            </View>
+          </Pressable>
+
+          {/* ── ORBITAL COMPLETO — aparece al pulsar GO, flota sobre el panel ── */}
+          {fsOrbitalOpen && !fsKbVisible && (() => {
+            const goSz  = 80;
+            const orbR  = 68;
+            const btnSz = 44;
+            const wrapSz = (orbR + btnSz / 2) * 2 + 12; // 192
+            const iconSz  = Math.round(btnSz * 0.34);
+            const labelSz = Math.max(7, Math.round(btnSz * 0.155));
+            const activeC = INTENTS.find(i => i.key === fsActivityKey)?.color ?? "#10b981";
+            return (
+              <Pressable
+                style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "flex-end", paddingBottom: 260 }}
+                onPress={() => setFsOrbitalOpen(false)}
+              >
+                <Pressable onPress={e => e.stopPropagation()}>
+                  <View style={{ width: wrapSz, height: wrapSz }}>
+                    {/* Breathing glow */}
+                    <Animated.View pointerEvents="none" style={{ position: "absolute", left: wrapSz/2-(goSz+12)/2, top: wrapSz/2-(goSz+12)/2, width: goSz+12, height: goSz+12, borderRadius: (goSz+12)/2, borderWidth: 2.5, borderColor: activeC, opacity: goBreath.interpolate({ inputRange:[0,1], outputRange:[0.18,0.55] }), shadowColor: activeC, shadowOpacity: 0.25, shadowRadius: 6, shadowOffset: {width:0,height:0} }} />
+                    {/* Pulse 1 */}
+                    <Animated.View pointerEvents="none" style={{ position: "absolute", left: wrapSz/2-goSz/2, top: wrapSz/2-goSz/2, width: goSz, height: goSz, borderRadius: goSz/2, borderWidth: 1.5, borderColor: "#ffffff", opacity: goPulse1.interpolate({ inputRange:[0,0.15,1], outputRange:[0,0.30,0] }), transform:[{scale: goPulse1.interpolate({inputRange:[0,1],outputRange:[1,1.45]})}] }} />
+                    {/* Pulse 2 */}
+                    <Animated.View pointerEvents="none" style={{ position: "absolute", left: wrapSz/2-goSz/2, top: wrapSz/2-goSz/2, width: goSz, height: goSz, borderRadius: goSz/2, borderWidth: 1.2, borderColor: "#ffffff", opacity: goPulse2.interpolate({ inputRange:[0,0.15,1], outputRange:[0,0.22,0] }), transform:[{scale: goPulse2.interpolate({inputRange:[0,1],outputRange:[1,1.6]})}] }} />
+                    {/* Satellites */}
+                    {INTENTS.map((it, idx) => {
+                      const angle = -Math.PI / 2 + (idx * 2 * Math.PI) / INTENTS.length;
+                      const sel = it.key === fsActivityKey;
+                      const lx = wrapSz / 2 + Math.cos(angle) * orbR - btnSz / 2;
+                      const ly = wrapSz / 2 + Math.sin(angle) * orbR - btnSz / 2;
+                      return (
+                        <View key={it.key} style={{ position: "absolute", left: lx, top: ly }}>
+                          <PremiumOrbitBtn
+                            color={it.color}
+                            selected={sel}
+                            onPress={() => {
+                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                              setFsActivityKey(it.key);
+                              setFsCustomLabel("");
+                              setFsOrbitalOpen(false);
+                            }}
+                            icon={it.icon as keyof typeof Feather.glyphMap}
+                            isComida={it.key === "comida"}
+                            label={it.label}
+                            size={btnSz}
+                            iconSize={iconSz}
+                            labelSize={labelSz}
+                            labelSpacing={0.5}
+                            paddingH={4}
+                          />
+                        </View>
+                      );
+                    })}
+                    {/* Center GO circle */}
+                    <View style={{ position: "absolute", left: wrapSz/2-goSz/2, top: wrapSz/2-goSz/2, width: goSz, height: goSz, borderRadius: goSz/2, backgroundColor: activeC, borderWidth: 2, borderColor: "#ffffff", alignItems: "center", justifyContent: "center", shadowColor: activeC, shadowOpacity: 0.7, shadowRadius: 22, shadowOffset: {width:0,height:0}, elevation: 12 }}>
+                      <Text style={{ fontSize: Math.round(goSz * 0.34), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 4, color: "#ffffff" }} {...noTranslate}>GO</Text>
+                    </View>
+                  </View>
+                </Pressable>
+              </Pressable>
+            );
+          })()}
+        </KeyboardAvoidingView>
+    );
+    if (embedded) {
+      return <View testID="calendar-task-layer" style={{ ...StyleSheet.absoluteFill, zIndex: 200 }}>{content}</View>;
+    }
+    return (
+      <Modal visible={fieldSelectorOpen} transparent animationType="slide" onRequestClose={closeFieldSelectorPanel} statusBarTranslucent>
+        {content}
+      </Modal>
+    );
+  }
 }
 
 function SideIcon({

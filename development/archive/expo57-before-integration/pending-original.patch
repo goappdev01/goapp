@@ -1,0 +1,1492 @@
+diff --git a/artifacts/api-server/src/routes/supabase.ts b/artifacts/api-server/src/routes/supabase.ts
+index e69c849..e9b689c 100644
+--- a/artifacts/api-server/src/routes/supabase.ts
++++ b/artifacts/api-server/src/routes/supabase.ts
+@@ -3,6 +3,18 @@ import { bearerHeader, supabaseRequest } from "../lib/supabase";
+ 
+ const router: IRouter = Router();
+ 
++type AuthPayload = {
++  access_token?: unknown;
++  refresh_token?: unknown;
++  expires_at?: unknown;
++  expires_in?: unknown;
++  user?: { id?: unknown };
++  error_code?: unknown;
++  code?: unknown;
++  msg?: unknown;
++  message?: unknown;
++};
++
+ router.post("/auth/register", async (req: Request, res: Response) => {
+   const { email, password, full_name, role } = req.body ?? {};
+   if (typeof email !== "string" || typeof password !== "string" || password.length < 8) {
+@@ -37,6 +49,39 @@ router.post("/auth/login", async (req: Request, res: Response) => {
+   res.status(response.status).type("application/json").send(body);
+ });
+ 
++// Official GoTrue refresh grant. Never log or place refresh tokens in URLs.
++router.post("/auth/refresh", async (req: Request, res: Response) => {
++  res.setHeader("Cache-Control", "no-store");
++  const token = req.body?.refresh_token;
++  if (typeof token !== "string" || !token.trim()) {
++    res.status(400).json({ code: "REFRESH_TOKEN_REQUIRED", error: "Refresh token is required" });
++    return;
++  }
++  const response = await supabaseRequest("/auth/v1/token?grant_type=refresh_token", {
++    method: "POST", headers: { "Content-Type": "application/json" },
++    body: JSON.stringify({ refresh_token: token }),
++  });
++  const payload = await response.json().catch(() => null) as AuthPayload | null;
++  if (!response.ok) {
++    const code = payload?.error_code ?? payload?.code;
++    const message = String(payload?.msg ?? payload?.message ?? "").toLowerCase();
++    const irrecoverable = [400, 401].includes(response.status) &&
++      (["refresh_token_not_found", "refresh_token_already_used", "session_not_found", "user_not_found", "invalid_grant"].includes(String(code))
++        || message.includes("invalid refresh token") || message.includes("refresh token not found"));
++    res.status(irrecoverable ? 401 : response.status).json({
++      code: irrecoverable ? "SESSION_UNRECOVERABLE" : "SESSION_REFRESH_FAILED",
++      error: irrecoverable ? "Session can no longer be refreshed" : "Session refresh unavailable",
++    });
++    return;
++  }
++  if (!payload?.access_token || !payload?.refresh_token || !payload?.user?.id) {
++    res.status(502).json({ code: "SESSION_REFRESH_FAILED", error: "Invalid session response" });
++    return;
++  }
++  res.json({ access_token: payload.access_token, refresh_token: payload.refresh_token,
++    expires_at: payload.expires_at, expires_in: payload.expires_in, user: payload.user });
++});
++
+ router.post("/auth/recover", async (req: Request, res: Response) => {
+   const { email } = req.body ?? {};
+   if (typeof email !== "string" || !email.includes("@")) {
+@@ -54,9 +99,10 @@ router.post("/auth/recover", async (req: Request, res: Response) => {
+ });
+ 
+ router.get("/auth/me", async (req: Request, res: Response) => {
++  res.setHeader("Cache-Control", "no-store");
+   const authorization = req.header("authorization");
+   if (!authorization?.match(/^Bearer \S+$/)) {
+-    res.status(401).json({ error: "Authorization bearer token is required" });
++    res.status(401).json({ code: "AUTH_TOKEN_INVALID", error: "Authorization bearer token is required" });
+     return;
+   }
+ 
+@@ -65,7 +111,7 @@ router.get("/auth/me", async (req: Request, res: Response) => {
+   });
+   const body = await response.text();
+   if (!response.ok) {
+-    res.status(response.status).type("application/json").send(body);
++    res.status(response.status).json({ code: response.status === 401 ? "AUTH_TOKEN_INVALID" : "AUTH_USER_CHECK_FAILED", error: "Could not validate user" });
+     return;
+   }
+ 
+@@ -85,6 +131,7 @@ router.get("/auth/me", async (req: Request, res: Response) => {
+   });
+   const profiles = await profileResponse.json().catch(() => []);
+   res.status(profileResponse.ok ? 200 : profileResponse.status).json({
++    ...(!profileResponse.ok ? { code: "PROFILE_ACCESS_FAILED" } : {}),
+     user,
+     profile: Array.isArray(profiles) ? (profiles[0] ?? null) : null,
+   });
+@@ -279,4 +326,4 @@ router.patch("/bookings/:bookingId/cancel", async (req: Request, res: Response)
+   res.json(body);
+ });
+ 
+-export default router;
+\ No newline at end of file
++export default router;
+diff --git a/artifacts/api-server/tests/mobile-sync.test.mjs b/artifacts/api-server/tests/mobile-sync.test.mjs
+index 1d99f87..62a753b 100644
+--- a/artifacts/api-server/tests/mobile-sync.test.mjs
++++ b/artifacts/api-server/tests/mobile-sync.test.mjs
+@@ -9,15 +9,16 @@ import { pathToFileURL } from 'node:url';
+ test('mobile saves cloud records, preserves form fields, archives and reports failures', async () => {
+  const dir=await mkdtemp(path.join(tmpdir(),'go-mobile-sync-'));
+  const outfile=path.join(dir,'booking.mjs');
+- const storage=new Map();globalThis.__storageMock={getItem:async k=>storage.get(k)??null,setItem:async(k,v)=>storage.set(k,v)};
++ const storage=new Map();globalThis.__storageMock={getItem:async k=>storage.get(k)??null,setItem:async(k,v)=>storage.set(k,v),multiRemove:async keys=>{for(const k of keys)storage.delete(k);}};
+  await build({entryPoints:['../go-app-mobile/data/booking.ts'],outfile,bundle:true,platform:'node',format:'esm',plugins:[{name:'storage-mock',setup(b){b.onResolve({filter:/^@react-native-async-storage\/async-storage$/},()=>({path:'storage',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'export default globalThis.__storageMock;',loader:'js'}));}}]});
+  const api=await import(pathToFileURL(outfile));const original=globalThis.fetch;
+  const user='11111111-1111-4111-8111-111111111111',business='22222222-2222-4222-8222-222222222222',service='33333333-3333-4333-8333-333333333333';
+  storage.set('go_supabase_session_v1',JSON.stringify({access_token:'test',user:{id:user}}));
+  let fail=false;let serviceRow;let writes=0,maxWrites=0;const requests=[];
+  globalThis.fetch=async(url,init)=>{
++  assert.equal(new Headers(init.headers).get('Authorization'),'Bearer test');
++  if(String(url).endsWith('/supabase/auth/me'))return Response.json({user:{id:user}});
+   const route=String(url).replace(/^.*\/supabase\/manage/,'');requests.push({route,init});
+-  assert.equal(init.headers.get('Authorization'),'Bearer test');
+   if(fail)return Response.json({error:'Sin conexión al servicio'},{status:503});
+   const body=init.body?JSON.parse(init.body):null;
+   if(init.method==='POST'||init.method==='PATCH'){
+diff --git a/artifacts/go-app-mobile/app/index.tsx b/artifacts/go-app-mobile/app/index.tsx
+index b26b261..54a0dfb 100644
+--- a/artifacts/go-app-mobile/app/index.tsx
++++ b/artifacts/go-app-mobile/app/index.tsx
+@@ -1,5 +1,7 @@
+ import type { GoEntry } from "@/components/AgendaOperativa";
+-import { notifySessionChanged } from "@/lib/sessionEvents";
++import { onSessionChanged } from "@/lib/sessionEvents";
++import { mobileSession } from "@/lib/mobileSession";
++import { AppState } from "react-native";
+ import { Feather, Ionicons } from "@expo/vector-icons";
+ import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
+ import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
+@@ -82,6 +84,11 @@ import { HumanityScreen } from "@/components/HumanityScreen";
+ import { ResiduosPanel } from "@/components/ResiduosPanel";
+ import { PerfilPanel } from "@/components/perfil/PerfilPanel";
+ import { HerramientasPanel } from "@/components/herramientas/HerramientasPanel";
++import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
++import { LandingActionSurface } from "@/components/landing/LandingActionSurface";
++import { LandingSatelliteSurface } from "@/components/landing/LandingSatelliteSurface";
++import { useLandingVisualVariant } from "@/hooks/useLandingVisualVariant";
++import { getLandingVisualTheme, getOrbitVisualSurface, getCoreVisualGradient, type LandingVisualTheme } from "@/components/landing/landingVisualThemes";
+ import {
+   LoginRegisterPanel,
+   type AccountRole,
+@@ -1879,6 +1886,7 @@ function PremiumOrbitBtn({
+   fillLogo = false,
+   logoScale,
+   flat = false,
++  visualTheme,
+ }: {
+   color: string;
+   selected: boolean;
+@@ -1906,6 +1914,7 @@ function PremiumOrbitBtn({
+   fillLogo?: boolean;
+   logoScale?: number;
+   flat?: boolean;
++  visualTheme?: LandingVisualTheme;
+ }) {
+   const { t } = useLanguage();
+   const pressAnim = React.useRef(new Animated.Value(1)).current;
+@@ -1950,14 +1959,15 @@ function PremiumOrbitBtn({
+       }
+     : undefined;
+ 
+-  const gradColors: [string, string, string, string] = [
++  const visualSurface = getOrbitVisualSurface(visualTheme, color, selected);
++  const gradColors: [string, string, string, string] = visualSurface?.colors ?? [
+     _orbitLighten(color, 0.28),
+     _orbitLighten(color, 0.06),
+     _orbitDarken(color, 0.14),
+     _orbitDarken(color, 0.32),
+   ];
+-  const iconColor  = flat ? color : "#ffffff";
+-  const labelColor = flat ? color : (labelColorProp ?? "#ffffff");
++  const iconColor  = flat ? color : (visualSurface?.icon ?? "#ffffff");
++  const labelColor = flat ? color : (visualSurface?.label ?? labelColorProp ?? "#ffffff");
+ 
+   // Auto-scale font for long labels so words never break across lines.
+   // Only the specific orbit that has a long word shrinks — others stay normal.
+@@ -1987,10 +1997,10 @@ function PremiumOrbitBtn({
+           : [{ scale: pressAnim }],
+         opacity: dimmed ? 0.22 : 1,
+         shadowColor: "#000",
+-        shadowOpacity: 0.45,
+-        shadowRadius: 10,
++        shadowOpacity: visualTheme?.shadowOpacity ?? 0.45,
++        shadowRadius: visualTheme?.shadowRadius ?? 10,
+         shadowOffset: { width: 0, height: 0 },
+-        elevation: 8,
++        elevation: visualTheme ? 0 : 8,
+       }}
+     >
+       {/* Colored glow */}
+@@ -2001,7 +2011,7 @@ function PremiumOrbitBtn({
+           left: -3, right: -3, top: -3, bottom: -3,
+           borderRadius: 999,
+           shadowColor: color,
+-          shadowOpacity: dimmed ? 0 : selected ? 0.90 : 0.65,
++          shadowOpacity: dimmed ? 0 : visualTheme ? visualTheme.glowOpacity : selected ? 0.90 : 0.65,
+           shadowRadius:  selected ? 18 : 13,
+           shadowOffset: { width: 0, height: 0 },
+           elevation: 0,
+@@ -2048,9 +2058,12 @@ function PremiumOrbitBtn({
+           borderRadius: 999,
+           overflow: "hidden",
+           borderWidth: selected ? 2.5 : 1.5,
+-          borderColor: flat ? color : (selected ? color : "rgba(255,255,255,0.22)"),
++          borderColor: visualTheme ? "transparent" : visualSurface?.border ?? (flat ? color : (selected ? color : "rgba(255,255,255,0.22)")),
+         }}
+       >
++        {visualTheme ? (
++          <LandingActionSurface theme={visualTheme} icon={icon} label={label} size={size} color={color} selected={selected} />
++        ) : (<>
+         {flat ? (
+           <View
+             style={{
+@@ -2300,6 +2313,7 @@ function PremiumOrbitBtn({
+             }}
+           />
+         )}
++        </>)}
+       </TouchableOpacity>
+ 
+       {/* Universal hint — shows during LP hold, max 3 uses */}
+@@ -2584,6 +2598,7 @@ function GoDeepSpaceUpper() {
+ export default function HomeScreen() {
+   const insets = useSafeAreaInsets();
+   const { t, lang, locale, setLang } = useLanguage();
++  const { landingVariant, setLandingVariant } = useLandingVisualVariant();
+ 
+   const localizeLabel = (label: string): string => {
+     const map: Record<string, string> = {
+@@ -2857,78 +2872,44 @@ export default function HomeScreen() {
+     }
+   };
+ 
+-  // Resuelve la autenticación antes de mostrar el Landing. La clave de rol es
+-  // solo información de presentación y nunca autentica por sí sola.
++  // Restore/renew the real saved session through the existing Express API.
+   useEffect(() => {
+     let cancelled = false;
+     const validRoles: AccountRole[] = ["usuario", "empresa", "admin", "trabajador", "proveedor", "partner", "franquicia"];
+     const isValidRole = (value: unknown): value is AccountRole =>
+       typeof value === "string" && validRoles.includes(value as AccountRole);
+-
+-    const requireAuthentication = async () => {
+-      await AsyncStorage.multiRemove(["go_supabase_session_v1", "go_account_type_v1"]);
+-      notifySessionChanged();
+-      if (!cancelled) commitAccountType(null);
+-    };
+-
+-    (async () => {
++    const restore = async (initial = false) => {
+       try {
+-        const [rawSession, rawRole] = await Promise.all([
+-          AsyncStorage.getItem("go_supabase_session_v1"),
+-          AsyncStorage.getItem("go_account_type_v1"),
+-        ]);
+-
+-        let session: { access_token?: string; user?: { user_metadata?: { role?: unknown } } } | null = null;
+-        try { session = rawSession ? JSON.parse(rawSession) : null; } catch { session = null; }
+-
+-        if (!session?.access_token) {
+-          await requireAuthentication();
+-          return;
+-        }
+-
+-        let resolvedRole: AccountRole | null = isValidRole(rawRole)
+-          ? rawRole
+-          : isValidRole(session.user?.user_metadata?.role)
+-            ? session.user.user_metadata.role
+-            : null;
+-
+-        const apiBase = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "")
+-          ?? (process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}/api` : "/api");
+-        const canValidateRemotely = Platform.OS === "web" || !apiBase.startsWith("/");
+-
+-        if (canValidateRemotely) {
+-          try {
+-            const response = await fetch(`${apiBase}/supabase/auth/me`, {
+-              headers: { Authorization: `Bearer ${session.access_token}` },
+-            });
+-            if (response.status === 401 || response.status === 403) {
+-              await requireAuthentication();
+-              return;
+-            }
+-            if (response.ok) {
+-              const payload = await response.json();
+-              if (isValidRole(payload.profile?.role)) resolvedRole = payload.profile.role;
+-            }
+-          } catch {
+-            // Una caída temporal de red no invalida una sesión ya guardada.
+-          }
+-        }
+-
+-        if (!cancelled) {
+-          if (resolvedRole) commitAccountType(resolvedRole);
+-          else setGoAuthOpen(true);
+-        }
+-      } catch {
+-        if (!cancelled) {
++        const result = await mobileSession.recover();
++        if (cancelled || !mobileSession.isCurrent(result)) return;
++        if (!result.session) {
+           setUserAccountType(null);
++          syncModeFromRole(null);
+           setGoAuthOpen(true);
++          return;
+         }
++        const role = isValidRole(result.role) ? result.role
++          : isValidRole(result.session.user?.user_metadata?.role) ? result.session.user.user_metadata.role : null;
++        if (role) {
++          setUserAccountType(role);
++          syncModeFromRole(role);
++          if (initial) setGoAuthOpen(false);
++        } else if (initial) setGoAuthOpen(true);
++      } catch {
++        // Storage/network failure is not evidence for deleting a session.
+       } finally {
+         if (!cancelled) setAuthBootstrapComplete(true);
+       }
+-    })();
+-
+-    return () => { cancelled = true; };
++    };
++    void restore(true);
++    const unsubscribe = onSessionChanged(() => { void restore(); });
++    const foreground = AppState.addEventListener("change", state => {
++      if (state === "active") void restore();
++    });
++    const timer = setInterval(() => {
++      if (AppState.currentState === "active") void restore();
++    }, 60000);
++    return () => { cancelled = true; unsubscribe(); foreground.remove(); clearInterval(timer); };
+   }, []);
+ 
+   // Helper: guarda MI TELÉFONO GO y muestra feedback verde 1 segundo.
+@@ -3281,10 +3262,14 @@ export default function HomeScreen() {
+   // Panel flotante triangular del selector de tamaño GO
+   const [sizePickerOpen, setSizePickerOpen] = useState(false);
+   const [residuosOpen, setResiduosOpen] = useState(false);
+-  // Lateralidad: "right" = diestro (check + chips a la derecha, pegados
+-  // al pulgar); "left" = zurdo (a la izquierda). Persistido en
+-  // AsyncStorage para que se respete entre sesiones.
+-  const [handedness, setHandedness] = useState<"right" | "left">("right");
++  // Posición horizontal del conjunto orbital. Los controles auxiliares
++  // conservan su ergonomía binaria; en CENTRO usan la disposición diestra
++  // mientras GO + órbitas se sitúan realmente en el centro.
++  type GoHorizontalPosition = "right" | "center" | "left";
++  const [goHorizontalPosition, setGoHorizontalPositionState] =
++    useState<GoHorizontalPosition>("right");
++  const handedness: "right" | "left" =
++    goHorizontalPosition === "left" ? "left" : "right";
+   // ── TIPO MENSAJE DE GO ────────────────────────────────────────────
+   // Un GoMessage siempre pertenece a un GO (goId).
+   // deliveryMode = "whatsapp"  → se abrió WhatsApp con el texto
+@@ -3623,8 +3608,6 @@ export default function HomeScreen() {
+ 
+   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+   const posRef = useRef({ x: 0, y: 0 }).current;
+-  const draggingRef = useRef(false);
+-  const [isDragging, setIsDragging] = useState(false);
+   const idleBob = useRef(new Animated.Value(0)).current;
+   const goldBreathAnim = useRef(new Animated.Value(0)).current;
+   const backBtnAnim = useRef(new Animated.Value(0)).current;
+@@ -3773,6 +3756,11 @@ export default function HomeScreen() {
+   // tarjeta de próxima cita. Se resetea a null cuando la tarjeta deja
+   // de renderizarse (ver useEffect que la limpia).
+   const [nextAptBottomY, setNextAptBottomY] = useState<number | null>(null);
++  const [humanityPan, setHumanityPan] = useState({ x: 0, y: 0 });
++  const [humanityObstacles, setHumanityObstacles] = useState<Record<string, HumanityRect>>({});
++  const measureHumanityObstacle = (key: string, rect: HumanityRect) => {
++    setHumanityObstacles(prev => JSON.stringify(prev[key]) === JSON.stringify(rect) ? prev : { ...prev, [key]: rect });
++  };
+   const [nextAptPanelH, setNextAptPanelH] = useState(0);
+   const [nextAptMinimized, setNextAptMinimized] = useState(true);
+   // Altura del panel "Cambios pendientes" — para apilar sobre próxima visita.
+@@ -9963,17 +9951,11 @@ export default function HomeScreen() {
+     });
+     return result;
+   };
+-  // Cambia la lateralidad y la persiste para próximas sesiones.
+-  // El reflejo horizontal del GO se gestiona en un useEffect aparte
+-  // (más abajo) para que el efecto colateral no quede dentro del updater
+-  // de setState (donde React puede invocarlo dos veces en strict mode).
+-  const toggleHandedness = () => {
++  // Cambia la posición horizontal y la persiste para próximas sesiones.
++  const setGoHorizontalPosition = (next: GoHorizontalPosition) => {
+     Haptics.selectionAsync().catch(() => {});
+-    setHandedness((prev) => {
+-      const next = prev === "right" ? "left" : "right";
+-      AsyncStorage.setItem("go_handedness_v1", next).catch(() => {});
+-      return next;
+-    });
++    setGoHorizontalPositionState(next);
++    AsyncStorage.setItem("go_handedness_v1", next).catch(() => {});
+   };
+   // Marca para distinguir el cambio MANUAL de lateralidad (vía toggle)
+   // del valor restaurado al cargar AsyncStorage. Sin esta marca, el GO
+@@ -9981,7 +9963,7 @@ export default function HomeScreen() {
+   // al usuario sin el GO en su lado preferido. (El useEffect que actúa
+   // sobre esta ref está más abajo, tras la declaración de minX/maxX,
+   // para evitar problemas de TDZ con esas constantes.)
+-  const prevHandednessRef = useRef<"right" | "left" | null>(null);
++  const prevGoHorizontalPositionRef = useRef<GoHorizontalPosition | null>(null);
+   // Análogo al anterior pero para el preset de tamaño UI: al cambiar de
+   // tamaño hay que reanclar el GO al borde inferior del lado del pulgar
+   // y reclamparlo dentro de los nuevos topes (en LARGE el GO ocupa más
+@@ -11465,17 +11447,6 @@ export default function HomeScreen() {
+   const orbitRadiusVisual = orbitRadius;
+   const orbitWrapSize = (orbitRadius + orbitBtnSize / 2) * 2 + 12;
+ 
+-  // ── HUMANITY DYNAMIC POSITION ────────────────────────────────────────
+-  // When GO grows (uiScaleFactor > 1 = "grande"), the lower-left orbital
+-  // satellites expand outward toward HUMANITY's corner.
+-  // Lift HUMANITY upward (and nudge slightly further left) to maintain
+-  // clear visual air between it and the satellite arc.
+-  //   standard (1.00): +0 px — no change.
+-  //   grande   (1.12): ≈ +22 px up, ≈ +8 px left.
+-  //   compacto (0.83): +0 px — clamped at zero, no downward shift.
+-  const humanityLift      = Math.round(Math.max(0, uiScaleFactor - 1.0) * orbitBtnSize * 2.5);
+-  const humanityLeftNudge = Math.round(humanityLift * 0.35);
+-
+   // ── BOUNDING RADIUS REAL DEL SISTEMA ORBITAL ────────────────────────
+   // Los micro-satélites funcionales (campana, mensajes, agenda, etc.)
+   // orbitan a microR = orbitRadius + 31*scale, que supera al anillo de
+@@ -11627,7 +11598,7 @@ export default function HomeScreen() {
+   //   left anchor center X            = SYSTEM_MARGIN_X + SBR
+   //   → minX = (SYSTEM_MARGIN_X + SBR) - (screen.width - SYSTEM_MARGIN_X - SBR)
+   //          = 2*SYSTEM_MARGIN_X + 2*SBR - screen.width
+-  const maxX = SYSTEM_MARGIN_X; // allow dragging to physical screen right edge
++  const maxX = SYSTEM_MARGIN_X; // safe horizontal anchor at physical screen edge
+   const minX = Math.min(
+     0,
+     Math.round(2 * SYSTEM_MARGIN_X + 2 * systemBoundingRadius - screen.width),
+@@ -11721,28 +11692,42 @@ export default function HomeScreen() {
+   //   _topFloor_screen (computed above).
+   // The dock-relative pan.y for the top floor is therefore:
+   //   minY = _topFloor_screen - _anchorContainerY   (negative = moved up)
++  const maxY = Math.max(0, insets.bottom - 6); // physical edge minus minimal breathing buffer
+   const _anchorContainerY =
+     screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize;
+-  const minY = Math.min(0, Math.round(_topFloor_screen - _anchorContainerY));
+-  const maxY = Math.max(0, insets.bottom - 6); // physical edge minus minimal breathing buffer
++  // The expanded Próxima panel becomes a live ceiling for the orbital
++  // block. Closing it restores the larger range automatically.
++  const nextPanelBottomScreenY =
++    !!nextAppointment && !anyOverlayOpen && !isActivelyCreating &&
++    !nextAptMinimized && !rutasMode && nextAptPanelH > 0
++      ? screen.height - (bottomReserved + orbitWrapSize - 2)
++      : null;
++  const dynamicTopFloor = Math.max(
++    _topFloor_screen,
++    nextPanelBottomScreenY === null
++      ? _topFloor_screen
++      : nextPanelBottomScreenY + Math.round(6 * uiScaleFactor),
++  );
++  const minY = Math.min(maxY, Math.round(dynamicTopFloor - _anchorContainerY));
+   const clamp = (v: number, lo: number, hi: number) =>
+     Math.min(Math.max(v, lo), hi);
+-
++  const horizontalTarget =
++    goHorizontalPosition === "right" ? maxX
++    : goHorizontalPosition === "left" ? minX
++    : (minX + maxX) / 2;
+   // Al cambiar de mano, ANCLA el GO al borde correspondiente:
+   //   • diestro → borde derecho (maxX)
+   //   • zurdo   → borde izquierdo (minX)
+   // Antes hacíamos un simple reflejo en torno al centro, lo que dejaba
+-  // al GO y al menú en lados OPUESTOS si el usuario había arrastrado
+-  // previamente el GO al lado contrario al de la mano activa. Con el
+-  // anclaje al borde garantizamos que el GO y el menú vivan SIEMPRE en
+-  // el mismo lado del pulgar (el usuario ya puede ajustar la altura
+-  // arrastrándolo verticalmente, pero la X queda ligada a la mano).
++  // al GO y al menú en lados OPUESTOS si la posición guardada estaba en
++  // el lado contrario al de la mano activa. Con el anclaje al borde
++  // garantizamos que GO y menú vivan SIEMPRE en el lado elegido.
+   // Se declara aquí, después de minX/maxX/clamp, para evitar TDZ.
+   useEffect(() => {
+-    const prev = prevHandednessRef.current;
+-    prevHandednessRef.current = handedness;
+-    if (prev === null || prev === handedness) return;
+-    const targetX = handedness === "right" ? maxX : minX;
++    const prev = prevGoHorizontalPositionRef.current;
++    prevGoHorizontalPositionRef.current = goHorizontalPosition;
++    if (prev === null || prev === goHorizontalPosition) return;
++    const targetX = horizontalTarget;
+     const targetY = clamp(posRef.y, minY, maxY);
+     posRef.x = targetX;
+     posRef.y = targetY;
+@@ -11763,7 +11748,7 @@ export default function HomeScreen() {
+       JSON.stringify({ x: targetX, y: targetY }),
+     ).catch(() => {});
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [handedness, minX, maxX, minY, maxY]);
++  }, [goHorizontalPosition, horizontalTarget, minY, maxY]);
+ 
+   // SCROLL INICIAL MENÚ CATEGORÍAS — posiciona "Todas" en el lado del pulgar.
+   // Diestro: scrollToEnd → "Todas" queda en el extremo derecho visible.
+@@ -11780,7 +11765,7 @@ export default function HomeScreen() {
+     }, 50);
+   }, [handedness]);
+ 
+-  // Reanclaje al cambiar el preset de tamaño UI.
++  // Reanclaje automático al cambiar el preset de tamaño UI.
+   //   • SIEMPRE deja el GO pegado al borde INFERIOR (maxY) y al borde
+   //     LATERAL del lado del pulgar (maxX en diestro, minX en zurdo) —
+   //     que es la zona más cómoda para el pulgar.
+@@ -11788,15 +11773,13 @@ export default function HomeScreen() {
+   //     salía de pantalla porque la posición guardada quedaba fuera de
+   //     los nuevos topes (maxX/maxY más pequeños al ocupar más espacio
+   //     la órbita).
+-  // Tras este snap el usuario sigue pudiendo arrastrar el GO a otra
+-  // posición y ese arrastre se persiste como antes (PanResponder + save
+-  // en go_floating_pos_v9). Es decir, el snap solo se dispara en el
+-  // momento del cambio de preset, no bloquea el drag posterior.
++  // El reanclaje conserva una posición válida sin permitir desplazamiento
++  // manual del conjunto orbital.
+   useEffect(() => {
+     const prev = prevUiScaleRef.current;
+     prevUiScaleRef.current = uiScale;
+     if (prev === null || prev === uiScale) return;
+-    const targetX = handedness === "right" ? maxX : minX;
++    const targetX = horizontalTarget;
+     const targetY = maxY; // borde inferior
+     posRef.x = targetX;
+     posRef.y = targetY;
+@@ -11811,7 +11794,7 @@ export default function HomeScreen() {
+       JSON.stringify({ x: targetX, y: targetY }),
+     ).catch(() => {});
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [uiScale, minX, maxX, minY, maxY, handedness]);
++  }, [uiScale, minY, maxY, horizontalTarget]);
+ 
+   // Salvavidas defensivo: si por la razón que sea (cambio de tamaño de
+   // ventana web, rotación del dispositivo, hidratación con preset
+@@ -11821,7 +11804,7 @@ export default function HomeScreen() {
+   // anterior no se hubiese disparado.
+   useEffect(() => {
+     if (!posReady) return;
+-    const cx = clamp(posRef.x, minX, maxX);
++    const cx = horizontalTarget;
+     const cy = clamp(posRef.y, minY, maxY);
+     if (cx === posRef.x && cy === posRef.y) return;
+     posRef.x = cx;
+@@ -11837,7 +11820,7 @@ export default function HomeScreen() {
+       JSON.stringify({ x: cx, y: cy }),
+     ).catch(() => {});
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+-  }, [minX, maxX, minY, maxY, posReady]);
++  }, [horizontalTarget, minY, maxY, posReady]);
+ 
+   // ── Geometría del overlay IA ──────────────────────────────────────────
+   // En IA la posición la resuelve flexbox dentro del contenedor IA;
+@@ -12080,7 +12063,7 @@ export default function HomeScreen() {
+     // En HERRAMIENTAS (optionsOpen): posición alineada al lado del pulgar
+     // según lateralidad (DIESTRO→derecha, ZURDO→izquierda) — simulación real.
+     const previewX = optionsOpen
+-      ? (handedness === "right" ? maxX : minX)
++      ? horizontalTarget
+       : (minX + maxX) / 2;
+     const visualCenterY = (titleBottom + visualPanelTop) / 2;
+     const targetPanY = visualCenterY - orbitWrapSize / 2;
+@@ -12134,7 +12117,7 @@ export default function HomeScreen() {
+     orbitWrapSize,
+     titleBottomLocalY,
+     uiScale,
+-    handedness,
++    horizontalTarget,
+   ]);
+ 
+   // Reset del layout del contenedor IA al cerrarse la pantalla IA:
+@@ -12208,7 +12191,9 @@ export default function HomeScreen() {
+       } catch {}
+       try {
+         const raw = await AsyncStorage.getItem("go_handedness_v1");
+-        if (raw === "left" || raw === "right") setHandedness(raw);
++        if (raw === "left" || raw === "center" || raw === "right") {
++          setGoHorizontalPositionState(raw);
++        }
+       } catch {}
+       try {
+         const raw = await AsyncStorage.getItem("go_sort_order_v1");
+@@ -12584,6 +12569,7 @@ export default function HomeScreen() {
+     const sub = pan.addListener((v) => {
+       posRef.x = v.x;
+       posRef.y = v.y;
++      setHumanityPan({ x: v.x, y: v.y });
+     });
+     return () => {
+       mounted = false;
+@@ -12852,51 +12838,13 @@ export default function HomeScreen() {
+       onStartShouldSetPanResponder: () => false,
+       onStartShouldSetPanResponderCapture: () => false,
+       onMoveShouldSetPanResponder: (_, g) =>
+-        Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8,
++        rutasModeRef.current && Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
+       onMoveShouldSetPanResponderCapture: (_, g) =>
+-        Math.abs(g.dx) > 8 || Math.abs(g.dy) > 8,
+-      onPanResponderGrant: () => {
+-        draggingRef.current = true;
+-        setIsDragging(true);
+-        pan.setOffset({ x: posRef.x, y: posRef.y });
+-        pan.setValue({ x: 0, y: 0 });
+-        try {
+-          Haptics.selectionAsync();
+-        } catch {}
+-      },
+-      onPanResponderMove: (_e, g) => {
+-        pan.x.setValue(g.dx);
+-        pan.y.setValue(g.dy);
+-      },
++        rutasModeRef.current && Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
+       onPanResponderRelease: (_, g) => {
+         if (rutasModeRef.current && g.dy > 70 && Math.abs(g.dx) < 100) {
+-          pan.flattenOffset();
+-          draggingRef.current = false;
+-          setIsDragging(false);
+           closeRutasModeRef.current();
+-          return;
+         }
+-        pan.flattenOffset();
+-        const tx = clamp(posRef.x, minX, maxX);
+-        const ty = clamp(posRef.y, minY, maxY);
+-        Animated.spring(pan, {
+-          toValue: { x: tx, y: ty },
+-          useNativeDriver: true,
+-          friction: 7,
+-          tension: 60,
+-        }).start(() => {
+-          draggingRef.current = false;
+-          setIsDragging(false);
+-        });
+-        AsyncStorage.setItem(
+-          "go_floating_pos_v14",
+-          JSON.stringify({ x: tx, y: ty }),
+-        ).catch(() => {});
+-      },
+-      onPanResponderTerminate: () => {
+-        pan.flattenOffset();
+-        draggingRef.current = false;
+-        setIsDragging(false);
+       },
+     }),
+   ).current;
+@@ -12938,7 +12886,7 @@ export default function HomeScreen() {
+   // Helper que envuelve el bloque interno del orbital. En IA se renderiza
+   // DENTRO de un contenedor exclusivo medido con onLayout, y centrado por
+   // flexbox. En el resto de pantallas se mantiene el wrapper absoluto
+-  // draggable original (pan + overlay transforms).
++  // anchored original (position + overlay transforms).
+   const wrapOrbital = (inner: React.ReactNode) => {
+     // V1 PROMPT 13 — SISTEMA DE CAPAS.
+     // Cualquier capa no-IA abierta (listado, calendario, contactos,
+@@ -12946,7 +12894,7 @@ export default function HomeScreen() {
+     // tarde", resumen IA…) ESCONDE GO por completo. Devolvemos null:
+     // el wrapper exterior es absolute, así que no deja hueco. Cuando
+     // la capa se cierre, `anyOverlayOpen` pasa a false y este helper
+-    // vuelve a renderizar el bloque absoluto draggable con GO en su
++    // vuelve a renderizar el bloque absoluto anclado con GO en su
+     // posición persistida (zona pulgar) — el efecto de animación
+     // resetea overlayDX/overlayDY/aiShrink en paralelo.
+     //
+@@ -13039,7 +12987,7 @@ export default function HomeScreen() {
+         </View>
+       );
+     }
+-    // ── OrbitalDockWrapper (draggable) ──────────────────────────────────
++    // ── OrbitalDockWrapper (fixed position) ─────────────────────────────
+     // Outer View: static absolute layer anchored bottom-right.
+     //   bottom: insets.bottom + SYSTEM_MARGIN_Y
+     //   right:  SYSTEM_MARGIN_X
+@@ -13047,8 +12995,8 @@ export default function HomeScreen() {
+     // Inner Animated.View: centered within the dock, translated by pan.
+     //   pan = (0,0) → orbital center at dock center = bottom-right anchor.
+     //   pan.x < 0 → moved left; pan.y < 0 → moved up.
+-    // Overflow is visible — the orbital can be dragged beyond the dock
+-    // bounds; touch delivery still works via the panResponder.
++    // Overflow is visible so the original orbital artwork remains unclipped.
++    // Only Rutas mode attaches the downward-swipe close responder.
+     return (
+       <View
+         pointerEvents="box-none"
+@@ -13061,7 +13009,7 @@ export default function HomeScreen() {
+         }}
+       >
+         <Animated.View
+-          {...panResponder.panHandlers}
++          {...(rutasMode ? panResponder.panHandlers : {})}
+           style={{
+             position: "absolute",
+             left: systemBoundingRadius - orbitWrapSize / 2,
+@@ -13202,6 +13150,29 @@ export default function HomeScreen() {
+     ];
+   };
+ 
++  // The experiment only paints the main Landing. Shared orbits in routes,
++  // commercial layers, IA and other panels retain their original appearance.
++  const landingTheme = !anyOverlayOpen && !voiceActive && !rutasMode
++    && orbitSecondLevel === null && !reservasOrbitalOpen && !marketplaceCheckout
++    ? getLandingVisualTheme(landingVariant)
++    : undefined;
++
++  const humanityPanelOpen = !!nextAppointment && !isActivelyCreating && !nextAptMinimized;
++  const humanityBlocks = humanityPanelOpen
++    ? [humanityObstacles.next, humanityObstacles.transport]
++    : !!nextAppointment && !isActivelyCreating ? [humanityObstacles.pill] : [];
++  // Wait for visible panels to report their complete touch bounds.
++  const humanityPanelsMeasured = humanityBlocks.every(rect => !!rect);
++  const humanityPlacement = humanityPanelsMeasured && posReady ? placeHumanity({
++    cx: screen.width - dockRight - systemBoundingRadius + humanityPan.x,
++    cy: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + humanityPan.y,
++    radius: orbitRadius, buttonSize: orbitBtnSize,
++    satelliteRadius: microR, satelliteSize: microSz, count: INTENTS.length + 1,
++    scale: uiScaleFactor,
++    bounds: { x: insets.left + 8, y: (titleBottomLocalY ?? ACTION_TOP_Y) + 8, width: screen.width - insets.left - insets.right - 16, height: screen.height - insets.bottom - 8 - ((titleBottomLocalY ?? ACTION_TOP_Y) + 8) },
++    obstacles: humanityBlocks.filter((rect): rect is HumanityRect => !!rect),
++  }) : null;
++
+   if (!authBootstrapComplete || !modeLoaded) {
+     return (
+       <View style={{ flex: 1, backgroundColor: "#F7F6F2", alignItems: "center", justifyContent: "center" }}>
+@@ -13213,7 +13184,7 @@ export default function HomeScreen() {
+ 
+   return (
+     <GestureDetector gesture={universalSwipeGesture}>
+-    <View style={[styles.root, { paddingTop }]}>
++    <View style={[styles.root, { paddingTop }, landingTheme && { backgroundColor: landingTheme.background }]}>
+       {/* Status bar — dark-content sobre paneles claros, light sobre el fondo oscuro GO */}
+       <StatusBar
+         style={
+@@ -13228,23 +13199,23 @@ export default function HomeScreen() {
+       <View style={StyleSheet.absoluteFill} pointerEvents="none">
+         <Image
+           source={EARTH_BG}
+-          style={StyleSheet.absoluteFill}
++          style={[StyleSheet.absoluteFill, landingTheme && { opacity: landingTheme.earthOpacity }]}
+           resizeMode="cover"
+         />
+       </View>
+       {/* Dark veil — preserves button readability, keeps cinematic depth */}
+       <View
+-        style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(2,4,12,0.51)" }]}
++        style={[StyleSheet.absoluteFill, { backgroundColor: landingTheme?.veil ?? "rgba(2,4,12,0.51)" }]}
+         pointerEvents="none"
+       />
+       {/* Cinematic blue-black overlay — reduces background competition, restores GO as protagonist */}
+       <View
+-        style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(3,6,22,0.12)" }]}
++        style={[StyleSheet.absoluteFill, { backgroundColor: landingTheme?.tint ?? "rgba(3,6,22,0.12)" }]}
+         pointerEvents="none"
+       />
+       {/* Top-edge fade — softens transition to status bar */}
+       <LinearGradient
+-        colors={["rgba(2,4,12,0.72)", "transparent"]}
++        colors={[landingTheme?.topFade ?? "rgba(2,4,12,0.72)", "transparent"]}
+         start={{ x: 0.5, y: 0 }}
+         end={{ x: 0.5, y: 0.22 }}
+         style={StyleSheet.absoluteFill}
+@@ -13252,14 +13223,18 @@ export default function HomeScreen() {
+       />
+       {/* Bottom-edge fade — anchors the orbit in deep space */}
+       <LinearGradient
+-        colors={["transparent", "rgba(2,4,12,0.55)"]}
++        colors={["transparent", landingTheme?.bottomFade ?? "rgba(2,4,12,0.55)"]}
+         start={{ x: 0.5, y: 0.72 }}
+         end={{ x: 0.5, y: 1 }}
+         style={StyleSheet.absoluteFill}
+         pointerEvents="none"
+       />
+       {/* Deep space upper layer — paz, profundidad, silencio */}
+-      <GoDeepSpaceUpper />
++      {landingTheme ? (
++        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: landingTheme.spaceOpacity }]}>
++          <GoDeepSpaceUpper />
++        </View>
++      ) : <GoDeepSpaceUpper />}
+       {/* TEST COLOR FONDO — overlay de prueba de color para Landing */}
+       {!!screenBgColors.landing && (
+         <View
+@@ -13591,6 +13566,7 @@ export default function HomeScreen() {
+         return (
+           <View
+             key="next-action-open-btn-wrap"
++            onLayout={(e) => measureHumanityObstacle("pill", e.nativeEvent.layout)}
+             style={{ position: "absolute", ...proximaSideStyle, bottom: PROXIMA_BOTTOM, zIndex: 7 }}
+           >
+             <TouchableOpacity
+@@ -14205,6 +14181,13 @@ export default function HomeScreen() {
+         const row2Btns = ([aCall, aLate, aGo]   as (ActBtnDef | undefined)[]).filter((b): b is ActBtnDef => !!b);
+         const numGridCols = Math.max(row1Btns.length, row2Btns.length);
+         const PANEL_W = numGridCols * BTN_W + (numGridCols - 1) * ROW_GAP;
++        // The information card can use the unused space toward the opposite
++        // side without changing the action grid's width or anchor.
++        const INFO_W = Math.min(
++          screen.width - insets.left - insets.right - Math.round(24 * uiScaleFactor),
++          PANEL_W + Math.round(96 * uiScaleFactor),
++        );
++        const PANEL_ACTION_GAP = Math.round(12 * uiScaleFactor);
+         // PROXIMA_V_EXTRA is frozen for all sizes.
+         // User confirmed: "PANEL SUPERIOR → congelarlo, está perfecto".
+         const PROXIMA_V_EXTRA = 0;
+@@ -14218,7 +14201,7 @@ export default function HomeScreen() {
+           <View
+             key="proxima-abs-block"
+             pointerEvents="box-none"
+-            onLayout={(e) => setNextAptPanelH(e.nativeEvent.layout.height)}
++            onLayout={(e) => { setNextAptPanelH(e.nativeEvent.layout.height); measureHumanityObstacle("next", e.nativeEvent.layout); }}
+             style={{
+               position: "absolute",
+               ...panelSideStyle,
+@@ -14227,7 +14210,7 @@ export default function HomeScreen() {
+               zIndex: 5,
+             }}
+           >
+-            <View style={{ gap: Math.round(3 * uiScaleFactor) }}>
++            <View style={{ gap: PANEL_ACTION_GAP }}>
+ 
+ 
+               {/* ── INDICADOR DE POSICIÓN + TARJETA — PanResponder unificado ──
+@@ -14341,7 +14324,13 @@ export default function HomeScreen() {
+               </View>
+ 
+               {/* Caja info — pulsación larga para opciones avanzadas; swipe gestionado por PanResponder superior */}
+-              <View style={{ position: "relative" }}>
++              <View
++                style={{
++                  position: "relative",
++                  width: INFO_W,
++                  alignSelf: handedness === "right" ? "flex-end" : "flex-start",
++                }}
++              >
+               <Pressable
+                 onPress={() => {
+                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+@@ -15116,6 +15105,7 @@ export default function HomeScreen() {
+           Solo visible cuando el panel está abierto (!nextAptMinimized). */}
+       {nextAppointment && !anyOverlayOpen && !isActivelyCreating && !nextAptMinimized && !rutasMode && kbHeight === 0 && (
+         <View
++          onLayout={(e) => measureHumanityObstacle("transport", e.nativeEvent.layout)}
+           style={(() => {
+             // 4 buttons (paddingVertical:6 × 2 + ~22 content) + 3 gaps of 5
+             const stripH = 4 * 34 + 3 * 5;
+@@ -15934,7 +15924,7 @@ export default function HomeScreen() {
+ 
+           • Pantalla IA: contenedor exclusivo IA (top = base del título,
+             bottom = top del panel IA), centrando el GO con flexbox.
+-          • Resto: wrapper absoluto draggable con pan + overlay
++          • Resto: wrapper absoluto con posición guardada + overlay
+             transforms. */}
+       {wrapOrbital(
+         <Animated.View
+@@ -15950,7 +15940,7 @@ export default function HomeScreen() {
+                   outputRange: [0, -3],
+                 }),
+               },
+-              { scale: isDragging ? 1.03 : 1 },
++              { scale: 1 },
+               { scale: kbScale },
+               { scale: aiShrink },
+             ],
+@@ -16148,10 +16138,10 @@ export default function HomeScreen() {
+               ],
+               // Black drop-shadow for elevation depth (same as PremiumOrbitBtn)
+               shadowColor: "#000",
+-              shadowOpacity: voiceActive ? 0 : 0.45,
+-              shadowRadius: 10,
++              shadowOpacity: voiceActive ? 0 : landingTheme?.shadowOpacity ?? 0.45,
++              shadowRadius: landingTheme?.shadowRadius ?? 10,
+               shadowOffset: { width: 0, height: 4 },
+-              elevation: voiceActive ? 0 : 8,
++              elevation: landingTheme ? 0 : voiceActive ? 0 : 8,
+               // V1: GO siempre visible, sin dimming de aprendizaje.
+               opacity: 1,
+             }}
+@@ -16165,7 +16155,7 @@ export default function HomeScreen() {
+                   left: -3, right: -3, top: -3, bottom: -3,
+                   borderRadius: 999,
+                   shadowColor: goButtonColor,
+-                  shadowOpacity: 0.65,
++                  shadowOpacity: landingTheme?.glowOpacity ?? 0.65,
+                   shadowRadius: 13,
+                   shadowOffset: { width: 0, height: 0 },
+                   elevation: 0,
+@@ -16237,7 +16227,7 @@ export default function HomeScreen() {
+                       shadowOffset: { width: 0, height: 0 },
+                       elevation: 0,
+                       borderWidth: 2,
+-                      borderColor: "#ffffff",
++                      borderColor: landingTheme ? "transparent" : "#ffffff",
+                     },
+               ]}
+             >
+@@ -16269,8 +16259,11 @@ export default function HomeScreen() {
+                 <>
+                   {/* Gradient + overhead highlight — same visual system as PremiumOrbitBtn */}
+                   {(() => {
++                    if (landingTheme) return (
++                      <View pointerEvents="none" style={{ position: "absolute", width: goSize * 0.76, height: goSize * 0.64, borderRadius: landingTheme.variant === "profesional" ? 18 : 8, backgroundColor: getCoreVisualGradient(landingTheme, goButtonColor)[1], borderWidth: 1, borderColor: landingTheme.coreBorder, alignSelf: "center" }} />
++                    );
+                     const _ckColor = marketplaceCheckout?.brand.color ?? goButtonColor;
+-                    const gc: [string, string, string] = [
++                    const gc: [string, string, string] = landingTheme ? getCoreVisualGradient(landingTheme, _ckColor) : [
+                       _orbitLighten(_ckColor, 0.28),
+                       _ckColor,
+                       _orbitDarken(_ckColor, 0.32),
+@@ -16319,7 +16312,7 @@ export default function HomeScreen() {
+                       styles.goText,
+                       modeOpen && styles.goTextChoose,
+                       {
+-                        color: "#ffffff",
++                        color: landingTheme?.variant === "confianza" && !modeOpen && !rutasMode && !marketplaceCheckout ? "#FFD700" : landingTheme?.coreText ?? "#ffffff",
+                         // V1 FIX · El texto interno del GO ("GO" / "ELIGE")
+                         // se escala proporcionalmente con uiScaleFactor para
+                         // que quepa cómodo cuando uiScale === "small"
+@@ -16630,6 +16623,7 @@ export default function HomeScreen() {
+                   >
+                     <PremiumOrbitBtn
+                       color={it.color}
++                      visualTheme={landingTheme}
+                       selected={selected}
+                       dimmed={dimmed}
+                       onPress={() => {
+@@ -16684,6 +16678,7 @@ export default function HomeScreen() {
+                   >
+                     <PremiumOrbitBtn
+                       color="#9ca3af"
++                      visualTheme={landingTheme}
+                       selected={otroSelected}
+                       dimmed={categorySelected}
+                       onPress={() => {
+@@ -17468,6 +17463,7 @@ export default function HomeScreen() {
+                     ? satCtxAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] })
+                     : 1;
+ 
++                  const satelliteTheme = !ctxReplace && !isNoteStep && !isEmpresaSetupStep && !memActive && !activeSatCtx ? landingTheme : undefined;
+                   const borderColor = ctxReplace
+                     ? "rgba(255,255,255,0.65)"
+                     : isNoteStep
+@@ -17478,6 +17474,7 @@ export default function HomeScreen() {
+                     ? "#C9A84C"
+                     : rutasMode
+                     ? "rgba(255,255,255,0.52)"
++                    : satelliteTheme ? satelliteTheme.satelliteBorder
+                     : s.contextLayer
+                     ? "rgba(255,255,255,0.28)"
+                     : "rgba(255,255,255,0.22)";
+@@ -17490,11 +17487,11 @@ export default function HomeScreen() {
+                     ? "rgba(30,110,80,0.18)"
+                     : memActive
+                     ? "rgba(201,168,76,0.14)"
+-                    : "#080810";
++                    : satelliteTheme?.satelliteBackground ?? "#080810";
+ 
+                   const shadowColor  = isNoteStep ? "#b89cff" : isEmpresaSetupStep ? "#3DC88C" : memActive ? "#C9A84C" : rutasMode ? "#a5f3fc" : "#ffffff";
+-                  const shadowOpacity = ctxReplace ? 0.60 : isNoteStep ? 0.90 : isEmpresaSetupStep ? 0.85 : memActive ? 0.80 : rutasMode ? 0.55 : 0.32;
+-                  const shadowRadius  = ctxReplace ? 16   : isNoteStep ? 20   : isEmpresaSetupStep ? 20   : memActive ? 18   : rutasMode ? 12 : 7;
++                  const shadowOpacity = ctxReplace ? 0.60 : isNoteStep ? 0.90 : isEmpresaSetupStep ? 0.85 : memActive ? 0.80 : rutasMode ? 0.55 : satelliteTheme?.shadowOpacity ?? 0.32;
++                  const shadowRadius  = ctxReplace ? 16   : isNoteStep ? 20   : isEmpresaSetupStep ? 20   : memActive ? 18   : rutasMode ? 12 : satelliteTheme?.shadowRadius ?? 7;
+ 
+                   const _incSat = () => {
+                     setSatUseCounts(prev => {
+@@ -17771,20 +17768,22 @@ export default function HomeScreen() {
+                             width: microSz,
+                             height: microSz,
+                             borderRadius: microSz / 2,
+-                            backgroundColor: (isContactBtn || isCalendarBtn) ? "transparent" : bgColor,
++                            backgroundColor: satelliteTheme ? "transparent" : (isContactBtn || isCalendarBtn) ? "transparent" : bgColor,
+                             borderWidth: ctxReplace ? 1.8 : memActive ? 1.6 : s.contextLayer ? 1.4 : 1.2,
+-                            borderColor,
++                            borderColor: satelliteTheme ? "transparent" : borderColor,
+                             alignItems: "center",
+                             justifyContent: "center",
+                             shadowColor,
+-                            shadowOpacity,
++                            shadowOpacity: satelliteTheme ? 0 : shadowOpacity,
+                             shadowRadius,
+                             shadowOffset: { width: 0, height: 0 },
+-                            elevation: ctxReplace ? 10 : memActive ? 8 : 6,
++                            elevation: satelliteTheme ? 0 : ctxReplace ? 10 : memActive ? 8 : 6,
+                             overflow: "hidden",
+                           }}
+                         >
+-                          {isContactBtn ? (
++                          {satelliteTheme ? (
++                            <LandingSatelliteSurface theme={satelliteTheme} icon={displayIcon} label={displayLabel ?? ""} size={microSz} />
++                          ) : isContactBtn ? (
+                             <LinearGradient
+                               colors={["rgba(50,50,95,1)", "rgba(22,22,52,1)", "rgba(10,10,28,1)", "rgba(3,3,12,1)"]}
+                               start={{ x: 0.5, y: 0 }}
+@@ -19408,7 +19407,7 @@ export default function HomeScreen() {
+         onClose={() => setCuentaOpen(false)}
+         onOpenEmpresa={() => { setCuentaOpen(false); setEmpresaOpen(true); }}
+         onOpenHistorial={() => { setCuentaOpen(false); setTimeout(() => setHistorialPedidosOpen(true), 220); }}
+-        onSwitchMode={() => setGoAuthOpen(true)}
++        onSwitchMode={() => { setCuentaOpen(false); setGoAuthOpen(true); }}
+         onResetTutorial={() => {
+           setTutGoRealizado(false);
+           setTutReservaRealizada(false);
+@@ -19418,10 +19417,12 @@ export default function HomeScreen() {
+       />
+ 
+       <HerramientasPanel
++        landingVariant={landingVariant}
++        onLandingVariantChange={setLandingVariant}
+         visible={optionsOpen}
+         onClose={() => { commitUserPhone(); setOptionsOpen(false); }}
+-        handedness={handedness}
+-        toggleHandedness={toggleHandedness}
++        goHorizontalPosition={goHorizontalPosition}
++        setGoHorizontalPosition={setGoHorizontalPosition}
+         uiScale={uiScale}
+         setUiScale={setUiScale}
+         userGoPhoneDraft={userGoPhoneDraft}
+@@ -26368,13 +26369,8 @@ export default function HomeScreen() {
+       />
+ 
+ 
+-      {/* ── GLOBO HUMANITY — botón independiente a la izquierda del GO ──
+-          Mismo tamaño que los satélites orbitales (orbitBtnSize).
+-          Se oculta cuando hay overlays abiertos, el teclado está arriba,
+-          o el panel de próxima visita está expandido.
+-          POSICIÓN DINÁMICA: humanityLift/humanityLeftNudge se calculan
+-          arriba en el cuerpo del componente y se aplican aquí. */}
+-      {!anyOverlayOpen && !rutasMode && kbHeight === 0 && nextAptMinimized && orbitSecondLevel === null && (
++      {/* HUMANITY follows the upper-left of the orbit; label and hit area share the collision bounds. */}
++      {!anyOverlayOpen && !rutasMode && kbHeight === 0 && orbitSecondLevel === null && humanityPlacement && (
+         <TouchableOpacity
+           activeOpacity={0.82}
+           onPress={() => {
+@@ -26383,19 +26379,20 @@ export default function HomeScreen() {
+           }}
+           style={{
+             position: "absolute",
+-            left: Math.max(insets.left + 14, 16) - humanityLeftNudge,
+-            bottom: Math.max(insets.bottom + 14, 18) + humanityLift,
+-            width: orbitBtnSize,
+-            height: orbitBtnSize,
+-            borderRadius: orbitBtnSize / 2,
++            left: humanityPlacement.x,
++            top: humanityPlacement.y,
++            width: humanityPlacement.width,
++            height: humanityPlacement.height,
++            borderRadius: humanityPlacement.globe / 2,
+             zIndex: 9990,
+             shadowColor: "#1d6fa8",
+-            shadowOpacity: 0.55,
+-            shadowRadius: 14,
++            shadowOpacity: landingTheme?.shadowOpacity ?? 0.18,
++            shadowRadius: 4,
+             shadowOffset: { width: 0, height: 0 },
+             elevation: 12,
+             alignItems: "center",
+-            justifyContent: "center",
++            justifyContent: "flex-start",
++            paddingTop: 5,
+             overflow: "visible",
+           }}
+         >
+@@ -26404,25 +26401,26 @@ export default function HomeScreen() {
+             pointerEvents="none"
+             style={{
+               position: "absolute",
+-              width: orbitBtnSize + 10,
+-              height: orbitBtnSize + 10,
+-              borderRadius: (orbitBtnSize + 10) / 2,
++              top: 2,
++              width: humanityPlacement.globe + 6,
++              height: humanityPlacement.globe + 6,
++              borderRadius: (humanityPlacement.globe + 6) / 2,
+               borderWidth: 1.2,
+-              borderColor: "rgba(80,180,255,0.28)",
++              borderColor: landingTheme?.humanityRing ?? "rgba(80,180,255,0.28)",
+             }}
+           />
+           {/* Cinematic Earth globe — photorealistic satellite image */}
+           <View style={{
+-            width: orbitBtnSize,
+-            height: orbitBtnSize,
+-            borderRadius: orbitBtnSize / 2,
++            width: humanityPlacement.globe,
++            height: humanityPlacement.globe,
++            borderRadius: humanityPlacement.globe / 2,
+             overflow: "hidden",
+             borderWidth: 1,
+-            borderColor: "rgba(100,200,255,0.30)",
++            borderColor: landingTheme?.humanityRing ?? "rgba(100,200,255,0.30)",
+           }}>
+             <Image
+               source={require("../assets/images/humanity_globe.png")}
+-              style={{ width: orbitBtnSize, height: orbitBtnSize }}
++              style={{ width: humanityPlacement.globe, height: humanityPlacement.globe }}
+               resizeMode="cover"
+             />
+             {/* Atmospheric limb glow */}
+@@ -26431,20 +26429,22 @@ export default function HomeScreen() {
+               style={{
+                 position: "absolute",
+                 top: 0, left: 0, right: 0, bottom: 0,
+-                borderRadius: orbitBtnSize / 2,
+-                borderWidth: Math.round(orbitBtnSize * 0.055),
+-                borderColor: "rgba(80,180,255,0.22)",
++                borderRadius: humanityPlacement.globe / 2,
++                borderWidth: Math.round(humanityPlacement.globe * 0.055),
++                borderColor: landingTheme?.humanityLimb ?? "rgba(80,180,255,0.22)",
+               }}
+             />
+           </View>
+           {/* Label */}
+-          <Text style={{
++          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={{
+             position: "absolute",
+-            bottom: -Math.round(orbitBtnSize * 0.32),
++            bottom: 0,
++            width: "100%",
+             color: "rgba(255,255,255,0.72)",
+-            fontSize: Math.max(6, Math.round(orbitBtnSize * 0.105)),
++            fontSize: 9,
++            lineHeight: 12,
+             fontWeight: "700",
+-            letterSpacing: 0.8,
++            letterSpacing: 0.4,
+             textAlign: "center",
+           }}>
+             HUMANITY
+diff --git a/artifacts/go-app-mobile/components/auth/LoginRegisterPanel.tsx b/artifacts/go-app-mobile/components/auth/LoginRegisterPanel.tsx
+index c0ca690..2af95d4 100644
+--- a/artifacts/go-app-mobile/components/auth/LoginRegisterPanel.tsx
++++ b/artifacts/go-app-mobile/components/auth/LoginRegisterPanel.tsx
+@@ -1,5 +1,6 @@
+-import { notifySessionChanged } from "@/lib/sessionEvents";
+-import React, { useRef, useState } from "react";
++import { mobileSession } from "@/lib/mobileSession";
++import { sessionFromPayload } from "@/lib/sessionManager";
++import React, { useEffect, useRef, useState } from "react";
+ import {
+   ActivityIndicator,
+   Animated,
+@@ -13,7 +14,6 @@ import {
+   TouchableOpacity,
+   View,
+ } from "react-native";
+-import AsyncStorage from "@react-native-async-storage/async-storage";
+ import { LinearGradient } from "expo-linear-gradient";
+ import { StatusBar } from "expo-status-bar";
+ import { Feather } from "@expo/vector-icons";
+@@ -140,6 +140,13 @@ export function LoginRegisterPanel({
+   const [authBusy, setAuthBusy] = useState(false);
+   const [authError, setAuthError] = useState<string | null>(null);
+ 
++  const [choosingRole, setChoosingRole] = useState(false);
++  const showRoleFlow = userAccountType === null || choosingRole;
++  // Closing the selector discards only its local presentation state, not the account.
++  useEffect(() => {
++    if (!visible) { setChoosingRole(false); setAuthStep("role"); }
++  }, [visible]);
++
+   const ROLE_OPTIONS = getRoleOptions(t);
+ 
+   const onCloseRef = useRef(onClose);
+@@ -228,17 +235,14 @@ export function LoginRegisterPanel({
+       });
+       const payload = await response.json().catch(() => ({}));
+       if (!response.ok) throw new Error(payload.error_description ?? payload.msg ?? payload.error ?? "No se pudo autenticar la cuenta.");
+-      if (payload.access_token) {
+-        await AsyncStorage.setItem("go_supabase_session_v1", JSON.stringify({
+-          access_token: payload.access_token,
+-          refresh_token: payload.refresh_token ?? null,
+-          user: payload.user ?? null,
+-        }));
++      const session = sessionFromPayload(payload);
++      if (session) {
++        if (!await mobileSession.save(session, selectedRole)) return;
+       } else if (authMode === "register") {
+         setAuthError("Revisa tu correo para confirmar la cuenta y después inicia sesión.");
+         return;
+       }
+-      notifySessionChanged();
++      if (!session) throw new Error("No se recibió una sesión válida.");
+       onSetAccountType(selectedRole);
+       setAuthStep("role");
+     } catch (error) {
+@@ -273,9 +277,12 @@ export function LoginRegisterPanel({
+     }
+   };
+ 
+-  const handleLogout = () => {
++  const handleLogout = async () => {
+     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+-    AsyncStorage.removeItem("go_supabase_session_v1").then(notifySessionChanged).catch(() => {});
++    try { if (!await mobileSession.logout()) return; } catch {
++      setAuthError("No se pudo cerrar la sesión local. Inténtalo de nuevo.");
++      return;
++    }
+     onSetAccountType(null);
+     setAuthStep("role");
+   };
+@@ -350,7 +357,7 @@ export function LoginRegisterPanel({
+             <Feather name="zap" size={12} color="#4A80BD" />
+             <Text style={s.goPillTxt}>GO</Text>
+           </View>
+-          {userAccountType !== null && (
++          {!showRoleFlow && userAccountType !== null && (
+             <View style={[s.rolePill, { backgroundColor: `${accentColor}15`, borderColor: `${accentColor}40` }]}>
+               <View style={[s.roleDot, { backgroundColor: accentColor }]} />
+               <Text style={[s.rolePillTxt, { color: accentColor }]}>
+@@ -361,7 +368,7 @@ export function LoginRegisterPanel({
+         </View>
+ 
+         {/* ── AUTH: credentials ── */}
+-        {userAccountType === null && authStep === "credentials" && (
++        {showRoleFlow && authStep === "credentials" && (
+           <ScrollView style={s.scroll} contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+             <View style={s.authForm}>
+               <View style={s.welcomeIcon}>
+@@ -395,7 +402,7 @@ export function LoginRegisterPanel({
+         )}
+ 
+         {/* ── SETUP: no account ── */}
+-        {userAccountType === null && authStep === "role" && (
++        {showRoleFlow && authStep === "role" && (
+           <>
+             <ScrollView
+               style={s.scroll}
+@@ -460,7 +467,7 @@ export function LoginRegisterPanel({
+         )}
+ 
+         {/* ── ACTIVE ACCOUNT ── */}
+-        {userAccountType !== null && (
++        {!showRoleFlow && userAccountType !== null && (
+           <View style={{ flex: 1 }}>
+ 
+             {/* ── TOP: spacer visual — nada interactivo arriba ── */}
+@@ -559,7 +566,7 @@ export function LoginRegisterPanel({
+               {/* Cambiar tipo · Cerrar sesión */}
+               <View style={s.secondaryRow}>
+                 <TouchableOpacity
+-                  onPress={() => { Haptics.selectionAsync().catch(() => {}); onSetAccountType(null); }}
++                  onPress={() => { Haptics.selectionAsync().catch(() => {}); setChoosingRole(true); setAuthStep("role"); }}
+                   activeOpacity={0.8}
+                   style={s.secondaryBtn}
+                 >
+@@ -582,7 +589,7 @@ export function LoginRegisterPanel({
+         )}
+ 
+         {/* FAB close — draggable, posición guardada por pantalla */}
+-        <DraggableFAB
++        {userAccountType !== null && <DraggableFAB
+           screenKey="login-register"
+           buttonKey="main"
+           initialRight={20}
+@@ -595,7 +602,7 @@ export function LoginRegisterPanel({
+               <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
+             </View>
+           </TouchableOpacity>
+-        </DraggableFAB>
++        </DraggableFAB>}
+ 
+         <LinearGradient
+           colors={["transparent", "rgba(0,0,0,0.04)"]}
+diff --git a/artifacts/go-app-mobile/components/herramientas/HerramientasPanel.tsx b/artifacts/go-app-mobile/components/herramientas/HerramientasPanel.tsx
+index e3da739..415dc2a 100644
+--- a/artifacts/go-app-mobile/components/herramientas/HerramientasPanel.tsx
++++ b/artifacts/go-app-mobile/components/herramientas/HerramientasPanel.tsx
+@@ -11,6 +11,8 @@ import {
+   Dimensions,
+ } from "react-native";
+ import { GoDevPanel } from "@/components/dev/GoDevPanel";
++import { LandingVariantSelector } from "@/components/landing/LandingVariantSelector";
++import type { LandingVisualVariant } from "@/components/landing/landingVariant";
+ import { DraggableFAB } from "../DraggableFAB";
+ import { LinearGradient } from "expo-linear-gradient";
+ import { Feather } from "@expo/vector-icons";
+@@ -32,8 +34,10 @@ const GOLD_BDR= "rgba(196,136,58,0.35)";
+ interface HerramientasPanelProps {
+   visible: boolean;
+   onClose: () => void;
+-  handedness: "left" | "right";
+-  toggleHandedness: () => void;
++  landingVariant: LandingVisualVariant;
++  onLandingVariantChange: (value: LandingVisualVariant) => void;
++  goHorizontalPosition: "left" | "center" | "right";
++  setGoHorizontalPosition: (value: "left" | "center" | "right") => void;
+   uiScale: "compacto" | "estandar" | "grande";
+   setUiScale: (k: "compacto" | "estandar" | "grande") => void;
+   userGoPhoneDraft: string;
+@@ -67,7 +71,8 @@ interface HerramientasPanelProps {
+ 
+ export function HerramientasPanel({
+   visible, onClose,
+-  handedness, toggleHandedness,
++  landingVariant, onLandingVariantChange,
++  goHorizontalPosition, setGoHorizontalPosition,
+   uiScale, setUiScale,
+   userGoPhoneDraft, setUserGoPhoneDraft,
+   phoneGoSaved, commitUserPhone,
+@@ -159,6 +164,13 @@ export function HerramientasPanel({
+           contentContainerStyle={{ paddingBottom: contentPadBottom }}
+           keyboardShouldPersistTaps="handled"
+         >
++          {__DEV__ && (
++            <LandingVariantSelector
++              value={landingVariant}
++              onChange={onLandingVariantChange}
++              onPreview={onClose}
++            />
++          )}
+ 
+           {/* ══════════════════════════════════════════════════════════
+               1 · PERSONALIZACIÓN
+@@ -176,16 +188,17 @@ export function HerramientasPanel({
+             <View style={[s.segRow, { marginTop: 10 }]}>
+               {([
+                 { k: "left"  as const, label: t("left_handed"),  icon: "←" },
++                { k: "center" as const, label: lang === "en" ? "Center" : "Centro", icon: "↔" },
+                 { k: "right" as const, label: t("right_handed"), icon: "→" },
+               ]).map(({ k, label, icon }) => {
+-                const active = handedness === k;
++                const active = goHorizontalPosition === k;
+                 return (
+                   <TouchableOpacity
+                     key={k}
+                     onPress={() => {
+-                      if (handedness !== k) {
++                      if (goHorizontalPosition !== k) {
+                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+-                        toggleHandedness();
++                        setGoHorizontalPosition(k);
+                       }
+                     }}
+                     activeOpacity={0.7}
+diff --git a/artifacts/go-app-mobile/data/booking.ts b/artifacts/go-app-mobile/data/booking.ts
+index 879e68d..026bf78 100644
+--- a/artifacts/go-app-mobile/data/booking.ts
++++ b/artifacts/go-app-mobile/data/booking.ts
+@@ -1,5 +1,7 @@
+ import AsyncStorage from "@react-native-async-storage/async-storage";
+ import { expandSearchTerms, normalize } from "./goSearchAliases";
++import { getMobileRequestSession, mobileSession } from "../lib/mobileSession";
++import type { Recovery } from "../lib/sessionManager";
+ 
+ // ── Types ──────────────────────────────────────────────────────────────────────
+ 
+@@ -161,12 +163,6 @@ const KEY_AVAILABILITY_WINDOWS = "go_availability_windows_v1";
+ const KEY_BOOKINGS = "go_bookings_v1";
+ const KEY_MANUAL_BLOCKS = "go_manual_blocks_v1";
+ const KEY_STAFF = "go_staff_v1";
+-const KEY_SUPABASE_SESSION = "go_supabase_session_v1";
+-
+-type StoredSupabaseSession = {
+-  access_token?: string;
+-  user?: { id?: string };
+-};
+ 
+ export class BookingApiError extends Error {
+   readonly status: number;
+@@ -187,18 +183,9 @@ export class BookingAuthenticationError extends BookingApiError {
+   }
+ }
+ 
+-async function getStoredSession(): Promise<StoredSupabaseSession | null> {
+-  try {
+-    const raw = await AsyncStorage.getItem(KEY_SUPABASE_SESSION);
+-    return raw ? (JSON.parse(raw) as StoredSupabaseSession) : null;
+-  } catch {
+-    return null;
+-  }
+-}
+-
+ export async function getAuthenticatedUserId(): Promise<string | null> {
+-  const session = await getStoredSession();
+-  return session?.user?.id ?? null;
++  const recovery = await getMobileRequestSession();
++  return recovery.session?.user?.id ?? null;
+ }
+ 
+ function getApiBase(): string {
+@@ -210,11 +197,12 @@ function getApiBase(): string {
+ 
+ async function performSupabaseRequest<T>(
+   path: string,
+-  init: RequestInit = {},
+-  requireToken = false,
+-  session: StoredSupabaseSession | null = null,
++  init: RequestInit,
++  requireToken: boolean,
++  recovery: Recovery,
+ ): Promise<T> {
+-  const token = session?.access_token;
++  assertRequestSessionCurrent(recovery);
++  const token = recovery.session?.access_token;
+   if (requireToken && !token) throw new BookingAuthenticationError();
+ 
+   const headers = new Headers(init.headers);
+@@ -226,6 +214,7 @@ async function performSupabaseRequest<T>(
+ 
+   const response = await fetch(`${getApiBase()}${path}`, { ...init, headers });
+   const body = await response.text();
++  assertRequestSessionCurrent(recovery);
+   let payload: unknown = null;
+   try {
+     payload = body ? JSON.parse(body) : null;
+@@ -246,11 +235,24 @@ async function performSupabaseRequest<T>(
+ }
+ 
+ let managementWrites: Promise<unknown> = Promise.resolve();
+-async function supabaseApiRequest<T>(path: string, init: RequestInit = {}, requireToken = false, expectedUserId?: string): Promise<T> {
+-  const session = await getStoredSession();
+-  if (expectedUserId && session?.user?.id !== expectedUserId) throw new BookingAuthenticationError();
+-  const run = () => performSupabaseRequest<T>(path, init, requireToken, session);
+-  if (path.startsWith("/supabase/manage") && init.method && init.method !== "GET") {
++function assertRequestSessionCurrent(recovery: Recovery): void {
++  if (!mobileSession.isCurrent(recovery)) {
++    throw new BookingApiError("La sesión ha cambiado. Vuelve a intentarlo.", 409, "SESSION_CHANGED");
++  }
++}
++async function supabaseApiRequest<T>(path: string, init: RequestInit = {}, requireToken = false, expectedUserId?: string, recovered?: Recovery): Promise<T> {
++  const authority = recovered ?? await getMobileRequestSession();
++  const queuedWrite = path.startsWith("/supabase/manage") && !!init.method && init.method !== "GET";
++  const run = async () => {
++    assertRequestSessionCurrent(authority);
++    // A queued write must acquire the current token when it runs, not when it was enqueued.
++    const current = queuedWrite ? await getMobileRequestSession() : authority;
++    assertRequestSessionCurrent(authority);
++    assertRequestSessionCurrent(current);
++    if (expectedUserId && current.session?.user?.id !== expectedUserId) throw new BookingAuthenticationError();
++    return performSupabaseRequest<T>(path, init, requireToken, current);
++  };
++  if (queuedWrite) {
+     const result = managementWrites.then(run, run);
+     managementWrites = result.catch(() => undefined);
+     return result;
+@@ -367,7 +369,8 @@ function remoteBookingPayload(candidate: Omit<Booking, "id"> & { id?: string },
+ }
+ 
+ async function createRemoteBooking(candidate: Omit<Booking, "id"> & { id?: string }): Promise<Booking> {
+-  const session = await getStoredSession();
++  const recovery = await getMobileRequestSession();
++  const session = recovery.session;
+   const customerId = session?.user?.id;
+   if (!session?.access_token || !customerId) throw new BookingAuthenticationError();
+   const payload = await supabaseApiRequest<RemoteBooking[] | RemoteBooking>(
+@@ -377,6 +380,8 @@ async function createRemoteBooking(candidate: Omit<Booking, "id"> & { id?: strin
+       body: JSON.stringify(remoteBookingPayload(candidate, customerId)),
+     },
+     true,
++    customerId,
++    recovery,
+   );
+   const row = Array.isArray(payload) ? payload[0] : payload;
+   if (!row?.id) throw new BookingApiError("Supabase devolvió una reserva inválida.", 502);
+@@ -711,19 +716,19 @@ export async function getBookings(filters?: {
+ 
+   // Las reservas confirmadas viven en Supabase. Los HOLD locales se mantienen
+   // aquí porque son exclusivamente temporales y todavía no se han confirmado.
+-  const session = await getStoredSession();
+-  if (session?.access_token) {
+-    try {
+-      const remote = await supabaseApiRequest<RemoteBooking[]>("/supabase/bookings", {}, true);
++  try {
++    const recovery = await getMobileRequestSession();
++    if (recovery.session?.access_token) {
++      const remote = await supabaseApiRequest<RemoteBooking[]>("/supabase/bookings", {}, true, undefined, recovery);
+       const remoteBookings = remote.map(mapRemoteBooking);
+       const remoteIds = new Set(remoteBookings.map((booking) => booking.id));
+       all = [
+         ...all.filter((booking) => !remoteIds.has(booking.id)),
+         ...remoteBookings,
+       ];
+-    } catch (error) {
+-      console.warn("[booking] No se pudieron cargar reservas remotas:", error);
+     }
++  } catch (error) {
++    console.warn("[booking] No se pudieron cargar reservas remotas:", error);
+   }
+ 
+   if (filters?.businessId) all = all.filter((b) => b.businessId === filters.businessId);
+diff --git a/artifacts/go-app-mobile/lib/sessionEvents.ts b/artifacts/go-app-mobile/lib/sessionEvents.ts
+index 369351e..8553888 100644
+--- a/artifacts/go-app-mobile/lib/sessionEvents.ts
++++ b/artifacts/go-app-mobile/lib/sessionEvents.ts
+@@ -1,4 +1,6 @@
+-const listeners = new Set<() => void>();
++// Keep subscriptions shared across Fast Refresh module generations.
++const runtime = globalThis as typeof globalThis & { __goSessionListeners?: Set<() => void> };
++const listeners = runtime.__goSessionListeners ??= new Set<() => void>();
+ export function notifySessionChanged(): void { for (const listener of listeners) listener(); }
+ export function onSessionChanged(listener: () => void): () => void {
+   listeners.add(listener); return () => { listeners.delete(listener); };

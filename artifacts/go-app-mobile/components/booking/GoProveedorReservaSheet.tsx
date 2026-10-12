@@ -29,6 +29,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import type { GoEntry } from "@/components/AgendaOperativa";
+import { updateGoLog } from "@/lib/goLogStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BOOKING_TEMPLATES } from "@/data/bookingTemplates";
 import { getAvailableReservationSlots, getBookableItems, getStaff, getStaffGoLogBusy, getBookings, crossCalendars, claimSlot, getBookingSlotKey, BLOCKING_STATUSES, type Booking, type BookableItem, type BookingEngineTrace, type ClientBusyInterval, type ReservationSlot, type StaffOption, type Staff } from "@/data/booking";
@@ -1127,7 +1129,7 @@ export function GoProveedorReservaSheet({
 
         const _prv_slotKey = result.booking.slotKey ?? getBookingSlotKey(result.booking);
 
-        const entry = {
+        const entry: GoEntry = {
           id:               entryId,
           intentKey:        "reserva",
           intentLabel:      t("biz_booking_intent_label"),
@@ -1184,8 +1186,7 @@ export function GoProveedorReservaSheet({
           });
         }
 
-        const raw = await AsyncStorage.getItem("go_log_v1");
-        const log = raw ? JSON.parse(raw) : [];
+
         console.log("[WRITE_GO_LOG_SOURCE]", {
           sourceFile:     "GoProveedorReservaSheet.tsx",
           functionName:   "saveBooking → go_log_v1",
@@ -1237,19 +1238,21 @@ export function GoProveedorReservaSheet({
         // Slot fingerprint: businessId|staffId|dateISO|startTime|endTime
         // Evict any existing entry for the same slot before appending the new one.
         const _entryFp = `${(entry as any).businessId ?? ""}|${(entry as any).staffId ?? "any"}|${(entry as any).dateISO ?? ""}|${(entry as any).time ?? ""}|${(entry as any).endTime ?? ""}`;
-        const _logDeduped = log.filter((e: any) => {
-          const isBkType = e.type === "GO_BOOKING" || e.type === "GO_RESERVA";
-          if (!isBkType) return true;
-          const fp = `${e.businessId ?? ""}|${e.staffId ?? "any"}|${e.dateISO ?? ""}|${e.time ?? ""}|${e.endTime ?? ""}`;
-          if (fp === _entryFp && e.id !== entry.id) {
-            console.log("[WRITE_DEDUPE/GoProveedorReservaSheet] evicting duplicate entry", { id: e.id, fp });
-            return false;
-          }
-          return true;
+        await updateGoLog(log => {
+          const _logDeduped = log.filter((e: any) => {
+            const isBkType = e.type === "GO_BOOKING" || e.type === "GO_RESERVA";
+            if (!isBkType) return true;
+            const fp = `${e.businessId ?? ""}|${e.staffId ?? "any"}|${e.dateISO ?? ""}|${e.time ?? ""}|${e.endTime ?? ""}`;
+            if (fp === _entryFp && e.id !== entry.id) {
+              console.log("[WRITE_DEDUPE/GoProveedorReservaSheet] evicting duplicate entry", { id: e.id, fp });
+              return false;
+            }
+            return true;
+          });
+          const _existsIdx = _logDeduped.findIndex((e: any) => e.id === entry.id);
+          if (_existsIdx >= 0) _logDeduped[_existsIdx] = entry; else _logDeduped.push(entry);
+          return { entries: _logDeduped, result: undefined };
         });
-        const _existsIdx = _logDeduped.findIndex((e: any) => e.id === entry.id);
-        if (_existsIdx >= 0) _logDeduped[_existsIdx] = entry; else _logDeduped.push(entry);
-        await AsyncStorage.setItem("go_log_v1", JSON.stringify(_logDeduped));
       } catch (logErr) {
         console.error("[SaveBooking] go_log_v1 error (no crítico):", logErr);
       }

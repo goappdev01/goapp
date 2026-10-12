@@ -1,7 +1,7 @@
+import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import React, { useState } from "react";
 import {
   Dimensions,
-  Modal,
   SafeAreaView,
   ScrollView,
   StyleSheet,
@@ -21,6 +21,8 @@ import { ZonasScreen }      from "./ZonasScreen";
 import { ConsumoScreen }    from "./ConsumoScreen";
 import { GoRoadmapScreen, RoadmapNode } from "./GoRoadmapScreen";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
+import { useGoView } from "@/contexts/GoViewContext";
 
 const { width: SW } = Dimensions.get("window");
 
@@ -668,9 +670,12 @@ const SECTIONS: Array<{
 interface Props {
   visible:  boolean;
   onClose:  () => void;
+  onOpenContext?: () => void;
 }
 
-export function GoAdminDashboard({ visible, onClose }: Props) {
+export function GoAdminDashboard({ visible, onClose, onOpenContext }: Props) {
+  const adminAccess = useAdminAccess();
+  const goView = useGoView();
   const insets  = useSafeAreaInsets();
   const { lang } = useLanguage();
   const [section, setSection]           = useState<AdminSection>("overview");
@@ -705,6 +710,8 @@ export function GoAdminDashboard({ visible, onClose }: Props) {
     section !== "overview"    ? (lang === 'en' ? (currentSec?.sublabel_en ?? currentSec?.sublabel ?? "") : (currentSec?.sublabel ?? "")) :
                                 (lang === 'en' ? "Internal system control" : "Control interno del sistema");
 
+  if (!adminAccess.allowed || !goView.isAdminView) return null;
+
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
       <StatusBar style="light" />
@@ -719,6 +726,9 @@ export function GoAdminDashboard({ visible, onClose }: Props) {
             <Text style={s.title}>{headerTitle}</Text>
             <Text style={s.subtitle}>{headerSub}</Text>
           </View>
+          {goView.isOwner && onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ padding: 8 }}>
+            <Text style={{ color: "#FFFFFF", fontSize: 12 }}>Cambiar contexto</Text>
+          </TouchableOpacity>}
         </View>
 
         {/* ── Overview ── */}
