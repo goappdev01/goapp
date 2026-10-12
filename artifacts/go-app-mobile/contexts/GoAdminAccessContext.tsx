@@ -6,17 +6,18 @@ import { onSessionChanged } from "@/lib/sessionEvents";
 type AdminAccessValue = AdminAccess & {
   isOwner: boolean;
   checking: boolean;
+  unavailable: boolean;
   refresh: () => Promise<boolean>;
   refreshOwner: (expectedUserId?: string) => Promise<boolean>;
 };
 const denied = (userId: string | null = null): AdminAccess => ({ userId, allowed: false, level: null, permissions: [] });
 const Context = createContext<AdminAccessValue>({
-  ...denied(), isOwner: false, checking: false,
+  ...denied(), isOwner: false, checking: false, unavailable: false,
   refresh: async () => false, refreshOwner: async () => false,
 });
 
 export function GoAdminAccessProvider({ children }: { children: React.ReactNode }) {
-  const [access, setAccess] = useState<AdminAccess & { checking: boolean }>({ ...denied(), checking: false });
+  const [access, setAccess] = useState<AdminAccess & { checking: boolean; unavailable: boolean }>({ ...denied(), checking: false, unavailable: false });
   const revision = useRef(0);
   const mounted = useRef(false);
   const inFlight = useRef<{ revision: number; result: Promise<AdminAccess>; promise: Promise<boolean> } | null>(null);
@@ -24,15 +25,15 @@ export function GoAdminAccessProvider({ children }: { children: React.ReactNode 
     const version = revision.current;
     if (inFlight.current?.revision === version) return inFlight.current;
     // Identity can retain a cosmetic preference during revalidation; privileges cannot.
-    setAccess(current => ({ ...denied(current.userId), checking: true }));
+    setAccess(current => ({ ...denied(current.userId), checking: true, unavailable: false }));
     const result = getAdminAccess().then(next => {
       const current = mounted.current && version === revision.current && AppState.currentState === "active";
       const granted = current && next.allowed === true;
       const resolved = granted ? next : denied(current ? next.userId : null);
-      if (mounted.current && version === revision.current) setAccess({ ...resolved, checking: false });
+      if (mounted.current && version === revision.current) setAccess({ ...resolved, checking: false, unavailable: false });
       return resolved;
     }).catch(() => {
-      if (mounted.current && version === revision.current) setAccess({ ...denied(), checking: false });
+      if (mounted.current && version === revision.current) setAccess(current => ({ ...denied(current.userId), checking: false, unavailable: true }));
       return denied();
     }).finally(() => {
       if (inFlight.current?.result === result) inFlight.current = null;
@@ -55,7 +56,7 @@ export function GoAdminAccessProvider({ children }: { children: React.ReactNode 
     mounted.current = true;
     const invalidate = (preserveIdentity = false) => {
       revision.current++;
-      setAccess(current => ({ ...denied(preserveIdentity ? current.userId : null), checking: preserveIdentity }));
+      setAccess(current => ({ ...denied(preserveIdentity ? current.userId : null), checking: preserveIdentity, unavailable: false }));
     };
     const unsubscribe = onSessionChanged(() => { invalidate(); void refresh(); });
     const subscription = AppState.addEventListener("change", next => {

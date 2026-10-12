@@ -59,6 +59,7 @@ function render({
     anyOperationalPanelOpen: false, insets: { bottom: 34 }, SYSTEM_MARGIN_Y: 0, orbitWrapSize: 300,
     nextAppointment: null, isActivelyCreating: false, anyOverlayOpen: false, nextAptMinimized: true,
     nextAptPanelH: 0, allPendientes: [], rutasMode: false, cambiosOpen: false, pendingPanelH: 0,
+    contentBottom: bottom => bottom, landingHelpBottom: 354, setLandingHelpH() {},
     workGuideHideAnim: 1, orbitSecondLevel: null, lang: 'es',
     tutReservaRealizada: tutorialsCompleted, tutGoRealizado: tutorialsCompleted,
     tutMarketplaceRealizado: tutorialsCompleted, workGuideDismissed,

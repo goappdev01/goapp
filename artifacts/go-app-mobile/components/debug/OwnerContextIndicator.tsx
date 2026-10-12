@@ -1,11 +1,22 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
-import { Modal as NativeModal, Platform, View, Text, StyleSheet, type ModalProps } from "react-native";
+import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Modal as NativeModal, Platform, View, Text, Image, StyleSheet, type ModalProps } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { FullWindowOverlay } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useGoView } from "@/contexts/GoViewContext";
 import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
 
+// Presentation only: extend the Landing behind the owner label's existing gutter.
+const LandingBackground = createContext({ show: (_visible: boolean) => {}, topInset: 0 });
+export function useOwnerLandingBackground(visible: boolean) {
+  const { show, topInset } = useContext(LandingBackground);
+  useLayoutEffect(() => {
+    show(visible);
+    return () => show(false);
+  }, [visible, show]);
+  return visible ? topInset : 0;
+}
 const ModalLayers = createContext({ count: 0, change: (_delta: number) => {} });
 function useLabel() {
   const view = useGoView();
@@ -32,14 +43,23 @@ function Indicator({ label }: { label: string }) {
 export function OwnerContextSurface({ children }: { children: React.ReactNode }) {
   const label = useLabel();
   const [count, setCount] = useState(0);
-  return <ModalLayers.Provider value={{ count, change: delta => setCount(value => Math.max(0, value + delta)) }}>
+  const [landingVisible, setLandingVisible] = useState(false);
+  return <LandingBackground.Provider value={{ show: setLandingVisible, topInset: label ? 22 : 0 }}><ModalLayers.Provider value={{ count, change: delta => setCount(value => Math.max(0, value + delta)) }}>
     <View style={[styles.surface, label ? { paddingTop: 22 } : undefined]}>
+      {label && landingVisible && <View pointerEvents="none" style={StyleSheet.absoluteFill}
+        testID="landing-safe-area-background" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        <Image source={require("../../assets/images/earth_bg.png")} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(2,4,12,0.51)" }]} />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(3,6,22,0.12)" }]} />
+        <LinearGradient colors={["rgba(2,4,12,0.72)", "transparent"]}
+          start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 0.22 }} style={StyleSheet.absoluteFill} />
+      </View>}
       {children}
       {label && (Platform.OS === "ios"
         ? <FullWindowOverlay unstable_accessibilityContainerViewIsModal={false}><Indicator label={label} /></FullWindowOverlay>
         : count === 0 ? <Indicator label={label} /> : null)}
     </View>
-  </ModalLayers.Provider>;
+  </ModalLayers.Provider></LandingBackground.Provider>;
 }
 /** Native modal and callbacks unchanged; reserve room for the passive owner label. */
 export function OwnerContextModal({ children, ...props }: ModalProps) {

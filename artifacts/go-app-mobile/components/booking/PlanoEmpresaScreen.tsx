@@ -51,7 +51,7 @@ import {
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { type PlantillaItem } from "@/data/goSectorData";
 import { getBusinessIcon } from "@/lib/businessIcons";
-import { getBusinessDemoProfessionals, visibleBusinessDemoElements, businessDemoElementRequiresReview } from "@/data/businessDemoStore";
+import { visibleBusinessDemoElements, businessDemoElementRequiresReview } from "@/data/businessDemoStore";
 
 // ── Native-only gesture helper ─────────────────────────────────────────────────
 // blocksExternalGestureHandlers() is unavailable on web — guard it safely.
@@ -1839,7 +1839,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
     let active = true;
     floorRepository.loadFloorPlan(businessId).then(async saved => {
       if (!active) return;
-      if (demo && (getBusinessDemoProfessionals(bizConfig, businessId).length || saved?.elements.some(element => element.demoKind === "professional"))) {
+      if (demo) { // Both professionals and configured physical spaces use the same persisted DEMO plan.
         const synced = await demo.reconcileProfessionalPlan();
         if (!active) return;
         const visible = visibleBusinessDemoElements(synced);

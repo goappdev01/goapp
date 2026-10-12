@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import * as Location from "expo-location";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getAuthenticatedUserId } from "@/data/booking";
+import {
+  assistantZoneKey, readAssistantZonePreference, writeAssistantZonePreference, sameAssistantZonePreference,
+  parseAssistantZonePreference, type AssistantZonePreference, type AssistantZoneScope,
+} from "@/lib/assistantZonePreference";
+export { ASSISTANT_ZONE_KEY } from "@/lib/assistantZonePreference";
 import {
   emptyBookingRequest,
   normalizeBookingText,
@@ -43,8 +48,9 @@ export type AssistantPanel =
   | null;
 const INTRO =
   "¿Qué necesitas hacer?\nPuedo ayudarte con reservas y gestionar tareas o actividades para tu calendario. Dímelo o escríbelo aquí.";
-export const ASSISTANT_ZONE_KEY = "go_booking_assistant_zone_v1";
-export function useBookingAssistant() {
+export function useBookingAssistant({ visible = true, scope = null, scopeReady = true }: {
+  visible?: boolean; scope?: AssistantZoneScope | null; scopeReady?: boolean;
+} = {}) {
   const [messages, setMessages] = useState([
     { id: 0, role: "assistant", text: INTRO },
   ]);
@@ -76,8 +82,28 @@ export function useBookingAssistant() {
   const placeGeneration = useRef(0);
   const pendingPlaceRef = useRef<typeof pendingPlace>(null);
   const placeQueryRef = useRef("");
-  const [radiusText, setRadiusText] = useState("5");
-  const [saveZone, setSaveZone] = useState(false);
+  const [radiusText, setRadiusTextState] = useState("5");
+  const [pendingCurrentLocation, setPendingCurrentLocation] = useState(false);
+  const currentLocationRef = useRef(false);
+  const [habitual, setHabitual] = useState<{ key: string | null; value: AssistantZonePreference | null }>({ key: null, value: null });
+  const habitualRef = useRef<AssistantZonePreference | null>(null);
+  const [zoneLoading, setZoneLoading] = useState(false);
+  const [zoneSaving, setZoneSaving] = useState(false);
+  const writingZone = useRef(false);
+  const preferenceVersion = useRef(0);
+  const draftVersion = useRef(0);
+  const hydration = useRef<Promise<void>>(Promise.resolve());
+  const scopeKey = scope ? assistantZoneKey(scope) : null;
+  const currentScope = useRef(scopeKey);
+  currentScope.current = scopeKey;
+  const readyScope = useRef(scopeReady);
+  readyScope.current = scopeReady;
+  const zoneScope = useRef(scopeKey);
+  const presentation = useRef<{ visible: boolean; key: string | null }>({ visible: false, key: null });
+  const mounted = useRef(true);
+  const panelRef = useRef(panel);
+  panelRef.current = panel;
+  const habitualZone = scopeReady && habitual.key === scopeKey ? habitual.value : null;
   const awaiting = useRef<AwaitingField>(null);
   const selection = useRef<{
     business?: Business;
@@ -103,6 +129,93 @@ export function useBookingAssistant() {
     zoneRef.current = value;
     setZone(value);
   };
+  function rememberHabitual(key: string | null, value: AssistantZonePreference | null) { habitualRef.current = value; setHabitual({ key, value }); }
+  function setRadiusText(text: string) { draftVersion.current++; setRadiusTextState(text); }
+  function draftPreference(): AssistantZonePreference | null {
+    const radiusKm = Number(radiusText.replace(",", "."));
+    if (!Number.isFinite(radiusKm) || radiusKm <= 0) return null;
+    if (currentLocationRef.current) return { mode: "current-location", radiusKm };
+    const place = pendingPlaceRef.current || (zoneRef.current?.label === placeText ? zoneRef.current : null);
+    return place ? parseAssistantZonePreference({ mode: "fixed", zone: { ...place, radiusKm } }) : null;
+  }
+  const saveZone = sameAssistantZonePreference(habitualZone, draftPreference());
+  function prepareZoneDraft(preference: AssistantZonePreference | null) {
+    cancelPlaceSearch();
+    const fixed = preference?.mode === "fixed" ? preference.zone : preference ? null : zoneRef.current;
+    const current = preference?.mode === "current-location" || (!preference && fixed?.source === "gps");
+    currentLocationRef.current = !!current;
+    setPendingCurrentLocation(!!current);
+    pendingPlaceRef.current = fixed;
+    setPendingPlace(fixed);
+    placeQueryRef.current = fixed?.label || "";
+    setPlaceText(fixed?.label || "");
+    setPlaces([]);
+    setPlaceNotice("");
+    setRadiusTextState(String(preference?.mode === "current-location" ? preference.radiusKm : fixed?.radiusKm || 5));
+  }
+  function openZonePanel() {
+    prepareZoneDraft(habitualZone);
+    panelRef.current = "zone";
+    setPanel("zone");
+  }
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; preferenceVersion.current++; }; }, []);
+  useEffect(() => {
+    if (!visible) presentation.current.visible = false;
+    if (!scopeReady) { preferenceVersion.current++; if (zoneScope.current !== scopeKey) invalidate(); return; }
+    if (zoneScope.current !== scopeKey) {
+      zoneScope.current = scopeKey;
+      invalidate(); updateZone(null); lastPlace.current = null;
+      updateRequest({ ...req.current, placeQuery: null, radiusKm: null });
+      rememberHabitual(scopeKey, null); prepareZoneDraft(null);
+    }
+    if (!visible) { preferenceVersion.current++; setZoneLoading(false); return; }
+    const restoreDraft = !presentation.current.visible || presentation.current.key !== scopeKey;
+    presentation.current = { visible: true, key: scopeKey };
+    const version = ++preferenceVersion.current, draft = draftVersion.current;
+    if (!scope) { rememberHabitual(null, null); setZoneLoading(false); return; }
+    setZoneLoading(true);
+    const valid = () => mounted.current && version === preferenceVersion.current && currentScope.current === scopeKey;
+    hydration.current = readAssistantZonePreference(scope).then(preference => {
+      if (!valid()) return;
+      rememberHabitual(scopeKey, preference);
+      if (restoreDraft && draft === draftVersion.current) {
+        if (preference?.mode === "fixed" && !zoneRef.current && !req.current.placeQuery) {
+          updateZone(preference.zone); lastPlace.current = preference.zone.label;
+          updateRequest({ ...req.current, placeQuery: preference.zone.label.slice(0, 200), radiusKm: preference.zone.radiusKm });
+        }
+        if (panelRef.current === "zone") prepareZoneDraft(preference);
+        else if (preference) setRadiusTextState(String(preference.mode === "fixed" ? preference.zone.radiusKm : preference.radiusKm));
+      }
+    }).catch(() => {
+      if (valid()) { rememberHabitual(scopeKey, null); setNotice("No he podido recuperar tu zona habitual. Vuelve a abrir GO para intentarlo de nuevo."); }
+    }).finally(() => { if (valid()) setZoneLoading(false); });
+    return () => { preferenceVersion.current++; };
+  }, [visible, scopeKey, scopeReady]);
+  async function rememberZone() {
+    if (writingZone.current || zoneLoading || !scopeReady) return;
+    if (!scope) { setNotice("Inicia sesión para guardar tu zona habitual."); return; }
+    const preference = draftPreference();
+    if (!preference) { setNotice("Selecciona una ubicación válida y una distancia mayor que cero antes de guardarla."); return; }
+    const key = scopeKey;
+    writingZone.current = true; setZoneSaving(true); setNotice("");
+    preferenceVersion.current++; // An earlier hydration must not replace this explicit save.
+    try {
+      const saved = await writeAssistantZonePreference(scope, preference, async () => {
+        const user = await getAuthenticatedUserId();
+        return readyScope.current && currentScope.current === key && user === scope.userId;
+      });
+      if (mounted.current && currentScope.current === key) {
+        rememberHabitual(key, saved);
+        setPlaceNotice("Zona habitual guardada. Aplicarla a una búsqueda es una acción independiente.");
+      }
+    } catch {
+      if (mounted.current && currentScope.current === key)
+        setNotice("No he podido guardar tu zona habitual. Comprueba tu sesión e inténtalo de nuevo.");
+    } finally {
+      writingZone.current = false;
+      if (mounted.current) setZoneSaving(false);
+    }
+  }
   function check(token: number) {
     if (token !== generation.current) throw new Error("REQUEST_CANCELLED");
   }
@@ -163,10 +276,12 @@ export function useBookingAssistant() {
       } catch { /* Coordinates remain real and visible when reverse geocoding fails. */ }
     }
     return { label, latitude, longitude,
-      radiusKm: zoneRef.current?.radiusKm || req.current.radiusKm || 5,
+      radiusKm: zoneRef.current?.radiusKm || req.current.radiusKm || (habitualRef.current?.mode === "current-location" ? habitualRef.current.radiusKm : habitualRef.current?.zone.radiusKm) || 5,
       source: "gps" as const };
   }
   async function advance(next: BookingRequest, token: number) {
+    await hydration.current;
+    check(token);
     if (!next.serviceQuery && !next.businessQuery) {
       ask("serviceQuery", "¿Qué servicio o actividad quieres reservar?");
       return;
@@ -188,7 +303,6 @@ export function useBookingAssistant() {
         return;
       }
       if (resolved.length > 1) {
-        setSaveZone(false);
         setPlaceText(next.placeQuery);
         setPlaces(resolved);
         setRadiusText(String(next.radiusKm || zoneRef.current?.radiusKm || 5));
@@ -395,6 +509,7 @@ export function useBookingAssistant() {
     setPlaceBusy(false);
   }
   function setPlaceQuery(text: string) {
+    draftVersion.current++; currentLocationRef.current = false; setPendingCurrentLocation(false);
     cancelPlaceSearch();
     placeQueryRef.current = "";
     pendingPlaceRef.current = null;
@@ -404,6 +519,7 @@ export function useBookingAssistant() {
     setPlaceText(text);
   }
   function pickPlace(place: Place, source: SearchZone["source"] = "manual") {
+    draftVersion.current++; currentLocationRef.current = source === "gps"; setPendingCurrentLocation(source === "gps");
     cancelPlaceSearch();
     const selected = { ...place, source };
     pendingPlaceRef.current = selected;
@@ -469,8 +585,6 @@ export function useBookingAssistant() {
     setSlots([]);
     setCreated(null);
     setPanel(null);
-    if (saveZone)
-      await AsyncStorage.setItem(ASSISTANT_ZONE_KEY, JSON.stringify(selected));
     if (next.serviceQuery || next.businessQuery)
       await work("Buscando…", (token) => advance(next, token));
   }
@@ -552,7 +666,13 @@ export function useBookingAssistant() {
   return {
     messages,
     request,
-    zone,
+    zone: scopeReady && zoneScope.current === scopeKey ? zone : null,
+    habitualZone,
+    zoneLoading: !scopeReady || zoneLoading || (!!scope && habitual.key !== scopeKey),
+    zoneSaving,
+    pendingCurrentLocation: scopeReady && zoneScope.current === scopeKey && pendingCurrentLocation,
+    rememberZone,
+    openZonePanel,
     panel,
     phase,
     busy,
@@ -566,14 +686,14 @@ export function useBookingAssistant() {
     bookings,
     names,
     cancelTarget,
-    placeText,
-    placeBusy,
+    placeText: scopeReady && zoneScope.current === scopeKey ? placeText : "",
+    placeBusy: scopeReady && zoneScope.current === scopeKey && placeBusy,
     placeNotice,
-    pendingPlace,
+    pendingPlace: scopeReady && zoneScope.current === scopeKey ? pendingPlace : null,
     setPlaceQuery,
     pickPlace,
-    places,
-    radiusText,
+    places: scopeReady && zoneScope.current === scopeKey ? places : [],
+    radiusText: scopeReady && zoneScope.current === scopeKey ? radiusText : "5",
     saveZone,
     selection,
     lock,
@@ -587,7 +707,6 @@ export function useBookingAssistant() {
     setPlaceText,
     setPlaces,
     setRadiusText,
-    setSaveZone,
     updateZone,
     updateRequest,
     say,

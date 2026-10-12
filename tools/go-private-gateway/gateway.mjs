@@ -31,8 +31,48 @@ async function login(body, request) {
   } catch {return {status:502,body:{error:'No se pudo iniciar sesión.'}};}
 }
 
+const refreshPath = '/api/supabase/auth/refresh';
+const maxRefreshBytes = 12288;
+const validRefreshToken = token => typeof token === 'string' && token.length > 0 && token.length <= 8192
+  && !/[\s\u0000-\u001f\u007f]/u.test(token);
+
+// Authenticate renewal with the existing opaque credential. Data routes retain their own authorization.
+async function refreshSession(body, request) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'refresh_token') || !validRefreshToken(body.refresh_token)) {
+    return {status:400,body:{code:'REFRESH_TOKEN_REQUIRED',error:'A valid refresh token is required'}};
+  }
+  try {
+    const response = await request(upstream + refreshPath, {
+      method:'POST', redirect:'error', signal:AbortSignal.timeout(15000),
+      headers:{Accept:'application/json','Content-Type':'application/json'},
+      body:JSON.stringify({refresh_token:body.refresh_token}),
+    });
+    if (!response.headers.get('content-type')?.includes('application/json')) throw Error('Invalid response');
+    const reader=response.body.getReader(), chunks=[];let size=0;
+    try {
+      while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;
+        if(size>1048576)throw Error('Response too large');chunks.push(value);}
+    } finally {await reader.cancel();}
+    const payload=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if(response.status!==200) {
+      const unrecoverable=response.status===401 && payload?.code==='SESSION_UNRECOVERABLE';
+      return {status:[400,401,403,429].includes(response.status)?response.status:502,
+        body:{code:unrecoverable?'SESSION_UNRECOVERABLE':'SESSION_REFRESH_FAILED',
+          error:unrecoverable?'Inicia sesión para continuar.':'No se pudo renovar la sesión en este momento.'}};
+    }
+    if(typeof payload?.access_token!=='string' || !/^[A-Za-z0-9._-]{1,8192}$/.test(payload.access_token)
+      || !validRefreshToken(payload?.refresh_token) || !uuid.test(payload?.user?.id ?? '')
+      || ['expires_at','expires_in'].some(key=>payload[key]!==undefined
+        && (typeof payload[key]!=='number' || !Number.isFinite(payload[key]) || payload[key]<=0))) throw Error('Invalid session');
+    return {status:200,body:{access_token:payload.access_token,refresh_token:payload.refresh_token,
+      expires_at:payload.expires_at,expires_in:payload.expires_in,user:payload.user}};
+  } catch {return {status:502,body:{code:'SESSION_REFRESH_FAILED',error:'No se pudo renovar la sesión en este momento.'}};}
+}
+
 export async function respond({method, url, authorization, body}, request = fetch) {
   if (method === 'POST' && url === loginPath) return login(body,request);
+  if (method === 'POST' && url === refreshPath) return refreshSession(body,request);
   if (method !== 'GET') return {status:405, body:{error:'Remote verification is read-only'}};
   if (!allowed.has(url)) return {status:404, body:{error:'Route not available for remote verification'}};
   if (url !== '/api/healthz' && !/^Bearer [A-Za-z0-9._-]{1,8192}$/.test(authorization ?? '')) {
@@ -78,7 +118,7 @@ export async function respond({method, url, authorization, body}, request = fetc
 }
 
 export function createGateway(request=fetch) {
-  const counts = new Map(), attempts = new Map();
+  const counts = new Map(), attempts = new Map(), renewals = new Map();
   const count = (map,key,now) => {
     for (const [k,v] of map) if(v.until < now)map.delete(k);
     const entry=map.get(key) ?? {until:now+60000,count:0};map.set(key,entry);return ++entry.count;
@@ -89,16 +129,18 @@ export function createGateway(request=fetch) {
     const key=req.socket.remoteAddress, now=Date.now();
     if(count(counts,key,now)>60)return send({status:429,body:{error:'Retry later'}});
     const authLogin=req.method==='POST' && req.url===loginPath;
+    const authRefresh=req.method==='POST' && req.url===refreshPath;
     let body;
-    if(authLogin){
-      if(count(attempts,key,now)>5)return send({status:429,body:{error:'Too many login attempts. Retry in one minute.'}});
+    if(authLogin || authRefresh){
+      if(count(authLogin?attempts:renewals,key,now)>5)return send({status:429,body:{error:authLogin?'Too many login attempts. Retry in one minute.':'Too many renewal attempts. Retry in one minute.'}});
+      const maxBytes=authLogin?maxLoginBytes:maxRefreshBytes;
       if(!/^application\/json(?:\s*;|$)/i.test(req.headers['content-type'] ?? '') || req.headers['content-encoding'])return send({status:415,body:{error:'JSON required'}});
-      if(Number(req.headers['content-length'])>maxLoginBytes)return send({status:413,body:{error:'Login request too large'}});
+      if(Number(req.headers['content-length'])>maxBytes)return send({status:413,body:{error:authLogin?'Login request too large':'Renewal request too large'}});
       const chunks=[];let size=0;
       try{
-        for await(const chunk of req){size+=chunk.length;if(size>maxLoginBytes)return send({status:413,body:{error:'Login request too large'}});chunks.push(chunk);}
+        for await(const chunk of req){size+=chunk.length;if(size>maxBytes)return send({status:413,body:{error:authLogin?'Login request too large':'Renewal request too large'}});chunks.push(chunk);}
         body=JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      }catch{return send({status:400,body:{error:'Invalid login request'}});}
+      }catch{return send({status:400,body:{error:authLogin?'Invalid login request':'Invalid renewal request'}});}
     }
     const result=await respond({method:req.method,url:req.url,authorization:req.headers.authorization,body},request);
     send(result);

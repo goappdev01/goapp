@@ -1,3 +1,4 @@
+import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -44,14 +45,19 @@ function fixture({ marker = null, storedSession = null, me = async () => Respons
     async getItem(key) { return storage.get(key) ?? null; },
     async setItem(key, value) { storage.set(key, value); },
     async removeItem(key) { storage.delete(key); },
+    async multiRemove(keys) { keys.forEach(key => storage.delete(key)); },
   };
   const AppState = { currentState: 'active', addEventListener: (_event, fn) => {
     subscriptions.set('state', fn); return { remove: () => subscriptions.delete('state') };
   } };
+  let sessionApi;
   const context = {
     exports: {}, process: { env: { EXPO_PUBLIC_API_URL: 'https://test.invalid/api' } },
     AbortController, setTimeout, clearTimeout,
-    require: name => { assert.equal(name, '@react-native-async-storage/async-storage'); return { default: AsyncStorage }; },
+    require: name => {
+      if (name === './authSession') return sessionApi;
+      assert.equal(name, '@react-native-async-storage/async-storage'); return { default: AsyncStorage };
+    },
     AsyncStorage, AppState, pendingRegistrationRef, authContextRef, authInputRevisionRef: { current: 0 },
     console: { warn: (...args) => logs.push(args) },
     Linking: { addEventListener: (_event, fn) => { subscriptions.set('url', fn); return { remove: () => subscriptions.delete('url') }; } },
@@ -66,6 +72,8 @@ function fixture({ marker = null, storedSession = null, me = async () => Respons
     setAuthEmail: value => { state.email = value; context.authEmail = value; }, setAuthPassword: value => { state.password = value; },
     setSelectedRole: value => { state.role = value; }, setAuthError: value => { state.error = value; }, setAuthBusy: value => { state.busy = value; },
   };
+  sessionApi = loadAuthSession(context, AsyncStorage, { notifySessionChanged: context.notifySessionChanged, onSessionChanged: context.onSessionChanged });
+  Object.assign(context, sessionApi);
   vm.createContext(context); vm.runInContext(transpile(helperSource), context);
   Object.assign(context, context.exports);
   vm.runInContext(transpile(`${errorMessage.getText(panel)}
@@ -126,8 +134,9 @@ test('a stored session for the confirmed same account is validated before automa
   const f = fixture({ storedSession: session }); await settle(); f.mark(); await f.resume();
   assert.equal(f.state.account, 'usuario'); assert.equal(f.state.step, 'role');
   assert.equal(f.requests.length, 1); assert.equal(f.requests[0].url, 'https://test.invalid/api/supabase/auth/me');
-  assert.equal(f.requests[0].init.headers.Authorization, 'Bearer test-only-token');
-  assert.equal(f.storage.get(sessionKey), JSON.stringify(session));
+  assert.equal(new Headers(f.requests[0].init.headers).get('Authorization'), 'Bearer test-only-token');
+  assert.deepEqual(JSON.parse(JSON.stringify(await f.context.readAuthSession())), session);
+  assert.equal(f.storage.has(sessionKey), false);
 });
 
 test('unconfirmed, mismatched and rejected sessions fall back to login without deleting the session', async () => {
@@ -141,7 +150,8 @@ test('unconfirmed, mismatched and rejected sessions fall back to login without d
   for (const response of responses) {
     const f = fixture({ storedSession: session, me: async () => response() }); await settle(); f.mark(); await f.resume();
     assert.equal(f.state.mode, 'login'); assert.equal(f.state.account, null);
-    assert.equal(f.storage.get(sessionKey), JSON.stringify(session));
+    assert.deepEqual(JSON.parse(JSON.stringify(await f.context.readAuthSession())), session);
+  assert.equal(f.storage.has(sessionKey), false);
   }
 });
 
@@ -156,7 +166,7 @@ test('logout or a replaced session cancels an older return validation', async ()
   for (const notify of [true, false]) {
     let release; const blocked = new Promise(resolve => { release = resolve; });
     const f = fixture({ storedSession: session, me: async () => { await blocked; return Response.json(confirmed); } });
-    await settle(); f.mark(); await f.resume(); f.storage.delete(sessionKey);
+    await settle(); f.mark(); await f.resume(); f.context.__credentials.secure.delete('go_auth_session_v2');
     if (notify) f.context.notifySessionChanged();
     release(); await settle();
     assert.equal(f.state.account, null); assert.equal(f.storage.has(sessionKey), false);
@@ -173,7 +183,7 @@ test('unmount removes subscriptions and prevents continuation from an obsolete v
 test('registration that already returns a session preserves existing immediate authentication', async () => {
   const f = fixture({ registered: session }); await settle(); await f.register();
   assert.equal(f.state.account, 'usuario'); assert.equal(f.state.step, 'role');
-  assert.equal(f.storage.has(pendingKey), false); assert.equal(JSON.parse(f.storage.get(sessionKey)).access_token, session.access_token);
+  assert.equal(f.storage.has(pendingKey), false); assert.equal((await f.context.readAuthSession()).access_token, session.access_token);
 });
 
 test('editing email clears the old error and a new submit uses the new email without automatic retries', async () => {

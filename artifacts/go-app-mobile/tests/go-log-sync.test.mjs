@@ -1,3 +1,4 @@
+import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -14,6 +15,7 @@ function load(file, modules) {
       throw new Error("Unexpected import: " + name);
     },
   };
+  if (file === "lib/bookingAssistant.ts") modules["./authSession"] = loadAuthSession(scope, modules["@react-native-async-storage/async-storage"].default);
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, scope);

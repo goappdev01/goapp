@@ -9,8 +9,12 @@ import { pathToFileURL } from 'node:url';
 test('mobile saves cloud records, preserves form fields, archives and reports failures', async () => {
  const dir=await mkdtemp(path.join(tmpdir(),'go-mobile-sync-'));
  const outfile=path.join(dir,'booking.mjs');
- const storage=new Map();globalThis.__storageMock={getItem:async k=>storage.get(k)??null,setItem:async(k,v)=>storage.set(k,v)};
- await build({entryPoints:['../go-app-mobile/data/booking.ts'],outfile,bundle:true,platform:'node',format:'esm',plugins:[{name:'storage-mock',setup(b){b.onResolve({filter:/^@react-native-async-storage\/async-storage$/},()=>({path:'storage',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:'export default globalThis.__storageMock;',loader:'js'}));}}]});
+ const storage=new Map(),secure=new Map();globalThis.__storageMock={getItem:async k=>storage.get(k)??null,setItem:async(k,v)=>storage.set(k,v),removeItem:async k=>storage.delete(k),multiRemove:async keys=>keys.forEach(k=>storage.delete(k))};
+ globalThis.__secureMock={get:async k=>secure.get(k)??null,set:async(k,v)=>secure.set(k,v),remove:async k=>secure.delete(k)};
+ await build({stdin:{contents:'export * from "../go-app-mobile/data/booking.ts"; export {clearAuthSession} from "../go-app-mobile/lib/authSession.ts";',resolveDir:process.cwd()},outfile,bundle:true,platform:'node',format:'esm',plugins:[{name:'native-session-mocks',setup(b){
+  b.onResolve({filter:/^(@react-native-async-storage\/async-storage|expo-secure-store|react-native)$/},args=>({path:args.path,namespace:'mock'}));
+  b.onLoad({filter:/.*/,namespace:'mock'},args=>({contents:args.path==='react-native'?'export const Platform={OS:"ios"};':args.path==='expo-secure-store'?'export const WHEN_UNLOCKED_THIS_DEVICE_ONLY=5,isAvailableAsync=async()=>true,getItemAsync=globalThis.__secureMock.get,setItemAsync=globalThis.__secureMock.set,deleteItemAsync=globalThis.__secureMock.remove;':'export default globalThis.__storageMock;',loader:'js'}));
+ }}]});
  const api=await import(pathToFileURL(outfile));const original=globalThis.fetch;
  const user='11111111-1111-4111-8111-111111111111',business='22222222-2222-4222-8222-222222222222',service='33333333-3333-4333-8333-333333333333';
  storage.set('go_supabase_session_v1',JSON.stringify({access_token:'test',user:{id:user}}));
@@ -50,6 +54,8 @@ test('mobile saves cloud records, preserves form fields, archives and reports fa
   assert.equal((await api.getCloudConfiguration()).businessId,business);
   await api.saveCloudConfiguration(business,{businessName:'Piloto'});
   fail=true;await assert.rejects(api.saveBusiness(b),e=>e.status===503);assert.equal(storage.has('go_businesses_v1'),false);
-  storage.delete('go_supabase_session_v1');await assert.rejects(api.getOwnedBusinesses(),api.BookingAuthenticationError);
- }finally{globalThis.fetch=original;delete globalThis.__storageMock;await rm(dir,{recursive:true,force:true});}
+  assert.equal(storage.has('go_supabase_session_v1'),false,'legacy credentials migrated');
+  assert.ok(secure.has('go_auth_session_v2'),'protected session used by real requests');
+  await api.clearAuthSession();assert.equal(secure.size,0);await assert.rejects(api.getOwnedBusinesses(),api.BookingAuthenticationError);
+ }finally{globalThis.fetch=original;delete globalThis.__storageMock;delete globalThis.__secureMock;await rm(dir,{recursive:true,force:true});}
 });

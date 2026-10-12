@@ -60,6 +60,19 @@ export function updateGoLog<T>(
     next.entries = next.entries.map(entry => {
       if (ambiguousIds) return entry; // Let existing hydration repair legacy IDs without assigning ownership.
       const old = before.get(entry.id);
+      // A manual mute toggle supersedes the automatic silence after removing the last reminder.
+      if ((old as (OwnedGoEntry & { reminderSilencedByRemoval?: boolean }) | undefined)?.reminderSilencedByRemoval
+        && old?.notificationsEnabled !== entry.notificationsEnabled) {
+        entry = { ...entry, ...{ reminderSilencedByRemoval: undefined } };
+      }
+      // Relative reminder offsets belong to this task. A manual or IA schedule
+      // change makes their prior firing history obsolete, without inventing times.
+      if (old && Array.isArray(entry.reminders) && entry.reminders.length
+        && (old.dateISO !== entry.dateISO || old.time !== entry.time)) {
+        entry = { ...entry, firedReminderMins: [], snoozeUntil: undefined };
+      }
+      const taskContext = (old as (OwnedGoEntry & { taskContext?: string }) | undefined)?.taskContext;
+      if (taskContext) entry = { ...entry, ...{ taskContext } };
       if (old?.ownerUserId) return { ...entry, ownerUserId: old.ownerUserId };
       if (!old && isPersonalTask(entry) && owner) return { ...entry, ownerUserId: owner };
       return entry;

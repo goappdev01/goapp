@@ -1,3 +1,4 @@
+import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -26,6 +27,7 @@ function fixture(remove) {
   const storage = new Map([['go_supabase_session_v1', '{"access_token":"test-only","refresh_token":"test-only","user":{"id":"test-user"}}'], ['go_account_type_v1', 'usuario'], ['unrelated-preference', 'keep']]);
   const state = { role: 'usuario', profileOpen: true, authOpen: false, mode: 'USER' };
   const context = {
+    suspendNativeTaskReminders: async () => { events.push("reminders:cancelled"); },
     AsyncStorage: {
       async multiRemove(keys) { events.push('remove:start'); if (remove) await remove(); keys.forEach(key => storage.delete(key)); events.push('remove:finish'); },
       async setItem(key, value) { storage.set(key, value); },
@@ -38,6 +40,7 @@ function fixture(remove) {
     notifySessionChanged: () => { assert.equal(storage.has('go_supabase_session_v1'), false); events.push('session:changed'); },
     console: { warn: () => events.push('storage:error') },
   };
+  context.clearAuthSession = loadAuthSession(context, context.AsyncStorage, { notifySessionChanged: context.notifySessionChanged }).clearAuthSession;
   const code = functionSource('commitAccountType') + '\n' + functionSource('handleProfileLogout') + '\nglobalThis.logout = handleProfileLogout;';
   vm.createContext(context);
   vm.runInContext(ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);

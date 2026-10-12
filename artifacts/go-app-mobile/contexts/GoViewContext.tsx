@@ -42,7 +42,7 @@ export function GoViewProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!admin.userId || (!admin.checking && !admin.isOwner)) {
+    if (!admin.userId || (!admin.checking && !admin.unavailable && !admin.isOwner)) {
       generation.current++;
       if (preferenceRef.current) remember(null);
       return;
@@ -56,7 +56,7 @@ export function GoViewProvider({ children }: { children: React.ReactNode }) {
       if (mounted.current && version === generation.current && current.userId === userId
         && (current.isOwner || current.checking)) remember({ userId, view: isGoView(stored) ? stored : "ADMIN", loaded: true });
     });
-  }, [admin.userId, admin.isOwner, admin.checking, remember]);
+  }, [admin.userId, admin.isOwner, admin.checking, admin.unavailable, remember]);
 
   const selectOwnerView = useCallback(async (next: GoView): Promise<boolean> => {
     if (!isGoView(next)) return false;
@@ -78,7 +78,7 @@ export function GoViewProvider({ children }: { children: React.ReactNode }) {
   }, [remember]);
 
   const belongsToIdentity = preference?.userId === admin.userId;
-  const ownerPresentation = admin.isOwner || (belongsToIdentity && admin.checking);
+  const ownerPresentation = admin.isOwner || (belongsToIdentity && (admin.checking || admin.unavailable));
   const loaded = !ownerPresentation || (belongsToIdentity && preference?.loaded === true);
   // A stored USER/BUSINESS choice must never flash ADMIN while storage is loading.
   // During revalidation, retain only the selected label, never its authority.

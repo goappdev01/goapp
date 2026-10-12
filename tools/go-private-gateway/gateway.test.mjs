@@ -13,7 +13,7 @@ const req={method:'GET',url:'/api/supabase/admin/access',authorization:'Bearer t
 for(const method of ['POST','PUT','PATCH','DELETE','OPTIONS','HEAD'])test(method+' is blocked before upstream',async()=>{
  const f=fixture();assert.equal((await respond({...req,method},f.request)).status,405);assert.equal(f.calls.length,0);
 });
-for(const url of ['/api/supabase/admin/memberships','/api/supabase/admin/audit','/api/supabase/bookings','/api/supabase/auth/login','/.env','/api/supabase/admin/access?token=x','http://evil.invalid/','/api/supabase/admin/%61ccess'])test(url+' is not exposed',async()=>{
+for(const url of ['/api/supabase/admin/memberships','/api/supabase/admin/audit','/api/supabase/bookings','/api/supabase/auth/login','/api/supabase/auth/refresh','/.env','/api/supabase/admin/access?token=x','http://evil.invalid/','/api/supabase/admin/%61ccess'])test(url+' is not exposed',async()=>{
  const f=fixture();assert.equal((await respond({...req,url},f.request)).status,404);assert.equal(f.calls.length,0);
 });
 test('missing or malformed session is rejected without contacting backend',async()=>{

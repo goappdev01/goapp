@@ -25,12 +25,15 @@ const owner = "11111111-1111-4111-8111-111111111111";
 const other = "22222222-2222-4222-8222-222222222222";
 const plain = value => JSON.parse(JSON.stringify(value));
 const turn = async () => { for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)); };
+// The reservation fixture is intentionally future relative to this fixed test clock.
+// Production continues to reject past times; advancing wall-clock time must not invalidate the fixture.
+class TestDate extends Date { static now() { return Date.parse("2026-10-12T08:00:00"); } }
 function loadPure(name, imports = {}) {
   const exports = {};
   vm.runInNewContext(compile(name), { exports, require: key => {
     if (key in imports) return imports[key];
     throw new Error("Unexpected runtime dependency: " + key);
-  }, console, Set, Map });
+  }, console, Date: TestDate, Set, Map });
   return exports;
 }
 const storeModule = loadPure("data/businessDemoStore.ts");
@@ -57,8 +60,13 @@ const floor = store => ({ id: store.planId, businessId: store.businessId, elemen
   id: "demo-space", type: "silla", label: "Profesional DEMO", capacity: 1, x: 0, y: 0, width: 90, height: 52,
   status: "disponible", reservable: true,
 }], updatedAt: 1 });
+const futureReservationDay = new Date();
+futureReservationDay.setDate(futureReservationDay.getDate() + 7 + (1 - futureReservationDay.getDay() + 7) % 7);
+futureReservationDay.setHours(12, 0, 0, 0);
+const futureReservationISO = [futureReservationDay.getFullYear(), String(futureReservationDay.getMonth() + 1).padStart(2, "0"), String(futureReservationDay.getDate()).padStart(2, "0")].join("-");
+const futureReservationLabel = futureReservationISO.split("-").reverse().join("/");
 const reservation = store => ({ id: "demo-reservation", planId: store.planId, elementId: "demo-space",
-  customerName: "Cliente de prueba", date: "12/10/2026", dateISO: "2026-10-12", time: "12:00",
+  customerName: "Cliente de prueba", date: futureReservationLabel, dateISO: futureReservationISO, time: "12:00",
   status: "pendiente", notes: "Prueba local", createdAt: 1 });
 
 test("DEMO uses only its owner key and cannot import real config, agenda or floor data", async () => {
@@ -125,7 +133,7 @@ test("floor and pending reservation persist and feed only the DEMO calendar", as
   const again = f.make(); await again.load();
   const doc = again.getSnapshot();
   assert.equal(doc.reservations[0].status, "pendiente"); assert.equal(doc.plan.elements[0].status, "reservado");
-  assert.equal(doc.entries.length, 1); assert.equal(doc.entries[0].dateISO, "2026-10-12");
+  assert.equal(doc.entries.length, 1); assert.equal(doc.entries[0].dateISO, futureReservationISO);
   assert.equal(doc.entries[0].ownerUserId, owner); assert.equal(doc.entries[0].businessId, f.store.businessId);
   await assert.rejects(f.store.saveReservations(f.store.planId, [{ ...reservation(f.store), elementId: "real-space" }]), /espacio guardado/);
 });
@@ -216,6 +224,7 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
     "@/data/booking": new Proxy({ BookingApiError: class BookingApiError extends Error {} }, { get: (target,key) => target[key] ?? external }),
     "@/data/goRecentBusinesses": { getRecentBusinessIds: external, recordBusinessVisit: external },
     "@/lib/goLogBridge": { syncBookingToGoLog: external },
+    "@/data/businessDemoCatalog": loadPure("data/businessDemoCatalog.ts", { "./businessDemoStore": storeModule }),
     "@/data/businessDemoStore": { ...storeModule, createBusinessDemoStore: options => storeModule.createBusinessDemoStore({ ...options, storage: data.storage }) },
     "@/hooks/useGoLog": { useGoLog: () => { calls.liveAgenda++; return React.useState([]); } },
     "@/hooks/useVerification": { useVerification: () => ({ status: "unverified" }) },
@@ -842,4 +851,11 @@ test('configuration navigation survives the actual company-panel remount without
  ui.unmount(Panel);f.store=storeModule.createBusinessDemoStore({ownerUserId:owner,companyId:'44444444-4444-4444-8444-444444444444',storage:f.storage,initialConfig:initial,canUse:()=>true});await f.store.load();await configuredSalon(f);
  opening();assert.equal(route,'configuration');ui.render(Panel,props());tree=ui.render(Panel,props());const wizard=component(tree,'EmpresaConfigScreen');assert.ok(wizard);assert.equal(wizard.props.startAtSteps,true);assert.ok(wizard.props.key.includes(f.store.businessId));
  wizard.props.onOpenCompanies();assert.equal(route,'companies');tree=ui.render(Panel,props());assert.equal(nodes(tree).find(n=>n.type==='DemoCompanyManager').props.open,true);assert.equal(ui.calls.external,0);
+});
+
+test("a fixed clock preserves future reservation tests without permitting past bookings",async()=>{
+ const f=dataFixture();await f.store.updateConfig({openFrom:"06:00",openTo:"20:00"});await f.store.saveFloorPlan(floor(f.store));
+ await assert.rejects(f.store.saveReservations(f.store.planId,[{...reservation(f.store),date:"12/10/2026",dateISO:"2026-10-12",time:"07:00"}]),/hora futura/);
+ assert.equal(f.store.getSnapshot().reservations.length,0);
+ await f.store.saveReservations(f.store.planId,[reservation(f.store)]);assert.equal(f.store.getSnapshot().reservations.length,1);
 });

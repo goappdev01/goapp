@@ -1,19 +1,18 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { BookingApiError, getAuthenticatedUserId, supabaseApiRequest } from "./booking";
+import { captureAuthIdentity, isAuthIdentityCurrent } from "@/lib/authSession";
+import { BookingApiError, supabaseApiRequest } from "./booking";
 
-const sessionKey = "go_supabase_session_v1";
 export type AdminLevel = "owner" | "technical";
 export type AdminAccess = { userId: string | null; allowed: boolean; level: AdminLevel | null; permissions: string[] };
 
 export async function getAdminAccess(): Promise<AdminAccess> {
-  const before = await AsyncStorage.getItem(sessionKey);
-  const userId = await getAuthenticatedUserId();
-  if (!userId) return { userId: null, allowed: false, level: null, permissions: [] };
+  const identity = await captureAuthIdentity();
+  const userId = identity?.userId;
+  if (!identity || !userId) return { userId: null, allowed: false, level: null, permissions: [] };
   try {
     const access = await supabaseApiRequest<{ userId?: unknown; role?: unknown; allowed?: unknown; level?: unknown; permissions?: unknown }>(
       "/supabase/admin/access", {}, true, userId,
     );
-    if (await AsyncStorage.getItem(sessionKey) !== before) throw new Error("Session changed");
+    if (!await isAuthIdentityCurrent(identity)) throw new Error("Session changed");
     // A legacy profiles.role response is insufficient: require the membership contract.
     const grants = access?.permissions;
     const permitted = access?.level === "owner"

@@ -21,6 +21,7 @@ function fixture(dev=true,{realCatalog=false,memory=new Map()}={}) {
       return [hook.slots[i].value,next=>{hook.slots[i].value=typeof next==="function"?next(hook.slots[i].value):next;}];},
     useMemo:(fn,deps)=>{const i=hook.cursor++,old=hook.slots[i];if(!old||!same(old.deps,deps))hook.slots[i]={deps,value:fn()};return hook.slots[i].value;},
     useCallback:(fn,deps)=>React.useMemo(()=>fn,deps),
+    useLayoutEffect:(fn,deps)=>React.useEffect(fn,deps),
     useEffect:(fn,deps)=>{const i=hook.cursor++,old=hook.slots[i];if(!old||!same(old.deps,deps)){const slot={deps};hook.slots[i]=slot;effects.push(()=>{old?.cleanup?.();slot.cleanup=fn();});}},
   };
   const same=(a,b)=>a&&b&&a.length===b.length&&a.every((v,i)=>Object.is(v,b[i]));
@@ -47,7 +48,9 @@ function fixture(dev=true,{realCatalog=false,memory=new Map()}={}) {
   let context={loaded:false};
   const indicator=load("components/debug/OwnerContextIndicator.tsx",{
     react:{default:React,...React},
-    "react-native":{Modal:"NativeModal",Platform:{OS:"ios"},View:"View",Text:"Text",StyleSheet:{create:v=>v}},
+    "react-native":{Modal:"NativeModal",Platform:{OS:"ios"},View:"View",Text:"Text",Image:"Image",StyleSheet:{create:v=>v,absoluteFill:{position:"absolute",top:0,left:0,right:0,bottom:0}}},
+    "expo-linear-gradient":{LinearGradient:"LinearGradient"},
+    "../../assets/images/earth_bg.png":"Existing Earth background",
     "react-native-screens":{FullWindowOverlay:"FullWindowOverlay"},
     "react-native-safe-area-context":{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},
     "@/contexts/GoViewContext":{useGoView:()=>view},
@@ -245,4 +248,47 @@ test('actual owner provider never pairs a selected business label with a differe
  for(const [companyId,expected] of prior){await catalog.select(companyId);await settle(f);assert.equal(JSON.stringify(f.value.demo.getSnapshot()),expected);assert.equal(f.value.catalog.getCompanies().filter(company=>!company.placeholder&&!company.archived).length,3);}
  f.unmount(f.provider.OwnerBusinessDemoProvider);const bytes=Array.from(memory),reopened=fixture(true,{realCatalog:true,memory});await settle(reopened);assert.equal(reopened.value.catalog.getSelectedId(),id);assert.equal(JSON.stringify(reopened.value.demo.getSnapshot()),prior[2][1]);assert.deepEqual(Array.from(memory),bytes);
  assert.equal(f.alerts.length,0);assert.equal(reopened.alerts.length,0);
+});
+
+test("owner Landing paints the reserved top gutter without moving safe controls or changing panels",()=>{
+  const f=fixture();
+  const paint=visible=>{
+    let tree=f.render(f.indicator.OwnerContextSurface,{children:"Existing navigator"});
+    tree.props.value.show(visible);
+    return f.render(f.indicator.OwnerContextSurface,{children:"Existing navigator"});
+  };
+  for(const context of ["ADMIN","BUSINESS","USER"]){
+    f.setView(context);
+    for(const visible of [true,false,true]){
+      const tree=paint(visible),all=nodes(tree);
+      assert.equal(tree.props.value.topInset,22);
+      const surface=all.find(node=>node.type==="View"&&node.children.includes("Existing navigator"));
+      assert.equal(surface.props.style[1].paddingTop,22,"keep original content geometry");
+      const backgrounds=all.filter(node=>node.props.testID==="landing-safe-area-background");
+      assert.equal(backgrounds.length,visible?1:0,"clear background for panels and restore on close");
+      if(visible){
+        const backdrop=backgrounds[0];
+        assert.equal(backdrop.props.pointerEvents,"none");
+        assert.equal(backdrop.props.style.top,0);
+        assert.equal(backdrop.props.style.bottom,0);
+        assert.equal(backdrop.children[0].props.source,"Existing Earth background");
+        assert.equal(backdrop.children[0].props.resizeMode,"cover");
+        assert.ok(surface.children.indexOf(backdrop)<surface.children.indexOf("Existing navigator"));
+      }
+      assert.equal(all.filter(node=>node.type==="FullWindowOverlay").length,1);
+    }
+  }
+  f.setAdmin({isOwner:false});
+  assert.equal(nodes(paint(true)).filter(node=>node.props.testID==="landing-safe-area-background").length,0);
+  const modal=f.render(f.indicator.OwnerContextModal,{visible:true,children:"Unchanged form"});
+  assert.equal(modal.children[0],"Unchanged form");
+});
+test("Landing keeps safe-area content padding and light status icons after a panel closes",()=>{
+  const source=readFileSync("app/index.tsx","utf8");
+  assert.match(source,/useOwnerLandingBackground\(authBootstrapComplete && modeLoaded && !goAuthOpen\s*&& !anyOverlayOpen && !empresaOpen && !verificacionOpen && !adminDashOpen\)/);
+  assert.match(source,/Platform\.OS === "web" \? Math\.max\(insets\.top, 67\) : insets\.top \+ 8/);
+  assert.match(source,/<View style=\{\[styles\.root, \{ paddingTop \}\]\} onLayout=/);
+  assert.match(source,/source=\{EARTH_BG\}\s*style=\{\[StyleSheet\.absoluteFill, \{ top: -landingTopInset \}\]\}/);
+  assert.match(source,/end=\{\{ x: 0\.5, y: 0\.22 \}\}\s*style=\{\[StyleSheet\.absoluteFill, \{ top: -landingTopInset \}\]\}/);
+  assert.match(source,/<StatusBar[\s\S]*?empresaOpen \|\| cuentaOpen[\s\S]*?\? "dark"\s*: "light"/);
 });

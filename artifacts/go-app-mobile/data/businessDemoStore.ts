@@ -65,6 +65,88 @@ export const visibleBusinessDemoElements = (plan: FloorPlan): FloorElement[] => 
 export function businessDemoProfessionalElement(data: BusinessDemoData, professional: { id: string }): FloorElement | undefined {
   return data.plan?.elements.find(element => !element.demoArchived && element.demoStaffId === professional.id);
 }
+
+/** Recover the old plantilla-to-floor expansion, with persistent slot identities instead of random IDs. */
+export function businessDemoSpaceType(label: string, sector: string): FloorElement["type"] {
+  const value = normalizedDemoName(label);
+  if (/mesa/.test(value)) return "mesa";
+  if (/terraza|zona|barra|mostrador/.test(value)) return "zona";
+  if (/cabina|sala|salon/.test(value)) return "sala";
+  if (/habitacion|cama/.test(value)) return "habitacion";
+  if (/puesto|silla/.test(value)) return "silla";
+  const sectorTypes: Record<string, FloorElement["type"]> = { restauracion: "mesa", deportes: "plaza", hoteles: "habitacion", servicios: "sala", hogar: "custom", actividades: "plaza" };
+  return sectorTypes[sector] ?? "custom";
+}
+function reconcileBusinessDemoPhysicalPlan(data: BusinessDemoData, createMissing: boolean) {
+  if (!data.plan || !data.config.sectorId || ["belleza", "salud"].includes(data.config.sectorId)) return;
+  const plan = data.plan, prefix = plan.businessId + "_space_";
+  // In people-based configuration the count is a professional slot, not a separate physical resource.
+  const groups = data.config.plantillaItems.filter(item => !item.staffNames?.some(name => name.trim()));
+  const desired = new Map<string, { label: string; type: FloorElement["type"] }>();
+  const elements = plan.elements.map(element => ({ ...element }));
+  const types = groups.map(item => businessDemoSpaceType(item.label, data.config.sectorId!));
+  const legacyType = businessDemoSpaceType("", data.config.sectorId);
+  const typeNames = { mesa: "Mesa", habitacion: "Habitación", sala: "Sala", plaza: "Plaza", zona: "Zona", silla: "Silla", custom: "Elemento" };
+  for (const [groupIndex, item] of groups.entries()) for (let index = 0; index < item.count; index++) {
+    const id = prefix + encodeURIComponent(item.id) + "_" + index, type = types[groupIndex];
+    const label = item.label + " " + (index + 1);
+    desired.set(id, { label, type });
+    if (elements.some(element => element.demoSpaceId === id)) continue;
+    // A one-time, unambiguous legacy bridge. Never re-identify by name after a slot has an ID.
+    const aliases = [label, item.emoji + " " + (index + 1), ...(index === 0 ? [item.emoji, item.label] : [])];
+    if (types.filter(value => value === type).length === 1) aliases.push(typeNames[type] + " " + (index + 1));
+    const matches = elements.filter(element => !element.demoSpaceId && !element.demoStaffId && element.demoKind !== "professional"
+      && !element.demoArchived && (element.type === type || element.type === legacyType) && aliases.some(value => value && normalizedDemoName(value) === normalizedDemoName(element.label)));
+    if (matches.length === 1) {
+      matches[0].demoSpaceId = id; matches[0].demoKind = "physical"; matches[0].type = type;
+      matches[0].demoSpaceLabel = label; // Preserve existing custom labels and geometry.
+    }
+  }
+  const hasActiveReservation = (elementId: string) => data.bookings.some(booking => booking.elementId === elementId
+    && blocking(booking) && Date.parse(booking.endDatetime) > Date.now())
+    || data.reservations.some(reservation => reservation.elementId === elementId && reservation.status !== "cancelada"
+      && (!reservation.dateISO || Date.parse(reservation.endDatetime ?? addMinutes(stamp(reservation.dateISO, reservation.time), reservation.durationMinutes ?? 30)) > Date.now()));
+  const assigned = new Set<string>();
+  for (const element of elements) {
+    if (!element.demoSpaceId) continue;
+    if (!element.demoSpaceId.startsWith(prefix)) throw new Error("Espacio DEMO de otra empresa.");
+    const slot = desired.get(element.demoSpaceId);
+    if (!slot || assigned.has(element.demoSpaceId)) {
+      // No real deletion, even without a current reservation. History and placed geometry remain recoverable.
+      if (hasActiveReservation(element.id)) {
+        if (createMissing) throw new Error("No se puede reducir este espacio: tiene una reserva activa. Gestiona esa reserva antes de cambiar su cantidad.");
+        continue;
+      }
+      if (!element.demoArchived) element.demoSpaceReservable = element.reservable;
+      element.demoArchived = true; element.reservable = false;
+    } else {
+      assigned.add(element.demoSpaceId);
+      if (element.demoArchived && element.demoSpaceReservable !== undefined) {
+        element.reservable = element.demoSpaceReservable; delete element.demoSpaceReservable;
+      }
+      element.demoArchived = false;
+      if (element.label === element.demoSpaceLabel) element.label = slot.label;
+      element.demoSpaceLabel = slot.label;
+    }
+  }
+  if (createMissing) {
+    // Same bounded-row arrangement as the original Replit expansion; existing elements never move.
+    const dimensions = { mesa: [72,72,4], habitacion: [110,80,2], sala: [130,95,10], plaza: [90,55,1], zona: [150,110,20], silla: [48,48,1], custom: [90,72,2] };
+    let x = 10, y = elements.some(element => !element.demoArchived)
+      ? Math.max(...elements.filter(element => !element.demoArchived).map(element => element.y + element.height)) + 24 : 10;
+    let rowHeight = 0;
+    for (const [slotId, slot] of desired) if (!assigned.has(slotId)) {
+      const [width, height, capacity] = dimensions[slot.type];
+      if (x > 10 && x + width > 390) { x = 10; y += rowHeight + 12; rowHeight = 0; }
+      elements.push({ id: "demo_space_element_" + slotId, demoSpaceId: slotId, demoSpaceLabel: slot.label,
+        demoKind: "physical", demoArchived: false, type: slot.type, label: slot.label, x, y, width, height, capacity,
+        status: "disponible", reservable: true });
+      x += width + 12; rowHeight = Math.max(rowHeight, height);
+    }
+  }
+  data.plan = { ...plan, elements };
+}
+
 /** Reconcile identifiable representations; keep ambiguous legacy/physical elements and all history. */
 export function reconcileBusinessDemoProfessionalPlan(data: BusinessDemoData, createMissing = false): void {
   if (!data.plan) return;
@@ -115,6 +197,7 @@ export function reconcileBusinessDemoProfessionalPlan(data: BusinessDemoData, cr
     }
   }
   data.plan = { ...data.plan, elements };
+  reconcileBusinessDemoPhysicalPlan(data, createMissing);
 }
 
 /** Shared company/professional rules used by both DEMO entry paths. */

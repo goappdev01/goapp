@@ -34,6 +34,10 @@ export type FloorElement = {
   color?: string;
   /** Local DEMO linkage; physical resources and historical representations stay distinct. */
   demoStaffId?: string;
+  /** Stable configuration slot; older resource IDs and placed positions are retained. */
+  demoSpaceId?: string;
+  demoSpaceLabel?: string;
+  demoSpaceReservable?: boolean;
   demoKind?: "professional" | "physical";
   demoArchived?: boolean;
 };

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import vm from 'node:vm';
+import { loadAuthSession } from './helpers/auth-session-fixture.mjs';
 
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const ts = require('typescript');
@@ -16,23 +17,29 @@ const id = '22222222-2222-4222-8222-222222222222';
 const sessionKey = 'go_supabase_session_v1';
 const plain = value => JSON.parse(JSON.stringify(value));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
-const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+const flush = async () => { await new Promise(setImmediate); };
 
 function dataFixture(rows = []) {
   const storage = new Map([[sessionKey, JSON.stringify({ access_token: 'test-only', user: { id: user } })]]);
   const calls = [];
+  const auth = loadAuthSession({ process: { env: {} }, fetch: () => { throw Error("Unexpected auth transport"); } }, {
+    getItem: async key => storage.get(key) ?? null,
+    setItem: async (key, value) => storage.set(key, value),
+    multiRemove: async keys => { for (const key of keys) storage.delete(key); },
+  });
   const context = { exports: {}, require(name) {
     if (name === '@react-native-async-storage/async-storage') return { default: { getItem: async key => storage.get(key) ?? null } };
+    if (name === '@/lib/authSession') return auth;
     if (name === './booking') return {
       BookingApiError: class extends Error { constructor(message, status, code) { super(message); this.status = status; this.code = code; } },
-      getAuthenticatedUserId: async () => { const s = JSON.parse(storage.get(sessionKey) ?? 'null'); return s?.access_token ? s.user.id : null; },
+      getAuthenticatedUserId: async () => (await auth.readAuthSession())?.user.id ?? null,
       isCloudId: value => typeof value === 'string' && /^[0-9a-f-]{36}$/i.test(value),
       supabaseApiRequest: async (...args) => { calls.push(args); return typeof rows === 'function' ? rows() : rows; },
     };
     throw new Error(`Unexpected import ${name}`);
   } };
   vm.createContext(context); vm.runInContext(transpile(read('data/businessAccess.ts')), context);
-  return { api: context.exports, storage, calls };
+  return { api: context.exports, storage, calls, auth };
 }
 
 function fakeReact() {
@@ -81,7 +88,7 @@ test('server lookup uses the existing authenticated API; logout/new session inva
   const pending = deferred(); const f = dataFixture(() => pending.promise);
   const request = f.api.getBusinessAccess(); await flush();
   assert.deepEqual(plain(f.calls[0]), ['/supabase/manage/businesses', {}, true, user]);
-  f.storage.delete(sessionKey); pending.resolve([{ id, verified: true }]);
+  await f.auth.clearAuthSession(); pending.resolve([{ id, verified: true }]);
   await assert.rejects(request, /sesión ha cambiado/);
   assert.equal((await f.api.getBusinessAccess()).userId, null);
   assert.equal(f.calls.length, 1);
@@ -96,8 +103,9 @@ test('enrollment submits fiscal fields under the existing identity and stores no
   assert.equal(route, '/supabase/manage/enrollment'); assert.equal(init.method, 'POST');
   assert.equal(authenticated, true); assert.equal(owner, user);
   assert.deepEqual(JSON.parse(init.body), { ...data, business_id: id });
-  assert.equal(f.storage.size, 1);
-  f.storage.clear(); await assert.rejects(f.api.submitBusinessEnrollment(data), /Inicia sesión/);
+  assert.equal(f.storage.size, 0, 'The legacy plaintext auth copy is removed after migration');
+  assert.equal(f.auth.__credentials.secure.size, 1);
+  await f.auth.clearAuthSession(); await assert.rejects(f.api.submitBusinessEnrollment(data), /Inicia sesión/);
   assert.equal(f.calls.length, 1);
 });
 
@@ -169,7 +177,7 @@ test('all direct business entries and configuration effects use the same permiss
     assert.match(home, new RegExp(`businessAccess\\.allowed && ${component === 'VerificacionEmpresaPanel' ? '' : '!goView.isOwner && goView.view === "BUSINESS" && !adminAccess.checking && '}<${component}`));
   }
   assert.match(home, /if \(open && !goView.isBusinessPreview\) setActiveMode\("BUSINESS"\)/);
-  assert.match(home, /commitAccountType\(resolvedRole === "admin" \? "usuario" : resolvedRole, false\)/);
+  assert.match(home, /commitAccountType\(role === "admin" \? "usuario" : role as AccountRole, false\)/);
   assert.match(home, /adminAccess.allowed && goView.isAdminView && <GoAdminDashboard/);
   assert.match(home, /onSwitchContext=\{\(\) => \{ if \(goView.isOwner \|\| adminAccess.checking\) return; setGoAuthOpen\(false\); setActiveMode\(isBusinessMode \? "USER" : "BUSINESS"\)/);
   assert.match(config, /if \(!enterprise.allowed\)[\s\S]*?return;[\s\S]*?getCloudConfiguration/);
@@ -190,14 +198,16 @@ test('pending-company logout waits for local deletion and returns to existing au
   find(root); assert.ok(logout);
   const barrier = deferred(), events = [];
   const context = {
-    AsyncStorage: { multiRemove: async keys => { events.push(['remove', plain(keys)]); await barrier.promise; } },
+    AsyncStorage: { setItem: async () => {}, multiRemove: async keys => { events.push(['remove', plain(keys)]); await barrier.promise; } },
     syncModeFromRole: value => events.push(['role', value]), notifySessionChanged: () => events.push(['changed']),
     Alert: { alert: () => events.push(['error']) },
   };
+  context.clearAuthSession = loadAuthSession({ process: { env: {} }, fetch: () => { throw Error('Unexpected auth transport'); } },
+    context.AsyncStorage, { notifySessionChanged: context.notifySessionChanged }).clearAuthSession;
   vm.createContext(context); vm.runInContext(transpile(`globalThis.logout = ${logout.getText(root)}`), context);
-  const run = context.logout(); assert.deepEqual(events, [['remove', [sessionKey, 'go_account_type_v1']]]);
+  const run = context.logout(); await flush(); assert.deepEqual(events, [['remove', [sessionKey, 'go_account_type_v1']]]);
   barrier.resolve(); await run;
-  assert.deepEqual(events.slice(1), [['role', null], ['changed']]);
+  assert.deepEqual(events.slice(1), [['changed'], ['role', null]]);
 });
 
 test('enrollment requires a valid unverified acknowledgement and rejects a changed identity', async () => {
@@ -208,6 +218,21 @@ test('enrollment requires a valid unverified acknowledgement and rejects a chang
   }
   const pending = deferred(), f = dataFixture(() => pending.promise);
   const submitted = f.api.submitBusinessEnrollment(data);
-  await flush(); f.storage.delete(sessionKey); pending.resolve([{ id, verified: false }]);
+  await flush(); await f.auth.clearAuthSession(); pending.resolve([{ id, verified: false }]);
   await assert.rejects(submitted, error => error.code === 'ENROLLMENT_SESSION_CHANGED');
+});
+
+test('business permission lookup accepts token rotation but invalidates a new login of the same UUID', async () => {
+  const pending = deferred(), f = dataFixture(() => pending.promise);
+  const lookup = f.api.getBusinessAccess(); await flush();
+  const original = await f.auth.readAuthSession();
+  f.auth.__credentials.secure.set('go_auth_session_v2', JSON.stringify({ ...original, access_token: 'test-only-rotated' }));
+  pending.resolve([{ id, verified: true }]);
+  assert.equal((await lookup).status, 'verificada');
+
+  const later = deferred(), g = dataFixture(() => later.promise);
+  const stale = g.api.getBusinessAccess(); await flush();
+  await g.auth.saveAuthSession({ access_token: 'new-login', user: { id: user } });
+  later.resolve([{ id, verified: true }]);
+  await assert.rejects(stale, /sesión ha cambiado/);
 });

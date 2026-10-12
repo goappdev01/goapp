@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import vm from 'node:vm';
+import { loadAuthSession } from './helpers/auth-session-fixture.mjs';
 
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const ts = require('typescript');
@@ -24,6 +25,8 @@ function fixture(shared = new Map()) {
     removeItem: async key => { shared.delete(key); },
     multiRemove: async keys => { for (const key of keys) shared.delete(key); },
   };
+  const auth = loadAuthSession({ process: { env: {} }, fetch: () => { throw Error('Unexpected auth transport'); } },
+    storage, { notifySessionChanged: () => events.push('session') });
   const modules = new Map();
   const load = (file, imports) => {
     const context = { exports: {}, console: { warn: (...args) => logs.push(plain(args)) }, require: imports };
@@ -68,6 +71,7 @@ function fixture(shared = new Map()) {
       return { id: 'stored-business', verified: false };
     } };
     if (name === '@/lib/sessionEvents') return { notifySessionChanged: () => events.push('session') };
+    if (name === '@/lib/authSession') return auth;
     throw new Error(name);
   });
   const Screen = gate.BusinessAccessGate({ children: 'private' }).type;

@@ -7,7 +7,7 @@ import {
   useAudioRecorder,
 } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
-import { assistantApi } from "@/lib/bookingAssistant";
+import { assistantApi, AssistantApiError } from "@/lib/bookingAssistant";
 import { getAuthenticatedUserId } from "@/data/booking";
 
 type Recognition = {
@@ -214,12 +214,14 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
     const token = generation.current;
     const zone = targetZone.current;
     let uri: string | null = null;
+    let durationMillis: number | undefined;
     let stage = "recording";
     let publicFailure = "No he podido finalizar la grabación. Inténtalo de nuevo o escribe tu solicitud.";
     changeStatus("transcribing");
     try {
       await withRecorder(async () => {
         if (generation.current !== token) return;
+        durationMillis = recorder.getStatus().durationMillis;
         await recorder.stop();
         uri = recorder.uri;
         await setAudioModeAsync({ allowsRecording: false });
@@ -230,6 +232,10 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
       if (!info.exists || !info.size) {
         publicFailure = "No he podido obtener audio de la grabación. Pulsa GO para intentarlo de nuevo.";
         throw new Error("EMPTY_RECORDING");
+      }
+      if (typeof durationMillis === "number" && Number.isFinite(durationMillis) && durationMillis < 300) {
+        publicFailure = "La grabación ha sido muy breve. Pulsa GO y habla antes de parar.";
+        throw new Error("RECORDING_TOO_SHORT");
       }
       if (info.size > 5000000) {
         publicFailure = "La grabación es demasiado larga. Prueba con una solicitud más breve.";
@@ -273,7 +279,7 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
     } catch (e) {
       if (generation.current === token) {
         console.info("[assistant-voice]", { code: "PROCESSING_FAILED", stage });
-        setError(publicFailure);
+        setError(e instanceof AssistantApiError ? e.message : publicFailure);
         if (stage === "recording" && (!uri || recorder.isRecording)) await withRecorder(async () => {
           if (generation.current === token) await cleanupNative();
         });

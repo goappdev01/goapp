@@ -45,7 +45,7 @@ test('Landing applies V1 gating without mounting hidden orbit or satellite hitbo
   assert.match(source, /fullLandingArchitecture && !anyOverlayOpen[\s\S]*?humanityPlacement && \(/);
   assert.match(source, /visible=\{fullLandingArchitecture && humanityOpen\}/);
   assert.match(source, /cx: screen\.width - dockRight - systemBoundingRadius \+ \(handedness === "right" \? maxX : minX\)/);
-  assert.match(source, /cy: screen\.height - insets\.bottom - SYSTEM_MARGIN_Y - orbitWrapSize \/ 2 - Math\.round\(12 \* uiScaleFactor\)/);
+  assert.match(source, /cy: screen\.height - insets\.bottom - SYSTEM_MARGIN_Y - orbitWrapSize \/ 2 \+ landingDock\.maxY/);
   assert.doesNotMatch(source, /\bsetHumanityPan\b|\bhumanityPan\s*\./);
   assert.match(source, /const QR_TYPES:[^\n]+isUserV1Surface \? \[\] : \[/);
   assert.match(source, /isUserV1Surface && !aiOpen[\s\S]*?openAi\(true\)/);

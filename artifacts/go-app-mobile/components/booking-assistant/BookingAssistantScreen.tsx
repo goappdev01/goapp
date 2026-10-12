@@ -18,21 +18,17 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import { StatusBar } from "expo-status-bar";
-import {
-  bookingDockOrder,
-  searchZoneSchema,
-} from "@workspace/api-zod";
+import { bookingDockOrder } from "@workspace/api-zod";
 import { assistantApi, localToday } from "@/lib/bookingAssistant";
 import {
-  ASSISTANT_ZONE_KEY,
   useBookingAssistant,
   type AssistantPanel,
 } from "@/hooks/useBookingAssistant";
 import { useGoActions } from "@/hooks/useGoActions";
+import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
 import { useBookingVoice } from "@/hooks/useBookingVoice";
 import { ListeningIndicator, listeningPlacement } from "./ListeningIndicator";
 import { BookingAssistantPanels } from "./BookingAssistantPanels";
@@ -73,8 +69,9 @@ export function BookingAssistantScreen({
   const [viewport, setViewport] = useState({ width: window.width, height: window.height - insets.top - insets.bottom - 68 });
   const [footerHeight, setFooterHeight] = useState(144);
   const [headerHeight, setHeaderHeight] = useState(68);
-  const a = useBookingAssistant();
-  const go = useGoActions(a);
+  const zoneIdentity = useAssistantZoneScope();
+  const a = useBookingAssistant({ visible, scope: zoneIdentity.scope, scopeReady: zoneIdentity.ready });
+  const go = useGoActions(a, zoneIdentity.ready ? zoneIdentity.scope : null);
   const [input, setInput] = useState("");
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const followEnd = useRef(true);
@@ -82,7 +79,6 @@ export function BookingAssistantScreen({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [slotCount, setSlotCount] = useState(8);
-  const hydrated = useRef(false);
   const scroll = useRef<ScrollView>(null);
   const [conversationLayout, setConversationLayout] = useState({ width: 0, height: 0 });
   const [conversationMeasurement, setConversationMeasurement] = useState({ height: 0, messages: -1 });
@@ -103,34 +99,17 @@ export function BookingAssistantScreen({
       return;
     }
     let cancelled = false;
-    (async () => {
-      const savedZone = await AsyncStorage.getItem(ASSISTANT_ZONE_KEY);
-      if (cancelled) return;
-      if (!hydrated.current) {
-        try {
-          const parsed = searchZoneSchema.safeParse(
-            JSON.parse(savedZone || "null"),
-          );
-          if (parsed.success) {
-            a.updateZone(parsed.data);
-            a.setRadiusText(String(parsed.data.radiusKm));
-            a.lastPlace.current = parsed.data.label;
-          }
-        } catch {}
-        hydrated.current = true;
-      }
-      assistantApi<{ interpretation: boolean }>("/capabilities")
-        .then((c) => {
-          if (!cancelled) setAiEnabled(c.interpretation);
-        })
-        .catch(() => {});
-    })().catch(() => {});
+    assistantApi<{ interpretation: boolean }>("/capabilities")
+      .then((c) => {
+        if (!cancelled) setAiEnabled(c.interpretation);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
       a.invalidate();
       voice.abort();
     };
-    // Hydrate the conversation on opening; only a GO tap starts microphone capture.
+    // Capabilities load on opening; zone hydration belongs to the scoped assistant hook.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
   useEffect(() => {
@@ -156,13 +135,7 @@ export function BookingAssistantScreen({
   function openPanel(panel: AssistantPanel) {
     voice.abort();
     a.setNotice("");
-    if (panel === "zone") {
-      a.setPlaceQuery(a.zone?.label || "");
-      if (a.zone) a.pickPlace(a.zone, a.zone.source);
-      a.setRadiusText(String(a.zone?.radiusKm || a.request.radiusKm || 5));
-      a.setPlaces([]);
-      a.setSaveZone(false);
-    }
+    if (panel === "zone") { a.openZonePanel(); return; }
     a.setPanel(panel);
   }
   function send() {

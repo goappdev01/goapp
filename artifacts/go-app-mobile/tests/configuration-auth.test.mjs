@@ -1,3 +1,4 @@
+import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -28,24 +29,30 @@ const openOptions = find(home, node => ts.isVariableDeclaration(node) && node.na
 const transpile = source => ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
-const sessionKey = 'go_supabase_session_v1';
+const sessionKey = 'go_supabase_session_v1', secureKey = 'go_auth_session_v2';
 const realSession = { access_token: 'test-only-token', user: { id: 'test-user' } };
 
 function fixture(session = null, response = async () => Response.json([]), onRead) {
   const storage = new Map(session ? [[sessionKey, JSON.stringify(session)]] : []);
+  const secure = new Map();
+  if (session?.access_token) { secure.set(secureKey, JSON.stringify(session)); storage.delete(sessionKey); }
   const reads = [], requests = [], alerts = [];
   const generation = { current: 0 };
   const state = { config: { businessName: 'previous user' }, loaded: false };
   const AsyncStorage = {
-    async getItem(key) { reads.push(key); onRead?.(key, reads, storage); return storage.get(key) ?? null; },
+    async getItem(key) { reads.push(key); return storage.get(key) ?? null; },
     async setItem(key, value) { storage.set(key, value); },
+    async removeItem(key) { storage.delete(key); },
+    async multiRemove(keys) { for (const key of keys) storage.delete(key); },
   };
+  let sessionApi;
   const context = {
     exports: {}, Headers, Response,
     process: { env: { EXPO_PUBLIC_API_URL: 'https://test.invalid/api' } },
     require(name) {
       if (name === '@react-native-async-storage/async-storage') return { default: AsyncStorage };
       if (name === './goSearchAliases') return {};
+      if (name === '@/lib/authSession') return sessionApi;
       throw new Error(`Unexpected import: ${name}`);
     },
     fetch: async (url, init) => { requests.push({ url, init }); return response(); },
@@ -54,19 +61,20 @@ function fixture(session = null, response = async () => Response.json([]), onRea
     setConfig: value => { state.config = value; }, setLoaded: value => { state.loaded = value; },
     Alert: { alert: (...args) => alerts.push(args) },
   };
+  sessionApi = loadAuthSession(context, AsyncStorage, {}, { secure, read: (key, values, calls) => onRead?.(key, calls, values) });
   vm.createContext(context);
   vm.runInContext(transpile(bookingSource), context);
   context.getAuthenticatedUserId = context.exports.getAuthenticatedUserId;
   context.getCloudConfiguration = context.exports.getCloudConfiguration;
   vm.runInContext(transpile(`globalThis.load = ${loadFunction.getText(config)};`), context);
-  return { load: context.load, api: context.exports, storage, reads, requests, alerts, generation, state };
+  return { load: context.load, api: context.exports, auth: sessionApi, storage, reads, requests, alerts, generation, state };
 }
 
 test('signed-out configuration skips business storage and protected HTTP requests', async () => {
   const f = fixture();
   f.storage.set('go_business_config_v1', 'invalid old cache');
   await f.load();
-  assert.deepEqual(f.reads, [sessionKey]);
+  assert.deepEqual(f.reads, ['go_auth_signed_out_v2', sessionKey]);
   assert.equal(f.requests.length, 0); assert.equal(f.alerts.length, 0);
   assert.equal(f.state.loaded, true); assert.equal(f.state.config.businessName, '');
   await assert.rejects(f.api.getCloudConfiguration(), error => error.code === 'AUTH_REQUIRED');
@@ -95,7 +103,7 @@ test('logout during an outstanding configuration request invalidates its result 
     const requested = new Promise(resolve => { started = resolve; });
     const f = fixture(realSession, async () => { started(); await pending; return Response.json([{ payload: { businessName: 'old account' } }], { status }); });
     const oldLoad = f.load(); await requested;
-    f.storage.delete(sessionKey); f.generation.current++;
+    await f.auth.clearAuthSession(); f.generation.current++;
     await f.load(); release(); await oldLoad;
     assert.equal(f.alerts.length, 0); assert.equal(f.state.config.businessName, '');
     assert.equal(f.state.loaded, true);
@@ -104,7 +112,7 @@ test('logout during an outstanding configuration request invalidates its result 
 
 test('a session removed between user lookup and the protected request is a signed-out state', async () => {
   const f = fixture(realSession, undefined, (key, reads, storage) => {
-    if (key === sessionKey && reads.length === 2) storage.delete(sessionKey);
+    if (key === secureKey && reads.length === 2) storage.delete(secureKey);
   });
   await f.load();
   assert.equal(f.requests.length, 0); assert.equal(f.alerts.length, 0);

@@ -1592,11 +1592,11 @@ export function AgendaBoard({
           {/* ── Tappable body: opens/closes card on tap.
               Lives outside the footer so button presses never bubble here. ── */}
           <TouchableOpacity onPress={tapThis} activeOpacity={0.85} style={{ gap: colMode === "stress" ? 2 : colMode === "relax" ? 7 : 4 }}>
-            {/* Top row: time + badges right */}
+            {/* Keep the time intact; secondary indicators can wrap on narrow cards. */}
             <View style={s.cardTopRow}>
-              <View style={{ flexDirection: "row", alignItems: "center", flex: 1, flexWrap: "nowrap" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0, flexWrap: "wrap", maxWidth: "100%" }}>
                 {hasTime && (
-                  <Text style={[s.cardTime, { fontSize: timeFont, color: _textPrimary, flexShrink: 0 }]}>
+                  <Text numberOfLines={1} style={[s.cardTime, { fontSize: timeFont, color: _textPrimary, flexShrink: 0 }]}>
                     {formatTimeDisplay(item.time)}
                   </Text>
                 )}
@@ -1627,7 +1627,7 @@ export function AgendaBoard({
                   );
                 })()}
               </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", flexShrink: 1, maxWidth: "100%", marginLeft: "auto", gap: 5 }}>
                 {!!itemWeatherAlert && (
                   <Feather
                     name={getWeatherFeatherIcon(itemWeatherAlert.weatherCode) as any}
@@ -2401,7 +2401,7 @@ export function AgendaBoard({
           ]}
         >
           {dragItem.time ? (
-            <Text style={s.cardTime}>{formatTimeDisplay(dragItem.time)}</Text>
+            <Text numberOfLines={1} style={s.cardTime}>{formatTimeDisplay(dragItem.time)}</Text>
           ) : null}
           <Text style={s.cardTitle} numberOfLines={2}>
             {dragItem.isGeneric
@@ -4018,11 +4018,14 @@ const s = StyleSheet.create({
   },
   cardTopRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 4,
   },
   cardTypeBadge: {
+    maxWidth: "100%",
+    flexShrink: 1,
     borderRadius: 5,
     paddingHorizontal: 5,
     paddingVertical: 2,

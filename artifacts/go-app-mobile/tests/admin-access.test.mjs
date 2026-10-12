@@ -1,3 +1,4 @@
+import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -11,7 +12,7 @@ const transpile = source => ts.transpileModule(source, { compilerOptions: {
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
 } }).outputText;
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
-const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+const flush = async () => { await new Promise(setImmediate); };
 const userId = '11111111-1111-4111-8111-111111111111', key = 'go_supabase_session_v1';
 const plain = value => JSON.parse(JSON.stringify(value));
 
@@ -19,16 +20,20 @@ function dataFixture(reply) {
   class BookingApiError extends Error { constructor(status) { super('denied'); this.status = status; } }
   const storage = new Map([[key, JSON.stringify({ access_token: 'test-only', user: { id: userId, user_metadata: { role: 'admin' } } })]]);
   const calls = [];
+  const storageApi = { getItem: async k => storage.get(k) ?? null, setItem: async (k, value) => storage.set(k, value),
+    multiRemove: async keys => { for (const k of keys) storage.delete(k); } };
+  const sessionApi = loadAuthSession({}, storageApi);
   const context = { exports: {}, require(name) {
-    if (name === '@react-native-async-storage/async-storage') return { default: { getItem: async k => storage.get(k) ?? null } };
+    if (name === '@react-native-async-storage/async-storage') return { default: storageApi };
+    if (name === '@/lib/authSession') return sessionApi;
     if (name === './booking') return { BookingApiError,
-      getAuthenticatedUserId: async () => storage.has(key) ? userId : null,
+      getAuthenticatedUserId: async () => (await sessionApi.readAuthSession())?.user.id ?? null,
       supabaseApiRequest: async (...args) => { calls.push(args); return typeof reply === 'function' ? reply() : reply; },
     };
     throw new Error(`Unexpected import ${name}`);
   } };
   vm.createContext(context); vm.runInContext(transpile(read('data/adminAccess.ts')), context);
-  return { api: context.exports, storage, calls, BookingApiError };
+  return { api: context.exports, auth: sessionApi, storage, calls, BookingApiError };
 }
 
 test('ADMIN permission requires the authenticated server response for the same current identity', async () => {
@@ -42,7 +47,7 @@ test('ADMIN permission requires the authenticated server response for the same c
     { userId, role: 'admin', allowed: true, level: 'owner', permissions: [] }, null, '<html>']) {
     await assert.rejects(dataFixture(reply).api.getAdminAccess(), /authorization response/);
   }
-  f.storage.delete(key);
+  await f.auth.clearAuthSession();
   assert.deepEqual(plain(await f.api.getAdminAccess()), { userId: null, allowed: false, level: null, permissions: [] });
   assert.equal(f.calls.length, 1);
   assert.equal((await dataFixture({ userId, role: 'admin', allowed: true, level: 'owner',
@@ -52,12 +57,12 @@ test('ADMIN permission requires the authenticated server response for the same c
 test('denials and temporary failures never erase a session; stale session responses cannot grant ADMIN', async () => {
   for (const status of [401, 403]) {
     const f = dataFixture(() => { throw new f.BookingApiError(status); });
-    assert.equal((await f.api.getAdminAccess()).allowed, false); assert.equal(f.storage.has(key), true);
+    assert.equal((await f.api.getAdminAccess()).allowed, false); assert.equal((await f.auth.readAuthSession()).user.id, userId);
   }
   const offline = dataFixture(() => { throw new Error('offline'); });
-  await assert.rejects(offline.api.getAdminAccess(), /offline/); assert.equal(offline.storage.has(key), true);
+  await assert.rejects(offline.api.getAdminAccess(), /offline/); assert.equal((await offline.auth.readAuthSession()).user.id, userId);
   const next = deferred(), f = dataFixture(() => next.promise), request = f.api.getAdminAccess();
-  await flush(); f.storage.set(key, 'a new session'); next.resolve({ userId, role: 'admin', allowed: true });
+  await flush(); await f.auth.saveAuthSession({access_token:'new-test-only',user:{id:'different-user'}}); next.resolve({ userId, role: 'admin', allowed: true });
   await assert.rejects(request, /Session changed/);
 });
 
@@ -120,7 +125,7 @@ test('public account selection is Empresa then Usuario; every existing ADMIN ent
   const home = read('app/index.tsx');
   assert.match(home, /if \(await adminAccess.refresh\(\)\)/);
   assert.match(home, /adminAccess.allowed && goView.isAdminView && <GoAdminDashboard/);
-  assert.match(home, /resolvedRole === "admin" \? "usuario" : resolvedRole/);
+  assert.match(home, /role === "admin" \? "usuario" : role as AccountRole/);
   const panel = read('components/empresa/EmpresaPanel.tsx');
   assert.match(panel, /filter\(m => m.key !== "admin" \|\| canOpenAdmin\)/);
   assert.match(panel, /if \(key === "admin" && !canOpenAdmin\) return/);

@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { readAuthSession, fetchWithAuth, AuthSessionRequiredError, type AuthSession } from "@/lib/authSession";
 import { expandSearchTerms, normalize } from "./goSearchAliases";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -163,12 +164,7 @@ const KEY_AVAILABILITY_WINDOWS = "go_availability_windows_v1";
 const KEY_BOOKINGS = "go_bookings_v1";
 const KEY_MANUAL_BLOCKS = "go_manual_blocks_v1";
 const KEY_STAFF = "go_staff_v1";
-const KEY_SUPABASE_SESSION = "go_supabase_session_v1";
-
-type StoredSupabaseSession = {
-  access_token?: string;
-  user?: { id?: string };
-};
+type StoredSupabaseSession = AuthSession;
 
 export class BookingApiError extends Error {
   readonly status: number;
@@ -190,12 +186,7 @@ export class BookingAuthenticationError extends BookingApiError {
 }
 
 async function getStoredSession(): Promise<StoredSupabaseSession | null> {
-  try {
-    const raw = await AsyncStorage.getItem(KEY_SUPABASE_SESSION);
-    return raw ? (JSON.parse(raw) as StoredSupabaseSession) : null;
-  } catch {
-    return null;
-  }
+  return readAuthSession();
 }
 
 export async function getAuthenticatedUserId(): Promise<string | null> {
@@ -226,7 +217,12 @@ async function performSupabaseRequest<T>(
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${getApiBase()}${path}`, { ...init, headers });
+  let response: Response;
+  try { response = await fetchWithAuth(`${getApiBase()}${path}`, { ...init, headers }, requireToken, session?.user.id); }
+  catch (error) {
+    if (error instanceof AuthSessionRequiredError) throw new BookingAuthenticationError();
+    throw error;
+  }
   const body = await response.text();
   let payload: unknown = null;
   try {

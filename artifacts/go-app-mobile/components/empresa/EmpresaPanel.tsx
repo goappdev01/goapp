@@ -558,6 +558,12 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   );
 
   if (previewReadOnly && !isBusinessPreview) return null;
+  const contextNavigation = isOwner && onOpenContext ? (
+    <TouchableOpacity onPress={() => { if (demo) clearLocationReturn(); onOpenContext(); }} accessibilityLabel={t("context_change")} style={[{ paddingHorizontal: 18, paddingVertical: 8 }, demo && modulo === "empresa_config" ? { flex: 1, minWidth: 0 } : { alignSelf: "flex-end" }]}>
+      <Text style={[{ color: "#4A80BD", fontWeight: "700" }, demo && modulo === "empresa_config" ? { textAlign: "right" } : undefined]}>{t("context_change")}</Text>
+    </TouchableOpacity>
+  ) : null;
+
   return (
     <Modal
       visible={panelVisible}
@@ -576,11 +582,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
         </View>
 
         {preview && <Text style={[s.headerSub, { textAlign: "center", color: "#4A80BD", fontWeight: "700" }]}>{demo ? demoTitle : t("biz_preview_title")}</Text>}
-        {isOwner && onOpenContext && (
-          <TouchableOpacity onPress={() => { if (demo) clearLocationReturn(); onOpenContext(); }} accessibilityLabel={t("context_change")} style={{ alignSelf: "flex-end", paddingHorizontal: 18, paddingVertical: 8 }}>
-            <Text style={{ color: "#4A80BD", fontWeight: "700" }}>{t("context_change")}</Text>
-          </TouchableOpacity>
-        )}
+        {!(demo && modulo === "empresa_config") && contextNavigation}
 
         {demo && modulo === "home" && <DemoCompanyManager open={demoManagerOpen} onOpenChange={setDemoManagerOpen} onOpenConfiguration={openDemoConfiguration} />}
 
@@ -1019,7 +1021,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             {modulo === "orbitas"         && <OrbitasScreen     guidanceLevel={guidanceLevel} />}
             {modulo === "consumo"         && <ConsumoScreen     guidanceLevel={guidanceLevel} />}
             {modulo === "zonas"           && <ZonasScreen       guidanceLevel={guidanceLevel} />}
-            {modulo === "empresa_config"   && <EmpresaConfigScreen   key={`ec-${businessDemo?.businessId ?? "live"}-${newEmpresaKey}`} keyboardManagedByParent startAtSteps={demo && openSelectedConfig} onOpenCompanies={demo ? openDemoBusinesses : undefined} onBack={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} onFinalizarConfig={() => { goHome(); if (previewReadOnly) return; if (onFinalizarWizard) { onFinalizarWizard(); } else { setActivacionVisible(true); } }} initialStep={configInitialStep} goPrevRef={modulePrevRef} />}
+            {modulo === "empresa_config"   && <EmpresaConfigScreen   key={`ec-${businessDemo?.businessId ?? "live"}-${newEmpresaKey}`} keyboardManagedByParent startAtSteps={demo && openSelectedConfig} onOpenCompanies={demo ? openDemoBusinesses : undefined} contextNavigation={demo ? contextNavigation : undefined} onBack={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} onFinalizarConfig={() => { goHome(); if (previewReadOnly) return; if (onFinalizarWizard) { onFinalizarWizard(); } else { setActivacionVisible(true); } }} initialStep={configInitialStep} goPrevRef={modulePrevRef} />}
             {modulo === "reservas_config"  && (demo ? <GoReservasDemoScreen onClose={goHome} hideFAB={true} /> : <GoReservasConfigScreen onClose={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} hideFAB={true} />)}
             {modulo === "deportes_screen"  && <GoDeportesScreen onClose={goHome} onOpenBooking={(_id, _label, _emoji, _color) => { goToModulo("reservas_config"); }} onOpenVerificacion={onOpenVerificacion} />}
 

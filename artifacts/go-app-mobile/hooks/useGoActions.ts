@@ -1,3 +1,5 @@
+import { useTaskReminders } from "./useTaskReminders";
+import type { TaskScope } from "@/lib/goTaskReminders";
 import { useTaskManagement } from "./useTaskManagement";
 import { useRef, useState } from "react";
 import {
@@ -17,7 +19,7 @@ type BookingAssistant = ReturnType<typeof useBookingAssistant>;
 type Active = GoContext["active"];
 export const GO_TASK_CREATION_ONLY = true;
 type TaskReview = { action: GoAction; reason: string; times: string[] };
-export function useGoActions(a: BookingAssistant) {
+export function useGoActions(a: BookingAssistant, scope?: TaskScope | null) {
   const [active, setActiveState] = useState<Active>(null);
   const [result, setResult] = useState<PersonalResult | null>(null);
   const [choices, setChoices] = useState<GoEntry[]>([]);
@@ -33,6 +35,7 @@ export function useGoActions(a: BookingAssistant) {
   const setActive = (value: Active) => { current.current = value; setActiveState(value); };
   function reset() {
     manager.reset();
+    reminders.reset();
     setReview(null);
     unresolved.current = { date: false, time: false, times: [] };
     pending.current = null;
@@ -45,6 +48,9 @@ export function useGoActions(a: BookingAssistant) {
   const manager = useTaskManagement(a, () => {
     pending.current = null; remainder.current = []; setReview(null); setChoices([]); setResult(null); setActive("task");
   }, () => { reset(); a.reset(); });
+  const reminders = useTaskReminders(a, scope, () => {
+    manager.reset(); pending.current = null; remainder.current = []; setReview(null); setChoices([]); setResult(null); setActive("task");
+  });
   function start(kind: NonNullable<Active>) {
     if (a.lock.current) return;
     manager.reset();
@@ -96,12 +102,16 @@ export function useGoActions(a: BookingAssistant) {
     a.check(token);
     if (!await manager.ensureAccount()) return;
     a.setBusy("Guardando en GO…");
-    const saved = await savePersonalAction(action);
+    const saved = await savePersonalAction(action, undefined, scope || undefined);
     a.check(token);
     pending.current = null;
     unresolved.current = { date: false, time: false, times: [] };
     setReview(null);
     setResult(saved);
+    await reminders.remember(saved.entry);
+    a.check(token);
+    if (!await manager.ensureAccount()) return;
+    a.check(token);
     a.say(describePersonalResult(saved));
   }
   async function confirmTask(time?: string) {
@@ -194,6 +204,7 @@ export function useGoActions(a: BookingAssistant) {
   }
   async function dispatch(text: string, useAI: boolean) {
     if (!text.trim() || dispatchLock.current || a.lock.current) return;
+    if (await reminders.handle(text)) return;
     if (await manager.handle(text)) return;
     if (dispatchLock.current || a.lock.current) return;
     const n = normalizeBookingText(stripGoAddress(text));

@@ -215,7 +215,9 @@ test('revocation and temporary failures discard effective owner context without 
     if (failure === 'denied') f.requests[1].resolve(denied());
     else f.requests[1].reject(new Error('test offline'));
     assert.equal(await refresh, false); await f.flush();
-    assert.equal(f.view.view, 'USER'); assert.equal(f.view.isOwner, false);
+    // Unavailability retains only the cosmetic choice; a confirmed denial returns to User.
+    assert.equal(f.view.view, failure === 'offline' ? 'BUSINESS' : 'USER'); assert.equal(f.view.isOwner, false);
+    assert.equal(f.admin.unavailable, failure === 'offline');
     assert.equal(f.view.isAdminView, false); assert.equal(f.view.isBusinessPreview, false);
     assert.deepEqual(f.writes, []); f.unmount();
   }
@@ -296,4 +298,32 @@ test('a late initial storage read cannot replace a successfully selected owner c
   read.resolve('ADMIN'); await f.flush();
   assert.equal(f.view.loaded, true); assert.equal(f.view.view, 'BUSINESS');
   assert.deepEqual(f.writes, [[key(ownerId), 'BUSINESS']]); f.unmount();
+});
+
+test('all three selected owner contexts survive repeated background revalidation and temporary errors without granting authority', async () => {
+  for (const saved of ['ADMIN', 'BUSINESS', 'USER']) {
+    const f = fixture({ storage: new Map([[key(ownerId), saved]]) });
+    await authorize(f);
+    f.appState('inactive'); f.appState('background'); await f.flush();
+    assert.equal(f.view.view, saved); assert.equal(f.admin.allowed, false);
+    f.appState('active'); await f.flush();
+    f.requests[1].reject(new Error('temporary network loss')); await f.flush();
+    assert.equal(f.view.view, saved); assert.equal(f.admin.unavailable, true);
+    assert.equal(f.view.isOwner, false); assert.equal(f.view.isAdminView, false); assert.equal(f.view.isBusinessPreview, false);
+    const check = f.admin.refresh(); f.requests[2].resolve(owner()); assert.equal(await check, true); await f.flush();
+    assert.equal(f.view.view, saved); assert.equal(f.view.isOwner, true);
+    assert.deepEqual(f.reads, [key(ownerId)]); assert.deepEqual(f.writes, []);
+    assert.equal(f.storage.get(key(ownerId)), saved);
+    f.unmount();
+  }
+});
+
+test('after permission revocation no saved owner context or temporary identity retention can restore ADMIN authority', async () => {
+  for (const saved of ['ADMIN', 'BUSINESS', 'USER']) {
+    const f = fixture({ storage: new Map([[key(ownerId), saved]]) }); await authorize(f);
+    const check = f.admin.refresh(); f.requests[1].resolve(denied()); assert.equal(await check, false); await f.flush();
+    assert.equal(f.view.view, 'USER'); assert.equal(f.view.isOwner, false); assert.equal(f.view.isAdminView, false);
+    assert.equal(f.view.isBusinessPreview, false); assert.equal(f.admin.unavailable, false);
+    assert.equal(f.storage.get(key(ownerId)), saved); assert.deepEqual(f.writes, []); f.unmount();
+  }
 });

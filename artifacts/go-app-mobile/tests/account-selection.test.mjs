@@ -1,3 +1,4 @@
+import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -25,7 +26,7 @@ function nodes(tree, predicate) {
 
 // Execute the actual panel and its rendered card callbacks, with native hosts
 // mocked. Authentication/network operations are deliberately not exercised here.
-function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: false, isBusinessPreview: false }, access = { allowed: false, checking: false, userId: null }, select = async () => true, width = 390, fontScale = 1, authenticate } = {}) {
+function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: false, isBusinessPreview: false }, access = { allowed: false, checking: false, userId: null }, select = async () => true, width = 390, fontScale = 1, platformOS = "ios", authenticate } = {}) {
   const slots = [], accountChanges = [], storageCalls = [];
   let closeCalls = 0;
   let cursor = 0;
@@ -41,6 +42,7 @@ function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: fals
   };
   const native = Object.fromEntries(['ActivityIndicator', 'Modal', 'ScrollView', 'Text', 'TextInput', 'TouchableOpacity', 'View'].map(name => [name, name]));
   Object.assign(native, {
+    Platform: { OS: platformOS },
     Animated: { Value: class {}, View: 'Animated.View' },
     Dimensions: { get: () => ({ width: 390, height: 844 }) },
     useWindowDimensions: () => ({ width, height: 844, fontScale }),
@@ -65,6 +67,7 @@ function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: fals
     '@/lib/sessionEvents': { notifySessionChanged() {} },
     '@/lib/registrationReturn': {},
   };
+  modules['@/lib/authSession'] = loadAuthSession({}, modules['@react-native-async-storage/async-storage'].default);
   const selectorContext = { exports: {}, require: name => { assert.ok(name in modules, name); return modules[name]; } };
   vm.runInNewContext(ts.transpileModule(readFileSync('components/auth/AccountContextSelector.tsx', 'utf8'), { compilerOptions: {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,
@@ -268,3 +271,100 @@ test('public cards remain reachable within the welcome scroll at narrow widths a
   const f=panelFixture({access:{allowed:false,checking:false,userId:null,refreshOwner:async()=>false},authenticate:async()=>({ok:true,json:async()=>({access_token:'mock-session',user:{id:'11111111-1111-4111-8111-111111111111'}})})});
   nodes(f.render(),n=>n.props?.testID==='owner-direct-login')[0].props.onPress();let tree=f.render(),inputs=nodes(tree,n=>n.type==='TextInput');inputs[0].props.onChangeText('ordinary@example.test');inputs[1].props.onChangeText('test-only-password');tree=f.render();await nodes(tree,n=>n.type==='TouchableOpacity'&&n.props.onPress?.name==='handleAuthenticate')[0].props.onPress();tree=f.render();assert.equal(nodes(tree,n=>n.props?.testID==='owner-view-admin').length,0);assert.deepEqual(f.accountChanges,[]);assert.ok(nodes(tree,n=>n.type==='Text').flatMap(n=>n.props.children).some(text=>String(text).includes('owner_login_denied')));
  });
+
+
+// Exercise native input props and event handlers from the actual login panel.
+function credentials(fixture, role = 'usuario') {
+  nodes(fixture.render(), n => n.type === 'TouchableOpacity' && n.props.key === role)[0].props.onPress();
+  return nodes(fixture.render(), n => n.type === 'TextInput');
+}
+for (const role of ['usuario', 'empresa']) {
+  test(role + ': iOS exposes a username/password pair without competing autocomplete hints', () => {
+    const f = panelFixture({ platformOS: 'ios' });
+    const [email, password] = credentials(f, role);
+    assert.equal(email.props.textContentType, 'username');
+    assert.equal(password.props.textContentType, 'password');
+    assert.equal(email.props.autoComplete, undefined);
+    assert.equal(password.props.autoComplete, undefined);
+    assert.equal(email.props.keyboardType, 'email-address');
+    assert.equal(email.props.autoCorrect, false);
+    assert.equal(email.props.autoCapitalize, 'none');
+    assert.equal(password.props.secureTextEntry, true);
+    assert.equal(password.props.autoCorrect, false);
+    assert.equal(password.props.autoCapitalize, 'none');
+    assert.equal(email.props.returnKeyType, 'next');
+    assert.equal(password.props.returnKeyType, 'go');
+    assert.deepEqual(f.storageCalls, []);
+  });
+}
+for (const platformOS of ['android', 'web']) {
+  test(platformOS + ': retains standard username/current-password autocomplete', () => {
+    const [email, password] = credentials(panelFixture({ platformOS }));
+    assert.equal(email.props.textContentType, undefined);
+    assert.equal(password.props.textContentType, undefined);
+    assert.equal(email.props.autoComplete, 'username');
+    assert.equal(password.props.autoComplete, 'current-password');
+    assert.equal(password.props.secureTextEntry, true);
+  });
+}
+for (const platformOS of ['ios', 'android']) {
+  test(platformOS + ': registration still requests a new password instead of a saved login password', () => {
+    const f = panelFixture({ platformOS });
+    credentials(f);
+    nodes(f.render(), n => n.type === 'TouchableOpacity' &&
+      nodes(n, child => child.type === 'Text' && child.props.children.includes('¿No tienes cuenta? Regístrate')).length)[0].props.onPress();
+    const inputs = nodes(f.render(), n => n.type === 'TextInput');
+    const email = inputs.find(n => n.props.placeholder === 'Email');
+    const password = inputs.find(n => n.props.secureTextEntry);
+    assert.equal(inputs.length, 3);
+    assert.equal(email.props.textContentType, platformOS === 'ios' ? 'emailAddress' : undefined);
+    assert.equal(password.props.textContentType, platformOS === 'ios' ? 'newPassword' : undefined);
+    assert.equal(email.props.autoComplete, platformOS === 'ios' ? undefined : 'email');
+    assert.equal(password.props.autoComplete, platformOS === 'ios' ? undefined : 'new-password');
+    assert.equal(password.props.returnKeyType, 'done');
+    assert.equal(password.props.onSubmitEditing, undefined);
+  });
+}
+test('native credential selection and email editing retain the password field without reading or storing passwords', () => {
+  const requests = [], f = panelFixture({ authenticate: (...args) => { requests.push(args); } });
+  const [email, password] = credentials(f);
+  password.props.onChangeText('native-fixture-password');
+  email.props.onChangeText('saved@example.test');
+  let inputs = nodes(f.render(), n => n.type === 'TextInput');
+  assert.equal(inputs[0].props.value, 'saved@example.test');
+  assert.equal(inputs[1].props.value, 'native-fixture-password');
+  assert.equal(inputs[1].props.ref, password.props.ref);
+  inputs[0].props.onChangeText('');
+  inputs = nodes(f.render(), n => n.type === 'TextInput');
+  inputs[0].props.onChangeText('other@example.test');
+  inputs = nodes(f.render(), n => n.type === 'TextInput');
+  assert.equal(inputs[1].props.value, 'native-fixture-password');
+  assert.equal(inputs[1].props.ref, password.props.ref);
+  const scroll = nodes(f.render(), n => n.type === 'ScrollView' &&
+    nodes(n, child => child.type === 'TextInput').length === 2)[0];
+  assert.equal(scroll.props.keyboardShouldPersistTaps, 'always');
+  assert.deepEqual(requests, []);
+  assert.deepEqual(f.storageCalls, []);
+});
+test('Next focuses the existing password input; Go submits native-filled credentials through the existing contract', async () => {
+  const requests = [], id = '11111111-1111-4111-8111-111111111111';
+  const f = panelFixture({ authenticate: async (url, options) => {
+    requests.push({ url, body: JSON.parse(options.body) });
+    return { ok: true, json: async () => ({ access_token: 'fixture-access', refresh_token: 'fixture-refresh', user: { id } }) };
+  } });
+  let [email, password] = credentials(f);
+  let focusCalls = 0;
+  password.props.ref.current = { focus: () => focusCalls++ };
+  email.props.onSubmitEditing();
+  assert.equal(focusCalls, 1);
+  email.props.onChangeText('  Saved@Example.Test  ');
+  password.props.onChangeText('native-fixture-password');
+  [email, password] = nodes(f.render(), n => n.type === 'TextInput');
+  await password.props.onSubmitEditing();
+  assert.deepEqual(requests, [{ url: 'http://private.test/api/supabase/auth/login',
+    body: { email: 'saved@example.test', password: 'native-fixture-password' } }]);
+  assert.deepEqual(f.accountChanges, ['usuario']);
+  assert.ok(!JSON.stringify(f.storageCalls).includes('native-fixture-password'));
+  assert.ok(!JSON.stringify(f.storageCalls).includes('fixture-access'));
+  assert.ok(!JSON.stringify(f.storageCalls).includes('fixture-refresh'));
+});

@@ -1,5 +1,5 @@
 import { Platform } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { fetchWithAuth, AuthSessionRequiredError } from "./authSession";
 import {
   bookingRequestSchema,
   parseBookingRequest,
@@ -44,6 +44,12 @@ export type AssistantCapabilities = {
   interpretation: boolean;
   transcription: boolean;
 };
+export class AssistantApiError extends Error {
+  constructor(readonly code: string, message: string, readonly status?: number) {
+    super(message);
+    this.name = "AssistantApiError";
+  }
+}
 const apiBase = () =>
   process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "") ||
   (process.env.EXPO_PUBLIC_DOMAIN
@@ -56,28 +62,45 @@ export async function assistantApi<T>(path: string, body?: unknown): Promise<T> 
     // Internal diagnostics deliberately exclude URLs, query text, bodies and tokens.
     console.info("[assistant-api]", { code, operation, ...(status ? { status } : {}) });
     const message = status === 401 ? "Inicia sesión para continuar con GO."
+      : code === "REQUEST_TIMEOUT" ? (operation === "voice"
+        ? "GO ha tardado demasiado en procesar tu voz. Puedes escribir o intentarlo de nuevo."
+        : "GO está tardando en responder. Inténtalo de nuevo en unos momentos.")
       : status === 429 ? "GO está recibiendo muchas solicitudes. Inténtalo de nuevo en unos momentos."
       : operation === "places" ? "No he podido buscar esa ubicación ahora. Inténtalo de nuevo en unos momentos."
       : operation === "voice" ? "No he podido procesar tu voz ahora. Puedes escribir o intentarlo de nuevo."
       : "No he podido conectar con GO ahora. Inténtalo de nuevo en unos momentos.";
-    throw new Error(message);
+    throw new AssistantApiError(code, message, status);
   };
   const base = apiBase();
   if (Platform.OS !== "web" && !/^https?:\/\//i.test(base)) fail("API_URL_MISSING");
-  let session: { access_token?: string } | null = null;
-  try { session = JSON.parse((await AsyncStorage.getItem("go_supabase_session_v1")) || "null"); } catch {}
-  const response = await fetch(base + "/booking-assistant" + path, {
-    method: body === undefined ? "GET" : "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(session?.access_token ? { Authorization: "Bearer " + session.access_token } : {}),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(35000),
-  }).catch(() => fail("NETWORK_UNAVAILABLE"));
-  if (!response.ok) fail("HTTP_FAILURE", response.status);
-  const data = await response.json().catch(() => fail("INVALID_RESPONSE"));
-  return data as T;
+  // React Native's AbortSignal has no timeout() static method. Use the same
+  // controller/timer pattern as GO's existing registration return flow.
+  const controller = new AbortController();
+  let timedOut = false;
+  // Voice includes up to 15 s of server authentication and 30 s of transcription.
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, operation === "voice" ? 55000 : 35000);
+  try {
+    const response = await fetchWithAuth(base + "/booking-assistant" + path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: controller.signal,
+    }, false);
+    if (!response.ok) fail("HTTP_FAILURE", response.status);
+    const data = await response.json().catch(() => fail(timedOut ? "REQUEST_TIMEOUT" : "INVALID_RESPONSE"));
+    return data as T;
+  } catch (error) {
+    if (error instanceof AssistantApiError) throw error;
+    if (error instanceof AuthSessionRequiredError) return fail("AUTH_REQUIRED", 401);
+    return fail(timedOut ? "REQUEST_TIMEOUT" : "NETWORK_UNAVAILABLE");
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 export const localToday = () => {
   const d = new Date();
