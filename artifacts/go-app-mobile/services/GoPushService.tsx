@@ -17,6 +17,7 @@ import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
+import { canPresentNativeTaskReminder } from "@/lib/goTaskReminderRuntime";
 
 import {
   AlertMode,
@@ -51,7 +52,10 @@ export interface GoPushPayload {
 // Envolvemos en try-catch para evitar crash al inicializar el módulo.
 try {
   Notifications.setNotificationHandler({
-    handleNotification: async () => {
+    handleNotification: async notification => {
+      if (!await canPresentNativeTaskReminder(notification.request.content.data ?? {})) {
+        return { shouldShowAlert: false, shouldShowBanner: false, shouldShowList: false, shouldPlaySound: false, shouldSetBadge: false };
+      }
       const raw  = await AsyncStorage.getItem(ALERT_MODE_KEY);
       const mode: AlertMode =
         raw === "sound" || raw === "visual" || raw === "silent" ? raw : "sound";

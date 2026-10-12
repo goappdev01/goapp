@@ -18,6 +18,7 @@ export function ListeningIndicator({ active, compact = false, diameter = 128 }: 
   const [reducedMotion, setReducedMotion] = useState<boolean | null>(null);
   const opacity = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
+  const wave = useRef(new Animated.Value(0)).current;
   const transition = useRef(0);
   useEffect(() => {
     let alive = true;
@@ -30,7 +31,9 @@ export function ListeningIndicator({ active, compact = false, diameter = 128 }: 
   useEffect(() => {
     const token = ++transition.current;
     pulse.stopAnimation(); pulse.setValue(0);
+    wave.stopAnimation(); wave.setValue(0);
     let heartbeat: Animated.CompositeAnimation | undefined;
+    let waves: Animated.CompositeAnimation | undefined;
     if (active) {
       setRendered(true);
       if (reducedMotion === false) {
@@ -39,14 +42,24 @@ export function ListeningIndicator({ active, compact = false, diameter = 128 }: 
           Animated.timing(pulse, { toValue: 0, duration: 1100, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
         ]));
         heartbeat.start();
+        // One native cycle expands and contracts the rings without a jump on repeat.
+        waves = Animated.loop(Animated.timing(wave, {
+          toValue: 1, duration: 1040,
+          easing: progress => (1 - Math.cos(progress * Math.PI * 2)) / 2,
+          useNativeDriver: true, isInteraction: false,
+        }), { iterations: -1 });
+        waves.start();
       }
     }
     const fade = Animated.timing(opacity, { toValue: active ? 1 : 0, duration: reducedMotion ? 0 : 180, useNativeDriver: true });
     fade.start(({ finished }) => {
       if (finished && !active && transition.current === token) setRendered(false);
     });
-    return () => { ++transition.current; heartbeat?.stop(); fade.stop(); pulse.stopAnimation(); };
-  }, [active, reducedMotion, opacity, pulse]);
+    return () => {
+      ++transition.current; heartbeat?.stop(); waves?.stop(); fade.stop();
+      pulse.stopAnimation(); wave.stopAnimation();
+    };
+  }, [active, reducedMotion, opacity, pulse, wave]);
   if (!rendered) return null;
   const size = compact ? 28 : diameter;
   return (
@@ -58,8 +71,13 @@ export function ListeningIndicator({ active, compact = false, diameter = 128 }: 
         {[1, 0.82, 0.64].map((ratio, index) => (
           <Animated.View key={ratio} style={[styles.ring, {
             position: "absolute", width: size * ratio * 0.92, height: size * ratio * 0.92,
-            borderRadius: size, opacity: 0.22 + index * 0.1,
-            transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.04 + index * 0.01] }) }],
+            borderRadius: size,
+            opacity: reducedMotion === false
+              ? wave.interpolate({ inputRange: [0, 1], outputRange: [0.3 + index * 0.1, 0.58 + index * 0.1] })
+              : 0.22 + index * 0.1,
+            transform: [{ scale: reducedMotion === false
+              ? wave.interpolate({ inputRange: [0, 1], outputRange: [0.72 + index * 0.06, 1.08 + index * 0.08] })
+              : 1 }],
           }]} />
         ))}
         <Animated.View style={[styles.core, { width: size * 0.43, height: size * 0.43, borderRadius: size,

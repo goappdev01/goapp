@@ -5,13 +5,13 @@ const path='/api/supabase/auth/login';
 const credentials={email:'fictitious@example.invalid',password:'fictitious-password'};
 const session={access_token:'fictitious-access',refresh_token:'fictitious-refresh',user:{id:'11111111-1111-4111-8111-111111111111'}};
 function fixture(payload=session,status=200){const calls=[];return {calls,request:async(url,init)=>{calls.push({url,init});return new Response(JSON.stringify(payload),{status,headers:{'content-type':'application/json'}});}};}
-test('only login is forwarded; credentials unchanged and no caller headers relayed',async()=>{
+test('login still forwards only its credential pair with no caller headers relayed',async()=>{
  const f=fixture();const result=await respond({method:'POST',url:path,body:credentials,authorization:'Bearer do-not-forward'},f.request);
  assert.equal(result.status,200);assert.deepEqual(result.body.user,session.user);assert.equal(f.calls.length,1);
  assert.equal(f.calls[0].url,'http://127.0.0.1:3000'+path);assert.equal(f.calls[0].init.method,'POST');
  assert.deepEqual(JSON.parse(f.calls[0].init.body),credentials);assert.equal(f.calls[0].init.headers.Authorization,undefined);assert.equal(f.calls[0].init.redirect,'error');
 });
-for(const route of ['/api/supabase/auth/register','/api/supabase/auth/refresh','/api/supabase/auth/recover','/api/supabase/bookings','/api/supabase/admin/memberships','/api/supabase/manage/enrollment',path+'?x=1'])test('POST stays blocked: '+route,async()=>{
+for(const route of ['/api/supabase/auth/register','/api/supabase/auth/recover','/api/supabase/bookings','/api/supabase/admin/memberships','/api/supabase/manage/enrollment',path+'?x=1'])test('POST stays blocked: '+route,async()=>{
  const f=fixture();assert.equal((await respond({method:'POST',url:route,body:credentials},f.request)).status,405);assert.equal(f.calls.length,0);
 });
 test('malformed credentials and extra fields never reach backend',async()=>{

@@ -1,3 +1,4 @@
+import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -36,14 +37,18 @@ function fixture() {
     getMinutes() { return this.localParts().getUTCMinutes(); }
     getSeconds() { return this.localParts().getUTCSeconds(); }
   }
+  const storageApi = {
+    getItem: async key => storage.get(key) ?? null,
+    setItem: async (key, value) => storage.set(key, value),
+    multiRemove: async keys => keys.forEach(key => storage.delete(key)),
+  };
+  let sessionApi;
   const context = {
     exports: {}, Date: PhoneDate, Headers, process: { env: { EXPO_PUBLIC_API_URL: 'https://test.invalid/api' } },
     console: { log() {}, warn() {} },
     require(name) {
-      if (name === '@react-native-async-storage/async-storage') return { default: {
-        getItem: async key => storage.get(key) ?? null,
-        setItem: async (key, value) => storage.set(key, value),
-      } };
+      if (name === '@react-native-async-storage/async-storage') return { default: storageApi };
+      if (name === '@/lib/authSession') return sessionApi;
       if (name === './goSearchAliases') return { normalize: value => value.toLowerCase(), expandSearchTerms: value => [value.toLowerCase()] };
       throw new Error(`Unexpected import: ${name}`);
     },
@@ -57,10 +62,11 @@ function fixture() {
       return Response.json(url.includes('/services') ? behavior.services : behavior.businesses);
     },
   };
+  sessionApi = loadAuthSession(context, storageApi);
   vm.runInNewContext(ts.transpileModule(readFileSync('data/booking.ts', 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, context);
-  return { api: context.exports, storage, calls, behavior, Date: PhoneDate };
+  return { api: context.exports, auth: sessionApi, storage, calls, behavior, Date: PhoneDate };
 }
 
 test('empty live customer catalogue never offers local demos; legacy local reads stay unchanged', async () => {
@@ -73,7 +79,8 @@ test('empty live customer catalogue never offers local demos; legacy local reads
 test('customer catalogue preserves backend failures rather than falling back to demo businesses', async () => {
   const f = fixture(); f.behavior.status = 503;
   await assert.rejects(f.api.searchBusinesses('padel'), error => error.status === 503);
-  assert.equal(f.storage.has('go_supabase_session_v1'), true);
+  assert.equal(f.storage.has('go_supabase_session_v1'), false, 'Migration removes the plaintext copy');
+  assert.equal((await f.auth.readAuthSession()).user.id, user, 'Temporary backend failure preserves protected authentication');
   assert.deepEqual(plain(await f.api.getBusinesses()), [demo]);
 });
 

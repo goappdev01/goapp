@@ -61,7 +61,7 @@ export function BookingAssistantPanels({
                   : a.panel === "cancel"
                     ? "Cancelar reserva"
                     : "Ayuda de GO";
-  const disabled = !!a.busy;
+  const disabled = !!a.busy || (a.panel === "zone" && (a.zoneLoading || a.zoneSaving));
   const [dockHeight, setDockHeight] = useState(84);
   return (
     <View style={s.scrim}>
@@ -119,6 +119,11 @@ export function BookingAssistantPanels({
                 Población, código postal, dirección o zona. Tú eliges el
                 destino.
               </Text>
+              {a.zoneLoading && <Text accessibilityLiveRegion="polite" style={z.caption}>Recuperando tu zona habitual…</Text>}
+              {a.habitualZone && <Text style={z.caption}>
+                Zona habitual guardada: {a.habitualZone.mode === "fixed" ? a.habitualZone.zone.label : "Mi ubicación actual"} · {a.habitualZone.mode === "fixed" ? a.habitualZone.zone.radiusKm : a.habitualZone.radiusKm} km
+                {a.habitualZone.mode === "current-location" ? ". Pulsa Mi ubicación actual para obtenerla cuando quieras aplicarla." : ""}
+              </Text>}
               <TextInput
                 accessibilityLabel="Centro de búsqueda"
                 editable={!disabled}
@@ -155,7 +160,7 @@ export function BookingAssistantPanels({
               {a.places.map((place, index) => <Choice tools key={place.label + index}
                 title={place.label} onPress={() => a.pickPlace(place)} disabled={disabled} />)}
               {a.pendingPlace && <>
-                <Text style={z.sectionTitle}>Pendiente de aplicar: {a.pendingPlace.label}</Text>
+                <Text style={z.sectionTitle}>{a.zone?.label === a.pendingPlace.label && a.zone?.latitude === a.pendingPlace.latitude && a.zone?.longitude === a.pendingPlace.longitude && a.zone?.radiusKm === Number(a.radiusText.replace(",", ".")) ? "Ubicación seleccionada" : "Pendiente de aplicar"}: {a.pendingPlace.label}</Text>
                 <Action tools primary text="Aplicar a esta búsqueda" disabled={disabled}
                   onPress={() => void a.chooseZone(a.pendingPlace!, a.pendingPlace!.source)} />
               </>}
@@ -173,6 +178,7 @@ export function BookingAssistantPanels({
                       s.chip, z.chip,
                       Number(a.radiusText) === value && z.activeChip,
                     ]}
+                    disabled={disabled}
                     onPress={() => a.setRadiusText(String(value))}
                   >
                     <Text style={z.chipText}>
@@ -184,6 +190,7 @@ export function BookingAssistantPanels({
               <Text style={z.caption}>Personalizado (km)</Text>
               <TextInput
                 accessibilityLabel="Distancia personalizada en kilómetros"
+                editable={!disabled}
                 value={a.radiusText}
                 onChangeText={a.setRadiusText}
                 keyboardType="decimal-pad"
@@ -192,10 +199,10 @@ export function BookingAssistantPanels({
               />
               <Action tools
                 text={
-                  (a.saveZone ? "✓ " : "") + "Recordar como mi zona habitual"
+                  a.zoneSaving ? "Guardando zona habitual…" : (a.saveZone ? "✓ " : "") + "Recordar como mi zona habitual"
                 }
-                onPress={() => a.setSaveZone((value) => !value)}
-                disabled={disabled}
+                onPress={() => void a.rememberZone()}
+                disabled={disabled || a.saveZone}
               />
             </>
           )}

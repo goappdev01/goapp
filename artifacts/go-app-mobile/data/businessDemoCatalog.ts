@@ -6,6 +6,12 @@ type Document = { version: 1; ownerUserId: string; selected: string; companies: 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
 const queues = new Map<string, Promise<unknown>>();
 const uuid = () => "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, char => { const n = Math.floor(Math.random() * 16); return (char === "x" ? n : (n & 3) | 8).toString(16); });
+/** Only registered active businesses participate; boundary swipes never wrap or create a company. */
+export function adjacentDemoCompanyId(companies: Array<DemoCompany & { placeholder?: boolean }>, selected: string, direction: -1 | 1): string | undefined {
+  const active = companies.filter(company => !company.archived && !company.placeholder);
+  const index = active.findIndex(company => company.id === selected);
+  return index < 0 ? undefined : active[index + direction]?.id;
+}
 /** Directory for the existing isolated DEMO documents. Never opens a live repository. */
 export function createBusinessDemoCatalog(options: { ownerUserId: string; storage: Storage; canUse: () => boolean; initialConfig: BusinessConfig }) {
   const key = businessDemoStorageKey(options.ownerUserId) + ":catalog";

@@ -118,7 +118,7 @@ test("DEMO GPS hands coordinates to the persistent owner provider bound to the s
   assert.match(source,/allowAddressLookup: true/);
 });
 
-function wizardReturnFixture(returnRoute) {
+function wizardReturnFixture(returnRoute, options = {}) {
   let cursor=0;const slots=[],effects=[],consumed=[];
   const React={
     createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),
@@ -128,21 +128,23 @@ function wizardReturnFixture(returnRoute) {
   };
   class Value {setValue(){} interpolate(){return 1}}
   const native=new Proxy({StyleSheet:{create:styles=>styles},Dimensions:{get:()=>({width:390,height:844})},
-    Animated:{Value,View:"Animated.View"},Platform:{OS:"ios"},Keyboard:{addListener:()=>({remove(){}})},
+    Animated:{Value,View:"Animated.View"},Platform:{OS:"ios"},Keyboard:{isVisible:()=>false,metrics:()=>undefined,addListener:()=>({remove(){}}),dismiss(){}},
+    PanResponder:{create:handlers=>({panHandlers:handlers})},Alert:{alert:(...args)=>options.alerts?.push(args)},
   },{get:(target,key)=>target[key]??key});
   const owner="11111111-1111-4111-8111-111111111111";
-  const config={sectorId:"beauty",subId:"hair",businessName:"Local demo",plantillaItems:[],services:[],completedSteps:[]};
+  const config=options.demo?.getSnapshot().config ?? {sectorId:"beauty",subId:"hair",businessName:"Local demo",plantillaItems:[],services:[],completedSteps:[]};
   const module=moduleFrom("components/empresa/EmpresaConfigScreen.tsx",{
     react:{default:React,...React},"react-native":native,"@/utils/countryConfig":country,
     "@/contexts/LanguageContext":{useLanguage:()=>({lang:"es",t:key=>key})},
     "react-native-safe-area-context":{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},
-    "@/contexts/GoBusinessConfigContext":{useBusinessConfig:()=>({config,demo:{getSnapshot:()=>({ownerUserId:owner,config})},updateConfig(){},resetToSubActivity(){}})},
-    "@/contexts/OwnerBusinessDemoContext":{useOwnerBusinessDemo:()=>({locationReturn:returnRoute,consumeLocationReturn:token=>consumed.push(token)})},
+    "@/contexts/GoBusinessConfigContext":{useBusinessConfig:()=>({config,demo:options.demo ?? {getSnapshot:()=>({ownerUserId:owner,config})},updateConfig(){},resetToSubActivity(){}})},
+    "@/contexts/OwnerBusinessDemoContext":{useOwnerBusinessDemo:()=>({catalog:options.catalog,locationReturn:returnRoute,consumeLocationReturn:token=>consumed.push(token)})},
+    "@/data/businessDemoCatalog":moduleFrom("data/businessDemoCatalog.ts"),
     "@/data/businessDemoStore":{getBusinessDemoSetupState:()=>({steps:Array(8).fill(false),completed:0,ready:false,nextStep:0})},
     "@/data/goSectorData":{SECTORS:[],SUB_TO_SECTOR:{},PEOPLE_SECTORS:new Set()},
     "@/components/empresa/EmpresaSetupGuide":{Step0Actividad:"ActivitySelect"},
   });
-  const tree=module.EmpresaConfigScreen({onBack(){},initialStep:6});
+  const tree=module.EmpresaConfigScreen({onBack(){},initialStep:6,...options.props});
   for(const effect of effects)effect();
   const nodes=root=>!root||typeof root!=="object"?[]:[root,...root.children.flatMap(nodes)];
   return {tree,nodes:nodes(tree),consumed};
@@ -190,4 +192,43 @@ test("locality-only, empty or unsuccessful reverse geocoding never fabricates a 
   const f=gpsFixture();let writes=0;f.adapter.reverseGeocodeAsync=async()=>results;
   const result=await api.readBusinessDeviceLocation(f.adapter,{allowAddressLookup:true,onCoordinates:()=>writes++});assert.equal(writes,1);assert.equal(result.status,"coordinates");assert.equal(result.address,undefined);
  }
+});
+
+
+test('header swipes select only neighbouring registered businesses and save focused fields first',async()=>{
+ const storeAPI=moduleFrom("data/businessDemoStore.ts");
+ const catalogAPI=moduleFrom("data/businessDemoCatalog.ts",{"./businessDemoStore":storeAPI});
+ const memory=new Map(),storage={getItem:async key=>memory.get(key)??null,setItem:async(key,value)=>memory.set(key,value)};
+ const catalog=catalogAPI.createBusinessDemoCatalog({ownerUserId:"11111111-1111-4111-8111-111111111111",storage,canUse:()=>true,initialConfig:{businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],services:[],activeDays:[],openFrom:"09:00",openTo:"18:00",completedSteps:[],daySchedules:{},paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,isBusinessActive:false}});
+ const ids=[];for(const name of ["Peluquería","Restaurante","Tercer negocio"])ids.push(await catalog.create(name));
+ for(const id of ids){await catalog.select(id);await catalog.getSelectedStore().updateConfig({sectorId:"belleza",subId:"peluqueria"});}
+ await catalog.select(ids[0]);const original=catalog.getSelectedStore(),alerts=[];
+ const f=wizardReturnFixture(undefined,{catalog,demo:original,alerts,props:{startAtSteps:true,initialStep:4,onOpenCompanies(){}}});
+ const header=f.nodes.find(node=>node.props.testID==="config-company-swipe-header");
+ const step=f.nodes.find(node=>node.type?.name==="StepEspacios");
+ let release;const gate=new Promise(resolve=>release=resolve);
+ step.props.saveRef.current=async()=>{await gate;await original.updateConfig({address:"Edición pendiente solo en peluquería"});};
+ assert.equal(header.props.onMoveShouldSetPanResponder(null,{dx:-60,dy:3}),true);
+ assert.equal(header.props.onMoveShouldSetPanResponder(null,{dx:10,dy:70}),false);
+ header.props.onPanResponderRelease(null,{dx:-60,dy:3});
+ header.props.onPanResponderRelease(null,{dx:-60,dy:3});
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(catalog.getSelectedId(),ids[0]);
+ release();for(let i=0;i<15;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(catalog.getSelectedId(),ids[1]);assert.equal(original.getSnapshot().config.address,"Edición pendiente solo en peluquería");
+ assert.equal(catalog.getSelectedStore().getSnapshot().config.address,"");assert.equal(alerts.length,0);
+ const second=wizardReturnFixture(undefined,{catalog,demo:catalog.getSelectedStore(),props:{startAtSteps:true,onOpenCompanies(){}}});
+ const position=second.nodes.find(node=>node.props.testID==="config-company-position");assert.match(position.children.join(""),/2 \/ 3/);
+ const back=second.nodes.find(node=>node.props.testID==="config-company-swipe-header");
+ back.props.onPanResponderRelease(null,{dx:60,dy:0});for(let i=0;i<15;i++)await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(catalog.getSelectedId(),ids[0]);assert.equal(catalogAPI.adjacentDemoCompanyId(catalog.getCompanies(),ids[0],-1),undefined);
+ assert.equal(catalogAPI.adjacentDemoCompanyId(catalog.getCompanies(),ids[2],1),undefined);
+ assert.match(src("components/empresa/EmpresaConfigScreen.tsx"),/key/); // The existing parent company key remounts drafts.
+ assert.match(src("components/empresa/EmpresaPanel.tsx"),/key=\{.ec-\$\{businessDemo\?\.businessId/);
+});
+test('professional/space step and summary share the full label and two-line layout',()=>{
+ const source=src("components/empresa/EmpresaConfigScreen.tsx"),translations=src("i18n/translations.ts");
+ assert.match(translations,/biz_cfg_step_staff:\s*"Profesionales y espacios"/);
+ assert.match(translations,/biz_cfg_staff_title:\s*"Profesionales y espacios"/);
+ assert.match(source,/s\.key === "espacios" && \{ width: 138 \}/);
+ assert.match(source,/numberOfLines=\{2\}/);assert.match(source,/label: t\("biz_cfg_step_staff"\)/);
 });

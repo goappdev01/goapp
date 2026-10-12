@@ -28,6 +28,13 @@
         }
       ],
       "expo-font",
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": false
+        }
+      ],
       "expo-web-browser",
       [
         "expo-notifications",

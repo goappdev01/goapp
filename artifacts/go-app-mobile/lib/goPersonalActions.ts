@@ -1,3 +1,4 @@
+import type { TaskScope, ReminderTask } from "./goTaskReminders";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import {
   goActionSchema, goPlanSchema, parseGoPlan, normalizeBookingText, normalizeListName,
@@ -54,13 +55,14 @@ export function personalActionMissing(action: GoAction): string | null {
   return null;
 }
 export type PersonalResult = { entry: GoEntry; changed: boolean; kind: "event" | "task" | "list" };
-export async function savePersonalAction(raw: GoAction, listId?: string): Promise<PersonalResult> {
+export async function savePersonalAction(raw: GoAction, listId?: string, scope?: TaskScope): Promise<PersonalResult> {
   const action = goActionSchema.parse(raw);
   if (!["event", "task", "list"].includes(action.kind)) throw new Error("Acción personal no compatible.");
   if (action.kind !== "list" && action.operation !== "create") throw new Error("Este paso solo permite crear tareas o actividades.");
   const missing = personalActionMissing(action);
   if (missing) throw new Error(missing);
   const owner = await getTaskUser();
+  if (scope && scope.userId !== owner) throw new Error("La cuenta ha cambiado. Vuelve a solicitar la acción.");
   return updatePersonalGoLog<PersonalResult>(async entries => {
     if (await getTaskUser() !== owner) throw new Error("La cuenta ha cambiado. Vuelve a solicitar la acción.");
     if (action.kind !== "list") {
@@ -69,6 +71,7 @@ export async function savePersonalAction(raw: GoAction, listId?: string): Promis
       const now = Date.now();
       const existing = entries.find(entry =>
         entry.id.startsWith("go_") && ((entry as OwnedGoEntry).ownerUserId || null) === owner && !entry.deleted && entry.estado !== "rechazado"
+        && ((entry as ReminderTask).taskContext || "live:USER") === (scope?.context || "live:USER")
         && entry.type === (action.kind === "event" ? "GO_INTERNO" : "TAREA_INTERNA")
         && typeof entry.createdAt === "number" && now >= entry.createdAt && now - entry.createdAt < 300000
         && normalizeBookingText(entry.notes || "") === normalizeBookingText(action.title || "")
@@ -78,7 +81,7 @@ export async function savePersonalAction(raw: GoAction, listId?: string): Promis
       );
       if (existing) return { entries, result: { entry: existing, changed: false, kind: action.kind as "task" | "event" } };
       if (entries.length >= 200) throw new Error("Tu registro de GO está lleno. Revisa tus acciones antes de añadir otra.");
-      const entry = newEntry(action);
+      const entry: ReminderTask = { ...newEntry(action), ...(scope ? { taskContext: scope.context } : {}) };
       return { entries: [entry, ...entries], result: { entry, changed: true, kind: action.kind as "task" | "event" } };
     }
     if (!action.listOperation) throw new Error("Dime si quieres crear, consultar, añadir o quitar elementos.");

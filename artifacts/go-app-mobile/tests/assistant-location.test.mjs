@@ -1,3 +1,4 @@
+import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -8,6 +9,7 @@ const ts = require("typescript");
 function load(file, modules, globals = {}) {
   const context = { exports: {}, console, Date, Error, setTimeout, clearTimeout, ...globals,
     require(name) { if (name in modules) return modules[name]; throw Error("Unexpected " + name); } };
+  if (file === "lib/bookingAssistant.ts") modules["./authSession"] = loadAuthSession(context, modules["@react-native-async-storage/async-storage"].default);
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React }
   }).outputText, context);
@@ -15,7 +17,7 @@ function load(file, modules, globals = {}) {
 }
 const model = load("../../lib/api-zod/src/booking-assistant.ts", { zod: require("zod") });
 const cieza = { label: "Cieza, Murcia", latitude: 38.24, longitude: -1.41 };
-function fixture(resolvePlaces = async () => [cieza], location = {}) {
+function fixture(resolvePlaces = async () => [cieza], location = {}, scope = null) {
   const values = [], effects = [], timers = new Map(), saved = new Map();
   let cursor = 0, timerId = 0;
   const hooks = {
@@ -29,12 +31,16 @@ function fixture(resolvePlaces = async () => [cieza], location = {}) {
       }
     },
   };
+  const storage = { getItem: async k => saved.get(k) ?? null, setItem: async (k,v) => saved.set(k,v) };
+  const preferenceApi = load("lib/assistantZonePreference.ts", { "@workspace/api-zod": model,
+    "@react-native-async-storage/async-storage": { default: storage } });
   const api = load("hooks/useBookingAssistant.ts", {
-    react: hooks, "@workspace/api-zod": model, "@/data/booking": {},
+    react: hooks, "@workspace/api-zod": model, "@/data/booking": { getAuthenticatedUserId: async () => "one" },
+    "@/lib/assistantZonePreference": preferenceApi,
     "@/lib/bookingAssistant": { resolvePlaces }, "expo-location": location,
     "@react-native-async-storage/async-storage": { default: { setItem: async (k,v) => saved.set(k,v) } }
   }, { setTimeout(fn) { timers.set(++timerId, fn); return timerId; }, clearTimeout(id) { timers.delete(id); } });
-  return { saved, render() { cursor = 0; const a = api.useBookingAssistant(); effects.splice(0).forEach(fn => fn()); return a; },
+  return { saved, render() { cursor = 0; const a = api.useBookingAssistant({ scope }); effects.splice(0).forEach(fn => fn()); return a; },
     async tick() { const callbacks = [...timers.values()]; timers.clear(); callbacks.forEach(fn => fn()); await new Promise(setImmediate); }, timers };
 }
 test("typing debounces real resolver calls and exposes selectable results", async () => {
@@ -67,12 +73,16 @@ test("late search responses cannot overwrite a newer query or a closed panel", a
   const closing = f.render().searchPlaces("Valencia"); f.render().invalidate();
   pending[2].r([cieza]); await closing; assert.equal(f.render().places.length, 0);
 });
-test("selection applies existing zone with radius and uses the original persistence key", async () => {
-  const f = fixture(); f.render().pickPlace(cieza); f.render().setRadiusText("3,5");
-  f.render().setSaveZone(true); const a = f.render(); await a.chooseZone(a.pendingPlace, a.pendingPlace.source);
+test("explicit remember persists the selected radius independently of applying the zone", async () => {
+  const f = fixture(undefined, {}, { userId: "one", context: "demo:USER" }); f.render(); await new Promise(setImmediate);
+  f.render().pickPlace(cieza); f.render().setRadiusText("3,5");
+  await f.render().rememberZone();
+  assert.equal(f.render().zone, null);
+  const saved = JSON.parse([...f.saved.values()][0]);
+  assert.equal(saved.preference.zone.latitude, cieza.latitude); assert.equal(saved.preference.zone.radiusKm, 3.5);
+  assert.equal(f.render().saveZone, true); assert.equal(f.saved.size, 1);
+  const a = f.render(); await a.chooseZone(a.pendingPlace, a.pendingPlace.source);
   assert.equal(f.render().zone.radiusKm, 3.5); assert.equal(f.render().request.placeQuery, cieza.label);
-  assert.equal(JSON.parse(f.saved.get("go_booking_assistant_zone_v1")).latitude, cieza.latitude);
-  assert.equal(f.saved.size, 1);
 });
 function gpsFixture(overrides = {}) { return fixture(undefined, {
   getForegroundPermissionsAsync: async () => ({ granted: true }),
@@ -170,7 +180,8 @@ function screenFixture(panel = null, size = "estandar", position = "right") {
     "./AssistantCloseControls": controls, "@/hooks/useGoDockPreference": { useGoDockPreference: () => ({ position }) },
     "@expo/vector-icons": { Feather: "Feather" }, "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34 }) },
     "@react-native-async-storage/async-storage": { default: {} }, "expo-image-picker": {}, "expo-document-picker": {}, "expo-status-bar": { StatusBar: "StatusBar" },
-    "@workspace/api-zod": model, "@/lib/bookingAssistant": {}, "@/hooks/useBookingAssistant": { useBookingAssistant: () => a },
+    "@workspace/api-zod": model, "@/lib/bookingAssistant": { assistantApi: async () => ({ interpretation: false }) }, "@/hooks/useBookingAssistant": { useBookingAssistant: () => a },
+    "@/hooks/useAssistantZoneScope": { useAssistantZoneScope: () => ({ scope: null, ready: true }) },
     "@/hooks/useGoActions": { useGoActions: () => ({ active: "task", choices: [], manager: { state: null }, dispatch: async (...args) => dispatched.push(args) }) },
     "@/hooks/useBookingVoice": { useBookingVoice: () => voice }, "./BookingAssistantPanels": panels, "./BookingAssistantUI": ui,
     "./ListeningIndicator": { ListeningIndicator: "ListeningIndicator", listeningPlacement: () => null },
@@ -226,7 +237,7 @@ function httpFixture(env = {}, fetch = async () => ({ status: 200, ok: true, jso
     "react-native": { Platform: { OS: "ios" } }, "@workspace/api-zod": model, "@/data/booking": {},
     "./goLogBridge": {}, "@/data/goSearchAliases": {},
     "@react-native-async-storage/async-storage": { default: { getItem: async () => null } }
-  }, { process: { env }, fetch, AbortSignal, Headers, console: { info: (...args) => diagnostics.push(args) } });
+  }, { process: { env }, fetch, AbortSignal, AbortController, Headers, console: { info: (...args) => diagnostics.push(args) } });
 }
 test("Expo Go without an absolute API URL explains the missing configuration without fetching", async () => {
   let calls = 0; const api = httpFixture({}, async () => { calls++; });

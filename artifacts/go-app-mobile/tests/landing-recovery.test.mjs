@@ -47,13 +47,14 @@ test('expanded changes stay within the safe area and above the complete Próxima
   assert.ok(panel);
   const style = panel.attributes.properties.find(attr => ts.isJsxAttribute(attr)
     && attr.name.getText(home) === 'style').initializer.expression;
-  assert.equal(style.properties.find(prop => prop.name?.getText(home) === 'maxHeight').initializer.getText(home), 'panelMaxHeight');
+  assert.equal(style.properties.find(prop => prop.name?.getText(home) === 'maxHeight').initializer.getText(home), 'landingFrame.virtual ? undefined : panelMaxHeight');
+  assert.ok(!style.properties.some(prop => prop.name?.getText(home) === 'minHeight'), 'never stretch changes to the top edge');
   const viewport = find(panel.parent, node => ts.isJsxOpeningElement(node)
-    && node.tagName.getText(home) === 'ScrollView');
+    && node.tagName.getText(home) === 'LandingCardContents');
   assert.ok(viewport, 'constrain the card contents instead of allowing them to overflow into Próxima');
-  const viewportStyle = viewport.attributes.properties.find(attr => ts.isJsxAttribute(attr)
-    && attr.name.getText(home) === 'style').initializer.expression.getText(home);
-  assert.equal(vm.runInNewContext(`(${viewportStyle})`).flexShrink, 1);
+  const natural = viewport.attributes.properties.find(attr => ts.isJsxAttribute(attr)
+    && attr.name.getText(home) === 'overflowing').initializer.expression.getText(home);
+  assert.equal(natural, 'landingFrame.virtual', 'outer scroll owns overflow while contents retain their natural height');
   const card = viewport.parent.parent;
   assert.ok(ts.isJsxElement(card) && card.openingElement.tagName.getText(home) === 'View');
   const cardStyle = card.openingElement.attributes.properties.find(attr => ts.isJsxAttribute(attr)
@@ -75,7 +76,7 @@ test('expanded changes stay within the safe area and above the complete Próxima
   for (const width of [320, 390, 430]) {
     for (const measuredWidth of [266, 354]) {
       for (const proximaExpanded of [true, false]) {
-        const context = { screen: { width }, insets: { left: 0, right: 0 }, PANEL_EDGE: 18,
+        const context = { landingPanelWidth: width, landingPanelInsets: { left: 0, right: 0 }, PANEL_EDGE: 18,
           proximaExpanded, humanityObstacles: { next: { width: measuredWidth } }, BTN_W: 82, uiScaleFactor: 1 };
         const actualWidth = vm.runInNewContext(panelWidth.initializer.getText(home), context);
         assert.ok(actualWidth <= width - 36, 'both horizontal safe margins remain inside the screen');

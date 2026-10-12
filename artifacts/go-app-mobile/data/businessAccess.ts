@@ -1,5 +1,5 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { BookingApiError, getAuthenticatedUserId, isCloudId, supabaseApiRequest } from "./booking";
+import { captureAuthIdentity, isAuthIdentityCurrent } from "@/lib/authSession";
+import { BookingApiError, isCloudId, supabaseApiRequest } from "./booking";
 
 export type BusinessVerificationStatus = "sin_empresa" | "pendiente_verificacion" | "rechazada" | "verificada";
 export type BusinessEnrollment = {
@@ -33,11 +33,11 @@ export function resolveBusinessAccess(rows: OwnedBusinessAccess[], userId: strin
 }
 
 export async function getBusinessAccess(): Promise<BusinessAccessSnapshot> {
-  const sessionBefore = await AsyncStorage.getItem("go_supabase_session_v1");
-  const userId = await getAuthenticatedUserId();
-  if (!userId) return { userId: null, business: null, status: "sin_empresa" };
+  const identity = await captureAuthIdentity();
+  const userId = identity?.userId;
+  if (!identity || !userId) return { userId: null, business: null, status: "sin_empresa" };
   const rows = await supabaseApiRequest<OwnedBusinessAccess[]>("/supabase/manage/businesses", {}, true, userId);
-  if (await AsyncStorage.getItem("go_supabase_session_v1") !== sessionBefore) {
+  if (!await isAuthIdentityCurrent(identity)) {
     throw new Error("La sesión ha cambiado. Vuelve a comprobar tu empresa.");
   }
   if (!Array.isArray(rows) || rows.some(row => !row || !isCloudId(row.id))) {
@@ -47,8 +47,9 @@ export async function getBusinessAccess(): Promise<BusinessAccessSnapshot> {
 }
 
 export async function submitBusinessEnrollment(data: BusinessEnrollment, businessId?: string): Promise<OwnedBusinessAccess> {
-  const userId = await getAuthenticatedUserId();
-  if (!userId) throw new Error("Inicia sesión para solicitar el alta de tu empresa.");
+  const identity = await captureAuthIdentity();
+  const userId = identity?.userId;
+  if (!identity || !userId) throw new Error("Inicia sesión para solicitar el alta de tu empresa.");
   const rows = await supabaseApiRequest<OwnedBusinessAccess[]>("/supabase/manage/enrollment", {
     method: "POST",
     body: JSON.stringify({ legal_name: data.legal_name, tax_id: data.tax_id,
@@ -59,7 +60,7 @@ export async function submitBusinessEnrollment(data: BusinessEnrollment, busines
     || rows[0].verified !== false || (businessId && rows[0].id !== businessId)) {
     throw new BookingApiError("Invalid enrollment acknowledgement", 502, "ENROLLMENT_NOT_CONFIRMED");
   }
-  if (await getAuthenticatedUserId() !== userId) {
+  if (!await isAuthIdentityCurrent(identity)) {
     throw new BookingApiError("Enrollment session changed", 401, "ENROLLMENT_SESSION_CHANGED");
   }
   return rows[0];

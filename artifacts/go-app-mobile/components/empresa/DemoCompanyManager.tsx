@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { Alert, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, Keyboard, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -9,7 +9,8 @@ export function DemoCompanyManager({ open, onOpenChange, onOpenConfiguration }: 
 }) {
   const { catalog, demo } = useOwnerBusinessDemo(); const { lang } = useLanguage();
   const [name, setName] = useState(""), [busy, setBusy] = useState(false), [backupText, setBackupText] = useState(""), [importOpen, setImportOpen] = useState(false);
-  const busyRef = useRef(false), nameInput = useRef<TextInput>(null);
+  const busyRef = useRef(false), nameInput = useRef<TextInput>(null), latestName = useRef("");
+  const [createError, setCreateError] = useState("");
   const [creating, setCreating] = useState(false), [toolsOpen, setToolsOpen] = useState(false);
   if (!catalog || !demo) return null;
   const en = lang === "en", companies = catalog.getCompanies();
@@ -18,6 +19,19 @@ export function DemoCompanyManager({ open, onOpenChange, onOpenConfiguration }: 
   const currentName = demo.getSnapshot().config.businessName || (en ? "Unnamed business" : "Negocio sin nombre");
   const run = async (operation: () => Promise<unknown>) => { if (busyRef.current) return; busyRef.current = true; setBusy(true); try { await operation(); } catch (error) { Alert.alert("DEMO", String(error)); } finally { busyRef.current = false; setBusy(false); } };
   const openConfiguration = () => { if (onOpenConfiguration) { onOpenChange(false); onOpenConfiguration(); } };
+  const createCompany = () => {
+    if (busyRef.current) return;
+    const trimmed = latestName.current.trim();
+    if (!trimmed || trimmed.length > 100) {
+      setCreateError(en ? "Enter a business name (1–100 characters)." : "Introduce el nombre del negocio (1–100 caracteres).");
+      nameInput.current?.focus(); return;
+    }
+    setCreateError("");
+    void run(async () => {
+      await demo.load(); await catalog.create(trimmed);
+      latestName.current = ""; setName(""); setCreating(false); Keyboard.dismiss(); openConfiguration();
+    });
+  };
   const switchCompany = (id: string, archived: boolean) => run(async () => {
     await demo.load(); // Wait for pending writes to the previous company.
     if (archived) await catalog.recover(id); else await catalog.select(id);
@@ -29,19 +43,18 @@ export function DemoCompanyManager({ open, onOpenChange, onOpenConfiguration }: 
     <Text testID="demo-selected-company" style={{ color: "#111827", fontWeight: "700" }}>{en ? "Current business: " : "Negocio actual: "}{currentName}</Text>
     <View style={{ flexDirection: "row", gap: 8 }}>
       <View style={{ flex: 1 }}>{button((en ? "My businesses · " : "Mis negocios · ") + activeCompanies.length + (open ? " ▴" : " ▾"), () => onOpenChange(!open), "demo-company-toggle")}</View>
-      <View style={{ flex: 1 }}>{button(en ? "New business" : "Nuevo negocio", () => { setCreating(true); setToolsOpen(false); onOpenChange(true); nameInput.current?.focus(); }, "demo-company-new")}</View>
+      <View style={{ flex: 1 }}>{button(en ? "New business" : "Nuevo negocio", () => { setCreating(true); setCreateError(""); setToolsOpen(false); onOpenChange(true); nameInput.current?.focus(); }, "demo-company-new")}</View>
     </View>
-    {creating && <View style={{ gap: 6 }} testID="demo-company-create-form">
-      <TextInput ref={nameInput} autoFocus testID="demo-company-name" accessibilityLabel={en ? "New DEMO company name" : "Nombre de nueva empresa DEMO"} placeholder={en ? "New business name" : "Nombre del nuevo negocio"} value={name} onChangeText={setName} maxLength={100} editable={!busy} style={{ borderWidth: 1, borderColor: "#aab8ca", padding: 10, borderRadius: 10, color: "#111827" }} />
+    {creating && <ScrollView style={{ maxHeight: 200 }} contentContainerStyle={{ gap: 6, paddingBottom: 8 }} keyboardShouldPersistTaps="always" nestedScrollEnabled testID="demo-company-create-form">
+      <Text style={{ color: "#4b5563", fontSize: 12 }}>{en ? "Create an independent business and open its configuration." : "Crea un negocio independiente y abre su configuración."}</Text>
+      <TextInput ref={nameInput} autoFocus testID="demo-company-name" accessibilityLabel={en ? "New DEMO company name" : "Nombre de nueva empresa DEMO"} placeholder={en ? "New business name" : "Nombre del nuevo negocio"} value={name} onChangeText={value => { latestName.current = value; setName(value); setCreateError(""); }} returnKeyType="go" onSubmitEditing={createCompany} maxLength={100} editable={!busy} style={{ borderWidth: 1, borderColor: "#aab8ca", padding: 10, borderRadius: 10, color: "#111827" }} />
+      {!!createError && <Text testID="demo-company-create-error" accessibilityRole="alert" style={{ color: "#b91c1c", fontSize: 13 }}>{createError}</Text>}
       <View style={{ flexDirection: "row", gap: 8 }}>
-        <View style={{ flex: 1 }}>{button(en ? "Create business" : "Crear negocio", () => void run(async () => {
-          await demo.load(); await catalog.create(name);
-          setName(""); setCreating(false); openConfiguration();
-        }), "demo-company-create")}</View>
-        <View style={{ flex: 1 }}>{button(en ? "Cancel" : "Cancelar", () => { setCreating(false); setName(""); }, "demo-company-create-cancel")}</View>
+        <View style={{ flex: 1 }}>{button(busy ? (en ? "Creating business…" : "Creando negocio…") : (en ? "Create business" : "Crear negocio"), createCompany, "demo-company-create")}</View>
+        <View style={{ flex: 1 }}>{button(en ? "Cancel" : "Cancelar", () => { setCreating(false); latestName.current = ""; setName(""); setCreateError(""); }, "demo-company-create-cancel")}</View>
       </View>
-    </View>}
-    {open && <ScrollView testID="demo-company-list" style={{ maxHeight: 150 }} contentContainerStyle={{ gap: 6, paddingBottom: 6 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+    </ScrollView>}
+    {open && !creating && <ScrollView testID="demo-company-list" style={{ maxHeight: 150 }} contentContainerStyle={{ gap: 6, paddingBottom: 6 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
       {activeCompanies.map(company => button((company.id === catalog.getSelectedId() ? "✓ " : "") + (company.name || (en ? "Unnamed business" : "Negocio sin nombre")), () => void switchCompany(company.id, false), "demo-company-" + company.id))}
       {activeCompanies.length === 0 && <Text style={{ color: "#4b5563", fontSize: 12 }}>{en ? "Create your first business with New business." : "Crea tu primer negocio con Nuevo negocio."}</Text>}
     </ScrollView>}

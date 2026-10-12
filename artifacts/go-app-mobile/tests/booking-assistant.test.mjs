@@ -1,3 +1,4 @@
+import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -15,6 +16,7 @@ function load(file, modules, globals = {}) {
     Error,
     Headers,
     AbortSignal,
+    AbortController,
     process: { env: {} },
     setTimeout,
     clearTimeout,
@@ -24,6 +26,7 @@ function load(file, modules, globals = {}) {
       throw new Error("Unexpected import " + name);
     },
   };
+  if (file === "lib/bookingAssistant.ts") modules["./authSession"] = loadAuthSession(context, modules["@react-native-async-storage/async-storage"].default);
   vm.runInNewContext(
     ts.transpileModule(readFileSync(file, "utf8"), {
       compilerOptions: {
@@ -347,6 +350,7 @@ test("conversation asks only for missing date, keeps Zone and writes only after 
     slotsForRequest: async () => [f.slot],
   };
   const render = hookFixture("hooks/useBookingAssistant.ts", {
+    "@/lib/assistantZonePreference": load("lib/assistantZonePreference.ts", { "@workspace/api-zod": model, "@react-native-async-storage/async-storage": { default: {} } }),
     "@workspace/api-zod": model,
     "@/data/booking": {},
     "@/lib/bookingAssistant": serviceApi,
@@ -498,6 +502,7 @@ function nativeVoiceFixture({
       },
     },
     "@/lib/bookingAssistant": {
+      AssistantApiError: class extends Error {},
       assistantApi: async (path, body) => {
         apiCalls.push(path);
         if (path === "/capabilities") {

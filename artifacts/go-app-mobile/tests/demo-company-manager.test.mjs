@@ -16,7 +16,7 @@ function fixture(copy = async () => true, options = {}){let cursor=0,open=true,l
  const storage={getItem:async key=>memory.get(key)??null,setItem:async(key,value)=>memory.set(key,value)};
  const catalog=catalogAPI.createBusinessDemoCatalog({ownerUserId:"11111111-1111-4111-8111-111111111111",initialConfig:initial,canUse:()=>authorized,storage});
  const React={createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),useState:initial=>{const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return[slots[i],value=>slots[i]=typeof value==='function'?value(slots[i]):value];},useRef:value=>React.useState(()=>({current:value}))[0]};
- const native={Text:'Text',TextInput:'TextInput',ScrollView:'ScrollView',View:'View',TouchableOpacity:'TouchableOpacity',Share:{share:async value=>shares.push(value)},Alert:{alert:(...args)=>alerts.push(args)}};
+ const native={Keyboard:{dismiss(){}},Text:'Text',TextInput:'TextInput',ScrollView:'ScrollView',View:'View',TouchableOpacity:'TouchableOpacity',Share:{share:async value=>shares.push(value)},Alert:{alert:(...args)=>alerts.push(args)}};
  const {DemoCompanyManager}=module("components/empresa/DemoCompanyManager.tsx",{react:{default:React,...React},'react/compiler-runtime':{c:size=>React.useState(()=>new Array(size).fill(Symbol.for('react.memo_cache_sentinel')))[0]},'react-native':native,'expo-clipboard':{setStringAsync:async value=>{copies.push(value);return await copy(value);}},'@/contexts/OwnerBusinessDemoContext':{useOwnerBusinessDemo:()=>authorized?{catalog,demo:catalog.getSelectedStore()}:{}},'@/contexts/LanguageContext':{useLanguage:()=>({lang})}});
  return{catalog,shares,alerts,copies,memory,storage,setLang:value=>lang=value,setAuthorized:value=>authorized=value,render:()=>{cursor=0;return DemoCompanyManager({open,onOpenChange:value=>open=value,...options});}};
 }
@@ -110,4 +110,22 @@ test('an unnamed legacy business with saved data remains selectable and cancelli
  const f=fixture();await f.catalog.getSelectedStore().updateConfig({address:'Dirección existente sin nombre'});const bytes=Array.from(f.memory);
  let tree=f.render();assert.match(content(byID(tree,'demo-company-toggle')),/Mis negocios · 1/);assert.ok(byID(tree,'demo-company-legacy'));
  tree=newForm(f);byID(tree,'demo-company-name').props.onChangeText('No crear');byID(f.render(),'demo-company-create-cancel').props.onPress();tree=f.render();assert.equal(byID(tree,'demo-company-create-form'),undefined);assert.deepEqual(Array.from(f.memory),bytes);assert.equal(f.catalog.getSelectedId(),'legacy');
+});
+
+
+test('empty business name has visible validation and remains a draft, never a counted company',async()=>{
+ const f=fixture(),before=Array.from(f.memory);let tree=newForm(f);
+ byID(tree,'demo-company-create').props.onPress();await turn();tree=f.render();
+ assert.match(content(byID(tree,'demo-company-create-error')),/nombre del negocio/);
+ assert.match(content(byID(tree,'demo-company-toggle')),/Mis negocios · 0/);
+ assert.deepEqual(Array.from(f.memory),before);assert.ok(byID(tree,'demo-company-name'));
+});
+test('keyboard submission uses the latest name, creates once, and opens the independent wizard',async()=>{
+ let opened=0;const f=fixture(undefined,{onOpenConfiguration:()=>opened++});const tree=newForm(f);
+ const form=byID(tree,'demo-company-create-form');assert.equal(form.type,'ScrollView');assert.equal(form.props.keyboardShouldPersistTaps,'always');
+ assert.equal(byID(tree,'demo-company-list'),undefined,'creation does not compete with the list for keyboard space');
+ const input=byID(tree,'demo-company-name');assert.equal(input.props.returnKeyType,'go');
+ input.props.onChangeText('  GO RESTAURANTE  ');input.props.onSubmitEditing();byID(tree,'demo-company-create').props.onPress();await turn();
+ assert.equal(opened,1);assert.equal(f.catalog.getSelectedStore().getSnapshot().config.businessName,'GO RESTAURANTE');
+ assert.match(content(byID(f.render(),'demo-company-toggle')),/Mis negocios · 1/);assert.equal(f.catalog.getSelectedStore().getSnapshot().config.completedSteps.length,0);
 });

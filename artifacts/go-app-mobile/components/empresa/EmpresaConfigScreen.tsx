@@ -23,6 +23,7 @@ import {
   KeyboardAvoidingView,
   NativeModules,
   Platform,
+  PanResponder,
   ScrollView,
   Share,
   StyleSheet,
@@ -36,6 +37,7 @@ import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { COUNTRY_CONFIGS, MARKET_STORAGE_KEY, type Market } from "@/utils/countryConfig";
 import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
+import { adjacentDemoCompanyId } from "@/data/businessDemoCatalog";
 import { getBusinessDemoSetupState, ensureBusinessDemoStaffIds } from "@/data/businessDemoStore";
 import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import * as ImagePicker from "expo-image-picker";
@@ -229,6 +231,7 @@ interface EmpresaConfigScreenProps {
   onFinalizarConfig?:  () => void;
   initialStep?:        number;
   onOpenCompanies?:    () => void;
+  contextNavigation?:  React.ReactNode;
   keyboardManagedByParent?: boolean;
   startAtSteps?:       boolean;
 }
@@ -299,12 +302,12 @@ function useStepSave(saveRef: StepSaveRef | undefined, flush: () => Promise<void
   }, [saveRef]);
 }
 
-export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarConfig, initialStep = 0, goPrevRef, onOpenCompanies, keyboardManagedByParent = false, startAtSteps = false }: EmpresaConfigScreenProps & { goPrevRef?: React.MutableRefObject<(() => void) | null> }) {
+export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarConfig, initialStep = 0, goPrevRef, onOpenCompanies, contextNavigation, keyboardManagedByParent = false, startAtSteps = false }: EmpresaConfigScreenProps & { goPrevRef?: React.MutableRefObject<(() => void) | null> }) {
   const insets = useSafeAreaInsets();
   const { t, lang } = useLanguage();
   const STEPS = buildStepsCfg(t);
   const { config, updateConfig, resetToSubActivity, demo } = useBusinessConfig();
-  const { locationReturn, consumeLocationReturn } = useOwnerBusinessDemo();
+  const { catalog, locationReturn, consumeLocationReturn } = useOwnerBusinessDemo();
   // Only a return from this owner's native GPS prompt skips the normal activity selector.
   const resumeLocation = useRef(demo && locationReturn?.userId === demo.getSnapshot().ownerUserId ? locationReturn : undefined).current;
 
@@ -320,6 +323,8 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
 
   const [currentStep,    setCurrentStep]    = useState(() => resumeLocation?.step ?? Math.min(Math.max(initialStep, 0), STEPS.length - 1));
   const [planoEditorOpen, setPlanoEditorOpen] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(() => Keyboard.isVisible());
+  const compactFooter = Boolean(demo) && Platform.OS === "ios" && (currentStep === 0 || currentStep === 1);
   useEffect(() => { if (resumeLocation) consumeLocationReturn(resumeLocation.token); }, [resumeLocation, consumeLocationReturn]);
   // Paso Ubicación — protección: el botón Siguiente solo se activa cuando
   // el usuario ha visto la sección CONTACTO o ha rellenado al menos un campo.
@@ -350,10 +355,45 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
       Alert.alert(lang === "en" ? "Could not save" : "No se pudo guardar", error instanceof Error ? error.message : String(error));
     } finally { companyTransitionBusy.current = false; setOpeningCompanies(false); }
   };
-  const companyNavigation = onOpenCompanies ? <TouchableOpacity testID="config-company-list" accessibilityRole="button"
-    disabled={openingCompanies} onPress={() => void openCompanies()} style={{ paddingHorizontal: 18, paddingVertical: 10 }}>
+  const registeredCompanies = catalog?.getCompanies().filter(company => !company.archived && !company.placeholder) ?? [];
+  const selectedPosition = registeredCompanies.findIndex(company => company.id === catalog?.getSelectedId());
+  const switchCompanyFromHeader = async (direction: -1 | 1) => {
+    if (!demo || !catalog || companyTransitionBusy.current) return;
+    const target = adjacentDemoCompanyId(catalog.getCompanies(), catalog.getSelectedId(), direction);
+    if (!target) return;
+    companyTransitionBusy.current = true; setOpeningCompanies(true);
+    try {
+      await stepSaveRef.current?.();
+      await demo.load();
+      Keyboard.dismiss();
+      await catalog.select(target); // EmpresaPanel's existing company key hydrates/remounts the selected wizard.
+    } catch (error) {
+      Alert.alert(lang === "en" ? "Could not change business" : "No se pudo cambiar de negocio", error instanceof Error ? error.message : String(error));
+    } finally { companyTransitionBusy.current = false; setOpeningCompanies(false); }
+  };
+  const companyGesture = useRef({ canSwipe: false, switchCompany: switchCompanyFromHeader });
+  companyGesture.current = { canSwipe: !!demo && registeredCompanies.length > 1 && !openingCompanies, switchCompany: switchCompanyFromHeader };
+  const companyHeaderPan = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gesture) => companyGesture.current.canSwipe && Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.5,
+    onPanResponderRelease: (_, gesture) => {
+      if (Math.abs(gesture.dx) >= 48 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.5)
+        void companyGesture.current.switchCompany(gesture.dx < 0 ? 1 : -1);
+    },
+    onPanResponderTerminationRequest: () => true,
+  })).current;
+  const companyPosition = selectedPosition >= 0 ? <Text testID="config-company-position" style={c.headerSub}>
+    {selectedPosition + 1} / {registeredCompanies.length}{registeredCompanies.length > 1 ? (lang === "en" ? " · swipe to change" : " · desliza para cambiar") : ""}
+  </Text> : null;
+  const companyButton = onOpenCompanies ? <TouchableOpacity testID="config-company-list" accessibilityRole="button"
+    disabled={openingCompanies} onPress={() => void openCompanies()} style={[{ paddingHorizontal: 18, paddingVertical: 10 }, contextNavigation ? { flex: 1, minWidth: 0 } : undefined]}>
     <Text style={{ color: BLUE, fontWeight: "700" }}>{lang === "en" ? "My businesses" : "Mis negocios"} ▾</Text>
   </TouchableOpacity> : null;
+  const companyNavigation = contextNavigation ? (
+    <View style={{ flexDirection: "row", alignItems: "center" }}>
+      {companyButton}
+      {contextNavigation}
+    </View>
+  ) : companyButton;
 
   const currentSector = SECTORS.find(s => s.id === config.sectorId) ?? null;
   const currentSub    = currentSector?.subs.find(s => s.id === config.subId) ?? null;
@@ -467,12 +507,14 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
     const onShow = Keyboard.addListener(showEvent, () => {
+      setKeyboardVisible(true);
       Animated.timing(headerAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
     });
     const onDidShow = Keyboard.addListener("keyboardDidShow", () => {
       if (activeNewInput.current?.isFocused()) revealProfessional(activeNewInput.current);
     });
     const onHide = Keyboard.addListener(hideEvent, () => {
+      setKeyboardVisible(false);
       Animated.timing(headerAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
     });
     return () => { onShow.remove(); onHide.remove(); onDidShow.remove(); };
@@ -489,10 +531,11 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
       <View style={c.root}>
         {companyNavigation}
         {/* Header — sin flecha top-left; navegación via FAB flotante */}
-        <View style={c.header}>
+        <View testID="config-company-swipe-header" style={c.header} {...companyHeaderPan.panHandlers}>
           <View style={{ width: 36 }} />
           <View style={c.headerCenter}>
             <Text testID="config-business-name" style={c.headerTitle}>{config.businessName?.trim() || t("biz_my_business")}</Text>
+            {companyPosition}
             {activeSector && (
               <Text style={[c.headerSub, { color: activeSector.color }]}>
                 {activeSector.emoji} {activeSector.label}{activeSub ? ` · ${activeSub.name}` : ""}
@@ -548,6 +591,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
       }]}>
         <ScrollView
           ref={scrollRef}
+          onLayout={compactFooter ? () => { if (activeNewInput.current?.isFocused()) revealProfessional(activeNewInput.current); } : undefined}
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
           showsVerticalScrollIndicator={false}
@@ -569,10 +613,11 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
             maxHeight: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 80] }),
             overflow:  "hidden",
           }}>
-            <View style={c.header}>
+            <View testID="config-company-swipe-header" style={c.header} {...companyHeaderPan.panHandlers}>
               <View style={{ width: 36 }} />
               <View style={c.headerCenter}>
                 <Text testID="config-business-name" style={c.headerTitle}>{config.businessName?.trim() || t("biz_my_business")}</Text>
+            {companyPosition}
                 {currentSector && (
                   <Text style={[c.headerSub, { color: currentSector.color }]}>
                     {currentSector.emoji} {getSectorLabel(currentSector, lang)}{currentSub ? ` · ${getSubName(currentSub, lang)}` : ""}
@@ -594,7 +639,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
                   key={s.key}
                   activeOpacity={0.7}
                   onPress={() => animateToStep(i)}
-                  style={c.stepPill}
+                  style={[c.stepPill, s.key === "espacios" && { width: 138 }]}
                 >
                   <View style={[c.stepDot, { backgroundColor: dotColor }]}>
                     {isDone
@@ -625,8 +670,8 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
 
           {/* Step content */}
           <View style={c.content}>
-            {currentStep === 0 && <StepNombre />}
-            {currentStep === 1 && <StepUbicacion />}
+            {currentStep === 0 && <StepNombre onFocusField={compactFooter ? revealProfessional : undefined} />}
+            {currentStep === 1 && <StepUbicacion onFocusField={compactFooter ? revealProfessional : undefined} />}
             {currentStep === 2 && <StepHorario currentSector={currentSector} />}
             {currentStep === 3 && <StepServicios currentSector={currentSector} saveRef={stepSaveRef} />}
             {currentStep === 4 && <StepEspacios currentSector={currentSector} saveRef={stepSaveRef} onRevealProfessional={revealProfessional} />}
@@ -645,23 +690,23 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
       </Animated.View>
 
       {/* ── Footer navigation — solo avance; retroceso via FAB flotante ── */}
-      <View style={[c.footer, { paddingBottom: insets.bottom + 12, justifyContent: "flex-end" }]}>
+      <View style={[c.footer, { paddingBottom: insets.bottom + 12, justifyContent: "flex-end" }, compactFooter && { paddingTop: 4, paddingBottom: keyboardVisible ? 4 : insets.bottom + 4 }]}>
         <TouchableOpacity
           activeOpacity={canProceed ? 0.88 : 1}
           onPress={canProceed && !isAdvancing ? goNext : undefined}
           disabled={isAdvancing}
-          style={[c.nextBtn, {
+          style={[c.nextBtn, compactFooter && c.nextBtnCompact, {
             backgroundColor: canProceed ? GREEN : "rgba(0,0,0,0.10)",
             borderWidth: canProceed ? 0 : 1,
             borderColor: "rgba(0,0,0,0.10)",
           }]}
         >
-          <Text style={[c.nextBtnTxt, { color: canProceed ? "#fff" : "rgba(0,0,0,0.30)" }]}>
+          <Text style={[c.nextBtnTxt, compactFooter && c.nextBtnTxtCompact, { color: canProceed ? "#fff" : "rgba(0,0,0,0.30)" }]}>
             {isLast ? t("biz_finish_config") : t("biz_next")}
           </Text>
           <Feather
             name={isLast ? "check-circle" : "arrow-right"}
-            size={17}
+            size={compactFooter ? 16 : 17}
             color={canProceed ? "#fff" : "rgba(0,0,0,0.25)"}
           />
         </TouchableOpacity>
@@ -693,7 +738,8 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
 // PASO 1 — NOMBRE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function StepNombre() {
+function StepNombre({ onFocusField }: { onFocusField?: (input: TextInput) => void }) {
+  const nameInput = useRef<TextInput>(null);
   const { t } = useLanguage();
   const { config, updateConfig } = useBusinessConfig();
   return (
@@ -701,6 +747,8 @@ function StepNombre() {
       <View style={c.sectionCard}>
         <Text style={c.sectionLabel}>{t("biz_visible_name_go")}</Text>
         <TextInput
+          ref={nameInput}
+          onFocus={() => { if (nameInput.current) onFocusField?.(nameInput.current); }}
           style={c.nameInput}
           value={config.businessName ?? ""}
           onChangeText={v => updateConfig({ businessName: v })}
@@ -722,7 +770,9 @@ function StepNombre() {
 // PASO 2 — UBICACIÓN
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function StepUbicacion() {
+function StepUbicacion({ onFocusField }: { onFocusField?: (input: TextInput) => void }) {
+  const addressInput = useRef<TextInput>(null);
+  const contactInputs = useRef<Partial<Record<"phone" | "mobile" | "whatsapp", TextInput | null>>>({});
   const { t, lang } = useLanguage();
   const { saveDeviceCoordinates, beginLocationReturn, consumeLocationReturn, finishLocationReturn } = useOwnerBusinessDemo();
   const { config, updateConfig, demo } = useBusinessConfig();
@@ -811,7 +861,8 @@ function StepUbicacion() {
   return (
     <View>
       <View style={c.sectionCard}>
-        <TextInput style={c.nameInput} value={config.address ?? ""} onChangeText={address => updateConfig({ address })}
+        <TextInput ref={addressInput} onFocus={() => { if (addressInput.current) onFocusField?.(addressInput.current); }}
+          style={c.nameInput} value={config.address ?? ""} onChangeText={address => updateConfig({ address })}
           placeholder={t("biz_address_placeholder")} placeholderTextColor={DIM} returnKeyType="done" autoFocus maxLength={120} />
         {config.coordinates && <Text style={{ color: GRAY, fontSize: 12, marginTop: 8 }}>
           {config.coordinates.latitude.toFixed(5)}, {config.coordinates.longitude.toFixed(5)}
@@ -839,7 +890,9 @@ function StepUbicacion() {
                 <Text style={c.sectionLabel}>{contact.label}</Text>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <Text style={{ color: GRAY, fontSize: 14 }}>{selectedCountry.prefix}</Text>
-                  <TextInput style={[c.nameInput, { flex: 1, minWidth: 0, marginTop: 2 }]} value={businessPhoneInput(value, country)}
+                  <TextInput ref={input => { contactInputs.current[contact.field] = input; }}
+                    onFocus={() => { const input = contactInputs.current[contact.field]; if (input) onFocusField?.(input); }}
+                    style={[c.nameInput, { flex: 1, minWidth: 0, marginTop: 2 }]} value={businessPhoneInput(value, country)}
                     accessibilityLabel={contact.label} placeholder={lang === "en" ? "National number" : "Número nacional"} placeholderTextColor={DIM}
                     keyboardType="phone-pad" textContentType="telephoneNumber" autoComplete="tel" returnKeyType="done" maxLength={64}
                     onChangeText={input => {
@@ -2497,7 +2550,7 @@ function StepPublicar({
     },
     {
       icon:  "layers",
-      label: t("biz_cfg_spaces"),
+      label: t("biz_cfg_step_staff"),
       value: (() => {
         const n = config.plantillaItems.reduce((s, it) => s + it.count, 0);
         return config.plantillaItems.length > 0
@@ -3008,5 +3061,7 @@ const c = StyleSheet.create({
   backFooterBtn:{ flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 10 },
   backFooterTxt:{ fontSize: 14, fontWeight: "600", color: GRAY },
   nextBtn:      { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 13, paddingHorizontal: 24, borderRadius: 14 },
+  nextBtnCompact: { minHeight: 44, paddingVertical: 10, paddingHorizontal: 20 },
+  nextBtnTxtCompact: { fontSize: 14 },
   nextBtnTxt:   { fontSize: 15, fontFamily: "Inter_700Bold", fontWeight: "800", color: "#fff" },
 });

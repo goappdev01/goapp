@@ -58,7 +58,9 @@ function flowFixture(initial = []) {
   const save = find(node => ts.isJsxAttribute(node) && node.name.getText(ast) === "onPress"
     && node.initializer?.expression?.getText(ast).includes("const slotTask ="));
   vm.runInContext(transpile("exports.saveForm = " + save.initializer.expression.getText(ast)), scope);
-  const session = find(node => ts.isCallExpression(node) && node.expression.getText(ast) === "onSessionChanged");
+  const session = find(node => ts.isCallExpression(node) && node.expression.getText(ast) === "onSessionChanged"
+    && node.arguments[0]?.getText(ast).includes("calendarSlotRequestRef.current"));
+  assert.ok(session, "Execute the existing calendar identity-change listener");
   vm.runInContext(transpile("exports.sessionChanged = " + session.arguments[0].getText(ast)), scope);
   return { scope, calls, access, store, storage,
     user(value) { user = value; }, fail(value) { fail = value; },

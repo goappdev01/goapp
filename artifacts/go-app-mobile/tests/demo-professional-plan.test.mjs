@@ -95,3 +95,71 @@ test("an explicitly retired legacy representation never reappears for a new prof
  assert.equal(retired.demoArchived,true);assert.equal(retired.reservable,false);assert.equal(retired.demoStaffId,undefined);assert.equal(retired.x,400);assert.equal(retired.y,130);
  const current=data.plan.elements.filter(element=>element.demoStaffId===person.id&&!element.demoArchived);assert.equal(current.length,1);assert.notEqual(current[0].id,retired.id);assert.equal(data.plan.elements.length,4);
 });
+
+
+async function restaurant(f,count=10){
+ await f.store.updateConfig({businessName:"Restaurante de prueba",address:"Dirección ficticia",sectorId:"restauracion",subId:"restaurante",activeDays:[0,1,2,3,4],services:[{name:"Mesa DEMO",duration:30,price:0}],completedSteps:[0,1,2,3,4,5,6,7],plantillaItems:[{id:"tables",emoji:"🪑",label:"Mesas interiores",count}]});
+ await f.store.reconcileProfessionalPlan();
+}
+test("ten configured tables become ten stable bookable resources; increasing to twelve preserves placed geometry and reload",async()=>{
+ const f=fixture(company);await restaurant(f);let plan=plain(f.store.getSnapshot().plan);
+ assert.equal(api.visibleBusinessDemoElements(plan).length,10);assert.equal(new Set(plan.elements.map(element=>element.demoSpaceId)).size,10);
+ assert.ok(plan.elements.every(element=>element.type==="mesa"&&element.demoKind==="physical"&&!element.demoStaffId&&element.reservable));
+ plan.elements[0].x=235;plan.elements[0].y=360;plan.elements[0].capacity=6;plan.elements[0].label="Mesa junto a la ventana";await f.store.saveFloorPlan(plan);
+ const original=plain(f.store.getSnapshot().plan.elements);
+ await f.store.updateConfig({plantillaItems:[{...f.store.getSnapshot().config.plantillaItems[0],count:12}]});
+ for(let i=0;i<3;i++)await f.store.reconcileProfessionalPlan();
+ const after=await f.make().load();assert.equal(after.plan.elements.length,12);assert.equal(new Set(after.plan.elements.map(element=>element.id)).size,12);
+ assert.deepEqual(plain(after.plan.elements.slice(0,10)),original);
+ const service=(await f.repo.getBookableItems(f.store.businessId))[0],slots=await f.repo.getAllSlots(f.store.businessId,service.id,"2030-01-07");
+ assert.equal(slots[0].availableUnits,12);assert.equal((await f.repo.getStaff(f.store.businessId)).length,0);
+ assert.ok(f.writes.every(key=>key.startsWith(api.businessDemoStorageKey(owner,company))));
+});
+test("reducing a table with an active reservation is refused; after cancellation history and position remain recoverable",async()=>{
+ const f=fixture(company);await restaurant(f,12);const before=plain(f.store.getSnapshot()),last=before.plan.elements[11];
+ await f.store.saveReservations(f.store.planId,[{id:"last-table-booking",planId:f.store.planId,elementId:last.id,customerName:"Cliente de prueba",date:"2030-01-07",dateISO:"2030-01-07",time:"10:00",status:"confirmada",durationMinutes:30,createdAt:1}]);
+ const count11={...f.store.getSnapshot().config.plantillaItems[0],count:11},persisted=plain(f.store.getSnapshot());
+ await assert.rejects(f.store.updateConfig({plantillaItems:[count11]}),/reserva activa/);
+ assert.deepEqual(plain(await f.make().load()),persisted);assert.equal(f.repo.getCustomerEntries().length,1);assert.equal(f.store.getSnapshot().entries.length,1);
+ await f.repo.cancelCustomerEntry("last-table-booking");const history=plain(f.store.getSnapshot().bookings);
+ await f.store.updateConfig({plantillaItems:[count11]});const reduced=await f.make().load();
+ assert.equal(api.visibleBusinessDemoElements(reduced.plan).length,11);assert.equal(reduced.plan.elements.length,12);
+ assert.equal(reduced.plan.elements.find(element=>element.id===last.id).reservable,false);assert.deepEqual(plain(reduced.bookings),history);
+ await f.store.updateConfig({plantillaItems:[{...count11,count:12}]});const restored=f.store.getSnapshot().plan.elements.find(element=>element.id===last.id);
+ assert.equal(restored.demoArchived,false);assert.equal(restored.reservable,true);assert.equal(restored.x,last.x);assert.equal(restored.y,last.y);assert.equal(f.store.getSnapshot().plan.elements.length,12);
+});
+test("legacy generated tables are adopted once without replacing IDs, manually placed resources or their reservations",async()=>{
+ const f=fixture(company);await f.store.updateConfig({sectorId:"restauracion",subId:"restaurante",plantillaItems:[{id:"tables",emoji:"🪑",label:"Mesas interiores",count:10}]});
+ const tables=Array.from({length:3},(_,i)=>({id:"legacy_table_"+i,type:"mesa",label:"🪑 "+(i+1),x:100+i*80,y:120,width:80,height:80,capacity:4,status:"disponible",reservable:true}));
+ const manual={...tables[0],id:"manual",type:"zona",label:"Rincón manual",x:5,y:9,width:300,capacity:15};
+ await f.store.saveFloorPlan({id:f.store.planId,businessId:f.store.businessId,elements:[...tables,manual],updatedAt:1});
+ for(let i=0;i<3;i++)await f.store.reconcileProfessionalPlan();
+ const after=await f.make().load();assert.equal(after.plan.elements.filter(element=>element.type==="mesa").length,10);
+ for(const old of tables){const element=after.plan.elements.find(value=>value.id===old.id);assert.ok(element.demoSpaceId);for(const field of ["id","x","y","width","height","capacity","label"])assert.equal(element[field],old[field]);}
+ assert.deepEqual(plain(after.plan.elements.find(element=>element.id===manual.id)),manual);
+});
+test("configured terraces, cabins and workstations keep their physical type and never generate professionals",async()=>{
+ const f=fixture(company);await f.store.updateConfig({sectorId:"servicios",subId:"coworking",plantillaItems:[
+ {id:"terrace",label:"Terraza",emoji:"🌿",count:2},{id:"cabin",label:"Cabinas",emoji:"🚪",count:2},{id:"post",label:"Puestos de trabajo",emoji:"💺",count:3}]});
+ await f.store.reconcileProfessionalPlan();const plan=f.store.getSnapshot().plan;
+ assert.equal(plan.elements.length,7);assert.deepEqual(plain(plan.elements.map(element=>element.type)),["zona","zona","sala","sala","silla","silla","silla"]);
+ assert.equal(api.getBusinessDemoProfessionals(f.store.getSnapshot().config,f.store.businessId).length,0);
+ assert.ok(plan.elements.every(element=>!element.demoStaffId));
+});
+test("restaurant resources remain isolated from a salon and another authenticated owner across new storage adapters",async()=>{
+ const shared=new Map(),a=fixture(company,shared),b=fixture(undefined,shared),c=fixture(company,shared,other);
+ await restaurant(a,12);await setup(b);await restaurant(c,2);const salon=plain(b.store.getSnapshot());
+ await a.store.updateConfig({plantillaItems:[{...a.store.getSnapshot().config.plantillaItems[0],count:10}]});
+ assert.deepEqual(plain(await b.make().load()),salon);assert.equal((await c.make().load()).plan.elements.length,2);
+ assert.ok((await b.make().load()).plan.elements.every(element=>element.type==="silla"&&!element.demoSpaceId));
+ assert.equal((await a.make().load()).plan.elements.filter(element=>!element.demoArchived).length,10);
+});
+
+test("old sector-only terrace resources acquire the correct type without creating a second resource or moving it",async()=>{
+ const f=fixture(company);await f.store.updateConfig({sectorId:"restauracion",subId:"restaurante",plantillaItems:[{id:"terrace",label:"Terraza",emoji:"🌿",count:1}]});
+ const original={id:"old-terrace",label:"🌿",type:"mesa",x:167,y:246,width:245,height:123,capacity:16,status:"disponible",reservable:true};
+ await f.store.saveFloorPlan({id:f.store.planId,businessId:f.store.businessId,elements:[original],updatedAt:1});const plan=await f.store.reconcileProfessionalPlan();
+ assert.equal(plan.elements.length,1);assert.equal(plan.elements[0].type,"zona");assert.equal(plan.elements[0].demoKind,"physical");
+ for(const key of ["id","x","y","width","height","capacity"])assert.equal(plan.elements[0][key],original[key]);
+ assert.deepEqual(plain((await f.make().load()).plan.elements),plain(plan.elements));
+});

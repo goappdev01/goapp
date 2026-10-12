@@ -39,7 +39,7 @@ const calendar = {};
 vm.runInNewContext(ts.transpileModule(dayFilter.getText(agenda), {
   compilerOptions: { target: ts.ScriptTarget.ES2022 },
 }).outputText, calendar);
-function fixture(initial = [], userId = null) {
+export function fixture(initial = [], userId = null) {
   let raw = JSON.stringify(initial), fail = false, writes = 0;
   const storage = {
     async getItem(key) { assert.equal(key, "go_log_v1"); return raw; },
@@ -66,6 +66,9 @@ function fixture(initial = [], userId = null) {
     "./goLogBridge": bridge,
     "./goTaskAccess": access,
     "./time": load("lib/time.ts"),
+  });
+  const reminders = load("lib/goTaskReminders.ts", {
+    "@workspace/api-zod": model, "./goLogBridge": bridge, "./goTaskAccess": access,
   });
   const management = load("lib/goTaskManagement.ts", {
     "@workspace/api-zod": model, "./goLogBridge": bridge, "./goTaskAccess": access,
@@ -99,16 +102,22 @@ function fixture(initial = [], userId = null) {
       react, "@workspace/api-zod": model, "@/lib/bookingAssistant": { localToday: () => "2026-10-08" },
       "@/lib/goTaskAccess": access, "@/lib/goTaskManagement": management,
     });
+    const remindersHook = load("hooks/useTaskReminders.ts", {
+      react, "@workspace/api-zod": model, "@/lib/bookingAssistant": { localToday: () => "2026-10-08" },
+      "@/lib/goTaskAccess": access, "@/lib/goTaskReminders": reminders,
+      "@/lib/goTaskReminderRuntime": { async refreshNativeTaskReminders() { return []; } },
+    });
     const hook = load("hooks/useGoActions.ts", {
+      "./useTaskReminders": remindersHook,
       "./useTaskManagement": managerHook,
       react, "@workspace/api-zod": model, "@/lib/bookingAssistant": { localToday: () => "2026-10-08" },
       "@/lib/goPersonalActions": personal,
     });
-    return { render() { si = 0; ri = 0; return hook.useGoActions(a); }, messages, bookingRequests,
+    return { render(scope) { si = 0; ri = 0; return hook.useGoActions(a, scope); }, messages, bookingRequests,
       get notice() { return notice; } };
   }
   const s = screen();
-  return { store, personal, management, user(value) { userId = value; }, screen, ...s, get notice() { return s.notice; }, get saved() { return JSON.parse(raw); },
+  return { store, personal, management, reminders, user(value) { userId = value; }, screen, ...s, get notice() { return s.notice; }, get saved() { return JSON.parse(raw); },
     get writes() { return writes; }, fail(value) { fail = value; }, reopenStore: newStore };
 }
 test("dated spoken task uses the manual task record and real calendar day filter", async () => {

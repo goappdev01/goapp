@@ -31,6 +31,7 @@ const GOLD_BG = "rgba(196,136,58,0.10)";
 const GOLD_BDR= "rgba(196,136,58,0.35)";
 
 interface HerramientasPanelProps {
+  landingVariantControls?: React.ReactNode;
   visible: boolean;
   onClose: () => void;
   handedness: "left" | "right";
@@ -67,7 +68,7 @@ interface HerramientasPanelProps {
 }
 
 export function HerramientasPanel({
-  visible, onClose,
+  visible, onClose, landingVariantControls,
   handedness, toggleHandedness,
   uiScale, setUiScale,
   userGoPhoneDraft, setUserGoPhoneDraft,
@@ -166,6 +167,7 @@ export function HerramientasPanel({
               1 · PERSONALIZACIÓN
           ══════════════════════════════════════════════════════════ */}
           <Text style={s.familyLabel}>PERSONALIZACIÓN</Text>
+          {landingVariantControls}
           <View style={s.card}>
 
             {/* Lateralidad */}

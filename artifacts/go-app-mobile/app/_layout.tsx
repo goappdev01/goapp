@@ -7,6 +7,8 @@ import {
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { AppState } from "react-native";
+import { startAuthSessionMaintenance } from "@/lib/authSession";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -23,6 +25,7 @@ import { OwnerContextSurface } from "@/components/debug/OwnerContextIndicator";
 import { DEFAULT_BUSINESS_CONFIG } from "@/contexts/GoBusinessConfigContext";
 import { GoBusinessConfigProvider } from "@/contexts/GoBusinessConfigContext";
 import { GoPushInitializer } from "@/services/GoPushService";
+import { GoTaskReminderInitializer } from "@/services/GoTaskReminderService";
 import { seedDemoBusinessIfNeeded, syncConfigToBusinessRegistry } from "@/data/seedDemoData";
 import { seedNemesiDemoIfNeeded } from "@/data/goSeedNemesiDemo";
 import { seedDemoBusinessesIfNeeded } from "@/data/goSeedDemoBusinesses";
@@ -36,6 +39,8 @@ export default function RootLayout() {
     Inter_700Bold,
     Inter_900Black,
   });
+
+  useEffect(() => startAuthSessionMaintenance(AppState), []);
 
   useEffect(() => {
     // Orden de arranque:
@@ -78,6 +83,7 @@ export default function RootLayout() {
             <GoBusinessConfigProvider>
               <GoNotificationProvider>
                 <GoPushInitializer />
+                <GoTaskReminderInitializer />
                 <GestureHandlerRootView style={{ flex: 1 }}>
                   <KeyboardProvider>
                     <OwnerContextSurface>

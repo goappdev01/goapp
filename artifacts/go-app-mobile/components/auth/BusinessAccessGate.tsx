@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,7 +6,7 @@ import { useGoMode } from "@/contexts/GoModeContext";
 import { submitBusinessEnrollment, type BusinessEnrollment } from "@/data/businessAccess";
 import { businessEnrollmentDraftKey, clearBusinessEnrollmentDraft, loadBusinessEnrollmentDraft,
   logBusinessEnrollmentFailure, saveBusinessEnrollmentDraft } from "@/data/businessEnrollmentDraft";
-import { notifySessionChanged } from "@/lib/sessionEvents";
+import { clearAuthSession } from "@/lib/authSession";
 
 const empty: BusinessEnrollment = { legal_name: "", tax_id: "", trading_name: "", address: "" };
 const sendError = "No hemos podido enviar tu solicitud en este momento. Tus datos se han conservado. Inténtalo de nuevo más tarde.";
@@ -109,9 +108,8 @@ function BusinessVerificationScreen() {
   };
   const logout = async () => {
     try {
-      await AsyncStorage.multiRemove(["go_supabase_session_v1", "go_account_type_v1"]);
+      await clearAuthSession();
       syncModeFromRole(null);
-      notifySessionChanged();
     } catch { Alert.alert("No se pudo cerrar sesión", "Vuelve a intentarlo."); }
   };
   return <KeyboardAvoidingView style={s.root} behavior={Platform.OS === "ios" ? "padding" : "height"}>

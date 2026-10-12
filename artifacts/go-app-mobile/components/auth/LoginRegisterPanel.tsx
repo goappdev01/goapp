@@ -1,5 +1,6 @@
 import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import { notifySessionChanged, onSessionChanged } from "@/lib/sessionEvents";
+import { saveAuthSession, clearAuthSession } from "@/lib/authSession";
 import { getConfirmedRegistrationRole, PENDING_REGISTRATION_KEY, readPendingRegistration, type PendingRegistration } from "@/lib/registrationReturn";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -9,6 +10,7 @@ import {
   Dimensions,
   Linking,
   PanResponder,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -359,11 +361,7 @@ export function LoginRegisterPanel({
         throw new Error(authErrorMessage(payload, response.status, "No se pudo autenticar la cuenta."));
       }
       if (payload.access_token) {
-        await AsyncStorage.setItem("go_supabase_session_v1", JSON.stringify({
-          access_token: payload.access_token,
-          refresh_token: payload.refresh_token ?? null,
-          user: payload.user ?? null,
-        }));
+        await saveAuthSession(payload);
       } else if (authMode === "register") {
         const pending = { email, role: selectedRole };
         pendingRegistrationRef.current = pending;
@@ -372,7 +370,6 @@ export function LoginRegisterPanel({
         setAuthError("Revisa tu correo para confirmar la cuenta y después inicia sesión.");
         return;
       }
-      notifySessionChanged();
       if (ownerLogin) {
         setAuthPassword("");
         if (!payload.user?.id || !await adminAccess.refreshOwner(payload.user.id)) throw new Error(t("owner_login_denied"));
@@ -412,11 +409,16 @@ export function LoginRegisterPanel({
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    AsyncStorage.removeItem("go_supabase_session_v1").then(notifySessionChanged).catch(() => {});
-    onSetAccountType(null);
-    setAuthStep("role");
+    try {
+      await clearAuthSession();
+      onSetAccountType(null);
+      setAuthPassword("");
+      setAuthStep("role");
+    } catch {
+      setAuthError("No se pudo cerrar la sesión. Vuelve a intentarlo.");
+    }
   };
 
   const currentOption = ROLE_OPTIONS.find(r => r.role === userAccountType);
@@ -506,7 +508,8 @@ export function LoginRegisterPanel({
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
-                autoComplete={authMode === "login" ? "username" : "email"}
+                textContentType={Platform.OS === "ios" ? (authMode === "login" ? "username" : "emailAddress") : undefined}
+                autoComplete={Platform.OS === "ios" ? undefined : (authMode === "login" ? "username" : "email")}
                 returnKeyType="next"
                 blurOnSubmit={false}
                 onSubmitEditing={() => passwordInputRef.current?.focus()}
@@ -519,7 +522,10 @@ export function LoginRegisterPanel({
                 placeholder="Contraseña (mínimo 8 caracteres)"
                 placeholderTextColor="#94A3B8"
                 secureTextEntry
-                autoComplete={authMode === "login" ? "current-password" : "new-password"}
+                autoCapitalize="none"
+                autoCorrect={false}
+                textContentType={Platform.OS === "ios" ? (authMode === "login" ? "password" : "newPassword") : undefined}
+                autoComplete={Platform.OS === "ios" ? undefined : (authMode === "login" ? "current-password" : "new-password")}
                 returnKeyType={authMode === "login" ? "go" : "done"}
                 onSubmitEditing={authMode === "login" ? handleAuthenticate : undefined}
                 style={s.authInput}

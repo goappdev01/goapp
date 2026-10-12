@@ -1,4 +1,4 @@
-import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
+import { OwnerContextModal as Modal, useOwnerLandingBackground } from "@/components/debug/OwnerContextIndicator";
 import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
 import { getBusinessDemoSetupState } from "@/data/businessDemoStore";
 import { createDemoBookingRepository, createDemoCatalogBookingRepository } from "@/data/demoBookingRepository";
@@ -6,8 +6,12 @@ import { DemoCustomerCalendar } from "@/components/booking/DemoCustomerCalendar"
 import type { GoEntry } from "@/components/AgendaOperativa";
 import { useGoLog } from "@/hooks/useGoLog";
 import { readGoLog, flushGoLog, commitGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
-import { notifySessionChanged, onSessionChanged } from "@/lib/sessionEvents";
+import { onSessionChanged } from "@/lib/sessionEvents";
+import { clearAuthSession, restoreStoredAuthentication, consumeAuthRecoveryNotice } from "@/lib/authSession";
 import { getTaskUser, assertTaskUser } from "@/lib/goTaskAccess";
+import { isNativeReminderTask } from "@/lib/goNativeReminderScheduler";
+import { isNativeTaskScopeActive, suspendNativeTaskReminders, refreshActiveNativeTaskReminders } from "@/lib/goTaskReminderRuntime";
+import { onTaskNotificationFocus } from "@/lib/goTaskNotificationFocus";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
@@ -28,8 +32,10 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Animated,
   Dimensions,
+  useWindowDimensions,
   Easing,
   Keyboard,
   KeyboardAvoidingView,
@@ -92,6 +98,9 @@ import { MessagesScreen } from "@/components/MessagesScreen";
 import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
+import { LandingContentViewport, LandingCardContents } from "@/components/landing/LandingContentViewport";
+import { fitLandingScale, landingPresetScale, landingDockBounds, landingContentFrame,
+  landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom } from "@/components/landing/landingResponsiveLayout";
 import {
   hasFullLandingArchitecture,
   isUserV1Landing,
@@ -100,6 +109,10 @@ import {
 } from "@/components/landing/landingV1Visibility";
 import { ResiduosPanel } from "@/components/ResiduosPanel";
 import { PerfilPanel } from "@/components/perfil/PerfilPanel";
+import { useLandingVisualVariant } from "@/hooks/useLandingVisualVariant";
+import { resolveUserLandingVariant } from "@/components/landing/landingVariant";
+import { LandingVariantSelector } from "@/components/landing/LandingVariantSelector";
+import { LandingVisualArtwork, LandingVisualBoundary, UserLandingInk } from "@/components/landing/LandingVisualArtwork";
 import { HerramientasPanel } from "@/components/herramientas/HerramientasPanel";
 import {
   LoginRegisterPanel,
@@ -2607,9 +2620,9 @@ export default function HomeScreen() {
   const goView = useGoView();
   const ownerIdentity = useRef<string | null>(null);
   if (goView.isOwner && adminAccess.userId) ownerIdentity.current = adminAccess.userId;
-  else if (!adminAccess.checking || ownerIdentity.current !== adminAccess.userId) ownerIdentity.current = null;
-  // Keep presentation mounted during this owner's recheck; inner permissions still fail closed.
-  const ownerPresentation = goView.isOwner || (!!adminAccess.userId && adminAccess.checking && ownerIdentity.current === adminAccess.userId);
+  else if ((!adminAccess.checking && !adminAccess.unavailable) || ownerIdentity.current !== adminAccess.userId) ownerIdentity.current = null;
+  // Retain mounted presentation during a recheck/temporary outage; inner permission checks still deny operations.
+  const ownerPresentation = goView.isOwner || (!!adminAccess.userId && (adminAccess.checking || adminAccess.unavailable) && ownerIdentity.current === adminAccess.userId);
   return ownerPresentation ? <HomeScreenContent /> : <BusinessAccessGate><HomeScreenContent /></BusinessAccessGate>;
 }
 
@@ -2738,11 +2751,11 @@ function HomeScreenContent() {
   const [demoInitialBusinessId, setDemoInitialBusinessId] = useState<string>();
   const demoCalendarOwnerRef = useRef(adminAccess.userId);
   useEffect(() => {
-    if (demoCalendarOwnerRef.current !== adminAccess.userId || goView.view !== "USER" || (!adminAccess.checking && !adminAccess.isOwner)) {
+    if (demoCalendarOwnerRef.current !== adminAccess.userId || goView.view !== "USER" || (!adminAccess.checking && !adminAccess.unavailable && !adminAccess.isOwner)) {
       setDemoCustomerCalendarSelected(false); setDemoCalendarFocus(undefined); setDemoInitialBusinessId(undefined);
     }
     demoCalendarOwnerRef.current = adminAccess.userId;
-  }, [goView.view, adminAccess.userId, adminAccess.checking, adminAccess.isOwner]);
+  }, [goView.view, adminAccess.userId, adminAccess.checking, adminAccess.unavailable, adminAccess.isOwner]);
   useEffect(() => {
     if (!goSearchOpen || !goSearchSub || adminAccess.checking) { setGoSearchBusinesses([]); return; }
     let active = true;
@@ -2767,9 +2780,11 @@ function HomeScreenContent() {
   const [userAccountType, setUserAccountType] = useState<AccountRole | null>(null);
   const [goAuthOpen, setGoAuthOpen] = useState(true);
   const [authBootstrapComplete, setAuthBootstrapComplete] = useState(false);
+  const [authBootstrapError, setAuthBootstrapError] = useState<string | null>(null);
+  const authBootstrapRetryRef = useRef<(() => void) | null>(null);
   const [adminDashOpen, setAdminDashOpen] = useState(false);
 
-  useEffect(() => { if (!goView.isAdminView && !adminAccess.checking) setAdminDashOpen(false); }, [goView.isAdminView, adminAccess.checking]);
+  useEffect(() => { if (!goView.isAdminView && !adminAccess.checking && !adminAccess.unavailable) setAdminDashOpen(false); }, [goView.isAdminView, adminAccess.checking, adminAccess.unavailable]);
   const handleOpenAdmin = async () => {
     if (goView.isOwner) { await handleSelectOwnerView("ADMIN"); return; }
     if (await adminAccess.refresh()) {
@@ -2935,88 +2950,51 @@ function HomeScreenContent() {
 
   const handleProfileLogout = async () => {
     try {
-      await AsyncStorage.multiRemove(["go_supabase_session_v1", "go_account_type_v1"]);
+      // Cancel private OS alerts before removing the previous session.
+      await suspendNativeTaskReminders();
+      await clearAuthSession();
       setCuentaOpen(false);
       commitAccountType(null);
-      notifySessionChanged();
     } catch {
       console.warn("[auth] Could not complete local logout.");
     }
   };
 
-  // Resuelve la autenticación antes de mostrar el Landing. La clave de rol es
-  // solo información de presentación y nunca autentica por sí sola.
+  // Restore the stored session before presentation. Token renewal never resets navigation.
   useEffect(() => {
-    let cancelled = false;
+    let cancelled = false, revision = 0, completed = false, needsRetry = true;
     const validRoles: AccountRole[] = ["usuario", "empresa", "admin", "trabajador", "proveedor", "partner", "franquicia"];
-    const isValidRole = (value: unknown): value is AccountRole =>
-      typeof value === "string" && validRoles.includes(value as AccountRole);
-
-    const requireAuthentication = async () => {
-      await AsyncStorage.multiRemove(["go_supabase_session_v1", "go_account_type_v1"]);
-      notifySessionChanged();
-      if (!cancelled) commitAccountType(null);
-    };
-
-    (async () => {
+    const restore = async () => {
+      const request = ++revision;
+      if (!completed) setAuthBootstrapError(null);
       try {
-        const [rawSession, rawRole] = await Promise.all([
-          AsyncStorage.getItem("go_supabase_session_v1"),
-          AsyncStorage.getItem("go_account_type_v1"),
-        ]);
-
-        let session: { access_token?: string; user?: { user_metadata?: { role?: unknown } } } | null = null;
-        try { session = rawSession ? JSON.parse(rawSession) : null; } catch { session = null; }
-
-        if (!session?.access_token) {
-          await requireAuthentication();
-          return;
-        }
-
-        let resolvedRole: AccountRole | null = isValidRole(rawRole)
-          ? rawRole
-          : isValidRole(session.user?.user_metadata?.role)
-            ? session.user.user_metadata.role
-            : null;
-
-        const apiBase = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "")
-          ?? (process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}/api` : "/api");
-        const canValidateRemotely = Platform.OS === "web" || !apiBase.startsWith("/");
-
-        if (canValidateRemotely) {
-          try {
-            const response = await fetch(`${apiBase}/supabase/auth/me`, {
-              headers: { Authorization: `Bearer ${session.access_token}` },
-            });
-            if (response.status === 401 || response.status === 403) {
-              await requireAuthentication();
-              return;
-            }
-            if (response.ok) {
-              const payload = await response.json();
-              if (isValidRole(payload.profile?.role)) resolvedRole = payload.profile.role;
-            }
-          } catch {
-            // Una caída temporal de red no invalida una sesión ya guardada.
-          }
-        }
-
-        if (!cancelled) {
+        const { session, role } = await restoreStoredAuthentication();
+        if (cancelled || request !== revision) return;
+        if (!session) {
+          commitAccountType(null);
+          const notice = consumeAuthRecoveryNotice();
+          if (notice) Alert.alert("Sesión finalizada", notice);
+        } else if (typeof role === "string" && validRoles.includes(role as AccountRole)) {
           // ADMIN is a separate server permission, never a local account context.
-          if (resolvedRole) commitAccountType(resolvedRole === "admin" ? "usuario" : resolvedRole, false);
-          else setGoAuthOpen(true);
-        }
+          commitAccountType(role === "admin" ? "usuario" : role as AccountRole, false);
+        } else setGoAuthOpen(true);
+        completed = true; needsRetry = false;
+        setAuthBootstrapError(null); setAuthBootstrapComplete(true);
       } catch {
-        if (!cancelled) {
-          setUserAccountType(null);
-          setGoAuthOpen(true);
+        if (!cancelled && request === revision) {
+          needsRetry = true;
+          // An unreadable keychain is temporary; never turn it into a logout or a new login prompt.
+          if (!completed) setAuthBootstrapError("No se pudo recuperar la sesión. Desbloquea el dispositivo y vuelve a intentarlo.");
         }
-      } finally {
-        if (!cancelled) setAuthBootstrapComplete(true);
       }
-    })();
-
-    return () => { cancelled = true; };
+    };
+    authBootstrapRetryRef.current = () => { void restore(); };
+    const unsubscribe = onSessionChanged(() => { void restore(); });
+    const activity = AppState.addEventListener("change", state => {
+      if (state === "active" && needsRetry) void restore();
+    });
+    void restore();
+    return () => { cancelled = true; revision++; authBootstrapRetryRef.current = null; unsubscribe(); activity.remove(); };
   }, []);
 
   // Helper: guarda MI TELÉFONO GO y muestra feedback verde 1 segundo.
@@ -3100,7 +3078,7 @@ function HomeScreenContent() {
   const [sortFeedbackVisible, setSortFeedbackVisible] = useState(false);
   const [messagesOpen, setMessagesOpen] = useState(false);
   const [humanityOpen, setHumanityOpen] = useState(false);
-  useEffect(() => { if (!goView.isAdminView && !adminAccess.checking) setHumanityOpen(false); }, [goView.isAdminView, adminAccess.checking]);
+  useEffect(() => { if (!goView.isAdminView && !adminAccess.checking && !adminAccess.unavailable) setHumanityOpen(false); }, [goView.isAdminView, adminAccess.checking, adminAccess.unavailable]);
   const [initialMessagesContact, setInitialMessagesContact] = useState<{ name: string; phone: string } | null>(null);
   // ── RECORDATORIO (RECUÉRDAME) ────────────────────────────────────────────
   const [remindOpen, setRemindOpen] = useState(false);
@@ -3376,6 +3354,8 @@ function HomeScreenContent() {
   // El campo persistido sigue siendo `go_ui_scale_v1`; valores antiguos
   // se mapean: "small" → "compacto", "normal"/"large" → "estandar".
   const [uiScale, setUiScale] = useState<"compacto" | "estandar" | "grande">("estandar");
+  const userLandingVisualEnabled = goView.loaded && goView.view === "USER" && !!adminAccess.userId && authBootstrapComplete && !goAuthOpen;
+  const landingVisual = useLandingVisualVariant(adminAccess.userId, userLandingVisualEnabled);
   // Tamaño de columnas del calendario (ancho día)
   const [calSize, setCalSize] = useState<CalSizeKey>(DEFAULT_GO_RENDER_PRESET.calSize);
   // Tamaño visual de tarjetas del listado: compacto / medio / grande
@@ -3442,8 +3422,8 @@ function HomeScreenContent() {
   useEffect(() => () => { ownerNavigationRevision.current++; }, []);
   useEffect(() => { ownerNavigationRevision.current++; }, [adminAccess.userId]);
   useEffect(() => {
-    if (!goView.isBusinessPreview && !businessAccess.allowed && !adminAccess.checking) setEmpresaOpenState(false);
-  }, [goView.isBusinessPreview, businessAccess.allowed, adminAccess.checking]);
+    if (!goView.isBusinessPreview && !businessAccess.allowed && !adminAccess.checking && !adminAccess.unavailable) setEmpresaOpenState(false);
+  }, [goView.isBusinessPreview, businessAccess.allowed, adminAccess.checking, adminAccess.unavailable]);
   const openOwnerContextSelector = () => {
     ownerNavigationRevision.current++;
     setAdminDashOpen(false); setEmpresaOpenState(false); setCuentaOpen(false);
@@ -3557,6 +3537,14 @@ function HomeScreenContent() {
     resolveEvent:  goResolveEvent,
     soundEnabled,
   } = useGoNotification();
+
+  useEffect(() => onTaskNotificationFocus(({ task, scope }) => {
+    if (!isNativeTaskScopeActive(scope)) return;
+    setAiOpen(false); setListOpen(false);
+    setCalHighlightEntryId(task.id);
+    setCalScrollToDateTarget({ dateISO: task.dateISO, timeHHMM: task.time, token: Date.now() });
+    setCalOpen(true);
+  }), []);
 
   // Sincroniza el motor de recordatorios GO con el modo de alerta global
   useEffect(() => {
@@ -3852,6 +3840,12 @@ function HomeScreenContent() {
   // recalculación dependiente (p. ej. la posición del GO en IA) se dispare
   // automáticamente cuando cambia la ventana: rotación, resize del iframe,
   // o cambios provocados por el teclado en Android (modo "resize").
+  const landingWindow = useWindowDimensions();
+  const [landingSurfaceSize, setLandingSurfaceSize] = useState<{ width: number; height: number } | null>(null);
+  const [pendingContentH, setPendingContentH] = useState(0);
+  const [pendingHeaderH, setPendingHeaderH] = useState(0);
+  const [transportPanelH, setTransportPanelH] = useState(0);
+  const [landingHelpH, setLandingHelpH] = useState(0);
   const [windowHeight, setWindowHeight] = useState(
     () => Dimensions.get("window").height || 800,
   );
@@ -6101,6 +6095,11 @@ function HomeScreenContent() {
     fieldSelectorOpen ||
     humanityOpen;
 
+  const userLandingVariant = resolveUserLandingVariant(goView.view, landingVisual.ready,
+    !anyOverlayOpen && !goAuthOpen && !empresaOpen && !adminDashOpen && !rutasMode,
+    landingVisual.active, landingVisual.preview);
+  const userLandingMinimal = userLandingVariant !== "actual" && orbitSecondLevel === null && activeSatCtx === null;
+
   // ── MODO CREACIÓN vs MODO VISITA ─────────────────────────────────────
   // Se considera que el usuario está CREANDO activamente cuando al menos
   // uno de los campos del formulario tiene contenido. En ese estado:
@@ -6982,6 +6981,7 @@ function HomeScreenContent() {
     setNotificationsGloballyEnabled(next);
     try {
       await AsyncStorage.setItem("go_notif_enabled_v1", next ? "on" : "off");
+      await refreshActiveNativeTaskReminders();
     } catch {}
     if (next) {
       const ok = await ensureWebNotificationPermission();
@@ -9984,6 +9984,8 @@ function HomeScreenContent() {
       const now = Date.now();
       const updates: Array<{ id: string; firedAdd: number[]; clearSnooze?: boolean }> = [];
       for (const g of goLog) {
+        // Explicit owned task reminders are delivered by the OS, never twice by this polling loop.
+        if (Platform.OS !== "web" && isNativeReminderTask(g)) continue;
         if (g.deleted) continue;
         if (g.notificationsEnabled === false) continue;
         // Estados terminales: no hace falta recordar nada más.
@@ -11756,10 +11758,10 @@ function HomeScreenContent() {
   // ESCALA GLOBAL DEL SISTEMA — factor único que controla todo el visual.
   // estandar = 1.00 (referencia). compacto < 1. grande > 1.
   // Todos los elementos del sistema derivan de este único valor.
-  const uiScaleFactor =
-    uiScale === "compacto" ? 0.83
-    : uiScale === "grande"  ? 1.12
-    : 1.00; // "estandar" — referencia base
+  // The actual surface can be smaller than the window; other screens keep their geometry.
+  const screen = !anyOverlayOpen && landingSurfaceSize ? landingSurfaceSize : landingWindow;
+  const uiScaleFactor = anyOverlayOpen ? landingPresetScale(uiScale)
+    : fitLandingScale(uiScale, screen.width, screen.height, insets);
 
   // Bases en estandar (scale=1.0). Compacto y grande escalan linealmente.
   const goSize = Math.round(128 * uiScaleFactor);
@@ -11829,7 +11831,6 @@ function HomeScreenContent() {
   const lColBtnSz  = Math.round(36 * barScale); // botones columna L (legacy)
   const secBtnSz   = Math.round(28 * barScale); // botones secundarios (zurdo / modo vis)
 
-  const screen = Dimensions.get("window");
 
   // ── LAYOUT CONSTRAINTS · 3 HARD ZONES ─────────────────────────────────
   // Single source of truth for vertical layout. The screen is partitioned
@@ -11928,11 +11929,11 @@ function HomeScreenContent() {
   //   left anchor center X            = SYSTEM_MARGIN_X + SBR
   //   → minX = (SYSTEM_MARGIN_X + SBR) - (screen.width - SYSTEM_MARGIN_X - SBR)
   //          = 2*SYSTEM_MARGIN_X + 2*SBR - screen.width
-  const maxX = SYSTEM_MARGIN_X; // allow dragging to physical screen right edge
-  const minX = Math.min(
-    0,
-    Math.round(2 * SYSTEM_MARGIN_X + 2 * systemBoundingRadius - screen.width),
-  );
+  const landingDock = landingDockBounds({ width: screen.width, insets, dockRight,
+    boundingRadius: systemBoundingRadius, wrapSize: orbitWrapSize,
+    satelliteRadius: microR, satelliteSize: microSz });
+  const maxX = anyOverlayOpen ? SYSTEM_MARGIN_X : landingDock.maxX;
+  const minX = anyOverlayOpen ? Math.min(0, Math.round(2 * SYSTEM_MARGIN_X + 2 * systemBoundingRadius - screen.width)) : landingDock.minX;
   // V1 PROMPT 12 · MODO COMPACTO de próxima cita.
   // En preset SMALL el GO orbital ocupa menos ancho, así que sobra una
   // franja vertical libre en el lado opuesto al pulgar (izquierda en
@@ -12026,8 +12027,8 @@ function HomeScreenContent() {
   //   minY = _topFloor_screen - _anchorContainerY   (negative = moved up)
   const _anchorContainerY =
     screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize;
-  const minY = Math.min(0, Math.round(_topFloor_screen - _anchorContainerY));
-  const maxY = Math.max(0, insets.bottom - 6); // physical edge minus minimal breathing buffer
+  const minY = Math.min(anyOverlayOpen ? 0 : landingDock.maxY, Math.round(_topFloor_screen - _anchorContainerY));
+  const maxY = anyOverlayOpen ? Math.max(0, insets.bottom - 6) : landingDock.maxY;
   const clamp = (v: number, lo: number, hi: number) =>
     Math.min(Math.max(v, lo), hi);
 
@@ -12265,27 +12266,9 @@ function HomeScreenContent() {
     const visualPanelTop = rawPanelTopY - 16;
     const availableSpace = Math.max(0, visualPanelTop - titleBottom);
 
-    // ── Escalado GO en LISTADO GLOBAL ──────────────────────────────────────
-    //
-    // REGLA: tamaño deseado directo, sin physicalCap.
-    //   1–2 fichas → 1.00  (máximo — ya validados)
-    //   3 fichas   → 0.97  (referencia base exacta — no tocar)
-    //   4–5 fichas → 1.00  (máximo — no reducir por falta de espacio)
-    //   6 fichas   → 0.87
-    //   7+ fichas  → proporcional al espacio disponible
-    //
-    // MIN_VIS = 0.30: ocultar solo si el hueco es físicamente nulo.
-    const MIN_VIS = 0.30;
     let visualScale = 1.0;
-
     if (listOpen) {
-      const availableRatio = availableSpace / safeScreenHeight;
-      if (availableRatio < 0.05) {
-        setListGoVisible(false);
-      } else {
-        visualScale = GO_SIZE_8.goSize / goSize;
-        setListGoVisible(true);
-      }
+      visualScale = GO_SIZE_8.goSize / goSize;
     } else {
       setListGoVisible(false);
     }
@@ -12363,6 +12346,12 @@ function HomeScreenContent() {
     }
     // ────────────────────────────────────────────────────────────────────────
 
+    // Include every orbit and its glow; never leave a clipped GO fragment.
+    if (listOpen) {
+      const fullGoHeight = (systemBoundingRadius * 2 + 24) * visualScale;
+      setListGoVisible(overlayPanelHeight > 0 && fullGoHeight <= availableSpace * 0.88);
+    }
+
     // ── Posición: centro visual entre título y panel ─────────────────────────
     //
     // centerY = punto medio entre titleBottom (borde inferior del título) y
@@ -12423,6 +12412,7 @@ function HomeScreenContent() {
     minY,
     maxY,
     orbitWrapSize,
+    systemBoundingRadius,
     titleBottomLocalY,
     uiScale,
     handedness,
@@ -13416,8 +13406,33 @@ function HomeScreenContent() {
     ];
   };
 
+  const landingBaseline = bottomReserved + orbitWrapSize - 2;
+  const landingSafeTop = Math.max(insets.top + Math.round(12 * uiScaleFactor), (titleBottomLocalY ?? 0) + 8);
+  const landingHasNext = !!nextAppointment && !anyOverlayOpen && !isActivelyCreating && !rutasMode;
+  const landingHasChanges = allPendientes.length > 0 && !anyOverlayOpen && !rutasMode;
+  const landingNextHeight = landingHasNext ? nextAptMinimized ? 46 : nextAptPanelH : 0;
+  // Intrinsic measurement remains valid when the viewport is constrained.
+  const landingPendingHeight = landingHasChanges ? cambiosOpen
+    ? Math.max(pendingPanelH, pendingHeaderH + pendingContentH + Math.round(4 * uiScaleFactor) + 3) : 46 : 0;
+  const landingPendingOffset = landingHasNext && !nextAptMinimized
+    ? landingNextHeight + Math.round(8 * uiScaleFactor) : cambiosOpen && landingHasNext ? 54 : 0;
+  const landingHelpBottom = insets.bottom + SYSTEM_MARGIN_Y + orbitWrapSize + 20
+    + (landingHasNext ? !nextAptMinimized && nextAptPanelH > 0 ? nextAptPanelH + 12 : nextAptMinimized ? 54 : 0 : 0)
+    + (landingHasChanges ? cambiosOpen && pendingPanelH > 0 ? landingPendingHeight + 12 : 54 : 0);
+  const landingBaseFrame = landingContentFrame({ width: screen.width, height: screen.height, insets,
+    safeTop: landingSafeTop, baseline: landingBaseline, boundingRadius: systemBoundingRadius, handedness,
+    controlSize: Math.max(44, Math.round(32 * uiScaleFactor)),
+    naturalHeight: Math.max(landingNextHeight, landingPendingHeight + landingPendingOffset,
+      !anyOperationalPanelOpen ? landingHelpBottom - landingBaseline + landingHelpH : 0,
+      landingHasNext && !nextAptMinimized ? transportPanelH : 0) });
+  const landingPanelWidth = landingContentWidth(screen.width, screen.height, insets, systemBoundingRadius);
+  const landingPanelInsets = landingPanelWidth !== screen.width ? { left: 0, right: 0 } : insets;
+  const landingStackTransport = landingPanelWidth < 280;
+
   const humanityPanelOpen = !!nextAppointment && !isActivelyCreating && !nextAptMinimized;
-  const humanityBlocks = humanityPanelOpen
+  const humanityBlocks = landingBaseFrame.virtual && !anyOverlayOpen
+    ? [{ x: landingBaseFrame.left, y: landingBaseFrame.top, width: landingBaseFrame.width, height: landingBaseFrame.height }]
+    : humanityPanelOpen
     ? [humanityObstacles.next, humanityObstacles.transport]
     : !!nextAppointment && !isActivelyCreating ? [humanityObstacles.pill] : [];
   // Wait for visible panels to report their complete touch bounds.
@@ -13425,7 +13440,7 @@ function HomeScreenContent() {
   const humanityPlacement = humanityPanelsMeasured && posReady ? placeHumanity({
     // Use the configured static dock anchor, never the former draggable pan.
     cx: screen.width - dockRight - systemBoundingRadius + (handedness === "right" ? maxX : minX),
-    cy: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 - Math.round(12 * uiScaleFactor),
+    cy: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + landingDock.maxY,
     radius: orbitRadius, buttonSize: orbitBtnSize,
     satelliteRadius: microR, satelliteSize: microSz, count: INTENTS.length + 1,
     scale: uiScaleFactor,
@@ -13433,11 +13448,110 @@ function HomeScreenContent() {
     obstacles: humanityBlocks.filter((rect): rect is HumanityRect => !!rect),
   }) : null;
 
+  // Paint only the Landing's outer gutter; keep every content inset and modal unchanged.
+  const landingTopInset = useOwnerLandingBackground(authBootstrapComplete && modeLoaded && !goAuthOpen
+    && !anyOverlayOpen && !empresaOpen && !verificacionOpen && !adminDashOpen);
+
+  // If the scroll area consumes its orbital slot, keep the same control above the cards.
+  const landingInlineHumanity = fullLandingArchitecture && !anyOverlayOpen && !rutasMode
+    && kbHeight === 0 && orbitSecondLevel === null && landingBaseFrame.virtual && !humanityPlacement;
+  const inlineHumanityRect = { x: 8, y: 0, width: Math.max(62, Math.round(52 * uiScaleFactor) + 10),
+    height: Math.round(56 * uiScaleFactor) + 16, globe: Math.round(56 * uiScaleFactor) };
+  const inlineContentHeight = Math.max(landingBaseFrame.height, landingBaseFrame.naturalHeight + inlineHumanityRect.height + 8);
+  const landingFrame = landingInlineHumanity ? { ...landingBaseFrame,
+    scroll: inlineContentHeight > landingBaseFrame.height, contentHeight: inlineContentHeight } : landingBaseFrame;
+  const contentBottom = (bottom: number) => landingContentBottom(bottom, landingFrame);
+  const renderLandingHumanity = (placement: HumanityRect & { globe: number }) => (
+        <TouchableOpacity
+          activeOpacity={0.82}
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+            setHumanityOpen(true);
+          }}
+          style={{
+            position: "absolute",
+            left: placement.x,
+            top: placement.y,
+            width: placement.width,
+            height: placement.height,
+            borderRadius: placement.globe / 2,
+            zIndex: 9990,
+            shadowColor: "#1d6fa8",
+            shadowOpacity: 0.55,
+            shadowRadius: 14,
+            shadowOffset: { width: 0, height: 0 },
+            elevation: 12,
+            alignItems: "center",
+            justifyContent: "flex-start",
+            paddingTop: 5,
+            overflow: "visible",
+          }}
+        >
+          {/* Glow ring */}
+          <View
+            pointerEvents="none"
+            style={{
+              position: "absolute",
+              top: 2,
+              width: placement.globe + 6,
+              height: placement.globe + 6,
+              borderRadius: (placement.globe + 6) / 2,
+              borderWidth: 1.2,
+              borderColor: "rgba(80,180,255,0.28)",
+            }}
+          />
+          {/* Cinematic Earth globe — photorealistic satellite image */}
+          <View style={{
+            width: placement.globe,
+            height: placement.globe,
+            borderRadius: placement.globe / 2,
+            overflow: "hidden",
+            borderWidth: 1,
+            borderColor: "rgba(100,200,255,0.30)",
+          }}>
+            <Image
+              source={require("../assets/images/humanity_globe.png")}
+              style={{ width: placement.globe, height: placement.globe }}
+              resizeMode="cover"
+            />
+            {/* Atmospheric limb glow */}
+            <View
+              pointerEvents="none"
+              style={{
+                position: "absolute",
+                top: 0, left: 0, right: 0, bottom: 0,
+                borderRadius: placement.globe / 2,
+                borderWidth: Math.round(placement.globe * 0.055),
+                borderColor: "rgba(80,180,255,0.22)",
+              }}
+            />
+          </View>
+          {/* Label */}
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={{
+            position: "absolute",
+            bottom: 0,
+            width: "100%",
+            color: "rgba(255,255,255,0.72)",
+            fontSize: 9,
+            lineHeight: 12,
+            fontWeight: "700",
+            letterSpacing: 0.4,
+            textAlign: "center",
+          }}>
+            HUMANITY
+          </Text>
+        </TouchableOpacity>
+  );
   if (!authBootstrapComplete || !modeLoaded) {
     return (
       <View style={{ flex: 1, backgroundColor: "#F7F6F2", alignItems: "center", justifyContent: "center" }}>
         <StatusBar style="dark" />
-        <ActivityIndicator size="large" color="#4A80BD" />
+        {authBootstrapError ? <>
+          <Text accessibilityRole="alert" style={{ color: "#111827", textAlign: "center", marginHorizontal: 24 }}>{authBootstrapError}</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Reintentar recuperación de sesión" onPress={() => authBootstrapRetryRef.current?.()} style={{ padding: 16 }}>
+            <Text style={{ color: "#4A80BD", fontFamily: "Inter_700Bold" }}>Reintentar</Text>
+          </Pressable>
+        </> : <ActivityIndicator size="large" color="#4A80BD" />}
       </View>
     );
   }
@@ -13445,7 +13559,10 @@ function HomeScreenContent() {
   return (
     <>
     <GestureDetector gesture={universalSwipeGesture}>
-    <View style={[styles.root, { paddingTop }]}>
+    <View style={[styles.root, { paddingTop }]} onLayout={(e) => {
+      const { width, height } = e.nativeEvent.layout;
+      setLandingSurfaceSize(prev => prev?.width === width && prev?.height === height ? prev : { width, height });
+    }}>
       {/* Status bar — dark-content sobre paneles claros, light sobre el fondo oscuro GO */}
       <StatusBar
         style={
@@ -13460,7 +13577,7 @@ function HomeScreenContent() {
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
         <Image
           source={EARTH_BG}
-          style={StyleSheet.absoluteFill}
+          style={[StyleSheet.absoluteFill, { top: -landingTopInset }]}
           resizeMode="cover"
         />
       </View>
@@ -13479,7 +13596,7 @@ function HomeScreenContent() {
         colors={["rgba(2,4,12,0.72)", "transparent"]}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 0.22 }}
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, { top: -landingTopInset }]}
         pointerEvents="none"
       />
       {/* Bottom-edge fade — anchors the orbit in deep space */}
@@ -13499,6 +13616,11 @@ function HomeScreenContent() {
           pointerEvents="none"
         />
       )}
+
+      {userLandingVariant !== "actual" && <LandingVisualBoundary key={userLandingVariant}
+        onFailure={() => { void landingVisual.recover(); }}>
+        <LandingVisualArtwork variant={userLandingVariant} />
+      </LandingVisualBoundary>}
 
       {/* ── CAPA SUPERIOR · título + info + acciones ──────────────────────
           onLayout → titleBottomLocalY. El orbit usa este valor como
@@ -13769,6 +13891,8 @@ function HomeScreenContent() {
         )}
       </View>
 
+      <LandingContentViewport frame={landingFrame} closingGesture={universalSwipeGesture}>
+      {landingInlineHumanity && renderLandingHumanity(inlineHumanityRect)}
       {/* PASTILLA PRÓXIMA ACCIÓN — solo cuando visita minimizada y sin overlays */}
       {!isActivelyCreating && !rutasMode && kbHeight === 0 && (() => {
         const showProxima = !anyOverlayOpen && !!nextAppointment && nextAptMinimized;
@@ -13796,7 +13920,7 @@ function HomeScreenContent() {
 
         // La pastilla vive exactamente donde estaba el botón "Cambiar":
         // borde derecho del panel (PANEL_EDGE) y mismo bottom que el panel.
-        const _pillPanelEdge = Math.max(18, (handedness === "right" ? insets.right : insets.left) + 18);
+        const _pillPanelEdge = Math.max(18, (handedness === "right" ? landingPanelInsets.right : landingPanelInsets.left) + 18);
         const proximaSideStyle = handedness === "right"
           ? { right: _pillPanelEdge }
           : { left:  _pillPanelEdge };
@@ -13824,7 +13948,7 @@ function HomeScreenContent() {
           <View
             key="next-action-open-btn-wrap"
             onLayout={(e) => measureHumanityObstacle("pill", e.nativeEvent.layout)}
-            style={{ position: "absolute", ...proximaSideStyle, bottom: PROXIMA_BOTTOM, zIndex: 7 }}
+            style={{ position: "absolute", ...proximaSideStyle, bottom: contentBottom(PROXIMA_BOTTOM), zIndex: 7 }}
           >
             <TouchableOpacity
               activeOpacity={0.75}
@@ -13883,7 +14007,7 @@ function HomeScreenContent() {
       {allPendientes.length > 0 && !anyOverlayOpen && !rutasMode && (() => {
         const ACCENT       = "#f97316";
         const BLUE         = "#60a5fa";
-        const PANEL_EDGE   = Math.max(18, (handedness === "right" ? insets.right : insets.left) + 18);
+        const PANEL_EDGE   = Math.max(18, (handedness === "right" ? landingPanelInsets.right : landingPanelInsets.left) + 18);
         const PILL_MAX_W   = 110;
         const PILL_H       = 46;
         const PROXIMA_BOTTOM = bottomReserved + orbitWrapSize - 2;
@@ -13915,7 +14039,7 @@ function HomeScreenContent() {
           return (
             <View
               key="pendientes-pill-wrap"
-              style={{ position: "absolute", ...pillSideStyle, bottom: pillBottom, zIndex: 7 }}
+              style={{ position: "absolute", ...pillSideStyle, bottom: contentBottom(pillBottom), zIndex: 7 }}
             >
               <TouchableOpacity
                 activeOpacity={0.75}
@@ -13968,7 +14092,7 @@ function HomeScreenContent() {
         const BTN_W   = uiScale === "grande" ? Math.round(BTN_H * 1.18) : Math.round(BTN_H * 1.28);
         // Reuse Próxima's measured information width without moving its grid.
         const PANEL_W = Math.min(
-          screen.width - insets.left - insets.right - 2 * PANEL_EDGE,
+          landingPanelWidth - landingPanelInsets.left - landingPanelInsets.right - 2 * PANEL_EDGE,
           proximaExpanded && humanityObstacles.next
             ? humanityObstacles.next.width
             : 3 * BTN_W + 2 * Math.round(6 * uiScaleFactor) + Math.round(96 * uiScaleFactor),
@@ -14026,11 +14150,10 @@ function HomeScreenContent() {
               position: "absolute",
               ...panelSideStyle,
               width: PANEL_W,
-              bottom: panelBottom,
+              bottom: contentBottom(panelBottom),
               // The shrinking scroll viewport contains overflow above Próxima;
               // the header remains visible below the top safe-area margin.
-              maxHeight: panelMaxHeight,
-              minHeight: proximaExpanded ? panelMaxHeight : undefined,
+              maxHeight: landingFrame.virtual ? undefined : panelMaxHeight,
               zIndex: 6,
               gap: Math.round(4 * uiScaleFactor),
             }}
@@ -14043,7 +14166,7 @@ function HomeScreenContent() {
                 ? (isSent ? "CAMBIO PROPUESTO" : "CAMBIO RECIBIDO")
                 : "RESERVA PENDIENTE";
               return (
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: Math.round(6 * uiScaleFactor), paddingHorizontal: 2 }}>
+                <View onLayout={(e) => setPendingHeaderH(e.nativeEvent.layout.height)} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: Math.round(6 * uiScaleFactor), paddingHorizontal: 2 }}>
                   {/* Flecha izquierda */}
                   {total > 1 && safeIdx > 0 ? (
                     <View pointerEvents="none" style={{ flexDirection: "row", alignItems: "center" }}>
@@ -14104,11 +14227,8 @@ function HomeScreenContent() {
                 overflow: "hidden",
               }}
             >
-            <ScrollView
-              style={{ flexGrow: 0, flexShrink: 1 }}
+            <LandingCardContents overflowing={landingFrame.virtual} onHeight={setPendingContentH}
               contentContainerStyle={{ paddingHorizontal: Math.round(12 * uiScaleFactor), paddingVertical: Math.round(6 * uiScaleFactor), gap: Math.round(2 * uiScaleFactor) }}
-              directionalLockEnabled
-              showsVerticalScrollIndicator={false}
             >
               {/* Tipo de pendiente */}
               {item.kind === "cambio" && (() => {
@@ -14265,7 +14385,7 @@ function HomeScreenContent() {
                   </TouchableOpacity>
                 </View>
               )}
-            </ScrollView>
+            </LandingCardContents>
             </View>
 
             {/* botón de cierre eliminado — lo gestiona el botón único flotante */}
@@ -14343,14 +14463,17 @@ function HomeScreenContent() {
             }
           : undefined;
 
-        const BTN_H    = Math.round(Math.min(80, Math.max(56, 64 * uiScaleFactor)));
-        // Botones ligeramente más anchos que altos → mejor pulsación en movimiento.
-        // Grande: ratio ligeramente reducido para liberar ancho lateral del panel superior.
-        const BTN_W    = uiScale === "grande" ? Math.round(BTN_H * 1.18) : Math.round(BTN_H * 1.28);
+        const actionGrid = landingActionGrid({ width: landingPanelWidth,
+          leftInset: landingPanelInsets.left, rightInset: landingPanelInsets.right,
+          scale: uiScaleFactor, large: uiScale === "grande",
+          columns: landingStackTransport ? 2 : hasWhatsapp || hasPhone ? 3 : 2,
+          transport: !landingStackTransport, transportWidth: uiScale === "grande" && !landingFrame.virtual ? 86 : 70 });
+        const BTN_H = actionGrid.height;
+        const BTN_W = actionGrid.buttonWidth;
         const ACT_ICON = Math.round(16 * uiScaleFactor);
-        const ACT_FS   = Math.round(12 * uiScaleFactor);
+        const ACT_FS   = actionGrid.compressed ? 12 : Math.round(12 * uiScaleFactor);
         const ACT_PV   = Math.round(8  * uiScaleFactor);
-        const ACT_PH   = Math.round(8  * uiScaleFactor);
+        const ACT_PH   = actionGrid.compressed ? 5 : Math.round(8 * uiScaleFactor);
         const ACT_GAP  = Math.round(5  * uiScaleFactor);
         const ACT_BR   = Math.round(12 * uiScaleFactor);
         const ROW_GAP  = Math.round(6  * uiScaleFactor);
@@ -14409,7 +14532,7 @@ function HomeScreenContent() {
                 <Text
                   numberOfLines={1}
                   adjustsFontSizeToFit
-                  minimumFontScale={0.65}
+                  minimumFontScale={actionGrid.compressed ? 0.92 : 0.65}
                   style={{
                     color: `${a.color}CC`,
                     fontSize: ACT_FS,
@@ -14443,7 +14566,7 @@ function HomeScreenContent() {
         // Panel del lado del PULGAR — mismo lado que el GO para acceso directo.
         // Diestro → derecha (right), zurdo → izquierda (left).
         // Se usa el inset del mismo lado donde se ancla el panel.
-        const PANEL_EDGE = Math.max(18, (handedness === "right" ? insets.right : insets.left) + 18);
+        const PANEL_EDGE = Math.max(18, (handedness === "right" ? landingPanelInsets.right : landingPanelInsets.left) + 18);
         const panelSideStyle = handedness === "right"
           ? { right: PANEL_EDGE }
           : { left:  PANEL_EDGE };
@@ -14451,15 +14574,21 @@ function HomeScreenContent() {
         // Fila 1: [WA?] + Cambiar + Aquí  |  Fila 2: [Llamar?] + Tarde + Ir
         const row1Btns = ([aWA, aChange, aHere] as (ActBtnDef | undefined)[]).filter((b): b is ActBtnDef => !!b);
         const row2Btns = ([aCall, aLate, aGo]   as (ActBtnDef | undefined)[]).filter((b): b is ActBtnDef => !!b);
-        const numGridCols = Math.max(row1Btns.length, row2Btns.length);
+        const actionRows = landingStackTransport
+          ? [...row1Btns, ...row2Btns].reduce<ActBtnDef[][]>((rows, button, index) => {
+              if (index % 2 === 0) rows.push([]); rows[rows.length - 1].push(button); return rows;
+            }, []) : [row1Btns, row2Btns];
+        const numGridCols = Math.max(...actionRows.map(row => row.length));
         const PANEL_W = numGridCols * BTN_W + (numGridCols - 1) * ROW_GAP;
         // The information card can use the unused space toward the opposite
         // side without changing the action grid's width or anchor.
         const INFO_W = Math.min(
-          screen.width - insets.left - insets.right - Math.round(24 * uiScaleFactor),
+          landingPanelWidth - landingPanelInsets.left - landingPanelInsets.right - Math.round(24 * uiScaleFactor),
+          landingPanelWidth - Math.max(18, (handedness === "right" ? landingPanelInsets.right : landingPanelInsets.left) + 18) - 4,
           PANEL_W + Math.round(96 * uiScaleFactor),
         );
-        const PANEL_ACTION_GAP = Math.round(12 * uiScaleFactor);
+        const PANEL_ACTION_GAP = Math.round(12 * uiScaleFactor)
+          + (landingFrame.virtual && !landingStackTransport ? Math.max(0, transportPanelH - 2 * BTN_H - ROW_GAP) : 0);
         // PROXIMA_V_EXTRA is frozen for all sizes.
         // User confirmed: "PANEL SUPERIOR → congelarlo, está perfecto".
         const PROXIMA_V_EXTRA = 0;
@@ -14487,7 +14616,7 @@ function HomeScreenContent() {
               position: "absolute",
               ...panelSideStyle,
               width: PANEL_W,
-              bottom: bottomReserved + orbitWrapSize - 2 + PROXIMA_V_EXTRA,
+              bottom: contentBottom(bottomReserved + orbitWrapSize - 2 + PROXIMA_V_EXTRA),
               zIndex: 5,
             }}
           >
@@ -14814,13 +14943,10 @@ function HomeScreenContent() {
                   Ubicación (azul):       Aquí | Ir        — siempre presentes
                   Si no hay comm → 2 cols; si hay alguno → 3 cols. Sin botones
                   disabled ni translúcidos: ausencia preferida sobre apagado. */}
-              <View style={{ gap: ROW_GAP }}>
-                <View style={{ flexDirection: "row", gap: ROW_GAP }}>
-                  {row1Btns.map((btn) => renderActBtn(btn))}
-                </View>
-                <View style={{ flexDirection: "row", gap: ROW_GAP }}>
-                  {row2Btns.map((btn) => renderActBtn(btn))}
-                </View>
+              <View style={{ gap: ROW_GAP, paddingBottom: landingFrame.virtual && landingStackTransport ? transportPanelH + 8 : 0 }}>
+                {actionRows.map((row, index) => <View key={index} style={{ flexDirection: "row", gap: ROW_GAP }}>
+                  {row.map((btn) => renderActBtn(btn))}
+                </View>)}
               </View>
             </View>
 
@@ -14828,6 +14954,343 @@ function HomeScreenContent() {
           </View>
         );
       })()}
+
+      {/* ── TRANSPORTE — tira compacta lateral izquierda ─────────────────
+          Solo visible cuando el panel está abierto (!nextAptMinimized). */}
+      {nextAppointment && !anyOverlayOpen && !isActivelyCreating && !nextAptMinimized && !rutasMode && kbHeight === 0 && (
+        <View
+          onLayout={(e) => {
+            setTransportPanelH(e.nativeEvent.layout.height);
+            if (!landingFrame.virtual) measureHumanityObstacle("transport", e.nativeEvent.layout);
+          }}
+          style={(() => {
+            // 4 buttons (paddingVertical:6 × 2 + ~22 content) + 3 gaps of 5
+            const stripH = transportPanelH || 4 * 34 + 3 * 5;
+
+            // ── TAXI PANEL — full freedom at bottom ──────────────────────────
+            // The old landing bar / bottom safe zone NO LONGER EXISTS.
+            // The panel can now sit all the way down at the phone's native
+            // safe-area bottom (paddingBottom) — only the physical home
+            // indicator / gesture bar is the floor.
+            //
+            // Horizontal guard: settings (157.5°) and MAS (202.5°) satellites
+            // still demand clearance on the right side.
+            const _SAT_COS = Math.cos(157.5 * Math.PI / 180); // ≈ -0.9239
+            const _satLeft =
+              screen.width - dockRight - systemBoundingRadius
+              + _SAT_COS * microR - microSz / 2;
+
+            // Panel left anchor.
+            // Compacto: centrar el panel en el punto medio entre el borde
+            // izquierdo de la pantalla y el borde izquierdo del satélite
+            // HERRAMIENTAS (≈129 px en iPhone 14), para que quede el mismo
+            // espacio libre a ambos lados del módulo de transporte.
+            const _compactoW = Math.round(screen.width * 0.24);
+            const tLeft = landingFrame.virtual ? 4 : uiScale === "compacto"
+              ? Math.max(insets.left, Math.round(_satLeft / 2 - _compactoW / 2))
+              : Math.max(4, insets.left + 4);
+            const naturalMaxW = uiScale === "grande"
+              ? Math.round(screen.width * 0.38)
+              : uiScale === "estandar"
+              ? Math.round(screen.width * 0.29)
+              : Math.round(screen.width * 0.24);
+            // Estandar: reduced clearance (3 px) to use all available space.
+            const _satGap = uiScale === "grande" ? 0 : uiScale === "estandar" ? 3 : 7;
+            const constrainedW = Math.floor(_satLeft - tLeft - _satGap);
+            // Grande: panel vive ~157 px por encima del satélite → sin solapamiento visual.
+            // Se fuerza un ancho mínimo de 86 px (mismo que estandar) para que Uber / T.pub
+            // sean legibles y el bloque tenga la misma respiración visual que el tamaño mediano.
+            const taxiW = landingFrame.virtual ? 70 : uiScale === "grande"
+              ? Math.min(naturalMaxW, Math.max(86, constrainedW))
+              : Math.min(naturalMaxW, Math.max(70, constrainedW));
+
+            // NEW bottom target: the panel's bottom edge sits at
+            //   paddingBottom + 4  (native safe-area + 4 px air).
+            // We compute the raise needed to hit that exact Y.
+            //
+            //   panelTop = screen.height - (paddingBottom + 4) - stripH
+            //   currentCentreTop = screen.height - bottomReserved - orbitWrapSize/2 - stripH/2 + 8
+            //   taxiRaise = currentCentreTop - panelTop
+            //             = bottomReserved + orbitWrapSize/2 - stripH/2 + 8 - (paddingBottom + 4 + stripH)
+            //             = bottomReserved - paddingBottom + orbitWrapSize/2 - 1.5*stripH + 4
+            //
+            // For mediano (orbitWrapSize ≈ 312, stripH ≈ 151, bottomReserved ≈ paddingBottom + 16):
+            //   taxiRaise ≈ 16 + 156 - 226 + 4 ≈ -50  (negative = panel drops)
+            //
+            // We also keep the old satellite-overlap guard — if the panel would
+            // collide with settings/MAS, we raise it just enough to clear them.
+            const _dock = insets.bottom + SYSTEM_MARGIN_Y;
+            const _SAT_SIN = Math.sin(157.5 * Math.PI / 180); // ≈  0.3827
+            const _satTopFromBottom =
+              _dock + orbitWrapSize / 2 - _SAT_SIN * microR + microSz / 2;
+
+            // Per-size bottom target (native safe-area + tiny air):
+            //   compacto: 2 px above native edge (tight)
+            //   mediano:  4 px above native edge
+            //   grande:   raised to align with top action panel (design choice)
+            const _nativeAir =
+              uiScale === "compacto" ? 2
+              : uiScale === "grande"  ? 100 // grande override below
+              : 4;
+
+            // Target top of panel from screen top:
+            const _targetTop = screen.height - (paddingBottom + _nativeAir) - stripH;
+            // Current top formula (centred around GO nucleus, then shifted by raise):
+            const _centreTop = screen.height - bottomReserved - orbitWrapSize / 2 - stripH / 2 + 8;
+            const _raiseFromBottom = Math.round(_centreTop - _targetTop);
+
+            const defaultRaise =
+              uiScale === "grande"  ? 100
+              : _raiseFromBottom;
+
+            // panelTopFromBottom at a given raise:
+            //   = bottomReserved + orbitWrapSize/2 - stripH/2 - 8 + raise
+            const panelTopBase =
+              bottomReserved + orbitWrapSize / 2 - stripH / 2 - 8;
+
+            // Satellite overlap guard: if panel right edge enters the satellite
+            // zone, raise it so panel top clears satellite top by 8 px.
+            const panelRight = tLeft + taxiW;
+            const hasHorizOverlap = panelRight > _satLeft - 6;
+            const requiredRaise = hasHorizOverlap
+              ? Math.ceil(_satTopFromBottom + 8 - panelTopBase)
+              : defaultRaise;
+            // Estandar: alinear el TOP del panel con el TOP del botón "..."
+            // El botón "..." (MAS) está a 202.5° → sin(202.5°) ≈ -0.3827
+            // (negativo = por ENCIMA del centro de la órbita en pantalla).
+            //   my_MAS = cy + sin(202.5°)*microR - microSz/2   (dentro del container)
+            //   masTopFromBottom = _dock + orbitWrapSize/2 - sin(202.5°)*microR + microSz/2
+            //   taxiRaise = masTopFromBottom - bottomReserved - orbitWrapSize/2 - stripH/2 + 8
+            const _MAS_SIN = Math.sin(202.5 * Math.PI / 180); // ≈ -0.3827
+            const _masTopFromBottom =
+              _dock + orbitWrapSize / 2 - _MAS_SIN * microR + microSz / 2;
+            const _satAlignRaise = Math.round(
+              _masTopFromBottom - bottomReserved - orbitWrapSize / 2 - stripH / 2 + 8,
+            );
+            // Grande: alinear el borde inferior del panel transporte con el borde
+            // inferior de los botones de acción del panel PRÓXIMA (WhatsApp/Llamar).
+            // PROXIMA bottom = bottomReserved + orbitWrapSize - 2
+            // Transport bottom = bottomReserved + orbitWrapSize/2 - stripH/2 - 8 + taxiRaise
+            // Igualando: taxiRaise = orbitWrapSize/2 + stripH/2 + 6
+            const _grandeTaxiRaise = Math.round(orbitWrapSize / 2 + stripH / 2 + 3);
+            const taxiRaise = uiScale === "grande"   ? _grandeTaxiRaise
+              : uiScale === "estandar" ? _satAlignRaise - 29
+              : defaultRaise;
+
+            const top =
+              screen.height - bottomReserved - orbitWrapSize / 2 - stripH / 2 + 8 - taxiRaise;
+
+            return {
+              position: "absolute" as const,
+              ...(handedness === "right" ? { left: tLeft } : { right: tLeft }),
+              ...(landingFrame.virtual ? { bottom: 0 } : { top }),
+              zIndex: 7,
+              maxWidth: landingFrame.virtual && landingStackTransport ? undefined : taxiW,
+              width: landingFrame.virtual && landingStackTransport ? landingPanelWidth - 36 : undefined,
+              flexDirection: landingFrame.virtual && landingStackTransport ? "row" as const : "column" as const,
+              flexWrap: "wrap" as const,
+              gap: 5,
+            };
+          })()}
+        >
+          {(
+            [
+              { label: "Taxi",  icon: "truck"      as keyof typeof Feather.glyphMap, accent: "#fbbf24", toast: t('toast_taxi_looking')    },
+              { label: "Uber",  icon: "navigation" as keyof typeof Feather.glyphMap, accent: "#e2e8f0", url:   "https://m.uber.com",  raise: 1 },
+              { label: "Bolt",  icon: "zap"        as keyof typeof Feather.glyphMap, accent: "#4ade80", url:   "https://bolt.eu"    },
+              { label: "T.pub", icon: "map"        as keyof typeof Feather.glyphMap, accent: "#60a5fa", toast: t('toast_routes_showing') },
+            ] as { label: string; icon: keyof typeof Feather.glyphMap; accent: string; url?: string; toast?: string; raise?: number }[]
+          ).map((op) => (
+            <TouchableOpacity
+              key={op.label}
+              activeOpacity={0.65}
+              onPress={() => {
+                if (op.url) {
+                  Linking.openURL(op.url).catch(() => showToast(t('toast_link_error'), "error"));
+                } else if (op.toast) {
+                  showToast(op.toast);
+                }
+              }}
+              style={{
+                width: landingFrame.virtual && landingStackTransport ? (landingPanelWidth - 41) / 2 : undefined,
+                marginTop: op.raise ?? 0,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: `${op.accent}38`,
+                overflow: "hidden",
+                shadowColor: op.accent,
+                shadowOpacity: 0.18,
+                shadowRadius: 7,
+                shadowOffset: { width: 0, height: 1 },
+                elevation: 3,
+              }}
+            >
+              <LinearGradient
+                colors={["rgba(22,26,42,0.98)", "rgba(6,8,16,0.99)"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                  paddingHorizontal: 8,
+                  paddingVertical: 6,
+                  minHeight: landingFrame.virtual ? 44 : undefined,
+                  justifyContent: "center",
+                }}
+              >
+                <Feather name={op.icon} size={11} color={`${op.accent}CC`} />
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: "rgba(203,213,225,0.82)",
+                    fontSize: 11,
+                    fontWeight: "600",
+                    flexShrink: 1,
+                  }}
+                >
+                  {op.label}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* ── LANDING HINTS ─────────────────────────────────────────────────────
+          REGLA: los hints viven DENTRO del tipo de usuario. Nunca se mezclan.
+          • PARTICULAR → 3 cols inteligentes (desaparecen cuando el usuario ya sabe)
+          • EMPRESA no configurada → "Configura tu empresa"
+          • EMPRESA configurada → "Añade servicios" / "Gestiona reservas"
+          • Cualquier panel expandido → workGuideHideAnim→0 (fade total)   */}
+      <Animated.View
+        onLayout={(e) => setLandingHelpH(e.nativeEvent.layout.height)}
+        pointerEvents={anyOperationalPanelOpen ? "none" : "box-none"}
+        style={{
+          position: "absolute",
+          bottom: contentBottom(landingHelpBottom),
+          left: 4,
+          right: 12,
+          zIndex: 2,
+          opacity: workGuideHideAnim,
+        }}
+      >
+        {showPersonalLandingHelp && orbitSecondLevel === null ? (
+          // ── PARTICULAR ── Hasta 3 columnas inteligentes: desaparecen cuando el tutorial está completado
+          (isUserV1Surface ? !tutReservaRealizada : (!tutGoRealizado || !tutReservaRealizada || !tutMarketplaceRealizado)) ? (
+            <View style={{ flexDirection: "row", gap: 4, alignItems: "flex-start" }}>
+              {/* ── COL 1 — Ejecuta acción ── visible hasta que el usuario haga 1 acción GO */}
+              {!isUserV1Surface && !tutGoRealizado && (
+                <View style={{ flex: 31 }}>
+                  <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "1 · Execute action" : "1 · Ejecuta acción"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 10.5, fontWeight: "700", marginTop: 3, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "Tap an orbit" : "Pulsa una órbita"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.52)", fontSize: 10, fontWeight: "600", marginTop: 2, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "→ Immediate action" : "→ Acción inmediata"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 9.5, fontWeight: "700", marginTop: 5, letterSpacing: 0.2, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "Examples:" : "Ejemplos:"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 2, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "• Food → restaurant" : "• Comida → restaurante"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "• Travel → organise" : "• Viaje → organizar"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "• Coffee → café" : "• Café → cafetería"}
+                  </Text>
+                </View>
+              )}
+              {/* Divider 1: solo si col 1 visible y hay algo más */}
+              {!isUserV1Surface && !tutGoRealizado && (!tutReservaRealizada || !tutMarketplaceRealizado) && (
+                <View style={{ width: 1, backgroundColor: "rgba(255,255,255,0.18)", alignSelf: "stretch", marginTop: 2 }} />
+              )}
+              {/* ── COL 2 — Reserva ── visible hasta que el usuario confirme 1 reserva */}
+              {!tutReservaRealizada && (
+                <View style={{ flex: isUserV1Surface ? 1 : 31 }}>
+                  <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? `${isUserV1Surface ? "1" : "2"} · Reservation` : `${isUserV1Surface ? "1" : "2"} · Reserva`}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 10.5, fontWeight: "700", marginTop: 3, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "Tap Bookings" : "Pulsa Reservas"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.52)", fontSize: 10, fontWeight: "600", marginTop: 2, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "→ Day" : "→ Día"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.52)", fontSize: 10, fontWeight: "600", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "→ Time" : "→ Hora"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.52)", fontSize: 10, fontWeight: "600", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "→ Confirm" : "→ Confirmar"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.32)", fontSize: 9.5, fontWeight: "500", marginTop: 5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "You can also choose a professional." : "También puedes elegir profesional."}
+                  </Text>
+                  {isUserV1Surface && (
+                    <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 9.5, fontWeight: "600", marginTop: 5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                      {lang === 'en' ? "Tap GO to open the reservation assistant." : "Pulsa GO para abrir el asistente de reservas."}
+                    </Text>
+                  )}
+                </View>
+              )}
+              {/* Divider 2: solo si col 2 y col 3 ambas visibles */}
+              {!isUserV1Surface && !tutReservaRealizada && !tutMarketplaceRealizado && (
+                <View style={{ width: 1, backgroundColor: "rgba(255,255,255,0.18)", alignSelf: "stretch", marginTop: 2 }} />
+              )}
+              {/* ── COL 3 — Marketplace ── visible hasta que el usuario abra el Marketplace */}
+              {!isUserV1Surface && !tutMarketplaceRealizado && (
+                <View style={{ flex: 38 }}>
+                  <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "3 · Buy" : "3 · Comprar"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 10.5, fontWeight: "700", marginTop: 3, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "Long-press an orbit" : "Mantén pulsada una órbita"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.52)", fontSize: 10, fontWeight: "600", marginTop: 2, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "→ Marketplace opens" : "→ Se abre Comprar"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 9.5, fontWeight: "700", marginTop: 5, letterSpacing: 0.2, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "From there:" : "Desde ahí:"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 2, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "• Buy" : "• Comprar"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "• Book" : "• Reservar"}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+                    {lang === 'en' ? "• Taxi · Services · Offers" : "• Taxi · Servicios · Ofertas"}
+                  </Text>
+                </View>
+              )}
+            </View>
+          ) : null
+        ) : showBusinessLandingHelp && !empresaConfigurada ? (
+          // ── EMPRESA no configurada ── hint i18n
+          <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 12, fontWeight: "700", letterSpacing: 1.0, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+            {t('biz_configure_hint')}
+          </Text>
+        ) : showBusinessLandingHelp && empresaConfigurada && !workGuideDismissed ? (
+          // ── EMPRESA configurada ── hints de gestión empresarial i18n
+          <View style={{ gap: 6 }}>
+            <Text style={{ color: "rgba(255,255,255,0.92)", fontSize: 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+              {goView.isBusinessPreview && ownerDemo.config?.businessName ? ownerDemo.config.businessName + ' · ' : ''}{t('biz_manage_title')}
+            </Text>
+            <Text style={{ color: "rgba(255,255,255,0.50)", fontSize: 10, fontWeight: "600", letterSpacing: 0.2, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+              {t('biz_add_services')}
+            </Text>
+            <Text style={{ color: "rgba(255,255,255,0.50)", fontSize: 10, fontWeight: "600", letterSpacing: 0.2, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
+              {t('biz_stats_hours')}
+            </Text>
+          </View>
+        ) : null}
+      </Animated.View>
+
+      </LandingContentViewport>
 
       {/* ── BOTÓN QR PERMANENTE ─────────────────────────────────────────────
           Función estructural: siempre visible en Landing GO.
@@ -14889,10 +15352,17 @@ function HomeScreenContent() {
             : baseBottom;
         }
 
-        const qrPositionStyle = { bottom: btnBottom };
+        if (landingFrame.virtual) {
+          resolvedSide = { left: handedness === "right"
+            ? landingFrame.left + landingFrame.width - QR_EDGE - BTN_SZ : landingFrame.left + QR_EDGE };
+          btnBottom = screen.height - landingSafeTop - BTN_SZ;
+        }
+        const qrPositionStyle = { bottom: clampLandingControlBottom(btnBottom,
+          screen.height, BTN_SZ, landingSafeTop, insets.bottom) };
         return (
           <TouchableOpacity
             key="qr-permanent-btn"
+            hitSlop={Math.max(6, (44 - BTN_SZ) / 2)}
             onPress={() => { Haptics.selectionAsync().catch(() => {}); setQrOpen(true); }}
             activeOpacity={0.8}
             style={{
@@ -15381,200 +15851,6 @@ function HomeScreenContent() {
           future, flip `BAR_HANDEDNESS` to "left" — the wrapper switches
           to flex-start and you can also reverse the row by setting
           flexDirection to "row-reverse". */}
-
-      {/* ── TRANSPORTE — tira compacta lateral izquierda ─────────────────
-          Solo visible cuando el panel está abierto (!nextAptMinimized). */}
-      {nextAppointment && !anyOverlayOpen && !isActivelyCreating && !nextAptMinimized && !rutasMode && kbHeight === 0 && (
-        <View
-          onLayout={(e) => measureHumanityObstacle("transport", e.nativeEvent.layout)}
-          style={(() => {
-            // 4 buttons (paddingVertical:6 × 2 + ~22 content) + 3 gaps of 5
-            const stripH = 4 * 34 + 3 * 5;
-
-            // ── TAXI PANEL — full freedom at bottom ──────────────────────────
-            // The old landing bar / bottom safe zone NO LONGER EXISTS.
-            // The panel can now sit all the way down at the phone's native
-            // safe-area bottom (paddingBottom) — only the physical home
-            // indicator / gesture bar is the floor.
-            //
-            // Horizontal guard: settings (157.5°) and MAS (202.5°) satellites
-            // still demand clearance on the right side.
-            const _SAT_COS = Math.cos(157.5 * Math.PI / 180); // ≈ -0.9239
-            const _satLeft =
-              screen.width - dockRight - systemBoundingRadius
-              + _SAT_COS * microR - microSz / 2;
-
-            // Panel left anchor.
-            // Compacto: centrar el panel en el punto medio entre el borde
-            // izquierdo de la pantalla y el borde izquierdo del satélite
-            // HERRAMIENTAS (≈129 px en iPhone 14), para que quede el mismo
-            // espacio libre a ambos lados del módulo de transporte.
-            const _compactoW = Math.round(screen.width * 0.24);
-            const tLeft = uiScale === "compacto"
-              ? Math.max(insets.left, Math.round(_satLeft / 2 - _compactoW / 2))
-              : Math.max(4, insets.left + 4);
-            const naturalMaxW = uiScale === "grande"
-              ? Math.round(screen.width * 0.38)
-              : uiScale === "estandar"
-              ? Math.round(screen.width * 0.29)
-              : Math.round(screen.width * 0.24);
-            // Estandar: reduced clearance (3 px) to use all available space.
-            const _satGap = uiScale === "grande" ? 0 : uiScale === "estandar" ? 3 : 7;
-            const constrainedW = Math.floor(_satLeft - tLeft - _satGap);
-            // Grande: panel vive ~157 px por encima del satélite → sin solapamiento visual.
-            // Se fuerza un ancho mínimo de 86 px (mismo que estandar) para que Uber / T.pub
-            // sean legibles y el bloque tenga la misma respiración visual que el tamaño mediano.
-            const taxiW = uiScale === "grande"
-              ? Math.min(naturalMaxW, Math.max(86, constrainedW))
-              : Math.min(naturalMaxW, Math.max(32, constrainedW));
-
-            // NEW bottom target: the panel's bottom edge sits at
-            //   paddingBottom + 4  (native safe-area + 4 px air).
-            // We compute the raise needed to hit that exact Y.
-            //
-            //   panelTop = screen.height - (paddingBottom + 4) - stripH
-            //   currentCentreTop = screen.height - bottomReserved - orbitWrapSize/2 - stripH/2 + 8
-            //   taxiRaise = currentCentreTop - panelTop
-            //             = bottomReserved + orbitWrapSize/2 - stripH/2 + 8 - (paddingBottom + 4 + stripH)
-            //             = bottomReserved - paddingBottom + orbitWrapSize/2 - 1.5*stripH + 4
-            //
-            // For mediano (orbitWrapSize ≈ 312, stripH ≈ 151, bottomReserved ≈ paddingBottom + 16):
-            //   taxiRaise ≈ 16 + 156 - 226 + 4 ≈ -50  (negative = panel drops)
-            //
-            // We also keep the old satellite-overlap guard — if the panel would
-            // collide with settings/MAS, we raise it just enough to clear them.
-            const _dock = insets.bottom + SYSTEM_MARGIN_Y;
-            const _SAT_SIN = Math.sin(157.5 * Math.PI / 180); // ≈  0.3827
-            const _satTopFromBottom =
-              _dock + orbitWrapSize / 2 - _SAT_SIN * microR + microSz / 2;
-
-            // Per-size bottom target (native safe-area + tiny air):
-            //   compacto: 2 px above native edge (tight)
-            //   mediano:  4 px above native edge
-            //   grande:   raised to align with top action panel (design choice)
-            const _nativeAir =
-              uiScale === "compacto" ? 2
-              : uiScale === "grande"  ? 100 // grande override below
-              : 4;
-
-            // Target top of panel from screen top:
-            const _targetTop = screen.height - (paddingBottom + _nativeAir) - stripH;
-            // Current top formula (centred around GO nucleus, then shifted by raise):
-            const _centreTop = screen.height - bottomReserved - orbitWrapSize / 2 - stripH / 2 + 8;
-            const _raiseFromBottom = Math.round(_centreTop - _targetTop);
-
-            const defaultRaise =
-              uiScale === "grande"  ? 100
-              : _raiseFromBottom;
-
-            // panelTopFromBottom at a given raise:
-            //   = bottomReserved + orbitWrapSize/2 - stripH/2 - 8 + raise
-            const panelTopBase =
-              bottomReserved + orbitWrapSize / 2 - stripH / 2 - 8;
-
-            // Satellite overlap guard: if panel right edge enters the satellite
-            // zone, raise it so panel top clears satellite top by 8 px.
-            const panelRight = tLeft + taxiW;
-            const hasHorizOverlap = panelRight > _satLeft - 6;
-            const requiredRaise = hasHorizOverlap
-              ? Math.ceil(_satTopFromBottom + 8 - panelTopBase)
-              : defaultRaise;
-            // Estandar: alinear el TOP del panel con el TOP del botón "..."
-            // El botón "..." (MAS) está a 202.5° → sin(202.5°) ≈ -0.3827
-            // (negativo = por ENCIMA del centro de la órbita en pantalla).
-            //   my_MAS = cy + sin(202.5°)*microR - microSz/2   (dentro del container)
-            //   masTopFromBottom = _dock + orbitWrapSize/2 - sin(202.5°)*microR + microSz/2
-            //   taxiRaise = masTopFromBottom - bottomReserved - orbitWrapSize/2 - stripH/2 + 8
-            const _MAS_SIN = Math.sin(202.5 * Math.PI / 180); // ≈ -0.3827
-            const _masTopFromBottom =
-              _dock + orbitWrapSize / 2 - _MAS_SIN * microR + microSz / 2;
-            const _satAlignRaise = Math.round(
-              _masTopFromBottom - bottomReserved - orbitWrapSize / 2 - stripH / 2 + 8,
-            );
-            // Grande: alinear el borde inferior del panel transporte con el borde
-            // inferior de los botones de acción del panel PRÓXIMA (WhatsApp/Llamar).
-            // PROXIMA bottom = bottomReserved + orbitWrapSize - 2
-            // Transport bottom = bottomReserved + orbitWrapSize/2 - stripH/2 - 8 + taxiRaise
-            // Igualando: taxiRaise = orbitWrapSize/2 + stripH/2 + 6
-            const _grandeTaxiRaise = Math.round(orbitWrapSize / 2 + stripH / 2 + 3);
-            const taxiRaise = uiScale === "grande"   ? _grandeTaxiRaise
-              : uiScale === "estandar" ? _satAlignRaise - 29
-              : defaultRaise;
-
-            const top =
-              screen.height - bottomReserved - orbitWrapSize / 2 - stripH / 2 + 8 - taxiRaise;
-
-            return {
-              position: "absolute" as const,
-              left: tLeft,
-              top,
-              zIndex: 7,
-              maxWidth: taxiW,
-              flexDirection: "column" as const,
-              gap: 5,
-            };
-          })()}
-        >
-          {(
-            [
-              { label: "Taxi",  icon: "truck"      as keyof typeof Feather.glyphMap, accent: "#fbbf24", toast: t('toast_taxi_looking')    },
-              { label: "Uber",  icon: "navigation" as keyof typeof Feather.glyphMap, accent: "#e2e8f0", url:   "https://m.uber.com",  raise: 1 },
-              { label: "Bolt",  icon: "zap"        as keyof typeof Feather.glyphMap, accent: "#4ade80", url:   "https://bolt.eu"    },
-              { label: "T.pub", icon: "map"        as keyof typeof Feather.glyphMap, accent: "#60a5fa", toast: t('toast_routes_showing') },
-            ] as { label: string; icon: keyof typeof Feather.glyphMap; accent: string; url?: string; toast?: string; raise?: number }[]
-          ).map((op) => (
-            <TouchableOpacity
-              key={op.label}
-              activeOpacity={0.65}
-              onPress={() => {
-                if (op.url) {
-                  Linking.openURL(op.url).catch(() => showToast(t('toast_link_error'), "error"));
-                } else if (op.toast) {
-                  showToast(op.toast);
-                }
-              }}
-              style={{
-                marginTop: op.raise ?? 0,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor: `${op.accent}38`,
-                overflow: "hidden",
-                shadowColor: op.accent,
-                shadowOpacity: 0.18,
-                shadowRadius: 7,
-                shadowOffset: { width: 0, height: 1 },
-                elevation: 3,
-              }}
-            >
-              <LinearGradient
-                colors={["rgba(22,26,42,0.98)", "rgba(6,8,16,0.99)"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 5,
-                  paddingHorizontal: 8,
-                  paddingVertical: 6,
-                }}
-              >
-                <Feather name={op.icon} size={11} color={`${op.accent}CC`} />
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    color: "rgba(203,213,225,0.82)",
-                    fontSize: 11,
-                    fontWeight: "600",
-                    flexShrink: 1,
-                  }}
-                >
-                  {op.label}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
 
       {/* Toast de feedback al invertir orden de listado */}
       {sortFeedbackVisible && (
@@ -18000,6 +18276,8 @@ function HomeScreenContent() {
                       >
                         <TouchableOpacity
                           onPress={handlePress}
+                          accessibilityRole={goView.view === "USER" ? "button" : undefined}
+                          accessibilityLabel={goView.view === "USER" ? (displayLabel ?? s.key) : undefined}
                           onLongPress={handleLongPress}
                           delayLongPress={isContactBtn || isCalendarBtn || isMapBtn ? 500 : 900}
                           onPressIn={
@@ -18046,6 +18324,7 @@ function HomeScreenContent() {
                             } : undefined
                           }
                           activeOpacity={isDimmed ? 1 : 0.70}
+                          hitSlop={Math.max(0, (44 - microSz) / 2)}
                           style={{
                             width: microSz,
                             height: microSz,
@@ -18077,7 +18356,7 @@ function HomeScreenContent() {
                                 paddingHorizontal: 3,
                               }}
                             >
-                              <Text
+                              <UserLandingInk minimal={userLandingMinimal}><Text
                                 numberOfLines={1}
                                 adjustsFontSizeToFit
                                 minimumFontScale={0.6}
@@ -18090,7 +18369,7 @@ function HomeScreenContent() {
                                 }}
                               >
                                 {displayLabel ?? ""}
-                              </Text>
+                              </Text></UserLandingInk>
                             </LinearGradient>
                           ) : isCalendarBtn ? (
                             <LinearGradient
@@ -18107,7 +18386,7 @@ function HomeScreenContent() {
                                 paddingHorizontal: 3,
                               }}
                             >
-                              <Text
+                              <UserLandingInk minimal={userLandingMinimal}><Text
                                 numberOfLines={1}
                                 adjustsFontSizeToFit
                                 minimumFontScale={0.6}
@@ -18120,13 +18399,13 @@ function HomeScreenContent() {
                                 }}
                               >
                                 {(displayLabel ?? "").toUpperCase()}
-                              </Text>
-                              <Text style={{ fontSize: _labelFs + 1, lineHeight: _labelFs + 2, textAlign: "center" }}>
+                              </Text></UserLandingInk>
+                              <UserLandingInk minimal={userLandingMinimal}><Text style={{ fontSize: _labelFs + 1, lineHeight: _labelFs + 2, textAlign: "center" }}>
                                 {"📅"}
-                              </Text>
+                              </Text></UserLandingInk>
                             </LinearGradient>
                           ) : (
-                            <Text
+                            <UserLandingInk minimal={userLandingMinimal}><Text
                               numberOfLines={1}
                               adjustsFontSizeToFit
                               minimumFontScale={0.6}
@@ -18140,7 +18419,7 @@ function HomeScreenContent() {
                               }}
                             >
                               {displayLabel ?? ""}
-                            </Text>
+                            </Text></UserLandingInk>
                           )}
                         </TouchableOpacity>
                       </Animated.View>
@@ -18372,153 +18651,6 @@ function HomeScreenContent() {
           )}
         </Animated.View>
       )}
-
-      {/* ── LANDING HINTS ─────────────────────────────────────────────────────
-          REGLA: los hints viven DENTRO del tipo de usuario. Nunca se mezclan.
-          • PARTICULAR → 3 cols inteligentes (desaparecen cuando el usuario ya sabe)
-          • EMPRESA no configurada → "Configura tu empresa"
-          • EMPRESA configurada → "Añade servicios" / "Gestiona reservas"
-          • Cualquier panel expandido → workGuideHideAnim→0 (fade total)   */}
-      <Animated.View
-        pointerEvents={anyOperationalPanelOpen ? "none" : "box-none"}
-        style={{
-          position: "absolute",
-          bottom: insets.bottom + SYSTEM_MARGIN_Y + orbitWrapSize + 20 + (() => {
-            // Lift hints clear of any panels stacked above the orbital zone.
-            // Próxima Reserva contribution:
-            const _proH = (!!nextAppointment && !isActivelyCreating && !anyOverlayOpen)
-              ? (!nextAptMinimized && nextAptPanelH > 0
-                  ? nextAptPanelH + 12          // expanded panel
-                  : nextAptMinimized ? 54 : 0)  // pill (46) + gap
-              : 0;
-            // Pendientes contribution (stacks above Próxima):
-            const _penH = (allPendientes.length > 0 && !rutasMode && !anyOverlayOpen)
-              ? (cambiosOpen && pendingPanelH > 0
-                  ? pendingPanelH + 12           // open panel
-                  : 54)                          // pill (46) + gap
-              : 0;
-            return _proH + _penH;
-          })(),
-          left: 4,
-          right: 12,
-          zIndex: 2,
-          opacity: workGuideHideAnim,
-        }}
-      >
-        {showPersonalLandingHelp && orbitSecondLevel === null ? (
-          // ── PARTICULAR ── Hasta 3 columnas inteligentes: desaparecen cuando el tutorial está completado
-          (isUserV1Surface ? !tutReservaRealizada : (!tutGoRealizado || !tutReservaRealizada || !tutMarketplaceRealizado)) ? (
-            <View style={{ flexDirection: "row", gap: 4, alignItems: "flex-start" }}>
-              {/* ── COL 1 — Ejecuta acción ── visible hasta que el usuario haga 1 acción GO */}
-              {!isUserV1Surface && !tutGoRealizado && (
-                <View style={{ flex: 31 }}>
-                  <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "1 · Execute action" : "1 · Ejecuta acción"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 10.5, fontWeight: "700", marginTop: 3, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "Tap an orbit" : "Pulsa una órbita"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.52)", fontSize: 10, fontWeight: "600", marginTop: 2, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "→ Immediate action" : "→ Acción inmediata"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 9.5, fontWeight: "700", marginTop: 5, letterSpacing: 0.2, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "Examples:" : "Ejemplos:"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 2, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "• Food → restaurant" : "• Comida → restaurante"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "• Travel → organise" : "• Viaje → organizar"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "• Coffee → café" : "• Café → cafetería"}
-                  </Text>
-                </View>
-              )}
-              {/* Divider 1: solo si col 1 visible y hay algo más */}
-              {!isUserV1Surface && !tutGoRealizado && (!tutReservaRealizada || !tutMarketplaceRealizado) && (
-                <View style={{ width: 1, backgroundColor: "rgba(255,255,255,0.18)", alignSelf: "stretch", marginTop: 2 }} />
-              )}
-              {/* ── COL 2 — Reserva ── visible hasta que el usuario confirme 1 reserva */}
-              {!tutReservaRealizada && (
-                <View style={{ flex: isUserV1Surface ? 1 : 31 }}>
-                  <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? `${isUserV1Surface ? "1" : "2"} · Reservation` : `${isUserV1Surface ? "1" : "2"} · Reserva`}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 10.5, fontWeight: "700", marginTop: 3, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "Tap Bookings" : "Pulsa Reservas"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.52)", fontSize: 10, fontWeight: "600", marginTop: 2, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "→ Day" : "→ Día"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.52)", fontSize: 10, fontWeight: "600", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "→ Time" : "→ Hora"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.52)", fontSize: 10, fontWeight: "600", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "→ Confirm" : "→ Confirmar"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.32)", fontSize: 9.5, fontWeight: "500", marginTop: 5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "You can also choose a professional." : "También puedes elegir profesional."}
-                  </Text>
-                  {isUserV1Surface && (
-                    <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 9.5, fontWeight: "600", marginTop: 5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                      {lang === 'en' ? "Tap GO to open the reservation assistant." : "Pulsa GO para abrir el asistente de reservas."}
-                    </Text>
-                  )}
-                </View>
-              )}
-              {/* Divider 2: solo si col 2 y col 3 ambas visibles */}
-              {!isUserV1Surface && !tutReservaRealizada && !tutMarketplaceRealizado && (
-                <View style={{ width: 1, backgroundColor: "rgba(255,255,255,0.18)", alignSelf: "stretch", marginTop: 2 }} />
-              )}
-              {/* ── COL 3 — Marketplace ── visible hasta que el usuario abra el Marketplace */}
-              {!isUserV1Surface && !tutMarketplaceRealizado && (
-                <View style={{ flex: 38 }}>
-                  <Text style={{ color: "rgba(255,255,255,0.95)", fontSize: lang === 'en' ? 10.5 : 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "3 · Buy" : "3 · Comprar"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 10.5, fontWeight: "700", marginTop: 3, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "Long-press an orbit" : "Mantén pulsada una órbita"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.52)", fontSize: 10, fontWeight: "600", marginTop: 2, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "→ Marketplace opens" : "→ Se abre Comprar"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 9.5, fontWeight: "700", marginTop: 5, letterSpacing: 0.2, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "From there:" : "Desde ahí:"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 2, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "• Buy" : "• Comprar"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "• Book" : "• Reservar"}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9.5, fontWeight: "500", marginTop: 1.5, letterSpacing: 0.1, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                    {lang === 'en' ? "• Taxi · Services · Offers" : "• Taxi · Servicios · Ofertas"}
-                  </Text>
-                </View>
-              )}
-            </View>
-          ) : null
-        ) : showBusinessLandingHelp && !empresaConfigurada ? (
-          // ── EMPRESA no configurada ── hint i18n
-          <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: 12, fontWeight: "700", letterSpacing: 1.0, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-            {t('biz_configure_hint')}
-          </Text>
-        ) : showBusinessLandingHelp && empresaConfigurada && !workGuideDismissed ? (
-          // ── EMPRESA configurada ── hints de gestión empresarial i18n
-          <View style={{ gap: 6 }}>
-            <Text style={{ color: "rgba(255,255,255,0.92)", fontSize: 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-              {goView.isBusinessPreview && ownerDemo.config?.businessName ? ownerDemo.config.businessName + ' · ' : ''}{t('biz_manage_title')}
-            </Text>
-            <Text style={{ color: "rgba(255,255,255,0.50)", fontSize: 10, fontWeight: "600", letterSpacing: 0.2, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-              {t('biz_add_services')}
-            </Text>
-            <Text style={{ color: "rgba(255,255,255,0.50)", fontSize: 10, fontWeight: "600", letterSpacing: 0.2, textShadowColor: "rgba(0,0,0,0.65)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-              {t('biz_stats_hours')}
-            </Text>
-          </View>
-        ) : null}
-      </Animated.View>
 
       {/* ── FOCUS MODE OVERLAY ────────────────────────────────────────────
           Aparece cuando el usuario está en modo creación (nota / selector).
@@ -19689,6 +19821,10 @@ function HomeScreenContent() {
       />
 
       <HerramientasPanel
+        landingVariantControls={userLandingVisualEnabled ? <LandingVariantSelector visual={landingVisual} lang={lang}
+          onPreviewLanding={() => { commitUserPhone(); setOptionsOpen(false);
+            showToast(lang === "en" ? "Temporary preview. Return to Tools to activate or cancel."
+              : "Vista previa temporal. Vuelve a Herramientas para activar o cancelar."); }} /> : undefined}
         visible={optionsOpen}
         onClose={() => { commitUserPhone(); setOptionsOpen(false); }}
         handedness={handedness}
@@ -21506,7 +21642,7 @@ function HomeScreenContent() {
 
           {/* Etiqueta TÍTULO */}
           <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.4, marginBottom: 5, marginLeft: 2 }}>
-            TÍTULO
+            {t('board_title_label').toUpperCase()}
           </Text>
 
           {/* TÍTULO OPERATIVO — una sola línea, nunca crece */}
@@ -21538,7 +21674,7 @@ function HomeScreenContent() {
 
           {/* Etiqueta TAREA INTERNA */}
           <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.4, marginBottom: 5, marginLeft: 2 }}>
-            INTERNAL TASK
+            {t('label_task_internal').toUpperCase()}
           </Text>
 
           {/* TAREA INTERNA — multilinea opcional */}
@@ -21600,7 +21736,7 @@ function HomeScreenContent() {
           >
             <Feather name="edit-2" size={12} color="#60a5fa" />
             <Text style={{ color: "#60a5fa", fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>
-              INTERNA
+              {t('tasks_internal_short').toUpperCase()}
             </Text>
           </TouchableOpacity>
 
@@ -21633,7 +21769,7 @@ function HomeScreenContent() {
           >
             <Feather name="edit-2" size={12} color="#fb923c" />
             <Text style={{ color: "#fb923c", fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>
-              EXTERNA
+              {t('tasks_external_short').toUpperCase()}
             </Text>
           </TouchableOpacity>
 
@@ -21648,7 +21784,7 @@ function HomeScreenContent() {
               toggleNotaRecording();
             }}
             activeOpacity={0.8}
-            accessibilityLabel={notaAudioRecording ? "Detener grabación" : notaAudioUri ? "Grabar de nuevo" : "Grabar audio"}
+            accessibilityLabel={notaAudioRecording ? t('tasks_stop_recording') : notaAudioUri ? t('tasks_record_again') : t('tasks_record_audio')}
             hitSlop={8}
             style={{
               width: 40,
@@ -21692,7 +21828,7 @@ function HomeScreenContent() {
               setQuickNoteAlarm(a => !a);
             }}
             activeOpacity={0.8}
-            accessibilityLabel={quickNoteAlarm ? "Desactivar recordatorio" : "Activar recordatorio"}
+            accessibilityLabel={quickNoteAlarm ? t('tasks_disable_reminder') : t('tasks_enable_reminder')}
             hitSlop={8}
             style={{
               width: 40,
@@ -21720,7 +21856,7 @@ function HomeScreenContent() {
               setNotesOpen(false);
             }}
             activeOpacity={0.8}
-            accessibilityLabel="Cerrar"
+            accessibilityLabel={t('close')}
             hitSlop={8}
             style={{
               width: 40,
@@ -21761,44 +21897,19 @@ function HomeScreenContent() {
         compactHeader
         minimized={listMinimized}
         title={(() => {
-          if (llamadasListOpen || typeFilter === "LLAMADA") return "CALL LOG";
-          if (listFilter === "papelera") return "DELETED";
-          if (listFilter === "pendiente") return "PENDING";
-          if (listFilter === "aceptado") return "ACCEPTED";
-          if (listFilter === "propuesta") return "CHANGE PROPOSALS";
-          if (typeFilter === "TAREA_INTERNA") return "INTERNAL TASKS";
-          if (typeFilter === "TAREA") return "TASKS";
-          if (typeFilter === "GO_INTERNO") return "INTERNAL GOs";
-          return "GO · TASKS";
+          if (llamadasListOpen || typeFilter === "LLAMADA") return t('tasks_call_log').toUpperCase();
+          if (listFilter === "papelera") return t('status_deleted').toUpperCase();
+          if (listFilter === "pendiente") return t('status_pending_label').toUpperCase();
+          if (listFilter === "aceptado") return t('status_accepted').toUpperCase();
+          if (listFilter === "propuesta") return t('tasks_change_proposals').toUpperCase();
+          if (typeFilter === "TAREA_INTERNA") return t('tasks_internal_tasks').toUpperCase();
+          if (typeFilter === "TAREA") return t('stat_tasks_label').toUpperCase();
+          if (typeFilter === "GO_INTERNO") return t('tasks_internal_gos').toUpperCase();
+          return t('tasks_title');
         })()}
         protectBrand
         paddingBottom={quickCreateKbVisible ? 0 : paddingBottom + 4}
         containerBg={screenBgColors.listados || undefined}
-        above={
-          /* Fondo adaptativo del listado — muestra la órbita GO del contexto
-             activo en lugar de dejar que el Landing se cuele por el backdrop
-             semitransparente. El intent hereda el contexto de trabajo actual. */
-          <View pointerEvents="none" style={{ paddingTop: 18, alignItems: "center", opacity: 0.38 }}>
-            {renderGoOrbit(GO_SIZE_3, intent)}
-            <Text style={{
-              color: intent.color,
-              fontSize: 9,
-              fontFamily: "Inter_700Bold", fontWeight: "800",
-              letterSpacing: 2,
-              marginTop: 8,
-              opacity: 0.90,
-            }}>
-              {llamadasListOpen || typeFilter === "LLAMADA" ? "CALL LOG"
-               : typeFilter === "GO_INTERNO"    ? "INTERNAL GOs"
-               : typeFilter === "TAREA_INTERNA" ? "INTERNAL TASKS"
-               : typeFilter === "TAREA"         ? "TASKS"
-               : listFilter  === "pendiente"    ? "PENDING"
-               : listFilter  === "aceptado"     ? "ACCEPTED"
-               : listFilter  === "papelera"     ? "DELETED"
-               : `${intent.label.toUpperCase()} · GO`}
-            </Text>
-          </View>
-        }
         footer={
           /* CONTROLES DEL LISTADO — el cluster principal de botones se
              agrupa en el lado del pulgar (derecha en diestro, izquierda
@@ -21860,9 +21971,7 @@ function HomeScreenContent() {
             const CAT_GAP     = listGoSize === "compacto" ?  3 : listGoSize === "grande" ?  5 :  4;
             const ROW_GAP     = listGoSize === "compacto" ?  4 : listGoSize === "grande" ?  8 :  6;
             const GAP_CTRL    = listGoSize === "compacto" ?  6 : listGoSize === "grande" ? 10 :  8;
-            const GAP_CLUSTER = listGoSize === "compacto" ?  4 : listGoSize === "grande" ?  8 :  6;
-            const PLUS_ICON   = listGoSize === "compacto" ? 16 : listGoSize === "grande" ? 22 : 19;
-            // ────────────────────────────────────────────────────────────────
+            const GAP_CLUSTER = listGoSize === "compacto" ?  4 : listGoSize === "grande" ?  8 :  6;             // ────────────────────────────────────────────────────────────────
             // Orden FIJO — sin reordenamiento dinámico.
             // La posición de cada botón es siempre la misma para crear
             // memoria muscular y evitar confusión.
@@ -21873,11 +21982,11 @@ function HomeScreenContent() {
             const countPendiente = goLog.filter((g) => !g.deleted && g.estado === "pendiente").length;
             const countPropuesta = goLog.filter((g) => !g.deleted && (g.estado === "propuesto" || g.estado === "propuesta_pendiente")).length;
             const filterDefs = [
-              { k: "todos" as const,     icon: "list" as const,       label: "All",       color: "#ffffff", iconOn: "#0a0a0a", count: 0 },
-              { k: "aceptado" as const,  icon: "check" as const,      label: "Accepted",  color: "#16a34a", iconOn: "#ffffff", count: 0 },
-              { k: "pendiente" as const, icon: "mail" as const,       label: "Pending",   color: "#eab308", iconOn: "#0a0a0a", count: countPendiente },
-              { k: "propuesta" as const, icon: "refresh-cw" as const, label: "Proposals", color: "#f97316", iconOn: "#ffffff", count: countPropuesta },
-              { k: "papelera" as const,  icon: "trash-2" as const,    label: "Trash",     color: "#dc2626", iconOn: "#ffffff", count: 0 },
+              { k: "todos" as const,     icon: "list" as const,       label: t('filter_todos'),       color: "#ffffff", iconOn: "#0a0a0a", count: 0 },
+              { k: "aceptado" as const,  icon: "check" as const,      label: t('status_accepted'),  color: "#16a34a", iconOn: "#ffffff", count: 0 },
+              { k: "pendiente" as const, icon: "mail" as const,       label: t('status_pending_label'),   color: "#eab308", iconOn: "#0a0a0a", count: countPendiente },
+              { k: "propuesta" as const, icon: "refresh-cw" as const, label: t('tasks_proposals'), color: "#f97316", iconOn: "#ffffff", count: countPropuesta },
+              { k: "papelera" as const,  icon: "trash-2" as const,    label: t('tasks_trash'),     color: "#dc2626", iconOn: "#ffffff", count: 0 },
             ];
             const renderFilterBtn = (f: typeof filterDefs[number]) => {
               const active = listFilter === f.k;
@@ -21987,7 +22096,7 @@ function HomeScreenContent() {
                   AsyncStorage.setItem("go_list_size_v1", next).catch(() => {});
                 }}
                 hitSlop={6}
-                accessibilityLabel="Cambiar tamaño de tarjetas"
+                accessibilityLabel={t('tasks_card_size')}
                 style={({ pressed }) => ({
                   width: BTN,
                   height: BTN,
@@ -22022,8 +22131,8 @@ function HomeScreenContent() {
                 hitSlop={6}
                 accessibilityLabel={
                   allExpanded
-                    ? "Colapsar todas las tarjetas"
-                    : "Expandir todas las tarjetas"
+                    ? t('tasks_collapse_all')
+                    : t('tasks_expand_all')
                 }
                 style={({ pressed }) => ({
                   width: BTN,
@@ -22091,7 +22200,7 @@ function HomeScreenContent() {
                   setListFiltersHidden((prev) => !prev);
                 }}
                 hitSlop={6}
-                accessibilityLabel={listFiltersHidden ? "Mostrar menús secundarios" : "Ocultar menús secundarios"}
+                accessibilityLabel={listFiltersHidden ? t('tasks_show_menus') : t('tasks_hide_menus')}
                 style={({ pressed }) => ({
                   width: BTN_MINI,
                   height: BTN_MINI,
@@ -22128,7 +22237,7 @@ function HomeScreenContent() {
                   setListFiltersHidden(false);
                 }}
                 hitSlop={6}
-                accessibilityLabel="Cerrar listado"
+                accessibilityLabel={t('tasks_close_list')}
                 style={({ pressed }) => ({
                   width: BTN_MINI,
                   height: BTN_MINI,
@@ -22158,7 +22267,7 @@ function HomeScreenContent() {
                 key="sort-order"
                 onPress={() => { Haptics.selectionAsync(); toggleGoSortOrder(); }}
                 hitSlop={6}
-                accessibilityLabel={goSortOrder === "desc" ? "Orden invertido — pulsa para restaurar" : "Orden natural — pulsa para invertir"}
+                accessibilityLabel={goSortOrder === "desc" ? t('tasks_sort_reverse') : t('tasks_sort_natural')}
                 style={({ pressed }) => ({
                   width: BTN,
                   height: BTN,
@@ -22251,12 +22360,12 @@ function HomeScreenContent() {
               icon: keyof typeof Feather.glyphMap;
               color: string;
             }> = [
-              { k: "todos",         label: "All",          icon: "grid",         color: "#ffffff" },
+              { k: "todos",         label: t('filter_todos'),          icon: "grid",         color: "#ffffff" },
               { k: "GO",            label: "GO",           icon: "send",         color: "#6ee7b7" },
-              { k: "GO_INTERNO",    label: "GO internal",  icon: "send",         color: "#16a34a" },
-              { k: "TAREA",         label: "Tasks",         icon: "check-square", color: "#f59e0b" },
-              { k: "TAREA_INTERNA", label: "Internal task", icon: "check-square", color: "#d97706" },
-              { k: "LLAMADA",       label: "Calls",         icon: "phone",        color: "#3b82f6" },
+              { k: "GO_INTERNO",    label: t('tasks_go_internal'),  icon: "send",         color: "#16a34a" },
+              { k: "TAREA",         label: t('stat_tasks_label'),         icon: "check-square", color: "#f59e0b" },
+              { k: "TAREA_INTERNA", label: t('label_task_internal'), icon: "check-square", color: "#d97706" },
+              { k: "LLAMADA",       label: t('tasks_calls'),         icon: "phone",        color: "#3b82f6" },
             ];
             // Diestro: orden físico izq→der = [📞, Tareas, GO, Todos] con flex-end
             //   → visual der→izq = Todos, GO, Tareas, 📞  ✓
@@ -22287,35 +22396,35 @@ function HomeScreenContent() {
                     : null,
                 ]}
               >
-                {orderedTypeDefs.map((t) => {
+                {orderedTypeDefs.map((typeDef) => {
                   // El botón LLAMADA está activo cuando estamos en la vista
                   // de llamadas (llamadasListOpen). El resto usan typeFilter.
-                  const active = t.k === "LLAMADA"
+                  const active = typeDef.k === "LLAMADA"
                     ? llamadasListOpen
-                    : typeFilter === t.k && !llamadasListOpen;
-                  const isWhite = t.color === "#ffffff";
+                    : typeFilter === typeDef.k && !llamadasListOpen;
+                  const isWhite = typeDef.color === "#ffffff";
                   return (
                     <TouchableOpacity
-                      key={t.k}
+                      key={typeDef.k}
                       onPress={() => {
                         Haptics.selectionAsync();
-                        if (t.k === "LLAMADA") {
+                        if (typeDef.k === "LLAMADA") {
                           // Abre la vista dedicada de llamadas (NO llama directamente)
                           setLlamadasListOpen(true);
                           setTypeFilter("todos");
                         } else {
                           setLlamadasListOpen(false);
                           setTypeFilter((cur) =>
-                            t.k === "todos"
+                            typeDef.k === "todos"
                               ? "todos"
-                              : cur === t.k
+                              : cur === typeDef.k
                                 ? "todos"
-                                : t.k,
+                                : typeDef.k,
                           );
                         }
                       }}
                       activeOpacity={0.85}
-                      accessibilityLabel={`Filtrar por ${t.label}`}
+                      accessibilityLabel={t('tasks_filter_by').replace('__LABEL__', typeDef.label)}
                       style={{
                         flexDirection: "row",
                         alignItems: "center",
@@ -22323,20 +22432,20 @@ function HomeScreenContent() {
                         paddingHorizontal: CHIP_PH,
                         paddingVertical: CHIP_PV,
                         borderRadius: 999,
-                        backgroundColor: active ? t.color : "#1a1a1c",
+                        backgroundColor: active ? typeDef.color : "#1a1a1c",
                         borderWidth: 1.2,
                         borderColor: active
-                          ? t.color
+                          ? typeDef.color
                           : isWhite
                             ? "rgba(255,255,255,0.22)"
-                            : `${t.color}80`,
+                            : `${typeDef.color}80`,
                         justifyContent: "center",
                       }}
                     >
                       <Feather
-                        name={t.icon}
+                        name={typeDef.icon}
                         size={CHIP_ICON}
-                        color={active ? (isWhite ? "#0a0a0a" : "#ffffff") : t.color}
+                        color={active ? (isWhite ? "#0a0a0a" : "#ffffff") : typeDef.color}
                       />
                       <Text
                         style={{
@@ -22350,7 +22459,7 @@ function HomeScreenContent() {
                           letterSpacing: 0.4,
                         }}
                       >
-                        {t.label}
+                        {typeDef.label}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -22410,7 +22519,7 @@ function HomeScreenContent() {
                         setActivityFilter(c.key === "todas" ? "todas" : (cur: "todas" | GoActivityKey) => cur === c.key ? "todas" : c.key as GoActivityKey);
                       }}
                       activeOpacity={0.85}
-                      accessibilityLabel={`Categoría ${c.label}`}
+                      accessibilityLabel={t('tasks_filter_by').replace('__LABEL__', c.label)}
                       style={{
                         flexDirection: "row",
                         alignItems: "center",
@@ -22448,8 +22557,8 @@ function HomeScreenContent() {
               </ScrollView>
             );
             const quickCreateOptions = [
-              { kind: "NOTA_INTERNA" as const, label: "INTERNAL TASK", icon: "file-text" as const, color: "#7c3aed", iconOn: "#ffffff" },
-              { kind: "NOTA_EXTERNA" as const, label: "EXTERNAL TASK", icon: "file-text" as const, color: "#f97316", iconOn: "#ffffff" },
+              { kind: "NOTA_INTERNA" as const, label: t('label_task_internal').toUpperCase(), icon: "file-text" as const, color: "#7c3aed", iconOn: "#ffffff" },
+              { kind: "NOTA_EXTERNA" as const, label: t('label_task_external').toUpperCase(), icon: "file-text" as const, color: "#f97316", iconOn: "#ffffff" },
             ];
             const handleQuickCreate = (kind: "NOTA_INTERNA" | "NOTA_EXTERNA") => {
               Haptics.selectionAsync().catch(() => {});
@@ -22484,7 +22593,7 @@ function HomeScreenContent() {
                         {/* Fila superior: label tenue + botón ↑ a la derecha */}
                         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                           <Text style={{ color: "rgba(255,255,255,0.28)", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.2 }}>
-                            NUEVA TAREA
+                            {t('new_task_label').toUpperCase()}
                           </Text>
                           <Pressable
                             onPress={() => Keyboard.dismiss()}
@@ -22534,7 +22643,7 @@ function HomeScreenContent() {
                       /* ── MODO SELECCIÓN: layout normal con 2×2 botones ── */
                       <>
                         <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.2, marginBottom: 7 }}>
-                          NUEVA TAREA
+                          {t('new_task_label').toUpperCase()}
                         </Text>
                         {/* Campo título */}
                         <View
@@ -22709,7 +22818,7 @@ function HomeScreenContent() {
                         transform: [{ scale: pressed ? 0.93 : 1 }],
                       })}
                     >
-                      <Feather name="plus" size={PLUS_ICON} color="#ffffff" />
+                      <MaterialCommunityIcons name="note-edit-outline" size={21} color="#ffffff" />
                     </Pressable>
                     {clusterScroll}
                   </View>
@@ -22880,17 +22989,17 @@ function HomeScreenContent() {
                 const curSlot = slotOf(g);
                 const slotMeta = {
                   papelera: {
-                    label: "TRASH",
+                    label: t('tasks_trash').toUpperCase(),
                     icon: "trash-2" as const,
                     color: "#7f1d1d",
                   },
                   pendiente: {
-                    label: "PENDING",
+                    label: t('status_pending_label').toUpperCase(),
                     icon: "mail" as const,
                     color: "#a16207",
                   },
                   aceptado: {
-                    label: "ACCEPTED",
+                    label: t('status_accepted').toUpperCase(),
                     icon: "check" as const,
                     color: "#16a34a",
                   },
@@ -22933,6 +23042,55 @@ function HomeScreenContent() {
                     }
                   }
                 };
+                const statusPill = (
+                  <TouchableOpacity
+                    activeOpacity={1}
+                    hitSlop={6}
+                    onPress={(e) => {
+                      if ((e as any)?.stopPropagation) (e as any).stopPropagation();
+                      Haptics.selectionAsync().catch(() => {});
+                      setExpandedId((prev) => (prev === g.id ? null : g.id));
+                    }}
+                    style={{
+                      paddingHorizontal: lv(7),
+                      paddingVertical: isProposalEstado ? lv(4) : lv(3),
+                      borderRadius: lv(7),
+                      backgroundColor: "#000000",
+                      borderWidth: 1.5,
+                      borderColor:
+                        g.estado === "aceptado"
+                          ? `${stateColor}99`
+                          : isProposalEstado
+                            ? "rgba(249,115,22,0.80)"
+                            : g.estado === "rechazado"
+                              ? "rgba(220,38,38,0.80)"
+                              : "rgba(234,179,8,0.80)",
+                      alignItems: "center",
+                    }}
+                  >
+                    {isProposalEstado ? (
+                      <Text style={{ color: "#f97316", fontSize: lv(9), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.6, textAlign: "center" }}>
+                        {g.estado === "propuesta_pendiente" ? t('biz_change_proposed') : t('biz_change_received')}
+                      </Text>
+                    ) : (
+                      <Text
+                        style={{
+                          color:
+                            g.estado === "aceptado"
+                              ? stateColor
+                              : g.estado === "rechazado"
+                                ? "#dc2626"
+                                : "#eab308",
+                          fontSize: lv(9),
+                          fontFamily: "Inter_700Bold", fontWeight: "800",
+                          letterSpacing: 0.6,
+                        }}
+                      >
+                        {statusLabel.toUpperCase()}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                );
                 return (
                   <React.Fragment key={g.id}>
                   {showNoDateSeparator && (
@@ -22969,7 +23127,7 @@ function HomeScreenContent() {
                       setExpandedId((prev) => (prev === g.id ? null : g.id));
                     }}
                     style={{
-                      paddingVertical: lv(8),
+                      paddingVertical: lv(isProposalEstado ? 6 : 8),
                       paddingHorizontal: lv(14),
                       borderRadius: lv(14),
                       backgroundColor: "#161618",
@@ -22992,6 +23150,7 @@ function HomeScreenContent() {
                   >
                     {/* ── FILA 1: TÍTULO COMPLETO — todo el ancho hasta el checkbox ── */}
                     <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8), marginBottom: lv(3) }}>
+                      {handedness === "left" && isProposalEstado && statusPill}
                       {/* CHECKBOX — izquierda si ZURDO */}
                       {handedness === "left" && (
                         <TouchableOpacity
@@ -23096,6 +23255,7 @@ function HomeScreenContent() {
                           );
                         })()}
                       </TouchableOpacity>
+                      {handedness === "right" && isProposalEstado && statusPill}
                       {/* CHECKBOX — derecha si DIESTRO */}
                       {handedness === "right" && (
                         <TouchableOpacity
@@ -23163,10 +23323,10 @@ function HomeScreenContent() {
                               const total = g.recipients.length;
                               const first = displayContact(g.recipients[0].name, g.recipients[0].phone);
                               const label = total === 1
-                                ? first || "1 participante"
+                                ? first || "1 " + t('participant_singular')
                                 : first
                                   ? `${first} +${total - 1}`
-                                  : `${total} participantes`;
+                                  : `${total} ${t('participants_count')}`;
                               return (
                                 <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
                                   <Feather name="users" size={lv(10)} color="rgba(255,255,255,0.70)" />
@@ -23196,77 +23356,26 @@ function HomeScreenContent() {
                       {/* DERECHA: estado + badge — separación vertical clara entre ellos */}
                       <View style={{ flexDirection: "column", alignItems: "flex-end", gap: lv(6), flexShrink: 0 }}>
                         {/* Estado pill */}
-                        <TouchableOpacity
-                          activeOpacity={1}
-                          hitSlop={6}
-                          onPress={(e) => {
-                            if ((e as any)?.stopPropagation) (e as any).stopPropagation();
-                            Haptics.selectionAsync().catch(() => {});
-                            setExpandedId((prev) => (prev === g.id ? null : g.id));
-                          }}
-                          style={{
-                            paddingHorizontal: lv(7),
-                            paddingVertical: isProposalEstado ? lv(4) : lv(3),
-                            borderRadius: lv(7),
-                            backgroundColor: "#000000",
-                            borderWidth: 1.5,
-                            borderColor:
-                              g.estado === "aceptado"
-                                ? `${stateColor}99`
-                                : isProposalEstado
-                                  ? "rgba(249,115,22,0.80)"
-                                  : g.estado === "rechazado"
-                                    ? "rgba(220,38,38,0.80)"
-                                    : "rgba(234,179,8,0.80)",
-                            alignItems: "center",
-                          }}
-                        >
-                          {isProposalEstado ? (
-                            <>
-                              <Text style={{ color: "#f97316", fontSize: lv(9), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.6, textAlign: "center" }}>
-                                CAMBIO
-                              </Text>
-                              <Text style={{ color: "#f97316", fontSize: lv(9), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.6, textAlign: "center" }}>
-                                {g.estado === "propuesta_pendiente" ? "PROPUESTO" : "RECIBIDO"}
-                              </Text>
-                            </>
-                          ) : (
-                            <Text
-                              style={{
-                                color:
-                                  g.estado === "aceptado"
-                                    ? stateColor
-                                    : g.estado === "rechazado"
-                                      ? "#dc2626"
-                                      : "#eab308",
-                                fontSize: lv(9),
-                                fontFamily: "Inter_700Bold", fontWeight: "800",
-                                letterSpacing: 0.6,
-                              }}
-                            >
-                              {statusLabel.toUpperCase()}
-                            </Text>
-                          )}
-                        </TouchableOpacity>
+                        {!isProposalEstado && statusPill}
                         {/* Badge con EXACTO mismo color que filtro inferior correspondiente */}
                         {(() => {
-                          const t = (g as any).type || "";
+                          const entryType = (g as any).type || "";
                           const lbl =
-                            t === "GO_BOOKING"      ? "RESERVA"
-                            : t === "GO_INTERNO"    ? "GO INT"
-                            : t === "TAREA_INTERNA" ? "TASK INT"
-                            : t === "TAREA"         ? "TASK EXT"
-                            : t === "LLAMADA"       ? "CALL"
-                            : t === "WHATSAPP"      ? "WHATSAPP"
-                            : g.isGeneric           ? "TASK"
-                            : g.kind === "received" ? "GO EXT"
-                            : "GO EXT";
+                            entryType === "GO_BOOKING"      ? t('biz_booking_intent_label').toUpperCase()
+                            : entryType === "GO_INTERNO"    ? t('tasks_badge_go_internal')
+                            : entryType === "TAREA_INTERNA" ? t('tasks_badge_task_internal')
+                            : entryType === "TAREA"         ? t('tasks_badge_task_external')
+                            : entryType === "LLAMADA"       ? t('tasks_call').toUpperCase()
+                            : entryType === "WHATSAPP"      ? "WHATSAPP"
+                            : g.isGeneric           ? t('tasks_task').toUpperCase()
+                            : g.kind === "received" ? t('tasks_badge_go_external')
+                            : t('tasks_badge_go_external');
                           const badgeColor =
-                            t === "GO_BOOKING"      ? "#818cf8"
-                            : t === "GO_INTERNO"    ? "#16a34a"
-                            : t === "TAREA_INTERNA" ? "#d97706"
-                            : t === "TAREA"         ? "#f59e0b"
-                            : t === "LLAMADA"       ? "#3b82f6"
+                            entryType === "GO_BOOKING"      ? "#818cf8"
+                            : entryType === "GO_INTERNO"    ? "#16a34a"
+                            : entryType === "TAREA_INTERNA" ? "#d97706"
+                            : entryType === "TAREA"         ? "#f59e0b"
+                            : entryType === "LLAMADA"       ? "#3b82f6"
                             : g.isGeneric           ? "#a78bfa"
                             : "#6ee7b7";
                           return (
@@ -23288,11 +23397,11 @@ function HomeScreenContent() {
                         {(g as any).type === "GO_BOOKING" && (() => {
                           const bs: ReservationStatus = (g as any).bookingStatus ?? "confirmada";
                           const bsConfig: Record<ReservationStatus, { label: string; color: string }> = {
-                            pendiente:        { label: "PENDIENTE",        color: "#eab308" },
-                            confirmada:       { label: "CONFIRMADA",       color: "#22c55e" },
-                            cancelada:        { label: "CANCELADA",        color: "#ef4444" },
-                            cambio_pendiente: { label: "CAMBIO PENDIENTE", color: "#f97316" },
-                            completada:       { label: "COMPLETADA",       color: "#94a3b8" },
+                            pendiente:        { label: t('status_pending_label').toUpperCase(),        color: "#eab308" },
+                            confirmada:       { label: t('status_confirmed').toUpperCase(),       color: "#22c55e" },
+                            cancelada:        { label: t('label_visit_cancelled_tag').toUpperCase(),        color: "#ef4444" },
+                            cambio_pendiente: { label: t('floor_reservation_cambio_pendiente').toUpperCase(), color: "#f97316" },
+                            completada:       { label: t('floor_reservation_completada').toUpperCase(),       color: "#94a3b8" },
                           };
                           const { label: bsLabel, color: bsColor } = bsConfig[bs] ?? bsConfig.confirmada;
                           return (
@@ -23316,19 +23425,19 @@ function HomeScreenContent() {
                     {/* ── PROPUESTA DE CAMBIO: siempre visible cuando existe ── */}
                     {!isPapelaraView && isProposalEstado && !!(g as any).changeProposal && (
                       <View style={{
-                        marginTop: lv(10),
+                        marginTop: lv(6),
                         borderRadius: lv(10),
                         borderWidth: 1.5,
                         borderColor: "rgba(249,115,22,0.65)",
                         backgroundColor: "rgba(249,115,22,0.13)",
                         overflow: "hidden",
-                        padding: lv(10),
-                        gap: lv(7),
+                        padding: lv(8),
+                        gap: lv(5),
                       }}>
                         {/* Reserva actual */}
                         <View style={{ gap: lv(2) }}>
                           <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: lv(8), fontWeight: "700", letterSpacing: 0.6 }}>
-                            RESERVA ACTUAL
+                            {t('tasks_current_booking').toUpperCase()}
                           </Text>
                           <Text
                             numberOfLines={1}
@@ -23342,7 +23451,7 @@ function HomeScreenContent() {
                         {/* Propuesta cambio */}
                         <View style={{ gap: lv(2) }}>
                           <Text style={{ color: "#f97316", fontSize: lv(8), fontWeight: "700", letterSpacing: 0.6 }}>
-                            PROPUESTA CAMBIO
+                            {t('tasks_change_proposal').toUpperCase()}
                           </Text>
                           <Text
                             numberOfLines={1}
@@ -23362,7 +23471,7 @@ function HomeScreenContent() {
                           <View style={{ flexDirection: "row", alignItems: "center", gap: lv(5), paddingTop: lv(2) }}>
                             <Feather name="clock" size={lv(11)} color="#f97316" />
                             <Text numberOfLines={1} style={{ color: "#f97316", fontSize: lv(10), fontWeight: "700", flexShrink: 1 }}>
-                              Esperando respuesta
+                              {t('biz_booking_awaiting')}
                             </Text>
                           </View>
                         ) : (
@@ -23370,7 +23479,7 @@ function HomeScreenContent() {
                             <View style={{ flexDirection: "row", alignItems: "center", gap: lv(5) }}>
                               <Feather name="refresh-cw" size={lv(11)} color="#f97316" />
                               <Text numberOfLines={1} style={{ color: "#f97316", fontSize: lv(10), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, flexShrink: 1 }}>
-                                CAMBIO RECIBIDO
+                                {t('biz_change_received')}
                               </Text>
                             </View>
                             <View style={{ flexDirection: "row", gap: lv(8) }}>
@@ -23380,7 +23489,7 @@ function HomeScreenContent() {
                                 style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: "#16a34a" }}
                               >
                                 <Feather name="check" size={lv(13)} color="#fff" />
-                                <Text style={{ color: "#fff", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>🟢 Aceptar</Text>
+                                <Text style={{ color: "#fff", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🟢 ' + t('accept')}</Text>
                               </TouchableOpacity>
                               <TouchableOpacity
                                 onPress={(e) => { if ((e as any)?.stopPropagation) (e as any).stopPropagation(); Haptics.selectionAsync().catch(() => {}); rejectProposal(g.id); }}
@@ -23388,7 +23497,7 @@ function HomeScreenContent() {
                                 style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: "#dc2626" }}
                               >
                                 <Feather name="x" size={lv(13)} color="#fff" />
-                                <Text style={{ color: "#fff", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>🔴 Rechazar</Text>
+                                <Text style={{ color: "#fff", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🔴 ' + t('reject')}</Text>
                               </TouchableOpacity>
                             </View>
                             <TouchableOpacity
@@ -23396,7 +23505,7 @@ function HomeScreenContent() {
                               activeOpacity={0.7}
                               style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: "rgba(249,115,22,0.15)", borderWidth: 1, borderColor: "rgba(249,115,22,0.45)" }}
                             >
-                              <Text style={{ color: "#f97316", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>🟠 Proponer</Text>
+                              <Text style={{ color: "#f97316", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🟠 ' + t('tasks_propose')}</Text>
                             </TouchableOpacity>
                           </View>
                         )}
@@ -23407,7 +23516,7 @@ function HomeScreenContent() {
                       <View style={{ marginTop: lv(8), borderRadius: lv(10), borderWidth: 1.5, borderColor: "rgba(74,128,189,0.40)", backgroundColor: "rgba(74,128,189,0.07)", padding: lv(10), gap: lv(6) }}>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: lv(6) }}>
                           <Feather name="calendar" size={lv(12)} color="#4A80BD" />
-                          <Text style={{ color: "#4A80BD", fontSize: lv(10), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>HUECOS DISPONIBLES</Text>
+                          <Text style={{ color: "#4A80BD", fontSize: lv(10), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>{t('tasks_available_slots').toUpperCase()}</Text>
                         </View>
                         {altSlotsEntry.slots.map((slot) => (
                           <TouchableOpacity
@@ -23424,7 +23533,7 @@ function HomeScreenContent() {
                           onPress={(e) => { if ((e as any)?.stopPropagation) (e as any).stopPropagation(); setAltSlotsEntry(null); }}
                           style={{ alignItems: "center", paddingVertical: lv(4) }}
                         >
-                          <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: lv(9), letterSpacing: 0.3 }}>Cerrar sugerencias</Text>
+                          <Text style={{ color: "rgba(255,255,255,0.35)", fontSize: lv(9), letterSpacing: 0.3 }}>{t('tasks_close_suggestions')}</Text>
                         </TouchableOpacity>
                       </View>
                     )}
@@ -23434,7 +23543,7 @@ function HomeScreenContent() {
                         {[
                           {
                             k: "accept",
-                            label: "ACCEPT",
+                            label: t('accept').toUpperCase(),
                             icon: "check" as const,
                             bg: "#16a34a",
                             textColor: "#ffffff",
@@ -23448,7 +23557,7 @@ function HomeScreenContent() {
                           },
                           {
                             k: "reject",
-                            label: "REJECT",
+                            label: t('reject').toUpperCase(),
                             icon: "x" as const,
                             bg: "#dc2626",
                             textColor: "#ffffff",
@@ -23462,7 +23571,7 @@ function HomeScreenContent() {
                           },
                           {
                             k: "propose",
-                            label: "PROPONER CAMBIO",
+                            label: t('tasks_propose_change').toUpperCase(),
                             icon: "edit-3" as const,
                             bg: "#d97706",
                             textColor: "#ffffff",
@@ -23513,12 +23622,12 @@ function HomeScreenContent() {
                             {(act as any).twoLine ? (
                               <View style={{ alignItems: "center", gap: lv(1) }}>
                                 <Text style={{ color: act.textColor, fontSize: (act as any).fontSize, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>
-                                  PROPOSE
+                                  {t('tasks_propose').toUpperCase()}
                                 </Text>
                                 <View style={{ flexDirection: "row", alignItems: "center", gap: lv(3) }}>
                                   <Feather name="edit-3" size={lv(10)} color={act.textColor} />
                                   <Text style={{ color: act.textColor, fontSize: (act as any).fontSize, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>
-                                    CAMBIO
+                                    {t('tasks_change_noun').toUpperCase()}
                                   </Text>
                                 </View>
                               </View>
@@ -23558,7 +23667,7 @@ function HomeScreenContent() {
                         <View style={{ flexDirection: "row", alignItems: "center", gap: lv(6), marginBottom: lv(6) }}>
                           <Feather name="lock" size={lv(11)} color="#a78bfa" />
                           <Text style={{ color: "#a78bfa", fontSize: lv(10), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>
-                            TAREA INTERNA
+                            {t('label_task_internal').toUpperCase()}
                           </Text>
                         </View>
                         <Text style={{ color: "#e5e7eb", fontSize: lv(13), lineHeight: lv(19) }}>
@@ -23604,7 +23713,7 @@ function HomeScreenContent() {
                               <View style={{ flexDirection: "row", alignItems: "center", gap: lv(5), marginBottom: lv(8) }}>
                                 <Feather name="message-square" size={lv(10)} color="rgba(255,255,255,0.45)" />
                                 <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: lv(10), fontWeight: "700", letterSpacing: 0.5 }}>
-                                  CHAT
+                                  {t('tasks_chat').toUpperCase()}
                                 </Text>
                               </View>
                               {chatMessages.map((m) => {
@@ -23693,7 +23802,7 @@ function HomeScreenContent() {
                                         <View style={{ flexDirection: "row", alignItems: "center", gap: lv(5), marginTop: lv(4), justifyContent: isOnRight ? "flex-end" : "flex-start" }}>
                                           <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: lv(10) }}>{timeStr}</Text>
                                           <Feather name="lock" size={lv(9)} color="rgba(255,255,255,0.40)" />
-                                          <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: lv(10) }}>interna</Text>
+                                          <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: lv(10) }}>{t('tasks_internal_short')}</Text>
                                         </View>
                                       </TouchableOpacity>
 
@@ -23735,7 +23844,7 @@ function HomeScreenContent() {
                           <View style={{ flexDirection: "row", alignItems: "center", gap: lv(5) }}>
                             <Feather name="edit-3" size={lv(10)} color="rgba(255,255,255,0.40)" />
                             <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: lv(10), fontWeight: "700", letterSpacing: 0.4 }}>
-                              NOTA / MENSAJE DEL GO
+                              {t('tasks_note_message').toUpperCase()}
                             </Text>
                           </View>
                           {/* TextInput — siempre interactivo */}
@@ -23868,19 +23977,19 @@ function HomeScreenContent() {
                       };
                       const PLACES: Record<string, PC[]> = {
                         cafe: [
-                          { nombre: "Café Central",   tipo: "Cafetería",    distancia: "120 m", direccion: "Calle Mayor 12",       abiertoCerrado: true,  rating: 4.5, lat: 40.4168, lng: -3.7038, placeId: "mock_cafe_001", icon: "coffee"       },
-                          { nombre: "Bakery & Co.",   tipo: "Panadería",    distancia: "200 m", direccion: "Av. del Sol 5",        abiertoCerrado: true,  rating: 4.2, lat: 40.4172, lng: -3.7045, placeId: "mock_cafe_002", icon: "sun"          },
-                          { nombre: "The Coffee Lab", tipo: "Especialidad", distancia: "350 m", direccion: "Calle Serrano 88",     abiertoCerrado: false, rating: 4.8, lat: 40.4185, lng: -3.7052, placeId: "mock_cafe_003", icon: "star"         },
+                          { nombre: "Café Central",   tipo: t('tasks_place_cafe'),    distancia: "120 m", direccion: "Calle Mayor 12",       abiertoCerrado: true,  rating: 4.5, lat: 40.4168, lng: -3.7038, placeId: "mock_cafe_001", icon: "coffee"       },
+                          { nombre: "Bakery & Co.",   tipo: t('tasks_place_bakery'),    distancia: "200 m", direccion: "Av. del Sol 5",        abiertoCerrado: true,  rating: 4.2, lat: 40.4172, lng: -3.7045, placeId: "mock_cafe_002", icon: "sun"          },
+                          { nombre: "The Coffee Lab", tipo: t('tasks_place_specialty'), distancia: "350 m", direccion: "Calle Serrano 88",     abiertoCerrado: false, rating: 4.8, lat: 40.4185, lng: -3.7052, placeId: "mock_cafe_003", icon: "star"         },
                         ],
                         comida: [
-                          { nombre: "Rest. Plaza",    tipo: "Restaurante",  distancia: "300 m", direccion: "Plaza España 3",      abiertoCerrado: true,  rating: 4.3, lat: 40.4190, lng: -3.7060, placeId: "mock_comida_001", icon: "award"       },
-                          { nombre: "Bistro Local",   tipo: "Bistró",       distancia: "450 m", direccion: "C/ Fuencarral 22",    abiertoCerrado: true,  rating: 3.9, lat: 40.4200, lng: -3.7070, placeId: "mock_comida_002", icon: "map-pin"     },
-                          { nombre: "Taberna Central",tipo: "Taberna",      distancia: "600 m", direccion: "C/ Corredera 10",     abiertoCerrado: false, rating: 4.1, lat: 40.4210, lng: -3.7080, placeId: "mock_comida_003", icon: "feather"     },
+                          { nombre: "Rest. Plaza",    tipo: t('tasks_place_restaurant'),  distancia: "300 m", direccion: "Plaza España 3",      abiertoCerrado: true,  rating: 4.3, lat: 40.4190, lng: -3.7060, placeId: "mock_comida_001", icon: "award"       },
+                          { nombre: "Bistro Local",   tipo: t('tasks_place_bistro'),       distancia: "450 m", direccion: "C/ Fuencarral 22",    abiertoCerrado: true,  rating: 3.9, lat: 40.4200, lng: -3.7070, placeId: "mock_comida_002", icon: "map-pin"     },
+                          { nombre: "Taberna Central",tipo: t('tasks_place_tavern'),      distancia: "600 m", direccion: "C/ Corredera 10",     abiertoCerrado: false, rating: 4.1, lat: 40.4210, lng: -3.7080, placeId: "mock_comida_003", icon: "feather"     },
                         ],
                         shopping: [
-                          { nombre: "Zara",            tipo: "Moda",         distancia: "200 m", direccion: "Gran Vía 32",         abiertoCerrado: true,  rating: 4.0, lat: 40.4178, lng: -3.7042, placeId: "mock_shop_001", icon: "shopping-bag" },
-                          { nombre: "El Corte Inglés", tipo: "Grandes Alm.", distancia: "450 m", direccion: "Pso. Castellana 1",  abiertoCerrado: true,  rating: 4.4, lat: 40.4195, lng: -3.7065, placeId: "mock_shop_002", icon: "tag"          },
-                          { nombre: "Tienda Local",    tipo: "Boutique",     distancia: "600 m", direccion: "C/ Princesa 8",      abiertoCerrado: false, rating: 3.7, lat: 40.4205, lng: -3.7075, placeId: "mock_shop_003", icon: "package"      },
+                          { nombre: "Zara",            tipo: t('tasks_place_fashion'),         distancia: "200 m", direccion: "Gran Vía 32",         abiertoCerrado: true,  rating: 4.0, lat: 40.4178, lng: -3.7042, placeId: "mock_shop_001", icon: "shopping-bag" },
+                          { nombre: "El Corte Inglés", tipo: t('tasks_place_department_store'), distancia: "450 m", direccion: "Pso. Castellana 1",  abiertoCerrado: true,  rating: 4.4, lat: 40.4195, lng: -3.7065, placeId: "mock_shop_002", icon: "tag"          },
+                          { nombre: "Tienda Local",    tipo: t('tasks_place_boutique'),     distancia: "600 m", direccion: "C/ Princesa 8",      abiertoCerrado: false, rating: 3.7, lat: 40.4205, lng: -3.7075, placeId: "mock_shop_003", icon: "package"      },
                         ],
                       };
 
@@ -24010,7 +24119,7 @@ function HomeScreenContent() {
                         }}
                       >
                         <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: lv(10), fontWeight: "600" }}>
-                          {"Se enviará en "}
+                          {t('tasks_send_in')}
                           {Math.max(0, Math.ceil((pendingUndos[g.id].expiresAt - Date.now()) / 1000))}
                           {" s"}
                         </Text>
@@ -24028,7 +24137,7 @@ function HomeScreenContent() {
                           }}
                         >
                           <Text style={{ color: "#fbbf24", fontSize: lv(10), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>
-                            DESHACER
+                            {t('undo').toUpperCase()}
                           </Text>
                         </TouchableOpacity>
                       </View>
@@ -26161,89 +26270,10 @@ function HomeScreenContent() {
       />}
 
 
-      {/* HUMANITY follows the upper-left of the orbit; label and hit area share the collision bounds. */}
+      {/* HUMANITY retains its original slot whenever it fits. */}
       {fullLandingArchitecture && !anyOverlayOpen && !rutasMode && kbHeight === 0 && orbitSecondLevel === null && humanityPlacement && (
-        <TouchableOpacity
-          activeOpacity={0.82}
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-            setHumanityOpen(true);
-          }}
-          style={{
-            position: "absolute",
-            left: humanityPlacement.x,
-            top: humanityPlacement.y,
-            width: humanityPlacement.width,
-            height: humanityPlacement.height,
-            borderRadius: humanityPlacement.globe / 2,
-            zIndex: 9990,
-            shadowColor: "#1d6fa8",
-            shadowOpacity: 0.55,
-            shadowRadius: 14,
-            shadowOffset: { width: 0, height: 0 },
-            elevation: 12,
-            alignItems: "center",
-            justifyContent: "flex-start",
-            paddingTop: 5,
-            overflow: "visible",
-          }}
-        >
-          {/* Glow ring */}
-          <View
-            pointerEvents="none"
-            style={{
-              position: "absolute",
-              top: 2,
-              width: humanityPlacement.globe + 6,
-              height: humanityPlacement.globe + 6,
-              borderRadius: (humanityPlacement.globe + 6) / 2,
-              borderWidth: 1.2,
-              borderColor: "rgba(80,180,255,0.28)",
-            }}
-          />
-          {/* Cinematic Earth globe — photorealistic satellite image */}
-          <View style={{
-            width: humanityPlacement.globe,
-            height: humanityPlacement.globe,
-            borderRadius: humanityPlacement.globe / 2,
-            overflow: "hidden",
-            borderWidth: 1,
-            borderColor: "rgba(100,200,255,0.30)",
-          }}>
-            <Image
-              source={require("../assets/images/humanity_globe.png")}
-              style={{ width: humanityPlacement.globe, height: humanityPlacement.globe }}
-              resizeMode="cover"
-            />
-            {/* Atmospheric limb glow */}
-            <View
-              pointerEvents="none"
-              style={{
-                position: "absolute",
-                top: 0, left: 0, right: 0, bottom: 0,
-                borderRadius: humanityPlacement.globe / 2,
-                borderWidth: Math.round(humanityPlacement.globe * 0.055),
-                borderColor: "rgba(80,180,255,0.22)",
-              }}
-            />
-          </View>
-          {/* Label */}
-          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85} style={{
-            position: "absolute",
-            bottom: 0,
-            width: "100%",
-            color: "rgba(255,255,255,0.72)",
-            fontSize: 9,
-            lineHeight: 12,
-            fontWeight: "700",
-            letterSpacing: 0.4,
-            textAlign: "center",
-          }}>
-            HUMANITY
-          </Text>
-        </TouchableOpacity>
+        renderLandingHumanity(humanityPlacement)
       )}
-
       {/* ── HUMANITY GO — módulos globales del sistema ──────────────── */}
       <HumanityScreen
         visible={fullLandingArchitecture && humanityOpen}
