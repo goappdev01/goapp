@@ -60,7 +60,7 @@ function gpsFixture({permission="granted",geoFails=false,positionFails=false}={}
     async reverseGeocodeAsync(){calls.push("address");if(geoFails)throw Error("Address unavailable");return [{street:"Fictitious street",streetNumber:"1",city:"Test city"}]},
   }};
 }
-test("DEMO GPS asks permission only when invoked and persists coordinates without address API",async()=>{
+test("GPS asks permission only when invoked and can explicitly skip address lookup",async()=>{
   const f=gpsFixture();assert.deepEqual(f.calls,[]);
   let saved;
   const result=await api.readBusinessDeviceLocation(f.adapter,{allowAddressLookup:false,onCoordinates:async coords=>{f.calls.push("save");saved=plain(coords)}});
@@ -115,7 +115,7 @@ test("DEMO GPS hands coordinates to the persistent owner provider bound to the s
   const source=src("components/empresa/EmpresaConfigScreen.tsx");
   assert.match(source,/useOwnerBusinessDemo/);
   assert.match(source,/saveDeviceCoordinates\(coordinates, demo\.getSnapshot\(\)\.ownerUserId, country, returnToken\)/);
-  assert.match(source,/allowAddressLookup: !demo/);
+  assert.match(source,/allowAddressLookup: true/);
 });
 
 function wizardReturnFixture(returnRoute) {
@@ -176,3 +176,18 @@ test("the company panel keeps a consumed GPS module and clears return breadcrumb
    const input=api.businessPhoneInput(value,"ES");assert.equal(api.validateBusinessPhone(input,"ES",kind).valid,false);assert.match(api.businessPhoneError(input,"ES",kind,"es"),reason);assert.ok(api.businessPhoneError(input,"ES",kind,"en"));
   }
  });
+
+
+test("native street lookup returns a recognizable address after coordinates have been saved",async()=>{
+ const f=gpsFixture();let coordinates;
+ f.adapter.reverseGeocodeAsync=async()=>{assert.ok(coordinates);return [{street:"Calle de prueba",streetNumber:"12",postalCode:"28001",city:"Madrid",region:"Madrid",country:"España"}]};
+ const result=await api.readBusinessDeviceLocation(f.adapter,{allowAddressLookup:true,onCoordinates:value=>{coordinates=plain(value)}});
+ assert.equal(result.status,"address");assert.equal(result.address,"Calle de prueba 12, 28001 Madrid, Madrid, España");assert.deepEqual(plain(result.coordinates),coordinates);
+});
+
+test("locality-only, empty or unsuccessful reverse geocoding never fabricates a street address",async()=>{
+ for(const results of [[],[{city:"Madrid",region:"Madrid",country:"España"}],[{streetNumber:"12",city:"Madrid"}]]){
+  const f=gpsFixture();let writes=0;f.adapter.reverseGeocodeAsync=async()=>results;
+  const result=await api.readBusinessDeviceLocation(f.adapter,{allowAddressLookup:true,onCoordinates:()=>writes++});assert.equal(writes,1);assert.equal(result.status,"coordinates");assert.equal(result.address,undefined);
+ }
+});

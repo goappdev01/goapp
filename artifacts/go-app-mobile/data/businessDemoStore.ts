@@ -1,5 +1,5 @@
 import type { BusinessConfig } from "@/contexts/GoBusinessConfigContext";
-import type { FloorPlan, FloorReservation } from "./floorPlan";
+import type { FloorElement, FloorPlan, FloorReservation } from "./floorPlan";
 import type { Booking, Staff } from "./booking";
 import type { GoEntry } from "@/components/AgendaOperativa";
 
@@ -45,17 +45,90 @@ export function isValidDemoLocalInterval(start: string, end: string, durationMin
 const normalizedDemoName = (value: string) => value.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 const demoNamedId = (businessId: string, kind: "staff" | "service", name: string) => businessId + "_" + kind + "_" + Array.from(name.normalize("NFKC").trim().toLowerCase()).map(char => char.codePointAt(0)!.toString(16)).join("_");
 
+let staffSequence = 0;
+/** Adopt legacy identities once; every later slot keeps its own persisted ID. */
+export function ensureBusinessDemoStaffIds(items: BusinessConfig["plantillaItems"], businessId: string): BusinessConfig["plantillaItems"] {
+  const used = new Set<string>(), prefix = businessId + "_staff_";
+  return items.map(item => ({ ...item, staffIds: Array.from({ length: item.count }, (_, index) => {
+    let id = item.staffIds?.[index];
+    if (id && !id.startsWith(prefix)) throw new Error("Profesional DEMO de otra empresa.");
+    if (!id && !item.staffIds) id = item.staffNames?.[index]?.trim()
+      ? demoNamedId(businessId, "staff", item.staffNames[index])
+      : prefix + "legacy_slot_" + encodeURIComponent(item.id) + "_" + index;
+    if (!id || used.has(id)) id = prefix + "id_" + Date.now().toString(36) + "_" + (++staffSequence).toString(36) + "_" + Math.random().toString(36).slice(2);
+    used.add(id); return id;
+  }) }));
+}
+
+export const businessDemoElementRequiresReview = (element: FloorElement) => !element.demoKind && !element.demoStaffId && element.type === "silla" && element.height === 52;
+export const visibleBusinessDemoElements = (plan: FloorPlan): FloorElement[] => plan.elements.filter(element => !element.demoArchived);
+export function businessDemoProfessionalElement(data: BusinessDemoData, professional: { id: string }): FloorElement | undefined {
+  return data.plan?.elements.find(element => !element.demoArchived && element.demoStaffId === professional.id);
+}
+/** Reconcile identifiable representations; keep ambiguous legacy/physical elements and all history. */
+export function reconcileBusinessDemoProfessionalPlan(data: BusinessDemoData, createMissing = false): void {
+  if (!data.plan) return;
+  const people = getBusinessDemoProfessionals(data.config, data.plan.businessId), ids = new Map(people.map(person => [person.id, person]));
+  const elements = data.plan.elements.map(element => ({ ...element }));
+  const claimed = new Set(elements.filter(element => element.demoStaffId && ids.has(element.demoStaffId)).map(element => element.demoStaffId));
+  for (const element of elements) {
+    if (element.demoStaffId && !element.demoStaffId.startsWith(data.plan.businessId + "_staff_")) throw new Error("Vínculo del plano DEMO de otra empresa.");
+    if (element.demoStaffId || element.demoKind === "physical" || element.demoArchived) continue;
+    const history = data.bookings.filter(booking => booking.elementId === element.id && booking.staffId);
+    const historyIds = [...new Set(history.map(booking => booking.staffId!).filter(id => id.startsWith(data.plan!.businessId + "_staff_")))];
+    let id = historyIds.length === 1 ? historyIds[0] : undefined;
+    // Name matching is a one-time legacy bridge only, never the ongoing identity.
+    if (!id) {
+      const candidates = people.filter(person => !claimed.has(person.id) && normalizedDemoName(person.name) === normalizedDemoName(element.label));
+      if (candidates.length === 1 && elements.filter(value => !value.demoStaffId && normalizedDemoName(value.label) === normalizedDemoName(element.label)).length === 1) id = candidates[0].id;
+    }
+    if (id) {
+      element.demoStaffId = id;
+      const historicalName = history.find(booking => booking.staffId === id)?.professionalName;
+      element.demoKind = element.type === "silla" && element.height === 52
+        && (ids.has(id) || historicalName && normalizedDemoName(historicalName) === normalizedDemoName(element.label)) ? "professional" : "physical";
+      claimed.add(id);
+    }
+  }
+  const assigned = new Set<string>();
+  for (const element of elements) {
+    if (!element.demoStaffId) continue;
+    const person = ids.get(element.demoStaffId);
+    if (!person || assigned.has(element.demoStaffId)) {
+      if (element.demoKind === "professional") { element.demoArchived = true; element.reservable = false; }
+      else { delete element.demoStaffId; }
+      continue;
+    }
+    assigned.add(person.id);
+    if (element.demoKind === "professional") { element.label = person.name; element.demoArchived = false; }
+  }
+  if (createMissing) {
+    let y = Math.max(0, ...elements.filter(element => !element.demoArchived).map(element => element.y + element.height)) + 24;
+    let x = 10;
+    for (const person of people) if (!assigned.has(person.id)) {
+      const width = Math.max(90, person.name.length * 8 + 30);
+      if (x > 10 && x + width > 390) { x = 10; y += 64; }
+      const id = "demo_professional_element_" + person.id;
+      elements.push({ id, type: "silla", label: person.name, capacity: 1, x, y, width, height: 52,
+        status: "disponible", reservable: true, demoStaffId: person.id, demoKind: "professional", demoArchived: false });
+      assigned.add(person.id); x += width + 12;
+    }
+  }
+  data.plan = { ...data.plan, elements };
+}
+
 /** Shared company/professional rules used by both DEMO entry paths. */
 export function getBusinessDemoProfessionals(config: BusinessConfig, businessId: string): Staff[] {
   const result: Staff[] = [], seen = new Set<string>();
   const services = config.services.filter(service => service.name.trim() && service.duration > 0 && Number.isFinite(service.duration) && service.price >= 0);
-  for (const item of config.plantillaItems) for (let index = 0; index < (item.staffNames?.length ?? 0); index++) {
+  for (const item of config.plantillaItems) for (let index = 0; index < Math.min(item.count, item.staffNames?.length ?? 0); index++) {
     const name = item.staffNames![index]?.trim();
-    if (!name || seen.has(normalizedDemoName(name))) continue;
-    seen.add(normalizedDemoName(name));
+    const id = item.staffIds?.[index] ?? demoNamedId(businessId, "staff", name ?? "");
+    if (!name || seen.has(id)) continue;
+    seen.add(id);
     const assigned = item.staffServices?.[index] ?? [];
     const serviceIds = assigned.length ? services.filter(service => assigned.some(value => normalizedDemoName(value) === normalizedDemoName(service.name))).map(service => demoNamedId(businessId, "service", service.name)) : [];
-    result.push({ id: demoNamedId(businessId, "staff", name), businessId, name, emoji: item.emoji,
+    result.push({ id, businessId, name, emoji: item.emoji,
       serviceIds, active: assigned.length === 0 || serviceIds.length > 0 });
   }
   return result;
@@ -109,7 +182,14 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
     if (raw.businessId !== undefined && raw.businessId !== businessId) assertBusiness(raw.businessId);
     const result = freshConfig();
     for (const field of configKeys) if (field in raw) Object.assign(result, { [field]: clone((raw as Record<string, unknown>)[field] ?? null) });
-    result.businessId = businessId; result.isBusinessActive = false; return result;
+    result.businessId = businessId; result.isBusinessActive = false;
+    result.plantillaItems = ensureBusinessDemoStaffIds(result.plantillaItems, businessId);
+    // Preserve individual schedules stored under the older name-derived UI key.
+    for (const person of getBusinessDemoProfessionals(result, businessId)) {
+      const legacy = businessId + "_staff_" + person.name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+      if (result.staffSchedules?.[legacy] && !result.staffSchedules[person.id]) result.staffSchedules[person.id] = clone(result.staffSchedules[legacy]);
+    }
+    return result;
   };
   const reservationBookingId = (reservation: DemoReservation) => reservation.bookingId ?? `demo_floor_booking_${options.companyId ? businessId + "_" : ""}${reservation.id}`;
   const bookingForReservation = (reservation: DemoReservation): DemoBooking => {
@@ -158,7 +238,9 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
       }
       const bookings = parsed.bookings ?? parsed.reservations.filter(r => r.dateISO).map(bookingForReservation);
       for (const booking of bookings) { assertBusiness(booking.businessId); if (booking.customerId !== ownerUserId) throw new Error("Reserva DEMO de otra identidad."); }
-      return { ...parsed, bookings, config: cleanConfig(parsed.config) };
+      const data = { ...parsed, bookings, config: cleanConfig(parsed.config) };
+      reconcileBusinessDemoProfessionalPlan(data);
+      return data;
   };
   const ensureLoaded = async (refresh = false) => {
     if (loaded && (!refresh || observedRevision === (revisions.get(key) ?? 0))) return;
@@ -181,8 +263,8 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     load: () => enqueue(async () => { await ensureLoaded(true); assertAllowed(); return clone(snapshot); }),
-    updateConfig: (patch: Partial<BusinessConfig>) => simpleChange(data => { data.config = cleanConfig({ ...data.config, ...patch }); syncEntries(data); return data; }),
-    transformConfig: (update: (config: BusinessConfig) => BusinessConfig) => simpleChange(data => { data.config = cleanConfig(update(data.config)); syncEntries(data); return data; }),
+    updateConfig: (patch: Partial<BusinessConfig>) => simpleChange(data => { data.config = cleanConfig({ ...data.config, ...patch }); reconcileBusinessDemoProfessionalPlan(data, true); syncEntries(data); return data; }),
+    transformConfig: (update: (config: BusinessConfig) => BusinessConfig) => simpleChange(data => { data.config = cleanConfig(update(data.config)); reconcileBusinessDemoProfessionalPlan(data, true); syncEntries(data); return data; }),
     reset: () => simpleChange(() => fresh()),
     importSnapshot: (value: BusinessDemoData) => simpleChange(() => { const next = decode(JSON.stringify(value)); syncEntries(next); return next; }),
     restoreBackup: () => enqueue(async () => {
@@ -192,7 +274,23 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
       await storage.setItem(key, JSON.stringify(previous)); assertAllowed(); publish(previous);
     }),
     loadFloorPlan: (id: string) => enqueue(async () => { assertBusiness(id); await ensureLoaded(true); assertAllowed(); return clone(snapshot.plan); }),
-    saveFloorPlan: (plan: FloorPlan) => simpleChange(data => { assertBusiness(plan.businessId); assertPlan(plan.id); data.plan = clone(plan); syncEntries(data); return data; }),
+    saveFloorPlan: (plan: FloorPlan) => simpleChange(data => {
+      assertBusiness(plan.businessId); assertPlan(plan.id);
+      const retained = data.plan?.elements.filter(element => element.demoArchived && !plan.elements.some(next => next.id === element.id)) ?? [];
+      data.plan = { ...clone(plan), elements: [...clone(plan.elements), ...retained] };
+      reconcileBusinessDemoProfessionalPlan(data, true); syncEntries(data); return data;
+    }),
+    reconcileProfessionalPlan: () => change(data => {
+      data.plan ??= { id: planId, businessId, elements: [], updatedAt: Date.now() };
+      reconcileBusinessDemoProfessionalPlan(data, true); syncEntries(data); return { data, result: clone(data.plan) };
+    }),
+    classifyLegacyElement: (elementId: string, kind: "professional" | "physical") => simpleChange(data => {
+      const element = data.plan?.elements.find(value => value.id === elementId);
+      if (!["professional", "physical"].includes(kind) || !element || element.demoStaffId) throw new Error("El elemento ya tiene una identidad asignada o no existe.");
+      element.demoKind = kind;
+      if (kind === "professional") { element.demoArchived = true; element.reservable = false; }
+      syncEntries(data); return data;
+    }),
     loadReservations: (id: string) => enqueue(async () => { assertPlan(id); await ensureLoaded(true); assertAllowed(); return clone(snapshot.reservations); }),
     saveReservations: (id: string, reservations: DemoReservation[]) => simpleChange(data => {
       assertPlan(id);
@@ -201,10 +299,7 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
         if (reservation.customerId !== undefined && reservation.customerId !== ownerUserId) throw new Error("Reserva DEMO de otra identidad.");
         const previous = data.reservations.find(value => value.id === reservation.id);
         const element = data.plan?.elements.find(value => value.id === reservation.elementId);
-        const professional = professionals.find((person,index) => {
-          const assigned = data.plan?.elements.find(value => normalizedDemoName(value.label) === normalizedDemoName(person.name)) ?? data.plan?.elements[index];
-          return assigned?.id === element?.id;
-        });
+        const professional = professionals.find(person => businessDemoProfessionalElement(data, person)?.id === element?.id);
         return { ...clone(reservation), customerId: ownerUserId, durationMinutes: reservation.durationMinutes ?? previous?.durationMinutes ?? 30,
           staffId: reservation.staffId ?? previous?.staffId ?? (previous ? undefined : professional?.id),
           professionalName: reservation.professionalName ?? previous?.professionalName ?? (previous ? undefined : professional?.name) };
@@ -221,19 +316,17 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
         if (reservation.status !== "cancelada" && selectionChanged) {
           if (Date.parse(proposed.startDatetime) <= Date.now()) throw new Error("Elige una hora futura para la nueva reserva DEMO.");
           const element = data.plan!.elements.find(value => value.id === reservation.elementId)!;
-          if (!element.reservable || ["bloqueado","ocupado","mantenimiento"].includes(element.status)) throw new Error("Este puesto DEMO no admite una nueva reserva.");
-          const professional = proposed.staffId ? professionals.find(person => person.id === proposed.staffId) : professionals.find((person,index) => {
-            const assigned = data.plan!.elements.find(value => normalizedDemoName(value.label) === normalizedDemoName(person.name)) ?? data.plan!.elements[index];
-            return assigned?.id === element.id;
-          });
+          if (data.config.sectorId && businessDemoElementRequiresReview(element)) throw new Error("Revisa este elemento antiguo del plano antes de asignar nuevas reservas.");
+          if (element.demoArchived || !element.reservable || ["bloqueado","ocupado","mantenimiento"].includes(element.status)) throw new Error("Este puesto DEMO no admite una nueva reserva.");
+          const professional = proposed.staffId ? professionals.find(person => person.id === proposed.staffId)
+            : professionals.find(person => businessDemoProfessionalElement(data, person)?.id === element.id);
           if (proposed.staffId && !professional || professional && !professional.active) throw new Error("Profesional DEMO no disponible para una nueva reserva.");
           if (professional) {
             // Bind old unassigned appointments only when their interval/resource changes, never for a state-only edit.
             reservation.staffId ??= professional.id;
             reservation.professionalName ??= professional.name;
             proposed.staffId = reservation.staffId;
-            const index = professionals.findIndex(person => person.id === professional.id);
-            const assigned = data.plan!.elements.find(value => normalizedDemoName(value.label) === normalizedDemoName(professional.name)) ?? data.plan!.elements[index];
+            const assigned = businessDemoProfessionalElement(data, professional);
             if (assigned?.id !== element.id) throw new Error("El profesional no corresponde a este puesto DEMO.");
           }
           if (reservation.serviceId && reservation.serviceId !== "demo_floor_service") {
@@ -311,7 +404,7 @@ export function getBusinessDemoSetupState(config: BusinessConfig, plan?: FloorPl
     const entry = config.daySchedules?.[String(day)];
     return entry ? [entry.shift1,entry.shift2].filter(shift=>shift?.active).length > 0 && [entry.shift1,entry.shift2].filter(shift=>shift?.active).every(validShift) : validTime(config.openFrom) && validTime(config.openTo) && config.openFrom < config.openTo;
   });
-  const steps = [
+  const validSteps = [
     !!config.businessName?.trim() && !!config.sectorId && !!config.subId,
     located,
     schedule,
@@ -321,6 +414,9 @@ export function getBusinessDemoSetupState(config: BusinessConfig, plan?: FloorPl
     plan === undefined ? marked.has(6) : !!plan?.elements.length && plan.businessId === config.businessId,
     marked.has(7),
   ];
+  // Suggested defaults are not completed work: each DEMO step must be reviewed
+  // and saved for this business. A checkmark alone never makes invalid data ready.
+  const steps = validSteps.map((valid, index) => valid && (!config.businessId?.startsWith("demo_business_") || marked.has(index)));
   const completed = steps.filter(Boolean).length;
   return { steps, completed, total: 8, ready: completed === 8, nextStep: Math.max(0, steps.findIndex(value => !value)) };
 }

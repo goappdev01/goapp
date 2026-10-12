@@ -8,8 +8,8 @@ function load(file,imports={}) { const exports={}; vm.runInNewContext(ts.transpi
 const storeAPI=load("data/businessDemoStore.ts"),catalogAPI=load("data/businessDemoCatalog.ts",{"./businessDemoStore":storeAPI}),repoAPI=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeAPI});
 const plain=value=>JSON.parse(JSON.stringify(value));
 const initial={businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],activeDays:[0,1,2,3,4],openFrom:"09:00",openTo:"20:00",daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};
-function fixture(memory=new Map(),user=owner) { let allowed=true,fail=false; const writes=[], storage={getItem:async key=>memory.get(key)??null,setItem:async(key,value)=>{if(fail)throw Error("disk failure");writes.push(key);memory.set(key,value);}};
- const make=()=>catalogAPI.createBusinessDemoCatalog({ownerUserId:user,storage,canUse:()=>allowed,initialConfig:initial});return {memory,writes,storage,make,catalog:make(),authorize:value=>allowed=value,fail:value=>fail=value}; }
+function fixture(memory=new Map(),user=owner,seed=initial) { let allowed=true,fail=false; const writes=[], storage={getItem:async key=>memory.get(key)??null,setItem:async(key,value)=>{if(fail)throw Error("disk failure");writes.push(key);memory.set(key,value);}};
+ const make=()=>catalogAPI.createBusinessDemoCatalog({ownerUserId:user,storage,canUse:()=>allowed,initialConfig:seed});return {memory,writes,storage,make,catalog:make(),authorize:value=>allowed=value,fail:value=>fail=value}; }
 async function configure(store,name="Test") { await store.updateConfig({businessName:name,address:"Dirección ficticia",sectorId:"belleza",subId:"peluqueria",services:[{name:"Servicio DEMO",duration:30,price:12}],plantillaItems:[{id:"post",label:"Profesional",count:1,staffNames:["Profesional ficticio"]}],completedSteps:[0,1,2,3,4,5,6,7]});await store.saveFloorPlan({id:store.planId,businessId:store.businessId,updatedAt:1,elements:[{id:"space",type:"silla",label:"Profesional ficticio",x:10,y:20,width:90,height:52,capacity:1,status:"disponible",reservable:true}]}); }
 const repository=catalog=>repoAPI.createDemoCatalogBookingRepository(catalog,{now:()=>Date.parse("2030-01-07T08:00:00")});
 async function bookingInput(repo,id){const item=(await repo.getBookableItems(id))[0];return {businessId:id,bookableItemId:item.id,customerId:owner,startDatetime:"2030-01-07T10:00:00",endDatetime:"2030-01-07T10:30:00",peopleCount:1,unitsReserved:1};}
@@ -41,3 +41,51 @@ test("export includes configuration, floor and reservations but no authenticatio
  test("a backup containing a case alias cannot overwrite a company before the merged directory is validated",async()=>{
   const f=fixture();await f.catalog.create("Keep");const id=f.catalog.getSelectedId(),copy=JSON.parse(await f.catalog.exportBackup());copy.companies.find(record=>record.company.id===id).company.id=id.toUpperCase();copy.selected=id.toUpperCase();const before=f.writes.length;await assert.rejects(f.catalog.importBackup(JSON.stringify(copy)));assert.equal(f.writes.length,before);assert.equal(f.catalog.getSelectedStore().getSnapshot().config.businessName,"Keep");
  });
+
+
+test('three configured businesses retain separate staff, specialties, services, floor, bookings and calendars on switch and reopening',async()=>{
+ const f=fixture(),companies=[];
+ for(const name of ['GO PELUQUERÍA','GO RESTAURANTE','Tercer negocio']){
+  const id=await f.catalog.create(name),store=f.catalog.getSelectedStore();await configure(store,name);
+  await store.updateConfig({address:'Dirección local '+name,phone:'912345678',coordinates:{latitude:40,longitude:-3}});
+  companies.push({id,store});
+ }
+ const repo=repository(f.catalog);
+ for(const {store} of companies){const hold=await repo.createHold(await bookingInput(repo,store.businessId));assert.equal(hold.ok,true);await repo.claimSlot({...hold.booking,status:'CONFIRMED'});}
+ const snapshots=companies.map(({store})=>plain(store.getSnapshot()));
+ assert.equal(new Set(companies.map(({store})=>store.businessId)).size,3);
+ assert.equal(repo.getCustomerEntries().length,3);
+ for(let i=0;i<companies.length;i++){
+  await f.catalog.select(companies[i].id);const current=f.catalog.getSelectedStore();assert.deepEqual(plain(current.getSnapshot()),snapshots[i]);
+  assert.equal(current.getSnapshot().entries.length,1);assert.equal(current.getSnapshot().reservations.length,1);assert.equal(current.getSnapshot().entries[0].businessId,current.businessId);
+ }
+ const reopened=f.make();await reopened.load();assert.equal(reopened.getSelectedId(),companies[2].id);
+ for(let i=0;i<companies.length;i++){await reopened.select(companies[i].id);assert.deepEqual(plain(reopened.getSelectedStore().getSnapshot()),snapshots[i]);}
+ assert.equal((await repository(reopened).getMyBookings()).length,3);assert.equal(repository(reopened).getCustomerEntries().length,3);
+ assert.ok(f.writes.every(key=>key.startsWith(storeAPI.businessDemoStorageKey(owner))));
+});
+
+
+test('a third business starts with eight unconfirmed steps even with suggested hours and activity defaults',async()=>{
+ const f=fixture(),prior=[];for(const name of ['GO PELUQUERÍA','GO RESTAURANTE']){const id=await f.catalog.create(name),store=f.catalog.getSelectedStore();await configure(store,name);prior.push([id,JSON.stringify(store.getSnapshot())]);}
+ const thirdId=await f.catalog.create('Tercer negocio independiente'),third=f.catalog.getSelectedStore();
+ assert.equal(storeAPI.getBusinessDemoSetupState(third.getSnapshot().config,third.getSnapshot().plan).completed,0);
+ await third.updateConfig({sectorId:'belleza',subId:'peluqueria',services:[{name:'Servicio sugerido',duration:30,price:12}],plantillaItems:[{id:'puesto',label:'Puesto',count:1}]});
+ assert.deepEqual(plain(storeAPI.getBusinessDemoSetupState(third.getSnapshot().config,null).steps),Array(8).fill(false));
+ await third.updateConfig({completedSteps:[0,2,3,4],services:[{name:'Servicio propio',duration:45,price:17}],plantillaItems:[{id:'puesto',label:'Profesional',count:1,staffNames:['Profesional propio'],staffServices:[['Servicio propio']]}]});
+ const expected=[...prior,[thirdId,JSON.stringify(third.getSnapshot())]];
+ for(const catalog of [f.catalog,f.make(),f.make()]){await catalog.load();for(const [id,doc]of expected){await catalog.select(id);assert.equal(JSON.stringify(catalog.getSelectedStore().getSnapshot()),doc);}}
+ const reopened=f.make();await reopened.load();assert.equal(reopened.getSelectedId(),thirdId);assert.equal(storeAPI.getBusinessDemoSetupState(reopened.getSelectedStore().getSnapshot().config,null).completed,4);
+});
+
+test('fresh business seeds never carry data from a configured business and load never rewrites existing documents',async()=>{
+ const f=fixture();await f.catalog.create('GO PELUQUERÍA');const salon=f.catalog.getSelectedStore();await configure(salon,'GO PELUQUERÍA');await salon.updateConfig({phone:'912345678',mobile:'612345678',whatsapp:'612345678',coordinates:{latitude:40,longitude:-3},staffSchedules:{test:{daySchedules:{}}}});
+ const kept=JSON.stringify(salon.getSnapshot()),seed=plain(salon.getSnapshot().config),seedCopy=JSON.stringify(seed);
+ const second=fixture(f.memory,owner,seed);await second.catalog.load();assert.equal(second.catalog.getSelectedStore().getSnapshot().config.businessName,'GO PELUQUERÍA');
+ const restaurantId=await second.catalog.create('GO RESTAURANTE'),restaurant=second.catalog.getSelectedStore(),blank=restaurant.getSnapshot();
+ for(const [field,expected]of Object.entries({address:'',sectorId:null,subId:null,services:[],plantillaItems:[],staffSchedules:{},completedSteps:[],daySchedules:{}}))assert.deepEqual(plain(blank.config[field]),expected,field);
+ for(const field of ['phone','mobile','whatsapp','coordinates'])assert.equal(blank.config[field],undefined,field);
+ assert.equal(blank.plan,null);assert.equal(blank.reservations.length,0);assert.equal(blank.bookings.length,0);assert.equal(blank.entries.length,0);assert.equal(storeAPI.getBusinessDemoSetupState(blank.config,blank.plan).completed,0);
+ assert.equal(JSON.stringify(seed),seedCopy);assert.equal(JSON.stringify(salon.getSnapshot()),kept);
+ const bytes=Array.from(f.memory),reopened=second.make();await reopened.load();await reopened.getSelectedStore().load();assert.deepEqual(Array.from(f.memory),bytes);assert.equal(reopened.getSelectedId(),restaurantId);assert.equal(reopened.getSelectedStore().getSnapshot().config.address,'');
+});

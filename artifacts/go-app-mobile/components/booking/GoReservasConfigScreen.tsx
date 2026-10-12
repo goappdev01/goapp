@@ -28,7 +28,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useGoLog } from "@/hooks/useGoLog";
-import type { BusinessDemoStore } from "@/data/businessDemoStore";
+import { getBusinessDemoProfessionals, type BusinessDemoStore } from "@/data/businessDemoStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
@@ -156,7 +156,10 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
   const { lang, t }  = useLanguage();
 
   // ── Professional list — built from real plantillaItems, no hardcoded names ──
+  const demoProfessionals = useMemo(() => demoStore ? getBusinessDemoProfessionals(config, demoStore.businessId) : [],
+    [demoStore, config.plantillaItems, config.services]);
   const professionals = useMemo<string[]>(() => {
+    if (demoStore) return ["Todos", "Sin asignar", ...demoProfessionals.map(person => person.id)];
     const names: string[] = ["Todos", "Sin asignar"];
     for (const item of config.plantillaItems) {
       if (item.staffNames && item.staffNames.length > 0) {
@@ -166,7 +169,7 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
       }
     }
     return names;
-  }, [config.plantillaItems]);
+  }, [config.plantillaItems, demoStore, demoProfessionals]);
 
   const [demoDayNightMode, setDemoDayNightMode] = useState<CalDayNightMode>("mixto");
   const actualDayNightMode = demoStore ? demoDayNightMode : dayNightMode;
@@ -356,6 +359,9 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
 
   // ── Professional selector ─────────────────────────────────────────────────
   const [selectedPro, setSelectedPro] = useState<string>("Todos");
+  useEffect(() => {
+    if (demoStore && !professionals.includes(selectedPro)) setSelectedPro("Todos");
+  }, [demoStore, professionals, selectedPro]);
 
   // ── Booking action handlers — persisten en go_log_v1 ──────────────────────
   const handleChangeEstado = useCallback(async (id: string, estado: GoEntry["estado"]) => {
@@ -374,6 +380,10 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
 
   const filteredLog = useMemo<GoEntry[]>(() => {
     if (selectedPro === "Todos") return goLog;
+    if (demoStore) return goLog.filter(entry => {
+      const id = (entry as GoEntry & { staffId?: string }).staffId;
+      return selectedPro === "Sin asignar" ? !id : id === selectedPro;
+    });
     if (selectedPro === "Sin asignar") {
       return goLog.filter(e => {
         const entry = e as GoEntry & { assignedTo?: string };
@@ -392,7 +402,7 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
         entry.assignedTo         === selectedPro
       );
     });
-  }, [goLog, selectedPro]);
+  }, [goLog, selectedPro, demoStore]);
 
   // ── Split drag handle ─────────────────────────────────────────────────────
   const containerH     = useRef(0);
@@ -530,7 +540,7 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
                   style={[g.proChip, { backgroundColor: tk.bg, borderColor: tk.border }, active && { backgroundColor: GREEN, borderColor: GREEN }]}
                 >
                   <Text style={[g.proChipTxt, { color: tk.gray }, active && { color: "#fff" }]}>
-                    {pro === "Todos" ? t("filter_todos") : pro === "Sin asignar" ? t("biz_unassigned_filter") : pro}
+                    {pro === "Todos" ? t("filter_todos") : pro === "Sin asignar" ? t("biz_unassigned_filter") : demoStore ? demoProfessionals.find(person => person.id === pro)?.name : pro}
                   </Text>
                 </TouchableOpacity>
               );

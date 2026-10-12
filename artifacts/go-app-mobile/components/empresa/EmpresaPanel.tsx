@@ -3,6 +3,9 @@ import {
   View,
   Text,
   PanResponder,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   TouchableOpacity,
   TextInput,
@@ -254,6 +257,8 @@ interface EmpresaPanelProps {
   /** Owner-only isolated context; configuration/bookings use the DEMO adapter when available. */
   previewReadOnly?: boolean;
   onOpenContext?: () => void;
+  initialCompaniesOpen?: boolean;
+  onDemoNavigate?: (route: "configuration" | "companies") => void;
 }
 
 // Modules that require Empresa Verificada to access.
@@ -285,7 +290,7 @@ function computeConfigProgress(cfg: typeof import("@/contexts/GoBusinessConfigCo
   return { ...progress, statusColor, statusDot };
 }
 
-export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, guidanceLevel = 5, onOpenVerificacion, onFinalizarWizard, previewReadOnly = false, onOpenContext }: EmpresaPanelProps) {
+export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, guidanceLevel = 5, onOpenVerificacion, onFinalizarWizard, previewReadOnly = false, onOpenContext, initialCompaniesOpen = false, onDemoNavigate }: EmpresaPanelProps) {
   const insets  = useSafeAreaInsets();
   const { t, locale, lang } = useLanguage();
   const SUITES = useMemo(() => getSuites(t), [t]);
@@ -317,7 +322,16 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   const [activacionVisible,  setActivacionVisible]  = useState(false);
   // Clave que cambia con cada «Nueva empresa» — fuerza remontaje limpio del wizard
   const [newEmpresaKey, setNewEmpresaKey] = useState(0);
-  const [demoManagerOpen, setDemoManagerOpen] = useState(false);
+  const [demoManagerOpen, setDemoManagerOpen] = useState(initialCompaniesOpen);
+  const [openSelectedConfig, setOpenSelectedConfig] = useState(demo && initialModulo === "empresa_config");
+  const [configKeyboardVisible, setConfigKeyboardVisible] = useState(false);
+  useEffect(() => {
+    if (!panelVisible || !(modulo === "empresa_config" || demo && modulo === "home" && demoManagerOpen)) { setConfigKeyboardVisible(false); return; }
+    setConfigKeyboardVisible(Keyboard.isVisible());
+    const show = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", () => setConfigKeyboardVisible(true));
+    const hide = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", () => setConfigKeyboardVisible(false));
+    return () => { show.remove(); hide.remove(); };
+  }, [panelVisible, modulo, demo, demoManagerOpen]);
 
   const MODULOS = useMemo(() => getModulos(t).filter(m => m.key !== "admin" || canOpenAdmin), [t, canOpenAdmin]);
 
@@ -487,6 +501,16 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
     }
     try { if (!previewReadOnly) onModuloChange?.(); } catch { /* silencioso */ }
   };
+  const openDemoConfiguration = () => {
+    setDemoManagerOpen(false); setConfigInitialStep(0); setOpenSelectedConfig(true);
+    setNewEmpresaKey(key => key + 1); setCurrentSuite("reservas");
+    if (onDemoNavigate) { setModulo("empresa_config"); slideAnim.setValue(0); onDemoNavigate("configuration"); }
+    else goToModulo("empresa_config");
+  };
+  const openDemoBusinesses = () => {
+    clearLocationReturn(); setModulo("home"); setCurrentSuite(null); setDemoManagerOpen(true);
+    onDemoNavigate?.("companies");
+  };
   goHomeRef.current = goHome;
 
   const moduloActual = MODULOS.find(m => m.key === modulo);
@@ -542,7 +566,9 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
       onRequestClose={closePanel}
     >
       <StatusBar style="dark" />
-      <View style={[s.root, { paddingTop: insets.top }]} {...rightSwipePan.panHandlers}>
+      <KeyboardAvoidingView style={[s.root, { paddingTop: insets.top }]} {...rightSwipePan.panHandlers}
+        testID="empresa-keyboard-frame" enabled={modulo === "empresa_config" || demo && demoManagerOpen}
+        behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={0}>
 
         {/* ── Drag handle — purely visual, no gesture ── */}
         <View style={s.handleZone}>
@@ -556,7 +582,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
           </TouchableOpacity>
         )}
 
-        {demo && modulo === "home" && currentSuite === null && <DemoCompanyManager open={demoManagerOpen} onOpenChange={setDemoManagerOpen} />}
+        {demo && modulo === "home" && <DemoCompanyManager open={demoManagerOpen} onOpenChange={setDemoManagerOpen} onOpenConfiguration={openDemoConfiguration} />}
 
         {/* ── Centered header — oculto en empresa_config (el asistente tiene su propia cabecera) ── */}
         {modulo !== "empresa_config" ? (
@@ -634,7 +660,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                 })()}
 
                 {/* ── Nueva empresa — siempre desde cero, sin heredar datos ── */}
-                <TouchableOpacity
+                {!demo && <TouchableOpacity
                   activeOpacity={0.75}
                   onPress={() => {
                     if (previewReadOnly && !demo) { showPreviewUnavailable(); return; }
@@ -674,7 +700,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                 >
                   <Feather name="plus" size={11} color="#4A80BD" />
                   <Text style={{ fontSize: 11, fontWeight: "700", color: "#4A80BD", letterSpacing: 0.5 }}>{t("biz_panel_new")}</Text>
-                </TouchableOpacity>
+                </TouchableOpacity>}
               </>
             ) : modulo === "home" && currentSuite !== null ? (
               // Suite sub-home header
@@ -804,7 +830,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             ) : currentSuite === "reservas" ? (
               // ── GO Reservas sub-view: Configuración + Daily operations ──
               (() => {
-                const { completed, total, nextStep, statusColor, statusDot } = computeConfigProgress(businessConfig);
+                const { completed, total, nextStep, statusColor, statusDot } = computeConfigProgress(businessConfig, demo ? businessDemo?.getSnapshot().plan : undefined);
                 const isAllDone = completed === total;
                 const progressFraction = completed / total;
                 return (
@@ -993,7 +1019,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             {modulo === "orbitas"         && <OrbitasScreen     guidanceLevel={guidanceLevel} />}
             {modulo === "consumo"         && <ConsumoScreen     guidanceLevel={guidanceLevel} />}
             {modulo === "zonas"           && <ZonasScreen       guidanceLevel={guidanceLevel} />}
-            {modulo === "empresa_config"   && <EmpresaConfigScreen   key={`ec-${newEmpresaKey}`} onBack={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} onFinalizarConfig={() => { goHome(); if (previewReadOnly) return; if (onFinalizarWizard) { onFinalizarWizard(); } else { setActivacionVisible(true); } }} initialStep={configInitialStep} goPrevRef={modulePrevRef} />}
+            {modulo === "empresa_config"   && <EmpresaConfigScreen   key={`ec-${businessDemo?.businessId ?? "live"}-${newEmpresaKey}`} keyboardManagedByParent startAtSteps={demo && openSelectedConfig} onOpenCompanies={demo ? openDemoBusinesses : undefined} onBack={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} onFinalizarConfig={() => { goHome(); if (previewReadOnly) return; if (onFinalizarWizard) { onFinalizarWizard(); } else { setActivacionVisible(true); } }} initialStep={configInitialStep} goPrevRef={modulePrevRef} />}
             {modulo === "reservas_config"  && (demo ? <GoReservasDemoScreen onClose={goHome} hideFAB={true} /> : <GoReservasConfigScreen onClose={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} hideFAB={true} />)}
             {modulo === "deportes_screen"  && <GoDeportesScreen onClose={goHome} onOpenBooking={(_id, _label, _emoji, _color) => { goToModulo("reservas_config"); }} onOpenVerificacion={onOpenVerificacion} />}
 
@@ -1020,13 +1046,13 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
         ) : null}
 
         {/* ── FABs flotantes — arrastrable con long-press ──────────────────── */}
-        {previewReadOnly ? (
+        {!configKeyboardVisible && (previewReadOnly ? (
           <View style={{ position: "absolute", right: 20, bottom: fabBottom, gap: 8 }}>{fabButtons}</View>
         ) : (
           <DraggableFAB screenKey="empresa" buttonKey="main" initialRight={20} initialBottom={fabBottom} maxH={90}>
             {fabButtons}
           </DraggableFAB>
-        )}
+        ))}
 
         {/* ── GUÍA GESTUAL DERECHA — indica zona de cerrar/minimizar ──────
             pointerEvents="none": puramente decorativa, nunca bloquea toques.
@@ -1046,7 +1072,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
           }}
         />
 
-      </View>
+      </KeyboardAvoidingView>
 
       {/* ── Fase de activación y cobros — independiente del asistente ── */}
       {!previewReadOnly && <ActivacionCobrosScreen

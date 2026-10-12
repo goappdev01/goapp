@@ -390,6 +390,7 @@ export type PlantillaItem = {
   emoji: string;
   label: string;
   count: number;
+  staffIds?: string[];        // stable DEMO identity per slot; preserved across renames/reordering
   staffNames?: string[];      // nombre de cada profesional/puesto (length == count)
   staffServices?: string[][]; // servicios seleccionados por slot (length == count)
   staffEmojis?: string[];     // icono individual por slot (length == count)

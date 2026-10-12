@@ -36,7 +36,7 @@ import * as Location from "expo-location";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { COUNTRY_CONFIGS, MARKET_STORAGE_KEY, type Market } from "@/utils/countryConfig";
 import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
-import { getBusinessDemoSetupState } from "@/data/businessDemoStore";
+import { getBusinessDemoSetupState, ensureBusinessDemoStaffIds } from "@/data/businessDemoStore";
 import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
@@ -150,9 +150,15 @@ export async function readBusinessDeviceLocation(adapter: DeviceLocationAdapter,
   await options.onCoordinates(coordinates);
   if (options.allowAddressLookup) {
     try {
-      const [geo] = await adapter.reverseGeocodeAsync(coordinates);
-      const address = [geo?.street, geo?.streetNumber, geo?.city, geo?.region].filter(Boolean).join(", ");
-      if (address) return { status: "address", coordinates, address };
+      const results = await adapter.reverseGeocodeAsync(coordinates);
+      // A locality/province alone cannot identify a business address reliably.
+      const geo = results.find(value => value.street?.trim());
+      if (geo) {
+        const street = [geo.street?.trim(), geo.streetNumber?.trim()].filter(Boolean).join(" ");
+        const city = [geo.postalCode?.trim(), geo.city?.trim() ?? geo.district?.trim()].filter(Boolean).join(" ");
+        const address = [...new Set([street, city, geo.region?.trim(), geo.country?.trim()].filter(Boolean))].join(", ");
+        if (address) return { status: "address", coordinates, address };
+      }
     } catch { /* Coordinates already persist; the user can enter an address manually. */ }
   }
   return { status: "coordinates", coordinates };
@@ -222,11 +228,78 @@ interface EmpresaConfigScreenProps {
   onOpenVerificacion?: () => void;
   onFinalizarConfig?:  () => void;
   initialStep?:        number;
+  onOpenCompanies?:    () => void;
+  keyboardManagedByParent?: boolean;
+  startAtSteps?:       boolean;
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarConfig, initialStep = 0, goPrevRef }: EmpresaConfigScreenProps & { goPrevRef?: React.MutableRefObject<(() => void) | null> }) {
+type StepSaveRef = React.MutableRefObject<(() => Promise<void>) | null>;
+
+/** Keep the newest edit while AsyncStorage acknowledges older queued writes. */
+function useConfigArrayDraft<D, S>(saved: S[], hydrate: (saved: S[]) => D[], serialize: (draft: D[]) => S[],
+  persist: (saved: S[]) => void | Promise<void>) {
+  const [draft, setDraft] = useState(() => hydrate(saved));
+  const latest = useRef(draft);
+  const observed = useRef(JSON.stringify(saved));
+  const saving = useRef(false);
+  const saveSequence = useRef(0);
+  const pendingSave = useRef<Promise<void>>(Promise.resolve());
+  const adapters = useRef({ hydrate, serialize, persist });
+  adapters.current = { hydrate, serialize, persist };
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const setValue = useCallback((value: D[] | ((previous: D[]) => D[])) => {
+    const next = typeof value === "function" ? value(latest.current) : value;
+    const before = JSON.stringify(adapters.current.serialize(latest.current));
+    latest.current = next;
+    if (mounted.current) setDraft(next);
+    const payload = adapters.current.serialize(next), signature = JSON.stringify(payload);
+    if (signature !== before) {
+      saving.current = true;
+      const sequence = ++saveSequence.current;
+      try { pendingSave.current = Promise.resolve(adapters.current.persist(payload)); }
+      catch (error) { pendingSave.current = Promise.reject(error); }
+      // Only completion of the latest write can acknowledge the draft, even if values repeat.
+      // Keep the original promise so Next/Save cannot claim success after a failed write.
+      void pendingSave.current.then(
+        () => { if (sequence === saveSequence.current) saving.current = false; },
+        error => Alert.alert("Configuración", error instanceof Error ? error.message : String(error)),
+      );
+    }
+    return pendingSave.current;
+  }, []);
+  useEffect(() => {
+    const signature = JSON.stringify(saved);
+    if (signature === observed.current) return;
+    observed.current = signature;
+    // Queued acknowledgements must not replace a newer edit. A matching saved value
+    // also keeps empty draft rows and their input IDs after the write has completed.
+    if (saving.current || signature === JSON.stringify(adapters.current.serialize(latest.current))) return;
+    latest.current = adapters.current.hydrate(saved);
+    setDraft(latest.current);
+  }, [saved]);
+  const flush = useCallback(() => pendingSave.current, []);
+  const getDraft = useCallback(() => latest.current, []);
+  return { draft, setValue, flush, getDraft };
+}
+
+/** Flush focused fields before Next and on closure, without writing during hydration. */
+function useStepSave(saveRef: StepSaveRef | undefined, flush: () => Promise<void>) {
+  const latest = useRef(flush);
+  latest.current = flush;
+  useEffect(() => {
+    const save = () => latest.current();
+    if (saveRef) saveRef.current = save;
+    return () => {
+      if (saveRef?.current === save) saveRef.current = null;
+      void save().catch(() => {}); // The field writer reports persistence errors.
+    };
+  }, [saveRef]);
+}
+
+export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarConfig, initialStep = 0, goPrevRef, onOpenCompanies, keyboardManagedByParent = false, startAtSteps = false }: EmpresaConfigScreenProps & { goPrevRef?: React.MutableRefObject<(() => void) | null> }) {
   const insets = useSafeAreaInsets();
   const { t, lang } = useLanguage();
   const STEPS = buildStepsCfg(t);
@@ -240,8 +313,10 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
   // sector y actividad antes de acceder a los 8 pasos.  Si sectorId/subId ya
   // existen de una sesión anterior aparecen pre-seleccionados, pero el flujo
   // solo recupera una ruta previa tras el permiso GPS del mismo propietario.
-  const [phase, setPhase] = useState<"activity" | "steps">(() => resumeLocation?.phase ?? "activity");
+  const [phase, setPhase] = useState<"activity" | "steps">(() => resumeLocation?.phase ?? (startAtSteps && config.sectorId && config.subId ? "steps" : "activity"));
   const [localSector, setLocalSector] = useState<Sector | null>(null);
+  const [localSubId, setLocalSubId] = useState(config.subId ?? null);
+  const stepSaveRef = useRef<(() => Promise<void>) | null>(null);
 
   const [currentStep,    setCurrentStep]    = useState(() => resumeLocation?.step ?? Math.min(Math.max(initialStep, 0), STEPS.length - 1));
   const [planoEditorOpen, setPlanoEditorOpen] = useState(false);
@@ -250,8 +325,35 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
   // el usuario ha visto la sección CONTACTO o ha rellenado al menos un campo.
   const [contactSectionSeen, setContactSectionSeen] = useState(false);
   const scrollRef   = useRef<ScrollView>(null);
+  const scrollContentRef = useRef<View>(null);
   const slideAnim   = useRef(new Animated.Value(0)).current;
   const headerAnim  = useRef(new Animated.Value(1)).current;
+  const activeNewInput = useRef<TextInput | null>(null);
+  const revealProfessional = useCallback((input: TextInput) => {
+    activeNewInput.current = input;
+    const content = scrollContentRef.current;
+    if (content) input.measureLayout(content, (_x, y) => {
+      scrollRef.current?.scrollTo({ y: Math.max(0, y - 24), animated: true });
+    }, () => {});
+  }, []);
+  useEffect(() => { activeNewInput.current = null; }, [currentStep]);
+  const companyTransitionBusy = useRef(false);
+  const [openingCompanies, setOpeningCompanies] = useState(false);
+  const openCompanies = async () => {
+    if (!onOpenCompanies || companyTransitionBusy.current) return;
+    companyTransitionBusy.current = true; setOpeningCompanies(true);
+    try {
+      await stepSaveRef.current?.(); // Commit a focused name/service before unmounting.
+      await demo?.load(); // Drain the current company's queued scalar edits as well.
+      Keyboard.dismiss(); onOpenCompanies();
+    } catch (error) {
+      Alert.alert(lang === "en" ? "Could not save" : "No se pudo guardar", error instanceof Error ? error.message : String(error));
+    } finally { companyTransitionBusy.current = false; setOpeningCompanies(false); }
+  };
+  const companyNavigation = onOpenCompanies ? <TouchableOpacity testID="config-company-list" accessibilityRole="button"
+    disabled={openingCompanies} onPress={() => void openCompanies()} style={{ paddingHorizontal: 18, paddingVertical: 10 }}>
+    <Text style={{ color: BLUE, fontWeight: "700" }}>{lang === "en" ? "My businesses" : "Mis negocios"} ▾</Text>
+  </TouchableOpacity> : null;
 
   const currentSector = SECTORS.find(s => s.id === config.sectorId) ?? null;
   const currentSub    = currentSector?.subs.find(s => s.id === config.subId) ?? null;
@@ -279,10 +381,23 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
 
   const advanceBusy = useRef(false);
   const [isAdvancing, setIsAdvancing] = useState(false);
-  const advanceStep = async () => {
+  const advanceStep = async (allowUnnamed = false) => {
     if (advanceBusy.current) return;
     advanceBusy.current = true; setIsAdvancing(true);
     try {
+      await stepSaveRef.current?.();
+      const savedConfig = demo?.getSnapshot().config ?? config;
+      if (currentStep === 4 && !allowUnnamed && PEOPLE_SECTORS.has(SUB_TO_SECTOR[savedConfig.subId ?? ""] ?? "")) {
+        const totalSlots = savedConfig.plantillaItems.reduce((sum, item) => sum + item.count, 0);
+        const namedSlots = savedConfig.plantillaItems.reduce((sum, item) => sum + (item.staffNames?.filter(name => name.trim()).length ?? 0), 0);
+        if (namedSlots < totalSlots) {
+          Alert.alert(t("biz_unnamed_slots_title"), t("biz_unnamed_slots_msg"), [
+            { text: t("biz_add_names"), style: "cancel" },
+            { text: t("biz_continue_anyway"), onPress: () => advanceStep(true) },
+          ]);
+          return;
+        }
+      }
       if (currentStep === 1) {
         const country = resolveBusinessPhoneCountry(config.countryCode);
         const validContacts = validateBusinessPhone(config.phone ?? "", country, "landline").valid
@@ -315,29 +430,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
     } finally { advanceBusy.current = false; setIsAdvancing(false); }
   };
 
-  const goNext = () => {
-    // Paso 4 (espacios/profesionales) — sector de personas: avisar si hay puestos sin nombre
-    if (currentStep === 4) {
-      const sectorId = SUB_TO_SECTOR[config.subId ?? ""] ?? "";
-      if (PEOPLE_SECTORS.has(sectorId)) {
-        const totalSlots  = config.plantillaItems.reduce((s, it) => s + it.count, 0);
-        const namedSlots  = config.plantillaItems.reduce((s, it) =>
-          s + (it.staffNames?.filter(n => n.trim()).length ?? 0), 0);
-        if (namedSlots < totalSlots) {
-          Alert.alert(
-            t("biz_unnamed_slots_title"),
-            t("biz_unnamed_slots_msg"),
-            [
-              { text: t("biz_add_names"), style: "cancel" },
-              { text: t("biz_continue_anyway"), onPress: advanceStep },
-            ]
-          );
-          return;
-        }
-      }
-    }
-    advanceStep();
-  };
+  const goNext = () => { void advanceStep(); };
 
   // ── goPrev unificado — gestiona todos los niveles de la ruta real ─────────
   // Activity / sector vista       → onBack() (suite home)
@@ -348,7 +441,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
     if (phase === "activity") {
       if (localSector !== null) {
         setLocalSector(null);
-        updateConfig({ sectorId: null, subId: null, plantillaItems: [] });
+        setLocalSubId(config.subId ?? null);
       } else {
         onBack();
       }
@@ -376,10 +469,13 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
     const onShow = Keyboard.addListener(showEvent, () => {
       Animated.timing(headerAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
     });
+    const onDidShow = Keyboard.addListener("keyboardDidShow", () => {
+      if (activeNewInput.current?.isFocused()) revealProfessional(activeNewInput.current);
+    });
     const onHide = Keyboard.addListener(hideEvent, () => {
       Animated.timing(headerAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
     });
-    return () => { onShow.remove(); onHide.remove(); };
+    return () => { onShow.remove(); onHide.remove(); onDidShow.remove(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -391,11 +487,12 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
 
     return (
       <View style={c.root}>
+        {companyNavigation}
         {/* Header — sin flecha top-left; navegación via FAB flotante */}
         <View style={c.header}>
           <View style={{ width: 36 }} />
           <View style={c.headerCenter}>
-            <Text style={c.headerTitle}>{t("biz_my_business")}</Text>
+            <Text testID="config-business-name" style={c.headerTitle}>{config.businessName?.trim() || t("biz_my_business")}</Text>
             {activeSector && (
               <Text style={[c.headerSub, { color: activeSector.color }]}>
                 {activeSector.emoji} {activeSector.label}{activeSub ? ` · ${activeSub.name}` : ""}
@@ -414,18 +511,12 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
         >
           <Step0Actividad
             sector={localSector}
-            setSector={(s) => {
-              setLocalSector(s);
-              if (!s) updateConfig({ sectorId: null, subId: null, plantillaItems: [] });
-              else updateConfig({ sectorId: s.id });
-            }}
-            subId={config.subId ?? null}
+            setSector={setLocalSector}
+            subId={localSubId}
             setSubId={(id) => {
-              if (id && localSector) {
-                resetToSubActivity(localSector.id, id);
-              } else {
-                updateConfig({ subId: null });
-              }
+              // Sector browsing/back is a visual draft; only a confirmed activity writes configuration.
+              setLocalSubId(id);
+              if (id && localSector) resetToSubActivity(localSector.id, id);
             }}
             onSubConfirmed={() => { setCurrentStep(Math.min(Math.max(initialStep, 0), STEPS.length - 1)); setPhase("steps"); }}
           />
@@ -446,7 +537,9 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
       style={c.root}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={insets.top}
+      enabled={!keyboardManagedByParent}
     >
+      {companyNavigation}
 
       {/* ── Animated step area — header + steps bar scroll with content ── */}
       <Animated.View style={[c.contentWrap, {
@@ -469,6 +562,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
             }
           }}
         >
+          <View ref={scrollContentRef} collapsable={false} testID="config-scroll-content">
           {/* Header — colapsa con teclado y al hacer scroll */}
           <Animated.View style={{
             opacity:   headerAnim,
@@ -478,7 +572,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
             <View style={c.header}>
               <View style={{ width: 36 }} />
               <View style={c.headerCenter}>
-                <Text style={c.headerTitle}>{t("biz_my_business")}</Text>
+                <Text testID="config-business-name" style={c.headerTitle}>{config.businessName?.trim() || t("biz_my_business")}</Text>
                 {currentSector && (
                   <Text style={[c.headerSub, { color: currentSector.color }]}>
                     {currentSector.emoji} {getSectorLabel(currentSector, lang)}{currentSub ? ` · ${getSubName(currentSub, lang)}` : ""}
@@ -534,8 +628,8 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
             {currentStep === 0 && <StepNombre />}
             {currentStep === 1 && <StepUbicacion />}
             {currentStep === 2 && <StepHorario currentSector={currentSector} />}
-            {currentStep === 3 && <StepServicios currentSector={currentSector} />}
-            {currentStep === 4 && <StepEspacios currentSector={currentSector} />}
+            {currentStep === 3 && <StepServicios currentSector={currentSector} saveRef={stepSaveRef} />}
+            {currentStep === 4 && <StepEspacios currentSector={currentSector} saveRef={stepSaveRef} onRevealProfessional={revealProfessional} />}
             {currentStep === 5 && <StepReservas />}
             {currentStep === 6 && <StepPlano currentSector={currentSector} onOpenEditor={() => setPlanoEditorOpen(true)} />}
             {currentStep === 7 && (
@@ -545,6 +639,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
                 onGoToActivity={() => setPhase("activity")}
               />
             )}
+          </View>
           </View>
         </ScrollView>
       </Animated.View>
@@ -660,25 +755,31 @@ function StepUbicacion() {
     if (gpsInFlight.current) return;
     gpsInFlight.current = true; setGpsBusy(true);
     let returnToken: number | undefined;
+    const addressBeforeLookup = demo?.getSnapshot().config.address ?? config.address;
     try {
       if (demo) returnToken = beginLocationReturn(demo.getSnapshot().ownerUserId);
       const result = await readBusinessDeviceLocation(Location, {
-        // DEMO uses the device GPS; it does not contact an address lookup service.
-        allowAddressLookup: !demo,
+        // Use Expo's native reverse geocoder in DEMO too; no new API or business write.
+        allowAddressLookup: true,
         onCoordinates: coordinates => demo
           ? saveDeviceCoordinates(coordinates, demo.getSnapshot().ownerUserId, country, returnToken)
           : persist({ coordinates, countryCode: country }),
       });
+      if (!demo && !stepMounted.current) return;
+      if (result.status === "address") {
+        // The permission prompt may have remounted this step. Save to the captured,
+        // owner-guarded DEMO company even then, without overwriting a manual edit.
+        const currentAddress = demo?.getSnapshot().config.address ?? config.address;
+        if (currentAddress === addressBeforeLookup) await persist({ address: result.address });
+      }
       if (!stepMounted.current) return;
       if (result.status === "denied") {
         Alert.alert(lang === "en" ? "Location permission denied" : "Permiso de ubicación denegado",
           lang === "en" ? "You can enter the business address manually." : "Puedes introducir la dirección del negocio manualmente.");
-      } else if (result.status === "address") {
-        await persist({ address: result.address });
-      } else {
+      } else if (result.status === "coordinates") {
         Alert.alert(lang === "en" ? "Coordinates saved" : "Coordenadas guardadas",
           lang === "en" ? "Address lookup is unavailable here. Enter the address manually; the coordinates remain saved."
-            : "La conversión a dirección no está disponible aquí. Introduce la dirección manualmente; las coordenadas quedan guardadas.");
+            : "No se ha encontrado una dirección precisa. Introduce o confirma la dirección manualmente; las coordenadas quedan guardadas.");
       }
     } catch {
       if (!stepMounted.current) return;
@@ -714,6 +815,9 @@ function StepUbicacion() {
           placeholder={t("biz_address_placeholder")} placeholderTextColor={DIM} returnKeyType="done" autoFocus maxLength={120} />
         {config.coordinates && <Text style={{ color: GRAY, fontSize: 12, marginTop: 8 }}>
           {config.coordinates.latitude.toFixed(5)}, {config.coordinates.longitude.toFixed(5)}
+        </Text>}
+        {config.coordinates && !config.address?.trim() && <Text style={{ color: GRAY, fontSize: 12, marginTop: 8 }}>
+          {lang === "en" ? "Enter or confirm the business address manually." : "Introduce o confirma la dirección del negocio manualmente."}
         </Text>}
       </View>
       <TouchableOpacity activeOpacity={0.85} disabled={gpsBusy} onPress={handleGPS} style={[c.gpsBtn, gpsBusy && { opacity: 0.5 }]}>
@@ -1053,10 +1157,12 @@ function StepHorario({ currentSector }: { currentSector: Sector | null }) {
 
 function ProfessionalScheduleSection({
   staffName,
+  staffId,
   businessId,
   color,
 }: {
   staffName: string;
+  staffId?: string;
   businessId: string;
   color: string;
 }) {
@@ -1067,7 +1173,7 @@ function ProfessionalScheduleSection({
   const [expanded,    setExpanded]    = useState(false);
   const [selectedDay, setSelectedDay] = useState(0);
 
-  const stableId = `${businessId}_staff_${staffName.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "")}`;
+  const stableId = staffId ?? `${businessId}_staff_${staffName.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "")}`;
 
   const schedCfg: StaffScheduleConfig = (config.staffSchedules ?? {})[stableId] ?? {
     useCompanySchedule: true,
@@ -1317,9 +1423,11 @@ function ProfessionalScheduleSection({
   );
 }
 
-function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
+function StepEspacios({ currentSector, saveRef, onRevealProfessional }: {
+  currentSector: Sector | null; saveRef?: StepSaveRef; onRevealProfessional?: (input: TextInput) => void;
+}) {
   const { t, lang } = useLanguage();
-  const { config, updateConfig } = useBusinessConfig();
+  const { config, updateConfig, demo } = useBusinessConfig();
   const [addingNew,    setAddingNew]    = useState(false);
   const [newLabel,     setNewLabel]     = useState("");
   const [newEmoji,     setNewEmoji]     = useState("🪑");
@@ -1340,42 +1448,44 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
   // Draft names: while the user is typing, we only update this local map.
   // The real patchStaffName is only called on blur / submit to avoid creating
   // partial-name professionals on every keystroke.
-  const [draftNames, setDraftNames] = useState<Record<string, string>>({});
-
-  // ── LOCAL state for items — avoids stale-closure bugs on remove→add cycles ──
-  const [items, setItemsLocal] = useState<PlantillaItem[]>(() => config.plantillaItems);
-
-  // Tracks whether the latest items change came from a local user interaction
-  // (vs. a sync from the context). Only local changes should write back to config.
-  const localChangedRef = useRef(false);
-
-  // setItems marks the change as local, then updates state.
-  // NOTE: updateConfig is NOT called here (inside the updater) to avoid the
-  // React anti-pattern of triggering a second setState from inside a state
-  // updater, which in React 18 concurrent mode can fire multiple times.
-  const setItems = useCallback((fn: PlantillaItem[] | ((prev: PlantillaItem[]) => PlantillaItem[])) => {
-    localChangedRef.current = true;
-    setItemsLocal(fn);
+  const staffDraftKey = (item: PlantillaItem, index: number) => item.staffIds?.[index] ?? item.id + "_" + index;
+  const [draftNames, setDraftNamesLocal] = useState<Record<string, string>>({});
+  const draftNamesRef = useRef(draftNames);
+  const professionalInputs = useRef(new Map<string, TextInput>());
+  const pendingReveal = useRef<string | null>(null);
+  const lastCreatedProfessional = useRef<string | null>(null);
+  const addingProfessionalRef = useRef(false);
+  const [addingProfessional, setAddingProfessional] = useState(false);
+  const focusProfessional = (key: string) => {
+    const input = professionalInputs.current.get(key);
+    if (!input) return false;
+    input.focus(); onRevealProfessional?.(input); return true;
+  };
+  const setDraftNames = useCallback((value: Record<string, string> | ((previous: Record<string, string>) => Record<string, string>)) => {
+    draftNamesRef.current = typeof value === "function" ? value(draftNamesRef.current) : value;
+    setDraftNamesLocal(draftNamesRef.current);
   }, []);
 
-  // After every render, if items changed locally, persist to config.
-  // This runs AFTER the render, outside any updater, so it is safe.
-  useEffect(() => {
-    if (!localChangedRef.current) return;
-    localChangedRef.current = false;
-    updateConfig({ plantillaItems: items });
-  }, [items, updateConfig]);
-
-  // If context is reset externally (e.g. resetToSubActivity), pull the latest
-  // value in. Mark as NOT local so the above effect does not write it back.
-  const prevConfigItems = useRef(config.plantillaItems);
-  useEffect(() => {
-    if (config.plantillaItems !== prevConfigItems.current) {
-      prevConfigItems.current = config.plantillaItems;
-      // localChangedRef.current stays false → the save effect will be a no-op
-      setItemsLocal(config.plantillaItems);
-    }
-  }, [config.plantillaItems]);
+  const saveItems = useCallback((plantillaItems: PlantillaItem[]) => demo
+    ? demo.updateConfig({ plantillaItems }) : updateConfig({ plantillaItems }), [demo, updateConfig]);
+  const withIds = useCallback((value: PlantillaItem[]) => demo ? ensureBusinessDemoStaffIds(value, demo.businessId) : value, [demo]);
+  const { draft: items, setValue: setDraftItems, flush: flushItems, getDraft: getItems } = useConfigArrayDraft(
+    config.plantillaItems, withIds, value => value, saveItems);
+  const setItems = useCallback((value: PlantillaItem[] | ((previous: PlantillaItem[]) => PlantillaItem[])) =>
+    setDraftItems(previous => withIds(typeof value === "function" ? value(previous) : value)), [setDraftItems, withIds]);
+  const flushNames = useCallback(() => {
+    const drafts = draftNamesRef.current;
+    if (!Object.keys(drafts).length) return flushItems();
+    return setItems(getItems().map(item => {
+      const names = [...(item.staffNames ?? Array.from({ length: item.count }, () => ""))];
+      for (let index = 0; index < item.count; index++) {
+        const name = drafts[staffDraftKey(item, index)];
+        if (name !== undefined) names[index] = name.trim().length >= 3 ? name.trim() : "";
+      }
+      return { ...item, staffNames: names };
+    }));
+  }, [flushItems, getItems, setItems]);
+  useStepSave(saveRef, flushNames);
 
   const color    = currentSector?.color ?? BLUE;
   const addLabel = getAddLabel(config.subId);
@@ -1398,7 +1508,7 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
       const newCount      = it.count - 1;
       if (newCount <= 0) {
         // For people sectors, keep the container so "Add professional" stays visible.
-        if (isPeople) return [{ ...it, count: 0, staffNames: [], staffServices: [], staffEmojis: [] }];
+        if (isPeople) return [{ ...it, count: 0, staffNames: [], staffServices: [], staffEmojis: [], ...(demo ? { staffIds: [] } : {}) }];
         return [];
       }
       const staffNames    = [...(it.staffNames ?? [])];
@@ -1407,24 +1517,40 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
       staffServices.splice(slotIdx, 1);
       const staffEmojis   = [...(it.staffEmojis ?? [])];
       staffEmojis.splice(slotIdx, 1);
-      return [{ ...it, count: newCount, staffNames, staffServices, staffEmojis }];
+      const staffIds = it.staffIds ? [...it.staffIds] : undefined;
+      staffIds?.splice(slotIdx, 1);
+      return [{ ...it, count: newCount, staffNames, staffServices, staffEmojis, ...(staffIds ? { staffIds } : {}) }];
     }));
   };
 
-  // Añade un slot vacío a un ítem existente (sólo sectores de personas)
-  const addSlot = (itemId: string) => {
+  // One insertion at a time. A second tap on an unfinished new card reveals it instead.
+  const addSlot = async (itemId?: string) => {
+    if (addingProfessionalRef.current) return;
+    if (lastCreatedProfessional.current) {
+      const key = lastCreatedProfessional.current;
+      const item = getItems().find(value => Array.from({ length: value.count }, (_, i) => staffDraftKey(value, i)).includes(key));
+      const index = item ? Array.from({ length: item.count }, (_, i) => staffDraftKey(item, i)).indexOf(key) : -1;
+      const name = draftNamesRef.current[key] ?? item?.staffNames?.[index] ?? "";
+      if (item && name.trim().length < 3) { focusProfessional(key); return; }
+    }
+    addingProfessionalRef.current = true; setAddingProfessional(true);
     Haptics.selectionAsync().catch(() => {});
     const defaultEmoji = getDefaultStaffEmoji(config.subId);
-    setItems(prev => prev.map(it => {
-      if (it.id !== itemId) return it;
-      return {
-        ...it,
-        count:        it.count + 1,
-        staffNames:   [...(it.staffNames ?? []), ""],
-        staffServices:[...(it.staffServices ?? []), []],
-        staffEmojis:  [...(it.staffEmojis ?? []), defaultEmoji],
-      };
-    }));
+    try {
+      const write = setItems(prev => itemId ? prev.map(it => it.id !== itemId ? it : {
+        ...it, count: it.count + 1,
+        staffNames: [...(it.staffNames ?? []), ""],
+        staffServices: [...(it.staffServices ?? []), []],
+        staffEmojis: [...(it.staffEmojis ?? []), defaultEmoji],
+      }) : [...prev, {
+        id: "pi_" + Date.now(), emoji: defaultEmoji, label: "", count: 1,
+        staffNames: [""], staffServices: [[]], staffEmojis: [defaultEmoji],
+      }]);
+      const item = itemId ? getItems().find(value => value.id === itemId) : getItems().at(-1);
+      if (item) pendingReveal.current = lastCreatedProfessional.current = staffDraftKey(item, item.count - 1);
+      await write;
+    } catch { /* The existing draft writer reports the failure and keeps the editable card. */ }
+    finally { addingProfessionalRef.current = false; setAddingProfessional(false); }
   };
 
   // Actualiza el emoji individual de un slot
@@ -1464,14 +1590,14 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
       const staffServices = delta > 0
         ? [...(it.staffServices ?? []), ...Array.from({ length: newCount - (it.staffServices?.length ?? 0) }, () => [] as string[])]
         : (it.staffServices ?? []).slice(0, newCount);
-      return { ...it, count: newCount, staffNames, staffServices };
+      return { ...it, count: newCount, staffNames, staffServices, ...(it.staffIds ? { staffIds: it.staffIds.slice(0, newCount) } : {}) };
     }));
   };
 
   const patchLabel = (id: string, label: string) =>
     setItems(prev => prev.map(it => it.id === id ? { ...it, label } : it));
 
-  const patchStaffName = (id: string, index: number, name: string) => {
+  const patchStaffName = (id: string, index: number, name: string, staffId?: string) => {
     // Solo persistir el nombre si tiene >= 3 chars tras trim.
     // Si el usuario borra todo o deja <= 2 chars, se guarda cadena vacía
     // (slot vacío, se puede re-editar). Esto evita que parciales de tipado
@@ -1479,8 +1605,10 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
     const committed = name.trim().length >= 3 ? name.trim() : "";
     setItems(prev => prev.map(it => {
       if (it.id !== id) return it;
+      const targetIndex = staffId && it.staffIds ? it.staffIds.indexOf(staffId) : index;
+      if (targetIndex < 0) return it;
       const names = [...(it.staffNames ?? Array.from({ length: it.count }, () => ""))];
-      names[index] = committed;
+      names[targetIndex] = committed;
       return { ...it, staffNames: names };
     }));
   };
@@ -1558,29 +1686,6 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
           </View>
         )}
 
-        {items.length === 0 && !addingNew && isPeople && (
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => {
-              Haptics.selectionAsync().catch(() => {});
-              const defaultEmoji = getDefaultStaffEmoji(config.subId);
-              setItems([{
-                id:            `pi_${Date.now()}`,
-                emoji:         defaultEmoji,
-                label:         "",
-                count:         1,
-                staffNames:    [""],
-                staffServices: [[]],
-                staffEmojis:   [defaultEmoji],
-              }]);
-            }}
-            style={[c.addSlotBtn, { borderColor: color + "40", marginTop: 4 }]}
-          >
-            <Feather name="user-plus" size={13} color={color} />
-            <Text style={[c.addSlotTxt, { color }]}>{t("biz_add_professional")}</Text>
-          </TouchableOpacity>
-        )}
-
         {items.map(item => (
           <View key={item.id}>
             {/* ── Item header row ── */}
@@ -1619,18 +1724,6 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
                 <Feather name="x" size={15} color={DIM} />
               </TouchableOpacity>
             </View>
-
-            {/* ── Botón ÚNICO "Añadir profesional" justo debajo de la cabecera ── */}
-            {isPeople && (
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => addSlot(item.id)}
-                style={[c.addSlotBtn, { borderColor: color + "40" }]}
-              >
-                <Feather name="user-plus" size={13} color={color} />
-                <Text style={[c.addSlotTxt, { color }]}>{t("biz_add_professional")}</Text>
-              </TouchableOpacity>
-            )}
 
             {/* ── Slots individuales de profesionales (isPeople only) ── */}
             {isPeople && Array.from({ length: item.count }, (_, i) => {
@@ -1671,7 +1764,7 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
 
               return (
                 <View
-                  key={`${item.id}_slot_${i}`}
+                  key={item.staffIds?.[i] ?? `${item.id}_slot_${i}`}
                   style={[
                     c.staffSlot,
                     isSub
@@ -1746,26 +1839,36 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
                           </Text>
                         </TouchableOpacity>
                         <TextInput
+                          ref={input => {
+                            const key = staffDraftKey(item, i);
+                            if (input) professionalInputs.current.set(key, input); else professionalInputs.current.delete(key);
+                          }}
+                          testID={"professional-name-" + staffDraftKey(item, i)}
+                          accessibilityLabel={t("biz_professional_name_ph")}
+                          onLayout={() => {
+                            const key = staffDraftKey(item, i);
+                            if (pendingReveal.current === key && focusProfessional(key)) pendingReveal.current = null;
+                          }}
                           style={[
                             c.staffNameBig,
                             isEmpty
                               ? { borderColor: GOLD + "60", backgroundColor: GOLD + "08", color: GOLD }
                               : { borderColor: "transparent", backgroundColor: "transparent" },
                           ]}
-                          value={draftNames[`${item.id}_${i}`] ?? nameVal}
-                          onChangeText={v => setDraftNames(prev => ({ ...prev, [`${item.id}_${i}`]: v }))}
+                          value={draftNames[staffDraftKey(item, i)] ?? nameVal}
+                          onChangeText={v => setDraftNames(prev => ({ ...prev, [staffDraftKey(item, i)]: v }))}
                           onBlur={() => {
-                            const draft = draftNames[`${item.id}_${i}`];
+                            const draft = draftNamesRef.current[staffDraftKey(item, i)];
                             if (draft !== undefined) {
-                              patchStaffName(item.id, i, draft);
-                              setDraftNames(prev => { const n = { ...prev }; delete n[`${item.id}_${i}`]; return n; });
+                              patchStaffName(item.id, i, draft, item.staffIds?.[i]);
+                              setDraftNames(prev => { const n = { ...prev }; delete n[staffDraftKey(item, i)]; return n; });
                             }
                           }}
                           onSubmitEditing={() => {
-                            const draft = draftNames[`${item.id}_${i}`];
+                            const draft = draftNamesRef.current[staffDraftKey(item, i)];
                             if (draft !== undefined) {
-                              patchStaffName(item.id, i, draft);
-                              setDraftNames(prev => { const n = { ...prev }; delete n[`${item.id}_${i}`]; return n; });
+                              patchStaffName(item.id, i, draft, item.staffIds?.[i]);
+                              setDraftNames(prev => { const n = { ...prev }; delete n[staffDraftKey(item, i)]; return n; });
                             }
                           }}
                           placeholder={t("biz_professional_name_ph")}
@@ -1815,6 +1918,7 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
                         <View style={{ marginTop: 8 }}>
                           <ProfessionalScheduleSection
                             staffName={nameVal.trim()}
+                            staffId={demo ? item.staffIds?.[i] : undefined}
                             businessId={config.businessId}
                             color={color}
                           />
@@ -1827,6 +1931,16 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
             })}
           </View>
         ))}
+
+        {isPeople && !addingNew && (
+          <TouchableOpacity testID="add-professional" accessibilityRole="button"
+            activeOpacity={0.8} disabled={addingProfessional}
+            onPress={() => void addSlot(items.at(-1)?.id)}
+            style={[c.addSlotBtn, { borderColor: color + "40", marginTop: 8, opacity: addingProfessional ? 0.5 : 1 }]}>
+            <Feather name="user-plus" size={13} color={color} />
+            <Text style={[c.addSlotTxt, { color }]}>{t("biz_add_professional")}</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Para sectores de espacios: formulario para añadir un nuevo tipo de espacio */}
         {!isPeople && (addingNew ? (
@@ -1948,17 +2062,21 @@ function StepEspacios({ currentSector }: { currentSector: Sector | null }) {
 // PASO 4 — SERVICIOS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function StepServicios({ currentSector }: { currentSector: Sector | null }) {
+function StepServicios({ currentSector, saveRef }: { currentSector: Sector | null; saveRef?: StepSaveRef }) {
   const { config, updateConfig, demo } = useBusinessConfig();
   const { t, lang } = useLanguage();
   const color = currentSector?.color ?? BLUE;
 
   type LocalSvc = SavedService & { id: string };
-  const [localSvcs, setLocalSvcs] = useState<LocalSvc[]>(() =>
-    config.services.length > 0
-      ? config.services.map((s, i) => ({ ...s, id: `svc_${i}_${s.name}`, capacity: s.capacity ?? 1 }))
-      : [{ id: "svc_0", name: "", duration: 30, price: 0, capacity: 1 }]
-  );
+  const serializeServices = (svcs: LocalSvc[]) => svcs.filter(service => service.name.trim())
+    .map(({ name, duration, price, capacity }) => ({ name, duration, price, capacity }));
+  const saveServices = useCallback((services: SavedService[]) => demo
+    ? demo.updateConfig({ services }) : updateConfig({ services }), [demo, updateConfig]);
+  const { draft: localSvcs, setValue: setLocalSvcs, flush } = useConfigArrayDraft<LocalSvc, SavedService>(
+    config.services, services => services.length > 0
+      ? services.map((service, index) => ({ ...service, id: `svc_${index}_${service.name}`, capacity: service.capacity ?? 1 }))
+      : [{ id: "svc_0", name: "", duration: 30, price: 0, capacity: 1 }], serializeServices, saveServices);
+  useStepSave(saveRef, flush);
 
   // ── OCR import state ────────────────────────────────────────────────────────
   const [ocrVisible,   setOcrVisible]   = useState(false);
@@ -1966,20 +2084,12 @@ function StepServicios({ currentSector }: { currentSector: Sector | null }) {
   const [ocrIsPdf,     setOcrIsPdf]     = useState(false);
   const [ocrIsUrl,     setOcrIsUrl]     = useState(false);
 
-  const flush = useCallback((svcs: LocalSvc[]) => {
-    updateConfig({
-      services: svcs
-        .filter(s => s.name.trim())
-        .map(({ name, duration, price, capacity }) => ({ name, duration, price, capacity })),
-    });
-  }, [updateConfig]);
-
   const patchSvc = (id: string, patch: Partial<SavedService>) =>
     setLocalSvcs(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
 
   const removeSvc = (id: string) => {
     Haptics.selectionAsync().catch(() => {});
-    setLocalSvcs(prev => { const next = prev.filter(s => s.id !== id); flush(next); return next; });
+    setLocalSvcs(prev => prev.filter(s => s.id !== id));
   };
   const addSvc = () => {
     Haptics.selectionAsync().catch(() => {});
@@ -2082,7 +2192,6 @@ function StepServicios({ currentSector }: { currentSector: Sector | null }) {
       })),
     ];
     setLocalSvcs(merged);
-    flush(merged);
     setOcrIsUrl(false);
     setOcrVisible(false);
   };
@@ -2098,7 +2207,7 @@ function StepServicios({ currentSector }: { currentSector: Sector | null }) {
               style={c.svcNameInput}
               value={trSector(svc.name, lang)}
               onChangeText={v => patchSvc(svc.id, { name: v })}
-              onBlur={() => flush(localSvcs)}
+              onBlur={() => { void flush().catch(() => {}); }}
               placeholder={idx === 0 ? t("biz_service_placeholder_first") : t("biz_service_placeholder")}
               placeholderTextColor={DIM}
               returnKeyType="done"
@@ -2109,7 +2218,7 @@ function StepServicios({ currentSector }: { currentSector: Sector | null }) {
                   style={c.numInput}
                   value={String(svc.duration)}
                   onChangeText={v => patchSvc(svc.id, { duration: parseInt(v) || 0 })}
-                  onBlur={() => flush(localSvcs)}
+                  onBlur={() => { void flush().catch(() => {}); }}
                   selectTextOnFocus
                   keyboardType="numeric"
                   returnKeyType="done"
@@ -2121,7 +2230,7 @@ function StepServicios({ currentSector }: { currentSector: Sector | null }) {
                   style={c.numInput}
                   value={svc.price ? String(svc.price) : ""}
                   onChangeText={v => patchSvc(svc.id, { price: parseFloat(v) || 0 })}
-                  onBlur={() => flush(localSvcs)}
+                  onBlur={() => { void flush().catch(() => {}); }}
                   selectTextOnFocus
                   keyboardType="numeric"
                   returnKeyType="done"
@@ -2135,7 +2244,7 @@ function StepServicios({ currentSector }: { currentSector: Sector | null }) {
                   style={c.numInput}
                   value={String(svc.capacity ?? 1)}
                   onChangeText={v => patchSvc(svc.id, { capacity: parseInt(v) || 1 })}
-                  onBlur={() => flush(localSvcs)}
+                  onBlur={() => { void flush().catch(() => {}); }}
                   selectTextOnFocus
                   keyboardType="numeric"
                   returnKeyType="done"

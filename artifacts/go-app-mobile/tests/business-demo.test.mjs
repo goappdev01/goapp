@@ -150,9 +150,10 @@ test("reset clears only the local configuration, plan, reservations and preferen
 });
 
 // Execute the real providers and screen callbacks with deterministic native APIs.
-function uiFixture(data, { authorized = true, reactCompiler = false, bookingToday } = {}) {
+function uiFixture(data, { authorized = true, reactCompiler = false, bookingToday, realActivity = false, gpsAdapter } = {}) {
   const cache = new Map(), hooks = new Map(), alerts = [], calls = { liveAgenda: 0, liveFloor: 0, external: 0 };
-  let current, cursor = 0, effects = [], lang = "es";
+  let current, cursor = 0, effects = [], lang = "es", keyboardVisible = false;
+  const keyboardListeners = new Map();
   const hook = () => { const i = cursor++; return [current, i]; };
   const same = (a,b) => a && b && a.length === b.length && a.every((v,i) => Object.is(v,b[i]));
   const React = {
@@ -174,7 +175,11 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
   const animation = { start(fn) { fn?.({ finished: true }); }, stop() {} };
   const native = new Proxy({
     Alert: { alert: (...args) => alerts.push(args) },
-    AppState: { currentState: "active" }, Keyboard: { addListener: () => ({ remove() {} }), dismiss() {} },
+    AppState: { currentState: "active" }, Keyboard: {
+      isVisible: () => keyboardVisible,
+      addListener: (event, fn) => { const listeners = keyboardListeners.get(event) ?? new Set(); listeners.add(fn); keyboardListeners.set(event, listeners); return { remove: () => listeners.delete(fn) }; },
+      dismiss() { keyboardVisible = false; for (const event of ["keyboardWillHide", "keyboardDidHide"]) for (const fn of keyboardListeners.get(event) ?? []) fn(); },
+    },
     StyleSheet: { create: v => v, absoluteFill: {}, absoluteFillObject: {} }, Dimensions: { get: () => ({ width: 390, height: 844 }) },
     Platform: { OS: "ios", select: options => options.ios ?? options.default },
     Animated: { Value, View: "Animated.View", timing: () => animation, spring: () => animation, add: () => 0, sequence: () => animation, loop: () => animation },
@@ -224,7 +229,7 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
       useAnimatedStyle: fn => fn(), withTiming: value => value, withDecay: () => 0, runOnJS: fn => fn },
     "react-native-gesture-handler": { Gesture: new Proxy({}, { get: () => () => chain }), GestureDetector: "GestureDetector" },
     "expo-image": { Image: "Image" }, "expo-status-bar": { StatusBar: "StatusBar" },
-    "expo-location": { Accuracy: { Balanced: 3 }, requestForegroundPermissionsAsync: async () => ({ status: "denied" }), getCurrentPositionAsync: external, reverseGeocodeAsync: external },
+    "expo-location": gpsAdapter ?? { Accuracy: { Balanced: 3 }, requestForegroundPermissionsAsync: async () => ({ status: "denied" }), getCurrentPositionAsync: external, reverseGeocodeAsync: external },
     "expo-image-picker": new Proxy({}, { get: () => external }),
     "expo-document-picker": new Proxy({}, { get: () => external }),
     "expo-clipboard": new Proxy({}, { get: () => external }),
@@ -234,7 +239,7 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
   function load(name) {
     if (cache.has(name)) return cache.get(name);
     const exports = {}; cache.set(name,exports);
-    vm.runInNewContext(compile(name, reactCompiler && ["contexts/GoBusinessConfigContext.tsx", "components/booking/GoReservasConfigScreen.tsx"].includes(name)), { exports, console, Date, Set, Map, setTimeout: () => 1, clearTimeout() {},
+    vm.runInNewContext(compile(name, reactCompiler && ["contexts/GoBusinessConfigContext.tsx", "components/booking/GoReservasConfigScreen.tsx", "components/empresa/EmpresaConfigScreen.tsx"].includes(name)), { exports, console, Date, Set, Map, setTimeout: () => 1, clearTimeout() {},
       setInterval: () => 1, clearInterval() {}, require(key) {
         if (key in imports) return imports[key];
         if (key === "@/data/floorPlan") {
@@ -243,6 +248,8 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
         }
         if (key.startsWith("@/data/")) return load(key.replace("@/","") + ".ts");
         if (key === "@/utils/countryConfig") return load("utils/countryConfig.ts");
+        if (key === "@/utils/goHaptics") return { hapticNextStep: async () => {} };
+        if (realActivity && key === "@/components/empresa/EmpresaSetupGuide") return load("components/empresa/EmpresaSetupGuide.tsx");
         if (key === "@/lib/time") return { ...load("lib/time.ts"), ...(bookingToday ? { getToday: () => new Date(bookingToday) } : {}) };
         if (key === "@/lib/businessIcons") return { getBusinessIcon: () => ({}) };
         if (key.includes("components/") || key.startsWith("./Plano") || key.startsWith("../Draggable") || (key.startsWith("./") && key.endsWith("Screen"))) return componentMocks;
@@ -256,7 +263,10 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
     const tree = component(props); if (tree?.type?.context) tree.type.context.value = tree.props.value;
     const run = effects; effects = []; for (const fn of run) fn(); return tree;
   };
-  return { load, render, alerts, calls, configApi, setLanguage(value) { lang = value; } };
+  return { load, render, alerts, calls, configApi,
+    emitKeyboard(event) { if (event.endsWith("Show")) keyboardVisible = true; if (event.endsWith("Hide")) keyboardVisible = false; for (const fn of keyboardListeners.get(event) ?? []) fn(); },
+    unmount(component) { for (const slot of hooks.get(component) ?? []) slot?.cleanup?.(); hooks.delete(component); },
+    setLanguage(value) { lang = value; } };
 }
 const nodes = tree => !tree || typeof tree !== "object" ? [] : [tree, ...tree.children.flatMap(nodes)];
 const text = node => typeof node === "string" ? node : node?.children?.map(text).join("") ?? "";
@@ -498,4 +508,338 @@ test("complete DEMO booking reaches its final screen and updates both real calen
   const restored = await reopened.load(); assert.equal(restored.bookings.length, 1); assert.equal(restored.bookings[0].status, "CANCELLED");
   assert.equal((await repo.getAllSlots(f.store.businessId, booking.bookableItemId, "2030-01-07", booking.staffId)).find(slot => slot.startDatetime === booking.startDatetime).isAvailable, true);
   assert.equal(ui.calls.external, 0); assert.equal(ui.calls.liveFloor, 0);
+});
+
+// Exercise the actual eight-step callbacks, rather than direct store.updateConfig alone.
+async function configuredSalon(f) {
+  await f.store.updateConfig({businessName:"GO PELUQUERIA",sectorId:"belleza",subId:"peluqueria",
+    address:"Direccion ficticia",phone:"912345678",activeDays:[0,1,2,3,4],
+    services:[{name:"Corte DEMO",duration:30,price:15,capacity:1},{name:"Servicio adicional",duration:45,price:20,capacity:1}],
+    plantillaItems:[{id:"original-posts",emoji:"chair",label:"Puestos",count:4,
+      staffNames:["Raul 1 GO PRUEBA","Raul 2 GO PRUEBA","Raul 3 GO PRUEBA","Raul 4 GO PRUEBA"],
+      staffServices:Array.from({length:4},()=>["Corte DEMO"]),staffEmojis:["a","b","c","d"]}],completedSteps:[0,1,2,3,4,5,6,7]});
+  await f.store.saveFloorPlan({id:f.store.planId,businessId:f.store.businessId,updatedAt:1,
+    elements:Array.from({length:4},(_,i)=>({id:"preserved-space-"+i,type:"silla",label:"Raul "+(i+1)+" GO PRUEBA",
+      capacity:1,x:10+i*100,y:20+i*30,width:150,height:52,status:"disponible",reservable:true}))});
+}
+function configurationUI(f,initialStep=0,options={}) {
+  const ui=uiFixture(f,{reactCompiler:true,realActivity:true,...options});
+  const Provider=ui.load("contexts/GoBusinessConfigContext.tsx").GoBusinessPreviewProvider;
+  const Screen=ui.load("components/empresa/EmpresaConfigScreen.tsx").EmpresaConfigScreen;
+  const props={initialStep,onBack(){},goPrevRef:{current:null}};
+  const render=()=>{ui.render(Provider,{children:"configuration"});return ui.render(Screen,props)};
+  const enterStep=name=>{component(render(),"Step0Actividad").props.onSubConfirmed();const step=component(render(),name);assert.ok(step,"Expected "+name);
+    const page=()=>{render();return ui.render(step.type,step.props)};return {step,page};};
+  return {...ui,Screen,Provider,props,render,renderComponent:ui.render,enterStep};
+}
+test("reopening the salon and reselecting its actual sector/activity preserves staff, services and all floor positions",async()=>{
+  const f=dataFixture();await configuredSalon(f);const before=plain(f.store.getSnapshot()),ui=configurationUI(f);
+  let activity=component(ui.render(),"Step0Actividad"),page=ui.renderComponent(activity.type,activity.props);
+  button(page,"Belleza").props.onPress();await turn();activity=component(ui.render(),"Step0Actividad");page=ui.renderComponent(activity.type,activity.props);
+  button(page,"Peluquer").props.onPress();await turn();ui.render();const restored=await f.make().load();
+  assert.deepEqual(plain(restored.config),before.config);assert.deepEqual(plain(restored.plan),before.plan);
+  assert.equal(ui.calls.external,0);assert.equal(ui.calls.liveFloor,0);
+});
+test("browsing a different sector then going back/cancelling never resets saved business configuration",async()=>{
+  const f=dataFixture();await configuredSalon(f);const before=plain(f.store.getSnapshot()),ui=configurationUI(f);
+  const activity=component(ui.render(),"Step0Actividad"),page=ui.renderComponent(activity.type,activity.props);
+  button(page,"Restauraci").props.onPress();await turn();ui.render();ui.props.goPrevRef.current();await turn();ui.render();ui.props.goPrevRef.current();await turn();
+  assert.deepEqual(plain(await f.make().load()),before);
+});
+test("a named service edited without a blur event persists when leaving the step and after Reload",async()=>{
+  const f=dataFixture();await configuredSalon(f);const ui=configurationUI(f,3),{step,page}=ui.enterStep("StepServicios");
+  button(page(),"biz_add_service_btn").props.onPress();
+  const inputs=nodes(page()).filter(n=>n.type==="TextInput" && n.props.placeholder?.startsWith("biz_service_placeholder"));
+  inputs.at(-1).props.onChangeText("Servicio nuevo sin blur");page();
+  const numeric=nodes(page()).filter(n=>n.type==="TextInput" && n.props.keyboardType==="numeric");numeric.at(-3).props.onChangeText("50");page();
+  ui.unmount(step.type);await turn();const saved=plain((await f.make().load()).config.services);
+  assert.equal(saved.length,3);assert.deepEqual(saved[2],{name:"Servicio nuevo sin blur",duration:50,price:0,capacity:1});
+  const reopened=configurationUI(f,3).enterStep("StepServicios").page();assert.ok(nodes(reopened).some(n=>n.type==="TextInput" && n.props.value==="Servicio nuevo sin blur"));
+});
+test("an older asynchronous staff save cannot replace newer additions or specialties in the open step",async()=>{
+  const f=dataFixture();await configuredSalon(f);const ui=configurationUI(f,4),{page}=ui.enterStep("StepEspacios");
+  const pending=[],write=f.storage.setItem;let blocking=true;
+  f.storage.setItem=async(key,value)=>{if(blocking)await new Promise(resolve=>pending.push(resolve));await write(key,value)};
+  button(page(),"biz_add_professional").props.onPress();page();await turn();
+  const first=nodes(page()).filter(n=>n.type==="TextInput" && n.props.placeholder==="biz_professional_name_ph").at(-1);
+  first.props.onChangeText("Profesional nuevo uno");first.props.onSubmitEditing();page();
+  button(page(),"biz_add_professional").props.onPress();page();
+  assert.equal(nodes(page()).filter(n=>n.props.placeholder==="biz_professional_name_ph").length,5,"A tap during insertion must not create another professional");
+  assert.equal(pending.length,1);pending.shift()();await turn();page();
+  button(page(),"biz_add_professional").props.onPress();page();
+  assert.equal(pending.length,1);pending.shift()();await turn();page();page();
+  assert.equal(nodes(page()).filter(n=>n.props.placeholder==="biz_professional_name_ph").length,6,"An older name acknowledgement cannot discard a later completed insertion");
+  const specialty=nodes(page()).find(n=>n.type==="TouchableOpacity" && text(n)==="Servicio adicional");assert.ok(specialty);specialty.props.onPress();page();
+  blocking=false;while(pending.length){pending.shift()();await turn()}await turn();const saved=(await f.make().load()).config;
+  assert.equal(saved.plantillaItems[0].count,6);
+  assert.equal(saved.plantillaItems[0].staffNames[4],"Profesional nuevo uno");
+  assert.deepEqual(plain(saved.plantillaItems[0].staffServices[0]),["Corte DEMO","Servicio adicional"]);assert.equal(saved.plantillaItems[0].staffNames[3],"Raul 4 GO PRUEBA");
+});
+test("Next commits a focused professional name before validating and advancing the saved step",async()=>{
+  const f=dataFixture();await configuredSalon(f);const before=plain(f.store.getSnapshot().plan),ui=configurationUI(f,4),{step,page}=ui.enterStep("StepEspacios");
+  button(page(),"biz_add_professional").props.onPress();
+  const names=nodes(page()).filter(n=>n.type==="TextInput" && n.props.placeholder==="biz_professional_name_ph");names.at(-1).props.onChangeText("Profesional adicional");page();
+  button(ui.render(),"biz_next").props.onPress();await turn();
+  assert.ok(component(ui.render(),"StepReservas"));ui.unmount(step.type);await turn();
+  const restored=await f.make().load();assert.equal(restored.config.plantillaItems[0].count,5);assert.equal(restored.config.plantillaItems[0].staffNames[4],"Profesional adicional");
+  assert.deepEqual(plain(restored.plan.elements.slice(0,before.elements.length)),before.elements);assert.equal(restored.plan.elements.length,5);assert.equal(restored.config.plantillaItems[0].id,"original-posts");
+});
+test("closing the professional page commits its focused name and specialties without requiring blur",async()=>{
+  const f=dataFixture();await configuredSalon(f);const ui=configurationUI(f,4),{step,page}=ui.enterStep("StepEspacios");
+  button(page(),"biz_add_professional").props.onPress();
+  const specialties=nodes(page()).filter(n=>n.type==="TouchableOpacity" && text(n)==="Servicio adicional");specialties.at(-1).props.onPress();
+  nodes(page()).filter(n=>n.type==="TextInput" && n.props.placeholder==="biz_professional_name_ph").at(-1).props.onChangeText("Profesional con especialidad");
+  ui.unmount(step.type);await turn();const stored=await f.make().load();
+  assert.equal(stored.config.plantillaItems[0].staffNames[4],"Profesional con especialidad");assert.deepEqual(plain(stored.config.plantillaItems[0].staffServices[4]),["Servicio adicional"]);
+  assert.equal(storeModule.getBusinessDemoProfessionals(stored.config,f.store.businessId).length,5);
+});
+test("service acknowledgements retain the next empty input and Save persists duration, price and capacity once",async()=>{
+  const f=dataFixture();await configuredSalon(f);const ui=configurationUI(f,3),{step,page}=ui.enterStep("StepServicios");
+  button(page(),"biz_add_service_btn").props.onPress();
+  nodes(page()).filter(n=>n.type==="TextInput" && n.props.placeholder?.startsWith("biz_service_placeholder")).at(-1).props.onChangeText("Servicio completo");
+  button(page(),"biz_add_service_btn").props.onPress();await turn();
+  const inputs=nodes(page()).filter(n=>n.type==="TextInput" && n.props.placeholder?.startsWith("biz_service_placeholder"));assert.equal(inputs.length,4);assert.equal(inputs.at(-1).props.value,"");
+  for(const [offset,value] of [[6,"60"],[7,"25"],[8,"2"]])nodes(page()).filter(n=>n.type==="TextInput" && n.props.keyboardType==="numeric")[offset].props.onChangeText(value);
+  button(ui.render(),"biz_next").props.onPress();await turn();assert.ok(component(ui.render(),"StepEspacios"));ui.unmount(step.type);await turn();
+  const services=plain((await f.make().load()).config.services);assert.equal(services.length,3);assert.deepEqual(services[2],{name:"Servicio completo",duration:60,price:25,capacity:2});
+});
+test("a failed field write keeps the configuration open and never announces successful completion",async()=>{
+  const f=dataFixture();await configuredSalon(f);const before=plain(f.store.getSnapshot().config.services),ui=configurationUI(f,3),{page}=ui.enterStep("StepServicios");
+  f.failWrites(true);nodes(page()).find(n=>n.type==="TextInput" && n.props.placeholder?.startsWith("biz_service_placeholder")).props.onChangeText("Cambio no guardado");await turn();
+  button(ui.render(),"biz_next").props.onPress();await turn();assert.ok(component(ui.render(),"StepServicios"));assert.deepEqual(plain(f.store.getSnapshot().config.services),before);
+  assert.ok(ui.alerts.some(alert=>String(alert[1]).includes("storage failure")));f.failWrites(false);
+});
+test("hydrating and leaving untouched configuration does not write or regenerate existing professionals, services or floor",async()=>{
+  const f=dataFixture();await configuredSalon(f);const before=plain(f.store.getSnapshot()),writes=f.writes.length;
+  for(const [index,name] of [[3,"StepServicios"],[4,"StepEspacios"]]){
+    const ui=configurationUI(f,index),{step,page}=ui.enterStep(name);page();page();ui.unmount(step.type);await turn();
+  }
+  assert.equal(f.writes.length,writes);assert.deepEqual(plain(await f.make().load()),before);
+});
+test("editing one company and reopening the catalog keeps restaurant, salon and other owners isolated",async()=>{
+  const f=dataFixture(),catalogAPI=loadPure("data/businessDemoCatalog.ts",{"./businessDemoStore":storeModule});
+  const catalog=catalogAPI.createBusinessDemoCatalog({ownerUserId:owner,storage:f.storage,initialConfig:initial,canUse:()=>true});
+  await catalog.create("GO PELUQUERIA");const salon=catalog.getSelectedStore(),salonId=catalog.getSelectedId();await configuredSalon({store:salon});
+  await catalog.create("GO RESTAURANTE");const restaurant=catalog.getSelectedStore();await restaurant.updateConfig({address:"Restaurante ficticio",sectorId:"restauracion",subId:"restaurante",services:[{name:"Menu DEMO",duration:90,price:30}],plantillaItems:[{id:"table",label:"Mesa",count:1,staffNames:["Personal restaurante"]}]});const beforeRestaurant=plain(restaurant.getSnapshot());
+  const otherOwner=dataFixture(other,f.shared);await otherOwner.store.updateConfig({businessName:"Otra identidad"});const beforeOther=plain(await otherOwner.make().load());
+  await catalog.select(salonId);const ui=configurationUI({store:salon,storage:f.storage},3),{step,page}=ui.enterStep("StepServicios");button(page(),"biz_add_service_btn").props.onPress();
+  nodes(page()).filter(n=>n.type==="TextInput" && n.props.placeholder?.startsWith("biz_service_placeholder")).at(-1).props.onChangeText("Servicio solo peluqueria");ui.unmount(step.type);await turn();
+  const newStoreAPI=loadPure("data/businessDemoStore.ts"),newCatalogAPI=loadPure("data/businessDemoCatalog.ts",{"./businessDemoStore":newStoreAPI});
+  const reopened=newCatalogAPI.createBusinessDemoCatalog({ownerUserId:owner,storage:f.storage,initialConfig:initial,canUse:()=>true});await reopened.load();
+  assert.equal(reopened.getSelectedStore().getSnapshot().config.services.length,3);assert.equal(reopened.getSelectedStore().getSnapshot().config.services[2].name,"Servicio solo peluqueria");
+  await reopened.select(catalog.getCompanies().find(c=>c.name==="GO RESTAURANTE").id);assert.deepEqual(plain(reopened.getSelectedStore().getSnapshot()),beforeRestaurant);assert.deepEqual(plain(await otherOwner.make().load()),beforeOther);
+});
+test("configuration edits and re-entry keep booking staff/service IDs, both calendars and floor IDs/positions",async()=>{
+  const f=dataFixture();await configuredSalon(f);const repo=bookingRepositoryModule.createDemoBookingRepository(f.store,{now:()=>Date.parse("2030-01-07T08:00:00")});
+  const service=(await repo.getBookableItems(f.store.businessId))[0],staff=(await repo.getStaff(f.store.businessId))[0];
+  const hold=await repo.createHold({businessId:f.store.businessId,bookableItemId:service.id,staffId:staff.id,customerId:owner,startDatetime:"2030-01-07T10:00:00",endDatetime:"2030-01-07T10:30:00",unitsReserved:1,peopleCount:1});assert.equal(hold.ok,true);
+  const confirmed=await repo.claimSlot({...hold.booking,status:"CONFIRMED",holdExpiresAt:undefined});assert.equal(confirmed.ok,true);const before=plain(f.store.getSnapshot());
+  const ui=configurationUI(f,4),{step,page}=ui.enterStep("StepEspacios");button(page(),"biz_add_professional").props.onPress();
+  nodes(page()).filter(n=>n.type==="TextInput" && n.props.placeholder==="biz_professional_name_ph").at(-1).props.onChangeText("Profesional nuevo");ui.unmount(step.type);await turn();
+  const activityUI=configurationUI(f);let activity=component(activityUI.render(),"Step0Actividad");button(activityUI.renderComponent(activity.type,activity.props),"Belleza").props.onPress();activity=component(activityUI.render(),"Step0Actividad");button(activityUI.renderComponent(activity.type,activity.props),"Peluquer").props.onPress();await turn();
+  const restored=f.make();await restored.load();const snapshot=plain(restored.getSnapshot());assert.deepEqual(snapshot.bookings,before.bookings);assert.deepEqual(snapshot.reservations,before.reservations);assert.deepEqual(snapshot.entries,before.entries);assert.deepEqual(snapshot.plan.elements.slice(0,before.plan.elements.length),before.plan.elements);assert.equal(snapshot.plan.elements.length,5);
+  const restoredRepo=bookingRepositoryModule.createDemoBookingRepository(restored,{now:()=>Date.parse("2030-01-07T08:00:00")});assert.equal((await restoredRepo.getMyBookings())[0].staffId,staff.id);assert.equal((await restoredRepo.getMyBookings())[0].bookableItemId,service.id);assert.equal(restoredRepo.getCustomerEntries().length,1);
+  const reopenedUI=uiFixture({...f,store:restored},{reactCompiler:true}),Provider=reopenedUI.load("contexts/GoBusinessConfigContext.tsx").GoBusinessPreviewProvider,Company=reopenedUI.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen,Customer=reopenedUI.load("components/booking/DemoCustomerCalendar.tsx").DemoCustomerCalendar;
+  reopenedUI.render(Provider);let company=reopenedUI.render(Company,{onClose(){},hideFAB:true});await turn();button(company,"view_mode_calendario").props.onPress();company=reopenedUI.render(Company,{onClose(){},hideFAB:true});button(company,staff.name).props.onPress();
+  assert.equal(component(reopenedUI.render(Company,{onClose(){},hideFAB:true}),"AgendaBoard").props.goLog.length,1);assert.equal(component(reopenedUI.render(Customer,{repository:restoredRepo,onPersonal(){}}),"AgendaBoard").props.goLog.length,1);
+  assert.equal(reopenedUI.calls.liveAgenda,0);assert.equal(reopenedUI.calls.liveFloor,0);assert.equal(reopenedUI.calls.external,0);
+});
+test("the actual floor merges added professionals once and preserves all original station IDs and positions across reopening",async()=>{
+  const f=dataFixture();await configuredSalon(f);const original=plain(f.store.getSnapshot().plan.elements),form=configurationUI(f,4),{step,page}=form.enterStep("StepEspacios");
+  for(const name of ["Profesional adicional uno","Profesional adicional dos"]){
+    button(page(),"biz_add_professional").props.onPress();nodes(page()).filter(n=>n.type==="TextInput" && n.props.placeholder==="biz_professional_name_ph").at(-1).props.onChangeText(name);
+    // Commit the field through its existing native Return path; the next addition is independent.
+    nodes(page()).filter(n=>n.type==="TextInput" && n.props.placeholder==="biz_professional_name_ph").at(-1).props.onSubmitEditing();page();await turn();
+  }
+  form.unmount(step.type);await turn();
+  const openFloor=async store=>{
+    const ui=uiFixture({...f,store},{reactCompiler:true}),Provider=ui.load("contexts/GoBusinessConfigContext.tsx").GoBusinessPreviewProvider,Floor=ui.load("components/booking/PlanoEmpresaScreen.tsx").PlanoEmpresaScreen;
+    ui.render(Provider);const props={businessId:store.businessId,businessName:"GO PELUQUERIA",onClose(){},onNext(){},hideFAB:true};ui.render(Floor,props);await turn();
+    const tree=ui.render(Floor,props),next=button(tree,"biz_next");assert.ok(next);await next.props.onPress();await turn();return ui;
+  };
+  const first=await openFloor(f.store);const saved=plain(f.store.getSnapshot().plan);assert.equal(saved.elements.length,6);assert.equal(new Set(saved.elements.map(e=>e.id)).size,6);
+  for(const element of original){const current=saved.elements.find(e=>e.id===element.id);assert.ok(current);assert.equal(current.x,element.x);assert.equal(current.y,element.y);assert.equal(current.label,element.label);}
+  assert.ok(saved.elements.some(e=>e.label==="Profesional adicional uno"));assert.ok(saved.elements.some(e=>e.label==="Profesional adicional dos"));
+  const restored=f.make();await restored.load();await openFloor(restored);assert.deepEqual(plain(restored.getSnapshot().plan.elements),saved.elements);assert.equal(restored.getSnapshot().config.plantillaItems[0].count,6);
+  assert.equal(first.calls.external,0);assert.equal(first.calls.liveFloor,0);
+});
+test("repeated draft values do not let an intermediate save acknowledge a later pending edit",async()=>{
+  const f=dataFixture();await configuredSalon(f);const ui=configurationUI(f,4),{page}=ui.enterStep("StepEspacios");
+  const pending=[],write=f.storage.setItem;f.storage.setItem=async(key,value)=>{await new Promise(resolve=>pending.push(resolve));await write(key,value)};
+  for(const label of ["Version antigua","Version nueva","Version antigua","Version nueva"]){
+    nodes(page()).find(n=>n.type==="TextInput" && n.props.placeholder==="biz_space_name_placeholder").props.onChangeText(label);page();
+  }
+  await turn();for(let index=0;index<3;index++){assert.equal(pending.length,1);pending.shift()();await turn();page();page();}
+  const specialty=nodes(page()).find(n=>n.type==="TouchableOpacity" && text(n)==="Servicio adicional");specialty.props.onPress();page();
+  while(pending.length){pending.shift()();await turn()}await turn();const saved=(await f.make().load()).config.plantillaItems[0];
+  assert.equal(saved.label,"Version nueva");assert.deepEqual(plain(saved.staffServices[0]),["Corte DEMO","Servicio adicional"]);assert.equal(saved.count,4);
+});
+
+function nativeBusinessGPS(f,{permission="granted",address=true,onPermission=()=>{},waitForAddress}={}){
+ const calls=[];return {calls,adapter:{Accuracy:{Balanced:3},
+  async requestForegroundPermissionsAsync(){calls.push("permission");onPermission();return {status:permission}},
+  async getCurrentPositionAsync(){calls.push("position");return {coords:{latitude:40.4168,longitude:-3.7038}}},
+  async reverseGeocodeAsync(){calls.push("address");assert.deepEqual(plain(f.store.getSnapshot().config.coordinates),{latitude:40.4168,longitude:-3.7038});if(waitForAddress)await waitForAddress;return address?[{street:"Calle de prueba",streetNumber:"12",city:"Madrid",country:"España"}]:[{city:"Madrid"}]},
+ }};
+}
+
+test("DEMO GPS fills the editable street field and keeps both address and coordinates after Reload",async()=>{
+ const f=dataFixture();await configuredSalon(f);const gps=nativeBusinessGPS(f),ui=configurationUI(f,1,{gpsAdapter:gps.adapter}),{step,page}=ui.enterStep("StepUbicacion");
+ assert.deepEqual(gps.calls,[]);await nodes(page()).find(n=>n.type==="TextInput"&&n.props.placeholder==="biz_address_placeholder").props.onChangeText("");await turn();
+ await button(page(),"biz_use_current_location").props.onPress();await turn();const address="Calle de prueba 12, Madrid, España";
+ assert.equal(nodes(page()).find(n=>n.type==="TextInput"&&n.props.placeholder==="biz_address_placeholder").props.value,address);
+ const input=nodes(page()).find(n=>n.type==="TextInput"&&n.props.placeholder==="biz_address_placeholder");input.props.onChangeText(address+", Local 2");await turn();ui.unmount(step.type);
+ const restored=await f.make().load();assert.equal(restored.config.address,address+", Local 2");assert.deepEqual(plain(restored.config.coordinates),{latitude:40.4168,longitude:-3.7038});assert.deepEqual(gps.calls,["permission","position","address"]);assert.equal(ui.calls.external,0);
+});
+
+test("address resolution survives the location prompt remount without relying on the old screen instance",async()=>{
+ const f=dataFixture();await configuredSalon(f);await f.store.updateConfig({address:""});let ui,step;
+ const gps=nativeBusinessGPS(f,{onPermission:()=>ui.unmount(step.type)});ui=configurationUI(f,1,{gpsAdapter:gps.adapter});const opened=ui.enterStep("StepUbicacion");step=opened.step;
+ await button(opened.page(),"biz_use_current_location").props.onPress();await turn();const restored=await f.make().load();assert.equal(restored.config.address,"Calle de prueba 12, Madrid, España");assert.deepEqual(plain(restored.config.coordinates),{latitude:40.4168,longitude:-3.7038});
+});
+
+test("unreliable DEMO lookup keeps coordinates and clearly requests manual address confirmation",async()=>{
+ const f=dataFixture();await configuredSalon(f);await f.store.updateConfig({address:""});const gps=nativeBusinessGPS(f,{address:false}),ui=configurationUI(f,1,{gpsAdapter:gps.adapter}),{page}=ui.enterStep("StepUbicacion");
+ await button(page(),"biz_use_current_location").props.onPress();await turn();assert.equal((await f.make().load()).config.address,"");assert.ok(text(page()).includes("confirma la dirección"));assert.ok(ui.alerts.some(alert=>String(alert[1]).includes("coordenadas quedan guardadas")));
+});
+
+test("denied native location permission leaves DEMO coordinates and address untouched",async()=>{
+ const f=dataFixture();await configuredSalon(f);const before=plain(f.store.getSnapshot()),gps=nativeBusinessGPS(f,{permission:"denied"}),ui=configurationUI(f,1,{gpsAdapter:gps.adapter}),{page}=ui.enterStep("StepUbicacion");
+ await button(page(),"biz_use_current_location").props.onPress();await turn();assert.deepEqual(plain(await f.make().load()),before);assert.deepEqual(gps.calls,["permission"]);assert.ok(ui.alerts.some(alert=>String(alert[0]).includes("Permiso")));
+});
+
+test("typing a manual address while the native lookup is pending is not overwritten",async()=>{
+ const f=dataFixture();await configuredSalon(f);await f.store.updateConfig({address:""});let release;const waitForAddress=new Promise(resolve=>{release=resolve});
+ const gps=nativeBusinessGPS(f,{waitForAddress}),ui=configurationUI(f,1,{gpsAdapter:gps.adapter}),{page}=ui.enterStep("StepUbicacion");const pending=button(page(),"biz_use_current_location").props.onPress();await turn();
+ nodes(page()).find(n=>n.type==="TextInput"&&n.props.placeholder==="biz_address_placeholder").props.onChangeText("Dirección introducida manualmente");await turn();release();await pending;assert.equal((await f.make().load()).config.address,"Dirección introducida manualmente");
+});
+
+test("the floor review classifies only its selected ambiguous old element, keeping physical posts and history",async()=>{
+ const f=dataFixture();await configuredSalon(f);const plan=plain(f.store.getSnapshot().plan),original=plain(plan.elements);plan.elements.push({...plan.elements[0],id:"old_unknown",label:"Profesional antiguo",demoStaffId:undefined,demoKind:undefined,demoArchived:undefined,x:350});await f.store.saveFloorPlan(plan);
+ const ui=uiFixture(f),Floor=ui.load("components/booking/PlanoEmpresaScreen.tsx").PlanoEmpresaScreen,props={businessId:f.store.businessId,onClose(){},hideFAB:true};ui.render(Floor,props);await turn();
+ let tree=ui.render(Floor,props);button(tree,"Revisar elementos antiguos").props.onPress();const options=ui.alerts.at(-1)[2];options.find(option=>option.text==="Profesional obsoleto").onPress();await turn();tree=ui.render(Floor,props);
+ assert.equal(f.store.getSnapshot().plan.elements.find(element=>element.id==="old_unknown").demoArchived,true);assert.deepEqual(plain(f.store.getSnapshot().plan.elements.slice(0,4)),original);assert.ok(!text(tree).includes("Profesional antiguo"));assert.equal(ui.calls.liveFloor,0);assert.equal(ui.calls.external,0);
+});
+
+test("a late blur after deleting a focused professional never renames the following slot",async()=>{
+ const f=dataFixture();await configuredSalon(f);const original=plain(f.store.getSnapshot().config.plantillaItems[0]),ui=configurationUI(f,4),{step,page}=ui.enterStep("StepEspacios");
+ const tree=page(),input=nodes(tree).find(n=>n.type==="TextInput"&&n.props.placeholder==="biz_professional_name_ph");
+ input.props.onChangeText("Borrador del profesional eliminado");page();
+ const row=nodes(tree).find(n=>n.type==="View"&&n.children?.includes(input));assert.ok(row);row.children.filter(n=>n.type==="TouchableOpacity").at(-1).props.onPress();
+ ui.alerts.at(-1)[2].find(option=>option.text==="biz_delete_slot").onPress();ui.alerts.at(-1)[2].find(option=>option.text==="biz_delete_slot").onPress();page();
+ input.props.onBlur();page();ui.unmount(step.type);await turn();const restored=await f.make().load();
+ assert.deepEqual(plain(restored.config.plantillaItems[0].staffNames),original.staffNames.slice(1));assert.deepEqual(plain(restored.config.plantillaItems[0].staffIds),original.staffIds.slice(1));
+ assert.equal(restored.plan.elements.find(element=>element.demoStaffId===original.staffIds[0]).demoArchived,true);
+});
+
+test("the individual schedule editor writes the persisted professional ID after renaming",async()=>{
+ const f=dataFixture();await configuredSalon(f);const original=plain(f.store.getSnapshot().config.plantillaItems[0]);
+ await f.store.updateConfig({plantillaItems:[{...original,staffNames:["Nombre cambiado",...original.staffNames.slice(1)]}]});
+ const ui=configurationUI(f,4),{page}=ui.enterStep("StepEspacios");page();const schedule=component(page(),"ProfessionalScheduleSection");assert.equal(schedule.props.staffId,original.staffIds[0]);
+ let controls=ui.renderComponent(schedule.type,schedule.props);button(controls,"biz_schedule_colon").props.onPress();controls=ui.renderComponent(schedule.type,schedule.props);
+ button(controls,"biz_custom_schedule").props.onPress();await turn();page();controls=ui.renderComponent(schedule.type,schedule.props);
+ component(controls,"GoTimeField").props.onConfirm("10:00");await turn();const restored=await f.make().load();
+ assert.equal(restored.config.staffSchedules[original.staffIds[0]].daySchedules["0"].shift1.from,"10:00");
+ const staff=storeModule.getBusinessDemoProfessionals(restored.config,f.store.businessId);const date="2030-01-07";assert.equal(storeModule.getBusinessDemoShifts(restored.config,date,staff[0])[0].from,600);
+});
+
+test("the professional calendar filters IDs after rename, distinguishes equal names and preserves retired history",async()=>{
+ const f=dataFixture();await configuredSalon(f);const repo=bookingRepositoryModule.createDemoBookingRepository(f.store,{now:()=>Date.parse("2030-01-07T08:00:00")});
+ const people=await repo.getStaff(f.store.businessId),service=(await repo.getBookableItems(f.store.businessId))[0];
+ for(const person of people.slice(0,2)){const held=await repo.createHold({businessId:f.store.businessId,bookableItemId:service.id,staffId:person.id,customerId:owner,startDatetime:"2030-01-07T10:00:00",endDatetime:"2030-01-07T10:30:00",unitsReserved:1,peopleCount:1});assert.equal(held.ok,true);assert.equal((await repo.claimSlot({...held.booking,status:"CONFIRMED",holdExpiresAt:undefined})).ok,true);}
+ const item=plain(f.store.getSnapshot().config.plantillaItems[0]);await f.store.updateConfig({plantillaItems:[{...item,staffNames:["Mismo nombre","Mismo nombre",...item.staffNames.slice(2)]}]});
+ const ui=uiFixture(f,{reactCompiler:true}),Provider=ui.load("contexts/GoBusinessConfigContext.tsx").GoBusinessPreviewProvider,Company=ui.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen,Customer=ui.load("components/booking/DemoCustomerCalendar.tsx").DemoCustomerCalendar,props={onClose(){},hideFAB:true};
+ const render=()=>{ui.render(Provider);return ui.render(Company,props)};let tree=render();await turn();button(tree,"view_mode_calendario").props.onPress();tree=render();
+ const pills=nodes(tree).filter(n=>n.type==="TouchableOpacity"&&text(n)==="Mismo nombre");assert.equal(pills.length,2);
+ pills[0].props.onPress();assert.equal(component(render(),"AgendaBoard").props.goLog[0].staffId,people[0].id);assert.equal(component(render(),"AgendaBoard").props.goLog.length,1);
+ pills[1].props.onPress();assert.equal(component(render(),"AgendaBoard").props.goLog[0].staffId,people[1].id);assert.equal(component(render(),"AgendaBoard").props.goLog.length,1);
+ await f.store.updateConfig({plantillaItems:[{...item,staffNames:["Mismo nombre","Nuevo nombre segundo",...item.staffNames.slice(2)]}]});tree=render();assert.ok(button(tree,"Nuevo nombre segundo"));assert.equal(component(tree,"AgendaBoard").props.goLog[0].staffId,people[1].id);
+ const updated=plain(f.store.getSnapshot().config.plantillaItems[0]);await f.store.updateConfig({plantillaItems:[{...updated,count:3,staffNames:updated.staffNames.filter((_,i)=>i!==1),staffIds:updated.staffIds.filter((_,i)=>i!==1),staffServices:updated.staffServices.filter((_,i)=>i!==1)}]});render();tree=render();assert.equal(button(tree,"Nuevo nombre segundo"),undefined);assert.equal(component(tree,"AgendaBoard").props.goLog.length,2);
+ assert.equal(component(ui.render(Customer,{repository:repo,onPersonal(){}}),"AgendaBoard").props.goLog.length,2);assert.equal((await f.make().load()).bookings.length,2);assert.equal(ui.calls.liveAgenda,0);assert.equal(ui.calls.external,0);
+});
+
+
+test('selected business name appears in both wizard phases and a selected configured company opens its eight steps',async()=>{
+ const f=dataFixture();await configuredSalon(f);const ui=configurationUI(f);let tree=ui.render();
+ assert.equal(text(nodes(tree).find(n=>n.props.testID==='config-business-name')),'GO PELUQUERIA');
+ component(tree,'Step0Actividad').props.onSubConfirmed();tree=ui.render();assert.equal(text(nodes(tree).find(n=>n.props.testID==='config-business-name')),'GO PELUQUERIA');
+ const selected=configurationUI(f);selected.props.startAtSteps=true;tree=selected.render();assert.ok(component(tree,'StepNombre'));assert.equal(component(tree,'Step0Actividad'),undefined);
+});
+
+test('return to My businesses awaits a focused professional name and specialties before changing company',async()=>{
+ const f=dataFixture();await configuredSalon(f);const ui=configurationUI(f,4);let opened=0,saved;
+ ui.props.onOpenCompanies=()=>{opened++;saved=plain(f.store.getSnapshot())};const {page}=ui.enterStep('StepEspacios');
+ const write=f.storage.setItem;let release;const gate=new Promise(resolve=>release=resolve);f.storage.setItem=async(key,value)=>{await gate;await write(key,value)};
+ button(page(),'biz_add_professional').props.onPress();const input=nodes(page()).filter(n=>n.props.placeholder==='biz_professional_name_ph').at(-1);input.props.onChangeText('Profesional antes de cambiar');
+ nodes(page()).filter(n=>n.type==='TouchableOpacity'&&text(n)==='Servicio adicional').at(-1).props.onPress();
+ const back=nodes(ui.render()).find(n=>n.props.testID==='config-company-list');back.props.onPress();back.props.onPress();await turn();assert.equal(opened,0);
+ release();await turn();assert.equal(opened,1);assert.equal(saved.config.plantillaItems[0].staffNames[4],'Profesional antes de cambiar');assert.deepEqual(saved.config.plantillaItems[0].staffServices[4],['Servicio adicional']);
+ const reopened=await f.make().load();assert.deepEqual(plain(reopened),saved);assert.equal(ui.calls.external,0);assert.equal(ui.calls.liveFloor,0);
+});
+
+test('a failed save keeps the company configuration open instead of proceeding to the business selector',async()=>{
+ const f=dataFixture();await configuredSalon(f);const ui=configurationUI(f,3);let opened=0;ui.props.onOpenCompanies=()=>opened++;
+ const {page}=ui.enterStep('StepServicios');f.failWrites(true);nodes(page()).find(n=>n.props.placeholder?.startsWith('biz_service_placeholder')).props.onChangeText('Cambio con fallo');await turn();
+ nodes(ui.render()).find(n=>n.props.testID==='config-company-list').props.onPress();await turn();assert.equal(opened,0);assert.ok(component(ui.render(),'StepServicios'));assert.ok(ui.alerts.some(row=>String(row[1]).includes('storage failure')));f.failWrites(false);
+});
+
+test('DEMO selector reuses the wizard, changes its business key and lets it return to the named list',async()=>{
+ const f=dataFixture();await configuredSalon(f);const ui=uiFixture(f),Panel=ui.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel,props={visible:true,previewReadOnly:true,onClose(){}};
+ ui.render(Panel,props);let tree=ui.render(Panel,props),manager=nodes(tree).find(n=>n.type==='DemoCompanyManager');assert.ok(manager);
+ manager.props.onOpenConfiguration();tree=ui.render(Panel,props);let screen=component(tree,'EmpresaConfigScreen');assert.ok(screen);assert.equal(screen.props.startAtSteps,true);assert.ok(screen.props.key.includes(f.store.businessId));const firstKey=screen.props.key;
+ screen.props.onOpenCompanies();tree=ui.render(Panel,props);manager=nodes(tree).find(n=>n.type==='DemoCompanyManager');assert.equal(manager.props.open,true);
+ const next=storeModule.createBusinessDemoStore({ownerUserId:owner,companyId:'33333333-3333-4333-8333-333333333333',storage:f.storage,initialConfig:initial,canUse:()=>true});await next.load();f.store=next;manager.props.onOpenConfiguration();screen=component(ui.render(Panel,props),'EmpresaConfigScreen');assert.notEqual(screen.props.key,firstKey);assert.ok(screen.props.key.includes(next.businessId));
+ assert.equal(ui.calls.liveAgenda,0);assert.equal(ui.calls.external,0);
+});
+
+test('enterprise modal handles keyboard once and hides/restores its floating navigation controls',async()=>{
+ const f=dataFixture();await configuredSalon(f);const ui=uiFixture(f),Panel=ui.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel,props={visible:true,previewReadOnly:true,initialModulo:'empresa_config',onClose(){}};
+ ui.render(Panel,props);let tree=ui.render(Panel,props),frame=nodes(tree).find(n=>n.props.testID==='empresa-keyboard-frame');
+ assert.equal(frame.type,'KeyboardAvoidingView');assert.equal(frame.props.enabled,true);assert.equal(frame.props.behavior,'padding');assert.equal(frame.props.keyboardVerticalOffset,0);
+ assert.equal(component(tree,'EmpresaConfigScreen').props.keyboardManagedByParent,true);assert.ok(nodes(tree).some(n=>n.props.accessibilityLabel==='biz_panel_close'));
+ ui.emitKeyboard('keyboardWillShow');tree=ui.render(Panel,props);assert.equal(nodes(tree).some(n=>n.props.accessibilityLabel==='biz_panel_close'),false);assert.equal(nodes(tree).some(n=>n.props.accessibilityLabel==='biz_panel_back'),false);
+ ui.emitKeyboard('keyboardWillHide');tree=ui.render(Panel,props);assert.ok(nodes(tree).some(n=>n.props.accessibilityLabel==='biz_panel_close'));assert.ok(nodes(tree).some(n=>n.props.accessibilityLabel==='biz_panel_back'));
+});
+
+test('Name and Location keep the scrollable form and tappable Next outside it with the keyboard open',async()=>{
+ for(const [index,name] of [[0,'StepNombre'],[1,'StepUbicacion']]){
+  const f=dataFixture();await configuredSalon(f);const ui=configurationUI(f,index);ui.props.keyboardManagedByParent=true;ui.enterStep(name);let tree=ui.render();
+  const scroll=nodes(tree).find(n=>n.type==='ScrollView'&&n.props.ref);scroll.props.onScroll({nativeEvent:{contentOffset:{y:100}}});ui.emitKeyboard('keyboardWillShow');tree=ui.render();
+  assert.equal(tree.type,'KeyboardAvoidingView');assert.equal(tree.props.enabled,false,'The outer enterprise modal already adjusts the keyboard');
+  assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');const next=button(tree,'biz_next');assert.equal(typeof next.props.onPress,'function');
+  assert.equal(nodes(scroll).includes(next),false,'Next stays in the footer outside the scrollable form');ui.emitKeyboard('keyboardWillHide');assert.ok(button(ui.render(),'biz_next'));
+ }
+});
+
+test('guided addition follows the last professional, scrolls/focuses its stable input and prevents rapid/unfinished duplicate cards',async()=>{
+ const f=dataFixture();await configuredSalon(f);const before=plain(f.store.getSnapshot().plan),ui=configurationUI(f,4),{step,page}=ui.enterStep('StepEspacios');
+ const scrolled=[],focused=[],content={nativeContent:true};let tree=ui.render();nodes(tree).find(n=>n.type==='ScrollView'&&n.props.ref).props.ref.current={scrollTo:value=>scrolled.push(value)};
+ nodes(tree).find(n=>n.props.testID==='config-scroll-content').props.ref.current=content;
+ for(const name of ['Profesional guiado uno','Profesional guiado dos']){
+  const currentPage=page(),currentNodes=nodes(currentPage),add=currentNodes.find(n=>n.props.testID==='add-professional');assert.ok(currentNodes.indexOf(add)>currentNodes.findLastIndex(n=>n.props.placeholder==='biz_professional_name_ph'));
+  add.props.onPress();add.props.onPress();tree=page();const input=nodes(tree).filter(n=>n.props.placeholder==='biz_professional_name_ph').at(-1),id=input.props.testID;
+  let inputFocused=false;const nativeInput={focus:()=>{inputFocused=true;focused.push(id)},isFocused:()=>inputFocused,measureLayout:(parent,callback)=>{assert.equal(parent,content);callback(0,800,200,40)}};input.props.ref(nativeInput);input.props.onLayout();assert.equal(focused.at(-1),id);assert.equal(scrolled.at(-1).y,776);
+  const count=nodes(page()).filter(n=>n.props.placeholder==='biz_professional_name_ph').length;await turn();button(page(),'biz_add_professional').props.onPress();page();assert.equal(nodes(page()).filter(n=>n.props.placeholder==='biz_professional_name_ph').length,count,'Blank new card is re-used');
+  ui.emitKeyboard('keyboardDidShow');assert.equal(scrolled.at(-1).y,776);inputFocused=false;const scrollsBefore=scrolled.length;ui.emitKeyboard('keyboardDidShow');assert.equal(scrolled.length,scrollsBefore,'Opening another input must not scroll back to the added professional');input.props.onChangeText(name);input.props.onSubmitEditing();await turn();
+  nodes(page()).filter(n=>n.type==='TouchableOpacity'&&text(n)==='Servicio adicional').at(-1).props.onPress();await turn();
+ }
+ ui.unmount(step.type);await turn();const restored=await f.make().load();assert.equal(restored.config.plantillaItems[0].count,6);assert.deepEqual(plain(restored.config.plantillaItems[0].staffNames.slice(-2)),['Profesional guiado uno','Profesional guiado dos']);
+ assert.equal(new Set(restored.config.plantillaItems[0].staffIds).size,6);assert.deepEqual(plain(restored.config.plantillaItems[0].staffServices.slice(-2)),[['Servicio adicional'],['Servicio adicional']]);assert.deepEqual(plain(restored.plan.elements.slice(0,4)),before.elements.slice(0,4));assert.equal(ui.calls.external,0);
+});
+
+test('the first professional in an empty business is created only once and keeps its name on reopen',async()=>{
+ const f=dataFixture();await f.store.updateConfig({businessName:'Negocio vacío',sectorId:'belleza',subId:'peluqueria',plantillaItems:[]});const ui=configurationUI(f,4),{step,page}=ui.enterStep('StepEspacios');
+ const add=button(page(),'biz_add_professional');add.props.onPress();add.props.onPress();let names=nodes(page()).filter(n=>n.props.placeholder==='biz_professional_name_ph');assert.equal(names.length,1);names[0].props.onChangeText('Primera persona');ui.unmount(step.type);await turn();
+ const restored=await f.make().load();assert.equal(restored.config.plantillaItems.length,1);assert.equal(restored.config.plantillaItems[0].count,1);assert.equal(restored.config.plantillaItems[0].staffNames[0],'Primera persona');
+});
+
+
+test('configuration navigation survives the actual company-panel remount without removing its isolation key',async()=>{
+ const root=source('app/index.tsx');assert.match(root,/const \[empresaDemoRoute, setEmpresaDemoRoute\]/);assert.match(root,/key=\{ownerDemo\.demo\?\.businessId\}[\s\S]*initialModulo=\{empresaDemoRoute === "configuration" \? "empresa_config" : "home"\}/);assert.match(root,/onDemoNavigate=\{setEmpresaDemoRoute\}/);
+ const f=dataFixture();await configuredSalon(f);const ui=uiFixture(f),Panel=ui.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel;let route='home';
+ const props=()=>({visible:true,previewReadOnly:true,initialModulo:route==='configuration'?'empresa_config':'home',initialCompaniesOpen:route==='companies',onDemoNavigate:value=>route=value,onClose(){}});
+ ui.render(Panel,props());let tree=ui.render(Panel,props());const opening=nodes(tree).find(n=>n.type==='DemoCompanyManager').props.onOpenConfiguration;
+ ui.unmount(Panel);f.store=storeModule.createBusinessDemoStore({ownerUserId:owner,companyId:'44444444-4444-4444-8444-444444444444',storage:f.storage,initialConfig:initial,canUse:()=>true});await f.store.load();await configuredSalon(f);
+ opening();assert.equal(route,'configuration');ui.render(Panel,props());tree=ui.render(Panel,props());const wizard=component(tree,'EmpresaConfigScreen');assert.ok(wizard);assert.equal(wizard.props.startAtSteps,true);assert.ok(wizard.props.key.includes(f.store.businessId));
+ wizard.props.onOpenCompanies();assert.equal(route,'companies');tree=ui.render(Panel,props());assert.equal(nodes(tree).find(n=>n.type==='DemoCompanyManager').props.open,true);assert.equal(ui.calls.external,0);
 });

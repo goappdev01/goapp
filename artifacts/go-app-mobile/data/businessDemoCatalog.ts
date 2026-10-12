@@ -10,6 +10,14 @@ const uuid = () => "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, char 
 export function createBusinessDemoCatalog(options: { ownerUserId: string; storage: Storage; canUse: () => boolean; initialConfig: BusinessConfig }) {
   const key = businessDemoStorageKey(options.ownerUserId) + ":catalog";
   let document: Document = { version: 1, ownerUserId: options.ownerUserId, selected: "legacy", companies: [{ id: "legacy", name: "", archived: false, createdAt: 0 }] };
+  // Only the original document may use its compatibility seed. New businesses
+  // start independently, even if a caller passes an already configured business.
+  const seedFor = (company: DemoCompany): BusinessConfig => company.id === "legacy"
+    ? { ...clone(options.initialConfig), businessName: company.name }
+    : { businessName: company.name, address: "", cartaUrl: "", sectorId: null, subId: null,
+      plantillaItems: [], activeDays: [0, 1, 2, 3, 4], openFrom: "09:00", openTo: "20:00",
+      daySchedules: {}, services: [], paymentPolicy: 0, approvalPolicy: 0, cancelPolicy: 0,
+      bookingEnabled: false, completedSteps: [], paymentMethod: null, isBusinessActive: false, staffSchedules: {} };
   const stores = new Map<string, BusinessDemoStore>(), listeners = new Set<() => void>();
   const allowed = () => { if (!options.canUse()) throw new Error("El propietario DEMO no está autorizado."); };
   const emit = () => { for (const listener of listeners) listener(); };
@@ -31,7 +39,7 @@ export function createBusinessDemoCatalog(options: { ownerUserId: string; storag
     if (!stores.has(id)) {
       const company = document.companies.find(value => value.id === id)!;
       const store = createBusinessDemoStore({ ...options, companyId: id === "legacy" ? undefined : id, keepBackup: true,
-        initialConfig: { ...clone(options.initialConfig), businessName: company.name },
+        initialConfig: seedFor(company),
         canUse: () => options.canUse() && document.companies.some(company => company.id === id && !company.archived),
       });
       store.subscribe(emit); stores.set(id, store);
@@ -41,7 +49,20 @@ export function createBusinessDemoCatalog(options: { ownerUserId: string; storag
   return {
     ownerUserId: options.ownerUserId,
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    getCompanies: () => document.companies.map(company => ({ ...company, name: stores.get(company.id)?.getSnapshot().config.businessName || company.name })),
+    getCompanies: () => document.companies.map(company => {
+      const data = stores.get(company.id)?.getSnapshot(), cfg = data?.config;
+      const name = cfg?.businessName || company.name;
+      // Keep the empty compatibility document recoverable, outside the business count.
+      // Any saved business content makes it a normal selectable business.
+      const hasContent = !!name || !!cfg && (!!cfg.sectorId || !!cfg.subId || !!cfg.address || !!cfg.cartaUrl
+        || !!cfg.phone || !!cfg.mobile || !!cfg.whatsapp || !!cfg.coordinates || !!cfg.countryCode
+        || cfg.services.length > 0 || cfg.plantillaItems.length > 0 || cfg.completedSteps.length > 0
+        || Object.keys(cfg.daySchedules ?? {}).length > 0 || Object.keys(cfg.staffSchedules ?? {}).length > 0
+        || cfg.openFrom !== options.initialConfig.openFrom || cfg.openTo !== options.initialConfig.openTo
+        || JSON.stringify(cfg.activeDays) !== JSON.stringify(options.initialConfig.activeDays))
+        || !!data?.plan || !!data?.reservations.length || !!data?.bookings.length || !!data?.entries.length;
+      return { ...company, name, placeholder: company.id === "legacy" && !hasContent };
+    }),
     getSelectedId: () => document.selected,
     getSelectedStore: () => getStore(document.selected),
     getStores: () => { allowed(); return document.companies.filter(company => !company.archived).map(company => getStore(company.id)); },
@@ -73,7 +94,7 @@ export function createBusinessDemoCatalog(options: { ownerUserId: string; storag
       // Fully validate all company namespaces before any storage write.
       const imports: { store: BusinessDemoStore; data: import("./businessDemoStore").BusinessDemoData }[] = [];
       for (const record of backup.companies) {
-        const opts = { ...options, companyId: record.company.id === "legacy" ? undefined : record.company.id, initialConfig: { ...clone(options.initialConfig), businessName: record.company.name } };
+        const opts = { ...options, companyId: record.company.id === "legacy" ? undefined : record.company.id, initialConfig: seedFor(record.company) };
         const validator = createBusinessDemoStore({ ...opts, storage: { getItem: async () => JSON.stringify(record.data), setItem: async () => {} } });
         imports.push({ store: createBusinessDemoStore({ ...opts, keepBackup: true }), data: await validator.load() });
       }
@@ -83,7 +104,7 @@ export function createBusinessDemoCatalog(options: { ownerUserId: string; storag
     }),
     exportBackup: () => enqueue(async () => { await refresh(); const companies = [];
       for (const company of document.companies) {
-        const reader = createBusinessDemoStore({ ...options, companyId: company.id === "legacy" ? undefined : company.id, initialConfig: { ...clone(options.initialConfig), businessName: company.name } });
+        const reader = createBusinessDemoStore({ ...options, companyId: company.id === "legacy" ? undefined : company.id, initialConfig: seedFor(company) });
         companies.push({ company: clone(company), data: await reader.load() });
       }
       allowed(); return JSON.stringify({ format: "go-demo-backup", version: 1, ownerUserId: options.ownerUserId, selected: document.selected, companies }, null, 2);
