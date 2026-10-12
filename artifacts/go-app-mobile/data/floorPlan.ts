@@ -32,6 +32,10 @@ export type FloorElement = {
   status: FloorElementStatus;
   reservable: boolean;
   color?: string;
+  /** Local DEMO linkage; physical resources and historical representations stay distinct. */
+  demoStaffId?: string;
+  demoKind?: "professional" | "physical";
+  demoArchived?: boolean;
 };
 
 export type FloorPlan = {

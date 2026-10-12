@@ -9,7 +9,7 @@ const compile = p => ts.transpileModule(readFileSync(p,"utf8"),{compilerOptions:
   target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,
 }}).outputText;
 const ownerId="11111111-1111-4111-8111-111111111111";
-function fixture(dev=true) {
+function fixture(dev=true,{realCatalog=false,memory=new Map()}={}) {
   let admin={isOwner:true,userId:ownerId,checking:false},view={view:"BUSINESS"},hook;
   const instances=new Map(),effects=[],stores=[],alerts=[],ownerChecks=[],timers=new Map(),stateListeners=new Set();
   let ownerResult=true,deferredCheck,deferredResolve,deferredWrite,writeResolve,timerId=0;
@@ -29,11 +29,15 @@ function fixture(dev=true) {
   const load=(file,imports)=>{const exports={};vm.runInNewContext(compile(file),{exports,__DEV__:dev,console,
     setTimeout:(fn,ms)=>{assert.equal(ms,30000);const id=++timerId;timers.set(id,fn);return id;},clearTimeout:id=>timers.delete(id),
     require:name=>{if(name in imports)return imports[name];throw Error("Unexpected import: "+name);}});return exports;};
+  const storage={getItem:async key=>memory.get(key)??null,setItem:async(key,value)=>memory.set(key,value)};
+  const storeModule=realCatalog?load("data/businessDemoStore.ts",{}):undefined;
+  const catalogModule=realCatalog?load("data/businessDemoCatalog.ts",{"./businessDemoStore":storeModule}):undefined;
   const provider=load("contexts/OwnerBusinessDemoContext.tsx",{
     react:{default:React,...React},"react-native":{AppState,Alert:{alert:(...args)=>alerts.push(args)}},
-    "@react-native-async-storage/async-storage":{default:{}},
+    "@react-native-async-storage/async-storage":{default:storage},
     "./GoAdminAccessContext":{useAdminAccess:()=>admin},
     "@/data/businessDemoCatalog":{createBusinessDemoCatalog:options=>{
+      if(realCatalog)return catalogModule.createBusinessDemoCatalog(options);
       const config={businessName:"GO Prueba",completedSteps:[]},listeners=new Set();
       const store={owner:options.ownerUserId,canUse:options.canUse,getSnapshot:()=>({config,ownerUserId:options.ownerUserId}),subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},
         load:async()=>{assert.equal(options.canUse(),true);store.loads++;},loads:0,
@@ -55,7 +59,7 @@ function fixture(dev=true) {
     const tree=component(props);for(const effect of effects.splice(0))effect();
     if(component===provider.OwnerBusinessDemoProvider)context=tree.props.value;return tree;
   };
-  return {provider,indicator,stores,alerts,AppState,render,ownerChecks,timers,
+  return {provider,indicator,stores,alerts,AppState,render,ownerChecks,timers,memory,storage,storeModule,
     setOwnerResult:result=>{ownerResult=result;},
     deferStoreWrite:()=>{deferredWrite=new Promise(resolve=>writeResolve=resolve);}, resolveStoreWrite:()=>writeResolve(),
     deferOwnerCheck:()=>{deferredCheck=new Promise(resolve=>deferredResolve=resolve);},
@@ -227,4 +231,18 @@ test("the GPS deadline stops before an authorized native storage write starts",a
   f.render(f.provider.OwnerBusinessDemoProvider,base);await f.flush();f.render(f.provider.OwnerBusinessDemoProvider,base);await f.flush();
   assert.equal(f.timers.size,0);f.expireTimers();assert.equal(completed,false);
   f.resolveStoreWrite();await f.flush();await saved;assert.equal(completed,true);assert.equal(f.stores[0].writes.length,1);
+});
+
+test('actual owner provider never pairs a selected business label with a different business configuration during creation and switch',async()=>{
+ const initial={businessName:'',address:'',cartaUrl:'',sectorId:null,subId:null,plantillaItems:[],activeDays:[0,1,2,3,4],openFrom:'09:00',openTo:'20:00',daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};
+ const memory=new Map(),props={children:'Original screens',initialConfig:initial},f=fixture(true,{realCatalog:true,memory});
+ const settle=async fixture=>{for(let i=0;i<12;i++){fixture.render(fixture.provider.OwnerBusinessDemoProvider,props);if(fixture.value.loaded){assert.equal(fixture.value.config,fixture.value.demo.getSnapshot().config);assert.equal(fixture.value.demo,fixture.value.catalog.getSelectedStore());assert.equal(fixture.value.config.businessId,fixture.value.demo.businessId);}await fixture.flush();}};
+ await settle(f);const catalog=f.value.catalog,prior=[];
+ for(const name of ['GO PELUQUERÍA','GO RESTAURANTE']){const id=await catalog.create(name);await settle(f);assert.equal(f.value.config.businessName,name);assert.equal(f.storeModule.getBusinessDemoSetupState(f.value.config,null).completed,0);
+   await f.value.demo.updateConfig({address:'Dirección de '+name,sectorId:'belleza',subId:'peluqueria',completedSteps:[0,1,2,3,4,5,6,7],services:[{name:'Servicio de '+name,duration:30,price:12}],plantillaItems:[{id:'puestos',label:'Profesional',count:1,staffNames:['Profesional de '+name]}]});await settle(f);prior.push([id,JSON.stringify(f.value.demo.getSnapshot())]);}
+ const id=await catalog.create('Tercer negocio');await settle(f);assert.equal(f.value.config.address,'');assert.equal(f.value.config.services.length,0);assert.equal(f.value.config.plantillaItems.length,0);assert.equal(f.storeModule.getBusinessDemoSetupState(f.value.config,null).completed,0);
+ await f.value.demo.updateConfig({sectorId:'belleza',subId:'peluqueria',services:[{name:'Servicio tercero',duration:45,price:20}],plantillaItems:[{id:'puestos',label:'Profesional',count:1,staffNames:['Profesional tercero']}]});await settle(f);prior.push([id,JSON.stringify(f.value.demo.getSnapshot())]);
+ for(const [companyId,expected] of prior){await catalog.select(companyId);await settle(f);assert.equal(JSON.stringify(f.value.demo.getSnapshot()),expected);assert.equal(f.value.catalog.getCompanies().filter(company=>!company.placeholder&&!company.archived).length,3);}
+ f.unmount(f.provider.OwnerBusinessDemoProvider);const bytes=Array.from(memory),reopened=fixture(true,{realCatalog:true,memory});await settle(reopened);assert.equal(reopened.value.catalog.getSelectedId(),id);assert.equal(JSON.stringify(reopened.value.demo.getSnapshot()),prior[2][1]);assert.deepEqual(Array.from(memory),bytes);
+ assert.equal(f.alerts.length,0);assert.equal(reopened.alerts.length,0);
 });

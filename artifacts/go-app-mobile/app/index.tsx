@@ -3436,6 +3436,8 @@ function HomeScreenContent() {
     setEmpresaOpenState(open && (goView.isBusinessPreview || businessAccess.allowed));
   };
   const [empresaModulo, setEmpresaModulo] = useState<string>("home");
+  // Keep DEMO navigation across the keyed company panel remount; identity/permissions stay unchanged.
+  const [empresaDemoRoute, setEmpresaDemoRoute] = useState<"home" | "configuration" | "companies">("home");
   const ownerNavigationRevision = useRef(0);
   useEffect(() => () => { ownerNavigationRevision.current++; }, []);
   useEffect(() => { ownerNavigationRevision.current++; }, [adminAccess.userId]);
@@ -26137,8 +26139,10 @@ function HomeScreenContent() {
       />}
 
       {goView.isBusinessPreview && <GoBusinessPreviewProvider>
-        <EmpresaPanel key={ownerDemo.demo?.businessId} visible={empresaOpen} previewReadOnly initialModulo="home"
-          onClose={() => setEmpresaOpenState(false)} onOpenContext={openOwnerContextSelector} />
+        <EmpresaPanel key={ownerDemo.demo?.businessId} visible={empresaOpen} previewReadOnly
+          initialModulo={empresaDemoRoute === "configuration" ? "empresa_config" : "home"}
+          initialCompaniesOpen={empresaDemoRoute === "companies"} onDemoNavigate={setEmpresaDemoRoute}
+          onClose={() => { setEmpresaOpenState(false); setEmpresaDemoRoute("home"); }} onOpenContext={openOwnerContextSelector} />
       </GoBusinessPreviewProvider>}
 
       {/* ── ACTIVACIÓN COBROS — se renderiza aquí (nivel raíz) para evitar

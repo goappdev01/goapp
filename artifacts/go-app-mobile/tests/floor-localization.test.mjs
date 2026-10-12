@@ -10,12 +10,14 @@ const compile=name=>ts.transpileModule(source(name),{compilerOptions:{target:ts.
 const tx={};vm.runInNewContext(compile('i18n/translations.ts'),{exports:tx});const {translations}=tx;
 const owner='11111111-1111-4111-8111-111111111111';
 const storeModule={};
+vm.runInNewContext(compile("data/businessDemoStore.ts"),{exports:storeModule,console,Date,Set,Map});
 const turn=async()=>{for(let i=0;i<8;i++)await new Promise(resolve=>setImmediate(resolve));};
 const names=Array.from({length:4},(_,i)=>'Raul '+(i+1)+' GO PRUEBA');
 function dataFixture(){
  const plan={id:'demo_plan',businessId:'demo_business',updatedAt:1,elements:names.map((label,i)=>({id:'space'+i,type:'silla',label,capacity:1,x:20+i*7,y:20+i*70,width:240,height:52,status:i===0?'reservado':'disponible',reservable:true}))};
- const snapshot={config:{businessName:'GO Peluquería Prueba',sectorId:'belleza',subId:'peluqueria',plantillaItems:[{id:'staff',count:4,emoji:'',staffNames:names}],services:[],completedSteps:[0,1,2,3,4,5,6,7]},plan,reservations:[],entries:[],preferences:{}};
+ const snapshot={config:{businessName:'GO Peluquería Prueba',sectorId:'belleza',subId:'peluqueria',plantillaItems:[{id:'staff',count:4,emoji:'',staffNames:names}],services:[],completedSteps:[0,1,2,3,4,5,6,7]},plan,reservations:[],bookings:[],entries:[],preferences:{}};
  const writes=[];const store={businessId:plan.businessId,planId:plan.id,getSnapshot:()=>snapshot,load:async()=>snapshot,
+ reconcileProfessionalPlan:async()=>{storeModule.reconcileBusinessDemoProfessionalPlan(snapshot,true);return JSON.parse(JSON.stringify(snapshot.plan));},
  loadFloorPlan:async()=>JSON.parse(JSON.stringify(snapshot.plan)),loadReservations:async()=>JSON.parse(JSON.stringify(snapshot.reservations)),
  saveFloorPlan:async value=>{writes.push('floor');snapshot.plan=value;},saveReservations:async(_id,value)=>{writes.push('res');snapshot.reservations=value;},
  updateConfig:async patch=>Object.assign(snapshot.config,patch),updateEntries:async fn=>{snapshot.entries=typeof fn==='function'?fn(snapshot.entries):fn;},

@@ -2,7 +2,7 @@ import type { BusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import type { Business, BookableItem, Staff, SlotWithStatus, Booking } from "./booking";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import type { BusinessDemoStore, BusinessDemoData, DemoBooking, DemoReservation } from "./businessDemoStore";
-import { getBusinessDemoSetupState, isValidDemoLocalDate, isValidDemoLocalInterval, getBusinessDemoProfessionals, getBusinessDemoShifts } from "./businessDemoStore";
+import { getBusinessDemoSetupState, isValidDemoLocalDate, isValidDemoLocalInterval, getBusinessDemoProfessionals, getBusinessDemoShifts, businessDemoProfessionalElement, businessDemoElementRequiresReview } from "./businessDemoStore";
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const token = (value: string) => Array.from(value.normalize("NFKC").trim().toLowerCase()).map(char => char.codePointAt(0)!.toString(16)).join("_");
@@ -41,15 +41,13 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
   const requireBusiness = (id: string) => { if (id !== store.businessId) throw new Error("DEMO no puede consultar empresas reales."); };
   const resourceOptions = (data: BusinessDemoData, service: BookableItem, member?: Staff) => {
     const allElements = data.plan?.elements ?? [];
-    const elements = allElements.filter(element => element.reservable && !["bloqueado", "ocupado", "mantenimiento"].includes(element.status));
+    const elements = allElements.filter(element => !element.demoArchived && !(data.config.sectorId && businessDemoElementRequiresReview(element)) && element.reservable && !["bloqueado", "ocupado", "mantenimiento"].includes(element.status));
     const allStaff = staffFor(data.config);
     const staff = member ? [member] : allStaff.filter(p => p.active && (!p.serviceIds?.length || p.serviceIds.includes(service.id)));
     if (member && (!member.active || member.serviceIds?.length && !member.serviceIds.includes(service.id))) return [];
     if (!staff.length) return member || allStaff.length ? [] : elements.map(element => ({ elementId: element.id, staff: undefined as Staff | undefined }));
     return staff.flatMap(person => {
-      const index = allStaff.findIndex(item => item.id === person.id);
-      const byName = allElements.find(element => normalized(element.label) === normalized(person.name));
-      const element = byName ?? allElements[index];
+      const element = businessDemoProfessionalElement(data, person);
       return element && elements.some(value => value.id === element.id) ? [{ elementId: element.id, staff: person }] : [];
     });
   };

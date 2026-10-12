@@ -51,6 +51,7 @@ import {
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { type PlantillaItem } from "@/data/goSectorData";
 import { getBusinessIcon } from "@/lib/businessIcons";
+import { getBusinessDemoProfessionals, visibleBusinessDemoElements, businessDemoElementRequiresReview } from "@/data/businessDemoStore";
 
 // ── Native-only gesture helper ─────────────────────────────────────────────────
 // blocksExternalGestureHandlers() is unavailable on web — guard it safely.
@@ -1836,8 +1837,16 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
   const demoReservationsSignature = demo ? JSON.stringify(demo.getSnapshot().reservations) : null;
   useEffect(() => {
     let active = true;
-    floorRepository.loadFloorPlan(businessId).then(saved => {
+    floorRepository.loadFloorPlan(businessId).then(async saved => {
       if (!active) return;
+      if (demo && (getBusinessDemoProfessionals(bizConfig, businessId).length || saved?.elements.some(element => element.demoKind === "professional"))) {
+        const synced = await demo.reconcileProfessionalPlan();
+        if (!active) return;
+        const visible = visibleBusinessDemoElements(synced);
+        setPlan({ ...synced, elements: visible }); setHasChanges(false);
+        setTimeout(() => fitToElements(visible), 350);
+        return;
+      }
       if (saved && saved.elements.length > 0) {
         // ── 1. Migrate pill widths so long names always fit ────────────────
         const migrated = saved.elements.map(el =>
@@ -1899,7 +1908,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
           }
         }
 
-        setPlan({ ...saved, elements: migrated });
+        setPlan({ ...saved, elements: demo ? migrated.filter(element => !element.demoArchived) : migrated });
         setTimeout(() => fitToElements(migrated), 350);
         return;
       }
@@ -1945,6 +1954,20 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
   }, [plan.id, demoReservationsSignature]);
 
   const selectedEl = plan.elements.find(e => e.id === selectedId) ?? null;
+  const legacyCandidates = demo?.getSnapshot().plan?.elements.filter(businessDemoElementRequiresReview) ?? [];
+  const reviewLegacy = () => {
+    const element = legacyCandidates[0];
+    if (!demo || !element) return;
+    Alert.alert(lang === "en" ? "Review old element" : "Revisar elemento antiguo", element.label + "\n\n" + (lang === "en"
+      ? "Identify whether this is an obsolete professional or a physical post. History and positions are retained."
+      : "Indica si es un profesional obsoleto o un puesto físico. Se conservan el historial y las posiciones."), [
+      { text: lang === "en" ? "Cancel" : "Cancelar", style: "cancel" },
+      ...(["professional", "physical"] as const).map(kind => ({ text: kind === "professional"
+        ? (lang === "en" ? "Obsolete professional" : "Profesional obsoleto") : (lang === "en" ? "Physical post" : "Puesto físico"),
+        onPress: () => { void demo.classifyLegacyElement(element.id, kind).catch(error => Alert.alert("Plano DEMO", String(error))); },
+      })),
+    ]);
+  };
 
   const updatePlan = useCallback((updater: (p: FloorPlan) => FloorPlan) => {
     setPlan(p => {
@@ -2013,6 +2036,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
     const el: FloorElement = {
       id: makeElementId(), type,
       label:    `${t(floorElementKey(type))} ${n}`,
+      ...(demo ? { demoKind: "physical" as const } : {}),
       capacity: defaults.capacity ?? 2,
       x, y,
       width:    elW,
@@ -2185,6 +2209,10 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
         <Text style={s.subtitleTxt}>{businessName ?? t("floor_my_business")}</Text>
       </View>
 
+      {legacyCandidates.length > 0 && <TouchableOpacity onPress={reviewLegacy} accessibilityRole="button"
+        style={{ paddingHorizontal: 14, paddingVertical: 8 }}>
+        <Text style={{ color: ACCENT, fontSize: 13 }}>{lang === "en" ? "Review old elements" : "Revisar elementos antiguos"}: {legacyCandidates.length}</Text>
+      </TouchableOpacity>}
       {/* ── Canvas area (+ inline reservations panel en modo dividido) ── */}
       <View style={{ flex: 1 }}>
       <GestureDetector gesture={canvasComposed}>
