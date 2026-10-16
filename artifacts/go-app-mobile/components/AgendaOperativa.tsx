@@ -292,6 +292,7 @@ export type AgendaBoardProps = {
   onSendGoChat?: (entryId: string, chatKey: string, text: string, senderType: "cliente" | "empresa") => void;
   embedded?: boolean;
   style?: ViewStyle;
+  renderHeader?: (monthNavigation: React.ReactNode | null) => React.ReactNode;
   calSizeKey?: CalSizeKey;
   viewMode?: "semana" | "mes_lineal" | "dia";
   calViewMonth?: string;
@@ -682,6 +683,7 @@ export function AgendaBoard({
   onSendGoChat,
   embedded = false,
   style,
+  renderHeader,
   calSizeKey = DEFAULT_GO_RENDER_PRESET.calSize,
   viewMode = "semana",
   calViewMonth,
@@ -1323,7 +1325,7 @@ export function AgendaBoard({
   );
 
   // ── CARD ─────────────────────────────────────────────────────────
-  const renderItemCard = (item: GoEntry, dnProgress = 0, colMode: "stress" | "normal" | "relax" = "normal", colDateISO?: string) => {
+  const renderItemCard = (item: GoEntry, dnProgress = 0, colMode: "stress" | "normal" | "relax" = "normal", colDateISO?: string, isPendingColumn = false) => {
     const hasProposal = !!(item.changeProposal);
     const isAcceptedProposal = hasProposal && item.estado === "aceptado";
     const _proposalColor   = isAcceptedProposal ? "#22c55e"               : "#FF8C00";
@@ -1371,6 +1373,7 @@ export function AgendaBoard({
     // A card is only treated as a valid bookable reservation if it carries
     // both staffId and slotKey — without them slot-conflict detection cannot work.
     const isBookingCard = _isRawBookingType && _hasRequiredSlotFields;
+    const compactPendingMetadata = isPendingColumn && !isExpanded && !isBookingCard;
 
     if (_isRawBookingType) {
       if (!_hasRequiredSlotFields) {
@@ -1592,9 +1595,9 @@ export function AgendaBoard({
           {/* ── Tappable body: opens/closes card on tap.
               Lives outside the footer so button presses never bubble here. ── */}
           <TouchableOpacity onPress={tapThis} activeOpacity={0.85} style={{ gap: colMode === "stress" ? 2 : colMode === "relax" ? 7 : 4 }}>
-            {/* Keep the time intact; secondary indicators can wrap on narrow cards. */}
-            <View style={s.cardTopRow}>
-              <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0, flexWrap: "wrap", maxWidth: "100%" }}>
+            {/* Pending tasks keep time/type together; other cards retain their metadata layout. */}
+            <View style={[s.cardTopRow, compactPendingMetadata && { flexWrap: "nowrap" }]}>
+              <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0, flexWrap: compactPendingMetadata ? "nowrap" : "wrap", maxWidth: "100%" }}>
                 {hasTime && (
                   <Text numberOfLines={1} style={[s.cardTime, { fontSize: timeFont, color: _textPrimary, flexShrink: 0 }]}>
                     {formatTimeDisplay(item.time)}
@@ -1627,7 +1630,7 @@ export function AgendaBoard({
                   );
                 })()}
               </View>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", flexShrink: 1, maxWidth: "100%", marginLeft: "auto", gap: 5 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: compactPendingMetadata ? "nowrap" : "wrap", flexShrink: 1, maxWidth: "100%", marginLeft: "auto", gap: 5 }}>
                 {!!itemWeatherAlert && (
                   <Feather
                     name={getWeatherFeatherIcon(itemWeatherAlert.weatherCode) as any}
@@ -1635,11 +1638,11 @@ export function AgendaBoard({
                     color={getWeatherColor(itemWeatherAlert.weatherCode)}
                   />
                 )}
-                {hasMessage && (
+                {hasMessage && (!isPendingColumn || isBookingCard) && (
                   <Feather name="message-circle" size={11} color="rgba(96,165,250,0.85)" />
                 )}
                 <View style={[s.cardTypeBadge, { backgroundColor: badge.color + "22" }]}>
-                  <Text style={[s.cardTypeBadgeText, { color: badge.color }]}>{badge.label}</Text>
+                  <Text numberOfLines={compactPendingMetadata ? 1 : undefined} style={[s.cardTypeBadgeText, { color: badge.color }]}>{badge.label}</Text>
                 </View>
               </View>
             </View>
@@ -1840,8 +1843,11 @@ export function AgendaBoard({
                 Haptics.selectionAsync().catch(() => {});
                 handleOpenMessage(item);
               }}
+              accessibilityRole="button"
+              accessibilityLabel={t("agenda_write_msg")}
               activeOpacity={0.75}
               style={{
+                minHeight: isPendingColumn ? 44 : undefined,
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 7,
@@ -1858,7 +1864,9 @@ export function AgendaBoard({
                 style={{ color: "rgba(96,165,250,0.75)", fontSize: 10, fontWeight: "600", flex: 1 }}
                 numberOfLines={1}
               >
-                {item.notes
+                {isPendingColumn
+                  ? t("agenda_write_msg")
+                  : item.notes
                   ? item.notes
                   : (item as any).message
                   ? (item as any).message
@@ -2005,6 +2013,7 @@ export function AgendaBoard({
         <View
           style={[
             s.colHeader,
+            !!renderHeader && s.compactColHeader,
             col.isRetrasados && s.colHeaderRetrasados,
             col.isEliminados && s.colHeaderEliminados,
             !isEmpty && isToday && s.colHeaderToday,
@@ -2034,7 +2043,7 @@ export function AgendaBoard({
               Los badges y indicadores usan position:"absolute" para no desplazar
               el contenido centrado.                                            */}
           <TouchableOpacity
-            style={s.colHeaderContent}
+            style={[s.colHeaderContent, !!renderHeader && s.compactColHeaderContent]}
             disabled={!col.dateISO || !onSelectDay}
             onPress={event => { event.stopPropagation(); if (col.dateISO) onSelectDay?.(col.dateISO); }}
             accessibilityRole="button"
@@ -2044,6 +2053,7 @@ export function AgendaBoard({
             <Text
               style={[
                 s.colHeaderDayName,
+                !!renderHeader && col.isRetrasados && s.pendingHeaderTitleOffset,
                 { fontSize: hdrFont },
                 !isEmpty && isSelectedDay && s.colHeaderTextSelected,
                 col.isEliminados && s.colHeaderTextEliminados,
@@ -2378,7 +2388,7 @@ export function AgendaBoard({
                 nestedScrollEnabled
                 scrollEnabled={!dragItem}
               >
-                {compactItems.map((item) => renderItemCard(item, colDnProgress, colHumanMode, col.dateISO))}
+                {compactItems.map((item) => renderItemCard(item, colDnProgress, colHumanMode, col.dateISO, !!col.isRetrasados))}
               </ScrollView>
             );
           })()
@@ -2430,6 +2440,22 @@ export function AgendaBoard({
   };
 
   // ── RENDER ────────────────────────────────────────────────────────
+  // Same active month and callbacks in the embedded header or standalone board.
+  const monthNavigation = viewMode === "mes_lineal" ? (<View style={[s.monthNavBar, !!renderHeader && s.monthNavInline]}>
+          <TouchableOpacity onPress={event => { event.stopPropagation(); changeMonth(-1); }} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Previous month" : "Mes anterior"} style={[s.monthNavBtn, !!renderHeader && s.monthNavInlineBtn]} activeOpacity={0.7}>
+            <Feather name="chevron-left" size={18} color="#ffffff" />
+          </TouchableOpacity>
+          <Text style={[s.monthNavTitle, !!renderHeader && s.monthNavInlineTitle]} numberOfLines={renderHeader ? 1 : undefined} adjustsFontSizeToFit={!!renderHeader} minimumFontScale={0.6}>
+            {((): string => {
+              const [y, m] = activeMonth.split("-").map(Number);
+              return `${monthNamesArr[m - 1]} ${y}`;
+            })()}
+          </Text>
+          <TouchableOpacity onPress={event => { event.stopPropagation(); changeMonth(1); }} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Next month" : "Mes siguiente"} style={[s.monthNavBtn, !!renderHeader && s.monthNavInlineBtn]} activeOpacity={0.7}>
+            <Feather name="chevron-right" size={18} color="#ffffff" />
+          </TouchableOpacity>
+        </View>) : null;
+
   return (
     <View
       ref={boardViewRef}
@@ -2442,30 +2468,14 @@ export function AgendaBoard({
       }}
     >
 
-      {/* Month navigation works with either the caller's month or a local fallback. */}
-      {viewMode === "mes_lineal" && (
-        <View style={s.monthNavBar}>
-          <TouchableOpacity onPress={event => { event.stopPropagation(); changeMonth(-1); }} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Previous month" : "Mes anterior"} style={s.monthNavBtn} activeOpacity={0.7}>
-            <Feather name="chevron-left" size={18} color="#ffffff" />
-          </TouchableOpacity>
-          <Text style={s.monthNavTitle}>
-            {((): string => {
-              const [y, m] = activeMonth.split("-").map(Number);
-              return `${monthNamesArr[m - 1]} ${y}`;
-            })()}
-          </Text>
-          <TouchableOpacity onPress={event => { event.stopPropagation(); changeMonth(1); }} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Next month" : "Mes siguiente"} style={s.monthNavBtn} activeOpacity={0.7}>
-            <Feather name="chevron-right" size={18} color="#ffffff" />
-          </TouchableOpacity>
-        </View>
-      )}
+      {renderHeader ? renderHeader(monthNavigation) : monthNavigation}
 
       <GHScrollView
         ref={scrollViewRef}
         horizontal
         showsHorizontalScrollIndicator={false}
         style={s.colsScroll}
-        contentContainerStyle={s.colsContent}
+        contentContainerStyle={[s.colsContent, !!renderHeader && s.compactColsContent]}
         decelerationRate="normal"
         directionalLockEnabled
         scrollEventThrottle={4}
@@ -3695,6 +3705,11 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,255,255,0.15)",
   },
+  monthNavInline: {
+    flex: 1, minWidth: 0, paddingHorizontal: 0, paddingVertical: 0, borderBottomWidth: 0,
+  },
+  monthNavInlineBtn: { width: 32 },
+  monthNavInlineTitle: { flex: 1, minWidth: 0, textAlign: "center" },
   monthNavBtn: {
     width: 44,
     height: 44,
@@ -3884,6 +3899,11 @@ const s = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,0.12)",
     backgroundColor: "rgba(8,8,16,0.92)",
   },
+  // Calendar-only spacing; keep every text/icon size and let larger content grow.
+  compactColsContent: { paddingTop: 0 },
+  compactColHeader: { paddingVertical: 0 },
+  compactColHeaderContent: { minHeight: 44, paddingVertical: 2, gap: 1, justifyContent: "center" },
+  pendingHeaderTitleOffset: { transform: [{ translateX: -6 }] },
   colHeaderContent: {
     flex: 1,
     alignItems: "center",

@@ -285,16 +285,23 @@ test("the working screen stays mounted during owner revalidation/outage and lose
   const code = "globalThis.HomeScreen = " + home.getText(ast).replace(/^export default /, "");
   vm.runInContext(ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText, scope);
   const initial = scope.HomeScreen();
-  assert.equal(initial.type, scope.HomeScreenContent);
+  assert.equal(initial.type, scope.BusinessAccessGate);
+  assert.equal(initial.props.ownerPresentation, true);
+  assert.equal(initial.children[0].type, scope.HomeScreenContent);
   authorized = false; admin = { ...admin, checking: true };
   assert.equal(scope.HomeScreen().type, initial.type);
+  assert.equal(scope.HomeScreen().props.ownerPresentation, true);
   admin = { ...admin, checking: false, unavailable: true };
   assert.equal(scope.HomeScreen().type, initial.type, "Transport errors must not reset local screen state");
+  assert.equal(scope.HomeScreen().props.ownerPresentation, true);
   admin = { ...admin, unavailable: false };
   assert.equal(scope.HomeScreen().type, scope.BusinessAccessGate, "Confirmed denial retains the business permission boundary");
+  assert.equal(scope.HomeScreen().props.ownerPresentation, false);
+  assert.equal(scope.HomeScreen().children[0].type, initial.children[0].type);
   authorized = true; scope.HomeScreen();
   authorized = false; admin = { userId: null, checking: true, unavailable: false };
   assert.equal(scope.HomeScreen().type, scope.BusinessAccessGate, "Logout cannot retain owner presentation");
+  assert.equal(scope.HomeScreen().props.ownerPresentation, false);
 });
 
 
@@ -303,4 +310,120 @@ test('the recovery notice is emitted only for confirmed expiry and consumed once
  await f.api.restoreStoredAuthentication();
  assert.match(f.api.consumeAuthRecoveryNotice(),/ya no es válida/);assert.equal(f.api.consumeAuthRecoveryNotice(),null);
  await f.api.clearAuthSession();assert.equal(f.api.consumeAuthRecoveryNotice(),null);
+});
+
+test('regression: owner-gateway auth/me 401 after successful rotation must not erase authentication', async()=>{
+ const f=fixture({reply:(url)=>url.endsWith('/auth/refresh')?Response.json({...session(),refresh_token:'rotated'}):Response.json({error:'Owner verification failed'},{status:401})});
+ const before=protectedData(f),restored=await f.api.restoreStoredAuthentication();
+ assert.ok(restored.session,'Gateway denial is not proof that Auth revoked the session');
+ assert.equal(f.getStored().refresh_token,'rotated');assert.equal(f.changes,0);assert.deepEqual(protectedData(f),before);
+});
+test('regression: sequential 429 renewal failures must share a retry pause', async()=>{
+ const f=fixture({storedSession:session(initialTime/1000-1),reply:()=>Response.json({error:'Retry later'},{status:429})});
+ for(let i=0;i<8;i++)await assert.rejects(f.api.ensureAuthSession());
+ assert.equal(f.calls.length,1,'Independent consumers must not exhaust the five-per-minute gateway allowance');
+ assert.ok(f.getStored());assert.equal(f.changes,0);
+});
+test('regression: sequential network renewal failures must share a retry pause', async()=>{
+ const f=fixture({storedSession:session(initialTime/1000-1),reply:()=>{throw Error('temporary network outage')}});
+ for(let i=0;i<8;i++)await assert.rejects(f.api.ensureAuthSession());
+ assert.equal(f.calls.length,1);assert.ok(f.getStored());assert.equal(f.changes,0);
+});
+
+test("regression: a 429 renewal obeys Retry-After and recovers once after the pause", async () => {
+  let limited = true;
+  const f = fixture({ storedSession: session(initialTime / 1000 - 1), reply: () => limited
+    ? Response.json({ error: "Retry later" }, { status: 429, headers: { "Retry-After": "120" } })
+    : Response.json({ ...session(initialTime / 1000 + 7200), refresh_token: "rotated-after-wait" }) });
+  await assert.rejects(f.api.ensureAuthSession());
+  limited = false; f.setTime(initialTime + 61000);
+  await assert.rejects(f.api.ensureAuthSession()); assert.equal(f.calls.length, 1);
+  f.setTime(initialTime + 120000);
+  const checks = await Promise.all(Array.from({ length: 8 }, () => f.api.ensureAuthSession()));
+  assert.ok(checks.every(value => value.refresh_token === "rotated-after-wait"));
+  assert.equal(f.calls.length, 2); assert.equal(f.changes, 0);
+});
+
+test("regression: transient network recovery resumes after 30 seconds without login or credential deletion", async () => {
+  let offline = true;
+  const f = fixture({ storedSession: session(initialTime / 1000 - 1), reply: () => {
+    if (offline) throw Error("offline");
+    return Response.json({ ...session(), refresh_token: "rotated-after-network" });
+  } });
+  const before = protectedData(f);
+  await assert.rejects(f.api.ensureAuthSession());
+  offline = false; f.setTime(initialTime + 29000);
+  await assert.rejects(f.api.ensureAuthSession()); assert.equal(f.calls.length, 1);
+  f.setTime(initialTime + 30000);
+  assert.equal((await f.api.ensureAuthSession()).refresh_token, "rotated-after-network");
+  assert.equal(f.calls.length, 2); assert.equal(f.changes, 0); assert.deepEqual(protectedData(f), before);
+});
+
+test("regression: repeated gateway 401s cannot repeatedly rotate or erase a valid renewable session", async () => {
+  const f = fixture({ reply: url => url.endsWith("/auth/refresh")
+    ? Response.json({ ...session(), refresh_token: "rotated" })
+    : Response.json({ error: "Owner verification failed" }, { status: 401 }) });
+  for (let i = 0; i < 8; i++) {
+    if (i === 0) assert.equal((await f.api.fetchWithAuth(base + "/supabase/auth/me")).status, 401);
+    else await assert.rejects(f.api.fetchWithAuth(base + "/supabase/auth/me"), error => error.code === "SESSION_REFRESH_UNAVAILABLE");
+  }
+  assert.equal(f.calls.filter(call => call.url.endsWith("/auth/refresh")).length, 1);
+  assert.ok(f.getStored()); assert.equal(f.changes, 0); assert.equal(f.api.consumeAuthRecoveryNotice(), null);
+});
+
+test("regression: protected-route 429 suppresses further authenticated traffic until Retry-After", async () => {
+  let limited = true;
+  const f = fixture({ reply: () => limited
+    ? Response.json({ error: "Retry later" }, { status: 429, headers: { "Retry-After": "90" } })
+    : Response.json({ allowed: true }) });
+  const before = [...f.storage];
+  assert.equal((await f.api.fetchWithAuth(base + "/supabase/admin/access")).status, 429);
+  for (let i = 0; i < 8; i++) await assert.rejects(f.api.fetchWithAuth(base + "/supabase/auth/me"));
+  assert.equal(f.calls.length, 1); assert.deepEqual([...f.storage], before); assert.equal(f.changes, 0);
+  limited = false; f.setTime(initialTime + 90000);
+  assert.equal((await f.api.fetchWithAuth(base + "/supabase/admin/access")).status, 200);
+  assert.equal(f.calls.length, 2);
+});
+
+test("regression: a Retry-After HTTP date is honored without changing stored data", async () => {
+  const delay = new Date(initialTime + 120000).toUTCString();
+  const f = fixture({ storedSession: session(initialTime / 1000 - 1),
+    reply: () => Response.json({}, { status: 429, headers: { "Retry-After": delay } }) });
+  await assert.rejects(f.api.ensureAuthSession()); f.setTime(initialTime + 61000);
+  await assert.rejects(f.api.ensureAuthSession()); assert.equal(f.calls.length, 1);
+  f.setTime(initialTime + 120000);
+  await assert.rejects(f.api.ensureAuthSession()); assert.equal(f.calls.length, 2);
+});
+
+test("regression: a new explicit login clears the old identity's retry pause and manual logout still wins", async () => {
+  const f = fixture({ storedSession: session(initialTime / 1000 - 1), reply: url =>
+    url.endsWith("/auth/refresh") ? Response.json({}, { status: 429 }) : Response.json({ user: session().user }) });
+  await assert.rejects(f.api.ensureAuthSession());
+  await f.api.saveAuthSession(session(initialTime / 1000 + 7200, "new-user", "new-session"));
+  assert.equal((await f.api.fetchWithAuth(base + "/supabase/auth/me")).status, 200);
+  assert.equal(f.calls.length, 2); await f.api.clearAuthSession();
+  assert.equal(await f.api.ensureAuthSession(), null);
+  await assert.rejects(f.api.fetchWithAuth(base + "/supabase/auth/me"), error => error.code === "AUTH_REQUIRED");
+  assert.equal(f.calls.length, 2); assert.equal(f.getStored(), null);
+});
+
+test("regression: bootstrap checks cannot renew twice when a freshly rotated token gets an owner-gateway 401", async () => {
+  const f = fixture({ storedSession: session(initialTime / 1000 - 1), reply: url => url.endsWith("/auth/refresh")
+    ? Response.json({ ...session(), refresh_token: "rotated" })
+    : Response.json({ error: "Owner verification failed" }, { status: 401 }) });
+  const before = protectedData(f);
+  const restored = await f.api.restoreStoredAuthentication();
+  assert.ok(restored.session); assert.equal(restored.role, "usuario");
+  assert.equal(f.calls.filter(call => call.url.endsWith("/auth/refresh")).length, 1);
+  assert.equal(f.changes, 0); assert.deepEqual(protectedData(f), before);
+});
+
+test("regression: an auth/me 429 during bootstrap preserves the account and does not emit a logout event", async () => {
+  const f = fixture({ reply: () => Response.json({}, { status: 429 }) });
+  const before = protectedData(f);
+  const restored = await f.api.restoreStoredAuthentication();
+  assert.ok(restored.session); assert.equal(restored.role, "usuario"); assert.equal(f.changes, 0);
+  assert.deepEqual(protectedData(f), before);
+  const second = await f.api.restoreStoredAuthentication();
+  assert.ok(second.session); assert.equal(second.role, "usuario"); assert.equal(f.calls.length, 1);
 });

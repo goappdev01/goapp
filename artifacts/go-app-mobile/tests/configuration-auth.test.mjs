@@ -126,14 +126,31 @@ test('a real backend failure with a session still shows the existing configurati
   assert.equal(f.state.loaded, false);
 });
 
-test('both configuration entry points use the existing authentication flow when signed out', () => {
-  assert.equal((homeSource.match(/handleOpenOptions\(\);/g) ?? []).length, 2);
-  assert.equal((homeSource.match(/setOptionsOpen\(true\)/g) ?? []).length, 1);
-  for (const role of [null, 'usuario', 'empresa']) {
-    const state = { options: false, auth: role === null };
-    const context = { userAccountType: role, setOptionsOpen: value => { state.options = value; }, setGoAuthOpen: value => { state.auth = value; } };
+test('all three configuration entries use the same authentication flow, including ADMIN Tools', () => {
+  const entries = [];
+  function collect(node) {
+    if (ts.isCallExpression(node) && node.expression.getText(home) === 'handleOpenOptions') {
+      let callback = node.parent;
+      while (callback && !ts.isArrowFunction(callback)) callback = callback.parent;
+      assert.ok(callback, 'each entry invokes the existing shared handler');
+      entries.push(callback);
+    }
+    ts.forEachChild(node, collect);
+  }
+  collect(home);
+  assert.equal(entries.length, 3, 'the two existing entries plus authorized ADMIN Tools');
+  assert.equal(entries.filter(callback => ts.isJsxAttribute(callback.parent.parent)
+    && callback.parent.parent.name.getText(home) === 'onOpenTools').length, 1);
+  assert.equal((homeSource.match(/setOptionsOpen\(true\)/g) ?? []).length, 1, 'no second configuration opener');
+  for (const role of [null, 'usuario', 'empresa', 'admin']) for (const entry of entries) {
+    const state = { options: false, auth: false };
+    const context = { userAccountType: role,
+      setOptionsOpen: value => { state.options = value; }, setGoAuthOpen: value => { state.auth = value; },
+      Haptics: { selectionAsync: () => Promise.resolve() }, setOtrosOpen() {}, setActiveSatCtx() {}, setAdminDashOpen() {},
+    };
     vm.createContext(context);
-    vm.runInContext(transpile(`(${openOptions.initializer.getText(home)})();`), context);
-    assert.equal(state.options, role !== null); assert.equal(state.auth, role === null);
+    vm.runInContext(transpile('const handleOpenOptions = '+openOptions.initializer.getText(home)+'; ('+entry.getText(home)+')();'), context);
+    assert.equal(state.options, role !== null, 'signed-out entry never opens protected configuration');
+    assert.equal(state.auth, role === null, 'signed-out entry requests existing login');
   }
 });

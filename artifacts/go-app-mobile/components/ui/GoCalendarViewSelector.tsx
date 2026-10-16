@@ -6,29 +6,30 @@ import { useLanguage } from "@/contexts/LanguageContext";
 type CalendarView = "dia" | "semana" | "mes_lineal";
 type Props = {
   value: CalendarView;
+  compact?: boolean;
   onChange: (value: CalendarView) => void;
 };
 
-export function GoCalendarViewSelector({ value, onChange }: Props) {
+export function GoCalendarViewSelector({ value, onChange, compact = false }: Props) {
   const { lang } = useLanguage();
   const [open, setOpen] = useState(false);
   const labels: Record<CalendarView, string> = lang === "en"
     ? { dia: "DAY", semana: "WEEK", mes_lineal: "MONTH" }
     : { dia: "DÍA", semana: "SEMANA", mes_lineal: "MES" };
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, compact && styles.compactRoot]}>
       <TouchableOpacity
         onPress={event => { event.stopPropagation(); setOpen(current => !current); }}
         accessibilityRole="button"
         accessibilityLabel={lang === "en" ? `Calendar view: ${labels[value]}` : `Vista del calendario: ${labels[value]}`}
         accessibilityState={{ expanded: open }}
-        style={styles.trigger}
+        style={[styles.trigger, compact && styles.compactTrigger]}
       >
         <Text style={styles.label}>{labels[value]}</Text>
         <Feather name={open ? "chevron-up" : "chevron-down"} size={14} color="#ffffff" />
       </TouchableOpacity>
       {open && (
-        <View style={styles.options}>
+        <View style={[styles.options, compact && styles.compactOptions]}>
           {(["dia", "semana", "mes_lineal"] as const).map(view => (
             <TouchableOpacity
               key={view}
@@ -48,6 +49,9 @@ export function GoCalendarViewSelector({ value, onChange }: Props) {
 
 const styles = StyleSheet.create({
   root: { alignItems: "center" },
+  compactRoot: { zIndex: 20 },
+  compactTrigger: { paddingHorizontal: 6, gap: 4 },
+  compactOptions: { position: "absolute", top: 44, left: 0, minWidth: 180, zIndex: 20 },
   trigger: { minHeight: 44, paddingHorizontal: 12, gap: 8, flexDirection: "row", alignItems: "center", borderRadius: 16, backgroundColor: "#0e0e10" },
   label: { color: "#ffffff", fontSize: 11, fontWeight: "700", letterSpacing: 0.8 },
   options: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 6, paddingTop: 6 },

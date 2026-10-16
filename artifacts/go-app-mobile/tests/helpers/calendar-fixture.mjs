@@ -66,7 +66,7 @@ export function fixture({ now } = {}) {
     '@/components/GoCalConfigPanel': { GoCalConfigPanel: 'GoCalConfigPanel' },
     '@/data/floorPlan': { loadReservations: async () => [], loadFloorPlan: async () => null },
     '@/data/businessDemoStore': { getBusinessDemoProfessionals: () => { throw new Error('Real calendar must not invoke the DEMO adapter'); } },
-    '../hooks/useWeatherContext': { useWeatherContext: () => ({ weatherHours: {}, weatherDays: {}, dayNightProgress: 0 }), getWeatherForHour: () => null, isAdverseWeather: () => false },
+    '../hooks/useWeatherContext': { useWeatherContext: () => ({ weatherHours: {}, weatherDays: {}, dayNightProgress: 0 }), getWeatherForHour: () => null, isAdverseWeather: () => false, getWeatherFeatherIcon: () => "cloud-rain", getWeatherColor: () => "#60a5fa" },
     '../hooks/usePredictive': { computeDaySuggestions: () => [] },
     '../hooks/useReceptionCountdown': { isReceptionActivity: () => false },
     '@/data/goSectorTranslations': { trSector: value => value },

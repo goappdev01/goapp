@@ -8,9 +8,10 @@ type Props = {
   visual: LandingVisualState & { startPreview: (v: LandingVisualVariant) => boolean;
     cancelPreview: () => void; confirm: () => Promise<boolean> };
   onPreviewLanding: () => void;
+  canPreviewLanding?: boolean;
   lang: string;
 };
-export function LandingVariantSelector({ visual, onPreviewLanding, lang }: Props) {
+export function LandingVariantSelector({ visual, onPreviewLanding, canPreviewLanding = true, lang }: Props) {
   const english = lang === "en";
   const name = (key: LandingVisualVariant) => LANDING_VISUAL_VARIANTS.find(v => v.key === key)!.label;
   const disabled = !visual.ready || visual.busy;
@@ -50,7 +51,7 @@ export function LandingVariantSelector({ visual, onPreviewLanding, lang }: Props
     {visual.preview && <Text accessibilityLiveRegion="polite" style={{ color: "#225484", fontSize: 13 }}>
       {english ? "Preview: " : "Vista previa: "}{name(visual.preview)}
     </Text>}
-    {button(english ? "View preview on Landing" : "Ver vista previa en el Landing", onPreviewLanding, disabled || !visual.preview)}
+    {button(english ? "View preview on Landing" : "Ver vista previa en el Landing", onPreviewLanding, disabled || !visual.preview || !canPreviewLanding)}
     {button(english ? "Confirm activation" : "Confirmar activación", confirm, disabled || !visual.preview)}
     {button(english ? "Cancel preview" : "Cancelar vista previa", visual.cancelPreview, disabled || !visual.preview)}
     {button(english ? "Preview previous presentation" : "Volver a la anterior · previsualizar", () => { visual.startPreview(visual.previous); })}

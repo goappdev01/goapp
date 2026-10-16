@@ -86,23 +86,10 @@ for (const preset of presets) {
           assert.ok(f.left >= 0 && f.left + f.width <= d.width);
           assert.ok(f.height > 0 && f.top >= d.insets.top + 12);
           assert.ok(f.top + f.height <= d.height - d.insets.bottom);
-          if (!f.virtual) {
-            assert.equal(policy.landingContentBottom(g.baseline, f), g.baseline);
-            assert.ok(d.height - g.baseline - naturalHeight >= d.insets.top + 12 + 52);
-          } else {
-            assert.equal(policy.landingContentBottom(g.baseline, f), 0);
-            assert.ok(f.contentHeight >= naturalHeight, "nothing cropped out of scroll content");
-            const scrollRange = f.contentHeight - f.height;
-            for (const r of [{ bottom: 0, height: nextHeight },
-              { bottom: nextHeight + gap, height: changesHeight }].filter(r => r.height)) {
-              const top = f.contentHeight - r.bottom - r.height;
-              assert.ok(top >= 0);
-              assert.ok(top + r.height <= f.contentHeight);
-              // Every part can be brought into the viewport using its native scroll range.
-              assert.ok(top <= scrollRange + f.height);
-              assert.ok(top + r.height >= 0);
-            }
-          }
+          assert.equal(f.scroll, false, "the Landing never scrolls, including long content");
+          assert.equal(f.contentHeight, f.height, "no taller movable canvas");
+          if (!f.virtual) assert.equal(policy.landingContentBottom(g.baseline, f), g.baseline);
+          else assert.equal(policy.landingContentBottom(g.baseline, f), 0);
         }
       }
     });
@@ -125,10 +112,10 @@ test("measured header, long cards and dimension changes recompute the viewport i
   const input={ ...d, safeTop: 150, baseline: g.baseline, boundingRadius: g.boundingRadius, handedness:"right", controlSize:44 };
   const long=policy.landingContentFrame({ ...input, naturalHeight:700 });
   const short=policy.landingContentFrame({ ...input, naturalHeight:100 });
-  assert.equal(long.scroll,true);
+  assert.equal(long.scroll,false);
   assert.equal(short.virtual,false);
   assert.equal(long.top,202);
-  assert.equal(long.contentHeight,700);
+  assert.equal(long.contentHeight,long.height);
   assert.ok(long.top+long.height<=d.height-d.insets.bottom);
 });
 test("QR stays fully below the status area and retains its valid bottom position when possible", () => {
@@ -140,38 +127,32 @@ test("QR stays fully below the status area and retains its valid bottom position
     if(desired>=d.insets.bottom+8 && desired<=d.height-d.insets.top-12-44) assert.equal(bottom,desired);
   }
 });
-test("bounded scroll owns only its gesture area; static content stays transparent to other controls", () => {
-  const relations=[];
-  const gesture={ enabled(v){relations.push(["enabled",v]);return this;},
-    blocksExternalGesture(v){relations.push(["blocks",v]);return this;} };
-  const closingGesture={};
-  const react={ createElement:(type,props,...children)=>({type,props,children}),
-    useMemo:fn=>fn(), useRef:()=>({current:null}), useEffect:fn=>fn() };
+test("Landing stays static even when overflow is requested; it does not capture native gestures", () => {
+  const react={ createElement:(type,props,...children)=>({type,props,children}) };
   const api=load("components/landing/LandingContentViewport.tsx",{
-    react, "react-native":{ ScrollView:"ScrollView", View:"View", StyleSheet:{absoluteFill:{position:"absolute"}} },
-    "react-native-gesture-handler":{ Gesture:{Native:()=>gesture}, GestureDetector:"GestureDetector" },
+    react, "react-native":{ScrollView:"ScrollView",View:"View",StyleSheet:{absoluteFill:{position:"absolute"}}},
   });
-  const base={ virtual:false, scroll:false, width:390,height:240,top:120,left:0,contentHeight:600,baseline:350 };
-  const normal=api.LandingContentViewport({frame:base,closingGesture,children:"same cards"});
-  assert.equal(normal.props.pointerEvents,"box-none");
-  assert.equal(normal.props.testID,"landing-content-static");
-  const scroll=api.LandingContentViewport({frame:{...base,virtual:true,scroll:true},closingGesture,children:"same cards"});
-  assert.equal(scroll.type,"GestureDetector");
-  assert.equal(scroll.children[0].type,"ScrollView");
-  assert.equal(scroll.children[0].props.directionalLockEnabled,true);
-  assert.equal(scroll.children[0].props.bounces,false);
-  assert.equal(scroll.children[0].props.contentContainerStyle.height,600);
-  assert.equal(relations.at(-1)[1],closingGesture);
+  const base={virtual:false,scroll:false,width:390,height:240,top:120,left:0,contentHeight:600,baseline:350};
+  for(const frame of [base,{...base,virtual:true,scroll:true}]) {
+    const view=api.LandingContentViewport({frame,closingGesture:{},children:"same cards"});
+    assert.equal(view.type,"View");assert.equal(view.props.pointerEvents,"box-none");
+    assert.notEqual(view.props.testID,"landing-content-scroll");
+    if(frame.virtual) assert.equal(view.children[0].props.style.height,frame.height);
+  }
 });
+
 test("one shared viewport contains both cards, transport and existing help; carousel callbacks are retained", () => {
   const s=readFileSync("app/index.tsx","utf8");
   const start=s.indexOf("<LandingContentViewport "),end=s.indexOf("</LandingContentViewport>",start);
   assert.ok(start>0 && end>start);
   const content=s.slice(start,end);
-  for(const element of ["pendientes-open-panel","proxima-abs-block",'op.label','workGuideHideAnim']) assert.ok(content.includes(element));
+  for(const element of ["pendientes-open-panel","proxima-abs-block",'workGuideHideAnim','{operations.content}','renderLandingOperations(item.g).content']) assert.ok(content.includes(element));
+  const sharedStart=s.indexOf('const renderLandingOperations ='),sharedEnd=s.indexOf('const toLandingRootRect =',sharedStart);
+  assert.ok(sharedStart>0&&sharedEnd>sharedStart);const shared=s.slice(sharedStart,sharedEnd);
+  for(const element of ['op.label','actionRows.map','{transportControls}'])assert.ok(shared.includes(element),'shared operations remain reachable inside the bounded cards');
   assert.ok(content.includes("nextCardPanRef.panHandlers") && content.includes("cambiosCardPanRef.panHandlers"));
-  assert.ok(content.includes("overflowing={landingFrame.virtual}"));
-  assert.ok(content.includes("onHeight={setPendingContentH}"));
+  assert.ok(content.includes("overflowing={false}"));
+  assert.ok(content.includes("onLayout={(e) => setPendingContentH(e.nativeEvent.layout.height)}"));
   assert.ok(!content.includes("minHeight: proximaExpanded ? panelMaxHeight"));
   assert.equal(s.match(/<LandingContentViewport /g).length,1);
   assert.ok(s.includes("setLandingSurfaceSize(prev => prev?.width === width"));
@@ -208,11 +189,12 @@ test("outer scroll uses a natural-height View for card contents and reports comp
   capped.props.onContentSizeChange(354,480);
   assert.deepEqual(measured,[480,480]);
 });
-test("Humanity keeps one reusable control and an accessible fallback before the scrolling cards", () => {
+test("Humanity keeps one reusable control and an accessible fallback before the fixed cards", () => {
   const s=readFileSync("app/index.tsx","utf8");
   const canvas=s.slice(s.indexOf("<LandingContentViewport "),s.indexOf("</LandingContentViewport>"));
-  assert.ok(canvas.includes("landingInlineHumanity && renderLandingHumanity(inlineHumanityRect)"));
-  assert.ok(s.includes("landingBaseFrame.naturalHeight + inlineHumanityRect.height + 8"));
+  assert.ok(s.includes("landingInlineHumanity && renderLandingHumanity(inlineHumanityRect)"));
+  assert.ok(s.indexOf("landingInlineHumanity && renderLandingHumanity(inlineHumanityRect)") < s.indexOf("<LandingContentViewport "), "header fallback is outside card/command coordinates");
+  assert.ok(s.includes("scroll: false, contentHeight: landingBaseFrame.height"));
   assert.equal(s.match(/source=\{require\("\.\.\/assets\/images\/humanity_globe.png"\)\}/g).length,1);
   assert.ok(s.includes("setHumanityOpen(true)"));
 });

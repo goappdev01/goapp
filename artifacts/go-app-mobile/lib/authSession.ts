@@ -1,3 +1,4 @@
+import { recordAuthTrace } from "./authTrace";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { readAuthCredentials, writeAuthCredentials, removeAuthCredentials, LEGACY_AUTH_SESSION_KEY, AuthCredentialStorageError } from "./authCredentialStorage";
 import { notifySessionChanged, onSessionChanged } from "./sessionEvents";
@@ -33,6 +34,26 @@ export function consumeAuthRecoveryNotice(): string | null {
 }
 let writes: Promise<unknown> = Promise.resolve();
 let refreshFlight: { revision: number; token: string; promise: Promise<AuthSession> } | null = null;
+type RetryPause = { revision: number; accessToken: string; refreshToken?: string | null; until: number };
+let renewalPause: RetryPause | null = null;
+let rateLimitPause: RetryPause | null = null;
+function sameCredential(pause: RetryPause | null, session: AuthSession, version: number): boolean {
+  return pause?.revision === version && pause.accessToken === session.access_token
+    && pause.refreshToken === session.refresh_token;
+}
+function retryDelay(response: Response, fallback: number): number {
+  const header = response.headers.get("Retry-After");
+  if (!header) return fallback;
+  const seconds = Number(header);
+  const milliseconds = Number.isFinite(seconds) && seconds >= 0
+    ? seconds * 1000 : Date.parse(header) - Date.now();
+  return Number.isFinite(milliseconds) ? Math.max(fallback, milliseconds) : fallback;
+}
+function pauseRenewal(session: AuthSession, version: number, milliseconds: number): void {
+  if (version !== revision) return;
+  renewalPause = { revision: version, accessToken: session.access_token,
+    refreshToken: session.refresh_token, until: Date.now() + milliseconds };
+}
 
 function serialize<T>(operation: () => Promise<T>): Promise<T> {
   const result = writes.catch(() => {}).then(operation);
@@ -68,8 +89,8 @@ function decode(raw: string | null): AuthSession | null {
   } catch { return null; }
 }
 async function stored(): Promise<AuthSession | null> {
-  try { return decode(await readAuthCredentials()); }
-  catch (error) { throw new AuthSessionUnavailableError(error instanceof AuthCredentialStorageError ? error.message : undefined); }
+  try { const session = decode(await readAuthCredentials()); recordAuthTrace("credentials.read", { present: !!session, revision }); return session; }
+  catch (error) { recordAuthTrace("credentials.unavailable", { revision }); throw new AuthSessionUnavailableError(error instanceof AuthCredentialStorageError ? error.message : undefined); }
 }
 export async function readAuthSession(): Promise<AuthSession | null> {
   await writes;
@@ -102,17 +123,21 @@ function normalize(payload: Record<string, unknown>): AuthSession {
 /** All credential writes are ordered, so a late refresh cannot resurrect a logout/new login. */
 export async function saveAuthSession(payload: Record<string, unknown>): Promise<void> {
   const session = normalize(payload), version = ++revision;
+  renewalPause = null; rateLimitPause = null;
   await serialize(async () => {
     if (version !== revision) throw new AuthSessionRequiredError();
     await writeAuthCredentials(JSON.stringify(session), true);
   });
   if (version !== revision) throw new AuthSessionRequiredError();
   recoveryNotice = null;
+  recordAuthTrace("session.saved", { revision });
   notifySessionChanged(); // Identity event, never emitted for token rotation.
 }
 export async function clearAuthSession(): Promise<void> {
+  recordAuthTrace("session.logout", { revision });
   recoveryNotice = null;
   const version = ++revision;
+  renewalPause = null; rateLimitPause = null;
   await serialize(() => removeAuthCredentials());
   if (version === revision) notifySessionChanged();
 }
@@ -127,6 +152,7 @@ async function expireIfCurrent(session: AuthSession, version: number): Promise<v
     removed = true;
   });
   if (removed) {
+    recordAuthTrace("session.expired", { revision });
     recoveryNotice = "La sesión ya no es válida y no se puede renovar. Inicia sesión de nuevo para continuar con seguridad.";
     notifySessionChanged();
   }
@@ -134,13 +160,17 @@ async function expireIfCurrent(session: AuthSession, version: number): Promise<v
 
 async function refresh(session: AuthSession, version: number): Promise<AuthSession> {
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15000);
+  let retryMilliseconds = 30000;
+  recordAuthTrace("refresh.start", { revision: version });
   try {
     const response = await fetch(getAuthApiBase() + "/supabase/auth/refresh", {
       method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" },
       body: JSON.stringify({ refresh_token: session.refresh_token }), signal: controller.signal,
     });
+    recordAuthTrace("refresh.response", { status: response.status, revision: version });
     const payload = await response.json().catch(() => null);
     if (!response.ok) {
+      retryMilliseconds = retryDelay(response, response.status === 429 ? 60000 : 30000);
       // A transport/gateway error or a generic 401/403 is NOT proof of a revoked session.
       if (response.status === 401 && payload?.code === "SESSION_UNRECOVERABLE") {
         await expireIfCurrent(session, version);
@@ -158,9 +188,13 @@ async function refresh(session: AuthSession, version: number): Promise<AuthSessi
       await writeAuthCredentials(JSON.stringify(next));
     });
     if (version !== revision) throw new AuthSessionRequiredError();
+    // A just-rotated token must not trigger another forced renewal from sibling checks.
+    pauseRenewal(next, version, 60000);
     return next;
   } catch (error) {
-    if (error instanceof AuthSessionRequiredError || error instanceof AuthSessionUnavailableError) throw error;
+    if (error instanceof AuthSessionRequiredError) throw error;
+    pauseRenewal(session, version, retryMilliseconds);
+    if (error instanceof AuthSessionUnavailableError) throw error;
     throw new AuthSessionUnavailableError();
   } finally { clearTimeout(timer); }
 }
@@ -169,6 +203,8 @@ export async function ensureAuthSession(options: { force?: boolean; rejectedAcce
   const version = revision, session = await readAuthSession();
   if (version !== revision) throw new AuthSessionRequiredError();
   if (!session) return null;
+  if (sameCredential(rateLimitPause, session, version) && rateLimitPause!.until > Date.now())
+    throw new AuthSessionUnavailableError("Se ha alcanzado el límite temporal de solicitudes. Espera un poco y vuelve a intentarlo.");
   const expiry = session.expires_at ?? tokenHints(session.access_token).exp;
   const due = typeof expiry === "number" && expiry <= Math.floor(Date.now() / 1000) + REFRESH_MARGIN_SECONDS;
   const force = options.force && (!options.rejectedAccessToken || session.access_token === options.rejectedAccessToken);
@@ -180,7 +216,10 @@ export async function ensureAuthSession(options: { force?: boolean; rejectedAcce
     }
     return session; // Legacy access-only sessions must be rejected by the server, not a device clock.
   }
-  if (refreshFlight?.revision === version && refreshFlight.token === session.refresh_token) return refreshFlight.promise;
+  if (refreshFlight?.revision === version && refreshFlight.token === session.refresh_token) { recordAuthTrace("refresh.shared", { revision: version }); return refreshFlight.promise; }
+  if (sameCredential(renewalPause, session, version) && renewalPause!.until > Date.now()) {
+    recordAuthTrace("refresh.paused", { revision: version }); throw new AuthSessionUnavailableError();
+  }
   const flight = { revision: version, token: session.refresh_token, promise: refresh(session, version) };
   refreshFlight = flight;
   void flight.promise.finally(() => { if (refreshFlight === flight) refreshFlight = null; }).catch(() => {});
@@ -194,10 +233,14 @@ export async function fetchWithAuth(url: string, init: RequestInit = {}, require
   if ((requireToken && !session) || (expectedUserId && session?.user.id !== expectedUserId) || version !== revision)
     throw new AuthSessionRequiredError();
   const expected = session ? identity(session, version) : null;
+  const route = url === getAuthApiBase() + "/supabase/auth/me" ? "identity"
+    : url === getAuthApiBase() + "/supabase/admin/access" ? "admin"
+    : url.startsWith(getAuthApiBase() + "/supabase/manage/") ? "business" : "protected";
   const send = () => {
     const headers = new Headers(init.headers);
     if (session) headers.set("Authorization", "Bearer " + session.access_token);
-    return fetch(url, { ...init, headers });
+    recordAuthTrace("request.start", { route, revision: version });
+    return fetch(url, { ...init, headers }).then(response => { recordAuthTrace("request.end", { route, status: response.status, revision: version }); return response; });
   };
   let response = await send();
   if (expected && !await isAuthIdentityCurrent(expected)) throw new AuthSessionRequiredError();
@@ -207,10 +250,16 @@ export async function fetchWithAuth(url: string, init: RequestInit = {}, require
     if (!session || (expected && !await isAuthIdentityCurrent(expected))) throw new AuthSessionRequiredError();
     response = await send();
     if (expected && !await isAuthIdentityCurrent(expected)) throw new AuthSessionRequiredError();
-    if (response.status === 401 && url === getAuthApiBase() + "/supabase/auth/me") {
-      await expireIfCurrent(session, version);
-      throw new AuthSessionRequiredError();
+    if (response.status === 401) {
+      // The private gateway can reject owner verification independently of Auth.
+      // Deny this operation and pause forced renewal. Only the refresh contract
+      // SESSION_UNRECOVERABLE can end a renewable session.
+      pauseRenewal(session, version, 60000);
     }
+  }
+  if (response.status === 429 && session && version === revision) {
+    rateLimitPause = { revision: version, accessToken: session.access_token,
+      refreshToken: session.refresh_token, until: Date.now() + retryDelay(response, 60000) };
   }
   return response;
 }

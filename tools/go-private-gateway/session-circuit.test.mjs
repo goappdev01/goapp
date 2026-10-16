@@ -62,11 +62,11 @@ async function circuit(run,{providerFailure,owner=true}={}){
   setItem:async(key,value)=>{storage.set(key,value);writes.push(key);},
   removeItem:async key=>{removals.push([key]);storage.delete(key);},
   multiRemove:async keys=>{removals.push([...keys]);for(const key of keys)storage.delete(key);}};
- class Clock extends Date{static now(){return now;}}
+ let clockTime=now;class Clock extends Date{static now(){return clockTime;}}
  const api=loadAuthSession({process:{env:{EXPO_PUBLIC_API_URL:base}},fetch,Headers,AbortController,Date:Clock},storageApi,
   {notifySessionChanged:()=>events.push('identity'),onSessionChanged:()=>()=>{}},
   {secure,write:key=>secureWrites.push(key)});
- try{await run({api,base,storage,secure,secureWrites,original,calls,providerCalls,events,writes,removals,setFailure:value=>{failing=value;}});}
+ try{await run({api,base,storage,secure,secureWrites,original,calls,providerCalls,events,writes,removals,setFailure:value=>{failing=value;},advanceTime:milliseconds=>{clockTime+=milliseconds;}});}
  finally{await new Promise(resolve=>server.close(resolve));}
 }
 const retained=f=>[...f.storage].filter(([key])=>key!==sessionKey&&key!==roleKey&&key!==logoutKey);
@@ -104,6 +104,8 @@ for(const failure of ['temporary','network'])test(failure+' failure across the c
  const restored=await f.api.restoreStoredAuthentication();
  assert.equal(restored.session.user.id,userId);assert.equal(f.secure.get(secureKey),JSON.stringify(session));
  assert.equal(f.storage.has(sessionKey),false);assert.deepEqual(f.removals,[[sessionKey]]);assert.deepEqual(retained(f),f.original);
- f.setFailure(null);const next=await f.api.ensureAuthSession();assert.equal(next.refresh_token,renewed.refresh_token);
+ f.setFailure(null);await assert.rejects(f.api.ensureAuthSession(),error=>error.code==='SESSION_REFRESH_UNAVAILABLE');
+ assert.equal(f.providerCalls.length,1,'No provider retry during the recovery pause');
+ f.advanceTime(30000);const next=await f.api.ensureAuthSession();assert.equal(next.refresh_token,renewed.refresh_token);
  assert.equal(f.providerCalls.length,2);assert.deepEqual(f.events,[]);assert.deepEqual(retained(f),f.original);
 },{providerFailure:failure}));

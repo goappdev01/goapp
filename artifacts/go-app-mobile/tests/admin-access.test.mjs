@@ -82,6 +82,7 @@ function providerFixture() {
     if (name === 'react') return { default: React, ...React };
     if (name === 'react-native') return { AppState };
     if (name === '@/data/adminAccess') return { getAdminAccess: () => { const next = deferred(); requests.push(next); return next.promise; } };
+    if (name === '@/lib/authTrace') return { recordAuthTrace:()=>{} };
     if (name === '@/lib/sessionEvents') return { onSessionChanged: listener => { listeners.add(listener); return () => listeners.delete(listener); } };
     throw new Error(`Unexpected import ${name}`);
   } };

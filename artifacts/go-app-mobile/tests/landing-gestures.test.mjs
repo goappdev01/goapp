@@ -62,17 +62,29 @@ for (const kind of ['next', 'changes']) {
   });
 }
 
-test('each responder encloses both its indicator and its card', () => {
-  for (const [name, header, card] of [
-    ['nextCardPanRef', '{ordinal}', 'Tarjeta próxima cita'],
-    ['cambiosCardPanRef', '{_ordinal}', '{cardTitle}'],
+test('indicator and card retain the same horizontal responder across the fixed header boundary', () => {
+  function all(node, predicate, result = []) {
+    if (predicate(node)) result.push(node);
+    ts.forEachChild(node, child => { all(child, predicate, result); });
+    return result;
+  }
+  for (const [name, header, card, expectedHosts] of [
+    ['nextCardPanRef', '{ordinal}', 'Tarjeta próxima cita', 2],
+    ['cambiosCardPanRef', '{_ordinal}', '{cardTitle}', 1],
   ]) {
-    const element = find(home, node => ts.isJsxElement(node)
+    const hosts = all(home, node => ts.isJsxElement(node)
       && node.openingElement.attributes.properties.some(attr => ts.isJsxSpreadAttribute(attr)
-        && attr.expression.getText(home) === `${name}.panHandlers`));
-    assert.ok(element);
-    assert.ok(element.getText(home).includes(header));
-    assert.ok(element.getText(home).includes(card));
+        && attr.expression.getText(home) === name + '.panHandlers'));
+    assert.equal(hosts.length, expectedHosts);
+    assert.equal(hosts.filter(node => node.getText(home).includes(header)).length, 1);
+    assert.equal(hosts.filter(node => node.getText(home).includes(card)).length, 1);
+    if (name === 'nextCardPanRef') {
+      const slot = node => { for (let p = node.parent; p; p = p.parent) if (ts.isJsxAttribute(p)) return p.name.getText(home); };
+      const fixed = hosts.find(node => slot(node) === 'header');
+      const body = hosts.find(node => slot(node) === 'bodyFrame');
+      assert.ok(fixed && body, 'header and fixed border share the horizontal responder outside vertical scrolling');
+      assert.equal(body.openingElement.getText(home).replace('flexShrink: 0, minHeight: 0, ', ''), fixed.openingElement.getText(home), 'only vertical sizing changes; original animation and responder are identical');
+    }
   }
 });
 
@@ -105,7 +117,8 @@ test('calendar header remains laid out but invisible and untouchable throughout 
     const style = vm.runInNewContext(`(${attribute('style')})`, context);
     assert.equal(vm.runInNewContext(attribute('pointerEvents'), context), showBookingFromCal ? 'none' : 'auto');
     assert.equal(style.opacity, showBookingFromCal ? 0 : 1);
-    assert.equal(style.paddingTop, 52, 'calendar geometry does not change');
+    assert.equal(style.paddingTop, 44, 'compact calendar geometry does not change during reservations');
+    assert.equal(style.paddingBottom, 0, 'opening reservations does not add an empty margin');
   }
   const overlay = find(home, node => ts.isJsxSelfClosingElement(node)
     && node.tagName.getText(home) === 'BookingSearchOverlay');

@@ -19,7 +19,7 @@ const identity={session:{user:{id:'test-only-user'}},role:'usuario'};
 function fixture(){
  const requests=[],events=new Set(),activity=new Set(),changes=[],alerts=[];
  const state={complete:false,error:null};let notice=null;
- const context={authBootstrapRetryRef:{current:null},
+ const context={recordAuthTrace:()=>{},authBootstrapRetryRef:{current:null},
   restoreStoredAuthentication:()=>{const r=deferred();requests.push(r);return r.promise;},
   commitAccountType:(role,changeContext)=>changes.push({role,changeContext}),
   setGoAuthOpen:value=>changes.push({open:value}),

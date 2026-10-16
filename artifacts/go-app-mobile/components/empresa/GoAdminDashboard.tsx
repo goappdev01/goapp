@@ -42,6 +42,7 @@ const ESTADO_CRITICO    = "#ef4444";
 
 type AdminSection =
   | "overview"
+  | "tools"
   | "partners"
   | "zones_rates"
   | "consumos"
@@ -654,6 +655,7 @@ const SECTIONS: Array<{
   icon: React.ComponentProps<typeof Feather>["name"];
   color: string;
 }> = [
+  { key: "tools", label: "Herramientas", label_en: "Tools", sublabel: "Configuración compartida y variantes del Landing USUARIO", sublabel_en: "Shared settings and USER Landing variants", icon: "settings", color: "#4A80BD" },
   { key: "roadmap",            label: "Roadmap GO",              label_en: "GO Roadmap",        sublabel: "Tablero maestro del ecosistema",          sublabel_en: "Ecosystem master board",                 icon: "map",         color: "#f59e0b" },
   { key: "modulos_empresa",    label: "Módulos empresariales",   label_en: "Business Modules",  sublabel: "Fases y estado de módulos contratables",  sublabel_en: "Phases and status of contractable modules", icon: "layers",    color: "#7C69BE" },
   { key: "siguientes_modulos", label: "Siguientes módulos",      label_en: "Next Modules",      sublabel: "Próximos desarrollos del ecosistema",     sublabel_en: "Upcoming system developments",           icon: "clock",       color: "#8b5cf6" },
@@ -671,9 +673,10 @@ interface Props {
   visible:  boolean;
   onClose:  () => void;
   onOpenContext?: () => void;
+  onOpenTools?: () => void;
 }
 
-export function GoAdminDashboard({ visible, onClose, onOpenContext }: Props) {
+export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools }: Props) {
   const adminAccess = useAdminAccess();
   const goView = useGoView();
   const insets  = useSafeAreaInsets();
@@ -685,6 +688,10 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext }: Props) {
   const fabBottom = insets.bottom + 24;
 
   const goSection = (sec: AdminSection) => {
+    if (sec === "tools") {
+      if (adminAccess.allowed && goView.isAdminView) onOpenTools?.();
+      return;
+    }
     setRoadmapStack([]);
     setSection(sec);
   };
@@ -762,6 +769,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext }: Props) {
                   key={sec.key}
                   style={s.sectCard}
                   activeOpacity={0.78}
+                  disabled={sec.key === "tools" && !onOpenTools}
                   onPress={() => goSection(sec.key as AdminSection)}
                 >
                   <View style={[s.sectIcon, { backgroundColor: `${sec.color}20` }]}>

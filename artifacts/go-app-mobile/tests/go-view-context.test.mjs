@@ -82,6 +82,7 @@ function fixture({ storage = new Map(), slowRead, business = false, failWrite = 
   };
   const policy = evaluate('data/goViewPolicy.ts', {});
   const adminApi = evaluate('contexts/GoAdminAccessContext.tsx', {
+    '@/lib/authTrace': { recordAuthTrace:()=>{} },
     react: { default: React, ...React }, 'react-native': { AppState },
     '@/data/adminAccess': { getAdminAccess: () => { const next = deferred(); requests.push(next); return next.promise; } },
     '@/lib/sessionEvents': { onSessionChanged: listener => { sessionListeners.add(listener); return () => sessionListeners.delete(listener); } },

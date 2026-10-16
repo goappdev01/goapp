@@ -97,7 +97,7 @@ test("normal users and changed UUID never receive the previous owner's store",as
 });
 test("a single iOS window label follows ADMIN/EMPRESA/USUARIO and never consumes touches",async()=>{
   const f=fixture();f.render(f.provider.OwnerBusinessDemoProvider,base);await f.flush();f.render(f.provider.OwnerBusinessDemoProvider,base);
-  for(const [context,label]of [["ADMIN","ADMIN"],["BUSINESS","EMPRESA DEMO · DEMO LOCAL"],["USER","USUARIO · DEMO LOCAL"]]){
+  for(const [context,label]of [["ADMIN","ADMIN"],["BUSINESS","DEMO"],["USER","USUARIO · DEMO LOCAL"]]){
     f.setView(context);const tree=f.render(f.indicator.OwnerContextSurface,{children:"Original navigator"});
     const overlays=nodes(tree).filter(node=>node.type==="FullWindowOverlay");assert.equal(overlays.length,1);
     assert.equal(overlays[0].props.unstable_accessibilityContainerViewIsModal,false);
@@ -250,7 +250,7 @@ test('actual owner provider never pairs a selected business label with a differe
  assert.equal(f.alerts.length,0);assert.equal(reopened.alerts.length,0);
 });
 
-test("owner Landing paints the reserved top gutter without moving safe controls or changing panels",()=>{
+test("owner Landing keeps its approved background and non-DEMO geometry while DEMO reserves no watermark row",()=>{
   const f=fixture();
   const paint=visible=>{
     let tree=f.render(f.indicator.OwnerContextSurface,{children:"Existing navigator"});
@@ -261,9 +261,11 @@ test("owner Landing paints the reserved top gutter without moving safe controls 
     f.setView(context);
     for(const visible of [true,false,true]){
       const tree=paint(visible),all=nodes(tree);
-      assert.equal(tree.props.value.topInset,22);
+      const inset=context==="BUSINESS"?0:22;
+      assert.equal(tree.props.value.topInset,inset);
       const surface=all.find(node=>node.type==="View"&&node.children.includes("Existing navigator"));
-      assert.equal(surface.props.style[1].paddingTop,22,"keep original content geometry");
+      assert.equal(surface.props.style[1]?.paddingTop??0,inset,"DEMO overlay reserves no row; other contexts stay unchanged");
+      assert.equal(surface.props.style[0].backgroundColor,"#0a0a0f","paint the upper surface even while Landing artwork is hidden");
       const backgrounds=all.filter(node=>node.props.testID==="landing-safe-area-background");
       assert.equal(backgrounds.length,visible?1:0,"clear background for panels and restore on close");
       if(visible){
@@ -291,4 +293,43 @@ test("Landing keeps safe-area content padding and light status icons after a pan
   assert.match(source,/source=\{EARTH_BG\}\s*style=\{\[StyleSheet\.absoluteFill, \{ top: -landingTopInset \}\]\}/);
   assert.match(source,/end=\{\{ x: 0\.5, y: 0\.22 \}\}\s*style=\{\[StyleSheet\.absoluteFill, \{ top: -landingTopInset \}\]\}/);
   assert.match(source,/<StatusBar[\s\S]*?empresaOpen \|\| cuentaOpen[\s\S]*?\? "dark"\s*: "light"/);
+});
+
+test("BUSINESS DEMO watermark is red, softly translucent, exact, and cannot participate in layout or touches",()=>{
+  const f=fixture(); f.setView("BUSINESS");
+  const tree=f.render(f.indicator.OwnerContextSurface,{children:"Approved contents"});
+  const all=nodes(tree),surface=all.find(n=>n.type==="View"&&n.children.includes("Approved contents"));
+  assert.equal(surface.props.style[1]?.paddingTop??0,0); assert.equal(tree.props.value.topInset,0);
+  const indicator=all.find(n=>n.type==="FullWindowOverlay").children[0];
+  const mark=f.render(indicator.type,indicator.props),markStyle=mark.props.style[0],text=mark.children[0];
+  assert.equal(mark.props.pointerEvents,"none"); assert.equal(markStyle.position,"absolute");
+  assert.equal(markStyle.left,0); assert.equal(markStyle.right,0); assert.equal(markStyle.backgroundColor,undefined);
+  assert.equal(markStyle.height,undefined); assert.equal(markStyle.paddingVertical,undefined);
+  assert.equal(mark.props.style[1].top,49); assert.equal(text.children[0],"DEMO");
+  assert.equal(text.props.style.color,"rgba(239,68,68,0.45)"); assert.ok(text.props.style.textShadowRadius>0);
+  assert.equal(text.props.style.fontSize,10);
+});
+
+test("DEMO native Calendar has no white gutter or reserved label row and retains its existing close callback",()=>{
+  const f=fixture(); f.setView("BUSINESS"); let closed=0; const onClose=()=>closed++;
+  const modal=f.render(f.indicator.OwnerContextModal,{visible:true,transparent:true,statusBarTranslucent:true,onRequestClose:onClose,children:"Existing Calendar"});
+  assert.equal(modal.props.visible,true); assert.equal(modal.props.transparent,true); assert.equal(modal.props.statusBarTranslucent,true);
+  const surface=modal.children[0]; assert.equal(surface.props.style[1]?.paddingTop??0,0);
+  assert.equal(surface.props.style[0].backgroundColor,"#0a0a0f"); assert.equal(surface.children[0],"Existing Calendar");
+  modal.props.onRequestClose(); assert.equal(closed,1);
+  f.setView("ADMIN"); const admin=f.render(f.indicator.OwnerContextModal,{visible:true,children:"Admin"});
+  assert.equal(admin.children[0].props.style[1].paddingTop,22,"non-DEMO panel geometry is preserved");
+});
+
+test("Calendar requests readable light status icons without changing Landing or light-panel status behavior",()=>{
+  const source=readFileSync("app/index.tsx","utf8"),ast=ts.createSourceFile("index.tsx",source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+  let expression;
+  const scan=node=>{if(ts.isJsxSelfClosingElement(node)&&node.tagName.getText(ast)==="StatusBar"){
+    const attr=node.attributes.properties.find(a=>a.name?.getText(ast)==="style"&&a.initializer&&ts.isJsxExpression(a.initializer));
+    if(attr)expression=attr.initializer.expression.getText(ast);
+  } ts.forEachChild(node,scan);}; scan(ast); assert.ok(expression);
+  const flags=Object.fromEntries([...expression.matchAll(/\b(\w+Open)\b/g)].map(m=>[m[1],false]));
+  const value=overrides=>{const scope={exports:{},...flags,...overrides}; vm.runInNewContext(ts.transpileModule("exports.value=("+expression+");",{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,scope);return scope.exports.value;};
+  assert.equal(value({calOpen:true}),"light"); assert.equal(value({calOpen:true,empresaOpen:true}),"light");
+  assert.equal(value({calOpen:false,empresaOpen:true}),"dark"); assert.equal(value({calOpen:false}),"light");
 });

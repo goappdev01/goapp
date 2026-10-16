@@ -20,6 +20,8 @@ const hints = find(ast, node => ts.isJsxElement(node) &&
   node.openingElement.tagName.getText(ast) === 'Animated.View' &&
   node.getText(ast).includes("t('biz_configure_hint')"));
 assert.ok(hints, 'reuse the existing Landing hints block');
+const hintExpression = ts.isParenthesizedExpression(hints.parent) ? hints.parent.parent : hints.parent;
+assert.ok(ts.isBinaryExpression(hintExpression) && hintExpression.left.getText(ast) === '!anyOperationalPanelOpen', 'all general guidance is structurally absent while any operational panel is open');
 const compile = value => ts.transpileModule(value, { compilerOptions: {
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
 } }).outputText;
@@ -35,12 +37,12 @@ const definitions = [
   assert.ok(node, name);
   return 'const ' + name + ' = ' + node.initializer.getText(ast) + ';';
 }).join('\n');
-const renderCode = compile(definitions + '\nmodule.exports = { tree: ' + hints.getText(ast) +
+const renderCode = compile(definitions + '\nmodule.exports = { tree: ' + hintExpression.getText(ast) +
   ', operationalBusiness: isBusinessMode, businessConfigured: empresaConfigurada };');
 function render({
   view = 'USER', owner = false, adminAllowed = false, checking = false, loaded = true,
   requestedBusinessMode = false, businessAllowed = false, configured = false, completedSteps = [],
-  workGuideDismissed = false, tutorialsCompleted = false, demoReady = false,
+  workGuideDismissed = false, tutorialsCompleted = false, demoReady = false, panelOpen = false, lang = 'es',
 } = {}) {
   const goView = {
     view, loaded,
@@ -56,14 +58,14 @@ function render({
     ownerDemo: { loaded, config: {businessName: demoReady ? 'GO Prueba' : ''} },
     empresaDemoSetup: { ready: demoReady },
     isUserV1Landing: policy.exports.isUserV1Landing,
-    anyOperationalPanelOpen: false, insets: { bottom: 34 }, SYSTEM_MARGIN_Y: 0, orbitWrapSize: 300,
+    anyOperationalPanelOpen: panelOpen, insets: { bottom: 34 }, SYSTEM_MARGIN_Y: 0, orbitWrapSize: 300,
     nextAppointment: null, isActivelyCreating: false, anyOverlayOpen: false, nextAptMinimized: true,
     nextAptPanelH: 0, allPendientes: [], rutasMode: false, cambiosOpen: false, pendingPanelH: 0,
     contentBottom: bottom => bottom, landingHelpBottom: 354, setLandingHelpH() {},
-    workGuideHideAnim: 1, orbitSecondLevel: null, lang: 'es',
+    workGuideHideAnim: 1, orbitSecondLevel: null, lang,
     tutReservaRealizada: tutorialsCompleted, tutGoRealizado: tutorialsCompleted,
     tutMarketplaceRealizado: tutorialsCompleted, workGuideDismissed,
-    t: key => translated.exports.translations.es[key],
+    t: key => translated.exports.translations[lang][key],
   };
   vm.runInNewContext(renderCode, context);
   return context.module.exports;
@@ -159,4 +161,22 @@ test("owner DEMO management comes from valid saved setup, never the visual count
   assert.equal(missing.businessConfigured,false);
   assert.match(texts(missing.tree), /Configura tu empresa/);
   assert.equal(texts(render({view:"BUSINESS", owner:true, adminAllowed:true,demoReady:true,checking:true}).tree), "");
+});
+
+for (const view of ['USER', 'BUSINESS', 'ADMIN']) for (const lang of ['es','en']) for (const panel of ['visit','task','changes'])
+ test(view+' / '+lang+' / '+panel+': hints unmount immediately even before fade-out, and recover after closing', () => {
+  const props={view,lang,owner:true,adminAllowed:true};
+  const before=texts(render(props).tree);assert.ok(before.length>0);
+  const open=render({...props,panelOpen:true});assert.equal(open.tree,false);assert.equal(texts(open.tree),'');
+  assert.equal(texts(render({...props,panelOpen:false}).tree),before,'existing contextual help returns unchanged');
+ });
+
+test('actual visit/task and changes state feed the shared visibility guard, including mixed open/closed states',()=>{
+ const expression=declaration('anyOperationalPanelOpen').initializer;
+ const identifiers=new Set();function collect(n){if(ts.isIdentifier(n))identifiers.add(n.text);ts.forEachChild(n,collect)}collect(expression);
+ const initial=Object.fromEntries([...identifiers].map(name=>[name,false]));initial.nextAptMinimized=true;initial.goPhase='idle';
+ const open=overrides=>vm.runInNewContext(expression.getText(ast),{...initial,...overrides});
+ assert.equal(open({}),false);
+ for(const overrides of [{nextAptMinimized:false},{cambiosOpen:true},{nextAptMinimized:false,cambiosOpen:true}])assert.equal(open(overrides),true);
+ assert.equal(open({nextAptMinimized:true,cambiosOpen:false}),false);
 });

@@ -22,7 +22,9 @@ function sheet(name) {
 function compile(text) {
   return ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React } }).outputText;
 }
-const listCode = compile(`tree = (${sheet('listOpen').getText(home)});`);
+const compactFormatter = find(home, node => ts.isFunctionDeclaration(node) && node.name?.text === 'formatCompactProposalSlot');
+assert.ok(compactFormatter, 'use the actual compact slot formatter');
+const listCode = compile(`${compactFormatter.getText(home)}\ntree = (${sheet('listOpen').getText(home)});`);
 const notesCode = compile(`tree = (${sheet('notesOpen').getText(home)});`);
 const translationsContext = { exports: {} };
 vm.runInNewContext(compile(readFileSync('i18n/translations.ts', 'utf8')), translationsContext);
@@ -101,13 +103,18 @@ for (const lang of ['es', 'en']) {
       assert.equal(orange.props.style.backgroundColor, '#f97316');
       orange.props.onPress({ stopPropagation() {} });
       assert.deepEqual(f.calls.at(-1), ['updateGoStatus', 'food']);
-      assert.equal(card.props.style.paddingVertical, 6);
+      assert.equal(card.props.style.paddingVertical, 4);
       const body = texts(card);
-      for (const value of ['03/06/2030', '12:00', '04/06/2030', '13:00', translations[lang].biz_booking_awaiting]) assert.ok(body.includes(value), value);
-      const proposal = card.props.children.find(n => n?.props?.style?.borderColor === 'rgba(249,115,22,0.65)');
-      assert.equal(proposal.props.style.padding, 8);
-      assert.equal(proposal.props.style.marginTop, 6);
-      assert.equal(proposal.props.style.gap, 5);
+      for (const value of ['03/06/30', '12:00', '04/06/2030', '13:00', translations[lang].biz_booking_awaiting]) assert.ok(body.includes(value), value);
+      const proposal = nodes(card, n => n.props?.testID === 'go-proposal-dates-food')[0];
+      assert.ok(proposal);
+      assert.equal(proposal.props.children.filter(n => n && typeof n === 'object').length, 3);
+      assert.ok(!texts(proposal).includes(translations[lang].biz_booking_awaiting));
+      assert.ok(texts(top).includes(translations[lang].biz_booking_awaiting));
+      assert.equal(proposal.props.style.paddingHorizontal, 8);
+      assert.equal(proposal.props.style.paddingVertical, 2);
+      assert.equal(proposal.props.style.marginTop, 3);
+      assert.equal(proposal.props.style.gap, 3);
       assert.equal(proposal.props.style.height, undefined);
       const received = swipes[1].props.children[0];
       childWith(received, '🟢 ' + translations[lang].accept).props.onPress({ stopPropagation() {} });
@@ -156,7 +163,7 @@ test('Tasks keeps the real active Landing and never mounts a second orbit or con
   for (const view of ['USER', 'BUSINESS', 'ADMIN']) {
     const f = fixture('es');
     Object.assign(f.context, { anyOverlayOpen: true, aiOpen: false, listGoVisible: false, insets: { bottom: 34 }, SYSTEM_MARGIN_Y: 12, dockRight: 16, systemBoundingRadius: 159, orbitWrapSize: 275,
-      Animated: { View: 'Animated.View' }, posReady: true, pan: { x: 0, y: 0 }, overlayDX: 0, overlayDY: 0, aiShrink: 1, kbOrbitTranslate: 0,
+      Animated: { View: 'Animated.View' }, landingOffsetY: 0, posReady: true, pan: { x: 0, y: 0 }, overlayDX: 0, overlayDY: 0, aiShrink: 1, kbOrbitTranslate: 0,
       inner: { type: 'ActiveLanding', props: { children: [], view } } });
     const code = compile(`tree = (${wrapper.initializer.getText(home)})(inner);`);
     vm.runInNewContext(code, f.context);

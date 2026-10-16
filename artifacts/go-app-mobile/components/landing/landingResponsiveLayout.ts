@@ -5,6 +5,11 @@ export type LandingFrame = {
   width: number; height: number; contentHeight: number; baseline: number; naturalHeight: number;
 };
 const SATELLITE_EXTENT = Math.cos(Math.PI / 8);
+// Same angular slots as the existing satellite renderer; visibility comes from its V1 policy.
+export const LANDING_SATELLITE_DEGREES: Record<string, number> = {
+  bell: -112.5, list: -67.5, map: -22.5, calendar: 22.5,
+  contacts: 67.5, messages: 112.5, settings: 157.5, payment: 157.5, mas: 202.5,
+};
 export function landingPresetScale(preset: LandingPreset) {
   return preset === "compacto" ? 0.83 : preset === "grande" ? 1.12 : 1;
 }
@@ -17,15 +22,18 @@ export function fitLandingScale(preset: LandingPreset, width: number, height: nu
     return 2 * (radius * SATELLITE_EXTENT + Math.round(50 * scale) / 2) <= room;
   };
   if (fits(requested)) return requested;
-  // Existing compact size is the readability floor; content scrolls separately.
+  // Existing compact size is the readability floor; the Landing stays static.
   let scale = requested;
   while (scale > 0.83 && !fits(scale)) scale = Math.max(0.83, Math.round((scale - 0.005) * 1000) / 1000);
   return scale;
 }
 /** Use the outer satellites, rather than the inner circle, to enforce safe dock limits. */
-export function landingDockBounds({ width, insets, dockRight, boundingRadius, wrapSize, satelliteRadius, satelliteSize }: {
+export function landingDockBounds({ width, insets, dockRight, boundingRadius, wrapSize, satelliteRadius, satelliteSize,
+  visibleSatelliteKeys, orbitRadius = 0, orbitButtonSize = 0, orbitCount = 7, orbitVisible = true, goSize = 0 }: {
   width: number; insets: LandingInsets; dockRight: number; boundingRadius: number;
   wrapSize: number; satelliteRadius: number; satelliteSize: number;
+  visibleSatelliteKeys?: readonly string[]; orbitRadius?: number; orbitButtonSize?: number;
+  orbitCount?: number; orbitVisible?: boolean; goSize?: number;
 }) {
   const extent = satelliteRadius * SATELLITE_EXTENT + satelliteSize / 2;
   const anchorX = width - dockRight - boundingRadius;
@@ -34,7 +42,17 @@ export function landingDockBounds({ width, insets, dockRight, boundingRadius, wr
   const maxX = Math.min(rightLimit, Math.max(Math.min(5, rightLimit), leftLimit));
   const legacyMinX = Math.min(0, Math.round(10 + 2 * boundingRadius - width));
   const minX = Math.max(legacyMinX, Math.ceil(insets.left + 4 + extent - anchorX));
-  return { minX: Math.min(minX, maxX), maxX, maxY: Math.min(0, Math.floor(wrapSize / 2 - extent)) };
+  const satelliteBottom = visibleSatelliteKeys === undefined ? extent : Math.max(0,
+    ...visibleSatelliteKeys.map(key => {
+      const degrees = LANDING_SATELLITE_DEGREES[key];
+      return degrees === undefined ? 0 : Math.sin(degrees * Math.PI / 180) * satelliteRadius + satelliteSize / 2;
+    }));
+  const orbitBottom = orbitVisible && orbitRadius > 0 ? Math.max(0,
+    ...Array.from({ length: orbitCount }, (_, i) => Math.sin(-Math.PI / 2 + i * 2 * Math.PI / orbitCount) * orbitRadius + orbitButtonSize / 2)) : 0;
+  const visibleBottom = Math.max(goSize / 2, satelliteBottom, orbitBottom);
+  // Positive translation is safe when lower satellite slots are hidden; the
+  // lowest visible control stays six points above the real bottom safe area.
+  return { minX: Math.min(minX, maxX), maxX, maxY: Math.floor(wrapSize / 2 - visibleBottom) };
 }
 export function landingContentWidth(width: number, height: number, insets: LandingInsets, boundingRadius: number) {
   const column = width - insets.left - insets.right - boundingRadius * 2 - 18;
@@ -55,7 +73,7 @@ export function landingActionGrid({ width, leftInset, rightInset, scale, large, 
   return { height, buttonWidth: Math.max(44, buttonWidth), gap,
     width: columns * Math.max(44, buttonWidth) + (columns - 1) * gap, compressed: buttonWidth < preferred };
 }
-/** Introduce a bounded viewport only when natural content no longer fits. */
+/** Static content frame. Long bodies stay within their existing card, never move the Landing. */
 export function landingContentFrame({ width, height, insets, safeTop, baseline, naturalHeight, boundingRadius, handedness, controlSize }: {
   width: number; height: number; insets: LandingInsets; safeTop: number; baseline: number;
   naturalHeight: number; boundingRadius: number; handedness: "left" | "right"; controlSize: number;
@@ -65,14 +83,30 @@ export function landingContentFrame({ width, height, insets, safeTop, baseline, 
   const actualBottom = sideColumn ? insets.bottom + 8 : baseline;
   const top = Math.max(insets.top + 12, safeTop) + controlSize + 8;
   const available = Math.max(1, height - actualBottom - top);
-  const virtual = sideColumn || naturalHeight > available;
+  const virtual = sideColumn;
   const left = sideColumn ? handedness === "right" ? insets.left : width - insets.right - contentWidth : 0;
-  return { virtual, scroll: naturalHeight > available, left, top, width: contentWidth,
-    height: available, contentHeight: Math.max(available, naturalHeight), baseline, naturalHeight };
+  return { virtual, scroll: false, left, top, width: contentWidth,
+    height: available, contentHeight: available, baseline, naturalHeight };
 }
 export function landingContentBottom(bottom: number, frame: LandingFrame) {
   return frame.virtual ? bottom - frame.baseline : bottom;
 }
 export function clampLandingControlBottom(bottom: number, height: number, controlSize: number, safeTop: number, bottomInset: number) {
   return Math.max(bottomInset + 8, Math.min(bottom, height - safeTop - controlSize));
+}
+
+/** Largest whole-point descent preserving the safe floor and fixed controls below each layer. */
+export function landingSafeVerticalShift({ safeBottom, moving, fixed }: {
+  safeBottom: number;
+  moving: readonly { x: number; y: number; width: number; height: number }[];
+  fixed: readonly { x: number; y: number; width: number; height: number }[];
+}) {
+  if (!moving.length) return 0;
+  let available = Math.min(...moving.map(rect => safeBottom - rect.y - rect.height));
+  for (const rect of moving) for (const control of fixed) {
+    const bottom = rect.y + rect.height;
+    if (rect.x < control.x + control.width && rect.x + rect.width > control.x && bottom <= control.y)
+      available = Math.min(available, control.y - bottom);
+  }
+  return Math.max(0, Math.floor(available));
 }

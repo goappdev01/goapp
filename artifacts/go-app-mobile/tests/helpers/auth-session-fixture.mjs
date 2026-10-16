@@ -56,6 +56,7 @@ export function loadAuthSession(globals, storageApi, events = {}, storageOptions
     require(name) {
       if (name === "@react-native-async-storage/async-storage") return { default: storageApi };
       if (name === "./authCredentialStorage") return credentials.api;
+      if (name === "./authTrace") return { recordAuthTrace: events.recordAuthTrace ?? (() => {}) };
       if (name === "./sessionEvents") return {
         notifySessionChanged: events.notifySessionChanged ?? (() => {}),
         onSessionChanged: events.onSessionChanged ?? (() => () => {}),

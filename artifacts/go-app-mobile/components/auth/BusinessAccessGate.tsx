@@ -12,9 +12,12 @@ const empty: BusinessEnrollment = { legal_name: "", tax_id: "", trading_name: ""
 const sendError = "No hemos podido enviar tu solicitud en este momento. Tus datos se han conservado. Inténtalo de nuevo más tarde.";
 const draftError = "No hemos podido guardar tus datos en este dispositivo. Mantén el formulario abierto e inténtalo de nuevo.";
 
-export function BusinessAccessGate({ children }: { children: React.ReactNode }) {
+export function BusinessAccessGate({ children, ownerPresentation = false }: { children: React.ReactNode; ownerPresentation?: boolean }) {
   const mode = useGoMode();
   const access = useBusinessAccess();
+  // Same owner presentation exception as Home previously used outside this gate.
+  // ADMIN/DEMO operations still require their current server-checked permissions.
+  if (ownerPresentation) return <>{children}</>;
   if (!mode.loaded || (mode.isBusinessMode && access.loading)) {
     return <View style={s.wait}><ActivityIndicator /><Text>Comprobando acceso…</Text></View>;
   }

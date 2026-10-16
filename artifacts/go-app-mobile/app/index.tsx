@@ -7,6 +7,7 @@ import type { GoEntry } from "@/components/AgendaOperativa";
 import { useGoLog } from "@/hooks/useGoLog";
 import { readGoLog, flushGoLog, commitGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
 import { onSessionChanged } from "@/lib/sessionEvents";
+import { recordAuthTrace } from "@/lib/authTrace";
 import { clearAuthSession, restoreStoredAuthentication, consumeAuthRecoveryNotice } from "@/lib/authSession";
 import { getTaskUser, assertTaskUser } from "@/lib/goTaskAccess";
 import { isNativeReminderTask } from "@/lib/goNativeReminderScheduler";
@@ -99,8 +100,11 @@ import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingContentViewport, LandingCardContents } from "@/components/landing/LandingContentViewport";
+import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands";
+import { redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
+import { splitLandingAppointments, landingPanelFrames, landingAdaptivePanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
 import { fitLandingScale, landingPresetScale, landingDockBounds, landingContentFrame,
-  landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom } from "@/components/landing/landingResponsiveLayout";
+  landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES } from "@/components/landing/landingResponsiveLayout";
 import {
   hasFullLandingArchitecture,
   isUserV1Landing,
@@ -2615,6 +2619,12 @@ function GoDeepSpaceUpper() {
   );
 }
 
+function formatCompactProposalSlot(dateLabel: string, dateISO: string | undefined, time: string | undefined): string {
+  const iso = dateISO?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = iso ? iso[3] + "/" + iso[2] + "/" + iso[1].slice(-2) : dateLabel.trim();
+  return [date, time].filter(Boolean).join(" · ");
+}
+
 export default function HomeScreen() {
   const adminAccess = useAdminAccess();
   const goView = useGoView();
@@ -2623,7 +2633,9 @@ export default function HomeScreen() {
   else if ((!adminAccess.checking && !adminAccess.unavailable) || ownerIdentity.current !== adminAccess.userId) ownerIdentity.current = null;
   // Retain mounted presentation during a recheck/temporary outage; inner permission checks still deny operations.
   const ownerPresentation = goView.isOwner || (!!adminAccess.userId && (adminAccess.checking || adminAccess.unavailable) && ownerIdentity.current === adminAccess.userId);
-  return ownerPresentation ? <HomeScreenContent /> : <BusinessAccessGate><HomeScreenContent /></BusinessAccessGate>;
+  // Keep the same parent across permission changes: a wrapper swap remounts
+  // Home and restarts authentication. Presentation never grants operations.
+  return <BusinessAccessGate ownerPresentation={ownerPresentation}><HomeScreenContent /></BusinessAccessGate>;
 }
 
 function HomeScreenContent() {
@@ -2962,14 +2974,18 @@ function HomeScreenContent() {
 
   // Restore the stored session before presentation. Token renewal never resets navigation.
   useEffect(() => {
+    recordAuthTrace("home.mount");
     let cancelled = false, revision = 0, completed = false, needsRetry = true;
     const validRoles: AccountRole[] = ["usuario", "empresa", "admin", "trabajador", "proveedor", "partner", "franquicia"];
     const restore = async () => {
       const request = ++revision;
+      recordAuthTrace("home.restore.start", { request });
       if (!completed) setAuthBootstrapError(null);
       try {
         const { session, role } = await restoreStoredAuthentication();
         if (cancelled || request !== revision) return;
+        recordAuthTrace("home.restore.end", { request, present: !!session,
+          outcome: !session ? "missing" : typeof role === "string" && validRoles.includes(role as AccountRole) ? "restored" : "unknown-role" });
         if (!session) {
           commitAccountType(null);
           const notice = consumeAuthRecoveryNotice();
@@ -2982,6 +2998,7 @@ function HomeScreenContent() {
         setAuthBootstrapError(null); setAuthBootstrapComplete(true);
       } catch {
         if (!cancelled && request === revision) {
+          recordAuthTrace("home.restore.error", { request });
           needsRetry = true;
           // An unreadable keychain is temporary; never turn it into a logout or a new login prompt.
           if (!completed) setAuthBootstrapError("No se pudo recuperar la sesión. Desbloquea el dispositivo y vuelve a intentarlo.");
@@ -2994,8 +3011,15 @@ function HomeScreenContent() {
       if (state === "active" && needsRetry) void restore();
     });
     void restore();
-    return () => { cancelled = true; revision++; authBootstrapRetryRef.current = null; unsubscribe(); activity.remove(); };
+    return () => { recordAuthTrace("home.unmount"); cancelled = true; revision++; authBootstrapRetryRef.current = null; unsubscribe(); activity.remove(); };
   }, []);
+
+  useEffect(() => {
+    recordAuthTrace("home.presentation", {
+      screen: !authBootstrapComplete || !modeLoaded ? "recovering" : goAuthOpen ? userAccountType === null ? "welcome" : "access" : "landing",
+      context: goView.view, checking: adminAccess.checking, loaded: goView.loaded,
+    });
+  }, [authBootstrapComplete, modeLoaded, goAuthOpen, userAccountType, goView.view, goView.loaded, adminAccess.checking]);
 
   // Helper: guarda MI TELÉFONO GO y muestra feedback verde 1 segundo.
   // Se llama en blur, Enter/Done, y al cerrar Herramientas.
@@ -3355,7 +3379,54 @@ function HomeScreenContent() {
   // se mapean: "small" → "compacto", "normal"/"large" → "estandar".
   const [uiScale, setUiScale] = useState<"compacto" | "estandar" | "grande">("estandar");
   const userLandingVisualEnabled = goView.loaded && goView.view === "USER" && !!adminAccess.userId && authBootstrapComplete && !goAuthOpen;
-  const landingVisual = useLandingVisualVariant(adminAccess.userId, userLandingVisualEnabled);
+  // ADMIN manages the same USER preference; appearance remains restricted to USER.
+  const landingVariantToolsEnabled = userLandingVisualEnabled || (goView.loaded && goView.isAdminView
+    && adminAccess.allowed && !!adminAccess.userId && authBootstrapComplete && !goAuthOpen);
+  const landingVisual = useLandingVisualVariant(adminAccess.userId, landingVariantToolsEnabled);
+  const [landingPreviewOpening, setLandingPreviewOpening] = useState(false);
+  const landingPreviewIdentityRef = useRef(adminAccess.userId);
+  landingPreviewIdentityRef.current = adminAccess.userId;
+  const landingPreviewSequenceRef = useRef(0);
+  const landingPreviewRequestRef = useRef<{ userId: string; variant: NonNullable<typeof landingVisual.preview>; approved: boolean } | null>(null);
+  useEffect(() => {
+    const pending = landingPreviewRequestRef.current;
+    if (pending && pending.userId !== adminAccess.userId) {
+      landingPreviewRequestRef.current = null;
+      landingPreviewSequenceRef.current++;
+      setLandingPreviewOpening(false);
+      return;
+    }
+    // Owner revalidation may cancel a draft. Restore it only after authorized USER selection.
+    if (pending?.approved && userLandingVisualEnabled && landingVisual.ready
+      && landingVisual.startPreview(pending.variant)) landingPreviewRequestRef.current = null;
+  }, [adminAccess.userId, userLandingVisualEnabled, landingVisual.ready]);
+  const openUserLandingPreviewFromTools = async () => {
+    if (!landingVariantToolsEnabled || !landingVisual.preview || landingPreviewOpening || landingPreviewRequestRef.current) return;
+    if (goView.isAdminView) {
+      if (!goView.isOwner || !adminAccess.userId) return;
+      const sequence = ++landingPreviewSequenceRef.current;
+      const pending = { userId: adminAccess.userId, variant: landingVisual.preview, approved: false };
+      landingPreviewRequestRef.current = pending;
+      setLandingPreviewOpening(true);
+      try {
+        const selected = await goView.selectOwnerView("USER");
+        if (sequence !== landingPreviewSequenceRef.current || landingPreviewIdentityRef.current !== pending.userId) return;
+        if (!selected) {
+          landingPreviewRequestRef.current = null;
+          showToast(lang === "en" ? "Could not open the authorized USER context." : "No se pudo abrir el contexto USUARIO autorizado.", "error");
+          return;
+        }
+        pending.approved = true;
+        if (landingVisual.startPreview(pending.variant)) landingPreviewRequestRef.current = null;
+      } finally {
+        if (sequence === landingPreviewSequenceRef.current && landingPreviewIdentityRef.current === pending.userId)
+          setLandingPreviewOpening(false);
+      }
+    }
+    commitUserPhone(); setOptionsOpen(false);
+    showToast(lang === "en" ? "Temporary preview. Return to Tools to activate or cancel."
+      : "Vista previa temporal. Vuelve a Herramientas para activar o cancelar.");
+  };
   // Tamaño de columnas del calendario (ancho día)
   const [calSize, setCalSize] = useState<CalSizeKey>(DEFAULT_GO_RENDER_PRESET.calSize);
   // Tamaño visual de tarjetas del listado: compacto / medio / grande
@@ -3905,6 +3976,7 @@ function HomeScreenContent() {
   };
   const [nextAptPanelH, setNextAptPanelH] = useState(0);
   const [nextAptMinimized, setNextAptMinimized] = useState(true);
+  const [nextPanelKind, setNextPanelKind] = useState<"visit" | "task">("visit");
   // Altura del panel "Cambios pendientes" — para apilar sobre próxima visita.
   const [pendingPanelH, setPendingPanelH] = useState(0);
   // Estado abierto/cerrado de la pastilla "CAMBIOS"
@@ -9726,7 +9798,11 @@ function HomeScreenContent() {
 
   // Primera cita (compat con toda la lógica existente que solo necesita saber
   // si hay alguna — condiciones de render, transport strip, compact button, etc.)
-  const nextAppointment = nextAppointments[0] ?? null;
+  // Shared source and renderer, separate commands and lists. Switching kind only
+  // minimizes the other next panel; Cambios keeps its independent state.
+  const nextGroups = useMemo(() => splitLandingAppointments(nextAppointments), [nextAppointments]);
+  const nextPanelAppointments = nextGroups[nextPanelKind];
+  const nextAppointment = nextPanelAppointments[0] ?? null;
 
   // Sync ref after nextAppointment is available (avoids TDZ in anyOperationalPanelOpen)
   proximaCitaExpandedRef.current = !!nextAppointment && !nextAptMinimized;
@@ -9792,7 +9868,7 @@ function HomeScreenContent() {
 
   // Loop continuo del indicador ambiental horizontal del panel PRÓXIMA.
   // Se activa solo cuando hay más de una ficha; se para y resetea si hay una sola.
-  const _nextAptCount = nextAppointments.length;
+  const _nextAptCount = nextPanelAppointments.length;
   useEffect(() => {
     if (_nextAptCount <= 1) {
       nextSwipeHintAnim.setValue(0);
@@ -11931,7 +12007,11 @@ function HomeScreenContent() {
   //          = 2*SYSTEM_MARGIN_X + 2*SBR - screen.width
   const landingDock = landingDockBounds({ width: screen.width, insets, dockRight,
     boundingRadius: systemBoundingRadius, wrapSize: orbitWrapSize,
-    satelliteRadius: microR, satelliteSize: microSz });
+    satelliteRadius: microR, satelliteSize: microSz,
+    // ADMIN geometry is the shared reference; visibility never moves the central GO.
+    visibleSatelliteKeys: Object.keys(LANDING_SATELLITE_DEGREES),
+    orbitRadius, orbitButtonSize: orbitBtnSize, orbitCount: rutasMode ? 8 : INTENTS.length + 1,
+    orbitVisible: true, goSize });
   const maxX = anyOverlayOpen ? SYSTEM_MARGIN_X : landingDock.maxX;
   const minX = anyOverlayOpen ? Math.min(0, Math.round(2 * SYSTEM_MARGIN_X + 2 * systemBoundingRadius - screen.width)) : landingDock.minX;
   // V1 PROMPT 12 · MODO COMPACTO de próxima cita.
@@ -11978,8 +12058,8 @@ function HomeScreenContent() {
   // Resetear el índice del carrusel si la lista cambia de tamaño
   // (p.ej. se elimina la tarjeta activa o llega una nueva).
   useEffect(() => {
-    setNextCardIdx((i) => Math.min(i, Math.max(0, nextAppointments.length - 1)));
-  }, [nextAppointments.length]);
+    setNextCardIdx((i) => Math.min(i, Math.max(0, nextPanelAppointments.length - 1)));
+  }, [nextPanelAppointments.length]);
   // Reserve vertical space at the bottom for the two stacked layers:
   //   - location bar pinned at paddingBottom (height ~44)
   //   - action bar above it with a 10px gap (height ~72; bottom edge at
@@ -12027,7 +12107,7 @@ function HomeScreenContent() {
   //   minY = _topFloor_screen - _anchorContainerY   (negative = moved up)
   const _anchorContainerY =
     screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize;
-  const minY = Math.min(anyOverlayOpen ? 0 : landingDock.maxY, Math.round(_topFloor_screen - _anchorContainerY));
+  const minY = anyOverlayOpen ? Math.min(0, Math.round(_topFloor_screen - _anchorContainerY)) : landingDock.maxY;
   const maxY = anyOverlayOpen ? Math.max(0, insets.bottom - 6) : landingDock.maxY;
   const clamp = (v: number, lo: number, hi: number) =>
     Math.min(Math.max(v, lo), hi);
@@ -13259,7 +13339,7 @@ function HomeScreenContent() {
         pointerEvents="box-none"
         style={{
           position: "absolute",
-          bottom: insets.bottom + SYSTEM_MARGIN_Y,
+          bottom: insets.bottom + SYSTEM_MARGIN_Y - landingOffsetY,
           right: dockRight,
           width: systemBoundingRadius * 2,
           height: systemBoundingRadius * 2,
@@ -13406,7 +13486,51 @@ function HomeScreenContent() {
     ];
   };
 
-  const landingBaseline = bottomReserved + orbitWrapSize - 2;
+  // Content never determines the dock position. Reserve the fixed command row
+  // above the complete orbital footprint, including hidden slots for clearance.
+  const landingOrbitTop = screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + landingDock.maxY
+    - Math.max(goSize / 2, orbitRadius + orbitBtnSize / 2, microR * Math.cos(Math.PI / 8) + microSz / 2);
+  // PR15/PR16 frozen close position. Reserve its touch lane before laying out commands.
+  const legacyLandingClose = { x: screen.width - Math.max(18, insets.right + 18) - 40,
+    y: screen.height - (bottomReserved + orbitWrapSize - 50) - 40, width: 40, height: 40 };
+  const landingOrbitObstacles: HumanityRect[] = [];
+  const landingCenter = { x: screen.width - dockRight - systemBoundingRadius + (handedness === "right" ? maxX : minX),
+    y: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + landingDock.maxY };
+  const addLandingOrbitObstacle = (degrees: number, radius: number, size: number) => {
+    const angle = degrees * Math.PI / 180;
+    landingOrbitObstacles.push({ x: landingCenter.x + Math.cos(angle) * radius - size / 2,
+      y: landingCenter.y + Math.sin(angle) * radius - size / 2, width: size, height: size });
+  };
+  addLandingOrbitObstacle(0, 0, goSize);
+  for (let i = 0; i < INTENTS.length + 1; i++)
+    addLandingOrbitObstacle(-90 + i * 360 / (INTENTS.length + 1), orbitRadius, orbitBtnSize);
+  for (const key of visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface))
+    addLandingOrbitObstacle(LANDING_SATELLITE_DEGREES[key], microR, microSz);
+  const closeColumnWidth = landingContentWidth(screen.width, screen.height, insets, systemBoundingRadius);
+  const closeHeaderHeight = Math.max(44, Math.round(32 * uiScaleFactor), fullLandingArchitecture ? Math.round(56 * uiScaleFactor) + 16 - 20 : 0);
+  const closeHeaderObstacles: HumanityRect[] = fullLandingArchitecture ? [{
+    x: handedness === "right" ? insets.left + 8 : screen.width - insets.right - 8 - Math.max(62, Math.round(52 * uiScaleFactor) + 10),
+    y: insets.top, width: Math.max(62, Math.round(52 * uiScaleFactor) + 10), height: Math.round(56 * uiScaleFactor) + 16,
+  }] : [];
+  const closeQrSize = Math.round(32 * uiScaleFactor), closeQrHit = Math.max(6, (44 - closeQrSize) / 2);
+  const closeQrEdge = Math.max(18, (handedness === "right" ? insets.right : insets.left) + 18);
+  const closeColumnLeft = handedness === "right" ? insets.left : screen.width - insets.right - closeColumnWidth;
+  const closeQrX = closeColumnWidth !== screen.width
+    ? closeColumnLeft + (handedness === "right" ? closeColumnWidth - closeQrEdge - closeQrSize : closeQrEdge)
+    : handedness === "right" ? screen.width - closeQrEdge - closeQrSize : closeQrEdge;
+  const closeQrY = Math.max(insets.top + Math.round(12 * uiScaleFactor), (titleBottomLocalY ?? 0) + 8);
+  closeHeaderObstacles.push({ x: closeQrX - closeQrHit, y: closeQrY - closeQrHit,
+    width: closeQrSize + 2 * closeQrHit, height: closeQrSize + 2 * closeQrHit });
+  const closeReservedColumn: HumanityRect[] = closeColumnWidth !== screen.width ? [{
+    x: handedness === "right" ? insets.left : screen.width - insets.right - closeColumnWidth,
+    y: Math.max(insets.top + 12, (titleBottomLocalY ?? 0) + 8) + closeHeaderHeight + 8,
+    width: closeColumnWidth, height: Math.max(0, screen.height - insets.bottom - 8 - (Math.max(insets.top + 12, (titleBottomLocalY ?? 0) + 8) + closeHeaderHeight + 8)),
+  }] : [];
+  const landingCloseRect = placeLandingClose(legacyLandingClose,
+    { x: insets.left, y: insets.top, width: screen.width - insets.left - insets.right, height: screen.height - insets.top - insets.bottom },
+    [...landingOrbitObstacles, ...closeHeaderObstacles, ...closeReservedColumn]) ?? legacyLandingClose;
+  const landingBaseline = Math.max(screen.height - landingOrbitTop + 12 + 46 + 8,
+    screen.height - landingCloseRect.y + 40 + 8 + 16);
   const landingSafeTop = Math.max(insets.top + Math.round(12 * uiScaleFactor), (titleBottomLocalY ?? 0) + 8);
   const landingHasNext = !!nextAppointment && !anyOverlayOpen && !isActivelyCreating && !rutasMode;
   const landingHasChanges = allPendientes.length > 0 && !anyOverlayOpen && !rutasMode;
@@ -13416,27 +13540,263 @@ function HomeScreenContent() {
     ? Math.max(pendingPanelH, pendingHeaderH + pendingContentH + Math.round(4 * uiScaleFactor) + 3) : 46 : 0;
   const landingPendingOffset = landingHasNext && !nextAptMinimized
     ? landingNextHeight + Math.round(8 * uiScaleFactor) : cambiosOpen && landingHasNext ? 54 : 0;
-  const landingHelpBottom = insets.bottom + SYSTEM_MARGIN_Y + orbitWrapSize + 20
-    + (landingHasNext ? !nextAptMinimized && nextAptPanelH > 0 ? nextAptPanelH + 12 : nextAptMinimized ? 54 : 0 : 0)
-    + (landingHasChanges ? cambiosOpen && pendingPanelH > 0 ? landingPendingHeight + 12 : 54 : 0);
+  const landingHelpBottom = landingBaseline + 12;
   const landingBaseFrame = landingContentFrame({ width: screen.width, height: screen.height, insets,
     safeTop: landingSafeTop, baseline: landingBaseline, boundingRadius: systemBoundingRadius, handedness,
-    controlSize: Math.max(44, Math.round(32 * uiScaleFactor)),
+    controlSize: Math.max(44, Math.round(32 * uiScaleFactor), fullLandingArchitecture ? Math.round(56 * uiScaleFactor) + 16 - 20 : 0),
     naturalHeight: Math.max(landingNextHeight, landingPendingHeight + landingPendingOffset,
       !anyOperationalPanelOpen ? landingHelpBottom - landingBaseline + landingHelpH : 0,
       landingHasNext && !nextAptMinimized ? transportPanelH : 0) });
+  const landingPanels = landingPanelFrames({ frame: landingBaseFrame, screenHeight: screen.height,
+    insets: landingBaseFrame.virtual ? { left: 0, right: 0 } : insets });
   const landingPanelWidth = landingContentWidth(screen.width, screen.height, insets, systemBoundingRadius);
   const landingPanelInsets = landingPanelWidth !== screen.width ? { left: 0, right: 0 } : insets;
   const landingStackTransport = landingPanelWidth < 280;
 
-  const humanityPanelOpen = !!nextAppointment && !isActivelyCreating && !nextAptMinimized;
-  const humanityBlocks = landingBaseFrame.virtual && !anyOverlayOpen
-    ? [{ x: landingBaseFrame.left, y: landingBaseFrame.top, width: landingBaseFrame.width, height: landingBaseFrame.height }]
-    : humanityPanelOpen
-    ? [humanityObstacles.next, humanityObstacles.transport]
-    : !!nextAppointment && !isActivelyCreating ? [humanityObstacles.pill] : [];
-  // Wait for visible panels to report their complete touch bounds.
-  const humanityPanelsMeasured = humanityBlocks.every(rect => !!rect);
+  // Same operational UI for visits, tasks and their pending changes. No duplicate controls.
+  const renderLandingOperations = (entry: typeof goLog[number]) => {
+    const g = landingCurrentEntry(entry);
+    const PANEL_W = landingPanels.region.width;
+    const hasPlace = !!(g.place && g.place.trim().length > 0);
+
+    const base = buildNextAptActions(g);
+    const aHere = base.find((a) => a.k === "here");
+    const aLate = base.find((a) => a.k === "late");
+    const aChange = base.find((a) => a.k === "change");
+
+    const aGo = {
+      k: "go",
+      label: t('go_nav'),
+      icon: "navigation" as keyof typeof Feather.glyphMap,
+      color: "#60a5fa",
+      disabled: !hasPlace,
+      fn: () => {
+        if (!hasPlace) return;
+        Linking.openURL(
+          `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(g.place)}`,
+        ).catch(() => showToast(t('toast_cannot_open_maps'), 'error'));
+      },
+    };
+
+    const callPhone  = normalizePhoneForWhatsApp(g.phone || "");
+    const hasPhone   = !!(g.phone && callPhone);
+    const waRaw      = g.whatsapp || g.phone || "";
+    const waPhone    = normalizePhoneForWhatsApp(waRaw);
+    const hasWhatsapp = !!waPhone;
+    const waMsg = [
+      t('whatsapp_intro'),
+      resolveIntentLabel(g) || "",
+      g.time ? t('at_time').replace('__TIME__', g.time) : "",
+    ].filter(Boolean).join(" ");
+    const aWA = hasWhatsapp
+      ? {
+          k: "wa-contact",
+          label: "WhatsApp",
+          icon: "message-circle" as keyof typeof Feather.glyphMap,
+          color: "#4ade80",
+          fn: () =>
+            Linking.openURL(
+              `https://wa.me/${waPhone}?text=${encodeURIComponent(waMsg)}`,
+            ).catch(() => showToast(t('toast_wa_open_failed'), 'error')),
+        }
+      : undefined;
+    const aCall = hasPhone
+      ? {
+          k: "call-contact",
+          label: t('call'),
+          icon: "phone" as keyof typeof Feather.glyphMap,
+          color: "#4ade80",
+          fn: () =>
+            Linking.openURL(`tel:${callPhone}`).catch(() =>
+              showToast(t('toast_call_failed'), 'error'),
+            ),
+        }
+      : undefined;
+
+    const actionGrid = landingActionGrid({ width: landingPanels.region.width,
+      leftInset: landingPanelInsets.left, rightInset: landingPanelInsets.right,
+      scale: uiScaleFactor, large: uiScale === "grande",
+      columns: landingStackTransport ? 2 : hasWhatsapp || hasPhone ? 3 : 2,
+      transport: !landingStackTransport, transportWidth: uiScale === "grande" ? 86 : 70 });
+    const BTN_H = actionGrid.height;
+    const BTN_W = actionGrid.buttonWidth;
+    const ACT_ICON = Math.round(16 * uiScaleFactor);
+    const ACT_FS   = actionGrid.compressed ? 12 : Math.round(12 * uiScaleFactor);
+    const ACT_PV   = Math.round(8  * uiScaleFactor);
+    const ACT_PH   = actionGrid.compressed ? 5 : Math.round(8 * uiScaleFactor);
+    const ACT_GAP  = Math.round(5  * uiScaleFactor);
+    const ACT_BR   = Math.round(12 * uiScaleFactor);
+    const ROW_GAP  = Math.round(6  * uiScaleFactor);
+
+    type ActBtnDef = {
+      k: string;
+      label: string;
+      icon: keyof typeof Feather.glyphMap;
+      color: string;
+      disabled?: boolean;
+      fn: () => void;
+    };
+    const renderActBtn = (a: ActBtnDef) => {
+      return (
+        <TouchableOpacity
+          key={a.k}
+          activeOpacity={a.disabled ? 1 : 0.82}
+          onPress={() => {
+            if (a.disabled) return;
+            Haptics.selectionAsync().catch(() => {});
+            a.fn();
+          }}
+          accessibilityLabel={a.label}
+          accessibilityState={{ disabled: !!a.disabled }}
+          hitSlop={4}
+          style={{
+            width: BTN_W,
+            height: BTN_H,
+            borderRadius: Math.round(14 * uiScaleFactor),
+            borderWidth: 1,
+            borderColor: `${a.color}50`,
+            overflow: "hidden",
+            shadowColor: a.color,
+            shadowOpacity: a.disabled ? 0 : 0.22,
+            shadowRadius: 9,
+            shadowOffset: { width: 0, height: 1 },
+            elevation: 3,
+            opacity: a.disabled ? 0.38 : 1,
+          }}
+        >
+          <LinearGradient
+            colors={["rgba(22,26,42,0.98)", "rgba(6,8,16,0.99)"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={{
+              flex: 1,
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: ACT_GAP,
+              paddingVertical: ACT_PV,
+              paddingHorizontal: ACT_PH,
+            }}
+          >
+            <Feather name={a.icon} size={ACT_ICON} color={`${a.color}CC`} />
+            <Text
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={actionGrid.compressed ? 0.92 : 0.65}
+              style={{
+                color: `${a.color}CC`,
+                fontSize: ACT_FS,
+                fontWeight: "700",
+                letterSpacing: 0.2,
+                textAlign: "center",
+              }}
+            >
+              {a.label}
+            </Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      );
+    };
+
+    // Cuadrícula dinámica: solo botones con datos reales (sin disabled fallback)
+    // Fila 1: [WA?] + Cambiar + Aquí  |  Fila 2: [Llamar?] + Tarde + Ir
+    const row1Btns = ([aWA, aChange, aHere] as (ActBtnDef | undefined)[]).filter((b): b is ActBtnDef => !!b);
+    const row2Btns = ([aCall, aLate, aGo]   as (ActBtnDef | undefined)[]).filter((b): b is ActBtnDef => !!b);
+    const actionRows = landingStackTransport
+      ? [...row1Btns, ...row2Btns].reduce<ActBtnDef[][]>((rows, button, index) => {
+          if (index % 2 === 0) rows.push([]); rows[rows.length - 1].push(button); return rows;
+        }, []) : [row1Btns, row2Btns];
+    const numGridCols = Math.max(...actionRows.map(row => row.length));
+    const transportControls = (<View
+      onLayout={(e) => {
+        setTransportPanelH(e.nativeEvent.layout.height);
+      }}
+      style={{ width: landingStackTransport ? PANEL_W : uiScale === "grande" ? 86 : 70,
+        flexDirection: landingStackTransport ? "row" : "column", flexWrap: "wrap", gap: 5 }}
+
+    >
+      {(
+        [
+          { label: "Taxi",  icon: "truck"      as keyof typeof Feather.glyphMap, accent: "#fbbf24", toast: t('toast_taxi_looking')    },
+          { label: "Uber",  icon: "navigation" as keyof typeof Feather.glyphMap, accent: "#e2e8f0", url:   "https://m.uber.com",  raise: 1 },
+          { label: "Bolt",  icon: "zap"        as keyof typeof Feather.glyphMap, accent: "#4ade80", url:   "https://bolt.eu"    },
+          { label: "T.pub", icon: "map"        as keyof typeof Feather.glyphMap, accent: "#60a5fa", toast: t('toast_routes_showing') },
+        ] as { label: string; icon: keyof typeof Feather.glyphMap; accent: string; url?: string; toast?: string; raise?: number }[]
+      ).map((op) => (
+        <TouchableOpacity
+          key={op.label}
+          activeOpacity={0.65}
+          onPress={() => {
+            if (op.url) {
+              Linking.openURL(op.url).catch(() => showToast(t('toast_link_error'), "error"));
+            } else if (op.toast) {
+              showToast(op.toast);
+            }
+          }}
+          style={{
+            width: landingStackTransport ? (PANEL_W - 5) / 2 : undefined,
+            marginTop: op.raise ?? 0,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: `${op.accent}38`,
+            overflow: "hidden",
+            shadowColor: op.accent,
+            shadowOpacity: 0.18,
+            shadowRadius: 7,
+            shadowOffset: { width: 0, height: 1 },
+            elevation: 3,
+          }}
+        >
+          <LinearGradient
+            colors={["rgba(22,26,42,0.98)", "rgba(6,8,16,0.99)"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 5,
+              paddingHorizontal: 8,
+              paddingVertical: 6,
+              minHeight: landingFrame.virtual ? 44 : undefined,
+              justifyContent: "center",
+            }}
+          >
+            <Feather name={op.icon} size={11} color={`${op.accent}CC`} />
+            <Text
+              numberOfLines={1}
+              style={{
+                color: "rgba(203,213,225,0.82)",
+                fontSize: 11,
+                fontWeight: "600",
+                flexShrink: 1,
+              }}
+            >
+              {op.label}
+            </Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      ))}
+    </View>);
+
+    return { change: aChange, content: (
+<View style={{ flexDirection: landingStackTransport ? "column" : handedness === "right" ? "row-reverse" : "row",
+        gap: 8, justifyContent: "space-between" }}>
+        <View style={{ gap: ROW_GAP, alignSelf: handedness === "right" ? "flex-end" : "flex-start" }}>
+          {actionRows.map((row, index) => <View key={index} style={{ flexDirection: "row", gap: ROW_GAP }}>
+            {row.map((btn) => renderActBtn(btn))}
+          </View>)}
+        </View>
+        {transportControls}
+      </View>
+    ) };
+  };
+
+  const toLandingRootRect = (rect: HumanityRect): HumanityRect => landingBaseFrame.virtual
+    ? { ...rect, x: rect.x + landingBaseFrame.left, y: rect.y + landingBaseFrame.top } : rect;
+  // Reserve the shared region even when minimized, so Humanity never moves on panel changes.
+  const humanityBlocks = [landingCloseRect, toLandingRootRect(landingPanels.commands),
+    toLandingRootRect(landingPanels.region)];
+  const humanityPanelsMeasured = true;
   const humanityPlacement = humanityPanelsMeasured && posReady ? placeHumanity({
     // Use the configured static dock anchor, never the former draggable pan.
     cx: screen.width - dockRight - systemBoundingRadius + (handedness === "right" ? maxX : minX),
@@ -13452,15 +13812,59 @@ function HomeScreenContent() {
   const landingTopInset = useOwnerLandingBackground(authBootstrapComplete && modeLoaded && !goAuthOpen
     && !anyOverlayOpen && !empresaOpen && !verificacionOpen && !adminDashOpen);
 
-  // If the scroll area consumes its orbital slot, keep the same control above the cards.
+  // Keep the same fallback control in a fixed side column if its orbital slot is occupied.
   const landingInlineHumanity = fullLandingArchitecture && !anyOverlayOpen && !rutasMode
-    && kbHeight === 0 && orbitSecondLevel === null && landingBaseFrame.virtual && !humanityPlacement;
-  const inlineHumanityRect = { x: 8, y: 0, width: Math.max(62, Math.round(52 * uiScaleFactor) + 10),
+    && kbHeight === 0 && orbitSecondLevel === null && !humanityPlacement;
+  const inlineHumanityWidth = Math.max(62, Math.round(52 * uiScaleFactor) + 10);
+  // The existing globe is reused in the reserved header only when no orbital
+  // slot is free. QR stays on the thumb side; Humanity uses the opposite side.
+  const inlineHumanityRect = { x: handedness === "right" ? insets.left + 8 : screen.width - insets.right - 8 - inlineHumanityWidth,
+    y: insets.top, width: inlineHumanityWidth,
     height: Math.round(56 * uiScaleFactor) + 16, globe: Math.round(56 * uiScaleFactor) };
-  const inlineContentHeight = Math.max(landingBaseFrame.height, landingBaseFrame.naturalHeight + inlineHumanityRect.height + 8);
   const landingFrame = landingInlineHumanity ? { ...landingBaseFrame,
-    scroll: inlineContentHeight > landingBaseFrame.height, contentHeight: inlineContentHeight } : landingBaseFrame;
+    scroll: false, contentHeight: landingBaseFrame.height } : landingBaseFrame;
   const contentBottom = (bottom: number) => landingContentBottom(bottom, landingFrame);
+  // Preserve the approved concentric geometry and move every dependent layer together.
+  // Keep the whole Landing 2pt inside its viewport; independent navigation retains OS safe insets.
+  const landingArrangement = useMemo(() => {
+    const unchanged = { offsetY: 0, offsets: {} as Record<string, { x: number; y: number }>, closeRect: landingCloseRect };
+    // The existing horizontal side column has a separate approved anchor.
+    if (anyOverlayOpen || rutasMode || orbitSecondLevel !== null || reservasOrbitalOpen || landingBaseFrame.virtual) return unchanged;
+    const arc = redistributeLandingLowerArc({ center: landingCenter,
+      bounds: { left: insets.left + 3, right: screen.width - insets.right - 3,
+        top: insets.top + 3, bottom: screen.height - 2 },
+      goSize, orbitRadius, orbitSize: orbitBtnSize, orbitCount: INTENTS.length + 1,
+      orbitVisible: true, satelliteRadius: microR, satelliteSize: microSz,
+      anchorSatelliteDegrees: Object.values(LANDING_SATELLITE_DEGREES),
+      satellites: visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface)
+        .filter(key => key !== "payment").map(key => ({ key, degrees: LANDING_SATELLITE_DEGREES[key] })),
+      });
+    if (!arc.fitted) return unchanged;
+    const move = (rect: HumanityRect) => ({ ...rect, y: rect.y + arc.offsetY });
+    const humanity = humanityPlacement ?? (landingInlineHumanity ? inlineHumanityRect : null);
+    const exclusions = [move(toLandingRootRect(landingPanels.commands)), move(toLandingRootRect(landingPanels.region)),
+      ...closeHeaderObstacles, ...closeReservedColumn, ...(humanity ? [move(humanity)] : [])];
+    const closeRect = placeLandingClose({ ...landingCloseRect, y: landingCloseRect.y + arc.offsetY },
+      { x: insets.left, y: insets.top, width: screen.width - insets.left - insets.right,
+        height: screen.height - insets.top - insets.bottom }, [...arc.obstacles, ...exclusions]);
+    // Never trade a complete close target for the descent on a constrained screen.
+    return closeRect ? { ...arc, closeRect } : unchanged;
+  }, [anyOverlayOpen, rutasMode, orbitSecondLevel, reservasOrbitalOpen,
+    screen.width, screen.height, insets.left, insets.right, insets.top, insets.bottom,
+    landingDock.maxY, landingCenter.x, landingCenter.y, goSize, orbitRadius, orbitBtnSize, microR, microSz,
+    isUserV1Surface, handedness, landingBaseFrame.virtual, landingCloseRect.x, landingCloseRect.y,
+    landingPanels.commands.x, landingPanels.commands.y, landingPanels.commands.width,
+    landingPanels.region.y, landingPanels.region.height, landingBaseFrame.left, landingBaseFrame.top,
+    humanityPlacement?.x, humanityPlacement?.y, humanityPlacement?.width, humanityPlacement?.height,
+    landingInlineHumanity, inlineHumanityRect.x, inlineHumanityRect.y, inlineHumanityRect.width,
+    inlineHumanityRect.height, closeQrX, closeQrY, closeQrSize, closeQrHit, closeHeaderHeight]);
+  const landingOffsetY = landingArrangement.offsetY;
+  const landingLowerOffsets = landingArrangement.offsets;
+  const landingDisplayCloseRect = landingArrangement.closeRect;
+  const landingHeaderControls = [
+    { x: closeQrX, y: closeQrY - landingOffsetY, width: closeQrSize, height: closeQrSize },
+    ...(landingInlineHumanity ? [inlineHumanityRect] : []),
+  ];
   const renderLandingHumanity = (placement: HumanityRect & { globe: number }) => (
         <TouchableOpacity
           activeOpacity={0.82}
@@ -13471,7 +13875,7 @@ function HomeScreenContent() {
           style={{
             position: "absolute",
             left: placement.x,
-            top: placement.y,
+            top: placement.y + landingOffsetY,
             width: placement.width,
             height: placement.height,
             borderRadius: placement.globe / 2,
@@ -13566,6 +13970,7 @@ function HomeScreenContent() {
       {/* Status bar — dark-content sobre paneles claros, light sobre el fondo oscuro GO */}
       <StatusBar
         style={
+          calOpen ? "light" :
           empresaOpen || cuentaOpen || optionsOpen || contactOpen ||
           agendaOpOpen || verificacionOpen || messagesOpen || humanityOpen ||
           listOpen || respondOpen || notesOpen || calOpen || mapOpen
@@ -13891,111 +14296,56 @@ function HomeScreenContent() {
         )}
       </View>
 
-      <LandingContentViewport frame={landingFrame} closingGesture={universalSwipeGesture}>
       {landingInlineHumanity && renderLandingHumanity(inlineHumanityRect)}
-      {/* PASTILLA PRÓXIMA ACCIÓN — solo cuando visita minimizada y sin overlays */}
-      {!isActivelyCreating && !rutasMode && kbHeight === 0 && (() => {
-        const showProxima = !anyOverlayOpen && !!nextAppointment && nextAptMinimized;
-        if (!showProxima) return null;
-
-        // ── PRÓXIMO GO PILL — ergonomic placement ───────────────────────────
-        // Move the pill as far RIGHT as possible within the free column that
-        // exists between the screen left edge and the FIESTA orbit button (idx 4),
-        // which is the closest lower-left orbit button at the pill's vertical band.
-        //
-        // Geometry (right-handed, default pan):
-        //   orbitCenter_X = screen.width - SYSTEM_MARGIN_X - systemBoundingRadius
-        //   FIESTA screen left = orbitCenter_X + cos(fiesta_angle)*orbitRadius
-        //                        - orbitBtnSize/2
-        //   pill idealLeft     = fiestaScreenLeft - pillMaxW - clearance
-        const _FIESTA_ANGLE = -Math.PI / 2 + (4 * 2 * Math.PI) / 7; // idx=4 ≈ 115.71°
-        const _fiestaScreenLeft =
-          screen.width - SYSTEM_MARGIN_X - systemBoundingRadius
-          + Math.cos(_FIESTA_ANGLE) * orbitRadius
-          - orbitBtnSize / 2;
-        const _PILL_MAX_W     = 110; // matches maxWidth in style
-        // Grande: allow pill to sit 4 px closer to FIESTA (slight right nudge).
-        const _PILL_ORBIT_GAP = uiScale === "grande" ? 4 : 8;
-        const _pillIdealLeft  = Math.round(_fiestaScreenLeft - _PILL_MAX_W - _PILL_ORBIT_GAP);
-
-        // La pastilla vive exactamente donde estaba el botón "Cambiar":
-        // borde derecho del panel (PANEL_EDGE) y mismo bottom que el panel.
-        const _pillPanelEdge = Math.max(18, (handedness === "right" ? landingPanelInsets.right : landingPanelInsets.left) + 18);
-        const proximaSideStyle = handedness === "right"
-          ? { right: _pillPanelEdge }
-          : { left:  _pillPanelEdge };
-
-        const PROXIMA_BOTTOM = bottomReserved + orbitWrapSize - 2;
-
-        // showProxima — pastilla con nombre de la próxima acción
-        const g = nextAppointment!.g;
-        const FEMININE_KEYS = new Set(["reunion", "comida", "fiesta", "cena", "llamada", "reserva"]);
-        const isFeminine = (key?: string) => key ? FEMININE_KEYS.has(key) : false;
-        let line1: string;
-        let line2: string;
-        if (g.type === "TAREA") {
-          line1 = t('next_fem');
-          line2 = t('task');
-        } else if (g.intentLabel && g.intentKey && g.intentKey !== "otro") {
-          line1 = isFeminine(g.intentKey) ? t('next_fem') : t('next_masc');
-          line2 = resolveIntentLabel(g).toUpperCase();
-        } else {
-          line1 = t('next_masc');
-          line2 = "GO";
-        }
-        const tint = readableOnDark(g.color || intent.color);
-        return (
-          <View
-            key="next-action-open-btn-wrap"
-            onLayout={(e) => measureHumanityObstacle("pill", e.nativeEvent.layout)}
-            style={{ position: "absolute", ...proximaSideStyle, bottom: contentBottom(PROXIMA_BOTTOM), zIndex: 7 }}
-          >
-            <TouchableOpacity
-              activeOpacity={0.75}
-              onPress={() => {
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                setNextAptMinimized(false);
-                Haptics.selectionAsync().catch(() => {});
-              }}
-              onLongPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                startRelatedGoAction(nextAppointment.g);
-              }}
-              delayLongPress={500}
-              style={{
-                minWidth: 86,
-                maxWidth: 110,
-                height: 46,
-                backgroundColor: "rgba(10,10,14,0.88)",
-                borderWidth: 1.5,
-                borderColor: `${tint}55`,
-                borderRadius: 12,
-                alignItems: "center",
-                justifyContent: "center",
-                paddingHorizontal: 10,
-                shadowColor: tint,
-                shadowOpacity: 0.3,
-                shadowRadius: 8,
-                shadowOffset: { width: 0, height: 0 },
-                elevation: 5,
-              }}
-            >
-              <Text style={{ color: tint, fontSize: 9, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.2 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{line1}</Text>
-              <Text
-                style={{ color: "#ffffff", fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3, textAlign: "center" }}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-                minimumFontScale={0.7}
-              >{line2}</Text>
-            </TouchableOpacity>
-            {_nextAptCount > 1 && (
-              <View pointerEvents="none" style={{ position: "absolute", top: -7, right: -7, width: 17, height: 17, borderRadius: 9, backgroundColor: tint, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: "rgba(0,0,0,0.55)", elevation: 6 }}>
-                <Text style={{ color: "#000000", fontSize: 9, fontFamily: "Inter_900Black", fontWeight: "900", lineHeight: 11 }}>{_nextAptCount}</Text>
-              </View>
-            )}
-          </View>
-        );
-      })()}
+      <LandingContentViewport frame={landingFrame} offsetY={landingOffsetY} closingGesture={universalSwipeGesture}>
+      {!anyOverlayOpen && !isActivelyCreating && !rutasMode && kbHeight === 0 && (
+        <LandingPanelCommands frame={landingPanels.commands} commands={[
+          { key: "visit", heading: t('next_fem'), title: t('word_visit').toUpperCase(),
+            color: readableOnDark(nextGroups.visit[0]?.g.color || intent.color), count: nextGroups.visit.length,
+            expanded: !cambiosOpen && !nextAptMinimized && nextPanelKind === "visit",
+            onPress: () => {
+              setCambiosOpen(false);
+              setNextAptMinimized(!cambiosOpen && !nextAptMinimized && nextPanelKind === "visit");
+              setNextPanelKind("visit");
+              if (nextPanelKind !== "visit") setNextCardIdx(0);
+              Haptics.selectionAsync().catch(() => {});
+            },
+            onLongPress: () => {
+              const entry = nextGroups.visit[0]; if (!entry) return;
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              startRelatedGoAction(entry.g);
+            } },
+          { key: "task", heading: t('next_fem'), title: t('task'),
+            color: readableOnDark(nextGroups.task[0]?.g.color || intent.color), count: nextGroups.task.length,
+            expanded: !cambiosOpen && !nextAptMinimized && nextPanelKind === "task",
+            onPress: () => {
+              setCambiosOpen(false);
+              setNextAptMinimized(!cambiosOpen && !nextAptMinimized && nextPanelKind === "task");
+              setNextPanelKind("task");
+              if (nextPanelKind !== "task") setNextCardIdx(0);
+              Haptics.selectionAsync().catch(() => {});
+            },
+            onLongPress: () => {
+              const entry = nextGroups.task[0]; if (!entry) return;
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              startRelatedGoAction(entry.g);
+            } },
+          { key: "changes", heading: "CAMBIOS", title: "PROPUESTOS", color: "#f97316", count: allPendientes.length,
+            expanded: cambiosOpen,
+            onPress: () => {
+              setNextAptMinimized(true);
+              setCambiosOpen(open => !open);
+              setCambiosCardIdx(0);
+              Haptics.selectionAsync().catch(() => {});
+            },
+            onLongPress: () => {
+              const item = allPendientes[Math.min(cambiosCardIdx, allPendientes.length - 1)];
+              if (item?.kind !== "cambio") return;
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              startRelatedGoAction(item.g);
+            } },
+        ]} />
+      )}
 
       {/* BOTÓN LIMPIAR LANDING — movido a microórbita funcional dentro del orbital wrap */}
 
@@ -14021,92 +14371,18 @@ function HomeScreenContent() {
         cambiosCardIdxRef.current = safeIdx;
         cambiosCardTotalRef.current = total;
 
-        // ── ESTADO CERRADO — pastilla ──────────────────────────────────
-        if (!cambiosOpen) {
-          const pillSideStyle = proximaPillShowing
-            ? handedness === "right"
-              ? { right: PANEL_EDGE + PILL_MAX_W + 8 }
-              : { left:  PANEL_EDGE + PILL_MAX_W + 8 }
-            : handedness === "right"
-              ? { right: PANEL_EDGE }
-              : { left:  PANEL_EDGE };
-          // When Próxima is expanded, sit pill just above the próxima panel.
-          // QR handles its own offset independently — do NOT add _QR_SZ here.
-          const pillBottom = proximaExpanded
-            ? PROXIMA_BOTTOM + nextAptPanelH + Math.round(8 * uiScaleFactor)
-            : PROXIMA_BOTTOM;
-
-          return (
-            <View
-              key="pendientes-pill-wrap"
-              style={{ position: "absolute", ...pillSideStyle, bottom: contentBottom(pillBottom), zIndex: 7 }}
-            >
-              <TouchableOpacity
-                activeOpacity={0.75}
-                onPress={() => {
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  setCambiosOpen(true);
-                  setCambiosCardIdx(0);
-                  Haptics.selectionAsync().catch(() => {});
-                }}
-                onLongPress={() => {
-                  if (item.kind !== "cambio") return;
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                  startRelatedGoAction(item.g);
-                }}
-                delayLongPress={500}
-                style={{
-                  minWidth: 86,
-                  maxWidth: PILL_MAX_W,
-                  height: PILL_H,
-                  backgroundColor: "rgba(10,10,14,0.88)",
-                  borderWidth: 1.5,
-                  borderColor: `${ACCENT}55`,
-                  borderRadius: 12,
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  paddingHorizontal: 10,
-                  gap: 2,
-                  shadowColor: ACCENT,
-                  shadowOpacity: 0.3,
-                  shadowRadius: 8,
-                  shadowOffset: { width: 0, height: 0 },
-                  elevation: 5,
-                }}
-              >
-                <Text style={{ color: ACCENT, fontSize: 9, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.2 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>CAMBIOS</Text>
-                <Text style={{ color: "#ffffff", fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3, textAlign: "center" }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>PROPUESTOS</Text>
-              </TouchableOpacity>
-              {total > 1 && (
-                <View pointerEvents="none" style={{ position: "absolute", top: -7, right: -7, width: 17, height: 17, borderRadius: 9, backgroundColor: ACCENT, alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: "rgba(0,0,0,0.55)", elevation: 6 }}>
-                  <Text style={{ color: "#000000", fontSize: 9, fontFamily: "Inter_900Black", fontWeight: "900", lineHeight: 11 }}>{total}</Text>
-                </View>
-              )}
-            </View>
-          );
-        }
+        if (!cambiosOpen) return null;
 
         // ── ESTADO ABIERTO — panel con tarjeta + swipe ────────────────
         const BTN_H   = Math.round(Math.min(80, Math.max(56, 64 * uiScaleFactor)));
         const BTN_W   = uiScale === "grande" ? Math.round(BTN_H * 1.18) : Math.round(BTN_H * 1.28);
-        // Reuse Próxima's measured information width without moving its grid.
-        const PANEL_W = Math.min(
-          landingPanelWidth - landingPanelInsets.left - landingPanelInsets.right - 2 * PANEL_EDGE,
-          proximaExpanded && humanityObstacles.next
-            ? humanityObstacles.next.width
-            : 3 * BTN_W + 2 * Math.round(6 * uiScaleFactor) + Math.round(96 * uiScaleFactor),
-        );
-        const panelSideStyle = handedness === "right" ? { right: PANEL_EDGE } : { left: PANEL_EDGE };
-        // Panel bottom: sit just above Próxima pill (PILL_H=46 + 8px gap) when pill
-        // is showing, or above the full Próxima expanded panel, or at PROXIMA_BOTTOM.
-        const _PILL_H = 46;
-        const panelBottom = proximaExpanded
-          ? PROXIMA_BOTTOM + nextAptPanelH + Math.round(8 * uiScaleFactor)
-          : proximaPillShowing
-          ? PROXIMA_BOTTOM + _PILL_H + 8
-          : PROXIMA_BOTTOM;
-        const panelMaxHeight = Math.max(0, screen.height - panelBottom - insets.top - Math.round(12 * uiScaleFactor));
+        const PANEL_W = landingPanels.changes.width;
+        const panelSideStyle = { left: landingPanels.changes.x };
+        const panelBottom = landingFrame.virtual
+          ? landingFrame.baseline + landingFrame.height - landingPanels.changes.y - landingPanels.changes.height
+          : screen.height - landingPanels.changes.y - landingPanels.changes.height;
+        const changesCardSpace = landingAdaptivePanelSpace({ panel: landingPanels.changes, frame: landingFrame,
+          insets, titleBottom: titleBottomLocalY ?? 0, controls: landingHeaderControls });
 
         // Resolver datos de visualización según tipo
         let cardAccent   = ACCENT;
@@ -14124,7 +14400,8 @@ function HomeScreenContent() {
           cardAccent   = isSent ? ACCENT : BLUE;
           cardTitle    = g.contactName || g.intentLabel || "GO";
           cardSub      = g.intentLabel && g.intentLabel !== cardTitle ? g.intentLabel : (g.intentKey || "");
-          cardOrigDate = [cp?.originalDate || g.date, cp?.originalTime || g.time].filter(Boolean).join(" · ");
+          const current = landingCurrentEntry(g);
+          cardOrigDate = [current.date, current.time].filter(Boolean).join(" · ");
           cardNewDate  = [cp?.date, cp?.time].filter(Boolean).join(" · ");
         } else if (item.kind === "hold") {
           const b      = item.booking;
@@ -14151,15 +14428,40 @@ function HomeScreenContent() {
               ...panelSideStyle,
               width: PANEL_W,
               bottom: contentBottom(panelBottom),
-              // The shrinking scroll viewport contains overflow above Próxima;
-              // the header remains visible below the top safe-area margin.
-              maxHeight: landingFrame.virtual ? undefined : panelMaxHeight,
               zIndex: 6,
               gap: Math.round(4 * uiScaleFactor),
             }}
           >
             {/* Header — ordinal · tipo · puntos · flechas (mismo patrón que PRÓXIMA) */}
-            {(() => {
+
+
+            <LandingCardContents
+              adaptiveBody={{ ...changesCardSpace, frameVerticalInset: 3 }}
+              footer={item.kind === "cambio" && renderLandingOperations(item.g).content}
+              footerGap={Math.round(12 * uiScaleFactor)} overflowing={false} onHeight={() => {}}
+              contentContainerStyle={{ gap: Math.round(12 * uiScaleFactor) }}
+              headerGap={Math.round(4 * uiScaleFactor)}
+              bodyFrame={(body) => (
+              <View
+              testID="landing-information-frame"
+              style={{
+                flexShrink: 0,
+                minHeight: 0,
+                borderRadius: Math.round(12 * uiScaleFactor),
+                backgroundColor: "rgba(15,15,18,0.94)",
+                borderWidth: 1.5,
+                borderColor: cardAccent + "55",
+                shadowColor: cardAccent,
+                shadowOpacity: 0.22,
+                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 0 },
+                elevation: 3,
+              }}
+            >
+            {body}
+            </View>
+              )}
+              header={(() => {
               const _ordSuffix = item.kind === "hold" ? "ª" : "º";
               const _ordinal   = `${safeIdx + 1}${_ordSuffix}`;
               const _typeLabel = item.kind === "cambio"
@@ -14209,27 +14511,23 @@ function HomeScreenContent() {
                   ) : <View style={{ width: 14 }} />}
                 </View>
               );
-            })()}
-
+            })()}>
             {/* Tarjeta: swipe ← → para navegar */}
-            <View
-              style={{
-                flexShrink: 1,
-                borderRadius: Math.round(12 * uiScaleFactor),
-                backgroundColor: "rgba(15,15,18,0.94)",
-                borderWidth: 1.5,
-                borderColor: cardAccent + "55",
-                shadowColor: cardAccent,
-                shadowOpacity: 0.22,
-                shadowRadius: 8,
-                shadowOffset: { width: 0, height: 0 },
-                elevation: 3,
-                overflow: "hidden",
-              }}
+            <View onLayout={(e) => setPendingContentH(e.nativeEvent.layout.height)}
+              style={{ paddingHorizontal: Math.round(12 * uiScaleFactor), paddingVertical: Math.round(6 * uiScaleFactor), gap: Math.round(2 * uiScaleFactor) }}
             >
-            <LandingCardContents overflowing={landingFrame.virtual} onHeight={setPendingContentH}
-              contentContainerStyle={{ paddingHorizontal: Math.round(12 * uiScaleFactor), paddingVertical: Math.round(6 * uiScaleFactor), gap: Math.round(2 * uiScaleFactor) }}
-            >
+              <Pressable
+                testID="landing-proposal-card"
+                disabled={item.kind !== "cambio"}
+                accessibilityRole={item.kind === "cambio" ? "button" : undefined}
+                accessibilityLabel="Abrir la acción original en el Calendario"
+                onPress={() => {
+                  if (item.kind !== "cambio") return;
+                  const action = buildNextAptActions(landingCurrentEntry(item.g)).find(a => a.k === "change");
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                  if (action) action.fn();
+                }}
+                style={{ gap: Math.round(2 * uiScaleFactor) }}>
               {/* Tipo de pendiente */}
               {item.kind === "cambio" && (() => {
                 const _sentCount     = allPendientes.filter(p => p.kind === "cambio" && p.g.estado === "propuesta_pendiente").length;
@@ -14262,14 +14560,23 @@ function HomeScreenContent() {
               )}
 
               {/* Nombre */}
-              <Text numberOfLines={1} ellipsizeMode="tail"
+              <Text
                 style={{ color: "#f3f3f3", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "700" }}>
                 {cardTitle}
               </Text>
+              {/* Estado: CAMBIO enviado → solo mostrar "Esperando respuesta" */}
+              {item.kind === "cambio" && isSent && (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: Math.round(2 * uiScaleFactor), paddingVertical: Math.round(2 * uiScaleFactor) }}>
+                  <Feather name="clock" size={Math.round(11 * uiScaleFactor)} color={ACCENT} />
+                  <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>{t('biz_booking_awaiting')}</Text>
+                </View>
+              )}
+
+
 
               {/* Subtítulo / servicio */}
               {!!cardSub && cardSub !== cardTitle && (
-                <Text numberOfLines={1} ellipsizeMode="tail"
+                <Text
                   style={{ color: "#9a9a9a", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>
                   {cardSub}
                 </Text>
@@ -14279,7 +14586,7 @@ function HomeScreenContent() {
               {item.kind === "cambio" && (
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   {!!cardOrigDate && (
-                    <Text numberOfLines={1} style={{ color: "rgba(255,255,255,0.40)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "600", textDecorationLine: "line-through" }}>
+                    <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "600", textDecorationLine: "line-through" }}>
                       {cardOrigDate}
                     </Text>
                   )}
@@ -14287,7 +14594,7 @@ function HomeScreenContent() {
                     <Feather name="arrow-right" size={Math.round(10 * uiScaleFactor)} color={ACCENT} />
                   )}
                   {!!cardNewDate && (
-                    <Text numberOfLines={1} style={{ color: ACCENT, fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>
+                    <Text style={{ color: ACCENT, fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>
                       {cardNewDate}
                     </Text>
                   )}
@@ -14296,10 +14603,19 @@ function HomeScreenContent() {
 
               {/* HOLD: fecha/hora de la reserva */}
               {item.kind === "hold" && !!cardDate && (
-                <Text numberOfLines={1} style={{ color: BLUE, fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>
+                <Text style={{ color: BLUE, fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>
                   {cardDate}
                 </Text>
               )}
+
+              {item.kind === "cambio" && !!item.g.notes?.trim()
+                && item.g.notes.trim() !== cardTitle && item.g.notes.trim() !== cardSub && (
+                <Text testID="landing-proposal-title-text" style={{ color: "#f3f3f3", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "700" }}>{item.g.notes}</Text>
+              )}
+              {item.kind === "cambio" && !!item.g.changeProposal?.note && (
+                <Text testID="landing-proposal-note" style={{ color: "rgba(249,115,22,0.80)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>{item.g.changeProposal.note}</Text>
+              )}
+              </Pressable>
 
               {/* Botones: CAMBIO recibido → RECHAZAR | PROPONER | ACEPTAR */}
               {item.kind === "cambio" && !isSent && (
@@ -14344,14 +14660,6 @@ function HomeScreenContent() {
                 </View>
               )}
 
-              {/* Estado: CAMBIO enviado → solo mostrar "Esperando respuesta" */}
-              {item.kind === "cambio" && isSent && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: Math.round(2 * uiScaleFactor), paddingVertical: Math.round(2 * uiScaleFactor) }}>
-                  <Feather name="clock" size={Math.round(11 * uiScaleFactor)} color={ACCENT} />
-                  <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>Esperando respuesta</Text>
-                </View>
-              )}
-
               {/* Botones: HOLD → CONFIRMAR / RECHAZAR */}
               {item.kind === "hold" && (
                 <View style={{ flexDirection: "row", gap: Math.round(8 * uiScaleFactor), marginTop: Math.round(2 * uiScaleFactor) }}>
@@ -14385,8 +14693,10 @@ function HomeScreenContent() {
                   </TouchableOpacity>
                 </View>
               )}
-            </LandingCardContents>
             </View>
+
+
+            </LandingCardContents>
 
             {/* botón de cierre eliminado — lo gestiona el botón único flotante */}
           </View>
@@ -14400,153 +14710,15 @@ function HomeScreenContent() {
             • GO grande    → orbitWrapSize grande  → bottom más alto → botones suben
           Esto cumple: "los botones nacen desde la zona más cercana al GO hacia arriba".
           Sin overlay, sin creación activa. */}
-      {nextAppointment && !anyOverlayOpen && !isActivelyCreating && !nextAptMinimized && !rutasMode && (() => {
-        const total = nextAppointments.length;
+      {nextAppointment && !anyOverlayOpen && !isActivelyCreating && !cambiosOpen && !nextAptMinimized && !rutasMode && (() => {
+        const total = nextPanelAppointments.length;
         const safeIdx = Math.min(nextCardIdx, total - 1);
-        const activeApt = nextAppointments[safeIdx] ?? nextAppointments[0];
+        const activeApt = nextPanelAppointments[safeIdx] ?? nextPanelAppointments[0];
         const g = activeApt.g;
         const dt = activeApt.dt;
         const tint = readableOnDark(g.color || intent.color);
-        const hasPlace = !!(g.place && g.place.trim().length > 0);
-
-        const base = buildNextAptActions(g);
-        const aHere = base.find((a) => a.k === "here");
-        const aLate = base.find((a) => a.k === "late");
-        const aChange = base.find((a) => a.k === "change");
-
-        const aGo = {
-          k: "go",
-          label: t('go_nav'),
-          icon: "navigation" as keyof typeof Feather.glyphMap,
-          color: "#60a5fa",
-          disabled: !hasPlace,
-          fn: () => {
-            if (!hasPlace) return;
-            Linking.openURL(
-              `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(g.place)}`,
-            ).catch(() => showToast(t('toast_cannot_open_maps'), 'error'));
-          },
-        };
-
-        const callPhone  = normalizePhoneForWhatsApp(g.phone || "");
-        const hasPhone   = !!(g.phone && callPhone);
-        const waRaw      = g.whatsapp || g.phone || "";
-        const waPhone    = normalizePhoneForWhatsApp(waRaw);
-        const hasWhatsapp = !!waPhone;
-        const waMsg = [
-          t('whatsapp_intro'),
-          resolveIntentLabel(g) || "",
-          g.time ? t('at_time').replace('__TIME__', g.time) : "",
-        ].filter(Boolean).join(" ");
-        const aWA = hasWhatsapp
-          ? {
-              k: "wa-contact",
-              label: "WhatsApp",
-              icon: "message-circle" as keyof typeof Feather.glyphMap,
-              color: "#4ade80",
-              fn: () =>
-                Linking.openURL(
-                  `https://wa.me/${waPhone}?text=${encodeURIComponent(waMsg)}`,
-                ).catch(() => showToast(t('toast_wa_open_failed'), 'error')),
-            }
-          : undefined;
-        const aCall = hasPhone
-          ? {
-              k: "call-contact",
-              label: t('call'),
-              icon: "phone" as keyof typeof Feather.glyphMap,
-              color: "#4ade80",
-              fn: () =>
-                Linking.openURL(`tel:${callPhone}`).catch(() =>
-                  showToast(t('toast_call_failed'), 'error'),
-                ),
-            }
-          : undefined;
-
-        const actionGrid = landingActionGrid({ width: landingPanelWidth,
-          leftInset: landingPanelInsets.left, rightInset: landingPanelInsets.right,
-          scale: uiScaleFactor, large: uiScale === "grande",
-          columns: landingStackTransport ? 2 : hasWhatsapp || hasPhone ? 3 : 2,
-          transport: !landingStackTransport, transportWidth: uiScale === "grande" && !landingFrame.virtual ? 86 : 70 });
-        const BTN_H = actionGrid.height;
-        const BTN_W = actionGrid.buttonWidth;
-        const ACT_ICON = Math.round(16 * uiScaleFactor);
-        const ACT_FS   = actionGrid.compressed ? 12 : Math.round(12 * uiScaleFactor);
-        const ACT_PV   = Math.round(8  * uiScaleFactor);
-        const ACT_PH   = actionGrid.compressed ? 5 : Math.round(8 * uiScaleFactor);
-        const ACT_GAP  = Math.round(5  * uiScaleFactor);
-        const ACT_BR   = Math.round(12 * uiScaleFactor);
-        const ROW_GAP  = Math.round(6  * uiScaleFactor);
-
-        type ActBtnDef = {
-          k: string;
-          label: string;
-          icon: keyof typeof Feather.glyphMap;
-          color: string;
-          disabled?: boolean;
-          fn: () => void;
-        };
-        const renderActBtn = (a: ActBtnDef) => {
-          return (
-            <TouchableOpacity
-              key={a.k}
-              activeOpacity={a.disabled ? 1 : 0.82}
-              onPress={() => {
-                if (a.disabled) return;
-                Haptics.selectionAsync().catch(() => {});
-                a.fn();
-              }}
-              accessibilityLabel={a.label}
-              accessibilityState={{ disabled: !!a.disabled }}
-              hitSlop={4}
-              style={{
-                width: BTN_W,
-                height: BTN_H,
-                borderRadius: Math.round(14 * uiScaleFactor),
-                borderWidth: 1,
-                borderColor: `${a.color}50`,
-                overflow: "hidden",
-                shadowColor: a.color,
-                shadowOpacity: a.disabled ? 0 : 0.22,
-                shadowRadius: 9,
-                shadowOffset: { width: 0, height: 1 },
-                elevation: 3,
-                opacity: a.disabled ? 0.38 : 1,
-              }}
-            >
-              <LinearGradient
-                colors={["rgba(22,26,42,0.98)", "rgba(6,8,16,0.99)"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-                style={{
-                  flex: 1,
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: ACT_GAP,
-                  paddingVertical: ACT_PV,
-                  paddingHorizontal: ACT_PH,
-                }}
-              >
-                <Feather name={a.icon} size={ACT_ICON} color={`${a.color}CC`} />
-                <Text
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={actionGrid.compressed ? 0.92 : 0.65}
-                  style={{
-                    color: `${a.color}CC`,
-                    fontSize: ACT_FS,
-                    fontWeight: "700",
-                    letterSpacing: 0.2,
-                    textAlign: "center",
-                  }}
-                >
-                  {a.label}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          );
-        };
+        const operations = renderLandingOperations(g);
+        const aChange = operations.change;
 
         const dateParts: string[] = [];
         if (dt) dateParts.push(formatDayLetterSlashLang(dt, lang));
@@ -14567,28 +14739,14 @@ function HomeScreenContent() {
         // Diestro → derecha (right), zurdo → izquierda (left).
         // Se usa el inset del mismo lado donde se ancla el panel.
         const PANEL_EDGE = Math.max(18, (handedness === "right" ? landingPanelInsets.right : landingPanelInsets.left) + 18);
-        const panelSideStyle = handedness === "right"
-          ? { right: PANEL_EDGE }
-          : { left:  PANEL_EDGE };
-        // Cuadrícula dinámica: solo botones con datos reales (sin disabled fallback)
-        // Fila 1: [WA?] + Cambiar + Aquí  |  Fila 2: [Llamar?] + Tarde + Ir
-        const row1Btns = ([aWA, aChange, aHere] as (ActBtnDef | undefined)[]).filter((b): b is ActBtnDef => !!b);
-        const row2Btns = ([aCall, aLate, aGo]   as (ActBtnDef | undefined)[]).filter((b): b is ActBtnDef => !!b);
-        const actionRows = landingStackTransport
-          ? [...row1Btns, ...row2Btns].reduce<ActBtnDef[][]>((rows, button, index) => {
-              if (index % 2 === 0) rows.push([]); rows[rows.length - 1].push(button); return rows;
-            }, []) : [row1Btns, row2Btns];
-        const numGridCols = Math.max(...actionRows.map(row => row.length));
-        const PANEL_W = numGridCols * BTN_W + (numGridCols - 1) * ROW_GAP;
-        // The information card can use the unused space toward the opposite
-        // side without changing the action grid's width or anchor.
-        const INFO_W = Math.min(
-          landingPanelWidth - landingPanelInsets.left - landingPanelInsets.right - Math.round(24 * uiScaleFactor),
-          landingPanelWidth - Math.max(18, (handedness === "right" ? landingPanelInsets.right : landingPanelInsets.left) + 18) - 4,
-          PANEL_W + Math.round(96 * uiScaleFactor),
-        );
-        const PANEL_ACTION_GAP = Math.round(12 * uiScaleFactor)
-          + (landingFrame.virtual && !landingStackTransport ? Math.max(0, transportPanelH - 2 * BTN_H - ROW_GAP) : 0);
+        const panelSideStyle = { left: landingPanels.next.x };
+        const PANEL_W = landingPanels.next.width;
+        const INFO_W = PANEL_W;
+        const nextCardSpace = landingAdaptivePanelSpace({ panel: landingPanels.next, frame: landingFrame,
+          insets, titleBottom: titleBottomLocalY ?? 0, controls: landingHeaderControls });
+        const nextCardAvailableHeight = nextCardSpace.availableHeight;
+        const headerObstacles = nextCardSpace.headerObstacles;
+        const PANEL_ACTION_GAP = Math.round(12 * uiScaleFactor);
         // PROXIMA_V_EXTRA is frozen for all sizes.
         // User confirmed: "PANEL SUPERIOR → congelarlo, está perfecto".
         const PROXIMA_V_EXTRA = 0;
@@ -14616,132 +14774,37 @@ function HomeScreenContent() {
               position: "absolute",
               ...panelSideStyle,
               width: PANEL_W,
-              bottom: contentBottom(bottomReserved + orbitWrapSize - 2 + PROXIMA_V_EXTRA),
+              bottom: contentBottom(landingFrame.virtual
+                ? landingFrame.baseline + landingFrame.height - landingPanels.next.y - landingPanels.next.height
+                : screen.height - landingPanels.next.y - landingPanels.next.height),
               zIndex: 5,
             }}
           >
-            <View style={{ gap: PANEL_ACTION_GAP }}>
-
-
-              {/* ── INDICADOR DE POSICIÓN + TARJETA — PanResponder unificado ──
-                  Todo el bloque (indicador + tarjeta) forma una sola zona táctil.
-                  onMoveShouldSetPanResponder captura el gesto en cuanto el dedo
-                  se mueve >8 px en horizontal, sin importar sobre qué elemento
-                  hijo empieza el toque. ── */}
+            <LandingCardContents
+              adaptiveBody={{ availableHeight: nextCardAvailableHeight, frameVerticalInset: Math.round(10 * uiScaleFactor) + Math.round(14 * uiScaleFactor) + 3, width: PANEL_W, headerObstacles }}
+              footer={operations.content}
+              footerGap={PANEL_ACTION_GAP} overflowing={false} onHeight={() => {}}
+              contentContainerStyle={{ gap: PANEL_ACTION_GAP }}
+              bodyFrame={(body) => (
               <Animated.View
                 {...nextCardPanRef.panHandlers}
-                style={{ transform: [{ translateX: nextCardSlideAnim }] }}
+                style={{ flexShrink: 0, minHeight: 0, transform: [{ translateX: nextCardSlideAnim }] }}
               >
-              {/* ── INDICADOR DE POSICIÓN — flechas dinámicas + puntos ── */}
-              <View
-                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 9, paddingHorizontal: 2 }}
-              >
-                {/* Centro: ordinal + separador + etiqueta + puntos */}
-                <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, minWidth: 0 }}>
-                  <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "700", letterSpacing: 0.5, flexShrink: 0 }}>
-                    {ordinal}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.30)", fontSize: 11, fontWeight: "600", flexShrink: 0 }}>·</Text>
-                  <Text
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.75}
-                    style={{ color: tint, fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.7, flexShrink: 1, minWidth: 0 }}
-                  >
-                    {cardLabel}
-                  </Text>
-                  {total > 1 && (
-                    <View style={{ flexDirection: "row", gap: 4, alignItems: "center", flexShrink: 0 }}>
-                      <Text style={{ color: "rgba(255,255,255,0.22)", fontSize: 11, fontWeight: "600" }}>·</Text>
-                      {nextAppointments.map((_, i) => (
-                        <View
-                          key={i}
-                          style={{
-                            width: i === safeIdx ? 8 : 5,
-                            height: i === safeIdx ? 8 : 5,
-                            borderRadius: 4,
-                            backgroundColor: i === safeIdx ? tint : "rgba(255,255,255,0.25)",
-                          }}
-                        />
-                      ))}
-                    </View>
-                  )}
-                </View>
 
-                {/* ── INDICADOR AMBIENTAL HORIZONTAL — mismo estilo que el fantasma
-                    vertical del Landing. Tres chevrones en cascada (el más opaco
-                    apunta la dirección), flotando 5 px en la dirección disponible.
-                    pointerEvents none → no interfiere con tap/swipe. ── */}
 
-                {/* Cascada hacia la DERECHA */}
-                {total > 1 && safeIdx < total - 1 && (
-                  <Animated.View
-                    pointerEvents="none"
-                    style={{
-                      position: "absolute",
-                      right: 0,
-                      top: 0, bottom: 0,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      opacity: nextSwipeHintAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0, 1],
-                      }),
-                      transform: [{
-                        translateX: nextSwipeHintAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [0, 5],
-                        }),
-                      }],
-                    }}
-                  >
-                    <Feather name="chevron-right" size={11} color={`${tint}38`} style={{ marginRight: -5 }} />
-                    <Feather name="chevron-right" size={13} color={`${tint}72`} style={{ marginRight: -5 }} />
-                    <Feather name="chevron-right" size={15} color={tint} />
-                  </Animated.View>
-                )}
-
-                {/* Cascada hacia la IZQUIERDA */}
-                {total > 1 && safeIdx > 0 && (
-                  <Animated.View
-                    pointerEvents="none"
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      top: 0, bottom: 0,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      opacity: nextSwipeHintAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: [0, 1],
-                      }),
-                      transform: [{
-                        translateX: nextSwipeHintAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [0, -5],
-                        }),
-                      }],
-                    }}
-                  >
-                    <Feather name="chevron-left" size={15} color={tint} style={{ marginRight: -5 }} />
-                    <Feather name="chevron-left" size={13} color={`${tint}72`} style={{ marginRight: -5 }} />
-                    <Feather name="chevron-left" size={11} color={`${tint}38`} />
-                  </Animated.View>
-                )}
-              </View>
 
               {/* Caja info — pulsación larga para opciones avanzadas; swipe gestionado por PanResponder superior */}
               <View
                 style={{
                   position: "relative",
+                  flexShrink: 0,
+                  minHeight: 0,
                   width: INFO_W,
                   alignSelf: handedness === "right" ? "flex-end" : "flex-start",
                 }}
               >
               <Pressable
+                testID="landing-information-frame"
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                   if (aChange) aChange.fn();
@@ -14753,6 +14816,8 @@ function HomeScreenContent() {
                 delayLongPress={500}
                 accessibilityLabel="Tarjeta próxima cita — mantén para opciones avanzadas"
                 style={({ pressed }) => ({
+                  flexShrink: 0,
+                  minHeight: 0,
                   paddingHorizontal: Math.round(12 * uiScaleFactor),
                   paddingVertical: Math.round(14 * uiScaleFactor),
                   paddingTop: Math.round(10 * uiScaleFactor),
@@ -14768,85 +14833,7 @@ function HomeScreenContent() {
                   opacity: pressed ? 0.82 : 1,
                 })}
               >
-                <View style={{ gap: 3 }}>
-                  {/* Contador de tiempo — solo si tiene hora y es hoy o inminente */}
-                  {(() => {
-                    if (!g.time) return null;
-                    const mLeft = Math.round((dt.getTime() - receptionNowMs) / 60_000);
-                    if (mLeft < -90 || mLeft > 480) return null; // solo dentro de 8 horas
-                    const isToday = g.dateISO === formatISODate(getToday());
-                    if (!isToday && mLeft > 120) return null;
-                    const isRecep = isReceptionActivity(g.intentKey, g.intentLabel);
-                    const { label } = formatCountdownLabel(mLeft, mLeft > 10 ? "en-camino" : mLeft >= 0 ? "proximo" : "retrasado");
-                    const chipColor = getReceptionStatusColor(mLeft > 10 ? "en-camino" : mLeft >= 0 ? "proximo" : "retrasado");
-                    return (
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 2 }}>
-                        <View style={{
-                          flexDirection: "row", alignItems: "center", gap: 4,
-                          paddingHorizontal: Math.round(7 * uiScaleFactor),
-                          paddingVertical: Math.round(3 * uiScaleFactor),
-                          borderRadius: 8,
-                          backgroundColor: chipColor + "1a",
-                          borderWidth: 1,
-                          borderColor: chipColor + "55",
-                        }}>
-                          <Feather name={isRecep ? "package" : "clock"} size={Math.round(10 * uiScaleFactor)} color={chipColor} />
-                          <Text style={{ color: chipColor, fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700", letterSpacing: 0.3 }}>
-                            {label}
-                          </Text>
-                        </View>
-                      </View>
-                    );
-                  })()}
-                  {/* Línea 1: QUIÉN — contacto completo, nunca truncado */}
-                  {!!displayContact(g.contactName, g.phone) && (
-                    <Text
-                      numberOfLines={2}
-                      ellipsizeMode="clip"
-                      style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}
-                    >
-                      {displayContact(g.contactName, g.phone)}
-                    </Text>
-                  )}
-                  {/* Línea 2: CUÁNDO — fecha + hora + chips (visibilidad) */}
-                  {!!dateStr && (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <Text
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.65}
-                        style={{ color: "#cfcfcf", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "600", flex: 1 }}
-                      >
-                        {dateStr}
-                      </Text>
-                      {g.visibility && g.visibility !== 'publico' && (() => {
-                        const VM: Record<string, { icon: React.ComponentProps<typeof Feather>["name"]; color: string }> = {
-                          clientes:    { icon: "users",  color: "#34d399" },
-                          proveedores: { icon: "truck",  color: "#a78bfa" },
-                          interno:     { icon: "shield", color: "#fbbf24" },
-                          privado:     { icon: "lock",   color: "#f87171" },
-                        };
-                        const vm = VM[g.visibility];
-                        if (!vm) return null;
-                        return (
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 2, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5, backgroundColor: vm.color + "18", borderWidth: 1, borderColor: vm.color + "40" }}>
-                            <Feather name={vm.icon} size={9} color={vm.color} />
-                          </View>
-                        );
-                      })()}
-                    </View>
-                  )}
-                  {/* Línea 3: DÓNDE — ubicación */}
-                  {!!g.place && (
-                    <Text
-                      numberOfLines={1}
-                      ellipsizeMode="clip"
-                      style={{ color: "#9a9a9a", fontSize: Math.round(12 * uiScaleFactor), fontWeight: "500" }}
-                    >
-                      {g.place}
-                    </Text>
-                  )}
-                </View>
+                {body}
               </Pressable>
 
               {/* ── PAPELERA — doble confirmación ─────────────────────────────────
@@ -14936,6 +14923,194 @@ function HomeScreenContent() {
               })()}
               </View>
               </Animated.View>
+              )}
+              header={<Animated.View
+                {...nextCardPanRef.panHandlers}
+                style={{ transform: [{ translateX: nextCardSlideAnim }] }}
+              >
+              {/* ── INDICADOR DE POSICIÓN — flechas dinámicas + puntos ── */}
+              <View
+                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 9, paddingHorizontal: 2 }}
+              >
+                {/* Centro: ordinal + separador + etiqueta + puntos */}
+                <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, minWidth: 0 }}>
+                  <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "700", letterSpacing: 0.5, flexShrink: 0 }}>
+                    {ordinal}
+                  </Text>
+                  <Text style={{ color: "rgba(255,255,255,0.30)", fontSize: 11, fontWeight: "600", flexShrink: 0 }}>·</Text>
+                  <Text
+                    numberOfLines={1}
+                    ellipsizeMode="tail"
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.75}
+                    style={{ color: tint, fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.7, flexShrink: 1, minWidth: 0 }}
+                  >
+                    {cardLabel}
+                  </Text>
+                  {total > 1 && (
+                    <View style={{ flexDirection: "row", gap: 4, alignItems: "center", flexShrink: 0 }}>
+                      <Text style={{ color: "rgba(255,255,255,0.22)", fontSize: 11, fontWeight: "600" }}>·</Text>
+                      {nextPanelAppointments.map((_, i) => (
+                        <View
+                          key={i}
+                          style={{
+                            width: i === safeIdx ? 8 : 5,
+                            height: i === safeIdx ? 8 : 5,
+                            borderRadius: 4,
+                            backgroundColor: i === safeIdx ? tint : "rgba(255,255,255,0.25)",
+                          }}
+                        />
+                      ))}
+                    </View>
+                  )}
+                </View>
+
+                {/* ── INDICADOR AMBIENTAL HORIZONTAL — mismo estilo que el fantasma
+                    vertical del Landing. Tres chevrones en cascada (el más opaco
+                    apunta la dirección), flotando 5 px en la dirección disponible.
+                    pointerEvents none → no interfiere con tap/swipe. ── */}
+
+                {/* Cascada hacia la DERECHA */}
+                {total > 1 && safeIdx < total - 1 && (
+                  <Animated.View
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      right: 0,
+                      top: 0, bottom: 0,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      opacity: nextSwipeHintAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, 1],
+                      }),
+                      transform: [{
+                        translateX: nextSwipeHintAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0, 5],
+                        }),
+                      }],
+                    }}
+                  >
+                    <Feather name="chevron-right" size={11} color={`${tint}38`} style={{ marginRight: -5 }} />
+                    <Feather name="chevron-right" size={13} color={`${tint}72`} style={{ marginRight: -5 }} />
+                    <Feather name="chevron-right" size={15} color={tint} />
+                  </Animated.View>
+                )}
+
+                {/* Cascada hacia la IZQUIERDA */}
+                {total > 1 && safeIdx > 0 && (
+                  <Animated.View
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: 0, bottom: 0,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      opacity: nextSwipeHintAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, 1],
+                      }),
+                      transform: [{
+                        translateX: nextSwipeHintAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0, -5],
+                        }),
+                      }],
+                    }}
+                  >
+                    <Feather name="chevron-left" size={15} color={tint} style={{ marginRight: -5 }} />
+                    <Feather name="chevron-left" size={13} color={`${tint}72`} style={{ marginRight: -5 }} />
+                    <Feather name="chevron-left" size={11} color={`${tint}38`} />
+                  </Animated.View>
+                )}
+              </View>
+              </Animated.View>}>
+
+
+              {/* Cabecera fija y tarjeta reutilizan el mismo gesto horizontal. */}
+              <View style={{ gap: 3 }}>
+                  {/* Contador de tiempo — solo si tiene hora y es hoy o inminente */}
+                  {(() => {
+                    if (!g.time) return null;
+                    const mLeft = Math.round((dt.getTime() - receptionNowMs) / 60_000);
+                    if (mLeft < -90 || mLeft > 480) return null; // solo dentro de 8 horas
+                    const isToday = g.dateISO === formatISODate(getToday());
+                    if (!isToday && mLeft > 120) return null;
+                    const isRecep = isReceptionActivity(g.intentKey, g.intentLabel);
+                    const { label } = formatCountdownLabel(mLeft, mLeft > 10 ? "en-camino" : mLeft >= 0 ? "proximo" : "retrasado");
+                    const chipColor = getReceptionStatusColor(mLeft > 10 ? "en-camino" : mLeft >= 0 ? "proximo" : "retrasado");
+                    return (
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 5, marginBottom: 2 }}>
+                        <View style={{
+                          flexDirection: "row", alignItems: "center", gap: 4,
+                          paddingHorizontal: Math.round(7 * uiScaleFactor),
+                          paddingVertical: Math.round(3 * uiScaleFactor),
+                          borderRadius: 8,
+                          backgroundColor: chipColor + "1a",
+                          borderWidth: 1,
+                          borderColor: chipColor + "55",
+                        }}>
+                          <Feather name={isRecep ? "package" : "clock"} size={Math.round(10 * uiScaleFactor)} color={chipColor} />
+                          <Text style={{ color: chipColor, fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700", letterSpacing: 0.3 }}>
+                            {label}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })()}
+                  {(g.type === "TAREA" || g.type === "TAREA_INTERNA") && !!g.notes?.trim()
+                    && g.notes.trim() !== displayContact(g.contactName, g.phone) && (
+                    <Text testID="landing-task-description" style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}>{g.notes}</Text>
+                  )}
+                  {/* Línea 1: QUIÉN — contacto completo, nunca truncado */}
+                  {!!displayContact(g.contactName, g.phone) && (
+                    <Text
+                      style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}
+                    >
+                      {displayContact(g.contactName, g.phone)}
+                    </Text>
+                  )}
+                  {/* Línea 2: CUÁNDO — fecha + hora + chips (visibilidad) */}
+                  {!!dateStr && (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Text
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.65}
+                        style={{ color: "#cfcfcf", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "600", flex: 1 }}
+                      >
+                        {dateStr}
+                      </Text>
+                      {g.visibility && g.visibility !== 'publico' && (() => {
+                        const VM: Record<string, { icon: React.ComponentProps<typeof Feather>["name"]; color: string }> = {
+                          clientes:    { icon: "users",  color: "#34d399" },
+                          proveedores: { icon: "truck",  color: "#a78bfa" },
+                          interno:     { icon: "shield", color: "#fbbf24" },
+                          privado:     { icon: "lock",   color: "#f87171" },
+                        };
+                        const vm = VM[g.visibility];
+                        if (!vm) return null;
+                        return (
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 2, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5, backgroundColor: vm.color + "18", borderWidth: 1, borderColor: vm.color + "40" }}>
+                            <Feather name={vm.icon} size={9} color={vm.color} />
+                          </View>
+                        );
+                      })()}
+                    </View>
+                  )}
+                  {/* Línea 3: DÓNDE — ubicación */}
+                  {!!g.place && (
+                    <Text
+                      style={{ color: "#9a9a9a", fontSize: Math.round(12 * uiScaleFactor), fontWeight: "500" }}
+                    >
+                      {g.place}
+                    </Text>
+                  )}
+                </View>
 
               {/* Botones de acción — cuadrícula dinámica (2 o 3 cols)
                   Comm (verde, opcional): WA | Llamar — solo si hay teléfono real
@@ -14943,219 +15118,13 @@ function HomeScreenContent() {
                   Ubicación (azul):       Aquí | Ir        — siempre presentes
                   Si no hay comm → 2 cols; si hay alguno → 3 cols. Sin botones
                   disabled ni translúcidos: ausencia preferida sobre apagado. */}
-              <View style={{ gap: ROW_GAP, paddingBottom: landingFrame.virtual && landingStackTransport ? transportPanelH + 8 : 0 }}>
-                {actionRows.map((row, index) => <View key={index} style={{ flexDirection: "row", gap: ROW_GAP }}>
-                  {row.map((btn) => renderActBtn(btn))}
-                </View>)}
-              </View>
-            </View>
+
+            </LandingCardContents>
 
             {/* botón cerrar Landing eliminado */}
           </View>
         );
       })()}
-
-      {/* ── TRANSPORTE — tira compacta lateral izquierda ─────────────────
-          Solo visible cuando el panel está abierto (!nextAptMinimized). */}
-      {nextAppointment && !anyOverlayOpen && !isActivelyCreating && !nextAptMinimized && !rutasMode && kbHeight === 0 && (
-        <View
-          onLayout={(e) => {
-            setTransportPanelH(e.nativeEvent.layout.height);
-            if (!landingFrame.virtual) measureHumanityObstacle("transport", e.nativeEvent.layout);
-          }}
-          style={(() => {
-            // 4 buttons (paddingVertical:6 × 2 + ~22 content) + 3 gaps of 5
-            const stripH = transportPanelH || 4 * 34 + 3 * 5;
-
-            // ── TAXI PANEL — full freedom at bottom ──────────────────────────
-            // The old landing bar / bottom safe zone NO LONGER EXISTS.
-            // The panel can now sit all the way down at the phone's native
-            // safe-area bottom (paddingBottom) — only the physical home
-            // indicator / gesture bar is the floor.
-            //
-            // Horizontal guard: settings (157.5°) and MAS (202.5°) satellites
-            // still demand clearance on the right side.
-            const _SAT_COS = Math.cos(157.5 * Math.PI / 180); // ≈ -0.9239
-            const _satLeft =
-              screen.width - dockRight - systemBoundingRadius
-              + _SAT_COS * microR - microSz / 2;
-
-            // Panel left anchor.
-            // Compacto: centrar el panel en el punto medio entre el borde
-            // izquierdo de la pantalla y el borde izquierdo del satélite
-            // HERRAMIENTAS (≈129 px en iPhone 14), para que quede el mismo
-            // espacio libre a ambos lados del módulo de transporte.
-            const _compactoW = Math.round(screen.width * 0.24);
-            const tLeft = landingFrame.virtual ? 4 : uiScale === "compacto"
-              ? Math.max(insets.left, Math.round(_satLeft / 2 - _compactoW / 2))
-              : Math.max(4, insets.left + 4);
-            const naturalMaxW = uiScale === "grande"
-              ? Math.round(screen.width * 0.38)
-              : uiScale === "estandar"
-              ? Math.round(screen.width * 0.29)
-              : Math.round(screen.width * 0.24);
-            // Estandar: reduced clearance (3 px) to use all available space.
-            const _satGap = uiScale === "grande" ? 0 : uiScale === "estandar" ? 3 : 7;
-            const constrainedW = Math.floor(_satLeft - tLeft - _satGap);
-            // Grande: panel vive ~157 px por encima del satélite → sin solapamiento visual.
-            // Se fuerza un ancho mínimo de 86 px (mismo que estandar) para que Uber / T.pub
-            // sean legibles y el bloque tenga la misma respiración visual que el tamaño mediano.
-            const taxiW = landingFrame.virtual ? 70 : uiScale === "grande"
-              ? Math.min(naturalMaxW, Math.max(86, constrainedW))
-              : Math.min(naturalMaxW, Math.max(70, constrainedW));
-
-            // NEW bottom target: the panel's bottom edge sits at
-            //   paddingBottom + 4  (native safe-area + 4 px air).
-            // We compute the raise needed to hit that exact Y.
-            //
-            //   panelTop = screen.height - (paddingBottom + 4) - stripH
-            //   currentCentreTop = screen.height - bottomReserved - orbitWrapSize/2 - stripH/2 + 8
-            //   taxiRaise = currentCentreTop - panelTop
-            //             = bottomReserved + orbitWrapSize/2 - stripH/2 + 8 - (paddingBottom + 4 + stripH)
-            //             = bottomReserved - paddingBottom + orbitWrapSize/2 - 1.5*stripH + 4
-            //
-            // For mediano (orbitWrapSize ≈ 312, stripH ≈ 151, bottomReserved ≈ paddingBottom + 16):
-            //   taxiRaise ≈ 16 + 156 - 226 + 4 ≈ -50  (negative = panel drops)
-            //
-            // We also keep the old satellite-overlap guard — if the panel would
-            // collide with settings/MAS, we raise it just enough to clear them.
-            const _dock = insets.bottom + SYSTEM_MARGIN_Y;
-            const _SAT_SIN = Math.sin(157.5 * Math.PI / 180); // ≈  0.3827
-            const _satTopFromBottom =
-              _dock + orbitWrapSize / 2 - _SAT_SIN * microR + microSz / 2;
-
-            // Per-size bottom target (native safe-area + tiny air):
-            //   compacto: 2 px above native edge (tight)
-            //   mediano:  4 px above native edge
-            //   grande:   raised to align with top action panel (design choice)
-            const _nativeAir =
-              uiScale === "compacto" ? 2
-              : uiScale === "grande"  ? 100 // grande override below
-              : 4;
-
-            // Target top of panel from screen top:
-            const _targetTop = screen.height - (paddingBottom + _nativeAir) - stripH;
-            // Current top formula (centred around GO nucleus, then shifted by raise):
-            const _centreTop = screen.height - bottomReserved - orbitWrapSize / 2 - stripH / 2 + 8;
-            const _raiseFromBottom = Math.round(_centreTop - _targetTop);
-
-            const defaultRaise =
-              uiScale === "grande"  ? 100
-              : _raiseFromBottom;
-
-            // panelTopFromBottom at a given raise:
-            //   = bottomReserved + orbitWrapSize/2 - stripH/2 - 8 + raise
-            const panelTopBase =
-              bottomReserved + orbitWrapSize / 2 - stripH / 2 - 8;
-
-            // Satellite overlap guard: if panel right edge enters the satellite
-            // zone, raise it so panel top clears satellite top by 8 px.
-            const panelRight = tLeft + taxiW;
-            const hasHorizOverlap = panelRight > _satLeft - 6;
-            const requiredRaise = hasHorizOverlap
-              ? Math.ceil(_satTopFromBottom + 8 - panelTopBase)
-              : defaultRaise;
-            // Estandar: alinear el TOP del panel con el TOP del botón "..."
-            // El botón "..." (MAS) está a 202.5° → sin(202.5°) ≈ -0.3827
-            // (negativo = por ENCIMA del centro de la órbita en pantalla).
-            //   my_MAS = cy + sin(202.5°)*microR - microSz/2   (dentro del container)
-            //   masTopFromBottom = _dock + orbitWrapSize/2 - sin(202.5°)*microR + microSz/2
-            //   taxiRaise = masTopFromBottom - bottomReserved - orbitWrapSize/2 - stripH/2 + 8
-            const _MAS_SIN = Math.sin(202.5 * Math.PI / 180); // ≈ -0.3827
-            const _masTopFromBottom =
-              _dock + orbitWrapSize / 2 - _MAS_SIN * microR + microSz / 2;
-            const _satAlignRaise = Math.round(
-              _masTopFromBottom - bottomReserved - orbitWrapSize / 2 - stripH / 2 + 8,
-            );
-            // Grande: alinear el borde inferior del panel transporte con el borde
-            // inferior de los botones de acción del panel PRÓXIMA (WhatsApp/Llamar).
-            // PROXIMA bottom = bottomReserved + orbitWrapSize - 2
-            // Transport bottom = bottomReserved + orbitWrapSize/2 - stripH/2 - 8 + taxiRaise
-            // Igualando: taxiRaise = orbitWrapSize/2 + stripH/2 + 6
-            const _grandeTaxiRaise = Math.round(orbitWrapSize / 2 + stripH / 2 + 3);
-            const taxiRaise = uiScale === "grande"   ? _grandeTaxiRaise
-              : uiScale === "estandar" ? _satAlignRaise - 29
-              : defaultRaise;
-
-            const top =
-              screen.height - bottomReserved - orbitWrapSize / 2 - stripH / 2 + 8 - taxiRaise;
-
-            return {
-              position: "absolute" as const,
-              ...(handedness === "right" ? { left: tLeft } : { right: tLeft }),
-              ...(landingFrame.virtual ? { bottom: 0 } : { top }),
-              zIndex: 7,
-              maxWidth: landingFrame.virtual && landingStackTransport ? undefined : taxiW,
-              width: landingFrame.virtual && landingStackTransport ? landingPanelWidth - 36 : undefined,
-              flexDirection: landingFrame.virtual && landingStackTransport ? "row" as const : "column" as const,
-              flexWrap: "wrap" as const,
-              gap: 5,
-            };
-          })()}
-        >
-          {(
-            [
-              { label: "Taxi",  icon: "truck"      as keyof typeof Feather.glyphMap, accent: "#fbbf24", toast: t('toast_taxi_looking')    },
-              { label: "Uber",  icon: "navigation" as keyof typeof Feather.glyphMap, accent: "#e2e8f0", url:   "https://m.uber.com",  raise: 1 },
-              { label: "Bolt",  icon: "zap"        as keyof typeof Feather.glyphMap, accent: "#4ade80", url:   "https://bolt.eu"    },
-              { label: "T.pub", icon: "map"        as keyof typeof Feather.glyphMap, accent: "#60a5fa", toast: t('toast_routes_showing') },
-            ] as { label: string; icon: keyof typeof Feather.glyphMap; accent: string; url?: string; toast?: string; raise?: number }[]
-          ).map((op) => (
-            <TouchableOpacity
-              key={op.label}
-              activeOpacity={0.65}
-              onPress={() => {
-                if (op.url) {
-                  Linking.openURL(op.url).catch(() => showToast(t('toast_link_error'), "error"));
-                } else if (op.toast) {
-                  showToast(op.toast);
-                }
-              }}
-              style={{
-                width: landingFrame.virtual && landingStackTransport ? (landingPanelWidth - 41) / 2 : undefined,
-                marginTop: op.raise ?? 0,
-                borderRadius: 12,
-                borderWidth: 1,
-                borderColor: `${op.accent}38`,
-                overflow: "hidden",
-                shadowColor: op.accent,
-                shadowOpacity: 0.18,
-                shadowRadius: 7,
-                shadowOffset: { width: 0, height: 1 },
-                elevation: 3,
-              }}
-            >
-              <LinearGradient
-                colors={["rgba(22,26,42,0.98)", "rgba(6,8,16,0.99)"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 5,
-                  paddingHorizontal: 8,
-                  paddingVertical: 6,
-                  minHeight: landingFrame.virtual ? 44 : undefined,
-                  justifyContent: "center",
-                }}
-              >
-                <Feather name={op.icon} size={11} color={`${op.accent}CC`} />
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    color: "rgba(203,213,225,0.82)",
-                    fontSize: 11,
-                    fontWeight: "600",
-                    flexShrink: 1,
-                  }}
-                >
-                  {op.label}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
 
       {/* ── LANDING HINTS ─────────────────────────────────────────────────────
           REGLA: los hints viven DENTRO del tipo de usuario. Nunca se mezclan.
@@ -15163,7 +15132,8 @@ function HomeScreenContent() {
           • EMPRESA no configurada → "Configura tu empresa"
           • EMPRESA configurada → "Añade servicios" / "Gestiona reservas"
           • Cualquier panel expandido → workGuideHideAnim→0 (fade total)   */}
-      <Animated.View
+      {!anyOperationalPanelOpen && (
+      <Animated.View testID="landing-general-help"
         onLayout={(e) => setLandingHelpH(e.nativeEvent.layout.height)}
         pointerEvents={anyOperationalPanelOpen ? "none" : "box-none"}
         style={{
@@ -15289,6 +15259,7 @@ function HomeScreenContent() {
           </View>
         ) : null}
       </Animated.View>
+      )}
 
       </LandingContentViewport>
 
@@ -15305,52 +15276,8 @@ function HomeScreenContent() {
         const QR_EDGE_OPP = Math.max(18, (handedness === "right" ? insets.left : insets.right) + 18);
         const qrSide = handedness === "right" ? { right: QR_EDGE } : { left: QR_EDGE };
         const BTN_SZ = Math.round(32 * uiScaleFactor);
-        const baseBottom = bottomReserved + orbitWrapSize + Math.round(14 * uiScaleFactor);
-        const proximaShowing = nextAppointment !== null && !nextAptMinimized && nextAptPanelH > 0;
-        const cambiosExpanded = cambiosOpen && allPendientes.length > 0 && !rutasMode && pendingPanelH > 0;
-        const _pendientesPillVisible = !cambiosExpanded && allPendientes.length > 0 && !cambiosOpen && !rutasMode;
-        const _pendientesPillTop = bottomReserved + orbitWrapSize - 2 + nextAptPanelH + Math.round(10 * uiScaleFactor) + BTN_SZ + 8 + 46;
-        const _cambiosPanelOpen = cambiosOpen && allPendientes.length > 0 && !rutasMode;
-        const _pendientesBaseOffset = _cambiosPanelOpen
-          ? (proximaShowing ? nextAptPanelH + 8 : nextAptMinimized ? 46 + 8 : 0)
-          : 0;
-        // Use the actual measured height — no 280 clamp that sent QR too high
-        const _pendientesH = _cambiosPanelOpen ? pendingPanelH : 0;
-
-        // Case: both cambios + próxima open → QR moves to opposite side to stay visible
-        const _bothOpen = _cambiosPanelOpen && proximaShowing;
-
-        const abovePanelBottom = _cambiosPanelOpen && _pendientesH > 0
-          // Pendientes open + measured: QR sits 14px above actual panel top
-          ? bottomReserved + orbitWrapSize - 2 + _pendientesBaseOffset + _pendientesH + 14
-          : _cambiosPanelOpen
-          // Not yet measured: stay just above the base offset (will settle on next layout)
-          ? bottomReserved + orbitWrapSize - 2 + _pendientesBaseOffset + 14
-          : _pendientesPillVisible
-          ? _pendientesPillTop + 8
-          : bottomReserved + orbitWrapSize - 2 + nextAptPanelH + Math.round(10 * uiScaleFactor);
-
-        const abovePastillaBottom = bottomReserved + orbitWrapSize - 2 + 46 + Math.round(8 * uiScaleFactor);
-
-        let btnBottom: number;
-        let resolvedSide: { right: number } | { left: number };
-
-        if (_bothOpen) {
-          // Case 2: cambios + próxima both open → opposite side, beside the próxima panel
-          resolvedSide = handedness === "right"
-            ? { left: QR_EDGE_OPP }
-            : { right: QR_EDGE_OPP };
-          // Position QR at ~35% height of próxima panel from its bottom anchor
-          const proximaNearMid = bottomReserved + orbitWrapSize - 2 + Math.round(nextAptPanelH * 0.35);
-          btnBottom = Math.max(baseBottom, proximaNearMid);
-        } else {
-          resolvedSide = qrSide;
-          btnBottom = (proximaShowing || _cambiosPanelOpen)
-            ? abovePanelBottom
-            : (nextAppointment !== null && nextAptMinimized) || (allPendientes.length > 0 && !cambiosOpen && !rutasMode)
-            ? abovePastillaBottom
-            : baseBottom;
-        }
+        let btnBottom = screen.height - landingSafeTop - BTN_SZ;
+        let resolvedSide: { right: number } | { left: number } = qrSide;
 
         if (landingFrame.virtual) {
           resolvedSide = { left: handedness === "right"
@@ -16920,7 +16847,23 @@ function HomeScreenContent() {
           {/* INTENT ORBIT — PremiumOrbitBtn with spring press scale
               TOQUE CORTO  → selecciona categoría GO (comportamiento original)
               PULSADO LARGO → abre segundo nivel comercial de esa órbita     */}
-          {!isUserV1Surface && (orbitSecondLevel === null ? (
+          {/* Public/business shells share ADMIN's exact rings, without enabling intent actions. */}
+          {!fullLandingArchitecture && !anyOverlayOpen && !rutasMode && !reservasOrbitalOpen && orbitSecondLevel === null ? (
+            <View pointerEvents="none" accessible={false} accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants" testID="landing-quiet-orbits" style={StyleSheet.absoluteFill}>
+              {[...INTENTS, { key: "otro", color: "#9ca3af" }].map((it, i) => {
+                const angle = -Math.PI / 2 + (i * 2 * Math.PI) / (INTENTS.length + 1);
+                const x = orbitWrapSize / 2 + Math.cos(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
+                const y = orbitWrapSize / 2 + Math.sin(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
+                return <View key={it.key} testID={`landing-quiet-orbit-${i}`}
+                  style={{ position: "absolute", left: x, top: y }}>
+                  <PremiumOrbitBtn color={it.color} selected={false} onPress={() => {}}
+                    icon="circle" label="" size={orbitBtnVisualSize} iconSize={0} labelSize={0}
+                    labelOpacity={0} labelSpacing={0} paddingH={0} cafeDepth={it.key === "cafe"} />
+                </View>;
+              })}
+            </View>
+          ) : !isUserV1Surface && (orbitSecondLevel === null ? (
             <>
               {rutasMode ? (
                 <>
@@ -17151,11 +17094,11 @@ function HomeScreenContent() {
                 const x =
                   orbitWrapSize / 2 +
                   Math.cos(angle) * orbitRadiusVisual -
-                  orbitBtnVisualSize / 2;
+                  orbitBtnVisualSize / 2 + (landingLowerOffsets[`orbit-${i}`]?.x ?? 0);
                 const y =
                   orbitWrapSize / 2 +
                   Math.sin(angle) * orbitRadiusVisual -
-                  orbitBtnVisualSize / 2;
+                  orbitBtnVisualSize / 2 + (landingLowerOffsets[`orbit-${i}`]?.y ?? 0);
                 const selected = categorySelected && it.key === intent.key;
                 const anySelected = categorySelected || otroSelected;
                 const dimmed = anySelected && !selected;
@@ -17213,8 +17156,8 @@ function HomeScreenContent() {
               {/* OTRO — PremiumOrbitBtn (same visual system as all other intents) */}
               {(() => {
                 const otroAngle = -Math.PI / 2 + (INTENTS.length * 2 * Math.PI) / (INTENTS.length + 1);
-                const ox = orbitWrapSize / 2 + Math.cos(otroAngle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
-                const oy = orbitWrapSize / 2 + Math.sin(otroAngle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
+                const ox = orbitWrapSize / 2 + Math.cos(otroAngle) * orbitRadiusVisual - orbitBtnVisualSize / 2 + (landingLowerOffsets[`orbit-${INTENTS.length}`]?.x ?? 0);
+                const oy = orbitWrapSize / 2 + Math.sin(otroAngle) * orbitRadiusVisual - orbitBtnVisualSize / 2 + (landingLowerOffsets[`orbit-${INTENTS.length}`]?.y ?? 0);
                 return (
                   <Animated.View
                     style={{
@@ -17962,8 +17905,8 @@ function HomeScreenContent() {
               <>
                 {visibleSatellites.map((s) => {
                   const rad = d2r(s.deg);
-                  const mx  = cx + Math.cos(rad) * microR - microSz / 2;
-                  const my  = cy + Math.sin(rad) * microR - microSz / 2;
+                  const mx  = cx + Math.cos(rad) * microR - microSz / 2 + (landingLowerOffsets[s.key]?.x ?? 0);
+                  const my  = cy + Math.sin(rad) * microR - microSz / 2 + (landingLowerOffsets[s.key]?.y ?? 0);
 
                   const isOrigin   = activeSatCtx !== null && s.key === activeSatCtx;
                   const ctxReplace = visibleContextLayer.find(cs => cs.replaceKey === s.key);
@@ -19795,6 +19738,7 @@ function HomeScreenContent() {
         visible={adminDashOpen}
         onClose={() => setAdminDashOpen(false)}
         onOpenContext={goView.isOwner ? openOwnerContextSelector : undefined}
+        onOpenTools={() => { setAdminDashOpen(false); handleOpenOptions(); }}
       />}
 
       {/* ── VERIFICACIÓN EMPRESA — subida de documentos y estado ──────── */}
@@ -19821,10 +19765,10 @@ function HomeScreenContent() {
       />
 
       <HerramientasPanel
-        landingVariantControls={userLandingVisualEnabled ? <LandingVariantSelector visual={landingVisual} lang={lang}
-          onPreviewLanding={() => { commitUserPhone(); setOptionsOpen(false);
-            showToast(lang === "en" ? "Temporary preview. Return to Tools to activate or cancel."
-              : "Vista previa temporal. Vuelve a Herramientas para activar o cancelar."); }} /> : undefined}
+        landingVariantControls={landingVariantToolsEnabled ? <LandingVariantSelector
+          visual={{ ...landingVisual, busy: landingVisual.busy || landingPreviewOpening }} lang={lang}
+          canPreviewLanding={userLandingVisualEnabled || goView.isOwner}
+          onPreviewLanding={openUserLandingPreviewFromTools} /> : undefined}
         visible={optionsOpen}
         onClose={() => { commitUserPhone(); setOptionsOpen(false); }}
         handedness={handedness}
@@ -19909,6 +19853,7 @@ function HomeScreenContent() {
 
       {/* CALENDAR MODAL — Agenda Operativa arriba + selector abajo */}
       <Modal
+        calendarWatermark
         visible={calOpen}
         transparent
         animationType="slide"
@@ -20026,35 +19971,33 @@ function HomeScreenContent() {
             </>
           )}
           <Pressable onPress={() => setCalPanelOpen(false)} style={{ flex: 1 }}>
-            {/* Header row: label izquierda + config toggle derecha */}
-            {!demoCustomerCalendarSelected && (<View
+            {/* AgendaBoard shares the existing view/settings header with month navigation. */}
+            <View testID="calendar-agenda-viewport" style={{ flex: 1 }}>
+            {demoCustomerCalendarSelected ? (demoBookingRepository
+              ? <View style={{ flex: 1 }}><DemoCustomerCalendar repository={demoBookingRepository} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
+              : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
+                renderHeader={monthNavigation => (<View testID="calendar-header"
               pointerEvents={showBookingFromCal ? "none" : "auto"}
-              style={{ opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top + 8, paddingHorizontal: 16, paddingBottom: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+              style={{ zIndex: 20, opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top, paddingLeft: Math.max(insets.left + 8, 8), paddingRight: Math.max(insets.right + 8, 8), gap: 4, paddingBottom: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
             >
-              <GoCalendarViewSelector value={calBgViewMode} onChange={changeCalendarView} />
-              {demoBookingRepository && <TouchableOpacity accessibilityRole="button" onPress={event => { event.stopPropagation(); setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{padding:8}}><Text style={{color:"#ff7474",fontSize:10,fontWeight:"700"}}>DEMO LOCAL</Text></TouchableOpacity>}
+              <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}><GoCalendarViewSelector compact value={calBgViewMode} onChange={changeCalendarView} />{demoBookingRepository && <TouchableOpacity accessibilityRole="button" onPress={event => { event.stopPropagation(); setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{paddingHorizontal:2,paddingVertical:8,width:44,minHeight:44,justifyContent:"center"}}><Text style={{color:"#ff7474",fontSize:10,fontWeight:"700",textAlign:"center"}}>DEMO LOCAL</Text></TouchableOpacity>}</View>
+              <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>{monthNavigation}</View>
               <TouchableOpacity
                 onPress={(e) => { e.stopPropagation(); Haptics.selectionAsync(); setCalConfigVisible(true); }}
                 activeOpacity={0.7}
-                hitSlop={10}
-                style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: calConfigVisible ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: calConfigVisible ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.14)" }}
+                hitSlop={{ top: 10, bottom: 10, left: 2, right: 2 }}
+                style={{ flexDirection: "row", alignItems: "center", flexShrink: 0, gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: calConfigVisible ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: calConfigVisible ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.14)" }}
               >
                 <Feather name={calConfigVisible ? "chevron-up" : "settings"} size={9} color="#ffffff" />
                 {!calConfigVisible && <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 8, fontWeight: "700", letterSpacing: 0.8 }}>CONFIG</Text>}
               </TouchableOpacity>
             </View>)}
-
-
-            <View testID="calendar-agenda-viewport" style={{ flex: 1, paddingBottom: 64 }}>
-            {demoCustomerCalendarSelected ? (demoBookingRepository
-              ? <DemoCustomerCalendar repository={demoBookingRepository} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} />
-              : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
                 goLog={goLog.filter((e: any) => {
                   const id: string = e.id ?? "";
                   if (isUserMode     && id.startsWith("go_booking_prv_")) return false;
                   if (isBusinessMode && id.startsWith("go_booking_cli_")) return false;
                   return true;
-                })}
+                }).map(e => cambiosOpen && e.id === currentReceivedIdRef.current ? landingCurrentEntry(e) : e)}
                 embedded
                 calSizeKey={calSize}
                 sortOrder={goSortOrder}
@@ -22957,6 +22900,7 @@ function HomeScreenContent() {
                           : t('status_pending_label');
                 const isProposalEstado =
                   g.estado === "propuesto" || g.estado === "propuesta_pendiente";
+                const compactProposal = !isPapelaraView && isProposalEstado && !!(g as any).changeProposal;
                 // Color semántico por estado — fuente única de verdad para
                 // borde lateral, check y glow. No depende de g.color.
                 const stateColor =
@@ -23045,7 +22989,7 @@ function HomeScreenContent() {
                 const statusPill = (
                   <TouchableOpacity
                     activeOpacity={1}
-                    hitSlop={6}
+                    hitSlop={compactProposal ? { top: 6, bottom: 6, left: 0, right: 0 } : 6}
                     onPress={(e) => {
                       if ((e as any)?.stopPropagation) (e as any).stopPropagation();
                       Haptics.selectionAsync().catch(() => {});
@@ -23091,6 +23035,12 @@ function HomeScreenContent() {
                     )}
                   </TouchableOpacity>
                 );
+                const proposalStatusLine = compactProposal && g.estado === "propuesta_pendiente" ? (<View testID={"go-proposal-substatus-" + g.id} style={{ flexDirection: "row", alignItems: "center", gap: lv(5), paddingTop: 0 }}>
+                            <Feather name="clock" size={lv(11)} color="#f97316" />
+                            <Text style={{ color: "#f97316", fontSize: lv(10), fontWeight: "700", flexShrink: 1 }}>
+                              {t('biz_booking_awaiting')}
+                            </Text>
+                          </View>) : null;
                 return (
                   <React.Fragment key={g.id}>
                   {showNoDateSeparator && (
@@ -23127,7 +23077,7 @@ function HomeScreenContent() {
                       setExpandedId((prev) => (prev === g.id ? null : g.id));
                     }}
                     style={{
-                      paddingVertical: lv(isProposalEstado ? 6 : 8),
+                      paddingVertical: lv(compactProposal ? 4 : isProposalEstado ? 6 : 8),
                       paddingHorizontal: lv(14),
                       borderRadius: lv(14),
                       backgroundColor: "#161618",
@@ -23149,7 +23099,7 @@ function HomeScreenContent() {
                     }}
                   >
                     {/* ── FILA 1: TÍTULO COMPLETO — todo el ancho hasta el checkbox ── */}
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8), marginBottom: lv(3) }}>
+                    <View testID={compactProposal ? "go-proposal-header-" + g.id : undefined} style={{ flexDirection: "row", alignItems: "center", flexWrap: compactProposal ? "wrap" : undefined, gap: compactProposal ? lv(3) : lv(8), marginBottom: lv(compactProposal ? 1 : 3) }}>
                       {handedness === "left" && isProposalEstado && statusPill}
                       {/* CHECKBOX — izquierda si ZURDO */}
                       {handedness === "left" && (
@@ -23244,17 +23194,40 @@ function HomeScreenContent() {
                           }
                         }}
                         delayLongPress={420}
-                        style={{ flex: 1, minWidth: 0 }}
+                        style={{ flex: 1, minWidth: compactProposal ? lv((g.notes?.trim() || g.intentLabel || "").length > 18 ? 115 : 64) : 0 }}
                       >
                         {(() => {
                           const realTitle = g.notes?.trim() || g.intentLabel;
-                          return (
-                            <Text style={{ color: "#ffffff", fontSize: lv(14), fontWeight: "700", lineHeight: lv(18) }} numberOfLines={1}>
+                          const title = (
+                            <Text testID={compactProposal ? "go-proposal-title-" + g.id : undefined} style={{ color: "#ffffff", fontSize: lv(14), fontWeight: "700", lineHeight: lv(18) }} numberOfLines={compactProposal ? undefined : 1}>
                               {realTitle}
                             </Text>
                           );
+                          return compactProposal ? (
+                            <View testID={"go-proposal-title-block-" + g.id}>
+                              {title}
+                              {proposalStatusLine}
+                            </View>
+                          ) : title;
                         })()}
                       </TouchableOpacity>
+                      {compactProposal && !!(g.contactName || g.phone || g.recipients?.length) && (
+                        <TouchableOpacity
+                          testID={"go-proposal-contact-" + g.id}
+                          accessibilityRole="button"
+                          accessibilityLabel={"Contacto: " + displayContact(g.contactName || g.recipients?.[0]?.name || "", g.phone || g.recipients?.[0]?.phone || "")}
+                          onPress={(e) => {
+                            (e as any)?.stopPropagation?.();
+                            Haptics.selectionAsync().catch(() => {});
+                            setInitialMessagesContact({ name: g.contactName || g.recipients?.[0]?.name || "", phone: g.phone || g.recipients?.[0]?.phone || "" });
+                            setMessagesOpen(true);
+                          }}
+                          activeOpacity={0.75}
+                          style={{ width: Math.max(44, lv(36)), height: Math.max(44, lv(36)), alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                        >
+                          <Feather name={g.recipients && g.recipients.length > 1 ? "users" : "user"} size={lv(18)} color="rgba(255,255,255,0.70)" />
+                        </TouchableOpacity>
+                      )}
                       {handedness === "right" && isProposalEstado && statusPill}
                       {/* CHECKBOX — derecha si DIESTRO */}
                       {handedness === "right" && (
@@ -23286,7 +23259,7 @@ function HomeScreenContent() {
                     </View>
 
                     {/* ── FILA 2: INFO + ESTADO + BADGE ── */}
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8) }}>
+                    {(!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8) }}>
                       {/* INFO — fecha/hora + destinatarios */}
                       <TouchableOpacity
                         activeOpacity={0.75}
@@ -23302,14 +23275,14 @@ function HomeScreenContent() {
                         style={{ flex: 1, minWidth: 0 }}
                       >
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                          {(!!g.date || !!g.time) && (
+                          {!compactProposal && ((!!g.date || !!g.time) && (
                             <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
                               <Feather name="clock" size={lv(10)} color="rgba(255,255,255,0.70)" />
                               <Text style={{ color: "#ffffff", fontSize: lv(11), fontWeight: "600" }} numberOfLines={1}>
                                 {[localizeLabel(g.date || ""), g.time].filter(Boolean).join(" · ")}
                               </Text>
                             </View>
-                          )}
+                          ))}
                           {(g as any).type === "GO_BOOKING" && !!(g as any).professionalName && (
                             <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
                               <Feather name="user" size={lv(10)} color="#818cf8" />
@@ -23318,7 +23291,7 @@ function HomeScreenContent() {
                               </Text>
                             </View>
                           )}
-                          {(() => {
+                          {!compactProposal && ((() => {
                             if (g.recipients && g.recipients.length > 0) {
                               const total = g.recipients.length;
                               const first = displayContact(g.recipients[0].name, g.recipients[0].phone);
@@ -23349,7 +23322,7 @@ function HomeScreenContent() {
                               );
                             }
                             return null;
-                          })()}
+                          })())}
                         </View>
                       </TouchableOpacity>
 
@@ -23358,7 +23331,7 @@ function HomeScreenContent() {
                         {/* Estado pill */}
                         {!isProposalEstado && statusPill}
                         {/* Badge con EXACTO mismo color que filtro inferior correspondiente */}
-                        {(() => {
+                        {!compactProposal && ((() => {
                           const entryType = (g as any).type || "";
                           const lbl =
                             entryType === "GO_BOOKING"      ? t('biz_booking_intent_label').toUpperCase()
@@ -23392,7 +23365,7 @@ function HomeScreenContent() {
                               </Text>
                             </View>
                           );
-                        })()}
+                        })())}
                         {/* ── bookingStatus pill — solo en GO_BOOKING ────────── */}
                         {(g as any).type === "GO_BOOKING" && (() => {
                           const bs: ReservationStatus = (g as any).bookingStatus ?? "confirmada";
@@ -23420,68 +23393,60 @@ function HomeScreenContent() {
                           );
                         })()}
                       </View>
-                    </View>
+                    </View>}
 
                     {/* ── PROPUESTA DE CAMBIO: siempre visible cuando existe ── */}
-                    {!isPapelaraView && isProposalEstado && !!(g as any).changeProposal && (
-                      <View style={{
-                        marginTop: lv(6),
+                    {!isPapelaraView && isProposalEstado && !!(g as any).changeProposal && (<React.Fragment>
+<View testID={"go-proposal-dates-" + g.id} style={{
+                        marginTop: lv(3),
                         borderRadius: lv(10),
                         borderWidth: 1.5,
                         borderColor: "rgba(249,115,22,0.65)",
                         backgroundColor: "rgba(249,115,22,0.13)",
                         overflow: "hidden",
-                        padding: lv(8),
-                        gap: lv(5),
+                        paddingHorizontal: lv(8),
+                        paddingVertical: lv(2),
+                        gap: lv(3),
                       }}>
                         {/* Reserva actual */}
-                        <View style={{ gap: lv(2) }}>
-                          <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: lv(8), fontWeight: "700", letterSpacing: 0.6 }}>
+                        <View testID={"go-proposal-current-" + g.id} style={{ flexDirection: "row", alignItems: "center", gap: lv(8) }}>
+                          <Text numberOfLines={1} style={{ flexShrink: 0, color: "rgba(255,255,255,0.45)", fontSize: Math.min(lv(8), 8), fontWeight: "700", letterSpacing: 0.6 }}>
                             {t('tasks_current_booking').toUpperCase()}
                           </Text>
                           <Text
                             numberOfLines={1}
-                            style={{ color: "#ffffff", fontSize: lv(12), fontWeight: "700", flexShrink: 1 }}
+                            adjustsFontSizeToFit minimumFontScale={0.85}
+                            accessibilityLabel={[localizeLabel(g.date || ""), g.time].filter(Boolean).join(" · ")}
+                            style={{ color: "#ffffff", fontSize: Math.min(lv(12), 12), fontWeight: "700", flex: 1, minWidth: 0, textAlign: "right" }}
                           >
-                            {[localizeLabel(g.date || ""), g.time].filter(Boolean).join("  ·  ")}
+                            {formatCompactProposalSlot(localizeLabel(g.date || ""), g.dateISO, g.time)}
                           </Text>
                         </View>
                         {/* Separador */}
                         <View style={{ height: 1, backgroundColor: "rgba(249,115,22,0.25)" }} />
                         {/* Propuesta cambio */}
-                        <View style={{ gap: lv(2) }}>
-                          <Text style={{ color: "#f97316", fontSize: lv(8), fontWeight: "700", letterSpacing: 0.6 }}>
+                        <View testID={"go-proposal-next-" + g.id} style={{ flexDirection: "row", alignItems: "center", gap: lv(8) }}>
+                          <Text numberOfLines={1} style={{ flexShrink: 0, color: "#f97316", fontSize: Math.min(lv(8), 8), fontWeight: "700", letterSpacing: 0.6 }}>
                             {t('tasks_change_proposal').toUpperCase()}
                           </Text>
                           <Text
                             numberOfLines={1}
-                            style={{ color: "#f97316", fontSize: lv(13), fontFamily: "Inter_700Bold", fontWeight: "800", flexShrink: 1 }}
+                            adjustsFontSizeToFit minimumFontScale={0.85}
+                            accessibilityLabel={[localizeLabel((g as any).changeProposal.date || ""), (g as any).changeProposal.time].filter(Boolean).join(" · ")}
+                            style={{ color: "#f97316", fontSize: Math.min(lv(13), 13), fontFamily: "Inter_700Bold", fontWeight: "800", flex: 1, minWidth: 0, textAlign: "right" }}
                           >
-                            {[localizeLabel((g as any).changeProposal.date || ""), (g as any).changeProposal.time].filter(Boolean).join("  ·  ")}
+                            {formatCompactProposalSlot(localizeLabel((g as any).changeProposal.date || ""), (g as any).changeProposal.dateISO, (g as any).changeProposal.time)}
                           </Text>
                         </View>
                         {/* Nota opcional */}
-                        {!!(g as any).changeProposal.note && (
-                          <Text numberOfLines={2} style={{ color: "rgba(249,115,22,0.80)", fontSize: lv(9), lineHeight: lv(13) }}>
+                        </View>
+{!!(g as any).changeProposal.note && (
+                          <Text testID={"go-proposal-note-" + g.id} style={{ marginTop: lv(3), color: "rgba(249,115,22,0.80)", fontSize: lv(9), lineHeight: lv(13) }}>
                             {(g as any).changeProposal.note}
                           </Text>
                         )}
-                        {/* Estado + botones */}
-                        {g.estado === "propuesta_pendiente" ? (
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: lv(5), paddingTop: lv(2) }}>
-                            <Feather name="clock" size={lv(11)} color="#f97316" />
-                            <Text numberOfLines={1} style={{ color: "#f97316", fontSize: lv(10), fontWeight: "700", flexShrink: 1 }}>
-                              {t('biz_booking_awaiting')}
-                            </Text>
-                          </View>
-                        ) : (
-                          <View style={{ gap: lv(6), paddingTop: lv(2) }}>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: lv(5) }}>
-                              <Feather name="refresh-cw" size={lv(11)} color="#f97316" />
-                              <Text numberOfLines={1} style={{ color: "#f97316", fontSize: lv(10), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, flexShrink: 1 }}>
-                                {t('biz_change_received')}
-                              </Text>
-                            </View>
+{g.estado !== "propuesta_pendiente" && (<View testID={"go-proposal-responses-" + g.id} style={{ marginTop: lv(8), gap: lv(4), paddingTop: 0 }}>
+
                             <View style={{ flexDirection: "row", gap: lv(8) }}>
                               <TouchableOpacity
                                 onPress={(e) => { if ((e as any)?.stopPropagation) (e as any).stopPropagation(); Haptics.selectionAsync().catch(() => {}); acceptProposal(g.id); }}
@@ -23507,10 +23472,8 @@ function HomeScreenContent() {
                             >
                               <Text style={{ color: "#f97316", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🟠 ' + t('tasks_propose')}</Text>
                             </TouchableOpacity>
-                          </View>
-                        )}
-                      </View>
-                    )}
+                          </View>)}
+</React.Fragment>)}
                     {/* ── HUECOS ALTERNATIVOS: aparece tras rechazar una propuesta ── */}
                     {(expandedId === g.id || allExpanded) && altSlotsEntry?.entryId === g.id && altSlotsEntry.slots.length > 0 && (
                       <View style={{ marginTop: lv(8), borderRadius: lv(10), borderWidth: 1.5, borderColor: "rgba(74,128,189,0.40)", backgroundColor: "rgba(74,128,189,0.07)", padding: lv(10), gap: lv(6) }}>
@@ -26308,8 +26271,9 @@ function HomeScreenContent() {
         }
         style={{
           position: "absolute",
-          right: Math.max(18, insets.right + 18),
-          bottom: bottomReserved + orbitWrapSize - 50,
+          ...(!anyOverlayOpen && !empresaOpen && !adminDashOpen && !verificacionOpen && !pedidoTrackingOpen && !rutasMode
+            ? { left: landingDisplayCloseRect.x, top: landingDisplayCloseRect.y }
+            : { right: Math.max(18, insets.right + 18), bottom: bottomReserved + orbitWrapSize - 50 }),
           opacity: listOpen ? 0 : backBtnAnim,
           transform: [{ scale: backBtnAnim.interpolate({ inputRange: [0, 1], outputRange: [0.70, 1] }) }],
           zIndex: 9998,

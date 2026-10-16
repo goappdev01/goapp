@@ -171,7 +171,7 @@ test('logout cancels old permission responses and network errors fail closed wit
 
 test('all direct business entries and configuration effects use the same permission boundary', () => {
   const home = read('app/index.tsx'), config = read('contexts/GoBusinessConfigContext.tsx');
-  assert.match(home, /return ownerPresentation \? <HomeScreenContent \/> : <BusinessAccessGate><HomeScreenContent \/><\/BusinessAccessGate>/);
+  assert.match(home, /return <BusinessAccessGate ownerPresentation=\{ownerPresentation\}><HomeScreenContent \/><\/BusinessAccessGate>/);
   assert.match(home, /const isBusinessMode = requestedBusinessMode && businessAccess.allowed/);
   for (const component of ['EmpresaPanel', 'VerificacionEmpresaPanel', 'ActivacionCobrosScreen']) {
     assert.match(home, new RegExp(`businessAccess\\.allowed && ${component === 'VerificacionEmpresaPanel' ? '' : '!goView.isOwner && goView.view === "BUSINESS" && !adminAccess.checking && '}<${component}`));

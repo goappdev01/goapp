@@ -1,3 +1,4 @@
+import { recordAuthTrace } from "@/lib/authTrace";
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { getAdminAccess, type AdminAccess } from "@/data/adminAccess";
@@ -23,6 +24,7 @@ export function GoAdminAccessProvider({ children }: { children: React.ReactNode 
   const inFlight = useRef<{ revision: number; result: Promise<AdminAccess>; promise: Promise<boolean> } | null>(null);
   const check = useCallback(() => {
     const version = revision.current;
+    recordAuthTrace("admin.check.start", { revision: version });
     if (inFlight.current?.revision === version) return inFlight.current;
     // Identity can retain a cosmetic preference during revalidation; privileges cannot.
     setAccess(current => ({ ...denied(current.userId), checking: true, unavailable: false }));
@@ -30,9 +32,11 @@ export function GoAdminAccessProvider({ children }: { children: React.ReactNode 
       const current = mounted.current && version === revision.current && AppState.currentState === "active";
       const granted = current && next.allowed === true;
       const resolved = granted ? next : denied(current ? next.userId : null);
+      recordAuthTrace("admin.check.end", { revision: version, allowed: granted });
       if (mounted.current && version === revision.current) setAccess({ ...resolved, checking: false, unavailable: false });
       return resolved;
     }).catch(() => {
+      recordAuthTrace("admin.check.error", { revision: version });
       if (mounted.current && version === revision.current) setAccess(current => ({ ...denied(current.userId), checking: false, unavailable: true }));
       return denied();
     }).finally(() => {

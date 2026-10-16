@@ -109,7 +109,7 @@ test('bottom controls emphasize RESERVAR, fit a narrow viewport and retain every
   assert.deepEqual(calls, [['task', true], ['today', 8], ['book', true], ['go'], ['diagnostics', true], ['voice']]);
   assert.equal(reserve.props.delayLongPress, 800); assert.equal(go.props.delayLongPress, 400);
 });
-test('root has no redundant panel close and floats have a reserved space outside the agenda', () => {
+test('root keeps hierarchical closes and overlays the original floats without reserving calendar space', () => {
   const globals = { insets: { right: 34 }, overlayPanelHeight: 90, calFlow: {}, Haptics: {}, closeCalendarTaskPanel() {}, setCalConfigVisible() {}, exitCalendarContainer() {} };
   let tree = renderFragment(byId('calendar-floating-controls'), globals);
   assert.deepEqual(nodes(tree, n => n.type === 'GoCloseButton').map(n => n.props.level), ['container']);
@@ -118,9 +118,16 @@ test('root has no redundant panel close and floats have a reserved space outside
   const calendar = nodes(tree, n => n.type === 'TouchableOpacity')[0];
   const style = byId('calendar-agenda-viewport').openingElement.attributes.properties.find(n => n.name?.getText(ast) === 'style').initializer.expression.getText(ast);
   const viewport = evaluate('exports.style = (' + style + ')', { insets: globals.insets }).style;
-  assert.equal(viewport.paddingRight, undefined, 'Daily columns keep the full viewport width');
+  assert.equal(viewport.paddingBottom ?? 0, 0, 'The calendar regains the full available height');
+  assert.equal(tree.props.style.position, 'absolute');
   assert.equal(tree.props.style.flexDirection, 'row');
-  assert.ok(tree.props.style.bottom - globals.overlayPanelHeight + calendar.props.style.height + calendar.props.hitSlop < viewport.paddingBottom);
+  assert.equal(tree.props.style.backgroundColor, undefined);
+  assert.equal(tree.props.style.width, undefined);
+  assert.equal(tree.props.style.height, undefined);
+  assert.equal(calendar.props.style.width, 44);
+  assert.equal(calendar.props.style.height, 44);
+  assert.ok(calendar.props.hitSlop * 2 < tree.props.style.gap);
+  assert.ok(!source.includes('contentRightInset'), 'No inset narrows the Calendar or DEMO customer viewport');
   assert.ok(tree.props.style.bottom > globals.overlayPanelHeight);
   const demoTree = renderFragment(byId('calendar-floating-controls'), { ...globals, demoCustomerCalendarSelected: true });
   assert.deepEqual(nodes(demoTree, n => n.type === 'GoCloseButton').map(n => n.props.level), ['container']);

@@ -37,9 +37,10 @@ test('public User V1 uses a fail-closed surface policy and preserves only approv
   assert.equal(api.visibleLandingContextAction(false, false), true);
 });
 
-test('Landing applies V1 gating without mounting hidden orbit or satellite hitboxes', () => {
+test('Landing preserves V1 action gating and satellite visibility while mounting passive orbit shells', () => {
   assert.match(source, /isUserV1Landing\(isUserMode, goView\.isAdminView\)/);
   assert.match(source, /!isUserV1Surface && \(orbitSecondLevel === null \?/);
+  assert.match(source, /testID="landing-quiet-orbits"/);
   assert.match(source, /visibleLandingSatelliteKeys\(/);
   assert.match(source, /visibleLandingContextAction\(isUserV1Surface, cs\.v1Visible\)/);
   assert.match(source, /fullLandingArchitecture && !anyOverlayOpen[\s\S]*?humanityPlacement && \(/);
@@ -54,8 +55,8 @@ test('Landing applies V1 gating without mounting hidden orbit or satellite hitbo
 });
 
 test('short card taps remain separate from long-press action loading and existing swipe responders', () => {
-  assert.match(source, /setNextAptMinimized\(false\)[\s\S]*?onLongPress=\{\(\) => \{[\s\S]*?startRelatedGoAction\(nextAppointment\.g\)/);
-  assert.match(source, /setCambiosOpen\(true\)[\s\S]*?onLongPress=\{\(\) => \{[\s\S]*?startRelatedGoAction\(item\.g\)/);
+  assert.match(source, /key: "visit"[\s\S]*?setNextAptMinimized\([\s\S]*?onLongPress: \(\) => \{[\s\S]*?startRelatedGoAction\(entry\.g\)/);
+  assert.match(source, /key: "changes"[\s\S]*?setCambiosOpen\(open => !open\)[\s\S]*?onLongPress: \(\) => \{[\s\S]*?startRelatedGoAction\(item\.g\)/);
   assert.match(source, /nextCardPanRef\.panHandlers/);
   assert.match(source, /cambiosCardPanRef\.panHandlers/);
   assert.match(source, /const startRelatedGoAction = \(g: typeof goLog\[number\]\) => \{[\s\S]*?loadGoIntoForm\(g\)/);
