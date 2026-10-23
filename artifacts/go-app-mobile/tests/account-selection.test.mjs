@@ -39,8 +39,9 @@ function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: fals
     },
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
     useEffect() {},
+    forwardRef: render => props => render(props, props.ref),
   };
-  const native = Object.fromEntries(['ActivityIndicator', 'Modal', 'ScrollView', 'Text', 'TextInput', 'TouchableOpacity', 'View'].map(name => [name, name]));
+  const native = Object.fromEntries(['ActivityIndicator', 'Modal', 'ScrollView', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable', 'View'].map(name => [name, name]));
   Object.assign(native, {
     Platform: { OS: platformOS },
     Animated: { Value: class {}, View: 'Animated.View' },
@@ -73,6 +74,11 @@ function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: fals
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,
   } }).outputText, selectorContext);
   modules['./AccountContextSelector'] = selectorContext.exports;
+  const passwordContext = { exports: {}, require: name => { assert.ok(name in modules, name); return modules[name]; } };
+  vm.runInNewContext(ts.transpileModule(readFileSync('components/auth/PasswordInput.tsx', 'utf8'), { compilerOptions: {
+    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,
+  } }).outputText, passwordContext);
+  modules['./PasswordInput'] = passwordContext.exports;
   const context = { exports: {}, process: { env: { EXPO_PUBLIC_API_URL: 'http://private.test/api' } }, fetch: authenticate, require: name => { assert.ok(name in modules, name); return modules[name]; } };
   vm.runInNewContext(ts.transpileModule(authSource, { compilerOptions: {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,

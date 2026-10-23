@@ -30,6 +30,7 @@ import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { useGoView } from "@/contexts/GoViewContext";
 import type { GoView } from "@/data/goViewPolicy";
 import { AccountContextSelector } from "./AccountContextSelector";
+import { PasswordInput } from "./PasswordInput";
 import {
   CuentaVerification,
   VerificationStatus,
@@ -528,13 +529,14 @@ export function LoginRegisterPanel({
                 onSubmitEditing={() => passwordInputRef.current?.focus()}
                 style={s.authInput}
               />
-              <TextInput
+              <PasswordInput
+                key={`${authMode}:${selectedRole}:${ownerLogin ? "owner" : "account"}:${visible ? "open" : "closed"}`}
+                testID="auth-password"
                 ref={passwordInputRef}
                 value={authPassword}
                 onChangeText={setAuthPassword}
                 placeholder="Contraseña (mínimo 8 caracteres)"
                 placeholderTextColor="#94A3B8"
-                secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
                 textContentType={Platform.OS === "ios" ? (authMode === "login" ? "password" : "newPassword") : undefined}
