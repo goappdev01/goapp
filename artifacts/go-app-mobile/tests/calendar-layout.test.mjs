@@ -100,7 +100,7 @@ test('the compact existing view selector opens its menu without adding another h
 
 const pending = { id: 'pending-note', kind: 'sent', type: 'TAREA_INTERNA', intentKey: 'nota_interna', intentLabel: 'Tarea interna',
   color: '#7c3aed', dateISO: '2026-10-13', date: '13/10/2026', time: '17:00', duration: '', place: '', contactName: '', phone: '',
-  estado: 'pendiente', isGeneric: true, notes: 'Revisión de prueba', messages: [{ id: 'message', goId: 'pending-note', text: 'Contenido que debe conservarse', senderId: 'yo', createdAt: 1, deliveryMode: 'internal' }], sharedChatId: 'existing-shared-chat' };
+  estado: 'pendiente', localResolutionStatus: 'pending', isGeneric: true, notes: 'Revisión de prueba', messages: [{ id: 'message', goId: 'pending-note', text: 'Contenido que debe conservarse', senderId: 'yo', createdAt: 1, deliveryMode: 'internal' }], sharedChatId: 'existing-shared-chat' };
 
 test('Pending cards keep 17:00 and TAREA.INT on one closed line and open the same conversation from inside', () => {
   const app = fixture({ now: '2026-10-14T12:00:00' }), { AgendaBoard } = app.load('components/AgendaOperativa.tsx');

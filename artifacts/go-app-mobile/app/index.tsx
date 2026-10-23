@@ -7,6 +7,17 @@ import { createDemoBookingRepository, createDemoCatalogBookingRepository } from 
 import { DemoCustomerCalendar } from "@/components/booking/DemoCustomerCalendar";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import { useGoLog } from "@/hooks/useGoLog";
+import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
+import { bookingActivityEnabled, canonicalBookingActivity, visibleBookingSectors } from "@workspace/api-zod";
+import { setInternalBookingContext } from "@/data/booking";
+import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
+import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
+import { useActionCompletion } from "@/hooks/useActionCompletion";
+import { LandingActionCompletion, completionFrame } from "@/components/landing/LandingActionCompletion";
+import { completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
+import { GoNoteReminderPicker } from "@/components/notes/GoNoteReminderPicker";
+import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, noteKeyboardContentHeight, type NoteReminderDraft } from "@/lib/goNoteTools";
+import { saveGoNoteReminder, changeGoNoteReminder, confirmAttachedGoNoteReminder } from "@/lib/goNoteReminder";
 import { changeBookingRequest as negotiateRealBooking } from "@/data/booking";
 import { readGoLog, flushGoLog, commitGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
 import { onSessionChanged } from "@/lib/sessionEvents";
@@ -119,7 +130,7 @@ import { PerfilPanel } from "@/components/perfil/PerfilPanel";
 import { useLandingVisualVariant } from "@/hooks/useLandingVisualVariant";
 import { resolveUserLandingVariant } from "@/components/landing/landingVariant";
 import { LandingVariantSelector } from "@/components/landing/LandingVariantSelector";
-import { LandingVisualArtwork, LandingVisualBoundary, UserLandingInk } from "@/components/landing/LandingVisualArtwork";
+import { LandingVisualArtwork, LandingVisualBoundary } from "@/components/landing/LandingVisualArtwork";
 import { HerramientasPanel } from "@/components/herramientas/HerramientasPanel";
 import {
   LoginRegisterPanel,
@@ -2759,6 +2770,20 @@ function HomeScreenContent() {
   const adminAccess = useAdminAccess();
   const goView = useGoView();
   const ownerDemo = useOwnerBusinessDemo();
+  const { publication: bookingPublication, internalAccess: bookingInternalAccess } = useBookingModulePublication(goView.loaded && !!adminAccess.userId && !adminAccess.checking);
+  const visibleOrbitalBookingCategories = useMemo(() => visibleBookingSectors(RESERVAS_ORBITAL_CATS, bookingPublication, bookingInternalAccess), [bookingPublication, bookingInternalAccess]);
+  useEffect(() => {
+    setInternalBookingContext(bookingInternalAccess ? adminAccess.userId : null);
+    return () => setInternalBookingContext(null);
+  }, [bookingInternalAccess, adminAccess.userId]);
+  useEffect(() => {
+    if (reservasOrbitalCat && !visibleOrbitalBookingCategories.some(category => category.id === reservasOrbitalCat)) {
+      setReservasOrbitalCat(null); setReservasOrbitalPage(0);
+    }
+    if (goSearchSub && !bookingActivityEnabled(goSearchSub.id, bookingPublication, bookingInternalAccess)) {
+      setGoSearchOpen(false); setGoSearchSub(null); setGoSearchBusinesses([]);
+    }
+  }, [bookingPublication, bookingInternalAccess, reservasOrbitalCat, goSearchSub?.id, visibleOrbitalBookingCategories]);
   const demoBookingRepository = useMemo(() => goView.view === "USER" && adminAccess.isOwner && !adminAccess.checking && ownerDemo.loaded && ownerDemo.demo
     ? (ownerDemo.catalog ? createDemoCatalogBookingRepository(ownerDemo.catalog) : createDemoBookingRepository(ownerDemo.demo)) : undefined, [goView.view, adminAccess.isOwner, adminAccess.checking, ownerDemo.loaded, ownerDemo.demo, ownerDemo.catalog]);
   const [demoCustomerCalendarSelected, setDemoCustomerCalendarSelected] = useState(false);
@@ -2772,13 +2797,13 @@ function HomeScreenContent() {
     demoCalendarOwnerRef.current = adminAccess.userId;
   }, [goView.view, adminAccess.userId, adminAccess.checking, adminAccess.unavailable, adminAccess.isOwner]);
   useEffect(() => {
-    if (!goSearchOpen || !goSearchSub || adminAccess.checking) { setGoSearchBusinesses([]); return; }
+    if (!goSearchOpen || !goSearchSub || adminAccess.checking || !bookingActivityEnabled(goSearchSub.id, bookingPublication, bookingInternalAccess)) { setGoSearchBusinesses([]); return; }
     let active = true;
     const query = demoBookingRepository ? demoBookingRepository.searchBusinesses(goSearchQuery) : getBusinesses();
-    void query.then(all => { if (active) setGoSearchBusinesses(all.filter(b => b.bookingActive !== false && b.category === goSearchSub.id)); })
+    void query.then(all => { if (active) setGoSearchBusinesses(all.filter(b => b.bookingActive !== false && canonicalBookingActivity(b.category) === goSearchSub.id && bookingActivityEnabled(b.category, bookingPublication, bookingInternalAccess))); })
       .catch(() => { if (active) setGoSearchBusinesses([]); });
     return () => { active = false; };
-  }, [goSearchOpen, goSearchSub?.id, demoBookingRepository, adminAccess.checking, demoBookingRepository ? goSearchQuery : null]);
+  }, [goSearchOpen, goSearchSub?.id, demoBookingRepository, adminAccess.checking, demoBookingRepository ? goSearchQuery : null, bookingPublication, bookingInternalAccess]);
   // Visual selection never grants operational business permission.
   const isBusinessMode = requestedBusinessMode && businessAccess.allowed && !adminAccess.checking && goView.view === "BUSINESS" && !goView.isBusinessPreview;
   const isUserMode = !isBusinessMode;
@@ -3073,12 +3098,6 @@ function HomeScreenContent() {
   const recordedChunksRef = useRef<any[]>([]);
   const audioElRef = useRef<any>(null);
 
-  // ── NOTA audio: grabación independiente del audio IA ────────────
-  const [notaAudioRecording, setNotaAudioRecording] = useState(false);
-  const [notaAudioUri, setNotaAudioUri] = useState<string | null>(null);
-  const notaRecorderRef = useRef<any>(null);
-  const notaStreamRef = useRef<any>(null);
-  const notaChunksRef = useRef<any[]>([]);
   // Texto del input justo antes de empezar una nueva escucha. Permite
   // que la transcripción en vivo (interim) se vaya añadiendo al final
   // sin pisar lo que el usuario ya hubiera escrito o dictado antes.
@@ -3267,7 +3286,7 @@ function HomeScreenContent() {
   }, []);
   // ── FIELD SELECTOR — pantalla de campos opcionales antes de crear nota/GO ─
   const [fieldSelectorOpen, setFieldSelectorOpen] = useState(false);
-  const calendarSlotDraftRef = useRef<{ ownerUserId: string; entryId?: string } | null>(null);
+  const calendarSlotDraftRef = useRef<{ ownerUserId: string; actionContext?: string; entryId?: string } | null>(null);
   const calendarSlotOpeningRef = useRef(false);
   const calendarSlotSavingRef = useRef(false);
   const calendarSlotRequestRef = useRef(0);
@@ -3382,10 +3401,10 @@ function HomeScreenContent() {
   // se mapean: "small" → "compacto", "normal"/"large" → "estandar".
   const [uiScale, setUiScale] = useState<"compacto" | "estandar" | "grande">("estandar");
   const userLandingVisualEnabled = goView.loaded && goView.view === "USER" && !!adminAccess.userId && authBootstrapComplete && !goAuthOpen;
-  // ADMIN manages the same USER preference; appearance remains restricted to USER.
-  const landingVariantToolsEnabled = userLandingVisualEnabled || (goView.loaded && goView.isAdminView
-    && adminAccess.allowed && !!adminAccess.userId && authBootstrapComplete && !goAuthOpen);
-  const landingVisual = useLandingVisualVariant(adminAccess.userId, landingVariantToolsEnabled);
+  // Only ADMIN manages variants; USER continues to read its assigned appearance.
+  const landingVariantToolsEnabled = goView.loaded && goView.isAdminView
+    && adminAccess.allowed && !!adminAccess.userId && authBootstrapComplete && !goAuthOpen;
+  const landingVisual = useLandingVisualVariant(adminAccess.userId, userLandingVisualEnabled || landingVariantToolsEnabled);
   const [landingPreviewOpening, setLandingPreviewOpening] = useState(false);
   const landingPreviewIdentityRef = useRef(adminAccess.userId);
   landingPreviewIdentityRef.current = adminAccess.userId;
@@ -3466,9 +3485,11 @@ function HomeScreenContent() {
     readByEmpresa: boolean;
   };
 
-  const [personalGoLog, setGoLog] = useGoLog();
+  const completionIdentity = useAssistantZoneScope();
+  const [personalGoLog, setGoLog] = useGoLog(completionIdentity.ready ? completionIdentity.scope : null);
   const customerBookings=useCustomerBookings(demoBookingRepository,goView.loaded && goView.view==="USER" && !adminAccess.checking && (!adminAccess.isOwner || ownerDemo.loaded));
   const goLog=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER"),[personalGoLog,customerBookings.entries,goView.view]);
+  const actionCompletion = useActionCompletion(goLog);
   const [receivedDetailOpen, setReceivedDetailOpen] = useState(false);
   const [receivedDetailGo, setReceivedDetailGo] = useState<typeof goLog[number] | null>(null);
 
@@ -4200,12 +4221,37 @@ function HomeScreenContent() {
   const [qrOpen, setQrOpen] = useState(false);
   const [cartaOpen, setCartaOpen] = useState(false);
   const [quickNoteText, setQuickNoteText] = useState("");
-  const [quickNoteAlarm, setQuickNoteAlarm] = useState(false);
+  const [quickNoteReminderMinutes, setQuickNoteReminderMinutes] = useState<number | null>(null);
+  const quickNoteAlarm = quickNoteReminderMinutes !== null;
+  const [noteReminderPickerOpen, setNoteReminderPickerOpen] = useState(false);
+  const noteTaskDraftRef = useRef<NoteReminderDraft | null>(null);
+  const noteStartLockRef = useRef(false);
+  const [noteReminderTargetId, setNoteReminderTargetId] = useState<string | null>(null);
+  const [noteReminderBusy, setNoteReminderBusy] = useState(false);
+  const noteIdentity = completionIdentity;
+  const noteIdentityRef = useRef(noteIdentity); noteIdentityRef.current = noteIdentity;
+  const noteVoice = useGoNoteVoice({ visible: notesOpen,
+    identity: JSON.stringify(noteIdentity.scope), title: quickNoteText,
+    setTitle: setQuickNoteText, setDetail: setQuickNoteDetail, english: lang === "en" });
+  const notaAudioRecording = noteVoice.status === "listening";
+  const toggleNotaRecording = noteVoice.toggle;
+  const resetNotaAudio = noteVoice.abort;
+  useEffect(() => {
+    if (!notesOpen) { noteVoice.abort(); setNoteReminderPickerOpen(false); }
+    if (notesOpen) noteStartLockRef.current = false;
+    setNoteReminderTargetId(null);
+  }, [notesOpen, noteIdentity.scope?.userId, noteIdentity.scope?.context]);
+  const savedGoNoteReminderTargets = noteIdentity.ready && noteIdentity.scope ? goLog.filter(entry => {
+    const note = entry as GoEntry & { goNoteReminder?: boolean; ownerUserId?: string; taskContext?: string };
+    return isGoNoteReminderTarget(note) && note.ownerUserId === noteIdentity.scope!.userId
+      && note.taskContext === noteIdentity.scope!.context && !note.deleted && note.estado !== "rechazado";
+  }) : [];
+  const noteReminderTarget = savedGoNoteReminderTargets.find(entry => entry.id === noteReminderTargetId);
   const [goVisibility, setGoVisibility] = useState<'publico' | 'clientes' | 'proveedores' | 'interno' | 'privado'>('publico');
   const [pendingEnvioNota, setPendingEnvioNota] = useState<{ phone: string; contactName: string; text: string; detail?: string } | null>(null);
   // Nota externa adjunta al GO activo — viaja dentro del mismo envío.
   // Se limpia al resetear el GO (resetContactFields).
-  const [attachedExternalNote, setAttachedExternalNote] = useState<{ title: string; detail: string } | null>(null);
+  const [attachedExternalNote, setAttachedExternalNote] = useState<{ title: string; detail: string; reminder?: NoteReminderDraft } | null>(null);
   const [quickNoteInternal, setQuickNoteInternal] = useState(false);
   const [internalNotes, setInternalNotes] = useState<
     Array<{ id: string; text: string; createdAt: number }>
@@ -5279,70 +5325,6 @@ function HomeScreenContent() {
     mediaRecorderRef.current = null;
   };
 
-  // ── NOTA mic: graba audio asociado a una nota/GO ─────────────────
-  const startNotaRecording = async () => {
-    if (Platform.OS !== "web" || typeof navigator === "undefined") return;
-    const nav: any = navigator as any;
-    if (!nav.mediaDevices?.getUserMedia || typeof (window as any).MediaRecorder === "undefined") return;
-    if (notaRecorderRef.current?.state === "recording") return;
-    try {
-      const stream = await nav.mediaDevices.getUserMedia({ audio: true });
-      notaStreamRef.current = stream;
-      notaChunksRef.current = [];
-      const mr = new (window as any).MediaRecorder(stream);
-      mr.ondataavailable = (e: any) => {
-        if (e.data && e.data.size > 0) notaChunksRef.current.push(e.data);
-      };
-      mr.onstop = () => {
-        try {
-          const chunks = notaChunksRef.current;
-          if (chunks.length > 0) {
-            const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
-            const url = URL.createObjectURL(blob);
-            setNotaAudioUri((prev) => {
-              if (prev) { try { URL.revokeObjectURL(prev); } catch {} }
-              return url;
-            });
-          }
-        } catch {}
-        try { stream.getTracks?.().forEach((t: any) => t.stop()); } catch {}
-        notaStreamRef.current = null;
-        setNotaAudioRecording(false);
-      };
-      notaRecorderRef.current = mr;
-      mr.start();
-      setNotaAudioRecording(true);
-    } catch {
-      setNotaAudioRecording(false);
-    }
-  };
-
-  const stopNotaRecording = () => {
-    try {
-      const mr = notaRecorderRef.current;
-      if (mr && mr.state !== "inactive") mr.stop();
-    } catch {}
-    notaRecorderRef.current = null;
-  };
-
-  const toggleNotaRecording = () => {
-    if (notaAudioRecording) {
-      stopNotaRecording();
-    } else {
-      setNotaAudioUri(null);
-      startNotaRecording();
-    }
-  };
-
-  const resetNotaAudio = () => {
-    stopNotaRecording();
-    setNotaAudioRecording(false);
-    setNotaAudioUri((prev) => {
-      if (prev) { try { URL.revokeObjectURL(prev); } catch {} }
-      return null;
-    });
-  };
-
   // ── AUDIO IA: reproductor (HTMLAudioElement, solo web) ───────────────
   // Cierra el elemento al cerrar IA y al sustituir el audio.
   const releaseAudioEl = () => {
@@ -6175,7 +6157,6 @@ function HomeScreenContent() {
   const userLandingVariant = resolveUserLandingVariant(goView.view, landingVisual.ready,
     !anyOverlayOpen && !goAuthOpen && !empresaOpen && !adminDashOpen && !rutasMode,
     landingVisual.active, landingVisual.preview);
-  const userLandingMinimal = userLandingVariant !== "actual" && orbitSecondLevel === null && activeSatCtx === null;
 
   // ── MODO CREACIÓN vs MODO VISITA ─────────────────────────────────────
   // Se considera que el usuario está CREANDO activamente cuando al menos
@@ -7155,6 +7136,7 @@ function HomeScreenContent() {
         scheduled: true,
         notes: notesDraft,
         attachedNote: attachedNoteText || undefined,
+        attachedNoteReminder: attachedExternalNote?.reminder,
         isGeneric: genericMode,
         reminders: remindersDraft,
         notificationsEnabled: notificationsEnabledDraft,
@@ -7185,6 +7167,8 @@ function HomeScreenContent() {
         type: "TAREA",
         assignedTo: advancedAssigned,
         notes: notesDraft,
+        attachedNote: attachedNoteText || undefined,
+        attachedNoteReminder: attachedExternalNote?.reminder,
         isGeneric: genericMode,
         reminders: remindersDraft,
         notificationsEnabled: notificationsEnabledDraft,
@@ -7222,6 +7206,10 @@ function HomeScreenContent() {
           type: "LLAMADA",
           assignedTo: advancedAssigned,
           notes: notesDraft,
+          attachedNote: attachedNoteText || undefined,
+          attachedNoteReminder: attachedExternalNote?.reminder,
+          reminders: remindersDraft,
+          notificationsEnabled: notificationsEnabledDraft,
           isGeneric: genericMode,
           sugerencia: selectedSugerencia || undefined,
         });
@@ -7294,6 +7282,7 @@ function HomeScreenContent() {
                 assignedTo: advAssigned,
                 notes: notesDraft,
                 attachedNote: attachedNoteText || undefined,
+        attachedNoteReminder: attachedExternalNote?.reminder,
                 isGeneric: genericMode,
                 reminders: remindersDraft,
                 notificationsEnabled: notificationsEnabledDraft,
@@ -7331,6 +7320,8 @@ function HomeScreenContent() {
         type: advancedType,
         assignedTo: advancedAssigned,
         notes: notesDraft,
+        attachedNote: attachedNoteText || undefined,
+        attachedNoteReminder: attachedExternalNote?.reminder,
         isGeneric: true,
         reminders: remindersDraft,
         notificationsEnabled: notificationsEnabledDraft,
@@ -7374,6 +7365,7 @@ function HomeScreenContent() {
         assignedTo: advancedAssigned,
         notes: notesDraft,
         attachedNote: attachedNoteText || undefined,
+        attachedNoteReminder: attachedExternalNote?.reminder,
         isGeneric: genericMode,
         reminders: remindersDraft,
         notificationsEnabled: notificationsEnabledDraft,
@@ -7399,6 +7391,7 @@ function HomeScreenContent() {
         assignedTo: advancedAssigned,
         notes: notesDraft,
         attachedNote: attachedNoteText || undefined,
+        attachedNoteReminder: attachedExternalNote?.reminder,
         isGeneric: genericMode,
         reminders: remindersDraft,
         notificationsEnabled: notificationsEnabledDraft,
@@ -8459,8 +8452,10 @@ function HomeScreenContent() {
     initialDetail?: string,
     prefillDateISO?: string,
     prefillTime?: string,
+    noteReminder?: NoteReminderDraft,
   ) => {
     if (calendarSlotSavingRef.current) return;
+    noteTaskDraftRef.current = noteReminder ?? null;
     const fromTimeSlot = prefillTime !== undefined;
     // ── NOTA EXTERNA DURANTE GO ACTIVO ─────────────────────────────────────
     // Si hay un GO en construcción (categoría elegida o campos ya rellenos),
@@ -8470,7 +8465,9 @@ function HomeScreenContent() {
       setAttachedExternalNote({
         title:  initialText   || "",
         detail: initialDetail || "",
+        reminder: noteReminder,
       });
+      noteTaskDraftRef.current = null;
       setNotesOpen(false);
       setQuickNoteText("");
       setQuickNoteDetail("");
@@ -8586,7 +8583,7 @@ function HomeScreenContent() {
     // Persist draft immediately so content is never lost if user navigates away
     if (!fromTimeSlot) AsyncStorage.setItem(
       "go_task_draft_v1",
-      JSON.stringify({ kind, text: initialText || "", detail: initialDetail || "" }),
+      JSON.stringify({ kind, text: initialText || "", detail: initialDetail || "", ...(noteReminder ? { noteReminder } : {}) }),
     ).catch(() => {});
     setListOpen(false);
     setListMinimized(false);
@@ -8609,7 +8606,7 @@ function HomeScreenContent() {
       }
       await assertTaskUser(ownerUserId);
       if (request !== calendarSlotRequestRef.current) return;
-      calendarSlotDraftRef.current = { ownerUserId };
+      calendarSlotDraftRef.current = { ownerUserId, actionContext: completionIdentity.scope?.userId===ownerUserId ? completionIdentity.scope.context : undefined };
       openFieldSelector("NOTA_INTERNA", "", "", slotDateISO, slotTime);
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), "error");
@@ -8631,8 +8628,55 @@ function HomeScreenContent() {
     await updateGoLog(async entries => {
       await assertTaskUser(ownerUserId);
       if (entries.some(existing => existing.id === entry.id)) return { entries, result: undefined };
-      return { entries: [{ ...entry, ownerUserId }, ...entries].slice(0, 200), result: undefined };
+      const actionContext=calendarSlotDraftRef.current?.actionContext || (completionIdentity.scope?.userId===ownerUserId ? completionIdentity.scope.context : "live:USER");
+      return { entries: [{ ...entry, ownerUserId, actionContext }, ...entries].slice(0, 200), result: undefined };
     });
+  };
+
+  const startGoNoteTask = (kind: "NOTA_INTERNA" | "NOTA_EXTERNA", text: string, detail: string) => {
+    if (noteStartLockRef.current) return;
+    const identity = noteIdentityRef.current;
+    if (quickNoteAlarm && (!identity.ready || !identity.scope)) {
+      showToast(lang === "en" ? "Wait for GO to verify your account and context before adding the reminder."
+        : "Espera a que GO verifique tu cuenta y contexto antes de añadir el aviso.", "warning");
+      setQuickNoteText(text); setQuickNoteDetail(detail);
+      return;
+    }
+    const draft = identity.ready && identity.scope
+      ? { scope: { ...identity.scope }, minutes: quickNoteReminderMinutes } : undefined;
+    noteStartLockRef.current = true;
+    openFieldSelector(kind, text, detail, undefined, undefined, draft);
+  };
+  const saveQuickNoteEntry = async (entry: GoEntry, draft: NoteReminderDraft) => {
+    const active = () => { const current = noteIdentityRef.current;
+      return current.ready && current.scope?.userId === draft.scope.userId && current.scope?.context === draft.scope.context; };
+    try {
+      const result = await saveGoNoteReminder(entry, draft, active);
+      if (active() && result.message) Alert.alert(lang === "en" ? "Task reminder" : "Aviso de la tarea", result.message);
+      if (noteTaskDraftRef.current === draft) noteTaskDraftRef.current = null;
+      setQuickNoteReminderMinutes(null);
+      return true;
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "error");
+      if (active() && !fieldSelectorOpen) { setQuickNoteText(entry.notes || ""); setQuickNoteDetail(entry.detail || ""); setNotesOpen(true); }
+      return false;
+    }
+  };
+
+  const changeQuickNoteReminder = async (minutes: number | null) => {
+    if (!noteReminderTargetId) { setQuickNoteReminderMinutes(minutes); setNoteReminderPickerOpen(false); return; }
+    if (noteReminderBusy) return;
+    const identity = noteIdentityRef.current;
+    if (!identity.ready || !identity.scope) return;
+    const expected = { ...identity.scope };
+    const active = () => noteIdentityRef.current.ready && noteIdentityRef.current.scope?.userId === expected.userId
+      && noteIdentityRef.current.scope?.context === expected.context;
+    setNoteReminderBusy(true);
+    try {
+      const result = await changeGoNoteReminder(noteReminderTargetId, { scope: expected, minutes }, active);
+      if (active()) { Alert.alert(lang === "en" ? "Task reminder" : "Aviso de la tarea", result.message); setNoteReminderPickerOpen(false); }
+    } catch (error) { if (active()) showToast(error instanceof Error ? error.message : String(error), "error"); }
+    finally { setNoteReminderBusy(false); }
   };
 
   // ── CREAR ENTRADA DESDE EL FLUJO FIELD SELECTOR ──────────────────────────
@@ -8647,10 +8691,12 @@ function HomeScreenContent() {
     placeVal: string,
     detailVal?: string,
   ) => {
+    const noteDraft = (kind === "NOTA_INTERNA" || kind === "NOTA_EXTERNA") ? noteTaskDraftRef.current : null;
     const slotOwner = calendarSlotDraftRef.current?.ownerUserId;
     if (calendarTaskContextRef.current && !slotOwner) closeFieldSelectorPanel();
     const now = Date.now();
-    const uid = calendarSlotDraftRef.current?.entryId || makeUid();
+    const uid = calendarSlotDraftRef.current?.entryId || noteDraft?.entryId || makeUid();
+    if (noteDraft) noteDraft.entryId = uid;
     if (slotOwner && calendarSlotDraftRef.current) calendarSlotDraftRef.current.entryId = uid;
 
     if (kind === "NOTA_INTERNA") {
@@ -8674,7 +8720,9 @@ function HomeScreenContent() {
         detail: detailVal || "",
         isGeneric: true,
       };
-      if (slotOwner) {
+      if (noteDraft) {
+        if (!await saveQuickNoteEntry(entry, noteDraft)) return false;
+      } else if (slotOwner) {
         await commitCalendarSelectorEntry(entry, slotOwner);
         closeFieldSelectorPanel();
       } else {
@@ -8709,7 +8757,9 @@ function HomeScreenContent() {
         notes: text || "",
         isGeneric: false,
       };
-      if (slotOwner) {
+      if (noteDraft) {
+        if (!await saveQuickNoteEntry(entry, noteDraft)) return false;
+      } else if (slotOwner) {
         await commitCalendarSelectorEntry(entry, slotOwner);
         closeFieldSelectorPanel();
       } else {
@@ -8989,6 +9039,7 @@ function HomeScreenContent() {
       sentAt?: number;
       notes?: string;
       attachedNote?: string;
+      attachedNoteReminder?: NoteReminderDraft;
       sugerencia?: string;
       isGeneric?: boolean;
       reminders?: number[];
@@ -9070,6 +9121,13 @@ function HomeScreenContent() {
     // el valor por defecto implícito es true para no ensuciar entries
     // antiguos que ya tienen notificaciones activas.
     if (extra?.notificationsEnabled === false) entry.notificationsEnabled = false;
+    if (kind === "sent" && extra?.attachedNoteReminder && entry.attachedNote) {
+      const identity = noteIdentityRef.current;
+      if (identity.ready && identity.scope?.userId === extra.attachedNoteReminder.scope.userId
+        && identity.scope?.context === extra.attachedNoteReminder.scope.context) {
+        Object.assign(entry, bindAttachedNoteReminder(entry, extra.attachedNoteReminder));
+      }
+    }
     console.log("━━━━━━ [addLogEntry - Creación] ━━━━━━");
     console.log("  kind         :", kind);
     console.log("  senderPhone  :", entry.senderPhone  || "(vacío — configura MI TELÉFONO GO)");
@@ -9092,6 +9150,15 @@ function HomeScreenContent() {
       persistLog(next);
       return next;
     });
+    const reminder = extra?.attachedNoteReminder;
+    if (reminder && hasAttachedNoteReminder(entry) && reminder.minutes !== null) {
+      const active = () => noteIdentityRef.current.ready && noteIdentityRef.current.scope?.userId === reminder.scope.userId
+        && noteIdentityRef.current.scope?.context === reminder.scope.context;
+      void confirmAttachedGoNoteReminder(entry.id,reminder,active).then(message=>{
+        if (active()) Alert.alert(lang === "en" ? "Note reminder" : "Aviso de la nota",message);
+      }).catch(()=>{ if (active()) showToast(lang === "en" ? "The note reminder could not be confirmed. Check it before relying on it."
+        : "No se ha podido confirmar el aviso de la nota. Revísalo antes de contar con él.","warning"); });
+    }
     return entry.id;
   };
 
@@ -9770,6 +9837,7 @@ function HomeScreenContent() {
         if (g.deleted) return false;
         if (g.customerBooking && g.bookingStatus !== "confirmada") return false;
         if (g.estado === "rechazado" || g.bookingStatus === "cancelada") return false;
+        if (actionCompletion.status(g)) return false;
         // ── DEDUP CLI/PRV — cada reserva genera dos entradas (cli + prv).
         // Solo mostramos la perspectiva que corresponde al modo activo:
         //   · Usuario  → ve la entrada cliente  (go_booking_cli_*)
@@ -9841,7 +9909,7 @@ function HomeScreenContent() {
 
     return candidates;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [goLog, isUserMode, isBusinessMode]);
+  }, [goLog, isUserMode, isBusinessMode, actionCompletion.status]);
 
   // Primera cita (compat con toda la lógica existente que solo necesita saber
   // si hay alguna — condiciones de render, transport strip, compact button, etc.)
@@ -9860,7 +9928,7 @@ function HomeScreenContent() {
   //   propuesto           → la recibimos, podemos aceptar o rechazar.
   // Se muestran en el panel "Cambios pendientes" sobre Próxima visita.
   const pendingChangeProposals = useMemo(() =>
-    goLog.filter(g => {
+    mergeCompletionEntries(goLog, actionCompletion.candidates).filter(g => {
       if (g.deleted) return false;
       if (!(g as any).changeProposal) return false;
       if (g.estado !== "propuesta_pendiente" && g.estado !== "propuesto") return false;
@@ -9870,7 +9938,7 @@ function HomeScreenContent() {
       if (isUserMode     && g.id.startsWith("go_booking_prv_")) return false;
       return true;
     }),
-  [goLog, isBusinessMode, isUserMode]);
+  [goLog, isBusinessMode, isUserMode, actionCompletion.candidates]);
 
   // ── PENDIENTES DE ACEPTACIÓN — lista unificada ───────────────────────
   // Agrupa: cambios propuestos (goLog) + reservas HOLD.
@@ -10034,6 +10102,8 @@ function HomeScreenContent() {
     setGoLog((prev) => {
       const next = prev.map((g) => {
         if (g.id !== id) return g;
+        // Linked notes keep the same GO/OS identifier; do not drop an independent GO offset.
+        if (hasAttachedNoteReminder(g)) return { ...effectiveNoteReminderEntry(g), firedReminderMins: [], snoozeUntil: undefined };
         const cleanReminders = sanitizeReminders(g.reminders ?? [60, 15]);
         const dt = goDateTime(g);
         const validFuture: number[] = [];
@@ -10106,7 +10176,8 @@ function HomeScreenContent() {
     const tick = () => {
       const now = Date.now();
       const updates: Array<{ id: string; firedAdd: number[]; clearSnooze?: boolean }> = [];
-      for (const g of goLog) {
+      for (const rawEntry of goLog) {
+        const g = effectiveNoteReminderEntry(rawEntry);
         // Explicit owned task reminders are delivered by the OS, never twice by this polling loop.
         if (Platform.OS !== "web" && isNativeReminderTask(g)) continue;
         if (g.deleted) continue;
@@ -15181,7 +15252,7 @@ function HomeScreenContent() {
           • EMPRESA no configurada → "Configura tu empresa"
           • EMPRESA configurada → "Añade servicios" / "Gestiona reservas"
           • Cualquier panel expandido → workGuideHideAnim→0 (fade total)   */}
-      {!anyOperationalPanelOpen && (
+      {!anyOperationalPanelOpen && !actionCompletion.unresolved.length && !actionCompletion.pending.length && (
       <Animated.View testID="landing-general-help"
         onLayout={(e) => setLandingHelpH(e.nativeEvent.layout.height)}
         pointerEvents={anyOperationalPanelOpen ? "none" : "box-none"}
@@ -16260,6 +16331,41 @@ function HomeScreenContent() {
         </>
       )}
 
+      {!anyOverlayOpen && !rutasMode && !goAuthOpen && authBootstrapComplete && <LandingActionCompletion
+        model={actionCompletion} lang={lang} availableWidth={screen.width-insets.left-insets.right}
+        frame={completionFrame({width:screen.width,left:insets.left,right:insets.right,
+          safeTop:Math.max(insets.top+8,closeQrY+closeQrSize+8,(titleBottomLocalY ?? 0)+8),
+          commandsTop:toLandingRootRect(landingPanels.commands).y+landingOffsetY,
+          header:{x:handedness==="right"?insets.left+closeHeaderHeight+20:closeQrX+closeQrSize+closeQrHit+8,
+            y:closeQrY,width:Math.max(44,screen.width-insets.left-insets.right-closeHeaderHeight-closeQrSize-closeQrHit-52),height:44},
+          open:anyOperationalPanelOpen,
+          openHeight:Math.min(landingPanels.region.height,Math.max(landingNextHeight,landingPendingHeight+landingPendingOffset))})}
+        onPendingList={()=>{setListFilter("pendiente");setListOpen(true);}}
+        onPropose={entry=>{
+          const scope=actionCompletion.scope;if(!scope || !actionCompletion.active(scope))return;
+          const current=actionCompletion.candidates.find(candidate=>candidate.id===entry.id);
+          if(!current || completionSchedule(current)!==completionSchedule(entry))return;
+          if(entry.reservationId && (entry.customerBooking || entry.businessBooking || entry.demoLocal)){
+            openBookingProposal(entry,scope.context.includes(":BUSINESS")?"business":"customer");
+            return;
+          }
+          currentReceivedIdRef.current=entry.id;proposalReturnRef.current="landing";
+          setCalOpen(true);
+          calFlow.open({startAt:"date",initialDateISO:entry.dateISO,initialDateDraft:entry.date,
+            initialTime:entry.time,initialDuration:entry.duration,
+            onCancel:()=>setCalOpen(false),
+            onSave:r=>Alert.alert(lang==="en"?"Confirm change proposal":"Confirmar propuesta de cambio",
+              r.dateISO+" · "+r.time,[
+                {text:lang==="en"?"Cancel":"Cancelar",style:"cancel",onPress:()=>setCalOpen(false)},
+                {text:lang==="en"?"Confirm proposal":"Confirmar propuesta",onPress:async()=>{
+                  try{await assertTaskUser(scope.userId);}catch{setCalOpen(false);return;}
+                  if(!actionCompletion.active(scope)){setCalOpen(false);return;}
+                    const latest=actionCompletion.candidates.find(e=>e.id===entry.id);
+                    if(!latest || completionSchedule(latest)!==completionSchedule(entry)){Alert.alert("GO","La acción ha cambiado. Revisa sus datos.");setCalOpen(false);return;}
+                    sendSuggestChangeFromCal(r);
+                }}
+              ])});
+        }}/>}
       {/* FIXED LOCATION ROW — removed. Map/Search/AQUÍ now live in the MAPA orbital satellite sub-layer. */}
       {false && (
       <Animated.View
@@ -17085,7 +17191,8 @@ function HomeScreenContent() {
 
                 if (reservasOrbitalCat !== null) {
                   /* ── NIVEL 2: sub-items de la categoría seleccionada — paginados ── */
-                  const activeCat = RESERVAS_ORBITAL_CATS.find(c => c.id === reservasOrbitalCat)!;
+                  const activeCat = visibleOrbitalBookingCategories.find(c => c.id === reservasOrbitalCat);
+                  if (!activeCat) return null;
                   const PAGE_SIZE = 7;
                   const pageStart = reservasOrbitalPage * PAGE_SIZE;
                   const pageSubs  = activeCat.subs.slice(pageStart, pageStart + PAGE_SIZE);
@@ -17117,7 +17224,7 @@ function HomeScreenContent() {
                   /* ── NIVEL 1: color semántico fijo por categoría ── */
                   return (
                     <>
-                      {RESERVAS_ORBITAL_CATS.map((cat, i) => orbBtn(
+                      {visibleOrbitalBookingCategories.map((cat, i) => orbBtn(
                         cat.id,
                         cat.color,
                         cat.icon, cat.label,
@@ -18348,7 +18455,7 @@ function HomeScreenContent() {
                                 paddingHorizontal: 3,
                               }}
                             >
-                              <UserLandingInk minimal={userLandingMinimal}><Text
+                              <Text
                                 numberOfLines={1}
                                 adjustsFontSizeToFit
                                 minimumFontScale={0.6}
@@ -18361,7 +18468,7 @@ function HomeScreenContent() {
                                 }}
                               >
                                 {displayLabel ?? ""}
-                              </Text></UserLandingInk>
+                              </Text>
                             </LinearGradient>
                           ) : isCalendarBtn ? (
                             <LinearGradient
@@ -18378,7 +18485,7 @@ function HomeScreenContent() {
                                 paddingHorizontal: 3,
                               }}
                             >
-                              <UserLandingInk minimal={userLandingMinimal}><Text
+                              <Text
                                 numberOfLines={1}
                                 adjustsFontSizeToFit
                                 minimumFontScale={0.6}
@@ -18391,13 +18498,13 @@ function HomeScreenContent() {
                                 }}
                               >
                                 {(displayLabel ?? "").toUpperCase()}
-                              </Text></UserLandingInk>
-                              <UserLandingInk minimal={userLandingMinimal}><Text style={{ fontSize: _labelFs + 1, lineHeight: _labelFs + 2, textAlign: "center" }}>
+                              </Text>
+                              <Text style={{ fontSize: _labelFs + 1, lineHeight: _labelFs + 2, textAlign: "center" }}>
                                 {"📅"}
-                              </Text></UserLandingInk>
+                              </Text>
                             </LinearGradient>
                           ) : (
-                            <UserLandingInk minimal={userLandingMinimal}><Text
+                            <Text
                               numberOfLines={1}
                               adjustsFontSizeToFit
                               minimumFontScale={0.6}
@@ -18411,7 +18518,7 @@ function HomeScreenContent() {
                               }}
                             >
                               {displayLabel ?? ""}
-                            </Text></UserLandingInk>
+                            </Text>
                           )}
                         </TouchableOpacity>
                       </Animated.View>
@@ -21610,6 +21717,7 @@ function HomeScreenContent() {
 
       <BottomSheet
         visible={notesOpen}
+        noteKeyboardScroll
         onClose={() => setNotesOpen(false)}
         title={t("panel_note")}
         subtitle={(() => {
@@ -21651,6 +21759,7 @@ function HomeScreenContent() {
           {/* TÍTULO OPERATIVO — una sola línea, nunca crece */}
           <TextInput
             value={quickNoteText}
+            onFocus={() => noteVoice.focus("title")}
             onChangeText={setQuickNoteText}
             placeholder={t('placeholder_task_title_quick')}
             placeholderTextColor="rgba(255,255,255,0.40)"
@@ -21683,6 +21792,7 @@ function HomeScreenContent() {
           {/* TAREA INTERNA — multilinea opcional */}
           <TextInput
             value={quickNoteDetail}
+            onFocus={() => noteVoice.focus("detail")}
             onChangeText={setQuickNoteDetail}
             placeholder={t('placeholder_task_details')}
             placeholderTextColor="rgba(255,255,255,0.55)"
@@ -21718,8 +21828,9 @@ function HomeScreenContent() {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
               setQuickNoteText("");
               setQuickNoteDetail("");
-              openFieldSelector("NOTA_INTERNA", text, detail);
+              startGoNoteTask("NOTA_INTERNA", text, detail);
             }}
+            disabled={noteVoice.status !== "idle"}
             activeOpacity={0.82}
             style={{
               flexDirection: "row",
@@ -21751,8 +21862,9 @@ function HomeScreenContent() {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
               setQuickNoteText("");
               setQuickNoteDetail("");
-              openFieldSelector("NOTA_EXTERNA", text, detail);
+              startGoNoteTask("NOTA_EXTERNA", text, detail);
             }}
+            disabled={noteVoice.status !== "idle"}
             activeOpacity={0.82}
             style={{
               flexDirection: "row",
@@ -21776,7 +21888,7 @@ function HomeScreenContent() {
             </Text>
           </TouchableOpacity>
 
-          {/* MICRÓFONO — graba audio asociado a la nota */}
+          {/* MICRÓFONO — dictado al último campo de escritura seleccionado */}
           <TouchableOpacity
             onPress={() => {
               Haptics.impactAsync(
@@ -21786,8 +21898,9 @@ function HomeScreenContent() {
               ).catch(() => {});
               toggleNotaRecording();
             }}
+            disabled={noteVoice.status === "preparing" || noteVoice.status === "transcribing"}
             activeOpacity={0.8}
-            accessibilityLabel={notaAudioRecording ? t('tasks_stop_recording') : notaAudioUri ? t('tasks_record_again') : t('tasks_record_audio')}
+            accessibilityLabel={notaAudioRecording ? t('tasks_stop_recording') : (noteVoice.status === "transcribing") ? t('tasks_record_again') : t('tasks_record_audio')}
             hitSlop={8}
             style={{
               width: 40,
@@ -21795,13 +21908,13 @@ function HomeScreenContent() {
               borderRadius: 20,
               backgroundColor: notaAudioRecording
                 ? "rgba(239,68,68,0.18)"
-                : notaAudioUri
+                : (noteVoice.status === "transcribing")
                 ? "rgba(96,165,250,0.14)"
                 : "#0e0e10",
               borderWidth: 1.5,
               borderColor: notaAudioRecording
                 ? "#ef4444"
-                : notaAudioUri
+                : (noteVoice.status === "transcribing")
                 ? "rgba(96,165,250,0.70)"
                 : "rgba(255,255,255,0.22)",
               alignItems: "center",
@@ -21817,7 +21930,7 @@ function HomeScreenContent() {
               color={
                 notaAudioRecording
                   ? "#ef4444"
-                  : notaAudioUri
+                  : (noteVoice.status === "transcribing")
                   ? "#60a5fa"
                   : "rgba(255,255,255,0.70)"
               }
@@ -21828,10 +21941,11 @@ function HomeScreenContent() {
           <TouchableOpacity
             onPress={() => {
               Haptics.selectionAsync().catch(() => {});
-              setQuickNoteAlarm(a => !a);
+              setNoteReminderPickerOpen(open => !open);
             }}
             activeOpacity={0.8}
-            accessibilityLabel={quickNoteAlarm ? t('tasks_disable_reminder') : t('tasks_enable_reminder')}
+            accessibilityLabel={quickNoteAlarm ? noteReminderLabel(quickNoteReminderMinutes!, lang === "en") : t('tasks_enable_reminder')}
+            accessibilityState={{ expanded: noteReminderPickerOpen }}
             hitSlop={8}
             style={{
               width: 40,
@@ -21855,7 +21969,7 @@ function HomeScreenContent() {
             onPress={() => {
               Haptics.selectionAsync().catch(() => {});
               resetNotaAudio();
-              setQuickNoteAlarm(false);
+              setNoteReminderPickerOpen(false);
               setNotesOpen(false);
             }}
             activeOpacity={0.8}
@@ -21878,6 +21992,19 @@ function HomeScreenContent() {
             <Feather name="chevron-down" size={18} color="rgba(255,255,255,0.70)" />
           </TouchableOpacity>
           </View>{/* fin fila botones */}
+          {noteVoice.status !== "idle" && <Text testID="note-dictation-status" accessibilityLiveRegion="polite" style={{ color: notaAudioRecording ? "#ef4444" : "#ffffff", fontSize: 12, marginTop: 8 }}>
+            {notaAudioRecording ? (lang === "en" ? "Listening… Tap the microphone to finish." : "Escuchando… Pulsa el micrófono para terminar.")
+              : noteVoice.status === "preparing" ? (lang === "en" ? "Preparing microphone…" : "Preparando micrófono…")
+              : (lang === "en" ? "Transcribing…" : "Transcribiendo…")}
+          </Text>}
+          {!!(noteVoice.error || noteVoice.notice) && <Text testID="note-dictation-error" accessibilityLiveRegion="polite" style={{ color: "#fbbf24", fontSize: 12, marginTop: 8 }}>
+            {noteVoice.notice || (lang === "en" ? "Dictation is unavailable. Check microphone permission and the connection, or type your note." : noteVoice.error)}
+          </Text>}
+          {noteReminderPickerOpen && <GoNoteReminderPicker value={noteReminderTarget ? goNoteReminderMinutes(noteReminderTarget) : quickNoteReminderMinutes}
+            english={lang === "en"} busy={noteReminderBusy}
+            targetName={noteReminderTarget ? [noteReminderTarget.notes, noteReminderTarget.dateISO, noteReminderTarget.time].filter(Boolean).join(" · ") : undefined}
+            savedNotes={savedGoNoteReminderTargets.map(entry => ({ id: entry.id, label: [entry.notes, entry.dateISO, entry.time].filter(Boolean).join(" · ") }))}
+            onSelectNote={setNoteReminderTargetId} onChange={minutes => { void changeQuickNoteReminder(minutes); }} />}
 
         </View>{/* fin wrapper gestual */}
       </BottomSheet>
@@ -21983,8 +22110,9 @@ function HomeScreenContent() {
             // Orden canónico (de pulgar hacia el centro):
             //   Diestro  derecha→izquierda: Todos · Aceptados · Pendientes · Rechazados · Eliminados · Expandir
             //   Zurdo    izquierda→derecha: Expandir · Eliminados · Rechazados · Pendientes · Aceptados · Todos
-            const countPendiente = goLog.filter((g) => !g.deleted && g.estado === "pendiente").length;
-            const countPropuesta = goLog.filter((g) => !g.deleted && (g.estado === "propuesto" || g.estado === "propuesta_pendiente")).length;
+            const resolutionEntries = mergeCompletionEntries(goLog, actionCompletion.candidates.filter(entry => actionCompletion.status(entry) === "pending" || !!entry.changeProposal));
+            const countPendiente = resolutionEntries.filter(g => !g.deleted && g.estado !== "rechazado" && (actionCompletion.status(g) === "pending" || g.estado === "pendiente" && (!g.dateISO || !g.time))).length;
+            const countPropuesta = resolutionEntries.filter((g) => !g.deleted && (g.estado === "propuesto" || g.estado === "propuesta_pendiente")).length;
             const filterDefs = [
               ...(goView.view === "USER" ? [{ k:"reservas" as const,icon:"calendar" as const,label:t('tasks_my_bookings'),color:"#4A80BD",iconOn:"#ffffff",count:customerBookings.entries.length }] : []),
               { k: "todos" as const,     icon: "list" as const,       label: t('filter_todos'),       color: "#ffffff", iconOn: "#0a0a0a", count: 0 },
@@ -22850,7 +22978,8 @@ function HomeScreenContent() {
           //   • Resto      → excluye papelera y aplica el filtro de estado.
           const isPapelaraView = listFilter === "papelera";
           const inPapelera = (g: typeof goLog[number]) => !!(g.deleted || g.estado === "rechazado");
-          const filtered = goLog.filter((g) => {
+          const listEntries = mergeCompletionEntries(goLog, actionCompletion.candidates.filter(entry => actionCompletion.status(entry) === "pending" || !!entry.changeProposal));
+          const filtered = listEntries.filter((g) => {
             if(listFilter==="reservas")return g.customerBooking===true && customerBookings.entries.some(entry=>entry.id===g.id);
             if (isPapelaraView) {
               if (!inPapelera(g)) return false;
@@ -22862,6 +22991,8 @@ function HomeScreenContent() {
               if (isUserMode     && g.id.startsWith("go_booking_prv_")) return false;
               if (listFilter === "propuesta") {
                 if (!["propuesto", "propuesta_pendiente"].includes(g.estado)) return false;
+              } else if (listFilter === "pendiente") {
+                if (actionCompletion.status(g) !== "pending" && (g.estado !== "pendiente" || !!g.dateISO && !!g.time)) return false;
               } else if (listFilter !== "todos" && g.estado !== listFilter) return false;
             }
             // Filtro por actividad: independiente del filtro de estado
@@ -26893,8 +27024,9 @@ function HomeScreenContent() {
                     <TouchableOpacity
                       onPress={async () => {
                         const slotTask = !!calendarSlotDraftRef.current;
+                        const noteTask = !!noteTaskDraftRef.current;
                         if (fieldSelectorSaveBusyRef.current) return;
-                        if (slotTask) fieldSelectorSaveBusyRef.current = true;
+                        if (slotTask || noteTask) fieldSelectorSaveBusyRef.current = true;
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
                         if (qdReturnTimerRef.current) {
                           clearTimeout(qdReturnTimerRef.current);
@@ -26910,10 +27042,11 @@ function HomeScreenContent() {
                         const dateISO = fsFilledValues.dateISO     || "";
                         const time    = fsFilledValues.time        || "";
                         const place   = fsFilledValues.place       || "";
-                        if (slotTask) {
-                          calendarSlotSavingRef.current = true;
+                        if (slotTask || noteTask) {
+                          if (slotTask) calendarSlotSavingRef.current = true;
                           try {
-                            await createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
+                            const result = await createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
+                            if (result === false) { fieldSelectorSaveBusyRef.current = false; return; }
                           } catch (error) {
                             fieldSelectorSaveBusyRef.current = false;
                             calendarSlotSavingRef.current = false;
@@ -26930,7 +27063,7 @@ function HomeScreenContent() {
                         setFieldSelectorOpen(false);
                         setFieldSelectorText("");
                         setFieldSelectorDetail("");
-                        if (!slotTask) void createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
+                        if (!slotTask && !noteTask) void createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
                         const origin = qdOriginContextRef.current;
                         qdOriginContextRef.current = { listOpen: false, notesOpen: false, agendaOpOpen: false };
                         if (origin.listOpen) setListOpen(true);
@@ -27310,6 +27443,7 @@ function BottomSheet({
   modalOverlay,
   rightZoneClose,
   containerBg,
+  noteKeyboardScroll,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -27386,6 +27520,7 @@ function BottomSheet({
   // Color de fondo de prueba (TEST COLOR FONDO). Sobreescribe el
   // backgroundColor del panel sin alterar el BACKGROUND_MASTER global.
   containerBg?: string;
+  noteKeyboardScroll?: boolean;
 }) {
   // Notifica al padre cuando el sheet deja de estar visible para que
   // resetee la altura del panel a 0 (modo "sin overlay").
@@ -27400,6 +27535,21 @@ function BottomSheet({
   // del safe-area completo. La propia animación del teclado hace la transición suave.
   const [kbVisible, setKbVisible] = useState(false);
   const effectivePaddingBottom = kbVisible ? 0 : paddingBottom;
+  const noteWindow = useWindowDimensions();
+  const noteInsets = useSafeAreaInsets();
+  const [noteKeyboardTop, setNoteKeyboardTop] = useState<number | null>(null);
+  const [noteHeaderHeight, setNoteHeaderHeight] = useState(0);
+  useEffect(() => {
+    if (!noteKeyboardScroll || !visible) { setNoteKeyboardTop(null); return; }
+    const change = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow", event => {
+      const top = event.endCoordinates.screenY;
+      setNoteKeyboardTop(top >= noteWindow.height ? null : top);
+    });
+    const hide = Keyboard.addListener("keyboardDidHide", () => setNoteKeyboardTop(null));
+    return () => { change.remove(); hide.remove(); };
+  }, [noteKeyboardScroll, visible, noteWindow.height]);
+  const noteContentHeight = noteKeyboardContentHeight(noteWindow.height, noteKeyboardTop,
+    noteInsets.top, noteHeaderHeight, (compact ? 6 : 12) + 1, effectivePaddingBottom);
   useEffect(() => {
     const show = Keyboard.addListener("keyboardWillShow", () => setKbVisible(true));
     const showDid = Keyboard.addListener("keyboardDidShow", () => setKbVisible(true));
@@ -27539,7 +27689,7 @@ function BottomSheet({
   const rightZoneGesture = useMemo(
     () =>
       Gesture.Pan()
-        .enabled(!!rightZoneClose && !!dragToClose)
+        .enabled(!!rightZoneClose && !!dragToClose && !(noteKeyboardScroll && kbVisible))
         // Activa tras 4 px (antes: 8) — respuesta casi inmediata.
         .activeOffsetY([0, 4])
         // Falla si el gesto va claramente hacia arriba.
@@ -27578,7 +27728,7 @@ function BottomSheet({
             translateY.value = withSpring(0, { damping: 22, stiffness: 240, mass: 0.7 });
           }
         }),
-    [rightZoneClose, dragToClose, rzStartedInZone, rzScreenW, doClose, translateY, panelH],
+    [rightZoneClose, dragToClose, noteKeyboardScroll, kbVisible, rzStartedInZone, rzScreenW, doClose, translateY, panelH],
   );
 
   const sheetAnimStyle = useAnimatedStyle(() => {
@@ -27682,7 +27832,7 @@ function BottomSheet({
                     se queda con el drag, Pressable solo recibe taps. */}
                 <Pressable onPress={(e) => e.stopPropagation?.()}>
                   {!minimized && (
-                    <View collapsable={false}>
+                    <View collapsable={false} onLayout={noteKeyboardScroll ? event => setNoteHeaderHeight(event.nativeEvent.layout.height) : undefined}>
                       <View
                         style={[
                           styles.sheetHandle,
@@ -27728,19 +27878,19 @@ function BottomSheet({
                       )}
                     </View>
                   )}
-                  {compact ? (
+                  {compact && !noteKeyboardScroll ? (
                     <View>{children}</View>
                   ) : (
                     <GestureDetector gesture={nativeScrollGesture}>
                       {Platform.OS === "web" ? (
                         <Reanimated.ScrollView
                           style={[
-                            { maxHeight: minimized ? 0 : 460, overflow: "hidden" },
+                            { maxHeight: minimized ? 0 : noteKeyboardScroll ? noteContentHeight : 460, overflow: "hidden" },
                             { WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", touchAction: "pan-y" } as any,
                           ]}
                           keyboardShouldPersistTaps="handled"
                           showsVerticalScrollIndicator={false}
-                          bounces
+                          bounces={!noteKeyboardScroll}
                           decelerationRate="normal"
                           nestedScrollEnabled
                           scrollEventThrottle={16}
@@ -27751,10 +27901,10 @@ function BottomSheet({
                         </Reanimated.ScrollView>
                       ) : (
                         <KeyboardAwareScrollView
-                          style={{ maxHeight: minimized ? 0 : 460, overflow: "hidden" }}
+                          style={{ maxHeight: minimized ? 0 : noteKeyboardScroll ? noteContentHeight : 460, overflow: "hidden", ...(noteKeyboardScroll ? { flexGrow: 0 } : {}) }}
                           keyboardShouldPersistTaps="handled"
                           showsVerticalScrollIndicator={false}
-                          bounces
+                          bounces={!noteKeyboardScroll}
                           decelerationRate="normal"
                           nestedScrollEnabled
                           scrollEventThrottle={16}

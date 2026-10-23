@@ -4,13 +4,14 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import vm from "node:vm";
+import { modulePublicationPolicy, loadModulePublicationHook } from "./helpers/module-publication-fixture.mjs";
 const ts = createRequire(path.join(process.cwd(),"package.json"))("typescript");
 const owner="11111111-1111-4111-8111-111111111111";
 const turn=async()=>{for(let i=0;i<15;i++)await new Promise(resolve=>setTimeout(resolve,0));};
 const compile=name=>ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 function pure(name,imports={}){const exports={};vm.runInNewContext(compile(name),{exports,require:key=>{if(key in imports)return imports[key];throw Error("Unexpected dependency "+key);},Date,Intl,Map,Set});return exports;}
 const storeModule=pure("data/businessDemoStore.ts"),repoModule=pure("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":pure("data/bookingServices.ts")});
-function fixture({real=false,sectors}={}){
+function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
   const memory=new Map(),liveCalls=[],navigation=[],hooks=new Map(),cache=new Map();
   const initial={businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],activeDays:[],openFrom:"09:00",openTo:"18:00",daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};
   const store=storeModule.createBusinessDemoStore({ownerUserId:owner,storage:{getItem:async key=>memory.get(key)??null,setItem:async(key,value)=>memory.set(key,value)},canUse:()=>true,initialConfig:initial});
@@ -37,6 +38,8 @@ function fixture({real=false,sectors}={}){
   const booking={BookingApiError,computeRefundInfo:()=>({isFree:true}),getAuthenticatedUserId:()=>live("getAuthenticatedUserId")};
   for(const name of ["cancelBooking","claimSlot","createHold","getAllSlots","getActivebusinesses","getBookableItems","getStaff","searchBusinesses","getMyBookings"])booking[name]=()=>live(name);
   const mocks={
+    "@workspace/api-zod":modulePublicationPolicy,
+    "@/hooks/useBookingModulePublication":loadModulePublicationHook(React,{context,owner:ownerAccess}),
     "./CatalogComplementSelector":{CatalogComplementSelector:()=>null},
     "@/data/catalogAssociations":pure("data/catalogAssociations.ts",{"./booking":booking}),
     react:{...React,default:React},"react-native":native,
@@ -83,6 +86,8 @@ test("Landing search keeps the live activation/category filters and ignores late
     const calls=[],results=[];let resolve;
     const pending=new Promise(done=>{resolve=done;});
     const scope={exports:{},goSearchOpen:true,goSearchSub:{id:"peluqueria"},adminAccess:{checking:false},goSearchQuery:"GO",
+      bookingPublication:modulePublicationPolicy.defaultGoModulePublication(),bookingInternalAccess:false,
+      bookingActivityEnabled:modulePublicationPolicy.bookingActivityEnabled,canonicalBookingActivity:modulePublicationPolicy.canonicalBookingActivity,
       demoBookingRepository:demo?{searchBusinesses:()=>{calls.push("demo");return pending;}}:undefined,
       getBusinesses:()=>{calls.push("live");return pending;},setGoSearchBusinesses:rows=>results.push(rows)};
     vm.runInNewContext(ts.transpileModule("exports.run="+effect.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,scope);
@@ -95,17 +100,19 @@ test("Landing search keeps the live activation/category filters and ignores late
 
 test("rapid repeated confirmation invokes the DEMO commit only once",async()=>{const f=fixture();await f.configure();await selectSlot(f);await turn();const tree=f.render(f.Overlay,f.props);let commits=0;const claim=f.repo.claimSlot;f.repo.claimSlot=input=>{commits++;return claim(input);};const confirm=button(tree,"BIZ_CONFIRM_BOOKING_BTN").props.onPress;await Promise.all([confirm(),confirm()]);const final=f.render(f.Overlay,f.props);assert.equal(commits,1);assert.ok(text(final).includes("BIZ_BOOKING_CONFIRMED"));assert.equal(f.store.getSnapshot().bookings.length,1);assert.equal(f.store.getSnapshot().reservations.length,1);});
 
-test("New reservation excludes existing reservation history and preserves its nine categories, recents and search",async()=>{
+for(const context of ["USER","ADMIN"])test("New reservation keeps history separate, recents and search; publication categories for "+context,async()=>{
   const {SECTORS}=pure("data/goSectorData.ts",{react:{},"@react-native-async-storage/async-storage":{default:{}},"@/data/goSectorTranslations":{trSector:value=>value}});
   assert.equal(SECTORS.length,9);
-  const f=fixture({sectors:SECTORS});await f.configure();
+  const f=fixture({sectors:SECTORS,context,ownerAccess:true});await f.configure();
   const service=(await f.repo.getBookableItems(f.store.businessId))[0];
   for(const time of ["10:00","11:00"]){const held=await f.repo.createHold({businessId:f.store.businessId,bookableItemId:service.id,customerId:owner,startDatetime:"2030-01-07T"+time+":00",endDatetime:"2030-01-07T"+time.slice(0,2)+":30:00",unitsReserved:1,peopleCount:1});await f.repo.claimSlot({...held.booking,status:"CONFIRMED"});if(time==="11:00")await f.repo.cancelBooking(held.booking.id);}
   const before=JSON.stringify(f.store.getSnapshot());
   const props={...f.props,initialBusinessId:undefined};
   f.render(f.Overlay,props);await turn();let tree=f.render(f.Overlay,props);
   assert.ok(text(tree).includes("BIZ_NEW_BOOKING"));assert.ok(text(tree).includes("biz_recent_label"));
-  for(const sector of SECTORS)assert.ok(button(tree,sector.label),sector.label);
+  const expected=modulePublicationPolicy.visibleBookingSectors(SECTORS,modulePublicationPolicy.defaultGoModulePublication(),context==="ADMIN");
+  assert.equal(expected.length,context==="ADMIN"?9:1);
+  for(const sector of SECTORS)assert.equal(!!button(tree,sector.label),expected.some(row=>row.id===sector.id),sector.label);
   assert.equal(nodes(tree).some(node=>node.type===f.MyList),false);
   assert.equal(text(tree).includes("Confirmada"),false);assert.equal(text(tree).includes("Cancelada"),false);
   assert.equal(nodes(tree).filter(node=>node.type==="TextInput").length,1);
@@ -117,7 +124,7 @@ test("New reservation excludes existing reservation history and preserves its ni
 
 test("New reservation removes only the history embed and reserves no history-specific layout height",()=>{
  const source=readFileSync("components/booking/BookingSearchOverlay.tsx","utf8");
- assert.equal(source.includes("MyBookingsList"),false);assert.ok(source.includes("SECTORS.slice(rowIdx * 3, rowIdx * 3 + 3)"));
+ assert.equal(source.includes("MyBookingsList"),false);assert.ok(source.includes("visibleSectors.slice(rowIdx * 3, rowIdx * 3 + 3)"));
  assert.ok(source.includes("biz_new_booking"));assert.ok(source.includes("biz_recent_label"));assert.ok(source.includes("biz_search_business_service_ph"));
  const ast=ts.createSourceFile("overlay.tsx",source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let dock;
  (function walk(n){if(ts.isPropertyAssignment(n)&&n.name.getText(ast)==="actionDock")dock=n.initializer;ts.forEachChild(n,walk)})(ast);
@@ -153,8 +160,8 @@ test("multi-service UI confirms cut, colour and treatment as one reservation",as
  const data=f.store.getSnapshot();assert.equal(data.bookings.length,1);assert.equal(data.bookings[0].services.length,3);assert.equal(data.bookings[0].endDatetime,"2030-01-07T10:45:00");assert.equal(data.reservations.length,1);assert.equal(data.entries[0].intentLabel,"Corte DEMO + Tinte DEMO + Tratamiento DEMO");assert.equal(data.entries[0].duration,"105");assert.deepEqual(f.liveCalls,[]);
 });
 
-test('the shared multi-service flow also confirms a different service sector without changing its catalogue',async()=>{
- const f=fixture();await f.configure();await f.store.updateConfig({sectorId:'salud',subId:'fisioterapia',services:[{name:'Consulta',duration:30,price:35},{name:'Tratamiento',duration:30,price:25}]});
+test('authorized internal preview retains the shared multi-service flow for an unpublished sector',async()=>{
+ const f=fixture({context:"BUSINESS",ownerAccess:true});await f.configure();await f.store.updateConfig({sectorId:'salud',subId:'fisioterapia',services:[{name:'Consulta',duration:30,price:35},{name:'Tratamiento',duration:30,price:25}]});
  const before=JSON.stringify(f.store.getSnapshot().config.services);
  let tree=await services(f);for(const item of await f.repo.getBookableItems(f.store.businessId)){control(tree,'booking-service-'+item.id).props.onPress();tree=f.render(f.Overlay,f.props);}
  await control(tree,'booking-save-services').props.onPress();tree=f.render(f.Overlay,f.props);button(tree,'Raul 1 GO PRUEBA').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);

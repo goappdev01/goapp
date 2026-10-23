@@ -65,6 +65,7 @@ export type GoEntry = {
   actionContext?: string;
   startDatetime?: string;
   endDatetime?: string;
+  localResolutionStatus?: "done" | "pending";
   id: string;
   kind: "sent" | "received";
   intentKey: string;
@@ -572,25 +573,9 @@ const MONTH_NAMES_ES = [
 ];
 
 function isOverdue(g: GoEntry): boolean {
-  if (g.deleted) return false;
-  if (g.estado === "aceptado") return false;
-  if (g.estado === "rechazado") return false;
-  // Propuestas de cambio pendientes de confirmación → ya tienen fecha/hora asignada,
-  // no deben aparecer en Pendientes aunque la hora haya pasado.
-  if (g.estado === "propuesta_pendiente") return false;
-  if (g.estado === "propuesto") return false;
-  if (!g.dateISO) return true; // Sin fecha → pendiente de ubicar en el tiempo
-  const todayISO = formatISODate(getToday());
-  if (g.dateISO < todayISO) return true;   // fecha pasada → siempre vencida
-  if (g.dateISO > todayISO) return false;  // fecha futura → nunca vencida
-  // Mismo día: comparar hora exacta
-  if (!g.time) return false;               // sin hora → no vencida (todo el día)
-  const tm = g.time.match(/^(\d{1,2}):(\d{2})$/);
-  if (!tm) return false;
-  const now = new Date();
-  const goMinutes = parseInt(tm[1], 10) * 60 + parseInt(tm[2], 10);
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  return goMinutes < nowMinutes;
+  if (g.deleted || g.estado === "rechazado" || g.localResolutionStatus === "done") return false;
+  if (g.localResolutionStatus === "pending") return true;
+  return !g.dateISO && g.estado === "pendiente";
 }
 
 function isInDay(g: GoEntry, dateISO: string): boolean {
@@ -1374,7 +1359,7 @@ export function AgendaBoard({
     const _textMuted     = hasProposal ? "rgba(255,255,255,0.45)"  : cardTextMuted;
     const _divider       = hasProposal ? _proposalAlpha22           : cardDivider;
 
-    const isCompleted    = item.estado === "aceptado";
+    const isCompleted    = item.localResolutionStatus === "done";
     const hasTime        = !!item.time;
     const isSelected     = embedded && selectedDateISO === item.dateISO;
     const isDragged      = dragItem?.id === item.id;
@@ -3352,21 +3337,7 @@ export function AgendaOperativa({
 
   const retrasadoItems = useMemo(
     () =>
-      goLog.filter((g) => {
-        if (g.deleted || g.estado === "aceptado" || g.estado === "rechazado") return false;
-        if (!g.dateISO) return false; // sin fecha → no vence en la vista SEMANA
-        const todayISO = formatISODate(getToday());
-        if (g.dateISO < todayISO) return true;   // fecha pasada → siempre vencida
-        if (g.dateISO > todayISO) return false;  // fecha futura → nunca vencida
-        // Mismo día: comparar hora exacta
-        if (!g.time) return false;
-        const tm = g.time.match(/^(\d{1,2}):(\d{2})$/);
-        if (!tm) return false;
-        const now = new Date();
-        const goMinutes = parseInt(tm[1], 10) * 60 + parseInt(tm[2], 10);
-        const nowMinutes = now.getHours() * 60 + now.getMinutes();
-        return goMinutes < nowMinutes;
-      }),
+      goLog.filter((g) => isOverdue(g)),
     [goLog]
   );
 

@@ -21,7 +21,7 @@ const access = load("lib/goTaskAccess.ts", { "@/data/booking": { getAuthenticate
 const reminders = load("lib/goTaskReminders.ts", {
   "@workspace/api-zod": {}, "./goLogBridge": {}, "./goTaskAccess": access,
 });
-const model = load("lib/goNativeReminderScheduler.ts", { "./goTaskAccess": access, "./goTaskReminders": reminders });
+const model = load("lib/goNativeReminderScheduler.ts", { "./goTaskAccess": access, "./goTaskReminders": reminders, "./goNoteTools": load("lib/goNoteTools.ts") });
 const plain = value => JSON.parse(JSON.stringify(value));
 const A = { userId: "A", context: "live:USER" };
 const task = (id = "buy", extra = {}) => ({ id, kind: "sent", notes: "Hacer la compra", dateISO: "2026-10-13",

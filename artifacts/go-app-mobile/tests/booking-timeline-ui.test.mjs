@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import vm from "node:vm";
+import { modulePublicationPolicy, loadModulePublicationHook } from "./helpers/module-publication-fixture.mjs";
 
 // Execute the production components and booking HTTP adapter. Native rendering,
 // hooks and the HTTP transport are deterministic; availability is never rebuilt
@@ -130,6 +131,7 @@ function fixture(kind = "provider", overrides = {}) {
   const apiScope = { exports: {}, Headers, URLSearchParams, Intl, Date: Clock,
     process: { env: { EXPO_PUBLIC_API_URL: "https://timeline.test.invalid/api" } }, console: { log() {}, warn() {}, error() {} },
     require(name) {
+      if (name === "@workspace/api-zod") return modulePublicationPolicy;
       if (name === "@react-native-async-storage/async-storage") return { default: storage };
       if (name === "@/lib/authSession") return auth;
       if (name === "./goSearchAliases") return { normalize: value => value.toLowerCase(), expandSearchTerms: value => [value.toLowerCase()] };
@@ -183,6 +185,8 @@ function fixture(kind = "provider", overrides = {}) {
   ], activeDays: [], daySchedules: {}, staffSchedules: {}, openFrom: "00:00", openTo: "00:01" };
   const timers = new Map(); let timerId = 0;
   const modules = {
+    "@workspace/api-zod": modulePublicationPolicy,
+    "@/hooks/useBookingModulePublication": loadModulePublicationHook(React),
     "./CatalogComplementSelector": { CatalogComplementSelector: "CatalogComplementSelector" },
     "@/data/catalogAssociations": catalogScope.exports,
     react: { ...React, default: React }, "react-native": native,

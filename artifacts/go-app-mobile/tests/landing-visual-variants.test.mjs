@@ -171,6 +171,5 @@ test("original orbit geometry, colors, swipe recognizers and core GO handlers ma
  for(const [name,hash] of Object.entries(expected))assert.equal(createHash("sha256").update(found[name].replace(/\s+/g,"")).digest("hex"),hash,name);
  assert.ok(source.includes('userLandingVisualEnabled = goView.loaded && goView.view === "USER"'));
  assert.ok(source.includes('accessibilityLabel={goView.view === "USER" ? (displayLabel ?? s.key) : undefined}'));
- assert.equal(source.match(/<UserLandingInk minimal=\{userLandingMinimal\}/g).length,4);
- assert.ok(source.includes('const userLandingMinimal = userLandingVariant !== "actual" && orbitSecondLevel === null && activeSatCtx === null;'));
+ assert.doesNotMatch(source, /<UserLandingInk\b|const userLandingMinimal\b/, 'functional satellite labels stay visible in every variant');
 });

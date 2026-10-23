@@ -21,7 +21,9 @@ const hints = find(ast, node => ts.isJsxElement(node) &&
   node.getText(ast).includes("t('biz_configure_hint')"));
 assert.ok(hints, 'reuse the existing Landing hints block');
 const hintExpression = ts.isParenthesizedExpression(hints.parent) ? hints.parent.parent : hints.parent;
-assert.ok(ts.isBinaryExpression(hintExpression) && hintExpression.left.getText(ast) === '!anyOperationalPanelOpen', 'all general guidance is structurally absent while any operational panel is open');
+assert.ok(ts.isBinaryExpression(hintExpression), 'guidance remains conditionally mounted');
+assert.equal(hintExpression.left.getText(ast), '!anyOperationalPanelOpen && !actionCompletion.unresolved.length && !actionCompletion.pending.length',
+  'guidance is structurally absent while an operational panel or the recovered completion information occupies its area');
 const compile = value => ts.transpileModule(value, { compilerOptions: {
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
 } }).outputText;
@@ -42,7 +44,7 @@ const renderCode = compile(definitions + '\nmodule.exports = { tree: ' + hintExp
 function render({
   view = 'USER', owner = false, adminAllowed = false, checking = false, loaded = true,
   requestedBusinessMode = false, businessAllowed = false, configured = false, completedSteps = [],
-  workGuideDismissed = false, tutorialsCompleted = false, demoReady = false, panelOpen = false, lang = 'es',
+  workGuideDismissed = false, tutorialsCompleted = false, demoReady = false, panelOpen = false, unresolved = 0, pending = 0, lang = 'es',
 } = {}) {
   const goView = {
     view, loaded,
@@ -59,6 +61,7 @@ function render({
     empresaDemoSetup: { ready: demoReady },
     isUserV1Landing: policy.exports.isUserV1Landing,
     anyOperationalPanelOpen: panelOpen, insets: { bottom: 34 }, SYSTEM_MARGIN_Y: 0, orbitWrapSize: 300,
+    actionCompletion: { unresolved: Array(unresolved).fill({}), pending: Array(pending).fill({}) },
     nextAppointment: null, isActivelyCreating: false, anyOverlayOpen: false, nextAptMinimized: true,
     nextAptPanelH: 0, allPendientes: [], rutasMode: false, cambiosOpen: false, pendingPanelH: 0,
     contentBottom: bottom => bottom, landingHelpBottom: 354, setLandingHelpH() {},
@@ -148,6 +151,19 @@ test('context switch and foreground revalidation cannot display another contexts
 
 test('normal reservation tutorial completion still hides its public help', () => {
   assert.equal(texts(render({ tutorialsCompleted: true }).tree), '');
+});
+
+test('recovered personal completion information suppresses only overlapping guidance in every authorized context', () => {
+  for (const view of ['USER', 'BUSINESS', 'ADMIN']) {
+    const props = { view, owner: true, adminAllowed: true };
+    const before = texts(render(props).tree);
+    assert.ok(before.length > 0);
+    for (const state of [{ unresolved: 1 }, { pending: 1 }, { unresolved: 2, pending: 3 }]) {
+      assert.equal(render({ ...props, ...state }).tree, false);
+      assert.equal(texts(render({ ...props, ...state }).tree), '');
+    }
+    assert.equal(texts(render(props).tree), before);
+  }
 });
 
 

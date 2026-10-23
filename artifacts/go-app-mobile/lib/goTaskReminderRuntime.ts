@@ -1,12 +1,23 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { readGoLog } from "./goLogStore";
+import { effectiveNoteReminderEntry } from "./goNoteTools";
 import { getTaskUser } from "./goTaskAccess";
-import { taskInScope, reminderOffsets, reminderTaskInstant, type TaskScope } from "./goTaskReminders";
-import { createNativeReminderScheduler, type NativeReminderReport } from "./goNativeReminderScheduler";
+import { reminderOffsets, reminderTaskInstant, type TaskScope } from "./goTaskReminders";
+import { createNativeReminderScheduler, nativeReminderTaskInScope, type NativeReminderReport } from "./goNativeReminderScheduler";
 import { createExpoReminderPorts } from "./goNativeNotificationAdapter";
 import { clearTaskNotificationFocus, focusTaskFromNotification } from "./goTaskNotificationFocus";
 import type { AlertMode } from "@/contexts/GoNotificationContext";
 
+type CompletionPolicy = {
+  requests(scope: TaskScope): Promise<import("./goNativeReminderScheduler").NativeReminderRequest[]>;
+  present(scope: TaskScope, data: Record<string, unknown>): Promise<boolean>;
+  open(scope: TaskScope, data: Record<string, unknown>): Promise<boolean>;
+};
+let completionPolicy: CompletionPolicy | null = null;
+export function registerActionCompletionRuntime(policy: CompletionPolicy) {
+  completionPolicy = policy;
+  return () => { if (completionPolicy === policy) completionPolicy = null; };
+}
 let scope: TaskScope | null = null;
 let mode: AlertMode = "sound";
 let revision = 0;
@@ -14,6 +25,7 @@ const same = (a: TaskScope | null, b: TaskScope | null) => a === null || b === n
 export const isNativeTaskScopeActive = (expected: TaskScope) => same(scope, expected);
 const scheduler = createNativeReminderScheduler(createExpoReminderPorts({
   readTasks: readGoLog, now: () => Date.now(),
+  readCompletionRequests: expected => completionPolicy?.requests(expected) ?? Promise.resolve([]),
   async scopeValid(expected) { return isNativeTaskScopeActive(expected) && await getTaskUser() === expected.userId && isNativeTaskScopeActive(expected); },
 }));
 async function persistedMode(): Promise<AlertMode> {
@@ -50,8 +62,12 @@ export async function openNativeReminderTask(data: Record<string, unknown>): Pro
   if (data.goTaskReminder !== true || typeof data.taskId !== "string" || typeof data.userId !== "string" || typeof data.context !== "string") return false;
   const expected = { userId: data.userId, context: data.context };
   if (!isNativeTaskScopeActive(expected) || await getTaskUser() !== expected.userId) return false;
+  if (data.goActionCompletion === true) {
+    const opened = await completionPolicy?.open(expected, data);
+    return !!opened && isNativeTaskScopeActive(expected) && await getTaskUser() === expected.userId;
+  }
   const rows = (await readGoLog()).filter(task => task.id === data.taskId);
-  if (rows.length !== 1 || !taskInScope(rows[0], expected) || rows[0].deleted || rows[0].estado === "rechazado"
+  if (rows.length !== 1 || !nativeReminderTaskInScope(rows[0], expected) || rows[0].deleted || rows[0].estado === "rechazado"
     || !isNativeTaskScopeActive(expected) || await getTaskUser() !== expected.userId || !isNativeTaskScopeActive(expected)) return false;
   focusTaskFromNotification({ task: rows[0], scope: expected });
   return true;
@@ -63,9 +79,12 @@ export async function canPresentNativeTaskReminder(data: Record<string, unknown>
   if (!isNativeTaskScopeActive(expected)) return false;
   const [owner, rows, preference] = await Promise.all([getTaskUser(), readGoLog(), persistedMode()]);
   if (owner !== expected.userId || preference === "silent" || !isNativeTaskScopeActive(expected)) return false;
+  if (data.goActionCompletion === true) {
+    return !!await completionPolicy?.present(expected, data) && await getTaskUser() === expected.userId && isNativeTaskScopeActive(expected);
+  }
   const matches = rows.filter(task => task.id === data.taskId);
-  const task = matches[0];
-  if (matches.length !== 1 || !task || !taskInScope(task, expected) || task.deleted || task.estado === "rechazado"
+  const task = matches[0] && effectiveNoteReminderEntry(matches[0]);
+  if (matches.length !== 1 || !task || !nativeReminderTaskInScope(task, expected) || task.deleted || task.estado === "rechazado"
     || task.notificationsEnabled === false || !reminderOffsets(task).includes(data.minutes)) return false;
   try {
     const signature = JSON.parse(String(data.signature));

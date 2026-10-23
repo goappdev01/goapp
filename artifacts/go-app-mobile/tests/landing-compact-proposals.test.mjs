@@ -30,6 +30,8 @@ const code = compile(`${formatter?.getText(ast) || ''}\ntree = (${sheet.getText(
 const translationsContext = { exports: {} };
 vm.runInNewContext(compile(fs.readFileSync('i18n/translations.ts', 'utf8')), translationsContext);
 const translations = translationsContext.exports.translations;
+const completionContext = { exports: {} };
+vm.runInNewContext(compile(fs.readFileSync('lib/goActionCompletion.ts', 'utf8')), completionContext);
 const setterNames = new Set();
 function setters(node) {
   if (ts.isIdentifier(node) && /^set[A-Z]/.test(node.text) && !['setTimeout', 'setInterval'].includes(node.text)) setterNames.add(node.text);
@@ -66,6 +68,8 @@ function fixture(lang = 'es', overrides = {}) {
   const hosts = Object.fromEntries(['BottomSheet', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable',
     'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(name => [name, name]));
   const context = { ...hosts, React, Date, Math, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""},
+    mergeCompletionEntries: completionContext.exports.mergeCompletionEntries,
+    actionCompletion: { candidates: [], status: () => undefined },
     t: key => { assert.equal(typeof translations[lang][key], 'string', key); return translations[lang][key]; },
     listOpen: true, listSwipeStepAllowed: true, llamadasListOpen: false, listMinimized: false,
     listFiltersHidden: false, listFilter: 'todos', typeFilter: 'todos', activityFilter: 'todas',

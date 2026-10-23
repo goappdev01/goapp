@@ -3,7 +3,7 @@ import * as Notifications from "expo-notifications";
 import type { NativeReminderPorts } from "./goNativeReminderScheduler";
 
 /** Local notifications only: no Expo push token, backend or network request. */
-export function createExpoReminderPorts(base: Pick<NativeReminderPorts, "readTasks" | "scopeValid" | "now">): NativeReminderPorts {
+export function createExpoReminderPorts(base: Pick<NativeReminderPorts, "readTasks" | "scopeValid" | "now" | "readCompletionRequests">): NativeReminderPorts {
   const platform = Platform.OS === "ios" || Platform.OS === "android" ? Platform.OS : "web";
   const channel = (sound: boolean) => sound ? "go-task-reminders-sound" : "go-task-reminders-visual";
   return {
@@ -50,7 +50,9 @@ export function createExpoReminderPorts(base: Pick<NativeReminderPorts, "readTas
           title: "Recordatorio GO", body: input.title,
           sound: input.sound ? "default" : false,
           data: { goTaskReminder: true, taskId: input.taskId, minutes: input.minutes,
-            userId: input.scope.userId, context: input.scope.context, signature: input.signature },
+            userId: input.scope.userId, context: input.scope.context, signature: input.signature,
+            ...(input.completion ? { goActionCompletion: true, completionKey: input.completion.key,
+              completionSchedule: input.completion.schedule } : {}) },
         },
         trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: input.at,
           ...(platform === "android" ? { channelId: channel(input.sound) } : {}) },

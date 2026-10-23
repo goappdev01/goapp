@@ -10,15 +10,31 @@ const ts = require('typescript'); // Existing workspace dev dependency.
 
 function fixture() {
   const requests = []; let upstream = new Response('{}', { status: 200 });
-  const source = readFileSync('src/routes/supabase.ts', 'utf8');
-  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  const module = { exports: {} };
-  const localRequire = id => id === '../lib/supabase' ? {
+  const transport = {
     bearerHeader: authorization => ({ Authorization: authorization }),
     supabaseRequest: async (url, init) => { requests.push({ url, init }); return upstream; },
-  } : require(id);
-  new vm.Script(`(function(require, module, exports) {${code}\n})`).runInThisContext()(localRequire, module, module.exports);
-  const router = module.exports.default;
+  };
+  // Resolve the router's actual shared TypeScript modules. Only the upstream
+  // transport is fictional; adding a booking dependency must not break Auth tests.
+  const modules = new Map();
+  const load = filename => {
+    const file = path.resolve(filename);
+    if (modules.has(file)) return modules.get(file).exports;
+    const module = { exports: {} }; modules.set(file, module);
+    const code = ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
+      module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
+    } }).outputText;
+    const localRequire = id => {
+      if (id === '@workspace/api-zod') return load('../../lib/api-zod/src/module-publication.ts');
+      if (!id.startsWith('.')) return require(id);
+      const target = path.resolve(path.dirname(file), id + '.ts');
+      return target === path.resolve('src/lib/supabase.ts') ? transport : load(target);
+    };
+    new vm.Script(`(function(require, module, exports) {${code}\n})`, { filename: file })
+      .runInThisContext()(localRequire, module, module.exports);
+    return module.exports;
+  };
+  const router = load('src/routes/supabase.ts').default;
   const response = () => ({
     statusCode: 200, headers: {}, body: undefined,
     setHeader(name, value) { this.headers[name.toLowerCase()] = value; return this; },

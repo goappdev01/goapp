@@ -44,6 +44,8 @@ import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { PEOPLE_SECTORS, SUB_TO_SECTOR } from "@/data/goSectorData";
 import { getBusinessIcon } from "@/lib/businessIcons";
+import { bookingActivityEnabled } from "@workspace/api-zod";
+import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type ProveedorData = {
@@ -164,6 +166,8 @@ export function GoProveedorReservaSheet({
   onClose,
   onBookingConfirmed,
 }: Props) {
+  const { publication, internalAccess } = useBookingModulePublication(visible);
+  const moduleEnabled = bookingActivityEnabled(proveedor?.subId, publication, internalAccess);
   const insets = useSafeAreaInsets();
   const { config } = useBusinessConfig();
   const { t } = useLanguage();
@@ -974,7 +978,7 @@ export function GoProveedorReservaSheet({
     onClose();
   }, [onClose]);
 
-  if (!visible || !proveedor) return null;
+  if (!visible || !proveedor || !moduleEnabled) return null;
 
   // ── Derived step flags ─────────────────────────────────────────────────────
   // El paso Profesional es SIEMPRE obligatorio, independientemente de si hay

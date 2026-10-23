@@ -1,4 +1,5 @@
 import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
+import { modulePublicationPolicy } from "./helpers/module-publication-fixture.mjs";
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -47,6 +48,7 @@ function fixture() {
     exports: {}, Date: PhoneDate, Headers, process: { env: { EXPO_PUBLIC_API_URL: 'https://test.invalid/api' } },
     console: { log() {}, warn() {} },
     require(name) {
+      if (name === '@workspace/api-zod') return modulePublicationPolicy;
       if (name === '@react-native-async-storage/async-storage') return { default: storageApi };
       if (name === '@/lib/authSession') return sessionApi;
       if (name === './goSearchAliases') return { normalize: value => value.toLowerCase(), expandSearchTerms: value => [value.toLowerCase()] };

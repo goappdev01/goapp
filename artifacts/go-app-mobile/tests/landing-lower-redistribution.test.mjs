@@ -120,7 +120,7 @@ test('Home preserves zero individual offsets for painted intents and contextual 
  const hook=decl('landingArrangement').initializer;
  assert.equal(hook.expression.getText(ast),'useMemo');
  const deps=hook.arguments[1].getText(ast);for(const volatile of ['cambiosOpen','nextAptMinimized','nextAptPanelH','pendingPanelH','goLog'])assert.ok(!deps.includes(volatile));
- assert.ok(source.includes('!anyOperationalPanelOpen && ('));
+ assert.ok(source.includes('!anyOperationalPanelOpen && !actionCompletion.unresolved.length && !actionCompletion.pending.length && ('));
 });
 
 test('the restored slot remains associated with DEPORTE, never with a different intention or a duplicated control',()=>{
@@ -139,9 +139,18 @@ test('frozen ADMIN geometry matrix remains exact across screens, all three sizes
  }
  assert.equal(createHash('sha256').update(JSON.stringify(records)).digest('hex'),'26d3b12b89b1a64255af344ff72c6dfd13bf5bd6330ad93e79afb5148db7407a');
 });
-test('the complete original ADMIN orbit renderer is preserved byte for byte',()=>{
+test('the original ADMIN orbit renderer is preserved apart from the authorized module visibility projection',()=>{
  const shell=nodes.find(n=>ts.isConditionalExpression(n)&&n.whenTrue.getText(ast).includes('testID="landing-quiet-orbits"'));
- assert.ok(shell);assert.equal(createHash('sha256').update(shell.whenFalse.getText(ast)).digest('hex'),'6efc8e73210cfb019f29b3500998eab9538f10065c6108ec7908d69a5d723d79');
+ assert.ok(shell);
+ const renderer=shell.whenFalse.getText(ast);
+ assert.equal((renderer.match(/visibleOrbitalBookingCategories/g)||[]).length,2);
+ // Remove only the two catalogue projections and their empty-selection guard.
+ // The pre-recovery hash still protects every position, colour, size and handler.
+ const unchangedRenderer=renderer
+  .replace('visibleOrbitalBookingCategories.find(c => c.id === reservasOrbitalCat);','RESERVAS_ORBITAL_CATS.find(c => c.id === reservasOrbitalCat)!;')
+  .replace(/\r?\n[ \t]*if \(!activeCat\) return null;/,'')
+  .replace('visibleOrbitalBookingCategories.map','RESERVAS_ORBITAL_CATS.map');
+ assert.equal(createHash('sha256').update(unchangedRenderer).digest('hex'),'6efc8e73210cfb019f29b3500998eab9538f10065c6108ec7908d69a5d723d79');
  const compile=text=>ts.transpileModule(text,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
  for(const fullLandingArchitecture of [true,false]){
   const matched=vm.runInNewContext(compile('result='+shell.condition.getText(ast)),{fullLandingArchitecture,anyOverlayOpen:false,rutasMode:false,reservasOrbitalOpen:false,orbitSecondLevel:null});

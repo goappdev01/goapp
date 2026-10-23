@@ -44,10 +44,11 @@ const variants=['actual','marca','identidad','planeta'];
 const variantLabel=key=>'Previsualizar '+catalog.LANDING_VISUAL_VARIANTS.find(v=>v.key===key).label;
 function text(children){return Array.isArray(children)?children.map(text).join(''):React.isValidElement(children)?text(children.props.children):children==null?'':String(children);}
 const auth=(id=alice,level=null)=>({userId:id,allowed:!!level,isOwner:level==='owner',checking:false,unavailable:false});
-async function fixture({level=null,id=alice,business=false,selected='ADMIN',writeGate=null,failWrite=false}={}){
+async function fixture({level=null,id=alice,business=false,selected='ADMIN',active='actual',writeGate=null,failWrite=false}={}){
  const buttons=new Set(),dialogs=[],requests=[],reads=[],writes=[],attempts=[];
  const data=new Map([['demo-preserved','keep'],['go_auth_session_v2','fictional-marker']]);
  if(level==='owner')data.set(policy.ownerViewStorageKey(id),selected);
+ if(active!=='actual')data.set(model.landingVisualStorageKey(id),JSON.stringify({version:1,confirmed:true,active,previous:'actual',lastGood:'actual'}));
  const storage={getItem:async k=>{reads.push(k);return data.get(k)??null;},setItem:async(k,v)=>{
   attempts.push([k,v]);if(k.startsWith('go_owner_view_context_v1:')&&writeGate)await writeGate.promise;
   if(k.startsWith('go_owner_view_context_v1:')&&failWrite)throw Error('simulated storage denial');
@@ -99,16 +100,17 @@ async function fixture({level=null,id=alice,business=false,selected='ADMIN',writ
  };
 }
 
-test('normal USER retains the real selector, exact A/B/C/D names and explicit activation',async()=>{
- const f=await fixture();try{
-  assert.equal(f.live.goView.view,'USER');assert.equal(f.live.landingVariantToolsEnabled,true);
-  for(const key of variants){assert.ok(f.button(variantLabel(key)));await f.choose(key);
-   assert.equal(f.live.landingVisual.preview,key);assert.equal(f.live.landingVisual.active,'actual');}
-  assert.equal(f.writes.length,0);await f.confirm();
-  assert.equal(f.live.landingVisual.active,'planeta');assert.equal(f.writes.length,1);
-  assert.equal(f.writes[0][0],model.landingVisualStorageKey(alice));
-  await f.press('Recuperar A · Landing conservado');assert.equal(f.live.landingVisual.active,'planeta');
-  await f.confirm();assert.equal(f.live.landingVisual.active,'actual');
+for(const active of variants)for(const settings of [{},{level:'owner',selected:'USER'},{business:true},{level:'owner',selected:'BUSINESS'}])
+test('only assigned appearance, no variant Tools: '+JSON.stringify({...settings,active}),async()=>{
+ const f=await fixture({...settings,active});try{
+  const view=settings.business||settings.selected==='BUSINESS'?'BUSINESS':'USER';
+  assert.equal(f.live.goView.view,view);assert.equal(f.live.landingVariantToolsEnabled,false);
+  assert.equal(f.buttons.length,0,'no variant selection, preview or activation controls outside ADMIN');
+  await settle(()=>f.live.openUserLandingPreviewFromTools());
+  assert.equal(f.requests.length,0);assert.equal(f.writes.length,0);assert.equal(f.env.commits,0);
+  assert.equal(f.live.landingVisual.preview,null);assert.equal(f.live.landingVisual.active,active);
+  assert.equal(catalog.resolveUserLandingVariant(view,f.live.landingVisual.ready,true,active,null),view==='USER'?active:'actual');
+  await f.openTools();assert.equal(f.buttons.length,0);
  }finally{await f.close();}
 });
 
@@ -138,8 +140,10 @@ for(const key of variants)test('owner preview '+key+' survives real context reva
   assert.equal(f.live.landingVisual.active,'actual');assert.equal(f.live.optionsOpen,false);
   assert.equal(f.env.mounts,1);assert.equal(f.env.unmounts,0);assert.equal(f.env.commits,1);
   assert.deepEqual(f.writes,[[policy.ownerViewStorageKey(alice),'USER']]);
-  await f.openTools();await f.confirm();assert.equal(f.live.landingVisual.active,key);
+  await f.openTools();assert.equal(f.buttons.length,0,'USER has no variant configuration, including the owner USER context');
+  await settle(()=>f.live.openUserLandingPreviewFromTools());assert.equal(f.requests.length,1);
   assert.equal(await f.switchView('ADMIN'),true);await f.flush();
+  await f.choose(key);await f.confirm();assert.equal(f.live.landingVisual.active,key);
   assert.equal(f.live.landingVisual.active,key);assert.equal(f.live.landingVariantToolsEnabled,true);
   assert.equal(catalog.resolveUserLandingVariant('ADMIN',true,true,key,null),'actual');
  }finally{await f.close();}
@@ -207,11 +211,11 @@ test('identity change releases the new account without restoring the old account
   await f.choose('marca');const {result}=await f.press('Ver vista previa en el Landing');
   await f.update({admin:auth(bob)});
   assert.equal(f.live.landingPreviewOpening,false);assert.equal(f.live.goView.view,'USER');
-  assert.ok(f.buttons.length>0&&!f.button(variantLabel('planeta')).disabled);
-  await f.choose('planeta');await f.confirm();assert.equal(f.live.landingVisual.active,'planeta');
+  assert.equal(f.buttons.length,0,'new non-ADMIN identity has no access to variants');
+  assert.equal(f.live.landingVariantToolsEnabled,false);assert.equal(f.live.landingVisual.active,'actual');
   await f.resolveOwner(auth(alice,'owner'));await result;await f.flush();
-  assert.equal(f.live.landingVisual.preview,null);assert.equal(f.live.landingVisual.active,'planeta');
-  assert.deepEqual(f.writes.map(([k])=>k),[model.landingVisualStorageKey(bob)]);
+  assert.equal(f.live.landingVisual.preview,null);assert.equal(f.live.landingVisual.active,'actual');
+  assert.deepEqual(f.writes,[]);
   assert.equal(f.data.has(model.landingVisualStorageKey(alice)),false);assert.equal(f.env.commits,0);
  }finally{await f.close();}
 });
@@ -243,6 +247,7 @@ test('ADMIN dashboard Tools opens the single existing Herramientas connection, w
  };
  for(const name of ['AdminScreen','PartnersScreen','PublicidadScreen','FacturacionScreen','ZonasScreen','ConsumoScreen','GoRoadmapScreen'])
   imports['./'+name]={[name]:native(name)};
+ imports['./GoModulePublicationPanel']={GoModulePublicationPanel:native('GoModulePublicationPanel')};
  const Dashboard=evaluate('components/empresa/GoAdminDashboard.tsx',imports).GoAdminDashboard;
  const root=createRoot(document.createElement('div'));
  const render=callback=>root.render(React.createElement(Dashboard,{visible:true,onClose(){},onOpenTools:callback}));

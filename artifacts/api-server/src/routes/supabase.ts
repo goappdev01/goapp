@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { bearerHeader, supabaseRequest } from "../lib/supabase";
 import { bookingCapabilities, createServiceBooking } from "../lib/bookingServiceContract";
+import { filterPublishedResources, internalModuleAccess, publishedBusinesses } from "../lib/modulePublication";
 
 const router: IRouter = Router();
 
@@ -168,6 +169,8 @@ router.get("/auth/me", async (req: Request, res: Response) => {
 });
 
 router.get("/businesses", async (req: Request, res: Response) => {
+  const internal = await internalModuleAccess(req, res);
+  if (internal === null) return;
   const query = new URLSearchParams({
     select: "id,name,description,address,timezone,booking_enabled,verified,ui_metadata",
     booking_enabled: "eq.true",
@@ -176,10 +179,15 @@ router.get("/businesses", async (req: Request, res: Response) => {
 
   const response = await supabaseRequest(`/rest/v1/businesses?${query}`);
   const body = await response.text();
-  res.status(response.status).type("application/json").send(body);
+  if (!response.ok) { res.status(response.status).type("application/json").send(body); return; }
+  const rows = JSON.parse(body);
+  if (!Array.isArray(rows)) { res.status(502).json({ error: "Invalid business catalogue" }); return; }
+  res.json(publishedBusinesses(rows, internal));
 });
 
 router.get("/businesses/:businessId/services", async (req: Request, res: Response) => {
+  const internal = await internalModuleAccess(req, res);
+  if (internal === null) return;
   const query = new URLSearchParams({
     select: "id,business_id,name,description,duration_minutes,price,currency,active,ui_metadata",
     business_id: `eq.${req.params.businessId}`,
@@ -189,10 +197,15 @@ router.get("/businesses/:businessId/services", async (req: Request, res: Respons
 
   const response = await supabaseRequest(`/rest/v1/services?${query}`);
   const body = await response.text();
-  res.status(response.status).type("application/json").send(body);
+  if (!response.ok) { res.status(response.status).type("application/json").send(body); return; }
+  const rows = await filterPublishedResources(JSON.parse(body), internal);
+  if (!rows) { res.status(503).json({ code: "MODULE_ACCESS_UNAVAILABLE", error: "No se pudo comprobar el catálogo." }); return; }
+  res.json(rows);
 });
 
 router.get("/services", async (req: Request, res: Response) => {
+  const internal = await internalModuleAccess(req, res);
+  if (internal === null) return;
   const query = new URLSearchParams({
     select: "id,business_id,name,description,duration_minutes,price,currency,active,ui_metadata",
     active: "eq.true",
@@ -204,7 +217,10 @@ router.get("/services", async (req: Request, res: Response) => {
 
   const response = await supabaseRequest(`/rest/v1/services?${query}`);
   const body = await response.text();
-  res.status(response.status).type("application/json").send(body);
+  if (!response.ok) { res.status(response.status).type("application/json").send(body); return; }
+  const rows = await filterPublishedResources(JSON.parse(body), internal);
+  if (!rows) { res.status(503).json({ code: "MODULE_ACCESS_UNAVAILABLE", error: "No se pudo comprobar el catálogo." }); return; }
+  res.json(rows);
 });
 
 router.get("/booking-capabilities", bookingCapabilities);
@@ -334,10 +350,15 @@ for (const [resource, select] of [
   ["availability", "id,business_id,staff_id,weekday,start_time,end_time,timezone,active,ui_metadata"],
 ]) {
   router.get(`/${resource}`, async (req: Request, res: Response) => {
+    const internal = await internalModuleAccess(req, res);
+    if (internal === null) return;
     const query = new URLSearchParams({ select, active: "eq.true" });
     if (typeof req.query.business_id === "string") query.set("business_id", `eq.${req.query.business_id}`);
     const result = await supabaseRequest(`/rest/v1/${resource}?${query}`);
-    res.status(result.status).type("application/json").send(await result.text());
+    if (!result.ok) { res.status(result.status).type("application/json").send(await result.text()); return; }
+    const rows = await filterPublishedResources(await result.json(), internal);
+    if (!rows) { res.status(503).json({ code: "MODULE_ACCESS_UNAVAILABLE", error: "No se pudo comprobar el catálogo." }); return; }
+    res.json(rows);
   });
 }
 

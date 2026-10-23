@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import vm from "node:vm";
+import { modulePublicationPolicy, loadModulePublicationHook } from "./helpers/module-publication-fixture.mjs";
 const require = createRequire(path.join(process.cwd(), "package.json"));
 const ts = require("typescript");
 const source = name => readFileSync(name, "utf8");
@@ -207,6 +208,8 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
     resetToSubActivity: (sectorId,subId) => data.store.transformConfig(config => ({ ...config, sectorId, subId })),
   });
   const imports = {
+    "@workspace/api-zod": modulePublicationPolicy,
+    "@/hooks/useBookingModulePublication": loadModulePublicationHook(React, { context: "BUSINESS", owner: authorized }),
     react: { ...React, default: React }, "react-native": native,
     "react/compiler-runtime": { c: size => React.useMemo(() => new Array(size).fill(Symbol.for("react.memo_cache_sentinel")), []) },
     "@react-native-async-storage/async-storage": { default: storage },

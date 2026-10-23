@@ -56,8 +56,9 @@ async function fixture({expired=false,status=200}={}){
  rn.PanResponder={create:()=>({panHandlers:{}})};
  rn.Linking={addEventListener:()=>({remove(){}})};
  rn.Animated={Value:class{stopAnimation(){};interpolate(){return 0;}},View:native('AnimatedView'),timing:()=>({start(){}}),spring:()=>({start(){}})};
- for(const name of ['ActivityIndicator','ScrollView','TextInput','TouchableOpacity'])rn[name]=native(name);
+ for(const name of ['ActivityIndicator','ScrollView','TextInput','TouchableOpacity','Pressable'])rn[name]=native(name);
  rn.Modal=({visible,children})=>visible?React.createElement('div',{'data-native':'Modal'},children):null;
+ const password=evaluate('components/auth/PasswordInput.tsx',{'@expo/vector-icons':{Feather:native('Feather')}});
  const panel=evaluate('components/auth/LoginRegisterPanel.tsx',{
   '@/components/debug/OwnerContextIndicator':surface,'@/lib/sessionEvents':sessionEvents,'@/lib/authSession':auth,
   '@/lib/registrationReturn':{readPendingRegistration:async()=>null,PENDING_REGISTRATION_KEY:'fictional-pending'},
@@ -67,6 +68,7 @@ async function fixture({expired=false,status=200}={}){
   'expo-haptics':{impactAsync:async()=>{},selectionAsync:async()=>{},ImpactFeedbackStyle:{Medium:'medium'}},
   '../DraggableFAB':{DraggableFAB:native('Fab')},'@/contexts/LanguageContext':{useLanguage:()=>({t:key=>key})},
   '@/contexts/GoAdminAccessContext':admin,'@/contexts/GoViewContext':view,'./AccountContextSelector':{AccountContextSelector:native('Selector')},
+  './PasswordInput':password,
   '@/data/cuenta':{verificationColor:()=>''},
  });
  const Panel=props=>{React.useEffect(()=>{mounts.panel++;return()=>{};},[]);return React.createElement(panel.LoginRegisterPanel,props);};

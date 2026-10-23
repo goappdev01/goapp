@@ -23,6 +23,7 @@ import { GoRoadmapScreen, RoadmapNode } from "./GoRoadmapScreen";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { useGoView } from "@/contexts/GoViewContext";
+import { GoModulePublicationPanel } from "./GoModulePublicationPanel";
 
 const { width: SW } = Dimensions.get("window");
 
@@ -741,6 +742,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         {/* ── Overview ── */}
         {section === "overview" && (
           <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+            <GoModulePublicationPanel />
 
             <View style={s.metricsGrid}>
               <MetricCard label={lang === 'en' ? "Revenue Today" : "Ingresos hoy"}  value={MOCK_METRICS.ingresosHoy}  color="#3D9A84" icon="trending-up" />

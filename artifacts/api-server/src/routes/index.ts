@@ -6,6 +6,7 @@ import bookingVerificationRouter from "./bookingVerification";
 import bookingNegotiationRouter from "./bookingNegotiation";
 import bookingTimelineRouter from "./bookingTimeline";
 import catalogAssociationsRouter from "./catalogAssociations";
+import modulePublicationRouter from "./modulePublication";
 
 import managementRouter from "./management";
 import adminRouter from "./admin";
@@ -16,6 +17,7 @@ router.use(healthRouter);
 router.use("/supabase/admin", adminRouter);
 router.use("/booking-assistant", bookingAssistantRouter);
 router.use("/supabase/manage", managementRouter);
+router.use("/supabase", modulePublicationRouter);
 router.use("/supabase", bookingVerificationRouter);
 router.use("/supabase", bookingTimelineRouter);
 router.use("/supabase", catalogAssociationsRouter);

@@ -36,6 +36,7 @@ function flowFixture(initial = []) {
   });
   Object.assign(scope, {
     Error, lang: "es", calendarSlotOpeningRef: { current: false }, calendarSlotRequestRef: { current: 0 },
+    completionIdentity: { ready: true, scope: { userId: "account-a", context: "live:USER" } },
     calendarSlotSavingRef: { current: false }, calendarSlotDraftRef: { current: null },
     fieldSelectorSaveBusyRef: { current: false }, pendingCalendarGoRef: { current: false }, pendingCalendarGoListenRef: { current: false }, goChatListenSequence: { current: 0 },
     getTaskUser: access.getTaskUser, assertTaskUser: access.assertTaskUser, updateGoLog: store.updateGoLog,
@@ -209,6 +210,8 @@ test("calendar ownership refresh hides foreign and unowned tasks, including late
   const realAccess = flowFixture().access;
   const requests = []; let changed, effect, state = null, started = false;
   const hook = load("hooks/useGoCalendarEntries.ts", {
+    "./useActionCompletion": { useCompletionDocument: () => ({ doc: null }) },
+    "@/lib/goActionCompletion": { completionDecision: () => undefined, ownedCompletionEntry: () => false },
     react: { useState: () => [state, value => { state = value; }], useEffect(callback) { if (!started) { started = true; effect = callback(); } } },
     "@/lib/goTaskAccess": { ...realAccess, getTaskUser: () => new Promise(resolve => requests.push(resolve)) },
     "@/lib/sessionEvents": { onSessionChanged(callback) { changed = callback; return () => {}; } },

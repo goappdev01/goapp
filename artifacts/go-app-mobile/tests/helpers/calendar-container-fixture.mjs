@@ -25,6 +25,7 @@ export function fixture() {
     exports: {}, Date, Set, Math, JSON,
     calOpen: true, fieldSelectorOpen: false, calQuickCreateOpen: false, calConfigVisible: false, calReservasOpen: false,
     dateISODraft: '2027-02-28', dateDraft: 'Dom 28/02', calBgViewMode: 'mes_lineal', calBgViewMonth: '2027-02',
+    noteTaskDraftRef: { current: null },
     calendarSlotSavingRef: { current: false }, calendarSlotDraftRef: { current: null }, fieldSelectorSaveBusyRef: { current: false }, calendarTaskContextRef: { current: null }, qdReturnTimerRef: { current: null }, qdFlowActiveRef: { current: false },
     pendingMoveCtxRef: { current: null }, qdOriginContextRef: { current: {} },
     ...Object.fromEntries(['ContactName', 'Phone', 'Date', 'DateISO', 'Time', 'Place'].map(name => ['qdCap' + name + 'Ref', { current: '' }])),

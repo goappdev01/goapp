@@ -58,7 +58,7 @@ function fixture({ marker = null, storedSession = null, me = async () => Respons
       if (name === './authSession') return sessionApi;
       assert.equal(name, '@react-native-async-storage/async-storage'); return { default: AsyncStorage };
     },
-    AsyncStorage, AppState, pendingRegistrationRef, authContextRef, authInputRevisionRef: { current: 0 },
+    AsyncStorage, AppState, pendingRegistrationRef, authContextRef, authInputRevisionRef: { current: 0 }, authRequestInFlightRef: { current: false },
     console: { warn: (...args) => logs.push(args) },
     Linking: { addEventListener: (_event, fn) => { subscriptions.set('url', fn); return { remove: () => subscriptions.delete('url') }; } },
     onSessionChanged: fn => { sessionListeners.add(fn); return () => sessionListeners.delete(fn); },

@@ -53,6 +53,8 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import type { DemoBookingRepository } from "@/data/demoBookingRepository";
 import { summarizeBookingServices, staffSupportsBookingServices, type BookingService } from "@/data/bookingServices";
 import { compactTimelineOptions, timelineOptionLabel } from "@/data/bookingTimeline";
+import { bookingActivityEnabled, canonicalBookingActivity, visibleBookingSectors } from "@workspace/api-zod";
+import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -367,6 +369,9 @@ export function BookingSearchOverlay({
   initialBusinessId,
   onDemoGoToBooking,
 }: BookingSearchOverlayProps) {
+  const { publication, internalAccess } = useBookingModulePublication(visible, !!demoRepository);
+  const visibleSectors = visibleBookingSectors(SECTORS, publication, internalAccess);
+  const businessVisible = (business: Business) => bookingActivityEnabled(business.category, publication, internalAccess);
   const cancelSelectedBooking = (id: string) => demoRepository
     ? demoRepository.cancelBooking(id).catch(() => undefined)
     : cancelBooking(id);
@@ -529,17 +534,22 @@ export function BookingSearchOverlay({
       if (demoRepository) {
         demoRepository.getActiveBusinesses().then(all => {
           if (!current) return;
-          setRecentBizs(all);
-          const initial = initialBusinessId && all.find(business => business.id === initialBusinessId);
+          const available = all.filter(businessVisible);
+          setRecentBizs(available);
+          const initial = initialBusinessId && available.find(business => business.id === initialBusinessId);
           if (initial) { setSelectedBusiness(initial); setSelectedDate(getDaysRange(1)[0]); setStep("item"); }
         }).catch(() => { if (current) setRecentBizs([]); });
       } else {
         getRecentBusinessIds(5).then(async (ids) => {
           if (!current) return;
-          if (ids.length === 0) { setRecentBizs([]); return; }
+          if (ids.length === 0 && !initialBusinessId) { setRecentBizs([]); return; }
           const all = await getActivebusinesses();
-          const ordered = ids.map(id => all.find(business => business.id === id)).filter((business): business is Business => !!business);
-          if (current) setRecentBizs(ordered);
+          const ordered = ids.map(id => all.find(business => business.id === id && businessVisible(business))).filter((business): business is Business => !!business);
+          if (current) {
+            setRecentBizs(ordered);
+            const initial = initialBusinessId && all.find(business => business.id === initialBusinessId && businessVisible(business));
+            if (initial) { setSelectedBusiness(initial); setSelectedDate(getDaysRange(1, initial.timezone)[0]); setStep("item"); }
+          }
         }).catch(() => { if (current) setRecentBizs([]); });
       }
       Animated.spring(slideAnim, {
@@ -572,13 +582,13 @@ export function BookingSearchOverlay({
     let current = true;
     const timer = setTimeout(async () => {
       try {
-        const r = await (demoRepository ? demoRepository.searchBusinesses(query) : searchBusinesses(query));
+        const r = (await (demoRepository ? demoRepository.searchBusinesses(query) : searchBusinesses(query))).filter(businessVisible);
         // Client-side sub-category filter
         const filtered = selectedSubCategory
           ? r.filter(b => {
-              if (b.category === selectedSubCategory) return true;
+              if (canonicalBookingActivity(b.category) === selectedSubCategory) return true;
               // Also match businesses whose category is the parent sector id
-              const parentSector = SECTORS.find(s => s.subs.some(sub => sub.id === selectedSubCategory));
+              const parentSector = visibleSectors.find(s => s.subs.some(sub => sub.id === selectedSubCategory));
               return !!(parentSector && b.category === parentSector.id);
             })
           : r;
@@ -593,7 +603,20 @@ export function BookingSearchOverlay({
       }
     }, 300);
     return () => { current = false; clearTimeout(timer); };
-  }, [query, visible, step, selectedSubCategory, demoRepository]);
+  }, [query, visible, step, selectedSubCategory, demoRepository, publication, internalAccess]);
+
+  useEffect(() => {
+    // A role/release change removes stale discoverable choices without touching stored data.
+    setRecentBizs(current => current.filter(businessVisible));
+    setResults(current => current.filter(businessVisible));
+    if (selectedCategory && !visibleSectors.some(sector => sector.id === selectedCategory)) {
+      setSelectedCategory(null); setSelectedSubCategory(null);
+    }
+    if (selectedSubCategory && !visibleSectors.some(sector => sector.subs.some(sub => sub.id === selectedSubCategory))) setSelectedSubCategory(null);
+    if (selectedBusiness && !businessVisible(selectedBusiness)) {
+      setSelectedBusiness(null); setSelectedItem(null); setSelectedServiceIds([]); setStep("search");
+    }
+  }, [publication, internalAccess]);
 
   useEffect(() => {
     if (!selectedBusiness) return;
@@ -689,6 +712,7 @@ export function BookingSearchOverlay({
   }, [step, loadSlots]);
 
   const handleSelectBusiness = (b: Business) => {
+    if (!businessVisible(b)) return;
     Haptics.selectionAsync().catch(() => {});
     setSelectedBusiness(b);
     setSelectedDate(getDaysRange(1, demoRepository ? undefined : b.timezone)[0]);
@@ -1070,7 +1094,8 @@ export function BookingSearchOverlay({
                     <>
                       {/* ── Vista de subcategorías (categoría madre seleccionada) ── */}
                       {selectedCategory ? (() => {
-                        const sector = SECTORS.find(s => s.id === selectedCategory)!;
+                        const sector = visibleSectors.find(s => s.id === selectedCategory);
+                        if (!sector) return null;
                         const subs = sector.subs;
                         // Build rows of 3
                         const rows: (typeof subs[0])[][] = [];
@@ -1128,9 +1153,9 @@ export function BookingSearchOverlay({
                       })() : (
                         /* ── Vista de categorías madre (9 sectores) ── */
                         <View style={s.categoryGrid}>
-                          {[0, 1, 2].map((rowIdx) => (
+                          {Array.from({ length: Math.ceil(visibleSectors.length / 3) }, (_, rowIdx) => (
                             <View key={rowIdx} style={s.categoryRow}>
-                              {SECTORS.slice(rowIdx * 3, rowIdx * 3 + 3).map((sector) => (
+                              {visibleSectors.slice(rowIdx * 3, rowIdx * 3 + 3).map((sector) => (
                                 <TouchableOpacity
                                   key={sector.id}
                                   activeOpacity={0.72}

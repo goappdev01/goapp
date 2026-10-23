@@ -1,3 +1,5 @@
+import { useCompletionDocument } from "./useActionCompletion";
+import { completionDecision, ownedCompletionEntry } from "@/lib/goActionCompletion";
 import { useEffect, useState } from "react";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import { getTaskUser, isPersonalTask, type OwnedGoEntry } from "@/lib/goTaskAccess";
@@ -5,6 +7,7 @@ import { onSessionChanged } from "@/lib/sessionEvents";
 
 /** Calendar presentation only; records and ownership remain in the shared store. */
 export function useGoCalendarEntries(entries: GoEntry[]): GoEntry[] {
+  const completion = useCompletionDocument();
   const [owner, setOwner] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -25,5 +28,6 @@ export function useGoCalendarEntries(entries: GoEntry[]): GoEntry[] {
   return entries.filter(entry => {
     const recordOwner = (entry as OwnedGoEntry).ownerUserId;
     return recordOwner ? recordOwner === owner : !isPersonalTask(entry);
-  });
+  }).map(entry => ({ ...entry, localResolutionStatus: completion.doc && ownedCompletionEntry(entry, completion.doc.scope)
+    ? completionDecision(entry, completion.doc)?.status : undefined }));
 }

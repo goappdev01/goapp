@@ -2,7 +2,8 @@ import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 
 const upstream = 'http://127.0.0.1:3000';
-const allowed = new Set(['/api/healthz', '/api/supabase/auth/me', '/api/supabase/admin/access', '/api/supabase/manage/businesses', '/api/supabase/manage/configuration']);
+const publicPublicationPath = '/api/supabase/module-publication';
+const allowed = new Set(['/api/healthz', '/api/supabase/auth/me', '/api/supabase/admin/access', '/api/supabase/manage/businesses', '/api/supabase/manage/configuration', publicPublicationPath, '/api/supabase/admin/module-publication']);
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const loginPath = '/api/supabase/auth/login';
@@ -70,18 +71,18 @@ async function refreshSession(body, request) {
   } catch {return {status:502,body:{code:'SESSION_REFRESH_FAILED',error:'No se pudo renovar la sesión en este momento.'}};}
 }
 
-export async function respond({method, url, authorization, body}, request = fetch) {
+export async function respond({method, url, authorization, body, internalModules}, request = fetch) {
   if (method === 'POST' && url === loginPath) return login(body,request);
   if (method === 'POST' && url === refreshPath) return refreshSession(body,request);
   if (method !== 'GET') return {status:405, body:{error:'Remote verification is read-only'}};
   if (!allowed.has(url)) return {status:404, body:{error:'Route not available for remote verification'}};
-  if (url !== '/api/healthz' && !/^Bearer [A-Za-z0-9._-]{1,8192}$/.test(authorization ?? '')) {
+  if (url !== '/api/healthz' && url !== publicPublicationPath && !/^Bearer [A-Za-z0-9._-]{1,8192}$/.test(authorization ?? '')) {
     return {status:401, body:{error:'A valid GO session is required'}};
   }
   const read = async route => {
     const response = await request(upstream + route, {
       method:'GET', redirect:'error', signal:AbortSignal.timeout(10000),
-      headers:{Accept:'application/json', ...(authorization ? {Authorization:authorization} : {})},
+      headers:{Accept:'application/json', ...(authorization ? {Authorization:authorization} : {}), ...(internalModules === '1' ? {'x-go-internal-modules':'1'} : {})},
     });
     if (!response.headers.get('content-type')?.includes('application/json')) throw new Error('Invalid response');
     const reader = response.body.getReader();
@@ -101,6 +102,11 @@ export async function respond({method, url, authorization, body}, request = fetc
       return result.status === 200 && result.body.status === 'ok'
         ? {status:200, body:{status:'ok', mode:'private-read-only'}}
         : {status:502, body:{error:'Local backend unavailable'}};
+    }
+    // Public release metadata contains no accounts or business data. Other reads retain the owner gate.
+    if (url === publicPublicationPath) {
+      const result = await read(url);
+      return result.status === 200 ? result : {status:502,body:{error:'Publication configuration unavailable'}};
     }
     // The existing backend validates the JWT and rechecks the live owner membership.
     // This gate never decodes a JWT to grant authority and never stores a token.
@@ -128,16 +134,18 @@ function webCors(req, res) {
   if (origin === undefined) return null;
   if (origin !== developmentWebOrigin) return {status:403,body:{error:'Web origin not authorized'}};
   const method = req.url === loginPath || req.url === refreshPath ? 'POST' : allowed.has(req.url) ? 'GET' : null;
+  const permittedHeaders = new Set(webRequestHeaders);
+  if (allowed.has(req.url)) permittedHeaders.add('x-go-internal-modules');
   if (req.method === 'OPTIONS') {
     res.setHeader('Vary', 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
     const requested = req.headers['access-control-request-method'];
     const requestedHeaders = String(req.headers['access-control-request-headers'] ?? '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
-    if (!method || requested !== method || requestedHeaders.some(value => !webRequestHeaders.has(value))) {
+    if (!method || requested !== method || requestedHeaders.some(value => !permittedHeaders.has(value))) {
       return {status:403,body:{error:'Web request not authorized'}};
     }
     res.setHeader('Access-Control-Allow-Origin', developmentWebOrigin);
     res.setHeader('Access-Control-Allow-Methods', method);
-    res.setHeader('Access-Control-Allow-Headers', 'Accept, Authorization, Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Accept, Authorization, Content-Type' + (allowed.has(req.url) ? ', X-GO-Internal-Modules' : ''));
     res.setHeader('Access-Control-Max-Age', '300');
     return {status:204};
   }
@@ -174,7 +182,7 @@ export function createGateway(request=fetch) {
         body=JSON.parse(Buffer.concat(chunks).toString('utf8'));
       }catch{return send({status:400,body:{error:authLogin?'Invalid login request':'Invalid renewal request'}});}
     }
-    const result=await respond({method:req.method,url:req.url,authorization:req.headers.authorization,body},request);
+    const result=await respond({method:req.method,url:req.url,authorization:req.headers.authorization,body,internalModules:req.headers['x-go-internal-modules']},request);
     send(result);
   });
   server.requestTimeout=15000;server.headersTimeout=10000;

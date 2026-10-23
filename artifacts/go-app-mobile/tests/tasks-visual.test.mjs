@@ -29,6 +29,9 @@ const notesCode = compile(`tree = (${sheet('notesOpen').getText(home)});`);
 const translationsContext = { exports: {} };
 vm.runInNewContext(compile(readFileSync('i18n/translations.ts', 'utf8')), translationsContext);
 const translations = translationsContext.exports.translations;
+const completionContext = { exports: {} };
+vm.runInNewContext(compile(readFileSync('lib/goActionCompletion.ts', 'utf8')), completionContext);
+const completionModel = completionContext.exports;
 function nodes(tree, predicate) {
   if (!tree || typeof tree !== 'object') return [];
   if (Array.isArray(tree)) return tree.flatMap(c => nodes(c, predicate));
@@ -42,6 +45,7 @@ const entries = [
 ];
 function fixture(lang = 'es', overrides = {}) {
   const calls = [];
+  const completionDocument = completionModel.emptyCompletionDocument({ userId: 'tasks-fixture', context: 'live:USER' });
   const React = { Fragment: 'Fragment', createElement: (type, props, ...children) => ({ type, props: { ...props, children: children.flat(Infinity) } }) };
   const hosts = Object.fromEntries(['BottomSheet', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable', 'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(x => [x, x]));
   const context = { ...hosts, React, Date, Math, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""}, console,
@@ -49,6 +53,8 @@ function fixture(lang = 'es', overrides = {}) {
     listOpen: true, listSwipeStepAllowed: true, llamadasListOpen: false, listMinimized: false, listFiltersHidden: false, listFilter: 'todos', typeFilter: 'todos', activityFilter: 'todas',
     quickCreateOpen: false, quickCreateKbVisible: false, quickCreateText: '', paddingBottom: 34, screenBgColors: {}, listGoSize: 'medio', goSortOrder: 'asc',
     goLog: entries, handedness: 'right', allExpanded: false, expandedId: null, isBusinessMode: false, isUserMode: true, altSlotsEntry: null,
+    mergeCompletionEntries: completionModel.mergeCompletionEntries,
+    actionCompletion: { candidates: [], status: entry => completionModel.completionDecision(entry, completionDocument)?.status },
     INTENTS: [{ key: 'comida', color: '#f97316', icon: 'disc' }, { key: 'deporte', color: '#22c55e', icon: 'activity' }], TRASH_DISPLAY_LIMIT: 50,
     slotOf: e => e.deleted || e.estado === 'rechazado' ? 'papelera' : e.estado === 'aceptado' ? 'aceptado' : 'pendiente',
     noTranslate: {}, localizeLabel: x => x, displayContact: name => name || '', getGoActivityKey: g => g.intentKey,
@@ -58,6 +64,8 @@ function fixture(lang = 'es', overrides = {}) {
     Haptics: { selectionAsync: () => Promise.resolve(), notificationAsync: () => Promise.resolve(), NotificationFeedbackType: { Warning: 'warning' } },
     date: '', time: '', notesOpen: true, notaDateISO: null, notaTime: '', quickNoteText: '', quickNoteDetail: '', notaAudioRecording: false, notaAudioUri: null,
     notaKbVisible: false, notaSaving: false, notaTextRef: { current: null },
+    noteVoice: { status: 'idle', error: '', notice: '', focus() {} }, noteReminderPickerOpen: false,
+    quickNoteReminderMinutes: null, lang, GoNoteReminderPicker: 'GoNoteReminderPicker',
     ...overrides,
   };
   const setterNames = new Set();

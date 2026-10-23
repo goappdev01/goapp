@@ -4,6 +4,12 @@ import { expandSearchTerms, normalize } from "./goSearchAliases";
 import type { ServiceTiming } from "./serviceTiming";
 import type { BookingTimeline } from "./bookingTimeline";
 import type { CatalogQuote } from "./catalogAssociations";
+import { canonicalBookingActivity } from "@workspace/api-zod";
+
+// A request hint only: the server independently verifies live ADMIN membership.
+// Never persisted, and never forwarded for a different authenticated identity.
+let internalBookingIdentity: string | null = null;
+export function setInternalBookingContext(userId: string | null): void { internalBookingIdentity = userId; }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -248,6 +254,7 @@ async function performSupabaseRequest<T>(
     headers.set("Content-Type", "application/json");
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (token && session?.user.id === internalBookingIdentity) headers.set("x-go-internal-modules", "1");
 
   let response: Response;
   try { response = await fetchWithAuth(`${getApiBase()}${path}`, { ...init, headers }, requireToken, session?.user.id); }
@@ -334,7 +341,7 @@ function mapRemoteBusiness(row: RemoteBusiness): Business {
   return {
     id: row.id,
     name: row.name,
-    category: row.ui_metadata?.category ?? row.description ?? "",
+    category: canonicalBookingActivity(row.ui_metadata?.category ?? row.description ?? ""),
     location: row.address ?? "",
     phone: row.ui_metadata?.phone ?? "",
     whatsapp: row.ui_metadata?.whatsapp,

@@ -2,10 +2,16 @@ import { Router, type IRouter } from "express";
 import { requireAdmin, requireAdminPermission } from "../middleware/requireAdmin";
 import { TECHNICAL_PERMISSIONS } from "../lib/adminPermissions";
 import { bearerHeader, supabaseRequest } from "../lib/supabase";
+import { serverModulePublication } from "../lib/modulePublication";
+import { GO_MODULE_STAGE_LABELS, GO_RESERVATION_SECTORS } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 // Every method/path in this namespace must pass the same server boundary.
 router.use(requireAdmin);
+router.get("/module-publication", requireAdminPermission("admin.access"), (_req, res) => {
+  res.json({ publication: serverModulePublication(), sectors: GO_RESERVATION_SECTORS, stageLabels: GO_MODULE_STAGE_LABELS,
+    configuration: "GO_MODULE_PUBLICATION", mutable: false });
+});
 router.get("/access", requireAdminPermission("admin.access"), (_req, res) => {
   res.json({ userId: res.locals.adminUserId, role: "admin", allowed: true,
     level: res.locals.adminLevel, permissions: res.locals.adminPermissions });

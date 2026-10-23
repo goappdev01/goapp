@@ -52,8 +52,11 @@ function fixture(initial = []) {
   let landing = [];
   const hook = load("hooks/useGoLog.ts", {
     "@/lib/goLogStore": store,
+    "@/lib/goTaskAccess": { assertTaskUser: async () => assert.fail("Unscoped legacy store does not request a scoped identity") },
     react: {
       useEffect(effect) { effect(); },
+      useRef(value) { return { current: value }; },
+      useCallback(callback) { return callback; },
       useSyncExternalStore(subscribe, get) {
         subscribe(() => { landing = plain(get()); });
         landing = plain(get());
@@ -183,7 +186,8 @@ test("Landing hydration preserves empty dateISO and writes only through the shar
   for (const dateISO of ["", "2026-10-24"]) {
     assert.equal(vm.runInNewContext(dateExpression, { legacy: { dateISO }, formatISODate() { throw new Error("Date invented"); } }), dateISO);
   }
-  assert.match(source, /\[personalGoLog, setGoLog\] = useGoLog\(\)/);
+  assert.ok(/\[personalGoLog, setGoLog\]\s*=\s*useGoLog\(completionIdentity\.ready\s*\?\s*completionIdentity\.scope\s*:\s*null\)/.test(source),
+    "Landing uses the same shared record with the current verified scope, including the hydration gate");
   assert.doesNotMatch(source, /AsyncStorage\.setItem\("go_log_v1"/);
   assert.doesNotMatch(source, /AsyncStorage\.getItem\("go_log_v1"/);
 });

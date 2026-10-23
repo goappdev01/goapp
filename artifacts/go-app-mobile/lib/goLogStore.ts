@@ -49,12 +49,16 @@ export function flushGoLog(): Promise<void> {
 /** The updater always receives the latest committed view, including manual edits. */
 export function updateGoLog<T>(
   update: (entries: GoEntry[]) => { entries: GoEntry[]; result: T } | Promise<{ entries: GoEntry[]; result: T }>,
+  assertActive?: () => void,
 ): Promise<T> {
   return enqueue(async () => {
+    assertActive?.();
     const owner = await getTaskUser();
+    assertActive?.();
     const before = new Map(snapshot.map(entry => [entry.id, entry as OwnedGoEntry]));
     const ambiguousIds = before.size !== snapshot.length || snapshot.some(entry => typeof entry.id !== "string" || !entry.id);
     const next = await update(JSON.parse(JSON.stringify(snapshot)) as GoEntry[]);
+    assertActive?.();
     // Ownership comes from the active session, never from a conversational payload.
     // Do not adopt legacy entries: their owner cannot be established safely.
     next.entries = next.entries.map(entry => {
@@ -78,6 +82,7 @@ export function updateGoLog<T>(
       return entry;
     });
     if (await getTaskUser() !== owner) throw new Error("La cuenta ha cambiado. Vuelve a solicitar la acción.");
+    assertActive?.();
     if (!equal(next.entries, snapshot)) {
       await AsyncStorage.setItem(GO_LOG_KEY, JSON.stringify(next.entries));
       // Notify Landing only after storage acknowledges the write.

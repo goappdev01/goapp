@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import vm from "node:vm";
 import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
+import { modulePublicationPolicy } from "./helpers/module-publication-fixture.mjs";
 
 const ts = createRequire(path.join(process.cwd(), "package.json"))("typescript");
 const compile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
@@ -59,6 +60,7 @@ function fixture() {
   const globals = { exports: {}, Date, Intl, Headers, URLSearchParams, process: { env: { EXPO_PUBLIC_API_URL: "https://timeline.test.invalid/api" } },
     console: { log() {}, warn() {} },
     require(name) {
+      if (name === "@workspace/api-zod") return modulePublicationPolicy;
       if (name === "@react-native-async-storage/async-storage") return { default: storageApi };
       if (name === "@/lib/authSession") return auth;
       if (name === "./goSearchAliases") return { normalize: value => value.toLowerCase(), expandSearchTerms: value => [value.toLowerCase()] };
