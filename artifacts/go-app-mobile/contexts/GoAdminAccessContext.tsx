@@ -9,7 +9,7 @@ type AdminAccessValue = AdminAccess & {
   checking: boolean;
   unavailable: boolean;
   refresh: () => Promise<boolean>;
-  refreshOwner: (expectedUserId?: string) => Promise<boolean>;
+  refreshOwner: (expectedUserId?: string, options?: { reportUnavailable?: boolean }) => Promise<boolean>;
 };
 const denied = (userId: string | null = null): AdminAccess => ({ userId, allowed: false, level: null, permissions: [] });
 const Context = createContext<AdminAccessValue>({
@@ -21,13 +21,14 @@ export function GoAdminAccessProvider({ children }: { children: React.ReactNode 
   const [access, setAccess] = useState<AdminAccess & { checking: boolean; unavailable: boolean }>({ ...denied(), checking: false, unavailable: false });
   const revision = useRef(0);
   const mounted = useRef(false);
-  const inFlight = useRef<{ revision: number; result: Promise<AdminAccess>; promise: Promise<boolean> } | null>(null);
+  const inFlight = useRef<{ revision: number; result: Promise<AdminAccess>; promise: Promise<boolean>; failure: { error?: unknown } } | null>(null);
   const check = useCallback(() => {
     const version = revision.current;
     recordAuthTrace("admin.check.start", { revision: version });
     if (inFlight.current?.revision === version) return inFlight.current;
     // Identity can retain a cosmetic preference during revalidation; privileges cannot.
     setAccess(current => ({ ...denied(current.userId), checking: true, unavailable: false }));
+    const failure: { error?: unknown } = {};
     const result = getAdminAccess().then(next => {
       const current = mounted.current && version === revision.current && AppState.currentState === "active";
       const granted = current && next.allowed === true;
@@ -35,7 +36,8 @@ export function GoAdminAccessProvider({ children }: { children: React.ReactNode 
       recordAuthTrace("admin.check.end", { revision: version, allowed: granted });
       if (mounted.current && version === revision.current) setAccess({ ...resolved, checking: false, unavailable: false });
       return resolved;
-    }).catch(() => {
+    }).catch(error => {
+      failure.error = error;
       recordAuthTrace("admin.check.error", { revision: version });
       if (mounted.current && version === revision.current) setAccess(current => ({ ...denied(current.userId), checking: false, unavailable: true }));
       return denied();
@@ -43,14 +45,18 @@ export function GoAdminAccessProvider({ children }: { children: React.ReactNode 
       if (inFlight.current?.result === result) inFlight.current = null;
     });
     const promise = result.then(next => next.allowed);
-    const flight = { revision: version, result, promise };
+    const flight = { revision: version, result, promise, failure };
     inFlight.current = flight;
     return flight;
   }, []);
   const refresh = useCallback((): Promise<boolean> => check().promise, [check]);
-  const refreshOwner = useCallback(async (expectedUserId?: string): Promise<boolean> => {
+  const refreshOwner = useCallback(async (expectedUserId?: string, options?: { reportUnavailable?: boolean }): Promise<boolean> => {
     const version = revision.current;
-    const next = await check().result;
+    const flight = check();
+    const next = await flight.result;
+    // Interactive login must distinguish an unavailable check from a confirmed denial.
+    // Background consumers retain the existing fail-closed boolean contract.
+    if (options?.reportUnavailable && "error" in flight.failure) throw flight.failure.error;
     return mounted.current && version === revision.current && AppState.currentState === "active"
       && next.allowed === true && next.level === "owner"
       && (expectedUserId === undefined || next.userId === expectedUserId);

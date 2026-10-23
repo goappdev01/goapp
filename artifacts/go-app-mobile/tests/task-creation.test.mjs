@@ -14,6 +14,7 @@ class Today extends Date {
 function load(file, modules = {}, extra = {}) {
   const scope = { exports: {}, Date: Today, Error, console, ...extra,
     require(name) {
+      if(name==="@/data/customerBookingProjection")return load("data/customerBookingProjection.ts",{});
       if (name in modules) return modules[name];
       throw new Error("Unexpected import: " + name);
     },

@@ -36,6 +36,10 @@ import { BOOKING_TEMPLATES } from "@/data/bookingTemplates";
 import { getAvailableReservationSlots, getBookableItems, getStaff, getStaffGoLogBusy, getBookings, crossCalendars, claimSlot, getBookingSlotKey, BLOCKING_STATUSES, type Booking, type BookableItem, type BookingEngineTrace, type ClientBusyInterval, type ReservationSlot, type StaffOption, type Staff } from "@/data/booking";
 import type { DebugStaffEntry } from "@/components/dev/GoBookingDebugOverlay";
 import { getClientBusyIntervals } from "@/data/clientCalendar";
+import { getAuthenticatedUserId, getTimelineAvailability, getActivebusinesses, isCloudId, BookingApiError } from "@/data/booking";
+import { CatalogComplementSelector } from "./CatalogComplementSelector";
+import { catalogBookingServices, isCatalogService, type CatalogQuote } from "@/data/catalogAssociations";
+import { compactTimelineOptions, timelineOptionLabel } from "@/data/bookingTimeline";
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { PEOPLE_SECTORS, SUB_TO_SECTOR } from "@/data/goSectorData";
@@ -69,22 +73,28 @@ type Props = {
 const PRV_DAY_KEYS   = ["day_sun","day_mon","day_tue","day_wed","day_thu","day_fri","day_sat"] as const;
 const PRV_MONTH_KEYS = ["month_jan","month_feb","month_mar","month_apr","month_may","month_jun","month_jul","month_aug","month_sep","month_oct","month_nov","month_dec"] as const;
 
-function buildDays(tFn: ReturnType<typeof useLanguage>["t"]) {
+function buildDays(tFn: ReturnType<typeof useLanguage>["t"], timezone?: string) {
   const today = new Date();
+  let firstDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+  if (timezone) {
+    const parts = new Intl.DateTimeFormat("en-CA", {timeZone:timezone,year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(today);
+    const get=(key:string)=>parts.find(part=>part.type===key)!.value;
+    firstDate=`${get("year")}-${get("month")}-${get("day")}`;
+  }
+  const anchor=Date.parse(firstDate+"T12:00:00Z");
   return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
-    const yyyy = d.getFullYear();
-    const mm   = String(d.getMonth() + 1).padStart(2, "0");
-    const dd   = String(d.getDate()).padStart(2, "0");
-    const dayShort   = tFn(PRV_DAY_KEYS[d.getDay()]);
-    const monthShort = tFn(PRV_MONTH_KEYS[d.getMonth()]).slice(0, 3).toLowerCase();
+    const d = new Date(anchor+i*86400000);
+    const yyyy = d.getUTCFullYear();
+    const mm   = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd   = String(d.getUTCDate()).padStart(2, "0");
+    const dayShort   = tFn(PRV_DAY_KEYS[d.getUTCDay()]);
+    const monthShort = tFn(PRV_MONTH_KEYS[d.getUTCMonth()]).slice(0, 3).toLowerCase();
     return {
       label:     i === 0 ? tFn("status_today") : dayShort,
       isToday:   i === 0,
-      num:       d.getDate(),
+      num:       d.getUTCDate(),
       month:     monthShort,
-      fullLabel: `${dayShort} ${d.getDate()} ${monthShort}`,
+      fullLabel: `${dayShort} ${d.getUTCDate()} ${monthShort}`,
       isoDate:   `${yyyy}-${mm}-${dd}`,
     };
   });
@@ -176,8 +186,22 @@ export function GoProveedorReservaSheet({
   const [lockedStaffId,        setLockedStaffId]        = useState<string | undefined>(undefined);
   const [selectedDay,          setSelectedDay]          = useState(0);
   const [selectedSlot,         setSelectedSlot]         = useState<string | null>(null);
+  const [selectedSlotInstant, setSelectedSlotInstant] = useState<string | null>(null);
+  const remoteRequestKey = useRef<string | null>(null);
+  const confirmationInFlight = useRef(false);
+  const [remoteRefresh, setRemoteRefresh] = useState(0);
+  const [serverDates, setServerDates] = useState<string[] | null>(null);
+  const [businessTimezone, setBusinessTimezone] = useState<string | undefined>();
   const [confirmed,            setConfirmed]            = useState(false);
   const [saving,               setSaving]               = useState(false);
+  const [goStaffRecords, setGoStaffRecords] = useState<Staff[]>([]);
+  useEffect(() => {
+    setGoStaffRecords([]);
+    if (!proveedor?.businessId) return;
+    let cancelled = false;
+    getStaff(proveedor.businessId).then(list => { if (!cancelled) setGoStaffRecords(list); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [proveedor?.businessId]);
 
   // ── Profesionales ─────────────────────────────────────────────────────────
   // Fuente A: si el proveedor es el propio negocio del usuario → plantillaItems
@@ -185,8 +209,10 @@ export function GoProveedorReservaSheet({
   const sectorId       = SUB_TO_SECTOR[proveedor?.subId ?? ""] ?? "";
   const isPeopleSector = PEOPLE_SECTORS.has(sectorId);
 
-  const staffData: { name: string; emoji: string; services: string[] }[] = useMemo(() => {
-    let raw: { name: string; emoji: string; services: string[] }[] = [];
+  const staffData: { id?: string; name: string; emoji: string; services: string[] }[] = useMemo(() => {
+    if (isCloudId(proveedor?.businessId)) return goStaffRecords.filter(person => person.active && isCloudId(person.id))
+      .map(person => ({ id: person.id, name: person.name, emoji: person.emoji ?? "👤", services: [] }));
+    let raw: { id?: string; name: string; emoji: string; services: string[] }[] = [];
     let source = "none";
 
     // Propio negocio con businessId coincidente
@@ -231,7 +257,7 @@ export function GoProveedorReservaSheet({
     console.log("PROFESSIONALS_RENDERED =", cleaned.map(p => p.name));
 
     return cleaned;
-  }, [isPeopleSector, config.plantillaItems, config.businessId, proveedor?.businessId, proveedor?.subId]);
+  }, [isPeopleSector, config.plantillaItems, config.businessId, proveedor?.businessId, proveedor?.subId, goStaffRecords]);
 
   // Station label per sector so the client feels they're booking a physical space
   const stationInfo = useMemo(() => {
@@ -252,8 +278,8 @@ export function GoProveedorReservaSheet({
   useEffect(() => {
     if (!proveedor?.businessId) { setRealItems([]); return; }
     let cancelled = false;
-    getBookableItems(proveedor.businessId).then(items => {
-      if (!cancelled) setRealItems(items.filter(i => i.active && i.visible));
+    getBookableItems(proveedor.businessId, isCloudId(proveedor.businessId)).then(items => {
+      if (!cancelled) setRealItems(items.filter(i => i.active && i.visible && isCatalogService(i)));
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [proveedor?.businessId]);
@@ -261,7 +287,7 @@ export function GoProveedorReservaSheet({
   // ── Todos los servicios — SIN filtrar por profesional ────────────────────
   // El profesional se elige DESPUÉS del servicio.
   const allServices = useMemo(() => {
-    if (realItems.length > 0) {
+    if (realItems.length > 0 || isCloudId(proveedor?.businessId)) {
       return realItems.map(item => ({
         title: item.title,
         durationMinutes: item.durationMinutes,
@@ -270,7 +296,7 @@ export function GoProveedorReservaSheet({
       }));
     }
     return BOOKING_TEMPLATES[proveedor?.subId ?? ""]?.services ?? [];
-  }, [realItems, proveedor?.subId]);
+  }, [realItems, proveedor?.subId, proveedor?.businessId]);
 
   // El servicio actualmente elegido
   const service = selectedService !== null ? (allServices[selectedService] ?? null) : null;
@@ -278,21 +304,19 @@ export function GoProveedorReservaSheet({
 
   // ── go_staff_v1 — fuente de IDs de servicio por profesional ──────────────
   // Debe declararse ANTES del useMemo staffForService (evitar temporal dead zone)
-  const [goStaffRecords, setGoStaffRecords] = useState<Staff[]>([]);
-  useEffect(() => {
-    if (!proveedor?.businessId) { setGoStaffRecords([]); return; }
-    let cancelled = false;
-    getStaff(proveedor.businessId).then(list => {
-      if (!cancelled) setGoStaffRecords(list);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [proveedor?.businessId]);
 
   // ── Staff elegible para el servicio elegido (paso 2) ─────────────────────
   // Validación: ID (principal, vía go_staff_v1) > nombre (fallback, vía plantillaItems)
   const staffForService = useMemo(() => {
     if (staffData.length === 0) return [];
     if (!service) return staffData;
+    if (isCloudId(proveedor?.businessId)) {
+      const itemId = realItems.find(item => item.title === service.title)?.id;
+      return itemId ? staffData.filter(person => {
+        const record = goStaffRecords.find(member => member.id === person.id);
+        return record && (!record.serviceIds?.length || record.serviceIds.includes(itemId));
+      }) : [];
+    }
     const anyHasServices = staffData.some(p => p.services.length > 0);
     if (!anyHasServices) return staffData; // ninguno tiene restricciones → todos
 
@@ -344,6 +368,8 @@ export function GoProveedorReservaSheet({
   }, [proveedor?.businessId, proveedor?.itemId, service, realItems]);
 
   const [loadingSlots, setLoadingSlots] = useState(false);
+  const [catalogQuote, setCatalogQuote] = useState<CatalogQuote | null>(null);
+  const validCatalogQuote = catalogQuote?.businessId === proveedor?.businessId && catalogQuote?.rootIds[0] === selectedItemId && catalogQuote.ready ? catalogQuote : null;
 
   // ── Debug overlay ─────────────────────────────────────────────────────────
   const [debugVisible,  setDebugVisible]  = useState(false);
@@ -352,7 +378,14 @@ export function GoProveedorReservaSheet({
   // ── Ocupados del profesional en go_log_v1 ────────────────────────────────
   const [staffGoBusy, setStaffGoBusy] = useState<ClientBusyInterval[]>([]);
 
-  const days = useMemo(() => buildDays(t), [t]);
+  useEffect(() => {
+    let current=true;setBusinessTimezone(undefined);
+    if (visible && isCloudId(proveedor?.businessId)) void getActivebusinesses().then(businesses=>{
+      if(current)setBusinessTimezone(businesses.find(business=>business.id===proveedor?.businessId)?.timezone);
+    }).catch(()=>{if(current)setServerDates([]);});
+    return()=>{current=false;};
+  },[visible,proveedor?.businessId]);
+  const days = useMemo(() => buildDays(t, businessTimezone), [t, businessTimezone]);
 
   // ── selectedStaffId — id estable del profesional seleccionado ────────────
   // ÚNICA FUENTE DE VERDAD: lockedStaffId fijado en el momento exacto del tap.
@@ -366,7 +399,17 @@ export function GoProveedorReservaSheet({
   }, [proveedor?.businessId, selectedProfessional, lockedStaffId]);
 
   // ── dayInfos — solo para UI del selector de días (indicadores abierto/cerrado) ──
+  useEffect(() => {
+    let current = true; setServerDates(null);
+    if (!visible || !isCloudId(proveedor?.businessId) || !businessTimezone || !selectedItemId || selectedProfessional === null || !validCatalogQuote) return;
+    void getTimelineAvailability(proveedor!.businessId!, validCatalogQuote.serviceIds, days[0].isoDate,
+      selectedProfessional === -1 ? undefined : selectedStaffId ?? undefined, { days: days.length, datesOnly: true })
+      .then(result => { if (current) setServerDates(result.availableDates); })
+      .catch(() => { if (current) setServerDates([]); });
+    return () => { current = false; };
+  }, [visible, proveedor?.businessId, selectedItemId, selectedProfessional, selectedStaffId, days, businessTimezone, catalogQuote]);
   const dayInfos = useMemo(() => {
+    if (isCloudId(proveedor?.businessId)) return days.map(day => ({ open: !!serverDates?.includes(day.isoDate) }));
     const staffSchedCfg = selectedStaffId ? (config.staffSchedules ?? {})[selectedStaffId] : undefined;
     const useStaffSched = staffSchedCfg && !staffSchedCfg.useCompanySchedule;
 
@@ -384,11 +427,12 @@ export function GoProveedorReservaSheet({
       if (!config.activeDays.includes(configDay)) return { open: false };
       return { open: true };
     });
-  }, [days, selectedStaffId, config.staffSchedules, config.activeDays]);
+  }, [days, selectedStaffId, config.staffSchedules, config.activeDays, proveedor?.businessId, serverDates]);
 
   // ── Agenda ocupada del cliente ────────────────────────────────────────────
   const [clientBusy, setClientBusy] = useState<ClientBusyInterval[]>([]);
   useEffect(() => {
+    if (isCloudId(proveedor?.businessId)) { setClientBusy([]); return; }
     const dateISO = days[selectedDay]?.isoDate;
     if (!dateISO) return;
     let cancelled = false;
@@ -415,7 +459,7 @@ export function GoProveedorReservaSheet({
     if (!proveedor?.businessId) return [];
     return staffForService.map((p) => {
       const normalized = p.name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
-      const stableId   = `${proveedor.businessId}_staff_${normalized}`;
+      const stableId   = isCloudId(proveedor.businessId) ? p.id! : `${proveedor.businessId}_staff_${normalized}`;
       const schedCfg   = (config.staffSchedules ?? {})[stableId] ?? null;
       // Incluir serviceIds reales desde go_staff_v1 para que el motor "any"
       // use validación por ID en lugar de solo por nombre.
@@ -443,7 +487,7 @@ export function GoProveedorReservaSheet({
       : null;
 
     return staffData.map(p => {
-      const stableId = `${proveedor?.businessId}_staff_${p.name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "")}`;
+      const stableId = isCloudId(proveedor?.businessId) ? p.id! : `${proveedor?.businessId}_staff_${p.name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "")}`;
       const goRec    = goStaffRecords.find(r => r.id === stableId);
 
       // ── match method ──────────────────────────────────────────────────────
@@ -521,6 +565,7 @@ export function GoProveedorReservaSheet({
   const [conflictReason, setConflictReason] = useState<"staff" | "client" | null>(null);
 
   useEffect(() => {
+    if (isCloudId(proveedor?.businessId)) { setOccupiedSlotTimes(new Set()); setLoadingOccupied(false); return; }
     if (!proveedor?.businessId) { setOccupiedSlotTimes(new Set()); setLoadingOccupied(false); return; }
     if (availableSlots.length === 0) { setOccupiedSlotTimes(new Set()); setLoadingOccupied(false); return; }
 
@@ -608,6 +653,7 @@ export function GoProveedorReservaSheet({
     setEngineTrace(null);
 
     if (!service || selectedProfessional === null) return;
+    if (isCloudId(proveedor?.businessId) && !validCatalogQuote) return;
 
     const dateISO = days[selectedDay]?.isoDate;
     if (!dateISO) return;
@@ -638,7 +684,7 @@ export function GoProveedorReservaSheet({
         console.log("SELECTED SERVICE", { title: capturedServiceTitle, itemId: selectedItemId });
         console.log("SELECTED DATE",    dateISO);
 
-        const clientBusyNow = await getClientBusyIntervals("local_user", dateISO);
+        const clientBusyNow = isCloudId(proveedor.businessId) ? [] : await getClientBusyIntervals("local_user", dateISO);
 
         // ── LOG DIAGNÓSTICO CRÍTICO: clientBusyNow ────────────────────────────
         console.log("[CLIENT_BUSY_NOW]", {
@@ -657,6 +703,7 @@ export function GoProveedorReservaSheet({
           businessName:          config.businessName ?? proveedor.name ?? "",
           selectedDate:          dateISO,
           serviceId:             selectedItemId ?? "",
+          serviceIds: validCatalogQuote?.serviceIds,
           serviceName:           service.title,
           durationMinutes:       service.durationMinutes,
           professionalId:        proIsAny ? "any" : (selectedStaffId ?? null),
@@ -672,6 +719,13 @@ export function GoProveedorReservaSheet({
           staffGoBusyIntervals:  proIsAny ? [] : staffGoBusy,
           onDebugTrace:          (trace) => { if (!cancelled) setEngineTrace(trace); },
         });
+        if (isCloudId(proveedor.businessId)) {
+          if (!cancelled) {
+            setAvailableSlots(compactTimelineOptions(slots.map(slot => ({ ...slot, staffId: slot.professionalId }))));
+            setOccupiedSlotTimes(new Set()); setLoadingOccupied(false);
+          }
+          return;
+        }
 
         // Cruzar con agenda del cliente
         const asProviderSlots = slots.map(s => ({
@@ -865,26 +919,27 @@ export function GoProveedorReservaSheet({
     visible,   // ← CRÍTICO: re-corre el motor cada vez que el sheet se abre (visible false→true)
                //   garantiza lectura fresca de go_bookings_v1 aunque ningún otro dep cambie
     service, selectedProfessional, selectedDay, days,
-    proveedor?.businessId, selectedItemId, selectedStaffId,
+    proveedor?.businessId, selectedItemId, selectedStaffId, catalogQuote,
     config.activeDays, config.daySchedules, config.openFrom, config.openTo, config.staffSchedules,
-    staffForService, allStaffOptions, staffGoBusy, goStaffRecords,
+    staffForService, allStaffOptions, staffGoBusy, goStaffRecords, remoteRefresh,
   ]);
 
   // ── Slots para mostrar ────────────────────────────────────────────────────
   // Fuente única: availableSlots filtrada por occupiedSlotTimes.
   // occupiedSlotTimes se recalcula con lectura fresca de go_bookings_v1 en el
   // useEffect de arriba — solapamiento real de intervalo, no comparación de prefijo.
-  const displaySlots: { time: string; available: boolean }[] =
+  const displaySlots: (ReservationSlot & { available: boolean })[] =
     (service === null || selectedProfessional === null)
       ? []
       : availableSlots
           .filter(s => !occupiedSlotTimes.has(s.time))
-          .map(s => ({ time: s.time, available: true }));
+          .map(s => ({ ...s, available: true }));
 
   const color = proveedor?.subColor ?? "#4A80BD";
 
   // ── Reset helpers ──────────────────────────────────────────────────────────
   const resetFromService = useCallback(() => {
+    setSelectedSlotInstant(null); remoteRequestKey.current = null;
     setSelectedProfessional(null);
     setLockedStaffId(undefined);
     setSelectedSlot(null);
@@ -895,6 +950,7 @@ export function GoProveedorReservaSheet({
   }, []);
 
   const resetFromPro = useCallback(() => {
+    setSelectedSlotInstant(null); remoteRequestKey.current = null;
     setSelectedSlot(null);
     setAvailableSlots([]);
     setOccupiedSlotTimes(new Set());
@@ -903,6 +959,7 @@ export function GoProveedorReservaSheet({
   }, []);
 
   const handleClose = useCallback(() => {
+    setSelectedSlotInstant(null); remoteRequestKey.current = null;
     setSelectedService(null);
     setSelectedProfessional(null);
     setLockedStaffId(undefined);
@@ -967,6 +1024,24 @@ export function GoProveedorReservaSheet({
     if (!dateISO || !time) {
       console.warn("[CONFIRM_PATH_REACHED] GoProveedorReservaSheet.saveBooking EARLY_RETURN_2 — missing dateISO or time", { dateISO, time });
       return NOPE();
+    }
+    if (isCloudId(proveedor.businessId)) {
+      const slot = availableSlots.find(value => selectedSlotInstant ? value.startInstant === selectedSlotInstant : value.time === time);
+      if (!slot?.startInstant || !slot.timingSnapshot || !selectedItemId || !validCatalogQuote) return NOPE(true);
+      try {
+        const customerId = await getAuthenticatedUserId();
+        if (!customerId) throw new BookingApiError("Inicia sesión antes de confirmar.", 401);
+        const id = remoteRequestKey.current ??= `booking_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        const result = await claimSlot({ id, businessId: proveedor.businessId, bookableItemId: selectedItemId, customerId,
+          catalogSnapshot: validCatalogQuote, services: catalogBookingServices(validCatalogQuote),
+          staffId: slot.professionalId || undefined, startDatetime: slot.startDatetime, endDatetime: slot.endDatetime,
+          startInstant: slot.startInstant, endInstant: slot.endInstant, timingSnapshot: slot.timingSnapshot,
+          unitsReserved: 1, peopleCount: 1, status: "CONFIRMED", paymentStatus: "none" });
+        return { saved: result.ok, alreadyTaken: !result.ok };
+      } catch (error) {
+        setAlreadyTakenError(true);
+        return NOPE(error instanceof BookingApiError && error.status === 409);
+      }
     }
 
     // ── staffId: única fuente de verdad = lockedStaffId ─────────────────────
@@ -1267,10 +1342,11 @@ export function GoProveedorReservaSheet({
 
   // ── Etiquetas para la pantalla de confirmación ───────────────────────────
   const dayDataConfirm   = days[selectedDay];
-  const durationLabel    = service
-    ? service.durationMinutes < 60
-      ? `${service.durationMinutes} min`
-      : `${(service.durationMinutes / 60).toFixed(service.durationMinutes % 60 !== 0 ? 1 : 0)} h`
+  const reviewedDuration = availableSlots.find(slot => selectedSlotInstant ? slot.startInstant === selectedSlotInstant : slot.time === selectedSlot)?.timingSnapshot?.totalClientMinutes ?? service?.durationMinutes;
+  const durationLabel    = reviewedDuration
+    ? reviewedDuration < 60
+      ? `${reviewedDuration} min`
+      : `${Math.floor(reviewedDuration / 60)} h${reviewedDuration % 60 ? ` ${reviewedDuration % 60} min` : ""}`
     : null;
 
   // ── PANTALLA PRINCIPAL (única Modal — confirmación dentro) ─────────────────
@@ -1598,6 +1674,9 @@ export function GoProveedorReservaSheet({
               PASO 2 · PROFESIONAL — visible SIEMPRE tras elegir servicio.
               Si no hay profesionales configurados muestra únicamente Indistinto.
               ══════════════════════════════════════════════════════════════ */}
+          {isCloudId(proveedor.businessId) && selectedItemId && <View style={{ marginHorizontal: 16 }}>
+            <CatalogComplementSelector businessId={proveedor.businessId!} rootIds={[selectedItemId]} onChange={setCatalogQuote} />
+          </View>}
           {serviceChosen && (
             <View onLayout={(e) => { paso2Y.current = e.nativeEvent.layout.y; }} style={{ marginHorizontal: 16, marginBottom: 20 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
@@ -1685,7 +1764,7 @@ export function GoProveedorReservaSheet({
                             // ID único y determinista: siempre el patrón computado por nombre.
                             // No depende de goStaffRecords → mismo valor en tap 1 y tap 2.
                             const norm = pro.name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
-                            const staffId = proveedor?.businessId
+                            const staffId = isCloudId(proveedor?.businessId) ? pro.id : proveedor?.businessId
                               ? `${proveedor.businessId}_staff_${norm}`
                               : undefined;
                             console.log("[TAP_PROFESIONAL]", { nombre: pro.name, staffId: staffId ?? "(sin businessId)" });
@@ -1934,14 +2013,16 @@ export function GoProveedorReservaSheet({
                 {!loadingSlots && !loadingOccupied && displaySlots.length > 0 && (
                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                     {displaySlots.map((slot) => {
-                      const isSelected = selectedSlot === slot.time;
+                      const isSelected = slot.startInstant ? selectedSlotInstant === slot.startInstant : selectedSlot === slot.time;
                       return (
                         <TouchableOpacity
-                          key={slot.time}
+                          key={slot.startInstant ?? slot.time}
                           disabled={!slot.available}
                           onPress={() => {
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                             setSelectedSlot(slot.time);
+                            if (selectedSlotInstant !== slot.startInstant || selectedSlot !== slot.time) remoteRequestKey.current = null;
+                            setSelectedSlotInstant(slot.startInstant ?? null);
                             setAlreadyTakenError(false);
                           }}
                           activeOpacity={0.82}
@@ -1961,7 +2042,7 @@ export function GoProveedorReservaSheet({
                             fontSize: 13, fontWeight: "700",
                             color: !slot.available ? "rgba(255,255,255,0.25)" : isSelected ? "#fff" : "rgba(255,255,255,0.85)",
                           }}>
-                            {slot.time}
+                            {timelineOptionLabel(slot, displaySlots)}
                           </Text>
                         </TouchableOpacity>
                       );
@@ -2033,6 +2114,8 @@ export function GoProveedorReservaSheet({
               activeOpacity={0.88}
               disabled={saving}
               onPress={async () => {
+                if (confirmationInFlight.current) return;
+                confirmationInFlight.current = true;
                 console.log("[ENTER_FUNCTION] GoProveedorReservaSheet → Confirmar button pressed", {
                   hasService: !!service,
                   businessId: proveedor?.businessId ?? "(missing)",
@@ -2049,13 +2132,15 @@ export function GoProveedorReservaSheet({
 
                 // claimSlot hace READ→CHECK→WRITE en una sola operación atómica.
                 // Si el slot está ocupado, no escribe nada y devuelve alreadyTaken=true.
-                const result = await saveBooking();
-                setSaving(false);
+                let result;
+                try { result = await saveBooking(); }
+                finally { confirmationInFlight.current = false; setSaving(false); }
 
                 if (result.alreadyTaken) {
                   setAlreadyTakenError(true);
                   // Forzar recálculo de occupiedSlotTimes para reflejar el estado real
                   setAvailableSlots(prev => [...prev]);
+                  if (isCloudId(proveedor.businessId)) { setSelectedSlot(null); setSelectedSlotInstant(null); setRemoteRefresh(value => value + 1); }
                   return;
                 }
                 if (result.saved) setConfirmed(true);

@@ -33,7 +33,15 @@ test('owner management denies cross-business writes and preserves server-owned f
   assert.equal((await req(`/businesses/${id}/services`,{name:'Cita',duration_minutes:30,price:25})).status,201);
   assert.equal(writes.at(-1).currency,'EUR');assert.equal(writes.at(-1).business_id,id);
   assert.equal((await req(`/businesses/${id}/services`,{name:'Cita',duration_minutes:0,price:25})).status,400);
+  assert.equal((await req(`/businesses/${id}/services`,{name:'Ampolla',duration_minutes:0,price:7.25,ui_metadata:{catalogKind:'product'}})).status,201);
+  assert.equal(writes.at(-1).ui_metadata.catalogKind,'product');
+  assert.equal((await req(`/businesses/${id}/services`,{name:'Ampolla',duration_minutes:30,price:7.25,ui_metadata:{catalogKind:'product'}})).status,400);
   assert.equal((await req(`/businesses/${id}/availability`,{weekday:1,start_time:'10:00',end_time:'09:00'})).status,400);
+  assert.equal((await req(`/businesses/${id}/availability`,{weekday:1,start_time:'22:00',end_time:'06:00',ui_metadata:{endNextDay:true}})).status,201);
+  assert.equal((await req(`/businesses/${id}/availability`,{weekday:1,start_time:'22:00',end_time:'06:00',ui_metadata:{endNextDay:false}})).status,400);
+  assert.equal((await req(`/businesses/${id}/availability`,{weekday:1,start_time:'09:00',end_time:'10:00',ui_metadata:{endNextDay:true}})).status,400);
+  assert.equal((await req(`/businesses/${id}/availability`,{weekday:1,start_time:'22:00',end_time:'22:00',ui_metadata:{endNextDay:true}})).status,400);
+  assert.equal((await req(`/businesses/${id}/availability`,{weekday:1,start_time:'09:00',end_time:'10:00',ui_metadata:{endNextDay:'true'}})).status,400);
   assert.equal((await req(`/businesses/${id}/availability`,{weekday:1,start_time:'09:00',end_time:'10:00',staff_id:id})).status,400);
   owner=false;const count=writes.length;
   assert.equal((await req(`/businesses/${id}/services`,{name:'Cita',duration_minutes:30,price:25})).status,404);

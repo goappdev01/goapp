@@ -1,3 +1,4 @@
+import {customerBookingEntry} from "@/data/customerBookingProjection";
 /**
  * Bridge that writes confirmed visits and bookings into the native go_log_v1
  * store so they appear automatically in the PRÓXIMA VISITA panel.
@@ -128,36 +129,7 @@ export async function syncBookingToGoLog(
 
     const _computedSlotKey = booking.slotKey ?? getBookingSlotKey(booking);
 
-    const entry: GoEntry = {
-      id:           goLogId,
-      intentKey:    "generico",
-      intentLabel:  "Reserva",
-      color:        business.bookingColor || "#00e5ff",
-      place:        business.location || businessName,
-      date:         dateLabel,
-      dateISO,
-      time:         timeStr,
-      duration:     `${durationMin}min`,
-      contactName:  businessName,
-      phone:        business.phone || "",
-      estado:       booking.status === "CANCELLED" ? "rechazado"
-                  : booking.status === "CONFIRMED"  ? "aceptado"
-                  : "pendiente",
-      deleted:      booking.status === "CANCELLED",
-      notes:        serviceName,
-      type:         "GO_RESERVA",
-      kind:         "sent",
-      // Booking-critical fields — required for slot conflict detection
-      staffId:      booking.staffId,
-      slotKey:      _computedSlotKey,
-      businessId:   booking.businessId,
-      serviceId:    booking.bookableItemId,
-      reservationId: booking.id,
-      startTime:    booking.startDatetime.slice(11, 16),
-      endTime:      booking.endDatetime.slice(11, 16),
-      ...(professionalName ? { professionalName } : {}),
-      ...(professionalId   ? { professionalId   } : {}),
-    } as GoEntry;
+    const entry: GoEntry = customerBookingEntry(booking,business,item,professionalName);
 
     console.log("[BOOKING_AFTER_TRANSFORM]", {
       sourceFile:     "goLogBridge.ts",

@@ -51,6 +51,14 @@
           "microphonePermission": "Permite que GO escuche tu solicitud de reserva.",
           "enableBackgroundPlayback": false
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permite que GO lea el QR de una reserva.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
       ]
     ],
     "experiments": {

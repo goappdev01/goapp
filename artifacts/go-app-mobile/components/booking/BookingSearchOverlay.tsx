@@ -18,6 +18,8 @@ import {
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { CatalogComplementSelector } from "./CatalogComplementSelector";
+import { catalogBookingServices, isCatalogService, type CatalogQuote } from "@/data/catalogAssociations";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -33,6 +35,7 @@ import {
   computeRefundInfo,
   createHold,
   getAllSlots,
+  getTimelineAvailability,
   getActivebusinesses,
   getBookableItems,
   getStaff,
@@ -47,8 +50,9 @@ import { trSector } from "@/data/goSectorTranslations";
 import { syncBookingToGoLog } from "@/lib/goLogBridge";
 import { formatISODate, getToday } from "@/lib/time";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { MyBookingsList } from "@/components/booking/MyBookingsList";
 import type { DemoBookingRepository } from "@/data/demoBookingRepository";
+import { summarizeBookingServices, staffSupportsBookingServices, type BookingService } from "@/data/bookingServices";
+import { compactTimelineOptions, timelineOptionLabel } from "@/data/bookingTimeline";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -170,8 +174,15 @@ function formatDateLabel(dateISO: string, t: ReturnType<typeof useLanguage>["t"]
   return `${t(DATE_DAY_KEYS[d.getDay()])} ${d.getDate()} ${t(DATE_MONTH_KEYS[d.getMonth()]).slice(0, 3).toLowerCase()}`;
 }
 
-function getDaysRange(count = 21): string[] {
+function getDaysRange(count = 21, timezone?: string): string[] {
   const days: string[] = [];
+  if (timezone) {
+    const parts = new Intl.DateTimeFormat("en-CA", {timeZone: timezone, year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
+    const get=(key:string)=>parts.find(part=>part.type===key)!.value;
+    const first = new Date(`${get("year")}-${get("month")}-${get("day")}T12:00:00Z`);
+    for(let i=0;i<count;i++) days.push(new Date(first.getTime()+i*86400000).toISOString().slice(0,10));
+    return days;
+  }
   const today = getToday();
   for (let i = 0; i < count; i++) {
     const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i, 12);
@@ -329,6 +340,8 @@ export type BookingSearchOverlayProps = {
   /** ↓↓ Cierra TODO el flujo y vuelve al Landing directamente (sin pasos intermedios). */
   onDismissAll?: () => void;
   onBookingConfirmed?: (booking: Booking, business: Business, item: BookableItem, professionalName?: string) => void;
+  /** The caller projects its calendar/list/Landing directly from the reservation repository. */
+  canonicalCustomerBookings?: boolean;
   externalBorderColor?: string;
   onProviderSelected?: (business: Business | null) => void;
   /** Llamado inmediatamente cuando se crea un HOLD — permite refrescar contadores sin esperar al polling */
@@ -346,6 +359,7 @@ export function BookingSearchOverlay({
   onClose,
   onDismissAll,
   onBookingConfirmed,
+  canonicalCustomerBookings = false,
   onProviderSelected,
   onHoldCreated,
   onGoToBooking,
@@ -456,9 +470,19 @@ export function BookingSearchOverlay({
   const [recentBizs, setRecentBizs] = useState<Business[]>([]);
   const [items, setItems] = useState<BookableItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<BookableItem | null>(null);
+  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
+  const [catalogQuote, setCatalogQuote] = useState<CatalogQuote | null>(null);
+  const [selectedServices, setSelectedServices] = useState<BookingService[]>([]);
+  const [availableDates, setAvailableDates] = useState<string[] | null>(null);
+  const [slotError, setSlotError] = useState("");
+  const slotGeneration = useRef(0);
+  let serviceSelection: ReturnType<typeof summarizeBookingServices> | null = null;
+  try { if (selectedServiceIds.length) serviceSelection = summarizeBookingServices(items, selectedServiceIds); } catch { /* catalogue changed: keep selection, disallow continuation */ }
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<Staff | null | "none">(null);
   const [selectedDate, setSelectedDate] = useState(formatISODate(getToday()));
+  const selectionScope = `${selectedBusiness?.id ?? ""}|${selectedServiceIds.join(",")}|${selectedStaff && selectedStaff !== "none" ? selectedStaff.id : "any"}`;
+  const currentSlotScope = useRef(""); currentSlotScope.current = `${selectionScope}|${selectedDate}|${visible}`;
   const [slots, setSlots] = useState<SlotWithStatus[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [activeHold, setActiveHold] = useState<Booking | null>(null);
@@ -468,7 +492,7 @@ export function BookingSearchOverlay({
   // Anti-doble-reserva: true cuando claimSlot o isSlotOccupied detectan conflicto
   const [slotTakenError, setSlotTakenError] = useState(false);
 
-  const days = getDaysRange(21);
+  const days = getDaysRange(21, demoRepository ? undefined : selectedBusiness?.timezone);
 
   const goToStep = (next: Step, direction: "forward" | "back" = "forward") => {
     const offset = direction === "forward" ? SCREEN_W : -SCREEN_W;
@@ -494,6 +518,7 @@ export function BookingSearchOverlay({
       setResults([]);
       setSelectedBusiness(null);
       setSelectedItem(null);
+      setSelectedServiceIds([]); setSelectedServices([]); setAvailableDates(null); setSlotError("");
       setStaffList([]);
       setSelectedStaff(null);
       setActiveHold(null);
@@ -506,7 +531,7 @@ export function BookingSearchOverlay({
           if (!current) return;
           setRecentBizs(all);
           const initial = initialBusinessId && all.find(business => business.id === initialBusinessId);
-          if (initial) { setSelectedBusiness(initial); setStep("item"); }
+          if (initial) { setSelectedBusiness(initial); setSelectedDate(getDaysRange(1)[0]); setStep("item"); }
         }).catch(() => { if (current) setRecentBizs([]); });
       } else {
         getRecentBusinessIds(5).then(async (ids) => {
@@ -572,13 +597,17 @@ export function BookingSearchOverlay({
 
   useEffect(() => {
     if (!selectedBusiness) return;
-    (demoRepository ? demoRepository.getBookableItems(selectedBusiness.id) : getBookableItems(selectedBusiness.id, true)).then((its) =>
-      setItems(its.filter((i) => i.active && i.visible))
-    ).catch((error) => {
+    let current = true;
+    setItems([]); setStaffList([]);
+    (demoRepository ? demoRepository.getBookableItems(selectedBusiness.id) : getBookableItems(selectedBusiness.id, true)).then((its) => {
+      if (current) setItems(its.filter((i) => i.active && i.visible));
+    }).catch((error) => {
+      if (!current) return;
       setItems([]);
       Alert.alert("No se pudieron cargar servicios", error instanceof Error ? error.message : "Comprueba la conexión e inténtalo de nuevo.");
     });
     (demoRepository ? demoRepository.getStaff(selectedBusiness.id) : getStaff(selectedBusiness.id)).then((all) => {
+      if (!current) return;
       // ── Limpieza defensiva antes de pintar profesionales ──────────────────
       // 1. Eliminar registros sin id o con nombre < 3 chars (parciales legacy)
       // 2. Deduplicar por nombre normalizado
@@ -587,7 +616,7 @@ export function BookingSearchOverlay({
         if (!s.id) return false;
         const name = (s.name ?? "").trim();
         if (name.length < 3) return false;
-        const norm = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const norm = s.id; // identity, never collapse two professionals with the same name
         if (seenNorm.has(norm)) return false;
         seenNorm.add(norm);
         return true;
@@ -596,10 +625,14 @@ export function BookingSearchOverlay({
       console.log("PROFESSIONALS_RENDERED =", clean.map((s) => s.name));
       setStaffList(clean);
     }).catch(() => {});
+    return () => { current = false; };
   }, [selectedBusiness, demoRepository]);
 
   const loadSlots = useCallback(async () => {
     if (!selectedBusiness || !selectedItem) return;
+    const generation = ++slotGeneration.current;
+    const scope = currentSlotScope.current;
+    setSlots([]); setSlotError("");
     setLoadingSlots(true);
     // Pass staffId so the slot engine uses staff-specific AvailabilityWindows when
     // they exist (created by syncWithBookingSystem). Falls back to business-level
@@ -609,12 +642,15 @@ export function BookingSearchOverlay({
       "| itemId →", selectedItem.id,
       "| date →", selectedDate,
       "| staffId usado →", staffId ?? "(sin profesional)");
-    const raw = await (demoRepository?.getAllSlots ?? getAllSlots)(
+    try {
+    const raw = demoRepository ? await demoRepository.getAllSlots(
       selectedBusiness.id,
       selectedItem.id,
       selectedDate,
       staffId,
-    );
+      selectedServices.map(service => service.id),
+    ) : await getAllSlots(selectedBusiness.id, selectedItem.id, selectedDate, staffId, selectedServices.map(service => service.id));
+    if (generation !== slotGeneration.current || scope !== currentSlotScope.current) return;
     console.log("[loadSlots] slots totales →", raw.length,
       "| disponibles →", raw.filter(s => s.isAvailable).length,
       "| bloqueados →", raw.filter(s => !s.isAvailable).length);
@@ -626,24 +662,27 @@ export function BookingSearchOverlay({
     // y ese profesional tiene horario propio (useCompanySchedule=false),
     // filtramos los slots para que solo aparezcan los que caben dentro de
     // sus turnos. Los slots fuera de esos turnos no se muestran.
-    if (!demoRepository && selectedStaff && selectedStaff !== "none") {
-      const weekdayJS = new Date(selectedDate + "T00:00:00").getDay();
-      const staffShifts = await getStaffShiftsForDay(
-        selectedBusiness.id,
-        selectedStaff.name,
-        weekdayJS,
-      );
-      if (staffShifts !== null) {
-        // staffShifts is a non-empty array of valid shift windows → filter slots to those windows
-        setSlots(filterSlotsByShifts(raw, staffShifts));
-        setLoadingSlots(false);
-        return;
-      }
-    }
+    // No second schedule filter: live results already validate the full sequence
+    // against company, professional and resource windows in the database.
 
     setSlots(raw);
-    setLoadingSlots(false);
-  }, [selectedBusiness, selectedItem, selectedDate, selectedStaff, demoRepository]);
+    } catch (error) {
+      if (generation === slotGeneration.current && scope === currentSlotScope.current) {
+        setSlots([]); setSlotError(error instanceof Error ? error.message : "No se pudo consultar la disponibilidad.");
+      }
+    } finally { if (generation === slotGeneration.current && scope === currentSlotScope.current) setLoadingSlots(false); }
+  }, [selectedBusiness, selectedItem, selectedDate, selectedStaff, selectedServices, demoRepository]);
+
+  useEffect(() => {
+    let current = true;
+    setAvailableDates(null);
+    if (!visible || demoRepository || step !== "slots" || !selectedBusiness || !selectedItem) return;
+    const staffId = selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined;
+    void getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), days[0], staffId, { days: days.length, datesOnly: true })
+      .then(result => { if (current) setAvailableDates(result.availableDates); })
+      .catch(error => { if (current) { setAvailableDates([]); setSlotError(error instanceof Error ? error.message : "No se pudieron consultar las fechas."); } });
+    return () => { current = false; };
+  }, [visible, step, selectionScope, demoRepository]);
 
   useEffect(() => {
     if (step === "slots") loadSlots();
@@ -652,6 +691,8 @@ export function BookingSearchOverlay({
   const handleSelectBusiness = (b: Business) => {
     Haptics.selectionAsync().catch(() => {});
     setSelectedBusiness(b);
+    setSelectedDate(getDaysRange(1, demoRepository ? undefined : b.timezone)[0]);
+    setItems([]); setSelectedItem(null); setSelectedServiceIds([]); setSelectedServices([]); setSelectedStaff(null); setSlots([]);
     if (!demoRepository) {
       onProviderSelected?.(b);
       recordBusinessVisit(b.id).catch(() => {});
@@ -661,9 +702,18 @@ export function BookingSearchOverlay({
 
   const handleSelectItem = (item: BookableItem) => {
     Haptics.selectionAsync().catch(() => {});
-    setSelectedItem(item);
-    setSelectedStaff(null);
-    // Siempre muestra el paso de profesional (incluye "Sin preferencia" aunque no haya staff)
+    setSelectedServiceIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id]);
+  };
+
+  const handleSaveServices = () => {
+    if (!serviceSelection) return;
+    if (demoRepository) {
+      setSelectedItem(serviceSelection.item); setSelectedServices(serviceSelection.services);
+    } else {
+      if (!catalogQuote?.ready || catalogQuote.businessId !== selectedBusiness?.id || JSON.stringify(catalogQuote.rootIds) !== JSON.stringify(selectedServiceIds)) return;
+      setSelectedItem({ ...serviceSelection.item, price: catalogQuote.totalPrice }); setSelectedServices(catalogBookingServices(catalogQuote));
+    }
+    setSelectedStaff(null); setSlots([]);
     goToStep("professional", "forward");
   };
 
@@ -677,7 +727,7 @@ export function BookingSearchOverlay({
     if (!selectedBusiness || !selectedItem) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
-      const staffId = selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined;
+      const staffId = demoRepository ? (selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined) : slot.staffId;
       console.log("[BOOKING_CHECK_INPUT] handleSelectSlot →", {
         businessId:    selectedBusiness.id,
         staffId,
@@ -693,6 +743,9 @@ export function BookingSearchOverlay({
       const result = await (demoRepository?.createHold ?? createHold)({
         businessId: selectedBusiness.id,
         bookableItemId: selectedItem.id,
+        ...(selectedServices.length ? { services: selectedServices } : {}),
+        ...(!demoRepository && catalogQuote ? { catalogSnapshot: catalogQuote } : {}),
+        startInstant: slot.startInstant, endInstant: slot.endInstant, timingSnapshot: slot.timingSnapshot,
         customerId: demoRepository?.ownerUserId ?? "me",
         staffId,
         startDatetime: slot.startDatetime,
@@ -801,7 +854,7 @@ export function BookingSearchOverlay({
         setActiveHold(null);
       } else {
         onBookingConfirmed?.(confirmed, selectedBusiness, selectedItem, proNameForLog);
-        syncBookingToGoLog(confirmed, selectedBusiness, selectedItem, proNameForLog, proIdForLog).catch(() => {});
+        if (!canonicalCustomerBookings) syncBookingToGoLog(confirmed, selectedBusiness, selectedItem, proNameForLog, proIdForLog).catch(() => {});
       }
       goToStep("confirmed", "forward");
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -871,6 +924,7 @@ export function BookingSearchOverlay({
     setSearching(false);
     setSelectedBusiness(null);
     setSelectedItem(null);
+    setSelectedServiceIds([]); setSelectedServices([]); setSlots([]); setAvailableDates(null);
     setStaffList([]);
     setSelectedStaff(null);
     setActiveHold(null);
@@ -920,6 +974,12 @@ export function BookingSearchOverlay({
   handleBackRef.current = handleBackOneLevel;
 
   const accentColor = selectedBusiness?.bookingColor || "#00e5ff";
+  const reviewedPlan = confirmedBooking?.timingSnapshot ?? activeHold?.timingSnapshot;
+  const summaryItem = selectedItem && reviewedPlan ? { ...selectedItem,
+    title: (confirmedBooking?.catalogSnapshot ?? activeHold?.catalogSnapshot)?.lines.map(line => line.name).join(" + ") || reviewedPlan.serviceDetails.map(service => service.title).join(" + "),
+    durationMinutes: reviewedPlan.totalClientMinutes,
+    price: (confirmedBooking?.catalogSnapshot ?? activeHold?.catalogSnapshot)?.totalPrice ?? reviewedPlan.totalPrice ?? selectedItem.price,
+  } : selectedItem;
 
   // Sheet compacto (sin flex:1) siempre en el paso "search" y cuando el teclado está visible.
   // El paso "search" se autoajusta a su contenido real (categorías + recientes + buscador).
@@ -928,7 +988,7 @@ export function BookingSearchOverlay({
 
   // Profesionales elegibles para el servicio seleccionado
   const eligibleStaff = selectedItem
-    ? staffList.filter((s) => !s.serviceIds || s.serviceIds.length === 0 || s.serviceIds.includes(selectedItem.id))
+    ? staffList.filter((s) => staffSupportsBookingServices(s, selectedServices.length ? selectedServices.map(service => service.id) : [selectedItem.id]))
     : staffList;
 
   // Etiqueta del profesional elegido — siempre definida cuando hay selección
@@ -1004,16 +1064,6 @@ export function BookingSearchOverlay({
 
                 {/* ── Dock de interacción — primero en DOM → fondo visual con column-reverse ── */}
                 <View style={[s.actionDock, { paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 16) }]}>
-
-                  <MyBookingsList
-                    demoRepository={demoRepository}
-                    visible={
-                      !keyboardVisible &&
-                      query.length === 0 &&
-                      !selectedCategory &&
-                      !selectedSubCategory
-                    }
-                  />
 
                   {/* Grid de categorías / subcategorías — prioridad principal */}
                   {!keyboardVisible && query.length === 0 && (
@@ -1225,10 +1275,13 @@ export function BookingSearchOverlay({
                   </View>
                 ) : (
                   <ScrollView style={s.list} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
-                    {items.map((item) => (
+                    {items.filter(isCatalogService).map((item) => (
                       <TouchableOpacity
                         key={item.id}
-                        style={[s.serviceCard, { borderColor: `${accentColor}30` }]}
+                        testID={"booking-service-" + item.id}
+                        accessibilityRole="checkbox"
+                        accessibilityState={{ checked: selectedServiceIds.includes(item.id) }}
+                        style={[s.serviceCard, { borderColor: selectedServiceIds.includes(item.id) ? accentColor : `${accentColor}30` }]}
                         onPress={() => handleSelectItem(item)}
                         activeOpacity={0.72}
                       >
@@ -1260,10 +1313,18 @@ export function BookingSearchOverlay({
                           ) : (
                             <Text style={s.servicePriceFree}>{t("biz_free")}</Text>
                           )}
-                          <Feather name="chevron-right" size={18} color="rgba(255,255,255,0.20)" />
+                          <Feather name={selectedServiceIds.includes(item.id) ? "check-square" : "chevron-right"} size={18} color={selectedServiceIds.includes(item.id) ? accentColor : "rgba(255,255,255,0.20)"} />
                         </View>
                       </TouchableOpacity>
                     ))}
+                    {!demoRepository && selectedBusiness && <CatalogComplementSelector businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} />}
+                    {serviceSelection && <Text testID="booking-services-total" style={s.metaBadgeText}>
+                      {serviceSelection.item.durationMinutes} min · {(!demoRepository && catalogQuote?.ready ? catalogQuote.totalPrice : serviceSelection.item.priceKnown === false ? null : serviceSelection.item.price) ?? (lang === "en" ? "Price to confirm" : "Precio por confirmar")} {serviceSelection.item.currency}
+                    </Text>}
+                    <TouchableOpacity testID="booking-save-services" accessibilityRole="button" disabled={!serviceSelection || !demoRepository && !catalogQuote?.ready} onPress={handleSaveServices}
+                      style={[s.serviceCard, { borderColor: accentColor, opacity: serviceSelection && (demoRepository || catalogQuote?.ready) ? 1 : 0.45 }]}>
+                      <Text style={s.serviceTitle}>{t("save")}</Text>
+                    </TouchableOpacity>
                   </ScrollView>
                 )}
               </View>
@@ -1374,12 +1435,14 @@ export function BookingSearchOverlay({
                     return (
                       <TouchableOpacity
                         key={d}
+                        disabled={!demoRepository && (availableDates === null || !availableDates.includes(d))}
                         onPress={() => {
                           Haptics.selectionAsync().catch(() => {});
-                          setSelectedDate(d);
+                          setSlots([]); setActiveHold(null); setSelectedDate(d);
                         }}
                         style={[
                           s.dayChip,
+                          !demoRepository && (availableDates === null || !availableDates.includes(d)) && { opacity: 0.35 },
                           isActive && {
                             borderColor: accentColor,
                             backgroundColor: `${accentColor}18`,
@@ -1398,12 +1461,14 @@ export function BookingSearchOverlay({
                   })}
                 </ScrollView>
 
+                {!!slotError && <Text accessibilityRole="alert" style={[s.emptyText, { marginHorizontal: 20 }]}>{slotError}</Text>}
+
                 {loadingSlots ? (
                   <View style={s.loaderWrap}>
                     <ActivityIndicator color={accentColor} />
                   </View>
                 ) : ((): React.ReactElement => {
-                  const available = slots.filter((sl) => sl.isAvailable);
+                  const available = demoRepository ? slots.filter((sl) => sl.isAvailable) : compactTimelineOptions(slots.filter((sl) => sl.isAvailable));
 
                   if (available.length === 0) {
                     return (
@@ -1427,7 +1492,7 @@ export function BookingSearchOverlay({
                           activeOpacity={0.75}
                         >
                           <Text style={[s.singleSlotTime, { color: accentColor }]}>
-                            {formatTime(sl.startDatetime)}
+                            {timelineOptionLabel(sl, slots)}
                           </Text>
                           {isPartial && (
                             <Text style={[s.singleSlotUnits, { color: `${accentColor}BB` }]}>
@@ -1456,13 +1521,13 @@ export function BookingSearchOverlay({
                           const isPartial = sl.availableUnits < sl.totalUnits && sl.totalUnits > 1;
                           return (
                             <TouchableOpacity
-                              key={idx}
+                              key={sl.startInstant ?? `${sl.startDatetime}|${sl.staffId ?? "any"}`}
                               style={[s.slotChipAvail, { borderColor: `${accentColor}60`, backgroundColor: "rgba(255,255,255,0.09)" }]}
                               onPress={() => handleSelectSlot(sl)}
                               activeOpacity={0.7}
                             >
                               <Text style={[s.slotTimeAvail, { color: "#FFFFFF" }]}>
-                                {formatTime(sl.startDatetime)}
+                                {timelineOptionLabel(sl, slots)}
                               </Text>
                               {isPartial && (
                                 <Text style={[s.slotUnitsAvail, { color: `${accentColor}CC` }]}>
@@ -1500,7 +1565,7 @@ export function BookingSearchOverlay({
                       <Text style={[s.summaryBizLabel, { color: accentColor }]}>
                         {selectedBusiness.name}
                       </Text>
-                      <Text style={s.summaryServiceName}>{trSector(selectedItem.title, lang)}</Text>
+                      <Text style={s.summaryServiceName}>{trSector(summaryItem!.title, lang)}</Text>
                       {/* Profesional — siempre visible si fue elegido */}
                       {proLabel && (
                         <View style={[s.summaryRow, { marginTop: 6 }]}>
@@ -1519,14 +1584,14 @@ export function BookingSearchOverlay({
                         <Feather name="clock" size={15} color="rgba(255,255,255,0.40)" />
                         <Text style={s.summaryRowText}>
                           {formatTime(activeHold.startDatetime)} — {formatTime(activeHold.endDatetime)}
-                          {"  ·  "}{selectedItem.durationMinutes} min
+                          {"  ·  "}{summaryItem!.durationMinutes} min
                         </Text>
                       </View>
-                      {selectedItem.price > 0 && (
+                      {summaryItem!.price > 0 && (
                         <View style={s.summaryRow}>
                           <Feather name="tag" size={15} color="rgba(255,255,255,0.40)" />
                           <Text style={[s.summaryRowText, { color: accentColor, fontWeight: "800" }]}>
-                            {selectedItem.price}€
+                            {summaryItem!.price}€
                           </Text>
                         </View>
                       )}
@@ -1536,7 +1601,7 @@ export function BookingSearchOverlay({
                   {/* Cancellation Policy — solo si el negocio tiene una política explícita */}
                   {selectedBusiness.cancellationPolicy ? (() => {
                     const policy = selectedBusiness.cancellationPolicy;
-                    const price  = selectedItem.price;
+                    const price  = summaryItem!.price;
                     const info   = computeRefundInfo(policy, activeHold, price);
                     return (
                       <View style={[
@@ -1557,7 +1622,7 @@ export function BookingSearchOverlay({
                               : policy.refundType === "full"    ? t("biz_refund_full")
                               : policy.refundType === "half"    ? t("biz_refund_half")
                               : policy.refundType === "partial" ? t("biz_refund_partial").replace("__PCT__", String(policy.refundPercent ?? 0))
-                              : policy.refundType === "fixed_fee" ? t("biz_refund_fixed_fee").replace("__FEE__", String(policy.fixedFee ?? 0)).replace("__REFUND__", Math.max(0, (selectedItem.price ?? 0) - (policy.fixedFee ?? 0)).toFixed(0))
+                              : policy.refundType === "fixed_fee" ? t("biz_refund_fixed_fee").replace("__FEE__", String(policy.fixedFee ?? 0)).replace("__REFUND__", Math.max(0, (summaryItem!.price ?? 0) - (policy.fixedFee ?? 0)).toFixed(0))
                               : t("biz_refund_none")}
                           </Text>
                         </View>
@@ -1653,7 +1718,7 @@ export function BookingSearchOverlay({
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 7, marginBottom: proShortName ? 10 : 22 }}>
                   <Feather name="check" size={14} color="#FFFFFF" />
                   <Text style={{ fontSize: 15, color: "#FFFFFF", textAlign: "center", fontWeight: "600" }}>
-                    {trSector(selectedItem.title, lang)}
+                    {trSector(summaryItem!.title, lang)}
                   </Text>
                 </View>
 
@@ -1710,7 +1775,7 @@ export function BookingSearchOverlay({
                       const dateISO = confirmedBooking.startDatetime.slice(0, 10);
                       const timeHHMM = confirmedBooking.startDatetime.slice(11, 16);
                       if (demoRepository) onDemoGoToBooking?.(dateISO, timeHHMM, demoRepository.getCustomerEntries().find(entry => entry.reservationId === confirmedBooking.id)?.id ?? `demo_customer_${confirmedBooking.id}`);
-                      else onGoToBooking?.(dateISO, timeHHMM, `go_booking_cli_${confirmedBooking.id}`);
+                      else onGoToBooking?.(dateISO, timeHHMM, canonicalCustomerBookings ? `go_booking_${confirmedBooking.id}` : `go_booking_cli_${confirmedBooking.id}`);
                     }
                     handleClose();
                   }}

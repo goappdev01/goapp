@@ -1,0 +1,17 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import vm from 'node:vm';
+const ts=createRequire(import.meta.url)('typescript'),scope={exports:{}};
+vm.runInNewContext(ts.transpileModule(readFileSync('data/bookingServices.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,scope);
+const {summarizeBookingServices,bookingServiceIds,staffSupportsBookingServices}=scope.exports;
+const item=(id,patch={})=>({id,businessId:'company',title:id,type:'service',durationMinutes:30,customerCapacity:1,unitQuantity:1,price:10,currency:'EUR',active:true,visible:true,paymentRequired:false,...patch});
+const plain=v=>JSON.parse(JSON.stringify(v));
+test('one service preserves its identity, configured price and duration',()=>{const a=item('corte');const result=summarizeBookingServices([a],['corte']);assert.deepEqual(plain(result.item),{...a,priceKnown:true});assert.equal(result.services.length,1);});
+test('three services accumulate duration and exact cents without synthetic service IDs',()=>{const catalog=[item('corte',{price:0.1,durationMinutes:15}),item('tinte',{price:0.2,durationMinutes:60}),item('tratamiento',{price:10,durationMinutes:30})];const result=summarizeBookingServices(catalog,catalog.map(s=>s.id));assert.equal(result.item.id,'corte');assert.equal(result.item.title,'corte + tinte + tratamiento');assert.equal(result.item.durationMinutes,105);assert.equal(result.item.price,10.3);assert.deepEqual(plain(result.services.map(s=>s.id)),catalog.map(s=>s.id));});
+test('a selection cannot duplicate, omit, hide or mix businesses',()=>{const catalog=[item('a'),item('b',{businessId:'other'}),item('inactive',{active:false}),item('hidden',{visible:false})];for(const ids of [[],['a','a'],['missing'],['a','b'],['inactive'],['hidden']])assert.throws(()=>summarizeBookingServices(catalog,ids));});
+test('unknown prices are never presented as free or as a configured total',()=>{const result=summarizeBookingServices([item('a'),item('b',{price:0,priceKnown:false})],['a','b']);assert.equal(result.item.priceKnown,false);assert.equal(result.services[1].priceKnown,false);});
+test('unknown duration and mixed currencies cannot create an invented interval or total',()=>{for(const value of [0,-1,NaN,Infinity])assert.throws(()=>summarizeBookingServices([item('a',{durationMinutes:value})],['a']));assert.throws(()=>summarizeBookingServices([item('a'),item('b',{currency:'USD'})],['a','b']));});
+test('professional must cover every selected service, while no explicit assignment retains existing all-services semantics',()=>{assert.equal(staffSupportsBookingServices({active:true,serviceIds:['a']},['a','b']),false);assert.equal(staffSupportsBookingServices({active:true,serviceIds:['a','b']},['a','b']),true);assert.equal(staffSupportsBookingServices({active:false,serviceIds:[]},['a']),false);assert.equal(staffSupportsBookingServices({active:true,serviceIds:[]},['a','b']),true);});
+test('legacy single-service records still resolve and multi-service identity is strict',()=>{assert.deepEqual(plain(bookingServiceIds({bookableItemId:'a'})),['a']);assert.deepEqual(plain(bookingServiceIds({bookableItemId:'a',services:[item('a'),item('b')]})),['a','b']);for(const services of [[],[item('b')],[item('a'),item('a')]])assert.throws(()=>bookingServiceIds({bookableItemId:'a',services}));});

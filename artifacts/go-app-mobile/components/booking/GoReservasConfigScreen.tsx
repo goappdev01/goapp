@@ -28,6 +28,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useGoLog } from "@/hooks/useGoLog";
+import type { useBusinessBookings } from "@/hooks/useBusinessBookings";
 import { getBusinessDemoProfessionals, type BusinessDemoStore } from "@/data/businessDemoStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -100,6 +101,7 @@ const VIEW_MODES: { key: ViewMode; icon: keyof typeof Feather.glyphMap; label: s
 
 interface GoReservasConfigScreenProps {
   onClose:                () => void;
+  onProposeBookingChange?: (entry:GoEntry)=>void;
   onOpenVerificacion?:    () => void;
   onOpenCalendarPanel?:   () => void;
   onOpenGo?:              () => void;
@@ -126,10 +128,15 @@ function computeIsDark(mode?: "claro" | "oscuro" | "mixto"): boolean {
 
 // Separate data wrappers share the same existing screen; DEMO never mounts the live agenda hook.
 export function GoReservasConfigScreen(props: GoReservasConfigScreenProps) {
-  const { demo } = useBusinessConfig();
+  const { demo, config } = useBusinessConfig();
   if (demo) throw new Error("GO Reservas DEMO requiere su adaptador aislado.");
-  const [allGoLog, setGoLog] = useGoLog();
-  return useGoReservasContent({ ...props, allGoLog, setGoLog });
+  // Load the live adapter only after denying a DEMO context; importing the DEMO screen never loads real booking data.
+  const {useBusinessBookings,mergeBusinessBookingEntries}:typeof import("@/hooks/useBusinessBookings")=require("@/hooks/useBusinessBookings");
+  const [personalGoLog, setGoLog] = useGoLog();
+  const bookings=useBusinessBookings(config.businessId,true);
+  const allGoLog=useMemo(()=>mergeBusinessBookingEntries(personalGoLog,bookings.entries),[personalGoLog,bookings.entries]);
+  useEffect(()=>{if(bookings.error)Alert.alert("GO",bookings.error);},[bookings.error]);
+  return useGoReservasContent({ ...props, allGoLog, setGoLog,liveBookingMutate:bookings.mutate });
 }
 export function GoReservasDemoScreen(props: GoReservasConfigScreenProps) {
   const { demo } = useBusinessConfig();
@@ -145,21 +152,42 @@ export function GoReservasDemoScreen(props: GoReservasConfigScreenProps) {
   });
 }
 
-function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot }: GoReservasConfigScreenProps & {
+function useGoReservasContent({ onProposeBookingChange, onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot, liveBookingMutate }: GoReservasConfigScreenProps & {
   allGoLog: GoEntry[];
   setGoLog: React.Dispatch<React.SetStateAction<GoEntry[]>>;
   demoStore?: BusinessDemoStore;
   demoSnapshot?: unknown;
+  liveBookingMutate?: ReturnType<typeof useBusinessBookings>["mutate"];
 }) {
+  const respondToDemoProposal=async(entry:GoEntry,operation:"accept"|"reject",acceptFinancialTerms=false)=>{
+    if(!demoStore && liveBookingMutate)return liveBookingMutate(entry,operation,{proposalId:entry.changeProposal?.id,acceptFinancialTerms});
+    if(!demoStore || !entry.changeProposal)throw new Error("Reserva DEMO no disponible.");
+    const proposal=entry.changeProposal as import("@/data/booking").BookingChangeProposal;
+    const {createDemoBookingRepository}=await import("@/data/demoBookingRepository");
+    await createDemoBookingRepository(demoStore).changeBooking(String(entry.reservationId),String(entry.businessId),"business",operation,{proposalId:proposal.id,acceptFinancialTerms});
+  };
   const insets    = useSafeAreaInsets();
   const { config } = useBusinessConfig();
   const { lang, t }  = useLanguage();
+  const [liveProfessionals, setLiveProfessionals] = useState<import("@/data/booking").Staff[]>([]);
+  useEffect(() => {
+    let current = true; setLiveProfessionals([]);
+    if (!demoStore && config.businessId) {
+      void (async () => {
+        try { const {getOwnedStaff}=require("@/data/booking") as typeof import("@/data/booking");
+          const staff=await getOwnedStaff(config.businessId!); if(current)setLiveProfessionals(staff.filter(person=>person.active));
+        } catch { /* canonical bookings remain readable; no alternate account cache */ }
+      })();
+    }
+    return () => { current = false; };
+  }, [demoStore, config.businessId]);
 
   // ── Professional list — built from real plantillaItems, no hardcoded names ──
   const demoProfessionals = useMemo(() => demoStore ? getBusinessDemoProfessionals(config, demoStore.businessId) : [],
     [demoStore, config.plantillaItems, config.services]);
   const professionals = useMemo<string[]>(() => {
     if (demoStore) return ["Todos", "Sin asignar", ...demoProfessionals.map(person => person.id)];
+    if (liveProfessionals.length) return ["Todos", "Sin asignar", ...liveProfessionals.map(person => person.id)];
     const names: string[] = ["Todos", "Sin asignar"];
     for (const item of config.plantillaItems) {
       if (item.staffNames && item.staffNames.length > 0) {
@@ -169,7 +197,7 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
       }
     }
     return names;
-  }, [config.plantillaItems, demoStore, demoProfessionals]);
+  }, [config.plantillaItems, demoStore, demoProfessionals, liveProfessionals]);
 
   const [demoDayNightMode, setDemoDayNightMode] = useState<CalDayNightMode>("mixto");
   const actualDayNightMode = demoStore ? demoDayNightMode : dayNightMode;
@@ -365,18 +393,21 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
 
   // ── Booking action handlers — persisten en go_log_v1 ──────────────────────
   const handleChangeEstado = useCallback(async (id: string, estado: GoEntry["estado"]) => {
+    if(allGoLog.some(entry=>entry.id===id && entry.businessBooking)){Alert.alert("GO",lang==="en"?"Use the reservation actions. No local status is changed.":"Utiliza las acciones de la reserva. No se cambia su estado localmente.");return;}
     setGoLog(prev => {
       const next = prev.map(e => e.id === id ? { ...e, estado } : e);
       return next;
     });
-  }, [setGoLog]);
+  }, [setGoLog,allGoLog,lang]);
 
   const handleDeleteItem = useCallback(async (id: string) => {
+    const entry=allGoLog.find(row=>row.id===id);
+    if(entry?.businessBooking && liveBookingMutate){Alert.alert(lang==="en"?"Cancel reservation":"Cancelar reserva",lang==="en"?"No automatic charge or refund is made.":"No se realiza ningún cobro ni devolución automática.",[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Cancel reservation":"Cancelar reserva",style:"destructive",onPress:()=>void liveBookingMutate(entry,"cancel").catch(error=>Alert.alert("GO",error.message))}]);return;}
     setGoLog(prev => {
       const next = prev.filter(e => e.id !== id);
       return next;
     });
-  }, [setGoLog]);
+  }, [setGoLog,allGoLog,liveBookingMutate,lang]);
 
   const filteredLog = useMemo<GoEntry[]>(() => {
     if (selectedPro === "Todos") return goLog;
@@ -393,6 +424,9 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
     }
     return goLog.filter(e => {
       const entry = e as GoEntry & { assignedTo?: string };
+      if (liveProfessionals.some(person => person.id === selectedPro)) {
+        return entry.staffId === selectedPro || !!entry.bookingTimeline?.workIntervals.some(interval => interval.staffId === selectedPro);
+      }
       // professionalName se guarda con emoji prefix ("👤 Isa") pero el pill usa
       // el nombre plano de staffNames ("Isa") — normalizamos antes de comparar.
       const rawName = (entry.professionalName ?? "").replace(/^[\p{Emoji}\s]+/u, "").trim();
@@ -402,7 +436,7 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
         entry.assignedTo         === selectedPro
       );
     });
-  }, [goLog, selectedPro, demoStore]);
+  }, [goLog, selectedPro, demoStore, liveProfessionals]);
 
   // ── Split drag handle ─────────────────────────────────────────────────────
   const containerH     = useRef(0);
@@ -540,7 +574,7 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
                   style={[g.proChip, { backgroundColor: tk.bg, borderColor: tk.border }, active && { backgroundColor: GREEN, borderColor: GREEN }]}
                 >
                   <Text style={[g.proChipTxt, { color: tk.gray }, active && { color: "#fff" }]}>
-                    {pro === "Todos" ? t("filter_todos") : pro === "Sin asignar" ? t("biz_unassigned_filter") : demoStore ? demoProfessionals.find(person => person.id === pro)?.name : pro}
+                    {pro === "Todos" ? t("filter_todos") : pro === "Sin asignar" ? t("biz_unassigned_filter") : demoStore ? demoProfessionals.find(person => person.id === pro)?.name : liveProfessionals.find(person => person.id === pro)?.name ?? pro}
                   </Text>
                 </TouchableOpacity>
               );
@@ -604,6 +638,12 @@ function useGoReservasContent({ onClose, onOpenVerificacion, onOpenCalendarPanel
             calDayNightMode={(actualDayNightMode ?? "mixto") as CalDayNightMode}
             onCreateTaskAtTime={onCreateTaskAtTime}
             onChangeEstado={handleChangeEstado}
+            onConfirmBooking={liveBookingMutate?id=>{const entry=allGoLog.find(e=>e.id===id);if(!entry)return;Alert.alert(lang==="en"?"Accept reservation":"Aceptar reserva",lang==="en"?"Confirm this reservation without changing its financial conditions.":"Confirmar esta reserva sin modificar sus condiciones económicas.",[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Accept":"Aceptar",onPress:()=>void liveBookingMutate(entry,"confirm").catch(error=>Alert.alert("GO",error.message))}]);}:undefined}
+            onDeleteItem={handleDeleteItem}
+            onProposeItem={onProposeBookingChange ? id=>{const entry=allGoLog.find(e=>e.id===id);if(entry)onProposeBookingChange(entry);} : undefined}
+            onAcceptProposal={demoStore || liveBookingMutate ? id=>{const entry=allGoLog.find(e=>e.id===id),proposal=entry?.changeProposal as import("@/data/booking").BookingChangeProposal|undefined;if(!entry || !proposal)return;Alert.alert(lang==="en"?"Accept proposal":"Aceptar propuesta",lang==="en"?"Keep existing financial conditions. No charge or refund is made.":"Se mantienen las condiciones económicas. No se realiza ningún cobro ni devolución.",[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Accept":"Aceptar",onPress:()=>void respondToDemoProposal(entry,"accept",true).catch(error=>Alert.alert("GO",error.message))}]);} : undefined}
+            onRejectProposal={demoStore || liveBookingMutate ? id=>{const entry=allGoLog.find(e=>e.id===id),proposal=entry?.changeProposal as import("@/data/booking").BookingChangeProposal|undefined;if(entry && proposal)void respondToDemoProposal(entry,"reject").catch(error=>Alert.alert("GO",error.message));} : undefined}
+            onProposeProposal={onProposeBookingChange ? id=>{const entry=allGoLog.find(e=>e.id===id);if(entry)onProposeBookingChange(entry);} : undefined}
             onChangeMonth={dir => {
               setCalViewMonth(prev => {
                 const [y, m] = prev.split("-").map(Number);

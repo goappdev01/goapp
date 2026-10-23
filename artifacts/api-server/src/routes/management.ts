@@ -23,7 +23,9 @@ function validate(resource: string, body: unknown, creating: boolean): Record<st
     if (["description", "address"].includes(key) && value !== null && (typeof value !== "string" || value.length > 4000)) return null;
     if (["active", "booking_enabled"].includes(key) && typeof value !== "boolean") return null;
     if (key === "timezone" && !validTimezone(value)) return null;
-    if (key === "duration_minutes" && (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 1440)) return null;
+    if (key === "duration_minutes" && (typeof value !== "number" || !Number.isInteger(value)
+      || value < ((data.ui_metadata as Record<string, unknown> | undefined)?.catalogKind === "product" ? 0 : 1) || value > 1440
+      || (data.ui_metadata as Record<string, unknown> | undefined)?.catalogKind === "product" && value !== 0)) return null;
     if (key === "price" && (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 9999999999.99 || Math.abs(value * 100 - Math.round(value * 100)) > 0.0001)) return null;
     if (key === "currency" && value !== "EUR") return null;
     if (key === "staff_id" && value !== null && (typeof value !== "string" || !uuid.test(value))) return null;
@@ -32,7 +34,13 @@ function validate(resource: string, body: unknown, creating: boolean): Record<st
   }
   const required: Record<string, string[]> = { businesses: ["name"], services: ["name", "duration_minutes", "price"], staff: ["display_name"], availability: ["weekday", "start_time", "end_time"] };
   if (creating && required[resource].some(k => data[k] === undefined)) return null;
-  if (data.start_time && data.end_time && String(data.end_time) <= String(data.start_time)) return null;
+  if (resource === "availability" && data.ui_metadata && "endNextDay" in (data.ui_metadata as Record<string, unknown>)
+    && typeof (data.ui_metadata as Record<string, unknown>).endNextDay !== "boolean") return null;
+  if (data.start_time && data.end_time) {
+    const overnight = (data.ui_metadata as Record<string, unknown> | undefined)?.endNextDay === true;
+    const order = String(data.end_time).localeCompare(String(data.start_time));
+    if (order === 0 || order < 0 && !overnight || order > 0 && overnight) return null;
+  }
   return { ...data };
 }
 router.use(async (req, res, next) => {

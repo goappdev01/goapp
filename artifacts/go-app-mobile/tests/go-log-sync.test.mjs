@@ -46,6 +46,7 @@ function fixture(initial = []) {
     "./goTaskAccess": { getTaskUser: async () => null, isPersonalTask: () => true },
   });
   const bridge = load("lib/goLogBridge.ts", {
+    "@/data/customerBookingProjection":load("data/customerBookingProjection.ts",{}),
     "./goLogStore": store, "@/data/booking": { getBookingSlotKey: () => "slot-test" },
   });
   let landing = [];
@@ -182,7 +183,7 @@ test("Landing hydration preserves empty dateISO and writes only through the shar
   for (const dateISO of ["", "2026-10-24"]) {
     assert.equal(vm.runInNewContext(dateExpression, { legacy: { dateISO }, formatISODate() { throw new Error("Date invented"); } }), dateISO);
   }
-  assert.match(source, /\[goLog, setGoLog\] = useGoLog\(\)/);
+  assert.match(source, /\[personalGoLog, setGoLog\] = useGoLog\(\)/);
   assert.doesNotMatch(source, /AsyncStorage\.setItem\("go_log_v1"/);
   assert.doesNotMatch(source, /AsyncStorage\.getItem\("go_log_v1"/);
 });
@@ -260,8 +261,8 @@ test("business-calendar edits and deletes keep hidden booking mirrors and IA act
   const file = "components/booking/GoReservasConfigScreen.tsx";
   const callback = name => callbackFrom(file, node => ts.isCallExpression(node)
     && ts.isVariableDeclaration(node.parent) && node.parent.name.getText() === name).text;
-  const change = runCallback(callback("handleChangeEstado"), { setGoLog: f.setManual });
-  const remove = runCallback(callback("handleDeleteItem"), { setGoLog: f.setManual });
+  const change = runCallback(callback("handleChangeEstado"), { setGoLog: f.setManual, allGoLog: f.saved, lang:"es" });
+  const remove = runCallback(callback("handleDeleteItem"), { setGoLog: f.setManual, allGoLog: f.saved, liveBookingMutate:undefined, lang:"es" });
   await change("provider", "aceptado");
   await f.store.flushGoLog();
   assert.equal(f.saved.find(e => e.id === "client").estado, "pendiente");

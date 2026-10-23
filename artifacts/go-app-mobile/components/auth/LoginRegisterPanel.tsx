@@ -178,6 +178,7 @@ export function LoginRegisterPanel({
   const [authPassword, setAuthPassword] = useState("");
   const [authName, setAuthName] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const authRequestInFlightRef = useRef(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const passwordInputRef = useRef<TextInput>(null);
   const authInputRevisionRef = useRef(0);
@@ -332,12 +333,14 @@ export function LoginRegisterPanel({
   };
 
   const handleAuthenticate = async () => {
+    if (authRequestInFlightRef.current) return;
     const inputRevision = authInputRevisionRef.current;
     const email = authEmail.trim().toLowerCase();
     if (!email || authPassword.length < 8) {
       setAuthError("Introduce un email válido y una contraseña de al menos 8 caracteres.");
       return;
     }
+    authRequestInFlightRef.current = true;
     setAuthBusy(true);
     setAuthError(null);
     try {
@@ -372,7 +375,16 @@ export function LoginRegisterPanel({
       }
       if (ownerLogin) {
         setAuthPassword("");
-        if (!payload.user?.id || !await adminAccess.refreshOwner(payload.user.id)) throw new Error(t("owner_login_denied"));
+        let ownerGranted = false;
+        if (payload.user?.id) {
+          try {
+            ownerGranted = await adminAccess.refreshOwner(payload.user.id, { reportUnavailable: true });
+          } catch (error) {
+            const status = error && typeof error === "object" && "status" in error ? Number(error.status) : 0;
+            throw new Error(authErrorMessage({}, status, "No se pudo comprobar el acceso de propietario. Comprueba la conexión y vuelve a intentarlo."));
+          }
+        }
+        if (!ownerGranted) throw new Error(t("owner_login_denied"));
       } else { onSetAccountType(selectedRole); }
       setAuthStep("role");
     } catch (error) {
@@ -380,6 +392,7 @@ export function LoginRegisterPanel({
         setAuthError(error instanceof Error ? error.message : "No se pudo autenticar la cuenta.");
       }
     } finally {
+      authRequestInFlightRef.current = false;
       setAuthBusy(false);
     }
   };

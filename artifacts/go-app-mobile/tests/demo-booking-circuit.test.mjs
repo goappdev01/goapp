@@ -10,7 +10,7 @@ const plain=value=>JSON.parse(JSON.stringify(value));
 function load(name,imports={}) { const exports={}; const text=ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
   vm.runInNewContext(text,{exports,require:key=>{if(key in imports)return imports[key];throw Error("External/runtime dependency forbidden: "+key);},console,Date,Intl,Set,Map});return exports; }
 const storeModule=load("data/businessDemoStore.ts");
-const repoModule=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule});
+const repoModule=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":load("data/bookingServices.ts")});
 const initial={businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],activeDays:[],openFrom:"09:00",openTo:"18:00",daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};
 function fixture(userId=owner,shared=new Map()) {let allowed=true,now=Date.parse("2030-01-07T08:00:00"); const reads=[],writes=[];
   const storage={async getItem(key){reads.push(key);return shared.get(key)??null;},async setItem(key,value){writes.push(key);shared.set(key,value);}};
@@ -57,3 +57,34 @@ test("legacy unassigned appointments preserve state-only edits but rescheduling 
 
 test("confirmation retry preserves the same booking and both calendar projections",async()=>{const f=fixture();await configured(f);const hold=await f.repo.createHold(await inputFor(f));const input={...hold.booking,status:"CONFIRMED",holdExpiresAt:undefined};const [first,second]=await Promise.all([f.repo.claimSlot(input),f.repo.claimSlot(input)]);assert.equal(first.booking.id,second.booking.id);const data=f.store.getSnapshot();assert.equal(data.bookings.length,1);assert.equal(data.reservations.length,1);assert.equal(data.entries.length,1);assert.equal(f.repo.getCustomerEntries().length,1);const restored=f.make();await restored.load();assert.equal(restored.getSnapshot().bookings[0].id,first.booking.id);});
 test("confirmation cannot replace the professional attached to the held appointment",async()=>{const f=fixture();await configured(f);const hold=await f.repo.createHold(await inputFor(f));const other=(await f.repo.getStaff(f.store.businessId))[1];await assert.rejects(f.repo.claimSlot({...hold.booking,staffId:other.id,status:"CONFIRMED",holdExpiresAt:undefined}),/selección/);assert.equal(f.store.getSnapshot().bookings[0].status,"HOLD");});
+
+test("combined multi-service negotiation preserves all services, original occupancy and one persisted booking",async()=>{
+ const f=fixture();await configured(f);
+ const items=await f.repo.getBookableItems(f.store.businessId),staff=(await f.repo.getStaff(f.store.businessId))[0];
+ const selection=load("data/bookingServices.ts").summarizeBookingServices(items,items.map(item=>item.id));
+ const result=await confirm(f,{...await inputFor(f),services:selection.services,endDatetime:"2030-01-07T11:30:00"});
+ const proposal=await f.repo.changeBooking(result.booking.id,f.store.businessId,"customer","propose",{dateISO:"2030-01-08",time:"11:17"});
+ assert.equal(proposal.startDatetime,"2030-01-07T10:00:00");assert.equal(proposal.changeProposal.duration,"90");
+ const old=await f.repo.getAllSlots(f.store.businessId,items[0].id,"2030-01-07",staff.id,items.map(item=>item.id));
+ assert.equal(old.find(slot=>slot.startDatetime==="2030-01-07T10:30:00").isAvailable,false);
+ const changed=await f.repo.changeBooking(result.booking.id,f.store.businessId,"business","accept",{proposalId:proposal.changeProposal.id});
+ assert.equal(changed.startDatetime,"2030-01-08T11:17:00");assert.equal(changed.endDatetime,"2030-01-08T12:47:00");
+ assert.deepEqual(plain(changed.services),plain(selection.services));
+ const reopened=f.make();await reopened.load();const snapshot=reopened.getSnapshot();
+ assert.equal(snapshot.bookings.length,1);assert.equal(snapshot.reservations.length,1);assert.equal(snapshot.entries.length,1);
+ assert.equal(snapshot.reservations[0].durationMinutes,90);assert.equal(snapshot.entries[0].duration,"90");
+ assert.deepEqual(plain(snapshot.reservations[0].services),plain(selection.services));
+ await f.repo.cancelBooking(changed.id);
+ assert.equal((await f.repo.getAllSlots(f.store.businessId,items[0].id,"2030-01-08",staff.id,items.map(item=>item.id))).find(slot=>slot.startDatetime==="2030-01-08T10:30:00").isAvailable,true);
+});
+
+test("combined multi-service proposal rejects a collision during the last service and keeps its confirmed interval",async()=>{
+ const f=fixture();await configured(f);const items=await f.repo.getBookableItems(f.store.businessId);
+ const services=load("data/bookingServices.ts").summarizeBookingServices(items,items.map(item=>item.id)).services;
+ const original=await confirm(f,{...await inputFor(f),services,endDatetime:"2030-01-07T11:30:00"});
+ const otherInput={...await inputFor(f),startDatetime:"2030-01-08T12:30:00",endDatetime:"2030-01-08T13:00:00"};
+ await confirm(f,otherInput);
+ await assert.rejects(f.repo.changeBooking(original.booking.id,f.store.businessId,"customer","propose",{dateISO:"2030-01-08",time:"11:17"}),/no está disponible/);
+ const stored=f.store.getSnapshot().bookings.find(booking=>booking.id===original.booking.id);
+ assert.equal(stored.startDatetime,original.booking.startDatetime);assert.equal(stored.changeProposal,undefined);assert.equal(f.store.getSnapshot().bookings.length,2);
+});

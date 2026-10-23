@@ -1,3 +1,5 @@
+import {useCustomerBookings} from "@/hooks/useCustomerBookings";
+import {mergeCustomerBookingEntries,type CustomerBookingEntry} from "@/data/customerBookingProjection";
 import { OwnerContextModal as Modal, useOwnerLandingBackground } from "@/components/debug/OwnerContextIndicator";
 import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
 import { getBusinessDemoSetupState } from "@/data/businessDemoStore";
@@ -5,6 +7,7 @@ import { createDemoBookingRepository, createDemoCatalogBookingRepository } from 
 import { DemoCustomerCalendar } from "@/components/booking/DemoCustomerCalendar";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import { useGoLog } from "@/hooks/useGoLog";
+import { changeBookingRequest as negotiateRealBooking } from "@/data/booking";
 import { readGoLog, flushGoLog, commitGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
 import { onSessionChanged } from "@/lib/sessionEvents";
 import { recordAuthTrace } from "@/lib/authTrace";
@@ -3317,7 +3320,7 @@ function HomeScreenContent() {
   const qdOriginContextRef = useRef<{ listOpen: boolean; notesOpen: boolean; agendaOpOpen: boolean }>({ listOpen: false, notesOpen: false, agendaOpOpen: false });
   // Origen del flujo principal (Landing directo desde Calendario / Listados)
   const goNavOriginRef = useRef<{ agendaOpOpen: boolean; listOpen: boolean }>({ agendaOpOpen: false, listOpen: false });
-  const [listFilter, setListFilter] = useState<"todos" | "pendiente" | "aceptado" | "propuesta" | "papelera">("todos");
+  const [listFilter, setListFilter] = useState<"todos" | "pendiente" | "aceptado" | "propuesta" | "papelera" | "reservas">("todos");
   // Filtro por ACTIVIDAD del listado global. Independiente del filtro
   // de estado (listFilter): permite acotar los GO mostrados a una
   // categoría de actividad concreta. "todas" no acota nada.
@@ -3463,7 +3466,9 @@ function HomeScreenContent() {
     readByEmpresa: boolean;
   };
 
-  const [goLog, setGoLog] = useGoLog();
+  const [personalGoLog, setGoLog] = useGoLog();
+  const customerBookings=useCustomerBookings(demoBookingRepository,goView.loaded && goView.view==="USER" && !adminAccess.checking && (!adminAccess.isOwner || ownerDemo.loaded));
+  const goLog=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER"),[personalGoLog,customerBookings.entries,goView.view]);
   const [receivedDetailOpen, setReceivedDetailOpen] = useState(false);
   const [receivedDetailGo, setReceivedDetailGo] = useState<typeof goLog[number] | null>(null);
 
@@ -3488,7 +3493,7 @@ function HomeScreenContent() {
   };
   const [empresaModulo, setEmpresaModulo] = useState<string>("home");
   // Keep DEMO navigation across the keyed company panel remount; identity/permissions stay unchanged.
-  const [empresaDemoRoute, setEmpresaDemoRoute] = useState<"home" | "configuration" | "companies">("home");
+  const [empresaDemoRoute, setEmpresaDemoRoute] = useState<"home" | "configuration" | "companies" | "reservations">("home");
   const ownerNavigationRevision = useRef(0);
   useEffect(() => () => { ownerNavigationRevision.current++; }, []);
   useEffect(() => { ownerNavigationRevision.current++; }, [adminAccess.userId]);
@@ -7688,7 +7693,40 @@ function HomeScreenContent() {
   // Envía la propuesta de cambio guardada en los drafts del calendario.
   // Se llama desde el botón PROPONER CAMBIO del panel y desde saveCal cuando
   // calProposalMode es true (duración elegida o SALTAR pulsado).
+  const bookingReturnDateRef=useRef<string|undefined>(undefined);
+  const bookingContextRef=useRef({view:goView.view,businessId:ownerDemo.demo?.businessId ?? bCfg.businessId,ownerId:adminAccess.userId});
+  bookingContextRef.current={view:goView.view,businessId:ownerDemo.demo?.businessId ?? bCfg.businessId,ownerId:adminAccess.userId};
+  const returnToBookingCompany=()=>{if(bookingContextRef.current.view==="BUSINESS"){if(ownerDemo.demo)setEmpresaDemoRoute("reservations");else setEmpresaModulo("reservas_config");setTimeout(()=>setEmpresaOpen(true),350);}};
+  const runCustomerBooking = (entry:CustomerBookingEntry,operation:"cancel"|"propose"|"accept"|"reject",input:Parameters<typeof customerBookings.mutate>[2]={}) => {
+    void customerBookings.mutate(entry,operation,input).then(()=>showToast(lang==="en"?"Reservation updated":"Reserva actualizada","success"))
+      .catch(error=>Alert.alert("GO",error.message));
+  };
+  const confirmBookingDraft = (entry:GoEntry,result:CalFlowResult,actor:"customer"|"business"="customer") => {
+    Alert.alert(lang==="en"?"Confirm change proposal":"Confirmar propuesta de cambio",result.dateISO+" · "+result.time+"\n"+(lang==="en"?"The original reservation remains unchanged until agreement. Existing payments and financial conditions remain unchanged; no charge or refund is made.":"La reserva original se mantiene hasta el acuerdo. Se conservan los pagos y condiciones económicas; no se realiza ningún cobro ni devolución."),[
+      {text:lang==="en"?"Cancel":"Cancelar",style:"cancel",onPress:()=>{if(actor==="business")returnToBookingCompany();}},
+      {text:lang==="en"?"Confirm proposal":"Confirmar propuesta",onPress:()=>{
+        const input={dateISO:result.dateISO,date:result.dateDraft,time:result.time,acceptFinancialTerms:true};
+        if(actor==="customer")runCustomerBooking(entry as CustomerBookingEntry,"propose",input);
+        else if(ownerDemo.demo && entry.businessId===ownerDemo.demo.businessId && bookingContextRef.current.view==="BUSINESS" && bookingContextRef.current.businessId===entry.businessId)void createDemoBookingRepository(ownerDemo.demo).changeBooking(String(entry.reservationId),String(entry.businessId),"business","propose",input).then(()=>{showToast(lang==="en"?"Proposal saved":"Propuesta guardada","success");returnToBookingCompany();}).catch(error=>{Alert.alert("GO",error.message);returnToBookingCompany();});
+        else if(entry.businessBooking && entry.ownerUserId && bookingContextRef.current.view==="BUSINESS" && bookingContextRef.current.businessId===entry.businessId)void negotiateRealBooking(String(entry.reservationId),"propose",{...input,expectedRevision:entry.bookingChangeRevision??0,proposalId:entry.changeProposal?.id},entry.ownerUserId).then(()=>{showToast(lang==="en"?"Proposal saved":"Propuesta guardada","success");returnToBookingCompany();}).catch(error=>{Alert.alert("GO",error.message);returnToBookingCompany();});
+        else Alert.alert("GO",lang==="en"?"The company context changed.":"Ha cambiado el contexto de empresa.");
+      }}]);
+  };
+  const openBookingProposal = (entry:GoEntry,actor:"customer"|"business"="customer",initial?:{dateISO:string;time:string}) => {
+    const keepCalendar=actor==="customer" && calOpen;
+    const open=()=>{setCalOpen(true);calFlow.open({startAt:"date",initialDateISO:initial?.dateISO ?? entry.dateISO,initialDateDraft:entry.date,initialTime:initial?.time ?? entry.time,initialDuration:entry.duration,skipDuration:true,
+      validate:r=>!r.time || isGoDateTimePast(r.dateISO,r.time)?(lang==="en"?"Choose a future date and time.":"Elige una fecha y hora futuras."):null,
+      onSave:result=>{if(!keepCalendar)setCalOpen(false);confirmBookingDraft(entry,result,actor);},onCancel:()=>{if(!keepCalendar)setCalOpen(false);if(actor==="business")returnToBookingCompany();}});};
+    if(actor==="business"){bookingReturnDateRef.current=entry.dateISO;setEmpresaOpen(false);setTimeout(open,350);}else open();
+  };
+  const respondCustomerBooking = (entry:CustomerBookingEntry,operation:"accept"|"reject") => {
+    const proposal=entry.changeProposal as import("@/data/booking").BookingChangeProposal|undefined;if(!proposal)return;
+    Alert.alert(lang==="en"?"Change proposal":"Propuesta de cambio",(lang==="en"?"The existing payment is preserved. No charge or refund will be made.":"Se conserva el pago existente. No se realizará ningún cobro ni devolución."),[
+      {text:lang==="en"?"Cancel":"Cancelar",style:"cancel"},{text:operation==="accept"?(lang==="en"?"Accept":"Aceptar"):(lang==="en"?"Reject":"Rechazar"),onPress:()=>runCustomerBooking(entry,operation,{proposalId:proposal.id,acceptFinancialTerms:true})}]);
+  };
   const sendSuggestChangeFromCal = (calResult: CalFlowResult) => {
+    const bookingEntry=customerBookings.entries.find(entry=>entry.id===currentReceivedIdRef.current);
+    if(bookingEntry){confirmBookingDraft(bookingEntry,calResult);calFlow.cancel();if(proposalReturnRef.current!=="calendar")setCalOpen(false);return;}
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
     const id = currentReceivedIdRef.current;
@@ -7947,6 +7985,7 @@ function HomeScreenContent() {
   //   • Muestra "No disponible por solape en agenda".
   //   • Calcula huecos alternativos automáticamente.
   const acceptProposal = (id: string) => {
+    const booking=customerBookings.entries.find(entry=>entry.id===id);if(booking){respondCustomerBooking(booking,"accept");return;}
     const entry = goLog.find((e) => e.id === id);
     const cp    = entry ? (entry as any).changeProposal : null;
 
@@ -8118,6 +8157,7 @@ function HomeScreenContent() {
   // (o del legacy proposal) y devuelve el estado a "pendiente".
   // También calcula huecos alternativos y los muestra bajo la tarjeta.
   const rejectProposal = (id: string) => {
+    const booking=customerBookings.entries.find(entry=>entry.id===id);if(booking){respondCustomerBooking(booking,"reject");return;}
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
     // Calcular alternativas ANTES de modificar el estado (goLog aún tiene el entry original)
     const entry = goLog.find((e) => e.id === id);
@@ -8783,6 +8823,7 @@ function HomeScreenContent() {
   };
 
   const moveGoToDay = (id: string, newDateISO: string, newTime: string, newDuration?: string) => {
+    const customerBooking=customerBookings.entries.find(entry=>entry.id===id);if(customerBooking){openBookingProposal(customerBooking,"customer",{dateISO:newDateISO,time:newTime});return;}
     let isExternal = false;
     let proposalLabel = "";
     let proposalIntentLabel = "";
@@ -9168,6 +9209,7 @@ function HomeScreenContent() {
   };
 
   const updateLogStatus = (id: string, estado: "pendiente" | "aceptado" | "rechazado" | "propuesto" | "propuesta_pendiente") => {
+    const customerBooking=customerBookings.entries.find(entry=>entry.id===id);if(customerBooking){if(estado==="rechazado")softDeleteGo(id);else showToast(lang==="en"?"Use the reservation actions.":"Utiliza las acciones de la reserva.","warning");return;}
     // GO_BOOKING: redirigir SIEMPRE a setReservationStatus para sync bidireccional
     const bookingId = bookingIdFromEntryId(id);
     const entry = goLog.find((e) => e.id === id);
@@ -9242,6 +9284,7 @@ function HomeScreenContent() {
   // y el registro canónico en go_bookings_v1. Jamás modificar bookingStatus
   // de forma aislada — usar siempre esta función para garantizar coherencia.
   const setReservationStatus = (bookingId: string, newStatus: ReservationStatus) => {
+    const customerBooking=customerBookings.entries.find(entry=>entry.bookingId===bookingId);if(customerBooking){if(newStatus==="cancelada")softDeleteGo(customerBooking.id);else showToast(lang==="en"?"Use the reservation actions.":"Utiliza las acciones de la reserva.","warning");return;}
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
     // Mapa de ReservationStatus → BookingStatus (go_bookings_v1)
@@ -9304,6 +9347,7 @@ function HomeScreenContent() {
   // Para GO_BOOKING: cancela AMBAS entradas (cliente + empresa) y el
   // registro en go_bookings_v1 para mantener coherencia.
   const softDeleteGo = (id: string) => {
+    const booking=customerBookings.entries.find(entry=>entry.id===id);if(booking){Alert.alert(lang==="en"?"Cancel reservation":"Cancelar reserva",lang==="en"?"Cancel this reservation? No automatic refund is issued.":"¿Cancelar esta reserva? No se realizará una devolución automática.",[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Cancel reservation":"Cancelar reserva",style:"destructive",onPress:()=>runCustomerBooking(booking,"cancel")}]);return;}
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     const bookingId = bookingIdFromEntryId(id);
@@ -9724,6 +9768,7 @@ function HomeScreenContent() {
         // + reservas recibidas desde un proveedor GO (el usuario tiene una cita)
         if (!(g.kind === "sent" || (g.kind === "received" && g.type === "GO_BOOKING"))) return false;
         if (g.deleted) return false;
+        if (g.customerBooking && g.bookingStatus !== "confirmada") return false;
         if (g.estado === "rechazado" || g.bookingStatus === "cancelada") return false;
         // ── DEDUP CLI/PRV — cada reserva genera dos entradas (cli + prv).
         // Solo mostramos la perspectiva que corresponde al modo activo:
@@ -9754,12 +9799,14 @@ function HomeScreenContent() {
       .map((g) => ({ g, dt: goDateTime(g) }))
       .filter((x): x is { g: typeof goLog[number]; dt: Date } => {
         if (x.dt === null) return false;
+        if(x.g.customerBooking && x.g.bookingStartsAt)return Date.parse(x.g.bookingStartsAt)>now;
         // Sin hora → válido todo el día mientras la fecha no haya pasado.
         if (!x.g.time) return (x.g.dateISO || "") >= todayISO;
         // Con hora → solo si la hora exacta es futura.
         return x.dt.getTime() > now;
       })
       .sort((a, b) => {
+        if(a.g.customerBooking || b.g.customerBooking)return (a.g.bookingStartsAt?Date.parse(a.g.bookingStartsAt):a.dt.getTime())-(b.g.bookingStartsAt?Date.parse(b.g.bookingStartsAt):b.dt.getTime());
         // Ordenar por fecha ISO primero, luego por hora si coinciden.
         const dA = a.g.dateISO || "";
         const dB = b.g.dateISO || "";
@@ -11672,6 +11719,7 @@ function HomeScreenContent() {
     itemTime: string,
     isExternal: boolean,
   ) => {
+    const customerBooking=customerBookings.entries.find(entry=>entry.id===itemId);if(customerBooking){openBookingProposal(customerBooking,"customer",{dateISO:toDateISO,time:itemTime});return;}
     const entry = goLog.find((g) => g.id === itemId);
 
     // ── OPTIMISTIC VISUAL COMMIT ────────────────────────────────────────────
@@ -12241,6 +12289,7 @@ function HomeScreenContent() {
     const isPapelera = listFilter === "papelera";
     const inPapelera = (g: typeof goLog[number]) => !!(g.deleted || g.estado === "rechazado");
     const count = goLog.filter((g) => {
+      if(listFilter==="reservas")return g.customerBooking===true && customerBookings.entries.some(entry=>entry.id===g.id);
       if (isPapelera) return inPapelera(g);
       if (inPapelera(g)) return false;
       if (listFilter === "propuesta") {
@@ -19974,7 +20023,7 @@ function HomeScreenContent() {
             {/* AgendaBoard shares the existing view/settings header with month navigation. */}
             <View testID="calendar-agenda-viewport" style={{ flex: 1 }}>
             {demoCustomerCalendarSelected ? (demoBookingRepository
-              ? <View style={{ flex: 1 }}><DemoCustomerCalendar repository={demoBookingRepository} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
+              ? <View style={{ flex: 1 }}><DemoCustomerCalendar repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
               : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
                 renderHeader={monthNavigation => (<View testID="calendar-header"
               pointerEvents={showBookingFromCal ? "none" : "auto"}
@@ -20095,6 +20144,7 @@ function HomeScreenContent() {
                 }}
                 onGoToLanding={() => setCalOpen(false)}
                 onProposeItem={(id) => {
+                  const booking=customerBookings.entries.find(entry=>entry.id===id);if(booking){openBookingProposal(booking);return;}
                   const g = goLog.find((x) => x.id === id);
                   if (!g) return;
                   currentReceivedIdRef.current = id;
@@ -20895,7 +20945,17 @@ function HomeScreenContent() {
             setCalScrollToDateTarget({ dateISO, timeHHMM, token: Date.now() });
             setCalHighlightEntryId(entryId);
           }}
+          canonicalCustomerBookings={goView.view === "USER"}
           onBookingConfirmed={async (booking, biz, item, confirmedProfessionalName) => {
+            if (goView.view === "USER") {
+              // The repository is authoritative; do not persist separate client/provider GO cards.
+              if (!demoBookingRepository && !tutReservaRealizada) {
+                setTutReservaRealizada(true);
+                AsyncStorage.setItem("tutorial.reservaRealizada", "1").catch(() => {});
+              }
+              await customerBookings.refresh();
+              return;
+            }
             if (demoBookingRepository) return; // DEMO never writes tutorial, personal agenda or live booking keys.
             console.log("[ON_BOOKING_CONFIRMED_ENTER]", {
               timestamp: new Date().toISOString(),
@@ -21841,6 +21901,7 @@ function HomeScreenContent() {
         minimized={listMinimized}
         title={(() => {
           if (llamadasListOpen || typeFilter === "LLAMADA") return t('tasks_call_log').toUpperCase();
+          if (listFilter === "reservas") return t('tasks_my_bookings').toUpperCase();
           if (listFilter === "papelera") return t('status_deleted').toUpperCase();
           if (listFilter === "pendiente") return t('status_pending_label').toUpperCase();
           if (listFilter === "aceptado") return t('status_accepted').toUpperCase();
@@ -21925,6 +21986,7 @@ function HomeScreenContent() {
             const countPendiente = goLog.filter((g) => !g.deleted && g.estado === "pendiente").length;
             const countPropuesta = goLog.filter((g) => !g.deleted && (g.estado === "propuesto" || g.estado === "propuesta_pendiente")).length;
             const filterDefs = [
+              ...(goView.view === "USER" ? [{ k:"reservas" as const,icon:"calendar" as const,label:t('tasks_my_bookings'),color:"#4A80BD",iconOn:"#ffffff",count:customerBookings.entries.length }] : []),
               { k: "todos" as const,     icon: "list" as const,       label: t('filter_todos'),       color: "#ffffff", iconOn: "#0a0a0a", count: 0 },
               { k: "aceptado" as const,  icon: "check" as const,      label: t('status_accepted'),  color: "#16a34a", iconOn: "#ffffff", count: 0 },
               { k: "pendiente" as const, icon: "mail" as const,       label: t('status_pending_label'),   color: "#eab308", iconOn: "#0a0a0a", count: countPendiente },
@@ -21938,6 +22000,7 @@ function HomeScreenContent() {
                 <Pressable
                   onPress={() => {
                     Haptics.selectionAsync();
+                    if(f.k==="reservas"){setTypeFilter("todos");setActivityFilter("todas");setLlamadasListOpen(false);}
                     setListFilter((cur) => (cur === f.k ? "todos" : f.k));
                   }}
                   accessibilityLabel={f.label}
@@ -22771,6 +22834,7 @@ function HomeScreenContent() {
           })()
         }
       >
+        {listFilter==="reservas" && (customerBookings.loading || !!customerBookings.error) && <Text testID="my-bookings-load-state" accessibilityLiveRegion="polite" style={{color:"#ffffff",padding:12}}>{customerBookings.error || t('biz_loading')}</Text>}
         {/* V1 FIX · FILTROS POR TIPO movidos al footer (zona pulgar).
             El bloque de chips "Todos / GO / Tareas / Llamadas" vivía
             ANTES aquí arriba. Se ha trasladado al footer del sheet,
@@ -22787,6 +22851,7 @@ function HomeScreenContent() {
           const isPapelaraView = listFilter === "papelera";
           const inPapelera = (g: typeof goLog[number]) => !!(g.deleted || g.estado === "rechazado");
           const filtered = goLog.filter((g) => {
+            if(listFilter==="reservas")return g.customerBooking===true && customerBookings.entries.some(entry=>entry.id===g.id);
             if (isPapelaraView) {
               if (!inPapelera(g)) return false;
             } else {
@@ -26190,6 +26255,7 @@ function HomeScreenContent() {
         visible={empresaOpen}
         initialModulo={empresaModulo as any}
         onClose={() => { setEmpresaOpen(false); setEmpresaModulo("home"); }}
+        bookingChangeReturnDate={bookingReturnDateRef.current} onProposeBookingChange={entry=>openBookingProposal(entry,"business")}
         onModuloChange={refreshRutasBadges}
         guidanceLevel={effectiveGuidanceLevel}
         onOpenVerificacion={() => { setEmpresaOpen(false); setVerificacionOpen(true); }}
@@ -26211,8 +26277,8 @@ function HomeScreenContent() {
       />}
 
       {goView.isBusinessPreview && <GoBusinessPreviewProvider>
-        <EmpresaPanel key={ownerDemo.demo?.businessId} visible={empresaOpen} previewReadOnly
-          initialModulo={empresaDemoRoute === "configuration" ? "empresa_config" : "home"}
+        <EmpresaPanel key={ownerDemo.demo?.businessId} visible={empresaOpen} previewReadOnly bookingChangeReturnDate={bookingReturnDateRef.current} onProposeBookingChange={entry=>openBookingProposal(entry,"business")}
+          initialModulo={empresaDemoRoute === "configuration" ? "empresa_config" : empresaDemoRoute === "reservations" ? "reservas_config" : "home"}
           initialCompaniesOpen={empresaDemoRoute === "companies"} onDemoNavigate={setEmpresaDemoRoute}
           onClose={() => { setEmpresaOpenState(false); setEmpresaDemoRoute("home"); }} onOpenContext={openOwnerContextSelector} />
       </GoBusinessPreviewProvider>}

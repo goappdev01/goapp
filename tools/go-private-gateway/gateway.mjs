@@ -117,6 +117,36 @@ export async function respond({method, url, authorization, body}, request = fetc
   } catch { return {status:502, body:{error:'Verification unavailable'}}; }
 }
 
+// Development browser only. This does not grant a route, a session or owner access.
+// Native clients send no Origin and retain the existing behavior. Bearer tokens
+// remain explicit; cookie credentials are neither required nor enabled by CORS.
+const developmentWebOrigin = 'http://100.105.48.111:8086';
+const webRequestHeaders = new Set(['accept', 'authorization', 'content-type']);
+function webCors(req, res) {
+  res.setHeader('Vary', 'Origin');
+  const origin = req.headers.origin;
+  if (origin === undefined) return null;
+  if (origin !== developmentWebOrigin) return {status:403,body:{error:'Web origin not authorized'}};
+  const method = req.url === loginPath || req.url === refreshPath ? 'POST' : allowed.has(req.url) ? 'GET' : null;
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Vary', 'Origin, Access-Control-Request-Method, Access-Control-Request-Headers');
+    const requested = req.headers['access-control-request-method'];
+    const requestedHeaders = String(req.headers['access-control-request-headers'] ?? '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+    if (!method || requested !== method || requestedHeaders.some(value => !webRequestHeaders.has(value))) {
+      return {status:403,body:{error:'Web request not authorized'}};
+    }
+    res.setHeader('Access-Control-Allow-Origin', developmentWebOrigin);
+    res.setHeader('Access-Control-Allow-Methods', method);
+    res.setHeader('Access-Control-Allow-Headers', 'Accept, Authorization, Content-Type');
+    res.setHeader('Access-Control-Max-Age', '300');
+    return {status:204};
+  }
+  // Include CORS on allowed-route error responses too (400/401/403/429/502),
+  // so the browser can display their existing safe error instead of Failed to fetch.
+  if (method && req.method === method) res.setHeader('Access-Control-Allow-Origin', developmentWebOrigin);
+  return null;
+}
+
 export function createGateway(request=fetch) {
   const counts = new Map(), attempts = new Map(), renewals = new Map();
   const count = (map,key,now) => {
@@ -125,9 +155,11 @@ export function createGateway(request=fetch) {
   };
   const server=http.createServer(async (req,res) => {
     res.setHeader('Cache-Control','no-store');res.setHeader('Connection','close');res.setHeader('Content-Type','application/json');
-    const send = result => {res.writeHead(result.status);res.end(JSON.stringify(result.body));};
+    const send = result => {res.writeHead(result.status);res.end(result.status===204?undefined:JSON.stringify(result.body));};
+    const corsResult = webCors(req,res);
     const key=req.socket.remoteAddress, now=Date.now();
     if(count(counts,key,now)>60)return send({status:429,body:{error:'Retry later'}});
+    if(corsResult)return send(corsResult);
     const authLogin=req.method==='POST' && req.url===loginPath;
     const authRefresh=req.method==='POST' && req.url===refreshPath;
     let body;

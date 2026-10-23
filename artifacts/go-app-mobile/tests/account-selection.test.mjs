@@ -368,3 +368,43 @@ test('Next focuses the existing password input; Go submits native-filled credent
   assert.ok(!JSON.stringify(f.storageCalls).includes('fixture-access'));
   assert.ok(!JSON.stringify(f.storageCalls).includes('fixture-refresh'));
 });
+
+
+for (const failure of ['offline', 'rate-limit']) test('regression: owner form reports '+failure+' without claiming missing owner membership or repeating login', async () => {
+  let requests = 0;
+  const checks = [];
+  const error = Object.assign(new Error('fictional transport failure'), failure === 'rate-limit' ? { status: 429 } : {});
+  const id = '11111111-1111-4111-8111-111111111111';
+  const f = panelFixture({
+    access: { allowed: false, checking: false, userId: null, refreshOwner: async (expected, options) => {
+      checks.push(expected);
+      if (options?.reportUnavailable) throw error;
+      return false;
+    } },
+    authenticate: async () => { requests++; return { ok: true, json: async () => ({ access_token: 'fictional-access', user: { id } }) }; },
+  });
+  nodes(f.render(), n => n.props?.testID === 'owner-direct-login')[0].props.onPress();
+  const inputs = nodes(f.render(), n => n.type === 'TextInput');
+  inputs[0].props.onChangeText('owner@example.test'); inputs[1].props.onChangeText('fictional-password');
+  await nodes(f.render(), n => n.type === 'TouchableOpacity' && n.props.onPress?.name === 'handleAuthenticate')[0].props.onPress();
+  const tree = f.render(), texts = nodes(tree, n => n.type === 'Text').flatMap(n => n.props.children).join(' ');
+  assert.match(texts, failure === 'rate-limit' ? /límite temporal de solicitudes/ : /No se pudo comprobar el acceso de propietario/);
+  assert.doesNotMatch(texts, /owner_login_denied/);
+  assert.equal(requests, 1); assert.deepEqual(checks, [id]); assert.deepEqual(f.accountChanges, []);
+  assert.equal(nodes(tree, n => n.props?.testID === 'owner-view-admin').length, 0);
+});
+
+test('regression: concurrent keyboard submit and login press issue only one credential request', async () => {
+  let complete, requests = 0;
+  const reply = new Promise(resolve => { complete = resolve; });
+  const f = panelFixture({ authenticate: () => { requests++; return reply; } });
+  let inputs = credentials(f);
+  inputs[0].props.onChangeText('user@example.test'); inputs[1].props.onChangeText('fictional-password');
+  const tree = f.render(); inputs = nodes(tree, n => n.type === 'TextInput');
+  const fromKeyboard = inputs[1].props.onSubmitEditing();
+  const fromButton = nodes(tree, n => n.type === 'TouchableOpacity' && n.props.onPress?.name === 'handleAuthenticate')[0].props.onPress();
+  complete({ ok: true, json: async () => ({ access_token: 'fictional-access', user: { id: '11111111-1111-4111-8111-111111111111' } }) });
+  await Promise.all([fromKeyboard, fromButton]);
+  assert.equal(requests, 1);
+  assert.deepEqual(f.accountChanges, ['usuario']);
+});

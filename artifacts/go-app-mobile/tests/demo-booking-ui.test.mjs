@@ -9,8 +9,8 @@ const owner="11111111-1111-4111-8111-111111111111";
 const turn=async()=>{for(let i=0;i<15;i++)await new Promise(resolve=>setTimeout(resolve,0));};
 const compile=name=>ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 function pure(name,imports={}){const exports={};vm.runInNewContext(compile(name),{exports,require:key=>{if(key in imports)return imports[key];throw Error("Unexpected dependency "+key);},Date,Intl,Map,Set});return exports;}
-const storeModule=pure("data/businessDemoStore.ts"),repoModule=pure("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule});
-function fixture({real=false}={}){
+const storeModule=pure("data/businessDemoStore.ts"),repoModule=pure("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":pure("data/bookingServices.ts")});
+function fixture({real=false,sectors}={}){
   const memory=new Map(),liveCalls=[],navigation=[],hooks=new Map(),cache=new Map();
   const initial={businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],activeDays:[],openFrom:"09:00",openTo:"18:00",daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};
   const store=storeModule.createBusinessDemoStore({ownerUserId:owner,storage:{getItem:async key=>memory.get(key)??null,setItem:async(key,value)=>memory.set(key,value)},canUse:()=>true,initialConfig:initial});
@@ -37,6 +37,8 @@ function fixture({real=false}={}){
   const booking={BookingApiError,computeRefundInfo:()=>({isFree:true}),getAuthenticatedUserId:()=>live("getAuthenticatedUserId")};
   for(const name of ["cancelBooking","claimSlot","createHold","getAllSlots","getActivebusinesses","getBookableItems","getStaff","searchBusinesses","getMyBookings"])booking[name]=()=>live(name);
   const mocks={
+    "./CatalogComplementSelector":{CatalogComplementSelector:()=>null},
+    "@/data/catalogAssociations":pure("data/catalogAssociations.ts",{"./booking":booking}),
     react:{...React,default:React},"react-native":native,
     "@react-native-async-storage/async-storage":{default:{getItem:()=>live("storage read"),setItem:()=>live("storage write")}},
     "expo-linear-gradient":{LinearGradient:"LinearGradient"},"@expo/vector-icons":{Feather:"Feather"},
@@ -46,8 +48,10 @@ function fixture({real=false}={}){
     "@/lib/goLogBridge":{syncBookingToGoLog:()=>live("agenda bridge")},
     "@/lib/time":{getToday:()=>new Date("2030-01-07T08:00:00"),formatISODate:d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")},
     "@/contexts/LanguageContext":{useLanguage:()=>({lang:"es",t:key=>key})},
-    "@/data/goSectorData":{SECTORS:[{id:"belleza",label:"Belleza",subs:[{id:"peluqueria",name:"Peluquería"}]}]},
-    "@/data/goSectorTranslations":{trSector:x=>x}
+    "@/data/goSectorData":{SECTORS:sectors??[{id:"belleza",label:"Belleza",subs:[{id:"peluqueria",name:"Peluquería"}]}]},
+    "@/data/goSectorTranslations":{trSector:x=>x},
+    "@/data/bookingServices":pure("data/bookingServices.ts"),
+    "@/data/bookingTimeline":pure("data/bookingTimeline.ts")
   };
   function load(name){if(cache.has(name))return cache.get(name);const exports={};cache.set(name,exports);
     vm.runInNewContext(compile(name),{exports,require:key=>key in mocks?mocks[key]:key==="@/components/booking/MyBookingsList"?load("components/booking/MyBookingsList.tsx"):(()=>{throw Error("Unexpected UI dependency "+key);})(),
@@ -63,7 +67,7 @@ function text(tree){if(typeof tree==="string"||typeof tree==="number")return Str
 function button(tree,label){return nodes(tree).find(node=>node.type==="TouchableOpacity"&&text(node).includes(label));}
 function input(tree){return nodes(tree).find(node=>node.type==="TextInput");}
 async function services(f){f.render(f.Overlay,f.props);await turn();f.render(f.Overlay,f.props);await turn();return f.render(f.Overlay,f.props);}
-async function selectSlot(f){let tree=await services(f);await button(tree,"Corte DEMO").props.onPress();tree=f.render(f.Overlay,f.props);await button(tree,"Raul 1 GO PRUEBA").props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);assert.ok(button(tree,"09:00"),text(tree));await button(tree,"09:00").props.onPress();return f.render(f.Overlay,f.props);}
+async function selectSlot(f){let tree=await services(f);await button(tree,"Corte DEMO").props.onPress();tree=f.render(f.Overlay,f.props);await button(tree,"save").props.onPress();tree=f.render(f.Overlay,f.props);await button(tree,"Raul 1 GO PRUEBA").props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);assert.ok(button(tree,"09:00"),text(tree));await button(tree,"09:00").props.onPress();return f.render(f.Overlay,f.props);}
 
 test("real overlay callbacks confirm DEMO and navigate only the isolated calendar with zero live side effects",async()=>{const f=fixture();await f.configure();let tree=await selectSlot(f);const confirm=nodes(tree).find(node=>node.props.onPress?.name==="handleConfirm");assert.ok(confirm);await confirm.props.onPress();tree=f.render(f.Overlay,f.props);assert.equal(f.store.getSnapshot().reservations.length,1);await button(tree,"biz_ok_view_calendar").props.onPress();await turn();assert.equal(f.store.getSnapshot().bookings[0].status,"CONFIRMED");assert.deepEqual(f.liveCalls,[]);assert.equal(f.navigation[0][0],"2030-01-07");assert.equal(f.navigation[0][1],"09:00");assert.match(f.navigation[0][2],/^demo_customer_/);assert.equal(f.navigation[1],"close");});
 test("closing an interactive DEMO HOLD releases only local availability",async()=>{const f=fixture();await f.configure();const tree=await selectSlot(f),modal=nodes(tree).find(node=>node.type==="Modal");await modal.props.onRequestClose();await turn();assert.equal(f.store.getSnapshot().bookings[0].status,"CANCELLED");assert.deepEqual(f.liveCalls,[]);});
@@ -90,3 +94,71 @@ test("Landing search keeps the live activation/category filters and ignores late
 
 
 test("rapid repeated confirmation invokes the DEMO commit only once",async()=>{const f=fixture();await f.configure();await selectSlot(f);await turn();const tree=f.render(f.Overlay,f.props);let commits=0;const claim=f.repo.claimSlot;f.repo.claimSlot=input=>{commits++;return claim(input);};const confirm=button(tree,"BIZ_CONFIRM_BOOKING_BTN").props.onPress;await Promise.all([confirm(),confirm()]);const final=f.render(f.Overlay,f.props);assert.equal(commits,1);assert.ok(text(final).includes("BIZ_BOOKING_CONFIRMED"));assert.equal(f.store.getSnapshot().bookings.length,1);assert.equal(f.store.getSnapshot().reservations.length,1);});
+
+test("New reservation excludes existing reservation history and preserves its nine categories, recents and search",async()=>{
+  const {SECTORS}=pure("data/goSectorData.ts",{react:{},"@react-native-async-storage/async-storage":{default:{}},"@/data/goSectorTranslations":{trSector:value=>value}});
+  assert.equal(SECTORS.length,9);
+  const f=fixture({sectors:SECTORS});await f.configure();
+  const service=(await f.repo.getBookableItems(f.store.businessId))[0];
+  for(const time of ["10:00","11:00"]){const held=await f.repo.createHold({businessId:f.store.businessId,bookableItemId:service.id,customerId:owner,startDatetime:"2030-01-07T"+time+":00",endDatetime:"2030-01-07T"+time.slice(0,2)+":30:00",unitsReserved:1,peopleCount:1});await f.repo.claimSlot({...held.booking,status:"CONFIRMED"});if(time==="11:00")await f.repo.cancelBooking(held.booking.id);}
+  const before=JSON.stringify(f.store.getSnapshot());
+  const props={...f.props,initialBusinessId:undefined};
+  f.render(f.Overlay,props);await turn();let tree=f.render(f.Overlay,props);
+  assert.ok(text(tree).includes("BIZ_NEW_BOOKING"));assert.ok(text(tree).includes("biz_recent_label"));
+  for(const sector of SECTORS)assert.ok(button(tree,sector.label),sector.label);
+  assert.equal(nodes(tree).some(node=>node.type===f.MyList),false);
+  assert.equal(text(tree).includes("Confirmada"),false);assert.equal(text(tree).includes("Cancelada"),false);
+  assert.equal(nodes(tree).filter(node=>node.type==="TextInput").length,1);
+  input(tree).props.onChangeText("peluquería");f.render(f.Overlay,props);await turn();tree=f.render(f.Overlay,props);
+  assert.ok(button(tree,"GO Peluquería Prueba"));assert.equal(nodes(tree).some(node=>node.type===f.MyList),false);
+  assert.equal(JSON.stringify(f.store.getSnapshot()),before);assert.equal(f.store.getSnapshot().bookings.length,2);
+  assert.equal(f.repo.getCustomerEntries().length,2);assert.deepEqual(f.liveCalls,[]);
+});
+
+test("New reservation removes only the history embed and reserves no history-specific layout height",()=>{
+ const source=readFileSync("components/booking/BookingSearchOverlay.tsx","utf8");
+ assert.equal(source.includes("MyBookingsList"),false);assert.ok(source.includes("SECTORS.slice(rowIdx * 3, rowIdx * 3 + 3)"));
+ assert.ok(source.includes("biz_new_booking"));assert.ok(source.includes("biz_recent_label"));assert.ok(source.includes("biz_search_business_service_ph"));
+ const ast=ts.createSourceFile("overlay.tsx",source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let dock;
+ (function walk(n){if(ts.isPropertyAssignment(n)&&n.name.getText(ast)==="actionDock")dock=n.initializer;ts.forEachChild(n,walk)})(ast);
+ assert.ok(dock);assert.equal(dock.properties.some(p=>["height","minHeight","marginTop"].includes(p.name?.getText(ast))),false);
+});
+
+const control=(tree,id)=>nodes(tree).find(node=>node.props.testID===id);
+test("multi-service UI keeps selection marked, supports deselection and waits for Guardar",async()=>{
+  const f=fixture();await f.configure();await f.store.updateConfig({services:[{name:"Corte DEMO",duration:30,price:12},{name:"Tinte DEMO",duration:60,price:20}]});
+  let tree=await services(f);assert.equal(control(tree,"booking-save-services").props.disabled,true);
+  const items=await f.repo.getBookableItems(f.store.businessId);
+  control(tree,"booking-service-"+items[0].id).props.onPress();tree=f.render(f.Overlay,f.props);
+  assert.equal(control(tree,"booking-service-"+items[0].id).props.accessibilityState.checked,true);assert.ok(control(tree,"booking-save-services"));assert.equal(button(tree,"Raul 1 GO PRUEBA"),undefined);
+  control(tree,"booking-service-"+items[1].id).props.onPress();tree=f.render(f.Overlay,f.props);
+  assert.match(text(control(tree,"booking-services-total")),/90\s+min/);assert.match(text(control(tree,"booking-services-total")),/32/);
+  control(tree,"booking-service-"+items[0].id).props.onPress();tree=f.render(f.Overlay,f.props);
+  assert.equal(control(tree,"booking-service-"+items[0].id).props.accessibilityState.checked,false);assert.equal(control(tree,"booking-service-"+items[1].id).props.accessibilityState.checked,true);
+  assert.match(text(control(tree,"booking-services-total")),/60\s+min/);control(tree,"booking-save-services").props.onPress();tree=f.render(f.Overlay,f.props);assert.ok(button(tree,"Raul 1 GO PRUEBA"));assert.equal(f.store.getSnapshot().bookings.length,0);assert.deepEqual(f.liveCalls,[]);
+});
+test("multi-service UI confirms one reservation with all services, total duration and isolated calendar projections",async()=>{
+  const f=fixture();await f.configure();await f.store.updateConfig({services:[{name:"Corte DEMO",duration:30,price:12},{name:"Tinte DEMO",duration:60,price:20}]});
+  let tree=await services(f);for(const item of await f.repo.getBookableItems(f.store.businessId)){control(tree,"booking-service-"+item.id).props.onPress();tree=f.render(f.Overlay,f.props);}
+  control(tree,"booking-save-services").props.onPress();tree=f.render(f.Overlay,f.props);button(tree,"Raul 1 GO PRUEBA").props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
+  await button(tree,"09:00").props.onPress();tree=f.render(f.Overlay,f.props);assert.match(text(tree),/Corte DEMO \+ Tinte DEMO/);assert.match(text(tree),/90\s+min/);
+  const confirm=button(tree,"BIZ_CONFIRM_BOOKING_BTN").props.onPress;await Promise.all([confirm(),confirm()]);tree=f.render(f.Overlay,f.props);
+  const data=f.store.getSnapshot();assert.equal(data.bookings.length,1);assert.equal(data.bookings[0].services.length,2);assert.equal(data.bookings[0].startDatetime,"2030-01-07T09:00:00");assert.equal(data.bookings[0].endDatetime,"2030-01-07T10:30:00");assert.equal(data.reservations.length,1);assert.equal(data.entries.length,1);assert.equal(data.entries[0].duration,"90");assert.equal(data.entries[0].intentLabel,"Corte DEMO + Tinte DEMO");assert.equal(f.repo.getCustomerEntries().length,1);assert.deepEqual(f.liveCalls,[]);
+});
+
+test("multi-service UI confirms cut, colour and treatment as one reservation",async()=>{
+ const f=fixture();await f.configure();await f.store.updateConfig({services:[{name:"Corte DEMO",duration:30,price:12},{name:"Tinte DEMO",duration:60,price:20},{name:"Tratamiento DEMO",duration:15,price:8}]});
+ let tree=await services(f);for(const item of await f.repo.getBookableItems(f.store.businessId)){control(tree,"booking-service-"+item.id).props.onPress();tree=f.render(f.Overlay,f.props);}
+ assert.match(text(control(tree,"booking-services-total")),/105\s+min/);assert.match(text(control(tree,"booking-services-total")),/40/);control(tree,"booking-save-services").props.onPress();tree=f.render(f.Overlay,f.props);button(tree,"Raul 1 GO PRUEBA").props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);await button(tree,"09:00").props.onPress();tree=f.render(f.Overlay,f.props);await button(tree,"BIZ_CONFIRM_BOOKING_BTN").props.onPress();
+ const data=f.store.getSnapshot();assert.equal(data.bookings.length,1);assert.equal(data.bookings[0].services.length,3);assert.equal(data.bookings[0].endDatetime,"2030-01-07T10:45:00");assert.equal(data.reservations.length,1);assert.equal(data.entries[0].intentLabel,"Corte DEMO + Tinte DEMO + Tratamiento DEMO");assert.equal(data.entries[0].duration,"105");assert.deepEqual(f.liveCalls,[]);
+});
+
+test('the shared multi-service flow also confirms a different service sector without changing its catalogue',async()=>{
+ const f=fixture();await f.configure();await f.store.updateConfig({sectorId:'salud',subId:'fisioterapia',services:[{name:'Consulta',duration:30,price:35},{name:'Tratamiento',duration:30,price:25}]});
+ const before=JSON.stringify(f.store.getSnapshot().config.services);
+ let tree=await services(f);for(const item of await f.repo.getBookableItems(f.store.businessId)){control(tree,'booking-service-'+item.id).props.onPress();tree=f.render(f.Overlay,f.props);}
+ await control(tree,'booking-save-services').props.onPress();tree=f.render(f.Overlay,f.props);button(tree,'Raul 1 GO PRUEBA').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
+ await button(tree,'09:00').props.onPress();tree=f.render(f.Overlay,f.props);await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();
+ assert.equal(f.store.getSnapshot().bookings.length,1);assert.equal(f.store.getSnapshot().bookings[0].services.length,2);
+ assert.equal(f.store.getSnapshot().bookings[0].endDatetime,'2030-01-07T10:00:00');assert.equal(JSON.stringify(f.store.getSnapshot().config.services),before);assert.deepEqual(f.liveCalls,[]);
+});

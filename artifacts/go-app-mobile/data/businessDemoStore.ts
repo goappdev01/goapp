@@ -6,6 +6,7 @@ import type { GoEntry } from "@/components/AgendaOperativa";
 export type DemoReservation = FloorReservation & {
   dateISO?: string; durationMinutes?: number; endDatetime?: string; serviceId?: string; staffId?: string;
   bookingId?: string; customerId?: string; professionalName?: string;
+  changeProposal?: GoEntry["changeProposal"]; services?: Booking["services"];
 };
 export type DemoBooking = Booking & { elementId?: string; professionalName?: string; serviceTitle?: string; createdAt?: number; source?: "floor" | "customer" };
 type Storage = { getItem: (key: string) => Promise<string | null>; setItem: (key: string, value: string) => Promise<void> };
@@ -278,7 +279,7 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
   const bookingForReservation = (reservation: DemoReservation): DemoBooking => {
     const start = stamp(reservation.dateISO ?? "", reservation.time), duration = reservation.durationMinutes ?? 30;
     return { id: reservationBookingId(reservation), businessId,
-      bookableItemId: reservation.serviceId ?? "demo_floor_service", customerId: reservation.customerId ?? ownerUserId,
+      bookableItemId: reservation.serviceId ?? "demo_floor_service", services: reservation.services && clone(reservation.services), customerId: reservation.customerId ?? ownerUserId,
       staffId: reservation.staffId, elementId: reservation.elementId, professionalName: reservation.professionalName,
       startDatetime: start, endDatetime: reservation.endDatetime ?? addMinutes(start, duration), unitsReserved: 1, peopleCount: 1,
       status: reservation.status === "cancelada" ? "CANCELLED" : reservation.status === "confirmada" ? "CONFIRMED" : "HOLD",
@@ -292,10 +293,12 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
       intentLabel: booking?.serviceTitle ?? data.plan?.elements.find(element => element.id === reservation.elementId)?.label ?? "Reserva DEMO",
       color: "#3D9A84", place: data.config.address, date: reservation.date, dateISO: reservation.dateISO ?? "", time: reservation.time,
       endTime: (reservation.endDatetime ?? booking?.endDatetime)?.slice(11,16), duration: String(reservation.durationMinutes ?? 30),
-      contactName: reservation.customerName, phone: "", estado: reservation.status === "confirmada" ? "aceptado" : reservation.status === "cancelada" ? "rechazado" : "pendiente",
-      bookingStatus: reservation.status, createdAt: reservation.createdAt, notes: reservation.notes, businessId, ownerUserId,
+      contactName: reservation.customerName, phone: "", estado: booking?.changeProposal ? booking.changeProposal.proposedBy === "customer" ? "propuesto" : "propuesta_pendiente" : reservation.status === "confirmada" ? "aceptado" : reservation.status === "cancelada" ? "rechazado" : "pendiente",
+      bookingStatus: reservation.status, changeProposal: booking?.changeProposal, createdAt: reservation.createdAt, notes: reservation.notes, businessId, ownerUserId,
       serviceId: reservation.serviceId ?? booking?.bookableItemId, staffId: reservation.staffId ?? booking?.staffId,
-      professionalName: reservation.professionalName ?? booking?.professionalName, demoLocal: true } as GoEntry;
+      professionalName: reservation.professionalName ?? booking?.professionalName, demoLocal: true,
+      startDatetime: booking?.startDatetime, endDatetime: reservation.endDatetime ?? booking?.endDatetime,
+      ...(reservation.changeProposal ? {changeProposal:reservation.changeProposal,estado:"propuesta_pendiente"} : {}) } as GoEntry;
   };
   const refreshPlanStatuses = (data: BusinessDemoData) => {
     if (!data.plan) return;
@@ -383,7 +386,7 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
         const previous = data.reservations.find(value => value.id === reservation.id);
         const element = data.plan?.elements.find(value => value.id === reservation.elementId);
         const professional = professionals.find(person => businessDemoProfessionalElement(data, person)?.id === element?.id);
-        return { ...clone(reservation), customerId: ownerUserId, durationMinutes: reservation.durationMinutes ?? previous?.durationMinutes ?? 30,
+        return { ...clone(reservation), customerId: ownerUserId, serviceId: reservation.serviceId ?? previous?.serviceId, services: clone(reservation.services ?? previous?.services ?? null) ?? undefined, durationMinutes: reservation.durationMinutes ?? previous?.durationMinutes ?? 30,
           staffId: reservation.staffId ?? previous?.staffId ?? (previous ? undefined : professional?.id),
           professionalName: reservation.professionalName ?? previous?.professionalName ?? (previous ? undefined : professional?.name) };
       });
@@ -395,7 +398,9 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
         const previous = data.reservations.find(existing => existing.id === reservation.id);
         const previousBooking = previous && bookingForReservation(previous);
         const selectionChanged = !previousBooking || proposed.startDatetime !== previousBooking.startDatetime || proposed.endDatetime !== previousBooking.endDatetime
-          || proposed.bookableItemId !== previousBooking.bookableItemId || proposed.staffId !== previousBooking.staffId || proposed.elementId !== previousBooking.elementId;
+          || proposed.bookableItemId !== previousBooking.bookableItemId || JSON.stringify(proposed.services ?? null) !== JSON.stringify(previousBooking.services ?? null) || proposed.staffId !== previousBooking.staffId || proposed.elementId !== previousBooking.elementId;
+        const canonicalBooking=data.bookings.find(value=>value.id===proposed.id);
+        if(selectionChanged && canonicalBooking?.source==="customer")throw new Error("Reserva de puesto DEMO: utiliza Proponer cambio para modificarla; conserva su horario hasta el acuerdo.");
         if (reservation.status !== "cancelada" && selectionChanged) {
           if (Date.parse(proposed.startDatetime) <= Date.now()) throw new Error("Elige una hora futura para la nueva reserva DEMO.");
           const element = data.plan!.elements.find(value => value.id === reservation.elementId)!;
@@ -413,9 +418,12 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
             if (assigned?.id !== element.id) throw new Error("El profesional no corresponde a este puesto DEMO.");
           }
           if (reservation.serviceId && reservation.serviceId !== "demo_floor_service") {
-            const service = data.config.services.find(value => demoNamedId(businessId,"service",value.name) === reservation.serviceId);
-            if (!service || service.duration !== reservation.durationMinutes || service.price < 0
-              || professional && professional.serviceIds?.length && !professional.serviceIds.includes(reservation.serviceId))
+            const ids = reservation.services?.map(value => value.id) ?? [reservation.serviceId];
+            const services = ids.map(id => data.config.services.find(value => demoNamedId(businessId,"service",value.name) === id));
+            if (!ids.length || ids[0] !== reservation.serviceId || new Set(ids).size !== ids.length
+              || services.some(service => !service || service.price < 0)
+              || services.reduce((total, service) => total + (service?.duration ?? 0), 0) !== reservation.durationMinutes
+              || professional && professional.serviceIds?.length && ids.some(id => !professional.serviceIds!.includes(id)))
               throw new Error("Servicio o duración DEMO no disponible para este profesional.");
           }
           const start = Number(reservation.time.slice(0,2))*60 + Number(reservation.time.slice(3,5));
@@ -441,7 +449,11 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
       data.reservations = [...normalizedReservations, ...concurrent];
       for (const reservation of data.reservations) {
         const proposed = bookingForReservation(reservation), index = data.bookings.findIndex(booking => booking.id === proposed.id);
-        if (index < 0) data.bookings.push(proposed); else data.bookings[index] = { ...data.bookings[index], ...proposed };
+        if (index < 0) data.bookings.push(proposed); else {
+          const previous=data.bookings[index];
+          data.bookings[index]={...previous,...proposed,source:previous.source ?? proposed.source,paymentStatus:previous.paymentStatus};
+          if(proposed.status==="CANCELLED" && previous.changeProposal){data.bookings[index].changeHistory=[...(previous.changeHistory ?? []),{proposal:previous.changeProposal,outcome:"cancelled",actor:"business",at:Date.now()}];delete data.bookings[index].changeProposal;}
+        }
       }
       syncEntries(data); return data;
     }),
@@ -457,9 +469,18 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
       if (entries.some(entry => !existing.has(entry.id))) throw new Error("La agenda DEMO solo admite sus reservas locales.");
       data.reservations = data.reservations.map(reservation => {
         const entry = entries.find(item => item.reservationId === reservation.id);
-        const status = !entry || entry.deleted || entry.estado === "rechazado" ? "cancelada" : entry.estado === "aceptado" ? "confirmada" : "pendiente";
+        const negotiating = entry?.estado === "propuesto" || entry?.estado === "propuesta_pendiente";
+        const status = !entry || entry.deleted || entry.estado === "rechazado" ? "cancelada" : negotiating ? reservation.status : entry.estado === "aceptado" ? "confirmada" : "pendiente";
         const id = reservationBookingId(reservation);
-        data.bookings = data.bookings.map(booking => booking.id === id ? { ...booking, status: status === "cancelada" ? "CANCELLED" : status === "confirmada" ? "CONFIRMED" : "HOLD" } : booking);
+        data.bookings = data.bookings.map(booking => {
+          if (booking.id !== id) return booking;
+          const next = { ...booking, status: status === "cancelada" ? "CANCELLED" as const : negotiating ? booking.status : status === "confirmada" ? "CONFIRMED" as const : "HOLD" as const };
+          if (status === "cancelada" && booking.changeProposal) {
+            next.changeHistory = [...(booking.changeHistory ?? []), { proposal: clone(booking.changeProposal), outcome: "cancelled", actor: "business", at: Date.now() }];
+            delete next.changeProposal;
+          }
+          return next;
+        });
         return { ...reservation, status };
       });
       syncEntries(data); return data;

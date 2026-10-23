@@ -42,6 +42,7 @@ export function fixture({ now } = {}) {
     StyleSheet: { create: value => value, absoluteFill: {} },
     Dimensions: { get: () => ({ width: 390, height: 844 }) },
     Platform: { OS: 'web' },
+    AppState: { addEventListener: () => ({remove(){}}) },
     PanResponder: { create: config => ({ panHandlers: config }) },
     Animated: { Value, View: 'Animated.View', timing: () => animation, spring: () => animation, sequence: () => animation, loop: () => animation },
   }, { get: (target, key) => target[key] ?? key });
@@ -57,6 +58,13 @@ export function fixture({ now } = {}) {
     'react-native-reanimated': { default: { View: 'ReAnimated.View' }, useSharedValue: value => react.useRef({ value }).current, useAnimatedStyle: fn => fn(), withSpring: value => value, withTiming: value => value, runOnJS: fn => fn, interpolateColor: () => '#000' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, right: 0, left: 0, bottom: 0 }) },
     '@/hooks/useGoLog': { useGoLog: () => react.useState([]) },
+    '@/lib/sessionEvents': { onSessionChanged: () => () => {} },
+    '@/data/booking': { subscribeBookingUpdates: () => () => {},
+      getAuthenticatedUserId: async () => {throw new Error('No network in navigation fixture');},
+      getOwnedBusinesses: async () => {throw new Error('No network in navigation fixture');},
+      getLiveBusinessBookings: async () => {throw new Error('No network in navigation fixture');},
+      changeBookingRequest: async () => {throw new Error('No booking writes in navigation fixture');},
+    },
     '@/hooks/useGoCalendarEntries': { useGoCalendarEntries: entries => entries },
     '@/contexts/LanguageContext': { useLanguage: () => ({ lang: language, t: key => key.startsWith("floor_") ? (translatedFloorLabels.translations[language]?.[key] ?? key) : key }) },
     '@/contexts/GoBusinessConfigContext': { useBusinessConfig: () => ({ config: { plantillaItems: [], businessName: 'Test', subId: '' } }) },
@@ -84,6 +92,9 @@ export function fixture({ now } = {}) {
       setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
       require(name) {
         if (name in mocks) return mocks[name];
+        if (name === '@/hooks/useBusinessBookings') return load('hooks/useBusinessBookings.ts');
+        if (name === '@/data/reservationCardPolicy') return load('data/reservationCardPolicy.ts');
+        if (name === '@/data/customerBookingProjection') return load('data/customerBookingProjection.ts');
         if (name.startsWith('@/components/')) return load(name.replace('@/', '') + '.tsx');
         if (name === '@/lib/time') return load('lib/time.ts');
         if (name.startsWith('.')) return load(path.resolve(path.dirname(filename), name) + (name.includes('/ui/') ? '.tsx' : '.ts'));

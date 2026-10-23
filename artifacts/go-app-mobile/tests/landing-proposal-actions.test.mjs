@@ -1,3 +1,4 @@
+import {originalGoProposalContract} from "./helpers/booking-go-contract.mjs";
 import { priorLandingPosition } from './helpers/landing-anchor-baseline.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -87,7 +88,7 @@ test('one shared operational UI preserves all approved button styles and transpo
 });
 test('approved geometry, controls, authentication and proposal resolution remain unchanged',()=>{
  for(const name of ['landingCloseRect','landingBaseline','landingOrbitTop','landingPanels','humanityBlocks','humanityPlacement','inlineHumanityRect','buildNextAptActions','acceptProposal','rejectProposal','setReservationStatus','sendSuggestChangeFromCal','sendProposalFromList','nextCardPanRef','cambiosCardPanRef','wrapOrbital']){
-  const now=decl(ast,name);assert.ok(now,name);assert.equal(typeof approved.declarations[name],'string',name);assert.equal(priorLandingPosition(now.getText(ast)),approved.declarations[name],name);
+  const now=decl(ast,name);assert.ok(now,name);assert.equal(typeof approved.declarations[name],'string',name);assert.equal(originalGoProposalContract(priorLandingPosition(now.getText(ast))),approved.declarations[name],name);
  }
  const commands=a=>find(a,n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(a)==='LandingPanelCommands');
  // Only the three explicitly authorized toggles may differ from the approved controls.

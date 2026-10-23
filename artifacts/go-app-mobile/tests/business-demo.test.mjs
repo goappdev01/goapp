@@ -37,7 +37,7 @@ function loadPure(name, imports = {}) {
   return exports;
 }
 const storeModule = loadPure("data/businessDemoStore.ts");
-const bookingRepositoryModule = loadPure("data/demoBookingRepository.ts", { "./businessDemoStore": storeModule });
+const bookingRepositoryModule = loadPure("data/demoBookingRepository.ts", { "./businessDemoStore": storeModule,"./bookingServices":loadPure("data/bookingServices.ts") });
 const localized = loadPure("i18n/translations.ts").translations;
 const initial = {
   businessName: "", address: "", cartaUrl: "", sectorId: null, subId: null, plantillaItems: [],
@@ -251,6 +251,9 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
     vm.runInNewContext(compile(name, reactCompiler && ["contexts/GoBusinessConfigContext.tsx", "components/booking/GoReservasConfigScreen.tsx", "components/empresa/EmpresaConfigScreen.tsx"].includes(name)), { exports, console, Date, Set, Map, setTimeout: () => 1, clearTimeout() {},
       setInterval: () => 1, clearInterval() {}, require(key) {
         if (key in imports) return imports[key];
+        if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };
+        if (key === "./CatalogComplementSelector") return { CatalogComplementSelector: () => null };
+        if (key === "./booking") return imports["@/data/booking"];
         if (key === "@/data/floorPlan") {
           const module = load("data/floorPlan.ts");
           return { ...module, loadFloorPlan: external, saveFloorPlan: external, loadReservations: external, saveReservations: external };
@@ -468,10 +471,10 @@ test("Expo-compiled DEMO provider keeps form edits visible and persists them acr
 });
 
 
-test("complete DEMO booking reaches its final screen and updates both real calendar callbacks, reload and cancellation", async () => {
+for (const multiple of [false, true]) test("complete DEMO booking reaches its final screen and updates both real calendar callbacks, reload and cancellation" + (multiple ? " with multiple services" : ""), async () => {
   const f = dataFixture();
   await f.store.updateConfig({ businessName: "GO PELUQUERÍA", sectorId: "belleza", subId: "peluqueria", address: "Calle de prueba", phone: "912345678",
-    activeDays: [0,1,2,3,4], services: [{ name: "Corte de prueba", duration: 30, price: 12 }],
+    activeDays: [0,1,2,3,4], services: [{ name: "Corte de prueba", duration: 30, price: 12 }, ...(multiple ? [{ name: "Tinte de prueba", duration: 60, price: 20 }] : [])],
     plantillaItems: [{ id: "puestos", count: 2, label: "Puestos", staffNames: ["Profesional DEMO", "Profesional DOS"] }], completedSteps: [0,1,2,3,4,5,6,7] });
   const plan = floor(f.store); plan.elements.push({ ...plan.elements[0], id: "demo-space-two", label: "Profesional DOS" });
   await f.store.saveFloorPlan(plan);
@@ -490,6 +493,8 @@ test("complete DEMO booking reaches its final screen and updates both real calen
   const navigation = [], props = { visible: true, demoRepository: repo, initialBusinessId: f.store.businessId, onClose() {}, onDemoGoToBooking: (...args) => navigation.push(args) };
   ui.render(Overlay, props); await turn(); ui.render(Overlay, props); await turn();
   let tree = ui.render(Overlay, props); button(tree, "Corte de prueba").props.onPress(); tree = ui.render(Overlay, props);
+  if (multiple) { button(tree, "Tinte de prueba").props.onPress(); tree = ui.render(Overlay, props); }
+  button(tree, "save").props.onPress(); tree = ui.render(Overlay, props);
   button(tree, "Profesional DEMO").props.onPress(); ui.render(Overlay, props); await turn(); tree = ui.render(Overlay, props);
   button(tree, "09:00").props.onPress(); await turn(); tree = ui.render(Overlay, props);
   const confirm = button(tree, "BIZ_CONFIRM_BOOKING_BTN").props.onPress;
@@ -505,6 +510,10 @@ test("complete DEMO booking reaches its final screen and updates both real calen
   assert.equal(clientBoard.props.goLog.length, 1); assert.equal(companyBoard.props.goLog.length, 1);
   assert.equal(clientBoard.props.goLog[0].reservationId, companyBoard.props.goLog[0].reservationId);
   assert.equal(clientBoard.props.goLog[0].staffId, booking.staffId);
+  if (multiple) {
+    assert.equal(booking.services.length, 2); assert.equal(booking.endDatetime, "2030-01-07T10:30:00");
+    for (const board of [clientBoard, companyBoard]) { assert.equal(board.props.goLog[0].duration, "90"); assert.equal(board.props.goLog[0].intentLabel, "Corte de prueba + Tinte de prueba"); }
+  }
   const reopened = f.make(); await reopened.load(); assert.equal(reopened.getSnapshot().bookings.length, 1); assert.equal(reopened.getSnapshot().bookings[0].id, booking.id);
   button(ui.render(Company, companyProps), "Profesional DOS").props.onPress();
   assert.equal(component(ui.render(Company, companyProps), "AgendaBoard").props.goLog.length, 0);
@@ -844,7 +853,7 @@ test('the first professional in an empty business is created only once and keeps
 
 
 test('configuration navigation survives the actual company-panel remount without removing its isolation key',async()=>{
- const root=source('app/index.tsx');assert.match(root,/const \[empresaDemoRoute, setEmpresaDemoRoute\]/);assert.match(root,/key=\{ownerDemo\.demo\?\.businessId\}[\s\S]*initialModulo=\{empresaDemoRoute === "configuration" \? "empresa_config" : "home"\}/);assert.match(root,/onDemoNavigate=\{setEmpresaDemoRoute\}/);
+ const root=source('app/index.tsx');assert.match(root,/const \[empresaDemoRoute, setEmpresaDemoRoute\]/);assert.match(root,/key=\{ownerDemo\.demo\?\.businessId\}[\s\S]*initialModulo=\{empresaDemoRoute === "configuration" \? "empresa_config" : empresaDemoRoute === "reservations" \? "reservas_config" : "home"\}/);assert.match(root,/onDemoNavigate=\{setEmpresaDemoRoute\}/);
  const f=dataFixture();await configuredSalon(f);const ui=uiFixture(f),Panel=ui.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel;let route='home';
  const props=()=>({visible:true,previewReadOnly:true,initialModulo:route==='configuration'?'empresa_config':'home',initialCompaniesOpen:route==='companies',onDemoNavigate:value=>route=value,onClose(){}});
  ui.render(Panel,props());let tree=ui.render(Panel,props());const opening=nodes(tree).find(n=>n.type==='DemoCompanyManager').props.onOpenConfiguration;

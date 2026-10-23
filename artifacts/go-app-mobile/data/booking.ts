@@ -1,6 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { readAuthSession, fetchWithAuth, AuthSessionRequiredError, type AuthSession } from "@/lib/authSession";
 import { expandSearchTerms, normalize } from "./goSearchAliases";
+import type { ServiceTiming } from "./serviceTiming";
+import type { BookingTimeline } from "./bookingTimeline";
+import type { CatalogQuote } from "./catalogAssociations";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -27,9 +30,13 @@ export type Business = {
   timezone: string;
   createdAt: string;
   cancellationPolicy?: CancellationPolicy;
+  bookingResources?: { id: string; name: string; capacity: number; active?: boolean }[];
+  bookingBlocks?: { startsAt: string; endsAt: string }[];
 };
 
 export type BookableItem = {
+  catalogMetadata?: Record<string, unknown>;
+  catalogKind?: "service" | "product";
   id: string;
   businessId: string;
   title: string;
@@ -43,6 +50,7 @@ export type BookableItem = {
   paymentRequired: boolean;
   active: boolean;
   visible: boolean;
+  timing?: ServiceTiming;
 };
 
 export type AvailabilityWindow = {
@@ -52,6 +60,7 @@ export type AvailabilityWindow = {
   staffId?: string;        // undefined = business-level; set = applies to specific staff member
   weekday: number; // 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat
   shiftIndex?: number;     // 0 = first shift, 1 = second shift (defaults 0)
+  endNextDay?: boolean;
   visibleStartHour: number; // 0-23
   visibleStartMinute?: number; // 0-59, defaults 0
   visibleEndHour: number; // 0-23
@@ -59,12 +68,27 @@ export type AvailabilityWindow = {
   active: boolean;
 };
 
+export type BookingChangeProposal = {
+  id: string; proposedBy: "customer" | "business";
+  dateISO: string; date: string; time: string; duration: string; proposedAt: number;
+  originalDateISO: string; originalDate: string; originalTime: string; originalDuration: string;
+  originalStartDatetime: string; originalEndDatetime: string;
+  financialAcceptanceRequired: boolean; proposerAcceptedFinancialTerms: boolean;
+};
+export type BookingChangeEvent = { proposal: BookingChangeProposal; outcome: "accepted" | "rejected" | "countered" | "cancelled"; actor: "customer" | "business"; at: number };
 export type Booking = {
+  catalogSnapshot?: CatalogQuote;
+  services?: { id: string; title: string; durationMinutes: number; price: number; currency?: string; priceKnown?: boolean }[];
+  timingSnapshot?: BookingTimeline;
+  changeRevision?:number;
+  serverStatus?:string;
+  receipt?:{customerName?:string;businessName?:string;address?:string;timezone?:string;serviceName?:string;staffName?:string};
   id: string;
   businessId: string;
   bookableItemId: string;
   customerId: string;
   staffId?: string;      // ID del profesional asignado; undefined = sin preferencia / "cualquiera"
+  startInstant?:string;endInstant?:string;
   startDatetime: string; // ISO
   endDatetime: string; // ISO
   unitsReserved: number;
@@ -72,6 +96,8 @@ export type Booking = {
   status: BookingStatus;
   holdExpiresAt?: string; // ISO — only for HOLD status
   paymentStatus: "none" | "pending" | "paid";
+  changeProposal?: BookingChangeProposal;
+  changeHistory?: BookingChangeEvent[];
   goEntryId?: string; // linked GO entry id
   slotKey?: string;   // clave única: businessId|staffId|date|startTime|endTime
   notes?: string;
@@ -140,6 +166,11 @@ export type ManualBlock = {
 };
 
 export type AvailableSlot = {
+  startInstant?: string;
+  endInstant?: string;
+  staffId?: string;
+  timezone?: string;
+  timingSnapshot?: BookingTimeline;
   startDatetime: string; // ISO
   endDatetime: string; // ISO
   availableUnits: number;
@@ -153,6 +184,7 @@ export type Staff = {
   emoji?: string;
   /** IDs de BookableItem que este profesional puede realizar (vacío = todos) */
   serviceIds?: string[];
+  bookingBlocks?: { startsAt: string; endsAt: string }[];
   active: boolean;
 };
 
@@ -290,6 +322,12 @@ type RemoteBooking = {
   ends_at: string;
   status: "PENDING" | "CONFIRMED" | "CANCELLED" | "COMPLETED" | "NO_SHOW";
   notes?: string | null;
+  change_proposal?: BookingChangeProposal;change_history?: BookingChangeEvent[];change_revision?: number;
+  customer_name?:string;business_name?:string;business_address?:string;business_timezone?:string;service_name?:string;staff_name?:string;
+  timing_snapshot?: BookingTimeline | null;
+  catalog_snapshot?: CatalogQuote | null;
+  service_ids?: string[];
+  service_details?: (Omit<NonNullable<Booking["services"]>[number], "price"> & { price: number | null })[] | null;
 };
 
 function mapRemoteBusiness(row: RemoteBusiness): Business {
@@ -301,6 +339,8 @@ function mapRemoteBusiness(row: RemoteBusiness): Business {
     phone: row.ui_metadata?.phone ?? "",
     whatsapp: row.ui_metadata?.whatsapp,
     cancellationPolicy: row.ui_metadata?.cancellationPolicy,
+    bookingResources: row.ui_metadata?.bookingResources,
+    bookingBlocks: row.ui_metadata?.bookingBlocks,
     bookingActive: row.booking_enabled !== false,
     bookingColor: row.ui_metadata?.bookingColor ?? "#4A80BD",
     timezone: row.timezone ?? "UTC",
@@ -314,6 +354,8 @@ function mapRemoteService(row: RemoteService): BookableItem {
     businessId: row.business_id,
     title: row.name,
     type: row.ui_metadata?.type ?? "service",
+    catalogMetadata: row.ui_metadata,
+    catalogKind: row.ui_metadata?.catalogKind ?? "service",
     durationMinutes: row.duration_minutes,
     customerCapacity: row.ui_metadata?.customerCapacity ?? 1,
     unitQuantity: row.ui_metadata?.unitQuantity ?? 1,
@@ -323,6 +365,7 @@ function mapRemoteService(row: RemoteService): BookableItem {
     paymentRequired: row.ui_metadata?.paymentRequired ?? false,
     active: row.active !== false,
     visible: row.ui_metadata?.visible ?? row.active !== false,
+    timing: row.ui_metadata?.timing,
   };
 }
 
@@ -334,8 +377,9 @@ function localBookingDateTime(value: string): string {
 
 function mapRemoteBooking(row: RemoteBooking): Booking {
   // The existing calendar/slot engine consumes device-local wall times.
-  const startsAt = localBookingDateTime(row.starts_at);
-  const endsAt = localBookingDateTime(row.ends_at);
+  const wall = row.timing_snapshot?.timezone ? (require("./bookingTimeline") as typeof import("./bookingTimeline")).businessWallTime : undefined;
+  const startsAt = wall ? wall(row.starts_at, row.timing_snapshot!.timezone) : localBookingDateTime(row.starts_at);
+  const endsAt = wall ? wall(row.ends_at, row.timing_snapshot!.timezone) : localBookingDateTime(row.ends_at);
   const status: BookingStatus = row.status === "PENDING"
     ? "HOLD"
     : row.status === "NO_SHOW"
@@ -347,6 +391,10 @@ function mapRemoteBooking(row: RemoteBooking): Booking {
     bookableItemId: row.service_id,
     customerId: row.customer_id,
     staffId: row.staff_id ?? undefined,
+    startInstant:row.starts_at,endInstant:row.ends_at,
+    timingSnapshot: row.timing_snapshot ?? undefined,
+    catalogSnapshot: row.catalog_snapshot ?? undefined,
+    services: (row.timing_snapshot?.serviceDetails ?? row.service_details)?.map(service => ({ ...service, price: service.price ?? 0, priceKnown: service.price != null && (!("priceKnown" in service) || service.priceKnown !== false) })),
     startDatetime: startsAt,
     endDatetime: endsAt,
     unitsReserved: 1,
@@ -354,6 +402,9 @@ function mapRemoteBooking(row: RemoteBooking): Booking {
     status,
     paymentStatus: "none",
     notes: row.notes ?? undefined,
+    changeProposal: row.change_proposal ?? undefined,changeHistory: row.change_history,changeRevision:Number(row.change_revision ?? 0),
+    serverStatus:row.status,
+    receipt:{customerName:row.customer_name,businessName:row.business_name,address:row.business_address,timezone:row.timing_snapshot?.timezone ?? row.business_timezone,serviceName:row.timing_snapshot?.serviceDetails?.map(service=>service.title).join(" + ") || row.service_name,staffName:row.staff_name},
     slotKey: getBookingSlotKey({
       businessId: row.business_id,
       staffId: row.staff_id ?? undefined,
@@ -388,16 +439,30 @@ async function createRemoteBooking(candidate: Omit<Booking, "id"> & { id?: strin
       400, "LOCAL_BOOKING_NOT_SUPPORTED",
     );
   }
+  const serviceIds = candidate.services?.map(service => service.id) ?? [candidate.bookableItemId];
+  if (!serviceIds.length || serviceIds[0] !== candidate.bookableItemId || serviceIds.some(id => !isCloudId(id)) || new Set(serviceIds).size !== serviceIds.length) {
+    throw new BookingApiError("Selección de servicios no válida.", 400, "INVALID_SERVICES");
+  }
+  if (!candidate.id) throw new BookingApiError("Revisa la reserva antes de confirmar.", 400, "REQUEST_KEY_REQUIRED");
   const payload = await supabaseApiRequest<RemoteBooking[] | RemoteBooking>(
-    "/supabase/bookings",
+    candidate.catalogSnapshot ? "/supabase/bookings/catalog" : "/supabase/bookings/timeline",
     {
       method: "POST",
-      body: JSON.stringify(remoteBookingPayload(candidate, customerId)),
+      body: JSON.stringify({ business_id: candidate.businessId,
+        ...(candidate.catalogSnapshot ? { root_ids: candidate.catalogSnapshot.rootIds, selected_ids: candidate.catalogSnapshot.selectedAssociationIds, expected_quote: candidate.catalogSnapshot } : { service_ids: serviceIds, status: "CONFIRMED" }),
+        starts_at: candidate.startInstant ?? new Date(candidate.startDatetime).toISOString(), staff_id: candidate.staffId ?? null,
+        request_key: candidate.id, notes: candidate.notes ?? null, expected_plan: candidate.timingSnapshot,
+        ends_at: candidate.endInstant,
+        ...(isCloudId(candidate.customerId) && candidate.customerId !== customerId ? { customer_id: candidate.customerId } : {}) }),
     },
     true,
   );
   const row = Array.isArray(payload) ? payload[0] : payload;
   if (!row?.id) throw new BookingApiError("Supabase devolvió una reserva inválida.", 502);
+  if (!row.timing_snapshot || JSON.stringify(row.timing_snapshot.serviceIds) !== JSON.stringify(serviceIds)) {
+    throw new BookingApiError("El servidor no devolvió la secuencia confirmada. Revisa Mis reservas antes de repetir.", 502, "INVALID_TIMELINE_CONTRACT");
+  }
+  notifyBookingUpdated();
   return mapRemoteBooking(row);
 }
 
@@ -438,7 +503,7 @@ export async function getOwnedBusinesses(): Promise<Business[]> {
 }
 function businessBody(b: Omit<Business, "id" | "createdAt">) {
   return { name: b.name.trim(), address: b.location, timezone: b.timezone, booking_enabled: b.bookingActive,
-    ui_metadata: { category: b.category, phone: b.phone, whatsapp: b.whatsapp, bookingColor: b.bookingColor, cancellationPolicy: b.cancellationPolicy } };
+    ui_metadata: { category: b.category, phone: b.phone, whatsapp: b.whatsapp, bookingColor: b.bookingColor, cancellationPolicy: b.cancellationPolicy, bookingResources: b.bookingResources, bookingBlocks: b.bookingBlocks } };
 }
 export async function createOwnedBusiness(data: Omit<Business, "id" | "createdAt">, expectedUserId?: string): Promise<Business> {
   const rows = await supabaseApiRequest<RemoteBusiness[]>(`${management}/businesses`, { method: "POST", body: JSON.stringify(businessBody(data)) }, true, expectedUserId);
@@ -453,15 +518,15 @@ export async function saveCloudConfiguration(businessId: string, payload: unknow
 }
 function serviceBody(item: Omit<BookableItem, "id">) {
   return { name: item.title, duration_minutes: item.durationMinutes, price: item.price, currency: "EUR", active: item.active,
-    ui_metadata: { type: item.type, customerCapacity: item.customerCapacity, unitQuantity: item.unitQuantity, paymentRequired: item.paymentRequired, visible: item.visible } };
+    ui_metadata: { ...item.catalogMetadata, type: item.type, catalogKind: item.catalogKind ?? "service", customerCapacity: item.customerCapacity, unitQuantity: item.unitQuantity, paymentRequired: item.paymentRequired, visible: item.visible, timing: item.timing } };
 }
 type RemoteStaff = { id: string; business_id: string; display_name: string; active: boolean; ui_metadata?: Partial<Staff> & { archived?: boolean } };
-const mapStaff = (r: RemoteStaff): Staff => ({ id: r.id, businessId: r.business_id, name: r.display_name, active: r.active, emoji: r.ui_metadata?.emoji, serviceIds: r.ui_metadata?.serviceIds });
+const mapStaff = (r: RemoteStaff): Staff => ({ id: r.id, businessId: r.business_id, name: r.display_name, active: r.active, emoji: r.ui_metadata?.emoji, serviceIds: r.ui_metadata?.serviceIds, bookingBlocks: r.ui_metadata?.bookingBlocks });
 type RemoteWindow = { id: string; business_id: string; staff_id: string | null; weekday: number; start_time: string; end_time: string; active: boolean; ui_metadata?: Partial<AvailabilityWindow> & { archived?: boolean } };
-const mapWindow = (r: RemoteWindow): AvailabilityWindow => ({ id: r.id, businessId: r.business_id, staffId: r.staff_id ?? undefined, weekday: r.weekday, visibleStartHour: Number(r.start_time.slice(0, 2)), visibleStartMinute: Number(r.start_time.slice(3, 5)), visibleEndHour: Number(r.end_time.slice(0, 2)), visibleEndMinute: Number(r.end_time.slice(3, 5)), active: r.active, shiftIndex: r.ui_metadata?.shiftIndex ?? 0, bookableItemId: r.ui_metadata?.bookableItemId });
+const mapWindow = (r: RemoteWindow): AvailabilityWindow => ({ id: r.id, businessId: r.business_id, staffId: r.staff_id ?? undefined, weekday: r.weekday, visibleStartHour: Number(r.start_time.slice(0, 2)), visibleStartMinute: Number(r.start_time.slice(3, 5)), visibleEndHour: Number(r.end_time.slice(0, 2)), visibleEndMinute: Number(r.end_time.slice(3, 5)), active: r.active, shiftIndex: r.ui_metadata?.shiftIndex ?? 0, endNextDay: r.ui_metadata?.endNextDay, bookableItemId: r.ui_metadata?.bookableItemId });
 function windowBody(w: Omit<AvailabilityWindow, "id">) {
   const time = (h: number, m = 0) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-  return { staff_id: w.staffId ?? null, weekday: w.weekday, start_time: time(w.visibleStartHour, w.visibleStartMinute), end_time: time(w.visibleEndHour, w.visibleEndMinute), active: w.active, ui_metadata: { shiftIndex: w.shiftIndex ?? 0, bookableItemId: w.bookableItemId } };
+  return { staff_id: w.staffId ?? null, weekday: w.weekday, start_time: time(w.visibleStartHour, w.visibleStartMinute), end_time: time(w.visibleEndHour, w.visibleEndMinute), active: w.active, ui_metadata: { shiftIndex: w.shiftIndex ?? 0, bookableItemId: w.bookableItemId, endNextDay: w.endNextDay === true } };
 }
 export async function getOwnedBookableItems(businessId: string): Promise<BookableItem[]> {
   const rows = await supabaseApiRequest<RemoteService[]>(`${management}/businesses/${businessId}/services`, {}, true);
@@ -637,7 +702,7 @@ export async function getStaff(businessId?: string): Promise<Staff[]> {
 export async function saveStaff(member: Staff): Promise<void> {
   if (isCloudId(member.businessId)) {
     const existing = isCloudId(member.id);
-    const rows = await supabaseApiRequest<RemoteStaff[]>(`${management}/businesses/${member.businessId}/staff${existing ? `/${member.id}` : ""}`, { method: existing ? "PATCH" : "POST", body: JSON.stringify({ display_name: member.name, active: member.active, ui_metadata: { emoji: member.emoji, serviceIds: member.serviceIds } }) }, true);
+    const rows = await supabaseApiRequest<RemoteStaff[]>(`${management}/businesses/${member.businessId}/staff${existing ? `/${member.id}` : ""}`, { method: existing ? "PATCH" : "POST", body: JSON.stringify({ display_name: member.name, active: member.active, ui_metadata: { emoji: member.emoji, serviceIds: member.serviceIds, bookingBlocks: member.bookingBlocks } }) }, true);
     remember([mapStaff(firstRow(rows))]); return;
   }
   const all = await loadAll<Staff>(KEY_STAFF);
@@ -649,7 +714,7 @@ export async function saveStaff(member: Staff): Promise<void> {
 
 export async function createStaff(data: Omit<Staff, "id">): Promise<Staff> {
   if (isCloudId(data.businessId)) {
-    const rows = await supabaseApiRequest<RemoteStaff[]>(`${management}/businesses/${data.businessId}/staff`, { method: "POST", body: JSON.stringify({ display_name: data.name, active: data.active, ui_metadata: { emoji: data.emoji, serviceIds: data.serviceIds } }) }, true);
+    const rows = await supabaseApiRequest<RemoteStaff[]>(`${management}/businesses/${data.businessId}/staff`, { method: "POST", body: JSON.stringify({ display_name: data.name, active: data.active, ui_metadata: { emoji: data.emoji, serviceIds: data.serviceIds, bookingBlocks: data.bookingBlocks } }) }, true);
     return remember([mapStaff(firstRow(rows))])[0];
   }
   const member: Staff = { ...data, id: uid() };
@@ -792,6 +857,14 @@ export async function createHold(
   holdSeconds = 300
 ): Promise<{ ok: true; booking: Booking } | { ok: false; conflict: Booking }> {
   const expires = new Date(Date.now() + holdSeconds * 1000);
+  // Online review is not a fictitious server hold. Confirmation revalidates and
+  // atomically allocates the same concrete professional selected by the server.
+  if (isCloudId(data.businessId)) {
+    if (!data.timingSnapshot || data.timingSnapshot.staffId !== (data.staffId ?? null) || !data.startInstant || !data.endInstant) {
+      throw new BookingApiError("Vuelve a consultar la disponibilidad de esta reserva.", 409, "STALE_AVAILABILITY");
+    }
+    return { ok: true, booking: { ...data, id: uid(), status: "HOLD", holdExpiresAt: expires.toISOString(), paymentStatus: "none" } };
+  }
   return checkAndClaimBookingSlot({
     ...data,
     status: "HOLD",
@@ -849,6 +922,7 @@ export async function cancelBooking(id: string): Promise<void> {
   }
   const all = await loadAll<Booking>(KEY_BOOKINGS);
   await saveAll(KEY_BOOKINGS, all.map(b => b.id === id ? { ...b, status: "CANCELLED" as BookingStatus } : b));
+  notifyBookingUpdated();
 }
 
 export async function updateBookingStatus(id: string, status: BookingStatus): Promise<void> {
@@ -1001,7 +1075,10 @@ export async function checkAndClaimBookingSlot(
   const isCustomerConfirmation =
     candidate.status === "CONFIRMED" &&
     (candidate.customerId === "me" || candidate.customerId === currentUserId);
-  if (isCustomerConfirmation) {
+  if (isCustomerConfirmation || (isCloudId(candidate.businessId) && candidate.status === "CONFIRMED")) {
+    if (!isCustomerConfirmation && !isCloudId(candidate.customerId)) {
+      throw new BookingApiError("Selecciona un cliente autorizado antes de guardar una reserva real.", 400, "CUSTOMER_REQUIRED");
+    }
     try {
       const booking = { ...await createRemoteBooking(candidate), goEntryId: candidate.goEntryId };
       // The remote booking replaces its local HOLD. Do not retry a successful
@@ -1420,12 +1497,34 @@ function deduplicateBookings<T extends { staffId?: string; startDatetime: string
   return kept;
 }
 
+/** The database is the sole live availability authority. Never fall back to a local grid. */
+export async function getTimelineAvailability(businessId: string, serviceIds: string[], dateISO: string, staffId?: string, options: { days?: number; datesOnly?: boolean; visualStepMinutes?: number } = {}): Promise<{ slots: SlotWithStatus[]; availableDates: string[]; timezone: string }> {
+  const query = new URLSearchParams({ business_id: businessId, service_ids: serviceIds.join(","), dateISO });
+  // The server still evaluates every minute and retains each exact free boundary.
+  // Sampling only the response avoids shipping hundreds of duplicate plan bodies.
+  query.set("step_minutes", String(options.datesOnly ? 1 : options.visualStepMinutes ?? 15));
+  if (staffId) query.set("staff_id", staffId);
+  if (options.days) query.set("days", String(options.days));
+  if (options.datesOnly) query.set("datesOnly", "true");
+  const result = await supabaseApiRequest<{ version: number; slots: BookingTimeline[]; availableDates: string[]; timezone: string }>(`/supabase/booking-availability?${query}`, {}, true);
+  if (result.version !== 1 || !Array.isArray(result.slots) || !Array.isArray(result.availableDates)) {
+    throw new BookingApiError("El servidor no dispone del motor de tiempos requerido.", 503, "TIMELINE_UNAVAILABLE");
+  }
+  const { businessWallTime } = require("./bookingTimeline") as typeof import("./bookingTimeline");
+  return { timezone: result.timezone, availableDates: result.availableDates, slots: result.slots.map(plan => ({
+    startDatetime: businessWallTime(plan.startsAt, plan.timezone), endDatetime: businessWallTime(plan.endsAt, plan.timezone),
+    startInstant: plan.startsAt, endInstant: plan.endsAt, staffId: plan.staffId ?? undefined, timezone: plan.timezone,
+    timingSnapshot: plan, availableUnits: 1, totalUnits: 1, isAvailable: true, isBlocked: false,
+  })) };
+}
+
 export async function getAvailableSlots(
   businessId: string,
   bookableItemId: string,
   dateISO: string, // "YYYY-MM-DD"
   staffId?: string,
 ): Promise<AvailableSlot[]> {
+  if (isCloudId(businessId)) return (await getTimelineAvailability(businessId, [bookableItemId], dateISO, staffId)).slots;
   const item = (await getBookableItems(businessId, isCloudId(businessId))).find(
     (i) => i.id === bookableItemId
   );
@@ -1545,7 +1644,10 @@ export async function getAllSlots(
   bookableItemId: string,
   dateISO: string,
   staffId?: string,
+  serviceIds: string[] = [bookableItemId],
 ): Promise<SlotWithStatus[]> {
+  if (isCloudId(businessId)) return (await getTimelineAvailability(businessId, serviceIds, dateISO, staffId)).slots;
+  if (serviceIds.length > 1) throw new BookingApiError("La combinación requiere el motor de reservas del servidor.", 503, "TIMELINE_UNAVAILABLE");
   const item = (await getBookableItems(businessId, isCloudId(businessId))).find(
     (i) => i.id === bookableItemId
   );
@@ -1759,6 +1861,7 @@ export type StaffOption = {
   scheduleConfig: StaffScheduleInput | null;
 };
 export type GetReservationSlotsParams = {
+  serviceIds?: string[];
   businessId:           string;
   selectedDate:         string;        // "YYYY-MM-DD"
   serviceId:            string;        // BookableItem id (para cruzar con reservas)
@@ -1785,6 +1888,10 @@ export type GetReservationSlotsParams = {
   onDebugTrace?:         (trace: BookingEngineTrace) => void;
 };
 export type ReservationSlot = {
+  timezone?: string;
+  startInstant?: string;
+  endInstant?: string;
+  timingSnapshot?: BookingTimeline;
   time:             string; // "HH:MM"
   startDatetime:    string; // "YYYY-MM-DDTHH:MM:00"
   endDatetime:      string; // "YYYY-MM-DDTHH:MM:00"
@@ -1912,6 +2019,14 @@ function resolveShiftsForDay(
 export async function getAvailableReservationSlots(
   params: GetReservationSlotsParams,
 ): Promise<ReservationSlot[]> {
+  if (isCloudId(params.businessId)) {
+    if (!params.professionalId) return [];
+    const { slots } = await getTimelineAvailability(params.businessId, params.serviceIds ?? [params.serviceId], params.selectedDate,
+      params.professionalId === "any" ? undefined : params.professionalId);
+    return slots.map(slot => ({ time: slot.startDatetime.slice(11, 16), startDatetime: slot.startDatetime,
+      endDatetime: slot.endDatetime, startInstant: slot.startInstant, endInstant: slot.endInstant, timingSnapshot: slot.timingSnapshot, timezone: slot.timezone,
+      professionalId: slot.staffId ?? "", professionalName: params.allStaffOptions?.find(staff => staff.id === slot.staffId)?.name ?? params.professionalName ?? "" }));
+  }
   const {
     businessId,
     selectedDate,
@@ -2659,6 +2774,28 @@ export function computeRefundInfo(
 export async function getLiveCustomerBookings(): Promise<Booking[]> {
   const customerId = await getAuthenticatedUserId();
   if (!customerId) throw new BookingAuthenticationError();
-  const rows = await supabaseApiRequest<RemoteBooking[]>("/supabase/bookings", {}, true);
+  const rows = await supabaseApiRequest<RemoteBooking[]>("/supabase/bookings?negotiation=1", {}, true);
   return rows.filter(row => row.customer_id === customerId).map(mapRemoteBooking);
+}
+
+const bookingUpdateListeners=new Set<()=>void>();
+export function subscribeBookingUpdates(listener:()=>void){bookingUpdateListeners.add(listener);return()=>{bookingUpdateListeners.delete(listener);};}
+export function notifyBookingUpdated(){for(const listener of bookingUpdateListeners)listener();}
+/** No local-success fallback: real negotiation requires an authenticated server transaction. */
+export async function changeBookingRequest(id:string,operation:"propose"|"accept"|"reject"|"cancel"|"confirm",input:{dateISO?:string;date?:string;time?:string;proposalId?:string;expectedRevision?:number;acceptFinancialTerms?:boolean},expectedUserId:string):Promise<Booking>{
+ if(!isRemoteBookingId(id))throw new BookingApiError("Esta reserva necesita su repositorio original.",400);
+ try{
+  const row=await supabaseApiRequest<RemoteBooking>("/supabase/bookings/"+encodeURIComponent(id)+"/change",{method:"POST",body:JSON.stringify({operation,expectedRevision:input.expectedRevision ?? 0,...input})},true,expectedUserId);
+  const booking=mapRemoteBooking(row);notifyBookingUpdated();return booking;
+ }catch(error){
+  if(error instanceof BookingApiError && (error.status===501 || error.status===404 && error.code!=="BOOKING_NOT_FOUND"))throw new BookingApiError("El servidor todavía no permite negociar esta reserva. Su fecha y sus pagos siguen intactos.",error.status);
+  throw error;
+ }
+}
+
+/** Caller-scoped business read of the same rows; ownership remains server-authoritative. */
+export async function getLiveBusinessBookings(businessId:string):Promise<Booking[]>{
+ if(!isRemoteBookingId(businessId))throw new BookingApiError("Empresa real no válida.",400);
+ const rows=await supabaseApiRequest<RemoteBooking[]>("/supabase/bookings?negotiation=1&business_id="+encodeURIComponent(businessId),{},true);
+ return rows.filter(row=>row.business_id===businessId).map(mapRemoteBooking);
 }

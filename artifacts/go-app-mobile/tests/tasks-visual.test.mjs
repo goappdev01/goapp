@@ -44,7 +44,7 @@ function fixture(lang = 'es', overrides = {}) {
   const calls = [];
   const React = { Fragment: 'Fragment', createElement: (type, props, ...children) => ({ type, props: { ...props, children: children.flat(Infinity) } }) };
   const hosts = Object.fromEntries(['BottomSheet', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable', 'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(x => [x, x]));
-  const context = { ...hosts, React, Date, Math, console,
+  const context = { ...hosts, React, Date, Math, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""}, console,
     t: key => { assert.equal(typeof translations[lang][key], 'string', key); return translations[lang][key]; },
     listOpen: true, listSwipeStepAllowed: true, llamadasListOpen: false, listMinimized: false, listFiltersHidden: false, listFilter: 'todos', typeFilter: 'todos', activityFilter: 'todas',
     quickCreateOpen: false, quickCreateKbVisible: false, quickCreateText: '', paddingBottom: 34, screenBgColors: {}, listGoSize: 'medio', goSortOrder: 'asc',
@@ -214,4 +214,11 @@ test('expanded cards and their notes use ES/EN labels while preserving accept/re
     assert.equal(f.calls.at(-1)[1].initialDateISO, entries[0].dateISO);
     assert.equal(f.calls.at(-1)[1].initialTime, entries[0].time);
   }
+});
+
+for(const lang of ['es','en'])for(const size of ['compacto','medio','grande'])test('Mis reservas / '+lang+' / '+size+': canonical bookings only, all statuses, original card renderer',()=>{
+ const booking={id:'go_booking_booking',customerBooking:true,type:'GO_BOOKING',kind:'received',reservationId:'booking',contactName:'GO PELUQUERÍA',intentLabel:'Corte',notes:'Corte',dateISO:'2030-01-07',date:'07/01/2030',time:'10:00',estado:'aceptado',bookingStatus:'confirmada'},cancelled={...booking,id:'go_booking_cancelled',reservationId:'cancelled',deleted:true,estado:'rechazado',bookingStatus:'cancelada'};
+ const f=fixture(lang,{listFilter:'reservas',listGoSize:size,goLog:[...entries,booking,cancelled],customerBookings:{entries:[booking,cancelled],loading:false,error:''}}),tree=f.render();assert.equal(tree.props.title,translations[lang].tasks_my_bookings.toUpperCase());
+ const rows=nodes(tree,n=>n.type==='SwipeableRow');assert.equal(rows.length,2);assert.ok(texts(tree).includes('GO PELUQUERÍA'));assert.ok(!texts(tree).includes('COMIDA'));assert.ok(!texts(tree).includes('DEPORTE'));
+ assert.ok(nodes(tree.props.footer,n=>n.props.accessibilityLabel===translations[lang].tasks_my_bookings).length);assert.equal(f.context.listGoSize,size);
 });

@@ -1,3 +1,4 @@
+import { summarizeBookingServices, bookingServiceIds, staffSupportsBookingServices } from "./bookingServices";
 import type { BusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import type { Business, BookableItem, Staff, SlotWithStatus, Booking } from "./booking";
 import type { GoEntry } from "@/components/AgendaOperativa";
@@ -39,21 +40,21 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
     bookingActive: true, bookingColor: "#3D9A84", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Madrid", createdAt: "",
   }) : null;
   const requireBusiness = (id: string) => { if (id !== store.businessId) throw new Error("DEMO no puede consultar empresas reales."); };
-  const resourceOptions = (data: BusinessDemoData, service: BookableItem, member?: Staff) => {
+  const resourceOptions = (data: BusinessDemoData, service: BookableItem, member?: Staff, serviceIds = [service.id]) => {
     const allElements = data.plan?.elements ?? [];
     const elements = allElements.filter(element => !element.demoArchived && !(data.config.sectorId && businessDemoElementRequiresReview(element)) && element.reservable && !["bloqueado", "ocupado", "mantenimiento"].includes(element.status));
     const allStaff = staffFor(data.config);
-    const staff = member ? [member] : allStaff.filter(p => p.active && (!p.serviceIds?.length || p.serviceIds.includes(service.id)));
-    if (member && (!member.active || member.serviceIds?.length && !member.serviceIds.includes(service.id))) return [];
+    const staff = member ? [member] : allStaff.filter(p => staffSupportsBookingServices(p, serviceIds));
+    if (member && !staffSupportsBookingServices(member, serviceIds)) return [];
     if (!staff.length) return member || allStaff.length ? [] : elements.map(element => ({ elementId: element.id, staff: undefined as Staff | undefined }));
     return staff.flatMap(person => {
       const element = businessDemoProfessionalElement(data, person);
       return element && elements.some(value => value.id === element.id) ? [{ elementId: element.id, staff: person }] : [];
     });
   };
-  const freeResource = (data: BusinessDemoData, service: BookableItem, candidate: { startDatetime: string; endDatetime: string }, member?: Staff, excludeId?: string, elementId?: string) => {
+  const freeResource = (data: BusinessDemoData, service: BookableItem, candidate: { startDatetime: string; endDatetime: string }, member?: Staff, excludeId?: string, elementId?: string, serviceIds = [service.id]) => {
     const dateISO = candidate.startDatetime.slice(0,10), start = minutes(candidate.startDatetime.slice(11,16)), end = minutes(candidate.endDatetime.slice(11,16));
-    return resourceOptions(data, service, member).find(resource => {
+    return resourceOptions(data, service, member, serviceIds).find(resource => {
       if (elementId && resource.elementId !== elementId) return false;
       const shifts = professionalShifts(data.config, dateISO, resource.staff);
       if (!shifts.some(shift => start >= shift.from && end <= shift.to)) return false;
@@ -61,16 +62,18 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
         && (booking.elementId === resource.elementId || resource.staff && booking.staffId === resource.staff.id));
     });
   };
-  const slotsFor = (data: BusinessDemoData, itemId: string, dateISO: string, id?: string): SlotWithStatus[] => {
+  const slotsFor = (data: BusinessDemoData, itemId: string, dateISO: string, id?: string, serviceIds = [itemId]): SlotWithStatus[] => {
     if (!dateValid(dateISO) || !businessFor(data)) return [];
-    const item = servicesFor(data.config).find(service => service.id === itemId); if (!item || item.durationMinutes <= 0) return [];
+    if (serviceIds[0] !== itemId) return [];
+    let item: BookableItem;
+    try { item = summarizeBookingServices(servicesFor(data.config), serviceIds).item; } catch { return []; }
     const member = id ? staffFor(data.config).find(person => person.id === id) : undefined; if (id && !member) return [];
     const shifts = companyShifts(data.config, dateISO), slots: SlotWithStatus[] = [], seen = new Set<string>();
     for (const shift of shifts) for (let start=shift.from; start+item.durationMinutes<=shift.to; start+=item.durationMinutes) {
       const candidate = { startDatetime: iso(dateISO,start), endDatetime: iso(dateISO,start+item.durationMinutes) };
       if (!isValidDemoLocalInterval(candidate.startDatetime, candidate.endDatetime, item.durationMinutes) || Date.parse(candidate.startDatetime) <= now() || seen.has(candidate.startDatetime)) continue; seen.add(candidate.startDatetime);
-      const available = resourceOptions(data,item,member).filter(resource => freeResource(data,item,candidate,resource.staff,undefined,resource.elementId));
-      slots.push({ ...candidate, availableUnits: available.length, totalUnits: resourceOptions(data,item,member).length,
+      const available = resourceOptions(data,item,member,serviceIds).filter(resource => freeResource(data,item,candidate,resource.staff,undefined,resource.elementId,serviceIds));
+      slots.push({ ...candidate, availableUnits: available.length, totalUnits: resourceOptions(data,item,member,serviceIds).length,
         isAvailable: available.length > 0, isBlocked: false });
     }
     return slots;
@@ -86,7 +89,7 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
       customerName: index >= 0 ? data.reservations[index].customerName : "Cliente DEMO local", date: booking.startDatetime.slice(0,10), dateISO: booking.startDatetime.slice(0,10),
       time: booking.startDatetime.slice(11,16), endDatetime: booking.endDatetime,
       durationMinutes: (Date.parse(booking.endDatetime)-Date.parse(booking.startDatetime))/60000,
-      serviceId: booking.bookableItemId, staffId: booking.staffId, professionalName: booking.professionalName,
+      serviceId: booking.bookableItemId, services: booking.services && clone(booking.services), staffId: booking.staffId, professionalName: booking.professionalName,
       status: ["CANCELLED", "REJECTED"].includes(booking.status) ? "cancelada" : "confirmada", createdAt: booking.createdAt ?? now(), notes: booking.notes,
     };
     if (index >= 0) data.reservations[index] = reservation; else data.reservations.push(reservation);
@@ -95,13 +98,17 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
     requireBusiness(input.businessId);
     if (input.customerId !== store.ownerUserId) throw new Error("La reserva DEMO requiere el UUID de su propietario.");
     const existing = input.id ? data.bookings.find(booking => booking.id === input.id) : undefined;
-    if (existing && (existing.bookableItemId !== input.bookableItemId || existing.startDatetime !== input.startDatetime || existing.endDatetime !== input.endDatetime
+    if (existing && (existing.bookableItemId !== input.bookableItemId || JSON.stringify(bookingServiceIds(existing)) !== JSON.stringify(bookingServiceIds(input)) || existing.startDatetime !== input.startDatetime || existing.endDatetime !== input.endDatetime
       || existing.staffId !== input.staffId || existing.elementId !== input.elementId || existing.unitsReserved !== input.unitsReserved
       || existing.peopleCount !== input.peopleCount || (existing.notes ?? "") !== (input.notes ?? "")))
       throw new Error("No se puede sustituir una reserva DEMO por otra selección.");
     if (existing?.status === "CONFIRMED" && input.status === "CONFIRMED") return { ok: true, booking: clone(existing) };
     if (!businessFor(data)) throw new Error("Completa la configuración DEMO antes de reservar.");
-    const item = servicesFor(data.config).find(service => service.id === input.bookableItemId); if (!item) throw new Error("Servicio DEMO no disponible.");
+    const serviceIds = bookingServiceIds(input);
+    let selection: ReturnType<typeof summarizeBookingServices>;
+    try { selection = summarizeBookingServices(servicesFor(data.config), serviceIds); } catch { throw new Error("Servicio DEMO no disponible."); }
+    const item = selection.item;
+    if (existing?.services && JSON.stringify(existing.services) !== JSON.stringify(selection.services)) throw new Error("Los servicios han cambiado. Vuelve a seleccionarlos antes de confirmar.");
     if (input.unitsReserved !== 1 || !Number.isInteger(input.peopleCount) || input.peopleCount < 1 || input.peopleCount > item.customerCapacity || (input.notes?.length ?? 0) > 4000)
       throw new Error("Cantidad de personas o notas DEMO no válidas.");
     const dateISO = input.startDatetime.slice(0,10), startDate = Date.parse(input.startDatetime);
@@ -113,7 +120,7 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
 
     const member = input.staffId ? staffFor(data.config).find(person => person.id === input.staffId) : undefined;
     if (input.staffId && !member) throw new Error("Profesional DEMO no disponible.");
-    const resource = freeResource(data,item,input,member,input.id,existing?.elementId);
+    const resource = freeResource(data,item,input,member,input.id,existing?.elementId,serviceIds);
     if (!resource) {
       const conflict = data.bookings.find(booking => booking.id !== input.id && blocks(booking,now()) && overlap(booking,input));
       if (conflict) return { ok:false, conflict:clone(conflict) };
@@ -122,10 +129,58 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
     const id = existing?.id ?? `demo_booking_${store.businessId}_${now()}_${Math.random().toString(36).slice(2,10)}`;
     const booking: DemoBooking = { ...clone(input), id, customerId:store.ownerUserId, paymentStatus:"none", elementId:existing?.elementId ?? resource.elementId,
       staffId:existing?.staffId ?? resource.staff?.id, professionalName:existing?.professionalName ?? resource.staff?.name,
+      ...(serviceIds.length > 1 ? { services: clone(selection.services) } : {}),
       serviceTitle:item.title, source:"customer", createdAt:existing?.createdAt ?? now(), holdExpiresAt:input.status === "HOLD" ? new Date(now()+300000).toISOString() : undefined,
       goEntryId:`demo_customer_${id}`, slotKey:`${store.businessId}|${resource.staff?.id ?? "any"}|${dateISO}|${input.startDatetime.slice(11,16)}|${input.endDatetime.slice(11,16)}` };
     const index = data.bookings.findIndex(value => value.id === id); if (index>=0) data.bookings[index]=booking; else data.bookings.push(booking);
     syncReservation(data,booking); return { ok:true, booking:clone(booking) };
+  });
+  // Negotiation is metadata on the existing booking, never another booking or occupied slot.
+  const changeBooking = (id:string, businessId:string, actor:"customer"|"business", operation:"propose"|"accept"|"reject", input:{dateISO?:string;date?:string;time?:string;proposalId?:string;acceptFinancialTerms?:boolean} = {}) => store.transactBookings(data => {
+    requireBusiness(businessId);
+    if(actor!=="customer" && actor!=="business")throw new Error("Participante no válido.");
+    const reservation=data.reservations.find(r=>r.id===id || store.reservationBookingId(r)===id);
+    const booking=data.bookings.find(b=>b.id===(reservation?store.reservationBookingId(reservation):id));
+    if(!booking || booking.customerId!==store.ownerUserId || booking.businessId!==businessId || !["CONFIRMED","ACCEPTED"].includes(booking.status))throw new Error("Reserva confirmada no disponible.");
+    const previous=booking.changeProposal;
+    const history=(outcome:"accepted"|"rejected"|"countered")=>{
+      if(previous)booking.changeHistory=[...(booking.changeHistory ?? []),{proposal:clone(previous),outcome,actor,at:now()}];
+    };
+    if(operation!=="propose"){
+      if(!previous || previous.id!==input.proposalId){
+        const completed=booking.changeHistory?.find(e=>e.proposal.id===input.proposalId && e.outcome===(operation==="accept"?"accepted":"rejected") && e.actor===actor);
+        if(!previous && completed)return clone(booking);
+        throw new Error("La propuesta ha cambiado. Actualiza la reserva.");
+      }
+      if(previous.proposedBy===actor)throw new Error("La otra parte debe responder a la propuesta.");
+      if(previous.originalStartDatetime!==booking.startDatetime || previous.originalEndDatetime!==booking.endDatetime)throw new Error("La reserva original ha cambiado.");
+      if(operation==="reject"){
+        history("rejected");delete booking.changeProposal;syncReservation(data,booking);return clone(booking);
+      }
+      if(previous.financialAcceptanceRequired && (!previous.proposerAcceptedFinancialTerms || !input.acceptFinancialTerms))throw new Error("Las condiciones económicas requieren aceptación expresa. No se ha modificado el pago.");
+    }
+    const dateISO=operation==="propose"?input.dateISO:previous!.dateISO,timeHHMM=operation==="propose"?input.time:previous!.time;
+    const duration=(Date.parse(booking.endDatetime)-Date.parse(booking.startDatetime))/60000;
+    if(!dateISO || !dateValid(dateISO) || !timeHHMM || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeHHMM))throw new Error("Elige una fecha y hora válidas.");
+    const startDatetime=dateISO+"T"+timeHHMM+":00",end=new Date(Date.parse(startDatetime)+duration*60000);
+    const endDatetime=end.getFullYear()+"-"+String(end.getMonth()+1).padStart(2,"0")+"-"+String(end.getDate()).padStart(2,"0")+"T"+String(end.getHours()).padStart(2,"0")+":"+String(end.getMinutes()).padStart(2,"0")+":00";
+    if(!isValidDemoLocalInterval(startDatetime,endDatetime,duration) || Date.parse(startDatetime)<=now() || endDatetime.slice(0,10)!==dateISO)throw new Error("Elige una hora futura válida.");
+    const serviceIds=bookingServiceIds(booking),item=summarizeBookingServices(servicesFor(data.config),serviceIds).item,member=staffFor(data.config).find(person=>person.id===booking.staffId);
+    if(!item || item.durationMinutes!==duration || booking.staffId && !member || !freeResource(data,item,{startDatetime,endDatetime},member,booking.id,booking.elementId,serviceIds))throw new Error("Esta hora no está disponible para el servicio y profesional originales.");
+    if(operation==="propose"){
+      const financialAcceptanceRequired=booking.paymentStatus!=="none";
+      if(financialAcceptanceRequired && !input.acceptFinancialTerms)throw new Error("Confirma las condiciones económicas. No se ha realizado ningún cobro ni devolución.");
+      if(previous?.proposedBy===actor && previous.dateISO===dateISO && previous.time===timeHHMM)return clone(booking);
+      history("countered");
+      booking.changeProposal={id:"demo_change_"+now()+"_"+Math.random().toString(36).slice(2),proposedBy:actor,dateISO,date:input.date ?? dateISO,time:timeHHMM,duration:String(duration),proposedAt:now(),
+        originalDateISO:booking.startDatetime.slice(0,10),originalDate:reservation?.date ?? booking.startDatetime.slice(0,10),originalTime:booking.startDatetime.slice(11,16),originalDuration:String(duration),
+        originalStartDatetime:booking.startDatetime,originalEndDatetime:booking.endDatetime,financialAcceptanceRequired,proposerAcceptedFinancialTerms:!!input.acceptFinancialTerms};
+    }else{
+      history("accepted");booking.startDatetime=startDatetime;booking.endDatetime=endDatetime;
+      booking.slotKey=store.businessId+"|"+(booking.staffId ?? "any")+"|"+dateISO+"|"+timeHHMM+"|"+endDatetime.slice(11,16);
+      delete booking.changeProposal;
+    }
+    syncReservation(data,booking);return clone(booking);
   });
   return {
     ownerUserId:store.ownerUserId, businessId:store.businessId, store,
@@ -135,11 +190,12 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
       return !query.trim() || normalized(query.trim()).split(/\s+/).every(term=>text.includes(term)) ? [business] : []; },
     getBookableItems: async (id:string) => { requireBusiness(id); return servicesFor((await store.load()).config); },
     getStaff: async (id:string) => { requireBusiness(id); return staffFor((await store.load()).config).filter(person => person.active); },
-    getAllSlots: async (id:string,item:string,date:string,professional?:string) => { requireBusiness(id); return slotsFor(await store.load(),item,date,professional); },
+    getAllSlots: async (id:string,item:string,date:string,professional?:string,serviceIds?:string[]) => { requireBusiness(id); return slotsFor(await store.load(),item,date,professional,serviceIds); },
+    changeBooking,
     createHold: (input:BookingInput) => claim({...input,status:"HOLD"}),
     claimSlot: (input:DemoBooking) => claim(input),
     cancelBooking: (id:string) => store.transactBookings(data=> { const booking=data.bookings.find(value=>value.id===id);
-      if (!booking) return; booking.status="CANCELLED"; syncReservation(data,booking); }),
+      if (!booking) return; if(booking.changeProposal)booking.changeHistory=[...(booking.changeHistory ?? []),{proposal:clone(booking.changeProposal),outcome:"cancelled",actor:"customer",at:now()}]; delete booking.changeProposal; booking.status="CANCELLED"; syncReservation(data,booking); }),
     cancelCustomerEntry: (reservationId:string, businessId = store.businessId) => store.transactBookings(data => {
       requireBusiness(businessId);
       const reservation = data.reservations.find(value => value.id === reservationId);
@@ -147,13 +203,15 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
       const id = store.reservationBookingId(reservation);
       const booking = data.bookings.find(value => value.id === id);
       if (!booking) throw new Error("Reserva DEMO no disponible.");
-      booking.status = "CANCELLED"; syncReservation(data,booking);
+      if(booking.changeProposal)booking.changeHistory=[...(booking.changeHistory ?? []),{proposal:clone(booking.changeProposal),outcome:"cancelled",actor:"customer",at:now()}];
+      delete booking.changeProposal;booking.status = "CANCELLED"; syncReservation(data,booking);
     }),
     getMyBookings: async (customerId=store.ownerUserId) => { if (customerId!==store.ownerUserId) throw new Error("Identidad DEMO diferente.");
       return (await store.load()).bookings.filter(booking=>booking.status!=="EXPIRED" && (booking.status!=="HOLD" || booking.source==="floor")).map(clone); },
     getCustomerEntries: () => store.getSnapshot().entries.filter(entry=>!entry.deleted).map(entry=> ({ ...entry,
       id:`demo_customer_${entry.reservationId}`, type:"GO_BOOKING", kind:"received", contactName:store.getSnapshot().config.businessName,
-      place:store.getSnapshot().config.address, demoLocal:true } as GoEntry)),
+      place:store.getSnapshot().config.address, intentKey:"generico", customerBooking:true, bookingStartsAt:store.getSnapshot().bookings.find(b=>b.id===store.reservationBookingId(store.getSnapshot().reservations.find(r=>r.id===entry.reservationId)!))?.startDatetime, bookingId:store.reservationBookingId(store.getSnapshot().reservations.find(r=>r.id===entry.reservationId)!),
+      estado:entry.changeProposal ? (entry.changeProposal as import("./booking").BookingChangeProposal).proposedBy==="customer"?"propuesta_pendiente":"propuesto" : entry.estado, demoLocal:true } as GoEntry)),
   };
 }
 export type DemoBookingRepository = ReturnType<typeof createDemoBookingRepository>;
@@ -176,7 +234,8 @@ export function createDemoCatalogBookingRepository(catalog: import("./businessDe
     getActiveBusinesses: async () => (await Promise.all(repositories().map(repo => repo.getActiveBusinesses()))).flat(),
     searchBusinesses: async query => (await Promise.all(repositories().map(repo => repo.searchBusinesses(query)))).flat(),
     getBookableItems: id => forBusiness(id).getBookableItems(id), getStaff: id => forBusiness(id).getStaff(id),
-    getAllSlots: (id, item, date, professional) => forBusiness(id).getAllSlots(id, item, date, professional),
+    getAllSlots: (id, item, date, professional, serviceIds) => forBusiness(id).getAllSlots(id, item, date, professional, serviceIds),
+    changeBooking: (id,businessId,actor,operation,input) => forBusiness(businessId).changeBooking(id,businessId,actor,operation,input),
     createHold: input => forBusiness(input.businessId).createHold(input), claimSlot: input => forBusiness(input.businessId).claimSlot(input),
     cancelBooking: async id => (await forBooking(id)).cancelBooking(id),
     cancelCustomerEntry: async (id, businessId) => {

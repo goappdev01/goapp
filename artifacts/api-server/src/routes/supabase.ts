@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { bearerHeader, supabaseRequest } from "../lib/supabase";
+import { bookingCapabilities, createServiceBooking } from "../lib/bookingServiceContract";
 
 const router: IRouter = Router();
 
@@ -206,6 +207,8 @@ router.get("/services", async (req: Request, res: Response) => {
   res.status(response.status).type("application/json").send(body);
 });
 
+router.get("/booking-capabilities", bookingCapabilities);
+
 router.get("/bookings", async (req: Request, res: Response) => {
   const authorization = req.header("authorization");
   if (!authorization?.match(/^Bearer \S+$/)) {
@@ -214,7 +217,8 @@ router.get("/bookings", async (req: Request, res: Response) => {
   }
 
   const query = new URLSearchParams({
-    select: "id,business_id,service_id,staff_id,customer_id,starts_at,ends_at,status,notes",
+    // RLS protects rows. Additive service snapshots also round-trip on the v1 schema.
+    select: "*",
     order: "starts_at.desc",
   });
   const response = await supabaseRequest(`/rest/v1/bookings?${query}`, {
@@ -258,6 +262,11 @@ router.post("/bookings", async (req: Request, res: Response) => {
   }
   if (customer_id && customer_id !== authUser.id) {
     res.status(403).json({ error: "customer_id must match the authenticated user" });
+    return;
+  }
+
+  if (req.body.service_ids !== undefined) {
+    await createServiceBooking(req, res, authorization, authUser.id);
     return;
   }
 

@@ -7,7 +7,7 @@ import vm from "node:vm";
 const ts=createRequire(import.meta.url)("typescript");
 const compile=file=>ts.transpileModule(readFileSync(file,"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 function load(file,imports={}){const exports={};vm.runInNewContext(compile(file),{exports,console,Date,Intl,Set,Map,require:key=>{if(key in imports)return imports[key];throw Error("Forbidden real dependency: "+key);}});return exports;}
-const storeModule=load("data/businessDemoStore.ts"),repoModule=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule});
+const storeModule=load("data/businessDemoStore.ts"),repoModule=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":load("data/bookingServices.ts")});
 const owner="11111111-1111-4111-8111-111111111111";
 async function data(){const values=new Map([["go_log_v1","REAL PERSONAL AGENDA"]]),writes=[];const initial={businessName:"GO Prueba",address:"Dirección DEMO",sectorId:"belleza",subId:"peluqueria",plantillaItems:[{id:"staff",label:"Puesto",count:1,staffNames:["Raul 1 GO PRUEBA"]}],activeDays:[0,1,2,3,4,5,6],openFrom:"09:00",openTo:"18:00",daySchedules:{},services:[{name:"Corte",duration:30,price:0,capacity:1}],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[0,1,2,3,4,5,6,7],isBusinessActive:false,staffSchedules:{}};
  const storage={getItem:async key=>values.get(key)??null,setItem:async(key,value)=>{writes.push(key);values.set(key,value);}};

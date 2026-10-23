@@ -74,6 +74,10 @@ import {
   type StaffScheduleConfig,
 } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { CatalogAssociationManager } from "./CatalogAssociationManager";
+import { getOwnedStaff, type Staff } from "@/data/booking";
+import { isStableBookingId, serializeServiceConfiguration, serviceTimingDuration, validateBookingResources,
+  validateBusinessTimezone, validateServiceTiming, type BookingResource, type ServicePhase, type ServiceTiming } from "@/data/serviceTiming";
 
 function blockDemoExternal(lang: string) {
   Alert.alert(lang === "en" ? "Local business DEMO" : "Empresa DEMO local",
@@ -951,12 +955,15 @@ function buildDefaultStaffSchedules(cfg: { daySchedules: Record<string, DaySched
 }
 
 function StepHorario({ currentSector }: { currentSector: Sector | null }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const SCHED_DAYS_FULL_T  = [t("biz_day_mon_full"), t("biz_day_tue_full"), t("biz_day_wed_full"), t("biz_day_thu_full"), t("biz_day_fri_full"), t("biz_day_sat_full"), t("biz_day_sun_full")];
   const SCHED_DAYS_SHORT_T = buildDaysShortT(t);
   const { config, updateConfig } = useBusinessConfig();
   const color = currentSector?.color ?? PURPLE;
   const [selectedDay, setSelectedDay] = useState(0);
+  const [timezone, setTimezone] = useState(config.timezone ?? "");
+  const [timezoneError, setTimezoneError] = useState("");
+  useEffect(() => { setTimezone(config.timezone ?? ""); }, [config.timezone]);
 
   const [daySchedules, setDaySchedules] = useState<Record<number, DaySchedule>>(() => {
     const stored  = config.daySchedules ?? {};
@@ -1048,6 +1055,14 @@ function StepHorario({ currentSector }: { currentSector: Sector | null }) {
   return (
     <View>
       <View style={c.sectionCard}>
+        <Text style={c.sectionLabel}>{lang === "en" ? "Business time zone" : "Zona horaria del negocio"}</Text>
+        <TextInput accessibilityLabel={lang === "en" ? "Business time zone" : "Zona horaria del negocio"}
+          style={c.svcNameInput} value={timezone} placeholder="Europe/Madrid" autoCapitalize="none" autoCorrect={false}
+          onChangeText={setTimezone} onBlur={() => {
+            try { updateConfig({ timezone: validateBusinessTimezone(timezone) }); setTimezoneError(""); }
+            catch (error) { setTimezoneError((error as Error).message); }
+          }} />
+        {!!timezoneError && <Text accessibilityRole="alert" style={{ color: RED, marginBottom: 10 }}>{timezoneError}</Text>}
         {/* Day pills */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
           <View style={{ flexDirection: "row", gap: 6 }}>
@@ -1105,7 +1120,7 @@ function StepHorario({ currentSector }: { currentSector: Sector | null }) {
                     label={t("biz_opening")}
                     value={sel.shift1.from}
                     onConfirm={v => patchShift(selectedDay, "shift1", { from: v })}
-                    minuteStep={30}
+                    minuteStep={1}
                     accentColor={color}
                   />
                 </View>
@@ -1117,7 +1132,7 @@ function StepHorario({ currentSector }: { currentSector: Sector | null }) {
                     label={t("biz_closing")}
                     value={sel.shift1.to}
                     onConfirm={v => patchShift(selectedDay, "shift1", { to: v })}
-                    minuteStep={30}
+                    minuteStep={1}
                     accentColor={color}
                   />
                 </View>
@@ -1143,7 +1158,7 @@ function StepHorario({ currentSector }: { currentSector: Sector | null }) {
                       label={t("biz_opening")}
                       value={sel.shift2.from}
                       onConfirm={v => patchShift(selectedDay, "shift2", { from: v })}
-                      minuteStep={30}
+                      minuteStep={1}
                       accentColor={color}
                     />
                   </View>
@@ -1155,7 +1170,7 @@ function StepHorario({ currentSector }: { currentSector: Sector | null }) {
                       label={t("biz_closing")}
                       value={sel.shift2.to}
                       onConfirm={v => patchShift(selectedDay, "shift2", { to: v })}
-                      minuteStep={30}
+                      minuteStep={1}
                       accentColor={color}
                     />
                   </View>
@@ -1413,14 +1428,14 @@ function ProfessionalScheduleSection({
                   <View style={[c.timeRow, { paddingTop: 0 }]}>
                     <View style={{ flex: 1 }}>
                       <GoTimeField label={t("biz_shift_1_start")} value={sel.shift1.from}
-                        onConfirm={v => patchDayShift(selectedDay, "shift1", { from: v })} minuteStep={30} accentColor={color} />
+                        onConfirm={v => patchDayShift(selectedDay, "shift1", { from: v })} minuteStep={1} accentColor={color} />
                     </View>
                     <View style={{ alignItems: "center", paddingTop: 20 }}>
                       <Feather name="arrow-right" size={14} color={DIM} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <GoTimeField label={t("biz_shift_1_end")} value={sel.shift1.to}
-                        onConfirm={v => patchDayShift(selectedDay, "shift1", { to: v })} minuteStep={30} accentColor={color} />
+                        onConfirm={v => patchDayShift(selectedDay, "shift1", { to: v })} minuteStep={1} accentColor={color} />
                     </View>
                   </View>
 
@@ -1435,14 +1450,14 @@ function ProfessionalScheduleSection({
                       <View style={c.timeRow}>
                         <View style={{ flex: 1 }}>
                           <GoTimeField label={t("biz_shift_2_start")} value={sel.shift2.from}
-                            onConfirm={v => patchDayShift(selectedDay, "shift2", { from: v })} minuteStep={30} accentColor={color} />
+                            onConfirm={v => patchDayShift(selectedDay, "shift2", { from: v })} minuteStep={1} accentColor={color} />
                         </View>
                         <View style={{ alignItems: "center", paddingTop: 20 }}>
                           <Feather name="arrow-right" size={14} color={DIM} />
                         </View>
                         <View style={{ flex: 1 }}>
                           <GoTimeField label={t("biz_shift_2_end")} value={sel.shift2.to}
-                            onConfirm={v => patchDayShift(selectedDay, "shift2", { to: v })} minuteStep={30} accentColor={color} />
+                            onConfirm={v => patchDayShift(selectedDay, "shift2", { to: v })} minuteStep={1} accentColor={color} />
                         </View>
                       </View>
                     </View>
@@ -2115,6 +2130,157 @@ function StepEspacios({ currentSector, saveRef, onRevealProfessional }: {
 // PASO 4 — SERVICIOS
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Configuration identities are stable UUIDs; they are never an availability claim.
+function newTimingId() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, character => {
+    const random = Math.floor(Math.random() * 16);
+    return (character === "x" ? random : (random & 3) | 8).toString(16);
+  });
+}
+
+function ServiceTimingEditor({ service, staff, resources, demo, onApply }: {
+  service: SavedService; staff: Staff[]; resources: BookingResource[]; demo: boolean;
+  onApply: (timing: ServiceTiming | undefined) => void;
+}) {
+  const { lang } = useLanguage();
+  const label = (es: string, en: string) => lang === "en" ? en : es;
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<ServiceTiming["mode"]>(service.timing?.mode ?? "simple");
+  const [phases, setPhases] = useState<ServicePhase[]>(() => service.timing?.phases.map(phase => ({ ...phase,
+    resources: phase.resources.map(resource => ({ ...resource })) })) ?? [{ id: newTimingId(), name: service.name || label("Trabajo", "Work"),
+    durationMinutes: service.duration, kind: "work", resources: [] }]);
+  const [declared, setDeclared] = useState(service.timing?.resourcesConfigured ?? false);
+  const [error, setError] = useState("");
+  const toggleEditor = () => {
+    if (!open) {
+      setMode(service.timing?.mode ?? "simple");
+      setPhases(service.timing?.phases.map(phase => ({ ...phase, resources: phase.resources.map(resource => ({ ...resource })) }))
+        ?? [{ id: newTimingId(), name: service.name || label("Trabajo", "Work"), durationMinutes: service.duration, kind: "work", resources: [] }]);
+      setDeclared(service.timing?.resourcesConfigured ?? false); setError("");
+    }
+    setOpen(!open);
+  };
+  const patch = (index: number, values: Partial<ServicePhase>) => setPhases(previous => previous.map((phase, i) => i === index ? { ...phase, ...values } : phase));
+  const chip = (text: string, selected: boolean, onPress: () => void, key?: string) => (
+    <TouchableOpacity key={key ?? text} accessibilityRole="button" accessibilityState={{ selected }} onPress={onPress}
+      style={{ minHeight: 36, justifyContent: "center", padding: 8, borderRadius: 8, borderWidth: 1, borderColor: selected ? BLUE : "#D1D5DB", backgroundColor: selected ? BLUE + "12" : "#FFFFFF" }}>
+      <Text style={{ color: selected ? BLUE : GRAY, fontSize: 12 }}>{text}</Text>
+    </TouchableOpacity>);
+  const save = () => {
+    try {
+      if (demo && mode === "phases") throw new Error(label("Las fases requieren reservas reales con disponibilidad central. DEMO utiliza duración continua.", "Phases require live reservations with central availability. DEMO uses a continuous duration."));
+      // No metadata means the existing simple, continuous service contract.
+      const timing = mode === "simple" ? undefined : validateServiceTiming({ version: 1, mode, phases, resourcesConfigured: declared },
+        { staffIds: staff.map(person => person.id), resources });
+      onApply(timing); setError(""); setOpen(false);
+    } catch (failure) { setError((failure as Error).message); }
+  };
+  return <View style={{ width: "100%", gap: 8, marginTop: 8 }}>
+    <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={toggleEditor} style={{ minHeight: 36, justifyContent: "center" }}>
+      <Text style={{ color: BLUE, fontWeight: "600" }}>{service.timing?.mode === "phases" ? label("Editar fases", "Edit phases") : label("Distribución del tiempo (opcional)", "Timing (optional)")}</Text>
+    </TouchableOpacity>
+    {open && <View style={{ gap: 10, padding: 10, borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 10 }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        {chip(label("Simple", "Simple"), mode === "simple", () => setMode("simple"))}
+        {!demo && chip(label("Por fases", "Phases"), mode === "phases", () => setMode("phases"))}
+      </View>
+      <Text style={{ color: GRAY, fontSize: 12 }}>{demo
+        ? label("DEMO utiliza el tiempo continuo del servicio. Las fases están disponibles en reservas reales con disponibilidad central.", "DEMO uses the continuous service duration. Phases are available for live reservations with central availability.")
+        : mode === "simple" ? label("El profesional está ocupado durante todos los minutos del servicio.", "The professional is busy for the full service duration.")
+        : label("Las fases se realizan en este orden. En una espera el profesional queda libre; los recursos conservan la ocupación indicada.", "Phases run in this order. A wait releases the professional; resources keep their selected occupancy.")}</Text>
+      {mode === "phases" && !demo && <>
+        {phases.map((phase, index) => <View key={phase.id} style={{ gap: 8, paddingVertical: 10, borderTopWidth: 1, borderColor: "#E5E7EB" }}>
+          <Text style={{ color: TEXT, fontWeight: "600" }}>{label("Fase", "Phase")} {index + 1}</Text>
+          <TextInput accessibilityLabel={label("Nombre de fase", "Phase name")} style={c.svcNameInput} value={phase.name} onChangeText={name => patch(index, { name })} />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <TextInput accessibilityLabel={label("Minutos exactos de fase", "Exact phase minutes")} style={[c.numInput, { minHeight: 40, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8 }]}
+              keyboardType="number-pad" value={phase.durationMinutes ? String(phase.durationMinutes) : ""}
+              onChangeText={value => patch(index, { durationMinutes: /^\d+$/.test(value) ? Number(value) : 0 })} />
+            <Text style={{ color: GRAY }}>min</Text>
+            {chip(label("Trabajo", "Work"), phase.kind === "work", () => patch(index, { kind: "work" }))}
+            {chip(label("Espera", "Wait"), phase.kind === "wait", () => patch(index, { kind: "wait", staffId: undefined }))}
+          </View>
+          {phase.kind === "work" && <View style={{ gap: 5 }}>
+            <Text style={{ color: GRAY, fontSize: 12 }}>{label("Profesional", "Professional")}</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+              {chip(label("El elegido al reservar", "Selected when booking"), !phase.staffId, () => patch(index, { staffId: undefined }))}
+              {staff.map(person => chip(person.name, phase.staffId === person.id, () => patch(index, { staffId: person.id }), person.id))}
+            </View>
+            {!!phase.staffId && !staff.some(person => person.id === phase.staffId) && <Text style={{ color: RED }}>{label("El profesional asignado ya no está disponible. Selecciona otro.", "The assigned professional is no longer available. Select another.")}</Text>}
+          </View>}
+          <Text style={{ color: GRAY, fontSize: 12 }}>{label("Recursos del negocio", "Business resources")}</Text>
+          {resources.length === 0 && <Text style={{ color: GRAY, fontSize: 12 }}>{label("Configura los recursos debajo o declara que esta fase no necesita recursos.", "Configure resources below, or declare that this phase needs no resources.")}</Text>}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            {resources.filter(resource => resource.active !== false).map(resource => {
+              const selected = phase.resources.some(value => value.resourceId === resource.id);
+              return chip(resource.name, selected, () => patch(index, { resources: selected
+                ? phase.resources.filter(value => value.resourceId !== resource.id)
+                : [...phase.resources, { resourceId: resource.id, quantity: 1, occupancy: "phase" }] }), resource.id);
+            })}
+          </View>
+          {phase.resources.map(requirement => <View key={requirement.resourceId} style={{ gap: 6 }}>
+            <Text style={{ color: TEXT, fontSize: 12 }}>{resources.find(resource => resource.id === requirement.resourceId)?.name ?? label("Recurso no disponible", "Unavailable resource")}</Text>
+            <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+              <TextInput accessibilityLabel={label("Cantidad de recurso", "Resource quantity")} style={[c.numInput, { minWidth: 45, minHeight: 36 }]} keyboardType="number-pad" value={String(requirement.quantity)}
+                onChangeText={value => patch(index, { resources: phase.resources.map(item => item.resourceId === requirement.resourceId ? { ...item, quantity: /^\d+$/.test(value) ? Number(value) : 0 } : item) })} />
+              {(["phase", "booking"] as const).map(occupancy => chip(occupancy === "phase" ? label("Solo esta fase", "This phase") : label("Toda la reserva", "Whole booking"), requirement.occupancy === occupancy,
+                () => patch(index, { resources: phase.resources.map(item => item.resourceId === requirement.resourceId ? { ...item, occupancy } : item) }), occupancy))}
+              {chip(label("Quitar", "Remove"), false, () => patch(index, { resources: phase.resources.filter(item => item.resourceId !== requirement.resourceId) }))}
+            </View>
+          </View>)}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            {index > 0 && chip(label("Subir", "Move up"), false, () => setPhases(previous => { const next = [...previous]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next; }))}
+            {index < phases.length - 1 && chip(label("Bajar", "Move down"), false, () => setPhases(previous => { const next = [...previous]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; return next; }))}
+            {chip(label("Eliminar fase", "Delete phase"), false, () => setPhases(previous => previous.filter((_, i) => i !== index)))}
+          </View>
+        </View>)}
+        {chip(label("Añadir fase", "Add phase"), false, () => setPhases(previous => [...previous, { id: newTimingId(), name: label("Trabajo", "Work"), durationMinutes: 1, kind: "work", resources: [] }]))}
+        <Text style={{ color: TEXT, fontWeight: "600" }}>{label("Duración total", "Total duration")}: {serviceTimingDuration({ phases })} min</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Switch accessibilityLabel={label("Recursos declarados", "Resources declared")} value={declared} onValueChange={setDeclared} />
+          <Text style={{ color: GRAY, flex: 1, fontSize: 12 }}>{label("Confirmo los recursos de cada fase; una lista vacía significa que no necesita recursos.", "I confirm the resources for each phase; an empty list means no resources are needed.")}</Text>
+        </View>
+      </>}
+      {!!error && <Text accessibilityRole="alert" style={{ color: RED }}>{error}</Text>}
+      {chip(label("Guardar distribución", "Save timing"), true, save)}
+    </View>}
+  </View>;
+}
+
+function BookingResourcesEditor({ resources, services, onSave }: { resources: BookingResource[]; services: SavedService[]; onSave: (resources: BookingResource[]) => void }) {
+  const { lang } = useLanguage();
+  const label = (es: string, en: string) => lang === "en" ? en : es;
+  const [open, setOpen] = useState(false), [draft, setDraft] = useState(resources), [error, setError] = useState("");
+  const save = () => {
+    try {
+      const checked = validateBookingResources(draft);
+      for (const service of services) if (service.timing) validateServiceTiming(service.timing, { resources: checked });
+      onSave(checked); setError(""); setOpen(false);
+    } catch (failure) { setError((failure as Error).message); }
+  };
+  return <View style={c.sectionCard}>
+    <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ minHeight: 40, justifyContent: "center" }} onPress={() => { if (!open) setDraft(resources); setOpen(!open); }}>
+      <Text style={c.sectionLabel}>{label("Recursos para las fases (opcional)", "Phase resources (optional)")}</Text>
+    </TouchableOpacity>
+    {open && <View style={{ gap: 10 }}>
+      <Text style={{ color: GRAY, fontSize: 12 }}>{label("Añade solo recursos reales del negocio y su cantidad disponible. La capacidad del servicio sigue indicando personas por reserva.", "Add real business resources and their available quantity. Service capacity still means people per reservation.")}</Text>
+      {draft.map((resource, index) => <View key={resource.id} style={{ gap: 6 }}>
+        <TextInput accessibilityLabel={label("Nombre del recurso", "Resource name")} placeholder={label("Nombre del recurso", "Resource name")} style={c.svcNameInput} value={resource.name}
+          onChangeText={name => setDraft(previous => previous.map((item, i) => i === index ? { ...item, name } : item))} />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text style={{ color: GRAY }}>{label("Cantidad disponible", "Available quantity")}</Text>
+          <TextInput accessibilityLabel={label("Cantidad disponible del recurso", "Available resource quantity")} style={[c.numInput, { minHeight: 40 }]} keyboardType="number-pad" value={resource.capacity ? String(resource.capacity) : ""}
+            onChangeText={value => setDraft(previous => previous.map((item, i) => i === index ? { ...item, capacity: /^\d+$/.test(value) ? Number(value) : 0 } : item))} />
+          <TouchableOpacity accessibilityRole="button" onPress={() => setDraft(previous => previous.filter((_, i) => i !== index))} style={{ padding: 8 }}><Text style={{ color: RED }}>{label("Eliminar", "Delete")}</Text></TouchableOpacity>
+        </View>
+      </View>)}
+      <TouchableOpacity accessibilityRole="button" onPress={() => setDraft(previous => [...previous, { id: newTimingId(), name: "", capacity: 1, active: true }])} style={c.addBtn}><Text style={c.addBtnTxt}>{label("Añadir recurso", "Add resource")}</Text></TouchableOpacity>
+      {!!error && <Text accessibilityRole="alert" style={{ color: RED }}>{error}</Text>}
+      <TouchableOpacity accessibilityRole="button" onPress={save} style={c.addBtn}><Text style={c.addBtnTxt}>{label("Guardar recursos", "Save resources")}</Text></TouchableOpacity>
+    </View>}
+  </View>;
+}
+
 function StepServicios({ currentSector, saveRef }: { currentSector: Sector | null; saveRef?: StepSaveRef }) {
   const { config, updateConfig, demo } = useBusinessConfig();
   const { t, lang } = useLanguage();
@@ -2122,14 +2288,25 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
 
   type LocalSvc = SavedService & { id: string };
   const serializeServices = (svcs: LocalSvc[]) => svcs.filter(service => service.name.trim())
-    .map(({ name, duration, price, capacity }) => ({ name, duration, price, capacity }));
-  const saveServices = useCallback((services: SavedService[]) => demo
-    ? demo.updateConfig({ services }) : updateConfig({ services }), [demo, updateConfig]);
+    .map(({ name, duration, price, capacity, timing }) => ({ name, duration, price, capacity, ...(timing ? { timing } : {}) }));
+  const saveServices = useCallback((services: SavedService[]) => {
+    const checked = serializeServiceConfiguration(services, { resources: config.bookingResources ?? [] });
+    return demo ? demo.updateConfig({ services: checked }) : updateConfig({ services: checked });
+  }, [demo, updateConfig, config.bookingResources]);
   const { draft: localSvcs, setValue: setLocalSvcs, flush } = useConfigArrayDraft<LocalSvc, SavedService>(
     config.services, services => services.length > 0
       ? services.map((service, index) => ({ ...service, id: `svc_${index}_${service.name}`, capacity: service.capacity ?? 1 }))
       : [{ id: "svc_0", name: "", duration: 30, price: 0, capacity: 1 }], serializeServices, saveServices);
   useStepSave(saveRef, flush);
+  const [timingStaff, setTimingStaff] = useState<Staff[]>([]);
+  useEffect(() => {
+    let active = true;
+    setTimingStaff([]);
+    if (!demo && isStableBookingId(config.businessId)) void getOwnedStaff(config.businessId).then(staff => {
+      if (active) setTimingStaff(staff.filter(person => person.active && isStableBookingId(person.id)));
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [demo, config.businessId]);
 
   // ── OCR import state ────────────────────────────────────────────────────────
   const [ocrVisible,   setOcrVisible]   = useState(false);
@@ -2253,6 +2430,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     <View>
       <View style={c.sectionCard}>
         <Text style={c.sectionLabel}>{t("biz_services_offered")}</Text>
+        <CatalogAssociationManager businessId={config.businessId} demo={!!demo} />
 
         {localSvcs.map((svc, idx) => (
           <View key={svc.id} style={c.svcRow}>
@@ -2270,7 +2448,8 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
                 <TextInput
                   style={c.numInput}
                   value={String(svc.duration)}
-                  onChangeText={v => patchSvc(svc.id, { duration: parseInt(v) || 0 })}
+                  editable={svc.timing?.mode !== "phases"}
+                  onChangeText={v => patchSvc(svc.id, { duration: /^\d+$/.test(v.trim()) ? Number(v) : 0 })}
                   onBlur={() => { void flush().catch(() => {}); }}
                   selectTextOnFocus
                   keyboardType="numeric"
@@ -2310,6 +2489,8 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
                 </TouchableOpacity>
               )}
             </View>
+            <ServiceTimingEditor service={svc} staff={timingStaff} resources={config.bookingResources ?? []} demo={!!demo}
+              onApply={timing => patchSvc(svc.id, { timing, ...(timing ? { duration: serviceTimingDuration(timing) } : {}) })} />
           </View>
         ))}
 
@@ -2318,6 +2499,9 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
           <Text style={c.addBtnTxt}>{t("biz_add_service_btn")}</Text>
         </TouchableOpacity>
       </View>
+
+      {!demo && <BookingResourcesEditor resources={config.bookingResources ?? []} services={localSvcs}
+        onSave={bookingResources => updateConfig({ bookingResources })} />}
 
       {/* ── OCR Import section ───────────────────────────────────────────────── */}
       <View style={c.importCard}>

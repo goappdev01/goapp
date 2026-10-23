@@ -7,8 +7,12 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import type { DemoBookingRepository } from "@/data/demoBookingRepository";
 
 /** Customer projection of the owner-local repository; never mounted with the personal agenda hooks. */
-export function DemoCustomerCalendar({ repository, focus, onPersonal }: {
+export function DemoCustomerCalendar({ repository, focus, onPersonal, entries: suppliedEntries, onProposeChange, onAcceptProposal, onRejectProposal }: {
   repository: DemoBookingRepository;
+  entries?: GoEntry[];
+  onProposeChange?: (entry:GoEntry)=>void;
+  onAcceptProposal?: (id:string)=>void;
+  onRejectProposal?: (id:string)=>void;
   focus?: { dateISO: string; timeHHMM: string; entryId: string; token: number };
   onPersonal: () => void;
 }) {
@@ -41,9 +45,10 @@ export function DemoCustomerCalendar({ repository, focus, onPersonal }: {
         </TouchableOpacity>
       </View>
     </View>
-    <AgendaBoard goLog={entries} embedded viewMode={view} calViewMonth={month} showHours density="30min"
+    <AgendaBoard goLog={suppliedEntries ?? entries} embedded viewMode={view} calViewMonth={month} showHours density="30min"
       selectedDateISO={focus?.dateISO} scrollToDateToken={focus} highlightEntryId={focus?.entryId}
       onChangeMonth={direction => { const [year, value] = month.split("-").map(Number); const date = new Date(year, value - 1 + direction, 1, 12); setMonth(String(date.getFullYear()) + "-" + String(date.getMonth() + 1).padStart(2, "0")); }}
-      onDeleteItem={cancel} />
+      onDeleteItem={cancel} onProposeItem={id=>{const entry=(suppliedEntries ?? entries).find(e=>e.id===id);if(entry)onProposeChange?.(entry);}}
+      onAcceptProposal={onAcceptProposal} onRejectProposal={onRejectProposal} onProposeProposal={id=>{const entry=(suppliedEntries ?? entries).find(e=>e.id===id);if(entry)onProposeChange?.(entry);}} />
   </View>;
 }

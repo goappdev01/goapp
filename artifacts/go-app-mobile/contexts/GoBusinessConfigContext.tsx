@@ -29,6 +29,8 @@ import { useAdminAccess } from "./GoAdminAccessContext";
 import type { BusinessDemoStore } from "@/data/businessDemoStore";
 import { useOwnerBusinessDemo } from "./OwnerBusinessDemoContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { serializeServiceConfiguration, validateBookingResources, validateBusinessTimezone, validateScheduleRange,
+  type BookingResource, type BookingBlock, type ServiceTiming } from "@/data/serviceTiming";
 import {
   initPlantillaItems,
   SECTORS,
@@ -71,6 +73,7 @@ export type SavedService = {
   duration:  number;
   price:     number;
   capacity?: number;
+  timing?: ServiceTiming;
 };
 
 export type DayShift = { from: string; to: string; active: boolean };
@@ -112,6 +115,9 @@ export type BusinessConfig = {
   phone?:           string; // Teléfono fijo de contacto
   whatsapp?:        string; // Número WhatsApp de contacto
   staffSchedules?:  Record<string, StaffScheduleConfig>; // keyed by stable staff ID
+  timezone?: string; // Explicit IANA zone; an existing business keeps its server zone.
+  bookingResources?: BookingResource[];
+  bookingBlocks?: BookingBlock[];
 };
 
 export const DEFAULT_BUSINESS_CONFIG: BusinessConfig = {
@@ -318,6 +324,17 @@ function deriveCancellationPolicy(cfg: BusinessConfig): CancellationPolicy | und
 async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string) => Promise<void>, userId: string): Promise<string | null> {
   const name = cfg.businessName?.trim();
   if (!name) return cfg.businessId ?? null;
+  const bookingResources = cfg.bookingResources === undefined ? undefined : validateBookingResources(cfg.bookingResources);
+  const services = serializeServiceConfiguration(cfg.services, { resources: bookingResources ?? [] });
+  // Validate before any remote write; an earlier closing time explicitly means next day.
+  for (const day of cfg.activeDays) {
+    const schedule = migrateDayScheduleEntry(cfg.daySchedules?.[String(day)] ?? { from: cfg.openFrom, to: cfg.openTo });
+    for (const shift of [schedule.shift1, schedule.shift2]) if (shift?.active) validateScheduleRange(shift.from, shift.to);
+  }
+  for (const schedule of Object.values(cfg.staffSchedules ?? {})) if (!schedule.useCompanySchedule) {
+    for (const day of Object.values(schedule.daySchedules ?? {}))
+      for (const shift of [day.shift1, day.shift2]) if (shift?.active) validateScheduleRange(shift.from, shift.to);
+  }
 
   const category = cfg.subId ?? cfg.sectorId ?? "";
   const location = cfg.address?.trim() ?? "";
@@ -342,6 +359,9 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
         cancellationPolicy,
         phone:    cfg.phone    ?? existing.phone ?? "",
         whatsapp: cfg.whatsapp ?? existing.whatsapp,
+        timezone: cfg.timezone ? validateBusinessTimezone(cfg.timezone) : existing.timezone,
+        bookingResources: bookingResources ?? existing.bookingResources,
+        bookingBlocks: cfg.bookingBlocks ?? existing.bookingBlocks,
       });
       resolvedId = cfg.businessId;
     } else {
@@ -354,7 +374,9 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
       whatsapp: cfg.whatsapp,
       bookingActive: false,
       bookingColor: sectorColor,
-      timezone: "Europe/Madrid",
+      timezone: validateBusinessTimezone(cfg.timezone ?? ""),
+      bookingResources,
+      bookingBlocks: cfg.bookingBlocks,
       cancellationPolicy,
     }, userId);
     resolvedId = created.id;
@@ -371,13 +393,13 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
   {
     const existingItems  = await getBookableItems(resolvedId);
     const desiredTitles  = new Set(
-      cfg.services.map((s) => s.name.toLowerCase().trim()).filter(Boolean)
+      services.map((s) => s.name.toLowerCase().trim()).filter(Boolean)
     );
 
     // Delete items whose title is no longer in config.services — sequential to
     // avoid the read-modify-write race condition on go_bookable_items_v1.
     const toDeleteItems = existingItems.filter(
-      (i) => !desiredTitles.has(i.title.toLowerCase().trim())
+      (i) => i.catalogKind !== "product" && !desiredTitles.has(i.title.toLowerCase().trim())
     );
     for (const item of toDeleteItems) {
       await deleteBookableItem(item.id, resolvedId);
@@ -385,7 +407,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
 
     // Re-fetch after deletions to build an accurate title→item map
     const remainingItems = existingItems.filter(
-      (i) => desiredTitles.has(i.title.toLowerCase().trim())
+      (i) => i.catalogKind !== "product" && desiredTitles.has(i.title.toLowerCase().trim())
     );
     const titleToItem = new Map(
       remainingItems.map((i) => [i.title.toLowerCase().trim(), i])
@@ -394,7 +416,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
     // Create missing items; update changed items — sequential to avoid
     // read-modify-write race: parallel calls on the same key each read the
     // same stale snapshot and the last write wipes earlier creates.
-    for (const svc of cfg.services.filter((s) => s.name.trim())) {
+    for (const svc of services) {
       const key      = svc.name.toLowerCase().trim();
       const existing = titleToItem.get(key);
       if (existing) {
@@ -402,7 +424,8 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
           !existing.active ||
           existing.durationMinutes  !== svc.duration          ||
           existing.price            !== svc.price             ||
-          existing.customerCapacity !== (svc.capacity ?? 1);
+          existing.customerCapacity !== (svc.capacity ?? 1) ||
+          JSON.stringify(existing.timing) !== JSON.stringify(svc.timing);
         if (changed) {
           await saveBookableItem({
             ...existing,
@@ -410,6 +433,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
             durationMinutes:  svc.duration,
             price:            svc.price,
             customerCapacity: svc.capacity ?? 1,
+            timing: svc.timing,
           });
         }
       } else {
@@ -424,6 +448,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
           paymentRequired:  false,
           active:           true,
           visible:          true,
+          timing:           svc.timing,
         });
       }
     }
@@ -436,7 +461,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
   // del flujo de reserva muestra lista vacía aunque el usuario haya configurado staff.
   {
     // Re-fetch items para incluir los recién creados arriba
-    const allItems = await getBookableItems(resolvedId);
+    const allItems = (await getBookableItems(resolvedId)).filter(item => item.catalogKind !== "product");
     const titleToId = new Map(
       allItems.map((it) => [it.title.toLowerCase().trim(), it.id])
     );
@@ -486,6 +511,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
           name,
           emoji:      plantItem.emoji ?? "👤",
           serviceIds,
+          bookingBlocks: existingMatch?.bookingBlocks,
           active:     true,
         });
       }
@@ -526,8 +552,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
         if (!shiftData?.active) continue;
         const key = winKey(undefined, jsWeekday, shiftIdx);
         desiredBizKeys.add(key);
-        const { hour: startH, minute: startM } = fromTimeStr(shiftData.from);
-        const { hour: endH,   minute: endM   } = fromTimeStr(shiftData.to);
+        const { startHour: startH, startMinute: startM, endHour: endH, endMinute: endM, endNextDay } = validateScheduleRange(shiftData.from, shiftData.to);
         const existing = windowByKey.get(key);
         if (existing) {
           const changed =
@@ -535,12 +560,14 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
             (existing.visibleStartMinute ?? 0) !== startM ||
             existing.visibleEndHour            !== endH   ||
             (existing.visibleEndMinute ?? 0)   !== endM   ||
+            (existing.endNextDay ?? false) !== endNextDay ||
             !existing.active;
           if (changed) {
             await saveAvailabilityWindow({
               ...existing,
               visibleStartHour: startH, visibleStartMinute: startM,
               visibleEndHour:   endH,   visibleEndMinute:   endM,
+              endNextDay,
               active: true,
             });
           }
@@ -549,6 +576,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
             businessId: resolvedId, weekday: jsWeekday, shiftIndex: shiftIdx,
             visibleStartHour: startH, visibleStartMinute: startM,
             visibleEndHour:   endH,   visibleEndMinute:   endM,
+            endNextDay,
             active: true,
           });
         }
@@ -591,8 +619,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
             if (!shiftData?.active) continue;
             const key = winKey(stableId, jsWeekday, shiftIdx);
             desiredStaffKeys.add(key);
-            const { hour: startH, minute: startM } = fromTimeStr(shiftData.from);
-            const { hour: endH,   minute: endM   } = fromTimeStr(shiftData.to);
+            const { startHour: startH, startMinute: startM, endHour: endH, endMinute: endM, endNextDay } = validateScheduleRange(shiftData.from, shiftData.to);
             const existing = windowByKey.get(key);
             if (existing) {
               const changed =
@@ -600,12 +627,14 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
                 (existing.visibleStartMinute ?? 0) !== startM ||
                 existing.visibleEndHour            !== endH   ||
                 (existing.visibleEndMinute ?? 0)   !== endM   ||
+                (existing.endNextDay ?? false) !== endNextDay ||
                 !existing.active;
               if (changed) {
                 await saveAvailabilityWindow({
                   ...existing,
                   visibleStartHour: startH, visibleStartMinute: startM,
                   visibleEndHour:   endH,   visibleEndMinute:   endM,
+                  endNextDay,
                   active: true,
                 });
               }
@@ -614,6 +643,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
                 businessId: resolvedId, staffId: stableId, weekday: jsWeekday, shiftIndex: shiftIdx,
                 visibleStartHour: startH, visibleStartMinute: startM,
                 visibleEndHour:   endH,   visibleEndMinute:   endM,
+                endNextDay,
                 active: true,
               });
             }
@@ -795,6 +825,9 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   // Debounce edits and serialize synchronizations. Never upload an old draft on login.
   useEffect(() => {
     if (!permission.current || !loaded || !dirty.current || !config.businessName?.trim()) return;
+    // Keep an unfinished new business draft local until its timezone is chosen
+    // in Horarios; don't issue repeated failing writes while entering its name.
+    if (!config.businessId && !config.timezone?.trim()) return;
     const version = generation.current;
     const timer = setTimeout(() => {
       syncQueue.current = syncQueue.current.then(async () => {

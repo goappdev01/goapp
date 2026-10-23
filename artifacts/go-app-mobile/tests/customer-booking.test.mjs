@@ -57,7 +57,9 @@ function fixture() {
       if (behavior.status !== 200) return Response.json({ error: 'Backend unavailable' }, { status: behavior.status });
       if (init.method === 'POST') {
         assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
-        return Response.json([{ id: booked, ...JSON.parse(init.body) }], { status: 201 });
+        const payload=JSON.parse(init.body),endsAt=new Date(Date.parse(payload.starts_at)+3600000).toISOString();
+        return Response.json([{ id: booked, ...payload,service_id:payload.service_ids[0],customer_id:user,ends_at:endsAt,
+          timing_snapshot:{version:1,serviceIds:payload.service_ids,startsAt:payload.starts_at,endsAt,serviceDetails:[]}}], { status: 201 });
       }
       return Response.json(url.includes('/services') ? behavior.services : behavior.businesses);
     },
@@ -122,9 +124,10 @@ test('real confirmation sends session identity, valid IDs, UTC instants and unch
   assert.equal(result.booking.startDatetime, candidate.startDatetime);
   assert.equal(result.booking.endDatetime, candidate.endDatetime);
   assert.equal(f.calls.length, 1);
+  assert.ok(f.calls[0].url.endsWith('/supabase/bookings/timeline'));
   assert.deepEqual(JSON.parse(f.calls[0].init.body), {
-    business_id: business, service_id: service, staff_id: null, customer_id: user,
-    starts_at: '2035-10-07T08:00:00.000Z', ends_at: '2035-10-07T09:00:00.000Z',
+    business_id: business, service_ids: [service], staff_id: null,
+    starts_at: '2035-10-07T08:00:00.000Z', request_key:'local-hold',
     status: 'CONFIRMED', notes: 'Nota del usuario',
   });
 });
@@ -146,6 +149,7 @@ test('UTC transport crossing midnight returns the selected local calendar day an
   assert.equal(result.booking.startDatetime, '2035-10-07T00:30:00');
   assert.equal(result.booking.endDatetime, '2035-10-07T01:30:00');
   const bridge = { exports: {}, Date: f.Date, console: { log() {}, warn() {} }, require(name) {
+    if (name === '@/data/customerBookingProjection') return projection.exports;
     if (name === '@/data/booking') return f.api;
     if (name === './goLogStore') return goLogStore.exports;
     if (name === './goTaskAccess') return taskAccess.exports;
@@ -155,6 +159,7 @@ test('UTC transport crossing midnight returns the selected local calendar day an
     } };
     throw new Error(name);
   } };
+  const projection={exports:{},Date:f.Date};vm.runInNewContext(ts.transpileModule(readFileSync('data/customerBookingProjection.ts','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,projection);
   const taskAccess = { ...bridge, exports: {} };
   vm.runInNewContext(ts.transpileModule(readFileSync('lib/goTaskAccess.ts', 'utf8'), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
@@ -172,4 +177,10 @@ test('UTC transport crossing midnight returns the selected local calendar day an
   assert.equal(entry.time, '00:30');
   assert.equal(entry.startTime, '00:30');
   assert.equal(entry.endTime, '01:30');
+});
+
+test('missing endpoints fail closed and uncertain network results do not claim an unchanged schedule',async()=>{
+ for(const status of [404,501,503]){const f=fixture();f.behavior.status=status;const before=JSON.stringify(candidate);f.storage.set('go_bookings_v1',before);
+ await assert.rejects(f.api.changeBookingRequest(booked,'propose',{dateISO:'2035-10-08',time:'10:00'},user),error=>{assert.equal(error.status,status);if(status===503){assert.equal(error.message,'Backend unavailable');assert.doesNotMatch(error.message,/siguen intactos|todavía no permite/);}else assert.match(error.message,/servidor todavía no permite/);return true;});
+ assert.equal(f.storage.get('go_bookings_v1'),before);assert.equal(f.storage.has('go_log_v1'),false);assert.equal(f.calls.length,1);assert.ok(f.calls[0].url.endsWith('/bookings/'+booked+'/change'));}
 });

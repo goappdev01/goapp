@@ -135,3 +135,36 @@ test('public account selection is Empresa then Usuario; every existing ADMIN ent
     assert.match(read(`components/empresa/${file}.tsx`), /if \(!adminAccess.allowed \|\| !goView.isAdminView\) return null/);
   }
 });
+
+
+for (const failure of ['offline', 'rate-limit']) test('regression: explicit owner check distinguishes '+failure+' from a denied membership', async () => {
+  const f = providerFixture();
+  const error = Object.assign(new Error(failure), failure === 'rate-limit' ? { status: 429 } : {});
+  const passive = f.render().refresh();
+  const explicit = f.render().refreshOwner(userId, { reportUnavailable: true });
+  const rejected = assert.rejects(explicit, actual => actual === error);
+  assert.equal(f.requests.length, 1, 'concurrent permission consumers share one request');
+  f.requests[0].reject(error);
+  await rejected;
+  assert.equal(await passive, false);
+  assert.equal(f.render().unavailable, true);
+  assert.equal(f.render().allowed, false);
+  const retry = f.render().refreshOwner(userId, { reportUnavailable: true });
+  f.requests[1].resolve({ userId, allowed: true, level: 'owner', permissions: ['admin.access'] });
+  assert.equal(await retry, true);
+  f.unmount();
+});
+
+test('regression: explicit owner check preserves genuine denials and rejects technical/different identities', async () => {
+  for (const reply of [
+    { userId, allowed: false, level: null, permissions: [] },
+    { userId, allowed: true, level: 'technical', permissions: ['admin.access'] },
+    { userId: 'another-user', allowed: true, level: 'owner', permissions: ['admin.access'] },
+  ]) {
+    const f = providerFixture();
+    const check = f.render().refreshOwner(userId, { reportUnavailable: true });
+    f.requests[0].resolve(reply);
+    assert.equal(await check, false);
+    f.unmount();
+  }
+});

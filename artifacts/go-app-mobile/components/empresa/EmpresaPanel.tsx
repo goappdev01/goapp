@@ -245,6 +245,8 @@ const PLAN_COLORS: Record<string, string> = {
 
 interface EmpresaPanelProps {
   visible: boolean;
+  bookingChangeReturnDate?:string;
+  onProposeBookingChange?: (entry:import("@/components/AgendaOperativa").GoEntry)=>void;
   onClose: () => void;
   initialModulo?: ModuloKey;
   onModuloChange?: () => void;
@@ -290,7 +292,7 @@ function computeConfigProgress(cfg: typeof import("@/contexts/GoBusinessConfigCo
   return { ...progress, statusColor, statusDot };
 }
 
-export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, guidanceLevel = 5, onOpenVerificacion, onFinalizarWizard, previewReadOnly = false, onOpenContext, initialCompaniesOpen = false, onDemoNavigate }: EmpresaPanelProps) {
+export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, guidanceLevel = 5, onOpenVerificacion, onFinalizarWizard, previewReadOnly = false, bookingChangeReturnDate, onProposeBookingChange, onOpenContext, initialCompaniesOpen = false, onDemoNavigate }: EmpresaPanelProps) {
   const insets  = useSafeAreaInsets();
   const { t, locale, lang } = useLanguage();
   const SUITES = useMemo(() => getSuites(t), [t]);
@@ -1022,7 +1024,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             {modulo === "consumo"         && <ConsumoScreen     guidanceLevel={guidanceLevel} />}
             {modulo === "zonas"           && <ZonasScreen       guidanceLevel={guidanceLevel} />}
             {modulo === "empresa_config"   && <EmpresaConfigScreen   key={`ec-${businessDemo?.businessId ?? "live"}-${newEmpresaKey}`} keyboardManagedByParent startAtSteps={demo && openSelectedConfig} onOpenCompanies={demo ? openDemoBusinesses : undefined} contextNavigation={demo ? contextNavigation : undefined} onBack={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} onFinalizarConfig={() => { goHome(); if (previewReadOnly) return; if (onFinalizarWizard) { onFinalizarWizard(); } else { setActivacionVisible(true); } }} initialStep={configInitialStep} goPrevRef={modulePrevRef} />}
-            {modulo === "reservas_config"  && (demo ? <GoReservasDemoScreen onClose={goHome} hideFAB={true} /> : <GoReservasConfigScreen onClose={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} hideFAB={true} />)}
+            {modulo === "reservas_config"  && (demo ? <GoReservasDemoScreen onClose={goHome} onProposeBookingChange={onProposeBookingChange} navigateToDayISO={bookingChangeReturnDate} hideFAB={true} /> : <GoReservasConfigScreen onClose={goHome} onProposeBookingChange={onProposeBookingChange} navigateToDayISO={bookingChangeReturnDate} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} hideFAB={true} />)}
             {modulo === "deportes_screen"  && <GoDeportesScreen onClose={goHome} onOpenBooking={(_id, _label, _emoji, _color) => { goToModulo("reservas_config"); }} onOpenVerificacion={onOpenVerificacion} />}
 
             {/* Gated modules — require Empresa Verificada */}
