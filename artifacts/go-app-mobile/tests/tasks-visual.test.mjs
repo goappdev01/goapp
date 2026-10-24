@@ -230,3 +230,22 @@ for(const lang of ['es','en'])for(const size of ['compacto','medio','grande'])te
  const rows=nodes(tree,n=>n.type==='SwipeableRow');assert.equal(rows.length,2);assert.ok(texts(tree).includes('GO PELUQUERÍA'));assert.ok(!texts(tree).includes('COMIDA'));assert.ok(!texts(tree).includes('DEPORTE'));
  assert.ok(nodes(tree.props.footer,n=>n.props.accessibilityLabel===translations[lang].tasks_my_bookings).length);assert.equal(f.context.listGoSize,size);
 });
+
+test('Mis reservas is operable only in USER while ADMIN and BUSINESS retain the original filters',()=>{
+  for(const view of ['USER','ADMIN','BUSINESS']){
+    const f=fixture('es',{goView:{view},isUserMode:view==='USER',isBusinessMode:view==='BUSINESS'});
+    const footer=f.render().props.footer;
+    const findControl=key=>nodes(footer,n=>n.type==='Pressable'&&n.props.accessibilityLabel===translations.es[key])[0];
+    const reservations=findControl('tasks_my_bookings');
+    assert.equal(!!reservations,view==='USER',view+' reservation filter visibility');
+    for(const [label,key] of [['filter_todos','todos'],['status_accepted','aceptado'],['status_pending_label','pendiente'],['tasks_proposals','propuesta'],['tasks_trash','papelera']]){
+      const control=findControl(label);assert.ok(control,view+' retains '+key);
+      f.context.listFilter=key==='todos'?'aceptado':'todos';control.props.onPress();assert.equal(f.context.listFilter,key,view+' operates '+key);
+    }
+    if(reservations){
+      f.context.listFilter='todos';f.context.typeFilter='TAREA_INTERNA';f.context.activityFilter='comida';f.context.llamadasListOpen=true;
+      reservations.props.onPress();
+      assert.equal(f.context.listFilter,'reservas');assert.equal(f.context.typeFilter,'todos');assert.equal(f.context.activityFilter,'todas');assert.equal(f.context.llamadasListOpen,false);
+    }
+  }
+});

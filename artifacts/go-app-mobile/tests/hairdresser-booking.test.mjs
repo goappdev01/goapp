@@ -1,4 +1,5 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import {createRequire} from 'node:module';
+import {fixture as calendarFixture} from './helpers/calendar-fixture.mjs';
 const ts=createRequire(path.join(process.cwd(),'package.json'))('typescript');process.env.TZ='Europe/Madrid';
 let clock=Date.parse('2030-01-07T08:00:00');class Clock extends Date{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}}
 function load(file,imports={}){const context={exports:{},Date:Clock,Intl,console,Map,Set,require:key=>{if(key in imports)return imports[key];throw Error('Unexpected '+key);}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);return context.exports;}
@@ -16,12 +17,16 @@ async function fixture(companyId=company,memory=new Map()){
 }
 test('create → request → company acceptance → reload uses one booking and both original calendar perspectives',async()=>{
  const f=await fixture(),b=await f.create(),before=plain(f.store.getSnapshot());let notifications=0;const stop=f.store.subscribe(()=>notifications++);
+ assert.ok(b.slotKey);assert.equal(before.entries[0].slotKey,b.slotKey);assert.equal(f.repo.getCustomerEntries()[0].slotKey,b.slotKey);
  const requested=await f.propose(b.id);assert.equal(requested.startDatetime,b.startDatetime);assert.equal(requested.paymentStatus,b.paymentStatus);assert.equal(f.store.getSnapshot().entries[0].dateISO,'2030-01-07');assert.equal(f.store.getSnapshot().entries[0].time,'10:00');assert.equal(f.store.getSnapshot().entries[0].estado,'propuesto');assert.equal(f.repo.getCustomerEntries()[0].estado,'propuesta_pendiente');
+ assert.equal(requested.slotKey,b.slotKey);assert.equal(f.store.getSnapshot().entries[0].slotKey,b.slotKey);assert.equal(f.repo.getCustomerEntries()[0].slotKey,b.slotKey);
  assert.equal((await f.repo.getAllSlots(f.store.businessId,f.service.id,'2030-01-07',f.staff.id)).find(s=>s.startDatetime.endsWith('T10:00:00')).isAvailable,false,'the original remains occupied');
  const accepted=await f.repo.changeBooking(b.id,f.store.businessId,'business','accept',{proposalId:requested.changeProposal.id});
  assert.equal(accepted.id,b.id);assert.ok(accepted.startDatetime.endsWith('T12:00:00'));assert.equal(accepted.staffId,b.staffId);assert.equal(accepted.bookableItemId,b.bookableItemId);assert.equal(accepted.paymentStatus,b.paymentStatus);assert.equal(accepted.changeProposal,undefined);
+ assert.notEqual(accepted.slotKey,b.slotKey);assert.equal(f.store.getSnapshot().entries[0].slotKey,accepted.slotKey);assert.equal(f.repo.getCustomerEntries()[0].slotKey,accepted.slotKey);
  const data=f.store.getSnapshot();for(const key of ['bookings','reservations','entries'])assert.equal(data[key].length,1,key);assert.equal(data.entries[0].time,'12:00');assert.equal(f.repo.getCustomerEntries()[0].time,'12:00');assert.ok(notifications>=2);stop();
  const reloaded=f.make();await reloaded.load();assert.equal(reloaded.getSnapshot().bookings[0].id,b.id);assert.equal(reloaded.getSnapshot().entries[0].time,'12:00');assert.equal(reloaded.getSnapshot().bookings[0].changeHistory[0].outcome,'accepted');assert.equal(before.bookings[0].startDatetime,b.startDatetime);
+ assert.equal(reloaded.getSnapshot().bookings[0].slotKey,accepted.slotKey);assert.equal(reloaded.getSnapshot().entries[0].slotKey,accepted.slotKey);assert.equal(repoModule.createDemoBookingRepository(reloaded,{now:()=>clock}).getCustomerEntries()[0].slotKey,accepted.slotKey);
 });
 test('rejection preserves original schedule, slot and financial data; business counterproposal requires customer acceptance',async()=>{
  const f=await fixture(),b=await f.create(),request=await f.propose(b.id);await f.repo.changeBooking(b.id,f.store.businessId,'business','reject',{proposalId:request.changeProposal.id});
@@ -127,4 +132,72 @@ test('company calendar cancellation clears only that proposal and keeps other ne
  const rows=f.store.getSnapshot().bookings,cancelled=rows.find(row=>row.id===a.id),other=rows.find(row=>row.id===b.id);
  assert.equal(cancelled.status,'CANCELLED');assert.equal(cancelled.changeProposal,undefined);assert.equal(cancelled.changeHistory.at(-1).actor,'business');
  assert.equal(other.status,'CONFIRMED');assert.equal(other.startDatetime,b.startDatetime);assert.equal(other.changeProposal.time,'13:00');assert.equal(f.repo.getCustomerEntries().find(e=>e.bookingId===b.id).bookingStatus,'confirmada');
+});
+
+for(const bookingSource of ['canonical','DEMO'])test(bookingSource+' customer Calendar opens the real proposal flow beside Cancel and changes no booking until explicit confirmation',async()=>{
+ const f=await fixture(),booking=await f.create(),before=plain(f.store.getSnapshot());
+ // Use the production projection used by authenticated USER bookings. The DEMO
+ // projection has a separate contract and must not be silently repaired in a test.
+ const entry=bookingSource==='DEMO'?f.repo.getCustomerEntries()[0]:projection.customerBookingEntry(booking,{id:f.store.businessId,name:'GO PELUQUERÍA',location:'Calle ficticia, Murcia',timezone:'Europe/Madrid',phone:'',bookingColor:'#3D9A84'},f.service,f.staff.name);
+ assert.equal(entry.customerBooking,true);
+ const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),all=[];
+ (function visit(n){all.push(n);ts.forEachChild(n,visit)})(ast);
+ const decl=name=>all.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name);
+ const calendarHandler=all.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='onProposeItem'&&n.initializer?.expression?.getText(ast).includes('const booking=customerBookings.entries.find'));
+ assert.ok(calendarHandler,'use the actual customer Calendar connection');
+ const alerts=[],mutations=[],toasts=[],calendarStates=[];
+ const scope={exports:{},Date:Clock,lang:'es',calOpen:true,showToast:(...args)=>toasts.push(args),Alert:{alert:(...args)=>alerts.push(args)},
+  setCalOpen:value=>calendarStates.push(value),getToday:()=>new Clock(),formatISODate:d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-'),
+  calFlow:{open:options=>{scope.draft=options}},customerBookings:{entries:[entry],mutate:(selected,operation,input)=>{
+    assert.equal(selected.id,entry.id);const promise=f.repo.changeBooking(selected.reservationId,selected.businessId,'customer',operation,input);
+    mutations.push({operation,input,promise});return promise;
+  }},goLog:[],
+ };
+ const code=['isGoDateTimePast','runCustomerBooking','confirmBookingDraft','openBookingProposal'].map(name=>'const '+decl(name).getText(ast)+';').join('\n')+'\nexports.propose='+calendarHandler.initializer.expression.getText(ast)+';';
+ vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,scope);
+ const cal=calendarFixture({now:'2030-01-07T08:00:00'}),{AgendaBoard}=cal.load('components/AgendaOperativa.tsx');
+ const props={goLog:[entry],viewMode:'dia',selectedDateISO:entry.dateISO,onProposeItem:scope.exports.propose,onDeleteItem:()=>{throw Error('Propose must not cancel the booking')}};
+ const nodes=n=>!n||typeof n!=='object'?[]:[n,...(n.children??[]).flatMap(nodes)];
+ const text=n=>typeof n==='string'?n:(n?.children??[]).map(text).join(' ');
+ let tree=cal.render(AgendaBoard,props);
+ const body=nodes(tree).find(n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85&&text(n).includes(entry.contactName));assert.ok(body);body.props.onPress();
+ tree=cal.render(AgendaBoard,props);
+ const propose=nodes(tree).find(n=>n.props.accessibilityLabel==='tasks_propose_change');
+ const cancel=nodes(tree).find(n=>n.type==='TouchableOpacity'&&text(n).includes('cancel')&&n.props.style?.borderColor==='rgba(220,38,38,0.35)');
+ assert.ok(propose);assert.ok(cancel);
+ const sameRow=nodes(tree).find(n=>n.type==='View'&&n.children?.includes(propose)&&n.children?.includes(cancel));assert.ok(sameRow,'both customer actions share the same rendered action row');assert.equal(sameRow.props.style.flexDirection,'row');
+ propose.props.onPress();
+ assert.equal(scope.draft.startAt,'date');assert.equal(scope.draft.initialDateISO,entry.dateISO);assert.equal(scope.draft.initialTime,entry.time);assert.equal(scope.draft.initialDuration,entry.duration);
+ assert.deepEqual(calendarStates,[true]);assert.equal(mutations.length,0);assert.deepEqual(plain(f.store.getSnapshot()),before);
+ const result={dateISO:'2030-01-07',dateDraft:'Lunes 7',time:'12:00',duration:entry.duration};
+ assert.equal(scope.draft.validate(result),null);scope.draft.onSave(result);
+ assert.equal(alerts.at(-1)[0],'Confirmar propuesta de cambio');assert.equal(mutations.length,0);assert.deepEqual(plain(f.store.getSnapshot()),before);
+ alerts.at(-1)[2].find(button=>button.style==='cancel').onPress();assert.equal(mutations.length,0);assert.deepEqual(plain(f.store.getSnapshot()),before);
+ scope.draft.onSave(result);alerts.at(-1)[2].find(button=>button.text==='Confirmar propuesta').onPress();
+ assert.equal(mutations.length,1);assert.equal(mutations[0].operation,'propose');assert.equal(mutations[0].input.acceptFinancialTerms,true);await mutations[0].promise;
+ const saved=f.store.getSnapshot().bookings[0];assert.equal(saved.id,booking.id);assert.equal(saved.startDatetime,booking.startDatetime);assert.equal(saved.paymentStatus,booking.paymentStatus);
+ assert.equal(saved.changeProposal.time,'12:00');assert.equal(saved.changeProposal.dateISO,'2030-01-07');assert.equal(f.store.getSnapshot().bookings.length,1);
+});
+
+test('legacy booking without slotKey projects its original key without storage writes or cross-company adoption after Reload',async()=>{
+ const memory=new Map();let writes=0;const save=memory.set.bind(memory);memory.set=(key,value)=>{writes++;return save(key,value)};
+ const f=await fixture(company,memory),other=await fixture(otherCompany,memory),booking=await f.create(),controlBooking=await other.create();
+ const originalSlotKey=booking.slotKey;assert.ok(originalSlotKey);
+ await f.store.transactBookings(data=>{delete data.bookings.find(row=>row.id===booking.id).slotKey;});
+ assert.equal(f.store.getSnapshot().bookings[0].slotKey,undefined,'legacy setup removes the persisted booking field');
+ const persistedBefore=JSON.stringify([...memory]),writesBefore=writes,otherBefore=plain(other.store.getSnapshot());
+ const assertProjection=(store,repo)=>{
+  const companyEntry=store.getSnapshot().entries.find(entry=>entry.reservationId===booking.id);
+  const clientEntry=repo.getCustomerEntries().find(entry=>entry.bookingId===booking.id);
+  assert.ok(companyEntry);assert.ok(clientEntry);
+  for(const entry of [companyEntry,clientEntry]){
+    assert.equal(entry.slotKey,originalSlotKey);assert.equal(entry.businessId,f.store.businessId);assert.equal(entry.staffId,booking.staffId);assert.equal(entry.ownerUserId,owner);
+    assert.equal(entry.startDatetime,booking.startDatetime);assert.equal(entry.endDatetime,booking.endDatetime);assert.notEqual(entry.reservationId,controlBooking.id);
+  }
+ };
+ assertProjection(f.store,f.repo);assert.equal(writes,writesBefore);assert.equal(JSON.stringify([...memory]),persistedBefore);
+ const reopened=f.make();await reopened.load();
+ assertProjection(reopened,repoModule.createDemoBookingRepository(reopened,{now:()=>clock}));
+ assert.equal(reopened.getSnapshot().bookings[0].slotKey,undefined,'projection does not migrate or backfill the legacy row');
+ assert.equal(writes,writesBefore);assert.equal(JSON.stringify([...memory]),persistedBefore);assert.deepEqual(plain(other.store.getSnapshot()),otherBefore);
 });

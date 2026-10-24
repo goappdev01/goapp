@@ -297,6 +297,9 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
       bookingStatus: reservation.status, changeProposal: booking?.changeProposal, createdAt: reservation.createdAt, notes: reservation.notes, businessId, ownerUserId,
       serviceId: reservation.serviceId ?? booking?.bookableItemId, staffId: reservation.staffId ?? booking?.staffId,
       professionalName: reservation.professionalName ?? booking?.professionalName, demoLocal: true,
+      // Both calendar perspectives need the same current interval key. Historical
+      // manual bookings derive it from their existing record, without writing it.
+      slotKey: booking?.slotKey ?? (booking ? [businessId, booking.staffId ?? "any", booking.startDatetime.slice(0,10), booking.startDatetime.slice(11,16), booking.endDatetime.slice(11,16)].join("|") : undefined),
       startDatetime: booking?.startDatetime, endDatetime: reservation.endDatetime ?? booking?.endDatetime,
       ...(reservation.changeProposal ? {changeProposal:reservation.changeProposal,estado:"propuesta_pendiente"} : {}) } as GoEntry;
   };
