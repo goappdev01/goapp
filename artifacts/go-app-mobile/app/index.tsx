@@ -3500,7 +3500,7 @@ function HomeScreenContent() {
   const actionCompletion = useActionCompletion(goLog);
   const [landingDetailsId, setLandingDetailsId] = useState<string | null>(null);
   const landingDetailsEntry = goLog.find(entry => entry.id === landingDetailsId) ?? null;
-  useEffect(() => { setLandingDetailsId(null); }, [goView.view, completionIdentity.scope]);
+  useEffect(() => { setLandingDetailsId(null); }, [goView.view, completionIdentity.scope?.userId, completionIdentity.scope?.context]);
   const [receivedDetailOpen, setReceivedDetailOpen] = useState(false);
   const [receivedDetailGo, setReceivedDetailGo] = useState<typeof goLog[number] | null>(null);
 

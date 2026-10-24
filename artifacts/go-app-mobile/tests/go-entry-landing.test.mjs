@@ -1,4 +1,5 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import vm from 'node:vm';import {createRequire} from 'node:module';import path from 'node:path';
+import lifecycle from './helpers/react-lifecycle.cjs';
 const require=createRequire(path.join(process.cwd(),'package.json')),ts=require('typescript');
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 function find(n,p){if(p(n))return n;let r;ts.forEachChild(n,c=>{if(!r)r=find(c,p)});return r;}
@@ -36,4 +37,36 @@ test('shared task changes retain the original and delegate to the existing negot
  const f=fixture(),entry={...task,type:'TAREA',direction:'outgoing',phone:'+34600123456',contactName:'Contacto vinculado'},saved=JSON.stringify(entry);f.api.open(entry,'calendar');
  assert.equal(f.ref.current,entry.id);assert.equal(f.context.proposalReturnRef.current,'calendar');assert.equal(f.context.draft.initialDateISO,entry.dateISO);
  const proposal={dateISO:'2035-01-08',time:'12:30'};f.context.draft.onSave(proposal);assert.equal(f.calls.filter(c=>c[0]==='proposal').length,1);assert.equal(f.calls.filter(c=>c[0]==='task').length,0);assert.equal(JSON.stringify(entry),saved);
+});
+
+test('Landing details remain open across refreshed scope objects and close on actual profile or account changes',async()=>{
+ const {React,createRoot,document,evaluate}=lifecycle;
+ let userId='owner-one',view={loaded:true,isOwner:true,isAdminView:false,view:'USER'},capture;
+ const listeners=new Set();
+ const identity=evaluate('hooks/useAssistantZoneScope.ts',{
+  '@/data/booking':{getAuthenticatedUserId:async()=>userId},
+  '@/lib/sessionEvents':{onSessionChanged:fn=>{listeners.add(fn);return()=>listeners.delete(fn);}},
+  '@/contexts/GoViewContext':{useGoView:()=>view},
+  '@/contexts/GoAdminAccessContext':{useAdminAccess:()=>({checking:false})},
+  '@/contexts/OwnerBusinessDemoContext':{useOwnerBusinessDemo:()=>({loaded:true,demo:{businessId:'business-one'}})},
+ });
+ const effect=find(ast,n=>ts.isCallExpression(n)&&n.expression.getText(ast)==='useEffect'&&n.arguments[0]?.getText(ast)==='() => { setLandingDetailsId(null); }');
+ assert.ok(effect,'Exercise the actual Home detail close effect');
+ const context={exports:{},React,useState:React.useState,useEffect:React.useEffect,useAssistantZoneScope:identity.useAssistantZoneScope,useGoView:()=>view,capture:value=>{capture=value;}};
+ vm.runInNewContext(compile(`exports.Panel=function Panel(){const goView=useGoView(),completionIdentity=useAssistantZoneScope();const ${decl('[landingDetailsId, setLandingDetailsId]')};${effect.getText(ast)};capture({id:landingDetailsId,scope:completionIdentity.scope,open:setLandingDetailsId});return React.createElement('div',null,landingDetailsId);};`),context);
+ const root=createRoot(document.createElement('div'));
+ const settle=async operation=>React.act(async()=>{operation?.();for(let i=0;i<8;i++)await Promise.resolve();});
+ const render=()=>root.render(React.createElement(context.exports.Panel));
+ try{
+  await settle(render);assert.equal(capture.scope.userId,userId);
+  await settle(()=>capture.open('reservation-one'));assert.equal(capture.id,'reservation-one');
+  for(let i=0;i<4;i++){const previous=capture.scope;await settle(render);assert.notEqual(capture.scope,previous);assert.equal(capture.id,'reservation-one');}
+  view={...view,view:'BUSINESS'};await settle(render);assert.equal(capture.id,null);
+  await settle(()=>capture.open('business-reservation'));assert.equal(capture.id,'business-reservation');
+  view={...view,isAdminView:true,view:'ADMIN'};await settle(render);assert.equal(capture.id,null);
+  await settle(()=>capture.open('admin-reservation'));assert.equal(capture.id,'admin-reservation');
+  userId='owner-two';await settle(()=>{for(const listener of listeners)listener();});assert.equal(capture.id,null);assert.equal(capture.scope.userId,userId);
+  await settle(()=>capture.open('second-owner-reservation'));assert.equal(capture.id,'second-owner-reservation');
+  userId=null;await settle(()=>{for(const listener of listeners)listener();});assert.equal(capture.id,null);assert.equal(capture.scope,null);
+ }finally{await settle(()=>root.unmount());assert.equal(listeners.size,0);}
 });
