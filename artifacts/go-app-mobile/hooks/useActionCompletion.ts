@@ -12,7 +12,7 @@ import { refreshActiveNativeTaskReminders,refreshNativeTaskReminders,registerAct
 import { completionNotificationPolicy } from "@/lib/goActionCompletionNotifications";
 
 type CompletionWrite = {
- id:string; scope:CompletionScope; entry:CompletionEntry; status:"done"|"pending";
+ id:string; scope:CompletionScope; entry:CompletionEntry; status:"done"|"pending"; explicit?:boolean; currentEntry?:()=>CompletionEntry|undefined;
  at:number; phase:"saving"|"failed"; message:string; promise?:Promise<void>;
 };
 const writeKey=(scope:CompletionScope,entry:CompletionEntry)=>JSON.stringify([completionStorageKey(scope),completionKey(entry),completionSchedule(entry)]);
@@ -48,7 +48,7 @@ export function useActionCompletion(entries:GoEntry[]) {
    const owned=entries.filter(e=>ownedCompletionEntry(e as CompletionEntry,s));
    const byKey=new Map<string,CompletionEntry>();
    for(const e of [...owned,...extras]){
-    if(!e.id || !e.dateISO || !e.time)continue;
+    if(!e.id)continue;
     if(!ownedCompletionEntry(e,s))continue;
     const key=completionKey(e);if(!byKey.has(key))byKey.set(key,e);
    }
@@ -77,17 +77,17 @@ export function useActionCompletion(entries:GoEntry[]) {
  const jobFor=(entry:CompletionEntry)=>state.scope?writes.current.get(writeKey(state.scope,entry)):undefined;
  const unresolved=state.doc?candidates.filter(e=>awaitingCompletion(e,state.doc!,now) && !jobFor(e)):[];
  const pending=state.doc?candidates.filter(e=>pendingCompletion(e,state.doc!) || jobFor(e)?.phase==="saving" && jobFor(e)?.status==="pending"):[];
- const decide=(entry:CompletionEntry,status:"done"|"pending"):Promise<void>=>{
+ const decide=(entry:CompletionEntry,status:"done"|"pending",explicit = false,currentEntry?:()=>CompletionEntry|undefined):Promise<void>=>{
    const scope=state.scope;if(!scope || !state.active(scope))return Promise.resolve();
    const id=writeKey(scope,entry),previous=writes.current.get(id);
    if(previous?.phase==="saving")return previous.promise!;
-   const job:CompletionWrite={id,scope:{...scope},entry:{...entry},status,at:previous?.at ?? Date.now(),phase:"saving",message:""};
+   const job:CompletionWrite={id,scope:{...scope},entry:{...entry},status,explicit,currentEntry,at:previous?.at ?? Date.now(),phase:"saving",message:""};
    writes.current.set(id,job);renderWrites(n=>n+1);
    // Capture the task, participant and schedule before any asynchronous work.
    const rows=unresolved.some(row=>row.id===entry.id)?unresolved:pending;
    const index=rows.findIndex(row=>row.id===entry.id);
    if(index>=0)setSelected(rows.length>1?rows[(index+1)%rows.length].id:null);
-   job.promise=decideCompletion(job.scope,job.entry,status,()=>state.active(job.scope),job.at).then(()=>{
+   job.promise=decideCompletion(job.scope,job.entry,status,()=>state.active(job.scope),job.at,explicit,currentEntry).then(()=>{
      if(writes.current.get(id)===job)writes.current.delete(id);
    }).catch(error=>{
      if(writes.current.get(id)===job){job.phase="failed";job.message=error instanceof Error?error.message:"No se pudo guardar la decisión.";}
@@ -106,7 +106,7 @@ export function useActionCompletion(entries:GoEntry[]) {
  };
  const retryDecision=(id:string)=>{
    const job=writes.current.get(id);
-   return job?.phase==="failed" && state.scope && sameScope(job.scope,state.scope)?decide(job.entry,job.status):Promise.resolve();
+   return job?.phase==="failed" && state.scope && sameScope(job.scope,state.scope)?decide(job.entry,job.status,job.explicit,job.currentEntry):Promise.resolve();
  };
  const isSaving=(entry:CompletionEntry)=>jobFor(entry)?.phase==="saving";
  const failedDecisions=currentWrites.filter(job=>job.phase==="failed");

@@ -1,4 +1,5 @@
 import type {GoEntry} from "@/components/AgendaOperativa";
+export const GO_ENTRY_COLORS = { pending:"#FFD700", change:"#FF8C00", accepted:"#22c55e", done:"#22c55e", destructive:"#FF0000" } as const;
 /** Render policy only. JWT/RLS and the server recheck every actual operation. */
 export function reservationCardPolicy(entry:GoEntry){
  const canonical=!!(entry.customerBooking || entry.businessBooking);
@@ -16,5 +17,5 @@ export function reservationCardPolicy(entry:GoEntry){
   canShowQr:real && !!entry.customerBooking && status==="confirmada" && !entry.deleted,
   canVerify:real && !!entry.businessBooking,
   stateKey:server==="NO_SHOW"?"booking_state_no_show":server==="EXPIRED"?"booking_state_expired":server==="REJECTED"?"booking_state_rejected":status==="confirmada"?"booking_state_accepted":["cancelada","CANCELLED"].includes(status??"")?"booking_state_cancelled":["completada","COMPLETED"].includes(status??"")?"booking_state_completed":"booking_state_pending",
-  stateColor:status==="confirmada"?"#22c55e":["cancelada","CANCELLED","REJECTED"].includes(status??"")?"#f87171":["completada","COMPLETED"].includes(status??"")?"#93c5fd":"#FF8C00"};
+  stateColor:status==="confirmada"?GO_ENTRY_COLORS.accepted:["cancelada","CANCELLED","REJECTED"].includes(status??"")?GO_ENTRY_COLORS.destructive:["completada","COMPLETED"].includes(status??"")?GO_ENTRY_COLORS.done:GO_ENTRY_COLORS.pending};
 }

@@ -30,6 +30,9 @@ const code = compile(`${formatter?.getText(ast) || ''}\ntree = (${sheet.getText(
 const translationsContext = { exports: {} };
 vm.runInNewContext(compile(fs.readFileSync('i18n/translations.ts', 'utf8')), translationsContext);
 const translations = translationsContext.exports.translations;
+const presentationContext={exports:{}},colorContext={exports:{}};
+vm.runInNewContext(compile(fs.readFileSync('data/goEntryPresentation.ts','utf8')),presentationContext);
+vm.runInNewContext(compile(fs.readFileSync('data/reservationCardPolicy.ts','utf8')),colorContext);
 const completionContext = { exports: {} };
 vm.runInNewContext(compile(fs.readFileSync('lib/goActionCompletion.ts', 'utf8')), completionContext);
 const setterNames = new Set();
@@ -67,7 +70,7 @@ function fixture(lang = 'es', overrides = {}) {
   }) };
   const hosts = Object.fromEntries(['BottomSheet', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable',
     'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(name => [name, name]));
-  const context = { ...hosts, React, Date, Math, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""},
+  const context = { ...hosts, React, Date, Math,lang,ENTRY_COLORS:colorContext.exports.GO_ENTRY_COLORS,entryIsReservation:presentationContext.exports.entryIsReservation,entryHeading:presentationContext.exports.entryHeading,canResolveEntry:()=>false, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""},
     mergeCompletionEntries: completionContext.exports.mergeCompletionEntries,
     actionCompletion: { candidates: [], status: () => undefined },
     t: key => { assert.equal(typeof translations[lang][key], 'string', key); return translations[lang][key]; },
@@ -134,7 +137,7 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
       for (const time of [entry.time, entry.changeProposal.time]) assert.equal(body.split(time).length - 1, 1);
       for (const [id, label, date, time, color] of [
         ['go-proposal-current-compact', translations[lang].tasks_current_booking.toUpperCase(), '15/10/26', '17:00', '#ffffff'],
-        ['go-proposal-next-compact', translations[lang].tasks_change_proposal.toUpperCase(), '16/10/26', '12:45', '#f97316'],
+        ['go-proposal-next-compact', translations[lang].tasks_change_proposal.toUpperCase(), '16/10/26', '12:45', '#FF8C00'],
       ]) {
         const row = byId(card, id), values = nodes(row, node => node.type === 'Text');
         assert.ok(row);
@@ -148,7 +151,7 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
       const label = translations[lang][estado === 'propuesta_pendiente' ? 'biz_change_proposed' : 'biz_change_received'];
       const buttons = nodes(header, node => node.type === 'TouchableOpacity');
       const pillIndex = buttons.findIndex(node => texts(node) === label);
-      const checkboxIndex = buttons.findIndex(node => node.props.style?.backgroundColor === '#f97316');
+      const checkboxIndex = buttons.findIndex(node => node.props.style?.backgroundColor === '#FF8C00');
       const titleIndex = buttons.findIndex(node => byId(node, 'go-proposal-title-compact'));
       const titleBlock = byId(header, 'go-proposal-title-block-compact');
       assert.equal(texts(byId(titleBlock, 'go-proposal-title-compact')), entry.notes);
@@ -164,7 +167,7 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
       f.calls.length = 0;
       buttons[checkboxIndex].props.onPress({ stopPropagation() {} });
       assert.deepEqual(plain(f.calls), [['updateGoStatus', entry.id]]);
-      const proposal = nodes(card, node => node.props?.style?.borderColor === 'rgba(249,115,22,0.65)')[0];
+      const proposal = nodes(card, node => node.props?.style?.borderColor === 'rgba(255,140,0,0.65)')[0];
       const scale = listGoSize === 'compacto' ? .8 : listGoSize === 'grande' ? 1.25 : 1;
       assert.equal(card.props.style.paddingVertical, Math.round(4 * scale));
       assert.equal(proposal.props.style.marginTop, Math.round(3 * scale));
@@ -225,8 +228,8 @@ test('group contact uses its existing first participant and missing contact crea
 
 for (const [bookingStatus, labelKey, color] of [
   ['confirmada', 'status_confirmed', '#22c55e'],
-  ['cambio_pendiente', 'floor_reservation_cambio_pendiente', '#f97316'],
-  ['cancelada', 'label_visit_cancelled_tag', '#ef4444'],
+  ['cambio_pendiente', 'floor_reservation_cambio_pendiente', '#FF8C00'],
+  ['cancelada', 'label_visit_cancelled_tag', '#FF0000'],
   [undefined, 'status_confirmed', '#22c55e'],
 ]) test(`compact booking ${bookingStatus ?? 'default'} preserves professional/state and isolates its contact`, () => {
   for (const lang of ['es', 'en']) {

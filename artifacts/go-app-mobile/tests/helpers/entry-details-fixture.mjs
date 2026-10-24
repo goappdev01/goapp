@@ -4,6 +4,7 @@ const require=createRequire(path.join(process.cwd(),'package.json'));
 const {React,evaluate,rn,native}=require('./tests/helpers/react-lifecycle.cjs');
 export const presentation=evaluate('data/goEntryPresentation.ts');
 const components=evaluate('components/GoEntryDetails.tsx',{
+ '@expo/vector-icons':{Feather:native('Feather')},
  'react-native':{...rn,TouchableOpacity:native('TouchableOpacity')},
  '@/data/goEntryPresentation':presentation,
  '@/data/reservationCardPolicy':evaluate('data/reservationCardPolicy.ts'),
@@ -13,4 +14,6 @@ const components=evaluate('components/GoEntryDetails.tsx',{
  './landing/landingPanels':evaluate('components/landing/landingPanels.ts'),
 });
 export const renderEntryQuickActions=(entry,showState=true,compact=false)=>React.createElement(components.GoEntryQuickActions,{entry,showState,compact,onCancel(){},onPropose(){},onEdit(){},onAccept(){},onReject(){}});
+export const renderEntryMicroActions=entry=>React.createElement(components.GoEntryMicroActions,{entry,onDone(){},onPending(){},onDiscard(){}});
+export const entryIsReservation=presentation.entryIsReservation;
 export const entryPhone=presentation.entryPhone;

@@ -14,7 +14,7 @@ import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
 import { useActionCompletion } from "@/hooks/useActionCompletion";
 import { LandingActionCompletion, completionFrame } from "@/components/landing/LandingActionCompletion";
-import { completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
+import { ownedCompletionEntry, completionEligible, completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
 import { GoNoteReminderPicker } from "@/components/notes/GoNoteReminderPicker";
 import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, noteKeyboardContentHeight, type NoteReminderDraft } from "@/lib/goNoteTools";
 import { saveGoNoteReminder, changeGoNoteReminder, confirmAttachedGoNoteReminder } from "@/lib/goNoteReminder";
@@ -117,8 +117,9 @@ import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingContentViewport, LandingCardContents } from "@/components/landing/LandingContentViewport";
-import { GoEntryDetailsSheet, GoEntryQuickActions } from "@/components/GoEntryDetails";
-import { entryHeading, entryIdentity, entryIsInternal, entryPhone, internalEntryCommand } from "@/data/goEntryPresentation";
+import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
+import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "@/components/GoEntryDetails";
+import { entryHeading, entryIdentity, entryIsReservation, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand } from "@/data/goEntryPresentation";
 import { changeTask } from "@/lib/goTaskManagement";
 import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands";
 import { redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
@@ -3134,6 +3135,8 @@ function HomeScreenContent() {
   const [humanityOpen, setHumanityOpen] = useState(false);
   useEffect(() => { if (!goView.isAdminView && !adminAccess.checking && !adminAccess.unavailable) setHumanityOpen(false); }, [goView.isAdminView, adminAccess.checking, adminAccess.unavailable]);
   const [initialMessagesContact, setInitialMessagesContact] = useState<{ name: string; phone: string } | null>(null);
+  const [initialMessagesContext,setInitialMessagesContext]=useState<ReturnType<typeof entryMessageContext>>(null);
+  const messageReturnRef=useRef<(()=>void)|null>(null);
   const [initialMessagesBookingId,setInitialMessagesBookingId]=useState<string|null>(null);
   // ── RECORDATORIO (RECUÉRDAME) ────────────────────────────────────────────
   const [remindOpen, setRemindOpen] = useState(false);
@@ -13533,7 +13536,10 @@ function HomeScreenContent() {
       onSave: result => sendSuggestChangeFromCal(result), onCancel: () => { if (from === "landing") setCalOpen(false); } });
   };
   const cancelEntryFromDetails = (entry: GoEntry) => {
-    if (!entryIsInternal(entry)) { softDeleteGo(entry.id); return; }
+    if (!entryIsInternal(entry)) {
+      if(entry.customerBooking){softDeleteGo(entry.id);return;}
+      Alert.alert("GO",lang==="en"?"Cancel or discard this action?":"¿Cancelar o descartar esta acción?",[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Confirm":"Confirmar",style:"destructive",onPress:()=>softDeleteGo(entry.id)}]);return;
+    }
     const owner = entry.ownerUserId;
     if (!owner) { showToast(lang === "en" ? "The task owner cannot be verified." : "No se puede verificar el propietario de la tarea.", "error"); return; }
     Alert.alert("GO", lang === "en" ? "Cancel this task?" : "¿Cancelar esta tarea?", [
@@ -13543,7 +13549,11 @@ function HomeScreenContent() {
           .then(() => setLandingDetailsId(null)).catch(error => Alert.alert("GO", error.message));
       } }]);
   };
-  const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false) => <GoEntryQuickActions entry={entry} showState={showState} compact={compact}
+  const canResolveEntry=(entry:GoEntry)=>!!actionCompletion.scope&&actionCompletion.active(actionCompletion.scope)&&ownedCompletionEntry(entry,actionCompletion.scope)&&completionEligible(entry)&&!entry.changeProposal&&!entry.proposal;
+  const resolveEntry=(entry:GoEntry,status:"done"|"pending",current?:()=>GoEntry|undefined)=>{if(canResolveEntry(entry))void actionCompletion.decide(entry,status,true,current??(()=>goLog.find(e=>e.id===entry.id)));};
+  const followedEntry=(entry:GoEntry)=>({...entry,localResolutionStatus:actionCompletion.status(entry)});
+  const renderEntryMicroActions=(entry:GoEntry)=><GoEntryMicroActions entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)} onDone={canResolveEntry(entry)?()=>resolveEntry(entry,"done"):undefined} onPending={canResolveEntry(entry)?()=>resolveEntry(entry,"pending"):undefined} onDiscard={!entry.deleted&&entry.estado!=="rechazado"&&(!reservationCardPolicy(entry).canonical||reservationCardPolicy(entry).canCancel)?()=>cancelEntryFromDetails(entry):undefined}/>;
+  const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false) => <GoEntryQuickActions entry={followedEntry(entry)} showState={showState} compact={compact}
     onCancel={() => cancelEntryFromDetails(entry)} onEdit={() => openEntryChange(entry)} onPropose={() => openEntryChange(entry)}
     onAccept={() => { if (entry.changeProposal) acceptProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "aceptado"); }}
     onConfirm={entry.businessBooking && entry.ownerUserId ? () => {
@@ -13553,11 +13563,11 @@ function HomeScreenContent() {
     } : undefined}
     onReject={() => { if (entry.changeProposal) rejectProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "rechazado"); }} />;
 
-  const openEntryMessage = (entry: GoEntry) => {
-    setLandingDetailsId(null);
-    const booking=entry.type==="GO_BOOKING"||entry.type==="GO_RESERVA"||entry.customerBooking||entry.businessBooking;
-    setInitialMessagesBookingId(booking ? String(entry.bookingId || entry.reservationId || entry.id.replace(/^go_booking_(?:cli_|prv_)?/,"")) : null);
-    setInitialMessagesContact(booking ? null : {name:entry.contactName||"",phone:entry.phone||""});
+  const openEntryMessage = (entry: GoEntry,returnTo?:()=>void) => {
+    const context=entryMessageContext(entry);if(!context)return;
+    messageReturnRef.current=returnTo??(()=>setLandingDetailsId(entry.id));
+    setLandingDetailsId(null);setInitialMessagesContext(context);
+    setInitialMessagesBookingId(context.bookingId??null);setInitialMessagesContact(null);
     setTimeout(()=>setMessagesOpen(true),180);
   };
 
@@ -14595,7 +14605,7 @@ function HomeScreenContent() {
           const linked = goLog.find((e) =>
             e.id === `go_booking_cli_${b.id}` || e.id === `go_booking_prv_${b.id}` || e.id === `go_booking_${b.id}`
           );
-          cardAccent = BLUE;
+          cardAccent = ENTRY_COLORS.pending;
           cardTitle  = linked?.contactName || "Cliente";
           cardSub    = linked?.intentLabel || "";
           const start = new Date(b.startDatetime);
@@ -14714,28 +14724,6 @@ function HomeScreenContent() {
                   setLandingDetailsId(item.g.id);
                 }}
                 style={{ gap: Math.round(2 * uiScaleFactor) }}>
-              {/* Tipo de pendiente */}
-              {item.kind === "cambio" && (() => {
-                const _sentCount     = allPendientes.filter(p => p.kind === "cambio" && p.g.estado === "propuesta_pendiente").length;
-                const _receivedCount = allPendientes.filter(p => p.kind === "cambio" && p.g.estado === "propuesto").length;
-                const _kindCount     = isSent ? _sentCount : _receivedCount;
-                const _labelText     = isSent
-                  ? (_kindCount > 1 ? "CAMBIOS PROPUESTOS" : "CAMBIO PROPUESTO")
-                  : (_kindCount > 1 ? "CAMBIOS RECIBIDOS"  : "CAMBIO RECIBIDO");
-                return (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                    <Feather name={isSent ? "clock" : "bell"} size={Math.round(10 * uiScaleFactor)} color={cardAccent} />
-                    <Text style={{ color: cardAccent, fontSize: Math.round(9 * uiScaleFactor), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4, flex: 1 }}>
-                      {_labelText}
-                    </Text>
-                    {_kindCount > 1 && (
-                      <Text style={{ color: cardAccent, fontSize: Math.round(11 * uiScaleFactor), fontFamily: "Inter_900Black", fontWeight: "900", opacity: 0.8 }}>
-                        {_kindCount}
-                      </Text>
-                    )}
-                  </View>
-                );
-              })()}
               {item.kind === "hold" && (
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                   <Feather name="calendar" size={Math.round(10 * uiScaleFactor)} color={cardAccent} />
@@ -14813,7 +14801,7 @@ function HomeScreenContent() {
                     }}
                     style={{ flex: 1, height: Math.round(34 * uiScaleFactor), borderRadius: Math.round(8 * uiScaleFactor), backgroundColor: "rgba(96,165,250,0.14)", borderWidth: 1, borderColor: "rgba(96,165,250,0.44)", alignItems: "center", justifyContent: "center" }}
                   >
-                    <Text style={{ color: "#60a5fa", fontSize: Math.round(11 * uiScaleFactor), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4 }}>CONFIRMAR</Text>
+                    <Text style={{ color: ENTRY_COLORS.accepted, fontSize: Math.round(11 * uiScaleFactor), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4 }}>CONFIRMAR</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     activeOpacity={0.8}
@@ -14827,7 +14815,7 @@ function HomeScreenContent() {
                     }}
                     style={{ flex: 1, height: Math.round(34 * uiScaleFactor), borderRadius: Math.round(8 * uiScaleFactor), backgroundColor: "rgba(239,68,68,0.11)", borderWidth: 1, borderColor: "rgba(239,68,68,0.38)", alignItems: "center", justifyContent: "center" }}
                   >
-                    <Text style={{ color: "#f87171", fontSize: Math.round(11 * uiScaleFactor), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4 }}>RECHAZAR</Text>
+                    <Text style={{ color: ENTRY_COLORS.destructive, fontSize: Math.round(11 * uiScaleFactor), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4 }}>RECHAZAR</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -14866,7 +14854,8 @@ function HomeScreenContent() {
         // Etiqueta compacta para el indicador de posición (sin datos privados)
         const INDICATOR_FEMININE = new Set(["reunion", "comida", "fiesta", "cena", "llamada", "reserva"]);
         const cardLabel =
-          g.type === "TAREA" ? t('task_type_label')
+          entryIsReservation(g) ? entryHeading(g,lang==="en"?"Reservation":"Reserva").toUpperCase()
+          : g.type === "TAREA" ? t('task_type_label')
           : g.intentKey && g.intentKey !== "otro" && g.intentKey !== "general" && g.intentKey !== "generico"
             ? (t(('intent_' + g.intentKey) as any) ?? g.intentLabel ?? "GO").toUpperCase()
             : (g.intentLabel ?? "GO").toUpperCase();
@@ -14974,91 +14963,7 @@ function HomeScreenContent() {
                 {body}
               </Pressable>
 
-              {/* ── PAPELERA — doble confirmación ─────────────────────────────────
-                  1er toque: borde rojo + "¿Borrar?" + timer 2s auto-reset
-                  2º  toque: softDelete + WA "Visita cancelada"              */}
-              {(() => {
-                const isConfirming = nextCardDeleteConfirm === g.id;
-                const TRASH_SZ = Math.round(28 * uiScaleFactor);
-                const handleTrashPress = () => {
-                  if (isConfirming) {
-                    if (nextCardDeleteTimerRef.current) clearTimeout(nextCardDeleteTimerRef.current);
-                    setNextCardDeleteConfirm(null);
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                    softDeleteGo(g.id);
-                    const waPhone = normalizePhoneForWhatsApp(g.phone || "");
-                    if (waPhone) {
-                      const cancelMsg = encodeURIComponent(`❌ Visita cancelada · ${resolveIntentLabel(g).toUpperCase()}${g.time ? ` · ${g.time}` : ""}`);
-                      Linking.openURL(`https://wa.me/${waPhone}?text=${cancelMsg}`).catch(() => {});
-                    }
-                  } else {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                    setNextCardDeleteConfirm(g.id);
-                    if (nextCardDeleteTimerRef.current) clearTimeout(nextCardDeleteTimerRef.current);
-                    nextCardDeleteTimerRef.current = setTimeout(() => {
-                      setNextCardDeleteConfirm(null);
-                    }, 2000);
-                  }
-                };
-                return (
-                  <TouchableOpacity
-                    key="trash-btn"
-                    onPress={handleTrashPress}
-                    hitSlop={8}
-                    activeOpacity={0.7}
-                    style={{
-                      position: "absolute",
-                      top: 6,
-                      right: 6,
-                      width: TRASH_SZ,
-                      height: TRASH_SZ,
-                      borderRadius: TRASH_SZ / 2,
-                      backgroundColor: isConfirming ? "rgba(239,68,68,0.18)" : "rgba(0,0,0,0.06)",
-                      borderWidth: 1,
-                      borderColor: isConfirming ? "#ef4444" : "#c0392b",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Feather
-                      name={isConfirming ? "alert-triangle" : "trash-2"}
-                      size={Math.round(12 * uiScaleFactor)}
-                      color={isConfirming ? "#ef4444" : "#ff4444"}
-                    />
-                  </TouchableOpacity>
-                );
-              })()}
-              {/* ── LÁPIZ DE NOTA — solo cuando hay notas; posicionado bajo la papelera ── */}
-              {!!g.notes?.trim() && (() => {
-                const BTN_SZ = Math.round(28 * uiScaleFactor);
-                const trashBottom = 6 + BTN_SZ; // top del trash (6) + alto del botón
-                return (
-                  <View
-                    key="note-indicator"
-                    pointerEvents="none"
-                    style={{
-                      position: "absolute",
-                      top: trashBottom + 4,
-                      right: 4,
-                      width: BTN_SZ,
-                      height: BTN_SZ,
-                      borderRadius: BTN_SZ / 2,
-                      backgroundColor: "rgba(96,165,250,0.10)",
-                      borderWidth: 1,
-                      borderColor: "rgba(96,165,250,0.35)",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Feather
-                      name="edit-2"
-                      size={Math.round(14 * uiScaleFactor)}
-                      color="#93c5fd"
-                    />
-                  </View>
-                );
-              })()}
+
               </View>
               </Animated.View>
               )}
@@ -15171,6 +15076,10 @@ function HomeScreenContent() {
 
               {/* Cabecera fija y tarjeta reutilizan el mismo gesto horizontal. */}
               <View style={{ gap: 3 }}>
+                  <View style={{alignSelf:"flex-end",flexDirection:"row",alignItems:"center",gap:4}}>
+                    {!!g.notes?.trim()&&<View key="note-indicator" pointerEvents="none" style={{width:28,height:28,borderRadius:14,backgroundColor:"rgba(96,165,250,0.10)",borderWidth:1,borderColor:"rgba(96,165,250,0.35)",alignItems:"center",justifyContent:"center"}}><Feather name="edit-2" size={14} color="#93c5fd"/></View>}
+                    {renderEntryMicroActions(g)}
+                  </View>
                   {/* Contador de tiempo — solo si tiene hora y es hoy o inminente */}
                   {(() => {
                     if (!g.time) return null;
@@ -15205,7 +15114,7 @@ function HomeScreenContent() {
                     <Text testID="landing-task-description" numberOfLines={1} style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}>{g.notes}</Text>
                   )}
                   {/* Línea 1: QUIÉN — contacto completo, nunca truncado */}
-                  {!!displayContact(entryIdentity(g.contactName), g.phone) && (
+                  {!entryIsReservation(g) && !!displayContact(entryIdentity(g.contactName), g.phone) && (
                     <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
                       style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}
                     >
@@ -15402,7 +15311,7 @@ function HomeScreenContent() {
       )}
 
       </LandingContentViewport>
-      <GoEntryDetailsSheet entry={landingDetailsEntry} onClose={() => setLandingDetailsId(null)} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry) : undefined}>
+      <GoEntryDetailsSheet handedness={handedness} entry={landingDetailsEntry?followedEntry(landingDetailsEntry):null} onClose={() => setLandingDetailsId(null)} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry) : undefined}>
         {landingDetailsEntry && renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}
       </GoEntryDetailsSheet>
 
@@ -20153,7 +20062,7 @@ function HomeScreenContent() {
             {/* AgendaBoard shares the existing view/settings header with month navigation. */}
             <View testID="calendar-agenda-viewport" style={{ flex: 1 }}>
             {demoCustomerCalendarSelected ? (demoBookingRepository
-              ? <View style={{ flex: 1 }}><DemoCustomerCalendar repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
+              ? <View style={{ flex: 1 }}><DemoCustomerCalendar onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
               : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
                 renderHeader={monthNavigation => (<View testID="calendar-header"
               pointerEvents={showBookingFromCal ? "none" : "auto"}
@@ -20279,10 +20188,8 @@ function HomeScreenContent() {
                   if (!g) return;
                   openEntryChange(g, "calendar");
                 }}
-                onOpenMessage={(item) => {
-                  const g = goLog.find((x) => x.id === item.id);
-                  if (g) openEntryMessage(g);
-                }}
+                onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness}
+                onDeleteItem={id=>{const entry=goLog.find(e=>e.id===id);if(entry)cancelEntryFromDetails(entry);}}
                 onSaveBookingMessage={(id, msg) => {
                   setGoLog((prev) => {
                     const next = prev.map((g) => g.id === id ? { ...g, bookingMessageToStaff: msg } : g);
@@ -21490,7 +21397,7 @@ function HomeScreenContent() {
           {/* 📅 RESERVAS — overlay completo dentro del Modal del calendario */}
           {calReservasOpen && (
             <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
-              <GoReservasConfigScreen
+              <GoReservasConfigScreen onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry}
                 onClose={() => setCalReservasOpen(false)}
                 onOpenGo={openAi}
                 onCreateTaskAtTime={openCalendarSlotTask}
@@ -23117,12 +23024,12 @@ function HomeScreenContent() {
                 // borde lateral, check y glow. No depende de g.color.
                 const stateColor =
                   g.estado === "aceptado"
-                    ? "#16a34a"                          // verde
+                    ? ENTRY_COLORS.accepted                 // verde
                     : isProposalEstado
-                      ? "#f97316"                        // naranja
+                      ? ENTRY_COLORS.change                   // naranja
                       : g.estado === "rechazado" || g.deleted
-                        ? "#dc2626"                      // rojo
-                        : "#eab308";                     // amarillo (pendiente)
+                        ? ENTRY_COLORS.destructive              // rojo
+                        : ENTRY_COLORS.pending;                 // amarillo (pendiente)
                 const checkBg =
                   g.estado === "aceptado" || isProposalEstado
                     ? stateColor
@@ -23217,15 +23124,15 @@ function HomeScreenContent() {
                         g.estado === "aceptado"
                           ? `${stateColor}99`
                           : isProposalEstado
-                            ? "rgba(249,115,22,0.80)"
+                            ? "rgba(255,140,0,0.80)"
                             : g.estado === "rechazado"
-                              ? "rgba(220,38,38,0.80)"
+                              ? "rgba(255,0,0,0.80)"
                               : "rgba(234,179,8,0.80)",
                       alignItems: "center",
                     }}
                   >
                     {isProposalEstado ? (
-                      <Text style={{ color: "#f97316", fontSize: lv(9), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.6, textAlign: "center" }}>
+                      <Text style={{ color: ENTRY_COLORS.change, fontSize: lv(9), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.6, textAlign: "center" }}>
                         {g.estado === "propuesta_pendiente" ? t('biz_change_proposed') : t('biz_change_received')}
                       </Text>
                     ) : (
@@ -23235,8 +23142,8 @@ function HomeScreenContent() {
                             g.estado === "aceptado"
                               ? stateColor
                               : g.estado === "rechazado"
-                                ? "#dc2626"
-                                : "#eab308",
+                                ? ENTRY_COLORS.destructive
+                                : ENTRY_COLORS.pending,
                           fontSize: lv(9),
                           fontFamily: "Inter_700Bold", fontWeight: "800",
                           letterSpacing: 0.6,
@@ -23248,8 +23155,8 @@ function HomeScreenContent() {
                   </TouchableOpacity>
                 );
                 const proposalStatusLine = compactProposal && g.estado === "propuesta_pendiente" ? (<View testID={"go-proposal-substatus-" + g.id} style={{ flexDirection: "row", alignItems: "center", gap: lv(5), paddingTop: 0 }}>
-                            <Feather name="clock" size={lv(11)} color="#f97316" />
-                            <Text style={{ color: "#f97316", fontSize: lv(10), fontWeight: "700", flexShrink: 1 }}>
+                            <Feather name="clock" size={lv(11)} color={ENTRY_COLORS.change} />
+                            <Text style={{ color: ENTRY_COLORS.change, fontSize: lv(10), fontWeight: "700", flexShrink: 1 }}>
                               {t('biz_booking_awaiting')}
                             </Text>
                           </View>) : null;
@@ -23314,7 +23221,7 @@ function HomeScreenContent() {
                     <View testID={compactProposal ? "go-proposal-header-" + g.id : undefined} style={{ flexDirection: "row", alignItems: "center", flexWrap: compactProposal ? "wrap" : undefined, gap: compactProposal ? lv(3) : lv(8), marginBottom: lv(compactProposal ? 1 : 3) }}>
                       {handedness === "left" && isProposalEstado && statusPill}
                       {/* CHECKBOX — izquierda si ZURDO */}
-                      {handedness === "left" && (
+                      {handedness === "left" && !canResolveEntry(g) && !entryIsReservation(g) && (
                         <TouchableOpacity
                           onPress={(e) => {
                             if ((e as any)?.stopPropagation) (e as any).stopPropagation();
@@ -23409,7 +23316,7 @@ function HomeScreenContent() {
                         style={{ flex: 1, minWidth: compactProposal ? lv((g.notes?.trim() || g.intentLabel || "").length > 18 ? 115 : 64) : 0 }}
                       >
                         {(() => {
-                          const realTitle = g.notes?.trim() || g.intentLabel;
+                          const realTitle = entryIsReservation(g)?entryHeading(g,lang==="en"?"Reservation":"Reserva"):g.notes?.trim() || g.intentLabel;
                           const title = (
                             <Text testID={compactProposal ? "go-proposal-title-" + g.id : undefined} style={{ color: "#ffffff", fontSize: lv(14), fontWeight: "700", lineHeight: lv(18) }} numberOfLines={compactProposal ? undefined : 1}>
                               {realTitle}
@@ -23441,8 +23348,9 @@ function HomeScreenContent() {
                         </TouchableOpacity>
                       )}
                       {handedness === "right" && isProposalEstado && statusPill}
+                      {!isProposalEstado && (canResolveEntry(g)||entryIsReservation(g)) && renderEntryMicroActions(g)}
                       {/* CHECKBOX — derecha si DIESTRO */}
-                      {handedness === "right" && (
+                      {handedness === "right" && !canResolveEntry(g) && !entryIsReservation(g) && (
                         <TouchableOpacity
                           onPress={(e) => {
                             if ((e as any)?.stopPropagation) (e as any).stopPropagation();
@@ -23521,7 +23429,7 @@ function HomeScreenContent() {
                                 </View>
                               );
                             }
-                            if (g.contactName || g.phone) {
+                            if (!entryIsReservation(g) && (g.contactName || g.phone)) {
                               const n = displayContact(g.contactName, g.phone);
                               if (!n) return null;
                               return (
@@ -23582,10 +23490,10 @@ function HomeScreenContent() {
                         {(g as any).type === "GO_BOOKING" && (() => {
                           const bs: ReservationStatus = (g as any).bookingStatus ?? "confirmada";
                           const bsConfig: Record<ReservationStatus, { label: string; color: string }> = {
-                            pendiente:        { label: t('status_pending_label').toUpperCase(),        color: "#eab308" },
+                            pendiente:        { label: t('status_pending_label').toUpperCase(),        color: ENTRY_COLORS.pending },
                             confirmada:       { label: t('status_confirmed').toUpperCase(),       color: "#22c55e" },
-                            cancelada:        { label: t('label_visit_cancelled_tag').toUpperCase(),        color: "#ef4444" },
-                            cambio_pendiente: { label: t('floor_reservation_cambio_pendiente').toUpperCase(), color: "#f97316" },
+                            cancelada:        { label: t('label_visit_cancelled_tag').toUpperCase(),        color: ENTRY_COLORS.destructive },
+                            cambio_pendiente: { label: t('floor_reservation_cambio_pendiente').toUpperCase(), color: ENTRY_COLORS.change },
                             completada:       { label: t('floor_reservation_completada').toUpperCase(),       color: "#94a3b8" },
                           };
                           const { label: bsLabel, color: bsColor } = bsConfig[bs] ?? bsConfig.confirmada;
@@ -23613,8 +23521,8 @@ function HomeScreenContent() {
                         marginTop: lv(3),
                         borderRadius: lv(10),
                         borderWidth: 1.5,
-                        borderColor: "rgba(249,115,22,0.65)",
-                        backgroundColor: "rgba(249,115,22,0.13)",
+                        borderColor: "rgba(255,140,0,0.65)",
+                        backgroundColor: "rgba(255,140,0,0.13)",
                         overflow: "hidden",
                         paddingHorizontal: lv(8),
                         paddingVertical: lv(2),
@@ -23635,17 +23543,17 @@ function HomeScreenContent() {
                           </Text>
                         </View>
                         {/* Separador */}
-                        <View style={{ height: 1, backgroundColor: "rgba(249,115,22,0.25)" }} />
+                        <View style={{ height: 1, backgroundColor: "rgba(255,140,0,0.25)" }} />
                         {/* Propuesta cambio */}
                         <View testID={"go-proposal-next-" + g.id} style={{ flexDirection: "row", alignItems: "center", gap: lv(8) }}>
-                          <Text numberOfLines={1} style={{ flexShrink: 0, color: "#f97316", fontSize: Math.min(lv(8), 8), fontWeight: "700", letterSpacing: 0.6 }}>
+                          <Text numberOfLines={1} style={{ flexShrink: 0, color: ENTRY_COLORS.change, fontSize: Math.min(lv(8), 8), fontWeight: "700", letterSpacing: 0.6 }}>
                             {t('tasks_change_proposal').toUpperCase()}
                           </Text>
                           <Text
                             numberOfLines={1}
                             adjustsFontSizeToFit minimumFontScale={0.85}
                             accessibilityLabel={[localizeLabel((g as any).changeProposal.date || ""), (g as any).changeProposal.time].filter(Boolean).join(" · ")}
-                            style={{ color: "#f97316", fontSize: Math.min(lv(13), 13), fontFamily: "Inter_700Bold", fontWeight: "800", flex: 1, minWidth: 0, textAlign: "right" }}
+                            style={{ color: ENTRY_COLORS.change, fontSize: Math.min(lv(13), 13), fontFamily: "Inter_700Bold", fontWeight: "800", flex: 1, minWidth: 0, textAlign: "right" }}
                           >
                             {formatCompactProposalSlot(localizeLabel((g as any).changeProposal.date || ""), (g as any).changeProposal.dateISO, (g as any).changeProposal.time)}
                           </Text>
@@ -23653,7 +23561,7 @@ function HomeScreenContent() {
                         {/* Nota opcional */}
                         </View>
 {!!(g as any).changeProposal.note && (
-                          <Text testID={"go-proposal-note-" + g.id} style={{ marginTop: lv(3), color: "rgba(249,115,22,0.80)", fontSize: lv(9), lineHeight: lv(13) }}>
+                          <Text testID={"go-proposal-note-" + g.id} style={{ marginTop: lv(3), color: "rgba(255,140,0,0.80)", fontSize: lv(9), lineHeight: lv(13) }}>
                             {(g as any).changeProposal.note}
                           </Text>
                         )}
@@ -23671,7 +23579,7 @@ function HomeScreenContent() {
                               <TouchableOpacity
                                 onPress={(e) => { if ((e as any)?.stopPropagation) (e as any).stopPropagation(); Haptics.selectionAsync().catch(() => {}); rejectProposal(g.id); }}
                                 activeOpacity={0.7}
-                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: "#dc2626" }}
+                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: ENTRY_COLORS.destructive }}
                               >
                                 <Feather name="x" size={lv(13)} color="#fff" />
                                 <Text style={{ color: "#fff", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🔴 ' + t('reject')}</Text>
@@ -23680,9 +23588,9 @@ function HomeScreenContent() {
                             <TouchableOpacity
                               onPress={(e) => { if ((e as any)?.stopPropagation) (e as any).stopPropagation(); Haptics.selectionAsync().catch(() => {}); openProposalFromList({ id: g.id, time: g.time, place: (g as any).place || "" }); }}
                               activeOpacity={0.7}
-                              style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: "rgba(249,115,22,0.15)", borderWidth: 1, borderColor: "rgba(249,115,22,0.45)" }}
+                              style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: "rgba(255,140,0,0.15)", borderWidth: 1, borderColor: "rgba(255,140,0,0.45)" }}
                             >
-                              <Text style={{ color: "#f97316", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🟠 ' + t('tasks_propose')}</Text>
+                              <Text style={{ color: ENTRY_COLORS.change, fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🟠 ' + t('tasks_propose')}</Text>
                             </TouchableOpacity>
                           </View>)}
 </React.Fragment>)}
@@ -23720,7 +23628,7 @@ function HomeScreenContent() {
                             k: "accept",
                             label: t('accept').toUpperCase(),
                             icon: "check" as const,
-                            bg: "#16a34a",
+                            bg: ENTRY_COLORS.accepted,
                             textColor: "#ffffff",
                             fontSize: lv(10),
                             fn: () => {
@@ -23734,7 +23642,7 @@ function HomeScreenContent() {
                             k: "reject",
                             label: t('reject').toUpperCase(),
                             icon: "x" as const,
-                            bg: "#dc2626",
+                            bg: ENTRY_COLORS.destructive,
                             textColor: "#ffffff",
                             fontSize: lv(9),
                             fn: () => {
@@ -23748,7 +23656,7 @@ function HomeScreenContent() {
                             k: "propose",
                             label: t('tasks_propose_change').toUpperCase(),
                             icon: "edit-3" as const,
-                            bg: "#d97706",
+                            bg: ENTRY_COLORS.change,
                             textColor: "#ffffff",
                             fontSize: lv(9),
                             twoLine: true,
@@ -24348,11 +24256,11 @@ function HomeScreenContent() {
       {/* MENSAJES GO — pantalla de mensajería interna */}
       <MessagesScreen
         visible={messagesOpen}
-        onClose={() => { setMessagesOpen(false); setInitialMessagesContact(null); setInitialMessagesBookingId(null); }}
+        onClose={() => { setMessagesOpen(false); setInitialMessagesContact(null); setInitialMessagesBookingId(null);setInitialMessagesContext(null);const back=messageReturnRef.current;messageReturnRef.current=null;if(back)setTimeout(back,180); }}
         recentContacts={recentContacts}
         userGoPhone={userGoPhone}
         initialContact={initialMessagesContact ?? undefined}
-        initialBookingId={initialMessagesBookingId ?? undefined}
+        initialBookingId={initialMessagesBookingId ?? undefined} initialContext={initialMessagesContext??undefined}
         onCreateGo={({ contactName: cName, contactPhone: cPhone, contextText }) => {
           setMessagesOpen(false);
           setContactName(cName);
@@ -25431,9 +25339,9 @@ function HomeScreenContent() {
               const intentColor = intentDef?.color || g.color || "#60a5fa";
               const isPending = g.estado === "pendiente";
               const stateColor =
-                g.estado === "aceptado" ? "#16a34a"
-                : g.estado === "rechazado" ? "#dc2626"
-                : "#60a5fa";
+                g.estado === "aceptado" ? ENTRY_COLORS.accepted
+                : g.estado === "rechazado" ? ENTRY_COLORS.destructive
+                : ["propuesto","propuesta_pendiente"].includes(g.estado)?ENTRY_COLORS.change:ENTRY_COLORS.pending;
               const stateLabel =
                 g.estado === "aceptado" ? t('status_accepted')
                 : g.estado === "rechazado" ? t('status_rejected')
@@ -26400,7 +26308,7 @@ function HomeScreenContent() {
       />
 
       {/* ── EMPRESA GO — Arquitectura económica completa ──────────────── */}
-      {businessAccess.allowed && !goView.isOwner && goView.view === "BUSINESS" && !adminAccess.checking && <EmpresaPanel
+      {businessAccess.allowed && !goView.isOwner && goView.view === "BUSINESS" && !adminAccess.checking && <EmpresaPanel onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness}
         visible={empresaOpen}
         initialModulo={empresaModulo as any}
         onClose={() => { setEmpresaOpen(false); setEmpresaModulo("home"); }}
@@ -26426,7 +26334,7 @@ function HomeScreenContent() {
       />}
 
       {goView.isBusinessPreview && <GoBusinessPreviewProvider>
-        <EmpresaPanel key={ownerDemo.demo?.businessId} visible={empresaOpen} previewReadOnly bookingChangeReturnDate={bookingReturnDateRef.current} onProposeBookingChange={entry=>openBookingProposal(entry,"business")}
+        <EmpresaPanel onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} key={ownerDemo.demo?.businessId} visible={empresaOpen} previewReadOnly bookingChangeReturnDate={bookingReturnDateRef.current} onProposeBookingChange={entry=>openBookingProposal(entry,"business")}
           initialModulo={empresaDemoRoute === "configuration" ? "empresa_config" : empresaDemoRoute === "reservations" ? "reservas_config" : "home"}
           initialCompaniesOpen={empresaDemoRoute === "companies"} onDemoNavigate={setEmpresaDemoRoute}
           onClose={() => { setEmpresaOpenState(false); setEmpresaDemoRoute("home"); }} onOpenContext={openOwnerContextSelector} />
@@ -26516,177 +26424,12 @@ function HomeScreenContent() {
         </TouchableOpacity>
       </Animated.View>
 
-      {/* ── BOOKING DETAIL MODAL — tarjeta ampliada al tocar ficha GO_BOOKING ── */}
-    <Modal
-      visible={calBookingDetailEntry !== null}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setCalBookingDetailEntry(null)}
-      statusBarTranslucent
-    >
-      <Pressable
-        style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "center", alignItems: "center", paddingHorizontal: 24 }}
-        onPress={() => setCalBookingDetailEntry(null)}
-      >
-        <Pressable
-          onPress={() => {}}
-          style={{
-            backgroundColor: "#18181b",
-            borderRadius: 22,
-            paddingTop: 18,
-            paddingBottom: 22,
-            paddingHorizontal: 20,
-            width: "100%",
-            maxWidth: 420,
-            borderWidth: 1,
-            borderColor: "rgba(255,255,255,0.10)",
-            shadowColor: "#000",
-            shadowOpacity: 0.65,
-            shadowRadius: 30,
-            shadowOffset: { width: 0, height: 10 },
-            elevation: 16,
-          }}
-        >
-          {/* ── Cabecera: icono + título + X ── */}
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: "#4A80BD1A", alignItems: "center", justifyContent: "center" }}>
-                <Feather name="calendar" size={16} color="#4A80BD" />
-              </View>
-              <Text style={{ color: "#ffffff", fontSize: 17, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.2 }}>{t("biz_booking_intent_label")}</Text>
-            </View>
-            <TouchableOpacity
-              onPress={() => setCalBookingDetailEntry(null)}
-              hitSlop={12}
-              style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: "rgba(255,255,255,0.08)", alignItems: "center", justifyContent: "center" }}
-            >
-              <Feather name="x" size={16} color="rgba(255,255,255,0.75)" />
-            </TouchableOpacity>
-          </View>
-
-          {/* ── Estado pill ── */}
-          {calBookingDetailEntry && (() => {
-            const e = calBookingDetailEntry as any;
-            const confirmed = (e.bookingStatus || e.estado || "confirmada").toLowerCase() === "confirmada";
-            return (
-              <View style={{ flexDirection: "row", marginBottom: 18 }}>
-                <View style={{
-                  paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20,
-                  backgroundColor: confirmed ? "#16a34a18" : "#eab30818",
-                  borderWidth: 1,
-                  borderColor: confirmed ? "#16a34a88" : "#eab30888",
-                }}>
-                  <Text style={{ color: confirmed ? "#4ade80" : "#fde047", fontSize: 11, fontWeight: "700", letterSpacing: 1.2 }}>
-                    {(e.bookingStatus || e.estado || "confirmada").toUpperCase()}
-                  </Text>
-                </View>
-              </View>
-            );
-          })()}
-
-          {/* ── Filas de detalle ── */}
-          {calBookingDetailEntry && (() => {
-            const e = calBookingDetailEntry as any;
-            const rows: { icon: string; label: string; value: string }[] = [];
-            if (e.contactName) rows.push({ icon: "home", label: "Empresa", value: e.contactName });
-            if (e.notes)       rows.push({ icon: "scissors", label: "Servicio", value: e.notes });
-            if (e.professionalName) rows.push({ icon: "user", label: "Profesional", value: e.professionalName });
-            if (e.date)        rows.push({ icon: "calendar", label: "Fecha", value: e.date });
-            if (e.time)        rows.push({ icon: "clock", label: "Hora", value: e.time });
-            if (e.duration)    rows.push({ icon: "activity", label: "Duración", value: e.duration });
-            if (e.place)       rows.push({ icon: "map-pin", label: "Dirección", value: e.place });
-            return (
-              <View style={{ gap: 14 }}>
-                {rows.map((r) => (
-                  <View key={r.label} style={{ flexDirection: "row", gap: 12, alignItems: "flex-start" }}>
-                    <View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>
-                      <Feather name={r.icon as keyof typeof Feather.glyphMap} size={13} color="rgba(255,255,255,0.55)" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 10, fontWeight: "700", letterSpacing: 1.1, textTransform: "uppercase", marginBottom: 2 }}>{r.label}</Text>
-                      <Text style={{ color: "#f0f0f0", fontSize: 14, fontWeight: "500", lineHeight: 20 }}>{r.value}</Text>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            );
-          })()}
-
-          {/* ── BLOQUE CAMBIO PROPUESTO / ACEPTADO — visible cuando existe changeProposal ── */}
-          {calBookingDetailEntry && (() => {
-            const e = calBookingDetailEntry as any;
-            const cp = e.changeProposal;
-            if (!cp) return null;
-            const _detAccepted  = e.estado === "aceptado";
-            const _detColor     = _detAccepted ? "#22c55e"              : "#FF8C00";
-            const _detAlpha75   = _detAccepted ? "rgba(34,197,94,0.75)" : "rgba(255,140,0,0.75)";
-            const _detAlpha22   = _detAccepted ? "rgba(34,197,94,0.22)" : "rgba(255,140,0,0.22)";
-            const _detAlpha18   = _detAccepted ? "rgba(34,197,94,0.18)" : "rgba(255,140,0,0.18)";
-            const _detAlpha16   = _detAccepted ? "rgba(34,197,94,0.16)" : "rgba(255,140,0,0.16)";
-            // Usar datos guardados directamente — nunca recalcular desde ISO ni sistema
-            const _clean = (s: string) => (s || "").replace(/,\s*/g, " ").trim();
-            const _origLabel = [_clean(cp.originalDate), cp.originalTime].filter(Boolean).join(" · ");
-            const _propLabel  = [_clean(cp.date), cp.time].filter(Boolean).join(" · ");
-            const _detHeaderLabel = _detAccepted
-              ? "CAMBIO ACEPTADO"
-              : e.estado === "propuesto" ? "CAMBIO RECIBIDO" : "CAMBIO PROPUESTO";
-            const _detIcon = _detAccepted ? "check-circle" : "refresh-cw";
-            return (
-              <View style={{
-                marginTop: 8,
-                borderRadius: 14,
-                borderWidth: 1.5,
-                borderColor: _detAlpha75,
-                backgroundColor: "rgba(8,6,4,0.92)",
-                padding: 16,
-                gap: 14,
-              }}>
-                {/* Header */}
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <View style={{ width: 28, height: 28, borderRadius: 9, backgroundColor: _detAlpha16, alignItems: "center", justifyContent: "center" }}>
-                    <Feather name={_detIcon} size={13} color={_detColor} />
-                  </View>
-                  <Text style={{ color: _detColor, fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.5 }}>{_detHeaderLabel}</Text>
-                </View>
-
-                <View style={{ height: 1, backgroundColor: _detAlpha22 }} />
-
-                {/* Fecha reserva */}
-                <View style={{ gap: 4 }}>
-                  <Text style={{ color: _detColor, fontSize: 10, fontWeight: "700", letterSpacing: 1.1, textTransform: "uppercase" }}>Fecha reserva</Text>
-                  <Text style={{ color: "rgba(255,255,255,0.90)", fontSize: 15, fontWeight: "700", lineHeight: 20 }} numberOfLines={1}>
-                    {_origLabel || "—"}
-                  </Text>
-                </View>
-
-                <View style={{ height: 1, backgroundColor: _detAlpha18 }} />
-
-                {/* Fecha propuesta / nueva fecha */}
-                <View style={{ gap: 4 }}>
-                  <Text style={{ color: _detColor, fontSize: 10, fontWeight: "700", letterSpacing: 1.1, textTransform: "uppercase" }}>{_detAccepted ? "Nueva fecha" : "Fecha propuesta"}</Text>
-                  <Text style={{ color: "rgba(255,255,255,0.90)", fontSize: 15, fontWeight: "700", lineHeight: 20 }} numberOfLines={1}>
-                    {_propLabel || "—"}
-                  </Text>
-                </View>
-
-                <View style={{ height: 1, backgroundColor: _detAlpha18 }} />
-
-                {/* Estado */}
-                <View style={{ gap: 4 }}>
-                  <Text style={{ color: _detColor, fontSize: 10, fontWeight: "700", letterSpacing: 1.1, textTransform: "uppercase" }}>Estado</Text>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Feather name={_detAccepted ? "check" : "clock"} size={12} color={_detColor} />
-                    <Text style={{ color: "rgba(255,255,255,0.82)", fontSize: 13, fontWeight: "600" }}>
-                      {_detAccepted ? "Reserva actualizada" : e.estado === "propuesta_pendiente" ? "Esperando respuesta" : "CAMBIO RECIBIDO"}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            );
-          })()}
-        </Pressable>
-      </Pressable>
-    </Modal>
+      {/* Lists and Calendar share the same expanded entry, contract and messaging. */}
+      <GoEntryDetailsSheet entry={calBookingDetailEntry?goLog.find(e=>e.id===calBookingDetailEntry.id)??null:null} handedness={handedness}
+        onClose={()=>setCalBookingDetailEntry(null)}
+        onMessage={calBookingDetailEntry?()=>{const entry=calBookingDetailEntry;setCalBookingDetailEntry(null);openEntryMessage(entry,()=>setCalBookingDetailEntry(entry));}:undefined}>
+        {calBookingDetailEntry&&renderEntryQuickActions(calBookingDetailEntry,!(calBookingDetailEntry.customerBooking||calBookingDetailEntry.businessBooking))}
+      </GoEntryDetailsSheet>
 
     </View>
     </GestureDetector>

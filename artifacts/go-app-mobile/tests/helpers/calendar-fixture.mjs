@@ -17,7 +17,7 @@ export function fixture({ now } = {}) {
     constructor(...args) { super(...(args.length ? args : [now ?? Date.now()])); }
     static now() { return now === undefined ? Date.now() : new Date(now).getTime(); }
   }
-  const slots = [], cache = new Map();
+  const slots = [], cache = new Map(), timers=[];
   let cursor = 0, effects = [], language = 'es';
   const react = {
     createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }),
@@ -92,7 +92,7 @@ export function fixture({ now } = {}) {
     }).outputText;
     vm.runInNewContext(code, {
       exports, console: { log() {}, warn() {}, error: console.error }, Date: Clock, Set, Map,
-      setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
+      setTimeout: fn => {timers.push(fn);return timers.length;}, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
       require(name) {
         if (name in mocks) return mocks[name];
         if (name === '@/hooks/useBusinessBookings') return load('hooks/useBusinessBookings.ts');
@@ -109,6 +109,7 @@ export function fixture({ now } = {}) {
   }
   return {
     urls,
+    runTimers(){const pending=timers.splice(0);pending.forEach(fn=>fn());},
     load,
     setLanguage: value => { language = value; },
     render(component, props) {

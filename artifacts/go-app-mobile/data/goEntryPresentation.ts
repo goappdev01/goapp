@@ -34,6 +34,18 @@ export function entryHeading(entry: GoEntry, unknown: string): string {
     : entryIdentity(entry.notes) || entry.intentLabel || unknown);
 }
 
+export function entryIsReservation(entry: GoEntry): boolean {
+  return !!(entry.customerBooking || entry.businessBooking || entry.bookingPerspective || ["GO_BOOKING","GO_RESERVA"].includes(entry.type ?? ""));
+}
+
+/** Read context from the same authorized card; server still resolves every recipient. */
+export function entryMessageContext(entry: GoEntry) {
+  if(entryIsInternal(entry))return null;
+  return { actionId:entry.id, bookingId:entryIsReservation(entry) ? String(entry.bookingId || entry.reservationId || entry.id.replace(/^go_booking_(?:cli_|prv_)?/,"")) : undefined,
+    name:entryIdentity(entry.contactName),phone:entry.phone||"",date:entry.date||entry.dateISO,time:entry.time,
+    kind:entryIsReservation(entry)?"booking" as const:"task" as const };
+}
+
 export function entryProposalPending(entry: GoEntry): boolean {
   return !!entry.changeProposal && ["propuesto", "propuesta_pendiente"].includes(entry.estado);
 }

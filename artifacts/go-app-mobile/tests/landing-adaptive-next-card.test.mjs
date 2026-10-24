@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import {createRequire} from 'node:module';
-import {renderEntryQuickActions} from './helpers/entry-details-fixture.mjs';
+import {renderEntryQuickActions,renderEntryMicroActions,entryIsReservation} from './helpers/entry-details-fixture.mjs';
 const require=createRequire(path.join(process.cwd(),'package.json'));
 const {React,createRoot,document,rn,ts,evaluate}=require('./tests/helpers/react-lifecycle.cjs');
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),nodes=[];
@@ -46,7 +46,7 @@ async function fixture(profile,{bodyHeight=40,availableHeight=278,scale=1,place=
  function ScrollView(props){const [offset,setOffset]=React.useState(0);propsById.set('scroll',props);propsById.set('drag',setOffset);return React.createElement('div',{'data-testid':props.testID,'data-native':'ScrollView','data-offset':offset,'data-style':JSON.stringify(props.style)},props.children);}
  const native={...rn,View,ScrollView,Pressable:View,TouchableOpacity:View};
  const shared=evaluate('components/landing/LandingContentViewport.tsx',{'react-native':native});
- const scope={React,View,Animated:{View},Pressable:View,TouchableOpacity:View,Text:rn.Text,Feather:()=>null,entryIdentity:e=>e||'',renderEntryQuickActions,lang:'es',
+ const scope={React,View,Animated:{View},Pressable:View,TouchableOpacity:View,Text:rn.Text,Feather:()=>null,entryIdentity:e=>e||'',renderEntryQuickActions,renderEntryMicroActions,entryIsReservation,lang:'es',
   nextCardPanRef:{panHandlers:{onMoveShouldSetResponder:()=>false}},nextCardSlideAnim:0,nextCardDeleteConfirm:null,nextCardDeleteTimerRef:{current:null},
   setNextCardDeleteConfirm(){},Haptics:{impactAsync:()=>Promise.resolve(),ImpactFeedbackStyle:{Light:'light',Medium:'medium'}},startRelatedGoAction:g=>actions.push('long:'+g.id),
   aChange:{fn:()=>actions.push('open')},setLandingDetailsId:()=>actions.push('open'),nextSwipeHintAnim:{interpolate:()=>0},nextSwipeHintStage:0,
@@ -60,6 +60,7 @@ async function fixture(profile,{bodyHeight=40,availableHeight=278,scale=1,place=
  let current={bodyHeight,availableHeight,place,entryType,notes,opened:true};
  function Root(){const [state,set]=React.useState(current);current=state;change=set;
   scope.g={id:'same-appointment',contactName:'Contacto completo',place:state.place,dateISO:'2032-10-16',type:state.entryType,notes:state.notes};
+  scope.cardLabel=entryIsReservation(scope.g)?scope.g.contactName.toUpperCase():'TAREA';
   scope.landingPanels={next:{height:state.availableHeight}};scope.nextCardAvailableHeight=state.availableHeight;
   return React.createElement(View,{testID:'bottom-anchored-panel',style:{position:'absolute',bottom:300}},state.opened&&scope.exportsRender());}
  const container=document.createElement('div'),root=createRoot(container);await settle(()=>root.render(React.createElement(Root)));
@@ -74,7 +75,7 @@ for(const profile of profiles)for(const [label,height]of [['two lines',36],['thr
    const body=byId(f.container,'landing-card-body'),frame=byId(f.container,'landing-information-frame'),footer=byId(f.container,'landing-card-operations');
    assert.equal(body.attributes['data-native'],'View');assert.ok(dom(frame).includes(body));
    for(const node of [body,frame]){const style=JSON.parse(node.attributes['data-style']);assert.equal(style.height,undefined);assert.equal(style.maxHeight,undefined);assert.equal(style.overflow,undefined);assert.equal(style.flexShrink,0);}
-   assert.ok(f.container.textContent.includes(address));assert.ok(f.container.textContent.includes('Contacto completo'));
+   assert.ok(f.container.textContent.includes(address));assert.ok(/Contacto completo|CONTACTO COMPLETO/.test(f.container.textContent));
    const actions=byId(f.container,'entry-quick-actions');assert.ok(dom(frame).includes(actions));assert.ok(!dom(footer).includes(actions),'reservation/task quick actions are inside their information card');
    const savedFooter=footer.attributes['data-style'];await f.press();await f.press(true);assert.deepEqual(f.actions,['open','long:same-appointment']);
    await f.update({opened:false});assert.equal(byId(f.container,'landing-information-frame'),undefined);

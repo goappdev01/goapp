@@ -57,8 +57,8 @@ import { formatDayLabel, formatISODate, getDayOffset, getToday } from "../lib/ti
 import { CalSizeKey, getCalColumnW, DEFAULT_GO_RENDER_PRESET } from "../constants/goSizes";
 import { trSector } from "@/data/goSectorTranslations";
 import { reservationCardPolicy } from "@/data/reservationCardPolicy";
-import { GoEntryDetailsSheet, GoEntryQuickActions } from "./GoEntryDetails";
-import { entryHeading, entryIdentity } from "@/data/goEntryPresentation";
+import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "./GoEntryDetails";
+import { entryHeading, entryIdentity, entryIsReservation } from "@/data/goEntryPresentation";
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { GoCalendarViewSelector } from "./ui/GoCalendarViewSelector";
 
@@ -310,7 +310,10 @@ export type AgendaBoardProps = {
   onDeleteItem?: (id: string) => void;
   onProposeItem?: (id: string) => void;
   onConfirmBooking?: (id:string)=>void;
-  onOpenMessage?: (item: GoEntry) => void;
+  onOpenMessage?: (entry:GoEntry,returnTo?:()=>void)=>void;
+  onResolveEntry?: (entry:GoEntry,status:"done"|"pending",current?:()=>GoEntry|undefined)=>void;
+  canResolveEntry?: (entry:GoEntry)=>boolean;
+  handedness?: "left"|"right";
   onSaveBookingMessage?: (id: string, msg: string) => void;
   goChats?: Record<string, BookingChatMessage[]>;
   onSendGoChat?: (entryId: string, chatKey: string, text: string, senderType: "cliente" | "empresa") => void;
@@ -632,7 +635,7 @@ function formatTimeDisplay(t: string): string {
 
 function estadoColor(estado: string): string {
   switch (estado) {
-    case "aceptado": return "#6ee7b7";
+    case "aceptado": return "#22c55e";
     case "rechazado": return "#FF0000";
     case "propuesto":
     case "propuesta_pendiente": return "#FF8C00";
@@ -654,7 +657,7 @@ const ESTADO_OPTIONS: Array<{ key: GoEntry["estado"]; icon: string; iconInactive
   { key: "rechazado", icon: "trash-2",      iconInactive: "trash-2",   color: "#FF0000" },
   { key: "propuesto", icon: "refresh-cw",   iconInactive: "circle",    color: "#FF8C00" },
   { key: "pendiente", icon: "mail",         iconInactive: "mail",      color: "#FFD700" },
-  { key: "aceptado",  icon: "check-circle", iconInactive: "circle",    color: "#6ee7b7" },
+  { key: "aceptado",  icon: "check-circle", iconInactive: "circle",    color: "#22c55e" },
 ];
 
 function resolveEstado(
@@ -685,7 +688,7 @@ export function AgendaBoard({
   onChangeEstado,
   onDeleteItem,
   onProposeItem,
-  onOpenMessage,
+  onOpenMessage, onResolveEntry, canResolveEntry, handedness,
   onSaveBookingMessage,
   goChats,
   onSendGoChat,
@@ -713,6 +716,7 @@ export function AgendaBoard({
   onGoToLanding,
 }: AgendaBoardProps) {
   const goLog = useGoCalendarEntries(calendarEntries);
+  const currentEntriesRef=useRef(goLog);currentEntriesRef.current=goLog;
   const allowedEntryIdsRef = useRef(new Set<string>());
   allowedEntryIdsRef.current = new Set(goLog.map(entry => entry.id));
   const todayISO = formatISODate(getToday());
@@ -772,7 +776,7 @@ export function AgendaBoard({
   const handleOpenMessage = useCallback((item: GoEntry) => {
     // All entry messages open the existing general GO Communication screen.
     // The legacy optimistic reservation modal cannot acknowledge real delivery.
-    onOpenMessage?.(item);
+    onOpenMessage?.(item,()=>{const current=currentEntriesRef.current.find(e=>e.id===item.id);if(current)setExpandedBookingItem(current);});
   }, [onOpenMessage]);
 
   const sendGoChat = useCallback(() => {
@@ -1338,7 +1342,7 @@ export function AgendaBoard({
     const names = { pendiente: t("booking_state_pending"), aceptado: t("booking_state_accepted"), rechazado: t("booking_state_rejected"), propuesto: t("tasks_propose_change"), propuesta_pendiente: t("tasks_propose_change") };
     return <View style={expanded ? { flexDirection: "row", gap: 10, marginBottom: 14 } : s.estadoRow}>
       {ESTADO_OPTIONS.map(opt => {
-        const active = opt.key === "propuesto" ? !!item.changeProposal : opt.key === "aceptado" ? item.bookingStatus === "confirmada" : opt.key === "rechazado" ? item.bookingStatus === "cancelada" : item.bookingStatus === "pendiente";
+        const active = opt.key === "propuesto" ? !!item.changeProposal : opt.key === "aceptado" ? policy.stateKey === "booking_state_accepted" : opt.key === "rechazado" ? ["booking_state_cancelled","booking_state_rejected"].includes(policy.stateKey) : policy.stateKey === "booking_state_pending";
         const perform = opt.key === "propuesto" && policy.canPropose && onProposeItem ? () => onProposeItem(item.id)
           : opt.key === "rechazado" && policy.received && onRejectProposal ? () => onRejectProposal(item.id)
           : opt.key === "rechazado" && policy.canCancel && onDeleteItem ? () => onDeleteItem(item.id)
@@ -1402,6 +1406,8 @@ export function AgendaBoard({
     // a slot key and either a staff assignment or a canonical server booking.
     // Unassigned canonical bookings reserve the business resource on the server.
     const isBookingCard = _isRawBookingType && _hasRequiredSlotFields;
+    const reservation=entryIsReservation(item);
+    const canResolve=!!onResolveEntry&&!!canResolveEntry?.(item);
     const compactPendingMetadata = isPendingColumn && !isExpanded && !isBookingCard;
 
     if (_isRawBookingType) {
@@ -1546,7 +1552,7 @@ export function AgendaBoard({
     })();
 
     const isDeleted = !!(item.deleted || item.estado === "rechazado");
-    const eColor = hasProposal ? _proposalColor : (isDeleted ? "#dc2626" : estadoColor(item.estado));
+    const eColor = hasProposal ? _proposalColor : (isDeleted ? "#FF0000" : item.localResolutionStatus === "done" ? "#22c55e" : item.localResolutionStatus === "pending" ? "#FFD700" : estadoColor(item.estado));
     const accentColor = hasProposal ? _proposalColor : (isDeleted ? "#dc2626" : (item.color || "#555"));
 
     return (
@@ -1653,6 +1659,10 @@ export function AgendaBoard({
                 })()}
               </View>
               <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: compactPendingMetadata ? "nowrap" : "wrap", flexShrink: 1, maxWidth: "100%", marginLeft: "auto", gap: 5 }}>
+                {!isSelecting && <GoEntryMicroActions entry={item}
+                  onDone={canResolve?()=>onResolveEntry?.(item,"done",()=>currentEntriesRef.current.find(e=>e.id===item.id)):undefined}
+                  onPending={canResolve?()=>onResolveEntry?.(item,"pending",()=>currentEntriesRef.current.find(e=>e.id===item.id)):undefined}
+                  onDiscard={onDeleteItem&&!item.deleted&&item.estado!=="rechazado"&&(!reservationCardPolicy(item).canonical||reservationCardPolicy(item).canCancel)?()=>onDeleteItem(item.id):undefined}/> }
                 {!!itemWeatherAlert && (
                   <Feather
                     name={getWeatherFeatherIcon(itemWeatherAlert.weatherCode) as any}
@@ -1670,9 +1680,9 @@ export function AgendaBoard({
             </View>
 
             {/* 1. CONTACTO — booking cards: empresa/cliente SIEMPRE visible antes del título. */}
-            {(!!item.contactName || item.businessBooking) && isBookingCard && (
+            {reservation && (
               <Text
-                style={[s.cardSub, { fontSize: subFont, lineHeight: Math.max(16, Math.round(subFont * 1.45)), color: _textSecondary, fontWeight: "600" }]}
+                style={[s.cardTitle, { fontSize: titleFont, lineHeight: titleLine, color: _textPrimary, fontWeight: "800" }]}
                 numberOfLines={isExpanded ? 0 : 1}
               >
                 {entryHeading(item, item.businessBooking || item.bookingPerspective === "business" ? t('booking_customer_unknown') : (lang === "en" ? "Reservation" : "Reserva"))}
@@ -1680,7 +1690,7 @@ export function AgendaBoard({
             )}
 
             {/* 2. TÍTULO / SERVICIO — hidden for booking cards in compact (zoom Modal shows it) */}
-            {!isBookingCard && (
+            {!reservation && (
               <Text
                 style={[s.cardTitle, { fontSize: titleFont, lineHeight: titleLine, color: _textPrimary, fontWeight: colMode === "stress" ? "800" : "700" }]}
                 numberOfLines={isExpanded ? 0 : (colMode === "relax" ? 2 : 1)}
@@ -1694,7 +1704,7 @@ export function AgendaBoard({
 
             {/* 2b. CON QUIÉN — non-booking: SIEMPRE visible (compacto y expandido)
                 Prioridad: nombre > teléfono > nada (ambos normalizados para evitar strings vacíos) */}
-            {!isBookingCard && (() => {
+            {!reservation && (() => {
               const _name  = entryIdentity(item.contactName);
               const _phone = item.phone?.trim() ?? "";
               const _label = _name  ? `Con ${_name}`
@@ -1717,7 +1727,7 @@ export function AgendaBoard({
             )}
 
             {/* 3. PROFESIONAL — compact "Con Isa" for booking entries */}
-            {isBookingCard && !!item.professionalName && (
+            {reservation && !!item.professionalName && (
               <Text
                 style={[s.cardSub, { fontSize: subFont, lineHeight: Math.max(15, Math.round(subFont * 1.4)), color: _textSecondary, fontWeight: "700" }]}
                 numberOfLines={1}
@@ -1728,6 +1738,8 @@ export function AgendaBoard({
               </Text>
             )}
 
+            {reservation && <GoEntryQuickActions entry={item} compact />}
+            {!reservation && item.localResolutionStatus && <Text style={{color:eColor,fontSize:subFont,fontWeight:"700"}}>{item.localResolutionStatus==="done"?(lang==="en"?"DONE":"REALIZADA"):(lang==="en"?"PENDING":"PENDIENTE")}</Text>}
             {/* 4. EXPANDED DETAIL BLOCK — only for non-booking types; bookings use the zoom Modal */}
             {isExpanded && !isBookingCard && (
               <View style={{ marginTop: 8, gap: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: _divider }}>
@@ -1952,18 +1964,7 @@ export function AgendaBoard({
                 })}
               </View>
             )}
-            {onDeleteItem && !reservationCardPolicy(item).canonical && (
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                  onDeleteItem(item.id);
-                }}
-                hitSlop={8}
-                style={s.deleteBtn}
-              >
-                <Feather name="trash-2" size={10} color="#FF0000" />
-              </TouchableOpacity>
-            )}
+
           </TouchableOpacity>
         </View>
       </GestureDetector>
@@ -2622,9 +2623,9 @@ export function AgendaBoard({
       {!!verificationEntry && (()=>{const {ReservationVerificationPanel}=require("@/components/booking/ReservationVerificationPanel") as typeof import("@/components/booking/ReservationVerificationPanel");return <ReservationVerificationPanel bookingId={verificationEntry.customerBooking?verificationEntry.reservationId:undefined} businessId={verificationEntry.businessBooking?verificationEntry.businessId:undefined} key={verificationEntry.id} onClose={()=>setVerificationEntry(null)}/>;})()}
 
       {/* One foreground detail for the same reservation or task. Calendar stays mounted. */}
-      <GoEntryDetailsSheet entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}
+      <GoEntryDetailsSheet handedness={handedness} entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}
         onClose={() => { setExpandedBookingItem(null); setExpandedCardId(null); }}
-        onMessage={expandedBookingItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);setExpandedCardId(null);setTimeout(()=>handleOpenMessage(item),180); } : undefined}
+        onMessage={expandedBookingItem && onOpenMessage ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);setExpandedCardId(null);setTimeout(()=>handleOpenMessage(item),180); } : undefined}
         onExit={onGoToLanding ? () => { setExpandedBookingItem(null); setExpandedCardId(null); onGoToLanding(); } : undefined}>
         {expandedBookingItem && <>
           {bookingPolicy?.canonical ? renderReservationControls(expandedBookingItem, true) : <GoEntryQuickActions entry={expandedBookingItem}
@@ -2885,7 +2886,7 @@ export function AgendaOperativa({
   onCompleteItem,
   onDeleteItem,
   onProposeItem,
-  onOpenMessage,
+  onOpenMessage, onResolveEntry, canResolveEntry, handedness,
   onSaveBookingMessage,
   goChats,
   onSendGoChat,
@@ -3180,7 +3181,7 @@ export function AgendaOperativa({
           onCompleteItem={onCompleteItem}
           onDeleteItem={onDeleteItem}
           onProposeItem={onProposeItem}
-          onOpenMessage={onOpenMessage}
+          onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness}
           onSaveBookingMessage={onSaveBookingMessage}
           goChats={goChats}
           onSendGoChat={onSendGoChat}
@@ -3671,7 +3672,7 @@ const s = StyleSheet.create({
     backgroundColor: "#0d0d10",
   },
   columnDragTarget: {
-    borderColor: "#6ee7b7",
+    borderColor: "#22c55e",
     backgroundColor: "#0d0d10",
   },
 
@@ -3711,7 +3712,7 @@ const s = StyleSheet.create({
   },
   colHeaderDragTarget: {
     backgroundColor: "rgba(20,60,40,0.95)",
-    borderBottomColor: "#6ee7b7",
+    borderBottomColor: "#22c55e",
   },
   colHeaderDayName: {
     color: "#ffffff",
@@ -3803,7 +3804,7 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.05)",
   },
   addCardBtnSelected: {
-    borderColor: "#6ee7b7",
+    borderColor: "#22c55e",
     backgroundColor: "rgba(110,231,183,0.08)",
   },
   addCardBtnText: {

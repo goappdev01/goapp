@@ -29,7 +29,7 @@ test('expanded sheet closes immediately from a larger floating target outside th
  const modal=nodes(f.tree,n=>n.type==='Modal')[0],floating=nodes(f.tree,n=>n.props.testID==='entry-detail-floating-close')[0],scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0];
  assert.equal(modal.props.animationType,'none');assert.equal(floating.props.style.position,'absolute');assert.equal(floating.props.style.right+floating.props.style.padding,12);assert.equal(floating.props.style.bottom+floating.props.style.padding,12);assert.equal(floating.props.style.padding,10,'parent bounds admit the full native hitSlop without moving the visible close icon');assert.equal(floating.props.style.flexDirection,'row');assert.equal(nodes(scroll,n=>n.props.testID==='entry-detail-floating-close').length,0);assert.equal(scroll.props.contentContainerStyle.paddingBottom,68);assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
  const close=nodes(floating,n=>n.props.accessibilityLabel==='Cerrar detalle')[0];assert.equal(close.props.hitSlop,10);const touch=f.render(close.type,close.props);assert.equal(touch.props.delayPressIn,0);touch.props.onPress({stopPropagation(){}});assert.equal(closed,1);
- const msg=nodes(f.tree,n=>n.props.testID==='entry-message-go')[0];assert.equal(msg.props.accessibilityLabel,'MENSAJE GO');assert.equal(msg.props.style.alignSelf,'flex-start');msg.props.onPress();assert.equal(message,1);
+ const msg=nodes(f.tree,n=>n.props.testID==='entry-message-go')[0];assert.equal(msg.props.accessibilityLabel,'MENSAJE GO');assert.equal(msg.props.style.alignSelf,'flex-end');msg.props.onPress();assert.equal(message,1);
 });
 
 test('identity suppression is limited to historic placeholders; real business names are kept',()=>{
@@ -104,4 +104,52 @@ for(const type of ['GO_BOOKING','TAREA_INTERNA'])test(`${type}: opening/closing 
    assert.equal(JSON.stringify(card(tree).props.style),style);const close=nodes(tree,n=>n.props.accessibilityLabel==='Cerrar detalle')[0];assert.ok(close);close.props.onPress();tree=f.render(AgendaBoard,props);
    assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,0);assert.equal(props.selectedDateISO,entry.dateISO);assert.equal(props.goLog.length,1);assert.equal(JSON.stringify(entry),saved);
  }
+});
+
+test('state colors and negative actions agree in compact and expanded cards without changing category colors',()=>{
+ const f=fixture(),c=f.load('components/GoEntryDetails.tsx'),policy=f.load('data/reservationCardPolicy.ts'),original=JSON.stringify(base);
+ for(const [status,key,color]of [['pendiente','booking_state_pending','#FFD700'],['confirmada','booking_state_accepted','#22c55e'],['completada','booking_state_completed','#22c55e'],['cancelada','booking_state_cancelled','#FF0000']]){
+  const entry={...base,bookingStatus:status};assert.equal(policy.reservationCardPolicy(entry).stateColor,color);assert.equal(policy.reservationCardPolicy(entry).stateKey,key);
+  for(const compact of [false,true]){const tree=f.render(c.GoEntryQuickActions,{entry,compact,onCancel(){},onPropose(){}});const state=nodes(tree,n=>n.type==='Text')[0];assert.equal(state.props.style.color,color);
+   for(const action of nodes(tree,n=>n.props.accessibilityLabel==='CANCELAR'))assert.equal(action.props.style.at(-1).borderColor,'#FF0000');}
+ }
+ const personal=f.render(c.GoEntryQuickActions,{entry:{...base,localResolutionStatus:'pending'}});assert.ok(texts(personal).includes('booking_state_accepted'));assert.ok(texts(personal).includes('Mi seguimiento:'));
+ assert.equal(JSON.stringify(base),original);assert.equal(base.color,'#00e5ff');
+});
+
+test('three microactions stop propagation, honor supplied permissions and retain the reservation contract',()=>{
+ const f=fixture(),{GoEntryMicroActions}=f.load('components/GoEntryDetails.tsx'),calls=[],saved=JSON.stringify(base);
+ const tree=f.render(GoEntryMicroActions,{entry:base,onDone:()=>calls.push('done'),onPending:()=>calls.push('pending'),onDiscard:()=>calls.push('cancel')});
+ const buttons=nodes(tree,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);let stopped=0;
+ buttons.forEach(b=>{assert.equal(b.props.hitSlop.top,6);assert.equal(b.props.hitSlop.left,0);b.props.onPress({stopPropagation(){stopped++;}});});
+ assert.deepEqual(calls,['done','pending','cancel']);assert.equal(stopped,3);assert.equal(JSON.stringify(base),saved);
+ assert.ok(buttons[0].props.accessibilityLabel.includes('Mi seguimiento'));assert.equal(f.render(GoEntryMicroActions,{entry:base}),null);
+ const denied=f.render(GoEntryMicroActions,{entry:base,onDiscard(){}});assert.equal(nodes(denied,n=>n.type==='TouchableOpacity').length,1);
+});
+
+test('expanded short cards push actions towards the useful bottom; long cards still use a single scroll and handed close',()=>{
+ for(const handedness of ['left','right']){const f=sheet({...base,detail:'Detail '.repeat(500)},{handedness,onMessage(){}});
+  const scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0],actions=nodes(scroll,n=>n.props.testID==='entry-details-actions')[0],close=nodes(f.tree,n=>n.props.testID==='entry-detail-floating-close')[0];
+  assert.equal(scroll.props.contentContainerStyle.flexGrow,1);assert.equal(actions.props.style.marginTop,'auto');assert.equal(close.props.style[handedness],2);assert.ok(scroll.props.contentContainerStyle.paddingBottom>=64);
+ }
+ const personal={...base,type:'TAREA_INTERNA',customerBooking:false,kind:'sent',direction:'self',contactName:'',phone:'',whatsapp:''};
+ assert.equal(nodes(sheet(personal,{onMessage(){}}).tree,n=>n.props.testID==='entry-message-go').length,0);
+});
+
+test('calendar reservation primary heading stays the real counterpart even when older slot metadata is missing',()=>{
+ const f=fixture({now:'2030-10-26T08:00:00'}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');
+ for(const entry of [{...base,slotKey:undefined,professionalName:'María',intentLabel:'Corte + Tinte'},{...base,businessBooking:true,customerBooking:false,contactName:'Cliente vinculado',intentLabel:'Corte + Tinte'}]){
+  const tree=f.render(AgendaBoard,{goLog:[entry],viewMode:'dia',selectedDateISO:entry.dateISO});
+  const card=nodes(tree,n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85)[0];assert.ok(texts(card).includes(entry.contactName));assert.ok(!texts(card).includes('Corte + Tinte'));
+ }
+});
+
+test('calendar microactions stay personal and reopening a contextual message returns to that same detail',()=>{
+ const f=fixture({now:'2030-10-26T08:00:00'}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');let returnTo,resolved=[];
+ const props={goLog:[base],viewMode:'dia',selectedDateISO:base.dateISO,canResolveEntry:()=>true,onResolveEntry:(entry,status,current)=>resolved.push([entry.id,status,current().id]),onOpenMessage:(entry,back)=>{assert.equal(entry.id,base.id);returnTo=back;}};
+ let tree=f.render(AgendaBoard,props);const done=nodes(tree,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0];assert.ok(done);done.props.onPress({stopPropagation(){}});assert.deepEqual(resolved,[[base.id,'done',base.id]]);
+ const card=nodes(tree,n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85)[0];card.props.onPress();tree=f.render(AgendaBoard,props);
+ nodes(tree,n=>n.props.testID==='entry-message-go')[0].props.onPress();
+ f.runTimers();assert.equal(typeof returnTo,'function');tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,0);
+ returnTo();tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,1);assert.equal(props.selectedDateISO,base.dateISO);
 });

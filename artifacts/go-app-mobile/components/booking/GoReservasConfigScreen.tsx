@@ -101,6 +101,9 @@ const VIEW_MODES: { key: ViewMode; icon: keyof typeof Feather.glyphMap; label: s
 
 interface GoReservasConfigScreenProps {
   onClose:                () => void;
+  onOpenMessage?: (entry:GoEntry,returnTo?:()=>void)=>void;
+  onResolveEntry?: (entry:GoEntry,status:"done"|"pending",current?:()=>GoEntry|undefined)=>void;
+  canResolveEntry?: (entry:GoEntry)=>boolean;
   onProposeBookingChange?: (entry:GoEntry)=>void;
   onOpenVerificacion?:    () => void;
   onOpenCalendarPanel?:   () => void;
@@ -152,7 +155,7 @@ export function GoReservasDemoScreen(props: GoReservasConfigScreenProps) {
   });
 }
 
-function useGoReservasContent({ onProposeBookingChange, onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot, liveBookingMutate }: GoReservasConfigScreenProps & {
+function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, onProposeBookingChange, onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot, liveBookingMutate }: GoReservasConfigScreenProps & {
   allGoLog: GoEntry[];
   setGoLog: React.Dispatch<React.SetStateAction<GoEntry[]>>;
   demoStore?: BusinessDemoStore;
@@ -626,7 +629,7 @@ function useGoReservasContent({ onProposeBookingChange, onClose, onOpenVerificac
         )}
 
         {viewMode === "calendario" && (
-          <AgendaBoard
+          <AgendaBoard onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness}
             goLog={filteredLog}
             embedded
             viewMode={calInnerView}

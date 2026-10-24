@@ -43,7 +43,11 @@ export type GoDirectMessage = {
   linkedGoId?: string;
 };
 
+export type GoMessageContext = {actionId:string;bookingId?:string;name:string;phone:string;date?:string;time?:string;kind:"booking"|"task"};
+
 export type GoConversation = {
+  actionId?:string;
+  contextLabel?:string;
   bookingId?: string;
   businessId?: string;
   counterpartId?: string;
@@ -70,6 +74,7 @@ type MessagesScreenProps = {
   /** Cuando se provee, abre directamente el hilo de este contacto al abrir la pantalla. */
   initialContact?: { name: string; phone: string };
   initialBookingId?: string;
+  initialContext?:GoMessageContext;
 };
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -249,7 +254,7 @@ export function MessagesScreen({
   onCreateGo,
   onPickDeviceContact,
   initialContact,
-  initialBookingId,
+  initialBookingId, initialContext,
 }: MessagesScreenProps) {
   const insets = useSafeAreaInsets();
   const { lang, t } = useLanguage();
@@ -260,6 +265,7 @@ export function MessagesScreen({
   const [activeConv, setActiveConv] = useState<GoConversation | null>(null);
   const [search, setSearch] = useState("");
   const [input, setInput] = useState("");
+  const inputRef=useRef("");
   const [inputKey, setInputKey] = useState(0);
   const threadScrollRef = useRef<ScrollView>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -273,11 +279,11 @@ export function MessagesScreen({
 
   const persist = useCallback((convs: GoConversation[]) => {
     // Server conversations are never written into the old local contact store.
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(convs.filter(c=>!c.bookingId))).catch(() => {});
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(convs.filter(c=>!c.bookingId&&!c.actionId))).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (visible && !initialBookingId) {
+    if (visible && !initialBookingId && !initialContext) {
       AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
         let convs: GoConversation[] = [];
         if (raw) { try { convs = JSON.parse(raw); } catch {} }
@@ -326,43 +332,58 @@ export function MessagesScreen({
     if(!visible)return;
     let alive=true;
     const token=++generation.current;
-    if(initialBookingId){setActiveConv(null);setInput("");setView("list");setMessageError("");}
+    const contextLabel=initialContext ? [initialContext.kind==="booking"?(lang==="en"?"Reservation":"Reserva"):(lang==="en"?"Shared task":"Tarea compartida"),initialContext.date,initialContext.time].filter(Boolean).join(" · ") : undefined;
+    const contextual=!!initialContext;
+    if(initialBookingId||contextual){
+      ownerRef.current=null;setInput("");inputRef.current="";setMessageError("");
+      if(initialContext){
+        setActiveConv({id:initialBookingId?"booking:"+initialBookingId:"action:"+initialContext.actionId,bookingId:initialBookingId,actionId:initialContext.actionId,
+          contactName:initialContext.name,contactPhone:initialContext.phone,isGoUser:true,contextLabel,messages:[],lastUpdated:0,unread:0});
+        setView("thread");slideAnim.setValue(0);
+      }else{setActiveConv(null);setView("list");}
+    }
     const load=async()=>{
       try{
         const owner=await getAuthenticatedUserId();if(!alive||generation.current!==token)return;
         ownerRef.current=owner;if(!owner)throw new Error("Inicia sesión para utilizar Comunicación GO.");
+        if(initialContext){
+          const id=initialBookingId?"booking:"+initialBookingId:"action:"+initialContext.actionId;
+          const draft=await AsyncStorage.getItem(draftKey(owner,id));
+          if(!alive||generation.current!==token)return;
+          if(!inputRef.current){inputRef.current=draft||"";setInput(draft||"");}
+          else await AsyncStorage.setItem(draftKey(owner,id),inputRef.current);
+          if(!initialBookingId)throw new Error("Esta tarea no dispone de un vínculo de comunicación verificable en el servidor. Tu borrador se conserva; no se ha enviado ningún mensaje.");
+        }
         const rows=await readBookingConversations(owner,initialBookingId);
         if(!alive||generation.current!==token)return;
-        setMessageError("");
-        setConversations(old=>[...rows,...old.filter(c=>!c.bookingId)]);
+        setMessageError("");setConversations(old=>[...rows,...old.filter(c=>!c.bookingId&&!c.actionId)]);
         if(initialBookingId){
           const thread=rows.find(c=>c.bookingId===initialBookingId);
           if(!thread)throw new Error("No se pudo recuperar la conversación de esta reserva.");
-          const draft=await AsyncStorage.getItem(draftKey(owner,thread.id));
-          if(!alive||generation.current!==token)return;
-          setActiveConv(thread);setInput(draft||"");setView("thread");slideAnim.setValue(0);
+          if(!contextual){const draft=await AsyncStorage.getItem(draftKey(owner,thread.id));if(!alive||generation.current!==token)return;inputRef.current=draft||"";setInput(draft||"");}
+          setActiveConv({...thread,actionId:initialContext?.actionId,contextLabel});setView("thread");slideAnim.setValue(0);
         }
       }catch(error){if(alive&&generation.current===token)setMessageError(errorText(error));}
     };
     void load();
     const unsubscribe=onSessionChanged(()=>{generation.current++;ownerRef.current=null;setActiveConv(null);setConversations([]);setInput("");setView("list");setMessageError("La sesión ha cambiado. Vuelve a abrir Comunicación GO.");});
     return()=>{alive=false;generation.current++;unsubscribe();};
-  },[visible,initialBookingId]);
+  },[visible,initialBookingId,initialContext?.actionId]);
 
   useEffect(()=>{
-    if(!visible||!activeConv?.bookingId||!ownerRef.current)return;
+    if(!visible||!activeConv?.bookingId||!activeConv.counterpartId||!ownerRef.current)return;
     let alive=true,busy=false;const owner=ownerRef.current,bookingId=activeConv.bookingId;
     const timer=setInterval(()=>{if(busy)return;busy=true;void readBookingConversations(owner,bookingId).then(rows=>{
       if(!alive||ownerRef.current!==owner)return;const thread=rows.find(c=>c.bookingId===bookingId);if(!thread)return;
-      setActiveConv(current=>current?.bookingId===bookingId?thread:current);
+      setActiveConv(current=>current?.bookingId===bookingId?{...thread,actionId:current.actionId,contextLabel:current.contextLabel}:current);
       setConversations(old=>[thread,...old.filter(c=>c.id!==thread.id)]);setMessageError("");
     }).catch(error=>{if(alive){setMessageError(errorText(error));if(error?.status===401||error?.status===403){setActiveConv(null);setView("list");setConversations(old=>old.filter(c=>c.bookingId!==bookingId));}}}).finally(()=>{busy=false;});},15000);
     return()=>{alive=false;clearInterval(timer);};
-  },[visible,activeConv?.bookingId]);
+  },[visible,activeConv?.bookingId,activeConv?.counterpartId]);
 
   const changeInput=(text:string)=>{
-    setInput(text);
-    if(activeConv?.bookingId&&ownerRef.current){void AsyncStorage.setItem(draftKey(ownerRef.current,activeConv.id),text).catch(()=>setMessageError("No se pudo guardar el borrador en este dispositivo."));}
+    inputRef.current=text;setInput(text);
+    if((activeConv?.bookingId||activeConv?.actionId)&&ownerRef.current){void AsyncStorage.setItem(draftKey(ownerRef.current,activeConv.id),text).catch(()=>setMessageError("No se pudo guardar el borrador en este dispositivo."));}
   };
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -385,6 +406,7 @@ export function MessagesScreen({
   };
 
   const backToList = () => {
+    if(initialContext){onClose();return;}
     const owner=ownerRef.current;
     if(owner)void readBookingConversations(owner).then(rows=>{if(ownerRef.current===owner)setConversations(old=>[...rows,...old.filter(c=>!c.bookingId)]);}).catch(error=>setMessageError(errorText(error)));
     Animated.timing(slideAnim, {
@@ -411,6 +433,7 @@ export function MessagesScreen({
 
   const sendMessage = async () => {
     if (!input.trim() || !activeConv) return;
+    if(activeConv.actionId&&!activeConv.bookingId){setMessageError("Esta tarea no dispone de un vínculo de comunicación verificable en el servidor. Tu borrador se conserva; no se ha enviado ningún mensaje.");return;}
     if(activeConv.bookingId){
       if(sendLock.current)return;
       const owner=ownerRef.current,token=generation.current,text=input.trim(),thread=activeConv,bookingId=activeConv.bookingId;
@@ -419,8 +442,8 @@ export function MessagesScreen({
       try{
         const saved=await deliverBookingMessage(owner,bookingId,text);
         if(ownerRef.current!==owner||generation.current!==token)return;
-        setActiveConv(saved);setConversations(old=>[saved,...old.filter(c=>c.id!==saved.id)]);
-        setInput(current=>current.trim()===text?"":current);
+        setActiveConv({...saved,actionId:thread.actionId,contextLabel:thread.contextLabel});setConversations(old=>[saved,...old.filter(c=>c.id!==saved.id)]);
+        setInput(current=>{if(current.trim()===text){inputRef.current="";return "";}return current;});
         await AsyncStorage.removeItem(draftKey(owner,thread.id));
       }catch(error){if(ownerRef.current===owner&&generation.current===token)setMessageError(errorText(error));}
       finally{sendLock.current=false;setSending(false);}
@@ -614,6 +637,7 @@ export function MessagesScreen({
                           ? (lang === "en" ? "GO User" : "Usuario GO")
                           : (lang === "en" ? "Contact" : "Contacto")}
                     </Text>
+                    {!!activeConv.contextLabel&&<Text testID="go-message-context" style={{color:C.textSub,fontSize:12,marginTop:3}}>{activeConv.contextLabel}</Text>}
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
                       <ChannelBadge isGoUser={activeConv.isGoUser} />
                       {activeConv.contactPhone ? (
@@ -757,7 +781,7 @@ export function MessagesScreen({
                   onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); backToList(); }}
                   activeOpacity={0.8}
                   style={s.fabBack}
-                  accessibilityLabel={lang === "en" ? "Back to conversations" : "Volver a conversaciones"}
+                  accessibilityLabel={initialContext?(lang==="en"?"Back to card":"Volver a la ficha"):(lang === "en" ? "Back to conversations" : "Volver a conversaciones")}
                 >
                   <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
                 </TouchableOpacity>

@@ -44,11 +44,12 @@ export function updateCompletionDocument(scope:CompletionScope,active:()=>boolea
   });
   queues.set(key,next);return next;
 }
-export function decideCompletion(scope:CompletionScope,entry:CompletionEntry,status:Resolution,active:()=>boolean,at=Date.now()):Promise<CompletionDocument>{
+export function decideCompletion(scope:CompletionScope,entry:CompletionEntry,status:Resolution,active:()=>boolean,at=Date.now(),explicit = false,currentEntry?:()=>CompletionEntry|undefined):Promise<CompletionDocument>{
   return updateCompletionDocument(scope,active,doc=>{
-    const matches=getCompletionSource(scope).filter(e=>completionKey(e)===completionKey(entry));
+    const rendered=explicit?currentEntry?.():undefined;
+    const matches=(explicit&&currentEntry?(rendered?[rendered].filter(e=>ownedCompletionEntry(e,scope)):[]):getCompletionSource(scope)).filter(e=>completionKey(e)===completionKey(entry));
     const current=matches[0];
     if(matches.length!==1 || !current || completionSchedule(current)!==completionSchedule(entry))throw new Error("La acción ha cambiado. Revisa sus datos.");
-    return recordCompletion(doc,current,status,at);
+    return recordCompletion(doc,current,status,at,explicit);
   });
 }

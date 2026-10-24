@@ -48,3 +48,43 @@ ni se envía por WhatsApp como sustitución de Comunicación GO.
 La activación en 8088 utiliza su backend y PostgreSQL aislados existentes. La
 disponibilidad de la URL pública del backend y la activación de este SQL en el
 entorno público son comprobaciones distintas de publicar el código en MAIN.
+
+## Ajustes de fichas y seguimiento (25 octubre 2026)
+
+Las reservas se identifican por su empresa en Usuario y por su cliente en
+Empresa. Los servicios y sus importes se consultan en el detalle del mismo
+registro. Landing, Calendario y Listados reutilizan la ficha ampliada; el listado
+ya no mantiene su antiguo modal de reserva con contenido y cierre diferentes.
+
+Pendiente es amarillo, propuestas naranja, aceptada y realizada verde con textos
+distintos, y cancelar/rechazar rojo intenso. El color de la categoría no cambia.
+Las acciones de la ficha ampliada ocupan la zona inferior útil cuando hay poco
+contenido. El contenido largo conserva un único desplazamiento y el cierre
+flotante dispone de espacio propio de seguridad, también en modo zurdo.
+
+Las microacciones usan el documento existente de seguimiento personal. Una
+decisión explícita puede guardarse antes de la hora prevista, únicamente para
+una acción del usuario y contexto actuales. La escritura vuelve a comprobar la
+identidad, la vigencia del registro y su horario. Marcar una reserva como
+realizada o pendiente **no cambia su aceptación contractual**, ni certifica el
+servicio para los otros participantes. La cancelación utiliza la confirmación y
+las operaciones existentes. Se mantiene el aviso automático 30 minutos después
+del final previsto; una decisión realizada suprime los avisos de seguimiento.
+
+MENSAJE GO abre inmediatamente la conversación contextual, con el nombre del
+participante y el horario. Los calendarios de Empresa y del cliente transmiten
+el mismo acceso al componente compartido. Al volver se recupera el detalle de
+origen. Si falla la lectura o el envío, no se sustituye el chat por una lista
+vacía y el borrador permanece asociado a la cuenta y acción. La confirmación del
+servidor y el identificador de reintento siguen siendo obligatorios para mostrar
+un mensaje como enviado.
+
+**Límites verificables:** una reserva exclusivamente local no tiene una relación
+de participantes autorizada en el backend. Las tareas compartidas sin vínculo de
+comunicación verificable tampoco disponen de una ruta de entrega autenticada en
+el backend actual. En esos casos se muestra el destinatario disponible en la
+ficha y se conserva el borrador, pero se informa de que no se ha enviado. No se
+crean relaciones ficticias ni se usa el almacén histórico local para fingir un
+envío. La entrega entre usuarios reales requiere el backend público operativo y
+la relación persistida; sigue pendiente de validación real. No se ha modificado
+el backend, aplicado SQL ni realizado un despliegue en esta reparación.

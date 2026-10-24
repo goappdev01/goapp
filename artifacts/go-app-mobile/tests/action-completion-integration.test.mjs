@@ -266,3 +266,28 @@ test('calendar cannot decorate a USER entry with another company context respons
  assert.equal(rows.length,2);assert.equal(rows[0].localResolutionStatus,undefined);assert.equal(rows[1].localResolutionStatus,'pending');
  assert.equal(userEntry.estado,'aceptado');assert.equal(companyEntry.estado,'aceptado');
 });
+
+test('explicit future completion and pending persist independently from acceptance and retain the 30 minute automatic prompt',async()=>{
+ const future=entry({dateISO:'2035-01-07',time:'12:30',reservationId:'one-reservation',businessId:'salon',bookingStatus:'confirmada',bookingServerStatus:'CONFIRMED'}),f=storageFixture(),before=JSON.stringify(future);
+ f.api.setCompletionSource(S,[future]);await assert.rejects(f.api.decideCompletion(S,future,'done',()=>true),/todavía/);
+ await f.api.decideCompletion(S,future,'done',()=>true,now,true);
+ let doc=await f.api.readCompletionDocument(S);assert.equal(core.completionDecision(future,doc).status,'done');assert.equal(core.nextCompletionReminder(future,doc,now),null);
+ const untouched={...future,id:'another',reservationId:'other'};assert.equal(core.awaitingCompletion(untouched,doc,core.plannedActionEnd(untouched)+1800000-1),false);assert.equal(core.awaitingCompletion(untouched,doc,core.plannedActionEnd(untouched)+1800000),true);
+ await f.api.decideCompletion(S,future,'pending',()=>true,now,true);doc=await f.api.readCompletionDocument(S);assert.equal(core.completionDecision(future,doc).status,'pending');
+ assert.equal(JSON.stringify(future),before);assert.equal(future.bookingServerStatus,'CONFIRMED');assert.equal(doc.records[core.completionKey(future)].history.length,2);
+ const reloaded=storageFixture(f.memory);assert.equal(core.completionDecision(future,await reloaded.api.readCompletionDocument(S)).status,'pending');
+});
+
+test('explicit early decisions recheck rendered schedule, user and company context; deleted or proposing records cannot bypass the checks',async()=>{
+ const future=entry({dateISO:'2035-01-07'}),f=storageFixture();
+ for(const changed of [undefined,{...future,time:'15:00'},{...future,ownerUserId:'another'},{...future,actionContext:'live:BUSINESS'},{...future,deleted:true},{...future,changeProposal:{time:'11:00'}}]){
+  await assert.rejects(f.api.decideCompletion(S,future,'done',()=>true,now,true,()=>changed));
+ }
+ assert.equal(f.writes.length,0);f.user('another');await assert.rejects(f.api.decideCompletion(S,future,'done',()=>true,now,true,()=>future),/cuenta/);assert.equal(f.writes.length,0);
+});
+
+test('an authorized company calendar can resolve its personal follow-up through the same store without adding a booking',async()=>{
+ const companyScope={...S,context:'live:BUSINESS'},row=entry({actionContext:'live:BUSINESS',reservationId:'one',businessId:'salon',businessBooking:true,dateISO:'2035-01-07'}),before=JSON.stringify(row),f=storageFixture();
+ const doc=await f.api.decideCompletion(companyScope,row,'done',()=>true,now,true,()=>row);assert.equal(core.completionDecision(row,doc).status,'done');assert.equal(JSON.stringify(row),before);
+ assert.equal(core.completionDecision(row,await f.api.readCompletionDocument(S)),undefined);
+});
