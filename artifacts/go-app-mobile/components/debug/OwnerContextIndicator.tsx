@@ -47,9 +47,11 @@ function Indicator({ label, calendarWatermark = false }: { label: string; calend
 /** iOS window overlay keeps ONE passive label above native modals and deep screens. */
 export function OwnerContextSurface({ children }: { children: React.ReactNode }) {
   const label = useLabel();
+  const { view } = useGoView();
   const [count, setCount] = useState(0);
   const [landingVisible, setLandingVisible] = useState(false);
   const [calendarWatermark, showCalendarWatermark] = useState(false);
+  const showIndicator = label && !(view === "USER" && landingVisible);
   return <LandingBackground.Provider value={{ show: setLandingVisible, topInset: label && label !== DEMO_BUSINESS_LABEL ? 22 : 0 }}><ModalLayers.Provider value={{ count, change: delta => setCount(value => Math.max(0, value + delta)), calendarWatermark, showCalendarWatermark }}>
     <View style={[styles.surface, label && label !== DEMO_BUSINESS_LABEL ? { paddingTop: 22 } : undefined]}>
       {label && landingVisible && <View pointerEvents="none" style={StyleSheet.absoluteFill}
@@ -61,7 +63,7 @@ export function OwnerContextSurface({ children }: { children: React.ReactNode })
           start={{ x: 0.5, y: 0 }} end={{ x: 0.5, y: 0.22 }} style={StyleSheet.absoluteFill} />
       </View>}
       {children}
-      {label && (Platform.OS === "ios"
+      {showIndicator && (Platform.OS === "ios"
         ? <FullWindowOverlay unstable_accessibilityContainerViewIsModal={false}><Indicator label={label} calendarWatermark={calendarWatermark} /></FullWindowOverlay>
         : count === 0 ? <Indicator label={label} calendarWatermark={calendarWatermark} /> : null)}
     </View>

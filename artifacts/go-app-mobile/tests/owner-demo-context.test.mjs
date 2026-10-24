@@ -277,7 +277,7 @@ test("owner Landing keeps its approved background and non-DEMO geometry while DE
         assert.equal(backdrop.children[0].props.resizeMode,"cover");
         assert.ok(surface.children.indexOf(backdrop)<surface.children.indexOf("Existing navigator"));
       }
-      assert.equal(all.filter(node=>node.type==="FullWindowOverlay").length,1);
+      assert.equal(all.filter(node=>node.type==="FullWindowOverlay").length,context==="USER"&&visible?0:1);
     }
   }
   f.setAdmin({isOwner:false});
