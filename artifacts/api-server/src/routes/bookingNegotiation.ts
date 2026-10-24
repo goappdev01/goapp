@@ -25,12 +25,13 @@ const messages: Record<string, string> = {
   BOOKING_AMBIGUOUS_LOCAL_TIME: "Esa hora se repite por el cambio de horario. Selecciona una hora inequívoca.",
 };
 
-async function relay(response: globalThis.Response, res: Response) {
+async function relay(response: globalThis.Response, res: Response, communication = false) {
   const body = await response.text();
   if (response.ok) { res.status(response.status).type("application/json").send(body); return; }
   let issue: RpcError = {};
   try { issue = JSON.parse(body) as RpcError; } catch { /* Do not expose proxy or SQL diagnostics. */ }
   if (["PGRST202", "42883"].includes(issue.code ?? "")) {
+    if(communication){res.status(501).json({code:"GO_MESSAGES_UNAVAILABLE",error:"Comunicación GO aún no está disponible en este servidor. El texto se conserva."});return;}
     res.status(501).json({ code: "BOOKING_NEGOTIATION_UNAVAILABLE", error: "La negociación requiere la migración revisada del servidor. La reserva y sus pagos permanecen intactos." }); return;
   }
   const status = issue.code === "23P01" || issue.code === "23505" || issue.code === "40P01" || issue.code === "40001" ? 409
@@ -96,6 +97,27 @@ router.get("/bookings", async (req: Request, res: Response, next) => {
       body: JSON.stringify({ p_business_id: businessId ?? null }),
     }), res);
   } catch { res.status(503).json({ code: "BOOKING_READ_UNAVAILABLE", error: "No se pudieron leer las reservas. No se ha modificado ninguna." }); }
+});
+
+// The same participant authorization as reservation receipts. The authenticated
+// identity and recipient are resolved in PostgreSQL, never supplied by the UI.
+router.get("/booking-conversations", async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  const auth = bearerHeader(req.header("authorization")), id = req.query.booking_id;
+  if (!auth.Authorization) { res.status(401).json({error:"Authentication required"}); return; }
+  if (id != null && (typeof id !== "string" || !uuid.test(id))) { res.status(400).json({error:"Esta reserva local no tiene una conversación compartida en el servidor."}); return; }
+  try { await relay(await supabaseRequest("/rest/v1/rpc/go_booking_conversations", {method:"POST",headers:{...auth,"Content-Type":"application/json"},body:JSON.stringify({p_booking_id:id??null})}),res,true); }
+  catch { res.status(503).json({error:"No se pudo conectar con Comunicación GO. El texto escrito se conserva."}); }
+});
+router.post("/bookings/:bookingId/messages", async (req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  const auth = bearerHeader(req.header("authorization")), id = req.params.bookingId, input = req.body;
+  if (!auth.Authorization) { res.status(401).json({error:"Authentication required"}); return; }
+  if (typeof id!=="string" || !uuid.test(id) || !input || typeof input!=="object" || Array.isArray(input)
+    || Object.keys(input).some(key=>!["messageId","text"].includes(key)) || typeof input.messageId!=="string" || !uuid.test(input.messageId)
+    || typeof input.text!=="string" || !input.text.trim() || input.text.length>1000) { res.status(400).json({error:"Mensaje o reserva no válidos."}); return; }
+  try { await relay(await supabaseRequest("/rest/v1/rpc/go_send_booking_message", {method:"POST",headers:{...auth,"Content-Type":"application/json"},body:JSON.stringify({p_booking_id:id,p_message_id:input.messageId,p_text:input.text})}),res,true); }
+  catch { res.status(503).json({error:"No se pudo confirmar el envío. Tu texto se conserva; reintenta para comprobarlo sin duplicar el mensaje."}); }
 });
 
 export default router;

@@ -13,6 +13,25 @@ const texts=tree=>nodes(tree,n=>n.type==='Text').flatMap(n=>n.children).filter(x
 const base={id:'one-reservation',reservationId:'11111111-1111-4111-8111-111111111111',businessId:'salon',type:'GO_BOOKING',customerBooking:true,slotKey:'slot',kind:'received',contactName:'Peluquería Nemesi',professionalName:'María José',phone:'+34 600 123 456',whatsapp:'0034 611 123 456',date:'26/10/2030',dateISO:'2030-10-26',time:'12:00',duration:'60min',estado:'aceptado',bookingStatus:'confirmada',color:'#00e5ff',place:'Dirección vigente'};
 const sheet=(entry,extra={})=>{const f=fixture(),c=f.load('components/GoEntryDetails.tsx');return {...f,components:c,tree:f.render(c.GoEntryDetailsSheet,{entry,onClose(){},...extra})};};
 
+test('older and new receipts expose the same compact accepted actions, including receipts with only server status',()=>{
+ const f=fixture(),c=f.load('components/GoEntryDetails.tsx');
+ for(const variant of [{...base,createdAt:1},{...base,createdAt:Date.now()},{...base,bookingStatus:undefined,bookingServerStatus:'CONFIRMED'},{...base,bookingStatus:undefined}]){
+  const tree=f.render(c.GoEntryQuickActions,{entry:variant,compact:true,onCancel(){},onPropose(){}});
+  assert.deepEqual(nodes(tree,n=>n.type==='TouchableOpacity').map(n=>n.props.accessibilityLabel),['CANCELAR','PROPONER CAMBIO']);
+  assert.ok(texts(tree).includes('booking_state_accepted'));assert.equal(nodes(tree,n=>n.props.accessibilityLabel==='ACEPTAR').length,0);
+  for(const button of nodes(tree,n=>n.type==='TouchableOpacity')){assert.equal(button.props.style[1].minWidth,0);assert.equal(button.props.style[1].minHeight,36);assert.equal(nodes(button,n=>n.type==='Text')[0].props.numberOfLines,1);}
+ }
+ const terminal=f.render(c.GoEntryQuickActions,{entry:{...base,bookingServerStatus:'REJECTED'},onCancel(){},onPropose(){}});assert.equal(nodes(terminal,n=>n.type==='TouchableOpacity').length,0);
+});
+
+test('expanded sheet closes immediately from a larger floating target outside the scroll and keeps GO message compact',()=>{
+ let closed=0,message=0;const f=sheet(base,{onClose:()=>closed++,onMessage:()=>message++,onExit(){}});
+ const modal=nodes(f.tree,n=>n.type==='Modal')[0],floating=nodes(f.tree,n=>n.props.testID==='entry-detail-floating-close')[0],scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0];
+ assert.equal(modal.props.animationType,'none');assert.equal(floating.props.style.position,'absolute');assert.equal(floating.props.style.right+floating.props.style.padding,12);assert.equal(floating.props.style.bottom+floating.props.style.padding,12);assert.equal(floating.props.style.padding,10,'parent bounds admit the full native hitSlop without moving the visible close icon');assert.equal(floating.props.style.flexDirection,'row');assert.equal(nodes(scroll,n=>n.props.testID==='entry-detail-floating-close').length,0);assert.equal(scroll.props.contentContainerStyle.paddingBottom,68);assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
+ const close=nodes(floating,n=>n.props.accessibilityLabel==='Cerrar detalle')[0];assert.equal(close.props.hitSlop,10);const touch=f.render(close.type,close.props);assert.equal(touch.props.delayPressIn,0);touch.props.onPress({stopPropagation(){}});assert.equal(closed,1);
+ const msg=nodes(f.tree,n=>n.props.testID==='entry-message-go')[0];assert.equal(msg.props.accessibilityLabel,'MENSAJE GO');assert.equal(msg.props.style.alignSelf,'flex-start');msg.props.onPress();assert.equal(message,1);
+});
+
 test('identity suppression is limited to historic placeholders; real business names are kept',()=>{
  assert.equal(presentation.entryIdentity('Cliente DEMO local'),'');assert.equal(presentation.entryIdentity('Cliente DEMO local '),'');
  assert.equal(presentation.entryIdentity('Peluquería DEMO S.L.'),'Peluquería DEMO S.L.');

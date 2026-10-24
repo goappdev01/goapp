@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import {createRequire} from 'node:module';
+import {renderEntryQuickActions} from './helpers/entry-details-fixture.mjs';
 const require=createRequire(path.join(process.cwd(),'package.json'));
 const {React,createRoot,document,rn,ts,evaluate}=require('./tests/helpers/react-lifecycle.cjs');
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),nodes=[];
@@ -18,12 +19,12 @@ const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<8;i++)awai
 const flatten=style=>Array.isArray(style)?Object.assign({},...style.map(flatten)):style??{};
 const profiles=['ADMIN','USER','BUSINESS'];
 
-test('visits/tasks and changes opt into the same intrinsic sizing; contact and location wrap without clipping',()=>{
+test('visits/tasks and changes share static compact sizing and retain full detail navigation',()=>{
  assert.ok(attribute(next,'adaptiveBody'));assert.ok(attribute(proposal,'adaptiveBody'),'changes now reuse the validated natural sizing path');
  const info=next.children.map(n=>n.getText(ast)).join('');
- for(const expression of ['{displayContact(g.contactName, g.phone)}','{g.place}']){
+ for(const expression of ['{displayContact(entryIdentity(g.contactName), g.phone)}','{g.place}']){
   const text=nodes.find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='Text'&&n.pos>=next.pos&&n.end<=next.end&&n.children.some(child=>child.getText(ast)===expression));
-  assert.ok(text);assert.equal(attribute(text,'numberOfLines'),undefined);assert.equal(attribute(text,'ellipsizeMode'),undefined);
+  assert.ok(text);assert.equal(attribute(text,'numberOfLines').getText(ast),'1');assert.equal(attribute(text,'ellipsizeMode'),undefined);
  }
  assert.ok(!info.includes('overflow: "hidden"'));assert.ok(!/isAdminView|isBusinessMode|isUserMode/.test(attribute(next,'adaptiveBody').getText(ast)));
  const frame=attribute(next,'bodyFrame').getText(ast);assert.ok(!frame.includes('flexShrink: 1'));assert.ok(!frame.includes('overflow: "hidden"'));
@@ -45,10 +46,10 @@ async function fixture(profile,{bodyHeight=40,availableHeight=278,scale=1,place=
  function ScrollView(props){const [offset,setOffset]=React.useState(0);propsById.set('scroll',props);propsById.set('drag',setOffset);return React.createElement('div',{'data-testid':props.testID,'data-native':'ScrollView','data-offset':offset,'data-style':JSON.stringify(props.style)},props.children);}
  const native={...rn,View,ScrollView,Pressable:View,TouchableOpacity:View};
  const shared=evaluate('components/landing/LandingContentViewport.tsx',{'react-native':native});
- const scope={React,View,Animated:{View},Pressable:View,TouchableOpacity:View,Text:rn.Text,Feather:()=>null,
+ const scope={React,View,Animated:{View},Pressable:View,TouchableOpacity:View,Text:rn.Text,Feather:()=>null,entryIdentity:e=>e||'',renderEntryQuickActions,lang:'es',
   nextCardPanRef:{panHandlers:{onMoveShouldSetResponder:()=>false}},nextCardSlideAnim:0,nextCardDeleteConfirm:null,nextCardDeleteTimerRef:{current:null},
   setNextCardDeleteConfirm(){},Haptics:{impactAsync:()=>Promise.resolve(),ImpactFeedbackStyle:{Light:'light',Medium:'medium'}},startRelatedGoAction:g=>actions.push('long:'+g.id),
-  aChange:{fn:()=>actions.push('open')},nextSwipeHintAnim:{interpolate:()=>0},nextSwipeHintStage:0,
+  aChange:{fn:()=>actions.push('open')},setLandingDetailsId:()=>actions.push('open'),nextSwipeHintAnim:{interpolate:()=>0},nextSwipeHintStage:0,
   INFO_W:354,uiScaleFactor:scale,handedness:'right',tint:'#f97316',ordinal:'1ª',cardLabel:'TAREA',safeIdx:0,total:1,
   dateStr:'Vie 16/10 · 14:00',dt:new Date('2032-10-16T14:00:00'),receptionNowMs:0,displayContact:name=>name,
   goView:{view:profile,isAdminView:profile==='ADMIN'},operations:{content:React.createElement(View,{testID:'unchanged-controls'},'Taxi · Uber · Bolt · WhatsApp · Cambiar · Aquí · Llamar · Tarde · Ir')},
@@ -74,6 +75,7 @@ for(const profile of profiles)for(const [label,height]of [['two lines',36],['thr
    assert.equal(body.attributes['data-native'],'View');assert.ok(dom(frame).includes(body));
    for(const node of [body,frame]){const style=JSON.parse(node.attributes['data-style']);assert.equal(style.height,undefined);assert.equal(style.maxHeight,undefined);assert.equal(style.overflow,undefined);assert.equal(style.flexShrink,0);}
    assert.ok(f.container.textContent.includes(address));assert.ok(f.container.textContent.includes('Contacto completo'));
+   const actions=byId(f.container,'entry-quick-actions');assert.ok(dom(frame).includes(actions));assert.ok(!dom(footer).includes(actions),'reservation/task quick actions are inside their information card');
    const savedFooter=footer.attributes['data-style'];await f.press();await f.press(true);assert.deepEqual(f.actions,['open','long:same-appointment']);
    await f.update({opened:false});assert.equal(byId(f.container,'landing-information-frame'),undefined);
    await f.update({opened:true});assert.ok(byId(f.container,'landing-information-frame'));assert.equal(byId(f.container,'landing-card-operations').attributes['data-style'],savedFooter);
@@ -92,12 +94,12 @@ for(const profile of profiles)test(profile+': measured growth goes upward, contr
  }finally{await f.close()}
 });
 
-for(const profile of profiles)test(profile+': only exceptional overflow scrolls; expanding available space restores natural layout',async()=>{
+for(const profile of profiles)test(profile+': compact Landing never creates a vertical scroller, even as available height changes',async()=>{
  const f=await fixture(profile,{bodyHeight:700});try{
   const footer=byId(f.container,'landing-card-operations'),frame=byId(f.container,'landing-information-frame'),body=byId(f.container,'landing-card-body');
-  assert.equal(body.attributes['data-native'],'ScrollView');assert.ok(dom(frame).includes(body));assert.ok(!dom(body).includes(frame)&&!dom(body).includes(footer));
-  const style=JSON.parse(body.attributes['data-style']);assert.equal(style.maxHeight,278-f.headerHeight-f.footerHeight-12-27);assert.equal(style.overflow,undefined);assert.ok(style.maxHeight>0);
-  for(const offset of [0,100,600]){await f.drag(offset);assert.equal(byId(f.container,'landing-card-operations'),footer);assert.equal(byId(f.container,'landing-information-frame'),frame);assert.ok(byId(f.container,'landing-card-natural-content'));}
+  assert.equal(body.attributes['data-native'],'View');assert.ok(dom(frame).includes(body));assert.ok(!dom(body).includes(frame)&&!dom(body).includes(footer));
+  assert.equal(dom(f.container).filter(n=>n.attributes?.['data-native']==='ScrollView').length,0);
+  assert.equal(byId(f.container,'landing-card-operations'),footer);assert.equal(byId(f.container,'landing-information-frame'),frame);
   await f.update({availableHeight:1000});assert.equal(byId(f.container,'landing-card-body').attributes['data-native'],'View');assert.equal(byId(f.container,'landing-card-operations'),footer);
   await f.update({bodyHeight:36,availableHeight:278});assert.equal(byId(f.container,'landing-card-body').attributes['data-native'],'View');
  }finally{await f.close()}
@@ -154,7 +156,7 @@ test('all real Home cards reuse the same safe-space helper without changing shar
  const api=evaluate('components/landing/landingPanels.ts');const bounds=api.landingAdaptivePanelSpace({panel:{x:18,y:133,width:354,height:280},frame:{virtual:false},insets:{top:47},titleBottom:65,controls:[{x:340,y:73,width:32,height:32}]});
  assert.equal(bounds.availableHeight,348);assert.equal(bounds.width,354);assert.equal(bounds.headerObstacles[0].x,322);assert.equal(bounds.headerObstacles[0].y,8);
 });
-for(const profile of profiles)for(const [preset,scale]of [['compacto',.83],['estandar',1],['grande',1.12]])for(const entryType of ['TAREA','TAREA_INTERNA'])
+for(const profile of profiles)for(const [preset,scale]of [['compacto',.83],['estandar',1],['grande',1.12],['enorme',1.35]])for(const entryType of ['TAREA','TAREA_INTERNA'])
  test(profile+' / '+preset+' / '+entryType+': actual task description and multiline location share natural upward growth and original actions',async()=>{
   const notes='Descripción completa de la tarea\nSegunda línea de notas\nTercera línea sin truncar',place='Calle de Murcia, Molina de Segura, Murcia\nUbicación completa de la tarea';
   const f=await fixture(profile,{bodyHeight:120,availableHeight:420,scale,entryType,notes,place});try{

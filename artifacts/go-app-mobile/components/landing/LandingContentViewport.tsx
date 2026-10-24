@@ -17,6 +17,8 @@ export function LandingContentViewport({ frame, children, offsetY = 0 }: {
 }
 
 type LandingCardProps = {
+  /** Compact Landing cards open their complete information in the existing detail sheet. */
+  staticBody?: boolean;
   header?: React.ReactNode;
   headerGap?: number;
   footer?: React.ReactNode;
@@ -36,7 +38,7 @@ export function LandingCardContents(props: LandingCardProps) {
   if (props.adaptiveBody) return <AdaptiveLandingCardContents {...props} />;
   const { overflowing, onHeight, contentContainerStyle, children } = props;
   const renderBody = () => {
-    if (overflowing) return <View style={contentContainerStyle} onLayout={(e) => onHeight(e.nativeEvent.layout.height)}>{children}</View>;
+    if (overflowing || props.staticBody) return <View testID="landing-card-body" style={contentContainerStyle} onLayout={(e) => onHeight(e.nativeEvent.layout.height)}>{children}</View>;
     return <ScrollView testID="landing-card-body"
         style={{ flexGrow: 0, flexShrink: 1, minHeight: 0, overflow: "hidden" }} contentContainerStyle={contentContainerStyle}
         bounces={false} alwaysBounceVertical={false} overScrollMode="never"
@@ -83,7 +85,7 @@ function AdaptiveLandingCardContents(props: LandingCardProps) {
     headerGap: hasHeader ? headerGap : 0, footerGap: hasFooter ? footerGap : 0,
     contentHeight: contentHeight ?? 0 });
   const measured = headerHeight !== null && footerHeight !== null && contentHeight !== null;
-  const scroll = measured && sizing.scroll;
+  const scroll = !props.staticBody && measured && sizing.scroll;
   // This View is always intrinsic, including when it is inside the exceptional scroller.
   // Measuring a constrained viewport instead would hide the true height of wrapped text.
   const content = <View testID={scroll ? "landing-card-natural-content" : "landing-card-body"}

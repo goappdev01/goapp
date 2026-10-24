@@ -25,20 +25,23 @@ export type GoEntryActionCallbacks = {
 };
 
 /** Callers supply the same existing commands used in Calendar. This component never mutates a record. */
-export function GoEntryQuickActions({ entry, showState = true, ...actions }: { entry: GoEntry; showState?: boolean } & GoEntryActionCallbacks) {
+export function GoEntryQuickActions({ entry, showState = true, compact = false, ...actions }: { entry: GoEntry; showState?: boolean; compact?: boolean } & GoEntryActionCallbacks) {
   const { lang, t } = useLanguage(), policy = reservationCardPolicy(entry);
   const canonical = policy.canonical;
   const active = canonical ? policy.active : !entry.deleted && entry.estado !== "rechazado" && entry.localResolutionStatus !== "done";
   const received = canonical ? policy.received : entryProposalPending(entry) && entry.estado === "propuesto";
   const internal = entryIsInternal(entry);
+  const accepted = entry.estado === "aceptado" || entry.bookingStatus === "confirmada" || ["CONFIRMED","ACCEPTED"].includes(entry.bookingServerStatus ?? "");
   const state = canonical ? t(policy.stateKey as any) : entry.localResolutionStatus === "done" ? (lang === "en" ? "DONE" : "REALIZADA")
-    : entry.estado === "aceptado" ? (lang === "en" ? "ACCEPTED" : "ACEPTADA") : entry.estado === "rechazado" ? (lang === "en" ? "CANCELLED" : "CANCELADA") : (lang === "en" ? "PENDING" : "PENDIENTE");
-  const button = (label: string, color: string, callback?: () => void) => callback && <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} onPress={callback} style={[s.action, { borderColor: color }]}><Text style={{ color, fontSize: 12, fontWeight: "700", textAlign: "center" }}>{label}</Text></TouchableOpacity>;
-  return <View testID="entry-quick-actions" style={{ gap: 8 }}>
-    {showState && <Text style={{ color: canonical ? policy.stateColor : entry.estado === "aceptado" ? "#22c55e" : "#FF8C00", fontWeight: "800" }}>{state}</Text>}
-    {active && <View style={s.actions}>
+    : accepted ? (lang === "en" ? "ACCEPTED" : "ACEPTADA") : entry.estado === "rechazado" ? (lang === "en" ? "CANCELLED" : "CANCELADA") : (lang === "en" ? "PENDING" : "PENDIENTE");
+  const pending = entryProposalPending(entry);
+  const button = (label: string, color: string, callback?: () => void) => callback && <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} onPress={event => { event?.stopPropagation(); callback(); }} style={[s.action, compact && s.compactAction, { borderColor: color }]}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{ color, fontSize: compact ? 10 : 12, fontWeight: "700", textAlign: "center" }}>{label}</Text></TouchableOpacity>;
+  return <View testID="entry-quick-actions" style={{ gap: compact ? 4 : 8 }}>
+    {showState && <Text numberOfLines={1} style={{ color: canonical ? policy.stateColor : accepted ? "#22c55e" : "#FF8C00", fontSize: compact ? 10 : 13, fontWeight: "800" }}>{pending ? "Original: " : ""}{state}</Text>}
+    {pending && <Text numberOfLines={1} style={{color:"#FF8C00",fontSize:compact?10:13,fontWeight:"700"}}>{received ? (lang === "en" ? "Change received · pending" : "Cambio recibido · pendiente") : (lang === "en" ? "Change · awaiting response" : "Cambio · esperando respuesta")}</Text>}
+    {active && <View style={[s.actions, compact && {flexWrap:"nowrap",gap:6}]}>
       {button(received ? (lang === "en" ? "REJECT" : "RECHAZAR") : (lang === "en" ? "CANCEL" : "CANCELAR"), "#f87171", received ? actions.onReject : actions.onCancel)}
-      {button(internal ? (lang === "en" ? "EDIT" : "MODIFICAR") : (lang === "en" ? "PROPOSE CHANGE" : "PROPONER CAMBIO"), "#FF8C00", internal ? actions.onEdit : actions.onPropose)}
+      {button(internal ? (lang === "en" ? "EDIT" : "MODIFICAR") : received ? (lang === "en" ? "PROPOSE" : "PROPONER") : (lang === "en" ? "PROPOSE CHANGE" : "PROPONER CAMBIO"), "#FF8C00", internal ? actions.onEdit : actions.onPropose)}
       {(received || canonical && policy.canConfirm || !canonical && !internal && entry.kind === "received" && entry.estado === "pendiente")
         && button(lang === "en" ? "ACCEPT" : "ACEPTAR", "#22c55e", received ? actions.onAccept : canonical ? actions.onConfirm : actions.onAccept)}
     </View>}
@@ -52,7 +55,7 @@ export function GoEntrySummary({ entry }: { entry: GoEntry }) {
   const professional = entry.professionalName === "Sin preferencia" ? "" : entryIdentity(entry.professionalName);
   return <View testID="entry-summary" style={{ gap: 8 }}>
     <Text style={s.title}>{entryHeading(entry, unknown)}</Text>
-    {policy.canonical && <Text style={{ color: policy.stateColor, fontWeight: "800" }}>{t(policy.stateKey as any)}</Text>}
+    {policy.canonical && <Text style={{ color: policy.stateColor, fontWeight: "800" }}>{entryProposalPending(entry) ? (lang === "en" ? "Original reservation: " : "Reserva original: ") : ""}{t(policy.stateKey as any)}</Text>}
     <Text style={s.text}>{[entry.date || entry.dateISO, entry.time, entry.duration].filter(Boolean).join(" · ")}</Text>
     {!!professional && <Text style={s.text}>{lang === "en" ? "Professional: " : "Profesional: "}{professional}</Text>}
     {!!entry.place && <Text style={s.secondary}>{entry.place}</Text>}
@@ -83,8 +86,8 @@ export function GoEntryContract({ entry }: { entry: GoEntry }) {
   </View>;
 }
 
-export function GoEntryDetailsSheet({ entry, onClose, onExit, children }: {
-  entry: GoEntry | null; onClose: () => void; onExit?: () => void; children?: React.ReactNode;
+export function GoEntryDetailsSheet({ entry, onClose, onExit, onMessage, children }: {
+  entry: GoEntry | null; onClose: () => void; onExit?: () => void; onMessage?: () => void; children?: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets(), { lang } = useLanguage();
   const pan = useMemo(() => PanResponder.create({
@@ -94,11 +97,11 @@ export function GoEntryDetailsSheet({ entry, onClose, onExit, children }: {
   if (!entry) return null;
   const current = landingCurrentEntry(entry);
   const pending = entryProposalPending(entry);
-  return <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+  return <Modal visible transparent animationType="none" onRequestClose={onClose}>
     <View testID="entry-details-overlay" style={{ flex: 1, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8, paddingHorizontal: Math.max(insets.left, insets.right, 8), backgroundColor: "rgba(0,0,0,0.62)" }}>
       <View testID="entry-details-sheet" style={[s.sheet, { borderColor: pending ? "#FF8C00" : entry.color || "#4A80BD" }]}>
         <View testID="entry-detail-close-gesture" {...pan.panHandlers} style={{ height: 24, alignItems: "center", justifyContent: "center" }}><View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.35)" }} /></View>
-        <ScrollView testID="entry-details-scroll" style={{ flex: 1 }} bounces={false} alwaysBounceVertical={false} overScrollMode="never" directionalLockEnabled contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 128, gap: 16 }}>
+        <ScrollView testID="entry-details-scroll" style={{ flex: 1 }} keyboardShouldPersistTaps="handled" bounces={false} alwaysBounceVertical={false} overScrollMode="never" directionalLockEnabled contentContainerStyle={{ paddingHorizontal: 18, paddingBottom: 68, gap: 12 }}>
           <GoEntrySummary entry={current} />
           <GoEntryContract entry={current} />
           {pending && <View testID="entry-proposal" style={{ borderColor: "#FF8C00", borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 }}>
@@ -107,11 +110,15 @@ export function GoEntryDetailsSheet({ entry, onClose, onExit, children }: {
             {!!entry.changeProposal!.note && <Text style={s.secondary}>{entry.changeProposal!.note}</Text>}
           </View>}
           <GoEntryCommunication entry={entry} />
+          {onMessage&&<TouchableOpacity testID="entry-message-go" accessibilityRole="button" accessibilityLabel="MENSAJE GO" onPress={onMessage}
+            style={{alignSelf:"flex-start",minHeight:44,paddingHorizontal:14,paddingVertical:10,borderWidth:1,borderRadius:10,borderColor:"#93c5fd"}}>
+            <Text numberOfLines={1} style={{color:"#93c5fd",fontWeight:"700",fontSize:12}}>MENSAJE GO</Text>
+          </TouchableOpacity>}
           {children}
         </ScrollView>
-        <View style={{ position: "absolute", right: 12, bottom: 12, gap: 8 }}>
+        <View testID="entry-detail-floating-close" pointerEvents="box-none" style={{ position: "absolute", right: 2, bottom: 2, padding:10, flexDirection:"row", gap: 12, zIndex: 20, elevation: 20 }}>
           {onExit && <GoCloseButton level="container" accessibilityLabel={lang === "en" ? "Exit calendar" : "Salir del calendario"} onPress={onExit} />}
-          <GoCloseButton level="panel" accessibilityLabel={lang === "en" ? "Close details" : "Cerrar detalle"} onPress={onClose} />
+          <GoCloseButton level="panel" hitSlop={10} accessibilityLabel={lang === "en" ? "Close details" : "Cerrar detalle"} onPress={onClose} />
         </View>
       </View>
     </View>
@@ -126,6 +133,7 @@ const s = StyleSheet.create({
   label: { color: "#fff", fontWeight: "700", fontSize: 16 },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   action: { flexGrow: 1, flexBasis: 90, minHeight: 44, padding: 10, borderWidth: 1, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  compactAction: { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 36, paddingVertical: 7, paddingHorizontal: 4, borderRadius: 8 },
   contact: { flex: 1, minHeight: 44, padding: 10, borderWidth: 1, borderColor: "#4ade80", borderRadius: 10, alignItems: "center", justifyContent: "center" },
   contactText: { color: "#4ade80", fontWeight: "700" },
 });

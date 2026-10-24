@@ -12,5 +12,5 @@ const components=evaluate('components/GoEntryDetails.tsx',{
  './ui/GoCloseButton':{GoCloseButton:()=>null},
  './landing/landingPanels':evaluate('components/landing/landingPanels.ts'),
 });
-export const renderEntryQuickActions=entry=>React.createElement(components.GoEntryQuickActions,{entry,onCancel(){},onPropose(){},onEdit(){},onAccept(){},onReject(){}});
+export const renderEntryQuickActions=(entry,showState=true,compact=false)=>React.createElement(components.GoEntryQuickActions,{entry,showState,compact,onCancel(){},onPropose(){},onEdit(){},onAccept(){},onReject(){}});
 export const entryPhone=presentation.entryPhone;

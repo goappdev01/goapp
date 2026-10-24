@@ -17,3 +17,34 @@ Para una base que ya tiene negociación, actualizar **únicamente esa función**
 La prueba `booking-receipt-contacts.postgres.test.mjs` usa el PostgreSQL local ya existente y revierte todas sus operaciones. Verifica acceso de propietario y cliente, rechazo de terceros y lectura actualizada del teléfono.
 
 La publicación del código no acredita un inicio de sesión, una llamada o una reserva física en producción cuando el alojamiento del backend está inaccesible. La comprobación final en dispositivo sigue siendo necesaria.
+# Corrección de fichas y Comunicación GO
+
+Las tarjetas compactas del Landing son estáticas. Sus acciones de estado están
+dentro del recuadro; comunicación, transporte y controles congelados permanecen
+en su zona existente. El texto extenso se consulta en la misma ficha ampliada.
+El cierre ampliado es flotante, inmediato, con área táctil adicional y sin una
+fila de formulario reservada. Los estados de la reserva original y de una
+propuesta pendiente se identifican separadamente.
+
+MENSAJE GO abre el componente existente `MessagesScreen`, también utilizado por
+Comunicación general. Para reservas persistidas, ambos accesos leen el mismo
+hilo `booking:<UUID>` mediante el backend y PostgreSQL. La identidad del remitente
+y el destinatario se resuelven desde la reserva y la sesión; el cliente no puede
+indicar otros participantes. Una respuesta es visible desde cualquiera de los
+dos accesos. No se modifica la reserva al abrir o enviar mensajes.
+
+La extensión SQL aditiva está en `supabase/drafts/booking_messages_v1.sql`, después
+de negociación. La tabla privada tiene RLS y carece de acceso directo para los
+clientes. Las funciones verifican cliente o propietario verificado. Los reintentos
+usan un identificador persistido por usuario y reserva; nunca se muestra un envío
+como entregado antes de recibir confirmación del servidor. Los borradores se
+conservan ante errores, y el cambio de sesión retira el hilo anterior de pantalla.
+
+Los mensajes locales históricos se conservan en sus almacenes originales. No se
+importan automáticamente como entregados ni se atribuyen a identidades remotas
+sin evidencia. Una reserva exclusivamente local no se convierte en un hilo real
+ni se envía por WhatsApp como sustitución de Comunicación GO.
+
+La activación en 8088 utiliza su backend y PostgreSQL aislados existentes. La
+disponibilidad de la URL pública del backend y la activación de este SQL en el
+entorno público son comprobaciones distintas de publicar el código en MAIN.

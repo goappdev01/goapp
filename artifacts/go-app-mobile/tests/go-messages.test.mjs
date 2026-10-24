@@ -1,0 +1,63 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import lifecycle from './helpers/react-lifecycle.cjs';
+const {React,createRoot,document,evaluate,rn,native}=lifecycle;
+const bookingId='11111111-1111-4111-8111-111111111111';
+const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<20;i++)await Promise.resolve();});
+async function fixture({initial=true}={}){
+ const memory=new Map(),storage={getItem:async k=>memory.get(k)??null,setItem:async(k,v)=>{memory.set(k,v);},removeItem:async k=>{memory.delete(k);}};
+ let owner='customer',fail=false,loseResponse=false,sending=0,attempts=0;const records=[],events=new Set(),inputs=[],buttons=[];
+ const thread=()=>({id:'booking:'+bookingId,bookingId,businessId:'salon',counterpartId:'business-owner',contactName:'Registered salon',lastUpdated:1,messages:records.map(x=>({...x,senderId:x.sender===owner?'yo':x.sender})),unread:0});
+ const booking={getAuthenticatedUserId:async()=>owner,supabaseApiRequest:async(path,init={},required,expected)=>{
+  assert.equal(required,true);assert.equal(expected,owner);if(fail)throw new Error('Servidor no disponible');
+  if(path.startsWith('/supabase/booking-conversations'))return records.length||path.includes('booking_id=')?[thread()]:[];
+  const {messageId,text}=JSON.parse(init.body);attempts++;sending++;await Promise.resolve();
+  if(!records.some(m=>m.id===messageId))records.push({id:messageId,text,sender:owner,createdAt:1,channel:'go'});sending--;
+  if(loseResponse){loseResponse=false;throw new Error('Respuesta de envío perdida');}return thread();
+ }};
+ const data=evaluate('data/goMessages.ts',{'./booking':booking,'@react-native-async-storage/async-storage':storage});
+ const text=n=>Array.isArray(n)?n.map(text).join(''):typeof n==='string'?n:n?.props?text(n.props.children):'';
+ class Value{setValue(){}interpolate(){return 0;}}
+ const motion={start:fn=>fn?.()};const chain=new Proxy({},{get:()=>()=>chain});
+ const View=native('View');
+ const screen=evaluate('components/MessagesScreen.tsx',{
+  '@/data/booking':booking,'@/data/goMessages':data,'@/lib/sessionEvents':{onSessionChanged:fn=>{events.add(fn);return()=>events.delete(fn);}},
+  '@react-native-async-storage/async-storage':storage,'@expo/vector-icons':{Feather:()=>null},'./DraggableFAB':{DraggableFAB:({children})=>children},
+  'expo-haptics':{selectionAsync(){},impactAsync(){},notificationAsync(){},ImpactFeedbackStyle:{Light:1},NotificationFeedbackType:{Warning:1}},
+  '@/contexts/LanguageContext':{useLanguage:()=>({lang:'es',t:key=>key})},'expo-linear-gradient':{LinearGradient:View},
+  'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34})},
+  'react-native-gesture-handler':{Gesture:{Pan:()=>chain},GestureDetector:({children})=>children},
+  'react-native-reanimated':{__esModule:true,default:{View},useSharedValue:v=>React.useRef({value:v}).current,useAnimatedStyle:fn=>fn(),withSpring:v=>v},
+  'react-native':{...rn,View,Text:native('Text'),Platform:{OS:'ios'},Modal:({visible,children})=>visible?children:null,
+   Dimensions:{get:()=>({width:390,height:844})},Easing:{out:x=>x,cubic:0},PanResponder:{create:()=>({panHandlers:{}})},
+   Animated:{Value,View,spring:()=>motion,timing:()=>motion},ScrollView:View,KeyboardAvoidingView:View,
+   FlatList:props=>React.createElement(View,null,(props.data||[]).map((item,index)=>React.createElement(React.Fragment,{key:item.id},props.renderItem({item,index})))),
+   TextInput:props=>{inputs.push(props);return React.createElement('input',{'data-value':props.value,'data-placeholder':props.placeholder});},
+   TouchableOpacity:props=>{buttons.push({...props,label:props.accessibilityLabel||text(props.children)});return React.createElement('button',null,props.children);},
+  },
+ });
+ let initialBookingId=initial?bookingId:undefined;const container=document.createElement('div'),root=createRoot(container);
+ const render=()=>{inputs.length=0;buttons.length=0;root.render(React.createElement(screen.MessagesScreen,{visible:true,onClose(){},recentContacts:[],userGoPhone:'',onCreateGo(){},onPickDeviceContact:async()=>null,initialBookingId}));};
+ await settle(render);
+ const input=()=>inputs.findLast(p=>p.placeholder==='Escribe un mensaje...');
+ const send=()=>buttons.findLast(p=>p.label==='msg_send_btn');
+ return{memory,records,container,data,get attempts(){return attempts;},get input(){return input();},get send(){return send();},
+  async type(value){await settle(()=>input().onChangeText(value));},async submit(){await settle(()=>send().onPress());},
+  async double(){await settle(()=>Promise.all([send().onPress(),send().onPress()]));},fail(v){fail=v;},lose(){loseResponse=true;},
+  async account(next){await settle(()=>{owner=next;for(const fn of events)fn();});},
+  async general(){initialBookingId=undefined;await settle(render);},
+  async close(){await settle(()=>root.unmount());assert.equal(events.size,0);assert.equal(sending,0);}
+ };
+}
+test('booking detail opens the existing GO Communication thread and double tap sends once',async()=>{
+ const f=await fixture();try{assert.ok(f.container.textContent.includes('Registered salon'));await f.type('Hello company');await f.double();assert.equal(f.records.length,1);assert.equal(f.attempts,1);assert.equal(f.input.value,'');await f.general();assert.ok(f.container.textContent.includes('Hello company'));}finally{await f.close();}
+});
+test('offline send preserves text and its scoped draft without displaying fictitious delivery',async()=>{
+ const f=await fixture();try{await f.type('Keep this text');f.fail(true);await f.submit();assert.equal(f.records.length,0);assert.equal(f.input.value,'Keep this text');assert.ok(f.container.textContent.includes('Servidor no disponible'));assert.ok([...f.memory.entries()].some(([k,v])=>k.includes('go_message_draft_v1:customer:')&&v==='Keep this text'));f.fail(false);await f.submit();assert.equal(f.records.length,1);assert.equal(f.input.value,'');}finally{await f.close();}
+});
+test('lost response retries with persisted message ID, including a reloaded outbox, without duplicate delivery',async()=>{
+ const f=await fixture();try{await f.type('Exactly once');f.lose();await f.submit();assert.equal(f.records.length,1);assert.equal(f.input.value,'Exactly once');const pending=JSON.parse([...f.memory.entries()].find(([k])=>k.startsWith('go_message_outbox_v1:'))[1]);assert.equal(pending.messageId,f.records[0].id);await f.submit();assert.equal(f.records.length,1);assert.equal(f.attempts,2);}finally{await f.close();}
+});
+test('account change removes the previous recipient, messages and input from the active screen',async()=>{
+ const f=await fixture();try{await f.type('Private draft');await f.account('another-account');const dom=n=>[n,...n.childNodes.flatMap(dom)];assert.equal(dom(f.container).filter(n=>n.attributes?.['data-placeholder']==='Escribe un mensaje...').length,0);assert.ok(!f.container.textContent.includes('Private draft'));assert.ok(f.container.textContent.includes('La sesión ha cambiado'));}finally{await f.close();}
+});

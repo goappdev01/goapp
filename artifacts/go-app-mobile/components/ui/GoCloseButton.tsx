@@ -7,19 +7,21 @@ type Props = {
   level: "panel" | "container";
   onPress: () => void;
   accessibilityLabel: string;
+  hitSlop?: number;
 };
 
 /** ↓ closes one open panel; ⇓ exits its containing screen. */
-export function GoCloseButton({ level, onPress, accessibilityLabel, disabled = false }: Props) {
+export function GoCloseButton({ level, onPress, accessibilityLabel, disabled = false, hitSlop = 2 }: Props) {
   return (
     <TouchableOpacity
-      onPress={event => { event.stopPropagation(); onPress(); }}
+      onPress={event => { event?.stopPropagation(); onPress(); }}
       disabled={disabled}
       accessibilityState={{ disabled }}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       activeOpacity={0.75}
-      hitSlop={2}
+      hitSlop={hitSlop}
+      delayPressIn={0}
       style={styles.button}
     >
       <Feather name={level === "panel" ? "chevron-down" : "chevrons-down"} size={20} color="#ffffff" />

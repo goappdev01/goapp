@@ -770,13 +770,9 @@ export function AgendaBoard({
   };
 
   const handleOpenMessage = useCallback((item: GoEntry) => {
-    if (item.type === "GO_BOOKING" || item.type === "GO_RESERVA") {
-      setBookingMsgDraft("");
-      setBookingMsgEntry(item);
-      setTimeout(() => chatScrollRef.current?.scrollToEnd({ animated: false }), 120);
-    } else {
-      onOpenMessage?.(item);
-    }
+    // All entry messages open the existing general GO Communication screen.
+    // The legacy optimistic reservation modal cannot acknowledge real delivery.
+    onOpenMessage?.(item);
   }, [onOpenMessage]);
 
   const sendGoChat = useCallback(() => {
@@ -2628,6 +2624,7 @@ export function AgendaBoard({
       {/* One foreground detail for the same reservation or task. Calendar stays mounted. */}
       <GoEntryDetailsSheet entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}
         onClose={() => { setExpandedBookingItem(null); setExpandedCardId(null); }}
+        onMessage={expandedBookingItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);setExpandedCardId(null);setTimeout(()=>handleOpenMessage(item),180); } : undefined}
         onExit={onGoToLanding ? () => { setExpandedBookingItem(null); setExpandedCardId(null); onGoToLanding(); } : undefined}>
         {expandedBookingItem && <>
           {bookingPolicy?.canonical ? renderReservationControls(expandedBookingItem, true) : <GoEntryQuickActions entry={expandedBookingItem}
@@ -2641,11 +2638,6 @@ export function AgendaBoard({
             style={{minHeight:44,padding:12,borderRadius:12,borderWidth:1,borderColor:"#93c5fd",alignItems:"center"}}>
             <Text style={{color:"#93c5fd",fontWeight:"700"}}>{t(bookingPolicy.canVerify?'verification_title':'verification_show')}</Text>
           </TouchableOpacity>}
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('biz_message_btn')}
-            onPress={() => { const item=expandedBookingItem;setExpandedBookingItem(null);setExpandedCardId(null);setTimeout(()=>handleOpenMessage(item),80); }}
-            style={{minHeight:44,padding:12,borderRadius:12,borderWidth:1,borderColor:"#93c5fd",alignItems:"center"}}>
-            <Text style={{color:"#93c5fd",fontWeight:"700"}}>{t('biz_message_btn')}</Text>
-          </TouchableOpacity>
         </>}
       </GoEntryDetailsSheet>
 

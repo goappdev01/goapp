@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import vm from "node:vm";
+import {fixture as cardFixture} from './helpers/calendar-fixture.mjs';
 const ts = createRequire(path.join(process.cwd(),"package.json"))("typescript");
 const owner="11111111-1111-4111-8111-111111111111", other="22222222-2222-4222-8222-222222222222";
 const plain=value=>JSON.parse(JSON.stringify(value));
@@ -11,6 +12,14 @@ function load(name,imports={}) { const exports={}; const text=ts.transpileModule
   vm.runInNewContext(text,{exports,require:key=>{if(key in imports)return imports[key];throw Error("External/runtime dependency forbidden: "+key);},console,Date,Intl,Set,Map});return exports; }
 const storeModule=load("data/businessDemoStore.ts");
 const repoModule=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":load("data/bookingServices.ts")});
+
+test('a newly confirmed booking and the same persisted booking reopened retain identical compact Landing actions',async()=>{
+ const f=fixture();await configured(f);const hold=await f.repo.createHold(await inputFor(f));assert.equal(hold.ok,true);assert.equal((await f.repo.claimSlot({...hold.booking,status:'CONFIRMED'})).ok,true);
+ const current=f.repo.getCustomerEntries()[0],reopened=f.make();await reopened.load();const saved=repoModule.createDemoBookingRepository(reopened).getCustomerEntries()[0];
+ const c=cardFixture(),api=c.load('components/GoEntryDetails.tsx'),all=(n,p)=>n&&typeof n==='object'?[...(p(n)?[n]:[]),...(n.children||[]).flatMap(x=>all(x,p))]:[];
+ for(const entry of [current,saved]){const tree=c.render(api.GoEntryQuickActions,{entry,compact:true,onCancel(){},onPropose(){}});assert.deepEqual(all(tree,n=>n.type==='TouchableOpacity').map(n=>n.props.accessibilityLabel),['CANCELAR','PROPONER CAMBIO']);assert.equal(entry.bookingStatus,'confirmada');}
+ assert.equal(current.reservationId,saved.reservationId);assert.equal(reopened.getSnapshot().bookings.length,1);
+});
 test('asynchronous display identity resolves before atomic booking persistence and survives reopening',async()=>{
  const f=fixture();await configured(f);let resolveIdentity,calls=0;
  const repo=repoModule.createDemoBookingRepository(f.store,{now:()=>Date.parse('2030-01-07T08:00:00'),customerIdentity:()=>{calls++;return new Promise(resolve=>{resolveIdentity=resolve;});}});

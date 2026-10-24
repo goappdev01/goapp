@@ -3134,6 +3134,7 @@ function HomeScreenContent() {
   const [humanityOpen, setHumanityOpen] = useState(false);
   useEffect(() => { if (!goView.isAdminView && !adminAccess.checking && !adminAccess.unavailable) setHumanityOpen(false); }, [goView.isAdminView, adminAccess.checking, adminAccess.unavailable]);
   const [initialMessagesContact, setInitialMessagesContact] = useState<{ name: string; phone: string } | null>(null);
+  const [initialMessagesBookingId,setInitialMessagesBookingId]=useState<string|null>(null);
   // ── RECORDATORIO (RECUÉRDAME) ────────────────────────────────────────────
   const [remindOpen, setRemindOpen] = useState(false);
   const [remindText, setRemindText] = useState("");
@@ -13542,10 +13543,23 @@ function HomeScreenContent() {
           .then(() => setLandingDetailsId(null)).catch(error => Alert.alert("GO", error.message));
       } }]);
   };
-  const renderEntryQuickActions = (entry: GoEntry, showState = true) => <GoEntryQuickActions entry={entry} showState={showState}
+  const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false) => <GoEntryQuickActions entry={entry} showState={showState} compact={compact}
     onCancel={() => cancelEntryFromDetails(entry)} onEdit={() => openEntryChange(entry)} onPropose={() => openEntryChange(entry)}
     onAccept={() => { if (entry.changeProposal) acceptProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "aceptado"); }}
+    onConfirm={entry.businessBooking && entry.ownerUserId ? () => {
+      if(bookingContextRef.current.view!=="BUSINESS" || bookingContextRef.current.businessId!==entry.businessId)return;
+      void negotiateRealBooking(String(entry.reservationId),"confirm",{expectedRevision:entry.bookingChangeRevision??0},entry.ownerUserId!)
+        .catch(error=>Alert.alert("GO",error.message));
+    } : undefined}
     onReject={() => { if (entry.changeProposal) rejectProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "rechazado"); }} />;
+
+  const openEntryMessage = (entry: GoEntry) => {
+    setLandingDetailsId(null);
+    const booking=entry.type==="GO_BOOKING"||entry.type==="GO_RESERVA"||entry.customerBooking||entry.businessBooking;
+    setInitialMessagesBookingId(booking ? String(entry.bookingId || entry.reservationId || entry.id.replace(/^go_booking_(?:cli_|prv_)?/,"")) : null);
+    setInitialMessagesContact(booking ? null : {name:entry.contactName||"",phone:entry.phone||""});
+    setTimeout(()=>setMessagesOpen(true),180);
+  };
 
   const buildNextAptActions = (g: typeof goLog[number]) => {
     const isAquiSending = aquiSendingId === g.id;
@@ -13961,7 +13975,6 @@ function HomeScreenContent() {
         </View>
         {transportControls}
       </View>
-      {!g.changeProposal && renderEntryQuickActions(g)}
     </View>) };
   };
 
@@ -14609,7 +14622,7 @@ function HomeScreenContent() {
             {/* Header — ordinal · tipo · puntos · flechas (mismo patrón que PRÓXIMA) */}
 
 
-            <LandingCardContents
+            <LandingCardContents staticBody
               adaptiveBody={{ ...changesCardSpace, frameVerticalInset: 3 }}
               footer={item.kind === "cambio" && renderLandingOperations(item.g).content}
               footerGap={Math.round(12 * uiScaleFactor)} overflowing={false} onHeight={() => {}}
@@ -14733,23 +14746,16 @@ function HomeScreenContent() {
               )}
 
               {/* Nombre */}
-              <Text
+              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
                 style={{ color: "#f3f3f3", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "700" }}>
                 {cardTitle}
               </Text>
-              {/* Estado: CAMBIO enviado → solo mostrar "Esperando respuesta" */}
-              {item.kind === "cambio" && isSent && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: Math.round(2 * uiScaleFactor), paddingVertical: Math.round(2 * uiScaleFactor) }}>
-                  <Feather name="clock" size={Math.round(11 * uiScaleFactor)} color={ACCENT} />
-                  <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>{t('biz_booking_awaiting')}</Text>
-                </View>
-              )}
 
 
 
               {/* Subtítulo / servicio */}
               {!!cardSub && cardSub !== cardTitle && (
-                <Text
+                <Text numberOfLines={1}
                   style={{ color: "#9a9a9a", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>
                   {cardSub}
                 </Text>
@@ -14783,14 +14789,14 @@ function HomeScreenContent() {
 
               {item.kind === "cambio" && !!item.g.notes?.trim()
                 && item.g.notes.trim() !== cardTitle && item.g.notes.trim() !== cardSub && (
-                <Text testID="landing-proposal-title-text" style={{ color: "#f3f3f3", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "700" }}>{item.g.notes}</Text>
+                <Text testID="landing-proposal-title-text" numberOfLines={1} style={{ color: "#f3f3f3", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>{item.g.notes}</Text>
               )}
               {item.kind === "cambio" && !!item.g.changeProposal?.note && (
-                <Text testID="landing-proposal-note" style={{ color: "rgba(249,115,22,0.80)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>{item.g.changeProposal.note}</Text>
+                <Text testID="landing-proposal-note" numberOfLines={1} style={{ color: "rgba(249,115,22,0.80)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>{item.g.changeProposal.note}</Text>
               )}
               </Pressable>
 
-              {item.kind === "cambio" && renderEntryQuickActions(item.g)}
+              {item.kind === "cambio" && renderEntryQuickActions(item.g, true, true)}
 
               {/* Botones: HOLD → CONFIRMAR / RECHAZAR */}
               {item.kind === "hold" && (
@@ -14912,7 +14918,7 @@ function HomeScreenContent() {
               zIndex: 5,
             }}
           >
-            <LandingCardContents
+            <LandingCardContents staticBody
               adaptiveBody={{ availableHeight: nextCardAvailableHeight, frameVerticalInset: Math.round(10 * uiScaleFactor) + Math.round(14 * uiScaleFactor) + 3, width: PANEL_W, headerObstacles }}
               footer={operations.content}
               footerGap={PANEL_ACTION_GAP} overflowing={false} onHeight={() => {}}
@@ -15196,11 +15202,11 @@ function HomeScreenContent() {
                   })()}
                   {(g.type === "TAREA" || g.type === "TAREA_INTERNA") && !!g.notes?.trim()
                     && g.notes.trim() !== displayContact(g.contactName, g.phone) && (
-                    <Text testID="landing-task-description" style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}>{g.notes}</Text>
+                    <Text testID="landing-task-description" numberOfLines={1} style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}>{g.notes}</Text>
                   )}
                   {/* Línea 1: QUIÉN — contacto completo, nunca truncado */}
                   {!!displayContact(entryIdentity(g.contactName), g.phone) && (
-                    <Text
+                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
                       style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}
                     >
                       {displayContact(entryIdentity(g.contactName), g.phone)}
@@ -15236,12 +15242,14 @@ function HomeScreenContent() {
                   )}
                   {/* Línea 3: DÓNDE — ubicación */}
                   {!!g.place && (
-                    <Text
+                    <Text numberOfLines={1}
                       style={{ color: "#9a9a9a", fontSize: Math.round(12 * uiScaleFactor), fontWeight: "500" }}
                     >
                       {g.place}
                     </Text>
                   )}
+                  {!!entryIdentity(g.professionalName) && <Text numberOfLines={1} style={{color:"#cfcfcf",fontSize:Math.round(11*uiScaleFactor)}}>{lang === "en" ? "Professional: " : "Profesional: "}{g.professionalName}</Text>}
+                  {renderEntryQuickActions(g, true, true)}
                 </View>
 
               {/* Botones de acción — cuadrícula dinámica (2 o 3 cols)
@@ -15394,7 +15402,7 @@ function HomeScreenContent() {
       )}
 
       </LandingContentViewport>
-      <GoEntryDetailsSheet entry={landingDetailsEntry} onClose={() => setLandingDetailsId(null)}>
+      <GoEntryDetailsSheet entry={landingDetailsEntry} onClose={() => setLandingDetailsId(null)} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry) : undefined}>
         {landingDetailsEntry && renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}
       </GoEntryDetailsSheet>
 
@@ -20273,10 +20281,7 @@ function HomeScreenContent() {
                 }}
                 onOpenMessage={(item) => {
                   const g = goLog.find((x) => x.id === item.id);
-                  if (g) {
-                    setInitialMessagesContact({ name: g.contactName || "", phone: g.phone || "" });
-                    setMessagesOpen(true);
-                  }
+                  if (g) openEntryMessage(g);
                 }}
                 onSaveBookingMessage={(id, msg) => {
                   setGoLog((prev) => {
@@ -24343,10 +24348,11 @@ function HomeScreenContent() {
       {/* MENSAJES GO — pantalla de mensajería interna */}
       <MessagesScreen
         visible={messagesOpen}
-        onClose={() => { setMessagesOpen(false); setInitialMessagesContact(null); }}
+        onClose={() => { setMessagesOpen(false); setInitialMessagesContact(null); setInitialMessagesBookingId(null); }}
         recentContacts={recentContacts}
         userGoPhone={userGoPhone}
         initialContact={initialMessagesContact ?? undefined}
+        initialBookingId={initialMessagesBookingId ?? undefined}
         onCreateGo={({ contactName: cName, contactPhone: cPhone, contextText }) => {
           setMessagesOpen(false);
           setContactName(cName);

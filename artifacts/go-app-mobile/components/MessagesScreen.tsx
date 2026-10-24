@@ -5,6 +5,9 @@ import * as Haptics from "expo-haptics";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { getAuthenticatedUserId } from "@/data/booking";
+import { readBookingConversations, deliverBookingMessage } from "@/data/goMessages";
+import { onSessionChanged } from "@/lib/sessionEvents";
 import {
   Animated,
   Dimensions,
@@ -41,6 +44,9 @@ export type GoDirectMessage = {
 };
 
 export type GoConversation = {
+  bookingId?: string;
+  businessId?: string;
+  counterpartId?: string;
   id: string;
   contactName: string;
   contactPhone: string;
@@ -63,6 +69,7 @@ type MessagesScreenProps = {
   onPickDeviceContact: () => Promise<{ name: string; phone: string } | null>;
   /** Cuando se provee, abre directamente el hilo de este contacto al abrir la pantalla. */
   initialContact?: { name: string; phone: string };
+  initialBookingId?: string;
 };
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -242,6 +249,7 @@ export function MessagesScreen({
   onCreateGo,
   onPickDeviceContact,
   initialContact,
+  initialBookingId,
 }: MessagesScreenProps) {
   const insets = useSafeAreaInsets();
   const { lang, t } = useLanguage();
@@ -255,15 +263,21 @@ export function MessagesScreen({
   const [inputKey, setInputKey] = useState(0);
   const threadScrollRef = useRef<ScrollView>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
+  const [messageError,setMessageError]=useState("");
+  const [sending,setSending]=useState(false);
+  const ownerRef=useRef<string|null>(null),generation=useRef(0),sendLock=useRef(false);
+  const draftKey=(owner:string,id:string)=>`go_message_draft_v1:${owner}:${id}`;
+  const errorText=(error:unknown)=>error && typeof error==="object" && "message" in error && typeof error.message==="string" ? error.message : "No se pudo conectar con Comunicación GO. Tu texto se conserva.";
 
   // ── Persist ───────────────────────────────────────────────────────────────
 
   const persist = useCallback((convs: GoConversation[]) => {
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(convs)).catch(() => {});
+    // Server conversations are never written into the old local contact store.
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(convs.filter(c=>!c.bookingId))).catch(() => {});
   }, []);
 
   useEffect(() => {
-    if (visible) {
+    if (visible && !initialBookingId) {
       AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
         let convs: GoConversation[] = [];
         if (raw) { try { convs = JSON.parse(raw); } catch {} }
@@ -298,13 +312,58 @@ export function MessagesScreen({
           }
         } else {
           // Apertura normal: mostrar lista
-          setConversations(convs);
+          setConversations(old=>[...old.filter(c=>c.bookingId),...convs]);
           setView("list");
         }
         setSearch("");
       });
     }
   }, [visible]);
+
+  // Reservation cards and general Communication use this SAME screen and server
+  // conversation. Merely opening a thread never creates a message or changes a booking.
+  useEffect(()=>{
+    if(!visible)return;
+    let alive=true;
+    const token=++generation.current;
+    if(initialBookingId){setActiveConv(null);setInput("");setView("list");setMessageError("");}
+    const load=async()=>{
+      try{
+        const owner=await getAuthenticatedUserId();if(!alive||generation.current!==token)return;
+        ownerRef.current=owner;if(!owner)throw new Error("Inicia sesión para utilizar Comunicación GO.");
+        const rows=await readBookingConversations(owner,initialBookingId);
+        if(!alive||generation.current!==token)return;
+        setMessageError("");
+        setConversations(old=>[...rows,...old.filter(c=>!c.bookingId)]);
+        if(initialBookingId){
+          const thread=rows.find(c=>c.bookingId===initialBookingId);
+          if(!thread)throw new Error("No se pudo recuperar la conversación de esta reserva.");
+          const draft=await AsyncStorage.getItem(draftKey(owner,thread.id));
+          if(!alive||generation.current!==token)return;
+          setActiveConv(thread);setInput(draft||"");setView("thread");slideAnim.setValue(0);
+        }
+      }catch(error){if(alive&&generation.current===token)setMessageError(errorText(error));}
+    };
+    void load();
+    const unsubscribe=onSessionChanged(()=>{generation.current++;ownerRef.current=null;setActiveConv(null);setConversations([]);setInput("");setView("list");setMessageError("La sesión ha cambiado. Vuelve a abrir Comunicación GO.");});
+    return()=>{alive=false;generation.current++;unsubscribe();};
+  },[visible,initialBookingId]);
+
+  useEffect(()=>{
+    if(!visible||!activeConv?.bookingId||!ownerRef.current)return;
+    let alive=true,busy=false;const owner=ownerRef.current,bookingId=activeConv.bookingId;
+    const timer=setInterval(()=>{if(busy)return;busy=true;void readBookingConversations(owner,bookingId).then(rows=>{
+      if(!alive||ownerRef.current!==owner)return;const thread=rows.find(c=>c.bookingId===bookingId);if(!thread)return;
+      setActiveConv(current=>current?.bookingId===bookingId?thread:current);
+      setConversations(old=>[thread,...old.filter(c=>c.id!==thread.id)]);setMessageError("");
+    }).catch(error=>{if(alive){setMessageError(errorText(error));if(error?.status===401||error?.status===403){setActiveConv(null);setView("list");setConversations(old=>old.filter(c=>c.bookingId!==bookingId));}}}).finally(()=>{busy=false;});},15000);
+    return()=>{alive=false;clearInterval(timer);};
+  },[visible,activeConv?.bookingId]);
+
+  const changeInput=(text:string)=>{
+    setInput(text);
+    if(activeConv?.bookingId&&ownerRef.current){void AsyncStorage.setItem(draftKey(ownerRef.current,activeConv.id),text).catch(()=>setMessageError("No se pudo guardar el borrador en este dispositivo."));}
+  };
 
   // ── Navigation ────────────────────────────────────────────────────────────
 
@@ -318,12 +377,16 @@ export function MessagesScreen({
       return updated;
     });
     setActiveConv({ ...conv, unread: 0 });
+    setMessageError("");setInput("");
+    if(conv.bookingId&&ownerRef.current){const owner=ownerRef.current;void AsyncStorage.getItem(draftKey(owner,conv.id)).then(value=>{if(ownerRef.current===owner)setInput(value||"");});}
     slideAnim.setValue(screen.width);
     setView("thread");
     Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, speed: 22, bounciness: 4 }).start();
   };
 
   const backToList = () => {
+    const owner=ownerRef.current;
+    if(owner)void readBookingConversations(owner).then(rows=>{if(ownerRef.current===owner)setConversations(old=>[...rows,...old.filter(c=>!c.bookingId)]);}).catch(error=>setMessageError(errorText(error)));
     Animated.timing(slideAnim, {
       toValue: screen.width, duration: 220,
       easing: Easing.out(Easing.cubic), useNativeDriver: true,
@@ -346,8 +409,23 @@ export function MessagesScreen({
 
   // ── Send ──────────────────────────────────────────────────────────────────
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!input.trim() || !activeConv) return;
+    if(activeConv.bookingId){
+      if(sendLock.current)return;
+      const owner=ownerRef.current,token=generation.current,text=input.trim(),thread=activeConv,bookingId=activeConv.bookingId;
+      if(!owner){setMessageError("Inicia sesión para enviar el mensaje.");return;}
+      sendLock.current=true;setSending(true);setMessageError("");
+      try{
+        const saved=await deliverBookingMessage(owner,bookingId,text);
+        if(ownerRef.current!==owner||generation.current!==token)return;
+        setActiveConv(saved);setConversations(old=>[saved,...old.filter(c=>c.id!==saved.id)]);
+        setInput(current=>current.trim()===text?"":current);
+        await AsyncStorage.removeItem(draftKey(owner,thread.id));
+      }catch(error){if(ownerRef.current===owner&&generation.current===token)setMessageError(errorText(error));}
+      finally{sendLock.current=false;setSending(false);}
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const msg: GoDirectMessage = {
       id: makeId(), text: input.trim(), senderId: "yo",
@@ -419,6 +497,7 @@ export function MessagesScreen({
       <View style={[s.root, { paddingTop: insets.top }]}>
         {/* Pure black background — no blue gradient */}
         <View style={[StyleSheet.absoluteFill, { backgroundColor: C.bg }]} pointerEvents="none" />
+        {!!messageError&&<Text testID="go-message-error" accessibilityRole="alert" style={{color:C.red,paddingHorizontal:16,paddingVertical:10}}>{messageError}</Text>}
 
         {/* ═══ LIST VIEW ═══════════════════════════════════════════════════ */}
         {view === "list" && (
@@ -629,7 +708,8 @@ export function MessagesScreen({
                     <TextInput
                       key={inputKey}
                       value={input}
-                      onChangeText={setInput}
+                      editable={!sending}
+                      onChangeText={changeInput}
                       placeholder={lang === "en" ? "Write a message..." : "Escribe un mensaje..."}
                       placeholderTextColor="rgba(255,255,255,0.30)"
                       style={s.msgInput}
@@ -655,7 +735,7 @@ export function MessagesScreen({
                         onPress={sendMessage}
                         style={[s.actionBtn, s.actionBtnSend, { opacity: input.trim() ? 1 : 0.35 }]}
                         activeOpacity={0.75}
-                        disabled={!input.trim()}
+                        disabled={!input.trim() || sending}
                       >
                         <Feather name="send" size={18} color="#fff" />
                         <Text style={s.actionBtnLabel}>{t("msg_send_btn")}</Text>
