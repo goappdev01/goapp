@@ -273,10 +273,15 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
     }, { filename: name });
     return exports;
   }
+  let catalogueScope = "";
   const render = (component, props = {}) => {
     current = hooks.get(component) ?? []; hooks.set(component,current); cursor = 0; effects = [];
     const tree = component(props); if (tree?.type?.context) tree.type.context.value = tree.props.value;
-    const run = effects; effects = []; for (const fn of run) fn(); return tree;
+    const run = effects; effects = []; for (const fn of run) fn();
+    const selector=nodes(tree).find(node=>node.props?.repository && node.props.rootIds);
+    const next=selector?selector.props.businessId+'|'+selector.props.rootIds.join(','):'';
+    if(selector && next!==catalogueScope){catalogueScope=next;if(selector.props.rootIds.length)void selector.props.repository.quoteCatalog(selector.props.businessId,selector.props.rootIds).then(quote=>{if(next===catalogueScope)selector.props.onChange(quote);});}
+    return tree;
   };
   return { load, render, alerts, calls, configApi,
     emitKeyboard(event) { if (event.endsWith("Show")) keyboardVisible = true; if (event.endsWith("Hide")) keyboardVisible = false; for (const fn of keyboardListeners.get(event) ?? []) fn(); },
@@ -497,6 +502,7 @@ for (const multiple of [false, true]) test("complete DEMO booking reaches its fi
   ui.render(Overlay, props); await turn(); ui.render(Overlay, props); await turn();
   let tree = ui.render(Overlay, props); button(tree, "Corte de prueba").props.onPress(); tree = ui.render(Overlay, props);
   if (multiple) { button(tree, "Tinte de prueba").props.onPress(); tree = ui.render(Overlay, props); }
+  await turn(); tree = ui.render(Overlay, props);
   button(tree, "save").props.onPress(); tree = ui.render(Overlay, props);
   button(tree, "Profesional DEMO").props.onPress(); ui.render(Overlay, props); await turn(); tree = ui.render(Overlay, props);
   button(tree, "09:00").props.onPress(); await turn(); tree = ui.render(Overlay, props);

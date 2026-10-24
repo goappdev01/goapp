@@ -1,5 +1,7 @@
 import { supabaseApiRequest, type BookableItem } from "./booking";
-export type AssociationMode = "included" | "optional" | "required";
+export type AssociationMode = "included" | "optional" | "recommended";
+/** Old required components are part of the main price, never a new charge. */
+export const associationMode = (mode: string): AssociationMode => mode === "required" ? "included" : mode as AssociationMode;
 export type CatalogAssociation = { id: string; business_id: string; source_id: string; target_id: string; mode: AssociationMode; active: boolean; revision: number };
 export type CatalogLine = { itemId: string; name: string; kind: "service" | "product"; durationMinutes: number; quantity: number; unitPrice: number; charge: number; included: boolean; currency: string };
 export type CatalogOption = { associationId: string; sourceId: string; itemId: string; name: string; kind: "service" | "product"; price: number; currency: string; mode: AssociationMode; selected: boolean };

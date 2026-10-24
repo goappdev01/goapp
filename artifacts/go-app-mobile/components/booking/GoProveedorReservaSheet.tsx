@@ -46,6 +46,7 @@ import { PEOPLE_SECTORS, SUB_TO_SECTOR } from "@/data/goSectorData";
 import { getBusinessIcon } from "@/lib/businessIcons";
 import { bookingActivityEnabled } from "@workspace/api-zod";
 import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
+import { BookingSearchOverlay } from "./BookingSearchOverlay";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type ProveedorData = {
@@ -65,6 +66,7 @@ export type ProveedorData = {
 };
 
 type Props = {
+  demoRepository?: import("@/data/demoBookingRepository").DemoBookingRepository;
   visible: boolean;
   proveedor: ProveedorData | null;
   onClose: () => void;
@@ -160,7 +162,17 @@ function buildMockSlotsForPro(serviceMinutes: number, _daySeed: number, _proInde
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-export function GoProveedorReservaSheet({
+export function GoProveedorReservaSheet(props: Props) {
+  // Both entry points use the same catalogue, multi-selection and booking command.
+  if (props.proveedor?.businessId) return <BookingSearchOverlay
+    visible={props.visible} initialBusinessId={props.proveedor!.businessId}
+    onClose={props.onClose} onDismissAll={props.onClose} canonicalCustomerBookings
+    demoRepository={props.demoRepository} onDemoGoToBooking={(dateISO, time) => props.onBookingConfirmed?.(dateISO, time)}
+    onGoToBooking={(dateISO, time) => props.onBookingConfirmed?.(dateISO, time)} />;
+  return <LocalProveedorReservaSheet {...props} />;
+}
+
+function LocalProveedorReservaSheet({
   visible,
   proveedor,
   onClose,

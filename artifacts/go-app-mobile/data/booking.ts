@@ -41,6 +41,7 @@ export type Business = {
 };
 
 export type BookableItem = {
+  description?: string;
   catalogMetadata?: Record<string, unknown>;
   catalogKind?: "service" | "product";
   id: string;
@@ -360,6 +361,7 @@ function mapRemoteService(row: RemoteService): BookableItem {
     id: row.id,
     businessId: row.business_id,
     title: row.name,
+    description: row.ui_metadata?.description ?? row.description ?? undefined,
     type: row.ui_metadata?.type ?? "service",
     catalogMetadata: row.ui_metadata,
     catalogKind: row.ui_metadata?.catalogKind ?? "service",
@@ -525,7 +527,7 @@ export async function saveCloudConfiguration(businessId: string, payload: unknow
 }
 function serviceBody(item: Omit<BookableItem, "id">) {
   return { name: item.title, duration_minutes: item.durationMinutes, price: item.price, currency: "EUR", active: item.active,
-    ui_metadata: { ...item.catalogMetadata, type: item.type, catalogKind: item.catalogKind ?? "service", customerCapacity: item.customerCapacity, unitQuantity: item.unitQuantity, paymentRequired: item.paymentRequired, visible: item.visible, timing: item.timing } };
+    ui_metadata: { ...item.catalogMetadata, description: item.description, type: item.type, catalogKind: item.catalogKind ?? "service", customerCapacity: item.customerCapacity, unitQuantity: item.unitQuantity, paymentRequired: item.paymentRequired, visible: item.visible, timing: item.timing } };
 }
 type RemoteStaff = { id: string; business_id: string; display_name: string; active: boolean; ui_metadata?: Partial<Staff> & { archived?: boolean } };
 const mapStaff = (r: RemoteStaff): Staff => ({ id: r.id, businessId: r.business_id, name: r.display_name, active: r.active, emoji: r.ui_metadata?.emoji, serviceIds: r.ui_metadata?.serviceIds, bookingBlocks: r.ui_metadata?.bookingBlocks });

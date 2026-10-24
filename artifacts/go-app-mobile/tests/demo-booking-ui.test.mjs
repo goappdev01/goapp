@@ -59,7 +59,17 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
   function load(name){if(cache.has(name))return cache.get(name);const exports={};cache.set(name,exports);
     vm.runInNewContext(compile(name),{exports,require:key=>key in mocks?mocks[key]:key==="@/components/booking/MyBookingsList"?load("components/booking/MyBookingsList.tsx"):(()=>{throw Error("Unexpected UI dependency "+key);})(),
       console:{log(){},warn(){}},Date,Intl,Map,Set,setTimeout:fn=>setTimeout(fn,0),clearTimeout,setInterval,clearInterval});return exports;}
-  function render(fn,props){current=hooks.get(fn)??[];hooks.set(fn,current);cursor=0;effects=[];const tree=fn(props);for(const effect of effects)effect();return tree;}
+  let catalogueScope = "";
+  function render(fn,props){current=hooks.get(fn)??[];hooks.set(fn,current);cursor=0;effects=[];const tree=fn(props);for(const effect of effects)effect();
+    // The selector's async transport is exercised separately. Resolve its real
+    // local pricing policy here so the parent flow uses the reviewed quote.
+    const selector=nodes(tree).find(node=>node.props.repository && node.props.rootIds);
+    const next=selector?selector.props.businessId+'|'+selector.props.rootIds.join(','):'';
+    if(selector && next!==catalogueScope){catalogueScope=next;const config=store.getSnapshot().config;
+      const ids=selector.props.rootIds,catalog=config.services.map(service=>({id:store.businessId+'_service_'+Array.from(service.name.normalize('NFKC').trim().toLowerCase()).map(c=>c.codePointAt(0).toString(16)).join('_'),businessId:store.businessId,title:service.name,durationMinutes:service.duration,price:service.price,active:true,visible:true,currency:'EUR'}));
+      selector.props.onChange(ids.length?pure('data/bookingServices.ts').localCatalogQuote(store.businessId,[...catalog,...(config.catalogProducts??[])],config.catalogAssociations??[],ids):null);
+      return render(fn,props);
+    }return tree;}
   const Overlay=load("components/booking/BookingSearchOverlay.tsx").BookingSearchOverlay,MyList=load("components/booking/MyBookingsList.tsx").MyBookingsList;
   const props={visible:true,demoRepository:repo,initialBusinessId:store.businessId,onClose(){navigation.push("close");},onBookingConfirmed(){liveCalls.push("real confirmed callback");},onHoldCreated(){liveCalls.push("real hold callback");},onGoToBooking(){liveCalls.push("real calendar");},onProviderSelected(){liveCalls.push("real provider");},onDemoGoToBooking(...args){navigation.push(args);}};
   const configure=async()=>{await store.updateConfig({businessName:"GO Peluquería Prueba",sectorId:"belleza",subId:"peluqueria",address:"Dirección DEMO",activeDays:[0,1,2,3,4],services:[{name:"Corte DEMO",duration:30,price:12}],plantillaItems:[{id:"pro",count:1,label:"Puesto",staffNames:["Raul 1 GO PRUEBA"]}],completedSteps:[0,1,2,3,4,5,6,7]});await store.saveFloorPlan({id:store.planId,businessId:store.businessId,updatedAt:1,elements:[{id:"puesto",label:"Raul 1 GO PRUEBA",type:"silla",reservable:true,status:"disponible",x:10,y:20,width:30,height:40,capacity:1}]});};
@@ -132,6 +142,18 @@ test("New reservation removes only the history embed and reserves no history-spe
 });
 
 const control=(tree,id)=>nodes(tree).find(node=>node.props.testID===id);
+test('the shared summary and saved selection use the reviewed voluntary product price with no extra minutes',async()=>{
+ const f=fixture();await f.configure();const businessId=f.store.businessId,[service]=await f.repo.getBookableItems(businessId);
+ await f.repo.saveCatalogProduct({id:businessId+'_product_extra',businessId,title:'Mascarilla',type:'product',catalogKind:'product',durationMinutes:0,price:7,currency:'EUR',active:true,visible:true,customerCapacity:1,unitQuantity:1,paymentRequired:false});
+ await f.repo.manageAssociations('create',{sourceId:service.id,targetId:businessId+'_product_extra',mode:'recommended'});
+ let tree=await services(f);control(tree,'booking-service-'+service.id).props.onPress();tree=f.render(f.Overlay,f.props);
+ const q=await f.repo.quoteCatalog(businessId,[service.id],[(await f.repo.manageAssociations('list'))[0].id]);
+ nodes(tree).find(node=>node.props.repository && node.props.rootIds).props.onChange(q);tree=f.render(f.Overlay,f.props);
+ assert.match(text(control(tree,'booking-services-total')),/30\s+min/);assert.match(text(control(tree,'booking-services-total')),/19/);
+ control(tree,'booking-save-services').props.onPress();tree=f.render(f.Overlay,f.props);button(tree,'Raul 1 GO PRUEBA').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
+ await button(tree,'09:00').props.onPress();tree=f.render(f.Overlay,f.props);await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();
+ assert.equal(f.store.getSnapshot().bookings[0].catalogSnapshot.totalPrice,19);assert.equal(f.store.getSnapshot().bookings[0].endDatetime,'2030-01-07T09:30:00');
+});
 test("multi-service UI keeps selection marked, supports deselection and waits for Guardar",async()=>{
   const f=fixture();await f.configure();await f.store.updateConfig({services:[{name:"Corte DEMO",duration:30,price:12},{name:"Tinte DEMO",duration:60,price:20}]});
   let tree=await services(f);assert.equal(control(tree,"booking-save-services").props.disabled,true);

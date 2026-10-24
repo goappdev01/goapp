@@ -267,6 +267,8 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
     const result = freshConfig();
     for (const field of configKeys) if (field in raw) Object.assign(result, { [field]: clone((raw as Record<string, unknown>)[field] ?? null) });
     result.businessId = businessId; result.isBusinessActive = false;
+    if (raw.catalogProducts) result.catalogProducts = clone(raw.catalogProducts);
+    if (raw.catalogAssociations) result.catalogAssociations = clone(raw.catalogAssociations);
     result.plantillaItems = ensureBusinessDemoStaffIds(result.plantillaItems, businessId);
     // Preserve individual schedules stored under the older name-derived UI key.
     for (const person of getBusinessDemoProfessionals(result, businessId)) {
@@ -293,7 +295,8 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
       intentLabel: booking?.serviceTitle ?? data.plan?.elements.find(element => element.id === reservation.elementId)?.label ?? "Reserva DEMO",
       color: "#3D9A84", place: data.config.address, date: reservation.date, dateISO: reservation.dateISO ?? "", time: reservation.time,
       endTime: (reservation.endDatetime ?? booking?.endDatetime)?.slice(11,16), duration: String(reservation.durationMinutes ?? 30),
-      contactName: reservation.customerName, phone: "", estado: booking?.changeProposal ? booking.changeProposal.proposedBy === "customer" ? "propuesto" : "propuesta_pendiente" : reservation.status === "confirmada" ? "aceptado" : reservation.status === "cancelada" ? "rechazado" : "pendiente",
+      contactName: reservation.customerName === "Cliente DEMO local" ? "" : reservation.customerName, phone: "", estado: booking?.changeProposal ? booking.changeProposal.proposedBy === "customer" ? "propuesto" : "propuesta_pendiente" : reservation.status === "confirmada" ? "aceptado" : reservation.status === "cancelada" ? "rechazado" : "pendiente",
+      bookingCatalog: booking?.catalogSnapshot,
       bookingStatus: reservation.status, changeProposal: booking?.changeProposal, createdAt: reservation.createdAt, notes: reservation.notes, businessId, ownerUserId,
       serviceId: reservation.serviceId ?? booking?.bookableItemId, staffId: reservation.staffId ?? booking?.staffId,
       professionalName: reservation.professionalName ?? booking?.professionalName, demoLocal: true,

@@ -21,7 +21,7 @@ create table go_catalog_private.associations (
  business_id uuid not null references public.businesses(id) on delete restrict,
  source_id uuid not null references public.services(id) on delete restrict,
  target_id uuid not null references public.services(id) on delete restrict,
- mode text not null check(mode in ('included','optional','required')),
+ mode text not null check(mode in ('included','optional','recommended','required')),
  active boolean not null default true,
  revision integer not null default 1,
  unique(source_id,target_id),check(source_id<>target_id)
@@ -76,6 +76,8 @@ language plpgsql security definer set search_path='' as $$
 declare item go_catalog_private.associations;
 begin
  perform go_catalog_private.owner(p_business);
+ if p_input ? 'mode' and p_input->>'mode' not in ('included','optional','recommended') then
+  raise exception using errcode='PT422',message='CATALOG_INVALID_MODE';end if;
  if p_operation='list' then return coalesce((select jsonb_agg(to_jsonb(a) order by a.source_id,a.target_id)
   from go_catalog_private.associations a where business_id=p_business),'[]'::jsonb);end if;
  if p_operation='create' then
@@ -119,17 +121,16 @@ begin
   for a in select * from go_catalog_private.associations where business_id=p_business and source_id=current_id and active order by id loop
    select * into target from public.services where id=a.target_id and business_id=p_business and active and coalesce(ui_metadata->>'archived','false')<>'true';
    if not found then
-    if a.mode<>'optional' or a.id=any(p_selected) then raise exception using errcode='PT422',message='CATALOG_ITEM_UNAVAILABLE';end if;
+    if a.mode in ('included','required') or a.id=any(p_selected) then raise exception using errcode='PT422',message='CATALOG_ITEM_UNAVAILABLE';end if;
     continue;
    end if;
    options:=options||jsonb_build_array(jsonb_build_object('associationId',a.id,'sourceId',a.source_id,'itemId',a.target_id,
-    'mode',a.mode,'name',target.name,'kind',go_catalog_private.kind(target.ui_metadata),'price',target.price,'currency',target.currency,
-    'selected',a.mode='included' or a.id=any(p_selected)));
+    'mode',case when a.mode='required' then 'included' else a.mode end,'name',target.name,'kind',go_catalog_private.kind(target.ui_metadata),'price',target.price,'currency',target.currency,
+    'selected',a.mode in ('included','required') or a.id=any(p_selected)));
    revisions:=revisions||jsonb_build_array(jsonb_build_object('id',a.id,'revision',a.revision));
-   if a.mode='required' and not a.id=any(p_selected) then missing:=array_append(missing,a.id);end if;
-   if a.mode='included' or a.id=any(p_selected) then
+   if a.mode in ('included','required') or a.id=any(p_selected) then
     used:=array_append(used,a.id);
-    if a.mode='included' then included:=array_append(included,a.target_id);end if;
+    if a.mode in ('included','required') then included:=array_append(included,a.target_id);end if;
     if not a.target_id=any(ids) then ids:=array_append(ids,a.target_id);end if;
    end if;
   end loop;
@@ -210,7 +211,6 @@ begin
   return (select to_jsonb(b) from public.bookings b where id=saved.booking_id);
  end if;
  q:=go_catalog_private.quote(p_business,p_roots,p_selected);
- if not (q->>'ready')::boolean then raise exception using errcode='PT422',message='CATALOG_REQUIRED_ACCEPTANCE';end if;
  if p_expected_quote is null or q is distinct from p_expected_quote then raise exception using errcode='PT409',message='CATALOG_QUOTE_STALE';end if;
  select array_agg(value::uuid order by n) into ids from jsonb_array_elements_text(q->'serviceIds') with ordinality t(value,n);
  if cardinality(ids) is null then raise exception using errcode='PT422',message='CATALOG_SERVICE_REQUIRED_FOR_BOOKING';end if;

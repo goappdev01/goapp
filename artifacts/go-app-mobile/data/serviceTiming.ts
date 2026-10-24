@@ -90,14 +90,15 @@ export function validateServiceTiming(value: unknown, options: ServiceTimingVali
 export const serviceTimingDuration = (timing: Pick<ServiceTiming, "phases">): number =>
   timing.phases.reduce((total, phase) => total + phase.durationMinutes, 0);
 
-export type ServiceConfiguration = { name: string; duration: number; price: number; capacity?: number; timing?: ServiceTiming };
+export type ServiceConfiguration = { name: string; description?: string; duration: number; price: number; capacity?: number; timing?: ServiceTiming };
 /** Keep timing in the existing service save path; phases define the scalar total. */
 export function serializeServiceConfiguration(services: readonly ServiceConfiguration[], options: Omit<ServiceTimingValidation, "durationMinutes"> = {}): ServiceConfiguration[] {
-  return services.filter(service => service.name.trim()).map(({ name, duration, price, capacity, timing }) => {
+  return services.filter(service => service.name.trim()).map(({ name, description, duration, price, capacity, timing }) => {
     const checked = timing && validateServiceTiming(timing, options);
     if (!checked && (!Number.isInteger(duration) || duration <= 0))
       throw new Error("Indica una duración en minutos enteros positivos.");
     return { name, duration: checked ? serviceTimingDuration(checked) : duration, price, capacity,
+      ...(description?.trim() ? { description: description.trim() } : {}),
       ...(checked ? { timing: checked } : {}) };
   });
 }

@@ -11,6 +11,29 @@ function load(name,imports={}) { const exports={}; const text=ts.transpileModule
   vm.runInNewContext(text,{exports,require:key=>{if(key in imports)return imports[key];throw Error("External/runtime dependency forbidden: "+key);},console,Date,Intl,Set,Map});return exports; }
 const storeModule=load("data/businessDemoStore.ts");
 const repoModule=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":load("data/bookingServices.ts")});
+test('company catalogue associations persist, stay voluntary and accompany one multi-service booking in both calendars',async()=>{
+ const f=fixture();await configured(f);const businessId=f.store.businessId,services=await f.repo.getBookableItems(businessId);
+ const product=(suffix,price)=>({id:businessId+'_product_'+suffix,businessId,title:suffix,type:'product',catalogKind:'product',durationMinutes:0,price,currency:'EUR',active:true,visible:true,paymentRequired:false,unitQuantity:1,customerCapacity:1});
+ for(const item of [product('included',5),product('recommended',7),product('optional',3)])await f.repo.saveCatalogProduct(item);
+ await f.repo.manageAssociations('create',{sourceId:services[0].id,targetId:product('included',5).id,mode:'included'});
+ await f.repo.manageAssociations('create',{sourceId:services[0].id,targetId:product('recommended',7).id,mode:'recommended'});
+ await f.repo.manageAssociations('create',{sourceId:services[1].id,targetId:product('optional',3).id,mode:'optional'});
+ const roots=services.map(s=>s.id),base=(await f.repo.quoteCatalog(businessId,roots));assert.equal(base.totalPrice,32);assert.equal(base.ready,true);assert.equal(base.options.find(o=>o.mode==='recommended').selected,false);
+ const extra=base.options.find(o=>o.mode==='recommended'),q=await f.repo.quoteCatalog(businessId,roots,[extra.associationId]);assert.equal(q.totalPrice,39);assert.equal(q.lines.find(line=>line.name==='included').charge,0);
+ const input={businessId,bookableItemId:roots[0],customerId:owner,services:services.map(s=>({id:s.id,title:s.title,durationMinutes:s.durationMinutes,price:s.price,currency:'EUR',priceKnown:true})),catalogSnapshot:q,startDatetime:'2030-01-07T10:00:00',endDatetime:'2030-01-07T11:30:00',unitsReserved:1,peopleCount:1};
+ const hold=await f.repo.createHold(input);assert.equal(hold.ok,true);const confirmed=await f.repo.claimSlot({...hold.booking,status:'CONFIRMED'});assert.equal(confirmed.ok,true);
+ assert.equal(f.store.getSnapshot().bookings.length,1);assert.equal(f.store.getSnapshot().reservations.length,1);assert.equal(f.store.getSnapshot().entries[0].bookingCatalog.totalPrice,39);assert.equal(f.repo.getCustomerEntries()[0].bookingCatalog.totalPrice,39);
+ const reopened=f.make();await reopened.load();const next=repoModule.createDemoBookingRepository(reopened,{now:()=>Date.parse('2030-01-07T08:00:00')});assert.equal((await next.quoteCatalog(businessId,roots)).totalPrice,32);assert.equal(reopened.getSnapshot().bookings[0].catalogSnapshot.totalPrice,39);
+ const rows=await next.manageAssociations('list'),row=rows.find(r=>r.id===extra.associationId);await next.manageAssociations('update',{id:row.id,revision:row.revision,mode:'included'});assert.equal((await next.quoteCatalog(businessId,roots)).totalPrice,32);
+ await assert.rejects(next.saveCatalogProduct({...product('foreign',9),businessId:'other'}));await assert.rejects(next.manageAssociations('create',{sourceId:roots[0],targetId:'other_product',mode:'optional'}));
+});
+test('legacy required local relations are included without surcharge or acceptance and customer names are preserved',async()=>{
+ const f=fixture();await configured(f);const businessId=f.store.businessId,[service]=await f.repo.getBookableItems(businessId);
+ const product={id:businessId+'_product_legacy',businessId,title:'Ampolla',type:'product',catalogKind:'product',durationMinutes:0,price:5,currency:'EUR',active:true,visible:true,paymentRequired:false,unitQuantity:1,customerCapacity:1};await f.repo.saveCatalogProduct(product);
+ await f.store.transformConfig(config=>({...config,catalogAssociations:[{id:'old',business_id:businessId,source_id:service.id,target_id:product.id,active:true,mode:'required',revision:1}]}));
+ const q=await f.repo.quoteCatalog(businessId,[service.id]);assert.equal(q.ready,true);assert.deepEqual(plain(q.missingRequired),[]);assert.equal(q.totalPrice,12);assert.equal(q.options[0].mode,'included');
+ await assert.rejects(f.repo.manageAssociations('create',{sourceId:service.id,targetId:product.id,mode:'required'}));
+});
 const initial={businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],activeDays:[],openFrom:"09:00",openTo:"18:00",daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};
 function fixture(userId=owner,shared=new Map()) {let allowed=true,now=Date.parse("2030-01-07T08:00:00"); const reads=[],writes=[];
   const storage={async getItem(key){reads.push(key);return shared.get(key)??null;},async setItem(key,value){writes.push(key);shared.set(key,value);}};

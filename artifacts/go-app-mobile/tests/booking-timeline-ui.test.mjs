@@ -214,6 +214,7 @@ function fixture(kind = "provider", overrides = {}) {
     setInterval: () => 0, clearInterval() {},
     require(name) { if (name in modules) return modules[name]; throw new Error("Unexpected UI dependency " + name); } };
   const componentPath = kind === "provider" ? "components/booking/GoProveedorReservaSheet.tsx" : "components/booking/BookingSearchOverlay.tsx";
+  if(kind === "provider") { const shared={...uiScope,exports:{}};vm.runInNewContext(source("components/booking/BookingSearchOverlay.tsx"),shared);modules["./BookingSearchOverlay"]=shared.exports; }
   vm.runInNewContext(source(componentPath), uiScope);
   const Component = kind === "provider" ? uiScope.exports.GoProveedorReservaSheet : uiScope.exports.BookingSearchOverlay;
   props = kind === "provider" ? { visible: true, proveedor: { name: "Peluquería primera", businessId: business,
@@ -225,6 +226,7 @@ function fixture(kind = "provider", overrides = {}) {
   function render() {
     hookIndex = 0; effects = []; dirty = false;
     tree = Component(props);
+    if(typeof tree?.type === "function") tree=tree.type(tree.props);
     // This integration fixture isolates the already separately exercised child
     // selector, while retaining the production catalogue HTTP adapter/transport.
     const selector = nodes(tree).find(node => node.type === "CatalogComplementSelector");
@@ -242,7 +244,7 @@ function fixture(kind = "provider", overrides = {}) {
     // Drain actual async component effects and any state updates, with a hard
     // convergence limit to catch render/effect loops instead of hiding them.
     for (let turn = 0; turn < 30; turn++) {
-      await Promise.resolve();
+      await new Promise(resolve => setImmediate(resolve));
       if (dirty) render();
     }
     assert.equal(dirty, false, "component must settle without a render loop");
@@ -256,7 +258,8 @@ function fixture(kind = "provider", overrides = {}) {
     render(); return settle();
   }
   async function start() { render(); return settle(); }
-  return { api, state, calls, alerts, commands, writes, memory, navigation, hooks, start, render, settle, press,
+  const back=async()=>{const control=buttons(tree).find(node=>node.props.onPress?.name==='handleBackOneLevel');assert.ok(control);control.props.onPress();render();return settle();};
+  return { api, state, calls, alerts, commands, writes, memory, navigation, hooks, start, render, settle, press, back,
     tree: () => tree, setProps: values => { props = { ...props, ...values }; return render(); },
     timers: async () => { const pending = [...timers.values()]; timers.clear(); for (const callback of pending) callback(); return settle(); } };
 }
@@ -269,12 +272,12 @@ function text(tree) {
   return (tree?.children ?? []).map(text).join(" ");
 }
 const buttons = tree => nodes(tree).filter(node => node.type === "TouchableOpacity");
-function button(tree, label) { return buttons(tree).find(node => text(node).includes(label)); }
+function button(tree, label) { return buttons(tree).find(node => text(node).toLowerCase().includes(label.toLowerCase())); }
 const confirmation = f => button(f.tree(), "biz_confirm_booking_btn");
 const actualSlots = f => f.calls.filter(call => call.url.pathname.endsWith("/booking-availability") && call.url.searchParams.get("datesOnly") !== "true");
 const posted = f => f.calls.filter(call => call.url.pathname.endsWith("/bookings/timeline") || call.url.pathname.endsWith("/bookings/catalog"));
 async function openProviderSlots(f, person = "Ana") {
-  await f.start(); await f.press("Corte exacto"); await f.press(person); return f.tree();
+  await f.start(); await f.press("Corte exacto"); await f.press("save"); await f.press(person); return f.tree();
 }
 async function openOverlaySlots(f, person = "Ana") {
   await f.start(); await f.press("Peluquería primera"); await f.press("Corte exacto");
@@ -327,16 +330,17 @@ test("late business A catalogue/staff cannot replace business B in the real over
 test("provider date, service and professional changes clear old selections before confirmation", async () => {
   const f = fixture(); await openProviderSlots(f); await f.press("02:37");
   assert.ok(confirmation(f));
-  const dates = buttons(f.tree()).filter(node => text(node).includes("day_mon") && text(node).includes("28"));
+  await f.back();
+  const dates = buttons(f.tree()).filter(node => node.props.key === tomorrow);
   assert.equal(dates.length, 1); await dates[0].props.onPress(); f.render(); await f.settle();
   assert.equal(confirmation(f), undefined, "a new date cannot confirm yesterday's selected instant");
   assert.equal(actualSlots(f).at(-1).url.searchParams.get("dateISO"), tomorrow);
   await f.press("11:37"); assert.ok(confirmation(f));
-  await f.press("Bea");
+  await f.back(); await f.back(); await f.press("Bea");
   assert.equal(confirmation(f), undefined, "professional changes clear the selected slot");
   assert.equal(actualSlots(f).at(-1).url.searchParams.get("staff_id"), secondStaff);
   await f.press("11:37"); assert.ok(confirmation(f));
-  await f.press("Lavado exacto");
+  await f.back(); await f.back(); await f.back(); await f.press("Corte exacto"); await f.press("Lavado exacto"); await f.press("save");
   assert.equal(confirmation(f), undefined, "service changes clear staff and slot selection");
   await f.press("Ana");
   assert.equal(actualSlots(f).at(-1).url.searchParams.get("service_ids"), secondService);
@@ -350,9 +354,7 @@ for (const kind of ["provider", "overlay"]) {
     if (kind === "provider") await openProviderSlots(f); else await openOverlaySlots(f);
     assert.equal(actualSlots(f).at(-1).url.searchParams.get("dateISO"), today);
     f.state.pendingSlots = null;
-    const nextDay = kind === "provider"
-      ? buttons(f.tree()).find(node => text(node).includes("day_mon") && text(node).includes("28"))
-      : buttons(f.tree()).find(node => node.props.key === tomorrow);
+    const nextDay = buttons(f.tree()).find(node => node.props.key === tomorrow);
     assert.ok(nextDay); await nextDay.props.onPress(); f.render(); await f.settle();
     assert.equal(actualSlots(f).at(-1).url.searchParams.get("dateISO"), tomorrow);
     assert.ok(button(f.tree(), "11:37"));
@@ -401,14 +403,9 @@ for (const kind of ["provider", "overlay"]) {
     const f = fixture(kind, { pendingSlots: { promise: Promise.resolve([plan]) } });
     if (kind === "provider") await openProviderSlots(f); else await openOverlaySlots(f);
     await f.press("02:37");
-    if (kind === "provider") {
-      await f.press("biz_confirm_booking_btn");
-      assert.ok(nodes(f.tree()).some(node => node.props.badge === "1 h 15 min"));
-      assert.doesNotMatch(text(f.tree()), /1\.3 h/);
-    } else {
-      assert.match(text(f.tree()), /75\s+min/);
-      await f.press("BIZ_CONFIRM_BOOKING_BTN");
-    }
+    assert.match(text(f.tree()), /75\s+min/);
+    assert.doesNotMatch(text(f.tree()), /1\.3 h/);
+    await f.press("BIZ_CONFIRM_BOOKING_BTN");
     assert.equal(posted(f)[0].body.expected_plan.totalClientMinutes, 75);
     assert.equal(posted(f)[0].body.ends_at, plan.endsAt);
   });

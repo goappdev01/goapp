@@ -207,6 +207,7 @@ export type GoEntry = {
   bookingServerStatus?:string;
   bookingTimeline?: import("@/data/bookingTimeline").BookingTimeline;
   bookingResourceNames?: Record<string, string>;
+  bookingCatalog?: import("@/data/catalogAssociations").CatalogQuote;
   bookingStatus?: "pendiente" | "confirmada" | "cancelada" | "cambio_pendiente" | "completada";
   // ── TELEFONÍA BILATERAL ─────────────────────────────────────────
   // Para GOs coordinados (enviados o recibidos) guardamos ambos extremos
@@ -1330,6 +1331,26 @@ export function AgendaBoard({
   );
 
   // ── CARD ─────────────────────────────────────────────────────────
+  const renderReservationControls = (item: GoEntry, expanded = false) => {
+    const policy = reservationCardPolicy(item);
+    const names = { pendiente: t("booking_state_pending"), aceptado: t("booking_state_accepted"), rechazado: t("booking_state_rejected"), propuesto: t("tasks_propose_change"), propuesta_pendiente: t("tasks_propose_change") };
+    return <View style={expanded ? { flexDirection: "row", gap: 10, marginBottom: 14 } : s.estadoRow}>
+      {ESTADO_OPTIONS.map(opt => {
+        const active = opt.key === "propuesto" ? !!item.changeProposal : opt.key === "aceptado" ? item.bookingStatus === "confirmada" : opt.key === "rechazado" ? item.bookingStatus === "cancelada" : item.bookingStatus === "pendiente";
+        const perform = opt.key === "propuesto" && policy.canPropose && onProposeItem ? () => onProposeItem(item.id)
+          : opt.key === "rechazado" && policy.received && onRejectProposal ? () => onRejectProposal(item.id)
+          : opt.key === "rechazado" && policy.canCancel && onDeleteItem ? () => onDeleteItem(item.id)
+          : opt.key === "aceptado" && policy.received && onAcceptProposal ? () => onAcceptProposal(item.id)
+          : opt.key === "aceptado" && policy.canConfirm && onConfirmBooking ? () => onConfirmBooking(item.id) : undefined;
+        return <TouchableOpacity key={opt.key} accessibilityRole="button" accessibilityLabel={names[opt.key]} accessibilityState={{ selected: active, disabled: !perform }}
+          disabled={!perform} onPress={() => { if (!perform) return; Haptics.selectionAsync().catch(() => {}); if (expanded) { setExpandedBookingItem(null); setExpandedCardId(null); } perform(); }}
+          style={[s.estadoPill, { flex: 1, minHeight: expanded ? 44 : 30, backgroundColor: active ? opt.color : "transparent", borderColor: opt.color + "80" }]}>
+          <Feather name={(active ? opt.icon : opt.iconInactive) as any} size={expanded ? 18 : 12} color={active ? "#101018" : opt.color + "90"} />
+        </TouchableOpacity>;
+      })}
+    </View>;
+  };
+
   const renderItemCard = (item: GoEntry, dnProgress = 0, colMode: "stress" | "normal" | "relax" = "normal", colDateISO?: string, isPendingColumn = false) => {
     const hasProposal = !!(item.changeProposal);
     const isAcceptedProposal = hasProposal && item.estado === "aceptado";
@@ -1886,7 +1907,7 @@ export function AgendaBoard({
               Inner buttons claim their own touches; tapping the gap between them
               falls through to this wrapper which toggles the card open/closed. ── */}
           <TouchableOpacity activeOpacity={1} onPress={tapThis} style={s.cardFooter}>
-            {reservationCardPolicy(item).canonical && <Text style={{flex:1,fontSize:10,fontWeight:"700",color:reservationCardPolicy(item).stateColor}}>{t(reservationCardPolicy(item).stateKey as any)}</Text>}
+            {reservationCardPolicy(item).canonical && renderReservationControls(item)}
             {onChangeEstado && !reservationCardPolicy(item).canonical && (
               <View style={s.estadoRow}>
                 {ESTADO_OPTIONS.map((opt) => {
@@ -1936,7 +1957,7 @@ export function AgendaBoard({
                 })}
               </View>
             )}
-            {onDeleteItem && (!reservationCardPolicy(item).canonical || reservationCardPolicy(item).canCancel) && (
+            {onDeleteItem && !reservationCardPolicy(item).canonical && (
               <TouchableOpacity
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -2763,6 +2784,11 @@ export function AgendaBoard({
                 <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.07)", marginTop: 16, marginBottom: 16 }} />
 
                 {/* ─── ESTADO PILLS ─── */}
+                {bookingPolicy?.canonical && renderReservationControls(expandedBookingItem, true)}
+                {!!expandedBookingItem.bookingCatalog && <View style={{gap:6,marginBottom:14}}>
+                  {expandedBookingItem.bookingCatalog.lines.map(line => <Text key={line.itemId} style={{color:"rgba(255,255,255,0.85)",fontSize:12}}>{line.name} · {line.included ? (lang === "en" ? "Included" : "Incluido") : `${line.charge.toFixed(2)} ${line.currency}`}</Text>)}
+                  <Text style={{color:"white",fontWeight:"700"}}>{expandedBookingItem.bookingCatalog.totalPrice.toFixed(2)} {expandedBookingItem.bookingCatalog.currency}</Text>
+                </View>}
                 {onChangeEstado && !bookingPolicy?.canonical && (
                   <View style={{ flexDirection: "row", gap: 10, marginBottom: 14 }}>
                     {ESTADO_OPTIONS.map((opt) => {
@@ -2800,11 +2826,6 @@ export function AgendaBoard({
                   </View>
                 )}
 
-                {!!bookingPolicy?.received && <View style={{flexDirection:"row",flexWrap:"wrap",gap:10,marginBottom:14}}>
-                  {onAcceptProposal && <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('accept')} onPress={()=>{const id=expandedBookingItem.id;setExpandedBookingItem(null);onAcceptProposal(id);}} style={{flexGrow:1,minHeight:44,padding:12,borderRadius:12,borderWidth:1,borderColor:"#22c55e",alignItems:"center"}}><Text style={{color:"#22c55e",fontWeight:"700"}}>{t('accept')}</Text></TouchableOpacity>}
-                  {onRejectProposal && <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('reject')} onPress={()=>{const id=expandedBookingItem.id;setExpandedBookingItem(null);onRejectProposal(id);}} style={{flexGrow:1,minHeight:44,padding:12,borderRadius:12,borderWidth:1,borderColor:"#f87171",alignItems:"center"}}><Text style={{color:"#f87171",fontWeight:"700"}}>{t('reject')}</Text></TouchableOpacity>}
-                </View>}
-                {!!bookingPolicy?.canConfirm && onConfirmBooking && <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('accept')} onPress={()=>{const id=expandedBookingItem.id;setExpandedBookingItem(null);onConfirmBooking(id);}} style={{minHeight:44,padding:12,marginBottom:14,borderRadius:12,borderWidth:1,borderColor:"#22c55e",alignItems:"center"}}><Text style={{color:"#22c55e",fontWeight:"700"}}>{t('accept')}</Text></TouchableOpacity>}
                 {(bookingPolicy?.canShowQr || bookingPolicy?.canVerify) && <TouchableOpacity accessibilityRole="button" accessibilityLabel={t(bookingPolicy.canVerify?'verification_title':'verification_show')} onPress={()=>{setVerificationEntry(expandedBookingItem);setExpandedBookingItem(null);setExpandedCardId(null);}} style={{minHeight:44,padding:12,marginBottom:14,borderRadius:12,borderWidth:1,borderColor:"#93c5fd",alignItems:"center"}}><Text style={{color:"#93c5fd",fontWeight:"700"}}>{t(bookingPolicy.canVerify?'verification_title':'verification_show')}</Text></TouchableOpacity>}
                 {/* ─── ACTION ROW: Mensaje + Eliminar ─── */}
                 <View style={{ flexDirection: "row", gap: 10, marginBottom: 14 }}>
@@ -2827,14 +2848,14 @@ export function AgendaBoard({
                     <Feather name="message-circle" size={16} color="#93c5fd" />
                     <Text style={{ color: "#93c5fd", fontSize: 14, fontWeight: "600" }}>{t('biz_message_btn')}</Text>
                   </TouchableOpacity>
-                  {bookingPolicy?.canPropose && onProposeItem && (
+                  {!bookingPolicy?.canonical && bookingPolicy?.canPropose && onProposeItem && (
                     <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('tasks_propose_change')}
                       onPress={() => { const entry=expandedBookingItem;setExpandedBookingItem(null);setExpandedCardId(null);onProposeItem(entry.id); }}
                       style={{flex:1,paddingHorizontal:10,paddingVertical:13,borderRadius:12,backgroundColor:"rgba(255,140,0,0.10)",borderWidth:1.5,borderColor:"rgba(255,140,0,0.35)",alignItems:"center",justifyContent:"center"}}>
                       <Text style={{color:"#FF8C00",fontSize:14,fontWeight:"600",textAlign:"center"}}>{t('tasks_propose_change')}</Text>
                     </TouchableOpacity>
                   )}
-                  {onDeleteItem && (!bookingPolicy?.canonical || bookingPolicy.canCancel) && (
+                  {onDeleteItem && !bookingPolicy?.canonical && (
                     <TouchableOpacity
                       onPress={() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});

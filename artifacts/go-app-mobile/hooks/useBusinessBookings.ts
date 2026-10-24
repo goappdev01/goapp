@@ -12,7 +12,7 @@ export function businessBookingEntry(booking:Booking,business:Business,ownerId:s
     customerCapacity:1,unitQuantity:1,paymentRequired:false,active:true,visible:true},booking.receipt?.staffName);
   return {...base,id:"go_booking_prv_"+booking.id,type:"GO_BOOKING",kind:"sent",customerBooking:false,businessBooking:true,
     bookingResourceNames:Object.fromEntries((business.bookingResources ?? []).map(resource=>[resource.id,resource.name])),
-    ownerUserId:ownerId,contactName:booking.receipt?.customerName?.trim() || "",estado:base.deleted?"rechazado":booking.changeProposal?
+    ownerUserId:ownerId,contactName:booking.receipt?.customerName?.trim() === "Cliente DEMO local" ? "" : booking.receipt?.customerName?.trim() || "",estado:base.deleted?"rechazado":booking.changeProposal?
       booking.changeProposal.proposedBy==="business"?"propuesta_pendiente":"propuesto":base.estado};
 }
 export function mergeBusinessBookingEntries(personal:GoEntry[],entries:GoEntry[]):GoEntry[]{

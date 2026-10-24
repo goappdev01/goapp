@@ -1,4 +1,6 @@
 import { summarizeBookingServices, bookingServiceIds, staffSupportsBookingServices } from "./bookingServices";
+import { localCatalogQuote } from "./bookingServices";
+import type { CatalogAssociation, CatalogQuote } from "./catalogAssociations";
 import type { BusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import type { Business, BookableItem, Staff, SlotWithStatus, Booking } from "./booking";
 import type { GoEntry } from "@/components/AgendaOperativa";
@@ -27,10 +29,13 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
     return config.services.filter(service => service.name.trim() && service.duration > 0 && Number.isFinite(service.duration) && service.price >= 0).filter(service => {
       const id = serviceId(service.name); if (seen.has(id)) return false; seen.add(id); return true;
     }).map(service => ({ id: serviceId(service.name), businessId: store.businessId, title: service.name,
+      ...(service.description ? { description: service.description } : {}),
       type: config.subId ?? config.sectorId ?? "demo", durationMinutes: service.duration, customerCapacity: service.capacity ?? 1,
       unitQuantity: 1, price: service.price, currency: "EUR", priceKnown: true, paymentRequired: false, active: true, visible: true }));
   };
   const staffFor = (config: BusinessConfig): Staff[] => getBusinessDemoProfessionals(config,store.businessId);
+  const catalogFor = (config: BusinessConfig) => [...servicesFor(config), ...(config.catalogProducts ?? []).filter(item => item.businessId === store.businessId)];
+  const quoteFor = (config: BusinessConfig, roots: string[], selected: string[] = []) => localCatalogQuote(store.businessId, catalogFor(config), config.catalogAssociations ?? [], roots, selected);
   const companyShifts = (config: BusinessConfig, dateISO: string) => getBusinessDemoShifts(config,dateISO);
   const professionalShifts = (config: BusinessConfig, dateISO: string, member?: Staff) => getBusinessDemoShifts(config,dateISO,member);
   const businessFor = (data: BusinessDemoData): Business | null => getBusinessDemoSetupState(data.config, data.plan).ready ? ({
@@ -107,6 +112,12 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
     const serviceIds = bookingServiceIds(input);
     let selection: ReturnType<typeof summarizeBookingServices>;
     try { selection = summarizeBookingServices(servicesFor(data.config), serviceIds); } catch { throw new Error("Servicio DEMO no disponible."); }
+    let acceptedQuote: CatalogQuote | undefined;
+    if (input.catalogSnapshot) {
+      acceptedQuote = quoteFor(data.config, input.catalogSnapshot.rootIds, input.catalogSnapshot.selectedAssociationIds);
+      if (JSON.stringify(acceptedQuote) !== JSON.stringify(input.catalogSnapshot) || JSON.stringify(acceptedQuote.serviceIds) !== JSON.stringify(serviceIds)) throw Error("El catálogo ha cambiado. Revisa la selección antes de confirmar.");
+      selection.services = acceptedQuote.lines.filter(line => line.kind === "service").map(line => ({ id: line.itemId, title: line.name, durationMinutes: line.durationMinutes, price: line.charge, priceKnown: true, currency: line.currency }));
+    } else if ((data.config.catalogAssociations ?? []).some(edge => edge.active && serviceIds.includes(edge.source_id))) throw Error("Revisa las opciones del servicio antes de reservar.");
     const item = selection.item;
     if (existing?.services && JSON.stringify(existing.services) !== JSON.stringify(selection.services)) throw new Error("Los servicios han cambiado. Vuelve a seleccionarlos antes de confirmar.");
     if (input.unitsReserved !== 1 || !Number.isInteger(input.peopleCount) || input.peopleCount < 1 || input.peopleCount > item.customerCapacity || (input.notes?.length ?? 0) > 4000)
@@ -129,7 +140,8 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
     const id = existing?.id ?? `demo_booking_${store.businessId}_${now()}_${Math.random().toString(36).slice(2,10)}`;
     const booking: DemoBooking = { ...clone(input), id, customerId:store.ownerUserId, paymentStatus:"none", elementId:existing?.elementId ?? resource.elementId,
       staffId:existing?.staffId ?? resource.staff?.id, professionalName:existing?.professionalName ?? resource.staff?.name,
-      ...(serviceIds.length > 1 ? { services: clone(selection.services) } : {}),
+      ...(serviceIds.length > 1 || acceptedQuote ? { services: clone(selection.services) } : {}),
+      ...(acceptedQuote ? { catalogSnapshot: clone(acceptedQuote) } : {}),
       serviceTitle:item.title, source:"customer", createdAt:existing?.createdAt ?? now(), holdExpiresAt:input.status === "HOLD" ? new Date(now()+300000).toISOString() : undefined,
       goEntryId:`demo_customer_${id}`, slotKey:`${store.businessId}|${resource.staff?.id ?? "any"}|${dateISO}|${input.startDatetime.slice(11,16)}|${input.endDatetime.slice(11,16)}` };
     const index = data.bookings.findIndex(value => value.id === id); if (index>=0) data.bookings[index]=booking; else data.bookings.push(booking);
@@ -189,6 +201,31 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
       const text=normalized([business.name,business.category,data.config.sectorId,data.config.address,...data.config.services.map(service=>service.name)].join(" "));
       return !query.trim() || normalized(query.trim()).split(/\s+/).every(term=>text.includes(term)) ? [business] : []; },
     getBookableItems: async (id:string) => { requireBusiness(id); return servicesFor((await store.load()).config); },
+    getCatalogItems: async (id:string) => { requireBusiness(id); return catalogFor((await store.load()).config); },
+    quoteCatalog: async (id:string, roots:string[], selected:string[] = []) => { requireBusiness(id); return quoteFor((await store.load()).config, roots, selected); },
+    manageAssociations: async (operation: "list" | "create" | "update" | "delete", input: Partial<CatalogAssociation> & { sourceId?: string; targetId?: string } = {}) => {
+      if (operation === "list") return clone((await store.load()).config.catalogAssociations ?? []);
+      await store.transformConfig(config => {
+        const rows = clone(config.catalogAssociations ?? []), previous = rows.find(row => row.id === input.id);
+        if (input.mode && !["included", "optional", "recommended"].includes(input.mode)) throw Error("Tipo de asociación no válido.");
+        if (operation !== "create" && (!previous || previous.revision !== input.revision)) throw Error("La asociación ha cambiado. Actualiza el catálogo.");
+        if (operation === "delete") return { ...config, catalogAssociations: rows.filter(row => row.id !== input.id) };
+        const edge: CatalogAssociation = operation === "create" ? { id: `${store.businessId}_association_${now()}_${Math.random().toString(36).slice(2)}`, business_id: store.businessId, source_id: input.sourceId!, target_id: input.targetId!, mode: input.mode!, revision: 1, active: true }
+          : { ...previous!, mode: input.mode ?? previous!.mode, active: input.active ?? previous!.active, revision: previous!.revision + 1 };
+        const catalog = catalogFor(config);
+        if (!catalog.some(item => item.id === edge.source_id) || !catalog.some(item => item.id === edge.target_id) || edge.source_id === edge.target_id || rows.some(row => row.id !== edge.id && row.source_id === edge.source_id && row.target_id === edge.target_id)) throw Error("Asociación no válida para esta empresa.");
+        const graph = [...rows.filter(row => row.id !== edge.id), edge], reached = new Set([edge.target_id]);
+        for (let pass = 0; pass < graph.length; pass++) for (const row of graph) if (reached.has(row.source_id)) reached.add(row.target_id);
+        if (reached.has(edge.source_id)) throw Error("Las asociaciones no pueden formar un ciclo.");
+        return { ...config, catalogAssociations: graph };
+      });
+      return clone(store.getSnapshot().config.catalogAssociations ?? []);
+    },
+    saveCatalogProduct: (item: BookableItem) => store.transformConfig(config => {
+      requireBusiness(item.businessId);
+      if (!item.id.startsWith(store.businessId + "_product_") || !item.title.trim() || !Number.isFinite(item.price) || item.price < 0 || item.durationMinutes !== 0 || item.catalogKind !== "product") throw Error("Producto no válido.");
+      return { ...config, catalogProducts: [...(config.catalogProducts ?? []).filter(row => row.id !== item.id), clone(item)] };
+    }),
     getStaff: async (id:string) => { requireBusiness(id); return staffFor((await store.load()).config).filter(person => person.active); },
     getAllSlots: async (id:string,item:string,date:string,professional?:string,serviceIds?:string[]) => { requireBusiness(id); return slotsFor(await store.load(),item,date,professional,serviceIds); },
     changeBooking,
@@ -234,6 +271,8 @@ export function createDemoCatalogBookingRepository(catalog: import("./businessDe
     getActiveBusinesses: async () => (await Promise.all(repositories().map(repo => repo.getActiveBusinesses()))).flat(),
     searchBusinesses: async query => (await Promise.all(repositories().map(repo => repo.searchBusinesses(query)))).flat(),
     getBookableItems: id => forBusiness(id).getBookableItems(id), getStaff: id => forBusiness(id).getStaff(id),
+    getCatalogItems: id => forBusiness(id).getCatalogItems(id),
+    quoteCatalog: (id, roots, selected) => forBusiness(id).quoteCatalog(id, roots, selected),
     getAllSlots: (id, item, date, professional, serviceIds) => forBusiness(id).getAllSlots(id, item, date, professional, serviceIds),
     changeBooking: (id,businessId,actor,operation,input) => forBusiness(businessId).changeBooking(id,businessId,actor,operation,input),
     createHold: input => forBusiness(input.businessId).createHold(input), claimSlot: input => forBusiness(input.businessId).claimSlot(input),

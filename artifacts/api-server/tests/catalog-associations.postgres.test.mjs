@@ -49,7 +49,7 @@ test('Shared catalogue associations: real PostgreSQL, JWT, PostgREST and Express
   };
   const item=async(name='Tinte',price=30,kind='service',business=ids.business)=>{const id=randomUUID();await db.query('insert into public.services(id,business_id,name,duration_minutes,price,currency,ui_metadata) values($1,$2,$3,$4,$5,\'EUR\',$6)',[id,business,name,kind==='product'?0:30,price,JSON.stringify({catalogKind:kind})]);return id};
   const manage=(operation,input={},actor=ids.owner,business=ids.business)=>http(actor,'/catalog/associations',{businessId:business,operation,input});
-  const associate=async(sourceId,targetId,mode='optional')=>{const r=await manage('create',{sourceId,targetId,mode});assert.equal(r.status,200,JSON.stringify(r));return r.body};
+  const associate=async(sourceId,targetId,mode='optional')=>{const r=await manage('create',{sourceId,targetId,mode:mode==='required'?'included':mode});assert.equal(r.status,200,JSON.stringify(r));return r.body};
   const quote=(rootIds,selectedIds=[],actor=ids.customer,business=ids.business)=>http(actor,'/catalog/quote',{businessId:business,rootIds,selectedIds});
   const create=(q,extra={},actor=ids.customer)=>http(actor,'/bookings/catalog',{business_id:ids.business,root_ids:q.rootIds,selected_ids:q.selectedAssociationIds,expected_quote:q,
     starts_at:'2035-01-08T10:00:00Z',staff_id:ids.staff,request_key:randomUUID(),...extra});
@@ -64,10 +64,15 @@ test('Shared catalogue associations: real PostgreSQL, JWT, PostgREST and Express
    await associate(s,p,'included');const a=await associate(s,b),a2=await associate(s,c);await associate(b,p,'included');
    const r=await quote([s],[a.id,a2.id]);assert.equal(r.body.totalPrice,49);assert.equal(r.body.lines.length,4);assert.equal(r.body.lines.find(x=>x.itemId===p).charge,0);assert.equal(r.body.lines.find(x=>x.itemId===p).unitPrice,9);
   });
-  await t.test('required priced complement requires explicit acceptance and cannot be silently booked',async()=>{
+  await t.test('recommended associations are voluntary in the server contract and can be booked without acceptance',async()=>{
+   await reset();const service=await item(),product=await item('Recommended',8,'product'),edge=await associate(service,product,'recommended');
+   const no=(await quote([service])).body;assert.equal(no.ready,true);assert.equal(no.totalPrice,30);assert.equal(no.options[0].mode,'recommended');assert.equal(no.options[0].selected,false);
+   const yes=(await quote([service],[edge.id])).body;assert.equal(yes.totalPrice,38);assert.equal((await create(no)).status,201);
+  });
+  await t.test('legacy required components are included without consent or a surcharge; new required associations are rejected',async()=>{
    await reset();const s=await item(),p=await item('Required',5,'product'),a=await associate(s,p,'required');
-   const q=(await quote([s])).body;assert.equal(q.ready,false);assert.deepEqual(q.missingRequired,[a.id]);assert.equal((await create(q)).status,422);
-   const yes=(await quote([s],[a.id])).body;assert.equal(yes.ready,true);assert.equal(yes.totalPrice,35);assert.equal((await create(yes)).status,201);
+   const q=(await quote([s])).body;assert.equal(q.ready,true);assert.deepEqual(q.missingRequired,[]);assert.equal(q.totalPrice,30);assert.equal(q.options[0].mode,'included');assert.equal((await create(q)).status,201);
+   const yes=(await quote([s],[a.id])).body;assert.equal(yes.ready,true);assert.equal(yes.totalPrice,30);assert.equal(yes.lines.find(line=>line.itemId===p).charge,0);assert.equal((await manage('create',{sourceId:p,targetId:s,mode:'required'})).status,400);
   });
   await t.test('all four relationship kinds use the same catalogue; products never add fictitious service time',async()=>{
    await reset();const s=await item(),s2=await item('Acabado',10),p=await item('Ampolla',7,'product'),p2=await item('Mascarilla',9,'product');
@@ -111,7 +116,7 @@ test('Shared catalogue associations: real PostgreSQL, JWT, PostgREST and Express
    const responses=await Promise.all([create(q),create(q,{},ids.otherCustomer)]);assert.deepEqual(responses.map(x=>x.status).sort(),[201,409]);
    assert.equal((await db.query('select * from public.bookings')).rowCount,1);assert.equal((await db.query('select * from go_catalog_private.booking_commands')).rowCount,1);
   });
-  await t.test('legacy booking route cannot bypass mandatory catalogue consent',async()=>{
+  await t.test('legacy booking route cannot bypass the canonical catalogue snapshot',async()=>{
    await reset();const s=await item(),p=await item('Ampolla',7,'product');await associate(s,p,'required');
    const r=await http(ids.customer,'/bookings/timeline',{business_id:ids.business,service_ids:[s],staff_id:ids.staff,starts_at:'2035-01-08T10:00:00Z',request_key:randomUUID()});assert.equal(r.status,409);assert.equal((await db.query('select * from public.bookings')).rowCount,0);
   });
@@ -154,11 +159,11 @@ test('Shared catalogue associations: real PostgreSQL, JWT, PostgREST and Express
    await db.query('update public.services set duration_minutes=75,ui_metadata=ui_metadata||$1::jsonb where id=$2',[JSON.stringify({timing:{version:1,mode:'phases',resourcesConfigured:true,phases:[phase('Aplicación',15,'work'),phase('Espera',30,'wait'),phase('Finalización',30,'work')]}}),s]);
    await db.query('update public.services set duration_minutes=15,ui_metadata=ui_metadata||$1::jsonb where id=$2',[JSON.stringify({timing:{version:1,mode:'simple',resourcesConfigured:true,phases:[{id:randomUUID(),name:'Acabado',durationMinutes:15,kind:'work',resources:[]}]}}),extra]);
    const requiredEdge=await associate(s,required,'required'),optionalEdge=await associate(s,optional);await associate(s,included,'included');
-   const pending=(await quote([s,extra])).body;assert.equal(pending.ready,false);assert.equal((await create(pending)).status,422);
-   const declined=(await quote([s,extra],[requiredEdge.id])).body;assert.equal(declined.totalPrice,45);assert.equal(declined.lines.some(line=>line.itemId===optional),false);
-   const q=(await quote([s,extra],[requiredEdge.id,optionalEdge.id])).body;assert.equal(q.ready,true);assert.equal(q.totalPrice,48);assert.deepEqual(q.serviceIds,[s,extra]);
+   const pending=(await quote([s,extra])).body;assert.equal(pending.ready,true);assert.equal(pending.totalPrice,40);
+   const declined=(await quote([s,extra],[requiredEdge.id])).body;assert.equal(declined.totalPrice,40);assert.equal(declined.lines.some(line=>line.itemId===optional),false);
+   const q=(await quote([s,extra],[requiredEdge.id,optionalEdge.id])).body;assert.equal(q.ready,true);assert.equal(q.totalPrice,43);assert.deepEqual(q.serviceIds,[s,extra]);
    const key=randomUUID(),created=await create(q,{request_key:key});assert.equal(created.status,201,JSON.stringify(created));
-   const b=created.body[0];assert.equal(b.timing_snapshot.totalClientMinutes,90);assert.equal(Date.parse(b.ends_at)-Date.parse(b.starts_at),90*60000);assert.equal(b.catalog_snapshot.totalPrice,48);
+   const b=created.body[0];assert.equal(b.timing_snapshot.totalClientMinutes,90);assert.equal(Date.parse(b.ends_at)-Date.parse(b.starts_at),90*60000);assert.equal(b.catalog_snapshot.totalPrice,43);
    assert.equal(b.timing_snapshot.workIntervals.reduce((sum,value)=>sum+(Date.parse(value.endsAt)-Date.parse(value.startsAt))/60000,0),60);
    assert.deepEqual((await create(q,{request_key:key})).body[0].id,b.id);assert.equal((await db.query('select * from public.bookings')).rowCount,1);
    const short=await item('Servicio durante espera',8);await db.query('update public.services set duration_minutes=15,ui_metadata=ui_metadata||$1::jsonb where id=$2',[JSON.stringify({timing:{version:1,mode:'phases',resourcesConfigured:true,phases:[phase('Trabajo breve',15,'work')]}}),short]);

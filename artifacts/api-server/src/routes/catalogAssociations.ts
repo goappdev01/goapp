@@ -25,9 +25,9 @@ router.post("/catalog/associations", async (req, res) => {
     || Object.keys(b).some(k => !["businessId", "operation", "input"].includes(k))) { res.status(400).json({ error: "Selección inválida." }); return; }
   const i = (b.input ?? {}) as Record<string, unknown>;
   const keys = b.operation === "create" ? ["sourceId", "targetId", "mode"] : b.operation === "update" ? ["id", "revision", "mode", "active"] : ["id", "revision"];
-  if (Object.keys(i).some(k => !keys.includes(k)) || b.operation === "create" && (!id(i.sourceId) || !id(i.targetId) || !["included", "optional", "required"].includes(String(i.mode)))
+  if (Object.keys(i).some(k => !keys.includes(k)) || b.operation === "create" && (!id(i.sourceId) || !id(i.targetId) || !["included", "optional", "recommended"].includes(String(i.mode)))
     || ["update", "delete"].includes(String(b.operation)) && (!id(i.id) || !Number.isInteger(i.revision) || Number(i.revision) < 1)
-    || i.mode != null && !["included", "optional", "required"].includes(String(i.mode)) || i.active != null && typeof i.active !== "boolean") {
+    || i.mode != null && !["included", "optional", "recommended"].includes(String(i.mode)) || i.active != null && typeof i.active !== "boolean") {
     res.status(400).json({ error: "Asociación inválida." }); return;
   }
   await call(req, res, "go_catalog_associations", { p_business_id: b.businessId, p_operation: b.operation, p_input: i });

@@ -19,6 +19,7 @@ export function customerBookingEntry(booking: Booking, business: Business, item:
     return { id: "go_booking_" + booking.id, bookingId: booking.id, reservationId: booking.id, businessId: booking.businessId, serviceId: booking.bookableItemId,
         staffId: booking.staffId, professionalId: booking.staffId, professionalName, ownerUserId: booking.customerId, actionContext: "live:USER", startDatetime: booking.startInstant ?? booking.startDatetime, endDatetime: booking.endInstant ?? booking.endDatetime, customerBooking: true, bookingStartsAt: booking.startInstant ?? booking.startDatetime, bookingChangeRevision:booking.changeRevision ?? 0, bookingServerStatus:booking.serverStatus ?? booking.status, bookingTimeline: booking.timingSnapshot,
         type: "GO_RESERVA", kind: "sent", intentKey: "generico", intentLabel: booking.receipt?.serviceName || item.title || "Reserva", color: business.bookingColor || "#00e5ff", place: business.location,
+        bookingCatalog: booking.catalogSnapshot,
         contactName: business.name, phone: business.phone, date: start.dateISO, dateISO: start.dateISO, time: start.time, startTime: start.time, endTime: end.time,
         duration: String((Date.parse(booking.endInstant ?? booking.endDatetime) - Date.parse(booking.startInstant ?? booking.startDatetime)) / 60000) + "min", notes: booking.receipt?.serviceName || item.title,
         bookingStatus: cancelled ? "cancelada" : booking.status === "COMPLETED" ? "completada" : ["CONFIRMED", "ACCEPTED"].includes(booking.status) ? "confirmada" : "pendiente",

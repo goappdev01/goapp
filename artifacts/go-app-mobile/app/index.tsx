@@ -26380,6 +26380,7 @@ function HomeScreenContent() {
 
       {/* ── GO PROVEEDOR RESERVA — pantalla de reserva orientada al cliente ── */}
       <GoProveedorReservaSheet
+        demoRepository={demoBookingRepository ?? undefined}
         visible={goProveedorOpen}
         proveedor={goProveedorData}
         onClose={() => { setGoProveedorOpen(false); setGoProveedorData(null); }}

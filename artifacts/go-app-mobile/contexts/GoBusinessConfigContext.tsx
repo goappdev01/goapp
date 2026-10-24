@@ -69,6 +69,7 @@ const LEGACY_PLANTILLA_KEY  = "go_plantilla_items_v1";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type SavedService = {
+  description?: string;
   name:      string;
   duration:  number;
   price:     number;
@@ -87,6 +88,8 @@ export type StaffScheduleConfig = {
 export type PaymentMethodId = "card" | "bank" | "stripe" | "tpv" | "other";
 
 export type BusinessConfig = {
+  catalogProducts?: import("@/data/booking").BookableItem[];
+  catalogAssociations?: import("@/data/catalogAssociations").CatalogAssociation[];
   businessName:     string;
   address:          string;
   cartaUrl:         string;
@@ -425,7 +428,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
           existing.durationMinutes  !== svc.duration          ||
           existing.price            !== svc.price             ||
           existing.customerCapacity !== (svc.capacity ?? 1) ||
-          JSON.stringify(existing.timing) !== JSON.stringify(svc.timing);
+          JSON.stringify(existing.timing) !== JSON.stringify(svc.timing) || existing.description !== svc.description;
         if (changed) {
           await saveBookableItem({
             ...existing,
@@ -434,6 +437,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
             price:            svc.price,
             customerCapacity: svc.capacity ?? 1,
             timing: svc.timing,
+            description: svc.description,
           });
         }
       } else {
@@ -449,6 +453,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
           active:           true,
           visible:          true,
           timing:           svc.timing,
+          description:      svc.description,
         });
       }
     }

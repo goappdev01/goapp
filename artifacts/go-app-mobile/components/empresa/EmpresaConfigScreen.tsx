@@ -2288,7 +2288,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
 
   type LocalSvc = SavedService & { id: string };
   const serializeServices = (svcs: LocalSvc[]) => svcs.filter(service => service.name.trim())
-    .map(({ name, duration, price, capacity, timing }) => ({ name, duration, price, capacity, ...(timing ? { timing } : {}) }));
+    .map(({ name, description, duration, price, capacity, timing }) => ({ name, duration, price, capacity, ...(description ? { description } : {}), ...(timing ? { timing } : {}) }));
   const saveServices = useCallback((services: SavedService[]) => {
     const checked = serializeServiceConfiguration(services, { resources: config.bookingResources ?? [] });
     return demo ? demo.updateConfig({ services: checked }) : updateConfig({ services: checked });
@@ -2430,7 +2430,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     <View>
       <View style={c.sectionCard}>
         <Text style={c.sectionLabel}>{t("biz_services_offered")}</Text>
-        <CatalogAssociationManager businessId={config.businessId} demo={!!demo} />
+        <CatalogAssociationManager businessId={config.businessId} demo={!!demo} beforeOpen={flush} />
 
         {localSvcs.map((svc, idx) => (
           <View key={svc.id} style={c.svcRow}>
@@ -2443,6 +2443,8 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               placeholderTextColor={DIM}
               returnKeyType="done"
             />
+            <TextInput style={c.svcNameInput} value={svc.description ?? ""} onChangeText={description => patchSvc(svc.id, { description })}
+              onBlur={() => { void flush().catch(() => {}); }} placeholder={lang === "en" ? "Description (optional)" : "Descripción (opcional)"} placeholderTextColor={DIM} />
             <View style={c.svcMeta}>
               <View style={c.numBox}>
                 <TextInput

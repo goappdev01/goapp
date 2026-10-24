@@ -731,11 +731,10 @@ export function BookingSearchOverlay({
 
   const handleSaveServices = () => {
     if (!serviceSelection) return;
-    if (demoRepository) {
-      setSelectedItem(serviceSelection.item); setSelectedServices(serviceSelection.services);
-    } else {
+    {
       if (!catalogQuote?.ready || catalogQuote.businessId !== selectedBusiness?.id || JSON.stringify(catalogQuote.rootIds) !== JSON.stringify(selectedServiceIds)) return;
-      setSelectedItem({ ...serviceSelection.item, price: catalogQuote.totalPrice }); setSelectedServices(catalogBookingServices(catalogQuote));
+      const services = catalogBookingServices(catalogQuote);
+      setSelectedItem({ ...serviceSelection.item, price: catalogQuote.totalPrice, durationMinutes: services.reduce((minutes, service) => minutes + service.durationMinutes, 0) }); setSelectedServices(services);
     }
     setSelectedStaff(null); setSlots([]);
     goToStep("professional", "forward");
@@ -768,7 +767,7 @@ export function BookingSearchOverlay({
         businessId: selectedBusiness.id,
         bookableItemId: selectedItem.id,
         ...(selectedServices.length ? { services: selectedServices } : {}),
-        ...(!demoRepository && catalogQuote ? { catalogSnapshot: catalogQuote } : {}),
+        ...(catalogQuote ? { catalogSnapshot: catalogQuote } : {}),
         startInstant: slot.startInstant, endInstant: slot.endInstant, timingSnapshot: slot.timingSnapshot,
         customerId: demoRepository?.ownerUserId ?? "me",
         staffId,
@@ -1312,6 +1311,7 @@ export function BookingSearchOverlay({
                       >
                         <View style={{ flex: 1, gap: 8 }}>
                           <Text style={s.serviceTitle}>{trSector(item.title, lang)}</Text>
+                          {!!item.description && <Text style={s.metaBadgeText}>{item.description}</Text>}
                           <View style={s.serviceMetaRow}>
                             <View style={s.metaBadge}>
                               <Feather name="clock" size={11} color="rgba(255,255,255,0.40)" />
@@ -1342,12 +1342,12 @@ export function BookingSearchOverlay({
                         </View>
                       </TouchableOpacity>
                     ))}
-                    {!demoRepository && selectedBusiness && <CatalogComplementSelector businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} />}
+                    {selectedBusiness && <CatalogComplementSelector businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} repository={demoRepository} />}
                     {serviceSelection && <Text testID="booking-services-total" style={s.metaBadgeText}>
-                      {serviceSelection.item.durationMinutes} min · {(!demoRepository && catalogQuote?.ready ? catalogQuote.totalPrice : serviceSelection.item.priceKnown === false ? null : serviceSelection.item.price) ?? (lang === "en" ? "Price to confirm" : "Precio por confirmar")} {serviceSelection.item.currency}
+                      {catalogQuote?.ready ? catalogBookingServices(catalogQuote).reduce((minutes, service) => minutes + service.durationMinutes, 0) : serviceSelection.item.durationMinutes} min · {(catalogQuote?.ready ? catalogQuote.totalPrice : serviceSelection.item.priceKnown === false ? null : serviceSelection.item.price) ?? (lang === "en" ? "Price to confirm" : "Precio por confirmar")} {serviceSelection.item.currency}
                     </Text>}
-                    <TouchableOpacity testID="booking-save-services" accessibilityRole="button" disabled={!serviceSelection || !demoRepository && !catalogQuote?.ready} onPress={handleSaveServices}
-                      style={[s.serviceCard, { borderColor: accentColor, opacity: serviceSelection && (demoRepository || catalogQuote?.ready) ? 1 : 0.45 }]}>
+                    <TouchableOpacity testID="booking-save-services" accessibilityRole="button" disabled={!serviceSelection || !catalogQuote?.ready} onPress={handleSaveServices}
+                      style={[s.serviceCard, { borderColor: accentColor, opacity: serviceSelection && catalogQuote?.ready ? 1 : 0.45 }]}>
                       <Text style={s.serviceTitle}>{t("save")}</Text>
                     </TouchableOpacity>
                   </ScrollView>
