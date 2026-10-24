@@ -1,4 +1,5 @@
 import {originalGoProposalContract} from "./helpers/booking-go-contract.mjs";
+import {entryPhone,renderEntryQuickActions} from './helpers/entry-details-fixture.mjs';
 import { priorLandingPosition } from './helpers/landing-anchor-baseline.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
@@ -40,7 +41,7 @@ const text=node=>typeof node==='string'||typeof node==='number'?String(node):Arr
 async function mountOperations(g,stacked=false){
  const buttons=new Map(),urls=[],sheets=[],calendar=[],gps=[],toasts=[],refs={current:null};
  const TouchableOpacity=props=>{const label=props.accessibilityLabel||text(props.children);buttons.set(label,props);return React.createElement('button',{'data-testid':label,disabled:!!props.accessibilityState?.disabled},props.children)};
- const context={exports:{},React,View:rn.View,Text:rn.Text,TouchableOpacity,LinearGradient:rn.View,Feather:()=>null,
+ const context={exports:{},React,entryPhone,renderEntryQuickActions,View:rn.View,Text:rn.Text,TouchableOpacity,LinearGradient:rn.View,Feather:()=>null,
   landingCurrentEntry:policy.landingCurrentEntry,landingActionGrid:layout.landingActionGrid,
   landingPanels:{region:{width:stacked?220:354}},landingPanelInsets:{left:0,right:0},landingStackTransport:stacked,landingFrame:{virtual:stacked},uiScaleFactor:1,uiScale:'estandar',handedness:'right',
   aquiSendingId:null,setAquiSendingId:id=>gps.push(id),Location:{getForegroundPermissionsAsync:async()=>({status:'granted'}),getLastKnownPositionAsync:async()=>({coords:{latitude:1,longitude:2}})},

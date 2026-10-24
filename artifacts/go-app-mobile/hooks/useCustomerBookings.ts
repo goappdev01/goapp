@@ -49,7 +49,7 @@ export function useCustomerBookings(repository: DemoBookingRepository | undefine
             for (const businessId of new Set(bookings.map(b => b.businessId))) {
                 const receipt = bookings.find(b=>b.businessId===businessId)?.receipt;
                 const business = businesses.find(b => b.id === businessId) ?? {
-                    id: businessId, name: receipt?.businessName ?? "Establecimiento no disponible", category: "", location: receipt?.address ?? "", phone: "",
+                    id: businessId, name: receipt?.businessName ?? "Establecimiento no disponible", category: "", location: receipt?.address ?? "", phone: receipt?.businessPhone ?? "", whatsapp:receipt?.businessWhatsapp,
                     bookingActive: false, bookingColor: "#00e5ff", timezone: receipt?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, createdAt: "",
                 };
                 const [items, staff] = await Promise.all([getBookableItems(businessId), getStaff(businessId)]);

@@ -44,7 +44,10 @@ language sql security invoker set search_path='' as $$
     'timing_snapshot',to_jsonb(r)->'timing_snapshot','catalog_snapshot',to_jsonb(r)->'catalog_snapshot') || jsonb_build_object(
     'business_name', b.name, 'business_address', b.address, 'business_timezone', b.timezone,
     'service_name', s.name, 'staff_name', p.display_name,
-    'customer_name',case when c.full_name not like '%@%' then nullif(btrim(c.full_name),'') else null end)
+    'customer_name',case when c.full_name not like '%@%' then nullif(btrim(c.full_name),'') else null end,
+    'customer_phone',case when b.verified and b.owner_id=auth.uid() then nullif(btrim(c.phone),'') else null end,
+    'business_phone',coalesce(nullif(b.ui_metadata->>'phoneE164',''),nullif(b.ui_metadata->>'mobileE164',''),nullif(b.ui_metadata->>'phone',''),nullif(b.ui_metadata->>'mobile','')),
+    'business_whatsapp',coalesce(nullif(b.ui_metadata->>'whatsappE164',''),nullif(b.ui_metadata->>'whatsapp','')))
   from public.bookings r join public.businesses b on b.id=r.business_id
   join public.services s on s.id=r.service_id left join public.staff p on p.id=r.staff_id
   left join public.profiles c on c.id=r.customer_id

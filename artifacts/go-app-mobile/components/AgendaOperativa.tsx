@@ -57,6 +57,8 @@ import { formatDayLabel, formatISODate, getDayOffset, getToday } from "../lib/ti
 import { CalSizeKey, getCalColumnW, DEFAULT_GO_RENDER_PRESET } from "../constants/goSizes";
 import { trSector } from "@/data/goSectorTranslations";
 import { reservationCardPolicy } from "@/data/reservationCardPolicy";
+import { GoEntryDetailsSheet, GoEntryQuickActions } from "./GoEntryDetails";
+import { entryHeading, entryIdentity } from "@/data/goEntryPresentation";
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { GoCalendarViewSelector } from "./ui/GoCalendarViewSelector";
 
@@ -208,6 +210,10 @@ export type GoEntry = {
   bookingTimeline?: import("@/data/bookingTimeline").BookingTimeline;
   bookingResourceNames?: Record<string, string>;
   bookingCatalog?: import("@/data/catalogAssociations").CatalogQuote;
+  bookingServices?: import("@/data/booking").Booking["services"];
+  bookingTotalPrice?: number | null;
+  bookingCurrency?: string;
+  bookingPerspective?: "customer" | "business";
   bookingStatus?: "pendiente" | "confirmada" | "cancelada" | "cambio_pendiente" | "completada";
   // ── TELEFONÍA BILATERAL ─────────────────────────────────────────
   // Para GOs coordinados (enviados o recibidos) guardamos ambos extremos
@@ -747,7 +753,7 @@ export function AgendaBoard({
   const [expandedBookingItem, setExpandedBookingItem] = useState<GoEntry | null>(null);
   const [verificationEntry,setVerificationEntry]=useState<GoEntry|null>(null);
   const bookingPolicy=expandedBookingItem?reservationCardPolicy(expandedBookingItem):null;
-  useEffect(()=>{if(expandedBookingItem && reservationCardPolicy(expandedBookingItem).canonical){const current=goLog.find(e=>e.id===expandedBookingItem.id);if(!current)setExpandedBookingItem(null);else if(current!==expandedBookingItem)setExpandedBookingItem(current);}},[goLog,expandedBookingItem]);
+  useEffect(()=>{if(expandedBookingItem){const current=goLog.find(e=>e.id===expandedBookingItem.id);if(!current)setExpandedBookingItem(null);else if(current!==expandedBookingItem)setExpandedBookingItem(current);}},[goLog,expandedBookingItem]);
   const [bookingMsgDraft, setBookingMsgDraft] = useState("");
   const chatScrollRef = useRef<ScrollView>(null);
   // Optimistic local messages — always shown immediately on send; merged with goChats prop
@@ -1443,17 +1449,10 @@ export function AgendaBoard({
       Haptics.selectionAsync().catch(() => {});
       if (isSelecting) {
         toggleSelect(item.id);
-      } else if (isBookingCard) {
-        // Booking cards open a floating zoom Modal instead of expanding in-column
-        if (expandedCardId === item.id) {
-          setExpandedCardId(null);
-          setExpandedBookingItem(null);
-        } else {
-          setExpandedCardId(item.id);
-          setExpandedBookingItem(item);
-        }
       } else {
-        setExpandedCardId((prev) => (prev === item.id ? null : item.id));
+        // Opening details never changes the size/order of its original column card.
+        setExpandedCardId(null);
+        setExpandedBookingItem(item);
       }
     };
 
@@ -1680,7 +1679,7 @@ export function AgendaBoard({
                 style={[s.cardSub, { fontSize: subFont, lineHeight: Math.max(16, Math.round(subFont * 1.45)), color: _textSecondary, fontWeight: "600" }]}
                 numberOfLines={isExpanded ? 0 : 1}
               >
-                {item.contactName || t('booking_customer_unknown')}
+                {entryHeading(item, item.businessBooking || item.bookingPerspective === "business" ? t('booking_customer_unknown') : (lang === "en" ? "Reservation" : "Reserva"))}
               </Text>
             )}
 
@@ -1700,7 +1699,7 @@ export function AgendaBoard({
             {/* 2b. CON QUIÉN — non-booking: SIEMPRE visible (compacto y expandido)
                 Prioridad: nombre > teléfono > nada (ambos normalizados para evitar strings vacíos) */}
             {!isBookingCard && (() => {
-              const _name  = item.contactName?.trim() ?? "";
+              const _name  = entryIdentity(item.contactName);
               const _phone = item.phone?.trim() ?? "";
               const _label = _name  ? `Con ${_name}`
                            : _phone ? `Con ${_phone}`
@@ -2626,278 +2625,29 @@ export function AgendaBoard({
 
       {!!verificationEntry && (()=>{const {ReservationVerificationPanel}=require("@/components/booking/ReservationVerificationPanel") as typeof import("@/components/booking/ReservationVerificationPanel");return <ReservationVerificationPanel bookingId={verificationEntry.customerBooking?verificationEntry.reservationId:undefined} businessId={verificationEntry.businessBooking?verificationEntry.businessId:undefined} key={verificationEntry.id} onClose={()=>setVerificationEntry(null)}/>;})()}
 
-      {/* ── BOOKING ZOOM MODAL — flotante, cubre el calendario ─────── */}
-      <Modal
-        visible={!!expandedBookingItem}
-        transparent
-        animationType="fade"
-        onRequestClose={() => { setExpandedBookingItem(null); setExpandedCardId(null); }}
-      >
-        {/* Backdrop — tap outside sheet to close */}
-        <TouchableOpacity
-          activeOpacity={1}
-          onPress={() => { setExpandedBookingItem(null); setExpandedCardId(null); }}
-          style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.62)", justifyContent: "flex-end" }}
-        >
-          {/* Bottom sheet card — View stops tap propagation to backdrop */}
-          {!!expandedBookingItem && (
-            <View
-              style={{
-                width: "100%",
-                maxHeight: "78%",
-                backgroundColor: "#0e0e10",
-                borderTopLeftRadius: 20,
-                borderTopRightRadius: 20,
-                borderTopWidth: 3,
-                borderTopColor: expandedBookingItem.color || "#4A80BD",
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: -4 },
-                shadowOpacity: 0.55,
-                shadowRadius: 20,
-                elevation: 24,
-              }}
-            >
-              {/* Drag handle */}
-              <View style={{ alignItems: "center", paddingTop: 12, paddingBottom: 4 }}>
-                <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.15)" }} />
-              </View>
-
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                bounces={false}
-                contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 24, gap: 0 }}
-              >
-                {/* ─── TIME · RESERVA · DURACIÓN ─── */}
-                <Text style={{ fontSize: 13, fontFamily: "Inter_700Bold", fontWeight: "800", color: "rgba(255,255,255,0.82)", letterSpacing: 0.5, marginBottom: 12 }}>
-                  {[
-                    expandedBookingItem.time ? expandedBookingItem.time : null,
-                    t('biz_booking_intent_label'),
-                    expandedBookingItem.duration || null,
-                  ].filter(Boolean).join("  ·  ")}
-                </Text>
-
-                {!!bookingPolicy?.canonical && <View accessibilityLabel={t(bookingPolicy.stateKey as any)} style={{alignSelf:"flex-start",paddingHorizontal:10,paddingVertical:6,borderRadius:12,borderWidth:1,borderColor:bookingPolicy.stateColor,marginBottom:12}}><Text style={{color:bookingPolicy.stateColor,fontWeight:"700",fontSize:13}}>{t(bookingPolicy.stateKey as any)}</Text></View>}
-                {/* ─── EMPRESA / CLIENTE ─── */}
-                {(!!expandedBookingItem.contactName || expandedBookingItem.businessBooking) && (
-                  <Text style={{ fontSize: 20, fontWeight: "700", color: "#ffffff", marginBottom: 6 }}>
-                    {expandedBookingItem.contactName || t('booking_customer_unknown')}
-                  </Text>
-                )}
-
-                {/* ─── SERVICIO · CON PROFESIONAL (merged) ─── */}
-                {!!(expandedBookingItem.notes || expandedBookingItem.intentLabel || expandedBookingItem.professionalName) && (() => {
-                  const servicio = trSector(expandedBookingItem.notes || expandedBookingItem.intentLabel || "", lang);
-                  const profRaw = expandedBookingItem.professionalName || "";
-                  const profClean = profRaw === "Sin preferencia" ? "" : profRaw.replace(/^[\p{Emoji}\s]+/u, "").trim() || profRaw;
-                  const profPart = profClean ? t('biz_with_pro').replace(/:\s*$/, ' ') + profClean : "";
-                  const merged = [servicio, profPart].filter(Boolean).join("  ·  ");
-                  if (!merged) return null;
-                  return (
-                    <Text style={{ fontSize: 16, fontWeight: "600", color: "rgba(255,255,255,0.82)", marginBottom: 8 }}>
-                      {merged}
-                    </Text>
-                  );
-                })()}
-
-                {/* ─── DIRECCIÓN ─── */}
-                {!!expandedBookingItem.businessBooking && !!expandedBookingItem.bookingTimeline && <View style={{ gap: 6, marginVertical: 8 }}>
-                  <Text style={{ color: "#ffffff", fontWeight: "700" }}>{lang === "en" ? "Work / processing" : "Intervención / espera"} · {expandedBookingItem.bookingTimeline.workMinutes} min / {expandedBookingItem.bookingTimeline.waitMinutes} min</Text>
-                  {expandedBookingItem.bookingTimeline.phases.map((phase, index) => {
-                    const wall = (instant: string) => new Intl.DateTimeFormat(lang === "en" ? "en-GB" : "es-ES", { timeZone: expandedBookingItem.bookingTimeline!.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(instant));
-                    return <View key={`${phase.serviceId}|${phase.id}|${index}`} style={{ gap: 2 }}>
-                      <Text style={{ color: phase.kind === "work" ? "#ffffff" : "rgba(255,255,255,0.65)", fontSize: 13 }}>
-                        {wall(phase.startsAt)}–{wall(phase.endsAt)} · {phase.name} · {phase.kind === "work" ? (lang === "en" ? "Work" : "Intervención") : (lang === "en" ? "Processing" : "Espera")}
-                      </Text>
-                      {!!phase.resources?.length && <Text style={{ color: "rgba(255,255,255,0.65)", fontSize: 12 }}>
-                        {phase.resources.map(resource => `${expandedBookingItem.bookingResourceNames?.[resource.resourceId] ?? (lang === "en" ? "Resource" : "Recurso")} ×${resource.quantity}${resource.occupancy === "booking" ? (lang === "en" ? " (whole visit)" : " (visita completa)") : ""}`).join(" · ")}
-                      </Text>}
-                    </View>;
-                  })}
-                </View>}
-                {!!expandedBookingItem.place && (
-                  <Text style={{ fontSize: 14, color: "rgba(255,255,255,0.48)", marginBottom: 6, lineHeight: 21 }}>
-                    {expandedBookingItem.place}
-                  </Text>
-                )}
-
-                {/* ─── MENSAJE AL PROFESIONAL ─── */}
-                {!!expandedBookingItem.bookingMessageToStaff && (
-                  <Text style={{ fontSize: 14, color: "#93c5fd", marginBottom: 8, lineHeight: 21, fontStyle: "italic" }}>
-                    {expandedBookingItem.bookingMessageToStaff}
-                  </Text>
-                )}
-
-                {/* ─── CAMBIO PROPUESTO / ACEPTADO — visible cuando existe changeProposal ─── */}
-                {!!(expandedBookingItem as any).changeProposal && (() => {
-                  const cp = (expandedBookingItem as any).changeProposal;
-                  const _expEstado = expandedBookingItem.estado;
-                  const _expAccepted = _expEstado === "aceptado";
-                  const _expColor   = _expAccepted ? "#22c55e" : "#FF8C00";
-                  const _expAlpha70 = _expAccepted ? "rgba(34,197,94,0.70)"  : "rgba(255,140,0,0.70)";
-                  const _expAlpha20 = _expAccepted ? "rgba(34,197,94,0.20)"  : "rgba(255,140,0,0.20)";
-                  const _expAlpha16 = _expAccepted ? "rgba(34,197,94,0.16)"  : "rgba(255,140,0,0.16)";
-                  // Usar datos guardados directamente — nunca recalcular desde ISO ni sistema
-                  const _clean = (s: string) => (s || "").replace(/,\s*/g, " ").trim();
-                  const _origLabel = [_clean(cp.originalDate), cp.originalTime].filter(Boolean).join(" · ");
-                  const _propLabel  = [_clean(cp.date), cp.time].filter(Boolean).join(" · ");
-                  const _isReceivedExp = _expEstado === "propuesto";
-                  const _expHeaderLabel = _expAccepted
-                    ? t('biz_change_accepted')
-                    : _isReceivedExp ? t('biz_change_received') : t('biz_change_proposed');
-                  const _expHeaderIcon = _expAccepted ? "check-circle" : "refresh-cw";
-                  return (
-                    <View style={{ marginTop: 12, marginBottom: 4, borderRadius: 12, borderWidth: 1.5, borderColor: _expAlpha70, backgroundColor: "rgba(8,6,4,0.92)", padding: 14, gap: 12 }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                        <View style={{ width: 24, height: 24, borderRadius: 7, backgroundColor: _expAlpha16, alignItems: "center", justifyContent: "center" }}>
-                          <Feather name={_expHeaderIcon} size={11} color={_expColor} />
-                        </View>
-                        <Text style={{ color: _expColor, fontSize: 12, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.5 }}>{_expHeaderLabel}</Text>
-                      </View>
-                      <View style={{ height: 1, backgroundColor: _expAlpha20 }} />
-                      <View style={{ flexDirection: "row", gap: 14 }}>
-                        <View style={{ flex: 1, gap: 3 }}>
-                          <Text style={{ color: _expColor, fontSize: 9, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" }}>{t('biz_booking_date_orig')}</Text>
-                          <Text style={{ color: "rgba(255,255,255,0.90)", fontSize: 13, fontWeight: "700", lineHeight: 18 }} numberOfLines={2}>{_origLabel || "—"}</Text>
-                        </View>
-                        <View style={{ flex: 1, gap: 3 }}>
-                          <Text style={{ color: _expColor, fontSize: 9, fontWeight: "700", letterSpacing: 0.8, textTransform: "uppercase" }}>{_expAccepted ? t('biz_booking_date_new') : t('biz_booking_date_proposed')}</Text>
-                          <Text style={{ color: "rgba(255,255,255,0.90)", fontSize: 13, fontWeight: "700", lineHeight: 18 }} numberOfLines={2}>{_propLabel || "—"}</Text>
-                        </View>
-                      </View>
-                      <View style={{ height: 1, backgroundColor: _expAlpha16 }} />
-                      {_expAccepted ? (
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                          <Feather name="check" size={11} color={_expColor} />
-                          <Text style={{ color: "rgba(255,255,255,0.82)", fontSize: 12, fontWeight: "600" }}>{t('biz_booking_updated')}</Text>
-                        </View>
-                      ) : !_isReceivedExp ? (
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                          <Feather name="clock" size={11} color={_expColor} />
-                          <Text style={{ color: "rgba(255,255,255,0.82)", fontSize: 12, fontWeight: "600" }}>{t('biz_booking_awaiting')}</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                })()}
-
-                {/* ─── DIVIDER ─── */}
-                <View style={{ height: 1, backgroundColor: "rgba(255,255,255,0.07)", marginTop: 16, marginBottom: 16 }} />
-
-                {/* ─── ESTADO PILLS ─── */}
-                {bookingPolicy?.canonical && renderReservationControls(expandedBookingItem, true)}
-                {!!expandedBookingItem.bookingCatalog && <View style={{gap:6,marginBottom:14}}>
-                  {expandedBookingItem.bookingCatalog.lines.map(line => <Text key={line.itemId} style={{color:"rgba(255,255,255,0.85)",fontSize:12}}>{line.name} · {line.included ? (lang === "en" ? "Included" : "Incluido") : `${line.charge.toFixed(2)} ${line.currency}`}</Text>)}
-                  <Text style={{color:"white",fontWeight:"700"}}>{expandedBookingItem.bookingCatalog.totalPrice.toFixed(2)} {expandedBookingItem.bookingCatalog.currency}</Text>
-                </View>}
-                {onChangeEstado && !bookingPolicy?.canonical && (
-                  <View style={{ flexDirection: "row", gap: 10, marginBottom: 14 }}>
-                    {ESTADO_OPTIONS.map((opt) => {
-                      const isActive =
-                        expandedBookingItem.estado === opt.key ||
-                        (opt.key === "propuesto" &&
-                          (expandedBookingItem.estado === "propuesto" || expandedBookingItem.estado === "propuesta_pendiente"));
-                      return (
-                        <TouchableOpacity
-                          key={opt.key}
-                          onPress={() => {
-                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                            const resolved = resolveEstado(expandedBookingItem.estado, opt.key);
-                            onChangeEstado(expandedBookingItem.id, resolved);
-                            if (opt.key === "propuesto" && onProposeItem) onProposeItem(expandedBookingItem.id);
-                            setExpandedBookingItem((prev) => prev ? { ...prev, estado: resolved } : prev);
-                          }}
-                          style={{
-                            flex: 1, paddingVertical: 12,
-                            borderRadius: 12, borderWidth: 1.5,
-                            alignItems: "center", justifyContent: "center",
-                            backgroundColor: isActive ? opt.color : "rgba(255,255,255,0.04)",
-                            borderColor: isActive ? opt.color : opt.color + "55",
-                          }}
-                          activeOpacity={0.7}
-                        >
-                          <Feather
-                            name={(isActive ? opt.icon : opt.iconInactive) as any}
-                            size={18}
-                            color={isActive ? "#101018" : opt.color + "80"}
-                          />
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                )}
-
-                {(bookingPolicy?.canShowQr || bookingPolicy?.canVerify) && <TouchableOpacity accessibilityRole="button" accessibilityLabel={t(bookingPolicy.canVerify?'verification_title':'verification_show')} onPress={()=>{setVerificationEntry(expandedBookingItem);setExpandedBookingItem(null);setExpandedCardId(null);}} style={{minHeight:44,padding:12,marginBottom:14,borderRadius:12,borderWidth:1,borderColor:"#93c5fd",alignItems:"center"}}><Text style={{color:"#93c5fd",fontWeight:"700"}}>{t(bookingPolicy.canVerify?'verification_title':'verification_show')}</Text></TouchableOpacity>}
-                {/* ─── ACTION ROW: Mensaje + Eliminar ─── */}
-                <View style={{ flexDirection: "row", gap: 10, marginBottom: 14 }}>
-                  <TouchableOpacity
-                    onPress={() => {
-                      Haptics.selectionAsync().catch(() => {});
-                      const item = expandedBookingItem;
-                      setExpandedBookingItem(null);
-                      setExpandedCardId(null);
-                      setTimeout(() => handleOpenMessage(item), 80);
-                    }}
-                    style={{
-                      flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-                      gap: 7, paddingVertical: 13, borderRadius: 12,
-                      backgroundColor: "rgba(74,128,189,0.18)",
-                      borderWidth: 1.5, borderColor: "rgba(74,128,189,0.55)",
-                    }}
-                    activeOpacity={0.75}
-                  >
-                    <Feather name="message-circle" size={16} color="#93c5fd" />
-                    <Text style={{ color: "#93c5fd", fontSize: 14, fontWeight: "600" }}>{t('biz_message_btn')}</Text>
-                  </TouchableOpacity>
-                  {!bookingPolicy?.canonical && bookingPolicy?.canPropose && onProposeItem && (
-                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('tasks_propose_change')}
-                      onPress={() => { const entry=expandedBookingItem;setExpandedBookingItem(null);setExpandedCardId(null);onProposeItem(entry.id); }}
-                      style={{flex:1,paddingHorizontal:10,paddingVertical:13,borderRadius:12,backgroundColor:"rgba(255,140,0,0.10)",borderWidth:1.5,borderColor:"rgba(255,140,0,0.35)",alignItems:"center",justifyContent:"center"}}>
-                      <Text style={{color:"#FF8C00",fontSize:14,fontWeight:"600",textAlign:"center"}}>{t('tasks_propose_change')}</Text>
-                    </TouchableOpacity>
-                  )}
-                  {onDeleteItem && !bookingPolicy?.canonical && (
-                    <TouchableOpacity
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                        onDeleteItem(expandedBookingItem.id);
-                        setExpandedBookingItem(null);
-                        setExpandedCardId(null);
-                      }}
-                      style={{
-                        paddingHorizontal: 18, paddingVertical: 13, borderRadius: 12,
-                        backgroundColor: "rgba(220,38,38,0.10)",
-                        borderWidth: 1.5, borderColor: "rgba(220,38,38,0.35)",
-                        alignItems: "center", justifyContent: "center",
-                      }}
-                      activeOpacity={0.75}
-                    >
-                      <Feather name="trash-2" size={16} color="#f87171" />
-                      {bookingPolicy?.canonical && <Text style={{color:"#f87171",fontSize:12}}>{t('cancel')}</Text>}
-                    </TouchableOpacity>
-                  )}
-                </View>
-
-              </ScrollView>
-
-              {/* ─── FAB CLOSE BUTTONS — flotantes, bottom-right del sheet ─── */}
-              <View style={{ position: "absolute", right: 16, bottom: 20, gap: 8, alignItems: "center" }}>
-                {onGoToLanding && (
-                  <GoCloseButton
-                    level="container"
-                    accessibilityLabel={lang === "en" ? "Exit calendar" : "Salir del calendario"}
-                    onPress={() => { onGoToLanding(); setExpandedBookingItem(null); setExpandedCardId(null); }}
-                  />
-                )}
-                <GoCloseButton
-                  level="panel"
-                  accessibilityLabel={lang === "en" ? "Close reservation details" : "Cerrar detalle de reserva"}
-                  onPress={() => { setExpandedBookingItem(null); setExpandedCardId(null); }}
-                />
-              </View>
-            </View>
-          )}
-        </TouchableOpacity>
-      </Modal>
+      {/* One foreground detail for the same reservation or task. Calendar stays mounted. */}
+      <GoEntryDetailsSheet entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}
+        onClose={() => { setExpandedBookingItem(null); setExpandedCardId(null); }}
+        onExit={onGoToLanding ? () => { setExpandedBookingItem(null); setExpandedCardId(null); onGoToLanding(); } : undefined}>
+        {expandedBookingItem && <>
+          {bookingPolicy?.canonical ? renderReservationControls(expandedBookingItem, true) : <GoEntryQuickActions entry={expandedBookingItem}
+            onCancel={onDeleteItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);onDeleteItem(item.id); } : undefined}
+            onEdit={onProposeItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);onProposeItem(item.id); } : undefined}
+            onPropose={onProposeItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);onProposeItem(item.id); } : undefined}
+            onAccept={onAcceptProposal || onChangeEstado ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);if(item.changeProposal)onAcceptProposal?.(item.id);else onChangeEstado?.(item.id,"aceptado"); } : undefined}
+            onReject={onRejectProposal || onChangeEstado ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);if(item.changeProposal)onRejectProposal?.(item.id);else onChangeEstado?.(item.id,"rechazado"); } : undefined} />}
+          {(bookingPolicy?.canShowQr || bookingPolicy?.canVerify) && <TouchableOpacity accessibilityRole="button" accessibilityLabel={t(bookingPolicy.canVerify?'verification_title':'verification_show')}
+            onPress={()=>{setVerificationEntry(expandedBookingItem);setExpandedBookingItem(null);setExpandedCardId(null);}}
+            style={{minHeight:44,padding:12,borderRadius:12,borderWidth:1,borderColor:"#93c5fd",alignItems:"center"}}>
+            <Text style={{color:"#93c5fd",fontWeight:"700"}}>{t(bookingPolicy.canVerify?'verification_title':'verification_show')}</Text>
+          </TouchableOpacity>}
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={t('biz_message_btn')}
+            onPress={() => { const item=expandedBookingItem;setExpandedBookingItem(null);setExpandedCardId(null);setTimeout(()=>handleOpenMessage(item),80); }}
+            style={{minHeight:44,padding:12,borderRadius:12,borderWidth:1,borderColor:"#93c5fd",alignItems:"center"}}>
+            <Text style={{color:"#93c5fd",fontWeight:"700"}}>{t('biz_message_btn')}</Text>
+          </TouchableOpacity>
+        </>}
+      </GoEntryDetailsSheet>
 
       {/* ── Chat GO de la reserva — mismo sistema visual que el Chat GO ── */}
       <Modal

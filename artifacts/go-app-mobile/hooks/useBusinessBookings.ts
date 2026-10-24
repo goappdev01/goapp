@@ -4,6 +4,7 @@ import type {GoEntry} from "@/components/AgendaOperativa";
 import {getAuthenticatedUserId,getOwnedBusinesses,getLiveBusinessBookings,changeBookingRequest,subscribeBookingUpdates,type Booking,type Business} from "@/data/booking";
 import {customerBookingEntry} from "@/data/customerBookingProjection";
 import {onSessionChanged} from "@/lib/sessionEvents";
+import {entryIdentity} from "@/data/goEntryPresentation";
 
 /** Another authorized view of the SAME server booking, never a persisted copy. */
 export function businessBookingEntry(booking:Booking,business:Business,ownerId:string):GoEntry {
@@ -12,7 +13,7 @@ export function businessBookingEntry(booking:Booking,business:Business,ownerId:s
     customerCapacity:1,unitQuantity:1,paymentRequired:false,active:true,visible:true},booking.receipt?.staffName);
   return {...base,id:"go_booking_prv_"+booking.id,type:"GO_BOOKING",kind:"sent",customerBooking:false,businessBooking:true,
     bookingResourceNames:Object.fromEntries((business.bookingResources ?? []).map(resource=>[resource.id,resource.name])),
-    ownerUserId:ownerId,contactName:booking.receipt?.customerName?.trim() === "Cliente DEMO local" ? "" : booking.receipt?.customerName?.trim() || "",estado:base.deleted?"rechazado":booking.changeProposal?
+    ownerUserId:ownerId,contactName:entryIdentity(booking.receipt?.customerName),phone:booking.receipt?.customerPhone || "",whatsapp:booking.receipt?.customerPhone || undefined,estado:base.deleted?"rechazado":booking.changeProposal?
       booking.changeProposal.proposedBy==="business"?"propuesta_pendiente":"propuesto":base.estado};
 }
 export function mergeBusinessBookingEntries(personal:GoEntry[],entries:GoEntry[]):GoEntry[]{

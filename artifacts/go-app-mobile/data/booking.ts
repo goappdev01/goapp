@@ -84,12 +84,14 @@ export type BookingChangeProposal = {
 };
 export type BookingChangeEvent = { proposal: BookingChangeProposal; outcome: "accepted" | "rejected" | "countered" | "cancelled"; actor: "customer" | "business"; at: number };
 export type Booking = {
+  totalPrice?: number | null;
+  currency?: string;
   catalogSnapshot?: CatalogQuote;
   services?: { id: string; title: string; durationMinutes: number; price: number; currency?: string; priceKnown?: boolean }[];
   timingSnapshot?: BookingTimeline;
   changeRevision?:number;
   serverStatus?:string;
-  receipt?:{customerName?:string;businessName?:string;address?:string;timezone?:string;serviceName?:string;staffName?:string};
+  receipt?:{customerName?:string;customerPhone?:string;businessName?:string;businessPhone?:string;businessWhatsapp?:string;address?:string;timezone?:string;serviceName?:string;staffName?:string};
   id: string;
   businessId: string;
   bookableItemId: string;
@@ -233,6 +235,24 @@ export async function getAuthenticatedUserId(): Promise<string | null> {
   return session?.access_token ? session.user?.id ?? null : null;
 }
 
+/** Display/contact data for an explicit booking confirmation, never authorization claims. */
+export async function getBookingParticipantIdentity(): Promise<{id:string;name:string;phone:string}> {
+  const session = await getStoredSession();
+  if (!session?.user.id) throw new BookingAuthenticationError();
+  const metadata = session.user.user_metadata;
+  let name = typeof metadata?.full_name === "string" ? metadata.full_name : "", phone = "";
+  try {
+    const me = await supabaseApiRequest<{user:{id:string};profile?:{id:string;full_name?:string;phone?:string}}>("/supabase/auth/me", {}, true, session.user.id);
+    if (me.user?.id !== session.user.id || me.profile && me.profile.id !== session.user.id) throw new BookingAuthenticationError();
+    name = me.profile?.full_name || name; phone = me.profile?.phone || "";
+  } catch (error) {
+    if (error instanceof BookingAuthenticationError || error instanceof BookingApiError && [401,403].includes(error.status)) throw error;
+    // An unavailable profile never becomes a fabricated identity or a different contact.
+  }
+  if (await getAuthenticatedUserId() !== session.user.id) throw new BookingAuthenticationError();
+  return {id:session.user.id,name:name.includes("@") ? "" : name.trim(),phone};
+}
+
 function getApiBase(): string {
   if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL.replace(/\/$/, "");
   return process.env.EXPO_PUBLIC_DOMAIN
@@ -321,6 +341,8 @@ type RemoteService = {
 };
 
 type RemoteBooking = {
+  total_price?: number | string | null;
+  currency?: string;
   id: string;
   business_id: string;
   service_id: string;
@@ -331,7 +353,7 @@ type RemoteBooking = {
   status: "PENDING" | "CONFIRMED" | "CANCELLED" | "COMPLETED" | "NO_SHOW";
   notes?: string | null;
   change_proposal?: BookingChangeProposal;change_history?: BookingChangeEvent[];change_revision?: number;
-  customer_name?:string;business_name?:string;business_address?:string;business_timezone?:string;service_name?:string;staff_name?:string;
+  customer_name?:string;customer_phone?:string;business_name?:string;business_phone?:string;business_whatsapp?:string;business_address?:string;business_timezone?:string;service_name?:string;staff_name?:string;
   timing_snapshot?: BookingTimeline | null;
   catalog_snapshot?: CatalogQuote | null;
   service_ids?: string[];
@@ -344,8 +366,8 @@ function mapRemoteBusiness(row: RemoteBusiness): Business {
     name: row.name,
     category: canonicalBookingActivity(row.ui_metadata?.category ?? row.description ?? ""),
     location: row.address ?? "",
-    phone: row.ui_metadata?.phone ?? "",
-    whatsapp: row.ui_metadata?.whatsapp,
+    phone: (row.ui_metadata as Record<string, string> | undefined)?.phoneE164 || (row.ui_metadata as Record<string, string> | undefined)?.mobileE164 || row.ui_metadata?.phone || (row.ui_metadata as Record<string, string> | undefined)?.mobile || "",
+    whatsapp: (row.ui_metadata as Record<string, string> | undefined)?.whatsappE164 || row.ui_metadata?.whatsapp,
     cancellationPolicy: row.ui_metadata?.cancellationPolicy,
     bookingResources: row.ui_metadata?.bookingResources,
     bookingBlocks: row.ui_metadata?.bookingBlocks,
@@ -403,6 +425,8 @@ function mapRemoteBooking(row: RemoteBooking): Booking {
     startInstant:row.starts_at,endInstant:row.ends_at,
     timingSnapshot: row.timing_snapshot ?? undefined,
     catalogSnapshot: row.catalog_snapshot ?? undefined,
+    totalPrice: row.total_price != null ? Number(row.total_price) : undefined,
+    currency: row.currency,
     services: (row.timing_snapshot?.serviceDetails ?? row.service_details)?.map(service => ({ ...service, price: service.price ?? 0, priceKnown: service.price != null && (!("priceKnown" in service) || service.priceKnown !== false) })),
     startDatetime: startsAt,
     endDatetime: endsAt,
@@ -413,7 +437,7 @@ function mapRemoteBooking(row: RemoteBooking): Booking {
     notes: row.notes ?? undefined,
     changeProposal: row.change_proposal ?? undefined,changeHistory: row.change_history,changeRevision:Number(row.change_revision ?? 0),
     serverStatus:row.status,
-    receipt:{customerName:row.customer_name,businessName:row.business_name,address:row.business_address,timezone:row.timing_snapshot?.timezone ?? row.business_timezone,serviceName:row.timing_snapshot?.serviceDetails?.map(service=>service.title).join(" + ") || row.service_name,staffName:row.staff_name},
+    receipt:{customerName:row.customer_name,customerPhone:row.customer_phone,businessName:row.business_name,businessPhone:row.business_phone,businessWhatsapp:row.business_whatsapp,address:row.business_address,timezone:row.timing_snapshot?.timezone ?? row.business_timezone,serviceName:row.timing_snapshot?.serviceDetails?.map(service=>service.title).join(" + ") || row.service_name,staffName:row.staff_name},
     slotKey: getBookingSlotKey({
       businessId: row.business_id,
       staffId: row.staff_id ?? undefined,

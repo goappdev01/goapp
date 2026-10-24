@@ -9,7 +9,7 @@ import type { GoEntry } from "@/components/AgendaOperativa";
 import { useGoLog } from "@/hooks/useGoLog";
 import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
 import { bookingActivityEnabled, canonicalBookingActivity, visibleBookingSectors } from "@workspace/api-zod";
-import { setInternalBookingContext } from "@/data/booking";
+import { setInternalBookingContext, getBookingParticipantIdentity } from "@/data/booking";
 import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
 import { useActionCompletion } from "@/hooks/useActionCompletion";
@@ -117,6 +117,9 @@ import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingContentViewport, LandingCardContents } from "@/components/landing/LandingContentViewport";
+import { GoEntryDetailsSheet, GoEntryQuickActions } from "@/components/GoEntryDetails";
+import { entryHeading, entryIdentity, entryIsInternal, entryPhone, internalEntryCommand } from "@/data/goEntryPresentation";
+import { changeTask } from "@/lib/goTaskManagement";
 import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands";
 import { redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
 import { splitLandingAppointments, landingPanelFrames, landingAdaptivePanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
@@ -2789,7 +2792,7 @@ function HomeScreenContent() {
     }
   }, [bookingPublication, bookingInternalAccess, reservasOrbitalCat, goSearchSub?.id, visibleOrbitalBookingCategories]);
   const demoBookingRepository = useMemo(() => goView.view === "USER" && adminAccess.isOwner && !adminAccess.checking && ownerDemo.loaded && ownerDemo.demo
-    ? (ownerDemo.catalog ? createDemoCatalogBookingRepository(ownerDemo.catalog) : createDemoBookingRepository(ownerDemo.demo)) : undefined, [goView.view, adminAccess.isOwner, adminAccess.checking, ownerDemo.loaded, ownerDemo.demo, ownerDemo.catalog]);
+    ? (ownerDemo.catalog ? createDemoCatalogBookingRepository(ownerDemo.catalog, {customerIdentity:getBookingParticipantIdentity}) : createDemoBookingRepository(ownerDemo.demo, {customerIdentity:getBookingParticipantIdentity})) : undefined, [goView.view, adminAccess.isOwner, adminAccess.checking, ownerDemo.loaded, ownerDemo.demo, ownerDemo.catalog]);
   const [demoCustomerCalendarSelected, setDemoCustomerCalendarSelected] = useState(false);
   const [demoCalendarFocus, setDemoCalendarFocus] = useState<{ dateISO: string; timeHHMM: string; entryId: string; token: number }>();
   const [demoInitialBusinessId, setDemoInitialBusinessId] = useState<string>();
@@ -3495,6 +3498,9 @@ function HomeScreenContent() {
   const customerBookings=useCustomerBookings(demoBookingRepository,goView.loaded && goView.view==="USER" && !adminAccess.checking && (!adminAccess.isOwner || ownerDemo.loaded));
   const goLog=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER").filter(canReadBoardTask),[personalGoLog,customerBookings.entries,goView.view,adminAccess.allowed,adminAccess.checking]);
   const actionCompletion = useActionCompletion(goLog);
+  const [landingDetailsId, setLandingDetailsId] = useState<string | null>(null);
+  const landingDetailsEntry = goLog.find(entry => entry.id === landingDetailsId) ?? null;
+  useEffect(() => { setLandingDetailsId(null); }, [goView.view, completionIdentity.scope]);
   const [receivedDetailOpen, setReceivedDetailOpen] = useState(false);
   const [receivedDetailGo, setReceivedDetailGo] = useState<typeof goLog[number] | null>(null);
 
@@ -13499,6 +13505,48 @@ function HomeScreenContent() {
   // small). Ambas presentan los mismos 4 atajos: Aquí, Tarde, +10m,
   // Cambiar — única fuente de verdad para color, etiqueta, icono y
   // handler. Si añadimos/quitamos un atajo, basta editar aquí.
+  const openEntryChange = (rawEntry: GoEntry, from: "landing" | "calendar" = "landing") => {
+    const entry = entryIsInternal(rawEntry) ? rawEntry : landingCurrentEntry(rawEntry);
+    setLandingDetailsId(null);
+    if (entry.customerBooking) { openBookingProposal(entry); return; }
+    if (entry.businessBooking) { openBookingProposal(entry, "business"); return; }
+    if (entryIsInternal(entry)) {
+      const owner = entry.ownerUserId;
+      if (!owner) { showToast(lang === "en" ? "The task owner cannot be verified." : "No se puede verificar el propietario de la tarea.", "error"); return; }
+      setCalOpen(true);
+      calFlow.open({ startAt: "date", initialDateISO: entry.dateISO, initialDateDraft: entry.date,
+        initialTime: entry.time, initialDuration: entry.duration, skipDuration: true,
+        validate: result => { const check = _validateProposalSlot(result.dateISO, result.time, entry); return check.valid ? null : check.reason || "Hora no disponible"; },
+        onSave: result => {
+          void changeTask({ owner, command: internalEntryCommand("update", result.dateISO, result.time), entries: [entry] }, entry, result.time, true)
+            .then(() => { if (from === "landing") setCalOpen(false); showToast(lang === "en" ? "Task updated" : "Tarea actualizada", "success"); })
+            .catch(error => Alert.alert("GO", error.message));
+        }, onCancel: () => { if (from === "landing") setCalOpen(false); } });
+      return;
+    }
+    currentReceivedIdRef.current = entry.id;
+    proposalReturnRef.current = from;
+    setCalOpen(true);
+    calFlow.open({ startAt: "date", initialDateISO: entry.dateISO || formatISODate(getToday()), initialDateDraft: entry.date,
+      initialTime: entry.time, initialDuration: entry.duration,
+      onSave: result => sendSuggestChangeFromCal(result), onCancel: () => { if (from === "landing") setCalOpen(false); } });
+  };
+  const cancelEntryFromDetails = (entry: GoEntry) => {
+    if (!entryIsInternal(entry)) { softDeleteGo(entry.id); return; }
+    const owner = entry.ownerUserId;
+    if (!owner) { showToast(lang === "en" ? "The task owner cannot be verified." : "No se puede verificar el propietario de la tarea.", "error"); return; }
+    Alert.alert("GO", lang === "en" ? "Cancel this task?" : "¿Cancelar esta tarea?", [
+      { text: lang === "en" ? "Back" : "Volver", style: "cancel" },
+      { text: lang === "en" ? "Cancel task" : "Cancelar tarea", style: "destructive", onPress: () => {
+        void changeTask({ owner, command: internalEntryCommand("delete"), entries: [entry] }, entry, undefined, true)
+          .then(() => setLandingDetailsId(null)).catch(error => Alert.alert("GO", error.message));
+      } }]);
+  };
+  const renderEntryQuickActions = (entry: GoEntry, showState = true) => <GoEntryQuickActions entry={entry} showState={showState}
+    onCancel={() => cancelEntryFromDetails(entry)} onEdit={() => openEntryChange(entry)} onPropose={() => openEntryChange(entry)}
+    onAccept={() => { if (entry.changeProposal) acceptProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "aceptado"); }}
+    onReject={() => { if (entry.changeProposal) rejectProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "rechazado"); }} />;
+
   const buildNextAptActions = (g: typeof goLog[number]) => {
     const isAquiSending = aquiSendingId === g.id;
     return [
@@ -13703,10 +13751,10 @@ function HomeScreenContent() {
       },
     };
 
-    const callPhone  = normalizePhoneForWhatsApp(g.phone || "");
+    const callPhone  = entryPhone(g.phone || "");
     const hasPhone   = !!(g.phone && callPhone);
     const waRaw      = g.whatsapp || g.phone || "";
-    const waPhone    = normalizePhoneForWhatsApp(waRaw);
+    const waPhone    = entryPhone(waRaw);
     const hasWhatsapp = !!waPhone;
     const waMsg = [
       t('whatsapp_intro'),
@@ -13903,7 +13951,7 @@ function HomeScreenContent() {
       ))}
     </View>);
 
-    return { change: aChange, content: (
+    return { change: aChange, content: (<View style={{ gap: 8 }}>
 <View style={{ flexDirection: landingStackTransport ? "column" : handedness === "right" ? "row-reverse" : "row",
         gap: 8, justifyContent: "space-between" }}>
         <View style={{ gap: ROW_GAP, alignSelf: handedness === "right" ? "flex-end" : "flex-start" }}>
@@ -13913,7 +13961,8 @@ function HomeScreenContent() {
         </View>
         {transportControls}
       </View>
-    ) };
+      {!g.changeProposal && renderEntryQuickActions(g)}
+    </View>) };
   };
 
   const toLandingRootRect = (rect: HumanityRect): HumanityRect => landingBaseFrame.virtual
@@ -14522,8 +14571,8 @@ function HomeScreenContent() {
           const g  = item.g;
           const cp = (g as any).changeProposal;
           isSent       = g.estado === "propuesta_pendiente";
-          cardAccent   = isSent ? ACCENT : BLUE;
-          cardTitle    = g.contactName || g.intentLabel || "GO";
+          cardAccent   = ACCENT;
+          cardTitle    = entryHeading(g, g.businessBooking ? t('booking_customer_unknown') : (lang === "en" ? "Reservation" : "Reserva"));
           cardSub      = g.intentLabel && g.intentLabel !== cardTitle ? g.intentLabel : (g.intentKey || "");
           const current = landingCurrentEntry(g);
           cardOrigDate = [current.date, current.time].filter(Boolean).join(" · ");
@@ -14645,12 +14694,11 @@ function HomeScreenContent() {
                 testID="landing-proposal-card"
                 disabled={item.kind !== "cambio"}
                 accessibilityRole={item.kind === "cambio" ? "button" : undefined}
-                accessibilityLabel="Abrir la acción original en el Calendario"
+                accessibilityLabel="Abrir ficha completa"
                 onPress={() => {
                   if (item.kind !== "cambio") return;
-                  const action = buildNextAptActions(landingCurrentEntry(item.g)).find(a => a.k === "change");
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                  if (action) action.fn();
+                  setLandingDetailsId(item.g.id);
                 }}
                 style={{ gap: Math.round(2 * uiScaleFactor) }}>
               {/* Tipo de pendiente */}
@@ -14742,48 +14790,7 @@ function HomeScreenContent() {
               )}
               </Pressable>
 
-              {/* Botones: CAMBIO recibido → RECHAZAR | PROPONER | ACEPTAR */}
-              {item.kind === "cambio" && !isSent && (
-                <View style={{ flexDirection: "row", gap: Math.round(6 * uiScaleFactor), marginTop: Math.round(2 * uiScaleFactor) }}>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      Haptics.selectionAsync().catch(() => {});
-                      rejectProposal(item.g.id);
-                      const nextIdx = safeIdx < total - 1 ? safeIdx : Math.max(0, safeIdx - 1);
-                      if (total <= 1) setCambiosOpen(false);
-                      else setCambiosCardIdx(nextIdx);
-                    }}
-                    style={{ flex: 1, height: Math.round(34 * uiScaleFactor), borderRadius: Math.round(8 * uiScaleFactor), backgroundColor: "rgba(220,38,38,0.14)", borderWidth: 1, borderColor: "rgba(220,38,38,0.45)", alignItems: "center", justifyContent: "center" }}
-                  >
-                    <Text style={{ color: "#f87171", fontSize: Math.round(10 * uiScaleFactor), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.2 }}>🔴 RECHAZAR</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      Haptics.selectionAsync().catch(() => {});
-                      openProposalFromList({ id: item.g.id, time: item.g.time, place: item.g.place || "" });
-                      setCambiosOpen(false);
-                    }}
-                    style={{ flex: 1, height: Math.round(34 * uiScaleFactor), borderRadius: Math.round(8 * uiScaleFactor), backgroundColor: "rgba(249,115,22,0.10)", borderWidth: 1, borderColor: "rgba(249,115,22,0.38)", alignItems: "center", justifyContent: "center" }}
-                  >
-                    <Text style={{ color: ACCENT, fontSize: Math.round(10 * uiScaleFactor), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.2 }}>🟠 PROPONER</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      Haptics.selectionAsync().catch(() => {});
-                      acceptProposal(item.g.id);
-                      const nextIdx = safeIdx < total - 1 ? safeIdx : Math.max(0, safeIdx - 1);
-                      if (total <= 1) setCambiosOpen(false);
-                      else setCambiosCardIdx(nextIdx);
-                    }}
-                    style={{ flex: 1, height: Math.round(34 * uiScaleFactor), borderRadius: Math.round(8 * uiScaleFactor), backgroundColor: "rgba(22,163,74,0.16)", borderWidth: 1, borderColor: "rgba(22,163,74,0.50)", alignItems: "center", justifyContent: "center" }}
-                  >
-                    <Text style={{ color: "#4ade80", fontSize: Math.round(10 * uiScaleFactor), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.2 }}>🟢 ACEPTAR</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
+              {item.kind === "cambio" && renderEntryQuickActions(item.g)}
 
               {/* Botones: HOLD → CONFIRMAR / RECHAZAR */}
               {item.kind === "hold" && (
@@ -14932,7 +14939,7 @@ function HomeScreenContent() {
                 testID="landing-information-frame"
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                  if (aChange) aChange.fn();
+                  setLandingDetailsId(g.id);
                 }}
                 onLongPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -15192,11 +15199,11 @@ function HomeScreenContent() {
                     <Text testID="landing-task-description" style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}>{g.notes}</Text>
                   )}
                   {/* Línea 1: QUIÉN — contacto completo, nunca truncado */}
-                  {!!displayContact(g.contactName, g.phone) && (
+                  {!!displayContact(entryIdentity(g.contactName), g.phone) && (
                     <Text
                       style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}
                     >
-                      {displayContact(g.contactName, g.phone)}
+                      {displayContact(entryIdentity(g.contactName), g.phone)}
                     </Text>
                   )}
                   {/* Línea 2: CUÁNDO — fecha + hora + chips (visibilidad) */}
@@ -15387,6 +15394,9 @@ function HomeScreenContent() {
       )}
 
       </LandingContentViewport>
+      <GoEntryDetailsSheet entry={landingDetailsEntry} onClose={() => setLandingDetailsId(null)}>
+        {landingDetailsEntry && renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}
+      </GoEntryDetailsSheet>
 
       {/* ── BOTÓN QR PERMANENTE ─────────────────────────────────────────────
           Función estructural: siempre visible en Landing GO.
@@ -20259,17 +20269,7 @@ function HomeScreenContent() {
                   const booking=customerBookings.entries.find(entry=>entry.id===id);if(booking){openBookingProposal(booking);return;}
                   const g = goLog.find((x) => x.id === id);
                   if (!g) return;
-                  currentReceivedIdRef.current = id;
-                  proposalReturnRef.current = "calendar";
-                  calFlow.open({
-                    startAt: "date",
-                    initialDateISO: g.dateISO || formatISODate(getToday()),
-                    initialDateDraft: g.date || "",
-                    initialTime: g.time || "",
-                    initialDuration: g.duration || "",
-                    onSave: (r: CalFlowResult) => { sendSuggestChangeFromCal(r); },
-                    onCancel: () => {},
-                  });
+                  openEntryChange(g, "calendar");
                 }}
                 onOpenMessage={(item) => {
                   const g = goLog.find((x) => x.id === item.id);

@@ -11,6 +11,18 @@ function load(name,imports={}) { const exports={}; const text=ts.transpileModule
   vm.runInNewContext(text,{exports,require:key=>{if(key in imports)return imports[key];throw Error("External/runtime dependency forbidden: "+key);},console,Date,Intl,Set,Map});return exports; }
 const storeModule=load("data/businessDemoStore.ts");
 const repoModule=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":load("data/bookingServices.ts")});
+test('asynchronous display identity resolves before atomic booking persistence and survives reopening',async()=>{
+ const f=fixture();await configured(f);let resolveIdentity,calls=0;
+ const repo=repoModule.createDemoBookingRepository(f.store,{now:()=>Date.parse('2030-01-07T08:00:00'),customerIdentity:()=>{calls++;return new Promise(resolve=>{resolveIdentity=resolve;});}});
+ const hold=await repo.createHold(await inputFor(f));assert.equal(calls,0);
+ const saving=repo.claimSlot({...hold.booking,status:'CONFIRMED'});await Promise.resolve();assert.equal(f.store.getSnapshot().reservations.length,0);
+ resolveIdentity({id:owner,name:'Cliente registrado',phone:'+34600123456'});const result=await saving;assert.equal(result.ok,true);
+ assert.equal(f.store.getSnapshot().reservations.length,1);assert.equal(f.store.getSnapshot().entries.length,1);
+ assert.equal(f.store.getSnapshot().entries[0].contactName,'Cliente registrado');assert.equal(f.store.getSnapshot().entries[0].phone,'+34600123456');
+ const reopened=f.make();await reopened.load();assert.equal(reopened.getSnapshot().entries[0].contactName,'Cliente registrado');
+ const before=JSON.stringify(f.store.getSnapshot());const wrong=repoModule.createDemoBookingRepository(f.store,{customerIdentity:async()=>({id:other,name:'Other',phone:''})});
+ await assert.rejects(wrong.claimSlot({...hold.booking,status:'CONFIRMED'}),/cuenta ha cambiado/);assert.equal(JSON.stringify(f.store.getSnapshot()),before);
+});
 test('company catalogue associations persist, stay voluntary and accompany one multi-service booking in both calendars',async()=>{
  const f=fixture();await configured(f);const businessId=f.store.businessId,services=await f.repo.getBookableItems(businessId);
  const product=(suffix,price)=>({id:businessId+'_product_'+suffix,businessId,title:suffix,type:'product',catalogKind:'product',durationMinutes:0,price,currency:'EUR',active:true,visible:true,paymentRequired:false,unitQuantity:1,customerCapacity:1});

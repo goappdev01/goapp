@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import vm from "node:vm";
@@ -12,6 +12,7 @@ vm.runInNewContext(ts.transpileModule(readFileSync("i18n/translations.ts", "utf8
 // Run the real calendar components with deterministic native adapters. Keep hook
 // state across renders so navigation and closing are tested without remounting.
 export function fixture({ now } = {}) {
+  const urls = [];
   class Clock extends Date {
     constructor(...args) { super(...(args.length ? args : [now ?? Date.now()])); }
     static now() { return now === undefined ? Date.now() : new Date(now).getTime(); }
@@ -43,6 +44,8 @@ export function fixture({ now } = {}) {
     Dimensions: { get: () => ({ width: 390, height: 844 }) },
     Platform: { OS: 'web' },
     AppState: { addEventListener: () => ({remove(){}}) },
+    Linking: { openURL: async url => { urls.push(url); } },
+    Alert: { alert() {} },
     PanResponder: { create: config => ({ panHandlers: config }) },
     Animated: { Value, View: 'Animated.View', timing: () => animation, spring: () => animation, sequence: () => animation, loop: () => animation },
   }, { get: (target, key) => target[key] ?? key });
@@ -94,16 +97,18 @@ export function fixture({ now } = {}) {
         if (name in mocks) return mocks[name];
         if (name === '@/hooks/useBusinessBookings') return load('hooks/useBusinessBookings.ts');
         if (name === '@/data/reservationCardPolicy') return load('data/reservationCardPolicy.ts');
+        if (name === '@/data/goEntryPresentation') return load('data/goEntryPresentation.ts');
         if (name === '@/data/customerBookingProjection') return load('data/customerBookingProjection.ts');
         if (name.startsWith('@/components/')) return load(name.replace('@/', '') + '.tsx');
         if (name === '@/lib/time') return load('lib/time.ts');
-        if (name.startsWith('.')) return load(path.resolve(path.dirname(filename), name) + (name.includes('/ui/') ? '.tsx' : '.ts'));
+        if (name.startsWith('.')) { const target=path.resolve(path.dirname(filename),name);return load(target+(existsSync(target+'.tsx')?'.tsx':'.ts')); }
         throw new Error(`Unexpected import ${name}`);
       },
     }, { filename });
     return exports;
   }
   return {
+    urls,
     load,
     setLanguage: value => { language = value; },
     render(component, props) {
@@ -111,7 +116,13 @@ export function fixture({ now } = {}) {
       const tree = component(props);
       const pending = effects; effects = [];
       pending.forEach(fn => fn());
-      return tree;
+      const expand = node => {
+        if (node == null || typeof node !== 'object') return node;
+        if (typeof node.type === 'function' && /^GoEntry/.test(node.type.name))
+          return expand(node.type({...node.props,children:node.children}));
+        return {...node,children:(node.children ?? []).map(expand)};
+      };
+      return expand(tree);
     },
   };
 }

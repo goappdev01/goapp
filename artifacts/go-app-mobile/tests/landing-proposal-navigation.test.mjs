@@ -37,24 +37,24 @@ async function mountRoute(route,g,kind='cambio'){
   aquiSendingId:null,t:k=>k,formatISODate:()=>{throw Error('Must use the confirmed date')},getToday(){},sendSuggestChangeFromCal:()=>writes.push('save'),capture:v=>snapshot=v,isInDay:dayCtx.isInDay,uiScaleFactor:1,
   goLog:[g,{id:'unrelated',dateISO:'2035-01-19',estado:'aceptado'},{id:'go_booking_prv_forbidden',dateISO:'2035-01-18',estado:'aceptado'}],isUserMode:true,isBusinessMode:false};
  const fixture=`function Fixture(){
- const [calOpen,setCalOpen]=useState(false),[dateISODraft,setDateISODraft]=useState(''),[dateDraft,setDateDraft]=useState('');
+ const [calOpen,setCalOpen]=useState(false),[dateISODraft,setDateISODraft]=useState(''),[dateDraft,setDateDraft]=useState(''),[detailsId,setLandingDetailsId]=useState(null);
  const calFlow=useGoCalendarFlow(),currentReceivedIdRef=useRef(null),proposalReturnRef=useRef(null),pendingMoveCtxRef=useRef(null);
  const g=goLog[0],item={kind:${JSON.stringify(kind)},g},cambiosOpen=${route==='changes'};
  const ${decl(ast,'buildNextAptActions').getText(ast)};
  const aChange=buildNextAptActions(landingCurrentEntry(g)).find(a=>a.k==='change');
  ${dateSync.getText(ast)};
  const entries=${records};
- capture({calOpen,dateISODraft,dateDraft,entryId:currentReceivedIdRef.current,flow:calFlow,entries,hits:entries.filter(e=>isInDay(e,dateISODraft))});
+ capture({calOpen,detailsId,openCalendar:aChange.fn,dateISODraft,dateDraft,entryId:currentReceivedIdRef.current,flow:calFlow,entries,hits:entries.filter(e=>isInDay(e,dateISODraft))});
  return React.createElement(Pressable,{onPress:${attr(route==='changes'?proposal:next,'onPress')},disabled:${route==='changes'?attr(proposal,'disabled'):'false'}});
  }exports.Fixture=Fixture;`;
  vm.runInNewContext(ts.transpileModule(fixture,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,ctx);
  const container=document.createElement('div'),root=createRoot(container);await React.act(()=>root.render(React.createElement(ctx.exports.Fixture)));
- return {get state(){return snapshot},get disabled(){return pressable.disabled},writes,press:async()=>React.act(()=>pressable.onPress()),close:async()=>React.act(()=>root.unmount())};
+ return {get state(){return snapshot},get disabled(){return pressable.disabled},writes,press:async()=>React.act(()=>pressable.onPress()),calendar:async()=>React.act(()=>snapshot.openCalendar()),close:async()=>React.act(()=>root.unmount())};
 }
 for(const [route,type,pending] of [['visit','GO_BOOKING',false],['task','TAREA',false],['changes','GO_BOOKING',true]])
- test(route+': real card tap and calendar hook open the confirmed day without saving',async()=>{
+ test(route+': card opens detail; existing Calendar action retains confirmed day without saving',async()=>{
  const g=entry(type,pending),saved=JSON.stringify(g);Object.freeze(g);const f=await mountRoute(route,g);try{
-  assert.equal(f.state.calOpen,false);await f.press();assert.equal(f.state.calOpen,true);assert.equal(f.state.entryId,g.id);
+  assert.equal(f.state.calOpen,false);await f.press();assert.equal(f.state.calOpen,false);assert.equal(f.state.detailsId,g.id);await f.calendar();assert.equal(f.state.calOpen,true);assert.equal(f.state.entryId,g.id);
   assert.equal(f.state.dateISODraft,'2035-01-18');assert.equal(f.state.flow.dateISO,'2035-01-18');assert.equal(f.state.flow.monthGridYear,2035);assert.equal(f.state.flow.monthGridMonth,0);
   assert.equal(f.state.hits.length,1);assert.equal(f.state.hits[0].id,g.id);assert.equal(f.writes.length,0);assert.equal(JSON.stringify(g),saved);
  }finally{await f.close()}
@@ -62,12 +62,12 @@ for(const [route,type,pending] of [['visit','GO_BOOKING',false],['task','TAREA',
 for(const type of ['GO_BOOKING','TAREA'])for(const estado of ['propuesto','propuesta_pendiente'])for(const moved of [false,true])
  test(`${type} / ${estado} / legacy moved=${moved}: original action remains discoverable and opens its existing calendar card`,async()=>{
  const g=entry(type,true,moved,estado),saved=JSON.stringify(g);Object.freeze(g.changeProposal);Object.freeze(g);const f=await mountRoute('changes',g);try{
-  await f.press();assert.equal(f.state.dateISODraft,g.changeProposal.originalDateISO);assert.equal(f.state.flow.monthGridMonth,0);assert.equal(f.state.flow.time,'10:00');
+  await f.press();assert.equal(f.state.detailsId,g.id);assert.equal(f.state.calOpen,false);await f.calendar();assert.equal(f.state.dateISODraft,g.changeProposal.originalDateISO);assert.equal(f.state.flow.monthGridMonth,0);assert.equal(f.state.flow.time,'10:00');
   const found=f.state.hits[0];assert.ok(found);assert.equal(found.id,g.id);assert.equal(found.changeProposal,g.changeProposal);assert.equal(found.estado,estado);assert.equal(found.bookingStatus,'confirmada');assert.equal(found.paymentStatus,'pagada');
   assert.equal(f.state.entries.length,2,'mode filter retained and no duplicate created');assert.equal(f.state.entries[1].id,'unrelated');
   const tap=decl(agenda,'tapThis').initializer.getText(agenda);let expanded=null,detail=null;
   vm.runInNewContext(`(${tap})()`,{Haptics:haptics,item:found,isSelecting:false,isBookingCard:type==='GO_BOOKING',expandedCardId:null,setExpandedCardId:v=>{expanded=typeof v==='function'?v(null):v},setExpandedBookingItem:v=>detail=v});
-  assert.equal(expanded,g.id);if(type==='GO_BOOKING'){assert.equal(detail,found);assert.equal(detail.dateISO,'2035-01-18');}
+  assert.equal(expanded,null);assert.equal(detail,found);assert.equal(detail.dateISO,'2035-01-18');
   assert.equal(f.writes.length,0);assert.equal(JSON.stringify(g),saved);
  }finally{await f.close()}
 });
@@ -85,9 +85,9 @@ test('approved next card, geometry and proposal buttons remain exact; the new ta
  assert.ok(opening.includes('testID="landing-information-frame"'));
  const frameStyle = vm.runInNewContext('(' + attr(next, 'style') + ')', { uiScaleFactor: 1, nextCardDeleteConfirm: null, g: { id: '1' }, tint: '#60a5fa' })({ pressed: false });
  assert.equal(frameStyle.flexShrink, 0); assert.equal(frameStyle.minHeight, 0);
- assert.equal(opening.replace(/^[ \t]*testID="landing-information-frame"\r?\n/m, '').replace(/^[ \t]*flexShrink: 0,\r?\n[ \t]*minHeight: 0,\r?\n/m, '').replace(/\r\n/g, '\n'), approved.nextCardOpening.replace(/\r\n/g, '\n'), 'every original press handler, visual property and touch behavior remains exact');
- for(const name of ['buildNextAptActions','renderLandingOperations','landingPanels','landingBaseline','landingCloseRect','humanityPlacement','wrapOrbital','acceptProposal','rejectProposal']){assert.equal(typeof approved.declarations[name],'string',name);assert.equal(originalGoProposalContract(priorLandingPosition(decl(ast,name).getText(ast))),approved.declarations[name],name);}
+ assert.equal(opening.replace('setLandingDetailsId(g.id);','if (aChange) aChange.fn();').replace(/^[ \t]*testID="landing-information-frame"\r?\n/m, '').replace(/^[ \t]*flexShrink: 0,\r?\n[ \t]*minHeight: 0,\r?\n/m, '').replace(/\r\n/g, '\n'), approved.nextCardOpening.replace(/\r\n/g, '\n'), 'approved new detail tap is the only change to the existing card opening');
+ for(const name of ['buildNextAptActions','landingPanels','landingBaseline','landingCloseRect','humanityPlacement','wrapOrbital','acceptProposal','rejectProposal']){assert.equal(typeof approved.declarations[name],'string',name);assert.equal(originalGoProposalContract(priorLandingPosition(decl(ast,name).getText(ast))),approved.declarations[name],name);}
  const childText=proposal.parent.getText(ast);assert.ok(!childText.includes('<TouchableOpacity'));for(const fn of ['acceptProposal','rejectProposal','openProposalFromList'])assert.ok(!childText.includes(fn));
- const buttons=a=>{const result=[];function walk(n){if(ts.isJsxAttribute(n)&&n.name.getText(a)==='onPress'&&['acceptProposal(item.g.id)','rejectProposal(item.g.id)','setReservationStatus(item.booking.id'].some(fn=>n.initializer?.getText(a).includes(fn)))result.push(n.getText(a));ts.forEachChild(n,walk)}walk(a);return result};assert.deepEqual(buttons(ast),approved.proposalButtonPresses);
+ const buttons=a=>{const result=[];function walk(n){if(ts.isJsxAttribute(n)&&n.name.getText(a)==='onPress'&&['acceptProposal(item.g.id)','rejectProposal(item.g.id)','setReservationStatus(item.booking.id'].some(fn=>n.initializer?.getText(a).includes(fn)))result.push(n.getText(a));ts.forEachChild(n,walk)}walk(a);return result};assert.deepEqual(buttons(ast),approved.proposalButtonPresses.filter(text=>text.includes('setReservationStatus(item.booking.id')));assert.ok(fs.readFileSync('app/index.tsx','utf8').includes('item.kind === "cambio" && renderEntryQuickActions(item.g)'),'proposals reuse the tested shared action component');
  const style=vm.runInNewContext('('+attr(proposal,'style')+')',{uiScaleFactor:1});assert.equal(style.gap,2);assert.equal(Object.keys(style).length,1,'no new padding, size, position, color or pressed opacity');
 });

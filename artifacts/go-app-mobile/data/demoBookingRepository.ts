@@ -21,7 +21,8 @@ type ClaimResult = { ok: true; booking: DemoBooking } | { ok: false; conflict: D
 type BookingInput = Omit<Booking, "id" | "status" | "holdExpiresAt" | "paymentStatus">;
 
 /** Local-only facade for the existing customer booking screen. Nothing delegates to a live repository. */
-export function createDemoBookingRepository(store: BusinessDemoStore, options: { now?: () => number } = {}) {
+type RepositoryDisplayOptions = { now?: () => number; customerIdentity?: () => Promise<{id:string;name:string;phone:string}> };
+export function createDemoBookingRepository(store: BusinessDemoStore, options: RepositoryDisplayOptions = {}) {
   const now = options.now ?? Date.now;
   const serviceId = (name: string) => `${store.businessId}_service_${token(name)}`;
   const servicesFor = (config: BusinessConfig): BookableItem[] => {
@@ -91,7 +92,7 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
     const reservation: DemoReservation = {
       ...(index >= 0 ? data.reservations[index] : {}), id: index >= 0 ? data.reservations[index].id : booking.id,
       planId: store.planId, elementId: booking.elementId, bookingId: booking.id, customerId: store.ownerUserId,
-      customerName: index >= 0 ? data.reservations[index].customerName : "Cliente DEMO local", date: booking.startDatetime.slice(0,10), dateISO: booking.startDatetime.slice(0,10),
+      customerName: booking.receipt?.customerName || (index >= 0 ? data.reservations[index].customerName : ""), date: booking.startDatetime.slice(0,10), dateISO: booking.startDatetime.slice(0,10),
       time: booking.startDatetime.slice(11,16), endDatetime: booking.endDatetime,
       durationMinutes: (Date.parse(booking.endDatetime)-Date.parse(booking.startDatetime))/60000,
       serviceId: booking.bookableItemId, services: booking.services && clone(booking.services), staffId: booking.staffId, professionalName: booking.professionalName,
@@ -99,7 +100,10 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
     };
     if (index >= 0) data.reservations[index] = reservation; else data.reservations.push(reservation);
   };
-  const claim = async (input: Partial<DemoBooking> & BookingInput & { status: Booking["status"] }): Promise<ClaimResult> => store.transactBookings(data => {
+  const claim = async (input: Partial<DemoBooking> & BookingInput & { status: Booking["status"] }): Promise<ClaimResult> => {
+    const participant = input.status === "CONFIRMED" ? await options.customerIdentity?.() : undefined;
+    if (participant && participant.id !== store.ownerUserId) throw new Error("La cuenta ha cambiado. Vuelve a confirmar la reserva.");
+    return store.transactBookings(data => {
     requireBusiness(input.businessId);
     if (input.customerId !== store.ownerUserId) throw new Error("La reserva DEMO requiere el UUID de su propietario.");
     const existing = input.id ? data.bookings.find(booking => booking.id === input.id) : undefined;
@@ -138,7 +142,7 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
       throw new Error("Esta hora o puesto no está disponible en el horario configurado.");
     }
     const id = existing?.id ?? `demo_booking_${store.businessId}_${now()}_${Math.random().toString(36).slice(2,10)}`;
-    const booking: DemoBooking = { ...clone(input), id, customerId:store.ownerUserId, paymentStatus:"none", elementId:existing?.elementId ?? resource.elementId,
+    const booking: DemoBooking = { ...clone(input), ...(participant ? {receipt:{...input.receipt,customerName:participant.name,customerPhone:participant.phone}} : {}), id, customerId:store.ownerUserId, paymentStatus:"none", elementId:existing?.elementId ?? resource.elementId,
       staffId:existing?.staffId ?? resource.staff?.id, professionalName:existing?.professionalName ?? resource.staff?.name,
       ...(serviceIds.length > 1 || acceptedQuote ? { services: clone(selection.services) } : {}),
       ...(acceptedQuote ? { catalogSnapshot: clone(acceptedQuote) } : {}),
@@ -146,7 +150,8 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
       goEntryId:`demo_customer_${id}`, slotKey:`${store.businessId}|${resource.staff?.id ?? "any"}|${dateISO}|${input.startDatetime.slice(11,16)}|${input.endDatetime.slice(11,16)}` };
     const index = data.bookings.findIndex(value => value.id === id); if (index>=0) data.bookings[index]=booking; else data.bookings.push(booking);
     syncReservation(data,booking); return { ok:true, booking:clone(booking) };
-  });
+    });
+  };
   // Negotiation is metadata on the existing booking, never another booking or occupied slot.
   const changeBooking = (id:string, businessId:string, actor:"customer"|"business", operation:"propose"|"accept"|"reject", input:{dateISO?:string;date?:string;time?:string;proposalId?:string;acceptFinancialTerms?:boolean} = {}) => store.transactBookings(data => {
     requireBusiness(businessId);
@@ -246,7 +251,8 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: {
     getMyBookings: async (customerId=store.ownerUserId) => { if (customerId!==store.ownerUserId) throw new Error("Identidad DEMO diferente.");
       return (await store.load()).bookings.filter(booking=>booking.status!=="EXPIRED" && (booking.status!=="HOLD" || booking.source==="floor")).map(clone); },
     getCustomerEntries: () => store.getSnapshot().entries.filter(entry=>!entry.deleted).map(entry=> ({ ...entry,
-      id:`demo_customer_${entry.reservationId}`, type:"GO_BOOKING", kind:"received", contactName:store.getSnapshot().config.businessName,
+      id:`demo_customer_${entry.reservationId}`, type:"GO_BOOKING", kind:"received", businessBooking:false, bookingPerspective:"customer", contactName:store.getSnapshot().config.businessName,
+      phone:store.getSnapshot().config.phoneE164 || store.getSnapshot().config.mobileE164 || store.getSnapshot().config.phone || store.getSnapshot().config.mobile || "", whatsapp:store.getSnapshot().config.whatsappE164 || store.getSnapshot().config.whatsapp,
       place:store.getSnapshot().config.address, intentKey:"generico", customerBooking:true, bookingStartsAt:store.getSnapshot().bookings.find(b=>b.id===store.reservationBookingId(store.getSnapshot().reservations.find(r=>r.id===entry.reservationId)!))?.startDatetime, bookingId:store.reservationBookingId(store.getSnapshot().reservations.find(r=>r.id===entry.reservationId)!),
       estado:entry.changeProposal ? (entry.changeProposal as import("./booking").BookingChangeProposal).proposedBy==="customer"?"propuesta_pendiente":"propuesto" : entry.estado, demoLocal:true } as GoEntry)),
   };
@@ -258,7 +264,7 @@ export type DemoBookingRepository = ReturnType<typeof createDemoBookingRepositor
 
 
 /** Aggregate the existing repositories; every mutation dispatches to an isolated DEMO document. */
-export function createDemoCatalogBookingRepository(catalog: import("./businessDemoCatalog").BusinessDemoCatalog, options: { now?: () => number } = {}): DemoBookingRepository {
+export function createDemoCatalogBookingRepository(catalog: import("./businessDemoCatalog").BusinessDemoCatalog, options: RepositoryDisplayOptions = {}): DemoBookingRepository {
   const repositories = () => catalog.getStores().map(store => createDemoBookingRepository(store, options));
   const forBusiness = (id: string) => { const repo = repositories().find(value => value.businessId === id); if (!repo) throw new Error("Empresa ajena al catálogo DEMO."); return repo; };
   const forBooking = async (id: string) => {

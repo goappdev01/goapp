@@ -57,6 +57,7 @@ function fixture() {
     fetch: async (url, init) => {
       calls.push({ url, init });
       if (behavior.status !== 200) return Response.json({ error: 'Backend unavailable' }, { status: behavior.status });
+      if (url.endsWith('/supabase/auth/me') && behavior.me) return Response.json(behavior.me);
       if (init.method === 'POST') {
         assert.equal(new Headers(init.headers).get('Authorization'), 'Bearer test-only');
         const payload=JSON.parse(init.body),endsAt=new Date(Date.parse(payload.starts_at)+3600000).toISOString();
@@ -72,6 +73,20 @@ function fixture() {
   }).outputText, context);
   return { api: context.exports, auth: sessionApi, storage, calls, behavior, Date: PhoneDate };
 }
+
+test('explicit booking confirmation resolves only its signed-in display identity, without automatic polling',async()=>{
+ const f=fixture();f.behavior.me={user:{id:user},profile:{id:user,full_name:'Cliente registrado',phone:'+34600123456'}};
+ assert.equal(f.calls.length,0);const identity=await f.api.getBookingParticipantIdentity();
+ assert.deepEqual(plain(identity),{id:user,name:'Cliente registrado',phone:'+34600123456'});
+ assert.equal(f.calls.filter(c=>c.url.endsWith('/supabase/auth/me')).length,1);
+ assert.equal(f.calls.filter(c=>/login|refresh/.test(c.url)).length,0);
+});
+test('another identity cannot be assigned to a booking and unavailable profile produces no invented name',async()=>{
+ const f=fixture();f.behavior.me={user:{id:'someone-else'},profile:{id:'someone-else',full_name:'Other'}};
+ await assert.rejects(f.api.getBookingParticipantIdentity(),error=>error.code==='AUTH_REQUIRED');
+ f.behavior.status=503;const unknown=await f.api.getBookingParticipantIdentity();assert.equal(unknown.id,user);assert.equal(unknown.name,'');assert.equal(unknown.phone,'');
+ assert.equal((await f.auth.readAuthSession()).user.id,user);
+});
 
 test('empty live customer catalogue never offers local demos; legacy local reads stay unchanged', async () => {
   const f = fixture();

@@ -2,13 +2,14 @@ import {test} from 'node:test';import assert from 'node:assert/strict';import fs
 const require=createRequire(path.join(process.cwd(),'package.json')),{React,createRoot,document,ts}=require('./tests/helpers/react-lifecycle.cjs');
 const compile=source=>ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const projection={exports:{}};vm.runInNewContext(compile(fs.readFileSync('data/customerBookingProjection.ts','utf8')),projection);
+const presentation={exports:{}};vm.runInNewContext(compile(fs.readFileSync('data/goEntryPresentation.ts','utf8')),presentation);
 const owner='11111111-1111-4111-8111-111111111111',other='22222222-2222-4222-8222-222222222222',company='33333333-3333-4333-8333-333333333333',secondCompany='44444444-4444-4444-8444-444444444444',bookingId='55555555-5555-4555-8555-555555555555';
 const booking={id:bookingId,businessId:company,bookableItemId:'cut',customerId:other,startDatetime:'2035-01-07T10:00:00',endDatetime:'2035-01-07T11:00:00',status:'CONFIRMED',paymentStatus:'none',changeRevision:3,changeProposal:{id:'proposal',proposedBy:'customer',dateISO:'2035-01-07',time:'12:00'},receipt:{serviceName:'Corte',staffName:'Ana'}};
 async function fixture(){
  let user=owner,business=company,model,session,update,revision=0,setVersion;
  const calls=[],listeners=new Set(),businesses=[company,secondCompany].map(id=>({id,name:'Test company',timezone:'UTC',location:'Test street',phone:''}));
  const api={getAuthenticatedUserId:async()=>user,getOwnedBusinesses:async()=>user===owner?businesses:[],getLiveBusinessBookings:async id=>[{...booking,businessId:id}],changeBookingRequest:async(...args)=>{calls.push(args);},subscribeBookingUpdates:fn=>{update=fn;return()=>update=undefined;}};
- const scope={exports:{},Error,console,setInterval:()=>1,clearInterval(){},require:key=>key==='react'?React:key==='react-native'?{AppState:{addEventListener:(_event,fn)=>{listeners.add(fn);return{remove:()=>listeners.delete(fn)};}}}:key==='@/data/booking'?api:key==='@/data/customerBookingProjection'?projection.exports:key==='@/lib/sessionEvents'?{onSessionChanged:fn=>{session=fn;return()=>session=undefined;}}:undefined};
+ const scope={exports:{},Error,console,setInterval:()=>1,clearInterval(){},require:key=>key==='@/data/goEntryPresentation'?presentation.exports:key==='react'?React:key==='react-native'?{AppState:{addEventListener:(_event,fn)=>{listeners.add(fn);return{remove:()=>listeners.delete(fn)};}}}:key==='@/data/booking'?api:key==='@/data/customerBookingProjection'?projection.exports:key==='@/lib/sessionEvents'?{onSessionChanged:fn=>{session=fn;return()=>session=undefined;}}:undefined};
  vm.runInNewContext(compile(fs.readFileSync('hooks/useBusinessBookings.ts','utf8')),scope);
  const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<15;i++)await new Promise(resolve=>setImmediate(resolve));});
  function Fixture(){const [v,set]=React.useState(revision);setVersion=set;model=scope.exports.useBusinessBookings(business,true);return React.createElement('div',null,v);}
