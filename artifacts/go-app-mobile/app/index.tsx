@@ -20141,7 +20141,7 @@ function HomeScreenContent() {
               pointerEvents={showBookingFromCal ? "none" : "auto"}
               style={{ zIndex: 20, opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top, paddingLeft: Math.max(insets.left + 8, 8), paddingRight: Math.max(insets.right + 8, 8), gap: 4, paddingBottom: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
             >
-              <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}><GoCalendarViewSelector compact value={calBgViewMode} onChange={changeCalendarView} />{demoBookingRepository && <TouchableOpacity accessibilityRole="button" onPress={event => { event.stopPropagation(); setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{paddingHorizontal:2,paddingVertical:8,width:44,minHeight:44,justifyContent:"center"}}><Text style={{color:"#ff7474",fontSize:10,fontWeight:"700",textAlign:"center"}}>DEMO LOCAL</Text></TouchableOpacity>}</View>
+              <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}><GoCalendarViewSelector compact value={calBgViewMode} onChange={changeCalendarView} />{demoBookingRepository && <TouchableOpacity accessibilityRole="button" testID="customer-calendar-shortcut" accessibilityLabel={lang === "en" ? "Customer calendar" : "Calendario cliente"} onPress={event => { event.stopPropagation(); setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{paddingHorizontal:2,paddingVertical:8,width:44,minHeight:44,justifyContent:"center"}}><Feather name="calendar" size={14} color="#ff7474" /></TouchableOpacity>}</View>
               <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>{monthNavigation}</View>
               <TouchableOpacity
                 onPress={(e) => { e.stopPropagation(); Haptics.selectionAsync(); setCalConfigVisible(true); }}
@@ -20380,7 +20380,7 @@ function HomeScreenContent() {
           </View>}
 
           {/* ── ZONA INFERIOR — Selector de fecha/hora/duración ──────────── */}
-          {demoCustomerCalendarSelected ? <View style={{paddingHorizontal:16,paddingBottom:Math.max(insets.bottom,12),paddingTop:8,backgroundColor:"#0e0e14"}}><TouchableOpacity accessibilityRole="button" onPress={() => { setDemoInitialBusinessId(undefined); setShowBookingFromCal(true); }} style={{padding:12,borderRadius:12,backgroundColor:"#284d42"}}><Text style={{color:"#ffffff",fontWeight:"700",textAlign:"center"}}>{lang === "en" ? "New reservation · LOCAL DEMO" : "Nueva reserva · DEMO LOCAL"}</Text></TouchableOpacity></View> : (<Pressable
+          {demoCustomerCalendarSelected ? <View style={{paddingHorizontal:16,paddingBottom:Math.max(insets.bottom,12),paddingTop:8,backgroundColor:"#0e0e14"}}><TouchableOpacity accessibilityRole="button" onPress={() => { setDemoInitialBusinessId(undefined); setShowBookingFromCal(true); }} style={{padding:12,borderRadius:12,backgroundColor:"#284d42"}}><Text style={{color:"#ffffff",fontWeight:"700",textAlign:"center"}}>{lang === "en" ? "New reservation" : "Nueva reserva"}</Text></TouchableOpacity></View> : (<Pressable
             style={[styles.sheet, { paddingBottom: isBusinessMode ? Math.max(paddingBottom - 22, 2) : Math.max(paddingBottom - 10, 0) }]}
             onPress={(e) => e.stopPropagation()}
             onLayout={(e) => {

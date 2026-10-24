@@ -152,7 +152,7 @@ test('wizard back suppresses the standalone FAB for both real-parent and DEMO co
 
 test('manual floor duration is explicit only in DEMO and uses the selected language',async()=>{
   const f=await setupFloor();const sheet=component(f.tree,'ClientBookingSheet'),el=f.data.store.getSnapshot().plan.elements[1];
-  let page=f.ui.render(sheet.type,{...sheet.props,visible:true,el});assert.ok(text(page).includes('Reserva manual · 30 minutos · DEMO LOCAL'));
-  f.ui.setLanguage('en');page=f.ui.render(sheet.type,{...sheet.props,visible:true,el});assert.ok(text(page).includes('Manual reservation · 30 minutes · LOCAL DEMO'));
+  let page=f.ui.render(sheet.type,{...sheet.props,visible:true,el});assert.ok(text(page).includes('Reserva manual · 30 minutos'));
+  f.ui.setLanguage('en');page=f.ui.render(sheet.type,{...sheet.props,visible:true,el});assert.ok(text(page).includes('Manual reservation · 30 minutes'));
   page=f.ui.render(sheet.type,{...sheet.props,visible:true,el,demo:false});assert.equal(text(page).includes('30 minutes'),false);
 });

@@ -80,7 +80,7 @@ import { isStableBookingId, serializeServiceConfiguration, serviceTimingDuration
   validateBusinessTimezone, validateServiceTiming, type BookingResource, type ServicePhase, type ServiceTiming } from "@/data/serviceTiming";
 
 function blockDemoExternal(lang: string) {
-  Alert.alert(lang === "en" ? "Local business DEMO" : "Empresa DEMO local",
+  Alert.alert(lang === "en" ? "Business" : "Empresa",
     lang === "en" ? "This action uses an external service. Enter the test data manually; no real operation will run."
       : "Esta acción utiliza un servicio externo. Introduce los datos de prueba manualmente; no se ejecutará ninguna operación real.");
 }
@@ -2168,7 +2168,7 @@ function ServiceTimingEditor({ service, staff, resources, demo, onApply }: {
     </TouchableOpacity>);
   const save = () => {
     try {
-      if (demo && mode === "phases") throw new Error(label("Las fases requieren reservas reales con disponibilidad central. DEMO utiliza duración continua.", "Phases require live reservations with central availability. DEMO uses a continuous duration."));
+      if (demo && mode === "phases") throw new Error(label("Las fases requieren reservas reales con disponibilidad central. Se utiliza duración continua.", "Phases require live reservations with central availability. A continuous duration is used."));
       // No metadata means the existing simple, continuous service contract.
       const timing = mode === "simple" ? undefined : validateServiceTiming({ version: 1, mode, phases, resourcesConfigured: declared },
         { staffIds: staff.map(person => person.id), resources });
@@ -2185,7 +2185,7 @@ function ServiceTimingEditor({ service, staff, resources, demo, onApply }: {
         {!demo && chip(label("Por fases", "Phases"), mode === "phases", () => setMode("phases"))}
       </View>
       <Text style={{ color: GRAY, fontSize: 12 }}>{demo
-        ? label("DEMO utiliza el tiempo continuo del servicio. Las fases están disponibles en reservas reales con disponibilidad central.", "DEMO uses the continuous service duration. Phases are available for live reservations with central availability.")
+        ? label("Se utiliza el tiempo continuo del servicio. Las fases están disponibles en reservas reales con disponibilidad central.", "The continuous service duration is used. Phases are available for live reservations with central availability.")
         : mode === "simple" ? label("El profesional está ocupado durante todos los minutos del servicio.", "The professional is busy for the full service duration.")
         : label("Las fases se realizan en este orden. En una espera el profesional queda libre; los recursos conservan la ocupación indicada.", "Phases run in this order. A wait releases the professional; resources keep their selected occupancy.")}</Text>
       {mode === "phases" && !demo && <>
@@ -2820,7 +2820,7 @@ function StepPublicar({
         <View style={c.qrWrapper}>
           <QRCode value={demo ? `GO DEMO local · ${config.businessName || "Mi negocio"}` : MOCK_LINK} size={150} backgroundColor="#FFFFFF" color="#111827" />
         </View>
-        <Text style={c.qrLink}>{demo ? (lang === "en" ? "Local test · no public booking link" : "Prueba local · sin enlace público de reservas") : MOCK_LINK}</Text>
+        <Text style={c.qrLink}>{demo ? (lang === "en" ? "No public booking link" : "Sin enlace público de reservas") : MOCK_LINK}</Text>
       </View>
 
       <TouchableOpacity activeOpacity={0.85} onPress={handleShare} style={[c.bigBtn, { backgroundColor: GOLD }]}>

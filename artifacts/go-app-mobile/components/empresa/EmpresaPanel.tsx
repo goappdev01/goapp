@@ -306,9 +306,9 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   const demo = preview && Boolean(businessDemo);
   const { locationReturn, clearLocationReturn } = useOwnerBusinessDemo();
   const closePanel = () => { if (demo) clearLocationReturn(); onClose(); };
-  const demoTitle = lang === "en" ? "Business DEMO · local data" : "Empresa DEMO · datos locales";
+  const demoTitle = "GO Empresa";
   const showPreviewUnavailable = () => Alert.alert(demo ? demoTitle : t("biz_preview_title"),
-    demo ? (lang === "en" ? "This module has no isolated DEMO adapter yet." : "Este módulo todavía no dispone de un adaptador DEMO aislado.") : t("biz_preview_unavailable"));
+    demo ? (lang === "en" ? "This module is not available in this context yet." : "Este módulo todavía no está disponible en este contexto.") : t("biz_preview_unavailable"));
   const verification = useVerification();
   const [modulo, setModulo] = useState<ModuloKey>(() => demo && locationReturn ? "empresa_config" : "home");
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -583,7 +583,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
           <View style={s.handlePill} />
         </View>
 
-        {preview && <Text style={[s.headerSub, { textAlign: "center", color: "#4A80BD", fontWeight: "700" }]}>{demo ? demoTitle : t("biz_preview_title")}</Text>}
+        {preview && !demo && <Text style={[s.headerSub, { textAlign: "center", color: "#4A80BD", fontWeight: "700" }]}>{t("biz_preview_title")}</Text>}
         {!(demo && modulo === "empresa_config") && contextNavigation}
 
         {demo && modulo === "home" && <DemoCompanyManager open={demoManagerOpen} onOpenChange={setDemoManagerOpen} onOpenConfiguration={openDemoConfiguration} />}
@@ -608,7 +608,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
 
                   if (preview) {
                     color = "#4A80BD";
-                    label = demo ? (lang === "en" ? "Local test configuration" : "Configuración local de prueba") : t("biz_preview_read_only");
+                    label = demo ? (lang === "en" ? "Configuration" : "Configuración") : t("biz_preview_read_only");
                     sub = demo ? (lang === "en" ? "No real company is linked or verified" : "Sin vincular ni verificar empresas reales") : t("biz_preview_unlinked");
                   } else if (st === "verified") {
                     color = "#10B981";
@@ -772,7 +772,6 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             </View>
             ) : (
               <View style={s.empresaHero}>
-                <Text style={{ color: "#EF4444", fontSize: 12, fontWeight: "700" }}>{lang === "en" ? "DEMO LOCAL · no real subscription or billing" : "DEMO LOCAL · sin suscripción ni facturación real"}</Text>
                 <Text style={[s.headerSub, { marginTop: 6 }]}>{businessConfig.businessName || demoTitle}</Text>
               </View>
             )}

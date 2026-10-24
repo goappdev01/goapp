@@ -186,3 +186,16 @@ test('the real iPhone owner-label gutter cannot change the physical GO center in
   assert.equal(Object.keys(user.landingArrangement.offsets).length,14);assert.equal(Object.keys(business.landingArrangement.offsets).length,14);
  }
 });
+test('removing the environment row preserves the physical GO anchor and all orbital offsets',()=>{
+ const window={...devices[1],height:844};
+ for(const preset of ['compacto','estandar','grande'])for(const hand of ['right','left'])for(const profile of ['ADMIN','USER','BUSINESS']){
+  const oldInset=profile==='BUSINESS'?0:22;
+  const before=fixture({...window,height:window.height-oldInset},preset,profile,hand);
+  const after=fixture(window,preset,profile,hand);
+  const center=(g,top)=>({x:g.landingCenter.x,y:g.landingCenter.y+g.landingArrangement.offsetY+top});
+  const a=center(before,oldInset),b=center(after,0);
+  assert.ok(Math.abs(a.x-b.x)<1e-6);assert.ok(Math.abs(a.y-b.y)<1e-6);
+  assert.equal(before.context.goSize,after.context.goSize);
+  assert.deepEqual(Object.keys(before.landingArrangement.offsets),Object.keys(after.landingArrangement.offsets));
+ }
+});

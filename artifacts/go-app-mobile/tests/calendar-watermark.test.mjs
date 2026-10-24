@@ -33,57 +33,25 @@ async function fixture(platform='ios') {
     unmount:async()=>React.act(async()=>root.unmount())};
 }
 
-test('iOS DEMO overlays the safe Calendar row without layout space or input interception and restores Landing on close',async()=>{
-  const f=await fixture();
-  try {
-    await f.render(false);
-    let marks=f.indicator();assert.equal(marks.length,1);
-    assert.equal(flatten(f.propsByNode.get(marks[0]).style).top,49);
-    await f.render(true);
-    marks=f.indicator();assert.equal(marks.length,1,'Keep one native window overlay');
-    const mark=marks[0],p=f.propsByNode.get(mark),style=flatten(p.style);
-    assert.equal(mark.textContent,'DEMO');assert.equal(p.pointerEvents,'none');
-    assert.equal(style.position,'absolute');assert.equal(style.top,63,'Inside the 44-point row below the 47-point safe inset');
-    assert.equal(style.height,undefined);assert.equal(style.paddingTop,undefined);
-    const text=nodes(mark).find(n=>n.attributes['data-native']==='Text');
-    const ts=flatten(f.propsByNode.get(text).style);
-    assert.equal(ts.opacity,0.3);assert.equal(ts.fontSize,10);assert.equal(ts.color,'rgba(239,68,68,0.45)');
-    const modal=f.live().find(n=>n.attributes['data-native']==='Modal');
-    const mp=f.propsByNode.get(modal);
-    assert.equal(mp.calendarWatermark,undefined,'Do not pass presentation props to NativeModal');
-    assert.equal(mp.onRequestClose,f.close);assert.equal(mp.visible,true);
-    const modalSurface=modal.firstChild;
-    assert.equal(flatten(f.propsByNode.get(modalSurface).style).paddingTop,undefined,'DEMO reserves no gutter');
-    await f.render(false);
-    const restored=f.indicator()[0];assert.equal(flatten(f.propsByNode.get(restored).style).top,49);
-    const restoredText=nodes(restored).find(n=>n.attributes['data-native']==='Text');
-    assert.equal(flatten(f.propsByNode.get(restoredText).style).opacity,undefined,'Original Landing watermark unchanged');
-  } finally {await f.unmount();}
+test('iOS Calendar opens and closes without environment overlays, gutters or input layers',async()=>{
+ const f=await fixture();try{for(const visible of [false,true,false,true]){
+  await f.render(visible);assert.equal(f.indicator().length,0);assert.equal(f.live().filter(n=>n.attributes['data-native']==='Overlay').length,0);
+  const modal=f.live().find(n=>n.attributes['data-native']==='Modal'),mp=f.propsByNode.get(modal);
+  assert.equal(mp.calendarWatermark,undefined);assert.equal(mp.visible,visible);assert.equal(mp.onRequestClose,f.close);assert.equal(modal.textContent,f.children);
+  assert.equal(flatten(f.propsByNode.get(modal.firstChild).style).paddingTop,undefined);
+ }}finally{await f.unmount();}
 });
 
-test('the Calendar watermark remains exclusive to authorized DEMO and leaves other contexts unchanged',async()=>{
-  const f=await fixture();
-  try {
-    await f.render(true,false);assert.equal(flatten(f.propsByNode.get(f.indicator()[0]).style).top,49);
-    await f.render(true);f.setView('ADMIN');await f.render(true);
-    assert.equal(f.indicator()[0].textContent,'ADMIN');
-    assert.equal(flatten(f.propsByNode.get(f.indicator()[0]).style).top,49);
-    f.setOwner(false);await f.render(true);
-    assert.equal(f.indicator().length,0);
-    const modal=f.live().find(n=>n.attributes['data-native']==='Modal');
-    assert.equal(modal.textContent,f.children);
-    assert.equal(f.propsByNode.get(modal).onRequestClose,f.close);
-  } finally {await f.unmount();}
+test('all profiles and public accounts preserve Calendar contents without environment badges',async()=>{
+ const f=await fixture();try{for(const owner of [true,false])for(const profile of ['ADMIN','USER','BUSINESS']){
+  f.setOwner(owner);f.setView(profile);await f.render(true);assert.equal(f.indicator().length,0);
+  const modal=f.live().find(n=>n.attributes['data-native']==='Modal');assert.equal(modal.textContent,f.children);assert.equal(f.propsByNode.get(modal).onRequestClose,f.close);
+ }}finally{await f.unmount();}
 });
 
-test('Android uses the same passive Calendar watermark inside the existing native modal',async()=>{
-  const f=await fixture('android');
-  try {
-    await f.render(true);
-    const mark=f.indicator();assert.equal(mark.length,1);
-    assert.equal(mark[0].textContent,'DEMO');
-    assert.equal(f.propsByNode.get(mark[0]).pointerEvents,'none');
-    assert.equal(flatten(f.propsByNode.get(mark[0]).style).top,63);
-    assert.equal(f.live().filter(n=>n.attributes['data-native']==='Overlay').length,0);
-  } finally {await f.unmount();}
+test('Android shares the same badge-free behavior and keeps native modal operations',async()=>{
+ const f=await fixture('android');try{for(const profile of ['ADMIN','USER','BUSINESS']){
+  f.setView(profile);await f.render(true);assert.equal(f.indicator().length,0);assert.equal(f.live().filter(n=>n.attributes['data-native']==='Overlay').length,0);
+  const modal=f.live().find(n=>n.attributes['data-native']==='Modal');assert.equal(modal.textContent,f.children);assert.equal(f.propsByNode.get(modal).onRequestClose,f.close);
+ }}finally{await f.unmount();}
 });

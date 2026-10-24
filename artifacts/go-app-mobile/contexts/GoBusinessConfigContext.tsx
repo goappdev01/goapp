@@ -170,7 +170,7 @@ export function GoBusinessPreviewProvider({ children }: { children: React.ReactN
   const admin = useAdminAccess();
   const { demo, loaded, config } = useOwnerBusinessDemo();
   const report = useCallback((operation: Promise<void>) => {
-    void operation.catch(error => Alert.alert("Empresa DEMO", String(error)));
+    void operation.catch(error => Alert.alert("Empresa", String(error)));
   }, []);
   const updateConfig = useCallback((patch: Partial<BusinessConfig>) => { if (demo) report(demo.updateConfig(patch)); }, [demo, report]);
   const resetToSubActivity = useCallback((sectorId: string, subId: string) => {

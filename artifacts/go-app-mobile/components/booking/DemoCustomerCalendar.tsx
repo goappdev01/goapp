@@ -33,11 +33,11 @@ export function DemoCustomerCalendar({ repository, focus, onPersonal, entries: s
     const entry = repository.getCustomerEntries().find(value => value.id === id);
     if (!entry?.reservationId) return;
     try { await repository.cancelCustomerEntry(String(entry.reservationId), String(entry.businessId)); }
-    catch { Alert.alert(lang === "en" ? "Could not cancel" : "No se pudo cancelar", lang === "en" ? "The DEMO reservation was not changed." : "La reserva DEMO no se ha modificado."); }
+    catch { Alert.alert(lang === "en" ? "Could not cancel" : "No se pudo cancelar", lang === "en" ? "The reservation was not changed." : "La reserva no se ha modificado."); }
   };
   return <View style={{ flex: 1 }} testID="demo-customer-calendar">
     <View style={{ paddingHorizontal: 16, paddingBottom: 8, paddingTop: insets.top + 8, gap: 8 }}>
-      <Text style={{ color: "#ff7474", fontSize: 12, fontWeight: "700" }}>{lang === "en" ? "Customer calendar · LOCAL DEMO" : "Calendario cliente · DEMO LOCAL"}</Text>
+      <Text style={{ color: "#ff7474", fontSize: 12, fontWeight: "700" }}>{lang === "en" ? "Customer calendar" : "Calendario cliente"}</Text>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
         <GoCalendarViewSelector value={view} onChange={setView} />
         <TouchableOpacity onPress={onPersonal} accessibilityRole="button" style={{ padding: 8 }}>

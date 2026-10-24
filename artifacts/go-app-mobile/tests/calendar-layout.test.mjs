@@ -16,7 +16,7 @@ function renderHeader(monthNavigation, demo = false, insets = { top: 44, left: 0
   const calls = [];
   const scope = { exports: {}, monthNavigation, React: { createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }) },
     View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', Feather: 'Feather', GoCalendarViewSelector: 'GoCalendarViewSelector',
-    insets, calBgViewMode: 'mes_lineal', calConfigVisible: false, showBookingFromCal: false, demoBookingRepository: demo,
+    lang: 'es', insets, calBgViewMode: 'mes_lineal', calConfigVisible: false, showBookingFromCal: false, demoBookingRepository: demo,
     changeCalendarView: value => calls.push(['view', value]), Haptics: { selectionAsync() {} },
     setCalConfigVisible: value => calls.push(['settings', value]), setCalQuickCreateOpen: value => calls.push(['task', value]), setCalPanelOpen: value => calls.push(['panel', value]), closeMonthGrid: () => calls.push(['monthGrid']), setDemoCustomerCalendarSelected: value => calls.push(['demo', value]),
   };
@@ -42,7 +42,7 @@ test('the embedded header reuses one month navigation between MES and configurat
     tree.children[2].props.onPress(event());
     assert.deepEqual(calls.slice(0, 2), [['view', 'semana'], ['settings', true]]);
     if (demo) {
-      const shortcut = nodes(tree, n => n.type === 'TouchableOpacity' && texts(n).includes('DEMO LOCAL'))[0];
+      const shortcut = nodes(tree, n => n.type === 'TouchableOpacity' && n.props.testID === 'customer-calendar-shortcut')[0];
       shortcut.props.onPress(event());
       assert.deepEqual(calls.slice(-5), [['settings', false], ['task', false], ['panel', false], ['monthGrid'], ['demo', true]]);
     }
@@ -188,7 +188,7 @@ test('the month header recovers padding space while preserving the safe inset an
     assert.equal(tree.props.style.paddingBottom, 0);
     assert.equal(tree.props.style.height, undefined, 'No cap can clip larger text');
     if (demo) {
-      const shortcut = nodes(tree, n => n.type === 'TouchableOpacity' && texts(n).includes('DEMO LOCAL'))[0];
+      const shortcut = nodes(tree, n => n.type === 'TouchableOpacity' && n.props.testID === 'customer-calendar-shortcut')[0];
       assert.equal(shortcut.props.style.minHeight, 44);
     }
   }

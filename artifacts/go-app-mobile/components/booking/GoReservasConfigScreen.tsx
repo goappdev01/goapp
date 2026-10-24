@@ -143,7 +143,7 @@ export function GoReservasDemoScreen(props: GoReservasConfigScreenProps) {
   if (!demo) throw new Error("No hay un entorno DEMO autorizado.");
   const snapshot = useSyncExternalStore(demo.subscribe, demo.getSnapshot);
   const setGoLog = useCallback<React.Dispatch<React.SetStateAction<GoEntry[]>>>(update => {
-    void demo.updateEntries(update).catch(error => Alert.alert("Reservas DEMO", String(error)));
+    void demo.updateEntries(update).catch(error => Alert.alert("Reservas", String(error)));
   }, [demo]);
   return useGoReservasContent({ ...props,
     onOpenVerificacion: undefined, onOpenCalendarPanel: undefined, onOpenGo: undefined,
@@ -202,7 +202,7 @@ function useGoReservasContent({ onProposeBookingChange, onClose, onOpenVerificac
   const [demoDayNightMode, setDemoDayNightMode] = useState<CalDayNightMode>("mixto");
   const actualDayNightMode = demoStore ? demoDayNightMode : dayNightMode;
   const calendarStorage = demoStore?.preferences ?? AsyncStorage;
-  const reportStorageError = (error: unknown) => { if (demoStore) Alert.alert("Calendario DEMO", String(error)); };
+  const reportStorageError = (error: unknown) => { if (demoStore) Alert.alert("Calendario", String(error)); };
   const isDark = computeIsDark(actualDayNightMode);
   const tk = isDark ? {
     bg:     "#0a0a0f",
@@ -481,7 +481,7 @@ function useGoReservasContent({ onProposeBookingChange, onClose, onOpenVerificac
         <View style={g.backBtn} />
         <View style={g.headerCenter}>
           <Text style={[g.headerTitle, { color: tk.text }]}>{lang === "en" ? "GO Bookings" : "GO Reservas"}</Text>
-          <Text style={[g.headerSub, { color: tk.dim }]}>{formatTodayLabel(t)} · {demoStore ? (lang === "en" ? "local DEMO" : "DEMO local") : lang === "en" ? "live" : "en tiempo real"}</Text>
+          <Text style={[g.headerSub, { color: tk.dim }]}>{formatTodayLabel(t)}{demoStore ? "" : lang === "en" ? " · live" : " · en tiempo real"}</Text>
           {viewMode === "calendario" && (
             <GoCalendarViewSelector value={calInnerView} onChange={setCalInnerView} />
           )}

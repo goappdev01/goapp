@@ -56,7 +56,7 @@ test('clipboard rejection or false result never reports success and permits retr
  for(const outcome of [false,new Error('Fallo ficticio de portapapeles')]){
   let retry=false;const f=fixture(async()=>{if(retry)return true;if(outcome instanceof Error)throw outcome;return outcome;});await f.catalog.create('Keep');
   const before=Array.from(f.memory);byID(tools(f),'demo-company-copy-backup').props.onPress();await turn();
-  assert.equal(f.alerts.length,1);assert.equal(f.alerts[0][0],'DEMO');assert.deepEqual(Array.from(f.memory),before);assert.equal(byID(tools(f),'demo-company-copy-backup').props.disabled,false);
+  assert.equal(f.alerts.length,1);assert.equal(f.alerts[0][0],'GO');assert.deepEqual(Array.from(f.memory),before);assert.equal(byID(tools(f),'demo-company-copy-backup').props.disabled,false);
   retry=true;byID(tools(f),'demo-company-copy-backup').props.onPress();await turn();assert.equal(f.alerts.at(-1)[0],'Copia copiada');assert.deepEqual(Array.from(f.memory),before);
  }
 });

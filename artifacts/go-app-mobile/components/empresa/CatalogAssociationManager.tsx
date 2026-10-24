@@ -35,7 +35,7 @@ export function CatalogAssociationManager({ businessId, demo }: { businessId?: s
   return <View style={{ gap: 8, paddingVertical: 8 }}>
     {button(label("Asociaciones de productos y servicios", "Product and service associations"), () => setOpen(value => !value), open)}
     {open && <>
-      {(demo || !isCloudId(businessId)) ? <Text style={{ color: "#ccc" }}>{label("Guarda y verifica el catálogo de la empresa para configurar asociaciones en el servidor. DEMO local no simula esta función.", "Save and verify the business catalogue to configure server associations. Local DEMO does not simulate this feature.")}</Text> : <>
+      {(demo || !isCloudId(businessId)) ? <Text style={{ color: "#ccc" }}>{label("Guarda y verifica el catálogo de la empresa para configurar asociaciones en el servidor.", "Save and verify the business catalogue to configure server associations.")}</Text> : <>
         {!!error && <Text accessibilityRole="alert" style={{ color: "#ff9c80" }}>{error}</Text>}
         <Text style={{ color: "white" }}>{label("Elemento principal", "Main item")}</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>{items.map(item => <React.Fragment key={item.id}>{button(`${item.title} · ${item.catalogKind === "product" ? label("Producto", "Product") : label("Servicio", "Service")}${item.active ? "" : label(" · inactivo", " · inactive")}`, () => setSource(item.id), source === item.id)}</React.Fragment>)}</View>

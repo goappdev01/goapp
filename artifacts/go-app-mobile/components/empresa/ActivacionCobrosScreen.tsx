@@ -246,17 +246,6 @@ export function ActivacionCobrosScreen({ visible, onClose, initialScreen = 1 }: 
                   <Feather name="alert-triangle" size={15} color={GOLD} />
                 </View>
                 <View style={{ flex: 1, gap: 6 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-                    <Text style={{ fontSize: 12, fontWeight: "900", color: GOLD, letterSpacing: 0.4 }}>
-                      {t("act_demo_mode_title")}
-                    </Text>
-                    <View style={{
-                      backgroundColor: GOLD + "22", borderRadius: 5,
-                      paddingHorizontal: 6, paddingVertical: 1,
-                    }}>
-                      <Text style={{ fontSize: 9, fontWeight: "800", color: GOLD }}>{t("act_demo_mode_badge")}</Text>
-                    </View>
-                  </View>
                   <Text style={{ fontSize: 12, color: GRAY, lineHeight: 18 }}>
                     {t("act_prod_step_intro")}
                   </Text>

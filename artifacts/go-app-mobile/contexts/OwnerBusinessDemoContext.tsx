@@ -135,7 +135,7 @@ export function OwnerBusinessDemoProvider({ children, initialConfig }: {
     let active = true;
     if (!catalog || !permission.current.allowed) { setCatalogReady(undefined); return; }
     const unsubscribe = catalog.subscribe(() => { if (active) render(value => value + 1); });
-    void catalog.load().then(() => { if (active && permission.current.allowed) setCatalogReady(catalog); }).catch(error => { if (active && permission.current.allowed) Alert.alert("Empresa DEMO", String(error)); });
+    void catalog.load().then(() => { if (active && permission.current.allowed) setCatalogReady(catalog); }).catch(error => { if (active && permission.current.allowed) Alert.alert("Empresa", String(error)); });
     return () => { active = false; unsubscribe(); };
   }, [catalog, admin.isOwner, admin.checking]);
   useEffect(() => {
@@ -145,7 +145,7 @@ export function OwnerBusinessDemoProvider({ children, initialConfig }: {
     void store.load().then(() => {
       if (active && permission.current.allowed) setReady(store);
     }).catch(error => {
-      if (active && permission.current.allowed) Alert.alert("Empresa DEMO", String(error));
+      if (active && permission.current.allowed) Alert.alert("Empresa", String(error));
       for (const request of [...pending.current]) if (request.store === store)
         finishLocation(request, error instanceof Error ? error : new Error(String(error)));
     });

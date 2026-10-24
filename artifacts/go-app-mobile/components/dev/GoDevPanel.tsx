@@ -318,7 +318,7 @@ export function GoDevPanel({ visible, onClose }: GoDevPanelProps) {
           )}
 
           {/* ── Sección 1: Nemesi ── */}
-          <Text style={d.sectionLabel}>EMPRESA DEMO</Text>
+          <Text style={d.sectionLabel}>EMPRESA</Text>
 
           <ActionCard
             icon="refresh-cw"
@@ -421,7 +421,7 @@ export function GoDevPanel({ visible, onClose }: GoDevPanelProps) {
           <View style={d.idCard}>
             <Feather name="key" size={11} color="#9CA3AF" />
             <Text style={d.idTxt}>
-              ID fijo de demo:{"\n"}
+              ID fijo:{"\n"}
               <Text style={{ fontFamily: "monospace", color: "#374151", fontWeight: "700" }}>{DEMO_BUSINESS_ID}</Text>
             </Text>
           </View>

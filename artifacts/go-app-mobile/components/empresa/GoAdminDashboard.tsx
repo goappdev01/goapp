@@ -146,8 +146,8 @@ const MODULOS_EMPRESA_ROADMAP: ModuloEmpresaDef[] = [
     desc_en: "Meet, coordinate human actions, place, time, contact, duration and calendar.",
     info: "THE GO conecta personas, lugar, tiempo y calendario para convertir cualquier intención en una acción coordinada.",
     info_en: "THE GO connects people, place, time and calendar to turn any intention into a coordinated action.",
-    estado: "Terminado / Demo activa",
-    estado_en: "Done / Demo active",
+    estado: "Terminado",
+    estado_en: "Done",
     chips: ["Quedar", "Contacto", "Ubicación", "Calendario"],
     chips_en: ["Meet", "Contact", "Location", "Calendar"],
     categoria: "maduros",
@@ -903,7 +903,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
                               backgroundColor: stColor + "15", borderRadius: 8, padding: 8 }}>
                               <Feather name="check-circle" size={12} color={stColor} />
                               <Text style={{ fontSize: 11, fontWeight: "700", color: stColor }}>
-                                {lang === 'en' ? "Mature module · demo ready" : "Módulo maduro · listo para demo"}
+                                {lang === 'en' ? "Mature module" : "Módulo maduro"}
                               </Text>
                             </View>
                           )}

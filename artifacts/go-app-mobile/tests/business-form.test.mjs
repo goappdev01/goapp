@@ -106,7 +106,8 @@ test("company DEMO does not present subscription, renewal or numeric mocks as ac
   const hero=source.slice(source.indexOf("{!demo ? ("),source.indexOf("{currentSuite === null",source.indexOf("{!demo ? (")));
   assert.match(hero,/MOCK_EMPRESA\.proximaRenovacion/);
   const demoBranch=hero.slice(hero.indexOf(") : ("));
-  assert.match(demoBranch,/DEMO LOCAL · sin suscripción ni facturación real/);
+  assert.doesNotMatch(demoBranch,/DEMO LOCAL/);
+  assert.match(demoBranch,/businessConfig\.businessName/);
   assert.doesNotMatch(demoBranch,/MOCK_EMPRESA|MetricCard|value="4"/);
   assert.match(source,/OwnerContextModal as Modal/);
 });

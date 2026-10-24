@@ -260,7 +260,7 @@ export function LoginRegisterPanel({
   const ROLE_OPTIONS = getRoleOptions(t);
   const ownerOptions = (["ADMIN", "BUSINESS", "USER"] as const).map(view => ({
     id: view,
-    label: view === "BUSINESS" ? t("role_empresa_label") + " DEMO" : t(view === "ADMIN" ? "role_admin_label" : "role_usuario_label"),
+    label: t(view === "BUSINESS" ? "role_empresa_label" : view === "ADMIN" ? "role_admin_label" : "role_usuario_label"),
     icon: (view === "ADMIN" ? "shield" : view === "BUSINESS" ? "briefcase" : "user") as RoleOption["icon"],
     color: view === "ADMIN" ? "#C25A5A" : view === "BUSINESS" ? "#3D9A84" : "#4A80BD",
     sublabel: t(view === "ADMIN" ? "admin_internal_sub" : view === "BUSINESS" ? "context_business_preview" : "role_usuario_sub"),

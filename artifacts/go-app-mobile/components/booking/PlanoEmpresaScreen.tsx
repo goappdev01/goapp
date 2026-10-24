@@ -1942,14 +1942,14 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
 
       // Sin plantilla → plan vacío centrado
       setTimeout(() => fitToElements([]), 350);
-    }).catch(error => { if (active && demo) Alert.alert("Plano DEMO", String(error)); });
+    }).catch(error => { if (active && demo) Alert.alert("Plano", String(error)); });
     return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId, demoPlanSignature]);
 
   useEffect(() => {
     let active = true;
-    floorRepository.loadReservations(plan.id).then(next => { if (active) setReservations(next); }).catch(error => { if (active && demo) Alert.alert("Reservas DEMO", String(error)); });
+    floorRepository.loadReservations(plan.id).then(next => { if (active) setReservations(next); }).catch(error => { if (active && demo) Alert.alert("Reservas", String(error)); });
     return () => { active = false; };
   }, [plan.id, demoReservationsSignature]);
 
@@ -1964,7 +1964,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
       { text: lang === "en" ? "Cancel" : "Cancelar", style: "cancel" },
       ...(["professional", "physical"] as const).map(kind => ({ text: kind === "professional"
         ? (lang === "en" ? "Obsolete professional" : "Profesional obsoleto") : (lang === "en" ? "Physical post" : "Puesto físico"),
-        onPress: () => { void demo.classifyLegacyElement(element.id, kind).catch(error => Alert.alert("Plano DEMO", String(error))); },
+        onPress: () => { void demo.classifyLegacyElement(element.id, kind).catch(error => Alert.alert("Plano", String(error))); },
       })),
     ]);
   };

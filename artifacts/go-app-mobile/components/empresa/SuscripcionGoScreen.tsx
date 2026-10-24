@@ -161,30 +161,6 @@ export function SuscripcionGoScreen({ guidanceLevel: _g = 5 }: { guidanceLevel?:
       contentContainerStyle={{ paddingBottom: 48, paddingTop: 4 }}
     >
 
-      {/* ── Banner MODO DEMO ── */}
-      <View style={{
-        margin: 16, marginBottom: 8,
-        backgroundColor: GOLD + "0C",
-        borderRadius: 16, padding: 14,
-        borderWidth: 1.5, borderColor: GOLD + "35",
-        flexDirection: "row", alignItems: "flex-start", gap: 10,
-      }}>
-        <Feather name="alert-triangle" size={16} color={GOLD} style={{ marginTop: 1 }} />
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 4 }}>
-            <Text style={{ fontSize: 11, fontWeight: "900", color: GOLD, letterSpacing: 0.4 }}>
-              MODO DEMO
-            </Text>
-            <View style={{ backgroundColor: GOLD + "22", borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1 }}>
-              <Text style={{ fontSize: 9, fontWeight: "800", color: GOLD }}>DESARROLLO</Text>
-            </View>
-          </View>
-          <Text style={{ fontSize: 12, color: GRAY, lineHeight: 17 }}>
-            Esta pantalla es funcional en diseño pero no procesa pagos reales. En producción conectará con el sistema de facturación de GO.
-          </Text>
-        </View>
-      </View>
-
       {/* ── 1. Estado actual ── */}
       <SectionLabel icon="star" label="SUSCRIPCIÓN ACTUAL" />
       <View style={{
@@ -209,7 +185,7 @@ export function SuscripcionGoScreen({ guidanceLevel: _g = 5 }: { guidanceLevel?:
                 <Text style={{ fontSize: 9, fontWeight: "800", color: "#8A9BB5", letterSpacing: 0.5 }}>PLAN ACTUAL</Text>
               </View>
             </View>
-            <Text style={{ fontSize: 12, color: DIM, marginTop: 2 }}>Demo · Sin renovación activa</Text>
+            <Text style={{ fontSize: 12, color: DIM, marginTop: 2 }}>Sin renovación activa</Text>
           </View>
           <Text style={{ fontSize: 20, fontWeight: "900", color: TEXT }}>0 €</Text>
         </View>
@@ -496,7 +472,7 @@ export function SuscripcionGoScreen({ guidanceLevel: _g = 5 }: { guidanceLevel?:
             }}>
               <Feather name="lock" size={11} color={DIM} />
               <Text style={{ fontSize: 11, color: DIM }}>
-                En demo — no se procesará ningún cargo
+                No se procesará ningún cargo
               </Text>
             </View>
           </>
