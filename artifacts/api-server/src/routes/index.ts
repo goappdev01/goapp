@@ -10,11 +10,13 @@ import modulePublicationRouter from "./modulePublication";
 
 import managementRouter from "./management";
 import adminRouter from "./admin";
+import boardsRouter from "./boards";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use("/supabase/admin", adminRouter);
+router.use("/supabase/boards", boardsRouter);
 router.use("/booking-assistant", bookingAssistantRouter);
 router.use("/supabase/manage", managementRouter);
 router.use("/supabase", modulePublicationRouter);

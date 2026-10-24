@@ -1,13 +1,19 @@
 import type { GoEntry } from "@/components/AgendaOperativa";
 import { getAuthenticatedUserId } from "@/data/booking";
 export type OwnedGoEntry = GoEntry & { ownerUserId?: string };
+let boardAccess: { userId: string | null; allowed: boolean } = { userId: null, allowed: false };
+export function configureBoardTaskAccess(userId: string | null, allowed: boolean) { boardAccess = { userId, allowed }; }
+export function canReadBoardTask(entry: GoEntry): boolean {
+  return !(entry as GoEntry & { boardId?: string }).boardId
+    || boardAccess.allowed && entry.ownerUserId === boardAccess.userId;
+}
 export const getTaskUser = getAuthenticatedUserId;
 export function isPersonalTask(entry: GoEntry): boolean {
   return entry.kind === "sent" && ["TAREA", "TAREA_INTERNA", "GO_INTERNO"].includes(entry.type || "")
     && !entry.recipients?.length && !/^lista\b/i.test(entry.notes || "") && !/^[-•] /m.test(entry.detail || "");
 }
 export function ownsTask(entry: GoEntry, userId: string): boolean {
-  return (entry as OwnedGoEntry).ownerUserId === userId && isPersonalTask(entry);
+  return (entry as OwnedGoEntry).ownerUserId === userId && isPersonalTask(entry) && canReadBoardTask(entry);
 }
 export async function requireTaskUser(): Promise<string> {
   const user = await getTaskUser();

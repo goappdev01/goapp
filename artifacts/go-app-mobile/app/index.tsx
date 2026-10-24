@@ -32,6 +32,9 @@ import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScr
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
+import { GoBoardsPanel } from "@/components/boards/GoBoardsPanel";
+import { useGoBoards } from "@/hooks/useGoBoards";
+import { canReadBoardTask } from "@/lib/goTaskAccess";
 import Svg, { Circle, Path as SvgPath } from "react-native-svg";
 import QRCode from "react-native-qrcode-svg";
 import { Accelerometer } from "expo-sensors";
@@ -2770,6 +2773,7 @@ function HomeScreenContent() {
   const adminAccess = useAdminAccess();
   const goView = useGoView();
   const ownerDemo = useOwnerBusinessDemo();
+  const goBoards = useGoBoards();
   const { publication: bookingPublication, internalAccess: bookingInternalAccess } = useBookingModulePublication(goView.loaded && !!adminAccess.userId && !adminAccess.checking);
   const visibleOrbitalBookingCategories = useMemo(() => visibleBookingSectors(RESERVAS_ORBITAL_CATS, bookingPublication, bookingInternalAccess), [bookingPublication, bookingInternalAccess]);
   useEffect(() => {
@@ -3064,6 +3068,7 @@ function HomeScreenContent() {
 
   const [mapOpen, setMapOpen] = useState(false);
   const [calOpen, setCalOpen] = useState(false);
+  const [boardsOpen, setBoardsOpen] = useState(false);
   // ── Flujo universal de calendario — hook sin lógica de módulo ──────────
   // Todos los módulos (normal, mover, propuesta, QD, reservas nav, etc.)
   // pasan por calFlow.open({onSave}) — cero ramas de módulo aquí.
@@ -3488,7 +3493,7 @@ function HomeScreenContent() {
   const completionIdentity = useAssistantZoneScope();
   const [personalGoLog, setGoLog] = useGoLog(completionIdentity.ready ? completionIdentity.scope : null);
   const customerBookings=useCustomerBookings(demoBookingRepository,goView.loaded && goView.view==="USER" && !adminAccess.checking && (!adminAccess.isOwner || ownerDemo.loaded));
-  const goLog=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER"),[personalGoLog,customerBookings.entries,goView.view]);
+  const goLog=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER").filter(canReadBoardTask),[personalGoLog,customerBookings.entries,goView.view,adminAccess.allowed,adminAccess.checking]);
   const actionCompletion = useActionCompletion(goLog);
   const [receivedDetailOpen, setReceivedDetailOpen] = useState(false);
   const [receivedDetailGo, setReceivedDetailGo] = useState<typeof goLog[number] | null>(null);
@@ -20414,6 +20419,11 @@ function HomeScreenContent() {
             )}
             {/* Acciones principales: Nueva tarea · HOY · RESERVAR · GO */}
             <View testID="calendar-actions" style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingLeft: isBusinessMode ? 0 : 4, paddingRight: isBusinessMode ? 2 : 6, paddingTop: 2, marginBottom: 0 }}>
+              {goView.view === "ADMIN" && adminAccess.allowed && !adminAccess.checking && <TouchableOpacity
+                accessibilityRole="button" accessibilityLabel="Tablero" onPress={() => setBoardsOpen(true)}
+                style={{ minHeight: 44, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: "#a78bfa", justifyContent: "center" }}>
+                <Text style={{ color: "#ffffff", fontSize: 12 }}>Tablero</Text>
+              </TouchableOpacity>}
               {/* NUEVA TAREA */}
               {!calQuickCreateOpen && (
                 <TouchableOpacity
@@ -21497,6 +21507,7 @@ function HomeScreenContent() {
           )}
 
           {calendarTaskContextRef.current && fieldSelectorOpen && renderFieldSelector(true)}
+          <GoBoardsPanel visible={boardsOpen && calOpen} onClose={() => setBoardsOpen(false)} manager={goBoards} fontScale={uiScaleFactor} handedness={handedness} />
         </View>
       </Modal>
 

@@ -1,0 +1,17 @@
+diff --git a/identity-bridge.cjs b/identity-bridge.cjs
+index 5098e94..1ee837f 100644
+--- a/identity-bridge.cjs
++++ b/identity-bridge.cjs
+@@ -218,6 +218,7 @@ function createIdentityBridge({ fixture, identity, legacy, request = fetch, now
+           // This signing key is LOCAL only; no real token is ever sent to PostgREST.
+           const localToken = signed({ sub: localOwner.id, role: 'authenticated', aud: 'authenticated',
+             iss: 'http://127.0.0.1:65441/auth/v1', session_id: verified.hint.session_id,
++            ...(/^\/rest\/v1\/(?:go_board_documents|rpc\/go_board_(?:save|move_task|delete|calendar))$/.test(url.pathname) && verified.permissions.includes('admin.access') ? { go_boards_scope: 'ADMIN' } : {}),
+             exp: Math.min(verified.hint.exp, Math.floor(now() / 1000) + 60) }, fixture.jwtSecret);
+           req.headers = { ...req.headers, authorization: 'Bearer ' + localToken };
+         }
+@@ -239,3 +240,4 @@ function createIdentityBridge({ fixture, identity, legacy, request = fetch, now
+   return { handler, networkAllowed, metrics };
+ }
+ module.exports = { createIdentityBridge, REFRESH_PREFIX };
++

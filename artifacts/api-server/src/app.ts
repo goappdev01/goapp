@@ -27,6 +27,7 @@ app.use(
 );
 app.use(cors());
 app.use("/api/booking-assistant/transcribe", express.json({ limit: "8mb" }));
+app.use("/api/supabase/boards", express.json({ limit: "2mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

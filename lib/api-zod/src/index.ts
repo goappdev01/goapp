@@ -5,3 +5,4 @@ export * from "./go-actions";
 export * from "./task-creation";
 export * from "./task-management";
 export * from "./module-publication";
+export * from "./go-boards";

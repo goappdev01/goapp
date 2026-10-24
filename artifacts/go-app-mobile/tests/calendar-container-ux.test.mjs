@@ -80,6 +80,7 @@ const nodes = (tree, predicate) => !tree || typeof tree !== 'object' ? [] :
 const textOf = tree => nodes(tree, n => n.type === 'Text').flatMap(n => n.children).filter(n => typeof n === 'string').join('');
 function renderFragment(node, globals = {}) {
   return evaluate('exports.tree = (' + node.getText(ast) + ')', {
+    goView: { view: 'USER' }, adminAccess: { allowed: false, checking: false },
     React: { createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }) },
     View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', Feather: 'Feather',
     MaterialCommunityIcons: 'MaterialCommunityIcons', GoCloseButton: 'GoCloseButton',

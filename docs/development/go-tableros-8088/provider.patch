@@ -1,0 +1,23 @@
+diff --git a/provider.cjs b/provider.cjs
+index a1b735e..8b41276 100644
+--- a/provider.cjs
++++ b/provider.cjs
+@@ -21,7 +21,7 @@ function issue(user,sessionId=crypto.randomUUID()){
+  sessions.set(sessionId,{active:true,userId:user.id,refreshHash:crypto.createHash('sha256').update(refresh).digest('hex'),expiresAt:now+86400});
+  return {access_token:sign({sub:user.id,role:'authenticated',aud:'authenticated',iss:'http://127.0.0.1:65441/auth/v1',session_id:sessionId,iat:now,exp:now+3600}),refresh_token:refresh,expires_in:3600,expires_at:now+3600,token_type:'bearer',user:publicUser(user)};
+ }
+-async function read(req){const chunks=[];let size=0;for await(const x of req){size+=x.length;if(size>200000)throw Error('Body limit');chunks.push(x);}return Buffer.concat(chunks);}
++async function read(req,limit=200000){const chunks=[];let size=0;for await(const x of req){size+=x.length;if(size>limit)throw Error('Body limit');chunks.push(x);}return Buffer.concat(chunks);}
+ http.createServer(async(req,res)=>{try{
+  const url=new URL(req.url,'http://127.0.0.1:65441');
+  if(url.pathname==='/fixture-status'&&req.method==='GET'){json(res,200,{status:'ok',mode:'fictitious-auth-and-local-postgres',sha:config.sha});return;}
+@@ -55,7 +55,8 @@ http.createServer(async(req,res)=>{try{
+   res.writeHead(204).end();return;
+  }
+  if(url.pathname.startsWith('/rest/v1/')){
+-  const body=await read(req),headers={'Content-Type':'application/json',Accept:'application/json',Authorization:req.headers.authorization??'Bearer '+anon};
++  const boardRoute=/^\/rest\/v1\/(?:go_board_documents|rpc\/go_board_(?:save|move_task|delete|calendar))$/.test(url.pathname);
++  const body=await read(req,boardRoute?2*1024*1024:200000),headers={'Content-Type':'application/json',Accept:'application/json',Authorization:req.headers.authorization??'Bearer '+anon};
+   for(const name of ['prefer','range','range-unit','accept-profile','content-profile'])if(req.headers[name])headers[name]=req.headers[name];
+   const upstream=await fetch('http://127.0.0.1:65440'+req.url.slice('/rest/v1'.length),{method:req.method,headers,...(body.length?{body}:{}),signal:AbortSignal.timeout(15000)});
+   const responseHeaders={'Content-Type':'application/json','Cache-Control':'no-store'};
