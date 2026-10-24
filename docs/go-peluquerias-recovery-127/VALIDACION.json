@@ -1,0 +1,131 @@
+{
+  "fecha": "2026-10-24",
+  "rama": "codex/go-peluquerias-v1-recovery-127-20261023",
+  "main": "aa5c137968bad97eae35cc49bf52b1f85517afe4",
+  "movil": {
+    "paseCompleto": {
+      "archivo": "mobile-full-final-20261024.tap",
+      "sha256": "a70a2a282934e898b4a37f32cb8c541ee31ed347561b1ec875d556966efc7a5d",
+      "tests": 1467,
+      "pass": 1465,
+      "fail": 2,
+      "skipped": 0,
+      "cancelled": 0,
+      "fallos": [
+        "complete DEMO booking reaches its final screen and updates both real calendar callbacks, reload and cancellation",
+        "complete DEMO booking reaches its final screen and updates both real calendar callbacks, reload and cancellation with multiple services"
+      ]
+    },
+    "repeticionSoloDosFixtures": {
+      "archivo": "business-demo-booking-two-recheck.tap",
+      "sha256": "9657277f8ebca1c54c5ce36256e0411040ac0738771dc6aa0ea8a3a77d85b175",
+      "tests": 2,
+      "pass": 2,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "fallos": []
+    },
+    "casosDistintosCorrectos": 1471,
+    "fallosPendientes": 0,
+    "validacionInterfazCliente": {
+      "archivo": "code-only-two-gaps-after-demo-fix.tap",
+      "sha256": "9b026d3d2013a0f8bd21b2bd24ef60dd7a0acce8f4dcb569704043fb07b8dd02",
+      "tests": 34,
+      "pass": 34,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "fallos": []
+    },
+    "validacionProyeccionHistorica": {
+      "archivo": "legacy-slot-projection-final.tap",
+      "sha256": "2f121899846e0ba4783a9ad75001387beec6bebc545b73e2e6fbb51efc86d9af",
+      "tests": 1,
+      "pass": 1,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "fallos": []
+    },
+    "regresionesTrasFixCompartido": {
+      "archivo": "demo-projection-regressions-final.tap",
+      "sha256": "5cec595dd68d60573e739f3293eda37d4ef26957aa2d38eb38906c652d7de7ea",
+      "tests": 134,
+      "pass": 134,
+      "fail": 0,
+      "skipped": 0,
+      "cancelled": 0,
+      "fallos": []
+    },
+    "casosNuevos": [
+      "canonical customer Calendar opens the real proposal flow beside Cancel and changes no booking until explicit confirmation",
+      "DEMO customer Calendar opens the real proposal flow beside Cancel and changes no booking until explicit confirmation",
+      "Mis reservas is operable only in USER while ADMIN and BUSINESS retain the original filters",
+      "legacy booking without slotKey projects its original key without storage writes or cross-company adoption after Reload"
+    ],
+    "criterio": "1465 correctos del pase completo y sus dos fallos de fixture comprobados de nuevo; cuatro casos nuevos. Tras reparar la proyección DEMO se verifican sus 134 regresiones afectadas. No se presenta como un único pase completo sin fallos."
+  },
+  "backend": {
+    "archivo": "backend-unit-final-20261024.tap",
+    "sha256": "30235830e25b8823a9942f49141975666193a8ce4ab60c2b39478c869d336309",
+    "tests": 36,
+    "pass": 36,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "fallos": []
+  },
+  "gateway": {
+    "archivo": "gateway-joint-20261024.tap",
+    "sha256": "e12fe86ebb457280fbffe9c6e5bb4abb56e95ae3433c84c0007146700b462c54",
+    "tests": 94,
+    "pass": 94,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "fallos": []
+  },
+  "notasConStoreReal": {
+    "archivo": "notes-company-race-final.tap",
+    "sha256": "64715fc9c0bb0fae5ae60717a73ac81d89c8061306357d4dc73efdb357e79eb2",
+    "tests": 40,
+    "pass": 40,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "fallos": []
+  },
+  "totalResultadosDistintosMovilBackendGateway": 1601,
+  "typescript": [
+    {
+      "archivo": "typescript-libs-20261024.log",
+      "sha256": "8d8d1d05c402e6e4d732eee20cf806c19a03c4102da372f63aa549377c608258",
+      "resultado": "CORRECTO, proceso con salida 0"
+    },
+    {
+      "archivo": "typescript-backend-20261024.log",
+      "sha256": "25541f44130d3ab4a9ab71a4b2e002dfe87aabdb28ed2a67eac101af00b015ff",
+      "resultado": "CORRECTO, proceso con salida 0"
+    },
+    {
+      "archivo": "typescript-mobile-projection-final.log",
+      "sha256": "0ee8e05dbec287836bcacda468e46991e52158fb149adf20bf526ef9e8a5ade9",
+      "resultado": "CORRECTO, proceso con salida 0"
+    }
+  ],
+  "sql": {
+    "ejecutadoAhora": false,
+    "motivo": "Contrato, motores y SQL no cambian. Se conservan las evidencias aisladas anteriores; no se aplicó SQL ni se arrancó otro entorno.",
+    "noEquivalencia": "Las pruebas DEMO de AsyncStorage no se atribuyen a PostgreSQL ni a producción."
+  },
+  "seguridad": {
+    "revision": "Sin archivos privados, dependencias locales o patrones de claves detectados en los archivos modificados.",
+    "comprobacionLimitada": "Una búsqueda de patrones no sustituye la revisión de credenciales ni una auditoría de producción.",
+    "archivosExaminados": 73
+  },
+  "fisico": {
+    "realizado": false,
+    "instanciaRecuperadaActiva": false
+  }
+}

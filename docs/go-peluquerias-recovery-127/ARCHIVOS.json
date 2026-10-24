@@ -1,0 +1,279 @@
+{
+  "base": "aa5c137968bad97eae35cc49bf52b1f85517afe4",
+  "functionalCommit": "4d453a8afb5fd76c51a3cbf3cde7375b796da84e",
+  "functionalFileCount": 68,
+  "files": [
+    {
+      "status": "A",
+      "path": "artifacts/api-server/src/lib/modulePublication.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/api-server/src/routes/admin.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/api-server/src/routes/index.ts"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/api-server/src/routes/modulePublication.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/api-server/src/routes/supabase.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/api-server/tests/email-confirmation.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/api-server/tests/module-publication.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/app/index.tsx"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/components/AgendaOperativa.tsx"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/components/auth/LoginRegisterPanel.tsx"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/components/auth/PasswordInput.tsx"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/components/booking/BookingSearchOverlay.tsx"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/components/booking/GoProveedorReservaSheet.tsx"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/components/empresa/GoAdminDashboard.tsx"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/components/empresa/GoModulePublicationPanel.tsx"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/components/landing/LandingActionCompletion.tsx"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/components/notes/GoNoteReminderPicker.tsx"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/data/booking.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/data/businessDemoStore.ts"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/hooks/useActionCompletion.ts"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/hooks/useBookingModulePublication.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/hooks/useGoCalendarEntries.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/hooks/useGoLog.ts"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/hooks/useGoNoteVoice.ts"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/lib/goActionCompletion.ts"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/lib/goActionCompletionNotifications.ts"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/lib/goActionCompletionStore.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/lib/goLogStore.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/lib/goNativeNotificationAdapter.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/lib/goNativeReminderScheduler.ts"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/lib/goNoteReminder.ts"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/lib/goNoteTools.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/lib/goTaskReminderRuntime.ts"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/account-selection.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/tests/action-completion-fluency.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/tests/action-completion-integration.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/tests/action-completion.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/admin-tools-matrix.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/auth-navigation-lifecycle.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/booking-timeline-ui.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/booking-timeline.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/business-demo.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/calendar-layout.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/calendar-slot-flow.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/configuration-auth.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/customer-booking.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/demo-booking-ui.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/go-log-sync.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/tests/go-note-functions.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/hairdresser-booking.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/helpers/calendar-container-fixture.mjs"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/tests/helpers/module-publication-fixture.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/landing-compact-proposals.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/landing-help-context.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/landing-lower-redistribution.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/tests/landing-satellite-labels.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/landing-visual-variants.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/tests/module-publication.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/native-reminder-runtime.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/native-reminder-scheduler.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "artifacts/go-app-mobile/tests/password-input.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/registration-return.test.mjs"
+    },
+    {
+      "status": "M",
+      "path": "artifacts/go-app-mobile/tests/tasks-visual.test.mjs"
+    },
+    {
+      "status": "A",
+      "path": "docs/GO-MODULE-PUBLICATION.md"
+    },
+    {
+      "status": "M",
+      "path": "lib/api-zod/src/index.ts"
+    },
+    {
+      "status": "A",
+      "path": "lib/api-zod/src/module-publication.ts"
+    },
+    {
+      "status": "M",
+      "path": "tools/go-private-gateway/gateway.mjs"
+    },
+    {
+      "status": "A",
+      "path": "tools/go-private-gateway/module-publication.test.mjs"
+    }
+  ]
+}
