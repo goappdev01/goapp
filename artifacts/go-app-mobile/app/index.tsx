@@ -20460,7 +20460,7 @@ function HomeScreenContent() {
                 accessibilityLabel={t("biz_book_btn")}
                 style={{ flexGrow: 1, flexShrink: 1, minWidth: 104, maxWidth: 180, paddingHorizontal: 16, height: 52, borderRadius: 18, backgroundColor: "#C8A037", borderWidth: 1.5, borderColor: "#F8DF8B", alignItems: "center", justifyContent: "center" }}
               >
-                <Text style={{ color: "#17120B", fontSize: 12, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.8 }}>{t("biz_book_btn").toUpperCase()}</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2} style={{ color: "#17120B", fontSize: 12, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.2, maxWidth: "100%", flexShrink: 1, textAlign: "center", textAlignVertical: "center", includeFontPadding: false }}>{t("biz_book_btn").toUpperCase()}</Text>
               </TouchableOpacity>
               {/* IA */}
               <TouchableOpacity
