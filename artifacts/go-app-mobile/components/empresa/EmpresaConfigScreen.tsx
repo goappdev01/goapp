@@ -1236,7 +1236,7 @@ function ProfessionalScheduleSection({
   businessId: string;
   color: string;
 }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const SCHED_DAYS_FULL_T  = [t("biz_day_mon_full"), t("biz_day_tue_full"), t("biz_day_wed_full"), t("biz_day_thu_full"), t("biz_day_fri_full"), t("biz_day_sat_full"), t("biz_day_sun_full")];
   const SCHED_DAYS_SHORT_T = buildDaysShortT(t);
   const { config, updateConfig } = useBusinessConfig();
@@ -1351,22 +1351,26 @@ function ProfessionalScheduleSection({
   const sel = getDs(selectedDay);
 
   return (
-    <View style={[c.proSchedWrapper, { borderColor: color + "25" }]}>
+    <View style={{ gap: 8 }}>
+    <View testID="professional-schedule-section" style={[c.proSchedWrapper, { borderColor: color + "25" }]}>
       <TouchableOpacity
+        testID="professional-schedule-toggle"
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
         onPress={() => setExpanded(e => !e)}
         activeOpacity={0.8}
         style={c.proSchedHeader}
       >
         <Feather name="clock" size={12} color={color} />
-        <Text style={[c.proSchedHeaderTxt, { color }]}>
-          {t("biz_schedule_colon")} {isCompany ? t("biz_company_schedule") : t("biz_custom_schedule")}
-        </Text>
+        <View style={{ flex: 1, gap: 2 }}>
+          <Text style={[c.proSchedHeaderTxt, { color: TEXT, flex: 0 }]}>{lang === "en" ? "PROFESSIONAL SCHEDULE" : "HORARIO DEL PROFESIONAL"}</Text>
+          <Text style={{ color: "#374151", fontSize: 12 }}>{isCompany ? t("biz_company_schedule") : t("biz_custom_schedule")}</Text>
+        </View>
         <Feather name={expanded ? "chevron-up" : "chevron-down"} size={12} color={color} />
       </TouchableOpacity>
 
       {expanded && (
         <View style={{ paddingHorizontal: 4, paddingBottom: 12, gap: 8 }}>
-          <ProfessionalGapPolicy color={color} value={schedCfg.gapPolicy} onChange={gapPolicy=>updateConfig({staffSchedules:{...(config.staffSchedules??{}),[stableId]:{...schedCfg,gapPolicy}}})}/>
           {/* Mode toggle */}
           <View style={{ flexDirection: "row", gap: 6, marginTop: 4 }}>
             {([t("biz_company_schedule"), t("biz_custom_schedule")] as const).map((label, idx) => {
@@ -1490,6 +1494,8 @@ function ProfessionalScheduleSection({
           )}
         </View>
       )}
+    </View>
+    <ProfessionalGapPolicy key={stableId} color={color} value={schedCfg.gapPolicy} onChange={gapPolicy=>updateConfig({staffSchedules:{...(config.staffSchedules??{}),[stableId]:{...schedCfg,gapPolicy}}})}/>
     </View>
   );
 }
