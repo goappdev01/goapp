@@ -27,8 +27,8 @@ test('older and new receipts expose the same compact accepted actions, including
 test('expanded sheet closes immediately from a larger floating target outside the scroll and keeps GO message compact',()=>{
  let closed=0,message=0;const f=sheet(base,{onClose:()=>closed++,onMessage:()=>message++,onExit(){}});
  const modal=nodes(f.tree,n=>n.type==='Modal')[0],floating=nodes(f.tree,n=>n.props.testID==='entry-detail-floating-close')[0],scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0];
- assert.equal(modal.props.animationType,'none');assert.equal(floating.props.style.position,'absolute');assert.equal(floating.props.style.right+floating.props.style.padding,12);assert.equal(floating.props.style.bottom+floating.props.style.padding,12);assert.equal(floating.props.style.padding,10,'parent bounds admit the full native hitSlop without moving the visible close icon');assert.equal(floating.props.style.flexDirection,'row');assert.equal(nodes(scroll,n=>n.props.testID==='entry-detail-floating-close').length,0);assert.equal(scroll.props.contentContainerStyle.paddingBottom,68);assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
- const close=nodes(floating,n=>n.props.accessibilityLabel==='Cerrar detalle')[0];assert.equal(close.props.hitSlop,10);const touch=f.render(close.type,close.props);assert.equal(touch.props.delayPressIn,0);touch.props.onPress({stopPropagation(){}});assert.equal(closed,1);
+ assert.equal(modal.props.animationType,'none');assert.equal(floating.props.style.position,'absolute');assert.equal(floating.props.style.right+6,12);assert.equal(floating.props.style.bottom+6,12);assert.equal(floating.props.style.padding,0,'actual touch targets replace overlapping hitSlop while visible icons keep their positions');assert.equal(floating.props.style.gap,0);assert.equal(floating.props.style.flexDirection,'row');assert.equal(nodes(scroll,n=>n.props.testID==='entry-detail-floating-close').length,0);assert.equal(scroll.props.contentContainerStyle.paddingBottom,68);assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
+ const close=nodes(floating,n=>n.props.accessibilityLabel==='Cerrar detalle')[0];assert.equal(close.props.hitSlop,0);const touch=f.render(close.type,close.props);assert.equal(touch.props.style.width,56);assert.equal(touch.props.style.height,56);assert.equal(touch.props.delayPressIn,0);touch.props.onPress({stopPropagation(){}});assert.equal(closed,1);
  const msg=nodes(f.tree,n=>n.props.testID==='entry-message-go')[0];assert.equal(msg.props.accessibilityLabel,'MENSAJE GO');assert.equal(msg.props.style.alignSelf,'flex-end');msg.props.onPress();assert.equal(message,1);
 });
 
@@ -92,7 +92,7 @@ test('contract shows only booked snapshot lines, included items are not charged 
  const entry={...base,detail:'Información larga '.repeat(300),bookingCatalog:{totalPrice:45,currency:'EUR',lines:[{itemId:'dye',name:'Tinte',charge:45,currency:'EUR'},{itemId:'included',name:'Mascarilla',included:true,charge:0,currency:'EUR'}],options:[{name:'No contratado'}]}};
  const f=sheet(entry),text=texts(f.tree);assert.ok(text.includes('Tinte'));assert.ok(text.includes('Mascarilla'));assert.ok(text.includes('Incluido'));assert.ok(text.includes('45.00 EUR'));assert.ok(!text.includes('No contratado'));
  assert.ok(text.includes(entry.detail));const scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0];assert.equal(scroll.props.bounces,false);assert.equal(scroll.props.alwaysBounceVertical,false);assert.equal(scroll.props.style.flex,1);
- const gesture=nodes(f.tree,n=>n.props.testID==='entry-detail-close-gesture')[0];assert.equal(scroll.props.onPanResponderRelease,undefined);assert.ok(gesture.props.onPanResponderRelease);
+ const gesture=nodes(f.tree,n=>n.props.testID==='entry-details-sheet')[0];assert.equal(scroll.props.onPanResponderRelease,undefined);assert.ok(gesture.props.onPanResponderRelease);assert.ok(gesture.props.onMoveShouldSetPanResponderCapture);
 });
 for(const type of ['GO_BOOKING','TAREA_INTERNA'])test(`${type}: opening/closing repeatedly preserves closed card geometry, day and canonical record`,()=>{
  const f=fixture({now:'2030-10-26T08:00:00'}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');
@@ -130,7 +130,7 @@ test('three microactions stop propagation, honor supplied permissions and retain
 test('expanded short cards push actions towards the useful bottom; long cards still use a single scroll and handed close',()=>{
  for(const handedness of ['left','right']){const f=sheet({...base,detail:'Detail '.repeat(500)},{handedness,onMessage(){}});
   const scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0],actions=nodes(scroll,n=>n.props.testID==='entry-details-actions')[0],close=nodes(f.tree,n=>n.props.testID==='entry-detail-floating-close')[0];
-  assert.equal(scroll.props.contentContainerStyle.flexGrow,1);assert.equal(actions.props.style.marginTop,'auto');assert.equal(close.props.style[handedness],2);assert.ok(scroll.props.contentContainerStyle.paddingBottom>=64);
+  assert.equal(scroll.props.contentContainerStyle.flexGrow,1);assert.equal(actions.props.style.marginTop,'auto');assert.equal(close.props.style[handedness]+6,12);assert.ok(scroll.props.contentContainerStyle.paddingBottom>=64);
  }
  const personal={...base,type:'TAREA_INTERNA',customerBooking:false,kind:'sent',direction:'self',contactName:'',phone:'',whatsapp:''};
  assert.equal(nodes(sheet(personal,{onMessage(){}}).tree,n=>n.props.testID==='entry-message-go').length,0);

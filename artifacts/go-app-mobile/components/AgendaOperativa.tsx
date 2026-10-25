@@ -761,10 +761,15 @@ export function AgendaBoard({
 
   // ── Booking chat modal (GO_BOOKING / GO_RESERVA entries) ─────────
   const [bookingMsgEntry, setBookingMsgEntry] = useState<GoEntry | null>(null);
-  const [expandedBookingItem, setExpandedBookingItem] = useState<GoEntry | null>(null);
+  // Selection owns only identity; calendar projections legitimately create fresh objects.
+  const [expandedBookingId, setExpandedBookingId] = useState<string | null>(null);
+  const expandedBookingItem = goLog.find(entry => entry.id === expandedBookingId) ?? null;
+  const setExpandedBookingItem = useCallback((entry: GoEntry | null) => setExpandedBookingId(entry?.id ?? null), []);
   const [verificationEntry,setVerificationEntry]=useState<GoEntry|null>(null);
   const bookingPolicy=expandedBookingItem?reservationCardPolicy(expandedBookingItem):null;
-  useEffect(()=>{if(expandedBookingItem){const current=goLog.find(e=>e.id===expandedBookingItem.id);if(!current)setExpandedBookingItem(null);else if(current!==expandedBookingItem)setExpandedBookingItem(current);}},[goLog,expandedBookingItem]);
+  useEffect(() => {
+    if (expandedBookingId && !expandedBookingItem) setExpandedBookingId(null);
+  }, [expandedBookingId, expandedBookingItem?.id]);
   const [bookingMsgDraft, setBookingMsgDraft] = useState("");
   const chatScrollRef = useRef<ScrollViewInstance>(null);
   // Optimistic local messages — always shown immediately on send; merged with goChats prop

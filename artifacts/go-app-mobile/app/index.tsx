@@ -118,6 +118,7 @@ import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
+import { LandingVisitOutline, LANDING_VISIT_FRAME } from "@/components/landing/LandingVisitOutline";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "@/components/GoEntryDetails";
 import { entryHeading, entryIdentity, entryIsReservation, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand } from "@/data/goEntryPresentation";
@@ -14867,6 +14868,7 @@ function HomeScreenContent() {
         return (
           <View
             key="proxima-abs-block"
+            testID={entryIsReservation(g) ? "landing-next-visit" : undefined}
             pointerEvents="box-none"
             onLayout={(e) => {
               const rect = e.nativeEvent.layout;
@@ -14886,9 +14888,11 @@ function HomeScreenContent() {
                 ? landingFrame.baseline + landingFrame.height - landingPanels.next.y - landingPanels.next.height
                 : screen.height - landingPanels.next.y - landingPanels.next.height),
               zIndex: 5,
+              ...(entryIsReservation(g) ? { paddingBottom: Math.round(LANDING_VISIT_FRAME.bottomGap * uiScaleFactor) } : {}),
             }}
           >
-            <LandingCardContents staticBody intrinsicBody={entryIsInternal(g)}
+            {entryIsReservation(g) && <LandingVisitOutline scale={uiScaleFactor} color={nextCardDeleteConfirm === g.id ? "#ef4444" : tint} />}
+            <LandingCardContents staticBody intrinsicBody={entryIsInternal(g) || entryIsReservation(g)}
               adaptiveBody={{ availableHeight: nextCardAvailableHeight, frameVerticalInset: Math.round(10 * uiScaleFactor) + Math.round((entryIsInternal(g) ? 8 : 14) * uiScaleFactor) + 3, width: PANEL_W, headerObstacles }}
               footer={operations.content}
               footerGap={PANEL_ACTION_GAP} overflowing={false} onHeight={() => {}}
@@ -14932,10 +14936,10 @@ function HomeScreenContent() {
                   ...(entryIsInternal(g) ? { paddingBottom: Math.round(8 * uiScaleFactor) } : {}),
                   borderRadius: Math.round(14 * uiScaleFactor),
                   borderWidth: 1.5,
-                  borderColor: nextCardDeleteConfirm === g.id ? "#ef4444" : tint,
+                  borderColor: entryIsReservation(g) ? "transparent" : nextCardDeleteConfirm === g.id ? "#ef4444" : tint,
                   backgroundColor: "rgba(15,15,18,0.94)",
                   shadowColor: nextCardDeleteConfirm === g.id ? "#ef4444" : tint,
-                  shadowOpacity: 0.35,
+                  shadowOpacity: entryIsReservation(g) ? 0 : 0.35,
                   shadowRadius: 10,
                   shadowOffset: { width: 0, height: 0 },
                   elevation: 4,

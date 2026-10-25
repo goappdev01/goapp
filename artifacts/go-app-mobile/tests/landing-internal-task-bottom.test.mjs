@@ -24,9 +24,9 @@ test('intrinsic containment and the compact bottom inset apply only to internal 
   const internal = [{ type: 'TAREA_INTERNA', notes: 'Hacer la compra' }, { type: 'TAREA', direction: 'self', sourceNoteId: 'note-1', notes: 'Hacer la compra' }, { type: 'GO_INTERNO' }];
   const other = [{ type: 'GO_BOOKING', customerBooking: true }, { type: 'GO_BOOKING', businessBooking: true }, { type: 'TAREA', direction: 'outgoing', phone: '600000001' }];
   for (const g of [...internal, ...other]) for (const scale of [.83, 1, 1.12, 1.35]) {
-    const expected = internal.includes(g), context = { g, entryIsInternal: presentation.entryIsInternal,
+    const expected = internal.includes(g), context = { g, entryIsInternal: presentation.entryIsInternal, entryIsReservation: presentation.entryIsReservation,
       uiScaleFactor: scale, nextCardAvailableHeight: 300, PANEL_W: 284, headerObstacles: [] };
-    assert.equal(vm.runInNewContext(attr(card, 'intrinsicBody').getText(ast), context), expected);
+    assert.equal(vm.runInNewContext(attr(card, 'intrinsicBody').getText(ast), context), expected || presentation.entryIsReservation(g));
     const sizing = vm.runInNewContext('(' + attr(card, 'adaptiveBody').getText(ast) + ')', context);
     assert.equal(sizing.frameVerticalInset, Math.round(10 * scale) + Math.round((expected ? 8 : 14) * scale) + 3);
     assert.equal(vm.runInNewContext(attr(title, 'numberOfLines').getText(ast), context), expected ? undefined : 1);

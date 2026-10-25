@@ -74,7 +74,7 @@ for(const profile of profiles)for(const [label,height]of [['two lines',36],['thr
   const f=await fixture(profile,{bodyHeight:height,place:address});try{
    const body=byId(f.container,'landing-card-body'),frame=byId(f.container,'landing-information-frame'),footer=byId(f.container,'landing-card-operations');
    assert.equal(body.attributes['data-native'],'View');assert.ok(dom(frame).includes(body));
-   for(const node of [body,frame]){const style=JSON.parse(node.attributes['data-style']);assert.equal(style.height,undefined);if(node===body)assert.ok(style.maxHeight>=0);else assert.equal(style.maxHeight,undefined);assert.equal(style.overflow,undefined);assert.equal(style.flexShrink,0);}
+   for(const node of [body,frame]){const style=JSON.parse(node.attributes['data-style']);assert.equal(style.height,undefined);assert.equal(style.maxHeight,undefined);assert.equal(style.overflow,undefined);assert.equal(style.flexShrink,0);}
    assert.ok(f.container.textContent.includes(address));assert.ok(/Contacto completo|CONTACTO COMPLETO/.test(f.container.textContent));
    const actions=byId(f.container,'entry-quick-actions');assert.ok(dom(frame).includes(actions));assert.ok(!dom(footer).includes(actions),'reservation/task quick actions are inside their information card');
    const savedFooter=footer.attributes['data-style'];await f.press();await f.press(true);assert.deepEqual(f.actions,['open','long:same-appointment']);
@@ -98,7 +98,7 @@ for(const profile of profiles)test(profile+': measured growth goes upward, contr
 for(const profile of profiles)test(profile+': compact Landing never creates a vertical scroller, even as available height changes',async()=>{
  const f=await fixture(profile,{bodyHeight:700});try{
   const footer=byId(f.container,'landing-card-operations'),frame=byId(f.container,'landing-information-frame'),body=byId(f.container,'landing-card-body');
-  assert.equal(body.attributes['data-native'],'View');assert.ok(JSON.parse(byId(f.container,'landing-card-fixed-frame').attributes['data-style']).maxHeight<=f.state.availableHeight);assert.ok(JSON.parse(body.attributes['data-style']).maxHeight<700);assert.ok(dom(frame).includes(body));assert.ok(!dom(body).includes(frame)&&!dom(body).includes(footer));
+  assert.equal(body.attributes['data-native'],'View');assert.equal(JSON.parse(byId(f.container,'landing-card-fixed-frame').attributes['data-style']).maxHeight,undefined);assert.equal(JSON.parse(body.attributes['data-style']).maxHeight,undefined,'essential visit controls must not cross a constrained body frame');assert.ok(dom(frame).includes(body));assert.ok(!dom(body).includes(frame)&&!dom(body).includes(footer));
   assert.equal(dom(f.container).filter(n=>n.attributes?.['data-native']==='ScrollView').length,0);
   assert.equal(byId(f.container,'landing-card-operations'),footer);assert.equal(byId(f.container,'landing-information-frame'),frame);
   await f.update({availableHeight:1000});assert.equal(byId(f.container,'landing-card-body').attributes['data-native'],'View');assert.equal(byId(f.container,'landing-card-operations'),footer);

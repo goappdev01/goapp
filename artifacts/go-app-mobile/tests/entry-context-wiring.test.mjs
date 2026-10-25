@@ -35,7 +35,8 @@ test('the compact proposal has one identifying title and retains the shared func
  const ast=parse('app/index.tsx');
  const card=nodes(ast,n=>ts.isJsxElement(n)&&n.openingElement.attributes.properties.some(p=>p.name?.getText(ast)==='testID'&&p.initializer?.getText(ast)==='"landing-proposal-card"'))[0];assert.ok(card);
  const text=card.getText(ast);assert.ok(!text.includes('_labelText'));assert.ok(!text.includes('CAMBIO PROPUESTO'));assert.ok(!text.includes('ScrollView'));
- assert.ok(fs.readFileSync('app/index.tsx','utf8').includes('item.kind === "cambio" && renderEntryQuickActions(item.g, true, true)'));
+ assert.ok(fs.readFileSync('app/index.tsx','utf8').includes('renderEntryQuickActions(item.g, true, true)'));
+ assert.ok(fs.readFileSync('app/index.tsx','utf8').includes('renderEntryMicroActions(item.g, true)'));
  const source=fs.readFileSync('components/GoEntryDetails.tsx','utf8');assert.ok(source.includes('"PROPONER CAMBIO"'));assert.ok(source.includes('"PROPOSE CHANGE"'));
  const panels=components(ast,'LandingCardContents');assert.equal(panels.length,2);for(const panel of panels)assert.ok(panel.attributes.properties.some(p=>p.name?.getText(ast)==='staticBody'));
 });

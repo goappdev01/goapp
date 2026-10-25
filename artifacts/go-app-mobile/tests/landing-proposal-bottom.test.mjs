@@ -39,7 +39,7 @@ test('Landing proposal containment and its padding budget remain scoped to chang
   }
   const otherCards = all.filter(n => ts.isJsxElement(n) && n.openingElement.tagName.getText(ast) === 'LandingCardContents' && n !== card);
   assert.ok(otherCards.length > 0);
-  for (const other of otherCards) assert.equal(attr(other, 'intrinsicBody').getText(ast), 'entryIsInternal(g)', 'Visits retain bounded sizing; only internal tasks opt in');
+  for (const other of otherCards) assert.equal(attr(other, 'intrinsicBody').getText(ast), 'entryIsInternal(g) || entryIsReservation(g)', 'Visit and task essentials use natural height without changing proposals');
 });
 
 test('constrained native measurements cannot clamp the proposal frame through its essential actions', async () => {

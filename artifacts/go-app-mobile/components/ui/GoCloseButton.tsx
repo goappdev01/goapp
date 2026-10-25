@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, TouchableOpacity } from "react-native";
+import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 
 type Props = {
@@ -8,10 +8,13 @@ type Props = {
   onPress: () => void;
   accessibilityLabel: string;
   hitSlop?: number;
+  touchSize?: number;
 };
 
 /** ↓ closes one open panel; ⇓ exits its containing screen. */
-export function GoCloseButton({ level, onPress, accessibilityLabel, disabled = false, hitSlop = 2 }: Props) {
+export function GoCloseButton({ level, onPress, accessibilityLabel, disabled = false, hitSlop = 2, touchSize = 44 }: Props) {
+  const size = Math.max(44, touchSize);
+  const icon = <Feather name={level === "panel" ? "chevron-down" : "chevrons-down"} size={20} color="#ffffff" />;
   return (
     <TouchableOpacity
       onPress={event => { event?.stopPropagation(); onPress(); }}
@@ -22,9 +25,9 @@ export function GoCloseButton({ level, onPress, accessibilityLabel, disabled = f
       activeOpacity={0.75}
       hitSlop={hitSlop}
       delayPressIn={0}
-      style={styles.button}
+      style={size === 44 ? styles.button : { width: size, height: size, alignItems: "center", justifyContent: "center" }}
     >
-      <Feather name={level === "panel" ? "chevron-down" : "chevrons-down"} size={20} color="#ffffff" />
+      {size === 44 ? icon : <View pointerEvents="none" style={styles.button}>{icon}</View>}
     </TouchableOpacity>
   );
 }

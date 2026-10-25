@@ -1,5 +1,5 @@
 import {test} from 'node:test';
-import {renderEntryQuickActions} from './helpers/entry-details-fixture.mjs';
+import {renderEntryQuickActions,renderEntryMicroActions} from './helpers/entry-details-fixture.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,7 +24,7 @@ async function fixture({scale=1,profile='ADMIN',long=false,received=false}={}){
  function ScrollView(p){const [offset,setOffset]=React.useState(0);propsById.set('drag',setOffset);return React.createElement('div',{'data-testid':p.testID,'data-native':'ScrollView','data-offset':offset,'data-style':JSON.stringify(p.style)},p.children)}
  const shared=evaluate('components/landing/LandingContentViewport.tsx',{'react-native':{...rn,View,Text,ScrollView}});
  const g=Object.freeze({id:'shared-action',type:'GO_BOOKING',kind:received?'received':'sent',estado:received?'propuesto':'propuesta_pendiente',notes:'Título completo de la actividad\nSegunda línea',changeProposal:{date:'Fecha propuesta completa',time:'14:00',note:'Nota completa de la propuesta\nSegunda línea\nTercera línea'}});
- const ctx={React,renderEntryQuickActions,View,Text,Pressable:View,TouchableOpacity:View,Feather:()=>null,LandingCompactBody:shared.LandingCompactBody,LandingCardContents:shared.LandingCardContents,uiScaleFactor:scale,
+ const ctx={React,renderEntryQuickActions,renderEntryMicroActions,View,Text,Pressable:View,TouchableOpacity:View,Feather:()=>null,LandingCompactBody:shared.LandingCompactBody,LandingCardContents:shared.LandingCardContents,uiScaleFactor:scale,
  changesCardSpace:{availableHeight:400,width:354,headerObstacles:[]},item:{kind:'cambio',g},cardAccent:'#f97316',cardTitle:'Contacto completo\nOtra línea',cardSub:'Servicio completo\nOtra línea',cardOrigDate:'Vie 16/10 · 14:00',cardNewDate:'Sáb 17/10 · 15:00',isSent:!received,total:1,safeIdx:0,allPendientes:[{kind:'cambio',g}],ACCENT:'#f97316',BLUE:'#60a5fa',
  goView:{view:profile},setPendingHeaderH(){},setPendingContentH(){},Haptics:{selectionAsync:async()=>{},impactAsync:async()=>{},ImpactFeedbackStyle:{Light:'light'}},
  t:k=>k==='biz_booking_awaiting'?'Esperando respuesta':k,landingCurrentEntry:e=>e,
