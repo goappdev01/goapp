@@ -489,15 +489,64 @@ test("Expo-compiled DEMO provider keeps form edits visible and persists them acr
 });
 
 
-for (const multiple of [false, true]) test("complete DEMO booking reaches its final screen and updates both real calendar callbacks, reload and cancellation" + (multiple ? " with multiple services" : ""), async () => {
-  const f = dataFixture();
+// Valid end-to-end fixtures assign actual bookable services explicitly. Empty
+// assignments deliberately remain covered by the negative scenarios below.
+async function demoReservationScenario(multiple, assigned = true) {
+  const f = dataFixture(), names = ["Corte de prueba", ...(multiple ? ["Tinte de prueba"] : [])];
   await f.store.updateConfig({ businessName: "GO PELUQUERÍA", sectorId: "belleza", subId: "peluqueria", address: "Calle de prueba", phone: "912345678",
-    activeDays: [0,1,2,3,4], services: [{ name: "Corte de prueba", duration: 30, price: 12 }, ...(multiple ? [{ name: "Tinte de prueba", duration: 60, price: 20 }] : [])],
-    plantillaItems: [{ id: "puestos", count: 2, label: "Puestos", staffNames: ["Profesional DEMO", "Profesional DOS"] }], completedSteps: [0,1,2,3,4,5,6,7] });
+    activeDays: [0,1,2,3,4], services: [{ name: names[0], duration: 30, price: 12 }, ...(multiple ? [{ name: names[1], duration: 60, price: 20 }] : [])],
+    plantillaItems: [{ id: "puestos", count: 2, label: "Puestos", staffNames: ["Profesional DEMO", "Profesional DOS"],
+      ...(assigned ? { staffServices: [names, [names[0]]] } : {}) }], completedSteps: [0,1,2,3,4,5,6,7] });
   const plan = floor(f.store); plan.elements.push({ ...plan.elements[0], id: "demo-space-two", label: "Profesional DOS" });
   await f.store.saveFloorPlan(plan);
-  const now = () => Date.parse("2030-01-07T08:00:00");
+  const dateISO = "2030-01-07", now = () => Date.parse(dateISO + "T08:00:00");
   const repo = bookingRepositoryModule.createDemoBookingRepository(f.store, { now });
+  const services = await repo.getBookableItems(f.store.businessId), professionals = await repo.getStaff(f.store.businessId);
+  return { f, repo, dateISO, now, services, professional: professionals[0], serviceIds: services.map(service => service.id), totalMinutes: multiple ? 90 : 30 };
+}
+
+// Observability for a failed expectation, never an alternate admission engine.
+// The selected slot and its units/availability always come from the actual repo.
+async function demoAvailabilityReport(scenario) {
+  const {f,repo,dateISO,now,services,professional,serviceIds,totalMinutes} = scenario, data = f.store.getSnapshot();
+  const raw = await repo.getAllSlots(f.store.businessId, services[0].id, dateISO, professional.id, serviceIds);
+  const assigned = services.filter(service => professional.serviceIds?.includes(service.id) && service.active && service.visible !== false);
+  const qualified = loadPure("data/bookingServices.ts").staffSupportsBookingServices(professional, serviceIds);
+  const shifts = storeModule.getBusinessDemoShifts(data.config, dateISO, professional);
+  const element = storeModule.businessDemoProfessionalElement(data, professional);
+  const toMinute = value => Number(value.slice(11,13))*60+Number(value.slice(14,16));
+  const slots = raw.map(slot => {
+    const related = data.bookings.filter(booking => booking.startDatetime < slot.endDatetime && booking.endDatetime > slot.startDatetime
+      && (booking.staffId === professional.id || booking.elementId === element?.id)
+      && (["CONFIRMED","ACCEPTED","COMPLETED","BLOCKED"].includes(booking.status) || booking.status === "HOLD" && (!booking.holdExpiresAt || Date.parse(booking.holdExpiresAt) > now())));
+    const reason = slot.isAvailable ? "AVAILABLE"
+      : !qualified ? professional.serviceIds?.length ? "MISSING_REQUESTED_SERVICE_ASSIGNMENT" : "NO_ASSIGNED_BOOKABLE_SERVICES"
+      : !shifts.some(shift => toMinute(slot.startDatetime) >= shift.from && toMinute(slot.endDatetime) <= shift.to) ? "OUTSIDE_PROFESSIONAL_SHIFT"
+      : related.length ? "OCCUPIED_BY_EXISTING_RESERVATION"
+      : !element?.reservable || ["bloqueado","ocupado","mantenimiento"].includes(element.status) ? "PHYSICAL_POST_NOT_RESERVABLE"
+      : "NO_ELIGIBLE_AVAILABLE_RESOURCE";
+    return { ...plain(slot), reason, relatedBookingIds: related.map(booking => booking.id) };
+  });
+  return { business: data.config.businessName, businessId: f.store.businessId, services: services.map(service => ({ id: service.id, title: service.title, durationMinutes: service.durationMinutes })),
+    professional: { id: professional.id, name: professional.name, active: professional.active, serviceIds: professional.serviceIds, qualified,
+      minimumAssignedMinutes: assigned.length ? Math.min(...assigned.map(service => service.durationMinutes)) : null,
+      schedule: data.config.staffSchedules[professional.id] ?? "company", shifts, exception: data.config.staffSchedules[professional.id]?.gapPolicy ?? {allowLastMinuteGaps:false} },
+    dateISO, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, now: new Date(now()).toString(), totalMinutes,
+    companyShifts: storeModule.getBusinessDemoShifts(data.config,dateISO), existingBookings: data.bookings.map(plain), physicalPost: element && plain(element), slots };
+}
+function requireAvailableDemoTime(tree, report, hour) {
+  const slot = report.slots.find(value => value.startDatetime.slice(11,16) === hour), control = button(tree,hour);
+  assert.ok(slot?.isAvailable && control && !control.props.disabled,
+    `DEMO booking availability: ${report.services.map(service=>service.title).join(" + ")} / ${report.professional.name} / ${report.dateISO} ${hour}. `
+    + `Expected an available selectable time for the exact ${report.totalMinutes}-minute selection. `
+    + `Reason: ${!slot ? "NO_SLOT_GENERATED" : !slot.isAvailable ? slot.reason : "AVAILABLE_SLOT_BUTTON_MISSING"}. Received:\n${JSON.stringify(report,null,2)}`);
+  return control;
+}
+
+
+for (const multiple of [false, true]) test("complete DEMO booking reaches its final screen and updates both real calendar callbacks, reload and cancellation" + (multiple ? " with multiple services" : ""), async () => {
+  const scenario = await demoReservationScenario(multiple);
+  const {f,repo,services,professional,serviceIds,totalMinutes,dateISO} = scenario;
   const ui = uiFixture(f, { reactCompiler: true, bookingToday: "2030-01-07T00:00:00" });
   const Provider = ui.load("contexts/GoBusinessConfigContext.tsx").GoBusinessPreviewProvider;
   const Customer = ui.load("components/booking/DemoCustomerCalendar.tsx").DemoCustomerCalendar;
@@ -515,12 +564,26 @@ for (const multiple of [false, true]) test("complete DEMO booking reaches its fi
   await turn(); tree = ui.render(Overlay, props);
   button(tree, "save").props.onPress(); tree = ui.render(Overlay, props);
   button(tree, "Profesional DEMO").props.onPress(); ui.render(Overlay, props); await turn(); tree = ui.render(Overlay, props);
-  button(tree, "09:00").props.onPress(); await turn(); tree = ui.render(Overlay, props);
-  const confirm = button(tree, "BIZ_CONFIRM_BOOKING_BTN").props.onPress;
+  const report = await demoAvailabilityReport(scenario);
+  const hourControl = requireAvailableDemoTime(tree,report,"09:00");
+  assert.equal(report.slots.length,multiple?7:22);
+  assert.equal(report.professional.minimumAssignedMinutes,30);
+  assert.ok(report.professional.qualified);
+  assert.ok(report.slots.every(slot=>slot.isAvailable && slot.totalUnits===1),`Unexpected unavailable alternatives: ${JSON.stringify(report,null,2)}`);
+  for(const slot of report.slots){const before=(Date.parse(slot.startDatetime)-Date.parse(dateISO+"T09:00:00"))/60000,after=(Date.parse(dateISO+"T20:00:00")-Date.parse(slot.endDatetime))/60000;assert.equal(before%30,0);assert.equal(after%30,0);}
+  hourControl.props.onPress(); await turn(); tree = ui.render(Overlay, props);
+  const confirmButton = button(tree, "BIZ_CONFIRM_BOOKING_BTN");
+  assert.ok(confirmButton,`Missing confirmation screen for ${dateISO} 09:00: ${text(tree)}`);
+  const confirm = confirmButton.props.onPress;
   await Promise.all([confirm(), confirm()]); tree = ui.render(Overlay, props);
   assert.ok(text(tree).includes("BIZ_BOOKING_CONFIRMED")); assert.ok(text(tree).includes("GO PELUQUERÍA")); assert.ok(text(tree).includes("Profesional DEMO"));
   const data = f.store.getSnapshot(), booking = data.bookings[0];
-  assert.equal(data.bookings.length, 1); assert.equal(data.reservations.length, 1);
+  assert.equal(data.bookings.length, 1); assert.equal(data.reservations.length, 1); assert.equal(data.entries.length,1);
+  assert.equal(booking.startDatetime,dateISO+"T09:00:00");
+  assert.equal(booking.endDatetime,dateISO+(multiple?"T10:30:00":"T09:30:00"));
+  assert.equal((Date.parse(booking.endDatetime)-Date.parse(booking.startDatetime))/60000,totalMinutes);
+  assert.deepEqual(plain(loadPure("data/bookingServices.ts").bookingServiceIds(booking)),plain(serviceIds));
+  assert.equal(data.reservations[0].durationMinutes,totalMinutes);
   assert.equal(booking.status, "CONFIRMED"); assert.equal(booking.businessId, f.store.businessId);
   assert.equal(booking.bookableItemId, (await repo.getBookableItems(f.store.businessId))[0].id);
   assert.equal(booking.staffId, (await repo.getStaff(f.store.businessId))[0].id);
@@ -529,22 +592,48 @@ for (const multiple of [false, true]) test("complete DEMO booking reaches its fi
   assert.equal(clientBoard.props.goLog.length, 1); assert.equal(companyBoard.props.goLog.length, 1);
   assert.equal(clientBoard.props.goLog[0].reservationId, companyBoard.props.goLog[0].reservationId);
   assert.equal(clientBoard.props.goLog[0].staffId, booking.staffId);
+  for(const board of [clientBoard,companyBoard]){assert.equal(board.props.goLog[0].duration,String(totalMinutes));assert.equal(board.props.goLog[0].endTime,multiple?"10:30":"09:30");}
+  assert.equal(booking.staffId,professional.id);
+  assert.ok((await demoAvailabilityReport(scenario)).slots.some(slot=>slot.startDatetime===booking.startDatetime && !slot.isAvailable && slot.reason==="OCCUPIED_BY_EXISTING_RESERVATION"));
   if (multiple) {
     assert.equal(booking.services.length, 2); assert.equal(booking.endDatetime, "2030-01-07T10:30:00");
     for (const board of [clientBoard, companyBoard]) { assert.equal(board.props.goLog[0].duration, "90"); assert.equal(board.props.goLog[0].intentLabel, "Corte de prueba + Tinte de prueba"); }
   }
   const reopened = f.make(); await reopened.load(); assert.equal(reopened.getSnapshot().bookings.length, 1); assert.equal(reopened.getSnapshot().bookings[0].id, booking.id);
+  assert.deepEqual(plain(reopened.getSnapshot().bookings[0]),plain(booking));
+  const reopenedRepo=bookingRepositoryModule.createDemoBookingRepository(reopened,{now:scenario.now});
+  assert.equal(reopenedRepo.getCustomerEntries().length,1);
+  assert.equal(reopenedRepo.getCustomerEntries()[0].reservationId,clientBoard.props.goLog[0].reservationId);
   button(ui.render(Company, companyProps), "Profesional DOS").props.onPress();
   assert.equal(component(ui.render(Company, companyProps), "AgendaBoard").props.goLog.length, 0);
   button(ui.render(Company, companyProps), "Profesional DEMO").props.onPress();
   button(tree, "biz_ok_view_calendar").props.onPress(); assert.equal(navigation.length, 1); assert.equal(navigation[0][0], "2030-01-07");
-  await clientBoard.props.onDeleteItem(clientBoard.props.goLog[0].id); await turn(); ui.render(Provider);
+  clientBoard.props.onDeleteItem(clientBoard.props.goLog[0].id);
+  assert.equal(f.store.getSnapshot().bookings[0].status,"CONFIRMED","opening cancellation must not cancel without consent");
+  const cancellationPrompt=ui.alerts.at(-1);
+  assert.match(cancellationPrompt?.[1]??"",/Cancelar esta reserva/);
+  const cancelAction=cancellationPrompt[2].find(action=>action.text==="Cancelar reserva" && action.style==="destructive");
+  assert.ok(cancelAction,"the existing cancellation prompt must offer its explicit confirmation");
+  cancelAction.onPress(); await turn(); ui.render(Provider);
   clientBoard = component(ui.render(Customer, customerProps), "AgendaBoard"); companyBoard = component(ui.render(Company, companyProps), "AgendaBoard");
   assert.equal(clientBoard.props.goLog[0].estado, "rechazado");
   assert.ok(companyBoard.props.goLog.every(entry => entry.reservationId !== booking.id || entry.estado === "rechazado"));
   const restored = await reopened.load(); assert.equal(restored.bookings.length, 1); assert.equal(restored.bookings[0].status, "CANCELLED");
-  assert.equal((await repo.getAllSlots(f.store.businessId, booking.bookableItemId, "2030-01-07", booking.staffId)).find(slot => slot.startDatetime === booking.startDatetime).isAvailable, true);
+  assert.equal(restored.reservations.length,1);assert.equal(restored.reservations[0].status,"cancelada");assert.equal(restored.entries.length,1);
+  const released=(await reopenedRepo.getAllSlots(f.store.businessId,booking.bookableItemId,dateISO,booking.staffId,serviceIds)).find(slot=>slot.startDatetime===booking.startDatetime);
+  assert.ok(released?.isAvailable,`Cancellation did not free the exact ${totalMinutes}-minute selection`);
+  assert.equal(released.endDatetime,booking.endDatetime);
   assert.equal(ui.calls.external, 0); assert.equal(ui.calls.liveFloor, 0);
+});
+
+for(const multiple of [false,true])test("unassigned professionals legitimately block every DEMO time and report the actual missing assignment"+(multiple?" for 90 minutes":" for 30 minutes"),async()=>{
+ const scenario=await demoReservationScenario(multiple,false),{f,repo,professional,services,serviceIds,dateISO,totalMinutes}=scenario;
+ const report=await demoAvailabilityReport(scenario);assert.equal(report.slots.length,multiple?7:22);assert.equal(report.existingBookings.length,0);assert.equal(report.professional.minimumAssignedMinutes,null);
+ assert.ok(report.slots.every(slot=>!slot.isAvailable && slot.totalUnits===0 && slot.reason==="NO_ASSIGNED_BOOKABLE_SERVICES"));
+ assert.throws(()=>requireAvailableDemoTime({type:"View",props:{},children:[]},report,"09:00"),error=>error.code==="ERR_ASSERTION"&&error.message.includes("NO_ASSIGNED_BOOKABLE_SERVICES")&&error.message.includes(professional.name)&&error.message.includes(dateISO)&&error.message.includes("09:00")&&error.message.includes("Corte de prueba"));
+ const input={businessId:f.store.businessId,bookableItemId:services[0].id,services:services.map(service=>({id:service.id,title:service.title,durationMinutes:service.durationMinutes,price:service.price,priceKnown:true,currency:"EUR"})),staffId:professional.id,customerId:owner,startDatetime:dateISO+"T09:00:00",endDatetime:dateISO+(multiple?"T10:30:00":"T09:30:00"),unitsReserved:1,peopleCount:1};
+ for(const operation of [()=>repo.createHold(input),()=>repo.claimSlot({...input,status:"CONFIRMED",paymentStatus:"none"})])await assert.rejects(operation,/no está disponible/);
+ assert.equal(f.store.getSnapshot().bookings.length,0);assert.equal(f.store.getSnapshot().reservations.length,0);assert.equal(f.store.getSnapshot().entries.length,0);
 });
 
 // Exercise the actual eight-step callbacks, rather than direct store.updateConfig alone.

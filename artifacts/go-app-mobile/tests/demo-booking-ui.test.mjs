@@ -74,8 +74,14 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
     }return tree;}
   const Overlay=load("components/booking/BookingSearchOverlay.tsx").BookingSearchOverlay,MyList=load("components/booking/MyBookingsList.tsx").MyBookingsList;
   const props={visible:true,demoRepository:repo,initialBusinessId:store.businessId,onClose(){navigation.push("close");},onBookingConfirmed(){liveCalls.push("real confirmed callback");},onHoldCreated(){liveCalls.push("real hold callback");},onGoToBooking(){liveCalls.push("real calendar");},onProviderSelected(){liveCalls.push("real provider");},onDemoGoToBooking(...args){navigation.push(args);}};
-  const configure=async()=>{await store.updateConfig({businessName:"GO Peluquería Prueba",sectorId:"belleza",subId:"peluqueria",address:"Dirección DEMO",activeDays:[0,1,2,3,4],services:[{name:"Corte DEMO",duration:30,price:12}],plantillaItems:[{id:"pro",count:1,label:"Puesto",staffNames:["Raul 1 GO PRUEBA"]}],completedSteps:[0,1,2,3,4,5,6,7]});await store.saveFloorPlan({id:store.planId,businessId:store.businessId,updatedAt:1,elements:[{id:"puesto",label:"Raul 1 GO PRUEBA",type:"silla",reservable:true,status:"disponible",x:10,y:20,width:30,height:40,capacity:1}]});};
+  const configure=async()=>{await store.updateConfig({businessName:"GO Peluquería Prueba",sectorId:"belleza",subId:"peluqueria",address:"Dirección DEMO",activeDays:[0,1,2,3,4],services:[{name:"Corte DEMO",duration:30,price:12}],plantillaItems:[{id:"pro",count:1,label:"Puesto",staffNames:["Raul 1 GO PRUEBA"],staffServices:[["Corte DEMO"]]}],completedSteps:[0,1,2,3,4,5,6,7]});await store.saveFloorPlan({id:store.planId,businessId:store.businessId,updatedAt:1,elements:[{id:"puesto",label:"Raul 1 GO PRUEBA",type:"silla",reservable:true,status:"disponible",x:10,y:20,width:30,height:40,capacity:1}]});};
   return{store,repo,liveCalls,navigation,render,Overlay,MyList,props,configure,keyboardEvents,accent:load("components/booking/BookingSearchOverlay.tsx").bookingCategoryAccent};
+}
+// These positive scenarios require the selected professional to offer the
+// exact services introduced by each fixture, not an implicit all-services grant.
+async function setReservableServices(f,services,patch={}){
+ const plantillaItems=f.store.getSnapshot().config.plantillaItems.map(item=>({...item,staffServices:(item.staffNames??[]).map(()=>services.map(service=>service.name))}));
+ await f.store.updateConfig({...patch,services,plantillaItems});
 }
 function nodes(tree){if(!tree||typeof tree!=="object")return[];return[tree,...(tree.children??[]).flatMap(nodes)];}
 function text(tree){if(typeof tree==="string"||typeof tree==="number")return String(tree);return(tree?.children??[]).map(text).join(" ");}
@@ -157,7 +163,7 @@ test('the shared summary and saved selection use the reviewed voluntary product 
  assert.equal(f.store.getSnapshot().bookings[0].catalogSnapshot.totalPrice,19);assert.equal(f.store.getSnapshot().bookings[0].endDatetime,'2030-01-07T09:30:00');
 });
 test("multi-service UI keeps selection marked, supports deselection and waits for Guardar",async()=>{
-  const f=fixture();await f.configure();await f.store.updateConfig({services:[{name:"Corte DEMO",duration:30,price:12},{name:"Tinte DEMO",duration:60,price:20}]});
+  const f=fixture();await f.configure();await setReservableServices(f,[{name:"Corte DEMO",duration:30,price:12},{name:"Tinte DEMO",duration:60,price:20}]);
   let tree=await services(f);assert.equal(control(tree,"booking-save-services").props.disabled,true);
   const items=await f.repo.getBookableItems(f.store.businessId);
   control(tree,"booking-service-"+items[0].id).props.onPress();tree=f.render(f.Overlay,f.props);
@@ -169,7 +175,7 @@ test("multi-service UI keeps selection marked, supports deselection and waits fo
   assert.match(text(control(tree,"booking-services-total")),/60\s+min/);control(tree,"booking-save-services").props.onPress();tree=f.render(f.Overlay,f.props);assert.ok(button(tree,"Raul 1 GO PRUEBA"));assert.equal(f.store.getSnapshot().bookings.length,0);assert.deepEqual(f.liveCalls,[]);
 });
 test("multi-service UI confirms one reservation with all services, total duration and isolated calendar projections",async()=>{
-  const f=fixture();await f.configure();await f.store.updateConfig({services:[{name:"Corte DEMO",duration:30,price:12},{name:"Tinte DEMO",duration:60,price:20}]});
+  const f=fixture();await f.configure();await setReservableServices(f,[{name:"Corte DEMO",duration:30,price:12},{name:"Tinte DEMO",duration:60,price:20}]);
   let tree=await services(f);for(const item of await f.repo.getBookableItems(f.store.businessId)){control(tree,"booking-service-"+item.id).props.onPress();tree=f.render(f.Overlay,f.props);}
   control(tree,"booking-save-services").props.onPress();tree=f.render(f.Overlay,f.props);button(tree,"Raul 1 GO PRUEBA").props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
   await button(tree,"09:00").props.onPress();tree=f.render(f.Overlay,f.props);assert.match(text(tree),/Corte DEMO \+ Tinte DEMO/);assert.match(text(tree),/90\s+min/);
@@ -178,14 +184,14 @@ test("multi-service UI confirms one reservation with all services, total duratio
 });
 
 test("multi-service UI confirms cut, colour and treatment as one reservation",async()=>{
- const f=fixture();await f.configure();await f.store.updateConfig({services:[{name:"Corte DEMO",duration:30,price:12},{name:"Tinte DEMO",duration:60,price:20},{name:"Tratamiento DEMO",duration:15,price:8}]});
+ const f=fixture();await f.configure();await setReservableServices(f,[{name:"Corte DEMO",duration:30,price:12},{name:"Tinte DEMO",duration:60,price:20},{name:"Tratamiento DEMO",duration:15,price:8}]);
  let tree=await services(f);for(const item of await f.repo.getBookableItems(f.store.businessId)){control(tree,"booking-service-"+item.id).props.onPress();tree=f.render(f.Overlay,f.props);}
  assert.match(text(control(tree,"booking-services-total")),/105\s+min/);assert.match(text(control(tree,"booking-services-total")),/40/);control(tree,"booking-save-services").props.onPress();tree=f.render(f.Overlay,f.props);button(tree,"Raul 1 GO PRUEBA").props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);await button(tree,"09:00").props.onPress();tree=f.render(f.Overlay,f.props);await button(tree,"BIZ_CONFIRM_BOOKING_BTN").props.onPress();
  const data=f.store.getSnapshot();assert.equal(data.bookings.length,1);assert.equal(data.bookings[0].services.length,3);assert.equal(data.bookings[0].endDatetime,"2030-01-07T10:45:00");assert.equal(data.reservations.length,1);assert.equal(data.entries[0].intentLabel,"Corte DEMO + Tinte DEMO + Tratamiento DEMO");assert.equal(data.entries[0].duration,"105");assert.deepEqual(f.liveCalls,[]);
 });
 
 test('authorized internal preview retains the shared multi-service flow for an unpublished sector',async()=>{
- const f=fixture({context:"BUSINESS",ownerAccess:true});await f.configure();await f.store.updateConfig({sectorId:'salud',subId:'fisioterapia',services:[{name:'Consulta',duration:30,price:35},{name:'Tratamiento',duration:30,price:25}]});
+ const f=fixture({context:"BUSINESS",ownerAccess:true});await f.configure();await setReservableServices(f,[{name:'Consulta',duration:30,price:35},{name:'Tratamiento',duration:30,price:25}],{sectorId:'salud',subId:'fisioterapia'});
  const before=JSON.stringify(f.store.getSnapshot().config.services);
  let tree=await services(f);for(const item of await f.repo.getBookableItems(f.store.businessId)){control(tree,'booking-service-'+item.id).props.onPress();tree=f.render(f.Overlay,f.props);}
  await control(tree,'booking-save-services').props.onPress();tree=f.render(f.Overlay,f.props);button(tree,'Raul 1 GO PRUEBA').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
@@ -196,7 +202,7 @@ test('authorized internal preview retains the shared multi-service flow for an u
 
 const flattened=value=>Array.isArray(value)?Object.assign({},...value.map(flattened)):value??{};
 test('beauty services use visible yellow borders/prices and retain multi-selection until Save',async()=>{
- const f=fixture();await f.configure();await f.store.updateConfig({services:[{name:'Corte',duration:30,price:12},{name:'Tinte',duration:60,price:25}]});
+ const f=fixture();await f.configure();await setReservableServices(f,[{name:'Corte',duration:30,price:12},{name:'Tinte',duration:60,price:25}]);
  let tree=await services(f);const saved=JSON.stringify(f.store.getSnapshot().config.services),items=await f.repo.getBookableItems(f.store.businessId);
  for(const item of items){const option=control(tree,'booking-service-'+item.id);assert.equal(flattened(option.props.style).borderColor,'#eab30890');
   const price=nodes(option).find(n=>n.type==='Text'&&new RegExp('^'+item.price+'\\s*€$').test(text(n)));assert.ok(price,'the configured price is visible');assert.equal(flattened(price.props.style).color,'#eab308');
