@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import {createRequire} from 'node:module';
-import {renderEntryQuickActions,renderEntryMicroActions,entryIsReservation} from './helpers/entry-details-fixture.mjs';
+import {renderEntryQuickActions,renderEntryMicroActions,entryIsReservation,presentation} from './helpers/entry-details-fixture.mjs';
 const require=createRequire(path.join(process.cwd(),'package.json'));
 const {React,createRoot,document,rn,ts,evaluate}=require('./tests/helpers/react-lifecycle.cjs');
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),nodes=[];
@@ -46,7 +46,7 @@ async function fixture(profile,{bodyHeight=40,availableHeight=348,scale=1,place=
  function ScrollView(props){const [offset,setOffset]=React.useState(0);propsById.set('scroll',props);propsById.set('drag',setOffset);return React.createElement('div',{'data-testid':props.testID,'data-native':'ScrollView','data-offset':offset,'data-style':JSON.stringify(props.style)},props.children);}
  const native={...rn,View,ScrollView,Pressable:View,TouchableOpacity:View};
  const shared=evaluate('components/landing/LandingContentViewport.tsx',{'react-native':native});
- const scope={React,View,Animated:{View},Pressable:View,TouchableOpacity:View,Text:rn.Text,Feather:()=>null,entryIdentity:e=>e||'',renderEntryQuickActions,renderEntryMicroActions,entryIsReservation,lang:'es',
+ const scope={React,View,Animated:{View},Pressable:View,TouchableOpacity:View,Text:rn.Text,Feather:()=>null,entryIdentity:e=>e||'',renderEntryQuickActions,renderEntryMicroActions,entryIsReservation,entryIsInternal:presentation.entryIsInternal,lang:'es',
   nextCardPanRef:{panHandlers:{onMoveShouldSetResponder:()=>false}},nextCardSlideAnim:0,nextCardDeleteConfirm:null,nextCardDeleteTimerRef:{current:null},
   setNextCardDeleteConfirm(){},Haptics:{impactAsync:()=>Promise.resolve(),ImpactFeedbackStyle:{Light:'light',Medium:'medium'}},startRelatedGoAction:g=>actions.push('long:'+g.id),
   aChange:{fn:()=>actions.push('open')},setLandingDetailsId:()=>actions.push('open'),nextSwipeHintAnim:{interpolate:()=>0},nextSwipeHintStage:0,

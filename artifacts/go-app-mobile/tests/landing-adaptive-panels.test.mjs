@@ -52,7 +52,9 @@ for(const profile of ['ADMIN','USER','BUSINESS'])test(profile+': long proposal r
 });
 test('visits and tasks retain one renderer; compact task description opens the full detail',()=>{
  assert.equal((source.match(/key="proxima-abs-block"/g)||[]).length,1);
- const task=all.find(n=>ts.isJsxElement(n)&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='testID'&&a.initializer?.getText(ast)==='"landing-task-description"'));assert.ok(task);assert.equal(attr(task,'numberOfLines').getText(ast),'1');assert.equal(task.openingElement.attributes.properties.find(p=>p.name?.getText(ast)==='ellipsizeMode')?.initializer.getText(ast),'"tail"');
+ const task=all.find(n=>ts.isJsxElement(n)&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='testID'&&a.initializer?.getText(ast)==='"landing-task-description"'));assert.ok(task);
+ for(const internal of [true,false])assert.equal(vm.runInNewContext(attr(task,'numberOfLines').getText(ast),{g:{},entryIsInternal:()=>internal}),internal?undefined:1,'only internal task titles may expand');
+ assert.equal(task.openingElement.attributes.properties.find(p=>p.name?.getText(ast)==='ellipsizeMode')?.initializer.getText(ast),'"tail"');
  assert.ok(next.getText(ast).includes('g.type === "TAREA" || g.type === "TAREA_INTERNA"'));
  for(const card of cards){assert.ok(attr(card,'adaptiveBody'));const style=attr(card.parent,'style').getText(ast);assert.ok(!style.includes('maxHeight'));assert.ok(style.includes('bottom: contentBottom('));}
 });

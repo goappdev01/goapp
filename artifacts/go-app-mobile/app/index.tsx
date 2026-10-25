@@ -14874,8 +14874,8 @@ function HomeScreenContent() {
               zIndex: 5,
             }}
           >
-            <LandingCardContents staticBody
-              adaptiveBody={{ availableHeight: nextCardAvailableHeight, frameVerticalInset: Math.round(10 * uiScaleFactor) + Math.round(14 * uiScaleFactor) + 3, width: PANEL_W, headerObstacles }}
+            <LandingCardContents staticBody intrinsicBody={entryIsInternal(g)}
+              adaptiveBody={{ availableHeight: nextCardAvailableHeight, frameVerticalInset: Math.round(10 * uiScaleFactor) + Math.round((entryIsInternal(g) ? 8 : 14) * uiScaleFactor) + 3, width: PANEL_W, headerObstacles }}
               footer={operations.content}
               footerGap={PANEL_ACTION_GAP} overflowing={false} onHeight={() => {}}
               contentContainerStyle={{ gap: PANEL_ACTION_GAP }}
@@ -14915,6 +14915,7 @@ function HomeScreenContent() {
                   paddingHorizontal: Math.round(12 * uiScaleFactor),
                   paddingVertical: Math.round(14 * uiScaleFactor),
                   paddingTop: Math.round(10 * uiScaleFactor),
+                  ...(entryIsInternal(g) ? { paddingBottom: Math.round(8 * uiScaleFactor) } : {}),
                   borderRadius: Math.round(14 * uiScaleFactor),
                   borderWidth: 1.5,
                   borderColor: nextCardDeleteConfirm === g.id ? "#ef4444" : tint,
@@ -15044,7 +15045,7 @@ function HomeScreenContent() {
                 primary={<>
                   {(g.type === "TAREA" || g.type === "TAREA_INTERNA") && !!g.notes?.trim()
                     && g.notes.trim() !== displayContact(g.contactName, g.phone) && (
-                    <Text testID="landing-task-description" numberOfLines={1} ellipsizeMode="tail" style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}>{g.notes}</Text>
+                    <Text testID="landing-task-description" numberOfLines={entryIsInternal(g) ? undefined : 1} ellipsizeMode="tail" style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}>{g.notes}</Text>
                   )}
                   <View testID="landing-date-actions-row" style={{ flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0 }}>
                     <View accessibilityLabel={dateStr} style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 4 }}>

@@ -1,5 +1,5 @@
 import {test} from 'node:test';
-import {entryPhone,renderEntryQuickActions} from './helpers/entry-details-fixture.mjs';
+import {entryPhone,renderEntryQuickActions,presentation} from './helpers/entry-details-fixture.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -54,7 +54,7 @@ async function fixture(profile,card,stacked){
  const Pressable=props=>React.createElement(View,{...props,style:typeof props.style==='function'?props.style({pressed:false}):props.style},props.children);
  const native={...rn,View,ScrollView,TouchableOpacity,Pressable};
  const shared=evaluate('components/landing/LandingContentViewport.tsx',{'react-native':native});
- const scope={exports:{},React,entryPhone,renderEntryQuickActions,View,Animated:{View},Pressable,Text:rn.Text,TouchableOpacity,
+ const scope={exports:{},React,entryPhone,entryIsInternal:presentation.entryIsInternal,renderEntryQuickActions,View,Animated:{View},Pressable,Text:rn.Text,TouchableOpacity,
   tint:"#60a5fa",cardAccent:"#f97316",INFO_W:stacked?220:354,nextCardPanRef:{panHandlers:{onMoveShouldSetResponder:()=>false}},nextCardSlideAnim:0,nextCardDeleteConfirm:null,
   nextCardDeleteTimerRef:{current:null},setNextCardDeleteConfirm(){},startRelatedGoAction(){},LinearGradient:View,Feather:()=>null,
   landingCurrentEntry:policy.landingCurrentEntry,landingActionGrid:layout.landingActionGrid,

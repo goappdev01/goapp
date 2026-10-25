@@ -23,7 +23,7 @@ const nodes = n => n ? [n, ...n.childNodes.flatMap(nodes)] : [];
 const byId = (n, id) => nodes(n).find(c => c.attributes?.['data-testid'] === id);
 const settle = async fn => React.act(async () => { fn?.(); for (let i = 0; i < 12; i++) await Promise.resolve(); });
 
-test('only the actual Landing change card opts into intrinsic containment; padding and its measured budget agree', () => {
+test('Landing proposal containment and its padding budget remain scoped to change cards', () => {
   assert.ok(card && wrapper && compact);
   for (const scale of [.83, 1, 1.12]) for (const kind of ['cambio', 'hold']) {
     const scope = { item: { kind }, uiScaleFactor: scale };
@@ -39,7 +39,7 @@ test('only the actual Landing change card opts into intrinsic containment; paddi
   }
   const otherCards = all.filter(n => ts.isJsxElement(n) && n.openingElement.tagName.getText(ast) === 'LandingCardContents' && n !== card);
   assert.ok(otherCards.length > 0);
-  for (const other of otherCards) assert.equal(attr(other, 'intrinsicBody'), undefined);
+  for (const other of otherCards) assert.equal(attr(other, 'intrinsicBody').getText(ast), 'entryIsInternal(g)', 'Visits retain bounded sizing; only internal tasks opt in');
 });
 
 test('constrained native measurements cannot clamp the proposal frame through its essential actions', async () => {
