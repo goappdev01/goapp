@@ -1,3 +1,4 @@
+import {requireBookingGapPolicy} from "../lib/bookingGapPolicy";
 import { createHash } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { bearerHeader, supabaseRequest } from "../lib/supabase";
@@ -281,6 +282,7 @@ router.post("/bookings", async (req: Request, res: Response) => {
     return;
   }
 
+  if(!await requireBookingGapPolicy(req,res))return;
   if (req.body.service_ids !== undefined) {
     await createServiceBooking(req, res, authorization, authUser.id);
     return;

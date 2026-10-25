@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { readAuthSession, fetchWithAuth, AuthSessionRequiredError, type AuthSession } from "@/lib/authSession";
 import { expandSearchTerms, normalize } from "./goSearchAliases";
-import type { ServiceTiming } from "./serviceTiming";
+import type { ServiceTiming, BookingGapPolicy } from "./serviceTiming";
 import type { BookingTimeline } from "./bookingTimeline";
 import type { CatalogQuote } from "./catalogAssociations";
 import { canonicalBookingActivity } from "@workspace/api-zod";
@@ -187,11 +187,12 @@ export type AvailableSlot = {
 };
 
 export type Staff = {
+  gapPolicy?: BookingGapPolicy;
   id: string;
   businessId: string;
   name: string;
   emoji?: string;
-  /** IDs de BookableItem que este profesional puede realizar (vacío = todos) */
+  /** IDs de BookableItem que este profesional puede realizar (sin asignaciones explícitas no se ofrece disponibilidad) */
   serviceIds?: string[];
   bookingBlocks?: { startsAt: string; endsAt: string }[];
   active: boolean;
@@ -461,6 +462,11 @@ function remoteBookingPayload(candidate: Omit<Booking, "id"> & { id?: string }, 
   };
 }
 
+async function requireRemoteGapPolicy(expectedUserId?:string):Promise<void>{
+  const version=await supabaseApiRequest<number>("/supabase/booking-gap-policy",{},true,expectedUserId);
+  if(version!==1)throw new BookingApiError("El servidor todavía no ha activado la validación de huecos. No se ha cambiado ninguna reserva.",503,"BOOKING_GAP_POLICY_UNAVAILABLE");
+}
+
 async function createRemoteBooking(candidate: Omit<Booking, "id"> & { id?: string }): Promise<Booking> {
   const session = await getStoredSession();
   const customerId = session?.user?.id;
@@ -477,6 +483,7 @@ async function createRemoteBooking(candidate: Omit<Booking, "id"> & { id?: strin
     throw new BookingApiError("Selección de servicios no válida.", 400, "INVALID_SERVICES");
   }
   if (!candidate.id) throw new BookingApiError("Revisa la reserva antes de confirmar.", 400, "REQUEST_KEY_REQUIRED");
+  await requireRemoteGapPolicy(customerId);
   const payload = await supabaseApiRequest<RemoteBooking[] | RemoteBooking>(
     candidate.catalogSnapshot ? "/supabase/bookings/catalog" : "/supabase/bookings/timeline",
     {
@@ -488,7 +495,7 @@ async function createRemoteBooking(candidate: Omit<Booking, "id"> & { id?: strin
         ends_at: candidate.endInstant,
         ...(isCloudId(candidate.customerId) && candidate.customerId !== customerId ? { customer_id: candidate.customerId } : {}) }),
     },
-    true,
+    true, customerId,
   );
   const row = Array.isArray(payload) ? payload[0] : payload;
   if (!row?.id) throw new BookingApiError("Supabase devolvió una reserva inválida.", 502);
@@ -554,7 +561,7 @@ function serviceBody(item: Omit<BookableItem, "id">) {
     ui_metadata: { ...item.catalogMetadata, description: item.description, type: item.type, catalogKind: item.catalogKind ?? "service", customerCapacity: item.customerCapacity, unitQuantity: item.unitQuantity, paymentRequired: item.paymentRequired, visible: item.visible, timing: item.timing } };
 }
 type RemoteStaff = { id: string; business_id: string; display_name: string; active: boolean; ui_metadata?: Partial<Staff> & { archived?: boolean } };
-const mapStaff = (r: RemoteStaff): Staff => ({ id: r.id, businessId: r.business_id, name: r.display_name, active: r.active, emoji: r.ui_metadata?.emoji, serviceIds: r.ui_metadata?.serviceIds, bookingBlocks: r.ui_metadata?.bookingBlocks });
+const mapStaff = (r: RemoteStaff): Staff => ({ id: r.id, businessId: r.business_id, name: r.display_name, active: r.active, emoji: r.ui_metadata?.emoji, serviceIds: r.ui_metadata?.serviceIds, bookingBlocks: r.ui_metadata?.bookingBlocks, gapPolicy: r.ui_metadata?.gapPolicy });
 type RemoteWindow = { id: string; business_id: string; staff_id: string | null; weekday: number; start_time: string; end_time: string; active: boolean; ui_metadata?: Partial<AvailabilityWindow> & { archived?: boolean } };
 const mapWindow = (r: RemoteWindow): AvailabilityWindow => ({ id: r.id, businessId: r.business_id, staffId: r.staff_id ?? undefined, weekday: r.weekday, visibleStartHour: Number(r.start_time.slice(0, 2)), visibleStartMinute: Number(r.start_time.slice(3, 5)), visibleEndHour: Number(r.end_time.slice(0, 2)), visibleEndMinute: Number(r.end_time.slice(3, 5)), active: r.active, shiftIndex: r.ui_metadata?.shiftIndex ?? 0, endNextDay: r.ui_metadata?.endNextDay, bookableItemId: r.ui_metadata?.bookableItemId });
 function windowBody(w: Omit<AvailabilityWindow, "id">) {
@@ -735,7 +742,7 @@ export async function getStaff(businessId?: string): Promise<Staff[]> {
 export async function saveStaff(member: Staff): Promise<void> {
   if (isCloudId(member.businessId)) {
     const existing = isCloudId(member.id);
-    const rows = await supabaseApiRequest<RemoteStaff[]>(`${management}/businesses/${member.businessId}/staff${existing ? `/${member.id}` : ""}`, { method: existing ? "PATCH" : "POST", body: JSON.stringify({ display_name: member.name, active: member.active, ui_metadata: { emoji: member.emoji, serviceIds: member.serviceIds, bookingBlocks: member.bookingBlocks } }) }, true);
+    const rows = await supabaseApiRequest<RemoteStaff[]>(`${management}/businesses/${member.businessId}/staff${existing ? `/${member.id}` : ""}`, { method: existing ? "PATCH" : "POST", body: JSON.stringify({ display_name: member.name, active: member.active, ui_metadata: { emoji: member.emoji, serviceIds: member.serviceIds, bookingBlocks: member.bookingBlocks, gapPolicy: member.gapPolicy } }) }, true);
     remember([mapStaff(firstRow(rows))]); return;
   }
   const all = await loadAll<Staff>(KEY_STAFF);
@@ -747,7 +754,7 @@ export async function saveStaff(member: Staff): Promise<void> {
 
 export async function createStaff(data: Omit<Staff, "id">): Promise<Staff> {
   if (isCloudId(data.businessId)) {
-    const rows = await supabaseApiRequest<RemoteStaff[]>(`${management}/businesses/${data.businessId}/staff`, { method: "POST", body: JSON.stringify({ display_name: data.name, active: data.active, ui_metadata: { emoji: data.emoji, serviceIds: data.serviceIds, bookingBlocks: data.bookingBlocks } }) }, true);
+    const rows = await supabaseApiRequest<RemoteStaff[]>(`${management}/businesses/${data.businessId}/staff`, { method: "POST", body: JSON.stringify({ display_name: data.name, active: data.active, ui_metadata: { emoji: data.emoji, serviceIds: data.serviceIds, bookingBlocks: data.bookingBlocks, gapPolicy: data.gapPolicy } }) }, true);
     return remember([mapStaff(firstRow(rows))])[0];
   }
   const member: Staff = { ...data, id: uid() };
@@ -1536,11 +1543,12 @@ export async function getTimelineAvailability(businessId: string, serviceIds: st
   // The server still evaluates every minute and retains each exact free boundary.
   // Sampling only the response avoids shipping hundreds of duplicate plan bodies.
   query.set("step_minutes", String(options.datesOnly ? 1 : options.visualStepMinutes ?? 15));
+  query.set("gap_policy_version","1");
   if (staffId) query.set("staff_id", staffId);
   if (options.days) query.set("days", String(options.days));
   if (options.datesOnly) query.set("datesOnly", "true");
-  const result = await supabaseApiRequest<{ version: number; slots: BookingTimeline[]; availableDates: string[]; timezone: string }>(`/supabase/booking-availability?${query}`, {}, true);
-  if (result.version !== 1 || !Array.isArray(result.slots) || !Array.isArray(result.availableDates)) {
+  const result = await supabaseApiRequest<{ version: number; gapPolicyVersion?:number; slots: BookingTimeline[]; availableDates: string[]; timezone: string }>(`/supabase/booking-availability?${query}`, {}, true);
+  if (result.version !== 1 || result.gapPolicyVersion !== 1 || !Array.isArray(result.slots) || result.slots.some(plan=>plan.gapPolicy?.version!==1) || !Array.isArray(result.availableDates)) {
     throw new BookingApiError("El servidor no dispone del motor de tiempos requerido.", 503, "TIMELINE_UNAVAILABLE");
   }
   const { businessWallTime } = require("./bookingTimeline") as typeof import("./bookingTimeline");
@@ -2818,6 +2826,7 @@ export function notifyBookingUpdated(){for(const listener of bookingUpdateListen
 export async function changeBookingRequest(id:string,operation:"propose"|"accept"|"reject"|"cancel"|"confirm",input:{dateISO?:string;date?:string;time?:string;proposalId?:string;expectedRevision?:number;acceptFinancialTerms?:boolean},expectedUserId:string):Promise<Booking>{
  if(!isRemoteBookingId(id))throw new BookingApiError("Esta reserva necesita su repositorio original.",400);
  try{
+  if(!["cancel","reject"].includes(operation))await requireRemoteGapPolicy(expectedUserId);
   const row=await supabaseApiRequest<RemoteBooking>("/supabase/bookings/"+encodeURIComponent(id)+"/change",{method:"POST",body:JSON.stringify({operation,expectedRevision:input.expectedRevision ?? 0,...input})},true,expectedUserId);
   const booking=mapRemoteBooking(row);notifyBookingUpdated();return booking;
  }catch(error){
@@ -2831,4 +2840,13 @@ export async function getLiveBusinessBookings(businessId:string):Promise<Booking
  if(!isRemoteBookingId(businessId))throw new BookingApiError("Empresa real no válida.",400);
  const rows=await supabaseApiRequest<RemoteBooking[]>("/supabase/bookings?negotiation=1&business_id="+encodeURIComponent(businessId),{},true);
  return rows.filter(row=>row.business_id===businessId).map(mapRemoteBooking);
+}
+
+export type BookingDayAnalysis = {
+  version:1;dateISO:string;timezone:string;finished:boolean;basis:"scheduled-occupation";
+  professionals:{staffId:string;name:string;minimumMinutes:number|null;ordinaryBookings:number;exceptionBookings:number;legacyBookings:number;
+    availableMinutes:number;occupiedMinutes:number;freeMinutes:number;remainingGaps:{startsAt:string;endsAt:string;minutes:number}[];recommendation:string}[];
+};
+export async function getBookingDayAnalysis(businessId:string,dateISO:string):Promise<BookingDayAnalysis>{
+  return supabaseApiRequest<BookingDayAnalysis>("/supabase/booking-day-analysis?"+new URLSearchParams({business_id:businessId,dateISO}),{},true);
 }

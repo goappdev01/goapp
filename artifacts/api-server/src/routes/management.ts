@@ -41,6 +41,15 @@ function validate(resource: string, body: unknown, creating: boolean): Record<st
     const order = String(data.end_time).localeCompare(String(data.start_time));
     if (order === 0 || order < 0 && !overnight || order > 0 && overnight) return null;
   }
+  const gap=(data.ui_metadata as Record<string,unknown>|undefined)?.gapPolicy;
+  if(resource==="staff" && gap!==undefined){
+    if(!gap || typeof gap!=="object" || Array.isArray(gap))return null;
+    const policy=gap as Record<string,unknown>;
+    if(typeof policy.allowLastMinuteGaps!=="boolean" || !Number.isInteger(policy.lastMinuteMinutes)
+      || Number(policy.lastMinuteMinutes)<1 || Number(policy.lastMinuteMinutes)>525600)return null;
+    // Authorization identity/timestamp are stamped by the database, never trusted from a client.
+    data.ui_metadata={...(data.ui_metadata as Record<string,unknown>),gapPolicy:{allowLastMinuteGaps:policy.allowLastMinuteGaps,lastMinuteMinutes:policy.lastMinuteMinutes}};
+  }
   return { ...data };
 }
 router.use(async (req, res, next) => {

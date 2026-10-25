@@ -50,6 +50,7 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import QRCode from "react-native-qrcode-svg";
 import { GoOcrImportSheet } from "@/components/empresa/GoOcrImportSheet";
+import { ProfessionalGapPolicy } from "./ProfessionalGapPolicy";
 import { Step0Actividad } from "@/components/empresa/EmpresaSetupGuide";
 
 import { GoTimeField } from "@/components/ui/GoTimePicker";
@@ -1280,7 +1281,7 @@ function ProfessionalScheduleSection({
     };
 
   const saveDs = (ds: Record<string, DaySchedule>) => {
-    const next: StaffScheduleConfig = { useCompanySchedule: false, daySchedules: ds };
+    const next: StaffScheduleConfig = { ...schedCfg, useCompanySchedule: false, daySchedules: ds };
     updateConfig({ staffSchedules: { ...(config.staffSchedules ?? {}), [stableId]: next } });
   };
 
@@ -1289,10 +1290,10 @@ function ProfessionalScheduleSection({
     if (!useCompany) {
       const built = buildDefaultStaffSchedules(config as any);
       setLocalDs(built);
-      const next: StaffScheduleConfig = { useCompanySchedule: false, daySchedules: built };
+      const next: StaffScheduleConfig = { ...schedCfg, useCompanySchedule: false, daySchedules: built };
       updateConfig({ staffSchedules: { ...(config.staffSchedules ?? {}), [stableId]: next } });
     } else {
-      const next: StaffScheduleConfig = { useCompanySchedule: true, daySchedules: {} };
+      const next: StaffScheduleConfig = { ...schedCfg, useCompanySchedule: true, daySchedules: {} };
       updateConfig({ staffSchedules: { ...(config.staffSchedules ?? {}), [stableId]: next } });
     }
   };
@@ -1365,6 +1366,7 @@ function ProfessionalScheduleSection({
 
       {expanded && (
         <View style={{ paddingHorizontal: 4, paddingBottom: 12, gap: 8 }}>
+          <ProfessionalGapPolicy color={color} value={schedCfg.gapPolicy} onChange={gapPolicy=>updateConfig({staffSchedules:{...(config.staffSchedules??{}),[stableId]:{...schedCfg,gapPolicy}}})}/>
           {/* Mode toggle */}
           <View style={{ flexDirection: "row", gap: 6, marginTop: 4 }}>
             {([t("biz_company_schedule"), t("biz_custom_schedule")] as const).map((label, idx) => {

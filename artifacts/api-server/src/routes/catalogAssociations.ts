@@ -1,3 +1,4 @@
+import {requireBookingGapPolicy} from "../lib/bookingGapPolicy";
 import { Router, type Request, type Response } from "express";
 import { bearerHeader, supabaseRequest } from "../lib/supabase";
 
@@ -9,6 +10,7 @@ async function call(req: Request, res: Response, rpc: string, args: object, crea
   res.setHeader("Cache-Control", "no-store");
   if (!/^Bearer \S+$/.test(req.header("authorization") ?? "")) { res.status(401).json({ error: "Inicia sesión." }); return; }
   try {
+    if(created && !await requireBookingGapPolicy(req,res))return;
     const response = await supabaseRequest(`/rest/v1/rpc/${rpc}`, { method: "POST", headers: { ...bearerHeader(req.header("authorization")), "Content-Type": "application/json" }, body: JSON.stringify(args) });
     const value = await response.json() as { code?: string; message?: string } | null;
     if (response.ok) { res.status(created ? 201 : 200).json(created ? [value] : value); return; }

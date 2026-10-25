@@ -7,6 +7,9 @@ import {
   StyleSheet,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { BookingDaySummary } from "./BookingDaySummary";
+import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
+import { useGoView } from "@/contexts/GoViewContext";
 import { MOCK_SUGERENCIAS } from "@/data/mockEconomia";
 import type { SugerenciaEstado, SugerenciaCategoria, SugerenciaOrigen } from "@/types/economia";
 import { getGuidanceConfig } from "@/utils/guidance";
@@ -67,6 +70,7 @@ function translateCat(cat: string, lang: string) {
 
 export function SugerenciasScreen({ guidanceLevel = 5 }: { guidanceLevel?: number }) {
   const { lang } = useLanguage();
+  const {config}=useBusinessConfig(),goView=useGoView();
   const [filtro, setFiltro] = useState<SugerenciaEstado | "todas">("todas");
   const guidanceCfg = useMemo(() => getGuidanceConfig(guidanceLevel), [guidanceLevel]);
 
@@ -104,6 +108,7 @@ export function SugerenciasScreen({ guidanceLevel = 5 }: { guidanceLevel?: numbe
 
   return (
     <View style={s.container}>
+      {!goView.isBusinessPreview&&<BookingDaySummary businessId={config.businessId} timezone={config.timezone}/>}
       <View style={s.resumenRow}>
         <StatChip label={lang === "en" ? "Shown"      : "Mostradas"}   value={totalMostradas.toString()}   color={GRAY}      />
         <StatChip label={lang === "en" ? "Converted"  : "Convertidas"} value={totalConvertidas.toString()} color="#3D9A84"   />

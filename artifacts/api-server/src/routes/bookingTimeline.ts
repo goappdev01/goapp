@@ -1,3 +1,4 @@
+import {requireBookingGapPolicy} from "../lib/bookingGapPolicy";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { bearerHeader, supabaseRequest } from "../lib/supabase";
 
@@ -14,6 +15,7 @@ async function rpc(req: Request, res: Response, name: string, args: Record<strin
   const headers = bearerHeader(req.header("authorization"));
   if (!/^Bearer \S+$/.test(headers.Authorization ?? "")) { res.status(401).json({ error: "Authentication required" }); return; }
   try {
+    if(created && !await requireBookingGapPolicy(req,res))return;
     const upstream = await supabaseRequest(`/rest/v1/rpc/${name}`, {
       method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(args),
     });
@@ -34,12 +36,15 @@ async function rpc(req: Request, res: Response, name: string, args: Record<strin
   }
 }
 
+router.get("/booking-gap-policy",(req,res)=>rpc(req,res,"go_booking_gap_policy_version",{}));
+
 router.get("/booking-availability", async (req, res) => {
   if (!/^Bearer \S+$/.test(req.header("authorization") ?? "")) { res.status(401).json({ error: "Authentication required" }); return; }
   const query = req.query;
   const selected = typeof query.service_ids === "string" ? query.service_ids.split(",") : [];
   const days = query.days == null ? 1 : Number(query.days);
   const step = query.step_minutes == null ? 1 : Number(query.step_minutes);
+  if(query.gap_policy_version!=null && String(query.gap_policy_version)!=="1"){res.status(400).json({code:"BOOKING_INVALID_GAP_POLICY"});return;}
   const local = typeof query.dateISO === "string" && /^\d{4}-\d{2}-\d{2}$/.test(query.dateISO);
   if (!id(query.business_id) || !serviceIds(selected) || query.staff_id != null && !id(query.staff_id)
     || !Number.isInteger(days) || days < 1 || days > 31 || !Number.isInteger(step) || step < 1 || step > 60
@@ -78,4 +83,10 @@ router.post("/bookings/timeline", async (req, res) => {
   }, true);
 });
 
+router.get("/booking-day-analysis",async(req,res)=>{
+  if(!id(req.query.business_id) || typeof req.query.dateISO!=="string" || !/^\d{4}-\d{2}-\d{2}$/.test(req.query.dateISO)){
+    res.status(400).json({code:"BOOKING_INVALID_RANGE"});return;
+  }
+  await rpc(req,res,"go_booking_day_analysis",{p_business_id:req.query.business_id,p_date_iso:req.query.dateISO});
+});
 export default router;

@@ -1,6 +1,7 @@
 /** Server-owned occupancy snapshot. These helpers format results; they never decide availability. */
 export type BookingTimeline = {
   version: 1;
+  gapPolicy?: {version:1;professionals:{staffId:string|null;minimumMinutes:number;exceptionUsed:boolean;lastMinuteMinutes:number}[]};
   staffId: string | null;
   startsAt: string;
   endsAt: string;

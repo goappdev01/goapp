@@ -121,3 +121,10 @@ export function validateScheduleRange(from: string, to: string): {
   return { startHour: Number(from.slice(0, 2)), startMinute: Number(from.slice(3, 5)),
     endHour: Number(to.slice(0, 2)), endMinute: Number(to.slice(3, 5)), endNextDay: to < from };
 }
+
+export type BookingGapPolicy = { allowLastMinuteGaps: boolean; lastMinuteMinutes: number };
+export function validateBookingGapPolicy(value: unknown): BookingGapPolicy {
+  if(!record(value) || typeof value.allowLastMinuteGaps!=="boolean" || !positive(value.lastMinuteMinutes,525600))
+    throw new Error("Indica un intervalo de excepción en minutos enteros, entre 1 y 525600.");
+  return {allowLastMinuteGaps:value.allowLastMinuteGaps,lastMinuteMinutes:value.lastMinuteMinutes};
+}

@@ -30,7 +30,7 @@ import type { BusinessDemoStore } from "@/data/businessDemoStore";
 import { useOwnerBusinessDemo } from "./OwnerBusinessDemoContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { serializeServiceConfiguration, validateBookingResources, validateBusinessTimezone, validateScheduleRange,
-  type BookingResource, type BookingBlock, type ServiceTiming } from "@/data/serviceTiming";
+  type BookingGapPolicy, type BookingResource, type BookingBlock, type ServiceTiming } from "@/data/serviceTiming";
 import {
   initPlantillaItems,
   SECTORS,
@@ -81,6 +81,7 @@ export type DayShift = { from: string; to: string; active: boolean };
 export type DaySchedule = { shift1: DayShift; shift2: DayShift };
 
 export type StaffScheduleConfig = {
+  gapPolicy?: BookingGapPolicy;
   useCompanySchedule: boolean;
   daySchedules: Record<string, DaySchedule>; // keyed "0"=Mon…"6"=Sun
 };
@@ -517,6 +518,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
           emoji:      plantItem.emoji ?? "👤",
           serviceIds,
           bookingBlocks: existingMatch?.bookingBlocks,
+          gapPolicy: (cfg.staffSchedules?.[stableId] ?? Object.entries(cfg.staffSchedules ?? {}).find(([key])=>key.endsWith(`_staff_${normName.replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,"")}`))?.[1])?.gapPolicy ?? existingMatch?.gapPolicy,
           active:     true,
         });
       }

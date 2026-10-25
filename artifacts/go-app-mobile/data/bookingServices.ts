@@ -60,5 +60,5 @@ export function bookingServiceIds(booking: Pick<Booking, "bookableItemId" | "ser
 }
 
 export function staffSupportsBookingServices(staff: Pick<Staff, "active" | "serviceIds">, ids: readonly string[]) {
-  return staff.active && (!staff.serviceIds?.length || ids.every(id => staff.serviceIds!.includes(id)));
+  return staff.active && !!staff.serviceIds?.length && ids.length>0 && ids.every(id => staff.serviceIds!.includes(id));
 }

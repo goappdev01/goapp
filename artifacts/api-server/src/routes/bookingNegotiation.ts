@@ -1,3 +1,4 @@
+import {requireBookingGapPolicy} from "../lib/bookingGapPolicy";
 import { createHash } from "node:crypto";
 import { Router, type IRouter, type Request, type Response } from "express";
 import { bearerHeader, supabaseRequest } from "../lib/supabase";
@@ -71,6 +72,7 @@ router.post("/bookings/:bookingId/change", async (req: Request, res: Response) =
   // Caller JWT is passed through unchanged. The database is the authority for
   // identity, ownership, revision, timing, conflict checks and the transaction.
   try {
+    if(!["cancel","reject"].includes(input.operation) && !await requireBookingGapPolicy(req,res))return;
     const response = await supabaseRequest("/rest/v1/rpc/go_negotiate_booking", {
       method: "POST", headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({ p_booking_id: id, p_operation: input.operation, p_request_id: requestId,

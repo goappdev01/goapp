@@ -122,11 +122,12 @@ test("saving exact overnight business and professional hours preserves persisted
   };
   vm.runInNewContext(compile(declaration.getText(ast) + ";exports.sync=ensureBookingRecord;"), scope);
   await scope.exports.sync({ businessId: business, businessName: "Local", activeDays: [0], daySchedules: {}, openFrom: "22:13", openTo: "06:07",
-    staffSchedules: { [staff]: { useCompanySchedule: false, daySchedules: { "0": { shift1: { active: true, from: "23:17", to: "04:29" }, shift2: { active: false } } } } },
+    staffSchedules: { [staff]: { useCompanySchedule: false, gapPolicy: {allowLastMinuteGaps:true,lastMinuteMinutes:1020}, daySchedules: { "0": { shift1: { active: true, from: "23:17", to: "04:29" }, shift2: { active: false } } } } },
     services: [{ name: "Corte", duration: 27, price: 12, capacity: 1 }], plantillaItems: [{ staffNames: ["Ana"], staffServices: [["Corte"]] }] }, async () => {}, "owner");
   assert.equal(writes.length, 1);
   assert.equal(writes[0].id, staff);
   assert.deepEqual(plain(writes[0].bookingBlocks), blocks);
+  assert.deepEqual(plain(writes[0].gapPolicy), {allowLastMinuteGaps:true,lastMinuteMinutes:1020});
   assert.equal(windowWrites.length, 2);
   assert.deepEqual(plain(windowWrites.map(window => [window.staffId ?? null, window.weekday, window.visibleStartHour, window.visibleStartMinute, window.visibleEndHour, window.visibleEndMinute, window.endNextDay])),
     [[null, 1, 22, 13, 6, 7, true], [staff, 1, 23, 17, 4, 29, true]]);

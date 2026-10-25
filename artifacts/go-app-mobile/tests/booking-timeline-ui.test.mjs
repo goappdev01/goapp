@@ -45,7 +45,7 @@ function planFor({ date = today, staffId = firstStaff, serviceId = firstService,
   const start = date === today ? `${date}T0${fold}:37:00.000Z` : `${date}T10:37:00.000Z`;
   const minutes = serviceId === firstService ? 13 : 27;
   const end = new Date(Date.parse(start) + minutes * 60000).toISOString();
-  return { version: 1, staffId, startsAt: start, endsAt: end, timezone: "Europe/Madrid",
+  return { version: 1, gapPolicy:{version:1,professionals:[{staffId,minimumMinutes:13,exceptionUsed:false,lastMinuteMinutes:1440}]}, staffId, startsAt: start, endsAt: end, timezone: "Europe/Madrid",
     totalClientMinutes: minutes, totalDurationMinutes: minutes, workMinutes: minutes, waitMinutes: 0,
     serviceIds: [serviceId], serviceDetails: [{ id: serviceId, title: serviceId === firstService ? "Corte exacto" : "Lavado exacto", durationMinutes: minutes, price: 12, currency: "EUR" }],
     totalPrice: 12, currency: "EUR", resourcesConfigured: false,
@@ -90,14 +90,15 @@ function fixture(kind = "provider", overrides = {}) {
       if (state.pendingStaff.has(selectedBusiness)) return Response.json(await state.pendingStaff.get(selectedBusiness).promise);
       return Response.json(state.staff.get(selectedBusiness) ?? []);
     }
+    if (parsed.pathname.endsWith("/booking-gap-policy"))return Response.json(1);
     if (parsed.pathname.endsWith("/booking-availability")) {
-      if (parsed.searchParams.get("datesOnly") === "true") return Response.json({ version: 1, timezone: "Europe/Madrid",
+      if (parsed.searchParams.get("datesOnly") === "true") return Response.json({ version: 1, gapPolicyVersion:1, timezone: "Europe/Madrid",
         availableDates: [today, tomorrow, "2030-10-29"], slots: [] });
       const parameters = { date: parsed.searchParams.get("dateISO"), staffId: parsed.searchParams.get("staff_id") ?? firstStaff,
         serviceId: parsed.searchParams.get("service_ids").split(",")[0] };
       const plans = state.pendingSlots ? await state.pendingSlots.promise : state.foldOptions && parameters.date === today
         ? [planFor({ ...parameters, fold: 0 }), planFor({ ...parameters, fold: 1 })] : [planFor(parameters)];
-      return Response.json({ version: 1, timezone: "Europe/Madrid", availableDates: [parameters.date], slots: plans });
+      return Response.json({ version: 1, gapPolicyVersion:1, timezone: "Europe/Madrid", availableDates: [parameters.date], slots: plans });
     }
     if (parsed.pathname.endsWith("/catalog/quote")) {
       const rows = body.rootIds.map(id => state.services.get(body.businessId)?.find(row => row.id === id));
