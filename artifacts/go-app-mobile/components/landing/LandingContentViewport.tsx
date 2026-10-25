@@ -19,6 +19,8 @@ export function LandingContentViewport({ frame, children, offsetY = 0 }: {
 type LandingCardProps = {
   /** Compact Landing cards open their complete information in the existing detail sheet. */
   staticBody?: boolean;
+  /** Let essential proposal controls determine the frame height instead of crossing its border. */
+  intrinsicBody?: boolean;
   header?: React.ReactNode;
   headerGap?: number;
   footer?: React.ReactNode;
@@ -132,7 +134,7 @@ function AdaptiveLandingCardContents(props: LandingCardProps) {
   // This View is always intrinsic, including when it is inside the exceptional scroller.
   // Measuring a constrained viewport instead would hide the true height of wrapped text.
   const content = <View testID={scroll ? "landing-card-natural-content" : "landing-card-body"}
-    style={[contentContainerStyle, { flexShrink: 0 }, props.staticBody && { maxHeight: sizing.bodyMaxHeight }]}
+    style={[contentContainerStyle, { flexShrink: 0 }, props.staticBody && !props.intrinsicBody && { maxHeight: sizing.bodyMaxHeight }]}
     onLayout={(e) => {
       const height = e.nativeEvent.layout.height;
       setContentHeight(previous => previous === height ? previous : height);
@@ -148,7 +150,7 @@ function AdaptiveLandingCardContents(props: LandingCardProps) {
   </CompactBodySpace.Provider>;
 }
 
-function renderFixedCard({ header, headerGap = 0, footer, footerGap = 0, bodyFrame, adaptiveBody, staticBody }: LandingCardProps,
+function renderFixedCard({ header, headerGap = 0, footer, footerGap = 0, bodyFrame, adaptiveBody, staticBody, intrinsicBody }: LandingCardProps,
   body: React.ReactNode, onHeaderHeight?: (height: number) => void, onFooterHeight?: (height: number) => void,
   headerInsets?: { paddingLeft: number; paddingRight: number }) {
   const hasHeader = header != null && header !== false;
@@ -156,7 +158,7 @@ function renderFixedCard({ header, headerGap = 0, footer, footerGap = 0, bodyFra
   const framedBody = bodyFrame ? bodyFrame(body) : body;
   if (!hasHeader && !hasFooter) return framedBody;
   return <View testID="landing-card-fixed-frame" pointerEvents="box-none" style={{ flexShrink: adaptiveBody ? 0 : 1, minHeight: 0,
-    ...(staticBody && adaptiveBody ? { maxHeight: adaptiveBody.availableHeight, overflow: "hidden" as const } : {}) }}>
+    ...(staticBody && adaptiveBody && !intrinsicBody ? { maxHeight: adaptiveBody.availableHeight, overflow: "hidden" as const } : {}) }}>
     {hasHeader && <View testID="landing-card-header" style={{ flexShrink: 0, marginBottom: headerGap, ...headerInsets }}
       {...(onHeaderHeight ? { onLayout: (e: import("react-native").LayoutChangeEvent) => onHeaderHeight(e.nativeEvent.layout.height) } : {})}>{header}</View>}
     {framedBody}
