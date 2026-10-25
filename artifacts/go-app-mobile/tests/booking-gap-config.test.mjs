@@ -11,15 +11,17 @@ const plain=value=>JSON.parse(JSON.stringify(value));
 function reactFixture(){
  const states=[];let cursor=0;
  const react={Fragment:'Fragment',createElement:(type,props,...children)=>({type,props:props??{},children}),useState:init=>{const i=cursor++;if(!(i in states))states[i]=typeof init==='function'?init():init;return [states[i],v=>{states[i]=typeof v==='function'?v(states[i]):v;}];}};
+ react.useRef=initial=>react.useState(()=>({current:initial}))[0];
  return {react,reset:()=>{cursor=0;},unmount:()=>{cursor=0;states.length=0;}};
 }
 const native={Text:'Text',View:'View',Switch:'Switch',TextInput:'TextInput',TouchableOpacity:'TouchableOpacity',ScrollView:'ScrollView'};
 function fixture(lang='es',initial){
  const hooks=reactFixture(),alerts=[],saves=[];let value=initial,persisted=JSON.stringify(initial??null);
- const scope={exports:{},require:name=>name==='react'?{...hooks.react,default:hooks.react}:name==='react-native'?{...native,Alert:{alert:(...args)=>alerts.push(args)}}:name==='@/contexts/LanguageContext'?{useLanguage:()=>({lang})}:name==='@/data/serviceTiming'?timing.exports:(()=>{throw new Error(name);})()};
+ const scope={exports:{},require:name=>name==='react'?{...hooks.react,default:hooks.react}:name==='react-native'?{...native,Alert:{alert:(...args)=>alerts.push(args)}}:name==='@expo/vector-icons'?{Feather:'Feather'}:name==='@/contexts/LanguageContext'?{useLanguage:()=>({lang})}:name==='@/data/serviceTiming'?timing.exports:(()=>{throw new Error(name);})()};
  vm.runInNewContext(compile(readFileSync('components/empresa/ProfessionalGapPolicy.tsx','utf8')),scope);
  const render=()=>{hooks.reset();return scope.exports.ProfessionalGapPolicy({value,color:'#FFD700',onChange:p=>{value=p;saves.push(plain(p));persisted=JSON.stringify(p);}});};
- return {render,alerts,saves,reload:()=>{hooks.unmount();value=JSON.parse(persisted)??undefined;}};
+ const expand=()=>{const tree=render();if(!byId(tree,'professional-gap-toggle').props.accessibilityState.expanded)byId(tree,'professional-gap-toggle').props.onPress();return render();};
+ return {render,expand,alerts,saves,reload:()=>{hooks.unmount();value=JSON.parse(persisted)??undefined;}};
 }
 function all(tree){return [tree,...(Array.isArray(tree)?tree:tree?.children??[]).flatMap(child=>typeof child==='object'&&child!==null?all(child):[])];}
 const byId=(tree,id)=>all(tree).find(node=>node?.props?.testID===id);
@@ -48,7 +50,7 @@ function professionalFixture(initial){
 
 test('exception is disabled by default; presets/custom input persist explicit authorization and can be disabled again',()=>{
  for(const lang of ['es','en']){
-  const f=fixture(lang);let tree=f.render();assert.equal(byId(tree,'professional-gap-enabled').props.value,false);
+  const f=fixture(lang);let tree=f.expand();assert.equal(byId(tree,'professional-gap-enabled').props.value,false);
   assert.equal(byId(tree,'professional-gap-custom').props.editable,false);
   for(const hours of [24,12,6,3]){const option=byId(tree,'professional-gap-preset-'+hours);assert.equal(option.props.disabled,true);option.props.onPress();}
   assert.equal(f.saves.length,0,'inactive options cannot authorize or save a new value');
@@ -60,7 +62,7 @@ test('exception is disabled by default; presets/custom input persist explicit au
   }
   const before=f.saves.length;byId(f.render(),'professional-gap-custom').props.onChangeText('0');byId(f.render(),'professional-gap-custom').props.onEndEditing();assert.equal(f.saves.length,before);assert.equal(f.alerts.length,1);
   byId(f.render(),'professional-gap-enabled').props.onValueChange(false);assert.equal(f.saves.at(-1).allowLastMinuteGaps,false);assert.equal(byId(f.render(),'professional-gap-custom').props.editable,false);
-  f.reload();assert.equal(byId(f.render(),'professional-gap-enabled').props.value,false);assert.match(text(byId(f.render(),'professional-gap-selected')),/0\.016666/);
+  f.reload();f.expand();assert.equal(byId(f.render(),'professional-gap-enabled').props.value,false);assert.match(text(byId(f.render(),'professional-gap-selected')),/0\.016666/);
  }
 });
 
@@ -71,10 +73,11 @@ test('only positive whole-minute custom windows are accepted; configuration neve
 
 test('custom intervals restore their visible value after reopening and independent professionals never share drafts',()=>{
  const ana=fixture('es',{allowLastMinuteGaps:true,lastMinuteMinutes:1020}),luis=fixture('es',{allowLastMinuteGaps:false,lastMinuteMinutes:360});
+ ana.expand();
  assert.equal(byId(ana.render(),'professional-gap-custom').props.value,'17');
- byId(ana.render(),'professional-gap-custom').props.onChangeText('2.5');byId(ana.render(),'professional-gap-custom').props.onEndEditing();ana.reload();
+ byId(ana.render(),'professional-gap-custom').props.onChangeText('2.5');byId(ana.render(),'professional-gap-custom').props.onEndEditing();ana.reload();ana.expand();
  assert.equal(byId(ana.render(),'professional-gap-custom').props.value,'2.5');assert.match(text(byId(ana.render(),'professional-gap-selected')),/2\.5/);
- luis.reload();assert.equal(byId(luis.render(),'professional-gap-enabled').props.value,false);assert.equal(byId(luis.render(),'professional-gap-preset-6').props.accessibilityState.selected,true);assert.equal(luis.saves.length,0);
+ luis.reload();luis.expand();assert.equal(byId(luis.render(),'professional-gap-enabled').props.value,false);assert.equal(byId(luis.render(),'professional-gap-preset-6').props.accessibilityState.selected,true);assert.equal(luis.saves.length,0);
 });
 
 test('schedule collapsed or open: exceptions stay visible independently, with isolated per-professional saves and unchanged split shifts',()=>{
@@ -98,7 +101,7 @@ test('active and inactive exception text/input remains high contrast on white, w
  const luminance=color=>color.map(v=>v<=0.04045?v/12.92:((v+0.055)/1.055)**2.4).reduce((sum,v,i)=>sum+v*[0.2126,0.7152,0.0722][i],0);
  const flatten=style=>Object.assign({},...(Array.isArray(style)?style.flat(Infinity):[style]).filter(Boolean));
  for(const enabled of [false,true])for(const lang of ['es','en']){
-  const tree=fixture(lang,{allowLastMinuteGaps:enabled,lastMinuteMinutes:360}).render();let count=0;
+  const tree=fixture(lang,{allowLastMinuteGaps:enabled,lastMinuteMinutes:360}).expand();let count=0;
   function inspect(node,bg=[1,1,1]){
    if(!node||typeof node!=='object')return;if(Array.isArray(node)){node.forEach(n=>inspect(n,bg));return;}
    const style=flatten(node.props.style);

@@ -124,7 +124,7 @@ function wizardReturnFixture(returnRoute, options = {}) {
   const React={
     createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),
     useState:initial=>{const i=cursor++;slots[i]??={value:typeof initial==="function"?initial():initial};return [slots[i].value,next=>{slots[i].value=typeof next==="function"?next(slots[i].value):next}]},
-    useRef:value=>React.useState(()=>({current:value}))[0],useEffect:fn=>effects.push(fn),
+    useRef:value=>React.useState(()=>({current:value}))[0],useEffect:fn=>effects.push(fn),useLayoutEffect:fn=>effects.push(fn),
     useCallback:fn=>fn,useMemo:fn=>fn(),
   };
   class Value {setValue(){} interpolate(){return 1}}

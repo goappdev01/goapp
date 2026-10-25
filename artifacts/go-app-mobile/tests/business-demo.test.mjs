@@ -161,7 +161,7 @@ test("reset clears only the local configuration, plan, reservations and preferen
 // Execute the real providers and screen callbacks with deterministic native APIs.
 function uiFixture(data, { authorized = true, reactCompiler = false, bookingToday, realActivity = false, gpsAdapter } = {}) {
   const cache = new Map(), hooks = new Map(), alerts = [], calls = { liveAgenda: 0, liveFloor: 0, external: 0 };
-  let current, cursor = 0, effects = [], lang = "es", keyboardVisible = false;
+  let current, cursor = 0, effects = [], lang = "es", keyboardVisible = false, focusedInput = null, keyboardDismisses = 0;
   const keyboardListeners = new Map();
   const hook = () => { const i = cursor++; return [current, i]; };
   const same = (a,b) => a && b && a.length === b.length && a.every((v,i) => Object.is(v,b[i]));
@@ -179,6 +179,7 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
     useEffect(fn,deps) { const [slots,i] = hook(), old = slots[i]; if (!old || !same(old.deps,deps)) {
       slots[i] = { deps }; effects.push(() => { old?.cleanup?.(); slots[i].cleanup = fn(); });
     } },
+    useLayoutEffect(fn,deps) { React.useEffect(fn,deps); },
   };
   class Value { constructor(value) { this.value = value; } setValue(value) { this.value = value; } interpolate() { return 0; } }
   const animation = { start(fn) { fn?.({ finished: true }); }, stop() {} };
@@ -187,7 +188,7 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
     AppState: { currentState: "active" }, Keyboard: {
       isVisible: () => keyboardVisible,
       addListener: (event, fn) => { const listeners = keyboardListeners.get(event) ?? new Set(); listeners.add(fn); keyboardListeners.set(event, listeners); return { remove: () => listeners.delete(fn) }; },
-      dismiss() { keyboardVisible = false; for (const event of ["keyboardWillHide", "keyboardDidHide"]) for (const fn of keyboardListeners.get(event) ?? []) fn(); },
+      dismiss() { keyboardDismisses++; focusedInput?.blur(); focusedInput = null; keyboardVisible = false; for (const event of ["keyboardWillHide", "keyboardDidHide"]) for (const fn of keyboardListeners.get(event) ?? []) fn(); },
     },
     StyleSheet: { create: v => v, absoluteFill: {}, absoluteFillObject: {} }, Dimensions: { get: () => ({ width: 390, height: 844 }) },
     Platform: { OS: "ios", select: options => options.ios ?? options.default },
@@ -255,6 +256,7 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
       setInterval: () => 1, clearInterval() {}, require(key) {
         if (key in imports) return imports[key];
         if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };
+        if (key === "./ProfessionalGapPolicy") return load("components/empresa/ProfessionalGapPolicy.tsx");
         if (key === "./CatalogComplementSelector") return { CatalogComplementSelector: () => null };
         if (key === "./booking") return imports["@/data/booking"];
         if (key === "@/data/floorPlan") {
@@ -284,6 +286,14 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
     return tree;
   };
   return { load, render, alerts, calls, configApi,
+    isKeyboardVisible: () => keyboardVisible, keyboardDismissCount: () => keyboardDismisses,
+    focusInput(input) {
+      const node = { focused: true, blur() { this.focused = false; }, isFocused() { return this.focused; } };
+      focusedInput = node;
+      if (typeof input.props.ref === "function") input.props.ref(node); else if (input.props.ref) input.props.ref.current = node;
+      keyboardVisible = true; for (const fn of keyboardListeners.get("keyboardWillShow") ?? []) fn();
+      input.props.onFocus?.(); return node;
+    },
     emitKeyboard(event) { if (event.endsWith("Show")) keyboardVisible = true; if (event.endsWith("Hide")) keyboardVisible = false; for (const fn of keyboardListeners.get(event) ?? []) fn(); },
     unmount(component) { for (const slot of hooks.get(component) ?? []) slot?.cleanup?.(); hooks.delete(component); },
     setLanguage(value) { lang = value; } };
@@ -559,6 +569,42 @@ function configurationUI(f,initialStep=0,options={}) {
     const page=()=>{render();return ui.render(step.type,step.props)};return {step,page};};
   return {...ui,Screen,Provider,props,render,renderComponent:ui.render,enterStep};
 }
+
+for (const [index, name, placeholder, field] of [[0,'StepNombre','biz_name_placeholder','businessName'],[1,'StepUbicacion','biz_address_placeholder','address']])
+test(`${name}: direct entry hides an inherited keyboard; manual focus and ordinary edits do not dismiss it`, async () => {
+  const f=dataFixture();await configuredSalon(f);await f.store.updateConfig({countryCode:'ES'});const ui=configurationUI(f,index);ui.props.startAtSteps=true;
+  ui.emitKeyboard('keyboardWillShow');
+  const page=()=>{const child=component(ui.render(),name);assert.ok(child);return ui.renderComponent(child.type,child.props);};
+  let tree=page();assert.equal(ui.isKeyboardVisible(),false);assert.ok(ui.keyboardDismissCount()>0);
+  for(const input of nodes(tree).filter(n=>n.type==='TextInput'))assert.notEqual(input.props.autoFocus,true);
+  const input=nodes(tree).find(n=>n.type==='TextInput'&&n.props.placeholder===placeholder),node=ui.focusInput(input),count=ui.keyboardDismissCount();
+  assert.equal(node.isFocused(),true);assert.equal(ui.isKeyboardVisible(),true);
+  await input.props.onChangeText(index===0?'Nombre escrito voluntariamente':'Dirección escrita voluntariamente');await turn();tree=page();
+  ui.emitKeyboard('keyboardDidShow');page();assert.equal(ui.keyboardDismissCount(),count,'only route entry may dismiss; data and keyboard events cannot interrupt typing');
+  assert.equal(node.isFocused(),true);assert.equal(ui.isKeyboardVisible(),true);
+  const saved=await f.make().load();assert.equal(saved.config[field],index===0?'Nombre escrito voluntariamente':'Dirección escrita voluntariamente');
+  assert.equal(ui.calls.external,0);assert.equal(ui.calls.liveFloor,0);
+});
+
+test('Next from Name blurs the input before Location opens, preserves edits and permits manual typing and return navigation', async () => {
+  const f=dataFixture();await configuredSalon(f);await f.store.updateConfig({countryCode:'ES'});const before=plain(f.store.getSnapshot().config),ui=configurationUI(f);ui.props.startAtSteps=true;
+  const page=name=>{const child=component(ui.render(),name);assert.ok(child);return ui.renderComponent(child.type,child.props);};
+  let tree=page('StepNombre'),input=nodes(tree).find(n=>n.type==='TextInput'&&n.props.placeholder==='biz_name_placeholder');
+  const nameNode=ui.focusInput(input);await input.props.onChangeText('Nombre conservado al avanzar');await turn();page('StepNombre');
+  assert.equal(ui.isKeyboardVisible(),true);const count=ui.keyboardDismissCount();
+  button(ui.render(),'biz_next').props.onPress();await turn();tree=page('StepUbicacion');
+  assert.equal(ui.isKeyboardVisible(),false);assert.equal(nameNode.isFocused(),false);assert.ok(ui.keyboardDismissCount()>count);
+  assert.ok(nodes(tree).filter(n=>n.type==='TextInput').every(n=>!n.props.autoFocus));
+  input=nodes(tree).find(n=>n.type==='TextInput'&&n.props.placeholder==='biz_address_placeholder');const addressNode=ui.focusInput(input),after=ui.keyboardDismissCount();
+  await input.props.onChangeText('Dirección conservada al volver');await turn();page('StepUbicacion');
+  assert.equal(ui.isKeyboardVisible(),true);assert.equal(ui.keyboardDismissCount(),after);
+  button(ui.render(),'biz_cfg_step_name').props.onPress();tree=page('StepNombre');
+  assert.equal(ui.isKeyboardVisible(),false);assert.equal(addressNode.isFocused(),false);
+  assert.equal(nodes(tree).find(n=>n.props.placeholder==='biz_name_placeholder').props.value,'Nombre conservado al avanzar');
+  const saved=await f.make().load();assert.equal(saved.config.address,'Dirección conservada al volver');
+  assert.deepEqual(plain(saved.config.services),before.services);assert.deepEqual(plain(saved.config.plantillaItems),before.plantillaItems);
+  assert.ok(saved.config.completedSteps.includes(0));assert.equal(ui.calls.external,0);
+});
 test("reopening the salon and reselecting its actual sector/activity preserves staff, services and all floor positions",async()=>{
   const f=dataFixture();await configuredSalon(f);const before=plain(f.store.getSnapshot()),ui=configurationUI(f);
   let activity=component(ui.render(),"Step0Actividad"),page=ui.renderComponent(activity.type,activity.props);
@@ -763,7 +809,7 @@ test("the individual schedule editor writes the persisted professional ID after 
  const f=dataFixture();await configuredSalon(f);const original=plain(f.store.getSnapshot().config.plantillaItems[0]);
  await f.store.updateConfig({plantillaItems:[{...original,staffNames:["Nombre cambiado",...original.staffNames.slice(1)]}]});
  const ui=configurationUI(f,4),{page}=ui.enterStep("StepEspacios");page();const schedule=component(page(),"ProfessionalScheduleSection");assert.equal(schedule.props.staffId,original.staffIds[0]);
- let controls=ui.renderComponent(schedule.type,schedule.props);button(controls,"biz_schedule_colon").props.onPress();controls=ui.renderComponent(schedule.type,schedule.props);
+ let controls=ui.renderComponent(schedule.type,schedule.props);nodes(controls).find(n=>n.props.testID==='professional-schedule-toggle').props.onPress();controls=ui.renderComponent(schedule.type,schedule.props);
  button(controls,"biz_custom_schedule").props.onPress();await turn();page();controls=ui.renderComponent(schedule.type,schedule.props);
  component(controls,"GoTimeField").props.onConfirm("10:00");await turn();const restored=await f.make().load();
  assert.equal(restored.config.staffSchedules[original.staffIds[0]].daySchedules["0"].shift1.from,"10:00");

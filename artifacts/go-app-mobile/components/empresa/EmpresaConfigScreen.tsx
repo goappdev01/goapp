@@ -14,7 +14,7 @@ import type { ScrollViewInstance, TextInputInstance, ViewInstance } from "react-
  * Paso 8: Publicar  (resumen + QR + compartir)
  * ═══════════════════════════════════════════════════════════════════════════
  */
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -328,6 +328,9 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
   const stepSaveRef = useRef<(() => Promise<void>) | null>(null);
 
   const [currentStep,    setCurrentStep]    = useState(() => resumeLocation?.step ?? Math.min(Math.max(initialStep, 0), STEPS.length - 1));
+  useLayoutEffect(() => {
+    if (phase === "steps" && (currentStep === 0 || currentStep === 1)) Keyboard.dismiss();
+  }, [phase, currentStep]);
   const [planoEditorOpen, setPlanoEditorOpen] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(() => Keyboard.isVisible());
   const compactFooter = Boolean(demo) && Platform.OS === "ios" && (currentStep === 0 || currentStep === 1);
@@ -407,6 +410,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
   const isLast = currentStep === STEPS.length - 1;
 
   const animateToStep = (next: number) => {
+    if (next === 0 || next === 1) Keyboard.dismiss();
     Haptics.selectionAsync().catch(() => {});
     // Al cambiar de paso, reiniciar la guardia de sección contacto
     if (next !== 1) setContactSectionSeen(false);
@@ -761,7 +765,6 @@ function StepNombre({ onFocusField }: { onFocusField?: (input: TextInputInstance
           placeholder={t("biz_name_placeholder")}
           placeholderTextColor={DIM}
           returnKeyType="done"
-          autoFocus
           maxLength={60}
         />
         {(config.businessName?.length ?? 0) > 0 && (
@@ -869,7 +872,7 @@ function StepUbicacion({ onFocusField }: { onFocusField?: (input: TextInputInsta
       <View style={c.sectionCard}>
         <TextInput ref={addressInput} onFocus={() => { if (addressInput.current) onFocusField?.(addressInput.current); }}
           style={c.nameInput} value={config.address ?? ""} onChangeText={address => updateConfig({ address })}
-          placeholder={t("biz_address_placeholder")} placeholderTextColor={DIM} returnKeyType="done" autoFocus maxLength={120} />
+          placeholder={t("biz_address_placeholder")} placeholderTextColor={DIM} returnKeyType="done" maxLength={120} />
         {config.coordinates && <Text style={{ color: GRAY, fontSize: 12, marginTop: 8 }}>
           {config.coordinates.latitude.toFixed(5)}, {config.coordinates.longitude.toFixed(5)}
         </Text>}
