@@ -31,6 +31,7 @@ test('multiple-service HTTP contract, legacy isolation and safe RPC failure', as
     if(!String(url).startsWith(process.env.SUPABASE_URL))return realFetch(url,init);
     const route=new URL(url);upstream.push({path:route.pathname,init});
     assert.equal(init.headers.Authorization,'Bearer test-token');
+    if(/go_booking_(gap|phase)_policy_version$/.test(route.pathname))return Response.json(1);
     if(route.pathname==='/auth/v1/user')return mode==='revoked'?Response.json({error:'invalid'},{status:401}):Response.json({id:customer});
     if(route.pathname==='/rest/v1/services')return Response.json(mode==='foreign'?[catalog[0],{...catalog[1],business_id:foreign}]:mode==='inactive'?[catalog[0]]:mode==='currency'?[catalog[0],{...catalog[1],currency:'USD'}]:catalog);
     if(route.pathname==='/rest/v1/rpc/go_booking_contract')return mode==='old'?Response.json({code:'PGRST202'},{status:404}):mode==='limited'?Response.json({code:'429'},{status:429}):Response.json({version:2,multiService:true});

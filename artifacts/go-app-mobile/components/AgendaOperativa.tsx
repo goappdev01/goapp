@@ -1,3 +1,4 @@
+import { BookingPhaseAvailability } from "./booking/BookingPhaseAvailability";
 import type { ScrollViewInstance, ViewInstance } from "react-native";
 import { useGoCalendarEntries } from "@/hooks/useGoCalendarEntries";
 import { GoCalendarSlot } from "@/components/ui/GoCalendarSlot";
@@ -298,6 +299,7 @@ export type AgendaBoardProps = {
   };
   goLog: GoEntry[];
   selectedDateISO?: string;
+  bookingProfessionalId?: string;
   sortOrder?: "asc" | "desc";
   onToggleSortOrder?: () => void;
   onSelectDay?: (dateISO: string) => void;
@@ -683,6 +685,7 @@ export function AgendaBoard({
   selection,
   goLog: calendarEntries,
   selectedDateISO,
+  bookingProfessionalId,
   sortOrder = "asc",
   onToggleSortOrder,
   onSelectDay,
@@ -1790,6 +1793,7 @@ export function AgendaBoard({
               </Text>
             )}
 
+            {reservation && <BookingPhaseAvailability entry={item} professionalId={bookingProfessionalId} color={_textSecondary} fontSize={subFont} />}
             {reservation && <GoEntryQuickActions entry={item} compact />}
             {!reservation && item.localResolutionStatus && <Text style={{color:eColor,fontSize:subFont,fontWeight:"700"}}>{item.localResolutionStatus==="done"?(lang==="en"?"DONE":"REALIZADA"):(lang==="en"?"PENDING":"PENDIENTE")}</Text>}
             {/* 4. EXPANDED DETAIL BLOCK — only for non-booking types; bookings use the zoom Modal */}

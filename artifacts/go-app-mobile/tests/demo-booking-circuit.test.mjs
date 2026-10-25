@@ -132,3 +132,9 @@ test("combined multi-service proposal rejects a collision during the last servic
  const stored=f.store.getSnapshot().bookings.find(booking=>booking.id===original.booking.id);
  assert.equal(stored.startDatetime,original.booking.startDatetime);assert.equal(stored.changeProposal,undefined);assert.equal(f.store.getSnapshot().bookings.length,2);
 });
+
+test('saved phased DEMO configuration cannot be falsely booked by the legacy continuous local adapter',async()=>{
+ const f=fixture();await configured(f);const input=await inputFor(f);
+ await f.store.transformConfig(config=>({...config,services:config.services.map((service,index)=>index?service:{...service,timing:{version:1,mode:'phases',resourcesConfigured:true,phases:[{id:'work',name:'',kind:'work',durationMinutes:service.duration,resources:[]}]}})}));
+ await assert.rejects(f.repo.claimSlot({...input,status:'CONFIRMED'}),/motor de servidor/);assert.equal(f.repo.getCustomerEntries().length,0);
+});

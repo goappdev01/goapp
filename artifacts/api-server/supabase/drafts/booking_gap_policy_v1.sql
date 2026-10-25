@@ -9,7 +9,7 @@ $$;
 
 create or replace function go_booking_timeline_private.minimum_service(p_business uuid,p_staff uuid)
 returns integer language sql stable set search_path='' as $$
- select min(s.duration_minutes) from public.services s
+ select min((go_booking_timeline_private.effective_timing(s.ui_metadata->'timing',p_staff,s.duration_minutes)->>'durationMinutes')::integer) from public.services s
  where s.business_id=p_business and s.active and s.duration_minutes>0
  and coalesce(s.ui_metadata->>'archived','false')<>'true'
  and coalesce(s.ui_metadata->>'visible','true')<>'false'
@@ -71,7 +71,7 @@ $$;
 create or replace function go_booking_timeline_private.gap_start_windows(p_business uuid,p_staff uuid,p_from timestamptz,p_to timestamptz)
 returns jsonb language plpgsql stable set search_path='' as $$
 declare professional record;minimum integer;policy jsonb;windows tstzmultirange;free tstzmultirange;
- a timestamptz:=p_from-interval '8 days';z timestamptz:=p_to+interval '8 days';r tstzrange;rows jsonb:='[]';
+ a timestamptz:=p_from-interval '8 days';z timestamptz:=p_to+interval '8 days';r tstzrange;rows jsonb:='[]';released tstzmultirange;
 begin
  for professional in select s.id,s.ui_metadata from public.staff s where s.business_id=p_business and s.active
    and coalesce(s.ui_metadata->>'archived','false')<>'true' and (p_staff is null or s.id=p_staff)
@@ -80,9 +80,10 @@ begin
   policy:=go_booking_timeline_private.validate_gap_policy(professional.ui_metadata->'gapPolicy');
   windows:=go_booking_timeline_private.available_segments(p_business,professional.id,a,z);
   free:=windows-go_booking_timeline_private.occupied(p_business,professional.id,a,z);
+  released:=go_booking_timeline_private.released_waits(p_business,professional.id,a,z);
   for r in select unnest(free) loop
    if upper(r)<=p_from or lower(r)>=p_to then continue;end if;
-   rows:=rows||jsonb_build_array(jsonb_build_object('startsAt',lower(r),'endsAt',upper(r),'minimumMinutes',minimum,'policy',policy,
+   rows:=rows||jsonb_build_array(jsonb_build_object('startsAt',lower(r),'endsAt',upper(r),'minimumMinutes',minimum,'policy',policy,'released',coalesce((select jsonb_agg(jsonb_build_array(lower(x),upper(x))) from unnest(released*tstzmultirange(r)) x),'[]'),
     'leftBounded',lower(r)<>a or not(go_booking_timeline_private.available_segments(p_business,professional.id,a-interval '1 minute',a) @> tstzrange(a-interval '1 minute',a,'[)')),
     'rightBounded',upper(r)<>z or not(go_booking_timeline_private.available_segments(p_business,professional.id,z,z+interval '1 minute') @> tstzrange(z,z+interval '1 minute','[)'))));
   end loop;
@@ -92,7 +93,7 @@ end; $$;
 
 create or replace function go_booking_timeline_private.gap_start_possible(p_windows jsonb,p_start timestamptz,p_continuous_minutes integer default null)
 returns boolean language plpgsql volatile set search_path='' as $$
-declare w jsonb;a timestamptz;z timestamptz;finish timestamptz;policy jsonb;flexible boolean;
+declare w jsonb;a timestamptz;z timestamptz;finish timestamptz;policy jsonb;flexible boolean;released tstzmultirange;
 begin
  for w in select value from jsonb_array_elements(p_windows) loop
   a:=(w->>'startsAt')::timestamptz;z:=(w->>'endsAt')::timestamptz;
@@ -101,9 +102,10 @@ begin
   policy:=w->'policy';flexible:=(policy->>'allowLastMinuteGaps')::boolean
    and p_start-clock_timestamp()<=(policy->>'lastMinuteMinutes')::integer*interval '1 minute';
   if flexible then return true;end if;
-  if (w->>'leftBounded')::boolean and not go_booking_timeline_private.valid_gap(extract(epoch from(p_start-a))/60,(w->>'minimumMinutes')::integer) then continue;end if;
+  select coalesce(range_agg(tstzrange((x->>0)::timestamptz,(x->>1)::timestamptz,'[)')),'{}'::tstzmultirange) into released from jsonb_array_elements(coalesce(w->'released','[]')) x;
+  if (w->>'leftBounded')::boolean and not go_booking_timeline_private.valid_ordinary_remainders(tstzmultirange(tstzrange(a,p_start,'[)')),released,(w->>'minimumMinutes')::integer) then continue;end if;
   if p_continuous_minutes is not null and (w->>'rightBounded')::boolean
-   and not go_booking_timeline_private.valid_gap(extract(epoch from(z-finish))/60,(w->>'minimumMinutes')::integer) then continue;end if;
+   and not go_booking_timeline_private.valid_ordinary_remainders(tstzmultirange(tstzrange(finish,z,'[)')),released,(w->>'minimumMinutes')::integer) then continue;end if;
   return true;
  end loop;
  return false;
@@ -113,7 +115,7 @@ end; $$;
 create or replace function go_booking_timeline_private.gap_admission(p_business uuid,p_start timestamptz,p_plan jsonb,p_exclude uuid default null)
 returns jsonb language plpgsql volatile set search_path='' as $$
 declare professional record;minimum integer;policy jsonb;windows tstzmultirange;segment tstzrange;
- inserted tstzmultirange;existing tstzmultirange;combined tstzmultirange;gap tstzrange;
+ inserted tstzmultirange;existing tstzmultirange;combined tstzmultirange;gap tstzrange;released tstzmultirange;proposed_waits tstzmultirange;recovered boolean;
  invalid boolean;flexible boolean;minutes numeric;rows jsonb:='[]';at timestamptz:=clock_timestamp();left_neighbor timestamptz;right_neighbor timestamptz;
 begin
  if p_start<=at then raise exception using errcode='PT422',message='BOOKING_INVALID_INTERVAL';end if;
@@ -137,6 +139,9 @@ begin
   windows:=go_booking_timeline_private.available_segments(p_business,professional.id,
     least(lower(range_merge(inserted)),coalesce(left_neighbor,lower(range_merge(inserted))))-interval '8 days',
     greatest(upper(range_merge(inserted)),coalesce(right_neighbor,upper(range_merge(inserted))))+interval '8 days');
+  released:=go_booking_timeline_private.released_waits(p_business,professional.id,lower(range_merge(windows)),upper(range_merge(windows)),p_exclude);
+  select coalesce(range_agg(tstzrange((w->>'startsAt')::timestamptz,(w->>'endsAt')::timestamptz,'[)')),'{}'::tstzmultirange) into proposed_waits from jsonb_array_elements(go_booking_timeline_private.snapshot_waits(p_plan,(p_plan->>'staffId')::uuid)) w where (w->>'staffId')::uuid is not distinct from professional.id;
+  recovered:=inserted&&released;released:=released+proposed_waits;
   invalid:=false;
   for segment in select unnest(windows) loop
    if not inserted&&tstzmultirange(segment) then continue;end if;
@@ -149,19 +154,15 @@ begin
       @> tstzrange(lower(gap)-interval '1 minute',lower(gap),'[)') then continue;end if;
     if upper(gap)=upper(segment) and go_booking_timeline_private.available_segments(p_business,professional.id,upper(gap),upper(gap)+interval '1 minute')
       @> tstzrange(upper(gap),upper(gap)+interval '1 minute','[)') then continue;end if;
-    -- A configured wait inside this SAME service is intentional, not a residual
-    -- between reservations. A different booking within it is checked normally.
-    if exists(select 1 from unnest(inserted) n where upper(n)=lower(gap))
-      and exists(select 1 from unnest(inserted) n where lower(n)=upper(gap)) then continue;end if;
     -- Ignore old gaps untouched by this placement, even when incompatible.
     if not exists(select 1 from unnest(inserted) n where upper(n)=lower(gap) or lower(n)=upper(gap)) then continue;end if;
     minutes:=extract(epoch from(upper(gap)-lower(gap)))/60;
-    if not go_booking_timeline_private.valid_gap(minutes,minimum) then invalid:=true;end if;
+    if not go_booking_timeline_private.valid_ordinary_remainders(tstzmultirange(gap),released,minimum) then invalid:=true;end if;
    end loop;
   end loop;
   if invalid and not flexible then raise exception using errcode='PT422',message='BOOKING_GAP_NOT_MULTIPLE';end if;
   rows:=rows||jsonb_build_array(jsonb_build_object('staffId',professional.id,'minimumMinutes',minimum,
-    'exceptionUsed',invalid,'lastMinuteMinutes',(policy->>'lastMinuteMinutes')::integer,
+    'exceptionUsed',invalid,'releasedWaitUsed',recovered,'lastMinuteMinutes',(policy->>'lastMinuteMinutes')::integer,
     'authorizedBy',policy->'authorizedBy','authorizedAt',policy->'authorizedAt'));
  end loop;
  if jsonb_array_length(rows)=0 then raise exception using errcode='PT422',message='BOOKING_NO_ASSIGNED_SERVICES';end if;

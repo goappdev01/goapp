@@ -1,5 +1,7 @@
 # Booking timeline v1 — review draft, never activated
 
+> Updated phase/wait consent and atomic activation procedure: [BOOKING_PHASE_WAITS_REVIEW.md](BOOKING_PHASE_WAITS_REVIEW.md). Use its full phase upgrade for the current definitions.
+
 Apply only to an explicitly disposable PostgreSQL fixture after the committed GO migrations, the negotiation draft, and the verification draft. The separate Agent1 multi-service draft is optional and must precede these drafts. This file and `booking_timeline_v1.sql` do not authorize production changes. No migration history entry or dependency is added.
 
 `go_booking_timeline_private.plan` is the single scheduling authority. HTTP preview, available dates/times, transactional creation, legacy direct REST inserts, confirmation, and proposal acceptance use it. Mobile receives canonical intervals for calendar rendering; a local calendar predicate is not authority. Availability returns proposed plans, without existing booking IDs, names, notes, customer identities, or busy-event payloads.
@@ -16,7 +18,7 @@ Services continue to expose the existing integer `duration_minutes` for simple s
 ]}
 ```
 
-Phase order is service selection order, then phase order within each service. Durations are exact positive integer minutes, with no rounding to 5/15/30 minute cells. A work phase can explicitly name a same-business qualified `staffId`; unspecified work phases resolve a concrete available professional. Wait phases release the professional. Preparation and cleaning are explicit `kind:"work"` phases whenever required; the engine never invents or omits them based on a service title.
+Phase order is service selection order, then phase order within each service. Durations are exact positive integer minutes, with no rounding to 5/15/30 minute cells. A work phase can explicitly name a same-business qualified `staffId`; unspecified work phases resolve a concrete available professional. Only a new wait with `releaseProfessional:true` releases the professional; an omitted or false value remains occupied. Historical receipts retain their committed semantics. Preparation and cleaning are explicit `kind:"work"` phases whenever required; the engine never invents or omits them based on a service title.
 
 An explicitly configured simple mode may include exactly one work phase matching `duration_minutes`. Its professional and resource requirements remain binding; they are never discarded by synthesizing an empty phase. A simple wait phase, multiple phases, or mismatching duration fails closed.
 

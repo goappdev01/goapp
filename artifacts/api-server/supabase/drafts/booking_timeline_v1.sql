@@ -32,7 +32,7 @@ returns jsonb language plpgsql immutable set search_path='' as $$
 declare result jsonb:=p_plan; key text; rows jsonb; item jsonb; delta interval;
 begin
  delta:=p_start-(p_plan->>'startsAt')::timestamptz;
- foreach key in array array['phases','workIntervals','resourceIntervals'] loop
+ foreach key in array array['phases','workIntervals','resourceIntervals','releasedWaitIntervals'] loop
   rows:='[]';
   for item in select value from jsonb_array_elements(coalesce(p_plan->key,'[]')) loop
    rows:=rows||jsonb_build_array(item||jsonb_build_object(
@@ -126,7 +126,7 @@ declare
  business public.businesses; service public.services; professional public.staff;
  selected uuid; timing jsonb; phase jsonb; phases jsonb:='[]'; work jsonb:='[]'; resources jsonb:='[]';
  demands jsonb; demand jsonb; resource jsonb; resource_key text; quantity integer; capacity integer;
- phase_minutes integer; offset_minutes integer:=0; work_minutes integer:=0; wait_minutes integer:=0;
+ phase_minutes integer; offset_minutes integer:=0; work_minutes integer:=0; wait_minutes integer:=0; released_minutes integer:=0;released jsonb:='[]';previous_staff uuid;
  a timestamptz; z timestamptz; assigned uuid; wanted uuid; default_staff uuid; candidate record; phase_key text; seen text[]:='{}';
  details jsonb:='[]'; money text; amount numeric:=0; known_price boolean:=true;
  configured boolean:=true; assigned_ok boolean; candidate_ok boolean; result jsonb; iv jsonb; other jsonb; tick timestamptz; used numeric;
@@ -158,6 +158,16 @@ begin
  if p_services is null or cardinality(p_services) not between 1 and 32 or array_ndims(p_services)<>1
   or array_lower(p_services,1)<>1 or (select count(distinct s) from unnest(p_services) s)<>cardinality(p_services) then
   raise exception using errcode='PT422',message='BOOKING_INVALID_SERVICES';end if;
+ -- Select a real professional before constructing their full overridden sequence.
+ if p_frozen is null and p_staff is null and exists(select 1 from public.staff s where s.business_id=p_business and s.active and coalesce(s.ui_metadata->>'archived','false')<>'true') then
+  for candidate in select s.id from public.staff s where s.business_id=p_business and s.active and coalesce(s.ui_metadata->>'archived','false')<>'true' order by s.id loop
+   begin return go_booking_timeline_private.plan(p_business,p_services,p_start,candidate.id,null,p_exclude,p_customer);
+   exception when exclusion_violation then null;
+    when sqlstate 'PT422' then if sqlerrm not in ('BOOKING_STAFF_UNAVAILABLE','BOOKING_OUTSIDE_AVAILABILITY','BOOKING_RESOURCE_UNAVAILABLE','BOOKING_NO_ASSIGNED_SERVICES','BOOKING_GAP_NOT_MULTIPLE') then raise;end if;
+   end;
+  end loop;
+  raise exception using errcode='PT422',message='BOOKING_STAFF_UNAVAILABLE';
+ end if;
  if p_frozen is null then
   foreach selected in array p_services loop
    select * into service from public.services s where s.id=selected and s.business_id=p_business
@@ -166,8 +176,9 @@ begin
    if not found then raise exception using errcode='PT422',message='BOOKING_SERVICE_UNAVAILABLE';end if;
    if money is not null and money<>service.currency then raise exception using errcode='PT422',message='BOOKING_MIXED_CURRENCY';end if;
    money:=service.currency;if service.price is null then known_price:=false;else amount:=amount+service.price;end if;
-   timing:=service.ui_metadata->'timing';
-   if timing is null then timing:=jsonb_build_object('version',1,'mode','simple','resourcesConfigured',false);end if;
+   perform go_booking_timeline_private.validate_service_timing(p_business,service.ui_metadata->'timing',service.duration_minutes);
+   timing:=go_booking_timeline_private.effective_timing(service.ui_metadata->'timing',p_staff,service.duration_minutes);
+   service.duration_minutes:=(timing->>'durationMinutes')::integer;
    if jsonb_typeof(timing)<>'object' or timing->>'version' is distinct from '1' or coalesce(timing->>'mode','') not in ('simple','phases')
     or jsonb_typeof(timing->'resourcesConfigured') is distinct from 'boolean' then
     raise exception using errcode='PT422',message='BOOKING_INVALID_TIMING';end if;
@@ -194,8 +205,8 @@ begin
    for phase in select value from jsonb_array_elements(demands) loop
     if jsonb_typeof(phase)<>'object' or jsonb_typeof(phase->'id') is distinct from 'string'
      or nullif(phase->>'id','') is null or phase->>'id'=any(seen)
-     or jsonb_typeof(phase->'name') is distinct from 'string'
-     or nullif(phase->>'name','') is null or coalesce(phase->>'kind','') not in ('work','wait')
+     or phase ? 'name' and jsonb_typeof(phase->'name') is distinct from 'string'
+     or coalesce(phase->>'kind','') not in ('work','wait')
      or jsonb_typeof(phase->'durationMinutes') is distinct from 'number'
      or (phase->>'durationMinutes')!~'^[0-9]+$' or (phase->>'durationMinutes')::numeric not between 1 and 1440
      or jsonb_typeof(coalesce(phase->'resources','[]'))<>'array' then
@@ -237,26 +248,8 @@ begin
  if not go_booking_timeline_private.in_shift(p_business,null,null,p_start,z,true)
   or go_booking_timeline_private.blocked(business.ui_metadata->'bookingBlocks',p_start,z) then
   raise exception using errcode='PT422',message='BOOKING_OUTSIDE_AVAILABILITY';end if;
- -- No preference means ONE qualified default professional for every implicit
- -- work phase. Only explicit per-phase staffId can request a staff handoff.
- if p_frozen is null and p_staff is null and exists(select 1 from jsonb_array_elements(result->'phases') p
-   where p->>'kind'='work' and nullif(p->>'staffId','') is null)
-   and exists(select 1 from public.staff s where s.business_id=p_business and s.active and coalesce(s.ui_metadata->>'archived','false')<>'true') then
-  -- Evaluate the COMPLETE same plan for each professional, including resources
-  -- and gap admission; an invalid first professional must not hide another.
-  for candidate in select s.id from public.staff s where s.business_id=p_business and s.active
-    and coalesce(s.ui_metadata->>'archived','false')<>'true' order by s.id loop
-   begin
-    return go_booking_timeline_private.plan(p_business,p_services,p_start,candidate.id,null,p_exclude,p_customer);
-   exception when exclusion_violation then null;
-    when sqlstate 'PT422' then
-     if sqlerrm not in ('BOOKING_STAFF_UNAVAILABLE','BOOKING_OUTSIDE_AVAILABILITY','BOOKING_RESOURCE_UNAVAILABLE','BOOKING_NO_ASSIGNED_SERVICES','BOOKING_GAP_NOT_MULTIPLE') then raise;end if;
-   end;
-  end loop;
-  raise exception using errcode='PT422',message='BOOKING_STAFF_UNAVAILABLE';
- end if;
  -- Legacy rows remain full-span and keep historical duration and identity.
- if coalesce((result->>'legacy')::boolean,false) then
+ if p_frozen is not null or coalesce((result->>'legacy')::boolean,false) then
   work:=result->'workIntervals';
  else
   phases:='[]';
@@ -265,8 +258,8 @@ begin
    a:=p_start+(phase->>'offsetMinutes')::integer*interval '1 minute';
    z:=a+(phase->>'durationMinutes')::integer*interval '1 minute';
    assigned:=null;assigned_ok:=false;
-   if phase->>'kind'='work' then
-    begin wanted:=coalesce(nullif(phase->>'staffId','')::uuid,p_staff,default_staff);
+   if phase->>'kind'='work' or phase->>'releaseProfessional' is distinct from 'true' then
+    begin wanted:=coalesce(nullif(phase->>'staffId','')::uuid,case when phase->>'kind'='wait' then previous_staff end,p_staff,previous_staff,default_staff);
     exception when invalid_text_representation then raise exception using errcode='PT422',message='BOOKING_INVALID_TIMING';end;
     for candidate in
      select s.id from public.staff s where s.business_id=p_business and s.active
@@ -289,11 +282,16 @@ begin
      assigned:=candidate.id;assigned_ok:=true;exit;
     end loop;
     if not assigned_ok then raise exception using errcode='23P01',message='BOOKING_CONFLICT';end if;
-    work_minutes:=work_minutes+(phase->>'durationMinutes')::integer;
-    work:=work||jsonb_build_array(jsonb_build_object('startsAt',a,'endsAt',z,'staffId',assigned,'serviceId',selected));
+    if phase->>'kind'='work' then work_minutes:=work_minutes+(phase->>'durationMinutes')::integer;
+    else wait_minutes:=wait_minutes+(phase->>'durationMinutes')::integer;end if;
+    work:=work||jsonb_build_array(jsonb_build_object('startsAt',a,'endsAt',z,'staffId',assigned,'serviceId',selected,'kind',phase->>'kind'));
+    previous_staff:=assigned;
    else
-    if nullif(phase->>'staffId','') is not null then raise exception using errcode='PT422',message='BOOKING_INVALID_TIMING';end if;
-    wait_minutes:=wait_minutes+(phase->>'durationMinutes')::integer;
+    begin assigned:=coalesce(nullif(phase->>'staffId','')::uuid,previous_staff,p_staff,default_staff);
+    exception when invalid_text_representation then raise exception using errcode='PT422',message='BOOKING_INVALID_TIMING';end;
+    if assigned is not null and not exists(select 1 from public.staff s where s.id=assigned and s.business_id=p_business and s.active and s.ui_metadata->'serviceIds' @> jsonb_build_array(selected::text)) then raise exception using errcode='PT422',message='BOOKING_STAFF_UNAVAILABLE';end if;
+    wait_minutes:=wait_minutes+(phase->>'durationMinutes')::integer;released_minutes:=released_minutes+(phase->>'durationMinutes')::integer;
+    released:=released||jsonb_build_array(jsonb_build_object('startsAt',a,'endsAt',z,'staffId',assigned,'serviceId',selected,'phaseId',phase->>'id'));
    end if;
    phases:=phases||jsonb_build_array(phase||jsonb_build_object('startsAt',a,'endsAt',z,'staffId',assigned));
    seen:='{}';
@@ -316,7 +314,8 @@ begin
     'startsAt',(r->>'startsAt')::timestamptz,'endsAt',(r->>'endsAt')::timestamptz) x
    from jsonb_array_elements(resources) r group by r->>'resourceId',(r->>'startsAt')::timestamptz,(r->>'endsAt')::timestamptz) q;
   result:=result||jsonb_build_object('phases',phases,'workIntervals',work,'resourceIntervals',resources,
-   'workMinutes',work_minutes,'waitMinutes',wait_minutes,'staffId',work->0->'staffId');
+   'workMinutes',work_minutes,'waitMinutes',wait_minutes,'releasedWaitMinutes',released_minutes,'occupiedMinutes',work_minutes+wait_minutes-released_minutes,
+   'phasePolicyVersion',1,'releasedWaitIntervals',released,'staffId',work->0->'staffId');
  end if;
  -- Frozen and legacy intervals share exactly the same final checker.
  for iv in select value from jsonb_array_elements(work) loop
@@ -376,6 +375,11 @@ begin
    if used>capacity then raise exception using errcode='23P01',message='BOOKING_RESOURCE_CONFLICT';end if;
   end loop;
  end loop;
+ if p_frozen is not null then
+  released:=go_booking_timeline_private.snapshot_waits(result,(result->>'staffId')::uuid);
+  select coalesce(sum(extract(epoch from((w->>'endsAt')::timestamptz-(w->>'startsAt')::timestamptz))/60),0)::integer into released_minutes from jsonb_array_elements(released) w;
+  result:=result||jsonb_build_object('releasedWaitIntervals',released,'releasedWaitMinutes',released_minutes,'phasePolicyVersion',1);
+ end if;
  result:=result||jsonb_build_object('gapPolicy',go_booking_timeline_private.gap_admission(p_business,p_start,result,p_exclude));
  return result;
 end; $$;
@@ -448,6 +452,7 @@ begin
  if tg_table_name='businesses' then business:=coalesce(new.id,old.id);
  else business:=coalesce(new.business_id,old.business_id);end if;
  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('go-booking:'||business::text,0));
+ if tg_table_name='services' and tg_op<>'DELETE' then perform go_booking_timeline_private.validate_service_timing(business,new.ui_metadata->'timing',new.duration_minutes);end if;
  if tg_table_name='staff' and tg_op<>'DELETE' and new.ui_metadata ? 'gapPolicy' then
   perform go_booking_timeline_private.validate_gap_policy(new.ui_metadata->'gapPolicy');
   if tg_op='INSERT' or jsonb_build_array(new.ui_metadata->'gapPolicy'->'allowLastMinuteGaps',new.ui_metadata->'gapPolicy'->'lastMinuteMinutes')
@@ -544,7 +549,7 @@ begin
   raise exception using errcode='22023',message='BOOKING_INVALID_RANGE';end if;
  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('go-booking:'||p_business_id::text,0));
  company_windows:=go_booking_timeline_private.shift_windows(p_business_id,null,null,tick,stop_at);
- select s.ui_metadata->'timing' into first_timing from public.services s where s.business_id=p_business_id and s.id=p_service_ids[1];
+ select go_booking_timeline_private.effective_timing(s.ui_metadata->'timing',p_staff_id,s.duration_minutes) into first_timing from public.services s where s.business_id=p_business_id and s.id=p_service_ids[1];
  initial_staff:=p_staff_id;
  if first_timing is null or (first_timing->>'mode'='simple' and not(first_timing ? 'phases')) then
   initial_work:=true;
@@ -557,6 +562,9 @@ begin
    exception when invalid_text_representation then initial_work:=false;end;
   end if;
  end if;
+ -- Automatic assignment may use a different initial phase in its override.
+ -- Bypass only this cheap probe; the complete plan still validates every slot.
+ if p_staff_id is null and first_timing ? 'professionalTimings' then initial_work:=false;end if;
  if initial_work then
   gap_windows:=go_booking_timeline_private.gap_start_windows(p_business_id,initial_staff,tick,stop_at);
   -- Only plain continuous services can prune BOTH sides using their sum. Phases
@@ -568,7 +576,7 @@ begin
    -- If both real residuals must be multiples, their SUM must be one too.
    -- This only discards impossible windows; it never admits a candidate.
    select coalesce(jsonb_agg(w),'[]') into gap_windows from jsonb_array_elements(gap_windows) w
-    where (w->'policy'->>'allowLastMinuteGaps')::boolean
+    where (w->'policy'->>'allowLastMinuteGaps')::boolean or coalesce(w->'released','[]')<>'[]'::jsonb
      or not((w->>'leftBounded')::boolean and (w->>'rightBounded')::boolean)
      or go_booking_timeline_private.valid_gap(extract(epoch from((w->>'endsAt')::timestamptz-(w->>'startsAt')::timestamptz))/60-continuous_minutes,(w->>'minimumMinutes')::integer);
   end if;
@@ -607,7 +615,7 @@ begin
   previous_valid:=current_valid;
   tick:=tick+interval '1 minute';
  end loop;
- return jsonb_build_object('version',1,'gapPolicyVersion',1,'timezone',zone,'slots',slots,'availableDates',dates,'truncated',truncated,
+ return jsonb_build_object('version',1,'gapPolicyVersion',1,'phasePolicyVersion',1,'timezone',zone,'slots',slots,'availableDates',dates,'truncated',truncated,
   'nextFrom',case when truncated then tick else null end);
 end; $$;
 create function public.go_booking_availability(p_business_id uuid,p_service_ids uuid[],p_from timestamptz default null,p_to timestamptz default null,

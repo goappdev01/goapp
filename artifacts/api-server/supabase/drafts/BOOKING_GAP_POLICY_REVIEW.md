@@ -1,12 +1,14 @@
 # Booking gaps: review and activation
 
+> Updated phase/wait consent and atomic activation procedure: [BOOKING_PHASE_WAITS_REVIEW.md](BOOKING_PHASE_WAITS_REVIEW.md). Use its full phase upgrade for the current definitions.
+
 This draft extends the existing canonical timeline engine; it does not create a second booking engine. It has not been applied to a real Supabase database. Nelson must review and authorize activation together with the matching API version.
 
 ## Admission
 
 `minimum_service` derives M from the selected professional's explicit `serviceIds`: active, visible, reservable services of the same business with positive duration, excluding products. Empty or absent assignments produce no availability. M is not stored or configured. A catalog or assignment edit recalculates future admission without changing an existing receipt.
 
-`plan` calls `gap_admission` after its existing professional, customer, resource and working-time validations. New residuals touching the placement must be zero or an exact positive multiple of M. Real opening, closing and break boundaries delimit these residuals; no padding or rounding is inserted. Unaffected historical gaps are ignored. Closed periods are subtracted before evaluation. Configured waits inside one service remain intentional phases, not gaps between two reservations; a second booking inserted into such a wait is checked normally.
+`plan` calls `gap_admission` after its existing professional, customer, resource and working-time validations. New residuals touching the placement must be zero or an exact positive multiple of M. Real opening, closing and break boundaries delimit these residuals; no padding or rounding is inserted. Unaffected historical gaps are ignored. Closed periods are subtracted before evaluation. Configured waits inside one service remain intentional phases, not gaps between two reservations; a second booking is checked for actual work/resource conflicts, while only its residual portions proved to originate in an authorized internal wait are exempt from the ordinary modulo rule.
 
 Availability, explicit or automatic professional assignment, creation, catalog combinations and negotiated rescheduling all reuse `plan`. Automatic assignment tests the complete plan for each candidate. Business advisory transaction locks already serialize bookings, changes and configuration updates. Existing snapshots retain their original services, duration, prices and identity. Cancellation still releases occupation without rewriting another reservation.
 

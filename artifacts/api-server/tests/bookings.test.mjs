@@ -24,6 +24,7 @@ test('booking API validates ownership, durations, conflicts and cancellation', a
   globalThis.fetch = async (url, init) => {
     if (!String(url).startsWith(process.env.SUPABASE_URL)) return realFetch(url, init);
     const route = new URL(url);
+    if(/go_booking_(gap|phase)_policy_version$/.test(route.pathname))return Response.json(1);
     if (route.pathname.endsWith('/user')) return Response.json({ id });
     if (route.pathname.endsWith('/services')) return Response.json(mode === 'wrong-service' ? [] : [{ id, duration_minutes: 60 }]);
     if (route.pathname.endsWith('/bookings')) {

@@ -68,9 +68,12 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: R
         && (booking.elementId === resource.elementId || resource.staff && booking.staffId === resource.staff.id));
     });
   };
+  // The local continuous adapter must never advertise a phased plan it cannot validate.
+  const requireSupportedTiming=(config:BusinessConfig,ids:string[])=>{if(config.services.some(service=>ids.includes(serviceId(service.name))&&(service.timing?.mode==="phases"||!!service.timing?.professionalTimings)))throw new Error("Las reservas por fases requieren el motor de servidor; la DEMO local no confirma estos horarios.");};
   const slotsFor = (data: BusinessDemoData, itemId: string, dateISO: string, id?: string, serviceIds = [itemId]): SlotWithStatus[] => {
     if (!dateValid(dateISO) || !businessFor(data)) return [];
     if (serviceIds[0] !== itemId) return [];
+    requireSupportedTiming(data.config,serviceIds);
     let item: BookableItem;
     try { item = summarizeBookingServices(servicesFor(data.config), serviceIds).item; } catch { return []; }
     const member = id ? staffFor(data.config).find(person => person.id === id) : undefined; if (id && !member) return [];
@@ -114,6 +117,7 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: R
     if (existing?.status === "CONFIRMED" && input.status === "CONFIRMED") return { ok: true, booking: clone(existing) };
     if (!businessFor(data)) throw new Error("Completa la configuración DEMO antes de reservar.");
     const serviceIds = bookingServiceIds(input);
+    requireSupportedTiming(data.config,serviceIds);
     let selection: ReturnType<typeof summarizeBookingServices>;
     try { selection = summarizeBookingServices(servicesFor(data.config), serviceIds); } catch { throw new Error("Servicio DEMO no disponible."); }
     let acceptedQuote: CatalogQuote | undefined;
@@ -182,6 +186,7 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: R
     const startDatetime=dateISO+"T"+timeHHMM+":00",end=new Date(Date.parse(startDatetime)+duration*60000);
     const endDatetime=end.getFullYear()+"-"+String(end.getMonth()+1).padStart(2,"0")+"-"+String(end.getDate()).padStart(2,"0")+"T"+String(end.getHours()).padStart(2,"0")+":"+String(end.getMinutes()).padStart(2,"0")+":00";
     if(!isValidDemoLocalInterval(startDatetime,endDatetime,duration) || Date.parse(startDatetime)<=now() || endDatetime.slice(0,10)!==dateISO)throw new Error("Elige una hora futura válida.");
+    requireSupportedTiming(data.config,bookingServiceIds(booking));
     const serviceIds=bookingServiceIds(booking),item=summarizeBookingServices(servicesFor(data.config),serviceIds).item,member=staffFor(data.config).find(person=>person.id===booking.staffId);
     if(!item || item.durationMinutes!==duration || booking.staffId && !member || !freeResource(data,item,{startDatetime,endDatetime},member,booking.id,booking.elementId,serviceIds))throw new Error("Esta hora no está disponible para el servicio y profesional originales.");
     if(operation==="propose"){

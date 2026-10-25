@@ -1,8 +1,8 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {randomUUID} from 'node:crypto';import {createRequire} from 'node:module';
 const require=createRequire(createRequire(import.meta.url).resolve('@workspace/db')),{Client}=require('pg');
 const configured=process.env.GO_BOOKING_GAP_TEST_URL;
-function config(){assert.equal(process.env.GO_BOOKING_GAP_TEST_CONFIRM,'isolated');const u=new URL(configured);assert.equal(u.hostname,'127.0.0.1');assert.equal(u.pathname,'/go_booking_gap_test_20261025');assert.equal(u.username,'go_booking_test_owner');return {connectionString:String(u)};}
-async function connect(){const db=new Client(config());await db.connect();const {rows:[r]}=await db.query("select current_database() name,current_setting('go.booking_test_environment') marker,current_setting('listen_addresses') host");assert.equal(r.name,'go_booking_gap_test_20261025');assert.equal(r.marker,'gap-isolated');assert.equal(r.host,'127.0.0.1');return db;}
+function config(){assert.equal(process.env.GO_BOOKING_GAP_TEST_CONFIRM,'isolated');const u=new URL(configured);assert.equal(u.hostname,'127.0.0.1');assert.ok(['/go_booking_gap_test_20261025','/go_booking_phase_test_20261025'].includes(u.pathname));assert.equal(u.username,'go_booking_test_owner');return {connectionString:String(u)};}
+async function connect(){const db=new Client(config());await db.connect();const {rows:[r]}=await db.query("select current_database() name,current_setting('go.booking_test_environment') marker,current_setting('listen_addresses') host");assert.ok(['go_booking_gap_test_20261025','go_booking_phase_test_20261025'].includes(r.name));assert.equal(r.marker,r.name==='go_booking_phase_test_20261025'?'phase-isolated':'gap-isolated');assert.equal(r.host,'127.0.0.1');return db;}
 const future=new Date(Date.now()+10*86400000).toISOString().slice(0,10),at=time=>`${future}T${time}:00Z`;
 test('18 mandatory cases against REAL PostgreSQL: one canonical engine, no extra listeners or production data',{skip:!configured},async t=>{
  const db=await connect();let ids,services;
@@ -96,7 +96,7 @@ test('18 mandatory cases against REAL PostgreSQL: one canonical engine, no extra
    await actor(ids.client,"select public.go_negotiate_booking($1,'cancel',$2,2,null,null,null,null,false)",[b.id,randomUUID()]);assert.ok((await plan(service(35),at('11:05'))).p);
   });
   await t.test('configured internal waits remain intentional; resource conflicts still cannot be authorized away',async()=>{
-   await fixture([20,75]);const phases=[{id:'apply',name:'Apply',kind:'work',durationMinutes:15,resources:[]},{id:'wait',name:'Wait',kind:'wait',durationMinutes:30,resources:[]},{id:'finish',name:'Finish',kind:'work',durationMinutes:30,resources:[]}];
+   await fixture([20,75]);const phases=[{id:'apply',name:'Apply',kind:'work',durationMinutes:15,resources:[]},{id:'wait',name:'Wait',kind:'wait',durationMinutes:30,releaseProfessional:true,resources:[]},{id:'finish',name:'Finish',kind:'work',durationMinutes:30,resources:[]}];
    await db.query("update public.services set ui_metadata=$1 where id=$2",[JSON.stringify({timing:{version:1,mode:'phases',resourcesConfigured:true,phases}}),service(75)]);
    const {p}=await plan(service(75),at('10:00'));assert.equal(p.totalClientMinutes,75);assert.equal(p.workMinutes,45);assert.equal(p.waitMinutes,30);
    await fixture([20]);const resource=randomUUID();await db.query("update public.businesses set ui_metadata=$1 where id=$2",[JSON.stringify({bookingResources:[{id:resource,name:'Shared resource',capacity:1,active:true}]}),ids.business]);

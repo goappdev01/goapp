@@ -484,6 +484,7 @@ async function createRemoteBooking(candidate: Omit<Booking, "id"> & { id?: strin
   }
   if (!candidate.id) throw new BookingApiError("Revisa la reserva antes de confirmar.", 400, "REQUEST_KEY_REQUIRED");
   await requireRemoteGapPolicy(customerId);
+  await requireRemotePhasePolicy(customerId);
   const payload = await supabaseApiRequest<RemoteBooking[] | RemoteBooking>(
     candidate.catalogSnapshot ? "/supabase/bookings/catalog" : "/supabase/bookings/timeline",
     {
@@ -1544,11 +1545,12 @@ export async function getTimelineAvailability(businessId: string, serviceIds: st
   // Sampling only the response avoids shipping hundreds of duplicate plan bodies.
   query.set("step_minutes", String(options.datesOnly ? 1 : options.visualStepMinutes ?? 15));
   query.set("gap_policy_version","1");
+  query.set("phase_policy_version","1");
   if (staffId) query.set("staff_id", staffId);
   if (options.days) query.set("days", String(options.days));
   if (options.datesOnly) query.set("datesOnly", "true");
-  const result = await supabaseApiRequest<{ version: number; gapPolicyVersion?:number; slots: BookingTimeline[]; availableDates: string[]; timezone: string }>(`/supabase/booking-availability?${query}`, {}, true);
-  if (result.version !== 1 || result.gapPolicyVersion !== 1 || !Array.isArray(result.slots) || result.slots.some(plan=>plan.gapPolicy?.version!==1) || !Array.isArray(result.availableDates)) {
+  const result = await supabaseApiRequest<{ version: number; gapPolicyVersion?:number; phasePolicyVersion?:number; slots: BookingTimeline[]; availableDates: string[]; timezone: string }>(`/supabase/booking-availability?${query}`, {}, true);
+  if (result.version !== 1 || result.gapPolicyVersion !== 1 || result.phasePolicyVersion !== 1 || !Array.isArray(result.slots) || result.slots.some(plan=>plan.gapPolicy?.version!==1||plan.phasePolicyVersion!==1) || !Array.isArray(result.availableDates)) {
     throw new BookingApiError("El servidor no dispone del motor de tiempos requerido.", 503, "TIMELINE_UNAVAILABLE");
   }
   const { businessWallTime } = require("./bookingTimeline") as typeof import("./bookingTimeline");
@@ -2826,7 +2828,7 @@ export function notifyBookingUpdated(){for(const listener of bookingUpdateListen
 export async function changeBookingRequest(id:string,operation:"propose"|"accept"|"reject"|"cancel"|"confirm",input:{dateISO?:string;date?:string;time?:string;proposalId?:string;expectedRevision?:number;acceptFinancialTerms?:boolean},expectedUserId:string):Promise<Booking>{
  if(!isRemoteBookingId(id))throw new BookingApiError("Esta reserva necesita su repositorio original.",400);
  try{
-  if(!["cancel","reject"].includes(operation))await requireRemoteGapPolicy(expectedUserId);
+  if(!["cancel","reject"].includes(operation)){await requireRemoteGapPolicy(expectedUserId);await requireRemotePhasePolicy(expectedUserId);}
   const row=await supabaseApiRequest<RemoteBooking>("/supabase/bookings/"+encodeURIComponent(id)+"/change",{method:"POST",body:JSON.stringify({operation,expectedRevision:input.expectedRevision ?? 0,...input})},true,expectedUserId);
   const booking=mapRemoteBooking(row);notifyBookingUpdated();return booking;
  }catch(error){
@@ -2849,4 +2851,22 @@ export type BookingDayAnalysis = {
 };
 export async function getBookingDayAnalysis(businessId:string,dateISO:string):Promise<BookingDayAnalysis>{
   return supabaseApiRequest<BookingDayAnalysis>("/supabase/booking-day-analysis?"+new URLSearchParams({business_id:businessId,dateISO}),{},true);
+}
+
+async function requireRemotePhasePolicy(expectedUserId?:string):Promise<void>{
+ const version=await supabaseApiRequest<number>("/supabase/booking-phase-policy",{},true,expectedUserId);
+ if(version!==1)throw new BookingApiError("Este servidor aún no ha activado los tiempos del servicio. No se ha cambiado ninguna reserva.",503,"BOOKING_PHASE_POLICY_UNAVAILABLE");
+}
+export type ProfessionalReleasedCapacity={version:1;phasePolicyVersion:1;timezone:string;dateISO:string;resourceValidationRequired:true;
+ releasedCapacity:{bookingId:string;phaseId:string;staffId:string;startsAt:string;endsAt:string}[]};
+export async function getProfessionalReleasedCapacity(businessId:string,staffId:string,dateISO:string):Promise<ProfessionalReleasedCapacity>{
+ if(!isCloudId(businessId)||!isCloudId(staffId)||!/^\d{4}-\d{2}-\d{2}$/.test(dateISO))throw new BookingApiError("Selecciona una empresa, profesional y fecha válidos.",400);
+ const user=await getAuthenticatedUserId();
+ if(!user)throw new BookingApiError("Inicia sesión para consultar la agenda.",401);
+ const value=await supabaseApiRequest<ProfessionalReleasedCapacity>("/supabase/booking-professional-capacity?"+new URLSearchParams({business_id:businessId,staff_id:staffId,dateISO}),{},true,user);
+ const invalid=()=>new BookingApiError("Disponibilidad por fases no disponible en este servidor.",503,"BOOKING_PHASE_POLICY_UNAVAILABLE");
+ if(!value||value.version!==1||value.phasePolicyVersion!==1||typeof value.timezone!=="string"||!value.timezone||value.dateISO!==dateISO||value.resourceValidationRequired!==true||!Array.isArray(value.releasedCapacity))throw invalid();
+ try{new Intl.DateTimeFormat("en",{timeZone:value.timezone}).format(0);}catch{throw invalid();}
+ if(value.releasedCapacity.some(row=>!row||!isCloudId(row.bookingId)||row.staffId!==staffId||typeof row.phaseId!=="string"||!row.phaseId||!Number.isFinite(Date.parse(row.startsAt))||!Number.isFinite(Date.parse(row.endsAt))||Date.parse(row.endsAt)<=Date.parse(row.startsAt)))throw invalid();
+ return value;
 }

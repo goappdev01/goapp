@@ -631,6 +631,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
         {viewMode === "calendario" && (
           <AgendaBoard onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness}
             goLog={filteredLog}
+            bookingProfessionalId={liveProfessionals.some(person=>person.id===selectedPro)?selectedPro:undefined}
             embedded
             viewMode={calInnerView}
             calViewMonth={calViewMonth}

@@ -38,7 +38,7 @@ function serverPlan() {
     offset += phase.durationMinutes;
     return value;
   });
-  return { version: 1, gapPolicy:{version:1,professionals:[{staffId:firstStaff,minimumMinutes:17,exceptionUsed:false,lastMinuteMinutes:1440}]}, staffId: firstStaff, startsAt, endsAt: after(126), timezone: "Europe/Madrid",
+  return { version: 1, phasePolicyVersion:1, gapPolicy:{version:1,professionals:[{staffId:firstStaff,minimumMinutes:17,exceptionUsed:false,lastMinuteMinutes:1440}]}, staffId: firstStaff, startsAt, endsAt: after(126), timezone: "Europe/Madrid",
     totalClientMinutes: 126, totalDurationMinutes: 126, workMinutes: 84, waitMinutes: 42,
     serviceIds: [service, extraService], serviceDetails: [{ id: service, title: "Tinte", durationMinutes: 59, price: 30, currency: "EUR" },
       { id: extraService, title: "Acabado", durationMinutes: 67, price: 20, currency: "EUR" }], totalPrice: 50, currency: "EUR", resourcesConfigured: true,
@@ -52,7 +52,7 @@ function fixture() {
     ["go_availability_windows_v1", JSON.stringify([{ businessId: business, active: true, weekday: 1, visibleStartHour: 0, visibleEndHour: 23 }])],
     ["go_bookings_v1", "[]"]]);
   const reads = [], writes = [], calls = [], commands = new Map();
-  const behavior = { plan: serverPlan(), status: 200, availability: null, response: null, loseReplyOnce: false, gapVersion: 1, gapStatus: 200 };
+  const behavior = { plan: serverPlan(), status: 200, availability: null, response: null, loseReplyOnce: false, gapVersion: 1, gapStatus: 200, phaseVersion:1 };
   const storageApi = { getItem: async key => { reads.push(key); return storage.get(key) ?? null; },
     setItem: async (key, value) => { writes.push(key); storage.set(key, value); },
     multiRemove: async keys => keys.forEach(key => storage.delete(key)) };
@@ -70,12 +70,14 @@ function fixture() {
     fetch: async (url, init = {}) => {
       const parsed = new URL(url), body = init.body ? JSON.parse(init.body) : null;
       if(parsed.pathname.endsWith("/booking-gap-policy")){assert.equal(new Headers(init.headers).get("Authorization"),"Bearer test-only");return Response.json(behavior.gapVersion,{status:behavior.gapStatus});}
+      if(parsed.pathname.endsWith("/booking-phase-policy")){assert.equal(new Headers(init.headers).get("Authorization"),"Bearer test-only");return Response.json(behavior.phaseVersion);}
       calls.push({ url: parsed, init, body });
       assert.equal(new Headers(init.headers).get("Authorization"), "Bearer test-only");
       if (behavior.status !== 200) return Response.json({ error: "Timeline unavailable" }, { status: behavior.status });
       if (parsed.pathname.endsWith("/booking-availability")) return Response.json(behavior.availability ?? {
-        version: 1, gapPolicyVersion:1, timezone: behavior.plan.timezone, availableDates: [dateISO, "2030-01-09"],
+        version: 1, phasePolicyVersion:1, gapPolicyVersion:1, timezone: behavior.plan.timezone, availableDates: [dateISO, "2030-01-09"],
         slots: parsed.searchParams.get("datesOnly") === "true" ? [] : [behavior.plan] });
+      if (parsed.pathname.endsWith("/booking-professional-capacity"))return Response.json(behavior.capacity);
       if (parsed.pathname.endsWith("/bookings/timeline")) {
         if (behavior.response) return Response.json(behavior.response);
         let row = commands.get(body.request_key);
@@ -299,4 +301,25 @@ test("old gap envelopes/plans are refused, and old server capability prevents an
   await assert.rejects(f.api.claimSlot({id:"one-stable-key",businessId:business,bookableItemId:service,customerId:"me",staffId:firstStaff,startDatetime:startsAt,startInstant:startsAt,endDatetime:after(126),unitsReserved:1,peopleCount:1,status:"CONFIRMED",paymentStatus:"none"}));
   assert.equal(f.commands.size,0);assert.equal(f.calls.length,0);assert.equal(f.storage.get("go_bookings_v1"),"[]");
  }
+});
+
+test("missing phase authority never falls back to continuous booking or writes a local receipt",async()=>{
+ for(const phaseVersion of [0,null,{version:1}]){
+  const f=fixture();f.behavior.phaseVersion=phaseVersion;
+  await assert.rejects(f.api.claimSlot({id:"phase-guard",businessId:business,bookableItemId:service,customerId:"me",staffId:firstStaff,startDatetime:startsAt,startInstant:startsAt,endDatetime:after(126),unitsReserved:1,peopleCount:1,status:"CONFIRMED",paymentStatus:"none"}),e=>e.code==="BOOKING_PHASE_POLICY_UNAVAILABLE");
+  assert.equal(f.commands.size,0);assert.equal(f.calls.length,0);assert.equal(f.storage.get("go_bookings_v1"),"[]");
+ }
+ for(const patch of [{phasePolicyVersion:undefined},{slots:[{...serverPlan(),phasePolicyVersion:undefined}]}]){
+  const f=fixture();f.behavior.availability={version:1,gapPolicyVersion:1,phasePolicyVersion:1,timezone:"Europe/Madrid",availableDates:[dateISO],slots:[serverPlan()],...patch};
+  await assert.rejects(f.api.getTimelineAvailability(business,[service],dateISO),e=>e.code==="TIMELINE_UNAVAILABLE");
+ }
+});
+
+test('capacity contract rejects malformed or cross-professional rows rather than rendering false free time',async()=>{
+ const valid={version:1,phasePolicyVersion:1,timezone:'Europe/Madrid',dateISO,resourceValidationRequired:true,releasedCapacity:[{bookingId,phaseId:'process',staffId:firstStaff,startsAt,endsAt:after(30)}]};
+ const f=fixture();f.behavior.capacity=valid;assert.deepEqual(plain(await f.api.getProfessionalReleasedCapacity(business,firstStaff,dateISO)),valid);
+ for(const patch of [{timezone:undefined},{timezone:'device'},{dateISO:'other'},{resourceValidationRequired:false},{releasedCapacity:[null]},{releasedCapacity:[{...valid.releasedCapacity[0],staffId:secondStaff}]},{releasedCapacity:[{...valid.releasedCapacity[0],endsAt:startsAt}]}]){
+  f.behavior.capacity={...valid,...patch};await assert.rejects(f.api.getProfessionalReleasedCapacity(business,firstStaff,dateISO),e=>e.code==='BOOKING_PHASE_POLICY_UNAVAILABLE');
+ }
+ const before=f.calls.length;await assert.rejects(f.api.getProfessionalReleasedCapacity(business,'local-staff',dateISO),e=>e.status===400);assert.equal(f.calls.length,before);
 });

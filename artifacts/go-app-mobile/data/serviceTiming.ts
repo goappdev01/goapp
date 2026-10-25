@@ -11,6 +11,8 @@ export type ServicePhase = {
   name: string;
   durationMinutes: number;
   kind: "work" | "wait";
+  /** Only an explicitly authorized wait frees the professional. */
+  releaseProfessional?: boolean;
   /** Omitted means the professional selected for the appointment. */
   staffId?: string;
   resources: ServiceResourceRequirement[];
@@ -20,9 +22,12 @@ export type ServiceTiming = {
   mode: "simple" | "phases";
   phases: ServicePhase[];
   resourcesConfigured: boolean;
+  professionalTimings?: Record<string, Omit<ServiceTiming, "professionalTimings"> & { durationMinutes: number }>;
 };
 export type ServiceTimingValidation = {
   durationMinutes?: number;
+  /** Internal recursion guard: an override cannot contain other overrides. */
+  allowOverrides?: boolean;
   staffIds?: readonly string[];
   resources?: readonly BookingResource[];
 };
@@ -56,10 +61,12 @@ export function validateServiceTiming(value: unknown, options: ServiceTimingVali
   const phaseIds = new Set<string>();
   const phases: ServicePhase[] = value.phases.map(raw => {
     if (!record(raw) || typeof raw.id !== "string" || !raw.id.trim() || raw.id.length > 128 || phaseIds.has(raw.id)
-      || typeof raw.name !== "string" || !raw.name.trim() || raw.name.trim().length > 120
+      || raw.name !== undefined && (typeof raw.name !== "string" || raw.name.trim().length > 120)
       || !positive(raw.durationMinutes, 1440) || raw.kind !== "work" && raw.kind !== "wait"
       || !Array.isArray(raw.resources) || raw.resources.length > 100)
-      throw new Error("Cada fase necesita nombre, minutos enteros positivos y tipo de trabajo o espera.");
+      throw new Error("Cada fase necesita minutos enteros positivos y tipo de trabajo o espera.");
+    if (raw.releaseProfessional !== undefined && typeof raw.releaseProfessional !== "boolean" || raw.kind === "work" && raw.releaseProfessional === true)
+      throw new Error("Solo una espera autorizada puede liberar al profesional.");
     phaseIds.add(raw.id);
     if (raw.staffId !== undefined && (!isStableBookingId(raw.staffId) || options.staffIds && !options.staffIds.includes(raw.staffId)))
       throw new Error("Selecciona un profesional activo del negocio para la fase.");
@@ -76,28 +83,44 @@ export function validateServiceTiming(value: unknown, options: ServiceTimingVali
       return { resourceId: requirement.resourceId, quantity: requirement.quantity,
         occupancy: requirement.occupancy } as ServiceResourceRequirement;
     });
-    return { id: raw.id, name: raw.name.trim(), durationMinutes: raw.durationMinutes, kind: raw.kind,
+    return { id: raw.id, name: typeof raw.name === "string" ? raw.name.trim() : "", durationMinutes: raw.durationMinutes, kind: raw.kind,
+      ...(raw.kind === "wait" ? { releaseProfessional: raw.releaseProfessional === true } : {}),
       ...(raw.staffId ? { staffId: raw.staffId as string } : {}), resources: requirements };
   });
   if (value.mode === "simple" && (phases.length !== 1 || phases[0].kind !== "work"))
     throw new Error("Un servicio simple tiene una sola fase de trabajo.");
+  if (!phases.some(phase => phase.kind === "work" || phase.releaseProfessional !== true))
+    throw new Error("El servicio necesita al menos una fase que ocupe al profesional.");
   const duration = serviceTimingDuration({ phases });
   if (duration > 1440 || options.durationMinutes !== undefined && options.durationMinutes !== duration)
     throw new Error("La duración del servicio debe coincidir con la suma exacta de sus fases.");
-  return { version: 1, mode: value.mode as ServiceTiming["mode"], phases, resourcesConfigured: value.resourcesConfigured };
+  let professionalTimings: ServiceTiming["professionalTimings"];
+  if (value.professionalTimings !== undefined) {
+    if (options.allowOverrides === false || !record(value.professionalTimings) || Object.keys(value.professionalTimings).length > 100)
+      throw new Error("Revisa los tiempos de cada profesional.");
+    professionalTimings = {};
+    for (const [staffId, override] of Object.entries(value.professionalTimings)) {
+      if (!isStableBookingId(staffId) || options.staffIds && !options.staffIds.includes(staffId) || !record(override) || !positive(override.durationMinutes,1440))
+        throw new Error("Los tiempos propios necesitan un profesional activo y una duración válida.");
+      const checked = validateServiceTiming(override,{...options,durationMinutes:override.durationMinutes,allowOverrides:false});
+      professionalTimings[staffId] = {...checked,durationMinutes:override.durationMinutes};
+    }
+  }
+  return { version: 1, mode: value.mode as ServiceTiming["mode"], phases, resourcesConfigured: value.resourcesConfigured,
+    ...(professionalTimings && Object.keys(professionalTimings).length ? {professionalTimings} : {}) };
 }
 
 export const serviceTimingDuration = (timing: Pick<ServiceTiming, "phases">): number =>
   timing.phases.reduce((total, phase) => total + phase.durationMinutes, 0);
 
 export type ServiceConfiguration = { name: string; description?: string; duration: number; price: number; capacity?: number; timing?: ServiceTiming };
-/** Keep timing in the existing service save path; phases define the scalar total. */
+/** Preserve the configured duration; a mismatch must be corrected explicitly. */
 export function serializeServiceConfiguration(services: readonly ServiceConfiguration[], options: Omit<ServiceTimingValidation, "durationMinutes"> = {}): ServiceConfiguration[] {
   return services.filter(service => service.name.trim()).map(({ name, description, duration, price, capacity, timing }) => {
-    const checked = timing && validateServiceTiming(timing, options);
+    const checked = timing && validateServiceTiming(timing, {...options,durationMinutes:duration});
     if (!checked && (!Number.isInteger(duration) || duration <= 0))
       throw new Error("Indica una duración en minutos enteros positivos.");
-    return { name, duration: checked ? serviceTimingDuration(checked) : duration, price, capacity,
+    return { name, duration, price, capacity,
       ...(description?.trim() ? { description: description.trim() } : {}),
       ...(checked ? { timing: checked } : {}) };
   });
@@ -127,4 +150,11 @@ export function validateBookingGapPolicy(value: unknown): BookingGapPolicy {
   if(!record(value) || typeof value.allowLastMinuteGaps!=="boolean" || !positive(value.lastMinuteMinutes,525600))
     throw new Error("Indica un intervalo de excepción en minutos enteros, entre 1 y 525600.");
   return {allowLastMinuteGaps:value.allowLastMinuteGaps,lastMinuteMinutes:value.lastMinuteMinutes};
+}
+
+/** Configuration totals only; admission still belongs to the canonical server. */
+export function serviceTimingTotals(phases: readonly ServicePhase[]) {
+ const total=phases.reduce((sum,p)=>sum+p.durationMinutes,0),work=phases.filter(p=>p.kind==="work").reduce((sum,p)=>sum+p.durationMinutes,0);
+ const wait=total-work,released=phases.filter(p=>p.kind==="wait"&&p.releaseProfessional===true).reduce((sum,p)=>sum+p.durationMinutes,0);
+ return {total,work,wait,released,occupied:total-released};
 }

@@ -12,7 +12,7 @@ const { validateServiceTiming, serviceTimingDuration, serializeServiceConfigurat
 const plain = value => JSON.parse(JSON.stringify(value));
 const business = "11111111-1111-4111-8111-111111111111", resource = "22222222-2222-4222-8222-222222222222", staff = "33333333-3333-4333-8333-333333333333";
 const resources = [{ id: resource, name: "Lavacabezas", capacity: 2 }];
-const phase = (id, durationMinutes, kind = "work", patch = {}) => ({ id, name: id, durationMinutes, kind, resources: [], ...patch });
+const phase = (id, durationMinutes, kind = "work", patch = {}) => ({ id, name: id, durationMinutes, kind, resources: [], ...(kind === "wait" ? { releaseProfessional: false } : {}), ...patch });
 const config = (phases, patch = {}) => ({ version: 1, mode: "phases", phases, resourcesConfigured: true, ...patch });
 
 test("legacy services keep exact minutes, price and customer capacity without inventing timing or resources", () => {
@@ -27,7 +27,7 @@ test("legacy services keep exact minutes, price and customer capacity without in
 test("ordered work/wait phases preserve exact minutes, fixed staff and configured occupancy across a JSON save", () => {
   const source = config([phase("Aplicar", 17, "work", { staffId: staff, resources: [{ resourceId: resource, quantity: 1, occupancy: "phase" }] }),
     phase("Procesar", 42, "wait", { resources: [{ resourceId: resource, quantity: 1, occupancy: "booking" }] }), phase("Acabar", 55), phase("Lavar", 12)]);
-  const saved = serializeServiceConfiguration([{ name: "Tinte", duration: 30, price: 38, capacity: 1, timing: source }], { resources, staffIds: [staff] });
+  const saved = serializeServiceConfiguration([{ name: "Tinte", duration: 126, price: 38, capacity: 1, timing: source }], { resources, staffIds: [staff] });
   assert.equal(saved[0].duration, 126);
   assert.equal(saved[0].price, 38);
   assert.equal(saved[0].capacity, 1);

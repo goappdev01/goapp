@@ -109,8 +109,9 @@ export function GoEntryContract({ entry }: { entry: GoEntry }) {
     {!!entry.detail && <Text selectable style={s.text}>{entry.detail}</Text>}
     {!!entry.bookingMessageToStaff && <Text style={s.secondary}>{entry.bookingMessageToStaff}</Text>}
     {!!entry.bookingTimeline && <View style={{ gap: 5 }}>
-      <Text style={s.secondary}>{lang === "en" ? "Work / processing" : "Intervención / espera"} · {entry.bookingTimeline.workMinutes} / {entry.bookingTimeline.waitMinutes} min</Text>
-      {entry.bookingTimeline.phases.map((phase, i) => <Text key={i} style={s.secondary}>{new Intl.DateTimeFormat(lang === "en" ? "en-GB" : "es-ES", { timeZone: entry.bookingTimeline!.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(phase.startsAt))} · {phase.name}
+      <Text style={s.secondary}>{lang === "en" ? "Work / processing" : "Trabajo / espera"} · {entry.bookingTimeline.workMinutes} / {entry.bookingTimeline.waitMinutes} min</Text>
+      {entry.bookingTimeline.phases.map((phase, i) => <Text key={i} style={s.secondary}>{new Intl.DateTimeFormat(lang === "en" ? "en-GB" : "es-ES", { timeZone: entry.bookingTimeline!.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(phase.startsAt))}–{new Intl.DateTimeFormat(lang === "en" ? "en-GB" : "es-ES", { timeZone: entry.bookingTimeline!.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(phase.endsAt))} · {phase.name || (phase.kind === "work" ? (lang === "en" ? "Work" : "Trabajo") : (lang === "en" ? "Wait" : "Espera"))}
+        {phase.kind === "wait" ? " · " + (phase.releaseProfessional === true ? (lang === "en" ? "Available wait" : "Espera disponible") : phase.releaseProfessional === false ? (lang === "en" ? "Occupied wait" : "Espera ocupada") : (lang === "en" ? "Original wait" : "Espera original")) : ""}
         {phase.resources?.length ? " · " + phase.resources.map(r => `${entry.bookingResourceNames?.[r.resourceId] || (lang === "en" ? "Resource" : "Recurso")} ×${r.quantity}`).join(" · ") : ""}</Text>)}
     </View>}
   </View>;

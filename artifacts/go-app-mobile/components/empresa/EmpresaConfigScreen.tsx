@@ -79,7 +79,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { CatalogAssociationManager } from "./CatalogAssociationManager";
 import { getOwnedStaff, type Staff } from "@/data/booking";
 import { isStableBookingId, serializeServiceConfiguration, serviceTimingDuration, validateBookingResources,
-  validateBusinessTimezone, validateServiceTiming, type BookingResource, type ServicePhase, type ServiceTiming } from "@/data/serviceTiming";
+  validateBusinessTimezone, validateServiceTiming, serviceTimingTotals, type BookingResource, type ServicePhase, type ServiceTiming } from "@/data/serviceTiming";
 
 function blockDemoExternal(lang: string) {
   Alert.alert(lang === "en" ? "Business" : "Empresa",
@@ -2163,8 +2163,20 @@ function ServiceTimingEditor({ service, staff, resources, demo, onApply }: {
     durationMinutes: service.duration, kind: "work", resources: [] }]);
   const [declared, setDeclared] = useState(service.timing?.resourcesConfigured ?? false);
   const [error, setError] = useState("");
+  const [scope,setScope] = useState("general");
+  const [ownDuration,setOwnDuration] = useState(service.duration);
+  const baseTiming = (): ServiceTiming => service.timing ?? {version:1,mode:"simple",resourcesConfigured:false,
+    phases:[{id:newTimingId(),name:"",durationMinutes:service.duration,kind:"work",resources:[]}]};
+  const selectScope = (id:string) => {
+    const timing=id==="general"?baseTiming():service.timing?.professionalTimings?.[id]??baseTiming();
+    setScope(id);setOwnDuration(id==="general"?service.duration:service.timing?.professionalTimings?.[id]?.durationMinutes??service.duration);
+    setMode(timing.mode);setPhases(timing.phases.map(p=>({...p,resources:p.resources.map(r=>({...r}))})));setDeclared(timing.resourcesConfigured);setError("");
+  };
+  const expectedDuration=scope==="general"?service.duration:ownDuration;
+  const totals=serviceTimingTotals(phases),difference=totals.total-expectedDuration;
   const toggleEditor = () => {
     if (!open) {
+      setScope("general");setOwnDuration(service.duration);
       setMode(service.timing?.mode ?? "simple");
       setPhases(service.timing?.phases.map(phase => ({ ...phase, resources: phase.resources.map(resource => ({ ...resource })) }))
         ?? [{ id: newTimingId(), name: service.name || label("Trabajo", "Work"), durationMinutes: service.duration, kind: "work", resources: [] }]);
@@ -2175,43 +2187,65 @@ function ServiceTimingEditor({ service, staff, resources, demo, onApply }: {
   const patch = (index: number, values: Partial<ServicePhase>) => setPhases(previous => previous.map((phase, i) => i === index ? { ...phase, ...values } : phase));
   const chip = (text: string, selected: boolean, onPress: () => void, key?: string) => (
     <TouchableOpacity key={key ?? text} accessibilityRole="button" accessibilityState={{ selected }} onPress={onPress}
-      style={{ minHeight: 36, justifyContent: "center", padding: 8, borderRadius: 8, borderWidth: 1, borderColor: selected ? BLUE : "#D1D5DB", backgroundColor: selected ? BLUE + "12" : "#FFFFFF" }}>
-      <Text style={{ color: selected ? BLUE : GRAY, fontSize: 12 }}>{text}</Text>
+      style={{ minHeight: 44, justifyContent: "center", padding: 8, borderRadius: 8, borderWidth: 1, borderColor: selected ? BLUE : "#D1D5DB", backgroundColor: selected ? BLUE + "12" : "#FFFFFF" }}>
+      <Text style={{ color: TEXT, fontSize: 12, fontWeight: selected ? "700" : "400" }}>{text}</Text>
     </TouchableOpacity>);
   const save = () => {
     try {
-      if (demo && mode === "phases") throw new Error(label("Las fases requieren reservas reales con disponibilidad central. Se utiliza duración continua.", "Phases require live reservations with central availability. A continuous duration is used."));
-      // No metadata means the existing simple, continuous service contract.
-      const timing = mode === "simple" ? undefined : validateServiceTiming({ version: 1, mode, phases, resourcesConfigured: declared },
-        { staffIds: staff.map(person => person.id), resources });
+      if(mode==="simple" && phases.some(p=>p.resources.length||p.staffId) && !(phases.length===1&&phases[0].kind==="work"))
+        throw new Error(label("Revisa los profesionales e instalaciones antes de convertir las fases en un servicio continuo.","Review professionals and facilities before converting phases to a continuous service."));
+      const continuousPhase=phases.length===1&&phases[0].kind==="work"?{...phases[0],durationMinutes:expectedDuration}:{id:newTimingId(),name:"",kind:"work" as const,durationMinutes:expectedDuration,resources:[]};
+      const chosen = mode==="simple" ? {version:1 as const,mode:"simple" as const,phases:[continuousPhase],resourcesConfigured:declared}
+        : validateServiceTiming({version:1,mode,phases,resourcesConfigured:declared},{durationMinutes:expectedDuration,staffIds:staff.map(p=>p.id),resources});
+      let timing:ServiceTiming|undefined;
+      if(scope==="general") {
+        const overrides=service.timing?.professionalTimings;
+        timing=mode==="simple"&&!overrides&&!chosen.phases.some(p=>p.staffId||p.resources.length)?undefined:validateServiceTiming({...chosen,...(overrides?{professionalTimings:overrides}:{})},{durationMinutes:service.duration,staffIds:staff.map(p=>p.id),resources});
+      } else {
+        timing=validateServiceTiming({...baseTiming(),professionalTimings:{...service.timing?.professionalTimings,[scope]:{...chosen,durationMinutes:expectedDuration}}},{durationMinutes:service.duration,staffIds:staff.map(p=>p.id),resources});
+      }
       onApply(timing); setError(""); setOpen(false);
     } catch (failure) { setError((failure as Error).message); }
   };
   return <View style={{ width: "100%", gap: 8, marginTop: 8 }}>
     <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={toggleEditor} style={{ minHeight: 36, justifyContent: "center" }}>
-      <Text style={{ color: BLUE, fontWeight: "600" }}>{service.timing?.mode === "phases" ? label("Editar fases", "Edit phases") : label("Distribución del tiempo (opcional)", "Timing (optional)")}</Text>
+      <Text style={{ color: BLUE, fontWeight: "600" }}>{service.timing?.mode === "phases" ? label("TIEMPOS DEL SERVICIO", "SERVICE TIMES") : label("TIEMPOS DEL SERVICIO", "SERVICE TIMES")}</Text>
     </TouchableOpacity>
-    {open && <View style={{ gap: 10, padding: 10, borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 10 }}>
+    {open && <View testID="service-times-editor" style={{ gap: 10, padding: 10, borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 10 }}>
+      <Text style={{color:TEXT,fontSize:12}}>{label("Organiza cuánto tiempo trabajas y cuánto tiempo necesita esperar el servicio.","Organize how long you work and how long the service needs to wait.")}</Text>
+      {!!staff.length && <View style={{gap:6}}><Text style={{color:TEXT,fontWeight:"600"}}>{label("Tiempos para", "Times for")}</Text><View style={{flexDirection:"row",flexWrap:"wrap",gap:6}}>
+        {chip(label("Servicio general", "General service"),scope==="general",()=>selectScope("general"))}
+        {staff.map(person=>chip(person.name,scope===person.id,()=>selectScope(person.id),person.id))}
+      </View></View>}
+      {scope!=="general" && <View style={{gap:6}}>
+        <Text style={{color:TEXT,fontSize:12}}>{label("Duración de este profesional (minutos)","This professional’s duration (minutes)")}</Text>
+        <TextInput testID="professional-service-duration" accessibilityLabel={label("Duración propia del profesional", "Professional service duration")} keyboardType="number-pad" value={ownDuration?String(ownDuration):""} onChangeText={v=>setOwnDuration(/^\d+$/.test(v)?Number(v):0)} style={[c.numInput,{color:TEXT,minHeight:44,borderWidth:1,borderColor:"#6B7280",borderRadius:8}]} />
+        <Text style={{color:GRAY,fontSize:12}}>{label("Solo se aplica a este profesional si tiene asignado el servicio. Los demás conservan sus tiempos.","Applies only to this professional when assigned this service. Others keep their times.")}</Text>
+        {chip(label("Usar tiempos generales", "Use general times"),false,()=>{const base=baseTiming(),overrides={...base.professionalTimings};delete overrides[scope];const next={...base,professionalTimings:Object.keys(overrides).length?overrides:undefined};onApply(next.mode==="simple"&&!next.professionalTimings&&!next.phases.some(p=>p.staffId||p.resources.length)?undefined:next);setOpen(false);})}
+      </View>}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-        {chip(label("Simple", "Simple"), mode === "simple", () => setMode("simple"))}
-        {!demo && chip(label("Por fases", "Phases"), mode === "phases", () => setMode("phases"))}
+        {chip(label("SERVICIO CONTINUO", "CONTINUOUS SERVICE"), mode === "simple", () => setMode("simple"))}
+        {chip(label("SERVICIO POR FASES", "SERVICE IN PHASES"), mode === "phases", () => setMode("phases"))}
       </View>
-      <Text style={{ color: GRAY, fontSize: 12 }}>{demo
-        ? label("Se utiliza el tiempo continuo del servicio. Las fases están disponibles en reservas reales con disponibilidad central.", "The continuous service duration is used. Phases are available for live reservations with central availability.")
-        : mode === "simple" ? label("El profesional está ocupado durante todos los minutos del servicio.", "The professional is busy for the full service duration.")
-        : label("Las fases se realizan en este orden. En una espera el profesional queda libre; los recursos conservan la ocupación indicada.", "Phases run in this order. A wait releases the professional; resources keep their selected occupancy.")}</Text>
-      {mode === "phases" && !demo && <>
+      <Text style={{color:TEXT,fontSize:12}}>{mode==="simple"?label("El profesional permanece ocupado durante toda la duración.","The professional stays busy for the full duration."):label("Combina atención directa y tiempos de espera, en este orden.","Combine direct care and waits, in this order.")}</Text>
+      {demo&&mode==="phases"&&<Text style={{color:TEXT,fontSize:12}}>{label("Puedes guardar estos tiempos. Las reservas por fases necesitan que se active el motor del servidor.","You can save these times. Phased reservations require server activation.")}</Text>}
+      {mode === "phases" && <>
         {phases.map((phase, index) => <View key={phase.id} style={{ gap: 8, paddingVertical: 10, borderTopWidth: 1, borderColor: "#E5E7EB" }}>
           <Text style={{ color: TEXT, fontWeight: "600" }}>{label("Fase", "Phase")} {index + 1}</Text>
-          <TextInput accessibilityLabel={label("Nombre de fase", "Phase name")} style={c.svcNameInput} value={phase.name} onChangeText={name => patch(index, { name })} />
+          <TextInput accessibilityLabel={label("Nombre de fase (opcional)", "Phase name (optional)")} placeholder={label("Nombre opcional", "Optional name")} placeholderTextColor="#4B5563" style={c.svcNameInput} value={phase.name} onChangeText={name => patch(index, { name })} />
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <TextInput accessibilityLabel={label("Minutos exactos de fase", "Exact phase minutes")} style={[c.numInput, { minHeight: 40, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8 }]}
               keyboardType="number-pad" value={phase.durationMinutes ? String(phase.durationMinutes) : ""}
               onChangeText={value => patch(index, { durationMinutes: /^\d+$/.test(value) ? Number(value) : 0 })} />
             <Text style={{ color: GRAY }}>min</Text>
-            {chip(label("Trabajo", "Work"), phase.kind === "work", () => patch(index, { kind: "work" }))}
-            {chip(label("Espera", "Wait"), phase.kind === "wait", () => patch(index, { kind: "wait", staffId: undefined }))}
+            {chip(label("TRABAJO", "WORK"), phase.kind === "work", () => patch(index, { kind: "work", releaseProfessional: false }))}
+            {chip(label("ESPERA", "WAIT"), phase.kind === "wait", () => patch(index, { kind: "wait", staffId: undefined, releaseProfessional: phase.releaseProfessional === true }))}
           </View>
+          {phase.kind === "wait" && <View testID={"phase-release-"+index} style={{gap:6}}>
+            <Text style={{color:TEXT,fontSize:12,fontWeight:"600"}}>{label("¿Puedes atender a otro cliente durante esta espera?", "Can you attend another client during this wait?")}</Text>
+            <View style={{flexDirection:"row",gap:6}}>{chip(label("SÍ", "YES"),phase.releaseProfessional===true,()=>patch(index,{releaseProfessional:true}))}{chip("NO",phase.releaseProfessional!==true,()=>patch(index,{releaseProfessional:false}))}</View>
+            <Text style={{color:TEXT,fontSize:12}}>{phase.releaseProfessional===true?label("Tiempo disponible para otros servicios compatibles. Las instalaciones que utilice el cliente siguen ocupadas.","Time available for other compatible services. Facilities used by the client remain occupied."):label("El profesional permanece ocupado. Estos minutos no se ofrecen a otros clientes.","The professional remains busy. These minutes are not offered to other clients.")}</Text>
+          </View>}
           {phase.kind === "work" && <View style={{ gap: 5 }}>
             <Text style={{ color: GRAY, fontSize: 12 }}>{label("Profesional", "Professional")}</Text>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
@@ -2220,8 +2254,8 @@ function ServiceTimingEditor({ service, staff, resources, demo, onApply }: {
             </View>
             {!!phase.staffId && !staff.some(person => person.id === phase.staffId) && <Text style={{ color: RED }}>{label("El profesional asignado ya no está disponible. Selecciona otro.", "The assigned professional is no longer available. Select another.")}</Text>}
           </View>}
-          <Text style={{ color: GRAY, fontSize: 12 }}>{label("Recursos del negocio", "Business resources")}</Text>
-          {resources.length === 0 && <Text style={{ color: GRAY, fontSize: 12 }}>{label("Configura los recursos debajo o declara que esta fase no necesita recursos.", "Configure resources below, or declare that this phase needs no resources.")}</Text>}
+          <Text style={{ color: GRAY, fontSize: 12 }}>{label("Puesto, sala o equipo de esta fase", "Station, room or equipment for this phase")}</Text>
+          {resources.length === 0 && <Text style={{ color: GRAY, fontSize: 12 }}>{label("Indica debajo las instalaciones que utiliza, o confirma que no necesita ninguna.", "Set up the facilities below, or confirm that none are needed.")}</Text>}
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
             {resources.filter(resource => resource.active !== false).map(resource => {
               const selected = phase.resources.some(value => value.resourceId === resource.id);
@@ -2246,15 +2280,19 @@ function ServiceTimingEditor({ service, staff, resources, demo, onApply }: {
             {chip(label("Eliminar fase", "Delete phase"), false, () => setPhases(previous => previous.filter((_, i) => i !== index)))}
           </View>
         </View>)}
-        {chip(label("Añadir fase", "Add phase"), false, () => setPhases(previous => [...previous, { id: newTimingId(), name: label("Trabajo", "Work"), durationMinutes: 1, kind: "work", resources: [] }]))}
-        <Text style={{ color: TEXT, fontWeight: "600" }}>{label("Duración total", "Total duration")}: {serviceTimingDuration({ phases })} min</Text>
+        {chip(label("Añadir fase", "Add phase"), false, () => setPhases(previous => [...previous, { id: newTimingId(), name: label("Trabajo", "Work"), durationMinutes: 0, kind: "work", resources: [] }]))}
+        <Text testID="service-time-total" style={{color:TEXT,fontWeight:"700"}}>{label("TOTAL", "TOTAL")}: {totals.total} / {expectedDuration} min</Text>
+        <Text style={{color:TEXT,fontSize:12}}>{label("TIEMPO DE TRABAJO", "WORK TIME")}: {totals.work} min</Text>
+        <Text style={{color:TEXT,fontSize:12}}>{label("TIEMPO DE ESPERA", "WAIT TIME")}: {totals.wait} min</Text>
+        <Text testID="service-time-released" style={{color:TEXT,fontWeight:"700",fontSize:12}}>{label("TIEMPO DE ESPERA DISPONIBLE", "AVAILABLE WAIT TIME")}: {totals.released} min</Text>
+        {!!difference&&<Text accessibilityRole="alert" style={{color:RED,fontWeight:"600"}}>{difference<0?label("Faltan ","Missing "):label("Sobran ","Excess ")}{Math.abs(difference)}{label(" minutos. Corrige las fases antes de guardar."," minutes. Correct the phases before saving.")}</Text>}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Switch accessibilityLabel={label("Recursos declarados", "Resources declared")} value={declared} onValueChange={setDeclared} />
-          <Text style={{ color: GRAY, flex: 1, fontSize: 12 }}>{label("Confirmo los recursos de cada fase; una lista vacía significa que no necesita recursos.", "I confirm the resources for each phase; an empty list means no resources are needed.")}</Text>
+          <Switch accessibilityLabel={label("Instalaciones indicadas", "Facilities specified")} value={declared} onValueChange={setDeclared} />
+          <Text style={{ color: GRAY, flex: 1, fontSize: 12 }}>{label("He indicado todo lo que utiliza. Si no marco nada, confirmo que no necesita instalaciones ni equipos.", "I have specified everything used. If nothing is selected, I confirm that no facilities or equipment are needed.")}</Text>
         </View>
       </>}
       {!!error && <Text accessibilityRole="alert" style={{ color: RED }}>{error}</Text>}
-      {chip(label("Guardar distribución", "Save timing"), true, save)}
+      {chip(label("Guardar tiempos", "Save times"), true, save)}
     </View>}
   </View>;
 }
@@ -2504,7 +2542,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               )}
             </View>
             <ServiceTimingEditor service={svc} staff={timingStaff} resources={config.bookingResources ?? []} demo={!!demo}
-              onApply={timing => patchSvc(svc.id, { timing, ...(timing ? { duration: serviceTimingDuration(timing) } : {}) })} />
+              onApply={timing => patchSvc(svc.id, { timing })} />
           </View>
         ))}
 

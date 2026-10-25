@@ -1,6 +1,10 @@
 /** Server-owned occupancy snapshot. These helpers format results; they never decide availability. */
 export type BookingTimeline = {
   version: 1;
+  phasePolicyVersion?: 1;
+  releasedWaitMinutes?: number;
+  occupiedMinutes?: number;
+  releasedWaitIntervals?: {startsAt:string;endsAt:string;staffId:string|null;serviceId:string;phaseId:string}[];
   gapPolicy?: {version:1;professionals:{staffId:string|null;minimumMinutes:number;exceptionUsed:boolean;lastMinuteMinutes:number}[]};
   staffId: string | null;
   startsAt: string;
@@ -18,10 +22,11 @@ export type BookingTimeline = {
   phases: {
     id: string; name: string; serviceId: string; kind: "work" | "wait";
     durationMinutes: number; offsetMinutes: number; staffId: string | null;
+    releaseProfessional?: boolean;
     startsAt: string; endsAt: string;
     resources: { resourceId: string; quantity: number; occupancy: "phase" | "booking" }[];
   }[];
-  workIntervals: { startsAt: string; endsAt: string; staffId: string; serviceId: string }[];
+  workIntervals: { startsAt: string; endsAt: string; staffId: string; serviceId: string; kind?: "work"|"wait" }[];
   resourceIntervals: { startsAt: string; endsAt: string; resourceId: string; quantity: number }[];
 };
 
