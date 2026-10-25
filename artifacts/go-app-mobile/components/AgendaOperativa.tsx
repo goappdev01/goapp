@@ -336,7 +336,7 @@ export type AgendaBoardProps = {
   /** Incrementar este token fuerza un scroll inmediato a HOY (columna actual + hora). */
   scrollToTodayToken?: number;
   /** Saltar a una fecha y hora específica (cambiar token para disparar). */
-  scrollToDateToken?: { dateISO: string; timeHHMM: string; token: number };
+  scrollToDateToken?: { dateISO: string; timeHHMM: string; entryId?:string; token: number };
   /** ID de la entrada que debe iluminarse suavemente al llegar al calendario. */
   highlightEntryId?: string;
   onAcceptProposal?: (id: string) => void;
@@ -631,6 +631,12 @@ function formatTimeDisplay(t: string): string {
   if (!m) return t;
   const h = parseInt(m[1], 10);
   return `${String(h).padStart(2, "0")}:${m[2]}`;
+}
+
+/** Center the measured card inside the actual scroll viewport, leaving floating controls clear. */
+export function centeredBookingOffset(contentY:number,cardHeight:number,viewportHeight:number,contentHeight:number):number {
+  const top=8,bottom=Math.min(64,viewportHeight/3),usable=Math.max(0,viewportHeight-top-bottom);
+  return Math.min(Math.max(0,contentHeight-viewportHeight),Math.max(0,contentY-top-Math.max(0,usable-cardHeight)/2));
 }
 
 function estadoColor(estado: string): string {
@@ -1040,6 +1046,18 @@ export function AgendaBoard({
   const colScrollY       = useRef<Record<string, number>>({});
   // Visible height of each column's ScrollView (tracked via onLayout)
   const colScrollViewH   = useRef<Record<string, number>>({});
+  const colContentH=useRef<Record<string,number>>({});
+  const entryViews=useRef<Record<string,{node:any;dateISO?:string}>>({});
+  const horizontalSize=useRef({viewport:0,content:0});
+  const pendingBookingFocus=useRef<{entryId:string;dateISO:string;token:number}|null>(null);
+  const focusTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const focusAttemptRef=useRef<()=>void>(()=>{});
+  const currentFocusRequest=useRef(scrollToDateToken);currentFocusRequest.current=scrollToDateToken;
+  const queueBookingFocus=useCallback(()=>{
+    if(!pendingBookingFocus.current||focusTimer.current!==null)return;
+    focusTimer.current=setTimeout(()=>{focusTimer.current=null;focusAttemptRef.current();},0);
+  },[]);
+  useEffect(()=>()=>{if(focusTimer.current!==null)clearTimeout(focusTimer.current);pendingBookingFocus.current=null;},[]);
   // Animated scroll X for mini-map (no state re-renders, pure Animated)
   const scrollXAnim = useRef(new Animated.Value(0)).current;
 
@@ -1067,8 +1085,9 @@ export function AgendaBoard({
   // ── AUTO-SCROLL: horizontal → PENDIENTES/HOY on every mode switch ─
   // Doble intento (200ms + 700ms) para cubrir renders lentos en apertura inicial.
   useEffect(() => {
-    if (viewMode !== "mes_lineal" && viewMode !== "semana") return;
+    if (scrollToDateToken?.entryId || viewMode !== "mes_lineal" && viewMode !== "semana") return;
     function doScroll(animated: boolean) {
+      if(currentFocusRequest.current?.entryId)return;
       // 1. Horizontal scroll → PENDIENTES column (just before HOY)
       const lay = colLayouts.current["retrasados"];
       if (lay) {
@@ -1090,7 +1109,7 @@ export function AgendaBoard({
     // Segundo intento para renders lentos (primera apertura, carga inicial)
     const t2 = setTimeout(() => doScroll(true), 750);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [viewMode, activeMonth]);
+  }, [viewMode, activeMonth,scrollToDateToken?.token]);
 
   // ── SCROLL A HOY: disparado por scrollToTodayToken desde el botón HOY ─
   useEffect(() => {
@@ -1124,11 +1143,10 @@ export function AgendaBoard({
   const glowAnim   = useRef(new Animated.Value(0)).current;
   const borderAnim = useRef(new Animated.Value(0)).current;
   const [activeGlowId, setActiveGlowId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!highlightEntryId) return;
+  const highlightBooking=useCallback((entryId:string)=>{
     glowAnim.setValue(0);
     borderAnim.setValue(0);
-    setActiveGlowId(highlightEntryId);
+    setActiveGlowId(entryId);
     // Glow overlay: fade in 350ms → hold 800ms → fade out 700ms (~1.85s)
     Animated.sequence([
       Animated.timing(glowAnim, { toValue: 1, duration: 350, useNativeDriver: true }),
@@ -1141,11 +1159,41 @@ export function AgendaBoard({
       Animated.delay(200),
       Animated.timing(borderAnim, { toValue: 0, duration: 200, useNativeDriver: true }),
     ]).start();
-  }, [highlightEntryId]);
+  },[glowAnim,borderAnim]);
+  useEffect(()=>{if(highlightEntryId&&!scrollToDateToken?.entryId)highlightBooking(highlightEntryId);},[highlightEntryId,scrollToDateToken?.entryId,highlightBooking]);
+
+  // Wait for the exact record, native card, column and viewport. Layout/data events
+  // retry this single request; no polling or new booking is involved.
+  focusAttemptRef.current=()=>{
+    const request=pendingBookingFocus.current;if(!request)return;
+    if(!currentEntriesRef.current.some(entry=>entry.id===request.entryId&&entry.dateISO===request.dateISO))return;
+    const key="day_"+request.dateISO,layout=colLayouts.current[key],view=entryViews.current[request.entryId],scroller=colScrollRefs.current[key];
+    const viewport=scroller?.getNativeScrollRef?.()??scroller;
+    if(!layout||!view?.node||view.dateISO!==request.dateISO||!viewport?.measureInWindow||!colScrollViewH.current[key]||!colContentH.current[key]||!horizontalSize.current.viewport||!horizontalSize.current.content)return;
+    const current=()=>pendingBookingFocus.current===request&&allowedEntryIdsRef.current.has(request.entryId);
+    viewport.measureInWindow((_x:number,viewportY:number,_w:number,viewportHeight:number)=>{
+      if(!current()||viewportHeight<=0)return;
+      view.node.measureInWindow((_cx:number,cardY:number,cardWidth:number,cardHeight:number)=>{
+        if(!current()||cardWidth<=0||cardHeight<=0)return;
+        const contentY=(colScrollY.current[key]??0)+cardY-viewportY;
+        const x=Math.min(Math.max(0,horizontalSize.current.content-horizontalSize.current.viewport),Math.max(0,layout.x-(horizontalSize.current.viewport-layout.w)/2));
+        const y=centeredBookingOffset(contentY,cardHeight,viewportHeight,colContentH.current[key]);
+        pendingBookingFocus.current=null;
+        scrollViewRef.current?.scrollTo({x,animated:false});
+        scroller.scrollTo({y,animated:true});
+        highlightBooking(request.entryId);
+      });
+    });
+  };
+  useEffect(()=>{
+    pendingBookingFocus.current=scrollToDateToken?.entryId?{entryId:scrollToDateToken.entryId,dateISO:scrollToDateToken.dateISO,token:scrollToDateToken.token}:null;
+    queueBookingFocus();
+  },[scrollToDateToken?.token]);
+  useEffect(()=>{queueBookingFocus();},[goLog,queueBookingFocus]);
 
   // ── SCROLL A FECHA+HORA ESPECÍFICA: disparado por scrollToDateToken ─────
   useEffect(() => {
-    if (!scrollToDateToken || scrollToDateToken.token === 0) return;
+    if (!scrollToDateToken || scrollToDateToken.token === 0 || scrollToDateToken.entryId) return;
     const { dateISO, timeHHMM } = scrollToDateToken;
     const t = setTimeout(() => {
       // Scroll horizontal → columna del día reservado
@@ -1559,7 +1607,9 @@ export function AgendaBoard({
       // Only dragGesture here — tap is handled by the TouchableOpacity body below.
       // This ensures footer action buttons never accidentally trigger card open/close.
       <GestureDetector key={item.id} gesture={dragGesture}>
-        <View
+        <View testID={"calendar-entry-"+item.id} collapsable={false}
+          ref={node=>{if(node)entryViews.current[item.id]={node,dateISO:item.dateISO};else delete entryViews.current[item.id];queueBookingFocus();}}
+          onLayout={queueBookingFocus}
           style={[
             s.card,
             { padding: cardPadSmart, backgroundColor: _cardBg },
@@ -2019,6 +2069,7 @@ export function AgendaBoard({
             x: e.nativeEvent.layout.x,
             w: e.nativeEvent.layout.width,
           };
+          queueBookingFocus();
         }}
         style={[
           s.column,
@@ -2252,15 +2303,18 @@ export function AgendaBoard({
             }
             return (
               <ScrollView
-                ref={(r) => { colScrollRefs.current[col.id] = r; }}
+                ref={(r) => { colScrollRefs.current[col.id] = r;queueBookingFocus(); }}
                 style={s.colScroll}
-                contentContainerStyle={{ paddingBottom: 12 }}
+                contentContainerStyle={{ paddingBottom: scrollToDateToken?.entryId&&scrollToDateToken.dateISO===col.dateISO?Math.max(12,(colScrollViewH.current[col.id]||Dimensions.get("window").height)/2):12 }}
+                removeClippedSubviews={scrollToDateToken?.entryId?false:undefined}
+                onContentSizeChange={(_w,h)=>{colContentH.current[col.id]=h;queueBookingFocus();}}
+                onScrollBeginDrag={()=>{pendingBookingFocus.current=null;}}
                 showsVerticalScrollIndicator={false}
                 nestedScrollEnabled
                 scrollEnabled={!dragItem}
                 scrollEventThrottle={50}
                 onScroll={(e) => { colScrollY.current[col.id] = e.nativeEvent.contentOffset.y; }}
-                onLayout={(e) => { colScrollViewH.current[col.id] = e.nativeEvent.layout.height; }}
+                onLayout={(e) => { colScrollViewH.current[col.id] = e.nativeEvent.layout.height;queueBookingFocus(); }}
               >
                 {untimedItems.length > 0 && (
                   <View style={{ padding: 5, gap: 5, borderBottomWidth: 1, borderBottomColor: colDnProgress >= 0.5 ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.07)" }}>
@@ -2406,8 +2460,14 @@ export function AgendaBoard({
             });
             return (
               <ScrollView
+                ref={r=>{colScrollRefs.current[col.id]=r;queueBookingFocus();}}
+                onLayout={e=>{colScrollViewH.current[col.id]=e.nativeEvent.layout.height;queueBookingFocus();}}
+                onContentSizeChange={(_w,h)=>{colContentH.current[col.id]=h;queueBookingFocus();}}
+                onScroll={e=>{colScrollY.current[col.id]=e.nativeEvent.contentOffset.y;}} scrollEventThrottle={50}
+                onScrollBeginDrag={()=>{pendingBookingFocus.current=null;}}
+                removeClippedSubviews={scrollToDateToken?.entryId?false:undefined}
                 style={s.colScroll}
-                contentContainerStyle={[s.colContent, { justifyContent: "flex-start", gap: compactGap }]}
+                contentContainerStyle={[s.colContent, { justifyContent: "flex-start", gap: compactGap },scrollToDateToken?.entryId&&scrollToDateToken.dateISO===col.dateISO&&{paddingBottom:Math.max(12,(colScrollViewH.current[col.id]||Dimensions.get("window").height)/2)}]}
                 showsVerticalScrollIndicator={false}
                 nestedScrollEnabled
                 scrollEnabled={!dragItem}
@@ -2496,6 +2556,9 @@ export function AgendaBoard({
 
       <GHScrollView
         ref={scrollViewRef}
+        onLayout={e=>{horizontalSize.current.viewport=e.nativeEvent.layout.width;queueBookingFocus();}}
+        onContentSizeChange={w=>{horizontalSize.current.content=w;queueBookingFocus();}}
+        onScrollBeginDrag={()=>{pendingBookingFocus.current=null;}}
         horizontal
         showsHorizontalScrollIndicator={false}
         style={s.colsScroll}

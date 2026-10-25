@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 
 const require = createRequire(path.join(process.cwd(), 'package.json')), ts = require('typescript');
@@ -71,7 +72,8 @@ for (const lang of ['es', 'en']) test(profile + ' / ' + variant + ' / ' + lang +
     };
     vm.runInNewContext(renderCode, scope);
     const rendered = scope.result, texts = treeNodes(rendered).filter(n => n.type === 'Text');
-    assert.equal(text(texts[0]), displayLabel, key + ' visible name');
+    assert.equal(text(texts[key==='calendar'?1:0]), displayLabel, key + ' visible name');
+    if(key==='calendar'){assert.equal(text(texts[0]),'📅');assert.ok(style(texts[1].props.style).fontSize>style(texts[0].props.style).fontSize);assert.equal(texts[1].props.numberOfLines,1);}
     for (const node of texts) {
       assert.notEqual(style(node.props.style).opacity, 0, key + ' must not inherit minimal orbit ink hiding');
       assert.notEqual(node.props.accessibilityElementsHidden, true);
@@ -83,8 +85,15 @@ for (const lang of ['es', 'en']) test(profile + ' / ' + variant + ' / ' + lang +
   }
 });
 
-test('the satellite renderer changes only ink visibility: all existing styles, hit areas and callbacks are preserved', () => {
-  // Captured from main before editing, with only the four ink wrappers removed.
-  assert.equal(createHash('sha256').update(button.getText(ast).replace(/\s+/g, '')).digest('hex'),
-    'f97a1780c64ff860cf2825c4276411e23f2adafb04abcdda8d56c5a842e03cf0');
+test('satellite size, placement, hit areas, other labels and callbacks retain their approved baseline',()=>{
+ const previous=execFileSync('git',['show','0070c51e8561164ec0990f547cf0965609540cc1:artifacts/go-app-mobile/app/index.tsx'],{encoding:'utf8',maxBuffer:8*1024*1024});
+ const old=ts.createSourceFile('old.tsx',previous,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+ function find(root,p){if(p(root))return root;let result;ts.forEachChild(root,n=>{if(!result)result=find(n,p)});return result;}
+ const oldButton=find(old,n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(old)==='TouchableOpacity'&&n.openingElement.attributes.properties.some(a=>a.name?.getText(old)==='onPress'&&a.initializer?.expression?.getText(old)==='handlePress'));
+ const calendar=find(button,n=>ts.isConditionalExpression(n)&&n.condition.getText(ast)==='isCalendarBtn'&&n.whenTrue.getText(ast).includes('<LinearGradient'));
+ const oldCalendar=find(oldButton,n=>ts.isConditionalExpression(n)&&n.condition.getText(old)==='isCalendarBtn'&&n.whenTrue.getText(old).includes('<LinearGradient'));
+ const normalized=button.getText(ast).replace(calendar.whenTrue.getText(ast),oldCalendar.whenTrue.getText(old)).replace('adjustsFontSizeToFit={s.key !== "mas"}','adjustsFontSizeToFit');
+ assert.equal(createHash('sha256').update(normalized.replace(/\s+/g,'')).digest('hex'),'f97a1780c64ff860cf2825c4276411e23f2adafb04abcdda8d56c5a842e03cf0');
+ const font=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='_labelFs').initializer.getText(ast);
+ for(const uiScaleFactor of [.83,1,1.12])assert.equal(vm.runInNewContext(font,{Math,uiScaleFactor}),Math.max(8,Math.round(9*uiScaleFactor)));
 });

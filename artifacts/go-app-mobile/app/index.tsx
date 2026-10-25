@@ -3176,7 +3176,7 @@ function HomeScreenContent() {
   // ── Token para recentrar en HOY desde el botón inferior ─────────────────
   const [calScrollToTodayToken, setCalScrollToTodayToken] = useState(0);
   // ── Token para ir a fecha+hora exacta tras confirmar una reserva ─────────
-  const [calScrollToDateTarget, setCalScrollToDateTarget] = useState<{ dateISO: string; timeHHMM: string; token: number }>({ dateISO: "", timeHHMM: "", token: 0 });
+  const [calScrollToDateTarget, setCalScrollToDateTarget] = useState<{ dateISO: string; timeHHMM: string; entryId?:string; token: number }>({ dateISO: "", timeHHMM: "", token: 0 });
   // ── ID de entrada a iluminar suavemente al llegar al calendario ───────────
   const [calHighlightEntryId, setCalHighlightEntryId] = useState<string | undefined>(undefined);
   // ── Indicador horizontal para el panel PRÓXIMA (swipe entre fichas) ──
@@ -18144,9 +18144,7 @@ function HomeScreenContent() {
                   // adjustsFontSizeToFit is unreliable on Expo web so we do it manually.
                   const _labelLen   = displayLabel?.length ?? 0;
                   const _isMasSat   = s.key === "mas" && _labelLen > 5;
-                  const _labelFs    = _isMasSat
-                    ? Math.max(5, Math.round((_labelLen > 6 ? 5 : 7) * uiScaleFactor))
-                    : Math.max(8, Math.round(9 * uiScaleFactor));
+                  const _labelFs    = Math.max(8, Math.round(9 * uiScaleFactor));
                   const _labelPadH  = _isMasSat ? 1 : 3;
 
                   return (
@@ -18413,32 +18411,33 @@ function HomeScreenContent() {
                                 borderRadius: microSz / 2,
                                 alignItems: "center",
                                 justifyContent: "center",
-                                gap: 3,
-                                paddingHorizontal: 3,
+                                gap: 4,
+                                paddingHorizontal: 2,
                               }}
                             >
+                              <Text style={{ fontSize: _labelFs, lineHeight: _labelFs + 1, textAlign: "center" }}>
+                                {"📅"}
+                              </Text>
                               <Text
                                 numberOfLines={1}
                                 adjustsFontSizeToFit
-                                minimumFontScale={0.6}
+                                minimumFontScale={0.7}
                                 style={{
                                   color: isOrigin ? "rgba(255,255,255,0.35)" : "#ffffff",
-                                  fontSize: _labelFs + 1,
+                                  fontSize: _labelFs + 2,
                                   fontFamily: "Inter_700Bold", fontWeight: "800",
-                                  letterSpacing: 0.3,
+                                  letterSpacing: -0.3,
                                   textAlign: "center",
                                 }}
                               >
                                 {(displayLabel ?? "").toUpperCase()}
                               </Text>
-                              <Text style={{ fontSize: _labelFs + 1, lineHeight: _labelFs + 2, textAlign: "center" }}>
-                                {"📅"}
-                              </Text>
+
                             </LinearGradient>
                           ) : (
                             <Text
                               numberOfLines={1}
-                              adjustsFontSizeToFit
+                              adjustsFontSizeToFit={s.key !== "mas"}
                               minimumFontScale={0.6}
                               style={{
                                 color: isOrigin ? "rgba(255,255,255,0.35)" : "#ffffff",
@@ -20971,7 +20970,8 @@ function HomeScreenContent() {
           onHoldCreated={refreshHoldBookings}
           onGoToBooking={(dateISO, timeHHMM, entryId) => {
             setShowBookingFromCal(false);
-            setCalScrollToDateTarget({ dateISO, timeHHMM, token: Date.now() });
+            setDateISODraft(dateISO);setCalBgViewMonth(dateISO.slice(0,7));setCalOpen(true);
+            setCalScrollToDateTarget({ dateISO, timeHHMM, entryId, token: Date.now() });
             setCalHighlightEntryId(entryId);
           }}
           canonicalCustomerBookings={goView.view === "USER"}
@@ -26076,7 +26076,9 @@ function HomeScreenContent() {
       {/* ── GO SEARCH OVERLAY — búsqueda contextual flotante sobre el Landing ── */}
       {goSearchOpen && goSearchSub && (() => {
         const panelBottom = kbHeight > 0 ? kbHeight + 8 : Math.max(insets.bottom + 96, 124);
-        const borderColor = goSearchSub.color + "50";
+        const borderColor = goSearchSub.color + "90";
+        const resultsMaxHeight=Math.max(44,screen.height-insets.top-panelBottom-goSearchCtrlH-92);
+        const closeSearch=()=>{Keyboard.dismiss();setGoSearchOpen(false);setGoSearchSub(null);setGoSearchQuery("");};
         const shadow = {
           shadowColor: goSearchSub.color,
           shadowOpacity: 0.40,
@@ -26129,25 +26131,21 @@ function HomeScreenContent() {
                   <View style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: goSearchSub.color + "22", alignItems: "center", justifyContent: "center" }}>
                     <Feather name={goSearchSub.icon} size={12} color={goSearchSub.color} />
                   </View>
-                  <Text style={{ color: goSearchSub.color, fontSize: 10, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.8, flex: 1 }}>
-                    {goSearchSub.label}
+                  <Text testID="landing-search-heading" style={{ color:"#ffffff", fontSize:20, fontWeight:"800",textAlign:"center",flex:1 }}>
+                    {lang==="en"?"Find your business":"Busca tu empresa"}
                   </Text>
-                  <TouchableOpacity
-                    onPress={() => { setGoSearchOpen(false); setGoSearchSub(null); setGoSearchQuery(""); }}
-                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-                  >
-                    <Feather name="x" size={17} color="rgba(255,255,255,0.40)" />
-                  </TouchableOpacity>
+                  <View style={{width:26}}/>
                 </View>
 
                 {/* Resultados en orden normal — pegados al bloque inferior por geometría */}
-                <View style={{ paddingHorizontal: 16, paddingBottom: 10 }}>
+                <ScrollView testID="landing-search-results" style={{maxHeight:resultsMaxHeight}} contentContainerStyle={{paddingHorizontal:16,paddingBottom:10}} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
                   {allResults.map((provider, idx) => (
                     <TouchableOpacity
                       key={provider.id}
                       activeOpacity={0.82}
                       onPress={() => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                        Keyboard.dismiss();
                         const sub = goSearchSub;
                         setGoSearchOpen(false);
                         setGoSearchSub(null);
@@ -26215,10 +26213,10 @@ function HomeScreenContent() {
                   {allResults.length === 0 && (
                     <View style={{ alignItems: "center", paddingVertical: 16 }}>
                       <Feather name="search" size={22} color="rgba(255,255,255,0.18)" />
-                      <Text style={{ color: "rgba(255,255,255,0.30)", fontSize: 12, marginTop: 8 }}>Sin resultados</Text>
+                      <Text style={{ color:"#ffffff",fontSize:14,marginTop:8 }}>{lang==="en"?"We couldn’t find that business.":"No encontramos esa empresa."}</Text>
                     </View>
                   )}
-                </View>
+                </ScrollView>
               </View>
             )}
 
@@ -26268,18 +26266,19 @@ function HomeScreenContent() {
                 marginHorizontal: 16, marginBottom: 14,
                 flexDirection: "row", alignItems: "center", gap: 10,
                 backgroundColor: "rgba(255,255,255,0.09)",
-                borderRadius: 16, paddingHorizontal: 14, paddingVertical: 11,
-                borderWidth: 1, borderColor: goSearchSub.color + "40",
+                borderRadius: 16, paddingHorizontal: 14,paddingRight:64,paddingVertical:14,minHeight:56,
+                borderWidth: 1, borderColor: "#ffffff",
               }}>
                 <Feather name="search" size={15} color={goSearchSub.color} />
                 <TextInput
                   value={goSearchQuery}
                   onChangeText={setGoSearchQuery}
                   placeholder={`Buscar ${goSearchSub.label.toLowerCase()}…`}
-                  placeholderTextColor="rgba(255,255,255,0.28)"
+                  placeholderTextColor="rgba(255,255,255,0.75)"
+                  accessibilityLabel={lang==="en"?"Find your business":"Busca tu empresa"}
                   style={{ flex: 1, color: "#fff", fontSize: 14, fontWeight: "500" }}
                   autoFocus
-                  returnKeyType="search"
+                  returnKeyType="search" onSubmitEditing={()=>Keyboard.dismiss()}
                 />
                 {goSearchQuery.length > 0 && (
                   <TouchableOpacity onPress={() => setGoSearchQuery("")} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
@@ -26288,6 +26287,7 @@ function HomeScreenContent() {
                 )}
               </View>
             </View>
+            <View testID="landing-search-floating-close" style={{position:"absolute",right:36,bottom:panelBottom+20,zIndex:2}}><GoCloseButton level="panel" accessibilityLabel={lang==="en"?"Close business search":"Cerrar buscador de empresas"} onPress={closeSearch}/></View>
           </View>
         );
       })()}
@@ -26298,10 +26298,15 @@ function HomeScreenContent() {
         visible={goProveedorOpen}
         proveedor={goProveedorData}
         onClose={() => { setGoProveedorOpen(false); setGoProveedorData(null); }}
-        onBookingConfirmed={async (dateISO, time) => {
+        onBookingConfirmed={async (dateISO, time, entryId) => {
           setGoProveedorOpen(false);
           setGoProveedorData(null);
           setDateISODraft(dateISO);
+          setCalBgViewMonth(dateISO.slice(0,7));
+          if(entryId){
+            if(demoBookingRepository){setDemoCalendarFocus({dateISO,timeHHMM:time,entryId,token:Date.now()});setDemoCustomerCalendarSelected(true);}
+            else{setCalScrollToDateTarget({dateISO,timeHHMM:time,entryId,token:Date.now()});setCalHighlightEntryId(entryId);}
+          }
           // The existing booking bridge publishes its committed projection.
           setCalOpen(true);
         }}

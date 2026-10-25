@@ -45,6 +45,7 @@ import {
   getRecentBusinessIds,
   recordBusinessVisit,
 } from "@/data/goRecentBusinesses";
+import { customerBookingEntry } from "@/data/customerBookingProjection";
 import { SECTORS } from "@/data/goSectorData";
 import { trSector } from "@/data/goSectorTranslations";
 import { syncBookingToGoLog } from "@/lib/goLogBridge";
@@ -128,6 +129,13 @@ function filterSlotsByShifts<T extends { startDatetime: string; endDatetime: str
     const endMin   = eH * 60 + eM;
     return shifts.some((sh) => startMin >= sh.fromMin && endMin <= sh.toMin);
   });
+}
+
+/** Category identity only: contractual status colors remain independent. */
+export function bookingCategoryAccent(business?:Pick<Business,"category"|"bookingColor">|null):string {
+  const beauty=SECTORS.find(sector=>sector.id==="belleza");
+  const activity=canonicalBookingActivity(business?.category??"");
+  return activity==="belleza"||beauty?.subs.some(sub=>sub.id===activity) ? beauty?.color||"#eab308" : business?.bookingColor||"#00e5ff";
 }
 
 const RESULT_CARD_H     = 80;  // paddingVertical 32 + content ~40 + marginBottom 8
@@ -456,7 +464,7 @@ export function BookingSearchOverlay({
     const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
     const onShow = Keyboard.addListener(showEvt, (e) => {
       setKeyboardVisible(true);
-      setKeyboardHeight(e.endCoordinates.height);
+      setKeyboardHeight(Math.max(0,SCREEN_H-(e.endCoordinates.screenY??(SCREEN_H-e.endCoordinates.height))));
     });
     const onHide = Keyboard.addListener(hideEvt, () => {
       setKeyboardVisible(false);
@@ -713,6 +721,7 @@ export function BookingSearchOverlay({
 
   const handleSelectBusiness = (b: Business) => {
     if (!businessVisible(b)) return;
+    Keyboard.dismiss();
     Haptics.selectionAsync().catch(() => {});
     setSelectedBusiness(b);
     setSelectedDate(getDaysRange(1, demoRepository ? undefined : b.timezone)[0]);
@@ -996,7 +1005,9 @@ export function BookingSearchOverlay({
   };
   handleBackRef.current = handleBackOneLevel;
 
-  const accentColor = selectedBusiness?.bookingColor || "#00e5ff";
+  const beauty=SECTORS.find(sector=>sector.id==="belleza");
+  const beautySelection=selectedCategory==="belleza"||beauty?.subs.some(sub=>sub.id===selectedSubCategory)||visibleSectors.length===1&&visibleSectors[0].id==="belleza";
+  const accentColor = selectedBusiness?bookingCategoryAccent(selectedBusiness):beautySelection?beauty?.color||"#eab308":"#00e5ff";
   const reviewedPlan = confirmedBooking?.timingSnapshot ?? activeHold?.timingSnapshot;
   const summaryItem = selectedItem && reviewedPlan ? { ...selectedItem,
     title: (confirmedBooking?.catalogSnapshot ?? activeHold?.catalogSnapshot)?.lines.map(line => line.name).join(" + ") || reviewedPlan.serviceDetails.map(service => service.title).join(" + "),
@@ -1025,6 +1036,8 @@ export function BookingSearchOverlay({
     selectedStaff === null   ? null :
     selectedStaff === "none" ? t("biz_no_preference") :
     selectedStaff.name;
+  const bookingAccepted=confirmedBooking?.status==="CONFIRMED"||confirmedBooking?.status==="ACCEPTED";
+  const confirmationColor=bookingAccepted?"#22c55e":"#FFD700";
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
@@ -1055,13 +1068,13 @@ export function BookingSearchOverlay({
 
             <View style={s.headerCenter}>
               {step === "search" && (
-                <Text style={s.headerTitle}>{t("biz_new_booking").toUpperCase()}</Text>
+                <Text testID="booking-search-heading" style={[s.headerTitle,s.stepHeading]}>{lang==="en"?"Find your business":"Busca tu empresa"}</Text>
               )}
               {step === "item" && (
                 <Text style={s.headerTitle}>{t("biz_step_service_label").toUpperCase()}</Text>
               )}
               {step === "professional" && (
-                <Text style={s.headerTitle}>{t("biz_step_professional_label").toUpperCase()}</Text>
+                <Text testID="booking-professional-heading" style={[s.headerTitle,s.stepHeading]}>{lang==="en"?"Choose your professional":"Elige tu profesional"}</Text>
               )}
               {step === "slots" && (
                 <Text style={s.headerTitle}>{t("biz_step_datetime_label").toUpperCase()}</Text>
@@ -1070,7 +1083,7 @@ export function BookingSearchOverlay({
                 <Text style={[s.headerTitle, { color: "#f59e0b" }]}>{t("accion_confirmar").toUpperCase()}</Text>
               )}
               {step === "confirmed" && (
-                <Text style={[s.headerTitle, { color: accentColor }]}>{"✓ " + t("biz_booked_label").toUpperCase()}</Text>
+                <Text style={[s.headerTitle, { color: confirmationColor }]}>{t(bookingAccepted?"biz_booked_label":"booking_state_pending").toUpperCase()}</Text>
               )}
             </View>
 
@@ -1111,12 +1124,12 @@ export function BookingSearchOverlay({
                             {/* Grid de subcategorías */}
                             <View style={s.categoryGrid}>
                               {rows.map((row, rowIdx) => (
-                                <View key={rowIdx} style={s.categoryRow}>
+                                <View key={rowIdx} style={[s.categoryRow,subs.length===1&&{justifyContent:"center"}]}>
                                   {row.map((sub) => {
                                     const active = selectedSubCategory === sub.id;
                                     return (
                                       <TouchableOpacity
-                                        key={sub.id}
+                                        key={sub.id} testID={"booking-subcategory-"+sub.id} accessibilityRole="button" accessibilityState={{selected:active}}
                                         activeOpacity={0.72}
                                         onPress={() => {
                                           Haptics.selectionAsync().catch(() => {});
@@ -1124,6 +1137,7 @@ export function BookingSearchOverlay({
                                         }}
                                         style={[
                                           s.categoryChip,
+                                          subs.length===1&&{flex:0,width:140,minHeight:88},
                                           {
                                             borderColor:     active ? sector.color : sector.color + "90",
                                             backgroundColor: active ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.04)",
@@ -1141,7 +1155,7 @@ export function BookingSearchOverlay({
                                     );
                                   })}
                                   {/* Rellena celdas vacías para mantener el grid */}
-                                  {row.length < 3 && Array.from({ length: 3 - row.length }).map((_, i) => (
+                                  {subs.length > 1 && row.length < 3 && Array.from({ length: 3 - row.length }).map((_, i) => (
                                     <View key={`empty-${i}`} style={[s.categoryChip, { opacity: 0 }]} />
                                   ))}
                                 </View>
@@ -1153,10 +1167,10 @@ export function BookingSearchOverlay({
                         /* ── Vista de categorías madre (9 sectores) ── */
                         <View style={s.categoryGrid}>
                           {Array.from({ length: Math.ceil(visibleSectors.length / 3) }, (_, rowIdx) => (
-                            <View key={rowIdx} style={s.categoryRow}>
+                            <View key={rowIdx} style={[s.categoryRow,visibleSectors.length===1&&{justifyContent:"center"}]}>
                               {visibleSectors.slice(rowIdx * 3, rowIdx * 3 + 3).map((sector) => (
                                 <TouchableOpacity
-                                  key={sector.id}
+                                  key={sector.id} testID={"booking-category-"+sector.id} accessibilityRole="button"
                                   activeOpacity={0.72}
                                   onPress={() => {
                                     Haptics.selectionAsync().catch(() => {});
@@ -1165,7 +1179,8 @@ export function BookingSearchOverlay({
                                   }}
                                   style={[
                                     s.categoryChip,
-                                    { borderColor: sector.color + "90" },
+                                    visibleSectors.length===1&&{flex:0,width:140,minHeight:88},
+                                    { borderColor: sector.color },
                                   ]}
                                 >
                                   <Text style={s.categoryChipEmoji}>{sector.emoji}</Text>
@@ -1182,7 +1197,7 @@ export function BookingSearchOverlay({
                   )}
 
                   {/* Accesos rápidos — negocios recientes (acceso secundario, debajo de categorías) */}
-                  {!keyboardVisible && query.length === 0 && recentBizs.length > 0 && (
+                  {query.length === 0 && recentBizs.length > 0 && (
                     <View style={s.recentSection}>
                       <Text style={s.recentLabel}>{t("biz_recent_label")}</Text>
                       <ScrollView
@@ -1198,7 +1213,7 @@ export function BookingSearchOverlay({
                             onPress={() => handleSelectBusiness(b)}
                             activeOpacity={0.72}
                           >
-                            <View style={[s.recentDot, { backgroundColor: b.bookingColor || "#00e5ff" }]} />
+                            <View style={[s.recentDot, { backgroundColor: bookingCategoryAccent(b) }]} />
                             <Text style={s.recentPillText} numberOfLines={1}>{b.name}</Text>
                           </TouchableOpacity>
                         ))}
@@ -1207,12 +1222,13 @@ export function BookingSearchOverlay({
                   )}
 
                   {/* Buscador — siempre visible al fondo del dock */}
-                  <View style={s.searchBar}>
-                    <Feather name="search" size={16} color="rgba(255,255,255,0.35)" />
+                  <View testID="booking-business-search" style={s.searchBar}>
+                    <Feather name="search" size={16} color="rgba(255,255,255,0.85)" />
                     <TextInput
                       style={s.searchInput}
                       placeholder={t("biz_search_business_service_ph")}
-                      placeholderTextColor="rgba(255,255,255,0.25)"
+                      placeholderTextColor="rgba(255,255,255,0.75)"
+                      accessibilityLabel={lang==="en"?"Find your business":"Busca tu empresa"}
                       value={query}
                       onChangeText={setQuery}
                       returnKeyType="search"
@@ -1229,7 +1245,7 @@ export function BookingSearchOverlay({
 
                 {/* Resultados — segundo en DOM → aparece ENCIMA del dock con column-reverse */}
                 {(query.length >= 1 || !!selectedSubCategory) && (
-                  <View style={s.resultsZone}>
+                  <View testID="booking-search-results" style={s.resultsZone}>
                     {searching ? (
                       <View style={s.loaderWrap}>
                         <ActivityIndicator color="rgba(255,255,255,0.4)" />
@@ -1239,7 +1255,7 @@ export function BookingSearchOverlay({
                         <Feather name="search" size={28} color="rgba(255,255,255,0.08)" />
                         <Text style={s.emptyText}>
                           {query.length >= 1
-                            ? t("biz_no_results_for").replace("__Q__", query)
+                            ? (lang==="en"?"We couldn’t find that business.":"No encontramos esa empresa.")
                             : t("biz_no_businesses_subcategory")}
                         </Text>
                       </View>
@@ -1249,11 +1265,12 @@ export function BookingSearchOverlay({
                           s.listResults,
                           {
                             // Altura exacta al número de tarjetas (máx 4), luego scroll
-                            maxHeight: Math.min(results.length, MAX_VISIBLE_RESULTS) * RESULT_CARD_H + 36,
+                            flex:1, minHeight:0,
                           },
                         ]}
                         showsVerticalScrollIndicator={false}
-                        contentContainerStyle={{ paddingBottom: 8, paddingHorizontal: 20 }}
+                        contentContainerStyle={{ paddingBottom: 112, paddingHorizontal: 20 }}
+                        keyboardDismissMode="on-drag"
                         keyboardShouldPersistTaps="handled"
                       >
                         <Text style={s.resultsLabel}>
@@ -1265,11 +1282,11 @@ export function BookingSearchOverlay({
                           return (
                             <TouchableOpacity
                               key={b.id}
-                              style={s.businessCard}
+                              testID={"booking-business-"+b.id} style={[s.businessCard,{borderColor:bookingCategoryAccent(b)+"90"}]}
                               onPress={() => handleSelectBusiness(b)}
                               activeOpacity={0.72}
                             >
-                              <View style={[s.bizColorDot, { backgroundColor: b.bookingColor || "#00e5ff" }]} />
+                              <View style={[s.bizColorDot, { backgroundColor: bookingCategoryAccent(b) }]} />
                               <View style={{ flex: 1 }}>
                                 <Text style={s.businessName}>{b.name}</Text>
                                 <Text style={s.businessMeta}>
@@ -1305,7 +1322,7 @@ export function BookingSearchOverlay({
                         testID={"booking-service-" + item.id}
                         accessibilityRole="checkbox"
                         accessibilityState={{ checked: selectedServiceIds.includes(item.id) }}
-                        style={[s.serviceCard, { borderColor: selectedServiceIds.includes(item.id) ? accentColor : `${accentColor}30` }]}
+                        style={[s.serviceCard, { borderColor: selectedServiceIds.includes(item.id) ? accentColor : `${accentColor}90`, borderWidth:selectedServiceIds.includes(item.id)?2:1, backgroundColor:selectedServiceIds.includes(item.id)?`${accentColor}18`:"rgba(255,255,255,0.04)" }]}
                         onPress={() => handleSelectItem(item)}
                         activeOpacity={0.72}
                       >
@@ -1336,14 +1353,14 @@ export function BookingSearchOverlay({
                               {item.price}€
                             </Text>
                           ) : (
-                            <Text style={s.servicePriceFree}>{t("biz_free")}</Text>
+                            <Text style={[s.servicePriceFree,{color:accentColor}]}>{t("biz_free")}</Text>
                           )}
-                          <Feather name={selectedServiceIds.includes(item.id) ? "check-square" : "chevron-right"} size={18} color={selectedServiceIds.includes(item.id) ? accentColor : "rgba(255,255,255,0.20)"} />
+                          <Feather name={selectedServiceIds.includes(item.id) ? "check-square" : "chevron-right"} size={18} color={accentColor} />
                         </View>
                       </TouchableOpacity>
                     ))}
-                    {selectedBusiness && <CatalogComplementSelector businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} repository={demoRepository} />}
-                    {serviceSelection && <Text testID="booking-services-total" style={s.metaBadgeText}>
+                    {selectedBusiness && <CatalogComplementSelector businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} repository={demoRepository} accentColor={accentColor} />}
+                    {serviceSelection && <Text testID="booking-services-total" style={[s.metaBadgeText,{color:accentColor}]}>
                       {catalogQuote?.ready ? catalogBookingServices(catalogQuote).reduce((minutes, service) => minutes + service.durationMinutes, 0) : serviceSelection.item.durationMinutes} min · {(catalogQuote?.ready ? catalogQuote.totalPrice : serviceSelection.item.priceKnown === false ? null : serviceSelection.item.price) ?? (lang === "en" ? "Price to confirm" : "Precio por confirmar")} {serviceSelection.item.currency}
                     </Text>}
                     <TouchableOpacity testID="booking-save-services" accessibilityRole="button" disabled={!serviceSelection || !catalogQuote?.ready} onPress={handleSaveServices}
@@ -1363,17 +1380,18 @@ export function BookingSearchOverlay({
 
                   {/* Opción Sin preferencia */}
                   <TouchableOpacity
-                    style={[s.serviceCard, { borderColor: `${accentColor}30` }]}
+                    testID="booking-professional-any" accessibilityRole="button" accessibilityState={{selected:selectedStaff==="none",disabled:staffList.length>0&&!eligibleStaff.length}} disabled={staffList.length>0&&!eligibleStaff.length}
+                    style={[s.serviceCard, { borderColor: selectedStaff==="none"?accentColor:`${accentColor}90`,borderWidth:selectedStaff==="none"?2:1,backgroundColor:selectedStaff==="none"?`${accentColor}18`:"rgba(255,255,255,0.04)",opacity:staffList.length>0&&!eligibleStaff.length?0.45:1 }]}
                     onPress={() => handleSelectStaff("none")}
                     activeOpacity={0.72}
                   >
                     <View style={{ flex: 1, gap: 4 }}>
                       <Text style={s.serviceTitle}>{t("biz_no_preference")}</Text>
-                      <Text style={[s.metaBadgeText, { opacity: 0.5, fontSize: 12 }]}>
+                      <Text style={[s.metaBadgeText, { color:"rgba(255,255,255,0.9)", fontSize: 12 }]}>
                         {t("biz_any_professional_available")}
                       </Text>
                     </View>
-                    <Feather name="chevron-right" size={18} color="rgba(255,255,255,0.20)" />
+                    <Feather name={selectedStaff==="none"?"check-circle":"circle"} size={20} color={accentColor} />
                   </TouchableOpacity>
 
                   {/* Staff elegibles */}
@@ -1383,16 +1401,18 @@ export function BookingSearchOverlay({
                       <Text style={s.emptyText}>{t("biz_no_professionals_available")}</Text>
                     </View>
                   )}
-                  {eligibleStaff.map((member) => {
+                  {staffList.map((member) => {
+                    const available=eligibleStaff.some(person=>person.id===member.id),selected=selectedStaff!==null&&selectedStaff!=="none"&&selectedStaff.id===member.id;
                     // Nombres de servicios que puede realizar este profesional
-                    const svcNames = (member.serviceIds ?? [])
+                    const svcNames = (member.serviceIds?.length?member.serviceIds:items.filter(isCatalogService).map(item=>item.id))
                       .map((id) => items.find((it) => it.id === id)?.title)
                       .filter((title): title is string => !!title)
                       .map((title) => trSector(title, lang));
                     return (
                       <TouchableOpacity
                         key={member.id}
-                        style={[s.serviceCard, { borderColor: `${accentColor}30` }]}
+                        testID={"booking-professional-"+member.id} accessibilityRole="button" accessibilityState={{selected,disabled:!available}} disabled={!available}
+                        style={[s.serviceCard, { borderColor:available?(selected?accentColor:`${accentColor}90`):"#666666",borderWidth:selected?2:1,backgroundColor:selected?`${accentColor}18`:"rgba(255,255,255,0.04)",opacity:available?1:0.45 }]}
                         onPress={() => handleSelectStaff(member)}
                         activeOpacity={0.72}
                       >
@@ -1402,12 +1422,12 @@ export function BookingSearchOverlay({
                         <View style={{ flex: 1, gap: 4, marginLeft: 12 }}>
                           <Text style={s.serviceTitle}>{member.name}</Text>
                           {svcNames.length > 0 && (
-                            <Text style={[s.metaBadgeText, { opacity: 0.5, fontSize: 12 }]} numberOfLines={2}>
+                            <Text style={[s.metaBadgeText, { color:"rgba(255,255,255,0.9)", fontSize: 12 }]} numberOfLines={2}>
                               {svcNames.join(" · ")}
                             </Text>
                           )}
                         </View>
-                        <Feather name="chevron-right" size={18} color="rgba(255,255,255,0.20)" />
+                        <Feather name={!available?"x-circle":selected?"check-circle":"circle"} size={20} color={available?accentColor:"#aaaaaa"} />
                       </TouchableOpacity>
                     );
                   })}
@@ -1467,6 +1487,7 @@ export function BookingSearchOverlay({
                         }}
                         style={[
                           s.dayChip,
+                          {borderColor:`${accentColor}90`},
                           !demoRepository && (availableDates === null || !availableDates.includes(d)) && { opacity: 0.35 },
                           isActive && {
                             borderColor: accentColor,
@@ -1547,7 +1568,7 @@ export function BookingSearchOverlay({
                           return (
                             <TouchableOpacity
                               key={sl.startInstant ?? `${sl.startDatetime}|${sl.staffId ?? "any"}`}
-                              style={[s.slotChipAvail, { borderColor: `${accentColor}60`, backgroundColor: "rgba(255,255,255,0.09)" }]}
+                              style={[s.slotChipAvail, { borderColor: `${accentColor}90`, backgroundColor: "rgba(255,255,255,0.09)" }]}
                               onPress={() => handleSelectSlot(sl)}
                               activeOpacity={0.7}
                             >
@@ -1720,18 +1741,18 @@ export function BookingSearchOverlay({
                 {/* Aro de confirmación — VERDE: correcto/hecho */}
                 <View style={{
                   width: 100, height: 100, borderRadius: 50,
-                  borderWidth: 2.5, borderColor: "#22c55e",
-                  backgroundColor: "#22c55e12",
+                  borderWidth: 2.5, borderColor: confirmationColor,
+                  backgroundColor: confirmationColor+"12",
                   alignItems: "center", justifyContent: "center",
                   marginBottom: 26,
-                  shadowColor: "#22c55e", shadowOpacity: 0.35, shadowRadius: 24, elevation: 10,
+                  shadowColor: confirmationColor, shadowOpacity: 0.35, shadowRadius: 24, elevation: 10,
                 }}>
-                  <Feather name="check" size={48} color="#22c55e" />
+                  <Feather name={bookingAccepted?"check":"clock"} size={48} color={confirmationColor} />
                 </View>
 
                 {/* RESERVA CONFIRMADA — VERDE */}
-                <Text style={{ fontSize: 11, fontWeight: "900", letterSpacing: 3.5, color: "#22c55e", marginBottom: 14 }}>
-                  {t("biz_booking_confirmed").toUpperCase()}
+                <Text testID="booking-confirmed-state" style={{ fontSize: 11, fontWeight: "900", letterSpacing: 3.5, color: confirmationColor, marginBottom: 14 }}>
+                  {t(bookingAccepted?"biz_booking_confirmed":"booking_state_pending").toUpperCase()}
                 </Text>
 
                 {/* Nombre del negocio — blanco */}
@@ -1797,9 +1818,9 @@ export function BookingSearchOverlay({
                   onPress={() => {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
                     if (confirmedBooking) {
-                      const dateISO = confirmedBooking.startDatetime.slice(0, 10);
-                      const timeHHMM = confirmedBooking.startDatetime.slice(11, 16);
-                      if (demoRepository) onDemoGoToBooking?.(dateISO, timeHHMM, demoRepository.getCustomerEntries().find(entry => entry.reservationId === confirmedBooking.id)?.id ?? `demo_customer_${confirmedBooking.id}`);
+                      const savedEntry=demoRepository?.getCustomerEntries().find(entry=>entry.reservationId===confirmedBooking.id)??customerBookingEntry(confirmedBooking,selectedBusiness,selectedItem,proShortName??undefined);
+                      const dateISO=savedEntry.dateISO!,timeHHMM=savedEntry.time;
+                      if (demoRepository) onDemoGoToBooking?.(dateISO, timeHHMM, savedEntry.id);
                       else onGoToBooking?.(dateISO, timeHHMM, canonicalCustomerBookings ? `go_booking_${confirmedBooking.id}` : `go_booking_cli_${confirmedBooking.id}`);
                     }
                     handleClose();
@@ -1820,7 +1841,7 @@ export function BookingSearchOverlay({
               mitad inferior del sheet. Tap = retroceder un nivel;
               swipe-down = close (capturado por rightSwipePan en el sheet).
               Oculta en paso "confirmed" para no interferir con el botón OK. */}
-          <TouchableOpacity
+          {step!=="search"&&<TouchableOpacity
             activeOpacity={1}
             onPress={handleBackOneLevel}
             style={{ position: "absolute", right: 0, top: "50%", bottom: 0, width: "25%", opacity: step === "confirmed" ? 0 : 1 }}
@@ -1832,7 +1853,7 @@ export function BookingSearchOverlay({
               end={{ x: 1, y: 0.5 }}
               style={{ flex: 1 }}
             />
-          </TouchableOpacity>
+          </TouchableOpacity>}
 
         </Animated.View>
 
@@ -1840,14 +1861,14 @@ export function BookingSearchOverlay({
             Disposición vertical idéntica al resto de GO (memoria muscular):
             • Arriba  (flecha simple):  retrocede un nivel
             • Abajo   (doble flecha):   cierra el panel → Landing           */}
-        {!keyboardVisible && step !== "confirmed" && (
-          <View style={[s.fabNavStack, { bottom: insets.bottom + 24 }]}>
+        {step !== "confirmed" && (
+          <View style={[s.fabNavStack, { bottom: keyboardHeight+(keyboardVisible?12:insets.bottom+24) }]}>
             {/* ↓  Retroceder un nivel — ARRIBA */}
-            <TouchableOpacity style={s.fabClose} onPress={handleBackOneLevel} activeOpacity={0.7}>
+            <TouchableOpacity testID="booking-back" accessibilityRole="button" accessibilityLabel={lang==="en"?"Back":"Volver"} hitSlop={4} style={s.fabClose} onPress={handleBackOneLevel} activeOpacity={0.7}>
               <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
             </TouchableOpacity>
             {/* ↓↓  Landing — ABAJO */}
-            <TouchableOpacity style={s.fabClose} onPress={handleDismissAll} activeOpacity={0.7}>
+            <TouchableOpacity testID="booking-exit" accessibilityRole="button" accessibilityLabel={lang==="en"?"Return to GO":"Volver a GO"} hitSlop={4} style={s.fabClose} onPress={handleDismissAll} activeOpacity={0.7}>
               <View style={{ alignItems: "center" }}>
                 <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
                 <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
@@ -1956,6 +1977,7 @@ const s = StyleSheet.create({
     letterSpacing: -0.3,
     lineHeight: 28,
   },
+  stepHeading:{fontSize:22,lineHeight:28,color:"#ffffff",letterSpacing:0,textAlign:"center"},
   // Search
   searchBar: {
     flexDirection: "row",
@@ -1966,7 +1988,8 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.05)",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.10)",
+    borderColor: "#ffffff",
+    minHeight:48,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
@@ -1998,7 +2021,7 @@ const s = StyleSheet.create({
     paddingBottom: 16,
   },
   emptyText: {
-    color: "rgba(255,255,255,0.25)",
+    color: "rgba(255,255,255,0.85)",
     fontSize: 15,
     fontWeight: "600",
     textAlign: "center",
@@ -2076,7 +2099,7 @@ const s = StyleSheet.create({
     paddingVertical: 4,
   },
   metaBadgeText: {
-    color: "rgba(255,255,255,0.40)",
+    color: "rgba(255,255,255,0.85)",
     fontSize: 11,
     fontWeight: "700",
     letterSpacing: 0.3,
@@ -2485,13 +2508,14 @@ const s = StyleSheet.create({
   // Sin flex, sin minHeight: envuelve exactamente el contenido.
   // Con column-reverse en el padre, queda pegado al actionDock sin hueco.
   resultsZone: {
+    flex:1,minHeight:0,
     paddingTop: 4,
   },
 
   // ── Contenedor del paso SEARCH — column-reverse: actionDock anclado abajo,
   // resultados crecen hacia arriba desde él, espacio libre siempre encima.
   searchStepInner: {
-    flexDirection: "column-reverse",
+    flexDirection: "column",
   },
 
   // ── Recientes ────────────────────────────────────────────────────────────

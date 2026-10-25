@@ -12,6 +12,7 @@ const compile=name=>ts.transpileModule(readFileSync(name,"utf8"),{compilerOption
 function pure(name,imports={}){const exports={};vm.runInNewContext(compile(name),{exports,require:key=>{if(key in imports)return imports[key];throw Error("Unexpected dependency "+key);},Date,Intl,Map,Set});return exports;}
 const storeModule=pure("data/businessDemoStore.ts"),repoModule=pure("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":pure("data/bookingServices.ts")});
 function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
+  const keyboardEvents=new Map();
   const memory=new Map(),liveCalls=[],navigation=[],hooks=new Map(),cache=new Map();
   const initial={businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],activeDays:[],openFrom:"09:00",openTo:"18:00",daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};
   const store=storeModule.createBusinessDemoStore({ownerUserId:owner,storage:{getItem:async key=>memory.get(key)??null,setItem:async(key,value)=>memory.set(key,value)},canUse:()=>true,initialConfig:initial});
@@ -29,7 +30,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
   class Value{constructor(value){this.value=value;}setValue(value){this.value=value;}interpolate(){return 0;}stopAnimation(){}}
   const animation={start(fn){fn?.({finished:true});},stop(){}};
   const native=new Proxy({Dimensions:{get:()=>({width:390,height:844})},Platform:{OS:"ios",select:x=>x.ios??x.default},
-    StyleSheet:{create:x=>x,absoluteFillObject:{}},Alert:{alert(){}},Keyboard:{addListener:()=>({remove(){}}),dismiss(){}},
+    StyleSheet:{create:x=>x,absoluteFillObject:{}},Alert:{alert(){}},Keyboard:{addListener:(event,fn)=>{keyboardEvents.set(event,fn);return{remove(){keyboardEvents.delete(event);}};},dismiss(){keyboardEvents.get("keyboardWillHide")?.();}},
     Animated:{Value,View:"Animated.View",spring:()=>animation,timing:()=>animation,add:()=>0},
     PanResponder:{create:config=>({panHandlers:config})}
   },{get:(target,key)=>target[key]??key});
@@ -47,6 +48,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
     "expo-linear-gradient":{LinearGradient:"LinearGradient"},"@expo/vector-icons":{Feather:"Feather"},
     "expo-haptics":{selectionAsync:async()=>{},impactAsync:async()=>{},notificationAsync:async()=>{},ImpactFeedbackStyle:{Medium:"medium"},NotificationFeedbackType:{Success:"success"}},
     "react-native-safe-area-context":{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},
+    "@/data/customerBookingProjection":pure("data/customerBookingProjection.ts"),
     "@/data/booking":booking,"@/data/goRecentBusinesses":{getRecentBusinessIds:()=>live("recent read"),recordBusinessVisit:()=>live("recent write")},
     "@/lib/goLogBridge":{syncBookingToGoLog:()=>live("agenda bridge")},
     "@/lib/time":{getToday:()=>new Date("2030-01-07T08:00:00"),formatISODate:d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")},
@@ -73,7 +75,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
   const Overlay=load("components/booking/BookingSearchOverlay.tsx").BookingSearchOverlay,MyList=load("components/booking/MyBookingsList.tsx").MyBookingsList;
   const props={visible:true,demoRepository:repo,initialBusinessId:store.businessId,onClose(){navigation.push("close");},onBookingConfirmed(){liveCalls.push("real confirmed callback");},onHoldCreated(){liveCalls.push("real hold callback");},onGoToBooking(){liveCalls.push("real calendar");},onProviderSelected(){liveCalls.push("real provider");},onDemoGoToBooking(...args){navigation.push(args);}};
   const configure=async()=>{await store.updateConfig({businessName:"GO Peluquería Prueba",sectorId:"belleza",subId:"peluqueria",address:"Dirección DEMO",activeDays:[0,1,2,3,4],services:[{name:"Corte DEMO",duration:30,price:12}],plantillaItems:[{id:"pro",count:1,label:"Puesto",staffNames:["Raul 1 GO PRUEBA"]}],completedSteps:[0,1,2,3,4,5,6,7]});await store.saveFloorPlan({id:store.planId,businessId:store.businessId,updatedAt:1,elements:[{id:"puesto",label:"Raul 1 GO PRUEBA",type:"silla",reservable:true,status:"disponible",x:10,y:20,width:30,height:40,capacity:1}]});};
-  return{store,repo,liveCalls,navigation,render,Overlay,MyList,props,configure};
+  return{store,repo,liveCalls,navigation,render,Overlay,MyList,props,configure,keyboardEvents,accent:load("components/booking/BookingSearchOverlay.tsx").bookingCategoryAccent};
 }
 function nodes(tree){if(!tree||typeof tree!=="object")return[];return[tree,...(tree.children??[]).flatMap(nodes)];}
 function text(tree){if(typeof tree==="string"||typeof tree==="number")return String(tree);return(tree?.children??[]).map(text).join(" ");}
@@ -119,7 +121,7 @@ for(const context of ["USER","ADMIN"])test("New reservation keeps history separa
   const before=JSON.stringify(f.store.getSnapshot());
   const props={...f.props,initialBusinessId:undefined};
   f.render(f.Overlay,props);await turn();let tree=f.render(f.Overlay,props);
-  assert.ok(text(tree).includes("BIZ_NEW_BOOKING"));assert.ok(text(tree).includes("biz_recent_label"));
+  assert.ok(text(tree).includes("Busca tu empresa"));assert.ok(text(tree).includes("biz_recent_label"));
   const expected=modulePublicationPolicy.visibleBookingSectors(SECTORS,modulePublicationPolicy.defaultGoModulePublication(),context==="ADMIN");
   assert.equal(expected.length,context==="ADMIN"?9:1);
   for(const sector of SECTORS)assert.equal(!!button(tree,sector.label),expected.some(row=>row.id===sector.id),sector.label);
@@ -135,7 +137,7 @@ for(const context of ["USER","ADMIN"])test("New reservation keeps history separa
 test("New reservation removes only the history embed and reserves no history-specific layout height",()=>{
  const source=readFileSync("components/booking/BookingSearchOverlay.tsx","utf8");
  assert.equal(source.includes("MyBookingsList"),false);assert.ok(source.includes("visibleSectors.slice(rowIdx * 3, rowIdx * 3 + 3)"));
- assert.ok(source.includes("biz_new_booking"));assert.ok(source.includes("biz_recent_label"));assert.ok(source.includes("biz_search_business_service_ph"));
+ assert.ok(source.includes("Busca tu empresa"));assert.ok(source.includes("biz_recent_label"));assert.ok(source.includes("biz_search_business_service_ph"));
  const ast=ts.createSourceFile("overlay.tsx",source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let dock;
  (function walk(n){if(ts.isPropertyAssignment(n)&&n.name.getText(ast)==="actionDock")dock=n.initializer;ts.forEachChild(n,walk)})(ast);
  assert.ok(dock);assert.equal(dock.properties.some(p=>["height","minHeight","marginTop"].includes(p.name?.getText(ast))),false);
@@ -190,4 +192,48 @@ test('authorized internal preview retains the shared multi-service flow for an u
  await button(tree,'09:00').props.onPress();tree=f.render(f.Overlay,f.props);await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();
  assert.equal(f.store.getSnapshot().bookings.length,1);assert.equal(f.store.getSnapshot().bookings[0].services.length,2);
  assert.equal(f.store.getSnapshot().bookings[0].endDatetime,'2030-01-07T10:00:00');assert.equal(JSON.stringify(f.store.getSnapshot().config.services),before);assert.deepEqual(f.liveCalls,[]);
+});
+
+const flattened=value=>Array.isArray(value)?Object.assign({},...value.map(flattened)):value??{};
+test('beauty services use visible yellow borders/prices and retain multi-selection until Save',async()=>{
+ const f=fixture();await f.configure();await f.store.updateConfig({services:[{name:'Corte',duration:30,price:12},{name:'Tinte',duration:60,price:25}]});
+ let tree=await services(f);const saved=JSON.stringify(f.store.getSnapshot().config.services),items=await f.repo.getBookableItems(f.store.businessId);
+ for(const item of items){const option=control(tree,'booking-service-'+item.id);assert.equal(flattened(option.props.style).borderColor,'#eab30890');
+  const price=nodes(option).find(n=>n.type==='Text'&&new RegExp('^'+item.price+'\\s*€$').test(text(n)));assert.ok(price,'the configured price is visible');assert.equal(flattened(price.props.style).color,'#eab308');
+  option.props.onPress();tree=f.render(f.Overlay,f.props);assert.equal(control(tree,'booking-service-'+item.id).props.accessibilityState.checked,true);assert.ok(control(tree,'booking-save-services'));
+ }
+ assert.equal(JSON.stringify(f.store.getSnapshot().config.services),saved);assert.equal(f.store.getSnapshot().bookings.length,0);
+});
+test('professional heading, no preference and configured names use a clear selectable yellow presentation',async()=>{
+ const f=fixture();await f.configure();let tree=await services(f);button(tree,'Corte DEMO').props.onPress();tree=f.render(f.Overlay,f.props);control(tree,'booking-save-services').props.onPress();tree=f.render(f.Overlay,f.props);
+ const heading=control(tree,'booking-professional-heading');assert.equal(text(heading),'Elige tu profesional');assert.equal(flattened(heading.props.style).color,'#ffffff');assert.equal(flattened(heading.props.style).fontSize,22);
+ const any=control(tree,'booking-professional-any');assert.equal(flattened(any.props.style).borderColor,'#eab30890');assert.equal(any.props.accessibilityState.disabled,false);
+ const pro=nodes(tree).find(n=>n.props.testID?.startsWith('booking-professional-')&&n.props.testID!=='booking-professional-any'&&n.type==='TouchableOpacity');assert.ok(pro);assert.equal(pro.props.disabled,false);assert.ok(text(pro).includes('Raul 1 GO PRUEBA'));
+ assert.equal(flattened(pro.props.style).borderColor,'#eab30890');assert.ok(nodes(pro).some(n=>n.type==='Feather'&&n.props.color==='#eab308'));
+ const servicesText=nodes(pro).find(n=>n.type==='Text'&&flattened(n.props.style).fontSize===12);if(servicesText)assert.equal(flattened(servicesText.props.style).color,'rgba(255,255,255,0.9)');
+});
+test('pilot category is a compact button and keyboard preserves the search, title, results and existing close controls',async()=>{
+ const sector={id:'belleza',label:'Belleza',emoji:'💇',color:'#eab308',subs:[{id:'peluqueria',name:'Peluquería',emoji:'✂️'}]},f=fixture({sectors:[sector]});await f.configure();const props={...f.props,initialBusinessId:undefined};
+ let tree=f.render(f.Overlay,props);await turn();tree=f.render(f.Overlay,props);
+ const category=control(tree,'booking-category-belleza');assert.equal(flattened(category.props.style).width,140);assert.equal(flattened(category.props.style).flex,0);assert.equal(flattened(category.props.style).borderColor,'#eab308');
+ input(tree).props.onChangeText('Peluquería');f.keyboardEvents.get('keyboardWillShow')({endCoordinates:{height:300,screenY:544}});tree=f.render(f.Overlay,props);await turn();tree=f.render(f.Overlay,props);
+ assert.equal(text(control(tree,'booking-search-heading')),'Busca tu empresa');assert.equal(flattened(control(tree,'booking-business-search').props.style).borderColor,'#ffffff');assert.equal(input(tree).props.value,'Peluquería');
+ const back=control(tree,'booking-back'),exit=control(tree,'booking-exit');assert.ok(back&&exit);assert.ok(nodes(tree).find(n=>n.children?.includes(back))||back);
+ assert.ok(button(tree,'GO Peluquería Prueba'));const results=control(tree,'booking-search-results');assert.equal(flattened(results.props.style).flex,1);
+ input(tree).props.onSubmitEditing();tree=f.render(f.Overlay,props);assert.equal(input(tree).props.value,'Peluquería');assert.ok(control(tree,'booking-back'));
+ input(tree).props.onChangeText('No such registered company');f.render(f.Overlay,props);await turn();tree=f.render(f.Overlay,props);assert.ok(text(tree).includes('No encontramos esa empresa.'));assert.deepEqual(f.liveCalls,[]);
+});
+
+test('beauty identity overrides only the category selection color and other sectors keep their configured color',()=>{
+ const f=fixture();for(const category of ['peluqueria','Belleza Peluquería','belleza'])assert.equal(f.accent({category,bookingColor:'#123456'}),'#eab308');
+ assert.equal(f.accent({category:'hotel',bookingColor:'#123456'}),'#123456');
+});
+
+test('a saved pending reservation keeps its real status, yellow presentation and unique ID when opening the calendar',async()=>{
+ const f=fixture();await f.configure();let tree=await selectSlot(f);
+ // Simulate the existing server returning a pending outcome instead of approval.
+ const repo=f.props.demoRepository,claim=repo.claimSlot;repo.claimSlot=async input=>{const result=await claim(input);return result.ok?{...result,booking:{...result.booking,status:'HOLD'}}:result;};
+ await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();tree=f.render(f.Overlay,f.props);
+ const state=control(tree,'booking-confirmed-state');assert.equal(text(state),'BOOKING_STATE_PENDING');assert.equal(state.props.style.color,'#FFD700');
+ await button(tree,'biz_ok_view_calendar').props.onPress();assert.ok(f.navigation[0][2]);assert.equal(f.store.getSnapshot().bookings.length,1);
 });

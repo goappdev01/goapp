@@ -195,6 +195,7 @@ function fixture(kind = "provider", overrides = {}) {
     "expo-haptics": { selectionAsync: async () => {}, impactAsync: async () => {}, notificationAsync: async () => {},
       ImpactFeedbackStyle: { Medium: "medium", Light: "light" }, NotificationFeedbackType: { Success: "success" } },
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34, left: 0, right: 0 }) },
+    "@/data/customerBookingProjection":loadPure("data/customerBookingProjection.ts"),
     "@/data/booking": api, "@/data/bookingServices": services, "@/data/bookingTimeline": timeline,
     "@/data/goRecentBusinesses": { getRecentBusinessIds: async () => [business, otherBusiness], recordBusinessVisit: async () => {} },
     "@/lib/goLogBridge": { syncBookingToGoLog: async () => { throw new Error("Canonical reservations must not be copied to GO Log"); } },

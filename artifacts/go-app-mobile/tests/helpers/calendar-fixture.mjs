@@ -47,7 +47,7 @@ export function fixture({ now } = {}) {
     Linking: { openURL: async url => { urls.push(url); } },
     Alert: { alert() {} },
     PanResponder: { create: config => ({ panHandlers: config }) },
-    Animated: { Value, View: 'Animated.View', timing: () => animation, spring: () => animation, sequence: () => animation, loop: () => animation },
+    Animated: { Value, View: 'Animated.View', timing: () => animation, spring: () => animation, sequence: () => animation, loop: () => animation, delay: () => animation },
   }, { get: (target, key) => target[key] ?? key });
   const chain = new Proxy({}, { get: () => () => chain });
   const mocks = {

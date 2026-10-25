@@ -70,7 +70,7 @@ type Props = {
   visible: boolean;
   proveedor: ProveedorData | null;
   onClose: () => void;
-  onBookingConfirmed?: (dateISO: string, time: string) => void;
+  onBookingConfirmed?: (dateISO: string, time: string,entryId?:string) => void;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -167,8 +167,8 @@ export function GoProveedorReservaSheet(props: Props) {
   if (props.proveedor?.businessId) return <BookingSearchOverlay
     visible={props.visible} initialBusinessId={props.proveedor!.businessId}
     onClose={props.onClose} onDismissAll={props.onClose} canonicalCustomerBookings
-    demoRepository={props.demoRepository} onDemoGoToBooking={(dateISO, time) => props.onBookingConfirmed?.(dateISO, time)}
-    onGoToBooking={(dateISO, time) => props.onBookingConfirmed?.(dateISO, time)} />;
+    demoRepository={props.demoRepository} onDemoGoToBooking={(dateISO, time, entryId) => props.onBookingConfirmed?.(dateISO, time,entryId)}
+    onGoToBooking={(dateISO, time, entryId) => props.onBookingConfirmed?.(dateISO, time,entryId)} />;
   return <LocalProveedorReservaSheet {...props} />;
 }
 
