@@ -28,10 +28,11 @@ test('the real next-card header uses the approved proposal typography without sh
  assert.ok(attr(next.parent.parent,'style').expression.getText(ast).includes('total > 1 ? 18 : 2'),'navigation chevrons have their own horizontal space');
 });
 
-test('the actual date and time row owns the existing microactions, with no separate pencil or icon row',()=>{
+test('the date and time stay together and written follow-up actions occupy the next primary row',()=>{
  const row=nodes.find(n=>ts.isJsxElement(n)&&attr(n,'testID')?.text==='landing-date-actions-row');assert.ok(row);
  assert.ok(attr(row,'style').expression.getText(ast).includes('flexDirection: "row"'));
- for(const value of ['landing-compact-date','landing-compact-time','renderEntryMicroActions(g, true)'])assert.ok(row.getText(ast).includes(value));
+ for(const value of ['landing-compact-date','landing-compact-time'])assert.ok(row.getText(ast).includes(value));
+ assert.ok(!row.getText(ast).includes('renderEntryMicroActions'));assert.ok(row.parent.getText(ast).includes('renderEntryMicroActions(g, true)'));
  const compact=source.slice(source.indexOf('key="proxima-abs-block"'),source.indexOf('{/* ── LANDING HINTS'));
  assert.ok(!compact.includes('note-indicator'));assert.ok(!compact.includes('name="edit-2"'));
  assert.equal((compact.match(/renderEntryMicroActions\(g, true\)/g)||[]).length,1);
@@ -49,7 +50,8 @@ test('inline microactions preserve callbacks, colors, permissions and stop openi
  const buttons=node.props.children;
  assert.equal(buttons.length,3);
  for(const [i,button] of buttons.entries()){
-  assert.equal(button.props.style.width,36);assert.equal(button.props.style.height+button.props.hitSlop.top+button.props.hitSlop.bottom,44);
+  assert.equal(button.props.style.flex,1);assert.equal(button.props.style.minHeight+button.props.hitSlop.top+button.props.hitSlop.bottom,44);
+  const label=button.props.children.find(c=>c?.props?.numberOfLines===1);assert.equal(label.props.children,['REALIZADA','PENDIENTE','ELIMINAR'][i]);assert.equal(label.props.style.textAlign,'center');assert.ok(button.props.children.find(c=>c?.props?.name));
   let stopped=false;button.props.onPress({stopPropagation(){stopped=true}});assert.ok(stopped);assert.equal(calls.length,i+1);
  }
  assert.deepEqual(calls,['done','pending','discard']);assert.equal(entry.estado,'aceptado');assert.equal(entry.localResolutionStatus,'pending');

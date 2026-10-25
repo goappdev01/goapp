@@ -3501,8 +3501,9 @@ function HomeScreenContent() {
   const completionIdentity = useAssistantZoneScope();
   const [personalGoLog, setGoLog] = useGoLog(completionIdentity.ready ? completionIdentity.scope : null);
   const customerBookings=useCustomerBookings(demoBookingRepository,goView.loaded && goView.view==="USER" && !adminAccess.checking && (!adminAccess.isOwner || ownerDemo.loaded));
-  const goLog=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER").filter(canReadBoardTask),[personalGoLog,customerBookings.entries,goView.view,adminAccess.allowed,adminAccess.checking]);
-  const actionCompletion = useActionCompletion(goLog);
+  const completionEntries=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER").filter(canReadBoardTask),[personalGoLog,customerBookings.entries,goView.view,adminAccess.allowed,adminAccess.checking]);
+  const actionCompletion = useActionCompletion(completionEntries);
+  const goLog=useMemo(()=>completionEntries.filter(entry=>!actionCompletion.isDiscarded(entry)),[completionEntries,actionCompletion.isDiscarded]);
   const [landingDetailsId, setLandingDetailsId] = useState<string | null>(null);
   const landingDetailsEntry = goLog.find(entry => entry.id === landingDetailsId) ?? null;
   useEffect(() => { setLandingDetailsId(null); }, [goView.view, completionIdentity.scope?.userId, completionIdentity.scope?.context]);
@@ -13550,10 +13551,23 @@ function HomeScreenContent() {
           .then(() => setLandingDetailsId(null)).catch(error => Alert.alert("GO", error.message));
       } }]);
   };
-  const canResolveEntry=(entry:GoEntry)=>!!actionCompletion.scope&&actionCompletion.active(actionCompletion.scope)&&ownedCompletionEntry(entry,actionCompletion.scope)&&completionEligible(entry)&&!entry.changeProposal&&!entry.proposal;
-  const resolveEntry=(entry:GoEntry,status:"done"|"pending",current?:()=>GoEntry|undefined)=>{if(canResolveEntry(entry))void actionCompletion.decide(entry,status,true,current??(()=>goLog.find(e=>e.id===entry.id)));};
+  const canResolveEntry=(entry:GoEntry)=>!!actionCompletion.scope&&actionCompletion.active(actionCompletion.scope)&&ownedCompletionEntry(entry,actionCompletion.scope)&&completionEligible(entry);
+  const resolveEntry=(entry:GoEntry,status:"done"|"pending"|"discard",current?:()=>GoEntry|undefined)=>{
+    if(!canResolveEntry(entry))return;
+    const read=current??(()=>goLog.find(e=>e.id===entry.id));
+    if(status==="discard"){
+      Alert.alert(lang==="en"?"Delete my card":"Eliminar mi ficha",lang==="en"?"Hide only your personal card? This does not cancel the reservation or remove anyone else's record.":"¿Ocultar solo tu ficha personal? No se cancela la reserva ni se elimina la ficha de otros participantes.",[
+        {text:lang==="en"?"Back":"Volver",style:"cancel"},
+        {text:lang==="en"?"DELETE":"ELIMINAR",style:"destructive",onPress:()=>{void actionCompletion.discard(entry,read).then(()=>setLandingDetailsId(null)).catch(error=>Alert.alert("GO",error.message));}},
+      ]);return;
+    }
+    if(!entry.changeProposal&&!entry.proposal)void actionCompletion.decide(entry,status,true,read);
+  };
   const followedEntry=(entry:GoEntry)=>({...entry,localResolutionStatus:actionCompletion.status(entry)});
-  const renderEntryMicroActions=(entry:GoEntry,inline=false)=><GoEntryMicroActions inline={inline} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)} onDone={canResolveEntry(entry)?()=>resolveEntry(entry,"done"):undefined} onPending={canResolveEntry(entry)?()=>resolveEntry(entry,"pending"):undefined} onDiscard={!entry.deleted&&entry.estado!=="rechazado"&&(!reservationCardPolicy(entry).canonical||reservationCardPolicy(entry).canCancel)?()=>cancelEntryFromDetails(entry):undefined}/>;
+  const renderEntryMicroActions=(entry:GoEntry,inline=false)=><GoEntryMicroActions inline={inline} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
+    onDone={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"done"):undefined}
+    onPending={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"pending"):undefined}
+    onDiscard={canResolveEntry(entry)?()=>resolveEntry(entry,"discard"):undefined}/>;
   const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false) => <GoEntryQuickActions entry={followedEntry(entry)} showState={showState} compact={compact}
     onCancel={() => cancelEntryFromDetails(entry)} onEdit={() => openEntryChange(entry)} onPropose={() => openEntryChange(entry)}
     onAccept={() => { if (entry.changeProposal) acceptProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "aceptado"); }}
@@ -14748,7 +14762,7 @@ function HomeScreenContent() {
                   actions={<>
 
 
-              {item.kind === "cambio" && renderEntryQuickActions(item.g, true, true)}
+              {item.kind === "cambio" && <View style={{gap:6}}>{renderEntryMicroActions(item.g, true)}{renderEntryQuickActions(item.g, true, true)}</View>}
 
               {/* Botones: HOLD → CONFIRMAR / RECHAZAR */}
               {item.kind === "hold" && (
@@ -15070,8 +15084,8 @@ function HomeScreenContent() {
                         );
                       })()}
                     </View>
-                    {renderEntryMicroActions(g, true)}
                   </View>
+                  {renderEntryMicroActions(g, true)}
                 </>}
                 secondary={[
                   { key: "contact", content: !entryIsReservation(g) && !!displayContact(entryIdentity(g.contactName), g.phone) && (
@@ -15265,7 +15279,7 @@ function HomeScreenContent() {
 
       </LandingContentViewport>
       <GoEntryDetailsSheet handedness={handedness} entry={landingDetailsEntry?followedEntry(landingDetailsEntry):null} onClose={() => setLandingDetailsId(null)} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry) : undefined}>
-        {landingDetailsEntry && renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}
+        {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry)}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}</>}
       </GoEntryDetailsSheet>
 
       {/* ── BOTÓN QR PERMANENTE ─────────────────────────────────────────────
@@ -18097,8 +18111,10 @@ function HomeScreenContent() {
                   // adjustsFontSizeToFit is unreliable on Expo web so we do it manually.
                   const _labelLen   = displayLabel?.length ?? 0;
                   const _isMasSat   = s.key === "mas" && _labelLen > 5;
-                  const _labelFs    = Math.max(8, Math.round(9 * uiScaleFactor));
                   const _labelPadH  = _isMasSat ? 1 : 3;
+                  const _labelFs    = displayLabel === "EMPRESA" && s.key === "mas"
+                    ? Math.min(Math.round(12 * uiScaleFactor), (microSz - 2 * _labelPadH - 4) / 5.25)
+                    : Math.max(8, Math.round(9 * uiScaleFactor));
 
                   return (
                     <Animated.View
@@ -18390,7 +18406,8 @@ function HomeScreenContent() {
                           ) : (
                             <Text
                               numberOfLines={1}
-                              adjustsFontSizeToFit={s.key !== "mas"}
+                              adjustsFontSizeToFit={displayLabel === "EMPRESA" || s.key !== "mas"}
+                              maxFontSizeMultiplier={displayLabel === "EMPRESA" ? 1 : undefined}
                               minimumFontScale={0.6}
                               style={{
                                 color: isOrigin ? "rgba(255,255,255,0.35)" : "#ffffff",
@@ -18399,6 +18416,7 @@ function HomeScreenContent() {
                                 letterSpacing: _isMasSat ? 0 : 0.2,
                                 textAlign: "center",
                                 paddingHorizontal: _labelPadH,
+                                ...(displayLabel === "EMPRESA" ? { width: "100%", textAlignVertical: "center" as const } : {}),
                               }}
                             >
                               {displayLabel ?? ""}
@@ -20244,7 +20262,7 @@ function HomeScreenContent() {
           </View>}
 
           {/* ── ZONA INFERIOR — Selector de fecha/hora/duración ──────────── */}
-          {demoCustomerCalendarSelected ? <View style={{paddingHorizontal:16,paddingBottom:Math.max(insets.bottom,12),paddingTop:8,backgroundColor:"#0e0e14"}}><TouchableOpacity accessibilityRole="button" onPress={() => { setDemoInitialBusinessId(undefined); setShowBookingFromCal(true); }} style={{padding:12,borderRadius:12,backgroundColor:"#284d42"}}><Text style={{color:"#ffffff",fontWeight:"700",textAlign:"center"}}>{lang === "en" ? "New reservation" : "Nueva reserva"}</Text></TouchableOpacity></View> : (<Pressable
+          {demoCustomerCalendarSelected ? <View style={{paddingHorizontal:16,paddingBottom:Math.max(insets.bottom,12),paddingTop:8,backgroundColor:"#0e0e14"}}><TouchableOpacity testID="calendar-new-reservation" accessibilityRole="button" accessibilityLabel={lang === "en" ? "NEW RESERVATION" : "NUEVA RESERVA"} activeOpacity={0.65} onPress={() => { setDemoInitialBusinessId(undefined); setShowBookingFromCal(true); }} style={{alignSelf:"center",width:"66%",minWidth:160,maxWidth:240,minHeight:44,paddingHorizontal:16,paddingVertical:12,borderWidth:2,borderColor:"#FFD700",borderRadius:12,backgroundColor:"#18180e",alignItems:"center",justifyContent:"center"}}><Text numberOfLines={1} adjustsFontSizeToFit style={{color:"#FFD700",fontWeight:"800",fontSize:13,textAlign:"center"}}>{lang === "en" ? "NEW RESERVATION" : "NUEVA RESERVA"}</Text></TouchableOpacity></View> : (<Pressable
             style={[styles.sheet, { paddingBottom: isBusinessMode ? Math.max(paddingBottom - 22, 2) : Math.max(paddingBottom - 10, 0) }]}
             onPress={(e) => e.stopPropagation()}
             onLayout={(e) => {
@@ -26386,7 +26404,7 @@ function HomeScreenContent() {
       <GoEntryDetailsSheet entry={calBookingDetailEntry?goLog.find(e=>e.id===calBookingDetailEntry.id)??null:null} handedness={handedness}
         onClose={()=>setCalBookingDetailEntry(null)}
         onMessage={calBookingDetailEntry?()=>{const entry=calBookingDetailEntry;setCalBookingDetailEntry(null);openEntryMessage(entry,()=>setCalBookingDetailEntry(entry));}:undefined}>
-        {calBookingDetailEntry&&renderEntryQuickActions(calBookingDetailEntry,!(calBookingDetailEntry.customerBooking||calBookingDetailEntry.businessBooking))}
+        {calBookingDetailEntry&&<>{renderEntryMicroActions(calBookingDetailEntry)}{renderEntryQuickActions(calBookingDetailEntry,!(calBookingDetailEntry.customerBooking||calBookingDetailEntry.businessBooking))}</>}
       </GoEntryDetailsSheet>
 
     </View>

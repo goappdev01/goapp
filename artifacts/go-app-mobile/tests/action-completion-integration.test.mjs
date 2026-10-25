@@ -291,3 +291,26 @@ test('an authorized company calendar can resolve its personal follow-up through 
  const doc=await f.api.decideCompletion(companyScope,row,'done',()=>true,now,true,()=>row);assert.equal(core.completionDecision(row,doc).status,'done');assert.equal(JSON.stringify(row),before);
  assert.equal(core.completionDecision(row,await f.api.readCompletionDocument(S)),undefined);
 });
+
+test('DELETE hides only this participant card, persists once and never cancels or changes acceptance',async()=>{
+ const f=storageFixture(),e=entry({type:'GO_BOOKING',reservationId:'reservation-one',businessId:'salon-one',customerBooking:true,bookingStatus:'confirmada',bookingServerStatus:'CONFIRMED'}),before=JSON.stringify(e);
+ await Promise.all([f.api.discardCompletionEntry(S,e,()=>true,()=>e),f.api.discardCompletionEntry(S,e,()=>true,()=>e)]);
+ assert.equal(f.writes.length,1);const restarted=storageFixture(f.memory),doc=await restarted.api.readCompletionDocument(S);
+ assert.equal(core.completionDiscarded(e,doc),true);assert.equal(core.awaitingCompletion(e,doc,now+86400000),false);assert.equal(core.nextCompletionReminder(e,doc,now),null);
+ assert.equal(core.completionDecision(e,doc),undefined);assert.equal(JSON.stringify(e),before);assert.equal(e.bookingStatus,'confirmada');assert.equal(e.estado,'aceptado');
+ const P={...S,context:'live:BUSINESS:salon-one'},provider={...e,actionContext:P.context,customerBooking:false,businessBooking:true};
+ assert.equal(core.completionDiscarded(provider,doc),false);assert.equal(core.completionDiscarded(provider,await f.api.readCompletionDocument(P)),false);
+ assert.equal(core.completionDiscarded({...e,time:'10:00'},doc),false,'a changed commitment is not silently hidden by an obsolete personal preference');
+});
+test('personal discard rechecks owner, company, schedule and identity; rejected writes preserve all records',async()=>{
+ const f=storageFixture(),e=entry();
+ for(const current of [undefined,{...e,ownerUserId:'other'},{...e,actionContext:'live:BUSINESS:other'},{...e,time:'15:00'}])await assert.rejects(f.api.discardCompletionEntry(S,e,()=>true,()=>current));
+ f.user('other');await assert.rejects(f.api.discardCompletionEntry(S,e,()=>true,()=>e));assert.equal(f.writes.length,0);
+});
+test('Calendar excludes the discarded personal card only and keeps the other participant and the shared receipt',()=>{
+ const e=entry({type:'GO_BOOKING',reservationId:'r1',businessId:'salon-one',bookingStatus:'confirmada'}),other=entry({id:'two',reservationId:'r2'}),before=JSON.stringify([e,other]);
+ let doc=core.discardCompletion(core.emptyCompletionDocument(S),e,now),owner=S.userId;
+ const hook=load('hooks/useGoCalendarEntries.ts',{'./useActionCompletion':{useCompletionDocument:()=>({doc})},'@/lib/goActionCompletion':core,react:{useState:()=>[owner,()=>{}],useEffect(){}},'@/lib/goTaskAccess':{getTaskUser:async()=>owner,isPersonalTask:()=>true},'@/lib/sessionEvents':{onSessionChanged:()=>()=>{}}});
+ assert.deepEqual(hook.useGoCalendarEntries([e,other]).map(row=>row.id),['two']);
+ doc=core.emptyCompletionDocument({...S,context:'live:BUSINESS:salon-one'});assert.equal(hook.useGoCalendarEntries([e,other]).length,2);assert.equal(JSON.stringify([e,other]),before);
+});

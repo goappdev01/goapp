@@ -102,7 +102,7 @@ const VIEW_MODES: { key: ViewMode; icon: keyof typeof Feather.glyphMap; label: s
 interface GoReservasConfigScreenProps {
   onClose:                () => void;
   onOpenMessage?: (entry:GoEntry,returnTo?:()=>void)=>void;
-  onResolveEntry?: (entry:GoEntry,status:"done"|"pending",current?:()=>GoEntry|undefined)=>void;
+  onResolveEntry?: (entry:GoEntry,status:"done"|"pending"|"discard",current?:()=>GoEntry|undefined)=>void;
   canResolveEntry?: (entry:GoEntry)=>boolean;
   onProposeBookingChange?: (entry:GoEntry)=>void;
   onOpenVerificacion?:    () => void;

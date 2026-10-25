@@ -30,16 +30,22 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
   const {lang}=useLanguage(),personal=!!(entry.reservationId||entry.customerBooking||entry.businessBooking);
   const label=(es:string,en:string)=>lang==="en"?en:es;
   const actions=[
-    {key:"done",label:(personal?label("Mi seguimiento: ","My follow-up: "):"")+label("REALIZADA","DONE"),color:C.done,icon:"check-circle" as const,run:onDone},
-    {key:"pending",label:(personal?label("Mi seguimiento: ","My follow-up: "):"")+label("PENDIENTE","PENDING"),color:C.pending,icon:"clock" as const,run:onPending},
-    {key:"discard",label:personal?label("Cancelar reserva con confirmación","Cancel reservation with confirmation"):label("Eliminar o descartar con confirmación","Delete or discard with confirmation"),color:C.destructive,icon:"trash-2" as const,run:onDiscard},
+    {key:"done",text:label("REALIZADA","DONE"),color:C.done,icon:"check-circle" as const,run:onDone},
+    {key:"pending",text:label("PENDIENTE","PENDING"),color:C.pending,icon:"clock" as const,run:onPending},
+    {key:"discard",text:label("ELIMINAR","DELETE"),color:C.destructive,icon:"trash-2" as const,run:onDiscard},
   ].filter(action=>action.run);
   if(!actions.length)return null;
-  return <View testID="entry-micro-actions" pointerEvents="box-none" style={{flexDirection:"row",flexShrink:0,gap:inline?2:4,padding:inline?0:4}}>
-    {actions.map(action=><TouchableOpacity key={action.key} accessibilityRole="button" accessibilityLabel={action.label} disabled={disabled}
-      accessibilityState={{disabled,selected:entry.localResolutionStatus===action.key}} hitSlop={{top:inline?4:6,bottom:inline?4:6,left:0,right:0}}
-      onPress={event=>{event?.stopPropagation();action.run?.();}} style={{width:inline?36:32,height:inline?36:32,alignItems:"center",justifyContent:"center"}}>
-      <Feather name={action.icon} size={16} color={action.color}/>
+  return <View testID="entry-micro-actions" pointerEvents="box-none" style={{flexDirection:"row",flexShrink:0,gap:4,padding:0}}>
+    {actions.map(action=><TouchableOpacity key={action.key} accessibilityRole="button"
+      accessibilityLabel={personal?label("Mi seguimiento: ","My follow-up: ")+action.text:action.text}
+      accessibilityHint={action.key==="discard"?label("Oculta solo tu ficha. No cancela el compromiso.","Hides only your card. Does not cancel the commitment."):undefined}
+      disabled={disabled} accessibilityState={{disabled,selected:entry.localResolutionStatus===action.key}}
+      hitSlop={{top:inline?4:0,bottom:inline?4:0,left:0,right:0}} activeOpacity={0.7}
+      onPress={event=>{event?.stopPropagation();action.run?.();}}
+      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:1,borderColor:action.color,backgroundColor:action.color+"12",flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center"}}>
+      <Feather name={action.icon} size={inline?12:14} color={action.color}/>
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2}
+        style={{color:action.color,fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.text}</Text>
     </TouchableOpacity>)}
   </View>;
 }

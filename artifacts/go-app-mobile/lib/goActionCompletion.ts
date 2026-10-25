@@ -8,6 +8,7 @@ export type CompletionEntry = GoEntry & {
 export type CompletionPreferences = { defaultDurationMinutes: number; reminderMinutes: number; pendingAlerts: boolean };
 export type Decision = { status: Resolution; schedule: string; at: number };
 export type CompletionRecord = {
+  discarded?: { schedule: string; at: number };
   decision?: Decision; history: Decision[]; reminderMinutes?: number; remindAt?: number; alerts?: boolean;
 };
 export type CompletionDocument = {
@@ -92,13 +93,23 @@ export function completionDecision(entry: CompletionEntry, doc: CompletionDocume
   const d=doc.records[completionKey(entry)]?.decision;
   return d?.schedule===completionSchedule(entry)?d:undefined;
 }
+/** A personal display preference, never a cancellation or a shared booking update. */
+export function completionDiscarded(entry: CompletionEntry, doc: CompletionDocument): boolean {
+  return ownedCompletionEntry(entry,doc.scope) && doc.records[completionKey(entry)]?.discarded?.schedule===completionSchedule(entry);
+}
+export function discardCompletion(doc: CompletionDocument, entry: CompletionEntry, at: number): CompletionDocument {
+  if(!ownedCompletionEntry(entry,doc.scope) || entry.deleted)throw new Error("No puedes descartar esta ficha en este contexto.");
+  if(completionDiscarded(entry,doc))return doc;
+  const key=completionKey(entry),old=doc.records[key] || {history:[]};
+  return {...doc,records:{...doc.records,[key]:{...old,discarded:{schedule:completionSchedule(entry),at}}}};
+}
 export function awaitingCompletion(entry: CompletionEntry, doc: CompletionDocument, now: number): boolean {
   const end=plannedActionEnd(entry,doc.preferences.defaultDurationMinutes);
-  return completionEligible(entry) && !entry.changeProposal && !entry.proposal && end!==null
+  return !completionDiscarded(entry,doc) && completionEligible(entry) && !entry.changeProposal && !entry.proposal && end!==null
     && now>=end+COMPLETION_GRACE_MS && !completionDecision(entry,doc);
 }
 export function pendingCompletion(entry: CompletionEntry, doc: CompletionDocument): boolean {
-  return completionEligible(entry) && completionDecision(entry,doc)?.status==="pending";
+  return !completionDiscarded(entry,doc) && completionEligible(entry) && completionDecision(entry,doc)?.status==="pending";
 }
 export function ownedCompletionEntry(e: CompletionEntry,s: CompletionScope): boolean {
   if (e.ownerUserId!==s.userId) return false;
@@ -108,7 +119,7 @@ export function ownedCompletionEntry(e: CompletionEntry,s: CompletionScope): boo
   return s.context==="live:USER";
 }
 export function nextCompletionReminder(entry: CompletionEntry,doc: CompletionDocument,now:number): number | null {
-  if (!completionEligible(entry) || entry.changeProposal || entry.proposal) return null;
+  if (completionDiscarded(entry,doc) || !completionEligible(entry) || entry.changeProposal || entry.proposal) return null;
   const record=doc.records[completionKey(entry)],decision=completionDecision(entry,doc);
   if (decision?.status==="done" || record?.alerts===false || decision?.status==="pending" && !doc.preferences.pendingAlerts) return null;
   const end=plannedActionEnd(entry,doc.preferences.defaultDurationMinutes);

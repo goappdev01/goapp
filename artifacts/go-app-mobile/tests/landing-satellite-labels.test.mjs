@@ -92,8 +92,10 @@ test('satellite size, placement, hit areas, other labels and callbacks retain th
  const oldButton=find(old,n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(old)==='TouchableOpacity'&&n.openingElement.attributes.properties.some(a=>a.name?.getText(old)==='onPress'&&a.initializer?.expression?.getText(old)==='handlePress'));
  const calendar=find(button,n=>ts.isConditionalExpression(n)&&n.condition.getText(ast)==='isCalendarBtn'&&n.whenTrue.getText(ast).includes('<LinearGradient'));
  const oldCalendar=find(oldButton,n=>ts.isConditionalExpression(n)&&n.condition.getText(old)==='isCalendarBtn'&&n.whenTrue.getText(old).includes('<LinearGradient'));
- const normalized=button.getText(ast).replace(calendar.whenTrue.getText(ast),oldCalendar.whenTrue.getText(old)).replace('adjustsFontSizeToFit={s.key !== "mas"}','adjustsFontSizeToFit');
+ const normalized=button.getText(ast).replace(calendar.whenTrue.getText(ast),oldCalendar.whenTrue.getText(old)).replace('adjustsFontSizeToFit={displayLabel === "EMPRESA" || s.key !== "mas"}','adjustsFontSizeToFit')
+  .replace('maxFontSizeMultiplier={displayLabel === "EMPRESA" ? 1 : undefined}','')
+  .replace('...(displayLabel === "EMPRESA" ? { width: "100%", textAlignVertical: "center" as const } : {}),','');
  assert.equal(createHash('sha256').update(normalized.replace(/\s+/g,'')).digest('hex'),'f97a1780c64ff860cf2825c4276411e23f2adafb04abcdda8d56c5a842e03cf0');
  const font=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='_labelFs').initializer.getText(ast);
- for(const uiScaleFactor of [.83,1,1.12])assert.equal(vm.runInNewContext(font,{Math,uiScaleFactor}),Math.max(8,Math.round(9*uiScaleFactor)));
+ for(const uiScaleFactor of [.83,1,1.12])assert.equal(vm.runInNewContext(font,{Math,uiScaleFactor,displayLabel:"AJUSTES",s:{key:"settings"}}),Math.max(8,Math.round(9*uiScaleFactor)));
 });

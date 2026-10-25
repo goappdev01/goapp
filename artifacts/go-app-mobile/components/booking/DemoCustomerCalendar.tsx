@@ -9,7 +9,7 @@ import type { DemoBookingRepository } from "@/data/demoBookingRepository";
 /** Customer projection of the owner-local repository; never mounted with the personal agenda hooks. */
 export function DemoCustomerCalendar({ repository, focus, onPersonal, entries: suppliedEntries, onProposeChange, onAcceptProposal, onRejectProposal, onOpenMessage,onResolveEntry,canResolveEntry,handedness }: {
   onOpenMessage?: (entry:GoEntry,returnTo?:()=>void)=>void;
-  onResolveEntry?: (entry:GoEntry,status:"done"|"pending",current?:()=>GoEntry|undefined)=>void;
+  onResolveEntry?: (entry:GoEntry,status:"done"|"pending"|"discard",current?:()=>GoEntry|undefined)=>void;
   canResolveEntry?: (entry:GoEntry)=>boolean;
   handedness?: "left"|"right";
   repository: DemoBookingRepository;

@@ -1166,9 +1166,10 @@ export function BookingSearchOverlay({
                       })() : (
                         /* ── Vista de categorías madre (9 sectores) ── */
                         <View style={s.categoryGrid}>
-                          {Array.from({ length: Math.ceil(visibleSectors.length / 3) }, (_, rowIdx) => (
-                            <View key={rowIdx} style={[s.categoryRow,visibleSectors.length===1&&{justifyContent:"center"}]}>
-                              {visibleSectors.slice(rowIdx * 3, rowIdx * 3 + 3).map((sector) => (
+                          {Array.from({ length: Math.ceil(SECTORS.length / 3) }, (_, rowIdx) => SECTORS.slice(rowIdx * 3, rowIdx * 3 + 3))
+                            .filter(row => row.some(sector => visibleSectors.some(visible => visible.id === sector.id))).map((row) => (
+                            <View key={row[0].id} testID="booking-category-row" style={s.categoryRow}>
+                              {row.map((sector) => visibleSectors.some(visible => visible.id === sector.id) ? (
                                 <TouchableOpacity
                                   key={sector.id} testID={"booking-category-"+sector.id} accessibilityRole="button"
                                   activeOpacity={0.72}
@@ -1179,7 +1180,6 @@ export function BookingSearchOverlay({
                                   }}
                                   style={[
                                     s.categoryChip,
-                                    visibleSectors.length===1&&{flex:0,width:140,minHeight:88},
                                     { borderColor: sector.color },
                                   ]}
                                 >
@@ -1188,7 +1188,7 @@ export function BookingSearchOverlay({
                                     {trSector(sector.label, lang)}
                                   </Text>
                                 </TouchableOpacity>
-                              ))}
+                              ) : <View key={sector.id} pointerEvents="none" accessible={false} style={{flex:1}} />)}
                             </View>
                           ))}
                         </View>

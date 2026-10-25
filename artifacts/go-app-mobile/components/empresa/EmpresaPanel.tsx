@@ -247,7 +247,7 @@ interface EmpresaPanelProps {
   visible: boolean;
   bookingChangeReturnDate?:string;
   onOpenMessage?: (entry:import("@/components/AgendaOperativa").GoEntry,returnTo?:()=>void)=>void;
-  onResolveEntry?: (entry:import("@/components/AgendaOperativa").GoEntry,status:"done"|"pending",current?:()=>import("@/components/AgendaOperativa").GoEntry|undefined)=>void;
+  onResolveEntry?: (entry:import("@/components/AgendaOperativa").GoEntry,status:"done"|"pending"|"discard",current?:()=>import("@/components/AgendaOperativa").GoEntry|undefined)=>void;
   canResolveEntry?: (entry:import("@/components/AgendaOperativa").GoEntry)=>boolean;
   handedness?: "left"|"right";
   onProposeBookingChange?: (entry:import("@/components/AgendaOperativa").GoEntry)=>void;

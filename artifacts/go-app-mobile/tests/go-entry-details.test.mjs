@@ -121,7 +121,7 @@ test('three microactions stop propagation, honor supplied permissions and retain
  const f=fixture(),{GoEntryMicroActions}=f.load('components/GoEntryDetails.tsx'),calls=[],saved=JSON.stringify(base);
  const tree=f.render(GoEntryMicroActions,{entry:base,onDone:()=>calls.push('done'),onPending:()=>calls.push('pending'),onDiscard:()=>calls.push('cancel')});
  const buttons=nodes(tree,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);let stopped=0;
- buttons.forEach(b=>{assert.equal(b.props.hitSlop.top,6);assert.equal(b.props.hitSlop.left,0);b.props.onPress({stopPropagation(){stopped++;}});});
+ buttons.forEach(b=>{assert.equal(b.props.style.minHeight+b.props.hitSlop.top+b.props.hitSlop.bottom,44);assert.equal(b.props.hitSlop.left,0);assert.ok(nodes(b,n=>n.type==='Text').length);assert.ok(nodes(b,n=>n.type==='Feather').length);b.props.onPress({stopPropagation(){stopped++;}});});
  assert.deepEqual(calls,['done','pending','cancel']);assert.equal(stopped,3);assert.equal(JSON.stringify(base),saved);
  assert.ok(buttons[0].props.accessibilityLabel.includes('Mi seguimiento'));assert.equal(f.render(GoEntryMicroActions,{entry:base}),null);
  const denied=f.render(GoEntryMicroActions,{entry:base,onDiscard(){}});assert.equal(nodes(denied,n=>n.type==='TouchableOpacity').length,1);
@@ -144,11 +144,12 @@ test('calendar reservation primary heading stays the real counterpart even when 
  }
 });
 
-test('calendar microactions stay personal and reopening a contextual message returns to that same detail',()=>{
+test('calendar compact cards omit follow-up; expanded personal actions and contextual message return to that same detail',()=>{
  const f=fixture({now:'2030-10-26T08:00:00'}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');let returnTo,resolved=[];
  const props={goLog:[base],viewMode:'dia',selectedDateISO:base.dateISO,canResolveEntry:()=>true,onResolveEntry:(entry,status,current)=>resolved.push([entry.id,status,current().id]),onOpenMessage:(entry,back)=>{assert.equal(entry.id,base.id);returnTo=back;}};
- let tree=f.render(AgendaBoard,props);const done=nodes(tree,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0];assert.ok(done);done.props.onPress({stopPropagation(){}});assert.deepEqual(resolved,[[base.id,'done',base.id]]);
+ let tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-micro-actions').length,0);
  const card=nodes(tree,n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85)[0];card.props.onPress();tree=f.render(AgendaBoard,props);
+ const done=nodes(tree,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0];assert.ok(done);done.props.onPress({stopPropagation(){}});assert.deepEqual(resolved,[[base.id,'done',base.id]]);
  nodes(tree,n=>n.props.testID==='entry-message-go')[0].props.onPress();
  f.runTimers();assert.equal(typeof returnTo,'function');tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,0);
  returnTo();tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,1);assert.equal(props.selectedDateISO,base.dateISO);

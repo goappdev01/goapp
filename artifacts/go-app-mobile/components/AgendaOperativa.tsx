@@ -312,7 +312,7 @@ export type AgendaBoardProps = {
   onProposeItem?: (id: string) => void;
   onConfirmBooking?: (id:string)=>void;
   onOpenMessage?: (entry:GoEntry,returnTo?:()=>void)=>void;
-  onResolveEntry?: (entry:GoEntry,status:"done"|"pending",current?:()=>GoEntry|undefined)=>void;
+  onResolveEntry?: (entry:GoEntry,status:"done"|"pending"|"discard",current?:()=>GoEntry|undefined)=>void;
   canResolveEntry?: (entry:GoEntry)=>boolean;
   handedness?: "left"|"right";
   onSaveBookingMessage?: (id: string, msg: string) => void;
@@ -1456,7 +1456,6 @@ export function AgendaBoard({
     // Unassigned canonical bookings reserve the business resource on the server.
     const isBookingCard = _isRawBookingType && _hasRequiredSlotFields;
     const reservation=entryIsReservation(item);
-    const canResolve=!!onResolveEntry&&!!canResolveEntry?.(item);
     const compactPendingMetadata = isPendingColumn && !isExpanded && !isBookingCard;
 
     if (_isRawBookingType) {
@@ -1675,8 +1674,8 @@ export function AgendaBoard({
               Lives outside the footer so button presses never bubble here. ── */}
           <TouchableOpacity onPress={tapThis} activeOpacity={0.85} style={{ gap: colMode === "stress" ? 2 : colMode === "relax" ? 7 : 4 }}>
             {/* Pending tasks keep time/type together; other cards retain their metadata layout. */}
-            <View style={[s.cardTopRow, compactPendingMetadata && { flexWrap: "nowrap" }]}>
-              <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0, flexWrap: compactPendingMetadata ? "nowrap" : "wrap", maxWidth: "100%" }}>
+            <View testID="calendar-time-type-row" style={[s.cardTopRow, { flexWrap: "nowrap" }]}>
+              <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0, flexWrap: "nowrap", maxWidth: "100%" }}>
                 {hasTime && (
                   <Text numberOfLines={1} style={[s.cardTime, { fontSize: timeFont, color: _textPrimary, flexShrink: 0 }]}>
                     {formatTimeDisplay(item.time)}
@@ -1709,11 +1708,8 @@ export function AgendaBoard({
                   );
                 })()}
               </View>
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: compactPendingMetadata ? "nowrap" : "wrap", flexShrink: 1, maxWidth: "100%", marginLeft: "auto", gap: 5 }}>
-                {!isSelecting && <GoEntryMicroActions entry={item}
-                  onDone={canResolve?()=>onResolveEntry?.(item,"done",()=>currentEntriesRef.current.find(e=>e.id===item.id)):undefined}
-                  onPending={canResolve?()=>onResolveEntry?.(item,"pending",()=>currentEntriesRef.current.find(e=>e.id===item.id)):undefined}
-                  onDiscard={onDeleteItem&&!item.deleted&&item.estado!=="rechazado"&&(!reservationCardPolicy(item).canonical||reservationCardPolicy(item).canCancel)?()=>onDeleteItem(item.id):undefined}/> }
+              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", flexWrap: "nowrap", flexShrink: 1, maxWidth: "100%", marginLeft: "auto", gap: 5 }}>
+
                 {!!itemWeatherAlert && (
                   <Feather
                     name={getWeatherFeatherIcon(itemWeatherAlert.weatherCode) as any}
@@ -1725,7 +1721,7 @@ export function AgendaBoard({
                   <Feather name="message-circle" size={11} color="rgba(96,165,250,0.85)" />
                 )}
                 <View style={[s.cardTypeBadge, { backgroundColor: badge.color + "22" }]}>
-                  <Text numberOfLines={compactPendingMetadata ? 1 : undefined} style={[s.cardTypeBadgeText, { color: badge.color }]}>{badge.label}</Text>
+                  <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={[s.cardTypeBadgeText, { color: badge.color }]}>{badge.label}</Text>
                 </View>
               </View>
             </View>
@@ -2692,6 +2688,10 @@ export function AgendaBoard({
         onMessage={expandedBookingItem && onOpenMessage ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);setExpandedCardId(null);setTimeout(()=>handleOpenMessage(item),180); } : undefined}
         onExit={onGoToLanding ? () => { setExpandedBookingItem(null); setExpandedCardId(null); onGoToLanding(); } : undefined}>
         {expandedBookingItem && <>
+          {onResolveEntry && canResolveEntry?.(expandedBookingItem) && <GoEntryMicroActions entry={expandedBookingItem}
+            onDone={!expandedBookingItem.changeProposal&&!expandedBookingItem.proposal?()=>onResolveEntry(expandedBookingItem,"done",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id)):undefined}
+            onPending={!expandedBookingItem.changeProposal&&!expandedBookingItem.proposal?()=>onResolveEntry(expandedBookingItem,"pending",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id)):undefined}
+            onDiscard={()=>onResolveEntry(expandedBookingItem,"discard",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id))}/> }
           {bookingPolicy?.canonical ? renderReservationControls(expandedBookingItem, true) : <GoEntryQuickActions entry={expandedBookingItem}
             onCancel={onDeleteItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);onDeleteItem(item.id); } : undefined}
             onEdit={onProposeItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);onProposeItem(item.id); } : undefined}

@@ -5,8 +5,8 @@ import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
 import { createDemoBookingRepository, createDemoCatalogBookingRepository } from "@/data/demoBookingRepository";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import { subscribeCompletions,getCompletionDocument,readCompletionDocument,updateCompletionDocument,
- setCompletionSource,clearCompletionSource,getCompletionSource,decideCompletion,onCompletionFocus } from "@/lib/goActionCompletionStore";
-import { awaitingCompletion,pendingCompletion,completionDecision,completionKey,ownedCompletionEntry,positiveMinutes,
+ setCompletionSource,clearCompletionSource,getCompletionSource,decideCompletion,discardCompletionEntry,onCompletionFocus } from "@/lib/goActionCompletionStore";
+import { awaitingCompletion,pendingCompletion,completionDecision,completionDiscarded,completionKey,ownedCompletionEntry,positiveMinutes,
  completionStorageKey,completionSchedule,sameCompletionScope as sameScope,type CompletionEntry,type CompletionScope,type CompletionPreferences } from "@/lib/goActionCompletion";
 import { refreshActiveNativeTaskReminders,refreshNativeTaskReminders,registerActionCompletionRuntime } from "@/lib/goTaskReminderRuntime";
 import { completionNotificationPolicy } from "@/lib/goActionCompletionNotifications";
@@ -131,9 +131,15 @@ export function useActionCompletion(entries:GoEntry[]) {
    }catch(e){setFeedback(e instanceof Error?e.message:"No se pudo guardar la configuración.");}
    finally{setBusy(false);}
  };
+ const discard=async(entry:GoEntry,currentEntry:()=>GoEntry|undefined)=>{
+   const scope=state.scope;if(!scope || !state.active(scope))throw new Error("La cuenta o el calendario han cambiado.");
+   await discardCompletionEntry(scope,entry,()=>state.active(scope),currentEntry);
+   await refreshNativeTaskReminders(scope).catch(()=>{if(state.active(scope))setFeedback("Ficha descartada. Revisa los avisos del teléfono.");});
+ };
+ const isDiscarded=useCallback((entry:GoEntry)=>!!state.doc && completionDiscarded(entry,state.doc),[state.doc]);
  const status=useCallback((e:GoEntry)=>{
    const job=state.scope?writes.current.get(writeKey(state.scope,e)):undefined;
    return job?.phase==="saving"?job.status:state.doc?completionDecision(e,state.doc)?.status:undefined;
  },[state.doc,scopeKey,writeRevision]);
- return {...state,now,candidates,unresolved,pending,selected,setSelected,decide,configure,status,busy,feedback,isSaving,savingCount,failedDecisions,retryDecision};
+ return {...state,now,candidates,unresolved,pending,selected,setSelected,decide,discard,isDiscarded,configure,status,busy,feedback,isSaving,savingCount,failedDecisions,retryDecision};
 }
