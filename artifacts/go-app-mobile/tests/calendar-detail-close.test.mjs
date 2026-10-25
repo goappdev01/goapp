@@ -1,69 +1,95 @@
-import {test} from 'node:test';
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import {createRequire} from 'node:module';
-const require=createRequire(path.join(process.cwd(),'package.json'));
-const {React,createRoot,document,rn,evaluate,ts}=require('./tests/helpers/react-lifecycle.cjs');
-const presentation=evaluate('data/goEntryPresentation.ts'),policy=evaluate('data/reservationCardPolicy.ts');
-const entry={id:'r1',type:'GO_BOOKING',kind:'sent',customerBooking:true,reservationId:'r1',estado:'aceptado',contactName:'Salón',date:'26/10/30',time:'12:00'};
-async function fixture(handedness='right'){
- const props=new Map();let panCreations=0,pending=null;
- const View=p=>{if(p.testID)props.set(p.testID,p);return React.createElement('div',{'data-testid':p.testID},p.children);};
- const TouchableOpacity=p=>{props.set(p.accessibilityLabel,p);return React.createElement('button',{'aria-label':p.accessibilityLabel},p.children);};
- class Value{constructor(v){this.value=v;}setValue(v){this.value=v;}interpolate(){return 0;}stopAnimation(){if(pending?.value===this){const old=pending;pending=null;old.callback?.({finished:false});}}}
- const native={...rn,View,TouchableOpacity,ScrollView:View,Modal:View,Dimensions:{get:()=>({width:390,height:844})},
-  Animated:{View,Value,timing:(value,config)=>({start:callback=>{pending={value,config,callback};}}),spring:(value,config)=>({start:()=>value.setValue(config.toValue)})},
-  PanResponder:{create:config=>{panCreations++;return{panHandlers:config};}}};
- const close=evaluate('components/ui/GoCloseButton.tsx',{'react-native':native,'@expo/vector-icons':{Feather:()=>null}});
- const api=evaluate('components/GoEntryDetails.tsx',{'react-native':native,'@expo/vector-icons':{Feather:()=>null},
-  '@/contexts/LanguageContext':{useLanguage:()=>({lang:'es',t:k=>k})},'@/data/goEntryPresentation':presentation,'@/data/reservationCardPolicy':policy,
-  'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},'./ui/GoCloseButton':close,'./landing/landingPanels':evaluate('components/landing/landingPanels.ts')});
- const root=createRoot(document.createElement('div'));
- const settle=async fn=>React.act(async()=>{fn();for(let i=0;i<8;i++)await Promise.resolve();});
- return{props,api,close,get panCreations(){return panCreations;},get pending(){return pending;},
-  render:extra=>settle(()=>root.render(React.createElement(api.GoEntryDetailsSheet,{entry,handedness,onClose(){},...extra}))),
-  finish:()=>{const old=pending;pending=null;old?.callback?.({finished:true});},dispose:()=>settle(()=>root.unmount())};
-}
-for(const hand of ['right','left'])test(`${hand}: real 56-point targets preserve icons, do not overlap and close on the first press`,async()=>{
- const f=await fixture(hand);let closed=0,exited=0;
- try{await f.render({onClose:()=>closed++,onExit:()=>exited++});
-  const group=f.props.get('entry-detail-floating-close');assert.equal(group.style.gap,0);assert.equal(group.style[hand]+6,12);assert.equal(group.style.bottom+6,12);
-  for(const label of ['Cerrar detalle','Salir del calendario']){const target=f.props.get(label);assert.equal(target.style.width,56);assert.equal(target.style.height,56);assert.equal(target.hitSlop,0);assert.equal(target.delayPressIn,0);
-   assert.equal(target.children.props.style.width,44);assert.equal(target.children.props.style.borderRadius,16);}
-  let stopped=0;f.props.get('Cerrar detalle').onPress({stopPropagation(){stopped++;}});assert.equal(closed,1);assert.equal(exited,0);assert.equal(stopped,1);
-  f.props.get('Salir del calendario').onPress({stopPropagation(){}});assert.equal(exited,1);assert.equal(closed,1);
-  assert.equal(f.close.GoCloseButton({level:'panel',onPress(){},accessibilityLabel:'default'}).props.style.width,44,'other GO close buttons keep their original size');
- }finally{await f.dispose();}
+import { createRequire } from 'node:module';
+import { detailFixture, detailEntry } from './helpers/calendar-detail-lifecycle.mjs';
+const require = createRequire(path.join(process.cwd(), 'package.json')), ts = require('typescript');
+const nodes = n => n ? [n, ...n.childNodes.flatMap(nodes)] : [];
+const byId = (root, id) => nodes(root).find(n => n.attributes?.['data-testid'] === id);
+
+for (const hand of ['right', 'left']) test(`${hand}: a single real 56-point close target has its own safe footer outside actions and gestures`, async () => {
+  const f = await detailFixture({ handedness: hand }); let closed = 0;
+  try {
+    await f.render({ onClose: () => closed++ });
+    const footer = f.props.get('entry-detail-close-footer'), target = f.props.get('Cerrar detalle');
+    assert.equal(footer.style.position, undefined); assert.equal(footer.style.flexShrink, 0);
+    assert.equal(footer.style.justifyContent, hand === 'left' ? 'flex-start' : 'flex-end'); assert.equal(footer.style.paddingBottom, 6);
+    assert.equal(target.style.width, 56); assert.equal(target.style.height, 56); assert.equal(target.children.props.style.width, 44); assert.equal(target.children.props.style.borderRadius, 16);
+    assert.equal(target.hitSlop, 0); assert.equal(target.delayPressIn, 0);
+    for (const id of ['entry-details-scroll', 'entry-details-gesture-body']) assert.equal(byId(byId(f.container, id), 'entry-detail-close-footer'), undefined);
+    assert.equal(f.props.has('Salir del calendario'), false); assert.equal(f.props.has('entry-detail-floating-close'), false);
+    assert.equal(f.props.get('entry-details-overlay').style.paddingBottom, 42);
+    await f.pressClose(); assert.equal(f.props.get('entry-details-modal').visible, false, 'first press hides the native modal');
+    assert.equal(closed, 0, 'selection and parent navigation wait for native iOS dismissal');
+    await f.nativeDismiss(); assert.equal(closed, 1);
+    await f.nativeDismiss(); await f.pressClose(); assert.equal(closed, 1);
+    assert.equal(f.close.GoCloseButton({ level: 'panel', onPress() {}, accessibilityLabel: 'default' }).props.style.width, 44);
+  } finally { await f.dispose(); }
 });
-for(const hand of ['right','left'])test(`${hand}: Calendar-equivalent drag leaves central scrolling and taps free, uses current close and resets after cancellation`,async()=>{
- const f=await fixture(hand);let closed=0;
- try{await f.render({onClose:()=>closed++});
-  const initial=f.props.get('entry-details-sheet').onPanResponderRelease;
-  for(let i=0;i<10;i++)await f.render({entry:{...entry},onClose:()=>{closed+=2;}});
-  assert.equal(f.panCreations,1);const pan=f.props.get('entry-details-sheet');assert.equal(pan.onPanResponderRelease,initial);
-  const event={nativeEvent:{pageX:hand==='right'?380:10,pageY:400}};
-  const gesture={dy:13,dx:0,y0:380};
-  assert.equal(pan.onMoveShouldSetPanResponderCapture(event,gesture),true);assert.equal(f.api.ENTRY_DETAIL_CLOSE.distance,140);
-  const boundary=390*(hand==='right'?.75:.25);
-  assert.equal(pan.onMoveShouldSetPanResponderCapture({nativeEvent:{pageX:boundary,pageY:400}},gesture),true);
-  assert.equal(pan.onMoveShouldSetPanResponderCapture({nativeEvent:{pageX:boundary+(hand==='right'?-1:1),pageY:400}},gesture),false);
-  for(const g of [{...gesture,dy:12},{...gesture,dy:-160},{...gesture,dx:30}])assert.equal(pan.onMoveShouldSetPanResponderCapture(event,g),false);
-  assert.equal(pan.onMoveShouldSetPanResponderCapture({nativeEvent:{pageX:195,pageY:400}},gesture),false,'central vertical scroll stays with the ScrollView');
-  assert.equal(pan.onMoveShouldSetPanResponderCapture({nativeEvent:{pageX:195,pageY:400}},{...gesture,y0:0}),false,'native pre-grant y0=0 must not make the entire sheet act as its header');
-  assert.equal(pan.onMoveShouldSetPanResponderCapture({nativeEvent:{pageX:195,pageY:70}},{...gesture,y0:60}),true,'header drag works across its full width');
-  pan.onPanResponderRelease(event,{...gesture,dy:140});assert.equal(closed,0);assert.equal(f.pending,null);
-  pan.onPanResponderMove(event,{...gesture,dy:160});pan.onPanResponderRelease(event,{...gesture,dy:160});assert.equal(f.pending.config.duration,180);f.finish();assert.equal(closed,2,'gesture uses the latest callback, exactly once');
-  pan.onPanResponderRelease(event,{...gesture,dy:160});f.props.get('Cerrar detalle').onPress({stopPropagation(){}});assert.equal(closed,4);assert.equal(f.pending,null,'button cancels a pending gesture before closing immediately');
-  await f.render({entry:null});await f.render({entry});assert.equal(f.panCreations,1);assert.ok(f.props.get('entry-detail-swipe-guide').pointerEvents==='none');
- }finally{await f.dispose();}
+
+for (const hand of ['right', 'left']) test(`${hand}: incomplete and interrupted gestures leave scrolling usable and permit a later single close`, async () => {
+  const f = await detailFixture({ handedness: hand }); let closed = 0;
+  try {
+    await f.render({ onClose: () => closed++ }); const initial = f.props.get('entry-details-gesture-body').onPanResponderRelease;
+    for (let i = 0; i < 10; i++) await f.render({ entry: { ...detailEntry }, onClose: () => { closed += 2; } });
+    assert.equal(f.panCreations, 1); const pan = f.props.get('entry-details-gesture-body'); assert.equal(pan.onPanResponderRelease, initial);
+    const event = { nativeEvent: { pageX: hand === 'right' ? 380 : 10, pageY: 400 } }, gesture = { dy: 13, dx: 0, y0: 0 };
+    assert.equal(pan.onMoveShouldSetPanResponderCapture(event, gesture), true);
+    const boundary = 390 * (hand === 'right' ? .75 : .25);
+    assert.equal(pan.onMoveShouldSetPanResponderCapture({ nativeEvent: { pageX: boundary, pageY: 400 } }, gesture), true);
+    assert.equal(pan.onMoveShouldSetPanResponderCapture({ nativeEvent: { pageX: boundary + (hand === 'right' ? -1 : 1), pageY: 400 } }, gesture), false);
+    for (const g of [{ ...gesture, dy: 12 }, { ...gesture, dy: -160 }, { ...gesture, dx: 30 }]) assert.equal(pan.onMoveShouldSetPanResponderCapture(event, g), false);
+    assert.equal(pan.onMoveShouldSetPanResponderCapture({ nativeEvent: { pageX: 195, pageY: 400 } }, gesture), false, 'native pre-grant y0=0 cannot capture central scrolling');
+    assert.equal(pan.onMoveShouldSetPanResponderCapture({ nativeEvent: { pageX: 195, pageY: 70 } }, gesture), true);
+    for (const dy of [13, 50, 139, 140]) await f.settle(() => pan.onPanResponderRelease(event, { ...gesture, dy }));
+    assert.equal(f.props.get('entry-details-modal').visible, true); assert.equal(closed, 0);
+    pan.onPanResponderTerminate(); assert.equal(pan.onPanResponderTerminationRequest(), true);
+    assert.equal(f.props.get('entry-details-sheet').style.some(s => s.transform), false, 'no displaced controls or unfinished animation');
+    await f.settle(() => { pan.onPanResponderRelease(event, { ...gesture, dy: 160 }); pan.onPanResponderRelease(event, { ...gesture, dy: 200 }); f.props.get('Cerrar detalle').onPress({ stopPropagation() {} }); });
+    assert.equal(f.props.get('entry-details-modal').visible, false); assert.equal(closed, 0); assert.equal(pan.onMoveShouldSetPanResponderCapture(event, gesture), false);
+    await f.nativeDismiss(); await f.nativeDismiss(); assert.equal(closed, 2, 'current callback runs exactly once after native dismissal');
+    await f.render({ entry: null }); await f.render({ entry: detailEntry }); assert.equal(f.props.get('entry-details-modal').visible, true);
+  } finally { await f.dispose(); }
 });
-test('detail activation and full-close distance match the existing Calendar policy',()=>{
- const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let node;
- function visit(n){if(ts.isVariableDeclaration(n)&&n.name.getText(ast)==='calTopSwipeRef')node=n;ts.forEachChild(n,visit);}visit(ast);
- const code=ts.transpileModule('('+node.initializer.getText(ast)+')',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
- const native=vm.runInNewContext(code,{useRef:x=>({current:x}),PanResponder:{create:c=>c},monthGridOpenRef:{current:false},calScreenWRef:{current:390},calCloseRef:{current(){}},calPanelCollapseRef:{current(){}},calOpenMonthGridRef:{current(){}}});
- for(const [dy,dx,x]of [[12,0,380],[13,0,380],[13,20,380],[13,0,195]])assert.equal(native.onMoveShouldSetPanResponder({nativeEvent:{pageX:x}},{dy,dx}),dy>12&&Math.abs(dy)>Math.abs(dx)&&x>=390*.75);
- assert.ok(node.getText(ast).includes('g.dy > 140'),'Calendar still uses the same full-dismiss distance');
+
+for (const platform of ['android', 'web']) test(`${platform}: closing completes once without waiting for iOS-only onDismiss`, async () => {
+  const f = await detailFixture({ platform }); let closed = 0;
+  try { await f.render({ onClose: () => closed++ }); await f.pressClose(); assert.equal(closed, 1); await f.pressClose(); await f.nativeDismiss(); assert.equal(closed, 1); }
+  finally { await f.dispose(); }
+});
+
+test('StrictMode replay and stale callbacks from an unmounted record cannot close a different session', async () => {
+  const f = await detailFixture({ strict: true }); let old = 0, current = 0;
+  try {
+    await f.render({ onClose: () => old++ }); const stale = f.props.get('entry-details-modal');
+    await f.pressClose(); assert.equal(f.props.get('entry-details-modal').visible, false);
+    await f.render({ entry: { ...detailEntry, id: 'new' }, onClose: () => current++ });
+    await f.settle(() => { stale.onDismiss(); stale.onRequestClose(); });
+    assert.equal(old, 0); assert.equal(current, 0); assert.equal(f.props.get('entry-details-modal').visible, true);
+    await f.pressClose(); await f.nativeDismiss(); assert.equal(current, 1);
+  } finally { await f.dispose(); }
+});
+
+test('detail thresholds match Calendar and both views reuse its actual white fade', () => {
+  const source = fs.readFileSync('app/index.tsx', 'utf8'), ast = ts.createSourceFile('home.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX); let node;
+  function visit(n) { if (ts.isVariableDeclaration(n) && n.name.getText(ast) === 'calTopSwipeRef') node = n; ts.forEachChild(n, visit); } visit(ast);
+  const code = ts.transpileModule('(' + node.initializer.getText(ast) + ')', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const native = vm.runInNewContext(code, { useRef: x => ({ current: x }), PanResponder: { create: c => c }, monthGridOpenRef: { current: false }, calScreenWRef: { current: 390 }, calCloseRef: { current() {} }, calPanelCollapseRef: { current() {} }, calOpenMonthGridRef: { current() {} } });
+  assert.equal(native.onMoveShouldSetPanResponder({ nativeEvent: { pageX: 380 } }, { dy: 13, dx: 0 }), true);
+  assert.ok(node.getText(ast).includes('g.dy > 140')); assert.ok(source.includes('<CalendarCloseGuide />'), 'existing Calendar lane stays on its original side; detail mirrors its own lane for handedness');
+  const detail = fs.readFileSync('components/GoEntryDetails.tsx', 'utf8'); assert.ok(detail.includes('<CalendarCloseGuide handedness={handedness} testID="entry-detail-swipe-guide" />'));
+  assert.ok(!detail.includes('Animated.timing')); assert.ok(!detail.includes('onExit'));
+});
+
+for (const hand of ['left', 'right']) test(`${hand}: fade matches Calendar's placement and intensity without covering footer targets`, async () => {
+  const f = await detailFixture({ handedness: hand });
+  try {
+    await f.render(); const guide = f.props.get('entry-detail-swipe-guide');
+    assert.equal(guide.pointerEvents, 'none'); assert.equal(guide.style[hand], 0); assert.equal(guide.style.top, '50%'); assert.equal(guide.style.bottom, 0); assert.equal(guide.style.width, '25%');
+    assert.deepEqual(Array.from(guide.colors), hand === 'right' ? ['transparent', 'rgba(255,255,255,0.18)'] : ['rgba(255,255,255,0.18)', 'transparent']);
+    assert.ok(byId(byId(f.container, 'entry-details-gesture-body'), 'entry-detail-swipe-guide'));
+    assert.equal(byId(byId(f.container, 'entry-detail-close-footer'), 'entry-detail-swipe-guide'), undefined);
+  } finally { await f.dispose(); }
 });

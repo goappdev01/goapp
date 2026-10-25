@@ -17,14 +17,16 @@ export function fixture({ now } = {}) {
     constructor(...args) { super(...(args.length ? args : [now ?? Date.now()])); }
     static now() { return now === undefined ? Date.now() : new Date(now).getTime(); }
   }
-  const slots = [], cache = new Map(), timers=[];
+  let slots = [];
+  const cache = new Map(), timers=[], sessionSlots = new Map();
   let cursor = 0, effects = [], language = 'es';
   const react = {
-    createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }),
+    createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.length ? children.flat(Infinity) : [props?.children].flat(Infinity).filter(v => v !== undefined) }),
     useState(initial) {
       const index = cursor++;
-      if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial;
-      return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }];
+      const ownSlots = slots;
+      if (!(index in ownSlots)) ownSlots[index] = typeof initial === 'function' ? initial() : initial;
+      return [ownSlots[index], value => { ownSlots[index] = typeof value === 'function' ? value(ownSlots[index]) : value; }];
     },
     useRef(initial) { return react.useState(() => ({ current: initial }))[0]; },
     useMemo: fn => fn(),
@@ -117,13 +119,26 @@ export function fixture({ now } = {}) {
       const tree = component(props);
       const pending = effects; effects = [];
       pending.forEach(fn => fn());
+      const mountedSessions = new Set();
       const expand = node => {
         if (node == null || typeof node !== 'object') return node;
+        if (typeof node.type === 'function' && node.type.name === 'GoEntryDetailsSession') {
+          const id = node.props.entry.id; mountedSessions.add(id);
+          const previousSlots = slots, previousCursor = cursor, previousEffects = effects;
+          slots = sessionSlots.get(id) ?? []; sessionSlots.set(id, slots); cursor = 0; effects = [];
+          const child = node.type({ ...node.props, children: node.children });
+          const childEffects = effects; effects = []; childEffects.forEach(fn => fn());
+          const expanded = expand(child);
+          slots = previousSlots; cursor = previousCursor; effects = previousEffects;
+          return expanded;
+        }
         if (typeof node.type === 'function' && /^GoEntry/.test(node.type.name))
           return expand(node.type({...node.props,children:node.children}));
         return {...node,children:(node.children ?? []).map(expand)};
       };
-      return expand(tree);
+      const expanded = expand(tree);
+      for (const id of sessionSlots.keys()) if (!mountedSessions.has(id)) sessionSlots.delete(id);
+      return expanded;
     },
   };
 }

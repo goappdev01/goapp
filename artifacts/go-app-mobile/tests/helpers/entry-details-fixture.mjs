@@ -11,6 +11,7 @@ const components=evaluate('components/GoEntryDetails.tsx',{
  '@/contexts/LanguageContext':{useLanguage:()=>({lang:'es',t:k=>k})},
  'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},
  './ui/GoCloseButton':{GoCloseButton:()=>null},
+ './ui/CalendarCloseGuide':{CalendarCloseGuide:()=>null},
  './landing/landingPanels':evaluate('components/landing/landingPanels.ts'),
 });
 export const renderEntryQuickActions=(entry,showState=true,compact=false)=>React.createElement(components.GoEntryQuickActions,{entry,showState,compact,onCancel(){},onPropose(){},onEdit(){},onAccept(){},onReject(){}});

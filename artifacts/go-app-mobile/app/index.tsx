@@ -32,6 +32,7 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import { CalendarCloseGuide } from "@/components/ui/CalendarCloseGuide";
 import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
 import { GoBoardsPanel } from "@/components/boards/GoBoardsPanel";
 import { useGoBoards } from "@/hooks/useGoBoards";
@@ -118,7 +119,7 @@ import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
-import { LandingVisitOutline, LANDING_VISIT_FRAME } from "@/components/landing/LandingVisitOutline";
+import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME } from "@/components/landing/LandingVisitOutline";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "@/components/GoEntryDetails";
 import { entryHeading, entryIdentity, entryIsReservation, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand } from "@/data/goEntryPresentation";
@@ -14633,6 +14634,7 @@ function HomeScreenContent() {
         return (
           <View
             key="pendientes-open-panel"
+            testID={item.kind === "cambio" ? "landing-change-group" : undefined}
             pointerEvents="box-none"
             {...cambiosCardPanRef.panHandlers}
             onLayout={(e) => setPendingPanelH(e.nativeEvent.layout.height)}
@@ -14643,8 +14645,11 @@ function HomeScreenContent() {
               bottom: contentBottom(panelBottom),
               zIndex: 6,
               gap: Math.round(4 * uiScaleFactor),
+              ...(item.kind === "cambio" ? { paddingBottom: Math.round(LANDING_ENTRY_FRAME.bottomGap * uiScaleFactor) } : {}),
             }}
           >
+            {item.kind === "cambio" && <LandingEntryOutline testID="landing-change-outline" scale={uiScaleFactor}
+              color={cardAccent + "55"} shadowColor={cardAccent} shadowOpacity={0.22} shadowRadius={8} />}
             {/* Header — ordinal · tipo · puntos · flechas (mismo patrón que PRÓXIMA) */}
 
 
@@ -14663,9 +14668,9 @@ function HomeScreenContent() {
                 borderRadius: Math.round(12 * uiScaleFactor),
                 backgroundColor: "rgba(15,15,18,0.94)",
                 borderWidth: 1.5,
-                borderColor: cardAccent + "55",
+                borderColor: item.kind === "cambio" ? "transparent" : cardAccent + "55",
                 shadowColor: cardAccent,
-                shadowOpacity: 0.22,
+                shadowOpacity: item.kind === "cambio" ? 0 : 0.22,
                 shadowRadius: 8,
                 shadowOffset: { width: 0, height: 0 },
                 elevation: 3,
@@ -14868,7 +14873,7 @@ function HomeScreenContent() {
         return (
           <View
             key="proxima-abs-block"
-            testID={entryIsReservation(g) ? "landing-next-visit" : undefined}
+            testID={entryIsReservation(g) ? "landing-next-visit" : entryIsInternal(g) ? "landing-task-group" : undefined}
             pointerEvents="box-none"
             onLayout={(e) => {
               const rect = e.nativeEvent.layout;
@@ -14889,9 +14894,11 @@ function HomeScreenContent() {
                 : screen.height - landingPanels.next.y - landingPanels.next.height),
               zIndex: 5,
               ...(entryIsReservation(g) ? { paddingBottom: Math.round(LANDING_VISIT_FRAME.bottomGap * uiScaleFactor) } : {}),
+              ...(entryIsInternal(g) ? { paddingBottom: Math.round(LANDING_ENTRY_FRAME.bottomGap * uiScaleFactor) } : {}),
             }}
           >
             {entryIsReservation(g) && <LandingVisitOutline scale={uiScaleFactor} color={nextCardDeleteConfirm === g.id ? "#ef4444" : tint} />}
+            {entryIsInternal(g) && <LandingEntryOutline testID="landing-task-outline" scale={uiScaleFactor} color={nextCardDeleteConfirm === g.id ? "#ef4444" : tint} />}
             <LandingCardContents staticBody intrinsicBody={entryIsInternal(g) || entryIsReservation(g)}
               adaptiveBody={{ availableHeight: nextCardAvailableHeight, frameVerticalInset: Math.round(10 * uiScaleFactor) + Math.round((entryIsInternal(g) ? 8 : 14) * uiScaleFactor) + 3, width: PANEL_W, headerObstacles }}
               footer={operations.content}
@@ -14936,10 +14943,10 @@ function HomeScreenContent() {
                   ...(entryIsInternal(g) ? { paddingBottom: Math.round(8 * uiScaleFactor) } : {}),
                   borderRadius: Math.round(14 * uiScaleFactor),
                   borderWidth: 1.5,
-                  borderColor: entryIsReservation(g) ? "transparent" : nextCardDeleteConfirm === g.id ? "#ef4444" : tint,
+                  borderColor: entryIsReservation(g) || entryIsInternal(g) ? "transparent" : nextCardDeleteConfirm === g.id ? "#ef4444" : tint,
                   backgroundColor: "rgba(15,15,18,0.94)",
                   shadowColor: nextCardDeleteConfirm === g.id ? "#ef4444" : tint,
-                  shadowOpacity: entryIsReservation(g) ? 0 : 0.35,
+                  shadowOpacity: entryIsReservation(g) || entryIsInternal(g) ? 0 : 0.35,
                   shadowRadius: 10,
                   shadowOffset: { width: 0, height: 0 },
                   elevation: 4,
@@ -20202,19 +20209,7 @@ function HomeScreenContent() {
               pointerEvents="none": puramente decorativa, nunca bloquea toques.
               LinearGradient horizontal: opaco en el borde, transparente hacia
               el centro. Ocupa el 25% derecho y la mitad inferior de la zona. */}
-          <LinearGradient
-            colors={["transparent", "rgba(255,255,255,0.18)"]}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            pointerEvents="none"
-            style={{
-              position: "absolute",
-              right: 0,
-              top: "50%",
-              bottom: 0,
-              width: "25%",
-            }}
-          />
+          <CalendarCloseGuide />
 
           </View>
 

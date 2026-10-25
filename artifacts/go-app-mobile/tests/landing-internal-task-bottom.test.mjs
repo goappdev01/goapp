@@ -76,7 +76,7 @@ test('the actual task card contains essential rows without a clipping cap or int
           assert.equal(flatten(captured.get('landing-card-fixed-frame').style).overflow, undefined);
           const style = flatten(captured.get('landing-information-frame').style);
           assert.equal(style.paddingBottom, Math.round(8 * scale)); assert.equal(style.paddingTop, Math.round(10 * scale));
-          assert.equal(style.borderWidth, 1.5); assert.equal(style.borderColor, '#a78bfa'); assert.equal(style.borderRadius, Math.round(14 * scale));
+          assert.equal(style.borderWidth, 1.5); assert.equal(style.borderColor, 'transparent'); assert.equal(style.borderRadius, Math.round(14 * scale));
           assert.equal(nodes(rootNode).filter(n => n.attributes?.['data-native'] === 'ScrollView').length, 0);
         }
     captured.get('landing-information-frame').onPress(); captured.get('landing-information-frame').onLongPress();

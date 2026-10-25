@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
-import { Alert, Animated, Dimensions, Linking, Modal, PanResponder, ScrollView, StyleSheet, Text, TouchableOpacity, View, type GestureResponderEvent, type PanResponderGestureState } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Dimensions, Linking, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, type GestureResponderEvent, type PanResponderGestureState } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -7,6 +7,7 @@ import type { GoEntry } from "./AgendaOperativa";
 import { entryCommunication, entryHeading, entryIdentity, entryIsInternal, entryProposalPending } from "@/data/goEntryPresentation";
 import { reservationCardPolicy, GO_ENTRY_COLORS as C } from "@/data/reservationCardPolicy";
 import { GoCloseButton } from "./ui/GoCloseButton";
+import { CalendarCloseGuide } from "./ui/CalendarCloseGuide";
 import { landingCurrentEntry } from "./landing/landingPanels";
 
 export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
@@ -117,20 +118,43 @@ export function GoEntryContract({ entry }: { entry: GoEntry }) {
 // Same activation, side-control lane and full-dismiss distance as Calendar's calTopSwipeRef.
 export const ENTRY_DETAIL_CLOSE = Object.freeze({ activation: 12, sideFraction: 0.25, distance: 140, headerHeight: 44, touchSize: 56 });
 
-export function GoEntryDetailsSheet({ entry, onClose, onExit, onMessage, handedness="right", children }: {
-  entry: GoEntry | null; onClose: () => void; onExit?: () => void; onMessage?: () => void; handedness?:"right"|"left"; children?: React.ReactNode;
-}) {
+type EntryDetailsProps = {
+  entry: GoEntry | null; onClose: () => void; onMessage?: () => void; handedness?: "right" | "left"; children?: React.ReactNode;
+};
+
+export function GoEntryDetailsSheet(props: EntryDetailsProps) {
+  // A new selection owns a new native-modal session. Old responders cannot close it.
+  return props.entry ? <GoEntryDetailsSession key={props.entry.id} {...props} entry={props.entry} /> : null;
+}
+
+function GoEntryDetailsSession({ entry, onClose, onMessage, handedness = "right", children }: EntryDetailsProps & { entry: GoEntry }) {
   const insets = useSafeAreaInsets(), { lang } = useLanguage();
-  const dragY = useRef(new Animated.Value(0)).current;
+  const [closing, setClosing] = useState(false);
+  const phase = useRef<"open" | "dismissing" | "closed">("open");
   const live = useRef({ onClose, handedness, headerBottom: 0 });
   live.current = { onClose, handedness, headerBottom: insets.top + 8 + ENTRY_DETAIL_CLOSE.headerHeight };
-  const dismiss = useCallback(() => { dragY.stopAnimation?.(); live.current.onClose(); }, [dragY]);
+  const finishDismiss = useCallback(() => {
+    if (phase.current !== "dismissing") return;
+    phase.current = "closed";
+    // iOS has now removed the native touch-blocking modal before selection/navigation changes.
+    live.current.onClose();
+  }, []);
+  const dismiss = useCallback(() => {
+    if (phase.current !== "open") return;
+    phase.current = "dismissing";
+    setClosing(true);
+  }, []);
   useEffect(() => {
-    dragY.stopAnimation?.(); dragY.setValue(0);
-    return () => dragY.stopAnimation?.();
-  }, [entry?.id, dragY]);
+    phase.current = "open";
+    return () => { phase.current = "closed"; };
+  }, []);
+  useEffect(() => {
+    // React Native only emits Modal.onDismiss on iOS; other platforms finish after hiding.
+    if (closing && Platform.OS !== "ios") finishDismiss();
+  }, [closing, finishDismiss]);
   const pan = useMemo(() => {
     const shouldClaim = (event: GestureResponderEvent, g: PanResponderGestureState) => {
+      if (phase.current !== "open") return false;
       if (g.dy <= ENTRY_DETAIL_CLOSE.activation || Math.abs(g.dy) <= Math.abs(g.dx)) return false;
       const width = Dimensions.get("window").width;
       const inSide = live.current.handedness === "left"
@@ -144,24 +168,22 @@ export function GoEntryDetailsSheet({ entry, onClose, onExit, onMessage, handedn
     return PanResponder.create({
       onMoveShouldSetPanResponder: shouldClaim,
       onMoveShouldSetPanResponderCapture: shouldClaim,
-      onPanResponderMove: (_event, g) => dragY.setValue(Math.max(0, g.dy) * 0.85),
       onPanResponderRelease: (_event, g) => {
-        if (g.dy > ENTRY_DETAIL_CLOSE.distance) {
-          Animated.timing(dragY, { toValue: Dimensions.get("window").height, duration: 180, useNativeDriver: true })
-            .start(({ finished }) => { if (finished) live.current.onClose(); });
-        } else Animated.spring(dragY, { toValue: 0, damping: 22, stiffness: 240, useNativeDriver: true }).start();
+        // Match Calendar's release-only close: no competing animation or translated hit targets.
+        if (g.dy > ENTRY_DETAIL_CLOSE.distance) dismiss();
       },
-      onPanResponderTerminate: () => { Animated.spring(dragY, { toValue: 0, useNativeDriver: true }).start(); },
+      onPanResponderTerminate: () => {},
+      onPanResponderTerminationRequest: () => true,
     });
-  }, [dragY]);
-  if (!entry) return null;
+  }, [dismiss]);
   const current = landingCurrentEntry(entry);
   const pending = entryProposalPending(entry);
-  return <Modal visible transparent animationType="none" onRequestClose={dismiss}>
+  return <Modal testID="entry-details-modal" visible={!closing} transparent animationType="none" onRequestClose={dismiss} onDismiss={finishDismiss}>
     <View testID="entry-details-overlay" style={{ flex: 1, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8, paddingHorizontal: Math.max(insets.left, insets.right, 8), backgroundColor: "rgba(0,0,0,0.62)" }}>
-      <Animated.View testID="entry-details-sheet" {...pan.panHandlers} style={[s.sheet, { borderColor: pending ? "#FF8C00" : entry.color || "#4A80BD" }, { transform: [{ translateY: dragY }] }]}>
+      <View testID="entry-details-sheet" pointerEvents={closing ? "none" : "auto"} onAccessibilityEscape={dismiss} style={[s.sheet, { borderColor: pending ? "#FF8C00" : entry.color || "#4A80BD" }]}>
+        <View testID="entry-details-gesture-body" {...pan.panHandlers} style={{ flex: 1, minHeight: 0 }}>
         <View testID="entry-detail-close-gesture" style={{ height: ENTRY_DETAIL_CLOSE.headerHeight, alignItems: "center", justifyContent: "center" }}><View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.35)" }} /></View>
-        <ScrollView testID="entry-details-scroll" style={{ flex: 1 }} keyboardShouldPersistTaps="handled" bounces={false} alwaysBounceVertical={false} overScrollMode="never" directionalLockEnabled contentContainerStyle={{ flexGrow:1, paddingHorizontal: 18, paddingBottom: 68, gap: 12 }}>
+        <ScrollView testID="entry-details-scroll" style={{ flex: 1 }} keyboardShouldPersistTaps="handled" bounces={false} alwaysBounceVertical={false} overScrollMode="never" directionalLockEnabled contentContainerStyle={{ flexGrow:1, paddingHorizontal: 18, paddingBottom: 12, gap: 12 }}>
           <GoEntrySummary entry={current} />
           <GoEntryContract entry={current} />
           {pending && <View testID="entry-proposal" style={{ borderColor: "#FF8C00", borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 }}>
@@ -178,16 +200,12 @@ export function GoEntryDetailsSheet({ entry, onClose, onExit, onMessage, handedn
           {children}
           </View>
         </ScrollView>
-        <Animated.View testID="entry-detail-swipe-guide" pointerEvents="none" style={{ position: "absolute", [handedness]: 20, bottom: 86, alignItems: "center", opacity: dragY.interpolate({ inputRange: [0, ENTRY_DETAIL_CLOSE.distance], outputRange: [0.3, 0.85], extrapolate: "clamp" }) }}>
-          <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.22)" style={{ marginBottom: -3 }} />
-          <Feather name="chevron-down" size={15} color="rgba(255,255,255,0.44)" style={{ marginBottom: -3 }} />
-          <Feather name="chevron-down" size={17} color="rgba(255,255,255,0.72)" />
-        </Animated.View>
-        <View testID="entry-detail-floating-close" pointerEvents="box-none" style={{ position: "absolute", [handedness]: 6, bottom: 6, padding:0, flexDirection:"row", gap: 0, zIndex: 20, elevation: 20 }}>
-          {onExit && <GoCloseButton level="container" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Exit calendar" : "Salir del calendario"} onPress={() => { dragY.stopAnimation?.(); onExit(); }} />}
+        <CalendarCloseGuide handedness={handedness} testID="entry-detail-swipe-guide" />
+        </View>
+        <View testID="entry-detail-close-footer" style={{ flexShrink: 0, flexDirection: "row", justifyContent: handedness === "left" ? "flex-start" : "flex-end", paddingHorizontal: 6, paddingTop: 4, paddingBottom: 6 }}>
           <GoCloseButton level="panel" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Close details" : "Cerrar detalle"} onPress={dismiss} />
         </View>
-      </Animated.View>
+      </View>
     </View>
   </Modal>;
 }

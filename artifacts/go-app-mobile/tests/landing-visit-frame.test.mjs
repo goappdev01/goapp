@@ -7,7 +7,7 @@ function walk(n){all.push(n);ts.forEachChild(n,walk);}walk(ast);
 const card=all.find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='LandingCardContents'&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='footer'&&a.initializer?.expression?.getText(ast)==='operations.content'));
 const tree=n=>n?[n,...n.childNodes.flatMap(tree)]:[],byId=(root,id)=>tree(root).find(n=>n.attributes?.['data-testid']===id),flatten=s=>Array.isArray(s)?Object.assign({},...s.map(flatten)):s||{};
 const settle=async fn=>React.act(async()=>{fn();for(let i=0;i<10;i++)await Promise.resolve();});
-test('frozen visit frame surrounds header, essential information and every existing lower action without changing task geometry',async()=>{
+test('frozen approved visit frame surrounds header, essentials and every lower action; internal tasks reuse its structure',async()=>{
  const props=new Map();let fontScale=1,width=284;
  function View(p){if(p.testID)props.set(p.testID,p);if(p.style?.position==='absolute'&&p.onLayout)props.set('outer',p);
   const height=({'landing-card-header':34*fontScale,'landing-card-operations':128,'landing-compact-primary':60*fontScale,'landing-compact-actions':64*fontScale})[p.testID];
@@ -42,7 +42,8 @@ test('frozen visit frame surrounds header, essential information and every exist
    assert.equal(props.get('landing-visit-outline').pointerEvents,'none');assert.ok(outer.textContent.includes('14:15'));
   }
   scope.g={id:'task-1',type:'TAREA_INTERNA',kind:'sent',estado:'pendiente',notes:'Hacer la compra',time:'14:15'};
-  await settle(()=>root.render(scope.renderVisit()));assert.equal(byId(container,'landing-visit-outline'),undefined);assert.equal(props.get('outer').style.paddingBottom,undefined);
-  assert.equal(props.get('landing-information-frame').style.borderColor,'#22c55e','task uses its own unchanged frame color');
+  await settle(()=>root.render(scope.renderVisit()));assert.equal(byId(container,'landing-visit-outline'),undefined);assert.equal(props.get('outer').style.paddingBottom,Math.round(8*scope.uiScaleFactor));
+  assert.ok(byId(container,'landing-task-outline'));assert.equal(props.get('landing-task-outline').style[1].borderColor,'#22c55e','task preserves the supplied tint on its global frame');
+  assert.equal(props.get('landing-information-frame').style.borderColor,'transparent','only the global task outline is visible');
  }finally{await settle(()=>root.unmount());}
 });
