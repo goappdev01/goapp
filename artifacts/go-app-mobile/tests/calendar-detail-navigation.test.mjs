@@ -1,55 +1,97 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'node:path';
-import { createRequire } from 'node:module';
-import { detailFixture, detailEntry } from './helpers/calendar-detail-lifecycle.mjs';
-import { calendarSelectionFixture } from './helpers/calendar-selection-lifecycle.mjs';
-const require = createRequire(path.join(process.cwd(), 'package.json'));
-const { React } = require('./tests/helpers/react-lifecycle.cjs');
-const nodes = n => n ? [n, ...n.childNodes.flatMap(nodes)] : [];
+import { nestedCalendarFixture } from './helpers/nested-calendar-gestures.mjs';
 
-for (const hand of ['right', 'left']) for (const internal of [false, true]) test(`${hand}/${internal ? 'task from Note' : 'reservation'}: repeated native dismissal, incomplete gestures and return to Landing leave both surfaces usable`, async () => {
-  const detail = await detailFixture({ handedness: hand }); let controls, closeCount = 0, landingTaps = 0, calendarTaps = 0;
-  function Screens({ selection }) {
-    const [calendarOpen, setCalendarOpen] = React.useState(true);
-    const press = () => calendarOpen ? calendarTaps++ : landingTaps++;
-    controls = { calendarOpen, exit: () => setCalendarOpen(false), reopen: () => setCalendarOpen(true), press };
-    return React.createElement('div', null,
-      React.createElement('button', { onClick: press }, calendarOpen ? 'Calendar' : 'Landing'),
-      React.createElement(detail.api.GoEntryDetailsSheet, { handedness: hand, entry: selection.entry, onClose: () => { closeCount++; selection.open(null); } }));
-  }
-  let selected;
-  const calendar = await calendarSelectionFixture(undefined, selection => { selected = selection; return React.createElement(Screens, { selection }); });
-  const record = { ...detailEntry, ...(internal ? { type: 'TAREA', customerBooking: false, reservationId: undefined, direction: 'self', sourceNoteId: 'note-1', notes: 'Hacer la compra' } : {}) };
-  const frozen = JSON.stringify(record), event = { nativeEvent: { pageX: hand === 'right' ? 380 : 10, pageY: 450 } };
-  // Keep batches below the selection fixture's 80-render runaway guard.
+function closeCalendar(f) {
+  const s = f.stream(380), pan = f.calendarPan, down = s.event();
+  pan.onStartShouldSetResponderCapture(down);
+  const move = s.event(0, 13, 40); pan.onMoveShouldSetResponderCapture(move); assert.equal(pan.onMoveShouldSetResponder(move), true);
+  pan.onResponderGrant(move); pan.onResponderMove(s.event(0, 180, 600));
+  pan.onResponderRelease(s.event(0, 180, 10, true)); f.refreshRoot();
+}
+
+for (const hand of ['right', 'left']) for (const mode of ['button', 'drag']) test(`${hand}/${mode}: actual nested recognizers require a new Calendar touch before returning to Landing`, async () => {
+  const f = await nestedCalendarFixture({ hand });
   try {
-    await calendar.render([record]);
     for (let cycle = 0; cycle < 12; cycle++) {
-      await calendar.open(record); assert.equal(selected.entry.id, record.id);
-      assert.ok(nodes(calendar.container).some(n => n.attributes?.['data-testid'] === 'entry-details-overlay'));
-      let pan = detail.props.get('entry-details-gesture-body');
-      for (const dy of [40, 139, 140]) await detail.settle(() => pan.onPanResponderRelease(event, { dy, dx: 0 }));
-      pan.onPanResponderTerminate(); assert.equal(detail.props.get('entry-details-modal').visible, true);
-      assert.equal(closeCount, cycle); assert.equal(controls.calendarOpen, true);
-      await calendar.render([{ ...record, time: cycle % 2 ? '12:30' : '12:00' }]);
-      assert.equal(detail.props.get('entry-details-modal').visible, true);
-      pan = detail.props.get('entry-details-gesture-body'); const stale = detail.props.get('entry-details-modal');
-      await detail.settle(() => {
-        pan.onPanResponderRelease(event, { dy: 180, dx: 0 });
-        pan.onPanResponderRelease(event, { dy: 220, dx: 0 });
-        detail.props.get('Cerrar detalle').onPress({ stopPropagation() {} });
-      });
-      assert.equal(closeCount, cycle); assert.equal(selected.entry.id, record.id); assert.equal(controls.calendarOpen, true);
-      await detail.nativeDismiss(); assert.equal(closeCount, cycle + 1); assert.equal(selected.entry, null);
-      await detail.settle(() => { stale.onDismiss(); stale.onRequestClose(); pan.onPanResponderRelease(event, { dy: 200, dx: 0 }); });
-      assert.equal(closeCount, cycle + 1, 'stale responders cannot issue a second close or exit Calendar');
-      await detail.settle(() => controls.exit()); assert.equal(controls.calendarOpen, false);
-      // Real React event handlers in the parent remain available after the detail unmounts.
-      await detail.settle(() => { controls.press(); controls.reopen(); }); assert.equal(controls.calendarOpen, true); controls.press();
+      await f.open(); assert.equal(f.root.enabled, false, 'native global RNGH must not compete with detail PanResponder');
+      f.rootDown(); f.rootStart(); // Also inject callbacks from an already queued global recognition.
+      let result;
+      if (mode === 'button') await f.detail.pressClose();
+      else { result = await f.releaseDetail(f.stream()); assert.equal(result.claimed, true); }
+      f.rootEnd(); assert.equal(f.calendarOpenRef.current, true); assert.equal(f.counters.globalCloses, 0);
+      assert.equal(f.detail.props.get('entry-details-modal').visible, false);
+      assert.equal(f.counters.detailCloses, cycle, 'wait for native iOS dismissal');
+      const late = result?.up ?? f.stream().event(0, 200, 10, true);
+      f.calendarPan.onResponderRelease(late); // Parent never owned this touch-down.
+      assert.equal(f.counters.calendarCloses, cycle);
+      await f.acknowledge(); assert.equal(f.counters.detailCloses, cycle + 1); assert.equal(f.detail.ownership.detailOpen(), false);
+      f.calendarPan.onResponderRelease(late); f.rootEnd();
+      assert.equal(f.calendarOpenRef.current, true, 'late release after onDismiss cannot cascade');
+      closeCalendar(f); assert.equal(f.calendarOpenRef.current, false); assert.equal(f.counters.calendarCloses, cycle + 1);
+      f.rootEnd(); assert.equal(f.counters.globalCloses, 0, 'Calendar release cannot be reused by Landing');
+      assert.equal(f.root.enabled, true, 'Landing recognizer is operable after native modal and Calendar close');
+      await f.reopenCalendar();
     }
-    assert.equal(landingTaps, 12); assert.equal(calendarTaps, 12); assert.equal(closeCount, 12);
-    assert.ok(calendar.renders < 65); assert.equal(JSON.stringify(record), frozen);
-    assert.equal(nodes(calendar.container).some(n => n.attributes?.['data-testid'] === 'entry-details-overlay'), false);
-  } finally { await calendar.close(); await detail.dispose(); }
+    assert.equal(f.counters.detailCloses, 12); assert.equal(f.counters.calendarCloses, 12);
+  } finally { await f.dispose(); }
+});
+
+for (const hand of ['right', 'left']) test(`${hand}: actual RN grant reset, incomplete drags, flicks, cancellation and duplicate attempts remain isolated`, async () => {
+  const f = await nestedCalendarFixture({ hand });
+  try {
+    await f.open();
+    let result = await f.releaseDetail(f.stream(), 90, 600); assert.equal(result.claimed, true);
+    assert.equal(f.detail.props.get('entry-details-modal').visible, true); assert.equal(f.counters.detailCloses, 0);
+    result = await f.releaseDetail(f.stream(), 65, 40); assert.equal(result.claimed, true, 'short intentional flick closes naturally');
+    assert.equal(f.detail.props.get('entry-details-modal').visible, false);
+    assert.equal((await f.releaseDetail(f.stream(), 200)).claimed, false, 'second gesture during dismissal cannot start');
+    const pending = f.stream(380), down = pending.event(); f.calendarPan.onStartShouldSetResponderCapture(down);
+    assert.equal(f.calendarPan.onMoveShouldSetResponder(pending.event(0, 30)), false);
+    f.rootDown(); f.rootStart(); f.rootEnd(); assert.equal(f.calendarOpenRef.current, true);
+    await f.acknowledge(); f.calendarPan.onResponderRelease(pending.event(0, 200, 10, true));
+    assert.equal(f.calendarOpenRef.current, true); assert.equal(f.counters.calendarCloses, 0);
+    await f.open();
+    const pan = f.detail.props.get('entry-details-gesture-body'), s = f.stream(); pan.onStartShouldSetResponderCapture(s.event());
+    const activation = s.event(0, 13); assert.equal(pan.onMoveShouldSetResponderCapture(activation), true); pan.onResponderGrant(activation);
+    assert.equal(pan.onResponderTerminationRequest(activation), false, 'another JS responder cannot steal an owned drag');
+    pan.onResponderTerminate(activation); pan.onResponderRelease(s.event(0, 200, 10, true));
+    assert.equal(f.detail.props.get('entry-details-modal').visible, true, 'forced system cancellation leaves the sheet usable');
+    await f.releaseDetail(f.stream(), 145, 600); assert.equal(f.detail.props.get('entry-details-modal').visible, false, 'distance is measured from finger-down despite native grant resetting dy');
+    await f.acknowledge(); closeCalendar(f); assert.equal(f.calendarOpenRef.current, false);
+    f.rootDown(); f.rootStart(); f.rootEnd(100); assert.equal(f.counters.globalCloses, 1); assert.equal(f.counters.resetFields, 1, 'a separate Landing gesture still invokes its original handlers');
+  } finally { await f.dispose(); }
+});
+
+for (const hand of ['right', 'left']) test(`${hand}: central scrolling stays central even if the finger later crosses into the side lane`, async () => {
+  const f = await nestedCalendarFixture({ hand });
+  try {
+    await f.open(); const pan = f.detail.props.get('entry-details-gesture-body'), s = f.stream(195, 400);
+    pan.onStartShouldSetResponderCapture(s.event());
+    assert.equal(pan.onMoveShouldSetResponderCapture(s.event(hand === 'right' ? 185 : -185, 200, 600)), false);
+    assert.equal(f.detail.props.get('entry-details-modal').visible, true); assert.equal(f.root.enabled, false);
+    await f.detail.pressClose(); await f.acknowledge(); closeCalendar(f); assert.equal(f.calendarOpenRef.current, false);
+  } finally { await f.dispose(); }
+});
+
+test('late releases and finalization from an old recognizer cannot erase the next independent gesture', async () => {
+  const f = await nestedCalendarFixture();
+  try {
+    await f.open(); const first = await f.releaseDetail(f.stream()); await f.acknowledge();
+    const s = f.stream(380), pan = f.calendarPan;
+    pan.onStartShouldSetResponderCapture(s.event()); const move = s.event(0, 13, 40);
+    pan.onMoveShouldSetResponderCapture(move); assert.equal(pan.onMoveShouldSetResponder(move), true); pan.onResponderGrant(move);
+    pan.onResponderMove(s.event(0, 180, 600));
+    pan.onResponderTerminate(first.up); pan.onResponderRelease(first.up); // Reused finger id; older timestamp.
+    pan.onResponderRelease(s.event(0, 180, 10, true)); assert.equal(f.calendarOpenRef.current, false);
+    const oldRoot = f.root; f.refreshRoot(); f.rootDown(); f.rootStart(); oldRoot.onFinalize?.();
+    f.rootEnd(100); assert.equal(f.counters.globalCloses, 1, 'old finalization has recognizer-local state');
+    await f.reopenCalendar(); await f.open();
+    const oldSheet = f.detail.props.get('entry-details-gesture-body'), next = f.stream();
+    oldSheet.onStartShouldSetResponderCapture(next.event()); const start = next.event(0, 13, 40);
+    assert.equal(oldSheet.onMoveShouldSetResponderCapture(start), true); oldSheet.onResponderGrant(start);
+    oldSheet.onResponderMove(next.event(0, 145, 600)); oldSheet.onResponderTerminate(first.up); oldSheet.onResponderRelease(first.up);
+    await f.detail.settle(() => oldSheet.onResponderRelease(next.event(0, 145, 10, true)));
+    assert.equal(f.detail.props.get('entry-details-modal').visible, false); await f.acknowledge();
+  } finally { await f.dispose(); }
 });

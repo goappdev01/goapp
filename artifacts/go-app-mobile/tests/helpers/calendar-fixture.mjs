@@ -38,6 +38,7 @@ export function fixture({ now } = {}) {
         effects.push(fn);
       }
     },
+    useLayoutEffect(fn, deps) { react.useEffect(fn, deps); },
   };
   const animation = { start(callback) { callback?.({ finished: true }); }, stop() {} };
   class Value { constructor(value) { this.value = value; } setValue(value) { this.value = value; } interpolate() { return 0; } }
@@ -103,6 +104,7 @@ export function fixture({ now } = {}) {
         if (name === '@/data/customerBookingProjection') return load('data/customerBookingProjection.ts');
         if (name.startsWith('@/components/')) return load(name.replace('@/', '') + '.tsx');
         if (name === '@/lib/time') return load('lib/time.ts');
+        if (name === '@/lib/calendarGestureOwnership') return load('lib/calendarGestureOwnership.ts');
         if (name.startsWith('.')) { const target=path.resolve(path.dirname(filename),name);return load(target+(existsSync(target+'.tsx')?'.tsx':'.ts')); }
         throw new Error(`Unexpected import ${name}`);
       },

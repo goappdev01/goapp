@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Alert, Dimensions, Linking, Modal, PanResponder, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, type GestureResponderEvent, type PanResponderGestureState } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -9,6 +9,7 @@ import { reservationCardPolicy, GO_ENTRY_COLORS as C } from "@/data/reservationC
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { CalendarCloseGuide } from "./ui/CalendarCloseGuide";
 import { landingCurrentEntry } from "./landing/landingPanels";
+import { calendarGestureOwnership } from "@/lib/calendarGestureOwnership";
 
 export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
   const { lang } = useLanguage();
@@ -116,7 +117,7 @@ export function GoEntryContract({ entry }: { entry: GoEntry }) {
 }
 
 // Same activation, side-control lane and full-dismiss distance as Calendar's calTopSwipeRef.
-export const ENTRY_DETAIL_CLOSE = Object.freeze({ activation: 12, sideFraction: 0.25, distance: 140, headerHeight: 44, touchSize: 56 });
+export const ENTRY_DETAIL_CLOSE = Object.freeze({ activation: 12, sideFraction: 0.25, distance: 140, flingDistance: 48, velocity: 0.65, headerHeight: 44, touchSize: 56 });
 
 type EntryDetailsProps = {
   entry: GoEntry | null; onClose: () => void; onMessage?: () => void; handedness?: "right" | "left"; children?: React.ReactNode;
@@ -131,6 +132,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, handedness = "right"
   const insets = useSafeAreaInsets(), { lang } = useLanguage();
   const [closing, setClosing] = useState(false);
   const phase = useRef<"open" | "dismissing" | "closed">("open");
+  const touch = useRef<{ identifier: string | number; timestamp: number; x: number; y: number; granted: boolean } | null>(null);
   const live = useRef({ onClose, handedness, headerBottom: 0 });
   live.current = { onClose, handedness, headerBottom: insets.top + 8 + ENTRY_DETAIL_CLOSE.headerHeight };
   const finishDismiss = useCallback(() => {
@@ -144,9 +146,10 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, handedness = "right"
     phase.current = "dismissing";
     setClosing(true);
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     phase.current = "open";
-    return () => { phase.current = "closed"; };
+    const release = calendarGestureOwnership.openDetail();
+    return () => { phase.current = "closed"; touch.current = null; release(); };
   }, []);
   useEffect(() => {
     // React Native only emits Modal.onDismiss on iOS; other platforms finish after hiding.
@@ -154,26 +157,41 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, handedness = "right"
   }, [closing, finishDismiss]);
   const pan = useMemo(() => {
     const shouldClaim = (event: GestureResponderEvent, g: PanResponderGestureState) => {
-      if (phase.current !== "open") return false;
+      const origin = touch.current;
+      if (phase.current !== "open" || !origin) return false;
       if (g.dy <= ENTRY_DETAIL_CLOSE.activation || Math.abs(g.dy) <= Math.abs(g.dx)) return false;
       const width = Dimensions.get("window").width;
       const inSide = live.current.handedness === "left"
-        ? event.nativeEvent.pageX <= width * ENTRY_DETAIL_CLOSE.sideFraction
-        : event.nativeEvent.pageX >= width * (1 - ENTRY_DETAIL_CLOSE.sideFraction);
-      // Before responder grant RN may still report y0=0; derive the touch origin
-      // from the move event so central scrolling can never look like a header drag.
-      const startY = event.nativeEvent.pageY - g.dy;
-      return inSide || startY <= live.current.headerBottom;
+        ? origin.x <= width * ENTRY_DETAIL_CLOSE.sideFraction
+        : origin.x >= width * (1 - ENTRY_DETAIL_CLOSE.sideFraction);
+      return inSide || origin.y <= live.current.headerBottom;
     };
+    const matches = (event: GestureResponderEvent) => !!touch.current && event?.nativeEvent.identifier === touch.current.identifier
+      && event.nativeEvent.timestamp >= touch.current.timestamp;
     return PanResponder.create({
+      onStartShouldSetPanResponderCapture: event => {
+        const e = event.nativeEvent;
+        touch.current = phase.current === "open" && e.touches.length === 1
+          ? { identifier: e.identifier, timestamp: e.timestamp, x: e.pageX, y: e.pageY, granted: false } : null;
+        return false; // Taps and central scrolling keep their existing handlers.
+      },
       onMoveShouldSetPanResponder: shouldClaim,
       onMoveShouldSetPanResponderCapture: shouldClaim,
-      onPanResponderRelease: (_event, g) => {
-        // Match Calendar's release-only close: no competing animation or translated hit targets.
-        if (g.dy > ENTRY_DETAIL_CLOSE.distance) dismiss();
+      onPanResponderGrant: () => { if (touch.current) touch.current.granted = true; },
+      onPanResponderRelease: (event, g) => {
+        const origin = touch.current;
+        if (phase.current !== "open" || !origin?.granted || !matches(event)) return;
+        touch.current = null;
+        event.stopPropagation();
+        const e = event.nativeEvent;
+        // RN resets dy on responder grant. Measure from touch-down, not that reset.
+        const dy = e.pageY - origin.y, dx = e.pageX - origin.x;
+        if (dy > Math.abs(dx) && (dy > ENTRY_DETAIL_CLOSE.distance
+          || dy >= ENTRY_DETAIL_CLOSE.flingDistance && g.vy > ENTRY_DETAIL_CLOSE.velocity)) dismiss();
       },
-      onPanResponderTerminate: () => {},
-      onPanResponderTerminationRequest: () => true,
+      onPanResponderTerminate: event => { if (matches(event)) touch.current = null; },
+      onPanResponderReject: event => { if (matches(event)) touch.current = null; },
+      onPanResponderTerminationRequest: () => false,
     });
   }, [dismiss]);
   const current = landingCurrentEntry(entry);

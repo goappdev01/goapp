@@ -12,6 +12,7 @@ const components=evaluate('components/GoEntryDetails.tsx',{
  'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},
  './ui/GoCloseButton':{GoCloseButton:()=>null},
  './ui/CalendarCloseGuide':{CalendarCloseGuide:()=>null},
+ '@/lib/calendarGestureOwnership':evaluate('lib/calendarGestureOwnership.ts'),
  './landing/landingPanels':evaluate('components/landing/landingPanels.ts'),
 });
 export const renderEntryQuickActions=(entry,showState=true,compact=false)=>React.createElement(components.GoEntryQuickActions,{entry,showState,compact,onCancel(){},onPropose(){},onEdit(){},onAccept(){},onReject(){}});

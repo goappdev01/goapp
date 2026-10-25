@@ -48,7 +48,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import * as Linking from "expo-linking";
 import * as Location from "expo-location";
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { calendarGestureOwnership, type CalendarGestureTicket } from "@/lib/calendarGestureOwnership";
 import {
   ActivityIndicator,
   Alert,
@@ -3184,7 +3185,6 @@ function HomeScreenContent() {
   const [calHighlightEntryId, setCalHighlightEntryId] = useState<string | undefined>(undefined);
   // ── Indicador horizontal para el panel PRÓXIMA (swipe entre fichas) ──
   const nextSwipeHintAnim = useRef(new Animated.Value(0)).current;
-  const swipeStartZoneRef = useRef({ valid: false });
   const swipeHandlersRef = useRef<{
     closeAllOverlays: () => void;
     resetContactFields: () => void;
@@ -4602,6 +4602,10 @@ function HomeScreenContent() {
   const calOpenMonthGridRef = useRef<() => void>(() => {});
   // Always-current screen width for the once-created PanResponders below.
   const calScreenWRef = useRef(Dimensions.get("window").width);
+  const calendarOpenRef = useRef(calOpen);
+  calendarOpenRef.current = calOpen;
+  const calendarTouchRef = useRef<CalendarGestureTicket | null>(null);
+  const calendarGestureGrantedRef = useRef(false);
 
   // ── PANEL NOTA — zona derecha de cierre gestual ────────────────────
   // Funciona con el teclado abierto (PanResponder nativo, no RNGH).
@@ -4655,7 +4659,14 @@ function HomeScreenContent() {
   // El PanResponder se crea una sola vez; usa refs para leer valores vivos.
   const calTopSwipeRef = useRef(
     PanResponder.create({
+      onStartShouldSetPanResponderCapture: e => {
+        calendarGestureGrantedRef.current = false;
+        calendarTouchRef.current = calendarOpenRef.current && e.nativeEvent.touches.length === 1
+          ? calendarGestureOwnership.beginParentTouch(e.nativeEvent) : null;
+        return false;
+      },
       onMoveShouldSetPanResponder: (e, g) => {
+        if (!calendarOpenRef.current || !calendarGestureOwnership.canUseParentTouch(calendarTouchRef.current, e.nativeEvent)) return false;
         if (monthGridOpenRef.current) return false;
         // Capture clearly-vertical drags (up or down).
         if (Math.abs(g.dy) <= 12 || Math.abs(g.dy) <= Math.abs(g.dx)) return false;
@@ -4664,17 +4675,33 @@ function HomeScreenContent() {
         const controlZoneStart = calScreenWRef.current * 0.75;
         return touchX >= controlZoneStart;
       },
-      onPanResponderRelease: (_e, g) => {
-        if (g.dy > 140) {
+      onPanResponderGrant: e => {
+        calendarGestureGrantedRef.current = calendarGestureOwnership.canUseParentTouch(calendarTouchRef.current, e.nativeEvent);
+      },
+      onPanResponderRelease: (e, g) => {
+        if (!calendarGestureOwnership.canUseParentTouch(calendarTouchRef.current, e.nativeEvent)) return;
+        const ticket = calendarTouchRef.current; calendarTouchRef.current = null;
+        const granted = calendarGestureGrantedRef.current; calendarGestureGrantedRef.current = false;
+        if (!granted || !calendarOpenRef.current || !calendarGestureOwnership.consumeParentTouch(ticket, e.nativeEvent)) return;
+        const dy = ticket?.origin?.pageY == null ? g.dy : e.nativeEvent.pageY - ticket.origin.pageY;
+        if (dy > 140) {
           // Long drag down → close completely
           calCloseRef.current();
-        } else if (g.dy > 50) {
+        } else if (dy > 50) {
           // Short drag down → minimize (collapse bottom panel)
           calPanelCollapseRef.current();
-        } else if (g.dy < -50) {
+        } else if (dy < -50) {
           // Drag up → open monthly calendar
           calOpenMonthGridRef.current();
         }
+      },
+      onPanResponderTerminate: e => {
+        if (!calendarGestureOwnership.canUseParentTouch(calendarTouchRef.current, e.nativeEvent)) return;
+        calendarTouchRef.current = null; calendarGestureGrantedRef.current = false;
+      },
+      onPanResponderReject: e => {
+        if (!calendarGestureOwnership.canUseParentTouch(calendarTouchRef.current, e.nativeEvent)) return;
+        calendarTouchRef.current = null; calendarGestureGrantedRef.current = false;
       },
     }),
   ).current;
@@ -11733,28 +11760,38 @@ function HomeScreenContent() {
   swipeHandlersRef.current.setOtrosOpen = setOtrosOpen;
   // resetContactFields is declared a few lines below — assigned there.
 
+  const detailGestureOpen = useSyncExternalStore(calendarGestureOwnership.subscribe, calendarGestureOwnership.detailOpen, calendarGestureOwnership.detailOpen);
   const universalSwipeGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .enabled(!goAuthOpen)
+    () => {
+      const startZone: { valid: boolean; ticket: CalendarGestureTicket | null } = { valid: false, ticket: null };
+      return Gesture.Pan()
+        .enabled(!goAuthOpen && !calOpen && !detailGestureOpen)
         .runOnJS(true)
         .activeOffsetY(40)
         .failOffsetX([-65, 65])
+        .onTouchesDown(() => {
+          startZone.valid = false;
+          startZone.ticket = calendarOpenRef.current ? null : calendarGestureOwnership.beginParentTouch();
+        })
         .onStart((e) => {
           const w = Dimensions.get("window").width;
           const h = Dimensions.get("window").height;
-          swipeStartZoneRef.current.valid =
+          startZone.valid =
             e.absoluteY > h * 0.45 && e.absoluteX > w * 0.32;
         })
-        .onEnd((e) => {
-          if (!swipeStartZoneRef.current.valid) return;
+        .onEnd((e, success) => {
+          const { valid, ticket } = startZone;
+          startZone.valid = false; startZone.ticket = null;
+          if (!success || !valid || calendarOpenRef.current || !calendarGestureOwnership.consumeParentTouch(ticket)) return;
           if (e.translationY < 80) return;
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           swipeHandlersRef.current.closeAllOverlays();
           swipeHandlersRef.current.resetContactFields();
           swipeHandlersRef.current.setOtrosOpen(false);
-        }),
-    [goAuthOpen],
+        })
+        .onFinalize(() => { startZone.valid = false; startZone.ticket = null; });
+    },
+    [goAuthOpen, calOpen, detailGestureOpen],
   );
 
   // Callback de guardar del flujo normal (creación/edición de GO).
