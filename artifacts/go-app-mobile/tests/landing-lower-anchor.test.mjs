@@ -9,7 +9,7 @@ const require=createRequire(path.join(process.cwd(),'package.json')),ts=require(
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),nodes=[];
 function walk(n){nodes.push(n);ts.forEachChild(n,walk)}walk(ast);
 const declaration=name=>nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name);
-const load=file=>{const scope={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,scope);return scope.exports;};
+const load=file=>{const scope={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,scope);return scope.exports;};
 const layout=load('components/landing/landingResponsiveLayout.ts');
 const native={safeBottom:810,moving:[{x:161,y:753.3333282470703,width:50,height:50},{x:18,y:443,width:354,height:46}],fixed:[{x:324,y:491,width:56,height:56}]};
 test('captured ADMIN native geometry: safe gap is 6.67pt, Taxi is 30pt, independent close allows a common 2pt descent',()=>{
@@ -66,7 +66,7 @@ test('Home moves the existing dock, whole panel/operations layer and Humanity by
 });
 test('the complete existing panel layer moves as one unit in portrait and landscape without introducing scrolling',()=>{
  const react={createElement:(type,props,...children)=>({type,props:props||{},children})},scope={exports:{},require:n=>n==='react'?react:n==='react-native'?{View:'View',ScrollView:'ScrollView',StyleSheet:{absoluteFill:{position:'absolute',top:0,left:0,right:0,bottom:0}}}:undefined};
- vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/landing/LandingContentViewport.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,scope);
+ vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/landing/LandingContentViewport.tsx','utf8'),{compilerOptions:{ alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,scope);
  for(const virtual of [false,true])for(const offsetY of [0,1,2,5]){
   const frame={virtual,left:20,top:60,width:350,height:400},children={panel:'unaltered',operations:'unaltered'},out=scope.exports.LandingContentViewport({frame,offsetY,children});
   assert.equal(out.type,'View');assert.equal(out.props.pointerEvents,'box-none');

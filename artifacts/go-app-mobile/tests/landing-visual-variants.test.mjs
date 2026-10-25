@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 const require=createRequire(path.join(process.cwd(),"package.json")), ts=require("typescript");
 function load(file,deps={}){
  const exports={};
- const code=ts.transpileModule(readFileSync(file,"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
+ const code=ts.transpileModule(readFileSync(file,"utf8"),{compilerOptions:{ alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
  vm.runInNewContext(code,{exports,require:key=>{if(!(key in deps))throw Error("Unexpected import "+key);return deps[key];}});
  return exports;
 }

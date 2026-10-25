@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import vm from "node:vm";
 const ts=createRequire(path.join(process.cwd(),"package.json"))("typescript");
-function load(name,imports={}){const exports={};vm.runInNewContext(ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:key=>{if(key in imports)return imports[key];throw Error("External dependency forbidden: "+key)},Date,Intl,Math,Set,Map,console});return exports;}
+function load(name,imports={}){const exports={};vm.runInNewContext(ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:key=>{if(key in imports)return imports[key];throw Error("External dependency forbidden: "+key)},Date,Intl,Math,Set,Map,console});return exports;}
 const api=load("data/businessDemoStore.ts"),booking=load("data/demoBookingRepository.ts",{"./businessDemoStore":api,"./bookingServices":load("data/bookingServices.ts")});
 const owner="11111111-1111-4111-8111-111111111111",other="22222222-2222-4222-8222-222222222222",company="33333333-3333-4333-8333-333333333333";
 const plain=value=>JSON.parse(JSON.stringify(value));

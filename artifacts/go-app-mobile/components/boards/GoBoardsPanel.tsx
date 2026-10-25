@@ -199,7 +199,7 @@ function BoardList({ boards, busy, more, search, setSearch, archive, setArchive,
           <Text style={[styles.title, { marginBottom: 10 }]}>{item.name}</Text><Text style={styles.muted} numberOfLines={2}>{item.description}</Text>
         </TouchableOpacity></BoardDragItem>}
       ListEmptyComponent={<Text style={styles.muted}>{busy ? "Cargando…" : "No hay tableros con este filtro."}</Text>}
-      ListFooterComponent={more ? <Button label="Cargar más tableros" onPress={onMore} /> : null} />
+      ListFooterComponent={more ? <Button label="Cargar más tableros" onPress={onMore} /> : undefined} />
   </>;
 }
 function BoardContents({ board, search, filter, dateFilter, onOpen, onAdd, onColumn, onAddColumn, onDate }: {

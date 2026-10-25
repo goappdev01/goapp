@@ -58,7 +58,7 @@ function fixture({ ready = true, scope = A, last = null, platform = "ios" } = {}
     if (name in modules) return modules[name]; throw Error("Unexpected import: " + name);
   } };
   vm.runInNewContext(ts.transpileModule(readFileSync("services/GoTaskReminderService.tsx", "utf8"), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React },
   }).outputText, context);
   function render(identity = state.identity, mode = state.alertMode) {
     state.identity = identity; state.alertMode = mode; refIndex = 0; effectIndex = 0;

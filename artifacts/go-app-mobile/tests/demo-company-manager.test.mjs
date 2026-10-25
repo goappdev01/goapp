@@ -7,7 +7,7 @@ const ts=createRequire(import.meta.url)("typescript");
 const compiled=new Map();
 const compile=file=>{if(compiled.has(file))return compiled.get(file);let source=readFileSync(file,"utf8");
  if(file.endsWith('.tsx')){const req=createRequire(import.meta.url),babel=req('@babel/core'),expoReq=createRequire(req.resolve('babel-preset-expo'));source=babel.transformSync(source,{filename:file,babelrc:false,configFile:false,parserOpts:{sourceType:'module',plugins:['typescript','jsx']},plugins:[[expoReq('babel-plugin-react-compiler'),{target:'19'}]]}).code;}
- const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;compiled.set(file,code);return code;};
+ const code=ts.transpileModule(source,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;compiled.set(file,code);return code;};
 function module(file,imports={}){const exports={};vm.runInNewContext(compile(file),{exports,require:key=>{if(key in imports)return imports[key];throw Error("Unexpected dependency "+key);},Date,Intl,Set,Map});return exports;}
 const storeAPI=module("data/businessDemoStore.ts"),catalogAPI=module("data/businessDemoCatalog.ts",{"./businessDemoStore":storeAPI});
 const initial={businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],activeDays:[],openFrom:"09:00",openTo:"20:00",daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false};

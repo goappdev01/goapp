@@ -1,3 +1,4 @@
+import type { ScrollViewInstance } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AssistantCloseControls } from "./AssistantCloseControls";
 import { useGoDockPreference } from "@/hooks/useGoDockPreference";
@@ -79,7 +80,7 @@ export function BookingAssistantScreen({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [slotCount, setSlotCount] = useState(8);
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ScrollViewInstance>(null);
   const [conversationLayout, setConversationLayout] = useState({ width: 0, height: 0 });
   const [conversationMeasurement, setConversationMeasurement] = useState({ height: 0, messages: -1 });
   const voice = useBookingVoice((text, isZone) => {

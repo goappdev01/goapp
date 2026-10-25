@@ -32,7 +32,7 @@ function fixture(saved = new Map(), getItem = async key => saved.get(key) ?? nul
   };
   const context = { exports: {}, console, require: name => { if (!(name in modules)) throw Error(name); return modules[name]; } };
   vm.runInNewContext(ts.transpileModule(readFileSync("components/DraggableFAB.tsx", "utf8"), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React }
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React }
   }).outputText, context);
   return { saved, get gesture() { return callbacks; },
     render(height = 500) {

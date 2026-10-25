@@ -6,7 +6,7 @@ import {createRequire} from 'node:module';
 import path from 'node:path';
 import {fixture} from './helpers/calendar-fixture.mjs';
 const require=createRequire(path.join(process.cwd(),'package.json')),ts=require('typescript');
-const scope={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync('data/goEntryPresentation.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,scope);
+const scope={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync('data/goEntryPresentation.ts','utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,scope);
 const presentation=scope.exports;
 const nodes=(tree,p)=>tree&&typeof tree==='object'?[...(p(tree)?[tree]:[]),...(tree.children??[]).flatMap(n=>nodes(n,p))]:[];
 const texts=tree=>nodes(tree,n=>n.type==='Text').flatMap(n=>n.children).filter(x=>typeof x==='string'||typeof x==='number').join(' ');

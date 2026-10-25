@@ -1,6 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import {createRequire} from 'node:module';
 const require=createRequire(path.join(process.cwd(),'package.json')),{React,createRoot,document,ts}=require('./tests/helpers/react-lifecycle.cjs');
-const compile=source=>ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const compile=source=>ts.transpileModule(source,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const projection={exports:{}};vm.runInNewContext(compile(fs.readFileSync('data/customerBookingProjection.ts','utf8')),projection);
 const owner='11111111-1111-4111-8111-111111111111',other='22222222-2222-4222-8222-222222222222';
 const booking={id:'reservation',businessId:'company',bookableItemId:'cut',customerId:owner,startDatetime:'2030-01-07T10:00:00',endDatetime:'2030-01-07T10:30:00',status:'CONFIRMED',paymentStatus:'none'};

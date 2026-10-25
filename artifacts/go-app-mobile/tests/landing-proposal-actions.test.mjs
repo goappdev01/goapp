@@ -14,7 +14,7 @@ const approved=JSON.parse(fs.readFileSync(new URL('./helpers/landing-proposal-ba
 function find(n,p){if(p(n))return n;let r;ts.forEachChild(n,c=>{if(!r)r=find(c,p)});return r;}
 const decl=(a,name)=>find(a,n=>ts.isVariableDeclaration(n)&&n.name.getText(a)===name);
 const compact=s=>s.replace(/\s+/g,' ').trim();
-function load(file){const context={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);return context.exports;}
+function load(file){const context={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);return context.exports;}
 const policy=load('components/landing/landingPanels.ts'),layout=load('components/landing/landingResponsiveLayout.ts');
 function entry(type='GO_BOOKING',estado='propuesta_pendiente',moved=true){return {id:'original-1',type,estado,kind:'sent',dateISO:moved?'2032-03-21':'2032-03-20',date:moved?'21 marzo':'20 marzo',time:moved?'16:00':'10:00',duration:'30',place:'Dirección vigente',phone:'+34600111222',whatsapp:'+34600333444',intentLabel:'Cita de prueba',intentKey:'reserva',color:'#60a5fa',reservationId:'booking-1',bookingStatus:'confirmada',paymentStatus:'pagada',changeProposal:{originalDateISO:'2032-03-20',originalDate:'20 marzo',originalTime:'10:00',originalDuration:'30',dateISO:'2032-03-21',date:'21 marzo',time:'16:00',place:'Dirección propuesta',duration:'60',proposedAt:1}};}
 for(const type of ['GO','GO_BOOKING','TAREA','TAREA_INTERNA'])for(const estado of ['propuesto','propuesta_pendiente'])
@@ -48,7 +48,7 @@ async function mountOperations(g,stacked=false){
   Linking:{openURL:async url=>urls.push(url)},normalizePhoneForWhatsApp:n=>n.replace(/\D/g,''),resolveIntentLabel:e=>e.intentLabel,t:k=>labels[k]??k,
   Haptics:{selectionAsync:()=>Promise.resolve()},setLateSheetGo:e=>sheets.push(e),snoozeGoReminder(){throw Error('Must not change a reminder during render')},currentReceivedIdRef:refs,proposalReturnRef:{current:null},setCalOpen(){},calFlow:{open:v=>calendar.push(v)},formatISODate:()=>{throw Error('Must use the original date')},getToday(){},sendSuggestChangeFromCal(){},setTransportPanelH(){},showToast:msg=>toasts.push(msg)};
  const code=`const ${decl(ast,'buildNextAptActions').getText(ast)};const ${decl(ast,'renderLandingOperations').getText(ast)};exports.render=renderLandingOperations;`;
- vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,context);
+ vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,context);
  const container=document.createElement('div'),root=createRoot(container);
  await React.act(()=>root.render(context.exports.render(g).content));
  return {buttons,urls,sheets,calendar,gps,toasts,refs,container,press:async label=>{const button=buttons.get(label);assert.ok(button,label);await React.act(async()=>{button.onPress();await new Promise(resolve=>setImmediate(resolve));})},close:async()=>React.act(()=>root.unmount())};

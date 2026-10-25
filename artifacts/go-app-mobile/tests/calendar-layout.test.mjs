@@ -102,7 +102,7 @@ const pending = { id: 'pending-note', kind: 'sent', type: 'TAREA_INTERNA', inten
   color: '#7c3aed', dateISO: '2026-10-13', date: '13/10/2026', time: '17:00', duration: '', place: '', contactName: '', phone: '',
   estado: 'pendiente', localResolutionStatus: 'pending', isGeneric: true, notes: 'Revisión de prueba', messages: [{ id: 'message', goId: 'pending-note', text: 'Contenido que debe conservarse', senderId: 'yo', createdAt: 1, deliveryMode: 'internal' }], sharedChatId: 'existing-shared-chat' };
 
-test('Pending cards keep 17:00 and TAREA.INT on one closed line and open the same conversation from inside', () => {
+test('Pending cards keep one closed line; personal tasks have no false chat and shared tasks retain the same conversation in expanded details', () => {
   const app = fixture({ now: '2026-10-14T12:00:00' }), { AgendaBoard } = app.load('components/AgendaOperativa.tsx');
   const opened = [], stateChanges = [], snapshot = JSON.stringify(pending);
   const props = { goLog: [pending], viewMode: 'mes_lineal', calViewMonth: '2026-10', onOpenMessage: item => opened.push(item), onChangeEstado: (...args) => stateChanges.push(args), contentRightInset: 64 };
@@ -115,16 +115,26 @@ test('Pending cards keep 17:00 and TAREA.INT on one closed line and open the sam
   assert.equal(nodes(card, n => n.props.accessibilityLabel === 'agenda_write_msg').length, 0);
   const body = nodes(card, n => n.type === 'TouchableOpacity' && texts(n).includes('17:00') && texts(n).includes('TAREA.INT'))[0];
   body.props.onPress(); tree = app.render(AgendaBoard, props);
-  const expanded = nodes(tree, n => n.type === 'GestureDetector' && n.props.key === pending.id)[0];
-  const message = nodes(expanded, n => n.type === 'TouchableOpacity' && n.props.accessibilityLabel === 'agenda_write_msg')[0];
+  assert.equal(nodes(tree, n => n.props.testID === 'entry-message-go').length, 0, 'a personal task must not invent a recipient');
+  nodes(tree, n => n.type === 'Modal' && n.props.visible && n.props.onRequestClose)[0].props.onRequestClose();
+  const shared = {...pending,id:'pending-shared',type:'TAREA_EXTERNA',intentKey:'tarea_externa',contactName:'Participante de prueba'};
+  const sharedSnapshot=JSON.stringify(shared), sharedProps={...props,goLog:[pending,shared]};
+  tree=app.render(AgendaBoard,sharedProps);
+  const sharedCard=nodes(tree,n=>n.type==='GestureDetector'&&n.props.key===shared.id)[0];assert.ok(sharedCard);
+  nodes(sharedCard,n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85)[0].props.onPress();
+  tree=app.render(AgendaBoard,sharedProps);
+  const expanded=nodes(tree,n=>n.props.testID==='entry-details-scroll')[0];assert.ok(expanded);
+  const message = nodes(expanded, n => n.type === 'TouchableOpacity' && n.props.testID === 'entry-message-go')[0];
   assert.ok(message);
   assert.equal(message.props.style.minHeight, 44);
   assert.equal(message.props.accessibilityRole, 'button');
-  assert.ok(texts(message).includes('agenda_write_msg'));
+  assert.ok(texts(message).includes('MENSAJE GO'));
   message.props.onPress();
-  assert.equal(opened.length, 1); assert.equal(opened[0], pending);
+  app.runTimers();
+  assert.equal(opened.length, 1); assert.equal(opened[0], shared);
   assert.equal(opened[0].sharedChatId, 'existing-shared-chat');
   assert.equal(JSON.stringify(pending), snapshot);
+  assert.equal(JSON.stringify(shared), sharedSnapshot);
   assert.deepEqual(stateChanges, []);
 });
 

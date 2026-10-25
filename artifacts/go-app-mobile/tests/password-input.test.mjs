@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import lifecycle from './helpers/react-lifecycle.cjs';
 const {React,createRoot,document,ts}=lifecycle;
 const source=fs.readFileSync('components/auth/PasswordInput.tsx','utf8');
-const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
+const code=ts.transpileModule(source,{compilerOptions:{ alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
 const settle=fn=>React.act(async()=>{if(fn)await fn();await Promise.resolve();});
 function hub(){const handlers=new Map();return{visibilityState:'visible',
  addEventListener(type,fn,capture){const rows=handlers.get(type)||[];rows.push({fn,capture});handlers.set(type,rows);},

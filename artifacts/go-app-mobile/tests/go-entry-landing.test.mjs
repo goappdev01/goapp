@@ -4,7 +4,7 @@ const require=createRequire(path.join(process.cwd(),'package.json')),ts=require(
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 function find(n,p){if(p(n))return n;let r;ts.forEachChild(n,c=>{if(!r)r=find(c,p)});return r;}
 const decl=name=>find(ast,n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name).getText(ast);
-const compile=text=>ts.transpileModule(text,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
+const compile=text=>ts.transpileModule(text,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
 const helper={exports:{}};vm.runInNewContext(compile(fs.readFileSync('data/goEntryPresentation.ts','utf8')),helper);
 const panels={exports:{}};vm.runInNewContext(compile(fs.readFileSync('components/landing/landingPanels.ts','utf8')),panels);
 function fixture(){

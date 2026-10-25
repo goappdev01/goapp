@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import vm from 'node:vm';
 const ts = createRequire(path.join(process.cwd(), 'package.json'))('typescript');
-const compile = file => ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
+const compile = file => ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
   module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
 } }).outputText;
 const policyScope = { exports: {} };

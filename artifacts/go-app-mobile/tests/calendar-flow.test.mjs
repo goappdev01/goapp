@@ -31,7 +31,7 @@ function fixture() {
     '@/lib/time': { getToday: date, formatISODate: () => '2026-10-08', formatDayLabel: () => 'Jue 8' },
   };
   const source = readFileSync('hooks/useGoCalendarFlow.tsx', 'utf8');
-  const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const code = ts.transpileModule(source, { compilerOptions: { esModuleInterop: false, alwaysStrict: false, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   vm.runInNewContext(code, {
     exports, Date,
     setTimeout: (fn, delay) => { timers.push({ fn, delay }); return timers.length; },

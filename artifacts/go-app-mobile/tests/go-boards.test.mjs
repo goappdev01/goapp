@@ -10,7 +10,7 @@ function load(file, imports = {}) {
   const scope = { exports: {}, Date, Error, console, setTimeout, clearTimeout, require: name => {
     if (name in imports) return imports[name]; throw Error('Unexpected import '+name);
   } };
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'), {fileName:file,compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'), {fileName:file,compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
   return scope.exports;
 }
 const contract = load('../../lib/api-zod/src/go-boards.ts', {zod});

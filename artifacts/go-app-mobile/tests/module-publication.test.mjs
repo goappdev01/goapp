@@ -6,7 +6,7 @@ import vm from 'node:vm';
 import path from 'node:path';
 const ts = createRequire(path.join(process.cwd(), 'package.json'))('typescript');
 const scope = { exports: {} };
-vm.runInNewContext(ts.transpileModule(readFileSync('../../lib/api-zod/src/module-publication.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, scope);
+vm.runInNewContext(ts.transpileModule(readFileSync('../../lib/api-zod/src/module-publication.ts', 'utf8'), { compilerOptions: { esModuleInterop: false, alwaysStrict: false, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, scope);
 const p = scope.exports, plain = value => JSON.parse(JSON.stringify(value));
 const sectors = [{ id: 'belleza', subs: [{ id: 'peluqueria' }, { id: 'barberia' }, { id: 'unas' }] }, { id: 'restauracion', subs: [{ id: 'restaurante' }] }];
 test('pilot exposes only hairdressers while retaining the full original catalogue', () => {
@@ -54,7 +54,7 @@ test('USER with an owner demo repository still sees only the pilot; internal pre
       if (name === '@/contexts/GoViewContext') return { useGoView: () => ({ loaded: true, isOwner: true, isBusinessPreview: false, isAdminView: false, ...view }) };
       throw Error(name);
     } };
-    vm.runInNewContext(ts.transpileModule(readFileSync('hooks/useBookingModulePublication.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, scoped);
+    vm.runInNewContext(ts.transpileModule(readFileSync('hooks/useBookingModulePublication.ts', 'utf8'), { compilerOptions: { esModuleInterop: false, alwaysStrict: false, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, scoped);
     return scoped.exports.useBookingModulePublication(true, true);
   };
   const user = fixture({}); assert.equal(user.internalAccess, false);

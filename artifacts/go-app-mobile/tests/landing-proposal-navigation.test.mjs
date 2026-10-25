@@ -13,7 +13,7 @@ const ast=parse('app/index.tsx'),agenda=parse('components/AgendaOperativa.tsx');
 const approved=JSON.parse(fs.readFileSync(new URL('./helpers/landing-proposal-baselines.json',import.meta.url),'utf8')).navigation;
 function find(n,p){if(p(n))return n;let r;ts.forEachChild(n,c=>{if(!r)r=find(c,p)});return r;}
 const decl=(a,name)=>find(a,n=>ts.isVariableDeclaration(n)&&n.name.getText(a)===name);
-function load(file,imports={}){const ctx={exports:{},setTimeout:()=>{throw Error('No save or mutation during navigation')},require:n=>n==='react'?React:imports[n]};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,ctx);return ctx.exports;}
+function load(file,imports={}){const ctx={exports:{},setTimeout:()=>{throw Error('No save or mutation during navigation')},require:n=>n==='react'?React:imports[n]};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,ctx);return ctx.exports;}
 const p=load('components/landing/landingPanels.ts');
 class Value{setValue(){} interpolate(){return 0}}
 const haptics={selectionAsync:async()=>{},impactAsync:async()=>{},ImpactFeedbackStyle:{Light:'light'}};
@@ -26,7 +26,7 @@ const board=find(ast,n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)===
 const records=attr(board,'goLog');
 const dateSync=find(ast,n=>ts.isCallExpression(n)&&n.expression.getText(ast)==='useEffect'&&n.arguments[0]?.getText(ast).includes('if (!calFlow.isActive || pendingMoveCtxRef.current) return;')&&n.arguments[0].getText(ast).includes('setDateISODraft'));
 assert.ok(dateSync);
-const dayNode=find(agenda,n=>ts.isFunctionDeclaration(n)&&n.name?.text==='isInDay');const dayCtx={};vm.runInNewContext(ts.transpileModule(dayNode.getText(agenda),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,dayCtx);
+const dayNode=find(agenda,n=>ts.isFunctionDeclaration(n)&&n.name?.text==='isInDay');const dayCtx={};vm.runInNewContext(ts.transpileModule(dayNode.getText(agenda),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,dayCtx);
 function entry(type='GO_BOOKING',pending=false,moved=false,estado='propuesta_pendiente'){
  return {id:'action-1',type,kind:'sent',estado:pending?estado:'aceptado',dateISO:pending&&moved?'2035-02-22':'2035-01-18',date:pending&&moved?'22 febrero':'18 enero',time:pending&&moved?'16:00':'10:00',duration:'30',place:'Dirección vigente',staffId:'staff-1',slotKey:'slot-1',reservationId:'booking-1',bookingStatus:'confirmada',paymentStatus:'pagada',changeProposal:pending?{dateISO:'2035-02-22',date:'22 febrero',time:'16:00',originalDateISO:'2035-01-18',originalDate:'18 enero',originalTime:'10:00',originalDuration:'30',proposedAt:1}:undefined};
 }
@@ -47,7 +47,7 @@ async function mountRoute(route,g,kind='cambio'){
  capture({calOpen,detailsId,openCalendar:aChange.fn,dateISODraft,dateDraft,entryId:currentReceivedIdRef.current,flow:calFlow,entries,hits:entries.filter(e=>isInDay(e,dateISODraft))});
  return React.createElement(Pressable,{onPress:${attr(route==='changes'?proposal:next,'onPress')},disabled:${route==='changes'?attr(proposal,'disabled'):'false'}});
  }exports.Fixture=Fixture;`;
- vm.runInNewContext(ts.transpileModule(fixture,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,ctx);
+ vm.runInNewContext(ts.transpileModule(fixture,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,ctx);
  const container=document.createElement('div'),root=createRoot(container);await React.act(()=>root.render(React.createElement(ctx.exports.Fixture)));
  return {get state(){return snapshot},get disabled(){return pressable.disabled},writes,press:async()=>React.act(()=>pressable.onPress()),calendar:async()=>React.act(()=>snapshot.openCalendar()),close:async()=>React.act(()=>root.unmount())};
 }
@@ -76,7 +76,7 @@ test('unconfirmed HOLD is not a navigation target',async()=>{
 });
 test('read projection is restricted to the proposal navigation target; other entries keep identity and permissions',()=>{
  const g=entry('GO_BOOKING',true,true),other={...entry('TAREA',true,true),id:'other-owner',ownerUserId:'owner-2'};
- for(const active of [false,true]){const result=vm.runInNewContext(ts.transpileModule('('+records+')',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{goLog:[g,other],cambiosOpen:active,currentReceivedIdRef:{current:g.id},landingCurrentEntry:p.landingCurrentEntry,isUserMode:false,isBusinessMode:false});
+ for(const active of [false,true]){const result=vm.runInNewContext(ts.transpileModule('('+records+')',{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,{goLog:[g,other],cambiosOpen:active,currentReceivedIdRef:{current:g.id},landingCurrentEntry:p.landingCurrentEntry,isUserMode:false,isBusinessMode:false});
   assert.equal(result[1],other);assert.equal(result[1].ownerUserId,'owner-2');assert.equal(result[0].dateISO,active?'2035-01-18':g.dateISO);if(!active)assert.equal(result[0],g);
  }
 });

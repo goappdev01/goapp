@@ -10,7 +10,7 @@ const ts = createRequire(path.join(process.cwd(), 'package.json'))('typescript')
 const plain = x => JSON.parse(JSON.stringify(x));
 const load = (file, imports = {}) => {
   const ctx = { exports: {}, Date, Intl, console, require(name) { if (name in imports) return imports[name]; throw Error('Unexpected import '+name); } };
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'), { compilerOptions: {
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'), { compilerOptions: { alwaysStrict: false,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,
   }}).outputText, ctx); return ctx.exports;
 };
@@ -201,7 +201,7 @@ test('the real Note creation connection carries the selected offset and guards d
     noteIdentityRef:{current:{ready:true,scope}},showToast:(...args)=>calls.push(['toast',...args]),
     setQuickNoteText:text=>calls.push(['title',text]),setQuickNoteDetail:text=>calls.push(['detail',text]),
     openFieldSelector:(...args)=>calls.push(['open',...args])};
-  vm.runInNewContext(ts.transpileModule('result = '+declaration.initializer.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,ctx);
+  vm.runInNewContext(ts.transpileModule('result = '+declaration.initializer.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,ctx);
   ctx.result('NOTA_INTERNA','Título','Detalle');ctx.result('NOTA_INTERNA','Título','Detalle');
   assert.equal(calls.length,1);assert.equal(calls[0][0],'open');assert.deepEqual(plain(calls[0].at(-1)),{scope,minutes:15});
   ctx.noteStartLockRef.current=false;ctx.noteIdentityRef.current.ready=false;ctx.result('NOTA_INTERNA','Conservado','Detalle');
@@ -281,7 +281,7 @@ test('the real attachment branch carries the chosen alarm inside GO without crea
     setAttachedExternalNote:note=>calls.push(['attached',plain(note)]),setNotesOpen:()=>{},setQuickNoteText:()=>{},setQuickNoteDetail:()=>{},
     AsyncStorage:{removeItem:async()=>{}},showToast:()=>{},Haptics:{NotificationFeedbackType:{Success:'success'},notificationAsync:async()=>{}},
     Alert:{alert:()=>assert.fail('The selected alarm must not be discarded with an unsupported warning')}};
-  vm.runInNewContext(ts.transpileModule('result = '+declaration.initializer.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,ctx);
+  vm.runInNewContext(ts.transpileModule('result = '+declaration.initializer.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,ctx);
   ctx.result('NOTA_EXTERNA','Título','Detalle',undefined,undefined,{scope,minutes:15});
   assert.deepEqual(calls,[['attached',{title:'Título',detail:'Detalle',reminder:{scope,minutes:15}}]]);
 });
@@ -294,7 +294,7 @@ test('the real GO creation connection persists one shared note/GO record and con
     setGoLog:fn=>{void f.store.updateGoLog(rows=>({entries:fn(rows),result:undefined}));},persistLog:()=>{},
     confirmAttachedGoNoteReminder:(...args)=>{confirmations.push(args);return f.api().confirmAttachedGoNoteReminder(...args);},
     lang:'es',Alert:{alert:()=>{}},showToast:()=>{},console:{log:()=>{}}};
-  vm.runInNewContext(ts.transpileModule('result = '+declaration.initializer.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,ctx);
+  vm.runInNewContext(ts.transpileModule('result = '+declaration.initializer.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,ctx);
   assert.equal(ctx.result('sent',{type:'GO',notes:'Padre',attachedNote:'Texto intacto',reminders:[15],attachedNoteReminder:{scope,minutes:15}}),'parent-go');
   await f.store.readGoLog();await new Promise(resolve=>setImmediate(resolve));await f.scheduler.refresh(scope);
   assert.equal(confirmations.length,1);assert.equal(JSON.parse(f.raw).length,1);assert.equal(f.os.size,1);

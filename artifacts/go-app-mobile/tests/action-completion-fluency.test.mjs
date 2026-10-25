@@ -13,7 +13,7 @@ const {React,createRoot,document,ts}=require("./tests/helpers/react-lifecycle.cj
 const NOW=Date.parse("2030-01-07T14:00:00+01:00");
 class Clock extends Date {constructor(...args){super(...(args.length?args:[NOW]));}static now(){return NOW;}}
 const S={userId:"11111111-1111-4111-8111-111111111111",context:"live:USER"};
-const compile=source=>ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
+const compile=source=>ts.transpileModule(source,{compilerOptions:{ alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
 function load(file,imports={},reactCompiled=false){
  const context={exports:{},Error,Date:Clock,Intl,Map,Set,console,Promise,setTimeout,clearTimeout,setInterval,clearInterval,require:name=>{if(name in imports)return imports[name];if(name==="react/compiler-runtime")return require(name);throw Error("Unexpected import "+name);}};
   let source=fs.readFileSync(file,"utf8");

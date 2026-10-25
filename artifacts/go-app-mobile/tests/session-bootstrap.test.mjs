@@ -13,7 +13,7 @@ function visit(node){
  ts.forEachChild(node,visit);
 }
 visit(ast);assert.ok(effect);
-const compile=code=>ts.transpileModule(code,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+const compile=code=>ts.transpileModule(code,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText;
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 const identity={session:{user:{id:'test-only-user'}},role:'usuario'};
 function fixture(){

@@ -283,7 +283,7 @@ test("the working screen stays mounted during owner revalidation/outage and lose
     HomeScreenContent() {}, BusinessAccessGate() {} };
   vm.createContext(scope);
   const code = "globalThis.HomeScreen = " + home.getText(ast).replace(/^export default /, "");
-  vm.runInContext(ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText, scope);
+  vm.runInContext(ts.transpileModule(code, { compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React } }).outputText, scope);
   const initial = scope.HomeScreen();
   assert.equal(initial.type, scope.BusinessAccessGate);
   assert.equal(initial.props.ownerPresentation, true);

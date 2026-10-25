@@ -69,7 +69,7 @@ function fixture() {
   };
   sessionApi = loadAuthSession(context, storageApi);
   vm.runInNewContext(ts.transpileModule(readFileSync('data/booking.ts', 'utf8'), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, context);
   return { api: context.exports, auth: sessionApi, storage, calls, behavior, Date: PhoneDate };
 }
@@ -176,17 +176,17 @@ test('UTC transport crossing midnight returns the selected local calendar day an
     } };
     throw new Error(name);
   } };
-  const projection={exports:{},Date:f.Date};vm.runInNewContext(ts.transpileModule(readFileSync('data/customerBookingProjection.ts','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,projection);
+  const projection={exports:{},Date:f.Date};vm.runInNewContext(ts.transpileModule(readFileSync('data/customerBookingProjection.ts','utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,projection);
   const taskAccess = { ...bridge, exports: {} };
   vm.runInNewContext(ts.transpileModule(readFileSync('lib/goTaskAccess.ts', 'utf8'), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, taskAccess);
   const goLogStore = { ...bridge, exports: {} };
   vm.runInNewContext(ts.transpileModule(readFileSync('lib/goLogStore.ts', 'utf8'), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, goLogStore);
   vm.runInNewContext(ts.transpileModule(readFileSync('lib/goLogBridge.ts', 'utf8'), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, bridge);
   await bridge.exports.syncBookingToGoLog(result.booking, { id: business, name: 'Published' }, { id: service, title: 'Service' });
   const [entry] = JSON.parse(f.storage.get('go_log_v1'));

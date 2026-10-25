@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import vm from 'node:vm';
 const ts=createRequire(import.meta.url)('typescript');
-const code=ts.transpileModule(readFileSync('lib/authTrace.ts','utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+const code=ts.transpileModule(readFileSync('lib/authTrace.ts','utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 function fixture(dev=true,failure=false){const messages=[];const scope={exports:{},__DEV__:dev,Date,console:{info:(...args)=>{if(failure)throw Error('unavailable log');messages.push(args);}}};vm.runInNewContext(code,scope);return{...scope.exports,messages};}
 test('diagnostic allowlist rejects credentials, identities, URLs and arbitrary payloads',()=>{
  const f=fixture();f.recordAuthTrace('request.end',{status:429,route:'identity',access_token:'fictional-secret',email:'fictional@test.invalid',userId:'fictional-user',url:'https://fictional.invalid',password:'fictional-password',payload:{refresh_token:'fictional-refresh'}});

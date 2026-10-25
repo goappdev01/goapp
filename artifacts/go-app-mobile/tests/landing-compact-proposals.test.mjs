@@ -22,7 +22,7 @@ const sheet = find(ast, node => ts.isJsxElement(node)
 assert.ok(sheet, 'exercise the actual task-list renderer');
 const formatter = find(ast, node => ts.isFunctionDeclaration(node) && node.name?.text === 'formatCompactProposalSlot');
 function compile(text) {
-  return ts.transpileModule(text, { compilerOptions: {
+  return ts.transpileModule(text, { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
   } }).outputText;
 }

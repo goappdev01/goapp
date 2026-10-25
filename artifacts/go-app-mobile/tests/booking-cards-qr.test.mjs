@@ -1,7 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import {createRequire} from 'node:module';
 import {fixture} from './helpers/calendar-fixture.mjs';
 const require=createRequire(path.join(process.cwd(),'package.json')),{React,createRoot,document,ts,evaluate}=require('./tests/helpers/react-lifecycle.cjs');
-const transpile=s=>ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
+const transpile=s=>ts.transpileModule(s,{compilerOptions:{ alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
 const policyScope={exports:{}};vm.runInNewContext(transpile(fs.readFileSync('data/reservationCardPolicy.ts','utf8')),policyScope);const {reservationCardPolicy:policy}=policyScope.exports;
 const base={id:'go_booking_a',reservationId:'11111111-1111-4111-8111-111111111111',businessId:'22222222-2222-4222-8222-222222222222',businessBooking:true,type:'GO_BOOKING',staffId:'professional',slotKey:'slot',contactName:'MARÍA JOSÉ',dateISO:'2030-01-07',date:'2030-01-07',time:'10:00',estado:'aceptado',bookingStatus:'confirmada',notes:'Corte',professionalName:'Ana'};
 const nodes=(tree,predicate)=>!tree||typeof tree!=='object'?[]:[...(predicate(tree)?[tree]:[]),...(tree.children??[]).flatMap(c=>nodes(c,predicate))];

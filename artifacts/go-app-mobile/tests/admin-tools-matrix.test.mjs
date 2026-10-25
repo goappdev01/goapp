@@ -33,7 +33,7 @@ capture({landingVisual,userLandingVisualEnabled,landingVariantToolsEnabled,landi
 openUserLandingPreviewFromTools,setOptionsOpen,setAdminDashOpen,onOpenTools:${toolsCallback}});
 useEffect(()=>{env.mounts++;return()=>env.unmounts++;},[]);
 return <div>{optionsOpen?(${selectorExpression}):null}</div>;
-};`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText,scope);
+};`,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText,scope);
 const settle=async operation=>React.act(async()=>{if(operation)await operation();for(let i=0;i<45;i++)await Promise.resolve();});
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};
 const alice='11111111-1111-4111-8111-111111111111',bob='22222222-2222-4222-8222-222222222222';

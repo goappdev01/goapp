@@ -76,7 +76,7 @@ async function fixture({expired=false,status=200}={}){
  // Execute the real Home hydration effect and account callback within React's
  // reconciler and real permission/view providers. Native/router host is simulated.
  const factorySource='exports.make=({React,AsyncStorage,AppState,onSessionChanged,restoreStoredAuthentication,consumeAuthRecoveryNotice,syncModeFromRole,Alert,capture,captureScreen,mounts,useOwnerLandingBackground,recordAuthTrace,Panel})=>function Home(){const {useState,useEffect,useRef}=React;const [userAccountType,setUserAccountType]=useState(null);const [goAuthOpen,setGoAuthOpen]=useState(true);const [authBootstrapComplete,setAuthBootstrapComplete]=useState(false);const [authBootstrapError,setAuthBootstrapError]=useState(null);const authBootstrapRetryRef=useRef(null);const '+commit+';'+bootstrap+';capture({userAccountType,goAuthOpen,authBootstrapComplete,commitAccountType,setGoAuthOpen,retry:()=>authBootstrapRetryRef.current?.()});const screen=authBootstrapComplete?(goAuthOpen?"access":"landing"):"recovering";captureScreen(screen);useEffect(()=>{mounts.home++;return()=>mounts.unmounts++;},[]);useOwnerLandingBackground(screen==="landing");return React.createElement(React.Fragment,null,React.createElement("div",{"data-screen":screen},screen),React.createElement(Panel,{visible:authBootstrapComplete&&goAuthOpen,userAccountType,onSetAccountType:commitAccountType,onClose:()=>setGoAuthOpen(false),onOpenPerfil:()=>{},onOpenEmpresa:()=>{}}));};';
- const code=ts.transpileModule(factorySource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+ const code=ts.transpileModule(factorySource,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
  const vm=await import('node:vm'),scope={exports:{}};vm.runInNewContext(code,scope);
  const MountedHome=scope.exports.make({React,AsyncStorage:storageApi,AppState,...sessionEvents,...auth,syncModeFromRole:()=>{},Alert:{alert(){}},capture:value=>{actions=value;},captureScreen:screen=>{if(screenChanges.at(-1)!==screen)screenChanges.push(screen);},mounts,useOwnerLandingBackground:surface.useOwnerLandingBackground,recordAuthTrace,Panel});
  const Observe=()=>{liveView=view.useGoView();liveAdmin=admin.useAdminAccess();return React.createElement(MountedHome);};
@@ -87,7 +87,7 @@ async function fixture({expired=false,status=200}={}){
   '@/data/businessEnrollmentDraft':{businessEnrollmentDraftKey:()=>null,loadBusinessEnrollmentDraft:async()=>null,logBusinessEnrollmentFailure:()=>{}},
   '@/lib/authSession':auth,'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:44,bottom:34})},
  });
- const wrapperCode=ts.transpileModule(wrapper+';exports.HomeScreen=HomeScreen;',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
+ const wrapperCode=ts.transpileModule(wrapper+';exports.HomeScreen=HomeScreen;',{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
  const wrapperScope={exports:{},React,useRef:React.useRef,useAdminAccess:admin.useAdminAccess,useGoView:view.useGoView,HomeScreenContent:Observe,BusinessAccessGate:gate.BusinessAccessGate};
  vm.runInNewContext(wrapperCode,wrapperScope);
  const root=createRoot(document.createElement('div'));

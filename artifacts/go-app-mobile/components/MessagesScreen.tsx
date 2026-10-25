@@ -1,3 +1,4 @@
+import type { ScrollViewInstance } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
 import { DraggableFAB } from "./DraggableFAB";
@@ -267,7 +268,7 @@ export function MessagesScreen({
   const [input, setInput] = useState("");
   const inputRef=useRef("");
   const [inputKey, setInputKey] = useState(0);
-  const threadScrollRef = useRef<ScrollView>(null);
+  const threadScrollRef = useRef<ScrollViewInstance>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [messageError,setMessageError]=useState("");
   const [sending,setSending]=useState(false);

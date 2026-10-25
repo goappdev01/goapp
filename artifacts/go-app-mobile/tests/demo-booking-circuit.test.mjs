@@ -8,7 +8,7 @@ import {fixture as cardFixture} from './helpers/calendar-fixture.mjs';
 const ts = createRequire(path.join(process.cwd(),"package.json"))("typescript");
 const owner="11111111-1111-4111-8111-111111111111", other="22222222-2222-4222-8222-222222222222";
 const plain=value=>JSON.parse(JSON.stringify(value));
-function load(name,imports={}) { const exports={}; const text=ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+function load(name,imports={}) { const exports={}; const text=ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
   vm.runInNewContext(text,{exports,require:key=>{if(key in imports)return imports[key];throw Error("External/runtime dependency forbidden: "+key);},console,Date,Intl,Set,Map});return exports; }
 const storeModule=load("data/businessDemoStore.ts");
 const repoModule=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":load("data/bookingServices.ts")});

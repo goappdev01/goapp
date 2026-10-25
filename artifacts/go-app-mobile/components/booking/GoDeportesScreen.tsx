@@ -1,3 +1,4 @@
+import type { ScrollViewInstance } from "react-native";
 /**
  * GoDeportesScreen
  * Sports booking module — themed entry point to the GO reservas engine.
@@ -139,7 +140,7 @@ interface GoDeportesScreenProps {
 
 export function GoDeportesScreen({ onClose, onOpenBooking, onOpenVerificacion }: GoDeportesScreenProps) {
   const insets    = useSafeAreaInsets();
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
 
   const handleSelectSport = (sport: SportDef) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});

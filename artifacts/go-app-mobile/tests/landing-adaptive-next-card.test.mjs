@@ -12,7 +12,7 @@ function walk(n){nodes.push(n);ts.forEachChild(n,walk)}walk(ast);
 const attribute=(node,name)=>node.openingElement.attributes.properties.find(p=>p.name?.getText(ast)===name)?.initializer?.expression;
 const cards=nodes.filter(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='LandingCardContents');
 const next=cards.find(n=>attribute(n,'footer')?.getText(ast)==='operations.content'),proposal=cards.find(n=>n!==next);
-const compile=code=>ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
+const compile=code=>ts.transpileModule(code,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
 const dom=node=>node?[node,...node.childNodes.flatMap(dom)]:[];
 const byId=(root,id)=>dom(root).find(n=>n.attributes?.['data-testid']===id);
 const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<8;i++)await Promise.resolve();});

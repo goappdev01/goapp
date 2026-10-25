@@ -10,7 +10,7 @@ import { modulePublicationPolicy, loadModulePublicationHook } from "./helpers/mo
 // hooks and the HTTP transport are deterministic; availability is never rebuilt
 // in this fixture, and no network/device/real account is used.
 const ts = createRequire(path.join(process.cwd(), "package.json"))("typescript");
-const source = file => ts.transpileModule(readFileSync(file, "utf8"), { compilerOptions: {
+const source = file => ts.transpileModule(readFileSync(file, "utf8"), { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
 } }).outputText;
 const plain = value => JSON.parse(JSON.stringify(value));

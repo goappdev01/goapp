@@ -12,7 +12,7 @@ function walk(n){all.push(n);ts.forEachChild(n,walk)}walk(ast);
 const attr=(n,k)=>n.openingElement.attributes.properties.find(a=>a.name?.getText(ast)===k)?.initializer?.expression;
 const cards=all.filter(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='LandingCardContents');
 const changes=cards.find(n=>attr(n,'footer').getText(ast).includes('item.kind')),next=cards.find(n=>n!==changes);
-const compile=s=>ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
+const compile=s=>ts.transpileModule(s,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
 const dom=n=>n?[n,...n.childNodes.flatMap(dom)]:[],byId=(root,id)=>dom(root).find(n=>n.attributes?.['data-testid']===id);
 const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<8;i++)await Promise.resolve()});
 const flatten=s=>Array.isArray(s)?Object.assign({},...s.map(flatten)):s??{};

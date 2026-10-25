@@ -6,7 +6,7 @@ process.env.TZ="Europe/Madrid";
 let clock=Date.parse("2026-10-20T13:30:00+02:00");
 class Clock extends Date {constructor(...a){super(...(a.length?a:[clock]));} static now(){return clock;}}
 function load(file,deps={}){const context={exports:{},Date:Clock,Intl,console,require:n=>{if(n in deps)return deps[n];throw Error("Unexpected import "+n);}};
- vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,context);return context.exports;}
+ vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,"utf8"),{compilerOptions:{ alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,context);return context.exports;}
 const core=load("lib/goActionCompletion.ts"),S={userId:"A",context:"live:USER"},B={userId:"B",context:"live:USER"};
 const action=(extra={})=>({id:"task",type:"TAREA_INTERNA",kind:"sent",dateISO:"2026-10-20",date:"20/10",time:"12:00",duration:"1h",estado:"aceptado",ownerUserId:"A",actionContext:"live:USER",intentLabel:"Contacto",notes:"Revisar cita",...extra});
 const doc=()=>core.emptyCompletionDocument(S),plain=v=>JSON.parse(JSON.stringify(v));
@@ -116,7 +116,7 @@ test("provider completion never implies the customer's personal completion",()=>
 });
 test("calendar Pending is driven by the explicit scoped response, not the clock",()=>{
  const src=fs.readFileSync("components/AgendaOperativa.tsx","utf8"),a=src.indexOf("function isOverdue(g: GoEntry)"),b=src.indexOf("\nfunction isInDay",a);
- const f=vm.runInNewContext(ts.transpileModule(src.slice(a,b)+"\nisOverdue",{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{});
+ const f=vm.runInNewContext(ts.transpileModule(src.slice(a,b)+"\nisOverdue",{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,{});
  for(const estado of ["pendiente","aceptado"])assert.equal(f(action({estado,dateISO:"2020-01-01"})),false);
  assert.equal(f(action({localResolutionStatus:"pending"})),true);assert.equal(f(action({localResolutionStatus:"done"})),false);
 });

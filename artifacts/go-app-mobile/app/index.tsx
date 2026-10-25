@@ -1,3 +1,4 @@
+import type { ScrollViewInstance, ViewInstance } from "react-native";
 import {useCustomerBookings} from "@/hooks/useCustomerBookings";
 import {mergeCustomerBookingEntries,type CustomerBookingEntry} from "@/data/customerBookingProjection";
 import { OwnerContextModal as Modal, useOwnerLandingBackground } from "@/components/debug/OwnerContextIndicator";
@@ -3851,9 +3852,9 @@ function HomeScreenContent() {
   const [suggestPlaceDraft, setSuggestPlaceDraft] = useState("");
   const modoScale = useRef(new Animated.Value(1)).current;
   const radialAnim = useRef(new Animated.Value(0)).current;
-  const goRef = useRef<View>(null);
+  const goRef = useRef<ViewInstance>(null);
   const [goCenter, setGoCenter] = useState({ cx: 0, cy: 0 });
-  const catScrollRef = useRef<ScrollView>(null);
+  const catScrollRef = useRef<ScrollViewInstance>(null);
 
   const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const posRef = useRef({ x: 0, y: 0 }).current;
@@ -3962,7 +3963,7 @@ function HomeScreenContent() {
     () => Dimensions.get("window").height || 800,
   );
   useEffect(() => {
-    const sub = Dimensions.addEventListener("change", ({ window }) => {
+    const sub = Dimensions.addEventListener("change", ({ window }: { window: ReturnType<typeof Dimensions.get> }) => {
       setWindowHeight(window.height || 800);
       calScreenWRef.current = window.width || Dimensions.get("window").width;
     });

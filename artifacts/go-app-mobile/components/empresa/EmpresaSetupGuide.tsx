@@ -1,3 +1,4 @@
+import type { ScrollViewInstance } from "react-native";
 /**
  * EmpresaSetupGuide
  * Guided 4-step onboarding for new business accounts.
@@ -947,7 +948,7 @@ export function EmpresaSetupGuide({
 
   const slideAnim  = useRef(new Animated.Value(0)).current;
   const fadeAnim   = useRef(new Animated.Value(0)).current;
-  const scrollRef  = useRef<ScrollView>(null);
+  const scrollRef  = useRef<ScrollViewInstance>(null);
 
   // Fade in when visible
   useEffect(() => {

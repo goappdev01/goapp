@@ -1,3 +1,4 @@
+import type { ViewInstance } from "react-native";
 import React, { createContext, useContext, useRef, useState } from "react";
 import { PanResponder, Text, View, type ViewStyle } from "react-native";
 
@@ -9,13 +10,13 @@ export function boardDropTarget(targets: Array<DropTarget & Rect>, x: number, y:
     .sort((a, b) => a.width * a.height - b.width * b.height)[0];
 }
 type DragValue = {
-  drag: boolean; register: (id: string, target: DropTarget, node: View | null) => void;
+  drag: boolean; register: (id: string, target: DropTarget, node: ViewInstance | null) => void;
   begin: (source: DropTarget, label: string, x: number, y: number, rect: Rect) => void;
   move: (x: number, y: number) => void; end: (x: number, y: number, cancel?: boolean) => void;
 };
 const Context = createContext<DragValue | null>(null);
 export function BoardDragSurface({ children, onDrop }: { children: React.ReactNode; onDrop: (from: DropTarget, to: DropTarget) => void }) {
-  const root = useRef<View>(null), registry = useRef(new Map<string, { target: DropTarget; node: View }>());
+  const root = useRef<ViewInstance>(null), registry = useRef(new Map<string, { target: DropTarget; node: ViewInstance }>());
   const current = useRef<{ source: DropTarget; targets: Array<DropTarget & Rect>; startX: number; startY: number; rect: Rect } | null>(null);
   const [ghost, setGhost] = useState<(Rect & { label: string }) | null>(null);
   const offset = useRef({ x: 0, y: 0 });
@@ -48,7 +49,7 @@ export function BoardDragItem({ target, label, children, style, draggable = true
   target: DropTarget; label: string; children: React.ReactNode; style?: ViewStyle; draggable?: boolean;
 }) {
   const context = useContext(Context), live = useRef(context); live.current = context;
-  const node = useRef<View | null>(null), timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const node = useRef<ViewInstance | null>(null), timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touch = useRef({ x: 0, y: 0, active: false });
   const stop = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; };
   const gesture = useRef(PanResponder.create({

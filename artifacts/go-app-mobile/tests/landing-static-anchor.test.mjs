@@ -5,7 +5,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
 const require=createRequire(path.join(process.cwd(),'package.json')),ts=require('typescript');
-function load(file){const scope={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,scope);return scope.exports;}
+function load(file){const scope={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,scope);return scope.exports;}
 const layout=load('components/landing/landingResponsiveLayout.ts'),visibility=load('components/landing/landingV1Visibility.ts');
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 function find(node,predicate){if(predicate(node))return node;let result;ts.forEachChild(node,n=>{if(!result)result=find(n,predicate)});return result;}

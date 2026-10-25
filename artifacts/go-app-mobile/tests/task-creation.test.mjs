@@ -20,7 +20,7 @@ function load(file, modules = {}, extra = {}) {
     },
   };
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, scope);
   return scope.exports;
 }
@@ -38,7 +38,7 @@ const agenda = ts.createSourceFile("Agenda.tsx", readFileSync("components/Agenda
 const dayFilter = agenda.statements.find(n => ts.isFunctionDeclaration(n) && n.name?.text === "isInDay");
 const calendar = {};
 vm.runInNewContext(ts.transpileModule(dayFilter.getText(agenda), {
-  compilerOptions: { target: ts.ScriptTarget.ES2022 },
+  compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022 },
 }).outputText, calendar);
 export function fixture(initial = [], userId = null) {
   let raw = JSON.stringify(initial), fail = false, writes = 0;

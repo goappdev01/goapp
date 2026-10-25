@@ -21,7 +21,7 @@ const statement=name=>home.statements.find(n=>ts.isVariableStatement(n)&&n.decla
 const geometry=source.slice(statement('landingOrbitTop').getStart(ast),statement('landingPanelWidth').end);
 const names=['isBusinessMode','isUserMode','fullLandingArchitecture','isUserV1Surface','uiScaleFactor','goSize','orbitRadius','orbitBtnSize','orbitWrapSize','microR','microSz','systemBoundingRadius','SYSTEM_MARGIN_X','SYSTEM_MARGIN_Y','dockRight','landingDock','maxX','minX','paddingBottom','LAYOUT','orbitAirGap','bottomReserved'];
 const geometrySource=names.map(name=>'const '+declarations.get(name).getText(ast)+';').join('\n')+'\n'+geometry+'\nresult={scale:uiScaleFactor,frame:landingBaseFrame,panels:landingPanels};';
-const geometryCode=ts.transpileModule(geometrySource,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+const geometryCode=ts.transpileModule(geometrySource,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 const layout=evaluate('components/landing/landingResponsiveLayout.ts'),policy=evaluate('components/landing/landingPanels.ts'),visibility=evaluate('components/landing/landingV1Visibility.ts');
 const profiles=[{name:'ADMIN',view:'ADMIN',owner:true,business:false,preview:false},{name:'USUARIO',view:'USER',owner:true,business:false,preview:false},{name:'EMPRESA',view:'BUSINESS',owner:false,business:true,preview:false},{name:'EMPRESA DEMO',view:'BUSINESS',owner:true,business:false,preview:true}];
 function regions(profile,preset,selected='visit',measuredHeight=320){
@@ -130,7 +130,7 @@ for(const profile of profiles)test(`${profile.name}: short bodies have no bounce
 
 test('body-only and natural-height consumers retain their original contract',()=>{
  const react={createElement:(type,props,...children)=>({type,props:props||{},children})};const scope={exports:{},require:n=>n==='react'?react:n==='react-native'?{View:'View',ScrollView:'ScrollView',StyleSheet:{absoluteFill:{}}}:undefined};
- vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/landing/LandingContentViewport.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,scope);
+ vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/landing/LandingContentViewport.tsx','utf8'),{compilerOptions:{ alwaysStrict: false,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,scope);
  const api=scope.exports,children={preserve:true},style={gap:12},heights=[];
  const props={overflowing:false,onHeight:h=>heights.push(h),contentContainerStyle:style,children};
  const body=api.LandingCardContents(props);assert.equal(body.type,'ScrollView');assert.equal(body.children[0],children);assert.equal(body.props.contentContainerStyle,style);body.props.onContentSizeChange(354,500);

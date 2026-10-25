@@ -14,7 +14,7 @@ export function find(predicate, root = ast) {
 }
 export const declaration = name => find(n => ts.isVariableDeclaration(n) && n.name.getText(ast) === name).initializer.getText(ast);
 export const transpile = code => ts.transpileModule(code, {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React },
+  compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React },
 }).outputText;
 function evaluate(code, globals = {}) {
   const scope = { exports: {}, ...globals }; vm.runInNewContext(transpile(code), scope); return scope.exports;

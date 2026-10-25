@@ -8,7 +8,7 @@ const ts=createRequire(path.join(process.cwd(),'package.json'))('typescript'),so
 function find(n,p){if(p(n))return n;let result;ts.forEachChild(n,c=>{if(!result)result=find(c,p);});return result;}
 const search=find(ast,n=>ts.isArrowFunction(n)&&n.body.getText(ast).startsWith('{\n        const panelBottom = kbHeight'));
 assert.ok(search,'exercise the actual existing orbital search');
-const code=ts.transpileModule('exports.render='+search.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
+const code=ts.transpileModule('exports.render='+search.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 const nodes=(n,p)=>n&&typeof n==='object'?[...(p(n)?[n]:[]),...(n.children??[]).flatMap(c=>nodes(c,p))]:[];
 const text=n=>typeof n==='string'?n:(n?.children??[]).map(text).join('');
 function fixture({keyboard=0,height=844,query=''}={}){
@@ -36,7 +36,7 @@ test('the actual search result selects the configured business without inventing
 test('both booking exits preserve the exact booking ID and real route selects the date/month without writing preferences',()=>{
  const callback=find(ast,n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='onGoToBooking'&&n.initializer?.getText(ast).includes('setCalScrollToDateTarget'))?.initializer.expression;assert.ok(callback);
  const calls=[],scope={exports:{},Date,setShowBookingFromCal:v=>calls.push(['closed',v]),setDateISODraft:v=>calls.push(['day',v]),setCalBgViewMonth:v=>calls.push(['month',v]),setCalOpen:v=>calls.push(['open',v]),setCalScrollToDateTarget:v=>calls.push(['target',v]),setCalHighlightEntryId:v=>calls.push(['highlight',v])};
- vm.runInNewContext(ts.transpileModule('exports.go='+callback.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,scope);
+ vm.runInNewContext(ts.transpileModule('exports.go='+callback.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,scope);
  scope.exports.go('2031-12-28','11:37','exact-booking-id');const target=calls.find(c=>c[0]==='target')[1];assert.equal(target.entryId,'exact-booking-id');assert.equal(target.dateISO,'2031-12-28');assert.ok(calls.some(c=>c[0]==='month'&&c[1]==='2031-12'));
  const wrapper=fs.readFileSync('components/booking/GoProveedorReservaSheet.tsx','utf8');assert.equal(wrapper.split('props.onBookingConfirmed?.(dateISO, time,entryId)').length-1,2);
 });

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import vm from "node:vm";
 const require=createRequire(import.meta.url),ts=require("typescript");
-function load(file,modules){const c={exports:{},require:k=>{if(k in modules)return modules[k];throw Error("Unexpected import "+k);}};vm.runInNewContext(ts.transpileModule(readFileSync(file,"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,c);return c.exports;}
+function load(file,modules){const c={exports:{},require:k=>{if(k in modules)return modules[k];throw Error("Unexpected import "+k);}};vm.runInNewContext(ts.transpileModule(readFileSync(file,"utf8"),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,c);return c.exports;}
 function fixture(platform="ios",initial={granted:true,canAskAgain:true,ios:{status:2,allowsSound:true,allowsAlert:true}}){let permission=initial,requested=0;const calls=[],pending=[];
  const native={IosAuthorizationStatus:{AUTHORIZED:2,PROVISIONAL:3,EPHEMERAL:4},AndroidImportance:{HIGH:4},SchedulableTriggerInputTypes:{DATE:"date"},
  async getPermissionsAsync(){return permission;},async requestPermissionsAsync(options){requested++;calls.push(["permission",options]);return permission;},async setNotificationChannelAsync(id,options){calls.push(["channel",id,options]);},

@@ -8,7 +8,7 @@ import { loadAuthSession } from "./helpers/auth-session-fixture.mjs";
 import { modulePublicationPolicy } from "./helpers/module-publication-fixture.mjs";
 
 const ts = createRequire(path.join(process.cwd(), "package.json"))("typescript");
-const compile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+const compile = source => ts.transpileModule(source, { compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 const plain = value => JSON.parse(JSON.stringify(value));
 function load(file, imports = {}, globals = {}) {
   const scope = { exports: {}, Date, Intl, Headers, URLSearchParams, console: { log() {}, warn() {} },

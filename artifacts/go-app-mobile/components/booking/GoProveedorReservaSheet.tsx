@@ -1,3 +1,4 @@
+import type { ScrollViewInstance } from "react-native";
 /**
  * GoProveedorReservaSheet
  * ════════════════════════════════════════════════════════════════════
@@ -185,7 +186,7 @@ function LocalProveedorReservaSheet({
   const { t } = useLanguage();
 
   // ── Refs para auto-scroll entre pasos ─────────────────────────────────────
-  const scrollRef  = useRef<ScrollView>(null);
+  const scrollRef  = useRef<ScrollViewInstance>(null);
   const paso2Y     = useRef(0);
   const paso3Y     = useRef(0);
 

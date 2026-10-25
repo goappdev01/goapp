@@ -22,7 +22,7 @@ El cierre de sesión guarda primero la marca no secreta `go_auth_signed_out_v2`,
 
 ## Plataformas y límites
 
-- SecureStore está incluido en Expo Go; se usa la versión `~57.0.4` prevista por Expo SDK 57. El plugin añadido prepara la exclusión de sus datos del backup Android para futuros builds propios.
+- SecureStore está incluido en Expo Go; se usa la versión `~58.0.2` prevista por Expo SDK 58. El plugin añadido prepara la exclusión de sus datos del backup Android para futuros builds propios.
 - Expo Go no permite exigir biometría con todas las capacidades de una app propia. Se usa almacenamiento protegido sin `requireAuthentication`; no se prometen prompts de Face ID.
 - Un iPhone bloqueado puede impedir temporalmente la lectura. Al desbloquear y regresar se puede reintentar sin borrar la sesión.
 - Algunas versiones nativas pueden rechazar valores grandes. El error se conserva como recuperable: no se truncan tokens ni se recurre a AsyncStorage.
@@ -38,7 +38,7 @@ El cierre de sesión guarda primero la marca no secreta `go_auth_signed_out_v2`,
 
 Las pruebas automatizadas utilizan almacenes ficticios separados, el módulo real de sesión y un proveedor Auth simulado. No equivalen a una comprobación de Keychain en un iPhone real.
 
-Referencias oficiales: https://docs.expo.dev/versions/v57.0.0/sdk/securestore/ y https://docs.expo.dev/guides/authentication/.
+Referencias oficiales: https://docs.expo.dev/versions/v58.0.0/sdk/securestore/ y https://docs.expo.dev/guides/authentication/.
 ## Formulario nativo de credenciales — iOS
 
 El login identifica explícitamente el correo como textContentType username y la contraseña como password en iOS. En registro usa emailAddress y newPassword. Android/web conservan autoComplete username/current-password o email/new-password. No se fijan ambos mecanismos simultáneamente en iOS. La contraseña mantiene secureTextEntry, sin corrección ni capitalización automática.

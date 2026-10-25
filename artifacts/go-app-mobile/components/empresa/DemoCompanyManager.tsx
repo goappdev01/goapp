@@ -1,3 +1,4 @@
+import type { TextInputInstance } from "react-native";
 import React, { useRef, useState } from "react";
 import { Alert, Keyboard, ScrollView, Share, Text, TextInput, TouchableOpacity, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
@@ -9,7 +10,7 @@ export function DemoCompanyManager({ open, onOpenChange, onOpenConfiguration }: 
 }) {
   const { catalog, demo } = useOwnerBusinessDemo(); const { lang } = useLanguage();
   const [name, setName] = useState(""), [busy, setBusy] = useState(false), [backupText, setBackupText] = useState(""), [importOpen, setImportOpen] = useState(false);
-  const busyRef = useRef(false), nameInput = useRef<TextInput>(null), latestName = useRef("");
+  const busyRef = useRef(false), nameInput = useRef<TextInputInstance>(null), latestName = useRef("");
   const [createError, setCreateError] = useState("");
   const [creating, setCreating] = useState(false), [toolsOpen, setToolsOpen] = useState(false);
   if (!catalog || !demo) return null;

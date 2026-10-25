@@ -88,7 +88,7 @@ test('expanded changes use the same fixed safe region as visit/task', () => {
     && node.name.getText(home) === 'PANEL_W');
   const module = {exports:{}};
   vm.runInNewContext(ts.transpileModule(readFileSync('components/landing/landingPanels.ts','utf8'),
-    {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,module);
+    {compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,module);
   for(const width of [320,390,430])for(const nextOpen of [false,true]){
     const frame={virtual:false,width,height:260,baseline:320,top:264,left:0,scroll:false,contentHeight:260,naturalHeight:500};
     const landingPanels=module.exports.landingPanelFrames({frame,screenHeight:844,insets:{left:0,right:0},nextOpen,changesOpen:true});
@@ -114,7 +114,7 @@ test('recovered Humanity placement includes its label and avoids orbital and pan
   const exports = {};
   vm.runInNewContext(ts.transpileModule(
     readFileSync('components/landing/humanityPlacement.ts', 'utf8'),
-    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
+    { compilerOptions: { esModuleInterop: false, alwaysStrict: false, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } },
   ).outputText, { exports });
   const { placeHumanity, overlapsHumanity } = exports;
   const tightSlot = placeHumanity({ cx: 200, cy: 200, radius: 20, buttonSize: 20,

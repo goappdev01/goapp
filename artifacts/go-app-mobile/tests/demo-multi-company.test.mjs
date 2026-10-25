@@ -4,7 +4,7 @@ import {readFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import vm from "node:vm";
 const ts=createRequire(import.meta.url)("typescript"), owner="11111111-1111-4111-8111-111111111111", other="22222222-2222-4222-8222-222222222222";
-function load(file,imports={}) { const exports={}; vm.runInNewContext(ts.transpileModule(readFileSync(file,"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:key=>{if(key in imports)return imports[key];throw Error("Unexpected dependency "+key);},Date,Intl,Map,Set});return exports; }
+function load(file,imports={}) { const exports={}; vm.runInNewContext(ts.transpileModule(readFileSync(file,"utf8"),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,{exports,require:key=>{if(key in imports)return imports[key];throw Error("Unexpected dependency "+key);},Date,Intl,Map,Set});return exports; }
 const storeAPI=load("data/businessDemoStore.ts"),catalogAPI=load("data/businessDemoCatalog.ts",{"./businessDemoStore":storeAPI}),repoAPI=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeAPI,"./bookingServices":load("data/bookingServices.ts")});
 const plain=value=>JSON.parse(JSON.stringify(value));
 const initial={businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],activeDays:[0,1,2,3,4],openFrom:"09:00",openTo:"20:00",daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};

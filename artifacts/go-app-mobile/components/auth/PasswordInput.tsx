@@ -1,3 +1,4 @@
+import type { TextInputInstance } from "react-native";
 import React, { forwardRef, useEffect, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from "react-native";
 import { Feather } from "@expo/vector-icons";
@@ -9,7 +10,7 @@ type PasswordInputProps = Omit<TextInputProps, "secureTextEntry" | "multiline"> 
 };
 
 /** Presentation only: the caller keeps ownership of the value and credential/autofill contract. */
-export const PasswordInput = forwardRef<TextInput, PasswordInputProps>(function PasswordInput({
+export const PasswordInput = forwardRef<TextInputInstance, PasswordInputProps>(function PasswordInput({
   style, onFocus, onBlur, testID = "password", showPasswordLabel = "Mostrar contraseña",
   hidePasswordLabel = "Ocultar contraseña", capsLockLabel = "Bloq Mayús activado", ...props
 }, ref) {

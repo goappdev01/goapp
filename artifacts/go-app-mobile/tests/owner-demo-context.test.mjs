@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import vm from "node:vm";
 const ts = createRequire(path.join(process.cwd(), "package.json"))("typescript");
-const compile = p => ts.transpileModule(readFileSync(p,"utf8"),{compilerOptions:{
+const compile = p => ts.transpileModule(readFileSync(p,"utf8"),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,
   target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,
 }}).outputText;
 const ownerId="11111111-1111-4111-8111-111111111111";
@@ -300,7 +300,7 @@ test("Calendar requests readable light status icons without changing Landing or 
     if(attr)expression=attr.initializer.expression.getText(ast);
   } ts.forEachChild(node,scan);}; scan(ast); assert.ok(expression);
   const flags=Object.fromEntries([...expression.matchAll(/\b(\w+Open)\b/g)].map(m=>[m[1],false]));
-  const value=overrides=>{const scope={exports:{},...flags,...overrides}; vm.runInNewContext(ts.transpileModule("exports.value=("+expression+");",{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,scope);return scope.exports.value;};
+  const value=overrides=>{const scope={exports:{},...flags,...overrides}; vm.runInNewContext(ts.transpileModule("exports.value=("+expression+");",{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,scope);return scope.exports.value;};
   assert.equal(value({calOpen:true}),"light"); assert.equal(value({calOpen:true,empresaOpen:true}),"light");
   assert.equal(value({calOpen:false,empresaOpen:true}),"dark"); assert.equal(value({calOpen:false}),"light");
 });

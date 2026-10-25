@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 const ts=createRequire(import.meta.url)('typescript'),scope={exports:{}};
-vm.runInNewContext(ts.transpileModule(readFileSync('data/bookingServices.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,scope);
+vm.runInNewContext(ts.transpileModule(readFileSync('data/bookingServices.ts','utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,scope);
 const {summarizeBookingServices,bookingServiceIds,staffSupportsBookingServices}=scope.exports;
 const item=(id,patch={})=>({id,businessId:'company',title:id,type:'service',durationMinutes:30,customerCapacity:1,unitQuantity:1,price:10,currency:'EUR',active:true,visible:true,paymentRequired:false,...patch});
 const plain=v=>JSON.parse(JSON.stringify(v));

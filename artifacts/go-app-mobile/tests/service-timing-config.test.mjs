@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import vm from "node:vm";
 const ts = createRequire(path.join(process.cwd(), "package.json"))("typescript");
-const compile = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React } }).outputText;
+const compile = source => ts.transpileModule(source, { compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React } }).outputText;
 const timing = { exports: {}, Intl };
 vm.runInNewContext(compile(readFileSync("data/serviceTiming.ts", "utf8")), timing);
 const { validateServiceTiming, serviceTimingDuration, serializeServiceConfiguration, validateBookingResources, validateBusinessTimezone } = timing.exports;

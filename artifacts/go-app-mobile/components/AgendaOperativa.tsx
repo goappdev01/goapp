@@ -1,3 +1,4 @@
+import type { ScrollViewInstance, ViewInstance } from "react-native";
 import { useGoCalendarEntries } from "@/hooks/useGoCalendarEntries";
 import { GoCalendarSlot } from "@/components/ui/GoCalendarSlot";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -42,7 +43,7 @@ import {
 import {
   Gesture,
   GestureDetector,
-  ScrollView as GHScrollView,
+  LegacyScrollView as GHScrollView,
 } from "react-native-gesture-handler";
 import ReAnimated, {
   interpolateColor,
@@ -765,7 +766,7 @@ export function AgendaBoard({
   const bookingPolicy=expandedBookingItem?reservationCardPolicy(expandedBookingItem):null;
   useEffect(()=>{if(expandedBookingItem){const current=goLog.find(e=>e.id===expandedBookingItem.id);if(!current)setExpandedBookingItem(null);else if(current!==expandedBookingItem)setExpandedBookingItem(current);}},[goLog,expandedBookingItem]);
   const [bookingMsgDraft, setBookingMsgDraft] = useState("");
-  const chatScrollRef = useRef<ScrollView>(null);
+  const chatScrollRef = useRef<ScrollViewInstance>(null);
   // Optimistic local messages — always shown immediately on send; merged with goChats prop
   const [localChatMsgs, setLocalChatMsgs] = useState<Record<string, BookingChatMessage[]>>({});
 
@@ -1033,7 +1034,7 @@ export function AgendaBoard({
   }));
 
   // ── Layout refs (never trigger re-renders) ───────────────────────
-  const boardViewRef  = useRef<View>(null);
+  const boardViewRef  = useRef<ViewInstance>(null);
   const boardX        = useRef(0); // board left edge in window coords
   const boardY        = useRef(0); // board top edge in window coords — needed to
                                     // convert absoluteY (screen) → board-local Y

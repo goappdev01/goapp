@@ -1,3 +1,4 @@
+import type { ScrollViewInstance, TextInputInstance, ViewInstance } from "react-native";
 /**
  * EmpresaConfigScreen
  * ═══════════════════════════════════════════════════════════════════════════
@@ -333,12 +334,12 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
   // Paso Ubicación — protección: el botón Siguiente solo se activa cuando
   // el usuario ha visto la sección CONTACTO o ha rellenado al menos un campo.
   const [contactSectionSeen, setContactSectionSeen] = useState(false);
-  const scrollRef   = useRef<ScrollView>(null);
-  const scrollContentRef = useRef<View>(null);
+  const scrollRef   = useRef<ScrollViewInstance>(null);
+  const scrollContentRef = useRef<ViewInstance>(null);
   const slideAnim   = useRef(new Animated.Value(0)).current;
   const headerAnim  = useRef(new Animated.Value(1)).current;
-  const activeNewInput = useRef<TextInput | null>(null);
-  const revealProfessional = useCallback((input: TextInput) => {
+  const activeNewInput = useRef<TextInputInstance | null>(null);
+  const revealProfessional = useCallback((input: TextInputInstance) => {
     activeNewInput.current = input;
     const content = scrollContentRef.current;
     if (content) input.measureLayout(content, (_x, y) => {
@@ -742,8 +743,8 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
 // PASO 1 — NOMBRE
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function StepNombre({ onFocusField }: { onFocusField?: (input: TextInput) => void }) {
-  const nameInput = useRef<TextInput>(null);
+function StepNombre({ onFocusField }: { onFocusField?: (input: TextInputInstance) => void }) {
+  const nameInput = useRef<TextInputInstance>(null);
   const { t } = useLanguage();
   const { config, updateConfig } = useBusinessConfig();
   return (
@@ -774,9 +775,9 @@ function StepNombre({ onFocusField }: { onFocusField?: (input: TextInput) => voi
 // PASO 2 — UBICACIÓN
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function StepUbicacion({ onFocusField }: { onFocusField?: (input: TextInput) => void }) {
-  const addressInput = useRef<TextInput>(null);
-  const contactInputs = useRef<Partial<Record<"phone" | "mobile" | "whatsapp", TextInput | null>>>({});
+function StepUbicacion({ onFocusField }: { onFocusField?: (input: TextInputInstance) => void }) {
+  const addressInput = useRef<TextInputInstance>(null);
+  const contactInputs = useRef<Partial<Record<"phone" | "mobile" | "whatsapp", TextInputInstance | null>>>({});
   const { t, lang } = useLanguage();
   const { saveDeviceCoordinates, beginLocationReturn, consumeLocationReturn, finishLocationReturn } = useOwnerBusinessDemo();
   const { config, updateConfig, demo } = useBusinessConfig();
@@ -1492,7 +1493,7 @@ function ProfessionalScheduleSection({
 }
 
 function StepEspacios({ currentSector, saveRef, onRevealProfessional }: {
-  currentSector: Sector | null; saveRef?: StepSaveRef; onRevealProfessional?: (input: TextInput) => void;
+  currentSector: Sector | null; saveRef?: StepSaveRef; onRevealProfessional?: (input: TextInputInstance) => void;
 }) {
   const { t, lang } = useLanguage();
   const { config, updateConfig, demo } = useBusinessConfig();
@@ -1519,7 +1520,7 @@ function StepEspacios({ currentSector, saveRef, onRevealProfessional }: {
   const staffDraftKey = (item: PlantillaItem, index: number) => item.staffIds?.[index] ?? item.id + "_" + index;
   const [draftNames, setDraftNamesLocal] = useState<Record<string, string>>({});
   const draftNamesRef = useRef(draftNames);
-  const professionalInputs = useRef(new Map<string, TextInput>());
+  const professionalInputs = useRef(new Map<string, TextInputInstance>());
   const pendingReveal = useRef<string | null>(null);
   const lastCreatedProfessional = useRef<string | null>(null);
   const addingProfessionalRef = useRef(false);

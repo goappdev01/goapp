@@ -8,7 +8,7 @@ import {createRequire} from 'node:module';
 const require=createRequire(path.join(process.cwd(),'package.json'));
 const ts=require('typescript');
 const {React,createRoot,document,rn}=require('./tests/helpers/react-lifecycle.cjs');
-function load(file,imports={}){const ctx={exports:{},require:n=>n==='react'?React:n==='react-native'?rn:imports[n]};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,ctx);return ctx.exports;}
+function load(file,imports={}){const ctx={exports:{},require:n=>n==='react'?React:n==='react-native'?rn:imports[n]};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,ctx);return ctx.exports;}
 const policy=load('components/landing/landingPanels.ts'),layout=load('components/landing/landingResponsiveLayout.ts'),humanity=load('components/landing/humanityPlacement.ts');
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 const protectedBaselines=JSON.parse(fs.readFileSync(new URL('./helpers/landing-protected-baselines.json',import.meta.url),'utf8'));
@@ -26,7 +26,7 @@ async function mountCommands(counts){
  const buttons=new Map();
  const native={...rn,View:props=>React.createElement('div',{'data-testid':props.testID,'data-layout':JSON.stringify(props.style)},props.children),TouchableOpacity:props=>{buttons.set(props.testID,props);return React.createElement('button',{'data-testid':props.testID,disabled:props.disabled},props.children)}};
  const ctx={exports:{},require:n=>n==='react'?React:n==='react-native'?native:n==='./landingPanels'?policy:undefined};
- vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/landing/LandingPanelCommands.tsx','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,ctx);
+ vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/landing/LandingPanelCommands.tsx','utf8'),{compilerOptions:{ alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,ctx);
  let state,clean;const actions=[],animations=[];
  Object.assign(ctx,{useState:React.useState,React,LandingPanelCommands:ctx.exports.LandingPanelCommands,
   capture:v=>state=v,captureClean:fn=>clean=fn,nextGroups:{visit:[{g:{id:'visit-1',type:'GO_BOOKING',color:'#60a5fa'}}],task:[{g:{id:'task-1',type:'TAREA',color:'#a855f7'}},{g:{id:'task-2',type:'TAREA_INTERNA',color:'#a855f7'}}]},allPendientes:[{kind:'cambio',g:{id:'change-1'}}],
@@ -35,7 +35,7 @@ async function mountCommands(counts){
  const hooks=['nextAptMinimized','nextPanelKind','cambiosOpen','nextCardIdx','cambiosCardIdx'].map(name=>'const '+find(ast,n=>ts.isVariableDeclaration(n)&&ts.isArrayBindingPattern(n.name)&&n.name.elements[0]?.name.getText(ast)===name).getText(ast)+';').join('\n');
  const closePanels=find(declaration('closeTopLayer'),n=>ts.isIfStatement(n)&&n.expression.getText(ast)==='!nextAptMinimized || cambiosOpen');assert.ok(closePanels);
  const fixture=`function Fixture(){clearButtons();${hooks}\n capture({nextAptMinimized,nextPanelKind,cambiosOpen,nextCardIdx});captureClean(()=>{${closePanels.getText(ast)}});return React.createElement(LandingPanelCommands,{frame:{x:18,y:350,width:354,height:46},commands:${commandsExpression}});}exports.Fixture=Fixture;`;
- vm.runInNewContext(ts.transpileModule(fixture,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,ctx);
+ vm.runInNewContext(ts.transpileModule(fixture,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,ctx);
  const makeEntries=counts=>{
   ctx.nextGroups={visit:Array.from({length:counts.visit},(_,i)=>({g:{id:'visit-'+(i+1),type:'GO_BOOKING',color:'#60a5fa'}})),task:Array.from({length:counts.task},(_,i)=>({g:{id:'task-'+(i+1),type:'TAREA',color:'#a855f7'}}))};
   ctx.allPendientes=Array.from({length:counts.changes},(_,i)=>({kind:'cambio',g:{id:'change-'+(i+1)}}));

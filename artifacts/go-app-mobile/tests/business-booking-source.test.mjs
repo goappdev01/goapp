@@ -1,6 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import {createRequire} from 'node:module';
 const require=createRequire(path.join(process.cwd(),'package.json')),{React,createRoot,document,ts}=require('./tests/helpers/react-lifecycle.cjs');
-const compile=source=>ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const compile=source=>ts.transpileModule(source,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const projection={exports:{}};vm.runInNewContext(compile(fs.readFileSync('data/customerBookingProjection.ts','utf8')),projection);
 const presentation={exports:{}};vm.runInNewContext(compile(fs.readFileSync('data/goEntryPresentation.ts','utf8')),presentation);
 const owner='11111111-1111-4111-8111-111111111111',other='22222222-2222-4222-8222-222222222222',company='33333333-3333-4333-8333-333333333333',secondCompany='44444444-4444-4444-8444-444444444444',bookingId='55555555-5555-4555-8555-555555555555';

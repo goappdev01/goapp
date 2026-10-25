@@ -21,7 +21,7 @@ function load(file, modules, globals = {}) {
     },
   };
   vm.runInNewContext(ts.transpileModule(readFileSync(path.resolve(appRoot, file), "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, context, { filename: file });
   return context.exports;
 }

@@ -18,7 +18,7 @@ const compile = (name, reactCompiler = false) => {
       plugins: [[expoRequire("babel-plugin-react-compiler"), { target: "19" }]],
     }).code;
   }
-  return ts.transpileModule(code, { compilerOptions: {
+  return ts.transpileModule(code, { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
   } }).outputText;
 };

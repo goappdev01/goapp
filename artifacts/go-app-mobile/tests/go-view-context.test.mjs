@@ -7,7 +7,7 @@ import vm from 'node:vm';
 
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const ts = require('typescript');
-const transpile = file => ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: {
+const transpile = file => ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
 } }).outputText;
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };

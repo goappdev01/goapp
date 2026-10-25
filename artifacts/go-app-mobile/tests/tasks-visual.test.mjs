@@ -20,7 +20,7 @@ function sheet(name) {
     && node.openingElement.attributes.properties.some(p => p.name?.text === 'visible' && p.initializer?.getText(home) === `{${name}}`));
 }
 function compile(text) {
-  return ts.transpileModule(text, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React } }).outputText;
+  return ts.transpileModule(text, { compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React } }).outputText;
 }
 const compactFormatter = find(home, node => ts.isFunctionDeclaration(node) && node.name?.text === 'formatCompactProposalSlot');
 assert.ok(compactFormatter, 'use the actual compact slot formatter');

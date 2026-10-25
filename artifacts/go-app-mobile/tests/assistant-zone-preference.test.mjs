@@ -8,7 +8,7 @@ function load(file, modules, globals = {}) {
   const context = { exports: {}, console, Date, Error, setTimeout, clearTimeout, ...globals,
     require(name) { if (name in modules) return modules[name]; throw Error("Unexpected " + name); } };
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, context);
   return context.exports;
 }

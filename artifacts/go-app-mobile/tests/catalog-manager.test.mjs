@@ -6,7 +6,7 @@ import vm from 'node:vm';
 import {createRequire} from 'node:module';
 const require=createRequire(path.join(process.cwd(),'package.json'));
 const {React,createRoot,document,ts}=require('./tests/helpers/react-lifecycle.cjs');
-const compile=file=>ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
+const compile=file=>ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
 function load(file,imports={}){const scope={exports:{},Date,console,require:key=>{if(key in imports)return imports[key];throw Error('Forbidden dependency '+key);}};vm.runInNewContext(compile(file),scope);return scope.exports;}
 const stores=load('data/businessDemoStore.ts'),services=load('data/bookingServices.ts'),repositories=load('data/demoBookingRepository.ts',{'./businessDemoStore':stores,'./bookingServices':services});
 const text=node=>typeof node==='string'?node:Array.isArray(node)?node.map(text).join(''):text(node?.props?.children??'');

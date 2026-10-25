@@ -14,7 +14,7 @@ const cards=all.filter(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(a
 const attr=(card,name)=>card.openingElement.attributes.properties.find(p=>p.name?.getText(ast)===name)?.initializer?.expression;
 const next=cards.find(card=>attr(card,'footer')?.getText(ast)==='operations.content');
 const changes=cards.find(card=>attr(card,'footer')?.getText(ast).includes('renderLandingOperations(item.g).content'));
-const compile=code=>ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
+const compile=code=>ts.transpileModule(code,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
 const text=node=>typeof node==='string'||typeof node==='number'?String(node):Array.isArray(node)?node.map(text).join(''):node?.props?text(node.props.children):'';
 const dom=node=>node?[node,...node.childNodes.flatMap(dom)]:[];
 const byId=(container,id)=>dom(container).find(n=>n.attributes?.['data-testid']===id);
@@ -125,7 +125,7 @@ for(const profile of profiles)for(const [kind,which] of [['visit/task',()=>next]
 test('HOLD and body-only callers reserve no empty operations row',()=>{
  const fakeReact={createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)})};
  const context={exports:{},require:name=>name==='react'?fakeReact:name==='react-native'?{View:'View',ScrollView:'ScrollView',StyleSheet:{absoluteFill:{}}}:undefined};
- vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/landing/LandingContentViewport.tsx','utf8'),{compilerOptions:{jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText,context);
+ vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/landing/LandingContentViewport.tsx','utf8'),{compilerOptions:{ alwaysStrict: false,jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText,context);
  const render=context.exports.LandingCardContents,props={overflowing:false,onHeight(){},children:'body',contentContainerStyle:{gap:12}};
  const bodyOnly=render(props);assert.equal(bodyOnly.type,'ScrollView');
  const held=render({...props,header:'HOLD',footer:false,footerGap:12});

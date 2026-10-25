@@ -18,7 +18,7 @@ const button = nodes.find(n => ts.isJsxElement(n) && n.openingElement.tagName.ge
 assert.ok(button, 'test the real functional satellite renderer');
 const definitions = nodes.find(n => ts.isVariableDeclaration(n) && n.name.getText(ast) === 'satellites'
   && ts.isConditionalExpression(n.initializer) && ts.isArrayLiteralExpression(n.initializer.whenFalse)).initializer.whenFalse.elements;
-const compilerOptions = { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true };
+const compilerOptions = { alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true };
 const compile = text => ts.transpileModule(text, { compilerOptions }).outputText;
 const react = {
   createElement(type, props, ...children) {

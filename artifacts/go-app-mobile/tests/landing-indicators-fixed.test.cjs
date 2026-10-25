@@ -3,7 +3,7 @@ const req=createRequire(path.join(process.cwd(),'package.json')),ts=req('typescr
 const component='components/landing/LandingContentViewport.tsx';
 const react={createElement:(type,props,...children)=>({type,props:props||{},children})};
 const scope={exports:{},require:name=>name==='react'?react:name==='react-native'?{ScrollView:'ScrollView',View:'View',StyleSheet:{absoluteFill:{position:'absolute',top:0,left:0,right:0,bottom:0}}}:undefined};
-vm.runInNewContext(ts.transpileModule(fs.readFileSync(component,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,scope);
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(component,'utf8'),{compilerOptions:{ alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,scope);
 const api=scope.exports;
 const body={id:'existing-card-and-actions'},style={gap:12};
 const render=()=>api.LandingCardContents({overflowing:false,onHeight(){},contentContainerStyle:style,children:body});

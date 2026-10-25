@@ -8,7 +8,7 @@ import { modulePublicationPolicy, loadModulePublicationHook } from "./helpers/mo
 const ts = createRequire(path.join(process.cwd(),"package.json"))("typescript");
 const owner="11111111-1111-4111-8111-111111111111";
 const turn=async()=>{for(let i=0;i<15;i++)await new Promise(resolve=>setTimeout(resolve,0));};
-const compile=name=>ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
+const compile=name=>ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 function pure(name,imports={}){const exports={};vm.runInNewContext(compile(name),{exports,require:key=>{if(key in imports)return imports[key];throw Error("Unexpected dependency "+key);},Date,Intl,Map,Set});return exports;}
 const storeModule=pure("data/businessDemoStore.ts"),repoModule=pure("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":pure("data/bookingServices.ts")});
 function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
@@ -102,7 +102,7 @@ test("Landing search keeps the live activation/category filters and ignores late
       bookingActivityEnabled:modulePublicationPolicy.bookingActivityEnabled,canonicalBookingActivity:modulePublicationPolicy.canonicalBookingActivity,
       demoBookingRepository:demo?{searchBusinesses:()=>{calls.push("demo");return pending;}}:undefined,
       getBusinesses:()=>{calls.push("live");return pending;},setGoSearchBusinesses:rows=>results.push(rows)};
-    vm.runInNewContext(ts.transpileModule("exports.run="+effect.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,scope);
+    vm.runInNewContext(ts.transpileModule("exports.run="+effect.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,scope);
     scope.exports.run();resolve(rows);await turn();assert.deepEqual(calls,[demo?"demo":"live"]);assert.deepEqual(Array.from(results[0],r=>r.id),["live"]);
     let resolveLate; scope.getBusinesses=()=>new Promise(done=>{resolveLate=done;});scope.demoBookingRepository=undefined;
     const cancel=scope.exports.run();cancel();resolveLate(rows);await turn();assert.equal(results.length,1);

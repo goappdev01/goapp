@@ -24,7 +24,7 @@ const hintExpression = ts.isParenthesizedExpression(hints.parent) ? hints.parent
 assert.ok(ts.isBinaryExpression(hintExpression), 'guidance remains conditionally mounted');
 assert.equal(hintExpression.left.getText(ast), '!anyOperationalPanelOpen && !actionCompletion.unresolved.length && !actionCompletion.pending.length',
   'guidance is structurally absent while an operational panel or the recovered completion information occupies its area');
-const compile = value => ts.transpileModule(value, { compilerOptions: {
+const compile = value => ts.transpileModule(value, { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
 } }).outputText;
 const translated = { exports: {} };

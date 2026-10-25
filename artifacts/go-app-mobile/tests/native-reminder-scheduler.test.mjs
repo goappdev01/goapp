@@ -13,7 +13,7 @@ function load(file, modules = {}) {
     throw Error("Unexpected import: " + name);
   } };
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, context);
   return context.exports;
 }

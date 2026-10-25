@@ -9,7 +9,7 @@ const ts=require('typescript');
 const read=file=>readFileSync(file,'utf8');
 function execute(source,modules={}) {
   const scope={exports:{},require:name=>{assert.ok(name in modules,'unexpected module '+name);return modules[name];}};
-  vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,scope);
+  vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{ alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,scope);
   return scope.exports;
 }
 const translations=execute(read('i18n/translations.ts')).translations;

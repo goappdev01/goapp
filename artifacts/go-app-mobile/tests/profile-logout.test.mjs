@@ -43,7 +43,7 @@ function fixture(remove) {
   context.clearAuthSession = loadAuthSession(context, context.AsyncStorage, { notifySessionChanged: context.notifySessionChanged }).clearAuthSession;
   const code = functionSource('commitAccountType') + '\n' + functionSource('handleProfileLogout') + '\nglobalThis.logout = handleProfileLogout;';
   vm.createContext(context);
-  vm.runInContext(ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, context);
+  vm.runInContext(ts.transpileModule(code, { compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022 } }).outputText, context);
   return { logout: context.logout, events, storage, state };
 }
 

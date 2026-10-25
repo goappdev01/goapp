@@ -23,7 +23,7 @@ const recover = find(panel, node => ts.isVariableDeclaration(node) && node.name.
 const emailChange = find(panel, node => ts.isVariableDeclaration(node) && node.name.getText(panel) === 'handleAuthEmailChange');
 const errorMessage = find(panel, node => ts.isFunctionDeclaration(node) && node.name?.text === 'authErrorMessage');
 const transpile = code => ts.transpileModule(code, {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
 const pendingKey = 'go_pending_email_confirmation_v1';
 const sessionKey = 'go_supabase_session_v1';

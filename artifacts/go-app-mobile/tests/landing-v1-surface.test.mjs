@@ -9,7 +9,7 @@ const require = createRequire(path.join(process.cwd(), 'package.json'));
 const ts = require('typescript');
 const source = readFileSync('app/index.tsx', 'utf8');
 const policySource = readFileSync('components/landing/landingV1Visibility.ts', 'utf8');
-const compiled = ts.transpileModule(policySource, { compilerOptions: {
+const compiled = ts.transpileModule(policySource, { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
   target: ts.ScriptTarget.ES2022,
   module: ts.ModuleKind.CommonJS,
 } }).outputText;

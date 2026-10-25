@@ -6,7 +6,7 @@ process.env.TZ='Europe/Madrid';
 let now=Date.parse('2030-01-07T12:00:00+01:00');
 class Clock extends Date{constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
 function load(file,modules={}){const context={exports:{},Date:Clock,Intl,Map,Set,console,require:n=>{if(n in modules)return modules[n];throw Error('Unexpected dependency '+n);}};
- vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,context);return context.exports;}
+ vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,context);return context.exports;}
 const core=load('lib/goActionCompletion.ts'),plain=x=>JSON.parse(JSON.stringify(x));
 const S={userId:'11111111-1111-4111-8111-111111111111',context:'live:USER'},entry=(extra={})=>({id:'one',ownerUserId:'11111111-1111-4111-8111-111111111111',actionContext:'live:USER',dateISO:'2030-01-07',date:'Lunes 7',time:'09:00',duration:'30min',estado:'aceptado',intentLabel:'Cita',notes:'Revisión',...extra});
 function storageFixture(memory=new Map()){
@@ -165,7 +165,7 @@ test('the existing list and badges use explicit Pending and separate DEMO propos
  const declaration=name=>all.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name).getText(ast);
  const raw=[entry({id:'elapsed',estado:'aceptado'}),entry({id:'future',dateISO:'2030-01-08',estado:'pendiente'}),entry({id:'unassigned',dateISO:'',time:'',estado:'pendiente'})],pending=entry({id:'demo',demoLocal:true}),proposal=entry({id:'proposal',demoLocal:true,estado:'propuesta_pendiente',changeProposal:{dateISO:'2030-01-08',time:'13:00'}}),context={exports:{},goLog:raw,mergeCompletionEntries:core.mergeCompletionEntries,actionCompletion:{candidates:[pending,proposal],status:e=>e.id==='demo'?'pending':undefined}};
  const code=['resolutionEntries','countPendiente','countPropuesta','listEntries'].map(n=>'const '+declaration(n)+';').join('\n')+'\nexports.result={countPendiente,countPropuesta,listEntries};';
- vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,context);
+ vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,context);
  assert.equal(context.exports.result.countPendiente,2,'one explicit decision and the existing undated task; elapsed/future actions never move automatically');assert.equal(context.exports.result.countPropuesta,1);assert.equal(context.exports.result.listEntries.length,5);assert.equal(new Set(context.exports.result.listEntries.map(e=>e.id)).size,5);assert.equal(raw[0].estado,'aceptado');assert.equal(raw[1].estado,'pendiente');
 });
 

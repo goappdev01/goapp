@@ -6,7 +6,7 @@ import path from "node:path";
 import vm from "node:vm";
 const ts = createRequire(path.join(process.cwd(),"package.json"))("typescript");
 const src = name => readFileSync(name,"utf8");
-const transpile = name => ts.transpileModule(src(name),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
+const transpile = name => ts.transpileModule(src(name),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 function moduleFrom(name, imports = {}) {
   const exports = {};
   vm.runInNewContext(transpile(name),{exports,require:key => imports[key] ?? {},console,Set,Map});

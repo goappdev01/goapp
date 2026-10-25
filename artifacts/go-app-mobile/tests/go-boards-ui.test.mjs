@@ -9,7 +9,7 @@ const {React,createRoot,document,req,ts}=lifecycle;
 const zod=createRequire(path.resolve('../../lib/api-zod/package.json'))('zod');
 function evaluate(file,imports,extra=''){
   const scope={exports:{},Date,Error,setTimeout,clearTimeout,console,require:name=>name==='react'?React:name in imports?imports[name]:(()=>{throw Error(name)})()};
-  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{fileName:file,compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText+extra,scope);return scope.exports;
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{fileName:file,compilerOptions:{ alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText+extra,scope);return scope.exports;
 }
 const contract=evaluate('../../lib/api-zod/src/go-boards.ts',{zod}),model=evaluate('lib/goBoards.ts',{'@workspace/api-zod':contract});
 const uid='11111111-1111-4111-8111-111111111111',bid='22222222-2222-4222-8222-222222222222',cid='33333333-3333-4333-8333-333333333333';

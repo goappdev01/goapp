@@ -1,6 +1,6 @@
 import React from "react";
 import { ScrollView, StyleSheet, View, type ScrollViewProps } from "react-native";
-import type { PanGesture } from "react-native-gesture-handler";
+import type { LegacyPanGesture as PanGesture } from "react-native-gesture-handler";
 import type { LandingFrame } from "./landingResponsiveLayout";
 
 /** Fixed layers preserve card and transport coordinates and never capture vertical scrolling. */

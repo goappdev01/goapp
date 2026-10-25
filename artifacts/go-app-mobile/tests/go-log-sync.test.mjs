@@ -17,7 +17,7 @@ function load(file, modules) {
   };
   if (file === "lib/bookingAssistant.ts") modules["./authSession"] = loadAuthSession(scope, modules["@react-native-async-storage/async-storage"].default);
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, scope);
   return scope.exports;
 }
@@ -251,7 +251,7 @@ function callbackFrom(file, predicate) {
 function runCallback(text, globals) {
   const scope = { exports: {}, ...globals };
   vm.runInNewContext(ts.transpileModule("exports.callback = " + text, {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, scope);
   return scope.exports.callback;
 }

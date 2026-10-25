@@ -17,7 +17,7 @@ const context = {
 };
 vm.runInNewContext(
   ts.transpileModule(readFileSync(sourceFile, "utf8"), {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText,
   context,
 );

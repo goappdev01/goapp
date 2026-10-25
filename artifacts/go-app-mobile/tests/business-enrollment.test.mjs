@@ -8,7 +8,7 @@ import { loadAuthSession } from './helpers/auth-session-fixture.mjs';
 
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const ts = require('typescript');
-const transpile = source => ts.transpileModule(source, { compilerOptions: {
+const transpile = source => ts.transpileModule(source, { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
 } }).outputText;
 const plain = value => JSON.parse(JSON.stringify(value));

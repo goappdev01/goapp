@@ -6,7 +6,7 @@ import vm from "node:vm";
 process.env.TZ="Europe/Madrid";
 const ts=createRequire(import.meta.url)("typescript");
 class Clock extends Date {constructor(...args){super(...(args.length?args:["2026-10-12T12:00:00+02:00"]));}static now(){return new Clock().getTime();}}
-function load(file,modules){const c={exports:{},Date:Clock,Intl,console,require:k=>{if(k in modules)return modules[k];throw Error("Unexpected import "+k);}};vm.runInNewContext(ts.transpileModule(readFileSync(file,"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,c);return c.exports;}
+function load(file,modules){const c={exports:{},Date:Clock,Intl,console,require:k=>{if(k in modules)return modules[k];throw Error("Unexpected import "+k);}};vm.runInNewContext(ts.transpileModule(readFileSync(file,"utf8"),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,c);return c.exports;}
 const scope={userId:"A",context:"demo:USER"};
 const task=()=>({id:"buy",kind:"sent",type:"TAREA_INTERNA",ownerUserId:"A",taskContext:"demo:USER",notes:"Hacer la compra",dateISO:"2026-10-13",time:"17:00",reminders:[60],estado:"pendiente"});
 function fixture(){let rows=[task()],user="A",mode="sound",global="on",permission={granted:true,canAskAgain:true,ios:{status:2,allowsSound:true,allowsAlert:true}},failCancel=false,request=0,preferenceWait=null;

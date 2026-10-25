@@ -2,7 +2,7 @@ import {test} from 'node:test';import assert from 'node:assert/strict';import fs
 import {fixture as calendarFixture} from './helpers/calendar-fixture.mjs';
 const ts=createRequire(path.join(process.cwd(),'package.json'))('typescript');process.env.TZ='Europe/Madrid';
 let clock=Date.parse('2030-01-07T08:00:00');class Clock extends Date{constructor(...args){super(...(args.length?args:[clock]));}static now(){return clock;}}
-function load(file,imports={}){const context={exports:{},Date:Clock,Intl,console,Map,Set,require:key=>{if(key in imports)return imports[key];throw Error('Unexpected '+key);}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);return context.exports;}
+function load(file,imports={}){const context={exports:{},Date:Clock,Intl,console,Map,Set,require:key=>{if(key in imports)return imports[key];throw Error('Unexpected '+key);}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);return context.exports;}
 const storeModule=load('data/businessDemoStore.ts'),repoModule=load('data/demoBookingRepository.ts',{'./businessDemoStore':storeModule,"./bookingServices":load("data/bookingServices.ts")}),projection=load('data/customerBookingProjection.ts');
 const completion=load('lib/goActionCompletion.ts');
 const owner='11111111-1111-4111-8111-111111111111',company='33333333-3333-4333-8333-333333333333',otherCompany='44444444-4444-4444-8444-444444444444',plain=value=>JSON.parse(JSON.stringify(value));
@@ -74,9 +74,9 @@ test('manual company edits cannot bypass agreement or reset an existing payment'
 test('Home routes booking decisions and drafts to the original reservation without GO writes or messages',()=>{
  const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),nodes=[];(function walk(n){nodes.push(n);ts.forEachChild(n,walk)})(ast);
  const decl=name=>nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name),booking={id:'booking'};
- for(const [name,op]of [['acceptProposal','accept'],['rejectProposal','reject']]){const calls=[],context={customerBookings:{entries:[booking]},respondCustomerBooking:(e,operation)=>calls.push([e.id,operation])};vm.runInNewContext(ts.transpileModule('('+decl(name).initializer.getText(ast)+')("booking");',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);assert.deepEqual(calls,[['booking',op]]);}
+ for(const [name,op]of [['acceptProposal','accept'],['rejectProposal','reject']]){const calls=[],context={customerBookings:{entries:[booking]},respondCustomerBooking:(e,operation)=>calls.push([e.id,operation])};vm.runInNewContext(ts.transpileModule('('+decl(name).initializer.getText(ast)+')("booking");',{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,context);assert.deepEqual(calls,[['booking',op]]);}
  const calls=[],ctx={customerBookings:{entries:[booking]},currentReceivedIdRef:{current:'booking'},proposalReturnRef:{current:'calendar'},calFlow:{cancel:()=>calls.push('cancel')},confirmBookingDraft:(e,result)=>calls.push([e.id,result.time])};
- vm.runInNewContext(ts.transpileModule('('+decl('sendSuggestChangeFromCal').initializer.getText(ast)+')({time:"12:00"});',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,ctx);assert.deepEqual(calls,[['booking','12:00'],'cancel']);
+ vm.runInNewContext(ts.transpileModule('('+decl('sendSuggestChangeFromCal').initializer.getText(ast)+')({time:"12:00"});',{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,ctx);assert.deepEqual(calls,[['booking','12:00'],'cancel']);
 });
 
 test('authoritative customer context excludes stale cache and another account while retaining normal GO actions',()=>{
@@ -96,7 +96,7 @@ test('the actual Home selectors show the same booking in My reservations, Calend
   const completionDocument=completion.emptyCompletionDocument({userId:owner,context:'USER'});
   const scope={exports:{},goLog,Date:Clock,__DEV__:false,isUserMode:true,isBusinessMode:false,useMemo:fn=>fn(),getToday:()=>new Clock(),formatISODate:d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-'),listFilter:'reservas',customerBookings:{entries},isPapelaraView:false,activityFilter:'todas',typeFilter:'todos',llamadasListOpen:false,
    mergeCompletionEntries:completion.mergeCompletionEntries,actionCompletion:{candidates:[],status:entry=>completion.completionDecision(entry,completionDocument)?.status}};
-  vm.runInNewContext(ts.transpileModule('const '+decl('goDateTime').getText(ast)+';const '+decl('nextAppointments').getText(ast)+';const '+decl('listEntries').getText(ast)+';const '+filtered.getText(ast)+';exports.next=nextAppointments;exports.mine=filtered;',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,scope);
+  vm.runInNewContext(ts.transpileModule('const '+decl('goDateTime').getText(ast)+';const '+decl('nextAppointments').getText(ast)+';const '+decl('listEntries').getText(ast)+';const '+filtered.getText(ast)+';exports.next=nextAppointments;exports.mine=filtered;',{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,scope);
   return {calendar:entries,mine:scope.exports.mine,next:scope.exports.next.filter(x=>x.g.reservationId===booking.id)};
  };
  let result=surfaces();assert.equal(result.mine.length,1);assert.equal(result.next.length,1);assert.equal(result.calendar[0].time,result.next[0].g.time);assert.equal(result.next[0].g.contactName,'GO PELUQUERÍA');assert.equal(result.next[0].g.intentLabel,'Corte');assert.equal(result.next[0].g.place,'Calle ficticia, Murcia');
@@ -110,7 +110,7 @@ test('proposing or cancelling a client draft preserves the existing Calendar lay
  const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),nodes=[];(function walk(n){nodes.push(n);ts.forEachChild(n,walk)})(ast);
  const fn=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='openBookingProposal');
  for(const opened of [true,false]){const calls=[],context={calOpen:opened,calFlow:{open:opts=>context.options=opts},setCalOpen:value=>calls.push(value),confirmBookingDraft:()=>calls.push('confirm'),isGoDateTimePast:()=>false,lang:'es'};
-  vm.runInNewContext(ts.transpileModule('('+fn.initializer.getText(ast)+')({id:"booking",dateISO:"2030-01-07",time:"10:00",duration:"30"});',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
+  vm.runInNewContext(ts.transpileModule('('+fn.initializer.getText(ast)+')({id:"booking",dateISO:"2030-01-07",time:"10:00",duration:"30"});',{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,context);
   assert.deepEqual(calls,[true]);context.options.onCancel();assert.deepEqual(calls,opened?[true]:[true,false]);calls.length=0;context.options.onSave({dateISO:'2030-01-08',time:'12:00'});assert.deepEqual(calls,opened?['confirm']:[false,'confirm']);
  }
 });
@@ -120,7 +120,7 @@ test('canonical customer confirmation refreshes its reservation without writing 
  (function visit(n){if(ts.isJsxAttribute(n)&&n.name.getText(ast)==='onBookingConfirmed'&&n.initializer?.expression?.getText(ast).includes('customerBookings.refresh'))callback=n.initializer.expression;ts.forEachChild(n,visit)})(ast);
  assert.ok(callback);let refresh=0,tutorial=0,writes=0;
  const context={exports:{},goView:{view:'USER'},demoBookingRepository:undefined,tutReservaRealizada:false,setTutReservaRealizada:()=>tutorial++,AsyncStorage:{setItem:async key=>{assert.equal(key,'tutorial.reservaRealizada');}},customerBookings:{refresh:async()=>refresh++},readGoLog:async()=>{writes++;throw Error('Not allowed');}};
- vm.runInNewContext(ts.transpileModule('exports.confirm = '+callback.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
+ vm.runInNewContext(ts.transpileModule('exports.confirm = '+callback.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,context);
  await context.exports.confirm({id:'reservation'});assert.equal(refresh,1);assert.equal(tutorial,1);assert.equal(writes,0);
  const overlay=fs.readFileSync('components/booking/BookingSearchOverlay.tsx','utf8');assert.ok(overlay.includes('if (!canonicalCustomerBookings) syncBookingToGoLog'));assert.ok(overlay.includes('canonicalCustomerBookings ? '));
 });
@@ -154,7 +154,7 @@ for(const bookingSource of ['canonical','DEMO'])test(bookingSource+' customer Ca
   }},goLog:[],
  };
  const code=['isGoDateTimePast','runCustomerBooking','confirmBookingDraft','openBookingProposal'].map(name=>'const '+decl(name).getText(ast)+';').join('\n')+'\nexports.propose='+calendarHandler.initializer.expression.getText(ast)+';';
- vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,scope);
+ vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,scope);
  const cal=calendarFixture({now:'2030-01-07T08:00:00'}),{AgendaBoard}=cal.load('components/AgendaOperativa.tsx');
  const props={goLog:[entry],viewMode:'dia',selectedDateISO:entry.dateISO,onProposeItem:scope.exports.propose,onDeleteItem:()=>{throw Error('Propose must not cancel the booking')}};
  const nodes=n=>!n||typeof n!=='object'?[]:[n,...(n.children??[]).flatMap(nodes)];
@@ -162,9 +162,11 @@ for(const bookingSource of ['canonical','DEMO'])test(bookingSource+' customer Ca
  let tree=cal.render(AgendaBoard,props);
  const body=nodes(tree).find(n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85&&text(n).includes(entry.contactName));assert.ok(body);body.props.onPress();
  tree=cal.render(AgendaBoard,props);
- const propose=nodes(tree).find(n=>n.props.accessibilityLabel==='tasks_propose_change');
- const cancel=nodes(tree).find(n=>n.type==='TouchableOpacity'&&text(n).includes('cancel')&&n.props.style?.borderColor==='rgba(220,38,38,0.35)');
+ const detail=nodes(tree).find(n=>n.props.testID==='entry-details-scroll');assert.ok(detail);
+ const propose=nodes(detail).find(n=>n.props.accessibilityLabel==='tasks_propose_change');
+ const cancel=nodes(detail).find(n=>n.type==='TouchableOpacity'&&n.props.accessibilityLabel==='booking_state_rejected');
  assert.ok(propose);assert.ok(cancel);
+ assert.equal(cancel.props.disabled,false);assert.equal(Object.assign({},...cancel.props.style).borderColor,'#FF000080');
  const sameRow=nodes(tree).find(n=>n.type==='View'&&n.children?.includes(propose)&&n.children?.includes(cancel));assert.ok(sameRow,'both customer actions share the same rendered action row');assert.equal(sameRow.props.style.flexDirection,'row');
  propose.props.onPress();
  assert.equal(scope.draft.startAt,'date');assert.equal(scope.draft.initialDateISO,entry.dateISO);assert.equal(scope.draft.initialTime,entry.time);assert.equal(scope.draft.initialDuration,entry.duration);

@@ -167,9 +167,9 @@ test('a transient storage error reaches the bootstrap as unavailable, never as a
  locked=false;assert.equal((await auth.readAuthSession()).user.id,user);assert.equal(f.plain.has(legacyKey),false);
 });
 
-test('SDK 57 dependency, native backup plugin and all credential connections use the protected adapter',()=>{
+test('SDK 58 dependency, native backup plugin and all credential connections use the protected adapter',()=>{
  const packageJson=JSON.parse(readFileSync('package.json','utf8')),app=JSON.parse(readFileSync('app.json','utf8'));
- assert.equal(packageJson.devDependencies['expo-secure-store'],'~57.0.4');
+ assert.equal(packageJson.devDependencies['expo-secure-store'],'~58.0.2');
  const plugin=app.expo.plugins.find(entry=>Array.isArray(entry)&&entry[0]==='expo-secure-store');
  assert.deepEqual(plugin,['expo-secure-store',{configureAndroidBackup:true,faceIDPermission:false}]);
  const auth=readFileSync('lib/authSession.ts','utf8'),storage=readFileSync('lib/authCredentialStorage.ts','utf8');

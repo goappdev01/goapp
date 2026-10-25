@@ -286,14 +286,14 @@ export async function restoreStoredAuthentication(): Promise<{ session: AuthSess
 }
 
 type ActivitySource = {
-  currentState: string | null;
+  currentState: string | null | undefined;
   addEventListener: (event: "change", listener: (state: string) => void) => { remove: () => void };
 };
 /** Exactly one root subscription. iOS may suspend timers; foreground always checks again. */
 export function startAuthSessionMaintenance(activity: ActivitySource): () => void {
   let disposed = false, timer: ReturnType<typeof setInterval> | undefined;
   const tick = () => { if (!disposed && activity.currentState === "active") void ensureAuthSession().catch(() => {}); };
-  const update = (state: string | null) => {
+  const update = (state: string | null | undefined) => {
     if (timer !== undefined) clearInterval(timer);
     timer = undefined;
     if (state === "active" && !disposed) { tick(); timer = setInterval(tick, 30000); }

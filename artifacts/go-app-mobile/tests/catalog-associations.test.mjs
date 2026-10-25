@@ -6,7 +6,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 const ts=createRequire(path.join(process.cwd(),'package.json'))('typescript');
 const plain=v=>JSON.parse(JSON.stringify(v));
-const compile=file=>ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
+const compile=file=>ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 function fixture(){
  const calls=[],listeners=new Set();let business='business-A',roots=['tinte'];
  const sample=selected=>({version:1,businessId:business,rootIds:roots,selectedAssociationIds:selected,ready:true,missingRequired:[],currency:'EUR',totalPrice:selected.includes('ampolla-link')?37:30,serviceIds:['tinte'],

@@ -20,7 +20,7 @@ function find(predicate) {
 function evaluate(code, globals = {}) {
   const scope = { exports: {}, ...globals };
   vm.runInNewContext(ts.transpileModule(code, {
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+    compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
   }).outputText, scope);
   return scope.exports;
 }

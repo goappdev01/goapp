@@ -1,3 +1,4 @@
+import type { TextInputInstance } from "react-native";
 import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import { notifySessionChanged, onSessionChanged } from "@/lib/sessionEvents";
 import { saveAuthSession, clearAuthSession } from "@/lib/authSession";
@@ -181,7 +182,7 @@ export function LoginRegisterPanel({
   const [authBusy, setAuthBusy] = useState(false);
   const authRequestInFlightRef = useRef(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const passwordInputRef = useRef<TextInput>(null);
+  const passwordInputRef = useRef<TextInputInstance>(null);
   const authInputRevisionRef = useRef(0);
   const pendingRegistrationRef = useRef<PendingRegistration | null>(null);
   const authContextRef = useRef({ visible, userAccountType, onSetAccountType });

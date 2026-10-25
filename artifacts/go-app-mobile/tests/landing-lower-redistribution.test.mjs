@@ -7,7 +7,7 @@ import path from 'node:path';
 import {createRequire} from 'node:module';
 const require=createRequire(path.join(process.cwd(),'package.json')),ts=require('typescript');
 // Compile the same pure geometry code in this realm; assertions still exercise Home's actual callback.
-const load=file=>{const scope={exports:{}};new Function('exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(scope.exports);return scope.exports;};
+const load=file=>{const scope={exports:{}};new Function('exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(scope.exports);return scope.exports;};
 const layout=load('components/landing/landingResponsiveLayout.ts'),arc=load('components/landing/landingLowerArc.ts');
 const panels=load('components/landing/landingPanels.ts'),policy=load('components/landing/landingV1Visibility.ts'),humanity=load('components/landing/humanityPlacement.ts');
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),nodes=[];
@@ -19,7 +19,7 @@ const code=ts.transpileModule([
  ...['landingSafeTop','landingBaseFrame','landingPanels','toLandingRootRect','humanityBlocks','humanityPanelsMeasured','humanityPlacement',
  'landingInlineHumanity','inlineHumanityWidth','inlineHumanityRect','landingArrangement'].map(name=>'const '+decl(name).getText(ast)+';'),
  'result={landingArrangement,landingCenter,landingPanels,landingBaseFrame,humanityPlacement,landingCloseRect,closeHeaderObstacles,closeReservedColumn,inlineHumanityRect};',
-].join('\n'),{compilerOptions:{module:ts.ModuleKind.None,target:ts.ScriptTarget.ES2022}}).outputText;
+].join('\n'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.None,target:ts.ScriptTarget.ES2022}}).outputText;
 const devices=[
  {width:320,height:568,insets:{top:20,bottom:0,left:0,right:0}},
  {width:390,height:822,insets:{top:47,bottom:34,left:0,right:0}},
@@ -151,7 +151,7 @@ test('the original ADMIN orbit renderer is preserved apart from the authorized m
   .replace(/\r?\n[ \t]*if \(!activeCat\) return null;/,'')
   .replace('visibleOrbitalBookingCategories.map','RESERVAS_ORBITAL_CATS.map');
  assert.equal(createHash('sha256').update(unchangedRenderer).digest('hex'),'6efc8e73210cfb019f29b3500998eab9538f10065c6108ec7908d69a5d723d79');
- const compile=text=>ts.transpileModule(text,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
+ const compile=text=>ts.transpileModule(text,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
  for(const fullLandingArchitecture of [true,false]){
   const matched=vm.runInNewContext(compile('result='+shell.condition.getText(ast)),{fullLandingArchitecture,anyOverlayOpen:false,rutasMode:false,reservasOrbitalOpen:false,orbitSecondLevel:null});
   assert.equal(matched,!fullLandingArchitecture,'ADMIN always takes its preserved renderer');
@@ -161,8 +161,8 @@ test('USUARIO and EMPRESA mount exactly eight original-color passive shells with
  const shell=nodes.find(n=>ts.isConditionalExpression(n)&&n.whenTrue.getText(ast).includes('testID="landing-quiet-orbits"'));
  const react={createElement:(type,props,...children)=>({type,props:props||{},children})};
  const setup=['GO_COLORS','INTENTS'].map(name=>'const '+decl(name).getText(ast)+';').join('\n');
- const output=ts.transpileModule(setup+'\nresult='+shell.whenTrue.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None,jsx:ts.JsxEmit.React}}).outputText;
- const colors=vm.runInNewContext(ts.transpileModule(setup+'\nresult=INTENTS.map(it=>it.color)',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{});
+ const output=ts.transpileModule(setup+'\nresult='+shell.whenTrue.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None,jsx:ts.JsxEmit.React}}).outputText;
+ const colors=vm.runInNewContext(ts.transpileModule(setup+'\nresult=INTENTS.map(it=>it.color)',{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,{});
  for(const preset of ['compacto','estandar','grande']){
   const g=fixture(devices[1],preset,'ADMIN','right'),ctx={React:react,View:'View',PremiumOrbitBtn:'PremiumOrbitBtn',StyleSheet:{absoluteFill:{position:'absolute',top:0,left:0,right:0,bottom:0}},orbitWrapSize:g.context.orbitWrapSize,orbitRadiusVisual:g.context.orbitRadius,orbitBtnVisualSize:g.context.orbitBtnSize};
   vm.runInNewContext(output,ctx);const tree=ctx.result,orbits=tree.children[0];

@@ -9,7 +9,7 @@ import { loadAuthSession } from './helpers/auth-session-fixture.mjs';
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const ts = require('typescript');
 const read = file => readFileSync(file, 'utf8');
-const transpile = source => ts.transpileModule(source, { compilerOptions: {
+const transpile = source => ts.transpileModule(source, { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
 } }).outputText;
 const user = '11111111-1111-4111-8111-111111111111';

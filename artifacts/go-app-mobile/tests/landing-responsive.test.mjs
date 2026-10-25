@@ -9,7 +9,7 @@ const ts = require("typescript");
 function load(file, dependencies = {}) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020,
+    compilerOptions: { alwaysStrict: false, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020,
       jsx: ts.JsxEmit.React, esModuleInterop: true },
   }).outputText, { exports, require: name => {
     if (!(name in dependencies)) throw Error("Unexpected import " + name);

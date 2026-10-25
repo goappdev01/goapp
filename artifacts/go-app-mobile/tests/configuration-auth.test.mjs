@@ -28,7 +28,7 @@ const loadFunction = find(loadEffect.arguments[0], node => ts.isArrowFunction(no
   && node.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword));
 const openOptions = find(home, node => ts.isVariableDeclaration(node) && node.name.getText(home) === 'handleOpenOptions');
 const transpile = source => ts.transpileModule(source, {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
 const sessionKey = 'go_supabase_session_v1', secureKey = 'go_auth_session_v2';
 const realSession = { access_token: 'test-only-token', user: { id: 'test-user' } };

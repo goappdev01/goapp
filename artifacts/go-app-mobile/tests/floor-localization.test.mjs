@@ -6,7 +6,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 const ts=createRequire(path.join(process.cwd(),'package.json'))('typescript');
 const source=name=>readFileSync(name,'utf8');
-const compile=name=>ts.transpileModule(source(name),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
+const compile=name=>ts.transpileModule(source(name),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 const tx={};vm.runInNewContext(compile('i18n/translations.ts'),{exports:tx});const {translations}=tx;
 const owner='11111111-1111-4111-8111-111111111111';
 const storeModule={};

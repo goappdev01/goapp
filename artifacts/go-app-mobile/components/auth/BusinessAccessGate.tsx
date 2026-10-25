@@ -1,3 +1,4 @@
+import type { TextInputInstance } from "react-native";
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -42,7 +43,7 @@ function BusinessVerificationScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const latest = useRef<{ key: string | null; data: BusinessEnrollment }>({ key: null, data: empty });
-  const inputs = useRef<Partial<Record<keyof BusinessEnrollment, TextInput>>>({});
+  const inputs = useRef<Partial<Record<keyof BusinessEnrollment, TextInputInstance>>>({});
   const saving = useRef(false);
   const mounted = useRef(false);
   const ready = !!draftKey && readyKey === draftKey;

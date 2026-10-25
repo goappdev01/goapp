@@ -7,7 +7,7 @@ const mobileRoot = fileURLToPath(new URL("../../", import.meta.url));
 const require = createRequire(path.join(mobileRoot, "package.json"));
 const ts = require("typescript");
 const compile = file => ts.transpileModule(readFileSync(path.join(mobileRoot, file), "utf8"), {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
 
 /** Run the real adapter against DISTINCT protected/plaintext stores, never a native device. */

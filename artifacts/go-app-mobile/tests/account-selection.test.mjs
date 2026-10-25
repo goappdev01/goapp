@@ -70,17 +70,17 @@ function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: fals
   };
   modules['@/lib/authSession'] = loadAuthSession({}, modules['@react-native-async-storage/async-storage'].default);
   const selectorContext = { exports: {}, require: name => { assert.ok(name in modules, name); return modules[name]; } };
-  vm.runInNewContext(ts.transpileModule(readFileSync('components/auth/AccountContextSelector.tsx', 'utf8'), { compilerOptions: {
+  vm.runInNewContext(ts.transpileModule(readFileSync('components/auth/AccountContextSelector.tsx', 'utf8'), { compilerOptions: { alwaysStrict: false,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,
   } }).outputText, selectorContext);
   modules['./AccountContextSelector'] = selectorContext.exports;
   const passwordContext = { exports: {}, require: name => { assert.ok(name in modules, name); return modules[name]; } };
-  vm.runInNewContext(ts.transpileModule(readFileSync('components/auth/PasswordInput.tsx', 'utf8'), { compilerOptions: {
+  vm.runInNewContext(ts.transpileModule(readFileSync('components/auth/PasswordInput.tsx', 'utf8'), { compilerOptions: { alwaysStrict: false,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,
   } }).outputText, passwordContext);
   modules['./PasswordInput'] = passwordContext.exports;
   const context = { exports: {}, process: { env: { EXPO_PUBLIC_API_URL: 'http://private.test/api' } }, fetch: authenticate, require: name => { assert.ok(name in modules, name); return modules[name]; } };
-  vm.runInNewContext(ts.transpileModule(authSource, { compilerOptions: {
+  vm.runInNewContext(ts.transpileModule(authSource, { compilerOptions: { alwaysStrict: false,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,
   } }).outputText, context);
   return {
