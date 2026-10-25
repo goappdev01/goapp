@@ -26,7 +26,7 @@ export type GoEntryActionCallbacks = {
 };
 
 /** Personal follow-up never writes the contractual acceptance or completion of a reservation. */
-export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean}){
+export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean}){
   const {lang}=useLanguage(),personal=!!(entry.reservationId||entry.customerBooking||entry.businessBooking);
   const label=(es:string,en:string)=>lang==="en"?en:es;
   const actions=[
@@ -35,10 +35,10 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
     {key:"discard",label:personal?label("Cancelar reserva con confirmación","Cancel reservation with confirmation"):label("Eliminar o descartar con confirmación","Delete or discard with confirmation"),color:C.destructive,icon:"trash-2" as const,run:onDiscard},
   ].filter(action=>action.run);
   if(!actions.length)return null;
-  return <View testID="entry-micro-actions" pointerEvents="box-none" style={{flexDirection:"row",gap:4,padding:4}}>
+  return <View testID="entry-micro-actions" pointerEvents="box-none" style={{flexDirection:"row",flexShrink:0,gap:inline?2:4,padding:inline?0:4}}>
     {actions.map(action=><TouchableOpacity key={action.key} accessibilityRole="button" accessibilityLabel={action.label} disabled={disabled}
-      accessibilityState={{disabled,selected:entry.localResolutionStatus===action.key}} hitSlop={{top:6,bottom:6,left:0,right:0}}
-      onPress={event=>{event?.stopPropagation();action.run?.();}} style={{width:32,height:32,alignItems:"center",justifyContent:"center"}}>
+      accessibilityState={{disabled,selected:entry.localResolutionStatus===action.key}} hitSlop={{top:inline?4:6,bottom:inline?4:6,left:0,right:0}}
+      onPress={event=>{event?.stopPropagation();action.run?.();}} style={{width:inline?36:32,height:inline?36:32,alignItems:"center",justifyContent:"center"}}>
       <Feather name={action.icon} size={16} color={action.color}/>
     </TouchableOpacity>)}
   </View>;

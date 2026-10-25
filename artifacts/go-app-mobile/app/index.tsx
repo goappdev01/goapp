@@ -117,7 +117,7 @@ import { MessagesScreen } from "@/components/MessagesScreen";
 import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
-import { LandingContentViewport, LandingCardContents } from "@/components/landing/LandingContentViewport";
+import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "@/components/GoEntryDetails";
 import { entryHeading, entryIdentity, entryIsReservation, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand } from "@/data/goEntryPresentation";
@@ -13553,7 +13553,7 @@ function HomeScreenContent() {
   const canResolveEntry=(entry:GoEntry)=>!!actionCompletion.scope&&actionCompletion.active(actionCompletion.scope)&&ownedCompletionEntry(entry,actionCompletion.scope)&&completionEligible(entry)&&!entry.changeProposal&&!entry.proposal;
   const resolveEntry=(entry:GoEntry,status:"done"|"pending",current?:()=>GoEntry|undefined)=>{if(canResolveEntry(entry))void actionCompletion.decide(entry,status,true,current??(()=>goLog.find(e=>e.id===entry.id)));};
   const followedEntry=(entry:GoEntry)=>({...entry,localResolutionStatus:actionCompletion.status(entry)});
-  const renderEntryMicroActions=(entry:GoEntry)=><GoEntryMicroActions entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)} onDone={canResolveEntry(entry)?()=>resolveEntry(entry,"done"):undefined} onPending={canResolveEntry(entry)?()=>resolveEntry(entry,"pending"):undefined} onDiscard={!entry.deleted&&entry.estado!=="rechazado"&&(!reservationCardPolicy(entry).canonical||reservationCardPolicy(entry).canCancel)?()=>cancelEntryFromDetails(entry):undefined}/>;
+  const renderEntryMicroActions=(entry:GoEntry,inline=false)=><GoEntryMicroActions inline={inline} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)} onDone={canResolveEntry(entry)?()=>resolveEntry(entry,"done"):undefined} onPending={canResolveEntry(entry)?()=>resolveEntry(entry,"pending"):undefined} onDiscard={!entry.deleted&&entry.estado!=="rechazado"&&(!reservationCardPolicy(entry).canonical||reservationCardPolicy(entry).canCancel)?()=>cancelEntryFromDetails(entry):undefined}/>;
   const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false) => <GoEntryQuickActions entry={followedEntry(entry)} showState={showState} compact={compact}
     onCancel={() => cancelEntryFromDetails(entry)} onEdit={() => openEntryChange(entry)} onPropose={() => openEntryChange(entry)}
     onAccept={() => { if (entry.changeProposal) acceptProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "aceptado"); }}
@@ -14725,65 +14725,28 @@ function HomeScreenContent() {
                   setLandingDetailsId(item.g.id);
                 }}
                 style={{ gap: Math.round(2 * uiScaleFactor) }}>
-              {item.kind === "hold" && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                  <Feather name="calendar" size={Math.round(10 * uiScaleFactor)} color={cardAccent} />
-                  <Text style={{ color: cardAccent, fontSize: Math.round(9 * uiScaleFactor), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4 }}>
-                    RESERVA PENDIENTE
-                  </Text>
-                </View>
-              )}
+                <LandingCompactBody key={item.kind === "cambio" ? item.g.id + uiScaleFactor : item.booking.id + uiScaleFactor}
+                  gap={Math.round(2 * uiScaleFactor)} verticalInset={Math.round(12 * uiScaleFactor)}
+                  primary={<>
+                    {item.kind === "hold" && <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Feather name="calendar" size={Math.round(10 * uiScaleFactor)} color={cardAccent} />
+                      <Text style={{ color: cardAccent, fontSize: Math.round(9 * uiScaleFactor), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4 }}>RESERVA PENDIENTE</Text>
+                    </View>}
+                    <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: "#f3f3f3", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "700" }}>{cardTitle}</Text>
+                    {item.kind === "cambio" && <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      {!!cardOrigDate && <Text numberOfLines={1} ellipsizeMode="tail" style={{ flexShrink: 1, minWidth: 0, color: "rgba(255,255,255,0.40)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "600", textDecorationLine: "line-through" }}>{cardOrigDate}</Text>}
+                      {!!cardOrigDate && !!cardNewDate && <Feather name="arrow-right" size={Math.round(10 * uiScaleFactor)} color={ACCENT} />}
+                      {!!cardNewDate && <Text numberOfLines={1} ellipsizeMode="tail" style={{ flexShrink: 1, minWidth: 0, color: ACCENT, fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>{cardNewDate}</Text>}
+                    </View>}
+                    {item.kind === "hold" && !!cardDate && <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: BLUE, fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>{cardDate}</Text>}
+                  </>}
+                  secondary={[
+                    { key: "service", content: !!cardSub && cardSub !== cardTitle && <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: "#9a9a9a", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>{cardSub}</Text> },
+                    { key: "activity", content: item.kind === "cambio" && !!item.g.notes?.trim() && item.g.notes.trim() !== cardTitle && item.g.notes.trim() !== cardSub && <Text testID="landing-proposal-title-text" numberOfLines={1} ellipsizeMode="tail" style={{ color: "#f3f3f3", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>{item.g.notes}</Text> },
+                    { key: "proposal-note", content: item.kind === "cambio" && !!item.g.changeProposal?.note && <Text testID="landing-proposal-note" numberOfLines={1} ellipsizeMode="tail" style={{ color: "rgba(249,115,22,0.80)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>{item.g.changeProposal.note}</Text> },
+                  ]}
+                  actions={<>
 
-              {/* Nombre */}
-              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
-                style={{ color: "#f3f3f3", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "700" }}>
-                {cardTitle}
-              </Text>
-
-
-
-              {/* Subtítulo / servicio */}
-              {!!cardSub && cardSub !== cardTitle && (
-                <Text numberOfLines={1}
-                  style={{ color: "#9a9a9a", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>
-                  {cardSub}
-                </Text>
-              )}
-
-              {/* Cambio: fecha original tachada → nueva */}
-              {item.kind === "cambio" && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  {!!cardOrigDate && (
-                    <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "600", textDecorationLine: "line-through" }}>
-                      {cardOrigDate}
-                    </Text>
-                  )}
-                  {!!cardOrigDate && !!cardNewDate && (
-                    <Feather name="arrow-right" size={Math.round(10 * uiScaleFactor)} color={ACCENT} />
-                  )}
-                  {!!cardNewDate && (
-                    <Text style={{ color: ACCENT, fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>
-                      {cardNewDate}
-                    </Text>
-                  )}
-                </View>
-              )}
-
-              {/* HOLD: fecha/hora de la reserva */}
-              {item.kind === "hold" && !!cardDate && (
-                <Text style={{ color: BLUE, fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>
-                  {cardDate}
-                </Text>
-              )}
-
-              {item.kind === "cambio" && !!item.g.notes?.trim()
-                && item.g.notes.trim() !== cardTitle && item.g.notes.trim() !== cardSub && (
-                <Text testID="landing-proposal-title-text" numberOfLines={1} style={{ color: "#f3f3f3", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>{item.g.notes}</Text>
-              )}
-              {item.kind === "cambio" && !!item.g.changeProposal?.note && (
-                <Text testID="landing-proposal-note" numberOfLines={1} style={{ color: "rgba(249,115,22,0.80)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>{item.g.changeProposal.note}</Text>
-              )}
-              </Pressable>
 
               {item.kind === "cambio" && renderEntryQuickActions(item.g, true, true)}
 
@@ -14820,8 +14783,11 @@ function HomeScreenContent() {
                   </TouchableOpacity>
                 </View>
               )}
-            </View>
 
+                  </>}
+                />
+              </Pressable>
+            </View>
 
             </LandingCardContents>
 
@@ -14974,7 +14940,7 @@ function HomeScreenContent() {
               >
               {/* ── INDICADOR DE POSICIÓN — flechas dinámicas + puntos ── */}
               <View
-                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 9, paddingHorizontal: 2 }}
+                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 9, paddingHorizontal: total > 1 ? 18 : 2 }}
               >
                 {/* Centro: ordinal + separador + etiqueta + puntos */}
                 <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, minWidth: 0 }}>
@@ -14985,16 +14951,14 @@ function HomeScreenContent() {
                   <Text
                     numberOfLines={1}
                     ellipsizeMode="tail"
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.75}
-                    style={{ color: tint, fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.7, flexShrink: 1, minWidth: 0 }}
+                    style={{ color: tint, fontSize: Math.round(13 * uiScaleFactor), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.7, flexShrink: 1, minWidth: 0, maxWidth: "100%" }}
                   >
                     {cardLabel}
                   </Text>
                   {total > 1 && (
                     <View style={{ flexDirection: "row", gap: 4, alignItems: "center", flexShrink: 0 }}>
                       <Text style={{ color: "rgba(255,255,255,0.22)", fontSize: 11, fontWeight: "600" }}>·</Text>
-                      {nextPanelAppointments.map((_, i) => (
+                      {nextPanelAppointments.map((_, i) => Math.abs(i - safeIdx) <= 2 && (
                         <View
                           key={i}
                           style={{
@@ -15076,13 +15040,48 @@ function HomeScreenContent() {
 
 
               {/* Cabecera fija y tarjeta reutilizan el mismo gesto horizontal. */}
-              <View style={{ gap: 3 }}>
-                  <View style={{alignSelf:"flex-end",flexDirection:"row",alignItems:"center",gap:4}}>
-                    {!!g.notes?.trim()&&<View key="note-indicator" pointerEvents="none" style={{width:28,height:28,borderRadius:14,backgroundColor:"rgba(96,165,250,0.10)",borderWidth:1,borderColor:"rgba(96,165,250,0.35)",alignItems:"center",justifyContent:"center"}}><Feather name="edit-2" size={14} color="#93c5fd"/></View>}
-                    {renderEntryMicroActions(g)}
+              <LandingCompactBody key={g.id + uiScaleFactor} gap={3}
+                primary={<>
+                  {(g.type === "TAREA" || g.type === "TAREA_INTERNA") && !!g.notes?.trim()
+                    && g.notes.trim() !== displayContact(g.contactName, g.phone) && (
+                    <Text testID="landing-task-description" numberOfLines={1} ellipsizeMode="tail" style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}>{g.notes}</Text>
+                  )}
+                  <View testID="landing-date-actions-row" style={{ flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0 }}>
+                    <View accessibilityLabel={dateStr} style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 4 }}>
+                      <Text testID="landing-compact-date" numberOfLines={1} ellipsizeMode="tail"
+                        style={{ color: "#cfcfcf", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "600", flexShrink: 1, minWidth: 0 }}>
+                        {(g.time ? dateStr.replace(" · " + g.time, "") : dateStr).replace(PANEL_W < 340 ? /^\D+\s+(?=\d)/ : /$^/, "")}
+                      </Text>
+                      {!!g.time && <Text testID="landing-compact-time" numberOfLines={1} style={{ color: "#cfcfcf", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "600", flexShrink: 0 }}>{g.time}</Text>}
+                      {g.visibility && g.visibility !== 'publico' && (() => {
+                        const VM: Record<string, { icon: React.ComponentProps<typeof Feather>["name"]; color: string }> = {
+                          clientes:    { icon: "users",  color: "#34d399" },
+                          proveedores: { icon: "truck",  color: "#a78bfa" },
+                          interno:     { icon: "shield", color: "#fbbf24" },
+                          privado:     { icon: "lock",   color: "#f87171" },
+                        };
+                        const vm = VM[g.visibility];
+                        if (!vm) return null;
+                        return (
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 2, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5, backgroundColor: vm.color + "18", borderWidth: 1, borderColor: vm.color + "40" }}>
+                            <Feather name={vm.icon} size={9} color={vm.color} />
+                          </View>
+                        );
+                      })()}
+                    </View>
+                    {renderEntryMicroActions(g, true)}
                   </View>
-                  {/* Contador de tiempo — solo si tiene hora y es hoy o inminente */}
-                  {(() => {
+                </>}
+                secondary={[
+                  { key: "contact", content: !entryIsReservation(g) && !!displayContact(entryIdentity(g.contactName), g.phone) && (
+                    <Text numberOfLines={1} ellipsizeMode="tail"
+                      style={{ color: "#f3f3f3", fontSize: Math.round(13 * uiScaleFactor), fontFamily: "Inter_900Black", fontWeight: "900" }}>
+                      {displayContact(entryIdentity(g.contactName), g.phone)}
+                    </Text>
+                  ) },
+                  { key: "professional", content: !!entryIdentity(g.professionalName) && <Text numberOfLines={1} ellipsizeMode="tail" style={{color:"#cfcfcf",fontSize:Math.round(11*uiScaleFactor)}}>{lang === "en" ? "Professional: " : "Profesional: "}{g.professionalName}</Text> },
+                  { key: "place", content: !!g.place && <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: "#9a9a9a", fontSize: Math.round(12 * uiScaleFactor), fontWeight: "500" }}>{g.place}</Text> },
+                  { key: "countdown", content: (() => {
                     if (!g.time) return null;
                     const mLeft = Math.round((dt.getTime() - receptionNowMs) / 60_000);
                     if (mLeft < -90 || mLeft > 480) return null; // solo dentro de 8 horas
@@ -15109,58 +15108,10 @@ function HomeScreenContent() {
                         </View>
                       </View>
                     );
-                  })()}
-                  {(g.type === "TAREA" || g.type === "TAREA_INTERNA") && !!g.notes?.trim()
-                    && g.notes.trim() !== displayContact(g.contactName, g.phone) && (
-                    <Text testID="landing-task-description" numberOfLines={1} style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}>{g.notes}</Text>
-                  )}
-                  {/* Línea 1: QUIÉN — contacto completo, nunca truncado */}
-                  {!entryIsReservation(g) && !!displayContact(entryIdentity(g.contactName), g.phone) && (
-                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
-                      style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}
-                    >
-                      {displayContact(entryIdentity(g.contactName), g.phone)}
-                    </Text>
-                  )}
-                  {/* Línea 2: CUÁNDO — fecha + hora + chips (visibilidad) */}
-                  {!!dateStr && (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <Text
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.65}
-                        style={{ color: "#cfcfcf", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "600", flex: 1 }}
-                      >
-                        {dateStr}
-                      </Text>
-                      {g.visibility && g.visibility !== 'publico' && (() => {
-                        const VM: Record<string, { icon: React.ComponentProps<typeof Feather>["name"]; color: string }> = {
-                          clientes:    { icon: "users",  color: "#34d399" },
-                          proveedores: { icon: "truck",  color: "#a78bfa" },
-                          interno:     { icon: "shield", color: "#fbbf24" },
-                          privado:     { icon: "lock",   color: "#f87171" },
-                        };
-                        const vm = VM[g.visibility];
-                        if (!vm) return null;
-                        return (
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: 2, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5, backgroundColor: vm.color + "18", borderWidth: 1, borderColor: vm.color + "40" }}>
-                            <Feather name={vm.icon} size={9} color={vm.color} />
-                          </View>
-                        );
-                      })()}
-                    </View>
-                  )}
-                  {/* Línea 3: DÓNDE — ubicación */}
-                  {!!g.place && (
-                    <Text numberOfLines={1}
-                      style={{ color: "#9a9a9a", fontSize: Math.round(12 * uiScaleFactor), fontWeight: "500" }}
-                    >
-                      {g.place}
-                    </Text>
-                  )}
-                  {!!entryIdentity(g.professionalName) && <Text numberOfLines={1} style={{color:"#cfcfcf",fontSize:Math.round(11*uiScaleFactor)}}>{lang === "en" ? "Professional: " : "Profesional: "}{g.professionalName}</Text>}
-                  {renderEntryQuickActions(g, true, true)}
-                </View>
+                  })() },
+                ]}
+                actions={renderEntryQuickActions(g, true, true)}
+              />
 
               {/* Botones de acción — cuadrícula dinámica (2 o 3 cols)
                   Comm (verde, opcional): WA | Llamar — solo si hay teléfono real

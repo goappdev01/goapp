@@ -129,7 +129,7 @@ for(const profile of profiles)test(`${profile.name}: short bodies have no bounce
 });
 
 test('body-only and natural-height consumers retain their original contract',()=>{
- const react={createElement:(type,props,...children)=>({type,props:props||{},children})};const scope={exports:{},require:n=>n==='react'?react:n==='react-native'?{View:'View',ScrollView:'ScrollView',StyleSheet:{absoluteFill:{}}}:undefined};
+ const react={createContext:React.createContext,createElement:(type,props,...children)=>({type,props:props||{},children})};const scope={exports:{},require:n=>n==='react'?react:n==='react-native'?{View:'View',ScrollView:'ScrollView',StyleSheet:{absoluteFill:{}}}:undefined};
  vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/landing/LandingContentViewport.tsx','utf8'),{compilerOptions:{ alwaysStrict: false,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,scope);
  const api=scope.exports,children={preserve:true},style={gap:12},heights=[];
  const props={overflowing:false,onHeight:h=>heights.push(h),contentContainerStyle:style,children};

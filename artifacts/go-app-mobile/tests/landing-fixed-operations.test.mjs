@@ -123,7 +123,7 @@ for(const profile of profiles)for(const [kind,which] of [['visit/task',()=>next]
  });
 
 test('HOLD and body-only callers reserve no empty operations row',()=>{
- const fakeReact={createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)})};
+ const fakeReact={createContext:React.createContext,createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)})};
  const context={exports:{},require:name=>name==='react'?fakeReact:name==='react-native'?{View:'View',ScrollView:'ScrollView',StyleSheet:{absoluteFill:{}}}:undefined};
  vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/landing/LandingContentViewport.tsx','utf8'),{compilerOptions:{ alwaysStrict: false,jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText,context);
  const render=context.exports.LandingCardContents,props={overflowing:false,onHeight(){},children:'body',contentContainerStyle:{gap:12}};

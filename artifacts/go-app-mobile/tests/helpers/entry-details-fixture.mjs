@@ -14,6 +14,6 @@ const components=evaluate('components/GoEntryDetails.tsx',{
  './landing/landingPanels':evaluate('components/landing/landingPanels.ts'),
 });
 export const renderEntryQuickActions=(entry,showState=true,compact=false)=>React.createElement(components.GoEntryQuickActions,{entry,showState,compact,onCancel(){},onPropose(){},onEdit(){},onAccept(){},onReject(){}});
-export const renderEntryMicroActions=entry=>React.createElement(components.GoEntryMicroActions,{entry,onDone(){},onPending(){},onDiscard(){}});
+export const renderEntryMicroActions=(entry,inline=false)=>React.createElement(components.GoEntryMicroActions,{entry,inline,onDone(){},onPending(){},onDiscard(){}});
 export const entryIsReservation=presentation.entryIsReservation;
 export const entryPhone=presentation.entryPhone;

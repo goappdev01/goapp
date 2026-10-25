@@ -24,21 +24,21 @@ test('visits/tasks and changes share static compact sizing and retain full detai
  const info=next.children.map(n=>n.getText(ast)).join('');
  for(const expression of ['{displayContact(entryIdentity(g.contactName), g.phone)}','{g.place}']){
   const text=nodes.find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='Text'&&n.pos>=next.pos&&n.end<=next.end&&n.children.some(child=>child.getText(ast)===expression));
-  assert.ok(text);assert.equal(attribute(text,'numberOfLines').getText(ast),'1');assert.equal(attribute(text,'ellipsizeMode'),undefined);
+  assert.ok(text);assert.equal(attribute(text,'numberOfLines').getText(ast),'1');assert.equal(text.openingElement.attributes.properties.find(p=>p.name?.getText(ast)==='ellipsizeMode')?.initializer.getText(ast),'"tail"');
  }
  assert.ok(!info.includes('overflow: "hidden"'));assert.ok(!/isAdminView|isBusinessMode|isUserMode/.test(attribute(next,'adaptiveBody').getText(ast)));
  const frame=attribute(next,'bodyFrame').getText(ast);assert.ok(!frame.includes('flexShrink: 1'));assert.ok(!frame.includes('overflow: "hidden"'));
  const panelStyle=attribute(next.parent,'style').getText(ast);assert.ok(panelStyle.includes('bottom: contentBottom('));assert.ok(!panelStyle.includes('maxHeight'),'no outer cap may silently reinstate the old full-width header reservation');assert.ok(!/margin|translateY|paddingTop/.test(panelStyle));
 });
 
-async function fixture(profile,{bodyHeight=40,availableHeight=278,scale=1,place='Calle de Murcia, Molina de Segura, Murcia',entryType='GO_BOOKING',notes=''}={}){
+async function fixture(profile,{bodyHeight=40,availableHeight=348,scale=1,place='Calle de Murcia, Molina de Segura, Murcia',entryType='GO_BOOKING',notes=''}={}){
  let change;const propsById=new Map(),actions=[],measures=[];
  const headerHeight=34,footerHeight=2*Math.round(Math.min(80,Math.max(56,64*scale)))+Math.round(6*scale);
  function View(props){
   const id=props.testID,style=flatten(typeof props.style==='function'?props.style({pressed:false}):props.style);
   if(id)propsById.set(id,props);
   const measured=id==='landing-card-header'?headerHeight:id==='landing-card-operations'?footerHeight:
-   id==='landing-card-natural-content'||id==='landing-card-body'?current.bodyHeight:null;
+   id==='landing-card-natural-content'||id==='landing-card-body'?current.bodyHeight:id==='landing-compact-primary'?36:id==='landing-compact-actions'?52:id?.startsWith('landing-compact-row-')?16:null;
   // Native onLayout values are injected; this harness does not pretend to render iOS fonts or Yoga.
   React.useLayoutEffect(()=>{if(measured!==null)props.onLayout?.({nativeEvent:{layout:{height:measured,width:328}}});},[id,measured]);
   return React.createElement('div',{'data-testid':id,'data-native':'View','data-style':JSON.stringify(style)},props.children);
@@ -53,13 +53,13 @@ async function fixture(profile,{bodyHeight=40,availableHeight=278,scale=1,place=
   INFO_W:354,uiScaleFactor:scale,handedness:'right',tint:'#f97316',ordinal:'1ª',cardLabel:'TAREA',safeIdx:0,total:1,
   dateStr:'Vie 16/10 · 14:00',dt:new Date('2032-10-16T14:00:00'),receptionNowMs:0,displayContact:name=>name,
   goView:{view:profile,isAdminView:profile==='ADMIN'},operations:{content:React.createElement(View,{testID:'unchanged-controls'},'Taxi · Uber · Bolt · WhatsApp · Cambiar · Aquí · Llamar · Tarde · Ir')},
-  PANEL_ACTION_GAP:Math.round(12*scale),PANEL_W:354,headerObstacles:[],nextCardAvailableHeight:availableHeight,LandingCardContents:shared.LandingCardContents};
+  PANEL_ACTION_GAP:Math.round(12*scale),PANEL_W:354,headerObstacles:[],nextCardAvailableHeight:availableHeight,LandingCompactBody:shared.LandingCompactBody,LandingCardContents:shared.LandingCardContents};
  vm.createContext(scope);
  // Compile a function so subsequent native measurements/entry changes use current scope values.
  vm.runInContext(compile('exportsRender = () => ('+next.getText(ast)+');'),scope);
  let current={bodyHeight,availableHeight,place,entryType,notes,opened:true};
  function Root(){const [state,set]=React.useState(current);current=state;change=set;
-  scope.g={id:'same-appointment',contactName:'Contacto completo',place:state.place,dateISO:'2032-10-16',type:state.entryType,notes:state.notes};
+  scope.g={id:'same-appointment',contactName:'Contacto completo',place:state.place,dateISO:'2032-10-16',time:'14:00',type:state.entryType,notes:state.notes};
   scope.cardLabel=entryIsReservation(scope.g)?scope.g.contactName.toUpperCase():'TAREA';
   scope.landingPanels={next:{height:state.availableHeight}};scope.nextCardAvailableHeight=state.availableHeight;
   return React.createElement(View,{testID:'bottom-anchored-panel',style:{position:'absolute',bottom:300}},state.opened&&scope.exportsRender());}
@@ -74,7 +74,7 @@ for(const profile of profiles)for(const [label,height]of [['two lines',36],['thr
   const f=await fixture(profile,{bodyHeight:height,place:address});try{
    const body=byId(f.container,'landing-card-body'),frame=byId(f.container,'landing-information-frame'),footer=byId(f.container,'landing-card-operations');
    assert.equal(body.attributes['data-native'],'View');assert.ok(dom(frame).includes(body));
-   for(const node of [body,frame]){const style=JSON.parse(node.attributes['data-style']);assert.equal(style.height,undefined);assert.equal(style.maxHeight,undefined);assert.equal(style.overflow,undefined);assert.equal(style.flexShrink,0);}
+   for(const node of [body,frame]){const style=JSON.parse(node.attributes['data-style']);assert.equal(style.height,undefined);if(node===body)assert.ok(style.maxHeight>=0);else assert.equal(style.maxHeight,undefined);assert.equal(style.overflow,undefined);assert.equal(style.flexShrink,0);}
    assert.ok(f.container.textContent.includes(address));assert.ok(/Contacto completo|CONTACTO COMPLETO/.test(f.container.textContent));
    const actions=byId(f.container,'entry-quick-actions');assert.ok(dom(frame).includes(actions));assert.ok(!dom(footer).includes(actions),'reservation/task quick actions are inside their information card');
    const savedFooter=footer.attributes['data-style'];await f.press();await f.press(true);assert.deepEqual(f.actions,['open','long:same-appointment']);
@@ -98,7 +98,7 @@ for(const profile of profiles)test(profile+': measured growth goes upward, contr
 for(const profile of profiles)test(profile+': compact Landing never creates a vertical scroller, even as available height changes',async()=>{
  const f=await fixture(profile,{bodyHeight:700});try{
   const footer=byId(f.container,'landing-card-operations'),frame=byId(f.container,'landing-information-frame'),body=byId(f.container,'landing-card-body');
-  assert.equal(body.attributes['data-native'],'View');assert.ok(dom(frame).includes(body));assert.ok(!dom(body).includes(frame)&&!dom(body).includes(footer));
+  assert.equal(body.attributes['data-native'],'View');assert.ok(JSON.parse(byId(f.container,'landing-card-fixed-frame').attributes['data-style']).maxHeight<=f.state.availableHeight);assert.ok(JSON.parse(body.attributes['data-style']).maxHeight<700);assert.ok(dom(frame).includes(body));assert.ok(!dom(body).includes(frame)&&!dom(body).includes(footer));
   assert.equal(dom(f.container).filter(n=>n.attributes?.['data-native']==='ScrollView').length,0);
   assert.equal(byId(f.container,'landing-card-operations'),footer);assert.equal(byId(f.container,'landing-information-frame'),frame);
   await f.update({availableHeight:1000});assert.equal(byId(f.container,'landing-card-body').attributes['data-native'],'View');assert.equal(byId(f.container,'landing-card-operations'),footer);
