@@ -7,6 +7,22 @@ import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import {completionKey} from "@/lib/goActionCompletion";
 type Model=ReturnType<typeof useActionCompletion>;
 export type CompletionFrame={x:number;y:number;width:number;height:number};
+/** Horizontal free header lane; vertical placement belongs to the actual panel, not a cached height. */
+export function completionPanelFrame(input:{panelX:number;panelWidth:number;width:number;left:number;right:number;edgeWidth:number;controls:readonly CompletionFrame[]}):CompletionFrame{
+ const left=input.left+input.edgeWidth,right=input.width-input.right-input.edgeWidth;
+ let lanes=[{left,right}];
+ for(const control of input.controls){
+  const start=control.x-8,end=control.x+control.width+8;
+  lanes=lanes.flatMap(lane=>end<=lane.left || start>=lane.right?[lane]:[
+   {left:lane.left,right:Math.min(lane.right,start)},{left:Math.max(lane.left,end),right:lane.right},
+  ].filter(part=>part.right-part.left>=44));
+ }
+ const overlap=(lane:{left:number;right:number})=>Math.max(0,Math.min(lane.right,input.panelX+input.panelWidth)-Math.max(lane.left,input.panelX));
+ const lane=lanes.sort((a,b)=>overlap(b)-overlap(a)||(b.right-b.left)-(a.right-a.left))[0] ?? {left,right};
+ const width=Math.min(input.panelWidth,Math.max(44,lane.right-lane.left));
+ const x=Math.max(lane.left,Math.min(input.panelX+(input.panelWidth-width)/2,lane.right-width));
+ return {x:x-input.panelX,y:0,width,height:44};
+}
 export function completionFrame(input:{width:number;safeTop:number;commandsTop:number;openHeight:number;open:boolean;left:number;right:number;header?:CompletionFrame}):CompletionFrame{
  const x=Math.max(18,input.left+18),width=Math.max(44,input.width-x-Math.max(18,input.right+18));
  const floor=Math.max(input.safeTop,input.commandsTop-8-(input.open?input.openHeight:0));
@@ -22,8 +38,8 @@ export function completionDecisionLayout(width:number,fontScale=1){
  return {columns,side:Math.max(44,Math.min(104*scale,(width-8*(columns-1))/columns))};
 }
 /** This is a separate absolute information layer. It never participates in orbital/card layout. */
-export function LandingActionCompletion({model,frame,onPropose,onPendingList,lang="es",availableWidth}:{
- model:Model;frame:CompletionFrame;onPropose:(e:CompletionEntry)=>void;onPendingList:()=>void;lang?:string;availableWidth?:number;
+export function LandingActionCompletion({model,frame,onPropose,onPendingList,lang="es",availableWidth,anchorAbove=false}:{
+ model:Model;frame:CompletionFrame;onPropose:(e:CompletionEntry)=>void;onPendingList:()=>void;lang?:string;availableWidth?:number;anchorAbove?:boolean;
 }){
  const insets=useSafeAreaInsets();
  const [tab,setTab]=useState<"unresolved"|"pending">("unresolved"),[settings,setSettings]=useState(false),[expanded,setExpanded]=useState(false);
@@ -36,11 +52,12 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
  useEffect(()=>{if(model.doc){setDuration(String(model.doc.preferences.defaultDurationMinutes));setHours(String(model.doc.preferences.reminderMinutes/60));}},[model.doc?.preferences]);
  useEffect(()=>{if(entry && model.doc)setActionHours(String((model.doc.records[completionKey(entry)]?.reminderMinutes ?? model.doc.preferences.reminderMinutes)/60));},[entry?.id,model.doc]);
  const document=model.doc;
- if(model.scope && model.error && !document)return <View pointerEvents="box-none" style={{position:"absolute",left:frame.x,top:frame.y,width:frame.width,zIndex:90}}>
+ const position=anchorAbove?{bottom:"100%" as const,marginBottom:8}:{top:frame.y};
+ if(model.scope && model.error && !document)return <View pointerEvents="box-none" style={{position:"absolute",left:frame.x,...position,width:frame.width,zIndex:90}}>
   <Text accessibilityLiveRegion="polite" style={{color:"#facc15",fontSize:12}}>{label("No se pudieron leer las confirmaciones. No se ha modificado ningún dato.","Confirmations could not be read. No data has been changed.")}</Text>
  </View>;
  if(!document || !model.scope || !model.unresolved.length && !model.pending.length && !model.savingCount && !model.failedDecisions?.length)return null;
- const compact=frame.height<180;
+ const compact=anchorAbove || frame.height<180;
  const {side}=completionDecisionLayout(expanded?(availableWidth ?? frame.width)-60:frame.width-16,PixelRatio?.getFontScale?.() ?? 1);
  const button={minHeight:44,paddingHorizontal:8,justifyContent:"center" as const};
  const text={color:"#ffffff",fontSize:12,fontWeight:"700" as const};
@@ -102,7 +119,7 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
   {!!(model.error || model.feedback)&&<Text accessibilityLiveRegion="polite" style={{color:"#facc15",fontSize:12}}>{model.error || model.feedback}</Text>}
  </View>;
  return <>
-  <View testID="landing-action-completion" pointerEvents="box-none" style={{position:"absolute",left:frame.x,top:frame.y,width:frame.width,height:Math.max(0,frame.height),zIndex:90}}>
+  <View testID="landing-action-completion" pointerEvents="box-none" style={{position:"absolute",left:frame.x,...position,width:frame.width,...(anchorAbove?{minHeight:44}:{height:Math.max(0,frame.height)}),zIndex:90}}>
    {compact?<TouchableOpacity accessibilityRole="button" style={{...button,minHeight:44,backgroundColor:"#141b29",borderColor:"#fb923c",borderWidth:1,borderRadius:12}}
      onPress={()=>setExpanded(true)}><Text style={text}>{label("Confirma tus acciones","Confirm your actions")} · {model.unresolved.length+model.pending.length}</Text></TouchableOpacity>
     :<ScrollView bounces={false} nestedScrollEnabled style={{maxHeight:frame.height,backgroundColor:"rgba(9,14,24,0.94)",borderRadius:14}} contentContainerStyle={{padding:8}}>{controls()}</ScrollView>}

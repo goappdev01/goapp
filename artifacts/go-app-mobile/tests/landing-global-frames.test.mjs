@@ -32,11 +32,12 @@ test('all three real outer groups contain header, body and the actual number of 
   assert.deepEqual(JSON.parse(JSON.stringify(frame.LANDING_VISIT_FRAME)), { bottomGap: 8, outset: 8, borderWidth: 1.5, radius: 14 });
   const footer = () => actionCount ? React.createElement(View, { testID: 'existing-related-actions' }, Array.from({ length: actionCount }, (_, i) => React.createElement('button', { key: i }, 'Existing action ' + i))) : null;
   const scope = { React, View, Animated: { View }, Pressable: native.Pressable, TouchableOpacity: View, Text: rn.Text, Feather: () => null,
+    renderLandingActionCompletion:()=>null,completionPanelFrame:()=>null,toLandingRootRect:rect=>rect,closeHeaderObstacles:[],closeHeaderHeight:52,insets:{left:0,right:0},
     ...frame, ...shared, ENTRY_COLORS: evaluate('data/reservationCardPolicy.ts').GO_ENTRY_COLORS, entryIsInternal: presentation.entryIsInternal, entryIsReservation: presentation.entryIsReservation, entryIdentity: presentation.entryIdentity,
     renderEntryQuickActions, renderEntryMicroActions, renderLandingOperations: () => ({ content: footer() }), nextCardPanRef: { panHandlers: {} }, cambiosCardPanRef: { panHandlers: {} },
     nextCardSlideAnim: 0, nextCardDeleteConfirm: null, nextSwipeHintAnim: { interpolate: () => 0 }, nextSwipeHintStage: 0, safeIdx: 0, total: 1, ordinal: '1ª',
     cardLabel: 'NOMBRE LARGO', headerObstacles: [], nextCardAvailableHeight: 150, PANEL_ACTION_GAP: 12, lang: 'es', displayContact: (name, phone) => name || phone || '',
-    panelSideStyle: { left: 18 }, panelBottom: 344, landingFrame: { virtual: false }, screen: { height: 844 }, landingPanels: { next: { y: 200, height: 300 } }, contentBottom: x => x,
+    panelSideStyle: { left: 18 }, panelBottom: 344, landingFrame: { virtual: false }, screen: { height: 844 }, landingPanels: { next: { x:18, y: 200, height: 300 }, changes: { x:18, y:200, height:300 } }, contentBottom: x => x,
     dateStr: 'Lun 26/10 · 14:15', dt: new Date('2026-10-26T14:15:00'), receptionNowMs: 0, ACCENT: '#f97316', BLUE: '#60a5fa',
     cardAccent: '#f97316', cardTitle: 'Peluquería con un nombre empresarial muy largo', cardSub: 'Servicio contratado', cardOrigDate: '26/10/26 · 14:15', cardNewDate: '27/10/26 · 18:30', cardDate: '',
     setPendingPanelH() {}, setPendingHeaderH() {}, setPendingContentH() {} };

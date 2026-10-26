@@ -15,7 +15,7 @@ import { setInternalBookingContext, getBookingParticipantIdentity } from "@/data
 import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
 import { useActionCompletion } from "@/hooks/useActionCompletion";
-import { LandingActionCompletion, completionFrame } from "@/components/landing/LandingActionCompletion";
+import { LandingActionCompletion, completionFrame, completionPanelFrame, type CompletionFrame } from "@/components/landing/LandingActionCompletion";
 import { ownedCompletionEntry, completionEligible, completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
 import { GoNoteReminderPicker } from "@/components/notes/GoNoteReminderPicker";
 import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, noteKeyboardContentHeight, type NoteReminderDraft } from "@/lib/goNoteTools";
@@ -14230,6 +14230,38 @@ function HomeScreenContent() {
           </Text>
         </TouchableOpacity>
   );
+  const landingCompletionAnchored = (landingHasChanges && cambiosOpen) || (landingHasNext && !cambiosOpen && !nextAptMinimized);
+  const renderLandingActionCompletion = (frame: CompletionFrame, anchorAbove = false) =>
+    !anyOverlayOpen && !rutasMode && !goAuthOpen && authBootstrapComplete && <LandingActionCompletion
+        model={actionCompletion} lang={lang} availableWidth={screen.width-insets.left-insets.right}
+        frame={frame} anchorAbove={anchorAbove}
+        onPendingList={()=>{setListFilter("pendiente");setListOpen(true);}}
+        onPropose={entry=>{
+          const scope=actionCompletion.scope;if(!scope || !actionCompletion.active(scope))return;
+          const current=actionCompletion.candidates.find(candidate=>candidate.id===entry.id);
+          if(!current || completionSchedule(current)!==completionSchedule(entry))return;
+          if(entry.reservationId && (entry.customerBooking || entry.businessBooking || entry.demoLocal)){
+            openBookingProposal(entry,scope.context.includes(":BUSINESS")?"business":"customer");
+            return;
+          }
+          currentReceivedIdRef.current=entry.id;proposalReturnRef.current="landing";
+          setCalOpen(true);
+          calFlow.open({startAt:"date",initialDateISO:entry.dateISO,initialDateDraft:entry.date,
+            initialTime:entry.time,initialDuration:entry.duration,
+            onCancel:()=>setCalOpen(false),
+            onSave:r=>Alert.alert(lang==="en"?"Confirm change proposal":"Confirmar propuesta de cambio",
+              r.dateISO+" · "+r.time,[
+                {text:lang==="en"?"Cancel":"Cancelar",style:"cancel",onPress:()=>setCalOpen(false)},
+                {text:lang==="en"?"Confirm proposal":"Confirmar propuesta",onPress:async()=>{
+                  try{await assertTaskUser(scope.userId);}catch{setCalOpen(false);return;}
+                  if(!actionCompletion.active(scope)){setCalOpen(false);return;}
+                    const latest=actionCompletion.candidates.find(e=>e.id===entry.id);
+                    if(!latest || completionSchedule(latest)!==completionSchedule(entry)){Alert.alert("GO","La acción ha cambiado. Revisa sus datos.");setCalOpen(false);return;}
+                    sendSuggestChangeFromCal(r);
+                }}
+              ])});
+        }}/>;
+
   if (!authBootstrapComplete || !modeLoaded) {
     return (
       <View style={{ flex: 1, backgroundColor: "#F7F6F2", alignItems: "center", justifyContent: "center" }}>
@@ -14930,6 +14962,10 @@ function HomeScreenContent() {
             </LandingCardContents>
 
             {/* botón de cierre eliminado — lo gestiona el botón único flotante */}
+          {renderLandingActionCompletion(completionPanelFrame({
+              panelX: toLandingRootRect(landingPanels.changes).x, panelWidth: PANEL_W, width: screen.width,
+              left: insets.left, right: insets.right, edgeWidth: closeHeaderHeight + 20, controls: closeHeaderObstacles,
+            }), true)}
           </View>
         );
       })()}
@@ -15267,6 +15303,10 @@ function HomeScreenContent() {
             </LandingCardContents>
 
             {/* botón cerrar Landing eliminado */}
+          {renderLandingActionCompletion(completionPanelFrame({
+              panelX: toLandingRootRect(landingPanels.next).x, panelWidth: PANEL_W, width: screen.width,
+              left: insets.left, right: insets.right, edgeWidth: closeHeaderHeight + 20, controls: closeHeaderObstacles,
+            }), true)}
           </View>
         );
       })()}
@@ -16359,41 +16399,13 @@ function HomeScreenContent() {
         </>
       )}
 
-      {!anyOverlayOpen && !rutasMode && !goAuthOpen && authBootstrapComplete && <LandingActionCompletion
-        model={actionCompletion} lang={lang} availableWidth={screen.width-insets.left-insets.right}
-        frame={completionFrame({width:screen.width,left:insets.left,right:insets.right,
+      {!landingCompletionAnchored && renderLandingActionCompletion(completionFrame({width:screen.width,left:insets.left,right:insets.right,
           safeTop:Math.max(insets.top+8,closeQrY+closeQrSize+8,(titleBottomLocalY ?? 0)+8),
           commandsTop:toLandingRootRect(landingPanels.commands).y+landingOffsetY,
           header:{x:handedness==="right"?insets.left+closeHeaderHeight+20:closeQrX+closeQrSize+closeQrHit+8,
             y:closeQrY,width:Math.max(44,screen.width-insets.left-insets.right-closeHeaderHeight-closeQrSize-closeQrHit-52),height:44},
           open:anyOperationalPanelOpen,
-          openHeight:Math.min(landingPanels.region.height,Math.max(landingNextHeight,landingPendingHeight+landingPendingOffset))})}
-        onPendingList={()=>{setListFilter("pendiente");setListOpen(true);}}
-        onPropose={entry=>{
-          const scope=actionCompletion.scope;if(!scope || !actionCompletion.active(scope))return;
-          const current=actionCompletion.candidates.find(candidate=>candidate.id===entry.id);
-          if(!current || completionSchedule(current)!==completionSchedule(entry))return;
-          if(entry.reservationId && (entry.customerBooking || entry.businessBooking || entry.demoLocal)){
-            openBookingProposal(entry,scope.context.includes(":BUSINESS")?"business":"customer");
-            return;
-          }
-          currentReceivedIdRef.current=entry.id;proposalReturnRef.current="landing";
-          setCalOpen(true);
-          calFlow.open({startAt:"date",initialDateISO:entry.dateISO,initialDateDraft:entry.date,
-            initialTime:entry.time,initialDuration:entry.duration,
-            onCancel:()=>setCalOpen(false),
-            onSave:r=>Alert.alert(lang==="en"?"Confirm change proposal":"Confirmar propuesta de cambio",
-              r.dateISO+" · "+r.time,[
-                {text:lang==="en"?"Cancel":"Cancelar",style:"cancel",onPress:()=>setCalOpen(false)},
-                {text:lang==="en"?"Confirm proposal":"Confirmar propuesta",onPress:async()=>{
-                  try{await assertTaskUser(scope.userId);}catch{setCalOpen(false);return;}
-                  if(!actionCompletion.active(scope)){setCalOpen(false);return;}
-                    const latest=actionCompletion.candidates.find(e=>e.id===entry.id);
-                    if(!latest || completionSchedule(latest)!==completionSchedule(entry)){Alert.alert("GO","La acción ha cambiado. Revisa sus datos.");setCalOpen(false);return;}
-                    sendSuggestChangeFromCal(r);
-                }}
-              ])});
-        }}/>}
+          openHeight:Math.min(landingPanels.region.height,Math.max(landingNextHeight,landingPendingHeight+landingPendingOffset))}))}
       {/* FIXED LOCATION ROW — removed. Map/Search/AQUÍ now live in the MAPA orbital satellite sub-layer. */}
       {false && (
       <Animated.View

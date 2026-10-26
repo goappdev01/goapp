@@ -18,6 +18,7 @@ test('frozen approved visit frame surrounds header, essentials and every lower a
  const frame=evaluate('components/landing/LandingVisitOutline.tsx',{'react-native':native});
  assert.equal(Object.isFrozen(frame.LANDING_VISIT_FRAME),true);assert.deepEqual(JSON.parse(JSON.stringify(frame.LANDING_VISIT_FRAME)),{bottomGap:8,outset:8,borderWidth:1.5,radius:14});
  const scope={React,View,Animated:{View},Pressable:native.Pressable,TouchableOpacity:View,Text:rn.Text,Feather:()=>null,
+  renderLandingActionCompletion:()=>null,completionPanelFrame:()=>null,toLandingRootRect:rect=>rect,closeHeaderObstacles:[],closeHeaderHeight:52,insets:{left:0,right:0},
   ...frame,...shared,entryIsInternal:presentation.entryIsInternal,entryIsReservation:presentation.entryIsReservation,entryIdentity:presentation.entryIdentity,
   renderEntryQuickActions,renderEntryMicroActions,nextCardPanRef:{panHandlers:{}},nextCardSlideAnim:0,nextCardDeleteConfirm:null,
   nextSwipeHintAnim:{interpolate:()=>0},nextSwipeHintStage:0,safeIdx:0,total:1,tint:'#22c55e',ordinal:'1ª',cardLabel:'SALÓN CON NOMBRE LARGO',
