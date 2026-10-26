@@ -15,6 +15,7 @@ export async function nestedCalendarFixture({ hand = 'right', homeSource = fs.re
   const counters = { calendarCloses: 0, globalCloses: 0, resetFields: 0, detailCloses: 0, collapsed: 0, monthOpened: 0 };
   const calendarOpenRef = { current: true }, nativeConfigs = [];
   const scope = { useRef: x => ({ current: x }), useMemo: fn => fn(), PanResponder: responder, calendarOpenRef,
+    createCalendarCloseResponder: detail.calendarCloseResponder.createCalendarCloseResponder,
     calendarTouchRef: { current: null }, calendarGestureGrantedRef: { current: false }, monthGridOpenRef: { current: false }, calScreenWRef: { current: 390 },
     calendarGestureOwnership: detail.ownership, calCloseRef: { current: () => { counters.calendarCloses++; calendarOpenRef.current = false; } },
     calPanelCollapseRef: { current: () => counters.collapsed++ }, calOpenMonthGridRef: { current: () => counters.monthOpened++ },
@@ -51,7 +52,7 @@ export async function nestedCalendarFixture({ hand = 'right', homeSource = fs.re
     async releaseDetail(stream, distance = 145, duration = 600) {
       const pan = detail.props.get('entry-details-gesture-body');
       const down = stream.event(); pan.onStartShouldSetResponderCapture(down);
-      const activation = stream.event(0, 13, 40), claim = pan.onMoveShouldSetResponderCapture(activation);
+      const activation = stream.event(0, 13, 40); pan.onMoveShouldSetResponderCapture(activation); const claim = pan.onMoveShouldSetResponder(activation);
       if (!claim) return { claimed: false, down };
       pan.onResponderGrant(activation); pan.onResponderMove(stream.event(0, distance, duration));
       const up = stream.event(0, distance, 10, true);

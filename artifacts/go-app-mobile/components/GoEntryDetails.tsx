@@ -1,6 +1,6 @@
 import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Alert, Dimensions, Linking, PanResponder, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, type GestureResponderEvent, type PanResponderGestureState } from "react-native";
+import { Alert, Dimensions, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -11,6 +11,7 @@ import { GoCloseButton } from "./ui/GoCloseButton";
 import { CalendarCloseGuide } from "./ui/CalendarCloseGuide";
 import { landingCurrentEntry } from "./landing/landingPanels";
 import { calendarGestureOwnership } from "@/lib/calendarGestureOwnership";
+import { createCalendarCloseResponder } from "@/lib/calendarCloseResponder";
 
 export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
   const { lang } = useLanguage();
@@ -119,7 +120,7 @@ export function GoEntryContract({ entry }: { entry: GoEntry }) {
 }
 
 // Same activation, side-control lane and full-dismiss distance as Calendar's calTopSwipeRef.
-export const ENTRY_DETAIL_CLOSE = Object.freeze({ activation: 12, sideFraction: 0.25, distance: 140, flingDistance: 48, velocity: 0.65, headerHeight: 44, touchSize: 56 });
+export const ENTRY_DETAIL_CLOSE = Object.freeze({ headerHeight: 44, touchSize: 56 });
 
 type EntryDetailsProps = {
   entry: GoEntry | null; onClose: () => void; onMessage?: () => void; onGoToLanding?: () => void; renderMessageScreen?: () => React.ReactNode; handedness?: "right" | "left"; children?: React.ReactNode;
@@ -138,10 +139,9 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
   const gapEnd = Math.min(navigationGeometry.y + navigationGeometry.height, navigationGeometry.y + navigationGeometry.actionsTop - navigationGeometry.offset - 12);
   const navigationTop = navigationGeometry.height > 0 && navigationGeometry.summaryEnd > 0 && navigationGeometry.actionsTop > 0 && gapEnd - gapStart >= ENTRY_DETAIL_CLOSE.touchSize ? gapEnd - ENTRY_DETAIL_CLOSE.touchSize : undefined;
   const phase = useRef<"open" | "dismissing" | "closed">("open");
-  const touch = useRef<{ identifier: string | number; timestamp: number; x: number; y: number; granted: boolean } | null>(null);
   const messageAfterDismiss = useRef(false);
-  const live = useRef({ onClose, onMessage, handedness, headerBottom: 0 });
-  live.current = { onClose, onMessage, handedness, headerBottom: insets.top + 8 + ENTRY_DETAIL_CLOSE.headerHeight };
+  const live = useRef({ onClose, onMessage, handedness });
+  live.current = { onClose, onMessage, handedness };
   const finishDismiss = useCallback(() => {
     if (phase.current !== "dismissing") return;
     phase.current = "closed";
@@ -159,51 +159,19 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
   useLayoutEffect(() => {
     phase.current = "open";
     const release = calendarGestureOwnership.openDetail();
-    return () => { phase.current = "closed"; touch.current = null; release(); };
+    return () => { phase.current = "closed"; release(); };
   }, []);
   useEffect(() => {
     // React Native only emits Modal.onDismiss on iOS; other platforms finish after hiding.
     if (closing && Platform.OS !== "ios") finishDismiss();
   }, [closing, finishDismiss]);
-  const pan = useMemo(() => {
-    const shouldClaim = (event: GestureResponderEvent, g: PanResponderGestureState) => {
-      const origin = touch.current;
-      if (phase.current !== "open" || !origin) return false;
-      if (g.dy <= ENTRY_DETAIL_CLOSE.activation || Math.abs(g.dy) <= Math.abs(g.dx)) return false;
-      const width = Dimensions.get("window").width;
-      const inSide = live.current.handedness === "left"
-        ? origin.x <= width * ENTRY_DETAIL_CLOSE.sideFraction
-        : origin.x >= width * (1 - ENTRY_DETAIL_CLOSE.sideFraction);
-      return inSide || origin.y <= live.current.headerBottom;
-    };
-    const matches = (event: GestureResponderEvent) => !!touch.current && event?.nativeEvent.identifier === touch.current.identifier
-      && event.nativeEvent.timestamp >= touch.current.timestamp;
-    return PanResponder.create({
-      onStartShouldSetPanResponderCapture: event => {
-        const e = event.nativeEvent;
-        touch.current = phase.current === "open" && e.touches.length === 1
-          ? { identifier: e.identifier, timestamp: e.timestamp, x: e.pageX, y: e.pageY, granted: false } : null;
-        return false; // Taps and central scrolling keep their existing handlers.
-      },
-      onMoveShouldSetPanResponder: shouldClaim,
-      onMoveShouldSetPanResponderCapture: shouldClaim,
-      onPanResponderGrant: () => { if (touch.current) touch.current.granted = true; },
-      onPanResponderRelease: (event, g) => {
-        const origin = touch.current;
-        if (phase.current !== "open" || !origin?.granted || !matches(event)) return;
-        touch.current = null;
-        event.stopPropagation();
-        const e = event.nativeEvent;
-        // RN resets dy on responder grant. Measure from touch-down, not that reset.
-        const dy = e.pageY - origin.y, dx = e.pageX - origin.x;
-        if (dy > Math.abs(dx) && (dy > ENTRY_DETAIL_CLOSE.distance
-          || dy >= ENTRY_DETAIL_CLOSE.flingDistance && g.vy > ENTRY_DETAIL_CLOSE.velocity)) dismiss();
-      },
-      onPanResponderTerminate: event => { if (matches(event)) touch.current = null; },
-      onPanResponderReject: event => { if (matches(event)) touch.current = null; },
-      onPanResponderTerminationRequest: () => false,
-    });
-  }, [dismiss]);
+  const pan = useMemo(() => createCalendarCloseResponder({
+    enabled: () => phase.current === "open",
+    width: () => Dimensions.get("window").width,
+    handedness: () => live.current.handedness,
+    detail: true,
+    onClose: dismiss,
+  }), [dismiss]);
   const current = landingCurrentEntry(entry);
   const pending = entryProposalPending(entry);
   return <Modal testID="entry-details-modal" visible={!closing} transparent animationType="none" onRequestClose={dismiss} onDismiss={finishDismiss}>

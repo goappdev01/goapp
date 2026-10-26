@@ -2,6 +2,7 @@ import {createRequire} from 'node:module';
 import path from 'node:path';
 const require=createRequire(path.join(process.cwd(),'package.json'));
 const {React,evaluate,rn,native}=require('./tests/helpers/react-lifecycle.cjs');
+const responder=evaluate('lib/calendarCloseResponder.ts',{'react-native':rn,'./calendarGestureOwnership':evaluate('lib/calendarGestureOwnership.ts')});
 export const presentation=evaluate('data/goEntryPresentation.ts');
 const components=evaluate('components/GoEntryDetails.tsx',{
  '@expo/vector-icons':{Feather:native('Feather')},
@@ -13,6 +14,7 @@ const components=evaluate('components/GoEntryDetails.tsx',{
  './ui/GoCloseButton':{GoCloseButton:()=>null},
  './ui/CalendarCloseGuide':{CalendarCloseGuide:()=>null},
  '@/lib/calendarGestureOwnership':evaluate('lib/calendarGestureOwnership.ts'),
+ '@/lib/calendarCloseResponder':responder,
  './landing/landingPanels':evaluate('components/landing/landingPanels.ts'),
 });
 export const renderEntryQuickActions=(entry,showState=true,compact=false)=>React.createElement(components.GoEntryQuickActions,{entry,showState,compact,onCancel(){},onPropose(){},onEdit(){},onAccept(){},onReject(){}});

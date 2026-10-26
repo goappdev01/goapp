@@ -51,6 +51,7 @@ import * as Location from "expo-location";
 import { StatusBar } from "expo-status-bar";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { calendarGestureOwnership, type CalendarGestureTicket } from "@/lib/calendarGestureOwnership";
+import { createCalendarCloseResponder } from "@/lib/calendarCloseResponder";
 import {
   ActivityIndicator,
   Alert,
@@ -4609,8 +4610,6 @@ function HomeScreenContent() {
   const calScreenWRef = useRef(Dimensions.get("window").width);
   const calendarOpenRef = useRef(calOpen);
   calendarOpenRef.current = calOpen;
-  const calendarTouchRef = useRef<CalendarGestureTicket | null>(null);
-  const calendarGestureGrantedRef = useRef(false);
 
   // ── PANEL NOTA — zona derecha de cierre gestual ────────────────────
   // Funciona con el teclado abierto (PanResponder nativo, no RNGH).
@@ -4663,51 +4662,13 @@ function HomeScreenContent() {
   //   • Drag largo  (> 140 px) → cerrar calendario completamente.
   // El PanResponder se crea una sola vez; usa refs para leer valores vivos.
   const calTopSwipeRef = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponderCapture: e => {
-        calendarGestureGrantedRef.current = false;
-        calendarTouchRef.current = calendarOpenRef.current && e.nativeEvent.touches.length === 1
-          ? calendarGestureOwnership.beginParentTouch(e.nativeEvent) : null;
-        return false;
-      },
-      onMoveShouldSetPanResponder: (e, g) => {
-        if (!calendarOpenRef.current || !calendarGestureOwnership.canUseParentTouch(calendarTouchRef.current, e.nativeEvent)) return false;
-        if (monthGridOpenRef.current) return false;
-        // Capture clearly-vertical drags (up or down).
-        if (Math.abs(g.dy) <= 12 || Math.abs(g.dy) <= Math.abs(g.dx)) return false;
-        // Restrict to right 25% of screen — the "control zone".
-        const touchX = e.nativeEvent.pageX;
-        const controlZoneStart = calScreenWRef.current * 0.75;
-        return touchX >= controlZoneStart;
-      },
-      onPanResponderGrant: e => {
-        calendarGestureGrantedRef.current = calendarGestureOwnership.canUseParentTouch(calendarTouchRef.current, e.nativeEvent);
-      },
-      onPanResponderRelease: (e, g) => {
-        if (!calendarGestureOwnership.canUseParentTouch(calendarTouchRef.current, e.nativeEvent)) return;
-        const ticket = calendarTouchRef.current; calendarTouchRef.current = null;
-        const granted = calendarGestureGrantedRef.current; calendarGestureGrantedRef.current = false;
-        if (!granted || !calendarOpenRef.current || !calendarGestureOwnership.consumeParentTouch(ticket, e.nativeEvent)) return;
-        const dy = ticket?.origin?.pageY == null ? g.dy : e.nativeEvent.pageY - ticket.origin.pageY;
-        if (dy > 140) {
-          // Long drag down → close completely
-          calCloseRef.current();
-        } else if (dy > 50) {
-          // Short drag down → minimize (collapse bottom panel)
-          calPanelCollapseRef.current();
-        } else if (dy < -50) {
-          // Drag up → open monthly calendar
-          calOpenMonthGridRef.current();
-        }
-      },
-      onPanResponderTerminate: e => {
-        if (!calendarGestureOwnership.canUseParentTouch(calendarTouchRef.current, e.nativeEvent)) return;
-        calendarTouchRef.current = null; calendarGestureGrantedRef.current = false;
-      },
-      onPanResponderReject: e => {
-        if (!calendarGestureOwnership.canUseParentTouch(calendarTouchRef.current, e.nativeEvent)) return;
-        calendarTouchRef.current = null; calendarGestureGrantedRef.current = false;
-      },
+    createCalendarCloseResponder({
+      enabled: () => calendarOpenRef.current,
+      canClaim: () => !monthGridOpenRef.current,
+      width: () => calScreenWRef.current,
+      onClose: () => calCloseRef.current(),
+      onCollapse: () => calPanelCollapseRef.current(),
+      onOpenMonth: () => calOpenMonthGridRef.current(),
     }),
   ).current;
 

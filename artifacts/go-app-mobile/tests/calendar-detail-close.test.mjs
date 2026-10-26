@@ -1,11 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
-import vm from 'node:vm';
-import { createRequire } from 'node:module';
 import { detailFixture, detailEntry } from './helpers/calendar-detail-lifecycle.mjs';
-const require = createRequire(path.join(process.cwd(), 'package.json')), ts = require('typescript');
 const nodes = n => n ? [n, ...n.childNodes.flatMap(nodes)] : [];
 const byId = (root, id) => nodes(root).find(n => n.attributes?.['data-testid'] === id);
 
@@ -39,20 +35,20 @@ for (const hand of ['right', 'left']) test(`${hand}: incomplete and interrupted 
     const x = hand === 'right' ? 380 : 10, event = point(x, 413), gesture = { dy: 13, dx: 0, y0: 0, vy: 0.1 };
     const down = (sx = x, sy = 400) => pan.onStartShouldSetPanResponderCapture(point(sx, sy, 100));
     down();
-    assert.equal(pan.onMoveShouldSetPanResponderCapture(event, gesture), true);
+    assert.equal(pan.onMoveShouldSetPanResponder(event, gesture), true);
     const boundary = 390 * (hand === 'right' ? .75 : .25);
-    down(boundary); assert.equal(pan.onMoveShouldSetPanResponderCapture(point(boundary, 413), gesture), true);
-    down(boundary + (hand === 'right' ? -1 : 1)); assert.equal(pan.onMoveShouldSetPanResponderCapture(point(boundary, 413), gesture), false);
+    down(boundary); assert.equal(pan.onMoveShouldSetPanResponder(point(boundary, 413), gesture), true);
+    down(boundary + (hand === 'right' ? -1 : 1)); assert.equal(pan.onMoveShouldSetPanResponder(point(boundary, 413), gesture), false);
     down();
-    for (const g of [{ ...gesture, dy: 12 }, { ...gesture, dy: -160 }, { ...gesture, dx: 30 }]) assert.equal(pan.onMoveShouldSetPanResponderCapture(event, g), false);
-    down(195); assert.equal(pan.onMoveShouldSetPanResponderCapture(point(195, 413), gesture), false, 'native pre-grant y0=0 cannot capture central scrolling');
-    down(195, 70); assert.equal(pan.onMoveShouldSetPanResponderCapture(point(195, 83), gesture), true);
+    for (const g of [{ ...gesture, dy: 12 }, { ...gesture, dx: 30 }]) assert.equal(pan.onMoveShouldSetPanResponder(event, g), false);
+    down(195); assert.equal(pan.onMoveShouldSetPanResponder(point(195, 413), gesture), false, 'native pre-grant y0=0 cannot capture central scrolling');
+    down(195, 70); assert.equal(pan.onMoveShouldSetPanResponder(point(195, 83), gesture), false, 'header uses the same side lane as Calendar');
     for (const dy of [13, 50, 139, 140]) await f.settle(() => { down(); pan.onPanResponderGrant(event); pan.onPanResponderRelease(point(x, 400 + dy), { ...gesture, dy }); });
     assert.equal(f.props.get('entry-details-modal').visible, true); assert.equal(closed, 0);
     pan.onPanResponderTerminate(); assert.equal(pan.onPanResponderTerminationRequest(), false);
     assert.equal(f.props.get('entry-details-sheet').style.some(s => s.transform), false, 'no displaced controls or unfinished animation');
     await f.settle(() => { down(); pan.onPanResponderGrant(event); pan.onPanResponderRelease(point(x, 560), { ...gesture, dy: 160 }); pan.onPanResponderRelease(point(x, 600), { ...gesture, dy: 200 }); f.props.get('Cerrar detalle').onPress({ stopPropagation() {} }); });
-    assert.equal(f.props.get('entry-details-modal').visible, false); assert.equal(closed, 0); assert.equal(pan.onMoveShouldSetPanResponderCapture(event, gesture), false);
+    assert.equal(f.props.get('entry-details-modal').visible, false); assert.equal(closed, 0); assert.equal(pan.onMoveShouldSetPanResponder(event, gesture), false);
     await f.nativeDismiss(); await f.nativeDismiss(); assert.equal(closed, 2, 'current callback runs exactly once after native dismissal');
     await f.render({ entry: null }); await f.render({ entry: detailEntry }); assert.equal(f.props.get('entry-details-modal').visible, true);
   } finally { await f.dispose(); }
@@ -76,14 +72,14 @@ test('StrictMode replay and stale callbacks from an unmounted record cannot clos
   } finally { await f.dispose(); }
 });
 
-test('detail thresholds match Calendar and both views reuse its actual white fade', () => {
-  const source = fs.readFileSync('app/index.tsx', 'utf8'), ast = ts.createSourceFile('home.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX); let node;
-  function visit(n) { if (ts.isVariableDeclaration(n) && n.name.getText(ast) === 'calTopSwipeRef') node = n; ts.forEachChild(n, visit); } visit(ast);
-  const code = ts.transpileModule('(' + node.initializer.getText(ast) + ')', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
-  const native = vm.runInNewContext(code, { useRef: x => ({ current: x }), PanResponder: { create: c => c }, monthGridOpenRef: { current: false }, calScreenWRef: { current: 390 }, calCloseRef: { current() {} }, calPanelCollapseRef: { current() {} }, calOpenMonthGridRef: { current() {} }, calendarOpenRef: { current: true }, calendarTouchRef: { current: null }, calendarGestureGrantedRef: { current: false }, calendarGestureOwnership: { canUseParentTouch: () => true } });
-  assert.equal(native.onMoveShouldSetPanResponder({ nativeEvent: { pageX: 380 } }, { dy: 13, dx: 0 }), true);
-  assert.ok(node.getText(ast).includes('dy > 140')); assert.ok(source.includes('<CalendarCloseGuide />'), 'existing Calendar lane stays on its original side; detail mirrors its own lane for handedness');
-  const detail = fs.readFileSync('components/GoEntryDetails.tsx', 'utf8'); assert.ok(detail.includes('<CalendarCloseGuide handedness={handedness} testID="entry-detail-swipe-guide" />'));
+test('Calendar and detail use one real responder factory and preserve the original white fade', () => {
+  const source = fs.readFileSync('app/index.tsx', 'utf8'), detail = fs.readFileSync('components/GoEntryDetails.tsx', 'utf8');
+  assert.ok(source.includes('createCalendarCloseResponder({'));
+  assert.ok(detail.includes('createCalendarCloseResponder({'));
+  assert.ok(!detail.includes('PanResponder.create'));
+  assert.ok(!detail.includes('flingDistance'));
+  assert.ok(source.includes('<CalendarCloseGuide />'));
+  assert.ok(detail.includes('<CalendarCloseGuide handedness={handedness} testID="entry-detail-swipe-guide" />'));
   assert.ok(!detail.includes('Animated.timing')); assert.ok(!detail.includes('onExit'));
 });
 
