@@ -28,14 +28,14 @@ for(const hand of ['right','left'])for(const platform of ['ios','android'])test(
 test('Calendar keeps its modal and source detail while the SAME Communication screen opens and returns after native dismissal',()=>{
  const calls=[],returnRef={current:null};let calOpen=true;
  const scope={exports:{},React:{createElement:tree},MessagesScreen:'MessagesScreen',entryMessageContext:presentation.entryMessageContext,
-  messageReturnRef:returnRef,messagesOpen:true,recentContacts:[],userGoPhone:'',initialMessagesContact:null,
+  messageReturnRef:returnRef,messagesOpen:true,goChatOpen:false,goChatScreen:null,setMessageEntryId:v=>calls.push(["host",v]),recentContacts:[],userGoPhone:'',initialMessagesContact:null,
   initialMessagesBookingId:booking.reservationId,initialMessagesContext:presentation.entryMessageContext(booking),
   setMessagesOpen:v=>calls.push(['messages',v]),setLandingDetailsId:v=>calls.push(['landing-detail',v]),
   setInitialMessagesContext:v=>calls.push(['context',v]),setInitialMessagesBookingId:v=>calls.push(['booking',v]),setInitialMessagesContact:v=>calls.push(['contact',v]),
   setTimeout:()=>{throw Error('Native navigation must not depend on a guessed timeout');}};
  vm.createContext(scope);vm.runInContext(transpile('exports.open='+declaration('openEntryMessage')+';exports.finish='+declaration('finishEntryMessageReturn')+';'),scope);
  scope.finishEntryMessageReturn=scope.exports.finish;
- scope.exports.open(booking,()=>calls.push(['restore',booking.id]));assert.equal(calOpen,true);assert.deepEqual(calls.at(-1),['messages',true]);
+ scope.exports.open(booking,()=>calls.push(['restore',booking.id]),true);assert.equal(calOpen,true);assert.deepEqual(calls.at(-1),['messages',true]);assert.equal(calls.some(x=>x[0]==='landing-detail'),false,'The selected source detail must remain mounted');
  vm.runInContext(transpile('exports.screen='+declaration('messagesScreen')+';'),scope);
  const screen=scope.exports.screen;assert.equal(screen.type,'MessagesScreen');assert.equal(screen.props.initialBookingId,booking.reservationId);assert.equal(screen.props.initialContext.name,booking.contactName);
  screen.props.onClose();assert.equal(calls.filter(x=>x[0]==='restore').length,0,'Back waits until Communication is actually dismissed');
@@ -46,9 +46,9 @@ test('the only Communication component is presented by the active Calendar, not 
  const screen=find(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='MessagesScreen');
  let fn=screen;while(fn&&!ts.isFunctionDeclaration(fn))fn=fn.parent;assert.equal(fn.name.text,'HomeScreenContent');
  const calendar=find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='Modal'&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='visible'&&a.initializer?.getText(ast)==='{calOpen}'));
- const inside=find(n=>ts.isBinaryExpression(n)&&n.getText(ast)==='calOpen && messagesScreen');
+ const inside=find(n=>ts.isBinaryExpression(n)&&n.getText(ast)==='calOpen && !messageEntryId && messagesScreen');
  let p=inside;while(p&&p!==calendar)p=p.parent;assert.equal(p,calendar,'iOS presenter must be inside Calendar native modal');
- const outside=find(n=>ts.isBinaryExpression(n)&&n.getText(ast)==='!calOpen && messagesScreen');
+ const outside=find(n=>ts.isBinaryExpression(n)&&n.getText(ast)==='!calOpen && !messageEntryId && messagesScreen');
  p=outside;while(p&&p!==calendar)p=p.parent;assert.equal(p,undefined,'General Communication stays on Landing only when Calendar is closed');
  const source=readFileSync('components/AgendaOperativa.tsx','utf8');assert.ok(!source.includes('setTimeout(()=>handleOpenMessage(item),180)'));
 });

@@ -121,7 +121,7 @@ export function GoEntryContract({ entry }: { entry: GoEntry }) {
 export const ENTRY_DETAIL_CLOSE = Object.freeze({ activation: 12, sideFraction: 0.25, distance: 140, flingDistance: 48, velocity: 0.65, headerHeight: 44, touchSize: 56 });
 
 type EntryDetailsProps = {
-  entry: GoEntry | null; onClose: () => void; onMessage?: () => void; handedness?: "right" | "left"; children?: React.ReactNode;
+  entry: GoEntry | null; onClose: () => void; onMessage?: () => void; renderMessageScreen?: () => React.ReactNode; handedness?: "right" | "left"; children?: React.ReactNode;
 };
 
 export function GoEntryDetailsSheet(props: EntryDetailsProps) {
@@ -129,9 +129,10 @@ export function GoEntryDetailsSheet(props: EntryDetailsProps) {
   return props.entry ? <GoEntryDetailsSession key={props.entry.id} {...props} entry={props.entry} /> : null;
 }
 
-function GoEntryDetailsSession({ entry, onClose, onMessage, handedness = "right", children }: EntryDetailsProps & { entry: GoEntry }) {
+function GoEntryDetailsSession({ entry, onClose, onMessage, renderMessageScreen, handedness = "right", children }: EntryDetailsProps & { entry: GoEntry }) {
   const insets = useSafeAreaInsets(), { lang } = useLanguage();
   const [closing, setClosing] = useState(false);
+  const [availableHeight, setAvailableHeight] = useState(Dimensions.get("window").height);
   const phase = useRef<"open" | "dismissing" | "closed">("open");
   const touch = useRef<{ identifier: string | number; timestamp: number; x: number; y: number; granted: boolean } | null>(null);
   const messageAfterDismiss = useRef(false);
@@ -202,7 +203,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, handedness = "right"
   const current = landingCurrentEntry(entry);
   const pending = entryProposalPending(entry);
   return <Modal testID="entry-details-modal" visible={!closing} transparent animationType="none" onRequestClose={dismiss} onDismiss={finishDismiss}>
-    <View testID="entry-details-overlay" style={{ flex: 1, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8, paddingHorizontal: Math.max(insets.left, insets.right, 8), backgroundColor: "rgba(0,0,0,0.62)" }}>
+    <View testID="entry-details-overlay" onLayout={event => { if (event.nativeEvent.layout.height > 0) setAvailableHeight(event.nativeEvent.layout.height); }} style={{ flex: 1, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8, paddingHorizontal: Math.max(insets.left, insets.right, 8), backgroundColor: "rgba(0,0,0,0.62)" }}>
       <View testID="entry-details-sheet" pointerEvents={closing ? "none" : "auto"} onAccessibilityEscape={dismiss} style={[s.sheet, { borderColor: pending ? "#FF8C00" : entry.color || "#4A80BD" }]}>
         <View testID="entry-details-gesture-body" {...pan.panHandlers} style={{ flex: 1, minHeight: 0 }}>
         <View testID="entry-detail-close-gesture" style={{ height: ENTRY_DETAIL_CLOSE.headerHeight, alignItems: "center", justifyContent: "center" }}><View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.35)" }} /></View>
@@ -216,7 +217,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, handedness = "right"
           </View>}
           <View testID="entry-details-actions" style={{marginTop:"auto",paddingTop:12,gap:12}}>
           <GoEntryCommunication entry={entry} />
-          {onMessage&&!entryIsInternal(entry)&&<TouchableOpacity testID="entry-message-go" accessibilityRole="button" accessibilityLabel="MENSAJE GO" onPress={() => { if (phase.current !== "open") return; messageAfterDismiss.current = true; dismiss(); }}
+          {onMessage&&!entryIsInternal(entry)&&<TouchableOpacity testID="entry-message-go" accessibilityRole="button" accessibilityLabel="MENSAJE GO" onPress={() => { if (phase.current !== "open") return; if (renderMessageScreen) { onMessage(); return; } messageAfterDismiss.current = true; dismiss(); }}
             style={{alignSelf:handedness==="left"?"flex-start":"flex-end",minHeight:44,paddingHorizontal:14,paddingVertical:10,borderWidth:1,borderRadius:10,borderColor:"#93c5fd"}}>
             <Text numberOfLines={1} style={{color:"#93c5fd",fontWeight:"700",fontSize:12}}>MENSAJE GO</Text>
           </TouchableOpacity>}
@@ -225,10 +226,11 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, handedness = "right"
         </ScrollView>
         <CalendarCloseGuide handedness={handedness} testID="entry-detail-swipe-guide" />
         </View>
-        <View testID="entry-detail-close-footer" style={{ flexShrink: 0, flexDirection: "row", justifyContent: handedness === "left" ? "flex-start" : "flex-end", paddingHorizontal: 6, paddingTop: 4, paddingBottom: 6 }}>
+        <View testID="entry-detail-close-footer" style={{ flexShrink: 0, flexDirection: "row", justifyContent: handedness === "left" ? "flex-start" : "flex-end", paddingHorizontal: 6, paddingTop: 4, paddingBottom: Math.max(24, Math.min(44, Math.round(availableHeight * 0.045))) }}>
           <GoCloseButton level="panel" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Close details" : "Cerrar detalle"} onPress={dismiss} />
         </View>
       </View>
+      {renderMessageScreen?.()}
     </View>
   </Modal>;
 }

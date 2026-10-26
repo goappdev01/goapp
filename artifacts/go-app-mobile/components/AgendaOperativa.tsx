@@ -314,6 +314,7 @@ export type AgendaBoardProps = {
   onProposeItem?: (id: string) => void;
   onConfirmBooking?: (id:string)=>void;
   onOpenMessage?: (entry:GoEntry,returnTo?:()=>void)=>void;
+  renderMessageScreen?: (entry:GoEntry)=>React.ReactNode;
   onResolveEntry?: (entry:GoEntry,status:"done"|"pending"|"discard",current?:()=>GoEntry|undefined)=>void;
   canResolveEntry?: (entry:GoEntry)=>boolean;
   handedness?: "left"|"right";
@@ -698,7 +699,7 @@ export function AgendaBoard({
   onChangeEstado,
   onDeleteItem,
   onProposeItem,
-  onOpenMessage, onResolveEntry, canResolveEntry, handedness,
+  onOpenMessage, renderMessageScreen, onResolveEntry, canResolveEntry, handedness,
   onSaveBookingMessage,
   goChats,
   onSendGoChat,
@@ -2692,7 +2693,7 @@ export function AgendaBoard({
       {!!verificationEntry && (()=>{const {ReservationVerificationPanel}=require("@/components/booking/ReservationVerificationPanel") as typeof import("@/components/booking/ReservationVerificationPanel");return <ReservationVerificationPanel bookingId={verificationEntry.customerBooking?verificationEntry.reservationId:undefined} businessId={verificationEntry.businessBooking?verificationEntry.businessId:undefined} key={verificationEntry.id} onClose={()=>setVerificationEntry(null)}/>;})()}
 
       {/* One foreground detail for the same reservation or task. Calendar stays mounted. */}
-      <GoEntryDetailsSheet handedness={handedness} entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}
+      <GoEntryDetailsSheet renderMessageScreen={renderMessageScreen && expandedBookingItem ? () => renderMessageScreen(expandedBookingItem) : undefined} handedness={handedness} entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}
         onClose={() => { setExpandedBookingItem(null); setExpandedCardId(null); }}
         onMessage={expandedBookingItem && onOpenMessage ? () => handleOpenMessage(expandedBookingItem) : undefined}
         >

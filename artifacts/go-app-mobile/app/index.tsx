@@ -3141,6 +3141,7 @@ function HomeScreenContent() {
   const [initialMessagesContact, setInitialMessagesContact] = useState<{ name: string; phone: string } | null>(null);
   const [initialMessagesContext,setInitialMessagesContext]=useState<ReturnType<typeof entryMessageContext>>(null);
   const messageReturnRef=useRef<(()=>void)|null>(null);
+  const [messageEntryId, setMessageEntryId] = useState<string | null>(null);
   const [initialMessagesBookingId,setInitialMessagesBookingId]=useState<string|null>(null);
   // ── RECORDATORIO (RECUÉRDAME) ────────────────────────────────────────────
   const [remindOpen, setRemindOpen] = useState(false);
@@ -6112,10 +6113,10 @@ function HomeScreenContent() {
     setAiListening(false);
   };
 
-  const openAi = (listenOnOpen = false) => {
+  const openAi = (listenOnOpen = false, fromMessages = false) => {
     if (pendingCalendarGoRef.current) return;
     // iOS must finish dismissing Calendar before presenting the existing AI modal.
-    if (calOpen) {
+    if (calOpen && !fromMessages) {
       pendingCalendarGoRef.current = true;
       pendingCalendarGoListenRef.current = listenOnOpen;
       setCalOpen(false);
@@ -13620,12 +13621,15 @@ function HomeScreenContent() {
   const finishEntryMessageReturn = () => {
     setInitialMessagesContact(null); setInitialMessagesBookingId(null); setInitialMessagesContext(null);
     const back = messageReturnRef.current; messageReturnRef.current = null; back?.();
+    setMessageEntryId(null);
   };
 
-  const openEntryMessage = (entry: GoEntry,returnTo?:()=>void) => {
+  const openEntryMessage = (entry: GoEntry,returnTo?:()=>void,inDetails = false) => {
     const context=entryMessageContext(entry);if(!context)return;
     messageReturnRef.current=returnTo??(()=>setLandingDetailsId(entry.id));
-    setLandingDetailsId(null);setInitialMessagesContext(context);
+    setMessageEntryId(inDetails ? entry.id : null);
+    if (!inDetails) setLandingDetailsId(null);
+    setInitialMessagesContext(context);
     setInitialMessagesBookingId(context.bookingId??null);setInitialMessagesContact(null);
     setMessagesOpen(true);
   };
@@ -14216,22 +14220,28 @@ function HomeScreenContent() {
     );
   }
 
+  const goChatScreen = (<GOChatScreen
+        visible={goChatOpen}
+        listenRequest={goChatListenRequest}
+        uiScale={uiScale}
+        handedness={handedness}
+        onHandednessChange={(value) => { setHandedness(value); AsyncStorage.setItem("go_handedness_v1", value).catch(() => {}); }}
+        onClose={() => {
+          setGoChatOpen(false);
+          // IA already commits to the same observable GO record.
+        }}
+      />);
+
   const messagesScreen = (<MessagesScreen
         visible={messagesOpen}
+        assistant={messagesOpen && goChatOpen ? goChatScreen : null}
         onClose={() => setMessagesOpen(false)}
         onDismiss={finishEntryMessageReturn}
         recentContacts={recentContacts}
         userGoPhone={userGoPhone}
         initialContact={initialMessagesContact ?? undefined}
         initialBookingId={initialMessagesBookingId ?? undefined} initialContext={initialMessagesContext??undefined}
-        onCreateGo={({ contactName: cName, contactPhone: cPhone, contextText }) => {
-          messageReturnRef.current = null;
-          setMessagesOpen(false);
-          setContactName(cName);
-          setPhone(cPhone);
-          setAiDraft(contextText);
-          setTimeout(() => setAiOpen(true), 350);
-        }}
+        onCreateGo={() => openAi(false, true)}
         onPickDeviceContact={async () => {
           try {
             if (Platform.OS === "ios" || Platform.OS === "android") {
@@ -14254,6 +14264,7 @@ function HomeScreenContent() {
           }
         }}
       />);
+  const renderEntryMessageScreen = (entry: GoEntry) => messageEntryId === entry.id ? messagesScreen : null;
 
   return (
     <>
@@ -15370,7 +15381,7 @@ function HomeScreenContent() {
       )}
 
       </LandingContentViewport>
-      <GoEntryDetailsSheet handedness={handedness} entry={landingDetailsEntry?followedEntry(landingDetailsEntry):null} onClose={() => setLandingDetailsId(null)} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry) : undefined}>
+      <GoEntryDetailsSheet handedness={handedness} entry={landingDetailsEntry?followedEntry(landingDetailsEntry):null} onClose={() => setLandingDetailsId(null)} renderMessageScreen={landingDetailsEntry ? () => renderEntryMessageScreen(landingDetailsEntry) : undefined} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry, undefined, true) : undefined}>
         {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry)}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}</>}
       </GoEntryDetailsSheet>
 
@@ -20124,7 +20135,7 @@ function HomeScreenContent() {
             {/* AgendaBoard shares the existing view/settings header with month navigation. */}
             <View testID="calendar-agenda-viewport" style={{ flex: 1 }}>
             {demoCustomerCalendarSelected ? (demoBookingRepository
-              ? <View style={{ flex: 1 }}><DemoCustomerCalendar scrollToTodayToken={calScrollToTodayToken} onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
+              ? <View style={{ flex: 1 }}><DemoCustomerCalendar renderMessageScreen={renderEntryMessageScreen} scrollToTodayToken={calScrollToTodayToken} onOpenMessage={(entry, back) => openEntryMessage(entry, back, true)} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
               : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
                 renderHeader={monthNavigation => (<View testID="calendar-header"
               pointerEvents={showBookingFromCal ? "none" : "auto"}
@@ -20250,7 +20261,7 @@ function HomeScreenContent() {
                   if (!g) return;
                   openEntryChange(g, "calendar");
                 }}
-                onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness}
+                renderMessageScreen={renderEntryMessageScreen} onOpenMessage={(entry, back) => openEntryMessage(entry, back, true)} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness}
                 onDeleteItem={id=>{const entry=goLog.find(e=>e.id===id);if(entry)cancelEntryFromDetails(entry);}}
                 onSaveBookingMessage={(id, msg) => {
                   setGoLog((prev) => {
@@ -20753,7 +20764,7 @@ function HomeScreenContent() {
             )}
 
           </Pressable>
-          {calOpen && messagesScreen}
+          {calOpen && !messageEntryId && messagesScreen}
 
         {/* ── MONTH GRID BOTTOM SHEET — slide up desde abajo ─────────────
             Se monta dentro del mismo Modal del calendario para heredar
@@ -24297,20 +24308,10 @@ function HomeScreenContent() {
 
 
       {/* GO CHAT SCREEN — asistente de reservas V1 */}
-      <GOChatScreen
-        visible={goChatOpen}
-        listenRequest={goChatListenRequest}
-        uiScale={uiScale}
-        handedness={handedness}
-        onHandednessChange={(value) => { setHandedness(value); AsyncStorage.setItem("go_handedness_v1", value).catch(() => {}); }}
-        onClose={() => {
-          setGoChatOpen(false);
-          // IA already commits to the same observable GO record.
-        }}
-      />
+      {!messagesOpen && goChatScreen}
 
       {/* MENSAJES GO — pantalla de mensajería interna */}
-      {!calOpen && messagesScreen}
+      {!calOpen && !messageEntryId && messagesScreen}
 
       {/* AI INPUT MODAL — bloque compacto pegado al teclado, sin huecos.
           Input multilinea que crece HACIA ARRIBA según se escribe (la
@@ -26453,7 +26454,8 @@ function HomeScreenContent() {
       {/* Lists and Calendar share the same expanded entry, contract and messaging. */}
       <GoEntryDetailsSheet entry={calBookingDetailEntry?goLog.find(e=>e.id===calBookingDetailEntry.id)??null:null} handedness={handedness}
         onClose={()=>setCalBookingDetailEntry(null)}
-        onMessage={calBookingDetailEntry?()=>{const entry=calBookingDetailEntry;setCalBookingDetailEntry(null);openEntryMessage(entry,()=>setCalBookingDetailEntry(entry));}:undefined}>
+        renderMessageScreen={calBookingDetailEntry ? () => renderEntryMessageScreen(calBookingDetailEntry) : undefined}
+        onMessage={calBookingDetailEntry?()=>{const entry=calBookingDetailEntry;openEntryMessage(entry,()=>setCalBookingDetailEntry(entry),true);}:undefined}>
         {calBookingDetailEntry&&<>{renderEntryMicroActions(calBookingDetailEntry)}{renderEntryQuickActions(calBookingDetailEntry,!(calBookingDetailEntry.customerBooking||calBookingDetailEntry.businessBooking))}</>}
       </GoEntryDetailsSheet>
 

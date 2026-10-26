@@ -65,6 +65,7 @@ type MessagesScreenProps = {
   visible: boolean;
   onClose: () => void;
   onDismiss?: () => void;
+  assistant?: React.ReactNode;
   recentContacts: { name: string; phone: string }[];
   userGoPhone: string;
   onCreateGo: (params: {
@@ -250,7 +251,7 @@ function ChannelBadge({ isGoUser }: { isGoUser: boolean }) {
 
 export function MessagesScreen({
   visible,
-  onClose, onDismiss,
+  onClose, onDismiss, assistant,
   recentContacts,
   userGoPhone,
   onCreateGo,
@@ -750,6 +751,27 @@ export function MessagesScreen({
 
                     {/* Right column — GO (top) / ENVIAR (bottom) */}
                     <View style={s.actionCol}>
+                      <View testID="message-back-position" style={{ height: 60, width: 76 }}>
+              {/* ── FAB volver — arrastrable con long-press ───────────── */}
+              <DraggableFAB
+                screenKey="messages"
+                buttonKey="back"
+                initialRight={8}
+                initialTop={8}
+                bounds={{ width: 76, height: 60 }}
+                buttonWidth={44}
+                maxH={44}
+              >
+                <TouchableOpacity
+                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); backToList(); }}
+                  activeOpacity={0.8}
+                  style={s.fabBack}
+                  accessibilityLabel={initialContext?(lang==="en"?"Back to card":"Volver a la ficha"):(lang === "en" ? "Back to conversations" : "Volver a conversaciones")}
+                >
+                  <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
+                </TouchableOpacity>
+              </DraggableFAB>
+                      </View>
                       {/* GO — upper, used less often */}
                       <TouchableOpacity
                         onPress={handleCreateGo}
@@ -774,27 +796,12 @@ export function MessagesScreen({
                 </KeyboardAvoidingView>
               </Animated.View>
 
-              {/* ── FAB volver — arrastrable con long-press ───────────── */}
-              <DraggableFAB
-                screenKey="messages"
-                buttonKey="back"
-                initialRight={20}
-                initialBottom={insets.bottom + 24}
-                maxH={40}
-              >
-                <TouchableOpacity
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); backToList(); }}
-                  activeOpacity={0.8}
-                  style={s.fabBack}
-                  accessibilityLabel={initialContext?(lang==="en"?"Back to card":"Volver a la ficha"):(lang === "en" ? "Back to conversations" : "Volver a conversaciones")}
-                >
-                  <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
-                </TouchableOpacity>
-              </DraggableFAB>
+
 
             </Reanimated.View>
           </GestureDetector>
         )}
+        {assistant}
       </View>
     </Modal>
   );
