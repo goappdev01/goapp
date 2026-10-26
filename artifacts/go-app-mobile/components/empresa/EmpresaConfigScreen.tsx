@@ -77,9 +77,9 @@ import {
 } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { CatalogAssociationManager } from "./CatalogAssociationManager";
-import { getOwnedStaff, type Staff } from "@/data/booking";
-import { isStableBookingId, serializeServiceConfiguration, serviceTimingDuration, validateBookingResources,
-  validateBusinessTimezone, validateServiceTiming, serviceTimingTotals, type BookingResource, type ServicePhase, type ServiceTiming } from "@/data/serviceTiming";
+import { isStableBookingId, serializeServiceConfiguration, validateBookingResources,
+  validateBusinessTimezone, validateServiceTiming, type BookingResource } from "@/data/serviceTiming";
+import { readServiceWorkWait, serviceWorkWaitTotal, updateServiceWorkWait, type ServiceWorkWaitDraft } from "@/data/serviceWorkWait";
 
 function blockDemoExternal(lang: string) {
   Alert.alert(lang === "en" ? "Business" : "Empresa",
@@ -2150,150 +2150,68 @@ function newTimingId() {
   });
 }
 
-function ServiceTimingEditor({ service, staff, resources, demo, onApply }: {
-  service: SavedService; staff: Staff[]; resources: BookingResource[]; demo: boolean;
-  onApply: (timing: ServiceTiming | undefined) => void;
+function ServiceTimingEditor({ service, resources, expanded, onExpandedChange, onApply, onValidityChange }: {
+  service: SavedService; resources: BookingResource[]; expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  onApply: (patch: Pick<SavedService, "duration" | "timing">) => void;
+  onValidityChange: (error: string) => void;
 }) {
   const { lang } = useLanguage();
   const label = (es: string, en: string) => lang === "en" ? en : es;
-  const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<ServiceTiming["mode"]>(service.timing?.mode ?? "simple");
-  const [phases, setPhases] = useState<ServicePhase[]>(() => service.timing?.phases.map(phase => ({ ...phase,
-    resources: phase.resources.map(resource => ({ ...resource })) })) ?? [{ id: newTimingId(), name: service.name || label("Trabajo", "Work"),
-    durationMinutes: service.duration, kind: "work", resources: [] }]);
-  const [declared, setDeclared] = useState(service.timing?.resourcesConfigured ?? false);
+  const [values, setValues] = useState<ServiceWorkWaitDraft>(() => readServiceWorkWait(service).values);
   const [error, setError] = useState("");
-  const [scope,setScope] = useState("general");
-  const [ownDuration,setOwnDuration] = useState(service.duration);
-  const baseTiming = (): ServiceTiming => service.timing ?? {version:1,mode:"simple",resourcesConfigured:false,
-    phases:[{id:newTimingId(),name:"",durationMinutes:service.duration,kind:"work",resources:[]}]};
-  const selectScope = (id:string) => {
-    const timing=id==="general"?baseTiming():service.timing?.professionalTimings?.[id]??baseTiming();
-    setScope(id);setOwnDuration(id==="general"?service.duration:service.timing?.professionalTimings?.[id]?.durationMinutes??service.duration);
-    setMode(timing.mode);setPhases(timing.phases.map(p=>({...p,resources:p.resources.map(r=>({...r}))})));setDeclared(timing.resourcesConfigured);setError("");
-  };
-  const expectedDuration=scope==="general"?service.duration:ownDuration;
-  const totals=serviceTimingTotals(phases),difference=totals.total-expectedDuration;
-  const toggleEditor = () => {
-    if (!open) {
-      setScope("general");setOwnDuration(service.duration);
-      setMode(service.timing?.mode ?? "simple");
-      setPhases(service.timing?.phases.map(phase => ({ ...phase, resources: phase.resources.map(resource => ({ ...resource })) }))
-        ?? [{ id: newTimingId(), name: service.name || label("Trabajo", "Work"), durationMinutes: service.duration, kind: "work", resources: [] }]);
-      setDeclared(service.timing?.resourcesConfigured ?? false); setError("");
-    }
-    setOpen(!open);
-  };
-  const patch = (index: number, values: Partial<ServicePhase>) => setPhases(previous => previous.map((phase, i) => i === index ? { ...phase, ...values } : phase));
-  const chip = (text: string, selected: boolean, onPress: () => void, key?: string) => (
-    <TouchableOpacity key={key ?? text} accessibilityRole="button" accessibilityState={{ selected }} onPress={onPress}
-      style={{ minHeight: 44, justifyContent: "center", padding: 8, borderRadius: 8, borderWidth: 1, borderColor: selected ? BLUE : "#D1D5DB", backgroundColor: selected ? BLUE + "12" : "#FFFFFF" }}>
-      <Text style={{ color: TEXT, fontSize: 12, fontWeight: selected ? "700" : "400" }}>{text}</Text>
-    </TouchableOpacity>);
-  const save = () => {
+  const latest = useRef(values), template = useRef(service), submitted = useRef("");
+  const source = JSON.stringify({ duration: service.duration, timing: service.timing });
+  const observed = useRef(source);
+  const validity = useRef(onValidityChange);
+  validity.current = onValidityChange;
+  useEffect(() => {
+    if (source === observed.current) return;
+    observed.current = source;
+    if (source === submitted.current) return;
+    template.current = service;
+    latest.current = readServiceWorkWait(service).values;
+    setValues(latest.current); setError(""); validity.current("");
+  }, [source]);
+  useEffect(() => () => validity.current(""), []);
+  const edit = (index: number, text: string) => {
+    const next = [...latest.current] as ServiceWorkWaitDraft;
+    next[index] = text; latest.current = next; setValues(next); onExpandedChange(true);
     try {
-      if(mode==="simple" && phases.some(p=>p.resources.length||p.staffId) && !(phases.length===1&&phases[0].kind==="work"))
-        throw new Error(label("Revisa los profesionales e instalaciones antes de convertir las fases en un servicio continuo.","Review professionals and facilities before converting phases to a continuous service."));
-      const continuousPhase=phases.length===1&&phases[0].kind==="work"?{...phases[0],durationMinutes:expectedDuration}:{id:newTimingId(),name:"",kind:"work" as const,durationMinutes:expectedDuration,resources:[]};
-      const chosen = mode==="simple" ? {version:1 as const,mode:"simple" as const,phases:[continuousPhase],resourcesConfigured:declared}
-        : validateServiceTiming({version:1,mode,phases,resourcesConfigured:declared},{durationMinutes:expectedDuration,staffIds:staff.map(p=>p.id),resources});
-      let timing:ServiceTiming|undefined;
-      if(scope==="general") {
-        const overrides=service.timing?.professionalTimings;
-        timing=mode==="simple"&&!overrides&&!chosen.phases.some(p=>p.staffId||p.resources.length)?undefined:validateServiceTiming({...chosen,...(overrides?{professionalTimings:overrides}:{})},{durationMinutes:service.duration,staffIds:staff.map(p=>p.id),resources});
-      } else {
-        timing=validateServiceTiming({...baseTiming(),professionalTimings:{...service.timing?.professionalTimings,[scope]:{...chosen,durationMinutes:expectedDuration}}},{durationMinutes:service.duration,staffIds:staff.map(p=>p.id),resources});
-      }
-      onApply(timing); setError(""); setOpen(false);
-    } catch (failure) { setError((failure as Error).message); }
+      const patch = updateServiceWorkWait(template.current, next, resources, newTimingId);
+      template.current = { ...template.current, ...patch };
+      submitted.current = JSON.stringify(patch);
+      setError(""); onValidityChange(""); onApply(patch);
+    } catch (failure) {
+      const message = (failure as Error).message;
+      setError(message); onValidityChange(message);
+    }
   };
-  return <View style={{ width: "100%", gap: 8, marginTop: 8 }}>
-    <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={toggleEditor} style={{ minHeight: 36, justifyContent: "center" }}>
-      <Text style={{ color: BLUE, fontWeight: "600" }}>{service.timing?.mode === "phases" ? label("TIEMPOS DEL SERVICIO", "SERVICE TIMES") : label("TIEMPOS DEL SERVICIO", "SERVICE TIMES")}</Text>
+  const editable = readServiceWorkWait(service).editable;
+  const total = serviceWorkWaitTotal(values);
+  const labels = [label("TRABAJO INICIAL", "INITIAL WORK"), label("ESPERA DEL CLIENTE", "CLIENT WAIT"), label("TRABAJO FINAL", "FINAL WORK")];
+  return <View testID="service-work-wait" style={{ width: "100%", marginTop: 6, gap: 8 }}>
+    <TouchableOpacity testID="service-work-wait-toggle" accessibilityRole="button" accessibilityState={{ expanded }}
+      onPress={() => onExpandedChange(!expanded)} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <Text style={{ flex: 1, color: TEXT, fontWeight: "700", fontSize: 13 }}>{label("TRABAJO CON ESPERA DEL CLIENTE", "WORK WITH CLIENT WAIT")}</Text>
+      <Feather name={expanded ? "chevron-up" : "chevron-down"} size={16} color={TEXT} />
     </TouchableOpacity>
-    {open && <View testID="service-times-editor" style={{ gap: 10, padding: 10, borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 10 }}>
-      <Text style={{color:TEXT,fontSize:12}}>{label("Organiza cuánto tiempo trabajas y cuánto tiempo necesita esperar el servicio.","Organize how long you work and how long the service needs to wait.")}</Text>
-      {!!staff.length && <View style={{gap:6}}><Text style={{color:TEXT,fontWeight:"600"}}>{label("Tiempos para", "Times for")}</Text><View style={{flexDirection:"row",flexWrap:"wrap",gap:6}}>
-        {chip(label("Servicio general", "General service"),scope==="general",()=>selectScope("general"))}
-        {staff.map(person=>chip(person.name,scope===person.id,()=>selectScope(person.id),person.id))}
-      </View></View>}
-      {scope!=="general" && <View style={{gap:6}}>
-        <Text style={{color:TEXT,fontSize:12}}>{label("Duración de este profesional (minutos)","This professional’s duration (minutes)")}</Text>
-        <TextInput testID="professional-service-duration" accessibilityLabel={label("Duración propia del profesional", "Professional service duration")} keyboardType="number-pad" value={ownDuration?String(ownDuration):""} onChangeText={v=>setOwnDuration(/^\d+$/.test(v)?Number(v):0)} style={[c.numInput,{color:TEXT,minHeight:44,borderWidth:1,borderColor:"#6B7280",borderRadius:8}]} />
-        <Text style={{color:GRAY,fontSize:12}}>{label("Solo se aplica a este profesional si tiene asignado el servicio. Los demás conservan sus tiempos.","Applies only to this professional when assigned this service. Others keep their times.")}</Text>
-        {chip(label("Usar tiempos generales", "Use general times"),false,()=>{const base=baseTiming(),overrides={...base.professionalTimings};delete overrides[scope];const next={...base,professionalTimings:Object.keys(overrides).length?overrides:undefined};onApply(next.mode==="simple"&&!next.professionalTimings&&!next.phases.some(p=>p.staffId||p.resources.length)?undefined:next);setOpen(false);})}
-      </View>}
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-        {chip(label("SERVICIO CONTINUO", "CONTINUOUS SERVICE"), mode === "simple", () => setMode("simple"))}
-        {chip(label("SERVICIO POR FASES", "SERVICE IN PHASES"), mode === "phases", () => setMode("phases"))}
-      </View>
-      <Text style={{color:TEXT,fontSize:12}}>{mode==="simple"?label("El profesional permanece ocupado durante toda la duración.","The professional stays busy for the full duration."):label("Combina atención directa y tiempos de espera, en este orden.","Combine direct care and waits, in this order.")}</Text>
-      {demo&&mode==="phases"&&<Text style={{color:TEXT,fontSize:12}}>{label("Puedes guardar estos tiempos. Las reservas por fases necesitan que se active el motor del servidor.","You can save these times. Phased reservations require server activation.")}</Text>}
-      {mode === "phases" && <>
-        {phases.map((phase, index) => <View key={phase.id} style={{ gap: 8, paddingVertical: 10, borderTopWidth: 1, borderColor: "#E5E7EB" }}>
-          <Text style={{ color: TEXT, fontWeight: "600" }}>{label("Fase", "Phase")} {index + 1}</Text>
-          <TextInput accessibilityLabel={label("Nombre de fase (opcional)", "Phase name (optional)")} placeholder={label("Nombre opcional", "Optional name")} placeholderTextColor="#4B5563" style={c.svcNameInput} value={phase.name} onChangeText={name => patch(index, { name })} />
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <TextInput accessibilityLabel={label("Minutos exactos de fase", "Exact phase minutes")} style={[c.numInput, { minHeight: 40, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 8 }]}
-              keyboardType="number-pad" value={phase.durationMinutes ? String(phase.durationMinutes) : ""}
-              onChangeText={value => patch(index, { durationMinutes: /^\d+$/.test(value) ? Number(value) : 0 })} />
-            <Text style={{ color: GRAY }}>min</Text>
-            {chip(label("TRABAJO", "WORK"), phase.kind === "work", () => patch(index, { kind: "work", releaseProfessional: false }))}
-            {chip(label("ESPERA", "WAIT"), phase.kind === "wait", () => patch(index, { kind: "wait", staffId: undefined, releaseProfessional: phase.releaseProfessional === true }))}
-          </View>
-          {phase.kind === "wait" && <View testID={"phase-release-"+index} style={{gap:6}}>
-            <Text style={{color:TEXT,fontSize:12,fontWeight:"600"}}>{label("¿Puedes atender a otro cliente durante esta espera?", "Can you attend another client during this wait?")}</Text>
-            <View style={{flexDirection:"row",gap:6}}>{chip(label("SÍ", "YES"),phase.releaseProfessional===true,()=>patch(index,{releaseProfessional:true}))}{chip("NO",phase.releaseProfessional!==true,()=>patch(index,{releaseProfessional:false}))}</View>
-            <Text style={{color:TEXT,fontSize:12}}>{phase.releaseProfessional===true?label("Tiempo disponible para otros servicios compatibles. Las instalaciones que utilice el cliente siguen ocupadas.","Time available for other compatible services. Facilities used by the client remain occupied."):label("El profesional permanece ocupado. Estos minutos no se ofrecen a otros clientes.","The professional remains busy. These minutes are not offered to other clients.")}</Text>
-          </View>}
-          {phase.kind === "work" && <View style={{ gap: 5 }}>
-            <Text style={{ color: GRAY, fontSize: 12 }}>{label("Profesional", "Professional")}</Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-              {chip(label("El elegido al reservar", "Selected when booking"), !phase.staffId, () => patch(index, { staffId: undefined }))}
-              {staff.map(person => chip(person.name, phase.staffId === person.id, () => patch(index, { staffId: person.id }), person.id))}
-            </View>
-            {!!phase.staffId && !staff.some(person => person.id === phase.staffId) && <Text style={{ color: RED }}>{label("El profesional asignado ya no está disponible. Selecciona otro.", "The assigned professional is no longer available. Select another.")}</Text>}
-          </View>}
-          <Text style={{ color: GRAY, fontSize: 12 }}>{label("Puesto, sala o equipo de esta fase", "Station, room or equipment for this phase")}</Text>
-          {resources.length === 0 && <Text style={{ color: GRAY, fontSize: 12 }}>{label("Indica debajo las instalaciones que utiliza, o confirma que no necesita ninguna.", "Set up the facilities below, or confirm that none are needed.")}</Text>}
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-            {resources.filter(resource => resource.active !== false).map(resource => {
-              const selected = phase.resources.some(value => value.resourceId === resource.id);
-              return chip(resource.name, selected, () => patch(index, { resources: selected
-                ? phase.resources.filter(value => value.resourceId !== resource.id)
-                : [...phase.resources, { resourceId: resource.id, quantity: 1, occupancy: "phase" }] }), resource.id);
-            })}
-          </View>
-          {phase.resources.map(requirement => <View key={requirement.resourceId} style={{ gap: 6 }}>
-            <Text style={{ color: TEXT, fontSize: 12 }}>{resources.find(resource => resource.id === requirement.resourceId)?.name ?? label("Recurso no disponible", "Unavailable resource")}</Text>
-            <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-              <TextInput accessibilityLabel={label("Cantidad de recurso", "Resource quantity")} style={[c.numInput, { minWidth: 45, minHeight: 36 }]} keyboardType="number-pad" value={String(requirement.quantity)}
-                onChangeText={value => patch(index, { resources: phase.resources.map(item => item.resourceId === requirement.resourceId ? { ...item, quantity: /^\d+$/.test(value) ? Number(value) : 0 } : item) })} />
-              {(["phase", "booking"] as const).map(occupancy => chip(occupancy === "phase" ? label("Solo esta fase", "This phase") : label("Toda la reserva", "Whole booking"), requirement.occupancy === occupancy,
-                () => patch(index, { resources: phase.resources.map(item => item.resourceId === requirement.resourceId ? { ...item, occupancy } : item) }), occupancy))}
-              {chip(label("Quitar", "Remove"), false, () => patch(index, { resources: phase.resources.filter(item => item.resourceId !== requirement.resourceId) }))}
-            </View>
-          </View>)}
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-            {index > 0 && chip(label("Subir", "Move up"), false, () => setPhases(previous => { const next = [...previous]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next; }))}
-            {index < phases.length - 1 && chip(label("Bajar", "Move down"), false, () => setPhases(previous => { const next = [...previous]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; return next; }))}
-            {chip(label("Eliminar fase", "Delete phase"), false, () => setPhases(previous => previous.filter((_, i) => i !== index)))}
+    {expanded && (editable ? <>
+      <View testID="service-work-wait-fields" style={{ flexDirection: "row", alignItems: "stretch", gap: 6 }}>
+        {labels.map((title, index) => <View key={index} style={{ flex: 1, minWidth: 0, gap: 4, justifyContent: "space-between" }}>
+          <Text style={{ minHeight: 28, color: TEXT, fontSize: 11, lineHeight: 14, fontWeight: "700", textAlign: "center" }}>{title}</Text>
+          <View style={{ minHeight: 44, flexDirection: "row", alignItems: "center", paddingHorizontal: 6, gap: 2, borderWidth: 1, borderColor: "#9CA3AF", borderRadius: 8, backgroundColor: "#FFFFFF" }}>
+            <TextInput testID={"service-work-wait-" + index} accessibilityLabel={title + label(" en minutos", " in minutes")}
+              style={{ flex: 1, minWidth: 0, minHeight: 44, paddingHorizontal: 2, paddingVertical: 8, color: TEXT, fontSize: 16, textAlign: "center" }}
+              value={values[index]} onChangeText={text => edit(index, text)} keyboardType="number-pad" selectTextOnFocus
+              placeholder="0" placeholderTextColor="#4B5563" returnKeyType="done" />
+            <Text style={{ color: TEXT, fontSize: 12 }}>min</Text>
           </View>
         </View>)}
-        {chip(label("Añadir fase", "Add phase"), false, () => setPhases(previous => [...previous, { id: newTimingId(), name: label("Trabajo", "Work"), durationMinutes: 0, kind: "work", resources: [] }]))}
-        <Text testID="service-time-total" style={{color:TEXT,fontWeight:"700"}}>{label("TOTAL", "TOTAL")}: {totals.total} / {expectedDuration} min</Text>
-        <Text style={{color:TEXT,fontSize:12}}>{label("TIEMPO DE TRABAJO", "WORK TIME")}: {totals.work} min</Text>
-        <Text style={{color:TEXT,fontSize:12}}>{label("TIEMPO DE ESPERA", "WAIT TIME")}: {totals.wait} min</Text>
-        <Text testID="service-time-released" style={{color:TEXT,fontWeight:"700",fontSize:12}}>{label("TIEMPO DE ESPERA DISPONIBLE", "AVAILABLE WAIT TIME")}: {totals.released} min</Text>
-        {!!difference&&<Text accessibilityRole="alert" style={{color:RED,fontWeight:"600"}}>{difference<0?label("Faltan ","Missing "):label("Sobran ","Excess ")}{Math.abs(difference)}{label(" minutos. Corrige las fases antes de guardar."," minutes. Correct the phases before saving.")}</Text>}
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Switch accessibilityLabel={label("Instalaciones indicadas", "Facilities specified")} value={declared} onValueChange={setDeclared} />
-          <Text style={{ color: GRAY, flex: 1, fontSize: 12 }}>{label("He indicado todo lo que utiliza. Si no marco nada, confirmo que no necesita instalaciones ni equipos.", "I have specified everything used. If nothing is selected, I confirm that no facilities or equipment are needed.")}</Text>
-        </View>
-      </>}
-      {!!error && <Text accessibilityRole="alert" style={{ color: RED }}>{error}</Text>}
-      {chip(label("Guardar tiempos", "Save times"), true, save)}
-    </View>}
+      </View>
+      <Text testID="service-work-wait-total" style={{ color: TEXT, fontWeight: "700", fontSize: 13 }}>{label("TOTAL DEL SERVICIO", "TOTAL SERVICE TIME")}: {total === null ? "—" : total} min</Text>
+      {!!error && <Text accessibilityRole="alert" style={{ color: RED, fontSize: 12 }}>{error}</Text>}
+    </> : <Text accessibilityRole="alert" style={{ color: RED, fontSize: 12 }}>{label("La configuración guardada se conserva; no puede reducirse a estos tres tiempos.", "The saved configuration is preserved; it cannot be reduced to these three times.")}</Text>)}
   </View>;
 }
 
@@ -2347,16 +2265,18 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     config.services, services => services.length > 0
       ? services.map((service, index) => ({ ...service, id: `svc_${index}_${service.name}`, capacity: service.capacity ?? 1 }))
       : [{ id: "svc_0", name: "", duration: 30, price: 0, capacity: 1 }], serializeServices, saveServices);
-  useStepSave(saveRef, flush);
-  const [timingStaff, setTimingStaff] = useState<Staff[]>([]);
+  const [timingOpen, setTimingOpen] = useState<Record<string, boolean>>({});
+  const invalidTiming = useRef(new Map<string, string>());
+  const isTimingOpen = (service: LocalSvc) => timingOpen[service.id] ?? service.timing?.mode === "phases";
+  const flushServices = useCallback(async () => {
+    const error = invalidTiming.current.values().next().value;
+    if (error) throw new Error(error);
+    await flush();
+  }, [flush]);
+  useStepSave(saveRef, flushServices);
   useEffect(() => {
-    let active = true;
-    setTimingStaff([]);
-    if (!demo && isStableBookingId(config.businessId)) void getOwnedStaff(config.businessId).then(staff => {
-      if (active) setTimingStaff(staff.filter(person => person.active && isStableBookingId(person.id)));
-    }).catch(() => {});
-    return () => { active = false; };
-  }, [demo, config.businessId]);
+    for (const id of invalidTiming.current.keys()) if (!localSvcs.some(service => service.id === id)) invalidTiming.current.delete(id);
+  }, [localSvcs]);
 
   // ── OCR import state ────────────────────────────────────────────────────────
   const [ocrVisible,   setOcrVisible]   = useState(false);
@@ -2368,6 +2288,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     setLocalSvcs(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
 
   const removeSvc = (id: string) => {
+    invalidTiming.current.delete(id);
     Haptics.selectionAsync().catch(() => {});
     setLocalSvcs(prev => prev.filter(s => s.id !== id));
   };
@@ -2480,7 +2401,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     <View>
       <View style={c.sectionCard}>
         <Text style={c.sectionLabel}>{t("biz_services_offered")}</Text>
-        <CatalogAssociationManager businessId={config.businessId} demo={!!demo} beforeOpen={flush} />
+        <CatalogAssociationManager businessId={config.businessId} demo={!!demo} beforeOpen={flushServices} />
 
         {localSvcs.map((svc, idx) => (
           <View key={svc.id} style={c.svcRow}>
@@ -2496,7 +2417,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
             <TextInput style={c.svcNameInput} value={svc.description ?? ""} onChangeText={description => patchSvc(svc.id, { description })}
               onBlur={() => { void flush().catch(() => {}); }} placeholder={lang === "en" ? "Description (optional)" : "Descripción (opcional)"} placeholderTextColor={DIM} />
             <View style={c.svcMeta}>
-              <View style={c.numBox}>
+              {!isTimingOpen(svc) && <View style={c.numBox}>
                 <TextInput
                   style={c.numInput}
                   value={String(svc.duration)}
@@ -2508,7 +2429,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
                   returnKeyType="done"
                 />
                 <Text style={c.numUnit}>min</Text>
-              </View>
+              </View>}
               <View style={c.numBox}>
                 <TextInput
                   style={c.numInput}
@@ -2541,8 +2462,10 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
                 </TouchableOpacity>
               )}
             </View>
-            <ServiceTimingEditor service={svc} staff={timingStaff} resources={config.bookingResources ?? []} demo={!!demo}
-              onApply={timing => patchSvc(svc.id, { timing })} />
+            <ServiceTimingEditor service={svc} resources={config.bookingResources ?? []} expanded={isTimingOpen(svc)}
+              onExpandedChange={expanded => setTimingOpen(previous => ({ ...previous, [svc.id]: expanded }))}
+              onApply={patch => patchSvc(svc.id, patch)}
+              onValidityChange={message => { if (message) invalidTiming.current.set(svc.id, message); else invalidTiming.current.delete(svc.id); }} />
           </View>
         ))}
 
