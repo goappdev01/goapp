@@ -14,14 +14,16 @@ const tint=(released=true)=>({name:'Tinte',duration:60,price:30,capacity:1,timin
 const compile=source=>ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,alwaysStrict:false,esModuleInterop:false}}).outputText;
 const ast=ts.createSourceFile('config.tsx',readFileSync('components/empresa/EmpresaConfigScreen.tsx','utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
 const declarations=['useConfigArrayDraft','useStepSave','ServiceTimingEditor','StepServicios'].map(name=>ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name));
+const styles=ast.statements.flatMap(node=>ts.isVariableStatement(node)?[...node.declarationList.declarations]:[]).find(node=>node.name.getText(ast)==='c').initializer.arguments[0];
+const serviceCardStyle=vm.runInNewContext('('+styles.properties.find(node=>node.name?.getText(ast)==='svcRow').initializer.getText(ast)+')',{CARD:'#FFFFFF'});
 const descendants=node=>node?[node,...node.childNodes.flatMap(descendants)]:[];
 async function fixture(service=tint(),{lang='es',resources=[],delay=false}={}){
- const Context=React.createContext(null),props=new Map(),calls=[],gates=[],alerts=[];let stored=JSON.stringify({businessId:a,services:[service],bookingResources:resources}),snapshot;
+ const Context=React.createContext(null),props=new Map(),calls=[],gates=[],alerts=[];let stored=JSON.stringify({businessId:a,services:Array.isArray(service)?service:[service],bookingResources:resources}),snapshot;
  const native=name=>p=>{const id=React.useId();props.set(id,{...p,native:name});return React.createElement('div',{'data-prop-id':id,'data-native':name},p.children);};
  const components=Object.fromEntries(['Text','View','TextInput','TouchableOpacity','Switch','ScrollView'].map(name=>[name,native(name)]));
  const scope={exports:{},React,useState:React.useState,useRef:React.useRef,useEffect:React.useEffect,useCallback:React.useCallback,...components,
   useBusinessConfig:()=>React.useContext(Context),useLanguage:()=>({lang,t:key=>key}),...timing,...adapter,newTimingId:(()=>{let n=0;return()=>`new-${++n}`;})(),
-  BLUE:'#1D4ED8',TEXT:'#111827',GRAY:'#374151',DIM:'#4B5563',RED:'#B91C1C',PURPLE:'#7E22CE',GREEN:'#166534',GOLD:'#C9A84C',c:{},trSector:value=>value,Feather:native('Feather'),
+  BLUE:'#1D4ED8',TEXT:'#111827',GRAY:'#374151',DIM:'#4B5563',RED:'#B91C1C',PURPLE:'#7E22CE',GREEN:'#166534',GOLD:'#C9A84C',c:{svcRow:serviceCardStyle},trSector:value=>value,Feather:native('Feather'),
   CatalogAssociationManager:()=>null,BookingResourcesEditor:()=>null,GoOcrImportSheet:()=>null,Haptics:{selectionAsync:async()=>{}},Alert:{alert:(...args)=>alerts.push(args)},
  };
  vm.runInNewContext(compile(declarations.map(node=>node.getText(ast)).join('\n')+';exports.StepServicios=StepServicios;'),scope);
@@ -31,10 +33,11 @@ async function fixture(service=tint(),{lang='es',resources=[],delay=false}={}){
   const persist=patch=>{calls.push(plain(patch));const commit=()=>{stored=JSON.stringify({...JSON.parse(stored),...patch});setConfig(current=>({...current,...patch}));};
    if(!delay){commit();return Promise.resolve();}return new Promise(resolve=>gates.push(()=>{commit();resolve();}));};
   return React.createElement(Context.Provider,{value:{config,updateConfig:persist,demo:null}},React.createElement(scope.exports.StepServicios,{currentSector:null,saveRef}));}
- const visible=()=>descendants(container).filter(node=>node.attributes?.['data-prop-id']).map(node=>props.get(node.attributes['data-prop-id']));
+ const visible=(parent=container)=>descendants(parent).filter(node=>node.attributes?.['data-prop-id']).map(node=>props.get(node.attributes['data-prop-id']));
  const get=id=>{const node=visible().find(p=>p.testID===id);assert.ok(node,'Missing '+id);return node;};
  await settle(()=>root.render(React.createElement(Host)));
  return {container,calls,alerts,gates,saveRef,visible,get,settle,get saved(){return JSON.parse(stored);},get config(){return snapshot;},
+  card(index){const node=descendants(container).find(node=>props.get(node.attributes?.['data-prop-id'])?.testID==='service-card-'+index);assert.ok(node);return visible(node);},
   async edit(index,text){await settle(()=>get('service-work-wait-'+index).onChangeText(text));},
   async toggle(){await settle(()=>get('service-work-wait-toggle').onPress());},
   async reload(){await settle(()=>root.unmount());root=createRoot(container);await settle(()=>root.render(React.createElement(Host)));},
@@ -55,14 +58,15 @@ for(const lang of ['es','en'])test(`${lang}: the optional compact section contai
 for(const released of [true,false])test(`three values sum automatically, persist through the existing service writer, and preserve wait consent=${released}`,async()=>{
  const original=tint(released);original.timing.professionalTimings={[a]:{...tint().timing,durationMinutes:60},[b]:{...tint(false).timing,durationMinutes:60}};
  const f=await fixture(original);try{
-  assert.equal(f.get('service-work-wait-toggle').accessibilityState.expanded,true);await f.edit(0,'13');await f.edit(1,'30');await f.edit(2,'27');await f.saveRef.current();
+  assert.equal(f.get('service-work-wait-toggle').accessibilityState.expanded,false);await f.toggle();await f.edit(0,'13');await f.edit(1,'30');await f.edit(2,'27');await f.saveRef.current();
   assert.match(f.container.textContent,/TOTAL DEL SERVICIO: 70 min/);const saved=f.saved.services[0];assert.equal(saved.duration,70);assert.equal(saved.price,30);assert.deepEqual(saved.timing.phases.map(p=>p.durationMinutes),[13,30,27]);assert.equal(saved.timing.phases[1].releaseProfessional,released);assert.deepEqual(saved.timing.professionalTimings,original.timing.professionalTimings);
-  await f.reload();for(const[index,value]of ['13','30','27'].entries())assert.equal(f.get('service-work-wait-'+index).value,value);assert.match(f.container.textContent,/70 min/);
+  await f.reload();assert.equal(f.get('service-work-wait-toggle').accessibilityState.expanded,false);await f.toggle();for(const[index,value]of ['13','30','27'].entries())assert.equal(f.get('service-work-wait-'+index).value,value);assert.match(f.container.textContent,/70 min/);
  }finally{await f.close();}
 });
 
 test('rapid input and older queued acknowledgements never overwrite the newest three values',async()=>{
  const f=await fixture(tint(),{delay:true});try{
+  await f.toggle();
   const inputs=[0,1,2].map(i=>f.get('service-work-wait-'+i));await f.settle(()=>{inputs[0].onChangeText('20');inputs[1].onChangeText('25');inputs[2].onChangeText('20');});
   assert.equal(f.gates.length,3);assert.match(f.container.textContent,/65 min/);await f.settle(()=>f.gates[0]());assert.equal(f.get('service-work-wait-1').value,'25');assert.equal(f.get('service-work-wait-2').value,'20');
   await f.settle(()=>f.gates[1]());await f.settle(()=>f.gates[2]());await f.saveRef.current();assert.deepEqual(f.saved.services[0].timing.phases.map(p=>p.durationMinutes),[20,25,20]);
@@ -71,6 +75,7 @@ test('rapid input and older queued acknowledgements never overwrite the newest t
 
 test('invalid input stays visible, cannot overwrite persisted data, and blocks Next until corrected',async()=>{
  const f=await fixture();try{
+  await f.toggle();
   await f.edit(1,'30.5');assert.equal(f.get('service-work-wait-1').value,'30.5');assert.equal(f.calls.length,0);assert.match(f.container.textContent,/minutos enteros/);await assert.rejects(f.saveRef.current(),/minutos enteros/);assert.equal(f.saved.services[0].duration,60);
   await f.edit(1,'35');await f.saveRef.current();assert.equal(f.saved.services[0].duration,65);assert.equal(f.saved.services[0].timing.phases[1].durationMinutes,35);assert.equal(f.alerts.length,0);
  }finally{await f.close();}
@@ -103,8 +108,8 @@ for(const existing of [false,true])test('15+30+15 on '+(existing?'an existing':'
   await f.toggle();await f.edit(0,'15');await f.edit(1,'30');await f.edit(2,'15');await f.saveRef.current();
   assert.equal(f.config.services[0].duration,60);assert.equal(f.saved.services[0].duration,60);assert.deepEqual(f.saved.services[0].timing.phases.map(p=>p.durationMinutes),[15,30,15]);assert.match(f.container.textContent,/TOTAL DEL SERVICIO: 60 min/);assert.match(f.container.textContent,/Pendiente de habilitar reservas/);assert.equal(f.alerts.length,0);
   await f.toggle();const main=f.visible().find(p=>p.native==='TextInput'&&!p.testID&&p.value==='60');assert.ok(main,'Main service duration must show 60, never the initial work of 15');
-  await f.reload();for(const[index,value]of ['15','30','15'].entries())assert.equal(f.get('service-work-wait-'+index).value,value);
-  await f.edit(1,'40');await f.saveRef.current();assert.equal(f.saved.services[0].duration,70);await f.reload();assert.equal(f.get('service-work-wait-1').value,'40');assert.match(f.container.textContent,/70 min/);assert.equal(f.saved.services[0].price,25);
+  await f.reload();await f.toggle();for(const[index,value]of ['15','30','15'].entries())assert.equal(f.get('service-work-wait-'+index).value,value);
+  await f.edit(1,'40');await f.saveRef.current();assert.equal(f.saved.services[0].duration,70);await f.reload();await f.toggle();assert.equal(f.get('service-work-wait-1').value,'40');assert.match(f.container.textContent,/70 min/);assert.equal(f.saved.services[0].price,25);
  }finally{await f.close();}
 });
 test('pending settings keep unknown or unavailable resources for later review without granting their use',()=>{
@@ -115,4 +120,36 @@ test('pending settings keep unknown or unavailable resources for later review wi
 });
 test('continuous services retain their current save path and never acquire a false wait or authorization',()=>{
  const next=adapter.updateServiceWorkWait({duration:30},['43','0','0'],[],()=> 'unused');assert.equal(next.duration,43);assert.equal(next.timing,undefined);
+});
+
+test('Corte, Lavado, Tinte and Peinado own their complete form and independent collapsed timing without mutating saved services',async()=>{
+ const originals=['CORTE','LAVADO','TINTE','PEINADO'].map((name,index)=>({...tint(index%2===0),name,description:'Complemento '+index,price:10+index}));
+ const f=await fixture(originals);try{
+  for(let index=0;index<4;index++){
+   const card=f.card(index),frame=card[0];assert.equal(frame.style[0].borderWidth,1.5);assert.equal(frame.style[0].borderRadius,14);assert.ok(frame.style[0].padding>0);
+   assert.equal(card.filter(p=>p.native==='TextInput'&&p.value===originals[index].name).length,1);assert.equal(card.filter(p=>p.value==='Complemento '+index).length,1);
+   assert.equal(card.filter(p=>p.testID==='service-work-wait-toggle').length,1);assert.equal(card.find(p=>p.testID==='service-work-wait-toggle').accessibilityState.expanded,false);
+   assert.equal(card.filter(p=>p.testID?.match(/^service-work-wait-[012]$/)).length,0);
+  }
+  assert.equal(f.calls.length,0);
+  await f.settle(()=>f.card(2).find(p=>p.testID==='service-work-wait-toggle').onPress());
+  assert.equal(f.card(2).filter(p=>p.testID?.match(/^service-work-wait-[012]$/)).length,3);
+  assert.equal(f.card(0).find(p=>p.testID==='service-work-wait-toggle').accessibilityState.expanded,false);
+  const extra=f.card(2).find(p=>p.accessibilityLabel==='Servicio complementario (opcional)');assert.equal(extra.placeholder,extra.accessibilityLabel);
+  await f.settle(()=>extra.onChangeText('Complemento editado'));await f.saveRef.current();
+  assert.equal(f.saved.services.length,4);assert.equal(f.saved.services[2].description,'Complemento editado');
+  for(let index=0;index<4;index++){assert.equal(f.saved.services[index].price,originals[index].price);assert.equal(f.saved.services[index].duration,60);assert.deepEqual(f.saved.services[index].timing,originals[index].timing);}
+  await f.reload();for(let index=0;index<4;index++)assert.equal(f.card(index).find(p=>p.testID==='service-work-wait-toggle').accessibilityState.expanded,false);
+  assert.equal(f.saved.services[2].description,'Complemento editado');
+ }finally{await f.close();}
+});
+
+for(const lang of ['es','en'])test(lang+': timing disclosure keeps the full one-line label and a larger chevron inside a 44-point touch target',async()=>{
+ const f=await fixture({...tint(),name:'Servicio con un nombre muy largo que debe conservarse completo'},{lang});try{
+  const toggle=f.get('service-work-wait-toggle');assert.ok(toggle.style.minHeight>=44);
+  const title=f.visible().find(p=>p.native==='Text'&&p.children===(lang==='en'?'WORK WITH CLIENT WAIT':'TRABAJO CON ESPERA DEL CLIENTE'));
+  assert.equal(title.numberOfLines,1);assert.equal(title.adjustsFontSizeToFit,true);assert.equal(title.style.minWidth,0);
+  assert.equal(f.visible().find(p=>p.native==='Feather'&&p.name==='chevron-down').size,24);
+  await f.toggle();assert.equal(f.get('service-work-wait-toggle').accessibilityState.expanded,true);await f.toggle();assert.equal(f.calls.length,0);
+ }finally{await f.close();}
 });

@@ -2193,8 +2193,9 @@ function ServiceTimingEditor({ service, resources, expanded, onExpandedChange, o
   return <View testID="service-work-wait" style={{ width: "100%", marginTop: 6, gap: 8 }}>
     <TouchableOpacity testID="service-work-wait-toggle" accessibilityRole="button" accessibilityState={{ expanded }}
       onPress={() => onExpandedChange(!expanded)} style={{ minHeight: 44, flexDirection: "row", alignItems: "center", gap: 6 }}>
-      <Text style={{ flex: 1, color: TEXT, fontWeight: "700", fontSize: 13 }}>{label("TRABAJO CON ESPERA DEL CLIENTE", "WORK WITH CLIENT WAIT")}</Text>
-      <Feather name={expanded ? "chevron-up" : "chevron-down"} size={16} color={TEXT} />
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}
+        style={{ flex: 1, minWidth: 0, color: TEXT, fontWeight: "700", fontSize: 12 }}>{label("TRABAJO CON ESPERA DEL CLIENTE", "WORK WITH CLIENT WAIT")}</Text>
+      <Feather name={expanded ? "chevron-up" : "chevron-down"} size={24} color={TEXT} />
     </TouchableOpacity>
     {expanded && (editable ? <>
       <View testID="service-work-wait-fields" style={{ flexDirection: "row", alignItems: "stretch", gap: 6 }}>
@@ -2268,7 +2269,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
       : [{ id: "svc_0", name: "", duration: 30, price: 0, capacity: 1 }], serializeServices, saveServices);
   const [timingOpen, setTimingOpen] = useState<Record<string, boolean>>({});
   const invalidTiming = useRef(new Map<string, string>());
-  const isTimingOpen = (service: LocalSvc) => timingOpen[service.id] ?? service.timing?.mode === "phases";
+  const isTimingOpen = (service: LocalSvc) => timingOpen[service.id] ?? false;
   const flushServices = useCallback(async () => {
     const error = invalidTiming.current.values().next().value;
     if (error) throw new Error(error);
@@ -2405,7 +2406,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
         <CatalogAssociationManager businessId={config.businessId} demo={!!demo} beforeOpen={flushServices} />
 
         {localSvcs.map((svc, idx) => (
-          <View key={svc.id} style={c.svcRow}>
+          <View key={svc.id} testID={"service-card-" + idx} style={[c.svcRow, { borderColor: color }]}>
             <TextInput
               style={c.svcNameInput}
               value={trSector(svc.name, lang)}
@@ -2415,12 +2416,13 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               placeholderTextColor={DIM}
               returnKeyType="done"
             />
-            <TextInput style={c.svcNameInput} value={svc.description ?? ""} onChangeText={description => patchSvc(svc.id, { description })}
-              onBlur={() => { void flush().catch(() => {}); }} placeholder={lang === "en" ? "Description (optional)" : "Descripción (opcional)"} placeholderTextColor={DIM} />
+            <TextInput style={[c.svcNameInput, { fontSize: 13 }]} value={svc.description ?? ""} onChangeText={description => patchSvc(svc.id, { description })}
+              accessibilityLabel={lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)"}
+              onBlur={() => { void flush().catch(() => {}); }} placeholder={lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)"} placeholderTextColor={DIM} />
             <View style={c.svcMeta}>
               {!isTimingOpen(svc) && <View style={c.numBox}>
                 <TextInput
-                  style={c.numInput}
+                  style={[c.numInput, { minWidth: 0 }]}
                   value={String(svc.duration)}
                   editable={svc.timing?.mode !== "phases"}
                   onChangeText={v => patchSvc(svc.id, { duration: /^\d+$/.test(v.trim()) ? Number(v) : 0 })}
@@ -2433,7 +2435,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               </View>}
               <View style={c.numBox}>
                 <TextInput
-                  style={c.numInput}
+                  style={[c.numInput, { minWidth: 0 }]}
                   value={svc.price ? String(svc.price) : ""}
                   onChangeText={v => patchSvc(svc.id, { price: parseFloat(v) || 0 })}
                   onBlur={() => { void flush().catch(() => {}); }}
@@ -2447,7 +2449,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               </View>
               <View style={c.numBox}>
                 <TextInput
-                  style={c.numInput}
+                  style={[c.numInput, { minWidth: 0 }]}
                   value={String(svc.capacity ?? 1)}
                   onChangeText={v => patchSvc(svc.id, { capacity: parseInt(v) || 1 })}
                   onBlur={() => { void flush().catch(() => {}); }}
@@ -3081,7 +3083,7 @@ const c = StyleSheet.create({
   },
   staffSvcName: { fontSize: 12, fontWeight: "600", color: GRAY, maxWidth: 120 },
 
-  svcRow:       { marginBottom: 10 },
+  svcRow:       { marginBottom: 10, padding: 10, borderWidth: 1.5, borderRadius: 14, backgroundColor: CARD },
   svcNameInput: {
     backgroundColor: "#F3F4F6", borderRadius: 10,
     paddingHorizontal: 12, paddingVertical: 9,
@@ -3089,7 +3091,7 @@ const c = StyleSheet.create({
   },
   svcMeta:      { flexDirection: "row", alignItems: "center", gap: 6 },
   numBox:       {
-    flex: 1, flexDirection: "row", alignItems: "center", gap: 4,
+    flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 4,
     backgroundColor: "#F3F4F6", borderRadius: 10,
     paddingHorizontal: 8, paddingVertical: 8,
   },

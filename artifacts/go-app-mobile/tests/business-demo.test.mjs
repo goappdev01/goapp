@@ -259,6 +259,7 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
         if (key === "./ProfessionalGapPolicy") return load("components/empresa/ProfessionalGapPolicy.tsx");
         if (key === "./CatalogComplementSelector") return { CatalogComplementSelector: () => null };
         if (key === "./booking") return imports["@/data/booking"];
+        if (key === "./serviceTiming") return load("data/serviceTiming.ts");
         if (key === "@/data/floorPlan") {
           const module = load("data/floorPlan.ts");
           return { ...module, loadFloorPlan: external, saveFloorPlan: external, loadReservations: external, saveReservations: external };
