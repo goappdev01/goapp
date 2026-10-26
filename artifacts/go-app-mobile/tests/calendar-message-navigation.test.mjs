@@ -27,7 +27,7 @@ for(const hand of ['right','left'])for(const platform of ['ios','android'])test(
 
 test('Calendar keeps its modal and source detail while the SAME Communication screen opens and returns after native dismissal',()=>{
  const calls=[],returnRef={current:null};let calOpen=true;
- const scope={exports:{},React:{createElement:tree},MessagesScreen:'MessagesScreen',entryMessageContext:presentation.entryMessageContext,
+ const scope={exports:{},React:{createElement:tree},MessagesScreen:'MessagesScreen',goDirectlyToLanding:()=>calls.push(['landing']),entryMessageContext:presentation.entryMessageContext,
   messageReturnRef:returnRef,directLandingRef:{current:false},messagesOpen:true,goChatOpen:false,goChatScreen:null,setMessageEntryId:v=>calls.push(["host",v]),recentContacts:[],userGoPhone:'',initialMessagesContact:null,
   initialMessagesBookingId:booking.reservationId,initialMessagesContext:presentation.entryMessageContext(booking),
   setMessagesOpen:v=>calls.push(['messages',v]),setLandingDetailsId:v=>calls.push(['landing-detail',v]),
@@ -37,7 +37,7 @@ test('Calendar keeps its modal and source detail while the SAME Communication sc
  scope.finishEntryMessageReturn=scope.exports.finish;
  scope.exports.open(booking,()=>calls.push(['restore',booking.id]),true);assert.equal(calOpen,true);assert.deepEqual(calls.at(-1),['messages',true]);assert.equal(calls.some(x=>x[0]==='landing-detail'),false,'The selected source detail must remain mounted');
  vm.runInContext(transpile('exports.screen='+declaration('messagesScreen')+';'),scope);
- const screen=scope.exports.screen;assert.equal(screen.type,'MessagesScreen');assert.equal(screen.props.initialBookingId,booking.reservationId);assert.equal(screen.props.initialContext.name,booking.contactName);
+ const screen=scope.exports.screen;assert.equal(screen.type,'MessagesScreen');assert.equal(screen.props.onGoToLanding,scope.goDirectlyToLanding,'Messages reuses the exact approved Landing coordinator');assert.equal(screen.props.initialBookingId,booking.reservationId);assert.equal(screen.props.initialContext.name,booking.contactName);
  screen.props.onClose();assert.equal(calls.filter(x=>x[0]==='restore').length,0,'Back waits until Communication is actually dismissed');
  screen.props.onDismiss();screen.props.onDismiss();assert.equal(calls.filter(x=>x[0]==='restore').length,1);assert.equal(calOpen,true,'Calendar and its scroll position remain mounted');
 });

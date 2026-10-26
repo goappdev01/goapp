@@ -4,9 +4,9 @@ import lifecycle from './helpers/react-lifecycle.cjs';
 const {React,createRoot,document,evaluate,rn,native}=lifecycle;
 const bookingId='11111111-1111-4111-8111-111111111111';
 const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<20;i++)await Promise.resolve();});
-async function fixture({initial=true,context,offline=false,account='customer',platform='ios'}={}){
+async function fixture({initial=true,context,offline=false,account='customer',platform='ios',contact}={}){
  const memory=new Map(),storage={getItem:async k=>memory.get(k)??null,setItem:async(k,v)=>{memory.set(k,v);},removeItem:async k=>{memory.delete(k);}};
- let owner=account,fail=offline,loseResponse=false,sending=0,attempts=0,closed=0;const records=[],events=new Set(),inputs=[],buttons=[];let modalProps,dismissed=0;
+ let owner=account,fail=offline,loseResponse=false,sending=0,attempts=0,closed=0,landings=0,aiOpens=0;const records=[],events=new Set(),inputs=[],buttons=[];let modalProps,dismissed=0;
  const thread=()=>({id:'booking:'+bookingId,bookingId,businessId:'salon',counterpartId:owner==='customer'?'business-owner':'customer',contactName:owner==='customer'?'Registered salon':'Registered customer',lastUpdated:1,messages:records.map(x=>({...x,senderId:x.sender===owner?'yo':x.sender})),unread:0});
  const booking={getAuthenticatedUserId:async()=>owner,supabaseApiRequest:async(path,init={},required,expected)=>{
   assert.equal(required,true);assert.equal(expected,owner);if(fail)throw new Error('Servidor no disponible');
@@ -37,15 +37,17 @@ async function fixture({initial=true,context,offline=false,account='customer',pl
   },
  });
  let shown=true,initialBookingId=initial?bookingId:undefined;const container=document.createElement('div'),root=createRoot(container);
- const render=()=>{inputs.length=0;buttons.length=0;root.render(React.createElement(screen.MessagesScreen,{visible:shown,onClose(){closed++;},onDismiss(){dismissed++;},recentContacts:[],userGoPhone:'',onCreateGo(){},onPickDeviceContact:async()=>null,initialBookingId,initialContext:context}));};
+ const render=()=>{inputs.length=0;buttons.length=0;root.render(React.createElement(screen.MessagesScreen,{visible:shown,onClose(){closed++;},onGoToLanding(){landings++;},onDismiss(){dismissed++;},recentContacts:[],initialContact:contact,userGoPhone:'',onCreateGo(){aiOpens++;},onPickDeviceContact:async()=>null,initialBookingId,initialContext:context}));};
  await settle(render);
  const input=()=>inputs.findLast(p=>p.placeholder==='Escribe un mensaje...');
  const send=()=>buttons.findLast(p=>p.label==='msg_send_btn');
- return{memory,records,container,data,get dismissed(){return dismissed;},async hide(){shown=false;await settle(render);},async nativeDismiss(){await settle(()=>modalProps.onDismiss());},get closed(){return closed;},get attempts(){return attempts;},get input(){return input();},get send(){return send();},
+ return{memory,records,container,data,get dismissed(){return dismissed;},async hide(){shown=false;await settle(render);},async nativeDismiss(){await settle(()=>modalProps.onDismiss());},get closed(){return closed;},get landings(){return landings;},get aiOpens(){return aiOpens;},get attempts(){return attempts;},get input(){return input();},get send(){return send();},
   async type(value){await settle(()=>input().onChangeText(value));},async submit(){await settle(()=>send().onPress());},
   async double(){await settle(()=>Promise.all([send().onPress(),send().onPress()]));},fail(v){fail=v;},lose(){loseResponse=true;},
   async account(next){await settle(()=>{owner=next;for(const fn of events)fn();});},
   async general(){initialBookingId=undefined;context=undefined;await settle(render);},
+  async landing(){await settle(()=>buttons.findLast(p=>p.accessibilityLabel==='Ir directamente al Landing').onPress());},
+  async go(){await settle(()=>buttons.findLast(p=>p.label==='GO').onPress());},
   async back(){await settle(()=>buttons.findLast(p=>p.accessibilityLabel==='Volver a la ficha'||p.accessibilityLabel==='Volver a conversaciones').onPress());},
   async reopen(){context={...context};initialBookingId=undefined;await settle(()=>root.render(null));initialBookingId=initial?bookingId:undefined;await settle(render);},
   async close(){await settle(()=>root.unmount());assert.equal(events.size,0);assert.equal(sending,0);}
@@ -87,3 +89,13 @@ test('a shared task without an authenticated server relationship preserves its d
 for(const platform of ['ios','android'])test(platform+': returning to a reservation waits for native Communication dismissal',async()=>{
  const f=await fixture({platform,context});try{assert.ok(f.input);await f.type('Keep the reservation draft');await f.back();assert.equal(f.dismissed,0);await f.hide();if(platform==='ios'){assert.equal(f.dismissed,0);await f.nativeDismiss();}assert.equal(f.dismissed,1);assert.equal(f.records.length,0);assert.ok([...f.memory.values()].includes('Keep the reservation draft'));}finally{await f.close();}
 });
+
+for(const route of ['back','landing'])test('Messages '+route+' keeps the existing reservation thread, sent messages and draft',async()=>{
+ const f=await fixture({context});try{await f.type('Mensaje conservado');await f.submit();const before=JSON.stringify(f.records);await f.type('Borrador sin enviar');await f[route]();assert.equal(f.closed,route==='back'?1:0);assert.equal(f.landings,route==='landing'?1:0);assert.equal(JSON.stringify(f.records),before);assert.equal(f.attempts,1);assert.equal(f.input.value,'Borrador sin enviar');assert.ok([...f.memory.values()].includes('Borrador sin enviar'));}finally{await f.close();}
+});
+
+test('conversation header retains the actual business and reservation, with no redundant GO, and lower gold GO still opens AI',async()=>{
+ const details={...context,name:'GO Peluquería de María'};const f=await fixture({context:details,offline:true});try{const dom=n=>[n,...n.childNodes.flatMap(dom)],header=dom(f.container).find(n=>n.attributes?.['data-testid']==='go-message-header');assert.ok(header);const text=header.textContent.replace(/\u200b/g,'');assert.ok(!text.includes('\\u200b'),'No visible escape sequence is introduced');assert.ok(text.includes(details.name));assert.ok(text.includes(details.date));assert.ok(text.includes(details.time));assert.ok(text.includes(details.phone));assert.equal((text.match(/GO/g)||[]).length,1,'Only the actual business name may contain GO in this header');assert.ok(!text.includes('GP'),'No green initials marker remains');await f.type('Texto para conservar');await f.go();assert.equal(f.aiOpens,1);assert.equal(f.closed,0);assert.equal(f.landings,0);assert.equal(f.input.value,'Texto para conservar');assert.equal(f.records.length,0);}finally{await f.close();}
+});
+
+test('non-GO conversation header keeps its existing WA identification and contact unchanged',async()=>{const contact={name:'Existing contact',phone:'+34600123456'},f=await fixture({initial:false,contact});try{const dom=n=>[n,...n.childNodes.flatMap(dom)],header=dom(f.container).find(n=>n.attributes?.['data-testid']==='go-message-header');assert.ok(header);assert.ok(header.textContent.includes(contact.name));assert.ok(header.textContent.includes(contact.phone));assert.ok(header.textContent.includes('WA'));assert.equal(f.records.length,0);}finally{await f.close();}});

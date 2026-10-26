@@ -14258,6 +14258,7 @@ function HomeScreenContent() {
       />);
 
   const messagesScreen = (<MessagesScreen
+        onGoToLanding={goDirectlyToLanding}
         visible={messagesOpen}
         assistant={messagesOpen && goChatOpen ? goChatScreen : null}
         onClose={() => setMessagesOpen(false)}

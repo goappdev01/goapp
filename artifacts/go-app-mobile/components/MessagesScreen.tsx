@@ -65,6 +65,7 @@ type MessagesScreenProps = {
   visible: boolean;
   onClose: () => void;
   onDismiss?: () => void;
+  onGoToLanding?: () => void;
   assistant?: React.ReactNode;
   recentContacts: { name: string; phone: string }[];
   userGoPhone: string;
@@ -251,7 +252,7 @@ function ChannelBadge({ isGoUser }: { isGoUser: boolean }) {
 
 export function MessagesScreen({
   visible,
-  onClose, onDismiss, assistant,
+  onClose, onDismiss, onGoToLanding, assistant,
   recentContacts,
   userGoPhone,
   onCreateGo,
@@ -634,8 +635,8 @@ export function MessagesScreen({
             <Reanimated.View style={[s.flex, swipeStyle]}>
               <Animated.View style={[s.flex, { transform: [{ translateX: slideAnim }] }]}>
                 {/* Thread title — contact info only, no top buttons */}
-                <View style={s.threadTitleRow}>
-                  <Avatar name={activeConv.contactName} isGoUser={activeConv.isGoUser} size={36} />
+                <View testID="go-message-header" style={s.threadTitleRow}>
+                  {activeConv.isGoUser ? <View testID="message-header-avatar-space" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 36, height: 36 }} /> : <Avatar name={activeConv.contactName} isGoUser={false} size={36} />}
                   <View style={{ flex: 1, marginLeft: 11 }}>
                     <Text style={s.threadName} numberOfLines={1}>
                       {activeConv.contactName
@@ -646,7 +647,7 @@ export function MessagesScreen({
                     </Text>
                     {!!activeConv.contextLabel&&<Text testID="go-message-context" style={{color:C.textSub,fontSize:12,marginTop:3}}>{activeConv.contextLabel}</Text>}
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 3 }}>
-                      <ChannelBadge isGoUser={activeConv.isGoUser} />
+                      {activeConv.isGoUser ? <View testID="message-header-channel-space" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[s.badge, { borderColor: "transparent" }]}><Text accessible={false} style={[s.badgeText, { color: "transparent" }]}>{"\u200b"}</Text></View> : <ChannelBadge isGoUser={false} />}
                       {activeConv.contactPhone ? (
                         <Text style={{ color: C.textMuted, fontSize: 11 }}>
                           {activeConv.contactPhone}
@@ -782,9 +783,10 @@ export function MessagesScreen({
                 initialRight={8}
                 initialTop={8}
                 bounds={{ width: chatArea.width, height: 60 }}
-                buttonWidth={44}
+                buttonWidth={onGoToLanding ? 96 : 44}
                 maxH={44}
               >
+                <View testID="message-navigation-controls" style={{ flexDirection: "row", gap: 8 }}>
                 <TouchableOpacity
                   onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); backToList(); }}
                   activeOpacity={0.8}
@@ -793,6 +795,10 @@ export function MessagesScreen({
                 >
                   <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
                 </TouchableOpacity>
+                {onGoToLanding && <TouchableOpacity testID="message-direct-landing" accessibilityRole="button" accessibilityLabel={lang === "en" ? "Go directly to Landing" : "Ir directamente al Landing"} activeOpacity={0.8} style={s.fabBack} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); onGoToLanding(); }}>
+                  <Feather name="chevrons-down" size={22} color="rgba(255,255,255,0.90)" />
+                </TouchableOpacity>}
+                </View>
               </DraggableFAB>
                   </View>}
                 </KeyboardAvoidingView>
