@@ -49,11 +49,9 @@ export function updateServiceWorkWait(service: Service, values: ServiceWorkWaitD
       ...(index === 1 ? { releaseProfessional: previous?.releaseProfessional === true } : {}) });
   });
   const mode = phases.length === 1 && phases[0].kind === "work" ? "simple" : "phases";
-  if (mode === "phases" && !service.timing?.resourcesConfigured)
-    throw new Error("Falta confirmar los recursos de este servicio. Se conserva su configuración anterior.");
   if (!service.timing && mode === "simple") return { duration: total, timing: undefined };
   try {
-    const timing = validateServiceTiming({ ...service.timing, version: 1, mode, resourcesConfigured: service.timing?.resourcesConfigured ?? false, phases }, { durationMinutes: total, resources });
+    const timing = validateServiceTiming({ ...service.timing, configurationStatus: undefined, version: 1, mode, resourcesConfigured: service.timing?.resourcesConfigured ?? false, phases }, { durationMinutes: total, resources, purpose: "configuration" });
     return { duration: total, timing };
   } catch { throw new Error("Revisa los minutos y los recursos guardados de este servicio."); }
 }

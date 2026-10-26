@@ -29,7 +29,7 @@ import { useAdminAccess } from "./GoAdminAccessContext";
 import type { BusinessDemoStore } from "@/data/businessDemoStore";
 import { useOwnerBusinessDemo } from "./OwnerBusinessDemoContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { serializeServiceConfiguration, validateBookingResources, validateBusinessTimezone, validateScheduleRange,
+import { serializeServiceConfiguration, isServiceTimingPending, validateBookingResources, validateBusinessTimezone, validateScheduleRange,
   type BookingGapPolicy, type BookingResource, type BookingBlock, type ServiceTiming } from "@/data/serviceTiming";
 import {
   initPlantillaItems,
@@ -423,21 +423,31 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
     for (const svc of services) {
       const key      = svc.name.toLowerCase().trim();
       const existing = titleToItem.get(key);
+      const pendingTiming = isServiceTimingPending(svc.timing);
+      // Full times are persisted in business_settings. A pending plan never
+      // reaches the booking compiler and the catalogue entry remains inactive.
+      const catalogueTiming = pendingTiming ? undefined : svc.timing;
+      const catalogueMetadata = { ...existing?.catalogMetadata };
+      if (pendingTiming) catalogueMetadata.timingConfigurationPending = true;
+      else delete catalogueMetadata.timingConfigurationPending;
+      const metadataPatch = pendingTiming || existing?.catalogMetadata?.timingConfigurationPending ? {catalogMetadata: catalogueMetadata} : {};
       if (existing) {
         const changed =
-          !existing.active ||
+          existing.active !== !pendingTiming ||
+          Boolean(existing.catalogMetadata?.timingConfigurationPending) !== pendingTiming ||
           existing.durationMinutes  !== svc.duration          ||
           existing.price            !== svc.price             ||
           existing.customerCapacity !== (svc.capacity ?? 1) ||
-          JSON.stringify(existing.timing) !== JSON.stringify(svc.timing) || existing.description !== svc.description;
+          JSON.stringify(existing.timing) !== JSON.stringify(catalogueTiming) || existing.description !== svc.description;
         if (changed) {
           await saveBookableItem({
             ...existing,
-            active: true,
+            active: !pendingTiming,
+            ...metadataPatch,
             durationMinutes:  svc.duration,
             price:            svc.price,
             customerCapacity: svc.capacity ?? 1,
-            timing: svc.timing,
+            timing: catalogueTiming,
             description: svc.description,
           });
         }
@@ -451,9 +461,10 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
           unitQuantity:     1,
           price:            svc.price,
           paymentRequired:  false,
-          active:           true,
+          active:           !pendingTiming,
+          ...metadataPatch,
           visible:          true,
-          timing:           svc.timing,
+          timing:           catalogueTiming,
           description:      svc.description,
         });
       }

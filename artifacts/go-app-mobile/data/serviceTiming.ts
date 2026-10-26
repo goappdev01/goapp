@@ -22,9 +22,13 @@ export type ServiceTiming = {
   mode: "simple" | "phases";
   phases: ServicePhase[];
   resourcesConfigured: boolean;
+  /** A saved configuration, never authorization to offer or confirm a booking. */
+  configurationStatus?: "pending";
   professionalTimings?: Record<string, Omit<ServiceTiming, "professionalTimings"> & { durationMinutes: number }>;
 };
 export type ServiceTimingValidation = {
+  /** Only the settings writer may preserve incomplete resource verification. */
+  purpose?: "configuration";
   durationMinutes?: number;
   /** Internal recursion guard: an override cannot contain other overrides. */
   allowOverrides?: boolean;
@@ -55,8 +59,14 @@ export function validateServiceTiming(value: unknown, options: ServiceTimingVali
   if (!record(value) || value.version !== 1 || !["simple", "phases"].includes(String(value.mode))
     || typeof value.resourcesConfigured !== "boolean" || !Array.isArray(value.phases) || !value.phases.length || value.phases.length > 32)
     throw new Error("Revisa la distribución del tiempo del servicio.");
-  if (value.mode === "phases" && !value.resourcesConfigured)
-    throw new Error("Declara los recursos de las fases, también si no necesitan ninguno.");
+  const configuration = options.purpose === "configuration";
+  if (value.configurationStatus !== undefined && value.configurationStatus !== "pending") throw new Error("Estado de configuración no válido.");
+  let pending = value.configurationStatus === "pending";
+  if (pending && !configuration) throw new Error("Los tiempos todavía no están habilitados para reservas.");
+  if (value.mode === "phases" && !value.resourcesConfigured) {
+    if (!configuration) throw new Error("Declara los recursos de las fases, también si no necesitan ninguno.");
+    pending = true;
+  }
   const resources = options.resources && validateBookingResources(options.resources);
   const phaseIds = new Set<string>();
   const phases: ServicePhase[] = value.phases.map(raw => {
@@ -77,9 +87,14 @@ export function validateServiceTiming(value: unknown, options: ServiceTimingVali
         throw new Error("Revisa la cantidad y ocupación de los recursos de cada fase.");
       used.add(requirement.resourceId.toLowerCase());
       const configured = resources?.find(resource => resource.id === requirement.resourceId && resource.active !== false);
-      if (resources && (!configured || Number(requirement.quantity) > configured.capacity))
-        throw new Error("El recurso no está activo o su cantidad supera la capacidad configurada.");
-      if (!value.resourcesConfigured) throw new Error("Confirma la declaración de recursos del servicio.");
+      if (resources && (!configured || Number(requirement.quantity) > configured.capacity)) {
+        if (!configuration) throw new Error("El recurso no está activo o su cantidad supera la capacidad configurada.");
+        pending = true;
+      }
+      if (!value.resourcesConfigured) {
+        if (!configuration) throw new Error("Confirma la declaración de recursos del servicio.");
+        pending = true;
+      }
       return { resourceId: requirement.resourceId, quantity: requirement.quantity,
         occupancy: requirement.occupancy } as ServiceResourceRequirement;
     });
@@ -104,9 +119,11 @@ export function validateServiceTiming(value: unknown, options: ServiceTimingVali
         throw new Error("Los tiempos propios necesitan un profesional activo y una duración válida.");
       const checked = validateServiceTiming(override,{...options,durationMinutes:override.durationMinutes,allowOverrides:false});
       professionalTimings[staffId] = {...checked,durationMinutes:override.durationMinutes};
+      if (checked.configurationStatus === "pending") pending = true;
     }
   }
   return { version: 1, mode: value.mode as ServiceTiming["mode"], phases, resourcesConfigured: value.resourcesConfigured,
+    ...(pending ? {configurationStatus: "pending" as const} : {}),
     ...(professionalTimings && Object.keys(professionalTimings).length ? {professionalTimings} : {}) };
 }
 
@@ -117,7 +134,7 @@ export type ServiceConfiguration = { name: string; description?: string; duratio
 /** Preserve the configured duration; a mismatch must be corrected explicitly. */
 export function serializeServiceConfiguration(services: readonly ServiceConfiguration[], options: Omit<ServiceTimingValidation, "durationMinutes"> = {}): ServiceConfiguration[] {
   return services.filter(service => service.name.trim()).map(({ name, description, duration, price, capacity, timing }) => {
-    const checked = timing && validateServiceTiming(timing, {...options,durationMinutes:duration});
+    const checked = timing && validateServiceTiming(timing, {...options,durationMinutes:duration,purpose:"configuration"});
     if (!checked && (!Number.isInteger(duration) || duration <= 0))
       throw new Error("Indica una duración en minutos enteros positivos.");
     return { name, duration, price, capacity,
@@ -157,4 +174,9 @@ export function serviceTimingTotals(phases: readonly ServicePhase[]) {
  const total=phases.reduce((sum,p)=>sum+p.durationMinutes,0),work=phases.filter(p=>p.kind==="work").reduce((sum,p)=>sum+p.durationMinutes,0);
  const wait=total-work,released=phases.filter(p=>p.kind==="wait"&&p.releaseProfessional===true).reduce((sum,p)=>sum+p.durationMinutes,0);
  return {total,work,wait,released,occupied:total-released};
+}
+
+/** Pending settings stay out of all booking/catalogue publication paths. */
+export function isServiceTimingPending(timing: ServiceTiming | undefined): boolean {
+  return timing?.configurationStatus === "pending" || Object.values(timing?.professionalTimings ?? {}).some(value => value.configurationStatus === "pending");
 }

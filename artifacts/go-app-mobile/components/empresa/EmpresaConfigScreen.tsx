@@ -2210,6 +2210,7 @@ function ServiceTimingEditor({ service, resources, expanded, onExpandedChange, o
         </View>)}
       </View>
       <Text testID="service-work-wait-total" style={{ color: TEXT, fontWeight: "700", fontSize: 13 }}>{label("TOTAL DEL SERVICIO", "TOTAL SERVICE TIME")}: {total === null ? "—" : total} min</Text>
+      {service.timing?.configurationStatus === "pending" && <Text accessibilityLiveRegion="polite" style={{ color: GRAY, fontSize: 12 }}>{label("Pendiente de habilitar reservas.", "Pending booking activation.")}</Text>}
       {!!error && <Text accessibilityRole="alert" style={{ color: RED, fontSize: 12 }}>{error}</Text>}
     </> : <Text accessibilityRole="alert" style={{ color: RED, fontSize: 12 }}>{label("La configuración guardada se conserva; no puede reducirse a estos tres tiempos.", "The saved configuration is preserved; it cannot be reduced to these three times.")}</Text>)}
   </View>;
@@ -2222,7 +2223,7 @@ function BookingResourcesEditor({ resources, services, onSave }: { resources: Bo
   const save = () => {
     try {
       const checked = validateBookingResources(draft);
-      for (const service of services) if (service.timing) validateServiceTiming(service.timing, { resources: checked });
+      for (const service of services) if (service.timing) validateServiceTiming(service.timing, { resources: checked, purpose: "configuration" });
       onSave(checked); setError(""); setOpen(false);
     } catch (failure) { setError((failure as Error).message); }
   };

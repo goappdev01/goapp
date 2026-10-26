@@ -426,7 +426,7 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
           if (reservation.serviceId && reservation.serviceId !== "demo_floor_service") {
             const ids = reservation.services?.map(value => value.id) ?? [reservation.serviceId];
             const services = ids.map(id => data.config.services.find(value => demoNamedId(businessId,"service",value.name) === id));
-            if(services.some(service=>service?.timing?.mode==="phases"||service?.timing?.professionalTimings))throw new Error("Las reservas por fases requieren el motor de servidor; no se crea una reserva local incompatible.");
+            if(services.some(service=>service?.timing?.configurationStatus==="pending"||service?.timing?.mode==="phases"||service?.timing?.professionalTimings))throw new Error("Las reservas por fases requieren el motor de servidor; no se crea una reserva local incompatible.");
             if (!ids.length || ids[0] !== reservation.serviceId || new Set(ids).size !== ids.length
               || services.some(service => !service || service.price < 0)
               || services.reduce((total, service) => total + (service?.duration ?? 0), 0) !== reservation.durationMinutes

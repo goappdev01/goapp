@@ -69,7 +69,7 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: R
     });
   };
   // The local continuous adapter must never advertise a phased plan it cannot validate.
-  const requireSupportedTiming=(config:BusinessConfig,ids:string[])=>{if(config.services.some(service=>ids.includes(serviceId(service.name))&&(service.timing?.mode==="phases"||!!service.timing?.professionalTimings)))throw new Error("Las reservas por fases requieren el motor de servidor; la DEMO local no confirma estos horarios.");};
+  const requireSupportedTiming=(config:BusinessConfig,ids:string[])=>{if(config.services.some(service=>ids.includes(serviceId(service.name))&&(service.timing?.configurationStatus==="pending"||service.timing?.mode==="phases"||!!service.timing?.professionalTimings)))throw new Error("Las reservas por fases requieren el motor de servidor; la DEMO local no confirma estos horarios.");};
   const slotsFor = (data: BusinessDemoData, itemId: string, dateISO: string, id?: string, serviceIds = [itemId]): SlotWithStatus[] => {
     if (!dateValid(dateISO) || !businessFor(data)) return [];
     if (serviceIds[0] !== itemId) return [];

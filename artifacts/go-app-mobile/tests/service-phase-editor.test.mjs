@@ -90,8 +90,29 @@ test('legacy complex sequences remain intact instead of being silently flattened
  assert.equal(adapter.readServiceWorkWait(old).editable,false);assert.throws(()=>adapter.updateServiceWorkWait(old,['15','40','15'],[],()=> 'unused'),/configuración guardada/);assert.deepEqual(old,before);
 });
 test('the visual simplification cannot silently grant unknown resources or release an unauthorized wait',()=>{
- assert.throws(()=>adapter.updateServiceWorkWait({duration:60},['15','30','15'],[],()=> 'new'),/recursos/);
+ let pendingId=0;const pending=adapter.updateServiceWorkWait({duration:60},['15','30','15'],[],()=> 'pending-'+(++pendingId));
+ assert.equal(pending.duration,60);assert.equal(pending.timing.configurationStatus,'pending');assert.equal(pending.timing.resourcesConfigured,false);assert.throws(()=>timing.validateServiceTiming(pending.timing),/habilitados/);
  const noWait={duration:60,timing:{version:1,mode:'simple',resourcesConfigured:true,phases:[work('work',60)]}};let id=0;
  const next=adapter.updateServiceWorkWait(noWait,['15','30','15'],[],()=> 'new-'+(++id));assert.equal(next.timing.phases[1].releaseProfessional,false);
  const bad=tint();bad.timing.phases[0].releaseProfessional=true;assert.throws(()=>timing.validateServiceTiming(bad));
+});
+
+for(const existing of [false,true])test('15+30+15 on '+(existing?'an existing':'a new')+' service saves the full 60 minutes despite unverified resources, then reloads and edits coherently',async()=>{
+ const original={name:existing?'Corte existente':'Tinte nuevo',duration:30,price:25,capacity:1};if(existing)original.timing={version:1,mode:'simple',resourcesConfigured:false,phases:[work('original',30)]};
+ const f=await fixture(original);try{
+  await f.toggle();await f.edit(0,'15');await f.edit(1,'30');await f.edit(2,'15');await f.saveRef.current();
+  assert.equal(f.config.services[0].duration,60);assert.equal(f.saved.services[0].duration,60);assert.deepEqual(f.saved.services[0].timing.phases.map(p=>p.durationMinutes),[15,30,15]);assert.match(f.container.textContent,/TOTAL DEL SERVICIO: 60 min/);assert.match(f.container.textContent,/Pendiente de habilitar reservas/);assert.equal(f.alerts.length,0);
+  await f.toggle();const main=f.visible().find(p=>p.native==='TextInput'&&!p.testID&&p.value==='60');assert.ok(main,'Main service duration must show 60, never the initial work of 15');
+  await f.reload();for(const[index,value]of ['15','30','15'].entries())assert.equal(f.get('service-work-wait-'+index).value,value);
+  await f.edit(1,'40');await f.saveRef.current();assert.equal(f.saved.services[0].duration,70);await f.reload();assert.equal(f.get('service-work-wait-1').value,'40');assert.match(f.container.textContent,/70 min/);assert.equal(f.saved.services[0].price,25);
+ }finally{await f.close();}
+});
+test('pending settings keep unknown or unavailable resources for later review without granting their use',()=>{
+ const source=tint();source.timing.phases[0].resources=[{resourceId:chair,quantity:1,occupancy:'booking'}];
+ const pending=adapter.updateServiceWorkWait(source,['15','30','15'],[],()=> 'unused');assert.equal(pending.duration,60);assert.equal(pending.timing.resourcesConfigured,true,'Existing confirmation must not be invented or removed');assert.equal(pending.timing.configurationStatus,'pending');assert.equal(pending.timing.phases[0].resources[0].resourceId,chair);
+ assert.throws(()=>timing.validateServiceTiming(pending.timing,{resources:[]}));
+ const approved=adapter.updateServiceWorkWait(pending,['15','30','15'],[{id:chair,name:'Silla',capacity:1}],()=> 'unused');assert.equal(approved.timing.configurationStatus,undefined);assert.equal(approved.duration,60);assert.equal(approved.timing.phases[1].releaseProfessional,true);
+});
+test('continuous services retain their current save path and never acquire a false wait or authorization',()=>{
+ const next=adapter.updateServiceWorkWait({duration:30},['43','0','0'],[],()=> 'unused');assert.equal(next.duration,43);assert.equal(next.timing,undefined);
 });
