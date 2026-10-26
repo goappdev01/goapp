@@ -16,15 +16,18 @@ const ast=ts.createSourceFile('config.tsx',readFileSync('components/empresa/Empr
 const declarations=['useConfigArrayDraft','useStepSave','ServiceTimingEditor','StepServicios'].map(name=>ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name));
 const styles=ast.statements.flatMap(node=>ts.isVariableStatement(node)?[...node.declarationList.declarations]:[]).find(node=>node.name.getText(ast)==='c').initializer.arguments[0];
 const serviceCardStyle=vm.runInNewContext('('+styles.properties.find(node=>node.name?.getText(ast)==='svcRow').initializer.getText(ast)+')',{CARD:'#FFFFFF'});
+const presentationStyles=Object.fromEntries(['svcNameInput','importCard','importBtn','importBtnsRow','importUrlBtn','importBtnLabel'].map(name=>[name,vm.runInNewContext('('+styles.properties.find(node=>node.name?.getText(ast)===name).initializer.getText(ast)+')',{CARD:'#FFFFFF',BORDER:'rgba(0,0,0,0.08)',TEXT:'#111827',DIM:'#9CA3AF',GREEN:'#3D9A84'})]));
+const translations=evaluate('i18n/translations.ts').translations;
 const descendants=node=>node?[node,...node.childNodes.flatMap(descendants)]:[];
 async function fixture(service=tint(),{lang='es',resources=[],delay=false}={}){
- const Context=React.createContext(null),props=new Map(),calls=[],gates=[],alerts=[];let stored=JSON.stringify({businessId:a,services:Array.isArray(service)?service:[service],bookingResources:resources}),snapshot;
+ const Context=React.createContext(null),props=new Map(),calls=[],gates=[],alerts=[],imports={image:0,pdf:0};let stored=JSON.stringify({businessId:a,services:Array.isArray(service)?service:[service],bookingResources:resources}),snapshot;
  const native=name=>p=>{const id=React.useId();props.set(id,{...p,native:name});return React.createElement('div',{'data-prop-id':id,'data-native':name},p.children);};
  const components=Object.fromEntries(['Text','View','TextInput','TouchableOpacity','Switch','ScrollView'].map(name=>[name,native(name)]));
  const scope={exports:{},React,useState:React.useState,useRef:React.useRef,useEffect:React.useEffect,useCallback:React.useCallback,...components,
-  useBusinessConfig:()=>React.useContext(Context),useLanguage:()=>({lang,t:key=>key}),...timing,...adapter,newTimingId:(()=>{let n=0;return()=>`new-${++n}`;})(),
-  BLUE:'#1D4ED8',TEXT:'#111827',GRAY:'#374151',DIM:'#4B5563',RED:'#B91C1C',PURPLE:'#7E22CE',GREEN:'#166534',GOLD:'#C9A84C',c:{svcRow:serviceCardStyle},trSector:value=>value,Feather:native('Feather'),
-  CatalogAssociationManager:()=>null,BookingResourcesEditor:()=>null,GoOcrImportSheet:()=>null,Haptics:{selectionAsync:async()=>{}},Alert:{alert:(...args)=>alerts.push(args)},
+  useBusinessConfig:()=>React.useContext(Context),useLanguage:()=>({lang,t:key=>translations[lang][key]??key}),...timing,...adapter,newTimingId:(()=>{let n=0;return()=>`new-${++n}`;})(),
+  BLUE:'#1D4ED8',TEXT:'#111827',GRAY:'#374151',DIM:'#4B5563',RED:'#B91C1C',PURPLE:'#7E22CE',GREEN:'#166534',GOLD:'#C9A84C',c:{svcRow:serviceCardStyle,...presentationStyles},trSector:value=>value,Feather:native('Feather'),
+  CatalogAssociationManager:()=>null,BookingResourcesEditor:()=>null,GoOcrImportSheet:native('GoOcrImportSheet'),Haptics:{selectionAsync:async()=>{}},Alert:{alert:(...args)=>alerts.push(args)},
+  ImagePicker:{requestMediaLibraryPermissionsAsync:async()=>({status:'granted'}),launchImageLibraryAsync:async()=>{imports.image++;return{canceled:true};}},DocumentPicker:{getDocumentAsync:async()=>{imports.pdf++;return{canceled:true};}},
  };
  vm.runInNewContext(compile(declarations.map(node=>node.getText(ast)).join('\n')+';exports.StepServicios=StepServicios;'),scope);
  const saveRef={current:null},container=document.createElement('div');let root=createRoot(container);
@@ -36,7 +39,7 @@ async function fixture(service=tint(),{lang='es',resources=[],delay=false}={}){
  const visible=(parent=container)=>descendants(parent).filter(node=>node.attributes?.['data-prop-id']).map(node=>props.get(node.attributes['data-prop-id']));
  const get=id=>{const node=visible().find(p=>p.testID===id);assert.ok(node,'Missing '+id);return node;};
  await settle(()=>root.render(React.createElement(Host)));
- return {container,calls,alerts,gates,saveRef,visible,get,settle,get saved(){return JSON.parse(stored);},get config(){return snapshot;},
+ return {container,calls,alerts,gates,imports,saveRef,visible,get,settle,get saved(){return JSON.parse(stored);},get config(){return snapshot;},
   card(index){const node=descendants(container).find(node=>props.get(node.attributes?.['data-prop-id'])?.testID==='service-card-'+index);assert.ok(node);return visible(node);},
   async edit(index,text){await settle(()=>get('service-work-wait-'+index).onChangeText(text));},
   async toggle(){await settle(()=>get('service-work-wait-toggle').onPress());},
@@ -151,5 +154,34 @@ for(const lang of ['es','en'])test(lang+': timing disclosure keeps the full one-
   assert.equal(title.numberOfLines,1);assert.equal(title.adjustsFontSizeToFit,true);assert.equal(title.style.minWidth,0);
   assert.equal(f.visible().find(p=>p.native==='Feather'&&p.name==='chevron-down').size,24);
   await f.toggle();assert.equal(f.get('service-work-wait-toggle').accessibilityState.expanded,true);await f.toggle();assert.equal(f.calls.length,0);
+ }finally{await f.close();}
+});
+
+test('only service names are centered and remain editable and persisted without changing service frames or configuration',async()=>{
+ const originals=['CORTE','LAVADO','TINTE','PEINADO','TRATAMIENTO'].map(name=>({...tint(),name,description:'Complemento guardado'}));
+ const f=await fixture(originals);try{
+  for(let index=0;index<originals.length;index++){
+   const name=f.get('service-name-'+index),extra=f.card(index).find(p=>p.accessibilityLabel==='Servicio complementario (opcional)');
+   assert.equal(name.style[1].textAlign,'center');assert.equal(name.editable,undefined);assert.equal(typeof name.onChangeText,'function');assert.equal(typeof name.onBlur,'function');
+   assert.equal(name.style[0].paddingVertical,9);assert.equal(name.style[0].fontSize,14);assert.equal(extra.style.some(style=>style?.textAlign==='center'),false);
+  }
+  await f.settle(()=>f.get('service-name-4').onChangeText('TRATAMIENTO PERSONALIZADO'));await f.saveRef.current();await f.reload();
+  assert.equal(f.get('service-name-4').value,'TRATAMIENTO PERSONALIZADO');
+  for(let index=0;index<originals.length;index++){const saved=f.saved.services[index];assert.equal(saved.description,originals[index].description);assert.equal(saved.duration,originals[index].duration);assert.equal(saved.price,originals[index].price);assert.deepEqual(saved.timing,originals[index].timing);}
+ }finally{await f.close();}
+});
+
+for(const lang of ['es','en'])test(lang+': exactly three spaced import buttons retain their icons, titles and original handlers without secondary explanations',async()=>{
+ const f=await fixture(tint(),{lang});try{
+  const buttons=['image','pdf','web'].map(kind=>f.get('service-import-'+kind));assert.ok(buttons.every(button=>typeof button.onPress==='function'));
+  const body=f.container.textContent;for(const key of ['biz_import_image_label','biz_import_pdf_label','biz_import_link_label'])assert.ok(body.includes(translations[lang][key]));
+  for(const key of ['biz_import_image_sub','biz_import_pdf_sub','biz_import_link_sub'])assert.ok(!body.includes(translations[lang][key]));
+  assert.doesNotMatch(body,/GO detectará nombres, precios y duraciones automáticamente/);
+  assert.equal(f.visible().filter(p=>p.native==='Feather'&&p.name==='camera').length,1);assert.equal(f.visible().filter(p=>p.native==='Feather'&&p.name==='file-text').length,1);assert.equal(f.visible().filter(p=>p.native==='Feather'&&p.name==='globe').length,1);
+  assert.ok(buttons[0].style.borderWidth>0);assert.equal(buttons[0].style,buttons[1].style);assert.ok(presentationStyles.importBtnsRow.gap>=10);assert.ok(presentationStyles.importBtnsRow.marginHorizontal>0);assert.ok(presentationStyles.importUrlBtn.marginHorizontal>0);
+  await f.settle(()=>buttons[0].onPress());const menu=f.alerts.at(-1)[2];await f.settle(()=>menu.find(choice=>choice.text.includes('Galería')).onPress());assert.equal(f.imports.image,1);
+  await f.settle(()=>buttons[1].onPress());assert.equal(f.imports.pdf,1);
+  await f.settle(()=>buttons[2].onPress());const sheet=f.visible().find(p=>p.native==='GoOcrImportSheet');assert.equal(sheet.visible,true);assert.equal(sheet.isUrl,true);assert.equal(sheet.sourceUri,null);
+  await f.settle(()=>sheet.onClose());assert.equal(f.visible().find(p=>p.native==='GoOcrImportSheet').visible,false);assert.equal(f.calls.length,0,'Opening import options must not alter services');
  }finally{await f.close();}
 });

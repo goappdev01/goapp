@@ -2408,7 +2408,8 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
         {localSvcs.map((svc, idx) => (
           <View key={svc.id} testID={"service-card-" + idx} style={[c.svcRow, { borderColor: color }]}>
             <TextInput
-              style={c.svcNameInput}
+              testID={"service-name-" + idx}
+              style={[c.svcNameInput, { textAlign: "center" }]}
               value={trSector(svc.name, lang)}
               onChangeText={v => patchSvc(svc.id, { name: v })}
               onBlur={() => { void flush().catch(() => {}); }}
@@ -2494,6 +2495,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
         <View style={c.importBtnsRow}>
           {/* Image */}
           <TouchableOpacity
+            testID="service-import-image"
             onPress={handleImageImport}
             activeOpacity={0.8}
             style={c.importBtn}
@@ -2502,13 +2504,11 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               <Feather name="camera" size={20} color={BLUE} />
             </View>
             <Text style={c.importBtnLabel}>{t("biz_import_image_label")}</Text>
-            <Text style={c.importBtnSub}>{t("biz_import_image_sub")}</Text>
           </TouchableOpacity>
-
-          <View style={c.importBtnSep} />
 
           {/* PDF */}
           <TouchableOpacity
+            testID="service-import-pdf"
             onPress={handlePdfImport}
             activeOpacity={0.8}
             style={c.importBtn}
@@ -2517,12 +2517,12 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               <Feather name="file-text" size={20} color={PURPLE} />
             </View>
             <Text style={c.importBtnLabel}>{t("biz_import_pdf_label")}</Text>
-            <Text style={c.importBtnSub}>{t("biz_import_pdf_sub")}</Text>
           </TouchableOpacity>
         </View>
 
         {/* URL import — ancho completo */}
         <TouchableOpacity
+          testID="service-import-web"
           onPress={handleUrlImport}
           activeOpacity={0.8}
           style={c.importUrlBtn}
@@ -2532,18 +2532,10 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
           </View>
           <View style={{ flex: 1 }}>
             <Text style={c.importBtnLabel}>{t("biz_import_link_label")}</Text>
-            <Text style={c.importBtnSub}>{t("biz_import_link_sub")}</Text>
           </View>
           <Feather name="chevron-right" size={16} color={GREEN} />
         </TouchableOpacity>
 
-        {/* Helper text */}
-        <View style={c.importHelperRow}>
-          <Feather name="zap" size={11} color={GOLD} />
-          <Text style={c.importHelperTxt}>
-            GO detectará nombres, precios y duraciones automáticamente. Podrás revisar y corregir antes de guardar.
-          </Text>
-        </View>
       </View>
 
       {/* OCR Review Sheet */}
@@ -3153,14 +3145,16 @@ const c = StyleSheet.create({
   },
   importBtnsRow: {
     flexDirection: "row",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: BORDER,
-    overflow: "hidden",
+    gap: 10,
+    marginHorizontal: 2,
     marginBottom: 12,
   },
   importBtn: {
     flex: 1,
+    minWidth: 0,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
     alignItems: "center",
     paddingVertical: 14,
     paddingHorizontal: 8,
@@ -3201,7 +3195,7 @@ const c = StyleSheet.create({
     borderWidth: 1,
     borderColor: GREEN + "30",
     backgroundColor: GREEN + "06",
-    marginBottom: 12,
+    marginHorizontal: 2,
   },
   importHelperRow: {
     flexDirection: "row",
