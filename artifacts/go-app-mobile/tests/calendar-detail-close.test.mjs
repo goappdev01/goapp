@@ -34,7 +34,7 @@ for (const hand of ['right', 'left']) test(`${hand}: native whole-sheet responde
     assert.equal(f.panCreations,1);const pan=f.props.get('entry-details-sheet');assert.equal(pan.onResponderRelease,initial);
     assert.equal(f.props.get('entry-details-gesture-body').onResponderRelease,undefined,'one responder on the full sheet includes the footer without duplication');
     let time=1000;const stream=(x=hand==='right'?380:10)=>touchStream({x,y:400,time:time+=1000});
-    const start=s=>{pan.onStartShouldSetResponderCapture(s.event());const move=s.event(0,13);assert.equal(pan.onMoveShouldSetResponderCapture(move),false);assert.equal(pan.onMoveShouldSetResponder(move),true);pan.onResponderGrant(move);};
+    const start=s=>{pan.onStartShouldSetResponderCapture(s.event());const move=s.event(0,13);assert.equal(pan.onMoveShouldSetResponderCapture(move),true);assert.equal(pan.onMoveShouldSetResponder(move),true);pan.onResponderGrant(move);};
     for(const dy of[13,40,50]){const s=stream();await f.settle(()=>{start(s);assert.equal(f.nativeScroll.enabled,false);pan.onResponderMove(s.event(0,dy,600));pan.onResponderRelease(s.event(0,dy,10,true));});assert.equal(f.nativeScroll.enabled,true);assert.equal(f.props.get('entry-details-modal').visible,true);}
     const cancel=stream();start(cancel);pan.onResponderTerminate(cancel.event(0,25));assert.equal(f.nativeScroll.enabled,true);assert.equal(pan.onResponderTerminationRequest(),false);
     const center=stream(195);pan.onStartShouldSetResponderCapture(center.event());const move=center.event(0,160);pan.onMoveShouldSetResponderCapture(move);assert.equal(pan.onMoveShouldSetResponder(move),false);assert.equal(f.nativeScroll.enabled,true);
@@ -65,11 +65,11 @@ test('StrictMode replay and stale callbacks from an unmounted record cannot clos
 test('Calendar and detail use one real responder factory and preserve the original white fade', () => {
   const source = fs.readFileSync('app/index.tsx', 'utf8'), detail = fs.readFileSync('components/GoEntryDetails.tsx', 'utf8');
   assert.ok(source.includes('createCalendarCloseResponder({'));
-  assert.ok(detail.includes('createCalendarCloseResponder({'));
+  assert.ok(detail.includes('<GoScreenCloseSurface'));assert.ok(fs.readFileSync('lib/screenCloseGesture.ts','utf8').includes('createCalendarCloseResponder({'));
   assert.ok(!detail.includes('PanResponder.create'));
   assert.ok(!detail.includes('flingDistance'));
   assert.ok(source.includes('<CalendarCloseGuide />'));
-  assert.ok(detail.includes('<CalendarCloseGuide handedness={handedness} testID="entry-detail-swipe-guide" />'));
+  assert.ok(detail.includes('<GoScreenCloseGuide testID="entry-detail-swipe-guide" />'));
   assert.ok(!detail.includes('Animated.timing')); assert.ok(!detail.includes('onExit'));
 });
 

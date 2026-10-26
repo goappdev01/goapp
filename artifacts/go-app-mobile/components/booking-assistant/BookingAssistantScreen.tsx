@@ -1,3 +1,4 @@
+import { GoScreenCloseSurface, GoScreenCloseGuide } from "@/components/ui/GoScreenCloseSurface";
 import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
 import type { ScrollViewInstance } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -83,6 +84,7 @@ export function BookingAssistantScreen({
   const [aiEnabled, setAiEnabled] = useState(false);
   const [slotCount, setSlotCount] = useState(8);
   const scroll = useRef<ScrollViewInstance>(null);
+  const panelScroll = useRef<ScrollViewInstance>(null);
   const [conversationLayout, setConversationLayout] = useState({ width: 0, height: 0 });
   const [conversationMeasurement, setConversationMeasurement] = useState({ height: 0, messages: -1 });
   const voice = useBookingVoice((text, isZone) => {
@@ -313,7 +315,7 @@ export function BookingAssistantScreen({
       onRequestClose={() => (a.panel ? back() : close())}
     >
       <StatusBar style="dark" />
-      <GestureHandlerRootView
+      <GoScreenCloseSurface as={GestureHandlerRootView} testID="assistant-close-surface" handedness={handedness} enabled={visible && !saving} onClose={() => close()} scrollRefs={[scroll, panelScroll]}
         style={[
           s.root,
           { paddingTop: insets.top, paddingBottom: keyboardVisible ? 0 : insets.bottom },
@@ -716,7 +718,7 @@ export function BookingAssistantScreen({
           {!keyboardVisible && dock}
           </View>}
         {a.panel && (
-          <BookingAssistantPanels
+          <BookingAssistantPanels scrollRef={panelScroll}
             a={panelState}
             go={go}
             bottom={0}
@@ -737,7 +739,8 @@ export function BookingAssistantScreen({
         {!a.panel && <AssistantCloseControls disabled={saving} onClose={() => close()} onGoToLanding={onGoToLanding ? () => close(true) : undefined}
           viewport={{ width: viewport.width, height: viewport.height + headerHeight }}
           protectedBottom={footerHeight} topInset={insets.top} />}
-      </GestureHandlerRootView>
+        <GoScreenCloseGuide testID="assistant-swipe-guide" />
+      </GoScreenCloseSurface>
     </Modal>
   );
 }

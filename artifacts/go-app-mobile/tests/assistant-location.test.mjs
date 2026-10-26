@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const ts = require("typescript");
 function load(file, modules, globals = {}) {
   const context = { exports: {}, console, Date, Error, setTimeout, clearTimeout, ...globals,
-    require(name) { if (name in modules) return modules[name]; if(name === '@/components/ui/GoScreenModal') return {GoScreenModal: modules['react-native'].Modal}; throw Error("Unexpected " + name); } };
+    require(name) { if (name in modules) return modules[name]; if(name === '@/components/ui/GoScreenCloseSurface') return {GoScreenCloseSurface:'GestureHandlerRootView',GoScreenCloseGuide:'Guide'}; if(name === '@/components/ui/GoScreenModal') return {GoScreenModal: modules['react-native'].Modal}; throw Error("Unexpected " + name); } };
   if (file === "lib/bookingAssistant.ts") modules["./authSession"] = loadAuthSession(context, modules["@react-native-async-storage/async-storage"].default);
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
     compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React }

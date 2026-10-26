@@ -100,6 +100,7 @@ export function fixture({ now } = {}) {
       require(name) {
         if (name in mocks) return mocks[name];
         if (name === '@/components/ui/GoScreenModal') return {GoScreenModal: mocks['react-native'].Modal};
+        if (name === '@/components/ui/GoScreenCloseSurface') return {GoScreenCloseSurface:'View',GoScreenCloseGuide:'Guide'};
         if (name === '@/hooks/useBusinessBookings') return load('hooks/useBusinessBookings.ts');
         if (name === '@/data/reservationCardPolicy') return load('data/reservationCardPolicy.ts');
         if (name === '@/data/goEntryPresentation') return load('data/goEntryPresentation.ts');

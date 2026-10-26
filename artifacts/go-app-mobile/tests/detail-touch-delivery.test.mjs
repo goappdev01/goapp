@@ -17,7 +17,7 @@ for(const hand of['left','right'])test(`${hand}: touch-down hands the real nativ
   assert.equal(nativeScrollMethod('_handleScrollShouldSetResponder',scrollOwner)(),true);
   assert.equal(nativeScrollMethod('_handleResponderTerminationRequest',scrollOwner)(),false,'installed ScrollView refuses to yield after it begins scrolling: a direct PanResponder-only replay misses this conflict');
   const s=touchStream({x:hand==='right'?380:10,y:600});sheet.onStartShouldSetResponderCapture(s.event());assert.equal(f.nativeScroll.enabled,false,'UIScrollView scrolling is disabled at finger-down, before it can emit the competing scroll event');
-  const move=s.event(0,13,40);assert.equal(sheet.onMoveShouldSetResponderCapture(move),false);assert.equal(sheet.onMoveShouldSetResponder(move),true);sheet.onResponderGrant(move);
+  const move=s.event(0,13,40);assert.equal(sheet.onMoveShouldSetResponderCapture(move),true);assert.equal(sheet.onMoveShouldSetResponder(move),true);sheet.onResponderGrant(move);
   await f.settle(()=>{sheet.onResponderMove(s.event(0,55,220));const up=s.event(0,55,10,true);sheet.onResponderRelease(up);sheet.onTouchEndCapture(up);});
   assert.equal(f.props.get('entry-details-modal').visible,false,'the existing Calendar short-panel path now closes the detail on the first 55-point drag');assert.equal(f.nativeScroll.enabled,true);assert.equal(closes,0);await f.nativeDismiss();assert.equal(closes,1);
  }finally{await f.dispose();}

@@ -14250,7 +14250,7 @@ function HomeScreenContent() {
         }}
       />);
 
-  const messagesScreen = (<MessagesScreen
+  const messagesScreen = (<MessagesScreen handedness={handedness}
         onGoToLanding={goDirectlyToLanding}
         visible={messagesOpen}
         assistant={messagesOpen && goChatOpen ? goChatScreen : null}

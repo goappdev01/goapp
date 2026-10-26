@@ -1,3 +1,4 @@
+import { GoScreenCloseSurface, GoScreenCloseGuide } from "@/components/ui/GoScreenCloseSurface";
 import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
 import type { ScrollViewInstance } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -62,6 +63,7 @@ export type GoConversation = {
 };
 
 type MessagesScreenProps = {
+  handedness?: "left" | "right";
   visible: boolean;
   onClose: () => void;
   onDismiss?: () => void;
@@ -252,7 +254,7 @@ function ChannelBadge({ isGoUser }: { isGoUser: boolean }) {
 
 export function MessagesScreen({
   visible,
-  onClose, onDismiss, onGoToLanding, assistant,
+  onClose, onDismiss, onGoToLanding, assistant, handedness = "right",
   recentContacts,
   userGoPhone,
   onCreateGo,
@@ -275,6 +277,7 @@ export function MessagesScreen({
   const inputRef=useRef("");
   const [inputKey, setInputKey] = useState(0);
   const threadScrollRef = useRef<ScrollViewInstance>(null);
+  const listScrollRef = useRef<FlatList<GoConversation>>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [messageError,setMessageError]=useState("");
   const [sending,setSending]=useState(false);
@@ -525,7 +528,7 @@ export function MessagesScreen({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose} onDismiss={onDismiss}>
-      <View style={[s.root, { paddingTop: insets.top }]}>
+      <GoScreenCloseSurface testID="messages-close-surface" handedness={handedness} enabled={visible && !assistant} onClose={onClose} scrollRefs={[threadScrollRef, listScrollRef]} style={[s.root, { paddingTop: insets.top }]}>
         {/* Pure black background — no blue gradient */}
         <View style={[StyleSheet.absoluteFill, { backgroundColor: C.bg }]} pointerEvents="none" />
         {!!messageError&&<Text testID="go-message-error" accessibilityRole="alert" style={{color:C.red,paddingHorizontal:16,paddingVertical:10}}>{messageError}</Text>}
@@ -545,7 +548,7 @@ export function MessagesScreen({
             </View>
 
             {/* Conversations list */}
-            <FlatList
+            <FlatList ref={listScrollRef}
               data={filteredConvs}
               keyExtractor={(c) => c.id}
               contentContainerStyle={{ paddingHorizontal: 14, paddingTop: 8, paddingBottom: 110 }}
@@ -809,8 +812,9 @@ export function MessagesScreen({
             </Reanimated.View>
           </GestureDetector>
         )}
+        <GoScreenCloseGuide testID="messages-swipe-guide" />
         {assistant}
-      </View>
+      </GoScreenCloseSurface>
     </Modal>
   );
 }

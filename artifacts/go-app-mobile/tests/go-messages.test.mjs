@@ -21,6 +21,7 @@ async function fixture({initial=true,context,offline=false,account='customer',pl
  const motion={start:fn=>fn?.()};const chain=new Proxy({},{get:()=>()=>chain});
  const NativeView=native('View');const View=props=>{React.useLayoutEffect(()=>{props.onLayout?.({nativeEvent:{layout:{x:10,y:0,width:370,height:300}}});},[]);return React.createElement(NativeView,props);};
  const screen=evaluate('components/MessagesScreen.tsx',{
+  '@/components/ui/GoScreenCloseSurface':{GoScreenCloseSurface:View,GoScreenCloseGuide:()=>null},
   '@/data/booking':booking,'@/data/goMessages':data,'@/lib/sessionEvents':{onSessionChanged:fn=>{events.add(fn);return()=>events.delete(fn);}},
   '@react-native-async-storage/async-storage':storage,'@expo/vector-icons':{Feather:()=>null},'./DraggableFAB':{DraggableFAB:({children})=>children},
   'expo-haptics':{selectionAsync:async()=>{},impactAsync:async()=>{},notificationAsync:async()=>{},ImpactFeedbackStyle:{Light:1},NotificationFeedbackType:{Warning:1}},

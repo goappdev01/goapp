@@ -28,7 +28,7 @@ for(const hand of ['right','left'])for(const platform of ['ios','android'])test(
 test('Calendar keeps its modal and source detail while the SAME Communication screen opens and returns after native dismissal',()=>{
  const calls=[],returnRef={current:null};let calOpen=true;
  const scope={exports:{},React:{createElement:tree},MessagesScreen:'MessagesScreen',goDirectlyToLanding:()=>calls.push(['landing']),entryMessageContext:presentation.entryMessageContext,
-  messageReturnRef:returnRef,directLandingRef:{current:false},messagesOpen:true,goChatOpen:false,goChatScreen:null,setMessageEntryId:v=>calls.push(["host",v]),recentContacts:[],userGoPhone:'',initialMessagesContact:null,
+  messageReturnRef:returnRef,directLandingRef:{current:false},messagesOpen:true,goChatOpen:false,goChatScreen:null,setMessageEntryId:v=>calls.push(["host",v]),recentContacts:[],userGoPhone:'',handedness:'right',initialMessagesContact:null,
   initialMessagesBookingId:booking.reservationId,initialMessagesContext:presentation.entryMessageContext(booking),
   setMessagesOpen:v=>calls.push(['messages',v]),setLandingDetailsId:v=>calls.push(['landing-detail',v]),
   setInitialMessagesContext:v=>calls.push(['context',v]),setInitialMessagesBookingId:v=>calls.push(['booking',v]),setInitialMessagesContact:v=>calls.push(['contact',v]),

@@ -1,6 +1,6 @@
 import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Alert, Dimensions, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -8,11 +8,8 @@ import type { GoEntry } from "./AgendaOperativa";
 import { entryCommunication, entryHeading, entryIdentity, entryIsInternal, entryProposalPending } from "@/data/goEntryPresentation";
 import { reservationCardPolicy, GO_ENTRY_COLORS as C } from "@/data/reservationCardPolicy";
 import { GoCloseButton } from "./ui/GoCloseButton";
-import { CalendarCloseGuide } from "./ui/CalendarCloseGuide";
 import { landingCurrentEntry } from "./landing/landingPanels";
-import { calendarGestureOwnership } from "@/lib/calendarGestureOwnership";
-import { createCalendarCloseResponder } from "@/lib/calendarCloseResponder";
-import { entryDetailTouchDelivery } from "@/lib/entryDetailTouchDelivery";
+import { GoScreenCloseSurface, GoScreenCloseGuide } from "@/components/ui/GoScreenCloseSurface";
 
 export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
   const { lang } = useLanguage();
@@ -160,35 +157,17 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
   }, []);
   useLayoutEffect(() => {
     phase.current = "open";
-    const release = calendarGestureOwnership.openDetail();
-    return () => { phase.current = "closed"; release(); };
+    return () => { phase.current = "closed"; };
   }, []);
   useEffect(() => {
     // React Native only emits Modal.onDismiss on iOS; other platforms finish after hiding.
     if (closing && Platform.OS !== "ios") finishDismiss();
   }, [closing, finishDismiss]);
-  const pan = useMemo(() => entryDetailTouchDelivery(createCalendarCloseResponder({
-    enabled: () => phase.current === "open",
-    width: () => Dimensions.get("window").width,
-    handedness: () => live.current.handedness,
-    detail: true,
-    onClose: dismiss,
-    onCollapse: dismiss,
-  }), {
-    enabled: () => phase.current === "open",
-    width: () => Dimensions.get("window").width,
-    handedness: () => live.current.handedness,
-    scrollEnabled: enabled => {
-      const target = scroll.current?.getNativeScrollRef?.() ?? scroll.current;
-      target?.setNativeProps?.({ scrollEnabled: enabled });
-    },
-  }), [dismiss]);
-  useEffect(() => () => pan.release(), [pan]);
   const current = landingCurrentEntry(entry);
   const pending = entryProposalPending(entry);
   return <Modal testID="entry-details-modal" visible={!closing} transparent animationType="none" onRequestClose={dismiss} onDismiss={finishDismiss}>
-    <View testID="entry-details-overlay" style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8, paddingHorizontal: Math.max(insets.left, insets.right, 8), backgroundColor: "rgba(0,0,0,0.62)" }}>
-      <View testID="entry-details-sheet" {...pan.panHandlers} pointerEvents={closing ? "none" : "auto"} onAccessibilityEscape={dismiss} style={[s.sheet, { borderColor: pending ? "#FF8C00" : entry.color || "#4A80BD" }]}>
+    <View testID="entry-details-overlay" style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8, paddingHorizontal: Math.max(insets.left, insets.right, 8), backgroundColor: "#0e0e10" }}>
+      <GoScreenCloseSurface testID="entry-details-sheet" handedness={handedness} enabled={!closing} onClose={dismiss} scrollRefs={[scroll]} pointerEvents={closing ? "none" : "auto"} onAccessibilityEscape={dismiss} style={[s.sheet, { borderColor: pending ? "#FF8C00" : entry.color || "#4A80BD" }]}>
         <View testID="entry-details-gesture-body" style={{ flex: 1, minHeight: 0 }}>
         <View testID="entry-detail-close-gesture" style={{ height: ENTRY_DETAIL_CLOSE.headerHeight, alignItems: "center", justifyContent: "center" }}><View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.35)" }} /></View>
         <ScrollView ref={scroll} testID="entry-details-scroll" style={{ flex: 1 }} onLayout={event => { const { y, height } = event.nativeEvent.layout; setNavigationGeometry(value => ({ ...value, y, height })); }} onScroll={event => setNavigationGeometry(value => ({ ...value, offset: event.nativeEvent.contentOffset.y }))} scrollEventThrottle={32} keyboardShouldPersistTaps="handled" bounces={false} alwaysBounceVertical={false} overScrollMode="never" directionalLockEnabled contentContainerStyle={{ flexGrow:1, paddingHorizontal: 18, paddingBottom: 12, gap: 12 }}>
@@ -210,7 +189,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
           {children}
           </View>
         </ScrollView>
-        <CalendarCloseGuide handedness={handedness} testID="entry-detail-swipe-guide" />
+        <GoScreenCloseGuide testID="entry-detail-swipe-guide" />
         </View>
         {/* Preserve the original 66-point footer; overlays never participate in layout. */}
         <View testID="entry-detail-close-footer" pointerEvents="none" style={{ flexShrink: 0, height: 66, flexDirection: "row", justifyContent: handedness === "left" ? "flex-start" : "flex-end", paddingHorizontal: 6, paddingTop: 4, paddingBottom: 6 }} />
@@ -218,7 +197,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
           <GoCloseButton level="panel" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Close details" : "Cerrar detalle"} onPress={dismiss} />
           {onGoToLanding && <GoCloseButton level="container" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Go directly to Landing" : "Ir directamente al Landing"} onPress={onGoToLanding} />}
         </View>
-      </View>
+      </GoScreenCloseSurface>
       {renderMessageScreen?.()}
     </View>
   </Modal>;

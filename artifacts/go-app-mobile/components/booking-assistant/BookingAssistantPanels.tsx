@@ -32,8 +32,9 @@ export function BookingAssistantPanels({
   saving,
   onClosePanel,
   attach,
-  viewReservation,
+  viewReservation, scrollRef,
 }: {
+  scrollRef?: React.Ref<React.ElementRef<typeof ScrollView>>;
   a: Assistant;
   go: ReturnType<typeof useGoActions>;
   bottom: number;
@@ -74,7 +75,7 @@ export function BookingAssistantPanels({
         <View style={s.sheetHeader}>
           <Text style={a.panel === "zone" ? z.sectionTitle : s.sectionTitle}>{title}</Text>
         </View>
-        <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+        <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
           {a.panel === "menu" && (
             <>
               <Action text="Nueva conversación" onPress={a.reset} />
