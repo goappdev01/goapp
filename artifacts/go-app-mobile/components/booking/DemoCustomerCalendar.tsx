@@ -7,7 +7,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import type { DemoBookingRepository } from "@/data/demoBookingRepository";
 
 /** Customer projection of the owner-local repository; never mounted with the personal agenda hooks. */
-export function DemoCustomerCalendar({ repository, focus, onPersonal, entries: suppliedEntries, onProposeChange, onAcceptProposal, onRejectProposal, onOpenMessage,onResolveEntry,canResolveEntry,handedness }: {
+export function DemoCustomerCalendar({ repository, focus, scrollToTodayToken, onPersonal, entries: suppliedEntries, onProposeChange, onAcceptProposal, onRejectProposal, onOpenMessage,onResolveEntry,canResolveEntry,handedness }: {
   onOpenMessage?: (entry:GoEntry,returnTo?:()=>void)=>void;
   onResolveEntry?: (entry:GoEntry,status:"done"|"pending"|"discard",current?:()=>GoEntry|undefined)=>void;
   canResolveEntry?: (entry:GoEntry)=>boolean;
@@ -18,6 +18,7 @@ export function DemoCustomerCalendar({ repository, focus, onPersonal, entries: s
   onAcceptProposal?: (id:string)=>void;
   onRejectProposal?: (id:string)=>void;
   focus?: { dateISO: string; timeHHMM: string; entryId: string; token: number };
+  scrollToTodayToken?: number;
   onPersonal: () => void;
 }) {
   const { lang } = useLanguage();
@@ -50,7 +51,7 @@ export function DemoCustomerCalendar({ repository, focus, onPersonal, entries: s
       </View>
     </View>
     <AgendaBoard onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} goLog={suppliedEntries ?? entries} embedded viewMode={view} calViewMonth={month} showHours density="30min"
-      selectedDateISO={focus?.dateISO} scrollToDateToken={focus} highlightEntryId={focus?.entryId}
+      selectedDateISO={focus?.dateISO} scrollToTodayToken={scrollToTodayToken} scrollToDateToken={focus} highlightEntryId={focus?.entryId}
       onChangeMonth={direction => { const [year, value] = month.split("-").map(Number); const date = new Date(year, value - 1 + direction, 1, 12); setMonth(String(date.getFullYear()) + "-" + String(date.getMonth() + 1).padStart(2, "0")); }}
       onDeleteItem={id=>Alert.alert("GO",lang==="en"?"Cancel this reservation?":"¿Cancelar esta reserva?",[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Cancel reservation":"Cancelar reserva",style:"destructive",onPress:()=>void cancel(id)}])} onProposeItem={id=>{const entry=(suppliedEntries ?? entries).find(e=>e.id===id);if(entry)onProposeChange?.(entry);}}
       onAcceptProposal={onAcceptProposal} onRejectProposal={onRejectProposal} onProposeProposal={id=>{const entry=(suppliedEntries ?? entries).find(e=>e.id===id);if(entry)onProposeChange?.(entry);}} />

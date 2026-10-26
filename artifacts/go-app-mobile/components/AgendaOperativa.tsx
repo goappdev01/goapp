@@ -2694,7 +2694,7 @@ export function AgendaBoard({
       {/* One foreground detail for the same reservation or task. Calendar stays mounted. */}
       <GoEntryDetailsSheet handedness={handedness} entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}
         onClose={() => { setExpandedBookingItem(null); setExpandedCardId(null); }}
-        onMessage={expandedBookingItem && onOpenMessage ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);setExpandedCardId(null);setTimeout(()=>handleOpenMessage(item),180); } : undefined}
+        onMessage={expandedBookingItem && onOpenMessage ? () => handleOpenMessage(expandedBookingItem) : undefined}
         >
         {expandedBookingItem && <>
           {onResolveEntry && canResolveEntry?.(expandedBookingItem) && <GoEntryMicroActions entry={expandedBookingItem}

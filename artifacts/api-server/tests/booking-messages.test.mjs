@@ -10,7 +10,9 @@ const id='11111111-1111-4111-8111-111111111111',messageId='22222222-2222-4222-82
 function fixture(){
  const handlers=new Map(),calls=[];let upstream=Response.json([]);
  const router={get:(p,h)=>handlers.set('GET '+p,h),post:(p,h)=>handlers.set('POST '+p,h)};
- vm.runInNewContext(source,{exports:{},require(name){if(name==='express')return{Router:()=>router};if(name==='../lib/supabase')return{bearerHeader:v=>v?.startsWith('Bearer ')?{Authorization:v}:{},supabaseRequest:async(...args)=>{calls.push(args);if(upstream instanceof Error)throw upstream;return upstream;}};return require(name);}});
+ const supabase={bearerHeader:v=>v?.startsWith('Bearer ')?{Authorization:v}:{},supabaseRequest:async(...args)=>{calls.push(args);if(upstream instanceof Error)throw upstream;return upstream;}};
+ const policy={};vm.runInNewContext(ts.transpileModule(readFileSync('src/lib/bookingGapPolicy.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:policy,require:name=>name==='./supabase'?supabase:require(name)});
+ vm.runInNewContext(source,{exports:{},require(name){if(name==='express')return{Router:()=>router};if(name==='../lib/supabase')return supabase;if(name==='../lib/bookingGapPolicy')return policy;return require(name);}});
  return{calls,reply:r=>{upstream=r;},async request(method,{auth='Bearer fictional',body,query={},bookingId=id}={}){
   const result={status:200};const res={setHeader(){},status:n=>{result.status=n;return res;},type:()=>res,send:v=>{result.body=JSON.parse(v);return res;},json:v=>{result.body=v;return res;}};
   await handlers.get(method==='GET'?'GET /booking-conversations':'POST /bookings/:bookingId/messages')({header:()=>auth,query,params:{bookingId},body},res);return result;

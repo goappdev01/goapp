@@ -64,6 +64,7 @@ export type GoConversation = {
 type MessagesScreenProps = {
   visible: boolean;
   onClose: () => void;
+  onDismiss?: () => void;
   recentContacts: { name: string; phone: string }[];
   userGoPhone: string;
   onCreateGo: (params: {
@@ -249,7 +250,7 @@ function ChannelBadge({ isGoUser }: { isGoUser: boolean }) {
 
 export function MessagesScreen({
   visible,
-  onClose,
+  onClose, onDismiss,
   recentContacts,
   userGoPhone,
   onCreateGo,
@@ -259,6 +260,9 @@ export function MessagesScreen({
 }: MessagesScreenProps) {
   const insets = useSafeAreaInsets();
   const { lang, t } = useLanguage();
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+  useEffect(() => { if (!visible && Platform.OS !== "ios") onDismissRef.current?.(); }, [visible]);
   const yesterdayLabel = lang === "en" ? "Yesterday" : "Ayer";
   const ft = (ts: number) => formatTime(ts, lang, yesterdayLabel);
   const [conversations, setConversations] = useState<GoConversation[]>([]);
@@ -517,7 +521,7 @@ export function MessagesScreen({
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose} onDismiss={onDismiss}>
       <View style={[s.root, { paddingTop: insets.top }]}>
         {/* Pure black background — no blue gradient */}
         <View style={[StyleSheet.absoluteFill, { backgroundColor: C.bg }]} pointerEvents="none" />

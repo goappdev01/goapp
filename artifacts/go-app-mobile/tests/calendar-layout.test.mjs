@@ -130,6 +130,11 @@ test('Pending cards keep one closed line; personal tasks have no false chat and 
   assert.equal(message.props.accessibilityRole, 'button');
   assert.ok(texts(message).includes('MENSAJE GO'));
   message.props.onPress();
+  assert.equal(opened.length, 0, "Communication waits for dismissal commit, not a guessed timeout");
+  tree = app.render(AgendaBoard, sharedProps);
+  const dismissing = nodes(tree, n => n.props.testID === "entry-details-modal")[0];
+  assert.equal(dismissing.props.visible, false);
+  dismissing.props.onDismiss();
   app.runTimers();
   assert.equal(opened.length, 1); assert.equal(opened[0], shared);
   assert.equal(opened[0].sharedChatId, 'existing-shared-chat');

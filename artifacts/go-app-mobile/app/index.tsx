@@ -13617,12 +13617,17 @@ function HomeScreenContent() {
     } : undefined}
     onReject={() => { if (entry.changeProposal) rejectProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "rechazado"); }} />;
 
+  const finishEntryMessageReturn = () => {
+    setInitialMessagesContact(null); setInitialMessagesBookingId(null); setInitialMessagesContext(null);
+    const back = messageReturnRef.current; messageReturnRef.current = null; back?.();
+  };
+
   const openEntryMessage = (entry: GoEntry,returnTo?:()=>void) => {
     const context=entryMessageContext(entry);if(!context)return;
     messageReturnRef.current=returnTo??(()=>setLandingDetailsId(entry.id));
     setLandingDetailsId(null);setInitialMessagesContext(context);
     setInitialMessagesBookingId(context.bookingId??null);setInitialMessagesContact(null);
-    setTimeout(()=>setMessagesOpen(true),180);
+    setMessagesOpen(true);
   };
 
   const buildNextAptActions = (g: typeof goLog[number]) => {
@@ -14210,6 +14215,45 @@ function HomeScreenContent() {
       </View>
     );
   }
+
+  const messagesScreen = (<MessagesScreen
+        visible={messagesOpen}
+        onClose={() => setMessagesOpen(false)}
+        onDismiss={finishEntryMessageReturn}
+        recentContacts={recentContacts}
+        userGoPhone={userGoPhone}
+        initialContact={initialMessagesContact ?? undefined}
+        initialBookingId={initialMessagesBookingId ?? undefined} initialContext={initialMessagesContext??undefined}
+        onCreateGo={({ contactName: cName, contactPhone: cPhone, contextText }) => {
+          messageReturnRef.current = null;
+          setMessagesOpen(false);
+          setContactName(cName);
+          setPhone(cPhone);
+          setAiDraft(contextText);
+          setTimeout(() => setAiOpen(true), 350);
+        }}
+        onPickDeviceContact={async () => {
+          try {
+            if (Platform.OS === "ios" || Platform.OS === "android") {
+              const { status } = await Contacts.requestPermissionsAsync();
+              if (status !== "granted") {
+                showToast(t('toast_contacts_permission_denied'));
+                return null;
+              }
+              const picked = await Contacts.presentContactPickerAsync();
+              if (!picked) return null;
+              const name = (picked.name || "").trim();
+              const phone = String((picked.phoneNumbers && picked.phoneNumbers[0]?.number) || "").replace(/[^\d+]/g, "");
+              if (!phone) return null;
+              await persistRecent(name, phone);
+              return { name, phone };
+            }
+            return null;
+          } catch {
+            return null;
+          }
+        }}
+      />);
 
   return (
     <>
@@ -20080,7 +20124,7 @@ function HomeScreenContent() {
             {/* AgendaBoard shares the existing view/settings header with month navigation. */}
             <View testID="calendar-agenda-viewport" style={{ flex: 1 }}>
             {demoCustomerCalendarSelected ? (demoBookingRepository
-              ? <View style={{ flex: 1 }}><DemoCustomerCalendar onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
+              ? <View style={{ flex: 1 }}><DemoCustomerCalendar scrollToTodayToken={calScrollToTodayToken} onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
               : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
                 renderHeader={monthNavigation => (<View testID="calendar-header"
               pointerEvents={showBookingFromCal ? "none" : "auto"}
@@ -20298,7 +20342,7 @@ function HomeScreenContent() {
           </View>}
 
           {/* ── ZONA INFERIOR — Selector de fecha/hora/duración ──────────── */}
-          {demoCustomerCalendarSelected ? <View style={{paddingHorizontal:16,paddingBottom:Math.max(insets.bottom,12),paddingTop:8,backgroundColor:"#0e0e14"}}><TouchableOpacity testID="calendar-new-reservation" accessibilityRole="button" accessibilityLabel={lang === "en" ? "NEW RESERVATION" : "NUEVA RESERVA"} activeOpacity={0.65} onPress={() => { setDemoInitialBusinessId(undefined); setShowBookingFromCal(true); }} style={{alignSelf:"center",width:"66%",minWidth:160,maxWidth:240,minHeight:44,paddingHorizontal:16,paddingVertical:12,borderWidth:2,borderColor:"#FFD700",borderRadius:12,backgroundColor:"#18180e",alignItems:"center",justifyContent:"center"}}><Text numberOfLines={1} adjustsFontSizeToFit style={{color:"#FFD700",fontWeight:"800",fontSize:13,textAlign:"center"}}>{lang === "en" ? "NEW RESERVATION" : "NUEVA RESERVA"}</Text></TouchableOpacity></View> : (<Pressable
+          <Pressable
             style={[styles.sheet, { paddingBottom: isBusinessMode ? Math.max(paddingBottom - 22, 2) : Math.max(paddingBottom - 10, 0) }]}
             onPress={(e) => e.stopPropagation()}
             onLayout={(e) => {
@@ -20359,6 +20403,10 @@ function HomeScreenContent() {
               <TouchableOpacity
                 onPress={() => {
                   Haptics.selectionAsync();
+                  if (demoCustomerCalendarSelected) {
+                    const now = getNow();
+                    setDemoCalendarFocus({ dateISO: formatISODate(getToday()), timeHHMM: String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0"), entryId: "", token: Date.now() });
+                  }
                   setCalScrollToTodayToken((t) => t + 1);
                 }}
                 activeOpacity={0.7}
@@ -20704,7 +20752,8 @@ function HomeScreenContent() {
               </>
             )}
 
-          </Pressable>)}
+          </Pressable>
+          {calOpen && messagesScreen}
 
         {/* ── MONTH GRID BOTTOM SHEET — slide up desde abajo ─────────────
             Se monta dentro del mismo Modal del calendario para heredar
@@ -24261,42 +24310,7 @@ function HomeScreenContent() {
       />
 
       {/* MENSAJES GO — pantalla de mensajería interna */}
-      <MessagesScreen
-        visible={messagesOpen}
-        onClose={() => { setMessagesOpen(false); setInitialMessagesContact(null); setInitialMessagesBookingId(null);setInitialMessagesContext(null);const back=messageReturnRef.current;messageReturnRef.current=null;if(back)setTimeout(back,180); }}
-        recentContacts={recentContacts}
-        userGoPhone={userGoPhone}
-        initialContact={initialMessagesContact ?? undefined}
-        initialBookingId={initialMessagesBookingId ?? undefined} initialContext={initialMessagesContext??undefined}
-        onCreateGo={({ contactName: cName, contactPhone: cPhone, contextText }) => {
-          setMessagesOpen(false);
-          setContactName(cName);
-          setPhone(cPhone);
-          setAiDraft(contextText);
-          setTimeout(() => setAiOpen(true), 350);
-        }}
-        onPickDeviceContact={async () => {
-          try {
-            if (Platform.OS === "ios" || Platform.OS === "android") {
-              const { status } = await Contacts.requestPermissionsAsync();
-              if (status !== "granted") {
-                showToast(t('toast_contacts_permission_denied'));
-                return null;
-              }
-              const picked = await Contacts.presentContactPickerAsync();
-              if (!picked) return null;
-              const name = (picked.name || "").trim();
-              const phone = String((picked.phoneNumbers && picked.phoneNumbers[0]?.number) || "").replace(/[^\d+]/g, "");
-              if (!phone) return null;
-              await persistRecent(name, phone);
-              return { name, phone };
-            }
-            return null;
-          } catch {
-            return null;
-          }
-        }}
-      />
+      {!calOpen && messagesScreen}
 
       {/* AI INPUT MODAL — bloque compacto pegado al teclado, sin huecos.
           Input multilinea que crece HACIA ARRIBA según se escribe (la

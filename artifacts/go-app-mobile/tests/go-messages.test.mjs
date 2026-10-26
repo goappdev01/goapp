@@ -4,9 +4,9 @@ import lifecycle from './helpers/react-lifecycle.cjs';
 const {React,createRoot,document,evaluate,rn,native}=lifecycle;
 const bookingId='11111111-1111-4111-8111-111111111111';
 const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<20;i++)await Promise.resolve();});
-async function fixture({initial=true,context,offline=false,account='customer'}={}){
+async function fixture({initial=true,context,offline=false,account='customer',platform='ios'}={}){
  const memory=new Map(),storage={getItem:async k=>memory.get(k)??null,setItem:async(k,v)=>{memory.set(k,v);},removeItem:async k=>{memory.delete(k);}};
- let owner=account,fail=offline,loseResponse=false,sending=0,attempts=0,closed=0;const records=[],events=new Set(),inputs=[],buttons=[];
+ let owner=account,fail=offline,loseResponse=false,sending=0,attempts=0,closed=0;const records=[],events=new Set(),inputs=[],buttons=[];let modalProps,dismissed=0;
  const thread=()=>({id:'booking:'+bookingId,bookingId,businessId:'salon',counterpartId:owner==='customer'?'business-owner':'customer',contactName:owner==='customer'?'Registered salon':'Registered customer',lastUpdated:1,messages:records.map(x=>({...x,senderId:x.sender===owner?'yo':x.sender})),unread:0});
  const booking={getAuthenticatedUserId:async()=>owner,supabaseApiRequest:async(path,init={},required,expected)=>{
   assert.equal(required,true);assert.equal(expected,owner);if(fail)throw new Error('Servidor no disponible');
@@ -28,7 +28,7 @@ async function fixture({initial=true,context,offline=false,account='customer'}={
   'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34})},
   'react-native-gesture-handler':{Gesture:{Pan:()=>chain},GestureDetector:({children})=>children},
   'react-native-reanimated':{__esModule:true,default:{View},useSharedValue:v=>React.useRef({value:v}).current,useAnimatedStyle:fn=>fn(),withSpring:v=>v},
-  'react-native':{...rn,View,Text:native('Text'),Platform:{OS:'ios'},Modal:({visible,children})=>visible?children:null,
+  'react-native':{...rn,View,Text:native('Text'),Platform:{OS:platform},Modal:props=>{modalProps=props;return props.visible?props.children:null;},
    Dimensions:{get:()=>({width:390,height:844})},Easing:{out:x=>x,cubic:0},PanResponder:{create:()=>({panHandlers:{}})},
    Animated:{Value,View,spring:()=>motion,timing:()=>motion},ScrollView:View,KeyboardAvoidingView:View,
    FlatList:props=>React.createElement(View,null,(props.data||[]).map((item,index)=>React.createElement(React.Fragment,{key:item.id},props.renderItem({item,index})))),
@@ -36,12 +36,12 @@ async function fixture({initial=true,context,offline=false,account='customer'}={
    TouchableOpacity:props=>{buttons.push({...props,label:props.accessibilityLabel||text(props.children)});return React.createElement('button',null,props.children);},
   },
  });
- let initialBookingId=initial?bookingId:undefined;const container=document.createElement('div'),root=createRoot(container);
- const render=()=>{inputs.length=0;buttons.length=0;root.render(React.createElement(screen.MessagesScreen,{visible:true,onClose(){closed++;},recentContacts:[],userGoPhone:'',onCreateGo(){},onPickDeviceContact:async()=>null,initialBookingId,initialContext:context}));};
+ let shown=true,initialBookingId=initial?bookingId:undefined;const container=document.createElement('div'),root=createRoot(container);
+ const render=()=>{inputs.length=0;buttons.length=0;root.render(React.createElement(screen.MessagesScreen,{visible:shown,onClose(){closed++;},onDismiss(){dismissed++;},recentContacts:[],userGoPhone:'',onCreateGo(){},onPickDeviceContact:async()=>null,initialBookingId,initialContext:context}));};
  await settle(render);
  const input=()=>inputs.findLast(p=>p.placeholder==='Escribe un mensaje...');
  const send=()=>buttons.findLast(p=>p.label==='msg_send_btn');
- return{memory,records,container,data,get closed(){return closed;},get attempts(){return attempts;},get input(){return input();},get send(){return send();},
+ return{memory,records,container,data,get dismissed(){return dismissed;},async hide(){shown=false;await settle(render);},async nativeDismiss(){await settle(()=>modalProps.onDismiss());},get closed(){return closed;},get attempts(){return attempts;},get input(){return input();},get send(){return send();},
   async type(value){await settle(()=>input().onChangeText(value));},async submit(){await settle(()=>send().onPress());},
   async double(){await settle(()=>Promise.all([send().onPress(),send().onPress()]));},fail(v){fail=v;},lose(){loseResponse=true;},
   async account(next){await settle(()=>{owner=next;for(const fn of events)fn();});},
@@ -82,4 +82,8 @@ test('a shared task without an authenticated server relationship preserves its d
   await f.type('Do not simulate delivery');await f.submit();assert.equal(f.records.length,0);assert.equal(f.attempts,0);assert.equal(f.input.value,'Do not simulate delivery');
   assert.ok(f.container.textContent.includes('vínculo de comunicación verificable'));assert.ok([...f.memory.values()].includes('Do not simulate delivery'));
  }finally{await f.close();}
+});
+
+for(const platform of ['ios','android'])test(platform+': returning to a reservation waits for native Communication dismissal',async()=>{
+ const f=await fixture({platform,context});try{assert.ok(f.input);await f.type('Keep the reservation draft');await f.back();assert.equal(f.dismissed,0);await f.hide();if(platform==='ios'){assert.equal(f.dismissed,0);await f.nativeDismiss();}assert.equal(f.dismissed,1);assert.equal(f.records.length,0);assert.ok([...f.memory.values()].includes('Keep the reservation draft'));}finally{await f.close();}
 });

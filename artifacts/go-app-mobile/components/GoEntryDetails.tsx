@@ -134,13 +134,17 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, handedness = "right"
   const [closing, setClosing] = useState(false);
   const phase = useRef<"open" | "dismissing" | "closed">("open");
   const touch = useRef<{ identifier: string | number; timestamp: number; x: number; y: number; granted: boolean } | null>(null);
-  const live = useRef({ onClose, handedness, headerBottom: 0 });
-  live.current = { onClose, handedness, headerBottom: insets.top + 8 + ENTRY_DETAIL_CLOSE.headerHeight };
+  const messageAfterDismiss = useRef(false);
+  const live = useRef({ onClose, onMessage, handedness, headerBottom: 0 });
+  live.current = { onClose, onMessage, handedness, headerBottom: insets.top + 8 + ENTRY_DETAIL_CLOSE.headerHeight };
   const finishDismiss = useCallback(() => {
     if (phase.current !== "dismissing") return;
     phase.current = "closed";
     // iOS has now removed the native touch-blocking modal before selection/navigation changes.
+    const message = messageAfterDismiss.current ? live.current.onMessage : undefined;
+    messageAfterDismiss.current = false;
     live.current.onClose();
+    message?.();
   }, []);
   const dismiss = useCallback(() => {
     if (phase.current !== "open") return;
@@ -212,7 +216,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, handedness = "right"
           </View>}
           <View testID="entry-details-actions" style={{marginTop:"auto",paddingTop:12,gap:12}}>
           <GoEntryCommunication entry={entry} />
-          {onMessage&&!entryIsInternal(entry)&&<TouchableOpacity testID="entry-message-go" accessibilityRole="button" accessibilityLabel="MENSAJE GO" onPress={onMessage}
+          {onMessage&&!entryIsInternal(entry)&&<TouchableOpacity testID="entry-message-go" accessibilityRole="button" accessibilityLabel="MENSAJE GO" onPress={() => { if (phase.current !== "open") return; messageAfterDismiss.current = true; dismiss(); }}
             style={{alignSelf:handedness==="left"?"flex-start":"flex-end",minHeight:44,paddingHorizontal:14,paddingVertical:10,borderWidth:1,borderRadius:10,borderColor:"#93c5fd"}}>
             <Text numberOfLines={1} style={{color:"#93c5fd",fontWeight:"700",fontSize:12}}>MENSAJE GO</Text>
           </TouchableOpacity>}

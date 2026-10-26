@@ -38,11 +38,15 @@ test('EMPRESA fits the real Inter glyphs in all three diameters, without moving 
   assert.equal(vm.runInNewContext(attr(label,'maxFontSizeMultiplier').expression.getText(ast),scope),1);
  }
 });
-test('NUEVA RESERVA is a bounded yellow button with press feedback and the same booking route',()=>{
- const button=byId(ast,'calendar-new-reservation'),calls=[],scope={exports:{},React,TouchableOpacity:'TouchableOpacity',Text:'Text',lang:'es',setDemoInitialBusinessId:value=>calls.push(['business',value]),setShowBookingFromCal:value=>calls.push(['open',value])};
- assert.ok(button);vm.runInNewContext(compile('exports.button=('+button.getText(ast)+');'),scope);const b=scope.exports.button;
- assert.equal(text(b),'NUEVA RESERVA');assert.equal(b.props.style.borderColor,'#FFD700');assert.equal(b.props.style.width,'66%');assert.ok(b.props.style.maxWidth<=240);assert.ok(b.props.style.minHeight>=44);assert.ok(b.props.activeOpacity<1);b.props.onPress();assert.deepEqual(calls,[['business',undefined],['open',true]]);
+test('Calendar retains the original named RESERVAR button and route, without a replacement control',()=>{
+ const button=find(ast,n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='TouchableOpacity'&&attr(n,'accessibilityLabel')?.getText(ast)==='{t("biz_book_btn")}');
+ const calls=[],scope={exports:{},React,TouchableOpacity:'TouchableOpacity',Text:'Text',t:()=> 'Reservar',Haptics:{impactAsync:async()=>{},ImpactFeedbackStyle:{Medium:1,Heavy:2}},setShowBookingFromCal:value=>calls.push(['open',value]),setDiagBookingOpen:value=>calls.push(['diagnostic',value])};
+ assert.ok(button);assert.ok(byId(ast,'calendar-actions'));assert.equal(byId(ast,'calendar-new-reservation'),undefined);
+ vm.runInNewContext(compile('exports.button=('+button.getText(ast)+');'),scope);const b=scope.exports.button;
+ assert.equal(text(b),'RESERVAR');assert.equal(b.props.style.borderColor,'#F8DF8B');assert.equal(b.props.style.height,52);assert.ok(b.props.style.maxWidth<=180);assert.ok(b.props.activeOpacity<1);
+ b.props.onPress();b.props.onLongPress();assert.deepEqual(calls,[['open',true],['diagnostic',true]]);
 });
+
 test('Belleza retains the original first cell and equal three-column width as more categories become public',()=>{
  const f=fixture(),sectors=f.load('data/goSectorData.ts').SECTORS,booking=fs.readFileSync('components/booking/BookingSearchOverlay.tsx','utf8'),tree=ts.createSourceFile('booking.tsx',booking,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
  const grid=find(tree,n=>ts.isJsxElement(n)&&attr(n,'style')?.expression?.getText(tree)==='s.categoryGrid'&&n.getText(tree).includes('booking-category-row'));
