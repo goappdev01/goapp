@@ -40,8 +40,8 @@ export function completionDecisionLayout(width:number,fontScale=1){
  return {columns,side:Math.max(44,Math.min(104*scale,(width-8*(columns-1))/columns))};
 }
 /** This is a separate absolute information layer. It never participates in orbital/card layout. */
-export function LandingActionCompletion({model,frame,onPropose,onPendingList,lang="es",availableWidth,anchorAbove=false}:{
- model:Model;frame:CompletionFrame;onPropose:(e:CompletionEntry)=>void;onPendingList:()=>void;lang?:string;availableWidth?:number;anchorAbove?:boolean;
+export function LandingActionCompletion({model,frame,onPropose,onPendingList,lang="es",availableWidth,anchorAbove=false,onCompactHeight}:{
+ model:Model;frame:CompletionFrame;onPropose:(e:CompletionEntry)=>void;onPendingList:()=>void;lang?:string;availableWidth?:number;anchorAbove?:boolean;onCompactHeight?:(height:number)=>void;
 }){
  const insets=useSafeAreaInsets();
  const [tab,setTab]=useState<"unresolved"|"pending">("unresolved"),[settings,setSettings]=useState(false),[expanded,setExpanded]=useState(false);
@@ -55,7 +55,7 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
  useEffect(()=>{if(entry && model.doc)setActionHours(String((model.doc.records[completionKey(entry)]?.reminderMinutes ?? model.doc.preferences.reminderMinutes)/60));},[entry?.id,model.doc]);
  const document=model.doc;
  const position=anchorAbove?{bottom:"100%" as const,marginBottom:LANDING_COMPLETION_PANEL_GAP}:{top:frame.y};
- if(model.scope && model.error && !document)return <View pointerEvents="box-none" style={{position:"absolute",left:frame.x,...position,width:frame.width,zIndex:90}}>
+ if(model.scope && model.error && !document)return <View pointerEvents="box-none" onLayout={event=>{if(anchorAbove)onCompactHeight?.(event.nativeEvent.layout.height);}} style={{position:"absolute",left:frame.x,...position,width:frame.width,zIndex:90}}>
   <Text accessibilityLiveRegion="polite" style={{color:"#facc15",fontSize:12}}>{label("No se pudieron leer las confirmaciones. No se ha modificado ningún dato.","Confirmations could not be read. No data has been changed.")}</Text>
  </View>;
  if(!document || !model.scope || !model.unresolved.length && !model.pending.length && !model.savingCount && !model.failedDecisions?.length)return null;
@@ -121,7 +121,7 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
   {!!(model.error || model.feedback)&&<Text accessibilityLiveRegion="polite" style={{color:"#facc15",fontSize:12}}>{model.error || model.feedback}</Text>}
  </View>;
  return <>
-  <View testID="landing-action-completion" pointerEvents="box-none" style={{position:"absolute",left:frame.x,...position,width:frame.width,...(anchorAbove?{minHeight:44}:{height:Math.max(0,frame.height)}),zIndex:90}}>
+  <View testID="landing-action-completion" pointerEvents="box-none" onLayout={event=>{if(anchorAbove)onCompactHeight?.(event.nativeEvent.layout.height);}} style={{position:"absolute",left:frame.x,...position,width:frame.width,...(anchorAbove?{minHeight:44}:{height:Math.max(0,frame.height)}),zIndex:90}}>
    {compact?<TouchableOpacity accessibilityRole="button" style={{...button,minHeight:44,backgroundColor:"#141b29",borderColor:"#fb923c",borderWidth:1,borderRadius:12}}
      onPress={()=>setExpanded(true)}><Text style={text}>{label("Confirma tus acciones","Confirm your actions")} · {model.unresolved.length+model.pending.length}</Text></TouchableOpacity>
     :<ScrollView bounces={false} nestedScrollEnabled style={{maxHeight:frame.height,backgroundColor:"rgba(9,14,24,0.94)",borderRadius:14}} contentContainerStyle={{padding:8}}>{controls()}</ScrollView>}

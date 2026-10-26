@@ -19,12 +19,12 @@ const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<8;i++)awai
 const flatten=style=>Array.isArray(style)?Object.assign({},...style.map(flatten)):style??{};
 const profiles=['ADMIN','USER','BUSINESS'];
 
-test('visits/tasks and changes share static compact sizing and retain full detail navigation',()=>{
+test('visits/tasks and changes share bounded scroll sizing and retain full detail navigation',()=>{
  assert.ok(attribute(next,'adaptiveBody'));assert.ok(attribute(proposal,'adaptiveBody'),'changes now reuse the validated natural sizing path');
  const info=next.children.map(n=>n.getText(ast)).join('');
  for(const expression of ['{displayContact(entryIdentity(g.contactName), g.phone)}','{g.place}']){
   const text=nodes.find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='Text'&&n.pos>=next.pos&&n.end<=next.end&&n.children.some(child=>child.getText(ast)===expression));
-  assert.ok(text);assert.equal(attribute(text,'numberOfLines').getText(ast),'1');assert.equal(text.openingElement.attributes.properties.find(p=>p.name?.getText(ast)==='ellipsizeMode')?.initializer.getText(ast),'"tail"');
+  assert.ok(text);assert.equal(attribute(text,'numberOfLines'),undefined);assert.equal(text.openingElement.attributes.properties.find(p=>p.name?.getText(ast)==='ellipsizeMode'),undefined);
  }
  assert.ok(!info.includes('overflow: "hidden"'));assert.ok(!/isAdminView|isBusinessMode|isUserMode/.test(attribute(next,'adaptiveBody').getText(ast)));
  const frame=attribute(next,'bodyFrame').getText(ast);assert.ok(!frame.includes('flexShrink: 1'));assert.ok(!frame.includes('overflow: "hidden"'));
@@ -69,7 +69,7 @@ async function fixture(profile,{bodyHeight=40,availableHeight=348,scale=1,place=
 }
 
 for(const profile of profiles)for(const [label,height]of [['two lines',36],['three lines',56],['multiline location',68]])
- test(profile+' / '+label+': natural content has no scroller, fixed height or clipping',async()=>{
+ test(profile+' / '+label+': natural content remains intrinsic inside one bounded scroller',async()=>{
   const address=label==='multiline location'?'Calle de Murcia, número 18\nMolina de Segura\nMurcia':'Calle de Murcia';
   const f=await fixture(profile,{bodyHeight:height,place:address});try{
    const body=byId(f.container,'landing-card-body'),frame=byId(f.container,'landing-information-frame'),footer=byId(f.container,'landing-card-operations');
@@ -95,12 +95,12 @@ for(const profile of profiles)test(profile+': measured growth goes upward, contr
  }finally{await f.close()}
 });
 
-for(const profile of profiles)test(profile+': compact Landing never creates a vertical scroller, even as available height changes',async()=>{
+for(const profile of profiles)test(profile+': bounded Landing keeps one scroller as available height changes',async()=>{
  const f=await fixture(profile,{bodyHeight:700});try{
   const footer=byId(f.container,'landing-card-operations'),frame=byId(f.container,'landing-information-frame'),body=byId(f.container,'landing-card-body');
   assert.equal(body.attributes['data-native'],'View');assert.equal(JSON.parse(byId(f.container,'landing-card-fixed-frame').attributes['data-style']).maxHeight,undefined);assert.equal(JSON.parse(body.attributes['data-style']).maxHeight,undefined,'essential visit controls must not cross a constrained body frame');assert.ok(dom(frame).includes(body));assert.ok(!dom(body).includes(frame)&&!dom(body).includes(footer));
-  assert.equal(dom(f.container).filter(n=>n.attributes?.['data-native']==='ScrollView').length,0);
-  assert.equal(byId(f.container,'landing-card-operations'),footer);assert.equal(byId(f.container,'landing-information-frame'),frame);
+  assert.equal(dom(f.container).filter(n=>n.attributes?.['data-native']==='ScrollView').length,1);
+  assert.equal(byId(f.container,'landing-card-operations'),footer);assert.equal(byId(f.container,'landing-information-frame'),frame);assert.equal(JSON.parse(byId(f.container,'landing-panel-scroll').attributes['data-style']).maxHeight,f.state.availableHeight-Math.round(8*f.scale));
   await f.update({availableHeight:1000});assert.equal(byId(f.container,'landing-card-body').attributes['data-native'],'View');assert.equal(byId(f.container,'landing-card-operations'),footer);
   await f.update({bodyHeight:36,availableHeight:278});assert.equal(byId(f.container,'landing-card-body').attributes['data-native'],'View');
  }finally{await f.close()}
@@ -151,7 +151,7 @@ for(const [preset,scale]of [['compacto',.83],['estandar',1],['grande',1.12]])for
 
 test('all real Home cards reuse the same safe-space helper without changing shared orbit policy',()=>{
  const helper=fs.readFileSync('components/landing/landingPanels.ts','utf8');assert.ok(helper.includes('Math.max(insets.top, titleBottom)'));
- for(const name of ['nextCardSpace','changesCardSpace']){const node=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name);assert.ok(node);assert.ok(node.initializer.getText(ast).startsWith('landingAdaptivePanelSpace('));}
+ for(const name of ['nextCardSpace','changesCardSpace']){const node=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name);assert.ok(node);assert.ok(node.initializer.getText(ast).startsWith('landingScrollPanelSpace('));}
  const controls=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='landingHeaderControls').getText(ast);assert.ok(controls.includes('landingInlineHumanity ? [inlineHumanityRect] : []'));
  const viewport=fs.readFileSync('components/landing/LandingContentViewport.tsx','utf8');assert.ok(viewport.includes('flexShrink: adaptiveBody ? 0 : 1'));
  const api=evaluate('components/landing/landingPanels.ts');const bounds=api.landingAdaptivePanelSpace({panel:{x:18,y:133,width:354,height:280},frame:{virtual:false},insets:{top:47},titleBottom:65,controls:[{x:340,y:73,width:32,height:32}]});

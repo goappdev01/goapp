@@ -35,26 +35,26 @@ async function fixture({scale=1,profile='ADMIN',long=false,received=false}={}){
  const container=document.createElement('div'),root=createRoot(container);await settle(()=>root.render(React.createElement(Root)));return{container,propsById,texts,calls,g,async opened(v){await settle(()=>change(v))},async scroll(v){await settle(()=>propsById.get('drag')(v))},async close(){await settle(()=>root.unmount())}};
 }
 for(const profile of ['ADMIN','USER','BUSINESS'])for(const [preset,scale]of [['compacto',.83],['estandar',1],['grande',1.12],['enorme',1.35]])for(const received of [false,true])
- test(profile+' / '+preset+' / received='+received+': compact proposal retains its information and opens full detail without scrolling',async()=>{
+ test(profile+' / '+preset+' / received='+received+': compact proposal retains its information and opens full detail with a bounded shared scroller',async()=>{
  const f=await fixture({profile,scale,received});try{const body=byId(f.container,'landing-card-body'),frame=byId(f.container,'landing-information-frame'),operations=byId(f.container,'landing-card-operations');
  assert.equal(body.attributes['data-native'],'View');assert.ok(dom(frame).includes(body)&&!dom(body).includes(operations));
  const frameStyle=JSON.parse(frame.attributes['data-style']);assert.equal(frameStyle.flexShrink,0);assert.equal(frameStyle.overflow,undefined);assert.equal(frameStyle.height,undefined);assert.equal(frameStyle.maxHeight,undefined);
- for(const value of ['Contacto completo\nOtra línea','Servicio completo\nOtra línea',f.g.notes,f.g.changeProposal.note]){assert.ok(f.container.textContent.includes(value));assert.equal(f.texts.get(value)?.numberOfLines,1);}
+ for(const value of ['Contacto completo\nOtra línea','Servicio completo\nOtra línea',f.g.notes,f.g.changeProposal.note]){assert.ok(f.container.textContent.includes(value));assert.equal(f.texts.get(value)?.numberOfLines,undefined);}
  for(const value of ['Vie 16/10 · 14:00','Sáb 17/10 · 15:00'])assert.ok(f.container.textContent.includes(value));
- assert.equal(dom(f.container).filter(n=>n.attributes?.['data-native']==='ScrollView').length,0);
+ assert.equal(dom(f.container).filter(n=>n.attributes?.['data-native']==='ScrollView').length,1);
  const actions=byId(f.container,'entry-quick-actions');assert.ok(dom(frame).includes(actions));assert.ok(!dom(operations).includes(actions),'proposal state actions stay inside the orange border, separate from existing transport controls');
  const saved=operations.attributes['data-style'];await f.opened(false);assert.equal(byId(f.container,'landing-information-frame'),undefined);await f.opened(true);assert.equal(byId(f.container,'landing-card-operations').attributes['data-style'],saved);
  f.propsById.get('landing-proposal-card').onPress();assert.equal(f.calls.at(-1),'open-detail:'+f.g.id);
  }finally{await f.close()}
  });
-for(const profile of ['ADMIN','USER','BUSINESS'])test(profile+': long proposal remains a static compact card with fixed external operations',async()=>{
- const f=await fixture({profile,long:true});try{const body=byId(f.container,'landing-card-body'),frame=byId(f.container,'landing-information-frame'),operations=byId(f.container,'landing-card-operations');assert.equal(body.attributes['data-native'],'View');assert.ok(dom(frame).includes(body));assert.ok(!dom(frame).includes(operations));assert.equal(dom(f.container).filter(n=>n.attributes?.['data-native']==='ScrollView').length,0);assert.equal(JSON.parse(byId(f.container,'panel').attributes['data-style']).bottom,300);f.propsById.get('landing-proposal-card').onPress();assert.equal(f.calls.at(-1),'open-detail:'+f.g.id);}finally{await f.close()}
+for(const profile of ['ADMIN','USER','BUSINESS'])test(profile+': long proposal remains a bounded card with all related operations accessible',async()=>{
+ const f=await fixture({profile,long:true});try{const body=byId(f.container,'landing-card-body'),frame=byId(f.container,'landing-information-frame'),operations=byId(f.container,'landing-card-operations');assert.equal(body.attributes['data-native'],'View');assert.ok(dom(frame).includes(body));assert.ok(!dom(frame).includes(operations));assert.equal(dom(f.container).filter(n=>n.attributes?.['data-native']==='ScrollView').length,1);assert.equal(JSON.parse(byId(f.container,'panel').attributes['data-style']).bottom,300);f.propsById.get('landing-proposal-card').onPress();assert.equal(f.calls.at(-1),'open-detail:'+f.g.id);}finally{await f.close()}
 });
 test('visits and tasks retain one renderer; compact task description opens the full detail',()=>{
  assert.equal((source.match(/key="proxima-abs-block"/g)||[]).length,1);
  const task=all.find(n=>ts.isJsxElement(n)&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='testID'&&a.initializer?.getText(ast)==='"landing-task-description"'));assert.ok(task);
- for(const internal of [true,false])assert.equal(vm.runInNewContext(attr(task,'numberOfLines').getText(ast),{g:{},entryIsInternal:()=>internal}),internal?undefined:1,'only internal task titles may expand');
- assert.equal(task.openingElement.attributes.properties.find(p=>p.name?.getText(ast)==='ellipsizeMode')?.initializer.getText(ast),'"tail"');
+ assert.equal(attr(task,'numberOfLines'),undefined,'task text wraps inside the bounded viewport');
+ assert.equal(task.openingElement.attributes.properties.find(p=>p.name?.getText(ast)==='ellipsizeMode'),undefined);
  assert.ok(next.getText(ast).includes('g.type === "TAREA" || g.type === "TAREA_INTERNA"'));
  for(const card of cards){assert.ok(attr(card,'adaptiveBody'));const style=attr(card.parent,'style').getText(ast);assert.ok(!style.includes('maxHeight'));assert.ok(style.includes('bottom: contentBottom('));}
 });

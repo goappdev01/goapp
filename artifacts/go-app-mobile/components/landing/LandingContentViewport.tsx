@@ -1,5 +1,5 @@
 import React from "react";
-import { ScrollView, StyleSheet, View, type ScrollViewProps } from "react-native";
+import { Pressable, ScrollView, StyleSheet, View, type ScrollViewProps } from "react-native";
 import type { LegacyPanGesture as PanGesture } from "react-native-gesture-handler";
 import type { LandingFrame } from "./landingResponsiveLayout";
 
@@ -17,6 +17,10 @@ export function LandingContentViewport({ frame, children, offsetY = 0 }: {
 }
 
 type LandingCardProps = {
+  /** Bound the whole group, including its operations, inside the fixed Landing region. */
+  boundedHeight?: number;
+  scrollKey?: string;
+  onOpen?: () => void;
   /** Compact Landing cards open their complete information in the existing detail sheet. */
   staticBody?: boolean;
   /** Let essential proposal controls determine the frame height instead of crossing its border. */
@@ -68,7 +72,7 @@ export function LandingCompactBody({ primary, actions, secondary, gap = 3, verti
     <View testID="landing-compact-primary" style={{ gap, flexShrink: 0 }}
       onLayout={event => measure("primary", event.nativeEvent.layout.height)}>{primary}</View>
     {hasSecondary && <View testID="landing-compact-secondary" style={{ gap, flexShrink: 1, minHeight: 0,
-      maxHeight: remaining, overflow: "hidden" }}>
+      ...(Number.isFinite(remaining) ? { maxHeight: remaining, overflow: "hidden" as const } : {}) }}>
       {secondary.map((row, index) => <View key={row.key} testID={`landing-compact-row-${row.key}`}
         style={{ flexShrink: 0, ...((!row.content || measured && heights[row.key] > 0 && !visible[index]) ? { display: "none" as const } : {}) }}
         onLayout={event => measure(row.key, event.nativeEvent.layout.height)}>{row.content}</View>)}
@@ -80,6 +84,7 @@ export function LandingCompactBody({ primary, actions, secondary, gap = 3, verti
 
 /** Default consumers retain their existing fixed header/body/operations contract. */
 export function LandingCardContents(props: LandingCardProps) {
+  if (props.boundedHeight != null) return <BoundedLandingCardContents {...props} />;
   if (props.adaptiveBody) return <AdaptiveLandingCardContents {...props} />;
   const { overflowing, onHeight, contentContainerStyle, children } = props;
   const renderBody = () => {
@@ -91,6 +96,30 @@ export function LandingCardContents(props: LandingCardProps) {
         onContentSizeChange={(_width, height) => onHeight(height)}>{children}</ScrollView>;
   };
   return renderFixedCard(props, renderBody());
+}
+
+/** Native scrolling cancels presses; the contact guard also rejects a tap after a drag. */
+function BoundedLandingCardContents(props: LandingCardProps) {
+  const moved = React.useRef(false), start = React.useRef({ x: 0, y: 0 });
+  const maxHeight = Math.max(1, props.boundedHeight!);
+  const body = <View testID="landing-card-body" style={[props.contentContainerStyle, { flexShrink: 0 }]}
+    onLayout={event => props.onHeight(event.nativeEvent.layout.height)}>{props.children}</View>;
+  return <CompactBodySpace.Provider value={Infinity}>
+    <ScrollView key={props.scrollKey} testID="landing-panel-scroll"
+      style={{ maxHeight, flexGrow: 0, flexShrink: 1, minHeight: 0 }}
+      contentContainerStyle={{ flexGrow: 0 }} bounces={false} alwaysBounceVertical={false}
+      overScrollMode="never" directionalLockEnabled nestedScrollEnabled
+      showsVerticalScrollIndicator keyboardShouldPersistTaps="handled"
+      onTouchStartCapture={event => { start.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY }; moved.current = false; }}
+      onTouchMoveCapture={event => { if (Math.abs(event.nativeEvent.pageX - start.current.x) > 8 || Math.abs(event.nativeEvent.pageY - start.current.y) > 8) moved.current = true; }}
+      onScrollBeginDrag={() => { moved.current = true; }}
+      onMomentumScrollBegin={() => { moved.current = true; }}>
+      <Pressable testID="landing-panel-open" accessible={false}
+        onPress={event => { event?.stopPropagation(); if (!moved.current) props.onOpen?.(); }}>
+        {renderFixedCard({ ...props, staticBody: false }, body)}
+      </Pressable>
+    </ScrollView>
+  </CompactBodySpace.Provider>;
 }
 
 /** Uses actual native measurements, never a fixed number of text lines or guessed footer height. */

@@ -15,7 +15,7 @@ import { setInternalBookingContext, getBookingParticipantIdentity } from "@/data
 import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
 import { useActionCompletion } from "@/hooks/useActionCompletion";
-import { LandingActionCompletion, completionFrame, completionPanelFrame, type CompletionFrame } from "@/components/landing/LandingActionCompletion";
+import { LandingActionCompletion, completionFrame, completionPanelFrame, LANDING_COMPLETION_PANEL_GAP, type CompletionFrame } from "@/components/landing/LandingActionCompletion";
 import { ownedCompletionEntry, completionEligible, completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
 import { GoNoteReminderPicker } from "@/components/notes/GoNoteReminderPicker";
 import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, noteKeyboardContentHeight, type NoteReminderDraft } from "@/lib/goNoteTools";
@@ -129,7 +129,7 @@ import { entryHeading, entryIdentity, entryIsReservation, entryMessageContext, e
 import { changeTask } from "@/lib/goTaskManagement";
 import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands";
 import { redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
-import { splitLandingAppointments, landingPanelFrames, landingAdaptivePanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
+import { splitLandingAppointments, landingPanelFrames, landingScrollPanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
 import { fitLandingScale, landingPresetScale, landingDockBounds, landingContentFrame,
   landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES } from "@/components/landing/landingResponsiveLayout";
 import {
@@ -3513,6 +3513,7 @@ function HomeScreenContent() {
   const actionCompletion = useActionCompletion(completionEntries);
   const goLog=useMemo(()=>completionEntries.filter(entry=>!actionCompletion.isDiscarded(entry)),[completionEntries,actionCompletion.isDiscarded]);
   const [landingDetailsId, setLandingDetailsId] = useState<string | null>(null);
+  const [landingCompletionHeight, setLandingCompletionHeight] = useState(44);
   const landingDetailsEntry = goLog.find(entry => entry.id === landingDetailsId) ?? null;
   useEffect(() => { setLandingDetailsId(null); }, [goView.view, completionIdentity.scope?.userId, completionIdentity.scope?.context]);
   const [receivedDetailOpen, setReceivedDetailOpen] = useState(false);
@@ -13886,7 +13887,8 @@ function HomeScreenContent() {
         <TouchableOpacity
           key={a.k}
           activeOpacity={a.disabled ? 1 : 0.82}
-          onPress={() => {
+          onPress={(event) => {
+            event?.stopPropagation();
             if (a.disabled) return;
             Haptics.selectionAsync().catch(() => {});
             a.fn();
@@ -13971,7 +13973,8 @@ function HomeScreenContent() {
         <TouchableOpacity
           key={op.label}
           activeOpacity={0.65}
-          onPress={() => {
+          onPress={(event) => {
+            event?.stopPropagation();
             if (op.url) {
               Linking.openURL(op.url).catch(() => showToast(t('toast_link_error'), "error"));
             } else if (op.toast) {
@@ -14110,6 +14113,9 @@ function HomeScreenContent() {
     { x: closeQrX, y: closeQrY - landingOffsetY, width: closeQrSize, height: closeQrSize },
     ...(landingInlineHumanity ? [inlineHumanityRect] : []),
   ];
+  const landingHasCompletion = !!actionCompletion.scope && (!!actionCompletion.error && !actionCompletion.doc
+    || !!actionCompletion.doc && !!(actionCompletion.unresolved.length || actionCompletion.pending.length
+      || actionCompletion.savingCount || actionCompletion.failedDecisions?.length));
   const renderLandingHumanity = (placement: HumanityRect & { globe: number }) => (
         <TouchableOpacity
           activeOpacity={0.82}
@@ -14196,6 +14202,7 @@ function HomeScreenContent() {
     !anyOverlayOpen && !rutasMode && !goAuthOpen && authBootstrapComplete && <LandingActionCompletion
         model={actionCompletion} lang={lang} availableWidth={screen.width-insets.left-insets.right}
         frame={frame} anchorAbove={anchorAbove}
+        onCompactHeight={height => setLandingCompletionHeight(previous => previous === height ? previous : height)}
         onPendingList={()=>{setListFilter("pendiente");setListOpen(true);}}
         onPropose={entry=>{
           const scope=actionCompletion.scope;if(!scope || !actionCompletion.active(scope))return;
@@ -14706,8 +14713,9 @@ function HomeScreenContent() {
         const panelBottom = landingFrame.virtual
           ? landingFrame.baseline + landingFrame.height - landingPanels.changes.y - landingPanels.changes.height
           : screen.height - landingPanels.changes.y - landingPanels.changes.height;
-        const changesCardSpace = landingAdaptivePanelSpace({ panel: landingPanels.changes, frame: landingFrame,
-          insets, titleBottom: titleBottomLocalY ?? 0, controls: landingHeaderControls });
+        const changesCardSpace = landingScrollPanelSpace({ panel: landingPanels.changes, frame: landingFrame,
+          insets, titleBottom: titleBottomLocalY ?? 0, controls: closeHeaderObstacles, offsetY: landingOffsetY,
+          confirmationHeight: landingHasCompletion ? landingCompletionHeight : 0, confirmationGap: LANDING_COMPLETION_PANEL_GAP });
 
         // Resolver datos de visualización según tipo
         let cardAccent   = ACCENT;
@@ -14765,9 +14773,12 @@ function HomeScreenContent() {
 
 
             <LandingCardContents staticBody intrinsicBody={item.kind === "cambio"}
+              boundedHeight={Math.max(1, changesCardSpace.availableHeight - Math.round(8 * uiScaleFactor))}
+              scrollKey={item.kind === "cambio" ? item.g.id : item.booking.id}
+              onOpen={item.kind === "cambio" ? () => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); setLandingDetailsId(item.g.id); } : undefined}
               adaptiveBody={{ ...changesCardSpace, frameVerticalInset: 3 }}
               footer={item.kind === "cambio" && renderLandingOperations(item.g).content}
-              footerGap={Math.round(12 * uiScaleFactor)} overflowing={false} onHeight={() => {}}
+              footerGap={Math.round(8 * uiScaleFactor)} overflowing={false} onHeight={() => {}}
               contentContainerStyle={{ gap: Math.round(12 * uiScaleFactor) }}
               headerGap={Math.round(4 * uiScaleFactor)}
               bodyFrame={(body) => (
@@ -14819,7 +14830,7 @@ function HomeScreenContent() {
                     {total > 1 && (
                       <View style={{ flexDirection: "row", gap: 4, alignItems: "center", flexShrink: 0 }}>
                         <Text style={{ color: "rgba(255,255,255,0.22)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "600" }}>·</Text>
-                        {allPendientes.map((_, i) => (
+                        {allPendientes.map((_, i) => Math.abs(i - safeIdx) <= 2 && (
                           <View key={i} style={{
                             width:  i === safeIdx ? 8 : 5,
                             height: i === safeIdx ? 8 : 5,
@@ -14850,7 +14861,8 @@ function HomeScreenContent() {
                 disabled={item.kind !== "cambio"}
                 accessibilityRole={item.kind === "cambio" ? "button" : undefined}
                 accessibilityLabel="Abrir ficha completa"
-                onPress={() => {
+                onPress={(event) => {
+                  event?.stopPropagation();
                   if (item.kind !== "cambio") return;
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                   setLandingDetailsId(item.g.id);
@@ -14863,7 +14875,7 @@ function HomeScreenContent() {
                       <Feather name="calendar" size={Math.round(10 * uiScaleFactor)} color={cardAccent} />
                       <Text style={{ color: cardAccent, fontSize: Math.round(9 * uiScaleFactor), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4 }}>RESERVA PENDIENTE</Text>
                     </View>}
-                    <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: "#f3f3f3", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "700" }}>{cardTitle}</Text>
+                    <Text style={{ color: "#f3f3f3", fontSize: Math.round(13 * uiScaleFactor), fontWeight: "700" }}>{cardTitle}</Text>
                     {item.kind === "cambio" && <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                       {!!cardOrigDate && <Text numberOfLines={1} ellipsizeMode="tail" style={{ flexShrink: 1, minWidth: 0, color: "rgba(255,255,255,0.40)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "600", textDecorationLine: "line-through" }}>{cardOrigDate}</Text>}
                       {!!cardOrigDate && !!cardNewDate && <Feather name="arrow-right" size={Math.round(10 * uiScaleFactor)} color={ACCENT} />}
@@ -14872,9 +14884,9 @@ function HomeScreenContent() {
                     {item.kind === "hold" && !!cardDate && <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: BLUE, fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>{cardDate}</Text>}
                   </>}
                   secondary={[
-                    { key: "service", content: !!cardSub && cardSub !== cardTitle && <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: "#9a9a9a", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>{cardSub}</Text> },
-                    { key: "activity", content: item.kind === "cambio" && !!item.g.notes?.trim() && item.g.notes.trim() !== cardTitle && item.g.notes.trim() !== cardSub && <Text testID="landing-proposal-title-text" numberOfLines={1} ellipsizeMode="tail" style={{ color: "#f3f3f3", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>{item.g.notes}</Text> },
-                    { key: "proposal-note", content: item.kind === "cambio" && !!item.g.changeProposal?.note && <Text testID="landing-proposal-note" numberOfLines={1} ellipsizeMode="tail" style={{ color: "rgba(249,115,22,0.80)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>{item.g.changeProposal.note}</Text> },
+                    { key: "service", content: !!cardSub && cardSub !== cardTitle && <Text style={{ color: "#9a9a9a", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>{cardSub}</Text> },
+                    { key: "activity", content: item.kind === "cambio" && !!item.g.notes?.trim() && item.g.notes.trim() !== cardTitle && item.g.notes.trim() !== cardSub && <Text testID="landing-proposal-title-text" style={{ color: "#f3f3f3", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "700" }}>{item.g.notes}</Text> },
+                    { key: "proposal-note", content: item.kind === "cambio" && !!item.g.changeProposal?.note && <Text testID="landing-proposal-note" style={{ color: "rgba(249,115,22,0.80)", fontSize: Math.round(11 * uiScaleFactor), fontWeight: "500" }}>{item.g.changeProposal.note}</Text> },
                   ]}
                   actions={<>
 
@@ -14971,8 +14983,9 @@ function HomeScreenContent() {
         const panelSideStyle = { left: landingPanels.next.x };
         const PANEL_W = landingPanels.next.width;
         const INFO_W = PANEL_W;
-        const nextCardSpace = landingAdaptivePanelSpace({ panel: landingPanels.next, frame: landingFrame,
-          insets, titleBottom: titleBottomLocalY ?? 0, controls: landingHeaderControls });
+        const nextCardSpace = landingScrollPanelSpace({ panel: landingPanels.next, frame: landingFrame,
+          insets, titleBottom: titleBottomLocalY ?? 0, controls: closeHeaderObstacles, offsetY: landingOffsetY,
+          confirmationHeight: landingHasCompletion ? landingCompletionHeight : 0, confirmationGap: LANDING_COMPLETION_PANEL_GAP });
         const nextCardAvailableHeight = nextCardSpace.availableHeight;
         const headerObstacles = nextCardSpace.headerObstacles;
         const PANEL_ACTION_GAP = Math.round(12 * uiScaleFactor);
@@ -14990,6 +15003,7 @@ function HomeScreenContent() {
             key="proxima-abs-block"
             testID={entryIsReservation(g) ? "landing-next-visit" : entryIsInternal(g) ? "landing-task-group" : undefined}
             pointerEvents="box-none"
+            {...nextCardPanRef.panHandlers}
             onLayout={(e) => {
               const rect = e.nativeEvent.layout;
               setNextAptPanelH(rect.height);
@@ -15015,9 +15029,12 @@ function HomeScreenContent() {
             {entryIsReservation(g) && <LandingVisitOutline scale={uiScaleFactor} color={nextCardDeleteConfirm === g.id ? "#ef4444" : tint} />}
             {entryIsInternal(g) && <LandingEntryOutline testID="landing-task-outline" scale={uiScaleFactor} color={nextCardDeleteConfirm === g.id ? "#ef4444" : tint} />}
             <LandingCardContents staticBody intrinsicBody={entryIsInternal(g) || entryIsReservation(g)}
+              boundedHeight={Math.max(1, nextCardAvailableHeight - Math.round(8 * uiScaleFactor))}
+              scrollKey={g.id}
+              onOpen={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); setLandingDetailsId(g.id); }}
               adaptiveBody={{ availableHeight: nextCardAvailableHeight, frameVerticalInset: Math.round((entryIsInternal(g) || entryIsReservation(g) ? 6 : 10) * uiScaleFactor) + Math.round((entryIsInternal(g) ? 8 : 14) * uiScaleFactor) + 3, width: PANEL_W, headerObstacles }}
               footer={operations.content}
-              footerGap={PANEL_ACTION_GAP} overflowing={false} onHeight={() => {}}
+              footerGap={Math.round(8 * uiScaleFactor)} overflowing={false} onHeight={() => {}}
               contentContainerStyle={{ gap: PANEL_ACTION_GAP }}
               bodyFrame={(body) => (
               <Animated.View
@@ -15039,7 +15056,8 @@ function HomeScreenContent() {
               >
               <Pressable
                 testID="landing-information-frame"
-                onPress={() => {
+                onPress={(event) => {
+                  event?.stopPropagation();
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                   setLandingDetailsId(g.id);
                 }}
@@ -15090,8 +15108,6 @@ function HomeScreenContent() {
                   </Text>
                   <Text style={{ color: "rgba(255,255,255,0.30)", fontSize: 11, fontWeight: "600", flexShrink: 0 }}>·</Text>
                   <Text
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
                     style={{ color: tint, fontSize: Math.round(13 * uiScaleFactor), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.7, flexShrink: 1, minWidth: 0, maxWidth: "100%" }}
                   >
                     {cardLabel}
@@ -15185,7 +15201,7 @@ function HomeScreenContent() {
                 primary={<>
                   {(g.type === "TAREA" || g.type === "TAREA_INTERNA") && !!g.notes?.trim()
                     && g.notes.trim() !== displayContact(g.contactName, g.phone) && (
-                    <Text testID="landing-task-description" numberOfLines={entryIsInternal(g) ? undefined : 1} ellipsizeMode="tail" style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}>{g.notes}</Text>
+                    <Text testID="landing-task-description" style={{ color: "#f3f3f3", fontSize: Math.round(14 * uiScaleFactor), fontWeight: "700" }}>{g.notes}</Text>
                   )}
                   <View testID="landing-date-actions-row" style={{ flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0 }}>
                     <View accessibilityLabel={dateStr} style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -15215,13 +15231,13 @@ function HomeScreenContent() {
                 </>}
                 secondary={[
                   { key: "contact", content: !entryIsReservation(g) && !!displayContact(entryIdentity(g.contactName), g.phone) && (
-                    <Text numberOfLines={1} ellipsizeMode="tail"
+                    <Text
                       style={{ color: "#f3f3f3", fontSize: Math.round(13 * uiScaleFactor), fontFamily: "Inter_900Black", fontWeight: "900" }}>
                       {displayContact(entryIdentity(g.contactName), g.phone)}
                     </Text>
                   ) },
-                  { key: "professional", content: !!entryIdentity(g.professionalName) && <Text numberOfLines={1} ellipsizeMode="tail" style={{color:"#cfcfcf",fontSize:Math.round(11*uiScaleFactor)}}>{lang === "en" ? "Professional: " : "Profesional: "}{g.professionalName}</Text> },
-                  { key: "place", content: !!g.place && <Text numberOfLines={1} ellipsizeMode="tail" style={{ color: "#9a9a9a", fontSize: Math.round(12 * uiScaleFactor), fontWeight: "500" }}>{g.place}</Text> },
+                  { key: "professional", content: !!entryIdentity(g.professionalName) && <Text style={{color:"#cfcfcf",fontSize:Math.round(11*uiScaleFactor)}}>{lang === "en" ? "Professional: " : "Profesional: "}{g.professionalName}</Text> },
+                  { key: "place", content: !!g.place && <Text style={{ color: "#9a9a9a", fontSize: Math.round(12 * uiScaleFactor), fontWeight: "500" }}>{g.place}</Text> },
                   { key: "countdown", content: (() => {
                     if (!g.time) return null;
                     const mLeft = Math.round((dt.getTime() - receptionNowMs) / 60_000);

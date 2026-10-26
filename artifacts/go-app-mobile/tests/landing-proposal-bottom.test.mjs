@@ -31,7 +31,7 @@ test('Landing proposal containment and its padding budget remain scoped to chang
     const padding = vm.runInNewContext('(' + attr(wrapper, 'style').getText(ast) + ')', scope);
     const inset = vm.runInNewContext(compactAttr('verticalInset').getText(ast), scope);
     assert.equal(intrinsic, kind === 'cambio');
-    assert.equal(padding.paddingTop, Math.round(6 * scale));
+    assert.equal(padding.paddingTop, Math.round((kind === 'cambio' ? 2 : 6) * scale));
     assert.equal(padding.paddingBottom, Math.round((kind === 'cambio' ? 8 : 6) * scale));
     assert.equal(inset, kind === 'cambio' ? padding.paddingTop + padding.paddingBottom : Math.round(12 * scale));
     assert.ok(padding.paddingBottom >= padding.paddingTop);

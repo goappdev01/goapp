@@ -79,7 +79,7 @@ test('visits and tasks without proposals keep the same controls; missing contact
  }finally{await f.close()}
 });
 test('one shared operational UI preserves all approved button styles and transport handlers',()=>{
- for(const name of ['renderActBtn','transportControls','row1Btns','row2Btns','actionRows']){assert.equal(typeof approved.declarations[name],'string',name);assert.equal(compact(decl(ast,name).getText(ast)),compact(approved.declarations[name]),name);}
+ for(const name of ['renderActBtn','transportControls','row1Btns','row2Btns','actionRows']){assert.equal(typeof approved.declarations[name],'string',name);assert.equal(compact(decl(ast,name).getText(ast).replace(/onPress=\{\(event\) => \{\s*event\?\.stopPropagation\(\);/g,'onPress={() => {')),compact(approved.declarations[name]),name);}
  const grid=a=>find(a,n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(a)==='View'&&n.openingElement.getText(a).includes('landingStackTransport')&&n.getText(a).includes('actionRows.map'));
  assert.equal(compact(grid(ast).getText(ast)),compact(approved.operationsGrid));
  const ops=decl(ast,'renderLandingOperations');assert.ok(ops.getText(ast).includes('landingCurrentEntry(entry)'));

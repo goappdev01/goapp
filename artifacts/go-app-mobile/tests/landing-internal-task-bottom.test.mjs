@@ -28,12 +28,12 @@ test('intrinsic containment and the compact bottom inset apply only to internal 
       uiScaleFactor: scale, nextCardAvailableHeight: 300, PANEL_W: 284, headerObstacles: [] };
     assert.equal(vm.runInNewContext(attr(card, 'intrinsicBody').getText(ast), context), expected || presentation.entryIsReservation(g));
     const sizing = vm.runInNewContext('(' + attr(card, 'adaptiveBody').getText(ast) + ')', context);
-    assert.equal(sizing.frameVerticalInset, Math.round(10 * scale) + Math.round((expected ? 8 : 14) * scale) + 3);
-    assert.equal(vm.runInNewContext(attr(title, 'numberOfLines').getText(ast), context), expected ? undefined : 1);
+    assert.equal(sizing.frameVerticalInset, Math.round((expected || presentation.entryIsReservation(g) ? 6 : 10) * scale) + Math.round((expected ? 8 : 14) * scale) + 3);
+    assert.equal(attr(title, 'numberOfLines'), undefined);
   }
 });
 
-test('the actual task card contains essential rows without a clipping cap or internal scroller at constrained sizes', async () => {
+test('the actual task card contains essential rows within a bounded scroller at constrained sizes', async () => {
   const captured = new Map(), textProps = new Map(), calls = [];
   let width = 284, fontScale = 1;
   function View(p) {
@@ -75,9 +75,9 @@ test('the actual task card contains essential rows without a clipping cap or int
           assert.equal(flatten(captured.get('landing-card-fixed-frame').style).maxHeight, undefined);
           assert.equal(flatten(captured.get('landing-card-fixed-frame').style).overflow, undefined);
           const style = flatten(captured.get('landing-information-frame').style);
-          assert.equal(style.paddingBottom, Math.round(8 * scale)); assert.equal(style.paddingTop, Math.round(10 * scale));
+          assert.equal(style.paddingBottom, Math.round(8 * scale)); assert.equal(style.paddingTop, Math.round(6 * scale));
           assert.equal(style.borderWidth, 1.5); assert.equal(style.borderColor, 'transparent'); assert.equal(style.borderRadius, Math.round(14 * scale));
-          assert.equal(nodes(rootNode).filter(n => n.attributes?.['data-native'] === 'ScrollView').length, 0);
+          assert.equal(nodes(rootNode).filter(n => n.attributes?.['data-native'] === 'ScrollView').length, 1);
         }
     captured.get('landing-information-frame').onPress(); captured.get('landing-information-frame').onLongPress();
     assert.deepEqual(calls, [['open', 'own-task'], ['long', 'own-task']]);

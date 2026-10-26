@@ -23,7 +23,7 @@ test('the real next-card header uses the approved proposal typography without sh
   const a=style(next,scale),b=style(approved,scale);
   for(const key of ['fontSize','fontWeight','fontFamily','letterSpacing'])assert.equal(a[key],b[key]);
  }
- assert.equal(attr(next,'numberOfLines').expression.getText(ast),'1');assert.equal(attr(next,'ellipsizeMode').text,'tail');
+ assert.equal(attr(next,'numberOfLines'),undefined);assert.equal(attr(next,'ellipsizeMode'),undefined);
  assert.equal(attr(next,'adjustsFontSizeToFit'),undefined);assert.equal(attr(next,'minimumFontScale'),undefined);
  assert.ok(attr(next.parent.parent,'style').expression.getText(ast).includes('total > 1 ? 18 : 2'),'navigation chevrons have their own horizontal space');
 });

@@ -128,7 +128,7 @@ test("QR stays fully below the status area and retains its valid bottom position
   }
 });
 test("Landing stays static even when overflow is requested; it does not capture native gestures", () => {
-  const react={ createElement:(type,props,...children)=>({type,props,children}) };
+  const react={ createContext:()=>({Provider:'Provider'}), createElement:(type,props,...children)=>({type,props,children}) };
   const api=load("components/landing/LandingContentViewport.tsx",{
     react, "react-native":{ScrollView:"ScrollView",View:"View",StyleSheet:{absoluteFill:{position:"absolute"}}},
   });
@@ -172,7 +172,7 @@ test("short landscape uses readable two-column actions and keeps transport in a 
   }
 });
 test("outer scroll uses a natural-height View for card contents and reports complete height", () => {
-  const react={createElement:(type,props,...children)=>({type,props,children})};
+  const react={createContext:()=>({Provider:'Provider'}),createElement:(type,props,...children)=>({type,props,children})};
   const api=load("components/landing/LandingContentViewport.tsx",{
     react,"react-native":{ScrollView:"ScrollView",View:"View",StyleSheet:{}},
     "react-native-gesture-handler":{},

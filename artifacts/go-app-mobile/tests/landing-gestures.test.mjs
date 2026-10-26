@@ -69,15 +69,15 @@ test('indicator and card retain the same horizontal responder across the fixed h
     return result;
   }
   for (const [name, header, card, expectedHosts] of [
-    ['nextCardPanRef', '{ordinal}', 'Tarjeta próxima cita', 2],
+    ['nextCardPanRef', '{ordinal}', 'Tarjeta próxima cita', 3],
     ['cambiosCardPanRef', '{_ordinal}', '{cardTitle}', 1],
   ]) {
     const hosts = all(home, node => ts.isJsxElement(node)
       && node.openingElement.attributes.properties.some(attr => ts.isJsxSpreadAttribute(attr)
         && attr.expression.getText(home) === name + '.panHandlers'));
     assert.equal(hosts.length, expectedHosts);
-    assert.equal(hosts.filter(node => node.getText(home).includes(header)).length, 1);
-    assert.equal(hosts.filter(node => node.getText(home).includes(card)).length, 1);
+    assert.equal(hosts.filter(node => node.getText(home).includes(header)).length, name === 'nextCardPanRef' ? 2 : 1);
+    assert.equal(hosts.filter(node => node.getText(home).includes(card)).length, name === 'nextCardPanRef' ? 2 : 1);
     if (name === 'nextCardPanRef') {
       const slot = node => { for (let p = node.parent; p; p = p.parent) if (ts.isJsxAttribute(p)) return p.name.getText(home); };
       const fixed = hosts.find(node => slot(node) === 'header');
@@ -85,6 +85,24 @@ test('indicator and card retain the same horizontal responder across the fixed h
       assert.ok(fixed && body, 'header and fixed border share the horizontal responder outside vertical scrolling');
       assert.equal(body.openingElement.getText(home).replace('flexShrink: 0, minHeight: 0, ', ''), fixed.openingElement.getText(home), 'only vertical sizing changes; original animation and responder are identical');
     }
+  }
+});
+
+test('the installed native recognizer at the shared ancestor retains horizontal navigation and yields vertical scroll', () => {
+  const { nativePanResponder, touchStream } = require('./tests/helpers/native-pan-responder.cjs');
+  for (const name of ['nextCardPanRef', 'cambiosCardPanRef']) {
+    const index={current:0},total={current:3},selected=[],select=value=>{index.current=value;selected.push(value)};
+    const config=responder(name,{nextCardIdxRef:index,nextCardTotalRef:total,nextCardSetIdxRef:{current:select},cambiosCardIdxRef:index,cambiosCardTotalRef:total,setCambiosCardIdx:select,
+      nextCardSlideAnim:{stopAnimation(){},setValue(){}},Animated:{timing(){},sequence:()=>({start:fn=>fn()})},LayoutAnimation:{configureNext(){},Presets:{easeInEaseOut:{}}},Haptics:{selectionAsync:()=>Promise.resolve()}});
+    const pan=nativePanResponder().create(config).panHandlers;
+    for (const direction of [-1,1]) {
+      const stream=touchStream({x:200,y:200,historyEnumerable:false});pan.onStartShouldSetResponderCapture(stream.event());
+      const move=stream.event(direction*20,1,30);assert.equal(pan.onMoveShouldSetResponderCapture(move),true);pan.onResponderGrant(move);
+      pan.onResponderMove(stream.event(direction*65,2,60));const end=stream.event(direction*65,2,10,true);pan.onResponderRelease(end);pan.onResponderRelease(end);
+    }
+    assert.deepEqual(selected,[1,0]);
+    const vertical=touchStream();pan.onStartShouldSetResponderCapture(vertical.event());const move=vertical.event(2,70,70);
+    assert.equal(pan.onMoveShouldSetResponderCapture(move),false);assert.equal(pan.onMoveShouldSetResponder(move),false,'native vertical scroll keeps its contact');
   }
 });
 

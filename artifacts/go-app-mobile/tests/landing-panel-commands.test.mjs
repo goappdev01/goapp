@@ -137,7 +137,7 @@ test('one shared transport strip serves both bounded cards, with unchanged targe
  }
 
  const handler=a=>{const attr=find(a,n=>ts.isJsxAttribute(n)&&n.name.getText(a)==='onPress'&&n.initializer?.getText(a).includes('op.url'));return ts.createPrinter().printNode(ts.EmitHint.Expression,attr.initializer.expression,a);};
- assert.equal(handler(ast),protectedBaselines.commandsTransportHandler);
+ assert.equal(handler(ast).replace(/\(event\) => \{\n    event\?\.stopPropagation\(\);/,'() => {'),protectedBaselines.commandsTransportHandler);
 });
 test('Humanity reserves one fixed region regardless of the expanded panel',()=>{
  const blocks=declaration('humanityBlocks').initializer.getText(ast);

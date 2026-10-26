@@ -86,3 +86,20 @@ export function landingAdaptivePanelSpace({ panel, frame, insets, titleBottom, c
   })).filter(rect => rect.x < panel.width && rect.x + rect.width > 0 && rect.y + rect.height > 0);
   return { availableHeight: Math.max(0, panelFloor - panelCeiling), width: panel.width, headerObstacles };
 }
+
+/** Cap only the card. The existing selectors, orbit and bottom anchor never move. */
+export function landingScrollPanelSpace({ panel, frame, insets, titleBottom, controls, offsetY = 0,
+  confirmationHeight = 0, confirmationGap = 16 }: {
+  panel: HumanityRect; frame: LandingFrame; insets: { top: number };
+  titleBottom: number; controls: readonly HumanityRect[]; offsetY?: number;
+  confirmationHeight?: number; confirmationGap?: number;
+}) {
+  const x = panel.x + (frame.virtual ? frame.left : 0);
+  const floor = panel.y + panel.height + (frame.virtual ? frame.top : 0) + offsetY;
+  const obstacles = controls.filter(rect => rect.x < x + panel.width && rect.x + rect.width > x);
+  const safeTop = Math.max(insets.top + 8, titleBottom + 8);
+  // The summary already excludes the header buttons horizontally; share that free lane.
+  const top = Math.max(safeTop + (confirmationHeight > 0 ? confirmationHeight + confirmationGap : 0),
+    ...obstacles.map(rect => rect.y + rect.height + 8));
+  return { availableHeight: Math.max(1, floor - top), width: panel.width, headerObstacles: [] };
+}
