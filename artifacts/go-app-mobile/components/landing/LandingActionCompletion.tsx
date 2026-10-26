@@ -7,6 +7,8 @@ import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import {completionKey} from "@/lib/goActionCompletion";
 type Model=ReturnType<typeof useActionCompletion>;
 export type CompletionFrame={x:number;y:number;width:number;height:number};
+/** Clear separation from the rendered global outline, independent of text and UI scale. */
+export const LANDING_COMPLETION_PANEL_GAP=16;
 /** Horizontal free header lane; vertical placement belongs to the actual panel, not a cached height. */
 export function completionPanelFrame(input:{panelX:number;panelWidth:number;width:number;left:number;right:number;edgeWidth:number;controls:readonly CompletionFrame[]}):CompletionFrame{
  const left=input.left+input.edgeWidth,right=input.width-input.right-input.edgeWidth;
@@ -52,7 +54,7 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
  useEffect(()=>{if(model.doc){setDuration(String(model.doc.preferences.defaultDurationMinutes));setHours(String(model.doc.preferences.reminderMinutes/60));}},[model.doc?.preferences]);
  useEffect(()=>{if(entry && model.doc)setActionHours(String((model.doc.records[completionKey(entry)]?.reminderMinutes ?? model.doc.preferences.reminderMinutes)/60));},[entry?.id,model.doc]);
  const document=model.doc;
- const position=anchorAbove?{bottom:"100%" as const,marginBottom:8}:{top:frame.y};
+ const position=anchorAbove?{bottom:"100%" as const,marginBottom:LANDING_COMPLETION_PANEL_GAP}:{top:frame.y};
  if(model.scope && model.error && !document)return <View pointerEvents="box-none" style={{position:"absolute",left:frame.x,...position,width:frame.width,zIndex:90}}>
   <Text accessibilityLiveRegion="polite" style={{color:"#facc15",fontSize:12}}>{label("No se pudieron leer las confirmaciones. No se ha modificado ningún dato.","Confirmations could not be read. No data has been changed.")}</Text>
  </View>;

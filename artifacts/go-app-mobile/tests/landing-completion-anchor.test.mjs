@@ -44,7 +44,7 @@ for(const order of orders)test(order.join(' → ')+': each real anchor stays out
    const before=JSON.stringify(f.model);
    for(const panel of [...order,...order.slice().reverse()]){
     await f.select(panel);const bars=f.visible().filter(p=>p.testID==='landing-action-completion');assert.equal(bars.length,1);
-    const bar=bars[0];assert.equal(bar.style.position,'absolute');assert.equal(bar.style.bottom,'100%');assert.equal(bar.style.marginBottom,8);assert.equal(bar.style.top,undefined);assert.equal(bar.style.height,undefined);assert.equal(bar.style.minHeight,44);
+    const bar=bars[0];assert.equal(bar.style.position,'absolute');assert.equal(bar.style.bottom,'100%');assert.equal(bar.style.marginBottom,16);assert.equal(bar.style.top,undefined);assert.equal(bar.style.height,undefined);assert.equal(bar.style.minHeight,44);
     assert.equal(f.get('actual-panel').style.top,220);assert.equal(f.get('actual-panel').pointerEvents,'box-none');
     const x=f.panelX+bar.style.left;for(const control of f.controls)assert.ok(x+bar.style.width<=control.x-8+.01||x>=control.x+control.width+8-.01,'The bar excludes the existing header touch area');
     const button=f.visible().find(p=>p.native==='TouchableOpacity'&&p.children?.props?.children?.[0]==='Confirma tus acciones');assert.ok(button);assert.ok(button.style.minHeight>=44);

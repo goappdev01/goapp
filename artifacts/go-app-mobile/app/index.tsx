@@ -14836,7 +14836,7 @@ function HomeScreenContent() {
                 ? (isSent ? "CAMBIO PROPUESTO" : "CAMBIO RECIBIDO")
                 : "RESERVA PENDIENTE";
               return (
-                <View onLayout={(e) => setPendingHeaderH(e.nativeEvent.layout.height)} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: Math.round(6 * uiScaleFactor), paddingHorizontal: 2 }}>
+                <View onLayout={(e) => setPendingHeaderH(e.nativeEvent.layout.height)} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: Math.round(6 * uiScaleFactor), paddingBottom: Math.round((item.kind === "cambio" ? 2 : 6) * uiScaleFactor), paddingHorizontal: 2 }}>
                   {/* Flecha izquierda */}
                   {total > 1 && safeIdx > 0 ? (
                     <View pointerEvents="none" style={{ flexDirection: "row", alignItems: "center" }}>
@@ -14882,7 +14882,7 @@ function HomeScreenContent() {
             })()}>
             {/* Tarjeta: swipe ← → para navegar */}
             <View onLayout={(e) => setPendingContentH(e.nativeEvent.layout.height)}
-              style={{ paddingHorizontal: Math.round(12 * uiScaleFactor), paddingTop: Math.round(6 * uiScaleFactor), paddingBottom: Math.round((item.kind === "cambio" ? 8 : 6) * uiScaleFactor), gap: Math.round(2 * uiScaleFactor) }}
+              style={{ paddingHorizontal: Math.round(12 * uiScaleFactor), paddingTop: Math.round((item.kind === "cambio" ? 2 : 6) * uiScaleFactor), paddingBottom: Math.round((item.kind === "cambio" ? 8 : 6) * uiScaleFactor), gap: Math.round(2 * uiScaleFactor) }}
             >
               <Pressable
                 testID="landing-proposal-card"
@@ -14896,7 +14896,7 @@ function HomeScreenContent() {
                 }}
                 style={{ gap: Math.round(2 * uiScaleFactor) }}>
                 <LandingCompactBody key={item.kind === "cambio" ? item.g.id + uiScaleFactor : item.booking.id + uiScaleFactor}
-                  gap={Math.round(2 * uiScaleFactor)} verticalInset={item.kind === "cambio" ? Math.round(6 * uiScaleFactor) + Math.round(8 * uiScaleFactor) : Math.round(12 * uiScaleFactor)}
+                  gap={Math.round(2 * uiScaleFactor)} verticalInset={item.kind === "cambio" ? Math.round(2 * uiScaleFactor) + Math.round(8 * uiScaleFactor) : Math.round(12 * uiScaleFactor)}
                   primary={<>
                     {item.kind === "hold" && <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                       <Feather name="calendar" size={Math.round(10 * uiScaleFactor)} color={cardAccent} />
@@ -15054,7 +15054,7 @@ function HomeScreenContent() {
             {entryIsReservation(g) && <LandingVisitOutline scale={uiScaleFactor} color={nextCardDeleteConfirm === g.id ? "#ef4444" : tint} />}
             {entryIsInternal(g) && <LandingEntryOutline testID="landing-task-outline" scale={uiScaleFactor} color={nextCardDeleteConfirm === g.id ? "#ef4444" : tint} />}
             <LandingCardContents staticBody intrinsicBody={entryIsInternal(g) || entryIsReservation(g)}
-              adaptiveBody={{ availableHeight: nextCardAvailableHeight, frameVerticalInset: Math.round(10 * uiScaleFactor) + Math.round((entryIsInternal(g) ? 8 : 14) * uiScaleFactor) + 3, width: PANEL_W, headerObstacles }}
+              adaptiveBody={{ availableHeight: nextCardAvailableHeight, frameVerticalInset: Math.round((entryIsInternal(g) || entryIsReservation(g) ? 6 : 10) * uiScaleFactor) + Math.round((entryIsInternal(g) ? 8 : 14) * uiScaleFactor) + 3, width: PANEL_W, headerObstacles }}
               footer={operations.content}
               footerGap={PANEL_ACTION_GAP} overflowing={false} onHeight={() => {}}
               contentContainerStyle={{ gap: PANEL_ACTION_GAP }}
@@ -15093,7 +15093,7 @@ function HomeScreenContent() {
                   minHeight: 0,
                   paddingHorizontal: Math.round(12 * uiScaleFactor),
                   paddingVertical: Math.round(14 * uiScaleFactor),
-                  paddingTop: Math.round(10 * uiScaleFactor),
+                  paddingTop: Math.round((entryIsInternal(g) || entryIsReservation(g) ? 6 : 10) * uiScaleFactor),
                   ...(entryIsInternal(g) ? { paddingBottom: Math.round(8 * uiScaleFactor) } : {}),
                   borderRadius: Math.round(14 * uiScaleFactor),
                   borderWidth: 1.5,
@@ -15120,7 +15120,7 @@ function HomeScreenContent() {
               >
               {/* ── INDICADOR DE POSICIÓN — flechas dinámicas + puntos ── */}
               <View
-                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 9, paddingHorizontal: total > 1 ? 18 : 2 }}
+                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 9, paddingBottom: entryIsInternal(g) || entryIsReservation(g) ? 5 : 9, paddingHorizontal: total > 1 ? 18 : 2 }}
               >
                 {/* Centro: ordinal + separador + etiqueta + puntos */}
                 <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, minWidth: 0 }}>

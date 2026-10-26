@@ -20,6 +20,9 @@ test('all three real outer groups contain header, body and the actual number of 
   const props = new Map(); let width = 284, fontScale = 1, actionCount = 0;
   function View(p) {
     if (p.testID) props.set(p.testID, p);
+    if (p.style?.paddingVertical === 9) props.set('next-header-spacing', p);
+    if (p.onLayout?.toString().includes('setPendingHeaderH')) props.set('change-header-spacing', p);
+    if (p.onLayout?.toString().includes('setPendingContentH')) props.set('change-body-spacing', p);
     const height = ({ 'landing-card-header': 34 * fontScale, 'landing-card-operations': Math.ceil(actionCount / 3) * 56,
       'landing-compact-primary': 72 * fontScale, 'landing-compact-actions': 100 * fontScale })[p.testID];
     React.useLayoutEffect(() => { if (height != null) p.onLayout?.({ nativeEvent: { layout: { height, width } } }); }, [height, width]);
@@ -68,10 +71,19 @@ test('all three real outer groups contain header, body and the actual number of 
       assert.equal(decoration.borderColor, v.change ? '#f9731655' : v.color); assert.equal(decoration.left, -Math.round(8 * scale)); assert.equal(decoration.right, decoration.left);
       assert.equal(props.get(v.group).style.paddingBottom, Math.round(8 * scale)); assert.equal(props.get(v.group).style.bottom, 344);
       assert.equal(props.get('landing-information-frame').style.borderColor, 'transparent'); assert.equal(props.get(v.outline).pointerEvents, 'none');
+      if (v.change) {
+        assert.equal(props.get('change-header-spacing').style.paddingBottom, Math.round(2 * scale));
+        assert.equal(props.get('change-body-spacing').style.paddingTop, Math.round(2 * scale));
+      } else {
+        assert.equal(props.get('next-header-spacing').style.paddingBottom, 5);
+        assert.equal(props.get('landing-information-frame').style.paddingTop, Math.round(6 * scale));
+      }
       assert.equal(nodes(group).filter(n => n.attributes?.['data-testid']?.endsWith('-outline')).length, 1);
     }
     Object.assign(scope, { item: { kind: 'hold', booking: { id: 'hold-1' } }, cardDate: '26/10/26 · 14:15' });
     await settle(() => root.render(scope.renderChange()));
     assert.equal(byId(container, 'landing-change-outline'), undefined); assert.equal(props.get('landing-information-frame').style.borderColor, '#f9731655', 'HOLD retains its existing inner frame');
+    assert.equal(props.get('change-header-spacing').style.paddingBottom, Math.round(6 * scope.uiScaleFactor));
+    assert.equal(props.get('change-body-spacing').style.paddingTop, Math.round(6 * scope.uiScaleFactor), 'unrelated pending reservations keep their original spacing');
   } finally { await settle(() => root.unmount()); }
 });
