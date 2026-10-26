@@ -23,7 +23,7 @@ export function fixture() {
   const calls = [];
   const scope = vm.createContext({
     exports: {}, Date, Set, Math, JSON,
-    calOpen: true, fieldSelectorOpen: false, calQuickCreateOpen: false, calConfigVisible: false, calReservasOpen: false,
+    calendarLayerBackRef: { current: null }, calOpen: true, fieldSelectorOpen: false, calQuickCreateOpen: false, calConfigVisible: false, calReservasOpen: false,
     dateISODraft: '2027-02-28', dateDraft: 'Dom 28/02', calBgViewMode: 'mes_lineal', calBgViewMonth: '2027-02',
     noteTaskDraftRef: { current: null },
     calendarSlotSavingRef: { current: false }, calendarSlotDraftRef: { current: null }, fieldSelectorSaveBusyRef: { current: false }, calendarTaskContextRef: { current: null }, qdReturnTimerRef: { current: null }, qdFlowActiveRef: { current: false },

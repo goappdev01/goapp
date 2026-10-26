@@ -1,3 +1,4 @@
+import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
 import type { ScrollViewInstance } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AssistantCloseControls } from "./AssistantCloseControls";
@@ -8,7 +9,6 @@ import {
   Image,
   KeyboardAvoidingView,
   Keyboard,
-  Modal,
   Platform,
   ScrollView,
   Text,
@@ -48,6 +48,7 @@ export interface BookingAssistantProps {
   visible: boolean;
   listenRequest?: number;
   onClose: () => void;
+  onGoToLanding?: () => void;
   onBack?: () => void;
   handedness?: "left" | "right";
   onHandednessChange?: (value: "left" | "right") => void;
@@ -58,6 +59,7 @@ export function BookingAssistantScreen({
   visible,
   listenRequest,
   onClose,
+  onGoToLanding,
   onBack,
   handedness = "right",
   uiScale = "estandar",
@@ -147,12 +149,13 @@ export function BookingAssistantScreen({
     setInput("");
     void go.dispatch(text, aiEnabled);
   }
-  function close() {
+  function close(toLanding = false) {
     if (a.busy === "Guardando en GO…" || a.busy === "Confirmando reserva…" || a.busy === "Cancelando reserva…")
       return;
     a.invalidate();
     voice.abort();
-    onClose();
+    if (toLanding && onGoToLanding) onGoToLanding();
+    else onClose();
   }
   function back() {
     if (a.busy) return;
@@ -731,7 +734,7 @@ export function BookingAssistantScreen({
         )}
           </View>
         </KeyboardAvoidingView>
-        {!a.panel && <AssistantCloseControls disabled={saving} onClose={close}
+        {!a.panel && <AssistantCloseControls disabled={saving} onClose={() => close()} onGoToLanding={onGoToLanding ? () => close(true) : undefined}
           viewport={{ width: viewport.width, height: viewport.height + headerHeight }}
           protectedBottom={footerHeight} topInset={insets.top} />}
       </GestureHandlerRootView>

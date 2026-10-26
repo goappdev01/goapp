@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const ts = require("typescript");
 function load(file, modules, globals = {}) {
   const context = { exports: {}, console, Date, Error, setTimeout, clearTimeout, ...globals,
-    require(name) { if (name in modules) return modules[name]; throw Error("Unexpected " + name); } };
+    require(name) { if (name in modules) return modules[name]; if(name === '@/components/ui/GoScreenModal') return {GoScreenModal: modules['react-native'].Modal}; throw Error("Unexpected " + name); } };
   if (file === "lib/bookingAssistant.ts") modules["./authSession"] = loadAuthSession(context, modules["@react-native-async-storage/async-storage"].default);
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
     compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React }
@@ -212,10 +212,10 @@ test("the same GO appears once, remains circular at every size and routes zone d
     assert.ok(f.all.some(n => n.type === "Feather" && n.props.name === "zap"));
   }
 });
-test("panel and container reuse one floating close without an additional footer row", () => {
+test("inner panel keeps its close and the assistant uses one-level Back without an additional footer row", () => {
   for (const panel of [null, "zone"]) {
     const f = screenFixture(panel);
-    assert.equal(f.all.filter(n => n.props?.accessibilityLabel === (panel ? "Cerrar panel" : "Ir al Landing") && n.type === "TouchableOpacity" && n.props.style?.width === 44).length, 1);
+    assert.equal(f.all.filter(n => n.props?.accessibilityLabel === (panel ? "Cerrar panel" : "Volver a la pantalla anterior") && n.type === "TouchableOpacity" && n.props.style?.width === 44).length, 1);
     assert.ok(f.all.some(n => n.type === "KeyboardAvoidingView" && n.props.behavior === "padding"));
     const draggable = f.all.find(n => n.type === "DraggableFAB");
     assert.ok(draggable.props.bounds.height > 60); assert.equal(draggable.props.maxH, 44);

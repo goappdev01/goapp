@@ -38,7 +38,7 @@ function flowFixture(initial = []) {
     Error, lang: "es", calendarSlotOpeningRef: { current: false }, calendarSlotRequestRef: { current: 0 },
     completionIdentity: { ready: true, scope: { userId: "account-a", context: "live:USER" } },
     calendarSlotSavingRef: { current: false }, calendarSlotDraftRef: { current: null },
-    fieldSelectorSaveBusyRef: { current: false }, pendingCalendarGoRef: { current: false }, pendingCalendarGoListenRef: { current: false }, goChatListenSequence: { current: 0 },
+    fieldSelectorSaveBusyRef: { current: false }, directLandingRef: { current: false }, pendingCalendarGoRef: { current: false }, pendingCalendarGoListenRef: { current: false }, goChatListenSequence: { current: 0 },
     getTaskUser: access.getTaskUser, assertTaskUser: access.assertTaskUser, updateGoLog: store.updateGoLog,
     makeUid: () => "go_slot_" + (++serial), t: key => key, isUserMode: false,
     showToast: (...args) => calls.push(["toast", ...args]),
@@ -190,10 +190,10 @@ test("short tap creates once; hold, horizontal swipe, vertical scroll and cancel
   assert.equal(calls.length, 1);
 });
 
-test("GO hands off the Calendar modal once and opens the integrated real assistant", () => {
+test("GO retains the Calendar origin and opens the same integrated assistant once", () => {
   const f = flowFixture(); const { scope } = f;
   scope.openAi(); scope.openAi();
-  assert.equal(scope.calOpen, false); assert.equal(scope.goChatOpen, false);
+  assert.equal(scope.calOpen, true); assert.equal(scope.goChatOpen, true);
   scope.completeCalendarGoOpen(); scope.completeCalendarGoOpen();
   assert.equal(scope.goChatOpen, true);
   assert.equal(f.calls.filter(call => call[0] === "setGoChatOpen").length, 1);

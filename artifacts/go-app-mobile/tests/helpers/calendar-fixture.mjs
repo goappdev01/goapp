@@ -98,6 +98,7 @@ export function fixture({ now } = {}) {
       setTimeout: fn => {timers.push(fn);return timers.length;}, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
       require(name) {
         if (name in mocks) return mocks[name];
+        if (name === '@/components/ui/GoScreenModal') return {GoScreenModal: mocks['react-native'].Modal};
         if (name === '@/hooks/useBusinessBookings') return load('hooks/useBusinessBookings.ts');
         if (name === '@/data/reservationCardPolicy') return load('data/reservationCardPolicy.ts');
         if (name === '@/data/goEntryPresentation') return load('data/goEntryPresentation.ts');

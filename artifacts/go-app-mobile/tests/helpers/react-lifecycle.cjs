@@ -29,7 +29,7 @@ const ts=req('typescript');
 const native=(name)=>({children,...props})=>React.createElement('div',{'data-native':name,'data-testid':props.testID},children);
 const rn={View:native('View'),Text:native('Text'),Image:native('Image'),Modal:native('Modal'),Platform:{OS:'ios'},StyleSheet:{absoluteFill:{},create:x=>x}};
 const evaluate=(file,imports={})=>{
- const context={exports:{},__DEV__:true,console,Promise,Date,setTimeout,clearTimeout,setInterval,clearInterval,require(name){if(name==='react')return React;if(name in imports)return imports[name];if(name==='react-native')return rn;if(name.endsWith('.png'))return 1;throw Error('Unexpected import '+name);}};
+ const context={exports:{},__DEV__:true,console,Promise,Date,setTimeout,clearTimeout,setInterval,clearInterval,require(name){if(name==='react')return React;if(name in imports)return imports[name];if(name==='@/components/ui/GoScreenModal')return {GoScreenModal:(imports['react-native']||rn).Modal};if(name==='react-native')return rn;if(name.endsWith('.png'))return 1;throw Error('Unexpected import '+name);}};
  const code=ts.transpileModule(fs.readFileSync(path.join(project,file),'utf8'),{compilerOptions:{ alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
  vm.runInNewContext(code,context,{filename:file});return context.exports;
 };

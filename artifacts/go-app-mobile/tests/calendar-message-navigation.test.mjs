@@ -28,7 +28,7 @@ for(const hand of ['right','left'])for(const platform of ['ios','android'])test(
 test('Calendar keeps its modal and source detail while the SAME Communication screen opens and returns after native dismissal',()=>{
  const calls=[],returnRef={current:null};let calOpen=true;
  const scope={exports:{},React:{createElement:tree},MessagesScreen:'MessagesScreen',entryMessageContext:presentation.entryMessageContext,
-  messageReturnRef:returnRef,messagesOpen:true,goChatOpen:false,goChatScreen:null,setMessageEntryId:v=>calls.push(["host",v]),recentContacts:[],userGoPhone:'',initialMessagesContact:null,
+  messageReturnRef:returnRef,directLandingRef:{current:false},messagesOpen:true,goChatOpen:false,goChatScreen:null,setMessageEntryId:v=>calls.push(["host",v]),recentContacts:[],userGoPhone:'',initialMessagesContact:null,
   initialMessagesBookingId:booking.reservationId,initialMessagesContext:presentation.entryMessageContext(booking),
   setMessagesOpen:v=>calls.push(['messages',v]),setLandingDetailsId:v=>calls.push(['landing-detail',v]),
   setInitialMessagesContext:v=>calls.push(['context',v]),setInitialMessagesBookingId:v=>calls.push(['booking',v]),setInitialMessagesContact:v=>calls.push(['contact',v]),
@@ -46,9 +46,9 @@ test('the only Communication component is presented by the active Calendar, not 
  const screen=find(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='MessagesScreen');
  let fn=screen;while(fn&&!ts.isFunctionDeclaration(fn))fn=fn.parent;assert.equal(fn.name.text,'HomeScreenContent');
  const calendar=find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='Modal'&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='visible'&&a.initializer?.getText(ast)==='{calOpen}'));
- const inside=find(n=>ts.isBinaryExpression(n)&&n.getText(ast)==='calOpen && !messageEntryId && messagesScreen');
+ const inside=find(n=>ts.isBinaryExpression(n)&&n.getText(ast)==='(calOpen || directLandingExit) && !messageEntryId && messagesScreen');
  let p=inside;while(p&&p!==calendar)p=p.parent;assert.equal(p,calendar,'iOS presenter must be inside Calendar native modal');
- const outside=find(n=>ts.isBinaryExpression(n)&&n.getText(ast)==='!calOpen && !messageEntryId && messagesScreen');
+ const outside=find(n=>ts.isBinaryExpression(n)&&n.getText(ast)==='!calOpen && !directLandingExit && !messageEntryId && messagesScreen');
  p=outside;while(p&&p!==calendar)p=p.parent;assert.equal(p,undefined,'General Communication stays on Landing only when Calendar is closed');
  const source=readFileSync('components/AgendaOperativa.tsx','utf8');assert.ok(!source.includes('setTimeout(()=>handleOpenMessage(item),180)'));
 });

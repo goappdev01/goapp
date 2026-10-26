@@ -1,3 +1,4 @@
+import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
 import type { ScrollViewInstance } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
@@ -15,7 +16,6 @@ import {
   Easing,
   FlatList,
   KeyboardAvoidingView,
-  Modal,
   PanResponder,
   Platform,
   ScrollView,
@@ -277,6 +277,7 @@ export function MessagesScreen({
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [messageError,setMessageError]=useState("");
   const [sending,setSending]=useState(false);
+  const [chatArea, setChatArea] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const ownerRef=useRef<string|null>(null),generation=useRef(0),sendLock=useRef(false);
   const draftKey=(owner:string,id:string)=>`go_message_draft_v1:${owner}:${id}`;
   const errorText=(error:unknown)=>error && typeof error==="object" && "message" in error && typeof error.message==="string" ? error.message : "No se pudo conectar con Comunicación GO. Tu texto se conserva.";
@@ -662,9 +663,10 @@ export function MessagesScreen({
                   style={s.flex}
                 >
                   {/* Chat area container — distinct background */}
-                  <View style={s.chatArea}>
+                  <View style={s.chatArea} onLayout={event => setChatArea(event.nativeEvent.layout)}>
                   <ScrollView
                     ref={threadScrollRef}
+                    style={{ marginBottom: 60 }}
                     contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", paddingHorizontal: 12, paddingTop: 14, paddingBottom: 14 }}
                     showsVerticalScrollIndicator={false}
                     onLayout={() => threadScrollRef.current?.scrollToEnd({ animated: false })}
@@ -751,27 +753,7 @@ export function MessagesScreen({
 
                     {/* Right column — GO (top) / ENVIAR (bottom) */}
                     <View style={s.actionCol}>
-                      <View testID="message-back-position" style={{ height: 60, width: 76 }}>
-              {/* ── FAB volver — arrastrable con long-press ───────────── */}
-              <DraggableFAB
-                screenKey="messages"
-                buttonKey="back"
-                initialRight={8}
-                initialTop={8}
-                bounds={{ width: 76, height: 60 }}
-                buttonWidth={44}
-                maxH={44}
-              >
-                <TouchableOpacity
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); backToList(); }}
-                  activeOpacity={0.8}
-                  style={s.fabBack}
-                  accessibilityLabel={initialContext?(lang==="en"?"Back to card":"Volver a la ficha"):(lang === "en" ? "Back to conversations" : "Volver a conversaciones")}
-                >
-                  <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
-                </TouchableOpacity>
-              </DraggableFAB>
-                      </View>
+
                       {/* GO — upper, used less often */}
                       <TouchableOpacity
                         onPress={handleCreateGo}
@@ -793,6 +775,26 @@ export function MessagesScreen({
                       </TouchableOpacity>
                     </View>
                   </View>
+                  {chatArea.height >= 60 && <View testID="message-floating-return" pointerEvents="box-none" style={{ position: "absolute", left: chatArea.x, top: chatArea.y + chatArea.height - 60, width: chatArea.width, height: 60 }}>
+                    <DraggableFAB
+                screenKey="messages"
+                buttonKey="back"
+                initialRight={8}
+                initialTop={8}
+                bounds={{ width: chatArea.width, height: 60 }}
+                buttonWidth={44}
+                maxH={44}
+              >
+                <TouchableOpacity
+                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); backToList(); }}
+                  activeOpacity={0.8}
+                  style={s.fabBack}
+                  accessibilityLabel={initialContext?(lang==="en"?"Back to card":"Volver a la ficha"):(lang === "en" ? "Back to conversations" : "Volver a conversaciones")}
+                >
+                  <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
+                </TouchableOpacity>
+              </DraggableFAB>
+                  </View>}
                 </KeyboardAvoidingView>
               </Animated.View>
 
@@ -1003,9 +1005,9 @@ const s = StyleSheet.create({
     elevation: 4,
   },
   actionBtnGo: {
-    backgroundColor: "rgba(61,154,132,0.08)",
+    backgroundColor: "#C8A037",
     borderWidth: 1.5,
-    borderColor: "rgba(61,154,132,0.35)",
+    borderColor: "#F8DF8B",
   },
   actionBtnClose: {
     backgroundColor: "#F7F8FA",
@@ -1013,7 +1015,7 @@ const s = StyleSheet.create({
     borderColor: "rgba(0,0,0,0.1)",
   },
   actionBtnLabel:      { color: "#FFFFFF", fontSize: 10, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.8 },
-  actionBtnLabelGo:    { color: "#3D9A84", fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.5 },
+  actionBtnLabelGo:    { color: "#17120B", fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.5 },
   actionBtnLabelClose: { color: "#9CA3AF", fontSize: 9, fontWeight: "700", letterSpacing: 0.6 },
 
   // Messages

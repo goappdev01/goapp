@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 const require=createRequire(import.meta.url), ts=require('typescript');
-function load(file,modules){const scope={exports:{},require(name){if(name in modules)return modules[name];throw Error('Unexpected '+name);}};
+function load(file,modules){const scope={exports:{},require(name){if(name in modules)return modules[name];if(name==='@/components/ui/GoScreenModal')return {GoScreenModal:modules['react-native'].Modal};throw Error('Unexpected '+name);}};
  vm.runInNewContext(ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);return scope.exports;}
 function nodes(tree){return tree?[tree,...(tree.props?.children??[]).flat(Infinity).flatMap(n=>typeof n==='object'?nodes(n):[])]:[];}
 function fixture(reduced=false){

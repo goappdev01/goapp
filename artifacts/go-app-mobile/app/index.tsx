@@ -1,3 +1,4 @@
+import { GoScreenHost } from "@/components/ui/GoScreenModal";
 import type { ScrollViewInstance, ViewInstance } from "react-native";
 import {useCustomerBookings} from "@/hooks/useCustomerBookings";
 import {mergeCustomerBookingEntries,type CustomerBookingEntry} from "@/data/customerBookingProjection";
@@ -3142,6 +3143,9 @@ function HomeScreenContent() {
   const [initialMessagesContext,setInitialMessagesContext]=useState<ReturnType<typeof entryMessageContext>>(null);
   const messageReturnRef=useRef<(()=>void)|null>(null);
   const [messageEntryId, setMessageEntryId] = useState<string | null>(null);
+  const directLandingRef = useRef(false);
+  const calendarLayerBackRef = useRef<(() => boolean) | null>(null);
+  const [directLandingExit, setDirectLandingExit] = useState(false);
   const [initialMessagesBookingId,setInitialMessagesBookingId]=useState<string|null>(null);
   // ── RECORDATORIO (RECUÉRDAME) ────────────────────────────────────────────
   const [remindOpen, setRemindOpen] = useState(false);
@@ -6115,13 +6119,7 @@ function HomeScreenContent() {
 
   const openAi = (listenOnOpen = false, fromMessages = false) => {
     if (pendingCalendarGoRef.current) return;
-    // iOS must finish dismissing Calendar before presenting the existing AI modal.
-    if (calOpen && !fromMessages) {
-      pendingCalendarGoRef.current = true;
-      pendingCalendarGoListenRef.current = listenOnOpen;
-      setCalOpen(false);
-      return;
-    }
+    // The current native presenter retains the origin underneath this same assistant.
     if (goChatOpen) return;
     Haptics.selectionAsync();
     // Anclaje al sistema de tiempo global: refrescamos "now" en cada
@@ -6142,6 +6140,7 @@ function HomeScreenContent() {
   };
 
   const completeCalendarGoOpen = () => {
+    if (directLandingRef.current) { finishDirectLanding(); return; }
     if (!pendingCalendarGoRef.current) return;
     pendingCalendarGoRef.current = false;
     const listenOnOpen = pendingCalendarGoListenRef.current;
@@ -13618,7 +13617,32 @@ function HomeScreenContent() {
     } : undefined}
     onReject={() => { if (entry.changeProposal) rejectProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "rechazado"); }} />;
 
+  const finishDirectLanding = () => {
+    if (!directLandingRef.current) return;
+    directLandingRef.current = false;
+    messageReturnRef.current = null;
+    pendingCalendarGoRef.current = false;
+    pendingCalendarGoListenRef.current = false;
+    setMessagesOpen(false); setGoChatOpen(false); setMessageEntryId(null);
+    setInitialMessagesContact(null); setInitialMessagesBookingId(null); setInitialMessagesContext(null);
+    setLandingDetailsId(null); setCalBookingDetailEntry(null);
+    setCalReservasOpen(false); setShowBookingFromCal(false); setAgendaOpOpen(false); setEmpresaOpen(false);
+    closeAllOverlays();
+    setDirectLandingExit(false);
+  };
+  const goDirectlyToLanding = () => {
+    if (directLandingRef.current) return;
+    directLandingRef.current = true;
+    setDirectLandingExit(true);
+    messageReturnRef.current = null;
+    // These screens share one native Calendar presenter; dismiss it exactly once.
+    // Keep its children mounted until the native acknowledgement, then clean UI state.
+    if (calOpen) setCalOpen(false);
+    else finishDirectLanding();
+  };
+
   const finishEntryMessageReturn = () => {
+    if (directLandingRef.current) return;
     setInitialMessagesContact(null); setInitialMessagesBookingId(null); setInitialMessagesContext(null);
     const back = messageReturnRef.current; messageReturnRef.current = null; back?.();
     setMessageEntryId(null);
@@ -14221,6 +14245,7 @@ function HomeScreenContent() {
   }
 
   const goChatScreen = (<GOChatScreen
+        onGoToLanding={goDirectlyToLanding}
         visible={goChatOpen}
         listenRequest={goChatListenRequest}
         uiScale={uiScale}
@@ -15381,7 +15406,7 @@ function HomeScreenContent() {
       )}
 
       </LandingContentViewport>
-      <GoEntryDetailsSheet handedness={handedness} entry={landingDetailsEntry?followedEntry(landingDetailsEntry):null} onClose={() => setLandingDetailsId(null)} renderMessageScreen={landingDetailsEntry ? () => renderEntryMessageScreen(landingDetailsEntry) : undefined} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry, undefined, true) : undefined}>
+      <GoEntryDetailsSheet onGoToLanding={goDirectlyToLanding} handedness={handedness} entry={landingDetailsEntry?followedEntry(landingDetailsEntry):null} onClose={() => setLandingDetailsId(null)} renderMessageScreen={landingDetailsEntry ? () => renderEntryMessageScreen(landingDetailsEntry) : undefined} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry, undefined, true) : undefined}>
         {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry)}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}</>}
       </GoEntryDetailsSheet>
 
@@ -20017,9 +20042,10 @@ function HomeScreenContent() {
         calendarWatermark
         visible={calOpen}
         transparent
-        animationType="slide"
+        animationType={directLandingExit ? "none" : "slide"}
         onDismiss={completeCalendarGoOpen}
         onRequestClose={() => {
+          if (calendarLayerBackRef.current?.()) return;
           if (calendarTaskContextRef.current && fieldSelectorOpen) {
             closeFieldSelectorPanel();
             return;
@@ -20036,6 +20062,8 @@ function HomeScreenContent() {
           }
         }}
       >
+        <GoScreenHost registerBack={handler => { calendarLayerBackRef.current = handler; }}>
+
         <View style={{ flex: 1, backgroundColor: screenBgColors.calendario ?? "#0a0a0f" }}>
           {/* ── ZONA SUPERIOR — Agenda Operativa / Calendario semanal ──────── */}
           {/* View exterior captura el swipe ↓ → cierra todo; Pressable interior captura el tap → colapsa panel */}
@@ -20135,7 +20163,7 @@ function HomeScreenContent() {
             {/* AgendaBoard shares the existing view/settings header with month navigation. */}
             <View testID="calendar-agenda-viewport" style={{ flex: 1 }}>
             {demoCustomerCalendarSelected ? (demoBookingRepository
-              ? <View style={{ flex: 1 }}><DemoCustomerCalendar renderMessageScreen={renderEntryMessageScreen} scrollToTodayToken={calScrollToTodayToken} onOpenMessage={(entry, back) => openEntryMessage(entry, back, true)} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
+              ? <View style={{ flex: 1 }}><DemoCustomerCalendar onGoToLanding={goDirectlyToLanding} renderMessageScreen={renderEntryMessageScreen} scrollToTodayToken={calScrollToTodayToken} onOpenMessage={(entry, back) => openEntryMessage(entry, back, true)} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
               : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
                 renderHeader={monthNavigation => (<View testID="calendar-header"
               pointerEvents={showBookingFromCal ? "none" : "auto"}
@@ -20254,7 +20282,7 @@ function HomeScreenContent() {
                   openProposalFromList({ id: g.id, time: g.time, place: (g as any).place || "" });
                   setCalOpen(false);
                 }}
-                onGoToLanding={() => setCalOpen(false)}
+                onGoToLanding={goDirectlyToLanding}
                 onProposeItem={(id) => {
                   const booking=customerBookings.entries.find(entry=>entry.id===id);if(booking){openBookingProposal(booking);return;}
                   const g = goLog.find((x) => x.id === id);
@@ -20764,7 +20792,8 @@ function HomeScreenContent() {
             )}
 
           </Pressable>
-          {calOpen && !messageEntryId && messagesScreen}
+          {(calOpen || directLandingExit) && !messageEntryId && messagesScreen}
+          {(calOpen || directLandingExit) && !messagesOpen && goChatScreen}
 
         {/* ── MONTH GRID BOTTOM SHEET — slide up desde abajo ─────────────
             Se monta dentro del mismo Modal del calendario para heredar
@@ -21488,6 +21517,7 @@ function HomeScreenContent() {
           {calendarTaskContextRef.current && fieldSelectorOpen && renderFieldSelector(true)}
           <GoBoardsPanel visible={boardsOpen && calOpen} onClose={() => setBoardsOpen(false)} manager={goBoards} fontScale={uiScaleFactor} handedness={handedness} />
         </View>
+      </GoScreenHost>
       </Modal>
 
 
@@ -24308,10 +24338,10 @@ function HomeScreenContent() {
 
 
       {/* GO CHAT SCREEN — asistente de reservas V1 */}
-      {!messagesOpen && goChatScreen}
+      {!calOpen && !directLandingExit && !messagesOpen && goChatScreen}
 
       {/* MENSAJES GO — pantalla de mensajería interna */}
-      {!calOpen && !messageEntryId && messagesScreen}
+      {!calOpen && !directLandingExit && !messageEntryId && messagesScreen}
 
       {/* AI INPUT MODAL — bloque compacto pegado al teclado, sin huecos.
           Input multilinea que crece HACIA ARRIBA según se escribe (la
@@ -26452,7 +26482,7 @@ function HomeScreenContent() {
       </Animated.View>
 
       {/* Lists and Calendar share the same expanded entry, contract and messaging. */}
-      <GoEntryDetailsSheet entry={calBookingDetailEntry?goLog.find(e=>e.id===calBookingDetailEntry.id)??null:null} handedness={handedness}
+      <GoEntryDetailsSheet onGoToLanding={goDirectlyToLanding} entry={calBookingDetailEntry?goLog.find(e=>e.id===calBookingDetailEntry.id)??null:null} handedness={handedness}
         onClose={()=>setCalBookingDetailEntry(null)}
         renderMessageScreen={calBookingDetailEntry ? () => renderEntryMessageScreen(calBookingDetailEntry) : undefined}
         onMessage={calBookingDetailEntry?()=>{const entry=calBookingDetailEntry;openEntryMessage(entry,()=>setCalBookingDetailEntry(entry),true);}:undefined}>

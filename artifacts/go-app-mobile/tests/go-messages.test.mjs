@@ -19,7 +19,7 @@ async function fixture({initial=true,context,offline=false,account='customer',pl
  const text=n=>Array.isArray(n)?n.map(text).join(''):typeof n==='string'?n:n?.props?text(n.props.children):'';
  class Value{setValue(){}interpolate(){return 0;}}
  const motion={start:fn=>fn?.()};const chain=new Proxy({},{get:()=>()=>chain});
- const View=native('View');
+ const NativeView=native('View');const View=props=>{React.useLayoutEffect(()=>{props.onLayout?.({nativeEvent:{layout:{x:10,y:0,width:370,height:300}}});},[]);return React.createElement(NativeView,props);};
  const screen=evaluate('components/MessagesScreen.tsx',{
   '@/data/booking':booking,'@/data/goMessages':data,'@/lib/sessionEvents':{onSessionChanged:fn=>{events.add(fn);return()=>events.delete(fn);}},
   '@react-native-async-storage/async-storage':storage,'@expo/vector-icons':{Feather:()=>null},'./DraggableFAB':{DraggableFAB:({children})=>children},

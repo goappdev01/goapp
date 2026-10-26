@@ -28,8 +28,8 @@ test('expanded sheet reserves one bottom close outside the scroll and keeps GO m
  let closed=0,message=0;const f=sheet(base,{onClose:()=>closed++,onMessage:()=>message++});
  const modal=nodes(f.tree,n=>n.type==='Modal')[0],footer=nodes(f.tree,n=>n.props.testID==='entry-detail-close-footer')[0],scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0];
  assert.equal(modal.props.animationType,'none');assert.equal(footer.props.style.position,undefined);assert.equal(footer.props.style.flexShrink,0);assert.equal(footer.props.style.paddingBottom,6);assert.equal(footer.props.style.flexDirection,'row');assert.equal(nodes(scroll,n=>n.props.testID==='entry-detail-close-footer').length,0);assert.equal(scroll.props.contentContainerStyle.paddingBottom,12);assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
- const close=nodes(footer,n=>n.props.accessibilityLabel==='Cerrar detalle')[0];assert.equal(close.props.hitSlop,0);const touch=f.render(close.type,close.props);assert.equal(touch.props.style.width,56);assert.equal(touch.props.style.height,56);assert.equal(touch.props.delayPressIn,0);touch.props.onPress({stopPropagation(){}});assert.equal(closed,0);modal.props.onDismiss();assert.equal(closed,1);
- const msg=nodes(f.tree,n=>n.props.testID==='entry-message-go')[0];assert.equal(msg.props.accessibilityLabel,'MENSAJE GO');assert.equal(msg.props.style.alignSelf,'flex-end');msg.props.onPress();assert.equal(message,1);
+ const close=nodes(f.tree,n=>n.props.accessibilityLabel==='Cerrar detalle')[0];assert.equal(nodes(f.tree,n=>n.props.testID==='entry-detail-floating-navigation')[0].props.style.position,'absolute');assert.equal(close.props.hitSlop,0);const touch=f.render(close.type,close.props);assert.equal(touch.props.style.width,56);assert.equal(touch.props.style.height,56);assert.equal(touch.props.delayPressIn,0);touch.props.onPress({stopPropagation(){}});assert.equal(closed,0);modal.props.onDismiss();assert.equal(closed,1);
+ const fresh=sheet(base,{onMessage:()=>message++});const msg=nodes(fresh.tree,n=>n.props.testID==='entry-message-go')[0];assert.equal(msg.props.accessibilityLabel,'MENSAJE GO');assert.equal(msg.props.style.alignSelf,'flex-end');msg.props.onPress();fresh.render(fresh.components.GoEntryDetailsSheet,{entry:base,onClose(){},onMessage:()=>message++});nodes(fresh.tree,n=>n.props.testID==='entry-details-modal')[0]?.props.onDismiss();assert.equal(message,1);
 });
 
 test('identity suppression is limited to historic placeholders; real business names are kept',()=>{
@@ -151,6 +151,6 @@ test('calendar compact cards omit follow-up; expanded personal actions and conte
  const card=nodes(tree,n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85)[0];card.props.onPress();tree=f.render(AgendaBoard,props);
  const done=nodes(tree,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0];assert.ok(done);done.props.onPress({stopPropagation(){}});assert.deepEqual(resolved,[[base.id,'done',base.id]]);
  nodes(tree,n=>n.props.testID==='entry-message-go')[0].props.onPress();
- f.runTimers();assert.equal(typeof returnTo,'function');tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,0);
+ tree=f.render(AgendaBoard,props);nodes(tree,n=>n.props.testID==='entry-details-modal')[0]?.props.onDismiss();f.runTimers();assert.equal(typeof returnTo,'function');tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,0);
  returnTo();tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,1);assert.equal(props.selectedDateISO,base.dateISO);
 });
