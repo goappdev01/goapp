@@ -19,7 +19,8 @@ export function createScreenCloseGesture(options: {
   const relative = (event: GestureResponderEvent): GestureResponderEvent => {
     const start = guide ? guide.x - (options.handedness() === "right" ? guide.width * 3 : 0) : 0;
     const x = eligible && guide ? Math.max(guide.x, Math.min(guide.x + guide.width, event.nativeEvent.pageX)) : event.nativeEvent.pageX;
-    return { ...event, nativeEvent: { ...event.nativeEvent, pageX: x - start },
+    // Responder history is part of the native contract, even when it is not enumerable.
+    return { ...event, touchHistory: event.touchHistory, nativeEvent: { ...event.nativeEvent, pageX: x - start },
       stopPropagation: () => event.stopPropagation() };
   };
   const responder = createCalendarCloseResponder({ enabled, width, handedness: options.handedness,

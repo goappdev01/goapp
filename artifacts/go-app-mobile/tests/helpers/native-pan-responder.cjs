@@ -23,7 +23,7 @@ function nativePanResponder() {
   return load('PanResponder').default;
 }
 
-function touchStream({ x = 380, y = 450, id = 0, time = 1000 } = {}) {
+function touchStream({ x = 380, y = 450, id = 0, time = 1000, historyEnumerable = true } = {}) {
   const initial = { x, y }; let clock = time, previous = { x, y, time }, stopped = 0;
   function event(dx = 0, dy = 0, ms = 20, ended = false) {
     clock += ms;
@@ -33,9 +33,11 @@ function touchStream({ x = 380, y = 450, id = 0, time = 1000 } = {}) {
       currentPageX: current.x, currentPageY: current.y, currentTimeStamp: clock };
     previous = current;
     const point = { pageX: current.x, pageY: current.y, identifier: id, timestamp: clock };
-    return { nativeEvent: { ...point, touches: ended ? [] : [point], changedTouches: [point] },
-      touchHistory: { touchBank: [record], numberActiveTouches: ended ? 0 : 1, indexOfSingleActiveTouch: 0, mostRecentTimeStamp: clock },
+    const event = { nativeEvent: { ...point, touches: ended ? [] : [point], changedTouches: [point] },
       stopPropagation() { stopped++; } };
+    // The responder contract guarantees access to touchHistory, not enumerability.
+    return Object.defineProperty(event, 'touchHistory', { enumerable: historyEnumerable, configurable: true, writable: true,
+      value: { touchBank: [record], numberActiveTouches: ended ? 0 : 1, indexOfSingleActiveTouch: 0, mostRecentTimeStamp: clock } });
   }
   return { event, get stopped() { return stopped; } };
 }
