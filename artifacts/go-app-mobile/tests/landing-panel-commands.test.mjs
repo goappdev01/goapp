@@ -29,6 +29,7 @@ async function mountCommands(counts){
  vm.runInNewContext(ts.transpileModule(fs.readFileSync('components/landing/LandingPanelCommands.tsx','utf8'),{compilerOptions:{ alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,ctx);
  let state,clean;const actions=[],animations=[];
  Object.assign(ctx,{useState:React.useState,React,LandingPanelCommands:ctx.exports.LandingPanelCommands,
+  LANDING_VISIT_VISUAL:load('components/landing/LandingVisitOutline.tsx',{react:React,'react-native':native}).LANDING_VISIT_VISUAL,
   capture:v=>state=v,captureClean:fn=>clean=fn,nextGroups:{visit:[{g:{id:'visit-1',type:'GO_BOOKING',color:'#60a5fa'}}],task:[{g:{id:'task-1',type:'TAREA',color:'#a855f7'}},{g:{id:'task-2',type:'TAREA_INTERNA',color:'#a855f7'}}]},allPendientes:[{kind:'cambio',g:{id:'change-1'}}],
   t:k=>({next_fem:'PRÓXIMA',word_visit:'visita',task:'TAREA'})[k]??k,readableOnDark:c=>c,intent:{color:'#ffffff'},
   LayoutAnimation:{configureNext(){animations.push(true)},Presets:{easeInEaseOut:{}}},Haptics:{selectionAsync:()=>Promise.resolve(),impactAsync:()=>Promise.resolve(),ImpactFeedbackStyle:{Medium:'medium'}},startRelatedGoAction:g=>actions.push(g.id)});

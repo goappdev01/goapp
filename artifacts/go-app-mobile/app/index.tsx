@@ -122,7 +122,7 @@ import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
-import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME } from "@/components/landing/LandingVisitOutline";
+import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "@/components/GoEntryDetails";
 import { entryHeading, entryIdentity, entryIsReservation, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand } from "@/data/goEntryPresentation";
@@ -14633,7 +14633,7 @@ function HomeScreenContent() {
       {!anyOverlayOpen && !isActivelyCreating && !rutasMode && kbHeight === 0 && (
         <LandingPanelCommands frame={landingPanels.commands} commands={[
           { key: "visit", heading: t('next_fem'), title: t('word_visit').toUpperCase(),
-            color: readableOnDark(nextGroups.visit[0]?.g.color || intent.color), count: nextGroups.visit.length,
+            color: LANDING_VISIT_VISUAL.color, count: nextGroups.visit.length,
             expanded: !cambiosOpen && !nextAptMinimized && nextPanelKind === "visit",
             onPress: () => {
               setCambiosOpen(false);
@@ -14956,7 +14956,7 @@ function HomeScreenContent() {
         const activeApt = nextPanelAppointments[safeIdx] ?? nextPanelAppointments[0];
         const g = activeApt.g;
         const dt = activeApt.dt;
-        const tint = readableOnDark(g.color || intent.color);
+        const tint = nextPanelKind === "visit" ? LANDING_VISIT_VISUAL.color : readableOnDark(g.color || intent.color);
         const operations = renderLandingOperations(g);
         const aChange = operations.change;
 

@@ -95,6 +95,7 @@ test('approved geometry, controls, authentication and proposal resolution remain
  // Only the three explicitly authorized toggles may differ from the approved controls.
  // Mounted lifecycle tests exercise their open/close behavior; keep everything else frozen.
  let currentCommands=commands(ast).getText(ast);
+ currentCommands=currentCommands.replace('color: LANDING_VISIT_VISUAL.color','color: readableOnDark(nextGroups.visit[0]?.g.color || intent.color)');
  for(const kind of ['visit','task']){
   const toggle='setNextAptMinimized(!cambiosOpen && !nextAptMinimized && nextPanelKind === "'+kind+'");';
   assert.equal(currentCommands.split(toggle).length,2,'exactly one toggle for '+kind);

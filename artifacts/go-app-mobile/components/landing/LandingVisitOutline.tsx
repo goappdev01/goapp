@@ -1,6 +1,9 @@
 import React from "react";
 import { StyleSheet, View } from "react-native";
 
+/** Approved Admin yellow; module identity is independent of role, business and booking state. */
+export const LANDING_VISIT_VISUAL = Object.freeze({ color: "#eab308" });
+
 /** Shared global frame: decoration never constrains or intercepts its contents. */
 export const LANDING_VISIT_FRAME = Object.freeze({ bottomGap: 8, outset: 8, borderWidth: 1.5, radius: 14 });
 export const LANDING_ENTRY_FRAME = LANDING_VISIT_FRAME;
