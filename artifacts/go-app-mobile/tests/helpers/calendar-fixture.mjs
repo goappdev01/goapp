@@ -4,6 +4,7 @@ import path from "node:path";
 import vm from "node:vm";
 const require = createRequire(path.join(process.cwd(), "package.json"));
 const ts = require("typescript");
+const actualResponder = require('./tests/helpers/native-pan-responder.cjs').nativePanResponder();
 const translatedFloorLabels = {};
 vm.runInNewContext(ts.transpileModule(readFileSync("i18n/translations.ts", "utf8"), {
   compilerOptions: { esModuleInterop: false, alwaysStrict: false, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -49,7 +50,7 @@ export function fixture({ now } = {}) {
     AppState: { addEventListener: () => ({remove(){}}) },
     Linking: { openURL: async url => { urls.push(url); } },
     Alert: { alert() {} },
-    PanResponder: { create: config => ({ panHandlers: config }) },
+    PanResponder: actualResponder,
     Animated: { Value, View: 'Animated.View', timing: () => animation, spring: () => animation, sequence: () => animation, loop: () => animation, delay: () => animation },
   }, { get: (target, key) => target[key] ?? key });
   const chain = new Proxy({}, { get: () => () => chain });
@@ -107,6 +108,7 @@ export function fixture({ now } = {}) {
         if (name === '@/lib/time') return load('lib/time.ts');
         if (name === '@/lib/calendarGestureOwnership') return load('lib/calendarGestureOwnership.ts');
         if (name === '@/lib/calendarCloseResponder') return load('lib/calendarCloseResponder.ts');
+        if (name === '@/lib/entryDetailTouchDelivery') return load('lib/entryDetailTouchDelivery.ts');
         if (name.startsWith('.')) { const target=path.resolve(path.dirname(filename),name);return load(target+(existsSync(target+'.tsx')?'.tsx':'.ts')); }
         throw new Error(`Unexpected import ${name}`);
       },

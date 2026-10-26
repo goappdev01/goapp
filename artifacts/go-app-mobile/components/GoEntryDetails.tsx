@@ -12,6 +12,7 @@ import { CalendarCloseGuide } from "./ui/CalendarCloseGuide";
 import { landingCurrentEntry } from "./landing/landingPanels";
 import { calendarGestureOwnership } from "@/lib/calendarGestureOwnership";
 import { createCalendarCloseResponder } from "@/lib/calendarCloseResponder";
+import { entryDetailTouchDelivery } from "@/lib/entryDetailTouchDelivery";
 
 export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
   const { lang } = useLanguage();
@@ -139,6 +140,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
   const gapEnd = Math.min(navigationGeometry.y + navigationGeometry.height, navigationGeometry.y + navigationGeometry.actionsTop - navigationGeometry.offset - 12);
   const navigationTop = navigationGeometry.height > 0 && navigationGeometry.summaryEnd > 0 && navigationGeometry.actionsTop > 0 && gapEnd - gapStart >= ENTRY_DETAIL_CLOSE.touchSize ? gapEnd - ENTRY_DETAIL_CLOSE.touchSize : undefined;
   const phase = useRef<"open" | "dismissing" | "closed">("open");
+  const scroll = useRef<React.ElementRef<typeof ScrollView>>(null);
   const messageAfterDismiss = useRef(false);
   const live = useRef({ onClose, onMessage, handedness });
   live.current = { onClose, onMessage, handedness };
@@ -165,21 +167,31 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
     // React Native only emits Modal.onDismiss on iOS; other platforms finish after hiding.
     if (closing && Platform.OS !== "ios") finishDismiss();
   }, [closing, finishDismiss]);
-  const pan = useMemo(() => createCalendarCloseResponder({
+  const pan = useMemo(() => entryDetailTouchDelivery(createCalendarCloseResponder({
     enabled: () => phase.current === "open",
     width: () => Dimensions.get("window").width,
     handedness: () => live.current.handedness,
     detail: true,
     onClose: dismiss,
+    onCollapse: dismiss,
+  }), {
+    enabled: () => phase.current === "open",
+    width: () => Dimensions.get("window").width,
+    handedness: () => live.current.handedness,
+    scrollEnabled: enabled => {
+      const target = scroll.current?.getNativeScrollRef?.() ?? scroll.current;
+      target?.setNativeProps?.({ scrollEnabled: enabled });
+    },
   }), [dismiss]);
+  useEffect(() => () => pan.release(), [pan]);
   const current = landingCurrentEntry(entry);
   const pending = entryProposalPending(entry);
   return <Modal testID="entry-details-modal" visible={!closing} transparent animationType="none" onRequestClose={dismiss} onDismiss={finishDismiss}>
-    <View testID="entry-details-overlay" style={{ flex: 1, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8, paddingHorizontal: Math.max(insets.left, insets.right, 8), backgroundColor: "rgba(0,0,0,0.62)" }}>
-      <View testID="entry-details-sheet" pointerEvents={closing ? "none" : "auto"} onAccessibilityEscape={dismiss} style={[s.sheet, { borderColor: pending ? "#FF8C00" : entry.color || "#4A80BD" }]}>
-        <View testID="entry-details-gesture-body" {...pan.panHandlers} style={{ flex: 1, minHeight: 0 }}>
+    <View testID="entry-details-overlay" style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8, paddingHorizontal: Math.max(insets.left, insets.right, 8), backgroundColor: "rgba(0,0,0,0.62)" }}>
+      <View testID="entry-details-sheet" {...pan.panHandlers} pointerEvents={closing ? "none" : "auto"} onAccessibilityEscape={dismiss} style={[s.sheet, { borderColor: pending ? "#FF8C00" : entry.color || "#4A80BD" }]}>
+        <View testID="entry-details-gesture-body" style={{ flex: 1, minHeight: 0 }}>
         <View testID="entry-detail-close-gesture" style={{ height: ENTRY_DETAIL_CLOSE.headerHeight, alignItems: "center", justifyContent: "center" }}><View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.35)" }} /></View>
-        <ScrollView testID="entry-details-scroll" style={{ flex: 1 }} onLayout={event => { const { y, height } = event.nativeEvent.layout; setNavigationGeometry(value => ({ ...value, y, height })); }} onScroll={event => setNavigationGeometry(value => ({ ...value, offset: event.nativeEvent.contentOffset.y }))} scrollEventThrottle={32} keyboardShouldPersistTaps="handled" bounces={false} alwaysBounceVertical={false} overScrollMode="never" directionalLockEnabled contentContainerStyle={{ flexGrow:1, paddingHorizontal: 18, paddingBottom: 12, gap: 12 }}>
+        <ScrollView ref={scroll} testID="entry-details-scroll" style={{ flex: 1 }} onLayout={event => { const { y, height } = event.nativeEvent.layout; setNavigationGeometry(value => ({ ...value, y, height })); }} onScroll={event => setNavigationGeometry(value => ({ ...value, offset: event.nativeEvent.contentOffset.y }))} scrollEventThrottle={32} keyboardShouldPersistTaps="handled" bounces={false} alwaysBounceVertical={false} overScrollMode="never" directionalLockEnabled contentContainerStyle={{ flexGrow:1, paddingHorizontal: 18, paddingBottom: 12, gap: 12 }}>
           <View testID="entry-details-information" onLayout={event => { const { y, height } = event.nativeEvent.layout; setNavigationGeometry(value => ({ ...value, summaryEnd: y + height })); }} style={{ gap: 12 }}>
           <GoEntrySummary entry={current} />
           <GoEntryContract entry={current} />

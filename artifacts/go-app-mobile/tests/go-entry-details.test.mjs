@@ -92,7 +92,7 @@ test('contract shows only booked snapshot lines, included items are not charged 
  const entry={...base,detail:'Información larga '.repeat(300),bookingCatalog:{totalPrice:45,currency:'EUR',lines:[{itemId:'dye',name:'Tinte',charge:45,currency:'EUR'},{itemId:'included',name:'Mascarilla',included:true,charge:0,currency:'EUR'}],options:[{name:'No contratado'}]}};
  const f=sheet(entry),text=texts(f.tree);assert.ok(text.includes('Tinte'));assert.ok(text.includes('Mascarilla'));assert.ok(text.includes('Incluido'));assert.ok(text.includes('45.00 EUR'));assert.ok(!text.includes('No contratado'));
  assert.ok(text.includes(entry.detail));const scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0];assert.equal(scroll.props.bounces,false);assert.equal(scroll.props.alwaysBounceVertical,false);assert.equal(scroll.props.style.flex,1);
- const gesture=nodes(f.tree,n=>n.props.testID==='entry-details-gesture-body')[0];assert.equal(scroll.props.onPanResponderRelease,undefined);assert.ok(gesture.props.onPanResponderRelease);assert.ok(gesture.props.onMoveShouldSetPanResponder);assert.equal(gesture.props.onMoveShouldSetPanResponderCapture,undefined);
+ const gesture=nodes(f.tree,n=>n.props.testID==='entry-details-sheet')[0];assert.equal(scroll.props.onResponderRelease,undefined);assert.ok(gesture.props.onResponderRelease);assert.ok(gesture.props.onMoveShouldSetResponder);assert.ok(gesture.props.onTouchEndCapture);
 });
 for(const type of ['GO_BOOKING','TAREA_INTERNA'])test(`${type}: opening/closing repeatedly preserves closed card geometry, day and canonical record`,()=>{
  const f=fixture({now:'2030-10-26T08:00:00'}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');

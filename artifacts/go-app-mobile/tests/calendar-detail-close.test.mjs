@@ -25,33 +25,23 @@ for (const hand of ['right', 'left']) test(`${hand}: a single real 56-point clos
   } finally { await f.dispose(); }
 });
 
-for (const hand of ['right', 'left']) test(`${hand}: incomplete and interrupted gestures leave scrolling usable and permit a later single close`, async () => {
+for (const hand of ['right', 'left']) test(`${hand}: native whole-sheet responder and temporary scroll handoff recover after an incomplete or cancelled contact`, async () => {
   const f = await detailFixture({ handedness: hand }); let closed = 0;
+  const {touchStream} = (await import('./helpers/native-pan-responder.cjs')).default;
   try {
-    await f.render({ onClose: () => closed++ }); const initial = f.props.get('entry-details-gesture-body').onPanResponderRelease;
-    for (let i = 0; i < 10; i++) await f.render({ entry: { ...detailEntry }, onClose: () => { closed += 2; } });
-    assert.equal(f.panCreations, 1); const pan = f.props.get('entry-details-gesture-body'); assert.equal(pan.onPanResponderRelease, initial);
-    const point = (x, y, timestamp = 200) => ({ nativeEvent: { pageX: x, pageY: y, identifier: 0, timestamp, touches: [{}] }, stopPropagation() {} });
-    const x = hand === 'right' ? 380 : 10, event = point(x, 413), gesture = { dy: 13, dx: 0, y0: 0, vy: 0.1 };
-    const down = (sx = x, sy = 400) => pan.onStartShouldSetPanResponderCapture(point(sx, sy, 100));
-    down();
-    assert.equal(pan.onMoveShouldSetPanResponder(event, gesture), true);
-    const boundary = 390 * (hand === 'right' ? .75 : .25);
-    down(boundary); assert.equal(pan.onMoveShouldSetPanResponder(point(boundary, 413), gesture), true);
-    down(boundary + (hand === 'right' ? -1 : 1)); assert.equal(pan.onMoveShouldSetPanResponder(point(boundary, 413), gesture), false);
-    down();
-    for (const g of [{ ...gesture, dy: 12 }, { ...gesture, dx: 30 }]) assert.equal(pan.onMoveShouldSetPanResponder(event, g), false);
-    down(195); assert.equal(pan.onMoveShouldSetPanResponder(point(195, 413), gesture), false, 'native pre-grant y0=0 cannot capture central scrolling');
-    down(195, 70); assert.equal(pan.onMoveShouldSetPanResponder(point(195, 83), gesture), false, 'header uses the same side lane as Calendar');
-    for (const dy of [13, 50, 139, 140]) await f.settle(() => { down(); pan.onPanResponderGrant(event); pan.onPanResponderRelease(point(x, 400 + dy), { ...gesture, dy }); });
-    assert.equal(f.props.get('entry-details-modal').visible, true); assert.equal(closed, 0);
-    pan.onPanResponderTerminate(); assert.equal(pan.onPanResponderTerminationRequest(), false);
-    assert.equal(f.props.get('entry-details-sheet').style.some(s => s.transform), false, 'no displaced controls or unfinished animation');
-    await f.settle(() => { down(); pan.onPanResponderGrant(event); pan.onPanResponderRelease(point(x, 560), { ...gesture, dy: 160 }); pan.onPanResponderRelease(point(x, 600), { ...gesture, dy: 200 }); f.props.get('Cerrar detalle').onPress({ stopPropagation() {} }); });
-    assert.equal(f.props.get('entry-details-modal').visible, false); assert.equal(closed, 0); assert.equal(pan.onMoveShouldSetPanResponder(event, gesture), false);
-    await f.nativeDismiss(); await f.nativeDismiss(); assert.equal(closed, 2, 'current callback runs exactly once after native dismissal');
-    await f.render({ entry: null }); await f.render({ entry: detailEntry }); assert.equal(f.props.get('entry-details-modal').visible, true);
-  } finally { await f.dispose(); }
+    await f.render({ onClose: () => closed++ }); const initial=f.props.get('entry-details-sheet').onResponderRelease;
+    for(let i=0;i<10;i++)await f.render({entry:{...detailEntry},onClose:()=>{closed+=2;}});
+    assert.equal(f.panCreations,1);const pan=f.props.get('entry-details-sheet');assert.equal(pan.onResponderRelease,initial);
+    assert.equal(f.props.get('entry-details-gesture-body').onResponderRelease,undefined,'one responder on the full sheet includes the footer without duplication');
+    let time=1000;const stream=(x=hand==='right'?380:10)=>touchStream({x,y:400,time:time+=1000});
+    const start=s=>{pan.onStartShouldSetResponderCapture(s.event());const move=s.event(0,13);assert.equal(pan.onMoveShouldSetResponderCapture(move),false);assert.equal(pan.onMoveShouldSetResponder(move),true);pan.onResponderGrant(move);};
+    for(const dy of[13,40,50]){const s=stream();await f.settle(()=>{start(s);assert.equal(f.nativeScroll.enabled,false);pan.onResponderMove(s.event(0,dy,600));pan.onResponderRelease(s.event(0,dy,10,true));});assert.equal(f.nativeScroll.enabled,true);assert.equal(f.props.get('entry-details-modal').visible,true);}
+    const cancel=stream();start(cancel);pan.onResponderTerminate(cancel.event(0,25));assert.equal(f.nativeScroll.enabled,true);assert.equal(pan.onResponderTerminationRequest(),false);
+    const center=stream(195);pan.onStartShouldSetResponderCapture(center.event());const move=center.event(0,160);pan.onMoveShouldSetResponderCapture(move);assert.equal(pan.onMoveShouldSetResponder(move),false);assert.equal(f.nativeScroll.enabled,true);
+    const valid=stream();await f.settle(()=>{start(valid);pan.onResponderMove(valid.event(0,160,600));const up=valid.event(0,160,10,true);pan.onResponderRelease(up);pan.onResponderRelease(up);});
+    assert.equal(f.props.get('entry-details-modal').visible,false);assert.equal(f.nativeScroll.enabled,true);assert.equal(closed,0);await f.nativeDismiss();await f.nativeDismiss();assert.equal(closed,2);
+    await f.render({entry:null});await f.render({entry:detailEntry});assert.equal(f.props.get('entry-details-modal').visible,true);
+  }finally{await f.dispose();}
 });
 
 for (const platform of ['android', 'web']) test(`${platform}: closing completes once without waiting for iOS-only onDismiss`, async () => {

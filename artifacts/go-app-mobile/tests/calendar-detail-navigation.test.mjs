@@ -41,10 +41,10 @@ for (const hand of ['right', 'left']) test(`${hand}: actual RN grant reset, inco
   const f = await nestedCalendarFixture({ hand });
   try {
     await f.open();
-    let result = await f.releaseDetail(f.stream(), 90, 600); assert.equal(result.claimed, true);
+    let result = await f.releaseDetail(f.stream(), 40, 600); assert.equal(result.claimed, true);
     assert.equal(f.detail.props.get('entry-details-modal').visible, true); assert.equal(f.counters.detailCloses, 0);
-    result = await f.releaseDetail(f.stream(), 65, 40); assert.equal(result.claimed, true);
-    assert.equal(f.detail.props.get('entry-details-modal').visible, true, 'short flick follows Calendar instead of a separate velocity shortcut');
+    result = await f.releaseDetail(f.stream(), 40, 40); assert.equal(result.claimed, true);
+    assert.equal(f.detail.props.get('entry-details-modal').visible, true, 'a sub-threshold flick cannot bypass the Calendar panel criterion');
     result = await f.releaseDetail(f.stream(), 145, 300); assert.equal(result.claimed, true);
     assert.equal(f.detail.props.get('entry-details-modal').visible, false);
     assert.equal((await f.releaseDetail(f.stream(), 200)).claimed, false, 'second gesture during dismissal cannot start');
@@ -54,7 +54,7 @@ for (const hand of ['right', 'left']) test(`${hand}: actual RN grant reset, inco
     await f.acknowledge(); f.calendarPan.onResponderRelease(pending.event(0, 200, 10, true));
     assert.equal(f.calendarOpenRef.current, true); assert.equal(f.counters.calendarCloses, 0);
     await f.open();
-    const pan = f.detail.props.get('entry-details-gesture-body'), s = f.stream(); pan.onStartShouldSetResponderCapture(s.event());
+    const pan = f.detail.props.get('entry-details-sheet'), s = f.stream(); pan.onStartShouldSetResponderCapture(s.event());
     const activation = s.event(0, 13); assert.equal(pan.onMoveShouldSetResponderCapture(activation), false); assert.equal(pan.onMoveShouldSetResponder(activation), true); pan.onResponderGrant(activation);
     assert.equal(pan.onResponderTerminationRequest(activation), false, 'another JS responder cannot steal an owned drag');
     pan.onResponderTerminate(activation); pan.onResponderRelease(s.event(0, 200, 10, true));
@@ -68,7 +68,7 @@ for (const hand of ['right', 'left']) test(`${hand}: actual RN grant reset, inco
 for (const hand of ['right', 'left']) test(`${hand}: central scrolling stays central even if the finger later crosses into the side lane`, async () => {
   const f = await nestedCalendarFixture({ hand });
   try {
-    await f.open(); const pan = f.detail.props.get('entry-details-gesture-body'), s = f.stream(195, 400);
+    await f.open(); const pan = f.detail.props.get('entry-details-sheet'), s = f.stream(195, 400);
     pan.onStartShouldSetResponderCapture(s.event());
     assert.equal(pan.onMoveShouldSetResponderCapture(s.event(hand === 'right' ? 185 : -185, 200, 600)), false);
     assert.equal(f.detail.props.get('entry-details-modal').visible, true); assert.equal(f.root.enabled, false);
@@ -89,7 +89,7 @@ test('late releases and finalization from an old recognizer cannot erase the nex
     const oldRoot = f.root; f.refreshRoot(); f.rootDown(); f.rootStart(); oldRoot.onFinalize?.();
     f.rootEnd(100); assert.equal(f.counters.globalCloses, 1, 'old finalization has recognizer-local state');
     await f.reopenCalendar(); await f.open();
-    const oldSheet = f.detail.props.get('entry-details-gesture-body'), next = f.stream();
+    const oldSheet = f.detail.props.get('entry-details-sheet'), next = f.stream();
     oldSheet.onStartShouldSetResponderCapture(next.event()); const start = next.event(0, 13, 40);
     assert.equal(oldSheet.onMoveShouldSetResponderCapture(start), false); assert.equal(oldSheet.onMoveShouldSetResponder(start), true); oldSheet.onResponderGrant(start);
     oldSheet.onResponderMove(next.event(0, 145, 600)); oldSheet.onResponderTerminate(first.up); oldSheet.onResponderRelease(first.up);

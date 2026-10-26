@@ -15,6 +15,7 @@ const components=evaluate('components/GoEntryDetails.tsx',{
  './ui/CalendarCloseGuide':{CalendarCloseGuide:()=>null},
  '@/lib/calendarGestureOwnership':evaluate('lib/calendarGestureOwnership.ts'),
  '@/lib/calendarCloseResponder':responder,
+ '@/lib/entryDetailTouchDelivery':evaluate('lib/entryDetailTouchDelivery.ts'),
  './landing/landingPanels':evaluate('components/landing/landingPanels.ts'),
 });
 export const renderEntryQuickActions=(entry,showState=true,compact=false)=>React.createElement(components.GoEntryQuickActions,{entry,showState,compact,onCancel(){},onPropose(){},onEdit(){},onAccept(){},onReject(){}});

@@ -50,7 +50,7 @@ export async function nestedCalendarFixture({ hand = 'right', homeSource = fs.re
     rootStart() { root.onStart?.({ absoluteX: 380, absoluteY: 600 }); },
     rootEnd(dy = 180, success = true) { root.onEnd?.({ translationY: dy }, success); root.onFinalize?.(); },
     async releaseDetail(stream, distance = 145, duration = 600) {
-      const pan = detail.props.get('entry-details-gesture-body');
+      const pan = detail.props.get('entry-details-sheet');
       const down = stream.event(); pan.onStartShouldSetResponderCapture(down);
       const activation = stream.event(0, 13, 40); pan.onMoveShouldSetResponderCapture(activation); const claim = pan.onMoveShouldSetResponder(activation);
       if (!claim) return { claimed: false, down };
