@@ -16,7 +16,7 @@ const ast=ts.createSourceFile('config.tsx',readFileSync('components/empresa/Empr
 const declarations=['useConfigArrayDraft','useStepSave','ServiceTimingEditor','StepServicios'].map(name=>ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name));
 const styles=ast.statements.flatMap(node=>ts.isVariableStatement(node)?[...node.declarationList.declarations]:[]).find(node=>node.name.getText(ast)==='c').initializer.arguments[0];
 const serviceCardStyle=vm.runInNewContext('('+styles.properties.find(node=>node.name?.getText(ast)==='svcRow').initializer.getText(ast)+')',{CARD:'#FFFFFF'});
-const presentationStyles=Object.fromEntries(['svcNameInput','importCard','importBtn','importBtnsRow','importUrlBtn','importBtnLabel'].map(name=>[name,vm.runInNewContext('('+styles.properties.find(node=>node.name?.getText(ast)===name).initializer.getText(ast)+')',{CARD:'#FFFFFF',BORDER:'rgba(0,0,0,0.08)',TEXT:'#111827',DIM:'#9CA3AF',GREEN:'#3D9A84'})]));
+const presentationStyles=Object.fromEntries(['svcNameInput','importCard','importBtn','importBtnsRow','importUrlBtn','importBtnLabel','importDividerTxt'].map(name=>[name,vm.runInNewContext('('+styles.properties.find(node=>node.name?.getText(ast)===name).initializer.getText(ast)+')',{CARD:'#FFFFFF',BORDER:'rgba(0,0,0,0.08)',TEXT:'#111827',GRAY:'#6B7280',DIM:'#9CA3AF',GREEN:'#3D9A84'})]));
 const translations=evaluate('i18n/translations.ts').translations;
 const descendants=node=>node?[node,...node.childNodes.flatMap(descendants)]:[];
 async function fixture(service=tint(),{lang='es',resources=[],delay=false}={}){
@@ -183,5 +183,16 @@ for(const lang of ['es','en'])test(lang+': exactly three spaced import buttons r
   await f.settle(()=>buttons[1].onPress());assert.equal(f.imports.pdf,1);
   await f.settle(()=>buttons[2].onPress());const sheet=f.visible().find(p=>p.native==='GoOcrImportSheet');assert.equal(sheet.visible,true);assert.equal(sheet.isUrl,true);assert.equal(sheet.sourceUri,null);
   await f.settle(()=>sheet.onClose());assert.equal(f.visible().find(p=>p.native==='GoOcrImportSheet').visible,false);assert.equal(f.calls.length,0,'Opening import options must not alter services');
+ }finally{await f.close();}
+});
+
+test('the import heading starts with uppercase O and its text and all three independent borders have sufficient contrast',async()=>{
+ const luminance=hex=>{const rgb=hex.slice(1).match(/../g).map(value=>parseInt(value,16)/255).map(value=>value<=0.04045?value/12.92:((value+0.055)/1.055)**2.4);return rgb[0]*0.2126+rgb[1]*0.7152+rgb[2]*0.0722;};
+ const contrast=(a,b)=>{const values=[luminance(a),luminance(b)].sort((a,b)=>b-a);return(values[0]+0.05)/(values[1]+0.05);};
+ const f=await fixture();try{
+  assert.equal(translations.es.biz_import_from_price_list,'O importar desde tarifa');assert.ok(f.container.textContent.includes('O importar desde tarifa'));
+  assert.ok(contrast(presentationStyles.importDividerTxt.color,'#FFFFFF')>=4.5);
+  for(const kind of ['image','pdf','web']){const button=f.get('service-import-'+kind);assert.ok(button.style.borderWidth>=1.5);for(const background of ['#FFFFFF','#FAFAFA','#F7F8FA'])assert.ok(contrast(button.style.borderColor,background)>=3);}
+  assert.equal(f.calls.length,0);
  }finally{await f.close();}
 });

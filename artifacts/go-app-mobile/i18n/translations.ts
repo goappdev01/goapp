@@ -1025,7 +1025,7 @@ const es = {
   biz_staff_icon:             "Icono del profesional",
   biz_staff_icon_hint:        "Toca para cambiar · el icono se muestra en el plano",
   biz_services_offered:       "Servicios ofrecidos",
-  biz_import_from_price_list: "o importar desde tarifa",
+  biz_import_from_price_list: "O importar desde tarifa",
   biz_no_sector:              "Sin sector",
   biz_day:                    "día",
   biz_days:                   "días",
