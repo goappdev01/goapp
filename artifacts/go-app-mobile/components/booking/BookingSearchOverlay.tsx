@@ -1811,10 +1811,10 @@ export function BookingSearchOverlay({
                 <TouchableOpacity
                   style={{
                     width: "100%",
-                    backgroundColor: accentColor,
+                    backgroundColor: "#22c55e",
                     borderRadius: 20, paddingVertical: 18,
                     alignItems: "center",
-                    shadowColor: accentColor, shadowOpacity: 0.45, shadowRadius: 20, elevation: 10,
+                    shadowColor: "#22c55e", shadowOpacity: 0.45, shadowRadius: 20, elevation: 10,
                   }}
                   onPress={() => {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -1828,7 +1828,7 @@ export function BookingSearchOverlay({
                   }}
                   activeOpacity={0.85}
                 >
-                  <Text style={{ color: "#fff", fontWeight: "900", fontSize: 18, letterSpacing: 1 }}>
+                  <Text style={{ color: "#050505", fontWeight: "900", fontSize: 18, letterSpacing: 1 }}>
                     {t("biz_ok_view_calendar")}
                   </Text>
                 </TouchableOpacity>
