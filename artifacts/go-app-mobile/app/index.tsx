@@ -121,6 +121,7 @@ import { MessagesScreen } from "@/components/MessagesScreen";
 import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
+import { placeLandingQr } from "@/components/landing/landingQrPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
@@ -14109,6 +14110,24 @@ function HomeScreenContent() {
   const landingOffsetY = landingArrangement.offsetY;
   const landingLowerOffsets = landingArrangement.offsets;
   const landingDisplayCloseRect = landingArrangement.closeRect;
+  const landingQrPosition = placeLandingQr({
+    company: { x: landingCenter.x + Math.cos(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
+      y: landingCenter.y + landingOffsetY + Math.sin(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
+      width: Math.max(44, microSz), height: Math.max(44, microSz) },
+    size: closeQrSize, hitSlop: closeQrHit,
+    bounds: { x: insets.left + 8, y: insets.top + 8,
+      width: screen.width - insets.left - insets.right - 16, height: screen.height - insets.top - insets.bottom - 16 },
+    obstacles: [
+      ...landingOrbitObstacles.map(rect => ({ ...rect, y: rect.y + landingOffsetY })),
+      ...[landingPanels.commands, landingPanels.region].map(rect => ({ ...toLandingRootRect(rect),
+        y: toLandingRootRect(rect).y + landingOffsetY })),
+      { x: landingDisplayCloseRect.x - 8, y: landingDisplayCloseRect.y - 8,
+        width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 },
+      ...(humanityPlacement ? [{ ...humanityPlacement, y: humanityPlacement.y + landingOffsetY }]
+        : landingInlineHumanity ? [{ ...inlineHumanityRect, y: inlineHumanityRect.y + landingOffsetY }] : []),
+    ],
+  }) ?? { x: closeQrX, y: closeQrY };
+  // Keep the approved header reservation: relocating QR must not shift panels or confirmations.
   const landingHeaderControls = [
     { x: closeQrX, y: closeQrY - landingOffsetY, width: closeQrSize, height: closeQrSize },
     ...(landingInlineHumanity ? [inlineHumanityRect] : []),
@@ -15428,29 +15447,9 @@ function HomeScreenContent() {
         {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry)}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}</>}
       </GoEntryDetailsSheet>
 
-      {/* ── BOTÓN QR PERMANENTE ─────────────────────────────────────────────
-          Función estructural: siempre visible en Landing GO.
-          No depende de agenda, rutas, estado del panel ni tareas.
-          Posición:
-            · Sin panel "Próxima visita": esquina del lado del pulgar,
-              justo encima del área orbital.
-            · Con panel visible: sube automáticamente sobre el tope
-              del panel usando nextAptPanelH medido por onLayout. */}
+      {/* Same QR control, in the free left orbital pocket below CAMBIOS and above EMPRESA. */}
       {!anyOverlayOpen && (() => {
-        const QR_EDGE = Math.max(18, (handedness === "right" ? insets.right : insets.left) + 18);
-        const QR_EDGE_OPP = Math.max(18, (handedness === "right" ? insets.left : insets.right) + 18);
-        const qrSide = handedness === "right" ? { right: QR_EDGE } : { left: QR_EDGE };
         const BTN_SZ = Math.round(32 * uiScaleFactor);
-        let btnBottom = screen.height - landingSafeTop - BTN_SZ;
-        let resolvedSide: { right: number } | { left: number } = qrSide;
-
-        if (landingFrame.virtual) {
-          resolvedSide = { left: handedness === "right"
-            ? landingFrame.left + landingFrame.width - QR_EDGE - BTN_SZ : landingFrame.left + QR_EDGE };
-          btnBottom = screen.height - landingSafeTop - BTN_SZ;
-        }
-        const qrPositionStyle = { bottom: clampLandingControlBottom(btnBottom,
-          screen.height, BTN_SZ, landingSafeTop, insets.bottom) };
         return (
           <TouchableOpacity
             key="qr-permanent-btn"
@@ -15459,8 +15458,8 @@ function HomeScreenContent() {
             activeOpacity={0.8}
             style={{
               position: "absolute",
-              ...qrPositionStyle,
-              ...resolvedSide,
+              left: landingQrPosition.x,
+              top: landingQrPosition.y,
               zIndex: 10,
               width: BTN_SZ,
               height: BTN_SZ,
