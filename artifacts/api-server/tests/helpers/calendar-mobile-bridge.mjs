@@ -11,6 +11,10 @@ function load(file,imports={},globals={}){
 }
 export function createCalendarMobileBridge(actor,user){
  const definitions={
+  go_booking_calendar_business:[['p_source_id','text']],
+  go_set_booking_calendar_timezone:[['p_business_id','uuid'],['p_timezone','text'],['p_expected_timezone','text']],
+  go_booking_calendar_exceptions_batch:[['p_business_id','uuid'],['p_date_iso','date'],['p_staff_ids','uuid[]'],['p_from_date','date']],
+  go_save_booking_calendar_exceptions_batch:[['p_business_id','uuid'],['p_date_iso','date'],['p_staff_ids','uuid[]'],['p_intervals','jsonb'],['p_expected_revisions','jsonb'],['p_request_key','text'],['p_delete','boolean']],
   go_booking_calendar_exceptions:[['p_business_id','uuid'],['p_date_iso','date'],['p_staff_id','uuid'],['p_from_date','date']],
   go_save_booking_calendar_exception:[['p_business_id','uuid'],['p_date_iso','date'],['p_staff_id','uuid'],['p_intervals','jsonb'],['p_expected_revision','integer'],['p_request_key','text'],['p_delete','boolean']],
  },calls=[],routes=new Map();
@@ -31,5 +35,5 @@ export function createCalendarMobileBridge(actor,user){
  };
  const mobile=path.resolve('../go-app-mobile'),timeline=load(path.join(mobile,'data/bookingTimeline.ts')),publication=load(path.resolve('../../lib/api-zod/src/module-publication.ts'));
  const booking=load(path.join(mobile,'data/booking.ts'),{'@workspace/api-zod':publication,'@/lib/authSession':{readAuthSession:async()=>({access_token:'calendar-test-'+user,user:{id:user}}),fetchWithAuth:transport,AuthSessionRequiredError:class extends Error{}},'@react-native-async-storage/async-storage':{default:{getItem:async()=>null,setItem:async()=>{throw Error('No local persistence is allowed for calendar exceptions');}}},'./bookingTimeline':timeline,'./goSearchAliases':{normalize:v=>v.toLowerCase(),expandSearchTerms:v=>[v]}});
- return {calls,api:load(path.join(mobile,'data/calendarExceptions.ts'),{'./booking':booking,'./bookingTimeline':timeline})};
+ return {calls,api:load(path.join(mobile,'data/calendarExceptions.ts'),{'./booking':booking,'./bookingTimeline':timeline,'./serviceTiming':load(path.join(mobile,'data/serviceTiming.ts'))})};
 }

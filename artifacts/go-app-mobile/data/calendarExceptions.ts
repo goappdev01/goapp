@@ -1,3 +1,4 @@
+import { validateBusinessTimezone } from "./serviceTiming";
 import { isCloudId, supabaseApiRequest } from "./booking";
 import { businessWallTime } from "./bookingTimeline";
 
@@ -9,6 +10,7 @@ export type CalendarException = {
 };
 export type CalendarExceptionResult = {
   timezone: string; exceptions: CalendarException[];
+  staffIds?: string[]; days?: CalendarExceptionResult["day"][];
   day: { dateISO: string; staffId: string | null; openIntervals: { startsAt: string; endsAt: string }[]; closedIntervals: { startsAt: string; endsAt: string }[] };
 };
 export type CalendarExceptionCommand = { businessId: string; staffId: string | null; dateISO: string; intervals: CalendarExceptionInterval[]; expectedRevision: number; requestId: string };
@@ -61,4 +63,45 @@ export async function deleteCalendarException(command: Omit<CalendarExceptionCom
   cloud(command.businessId, command.staffId); validateCalendarDate(command.dateISO);
   return calendarRequest("/supabase/booking-calendar-exceptions", { method: "DELETE", body: JSON.stringify({ business_id: command.businessId, staff_id: command.staffId,
     dateISO: command.dateISO, expectedRevision: command.expectedRevision, requestId: command.requestId }) }, expectedUserId);
+}
+
+export type CalendarExceptionBatchCommand = Omit<CalendarExceptionCommand, "staffId" | "expectedRevision"> & { staffIds: string[]; expectedRevisions: Record<string, number> };
+export function validateCalendarStaffSelection(businessId: string, staffIds: readonly string[]): string[] {
+  cloud(businessId, null);
+  if (!staffIds.length || staffIds.length > 100 || staffIds.some(id => !isCloudId(id)) || new Set(staffIds).size !== staffIds.length) throw new Error("Selecciona al menos un profesional de esta empresa.");
+  return [...staffIds].sort();
+}
+export async function getCalendarExceptionsBatch(businessId: string, dateISO: string, staffIds: string[], fromDate: string, expectedUserId?: string): Promise<CalendarExceptionResult> {
+  const selected = validateCalendarStaffSelection(businessId, staffIds); validateCalendarDate(dateISO); validateCalendarDate(fromDate);
+  const query = new URLSearchParams({ business_id: businessId, dateISO, from_date: fromDate, staff_ids: selected.join(",") });
+  return calendarRequest(`/supabase/booking-calendar-exceptions?${query}`, {}, expectedUserId);
+}
+async function batchCommand(command: Omit<CalendarExceptionBatchCommand, "intervals"> & { intervals?: CalendarExceptionInterval[] }, deleting: boolean, expectedUserId?: string) {
+  const staff = validateCalendarStaffSelection(command.businessId, command.staffIds); validateCalendarDate(command.dateISO);
+  if (Object.keys(command.expectedRevisions).length !== staff.length || staff.some(id => !Number.isSafeInteger(command.expectedRevisions[id]) || command.expectedRevisions[id] < 0)) throw new Error("Recarga las excepciones antes de guardar.");
+  return calendarRequest("/supabase/booking-calendar-exceptions", { method: deleting ? "DELETE" : "PUT", body: JSON.stringify({ business_id: command.businessId, staff_ids: staff,
+    dateISO: command.dateISO, ...(deleting ? {} : { intervals: validateCalendarIntervals(command.intervals ?? []) }), expectedRevisions: command.expectedRevisions, requestId: command.requestId }) }, expectedUserId);
+}
+export const saveCalendarExceptionsBatch = (command: CalendarExceptionBatchCommand, expectedUserId?: string) => batchCommand(command, false, expectedUserId);
+export const deleteCalendarExceptionsBatch = (command: Omit<CalendarExceptionBatchCommand, "intervals">, expectedUserId?: string) => batchCommand(command, true, expectedUserId);
+
+export async function resolveCalendarExceptionBusiness(sourceId: string, expectedUserId: string): Promise<{ businessId: string; sourceId: string; name: string; timezone: string }> {
+  if (!sourceId || sourceId.length > 256) throw new Error("Selecciona una empresa válida.");
+  const result = await supabaseApiRequest<{ businessId: string; sourceId: string; name: string; timezone: string }>(`/supabase/booking-calendar-business?${new URLSearchParams({ source_id: sourceId })}`, {}, true, expectedUserId);
+  if (!isCloudId(result.businessId) || result.sourceId !== sourceId || typeof result.timezone !== "string" || typeof result.name !== "string") throw new Error("No se pudo comprobar la empresa sincronizada.");
+  return result;
+}
+
+export async function setCalendarBusinessTimezone(sourceId: string | undefined, wanted: string, expectedUserId: string): Promise<string> {
+  const timezone = validateBusinessTimezone(wanted);
+  if (!sourceId) return timezone; // Unsynchronized configuration draft, persisted by its existing writer.
+  let company;
+  try { company = await resolveCalendarExceptionBusiness(sourceId, expectedUserId); }
+  catch (cause) {
+    if (!isCloudId(sourceId) && cause && typeof cause === "object" && "code" in cause && cause.code === "BOOKING_CALENDAR_BUSINESS_NOT_LINKED") return timezone;
+    throw cause;
+  }
+  const result = await supabaseApiRequest<{ businessId: string; timezone: string }>("/supabase/booking-calendar-timezone", { method: "PUT", body: JSON.stringify({ business_id: company.businessId, timezone, expectedTimezone: company.timezone }) }, true, expectedUserId);
+  if (result.businessId !== company.businessId || result.timezone !== timezone) throw new Error("No se pudo comprobar el guardado de la zona horaria.");
+  return result.timezone;
 }

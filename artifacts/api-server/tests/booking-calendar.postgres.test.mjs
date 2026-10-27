@@ -143,5 +143,67 @@ test('real PostgreSQL calendar exceptions: dated authority, canonical booking en
    await assert.rejects(actor(ids.owner,"select public.go_negotiate_booking($1,'accept',$2,1,$3,null,null,null,true)",[b.id,randomUUID(),key]));assert.deepEqual(await one('select to_jsonb(b) value from public.bookings b where id=$1',[b.id]),original);
    await actor(ids.clientA,"select public.go_negotiate_booking($1,'cancel',$2,1,null,null,null,null,true)",[b.id,randomUUID()]);assert.equal((await one('select status from public.bookings where id=$1',[b.id])).status,'CANCELLED');
   });
+
+  const batchSQL='select public.go_save_booking_calendar_exceptions_batch($1::uuid,$2::date,$3::uuid[],$4::jsonb,$5::jsonb,$6::text,$7::boolean) r';
+  const batch=(staff,intervals,options={})=>actor(options.user??ids.owner,batchSQL,[ids.business,options.day??date,staff,JSON.stringify(intervals),JSON.stringify(options.revisions??Object.fromEntries(staff.map(id=>[id,0]))),options.key??randomUUID(),options.deleting??false]);
+  await t.test('multiple staff: atomic persistence, editing, idempotency, individual calendar availability and deletion',async()=>{
+   await fixture();const c=randomUUID();await db.query("insert into public.staff(id,business_id,display_name,active,ui_metadata) values($1,$2,'Third professional',true,$3)",[c,ids.business,JSON.stringify({serviceIds:[ids.cut]})]);
+   const selected=[ids.a,ids.b],key=randomUUID(),ranges=[closed(540,600),closed(1020,1080)];let r=await batch(selected,ranges,{key});
+   assert.equal(r.r.days.length,2);assert.deepEqual(new Set(r.r.staffIds),new Set(selected));assert.equal(has(await avail(),'09:00'),false);assert.equal(has(await avail({staff:ids.b}),'09:00'),false);assert.equal(has(await avail({staff:c}),'09:00'),true);
+   const read=await actor(ids.owner,'select public.go_booking_calendar_exceptions_batch($1::uuid,$2::date,$3::uuid[],$2::date) r',[ids.business,date,selected]);assert.deepEqual(read,r);
+   await batch([...selected].reverse(),ranges,{key});assert.equal((await one('select count(*)::int n from public.booking_calendar_exceptions where business_id=$1',[ids.business])).n,2);
+   await assert.rejects(batch([ids.a],ranges,{key}),e=>e.message==='BOOKING_REQUEST_REUSED');
+   const revisions=Object.fromEntries(r.r.exceptions.map(e=>[e.staffId,e.revision]));r=await batch(selected,[closed(600,660)],{revisions});assert.equal(has(await avail(),'09:00'),true);
+   const next=Object.fromEntries(r.r.exceptions.map(e=>[e.staffId,e.revision]));await batch(selected,[],{revisions:next,deleting:true});assert.equal((await get()).r.exceptions.length,0);assert.equal(has(await avail({staff:ids.b}),'10:00'),true);
+  });
+  await t.test('a stale member revision rolls back every member and an invalid/foreign selection saves nothing',async()=>{
+   await fixture();await save([closed(540,600)],{staff:ids.b});
+   await assert.rejects(batch([ids.a,ids.b],[closed(600,660)]),e=>e.message==='BOOKING_CALENDAR_CHANGED');
+   assert.equal((await get({staff:ids.a})).r.exceptions.some(e=>e.staffId===ids.a),false);
+   const foreign=randomUUID();await db.query("insert into public.staff(id,business_id,display_name) values($1,$2,'Other tenant')",[foreign,ids.otherBusiness]);
+   for(const staff of [[ids.a,ids.a],[ids.a,foreign],[]])await assert.rejects(batch(staff,[closed(600,660)]));
+   await denied(batch([ids.a],[closed(600,660)],{user:ids.foreign}));await denied(batch([ids.a],[closed(600,660)],{user:ids.clientA}));
+   assert.equal((await one('select count(*)::int n from public.booking_calendar_exceptions where business_id=$1',[ids.business])).n,1);
+  });
+  await t.test('concurrent batches have one revision winner and closures conserve existing commitments and conflict identities',async()=>{
+   await fixture();const {b}=await create('09:00');const before=await one('select to_jsonb(b) value from public.bookings b where id=$1',[b.id]);
+   const results=await Promise.allSettled([batch([ids.a,ids.b],[closed(540,600)]),batch([ids.b,ids.a],[closed(540,600)])]);assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+   const r=results.find(r=>r.status==='fulfilled').value;assert.equal(r.r.exceptions.find(e=>e.staffId===ids.a).conflicts[0].bookingId,b.id);
+   assert.deepEqual(await one('select to_jsonb(b) value from public.bookings b where id=$1',[b.id]),before);await blocked(create('09:00',{staff:ids.b,user:ids.clientB}));
+  });
+  await t.test('actual multiple selection mobile adapter and API persist and recover through canonical PostgreSQL',async()=>{
+   await fixture();const {createCalendarMobileBridge}=await import('./helpers/calendar-mobile-bridge.mjs');const client=createCalendarMobileBridge(actor,ids.owner);
+   const c={businessId:ids.business,staffIds:[ids.a,ids.b],dateISO:date,intervals:[open(780,840)],expectedRevisions:{[ids.a]:0,[ids.b]:0},requestId:randomUUID()};
+   const saved=await client.api.saveCalendarExceptionsBatch(c,ids.owner);assert.equal(saved.days.length,2);assert.deepEqual(await client.api.getCalendarExceptionsBatch(ids.business,date,[ids.a,ids.b],date,ids.owner),saved);
+   await client.api.deleteCalendarExceptionsBatch({...c,expectedRevisions:Object.fromEntries(saved.exceptions.map(e=>[e.staffId,e.revision])),requestId:randomUUID()},ids.owner);
+   assert.equal((await get()).r.exceptions.length,0);assert.ok(client.calls.some(c=>c.name==='go_save_booking_calendar_exceptions_batch'));
+  });
+
+  await t.test('registered local company identity resolves only its exact owner link, with no name matching or direct client writes',async()=>{
+   await fixture();const source='local-'+randomUUID();await db.query('insert into go_booking_timeline_private.calendar_business_links(source_id,owner_id,business_id) values($1,$2,$3)',[source,ids.owner,ids.business]);
+   const sql='select public.go_booking_calendar_business($1::text) r';const linked=await actor(ids.owner,sql,[source]);assert.equal(linked.r.businessId,ids.business);assert.equal(linked.r.sourceId,source);await denied(actor(ids.owner,'select * from go_booking_timeline_private.calendar_booking_sources'));
+   for(const user of [ids.foreign,ids.clientA])await assert.rejects(actor(user,sql,[source]),e=>e.message==='BOOKING_CALENDAR_BUSINESS_NOT_LINKED');
+   await assert.rejects(actor(ids.owner,sql,['Isolated calendar fixture']),e=>e.message==='BOOKING_CALENDAR_BUSINESS_NOT_LINKED');
+   await denied(actor(ids.owner,'insert into go_booking_timeline_private.calendar_business_links(source_id,owner_id,business_id) values($1,$2,$3)',[randomUUID(),ids.owner,ids.otherBusiness]));
+   await db.query("update public.businesses set name='Renamed same business' where id=$1",[ids.business]);assert.equal((await actor(ids.owner,sql,[source])).r.businessId,ids.business);
+  });
+
+  await t.test('timezone selector persistence is atomic, tenant-scoped and preserves weekly wall-clock times',async()=>{
+   await fixture();await db.query('insert into public.business_settings(business_id,payload) values($1,$2)',[ids.business,JSON.stringify({businessName:'Unchanged',timezone:'UTC',services:['Preserved']})]);
+   const windows=async()=>(await db.query('select id,weekday,start_time,end_time,staff_id,active,ui_metadata from public.availability where business_id=$1 order by id',[ids.business])).rows;
+   const before=await windows(),sql='select public.go_set_booking_calendar_timezone($1::uuid,$2::text,$3::text) r';
+   let r=await actor(ids.owner,sql,[ids.business,'Atlantic/Canary','UTC']);assert.equal(r.r.timezone,'Atlantic/Canary');assert.deepEqual(await windows(),before);
+   assert.deepEqual((await one('select payload from public.business_settings where business_id=$1',[ids.business])).payload,{businessName:'Unchanged',timezone:'Atlantic/Canary',services:['Preserved']});
+   assert.equal((await actor(ids.owner,'select public.go_booking_calendar_business($1::text) r',[ids.business])).r.businessId,ids.business);
+   await denied(actor(ids.foreign,sql,[ids.business,'Europe/Madrid','Atlantic/Canary']));await denied(actor(ids.clientA,sql,[ids.business,'Europe/Madrid','Atlantic/Canary']));
+   await assert.rejects(actor(ids.owner,sql,[ids.business,'Europe/Madrid','UTC']),e=>e.message==='BOOKING_CALENDAR_CHANGED');await assert.rejects(actor(ids.owner,sql,[ids.business,'invalid/timezone','Atlantic/Canary']),e=>e.message==='BOOKING_INVALID_TIMEZONE');
+   const {createCalendarMobileBridge}=await import('./helpers/calendar-mobile-bridge.mjs'),mobile=createCalendarMobileBridge(actor,ids.owner);
+   assert.equal(await mobile.api.setCalendarBusinessTimezone(ids.business,'Europe/Madrid',ids.owner),'Europe/Madrid');assert.equal((await one('select timezone from public.businesses where id=$1',[ids.business])).timezone,'Europe/Madrid');assert.deepEqual(await windows(),before);
+  });
+  await t.test('changing a booked timezone cannot shift any existing reservation, and the same saved zone remains selectable',async()=>{
+   await fixture();const {b}=await create('09:00');const before=await one('select to_jsonb(b) value from public.bookings b where id=$1',[b.id]),sql='select public.go_set_booking_calendar_timezone($1::uuid,$2::text,$3::text) r';
+   await assert.rejects(actor(ids.owner,sql,[ids.business,'Europe/Madrid','UTC']),e=>e.message==='BOOKING_TIMEZONE_HAS_COMMITMENTS');await actor(ids.owner,sql,[ids.business,'UTC','UTC']);assert.deepEqual(await one('select to_jsonb(b) value from public.bookings b where id=$1',[b.id]),before);
+   await fixture();await save([closed(540,600)]);await assert.rejects(actor(ids.owner,sql,[ids.business,'Europe/Madrid','UTC']),e=>e.message==='BOOKING_TIMEZONE_HAS_COMMITMENTS');assert.equal((await get()).r.timezone,'UTC');
+  });
  }finally{await db.end();}
 });

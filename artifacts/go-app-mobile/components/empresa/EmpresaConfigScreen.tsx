@@ -52,6 +52,8 @@ import QRCode from "react-native-qrcode-svg";
 import { GoOcrImportSheet } from "@/components/empresa/GoOcrImportSheet";
 import { ProfessionalGapPolicy } from "./ProfessionalGapPolicy";
 import { Step0Actividad } from "@/components/empresa/EmpresaSetupGuide";
+import { captureAuthIdentity, isAuthIdentityCurrent } from "@/lib/authSession";
+import { resolveCalendarExceptionBusiness, setCalendarBusinessTimezone } from "@/data/calendarExceptions";
 import { CalendarExceptionsSection } from "./CalendarExceptionsSection";
 
 import { GoTimeField } from "@/components/ui/GoTimePicker";
@@ -965,13 +967,60 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
   const { t, lang } = useLanguage();
   const SCHED_DAYS_FULL_T  = [t("biz_day_mon_full"), t("biz_day_tue_full"), t("biz_day_wed_full"), t("biz_day_thu_full"), t("biz_day_fri_full"), t("biz_day_sat_full"), t("biz_day_sun_full")];
   const SCHED_DAYS_SHORT_T = buildDaysShortT(t);
-  const { config, updateConfig } = useBusinessConfig();
+  const { config, updateConfig, demo } = useBusinessConfig();
   const color = currentSector?.color ?? PURPLE;
   const [selectedDay, setSelectedDay] = useState(0);
   const [exceptionsOpen, setExceptionsOpen] = useState(false);
   const [timezone, setTimezone] = useState(config.timezone ?? "");
   const [timezoneError, setTimezoneError] = useState("");
+  const [timezonePickerOpen, setTimezonePickerOpen] = useState(false);
+  const [timezoneSaving, setTimezoneSaving] = useState(false);
+  const timezoneBusy = useRef(false), timezoneMounted = useRef(true);
+  useEffect(() => { timezoneMounted.current = true; return () => { timezoneMounted.current = false; }; }, []);
+  const timezoneOptions = [
+    { value: "Europe/Madrid", label: lang === "en" ? "Europe/Madrid — Mainland Spain" : "Europe/Madrid — España peninsular" },
+    { value: "Atlantic/Canary", label: lang === "en" ? "Atlantic/Canary — Canary Islands" : "Atlantic/Canary — Islas Canarias" },
+    ...(timezone && !["Europe/Madrid", "Atlantic/Canary"].includes(timezone) ? [{ value: timezone, label: timezone }] : []),
+  ];
+  const selectTimezone = async (wanted: string) => {
+    if (timezoneBusy.current) return;
+    const source = config.businessId, target = demo;
+    timezoneBusy.current = true; setTimezoneSaving(true); setTimezoneError("");
+    try {
+      const who = await captureAuthIdentity();
+      if (!who) throw new Error(lang === "en" ? "Sign in to save your business." : "Inicia sesión para guardar la empresa.");
+      const saved = await setCalendarBusinessTimezone(source, wanted, who.userId);
+      if (!await isAuthIdentityCurrent(who)) throw new Error(lang === "en" ? "The account changed." : "La cuenta ha cambiado.");
+      if (target) {
+        if (target.businessId !== source) throw new Error("La empresa seleccionada ha cambiado.");
+        await target.updateConfig({ timezone: saved });
+      } else updateConfig({ timezone: saved }, source ?? "");
+      if (timezoneMounted.current) { setTimezone(saved); setTimezonePickerOpen(false); }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo guardar la zona horaria.";
+      if (timezoneMounted.current) setTimezoneError(message); else Alert.alert(lang === "en" ? "Time zone" : "Zona horaria", message);
+    } finally { timezoneBusy.current = false; if (timezoneMounted.current) setTimezoneSaving(false); }
+  };
   useEffect(() => { setTimezone(config.timezone ?? ""); }, [config.timezone]);
+  useEffect(() => {
+    let active = true;
+    const source = config.businessId, target = demo;
+    if (!source || config.timezone) return;
+    void (async () => {
+      try {
+        const who = await captureAuthIdentity(); if (!who) return;
+        const saved = await resolveCalendarExceptionBusiness(source, who.userId);
+        if (!active || timezoneBusy.current || saved.sourceId !== source || !await isAuthIdentityCurrent(who)) return;
+        if (target) await target.updateConfig({ timezone: saved.timezone });
+        else updateConfig({ timezone: saved.timezone }, source);
+        if (active) setTimezone(saved.timezone);
+      } catch (error) {
+        if (active && !(error && typeof error === "object" && "code" in error && error.code === "BOOKING_CALENDAR_BUSINESS_NOT_LINKED"))
+          setTimezoneError(error instanceof Error ? error.message : "No se pudo recuperar la zona horaria guardada.");
+      }
+    })();
+    return () => { active = false; };
+  }, [config.businessId, config.timezone, demo]);
 
   const [daySchedules, setDaySchedules] = useState<Record<number, DaySchedule>>(() => {
     const stored  = config.daySchedules ?? {};
@@ -1064,13 +1113,21 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
     <View>
       <View style={c.sectionCard}>
         <Text accessibilityRole="header" style={{ fontSize: 16, fontWeight: "700", color: TEXT, marginBottom: 12 }}>{lang === "en" ? "REGULAR WEEKLY HOURS" : "HORARIO HABITUAL"}</Text>
-        <Text style={c.sectionLabel}>{lang === "en" ? "Business time zone" : "Zona horaria del negocio"}</Text>
-        <TextInput accessibilityLabel={lang === "en" ? "Business time zone" : "Zona horaria del negocio"}
-          style={c.svcNameInput} value={timezone} placeholder="Europe/Madrid" autoCapitalize="none" autoCorrect={false}
-          onChangeText={setTimezone} onBlur={() => {
-            try { updateConfig({ timezone: validateBusinessTimezone(timezone) }); setTimezoneError(""); }
-            catch (error) { setTimezoneError((error as Error).message); }
-          }} />
+        <Text style={[c.sectionLabel, { color: TEXT }]}>{lang === "en" ? "Business time zone" : "ZONA HORARIA DEL NEGOCIO"}</Text>
+        <TouchableOpacity testID="business-timezone-selector" accessibilityRole="button" accessibilityLabel={lang === "en" ? "Business time zone" : "Zona horaria del negocio"}
+          accessibilityState={{ expanded: timezonePickerOpen, disabled: timezoneSaving }} disabled={timezoneSaving} activeOpacity={0.75}
+          onPress={() => setTimezonePickerOpen(open => !open)} style={{ minHeight: 48, borderWidth: 1, borderColor: BORDER, borderRadius: 12, padding: 12, marginBottom: 10, flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: CARD }}>
+          <Text style={{ flex: 1, fontSize: 14, color: TEXT, fontWeight: "600" }}>{timezoneSaving ? (lang === "en" ? "Saving…" : "Guardando…") : timezoneOptions.find(option => option.value === timezone)?.label || (lang === "en" ? "Select time zone" : "Seleccionar zona horaria")}</Text>
+          <Feather name={timezonePickerOpen ? "chevron-up" : "chevron-down"} size={18} color={TEXT} />
+        </TouchableOpacity>
+        {timezonePickerOpen && <View testID="business-timezone-options" accessibilityRole="radiogroup" style={{ marginBottom: 12, gap: 8 }}>
+          {timezoneOptions.map(option => <TouchableOpacity key={option.value} testID={`business-timezone-option-${option.value}`} accessibilityRole="radio"
+            accessibilityState={{ checked: timezone === option.value, disabled: timezoneSaving }} disabled={timezoneSaving} onPress={() => { void selectTimezone(option.value); }} activeOpacity={0.75}
+            style={{ minHeight: 48, padding: 12, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: timezone === option.value ? 2 : 1, borderColor: timezone === option.value ? color : BORDER, borderRadius: 12, backgroundColor: CARD }}>
+            <Feather name={timezone === option.value ? "check-circle" : "circle"} size={18} color={timezone === option.value ? color : TEXT} />
+            <Text style={{ flex: 1, color: TEXT, fontSize: 14, fontWeight: timezone === option.value ? "700" : "500" }}>{option.label}</Text>
+          </TouchableOpacity>)}
+        </View>}
         {!!timezoneError && <Text accessibilityRole="alert" style={{ color: RED, marginBottom: 10 }}>{timezoneError}</Text>}
         {/* Day pills */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
@@ -1237,7 +1294,13 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
           <Feather name={exceptionsOpen ? "chevron-up" : "chevron-down"} size={18} color={color} />
         </TouchableOpacity>
       </View>
-      {exceptionsOpen && <CalendarExceptionsSection key={config.businessId ?? "unlinked"} businessId={config.businessId} timezone={config.timezone} color={color} onManageConflicts={onManageConflicts} />}
+      {exceptionsOpen && <CalendarExceptionsSection key={config.businessId ?? "unlinked"} businessId={config.businessId} timezone={config.timezone} color={color} onManageConflicts={onManageConflicts} onBusinessResolved={value => {
+        // Recover only a missing zone from this exact owner-authorized registered business.
+        // Never replace an existing setting or an unfinished edit of the weekly form.
+        if (value.sourceId === config.businessId && !config.timezone && !timezone.trim()) {
+          setTimezone(value.timezone); updateConfig({ timezone: value.timezone });
+        }
+      }} />}
     </View>
   );
 }

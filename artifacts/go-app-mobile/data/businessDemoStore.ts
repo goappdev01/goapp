@@ -249,7 +249,7 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
   const key = businessDemoStorageKey(ownerUserId, options.companyId);
   const suffix = ownerUserId.toLowerCase() + (options.companyId ? "_" + options.companyId.toLowerCase() : "");
   const businessId = `demo_business_${suffix}`, planId = `demo_plan_${suffix}`;
-  const configKeys = ["businessName", "address", "cartaUrl", "sectorId", "subId", "plantillaItems", "activeDays", "openFrom", "openTo", "daySchedules", "services", "paymentPolicy", "approvalPolicy", "cancelPolicy", "bookingEnabled", "completedSteps", "paymentMethod", "phone", "whatsapp", "staffSchedules", "countryCode", "mobile", "coordinates", "phoneE164", "mobileE164", "whatsappE164"] as const;
+  const configKeys = ["businessName", "timezone", "address", "cartaUrl", "sectorId", "subId", "plantillaItems", "activeDays", "openFrom", "openTo", "daySchedules", "services", "paymentPolicy", "approvalPolicy", "cancelPolicy", "bookingEnabled", "completedSteps", "paymentMethod", "phone", "whatsapp", "staffSchedules", "countryCode", "mobile", "coordinates", "phoneE164", "mobileE164", "whatsappE164"] as const;
   const freshConfig = (): BusinessConfig => ({ ...clone(options.initialConfig), businessId, isBusinessActive: false });
   const fresh = (): BusinessDemoData => ({ version: 1, ownerUserId, config: freshConfig(), plan: null, reservations: [], bookings: [], entries: [], preferences: {} });
   let snapshot = fresh(), loaded = false, observedRevision = -1;

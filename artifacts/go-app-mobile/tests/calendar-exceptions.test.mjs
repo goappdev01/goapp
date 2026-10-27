@@ -7,7 +7,7 @@ import vm from 'node:vm';
 const ts=createRequire(path.join(process.cwd(),'package.json'))('typescript');
 const plain=value=>JSON.parse(JSON.stringify(value));
 const compile=text=>ts.transpileModule(text,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,alwaysStrict:false,esModuleInterop:false}}).outputText;
-function load(file,imports={},globals={}){const scope={exports:{},Intl,Date,Error,URLSearchParams,console,require:name=>{if(name in imports)return imports[name];throw Error('Unexpected import '+name);},...globals};vm.runInNewContext(compile(readFileSync(file,'utf8')),scope);return scope.exports;}
+function load(file,imports={},globals={}){const scope={exports:{},Intl,Date,Error,URLSearchParams,console,require:name=>{if(name in imports)return imports[name];if(name==='./serviceTiming')return load('data/serviceTiming.ts');throw Error('Unexpected import '+name);},...globals};vm.runInNewContext(compile(readFileSync(file,'utf8')),scope);return scope.exports;}
 const timeline=load('data/bookingTimeline.ts');
 const business='11111111-1111-4111-8111-111111111111',staffA='22222222-2222-4222-8222-222222222222',staffB='33333333-3333-4333-8333-333333333333',owner='44444444-4444-4444-8444-444444444444';
 const isCloudId=value=>typeof value==='string'&&/^[0-9a-f-]{36}$/i.test(value);
@@ -37,7 +37,12 @@ function fixture(){
  const get=async(b,d,s,from,user)=>{calls.push({type:'get',b,d,s,user});if(offline)throw typeof offline==='object'?offline:Error('Servidor de excepciones no disponible; no se ha guardado.');const value=result(b,d,s);if(hold){const wait=hold;hold=null;await wait;}return value;};
  const save=async(command,user)=>{calls.push({type:'save',command:plain(command),user});if(offline)throw Error('Servidor no disponible');const id=key(command.businessId,command.dateISO,command.staffId),old=stored.get(id);stored.set(id,{id,businessId:command.businessId,staffId:command.staffId,dateISO:command.dateISO,timezone:'UTC',intervals:plain(command.intervals),revision:(old?.revision??0)+1,conflicts:command.intervals.some(i=>i.startMinute===600)?[{bookingId:'reservation',customerName:'Cliente autorizado',serviceName:'Corte',startsAt:command.dateISO+'T10:00:00Z',endsAt:command.dateISO+'T10:20:00Z',status:'CONFIRMED'}]:[]});return result(command.businessId,command.dateISO,command.staffId);};
  const calendar={get monthGridOpen(){return picker;},get monthGridYear(){return year;},get monthGridMonth(){return month;},cancel(){picker=false;},openForNav(options){picker=true;pickDate=options.onDaySelect;const d=new Date(options.initialDateISO+'T12:00:00');year=d.getFullYear();month=d.getMonth();},handleDayTap(iso){picker=false;pickDate(iso);},navigateMonth(delta){const d=new Date(year,month+delta,1);year=d.getFullYear();month=d.getMonth();},closeMonthGridManual(){picker=false;}};
- const imports={react:{...h.react,default:h.react},'react-native':{Text:'Text',View:'View',TouchableOpacity:'TouchableOpacity',StyleSheet:{create:v=>v},Alert:{alert:(...args)=>alerts.push(args)}},'@expo/vector-icons':{Feather:'Feather'},'@/contexts/LanguageContext':{useLanguage:()=>({lang:'es'})},'@/lib/authSession':{captureAuthIdentity:async()=>identity(),isAuthIdentityCurrent:async who=>who.userId===account},'@/lib/sessionEvents':{onSessionChanged:listener=>{listeners.add(listener);return()=>listeners.delete(listener);}},'@/hooks/useGoCalendarFlow':{useGoCalendarFlow:()=>calendar},'@/lib/time':{formatISODate:d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`},'@/data/booking':{isCloudId,getOwnedStaff:async()=>[{id:staffA,name:'Raul 1',active:true},{id:staffB,name:'Raul 2',active:true}]},'@/data/bookingTimeline':timeline,'@/data/calendarExceptions':{...api,getCalendarExceptions:get,saveCalendarException:save,deleteCalendarException:async command=>{calls.push({type:'delete',command});stored.delete(key(command.businessId,command.dateISO,command.staffId));return result(command.businessId,command.dateISO,command.staffId);}},'@/components/ui/GoTimePicker':{GoTimeField:'GoTimeField'}};
+ const imports={react:{...h.react,default:h.react},'react-native':{Text:'Text',View:'View',TouchableOpacity:'TouchableOpacity',StyleSheet:{create:v=>v},Alert:{alert:(...args)=>alerts.push(args)}},'@expo/vector-icons':{Feather:'Feather'},'@/contexts/LanguageContext':{useLanguage:()=>({lang:'es'})},'@/lib/authSession':{captureAuthIdentity:async()=>identity(),isAuthIdentityCurrent:async who=>who.userId===account},'@/lib/sessionEvents':{onSessionChanged:listener=>{listeners.add(listener);return()=>listeners.delete(listener);}},'@/hooks/useGoCalendarFlow':{useGoCalendarFlow:()=>calendar},'@/lib/time':{formatISODate:d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`},'@/data/booking':{isCloudId,getOwnedStaff:async()=>[{id:staffA,name:'Raul 1',active:true},{id:staffB,name:'Raul 2',active:true}]},'@/data/bookingTimeline':timeline,'@/data/calendarExceptions':{...api,
+ resolveCalendarExceptionBusiness:async(source,user)=>{if(source!=='local-linked' || user!==owner)throw Error('Este negocio local necesita sincronizarse con el servidor.');return {businessId:business,sourceId:source,name:'María José',timezone:'UTC'};},
+ getCalendarExceptionsBatch:async(b,d,ids,from,user)=>{const single=await get(b,d,ids[0],from,user);return {...single,staffIds:ids,days:ids.map(id=>result(b,d,id).day)};},
+ saveCalendarExceptionsBatch:async(c,user)=>{calls.push({type:'batch-save',command:plain(c),user});for(const id of c.staffIds)await save({...c,staffId:id,expectedRevision:c.expectedRevisions[id]},user);return {...result(c.businessId,c.dateISO,c.staffIds[0]),staffIds:c.staffIds,days:c.staffIds.map(id=>result(c.businessId,c.dateISO,id).day)};},
+ deleteCalendarExceptionsBatch:async c=>{calls.push({type:'batch-delete',command:plain(c)});for(const id of c.staffIds)stored.delete(key(c.businessId,c.dateISO,id));return {...result(c.businessId,c.dateISO,c.staffIds[0]),staffIds:c.staffIds,days:c.staffIds.map(id=>result(c.businessId,c.dateISO,id).day)};},
+ getCalendarExceptions:get,saveCalendarException:save,deleteCalendarException:async command=>{calls.push({type:'delete',command});stored.delete(key(command.businessId,command.dateISO,command.staffId));return result(command.businessId,command.dateISO,command.staffId);}},'@/components/ui/GoTimePicker':{GoTimeField:'GoTimeField'}};
  const component=load('components/empresa/CalendarExceptionsSection.tsx',imports).CalendarExceptionsSection;
  const render=()=>{h.reset();return component({businessId,timezone:'UTC',color:'#7C69BE',onManageConflicts:date=>managed.push(date)});};
  const frame=async()=>{let tree;for(let i=0;i<4;i++){tree=render();h.run();await new Promise(r=>setImmediate(r));}return render();};
@@ -74,8 +79,8 @@ test('backend failure keeps the editor truthful and an account change discards l
  f.setOffline(false);byId(tree,'calendar-exception-reload').props.onPress();tree=await f.frame();assert.ok(byId(tree,'calendar-exception-save'));let release;f.hold(new Promise(r=>{release=r;}));byId(tree,'calendar-exception-reload').props.onPress();tree=await f.frame();f.setAccount('55555555-5555-4555-8555-555555555555');release();tree=await f.frame();assert.ok(f.calls.filter(c=>c.type==='get').at(-1).user!==owner);assert.equal(f.calls.filter(c=>c.type==='save').length,0);f.unmount();
 });
 
-test('unsynchronized and DEMO businesses never contact or simulate the remote exception service',async()=>{
- const f=fixture();f.setBusiness('local-demo');const tree=await f.frame();assert.ok(text(tree).includes('Guarda y sincroniza'));assert.equal(f.calls.length,0);assert.equal(f.stored.size,0);assert.equal(byId(tree,'calendar-exception-save'),undefined);f.unmount();
+test('an unlinked local business cannot contact exception writers or simulate remote persistence',async()=>{
+ const f=fixture();f.setBusiness('local-demo');const tree=await f.frame();assert.ok(text(tree).includes('necesita sincronizarse'));assert.equal(f.calls.length,0);assert.equal(f.stored.size,0);assert.equal(byId(tree,'calendar-exception-save'),undefined);f.unmount();
 });
 test('the existing environment missing the API or SQL explicitly reports unavailable configuration without local success',async()=>{
  for(const status of [404,501]){const {api,calls}=apiFixture(Object.assign(new Error('Unavailable'),{status}));await assert.rejects(api.getCalendarExceptions(business,'2030-10-27',null,'2030-10-27',owner),error=>/actualización del servidor/.test(error.message)&&/No se ha guardado/.test(error.message));assert.equal(calls.length,1);}
@@ -94,4 +99,42 @@ test('an unavailable calendar API never hides the existing date and professional
  f.calendar.handleDayTap('2030-10-27');tree=await f.frame();assert.equal(byId(tree,'calendar-exception-date').props.accessibilityState.disabled,false);
  byId(tree,'calendar-exception-staff-'+staffB).props.onPress();tree=await f.frame();assert.equal(byId(tree,'calendar-exception-staff-'+staffB).props.accessibilityState.selected,true);
  assert.equal(byId(tree,'calendar-exception-save'),undefined);assert.equal(f.calls.filter(c=>c.type==='save'||c.type==='delete').length,0);assert.equal(f.stored.size,0);f.unmount();
+});
+
+test('several professionals are explicit, recover/edit one atomic scope and leave unselected people alone',async()=>{
+ const f=fixture();let tree=await f.frame();byId(tree,'calendar-exception-several').props.onPress();tree=await f.frame();
+ byId(tree,'calendar-exception-staff-'+staffB).props.onPress();tree=await f.frame();assert.ok(text(byId(tree,'calendar-exception-selection')).includes('Raul 1, Raul 2'));
+ byId(tree,'calendar-exception-add-afternoon').props.onPress();tree=await f.frame();byId(tree,'calendar-exception-save').props.onPress();tree=await f.frame();
+ assert.equal(f.calls.filter(c=>c.type==='batch-save').length,1);let command=f.calls.find(c=>c.type==='batch-save').command;assert.deepEqual(new Set(command.staffIds),new Set([staffA,staffB]));assert.deepEqual(command.expectedRevisions,{[staffA]:0,[staffB]:0});assert.equal(f.stored.size,2);
+ byId(tree,'calendar-exception-reload').props.onPress();tree=await f.frame();assert.ok(byId(tree,'calendar-exception-interval-0'));
+ byId(tree,'calendar-exception-delete').props.onPress();f.alerts.at(-1)[2].find(b=>b.style==='destructive').onPress();tree=await f.frame();assert.equal(f.stored.size,0);assert.equal(f.calls.filter(c=>c.type==='batch-delete').length,1);
+ byId(tree,'calendar-exception-staff-'+staffB).props.onPress();tree=await f.frame();byId(tree,'calendar-exception-staff-'+staffA).props.onPress();tree=await f.frame();assert.equal(byId(tree,'calendar-exception-save'),undefined,'An empty selection can never mean all professionals');
+ byId(tree,'calendar-exception-business').props.onPress();tree=await f.frame();assert.ok(text(byId(tree,'calendar-exception-selection')).includes('Todos'));f.unmount();
+});
+test('batch adapter rejects duplicate/local IDs and retains individual revisions and caller identity',async()=>{
+ const {api,calls}=apiFixture();const c={businessId:business,staffIds:[staffB,staffA],dateISO:'2030-10-27',intervals:[{kind:'closed',startMinute:540,endMinute:780}],expectedRevisions:{[staffA]:1,[staffB]:0},requestId:'stable-batch'};
+ await api.getCalendarExceptionsBatch(business,c.dateISO,c.staffIds,c.dateISO,owner);assert.ok(calls[0][0].includes('staff_ids='));await api.saveCalendarExceptionsBatch(c,owner);assert.deepEqual(JSON.parse(calls[1][1].body).expectedRevisions,c.expectedRevisions);assert.equal(calls[1][3],owner);
+ await api.deleteCalendarExceptionsBatch(c,owner);assert.equal(calls[2][1].method,'DELETE');
+ for(const staffIds of [[],[staffA,staffA],['local']])await assert.rejects(api.saveCalendarExceptionsBatch({...c,staffIds},owner));assert.equal(calls.length,3);
+});
+
+test('a locally registered company resolves its canonical ID and real professionals without borrowing another business by name',async()=>{
+ const f=fixture();f.setBusiness('local-linked');let tree=await f.frame();assert.ok(byId(tree,'calendar-exception-staff-'+staffA));assert.ok(f.calls.some(c=>c.type==='get'&&c.b===business));
+ byId(tree,'calendar-exception-add-day').props.onPress();tree=await f.frame();byId(tree,'calendar-exception-save').props.onPress();tree=await f.frame();assert.equal(f.calls.find(c=>c.type==='save').command.businessId,business);
+ f.setBusiness('different-local-business');tree=await f.frame();assert.equal(byId(tree,'calendar-exception-save'),undefined);assert.equal(byId(tree,'calendar-exception-staff-'+staffA),undefined);assert.ok(text(tree).includes('sincronizarse'));f.unmount();
+});
+test('company link adapter rejects stale/different source identity and always forwards the captured account',async()=>{
+ const calls=[],source='local-linked';let result={businessId:business,sourceId:source,name:'María José',timezone:'Europe/Madrid'};
+ const api=load('data/calendarExceptions.ts',{'./booking':{isCloudId,supabaseApiRequest:async(...args)=>{calls.push(args);return result;}},'./bookingTimeline':timeline});
+ assert.equal((await api.resolveCalendarExceptionBusiness(source,owner)).businessId,business);assert.equal(calls[0][3],owner);
+ result={...result,sourceId:'other-company'};await assert.rejects(api.resolveCalendarExceptionBusiness(source,owner));
+});
+
+test('timezone adapter persists the exact selected business and never treats an API failure as a draft save',async()=>{
+ const calls=[];let fail=null;
+ const api=load('data/calendarExceptions.ts',{'./booking':{isCloudId,supabaseApiRequest:async(path,init,auth,user)=>{calls.push({path,init,user});if(fail)throw fail;return path.includes('booking-calendar-business')?{businessId:business,sourceId:'local-linked',name:'Registered',timezone:'Europe/Madrid'}:{businessId:business,timezone:'Atlantic/Canary'};}},'./bookingTimeline':timeline});
+ assert.equal(await api.setCalendarBusinessTimezone('local-linked','Atlantic/Canary',owner),'Atlantic/Canary');assert.equal(calls[1].user,owner);assert.deepEqual(JSON.parse(calls[1].init.body),{business_id:business,timezone:'Atlantic/Canary',expectedTimezone:'Europe/Madrid'});
+ fail=Object.assign(Error('Unlinked'),{code:'BOOKING_CALENDAR_BUSINESS_NOT_LINKED',status:404});assert.equal(await api.setCalendarBusinessTimezone('local-draft','Europe/Madrid',owner),'Europe/Madrid');
+ fail=Object.assign(Error('API unavailable'),{status:404});await assert.rejects(api.setCalendarBusinessTimezone('local-draft','Europe/Madrid',owner));
+ fail=Object.assign(Error('Commitments preserved'),{status:409});await assert.rejects(api.setCalendarBusinessTimezone('local-linked','Atlantic/Canary',owner));
 });

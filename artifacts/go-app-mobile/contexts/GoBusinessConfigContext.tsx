@@ -155,7 +155,7 @@ type GoBusinessConfigContextType = {
   demo?: BusinessDemoStore;
   config:             BusinessConfig;
   loaded:             boolean;
-  updateConfig:       (patch: Partial<BusinessConfig>) => void;
+  updateConfig:       (patch: Partial<BusinessConfig>, expectedBusinessId?: string) => void;
   resetToSubActivity: (sectorId: string, subId: string) => void;
   resetConfig:        () => Promise<void>;
 };
@@ -881,8 +881,9 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   // La sincronización con go_businesses_v1 la gestiona el useEffect de arriba,
   // que se activa automáticamente cuando el estado cambia.
 
-  const updateConfig = useCallback((patch: Partial<BusinessConfig>) => {
-    if (!permission.current) return;
+  const updateConfig = useCallback((patch: Partial<BusinessConfig>, expectedBusinessId?: string) => {
+    if (expectedBusinessId !== undefined && (configRef.current.businessId ?? "") !== expectedBusinessId) throw new Error("La empresa seleccionada ha cambiado.");
+    if (!permission.current) { if (expectedBusinessId !== undefined) throw new Error("No tienes permiso para guardar esta configuración."); return; }
     dirty.current = true;
     revision.current++;
     setConfig(prev => {
