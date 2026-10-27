@@ -52,6 +52,7 @@ import QRCode from "react-native-qrcode-svg";
 import { GoOcrImportSheet } from "@/components/empresa/GoOcrImportSheet";
 import { ProfessionalGapPolicy } from "./ProfessionalGapPolicy";
 import { Step0Actividad } from "@/components/empresa/EmpresaSetupGuide";
+import { CalendarExceptionsSection } from "./CalendarExceptionsSection";
 
 import { GoTimeField } from "@/components/ui/GoTimePicker";
 import {
@@ -234,6 +235,7 @@ function buildCancelOptsCfg(t: (k: any) => string) {
 interface EmpresaConfigScreenProps {
   onBack:              () => void;
   onOpenVerificacion?: () => void;
+  onManageCalendarConflicts?: (dateISO: string) => void;
   onFinalizarConfig?:  () => void;
   initialStep?:        number;
   onOpenCompanies?:    () => void;
@@ -308,7 +310,7 @@ function useStepSave(saveRef: StepSaveRef | undefined, flush: () => Promise<void
   }, [saveRef]);
 }
 
-export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarConfig, initialStep = 0, goPrevRef, onOpenCompanies, contextNavigation, keyboardManagedByParent = false, startAtSteps = false }: EmpresaConfigScreenProps & { goPrevRef?: React.MutableRefObject<(() => void) | null> }) {
+export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalendarConflicts, onFinalizarConfig, initialStep = 0, goPrevRef, onOpenCompanies, contextNavigation, keyboardManagedByParent = false, startAtSteps = false }: EmpresaConfigScreenProps & { goPrevRef?: React.MutableRefObject<(() => void) | null> }) {
   const insets = useSafeAreaInsets();
   const { t, lang } = useLanguage();
   const STEPS = buildStepsCfg(t);
@@ -682,7 +684,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onFinalizarCon
           <View style={c.content}>
             {currentStep === 0 && <StepNombre onFocusField={compactFooter ? revealProfessional : undefined} />}
             {currentStep === 1 && <StepUbicacion onFocusField={compactFooter ? revealProfessional : undefined} />}
-            {currentStep === 2 && <StepHorario currentSector={currentSector} />}
+            {currentStep === 2 && <StepHorario currentSector={currentSector} onManageConflicts={onManageCalendarConflicts} />}
             {currentStep === 3 && <StepServicios currentSector={currentSector} saveRef={stepSaveRef} />}
             {currentStep === 4 && <StepEspacios currentSector={currentSector} saveRef={stepSaveRef} onRevealProfessional={revealProfessional} />}
             {currentStep === 5 && <StepReservas />}
@@ -959,7 +961,7 @@ function buildDefaultStaffSchedules(cfg: { daySchedules: Record<string, DaySched
   return result;
 }
 
-function StepHorario({ currentSector }: { currentSector: Sector | null }) {
+function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sector | null; onManageConflicts?: (dateISO: string) => void }) {
   const { t, lang } = useLanguage();
   const SCHED_DAYS_FULL_T  = [t("biz_day_mon_full"), t("biz_day_tue_full"), t("biz_day_wed_full"), t("biz_day_thu_full"), t("biz_day_fri_full"), t("biz_day_sat_full"), t("biz_day_sun_full")];
   const SCHED_DAYS_SHORT_T = buildDaysShortT(t);
@@ -1060,6 +1062,7 @@ function StepHorario({ currentSector }: { currentSector: Sector | null }) {
   return (
     <View>
       <View style={c.sectionCard}>
+        <Text accessibilityRole="header" style={{ fontSize: 16, fontWeight: "700", color: TEXT, marginBottom: 12 }}>{lang === "en" ? "REGULAR WEEKLY HOURS" : "HORARIO HABITUAL"}</Text>
         <Text style={c.sectionLabel}>{lang === "en" ? "Business time zone" : "Zona horaria del negocio"}</Text>
         <TextInput accessibilityLabel={lang === "en" ? "Business time zone" : "Zona horaria del negocio"}
           style={c.svcNameInput} value={timezone} placeholder="Europe/Madrid" autoCapitalize="none" autoCorrect={false}
@@ -1220,6 +1223,7 @@ function StepHorario({ currentSector }: { currentSector: Sector | null }) {
           })}
         </View>
       </View>
+      <CalendarExceptionsSection key={config.businessId ?? "unlinked"} businessId={config.businessId} timezone={config.timezone} color={color} onManageConflicts={onManageConflicts} />
     </View>
   );
 }

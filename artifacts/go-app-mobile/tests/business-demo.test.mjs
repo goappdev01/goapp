@@ -257,6 +257,8 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
         if (key in imports) return imports[key];
         if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };
         if (key === "./ProfessionalGapPolicy") return load("components/empresa/ProfessionalGapPolicy.tsx");
+        // The remote-only date editor has its own real component and SQL integration tests.
+        if (key === "./CalendarExceptionsSection") return componentMocks;
         if (key === "./CatalogComplementSelector") return { CatalogComplementSelector: () => null };
         if (key === "./booking") return imports["@/data/booking"];
         if (key === "./serviceTiming") return load("data/serviceTiming.ts");
