@@ -968,6 +968,7 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
   const { config, updateConfig } = useBusinessConfig();
   const color = currentSector?.color ?? PURPLE;
   const [selectedDay, setSelectedDay] = useState(0);
+  const [exceptionsOpen, setExceptionsOpen] = useState(false);
   const [timezone, setTimezone] = useState(config.timezone ?? "");
   const [timezoneError, setTimezoneError] = useState("");
   useEffect(() => { setTimezone(config.timezone ?? ""); }, [config.timezone]);
@@ -1222,8 +1223,21 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
             );
           })}
         </View>
+        <TouchableOpacity
+          testID="calendar-exceptions-access"
+          accessibilityRole="button"
+          accessibilityLabel={lang === "en" ? "Calendar exceptions" : "Excepciones del calendario"}
+          accessibilityState={{ expanded: exceptionsOpen }}
+          activeOpacity={0.75}
+          onPress={() => { Haptics.selectionAsync().catch(() => {}); setExceptionsOpen(open => !open); }}
+          style={[c.copyBtn, { minHeight: 48, borderWidth: 1, borderColor: color }]}
+        >
+          <Feather name="calendar" size={18} color={color} />
+          <Text style={[c.copyBtnTxt, { color: TEXT, fontSize: 14, flex: 1, textAlign: "left" }]}>{lang === "en" ? "Calendar exceptions" : "Excepciones del calendario"}</Text>
+          <Feather name={exceptionsOpen ? "chevron-up" : "chevron-down"} size={18} color={color} />
+        </TouchableOpacity>
       </View>
-      <CalendarExceptionsSection key={config.businessId ?? "unlinked"} businessId={config.businessId} timezone={config.timezone} color={color} onManageConflicts={onManageConflicts} />
+      {exceptionsOpen && <CalendarExceptionsSection key={config.businessId ?? "unlinked"} businessId={config.businessId} timezone={config.timezone} color={color} onManageConflicts={onManageConflicts} />}
     </View>
   );
 }

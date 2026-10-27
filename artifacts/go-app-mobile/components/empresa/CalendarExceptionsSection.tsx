@@ -45,10 +45,16 @@ export function CalendarExceptionsSection({ businessId, timezone, color, onManag
       try {
         const who = await captureAuthIdentity();
         if (!who) throw new Error(label("Inicia sesión para gestionar las excepciones.", "Sign in to manage calendar exceptions."));
-        const [result, professionals] = await Promise.all([getCalendarExceptions(businessId, dateISO, staffId, calendarToday(timezone || "UTC"), who.userId), getOwnedStaff(businessId)]);
+        const [calendarResult, professionalResult] = await Promise.allSettled([getCalendarExceptions(businessId, dateISO, staffId, calendarToday(timezone || "UTC"), who.userId), getOwnedStaff(businessId)]);
         if (scope.current !== token || !await isAuthIdentityCurrent(who)) return;
-        identity.current = who; setStaff(professionals.filter(s => s.active)); setData(result);
-        setDraft(result.exceptions.find(e => e.dateISO === dateISO && e.staffId === staffId)?.intervals.map(i => ({ ...i })) ?? []);
+        identity.current = who;
+        if (professionalResult.status === "fulfilled") setStaff(professionalResult.value.filter(s => s.active));
+        if (calendarResult.status === "fulfilled") {
+          const result = calendarResult.value;
+          setData(result);
+          setDraft(result.exceptions.find(e => e.dateISO === dateISO && e.staffId === staffId)?.intervals.map(i => ({ ...i })) ?? []);
+        } else setError(message(calendarResult.reason));
+        if (calendarResult.status === "fulfilled" && professionalResult.status === "rejected") setError(message(professionalResult.reason));
       } catch (cause) { if (scope.current === token) setError(message(cause)); }
       finally { if (scope.current === token) setLoading(false); }
     })();

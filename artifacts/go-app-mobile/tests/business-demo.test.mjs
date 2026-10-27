@@ -1015,3 +1015,21 @@ test("a fixed clock preserves future reservation tests without permitting past b
  assert.equal(f.store.getSnapshot().reservations.length,0);
  await f.store.saveReservations(f.store.planId,[reservation(f.store)]);assert.equal(f.store.getSnapshot().reservations.length,1);
 });
+
+
+test("step 3 exposes Calendar exceptions after the weekly summary, reuses one editor and keeps weekly settings unchanged",async()=>{
+ const f=dataFixture();await f.store.updateConfig({sectorId:"belleza",subId:"peluqueria",activeDays:[0,1,2,3,4],openFrom:"09:00",openTo:"13:00",timezone:"Europe/Madrid"});
+ const ui=uiFixture(f),Screen=ui.load("components/empresa/EmpresaConfigScreen.tsx").EmpresaConfigScreen;
+ const parent=ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:2});const step=component(parent,"StepHorario");assert.ok(step,"The real third step is mounted");
+ const scroll=nodes(parent).find(node=>node.type==="ScrollView"&&node.props.ref);assert.ok(nodes(scroll).includes(step));assert.notEqual(scroll.props.scrollEnabled,false);assert.ok(scroll.props.contentContainerStyle.paddingBottom>=100);
+ const next=button(parent,"biz_next");assert.ok(next);assert.ok(!nodes(scroll).includes(next),"The existing Next control stays outside the scroll; the access stays inside");
+ const before=plain(f.store.getSnapshot().config);let tree=ui.render(step.type,step.props),access=nodes(tree).find(node=>node.props?.testID==="calendar-exceptions-access");
+ assert.ok(access);assert.equal(text(access),"Excepciones del calendario");assert.equal(access.props.accessibilityRole,"button");assert.equal(access.props.accessibilityState.expanded,false);assert.equal(component(tree,"CalendarExceptionsSection"),undefined);
+ assert.ok(access.props.style.some(style=>style?.minHeight>=44));
+ const summary=nodes(tree).find(node=>node.type==="View"&&node.props.style?.borderTopWidth===1&&node.props.style?.marginTop===18);
+ assert.ok(summary);assert.ok(nodes(tree).indexOf(access)>nodes(tree).indexOf(summary),"The entry follows the existing weekly summary");
+ access.props.onPress();tree=ui.render(step.type,step.props);access=nodes(tree).find(node=>node.props?.testID==="calendar-exceptions-access");
+ assert.equal(access.props.accessibilityState.expanded,true);const editor=component(tree,"CalendarExceptionsSection");assert.ok(editor);assert.equal(nodes(tree).filter(node=>node.type?.name==="CalendarExceptionsSection").length,1);assert.equal(editor.props.businessId,before.businessId);
+ assert.deepEqual(plain(f.store.getSnapshot().config),before);access.props.onPress();tree=ui.render(step.type,step.props);assert.equal(component(tree,"CalendarExceptionsSection"),undefined);assert.deepEqual(plain(f.store.getSnapshot().config),before);
+ assert.equal(ui.calls.external,0);assert.equal(ui.calls.liveFloor,0);
+});
