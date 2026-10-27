@@ -19,12 +19,31 @@ export async function saveGoNoteReminder(entry: GoEntry, draft: NoteReminderDraf
     await check();
     const existing = entries.filter(row => row.id === entry.id);
     if (existing.length > 1 || (existing[0] && ((existing[0] as GoEntry & { ownerUserId?: string }).ownerUserId !== draft.scope.userId
-      || (existing[0] as GoEntry & { taskContext?: string }).taskContext !== draft.scope.context)))
+      || ((existing[0] as GoEntry & { taskContext?: string }).taskContext ?? existing[0].actionContext ?? "live:USER") !== draft.scope.context)))
       throw new Error("La nota no está disponible en este contexto.");
+    if (draft.edit) {
+      const previous = existing[0];
+      if (!previous || previous.deleted || previous.estado === "rechazado" || !["TAREA", "TAREA_INTERNA"].includes(previous.type || ""))
+        throw new Error("La nota ya no está disponible. No se ha modificado.");
+      if (Object.keys(draft.edit).some(key => JSON.stringify(previous[key as keyof GoEntry] ?? (key === "reminders" ? [] : ""))
+        !== JSON.stringify(draft.edit![key as keyof typeof draft.edit] ?? (key === "reminders" ? [] : ""))))
+        throw new Error("La nota cambió durante la edición. Vuelve a abrirla para conservar los cambios recientes.");
+      const result = noteReminderMetadata({ ...previous, notes: entry.notes, detail: entry.detail,
+        date: entry.date, dateISO: entry.dateISO, time: entry.time, duration: entry.duration,
+        place: entry.place, contactName: entry.contactName, phone: entry.phone }, draft);
+      // Other independent alerts on legacy tasks are not removed by editing this note.
+      const priorMinutes = previous.reminders?.[0] ?? null;
+      result.reminders = draft.minutes === priorMinutes ? previous.reminders || []
+        : [...new Set([...(draft.minutes === null ? [] : [draft.minutes]), ...(previous.reminders || []).filter(n => n !== priorMinutes)])];
+      result.notificationsEnabled = result.reminders.length > 0 && (draft.minutes === priorMinutes ? previous.notificationsEnabled !== false : true);
+      result.firedReminderMins = previous.dateISO !== result.dateISO || previous.time !== result.time ? []
+        : (previous.firedReminderMins || []).filter(n => draft.minutes === priorMinutes || (n !== priorMinutes && n !== draft.minutes));
+      return { entries: entries.map(row => row.id === result.id ? result : row), result };
+    }
     // Retrying a save never overwrites a later edit or creates another note.
     if (existing[0]) return { entries, result: existing[0] };
     const result = noteReminderMetadata(entry, draft);
-    return { entries: [result, ...entries].slice(0, 200), result };
+    return { entries: [result, ...entries], result };
   }, assertActive);
   await check();
   try {

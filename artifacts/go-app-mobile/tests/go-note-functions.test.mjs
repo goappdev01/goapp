@@ -49,10 +49,12 @@ async function fixture({ permission = 'allowed', platform = 'ios' } = {}) {
   };
 }
 
-test('bell offers exactly the eleven requested offsets, with Spanish and English labels',()=>{
+test('numeric bell accepts exact hour/minute intervals and retains all existing offsets',()=>{
   assert.deepEqual([...tools.NOTE_REMINDER_MINUTES],[5,10,15,30,45,60,120,180,360,720,1440]);
   for(const n of tools.NOTE_REMINDER_MINUTES){assert.equal(tools.isNoteReminderMinutes(n),true);assert.ok(tools.noteReminderLabel(n).endsWith('antes'));assert.ok(tools.noteReminderLabel(n,true).endsWith('before'));}
-  for(const invalid of [0,-1,6,25,1450,'15',null,NaN])assert.equal(tools.isNoteReminderMinutes(invalid),false);
+  for(const n of [1,6,25,75,1450,525600])assert.equal(tools.isNoteReminderMinutes(n),true);
+  assert.equal(tools.noteReminderLabel(75),'1 hora 15 min antes');
+  for(const invalid of [0,-1,1.5,525601,'15',null,NaN])assert.equal(tools.isNoteReminderMinutes(invalid),false);
 });
 for(const minutes of tools.NOTE_REMINDER_MINUTES)test(minutes+' minutes: persisted note programs exactly one real-queue request at the right instant',async()=>{
   const f=await fixture(),entry=futureEntry();
@@ -171,28 +173,32 @@ test('keyboard scrolling is opt-in for Nota only; normal closed-keyboard layout,
   const opted=nodes.filter(n=>(ts.isJsxOpeningElement(n)||ts.isJsxSelfClosingElement(n))&&n.attributes?.properties.some(p=>p.name?.getText(ast)==='noteKeyboardScroll'));
   assert.equal(opted.length,1);assert.equal(opted[0].tagName.getText(ast),'BottomSheet');
   assert.equal(opted[0].attributes.properties.find(p=>p.name?.getText(ast)==='visible').initializer.expression.getText(ast),'notesOpen');
-  assert.ok(source.includes('compact && !noteKeyboardScroll ?'));assert.ok(source.includes('bottomOffset={16}'));
+  assert.ok(source.includes('compact && !noteKeyboardScroll ?'));assert.ok(source.includes('noteFooterHeight + effectivePaddingBottom + 26 : 16'));
   assert.ok(source.includes('noteKeyboardScroll && kbVisible'),'right-edge close pan cannot steal note scrolling while keyboard is open');
   assert.ok(source.includes('onFocus={() => noteVoice.focus("title")}'));assert.ok(source.includes('onFocus={() => noteVoice.focus("detail")}'));
   assert.ok(source.includes('note-dictation-status'));assert.ok(source.includes('note-dictation-error'));
-  assert.ok(source.includes('changeQuickNoteReminder(minutes)'));assert.ok(source.includes('onSelectNote={setNoteReminderTargetId}'));
+  assert.ok(source.includes('changeQuickNoteReminder(minutes)'));assert.ok(!source.includes('onSelectNote={setNoteReminderTargetId}'));
 });
 
-const picker=evaluate('components/notes/GoNoteReminderPicker.tsx',{
-  'react-native':{View:'View',Text:'Text',TouchableOpacity:'Button'},'@/lib/goNoteTools':tools,
-}).GoNoteReminderPicker;
 const jsxNodes=tree=>Array.isArray(tree)?tree.flatMap(jsxNodes):React.isValidElement(tree)?[tree,...jsxNodes(tree.props.children)]:[];
 const jsxText=tree=>Array.isArray(tree)?tree.map(jsxText).join(''):React.isValidElement(tree)?jsxText(tree.props.children):tree==null?'':String(tree);
-for(const english of [false,true])test('bell menu '+(english?'EN':'ES')+': all choices, clear selection and saved-note access are explicit',()=>{
-  const changes=[],selected=[];
-  const tree=picker({value:15,onChange:n=>changes.push(n),english,savedNotes:[{id:'owned',label:'Mi nota · fecha · hora'}],onSelectNote:id=>selected.push(id)});
-  const radios=jsxNodes(tree).filter(n=>n.props.accessibilityRole==='radio');assert.equal(radios.length,12);
-  for(const radio of radios){assert.ok(radio.props.style.minHeight>=44);radio.props.onPress();}
-  assert.deepEqual(changes,[null,...tools.NOTE_REMINDER_MINUTES]);assert.equal(radios.filter(n=>n.props.accessibilityState.checked).length,1);
-  assert.ok(jsxText(tree).includes(english?'No reminder':'Sin aviso'));
-  const stored=jsxNodes(tree).find(n=>n.type==='Button'&&jsxText(n)==='Mi nota · fecha · hora');assert.ok(stored);stored.props.onPress();assert.deepEqual(selected,['owned']);
-  const editing=picker({value:60,onChange(){},english,targetName:'Nota seleccionada',onSelectNote:id=>selected.push(id),busy:true});
-  assert.ok(jsxText(editing).includes('Nota seleccionada'));assert.ok(jsxNodes(editing).filter(n=>n.type==='Button').every(n=>n.props.disabled));
+for(const english of [false,true])test('compact bell '+(english?'EN':'ES')+': numeric interaction, validation, no automatic focus or unrelated note list',async()=>{
+  const hosts=new Map(),changes=[],container=document.createElement('div'),root=createRoot(container);
+  const host=name=>props=>{hosts.set(props.testID||name,props);return React.createElement('div',null,props.children);};
+  const picker=evaluate('components/notes/GoNoteReminderPicker.tsx',{'react-native':{View:host('View'),Text:host('Text'),TextInput:host('Input'),TouchableOpacity:host('Button')},'@/lib/goNoteTools':tools}).GoNoteReminderPicker;
+  const run=fn=>React.act(async()=>{await fn();});
+  try{
+    await run(()=>root.render(React.createElement(picker,{value:15,onChange:n=>changes.push(n),english})));
+    for(const id of ['note-reminder-hours','note-reminder-minutes']){assert.equal(hosts.get(id).autoFocus,undefined);assert.ok(hosts.get(id).style.minHeight>=44);}
+    await run(()=>hosts.get('note-reminder-hours').onChangeText('1'));await run(()=>hosts.get('note-reminder-minutes').onChangeText('15'));
+    assert.match(container.textContent,english?/1 hour 15 min before/:/1 hora 15 min antes/);
+    await run(()=>hosts.get('note-reminder-confirm').onPress());assert.deepEqual(changes,[75]);
+    await run(()=>hosts.get('note-reminder-minutes').onChangeText('60'));await run(()=>hosts.get('note-reminder-confirm').onPress());assert.deepEqual(changes,[75]);
+    await run(()=>hosts.get('note-reminder-none').onPress());assert.deepEqual(changes,[75,null]);
+    assert.ok(!/CAMBIAR AVISO|NOTA GUARDADA|saved note|countdown/i.test(container.textContent));
+    await run(()=>root.render(React.createElement(picker,{value:60,onChange(){},english,busy:true})));
+    for(const id of ['note-reminder-confirm','note-reminder-none'])assert.equal(hosts.get(id).disabled,true);
+  }finally{await run(()=>root.unmount());}
 });
 
 test('the real Note creation connection carries the selected offset and guards duplicate taps',()=>{

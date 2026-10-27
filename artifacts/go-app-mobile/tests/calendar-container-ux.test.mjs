@@ -136,7 +136,8 @@ test('root keeps hierarchical closes and overlays the original floats without re
 });
 test('one existing form is embedded in Calendar while the agenda stays mounted', () => {
   const body = find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'renderFieldSelector').getText(ast);
-  assert.equal((body.match(/<KeyboardAvoidingView/g) ?? []).length, 1); assert.match(body, /if \(embedded\)/);
+  assert.equal((body.match(/<SelectorKeyboardFrame/g) ?? []).length, 1); assert.match(body, /if \(embedded\)/);
+  assert.match(body,/isNoteSelector \? KeyboardControllerAvoidingView : KeyboardAvoidingView/);
   const agenda = byId('calendar-agenda-viewport');
   assert.equal(agenda.parent.kind, ts.SyntaxKind.JsxElement, 'Agenda is always mounted, outside any conditional layer');
   const call = find(n => ts.isCallExpression(n) && n.getText(ast) === 'renderFieldSelector(true)');
@@ -157,6 +158,7 @@ test('exiting month navigation never calls a stale creation callback', () => {
 
 test("cancelling the existing date tool returns to the embedded task form", () => {
   const { scope } = fixture(); scope.openFieldSelector("NOTA_INTERNA", "Piloto", "", "2027-02-28");
+  scope.isNoteSelector=true;scope.embedded=true;scope.noteCalendarAfterSelectorDismissRef={current:null};
   let options;
   scope.calFlow.open = value => { options = value; };
   scope._handleCalFlowSave = () => {};

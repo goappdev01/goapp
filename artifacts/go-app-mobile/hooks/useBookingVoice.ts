@@ -30,7 +30,7 @@ type SpeechWindow = {
   SpeechRecognition?: new () => Recognition;
   webkitSpeechRecognition?: new () => Recognition;
 };
-export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
+export function useBookingVoice(onText: (text: string, zone: boolean) => void, options?: { requireTranscriptionReady?: boolean }) {
   const recorderStatus = useRef<(event: { hasError: boolean; isFinished: boolean; mediaServicesDidReset?: boolean; url?: string | null }) => void>(() => {});
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY, event => recorderStatus.current(event));
   const [status, setStatus] = useState<
@@ -163,6 +163,23 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
       }
       let stage = "permission";
       try {
+        if (options?.requireTranscriptionReady) {
+          stage = "availability";
+          const capabilities = await assistantApi<{ transcription: boolean }>("/capabilities");
+          if (generation.current !== token) return;
+          if (!capabilities.transcription) {
+            setError("El servicio de dictado de GO no está configurado o no está disponible. No se ha iniciado una grabación. Puedes escribir mientras se restablece el servicio.");
+            changeStatus("idle"); return;
+          }
+          const userId = await getAuthenticatedUserId();
+          if (generation.current !== token) return;
+          if (!userId) {
+            setError("Inicia sesión para utilizar el dictado de GO. Puedes seguir escribiendo.");
+            changeStatus("idle"); return;
+          }
+          if (generation.current !== token) return;
+          stage = "permission";
+        }
         const permission = await AudioModule.requestRecordingPermissionsAsync();
         if (generation.current !== token) return;
         if (!permission.granted) {
@@ -196,13 +213,13 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void) {
         });
         if (generation.current !== token) return;
         console.info("[assistant-voice]", { code: "START_FAILED", stage });
-        setError(stage === "permission"
+        setError(stage === "availability" ? "No se ha podido comprobar el servicio de dictado. No se ha iniciado una grabación. Puedes seguir escribiendo." : stage === "permission"
           ? "No he podido comprobar el permiso del micrófono. Inténtalo de nuevo."
           : "No he podido iniciar la grabación. Inténtalo de nuevo o escribe tu solicitud.");
         changeStatus("idle");
       }
     },
-    [recorder, changeStatus, cleanupNative, withRecorder],
+    [recorder, changeStatus, cleanupNative, withRecorder, options?.requireTranscriptionReady],
   );
   const stop = useCallback(async () => {
     if (statusRef.current !== "listening") return;

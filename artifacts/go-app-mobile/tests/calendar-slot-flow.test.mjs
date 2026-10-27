@@ -37,6 +37,8 @@ function flowFixture(initial = []) {
   Object.assign(scope, {
     Error, lang: "es", calendarSlotOpeningRef: { current: false }, calendarSlotRequestRef: { current: 0 },
     completionIdentity: { ready: true, scope: { userId: "account-a", context: "live:USER" } },
+    noteIdentityRef: { current: { ready: true, scope: { userId: "account-a", context: "live:USER" } } },
+    quickNoteReminderMinutes: null,
     calendarSlotSavingRef: { current: false }, calendarSlotDraftRef: { current: null },
     fieldSelectorSaveBusyRef: { current: false }, directLandingRef: { current: false }, pendingCalendarGoRef: { current: false }, pendingCalendarGoListenRef: { current: false }, goChatListenSequence: { current: 0 },
     getTaskUser: access.getTaskUser, assertTaskUser: access.assertTaskUser, updateGoLog: store.updateGoLog,
@@ -56,9 +58,13 @@ function flowFixture(initial = []) {
     vm.runInContext(transpile("exports." + name + " = " + declaration(name)), scope);
     scope[name] = scope.exports[name];
   }
-  const save = find(node => ts.isJsxAttribute(node) && node.name.getText(ast) === "onPress"
-    && node.initializer?.expression?.getText(ast).includes("const slotTask ="));
-  vm.runInContext(transpile("exports.saveForm = " + save.initializer.expression.getText(ast)), scope);
+  const tools = load("lib/goNoteTools.ts", {});
+  const noteApi = load("lib/goNoteReminder.ts", {"./goLogStore":store,"./goTaskAccess":access,"./goNoteTools":tools,
+    "./goTaskReminderRuntime":{refreshNativeTaskReminders:async()=>[]},"./goTaskReminders":{describeReminders:()=>""}});
+  scope.saveGoNoteReminder=noteApi.saveGoNoteReminder;
+  scope.setQuickNoteReminderMinutes=()=>{};
+  for(const name of ["saveQuickNoteEntry","saveFieldSelector"]){vm.runInContext(transpile("exports."+name+" = "+declaration(name)),scope);scope[name]=scope.exports[name];}
+  scope.exports.saveForm=scope.saveFieldSelector;
   const session = find(node => ts.isCallExpression(node) && node.expression.getText(ast) === "onSessionChanged"
     && node.arguments[0]?.getText(ast).includes("calendarSlotRequestRef.current"));
   assert.ok(session, "Execute the existing calendar identity-change listener");
@@ -199,7 +205,10 @@ test("GO retains the Calendar origin and opens the same integrated assistant onc
   assert.equal(f.calls.filter(call => call[0] === "setGoChatOpen").length, 1);
   const modal = find(node => ts.isJsxOpeningElement(node) && node.tagName.getText(ast) === "Modal"
     && node.attributes.properties.some(attr => attr.name?.getText(ast) === "visible" && attr.initializer?.getText(ast) === "{calOpen}"));
-  assert.ok(modal.attributes.properties.some(attr => attr.name?.getText(ast) === "onDismiss" && attr.initializer?.getText(ast) === "{completeCalendarGoOpen}"));
+  const dismiss=modal.attributes.properties.find(attr=>attr.name?.getText(ast)==="onDismiss");assert.ok(dismiss);
+  scope.noteSelectorAfterCalendarDismissRef={current:false};
+  vm.runInContext(transpile("exports.dismissCalendar = "+dismiss.initializer.expression.getText(ast)),scope);
+  scope.exports.dismissCalendar();assert.equal(scope.goChatOpen,true);assert.equal(f.calls.filter(call=>call[0]==="setGoChatOpen").length,1);
   const wrapper = readFileSync("components/GOChatScreen.tsx", "utf8");
   assert.match(wrapper, /GO_BOOKING_ASSISTANT_V1 = true/); assert.match(wrapper, /<BookingAssistantScreen/);
   const reservas = find(node => ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === "GoReservasConfigScreen");

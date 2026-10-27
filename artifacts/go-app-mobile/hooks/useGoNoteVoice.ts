@@ -25,7 +25,7 @@ export function useGoNoteVoice({ visible, identity, title, setTitle, setDetail, 
       setNotice(english ? `The title allows 16 characters. Dictation was not truncated: ${text}. Select the details field and dictate there.`
         : `El título admite 16 caracteres. No se ha recortado el dictado: ${text}. Selecciona el campo de detalle para dictarlo allí.`);
     }
-  });
+  }, { requireTranscriptionReady: true });
   const abort = useRef(voice.abort); abort.current = voice.abort;
   useEffect(() => {
     if (!visible || captureIdentity.current !== identity) { abort.current(); setNotice(""); }

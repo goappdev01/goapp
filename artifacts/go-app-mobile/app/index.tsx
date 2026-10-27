@@ -34,6 +34,7 @@ import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScr
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoNoteControls } from "@/components/notes/GoNoteControls";
+import { GoTaskScheduleStep } from "@/components/notes/GoTaskScheduleStep";
 import { CalendarCloseGuide } from "@/components/ui/CalendarCloseGuide";
 import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
 import { GoBoardsPanel } from "@/components/boards/GoBoardsPanel";
@@ -3326,7 +3327,7 @@ function HomeScreenContent() {
   const [fieldSelectorFields, setFieldSelectorFields] = useState<Set<string>>(new Set());
   const [fsFilledValues, setFsFilledValues] = useState<{
     contactName?: string; phone?: string;
-    date?: string; dateISO?: string; time?: string;
+    date?: string; dateISO?: string; time?: string; duration?: string;
     place?: string;
   }>({});
   const [fsLocationExpanded, setFsLocationExpanded] = useState(false);
@@ -4255,6 +4256,11 @@ function HomeScreenContent() {
   const [noteReminderPickerOpen, setNoteReminderPickerOpen] = useState(false);
   const noteTaskDraftRef = useRef<NoteReminderDraft | null>(null);
   const noteStartLockRef = useRef(false);
+  const noteSelectorAfterNotesDismissRef = useRef(false);
+  const noteSelectorAfterCalendarDismissRef = useRef(false);
+  const noteCalendarAfterSelectorDismissRef = useRef<(() => void) | null>(null);
+  const noteEditAfterDetailsRef = useRef<GoEntry | null>(null);
+  const [noteDetailCloseRequested, setNoteDetailCloseRequested] = useState(false);
   const [noteReminderTargetId, setNoteReminderTargetId] = useState<string | null>(null);
   const [noteReminderBusy, setNoteReminderBusy] = useState(false);
   const noteIdentity = completionIdentity;
@@ -4792,6 +4798,11 @@ function HomeScreenContent() {
 
   // closeMonthGrid delegado al hook (cierra con animación y actualiza step).
   const closeMonthGrid = () => {
+    if (qdFlowActiveRef.current && (fieldSelectorKind === "NOTA_INTERNA" || fieldSelectorKind === "NOTA_EXTERNA")) {
+      setFsFilledValues(previous => ({ ...previous, dateISO: calFlow.dateISO, date: calFlow.dateDraft, time: calFlow.time, duration: calFlow.duration }));
+      calFlow.cancel();
+      return;
+    }
     calFlow.closeMonthGridManual();
     if (calendarTaskContextRef.current) setFieldSelectorOpen(true);
   };
@@ -8472,7 +8483,7 @@ function HomeScreenContent() {
     // Si hay un GO en construcción (categoría elegida o campos ya rellenos),
     // la nota externa NO crea una entrada separada: se adjunta al GO activo
     // y viajará dentro del mismo envío. El botón central permanece "SEND GO".
-    if (!fromTimeSlot && kind === "NOTA_EXTERNA" && (isActivelyCreating || categorySelected)) {
+    if (!fromTimeSlot && kind === "NOTA_EXTERNA" && !noteReminder?.edit && (isActivelyCreating || categorySelected)) {
       setAttachedExternalNote({
         title:  initialText   || "",
         detail: initialDetail || "",
@@ -8495,53 +8506,7 @@ function HomeScreenContent() {
     const landingTime     = time.trim();
     const landingPlace    = place.trim();
 
-    // ── BYPASS INTELIGENTE — solo cuando los 3 datos aplicables existen ──
-    // NOTA_INTERNA: los campos relevantes son Ubicación + Fecha (sin contacto).
-    // NOTA_EXTERNA: los 3 campos son Contacto + Ubicación + Fecha.
-    // Si falta cualquiera → abrir segunda pantalla con los existentes iluminados.
-    const hasContact = !!(landingContact || landingPhone);
-    const hasPlace   = !!landingPlace;
-    const hasDate    = !!(landingDate || landingDateISO);
-
-    if (!fromTimeSlot && kind === "NOTA_INTERNA" && hasPlace && hasDate) {
-      setNotesOpen(false);
-      setQuickNoteText("");
-      setQuickNoteDetail("");
-      createEntryFromSelector(
-        "NOTA_INTERNA",
-        initialText || "",
-        "",
-        "",
-        landingDate,
-        landingDateISO,
-        landingTime,
-        landingPlace,
-        initialDetail,
-      );
-      showToast(t('toast_task_saved'));
-      return;
-    }
-
-    if (!fromTimeSlot && kind === "NOTA_EXTERNA" && hasContact && hasPlace && hasDate) {
-      setNotesOpen(false);
-      setQuickNoteText("");
-      setQuickNoteDetail("");
-      createEntryFromSelector(
-        "NOTA_EXTERNA",
-        initialText || "",
-        landingContact,
-        landingPhone,
-        landingDate,
-        landingDateISO,
-        landingTime,
-        landingPlace,
-        initialDetail,
-      );
-      showToast(t('toast_task_saved'));
-      return;
-    }
-
-    // ── APERTURA DEL SELECTOR — faltan datos ──────────────────────────────
+    // Abrir el formulario conservando los datos disponibles. GUARDAR confirma la persistencia.
     // Los campos ya rellenados en el Landing aparecerán iluminados/marcados
     // automáticamente a través de fsFilledValues.
     calendarTaskContextRef.current = calOpen
@@ -8590,7 +8555,8 @@ function HomeScreenContent() {
     qdCapTimeRef.current = "";
     qdCapPlaceRef.current = "";
     qdFlowActiveRef.current = false;
-    setFieldSelectorOpen(true);
+    if (notesOpen && !calOpen && Platform.OS === "ios") { noteSelectorAfterNotesDismissRef.current = true; setFieldSelectorOpen(false); }
+    else setFieldSelectorOpen(true);
     // Persist draft immediately so content is never lost if user navigates away
     if (!fromTimeSlot) AsyncStorage.setItem(
       "go_task_draft_v1",
@@ -8640,16 +8606,16 @@ function HomeScreenContent() {
       await assertTaskUser(ownerUserId);
       if (entries.some(existing => existing.id === entry.id)) return { entries, result: undefined };
       const actionContext=calendarSlotDraftRef.current?.actionContext || (completionIdentity.scope?.userId===ownerUserId ? completionIdentity.scope.context : "live:USER");
-      return { entries: [{ ...entry, ownerUserId, actionContext }, ...entries].slice(0, 200), result: undefined };
+      return { entries: [{ ...entry, ownerUserId, actionContext }, ...entries], result: undefined };
     });
   };
 
   const startGoNoteTask = (kind: "NOTA_INTERNA" | "NOTA_EXTERNA", text: string, detail: string) => {
     if (noteStartLockRef.current) return;
     const identity = noteIdentityRef.current;
-    if (quickNoteAlarm && (!identity.ready || !identity.scope)) {
-      showToast(lang === "en" ? "Wait for GO to verify your account and context before adding the reminder."
-        : "Espera a que GO verifique tu cuenta y contexto antes de añadir el aviso.", "warning");
+    if (!identity.ready || !identity.scope) {
+      showToast(lang === "en" ? "Wait for GO to verify your account and context before saving the note."
+        : "Espera a que GO verifique tu cuenta y contexto antes de guardar la nota.", "warning");
       setQuickNoteText(text); setQuickNoteDetail(detail);
       return;
     }
@@ -8675,7 +8641,11 @@ function HomeScreenContent() {
   };
 
   const changeQuickNoteReminder = async (minutes: number | null) => {
-    if (!noteReminderTargetId) { setQuickNoteReminderMinutes(minutes); setNoteReminderPickerOpen(false); return; }
+    if (!noteReminderTargetId) {
+      setQuickNoteReminderMinutes(minutes);
+      if (noteTaskDraftRef.current) noteTaskDraftRef.current.minutes = minutes;
+      setNoteReminderPickerOpen(false); return;
+    }
     if (noteReminderBusy) return;
     const identity = noteIdentityRef.current;
     if (!identity.ready || !identity.scope) return;
@@ -8701,10 +8671,11 @@ function HomeScreenContent() {
     timeVal: string,
     placeVal: string,
     detailVal?: string,
+    durationVal?: string,
   ) => {
     const noteDraft = (kind === "NOTA_INTERNA" || kind === "NOTA_EXTERNA") ? noteTaskDraftRef.current : null;
     const slotOwner = calendarSlotDraftRef.current?.ownerUserId;
-    if (calendarTaskContextRef.current && !slotOwner) closeFieldSelectorPanel();
+    if (calendarTaskContextRef.current && !slotOwner && !noteDraft) closeFieldSelectorPanel();
     const now = Date.now();
     const uid = calendarSlotDraftRef.current?.entryId || noteDraft?.entryId || makeUid();
     if (noteDraft) noteDraft.entryId = uid;
@@ -8721,7 +8692,7 @@ function HomeScreenContent() {
         date: dateVal || "",
         dateISO: dateISOVal || "",
         time: timeVal || "",
-        duration: "",
+        duration: durationVal || "",
         contactName: "",
         phone: "",
         estado: "pendiente",
@@ -8745,8 +8716,8 @@ function HomeScreenContent() {
       }
       showToast(t('toast_internal_task_saved'), 'success');
       if (!slotOwner) AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
-      if (isUserMode) setGoOnboardingCount(prev => { const next = prev + 1; AsyncStorage.setItem("go_onboarding_count_v1", String(next)).catch(() => {}); return next; });
-      if (isUserMode && !tutGoRealizado) { setTutGoRealizado(true); AsyncStorage.setItem("tutorial.goRealizado", "1").catch(() => {}); }
+      if (isUserMode && !noteDraft?.edit) setGoOnboardingCount(prev => { const next = prev + 1; AsyncStorage.setItem("go_onboarding_count_v1", String(next)).catch(() => {}); return next; });
+      if (isUserMode && !noteDraft?.edit && !tutGoRealizado) { setTutGoRealizado(true); AsyncStorage.setItem("tutorial.goRealizado", "1").catch(() => {}); }
 
     } else if (kind === "NOTA_EXTERNA") {
       const entry: any = {
@@ -8759,13 +8730,14 @@ function HomeScreenContent() {
         date: dateVal || "",
         dateISO: dateISOVal || "",
         time: timeVal || "",
-        duration: "",
+        duration: durationVal || "",
         contactName: contactNameVal || "",
         phone: phoneVal || "",
         estado: "pendiente",
         createdAt: now,
         type: "TAREA",
         notes: text || "",
+        detail: detailVal || "",
         isGeneric: false,
       };
       if (noteDraft) {
@@ -8789,8 +8761,8 @@ function HomeScreenContent() {
         showToast(t('toast_external_task_saved'), 'success');
       }
       if (!slotOwner) AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
-      if (isUserMode) setGoOnboardingCount(prev => { const next = prev + 1; AsyncStorage.setItem("go_onboarding_count_v1", String(next)).catch(() => {}); return next; });
-      if (isUserMode && !tutGoRealizado) { setTutGoRealizado(true); AsyncStorage.setItem("tutorial.goRealizado", "1").catch(() => {}); }
+      if (isUserMode && !noteDraft?.edit) setGoOnboardingCount(prev => { const next = prev + 1; AsyncStorage.setItem("go_onboarding_count_v1", String(next)).catch(() => {}); return next; });
+      if (isUserMode && !noteDraft?.edit && !tutGoRealizado) { setTutGoRealizado(true); AsyncStorage.setItem("tutorial.goRealizado", "1").catch(() => {}); }
 
     } else if (kind === "GO_INTERNO") {
       const entry: any = {
@@ -8882,6 +8854,40 @@ function HomeScreenContent() {
       if (!slotOwner) AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
     }
   };
+  const saveFieldSelector = async () => {
+    if (fieldSelectorSaveBusyRef.current) return;
+    fieldSelectorSaveBusyRef.current = true;
+    const slotTask = !!calendarSlotDraftRef.current;
+    let saved = false;
+    try {
+      Keyboard.dismiss();
+      const kind = fieldSelectorKind, text = fieldSelectorText.trim(), detail = fieldSelectorDetail;
+      const note = kind === "NOTA_INTERNA" || kind === "NOTA_EXTERNA";
+      if (note && !text && !detail.trim()) throw new Error("Escribe un título o el contenido de la tarea antes de guardar.");
+      if (note && !noteTaskDraftRef.current) {
+        const identity = noteIdentityRef.current;
+        if (!identity.ready || !identity.scope) throw new Error("Espera a que GO verifique tu cuenta antes de guardar la nota.");
+        if (slotTask && calendarSlotDraftRef.current?.ownerUserId !== identity.scope.userId) throw new Error("La cuenta ha cambiado. Vuelve a abrir la tarea.");
+        noteTaskDraftRef.current = { scope: { ...identity.scope }, minutes: quickNoteReminderMinutes };
+      }
+      if (qdReturnTimerRef.current) { clearTimeout(qdReturnTimerRef.current); qdReturnTimerRef.current = null; }
+      qdFlowActiveRef.current = false;
+      if (slotTask) calendarSlotSavingRef.current = true;
+      const result = await createEntryFromSelector(kind, text, fsFilledValues.contactName || "", fsFilledValues.phone || "",
+        fsFilledValues.date || "", fsFilledValues.dateISO || "", fsFilledValues.time || "", fsFilledValues.place || "", detail, fsFilledValues.duration);
+      if (result === false) return;
+      saved = true;
+      if (calendarTaskContextRef.current) closeFieldSelectorPanel();
+      setFsFilledValues({}); setFsLocationExpanded(false); setFsActivityKey(null); setFsOrbitalOpen(false);
+      setFsCustomOpen(false); setFsCustomLabel(""); setFieldSelectorOpen(false); setFieldSelectorText(""); setFieldSelectorDetail("");
+      const origin = qdOriginContextRef.current;
+      qdOriginContextRef.current = { listOpen: false, notesOpen: false, agendaOpOpen: false };
+      if (origin.listOpen) setListOpen(true);
+      if (origin.agendaOpOpen) setAgendaOpOpen(true);
+    } catch (error) { showToast(error instanceof Error ? error.message : String(error), "error"); }
+    finally { if (!saved) fieldSelectorSaveBusyRef.current = false; calendarSlotSavingRef.current = false; }
+  };
+
 
   const moveGoToDay = (id: string, newDateISO: string, newTime: string, newDuration?: string) => {
     const customerBooking=customerBookings.entries.find(entry=>entry.id===id);if(customerBooking){openBookingProposal(customerBooking,"customer",{dateISO:newDateISO,time:newTime});return;}
@@ -11114,14 +11120,19 @@ function HomeScreenContent() {
   // Llamado desde cada save handler cuando qdFlowActiveRef.current es true.
   // Actualiza fsFilledValues con lo capturado y reabre el panel selector.
   const qdReturnToSelector = () => {
-    setFsFilledValues({
+    setFsFilledValues(previous => ({ ...previous,
       contactName: qdCapContactNameRef.current || undefined,
       phone:       qdCapPhoneRef.current       || undefined,
       date:        qdCapDateRef.current         || undefined,
       dateISO:     qdCapDateISORef.current      || undefined,
       time:        qdCapTimeRef.current         || undefined,
       place:       qdCapPlaceRef.current        || undefined,
-    });
+    }));
+    if ((fieldSelectorKind === "NOTA_INTERNA" || fieldSelectorKind === "NOTA_EXTERNA") && qdFlowActiveRef.current) {
+      if (calendarTaskContextRef.current || Platform.OS !== "ios") setFieldSelectorOpen(true);
+      else noteSelectorAfterCalendarDismissRef.current = true;
+      return;
+    }
     if (qdReturnTimerRef.current) clearTimeout(qdReturnTimerRef.current);
     qdReturnTimerRef.current = setTimeout(() => {
       qdReturnTimerRef.current = null;
@@ -11762,7 +11773,18 @@ function HomeScreenContent() {
   // Callback de guardar del flujo normal (creación/edición de GO).
   // La validación de fecha pasada la gestiona el hook internamente via `validate`;
   // este callback solo se ejecuta cuando la fecha/hora ya es válida.
+  const noteScheduleActive = qdFlowActiveRef.current && (fieldSelectorKind === "NOTA_INTERNA" || fieldSelectorKind === "NOTA_EXTERNA");
+  const noteSchedulePhase = ["clock", "ampm", "duration"].includes(calFlow.step) ? calFlow.step : "duration";
   const _handleCalFlowSave = (r: CalFlowResult) => {
+    if (qdFlowActiveRef.current && (fieldSelectorKind === "NOTA_INTERNA" || fieldSelectorKind === "NOTA_EXTERNA")) {
+      qdCapDateRef.current = r.dateDraft;
+      qdCapDateISORef.current = r.dateISO;
+      qdCapTimeRef.current = r.time;
+      setFsFilledValues(previous => ({ ...previous, duration: r.duration }));
+      if (!calendarTaskContextRef.current) setCalOpen(false);
+      qdReturnToSelector();
+      return;
+    }
     setDate(r.dateDraft);
     setDateISO(r.dateISO);
     setTime(r.time);
@@ -11774,6 +11796,7 @@ function HomeScreenContent() {
       qdCapDateRef.current = r.dateDraft;
       qdCapDateISORef.current = r.dateISO;
       qdCapTimeRef.current = r.time;
+      setFsFilledValues(previous => ({ ...previous, duration: r.duration }));
       qdReturnToSelector();
     }
   };
@@ -13515,11 +13538,35 @@ function HomeScreenContent() {
   // small). Ambas presentan los mismos 4 atajos: Aquí, Tarde, +10m,
   // Cambiar — única fuente de verdad para color, etiqueta, icono y
   // handler. Si añadimos/quitamos un atajo, basta editar aquí.
-  const openEntryChange = (rawEntry: GoEntry, from: "landing" | "calendar" = "landing") => {
+  const openEntryChange = (rawEntry: GoEntry, from: "landing" | "calendar" = "landing", afterDismiss = false) => {
     const entry = entryIsInternal(rawEntry) ? rawEntry : landingCurrentEntry(rawEntry);
+    if (!afterDismiss && landingDetailsId === entry.id && entry.kind === "sent" && ["TAREA", "TAREA_INTERNA"].includes(entry.type || "")
+      && (isGoNoteReminderTarget(entry) || ["nota_interna", "nota_externa"].includes(entry.intentKey))) {
+      noteEditAfterDetailsRef.current = entry;
+      setNoteDetailCloseRequested(true);
+      return;
+    }
     setLandingDetailsId(null);
     if (entry.customerBooking) { openBookingProposal(entry); return; }
     if (entry.businessBooking) { openBookingProposal(entry, "business"); return; }
+    if (entry.kind === "sent" && ["TAREA", "TAREA_INTERNA"].includes(entry.type || "")
+      && (isGoNoteReminderTarget(entry) || ["nota_interna", "nota_externa"].includes(entry.intentKey))) {
+      const identity = noteIdentityRef.current;
+      if (!identity.ready || !identity.scope || entry.ownerUserId !== identity.scope.userId
+        || (entry.taskContext ?? entry.actionContext ?? "live:USER") !== identity.scope.context) {
+        showToast("No se puede verificar la cuenta y el contexto de esta nota.", "error"); return;
+      }
+      const draft: NoteReminderDraft = { scope: { ...identity.scope }, minutes: entry.reminders?.[0] ?? null, entryId: entry.id,
+        edit: { notes: entry.notes, detail: entry.detail, date: entry.date, dateISO: entry.dateISO, time: entry.time, duration: entry.duration,
+          place: entry.place, contactName: entry.contactName, phone: entry.phone,
+          reminders: [...(entry.reminders || [])] } };
+      setQuickNoteReminderMinutes(draft.minutes); setNoteReminderTargetId(null); setNoteReminderPickerOpen(false);
+      openFieldSelector(entry.type === "TAREA_INTERNA" ? "NOTA_INTERNA" : "NOTA_EXTERNA", entry.notes || "", entry.detail || "", entry.dateISO || "", entry.time || "", draft);
+      setFsFilledValues({ date: entry.date, dateISO: entry.dateISO, time: entry.time, duration: entry.duration,
+        contactName: entry.contactName, phone: entry.phone, place: entry.place });
+      setFsPlaceDraft(entry.place || "");
+      return;
+    }
     if (entryIsInternal(entry)) {
       const owner = entry.ownerUserId;
       if (!owner) { showToast(lang === "en" ? "The task owner cannot be verified." : "No se puede verificar el propietario de la tarea.", "error"); return; }
@@ -15445,7 +15492,10 @@ function HomeScreenContent() {
       )}
 
       </LandingContentViewport>
-      <GoEntryDetailsSheet onGoToLanding={goDirectlyToLanding} handedness={handedness} entry={landingDetailsEntry?followedEntry(landingDetailsEntry):null} onClose={() => setLandingDetailsId(null)} renderMessageScreen={landingDetailsEntry ? () => renderEntryMessageScreen(landingDetailsEntry) : undefined} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry, undefined, true) : undefined}>
+      <GoEntryDetailsSheet onGoToLanding={goDirectlyToLanding} handedness={handedness} entry={landingDetailsEntry?followedEntry(landingDetailsEntry):null}
+        closeRequested={noteDetailCloseRequested}
+        onClose={() => { const edit = noteEditAfterDetailsRef.current; noteEditAfterDetailsRef.current = null; setNoteDetailCloseRequested(false); setLandingDetailsId(null); if (edit) openEntryChange(edit, "landing", true); }}
+        renderMessageScreen={landingDetailsEntry ? () => renderEntryMessageScreen(landingDetailsEntry) : undefined} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry, undefined, true) : undefined}>
         {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry)}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}</>}
       </GoEntryDetailsSheet>
 
@@ -20034,7 +20084,7 @@ function HomeScreenContent() {
         visible={calOpen}
         transparent
         animationType={directLandingExit ? "none" : "slide"}
-        onDismiss={completeCalendarGoOpen}
+        onDismiss={() => { completeCalendarGoOpen(); if (noteSelectorAfterCalendarDismissRef.current) { noteSelectorAfterCalendarDismissRef.current = false; setFieldSelectorOpen(true); } }}
         onRequestClose={() => {
           if (calendarLayerBackRef.current?.()) return;
           if (calendarTaskContextRef.current && fieldSelectorOpen) {
@@ -20602,7 +20652,7 @@ function HomeScreenContent() {
             })()}
 
             {/* PASO 2b — AM/PM: solo si el usuario no seleccionó período en el reloj */}
-            {calPanelOpen && calStep === "ampm" && (
+            {calPanelOpen && calStep === "ampm" && !noteScheduleActive && (
               <>
                 <Text style={[styles.sheetTitle, { textAlign: "center", marginTop: 8, marginBottom: 6, color: "#ffffff" }]}>
                   AM o PM
@@ -20642,7 +20692,7 @@ function HomeScreenContent() {
             )}
 
             {/* PASO 3 — DURACIÓN: visible solo tras elegir hora */}
-            {calPanelOpen && calStep === "duration" && (
+            {calPanelOpen && calStep === "duration" && !noteScheduleActive && (
               <>
                 {/* Resumen día + hora elegidos — tappable para corregir, con SALTAR a la derecha */}
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: calError ? 10 : 16, marginTop: 6, paddingHorizontal: 4 }}>
@@ -21317,7 +21367,7 @@ function HomeScreenContent() {
         />
 
         {/* ── CLOCK BOTTOM SHEET — reloj analógico táctil ─────────────── */}
-        {clockOpen && (() => {
+        {clockOpen && !noteScheduleActive && (() => {
           const NUM_R = 82;
           const FACE = CLOCK_R * 2;
           const positions = Array.from({ length: 12 }, (_, i) => {
@@ -21505,6 +21555,12 @@ function HomeScreenContent() {
             </View>
           )}
 
+          {noteScheduleActive && !fieldSelectorOpen && !monthGridOpen && <GoTaskScheduleStep
+            key={noteSchedulePhase} step={noteSchedulePhase as "clock" | "ampm" | "duration"} dateLabel={calFlow.dateDraft || calFlow.dateISO}
+            time={calFlow.time} duration={calFlow.duration} handedness={handedness}
+            onDurationDraft={calFlow.setDurationDraft}
+            onTime={calFlow.selectExactTime} onDuration={calFlow.selectDuration} onDate={calFlow.returnToDate}
+            onBack={() => calFlow.step === "duration" ? calFlow.reopenClock() : calFlow.returnToDate()} />}
           {calendarTaskContextRef.current && fieldSelectorOpen && renderFieldSelector(true)}
           <GoBoardsPanel visible={boardsOpen && calOpen} onClose={() => setBoardsOpen(false)} manager={goBoards} fontScale={uiScaleFactor} handedness={handedness} />
         </View>
@@ -21729,6 +21785,7 @@ function HomeScreenContent() {
       <BottomSheet
         visible={notesOpen}
         noteKeyboardScroll
+        onDismiss={() => { if (noteSelectorAfterNotesDismissRef.current) { noteSelectorAfterNotesDismissRef.current = false; setFieldSelectorOpen(true); } }}
         onShow={() => quickNoteTitleRef.current?.focus()}
         onClose={() => { Keyboard.dismiss(); setNotesOpen(false); }}
         footer={<GoNoteControls handedness={handedness} closeLabel={t('close')}
@@ -21987,11 +22044,8 @@ function HomeScreenContent() {
           {!!(noteVoice.error || noteVoice.notice) && <Text testID="note-dictation-error" accessibilityLiveRegion="polite" style={{ color: "#fbbf24", fontSize: 12, marginTop: 8 }}>
             {noteVoice.notice || (lang === "en" ? "Dictation is unavailable. Check microphone permission and the connection, or type your note." : noteVoice.error)}
           </Text>}
-          {noteReminderPickerOpen && <GoNoteReminderPicker value={noteReminderTarget ? goNoteReminderMinutes(noteReminderTarget) : quickNoteReminderMinutes}
-            english={lang === "en"} busy={noteReminderBusy}
-            targetName={noteReminderTarget ? [noteReminderTarget.notes, noteReminderTarget.dateISO, noteReminderTarget.time].filter(Boolean).join(" · ") : undefined}
-            savedNotes={savedGoNoteReminderTargets.map(entry => ({ id: entry.id, label: [entry.notes, entry.dateISO, entry.time].filter(Boolean).join(" · ") }))}
-            onSelectNote={setNoteReminderTargetId} onChange={minutes => { void changeQuickNoteReminder(minutes); }} />}
+          {noteReminderPickerOpen && <GoNoteReminderPicker value={quickNoteReminderMinutes} english={lang === "en"} busy={noteReminderBusy}
+            dateISO={dateISO} time={time} onChange={minutes => { void changeQuickNoteReminder(minutes); }} />}
 
         </View>{/* fin wrapper gestual */}
       </BottomSheet>
@@ -25705,8 +25759,8 @@ function HomeScreenContent() {
 
               {/* 2 opciones: TAREA INTERNA · TAREA EXTERNA */}
               {([
-                { kind: "NOTA_INTERNA" as const, label: "INTERNAL TASK", sub: "Quick panel", icon: "file-text" as const, color: "#7c3aed" },
-                { kind: "NOTA_EXTERNA" as const, label: "EXTERNAL TASK", sub: "Quick panel", icon: "file-text" as const, color: "#f97316" },
+                { kind: "NOTA_INTERNA" as const, label: "TAREA INTERNA", sub: "Nota rápida", icon: "file-text" as const, color: "#7c3aed" },
+                { kind: "NOTA_EXTERNA" as const, label: "TAREA EXTERNA", sub: "Nota rápida", icon: "file-text" as const, color: "#f97316" },
               ] as const).map((opt) => (
                 <View key={opt.kind} style={{ flexDirection: "row", gap: 10, marginBottom: 10 }}>
                   {[opt].map((o) => {
@@ -26481,28 +26535,35 @@ function HomeScreenContent() {
 
   // Reuse the same task form inside Calendar or in its original standalone modal.
   function renderFieldSelector(embedded: boolean) {
+    const isNoteSelector = fieldSelectorKind === "NOTA_INTERNA" || fieldSelectorKind === "NOTA_EXTERNA";
+    const SelectorKeyboardFrame = isNoteSelector ? KeyboardControllerAvoidingView : KeyboardAvoidingView;
+    const FormScroll = isNoteSelector ? (Platform.OS === "web" ? ScrollView : KeyboardAwareScrollView) : View;
     const content = (
-      <KeyboardAvoidingView
-          style={{ flex: 1, justifyContent: "flex-end" }}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+      <SelectorKeyboardFrame
+          style={{ flex: 1, justifyContent: "flex-end", ...(isNoteSelector ? { backgroundColor: "#0e0e10", paddingTop: insets.top + 4 } : {}) }}
+          behavior={isNoteSelector ? "height" : Platform.OS === "ios" ? "padding" : "height"}
         >
           <Pressable
-            style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: embedded ? "rgba(0,0,0,0.42)" : "transparent" }}
+            style={{ ...(isNoteSelector ? { height: embedded ? 108 : 8, flexShrink: 0 } : { flex: 1 }), alignItems: "center", justifyContent: "center", backgroundColor: embedded ? "rgba(0,0,0,0.42)" : "transparent" }}
             onPress={closeFieldSelectorPanel}
           >
-            {!embedded && (
+            {!embedded && !isNoteSelector && (
               <View pointerEvents="none" style={{ opacity: 0.78 }}>
                 {renderGoOrbit(GO_SIZE_4, intent)}
               </View>
             )}
             {embedded && (
-              <View testID="calendar-task-closes" style={{ position: "absolute", right: Math.max(insets.right + 14, 14), bottom: 10, gap: 8 }}>
+              <View testID="calendar-task-closes" style={{ position: "absolute", ...(isNoteSelector && handedness === "left" ? {left: Math.max(insets.left + 14,14)} : {right: Math.max(insets.right + 14, 14)}), bottom: 10, gap: 8 }}>
                 <GoCloseButton level="panel" onPress={closeFieldSelectorPanel} accessibilityLabel={lang === "en" ? "Close new task" : "Cerrar Nueva tarea"} />
                 <GoCloseButton level="container" onPress={exitCalendarContainer} accessibilityLabel={lang === "en" ? "Exit Calendar" : "Salir de Calendario"} />
               </View>
             )}
           </Pressable>
-          <Pressable onPress={(e) => { e.stopPropagation(); Keyboard.dismiss(); }}>
+          <FormScroll testID={isNoteSelector ? "note-task-form-scroll" : undefined} {...(isNoteSelector ? {
+            keyboardShouldPersistTaps: "handled" as const, style: { flex: 1 }, bottomOffset: 20,
+            contentContainerStyle: { paddingBottom: 4 },
+          } : {})}>
+          <Pressable onPress={(e) => { e.stopPropagation(); if (!isNoteSelector) Keyboard.dismiss(); }}>
             <View
               style={{
                 backgroundColor: "#131316",
@@ -26518,10 +26579,10 @@ function HomeScreenContent() {
                 const meta: Record<string, { label: string; icon: keyof typeof Feather.glyphMap; color: string }> = {
                   GO_INTERNO:   { label: "GO INTERNO",   icon: "zap",       color: "#3b82f6" },
                   GO_EXTERNO:   { label: "GO EXTERNO",   icon: "send",      color: "#10b981" },
-                  NOTA_INTERNA: { label: "INTERNAL TASK", icon: "file-text", color: "#7c3aed" },
-                  NOTA_EXTERNA: { label: "EXTERNAL TASK", icon: "file-text", color: "#f97316" },
+                  NOTA_INTERNA: { label: "TAREA INTERNA", icon: "file-text", color: "#7c3aed" },
+                  NOTA_EXTERNA: { label: "TAREA EXTERNA", icon: "file-text", color: "#f97316" },
                 };
-                const m = meta[fieldSelectorKind] ?? { label: "NEW", icon: "plus" as any, color: "#ffffff" };
+                const m = meta[fieldSelectorKind] ?? { label: "NUEVA TAREA", icon: "plus" as any, color: "#ffffff" };
                 return (
                   <View style={{ flexDirection: "row", alignItems: "center", marginBottom: fsKbVisible ? 6 : 10 }}>
                     <View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: m.color + "22", alignItems: "center", justifyContent: "center", marginRight: 9 }}>
@@ -26533,8 +26594,9 @@ function HomeScreenContent() {
               })()}
 
               {/* DETALLES — campo principal; solo visible cuando no hay teclado o cuando este campo está enfocado */}
-              {(!fsKbVisible || fsFocusedField === "detail") && (
+              {(isNoteSelector || !fsKbVisible || fsFocusedField === "detail") && (
                 <TextInput
+                  testID="task-detail"
                   value={fieldSelectorDetail}
                   onChangeText={setFieldSelectorDetail}
                   onFocus={() => setFsFocusedField("detail")}
@@ -26562,12 +26624,13 @@ function HomeScreenContent() {
               )}
 
               {/* TÍTULO — solo visible cuando no hay teclado o cuando este campo está enfocado */}
-              {(!fsKbVisible || fsFocusedField === "title") && (
+              {(isNoteSelector || !fsKbVisible || fsFocusedField === "title") && (
                 <>
                   <Text style={{ color: "#ffffff", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.4, marginBottom: 4, marginLeft: 2 }}>
                     TÍTULO
                   </Text>
                   <TextInput
+                    testID="task-title"
                     value={fieldSelectorText}
                     onChangeText={setFieldSelectorText}
                     onFocus={() => setFsFocusedField("title")}
@@ -26778,6 +26841,14 @@ function HomeScreenContent() {
                 );
               })()}
 
+              {isNoteSelector && <View style={{ marginBottom: 10 }}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Aviso de esta tarea" onPress={() => setNoteReminderPickerOpen(open => !open)}
+                  style={{minHeight:44,flexDirection:"row",alignItems:"center",gap:8}}>
+                  <Feather name="bell" size={18} color="#fbbf24"/><Text style={{color:"#ffffff",flexShrink:1}}>{quickNoteReminderMinutes === null ? "Sin aviso" : noteReminderLabel(quickNoteReminderMinutes)}</Text>
+                </TouchableOpacity>
+                {noteReminderPickerOpen && <GoNoteReminderPicker value={quickNoteReminderMinutes} dateISO={fsFilledValues.dateISO} time={fsFilledValues.time}
+                  onChange={minutes => { void changeQuickNoteReminder(minutes); }} />}
+              </View>}
               {/* Fila inferior: GUARDAR · FECHA/HORA · ↓ — todos los tipos */}
               {!fsKbVisible && (() => {
                 const anyFilled = Boolean(fsFilledValues.date || fsFilledValues.time);
@@ -26790,83 +26861,46 @@ function HomeScreenContent() {
                   qdCapDateISORef.current     = fsFilledValues.dateISO     || "";
                   qdCapTimeRef.current        = fsFilledValues.time        || "";
                   qdCapPlaceRef.current       = fsFilledValues.place       || "";
-                  setFieldSelectorOpen(false);
+                  const openSchedule = () => {
                   setCalOpen(true);
                   calFlow.open({
                     startAt: "date",
                     initialDateISO: fsFilledValues.dateISO || formatISODate(getToday()),
                     initialDateDraft: fsFilledValues.date || "",
                     initialTime: fsFilledValues.time || "",
+                    initialDuration: fsFilledValues.duration || "",
                     onSave: _handleCalFlowSave,
                     onCancel: () => {
+                      qdFlowActiveRef.current = false;
                       if (calendarTaskContextRef.current) setFieldSelectorOpen(true);
-                      else setCalOpen(false);
+                      else {
+                        if (isNoteSelector && Platform.OS === "ios") noteSelectorAfterCalendarDismissRef.current = true;
+                        else setFieldSelectorOpen(true);
+                        setCalOpen(false);
+                      }
                     },
                   });
+                  };
+                  if (isNoteSelector && !embedded && Platform.OS === "ios") noteCalendarAfterSelectorDismissRef.current = openSchedule;
+                  setFieldSelectorOpen(false);
+                  if (!noteCalendarAfterSelectorDismissRef.current) openSchedule();
                 };
                 return (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
-                    {/* GUARDAR — izquierda, menos cómodo; guarda sin fecha/hora */}
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10, ...(isNoteSelector ? { flexWrap: "wrap" } : {}) }}>
+                    {/* GUARDAR conserva todos los valores seleccionados. */}
                     <TouchableOpacity
-                      onPress={async () => {
-                        const slotTask = !!calendarSlotDraftRef.current;
-                        const noteTask = !!noteTaskDraftRef.current;
-                        if (fieldSelectorSaveBusyRef.current) return;
-                        if (slotTask || noteTask) fieldSelectorSaveBusyRef.current = true;
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                        if (qdReturnTimerRef.current) {
-                          clearTimeout(qdReturnTimerRef.current);
-                          qdReturnTimerRef.current = null;
-                        }
-                        qdFlowActiveRef.current = false;
-                        const kind = fieldSelectorKind;
-                        const text = fieldSelectorText.trim();
-                        const detail = fieldSelectorDetail;
-                        const contact = fsFilledValues.contactName || "";
-                        const phone   = fsFilledValues.phone       || "";
-                        const date    = fsFilledValues.date        || "";
-                        const dateISO = fsFilledValues.dateISO     || "";
-                        const time    = fsFilledValues.time        || "";
-                        const place   = fsFilledValues.place       || "";
-                        if (slotTask || noteTask) {
-                          if (slotTask) calendarSlotSavingRef.current = true;
-                          try {
-                            const result = await createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
-                            if (result === false) { fieldSelectorSaveBusyRef.current = false; return; }
-                          } catch (error) {
-                            fieldSelectorSaveBusyRef.current = false;
-                            calendarSlotSavingRef.current = false;
-                            showToast(error instanceof Error ? error.message : String(error), "error");
-                            return;
-                          }
-                        }
-                        setFsFilledValues({});
-                        setFsLocationExpanded(false);
-                        setFsActivityKey(null);
-                        setFsOrbitalOpen(false);
-                        setFsCustomOpen(false);
-                        setFsCustomLabel("");
-                        setFieldSelectorOpen(false);
-                        setFieldSelectorText("");
-                        setFieldSelectorDetail("");
-                        if (!slotTask && !noteTask) void createEntryFromSelector(kind, text, contact, phone, date, dateISO, time, place, detail);
-                        const origin = qdOriginContextRef.current;
-                        qdOriginContextRef.current = { listOpen: false, notesOpen: false, agendaOpOpen: false };
-                        if (origin.listOpen) setListOpen(true);
-                        if (origin.agendaOpOpen) setAgendaOpOpen(true);
-                        if (slotTask) calendarSlotSavingRef.current = false;
-                      }}
-                      style={{ paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#6ee7b7", alignItems: "center" }}
+                      onPress={saveFieldSelector}
+                      style={{ paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#6ee7b7", alignItems: "center", ...(isNoteSelector ? { minHeight: 44, justifyContent: "center" } : {}) }}
                     >
-                      <Text style={{ color: "#000000", fontSize: 11, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>SAVE</Text>
+                      <Text style={{ color: "#000000", fontSize: 11, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>GUARDAR</Text>
                     </TouchableOpacity>
                     {/* FECHA / HORA — centro/derecha, más cómodo */}
                     <TouchableOpacity
                       onPress={openFechaHora}
-                      style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 9, borderRadius: 10, backgroundColor: anyFilled ? "rgba(34,197,94,0.15)" : "#1e1e22", borderWidth: 1.5, borderColor: anyFilled ? "#6ee7b7" : "rgba(255,255,255,0.18)" }}
+                      style={{ flex: 1, ...(isNoteSelector ? { minWidth: 128, minHeight: 44 } : {}), flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 9, borderRadius: 10, backgroundColor: anyFilled ? "rgba(34,197,94,0.15)" : "#1e1e22", borderWidth: 1.5, borderColor: anyFilled ? "#6ee7b7" : "rgba(255,255,255,0.18)" }}
                     >
                       <Feather name={anyFilled ? "check" : "calendar"} size={13} color={anyFilled ? "#6ee7b7" : "#ffffff"} />
-                      <Text style={{ color: anyFilled ? "#6ee7b7" : "#ffffff", fontSize: 12, fontWeight: "700" }}>{t('date_time_label')}</Text>
+                      <Text style={{ color: anyFilled ? "#6ee7b7" : "#ffffff", fontSize: 12, fontWeight: "700", ...(isNoteSelector ? { flexShrink: 1 } : {}) }}>{t('date_time_label')}</Text>
                     </TouchableOpacity>
                     {/* CONTACTO circular — solo TAREA EXTERNA y GO EXTERNO */}
                     {(fieldSelectorKind === "NOTA_EXTERNA" || fieldSelectorKind === "GO_EXTERNO") && (() => {
@@ -26918,13 +26952,10 @@ function HomeScreenContent() {
                 );
               })()}
 
-              {/* GUARDAR — cierra teclado; visible cuando el teclado está abierto */}
+              {/* El mismo guardado persistente también con teclado abierto. */}
               {fsKbVisible && (
                 <TouchableOpacity
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    Keyboard.dismiss();
-                  }}
+                  onPress={saveFieldSelector}
                   style={{
                     alignSelf: "flex-end",
                     marginTop: 6,
@@ -26932,17 +26963,19 @@ function HomeScreenContent() {
                     paddingHorizontal: 18,
                     borderRadius: 10,
                     backgroundColor: "#6ee7b7",
+                    ...(isNoteSelector ? { minHeight: 44, justifyContent: "center" } : {}),
                   }}
                 >
-                  <Text style={{ color: "#000000", fontSize: 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.8 }}>SAVE</Text>
+                  <Text style={{ color: "#000000", fontSize: 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.8 }}>GUARDAR</Text>
                 </TouchableOpacity>
               )}
 
             </View>
           </Pressable>
 
+          </FormScroll>
           {/* ── ORBITAL COMPLETO — aparece al pulsar GO, flota sobre el panel ── */}
-          {fsOrbitalOpen && !fsKbVisible && (() => {
+          {!isNoteSelector && fsOrbitalOpen && !fsKbVisible && (() => {
             const goSz  = 80;
             const orbR  = 68;
             const btnSz = 44;
@@ -27001,13 +27034,14 @@ function HomeScreenContent() {
               </Pressable>
             );
           })()}
-        </KeyboardAvoidingView>
+        </SelectorKeyboardFrame>
     );
     if (embedded) {
       return <View testID="calendar-task-layer" style={{ ...StyleSheet.absoluteFill, zIndex: 200 }}>{content}</View>;
     }
     return (
-      <Modal visible={fieldSelectorOpen} transparent animationType="slide" onRequestClose={closeFieldSelectorPanel} statusBarTranslucent>
+      <Modal visible={fieldSelectorOpen} transparent animationType="slide" onRequestClose={closeFieldSelectorPanel} statusBarTranslucent
+        onDismiss={() => { const open = noteCalendarAfterSelectorDismissRef.current; noteCalendarAfterSelectorDismissRef.current = null; open?.(); }}>
         {content}
       </Modal>
     );
@@ -27210,6 +27244,7 @@ function BottomSheet({
   visible,
   onClose,
   onShow,
+  onDismiss,
   title,
   subtitle,
   paddingBottom,
@@ -27235,6 +27270,7 @@ function BottomSheet({
   visible: boolean;
   onClose: () => void;
   onShow?: () => void;
+  onDismiss?: () => void;
   title: string;
   subtitle?: string;
   paddingBottom: number;
@@ -27558,6 +27594,7 @@ function BottomSheet({
         animationType="slide"
         onRequestClose={onClose}
         onShow={onShow}
+        onDismiss={onDismiss}
       >
         {/* GestureDetector envuelve TODO el área del modal — incluido
             el backdrop superior vacío — para que el swipe ↓ se detecte
@@ -27599,7 +27636,7 @@ function BottomSheet({
                   styles.sheet,
                   compact && { paddingTop: 6, paddingHorizontal: 18 },
                   { paddingBottom: effectivePaddingBottom },
-                  noteKeyboardScroll && { maxHeight: "100%", flexShrink: 1,
+                  noteKeyboardScroll && { height: "100%", maxHeight: 440, flexShrink: 1,
                     paddingLeft: 18 + noteInsets.left, paddingRight: 18 + noteInsets.right },
                   liftBottom && liftBottom > 0
                     ? {
@@ -27621,7 +27658,7 @@ function BottomSheet({
                     propaguen al backdrop (que los interpretaría como
                     "cerrar"). No interfiere con el Pan: gesture-handler
                     se queda con el drag, Pressable solo recibe taps. */}
-                <Pressable onPress={(e) => e.stopPropagation?.()} style={noteKeyboardScroll ? { flexShrink: 1 } : undefined}>
+                <Pressable onPress={(e) => e.stopPropagation?.()} style={noteKeyboardScroll ? { flex: 1 } : undefined}>
                   {!minimized && (
                     <View collapsable={false}>
                       <View
@@ -27679,7 +27716,7 @@ function BottomSheet({
                         <Reanimated.ScrollView
                           style={[
                             { maxHeight: minimized ? 0 : noteKeyboardScroll ? undefined : 460, overflow: "hidden",
-                              ...(noteKeyboardScroll ? { flexGrow: 0, flexShrink: 1 } : {}) },
+                              ...(noteKeyboardScroll ? { flexGrow: 1, flexShrink: 1 } : {}) },
                             { WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", touchAction: "pan-y" } as any,
                           ]}
                           keyboardShouldPersistTaps="handled"
@@ -27695,7 +27732,7 @@ function BottomSheet({
                         </Reanimated.ScrollView>
                       ) : (
                         <KeyboardAwareScrollView
-                          style={{ maxHeight: minimized ? 0 : noteKeyboardScroll ? undefined : 460, overflow: "hidden", ...(noteKeyboardScroll ? { flexGrow: 0, flexShrink: 1 } : {}) }}
+                          style={{ maxHeight: minimized ? 0 : noteKeyboardScroll ? undefined : 460, overflow: "hidden", ...(noteKeyboardScroll ? { flexGrow: 1, flexShrink: 1 } : {}) }}
                           keyboardShouldPersistTaps="handled"
                           showsVerticalScrollIndicator={false}
                           bounces={!noteKeyboardScroll}

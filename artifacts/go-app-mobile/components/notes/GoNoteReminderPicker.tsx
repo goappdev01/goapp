@@ -1,37 +1,53 @@
-import React from "react";
-import { Text, TouchableOpacity, View } from "react-native";
-import { NOTE_REMINDER_MINUTES, noteReminderLabel } from "@/lib/goNoteTools";
+import React, { useEffect, useState } from "react";
+import { Text, TextInput, TouchableOpacity, View } from "react-native";
+import { isNoteReminderMinutes, noteReminderLabel } from "@/lib/goNoteTools";
 
-export function GoNoteReminderPicker({ value, onChange, english = false, savedNotes = [], onSelectNote, targetName, busy = false }: {
-  value: number | null; onChange: (minutes: number | null) => void; english?: boolean;
-  savedNotes?: Array<{ id: string; label: string }>; onSelectNote?: (id: string | null) => void; targetName?: string; busy?: boolean;
+/** Only the current note's offset; opening never focuses an input or edits other notes. */
+export function GoNoteReminderPicker({ value, onChange, english = false, busy = false, dateISO, time }: {
+  value: number | null; onChange: (minutes: number | null) => void; english?: boolean; busy?: boolean;
+  dateISO?: string; time?: string;
 }) {
-  return <View testID="note-reminder-picker" accessibilityRole="radiogroup"
-    style={{ marginTop: 10, gap: 6, padding: 10, borderRadius: 12, backgroundColor: "#1a1a1c", borderWidth: 1, borderColor: "rgba(251,191,36,0.40)" }}>
-    <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "700" }}>{english ? "Task reminder" : "Aviso de la tarea"}</Text>
-    <Text style={{ color: "#ffffff", fontSize: 12 }}>{targetName || (english ? "New note/task" : "Nueva nota/tarea")}</Text>
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-      {[null, ...NOTE_REMINDER_MINUTES].map(minutes => <TouchableOpacity key={String(minutes)} accessibilityRole="radio"
-        disabled={busy} accessibilityState={{ checked: value === minutes, disabled: busy }} onPress={() => onChange(minutes)}
-        style={{ minHeight: 44, minWidth: 72, justifyContent: "center", paddingHorizontal: 10, paddingVertical: 8,
-          borderRadius: 8, borderWidth: 1, borderColor: value === minutes ? "#fbbf24" : "rgba(255,255,255,0.25)",
-          backgroundColor: value === minutes ? "rgba(251,191,36,0.18)" : "transparent" }}>
-        <Text style={{ color: value === minutes ? "#fbbf24" : "#ffffff", fontSize: 12 }}>{minutes === null
-          ? (english ? "No reminder" : "Sin aviso") : noteReminderLabel(minutes, english)}</Text>
-      </TouchableOpacity>)}
+  const [hours, setHours] = useState(String(Math.floor((value || 0) / 60)));
+  const [minutes, setMinutes] = useState(String((value || 0) % 60));
+  const [error, setError] = useState("");
+  useEffect(() => { setHours(String(Math.floor((value || 0) / 60))); setMinutes(String((value || 0) % 60)); setError(""); }, [value]);
+  const total = Number(hours || "0") * 60 + Number(minutes || "0");
+  const valid = /^\d{0,4}$/.test(hours) && /^\d{0,2}$/.test(minutes) && Number(minutes || "0") < 60
+    && (total === 0 || isNoteReminderMinutes(total));
+  const at = dateISO && time ? Date.parse(`${dateISO}T${time}:00`) : NaN;
+  return <View testID="note-reminder-picker" style={{ marginTop: 10, gap: 10, padding: 12,
+    borderRadius: 12, backgroundColor: "#1a1a1c", borderWidth: 1, borderColor: "rgba(251,191,36,0.40)" }}>
+    <Text style={{ color: "#ffffff", fontSize: 13, fontWeight: "700" }}>{english ? "REMIND ME BEFORE" : "AVISARME ANTES"}</Text>
+    <View style={{ flexDirection: "row", gap: 12 }}>
+      {[[english ? "HOURS" : "HORAS", hours, setHours, 4], [english ? "MINUTES" : "MINUTOS", minutes, setMinutes, 2]].map(([label, text, setter, length]) =>
+        <View key={label as string} style={{ flex: 1, gap: 5 }}>
+          <Text style={{ color: "#ffffff", fontSize: 12 }}>{label as string}</Text>
+          <TextInput testID={length === 4 ? "note-reminder-hours" : "note-reminder-minutes"}
+            accessibilityLabel={label as string} value={text as string} onChangeText={setter as (text: string) => void}
+            keyboardType="number-pad" maxLength={length as number} selectTextOnFocus editable={!busy}
+            style={{ minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.35)",
+              color: "#ffffff", fontSize: 22, textAlign: "center", paddingHorizontal: 10 }} />
+        </View>)}
     </View>
-    <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: 12 }}>{english
-      ? "Saved with the task. A notification needs a future date/time and notification permission."
-      : "Se guarda con la tarea. El aviso necesita fecha y hora futuras y permiso de notificaciones."}</Text>
-    {targetName && <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => onSelectNote?.(null)} style={{ minHeight: 44, justifyContent: "center" }}>
-      <Text style={{ color: "#ffffff", fontSize: 12 }}>{english ? "Back to new note" : "Volver a nueva nota"}</Text>
-    </TouchableOpacity>}
-    {!targetName && savedNotes.length > 0 && <>
-      <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "700" }}>{english ? "Change a saved note reminder" : "Cambiar aviso de una nota guardada"}</Text>
-      {savedNotes.map(note => <TouchableOpacity key={note.id} accessibilityRole="button" disabled={busy} onPress={() => onSelectNote?.(note.id)}
-        style={{ minHeight: 44, justifyContent: "center", paddingVertical: 8, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.18)" }}>
-        <Text style={{ color: "#ffffff", fontSize: 12 }}>{note.label}</Text>
-      </TouchableOpacity>)}
-    </>}
+    <Text accessibilityLiveRegion="polite" style={{ color: "#fbbf24", fontSize: 12 }}>{valid
+      ? total ? noteReminderLabel(total, english) : english ? "No reminder" : "Sin aviso"
+      : english ? "Enter valid hours and minutes from 00 to 59." : "Introduce horas válidas y minutos entre 00 y 59."}</Text>
+    <Text style={{ color: "rgba(255,255,255,0.75)", fontSize: 12 }}>{!Number.isFinite(at)
+      ? english ? "Choose a date and time to schedule it. Your interval is retained." : "Elige fecha y hora para programar el aviso. El intervalo se conserva."
+      : at <= Date.now() ? english ? "Choose a future date and time to schedule it." : "Elige una fecha y hora futuras para programar el aviso."
+        : english ? "The notification also requires permission on this phone." : "La notificación también requiere permiso en este teléfono."}</Text>
+    {!!error && <Text accessibilityRole="alert" style={{ color: "#fbbf24", fontSize: 12 }}>{error}</Text>}
+    <View style={{ flexDirection: "row", gap: 10 }}>
+      <TouchableOpacity testID="note-reminder-none" accessibilityRole="button" disabled={busy} onPress={() => onChange(null)}
+        style={{ flex: 1, minHeight: 44, justifyContent: "center", alignItems: "center", borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.35)" }}>
+        <Text style={{ color: "#ffffff", fontSize: 12 }}>{english ? "NO REMINDER" : "SIN AVISO"}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity testID="note-reminder-confirm" accessibilityRole="button" disabled={busy} onPress={() => {
+        if (!valid) { setError(english ? "Invalid interval." : "El intervalo no es válido."); return; }
+        onChange(total || null);
+      }} style={{ flex: 1, minHeight: 44, justifyContent: "center", alignItems: "center", borderRadius: 8, backgroundColor: "#fbbf24" }}>
+        <Text style={{ color: "#0e0e10", fontSize: 12, fontWeight: "700" }}>{english ? "CONFIRM" : "CONFIRMAR"}</Text>
+      </TouchableOpacity>
+    </View>
   </View>;
 }

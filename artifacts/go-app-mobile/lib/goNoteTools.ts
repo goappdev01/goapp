@@ -2,19 +2,21 @@ import type { GoEntry } from "@/components/AgendaOperativa";
 import type { TaskScope } from "./goTaskReminders";
 
 export const NOTE_REMINDER_MINUTES = [5, 10, 15, 30, 45, 60, 120, 180, 360, 720, 1440] as const;
-export type NoteReminderDraft = { scope: TaskScope; minutes: number | null; entryId?: string };
+export type NoteReminderDraft = { scope: TaskScope; minutes: number | null; entryId?: string;
+  edit?: Pick<GoEntry, "notes" | "detail" | "date" | "dateISO" | "time" | "duration" | "place" | "contactName" | "phone" | "reminders"> };
 export const isNoteReminderMinutes = (value: unknown): value is number =>
-  typeof value === "number" && (NOTE_REMINDER_MINUTES as readonly number[]).includes(value);
+  typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 525600;
 export function noteReminderLabel(minutes: number, english = false): string {
-  return minutes < 60 ? `${minutes} min ${english ? "before" : "antes"}`
-    : `${minutes / 60} ${english ? (minutes === 60 ? "hour before" : "hours before") : (minutes === 60 ? "hora antes" : "horas antes")}`;
+  const hours = Math.floor(minutes / 60), rest = minutes % 60;
+  return [hours ? `${hours} ${english ? hours === 1 ? "hour" : "hours" : hours === 1 ? "hora" : "horas"}` : "",
+    rest ? `${rest} min` : "", english ? "before" : "antes"].filter(Boolean).join(" ");
 }
 export function noteReminderMetadata(entry: GoEntry, draft: NoteReminderDraft) {
   if (!draft.scope.userId || !draft.scope.context || (draft.minutes !== null && !isNoteReminderMinutes(draft.minutes)))
     throw new Error("El aviso de la nota no es válido.");
   if (entry.type !== "TAREA" && entry.type !== "TAREA_INTERNA") throw new Error("El aviso pertenece a una nota/tarea.");
   return { ...entry, ownerUserId: draft.scope.userId, taskContext: draft.scope.context,
-    goNoteReminder: true, reminders: draft.minutes === null ? [] : [draft.minutes], firedReminderMins: [],
+    goNoteReminder: true, reminders: draft.minutes === null ? [] : [draft.minutes], firedReminderMins: [] as number[],
     notificationsEnabled: draft.minutes !== null };
 }
 export function appendNoteDictation(current: string, text: string): string {

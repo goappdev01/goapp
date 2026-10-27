@@ -478,6 +478,21 @@ export function useGoCalendarFlow() {
     clockLastHaptic.current = -1;
   }, []);
 
+  /** Exact numeric input used by the note/task form, without changing the analogue recognizer. */
+  const selectExactTime = useCallback((value: string) => {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) { setCalError("Introduce una hora entre 00:00 y 23:59."); return; }
+    const [hour, minute] = value.split(":").map(Number);
+    setTime(value); setClockH12(hour % 12 || 12); setClockMins(minute); setClockPeriod(hour >= 12 ? "PM" : "AM");
+    setClockOpen(false); setCalError(null);
+    if (skipDurationRef.current) { const s = flowSnapshotRef.current; _tryFinalize({ ...s, time: value }); }
+    else { setStep("duration"); setPanelOpen(true); }
+  }, [_tryFinalize]);
+  const returnToDate = useCallback(() => {
+    const date = new Date(dateISO + "T00:00:00");
+    setMonthGridYear(date.getFullYear()); setMonthGridMonth(date.getMonth()); setMonthGridMode("flow");
+    setClockOpen(false); setPanelOpen(false); setStep("date"); setMonthGridOpen(true);
+  }, [dateISO]);
+
   const isActive = step !== "idle";
 
   return {
@@ -510,6 +525,9 @@ export function useGoCalendarFlow() {
     reopenClock,
     setPeriodDraft,
     goBackToHours,
+    selectExactTime,
+    returnToDate,
+    setDurationDraft: setDuration,
     // AM/PM
     selectAmPm,
     // Duración

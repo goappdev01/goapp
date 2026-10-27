@@ -121,6 +121,7 @@ export function GoEntryContract({ entry }: { entry: GoEntry }) {
 export const ENTRY_DETAIL_CLOSE = Object.freeze({ headerHeight: 44, touchSize: 56 });
 
 type EntryDetailsProps = {
+  closeRequested?: boolean;
   entry: GoEntry | null; onClose: () => void; onMessage?: () => void; onGoToLanding?: () => void; renderMessageScreen?: () => React.ReactNode; handedness?: "right" | "left"; children?: React.ReactNode;
 };
 
@@ -129,7 +130,7 @@ export function GoEntryDetailsSheet(props: EntryDetailsProps) {
   return props.entry ? <GoEntryDetailsSession key={props.entry.id} {...props} entry={props.entry} /> : null;
 }
 
-function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, renderMessageScreen, handedness = "right", children }: EntryDetailsProps & { entry: GoEntry }) {
+function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, renderMessageScreen, handedness = "right", children, closeRequested = false }: EntryDetailsProps & { entry: GoEntry }) {
   const insets = useSafeAreaInsets(), { lang } = useLanguage();
   const [closing, setClosing] = useState(false);
   const [navigationGeometry, setNavigationGeometry] = useState({ y: 0, height: 0, summaryEnd: 0, actionsTop: 0, offset: 0 });
@@ -155,6 +156,8 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
     phase.current = "dismissing";
     setClosing(true);
   }, []);
+  // A note editor may open only after this native presenter has released its touches.
+  useEffect(() => { if (closeRequested) dismiss(); }, [closeRequested, dismiss]);
   useLayoutEffect(() => {
     phase.current = "open";
     return () => { phase.current = "closed"; };

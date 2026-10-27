@@ -79,6 +79,7 @@ function clockFixture() {
 }
 function nativeVoiceFixture(options = {}) {
   const received = [], deleted = [], requests = [], reads = [], diagnostics = [], slots = [], effects = [];
+  const permissionRequests = [];
   const clock = clockFixture();
   let cursor = 0, appStateListener, recorderListener;
   const react = {
@@ -134,7 +135,7 @@ function nativeVoiceFixture(options = {}) {
     'expo-audio': {
       useAudioRecorder(recordingPreset, listener) { assert.equal(recordingPreset, preset); recorderListener = listener; return recorder; },
       RecordingPresets: { HIGH_QUALITY: preset },
-      AudioModule: { requestRecordingPermissionsAsync: async () => ({ granted: options.denied !== true }) },
+      AudioModule: { requestRecordingPermissionsAsync: async () => {permissionRequests.push(true);return { granted: options.denied !== true };} },
       setAudioModeAsync: async () => {},
     },
     'expo-file-system/legacy': {
@@ -151,10 +152,10 @@ function nativeVoiceFixture(options = {}) {
     '@/data/booking': { getAuthenticatedUserId: async () => session?.access_token ? session.user?.id || null : null },
   }, globals);
   return {
-    received, deleted, requests, diagnostics, reads, audio, recorder, clock, api, preset, options,
+    received, deleted, requests, diagnostics, reads, audio, recorder, clock, api, preset, options, permissionRequests,
     render() {
       cursor = 0;
-      const value = hook.useBookingVoice((text, zone) => { received.push({ text, zone }); options.onText?.(text, zone); });
+      const value = hook.useBookingVoice((text, zone) => { received.push({ text, zone }); options.onText?.(text, zone); }, options.note ? {requireTranscriptionReady:true} : undefined);
       effects.splice(0).forEach(effect => effect());
       return value;
     },
@@ -163,6 +164,18 @@ function nativeVoiceFixture(options = {}) {
     unmount() { slots.forEach(slot => slot?.cleanup?.()); },
   };
 }
+
+test('GO note microphone checks the actual service before requesting permission or recording, with an honest unavailable message',async()=>{
+  const f=nativeVoiceFixture({note:true,available:false});await f.render().start();
+  assert.equal(f.render().status,'idle');assert.match(f.render().error,/servicio de dictado.*no está disponible.*No se ha iniciado una grabación/);
+  assert.equal(f.recorder.starts,0);assert.equal(f.permissionRequests.length,0);assert.equal(f.deleted.length,0);assert.deepEqual(f.requests.map(r=>r.operation),['capabilities']);f.unmount();
+});
+
+test('GO note microphone with an available authenticated transcriber returns editable text and removes the stopped audio',async()=>{
+  const f=nativeVoiceFixture({note:true,text:'Texto para la nota'});await f.render().start();assert.equal(f.render().status,'listening');
+  assert.equal(f.permissionRequests.length,1);await f.render().stop();assert.deepEqual(f.received,[{text:'Texto para la nota',zone:false}]);
+  assert.equal(f.deleted.length,1);assert.equal(f.render().status,'idle');assert.equal(f.recorder.isRecording,false);f.unmount();
+});
 test('short and longer iOS recordings traverse the actual client and deliver only one final message', async () => {
   for (const duration of [1500, 45000]) {
     const f = nativeVoiceFixture({ duration, audio: Buffer.alloc(duration === 45000 ? 720000 : 24000, 17) });
