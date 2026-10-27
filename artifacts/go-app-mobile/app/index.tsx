@@ -18,7 +18,7 @@ import { useActionCompletion } from "@/hooks/useActionCompletion";
 import { LandingActionCompletion, completionFrame, completionPanelFrame, LANDING_COMPLETION_PANEL_GAP, type CompletionFrame } from "@/components/landing/LandingActionCompletion";
 import { ownedCompletionEntry, completionEligible, completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
 import { GoNoteReminderPicker } from "@/components/notes/GoNoteReminderPicker";
-import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, noteKeyboardContentHeight, type NoteReminderDraft } from "@/lib/goNoteTools";
+import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, type NoteReminderDraft } from "@/lib/goNoteTools";
 import { saveGoNoteReminder, changeGoNoteReminder, confirmAttachedGoNoteReminder } from "@/lib/goNoteReminder";
 import { changeBookingRequest as negotiateRealBooking } from "@/data/booking";
 import { readGoLog, flushGoLog, commitGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
@@ -33,6 +33,7 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import { GoNoteControls } from "@/components/notes/GoNoteControls";
 import { CalendarCloseGuide } from "@/components/ui/CalendarCloseGuide";
 import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
 import { GoBoardsPanel } from "@/components/boards/GoBoardsPanel";
@@ -94,7 +95,7 @@ import Reanimated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
-import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { KeyboardAwareScrollView, KeyboardAvoidingView as KeyboardControllerAvoidingView } from "react-native-keyboard-controller";
 
 const AnimatedPressable = Reanimated.createAnimatedComponent(Pressable);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -4248,6 +4249,7 @@ function HomeScreenContent() {
   const [qrOpen, setQrOpen] = useState(false);
   const [cartaOpen, setCartaOpen] = useState(false);
   const [quickNoteText, setQuickNoteText] = useState("");
+  const quickNoteTitleRef = useRef<React.ElementRef<typeof TextInput>>(null);
   const [quickNoteReminderMinutes, setQuickNoteReminderMinutes] = useState<number | null>(null);
   const quickNoteAlarm = quickNoteReminderMinutes !== null;
   const [noteReminderPickerOpen, setNoteReminderPickerOpen] = useState(false);
@@ -21727,7 +21729,159 @@ function HomeScreenContent() {
       <BottomSheet
         visible={notesOpen}
         noteKeyboardScroll
-        onClose={() => setNotesOpen(false)}
+        onShow={() => quickNoteTitleRef.current?.focus()}
+        onClose={() => { Keyboard.dismiss(); setNotesOpen(false); }}
+        footer={<GoNoteControls handedness={handedness} closeLabel={t('close')}
+          onClose={() => {
+            Haptics.selectionAsync().catch(() => {});
+            resetNotaAudio();
+            setNoteReminderPickerOpen(false);
+            Keyboard.dismiss();
+            setNotesOpen(false);
+          }}
+          internal={<>{/* TAREA INTERNA */}
+          <TouchableOpacity
+            onPress={() => {
+              const text = quickNoteText.trim();
+              const detail = quickNoteDetail.trim();
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              setQuickNoteText("");
+              setQuickNoteDetail("");
+              startGoNoteTask("NOTA_INTERNA", text, detail);
+            }}
+            disabled={noteVoice.status !== "idle"}
+            activeOpacity={0.82}
+            style={{
+              flex: 1, minHeight: 44,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 5,
+              paddingHorizontal: 9,
+              paddingVertical: 10,
+              borderRadius: 12,
+              backgroundColor: "rgba(74,128,189,0.12)",
+              borderWidth: 1.5,
+              borderColor: "#4A80BD",
+              shadowColor: "#4A80BD",
+              shadowOpacity: 0.28,
+              shadowRadius: 6,
+            }}
+          >
+            <Feather name="edit-2" size={12} color="#60a5fa" />
+            <Text style={{ color: "#60a5fa", fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>
+              {t('tasks_internal_short').toUpperCase()}
+            </Text>
+          </TouchableOpacity></>}
+          external={<>{/* TAREA EXTERNA */}
+          <TouchableOpacity
+            onPress={() => {
+              const text = quickNoteText.trim();
+              const detail = quickNoteDetail.trim();
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              setQuickNoteText("");
+              setQuickNoteDetail("");
+              startGoNoteTask("NOTA_EXTERNA", text, detail);
+            }}
+            disabled={noteVoice.status !== "idle"}
+            activeOpacity={0.82}
+            style={{
+              flex: 1, minHeight: 44,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 5,
+              paddingHorizontal: 9,
+              paddingVertical: 10,
+              borderRadius: 12,
+              backgroundColor: "rgba(251,146,60,0.12)",
+              borderWidth: 1.5,
+              borderColor: "#fb923c",
+              shadowColor: "#fb923c",
+              shadowOpacity: 0.28,
+              shadowRadius: 6,
+            }}
+          >
+            <Feather name="edit-2" size={12} color="#fb923c" />
+            <Text style={{ color: "#fb923c", fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>
+              {t('tasks_external_short').toUpperCase()}
+            </Text>
+          </TouchableOpacity></>}
+          microphone={<>{/* MICRÓFONO — dictado al último campo de escritura seleccionado */}
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.impactAsync(
+                notaAudioRecording
+                  ? Haptics.ImpactFeedbackStyle.Medium
+                  : Haptics.ImpactFeedbackStyle.Light
+              ).catch(() => {});
+              toggleNotaRecording();
+            }}
+            disabled={noteVoice.status === "preparing" || noteVoice.status === "transcribing"}
+            activeOpacity={0.8}
+            accessibilityLabel={notaAudioRecording ? t('tasks_stop_recording') : (noteVoice.status === "transcribing") ? t('tasks_record_again') : t('tasks_record_audio')}
+            hitSlop={2}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              backgroundColor: notaAudioRecording
+                ? "rgba(239,68,68,0.18)"
+                : (noteVoice.status === "transcribing")
+                ? "rgba(96,165,250,0.14)"
+                : "#0e0e10",
+              borderWidth: 1.5,
+              borderColor: notaAudioRecording
+                ? "#ef4444"
+                : (noteVoice.status === "transcribing")
+                ? "rgba(96,165,250,0.70)"
+                : "rgba(255,255,255,0.22)",
+              alignItems: "center",
+              justifyContent: "center",
+              shadowColor: notaAudioRecording ? "#ef4444" : "#ffffff",
+              shadowOpacity: notaAudioRecording ? 0.45 : 0.07,
+              shadowRadius: notaAudioRecording ? 10 : 8,
+            }}
+          >
+            <Feather
+              name={notaAudioRecording ? "mic-off" : "mic"}
+              size={16}
+              color={
+                notaAudioRecording
+                  ? "#ef4444"
+                  : (noteVoice.status === "transcribing")
+                  ? "#60a5fa"
+                  : "rgba(255,255,255,0.70)"
+              }
+            />
+          </TouchableOpacity></>}
+          reminder={<>{/* BOTÓN ALARMA — toggle recordatorio en la nota */}
+          <TouchableOpacity
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              setNoteReminderPickerOpen(open => !open);
+            }}
+            activeOpacity={0.8}
+            accessibilityLabel={quickNoteAlarm ? noteReminderLabel(quickNoteReminderMinutes!, lang === "en") : t('tasks_enable_reminder')}
+            accessibilityState={{ expanded: noteReminderPickerOpen }}
+            hitSlop={2}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 22,
+              backgroundColor: quickNoteAlarm ? "rgba(251,191,36,0.18)" : "#0e0e10",
+              borderWidth: 1.5,
+              borderColor: quickNoteAlarm ? "#fbbf24" : "rgba(255,255,255,0.22)",
+              alignItems: "center",
+              justifyContent: "center",
+              shadowColor: quickNoteAlarm ? "#fbbf24" : "#ffffff",
+              shadowOpacity: quickNoteAlarm ? 0.35 : 0.07,
+              shadowRadius: 8,
+            }}
+          >
+            <Feather name="bell" size={16} color={quickNoteAlarm ? "#fbbf24" : "rgba(255,255,255,0.70)"} />
+          </TouchableOpacity></>}
+        />}
         title={t("panel_note")}
         subtitle={(() => {
           const DAY3: Record<string, string> = { D:t('day_sun'), L:t('day_mon'), M:t('day_tue'), X:t('day_wed'), J:t('day_thu'), V:t('day_fri'), S:t('day_sat') };
@@ -21767,12 +21921,12 @@ function HomeScreenContent() {
 
           {/* TÍTULO OPERATIVO — una sola línea, nunca crece */}
           <TextInput
+            ref={quickNoteTitleRef}
             value={quickNoteText}
             onFocus={() => noteVoice.focus("title")}
             onChangeText={setQuickNoteText}
             placeholder={t('placeholder_task_title_quick')}
             placeholderTextColor="rgba(255,255,255,0.40)"
-            autoFocus
             returnKeyType="next"
             maxLength={16}
             numberOfLines={1}
@@ -21824,183 +21978,7 @@ function HomeScreenContent() {
             }}
           />
 
-          {/* BOTONES: TAREA INTERNA + TAREA EXTERNA — alineados a la derecha junto al botón de cierre */}
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            {/* SPACER — empuja todo el cluster hacia la derecha */}
-            <View style={{ flex: 1 }} />
 
-          {/* TAREA INTERNA */}
-          <TouchableOpacity
-            onPress={() => {
-              const text = quickNoteText.trim();
-              const detail = quickNoteDetail.trim();
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-              setQuickNoteText("");
-              setQuickNoteDetail("");
-              startGoNoteTask("NOTA_INTERNA", text, detail);
-            }}
-            disabled={noteVoice.status !== "idle"}
-            activeOpacity={0.82}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 5,
-              paddingHorizontal: 9,
-              paddingVertical: 10,
-              borderRadius: 12,
-              backgroundColor: "rgba(74,128,189,0.12)",
-              borderWidth: 1.5,
-              borderColor: "#4A80BD",
-              shadowColor: "#4A80BD",
-              shadowOpacity: 0.28,
-              shadowRadius: 6,
-            }}
-          >
-            <Feather name="edit-2" size={12} color="#60a5fa" />
-            <Text style={{ color: "#60a5fa", fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>
-              {t('tasks_internal_short').toUpperCase()}
-            </Text>
-          </TouchableOpacity>
-
-          {/* TAREA EXTERNA */}
-          <TouchableOpacity
-            onPress={() => {
-              const text = quickNoteText.trim();
-              const detail = quickNoteDetail.trim();
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-              setQuickNoteText("");
-              setQuickNoteDetail("");
-              startGoNoteTask("NOTA_EXTERNA", text, detail);
-            }}
-            disabled={noteVoice.status !== "idle"}
-            activeOpacity={0.82}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 5,
-              paddingHorizontal: 9,
-              paddingVertical: 10,
-              borderRadius: 12,
-              backgroundColor: "rgba(251,146,60,0.12)",
-              borderWidth: 1.5,
-              borderColor: "#fb923c",
-              shadowColor: "#fb923c",
-              shadowOpacity: 0.28,
-              shadowRadius: 6,
-            }}
-          >
-            <Feather name="edit-2" size={12} color="#fb923c" />
-            <Text style={{ color: "#fb923c", fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>
-              {t('tasks_external_short').toUpperCase()}
-            </Text>
-          </TouchableOpacity>
-
-          {/* MICRÓFONO — dictado al último campo de escritura seleccionado */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(
-                notaAudioRecording
-                  ? Haptics.ImpactFeedbackStyle.Medium
-                  : Haptics.ImpactFeedbackStyle.Light
-              ).catch(() => {});
-              toggleNotaRecording();
-            }}
-            disabled={noteVoice.status === "preparing" || noteVoice.status === "transcribing"}
-            activeOpacity={0.8}
-            accessibilityLabel={notaAudioRecording ? t('tasks_stop_recording') : (noteVoice.status === "transcribing") ? t('tasks_record_again') : t('tasks_record_audio')}
-            hitSlop={8}
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: notaAudioRecording
-                ? "rgba(239,68,68,0.18)"
-                : (noteVoice.status === "transcribing")
-                ? "rgba(96,165,250,0.14)"
-                : "#0e0e10",
-              borderWidth: 1.5,
-              borderColor: notaAudioRecording
-                ? "#ef4444"
-                : (noteVoice.status === "transcribing")
-                ? "rgba(96,165,250,0.70)"
-                : "rgba(255,255,255,0.22)",
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: notaAudioRecording ? "#ef4444" : "#ffffff",
-              shadowOpacity: notaAudioRecording ? 0.45 : 0.07,
-              shadowRadius: notaAudioRecording ? 10 : 8,
-            }}
-          >
-            <Feather
-              name={notaAudioRecording ? "mic-off" : "mic"}
-              size={16}
-              color={
-                notaAudioRecording
-                  ? "#ef4444"
-                  : (noteVoice.status === "transcribing")
-                  ? "#60a5fa"
-                  : "rgba(255,255,255,0.70)"
-              }
-            />
-          </TouchableOpacity>
-
-          {/* BOTÓN ALARMA — toggle recordatorio en la nota */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.selectionAsync().catch(() => {});
-              setNoteReminderPickerOpen(open => !open);
-            }}
-            activeOpacity={0.8}
-            accessibilityLabel={quickNoteAlarm ? noteReminderLabel(quickNoteReminderMinutes!, lang === "en") : t('tasks_enable_reminder')}
-            accessibilityState={{ expanded: noteReminderPickerOpen }}
-            hitSlop={8}
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: quickNoteAlarm ? "rgba(251,191,36,0.18)" : "#0e0e10",
-              borderWidth: 1.5,
-              borderColor: quickNoteAlarm ? "#fbbf24" : "rgba(255,255,255,0.22)",
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: quickNoteAlarm ? "#fbbf24" : "#ffffff",
-              shadowOpacity: quickNoteAlarm ? 0.35 : 0.07,
-              shadowRadius: 8,
-            }}
-          >
-            <Feather name="bell" size={16} color={quickNoteAlarm ? "#fbbf24" : "rgba(255,255,255,0.70)"} />
-          </TouchableOpacity>
-
-          {/* BOTÓN CIRCULAR CERRAR — chevron-down, coherente con el sistema TESO */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.selectionAsync().catch(() => {});
-              resetNotaAudio();
-              setNoteReminderPickerOpen(false);
-              setNotesOpen(false);
-            }}
-            activeOpacity={0.8}
-            accessibilityLabel={t('close')}
-            hitSlop={8}
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: "#0e0e10",
-              borderWidth: 1.2,
-              borderColor: "rgba(255,255,255,0.22)",
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: "#ffffff",
-              shadowOpacity: 0.07,
-              shadowRadius: 8,
-            }}
-          >
-            <Feather name="chevron-down" size={18} color="rgba(255,255,255,0.70)" />
-          </TouchableOpacity>
-          </View>{/* fin fila botones */}
           {noteVoice.status !== "idle" && <Text testID="note-dictation-status" accessibilityLiveRegion="polite" style={{ color: notaAudioRecording ? "#ef4444" : "#ffffff", fontSize: 12, marginTop: 8 }}>
             {notaAudioRecording ? (lang === "en" ? "Listening… Tap the microphone to finish." : "Escuchando… Pulsa el micrófono para terminar.")
               : noteVoice.status === "preparing" ? (lang === "en" ? "Preparing microphone…" : "Preparando micrófono…")
@@ -27231,6 +27209,7 @@ function useSheetSwipeDown(onClose: () => void) {
 function BottomSheet({
   visible,
   onClose,
+  onShow,
   title,
   subtitle,
   paddingBottom,
@@ -27255,6 +27234,7 @@ function BottomSheet({
 }: {
   visible: boolean;
   onClose: () => void;
+  onShow?: () => void;
   title: string;
   subtitle?: string;
   paddingBottom: number;
@@ -27342,22 +27322,14 @@ function BottomSheet({
   // sheet, pegando el contenido al teclado con un margen de 10 px en lugar
   // del safe-area completo. La propia animación del teclado hace la transición suave.
   const [kbVisible, setKbVisible] = useState(false);
-  const effectivePaddingBottom = kbVisible ? 0 : paddingBottom;
-  const noteWindow = useWindowDimensions();
   const noteInsets = useSafeAreaInsets();
-  const [noteKeyboardTop, setNoteKeyboardTop] = useState<number | null>(null);
-  const [noteHeaderHeight, setNoteHeaderHeight] = useState(0);
-  useEffect(() => {
-    if (!noteKeyboardScroll || !visible) { setNoteKeyboardTop(null); return; }
-    const change = Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillChangeFrame" : "keyboardDidShow", event => {
-      const top = event.endCoordinates.screenY;
-      setNoteKeyboardTop(top >= noteWindow.height ? null : top);
-    });
-    const hide = Keyboard.addListener("keyboardDidHide", () => setNoteKeyboardTop(null));
-    return () => { change.remove(); hide.remove(); };
-  }, [noteKeyboardScroll, visible, noteWindow.height]);
-  const noteContentHeight = noteKeyboardContentHeight(noteWindow.height, noteKeyboardTop,
-    noteInsets.top, noteHeaderHeight, (compact ? 6 : 12) + 1, effectivePaddingBottom);
+  const effectivePaddingBottom = noteKeyboardScroll
+    ? kbVisible ? 6 : Math.max(12, noteInsets.bottom) : kbVisible ? 0 : paddingBottom;
+  const [noteFooterHeight, setNoteFooterHeight] = useState(0);
+  // NOTA has one keyboard frame owner. Its native animation constrains the whole
+  // sheet before focus; the inner scroll only keeps the caret above the fixed tools.
+  const SheetKeyboardFrame = noteKeyboardScroll && Platform.OS !== "web"
+    ? KeyboardControllerAvoidingView : KeyboardAvoidingView;
   useEffect(() => {
     const show = Keyboard.addListener("keyboardWillShow", () => setKbVisible(true));
     const showDid = Keyboard.addListener("keyboardDidShow", () => setKbVisible(true));
@@ -27369,6 +27341,11 @@ function BottomSheet({
     protectBrand || containsGoBrand(subtitle) ? noTranslate : {};
   const titleNoTranslate =
     protectBrand || containsGoBrand(title) ? noTranslate : {};
+  const sheetContents = noteKeyboardScroll && subtitle ? <>
+    <Text style={{ fontSize: 11, color: "#ffffff", fontWeight: "600", letterSpacing: 0.3,
+      marginBottom: 8 }} {...subtitleNoTranslate}>{subtitle}</Text>
+    {children}
+  </> : children;
   // V2 NAV · Gesture handler único para cerrar deslizando hacia
   // abajo desde la cabecera del sheet (regla 2 del sistema de
   // navegación). Llama directamente a onClose, igual que la X
@@ -27580,12 +27557,13 @@ function BottomSheet({
         transparent
         animationType="slide"
         onRequestClose={onClose}
+        onShow={onShow}
       >
         {/* GestureDetector envuelve TODO el área del modal — incluido
             el backdrop superior vacío — para que el swipe ↓ se detecte
             desde cualquier punto de la pantalla, no solo desde el panel. */}
         <GestureDetector gesture={Gesture.Race(rightZoneGesture, dragGesture)}>
-        <View style={{ flex: 1, justifyContent: "flex-end" }}>
+        <View style={{ flex: 1, justifyContent: noteKeyboardScroll ? "flex-start" : "flex-end" }}>
           <AnimatedPressable
             style={[
               { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
@@ -27607,17 +27585,22 @@ function BottomSheet({
               {modalOverlay}
             </View>
           ) : null}
-          <KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+          <SheetKeyboardFrame
+            behavior={noteKeyboardScroll ? "height" : Platform.OS === "ios" ? "padding" : "height"}
             keyboardVerticalOffset={0}
-            style={{ width: "100%" }}
+            style={{ width: "100%", ...(noteKeyboardScroll ? {
+              flex: 1, justifyContent: "flex-end", paddingTop: noteInsets.top + 4,
+            } : {}) }}
             pointerEvents="box-none"
           >
               <Reanimated.View
+                testID={noteKeyboardScroll ? "note-sheet" : undefined}
                 style={[
                   styles.sheet,
                   compact && { paddingTop: 6, paddingHorizontal: 18 },
                   { paddingBottom: effectivePaddingBottom },
+                  noteKeyboardScroll && { maxHeight: "100%", flexShrink: 1,
+                    paddingLeft: 18 + noteInsets.left, paddingRight: 18 + noteInsets.right },
                   liftBottom && liftBottom > 0
                     ? {
                         marginBottom: liftBottom,
@@ -27638,20 +27621,22 @@ function BottomSheet({
                     propaguen al backdrop (que los interpretaría como
                     "cerrar"). No interfiere con el Pan: gesture-handler
                     se queda con el drag, Pressable solo recibe taps. */}
-                <Pressable onPress={(e) => e.stopPropagation?.()}>
+                <Pressable onPress={(e) => e.stopPropagation?.()} style={noteKeyboardScroll ? { flexShrink: 1 } : undefined}>
                   {!minimized && (
-                    <View collapsable={false} onLayout={noteKeyboardScroll ? event => setNoteHeaderHeight(event.nativeEvent.layout.height) : undefined}>
+                    <View collapsable={false}>
                       <View
                         style={[
                           styles.sheetHandle,
-                          (compact || compactHeader) && { marginBottom: 6 },
+                          (compact || compactHeader) && { marginBottom: noteKeyboardScroll ? 2 : 6 },
                           containerBg && { backgroundColor: 'rgba(0,0,0,0.15)' },
                         ]}
                       />
                       {compact ? (
-                        <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8 }}>
+                        <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", marginBottom: noteKeyboardScroll ? 4 : 8,
+                          ...(noteKeyboardScroll ? { flexWrap: "wrap", gap: 4 } : {}) }}>
                           <Text style={[styles.sheetTitle, { fontSize: 16, color: "#ffffff" }]} {...titleNoTranslate}>{title}</Text>
-                          {subtitle ? <Text style={{ fontSize: 11, color: "#ffffff", fontWeight: "600", letterSpacing: 0.3 }} {...subtitleNoTranslate}>{subtitle}</Text> : null}
+                          {subtitle && !noteKeyboardScroll ? <Text style={{ fontSize: 11, color: "#ffffff", fontWeight: "600", letterSpacing: 0.3,
+                            ...(noteKeyboardScroll ? { flexShrink: 1 } : {}) }} {...subtitleNoTranslate}>{subtitle}</Text> : null}
                         </View>
                       ) : (
                         <>
@@ -27693,7 +27678,8 @@ function BottomSheet({
                       {Platform.OS === "web" ? (
                         <Reanimated.ScrollView
                           style={[
-                            { maxHeight: minimized ? 0 : noteKeyboardScroll ? noteContentHeight : 460, overflow: "hidden" },
+                            { maxHeight: minimized ? 0 : noteKeyboardScroll ? undefined : 460, overflow: "hidden",
+                              ...(noteKeyboardScroll ? { flexGrow: 0, flexShrink: 1 } : {}) },
                             { WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", touchAction: "pan-y" } as any,
                           ]}
                           keyboardShouldPersistTaps="handled"
@@ -27705,28 +27691,29 @@ function BottomSheet({
                           onScroll={scrollHandler}
                           contentContainerStyle={anchorBottom ? { flexGrow: 1, justifyContent: "flex-end" } : undefined}
                         >
-                          {children}
+                          {sheetContents}
                         </Reanimated.ScrollView>
                       ) : (
                         <KeyboardAwareScrollView
-                          style={{ maxHeight: minimized ? 0 : noteKeyboardScroll ? noteContentHeight : 460, overflow: "hidden", ...(noteKeyboardScroll ? { flexGrow: 0 } : {}) }}
+                          style={{ maxHeight: minimized ? 0 : noteKeyboardScroll ? undefined : 460, overflow: "hidden", ...(noteKeyboardScroll ? { flexGrow: 0, flexShrink: 1 } : {}) }}
                           keyboardShouldPersistTaps="handled"
                           showsVerticalScrollIndicator={false}
                           bounces={!noteKeyboardScroll}
                           decelerationRate="normal"
                           nestedScrollEnabled
                           scrollEventThrottle={16}
-                          bottomOffset={16}
+                          bottomOffset={noteKeyboardScroll ? noteFooterHeight + effectivePaddingBottom + 26 : 16}
                           onScroll={(e) => { scrollOffset.value = e.nativeEvent.contentOffset.y; }}
                           contentContainerStyle={anchorBottom ? { flexGrow: 1, justifyContent: "flex-end" } : undefined}
                         >
-                          {children}
+                          {sheetContents}
                         </KeyboardAwareScrollView>
                       )}
                     </GestureDetector>
                   )}
                   {footer ? (
-                    <View style={{ marginTop: minimized ? 4 : 10 }}>{footer}</View>
+                    <View style={{ marginTop: minimized || noteKeyboardScroll ? 4 : 10, ...(noteKeyboardScroll ? { flexShrink: 0 } : {}) }}
+                      onLayout={noteKeyboardScroll ? event => setNoteFooterHeight(event.nativeEvent.layout.height) : undefined}>{footer}</View>
                   ) : null}
                 </Pressable>
                 {overlay ? (
@@ -27740,7 +27727,7 @@ function BottomSheet({
                   style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 56, zIndex: 5, pointerEvents: "none" } as any}
                 />
               </Reanimated.View>
-          </KeyboardAvoidingView>
+          </SheetKeyboardFrame>
         </View>
         </GestureDetector>
       </Modal>
