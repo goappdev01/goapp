@@ -8,7 +8,7 @@ export type DemoReservation = FloorReservation & {
   bookingId?: string; customerId?: string; professionalName?: string;
   changeProposal?: GoEntry["changeProposal"]; services?: Booking["services"];
 };
-export type DemoBooking = Booking & { elementId?: string; professionalName?: string; serviceTitle?: string; createdAt?: number; source?: "floor" | "customer" };
+export type DemoBooking = Booking & { elementId?: string; professionalName?: string; serviceTitle?: string; createdAt?: number; source?: "floor" | "customer"; serverBookingId?: string };
 type Storage = { getItem: (key: string) => Promise<string | null>; setItem: (key: string, value: string) => Promise<void> };
 export type BusinessDemoData = {
   version: 1; ownerUserId: string; config: BusinessConfig; plan: FloorPlan | null;
@@ -244,7 +244,7 @@ export function businessDemoStorageKey(ownerUserId: string, companyId?: string):
   return `go_owner_business_demo_v1:${ownerUserId.toLowerCase()}${companyId ? ":" + companyId.toLowerCase() : ""}`;
 }
 /** One owner-scoped local document. No live repositories, tokens or network fallbacks. */
-export function createBusinessDemoStore(options: { ownerUserId: string; storage: Storage; canUse: () => boolean; initialConfig: BusinessConfig; companyId?: string; keepBackup?: boolean }) {
+export function createBusinessDemoStore(options: { ownerUserId: string; storage: Storage; canUse: () => boolean; initialConfig: BusinessConfig; companyId?: string; keepBackup?: boolean; serverBookings?: boolean }) {
   const { ownerUserId, storage, canUse } = options;
   const key = businessDemoStorageKey(ownerUserId, options.companyId);
   const suffix = ownerUserId.toLowerCase() + (options.companyId ? "_" + options.companyId.toLowerCase() : "");
@@ -345,13 +345,16 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
   const change = <T,>(update: (data: BusinessDemoData) => { data: BusinessDemoData; result: T }) => enqueue(async () => {
     // Refresh inside the per-owner queue: another mounted adapter cannot overwrite a newer committed document.
     await ensureLoaded(true); const { data: next, result } = update(clone(snapshot)); assertAllowed();
+    if(options.serverBookings && JSON.stringify(snapshot.bookings)!==JSON.stringify(next.bookings)){
+      await (await import("./registeredBookingRepository")).validateRegisteredBookingChanges({ownerUserId,businessId},snapshot,next);assertAllowed();
+    }
     if (options.keepBackup) { await storage.setItem(key + ":backup", JSON.stringify(snapshot)); assertAllowed(); }
     await storage.setItem(key, JSON.stringify(next)); assertAllowed(); publish(next); return result;
   });
   const simpleChange = (update: (data: BusinessDemoData) => BusinessDemoData) => change(data => ({ data: update(data), result: undefined }));
   const syncEntries = (data: BusinessDemoData) => { data.entries = data.reservations.map(reservation => entryFor(reservation, data)); refreshPlanStatuses(data); };
   const api = {
-    ownerUserId, businessId, planId, reservationBookingId,
+    ownerUserId, businessId, planId, reservationBookingId, serverBookings: options.serverBookings === true,
     getSnapshot: () => snapshot,
     subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
     load: () => enqueue(async () => { await ensureLoaded(true); assertAllowed(); return clone(snapshot); }),

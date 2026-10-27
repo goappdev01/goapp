@@ -84,6 +84,7 @@ export type BookingChangeProposal = {
 };
 export type BookingChangeEvent = { proposal: BookingChangeProposal; outcome: "accepted" | "rejected" | "countered" | "cancelled"; actor: "customer" | "business"; at: number };
 export type Booking = {
+  registeredSourceId?: string; // Owner-scoped registration hint; verified again by the server.
   totalPrice?: number | null;
   currency?: string;
   catalogSnapshot?: CatalogQuote;
@@ -489,6 +490,7 @@ async function createRemoteBooking(candidate: Omit<Booking, "id"> & { id?: strin
     candidate.catalogSnapshot ? "/supabase/bookings/catalog" : "/supabase/bookings/timeline",
     {
       method: "POST",
+      ...(candidate.registeredSourceId ? {headers:{"x-go-booking-source":candidate.registeredSourceId}} : {}),
       body: JSON.stringify({ business_id: candidate.businessId,
         ...(candidate.catalogSnapshot ? { root_ids: candidate.catalogSnapshot.rootIds, selected_ids: candidate.catalogSnapshot.selectedAssociationIds, expected_quote: candidate.catalogSnapshot } : { service_ids: serviceIds, status: "CONFIRMED" }),
         starts_at: candidate.startInstant ?? new Date(candidate.startDatetime).toISOString(), staff_id: candidate.staffId ?? null,
@@ -1541,7 +1543,7 @@ function deduplicateBookings<T extends { staffId?: string; startDatetime: string
 }
 
 /** The database is the sole live availability authority. Never fall back to a local grid. */
-export async function getTimelineAvailability(businessId: string, serviceIds: string[], dateISO: string, staffId?: string, options: { days?: number; datesOnly?: boolean; visualStepMinutes?: number } = {}): Promise<{ slots: SlotWithStatus[]; availableDates: string[]; timezone: string }> {
+export async function getTimelineAvailability(businessId: string, serviceIds: string[], dateISO: string, staffId?: string, options: { days?: number; datesOnly?: boolean; visualStepMinutes?: number; registeredSourceId?:string } = {}): Promise<{ slots: SlotWithStatus[]; availableDates: string[]; timezone: string }> {
   const query = new URLSearchParams({ business_id: businessId, service_ids: serviceIds.join(","), dateISO });
   // The server still evaluates every minute and retains each exact free boundary.
   // Sampling only the response avoids shipping hundreds of duplicate plan bodies.
@@ -1551,7 +1553,7 @@ export async function getTimelineAvailability(businessId: string, serviceIds: st
   if (staffId) query.set("staff_id", staffId);
   if (options.days) query.set("days", String(options.days));
   if (options.datesOnly) query.set("datesOnly", "true");
-  const result = await supabaseApiRequest<{ version: number; gapPolicyVersion?:number; phasePolicyVersion?:number; slots: BookingTimeline[]; availableDates: string[]; timezone: string }>(`/supabase/booking-availability?${query}`, {}, true);
+  const result = await supabaseApiRequest<{ version: number; gapPolicyVersion?:number; phasePolicyVersion?:number; slots: BookingTimeline[]; availableDates: string[]; timezone: string }>(`/supabase/booking-availability?${query}`, options.registeredSourceId ? {headers:{"x-go-booking-source":options.registeredSourceId}} : {}, true);
   if (result.version !== 1 || result.gapPolicyVersion !== 1 || result.phasePolicyVersion !== 1 || !Array.isArray(result.slots) || result.slots.some(plan=>plan.gapPolicy?.version!==1||plan.phasePolicyVersion!==1) || !Array.isArray(result.availableDates)) {
     throw new BookingApiError("El servidor no dispone del motor de tiempos requerido.", 503, "TIMELINE_UNAVAILABLE");
   }

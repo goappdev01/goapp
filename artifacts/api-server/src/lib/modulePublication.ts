@@ -48,7 +48,17 @@ export async function allowNewBookingModule(req: Request, res: Response, busines
   const response = await supabaseRequest(`/rest/v1/businesses?${query}`, { headers: bearerHeader(req.header("authorization")) });
   if (!response.ok) { res.status(response.status >= 500 ? 503 : response.status).json({ code: "MODULE_ACCESS_UNAVAILABLE", error: "No se pudo comprobar la disponibilidad del negocio." }); return false; }
   const rows: unknown = await response.json();
-  if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.id !== businessId || rows[0]?.booking_enabled !== true) {
+  let registeredOwner=false;
+  const source=req.header("x-go-booking-source");
+  if(Array.isArray(rows)&&rows.length===1&&rows[0]?.id===businessId&&rows[0]?.booking_enabled!==true&&source&&source.length<=256){
+    // A hint is never permission: the existing owner-guarded RPC must resolve
+    // the exact registered source and business under the ORIGINAL caller JWT.
+    const registration=await supabaseRequest("/rest/v1/rpc/go_booking_calendar_business",{method:"POST",headers:{...bearerHeader(req.header("authorization")),"Content-Type":"application/json"},body:JSON.stringify({p_source_id:source})});
+    const body=await registration.json().catch(()=>null) as {businessId?:unknown;sourceId?:unknown;bookingAuthority?:unknown}|null;
+    registeredOwner=registration.ok&&body?.businessId===businessId&&body?.sourceId===source&&body?.bookingAuthority===true;
+    if(!registeredOwner&&registration.status>=500){res.status(503).json({code:"MODULE_ACCESS_UNAVAILABLE",error:"No se pudo comprobar la empresa registrada. No se ha confirmado ninguna reserva."});return false;}
+  }
+  if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.id !== businessId || rows[0]?.booking_enabled !== true&&!registeredOwner) {
     res.status(404).json({ code: "BUSINESS_UNAVAILABLE", error: "No se encontró un negocio disponible." }); return false;
   }
   if (bookingActivityEnabled(rows[0].ui_metadata?.category, serverModulePublication())) return true;

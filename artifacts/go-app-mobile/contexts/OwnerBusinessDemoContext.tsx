@@ -43,7 +43,7 @@ export function OwnerBusinessDemoProvider({ children, initialConfig }: {
   const catalog = useMemo(() => {
     if (!admin.userId) return undefined;
     const userId = admin.userId;
-    return createBusinessDemoCatalog({ ownerUserId: userId, storage: AsyncStorage, initialConfig,
+    return createBusinessDemoCatalog({ ownerUserId: userId, storage: AsyncStorage, initialConfig, serverBookings: true,
       canUse: () => mounted.current && permission.current.allowed && permission.current.userId === userId
         && AppState.currentState === "active",
     });

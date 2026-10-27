@@ -22,7 +22,7 @@ type BookingInput = Omit<Booking, "id" | "status" | "holdExpiresAt" | "paymentSt
 
 /** Local-only facade for the existing customer booking screen. Nothing delegates to a live repository. */
 type RepositoryDisplayOptions = { now?: () => number; customerIdentity?: () => Promise<{id:string;name:string;phone:string}> };
-export function createDemoBookingRepository(store: BusinessDemoStore, options: RepositoryDisplayOptions = {}) {
+function createLocalDemoBookingRepository(store: BusinessDemoStore, options: RepositoryDisplayOptions = {}) {
   const now = options.now ?? Date.now;
   const serviceId = (name: string) => `${store.businessId}_service_${token(name)}`;
   const servicesFor = (config: BusinessConfig): BookableItem[] => {
@@ -43,7 +43,7 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: R
     id: store.businessId, name: data.config.businessName, category: data.config.subId ?? data.config.sectorId ?? "demo",
     location: data.config.address || (data.config.coordinates ? `${data.config.coordinates.latitude}, ${data.config.coordinates.longitude}` : ""),
     phone: data.config.phoneE164 ?? data.config.phone ?? "", whatsapp: data.config.whatsappE164 ?? data.config.whatsapp,
-    bookingActive: true, bookingColor: "#3D9A84", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Madrid", createdAt: "",
+    bookingActive: true, bookingColor: "#3D9A84", timezone: data.config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Madrid", createdAt: "",
   }) : null;
   const requireBusiness = (id: string) => { if (id !== store.businessId) throw new Error("DEMO no puede consultar empresas reales."); };
   const resourceOptions = (data: BusinessDemoData, service: BookableItem, member?: Staff, serviceIds = [service.id]) => {
@@ -205,7 +205,7 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: R
     syncReservation(data,booking);return clone(booking);
   });
   return {
-    ownerUserId:store.ownerUserId, businessId:store.businessId, store,
+    ownerUserId:store.ownerUserId, businessId:store.businessId, store, projectReservation:syncReservation, getAvailableDates:undefined as undefined | ((businessId:string,services:string[],date:string,professional:string|undefined,days:number)=>Promise<string[]>),
     getActiveBusinesses: async () => { const data=await store.load(), business=businessFor(data); return business ? [business] : []; },
     searchBusinesses: async (query:string) => { const data=await store.load(), business=businessFor(data); if (!business) return [];
       const text=normalized([business.name,business.category,data.config.sectorId,data.config.address,...data.config.services.map(service=>service.name)].join(" "));
@@ -262,7 +262,13 @@ export function createDemoBookingRepository(store: BusinessDemoStore, options: R
       estado:entry.changeProposal ? (entry.changeProposal as import("./booking").BookingChangeProposal).proposedBy==="customer"?"propuesta_pendiente":"propuesto" : entry.estado, demoLocal:true } as GoEntry)),
   };
 }
-export type DemoBookingRepository = ReturnType<typeof createDemoBookingRepository>;
+export type DemoBookingRepository = ReturnType<typeof createLocalDemoBookingRepository>;
+/** A registered runtime never falls back to local availability or confirmation. */
+export function createDemoBookingRepository(store:BusinessDemoStore,options:RepositoryDisplayOptions={}):DemoBookingRepository {
+  const local=createLocalDemoBookingRepository(store,options);
+  if(!store.serverBookings)return local;
+  return (require("./registeredBookingRepository") as typeof import("./registeredBookingRepository")).withRegisteredBookingAuthority(local,store,local.projectReservation);
+}
 
 
 
@@ -285,6 +291,7 @@ export function createDemoCatalogBookingRepository(catalog: import("./businessDe
     getCatalogItems: id => forBusiness(id).getCatalogItems(id),
     quoteCatalog: (id, roots, selected) => forBusiness(id).quoteCatalog(id, roots, selected),
     getAllSlots: (id, item, date, professional, serviceIds) => forBusiness(id).getAllSlots(id, item, date, professional, serviceIds),
+    getAvailableDates: selected.getAvailableDates ? (id,services,date,professional,days)=>forBusiness(id).getAvailableDates!(id,services,date,professional,days) : undefined,
     changeBooking: (id,businessId,actor,operation,input) => forBusiness(businessId).changeBooking(id,businessId,actor,operation,input),
     createHold: input => forBusiness(input.businessId).createHold(input), claimSlot: input => forBusiness(input.businessId).claimSlot(input),
     cancelBooking: async id => (await forBooking(id)).cancelBooking(id),

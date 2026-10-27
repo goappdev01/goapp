@@ -13,7 +13,7 @@ export function adjacentDemoCompanyId(companies: Array<DemoCompany & { placehold
   return index < 0 ? undefined : active[index + direction]?.id;
 }
 /** Directory for the existing isolated DEMO documents. Never opens a live repository. */
-export function createBusinessDemoCatalog(options: { ownerUserId: string; storage: Storage; canUse: () => boolean; initialConfig: BusinessConfig }) {
+export function createBusinessDemoCatalog(options: { ownerUserId: string; storage: Storage; canUse: () => boolean; initialConfig: BusinessConfig; serverBookings?: boolean }) {
   const key = businessDemoStorageKey(options.ownerUserId) + ":catalog";
   let document: Document = { version: 1, ownerUserId: options.ownerUserId, selected: "legacy", companies: [{ id: "legacy", name: "", archived: false, createdAt: 0 }] };
   // Only the original document may use its compatibility seed. New businesses

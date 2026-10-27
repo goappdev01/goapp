@@ -505,7 +505,7 @@ export function BookingSearchOverlay({
   // Anti-doble-reserva: true cuando claimSlot o isSlotOccupied detectan conflicto
   const [slotTakenError, setSlotTakenError] = useState(false);
 
-  const days = getDaysRange(21, demoRepository ? undefined : selectedBusiness?.timezone);
+  const days = getDaysRange(21, demoRepository && !demoRepository.store.serverBookings ? undefined : selectedBusiness?.timezone);
 
   const goToStep = (next: Step, direction: "forward" | "back" = "forward") => {
     const offset = direction === "forward" ? SCREEN_W : -SCREEN_W;
@@ -707,9 +707,9 @@ export function BookingSearchOverlay({
   useEffect(() => {
     let current = true;
     setAvailableDates(null);
-    if (!visible || demoRepository || step !== "slots" || !selectedBusiness || !selectedItem) return;
+    if (!visible || demoRepository && !demoRepository.getAvailableDates || step !== "slots" || !selectedBusiness || !selectedItem) return;
     const staffId = selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined;
-    void getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), days[0], staffId, { days: days.length, datesOnly: true })
+    void (demoRepository?.getAvailableDates ? demoRepository.getAvailableDates(selectedBusiness.id, selectedServices.map(service => service.id), days[0], staffId, days.length).then(availableDates=>({availableDates})) : getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), days[0], staffId, { days: days.length, datesOnly: true }))
       .then(result => { if (current) setAvailableDates(result.availableDates); })
       .catch(error => { if (current) { setAvailableDates([]); setSlotError(error instanceof Error ? error.message : "No se pudieron consultar las fechas."); } });
     return () => { current = false; };
@@ -724,7 +724,7 @@ export function BookingSearchOverlay({
     Keyboard.dismiss();
     Haptics.selectionAsync().catch(() => {});
     setSelectedBusiness(b);
-    setSelectedDate(getDaysRange(1, demoRepository ? undefined : b.timezone)[0]);
+    setSelectedDate(getDaysRange(1, demoRepository && !demoRepository.store.serverBookings ? undefined : b.timezone)[0]);
     setItems([]); setSelectedItem(null); setSelectedServiceIds([]); setSelectedServices([]); setSelectedStaff(null); setSlots([]);
     if (!demoRepository) {
       onProviderSelected?.(b);
@@ -759,7 +759,7 @@ export function BookingSearchOverlay({
     if (!selectedBusiness || !selectedItem) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
-      const staffId = demoRepository ? (selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined) : slot.staffId;
+      const staffId = slot.staffId ?? (selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined);
       console.log("[BOOKING_CHECK_INPUT] handleSelectSlot →", {
         businessId:    selectedBusiness.id,
         staffId,
@@ -795,7 +795,8 @@ export function BookingSearchOverlay({
       goToStep("hold", "forward");
       // Notifica inmediatamente — sin esperar al polling de 3 min
       if (!demoRepository) onHoldCreated?.();
-    } catch {
+    } catch (error) {
+      setSlotError(error instanceof Error ? error.message : "No se pudo comprobar el horario. No se ha creado ninguna reserva.");
       loadSlots();
     }
   };
@@ -842,7 +843,7 @@ export function BookingSearchOverlay({
         setConfirming(false);
         if (
           error instanceof BookingApiError &&
-          (error.status === 409 || error.code === "23P01" || error.code === "BOOKING_CONFLICT")
+          (error.status === 409 || ["23P01","BOOKING_CONFLICT","BOOKING_OUTSIDE_AVAILABILITY","BOOKING_STAFF_UNAVAILABLE","BOOKING_GAP_NOT_MULTIPLE"].includes(error.code ?? ""))
         ) {
           cancelSelectedBooking(activeHold.id).catch(() => {});
           setActiveHold(null);

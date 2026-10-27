@@ -10,8 +10,8 @@ export type CatalogQuote = { version: 1; businessId: string; rootIds: string[]; 
 export async function manageAssociations<T = CatalogAssociation[]>(businessId: string, operation: "list" | "create" | "update" | "delete", input: object = {}): Promise<T> {
   return supabaseApiRequest<T>("/supabase/catalog/associations", { method: "POST", body: JSON.stringify({ businessId, operation, input }) }, true);
 }
-export async function quoteCatalog(businessId: string, rootIds: string[], selectedIds: string[] = []): Promise<CatalogQuote> {
-  const quote = await supabaseApiRequest<CatalogQuote>("/supabase/catalog/quote", { method: "POST", body: JSON.stringify({ businessId, rootIds, selectedIds }) }, true);
+export async function quoteCatalog(businessId: string, rootIds: string[], selectedIds: string[] = [], registeredSourceId?:string): Promise<CatalogQuote> {
+  const quote = await supabaseApiRequest<CatalogQuote>("/supabase/catalog/quote", { method: "POST", ...(registeredSourceId ? {headers:{"x-go-booking-source":registeredSourceId}} : {}), body: JSON.stringify({ businessId, rootIds, selectedIds }) }, true);
   if (quote.version !== 1 || quote.businessId !== businessId || !Array.isArray(quote.lines) || !Array.isArray(quote.options)
     || JSON.stringify(quote.rootIds) !== JSON.stringify(rootIds) || !Number.isFinite(quote.totalPrice)) throw Error("Respuesta de catálogo no válida.");
   return quote;
