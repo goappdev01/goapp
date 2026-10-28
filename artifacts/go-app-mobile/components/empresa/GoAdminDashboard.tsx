@@ -709,7 +709,10 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
 
   const currentSec = SECTIONS.find(s => s.key === section);
 
+  const financialView = section === "roadmap" && roadmapStack[roadmapStack.length - 1]?.key === "plan_financiero_y_proyecciones";
+
   const headerTitle =
+    financialView            ? (lang === 'en' ? "Finance" : "Finanzas") :
     roadmapStack.length > 0   ? roadmapStack[roadmapStack.length - 1].label :
     section !== "overview"    ? (lang === 'en' ? (currentSec?.label_en ?? currentSec?.label ?? "") : (currentSec?.label ?? "")) :
                                 (lang === 'en' ? "GO Admin" : "Admin GO");
@@ -722,20 +725,20 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
-      <StatusBar style="light" />
-      <SafeAreaView style={s.root}>
+      <StatusBar style={financialView ? "dark" : "light"} />
+      <SafeAreaView style={[s.root, financialView && { backgroundColor: "#FFFFFF" }]}>
 
         {/* ── Header ── */}
-        <View style={s.header}>
-          <View style={[s.iconBadge, { backgroundColor: "rgba(239,68,68,0.15)" }]}>
-            <Feather name="shield" size={14} color="#ef4444" />
+        <View style={[s.header, financialView && { backgroundColor: "#FFFFFF", borderBottomColor: "#E2E6EB", paddingVertical: 8 }]}>
+          <View style={[s.iconBadge, { backgroundColor: financialView ? "#EDF1F7" : "rgba(239,68,68,0.15)" }]}>
+            <Feather name={financialView ? "pie-chart" : "shield"} size={14} color={financialView ? "#344D78" : "#ef4444"} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={s.title}>{headerTitle}</Text>
-            <Text style={s.subtitle}>{headerSub}</Text>
+            <Text style={[s.title, financialView && { color: "#171B22" }]}>{headerTitle}</Text>
+            {!financialView && <Text style={s.subtitle}>{headerSub}</Text>}
           </View>
           {goView.isOwner && onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ padding: 8 }}>
-            <Text style={{ color: "#FFFFFF", fontSize: 12 }}>Cambiar contexto</Text>
+            <Text style={{ color: financialView ? "#505A69" : "#FFFFFF", fontSize: 12 }}>Cambiar contexto</Text>
           </TouchableOpacity>}
         </View>
 

@@ -3,7 +3,7 @@ import { Text,View } from "react-native";
 import Svg,{Circle,Line,Path,Text as SvgText} from "react-native-svg";
 import { FINANCE_SCENARIOS,type FinancialScenario,type FinancialTotal } from "@workspace/api-zod";
 import { FinanceButton,financialMoney,financialCount,financeStyles as s } from "./FinancialUI";
-const SERIES=[{key:"revenue",label:"Ingresos",color:"#68D6AF"},{key:"operating",label:"Costes operativos",color:"#F2BA73"},{key:"result",label:"Resultado",color:"#8FB5FF"}] as const;
+const SERIES=[{key:"revenue",label:"Ingresos",color:"#345F9C"},{key:"operating",label:"Costes operativos",color:"#A36C25"},{key:"result",label:"Resultado",color:"#7354A3"}] as const;
 const complete=(value:FinancialTotal|undefined)=>!!value&&value.rows>0&&value.incompleteRows===0&&SERIES.every(series=>value.amounts[series.key]!==null);
 export function FinancialTrend({totals,scenario,currency}:{totals:FinancialTotal[];scenario:FinancialScenario;currency:string}){
  const years=totals.filter(row=>row.scenario===scenario).sort((a,b)=>a.year-b.year);
@@ -13,9 +13,9 @@ export function FinancialTrend({totals,scenario,currency}:{totals:FinancialTotal
  const label=(value:number)=>new Intl.NumberFormat("es-ES",{notation:"compact",maximumFractionDigits:1}).format(value);
  return <View style={s.card}><View style={s.planBar}><Text style={s.heading}>Evolución anual</Text><Text style={s.note}>{currency}</Text></View>
  <Svg width="100%" height={190} viewBox="0 0 320 190" accessibilityLabel={"Evolución de ingresos, costes operativos y resultado en "+currency} accessible>
- <Line x1={48} x2={306} y1={y(0)} y2={y(0)} stroke="#59616E" strokeWidth={1}/><SvgText x={43} y={154} fill="#AEB7C6" fontSize={10} textAnchor="end">{label(min)}</SvgText>{max!==min&&<SvgText x={43} y={34} fill="#AEB7C6" fontSize={10} textAnchor="end">{label(max)}</SvgText>}
+ <Line x1={48} x2={306} y1={y(0)} y2={y(0)} stroke="#C5CBD4" strokeWidth={1}/><SvgText x={43} y={154} fill="#667080" fontSize={10} textAnchor="end">{label(min)}</SvgText>{max!==min&&<SvgText x={43} y={34} fill="#667080" fontSize={10} textAnchor="end">{label(max)}</SvgText>}
  {SERIES.map(series=>{let started=false;const segments:string[]=[];for(let i=0;i<years.length;i++){const row=years[i];if(!complete(row)){started=false;continue;}segments.push((started?"L":"M")+x(i)+","+y(row.amounts[series.key]!));started=true;}return <React.Fragment key={series.key}><Path d={segments.join(" ")} stroke={series.color} strokeWidth={2.5} fill="none"/>{years.map((row,index)=>complete(row)?<Circle key={row.year} cx={x(index)} cy={y(row.amounts[series.key]!)} r={3} fill={series.color}/>:null)}</React.Fragment>;})}
- {years.map((row,index)=>(index===0||index===years.length-1||index%Math.max(1,Math.ceil(years.length/6))===0)?<SvgText key={row.year} x={x(index)} y={176} fill="#BBC4D1" fontSize={10} textAnchor="middle">{row.year}</SvgText>:null)}
+ {years.map((row,index)=>(index===0||index===years.length-1||index%Math.max(1,Math.ceil(years.length/6))===0)?<SvgText key={row.year} x={x(index)} y={176} fill="#667080" fontSize={10} textAnchor="middle">{row.year}</SvgText>:null)}
  </Svg><View style={s.row}>{SERIES.map(series=><Text key={series.key} style={[s.note,{color:series.color}]}>● {series.label}</Text>)}</View>{years.some(row=>!complete(row))&&<Text style={s.note}>Los años incompletos aparecen sin trazar.</Text>}</View>;
 }
 export function FinancialSummary({totals,scenario,year,currency,onConfigure,onImport}:{totals:FinancialTotal[];scenario:FinancialScenario;year:number;currency:string;onConfigure:()=>void;onImport:()=>void}){

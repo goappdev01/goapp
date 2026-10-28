@@ -42,3 +42,17 @@ test('module catalogue and existing floating GO controls are unchanged; Expo Go 
  function controls(text){const f=ast(text),found=[];function visit(n){if(ts.isJsxElement(n)&&n.openingElement.tagName.getText(f)==='DraggableFAB')found.push(n.getText(f).replace(/\r\n/g,'\n'));ts.forEachChild(n,visit);}visit(f);return found;}
  assert.deepEqual(controls(source),controls(original));assert.doesNotMatch(source,/expo-dev-client|DevMenu|RCTEventEmitter/);
 });
+
+
+test('compact light header is exclusive to Finance and returns to the original Admin header',()=>{
+ const h=screen();h.button('Roadmap GO').props.onPress();
+ h.all().find(n=>n.type==='GoRoadmapScreen').props.setNavStack([{key:'plan_financiero_y_proyecciones',label:'Plan Financiero y Proyecciones'}]);
+ const finance=h.all();assert.equal(finance.filter(n=>n.type==='Text'&&n.children.includes('Finanzas')).length,1);
+ assert.equal(finance.some(n=>n.type==='Text'&&n.children.includes('Plan Financiero y Proyecciones')),false);
+ assert.equal(finance.find(n=>n.type==='StatusBar').props.style,'dark');
+ assert.equal(finance.find(n=>n.type==='SafeAreaView').props.style[1].backgroundColor,'#FFFFFF');
+ h.button('Volver al paso anterior').props.onPress();const roadmap=h.all();
+ assert.equal(roadmap.find(n=>n.type==='StatusBar').props.style,'light');
+ assert.equal(roadmap.some(n=>n.type==='Text'&&n.children.includes('Roadmap GO')),true);
+ assert.equal(roadmap.find(n=>n.type==='SafeAreaView').props.style[1],false);
+});
