@@ -712,7 +712,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
   const financialView = section === "roadmap" && roadmapStack[roadmapStack.length - 1]?.key === "plan_financiero_y_proyecciones";
 
   const headerTitle =
-    financialView            ? (lang === 'en' ? "Finance" : "Finanzas") :
+    financialView            ? (lang === 'en' ? "GO income projection" : "Proyección de ingresos GO") :
     roadmapStack.length > 0   ? roadmapStack[roadmapStack.length - 1].label :
     section !== "overview"    ? (lang === 'en' ? (currentSec?.label_en ?? currentSec?.label ?? "") : (currentSec?.label ?? "")) :
                                 (lang === 'en' ? "GO Admin" : "Admin GO");
@@ -734,7 +734,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
             <Feather name={financialView ? "pie-chart" : "shield"} size={14} color={financialView ? "#344D78" : "#ef4444"} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[s.title, financialView && { color: "#171B22" }]}>{headerTitle}</Text>
+            <Text style={[s.title, financialView && { color: "#171B22", fontSize: 14 }]}>{headerTitle}</Text>
             {!financialView && <Text style={s.subtitle}>{headerSub}</Text>}
           </View>
           {goView.isOwner && onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ padding: 8 }}>

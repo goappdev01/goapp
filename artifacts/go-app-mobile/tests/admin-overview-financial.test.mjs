@@ -47,7 +47,7 @@ test('module catalogue and existing floating GO controls are unchanged; Expo Go 
 test('compact light header is exclusive to Finance and returns to the original Admin header',()=>{
  const h=screen();h.button('Roadmap GO').props.onPress();
  h.all().find(n=>n.type==='GoRoadmapScreen').props.setNavStack([{key:'plan_financiero_y_proyecciones',label:'Plan Financiero y Proyecciones'}]);
- const finance=h.all();assert.equal(finance.filter(n=>n.type==='Text'&&n.children.includes('Finanzas')).length,1);
+ const finance=h.all();assert.equal(finance.filter(n=>n.type==='Text'&&n.children.includes('Proyección de ingresos GO')).length,1);
  assert.equal(finance.some(n=>n.type==='Text'&&n.children.includes('Plan Financiero y Proyecciones')),false);
  assert.equal(finance.find(n=>n.type==='StatusBar').props.style,'dark');
  assert.equal(finance.find(n=>n.type==='SafeAreaView').props.style[1].backgroundColor,'#FFFFFF');
