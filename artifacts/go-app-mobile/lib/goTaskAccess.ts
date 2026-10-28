@@ -9,6 +9,7 @@ export function canReadBoardTask(entry: GoEntry): boolean {
 }
 export const getTaskUser = getAuthenticatedUserId;
 export function isPersonalTask(entry: GoEntry): boolean {
+  if(entry.note?.version===1)return entry.note.destination!=="archive" && entry.kind==="sent" && !entry.recipients?.length;
   return entry.kind === "sent" && ["TAREA", "TAREA_INTERNA", "GO_INTERNO"].includes(entry.type || "")
     && !entry.recipients?.length && !/^lista\b/i.test(entry.notes || "") && !/^[-•] /m.test(entry.detail || "");
 }

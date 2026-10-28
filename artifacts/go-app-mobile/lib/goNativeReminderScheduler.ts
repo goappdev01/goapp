@@ -40,6 +40,7 @@ function isExplicitGoNote(entry: GoEntry): boolean {
     && entry.kind === "sent" && ["TAREA", "TAREA_INTERNA"].includes(entry.type || "") && !entry.recipients?.length;
 }
 export function nativeReminderTaskInScope(entry: ReminderTask, scope: TaskScope): boolean {
+  if(entry.note?.version===1&&entry.note.destination!=="calendar")return false;
   return taskInScope(entry, scope) || ((isExplicitGoNote(entry) || hasAttachedNoteReminder(entry))
     && (entry as ReminderTask & { ownerUserId?: string }).ownerUserId === scope.userId && entry.taskContext === scope.context);
 }

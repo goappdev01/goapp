@@ -5,10 +5,10 @@ import { appendNoteDictation } from "@/lib/goNoteTools";
 
 type Field = "title" | "detail";
 type Props = { visible: boolean; identity: string; title: string; setTitle: Dispatch<SetStateAction<string>>;
-  setDetail: Dispatch<SetStateAction<string>>; english: boolean };
+  setDetail: Dispatch<SetStateAction<string>>; english: boolean; titleLimit?: number };
 
 /** Uses the existing recorder/transcriber; it never sends a task, message or booking. */
-export function useGoNoteVoice({ visible, identity, title, setTitle, setDetail, english }: Props) {
+export function useGoNoteVoice({ visible, identity, title, setTitle, setDetail, english, titleLimit = 16 }: Props) {
   const field = useRef<Field>("title"), target = useRef<Field>("title");
   const captureIdentity = useRef(identity);
   const current = useRef({ visible, identity }); current.current = { visible, identity };
@@ -18,12 +18,12 @@ export function useGoNoteVoice({ visible, identity, title, setTitle, setDetail, 
     if (target.current === "detail") setDetail(previous => appendNoteDictation(previous, text));
     else {
       const next = appendNoteDictation(title, text);
-      if (next.length <= 16) { setTitle(previous => {
+      if (next.length <= titleLimit) { setTitle(previous => {
         const updated = appendNoteDictation(previous, text);
-        return updated.length <= 16 ? updated : previous;
+        return updated.length <= titleLimit ? updated : previous;
       }); return; }
-      setNotice(english ? `The title allows 16 characters. Dictation was not truncated: ${text}. Select the details field and dictate there.`
-        : `El título admite 16 caracteres. No se ha recortado el dictado: ${text}. Selecciona el campo de detalle para dictarlo allí.`);
+      setNotice(english ? `The title allows ${titleLimit} characters. Dictation was not truncated: ${text}. Select the details field and dictate there.`
+        : `El título admite ${titleLimit} caracteres. No se ha recortado el dictado: ${text}. Selecciona el campo de detalle para dictarlo allí.`);
     }
   }, { requireTranscriptionReady: true });
   const abort = useRef(voice.abort); abort.current = voice.abort;

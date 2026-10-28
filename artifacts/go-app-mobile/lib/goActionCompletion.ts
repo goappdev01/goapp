@@ -46,6 +46,7 @@ export function mergeCompletionEntries(base: readonly CompletionEntry[], candida
 }
 export function completionSchedule(entry: CompletionEntry): string {
   const e=current(entry);
+  if(e.note?.version===1){const plan=e.note.schedule;return JSON.stringify([plan.dateISO,plan.time,plan.duration,e.startDatetime||"",e.endDatetime||"",e.endTime||""]);}
   return JSON.stringify([e.dateISO,e.time,e.duration,e.startDatetime || "",e.endDatetime || "",e.endTime || ""]);
 }
 export function durationMinutes(value: string): number | null {
@@ -66,6 +67,7 @@ function localInstant(date: string,time: string): number | null {
   return at.getTime();
 }
 export function plannedActionEnd(entry: CompletionEntry, fallbackMinutes=60): number | null {
+  if(entry.note?.version===1 && entry.note.destination!=="calendar")return null;
   const e=current(entry);
   const start=e.startDatetime ? Date.parse(e.startDatetime) : localInstant(e.dateISO || "",e.time || "");
   if (start===null || !Number.isFinite(start)) return null;
@@ -86,6 +88,7 @@ export function plannedActionEnd(entry: CompletionEntry, fallbackMinutes=60): nu
   return duration!==null && positiveMinutes(duration)?start+duration*60000:null;
 }
 export function completionEligible(entry: CompletionEntry): boolean {
+  if(entry.note?.version===1 && entry.note.destination==="archive")return false;
   return !entry.deleted && entry.estado!=="rechazado" && entry.bookingStatus!=="cancelada"
     && !(entry as GoEntry & {scheduled?:boolean}).scheduled;
 }

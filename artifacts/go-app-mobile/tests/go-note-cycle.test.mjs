@@ -40,13 +40,12 @@ test('the actual existing-card edit action carries the saved ID, owner, content 
  const a=selectorFixture();await a.save();const entry=a.rows[0],ctx=a.context,opens=[];
  Object.assign(ctx,{entryIsInternal:()=>true,landingCurrentEntry:e=>e,landingDetailsId:entry.id,noteEditAfterDetailsRef:{current:null},
   setNoteDetailCloseRequested:()=>{},setLandingDetailsId:id=>{ctx.landingDetailsId=id;},isGoNoteReminderTarget:()=>true,setNoteReminderTargetId:()=>{},setNoteReminderPickerOpen:()=>{},setFsPlaceDraft:()=>{},
-  openFieldSelector:(kind,title,detail,_date,_time,draft)=>{opens.push(draft);ctx.noteTaskDraftRef.current=draft;ctx.fieldSelectorKind=kind;ctx.fieldSelectorText=title;ctx.fieldSelectorDetail=detail;ctx.fieldSelectorOpen=true;ctx.fieldSelectorSaveBusyRef.current=false;}});
+  openUnifiedNote:record=>opens.push(record)});
  vm.runInContext(compile('globalThis.openEntryChange = '+declaration('openEntryChange')),ctx);
  ctx.openEntryChange(entry);assert.equal(opens.length,0);assert.equal(ctx.noteEditAfterDetailsRef.current.id,entry.id);
  const sheet=nodes.find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='GoEntryDetailsSheet'&&n.openingElement.attributes.properties.some(p=>p.name?.getText(ast)==='closeRequested'));
  const close=sheet.openingElement.attributes.properties.find(p=>p.name?.getText(ast)==='onClose').initializer.expression;
- vm.runInContext(compile('globalThis.finishNoteDetail = '+close.getText(ast)),ctx);ctx.finishNoteDetail();ctx.finishNoteDetail();assert.equal(opens.length,1);assert.equal(opens[0].entryId,entry.id);
- ctx.fieldSelectorDetail='Editada después de dictar';await a.save();assert.equal(a.rows.length,1);assert.equal(a.rows[0].id,entry.id);assert.equal(a.rows[0].ownerUserId,scope.userId);assert.equal(a.rows[0].detail,'Editada después de dictar');assert.deepEqual(a.rows[0].reminders,[75]);
+ vm.runInContext(compile('globalThis.finishNoteDetail = '+close.getText(ast)),ctx);ctx.finishNoteDetail();ctx.finishNoteDetail();assert.equal(opens.length,1);assert.equal(opens[0].id,entry.id);assert.equal(opens[0].ownerUserId,scope.userId);assert.equal(opens[0].detail,'Contenido dictado');assert.deepEqual(opens[0].reminders,[75]);
 });
 
 test('saving a dated Calendar task uses the same confirmed queue and restores its container once',async()=>{

@@ -33,6 +33,9 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import { GoNoteEditor } from "@/components/notes/GoNoteEditor";
+import { isArchivedNote, noteDocument, noteInScope, type UnifiedNoteDraft, type NoteDestination } from "@/lib/unifiedNotes";
+import { saveUnifiedNote, moveUnifiedNote } from "@/lib/unifiedNoteStore";
 import { GoNoteControls } from "@/components/notes/GoNoteControls";
 import { GoTaskScheduleStep } from "@/components/notes/GoTaskScheduleStep";
 import { CalendarCloseGuide } from "@/components/ui/CalendarCloseGuide";
@@ -3512,7 +3515,7 @@ function HomeScreenContent() {
   const completionIdentity = useAssistantZoneScope();
   const [personalGoLog, setGoLog] = useGoLog(completionIdentity.ready ? completionIdentity.scope : null);
   const customerBookings=useCustomerBookings(demoBookingRepository,goView.loaded && goView.view==="USER" && !adminAccess.checking && (!adminAccess.isOwner || ownerDemo.loaded));
-  const completionEntries=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER").filter(canReadBoardTask),[personalGoLog,customerBookings.entries,goView.view,adminAccess.allowed,adminAccess.checking]);
+  const completionEntries=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER").filter(entry=>canReadBoardTask(entry)&&!isArchivedNote(entry)&&(!noteDocument(entry)||completionIdentity.ready&&!!completionIdentity.scope&&noteInScope(entry,completionIdentity.scope))),[personalGoLog,customerBookings.entries,goView.view,adminAccess.allowed,adminAccess.checking,completionIdentity.ready,completionIdentity.scope?.userId,completionIdentity.scope?.context]);
   const actionCompletion = useActionCompletion(completionEntries);
   const goLog=useMemo(()=>completionEntries.filter(entry=>!actionCompletion.isDiscarded(entry)),[completionEntries,actionCompletion.isDiscarded]);
   const [landingDetailsId, setLandingDetailsId] = useState<string | null>(null);
@@ -3665,7 +3668,7 @@ function HomeScreenContent() {
   } = useGoNotification();
 
   useEffect(() => onTaskNotificationFocus(({ task, scope }) => {
-    if (!isNativeTaskScopeActive(scope)) return;
+    if (!isNativeTaskScopeActive(scope) || isArchivedNote(task) || task.note?.version===1 && task.note.destination!=="calendar") return;
     setAiOpen(false); setListOpen(false);
     setCalHighlightEntryId(task.id);
     setCalScrollToDateTarget({ dateISO: task.dateISO, timeHHMM: task.time, token: Date.now() });
@@ -4263,16 +4266,25 @@ function HomeScreenContent() {
   const [noteDetailCloseRequested, setNoteDetailCloseRequested] = useState(false);
   const [noteReminderTargetId, setNoteReminderTargetId] = useState<string | null>(null);
   const [noteReminderBusy, setNoteReminderBusy] = useState(false);
+  const [unifiedNoteInitial,setUnifiedNoteInitial]=useState<GoEntry|null>(null);
+  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string}>({});
+  const unifiedNoteCache=useRef<{scope:string;draft:UnifiedNoteDraft}|null>(null);
+  const openUnifiedNote=(entry:GoEntry,seed:typeof unifiedNoteSeed={})=>{
+    if(unifiedNoteCache.current?.draft.id!==entry.id)unifiedNoteCache.current=null;
+    setUnifiedNoteInitial(entry);setUnifiedNoteSeed(seed);setNotesOpen(true);
+  };
+  const moveNoteDestination=(entry:GoEntry,destination:NoteDestination)=>{
+    if(destination==="calendar"){openUnifiedNote(entry,{destination});return;}
+    const identity=noteIdentityRef.current;
+    if(!identity.ready||!identity.scope){showToast("Espera a que se verifique tu cuenta.","error");return;}
+    const scope={...identity.scope};
+    void moveUnifiedNote(entry,destination,scope,()=>noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===scope.userId&&noteIdentityRef.current.scope.context===scope.context)
+      .then(result=>showToast(result.message,"success")).catch(error=>showToast(error.message,"error"));
+  };
   const noteIdentity = completionIdentity;
   const noteIdentityRef = useRef(noteIdentity); noteIdentityRef.current = noteIdentity;
-  const noteVoice = useGoNoteVoice({ visible: notesOpen,
-    identity: JSON.stringify(noteIdentity.scope), title: quickNoteText,
-    setTitle: setQuickNoteText, setDetail: setQuickNoteDetail, english: lang === "en" });
-  const notaAudioRecording = noteVoice.status === "listening";
-  const toggleNotaRecording = noteVoice.toggle;
-  const resetNotaAudio = noteVoice.abort;
   useEffect(() => {
-    if (!notesOpen) { noteVoice.abort(); setNoteReminderPickerOpen(false); }
+    if (!notesOpen) { setNoteReminderPickerOpen(false); }
     if (notesOpen) noteStartLockRef.current = false;
     setNoteReminderTargetId(null);
   }, [notesOpen, noteIdentity.scope?.userId, noteIdentity.scope?.context]);
@@ -8890,6 +8902,8 @@ function HomeScreenContent() {
 
 
   const moveGoToDay = (id: string, newDateISO: string, newTime: string, newDuration?: string) => {
+    const note=personalGoLog.find(entry=>entry.id===id);
+    if(noteDocument(note as GoEntry)){openUnifiedNote(note!,{destination:"calendar",dateISO:newDateISO,time:newTime||note!.note!.schedule.time});return;}
     const customerBooking=customerBookings.entries.find(entry=>entry.id===id);if(customerBooking){openBookingProposal(customerBooking,"customer",{dateISO:newDateISO,time:newTime});return;}
     let isExternal = false;
     let proposalLabel = "";
@@ -11836,6 +11850,7 @@ function HomeScreenContent() {
   ) => {
     const customerBooking=customerBookings.entries.find(entry=>entry.id===itemId);if(customerBooking){openBookingProposal(customerBooking,"customer",{dateISO:toDateISO,time:itemTime});return;}
     const entry = goLog.find((g) => g.id === itemId);
+    if(entry?.note?.version===1){openUnifiedNote(entry,{destination:"calendar",dateISO:toDateISO,time:itemTime||entry.note.schedule.time});return;}
 
     // ── OPTIMISTIC VISUAL COMMIT ────────────────────────────────────────────
     const d0 = new Date(toDateISO + "T00:00:00");
@@ -13556,15 +13571,7 @@ function HomeScreenContent() {
         || (entry.taskContext ?? entry.actionContext ?? "live:USER") !== identity.scope.context) {
         showToast("No se puede verificar la cuenta y el contexto de esta nota.", "error"); return;
       }
-      const draft: NoteReminderDraft = { scope: { ...identity.scope }, minutes: entry.reminders?.[0] ?? null, entryId: entry.id,
-        edit: { notes: entry.notes, detail: entry.detail, date: entry.date, dateISO: entry.dateISO, time: entry.time, duration: entry.duration,
-          place: entry.place, contactName: entry.contactName, phone: entry.phone,
-          reminders: [...(entry.reminders || [])] } };
-      setQuickNoteReminderMinutes(draft.minutes); setNoteReminderTargetId(null); setNoteReminderPickerOpen(false);
-      openFieldSelector(entry.type === "TAREA_INTERNA" ? "NOTA_INTERNA" : "NOTA_EXTERNA", entry.notes || "", entry.detail || "", entry.dateISO || "", entry.time || "", draft);
-      setFsFilledValues({ date: entry.date, dateISO: entry.dateISO, time: entry.time, duration: entry.duration,
-        contactName: entry.contactName, phone: entry.phone, place: entry.place });
-      setFsPlaceDraft(entry.place || "");
+      openUnifiedNote(entry);
       return;
     }
     if (entryIsInternal(entry)) {
@@ -20251,6 +20258,8 @@ function HomeScreenContent() {
                 scrollToTodayToken={calScrollToTodayToken}
                 scrollToDateToken={calScrollToDateTarget}
                 highlightEntryId={calHighlightEntryId}
+                archiveNotes={completionIdentity.ready&&completionIdentity.scope?personalGoLog.filter(entry=>isArchivedNote(entry)&&noteInScope(entry,completionIdentity.scope!)&&!entry.deleted):[]}
+                onOpenNote={openUnifiedNote} onMoveNote={moveNoteDestination}
                 onMoveItem={moveGoToDay}
                 onOpenMoveFlow={openMoveFlow}
                 onCreateTaskAtTime={openCalendarSlotTask}
@@ -21562,6 +21571,7 @@ function HomeScreenContent() {
             onTime={calFlow.selectExactTime} onDuration={calFlow.selectDuration} onDate={calFlow.returnToDate}
             onBack={() => calFlow.step === "duration" ? calFlow.reopenClock() : calFlow.returnToDate()} />}
           {calendarTaskContextRef.current && fieldSelectorOpen && renderFieldSelector(true)}
+          {calOpen && renderUnifiedNoteEditor()}
           <GoBoardsPanel visible={boardsOpen && calOpen} onClose={() => setBoardsOpen(false)} manager={goBoards} fontScale={uiScaleFactor} handedness={handedness} />
         </View>
       </GoScreenHost>
@@ -21782,273 +21792,7 @@ function HomeScreenContent() {
         </View>
       </BottomSheet>
 
-      <BottomSheet
-        visible={notesOpen}
-        noteKeyboardScroll
-        onDismiss={() => { if (noteSelectorAfterNotesDismissRef.current) { noteSelectorAfterNotesDismissRef.current = false; setFieldSelectorOpen(true); } }}
-        onShow={() => quickNoteTitleRef.current?.focus()}
-        onClose={() => { Keyboard.dismiss(); setNotesOpen(false); }}
-        footer={<GoNoteControls handedness={handedness} closeLabel={t('close')}
-          onClose={() => {
-            Haptics.selectionAsync().catch(() => {});
-            resetNotaAudio();
-            setNoteReminderPickerOpen(false);
-            Keyboard.dismiss();
-            setNotesOpen(false);
-          }}
-          internal={<>{/* TAREA INTERNA */}
-          <TouchableOpacity
-            onPress={() => {
-              const text = quickNoteText.trim();
-              const detail = quickNoteDetail.trim();
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-              setQuickNoteText("");
-              setQuickNoteDetail("");
-              startGoNoteTask("NOTA_INTERNA", text, detail);
-            }}
-            disabled={noteVoice.status !== "idle"}
-            activeOpacity={0.82}
-            style={{
-              flex: 1, minHeight: 44,
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 5,
-              paddingHorizontal: 9,
-              paddingVertical: 10,
-              borderRadius: 12,
-              backgroundColor: "rgba(74,128,189,0.12)",
-              borderWidth: 1.5,
-              borderColor: "#4A80BD",
-              shadowColor: "#4A80BD",
-              shadowOpacity: 0.28,
-              shadowRadius: 6,
-            }}
-          >
-            <Feather name="edit-2" size={12} color="#60a5fa" />
-            <Text style={{ color: "#60a5fa", fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>
-              {t('tasks_internal_short').toUpperCase()}
-            </Text>
-          </TouchableOpacity></>}
-          external={<>{/* TAREA EXTERNA */}
-          <TouchableOpacity
-            onPress={() => {
-              const text = quickNoteText.trim();
-              const detail = quickNoteDetail.trim();
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-              setQuickNoteText("");
-              setQuickNoteDetail("");
-              startGoNoteTask("NOTA_EXTERNA", text, detail);
-            }}
-            disabled={noteVoice.status !== "idle"}
-            activeOpacity={0.82}
-            style={{
-              flex: 1, minHeight: 44,
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 5,
-              paddingHorizontal: 9,
-              paddingVertical: 10,
-              borderRadius: 12,
-              backgroundColor: "rgba(251,146,60,0.12)",
-              borderWidth: 1.5,
-              borderColor: "#fb923c",
-              shadowColor: "#fb923c",
-              shadowOpacity: 0.28,
-              shadowRadius: 6,
-            }}
-          >
-            <Feather name="edit-2" size={12} color="#fb923c" />
-            <Text style={{ color: "#fb923c", fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>
-              {t('tasks_external_short').toUpperCase()}
-            </Text>
-          </TouchableOpacity></>}
-          microphone={<>{/* MICRÓFONO — dictado al último campo de escritura seleccionado */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.impactAsync(
-                notaAudioRecording
-                  ? Haptics.ImpactFeedbackStyle.Medium
-                  : Haptics.ImpactFeedbackStyle.Light
-              ).catch(() => {});
-              toggleNotaRecording();
-            }}
-            disabled={noteVoice.status === "preparing" || noteVoice.status === "transcribing"}
-            activeOpacity={0.8}
-            accessibilityLabel={notaAudioRecording ? t('tasks_stop_recording') : (noteVoice.status === "transcribing") ? t('tasks_record_again') : t('tasks_record_audio')}
-            hitSlop={2}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: notaAudioRecording
-                ? "rgba(239,68,68,0.18)"
-                : (noteVoice.status === "transcribing")
-                ? "rgba(96,165,250,0.14)"
-                : "#0e0e10",
-              borderWidth: 1.5,
-              borderColor: notaAudioRecording
-                ? "#ef4444"
-                : (noteVoice.status === "transcribing")
-                ? "rgba(96,165,250,0.70)"
-                : "rgba(255,255,255,0.22)",
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: notaAudioRecording ? "#ef4444" : "#ffffff",
-              shadowOpacity: notaAudioRecording ? 0.45 : 0.07,
-              shadowRadius: notaAudioRecording ? 10 : 8,
-            }}
-          >
-            <Feather
-              name={notaAudioRecording ? "mic-off" : "mic"}
-              size={16}
-              color={
-                notaAudioRecording
-                  ? "#ef4444"
-                  : (noteVoice.status === "transcribing")
-                  ? "#60a5fa"
-                  : "rgba(255,255,255,0.70)"
-              }
-            />
-          </TouchableOpacity></>}
-          reminder={<>{/* BOTÓN ALARMA — toggle recordatorio en la nota */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.selectionAsync().catch(() => {});
-              setNoteReminderPickerOpen(open => !open);
-            }}
-            activeOpacity={0.8}
-            accessibilityLabel={quickNoteAlarm ? noteReminderLabel(quickNoteReminderMinutes!, lang === "en") : t('tasks_enable_reminder')}
-            accessibilityState={{ expanded: noteReminderPickerOpen }}
-            hitSlop={2}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: quickNoteAlarm ? "rgba(251,191,36,0.18)" : "#0e0e10",
-              borderWidth: 1.5,
-              borderColor: quickNoteAlarm ? "#fbbf24" : "rgba(255,255,255,0.22)",
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: quickNoteAlarm ? "#fbbf24" : "#ffffff",
-              shadowOpacity: quickNoteAlarm ? 0.35 : 0.07,
-              shadowRadius: 8,
-            }}
-          >
-            <Feather name="bell" size={16} color={quickNoteAlarm ? "#fbbf24" : "rgba(255,255,255,0.70)"} />
-          </TouchableOpacity></>}
-        />}
-        title={t("panel_note")}
-        subtitle={(() => {
-          const DAY3: Record<string, string> = { D:t('day_sun'), L:t('day_mon'), M:t('day_tue'), X:t('day_wed'), J:t('day_thu'), V:t('day_fri'), S:t('day_sat') };
-          const d = date ? date.replace(/^([DLMXJVS]) /, (_: string, l: string) => (DAY3[l] || l) + " ") : "";
-          return [d, time].filter(Boolean).join("  ·  ") || undefined;
-        })()}
-        paddingBottom={paddingBottom + 20}
-        compact
-        dragToClose
-        rightZoneClose
-        onPanelHeightChange={setOverlayPanelHeight}
-      >
-        {/* El gesto real está en el BottomSheet (rightZoneGesture RNGH).
-            Este View solo sirve para posicionar el degradado visual. */}
-        <View style={{ position: "relative" }}>
-
-          {/* GUÍA VISUAL — degradado blanco sutil en el borde derecho */}
-          <LinearGradient
-            colors={["transparent", "rgba(255,255,255,0.18)"]}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            pointerEvents="none"
-            style={{
-              position: "absolute",
-              right: 0,
-              top: 0,
-              bottom: 0,
-              width: "40%",
-              zIndex: 0,
-            }}
-          />
-
-          {/* Etiqueta TÍTULO */}
-          <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.4, marginBottom: 5, marginLeft: 2 }}>
-            {t('board_title_label').toUpperCase()}
-          </Text>
-
-          {/* TÍTULO OPERATIVO — una sola línea, nunca crece */}
-          <TextInput
-            ref={quickNoteTitleRef}
-            value={quickNoteText}
-            onFocus={() => noteVoice.focus("title")}
-            onChangeText={setQuickNoteText}
-            placeholder={t('placeholder_task_title_quick')}
-            placeholderTextColor="rgba(255,255,255,0.40)"
-            returnKeyType="next"
-            maxLength={16}
-            numberOfLines={1}
-            multiline={false}
-            style={{
-              color: "#ffffff",
-              fontSize: 15,
-              fontWeight: "700",
-              paddingHorizontal: 14,
-              paddingVertical: 12,
-              borderRadius: 12,
-              backgroundColor: "#1a1a1c",
-              borderWidth: 1.5,
-              borderColor: quickNoteText.trim()
-                ? "rgba(96,165,250,0.55)"
-                : "rgba(255,255,255,0.18)",
-              marginBottom: 10,
-            }}
-          />
-
-          {/* Etiqueta TAREA INTERNA */}
-          <Text style={{ color: "rgba(255,255,255,0.38)", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.4, marginBottom: 5, marginLeft: 2 }}>
-            {t('label_task_internal').toUpperCase()}
-          </Text>
-
-          {/* TAREA INTERNA — multilinea opcional */}
-          <TextInput
-            value={quickNoteDetail}
-            onFocus={() => noteVoice.focus("detail")}
-            onChangeText={setQuickNoteDetail}
-            placeholder={t('placeholder_task_details')}
-            placeholderTextColor="rgba(255,255,255,0.55)"
-            multiline
-            style={{
-              color: "#ffffff",
-              fontSize: 13,
-              paddingHorizontal: 14,
-              paddingVertical: 10,
-              borderRadius: 12,
-              backgroundColor: "#1a1a1c",
-              borderWidth: 1.5,
-              borderColor: quickNoteDetail.trim()
-                ? "rgba(167,139,250,0.70)"
-                : "rgba(255,255,255,0.28)",
-              minHeight: 52,
-              maxHeight: 110,
-              textAlignVertical: "top",
-              marginBottom: 12,
-            }}
-          />
-
-
-          {noteVoice.status !== "idle" && <Text testID="note-dictation-status" accessibilityLiveRegion="polite" style={{ color: notaAudioRecording ? "#ef4444" : "#ffffff", fontSize: 12, marginTop: 8 }}>
-            {notaAudioRecording ? (lang === "en" ? "Listening… Tap the microphone to finish." : "Escuchando… Pulsa el micrófono para terminar.")
-              : noteVoice.status === "preparing" ? (lang === "en" ? "Preparing microphone…" : "Preparando micrófono…")
-              : (lang === "en" ? "Transcribing…" : "Transcribiendo…")}
-          </Text>}
-          {!!(noteVoice.error || noteVoice.notice) && <Text testID="note-dictation-error" accessibilityLiveRegion="polite" style={{ color: "#fbbf24", fontSize: 12, marginTop: 8 }}>
-            {noteVoice.notice || (lang === "en" ? "Dictation is unavailable. Check microphone permission and the connection, or type your note." : noteVoice.error)}
-          </Text>}
-          {noteReminderPickerOpen && <GoNoteReminderPicker value={quickNoteReminderMinutes} english={lang === "en"} busy={noteReminderBusy}
-            dateISO={dateISO} time={time} onChange={minutes => { void changeQuickNoteReminder(minutes); }} />}
-
-        </View>{/* fin wrapper gestual */}
-      </BottomSheet>
+      {!calOpen && renderUnifiedNoteEditor()}
 
       {/* LISTADO GLOBAL — vista de todos los GO */}
       <BottomSheet
@@ -26533,6 +26277,21 @@ function HomeScreenContent() {
     </>
   );
 
+  function renderUnifiedNoteEditor(){
+    const scope=noteIdentity.scope;
+    return <GoNoteEditor visible={notesOpen} initial={unifiedNoteInitial} handedness={handedness} ready={noteIdentity.ready} scope={scope}
+      cached={unifiedNoteCache.current?.scope===JSON.stringify(scope)?unifiedNoteCache.current.draft:undefined}
+      seed={{...unifiedNoteSeed,title:quickNoteText,content:quickNoteDetail}}
+      onClose={state=>{unifiedNoteCache.current=state&&!state.saved?{scope:JSON.stringify(scope),draft:state.draft}:null;setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}
+      onSave={async draft=>{
+        const identity=noteIdentityRef.current;
+        if(!identity.ready||!identity.scope)throw new Error("No se puede verificar tu cuenta. La nota permanece en el editor.");
+        const expected={...identity.scope};
+        const result=await saveUnifiedNote(draft,expected,()=>noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===expected.userId&&noteIdentityRef.current.scope.context===expected.context);
+        setQuickNoteText("");setQuickNoteDetail("");await AsyncStorage.removeItem("go_task_draft_v1").catch(()=>{});
+        return result;
+      }}/ >;
+  }
   // Reuse the same task form inside Calendar or in its original standalone modal.
   function renderFieldSelector(embedded: boolean) {
     const isNoteSelector = fieldSelectorKind === "NOTA_INTERNA" || fieldSelectorKind === "NOTA_EXTERNA";

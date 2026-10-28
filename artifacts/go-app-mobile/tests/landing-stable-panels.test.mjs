@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 import lifecycle from './helpers/react-lifecycle.cjs';
 const { React, createRoot, document, rn, evaluate, ts } = lifecycle;
 const policy = evaluate('components/landing/landingPanels.ts');
@@ -88,5 +89,8 @@ test('all actual Landing groups opt into the same viewport and reuse the existin
   for(const card of cards){const code=card.openingElement.getText(ast);for(const name of ['boundedHeight=','onOpen=','scrollKey='])assert.ok(code.includes(name));assert.ok(code.includes('setLandingDetailsId('));assert.ok(card.parent.openingElement.getText(ast).includes('CardPanRef.panHandlers'),'the existing horizontal recognizer remains above the free-area press target');}
   const overlays=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='anyOverlayOpen').getText(ast);
   assert.ok(!overlays.includes('landingDetailsId'),'opening the full card leaves its Landing scroller mounted');
-  assert.ok(source.includes('onClose={() => setLandingDetailsId(null)}'));
+  const detail=nodes.find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='GoEntryDetailsSheet'&&n.openingElement.attributes.properties.some(p=>p.name?.getText(ast)==='closeRequested'));
+  const close=detail.openingElement.attributes.properties.find(p=>p.name?.getText(ast)==='onClose').initializer.expression;
+  const calls=[],ctx={noteEditAfterDetailsRef:{current:null},setNoteDetailCloseRequested:value=>calls.push(['request',value]),setLandingDetailsId:value=>calls.push(['detail',value]),openEntryChange:()=>assert.fail('ordinary close must not start editing')};
+  vm.runInNewContext(ts.transpileModule('globalThis.close='+close.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,ctx);ctx.close();assert.deepEqual(calls,[['request',false],['detail',null]]);
 });

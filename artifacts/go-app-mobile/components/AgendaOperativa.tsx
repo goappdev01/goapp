@@ -60,11 +60,14 @@ import { CalSizeKey, getCalColumnW, DEFAULT_GO_RENDER_PRESET } from "../constant
 import { trSector } from "@/data/goSectorTranslations";
 import { reservationCardPolicy } from "@/data/reservationCardPolicy";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "./GoEntryDetails";
+import { GoNoteArchiveColumn } from "./notes/GoNoteArchiveColumn";
 import { entryHeading, entryIdentity, entryIsReservation } from "@/data/goEntryPresentation";
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { GoCalendarViewSelector } from "./ui/GoCalendarViewSelector";
 
 export type GoEntry = {
+  note?: import("@/lib/unifiedNotes").NoteDocument;
+  goNoteReminder?: boolean;
   taskContext?: string;
   actionContext?: string;
   startDatetime?: string;
@@ -278,6 +281,7 @@ type Column = {
   isRetrasados?: boolean;
   isCustom?: boolean;
   isEliminados?: boolean;
+  isNotes?: boolean;
 };
 
 export type CalDayNightMode = "claro" | "oscuro" | "mixto";
@@ -298,6 +302,9 @@ export type AgendaBoardProps = {
     setSelectionMode: React.Dispatch<React.SetStateAction<boolean>>;
   };
   goLog: GoEntry[];
+  archiveNotes?: GoEntry[];
+  onOpenNote?: (entry:GoEntry)=>void;
+  onMoveNote?: (entry:GoEntry,destination:import("@/lib/unifiedNotes").NoteDestination)=>void;
   selectedDateISO?: string;
   bookingProfessionalId?: string;
   sortOrder?: "asc" | "desc";
@@ -587,12 +594,14 @@ const MONTH_NAMES_ES = [
 ];
 
 function isOverdue(g: GoEntry): boolean {
+  if(g.note?.version===1 && g.note.destination==="archive")return false;
   if (g.deleted || g.estado === "rechazado" || g.localResolutionStatus === "done") return false;
   if (g.localResolutionStatus === "pending") return true;
   return !g.dateISO && g.estado === "pendiente";
 }
 
 function isInDay(g: GoEntry, dateISO: string): boolean {
+  if(g.note?.version===1 && g.note.destination!=="calendar")return false;
   if (g.deleted || g.estado === "rechazado") return false;
   if (g.dateISO === dateISO) return true;
   return false;
@@ -685,6 +694,9 @@ function resolveEstado(
 export function AgendaBoard({
   selection,
   goLog: calendarEntries,
+  archiveNotes,
+  onOpenNote,
+  onMoveNote,
   selectedDateISO,
   bookingProfessionalId,
   sortOrder = "asc",
@@ -727,6 +739,10 @@ export function AgendaBoard({
   onGoToLanding,
 }: AgendaBoardProps) {
   const goLog = useGoCalendarEntries(calendarEntries);
+  const [notesExpanded,setNotesExpanded]=useState(false);
+  const noteDayFocus=useRef({key:"",done:false});
+  const noteDayFocusKey=viewMode+":"+selectedDateISO;
+  if(noteDayFocus.current.key!==noteDayFocusKey)noteDayFocus.current={key:noteDayFocusKey,done:false};
   const currentEntriesRef=useRef(goLog);currentEntriesRef.current=goLog;
   const allowedEntryIdsRef = useRef(new Set<string>());
   allowedEntryIdsRef.current = new Set(goLog.map(entry => entry.id));
@@ -894,7 +910,7 @@ export function AgendaBoard({
     return { id: iso, dateISO: iso, label } as Column;
   }, [viewMode, selectedDateISO, dayColumns, lang]);
 
-  const allColumns = useMemo(() => {
+  const baseColumns = useMemo(() => {
     if (viewMode === "mes_lineal") {
       // Insert PENDIENTES column just before today so it stays close to HOY
       const pendientesCol: Column = { id: "retrasados", label: t("col_pendientes"), isRetrasados: true };
@@ -909,6 +925,13 @@ export function AgendaBoard({
     if (viewMode === "dia" && diaColumn) return [diaColumn];
     return dayColumns;
   }, [viewMode, monthColumns, dayColumns, diaColumn, todayISO]);
+  const allColumns=useMemo(()=>{
+    if(!onOpenNote)return baseColumns;
+    const columns=viewMode==="dia"?[{id:"retrasados",label:t("col_pendientes"),isRetrasados:true},...baseColumns]:[...baseColumns];
+    const index=columns.findIndex(col=>col.isRetrasados);
+    columns.splice(Math.max(0,index),0,{id:"notes",label:"NOTAS",isNotes:true});
+    return columns;
+  },[baseColumns,onOpenNote,viewMode,lang]);
 
   // ── Pulse animation for RETRASADOS dot ──────────────────────────
   const pulseAnim = useRef(new Animated.Value(0)).current;
@@ -2030,6 +2053,11 @@ export function AgendaBoard({
 
   // ── COLUMN ───────────────────────────────────────────────────────
   const renderColumn = (col: Column) => {
+    if(col.isNotes&&onOpenNote)return <View key={col.id} style={[s.column,{width:notesExpanded?columnW:52}]}
+      onLayout={event=>{colLayouts.current[col.id]={x:event.nativeEvent.layout.x,w:event.nativeEvent.layout.width};queueBookingFocus();}}>
+      <GoNoteArchiveColumn entries={archiveNotes||[]} expanded={notesExpanded} onOpen={onOpenNote} onMove={onMoveNote}
+        onToggle={()=>{setNotesExpanded(value=>!value);scrollViewRef.current?.scrollTo({x:Math.max(0,(colLayouts.current[col.id]?.x||0)-12),animated:true});}}/>
+    </View>;
     const items = col.isRetrasados
       ? retrasadoItems
       : col.isEliminados
@@ -2076,6 +2104,7 @@ export function AgendaBoard({
             x: e.nativeEvent.layout.x,
             w: e.nativeEvent.layout.width,
           };
+          if(onOpenNote&&viewMode==="dia"&&col.dateISO&&!noteDayFocus.current.done){noteDayFocus.current.done=true;scrollViewRef.current?.scrollTo({x:Math.max(0,e.nativeEvent.layout.x-12),animated:false});}
           queueBookingFocus();
         }}
         style={[
@@ -2589,7 +2618,7 @@ export function AgendaBoard({
           pointerEvents none: puramente visual, no interfiere con gestos. */}
       {viewMode === "mes_lineal" && (() => {
         const totalCols = allColumns.length;
-        const totalContentW = totalCols * (columnW + colGap);
+        const totalContentW = allColumns.reduce((sum,col)=>sum+(col.isNotes&&!notesExpanded?52:columnW)+colGap,0);
         const maxScrollX = Math.max(1, totalContentW - screenW);
         const BAR_W = 72;
         const thumbW = Math.max(10, Math.round((screenW / Math.max(screenW + 1, totalContentW)) * BAR_W));

@@ -53,15 +53,15 @@ export function fixture({ now } = {}) {
     PanResponder: actualResponder,
     Animated: { Value, View: 'Animated.View', timing: () => animation, spring: () => animation, sequence: () => animation, loop: () => animation, delay: () => animation },
   }, { get: (target, key) => target[key] ?? key });
-  const chain = new Proxy({}, { get: () => () => chain });
+  const gestureChain = () => { const values={};const chain=new Proxy(values,{get:(target,key)=>key in target?target[key]:(...args)=>{target['_'+String(key)]=args[0];return chain;}});return chain; };
   const mocks = {
     react: { ...react, default: react },
     'react-native': native,
     '@/components/debug/OwnerContextIndicator': { OwnerContextModal: 'Modal' },
     '@expo/vector-icons': { Feather: 'Feather' },
-    'expo-haptics': { selectionAsync: async () => {}, impactAsync: async () => {}, ImpactFeedbackStyle: { Light: 'light' } },
+    'expo-haptics': { selectionAsync: async () => {}, impactAsync: async () => {}, notificationAsync:async()=>{},NotificationFeedbackType:{Success:'success'}, ImpactFeedbackStyle: { Light: 'light' } },
     '@react-native-async-storage/async-storage': { default: { getItem: async () => null, setItem: async () => {} } },
-    'react-native-gesture-handler': { Gesture: { Tap: () => chain, Pan: () => chain, Race: () => chain, Simultaneous: () => chain }, GestureDetector: 'GestureDetector', ScrollView: 'GHScrollView', LegacyScrollView: 'GHScrollView' },
+    'react-native-gesture-handler': { Gesture: { Tap: gestureChain, Pan: gestureChain, Race: (...gestures) => ({gestures}), Simultaneous: (...gestures) => ({gestures}) }, GestureDetector: 'GestureDetector', ScrollView: 'GHScrollView', LegacyScrollView: 'GHScrollView' },
     'react-native-reanimated': { default: { View: 'ReAnimated.View' }, useSharedValue: value => react.useRef({ value }).current, useAnimatedStyle: fn => fn(), withSpring: value => value, withTiming: value => value, runOnJS: fn => fn, interpolateColor: () => '#000' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, right: 0, left: 0, bottom: 0 }) },
     '@/hooks/useGoLog': { useGoLog: () => react.useState([]) },

@@ -169,15 +169,15 @@ test('the existing title limit is preserved, with a visible full dictation notic
 
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),nodes=[];
 function visit(n){nodes.push(n);ts.forEachChild(n,visit)}visit(ast);
-test('keyboard scrolling is opt-in for Nota only; normal closed-keyboard layout, other sheets and Landing remain untouched',()=>{
+test('Nota has one full-screen editor; existing non-note sheets retain their keyboard and gesture defaults',()=>{
   const opted=nodes.filter(n=>(ts.isJsxOpeningElement(n)||ts.isJsxSelfClosingElement(n))&&n.attributes?.properties.some(p=>p.name?.getText(ast)==='noteKeyboardScroll'));
-  assert.equal(opted.length,1);assert.equal(opted[0].tagName.getText(ast),'BottomSheet');
-  assert.equal(opted[0].attributes.properties.find(p=>p.name?.getText(ast)==='visible').initializer.expression.getText(ast),'notesOpen');
+  assert.equal(opted.length,0,'the retired sheet must not coexist with the new editor');
+  const editors=nodes.filter(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='GoNoteEditor');assert.equal(editors.length,1);
+  assert.equal(editors[0].attributes.properties.find(p=>p.name?.getText(ast)==='visible').initializer.expression.getText(ast),'notesOpen');
   assert.ok(source.includes('compact && !noteKeyboardScroll ?'));assert.ok(source.includes('noteFooterHeight + effectivePaddingBottom + 26 : 16'));
   assert.ok(source.includes('noteKeyboardScroll && kbVisible'),'right-edge close pan cannot steal note scrolling while keyboard is open');
-  assert.ok(source.includes('onFocus={() => noteVoice.focus("title")}'));assert.ok(source.includes('onFocus={() => noteVoice.focus("detail")}'));
-  assert.ok(source.includes('note-dictation-status'));assert.ok(source.includes('note-dictation-error'));
-  assert.ok(source.includes('changeQuickNoteReminder(minutes)'));assert.ok(!source.includes('onSelectNote={setNoteReminderTargetId}'));
+  const editor=fs.readFileSync('components/notes/GoNoteEditor.tsx','utf8');assert.ok(editor.includes('voice.focus("title")'));assert.ok(editor.includes('voice.focus("detail")'));
+  assert.ok(editor.includes('voice.error||voice.notice'));assert.ok(editor.includes('<GoNoteReminderPicker'));assert.ok(!source.includes('onSelectNote={setNoteReminderTargetId}'));
 });
 
 const jsxNodes=tree=>Array.isArray(tree)?tree.flatMap(jsxNodes):React.isValidElement(tree)?[tree,...jsxNodes(tree.props.children)]:[];
