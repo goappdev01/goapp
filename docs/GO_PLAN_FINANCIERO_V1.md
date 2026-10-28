@@ -204,3 +204,13 @@ Referencias técnicas: [orientación por pantalla en Expo Router](https://docs.e
 ## Importes compactos y totales verdes · 28/10/2026
 
 La calculadora muestra euros enteros mediante redondeo exclusivamente visual: las entradas, cálculos y valores guardados conservan los céntimos. Las columnas Ingresos/mes (€) e Ingresos/año (€) se estrechan y los importes mantienen el símbolo en la misma línea. Los resultados y totales se destacan en verde. Se retira el contador técnico de combinaciones y las etiquetas parcial; cuando faltan entradas, el encabezado dice Total calculado en vez de presentar el subtotal como un total general completo. Los campos desconocidos siguen mostrando Sin dato. Se verifican los importes de las capturas con datos sintéticos, 16 pruebas pertinentes, typecheck móvil y revisión visual a tamaño de iPhone; no se modifica el motor ni la persistencia.
+
+## Empresas enteras y aplicación conjunta por países · 28/10/2026
+
+La calculadora redondea las empresas captadas al entero más próximo, con 0,5 hacia arriba, antes de calcular facturación. El adaptador entrega esa cantidad al motor existente; no cambia las estadísticas originales, fórmulas compartidas, permisos ni backend. Casos sintéticos: 46086 × 5 % → 2304 empresas; con EUR29 → EUR66816/mes y EUR801792/año; con EUR30 → EUR69120/mes; al pasar al 6 % → 2765 empresas y EUR82950/mes. Los datos desconocidos permanecen como Sin dato.
+
+La edición conserva el texto mientras el campo está enfocado y recoge el texto final nativo. CALCULAR recoge las últimas entradas y reutiliza la cola de guardado versionada, que protege ediciones realizadas durante una petición anterior. Las columnas de captación y cuota se compactan y amplían según su contenido; los bordes editables ganan contraste y CALCULAR se alinea con los selectores en horizontal.
+
+El selector de países permite uno, varios, todos o ninguno, en la misma pantalla. Con varios seleccionados aparecen captación y cuota conjuntas con una única acción Aplicar a seleccionados. Un campo vacío conserva el parámetro; cero sigue siendo un valor válido. Se aplica solo a los países elegidos y a la actividad filtrada, o a las cinco actividades si no hay filtro. La acción es una sola modificación persistida y no altera países ajenos, mercados, costes ni escenarios internos distintos de REAL.
+
+Validación: 23 pruebas de cálculo, redondeo, edición, guardado y reapertura, guardados en curso, permisos, aislamiento, selección múltiple, aplicación conjunta atómica y presentación; typecheck móvil y git diff --check. Revisión visual aislada con datos sintéticos en 390×844 y 844×390 y bundle iOS actualizado HTTP 200 desde Metro 8088 / Expo 58. La comprobación física final de giro, teclado y uso en iPhone corresponde al propietario.
