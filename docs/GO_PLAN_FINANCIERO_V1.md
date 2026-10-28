@@ -184,3 +184,18 @@ FinancialAdvancedScreen conserva la implementación anterior internamente, sin r
 Validación: 11 pruebas nuevas de cálculo, desconocidos/cero, totales, independencia de escenarios y cola de guardado; 31 regresiones existentes de permisos, cliente, importador y programación interna. Caso sintético obligatorio: 100000 empresas, 1 %, EUR10 = 1000 captadas, EUR10000 mensuales y EUR120000 anuales. Typecheck móvil y bundle iOS de Expo 58 / Metro 8088 correctos. La prueba visual aislada utiliza exclusivamente datos SYNTHETIC y demuestra el recálculo inmediato al escribir. No sustituye la comprobación física del teclado y el desplazamiento en iPhone.
 
 La comprobación de solo lectura contra el documento local guardado confirma 100 filas de presentación (20 × 5), 58 cantidades recuperadas y 42 mercados ausentes. Las 20 cifras de Peluquerías ya estaban marcadas CONFLICTO: se muestran como «En revisión» y se excluyen del cálculo, conservando el bloqueo de calidad anterior. Las primeras tres columnas caben completas en el ancho inicial del iPhone; el resto utiliza desplazamiento horizontal. Ninguna cantidad de mercado se ha modificado durante esta tarea.
+
+
+## Corrección de cálculo y presentación sobre Notas Unificadas · 28/10/2026
+
+Se conservan los ocho borradores originales en una copia externa con SHA-256 y parche. MAIN avanza de 5183dae a 715e672 por fast-forward; los 21 archivos de Notas se mantienen sin modificaciones adicionales.
+
+CALCULAR, en verde, vuelve a evaluar las entradas actuales, conserva el recálculo automático y solicita guardar los cambios por la cola existente. Cada fila se calcula independientemente: una actividad sin datos o con una entrada inválida no bloquea las demás. Las cantidades conocidas marcadas CONFLICTO se pueden utilizar como hipótesis numérica en esta calculadora, manteniendo «En revisión» y la marca original; no se convierten en estadísticas verificadas ni se cambian los datos de mercado. Los mercados ausentes continúan como «Sin dato», incluidos los totales parciales. El motor compartido y las protecciones backend permanecen intactos.
+
+Se elimina la línea superior Guardado. Las columnas ajustan anchuras al ancho real, mantienen números grandes y usan desplazamiento horizontal. La capacidad de orientación de la aplicación pasa a default; el Stack mantiene portrait para todas las pantallas. Solo mientras Finanzas está montada solicita orientation=all y su modal admite ambos horizontales. Al salir, cerrar el modal o perder acceso, se restaura portrait. Se reutilizan Expo Router y react-native-screens incluidos en Expo 58; no se añaden dependencias nativas.
+
+Se retira Cambiar contexto de las cabeceras de Administrador y Empresa. La misma acción, callback y control de propietario se mantienen dentro del contenido de Configuración de GO Empresa, tanto al seleccionar actividad como en los pasos. El acceso de Perfil y el selector existente no se modifican.
+
+Validación proporcionada: 38 pruebas de cálculo, botón, guardado, aislamiento, permisos, contexto, cierre del modal y ciclo de orientación. Typecheck móvil e integración iOS sobre MAIN actualizado. Revisión visual aislada con datos sintéticos en 390×844 y 844×390, incluido el caso 100000 × 1 % × EUR10 = EUR10000 mensuales / EUR120000 anuales. La revisión de tamaños no equivale a una prueba de giro físico; esa comprobación final corresponde al propietario en su iPhone.
+
+Referencias técnicas: [orientación por pantalla en Expo Router](https://docs.expo.dev/versions/latest/sdk/screen-orientation/#per-screen-orientation-with-expo-router) y [orientaciones admitidas por Modal](https://reactnative.dev/docs/modal#supportedorientations).

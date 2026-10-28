@@ -398,15 +398,10 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
     {selectedPosition + 1} / {registeredCompanies.length}{registeredCompanies.length > 1 ? (lang === "en" ? " · swipe to change" : " · desliza para cambiar") : ""}
   </Text> : null;
   const companyButton = onOpenCompanies ? <TouchableOpacity testID="config-company-list" accessibilityRole="button"
-    disabled={openingCompanies} onPress={() => void openCompanies()} style={[{ paddingHorizontal: 18, paddingVertical: 10 }, contextNavigation ? { flex: 1, minWidth: 0 } : undefined]}>
+    disabled={openingCompanies} onPress={() => void openCompanies()} style={{ paddingHorizontal: 18, paddingVertical: 10 }}>
     <Text style={{ color: BLUE, fontWeight: "700" }}>{lang === "en" ? "My businesses" : "Mis negocios"} ▾</Text>
   </TouchableOpacity> : null;
-  const companyNavigation = contextNavigation ? (
-    <View style={{ flexDirection: "row", alignItems: "center" }}>
-      {companyButton}
-      {contextNavigation}
-    </View>
-  ) : companyButton;
+  const companyNavigation = companyButton;
 
   const currentSector = SECTORS.find(s => s.id === config.sectorId) ?? null;
   const currentSub    = currentSector?.subs.find(s => s.id === config.subId) ?? null;
@@ -577,6 +572,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
             }}
             onSubConfirmed={() => { setCurrentStep(Math.min(Math.max(initialStep, 0), STEPS.length - 1)); setPhase("steps"); }}
           />
+          {contextNavigation && <View testID="config-context-management">{contextNavigation}</View>}
         </ScrollView>
 
         {/* Footer — solo Cancelar; Continuar es automático al tocar la actividad */}
@@ -699,6 +695,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
               />
             )}
           </View>
+          {contextNavigation && <View testID="config-context-management">{contextNavigation}</View>}
           </View>
         </ScrollView>
       </Animated.View>

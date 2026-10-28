@@ -567,7 +567,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
 
   if (previewReadOnly && !isBusinessPreview) return null;
   const contextNavigation = isOwner && onOpenContext ? (
-    <TouchableOpacity onPress={() => { if (demo) clearLocationReturn(); onOpenContext(); }} accessibilityLabel={t("context_change")} style={[{ paddingHorizontal: 18, paddingVertical: 8 }, demo && modulo === "empresa_config" ? { flex: 1, minWidth: 0 } : { alignSelf: "flex-end" }]}>
+    <TouchableOpacity onPress={() => { if (demo) clearLocationReturn(); onOpenContext(); }} accessibilityLabel={t("context_change")} style={{ paddingHorizontal: 18, paddingVertical: 12, alignSelf: "flex-start" }}>
       <Text style={[{ color: "#4A80BD", fontWeight: "700" }, demo && modulo === "empresa_config" ? { textAlign: "right" } : undefined]}>{t("context_change")}</Text>
     </TouchableOpacity>
   ) : null;
@@ -590,7 +590,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
         </View>
 
         {preview && !demo && <Text style={[s.headerSub, { textAlign: "center", color: "#4A80BD", fontWeight: "700" }]}>{t("biz_preview_title")}</Text>}
-        {!(demo && modulo === "empresa_config") && contextNavigation}
+
 
         {demo && modulo === "home" && <DemoCompanyManager open={demoManagerOpen} onOpenChange={setDemoManagerOpen} onOpenConfiguration={openDemoConfiguration} />}
 
@@ -1028,7 +1028,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             {modulo === "orbitas"         && <OrbitasScreen     guidanceLevel={guidanceLevel} />}
             {modulo === "consumo"         && <ConsumoScreen     guidanceLevel={guidanceLevel} />}
             {modulo === "zonas"           && <ZonasScreen       guidanceLevel={guidanceLevel} />}
-            {modulo === "empresa_config"   && <EmpresaConfigScreen onManageCalendarConflicts={dateISO => { setExceptionCalendarDate(dateISO); goToModulo("reservas_config"); }} key={`ec-${businessDemo?.businessId ?? "live"}-${newEmpresaKey}`} keyboardManagedByParent startAtSteps={demo && openSelectedConfig} onOpenCompanies={demo ? openDemoBusinesses : undefined} contextNavigation={demo ? contextNavigation : undefined} onBack={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} onFinalizarConfig={() => { goHome(); if (previewReadOnly) return; if (onFinalizarWizard) { onFinalizarWizard(); } else { setActivacionVisible(true); } }} initialStep={configInitialStep} goPrevRef={modulePrevRef} />}
+            {modulo === "empresa_config"   && <EmpresaConfigScreen onManageCalendarConflicts={dateISO => { setExceptionCalendarDate(dateISO); goToModulo("reservas_config"); }} key={`ec-${businessDemo?.businessId ?? "live"}-${newEmpresaKey}`} keyboardManagedByParent startAtSteps={demo && openSelectedConfig} onOpenCompanies={demo ? openDemoBusinesses : undefined} contextNavigation={contextNavigation} onBack={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} onFinalizarConfig={() => { goHome(); if (previewReadOnly) return; if (onFinalizarWizard) { onFinalizarWizard(); } else { setActivacionVisible(true); } }} initialStep={configInitialStep} goPrevRef={modulePrevRef} />}
             {modulo === "reservas_config"  && (demo ? <GoReservasDemoScreen onClose={goHome} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} onProposeBookingChange={onProposeBookingChange} navigateToDayISO={exceptionCalendarDate ?? bookingChangeReturnDate} hideFAB={true} /> : <GoReservasConfigScreen onClose={goHome} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} onProposeBookingChange={onProposeBookingChange} navigateToDayISO={exceptionCalendarDate ?? bookingChangeReturnDate} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} hideFAB={true} />)}
             {modulo === "deportes_screen"  && <GoDeportesScreen onClose={goHome} onOpenBooking={(_id, _label, _emoji, _color) => { goToModulo("reservas_config"); }} onOpenVerificacion={onOpenVerificacion} />}
 

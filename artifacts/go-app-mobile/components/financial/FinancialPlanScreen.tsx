@@ -1,5 +1,6 @@
 import React,{useEffect,useMemo,useState} from "react";
 import {ActivityIndicator,ScrollView,Text,View} from "react-native";
+import {useNavigation} from "expo-router";
 import {KeyboardAvoidingView} from "react-native-keyboard-controller";
 import {useAdminAccess} from "@/contexts/GoAdminAccessContext";
 import {onSessionChanged} from "@/lib/sessionEvents";
@@ -8,6 +9,8 @@ import {FinancialRevenueTable} from "./FinancialRevenueTable";
 import {FinanceButton,financeStyles as s} from "./FinancialUI";
 
 export function FinancialPlanScreen(){
+ const navigation=useNavigation();
+ useEffect(()=>{navigation.setOptions({orientation:"all"});return()=>navigation.setOptions({orientation:"portrait"});},[navigation]);
  const admin=useAdminAccess(),[epoch,setEpoch]=useState(0),[session,setSession]=useState<CalculatorSession|null>(null),[revision,setRevision]=useState(0),[error,setError]=useState("");
  useEffect(()=>onSessionChanged(()=>{setSession(null);setError("");setEpoch(v=>v+1);}),[]);
  useEffect(()=>{let active=true,off:(()=>void)|undefined,current:CalculatorSession|undefined;setSession(null);setError("");
@@ -16,12 +19,12 @@ export function FinancialPlanScreen(){
  },[admin.userId,admin.allowed,admin.checking,epoch]);
  const view=useMemo(()=>session?.snapshot(),[session,revision]);
  if(!admin.allowed||admin.checking)return <View style={s.root}/>;
- return <KeyboardAvoidingView behavior="height" style={{flex:1}}><ScrollView style={s.root} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+ return <KeyboardAvoidingView behavior="height" style={{flex:1}}><ScrollView style={s.root} contentContainerStyle={[s.content,{paddingTop:8,gap:10}]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
  {!view&&!error&&<ActivityIndicator accessibilityLabel="Abriendo calculadora"/>}
  {!!error&&<View><Text accessibilityRole="alert" style={s.error}>{error}</Text><FinanceButton label="Reintentar" onPress={()=>setEpoch(v=>v+1)}/></View>}
  {view&&<>
  {!!view.error&&<View><Text accessibilityRole="alert" style={s.error}>{view.error}</Text>{view.canWrite&&<FinanceButton label="Reintentar guardado" onPress={()=>{void session!.flush();}}/>}</View>}
- <Text accessibilityLiveRegion="polite" style={s.note}>{!view.canWrite?"Solo lectura":view.error?"Cambios sin guardar":view.saving||view.dirty?"Guardando cambios…":"Guardado"}</Text>
- <FinancialRevenueTable doc={view.doc} writable={view.canWrite} update={fn=>session!.change(fn)}/></>}
+ {!view.canWrite&&<Text style={s.note}>Solo lectura</Text>}
+ <FinancialRevenueTable doc={view.doc} onCalculate={()=>{void session!.flush();}} writable={view.canWrite} update={fn=>session!.change(fn)}/></>}
  </ScrollView></KeyboardAvoidingView>;
 }

@@ -724,7 +724,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
   if (!adminAccess.allowed || !goView.isAdminView) return null;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose} supportedOrientations={financialView && visible ? ["portrait", "landscape-left", "landscape-right"] : ["portrait"]}>
       <StatusBar style={financialView ? "dark" : "light"} />
       <SafeAreaView style={[s.root, financialView && { backgroundColor: "#FFFFFF" }]}>
 
@@ -734,12 +734,10 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
             <Feather name={financialView ? "pie-chart" : "shield"} size={14} color={financialView ? "#344D78" : "#ef4444"} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[s.title, financialView && { color: "#171B22", fontSize: 14 }]}>{headerTitle}</Text>
+            <Text style={[s.title, financialView && { color: "#171B22", fontSize: 16 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>{headerTitle}</Text>
             {!financialView && <Text style={s.subtitle}>{headerSub}</Text>}
           </View>
-          {goView.isOwner && onOpenContext && <TouchableOpacity onPress={onOpenContext} accessibilityRole="button" style={{ padding: 8 }}>
-            <Text style={{ color: financialView ? "#505A69" : "#FFFFFF", fontSize: 12 }}>Cambiar contexto</Text>
-          </TouchableOpacity>}
+
         </View>
 
         {/* ── Overview ── */}
@@ -773,7 +771,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         )}
 
         {/* ── Sub-sections ── */}
-        {section === "roadmap"     && (
+        {section === "roadmap" && (!financialView || visible) && (
           <GoRoadmapScreen
             navStack={roadmapStack}
             allowFinancialPlan

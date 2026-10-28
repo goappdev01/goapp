@@ -19,16 +19,16 @@ function screen({allowed=true,adminView=true,owner=true}={}){
  function* walk(n){if(!n||typeof n!=='object')return;yield n;for(const child of n.children||[])yield*walk(child);}
  function all(){render();return[...walk(tree)];}
  function button(label){const b=all().find(n=>n.props.accessibilityLabel===label);assert.ok(b,'Button '+label);return b;}
- return{render,all,button,tools:()=>tools,context:()=>context,closed:()=>closed};
+ return{render,all,button,setVisible:value=>{props.visible=value;},tools:()=>tools,context:()=>context,closed:()=>closed};
 }
 test('administrator opens with MODULES and exactly the existing cards in the approved order',()=>{
  const h=screen(),nodes=h.all(),scroll=nodes.find(n=>n.type==='ScrollView');assert.equal(scroll.children[0].type,'Text');assert.ok(scroll.children[0].children.includes('MÓDULOS'));
  const cards=nodes.filter(n=>n.props.accessibilityRole==='button'&&sections.includes(n.props.accessibilityLabel));assert.deepEqual(cards.map(n=>n.props.accessibilityLabel),sections);assert.ok(cards.every(n=>n.props.style.minHeight>=72&&n.props.style.borderRadius>=14));assert.equal(nodes.some(n=>n.type==='GoModulePublicationPanel'),false);assert.equal(nodes.filter(n=>n.type?.name==='MetricCard').length,0);
 });
-test('tools, Roadmap navigation and owner context preserve their original actions',()=>{
+test('tools and Roadmap preserve actions without a context shortcut in the header',()=>{
  const h=screen();h.button('Herramientas').props.onPress();assert.equal(h.tools(),1);assert.equal(h.all().some(n=>n.children?.includes('MÓDULOS')),true);
  h.button('Roadmap GO').props.onPress();const roadmap=h.all().find(n=>n.type==='GoRoadmapScreen');assert.ok(roadmap);assert.equal(roadmap.props.allowFinancialPlan,true);roadmap.props.setNavStack([{key:'plan_financiero_y_proyecciones',label:'Plan Financiero y Proyecciones'}]);h.button('Volver al paso anterior').props.onPress();assert.equal(h.all().find(n=>n.type==='GoRoadmapScreen').props.navStack.length,0);h.button('Volver al paso anterior').props.onPress();assert.ok(h.all().some(n=>n.children?.includes('MÓDULOS')));assert.equal(h.closed(),0);
- const context=h.all().find(n=>n.type==='TouchableOpacity'&&n.children.some(c=>c?.children?.includes('Cambiar contexto')));assert.ok(context);context.props.onPress();assert.equal(h.context(),1);
+ assert.equal(h.all().some(n=>n.children?.includes('Cambiar contexto')),false);
 });
 test('publication settings and existing revenue indicators remain inside System and Metrics',()=>{
  const h=screen();h.button('Sistema').props.onPress();assert.equal(h.all().filter(n=>n.type==='GoModulePublicationPanel').length,1);assert.ok(h.all().some(n=>n.type==='AdminScreen'));h.button('Volver al paso anterior').props.onPress();h.button('Métricas').props.onPress();assert.equal(h.all().filter(n=>n.type?.name==='MetricCard').length,4);assert.ok(h.all().some(n=>n.children?.includes('Ingreso total estimado')));assert.ok(h.all().some(n=>n.children?.includes('Partner más rentable')));
@@ -50,9 +50,13 @@ test('compact light header is exclusive to Finance and returns to the original A
  const finance=h.all();assert.equal(finance.filter(n=>n.type==='Text'&&n.children.includes('Proyección de ingresos GO')).length,1);
  assert.equal(finance.some(n=>n.type==='Text'&&n.children.includes('Plan Financiero y Proyecciones')),false);
  assert.equal(finance.find(n=>n.type==='StatusBar').props.style,'dark');
+ assert.deepEqual(Array.from(finance.find(n=>n.type==='Modal').props.supportedOrientations),['portrait','landscape-left','landscape-right']);
  assert.equal(finance.find(n=>n.type==='SafeAreaView').props.style[1].backgroundColor,'#FFFFFF');
  h.button('Volver al paso anterior').props.onPress();const roadmap=h.all();
  assert.equal(roadmap.find(n=>n.type==='StatusBar').props.style,'light');
+ assert.deepEqual(Array.from(roadmap.find(n=>n.type==='Modal').props.supportedOrientations),['portrait']);
  assert.equal(roadmap.some(n=>n.type==='Text'&&n.children.includes('Roadmap GO')),true);
  assert.equal(roadmap.find(n=>n.type==='SafeAreaView').props.style[1],false);
 });
+
+test('closing the financial modal unmounts its orientation scope immediately',()=>{const h=screen();h.button('Roadmap GO').props.onPress();h.all().find(n=>n.type==='GoRoadmapScreen').props.setNavStack([{key:'plan_financiero_y_proyecciones',label:'Plan Financiero y Proyecciones'}]);h.setVisible(false);assert.equal(h.all().some(n=>n.type==='GoRoadmapScreen'),false);assert.deepEqual(Array.from(h.all().find(n=>n.type==='Modal').props.supportedOrientations),['portrait']);});

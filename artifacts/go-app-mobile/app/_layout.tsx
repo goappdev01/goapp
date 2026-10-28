@@ -87,7 +87,7 @@ export default function RootLayout() {
                 <GestureHandlerRootView style={{ flex: 1 }}>
                   <KeyboardProvider>
                     <OwnerContextSurface>
-                    <Stack screenOptions={{ headerShown: false }}>
+                    <Stack screenOptions={{ headerShown: false, orientation: "portrait" }}>
                       <Stack.Screen name="index" />
                     </Stack>
                     </OwnerContextSurface>

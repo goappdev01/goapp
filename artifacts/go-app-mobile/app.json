@@ -3,7 +3,7 @@
     "name": "GO App",
     "slug": "go-app",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "go-app",
     "userInterfaceStyle": "dark",
