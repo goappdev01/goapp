@@ -149,3 +149,16 @@ No se incorpora otra IA ni se registra una herramienta que ejecute modificacione
 ## Estado de entrega
 
 Implementación recuperada del Agente 2 e integrada selectivamente en MAIN sobre f90fa60, sin incorporar borradores de voz, zona o recordatorios. Acceso aprobado mediante Administrador → Roadmap GO. Las pruebas y la activación local se documentan en development/go-finance-8088/README.md. No hay estadísticas empresariales reales, credenciales nuevas en cliente ni SQL aplicado a producción. La comprobación visual en iPhone se informa por separado y no se deduce del resultado automatizado.
+
+
+## Reestructuración de uso en iPhone · 28/10/2026
+
+La pantalla abre automáticamente los planes autorizados mediante la sesión vigente de GO. Los cambios de sesión, incluso para el mismo usuario, cancelan respuestas anteriores y revalidan el acceso sin otra contraseña ni un paso manual. Se eliminan los requisitos técnicos de motivo obligatorio e identificador manual de actividad; el motivo de auditoría sigue enviándose al backend y cada actividad conserva un identificador estable. El guardado utiliza la misma versión esperada y muestra una acción fija accesible junto al teclado. Un fallo de guardado conserva el borrador para reintentar.
+
+La navegación principal contiene Resumen, Países, Actividades, Escenarios, Proyecciones e Importar datos. El resumen presenta indicadores y gráfico anual SVG, derivados del motor existente. No conecta años incompletos ni convierte datos desconocidos en cero. Proyecciones conserva ingresos, costes, consolidación, detalle y todas las tablas originales. Datos/fuentes, historial/permisos, ajustes y metodología pasan a un segundo nivel. Las importaciones y los cambios de acceso mantienen su confirmación explícita.
+
+No se han modificado las fórmulas, contratos, SQL, rutas backend, permisos administrativos, Landing, Administrador general ni Roadmap en esta corrección. No se han instalado dependencias, cargado estadísticas reales ni tocado servicios alojados.
+
+Validación de esta corrección: 37 pruebas móviles (15 de interfaz/recorrido y gráficos, 10 de cliente/importación, 7 de permisos y 5 de Administrador) y 35 de motor, API, SQL y permisos backend. Incluyen un recorrido sintético de creación, actividad, país, hipótesis, tarifa, costes, guardado, reapertura y vista previa de importación sin aplicarla. Las pruebas SQL usan PostgreSQL embebido aislado. Typecheck móvil ordinario y bundle iOS de Metro 8088 con Expo 58 correctos. Ocho archivos protegidos del motor, SQL, backend y navegación conservan su SHA-256.
+
+Revisión visual adicional de los componentes reales en un marco de 390 × 844 mediante react-native-web, con datos exclusivamente sintéticos y API simulada sin acceso a servicios. Se han comprobado navegación, selección de países, botón fijo de guardado, indicadores, gráfico y estado vacío. Esta revisión no sustituye el teclado, la sesión, la persistencia y la ergonomía en el iPhone físico; la confirmación del propietario se registra por separado.

@@ -17,7 +17,7 @@ export async function financialApi<T>(path: string, userId: string, method = "GE
   } catch (error) {
     if (error instanceof BookingApiError) {
       if (error.status === 422) throw new Error("El archivo contiene datos incompatibles. Revísalo en la vista previa local antes de aplicar.");
-      const safe:Record<number,string>={400:"Revisa los datos y referencias de la operación financiera.",401:"Inicia sesión de nuevo para acceder al plan.",403:"No tienes autorización expresa para este plan.",404:"El servicio financiero todavía no está disponible en este entorno.",409:"El plan ha cambiado. Recarga y revisa antes de guardar o revertir.",503:"La persistencia financiera todavía no está instalada en este entorno."};
+      const safe:Record<number,string>={400:"Revisa los datos y referencias de la operación financiera.",401:"No se ha podido comprobar tu sesión actual de GO. Vuelve a intentarlo.",403:"No tienes autorización expresa para este plan.",404:"El servicio financiero todavía no está disponible en este entorno.",409:"El plan ha cambiado. Recarga y revisa antes de guardar o revertir.",503:"La persistencia financiera todavía no está instalada en este entorno."};
       throw new Error(safe[error.status]||"No se pudo verificar la operación financiera. Inténtalo de nuevo.");
     }
     throw new Error("No se pudo verificar la operación financiera. Comprueba tu sesión y conexión antes de volver a intentarlo.");
@@ -26,5 +26,7 @@ export async function financialApi<T>(path: string, userId: string, method = "GE
 export function parseFinancialPlan(value: FinancialPlan): FinancialPlan {
   if (!value || typeof value.id !== "string" || typeof value.ownerUserId !== "string" || !Number.isSafeInteger(value.version) || value.version < 1 || typeof value.canWrite !== "boolean")
     throw new Error("No se pudo verificar la respuesta del plan financiero.");
-  return { ...value, document: financialDocumentSchema.parse(value.document) };
+  const parsed=financialDocumentSchema.safeParse(value.document);
+  if(!parsed.success)throw new Error("No se pudieron comprobar los datos del plan. Vuelve a intentarlo.");
+  return { ...value, document: parsed.data };
 }

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 import { FINANCE_COUNTRY_CODES, FINANCE_SCENARIOS, EMPTY_ANNUAL, newFinancialAssumption, type FinancialDocument, type FinancialAssumption, type FinancialScenario } from "@workspace/api-zod";
 import { COUNTRY_CONFIGS } from "@/utils/countryConfig";
@@ -6,7 +6,7 @@ import { FinanceButton, FinanceField, FinanceNumber, financeStyles as s } from "
 export type FinancialEditProps={doc:FinancialDocument;update:(fn:(doc:FinancialDocument)=>FinancialDocument)=>void;writable:boolean;activityId:string;countryCode:string;scenario:FinancialScenario;year:number};
 export const financeId=(prefix:string)=>prefix+"_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,12);
 export function FinancialCountries({doc,update,writable,activityId,scenario}:FinancialEditProps){
- const [search,setSearch]=useState(""),[filter,setFilter]=useState("all"),[newName,setNewName]=useState(""),[newId,setNewId]=useState(""),[unit,setUnit]=useState<"empresa"|"establecimiento"|"otra">("empresa");
+ const [search,setSearch]=useState(""),[filter,setFilter]=useState("all");
  const names=useMemo(()=>{try{return new Intl.DisplayNames(["es"],{type:"region"});}catch{return null;}},[]);
  const countryName=(code:string)=>doc.countries.find(c=>c.code===code)?.name||names?.of(code)||code;
  const selected=new Set(doc.assumptions.filter(a=>a.activityId===activityId&&a.scenario===scenario&&a.selected).map(a=>a.countryCode));
@@ -20,18 +20,18 @@ export function FinancialCountries({doc,update,writable,activityId,scenario}:Fin
     else if(sc===scenario)assumptions[index]={...assumptions[index],selected:enabled};}}
   return{...current,countries,assumptions};});}
  return <>
- <View style={s.card}><Text style={s.heading}>Actividades comerciales</Text><Text style={s.note}>El identificador se conserva para importaciones futuras. Desactivar excluye cálculos y conserva todos los datos.</Text>
- {doc.activities.map(a=><FinanceButton key={a.id} label={(a.enabled?"☑ ":"☐ ")+a.name+" · "+a.id} disabled={!writable} selected={a.enabled} onPress={()=>update(d=>({...d,activities:d.activities.map(x=>x.id===a.id?{...x,enabled:!x.enabled}:x)}))}/>)}
- <FinanceField label="Nombre de actividad" value={newName} onChange={setNewName} disabled={!writable}/><FinanceField label="Identificador estable" value={newId} onChange={setNewId} placeholder="actividad-elegida" disabled={!writable}/>
- <View style={s.row}>{(["empresa","establecimiento","otra"] as const).map(value=><FinanceButton key={value} label={value} selected={unit===value} disabled={!writable} onPress={()=>setUnit(value)}/>)}</View>
- <FinanceButton label="Añadir actividad al borrador" disabled={!writable||!newName.trim()||!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/.test(newId)||doc.activities.some(a=>a.id===newId)} onPress={()=>{update(d=>({...d,activities:[...d.activities,{id:newId,name:newName.trim(),unit,enabled:true}]}));setNewName("");setNewId("");}}/>
- </View>
- <View style={s.card}><Text style={s.heading}>Países · {scenario}</Text><Text style={s.note}>Selección independiente para esta actividad y escenario. Seleccionar todos afecta al catálogo completo; deseleccionar no borra parámetros. Un país nuevo usa la moneda conocida de GO o la moneda base de proyección; revísala antes de introducir tarifas.</Text>
- <FinanceField label="Buscar país o código ISO" value={search} onChange={setSearch}/><View style={s.row}>{[["all","Todos"],["selected","Seleccionados"],["other","Sin seleccionar"]].map(([value,label])=><FinanceButton key={value} label={label} selected={filter===value} onPress={()=>setFilter(value)}/>)}</View>
+ <View style={s.card}><Text style={s.heading}>Países · {scenario}</Text><Text style={s.note}>Elige los países de esta actividad. Desmarcar conserva sus datos.</Text>
+ <FinanceField label="Buscar país" value={search} onChange={setSearch}/><View style={s.row}>{[["all","Todos"],["selected","Seleccionados"],["other","Sin seleccionar"]].map(([value,label])=><FinanceButton key={value} label={label} selected={filter===value} onPress={()=>setFilter(value)}/>)}</View>
  <View style={s.row}><FinanceButton label="Seleccionar todos" disabled={!writable||!activityId} onPress={()=>choose(FINANCE_COUNTRY_CODES,true)}/><FinanceButton label="Deseleccionar todos" disabled={!writable||!activityId} onPress={()=>choose(FINANCE_COUNTRY_CODES,false)}/></View>
  {!activityId&&<Text style={s.note}>Crea y elige una actividad antes de seleccionar países.</Text>}
  {rows.map(code=><TouchableOpacity key={code} accessibilityRole="checkbox" accessibilityState={{checked:selected.has(code),disabled:!writable||!activityId}} disabled={!writable||!activityId} onPress={()=>choose([code],!selected.has(code))} style={[s.button,selected.has(code)&&s.selected]}><Text style={s.text}>{selected.has(code)?"☑":"☐"} {code} — {countryName(code)}</Text></TouchableOpacity>)}
  </View></>;
+}
+export function FinancialActivities({doc,update,writable,activityId,onSelect}:FinancialEditProps&{onSelect:(id:string)=>void}){
+ const [name,setName]=useState(""),[unit,setUnit]=useState<"empresa"|"establecimiento"|"otra">("empresa");const submitting=useRef(false);
+ function add(){if(!writable||!name.trim()||name.trim().length>160||submitting.current)return;submitting.current=true;const id=financeId("activity");update(d=>({...d,activities:[...d.activities,{id,name:name.trim(),unit,enabled:true}]}));onSelect(id);setName("");}
+ return <><View style={s.card}><Text style={s.heading}>Tus actividades</Text>{!doc.activities.length&&<Text style={s.note}>Añade la primera actividad de tu plan.</Text>}{doc.activities.map(a=><View key={a.id} style={s.activityRow}><FinanceButton label={a.name} selected={activityId===a.id} onPress={()=>onSelect(a.id)}/><TouchableOpacity accessibilityRole="checkbox" accessibilityLabel={"Incluir "+a.name} accessibilityState={{checked:a.enabled,disabled:!writable}} disabled={!writable} onPress={()=>update(d=>({...d,activities:d.activities.map(x=>x.id===a.id?{...x,enabled:!x.enabled}:x)}))}><Text style={s.note}>{a.enabled?"☑ Incluida":"☐ Excluida"}</Text></TouchableOpacity></View>)}</View>
+ <View style={s.card}><Text style={s.heading}>Añadir actividad</Text><FinanceField label="Nombre de actividad" value={name} disabled={!writable} placeholder="Nombre de tu actividad" onChange={value=>{submitting.current=false;setName(value);}}/><Text style={s.label}>Unidad de mercado</Text><View style={s.row}>{(["empresa","establecimiento","otra"] as const).map(value=><FinanceButton key={value} label={value} selected={unit===value} disabled={!writable} onPress={()=>setUnit(value)}/>)}</View><FinanceButton label="Añadir actividad" disabled={!writable||!name.trim()||name.trim().length>160} onPress={add}/><Text style={s.note}>Cada actividad conserva sus países e hipótesis.</Text></View></>;
 }
 const PARAMS: [keyof typeof EMPTY_ANNUAL,string][]=[
  ["penetrationPct","Objetivo de mercado (%)"],["annualGrowthPct","Crecimiento anual del objetivo (%)"],["marketGrowthPct","Crecimiento anual del mercado (%)"],["churnPct","Bajas anuales (%)"],
@@ -41,15 +41,15 @@ const PARAMS: [keyof typeof EMPTY_ANNUAL,string][]=[
 export function FinancialParameters(props:FinancialEditProps){const{doc,update,writable,activityId,countryCode,scenario,year}=props;
  const assumption=doc.assumptions.find(a=>a.activityId===activityId&&a.countryCode===countryCode&&a.scenario===scenario);
  function change(fn:(a:FinancialAssumption)=>FinancialAssumption){if(!assumption)return;update(d=>({...d,assumptions:d.assumptions.map(a=>a.id===assumption.id?fn(a):a)}));}
- if(!assumption)return <View style={s.card}><Text style={s.text}>Selecciona este país en Países para preparar su hipótesis. No se crea una cartera ficticia.</Text></View>;
+ if(!assumption)return <View style={s.card}><Text style={s.text}>Selecciona primero un país para configurar este escenario. </Text></View>;
  const annual=year?assumption.years.find(y=>y.year===year)||{year,...EMPTY_ANNUAL}:assumption;
- return <View style={s.card}><Text style={s.heading}>Parámetros · {scenario} · {year||"Base"}</Text><Text style={s.note}>Real es una hipótesis editable, no un resultado observado. No se impone ningún porcentaje. En una excepción anual, vacío hereda la base; cero es una hipótesis explícita. Las altas explícitas prevalecen sobre el objetivo porcentual.</Text>
+ return <View style={s.card}><Text style={s.heading}>Parámetros · {scenario} · {year||"Base"}</Text><Text style={s.note}>Define tus hipótesis. Los campos vacíos quedan sin completar; una excepción anual vacía conserva la base.</Text>
  <FinanceField label="Moneda de proyección del país" value={doc.countries.find(c=>c.code===countryCode)?.currency||""} disabled={!writable} onChange={currency=>update(d=>({...d,countries:d.countries.map(c=>c.code===countryCode?{...c,currency:currency.toUpperCase()}:c)}))}/>
  <FinanceNumber label="Año de inicio de esta actividad y país" value={assumption.startYear} disabled={!writable} onChange={v=>change(a=>({...a,startYear:v??0}))}/>
  <FinanceNumber label="Empresas existentes al inicio" value={assumption.openingCompanies} disabled={!writable} onChange={v=>change(a=>({...a,openingCompanies:v??Number.NaN}))}/>
  {PARAMS.map(([key,label])=><FinanceNumber key={key} label={label} value={annual[key]} placeholder={year&&assumption[key]!==null?"Heredado: "+assumption[key]:"Sin hipótesis"} disabled={!writable} onChange={v=>change(a=>year?{...a,years:[...a.years.filter(y=>y.year!==year),{...(a.years.find(y=>y.year===year)||{year,...EMPTY_ANNUAL}),[key]:v}]}:{...a,[key]:v})}/>)}
  <Text style={s.label}>Momento de incorporación · editable</Text><View style={s.row}>{([["uniform","Progresiva durante el año"],["start","Todas al inicio"],["end","Todas al final"]] as const).map(([value,label])=><FinanceButton key={value} label={label} selected={assumption.acquisitionTiming===value} disabled={!writable} onPress={()=>change(a=>({...a,acquisitionTiming:value}))}/>)}</View>
- <Text style={s.note}>La captación progresiva se distribuye entre los doce meses y factura media mensualidad a las altas de cada mes. Inicio/final son hipótesis explícitas alternativas; nunca se facturan automáticamente doce meses por cliente progresivo.</Text>
+ <Text style={s.note}>El momento de incorporación determina los meses facturables.</Text>
  </View>;
 }
 const REVENUE_KINDS={monthly:"Cuota mensual",annual:"Cuota anual (devengo proporcional)",commission:"Comisión (%)",operation:"Precio por operación",one_off:"Pago único por alta"} as const;

@@ -17,3 +17,12 @@ function handoff(){let change;const value=load('data/financialFileHandoff.ts',{'
 test('picker handoff scopes descriptors by user and plan and consumes each selection once',()=>{const h=handoff(),asset={name:'synthetic.json',uri:'file:///synthetic-test-only.json'};assert.equal(h.queueFinancialFile(A,'plan',asset,h.financialFileGeneration()),true);assert.equal(h.pendingFinancialFile('other'),null);assert.equal(h.takeFinancialFile(A,'other-plan'),null);assert.equal(h.takeFinancialFile('other','plan'),null);assert.equal(h.takeFinancialFile(A,'plan'),asset);assert.equal(h.takeFinancialFile(A,'plan'),null);});
 test('session changes purge queued descriptors and invalidate late native picker completions',()=>{const h=handoff(),token=h.financialFileGeneration(),asset={name:'synthetic.json',uri:'file:///synthetic-test-only.json'};h.queueFinancialFile(A,'plan',asset,token);h.change();assert.equal(h.pendingFinancialFile(A),null);assert.equal(h.queueFinancialFile(A,'plan',asset,token),false);assert.equal(h.queueFinancialFile('new-user','plan',asset,h.financialFileGeneration()),true);assert.equal(h.pendingFinancialFile(A),null);});
 test('handoff subscriptions stop after unmount and retain no parsed financial inputs',()=>{const h=handoff();let calls=0;const off=h.onFinancialFile(()=>calls++);h.queueFinancialFile(A,'plan',{name:'synthetic.csv',uri:'file:///synthetic-test-only.csv'},h.financialFileGeneration());assert.equal(calls,1);assert.deepEqual(Object.keys(h.pendingFinancialFile(A)).sort(),['asset','planId','userId']);off();h.discardFinancialFile(A);assert.equal(calls,1);assert.equal(h.pendingFinancialFile(A),null);});
+
+test('malformed plan responses stay private and valid documents preserve their canonical data',()=>{
+ const document={title:'SYNTHETIC'},plan={id:'synthetic-plan',ownerUserId:A,version:1,canWrite:true,document};
+ const schema={safeParse:value=>value===document?{success:true,data:document}:{success:false,error:{message:'SENSITIVE INTERNAL SCHEMA'}}};
+ const api=load('data/financialPlans.ts',{'./booking':{BookingApiError},'@workspace/api-zod':{financialDocumentSchema:schema}});
+ assert.equal(api.parseFinancialPlan(plan).document,document);
+ assert.throws(()=>api.parseFinancialPlan({...plan,document:null}),e=>!e.message.includes('SENSITIVE')&&!e.message.includes('SCHEMA')&&/plan/.test(e.message));
+ assert.throws(()=>api.parseFinancialPlan({...plan,version:0}),/respuesta/);
+});
