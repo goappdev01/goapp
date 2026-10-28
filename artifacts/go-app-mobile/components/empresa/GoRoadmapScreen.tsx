@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { DraggableFAB } from "@/components/DraggableFAB";
 import { GoEticaScreen } from "./GoEticaScreen";
+import { FinancialPlanScreen } from "../financial/FinancialPlanScreen";
 
 // ─── FAB button style — mismo sistema que el resto del ecosistema GO ──────────
 const ETICA_FAB_BTN = {
@@ -1380,18 +1381,20 @@ interface GoRoadmapScreenProps {
   navStack:     RoadmapNode[];
   setNavStack:  (stack: RoadmapNode[]) => void;
   onGoLanding?: () => void;
+  allowFinancialPlan?: boolean;
 }
 
 // ─── Componente principal ────────────────────────────────────────────────────
-export function GoRoadmapScreen({ navStack, setNavStack, onGoLanding }: GoRoadmapScreenProps) {
+export function GoRoadmapScreen({ navStack, setNavStack, onGoLanding, allowFinancialPlan = false }: GoRoadmapScreenProps) {
   const { lang } = useLanguage();
   const push = (node: RoadmapNode) => setNavStack([...navStack, node]);
 
   if (navStack.length === 0) {
-    return <RootList nodes={ROADMAP_TREE} onOpen={push} lang={lang} />;
+    return <RootList nodes={ROADMAP_TREE} onOpen={push} lang={lang} onOpenFinancial={allowFinancialPlan ? () => push({ key: "plan_financiero_y_proyecciones", emoji: "📊", label: "Plan Financiero y Proyecciones", color: "#59BA83", progress: 0, desc: "Herramienta privada de planificación" }) : undefined} />;
   }
 
   const current = navStack[navStack.length - 1];
+  if (current.key === "plan_financiero_y_proyecciones") return allowFinancialPlan ? <FinancialPlanScreen /> : null;
   return (
     <NodeDetail
       node={current}
@@ -1404,10 +1407,11 @@ export function GoRoadmapScreen({ navStack, setNavStack, onGoLanding }: GoRoadma
 }
 
 // ─── Vista raíz ──────────────────────────────────────────────────────────────
-function RootList({ nodes, onOpen, lang }: {
+function RootList({ nodes, onOpen, lang, onOpenFinancial }: {
   nodes: RoadmapNode[];
   onOpen: (n: RoadmapNode) => void;
   lang: string;
+  onOpenFinancial?: () => void;
 }) {
   const [infoNode, setInfoNode] = React.useState<RoadmapNode | null>(null);
   return (
@@ -1425,6 +1429,8 @@ function RootList({ nodes, onOpen, lang }: {
             : "Árbol maestro del ecosistema GO · Solo visible internamente"}
         </Text>
       </View>
+
+      {onOpenFinancial && <TouchableOpacity accessibilityRole="button" onPress={onOpenFinancial} style={s.modCard}><Text style={{ color: "#FFFFFF", fontSize: 16, fontWeight: "700" }}>Plan Financiero y Proyecciones</Text><Text style={{ color: "#ACB4C2", marginTop: 5 }}>Sección privada · requiere autorización del backend</Text></TouchableOpacity>}
 
       <View style={s.globalRow}>
         <GlobalStat label={lang === 'en' ? "Modules"    : "Módulos"}     value={`${TOTAL_MODS}`}    color="#4A80BD" />

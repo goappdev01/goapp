@@ -1,0 +1,22 @@
+diff --git a/provider.cjs b/provider.cjs
+index 8b41276..6d6f962 100644
+--- a/provider.cjs
++++ b/provider.cjs
+@@ -3,6 +3,7 @@ const http=require('node:http'),fs=require('node:fs'),crypto=require('node:crypt
+ const config=JSON.parse(fs.readFileSync(__dirname+'/runtime.private.json','utf8'));
+ if(config.database!=='go_peluquerias_github_20261023'||config.providerPort!==65441||config.postgrestPort!==65440)throw Error('Refuse unexpected fixture');
+ const sessions=new Map(),failures=new Map();
++const FINANCE_RPC = /^\/rest\/v1\/rpc\/finance_(?:access|get_plan|create_plan|save_plan|history|grant|prepare_import|apply_import|cancel_import|list_imports|revert_import|list_grants)$/;
+ const json=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
+ const sign=claims=>{const content=Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url')+'.'+Buffer.from(JSON.stringify(claims)).toString('base64url');return content+'.'+crypto.createHmac('sha256',config.jwtSecret).update(content).digest('base64url');};
+ const anon=sign({role:'anon',exp:Math.floor(Date.now()/1000)+86400});
+@@ -56,7 +57,8 @@ http.createServer(async(req,res)=>{try{
+  }
+  if(url.pathname.startsWith('/rest/v1/')){
+   const boardRoute=/^\/rest\/v1\/(?:go_board_documents|rpc\/go_board_(?:save|move_task|delete|calendar))$/.test(url.pathname);
+-  const body=await read(req,boardRoute?2*1024*1024:200000),headers={'Content-Type':'application/json',Accept:'application/json',Authorization:req.headers.authorization??'Bearer '+anon};
++  const financeRoute=FINANCE_RPC.test(url.pathname)&&req.method==='POST'&&!url.search;
++  const body=await read(req,financeRoute?20*1024*1024:boardRoute?2*1024*1024:200000),headers={'Content-Type':'application/json',Accept:'application/json',Authorization:req.headers.authorization??'Bearer '+anon};
+   for(const name of ['prefer','range','range-unit','accept-profile','content-profile'])if(req.headers[name])headers[name]=req.headers[name];
+   const upstream=await fetch('http://127.0.0.1:65440'+req.url.slice('/rest/v1'.length),{method:req.method,headers,...(body.length?{body}:{}),signal:AbortSignal.timeout(15000)});
+   const responseHeaders={'Content-Type':'application/json','Cache-Control':'no-store'};

@@ -6,3 +6,6 @@ export * from "./task-creation";
 export * from "./task-management";
 export * from "./module-publication";
 export * from "./go-boards";
+export * from "./financial-plan";
+export * from "./financial-calculations";
+export * from "./financial-import";

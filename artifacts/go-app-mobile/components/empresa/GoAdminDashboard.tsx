@@ -741,36 +741,16 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
 
         {/* ── Overview ── */}
         {section === "overview" && (
-          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
-            <GoModulePublicationPanel />
-
-            <View style={s.metricsGrid}>
-              <MetricCard label={lang === 'en' ? "Revenue Today" : "Ingresos hoy"}  value={MOCK_METRICS.ingresosHoy}  color="#3D9A84" icon="trending-up" />
-              <MetricCard label={lang === 'en' ? "Revenue / Month" : "Ingresos mes"}  value={MOCK_METRICS.ingresosMes}  color="#4A80BD" icon="dollar-sign" />
-              <MetricCard label={lang === 'en' ? "Uses Today" : "Usos hoy"}      value={MOCK_METRICS.usosHoy}      color="#f97316" icon="zap"         />
-              <MetricCard label={lang === 'en' ? "Uses / Month" : "Usos mes"}      value={MOCK_METRICS.usosMes}      color="#8b5cf6" icon="activity"    />
-            </View>
-
-            <View style={s.totalRow}>
-              <View style={s.totalCard}>
-                <Feather name="award" size={14} color="#f59e0b" />
-                <Text style={s.totalLabel}>{lang === 'en' ? "Estimated total revenue" : "Ingreso total estimado"}</Text>
-                <Text style={s.totalValue}>{MOCK_METRICS.ingresoTotal}</Text>
-              </View>
-              <View style={s.totalCard}>
-                <Feather name="star" size={14} color="#ec4899" />
-                <Text style={s.totalLabel}>{lang === 'en' ? "Most profitable partner" : "Partner más rentable"}</Text>
-                <Text style={s.totalValue}>{MOCK_METRICS.partnerTop}</Text>
-              </View>
-            </View>
-
-            <Text style={s.sectionTitle}>{lang === 'en' ? "MODULES" : "MÓDULOS"}</Text>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 8, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+            <Text style={[s.sectionTitle, { fontSize: 12, color: GRAY, paddingTop: 8 }]}>{lang === 'en' ? "MODULES" : "MÓDULOS"}</Text>
             <View style={s.sectGrid}>
               {SECTIONS.map(sec => (
                 <TouchableOpacity
                   key={sec.key}
                   style={s.sectCard}
                   activeOpacity={0.78}
+                  accessibilityRole="button"
+                  accessibilityLabel={lang === 'en' ? sec.label_en : sec.label}
                   disabled={sec.key === "tools" && !onOpenTools}
                   onPress={() => goSection(sec.key as AdminSection)}
                 >
@@ -779,14 +759,13 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.sectLabel}>{lang === 'en' ? sec.label_en : sec.label}</Text>
-                    <Text style={s.sectSub}>{lang === 'en' ? sec.sublabel_en : sec.sublabel}</Text>
+                    {(sec.key === "roadmap" || sec.key === "siguientes_modulos") && <Text style={s.sectSub} numberOfLines={1}>{lang === 'en' ? sec.sublabel_en : sec.sublabel}</Text>}
                   </View>
                   <Feather name="chevron-right" size={14} color={DIM} />
                 </TouchableOpacity>
               ))}
             </View>
 
-            <View style={{ height: 120 }} />
           </ScrollView>
         )}
 
@@ -794,6 +773,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         {section === "roadmap"     && (
           <GoRoadmapScreen
             navStack={roadmapStack}
+            allowFinancialPlan
             setNavStack={setRoadmapStack}
             onGoLanding={onClose}
           />
@@ -1074,10 +1054,29 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         {section === "consumos"    && <ConsumoScreen dark />}
         {section === "publicidad"  && <PublicidadScreen />}
         {section === "facturacion" && <FacturacionScreen />}
-        {section === "sistema"     && <AdminScreen />}
+        {section === "sistema"     && <><GoModulePublicationPanel /><AdminScreen /></>}
 
         {section === "metricas" && (
           <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: 120 }}>
+            <View style={s.metricsGrid}>
+              <MetricCard label={lang === 'en' ? "Revenue Today" : "Ingresos hoy"}  value={MOCK_METRICS.ingresosHoy}  color="#3D9A84" icon="trending-up" />
+              <MetricCard label={lang === 'en' ? "Revenue / Month" : "Ingresos mes"}  value={MOCK_METRICS.ingresosMes}  color="#4A80BD" icon="dollar-sign" />
+              <MetricCard label={lang === 'en' ? "Uses Today" : "Usos hoy"}      value={MOCK_METRICS.usosHoy}      color="#f97316" icon="zap"         />
+              <MetricCard label={lang === 'en' ? "Uses / Month" : "Usos mes"}      value={MOCK_METRICS.usosMes}      color="#8b5cf6" icon="activity"    />
+            </View>
+
+            <View style={s.totalRow}>
+              <View style={s.totalCard}>
+                <Feather name="award" size={14} color="#f59e0b" />
+                <Text style={s.totalLabel}>{lang === 'en' ? "Estimated total revenue" : "Ingreso total estimado"}</Text>
+                <Text style={s.totalValue}>{MOCK_METRICS.ingresoTotal}</Text>
+              </View>
+              <View style={s.totalCard}>
+                <Feather name="star" size={14} color="#ec4899" />
+                <Text style={s.totalLabel}>{lang === 'en' ? "Most profitable partner" : "Partner más rentable"}</Text>
+                <Text style={s.totalValue}>{MOCK_METRICS.partnerTop}</Text>
+              </View>
+            </View>
             {MOCK_METRICAS.map((m, i) => (
               <View key={i} style={s.metRow}>
                 <View style={[s.metIcon, { backgroundColor: `${m.color}20` }]}>
@@ -1249,10 +1248,10 @@ const s = StyleSheet.create({
   totalLabel:     { fontSize: 10, color: DIM, fontWeight: "600", flex: 1, textTransform: "uppercase", letterSpacing: 0.3 },
   totalValue:     { fontSize: 14, fontFamily: "Inter_700Bold", fontWeight: "800", color: TEXT, width: "100%" },
   sectionTitle:   { fontSize: 10, fontWeight: "700", color: DIM, letterSpacing: 0.8, paddingHorizontal: 16, paddingTop: 20, paddingBottom: 8 },
-  sectGrid:       { paddingHorizontal: 16, gap: 6 },
-  sectCard:       { backgroundColor: CARD, borderRadius: 14, padding: 14, flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderColor: BORD },
+  sectGrid:       { paddingHorizontal: 16, gap: 10 },
+  sectCard:       { backgroundColor: CARD, borderRadius: 16, minHeight: 72, padding: 16, flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderColor: BORD },
   sectIcon:       { width: 40, height: 40, borderRadius: 13, alignItems: "center", justifyContent: "center" },
-  sectLabel:      { fontSize: 14, fontWeight: "700", color: TEXT, marginBottom: 2 },
+  sectLabel:      { fontSize: 16, fontWeight: "700", color: TEXT, marginBottom: 2 },
   sectSub:        { fontSize: 11, color: DIM, fontWeight: "500" },
   metRow:         { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: CARD, borderRadius: 14, padding: 14, borderWidth: 1, borderColor: BORD },
   metIcon:        { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },

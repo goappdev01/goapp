@@ -1,0 +1,36 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture,full,blank,A,B,C} from './financial-test-utils.mjs';
+test('PostgreSQL isolated: exact scenarios, relational persistence, explicit delegation, read-only grants and revocation',async()=>{const f=await fixture();try{
+ const p=await f.rpc('create_plan',[full()]);assert.equal(p.version,1);assert.equal(p.document.markets[0].companies,1000);
+ await f.db.exec('reset role');const s=await f.db.query('select code from go_finance_private.scenarios where plan_id=$1 order by code',[p.id]);assert.deepEqual(s.rows.map(r=>r.code),['OPTIMISTA','PESIMISTA','REAL']);
+ await f.user(B);await assert.rejects(f.rpc('get_plan',[p.id]),e=>e.code==='42501');await assert.rejects(f.rpc('create_plan',[blank()]),e=>e.code==='42501');await assert.rejects(f.db.query('select * from go_finance_private.markets'),e=>e.code==='42501');
+ await f.user(A);await f.rpc('grant',[p.id,1,B,false,true,'SYNTHETIC read grant']);await f.user(B);let r=await f.rpc('get_plan',[p.id]);assert.equal(r.canWrite,false);await assert.rejects(f.rpc('save_plan',[p.id,2,r.document,'blocked']),e=>e.code==='42501');
+ await f.user(A);await f.rpc('grant',[p.id,2,B,true,true,'SYNTHETIC edit grant']);await f.user(B);r=await f.rpc('get_plan',[p.id]);r.document.title='SYNTHETIC EDIT';assert.equal((await f.rpc('save_plan',[p.id,3,r.document,'synthetic change'])).version,4);
+ await f.user(C);await assert.rejects(f.rpc('get_plan',[p.id]),e=>e.code==='42501');await f.user(A);await f.rpc('grant',[p.id,4,B,true,false,'SYNTHETIC revoke']);await f.user(B);await assert.rejects(f.rpc('get_plan',[p.id]),e=>e.code==='42501');
+ }finally{await f.close();}});
+
+test('PostgreSQL isolated: stale writes, failed replacements, duplicates and invalid references leave no partial changes',async()=>{const f=await fixture();try{const p=await f.rpc('create_plan',[full()]);
+ await assert.rejects(f.rpc('save_plan',[p.id,99,p.document,'stale']),e=>e.code==='PT409');
+ const bad=structuredClone(p.document);bad.markets[0].companies=-1;await assert.rejects(f.rpc('save_plan',[p.id,1,bad,'negative']),e=>e.code==='23514');assert.deepEqual((await f.rpc('get_plan',[p.id])).document,p.document);
+ const duplicate=structuredClone(p.document);duplicate.countries.push(duplicate.countries[0]);await assert.rejects(f.rpc('save_plan',[p.id,1,duplicate,'duplicate']),e=>e.code==='23505');assert.equal((await f.rpc('history',[p.id])).length,1);
+ const missing=structuredClone(p.document);missing.markets[0].sourceId='missing';await assert.rejects(f.rpc('save_plan',[p.id,1,missing,'bad source']),e=>e.code==='23503');assert.equal((await f.rpc('get_plan',[p.id])).version,1);
+ }finally{await f.close();}});
+
+test('PostgreSQL isolated: preview, cancel, atomic import, retry idempotence and reversal preserve later personal hypotheses',async()=>{const f=await fixture();try{
+ let p=await f.rpc('create_plan',[full()]);const candidate=structuredClone(p.document);candidate.markets[0].companies=1200;candidate.markets.push({...candidate.markets[0],countryCode:'FR',companies:2000});
+ let draft=await f.rpc('prepare_import',[p.id,1,candidate,{rows:2}]);assert.equal((await f.rpc('get_plan',[p.id])).document.markets.length,1);await f.rpc('cancel_import',[p.id,draft.previewId]);await assert.rejects(f.rpc('apply_import',[p.id,draft.previewId]));
+ draft=await f.rpc('prepare_import',[p.id,1,candidate,{rows:2}]);await f.user(B);await assert.rejects(f.rpc('apply_import',[p.id,draft.previewId]),e=>e.code==='42501');await f.user(A);
+ p=await f.rpc('apply_import',[p.id,draft.previewId]);assert.equal(p.version,2);assert.equal(p.document.markets.length,2);assert.equal(p.document.assumptions[0].penetrationPct,10);assert.equal((await f.rpc('apply_import',[p.id,draft.previewId])).version,2);
+ p.document.assumptions[0].penetrationPct=27;p=await f.rpc('save_plan',[p.id,2,p.document,'later hypothesis']);p=await f.rpc('revert_import',[p.id,3,draft.previewId]);assert.equal(p.version,4);assert.equal(p.document.markets.length,1);assert.equal(p.document.markets[0].companies,1000);assert.equal(p.document.assumptions[0].penetrationPct,27);assert.equal(p.document.revenues[0].value,10);
+ assert.equal((await f.rpc('revert_import',[p.id,4,draft.previewId])).version,4);assert.equal((await f.rpc('list_imports',[p.id]))[0].reverted_version,4);
+ }finally{await f.close();}});
+
+test('PostgreSQL isolated: import cannot alter tariffs and subsequent market changes prevent destructive reversal',async()=>{const f=await fixture();try{
+ let p=await f.rpc('create_plan',[full()]);const illegal=structuredClone(p.document);illegal.revenues[0].value=999;await assert.rejects(f.rpc('prepare_import',[p.id,1,illegal,{}]),e=>e.code==='22023');
+ const candidate=structuredClone(p.document);candidate.markets[0].companies=1500;const draft=await f.rpc('prepare_import',[p.id,1,candidate,{}]);p=await f.rpc('apply_import',[p.id,draft.previewId]);p.document.markets[0].companies=1700;p=await f.rpc('save_plan',[p.id,2,p.document,'later market correction']);
+ await assert.rejects(f.rpc('revert_import',[p.id,3,draft.previewId]),e=>e.code==='PT409');assert.equal((await f.rpc('get_plan',[p.id])).document.markets[0].companies,1700);
+ }finally{await f.close();}});
+
+test('PostgreSQL isolated: yearly exceptions, disabled selection and original currency persist after reopen',async()=>{const f=await fixture();try{const d=full();d.assumptions[0].years=[{year:2027,penetrationPct:23,annualGrowthPct:null,marketGrowthPct:null,churnPct:null,newCompanies:null,retainedCompanies:null,marketCompanies:null,operationsPerCompanyMonth:null,averageTicket:null}];d.revenues.push({...d.revenues[0],id:'annual-fee',year:2027,value:17});d.countries[0].currency='USD';d.fxRates.push({currency:'USD',baseCurrency:'EUR',year:2026,rate:0.9,sourceId:'source',asOf:'2026-10-27'});let p=await f.rpc('create_plan',[d]);assert.equal(p.document.assumptions[0].years[0].penetrationPct,23);p.document.assumptions[0].selected=false;p=await f.rpc('save_plan',[p.id,1,p.document,'SYNTHETIC deselection']);const r=await f.rpc('get_plan',[p.id]);assert.equal(r.document.assumptions[0].selected,false);assert.equal(r.document.assumptions[0].years[0].penetrationPct,23);assert.equal(r.document.revenues.find(x=>x.id==='annual-fee').value,17);assert.equal(r.document.markets[0].companies,1000);assert.equal(r.document.fxRates[0].rate,0.9);}finally{await f.close();}});
+test('PostgreSQL isolated: anonymous/helper access is denied and inactive administrators lose existing grants',async()=>{const f=await fixture();try{const p=await f.rpc('create_plan',[full()]);await f.rpc('grant',[p.id,1,B,true,true,'SYNTHETIC grant']);await f.user(B);await assert.rejects(f.db.query('select go_finance_private.write_document($1,$2,false)',[p.id,JSON.stringify(p.document)]),e=>e.code==='42501');await f.db.exec('reset role');await f.db.query('update public.admin_memberships set active=false where user_id=$1',[B]);await f.user(B);await assert.rejects(f.rpc('get_plan',[p.id]),e=>e.code==='42501');await f.user(A);await f.rpc('grant',[p.id,2,B,false,false,'Revoke inactive SYNTHETIC admin']);await f.db.exec('reset role;set role anon');await assert.rejects(f.rpc('access'),e=>e.code==='42501');}finally{await f.close();}});

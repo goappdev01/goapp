@@ -1,0 +1,34 @@
+diff --git a/identity-bridge-20261023/identity-bridge.cjs b/identity-bridge-20261023/identity-bridge.cjs
+index e729a62..1189930 100644
+--- a/identity-bridge-20261023/identity-bridge.cjs
++++ b/identity-bridge-20261023/identity-bridge.cjs
+@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
+ const { Readable } = require('node:stream');
+ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+ const REFRESH_PREFIX = 'go8088-idp-v1.';
++const FINANCE_RPC = /^\/rest\/v1\/rpc\/finance_(?:access|get_plan|create_plan|save_plan|history|grant|prepare_import|apply_import|cancel_import|list_imports|revert_import|list_grants)$/;
+ const PERMISSIONS = ['admin.access', 'development', 'diagnostics', 'maintenance', 'memberships.manage', 'ownership.manage'];
+ class BridgeError extends Error {
+   constructor(status, code, errorCode) { super(code); this.status = status; this.code = code; this.errorCode = errorCode; }
+@@ -202,6 +203,7 @@ function createIdentityBridge({ fixture, identity, legacy, request = fetch, now
+         send(res, 204); return;
+       }
+       if (url.pathname.startsWith('/rest/v1/')) {
++        if (url.pathname.startsWith('/rest/v1/rpc/finance_') && (!FINANCE_RPC.test(url.pathname) || req.method !== 'POST' || url.search)) fail(403, 'FINANCE_ROUTE_FORBIDDEN');
+         // Account/permission mutation APIs are unavailable, never forwarded to real data.
+         if (url.pathname.startsWith('/rest/v1/rpc/admin_')) fail(403, 'ISOLATED_ADMIN_OPERATION_UNAVAILABLE');
+         let verified = null;
+@@ -219,6 +221,7 @@ function createIdentityBridge({ fixture, identity, legacy, request = fetch, now
+           const localToken = signed({ sub: localOwner.id, role: 'authenticated', aud: 'authenticated',
+             iss: 'http://127.0.0.1:65441/auth/v1', session_id: verified.hint.session_id,
+             ...(/^\/rest\/v1\/(?:go_board_documents|rpc\/go_board_(?:save|move_task|delete|calendar))$/.test(url.pathname) && verified.permissions.includes('admin.access') ? { go_boards_scope: 'ADMIN' } : {}),
++            ...(FINANCE_RPC.test(url.pathname) && req.method === 'POST' && !url.search && verified.permissions.includes('admin.access') ? { go_finance_scope: 'OWNER' } : {}),
+             exp: Math.min(verified.hint.exp, Math.floor(now() / 1000) + 60) }, fixture.jwtSecret);
+           req.headers = { ...req.headers, authorization: 'Bearer ' + localToken };
+         }
+@@ -240,4 +243,4 @@ function createIdentityBridge({ fixture, identity, legacy, request = fetch, now
+   return { handler, networkAllowed, metrics };
+ }
+ module.exports = { createIdentityBridge, REFRESH_PREFIX };
+-
++
