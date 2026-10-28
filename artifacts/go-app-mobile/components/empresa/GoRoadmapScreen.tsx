@@ -31,7 +31,7 @@ const BG   = "#0D0E11";
 const CARD = "#1A1B1F";
 const BORD = "rgba(255,255,255,0.08)";
 const TEXT = "#FFFFFF";
-const DIM  = "rgba(255,255,255,0.28)";
+const DIM  = "#C4C8D0";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 export type RoadmapNode = {
@@ -707,7 +707,7 @@ function statusColor(p: number): string {
   if (p >= 70)   return "#22c55e";
   if (p >= 30)   return "#f97316";
   if (p > 0)     return "#4A80BD";
-  return "rgba(255,255,255,0.22)";
+  return DIM;
 }
 
 // ─── Info explicativa (ES fijo) de los 7 bloques madre ───────────────────────
@@ -1084,7 +1084,7 @@ function RootInfoModal({ node, onClose, lang }: { node: RoadmapNode | null; onCl
         <View style={[s.rootInfoCard, { borderColor: node.color + "40" }]}>
           <View style={s.rootInfoHeader}>
             <Text style={s.rootInfoEmoji}>{node.emoji}</Text>
-            <Text style={[s.rootInfoTitle, { color: node.color }]}>{nodeLabel(node, lang)}</Text>
+            <Text style={s.rootInfoTitle}>{nodeLabel(node, lang)}</Text>
           </View>
           <ScrollView style={s.rootInfoScroll} showsVerticalScrollIndicator={false}>
             <Text style={s.rootInfoBody}>{getInfo(node.key, lang, node)}</Text>
@@ -1421,16 +1421,7 @@ function RootList({ nodes, onOpen, lang, onOpenFinancial }: {
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
     >
-      <View style={s.infoBanner}>
-        <Feather name="map" size={13} color="#f59e0b" />
-        <Text style={s.infoBannerTxt}>
-          {lang === 'en'
-            ? "GO ecosystem master tree · Internal use only"
-            : "Árbol maestro del ecosistema GO · Solo visible internamente"}
-        </Text>
-      </View>
-
-      {onOpenFinancial && <TouchableOpacity accessibilityRole="button" onPress={onOpenFinancial} style={s.modCard}><Text style={{ color: "#FFFFFF", fontSize: 16, fontWeight: "700" }}>Plan Financiero y Proyecciones</Text><Text style={{ color: "#ACB4C2", marginTop: 5 }}>Sección privada · requiere autorización del backend</Text></TouchableOpacity>}
+      {onOpenFinancial && <TouchableOpacity accessibilityRole="button" onPress={onOpenFinancial} style={s.modCard}><Text style={{ color: "#FFFFFF", fontSize: 16, fontWeight: "700" }}>Plan Financiero y Proyecciones</Text></TouchableOpacity>}
 
       <View style={s.globalRow}>
         <GlobalStat label={lang === 'en' ? "Modules"    : "Módulos"}     value={`${TOTAL_MODS}`}    color="#4A80BD" />
@@ -1460,7 +1451,6 @@ function RootList({ nodes, onOpen, lang, onOpenFinancial }: {
                 <Text
                   style={[
                     s.modLabel,
-                    { color: mod.color },
                     mod.key === "comunicacion" && lang === "en" && s.modLabelCommEn,
                   ]}
                 >
@@ -1554,7 +1544,7 @@ function NodeDetail({ node, breadcrumb, onOpen, lang, onGoLanding }: {
         <View style={s.detHeaderTop}>
           <Text style={s.detEmoji}>{node.emoji}</Text>
           <View style={{ flex: 1 }}>
-            <Text style={[s.detLabel, { color: node.color }]}>{nodeLabel(node, lang)}</Text>
+            <Text style={s.detLabel}>{nodeLabel(node, lang)}</Text>
             <Text style={s.detDesc}>{nodeDesc(node, lang)}</Text>
           </View>
           <Text style={[s.detPct, { color: node.color }]}>{node.progress}%</Text>
@@ -1579,7 +1569,7 @@ function NodeDetail({ node, breadcrumb, onOpen, lang, onGoLanding }: {
         <View style={s.detStats}>
           <DetStat label={lang === 'en' ? "Done"        : "Terminados"}  value={`${completados}`} color="#3D9A84" />
           <DetStat label={lang === 'en' ? "In progress" : "En progreso"} value={`${enProgreso}`}  color={node.color} />
-          <DetStat label={lang === 'en' ? "Pending"     : "Pendientes"}  value={`${pendientes}`}  color="#555" />
+          <DetStat label={lang === 'en' ? "Pending"     : "Pendientes"}  value={`${pendientes}`}  color={DIM} />
         </View>
       )}
 
@@ -1627,7 +1617,7 @@ function NodeDetail({ node, breadcrumb, onOpen, lang, onGoLanding }: {
                       <Text style={s.childEmoji}>{child.emoji}</Text>
                     </View>
                     <View style={{ flex: 1, paddingRight: isRootLevel ? 20 : 0 }}>
-                      <Text style={[s.childLabel, { color: child.color }]}>{nodeLabel(child, lang)}</Text>
+                      <Text style={s.childLabel}>{nodeLabel(child, lang)}</Text>
                       <Text style={s.childDesc} numberOfLines={1}>{nodeDesc(child, lang)}</Text>
                     </View>
                     <Text style={[s.childPct, { color: child.color }]}>{child.progress}%</Text>
@@ -1684,7 +1674,7 @@ function NodeDetail({ node, breadcrumb, onOpen, lang, onGoLanding }: {
 
       {/* Nodo hoja sin hijos — el propio nodo es la unidad evaluable */}
       {children.length === 0 && (
-        <View style={[s.leafCard, { opacity: 0.6 }]}>
+        <View style={s.leafCard}>
           <Text style={{ color: DIM, fontSize: 12, textAlign: "center" }}>
             {lang === 'en' ? "No subtasks defined yet." : "Sin subtareas definidas aún."}
           </Text>
@@ -1781,21 +1771,18 @@ function DetStat({ label, value, color }: { label: string; value: string; color:
 const s = StyleSheet.create({
   root:          { flex: 1, backgroundColor: BG },
 
-  infoBanner:    { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "rgba(245,158,11,0.10)", borderRadius: 12, padding: 12, marginBottom: 14, borderWidth: 1, borderColor: "rgba(245,158,11,0.20)" },
-  infoBannerTxt: { fontSize: 11, color: "#FFFFFF", fontWeight: "600", flex: 1, lineHeight: 15 },
-
   globalRow:    { flexDirection: "row", gap: 8, marginBottom: 20 },
   gStatCard:    { flex: 1, backgroundColor: CARD, borderRadius: 12, padding: 10, alignItems: "center", borderWidth: 1 },
   gStatVal:     { fontSize: 16, fontWeight: "900" },
   gStatLabel:   { fontSize: 8, color: DIM, fontWeight: "600", textTransform: "uppercase", letterSpacing: 0.4, marginTop: 3 },
 
-  secTitle:     { fontSize: 10, fontWeight: "700", color: DIM, letterSpacing: 0.8, marginBottom: 10 },
+  secTitle:     { fontSize: 10, fontWeight: "700", color: TEXT, letterSpacing: 0.8, marginBottom: 10 },
 
   modCard:      { backgroundColor: CARD, borderRadius: 16, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: BORD },
   modTop:       { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
   modEmojiBg:   { width: 40, height: 40, borderRadius: 13, alignItems: "center", justifyContent: "center" },
   modEmoji:     { fontSize: 18, lineHeight: 22 },
-  modLabel:     { fontSize: 14, fontWeight: "800", letterSpacing: 0.2 },
+  modLabel:     { fontSize: 14, fontWeight: "800", color: TEXT, letterSpacing: 0.2 },
   modLabelCommEn: { fontSize: 11, letterSpacing: 0 },
   modDesc:      { fontSize: 11, color: DIM, marginTop: 1, fontWeight: "500" },
   modPct:       { fontSize: 16, fontWeight: "900" },
@@ -1812,13 +1799,13 @@ const s = StyleSheet.create({
   chip:         { borderWidth: 1, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 2 },
   chipTxt:      { fontSize: 9, fontWeight: "700" },
 
-  breadcrumb:    { flexDirection: "row", alignItems: "center", flexWrap: "wrap", marginBottom: 12, opacity: 0.7 },
+  breadcrumb:    { flexDirection: "row", alignItems: "center", flexWrap: "wrap", marginBottom: 12 },
   breadcrumbTxt: { fontSize: 10, color: DIM, fontWeight: "600" },
 
   detHeader:    { backgroundColor: CARD, borderRadius: 16, padding: 14, marginBottom: 12, borderWidth: 1 },
   detHeaderTop: { flexDirection: "row", alignItems: "center", gap: 12 },
   detEmoji:     { fontSize: 28, lineHeight: 34 },
-  detLabel:     { fontSize: 17, fontWeight: "900", letterSpacing: 0.2 },
+  detLabel:     { fontSize: 17, fontWeight: "900", color: TEXT, letterSpacing: 0.2 },
   detDesc:      { fontSize: 12, color: DIM, marginTop: 3, lineHeight: 17 },
   detPct:       { fontSize: 26, fontWeight: "900" },
 
@@ -1831,7 +1818,7 @@ const s = StyleSheet.create({
   childTop:     { flexDirection: "row", alignItems: "center", gap: 10 },
   childEmojiBg: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   childEmoji:   { fontSize: 16, lineHeight: 20 },
-  childLabel:   { fontSize: 13, fontWeight: "700" },
+  childLabel:   { fontSize: 13, fontWeight: "700", color: TEXT },
   childDesc:    { fontSize: 10, color: DIM, marginTop: 1, fontWeight: "500" },
   childPct:     { fontSize: 15, fontWeight: "900" },
 
@@ -1849,7 +1836,7 @@ const s = StyleSheet.create({
   rootInfoCard:     { width: "100%", maxHeight: "70%", backgroundColor: CARD, borderRadius: 18, borderWidth: 1, padding: 18 },
   rootInfoHeader:   { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 12 },
   rootInfoEmoji:    { fontSize: 22, lineHeight: 26 },
-  rootInfoTitle:    { fontSize: 16, fontWeight: "900", letterSpacing: 0.2, flex: 1 },
+  rootInfoTitle:    { fontSize: 16, fontWeight: "900", color: TEXT, letterSpacing: 0.2, flex: 1 },
   rootInfoScroll:   { marginBottom: 14 },
   rootInfoBody:     { fontSize: 13, color: TEXT, lineHeight: 20, fontWeight: "500" },
   rootInfoCloseBtn: { borderRadius: 12, paddingVertical: 11, alignItems: "center" },

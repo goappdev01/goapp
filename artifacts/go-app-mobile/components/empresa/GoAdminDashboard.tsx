@@ -735,7 +735,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[s.title, financialView && { color: "#171B22", fontSize: 16 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>{headerTitle}</Text>
-            {!financialView && <Text style={s.subtitle}>{headerSub}</Text>}
+            {!financialView && (section !== "roadmap" || roadmapStack.length > 0) && <Text style={s.subtitle}>{headerSub}</Text>}
           </View>
 
         </View>
@@ -760,7 +760,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.sectLabel}>{lang === 'en' ? sec.label_en : sec.label}</Text>
-                    {(sec.key === "roadmap" || sec.key === "siguientes_modulos") && <Text style={s.sectSub} numberOfLines={1}>{lang === 'en' ? sec.sublabel_en : sec.sublabel}</Text>}
+                    {sec.key === "siguientes_modulos" && <Text style={s.sectSub} numberOfLines={1}>{lang === 'en' ? sec.sublabel_en : sec.sublabel}</Text>}
                   </View>
                   <Feather name="chevron-right" size={14} color={DIM} />
                 </TouchableOpacity>
