@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, type TextStyle } from "react-native";
 export const financeStyles = StyleSheet.create({
  root:{flex:1,backgroundColor:"#F7F8FA"}, content:{padding:16,paddingBottom:110,gap:12}, card:{backgroundColor:"#FFFFFF",borderRadius:16,padding:16,gap:10,borderWidth:1,borderColor:"#E2E6EB"},
  activityRow:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:10},
@@ -25,10 +25,10 @@ export function FinanceNumber({label,value,onChange,placeholder,disabled=false,c
  useEffect(()=>{if(!Number.isNaN(value))setDraft(value===null?"":String(value));},[value]);
  return <View style={compact?{minWidth:0,flex:1}:{minWidth:155,flexGrow:1}}>{!compact&&<Text style={financeStyles.label}>{label}</Text>}<TextInput accessibilityLabel={label} editable={!disabled} value={draft} onChangeText={text=>{setDraft(text);const normalized=text.trim().replace(",",".");if(!normalized)onChange(null);else if(/^-?\d+(?:\.\d*)?$/.test(normalized))onChange(Number(normalized));else onChange(Number.NaN);}} placeholder={placeholder||"Sin dato"} placeholderTextColor="#747D8C" keyboardType="numbers-and-punctuation" style={[financeStyles.input,compact&&{fontSize:17,fontWeight:"500"}]}/></View>;
 }
-export function FinanceTable({headers,rows}:{headers:string[];rows:(string|number)[][]}) {
- return <ScrollView horizontal><View><View style={{flexDirection:"row"}}>{headers.map((h,i)=><Text key={i} style={[financeStyles.cell,{fontWeight:"800",color:"#171B22"}]}>{h}</Text>)}</View>{rows.map((row,i)=><View key={i} style={{flexDirection:"row"}}>{row.map((cell,j)=><Text key={j} selectable style={[financeStyles.cell,financeStyles.calculated]}>{cell}</Text>)}</View>)}</View></ScrollView>;
+export function FinanceTable({headers,rows,valueStyle}:{headers:string[];rows:(string|number)[][];valueStyle?:TextStyle}) {
+ return <ScrollView horizontal><View><View style={{flexDirection:"row"}}>{headers.map((h,i)=><Text key={i} style={[financeStyles.cell,{fontWeight:"800",color:"#171B22"}]}>{h}</Text>)}</View>{rows.map((row,i)=><View key={i} style={{flexDirection:"row"}}>{row.map((cell,j)=><Text key={j} selectable numberOfLines={valueStyle&&j>0?1:undefined} adjustsFontSizeToFit={!!valueStyle&&j>0} minimumFontScale={0.75} style={[financeStyles.cell,financeStyles.calculated,j>0&&cell!=="Sin dato"&&valueStyle]}>{cell}</Text>)}</View>)}</View></ScrollView>;
 }
-export const financialMoney=(value:number|null|undefined,currency:string)=>value===null||value===undefined?"Sin dato":new Intl.NumberFormat("es-ES",{style:"currency",currency}).format(value);
+export const financialMoney=(value:number|null|undefined,currency:string,fractionDigits?:number)=>value===null||value===undefined?"Sin dato":new Intl.NumberFormat("es-ES",{style:"currency",currency,...(fractionDigits===undefined?{}:{minimumFractionDigits:fractionDigits,maximumFractionDigits:fractionDigits})}).format(value);
 export const financialCount=(value:number|null|undefined)=>value===null||value===undefined?"Sin dato":new Intl.NumberFormat("es-ES",{maximumFractionDigits:2}).format(value);
 
 export function FinanceChoice({label,value,options,onChange,disabled=false}:{label:string;value:string;options:{value:string;label:string}[];onChange:(value:string)=>void;disabled?:boolean}){

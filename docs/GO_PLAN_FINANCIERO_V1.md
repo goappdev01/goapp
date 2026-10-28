@@ -199,3 +199,8 @@ Se retira Cambiar contexto de las cabeceras de Administrador y Empresa. La misma
 Validación proporcionada: 38 pruebas de cálculo, botón, guardado, aislamiento, permisos, contexto, cierre del modal y ciclo de orientación. Typecheck móvil e integración iOS sobre MAIN actualizado. Revisión visual aislada con datos sintéticos en 390×844 y 844×390, incluido el caso 100000 × 1 % × EUR10 = EUR10000 mensuales / EUR120000 anuales. La revisión de tamaños no equivale a una prueba de giro físico; esa comprobación final corresponde al propietario en su iPhone.
 
 Referencias técnicas: [orientación por pantalla en Expo Router](https://docs.expo.dev/versions/latest/sdk/screen-orientation/#per-screen-orientation-with-expo-router) y [orientaciones admitidas por Modal](https://reactnative.dev/docs/modal#supportedorientations).
+
+
+## Importes compactos y totales verdes · 28/10/2026
+
+La calculadora muestra euros enteros mediante redondeo exclusivamente visual: las entradas, cálculos y valores guardados conservan los céntimos. Las columnas Ingresos/mes (€) e Ingresos/año (€) se estrechan y los importes mantienen el símbolo en la misma línea. Los resultados y totales se destacan en verde. Se retira el contador técnico de combinaciones y las etiquetas parcial; cuando faltan entradas, el encabezado dice Total calculado en vez de presentar el subtotal como un total general completo. Los campos desconocidos siguen mostrando Sin dato. Se verifican los importes de las capturas con datos sintéticos, 16 pruebas pertinentes, typecheck móvil y revisión visual a tamaño de iPhone; no se modifica el motor ni la persistencia.
