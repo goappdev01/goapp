@@ -34,24 +34,26 @@ async function diskFixture(){
   get store(){return store;},get writes(){return writes;},get reads(){return reads;},get rows(){try{return JSON.parse(fs.readFileSync(keyFile('go_log_v1'),'utf8'));}catch{return[];}},
   failWrite:value=>failWrite=value,failRead:value=>failRead=value,gate:value=>gate=value,permission:value=>permission=value,setUser,
   active:()=>activeScope.context===scope.context,changeContext:context=>activeScope={...scope,context},
-  async reopen(){store=reopen();return store.readGoLog();},draft:extra=>({...model.noteDraft(),content:'Una frase',...extra}),
+  async reopen(){store=reopen();return store.readGoLog();},draft:extra=>({...model.noteDraft(),destination:'archive',content:'Una frase',...extra}),
   async sourceFile(name='documento.pdf',content='fixture document'){const filename=path.join(directory,name);fs.writeFileSync(filename,content);return{uri:pathToFileURL(filename).href,name,size:Buffer.byteLength(content),mimeType:'application/pdf'};},
   close(){const resolved=path.resolve(directory);if(!resolved.startsWith(path.resolve(os.tmpdir())+path.sep+'go-unified-note-test-'))throw Error('Unsafe fixture cleanup');fs.rmSync(resolved,{recursive:true,force:true});}};
 }
 async function editorFixture({scope={userId:'note-user',context:'demo:USER'},onSave,initial=null,seed,handedness='right',cached,ready=true,ports={}}={}){
  const hosts=new Map(),instances=new Map(),container=document.createElement('div'),root=createRoot(container),calls=[];let props;
- const host=name=>React.forwardRef((p,ref)=>{const token=React.useRef({}).current;if(p.testID){hosts.set(p.testID,p);instances.set(p.testID,token);}if(p.accessibilityLabel)hosts.set(p.accessibilityLabel,p);React.useImperativeHandle(ref,()=>({scrollTo(){},setNativeProps(){}}));return React.createElement('div',null,p.children);});
+ const host=name=>React.forwardRef((p,ref)=>{const token=React.useRef({}).current;if(p.testID){hosts.set(p.testID,p);instances.set(p.testID,token);}if(p.accessibilityLabel)hosts.set(p.accessibilityLabel,p);React.useImperativeHandle(ref,()=>({scrollTo(){},scrollToEnd(){calls.push(['scrollEnd']);},setNativeProps(){}}));return React.createElement('div',null,p.children);});
  const native={...life.rn,Platform:{OS:'ios'},View:host('View'),Text:host('Text'),TextInput:host('TextInput'),TouchableOpacity:host('TouchableOpacity'),ScrollView:host('ScrollView'),Keyboard:{dismiss:()=>calls.push(['keyboard'])},Linking:{openURL:async uri=>calls.push(['link',uri])},Share:{share:async data=>calls.push(['share',data])},StyleSheet:{create:x=>x,absoluteFill:{}}};
  const common={'react-native':native,'@expo/vector-icons':{Feather:host('Feather')},'@/lib/time':{getToday:()=>new Date('2027-01-01'),formatISODate:d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}};
  const model=load('lib/unifiedNotes.ts'),tools=load('lib/goNoteTools.ts'),picker=load('components/notes/GoNoteReminderPicker.tsx',{...common,'@/lib/goNoteTools':tools}),date=load('components/notes/GoNoteDatePicker.tsx',common);
- const voice={status:'idle',error:'',notice:'',focus:field=>calls.push(['focus',field]),abort:()=>calls.push(['abort']),toggle:async()=>calls.push(['microphone'])};
+ let receive;const voice={status:'idle',error:'',transcript:'',abort:()=>calls.push(['abort']),start:async()=>calls.push(['microphone']),stop:async()=>calls.push(['stop'])};
+ const voiceHook=load('hooks/useGoNoteVoice.ts',{'./useBookingVoice':{useBookingVoice:callback=>{receive=callback;return voice;}},'@/lib/goNoteTools':tools});
+ const assistantUI=load('components/booking-assistant/BookingAssistantUI.tsx',common);
  const imports={...common,'react-native-keyboard-controller':{KeyboardAvoidingView:host('KeyboardFrame'),KeyboardAwareScrollView:host('KeyboardScroll')},'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},
   '@/components/ui/GoScreenModal':{GoScreenModal:host('Modal')},'@/components/ui/GoScreenCloseSurface':{GoScreenCloseSurface:host('Surface'),GoScreenCloseGuide:()=>null},'@/components/ui/GoCloseButton':{GoCloseButton:host('Close')},
-  './GoNoteReminderPicker':picker,'./GoNoteDatePicker':date,'@/hooks/useGoNoteVoice':{useGoNoteVoice:p=>({...voice,props:p})},'@/lib/unifiedNotes':model,'@/lib/goNoteFiles':{importNoteFile:ports.importFile||async function(){throw Error('Use the actual file fixture for persistence tests');}},
+  './GoNoteReminderPicker':picker,'./GoNoteDatePicker':date,'@/hooks/useGoNoteVoice':voiceHook,'@/components/booking-assistant/BookingAssistantUI':assistantUI,'@/lib/goNotePreparation':{prepareGoNote:ports.prepare||async function(text){return{patch:{content:text},notice:'Borrador sin guardar.'};}},'@/lib/goNoteTools':tools,'@/lib/unifiedNotes':model,'@/lib/goNoteFiles':{importNoteFile:ports.importFile||async function(){throw Error('Use the actual file fixture for persistence tests');}},
   'expo-document-picker':ports.documents||{getDocumentAsync:async()=>({canceled:true})},'expo-image-picker':ports.images||{launchImageLibraryAsync:async()=>({canceled:true})},'expo-location':ports.location||{}};
- const Editor=load('components/notes/GoNoteEditor.tsx',imports).GoNoteEditor;
+ const Editor=load('components/notes/GoNoteEditor.tsx',imports,ports.timers||{}).GoNoteEditor;
  props={visible:true,scope,ready,initial,seed,handedness,cached,onClose:state=>calls.push(['close',state]),onSave:onSave||(async draft=>({entry:model.buildNoteEntry(draft,scope,draft.original),message:'Nota guardada.'}))};
  const render=async patch=>{props={...props,...patch};await settle(()=>root.render(React.createElement(Editor,props)));};await render({});
- return{hosts,instances,calls,voice,container,run:settle,render,async idle(){for(let i=0;i<20;i++)await settle(()=>new Promise(setImmediate));},close:()=>settle(()=>root.unmount())};
+ return{hosts,instances,calls,voice,container,run:settle,render,emit:text=>settle(()=>receive(text)),async idle(){for(let i=0;i<20;i++)await settle(()=>new Promise(setImmediate));},close:()=>settle(()=>root.unmount())};
 }
 module.exports={...life,compile,load,plain,settle,diskFixture,editorFixture};

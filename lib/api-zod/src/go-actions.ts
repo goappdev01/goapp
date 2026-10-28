@@ -111,6 +111,8 @@ function extractPlace(text: string): string | null {
   const source = /\b(?:voy|llevo|viajo|ir|llevar)\b/i.test(text) ? text : text.replace(/\ba\s+(?=[A-ZÁÉÍÓÚÑ])/gu, "con ");
   return source.match(/(?:\ben|\ba)\s+([A-ZÁÉÍÓÚÑ][\p{L}]+(?:\s+(?:de(?:l)?|la|[A-ZÁÉÍÓÚÑ][\p{L}]+)){0,4})(?=\s+a las|[,.!?]|$)/u)?.[1]?.trim() || null;
 }
+// Reuse the same conservative extraction when preparing an editable note draft.
+export { fields as extractGoScheduleFields, extractPlace as extractGoPlace };
 function finish(action: GoAction): GoPlan { return { actions: [goActionSchema.parse(action)] }; }
 
 /** Conservative offline extraction. Ambiguous requests never become speculative writes. */

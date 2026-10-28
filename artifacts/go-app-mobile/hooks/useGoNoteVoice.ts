@@ -5,16 +5,17 @@ import { appendNoteDictation } from "@/lib/goNoteTools";
 
 type Field = "title" | "detail";
 type Props = { visible: boolean; identity: string; title: string; setTitle: Dispatch<SetStateAction<string>>;
-  setDetail: Dispatch<SetStateAction<string>>; english: boolean; titleLimit?: number };
+  setDetail: Dispatch<SetStateAction<string>>; english: boolean; titleLimit?: number; onPreparedText?:(text:string)=>void };
 
 /** Uses the existing recorder/transcriber; it never sends a task, message or booking. */
-export function useGoNoteVoice({ visible, identity, title, setTitle, setDetail, english, titleLimit = 16 }: Props) {
+export function useGoNoteVoice({ visible, identity, title, setTitle, setDetail, english, titleLimit = 16, onPreparedText }: Props) {
   const field = useRef<Field>("title"), target = useRef<Field>("title");
   const captureIdentity = useRef(identity);
   const current = useRef({ visible, identity }); current.current = { visible, identity };
   const [notice, setNotice] = useState("");
   const voice = useBookingVoice(text => {
     if (!current.current.visible || current.current.identity !== captureIdentity.current) return;
+    if(onPreparedText){onPreparedText(text);return;}
     if (target.current === "detail") setDetail(previous => appendNoteDictation(previous, text));
     else {
       const next = appendNoteDictation(title, text);

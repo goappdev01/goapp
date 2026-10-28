@@ -14,7 +14,7 @@ La persistencia es local al proyecto Expo y al dispositivo: no se promete sincro
 
 ## Destinos y acciones
 
-- ARCHIVO conserva información de consulta; una nota nueva empieza aquí hasta que la persona elija otro destino. No equivale a REALIZADA, retirada o eliminación.
+- ARCHIVO conserva información de consulta. Una nota nueva no tiene ningún destino seleccionado: el usuario debe elegir CALENDARIO, PENDIENTES o ARCHIVO antes de guardar. No equivale a REALIZADA, retirada o eliminación.
 - PENDIENTES conserva una acción sin programación. Fecha/hora/duración opcionales permanecen en sus metadatos y no generan un evento ni un aviso ordinario.
 - CALENDARIO exige una fecha y hora válidas, sin obligar a duración o recordatorio.
 
@@ -28,11 +28,11 @@ DocumentPicker e ImagePicker reales copian los archivos al directorio persistent
 
 Los adjuntos ordinarios no están cifrados por esta función. Quitar una referencia no elimina archivos de notas anteriores. La limpieza de archivos huérfanos queda pendiente de una política segura; no se realiza borrado masivo. La recepción directa mediante la extensión Compartir de otras apps no está implementada en Expo Go; no hay un botón que simule esa integración.
 
-El guardado y la clasificación manual no requieren IA ni HTTP. No se añade un clasificador semántico simulado. El micrófono conserva la captura y el servicio de transcripción actuales, incluida la comprobación de disponibilidad; si el servicio no está disponible se informa sin inventar texto. La transcripción real y el dictado nativo requieren prueba física; la selección del cursor no se fuerza desde JavaScript.
+El guardado y la clasificación manual no requieren IA ni HTTP. GO utiliza la captura de voz, interpretGoActions y el reconocimiento conservador de fechas/horas ya existentes para preparar un borrador editable. No guarda, selecciona destino ni crea eventos por sí solo. Las horas ambiguas permanecen sin completar y las ediciones manuales posteriores tienen prioridad frente a respuestas tardías. Si voz o IA no están disponibles se informa sin inventar texto; el servicio sigue deshabilitado en el entorno de validación. GO y GUARDAR permanecen junto al pulgar dominante, y la distribución de controles se invierte con la lateralidad existente sin invertir el texto. La transcripción real y el dictado nativo requieren prueba física; la selección del cursor no se fuerza desde JavaScript.
 
 ## Diseño de bóveda — sin activar
 
-La casilla NOTA DE SEGURIDAD se presenta desactivada, con explicación. El servicio rechaza security=true antes de escribir datos ordinarios. No existe bóveda operativa, cifrado de notas o acceso Face ID implementado en este cambio.
+NOTA DE SEGURIDAD es una opción informativa compacta en la cabecera: al pulsarla aparece una explicación flotante temporal. No activa la protección. El servicio rechaza security=true antes de escribir datos ordinarios y su contenido no se envía a GO. No existe bóveda operativa, cifrado de notas o acceso Face ID implementado en este cambio.
 
 Para activarla se necesita un binario nativo propio y verificar estos requisitos:
 

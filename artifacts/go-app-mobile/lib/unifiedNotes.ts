@@ -12,7 +12,7 @@ export type NoteDocument = {
   history: { at: number; from: NoteDestination; to: NoteDestination; schedule: NoteSchedule }[];
 };
 export type UnifiedNoteDraft = {
-  id: string; operationId: string; title: string; content: string; destination: NoteDestination;
+  id: string; operationId: string; title: string; content: string; destination: NoteDestination | null;
   dateISO: string; time: string; duration: string; place: string; reminderMinutes: number | null;
   attachments: NoteAttachment[]; location?: NoteDocument["location"]; original?: GoEntry; security?: boolean;
 };
@@ -30,15 +30,15 @@ export function validNoteDate(value:string){
 export function noteDraft(entry?: GoEntry | null): UnifiedNoteDraft {
   const n = entry && noteDocument(entry);
   return { id: entry?.id || noteId(), operationId: noteId(), title: n ? n.title : entry?.notes || "",
-    content: n ? n.content : entry?.detail || "", destination: n?.destination || (entry ? entry.dateISO ? "calendar" : "pending" : "archive"),
+    content: n ? n.content : entry?.detail || "", destination: n?.destination || (entry ? entry.dateISO ? "calendar" : "pending" : null),
     dateISO: n?.schedule.dateISO ?? entry?.dateISO ?? "", time: n?.schedule.time ?? entry?.time ?? "", duration: n?.schedule.duration ?? entry?.duration ?? "",
     place: entry?.place || "", reminderMinutes: n?.reminderMinutes ?? entry?.reminders?.[0] ?? null,
     attachments: n?.attachments || [], location: n?.location, original: entry || undefined };
 }
-export function validateNote(draft: UnifiedNoteDraft): void {
+export function validateNote(draft: UnifiedNoteDraft): asserts draft is UnifiedNoteDraft & {destination:NoteDestination} {
   if (draft.security) throw new Error("Las notas de seguridad no están activadas. No se ha guardado contenido protegido.");
   if (!draft.title.trim() && !draft.content.trim() && !draft.attachments.length) throw new Error("Escribe una nota o adjunta un archivo antes de guardar.");
-  if (!["pending", "calendar", "archive"].includes(draft.destination)) throw new Error("Selecciona el destino de la nota.");
+  if (!draft.destination || !["pending", "calendar", "archive"].includes(draft.destination)) throw new Error("Selecciona CALENDARIO, PENDIENTES o ARCHIVO antes de guardar.");
   if(draft.dateISO&&!validNoteDate(draft.dateISO))throw new Error("La fecha no es válida.");
   if(draft.time&&!validNoteTime(draft.time))throw new Error("Introduce una hora entre 00:00 y 23:59.");
   if (draft.destination === "calendar" && (!draft.dateISO || !draft.time)) throw new Error("Para CALENDARIO, selecciona fecha y hora. Duración y aviso son opcionales.");
