@@ -9,12 +9,14 @@ type Props = {
   accessibilityLabel: string;
   hitSlop?: number;
   touchSize?: number;
+  appearance?: "default" | "light";
 };
 
 /** ↓ closes one open panel; ⇓ exits its containing screen. */
-export function GoCloseButton({ level, onPress, accessibilityLabel, disabled = false, hitSlop = 2, touchSize = 44 }: Props) {
+export function GoCloseButton({ level, onPress, accessibilityLabel, disabled = false, hitSlop = 2, touchSize = 44, appearance = "default" }: Props) {
   const size = Math.max(44, touchSize);
-  const icon = <Feather name={level === "panel" ? "chevron-down" : "chevrons-down"} size={20} color="#ffffff" />;
+  const buttonStyle = appearance === "light" ? [styles.button, styles.light] : styles.button;
+  const icon = <Feather name={level === "panel" ? "chevron-down" : "chevrons-down"} size={20} color={appearance === "light" ? "#17212b" : "#ffffff"} />;
   return (
     <TouchableOpacity
       onPress={event => { event?.stopPropagation(); onPress(); }}
@@ -25,14 +27,15 @@ export function GoCloseButton({ level, onPress, accessibilityLabel, disabled = f
       activeOpacity={0.75}
       hitSlop={hitSlop}
       delayPressIn={0}
-      style={size === 44 ? styles.button : { width: size, height: size, alignItems: "center", justifyContent: "center" }}
+      style={size === 44 ? buttonStyle : { width: size, height: size, alignItems: "center", justifyContent: "center" }}
     >
-      {size === 44 ? icon : <View pointerEvents="none" style={styles.button}>{icon}</View>}
+      {size === 44 ? icon : <View pointerEvents="none" style={buttonStyle}>{icon}</View>}
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
+  light: { backgroundColor: "rgba(225,232,237,0.92)", borderColor: "#89949d" },
   button: {
     width: 44,
     height: 44,

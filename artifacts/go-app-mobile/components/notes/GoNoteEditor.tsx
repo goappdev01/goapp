@@ -30,6 +30,8 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   const insets=useSafeAreaInsets(),scroll=useRef<React.ElementRef<typeof KeyboardAwareScrollView>>(null);
   const [draft,setDraft]=useState<UnifiedNoteDraft>(()=>cached||noteDraft(initial)),[panel,setPanel]=useState(""),[error,setError]=useState(""),[message,setMessage]=useState("");
   const [busy,setBusy]=useState(false),[attachmentBusy,setAttachmentBusy]=useState(false),[link,setLink]=useState(""),[contentHeight,setContentHeight]=useState(120);
+  const [toolsOpen,setToolsOpen]=useState(false),[writingHeight,setWritingHeight]=useState(240);
+  const toolsScroll=useRef<React.ElementRef<typeof KeyboardAwareScrollView>>(null);
   const [locations,setLocations]=useState<{latitude:number;longitude:number;label:string}[]>([]);
   const [preparing,setPreparing]=useState(false),[preparedNotice,setPreparedNotice]=useState(""),[floatingNotice,setFloatingNotice]=useState("");
   const preparation=useRef(0),draftRef=useRef(draft);draftRef.current=draft;
@@ -37,7 +39,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   const saved=useRef(false),wasVisible=useRef(false),operation=useRef({value:"",id:noteId()});
   const lastScope=useRef(scope);
   const measureContent=useCallback((event:{nativeEvent:{contentSize:{height:number}}})=>{
-    const next=Math.min(240,Math.max(120,Math.ceil(event.nativeEvent.contentSize.height)));
+    const next=Math.min(480,Math.max(120,Math.ceil(event.nativeEvent.contentSize.height)));
     // Native content size already includes padding. Ignore border rounding so
     // applying the measured height cannot feed another resize back into itself.
     setContentHeight(current=>Math.abs(next-current)<=2?current:next);
@@ -69,7 +71,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       const key=initial?.id||"new";
       if(session.current!==key || saved.current || initial){const next=cached||noteDraft(initial);if(!initial&&!cached){next.title=seed?.title||"";next.content=seed?.content||"";}
         if(seed?.destination)next.destination=seed.destination;if(seed?.dateISO)next.dateISO=seed.dateISO;if(seed?.time!==undefined)next.time=seed.time;
-        setDraft(next);setPanel("");setLocations([]);setError("");setMessage("");setPreparedNotice("");saved.current=false;}
+        setDraft(next);setPanel("");setToolsOpen(false);setLocations([]);setError("");setMessage("");setPreparedNotice("");saved.current=false;}
       session.current=key;voice.focus("detail");
     }
     wasVisible.current=visible;
@@ -122,7 +124,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   };
   const input=(id:string,label:string,value:string,onChangeText:(value:string)=>void,extra:object={})=><View style={[s.field,id.startsWith("note-exact-")&&{flex:1,minWidth:100}]}>
     <Text style={s.label}>{label}</Text><TextInput testID={id} accessibilityLabel={label} value={value} onChangeText={onChangeText} editable={!busy}
-      placeholderTextColor="#a1a1aa" style={s.input} {...extra}/></View>;
+      placeholderTextColor="#626974" style={s.input} {...extra}/></View>;
   const choice=(label:string,action:()=>void,selected=false,id?:string)=><TouchableOpacity testID={id} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{selected,disabled:busy||attachmentBusy}}
     disabled={busy||attachmentBusy} onPress={action} style={[s.choice,selected&&s.configured]}><Text style={s.text}>{label}</Text></TouchableOpacity>;
   const controlRow=[s.row,{flexDirection:handedness==="left"?"row" as const:"row-reverse" as const}];
@@ -132,21 +134,33 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   });
   if(!visible)return null;
   return <GoScreenModal visible animationType="slide" onRequestClose={close}>
-    <GoScreenCloseSurface testID="unified-note-screen" handedness={handedness} onClose={close} enabled={!busy&&!attachmentBusy} scrollRefs={[scroll]} style={s.root}>
+    <GoScreenCloseSurface testID="unified-note-screen" handedness={handedness} onClose={close} enabled={!busy&&!attachmentBusy} scrollRefs={[scroll,toolsScroll]} style={s.root}>
       <KeyboardAvoidingView testID="KeyboardFrame" behavior="height" style={{flex:1,paddingTop:insets.top+8,paddingHorizontal:Math.max(12,insets.left,insets.right)}}>
-        <View style={s.header}><Text accessibilityRole="header" style={s.heading}>NOTA</Text>
-          <TouchableOpacity testID="note-security-info" accessibilityRole="button" accessibilityLabel="NOTA DE SEGURIDAD, información" onPress={()=>setFloatingNotice("Aún no disponible: falta validar el cifrado y el acceso seguro de las notas.")} style={s.security}>
-            <Feather name="lock" color="#c4c8d0" size={14}/><Text style={s.securityText}>NOTA DE SEGURIDAD</Text></TouchableOpacity></View>
-        <KeyboardAwareScrollView ref={scroll} testID="unified-note-scroll" style={{flex:1}} keyboardShouldPersistTaps="handled" bottomOffset={90} contentContainerStyle={{flexGrow:1,paddingBottom:16,gap:12}}>
+        <View style={s.header}><Text accessibilityRole="header" style={s.heading}>NOTA</Text></View>
+        <View testID="note-writing-workspace" style={s.workspace}>
+        <KeyboardAwareScrollView ref={scroll} testID="unified-note-scroll" style={[s.writing,handedness==="right"?{marginRight:48}:{marginLeft:48}]}
+          onLayout={event=>{const height=Math.max(120,Math.floor(event.nativeEvent.layout.height-110));setWritingHeight(current=>Math.abs(current-height)<=2?current:height);}}
+          keyboardShouldPersistTaps="handled" bottomOffset={24} contentContainerStyle={{flexGrow:1,paddingBottom:16,gap:12}}>
           {input("note-title","TÍTULO (OPCIONAL)",draft.title,title=>change({title}),{onFocus:()=>voice.focus("title"),maxLength:200})}
-          {input("note-content","CONTENIDO",draft.content,content=>change({content}),{onFocus:()=>voice.focus("detail"),multiline:true,textAlignVertical:"top",scrollEnabled:contentHeight>=240,
-            onContentSizeChange:measureContent,style:[s.input,{height:contentHeight,minHeight:120}]})}
+          {input("note-content","CONTENIDO",draft.content,content=>change({content}),{onFocus:()=>voice.focus("detail"),multiline:true,textAlignVertical:"top",scrollEnabled:true,
+            onContentSizeChange:measureContent,style:[s.input,s.content,{height:Math.max(writingHeight,Math.min(contentHeight,480))}]})}
           {voice.status!=="idle"&&<Text style={s.hint}>{voice.status==="listening"?"Escuchando…":voice.status==="transcribing"?"Transcribiendo…":"Comprobando dictado…"}</Text>}
           {preparing&&<Text accessibilityLiveRegion="polite" style={s.hint}>Preparando borrador…</Text>}
           {!!preparedNotice&&<Text accessibilityLiveRegion="polite" style={s.hint}>{preparedNotice}</Text>}
-          <View testID="note-secondary-controls" style={controlRow}>{options(["attachments","place","duration"])}</View>
+        </KeyboardAwareScrollView>
+        <View testID="note-tools-panel" pointerEvents={toolsOpen?"auto":"none"} accessibilityElementsHidden={!toolsOpen} importantForAccessibility={toolsOpen?"auto":"no-hide-descendants"}
+          style={[s.tools,handedness==="right"?{right:48,left:0}:{left:48,right:0},{display:toolsOpen?"flex":"none"}]}>
+        <KeyboardAwareScrollView ref={toolsScroll} testID="note-tools-scroll" keyboardShouldPersistTaps="handled" bottomOffset={24} style={{flex:1}} contentContainerStyle={{gap:12,padding:8}}
+          onContentSizeChange={()=>{if(toolsOpen&&panel)toolsScroll.current?.scrollToEnd({animated:true});}}>
+          <View testID="note-primary-controls" style={controlRow}>{options(["date","time","duration","reminder"])}</View>
+          <View testID="note-secondary-controls" style={controlRow}>{options(["place","attachments"])}</View>
+          <Text style={s.label}>DESTINO</Text><View testID="note-destinations" style={s.destinationList}>{destinations.map(([value,label])=><TouchableOpacity key={value} testID={"note-destination-"+value}
+            accessibilityRole="radio" accessibilityLabel={label} accessibilityState={{checked:draft.destination===value}} disabled={busy} onPress={()=>change({destination:value})}
+            style={[s.choice,s.destination,{calendar:s.calendar,pending:s.pending,archive:s.archive}[value],draft.destination===value&&s.selectedDestination]}><Text style={s.destinationText}>{label}</Text></TouchableOpacity>)}</View>
+          <TouchableOpacity testID="note-security-info" accessibilityRole="button" accessibilityLabel="NOTA DE SEGURIDAD, información" onPress={()=>setFloatingNotice("Aún no disponible: falta validar el cifrado y el acceso seguro de las notas.")} style={[s.choice,s.security]}>
+            <Feather name="lock" color="#323b44" size={16}/><Text style={s.securityText}>NOTA DE SEGURIDAD</Text></TouchableOpacity>
           {!!(draft.dateISO||draft.time||draft.duration||draft.place)&&<Text style={s.hint}>{[draft.dateISO,draft.time,draft.duration,draft.place].filter(Boolean).join(" · ")}</Text>}
-          {panel==="date"&&<View style={s.section}><GoNoteDatePicker value={draft.dateISO} onChange={dateISO=>change({dateISO})} disabled={busy}/>{input("note-date","FECHA · AAAA-MM-DD",draft.dateISO,dateISO=>change({dateISO}),{keyboardType:"numbers-and-punctuation",placeholder:"2026-12-30",maxLength:10})}{choice("Sin fecha",()=>change({dateISO:""}))}</View>}
+          {panel==="date"&&<View style={s.section}><GoNoteDatePicker value={draft.dateISO} onChange={dateISO=>change({dateISO})} disabled={busy} light/>{input("note-date","FECHA · AAAA-MM-DD",draft.dateISO,dateISO=>change({dateISO}),{keyboardType:"numbers-and-punctuation",placeholder:"2026-12-30",maxLength:10})}{choice("Sin fecha",()=>change({dateISO:""}))}</View>}
           {panel==="time"&&<View style={s.section}><View style={s.row}>
             {input("note-exact-hour","HORAS · 00–23",draft.time.split(":")[0]||"",hour=>change({time:hour+":"+(draft.time.split(":")[1]||"00")}),{keyboardType:"number-pad",maxLength:2,selectTextOnFocus:true,style:[s.input,s.number]})}
             {input("note-exact-minute","MINUTOS · 00–59",draft.time.split(":")[1]||"",minute=>change({time:(draft.time.split(":")[0]||"00")+":"+minute}),{keyboardType:"number-pad",maxLength:2,selectTextOnFocus:true,style:[s.input,s.number]})}
@@ -155,39 +169,40 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
           {panel==="place"&&<View style={s.section}>{input("note-place","DIRECCIÓN O LUGAR",draft.place,place=>{change({place,location:undefined});setLocations([]);})}<View style={controlRow}>{choice("Buscar ubicación",()=>void locate(true))}{choice("Ubicación actual",()=>void locate(false))}</View>
             {locations.map((result,index)=><React.Fragment key={index}>{choice(result.label,()=>{const {label,...location}=result;change({location,place:label});setLocations([]);},false,"note-location-result-"+index)}</React.Fragment>)}
             {draft.location&&<Text style={s.hint}>{draft.location.latitude.toFixed(5)}, {draft.location.longitude.toFixed(5)}</Text>}</View>}
-          {panel==="reminder"&&<GoNoteReminderPicker value={draft.reminderMinutes} onChange={reminderMinutes=>{change({reminderMinutes});setPanel("");}} dateISO={draft.dateISO} time={draft.time} busy={busy}/>}
+          {panel==="reminder"&&<GoNoteReminderPicker value={draft.reminderMinutes} onChange={reminderMinutes=>{change({reminderMinutes});setPanel("");}} dateISO={draft.dateISO} time={draft.time} busy={busy} light/>}
           {panel==="attachments"&&<View style={s.section}><View style={controlRow}>{choice("Fotografías",()=>void attach("image"))}{choice("PDF o documento",()=>void attach("file"))}</View>
             {input("note-link","ENLACE O UBICACIÓN COMPARTIDA",link,setLink,{autoCapitalize:"none",keyboardType:"url",placeholder:"https://…"})}
             {choice("Añadir enlace",()=>{if(!/^https?:\/\//i.test(link.trim())){setError("Escribe un enlace http:// o https:// válido.");return;}change({attachments:[...draft.attachments,{id:noteId(),kind:"link",name:link.trim(),uri:link.trim()}]});setLink("");})}
           </View>}
           {draft.attachments.map(a=><View key={a.id} style={s.attachment}><TouchableOpacity accessibilityRole="button" disabled={busy} style={{flex:1,minHeight:44,justifyContent:"center"}} onPress={()=>void (a.kind==="link"?Linking.openURL(a.uri):Share.share({url:a.uri,title:a.name})).catch(()=>setError("No se ha podido abrir el adjunto."))}><Text style={s.text}>{a.name}</Text></TouchableOpacity>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={"Quitar "+a.name} disabled={busy} style={s.icon} onPress={()=>change({attachments:draft.attachments.filter(b=>b.id!==a.id)})}><Feather name="x" size={20} color="#ffffff"/></TouchableOpacity></View>)}
-          <View style={s.primaryGroup}>
-          <View testID="note-primary-controls" style={controlRow}>{options(["date","time","reminder"])}</View>
-          <Text style={s.label}>DESTINO</Text><View testID="note-destinations" style={controlRow}>{destinations.map(([value,label])=><TouchableOpacity key={value} testID={"note-destination-"+value}
-            accessibilityRole="radio" accessibilityState={{checked:draft.destination===value}} disabled={busy} onPress={()=>change({destination:value})} style={[s.choice,s.destination,draft.destination===value&&s.configured]}><Text style={s.text}>{label}</Text></TouchableOpacity>)}</View>
-          {!!error&&<Text testID="note-save-error" accessibilityRole="alert" style={s.warning}>{error}</Text>}
-          {!!message&&<Text testID="note-save-confirmation" accessibilityLiveRegion="polite" style={s.success}>{message}</Text>}
-          </View>
-        </KeyboardAwareScrollView>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={"Quitar "+a.name} disabled={busy} style={s.icon} onPress={()=>change({attachments:draft.attachments.filter(b=>b.id!==a.id)})}><Feather name="x" size={20} color="#242b34"/></TouchableOpacity></View>)}
+        </KeyboardAwareScrollView></View>
+        <TouchableOpacity testID="note-tools-toggle" accessibilityRole="button" accessibilityLabel={toolsOpen?"Ocultar herramientas de la nota":"Mostrar herramientas de la nota"} accessibilityState={{expanded:toolsOpen}}
+          onPress={()=>setToolsOpen(open=>!open)} style={[s.toolsToggle,handedness==="right"?{right:0}:{left:0}]}>
+          <Feather name={handedness==="right"?(toolsOpen?"chevron-right":"chevron-left"):(toolsOpen?"chevron-left":"chevron-right")} size={22} color="#202830"/>
+        </TouchableOpacity>
+        </View>
+        {!!error&&<Text testID="note-save-error" accessibilityRole="alert" style={s.warning}>{error}</Text>}
+        {!!message&&<Text testID="note-save-confirmation" accessibilityLiveRegion="polite" style={s.success}>{message}</Text>}
         <GoScreenCloseGuide/>
         {!!floatingNotice&&<View testID="note-floating-notice" pointerEvents="none" accessibilityRole="alert" accessibilityLiveRegion="polite" style={[s.floating,{top:insets.top+64}]}><Text style={s.text}>{floatingNotice}</Text></View>}
         <View testID="note-editor-footer" style={[s.footer,{paddingBottom:Math.max(insets.bottom,12),flexDirection:handedness==="left"?"row-reverse":"row"}]}>
-          <GoCloseButton level="panel" touchSize={56} hitSlop={0} onPress={close} accessibilityLabel="Cerrar nota" disabled={busy}/>
-          <TouchableOpacity testID="unified-note-save" accessibilityRole="button" disabled={busy||attachmentBusy||preparing||voice.status!=="idle"} onPress={()=>void save()} style={s.save}><Text style={s.saveText}>{busy?"GUARDANDO…":"GUARDAR"}</Text></TouchableOpacity>
           <TouchableOpacity testID="note-microphone" accessibilityRole="button" accessibilityLabel={voice.status==="listening"?"Detener escucha de GO":"Hablar con GO para preparar la nota"} accessibilityState={{selected:voice.status==="listening",disabled:busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"}}
             disabled={busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"} onPress={()=>{if(draftRef.current.security){setFloatingNotice("Las notas de seguridad no están activadas y no se envían a la IA.");return;}if(!latest.current.ready){setFloatingNotice("Espera a que se verifique tu cuenta para hablar con GO.");return;}void voice.toggle();}} style={[assistantStyles.goButton,s.go,voice.status==="listening"&&assistantStyles.listening]}>
             <Feather name={voice.status==="listening"?"square":"mic"} size={22} color={voice.status==="listening"?"#ffffff":"#142D2A"}/><Text style={[s.goText,voice.status==="listening"&&{color:"#ffffff"}]}>{voice.status==="listening"?"Parar":"GO"}</Text></TouchableOpacity>
+          <TouchableOpacity testID="unified-note-save" accessibilityRole="button" disabled={busy||attachmentBusy||preparing||voice.status!=="idle"} onPress={()=>void save()} style={s.save}><Text style={s.saveText}>{busy?"GUARDANDO…":"GUARDAR"}</Text></TouchableOpacity>
+          <GoCloseButton level="panel" touchSize={56} hitSlop={0} onPress={close} accessibilityLabel="Cerrar nota" disabled={busy} appearance="light"/>
         </View>
       </KeyboardAvoidingView>
     </GoScreenCloseSurface>
   </GoScreenModal>;
 }
-const s=StyleSheet.create({root:{flex:1,backgroundColor:"#0e0e10"},header:{flexDirection:"row",alignItems:"center",justifyContent:"space-between",minHeight:52},heading:{color:"#ffffff",fontSize:20,fontWeight:"800"},
-  field:{gap:6,flexShrink:0},label:{color:"#d4d4d8",fontSize:12,fontWeight:"700"},input:{minHeight:48,color:"#ffffff",fontSize:16,borderWidth:1,borderColor:"rgba(255,255,255,0.35)",backgroundColor:"#1a1a1c",borderRadius:12,padding:12},
-  number:{fontSize:28,textAlign:"center",minHeight:64},row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:8},choice:{minHeight:48,paddingVertical:10,paddingHorizontal:12,borderWidth:2,borderColor:"#59616d",backgroundColor:"#23262b",borderRadius:14,justifyContent:"center"},configured:{borderColor:"#22c55e",backgroundColor:"#173c2a"},destination:{flexGrow:1,flexBasis:"30%",minWidth:88},
-  text:{color:"#ffffff",fontSize:13,flexShrink:1},hint:{color:"#a1a1aa",fontSize:12},warning:{color:"#fbbf24",fontSize:13},success:{color:"#6ee7b7",fontSize:13},section:{gap:10,padding:12,borderWidth:1,borderColor:"rgba(255,255,255,0.15)",borderRadius:12},
-  icon:{width:44,height:44,alignItems:"center",justifyContent:"center"},attachment:{flexDirection:"row",alignItems:"center",gap:8,borderWidth:1,borderColor:"rgba(255,255,255,0.2)",paddingHorizontal:10,borderRadius:10},
-  security:{minHeight:44,flexDirection:"row",alignItems:"center",gap:6,paddingHorizontal:8,borderRadius:12,flexShrink:1},securityText:{color:"#c4c8d0",fontSize:10,fontWeight:"600",flexShrink:1},floating:{position:"absolute",left:12,right:12,padding:14,borderRadius:14,borderWidth:1,borderColor:"#59616d",backgroundColor:"#292d34",zIndex:20},
-  primaryGroup:{marginTop:"auto",gap:12},go:{marginHorizontal:0,alignItems:"center",justifyContent:"center",gap:2},goText:{color:"#142D2A",fontSize:13,fontWeight:"800"},
-  footer:{flexDirection:"row",alignItems:"center",gap:10,paddingTop:8},save:{flex:1,minHeight:52,borderRadius:16,backgroundColor:"#6ee7b7",alignItems:"center",justifyContent:"center"},saveText:{color:"#0e0e10",fontSize:15,fontWeight:"800"}});
+const s=StyleSheet.create({root:{flex:1,backgroundColor:"#FAFAF7"},header:{justifyContent:"center",minHeight:44},heading:{color:"#18212a",fontSize:20,fontWeight:"800"},
+  workspace:{flex:1,minHeight:0},writing:{flex:1},field:{gap:6,flexShrink:0},label:{color:"#424b55",fontSize:12,fontWeight:"700"},input:{minHeight:48,color:"#17212b",fontSize:16,borderWidth:1.5,borderColor:"#9aa3ad",backgroundColor:"rgba(255,255,255,0.86)",borderRadius:12,padding:12},content:{borderColor:"#b8bfc5",fontSize:17},
+  number:{fontSize:28,textAlign:"center",minHeight:64},row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:8},choice:{minHeight:48,paddingVertical:10,paddingHorizontal:10,borderWidth:1.5,borderColor:"#88939e",backgroundColor:"rgba(232,236,239,0.90)",borderRadius:14,justifyContent:"center",width:"100%"},configured:{borderColor:"#16834a",backgroundColor:"rgba(212,243,222,0.90)"},destinationList:{gap:8},destination:{width:"100%"},calendar:{backgroundColor:"rgba(199,236,224,0.88)",borderColor:"#578879"},pending:{backgroundColor:"rgba(255,239,168,0.88)",borderColor:"#99802b"},archive:{backgroundColor:"rgba(211,229,255,0.88)",borderColor:"#6385ac"},selectedDestination:{borderColor:"#16834a",borderWidth:3},destinationText:{color:"#17212b",fontSize:13,fontWeight:"700",textAlign:"center"},
+  text:{color:"#17212b",fontSize:13,flexShrink:1},hint:{color:"#515d69",fontSize:12},warning:{color:"#8a3d0a",fontSize:13,paddingVertical:6},success:{color:"#146339",fontSize:13,paddingVertical:6},section:{gap:10,padding:8,borderWidth:1.5,borderColor:"#aeb8bf",borderRadius:12},
+  tools:{position:"absolute",top:0,bottom:0,maxWidth:340,borderWidth:1.5,borderColor:"#89949d",borderRadius:18,backgroundColor:"rgba(250,250,247,0.97)",zIndex:5,shadowColor:"#22303b",shadowOpacity:0.15,shadowRadius:8,elevation:6},toolsToggle:{position:"absolute",top:"40%",width:44,minHeight:48,alignItems:"center",justifyContent:"center",borderRadius:14,borderWidth:1.5,borderColor:"#89949d",backgroundColor:"rgba(225,232,237,0.92)",zIndex:6},
+  icon:{width:44,height:44,alignItems:"center",justifyContent:"center"},attachment:{flexDirection:"row",alignItems:"center",gap:8,borderWidth:1.5,borderColor:"#aeb8bf",paddingHorizontal:10,borderRadius:10},
+  security:{flexDirection:"row",alignItems:"center",gap:6},securityText:{color:"#323b44",fontSize:11,fontWeight:"600",flexShrink:1},floating:{position:"absolute",left:12,right:12,padding:14,borderRadius:14,borderWidth:1.5,borderColor:"#89949d",backgroundColor:"#eef2f4",zIndex:20},
+  go:{marginHorizontal:0,alignItems:"center",justifyContent:"center",gap:2,backgroundColor:"rgba(211,241,224,0.92)",borderColor:"#5e8b72",borderWidth:1.5},goText:{color:"#142D2A",fontSize:13,fontWeight:"800"},
+  footer:{flexDirection:"row",alignItems:"center",gap:10,paddingTop:8},save:{flex:1,minHeight:52,borderRadius:16,borderWidth:1.5,borderColor:"#528367",backgroundColor:"rgba(193,235,211,0.92)",alignItems:"center",justifyContent:"center"},saveText:{color:"#17212b",fontSize:15,fontWeight:"800"}});
