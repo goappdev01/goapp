@@ -15,14 +15,14 @@ for(const handedness of ['right','left'])test('creation: save and both arrows co
  const disk=await h.diskFixture(),ui=await h.editorFixture({handedness,ports,scope:disk.scope,onSave:d=>disk.api().saveUnifiedNote(d,disk.scope,disk.active)});
  try{
   await edit(ui,'note-content','Una nota sin título');
-  await ui.tool('time');assert.equal(ui.hosts.has('note-time-clear'),false);assert.match(ui.container.textContent,/GUARDAR/);assert.doesNotMatch(ui.container.textContent,/APLICAR HORA|SIN HORA/);
+  await ui.tool('time');assert.equal(ui.hosts.get('note-time-clear').disabled,true);assert.match(ui.container.textContent,/GUARDAR/);assert.doesNotMatch(ui.container.textContent,/APLICAR HORA|SIN HORA/);
   await edit(ui,'note-time-hour','19');await edit(ui,'note-time-minute','30');await focus(ui,'note-time-minute');await back(ui);assert.ok(ui.hosts.has('note-time-picker'));assert.equal(disk.rows.length,0);await back(ui);
   assert.match(ui.hosts.get('note-summary').children,/19:30/);assert.equal(disk.rows.length,0);
   await number(ui,'time','20','00');await press(ui,'note-time-apply');assert.match(ui.hosts.get('note-summary').children,/20:00/);
   await ui.tool('time');assert.ok(ui.hosts.has('note-time-clear'));await press(ui,'note-time-clear');assert.equal(ui.hosts.get('note-option-time').accessibilityState.selected,false);
   await number(ui,'duration','1','30');await press(ui,'note-tools-toggle');assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,false);
   await ui.tool('duration');assert.equal(ui.hosts.get('note-duration-hour').value,'1');assert.equal(ui.hosts.get('note-duration-minute').value,'30');await press(ui,'note-duration-clear');assert.equal(ui.hosts.get('note-option-duration').accessibilityState.selected,false);
-  await ui.tool('reminder');assert.equal(ui.hosts.has('note-reminder-none'),false);await edit(ui,'note-reminder-hours','1');await edit(ui,'note-reminder-minutes','15');await back(ui);
+  await ui.tool('reminder');assert.equal(ui.hosts.get('note-reminder-none').disabled,true);await edit(ui,'note-reminder-hours','1');await edit(ui,'note-reminder-minutes','15');await back(ui);
   await ui.tool('reminder');assert.equal(ui.hosts.get('note-reminder-hours').value,'1');assert.equal(ui.hosts.get('note-reminder-minutes').value,'15');await press(ui,'note-reminder-none');assert.equal(ui.hosts.get('note-option-reminder').accessibilityState.selected,false);
   await ui.tool('place');await press(ui,'note-location-current');assert.equal(ui.hosts.get('note-location-current').accessibilityState.selected,true);assert.match(ui.container.textContent,/✓ Seleccionada: Calle Nueva/);await back(ui);
   await ui.tool('place');assert.match(ui.container.textContent,/Ubicación guardada: Calle Nueva/);await press(ui,'note-place-clear');assert.equal(ui.hosts.get('note-option-place').accessibilityState.selected,false);
@@ -53,7 +53,7 @@ for(const destination of ['calendar','pending','archive'])for(const handedness o
   await ui.tool('time');await press(ui,'note-time-clear');assert.equal(disk.rows[0].note.schedule.time,'');assert.equal(disk.rows[0].time,'');assert.equal(disk.rows[0].dateISO,'2027-10-31');assert.equal(disk.osRequests.size,0,'untimed day note cannot retain a stale alarm');
   await ui.tool('duration');await press(ui,'note-duration-clear');assert.equal(disk.rows[0].note.schedule.duration,'');
   const [stored]=await disk.reopen();assert.equal(stored.id,entry.id);assert.equal(stored.createdAt,entry.createdAt);assert.equal(stored.estado,entry.estado);assert.equal(stored.note.title,'HACER LA COMPRA');assert.equal(stored.note.content,'Pan y tomates');
-  const reopened=await h.editorFixture({initial:stored,scope:disk.scope});try{await reopened.tool('time');assert.equal(reopened.hosts.has('note-time-clear'),false);await back(reopened);await reopened.tool('attachments');assert.match(reopened.container.textContent,/nueva.jpg/);assert.doesNotMatch(reopened.container.textContent,/anterior.pdf/);}finally{await reopened.close();}
+  const reopened=await h.editorFixture({initial:stored,scope:disk.scope});try{await reopened.tool('time');assert.equal(reopened.hosts.get('note-time-clear').disabled,true);await back(reopened);await reopened.tool('attachments');assert.match(reopened.container.textContent,/nueva.jpg/);assert.doesNotMatch(reopened.container.textContent,/anterior.pdf/);}finally{await reopened.close();}
  }finally{await ui.close();disk.close();}
 });
 
@@ -75,12 +75,12 @@ test('failed write/readback leaves the tool and draft recoverable; save, back an
  }finally{await ui.close();disk.close();}}
 });
 
-test('concurrent finish events during notification acknowledgement write once and do not close the editor',async()=>{
- const disk=await h.diskFixture(),{entry}=await disk.api().saveUnifiedNote(disk.draft({destination:'calendar',dateISO:'2027-10-31',time:'19:30',reminderMinutes:15}),disk.scope,disk.active);let release;disk.holdReminders(new Promise(r=>release=r));
+test('concurrent finish events during the disk write commit once and do not close the editor',async()=>{
+ const disk=await h.diskFixture(),{entry}=await disk.api().saveUnifiedNote(disk.draft({destination:'calendar',dateISO:'2027-10-31',time:'19:30',reminderMinutes:15}),disk.scope,disk.active);let release;disk.gate(new Promise(r=>release=r));
  const ui=await h.editorFixture({initial:entry,scope:disk.scope,onSave:d=>disk.api().saveUnifiedNote(d,disk.scope,disk.active)});try{
-  await number(ui,'time','20','00');await ui.run(()=>{ui.hosts.get('note-time-apply').onPress();ui.hosts.get('note-editor-footer').children[2].props.onPress();ui.hosts.get('note-tools-toggle').onPress();});await ui.idle();assert.equal(disk.writes,2);assert.equal(ui.calls.some(c=>c[0]==='close'),false);assert.equal(ui.hosts.get('unified-note-save').disabled,true);
+  await number(ui,'time','20','00');await ui.run(()=>{ui.hosts.get('note-time-apply').onPress();ui.hosts.get('note-editor-footer').children[2].props.onPress();ui.hosts.get('note-tools-toggle').onPress();});await ui.idle();assert.equal(disk.writes,1);assert.equal(ui.calls.some(c=>c[0]==='close'),false);assert.equal(ui.hosts.get('unified-note-save').disabled,true);
   await ui.run(()=>release());await ui.idle();assert.equal(disk.rows.length,1);assert.equal(disk.rows[0].note.revision,2);assert.equal(disk.osRequests.size,1);assert.equal(ui.calls.some(c=>c[0]==='close'),false);
- }finally{await ui.close();disk.close();}
+ }finally{release?.();await ui.close();disk.close();}
 });
 
 test('tool persistence preserves unsubmitted text, execution state and other users; final save updates the same note',async()=>{

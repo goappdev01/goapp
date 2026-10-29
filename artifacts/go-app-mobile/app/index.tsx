@@ -36,6 +36,7 @@ import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoNoteEditor } from "@/components/notes/GoNoteEditor";
 import { isArchivedNote, noteDocument, noteInScope, type UnifiedNoteDraft, type NoteDestination } from "@/lib/unifiedNotes";
 import { saveUnifiedNote, moveUnifiedNote } from "@/lib/unifiedNoteStore";
+import { noteReminderOperationCurrent } from "@/lib/goNoteSaveProgress";
 import { savedNoteTarget, type NoteRevealTarget } from "@/lib/goNoteNavigation";
 import { GoNoteControls } from "@/components/notes/GoNoteControls";
 import { GoTaskScheduleStep } from "@/components/notes/GoTaskScheduleStep";
@@ -4280,7 +4281,7 @@ function HomeScreenContent() {
     if(!identity.ready||!identity.scope){showToast("Espera a que se verifique tu cuenta.","error");return;}
     const scope={...identity.scope};
     void moveUnifiedNote(entry,destination,scope,()=>noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===scope.userId&&noteIdentityRef.current.scope.context===scope.context)
-      .then(result=>showToast(result.message,"success")).catch(error=>showToast(error.message,"error"));
+      .then(result=>{watchNoteReminderReceipt(result);showToast(result.notice,"success");}).catch(error=>showToast(error.message,"error"));
   };
   const noteIdentity = completionIdentity;
   const noteIdentityRef = useRef(noteIdentity); noteIdentityRef.current = noteIdentity;
@@ -26303,8 +26304,18 @@ function HomeScreenContent() {
         if(!identity.ready||!identity.scope)throw new Error("No se puede verificar tu cuenta. La nota permanece en el editor.");
         const expected={...identity.scope};
         const result=await saveUnifiedNote(draft,expected,()=>noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===expected.userId&&noteIdentityRef.current.scope.context===expected.context);
-        if(!draft.original){setQuickNoteText("");setQuickNoteDetail("");await AsyncStorage.removeItem("go_task_draft_v1").catch(()=>{});}
+        watchNoteReminderReceipt(result);
+        if(!draft.original){setQuickNoteText("");setQuickNoteDetail("");void AsyncStorage.removeItem("go_task_draft_v1").catch(()=>{});}
         return result;
+  }
+  function watchNoteReminderReceipt(result:Awaited<ReturnType<typeof saveUnifiedNote>>){
+    const identity=noteIdentityRef.current,expected=identity.scope;
+    if(!identity.ready||!expected||!noteInScope(result.entry,expected))return;
+    void result.reminderSync.then(receipt=>{
+      if(receipt.phase!=="warning"||!noteIdentityRef.current.ready||noteIdentityRef.current.scope?.userId!==expected.userId||noteIdentityRef.current.scope.context!==expected.context
+        ||!noteReminderOperationCurrent(expected,result.entry.id,result.entry.note!.operationId))return;
+      showToast(receipt.message,"warning");
+    });
   }
   function renderSavedNoteActions(entry:GoEntry,onEdit:()=>void){
     return <>{renderEntryMicroActions(entry)}{renderEntryQuickActions(entry,true,false,onEdit)}</>;

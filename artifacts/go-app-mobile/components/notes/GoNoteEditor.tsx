@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Keyboard, KeyboardAvoidingView, Linking, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View, type TextInputProps } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -23,10 +23,11 @@ import { importNoteFile } from "@/lib/goNoteFiles";
 import { noteDraft, noteId, validNoteDate, validNoteTime, validateNote, type NoteDestination, type UnifiedNoteDraft } from "@/lib/unifiedNotes";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import type { TaskScope } from "@/lib/goTaskReminders";
+import { getNoteReminderProgress, subscribeNoteReminderProgress, startNoteSaveTrace, type NoteSaveTrace } from "@/lib/goNoteSaveProgress";
 
 type Props = { visible:boolean; initial?:GoEntry|null; seed?:{title?:string;content?:string;destination?:NoteDestination;dateISO?:string;time?:string};
   scope:TaskScope|null; ready:boolean; handedness:"left"|"right"; cached?:UnifiedNoteDraft; onClose:(state?:{draft:UnifiedNoteDraft;saved:boolean})=>void;
-  onSave:(draft:UnifiedNoteDraft)=>Promise<{entry:GoEntry;message:string;notice?:string}>;
+  onSave:(draft:UnifiedNoteDraft)=>Promise<{entry:GoEntry;message:string;notice?:string;performance?:NoteSaveTrace}>;
   onSaved?:(entry:GoEntry,notice:string)=>void;
   onGoToLanding?:()=>void; closeRequested?:boolean;
   renderActions?:(entry:GoEntry,onEdit:()=>void)=>React.ReactNode };
@@ -50,7 +51,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   const [openingTool,setOpeningTool]=useState(""),[awaitingTool,setAwaitingTool]=useState<{key:string;epoch:number;id:string}|null>(null);
   const [frameHeight,setFrameHeight]=useState(0),[footerBottom,setFooterBottom]=useState(0);
   const [dateContentHeight,setDateContentHeight]=useState(400),[closingSaved,setClosingSaved]=useState(false);
-  const savedExit=useRef<{entry:GoEntry;notice:string;scope:TaskScope;afterClose?:()=>void;draft?:UnifiedNoteDraft;saved?:boolean}|null>(null),exitLock=useRef(false);
+  const savedExit=useRef<{entry:GoEntry;notice:string;scope:TaskScope;afterClose?:()=>void;draft?:UnifiedNoteDraft;saved?:boolean;performance?:NoteSaveTrace}|null>(null),exitLock=useRef(false);
   const keyboardVisible=keyboard.visible;
   const toolRequest=useRef(0),footerHeight=useRef(106),focusedToolTarget=useRef<Parameters<React.ElementRef<typeof ScrollView>["scrollResponderScrollNativeHandleToKeyboard"]>[0]|null>(null);
   const focusedWritingTarget=useRef<Parameters<React.ElementRef<typeof ScrollView>["scrollResponderScrollNativeHandleToKeyboard"]>[0]|null>(null);
@@ -68,6 +69,8 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   const [preparing,setPreparing]=useState(false),[preparedNotice,setPreparedNotice]=useState(""),[floatingNotice,setFloatingNotice]=useState("");
   const preparation=useRef(0),draftRef=useRef(draft);draftRef.current=draft;
   const saveLock=useRef(false),workLock=useRef(false),session=useRef(""),latest=useRef({scope,ready,visible,id:draft.id});latest.current={scope,ready,visible,id:draft.id};
+  const readReminderProgress=useCallback(()=>scope&&draft.original?.note?getNoteReminderProgress(scope,draft.id,draft.original.note.operationId):null,[scope?.userId,scope?.context,draft.id,draft.original?.note?.operationId]);
+  const reminderProgress=useSyncExternalStore(subscribeNoteReminderProgress,readReminderProgress,()=>null);
   const saved=useRef(false),wasVisible=useRef(false),operation=useRef({value:"",id:noteId()});
   const lastScope=useRef(scope);
   const revealToolInput=useCallback(()=>{if(focusedToolTarget.current)toolsScroll.current?.scrollResponderScrollNativeHandleToKeyboard(focusedToolTarget.current,footerHeight.current+16,true);},[]);
@@ -160,12 +163,12 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   const finishSaved=()=>{
     const result=savedExit.current;if(!result)return;savedExit.current=null;
     if(!latest.current.visible||latest.current.scope?.userId!==result.scope.userId||latest.current.scope?.context!==result.scope.context)return;
-    onClose({draft:result.draft||noteDraft(result.entry),saved:result.saved??true});
+    result.performance?.mark("presenterDismissed");onClose({draft:result.draft||noteDraft(result.entry),saved:result.saved??true});
     if(result.afterClose)result.afterClose();else onSaved?.(result.entry,result.notice);
   };
   useEffect(()=>()=>{savedExit.current=null;},[]);
-  const work=async(fn:()=>Promise<void>)=>{if(workLock.current||saveLock.current||toolCloseLock.current)return;workLock.current=true;setAttachmentBusy(true);setError("");try{await fn();}catch(e){if(latest.current.visible)setError(e instanceof Error?e.message:"No se ha podido completar la selección.");}finally{workLock.current=false;setAttachmentBusy(false);}};
-  const attach=async(kind:"file"|"image")=>work(async()=>{
+  const work=async(kind:"attachments"|"location",fn:()=>Promise<void>)=>{if(workLock.current||saveLock.current||toolCloseLock.current)return;const trace=startNoteSaveTrace("selection:"+kind);workLock.current=true;setAttachmentBusy(true);setError("");try{await fn();}catch(e){if(latest.current.visible)setError(e instanceof Error?e.message:"No se ha podido completar la selección.");}finally{trace.mark("selectionFinished");workLock.current=false;setAttachmentBusy(false);}};
+  const attach=async(kind:"file"|"image")=>work("attachments",async()=>{
     const expected=latest.current.scope,expectedId=draftRef.current.id;if(!expected || !latest.current.ready)throw new Error("Espera a que se verifique tu cuenta para adjuntar archivos.");
     if(!await hideKeyboard())return;
     if(!latest.current.visible||latest.current.id!==expectedId||latest.current.scope?.userId!==expected.userId||latest.current.scope?.context!==expected.context)return;
@@ -177,7 +180,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       added.push(await importNoteFile(expected,expectedId,{uri:asset.uri,name:"name" in asset?asset.name:asset.fileName||"Fotografía.jpg",mimeType:asset.mimeType,size:"size" in asset?asset.size:"fileSize" in asset?asset.fileSize:undefined}));}
     if(latest.current.visible && latest.current.id===expectedId && latest.current.scope?.userId===expected.userId && latest.current.scope?.context===expected.context){stage({attachments:[...(toolDraftRef.current||draftRef.current).attachments,...added]});if(added.length)setFloatingNotice("Archivo seleccionado.");}
   });
-  const locate=async(search:boolean)=>work(async()=>{
+  const locate=async(search:boolean)=>work("location",async()=>{
     const expected=latest.current.scope,expectedId=draftRef.current.id,place=(toolDraftRef.current||draftRef.current).place;
     if(!expected||!latest.current.ready)throw new Error("Espera a que se verifique tu cuenta para seleccionar la ubicación.");
     if(!search||Platform.OS==="android"){const permission=await Location.requestForegroundPermissionsAsync();if(permission.status!=="granted")throw new Error("Permite el acceso a ubicación o escribe la dirección manualmente.");}
@@ -209,6 +212,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       if(!latest.current.visible||latest.current.id!==id||latest.current.scope?.userId!==expected.userId||latest.current.scope?.context!==expected.context)return false;
       persistedEntry.current=result.entry;
       change({...patch,original:result.entry});
+      requestAnimationFrame(()=>result.performance?.mark("visible"));
       saved.current=same(draftRef.current.title,noteDraft(result.entry).title)&&same(draftRef.current.content,noteDraft(result.entry).content);
       setFloatingNotice(result.notice?.includes("revisa")?result.notice:"Configuración guardada.");return true;
     }catch(e){if(latest.current.visible&&latest.current.id===id&&latest.current.scope?.userId===expected.userId&&latest.current.scope?.context===expected.context)setError(e instanceof Error?e.message:"No se ha podido guardar. Los cambios siguen aquí.");return false;}
@@ -279,10 +283,11 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       const result=await onSave(operationDraft(draft));
       if(!latest.current.visible || latest.current.scope?.userId!==expected?.userId || latest.current.scope?.context!==expected?.context)return;
       const notice=result.notice||"Nota guardada.";persistedEntry.current=result.entry;const committed=noteDraft(result.entry);draftRef.current=committed;setDraft(committed);setMessage(notice);saved.current=true;
+      requestAnimationFrame(()=>result.performance?.mark("visible"));
       if(onSaved&&expected){
         if(!await hideKeyboard()){setMessage("Nota guardada. Oculta el teclado y vuelve a pulsar GUARDAR para abrir su destino.");return;}
         if(!latest.current.visible||latest.current.scope?.userId!==expected.userId||latest.current.scope?.context!==expected.context)return;
-        savedExit.current={entry:result.entry,notice,scope:expected};setClosingSaved(true);
+        result.performance?.mark("keyboardHidden");savedExit.current={entry:result.entry,notice,scope:expected,performance:result.performance};setClosingSaved(true);
       }
     }catch(e){setError(e instanceof Error?e.message:"No se ha podido guardar. Tu nota sigue en el editor.");}
     finally{saveLock.current=false;setBusy(false);}
@@ -321,6 +326,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
             {renderActions&&<View testID="note-existing-actions" pointerEvents={busy||toolFinishing?"none":"auto"} style={{backgroundColor:"#0e0e10",padding:10,borderRadius:12,gap:10}}>{renderActions(initial,()=>setToolsOpen(true))}</View>}
             {onGoToLanding&&<View style={{alignItems:handedness==="right"?"flex-end":"flex-start"}}><GoCloseButton level="container" touchSize={56} hitSlop={0} appearance="light" accessibilityLabel="Ir directamente al Landing" disabled={busy||toolFinishing||closingSaved} onPress={()=>void requestNoteExit(onGoToLanding)}/></View>}
           </View>}
+          {!!reminderProgress?.message&&<Text testID="note-reminder-sync-status" accessibilityLiveRegion="polite" style={reminderProgress.phase==="warning"?s.warning:s.hint}>{reminderProgress.message}</Text>}
           {voice.status!=="idle"&&<Text style={s.hint}>{voice.status==="listening"?"Escuchando…":voice.status==="transcribing"?"Transcribiendo…":"Comprobando dictado…"}</Text>}
           {preparing&&<Text accessibilityLiveRegion="polite" style={s.hint}>Preparando borrador…</Text>}
           {!!preparedNotice&&<Text accessibilityLiveRegion="polite" style={s.hint}>{preparedNotice}</Text>}
@@ -358,7 +364,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
           </>}
           {(!panel||panel==="destinations")&&<><Text style={s.label}>DESTINO</Text><View testID="note-destinations" style={s.destinationList}>{destinations.map(([value,label])=><TouchableOpacity key={value} testID={"note-destination-"+value}
             accessibilityRole="radio" accessibilityLabel={label} accessibilityState={{checked:draft.destination===value,selected:draft.destination===value}} disabled={busy} activeOpacity={0.78} onPress={()=>{setError("");void persistConfiguration({destination:value}).then(ok=>{if(ok&&panel==="destinations")setPanel("");});}}
-            style={[s.choice,s.destination,{calendar:s.calendar,pending:s.pending,archive:s.archive}[value],draft.destination===value&&[s.selectedDestination,{backgroundColor:{calendar:"#82c8ae",pending:"#f2d06b",archive:"#9fc5f1"}[value]}]]}><LinearGradient pointerEvents="none" colors={draft.destination===value?["rgba(255,255,255,0.08)","rgba(0,0,0,0.07)"]:["rgba(255,255,255,0.55)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,s.buttonSheen]}/><Text testID={"note-destination-label-"+value} maxFontSizeMultiplier={1.3} style={s.destinationText}>{label}</Text>{draft.destination===value&&<Text testID="note-destination-selected" maxFontSizeMultiplier={1.3} style={{color:"#17212b",fontSize:11,fontWeight:"800",textAlign:"center",marginTop:3}}>✓ SELECCIONADO</Text>}</TouchableOpacity>)}</View></>}
+            style={[s.choice,s.destination,{calendar:s.calendar,pending:s.pending,archive:s.archive}[value],draft.destination===value&&[s.selectedDestination,{backgroundColor:{calendar:"#23674f",pending:"#806017",archive:"#315f9c"}[value]}]]}><LinearGradient pointerEvents="none" colors={draft.destination===value?["rgba(255,255,255,0.08)","rgba(0,0,0,0.07)"]:["rgba(255,255,255,0.55)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,s.buttonSheen]}/><Text testID={"note-destination-label-"+value} maxFontSizeMultiplier={1.3} style={[s.destinationText,draft.destination===value&&s.destinationActiveText]}>{label}</Text>{draft.destination===value&&<Text testID="note-destination-selected" maxFontSizeMultiplier={1.3} style={{color:"#ffffff",fontSize:11,fontWeight:"800",textAlign:"center",marginTop:3}}>✓ SELECCIONADO</Text>}</TouchableOpacity>)}</View></>}
           {panel==="destinations"&&<GoNoteToolFooter testID="note-destination-save" disabled={busy||toolFinishing} handedness={handedness} onSave={()=>{if(!draftRef.current.destination){setError("Selecciona CALENDARIO, PENDIENTES o ARCHIVO.");return;}void finishTool({destination:draftRef.current.destination});}}/>}
           {!panel&&<>
             <TouchableOpacity testID="note-security-info" accessibilityRole="button" accessibilityLabel="NOTA DE SEGURIDAD, no disponible, información" activeOpacity={0.78} onPress={()=>setFloatingNotice("Aún no disponible: falta validar el cifrado y el acceso seguro de las notas.")} style={[s.choice,s.security]}><LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.65)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,s.buttonSheen]}/><Feather name="lock" color="#323b44" size={16}/><View style={{flex:1}}><Text maxFontSizeMultiplier={1.5} style={s.securityText}>NOTA DE SEGURIDAD</Text><Text maxFontSizeMultiplier={1.5} style={[s.hint,{fontSize:11,textAlign:"center"}]}>No disponible</Text></View></TouchableOpacity>
@@ -395,7 +401,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
 }
 const s=StyleSheet.create({keyboardBack:{position:"absolute",width:44,height:44,alignItems:"center",justifyContent:"center",borderRadius:10,backgroundColor:"#eaf0f3"},root:{flex:1,backgroundColor:"#FAFAF7"},header:{justifyContent:"center",alignItems:"center",minHeight:44},heading:{color:"#18212a",fontSize:20,fontWeight:"800",textAlign:"center",width:"100%"},
   workspace:{flex:1,minHeight:0},writing:{flex:1},field:{gap:6,flexShrink:0},label:{color:"#424b55",fontSize:12,fontWeight:"700"},input:{minHeight:48,color:"#17212b",fontSize:16,borderWidth:1.5,borderColor:"#9aa3ad",backgroundColor:"rgba(255,255,255,0.86)",borderRadius:12,padding:12},content:{borderColor:"#b8bfc5",fontSize:17},
-  number:{fontSize:28,textAlign:"center",minHeight:64},row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:8},choice:{minHeight:44,paddingVertical:8,paddingHorizontal:10,borderWidth:1,borderColor:"#adbac3",borderTopColor:"#ffffff",borderBottomColor:"#a0afb9",backgroundColor:"rgba(231,237,242,0.96)",borderRadius:12,justifyContent:"center",width:"100%",shadowColor:"#2b3d45",shadowOpacity:0.13,shadowRadius:5,shadowOffset:{width:0,height:3},elevation:3},buttonSheen:{borderRadius:12},choiceText:{textAlign:"center",fontWeight:"500"},configured:{borderColor:"#16834a",backgroundColor:"rgba(212,243,222,0.90)"},destinationList:{gap:8},destination:{width:"100%"},calendar:{backgroundColor:"rgba(199,236,224,0.90)",borderColor:"#84ab9e"},pending:{backgroundColor:"rgba(255,239,168,0.90)",borderColor:"#b5a15c"},archive:{backgroundColor:"rgba(211,229,255,0.90)",borderColor:"#93adc9"},selectedDestination:{borderColor:"#446657",borderWidth:2.5,shadowOpacity:0.24,shadowRadius:7,shadowOffset:{width:0,height:4},elevation:6,transform:[{translateY:-1}]},destinationText:{color:"#17212b",fontSize:13,fontWeight:"700",textAlign:"center"},
+  number:{fontSize:28,textAlign:"center",minHeight:64},row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:8},choice:{minHeight:44,paddingVertical:8,paddingHorizontal:10,borderWidth:1,borderColor:"#adbac3",borderTopColor:"#ffffff",borderBottomColor:"#a0afb9",backgroundColor:"rgba(231,237,242,0.96)",borderRadius:12,justifyContent:"center",width:"100%",shadowColor:"#2b3d45",shadowOpacity:0.13,shadowRadius:5,shadowOffset:{width:0,height:3},elevation:3},buttonSheen:{borderRadius:12},choiceText:{textAlign:"center",fontWeight:"500"},configured:{borderColor:"#16834a",backgroundColor:"rgba(212,243,222,0.90)"},destinationList:{gap:8},destination:{width:"100%"},calendar:{backgroundColor:"rgba(199,236,224,0.90)",borderColor:"#84ab9e"},pending:{backgroundColor:"rgba(255,239,168,0.90)",borderColor:"#b5a15c"},archive:{backgroundColor:"rgba(211,229,255,0.90)",borderColor:"#93adc9"},selectedDestination:{borderColor:"#446657",borderWidth:2.5,shadowOpacity:0.24,shadowRadius:7,shadowOffset:{width:0,height:4},elevation:6,transform:[{translateY:-1}]},destinationText:{color:"#17212b",fontSize:13,fontWeight:"700",textAlign:"center"},destinationActiveText:{color:"#ffffff"},
   text:{color:"#17212b",fontSize:13,flexShrink:1},hint:{color:"#515d69",fontSize:12},warning:{color:"#8a3d0a",fontSize:13,paddingVertical:6},success:{color:"#146339",fontSize:13,paddingVertical:6},section:{gap:10,padding:8,borderWidth:1.5,borderColor:"#aeb8bf",borderRadius:12},
   tools:{position:"absolute",bottom:0,maxHeight:"100%",borderWidth:1,borderColor:"#b2bdc5",borderRadius:20,backgroundColor:"rgba(249,252,251,0.97)",zIndex:5,shadowColor:"#2b3d45",shadowOpacity:0.17,shadowRadius:16,shadowOffset:{width:0,height:6},elevation:5},toolsToggle:{width:44,height:48,alignItems:"center",justifyContent:"center",borderRadius:14,borderWidth:1,borderColor:"#a5b0b8",backgroundColor:"rgba(233,239,243,0.94)",zIndex:6,shadowColor:"#2b3d45",shadowOpacity:0.14,shadowRadius:6,shadowOffset:{width:0,height:3},elevation:3},
   icon:{width:44,height:44,alignItems:"center",justifyContent:"center"},attachment:{flexDirection:"row",alignItems:"center",gap:8,borderWidth:1.5,borderColor:"#aeb8bf",paddingHorizontal:10,borderRadius:10},

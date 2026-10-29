@@ -21,6 +21,8 @@ export function registerActionCompletionRuntime(policy: CompletionPolicy) {
 let scope: TaskScope | null = null;
 let mode: AlertMode = "sound";
 let revision = 0;
+type RefreshFlight={expected:TaskScope;epoch:number;permission:boolean;dirty:boolean;promise:Promise<NativeReminderReport[]>};
+let refreshFlight:RefreshFlight|null=null;
 const same = (a: TaskScope | null, b: TaskScope | null) => a === null || b === null ? a === b : a.userId === b.userId && a.context === b.context;
 export const isNativeTaskScopeActive = (expected: TaskScope) => same(scope, expected);
 const scheduler = createNativeReminderScheduler(createExpoReminderPorts({
@@ -46,12 +48,26 @@ export async function setNativeTaskReminderScope(value: TaskScope | null, alertM
   if (revision !== epoch || !same(scope, value)) return [];
   return scheduler.setScope(scope, effective);
 }
-export async function refreshNativeTaskReminders(expected: TaskScope, requestPermission = false): Promise<NativeReminderReport[]> {
-  if (!isNativeTaskScopeActive(expected)) return [];
-  const savedMode = await persistedMode();
-  if (!isNativeTaskScopeActive(expected)) return [];
-  await scheduler.setScope(scope, savedMode);
-  return scheduler.refresh(expected, { requestPermission });
+export function refreshNativeTaskReminders(expected: TaskScope, requestPermission = false): Promise<NativeReminderReport[]> {
+  if (!isNativeTaskScopeActive(expected)) return Promise.resolve([]);
+  if(refreshFlight&&refreshFlight.epoch===revision&&same(refreshFlight.expected,expected)){
+    refreshFlight.permission ||= requestPermission;refreshFlight.dirty=true;return refreshFlight.promise;
+  }
+  const flight:RefreshFlight={expected:{...expected},epoch:revision,permission:requestPermission,dirty:true,promise:Promise.resolve([])};
+  refreshFlight=flight;
+  flight.promise=Promise.resolve().then(async()=>{
+    let reports:NativeReminderReport[]=[];
+    while(flight.epoch===revision&&isNativeTaskScopeActive(flight.expected)){
+      const savedMode=await persistedMode();
+      if(flight.epoch!==revision||!isNativeTaskScopeActive(flight.expected))return [];
+      const permission=flight.permission;flight.permission=false;flight.dirty=false;
+      // Applying mode and refreshing is one reconciliation, not setScope + refresh.
+      reports=await scheduler.refresh(flight.expected,{requestPermission:permission,mode:savedMode});
+      if(!flight.dirty)return reports; // Changes during native work get one latest trailing run.
+    }
+    return [];
+  }).finally(()=>{if(refreshFlight===flight)refreshFlight=null;});
+  return flight.promise;
 }
 export async function suspendNativeTaskReminders(): Promise<void> {
   ++revision; scope = null; clearTaskNotificationFocus();

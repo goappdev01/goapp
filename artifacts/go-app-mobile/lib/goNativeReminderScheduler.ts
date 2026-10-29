@@ -215,6 +215,7 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
       return reports;
     }
 
+    const confirm: Desired[] = [];
     for (const item of retained) {
       if (!await valid(epoch, expected)) return [];
       const exists = pending.some(request => matches(request, item));
@@ -238,16 +239,16 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
           continue;
         }
       }
-      try {
-        const confirmed = await ports.pending();
-        if (!await valid(epoch, expected)) {
-          await ports.cancel(item.identifier);
-          return [];
-        }
-        item.report.status = confirmed.some(request => matches(request, item))
-          ? permission === "quiet" || selectedMode === "visual" ? "quiet" : "scheduled" : "failed";
-      } catch { item.report.status = "failed"; }
+      confirm.push(item);
     }
+    // One native read verifies the complete batch. Re-reading all requests for
+    // each retained item made a full iOS queue cross the bridge 65 times/run.
+    if (confirm.length) try {
+      const confirmed = await ports.pending();
+      if (!await valid(epoch, expected)) { for(const item of confirm)await ports.cancel(item.identifier);return []; }
+      for (const item of confirm) item.report.status = confirmed.some(request => matches(request, item))
+        ? permission === "quiet" || selectedMode === "visual" ? "quiet" : "scheduled" : "failed";
+    } catch { confirm.forEach(item => { item.report.status = "failed"; }); }
     return reports;
   }
   function matches(request: NativeRequest, desired: NativeReminderRequest) {
@@ -275,8 +276,9 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
     const epoch = generation, expected = current;
     return enqueue(() => reconcile(epoch, expected, nextMode, false));
   }
-  function refresh(scope: TaskScope, options: { requestPermission?: boolean } = {}): Promise<NativeReminderReport[]> {
+  function refresh(scope: TaskScope, options: { requestPermission?: boolean; mode?:Mode } = {}): Promise<NativeReminderReport[]> {
     if (!sameScope(current, scope)) return Promise.resolve([]);
+    if(options.mode&&options.mode!==mode){generation++;mode=options.mode;}
     const epoch = generation, expected = current ? { ...current } : null, selectedMode = mode;
     return enqueue(() => reconcile(epoch, expected, selectedMode, !!options.requestPermission));
   }

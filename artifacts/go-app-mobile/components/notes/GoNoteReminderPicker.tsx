@@ -44,7 +44,7 @@ export function GoNoteReminderPicker({ value, onChange, english = false, busy = 
       : at <= Date.now() ? english ? "Choose a future date and time to schedule it." : "Elige una fecha y hora futuras para programar el aviso."
         : english ? "The notification also requires permission on this phone." : "La notificación también requiere permiso en este teléfono."}</Text>}
     {!!error && <Text accessibilityRole="alert" style={{ color: warning, fontSize: 12 }}>{error}</Text>}
-    {unified?<GoNoteToolFooter testID="note-reminder-confirm" removeID="note-reminder-none" handedness={handedness} disabled={busy} onSave={()=>{if(!toolValid){setError(invalid);return;}onChange(total);}} onRemove={value!==null?()=>onChange(null):undefined} removeLabel="QUITAR RECORDATORIO"/>:<View style={{ flexDirection: "row", gap: 10, flexWrap: light ? "wrap" : undefined }}>
+    {unified?<View style={{marginHorizontal:-12}}><GoNoteToolFooter testID="note-reminder-confirm" removeID="note-reminder-none" handedness={handedness} disabled={busy} onSave={()=>{if(!toolValid){setError(invalid);return;}onChange(total);}} onRemove={value!==null?()=>onChange(null):undefined} removeLabel="QUITAR AVISO"/></View>:<View style={{ flexDirection: "row", gap: 10, flexWrap: light ? "wrap" : undefined }}>
       <TouchableOpacity testID="note-reminder-none" accessibilityRole="button" disabled={busy} onPress={() => onChange(null)}
         style={{ flex: 1, minWidth: light ? 140 : undefined, minHeight: 44, justifyContent: "center", alignItems: "center", borderRadius: 8, borderWidth: 1, borderColor: border }}>
         <Text style={{ color: foreground, fontSize: 12 }}>{english ? "NO REMINDER" : "SIN AVISO"}</Text>
