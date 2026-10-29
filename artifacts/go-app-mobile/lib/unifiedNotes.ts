@@ -48,8 +48,9 @@ export function validateNote(draft: UnifiedNoteDraft): asserts draft is UnifiedN
   if (!draft.destination || !["pending", "calendar", "archive"].includes(draft.destination)) throw new Error("Selecciona CALENDARIO, PENDIENTES o ARCHIVO antes de guardar.");
   if(draft.dateISO&&!validNoteDate(draft.dateISO))throw new Error("La fecha no es válida.");
   if(draft.time&&!validNoteTime(draft.time))throw new Error("Introduce una hora entre 00:00 y 23:59.");
-  if (draft.destination === "calendar" && (!draft.dateISO || !draft.time)) throw new Error("Para CALENDARIO, selecciona fecha y hora. Duración y aviso son opcionales.");
-  if(draft.destination==="calendar") {
+  // Calendar already has an untimed-note lane; explicitly removing time keeps the day.
+  if (draft.destination === "calendar" && !draft.dateISO) throw new Error("Para CALENDARIO, selecciona una fecha. La hora es opcional.");
+  if(draft.destination==="calendar"&&draft.time) {
     const [hours,minutes]=draft.time.split(":").map(Number),local=new Date(draft.dateISO+"T00:00:00");local.setHours(hours,minutes,0,0);
     if(local.getHours()!==hours||local.getMinutes()!==minutes)throw new Error("Esa hora no existe en la fecha y zona horaria seleccionadas.");
   }
@@ -79,6 +80,6 @@ export function buildNoteEntry(draft: UnifiedNoteDraft, scope: TaskScope, previo
     dateISO:draft.destination==="calendar"?draft.dateISO:"",date:draft.destination==="calendar"?draft.dateISO:"",
     time:draft.destination==="calendar"?exactTime:"",duration:draft.destination==="calendar"?draft.duration:"",
     reminders:draft.destination==="calendar"?reminderOffsets:[],
-    notificationsEnabled:draft.destination==="calendar" && reminderOffsets.length>0 && !notificationsMuted,
+    notificationsEnabled:draft.destination==="calendar" && !!exactTime && reminderOffsets.length>0 && !notificationsMuted,
     goNoteReminder:true,note };
 }

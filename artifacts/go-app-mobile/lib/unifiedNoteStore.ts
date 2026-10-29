@@ -43,10 +43,10 @@ export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope,
   await check();
   const verifiedAt=now();
   let message="Nota guardada en "+({pending:"PENDIENTES",calendar:"CALENDARIO",archive:"ARCHIVO"}[draft.destination])+".";
-  let reminderWarning=false;
-  try {const reports=await refreshNativeTaskReminders(scope,draft.destination==="calendar"&&draft.reminderMinutes!==null);
-    reminderWarning=reports.some(report=>report.taskId===saved.id&&["failed","denied","capacity","unsupported"].includes(report.status));
-    if(draft.destination==="calendar"&&draft.reminderMinutes!==null)message+=" "+describeReminders(saved,reports);
+  let reminderWarning=draft.destination==="calendar"&&!draft.time&&draft.reminderMinutes!==null;
+  try {const reports=await refreshNativeTaskReminders(scope,draft.destination==="calendar"&&!!draft.time&&draft.reminderMinutes!==null);
+    reminderWarning=reminderWarning||reports.some(report=>(!report.taskId||report.taskId===saved.id)&&["failed","denied","capacity","unsupported"].includes(report.status));
+    if(draft.destination==="calendar"&&draft.reminderMinutes!==null)message+=!draft.time?" Elige una hora para programar el aviso.":" "+describeReminders(saved,reports);
     else if(draft.reminderMinutes!==null)message+=" El aviso se conserva sin programar hasta elegir CALENDARIO, fecha y hora.";
   }catch{reminderWarning=true;message+=" El aviso no se ha podido confirmar. Revisa los permisos del teléfono.";}
   await check();const completed=now();

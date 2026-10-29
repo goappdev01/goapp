@@ -4270,8 +4270,8 @@ function HomeScreenContent() {
   const [unifiedNoteInitial,setUnifiedNoteInitial]=useState<GoEntry|null>(null);
   const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string}>({});
   const unifiedNoteCache=useRef<{scope:string;draft:UnifiedNoteDraft}|null>(null);
+  const unifiedNoteEditCache=useRef(new Map<string,UnifiedNoteDraft>());
   const openUnifiedNote=(entry:GoEntry,seed:typeof unifiedNoteSeed={})=>{
-    if(unifiedNoteCache.current?.draft.id!==entry.id)unifiedNoteCache.current=null;
     setUnifiedNoteInitial(entry);setUnifiedNoteSeed(seed);setNotesOpen(true);
   };
   const moveNoteDestination=(entry:GoEntry,destination:NoteDestination)=>{
@@ -13627,8 +13627,8 @@ function HomeScreenContent() {
     onDone={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"done"):undefined}
     onPending={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"pending"):undefined}
     onDiscard={canResolveEntry(entry)?()=>resolveEntry(entry,"discard"):undefined}/>;
-  const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false) => <GoEntryQuickActions entry={followedEntry(entry)} showState={showState} compact={compact}
-    onCancel={() => cancelEntryFromDetails(entry)} onEdit={() => openEntryChange(entry)} onPropose={() => openEntryChange(entry)}
+  const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false, editNote?:()=>void) => <GoEntryQuickActions entry={followedEntry(entry)} showState={showState} compact={compact}
+    onCancel={() => cancelEntryFromDetails(entry)} onEdit={editNote||(()=>openEntryChange(entry))} onPropose={() => openEntryChange(entry)}
     onAccept={() => { if (entry.changeProposal) acceptProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "aceptado"); }}
     onConfirm={entry.businessBooking && entry.ownerUserId ? () => {
       if(bookingContextRef.current.view!=="BUSINESS" || bookingContextRef.current.businessId!==entry.businessId)return;
@@ -15500,7 +15500,7 @@ function HomeScreenContent() {
       )}
 
       </LandingContentViewport>
-      <GoEntryDetailsSheet onGoToLanding={goDirectlyToLanding} handedness={handedness} entry={landingDetailsEntry?followedEntry(landingDetailsEntry):null}
+      <GoEntryDetailsSheet renderNote={renderExistingNote} onGoToLanding={goDirectlyToLanding} handedness={handedness} entry={landingDetailsEntry?followedEntry(landingDetailsEntry):null}
         closeRequested={noteDetailCloseRequested}
         onClose={() => { const edit = noteEditAfterDetailsRef.current; noteEditAfterDetailsRef.current = null; setNoteDetailCloseRequested(false); setLandingDetailsId(null); if (edit) openEntryChange(edit, "landing", true); }}
         renderMessageScreen={landingDetailsEntry ? () => renderEntryMessageScreen(landingDetailsEntry) : undefined} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry, undefined, true) : undefined}>
@@ -20260,7 +20260,7 @@ function HomeScreenContent() {
                 scrollToDateToken={calScrollToDateTarget}
                 highlightEntryId={calHighlightEntryId}
                 archiveNotes={completionIdentity.ready&&completionIdentity.scope?personalGoLog.filter(entry=>isArchivedNote(entry)&&noteInScope(entry,completionIdentity.scope!)&&!entry.deleted):[]}
-                onOpenNote={openUnifiedNote} onMoveNote={moveNoteDestination}
+                onOpenNote={openUnifiedNote} onMoveNote={moveNoteDestination} renderNote={renderExistingNote}
                 onMoveItem={moveGoToDay}
                 onOpenMoveFlow={openMoveFlow}
                 onCreateTaskAtTime={openCalendarSlotTask}
@@ -26248,7 +26248,7 @@ function HomeScreenContent() {
       </Animated.View>
 
       {/* Lists and Calendar share the same expanded entry, contract and messaging. */}
-      <GoEntryDetailsSheet onGoToLanding={goDirectlyToLanding} entry={calBookingDetailEntry?goLog.find(e=>e.id===calBookingDetailEntry.id)??null:null} handedness={handedness}
+      <GoEntryDetailsSheet renderNote={renderExistingNote} onGoToLanding={goDirectlyToLanding} entry={calBookingDetailEntry?goLog.find(e=>e.id===calBookingDetailEntry.id)??null:null} handedness={handedness}
         onClose={()=>setCalBookingDetailEntry(null)}
         renderMessageScreen={calBookingDetailEntry ? () => renderEntryMessageScreen(calBookingDetailEntry) : undefined}
         onMessage={calBookingDetailEntry?()=>{const entry=calBookingDetailEntry;openEntryMessage(entry,()=>setCalBookingDetailEntry(entry),true);}:undefined}>
@@ -26291,18 +26291,35 @@ function HomeScreenContent() {
   function renderUnifiedNoteEditor(){
     const scope=noteIdentity.scope;
     return <GoNoteEditor visible={notesOpen} initial={unifiedNoteInitial} handedness={handedness} ready={noteIdentity.ready} scope={scope}
-      cached={unifiedNoteCache.current?.scope===JSON.stringify(scope)?unifiedNoteCache.current.draft:undefined}
+      cached={unifiedNoteInitial?unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+unifiedNoteInitial.id):unifiedNoteCache.current?.scope===JSON.stringify(scope)?unifiedNoteCache.current.draft:undefined}
       seed={{...unifiedNoteSeed,title:quickNoteText,content:quickNoteDetail}}
-      onClose={state=>{unifiedNoteCache.current=state&&!state.saved?{scope:JSON.stringify(scope),draft:state.draft}:null;setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}
+      onClose={state=>{cacheNoteDraft(state,unifiedNoteInitial?.id);setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}
       onSaved={openSavedNoteDestination}
-      onSave={async draft=>{
+      renderActions={renderSavedNoteActions}
+      onSave={saveNoteDraft}/ >;
+  }
+  async function saveNoteDraft(draft:UnifiedNoteDraft){
         const identity=noteIdentityRef.current;
         if(!identity.ready||!identity.scope)throw new Error("No se puede verificar tu cuenta. La nota permanece en el editor.");
         const expected={...identity.scope};
         const result=await saveUnifiedNote(draft,expected,()=>noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===expected.userId&&noteIdentityRef.current.scope.context===expected.context);
-        setQuickNoteText("");setQuickNoteDetail("");await AsyncStorage.removeItem("go_task_draft_v1").catch(()=>{});
+        if(!draft.original){setQuickNoteText("");setQuickNoteDetail("");await AsyncStorage.removeItem("go_task_draft_v1").catch(()=>{});}
         return result;
-      }}/ >;
+  }
+  function renderSavedNoteActions(entry:GoEntry,onEdit:()=>void){
+    return <>{renderEntryMicroActions(entry)}{renderEntryQuickActions(entry,true,false,onEdit)}</>;
+  }
+  function cacheNoteDraft(state:{draft:UnifiedNoteDraft;saved:boolean}|undefined,id?:string){
+    const scope=JSON.stringify(noteIdentityRef.current.scope);
+    if(id){const key=scope+":"+id;if(state&&!state.saved)unifiedNoteEditCache.current.set(key,state.draft);else unifiedNoteEditCache.current.delete(key);}
+    else unifiedNoteCache.current=state&&!state.saved?{scope,draft:state.draft}:null;
+  }
+  function renderExistingNote(entry:GoEntry,onClose:()=>void,navigation?:{onGoToLanding?:()=>void;closeRequested?:boolean}){
+    const scope=noteIdentity.scope;
+    return <GoNoteEditor key={entry.id} visible initial={entry} scope={scope} ready={noteIdentity.ready} handedness={handedness}
+      cached={unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+entry.id)}
+      onSave={saveNoteDraft} renderActions={renderSavedNoteActions} onGoToLanding={navigation?.onGoToLanding} closeRequested={navigation?.closeRequested}
+      onClose={state=>{cacheNoteDraft(state,entry.id);onClose();}}/ >;
   }
   // Reuse the same task form inside Calendar or in its original standalone modal.
   function renderFieldSelector(embedded: boolean) {

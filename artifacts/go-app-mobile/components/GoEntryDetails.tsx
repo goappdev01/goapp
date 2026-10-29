@@ -122,10 +122,15 @@ export const ENTRY_DETAIL_CLOSE = Object.freeze({ headerHeight: 44, touchSize: 5
 
 type EntryDetailsProps = {
   closeRequested?: boolean;
+  renderNote?:(entry:GoEntry,onClose:()=>void,navigation?:{onGoToLanding?:()=>void;closeRequested?:boolean})=>React.ReactNode;
   entry: GoEntry | null; onClose: () => void; onMessage?: () => void; onGoToLanding?: () => void; renderMessageScreen?: () => React.ReactNode; handedness?: "right" | "left"; children?: React.ReactNode;
 };
 
 export function GoEntryDetailsSheet(props: EntryDetailsProps) {
+  // Ordinary notes share their creation editor/tools throughout their lifetime.
+  // Reservations and every other detail retain the existing native presenter.
+  const note=props.entry&&(props.entry.note?.version===1||props.entry.kind==="sent"&&["TAREA","TAREA_INTERNA"].includes(props.entry.type||"")&&(props.entry.goNoteReminder===true||["nota_interna","nota_externa"].includes(props.entry.intentKey)));
+  if(note&&props.entry&&props.renderNote)return props.renderNote(props.entry,props.onClose,{onGoToLanding:props.onGoToLanding,closeRequested:props.closeRequested});
   // A new selection owns a new native-modal session. Old responders cannot close it.
   return props.entry ? <GoEntryDetailsSession key={props.entry.id} {...props} entry={props.entry} /> : null;
 }

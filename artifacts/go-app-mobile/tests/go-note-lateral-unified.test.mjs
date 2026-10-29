@@ -24,7 +24,7 @@ test('ONE bottom arrow handles keyboard, subform, lateral menu and editor in fou
   await edit(ui,'note-content','Borrador íntegro');await ui.tool('time');await edit(ui,'note-time-hour','18');await edit(ui,'note-time-minute','37');await focus(ui,'note-time-minute');
   assert.equal(ui.hosts.has('note-tool-back'),false);assert.doesNotMatch(ui.container.textContent,/VOLVER|LISTO/);await ui.back();assert.equal(ui.keyboard.visible,false);assert.ok(ui.hosts.has('note-time-picker'));assert.equal(ui.hosts.get('note-time-minute').value,'37');assert.equal(ui.calls.some(c=>c[0]==='close'),false);
   await ui.back();assert.ok(ui.hosts.has('note-primary-controls'));assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,true);await ui.back();assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,false);assert.equal(ui.calls.some(c=>c[0]==='close'),false);
-  await ui.back();const exits=ui.calls.filter(c=>c[0]==='close');assert.equal(exits.length,1);assert.equal(exits[0][1].draft.content,'Borrador íntegro');assert.equal(exits[0][1].draft.time,'','unapplied numerical edits never silently commit');
+  await ui.back();const exits=ui.calls.filter(c=>c[0]==='close');assert.equal(exits.length,1);assert.equal(exits[0][1].draft.content,'Borrador íntegro');assert.equal(exits[0][1].draft.time,'18:37','closing the tool retains its last valid edit in the creation draft');
  }finally{await ui.close();}
 });
 
@@ -34,7 +34,7 @@ test('numeric time supports exact two-digit values, rejects invalid ranges and r
    await ui.tool('time');for(const id of ['note-time-hour','note-time-minute']){assert.equal(ui.hosts.get(id).keyboardType,'number-pad');assert.equal(ui.hosts.get(id).maxLength,2);}
    await edit(ui,'note-time-hour',hour);await edit(ui,'note-time-minute',minute);await focus(ui,'note-time-minute');await ui.back();assert.equal(ui.hosts.get('note-time-minute').value,minute);await ui.tap('note-time-apply');assert.equal(ui.keyboard.visible,false);assert.equal(ui.hosts.has('note-time-picker'),false);assert.match(ui.hosts.get('note-summary').children,new RegExp(hour+':'+minute));
   }
-  for(const [hour,minute]of [['24','00'],['23','60'],['-1','00'],['','30']]){await ui.tool('time');await edit(ui,'note-time-hour',hour);await edit(ui,'note-time-minute',minute);await ui.tap('note-time-apply');assert.match(ui.container.textContent,/horas de 00 a 23/);assert.ok(ui.hosts.has('note-time-picker'));}
+  for(const [hour,minute]of [['24','00'],['23','60'],['-1','00'],['','30']]){if(!ui.hosts.has('note-time-picker'))await ui.tool('time');await edit(ui,'note-time-hour',hour);await edit(ui,'note-time-minute',minute);await ui.tap('note-time-apply');assert.match(ui.container.textContent,/horas de 00 a 23/);assert.ok(ui.hosts.has('note-time-picker'));}
   await ui.tap('note-time-clear');assert.equal(ui.hosts.get('note-option-time').accessibilityState.selected,false);
  }finally{await ui.close();}
 });
@@ -44,7 +44,7 @@ test('numeric custom duration uses the existing duration engine and canonical mi
   await edit(ui,'note-content','Trabajo con duración propia');await ui.tool('duration');for(const value of ['15m','30m','1h','2h'])assert.ok(ui.hosts.has('note-duration-'+value));
   await edit(ui,'note-duration-hour','1');await edit(ui,'note-duration-minute','30');await focus(ui,'note-duration-minute');await ui.tap('note-duration-apply');assert.equal(ui.keyboard.visible,false);assert.match(ui.hosts.get('note-summary').children,/90 minutos/);await ui.destination('calendar');await ui.pickDate('2027-01-15');await ui.pickTime('18','30');await ui.tap('unified-note-save');await ui.idle();
   const [stored]=await disk.reopen();assert.equal(stored.duration,'90m');assert.equal(stored.note.schedule.duration,'90m');assert.equal(h.load('lib/goActionCompletion.ts').durationMinutes(stored.duration),90);
-  for(const [hours,minutes]of [['0','0'],['1','60'],['-1','00'],['10000','00']]){await ui.tool('duration');await edit(ui,'note-duration-hour',hours);await edit(ui,'note-duration-minute',minutes);await ui.tap('note-duration-apply');assert.match(ui.container.textContent,/mayor que cero/);assert.ok(ui.hosts.has('note-duration-picker'));}
+  for(const [hours,minutes]of [['0','0'],['1','60'],['-1','00'],['10000','00']]){if(!ui.hosts.has('note-duration-picker'))await ui.tool('duration');await edit(ui,'note-duration-hour',hours);await edit(ui,'note-duration-minute',minutes);await ui.tap('note-duration-apply');assert.match(ui.container.textContent,/mayor que cero/);assert.ok(ui.hosts.has('note-duration-picker'));}
  }finally{await ui.close();disk.close();}
 });
 

@@ -26,6 +26,7 @@ test('repeated manual folding keeps long dictated text, native input instance, s
   await open(ui);await ui.tool('reminder');await ui.run(()=>ui.hosts.get('note-reminder-hours').onChangeText('2'));
   await ui.run(()=>ui.hosts.get('note-reminder-minutes').onChangeText('25'));
   for(let i=0;i<12;i++)await open(ui);
+  await ui.tool('reminder');
   assert.equal(ui.instances.get('note-content'),instance);assert.equal(ui.hosts.get('note-content').value,text);
   assert.equal(ui.hosts.get('note-reminder-hours').value,'2');assert.equal(ui.hosts.get('note-reminder-minutes').value,'25');
   for(const key of ['selection','onSelectionChange','autoFocus'])assert.equal(ui.hosts.get('note-content')[key],undefined);

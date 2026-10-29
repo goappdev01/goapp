@@ -172,7 +172,7 @@ function visit(n){nodes.push(n);ts.forEachChild(n,visit)}visit(ast);
 test('Nota has one full-screen editor; existing non-note sheets retain their keyboard and gesture defaults',()=>{
   const opted=nodes.filter(n=>(ts.isJsxOpeningElement(n)||ts.isJsxSelfClosingElement(n))&&n.attributes?.properties.some(p=>p.name?.getText(ast)==='noteKeyboardScroll'));
   assert.equal(opted.length,0,'the retired sheet must not coexist with the new editor');
-  const editors=nodes.filter(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='GoNoteEditor');assert.equal(editors.length,1);
+  const editors=nodes.filter(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='GoNoteEditor');assert.equal(editors.length,2,'creation and saved-note sheets reuse the same component');
   assert.equal(editors[0].attributes.properties.find(p=>p.name?.getText(ast)==='visible').initializer.expression.getText(ast),'notesOpen');
   assert.ok(source.includes('compact && !noteKeyboardScroll ?'));assert.ok(source.includes('noteFooterHeight + effectivePaddingBottom + 26 : 16'));
   assert.ok(source.includes('noteKeyboardScroll && kbVisible'),'right-edge close pan cannot steal note scrolling while keyboard is open');
@@ -185,7 +185,9 @@ const jsxText=tree=>Array.isArray(tree)?tree.map(jsxText).join(''):React.isValid
 for(const english of [false,true])test('compact bell '+(english?'EN':'ES')+': numeric interaction, validation, no automatic focus or unrelated note list',async()=>{
   const hosts=new Map(),changes=[],container=document.createElement('div'),root=createRoot(container);
   const host=name=>props=>{hosts.set(props.testID||name,props);return React.createElement('div',null,props.children);};
-  const picker=evaluate('components/notes/GoNoteReminderPicker.tsx',{'react-native':{View:host('View'),Text:host('Text'),TextInput:host('Input'),TouchableOpacity:host('Button')},'@/lib/goNoteTools':tools}).GoNoteReminderPicker;
+  const native={StyleSheet:{create:x=>x},View:host('View'),Text:host('Text'),TextInput:host('Input'),TouchableOpacity:host('Button')};
+  const footer=evaluate('components/notes/GoNoteToolFooter.tsx',{'react-native':native});
+  const picker=evaluate('components/notes/GoNoteReminderPicker.tsx',{'react-native':native,'@/lib/goNoteTools':tools,'./GoNoteToolFooter':footer}).GoNoteReminderPicker;
   const run=fn=>React.act(async()=>{await fn();});
   try{
     await run(()=>root.render(React.createElement(picker,{value:15,onChange:n=>changes.push(n),english})));

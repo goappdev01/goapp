@@ -305,6 +305,7 @@ export type AgendaBoardProps = {
   goLog: GoEntry[];
   archiveNotes?: GoEntry[];
   onOpenNote?: (entry:GoEntry)=>void;
+  renderNote?:(entry:GoEntry,onClose:()=>void,navigation?:{onGoToLanding?:()=>void;closeRequested?:boolean})=>React.ReactNode;
   onMoveNote?: (entry:GoEntry,destination:import("@/lib/unifiedNotes").NoteDestination)=>void;
   selectedDateISO?: string;
   bookingProfessionalId?: string;
@@ -697,6 +698,7 @@ export function AgendaBoard({
   goLog: calendarEntries,
   archiveNotes,
   onOpenNote,
+  renderNote,
   onMoveNote,
   selectedDateISO,
   bookingProfessionalId,
@@ -2734,7 +2736,7 @@ export function AgendaBoard({
       {!!verificationEntry && (()=>{const {ReservationVerificationPanel}=require("@/components/booking/ReservationVerificationPanel") as typeof import("@/components/booking/ReservationVerificationPanel");return <ReservationVerificationPanel bookingId={verificationEntry.customerBooking?verificationEntry.reservationId:undefined} businessId={verificationEntry.businessBooking?verificationEntry.businessId:undefined} key={verificationEntry.id} onClose={()=>setVerificationEntry(null)}/>;})()}
 
       {/* One foreground detail for the same reservation or task. Calendar stays mounted. */}
-      <GoEntryDetailsSheet onGoToLanding={onGoToLanding} renderMessageScreen={renderMessageScreen && expandedBookingItem ? () => renderMessageScreen(expandedBookingItem) : undefined} handedness={handedness} entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}
+      <GoEntryDetailsSheet renderNote={renderNote} onGoToLanding={onGoToLanding} renderMessageScreen={renderMessageScreen && expandedBookingItem ? () => renderMessageScreen(expandedBookingItem) : undefined} handedness={handedness} entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}
         onClose={() => { setExpandedBookingItem(null); setExpandedCardId(null); }}
         onMessage={expandedBookingItem && onOpenMessage ? () => handleOpenMessage(expandedBookingItem) : undefined}
         >

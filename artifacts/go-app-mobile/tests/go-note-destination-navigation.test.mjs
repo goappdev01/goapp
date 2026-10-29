@@ -27,3 +27,7 @@ test('navigation targets cannot expose another account/context, a deleted note, 
  const model=h.load('lib/unifiedNotes.ts'),nav=h.load('lib/goNoteNavigation.ts',{'./unifiedNotes':model}),scope={userId:'owner',context:'demo:USER'},entry=model.buildNoteEntry({...model.noteDraft(),content:'Nota',destination:'calendar',dateISO:'2027-01-15',time:'18:37'},scope);
  assert.equal(nav.savedNoteTarget(entry,scope,1).entryId,entry.id);for(const patch of [{ownerUserId:'other'},{taskContext:'demo:BUSINESS'},{deleted:true},{time:'25:00'}])assert.throws(()=>nav.savedNoteTarget({...entry,...patch},scope,1));
 });
+
+test('removing a note time retains its real calendar day and reuses the existing untimed lane/focus without inventing midnight',async()=>{
+ const disk=await h.diskFixture();try{const {entry}=await disk.api().saveUnifiedNote(disk.draft({destination:'calendar',dateISO:'2027-01-15',time:''}),disk.scope,disk.active),nav=h.load('lib/goNoteNavigation.ts',{'./unifiedNotes':disk.model}),target=nav.savedNoteTarget(entry,disk.scope,1);assert.equal(target.timeHHMM,'');assert.equal(target.dateISO,'2027-01-15');const m=mount(entry,'calendar');m.layout();m.f.runTimers();assert.deepEqual(m.scrolls.map(row=>row[0]),['x','y']);assert.equal(disk.rows[0].time,'');}finally{disk.close();}
+});
