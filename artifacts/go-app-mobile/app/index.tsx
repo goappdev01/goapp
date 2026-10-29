@@ -4269,14 +4269,14 @@ function HomeScreenContent() {
   const [noteReminderTargetId, setNoteReminderTargetId] = useState<string | null>(null);
   const [noteReminderBusy, setNoteReminderBusy] = useState(false);
   const [unifiedNoteInitial,setUnifiedNoteInitial]=useState<GoEntry|null>(null);
-  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string}>({});
+  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;toolsOpen?:boolean}>({});
   const unifiedNoteCache=useRef<{scope:string;draft:UnifiedNoteDraft}|null>(null);
   const unifiedNoteEditCache=useRef(new Map<string,UnifiedNoteDraft>());
   const openUnifiedNote=(entry:GoEntry,seed:typeof unifiedNoteSeed={})=>{
     setUnifiedNoteInitial(entry);setUnifiedNoteSeed(seed);setNotesOpen(true);
   };
   const moveNoteDestination=(entry:GoEntry,destination:NoteDestination)=>{
-    if(destination==="calendar"){openUnifiedNote(entry,{destination});return;}
+    if(destination==="calendar"){openUnifiedNote(entry,{destination,toolsOpen:true});return;}
     const identity=noteIdentityRef.current;
     if(!identity.ready||!identity.scope){showToast("Espera a que se verifique tu cuenta.","error");return;}
     const scope={...identity.scope};
@@ -26292,6 +26292,7 @@ function HomeScreenContent() {
   function renderUnifiedNoteEditor(){
     const scope=noteIdentity.scope;
     return <GoNoteEditor visible={notesOpen} initial={unifiedNoteInitial} handedness={handedness} ready={noteIdentity.ready} scope={scope}
+      initialToolsOpen={unifiedNoteSeed.toolsOpen===true}
       cached={unifiedNoteInitial?unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+unifiedNoteInitial.id):unifiedNoteCache.current?.scope===JSON.stringify(scope)?unifiedNoteCache.current.draft:undefined}
       seed={{...unifiedNoteSeed,title:quickNoteText,content:quickNoteDetail}}
       onClose={state=>{cacheNoteDraft(state,unifiedNoteInitial?.id);setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}

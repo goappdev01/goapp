@@ -22,8 +22,8 @@ export function GoNoteReminderPicker({ value, onChange, english = false, busy = 
   const invalid="Introduce un aviso entre un minuto y un año, con minutos de 00 a 59.";
   useEffect(()=>{onPendingChange?.({changed:touched&&(!toolValid||total!==value),value:toolValid?total:undefined,error:toolValid?undefined:invalid});},[hours,minutes,touched,value,onPendingChange]);
   const at = dateISO && time ? Date.parse(`${dateISO}T${time}:00`) : NaN;
-  return <View testID="note-reminder-picker" style={{ marginTop: 10, gap: 10, padding: 12,
-    borderRadius: 12, backgroundColor: light ? "rgba(240,243,245,0.94)" : "#1a1a1c", borderWidth: 1, borderColor: light ? border : "rgba(251,191,36,0.40)" }}>
+  return <View testID="note-reminder-picker" style={[{ marginTop: 10, gap: 10, padding: 12,
+    borderRadius: 12, backgroundColor: light ? "rgba(240,243,245,0.94)" : "#1a1a1c", borderWidth: 1, borderColor: light ? border : "rgba(251,191,36,0.40)" },unified&&{marginTop:0,padding:0,gap:8,borderWidth:0,backgroundColor:"transparent"}]}>
     <Text style={{ color: foreground, fontSize: 13, fontWeight: "700" }}>{english ? "REMIND ME BEFORE" : "AVISARME ANTES"}</Text>
     <View style={{ flexDirection: "row", gap: 12 }}>
       {[[english ? "HOURS" : "HORAS", hours, setHours, 4], [english ? "MINUTES" : "MINUTOS", minutes, setMinutes, 2]].map(([label, text, setter, length]) =>
@@ -44,7 +44,7 @@ export function GoNoteReminderPicker({ value, onChange, english = false, busy = 
       : at <= Date.now() ? english ? "Choose a future date and time to schedule it." : "Elige una fecha y hora futuras para programar el aviso."
         : english ? "The notification also requires permission on this phone." : "La notificación también requiere permiso en este teléfono."}</Text>}
     {!!error && <Text accessibilityRole="alert" style={{ color: warning, fontSize: 12 }}>{error}</Text>}
-    {unified?<View style={{marginHorizontal:-12}}><GoNoteToolFooter testID="note-reminder-confirm" removeID="note-reminder-none" handedness={handedness} disabled={busy} onSave={()=>{if(!toolValid){setError(invalid);return;}onChange(total);}} onRemove={value!==null?()=>onChange(null):undefined} removeLabel="QUITAR AVISO"/></View>:<View style={{ flexDirection: "row", gap: 10, flexWrap: light ? "wrap" : undefined }}>
+    {unified?<GoNoteToolFooter testID="note-reminder-confirm" removeID="note-reminder-none" handedness={handedness} disabled={busy} onSave={()=>{if(!toolValid){setError(invalid);return;}onChange(total);}} onRemove={value!==null?()=>onChange(null):undefined} removeLabel="QUITAR AVISO"/>:<View style={{ flexDirection: "row", gap: 10, flexWrap: light ? "wrap" : undefined }}>
       <TouchableOpacity testID="note-reminder-none" accessibilityRole="button" disabled={busy} onPress={() => onChange(null)}
         style={{ flex: 1, minWidth: light ? 140 : undefined, minHeight: 44, justifyContent: "center", alignItems: "center", borderRadius: 8, borderWidth: 1, borderColor: border }}>
         <Text style={{ color: foreground, fontSize: 12 }}>{english ? "NO REMINDER" : "SIN AVISO"}</Text>
