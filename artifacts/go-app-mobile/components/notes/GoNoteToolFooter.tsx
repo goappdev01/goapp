@@ -3,12 +3,12 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 /** A tool can finish by its footer or the editor's single back control. */
 export type NoteToolEdit<T> = { changed:boolean; value?:T; error?:string };
-export function GoNoteToolFooter({ onSave, onRemove, removeLabel, testID, removeID, disabled=false, handedness="right", besideHandle=true }: {
-  onSave:()=>void; onRemove?:()=>void; removeLabel?:string; testID:string; removeID?:string;
+export function GoNoteToolFooter({ onSave, onRemove, removeLabel, removeAccessibilityLabel, testID, removeID, disabled=false, handedness="right", besideHandle=true }: {
+  onSave:()=>void; onRemove?:()=>void; removeLabel?:string; removeAccessibilityLabel?:string; testID:string; removeID?:string;
   disabled?:boolean; handedness?:"left"|"right"; besideHandle?:boolean;
 }) {
   return <View testID={testID+"-footer"} style={[s.row,besideHandle&&(handedness==="left"?{paddingLeft:44}:{paddingRight:44})]}>
-    <TouchableOpacity testID={removeID||testID+"-remove"} accessibilityRole="button" accessibilityState={{disabled:disabled||!onRemove}} disabled={disabled||!onRemove} onPress={onRemove} activeOpacity={0.75} style={[s.button,onRemove?s.remove:s.neutral]}>
+    <TouchableOpacity testID={removeID||testID+"-remove"} accessibilityRole="button" accessibilityLabel={removeAccessibilityLabel} accessibilityState={{disabled:disabled||!onRemove}} disabled={disabled||!onRemove} onPress={onRemove} activeOpacity={0.75} style={[s.button,onRemove?s.remove:s.neutral]}>
       <Text maxFontSizeMultiplier={1.3} style={[s.label,onRemove?s.removeText:s.neutralText]}>{removeLabel||"QUITAR"}</Text>
     </TouchableOpacity>
     <TouchableOpacity testID={testID} accessibilityRole="button" accessibilityLabel="Guardar configuración" disabled={disabled} activeOpacity={0.75} onPress={onSave} style={s.save}>

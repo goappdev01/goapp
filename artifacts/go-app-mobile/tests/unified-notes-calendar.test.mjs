@@ -3,15 +3,15 @@ import {fixture} from './helpers/calendar-fixture.mjs';
 const require=createRequire(import.meta.url),h=require('./helpers/unified-note-fixture.cjs');
 const nodes=(n,p)=>!n||typeof n!=='object'?[]:[...(p(n)?[n]:[]),...(n.children||[]).flatMap(c=>nodes(c,p))];
 const style=s=>Array.isArray(s)?Object.assign({},...s.filter(Boolean)):s;
-for(const viewMode of ['dia','semana','mes_lineal'])test(viewMode+': one foldable NOTAS immediately before PENDIENTES, independent day width and real archive actions',async()=>{
+for(const viewMode of ['dia','semana','mes_lineal'])test(viewMode+': NOTAS ARCHIVO opens readable before PENDIENTES; manual folding retains its full heading and day widths',async()=>{
  const disk=await h.diskFixture();try{const {entry}=await disk.api().saveUnifiedNote(disk.draft({content:'Consultar documento'}),disk.scope,disk.active);
  const app=fixture({now:'2027-01-01T12:00:00'}),{AgendaBoard}=app.load('components/AgendaOperativa.tsx'),opens=[],moves=[];
  const props={goLog:[],archiveNotes:[entry],onOpenNote:e=>opens.push(e),onMoveNote:(e,d)=>moves.push([e,d]),viewMode,selectedDateISO:'2027-01-01',calViewMonth:'2027-01'};
  let tree=app.render(AgendaBoard,props),columns=nodes(tree,n=>n.props.key&&n.props.onLayout&&style(n.props.style)?.width);
- const noteIndex=columns.findIndex(c=>c.props.key==='notes');assert.ok(noteIndex>=0);assert.equal(columns[noteIndex+1].props.key,'retrasados');assert.equal(columns.filter(c=>c.props.key==='notes').length,1);assert.equal(style(columns[noteIndex].props.style).width,52);
- const component=nodes(tree,n=>n.type?.name==='GoNoteArchiveColumn')[0];assert.equal(component.props.expanded,false);assert.equal(component.props.entries[0].id,entry.id);
+ const noteIndex=columns.findIndex(c=>c.props.key==='notes');assert.ok(noteIndex>=0);assert.equal(columns[noteIndex+1].props.key,'retrasados');assert.equal(columns.filter(c=>c.props.key==='notes').length,1);assert.ok(style(columns[noteIndex].props.style).width>=176);
+ const component=nodes(tree,n=>n.type?.name==='GoNoteArchiveColumn')[0];assert.equal(component.props.expanded,true);assert.equal(component.props.entries[0].id,entry.id);
  const dayWidth=style(columns[noteIndex+1].props.style).width;component.props.onToggle();tree=app.render(AgendaBoard,props);
- const expanded=nodes(tree,n=>n.type?.name==='GoNoteArchiveColumn')[0];assert.equal(expanded.props.expanded,true);columns=nodes(tree,n=>n.props.key&&n.props.onLayout&&style(n.props.style)?.width);assert.equal(style(columns.find(c=>c.props.key==='retrasados').props.style).width,dayWidth);
+ const folded=nodes(tree,n=>n.type?.name==='GoNoteArchiveColumn')[0];assert.equal(folded.props.expanded,false);columns=nodes(tree,n=>n.props.key&&n.props.onLayout&&style(n.props.style)?.width);assert.equal(style(columns.find(c=>c.props.key==='retrasados').props.style).width,dayWidth);assert.ok(style(columns.find(c=>c.props.key==='notes').props.style).width>=176);folded.props.onToggle();tree=app.render(AgendaBoard,props);const expanded=nodes(tree,n=>n.type?.name==='GoNoteArchiveColumn')[0];assert.equal(expanded.props.expanded,true);
  const content=expanded.type(expanded.props),open=nodes(content,n=>n.props.accessibilityLabel==='Abrir nota '+entry.notes)[0];open.props.onPress();assert.equal(opens[0].id,entry.id);
  const actions=nodes(content,n=>n.props.onPress&&n.props.key==='pending');assert.equal(actions.length,1);actions[0].props.onPress();assert.equal(moves[0][0].id,entry.id);assert.equal(moves[0][1],'pending');assert.equal(disk.rows.length,1,'render and opening cannot duplicate/write notes');
  }finally{disk.close();}

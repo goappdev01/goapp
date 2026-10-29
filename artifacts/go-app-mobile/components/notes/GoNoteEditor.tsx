@@ -86,7 +86,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   const hideKeyboard=async()=>{const epoch=toolRequest.current,id=latest.current.id;focusedToolTarget.current=null;focusedWritingTarget.current=null;const hidden=await keyboard.dismiss();if(!hidden&&epoch===toolRequest.current&&latest.current.visible&&latest.current.id===id)setFloatingNotice("No se ha confirmado el cierre del teclado. Tu nota sigue abierta; vuelve a pulsar la flecha inferior.");return hidden;};
   const openTool=async(key:string)=>{
     const epoch=++toolRequest.current,id=latest.current.id;
-    focusedToolTarget.current=null;setToolsOpen(true);setOpeningTool(key||"tools");
+    focusedToolTarget.current=null;if(key)setToolsOpen(true);setOpeningTool(key||"tools");
     const hidden=await hideKeyboard();
     if(epoch!==toolRequest.current||!latest.current.visible||latest.current.id!==id)return;
     if(!hidden){setOpeningTool("");return;}
@@ -101,7 +101,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
         if(width&&height)setWorkspaceBounds(current=>({...current,width,height}));
         const next=awaitingTool.key?{...draftRef.current,attachments:[...draftRef.current.attachments]}:null;
         toolDraftRef.current=next;setToolDraft(next);pendingTool.current=null;pendingCommit.current=null;setLink("");setLocations([]);setLocationSource(null);
-        setPanel(awaitingTool.key);setOpeningTool("");setAwaitingTool(null);
+        setPanel(awaitingTool.key);setToolsOpen(true);setOpeningTool("");setAwaitingTool(null);
       };
       if(workspaceView.current?.measure)workspaceView.current.measure((_x,_y,width,height)=>finish(width,height));else finish();
     });
@@ -373,7 +373,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
           {panel==="place"&&<View style={s.section}>{input("note-place","DIRECCIÓN O LUGAR",working.place,place=>{stage({place,location:undefined});setLocationSource("manual");setLocations([]);})}<View style={controlRow}>{choice("Buscar ubicación",()=>void locate(true))}{choice(locationSource==="current"?"✓ Ubicación actual":"Ubicación actual",()=>void locate(false),locationSource==="current","note-location-current")}</View>
             {locations.map((result,index)=><React.Fragment key={index}>{choice(result.label,()=>{const {label,...location}=result;stage({location,place:label});setLocationSource("manual");setLocations([]);},false,"note-location-result-"+index)}</React.Fragment>)}
             {!!(working.place||working.location)&&<View testID="note-location-selection" accessibilityLiveRegion="polite" style={[s.configured,{padding:8,borderWidth:1,borderRadius:10}]}><Text style={s.text}>{locationSource?"✓ Seleccionada: ":"Ubicación guardada: "}{working.place}</Text>{working.location&&<Text style={s.hint}>{working.location.latitude.toFixed(5)}, {working.location.longitude.toFixed(5)}</Text>}</View>}
-            <GoNoteToolFooter testID="note-place-save" removeID="note-place-clear" disabled={busy||toolFinishing||attachmentBusy} handedness={handedness} onSave={()=>void finishTool()} onRemove={draft.place||draft.location?()=>applyTool({place:"",location:undefined}):undefined} removeLabel="QUITAR UBICACIÓN"/>
+            <View style={{marginHorizontal:-8}}><GoNoteToolFooter testID="note-place-save" removeID="note-place-clear" disabled={busy||toolFinishing||attachmentBusy} handedness={handedness} onSave={()=>void finishTool()} onRemove={draft.place||draft.location?()=>applyTool({place:"",location:undefined}):undefined} removeLabel="QUITAR" removeAccessibilityLabel="Quitar ubicación"/></View>
           </View>}
           {panel==="reminder"&&<GoNoteReminderPicker value={draft.reminderMinutes} onChange={reminderMinutes=>applyTool({reminderMinutes})} onInputFocus={focusToolInput} onPendingChange={edit=>recordPending("reminderMinutes",edit)} handedness={handedness} unified dateISO={draft.dateISO} time={draft.time} busy={busy||toolFinishing} light/>}
           {panel==="attachments"&&<View style={s.section}>
@@ -391,7 +391,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       {workspaceBounds.width>=44&&workspaceBounds.height>=64&&
       <DraggableFAB screenKey="note-editor" buttonKey="tools-toggle" bounds={{width:workspaceBounds.width,height:workspaceBounds.height}} buttonWidth={44} maxH={48} initialTop={toggleTop} fixedLeft={toggleLeft} onDragStart={markToggleDrag}>
         <TouchableOpacity testID="note-tools-toggle" accessibilityRole="button" accessibilityLabel={toolsOpen?"Ocultar herramientas de la nota":"Mostrar herramientas de la nota"} accessibilityHint="Mantén pulsado medio segundo para mover la flecha verticalmente" accessibilityState={{expanded:toolsOpen}}
-          delayLongPress={500} disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPressIn={()=>{suppressToggle.current=false;}} onLongPress={markToggleDrag} activeOpacity={0.78} onPress={()=>{if(suppressToggle.current||saveLock.current||workLock.current)return;if(!toolsOpen){setToolsOpen(true);return;}if(panel){void finishTool(undefined,true);return;}toolRequest.current++;setOpeningTool("");setAwaitingTool(null);if(focusedToolTarget.current)void hideKeyboard();setToolsOpen(false);}} style={s.toolsToggle}>
+          delayLongPress={500} disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPressIn={()=>{suppressToggle.current=false;}} onLongPress={markToggleDrag} activeOpacity={0.78} onPress={()=>{if(suppressToggle.current||saveLock.current||workLock.current)return;if(!toolsOpen){void openTool("");return;}if(panel){void finishTool(undefined,true);return;}toolRequest.current++;setOpeningTool("");setAwaitingTool(null);if(focusedToolTarget.current)void hideKeyboard();setToolsOpen(false);}} style={s.toolsToggle}>
           <LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.65)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,{borderRadius:14}]}/><Feather name={handedness==="right"?(toolsOpen?"chevron-right":"chevron-left"):(toolsOpen?"chevron-left":"chevron-right")} size={22} color="#202830"/>
         </TouchableOpacity>
       </DraggableFAB>}

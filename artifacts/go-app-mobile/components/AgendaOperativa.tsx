@@ -30,6 +30,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Animated,
   Dimensions,
+  useWindowDimensions,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -60,7 +61,7 @@ import { CalSizeKey, getCalColumnW, DEFAULT_GO_RENDER_PRESET } from "../constant
 import { trSector } from "@/data/goSectorTranslations";
 import { reservationCardPolicy } from "@/data/reservationCardPolicy";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "./GoEntryDetails";
-import { GoNoteArchiveColumn } from "./notes/GoNoteArchiveColumn";
+import { GoNoteArchiveColumn, noteArchiveColumnWidth } from "./notes/GoNoteArchiveColumn";
 import { noteRevealColumn } from "@/lib/goNoteNavigation";
 import { entryHeading, entryIdentity, entryIsReservation } from "@/data/goEntryPresentation";
 import { GoCloseButton } from "./ui/GoCloseButton";
@@ -742,7 +743,9 @@ export function AgendaBoard({
   onGoToLanding,
 }: AgendaBoardProps) {
   const goLog = useGoCalendarEntries(calendarEntries);
-  const [notesExpanded,setNotesExpanded]=useState(false);
+  const [notesExpanded,setNotesExpanded]=useState(true);
+  const notesViewport=useWindowDimensions();
+  const notesColumnW=noteArchiveColumnWidth(notesViewport.width,notesViewport.fontScale,notesExpanded);
   const archiveEntriesRef=useRef(archiveNotes||[]);archiveEntriesRef.current=archiveNotes||[];
   const noteDayFocus=useRef({key:"",done:false});
   const noteDayFocusKey=viewMode+":"+selectedDateISO;
@@ -933,7 +936,7 @@ export function AgendaBoard({
     if(!onOpenNote)return baseColumns;
     const columns=viewMode==="dia"?[{id:"retrasados",label:t("col_pendientes"),isRetrasados:true},...baseColumns]:[...baseColumns];
     const index=columns.findIndex(col=>col.isRetrasados);
-    columns.splice(Math.max(0,index),0,{id:"notes",label:"NOTAS",isNotes:true});
+    columns.splice(Math.max(0,index),0,{id:"notes",label:"NOTAS ARCHIVO",isNotes:true});
     return columns;
   },[baseColumns,onOpenNote,viewMode,lang]);
 
@@ -2059,7 +2062,7 @@ export function AgendaBoard({
 
   // ── COLUMN ───────────────────────────────────────────────────────
   const renderColumn = (col: Column) => {
-    if(col.isNotes&&onOpenNote)return <View key={col.id} style={[s.column,{width:notesExpanded?columnW:52}]}
+    if(col.isNotes&&onOpenNote)return <View key={col.id} style={[s.column,{width:notesColumnW}]}
       onLayout={event=>{colLayouts.current[col.id]={x:event.nativeEvent.layout.x,w:event.nativeEvent.layout.width};queueBookingFocus();}}>
       <GoNoteArchiveColumn entries={archiveNotes||[]} expanded={notesExpanded} onOpen={onOpenNote} onMove={onMoveNote}
         focus={scrollToDateToken?.destination==="archive"&&scrollToDateToken.entryId?{
@@ -2632,7 +2635,7 @@ export function AgendaBoard({
           pointerEvents none: puramente visual, no interfiere con gestos. */}
       {viewMode === "mes_lineal" && (() => {
         const totalCols = allColumns.length;
-        const totalContentW = allColumns.reduce((sum,col)=>sum+(col.isNotes&&!notesExpanded?52:columnW)+colGap,0);
+        const totalContentW = allColumns.reduce((sum,col)=>sum+(col.isNotes?notesColumnW:columnW)+colGap,0);
         const maxScrollX = Math.max(1, totalContentW - screenW);
         const BAR_W = 72;
         const thumbW = Math.max(10, Math.round((screenW / Math.max(screenW + 1, totalContentW)) * BAR_W));

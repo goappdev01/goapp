@@ -10,12 +10,12 @@ function parentNavigation(scope){
  vm.runInNewContext(h.compile(fn.getText(tree)+';globalThis.openSaved=openSavedNoteDestination;'),ctx);return{ctx,calls,open:ctx.openSaved,navigation};
 }
 
-test('approved 56 percent lateral menu opens over the keyboard without blurring or replacing the opposite writing field, in either hand',async()=>{
+test('one lateral-menu press hides and blurs the keyboard before restoring the approved 56 percent band, in either hand',async()=>{
  for(const handedness of ['left','right']){const ui=await h.editorFixture({handedness});try{
   await edit(ui,'note-content','Texto editable\nOtra línea');await focus(ui,'note-content');const token=ui.instances.get('note-content'),blurs=ui.calls.filter(c=>c[0]==='blur').length;await ui.tap('note-tools-toggle');
-  assert.equal(ui.keyboard.visible,true);assert.equal(ui.keyboard.focused,'note-content');assert.equal(ui.calls.filter(c=>c[0]==='blur').length,blurs);assert.equal(ui.instances.get('note-content'),token);
-  const panel=flat(ui.hosts.get('note-tools-panel').style);assert.ok(panel.width<=366*.56+1);assert.equal(panel[handedness==='right'?'right':'left'],0);assert.ok(panel.height<=300*.6+1);assert.equal(ui.hosts.get('note-tools-scroll').keyboardShouldPersistTaps,'always');assert.equal(ui.hosts.get('note-tools-scroll').keyboardDismissMode,'none');
-  for(const key of ['date','time','duration','reminder','place','attachments'])assert.equal(flat(ui.hosts.get('note-option-'+key).style).width,'100%');await ui.tap('note-tools-toggle');assert.equal(ui.keyboard.visible,true);assert.equal(ui.hosts.get('note-content').value,'Texto editable\nOtra línea');
+  assert.equal(ui.keyboard.visible,false);assert.equal(ui.keyboard.focused,null);assert.equal(ui.calls.filter(c=>c[0]==='blur').length,blurs+1);assert.equal(ui.instances.get('note-content'),token);
+  const panel=flat(ui.hosts.get('note-tools-panel').style);assert.ok(panel.width<=366*.56+1);assert.equal(panel[handedness==='right'?'right':'left'],0);assert.ok(panel.height<=600*.6+1);assert.equal(ui.hosts.get('note-tools-scroll').keyboardShouldPersistTaps,'always');assert.equal(ui.hosts.get('note-tools-scroll').keyboardDismissMode,'none');
+  for(const key of ['date','time','duration','reminder','place','attachments'])assert.equal(flat(ui.hosts.get('note-option-'+key).style).width,'100%');await ui.tap('note-tools-toggle');assert.equal(ui.keyboard.visible,false);assert.equal(ui.hosts.get('note-content').value,'Texto editable\nOtra línea');
  }finally{await ui.close();}}
 });
 
