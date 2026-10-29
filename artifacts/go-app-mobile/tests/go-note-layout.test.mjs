@@ -6,13 +6,13 @@ const load=(source,imports={})=>{const vm=require('node:vm'),ctx={exports:{},req
 test('full-screen note has a definite native keyboard viewport, immediate fields, native cursor and a separate accessible footer',async()=>{
  for(const handedness of ['left','right']){const ui=await h.editorFixture({handedness});try{
  const frame=ui.hosts.get('KeyboardFrame'),scroll=ui.hosts.get('unified-note-scroll'),footer=ui.hosts.get('note-editor-footer');
- assert.equal(frame.behavior,'height');assert.equal(frame.style.flex,1);assert.equal(style(scroll.style).flex,1);assert.equal(scroll.keyboardShouldPersistTaps,'handled');
+ assert.equal(frame.behavior,'padding');assert.equal(frame.style.flex,1);assert.equal(style(scroll.style).flex,1);assert.equal(scroll.keyboardShouldPersistTaps,'handled');
  assert.equal(footer.style[1].flexDirection,handedness==='left'?'row-reverse':'row');assert.ok(footer.style[1].paddingBottom>=34);
  assert.equal(ui.hosts.get('Cerrar nota').touchSize,56);assert.equal(ui.hosts.get('unified-note-save').style.minHeight,52);
  for(const id of ['note-title','note-content']){assert.ok(ui.hosts.get(id));assert.equal(ui.hosts.get(id).autoFocus,undefined);assert.equal(ui.hosts.get(id).selection,undefined);}
- await ui.run(()=>ui.hosts.get('note-content').onContentSizeChange({nativeEvent:{contentSize:{height:600}}}));
- assert.equal(style(ui.hosts.get('note-content').style).height,480);assert.equal(ui.hosts.get('note-content').scrollEnabled,true);
- const resize=ui.hosts.get('note-content').onContentSizeChange;for(const height of [238,240,238,240])await ui.run(()=>resize({nativeEvent:{contentSize:{height}}}));assert.equal(style(ui.hosts.get('note-content').style).height,240);assert.equal(ui.hosts.get('note-content').onContentSizeChange,resize,'resize callback stays stable and ignores native border rounding');
+ await ui.run(()=>ui.hosts.get('note-content').onChangeText(('Texto largo\n').repeat(100)));
+ assert.equal(style(ui.hosts.get('note-content').style).height,240);assert.equal(ui.hosts.get('note-content').scrollEnabled,true);
+ assert.equal(ui.hosts.get('note-content').onContentSizeChange,undefined,'native content size cannot feed an artificial outer height or trailing keyboard spacer');assert.equal(scroll.automaticallyAdjustKeyboardInsets,false);assert.equal(scroll.bounces,false);
  }finally{await ui.close();}}
 });
 test('inline configuration and reopening keep the same unsaved note, title, content and independent optional values',async()=>{

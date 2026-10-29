@@ -46,18 +46,18 @@ test('duration is provisional until applied, closes on confirmation and preserve
 });
 
 test('opening a nontext tool waits for native keyboard dismissal and the next layout frame, preserving text and native cursor ownership',async()=>{
- let release,measure;const frames=[],ui=await h.editorFixture({ports:{keyboardVisible:true,dismiss:()=>new Promise(resolve=>release=resolve),frame:fn=>{frames.push(fn);return frames.length;},measure:fn=>measure=fn}});try{
-  await content(ui,'Texto largo\nCon cursor propio');await ui.run(()=>ui.hosts.get('note-content').onFocus({target:42}));const instance=ui.instances.get('note-content');await ui.tool('date');
-  assert.equal(ui.hosts.has('note-inline-date-picker'),false);assert.equal(ui.keyboard.visible,true);assert.deepEqual(h.plain(ui.calls.find(c=>c[0]==='keyboard-dismiss')[1]),{keepFocus:false});
+ let manual=false,release,measure;const frames=[],ui=await h.editorFixture({ports:{dismiss:()=>new Promise(resolve=>release=resolve),frame:fn=>{if(manual)frames.push(fn);else Promise.resolve().then(()=>fn(0));return frames.length;},measure:fn=>manual?measure=fn:fn(0,0,366,600)}});try{
+  await ui.tap('note-tools-toggle');manual=true;await content(ui,'Texto largo\nCon cursor propio');await ui.run(()=>{ui.hosts.get('note-content').onFocus({target:42});ui.keyboard.show();});const instance=ui.instances.get('note-content');await ui.tap('note-option-date');
+  assert.equal(ui.hosts.has('note-inline-date-picker'),false);assert.equal(ui.keyboard.visible,true);assert.ok(ui.calls.some(c=>c[0]==='blur'&&c[1]==='note-content'));assert.equal(ui.calls.some(c=>c[0]==='keyboard-dismiss'),false);
   await ui.run(()=>release());assert.equal(ui.hosts.has('note-inline-date-picker'),false);assert.equal(ui.keyboard.focused,null);
   await ui.run(()=>ui.hosts.get('note-writing-workspace').onLayout({nativeEvent:{layout:{x:12,y:99,width:366,height:600}}}));await ui.run(()=>frames.splice(0).forEach(fn=>fn(0)));assert.equal(ui.hosts.has('note-inline-date-picker'),false);await ui.run(()=>measure(0,0,366,600));assert.ok(ui.hosts.has('note-inline-date-picker'));
   assert.equal(ui.instances.get('note-content'),instance);assert.equal(ui.hosts.get('note-content').value,'Texto largo\nCon cursor propio');assert.equal(ui.hosts.get('note-content').selection,undefined);assert.equal(ui.hosts.get('note-content').autoFocus,undefined);
  }finally{await ui.close();}
 });
 
-test('LISTO and an outside heading tap hide the keyboard without closing the note; each nontext tool opens without it',async()=>{
+test('the existing bottom arrow and an outside heading tap hide the keyboard without closing the note; each nontext tool opens without it',async()=>{
  const ui=await h.editorFixture();try{
-  await content(ui);await ui.run(()=>ui.keyboard.show());assert.ok(ui.hosts.has('note-hide-keyboard'));await ui.tap('note-hide-keyboard');assert.equal(ui.keyboard.visible,false);assert.equal(ui.calls.some(c=>c[0]==='close'),false);
+  await content(ui);await ui.run(()=>ui.keyboard.show());assert.equal(ui.hosts.has('note-hide-keyboard'),false);await ui.tap('Ocultar teclado');assert.equal(ui.keyboard.visible,false);assert.equal(ui.calls.some(c=>c[0]==='close'),false);
   await ui.run(()=>ui.keyboard.show());await ui.tap('note-heading');assert.equal(ui.keyboard.visible,false);
   for(const key of ['date','time','duration','reminder','attachments']){await ui.run(()=>ui.keyboard.show());await ui.tool(key);assert.equal(ui.keyboard.visible,false);assert.ok(ui.hosts.has('note-tool-back'));assert.equal(ui.hosts.get('note-content').value,'Una nota completa');}
  }finally{await ui.close();}
@@ -74,9 +74,9 @@ test('each tool starts with a fresh bounded scroll; no content-size callback can
 test('textual tool inputs use native focus scrolling above the measured footer, without an extra keyboard spacer',async()=>{
  const ui=await h.editorFixture();try{
   await ui.tool('attachments');await ui.run(()=>ui.hosts.get('note-editor-footer').onLayout({nativeEvent:{layout:{height:106}}}));await ui.run(()=>ui.hosts.get('note-link').onFocus({nativeEvent:{target:77}}));await ui.run(()=>ui.keyboard.show());
-  assert.ok(ui.calls.some(c=>c[0]==='reveal-input'&&c[1]===77&&c[2]===122&&c[3]===true));assert.equal(ui.hosts.get('note-tools-scroll').automaticallyAdjustKeyboardInsets,false);assert.ok(ui.hosts.has('note-hide-keyboard'));assert.equal(ui.hosts.has('note-tool-header'),false);assert.ok(ui.hosts.has('note-tool-back'));assert.equal(ui.hosts.get('note-tool-back').style[0].height,44);
+  assert.ok(ui.calls.some(c=>c[0]==='reveal-input'&&c[1]===77&&c[2]===122&&c[3]===true));assert.equal(ui.hosts.get('note-tools-scroll').automaticallyAdjustKeyboardInsets,false);assert.equal(ui.hosts.has('note-hide-keyboard'),false);assert.ok(ui.hosts.has('Ocultar teclado'));assert.equal(ui.hosts.has('note-tool-header'),false);assert.ok(ui.hosts.has('note-tool-back'));assert.equal(ui.hosts.get('note-tool-back').style[0].height,44);
   const atShow=ui.calls.filter(c=>c[0]==='reveal-input').length;await ui.run(()=>ui.hosts.get('note-writing-workspace').onLayout({nativeEvent:{layout:{x:12,y:80,width:296,height:102}}}));assert.ok(ui.calls.filter(c=>c[0]==='reveal-input').length>atShow,'reveal is recalculated after the keyboard changes the real viewport');
-  await ui.tap('note-hide-keyboard');assert.ok(ui.hosts.has('note-tool-header'));const before=ui.calls.filter(c=>c[0]==='reveal-input').length;await ui.run(()=>ui.hosts.get('note-content').onFocus({target:99}));await ui.run(()=>ui.keyboard.show());assert.equal(ui.calls.filter(c=>c[0]==='reveal-input').length,before,'returning to content never scrolls an old tool field');
+  await ui.tap('Ocultar teclado');assert.ok(ui.hosts.has('note-tool-header'));const before=ui.calls.filter(c=>c[0]==='reveal-input').length;await ui.run(()=>ui.hosts.get('note-content').onFocus({target:99}));await ui.run(()=>ui.keyboard.show());assert.equal(ui.calls.filter(c=>c[0]==='reveal-input').length,before,'returning to content never scrolls an old tool field');
  }finally{await ui.close();}
 });
 
@@ -108,8 +108,8 @@ test('destination, invalid date and invalid hour errors are distinct and route t
 });
 
 test('a tool request finishing after close or identity change never reopens a stale selector',async()=>{
- for(const mode of ['close','identity']){let release;const frames=[],ui=await h.editorFixture({ports:{dismiss:()=>new Promise(resolve=>release=resolve),frame:fn=>{frames.push(fn);return 1;}}});try{
-  await ui.tool('date');await ui.render(mode==='close'?{visible:false}:{scope:{userId:'other-user',context:'demo:USER'}});await ui.run(()=>release());await ui.run(()=>frames.splice(0).forEach(fn=>fn(0)));assert.equal(ui.hosts.has('note-inline-date-picker'),false);
+ for(const mode of ['close','identity']){let release;const ui=await h.editorFixture({ports:{dismiss:()=>new Promise(resolve=>release=resolve)}});try{
+  await ui.tap('note-tools-toggle');await ui.run(()=>ui.keyboard.show());await ui.tap('note-option-date');await ui.render(mode==='close'?{visible:false}:{scope:{userId:'other-user',context:'demo:USER'}});await ui.run(()=>release());assert.equal(ui.hosts.has('note-inline-date-picker'),false);
  }finally{await ui.close();}}
 });
 
@@ -123,7 +123,7 @@ test('attachment links remain after changing tools and hiding the text tool blur
 
 test('an attachment waiting for keyboard dismissal never opens a picker after the account changes',async()=>{
  let waiting=false,release,pickers=0;const ui=await h.editorFixture({ports:{dismiss:()=>waiting?new Promise(resolve=>release=resolve):Promise.resolve(),documents:{getDocumentAsync:async()=>{pickers++;return{canceled:true};}}}});try{
-  await ui.tool('attachments');waiting=true;await ui.tap('PDF o documento');await ui.render({scope:{userId:'other-user',context:'demo:USER'}});await ui.run(()=>release());await ui.idle();assert.equal(pickers,0);assert.equal(ui.hosts.get('note-content').value,'');
+  await ui.tool('attachments');waiting=true;await ui.run(()=>{ui.hosts.get('note-link').onFocus({target:42});ui.keyboard.show();});await ui.tap('PDF o documento');await ui.render({scope:{userId:'other-user',context:'demo:USER'}});await ui.run(()=>release());await ui.idle();assert.equal(pickers,0);assert.equal(ui.hosts.get('note-content').value,'');
  }finally{await ui.close();}
 });
 
