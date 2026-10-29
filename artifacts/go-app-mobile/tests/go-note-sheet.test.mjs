@@ -34,10 +34,10 @@ test('repeated manual folding keeps long dictated text, native input instance, s
  }finally{await ui.close();}
 });
 
-test('right-handed close stays at the right edge; left-handed mode mirrors controls, panel and tab without remounting or reversing text',async()=>{
+test('GO stays at the dominant edge with close, save, GO order; left-handed mode mirrors controls, panel and tab without reversing text',async()=>{
  const ui=await h.editorFixture();try{
   await ui.run(()=>ui.hosts.get('note-content').onChangeText('Texto con sentido de lectura normal'));const instance=ui.instances.get('note-content');
-  const footer=ui.hosts.get('note-editor-footer');assert.equal(footer.children[0].props.testID,'note-microphone');assert.equal(footer.children[1].props.testID,'unified-note-save');assert.equal(footer.children[2].props.accessibilityLabel,'Cerrar nota');
+  const footer=ui.hosts.get('note-editor-footer');assert.equal(footer.children[0].props.accessibilityLabel,'Cerrar nota');assert.equal(footer.children[1].props.testID,'unified-note-save');assert.equal(footer.children[2].props.testID,'note-microphone');
   assert.equal(flat(footer.style).flexDirection,'row');assert.equal(flat(ui.hosts.get('note-tools-panel').style).right,48);assert.equal(flat(ui.hosts.get('note-tools-toggle').style).right,0);
   await open(ui);await ui.render({handedness:'left'});
   assert.equal(flat(ui.hosts.get('note-editor-footer').style).flexDirection,'row-reverse');assert.equal(flat(ui.hosts.get('note-tools-panel').style).left,48);assert.equal(flat(ui.hosts.get('note-tools-toggle').style).left,0);
@@ -78,4 +78,34 @@ test('light close appearance is opt-in; every other screen retains the original 
  const native={TouchableOpacity:'button',View:'view',StyleSheet:{create:x=>x}},icons={Feather:'icon'},Close=h.load('components/ui/GoCloseButton.tsx',{'react-native':native,'@expo/vector-icons':icons}).GoCloseButton;
  const defaults=Close({level:'panel',onPress(){},accessibilityLabel:'Cerrar'});assert.equal(defaults.props.style.backgroundColor,'#0e0e10');assert.equal(defaults.props.children.props.color,'#ffffff');assert.equal(defaults.props.style.width,44);
  let stopped=0,closed=0;const light=Close({level:'panel',onPress(){closed++;},accessibilityLabel:'Cerrar nota',touchSize:56,appearance:'light'});assert.equal(light.props.style.width,56);assert.equal(light.props.children.props.children.props.color,'#17212b');light.props.onPress({stopPropagation(){stopped++;}});assert.equal(stopped,1);assert.equal(closed,1);
+});
+
+test('premium heading is centered independently of floating controls; normal tools use 56 percent of the measured sheet and sit lower',async()=>{
+ const ui=await h.editorFixture();try{
+  assert.equal(flat(ui.hosts.get('note-heading').style).textAlign,'center');assert.equal(flat(ui.hosts.get('note-heading').style).width,'100%');
+  await ui.run(()=>ui.hosts.get('note-writing-workspace').onLayout({nativeEvent:{layout:{width:366,height:600}}}));
+  const tools=flat(ui.hosts.get('note-tools-panel').style),tab=flat(ui.hosts.get('note-tools-toggle').style);
+  assert.ok(tools.width>=366*.5&&tools.width<=366*.6);assert.ok(tools.width<318*.7);assert.equal(tools.height,360);assert.equal(tools.bottom,0);assert.equal(tab.top,372);assert.ok(tab.top>600*.4);assert.equal(tab.height,48);assert.equal(tab.width,44);
+  assert.equal(ui.hosts.get('note-option-date').activeOpacity,0.78);assert.equal(flat(ui.hosts.get('note-option-date').children.props.style).textAlign,'center');
+  assert.equal(flat(ui.hosts.get('note-destination-pending').style).backgroundColor,'rgba(255,239,168,0.90)');assert.equal(flat(ui.hosts.get('note-destination-archive').style).backgroundColor,'rgba(211,229,255,0.90)');assert.equal(flat(ui.hosts.get('note-destination-calendar').style).backgroundColor,'rgba(199,236,224,0.90)');
+ }finally{await ui.close();}
+});
+
+test('large fonts, inline pickers and short keyboard viewports get only the extra space they need without moving the writing frame',async()=>{
+ const ports={viewport:{width:320,height:568,scale:2,fontScale:2}},ui=await h.editorFixture({ports});try{
+  await ui.run(()=>ui.hosts.get('note-content').onChangeText('Borrador intacto'));const instance=ui.instances.get('note-content');
+  await ui.run(()=>ui.hosts.get('note-writing-workspace').onLayout({nativeEvent:{layout:{width:296,height:96}}}));await open(ui);
+  assert.equal(flat(ui.hosts.get('note-tools-panel').style).width,248);assert.equal(flat(ui.hosts.get('note-tools-panel').style).height,96);assert.ok(flat(ui.hosts.get('note-tools-toggle').style).top+48<=96);
+  await ui.run(()=>ui.hosts.get('note-option-date').onPress());assert.ok(ui.hosts.get('note-date'));assert.equal(flat(ui.hosts.get('note-tools-panel').style).width,248);
+  ports.viewport={width:390,height:844,scale:3,fontScale:1};await ui.run(()=>ui.hosts.get('note-writing-workspace').onLayout({nativeEvent:{layout:{width:366,height:600}}}));assert.equal(flat(ui.hosts.get('note-tools-panel').style).width,288);
+  await ui.run(()=>ui.hosts.get('note-option-date').onPress());assert.ok(flat(ui.hosts.get('note-tools-panel').style).width<=366*.6);assert.equal(ui.instances.get('note-content'),instance);assert.equal(ui.hosts.get('note-content').value,'Borrador intacto');
+ }finally{await ui.close();}
+});
+
+test('opening tools, hiding them and changing handedness never resizes the sheet, starts voice or persists a draft',async()=>{
+ const disk=await h.diskFixture(),ui=await h.editorFixture({scope:disk.scope,onSave:d=>disk.api().saveUnifiedNote(d,disk.scope,disk.active)});try{
+  const initial=flat(ui.hosts.get('unified-note-scroll').style);await ui.run(()=>ui.hosts.get('note-content').onChangeText('Una frase sin destino'));
+  for(let i=0;i<20;i++)await open(ui);assert.deepEqual(flat(ui.hosts.get('unified-note-scroll').style),initial);assert.equal(disk.writes,0);assert.equal(ui.calls.some(c=>c[0]==='microphone'),false);
+  await ui.render({handedness:'left'});assert.equal(flat(ui.hosts.get('note-editor-footer').style).flexDirection,'row-reverse');await ui.run(()=>ui.hosts.get('unified-note-save').onPress());assert.equal(disk.writes,0);assert.match(ui.container.textContent,/Selecciona CALENDARIO/);assert.equal(ui.hosts.get('note-content').value,'Una frase sin destino');
+ }finally{await ui.close();disk.close();}
 });
