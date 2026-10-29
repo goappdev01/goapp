@@ -43,6 +43,9 @@ interface DraggableFABProps {
   maxH?: number;
   bounds?: { width: number; height: number };
   buttonWidth?: number;
+  /** Opt-in vertical rail, inside an already safe local viewport. */
+  fixedLeft?: number;
+  onDragStart?: () => void;
   children: React.ReactNode;
 }
 
@@ -55,6 +58,8 @@ export function DraggableFAB({
   maxH = FAB_BTN,
   bounds,
   buttonWidth = FAB_BTN,
+  fixedLeft,
+  onDragStart,
   children,
 }: DraggableFABProps) {
   const { width: SW, height: SH } = bounds || Dimensions.get("window");
@@ -81,8 +86,9 @@ export function DraggableFAB({
   const hasDragged = useSharedValue(false);
 
   // ── Safe area clamp bounds ───────────────────────────────────────────────
-  const minL = (bounds ? 0 : insets.left) + EDGE;
-  const maxL = Math.max(minL, SW - (bounds ? 0 : insets.right) - EDGE - buttonWidth);
+  const fixed = fixedLeft === undefined ? undefined : Math.max(0, Math.min(SW - buttonWidth, fixedLeft));
+  const minL = fixed ?? (bounds ? 0 : insets.left) + EDGE;
+  const maxL = fixed ?? Math.max(minL, SW - (bounds ? 0 : insets.right) - EDGE - buttonWidth);
   const minT = (bounds ? 0 : insets.top) + EDGE;
   const maxT = Math.max(minT, SH - (bounds ? 0 : insets.bottom) - EDGE - maxH);
 
@@ -123,10 +129,11 @@ export function DraggableFAB({
           "worklet";
           isDragging.value = true;
           hasDragged.value = true;
+          if (onDragStart) runOnJS(onDragStart)();
           startL.value = Math.max(minL, Math.min(maxL, posL.value)) - event.translationX;
           startT.value = Math.max(minT, Math.min(maxT, posT.value)) - event.translationY;
-          scale.value = withSpring(1.1, { damping: 10, stiffness: 180 });
-          shadowOp.value = 0.42;
+          scale.value = withSpring(fixed === undefined ? 1.1 : 1, { damping: 10, stiffness: 180 });
+          shadowOp.value = fixed === undefined ? 0.42 : 0.22;
           runOnJS(Haptics.selectionAsync)();
         })
         .onUpdate((e) => {
@@ -148,7 +155,7 @@ export function DraggableFAB({
           scale.value = withSpring(1);
           shadowOp.value = 0.18;
         }),
-    [minL, maxL, minT, maxT, savePos]
+    [minL, maxL, minT, maxT, savePos, onDragStart, fixed]
   );
 
   // ── Animated style ───────────────────────────────────────────────────────
@@ -158,8 +165,8 @@ export function DraggableFAB({
     transform: [{ scale: scale.value }],
     zIndex: isDragging.value ? 300 : 99,
     shadowOpacity: shadowOp.value,
-    shadowRadius: isDragging.value ? 18 : 6,
-    elevation: isDragging.value ? 20 : 4,
+    shadowRadius: isDragging.value ? (fixed === undefined ? 18 : 8) : 6,
+    elevation: isDragging.value ? (fixed === undefined ? 20 : 6) : 4,
   }));
 
   return (

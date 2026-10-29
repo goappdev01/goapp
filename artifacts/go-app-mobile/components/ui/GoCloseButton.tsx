@@ -35,7 +35,7 @@ export function GoCloseButton({ level, onPress, accessibilityLabel, disabled = f
 }
 
 const styles = StyleSheet.create({
-  light: { backgroundColor: "rgba(225,232,237,0.92)", borderColor: "#89949d" },
+  light: { backgroundColor: "rgba(238,244,248,0.96)", borderColor: "#91a4b1", borderWidth: 1, shadowColor: "#314955", shadowOpacity: 0.14, shadowRadius: 5, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
   button: {
     width: 44,
     height: 44,
