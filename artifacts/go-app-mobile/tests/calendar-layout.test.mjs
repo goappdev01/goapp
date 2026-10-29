@@ -165,7 +165,7 @@ test('the restored full calendar width accepts a valid right-edge drop once, whi
   scan(boardAst); assert.ok(callback);
   for (const [pointerX, itemId, expectedMoves, expectedCancelled] of [[350, 'pending-note', 1, 0], [280, 'pending-note', 1, 0], [350, 'foreign-entry', 0, 1]]) {
     const calls = [], moves = [], scope = { exports: {}, screenW: 390,
-      allowedEntryIdsRef: { current: new Set(['pending-note']) }, jsCancelDragRef: { current: () => calls.push('cancelled') },
+      allowedEntryIdsRef: { current: new Set(['pending-note']) }, dropConsumed:{current:false}, jsCancelDragRef: { current: () => calls.push('cancelled') },
       boardX: { current: 0 }, scrollX: { current: 0 }, allColumnsRef: { current: [{ id: 'day', dateISO: '2026-10-15' }] }, colLayouts: { current: { day: { x: 200, w: 180 } } },
       clearEdgeScroll() {}, floatOp: {}, floatSc: {}, withTiming: value => value, withSpring: value => value,
       dragItemRef: { current: pending }, selectedIdsRef: { current: new Set() }, onOpenMoveFlow: (...args) => moves.push(args),

@@ -108,6 +108,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1} } =
         if (name === '@/data/customerBookingProjection') return load('data/customerBookingProjection.ts');
         if (name.startsWith('@/components/')) return load(name.replace('@/', '') + '.tsx');
         if (name === '@/lib/time') return load('lib/time.ts');
+        if (name === '@/lib/unifiedNotes') return load('lib/unifiedNotes.ts');
         if (name === '@/lib/calendarGestureOwnership') return load('lib/calendarGestureOwnership.ts');
         if (name === '@/lib/calendarCloseResponder') return load('lib/calendarCloseResponder.ts');
         if (name === '@/lib/entryDetailTouchDelivery') return load('lib/entryDetailTouchDelivery.ts');

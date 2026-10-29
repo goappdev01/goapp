@@ -42,6 +42,8 @@ interface DraggableFABProps {
   initialTop?: number;
   maxH?: number;
   bounds?: { width: number; height: number };
+  /** Local bounds already inside a safe area may opt out of the extra vertical inset. */
+  boundsVerticalInset?: number;
   buttonWidth?: number;
   /** Opt-in vertical rail, inside an already safe local viewport. */
   fixedLeft?: number;
@@ -57,6 +59,7 @@ export function DraggableFAB({
   initialTop,
   maxH = FAB_BTN,
   bounds,
+  boundsVerticalInset,
   buttonWidth = FAB_BTN,
   fixedLeft,
   onDragStart,
@@ -89,8 +92,9 @@ export function DraggableFAB({
   const fixed = fixedLeft === undefined ? undefined : Math.max(0, Math.min(SW - buttonWidth, fixedLeft));
   const minL = fixed ?? (bounds ? 0 : insets.left) + EDGE;
   const maxL = fixed ?? Math.max(minL, SW - (bounds ? 0 : insets.right) - EDGE - buttonWidth);
-  const minT = (bounds ? 0 : insets.top) + EDGE;
-  const maxT = Math.max(minT, SH - (bounds ? 0 : insets.bottom) - EDGE - maxH);
+  const verticalEdge = bounds ? Math.max(0,boundsVerticalInset??EDGE) : EDGE;
+  const minT = (bounds ? 0 : insets.top) + verticalEdge;
+  const maxT = Math.max(minT, SH - (bounds ? 0 : insets.bottom) - verticalEdge - maxH);
 
   // ── Persist ──────────────────────────────────────────────────────────────
   useEffect(() => {

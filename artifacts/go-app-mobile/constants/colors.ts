@@ -1,3 +1,5 @@
+export const GO_PENDING_YELLOW = "#FFD700";
+
 const colors = {
   light: {
     text: "#0a0a0a",

@@ -10,8 +10,8 @@ test('QUITAR/GUARDAR keep two equal flex surfaces, physical left/right order and
   await ui.tool('time');let remove=ui.hosts.get('note-time-clear'),save=ui.hosts.get('note-time-apply'),footer=flat(ui.hosts.get('note-time-apply-footer').style);
   assert.equal(footer.flexDirection,'row');assert.equal(footer.alignItems,'stretch');assert.equal(remove.disabled,true);assert.equal(remove.accessibilityState.disabled,true);assert.equal(flat(remove.style).backgroundColor,'#e7edf2');
   for(const key of ['flex','flexBasis','minWidth','minHeight','paddingHorizontal','paddingVertical','borderRadius'])assert.equal(flat(remove.style)[key],flat(save.style)[key]);
-  assert.equal(footer.flexWrap,undefined);await write(ui,'note-time-hour','19');await write(ui,'note-time-minute','30');await ui.tap('note-time-apply');await ui.tool('time');remove=ui.hosts.get('note-time-clear');assert.equal(remove.disabled,false);assert.equal(flat(remove.style).backgroundColor,'#b91c1c');assert.equal(remove.children.props.children,'QUITAR HORA');
-  await ui.tap('note-time-clear');assert.equal(ui.hosts.get('note-option-time').accessibilityState.selected,false);await ui.tool('reminder');assert.equal(ui.hosts.get('note-reminder-none').children.props.children,'QUITAR AVISO');assert.equal(ui.hosts.get('note-reminder-none').disabled,true);
+  assert.equal(footer.flexWrap,undefined);await write(ui,'note-time-hour','19');await write(ui,'note-time-minute','30');await ui.tap('note-time-apply');await ui.tool('time');remove=ui.hosts.get('note-time-clear');assert.equal(remove.disabled,false);assert.equal(flat(remove.style).backgroundColor,'#b91c1c');assert.equal(remove.children.props.children,'QUITAR');assert.equal(remove.accessibilityLabel,'QUITAR HORA');
+  await ui.tap('note-time-clear');assert.equal(ui.hosts.get('note-option-time').accessibilityState.selected,false);await ui.tool('reminder');assert.equal(ui.hosts.get('note-reminder-none').accessibilityLabel,'QUITAR AVISO');assert.equal(ui.hosts.get('note-reminder-none').disabled,true);
  }finally{await ui.close();}}
 });
 

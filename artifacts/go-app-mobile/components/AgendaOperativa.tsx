@@ -30,7 +30,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Animated,
   Dimensions,
-  useWindowDimensions,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -61,10 +60,13 @@ import { CalSizeKey, getCalColumnW, DEFAULT_GO_RENDER_PRESET } from "../constant
 import { trSector } from "@/data/goSectorTranslations";
 import { reservationCardPolicy } from "@/data/reservationCardPolicy";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "./GoEntryDetails";
-import { GoNoteArchiveColumn, noteArchiveColumnWidth } from "./notes/GoNoteArchiveColumn";
+import { GoNoteArchiveColumn } from "./notes/GoNoteArchiveColumn";
+import { noteDocument } from "@/lib/unifiedNotes";
 import { noteRevealColumn } from "@/lib/goNoteNavigation";
 import { entryHeading, entryIdentity, entryIsReservation } from "@/data/goEntryPresentation";
 import { GoCloseButton } from "./ui/GoCloseButton";
+import { goCalendarColumnHeaderStyles } from "./ui/goCalendarColumnStyles";
+import { GO_PENDING_YELLOW } from "../constants/colors";
 import { GoCalendarViewSelector } from "./ui/GoCalendarViewSelector";
 
 export type GoEntry = {
@@ -678,7 +680,7 @@ function estadoLabel(estado: string, lang?: string): string {
 const ESTADO_OPTIONS: Array<{ key: GoEntry["estado"]; icon: string; iconInactive: string; color: string }> = [
   { key: "rechazado", icon: "trash-2",      iconInactive: "trash-2",   color: "#FF0000" },
   { key: "propuesto", icon: "refresh-cw",   iconInactive: "circle",    color: "#FF8C00" },
-  { key: "pendiente", icon: "mail",         iconInactive: "mail",      color: "#FFD700" },
+  { key: "pendiente", icon: "mail",         iconInactive: "mail",      color: GO_PENDING_YELLOW },
   { key: "aceptado",  icon: "check-circle", iconInactive: "circle",    color: "#22c55e" },
 ];
 
@@ -744,8 +746,7 @@ export function AgendaBoard({
 }: AgendaBoardProps) {
   const goLog = useGoCalendarEntries(calendarEntries);
   const [notesExpanded,setNotesExpanded]=useState(true);
-  const notesViewport=useWindowDimensions();
-  const notesColumnW=noteArchiveColumnWidth(notesViewport.width,notesViewport.fontScale,notesExpanded);
+  const [archiveHeaderHeight,setArchiveHeaderHeight]=useState<number>();
   const archiveEntriesRef=useRef(archiveNotes||[]);archiveEntriesRef.current=archiveNotes||[];
   const noteDayFocus=useRef({key:"",done:false});
   const noteDayFocusKey=viewMode+":"+selectedDateISO;
@@ -1038,6 +1039,7 @@ export function AgendaBoard({
   const [dragItem, setDragItem] = useState<GoEntry | null>(null);
   const [dragTargetColId, setDragTargetColId] = useState<string | null>(null);
   const dragItemRef = useRef<GoEntry | null>(null);
+  const dropConsumed=useRef(false);
   useEffect(() => { dragItemRef.current = dragItem; }, [dragItem]);
 
   // ── MOVE FLOW REF (stores handler ref for cross-day drops) ──────
@@ -1049,6 +1051,7 @@ export function AgendaBoard({
   const floatSc = useSharedValue(1);
   const floatRot = useSharedValue(0); // slight tilt à la Trello/iOS drag
   const lastAbsX = useSharedValue(0); // captured in onFinalize for drop detection
+  const lastAbsY = useSharedValue(0);
   // Captured once at long-press start: finger Y relative to the float card top,
   // so the card stays exactly under the finger with no vertical jump.
   const fingerOffsetY = useSharedValue(44);
@@ -1078,7 +1081,8 @@ export function AgendaBoard({
   const boardY        = useRef(0); // board top edge in window coords — needed to
                                     // convert absoluteY (screen) → board-local Y
   const scrollX       = useRef(0); // horizontal scroll offset
-  const colLayouts    = useRef<Record<string, { x: number; w: number }>>({});
+  const colLayouts    = useRef<Record<string, { x: number; w: number; y?:number; h?:number }>>({});
+  const columnsViewportY=useRef(0);
   const scrollViewRef = useRef<any>(null);
   // Refs for each column's inner vertical ScrollView (hourly mode)
   const colScrollRefs    = useRef<Record<string, any>>({});
@@ -1118,6 +1122,7 @@ export function AgendaBoard({
 
   // Always-latest refs for callbacks used inside gesture worklets
   const onMoveItemRef  = useRef(onMoveItem);
+  const onMoveNoteRef=useRef(onMoveNote);onMoveNoteRef.current=onMoveNote;
   const allColumnsRef  = useRef(allColumns);
   useEffect(() => { onMoveItemRef.current  = onMoveItem;   }, [onMoveItem]);
   useEffect(() => { allColumnsRef.current  = allColumns;   }, [allColumns]);
@@ -1283,13 +1288,18 @@ export function AgendaBoard({
   // Called when long press fires — record which item is being dragged
   const jsStartDrag = useCallback((item: GoEntry) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-    setDragItem(item);
+    dropConsumed.current=false;dragItemRef.current=item;setDragItem(item);
     setDragTargetColId(null);
   }, []);
 
   // Called on every finger move — determine which column is under the finger
   // Also triggers edge-auto-scroll when near screen edges during drag
-  const jsUpdateTarget = useCallback((absX: number) => {
+  const canArchiveDrop=(itemId:string)=>{
+    const rows=currentEntriesRef.current.filter(item=>item.id===itemId),item=rows[0],origin=dragItemRef.current;
+    return !!(onMoveNoteRef.current&&rows.length===1&&origin?.id===itemId&&noteDocument(item)&&!entryIsReservation(item)&&!item.deleted&&item.estado!=="rechazado"&&item.ownerUserId===origin.ownerUserId&&item.taskContext===origin.taskContext);
+  };
+  const archiveContainsY=(absY:number,lay:{y?:number;h?:number})=>Number.isFinite(absY)&&!!lay.h&&absY>=boardY.current+columnsViewportY.current+(lay.y||0)&&absY<=boardY.current+columnsViewportY.current+(lay.y||0)+lay.h;
+  const jsUpdateTarget = useCallback((absX: number,absY:number) => {
     // ── Edge auto-scroll ──────────────────────────────────────────
     const EDGE_ZONE = 60;
     const newDir: "left" | "right" | null =
@@ -1318,6 +1328,7 @@ export function AgendaBoard({
     for (const col of allColumnsRef.current) {
       const lay = colLayouts.current[col.id];
       if (lay && relX >= lay.x && relX <= lay.x + lay.w) {
+        if(col.isNotes&&(!dragItemRef.current||!canArchiveDrop(dragItemRef.current.id)||!archiveContainsY(absY,lay)))break;
         found = col.id;
         break;
       }
@@ -1331,8 +1342,10 @@ export function AgendaBoard({
   }, [screenW, clearEdgeScroll]);
 
   // Called on successful drop — compute final column and trigger onMoveItem
-  const jsDropAt = useCallback((absX: number, itemId: string, itemTime: string) => {
+  const jsDropAt = useCallback((absX: number, itemId: string, itemTime: string,absY:number) => {
     if (!allowedEntryIdsRef.current.has(itemId)) { jsCancelDragRef.current(); return; }
+    if(dropConsumed.current||dragItemRef.current?.id!==itemId)return;
+    dropConsumed.current=true;
     clearEdgeScroll();
     const relX = absX - boardX.current + scrollX.current;
     let targetCol: Column | undefined;
@@ -1346,6 +1359,11 @@ export function AgendaBoard({
     floatOp.value = withTiming(0, { duration: 120 });
     floatSc.value = withSpring(1, { damping: 10, stiffness: 320 });
 
+    if(targetCol?.isNotes&&canArchiveDrop(itemId)&&archiveContainsY(absY,colLayouts.current[targetCol.id])){
+      const current=currentEntriesRef.current.find(item=>item.id===itemId)!;
+      try{onMoveNoteRef.current!(current,"archive");}finally{dragItemRef.current=null;setDragItem(null);setDragTargetColId(null);}
+      return;
+    }
     if (targetCol?.dateISO) {
       const fromDateISO = dragItemRef.current?.dateISO ?? "";
       const isCrossDay = fromDateISO !== targetCol.dateISO;
@@ -1374,7 +1392,7 @@ export function AgendaBoard({
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
 
-    setDragItem(null);
+    dragItemRef.current=null;setDragItem(null);
     setDragTargetColId(null);
   }, [clearEdgeScroll]);
 
@@ -1383,7 +1401,7 @@ export function AgendaBoard({
     clearEdgeScroll();
     floatOp.value = withTiming(0, { duration: 100 });
     floatSc.value = withSpring(1, { damping: 10, stiffness: 320 });
-    setDragItem(null);
+    dropConsumed.current=true;dragItemRef.current=null;setDragItem(null);
     setDragTargetColId(null);
   }, [clearEdgeScroll]);
 
@@ -1486,9 +1504,9 @@ export function AgendaBoard({
 
     // Capture stable copies of callbacks for this specific item
     const startThis  = () => jsStartDragRef.current(item);
-    const dropThis   = (absX: number) => jsDropAtRef.current(absX, item.id, item.time || "");
+    const dropThis   = (absX: number,absY:number) => jsDropAtRef.current(absX, item.id, item.time || "",absY);
     const cancelThis = () => jsCancelDragRef.current();
-    const updateThis = (absX: number) => jsUpdateTargetRef.current(absX);
+    const updateThis = (absX: number,absY:number) => jsUpdateTargetRef.current(absX,absY);
     const _bc = item as any;
     const _isRawBookingType = item.type === "GO_BOOKING" || item.type === "GO_RESERVA";
     const _hasRequiredSlotFields = !!_bc.slotKey && (!!_bc.staffId || !!((_bc.customerBooking || _bc.businessBooking) && _bc.reservationId && _bc.businessId));
@@ -1572,6 +1590,7 @@ export function AgendaBoard({
         // Start neutral — tilt builds dynamically in onUpdate
         floatRot.value = withSpring(0, { damping: 8, stiffness: 200 });
         lastAbsX.value = e.absoluteX;
+        lastAbsY.value = e.absoluteY;
         runOnJS(startThis)();
       })
       .onUpdate((e) => {
@@ -1579,6 +1598,7 @@ export function AgendaBoard({
         floatL.value  = e.absoluteX - (colWShared.value - 14) / 2;
         floatT.value  = e.absoluteY - fingerOffsetY.value - boardY.current;
         lastAbsX.value = e.absoluteX;
+        lastAbsY.value = e.absoluteY;
         // Bidirectional tilt — increased to ±5° for a more physical feel.
         // velocityX threshold 50 px/s filters micro-jitter while staying responsive.
         // Intermediate speed (50–300): scale tilt proportionally for smoothness.
@@ -1591,13 +1611,13 @@ export function AgendaBoard({
           : 0;
         floatRot.value = withSpring(tilt, { damping: 12, stiffness: 200 });
         // Column highlight runs on JS thread (acceptable ~1 frame lag)
-        runOnJS(updateThis)(e.absoluteX);
+        runOnJS(updateThis)(e.absoluteX,e.absoluteY);
       })
       .onFinalize((_e, success) => {
         // Snap rotation back to 0 on release
         floatRot.value = withSpring(0, { damping: 12, stiffness: 300 });
         if (success) {
-          runOnJS(dropThis)(lastAbsX.value);
+          runOnJS(dropThis)(Number.isFinite(_e.absoluteX)?_e.absoluteX:lastAbsX.value,Number.isFinite(_e.absoluteY)?_e.absoluteY:lastAbsY.value);
         } else {
           runOnJS(cancelThis)();
         }
@@ -2062,9 +2082,10 @@ export function AgendaBoard({
 
   // ── COLUMN ───────────────────────────────────────────────────────
   const renderColumn = (col: Column) => {
-    if(col.isNotes&&onOpenNote)return <View key={col.id} style={[s.column,{width:notesColumnW}]}
-      onLayout={event=>{colLayouts.current[col.id]={x:event.nativeEvent.layout.x,w:event.nativeEvent.layout.width};queueBookingFocus();}}>
+    if(col.isNotes&&onOpenNote)return <View key={col.id} style={[s.column,{width:columnW,borderColor:"#475569"},dragTargetColId===col.id&&s.columnDragTarget]}
+      onLayout={event=>{const {x,y,width,height}=event.nativeEvent.layout;colLayouts.current[col.id]={x,y,w:width,h:height};queueBookingFocus();}}>
       <GoNoteArchiveColumn entries={archiveNotes||[]} expanded={notesExpanded} onOpen={onOpenNote} onMove={onMoveNote}
+        compact={!!renderHeader} headerHeight={archiveHeaderHeight} titleFont={hdrFont} dateFont={hdrDateFt} dropActive={dragTargetColId===col.id}
         focus={scrollToDateToken?.destination==="archive"&&scrollToDateToken.entryId?{
           entryId:scrollToDateToken.entryId,highlightEntryId:activeGlowId,
           registerScroll:node=>{colScrollRefs.current.notes=node;queueBookingFocus();},
@@ -2139,6 +2160,7 @@ export function AgendaBoard({
       >
         {/* Column header */}
         <View
+          onLayout={col.isRetrasados?event=>{const height=event.nativeEvent.layout.height;if(height>0)setArchiveHeaderHeight(previous=>previous===height?previous:height);}:undefined}
           style={[
             s.colHeader,
             !!renderHeader && s.compactColHeader,
@@ -2609,7 +2631,7 @@ export function AgendaBoard({
 
       <GHScrollView
         ref={scrollViewRef}
-        onLayout={e=>{horizontalSize.current.viewport=e.nativeEvent.layout.width;queueBookingFocus();}}
+        onLayout={e=>{horizontalSize.current.viewport=e.nativeEvent.layout.width;columnsViewportY.current=e.nativeEvent.layout.y||0;queueBookingFocus();}}
         onContentSizeChange={w=>{horizontalSize.current.content=w;queueBookingFocus();}}
         onScrollBeginDrag={()=>{pendingBookingFocus.current=null;}}
         horizontal
@@ -2635,7 +2657,7 @@ export function AgendaBoard({
           pointerEvents none: puramente visual, no interfiere con gestos. */}
       {viewMode === "mes_lineal" && (() => {
         const totalCols = allColumns.length;
-        const totalContentW = allColumns.reduce((sum,col)=>sum+(col.isNotes?notesColumnW:columnW)+colGap,0);
+        const totalContentW = allColumns.reduce(sum=>sum+columnW+colGap,0);
         const maxScrollX = Math.max(1, totalContentW - screenW);
         const BAR_W = 72;
         const thumbW = Math.max(10, Math.round((screenW / Math.max(screenW + 1, totalContentW)) * BAR_W));
@@ -3502,6 +3524,7 @@ export function AgendaOperativa({
 
 
 const s = StyleSheet.create({
+  ...goCalendarColumnHeaderStyles,
   // ── Native bottom-sheet panel ──────────────────────────────────────
   panel: {
     position: "absolute",
@@ -3797,27 +3820,13 @@ const s = StyleSheet.create({
   },
 
   // ── Column header — dark with white text; accent via bottom border only
-  colHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 10,
-    paddingVertical: 12,
-    gap: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.12)",
-    backgroundColor: "rgba(8,8,16,0.92)",
-  },
+
   // Calendar-only spacing; keep every text/icon size and let larger content grow.
   compactColsContent: { paddingTop: 0 },
-  compactColHeader: { paddingVertical: 0 },
-  compactColHeaderContent: { minHeight: 44, paddingVertical: 2, gap: 1, justifyContent: "center" },
+
+
   pendingHeaderTitleOffset: { transform: [{ translateX: -6 }] },
-  colHeaderContent: {
-    flex: 1,
-    alignItems: "center",
-    gap: 2,
-  },
+
   colHeaderRetrasados: {
     backgroundColor: "rgba(120,60,0,0.92)",
     borderBottomColor: "#d97706",
@@ -3834,36 +3843,13 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(20,60,40,0.95)",
     borderBottomColor: "#22c55e",
   },
-  colHeaderDayName: {
-    color: "#ffffff",
-    fontSize: 13,
-    fontFamily: "Inter_900Black", fontWeight: "900",
-    letterSpacing: 0.8,
-    textAlign: "center",
-  },
-  colHeaderDayDate: {
-    color: "rgba(255,255,255,0.50)",
-    fontSize: 10,
-    fontWeight: "600",
-    letterSpacing: 0.3,
-    textAlign: "center",
-  },
+
+
   colHeaderTextSelected: {
     color: "#00e5ff",
   },
-  colCountBadge: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  colCount: {
-    color: "#ffffff",
-    fontSize: 9,
-    fontFamily: "Inter_700Bold", fontWeight: "800",
-    backgroundColor: "rgba(255,255,255,0.22)",
-    borderRadius: 6,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
+
+
   retrasadosBadge: {
     backgroundColor: "#d97706",
     borderRadius: 8,
@@ -3882,7 +3868,7 @@ const s = StyleSheet.create({
     backgroundColor: "#d97706",
   },
 
-  // ── Column scroll
+// ── Column scroll
   colScroll: {
     flex: 1,
   },
