@@ -84,20 +84,20 @@ test('ordinary editor opens both fields immediately without automatic keyboard a
  const f=await h.diskFixture(),ui=await h.editorFixture({scope:f.scope,onSave:d=>f.api().saveUnifiedNote(d,f.scope,f.active)});
  try{assert.ok(ui.hosts.get('note-content'));assert.ok(ui.hosts.get('note-title'));assert.equal(ui.hosts.get('note-content').autoFocus,undefined);assert.equal(ui.hosts.get('note-title').autoFocus,undefined);
   await ui.run(()=>ui.hosts.get('note-content').onChangeText('Comprar leche'));assert.equal(ui.hosts.get('note-title').value,'');
-  await ui.run(()=>ui.hosts.get('note-destination-pending').onPress());
+  await ui.destination('pending');
   const press=ui.hosts.get('unified-note-save').onPress;await ui.run(()=>{press();press();});await ui.idle();assert.equal(f.rows.length,1);assert.equal(f.rows[0].note.content,'Comprar leche');assert.ok(ui.hosts.get('note-save-confirmation'));
  }finally{await ui.close();f.close();}
 });
 
 test('native dictation corrections, cursor-owned editing and optional configuration never unmount the content field',async()=>{
  const ui=await h.editorFixture();try{const instance=ui.instances.get('note-content');for(const text of ['Dictado nativo','Dictado natio','Dictado corregido','Texto insertado en medio']){await ui.run(()=>ui.hosts.get('note-content').onChangeText(text));assert.equal(ui.instances.get('note-content'),instance);assert.equal(ui.hosts.get('note-content').selection,undefined);}
-  for(const option of ['date','time','duration','place','reminder','attachments']){await ui.run(()=>ui.hosts.get('note-option-'+option).onPress());assert.equal(ui.instances.get('note-content'),instance);assert.equal(ui.hosts.get('note-content').value,'Texto insertado en medio');}
+  for(const option of ['date','time','duration','place','reminder','attachments']){await ui.tool(option);assert.equal(ui.instances.get('note-content'),instance);assert.equal(ui.hosts.get('note-content').value,'Texto insertado en medio');}
   await ui.run(()=>ui.hosts.get('note-microphone').onPress());assert.ok(ui.calls.some(c=>c[0]==='microphone'));
  }finally{await ui.close();}
 });
 
 test('failed UI save retains draft and error; normal close returns its unsaved content without inventing success',async()=>{
- const ui=await h.editorFixture({onSave:async()=>{throw Error('No se pudo guardar en disco');}});try{await ui.run(()=>ui.hosts.get('note-content').onChangeText('No perder texto'));await ui.run(()=>ui.hosts.get('note-destination-pending').onPress());await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();
+ const ui=await h.editorFixture({onSave:async()=>{throw Error('No se pudo guardar en disco');}});try{await ui.run(()=>ui.hosts.get('note-content').onChangeText('No perder texto'));await ui.destination('pending');await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();
   assert.equal(ui.hosts.get('note-content').value,'No perder texto');assert.ok(ui.hosts.get('note-save-error'));assert.equal(ui.hosts.has('note-save-confirmation'),false);
   await ui.run(()=>ui.hosts.get('Cerrar nota').onPress());const closed=ui.calls.find(c=>c[0]==='close')[1];assert.equal(closed.draft.content,'No perder texto');assert.equal(closed.saved,false);
  }finally{await ui.close();}
@@ -112,9 +112,9 @@ test('real editor attachment and location callbacks import a durable file, selec
  documents:{getDocumentAsync:async()=>{pickers++;return{canceled:false,assets:[asset]};}},importFile:disk.fileApi.importNoteFile,
  location:{geocodeAsync:async()=>[{latitude:38,longitude:-1},{latitude:39,longitude:-2}],reverseGeocodeAsync:async point=>[{street:point.latitude===38?'Calle uno':'Calle dos',streetNumber:'10',city:'Murcia'}],requestForegroundPermissionsAsync:()=>assert.fail('iOS address search should not request GPS permission')}}});
  await ui.run(()=>ui.hosts.get('note-content').onChangeText('Documento asociado'));
- await ui.run(()=>ui.hosts.get('note-option-attachments').onPress());const pick=ui.hosts.get('PDF o documento').onPress;await ui.run(()=>{pick();pick();});await ui.idle();assert.equal(pickers,1);
- await ui.run(()=>ui.hosts.get('note-option-place').onPress());await ui.run(()=>ui.hosts.get('note-place').onChangeText('Calle de búsqueda'));await ui.run(()=>ui.hosts.get('Buscar ubicación').onPress());await ui.idle();
+ await ui.tool('attachments');const pick=ui.hosts.get('PDF o documento').onPress;await ui.run(()=>{pick();pick();});await ui.idle();assert.equal(pickers,1);
+ await ui.tool('place');await ui.run(()=>ui.hosts.get('note-place').onChangeText('Calle de búsqueda'));await ui.run(()=>ui.hosts.get('Buscar ubicación').onPress());await ui.idle();
  assert.equal(ui.hosts.get('note-place').value,'Calle de búsqueda','search proposes choices before replacing the selected location');await ui.run(()=>ui.hosts.get('note-location-result-1').onPress());assert.equal(ui.hosts.get('note-place').value,'Calle dos, 10, Murcia');
- await ui.run(()=>ui.hosts.get('note-destination-archive').onPress());await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(disk.rows.length,1);const [loaded]=await disk.reopen();assert.equal(loaded.note.attachments.length,1);assert.equal(fs.readFileSync(fileURLToPath(loaded.note.attachments[0].uri),'utf8'),'fixture document');assert.equal(loaded.note.location.latitude,39);assert.equal(loaded.place,'Calle dos, 10, Murcia');
+ await ui.destination('archive');await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(disk.rows.length,1);const [loaded]=await disk.reopen();assert.equal(loaded.note.attachments.length,1);assert.equal(fs.readFileSync(fileURLToPath(loaded.note.attachments[0].uri),'utf8'),'fixture document');assert.equal(loaded.note.location.latitude,39);assert.equal(loaded.place,'Calle dos, 10, Murcia');
  }finally{if(ui)await ui.close();disk.close();}
 });

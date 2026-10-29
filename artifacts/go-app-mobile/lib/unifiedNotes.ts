@@ -46,7 +46,7 @@ export function validateNote(draft: UnifiedNoteDraft): asserts draft is UnifiedN
     const [hours,minutes]=draft.time.split(":").map(Number),local=new Date(draft.dateISO+"T00:00:00");local.setHours(hours,minutes,0,0);
     if(local.getHours()!==hours||local.getMinutes()!==minutes)throw new Error("Esa hora no existe en la fecha y zona horaria seleccionadas.");
   }
-  if (draft.duration && !["15m","30m","1h","2h"].includes(draft.duration) && draft.duration !== draft.original?.duration)
+  if (draft.duration && !["15m","30m","1h","2h"].includes(draft.duration) && draft.duration !== draft.original?.duration && draft.duration !== noteDocument(draft.original)?.schedule.duration)
     throw new Error("Selecciona una duración válida.");
   if (draft.reminderMinutes !== null && (!Number.isInteger(draft.reminderMinutes) || draft.reminderMinutes < 1 || draft.reminderMinutes > 525600)) throw new Error("El intervalo del aviso no es válido.");
   if (draft.location && (!Number.isFinite(draft.location.latitude) || !Number.isFinite(draft.location.longitude)

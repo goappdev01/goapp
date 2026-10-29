@@ -53,6 +53,6 @@ test('repeated drag/fold cycles preserve writing, explicit destinations, GO and 
   const text=('Texto largo editable después del dictado.\n').repeat(70);await ui.run(()=>ui.hosts.get('note-content').onChangeText(text));const input=ui.instances.get('note-content');
   for(let i=0;i<10;i++){await drag(ui,i%2?2000:-2000);await ui.run(()=>ui.hosts.get('note-tools-toggle').onPress());await press(ui);}assert.equal(ui.instances.get('note-content'),input);assert.equal(ui.hosts.get('note-content').value,text);assert.equal(disk.writes,0);
   await ui.run(()=>ui.hosts.get('unified-note-save').onPress());assert.match(ui.container.textContent,/Selecciona CALENDARIO/);await ui.run(()=>ui.hosts.get('note-microphone').onPress());assert.ok(ui.calls.some(c=>c[0]==='microphone'));
-  await press(ui);await ui.run(()=>ui.hosts.get('note-destination-pending').onPress());await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();const [loaded]=await disk.reopen();assert.equal(loaded.note.content,text);assert.equal(loaded.note.destination,'pending');assert.match(ui.container.textContent,/guardada/i);assert.equal(disk.rows.length,1);
+  await press(ui);await ui.destination('pending');await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();const [loaded]=await disk.reopen();assert.equal(loaded.note.content,text);assert.equal(loaded.note.destination,'pending');assert.match(ui.container.textContent,/guardada/i);assert.equal(disk.rows.length,1);
  }finally{await ui.close();disk.close();}
 });

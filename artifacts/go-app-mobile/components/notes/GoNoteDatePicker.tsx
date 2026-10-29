@@ -1,26 +1,38 @@
 import React, { useState } from "react";
-import { Text, TouchableOpacity, View } from "react-native";
+import { ScrollView, Text, TouchableOpacity, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { formatISODate, getToday } from "@/lib/time";
+import { validNoteDate } from "@/lib/unifiedNotes";
+export const noteDateLabel=(value:string)=>validNoteDate(value)?value.split("-").reverse().join("/"):value;
+const monthStart=(value:Date)=>{const date=new Date(value);date.setDate(1);return date;};
 
 /** Inline optional date selection: never opens or changes the Calendar screen. */
 export function GoNoteDatePicker({value,onChange,disabled=false,light=false}:{value:string;onChange:(value:string)=>void;disabled?:boolean;light?:boolean}){
- const text=light?"#17212b":"#ffffff",secondary=light?"#515d69":"#a1a1aa";
- const [month,setMonth]=useState(()=>{const candidate=/^\d{4}-\d{2}-\d{2}$/.test(value)?new Date(value+"T12:00:00"):getToday();const initial=Number.isFinite(candidate.getTime())?candidate:getToday();return new Date(initial.getFullYear(),initial.getMonth(),1);});
- const length=new Date(month.getFullYear(),month.getMonth()+1,0).getDate(),offset=(month.getDay()+6)%7;
- const move=(delta:number)=>setMonth(current=>new Date(current.getFullYear(),current.getMonth()+delta,1));
- return <View testID="note-inline-date-picker" style={{gap:8}}>
+ const text=light?"#17212b":"#ffffff",secondary=light?"#515d69":"#a1a1aa",today=getToday(),todayISO=formatISODate(today);
+ const [month,setMonth]=useState(()=>monthStart(validNoteDate(value)?new Date(value+"T12:00:00"):today));
+ const [focusToday,setFocusToday]=useState(false),[viewEpoch,setViewEpoch]=useState(0);
+ const end=new Date(month);end.setMonth(end.getMonth()+1);end.setDate(0);
+ const length=end.getDate(),offset=(month.getDay()+6)%7;
+ const move=(delta:number)=>{setFocusToday(false);setMonth(current=>{const next=new Date(current);next.setMonth(next.getMonth()+delta);return Number.isFinite(next.getTime())?next:current;});};
+ const shownISO=formatISODate(month).slice(0,7),focusDay=focusToday&&shownISO===todayISO.slice(0,7)?today.getDate():validNoteDate(value)&&value.slice(0,7)===shownISO?Number(value.slice(8)):shownISO===todayISO.slice(0,7)?today.getDate():1;
+ return <View testID="note-inline-date-picker" style={{flex:1,minHeight:0,gap:8}}>
+  <Text testID="note-date-month" accessibilityRole="header" style={{color:text,fontSize:16,fontWeight:"700",textAlign:"center"}}>{month.toLocaleDateString("es-ES",{month:"long",year:"numeric"})}</Text>
   <View style={{flexDirection:"row",alignItems:"center",justifyContent:"space-between"}}>
    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Mes anterior" disabled={disabled} onPress={()=>move(-1)} style={{width:44,height:44,alignItems:"center",justifyContent:"center"}}><Feather name="chevron-left" size={20} color={text}/></TouchableOpacity>
-   <Text style={{color:text,fontSize:14,flexShrink:1}}>{month.toLocaleDateString("es-ES",{month:"long",year:"numeric"})}</Text>
+   <TouchableOpacity testID="note-date-today" accessibilityRole="button" accessibilityLabel="Volver al mes de hoy" disabled={disabled} onPress={()=>{setFocusToday(true);setViewEpoch(epoch=>epoch+1);setMonth(monthStart(getToday()));}} style={{minWidth:64,minHeight:44,alignItems:"center",justifyContent:"center",borderRadius:12,backgroundColor:"rgba(59,130,246,0.12)"}}><Text style={{color:light?"#1758a6":"#93c5fd",fontSize:13,fontWeight:"700"}}>HOY</Text></TouchableOpacity>
    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Mes siguiente" disabled={disabled} onPress={()=>move(1)} style={{width:44,height:44,alignItems:"center",justifyContent:"center"}}><Feather name="chevron-right" size={20} color={text}/></TouchableOpacity>
   </View>
-  <View style={{flexDirection:"row",flexWrap:"wrap"}}>
+  <View testID="note-date-weekdays" style={{flexDirection:"row"}}>
    {["L","M","X","J","V","S","D"].map((day,i)=><Text key={i} style={{width:"14.2857%",textAlign:"center",color:secondary,fontSize:12}}>{day}</Text>)}
-   {Array.from({length:offset+length},(_,index)=>{const day=index-offset+1;if(day<1)return <View key={index} style={{width:"14.2857%",height:44}}/>;
-    const iso=formatISODate(new Date(month.getFullYear(),month.getMonth(),day));
-    return <TouchableOpacity key={index} testID={"note-date-"+iso} accessibilityRole="button" accessibilityLabel={iso} accessibilityState={{selected:iso===value}} disabled={disabled} onPress={()=>onChange(iso)} style={{width:"14.2857%",minHeight:44,alignItems:"center",justifyContent:"center",borderRadius:8,backgroundColor:iso===value?"rgba(34,197,94,0.2)":"transparent"}}><Text style={{color:text,fontSize:14}}>{day}</Text></TouchableOpacity>;
-   })}
   </View>
+  <ScrollView key={shownISO+":"+viewEpoch} testID="note-date-grid" style={{flex:1,minHeight:44}} contentContainerStyle={{flexDirection:"row",flexWrap:"wrap"}} contentOffset={{x:0,y:Math.floor((offset+focusDay-1)/7)*44}} bounces={false} alwaysBounceVertical={false} overScrollMode="never" contentInsetAdjustmentBehavior="never" automaticallyAdjustKeyboardInsets={false} keyboardShouldPersistTaps="handled">
+   {Array.from({length:offset+length},(_,index)=>{const day=index-offset+1;if(day<1)return <View key={index} style={{width:"14.2857%",height:44}}/>;
+    const date=new Date(month);date.setDate(day);const iso=formatISODate(date),isToday=iso===todayISO,selected=iso===value;
+    return <TouchableOpacity key={index} testID={"note-date-"+iso} accessibilityRole="button" accessibilityLabel={[noteDateLabel(iso),isToday?"hoy":"",selected?"seleccionada":""].filter(Boolean).join(", ")} accessibilityState={{selected}} disabled={disabled} onPress={()=>onChange(iso)} style={{width:"14.2857%",minHeight:44,alignItems:"center",justifyContent:"center"}}>
+     <View testID={isToday?"note-date-today-ring":undefined} style={{width:38,height:38,borderRadius:19,borderWidth:isToday?2:1,borderColor:isToday?"#2563eb":selected?"#16834a":"transparent",backgroundColor:selected?"#d6f1df":isToday?"#eaf3ff":"transparent",alignItems:"center",justifyContent:"center"}}><Text style={{color:isToday||selected?"#17212b":text,fontSize:14}}>{day}</Text>{selected&&<View style={{position:"absolute",bottom:2,width:4,height:4,borderRadius:2,backgroundColor:"#16834a"}}/>}</View>
+    </TouchableOpacity>;
+   })}
+  </ScrollView>
+  {!!value&&<Text testID="note-date-selection" style={{color:text,fontSize:13,textAlign:"center"}}>{noteDateLabel(value)}</Text>}
  </View>;
 }

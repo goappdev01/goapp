@@ -23,14 +23,14 @@ test('repeated manual folding keeps long dictated text, native input instance, s
  const ui=await h.editorFixture();try{
   const text=('Párrafo dictado, seleccionable y editable.\n').repeat(100);
   await ui.run(()=>ui.hosts.get('note-content').onChangeText(text));const instance=ui.instances.get('note-content');
-  await open(ui);await ui.run(()=>ui.hosts.get('note-option-reminder').onPress());await ui.run(()=>ui.hosts.get('note-reminder-hours').onChangeText('2'));
+  await open(ui);await ui.tool('reminder');await ui.run(()=>ui.hosts.get('note-reminder-hours').onChangeText('2'));
   await ui.run(()=>ui.hosts.get('note-reminder-minutes').onChangeText('25'));
   for(let i=0;i<12;i++)await open(ui);
   assert.equal(ui.instances.get('note-content'),instance);assert.equal(ui.hosts.get('note-content').value,text);
   assert.equal(ui.hosts.get('note-reminder-hours').value,'2');assert.equal(ui.hosts.get('note-reminder-minutes').value,'25');
   for(const key of ['selection','onSelectionChange','autoFocus'])assert.equal(ui.hosts.get('note-content')[key],undefined);
   await ui.run(()=>ui.hosts.get('note-content').onChangeText(text.replace('dictado','corregido')));assert.match(ui.hosts.get('note-content').value,/corregido/);
-  assert.equal(ui.calls.some(c=>c[0]==='keyboard'),false);
+  assert.equal(ui.calls.filter(c=>c[0]==='keyboard').length,1,'folding does not dismiss the keyboard again');
  }finally{await ui.close();}
 });
 
@@ -59,17 +59,17 @@ test('keyboard layout changes keep the same live field, enlarge usable writing a
 test('all three destinations survive folding and persist with the existing store, without saving on selection or creating duplicate records',async()=>{
  for(const destination of ['pending','archive','calendar']){const disk=await h.diskFixture(),ui=await h.editorFixture({scope:disk.scope,onSave:d=>disk.api().saveUnifiedNote(d,disk.scope,disk.active)});try{
   await ui.run(()=>ui.hosts.get('note-content').onChangeText('Una nota '+destination));await open(ui);
-  if(destination==='calendar'){await ui.run(()=>ui.hosts.get('note-option-date').onPress());await ui.run(()=>ui.hosts.get('note-date').onChangeText('2027-12-30'));await ui.run(()=>ui.hosts.get('note-option-time').onPress());await ui.run(()=>ui.hosts.get('note-exact-hour').onChangeText('18'));await ui.run(()=>ui.hosts.get('note-exact-minute').onChangeText('30'));}
-  await ui.run(()=>ui.hosts.get('note-destination-'+destination).onPress());assert.equal(disk.rows.length,0);assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,true);
+  if(destination==='calendar'){await ui.pickDate('2027-12-30');await ui.pickTime('18','30');}
+  await ui.destination(destination);assert.equal(disk.rows.length,0);assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,true);
   await open(ui);await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();const [loaded]=await disk.reopen();assert.equal(loaded.note.destination,destination);assert.equal(loaded.note.content,'Una nota '+destination);assert.equal(disk.rows.length,1);
   await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal((await disk.reopen()).length,1);
  }finally{await ui.close();disk.close();}}
 });
 
-test('saving without a destination keeps the tools closed and text intact; security stays informational and GO uses its existing callback',async()=>{
+test('saving without a destination reveals its controls and text intact; security stays informational and GO uses its existing callback',async()=>{
  const ui=await h.editorFixture();try{
-  await ui.run(()=>ui.hosts.get('note-content').onChangeText('No archivar por accidente'));await ui.run(()=>ui.hosts.get('unified-note-save').onPress());assert.match(ui.container.textContent,/Selecciona CALENDARIO/);assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,false);
-  await open(ui);await ui.run(()=>ui.hosts.get('note-security-info').onPress());assert.match(ui.container.textContent,/falta validar el cifrado/);await open(ui);
+  await ui.run(()=>ui.hosts.get('note-content').onChangeText('No archivar por accidente'));await ui.run(()=>ui.hosts.get('unified-note-save').onPress());assert.match(ui.container.textContent,/Selecciona CALENDARIO/);assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,true);
+  await ui.tap('note-tool-back');await ui.run(()=>ui.hosts.get('note-security-info').onPress());assert.match(ui.container.textContent,/falta validar el cifrado/);await open(ui);
   await ui.run(()=>ui.hosts.get('note-microphone').onPress());assert.ok(ui.calls.some(c=>c[0]==='microphone'));await ui.run(()=>ui.hosts.get('Cerrar nota').onPress());const state=ui.calls.find(c=>c[0]==='close')[1];assert.equal(state.draft.content,'No archivar por accidente');assert.equal(state.draft.destination,null);assert.equal(state.draft.security,undefined);
  }finally{await ui.close();}
 });
@@ -96,9 +96,9 @@ test('large fonts, inline pickers and short keyboard viewports get only the extr
   await ui.run(()=>ui.hosts.get('note-content').onChangeText('Borrador intacto'));const instance=ui.instances.get('note-content');
   await ui.run(()=>ui.hosts.get('note-writing-workspace').onLayout({nativeEvent:{layout:{x:12,y:99,width:296,height:96}}}));await open(ui);
   assert.equal(flat(ui.hosts.get('note-tools-panel').style).width,296);assert.equal(flat(ui.hosts.get('note-tools-panel').style).height,96);assert.ok(ui.fab.style().top+48<=96);
-  await ui.run(()=>ui.hosts.get('note-option-date').onPress());assert.ok(ui.hosts.get('note-date'));assert.equal(flat(ui.hosts.get('note-tools-panel').style).width,296);
-  ports.viewport={width:390,height:844,scale:3,fontScale:1};await ui.run(()=>ui.hosts.get('note-writing-workspace').onLayout({nativeEvent:{layout:{x:12,y:99,width:366,height:600}}}));assert.equal(flat(ui.hosts.get('note-tools-panel').style).width,288);
-  await ui.run(()=>ui.hosts.get('note-option-date').onPress());assert.ok(flat(ui.hosts.get('note-tools-panel').style).width<=366*.6);assert.equal(ui.instances.get('note-content'),instance);assert.equal(ui.hosts.get('note-content').value,'Borrador intacto');
+  await ui.tool('date');assert.ok(ui.hosts.get('note-inline-date-picker'));assert.equal(flat(ui.hosts.get('note-tools-panel').style).width,296);
+  ports.viewport={width:390,height:844,scale:3,fontScale:1};await ui.run(()=>ui.hosts.get('note-writing-workspace').onLayout({nativeEvent:{layout:{x:12,y:99,width:366,height:600}}}));assert.equal(flat(ui.hosts.get('note-tools-panel').style).width,366);
+  await ui.tap('note-tool-back');assert.ok(flat(ui.hosts.get('note-tools-panel').style).width<=366*.6);assert.equal(ui.instances.get('note-content'),instance);assert.equal(ui.hosts.get('note-content').value,'Borrador intacto');
  }finally{await ui.close();}
 });
 

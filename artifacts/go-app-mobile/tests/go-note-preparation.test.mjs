@@ -26,7 +26,7 @@ test('new notes have no selected destination and cannot write until the user cho
  assert.equal(disk.model.noteDraft().destination,null);for(const dest of ['calendar','pending','archive'])assert.equal(ui.hosts.get('note-destination-'+dest).accessibilityState.checked,false);
  await ui.run(()=>ui.hosts.get('note-content').onChangeText('No archivar accidentalmente'));await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(disk.writes,0);assert.match(ui.container.textContent,/Selecciona CALENDARIO/);
  await assert.rejects(disk.api().saveUnifiedNote({...disk.draft(),destination:null},disk.scope,disk.active),/Selecciona/);assert.equal(disk.writes,0);
- await ui.run(()=>ui.hosts.get('note-destination-archive').onPress());await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(disk.rows.length,1);assert.equal(disk.model.noteDraft(disk.rows[0]).destination,'archive');
+ await ui.destination('archive');await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(disk.rows.length,1);assert.equal(disk.model.noteDraft(disk.rows[0]).destination,'archive');
  }finally{await ui.close();disk.close();}
 });
 test('security is compact and informational: its floating explanation appears only on demand and cannot activate protected storage',async()=>{
@@ -39,8 +39,8 @@ test('security is compact and informational: its floating explanation appears on
 test('the real note voice hook routes a transcript into the existing interpreter, fills one draft and only GUARDAR persists after explicit destination',async()=>{
  const disk=await h.diskFixture(),p=preparation(),ui=await h.editorFixture({scope:disk.scope,ports:{prepare:p.prepare},onSave:d=>disk.api().saveUnifiedNote(d,disk.scope,disk.active)});try{
  await ui.run(()=>ui.hosts.get('note-microphone').onPress());assert.ok(ui.calls.some(c=>c[0]==='microphone'));await ui.emit(spoken);await ui.idle();assert.equal(ui.hosts.get('note-title').value,'Viaje');assert.match(ui.hosts.get('note-content').value,/Preparar maleta/);assert.equal(disk.rows.length,0);
- await ui.run(()=>ui.hosts.get('note-option-time').onPress());assert.equal(ui.hosts.get('note-exact-hour').value,'18');assert.equal(ui.hosts.get('note-exact-minute').value,'30');for(const dest of ['calendar','pending','archive'])assert.equal(ui.hosts.get('note-destination-'+dest).accessibilityState.checked,false);
- await ui.run(()=>ui.hosts.get('note-destination-calendar').onPress());await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(disk.rows.length,1);assert.equal(disk.rows[0].note.destination,'calendar');assert.equal(disk.rows[0].time,'18:30');assert.equal(disk.rows[0].note.reminderMinutes,75);assert.equal(disk.osRequests.size,1);
+ await ui.tool('time');assert.equal(ui.hosts.get('note-time-hour-18').accessibilityState.checked,true);assert.equal(ui.hosts.get('note-time-minute-30').accessibilityState.checked,true);await ui.tap('note-tool-back');for(const dest of ['calendar','pending','archive'])assert.equal(ui.hosts.get('note-destination-'+dest).accessibilityState.checked,false);
+ await ui.destination('calendar');await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(disk.rows.length,1);assert.equal(disk.rows[0].note.destination,'calendar');assert.equal(disk.rows[0].time,'18:30');assert.equal(disk.rows[0].note.reminderMinutes,75);assert.equal(disk.osRequests.size,1);
  }finally{await ui.close();disk.close();}
 });
 test('switching handedness mirrors only controls, retaining native text/editing and the unsaved data',async()=>{

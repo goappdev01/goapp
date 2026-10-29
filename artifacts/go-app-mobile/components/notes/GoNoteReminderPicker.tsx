@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Text, TextInput, TouchableOpacity, View, type TextInputProps } from "react-native";
 import { isNoteReminderMinutes, noteReminderLabel } from "@/lib/goNoteTools";
 
 /** Only the current note's offset; opening never focuses an input or edits other notes. */
-export function GoNoteReminderPicker({ value, onChange, english = false, busy = false, dateISO, time, light = false }: {
+export function GoNoteReminderPicker({ value, onChange, english = false, busy = false, dateISO, time, light = false, onInputFocus }: {
   value: number | null; onChange: (minutes: number | null) => void; english?: boolean; busy?: boolean;
-  dateISO?: string; time?: string; light?: boolean;
+  dateISO?: string; time?: string; light?: boolean; onInputFocus?: TextInputProps["onFocus"];
 }) {
   const foreground = light ? "#17212b" : "#ffffff", border = light ? "#89949d" : "rgba(255,255,255,0.35)", warning = light ? "#8a3d0a" : "#fbbf24";
   const [hours, setHours] = useState(String(Math.floor((value || 0) / 60)));
@@ -25,7 +25,7 @@ export function GoNoteReminderPicker({ value, onChange, english = false, busy = 
           <Text style={{ color: foreground, fontSize: 12 }}>{label as string}</Text>
           <TextInput testID={length === 4 ? "note-reminder-hours" : "note-reminder-minutes"}
             accessibilityLabel={label as string} value={text as string} onChangeText={setter as (text: string) => void}
-            keyboardType="number-pad" maxLength={length as number} selectTextOnFocus editable={!busy}
+            onFocus={onInputFocus} keyboardType="number-pad" maxLength={length as number} selectTextOnFocus editable={!busy}
             style={{ minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: border,
               color: foreground, fontSize: 22, textAlign: "center", paddingHorizontal: 10 }} />
         </View>)}
