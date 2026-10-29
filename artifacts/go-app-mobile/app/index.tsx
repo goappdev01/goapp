@@ -36,6 +36,7 @@ import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoNoteEditor } from "@/components/notes/GoNoteEditor";
 import { isArchivedNote, noteDocument, noteInScope, type UnifiedNoteDraft, type NoteDestination } from "@/lib/unifiedNotes";
 import { saveUnifiedNote, moveUnifiedNote } from "@/lib/unifiedNoteStore";
+import { savedNoteTarget, type NoteRevealTarget } from "@/lib/goNoteNavigation";
 import { GoNoteControls } from "@/components/notes/GoNoteControls";
 import { GoTaskScheduleStep } from "@/components/notes/GoTaskScheduleStep";
 import { CalendarCloseGuide } from "@/components/ui/CalendarCloseGuide";
@@ -3192,7 +3193,7 @@ function HomeScreenContent() {
   // ── Token para recentrar en HOY desde el botón inferior ─────────────────
   const [calScrollToTodayToken, setCalScrollToTodayToken] = useState(0);
   // ── Token para ir a fecha+hora exacta tras confirmar una reserva ─────────
-  const [calScrollToDateTarget, setCalScrollToDateTarget] = useState<{ dateISO: string; timeHHMM: string; entryId?:string; token: number }>({ dateISO: "", timeHHMM: "", token: 0 });
+  const [calScrollToDateTarget, setCalScrollToDateTarget] = useState<{ dateISO: string; timeHHMM: string; entryId?:string; token: number; destination?:NoteRevealTarget["destination"] }>({ dateISO: "", timeHHMM: "", token: 0 });
   // ── ID de entrada a iluminar suavemente al llegar al calendario ───────────
   const [calHighlightEntryId, setCalHighlightEntryId] = useState<string | undefined>(undefined);
   // ── Indicador horizontal para el panel PRÓXIMA (swipe entre fichas) ──
@@ -26277,12 +26278,23 @@ function HomeScreenContent() {
     </>
   );
 
+  function openSavedNoteDestination(entry:GoEntry,notice:string){
+    const identity=noteIdentityRef.current;if(!identity.ready||!identity.scope)return;
+    const target=savedNoteTarget(entry,identity.scope,Date.now());
+    // The editor calls this only after its native/hosted presenter has dismissed.
+    calendarTaskContextRef.current=null;setFieldSelectorOpen(false);
+    setDemoCustomerCalendarSelected(false);setCalConfigVisible(false);setCalQuickCreateOpen(false);setCalPanelOpen(false);closeMonthGrid();
+    setCalBgViewMode("semana");
+    if(target.destination==="calendar"){setDateISODraft(target.dateISO);setCalBgViewMonth(target.dateISO.slice(0,7));}
+    setCalScrollToDateTarget(target);setCalHighlightEntryId(entry.id);setCalOpen(true);showToast(notice,"success");
+  }
   function renderUnifiedNoteEditor(){
     const scope=noteIdentity.scope;
     return <GoNoteEditor visible={notesOpen} initial={unifiedNoteInitial} handedness={handedness} ready={noteIdentity.ready} scope={scope}
       cached={unifiedNoteCache.current?.scope===JSON.stringify(scope)?unifiedNoteCache.current.draft:undefined}
       seed={{...unifiedNoteSeed,title:quickNoteText,content:quickNoteDetail}}
       onClose={state=>{unifiedNoteCache.current=state&&!state.saved?{scope:JSON.stringify(scope),draft:state.draft}:null;setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}
+      onSaved={openSavedNoteDestination}
       onSave={async draft=>{
         const identity=noteIdentityRef.current;
         if(!identity.ready||!identity.scope)throw new Error("No se puede verificar tu cuenta. La nota permanece en el editor.");

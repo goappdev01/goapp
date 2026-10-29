@@ -32,14 +32,14 @@ test('new notes have no selected destination and cannot write until the user cho
 test('security is compact and informational: its floating explanation appears only on demand and cannot activate protected storage',async()=>{
  const timers=[],ui=await h.editorFixture({ports:{timers:{setTimeout:fn=>{timers.push(fn);return timers.length;},clearTimeout(){}}}});try{
  assert.doesNotMatch(ui.container.textContent,/falta validar|No disponible en esta versión/);await ui.run(()=>ui.hosts.get('note-security-info').onPress());assert.match(ui.container.textContent,/falta validar el cifrado/);
- await ui.run(()=>timers.at(-1)());assert.doesNotMatch(ui.container.textContent,/falta validar el cifrado/);await ui.run(()=>ui.hosts.get('Cerrar nota').onPress());assert.equal(ui.calls.find(c=>c[0]==='close')[1].draft.security,undefined);
+ await ui.run(()=>timers.at(-1)());assert.doesNotMatch(ui.container.textContent,/falta validar el cifrado/);await ui.exit();assert.equal(ui.calls.find(c=>c[0]==='close')[1].draft.security,undefined);
  const protectedUI=await h.editorFixture({cached:{...h.load('lib/unifiedNotes.ts').noteDraft(),security:true}});try{await protectedUI.run(()=>protectedUI.hosts.get('note-microphone').onPress());assert.equal(protectedUI.calls.some(c=>c[0]==='microphone'),false);}finally{await protectedUI.close();}
  }finally{await ui.close();}
 });
 test('the real note voice hook routes a transcript into the existing interpreter, fills one draft and only GUARDAR persists after explicit destination',async()=>{
  const disk=await h.diskFixture(),p=preparation(),ui=await h.editorFixture({scope:disk.scope,ports:{prepare:p.prepare},onSave:d=>disk.api().saveUnifiedNote(d,disk.scope,disk.active)});try{
  await ui.run(()=>ui.hosts.get('note-microphone').onPress());assert.ok(ui.calls.some(c=>c[0]==='microphone'));await ui.emit(spoken);await ui.idle();assert.equal(ui.hosts.get('note-title').value,'Viaje');assert.match(ui.hosts.get('note-content').value,/Preparar maleta/);assert.equal(disk.rows.length,0);
- await ui.tool('time');assert.equal(ui.hosts.get('note-time-hour-18').accessibilityState.checked,true);assert.equal(ui.hosts.get('note-time-minute-30').accessibilityState.checked,true);await ui.tap('note-tool-back');for(const dest of ['calendar','pending','archive'])assert.equal(ui.hosts.get('note-destination-'+dest).accessibilityState.checked,false);
+ await ui.tool('time');assert.equal(ui.hosts.get('note-time-hour').value,'18');assert.equal(ui.hosts.get('note-time-minute').value,'30');await ui.back();for(const dest of ['calendar','pending','archive'])assert.equal(ui.hosts.get('note-destination-'+dest).accessibilityState.checked,false);
  await ui.destination('calendar');await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(disk.rows.length,1);assert.equal(disk.rows[0].note.destination,'calendar');assert.equal(disk.rows[0].time,'18:30');assert.equal(disk.rows[0].note.reminderMinutes,75);assert.equal(disk.osRequests.size,1);
  }finally{await ui.close();disk.close();}
 });
@@ -58,13 +58,13 @@ test('GO retains the real unavailability message; recording blocks saving and cl
  const ui=await h.editorFixture();try{
  ui.voice.error='El servicio de dictado de GO no está configurado o no está disponible.';await ui.render({});assert.match(ui.container.textContent,/no está configurado/);
  ui.voice.error='';ui.voice.status='listening';await ui.render({});assert.equal(ui.hosts.get('unified-note-save').disabled,true);await ui.run(()=>ui.hosts.get('note-microphone').onPress());assert.ok(ui.calls.some(c=>c[0]==='stop'));
- await ui.run(()=>ui.hosts.get('Cerrar nota').onPress());assert.ok(ui.calls.some(c=>c[0]==='abort'));
+ await ui.exit();assert.ok(ui.calls.some(c=>c[0]==='abort'));
  }finally{await ui.close();}
 });
 
 test('closing or changing identity ignores a delayed prepared result and preserves the captured unsaved dictation',async()=>{
  for(const action of ['close','identity']){let release;const gate=new Promise(r=>release=r),ui=await h.editorFixture({ports:{prepare:()=>gate}});try{
- await ui.emit('Dictado conservado');if(action==='close'){await ui.run(()=>ui.hosts.get('Cerrar nota').onPress());assert.equal(ui.calls.find(c=>c[0]==='close')[1].draft.content,'Dictado conservado');}
+ await ui.emit('Dictado conservado');if(action==='close'){await ui.exit();assert.equal(ui.calls.find(c=>c[0]==='close')[1].draft.content,'Dictado conservado');}
  else await ui.render({scope:{userId:'another',context:'demo:USER'}});
  release({patch:{content:'No debe aplicarse'},notice:'Respuesta tardía'});await ui.idle();assert.doesNotMatch(ui.container.textContent,/Respuesta tardía/);assert.notEqual(ui.hosts.get('note-content').value,'No debe aplicarse');
  }finally{await ui.close();}}

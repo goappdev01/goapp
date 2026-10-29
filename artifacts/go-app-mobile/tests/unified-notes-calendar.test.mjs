@@ -35,7 +35,7 @@ test('Home scheduling opens the same note editor, preserves content on cancellat
  const open=[],ctx={personalGoLog:[entry],noteDocument:disk.model.noteDocument,openUnifiedNote:(...args)=>open.push(h.plain(args)),customerBookings:{entries:[]},setGoLog:()=>assert.fail('note drag must not call a generic optimistic writer'),setCalOpen:()=>assert.fail('no intermediate calendar route')};
  const declaration=name=>all.find(n=>h.ts.isVariableDeclaration(n)&&n.name.getText(ast)===name).initializer.getText(ast);
  vm.runInNewContext(h.compile('globalThis.move = '+declaration('moveGoToDay')),ctx);ctx.move(entry.id,'2027-01-15','');assert.equal(open.length,1);assert.equal(open[0][0].id,entry.id);assert.equal(open[0][1].destination,'calendar');assert.equal(disk.rows[0].note.destination,'pending');
- const ui=await h.editorFixture({initial:entry,seed:open[0][1],onSave:d=>disk.api().saveUnifiedNote(d,disk.scope,disk.active)});try{await ui.run(()=>ui.hosts.get('Cerrar nota').onPress());assert.equal(disk.rows[0].note.destination,'pending');assert.equal(disk.rows.length,1);}finally{await ui.close();}
+ const ui=await h.editorFixture({initial:entry,seed:open[0][1],onSave:d=>disk.api().saveUnifiedNote(d,disk.scope,disk.active)});try{await ui.exit();assert.equal(disk.rows[0].note.destination,'pending');assert.equal(disk.rows.length,1);}finally{await ui.close();}
  }finally{disk.close();}
 });
 
@@ -43,7 +43,7 @@ test('the real Home GUARDAR callback and mounted editor persist/read back a phra
  const disk=await h.diskFixture();try{
  const source=fs.readFileSync('app/index.tsx','utf8'),ast=h.ts.createSourceFile('home.tsx',source,h.ts.ScriptTarget.Latest,true,h.ts.ScriptKind.TSX),all=[];function visit(n){all.push(n);h.ts.forEachChild(n,visit);}visit(ast);
  const fn=all.find(n=>h.ts.isFunctionDeclaration(n)&&n.name?.text==='renderUnifiedNoteEditor'),calls=[],identity={ready:true,scope:disk.scope};
- const ctx={React:h.React,GoNoteEditor:'Editor',noteIdentity:identity,noteIdentityRef:{current:identity},notesOpen:true,unifiedNoteInitial:null,handedness:'right',unifiedNoteCache:{current:null},unifiedNoteSeed:{},quickNoteText:'',quickNoteDetail:'',saveUnifiedNote:disk.api().saveUnifiedNote,AsyncStorage:{removeItem:async key=>calls.push(['remove',key])},setQuickNoteText:text=>calls.push(['title',text]),setQuickNoteDetail:text=>calls.push(['detail',text])};
+ const ctx={openSavedNoteDestination(){},React:h.React,GoNoteEditor:'Editor',noteIdentity:identity,noteIdentityRef:{current:identity},notesOpen:true,unifiedNoteInitial:null,handedness:'right',unifiedNoteCache:{current:null},unifiedNoteSeed:{},quickNoteText:'',quickNoteDetail:'',saveUnifiedNote:disk.api().saveUnifiedNote,AsyncStorage:{removeItem:async key=>calls.push(['remove',key])},setQuickNoteText:text=>calls.push(['title',text]),setQuickNoteDetail:text=>calls.push(['detail',text])};
  vm.runInNewContext(h.compile(fn.getText(ast)+';globalThis.renderEditor=renderUnifiedNoteEditor;'),ctx);const element=ctx.renderEditor();assert.equal(element.props.visible,true);
  const ui=await h.editorFixture({scope:element.props.scope,onSave:element.props.onSave});try{
  await ui.run(()=>ui.hosts.get('note-content').onChangeText('Frase del Landing sin título'));await ui.run(()=>ui.hosts.get('note-destination-pending').onPress());disk.failWrite(true);await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(calls.length,0);assert.equal(disk.rows.length,0);

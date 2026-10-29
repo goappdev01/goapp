@@ -99,7 +99,7 @@ test('native dictation corrections, cursor-owned editing and optional configurat
 test('failed UI save retains draft and error; normal close returns its unsaved content without inventing success',async()=>{
  const ui=await h.editorFixture({onSave:async()=>{throw Error('No se pudo guardar en disco');}});try{await ui.run(()=>ui.hosts.get('note-content').onChangeText('No perder texto'));await ui.destination('pending');await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();
   assert.equal(ui.hosts.get('note-content').value,'No perder texto');assert.ok(ui.hosts.get('note-save-error'));assert.equal(ui.hosts.has('note-save-confirmation'),false);
-  await ui.run(()=>ui.hosts.get('Cerrar nota').onPress());const closed=ui.calls.find(c=>c[0]==='close')[1];assert.equal(closed.draft.content,'No perder texto');assert.equal(closed.saved,false);
+  await ui.exit();const closed=ui.calls.find(c=>c[0]==='close')[1];assert.equal(closed.draft.content,'No perder texto');assert.equal(closed.saved,false);
  }finally{await ui.close();}
 });
 

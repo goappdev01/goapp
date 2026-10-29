@@ -27,7 +27,7 @@ test('actual shared 500ms recognizer moves only vertically; releasing a drag can
 test('chosen position uses the existing fab_pos key, survives real disk reload and remains independent of note persistence',async()=>{
  const disk=await h.diskFixture(),ports={fabStorage:disk.storage};let ui=await h.editorFixture({ports});try{
   await ui.run(()=>ui.hosts.get('note-content').onChangeText('Borrador que se conserva'));await drag(ui,-135);const chosen=ui.fab.style().top;
-  const record=JSON.parse(await disk.storage.getItem('fab_pos:note-editor:tools-toggle'));assert.equal(record.t,chosen);assert.equal(disk.writes,0);await ui.run(()=>ui.hosts.get('Cerrar nota').onPress());const cached=ui.calls.find(c=>c[0]==='close')[1].draft;await ui.close();
+  const record=JSON.parse(await disk.storage.getItem('fab_pos:note-editor:tools-toggle'));assert.equal(record.t,chosen);assert.equal(disk.writes,0);await ui.exit();const cached=ui.calls.find(c=>c[0]==='close')[1].draft;await ui.close();
   ui=await h.editorFixture({ports,cached});await ui.idle();assert.equal(ui.fab.style().top,chosen);assert.equal(ui.hosts.get('note-content').value,'Borrador que se conserva');await press(ui);await press(ui);assert.equal(ui.fab.style().top,chosen);assert.equal(disk.rows.length,0);
  }finally{await ui.close();disk.close();}
 });

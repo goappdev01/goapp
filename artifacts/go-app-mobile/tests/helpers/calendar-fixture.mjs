@@ -110,6 +110,7 @@ export function fixture({ now } = {}) {
         if (name === '@/lib/calendarGestureOwnership') return load('lib/calendarGestureOwnership.ts');
         if (name === '@/lib/calendarCloseResponder') return load('lib/calendarCloseResponder.ts');
         if (name === '@/lib/entryDetailTouchDelivery') return load('lib/entryDetailTouchDelivery.ts');
+        if (name === '@/lib/goNoteNavigation') return load('lib/goNoteNavigation.ts');
         if (name.startsWith('.')) { const target=path.resolve(path.dirname(filename),name);return load(target+(existsSync(target+'.tsx')?'.tsx':'.ts')); }
         throw new Error(`Unexpected import ${name}`);
       },

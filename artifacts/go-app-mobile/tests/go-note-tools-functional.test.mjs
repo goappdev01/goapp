@@ -15,7 +15,7 @@ test('selected old dates open at their month; previous, next and HOY navigate wi
  const model=h.load('lib/unifiedNotes.ts'),cached={...model.noteDraft(),dateISO:'2000-02-29'},ui=await h.editorFixture({cached,ports:{today:new Date(2026,9,29)}});try{
   await ui.tool('date');assert.match(ui.hosts.get('note-date-month').children,/febrero de 2000/);await ui.tap('Mes anterior');assert.match(ui.hosts.get('note-date-month').children,/enero de 2000/);await ui.tap('Mes siguiente');assert.match(ui.hosts.get('note-date-month').children,/febrero de 2000/);
   for(let i=0;i<25;i++)await ui.tap('Mes siguiente');assert.match(ui.hosts.get('note-date-month').children,/marzo de 2002/);await ui.tap('note-date-today');assert.match(ui.hosts.get('note-date-month').children,/octubre de 2026/);
-  await ui.tap('note-tool-back');assert.match(ui.hosts.get('note-summary').children,/29\/02\/2000/);await ui.tool('date');assert.match(ui.hosts.get('note-date-month').children,/febrero de 2000/);
+  await ui.back();assert.match(ui.hosts.get('note-summary').children,/29\/02\/2000/);await ui.tool('date');assert.match(ui.hosts.get('note-date-month').children,/febrero de 2000/);
  }finally{await ui.close();}
 });
 
@@ -24,25 +24,21 @@ test('existing local time utilities identify today across UTC midnight and dayli
  for(const [zone,date] of [['America/Los_Angeles','2026-10-28'],['Europe/Madrid','2026-10-29'],['Pacific/Auckland','2026-10-29']])assert.equal(execFileSync(process.execPath,['-e',script],{cwd:process.cwd(),env:{...process.env,TZ:zone},encoding:'utf8'}),date);
 });
 
-test('hour/minute columns cover all exact values without a keyboard and apply/clear exclusively on confirmation',async()=>{
+test('native numeric hours and all 60 exact minutes apply only on confirmation without the obsolete long lists',async()=>{
  const ui=await h.editorFixture();try{
-  await content(ui);for(const [hour,minute] of [['00','00'],['03','15'],['05','20'],['13','45'],['18','30'],['23','59']]){
-   await ui.tool('time');assert.equal(ui.hosts.has('note-exact-hour'),false);assert.equal(ui.hosts.has('note-exact-minute'),false);
-   for(let number=0;number<60;number++)assert.ok(ui.hosts.has('note-time-minute-'+String(number).padStart(2,'0')));
-   await ui.tap('note-time-hour-'+hour);await ui.tap('note-time-minute-'+minute);assert.equal(ui.hosts.get('note-time-preview').children,hour+':'+minute);assert.ok(ui.hosts.has('note-time-apply'));
-   await ui.tap('note-time-apply');assert.equal(ui.hosts.has('note-time-picker'),false);assert.match(ui.hosts.get('note-summary').children,new RegExp(hour+':'+minute));
-   await ui.tool('time');assert.equal(ui.hosts.get('note-time-hour-'+hour).accessibilityState.checked,true);assert.equal(ui.hosts.get('note-time-minute-'+minute).accessibilityState.checked,true);await ui.tap('note-tool-back');
+  for(const [hour,minute] of [['00','00'],['03','15'],['05','20'],['13','45'],['18','30'],['23','59']]){
+   await ui.tool('time');assert.equal(ui.hosts.has('note-time-hour-list'),false);assert.equal(ui.hosts.get('note-time-hour').keyboardType,'number-pad');await ui.run(()=>ui.hosts.get('note-time-hour').onChangeText(hour));await ui.run(()=>ui.hosts.get('note-time-minute').onChangeText(minute));assert.equal(ui.hosts.get('note-time-preview').children,hour+':'+minute);await ui.tap('note-time-apply');assert.equal(ui.hosts.has('note-time-picker'),false);await ui.tool('time');assert.equal(ui.hosts.get('note-time-hour').value,hour);assert.equal(ui.hosts.get('note-time-minute').value,minute);await ui.back();
   }
-  await ui.tool('time');await ui.tap('note-time-clear');assert.equal(ui.hosts.get('note-option-time').accessibilityState.selected,false);assert.equal(ui.keyboard.visible,false);
+  await ui.tool('time');for(let i=0;i<60;i++){const minute=String(i).padStart(2,'0');await ui.run(()=>ui.hosts.get('note-time-minute').onChangeText(minute));assert.ok(ui.hosts.get('note-time-preview').children.endsWith(':'+minute));}await ui.tap('note-time-clear');assert.equal(ui.hosts.get('note-option-time').accessibilityState.selected,false);
  }finally{await ui.close();}
 });
 
 test('duration is provisional until applied, closes on confirmation and preserves existing custom durations',async()=>{
  const ui=await h.editorFixture();try{
-  await ui.tool('duration');for(const value of ['15m','30m','1h','2h'])assert.ok(ui.hosts.has('note-duration-'+value));await ui.tap('note-duration-30m');assert.equal(ui.hosts.get('note-duration-30m').accessibilityState.checked,true);await ui.tap('note-tool-back');assert.equal(ui.hosts.get('note-option-duration').accessibilityState.selected,false);
+  await ui.tool('duration');for(const value of ['15m','30m','1h','2h'])assert.ok(ui.hosts.has('note-duration-'+value));await ui.tap('note-duration-30m');assert.equal(ui.hosts.get('note-duration-30m').accessibilityState.checked,true);await ui.back();assert.equal(ui.hosts.get('note-option-duration').accessibilityState.selected,false);
   await ui.tool('duration');await ui.tap('note-duration-2h');await ui.tap('note-duration-apply');assert.match(ui.hosts.get('note-summary').children,/2 horas/);await ui.tool('duration');assert.equal(ui.hosts.get('note-duration-2h').accessibilityState.checked,true);await ui.tap('note-duration-clear');assert.equal(ui.hosts.get('note-option-duration').accessibilityState.selected,false);
  }finally{await ui.close();}
- const cached={...h.load('lib/unifiedNotes.ts').noteDraft(),duration:'45m'},old=await h.editorFixture({cached});try{await old.tool('duration');assert.equal(old.hosts.get('note-duration-45m').accessibilityState.checked,true);await old.tap('note-duration-apply');assert.match(old.hosts.get('note-summary').children,/45 minutos/);}finally{await old.close();}
+ const cached={...h.load('lib/unifiedNotes.ts').noteDraft(),duration:'45m'},old=await h.editorFixture({cached});try{await old.tool('duration');assert.equal(old.hosts.get('note-duration-hour').value,'0');assert.equal(old.hosts.get('note-duration-minute').value,'45');await old.tap('note-duration-apply');assert.match(old.hosts.get('note-summary').children,/45 minutos/);}finally{await old.close();}
 });
 
 test('opening a nontext tool waits for native keyboard dismissal and the next layout frame, preserving text and native cursor ownership',async()=>{
@@ -59,32 +55,32 @@ test('the existing bottom arrow and an outside heading tap hide the keyboard wit
  const ui=await h.editorFixture();try{
   await content(ui);await ui.run(()=>ui.keyboard.show());assert.equal(ui.hosts.has('note-hide-keyboard'),false);await ui.tap('Ocultar teclado');assert.equal(ui.keyboard.visible,false);assert.equal(ui.calls.some(c=>c[0]==='close'),false);
   await ui.run(()=>ui.keyboard.show());await ui.tap('note-heading');assert.equal(ui.keyboard.visible,false);
-  for(const key of ['date','time','duration','reminder','attachments']){await ui.run(()=>ui.keyboard.show());await ui.tool(key);assert.equal(ui.keyboard.visible,false);assert.ok(ui.hosts.has('note-tool-back'));assert.equal(ui.hosts.get('note-content').value,'Una nota completa');}
+  for(const key of ['date','time','duration','reminder','attachments']){await ui.run(()=>ui.keyboard.show());await ui.tool(key);assert.equal(ui.keyboard.visible,false);assert.equal(ui.hosts.has('note-tool-back'),false);assert.equal(ui.hosts.get('note-content').value,'Una nota completa');}
  }finally{await ui.close();}
 });
 
 test('each tool starts with a fresh bounded scroll; no content-size callback can move the selector to an empty trailing area',async()=>{
  const ui=await h.editorFixture();try{
-  let previous=ui.instances.get('note-tools-scroll');for(const key of ['date','attachments','place','reminder']){await ui.tool(key);const id=key==='date'?'note-date-grid':'note-tools-scroll',scroll=ui.hosts.get(id);assert.notEqual(ui.instances.get(id),previous);previous=ui.instances.get(id);assert.equal(scroll.bounces,false);assert.equal(scroll.alwaysBounceVertical,false);assert.equal(scroll.automaticallyAdjustKeyboardInsets,false);assert.equal(scroll.onContentSizeChange,undefined);assert.equal(scroll.contentContainerStyle.flexGrow,undefined);}
+  let previous=ui.instances.get('note-tools-scroll');for(const key of ['date','attachments','place','reminder']){await ui.tool(key);const id=key==='date'?'note-date-grid':'note-tools-scroll',scroll=ui.hosts.get(id);assert.notEqual(ui.instances.get(id),previous);previous=ui.instances.get(id);assert.equal(scroll.bounces,false);assert.equal(scroll.alwaysBounceVertical,false);assert.equal(scroll.automaticallyAdjustKeyboardInsets,false);if(key==='date')await ui.run(()=>scroll.onContentSizeChange(300,264));else assert.equal(scroll.onContentSizeChange,undefined);assert.equal(scroll.contentContainerStyle.flexGrow,undefined);}
   assert.equal(ui.calls.some(c=>c[0]==='scrollEnd'||c[0]==='scrollTo'),false);
-  await ui.tool('time');for(const key of ['hour','minute']){const list=ui.hosts.get('note-time-'+key+'-list');assert.equal(list.bounces,false);assert.equal(list.overScrollMode,'never');}await ui.tool('duration');assert.equal(ui.hosts.get('note-duration-options').bounces,false);
+  await ui.tool('time');assert.equal(ui.hosts.has('note-time-hour-list'),false);assert.equal(ui.hosts.get('note-tools-scroll').bounces,false);await ui.tool('duration');assert.equal(ui.hosts.get('note-tools-scroll').overScrollMode,'never');
  }finally{await ui.close();}
 });
 
 test('textual tool inputs use native focus scrolling above the measured footer, without an extra keyboard spacer',async()=>{
  const ui=await h.editorFixture();try{
   await ui.tool('attachments');await ui.run(()=>ui.hosts.get('note-editor-footer').onLayout({nativeEvent:{layout:{height:106}}}));await ui.run(()=>ui.hosts.get('note-link').onFocus({nativeEvent:{target:77}}));await ui.run(()=>ui.keyboard.show());
-  assert.ok(ui.calls.some(c=>c[0]==='reveal-input'&&c[1]===77&&c[2]===122&&c[3]===true));assert.equal(ui.hosts.get('note-tools-scroll').automaticallyAdjustKeyboardInsets,false);assert.equal(ui.hosts.has('note-hide-keyboard'),false);assert.ok(ui.hosts.has('Ocultar teclado'));assert.equal(ui.hosts.has('note-tool-header'),false);assert.ok(ui.hosts.has('note-tool-back'));assert.equal(ui.hosts.get('note-tool-back').style[0].height,44);
+  assert.ok(ui.calls.some(c=>c[0]==='reveal-input'&&c[1]===77&&c[2]===122&&c[3]===true));assert.equal(ui.hosts.get('note-tools-scroll').automaticallyAdjustKeyboardInsets,false);assert.equal(ui.hosts.has('note-hide-keyboard'),false);assert.ok(ui.hosts.has('Ocultar teclado'));assert.equal(ui.hosts.has('note-tool-header'),false);assert.equal(ui.hosts.has('note-tool-back'),false);assert.equal(ui.hosts.get('Ocultar teclado').touchSize,56);
   const atShow=ui.calls.filter(c=>c[0]==='reveal-input').length;await ui.run(()=>ui.hosts.get('note-writing-workspace').onLayout({nativeEvent:{layout:{x:12,y:80,width:296,height:102}}}));assert.ok(ui.calls.filter(c=>c[0]==='reveal-input').length>atShow,'reveal is recalculated after the keyboard changes the real viewport');
-  await ui.tap('Ocultar teclado');assert.ok(ui.hosts.has('note-tool-header'));const before=ui.calls.filter(c=>c[0]==='reveal-input').length;await ui.run(()=>ui.hosts.get('note-content').onFocus({target:99}));await ui.run(()=>ui.keyboard.show());assert.equal(ui.calls.filter(c=>c[0]==='reveal-input').length,before,'returning to content never scrolls an old tool field');
+  await ui.tap('Ocultar teclado');assert.ok(ui.hosts.has('note-tool-header'));const before=ui.calls.filter(c=>c[0]==='reveal-input').length;await ui.run(()=>ui.hosts.get('note-content').onFocus({target:99}));await ui.run(()=>ui.keyboard.show());assert.ok(ui.calls.filter(c=>c[0]==='reveal-input').slice(before).every(c=>c[1]===99),'returning to writing reveals its current input, never the old tool field');
  }finally{await ui.close();}
 });
 
-test('a stored custom duration survives editing an archived or pending note without allowing unsupported durations in new notes',async()=>{
+test('a stored custom duration survives editing an archived or pending note while accepting requested canonical custom durations and rejecting out-of-range new values',async()=>{
  const disk=await h.diskFixture();try{
   const initial=await disk.api().saveUnifiedNote(disk.draft({destination:'archive'}),disk.scope,disk.active),legacy={...initial.entry,note:{...initial.entry.note,schedule:{dateISO:'2027-12-30',time:'18:30',duration:'45m'}}};
   await disk.storage.setItem('go_log_v1',JSON.stringify([legacy]));const [loaded]=await disk.reopen(),draft=disk.model.noteDraft(loaded);draft.title='Nota antigua corregida';await disk.api().saveUnifiedNote(draft,disk.scope,disk.active);assert.equal((await disk.reopen())[0].note.schedule.duration,'45m');
-  await assert.rejects(disk.api().saveUnifiedNote(disk.draft({duration:'45m'}),disk.scope,disk.active),/duración válida/);
+  await assert.rejects(disk.api().saveUnifiedNote(disk.draft({duration:'600000m'}),disk.scope,disk.active),/duración válida/);
  }finally{disk.close();}
 });
 
@@ -103,7 +99,7 @@ test('destination, invalid date and invalid hour errors are distinct and route t
   await ui.tap('unified-note-save');assert.match(ui.container.textContent,/Selecciona CALENDARIO/);assert.ok(ui.hosts.has('note-destinations'));assert.equal(ui.hosts.has('note-inline-date-picker'),false);
   await ui.destination('pending');await ui.tap('unified-note-save');assert.match(ui.container.textContent,/La fecha no es válida/);assert.ok(ui.hosts.has('note-inline-date-picker'));assert.doesNotMatch(ui.container.textContent,/Selecciona CALENDARIO/);
   await ui.tap('note-date-2027-01-02');await ui.tap('unified-note-save');assert.match(ui.container.textContent,/Introduce una hora/);assert.ok(ui.hosts.has('note-time-picker'));assert.equal(ui.hosts.get('note-content').value,cached.content);
-  await ui.tap('note-time-hour-23');await ui.tap('note-time-minute-59');await ui.tap('note-time-apply');await ui.tap('unified-note-save');await ui.idle();assert.ok(ui.hosts.has('note-save-confirmation'));
+  await ui.run(()=>ui.hosts.get('note-time-hour').onChangeText('23'));await ui.run(()=>ui.hosts.get('note-time-minute').onChangeText('59'));await ui.tap('note-time-apply');await ui.tap('unified-note-save');await ui.idle();assert.ok(ui.hosts.has('note-save-confirmation'));
  }finally{await ui.close();}
 });
 

@@ -10,10 +10,11 @@ import { buildNoteEntry, noteDocument, noteDraft, noteInScope, validateNote, typ
 
 /** Ordinary notes use GO's existing committed store; saving is independent of IA and HTTP availability. */
 export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope, active: () => boolean) {
+  const now=()=>typeof performance!=="undefined"?performance.now():Date.now(),started=now();
   validateNote(draft);assertNoteAttachments(scope,draft.id,draft.attachments);
   const check=async()=>{await assertTaskUser(scope.userId);if(!active())throw new Error("La cuenta o el contexto ha cambiado. La nota sigue en el editor.");};
   await check();
-  await verifyNoteFiles(scope,draft.id,draft.attachments);await check();
+  const validated=now();await verifyNoteFiles(scope,draft.id,draft.attachments);await check();const filesVerified=now();
   const saved=await updateGoLog(async rows=>{
     await check();const matches=rows.filter(row=>row.id===draft.id),previous=matches[0];
     if(matches.length>1 || previous && (!noteInScope(previous,scope) || previous.deleted || previous.estado==="rechazado"))throw new Error("No puedes modificar esta nota en este contexto.");
@@ -31,6 +32,7 @@ export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope,
     const entry=buildNoteEntry(draft,scope,previous);
     return {entries:previous?rows.map(row=>row.id===entry.id?entry:row):[entry,...rows],result:entry};
   },()=>{if(!active())throw new Error("El contexto ha cambiado. No se ha confirmado el guardado.");});
+  const persisted=now();
   await check();
   // Read the native storage itself, rather than treating the in-memory snapshot as persistence proof.
   const disk:unknown=JSON.parse(await AsyncStorage.getItem("go_log_v1") || "null");
@@ -39,12 +41,18 @@ export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope,
     || ["note","notes","detail","place"].some(k=>JSON.stringify(verified[0][k])!==JSON.stringify(saved[k as keyof GoEntry])))
     throw new Error("No se ha podido verificar el guardado en el teléfono. Conserva la nota y vuelve a pulsar GUARDAR.");
   await check();
+  const verifiedAt=now();
   let message="Nota guardada en "+({pending:"PENDIENTES",calendar:"CALENDARIO",archive:"ARCHIVO"}[draft.destination])+".";
+  let reminderWarning=false;
   try {const reports=await refreshNativeTaskReminders(scope,draft.destination==="calendar"&&draft.reminderMinutes!==null);
+    reminderWarning=reports.some(report=>report.taskId===saved.id&&["failed","denied","capacity","unsupported"].includes(report.status));
     if(draft.destination==="calendar"&&draft.reminderMinutes!==null)message+=" "+describeReminders(saved,reports);
     else if(draft.reminderMinutes!==null)message+=" El aviso se conserva sin programar hasta elegir CALENDARIO, fecha y hora.";
-  }catch{message+=" El aviso no se ha podido confirmar. Revisa los permisos del teléfono.";}
-  await check();return {entry:saved,message};
+  }catch{reminderWarning=true;message+=" El aviso no se ha podido confirmar. Revisa los permisos del teléfono.";}
+  await check();const completed=now();
+  const notice="Guardada en "+({pending:"Pendientes",calendar:"Calendario",archive:"Archivo"}[draft.destination])+(reminderWarning?" · revisa el aviso":"");
+  // Diagnostic durations contain no note text, user identifiers or audio; never persisted or logged.
+  return {entry:saved,message,notice,timings:{validationMs:validated-started,attachmentsMs:filesVerified-validated,persistenceMs:persisted-filesVerified,verificationMs:verifiedAt-persisted,remindersMs:completed-verifiedAt,totalMs:completed-started}};
 }
 export async function moveUnifiedNote(entry:GoEntry,destination:NoteDestination,scope:TaskScope,active:()=>boolean, schedule?:{dateISO:string;time:string;duration?:string}) {
   const draft=noteDraft(entry);draft.destination=destination;

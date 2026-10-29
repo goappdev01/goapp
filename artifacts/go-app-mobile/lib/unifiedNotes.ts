@@ -22,6 +22,13 @@ export const isArchivedNote = (entry: GoEntry) => noteDocument(entry)?.destinati
 export const noteInScope = (entry: GoEntry, scope: TaskScope) => entry.ownerUserId === scope.userId
   && (entry.taskContext ?? entry.actionContext ?? "live:USER") === scope.context;
 export const validNoteTime=(value:string)=>/^([01]?\d|2[0-3]):[0-5]?\d$/.test(value);
+// Canonical durations from the optional four-digit hour / two-digit minute form.
+export const NOTE_MAX_DURATION_MINUTES=9999*60+59;
+export function validCustomNoteDuration(value:string){
+  const match=/^([1-9]\d*)(m|h)$/.exec(value);if(!match)return false;
+  const minutes=Number(match[1])*(match[2]==="h"?60:1);
+  return Number.isSafeInteger(minutes)&&minutes>0&&minutes<=NOTE_MAX_DURATION_MINUTES;
+}
 export function validNoteDate(value:string){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
   const date=new Date(value+"T12:00:00"),[year,month,day]=value.split("-").map(Number);
@@ -46,7 +53,7 @@ export function validateNote(draft: UnifiedNoteDraft): asserts draft is UnifiedN
     const [hours,minutes]=draft.time.split(":").map(Number),local=new Date(draft.dateISO+"T00:00:00");local.setHours(hours,minutes,0,0);
     if(local.getHours()!==hours||local.getMinutes()!==minutes)throw new Error("Esa hora no existe en la fecha y zona horaria seleccionadas.");
   }
-  if (draft.duration && !["15m","30m","1h","2h"].includes(draft.duration) && draft.duration !== draft.original?.duration && draft.duration !== noteDocument(draft.original)?.schedule.duration)
+  if (draft.duration && !validCustomNoteDuration(draft.duration) && draft.duration !== draft.original?.duration && draft.duration !== noteDocument(draft.original)?.schedule.duration)
     throw new Error("Selecciona una duración válida.");
   if (draft.reminderMinutes !== null && (!Number.isInteger(draft.reminderMinutes) || draft.reminderMinutes < 1 || draft.reminderMinutes > 525600)) throw new Error("El intervalo del aviso no es válido.");
   if (draft.location && (!Number.isFinite(draft.location.latitude) || !Number.isFinite(draft.location.longitude)

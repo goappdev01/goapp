@@ -4,7 +4,7 @@ const compile=s=>ts.transpileModule(s,{compilerOptions:{alwaysStrict:false,modul
 const load=(file,imports={},globals={})=>{const c={exports:{},Date,Intl,URL,Error,TypeError,RangeError,console,setTimeout,clearTimeout,Promise,...globals,require:n=>n==='react'?React:n in imports?imports[n]:(()=>{throw Error('Unexpected '+n+' in '+file)})()};vm.runInNewContext(compile(fs.readFileSync(file,'utf8')),c);return c.exports;};
 const plain=x=>JSON.parse(JSON.stringify(x));
 const settle=fn=>React.act(async()=>{await fn?.();for(let i=0;i<10;i++)await Promise.resolve();});
-async function diskFixture(){
+async function diskFixture({storePath='lib/unifiedNoteStore.ts'}={}){
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'go-unified-note-test-')),filesDirectory=path.join(directory,'files');fs.mkdirSync(filesDirectory);
  let failWrite=false,failRead=false,gate=null,reads=0,writes=0;
  const keyFile=key=>path.join(directory,encodeURIComponent(key)+'.json');
@@ -24,21 +24,21 @@ async function diskFixture(){
  const reopen=()=>load('lib/goLogStore.ts',{'@react-native-async-storage/async-storage':storage,'./goTaskAccess':access});let store=reopen();
  const noteTools=load('lib/goNoteTools.ts'),reminders=load('lib/goTaskReminders.ts',{'@workspace/api-zod':{},'./goLogBridge':{},'./goTaskAccess':access});
  const schedulerModel=load('lib/goNativeReminderScheduler.ts',{'./goTaskAccess':access,'./goTaskReminders':reminders,'./goNoteTools':noteTools});
- let activeScope=scope,permission='allowed';const osRequests=new Map(),refreshes=[];
+ let activeScope=scope,permission='allowed',reminderGate=null;const osRequests=new Map(),refreshes=[];
  const scheduler=schedulerModel.createNativeReminderScheduler({platform:'ios',readTasks:()=>store.readGoLog(),now:()=>Date.now(),scopeValid:async expected=>expected.userId===await ctx.exports.getAuthenticatedUserId()&&expected.context===activeScope.context,
   permissions:async()=>permission,pending:async()=>[...osRequests.values()],delivered:async()=>[],schedule:async item=>{osRequests.set(item.identifier,{identifier:item.identifier,data:{taskId:item.taskId,minutes:item.minutes,signature:item.signature}});return item.identifier;},cancel:async id=>osRequests.delete(id),dismiss:async()=>{}});
  await scheduler.setScope(scope,'sound');
- const api=()=>load('lib/unifiedNoteStore.ts',{'@react-native-async-storage/async-storage':storage,'./goTaskAccess':access,'./goLogStore':store,'./goNoteFiles':fileApi,'./unifiedNotes':model,'./goTaskReminders':reminders,
-  './goTaskReminderRuntime':{refreshNativeTaskReminders:async(expected,requestPermission)=>{refreshes.push([expected,requestPermission]);return scheduler.refresh(expected,{requestPermission});}}});
+ const api=()=>load(storePath,{'@react-native-async-storage/async-storage':storage,'./goTaskAccess':access,'./goLogStore':store,'./goNoteFiles':fileApi,'./unifiedNotes':model,'./goTaskReminders':reminders,
+  './goTaskReminderRuntime':{refreshNativeTaskReminders:async(expected,requestPermission)=>{refreshes.push([expected,requestPermission]);if(reminderGate)await reminderGate;return scheduler.refresh(expected,{requestPermission});}}});
  return{scope,storage,access,auth,model,fileApi,api,scheduler,nativeModel:schedulerModel,osRequests,refreshes,directory,
   get store(){return store;},get writes(){return writes;},get reads(){return reads;},get rows(){try{return JSON.parse(fs.readFileSync(keyFile('go_log_v1'),'utf8'));}catch{return[];}},
-  failWrite:value=>failWrite=value,failRead:value=>failRead=value,gate:value=>gate=value,permission:value=>permission=value,setUser,
+  failWrite:value=>failWrite=value,failRead:value=>failRead=value,gate:value=>gate=value,holdReminders:value=>reminderGate=value,permission:value=>permission=value,setUser,
   active:()=>activeScope.context===scope.context,changeContext:context=>activeScope={...scope,context},
   async reopen(){store=reopen();return store.readGoLog();},draft:extra=>({...model.noteDraft(),destination:'archive',content:'Una frase',...extra}),
   async sourceFile(name='documento.pdf',content='fixture document'){const filename=path.join(directory,name);fs.writeFileSync(filename,content);return{uri:pathToFileURL(filename).href,name,size:Buffer.byteLength(content),mimeType:'application/pdf'};},
   close(){const resolved=path.resolve(directory);if(!resolved.startsWith(path.resolve(os.tmpdir())+path.sep+'go-unified-note-test-'))throw Error('Unsafe fixture cleanup');fs.rmSync(resolved,{recursive:true,force:true});}};
 }
-async function editorFixture({scope={userId:'note-user',context:'demo:USER'},onSave,initial=null,seed,handedness='right',cached,ready=true,ports={}}={}){
+async function editorFixture({scope={userId:'note-user',context:'demo:USER'},onSave,onSaved,initial=null,seed,handedness='right',cached,ready=true,ports={}}={}){
  const hosts=new Map(),instances=new Map(),container=document.createElement('div'),root=createRoot(container),calls=[],keyboardListeners=new Map();let props;
  const layout=()=>{if(ports.manualGeometry)return;const full=ports.workspace||{x:12,y:99,width:366,height:600},height=ports.viewport?.height||844,inset=keyboard.visible?300:0;hosts.get('note-writing-workspace')?.onLayout?.({nativeEvent:{layout:{...full,height:Math.max(1,full.height-inset)}}});hosts.get('note-editor-footer')?.onLayout?.({nativeEvent:{layout:{y:height-inset-106,height:106}}});};
  const keyboard={visible:!!ports.keyboardVisible,focused:null,input:null,emit(name,event={}){for(const fn of keyboardListeners.get(name)||[])fn(event);},
@@ -53,7 +53,7 @@ async function editorFixture({scope={userId:'note-user',context:'demo:USER'},onS
  native.Keyboard.addListener=(name,fn)=>{const set=keyboardListeners.get(name)||new Set();set.add(fn);keyboardListeners.set(name,set);return{remove:()=>set.delete(fn)};};
  const controller={isVisible:()=>keyboard.visible,dismiss:async options=>{calls.push(['keyboard']);calls.push(['keyboard-dismiss',options]);if(ports.dismiss)await ports.dismiss(options);keyboard.hide();}};
  const model=load('lib/unifiedNotes.ts'),common={'react-native':native,'@/lib/unifiedNotes':model,'@expo/vector-icons':{Feather:host('Feather')},'@/lib/time':{getToday:()=>ports.today?new Date(ports.today):new Date(2027,0,1),formatISODate:d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}};
- const tools=load('lib/goNoteTools.ts'),picker=load('components/notes/GoNoteReminderPicker.tsx',{...common,'@/lib/goNoteTools':tools}),date=load('components/notes/GoNoteDatePicker.tsx',common),schedule=load('components/notes/GoNoteSchedulePicker.tsx',common);
+ const tools=load('lib/goNoteTools.ts'),picker=load('components/notes/GoNoteReminderPicker.tsx',{...common,'@/lib/goNoteTools':tools}),date=load('components/notes/GoNoteDatePicker.tsx',common),schedule=load('components/notes/GoNoteSchedulePicker.tsx',{...common,'@/lib/goActionCompletion':load('lib/goActionCompletion.ts')});
  let receive;const voice={status:'idle',error:'',transcript:'',abort:()=>calls.push(['abort']),start:async()=>calls.push(['microphone']),stop:async()=>calls.push(['stop'])};
  const voiceHook=load('hooks/useGoNoteVoice.ts',{'./useBookingVoice':{useBookingVoice:callback=>{receive=callback;return voice;}},'@/lib/goNoteTools':tools});
  const keyboardHook=load('hooks/useGoNoteKeyboard.ts',{'react-native':native},{...ports.timers});
@@ -61,18 +61,21 @@ async function editorFixture({scope={userId:'note-user',context:'demo:USER'},onS
  const savedFabs=new Map(),fabStorage=ports.fabStorage||{getItem:async key=>savedFabs.get(key)||null,setItem:async(key,value)=>savedFabs.set(key,value)},fabGestures=[],fabStyles=[];
  const pan=()=>{const chain={};for(const name of ['activateAfterLongPress','onStart','onUpdate','onEnd','onFinalize'])chain[name]=value=>{chain['_'+name]=value;return chain;};fabGestures.push(chain);return chain;};
  const fab=load('components/DraggableFAB.tsx',{'react-native':{...native,Dimensions:{get:()=>ports.viewport||{width:390,height:844}}},'react-native-reanimated':{__esModule:true,default:{View:host('AnimatedFAB')},runOnJS:fn=>fn,useSharedValue:value=>React.useRef({value}).current,useAnimatedStyle:fn=>{fabStyles.push(fn);return fn();},withSpring:value=>value},'react-native-gesture-handler':{Gesture:{Pan:pan},GestureDetector:host('GestureDetector')},'@react-native-async-storage/async-storage':fabStorage,'expo-haptics':{selectionAsync(){},impactAsync(){},ImpactFeedbackStyle:{Light:'light'}},'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})}});
+ const hostsModal=host('Modal');
  const imports={...common,'react-native-keyboard-controller':{KeyboardAvoidingView:host('KeyboardFrame'),KeyboardAwareScrollView:host('KeyboardScroll'),KeyboardController:controller},'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},
-  '@/components/ui/GoScreenModal':{GoScreenModal:host('Modal')},'@/components/ui/GoScreenCloseSurface':{GoScreenCloseSurface:host('Surface'),GoScreenCloseGuide:()=>null},'@/components/ui/GoCloseButton':{GoCloseButton:host('Close')},'@/components/DraggableFAB':fab,'expo-linear-gradient':{LinearGradient:host('Gradient')},
+  '@/components/ui/GoScreenModal':{GoScreenModal:p=>{hosts.set('NoteModal',p);return React.createElement(hostsModal,p);}},'@/components/ui/GoScreenCloseSurface':{GoScreenCloseSurface:host('Surface'),GoScreenCloseGuide:()=>null},'@/components/ui/GoCloseButton':{GoCloseButton:host('Close')},'@/components/DraggableFAB':fab,'expo-linear-gradient':{LinearGradient:host('Gradient')},
   './GoNoteReminderPicker':picker,'./GoNoteDatePicker':date,'./GoNoteSchedulePicker':schedule,'@/hooks/useGoNoteVoice':voiceHook,'@/hooks/useGoNoteKeyboard':keyboardHook,'@/components/booking-assistant/BookingAssistantUI':assistantUI,'@/lib/goNotePreparation':{prepareGoNote:ports.prepare||async function(text){return{patch:{content:text},notice:'Borrador sin guardar.'};}},'@/lib/goNoteTools':tools,'@/lib/unifiedNotes':model,'@/lib/goNoteFiles':{importNoteFile:ports.importFile||async function(){throw Error('Use the actual file fixture for persistence tests');}},
   'expo-document-picker':ports.documents||{getDocumentAsync:async()=>({canceled:true})},'expo-image-picker':ports.images||{launchImageLibraryAsync:async()=>({canceled:true})},'expo-location':ports.location||{}};
  const Editor=load(ports.editorPath||'components/notes/GoNoteEditor.tsx',imports,{cancelAnimationFrame:()=>{},requestAnimationFrame:ports.frame||function(fn){Promise.resolve().then(()=>fn(0));return 1;},...ports.timers}).GoNoteEditor;
- props={visible:true,scope,ready,initial,seed,handedness,cached,onClose:state=>calls.push(['close',state]),onSave:onSave||(async draft=>({entry:model.buildNoteEntry(draft,scope,draft.original),message:'Nota guardada.'}))};
+ props={visible:true,scope,ready,initial,seed,handedness,cached,onSaved,onClose:state=>calls.push(['close',state]),onSave:onSave||(async draft=>({entry:model.buildNoteEntry(draft,scope,draft.original),message:'Nota guardada.'}))};
  const render=async patch=>{props={...props,...patch};await settle(()=>root.render(React.createElement(Editor,props)));};await render({});
  const tap=id=>settle(()=>{const button=hosts.get(id);if(!button)throw Error('Missing visible control '+id);button.onPressIn?.();return button.onPress();});
- const tool=async key=>{if(!hosts.get('note-tools-toggle').accessibilityState.expanded)await tap('note-tools-toggle');if(hosts.has('note-tool-back'))await tap('note-tool-back');await tap('note-option-'+key);};
- const destination=async value=>{if(!hosts.get('note-tools-toggle').accessibilityState.expanded)await tap('note-tools-toggle');if(!hosts.has('note-destination-'+value)&&hosts.has('note-tool-back'))await tap('note-tool-back');await tap('note-destination-'+value);};
+ const back=()=>settle(()=>hosts.get('note-editor-footer').children[2].props.onPress());
+ const exit=async()=>{const before=calls.filter(c=>c[0]==='close').length;for(let i=0;i<5&&calls.filter(c=>c[0]==='close').length===before;i++)await back();if(calls.filter(c=>c[0]==='close').length===before)throw Error('The actual hierarchical bottom control did not exit');};
+ const tool=async key=>{if(!hosts.get('note-tools-toggle').accessibilityState.expanded)await tap('note-tools-toggle');for(let i=0;i<3&&!hosts.has('note-option-'+key);i++)await back();await tap('note-option-'+key);};
+ const destination=async value=>{if(!hosts.get('note-tools-toggle').accessibilityState.expanded)await tap('note-tools-toggle');for(let i=0;i<3&&!hosts.has('note-destination-'+value);i++)await back();await tap('note-destination-'+value);};
  const pickDate=async iso=>{await tool('date');for(let i=0;i<2400&&!hosts.has('note-date-'+iso);i++){const shown=[...hosts.keys()].find(key=>/^note-date-\d{4}-\d\d-\d\d$/.test(key));await tap(shown.slice(10,17)<iso.slice(0,7)?'Mes siguiente':'Mes anterior');}await tap('note-date-'+iso);};
- const pickTime=async(hour,minute)=>{await tool('time');await tap('note-time-hour-'+hour);await tap('note-time-minute-'+minute);await tap('note-time-apply');};
- return{hosts,instances,calls,voice,keyboard,controller,container,tap,tool,destination,pickDate,pickTime,fab:{get gesture(){return fabGestures.at(-1);},style:()=>fabStyles.at(-1)(),storage:fabStorage},run:settle,render,emit:text=>settle(()=>receive(text)),async idle(){for(let i=0;i<20;i++)await settle(()=>new Promise(setImmediate));},close:()=>settle(()=>root.unmount())};
+ const pickTime=async(hour,minute)=>{await tool('time');await settle(()=>hosts.get('note-time-hour').onChangeText(hour));await settle(()=>hosts.get('note-time-minute').onChangeText(minute));await tap('note-time-apply');};
+ return{hosts,instances,calls,voice,keyboard,controller,container,tap,back,exit,tool,destination,pickDate,pickTime,dismissSaved:()=>settle(()=>hosts.get('NoteModal').onDismiss()),fab:{get gesture(){return fabGestures.at(-1);},style:()=>fabStyles.at(-1)(),storage:fabStorage},run:settle,render,emit:text=>settle(()=>receive(text)),async idle(){for(let i=0;i<20;i++)await settle(()=>new Promise(setImmediate));},close:()=>settle(()=>root.unmount())};
 }
 module.exports={...life,compile,load,plain,settle,diskFixture,editorFixture};

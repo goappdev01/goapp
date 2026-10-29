@@ -20,7 +20,7 @@ test('inline configuration and reopening keep the same unsaved note, title, cont
  await ui.run(()=>ui.hosts.get('note-title').onChangeText('Mi título'));await ui.run(()=>ui.hosts.get('note-content').onChangeText('Párrafos conservados'));
  await ui.pickTime('03','15');
  await ui.tool('date');await ui.run(()=>ui.hosts.get('note-date-2027-01-15').onPress());
- await ui.run(()=>ui.hosts.get('Cerrar nota').onPress());const state=ui.calls.find(c=>c[0]==='close')[1];
+ await ui.exit();const state=ui.calls.find(c=>c[0]==='close')[1];
  assert.equal(state.draft.time,'03:15');assert.equal(state.draft.dateISO,'2027-01-15');assert.equal(state.draft.title,'Mi título');assert.equal(state.draft.content,'Párrafos conservados');assert.equal(state.saved,false);
  const again=await h.editorFixture({cached:state.draft});try{assert.equal(again.hosts.get('note-content').value,'Párrafos conservados');assert.equal(again.hosts.get('note-title').value,'Mi título');}finally{await again.close();}
  }finally{await ui.close();}

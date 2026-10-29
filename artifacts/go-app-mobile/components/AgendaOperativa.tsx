@@ -61,6 +61,7 @@ import { trSector } from "@/data/goSectorTranslations";
 import { reservationCardPolicy } from "@/data/reservationCardPolicy";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "./GoEntryDetails";
 import { GoNoteArchiveColumn } from "./notes/GoNoteArchiveColumn";
+import { noteRevealColumn } from "@/lib/goNoteNavigation";
 import { entryHeading, entryIdentity, entryIsReservation } from "@/data/goEntryPresentation";
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { GoCalendarViewSelector } from "./ui/GoCalendarViewSelector";
@@ -347,7 +348,7 @@ export type AgendaBoardProps = {
   /** Incrementar este token fuerza un scroll inmediato a HOY (columna actual + hora). */
   scrollToTodayToken?: number;
   /** Saltar a una fecha y hora específica (cambiar token para disparar). */
-  scrollToDateToken?: { dateISO: string; timeHHMM: string; entryId?:string; token: number };
+  scrollToDateToken?: { dateISO: string; timeHHMM: string; entryId?:string; token: number; destination?:import("@/lib/unifiedNotes").NoteDestination };
   /** ID de la entrada que debe iluminarse suavemente al llegar al calendario. */
   highlightEntryId?: string;
   onAcceptProposal?: (id: string) => void;
@@ -740,6 +741,7 @@ export function AgendaBoard({
 }: AgendaBoardProps) {
   const goLog = useGoCalendarEntries(calendarEntries);
   const [notesExpanded,setNotesExpanded]=useState(false);
+  const archiveEntriesRef=useRef(archiveNotes||[]);archiveEntriesRef.current=archiveNotes||[];
   const noteDayFocus=useRef({key:"",done:false});
   const noteDayFocusKey=viewMode+":"+selectedDateISO;
   if(noteDayFocus.current.key!==noteDayFocusKey)noteDayFocus.current={key:noteDayFocusKey,done:false};
@@ -1082,7 +1084,7 @@ export function AgendaBoard({
   const colContentH=useRef<Record<string,number>>({});
   const entryViews=useRef<Record<string,{node:any;dateISO?:string}>>({});
   const horizontalSize=useRef({viewport:0,content:0});
-  const pendingBookingFocus=useRef<{entryId:string;dateISO:string;token:number}|null>(null);
+  const pendingBookingFocus=useRef<{entryId:string;dateISO:string;token:number;destination?:import("@/lib/unifiedNotes").NoteDestination}|null>(null);
   const focusTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
   const focusAttemptRef=useRef<()=>void>(()=>{});
   const currentFocusRequest=useRef(scrollToDateToken);currentFocusRequest.current=scrollToDateToken;
@@ -1199,11 +1201,12 @@ export function AgendaBoard({
   // retry this single request; no polling or new booking is involved.
   focusAttemptRef.current=()=>{
     const request=pendingBookingFocus.current;if(!request)return;
-    if(!currentEntriesRef.current.some(entry=>entry.id===request.entryId&&entry.dateISO===request.dateISO))return;
-    const key="day_"+request.dateISO,layout=colLayouts.current[key],view=entryViews.current[request.entryId],scroller=colScrollRefs.current[key];
+    const available=()=> (request.destination==="archive"?archiveEntriesRef.current:currentEntriesRef.current).some(entry=>entry.id===request.entryId&&(entry.dateISO||"")===request.dateISO);
+    if(!available())return;
+    const key=request.destination?noteRevealColumn({destination:request.destination,dateISO:request.dateISO}):"day_"+request.dateISO,layout=colLayouts.current[key],view=entryViews.current[request.entryId],scroller=colScrollRefs.current[key];
     const viewport=scroller?.getNativeScrollRef?.()??scroller;
-    if(!layout||!view?.node||view.dateISO!==request.dateISO||!viewport?.measureInWindow||!colScrollViewH.current[key]||!colContentH.current[key]||!horizontalSize.current.viewport||!horizontalSize.current.content)return;
-    const current=()=>pendingBookingFocus.current===request&&allowedEntryIdsRef.current.has(request.entryId);
+    if(!layout||!view?.node||(view.dateISO||"")!==request.dateISO||!viewport?.measureInWindow||!colScrollViewH.current[key]||!colContentH.current[key]||!horizontalSize.current.viewport||!horizontalSize.current.content)return;
+    const current=()=>pendingBookingFocus.current===request&&available();
     viewport.measureInWindow((_x:number,viewportY:number,_w:number,viewportHeight:number)=>{
       if(!current()||viewportHeight<=0)return;
       view.node.measureInWindow((_cx:number,cardY:number,cardWidth:number,cardHeight:number)=>{
@@ -1219,10 +1222,11 @@ export function AgendaBoard({
     });
   };
   useEffect(()=>{
-    pendingBookingFocus.current=scrollToDateToken?.entryId?{entryId:scrollToDateToken.entryId,dateISO:scrollToDateToken.dateISO,token:scrollToDateToken.token}:null;
+    pendingBookingFocus.current=scrollToDateToken?.entryId?{entryId:scrollToDateToken.entryId,dateISO:scrollToDateToken.dateISO,token:scrollToDateToken.token,destination:scrollToDateToken.destination}:null;
+    if(scrollToDateToken?.destination==="archive")setNotesExpanded(true);
     queueBookingFocus();
   },[scrollToDateToken?.token]);
-  useEffect(()=>{queueBookingFocus();},[goLog,queueBookingFocus]);
+  useEffect(()=>{queueBookingFocus();},[goLog,archiveNotes,queueBookingFocus]);
 
   // ── SCROLL A FECHA+HORA ESPECÍFICA: disparado por scrollToDateToken ─────
   useEffect(() => {
@@ -2056,6 +2060,14 @@ export function AgendaBoard({
     if(col.isNotes&&onOpenNote)return <View key={col.id} style={[s.column,{width:notesExpanded?columnW:52}]}
       onLayout={event=>{colLayouts.current[col.id]={x:event.nativeEvent.layout.x,w:event.nativeEvent.layout.width};queueBookingFocus();}}>
       <GoNoteArchiveColumn entries={archiveNotes||[]} expanded={notesExpanded} onOpen={onOpenNote} onMove={onMoveNote}
+        focus={scrollToDateToken?.destination==="archive"&&scrollToDateToken.entryId?{
+          entryId:scrollToDateToken.entryId,highlightEntryId:activeGlowId,
+          registerScroll:node=>{colScrollRefs.current.notes=node;queueBookingFocus();},
+          registerCard:(id,node)=>{if(node)entryViews.current[id]={node,dateISO:""};else delete entryViews.current[id];queueBookingFocus();},
+          onCardLayout:queueBookingFocus,onLayout:event=>{colScrollViewH.current.notes=event.nativeEvent.layout.height;queueBookingFocus();},
+          onContentSizeChange:(_width,height)=>{colContentH.current.notes=height;queueBookingFocus();},
+          onScroll:event=>{colScrollY.current.notes=event.nativeEvent.contentOffset.y;},onScrollBeginDrag:()=>{pendingBookingFocus.current=null;}
+        }:undefined}
         onToggle={()=>{setNotesExpanded(value=>!value);scrollViewRef.current?.scrollTo({x:Math.max(0,(colLayouts.current[col.id]?.x||0)-12),animated:true});}}/>
     </View>;
     const items = col.isRetrasados

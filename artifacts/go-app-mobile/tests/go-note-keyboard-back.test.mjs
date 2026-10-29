@@ -71,12 +71,12 @@ test('iOS didChangeFrame with the keyboard outside the screen can complete a hid
  }finally{await ui.close();}
 });
 
-test('the main menu exposes the existing ten controls together in two adaptive columns, with a visibly unavailable security option',async()=>{
+test('the main menu retains ten discoverable tools in one narrow scrollable column, with a visibly unavailable security option',async()=>{
  for(const handedness of ['left','right']){const ui=await h.editorFixture({handedness});try{
-  await ui.tap('note-tools-toggle');for(const key of ['date','time','duration','reminder','place','attachments']){assert.ok(ui.hosts.has('note-option-'+key));assert.equal(flat(ui.hosts.get('note-option-'+key).style).width,'47%');}
+  await ui.tap('note-tools-toggle');for(const key of ['date','time','duration','reminder','place','attachments']){assert.ok(ui.hosts.has('note-option-'+key));assert.equal(flat(ui.hosts.get('note-option-'+key).style).width,'100%');}
   for(const value of ['calendar','pending','archive'])assert.equal(ui.hosts.get('note-destination-'+value).accessibilityState.checked,false);
   assert.match(ui.hosts.get('note-security-info').accessibilityLabel,/no disponible/);assert.match(ui.container.textContent,/No disponible/);
-  const panel=flat(ui.hosts.get('note-tools-panel').style);assert.equal(panel.height,undefined);assert.equal(panel.maxHeight,600);assert.equal(panel[handedness==='right'?'right':'left'],0);
+  const panel=flat(ui.hosts.get('note-tools-panel').style);assert.equal(panel.height,360);assert.ok(panel.width<=366*.56+1);assert.equal(panel.maxHeight,600);assert.equal(panel[handedness==='right'?'right':'left'],0);
  }finally{await ui.close();}}
 });
 
