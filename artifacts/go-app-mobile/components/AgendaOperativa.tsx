@@ -309,7 +309,7 @@ export type AgendaBoardProps = {
   archiveNotes?: GoEntry[];
   onOpenNote?: (entry:GoEntry)=>void;
   renderNote?:(entry:GoEntry,onClose:()=>void,navigation?:{onGoToLanding?:()=>void;closeRequested?:boolean})=>React.ReactNode;
-  onMoveNote?: (entry:GoEntry,destination:import("@/lib/unifiedNotes").NoteDestination)=>void;
+  onMoveNote?: (entry:GoEntry,destination:import("@/lib/unifiedNotes").NoteDestination,schedule?:{dateISO:string;time?:string})=>void;
   selectedDateISO?: string;
   bookingProfessionalId?: string;
   sortOrder?: "asc" | "desc";
@@ -1046,6 +1046,7 @@ export function AgendaBoard({
 
   // Reanimated shared values — updated on the UI thread for butter-smooth movement
   const floatL  = useSharedValue(0);
+  const boardLeftShared=useSharedValue(0),fingerOffsetX=useSharedValue(0);
   const floatT  = useSharedValue(0);
   const floatOp = useSharedValue(0);
   const floatSc = useSharedValue(1);
@@ -1298,6 +1299,10 @@ export function AgendaBoard({
     const rows=currentEntriesRef.current.filter(item=>item.id===itemId),item=rows[0],origin=dragItemRef.current;
     return !!(onMoveNoteRef.current&&rows.length===1&&origin?.id===itemId&&noteDocument(item)&&!entryIsReservation(item)&&!item.deleted&&item.estado!=="rechazado"&&item.ownerUserId===origin.ownerUserId&&item.taskContext===origin.taskContext);
   };
+  const canRestoreArchive=(itemId:string)=>{
+    const rows=archiveEntriesRef.current.filter(item=>item.id===itemId),item=rows[0],origin=dragItemRef.current;
+    return !!(onMoveNoteRef.current&&rows.length===1&&origin?.id===itemId&&noteDocument(item)?.destination==="archive"&&!entryIsReservation(item)&&!item.deleted&&item.estado!=="rechazado"&&item.ownerUserId===origin.ownerUserId&&item.taskContext===origin.taskContext);
+  };
   const archiveContainsY=(absY:number,lay:{y?:number;h?:number})=>Number.isFinite(absY)&&!!lay.h&&absY>=boardY.current+columnsViewportY.current+(lay.y||0)&&absY<=boardY.current+columnsViewportY.current+(lay.y||0)+lay.h;
   const jsUpdateTarget = useCallback((absX: number,absY:number) => {
     // ── Edge auto-scroll ──────────────────────────────────────────
@@ -1329,6 +1334,7 @@ export function AgendaBoard({
       const lay = colLayouts.current[col.id];
       if (lay && relX >= lay.x && relX <= lay.x + lay.w) {
         if(col.isNotes&&(!dragItemRef.current||!canArchiveDrop(dragItemRef.current.id)||!archiveContainsY(absY,lay)))break;
+        if(noteDocument(dragItemRef.current)?.destination==="archive"&&(!col.dateISO||!canRestoreArchive(dragItemRef.current!.id)||!archiveContainsY(absY,lay)))break;
         found = col.id;
         break;
       }
@@ -1343,7 +1349,7 @@ export function AgendaBoard({
 
   // Called on successful drop — compute final column and trigger onMoveItem
   const jsDropAt = useCallback((absX: number, itemId: string, itemTime: string,absY:number) => {
-    if (!allowedEntryIdsRef.current.has(itemId)) { jsCancelDragRef.current(); return; }
+    if (!allowedEntryIdsRef.current.has(itemId)&&!canRestoreArchive(itemId)) { jsCancelDragRef.current(); return; }
     if(dropConsumed.current||dragItemRef.current?.id!==itemId)return;
     dropConsumed.current=true;
     clearEdgeScroll();
@@ -1359,6 +1365,15 @@ export function AgendaBoard({
     floatOp.value = withTiming(0, { duration: 120 });
     floatSc.value = withSpring(1, { damping: 10, stiffness: 320 });
 
+    if(noteDocument(dragItemRef.current)?.destination==="archive"){
+      try{
+        if(targetCol?.dateISO&&canRestoreArchive(itemId)&&archiveContainsY(absY,colLayouts.current[targetCol.id])){
+          const current=archiveEntriesRef.current.find(item=>item.id===itemId)!;
+          onMoveNoteRef.current!(current,"calendar",{dateISO:targetCol.dateISO,time:current.note!.schedule.time});
+        }
+      }finally{dragItemRef.current=null;setDragItem(null);setDragTargetColId(null);}
+      return;
+    }
     if(targetCol?.isNotes&&canArchiveDrop(itemId)&&archiveContainsY(absY,colLayouts.current[targetCol.id])){
       const current=currentEntriesRef.current.find(item=>item.id===itemId)!;
       try{onMoveNoteRef.current!(current,"archive");}finally{dragItemRef.current=null;setDragItem(null);setDragTargetColId(null);}
@@ -1465,6 +1480,67 @@ export function AgendaBoard({
     </View>;
   };
 
+  // One native recognizer for both calendar and archive cards; preserve its approved parameters/worklets.
+  const makeEntryDragGesture = (item:GoEntry) => {
+    const archiveOrigin=noteDocument(item)?.destination==="archive";
+    const startThis  = () => jsStartDragRef.current(item);
+    const dropThis   = (absX: number,absY:number) => jsDropAtRef.current(absX, item.id, item.time || noteDocument(item)?.schedule.time || "",absY);
+    const cancelThis = () => jsCancelDragRef.current();
+    const updateThis = (absX: number,absY:number) => jsUpdateTargetRef.current(absX,absY);
+    return Gesture.Pan()
+      .activateAfterLongPress(400)
+      .onStart((e) => {
+        // ── Coordinate space fix ────────────────────────────────────────
+        // e.absoluteY is in SCREEN coords; the float card is positioned
+        // inside the board View (which starts at boardY.current below the
+        // screen top).  Subtracting boardY converts screen → board-local.
+        //
+        // e.y = finger Y relative to the card's own View at long-press
+        // activation — this is the exact pick-up point within the card.
+        // Result: float card top = card's board-local top → zero jump.
+        fingerOffsetY.value = e.y;
+        fingerOffsetX.value=Number.isFinite(e.x)?e.x:(colWShared.value-14)/2;
+        floatL.value  = e.absoluteX - (archiveOrigin?fingerOffsetX.value+boardLeftShared.value:(colWShared.value - 14) / 2);
+        floatT.value  = e.absoluteY - e.y - boardY.current;
+        floatOp.value = withSpring(1, { damping: 10, stiffness: 320 });
+        floatSc.value = withSpring(1.06, { damping: 9, stiffness: 300 });
+        // Start neutral — tilt builds dynamically in onUpdate
+        floatRot.value = withSpring(0, { damping: 8, stiffness: 200 });
+        lastAbsX.value = e.absoluteX;
+        lastAbsY.value = e.absoluteY;
+        runOnJS(startThis)();
+      })
+      .onUpdate((e) => {
+        // Track finger in board-local coords (absoluteY − boardY = board Y).
+        floatL.value  = e.absoluteX - (archiveOrigin?fingerOffsetX.value+boardLeftShared.value:(colWShared.value - 14) / 2);
+        floatT.value  = e.absoluteY - fingerOffsetY.value - boardY.current;
+        lastAbsX.value = e.absoluteX;
+        lastAbsY.value = e.absoluteY;
+        // Bidirectional tilt — increased to ±5° for a more physical feel.
+        // velocityX threshold 50 px/s filters micro-jitter while staying responsive.
+        // Intermediate speed (50–300): scale tilt proportionally for smoothness.
+        const vx = e.velocityX;
+        const maxTilt = 5;
+        const tilt = vx > 300 ? maxTilt
+          : vx < -300 ? -maxTilt
+          : vx > 50   ? (vx / 300) * maxTilt
+          : vx < -50  ? (vx / 300) * maxTilt
+          : 0;
+        floatRot.value = withSpring(tilt, { damping: 12, stiffness: 200 });
+        // Column highlight runs on JS thread (acceptable ~1 frame lag)
+        runOnJS(updateThis)(e.absoluteX,e.absoluteY);
+      })
+      .onFinalize((_e, success) => {
+        // Snap rotation back to 0 on release
+        floatRot.value = withSpring(0, { damping: 12, stiffness: 300 });
+        if (success) {
+          runOnJS(dropThis)(Number.isFinite(_e.absoluteX)?_e.absoluteX:lastAbsX.value,Number.isFinite(_e.absoluteY)?_e.absoluteY:lastAbsY.value);
+        } else {
+          runOnJS(cancelThis)();
+        }
+      });
+  };
+
   const renderItemCard = (item: GoEntry, dnProgress = 0, colMode: "stress" | "normal" | "relax" = "normal", colDateISO?: string, isPendingColumn = false) => {
     const hasProposal = !!(item.changeProposal);
     const isAcceptedProposal = hasProposal && item.estado === "aceptado";
@@ -1503,10 +1579,6 @@ export function AgendaBoard({
     const isMultiSelected = selectedIds.has(item.id);
 
     // Capture stable copies of callbacks for this specific item
-    const startThis  = () => jsStartDragRef.current(item);
-    const dropThis   = (absX: number,absY:number) => jsDropAtRef.current(absX, item.id, item.time || "",absY);
-    const cancelThis = () => jsCancelDragRef.current();
-    const updateThis = (absX: number,absY:number) => jsUpdateTargetRef.current(absX,absY);
     const _bc = item as any;
     const _isRawBookingType = item.type === "GO_BOOKING" || item.type === "GO_RESERVA";
     const _hasRequiredSlotFields = !!_bc.slotKey && (!!_bc.staffId || !!((_bc.customerBooking || _bc.businessBooking) && _bc.reservationId && _bc.businessId));
@@ -1571,57 +1643,7 @@ export function AgendaBoard({
       .onEnd(() => { runOnJS(tapThis)(); });
 
     // Long press (400ms) activates the drag; pan then tracks the finger
-    const dragGesture = Gesture.Pan()
-      .activateAfterLongPress(400)
-      .onStart((e) => {
-        // ── Coordinate space fix ────────────────────────────────────────
-        // e.absoluteY is in SCREEN coords; the float card is positioned
-        // inside the board View (which starts at boardY.current below the
-        // screen top).  Subtracting boardY converts screen → board-local.
-        //
-        // e.y = finger Y relative to the card's own View at long-press
-        // activation — this is the exact pick-up point within the card.
-        // Result: float card top = card's board-local top → zero jump.
-        fingerOffsetY.value = e.y;
-        floatL.value  = e.absoluteX - (colWShared.value - 14) / 2;
-        floatT.value  = e.absoluteY - e.y - boardY.current;
-        floatOp.value = withSpring(1, { damping: 10, stiffness: 320 });
-        floatSc.value = withSpring(1.06, { damping: 9, stiffness: 300 });
-        // Start neutral — tilt builds dynamically in onUpdate
-        floatRot.value = withSpring(0, { damping: 8, stiffness: 200 });
-        lastAbsX.value = e.absoluteX;
-        lastAbsY.value = e.absoluteY;
-        runOnJS(startThis)();
-      })
-      .onUpdate((e) => {
-        // Track finger in board-local coords (absoluteY − boardY = board Y).
-        floatL.value  = e.absoluteX - (colWShared.value - 14) / 2;
-        floatT.value  = e.absoluteY - fingerOffsetY.value - boardY.current;
-        lastAbsX.value = e.absoluteX;
-        lastAbsY.value = e.absoluteY;
-        // Bidirectional tilt — increased to ±5° for a more physical feel.
-        // velocityX threshold 50 px/s filters micro-jitter while staying responsive.
-        // Intermediate speed (50–300): scale tilt proportionally for smoothness.
-        const vx = e.velocityX;
-        const maxTilt = 5;
-        const tilt = vx > 300 ? maxTilt
-          : vx < -300 ? -maxTilt
-          : vx > 50   ? (vx / 300) * maxTilt
-          : vx < -50  ? (vx / 300) * maxTilt
-          : 0;
-        floatRot.value = withSpring(tilt, { damping: 12, stiffness: 200 });
-        // Column highlight runs on JS thread (acceptable ~1 frame lag)
-        runOnJS(updateThis)(e.absoluteX,e.absoluteY);
-      })
-      .onFinalize((_e, success) => {
-        // Snap rotation back to 0 on release
-        floatRot.value = withSpring(0, { damping: 12, stiffness: 300 });
-        if (success) {
-          runOnJS(dropThis)(Number.isFinite(_e.absoluteX)?_e.absoluteX:lastAbsX.value,Number.isFinite(_e.absoluteY)?_e.absoluteY:lastAbsY.value);
-        } else {
-          runOnJS(cancelThis)();
-        }
-      });
+    const dragGesture = makeEntryDragGesture(item);
 
     const badge = getCardBadge(item);
 
@@ -2085,6 +2107,7 @@ export function AgendaBoard({
     if(col.isNotes&&onOpenNote)return <View key={col.id} style={[s.column,{width:columnW,borderColor:"#475569"},dragTargetColId===col.id&&s.columnDragTarget]}
       onLayout={event=>{const {x,y,width,height}=event.nativeEvent.layout;colLayouts.current[col.id]={x,y,w:width,h:height};queueBookingFocus();}}>
       <GoNoteArchiveColumn entries={archiveNotes||[]} expanded={notesExpanded} onOpen={onOpenNote} onMove={onMoveNote}
+        dragging={!!dragItem} renderDraggable={(entry,card)=><GestureDetector key={entry.id} gesture={makeEntryDragGesture(entry)}><View collapsable={false} style={{opacity:dragItem?.id===entry.id?0.2:1}}>{card}</View></GestureDetector>}
         compact={!!renderHeader} headerHeight={archiveHeaderHeight} titleFont={hdrFont} dateFont={hdrDateFt} dropActive={dragTargetColId===col.id}
         focus={scrollToDateToken?.destination==="archive"&&scrollToDateToken.entryId?{
           entryId:scrollToDateToken.entryId,highlightEntryId:activeGlowId,
@@ -2141,6 +2164,8 @@ export function AgendaBoard({
           colLayouts.current[col.id] = {
             x: e.nativeEvent.layout.x,
             w: e.nativeEvent.layout.width,
+            y: e.nativeEvent.layout.y,
+            h: e.nativeEvent.layout.height,
           };
           if(onOpenNote&&viewMode==="dia"&&col.dateISO&&!noteDayFocus.current.done){noteDayFocus.current.done=true;scrollViewRef.current?.scrollTo({x:Math.max(0,e.nativeEvent.layout.x-12),animated:false});}
           queueBookingFocus();
@@ -2559,7 +2584,7 @@ export function AgendaBoard({
 
   // ── FLOATING DRAG CARD ────────────────────────────────────────────
   const renderFloatCard = () => {
-    if (!dragItem || !allowedEntryIdsRef.current.has(dragItem.id)) return null;
+    if (!dragItem || !allowedEntryIdsRef.current.has(dragItem.id)&&!canRestoreArchive(dragItem.id)) return null;
     return (
       <ReAnimated.View style={floatCardStyle} pointerEvents="none">
         <View
@@ -2622,6 +2647,7 @@ export function AgendaBoard({
       onLayout={() => {
         boardViewRef.current?.measureInWindow((x, y) => {
           boardX.current = x;
+          boardLeftShared.value=x;
           boardY.current = y;
         });
       }}

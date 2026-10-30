@@ -34,7 +34,7 @@ import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScr
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoNoteEditor } from "@/components/notes/GoNoteEditor";
-import { isArchivedNote, noteDocument, noteInScope, type UnifiedNoteDraft, type NoteDestination } from "@/lib/unifiedNotes";
+import { isArchivedNote, noteDocument, noteInScope, validNoteDate, validNoteTime, type UnifiedNoteDraft, type NoteDestination } from "@/lib/unifiedNotes";
 import { saveUnifiedNote, moveUnifiedNote } from "@/lib/unifiedNoteStore";
 import { noteReminderOperationCurrent } from "@/lib/goNoteSaveProgress";
 import { savedNoteTarget, type NoteRevealTarget } from "@/lib/goNoteNavigation";
@@ -4269,19 +4269,29 @@ function HomeScreenContent() {
   const [noteReminderTargetId, setNoteReminderTargetId] = useState<string | null>(null);
   const [noteReminderBusy, setNoteReminderBusy] = useState(false);
   const [unifiedNoteInitial,setUnifiedNoteInitial]=useState<GoEntry|null>(null);
-  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;toolsOpen?:boolean}>({});
+  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;toolsOpen?:boolean;confirmSchedule?:boolean}>({});
   const unifiedNoteCache=useRef<{scope:string;draft:UnifiedNoteDraft}|null>(null);
   const unifiedNoteEditCache=useRef(new Map<string,UnifiedNoteDraft>());
   const openUnifiedNote=(entry:GoEntry,seed:typeof unifiedNoteSeed={})=>{
     setUnifiedNoteInitial(entry);setUnifiedNoteSeed(seed);setNotesOpen(true);
   };
-  const moveNoteDestination=(entry:GoEntry,destination:NoteDestination)=>{
-    if(destination==="calendar"){openUnifiedNote(entry,{destination,toolsOpen:true});return;}
+  const moveNoteDestination=(entry:GoEntry,destination:NoteDestination,schedule?:{dateISO:string;time?:string})=>{
+    if(schedule){const current=noteIdentityRef.current;if(!current.ready||!current.scope||!noteInScope(entry,current.scope)){showToast("La cuenta o el calendario han cambiado. Vuelve a abrir la nota.","error");return;}}
+    const time=schedule?.time??entry.note?.schedule.time??"";
+    if(destination==="calendar"&&(!schedule||!validNoteDate(schedule.dateISO)||!validNoteTime(time))){
+      openUnifiedNote(entry,{destination,toolsOpen:true,...(schedule?{dateISO:schedule.dateISO,time:validNoteTime(time)?time:"",confirmSchedule:true}:{})});return;
+    }
     const identity=noteIdentityRef.current;
     if(!identity.ready||!identity.scope){showToast("Espera a que se verifique tu cuenta.","error");return;}
     const scope={...identity.scope};
-    void moveUnifiedNote(entry,destination,scope,()=>noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===scope.userId&&noteIdentityRef.current.scope.context===scope.context)
-      .then(result=>{watchNoteReminderReceipt(result);showToast(result.notice,"success");}).catch(error=>showToast(error.message,"error"));
+    void moveUnifiedNote(entry,destination,scope,()=>noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===scope.userId&&noteIdentityRef.current.scope.context===scope.context,schedule?{dateISO:schedule.dateISO,time}:undefined)
+      .then(result=>{
+        watchNoteReminderReceipt(result);
+        if(schedule&&destination==="calendar"&&noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===scope.userId&&noteIdentityRef.current.scope.context===scope.context){
+          setCalScrollToDateTarget(savedNoteTarget(result.entry,scope,Date.now()));setCalHighlightEntryId(result.entry.id);
+        }
+        showToast(result.notice,"success");
+      }).catch(error=>showToast(error.message,"error"));
   };
   const noteIdentity = completionIdentity;
   const noteIdentityRef = useRef(noteIdentity); noteIdentityRef.current = noteIdentity;
@@ -26293,6 +26303,7 @@ function HomeScreenContent() {
     const scope=noteIdentity.scope;
     return <GoNoteEditor visible={notesOpen} initial={unifiedNoteInitial} handedness={handedness} ready={noteIdentity.ready} scope={scope}
       initialToolsOpen={unifiedNoteSeed.toolsOpen===true}
+      confirmScheduleOnSave={unifiedNoteSeed.confirmSchedule===true}
       cached={unifiedNoteInitial?unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+unifiedNoteInitial.id):unifiedNoteCache.current?.scope===JSON.stringify(scope)?unifiedNoteCache.current.draft:undefined}
       seed={{...unifiedNoteSeed,title:quickNoteText,content:quickNoteDetail}}
       onClose={state=>{cacheNoteDraft(state,unifiedNoteInitial?.id);setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}

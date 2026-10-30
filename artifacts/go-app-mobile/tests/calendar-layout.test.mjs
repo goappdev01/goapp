@@ -165,7 +165,7 @@ test('the restored full calendar width accepts a valid right-edge drop once, whi
   scan(boardAst); assert.ok(callback);
   for (const [pointerX, itemId, expectedMoves, expectedCancelled] of [[350, 'pending-note', 1, 0], [280, 'pending-note', 1, 0], [350, 'foreign-entry', 0, 1]]) {
     const calls = [], moves = [], scope = { exports: {}, screenW: 390,
-      allowedEntryIdsRef: { current: new Set(['pending-note']) }, dropConsumed:{current:false}, jsCancelDragRef: { current: () => calls.push('cancelled') },
+      allowedEntryIdsRef: { current: new Set(['pending-note']) }, dropConsumed:{current:false}, canRestoreArchive:()=>false,noteDocument:()=>undefined,jsCancelDragRef: { current: () => calls.push('cancelled') },
       boardX: { current: 0 }, scrollX: { current: 0 }, allColumnsRef: { current: [{ id: 'day', dateISO: '2026-10-15' }] }, colLayouts: { current: { day: { x: 200, w: 180 } } },
       clearEdgeScroll() {}, floatOp: {}, floatSc: {}, withTiming: value => value, withSpring: value => value,
       dragItemRef: { current: pending }, selectedIdsRef: { current: new Set() }, onOpenMoveFlow: (...args) => moves.push(args),
@@ -187,7 +187,7 @@ test('drag edge scrolling uses the original screen boundary on both sides, with 
   for (const [pointerX, expectedTimers, expectedClears] of [[350, 1, 0], [300, 0, 0], [25, 1, 0]]) {
     const timers = [], cleared = [], scope = { exports: {}, screenW: 390,
       boardX: { current: 0 }, scrollX: { current: 0 }, allColumnsRef: { current: [{ id: 'day' }] }, colLayouts: { current: { day: { x: 200, w: 180 } } },
-      edgeScrollDir: { current: null }, edgeScrollTimer: { current: null }, scrollViewRef: { current: null },
+      edgeScrollDir: { current: null }, edgeScrollTimer: { current: null }, scrollViewRef: { current: null },noteDocument:()=>undefined,dragItemRef:{current:null},
       clearEdgeScroll: () => cleared.push(true), clearInterval() {}, setInterval: callback => { timers.push(callback); return 1; },
       Haptics: { selectionAsync: async () => {} }, setDragTargetColId() {},
     };

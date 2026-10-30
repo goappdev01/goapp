@@ -29,14 +29,14 @@ type Props = { visible:boolean; initial?:GoEntry|null; seed?:{title?:string;cont
   scope:TaskScope|null; ready:boolean; handedness:"left"|"right"; cached?:UnifiedNoteDraft; onClose:(state?:{draft:UnifiedNoteDraft;saved:boolean})=>void;
   onSave:(draft:UnifiedNoteDraft)=>Promise<{entry:GoEntry;message:string;notice?:string;performance?:NoteSaveTrace}>;
   onSaved?:(entry:GoEntry,notice:string)=>void;
-  onGoToLanding?:()=>void; closeRequested?:boolean; initialToolsOpen?:boolean;
+  onGoToLanding?:()=>void; closeRequested?:boolean; initialToolsOpen?:boolean; confirmScheduleOnSave?:boolean;
   renderActions?:(entry:GoEntry,onEdit:()=>void)=>React.ReactNode };
 const destinations: [NoteDestination,string][]=[["calendar","CALENDARIO"],["pending","PENDIENTES"],["archive","ARCHIVO"]];
 const configurationKeys=["destination","dateISO","time","duration","place","location","reminderMinutes","attachments"] as const;
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 
 /** One ordinary-note editor, one native presenter, and one acknowledged save operation. */
-export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClose,onSave,onSaved,cached,renderActions,onGoToLanding,closeRequested=false,initialToolsOpen=false}:Props) {
+export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClose,onSave,onSaved,cached,renderActions,onGoToLanding,closeRequested=false,initialToolsOpen=false,confirmScheduleOnSave=false}:Props) {
   const insets=useSafeAreaInsets(),scroll=useRef<React.ElementRef<typeof ScrollView>>(null),keyboard=useGoNoteKeyboard(visible);
   const [draft,setDraft]=useState<UnifiedNoteDraft>(()=>cached||noteDraft(initial)),[panel,setPanel]=useState(""),[error,setError]=useState(""),[message,setMessage]=useState("");
   const [busy,setBusy]=useState(false),[attachmentBusy,setAttachmentBusy]=useState(false),[link,setLink]=useState("");
@@ -200,7 +200,10 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   async function persistConfiguration(patch:Partial<UnifiedNoteDraft>):Promise<boolean>{
     if(saveLock.current||workLock.current||savedExit.current)return false;
     const next={...draftRef.current,...patch};
-    if(!persistedEntry.current){change(patch);return true;} // Creation changes only its draft, never creates a row.
+    // A restore with missing schedule is a pending destination change, including its recovered local draft.
+    // Only the main GUARDAR may confirm that transition; ordinary note-tool autosaves are unchanged.
+    const unconfirmedSchedule=confirmScheduleOnSave||(cached?.original?.note?.destination==="archive"&&cached.destination==="calendar");
+    if(!persistedEntry.current||unconfirmedSchedule&&next.destination==="calendar"){change(patch);return true;}
     const original=persistedEntry.current,base=noteDraft(original),configured={...base};
     for(const key of configurationKeys)Object.assign(configured,{[key]:next[key]});
     if(configurationKeys.every(key=>same(base[key],configured[key])))return true;
