@@ -246,6 +246,29 @@ test('different identity cannot retain the preceding owner selector',()=>{
   assert.equal(nodes(fixture.render('usuario'),n=>n.props.testID?.startsWith('owner-view-')).length,0);
 });
 
+test('owner backend failure retains disabled contexts, retries and never falls into public roles',async()=>{
+  const selected=[];const fixture=ownerFixture(async next=>{selected.push(next);return true;});
+  let retries=0;fixture.access.refresh=async()=>{retries++;return false;};
+  fixture.render('usuario');
+  fixture.view.isOwner=false;fixture.access.allowed=false;fixture.access.unavailable=true;
+  const tree=fixture.render('usuario');
+  const cards=nodes(tree,n=>n.props.testID?.startsWith('owner-view-'));
+  assert.equal(cards.length,3);assert.ok(cards.every(card=>card.props.disabled));
+  for(const card of cards)card.props.onPress();
+  assert.deepEqual(selected,[]);
+  assert.equal(nodes(tree,n=>n.props.testID?.startsWith('account-role-')).length,0);
+  await nodes(tree,n=>n.props.testID==='owner-access-retry')[0].props.onPress();
+  assert.equal(retries,1);
+  fixture.access.unavailable=false;fixture.access.checking=true;
+  assert.equal(nodes(fixture.render('usuario'),n=>n.props.testID?.startsWith('owner-view-')).length,3);
+  fixture.access.checking=false;fixture.view.isOwner=true;fixture.access.allowed=true;
+  const recovered=fixture.render('usuario');
+  assert.ok(nodes(recovered,n=>n.props.testID?.startsWith('owner-view-')).every(card=>!card.props.disabled));
+  fixture.view.isOwner=false;fixture.access.allowed=false;
+  assert.equal(nodes(fixture.render('usuario'),n=>n.props.testID?.startsWith('owner-view-')).length,0);
+  assert.deepEqual(fixture.storageCalls,[]);
+});
+
 test('public cards remain reachable within the welcome scroll at narrow widths and large font sizes', () => {
   for (const dimensions of [{width: 320, fontScale: 1}, {width: 390, fontScale: 1.6}]) {
     const fixture = panelFixture(dimensions);
@@ -384,10 +407,10 @@ test('Next focuses the existing password input; Go submits native-filled credent
 });
 
 
-for (const failure of ['offline', 'rate-limit']) test('regression: owner form reports '+failure+' without claiming missing owner membership or repeating login', async () => {
+for (const failure of ['offline', 'rate-limit', 'missing-admin-route']) test('regression: owner form reports '+failure+' without claiming missing owner membership or repeating login', async () => {
   let requests = 0;
   const checks = [];
-  const error = Object.assign(new Error('fictional transport failure'), failure === 'rate-limit' ? { status: 429 } : {});
+  const error = Object.assign(new Error('fictional transport failure'), failure === 'rate-limit' ? { status: 429 } : failure === 'missing-admin-route' ? {status:404} : {});
   const id = '11111111-1111-4111-8111-111111111111';
   const f = panelFixture({
     access: { allowed: false, checking: false, userId: null, refreshOwner: async (expected, options) => {
@@ -402,7 +425,7 @@ for (const failure of ['offline', 'rate-limit']) test('regression: owner form re
   inputs[0].props.onChangeText('owner@example.test'); inputs[1].props.onChangeText('fictional-password');
   await nodes(f.render(), n => n.type === 'TouchableOpacity' && n.props.onPress?.name === 'handleAuthenticate')[0].props.onPress();
   const tree = f.render(), texts = nodes(tree, n => n.type === 'Text').flatMap(n => n.props.children).join(' ');
-  assert.match(texts, failure === 'rate-limit' ? /límite temporal de solicitudes/ : /No se pudo comprobar el acceso de propietario/);
+  assert.match(texts, failure === 'rate-limit' ? /límite temporal de solicitudes/ : failure === 'missing-admin-route' ? /backend.*comprobación de propietario/ : /No se pudo comprobar el acceso de propietario/);
   assert.doesNotMatch(texts, /owner_login_denied/);
   assert.equal(requests, 1); assert.deepEqual(checks, [id]); assert.deepEqual(f.accountChanges, []);
   assert.equal(nodes(tree, n => n.props?.testID === 'owner-view-admin').length, 0);

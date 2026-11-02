@@ -161,9 +161,9 @@ export function LoginRegisterPanel({
   const [viewError, setViewError] = useState<string | null>(null);
   const ownerSelectorIdentity = useRef<string | null>(null);
   if (goView.isOwner && adminAccess.userId) ownerSelectorIdentity.current = adminAccess.userId;
-  else if (!adminAccess.checking || ownerSelectorIdentity.current !== adminAccess.userId) ownerSelectorIdentity.current = null;
+  else if ((!adminAccess.checking && !adminAccess.unavailable) || ownerSelectorIdentity.current !== adminAccess.userId) ownerSelectorIdentity.current = null;
   // Retain only presentation during revalidation; buttons require current authority.
-  const ownerSelector = goView.isOwner || (!!adminAccess.userId && adminAccess.checking && ownerSelectorIdentity.current === adminAccess.userId);
+  const ownerSelector = goView.isOwner || (!!adminAccess.userId && (adminAccess.checking || adminAccess.unavailable) && ownerSelectorIdentity.current === adminAccess.userId);
   const chooseOwnerView = async (next: GoView) => {
     if (viewBusy || !goView.isOwner || !onSelectOwnerView) return;
     setViewBusy(true); setViewError(null);
@@ -383,7 +383,9 @@ export function LoginRegisterPanel({
             ownerGranted = await adminAccess.refreshOwner(payload.user.id, { reportUnavailable: true });
           } catch (error) {
             const status = error && typeof error === "object" && "status" in error ? Number(error.status) : 0;
-            throw new Error(authErrorMessage({}, status, "No se pudo comprobar el acceso de propietario. Comprueba la conexión y vuelve a intentarlo."));
+            throw new Error(authErrorMessage({}, status, status === 404
+              ? "El backend no ofrece la comprobación de propietario requerida por esta versión de GO. La sesión se conserva; es necesario actualizar el backend."
+              : "No se pudo comprobar el acceso de propietario. Comprueba la conexión y vuelve a intentarlo."));
           }
         }
         if (!ownerGranted) throw new Error(t("owner_login_denied"));
@@ -592,7 +594,14 @@ export function LoginRegisterPanel({
                     disabled={viewBusy || !goView.isOwner} testIDPrefix="owner-view"
                     onSelect={next => { void chooseOwnerView(next); }} />
                   <Text style={[s.actionSub, { paddingHorizontal: 20 }]}>{t("context_preview_notice")}</Text>
-                  {(viewBusy || !goView.isOwner) && <ActivityIndicator accessibilityLabel={t("context_checking")} />}
+                  {(viewBusy || adminAccess.checking) && <ActivityIndicator accessibilityLabel={t("context_checking")} />}
+                  {adminAccess.unavailable && <View style={{ paddingHorizontal: 20 }}>
+                    <Text accessibilityRole="alert" style={s.authError}>{t("context_access_error")}</Text>
+                    <TouchableOpacity testID="owner-access-retry" disabled={viewBusy || adminAccess.checking}
+                      onPress={() => adminAccess.refresh()} style={s.secondaryBtn}>
+                      <Text style={s.secondaryTxt}>{t("context_retry")}</Text>
+                    </TouchableOpacity>
+                  </View>}
                   {viewError && <Text accessibilityRole="alert" style={s.authError}>{viewError}</Text>}
                   <View style={[s.secondaryRow, { marginHorizontal: 20 }]}>
                     <TouchableOpacity onPress={() => { onOpenPerfil(); onClose(); }} style={s.secondaryBtn}>
