@@ -106,7 +106,7 @@ import { KeyboardAwareScrollView, KeyboardAvoidingView as KeyboardControllerAvoi
 const AnimatedPressable = Reanimated.createAnimatedComponent(Pressable);
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { cancelBooking, saveBooking, getBookings, getBusinesses, updateBookingStatus, type Booking, type Business, type BookingStatus } from "@/data/booking";
+import { cancelBooking, saveBooking, getBookings, getActivebusinesses, updateBookingStatus, type Booking, type Business, type BookingStatus } from "@/data/booking";
 import { GoBookingDiagPanel } from "@/components/dev/GoBookingDiagPanel";
 import { BookingSearchOverlay } from "@/components/booking/BookingSearchOverlay";
 import { useGoNotification } from "@/contexts/GoNotificationContext";
@@ -2821,7 +2821,7 @@ function HomeScreenContent() {
   useEffect(() => {
     if (!goSearchOpen || !goSearchSub || adminAccess.checking || !bookingActivityEnabled(goSearchSub.id, bookingPublication, bookingInternalAccess)) { setGoSearchBusinesses([]); return; }
     let active = true;
-    const query = demoBookingRepository ? demoBookingRepository.searchBusinesses(goSearchQuery) : getBusinesses();
+    const query = demoBookingRepository ? demoBookingRepository.searchBusinesses(goSearchQuery) : getActivebusinesses();
     void query.then(all => { if (active) setGoSearchBusinesses(all.filter(b => b.bookingActive !== false && canonicalBookingActivity(b.category) === goSearchSub.id && bookingActivityEnabled(b.category, bookingPublication, bookingInternalAccess))); })
       .catch(() => { if (active) setGoSearchBusinesses([]); });
     return () => { active = false; };

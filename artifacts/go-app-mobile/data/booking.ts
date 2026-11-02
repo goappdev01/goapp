@@ -542,6 +542,7 @@ function firstRow<T extends { id: string }>(rows: T[]): T {
 }
 export async function getOwnedBusinesses(): Promise<Business[]> {
   const rows = await supabaseApiRequest<RemoteBusiness[]>(`${management}/businesses`, {}, true);
+  if (!Array.isArray(rows)) throw new BookingApiError("El servidor devolvió una lista de empresas inválida.", 502);
   return rows.map(mapRemoteBusiness);
 }
 function businessBody(b: Omit<Business, "id" | "createdAt">) {
@@ -550,6 +551,7 @@ function businessBody(b: Omit<Business, "id" | "createdAt">) {
 }
 export async function createOwnedBusiness(data: Omit<Business, "id" | "createdAt">, expectedUserId?: string): Promise<Business> {
   const rows = await supabaseApiRequest<RemoteBusiness[]>(`${management}/businesses`, { method: "POST", body: JSON.stringify(businessBody(data)) }, true, expectedUserId);
+  if (!Array.isArray(rows)) throw new BookingApiError("El servidor no confirmó el alta de la empresa.", 502);
   return mapRemoteBusiness(firstRow(rows));
 }
 export async function getCloudConfiguration<T>(): Promise<T | null> {
@@ -600,6 +602,7 @@ export async function getBusinesses(): Promise<Business[]> {
   const local = await loadAll<Business>(KEY_BUSINESSES);
   try {
     const remote = await supabaseApiRequest<RemoteBusiness[]>("/supabase/businesses");
+    if (!Array.isArray(remote)) throw new BookingApiError("El servidor devolvió una lista de empresas inválida.", 502);
     if (remote.length > 0) return remote.map(mapRemoteBusiness);
   } catch (error) {
     console.warn("[booking] No se pudieron cargar negocios remotos:", error);
@@ -611,6 +614,7 @@ export async function getActivebusinesses(): Promise<Business[]> {
   // Customer bookings require the live catalogue. Empty/error responses must
   // never advertise local demo records as remotely reservable businesses.
   const remote = await supabaseApiRequest<RemoteBusiness[]>("/supabase/businesses");
+  if (!Array.isArray(remote)) throw new BookingApiError("El servidor devolvió una lista de negocios inválida.", 502);
   return remote.map(mapRemoteBusiness).filter((b) => isCloudId(b.id) && b.bookingActive !== false);
 }
 
@@ -687,6 +691,7 @@ export async function getBookableItems(businessId?: string, remoteOnly = false):
       ? `/supabase/services?business_id=${encodeURIComponent(businessId)}`
       : "/supabase/services";
     const remote = await supabaseApiRequest<RemoteService[]>(path);
+    if (!Array.isArray(remote)) throw new BookingApiError("El servidor devolvió una lista de servicios inválida.", 502);
     if (remote.length > 0 || remoteOnly) {
       const mapped = remember(remote.map(mapRemoteService));
       return businessId ? mapped.filter((x) => x.businessId === businessId) : mapped;
