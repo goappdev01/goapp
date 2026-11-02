@@ -258,6 +258,11 @@ test('public cards remain reachable within the welcome scroll at narrow widths a
     for (const role of ['empresa', 'usuario']) {
       const card = nodes(welcomeScroll, node => node.props?.testID === 'account-role-' + role)[0];
       assert.equal(card.props.disabled, false);
+      const label = nodes(card, node => node.type === 'Text' && node.props.adjustsFontSizeToFit === true)[0];
+      assert.ok(label, `the ${role.toLocaleUpperCase()} label must remain present and fit its card`);
+      assert.equal(label.props.adjustsFontSizeToFit, true);
+      assert.ok(label.props.minimumFontScale <= 0.65);
+      assert.equal(label.props.numberOfLines, 1);
     }
   }
 });
