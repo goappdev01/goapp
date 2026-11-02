@@ -407,10 +407,11 @@ test('Next focuses the existing password input; Go submits native-filled credent
 });
 
 
-for (const failure of ['offline', 'rate-limit', 'missing-admin-route']) test('regression: owner form reports '+failure+' without claiming missing owner membership or repeating login', async () => {
+for (const failure of ['offline', 'rate-limit', 'missing-admin-route', 'unauthenticated', 'forbidden', 'backend-error']) test('regression: owner form reports '+failure+' without claiming missing owner membership or repeating login', async () => {
   let requests = 0;
   const checks = [];
-  const error = Object.assign(new Error('fictional transport failure'), failure === 'rate-limit' ? { status: 429 } : failure === 'missing-admin-route' ? {status:404} : {});
+  const statuses={'rate-limit':429,'missing-admin-route':404,unauthenticated:401,forbidden:403,'backend-error':502};
+  const error = Object.assign(new Error('fictional transport failure'), failure in statuses ? {status:statuses[failure]} : {});
   const id = '11111111-1111-4111-8111-111111111111';
   const f = panelFixture({
     access: { allowed: false, checking: false, userId: null, refreshOwner: async (expected, options) => {
@@ -425,7 +426,7 @@ for (const failure of ['offline', 'rate-limit', 'missing-admin-route']) test('re
   inputs[0].props.onChangeText('owner@example.test'); inputs[1].props.onChangeText('fictional-password');
   await nodes(f.render(), n => n.type === 'TouchableOpacity' && n.props.onPress?.name === 'handleAuthenticate')[0].props.onPress();
   const tree = f.render(), texts = nodes(tree, n => n.type === 'Text').flatMap(n => n.props.children).join(' ');
-  assert.match(texts, failure === 'rate-limit' ? /límite temporal de solicitudes/ : failure === 'missing-admin-route' ? /backend.*comprobación de propietario/ : /No se pudo comprobar el acceso de propietario/);
+  assert.match(texts, failure === 'rate-limit' ? /límite temporal de solicitudes/ : failure === 'missing-admin-route' ? /backend.*comprobación de propietario/ : failure in statuses ? new RegExp('HTTP '+statuses[failure]) : /No se pudo comprobar el acceso de propietario/);
   assert.doesNotMatch(texts, /owner_login_denied/);
   assert.equal(requests, 1); assert.deepEqual(checks, [id]); assert.deepEqual(f.accountChanges, []);
   assert.equal(nodes(tree, n => n.props?.testID === 'owner-view-admin').length, 0);
@@ -444,4 +445,27 @@ test('regression: concurrent keyboard submit and login press issue only one cred
   await Promise.all([fromKeyboard, fromButton]);
   assert.equal(requests, 1);
   assert.deepEqual(f.accountChanges, ['usuario']);
+});
+
+test('Empresa login waits for owner authorization and opens owner contexts instead of prematurely mounting Landing',async()=>{
+  const id='11111111-1111-4111-8111-111111111111';let finish;const wait=new Promise(r=>finish=r),selected=[];
+  const view={view:'USER',isOwner:false};const access={allowed:false,checking:false,userId:null,
+    refreshOwner:async expected=>{assert.equal(expected,id);await wait;view.isOwner=true;access.allowed=true;access.userId=id;return true;}};
+  const f=panelFixture({view,access,select:async next=>{selected.push(next);return true;},authenticate:async()=>({ok:true,json:async()=>({access_token:'synthetic-session',user:{id}})})});
+  const [email,password]=credentials(f,'empresa');email.props.onChangeText('owner@example.test');password.props.onChangeText('fixture-password');
+  const login=nodes(f.render(),n=>n.props.onPress?.name==='handleAuthenticate')[0].props.onPress();
+  await new Promise(r=>setImmediate(r));assert.deepEqual(f.accountChanges,[]);
+  finish();await login;const tree=f.render();assert.deepEqual(f.accountChanges,[]);
+  assert.equal(nodes(tree,n=>n.props.testID?.startsWith('account-role-')).length,0);
+  const business=nodes(tree,n=>n.props.testID==='owner-view-business')[0];assert.ok(business);business.props.onPress();
+  await new Promise(r=>setImmediate(r));assert.deepEqual(selected,['BUSINESS']);
+});
+
+for(const status of [401,403,404,502])test('Empresa login handles ADMIN HTTP '+status+' without erasing session or inventing authorization',async()=>{
+  const id='11111111-1111-4111-8111-111111111111';
+  const f=panelFixture({access:{allowed:false,checking:false,userId:null,refreshOwner:async()=>{throw Object.assign(new Error('provider'),{status});}},authenticate:async()=>({ok:true,json:async()=>({access_token:'synthetic-session',user:{id}})})});
+  const [email,password]=credentials(f,'empresa');email.props.onChangeText('business@example.test');password.props.onChangeText('fixture-password');
+  await nodes(f.render(),n=>n.props.onPress?.name==='handleAuthenticate')[0].props.onPress();
+  assert.deepEqual(f.accountChanges,status===403?['empresa']:[]);
+  assert.equal(nodes(f.render(),n=>n.props.testID==='owner-view-admin').length,0);
 });

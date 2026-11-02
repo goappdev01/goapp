@@ -32,7 +32,8 @@ export function GoAdminAccessProvider({ children }: { children: React.ReactNode 
     const result = getAdminAccess().then(next => {
       const current = mounted.current && version === revision.current && AppState.currentState === "active";
       const granted = current && next.allowed === true;
-      const resolved = granted ? next : denied(current ? next.userId : null);
+      const resolved = granted ? next : { ...denied(current ? next.userId : null),
+        ...(current && next.denialStatus === 403 ? { denialStatus: 403 as const } : {}) };
       recordAuthTrace("admin.check.end", { revision: version, allowed: granted });
       if (mounted.current && version === revision.current) setAccess({ ...resolved, checking: false, unavailable: false });
       return resolved;
@@ -57,6 +58,13 @@ export function GoAdminAccessProvider({ children }: { children: React.ReactNode 
     // Interactive login must distinguish an unavailable check from a confirmed denial.
     // Background consumers retain the existing fail-closed boolean contract.
     if (options?.reportUnavailable && "error" in flight.failure) throw flight.failure.error;
+    if (options?.reportUnavailable) {
+      if (!mounted.current || version !== revision.current || AppState.currentState !== "active"
+        || !next.userId || (expectedUserId !== undefined && next.userId !== expectedUserId)) {
+        throw new Error("La sesión o el estado de la aplicación ha cambiado. Vuelve a comprobar el acceso.");
+      }
+      if (next.denialStatus === 403) throw Object.assign(new Error("El servidor rechazó el acceso administrativo."), { status: 403 });
+    }
     return mounted.current && version === revision.current && AppState.currentState === "active"
       && next.allowed === true && next.level === "owner"
       && (expectedUserId === undefined || next.userId === expectedUserId);

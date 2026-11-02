@@ -57,7 +57,9 @@ test('ADMIN permission requires the authenticated server response for the same c
 test('denials and temporary failures never erase a session; stale session responses cannot grant ADMIN', async () => {
   for (const status of [401, 403]) {
     const f = dataFixture(() => { throw new f.BookingApiError(status); });
-    assert.equal((await f.api.getAdminAccess()).allowed, false); assert.equal((await f.auth.readAuthSession()).user.id, userId);
+    if(status===401) await assert.rejects(f.api.getAdminAccess(),e=>e.status===401);
+    else assert.equal((await f.api.getAdminAccess()).denialStatus,403);
+    assert.equal((await f.auth.readAuthSession()).user.id, userId);
   }
   const offline = dataFixture(() => { throw new Error('offline'); });
   await assert.rejects(offline.api.getAdminAccess(), /offline/); assert.equal((await offline.auth.readAuthSession()).user.id, userId);
@@ -164,7 +166,16 @@ test('regression: explicit owner check preserves genuine denials and rejects tec
     const f = providerFixture();
     const check = f.render().refreshOwner(userId, { reportUnavailable: true });
     f.requests[0].resolve(reply);
-    assert.equal(await check, false);
+    if(reply.userId!==userId) await assert.rejects(check,/sesión/);
+    else assert.equal(await check, false);
     f.unmount();
   }
+});
+
+test('interactive owner revalidation never reports a stale foreground response as missing membership',async()=>{
+  const f=providerFixture();const check=f.render().refreshOwner(userId,{reportUnavailable:true});
+  const rejected=assert.rejects(check,/sesión/);
+  f.appState('background');
+  f.requests[0].resolve({userId,allowed:true,level:'owner',permissions:['admin.access']});
+  await rejected;assert.equal(f.render().allowed,false);f.unmount();
 });

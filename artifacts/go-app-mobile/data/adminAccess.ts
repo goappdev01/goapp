@@ -2,7 +2,7 @@ import { captureAuthIdentity, isAuthIdentityCurrent } from "@/lib/authSession";
 import { BookingApiError, supabaseApiRequest } from "./booking";
 
 export type AdminLevel = "owner" | "technical";
-export type AdminAccess = { userId: string | null; allowed: boolean; level: AdminLevel | null; permissions: string[] };
+export type AdminAccess = { userId: string | null; allowed: boolean; level: AdminLevel | null; permissions: string[]; denialStatus?: 403 };
 
 export async function getAdminAccess(): Promise<AdminAccess> {
   const identity = await captureAuthIdentity();
@@ -26,8 +26,8 @@ export async function getAdminAccess(): Promise<AdminAccess> {
     }
     return { userId, allowed: true, level: access.level as AdminLevel, permissions: [...grants] as string[] };
   } catch (error) {
-    if (error instanceof BookingApiError && [401, 403].includes(error.status)) {
-      return { userId, allowed: false, level: null, permissions: [] };
+    if (error instanceof BookingApiError && error.status === 403) {
+      return { userId, allowed: false, level: null, permissions: [], denialStatus: 403 };
     }
     throw error;
   }

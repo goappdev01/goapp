@@ -374,8 +374,10 @@ export function LoginRegisterPanel({
         await AsyncStorage.setItem(PENDING_REGISTRATION_KEY, JSON.stringify(pending)).catch(() => {});
         setAuthError("Revisa tu correo para confirmar la cuenta y después inicia sesión.");
         return;
+      } else {
+        throw new Error("El servidor no confirmó una sesión válida. Vuelve a iniciar sesión.");
       }
-      if (ownerLogin) {
+      if (ownerLogin || selectedRole === "empresa") {
         setAuthPassword("");
         let ownerGranted = false;
         if (payload.user?.id) {
@@ -383,12 +385,24 @@ export function LoginRegisterPanel({
             ownerGranted = await adminAccess.refreshOwner(payload.user.id, { reportUnavailable: true });
           } catch (error) {
             const status = error && typeof error === "object" && "status" in error ? Number(error.status) : 0;
-            throw new Error(authErrorMessage({}, status, status === 404
+            // A non-admin may still manage their own verified business. Only a
+            // confirmed ADMIN denial may continue through that separate gate.
+            if (!ownerLogin && status === 403) ownerGranted = false;
+            else throw new Error(authErrorMessage({}, status, status === 401
+              ? "El servidor no pudo autenticar la sesión (HTTP 401). No se ha comprobado la membresía OWNER. Vuelve a iniciar sesión."
+              : status === 403
+              ? "El servidor rechazó el acceso administrativo de esta sesión (HTTP 403). No se han cambiado tus permisos."
+              : status === 404
               ? "El backend no ofrece la comprobación de propietario requerida por esta versión de GO. La sesión se conserva; es necesario actualizar el backend."
+              : status >= 500
+              ? `El backend no pudo comprobar el acceso de propietario (HTTP ${status}). La sesión se conserva; vuelve a intentarlo.`
               : "No se pudo comprobar el acceso de propietario. Comprueba la conexión y vuelve a intentarlo."));
           }
         }
-        if (!ownerGranted) throw new Error(t("owner_login_denied"));
+        if (ownerLogin && !ownerGranted) throw new Error(t("owner_login_denied"));
+        // A verified owner uses the shared owner context selector. Do not switch
+        // GoMode and mount business-only screens while permission is unresolved.
+        if (!ownerLogin && !ownerGranted) onSetAccountType(selectedRole);
       } else { onSetAccountType(selectedRole); }
       setAuthStep("role");
     } catch (error) {
