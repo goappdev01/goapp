@@ -2,11 +2,14 @@ import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import supabaseRouter from "./supabase";
 
+import adminRouter from "./admin";
+
 import managementRouter from "./management";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use("/supabase/admin", adminRouter);
 router.use("/supabase/manage", managementRouter);
 router.use("/supabase", supabaseRouter);
 
