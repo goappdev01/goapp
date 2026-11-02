@@ -31,6 +31,7 @@ import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { useGoView } from "@/contexts/GoViewContext";
 import type { GoView } from "@/data/goViewPolicy";
 import { AccountContextSelector } from "./AccountContextSelector";
+import { loginSessionPayload, invalidLoginResponse } from "@/lib/loginResponse";
 import { PasswordInput } from "./PasswordInput";
 import {
   CuentaVerification,
@@ -355,8 +356,13 @@ export function LoginRegisterPanel({
           password: authPassword,
           ...(authMode === "register" ? { full_name: authName.trim() || null, role: selectedRole } : {}),
         }),
-      });
-      const payload = await response.json().catch(() => ({}));
+      }).catch(() => { throw new Error("No se pudo conectar con el servidor de inicio de sesión (LOGIN_NETWORK). No se han comprobado las credenciales ni los permisos."); });
+      let payload;
+      try { payload = await response.json(); }
+      catch { throw new Error(invalidLoginResponse(response.status, false)); }
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error(invalidLoginResponse(response.status, true));
+      }
       if (inputRevision !== authInputRevisionRef.current) return;
       if (!response.ok) {
         const message = payload.error_description ?? payload.msg ?? payload.message ?? payload.error ?? "No se pudo autenticar la cuenta.";
@@ -365,8 +371,9 @@ export function LoginRegisterPanel({
         console.warn("[auth] Solicitud rechazada", { operation: authMode, httpStatus: response.status, emailRateLimit });
         throw new Error(authErrorMessage(payload, response.status, "No se pudo autenticar la cuenta."));
       }
-      if (payload.access_token) {
-        await saveAuthSession(payload);
+      const sessionPayload = loginSessionPayload(payload);
+      if (sessionPayload) {
+        await saveAuthSession(sessionPayload);
       } else if (authMode === "register") {
         const pending = { email, role: selectedRole };
         pendingRegistrationRef.current = pending;
@@ -375,14 +382,14 @@ export function LoginRegisterPanel({
         setAuthError("Revisa tu correo para confirmar la cuenta y después inicia sesión.");
         return;
       } else {
-        throw new Error("El servidor no confirmó una sesión válida. Vuelve a iniciar sesión.");
+        throw new Error(invalidLoginResponse(response.status, true));
       }
       if (ownerLogin || selectedRole === "empresa") {
         setAuthPassword("");
         let ownerGranted = false;
-        if (payload.user?.id) {
+        if (sessionPayload?.user.id) {
           try {
-            ownerGranted = await adminAccess.refreshOwner(payload.user.id, { reportUnavailable: true });
+            ownerGranted = await adminAccess.refreshOwner(sessionPayload.user.id, { reportUnavailable: true });
           } catch (error) {
             const status = error && typeof error === "object" && "status" in error ? Number(error.status) : 0;
             // A non-admin may still manage their own verified business. Only a

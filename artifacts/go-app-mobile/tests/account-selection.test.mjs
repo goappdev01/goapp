@@ -69,6 +69,9 @@ function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: fals
     '@/lib/registrationReturn': {},
   };
   modules['@/lib/authSession'] = loadAuthSession({}, modules['@react-native-async-storage/async-storage'].default);
+  const loginResponseContext = { exports: {} };
+  vm.runInNewContext(ts.transpileModule(readFileSync('lib/loginResponse.ts', 'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText, loginResponseContext);
+  modules['@/lib/loginResponse'] = loginResponseContext.exports;
   const selectorContext = { exports: {}, require: name => { assert.ok(name in modules, name); return modules[name]; } };
   vm.runInNewContext(ts.transpileModule(readFileSync('components/auth/AccountContextSelector.tsx', 'utf8'), { compilerOptions: { alwaysStrict: false,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,
@@ -468,4 +471,52 @@ for(const status of [401,403,404,502])test('Empresa login handles ADMIN HTTP '+s
   await nodes(f.render(),n=>n.props.onPress?.name==='handleAuthenticate')[0].props.onPress();
   assert.deepEqual(f.accountChanges,status===403?['empresa']:[]);
   assert.equal(nodes(f.render(),n=>n.props.testID==='owner-view-admin').length,0);
+});
+
+for(const role of ['usuario','empresa','owner'])for(const shape of ['direct','session','data','data.session']){
+  test(`${role}: complete ${shape} login session survives decoding before any OWNER check`,async()=>{
+    const id='11111111-1111-4111-8111-111111111111',checks=[];
+    const session={access_token:'synthetic-access',refresh_token:'synthetic-renewal',user:{id}};
+    const payload=shape==='direct'?session:shape==='session'?{session,user:{id}}:shape==='data'?{data:session}:{data:{session,user:{id}}};
+    const view={view:'USER',isOwner:false},access={allowed:false,checking:false,userId:null,
+      refreshOwner:async expected=>{checks.push(expected);view.isOwner=true;access.allowed=true;access.userId=id;return true;}};
+    const f=panelFixture({view,access,authenticate:async()=>({ok:true,status:200,json:async()=>payload})});
+    let inputs;
+    if(role==='owner'){nodes(f.render(),n=>n.props.testID==='owner-direct-login')[0].props.onPress();inputs=nodes(f.render(),n=>n.type==='TextInput');}
+    else inputs=credentials(f,role);
+    inputs[0].props.onChangeText('fixture@example.test');inputs[1].props.onChangeText('fixture-password');
+    await nodes(f.render(),n=>n.props.onPress?.name==='handleAuthenticate')[0].props.onPress();
+    const texts=nodes(f.render(),n=>n.type==='Text').flatMap(n=>n.props.children).join(' ');
+    assert.doesNotMatch(texts,/LOGIN_SESSION_INCOMPLETE|LOGIN_JSON_INVALID|no confirmó una sesión válida/);
+    assert.deepEqual(checks,role==='usuario'?[]:[id]);
+    assert.deepEqual(f.accountChanges,role==='usuario'?['usuario']:[]);
+    if(role!=='usuario')assert.equal(nodes(f.render(),n=>n.props.testID==='owner-view-admin').length,1);
+  });
+}
+
+for(const failure of ['missing-token','invalid-json','conflicting-user','incomplete-session']){
+  test(`login ${failure} is a response contract error, never OWNER denial or successful navigation`,async()=>{
+    let checks=0;
+    const id='11111111-1111-4111-8111-111111111111';
+    const payload=failure==='conflicting-user'?{user:{id:'other'},session:{access_token:'synthetic',user:{id}}}
+      :failure==='incomplete-session'?{session:{access_token:'synthetic'}}:{user:{id}};
+    const f=panelFixture({access:{allowed:false,checking:false,userId:null,refreshOwner:async()=>{checks++;return true;}},
+      authenticate:async()=>({ok:true,status:200,json:async()=>{if(failure==='invalid-json')throw Error('unparseable');return payload;}})});
+    const [email,password]=credentials(f,'empresa');email.props.onChangeText('fixture@example.test');password.props.onChangeText('fixture-password');
+    await nodes(f.render(),n=>n.props.onPress?.name==='handleAuthenticate')[0].props.onPress();
+    const texts=nodes(f.render(),n=>n.type==='Text').flatMap(n=>n.props.children).join(' ');
+    assert.match(texts,failure==='invalid-json'?/HTTP 200; LOGIN_JSON_INVALID/:/HTTP 200; LOGIN_SESSION_INCOMPLETE/);
+    assert.doesNotMatch(texts,/owner_login_denied/);assert.equal(checks,0);assert.deepEqual(f.accountChanges,[]);
+  });
+}
+
+for(const failure of ['credentials','network'])test(`login ${failure} remains distinct from invalid session format and OWNER authorization`,async()=>{
+  let checks=0;
+  const f=panelFixture({access:{allowed:false,checking:false,userId:null,refreshOwner:async()=>{checks++;return true;}},
+    authenticate:async()=>{if(failure==='network')throw new TypeError('offline');return {ok:false,status:400,json:async()=>({code:'invalid_credentials'})};}});
+  const [email,password]=credentials(f,'empresa');email.props.onChangeText('fixture@example.test');password.props.onChangeText('fixture-password');
+  await nodes(f.render(),n=>n.props.onPress?.name==='handleAuthenticate')[0].props.onPress();
+  const texts=nodes(f.render(),n=>n.type==='Text').flatMap(n=>n.props.children).join(' ');
+  assert.match(texts,failure==='network'?/LOGIN_NETWORK/:/Correo o contraseña incorrectos/);
+  assert.doesNotMatch(texts,/LOGIN_SESSION_INCOMPLETE|owner_login_denied/);assert.equal(checks,0);assert.deepEqual(f.accountChanges,[]);
 });
