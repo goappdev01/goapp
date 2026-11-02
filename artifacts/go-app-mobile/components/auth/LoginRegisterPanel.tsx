@@ -31,7 +31,7 @@ import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { useGoView } from "@/contexts/GoViewContext";
 import type { GoView } from "@/data/goViewPolicy";
 import { AccountContextSelector } from "./AccountContextSelector";
-import { loginSessionPayload, invalidLoginResponse } from "@/lib/loginResponse";
+import { loginApiBase, loginSessionPayload, invalidLoginResponse } from "@/lib/loginResponse";
 import { PasswordInput } from "./PasswordInput";
 import {
   CuentaVerification,
@@ -347,7 +347,7 @@ export function LoginRegisterPanel({
     setAuthBusy(true);
     setAuthError(null);
     try {
-      const apiBase = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "") ?? (process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}/api` : "/api");
+      const apiBase = loginApiBase(process.env.EXPO_PUBLIC_API_URL, process.env.EXPO_PUBLIC_DOMAIN, Platform.OS);
       const response = await fetch(`${apiBase}/supabase/auth/${authMode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

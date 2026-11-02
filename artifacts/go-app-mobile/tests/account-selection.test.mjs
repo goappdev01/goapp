@@ -26,7 +26,7 @@ function nodes(tree, predicate) {
 
 // Execute the actual panel and its rendered card callbacks, with native hosts
 // mocked. Authentication/network operations are deliberately not exercised here.
-function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: false, isBusinessPreview: false }, access = { allowed: false, checking: false, userId: null }, select = async () => true, width = 390, fontScale = 1, platformOS = "ios", authenticate } = {}) {
+function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: false, isBusinessPreview: false }, access = { allowed: false, checking: false, userId: null }, select = async () => true, width = 390, fontScale = 1, platformOS = "ios", apiUrl = 'http://private.test/api', authenticate } = {}) {
   const slots = [], accountChanges = [], storageCalls = [];
   let closeCalls = 0;
   let cursor = 0;
@@ -69,7 +69,7 @@ function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: fals
     '@/lib/registrationReturn': {},
   };
   modules['@/lib/authSession'] = loadAuthSession({}, modules['@react-native-async-storage/async-storage'].default);
-  const loginResponseContext = { exports: {} };
+  const loginResponseContext = { exports: {}, Error };
   vm.runInNewContext(ts.transpileModule(readFileSync('lib/loginResponse.ts', 'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText, loginResponseContext);
   modules['@/lib/loginResponse'] = loginResponseContext.exports;
   const selectorContext = { exports: {}, require: name => { assert.ok(name in modules, name); return modules[name]; } };
@@ -82,7 +82,7 @@ function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: fals
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,
   } }).outputText, passwordContext);
   modules['./PasswordInput'] = passwordContext.exports;
-  const context = { exports: {}, process: { env: { EXPO_PUBLIC_API_URL: 'http://private.test/api' } }, fetch: authenticate, require: name => { assert.ok(name in modules, name); return modules[name]; } };
+  const context = { exports: {}, Error, process: { env: { EXPO_PUBLIC_API_URL: apiUrl } }, fetch: authenticate, require: name => { assert.ok(name in modules, name); return modules[name]; } };
   vm.runInNewContext(ts.transpileModule(authSource, { compilerOptions: { alwaysStrict: false,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, esModuleInterop: true,
   } }).outputText, context);
@@ -519,4 +519,22 @@ for(const failure of ['credentials','network'])test(`login ${failure} remains di
   const texts=nodes(f.render(),n=>n.type==='Text').flatMap(n=>n.props.children).join(' ');
   assert.match(texts,failure==='network'?/LOGIN_NETWORK/:/Correo o contraseña incorrectos/);
   assert.doesNotMatch(texts,/LOGIN_SESSION_INCOMPLETE|owner_login_denied/);assert.equal(checks,0);assert.deepEqual(f.accountChanges,[]);
+});
+
+for(const platformOS of ['ios','android'])for(const apiUrl of ['', '/api'])test(`${platformOS} never posts credentials to Metro through a relative API (${apiUrl || 'missing'})`,async()=>{
+  let sent=0;
+  const f=panelFixture({platformOS,apiUrl,authenticate:async()=>{sent++;return {ok:true,status:200,json:async()=>{throw Error('Metro returned HTML');}};}});
+  const [email,password]=credentials(f);email.props.onChangeText('fixture@example.test');password.props.onChangeText('fixture-password');
+  await nodes(f.render(),n=>n.props.onPress?.name==='handleAuthenticate')[0].props.onPress();
+  const text=nodes(f.render(),n=>n.type==='Text').flatMap(n=>n.props.children).join(' ');
+  assert.match(text,/LOGIN_API_UNCONFIGURED/);assert.equal(sent,0);assert.deepEqual(f.accountChanges,[]);
+});
+
+test('native login posts to the explicit Railway API, while web retains its relative origin',async()=>{
+  for(const [platformOS,apiUrl,expected]of [['ios','https://goapp-api-production.up.railway.app/api/','https://goapp-api-production.up.railway.app/api/supabase/auth/login'],['web','','/api/supabase/auth/login']]){
+    const requests=[];const f=panelFixture({platformOS,apiUrl,authenticate:async url=>{requests.push(url);return {ok:true,status:200,json:async()=>({access_token:'synthetic',user:{id:'11111111-1111-4111-8111-111111111111'}})};}});
+    const [email,password]=credentials(f);email.props.onChangeText('fixture@example.test');password.props.onChangeText('fixture-password');
+    await nodes(f.render(),n=>n.props.onPress?.name==='handleAuthenticate')[0].props.onPress();
+    assert.deepEqual(requests,[expected]);assert.deepEqual(f.accountChanges,['usuario']);
+  }
 });

@@ -2,6 +2,15 @@ type JsonObject = Record<string, unknown>;
 const object = (value: unknown): value is JsonObject => !!value && typeof value === "object" && !Array.isArray(value);
 export type LoginSessionPayload = JsonObject & { access_token: string; user: JsonObject & { id: string } };
 
+/** Relative /api is a web origin feature, never a native authentication server. */
+export function loginApiBase(configured: unknown, domain: unknown, platform: string): string {
+  const explicit = typeof configured === "string" ? configured.trim() : "";
+  const host = typeof domain === "string" ? domain.trim() : "";
+  const base = (explicit || (host ? `https://${host}/api` : platform === "web" ? "/api" : "")).replace(/\/$/, "");
+  if (/^https?:\/\/[^/?#\s]+(?:\/[^?#\s]*)?$/.test(base) || (platform === "web" && /^\/(?!\/)[^?#\s]*$/.test(base))) return base;
+  throw new Error("La dirección del servidor de acceso no está configurada (LOGIN_API_UNCONFIGURED). No se ha enviado ninguna credencial.");
+}
+
 /** Decode a complete session only. Server verification remains mandatory for privileges. */
 export function loginSessionPayload(value: unknown): LoginSessionPayload | null {
   if (!object(value) || value.error) return null;
