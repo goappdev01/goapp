@@ -1,0 +1,116 @@
+diff --git a/artifacts/api-server/src/lib/adminPermissions.ts b/artifacts/api-server/src/lib/adminPermissions.ts
+new file mode 100644
+index 0000000..b276eb0
+--- /dev/null
++++ b/artifacts/api-server/src/lib/adminPermissions.ts
+@@ -0,0 +1,19 @@
++export const ADMIN_PERMISSIONS = [
++  "admin.access", "development", "diagnostics", "maintenance",
++  "memberships.manage", "ownership.manage",
++] as const;
++export type AdminPermission = typeof ADMIN_PERMISSIONS[number];
++export type AdminLevel = "owner" | "technical";
++export const TECHNICAL_PERMISSIONS: readonly AdminPermission[] = [
++  "admin.access", "development", "diagnostics", "maintenance",
++];
++
++// Reject malformed or reserved grants rather than widening their meaning.
++export function effectiveAdminPermissions(level: unknown, grants: unknown): AdminPermission[] | null {
++  if (level !== "owner" && level !== "technical") return null;
++  if (!Array.isArray(grants) || !grants.every(p => typeof p === "string" &&
++    (level === "owner" ? ADMIN_PERMISSIONS : TECHNICAL_PERMISSIONS).includes(p as AdminPermission))) return null;
++  if (level === "owner") return [...ADMIN_PERMISSIONS];
++  if (!grants.includes("admin.access")) return null;
++  return [...new Set(grants)] as AdminPermission[];
++}
+diff --git a/artifacts/api-server/src/middleware/requireAdmin.ts b/artifacts/api-server/src/middleware/requireAdmin.ts
+new file mode 100644
+index 0000000..6f18db9
+--- /dev/null
++++ b/artifacts/api-server/src/middleware/requireAdmin.ts
+@@ -0,0 +1,51 @@
++import type { RequestHandler } from "express";
++import { bearerHeader, supabaseRequest } from "../lib/supabase";
++import { effectiveAdminPermissions, type AdminPermission } from "../lib/adminPermissions";
++
++// Always check the live, server-owned membership for this authenticated identity.
++// Neither editable user_metadata, email, request body nor a client role authorizes ADMIN.
++export const requireAdmin: RequestHandler = async (req, res, next) => {
++  res.setHeader("Cache-Control", "no-store");
++  const authorization = req.header("authorization");
++  if (!authorization?.match(/^Bearer \S+$/)) {
++    res.status(401).json({ code: "AUTH_REQUIRED", error: "Inicia sesión." });
++    return;
++  }
++  try {
++    const response = await supabaseRequest("/auth/v1/user", { headers: bearerHeader(authorization) });
++    if (!response.ok) {
++      res.status([401, 403].includes(response.status) ? 401 : 502)
++        .json({ code: "ADMIN_ACCESS_UNAVAILABLE", error: "No se pudo comprobar el acceso." });
++      return;
++    }
++    const user = await response.json() as { id?: unknown };
++    if (typeof user?.id !== "string" || !user.id) throw new Error("Invalid authenticated identity");
++    const query = new URLSearchParams({ user_id: `eq.${user.id}`, select: "user_id,level,permissions,active", limit: "1" });
++    const memberships = await supabaseRequest(`/rest/v1/admin_memberships?${query}`, { headers: bearerHeader(authorization) });
++    if (!memberships.ok) throw new Error("Membership authorization unavailable");
++    const rows = await memberships.json() as { user_id?: unknown; level?: unknown; permissions?: unknown; active?: unknown }[];
++    if (!Array.isArray(rows)) throw new Error("Invalid membership response");
++    const permissions = rows.length === 1 ? effectiveAdminPermissions(rows[0]?.level, rows[0]?.permissions) : null;
++    if (rows.length !== 1 || rows[0]?.user_id !== user.id || rows[0]?.active !== true || !permissions) {
++      res.status(403).json({ code: "ADMIN_REQUIRED", error: "Acceso no autorizado." });
++      return;
++    }
++    res.locals.adminUserId = user.id;
++    res.locals.adminLevel = rows[0].level;
++    res.locals.adminPermissions = permissions;
++    next();
++  } catch {
++    // A network/membership failure denies access; it never deletes a real session.
++    res.status(502).json({ code: "ADMIN_ACCESS_UNAVAILABLE", error: "No se pudo comprobar el acceso." });
++  }
++};
++
++export function requireAdminPermission(permission: AdminPermission): RequestHandler {
++  return (_req, res, next) => {
++    if (!Array.isArray(res.locals.adminPermissions) || !res.locals.adminPermissions.includes(permission)) {
++      res.status(403).json({ code: "ADMIN_PERMISSION_REQUIRED", error: "Acceso no autorizado." });
++      return;
++    }
++    next();
++  };
++}
+diff --git a/artifacts/api-server/src/routes/admin.ts b/artifacts/api-server/src/routes/admin.ts
+new file mode 100644
+index 0000000..b066730
+--- /dev/null
++++ b/artifacts/api-server/src/routes/admin.ts
+@@ -0,0 +1,9 @@
++import { Router } from "express";
++import { requireAdmin, requireAdminPermission } from "../middleware/requireAdmin";
++const router = Router();
++router.use(requireAdmin);
++router.get("/access", requireAdminPermission("admin.access"), (_req, res) => {
++  res.json({ userId: res.locals.adminUserId, role: "admin", allowed: true,
++    level: res.locals.adminLevel, permissions: res.locals.adminPermissions });
++});
++export default router;
+diff --git a/artifacts/api-server/src/routes/index.ts b/artifacts/api-server/src/routes/index.ts
+index 745a0bd..3335718 100644
+--- a/artifacts/api-server/src/routes/index.ts
++++ b/artifacts/api-server/src/routes/index.ts
+@@ -2,11 +2,14 @@ import { Router, type IRouter } from "express";
+ import healthRouter from "./health";
+ import supabaseRouter from "./supabase";
+ 
++import adminRouter from "./admin";
++
+ import managementRouter from "./management";
+ 
+ const router: IRouter = Router();
+ 
+ router.use(healthRouter);
++router.use("/supabase/admin", adminRouter);
+ router.use("/supabase/manage", managementRouter);
+ router.use("/supabase", supabaseRouter);
+ 
