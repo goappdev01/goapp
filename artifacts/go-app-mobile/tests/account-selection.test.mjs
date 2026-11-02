@@ -126,10 +126,13 @@ test('the Landing recognizer is disabled during access and resumes when it close
   const callback = gesture.initializer.arguments[0];
   const dependencyList = gesture.initializer.arguments[1];
   assert.ok(dependencyList.elements.some(element => element.getText(home) === 'goAuthOpen'), 'opening/closing access must update the recognizer');
+  const callbackSource = ts.transpileModule(`const callback = ${callback.getText(home)}; callback();`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+  }).outputText;
   for (const goAuthOpen of [true, false, true]) {
     const config = {};
     const chain = new Proxy({}, { get: (_target, key) => (...args) => { config[key] = args; return chain; } });
-    vm.runInNewContext(`(${callback.getText(home)})()`, { goAuthOpen, Gesture: { Pan: () => chain } });
+    vm.runInNewContext(callbackSource, { goAuthOpen, calOpen: false, detailGestureOpen: false, Gesture: { Pan: () => chain } });
     assert.equal(config.enabled?.[0], !goAuthOpen);
     assert.equal(config.activeOffsetY[0], 40, 'preserve the validated Landing swipe threshold');
   }
