@@ -35,7 +35,7 @@ export function AccountContextSelector<T extends string>({ options, selected, di
           <View style={[s.icon, { backgroundColor: option.color + "14" }]}>
             <Feather name={option.icon} size={22} color={option.color} />
           </View>
-          <Text style={s.label} numberOfLines={option.label.endsWith(" DEMO") ? 2 : 1} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={2}>
+          <Text style={s.label} numberOfLines={option.label.endsWith(" DEMO") ? 2 : 1} adjustsFontSizeToFit minimumFontScale={0.65} maxFontSizeMultiplier={1.4}>
             {option.label.toLocaleUpperCase()}
           </Text>
           <Text style={s.sub}>{option.sublabel}</Text>
@@ -54,7 +54,7 @@ const s = StyleSheet.create({
   card: { backgroundColor: "#FFFFFF", borderRadius: 20, borderWidth: 1.5, paddingHorizontal: 12,
     paddingVertical: 16, alignItems: "center", gap: 7 },
   icon: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  label: { width: "100%", color: "#111827", fontSize: 18, fontFamily: "Inter_700Bold",
+  label: { width: "100%", color: "#111827", fontSize: 16, fontFamily: "Inter_700Bold",
     fontWeight: "800", textAlign: "center", letterSpacing: 0.2 },
   sub: { color: "#6B7280", fontSize: 11, fontWeight: "600", textAlign: "center" },
   description: { color: "#9CA3AF", fontSize: 11, lineHeight: 15, textAlign: "center" },
