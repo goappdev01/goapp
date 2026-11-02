@@ -1,4 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
+import { loginApiBase } from "@/lib/loginResponse";
 import { readAuthSession, fetchWithAuth, AuthSessionRequiredError, type AuthSession } from "@/lib/authSession";
 import { expandSearchTerms, normalize } from "./goSearchAliases";
 import type { ServiceTiming, BookingGapPolicy } from "./serviceTiming";
@@ -256,10 +258,7 @@ export async function getBookingParticipantIdentity(): Promise<{id:string;name:s
 }
 
 function getApiBase(): string {
-  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL.replace(/\/$/, "");
-  return process.env.EXPO_PUBLIC_DOMAIN
-    ? `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`
-    : "/api";
+  return loginApiBase(process.env.EXPO_PUBLIC_API_URL, process.env.EXPO_PUBLIC_DOMAIN, Platform.OS);
 }
 
 async function performSupabaseRequest<T>(

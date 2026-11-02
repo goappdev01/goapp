@@ -13,7 +13,7 @@ function pure(name,imports={}){const exports={};vm.runInNewContext(compile(name)
 const storeModule=pure("data/businessDemoStore.ts"),repoModule=pure("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":pure("data/bookingServices.ts")});
 function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
   const keyboardEvents=new Map();
-  const memory=new Map(),liveCalls=[],navigation=[],hooks=new Map(),cache=new Map();
+  const memory=new Map(),liveCalls=[],navigation=[],alerts=[],hooks=new Map(),cache=new Map();
   const initial={businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],activeDays:[],openFrom:"09:00",openTo:"18:00",daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};
   const store=storeModule.createBusinessDemoStore({ownerUserId:owner,storage:{getItem:async key=>memory.get(key)??null,setItem:async(key,value)=>memory.set(key,value)},canUse:()=>true,initialConfig:initial});
   const repo=repoModule.createDemoBookingRepository(store,{now:()=>Date.parse("2030-01-07T08:00:00")});
@@ -30,7 +30,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
   class Value{constructor(value){this.value=value;}setValue(value){this.value=value;}interpolate(){return 0;}stopAnimation(){}}
   const animation={start(fn){fn?.({finished:true});},stop(){}};
   const native=new Proxy({Dimensions:{get:()=>({width:390,height:844})},Platform:{OS:"ios",select:x=>x.ios??x.default},
-    StyleSheet:{create:x=>x,absoluteFillObject:{}},Alert:{alert(){}},Keyboard:{addListener:(event,fn)=>{keyboardEvents.set(event,fn);return{remove(){keyboardEvents.delete(event);}};},dismiss(){keyboardEvents.get("keyboardWillHide")?.();}},
+    StyleSheet:{create:x=>x,absoluteFillObject:{}},Alert:{alert(title,message){alerts.push([title,message]);}},Keyboard:{addListener:(event,fn)=>{keyboardEvents.set(event,fn);return{remove(){keyboardEvents.delete(event);}};},dismiss(){keyboardEvents.get("keyboardWillHide")?.();}},
     Animated:{Value,View:"Animated.View",spring:()=>animation,timing:()=>animation,add:()=>0},
     PanResponder:{create:config=>({panHandlers:config})}
   },{get:(target,key)=>target[key]??key});
@@ -60,7 +60,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
   };
   function load(name){if(cache.has(name))return cache.get(name);const exports={};cache.set(name,exports);
     vm.runInNewContext(compile(name),{exports,require:key=>key in mocks?mocks[key]:key==="@/components/booking/MyBookingsList"?load("components/booking/MyBookingsList.tsx"):(()=>{throw Error("Unexpected UI dependency "+key);})(),
-      console:{log(){},warn(){}},Date,Intl,Map,Set,setTimeout:fn=>setTimeout(fn,0),clearTimeout,setInterval,clearInterval});return exports;}
+      console:{log(){},warn(){}},Error,Date,Intl,Map,Set,setTimeout:fn=>setTimeout(fn,0),clearTimeout,setInterval,clearInterval});return exports;}
   let catalogueScope = "";
   function render(fn,props){current=hooks.get(fn)??[];hooks.set(fn,current);cursor=0;effects=[];const tree=fn(props);for(const effect of effects)effect();
     // The selector's async transport is exercised separately. Resolve its real
@@ -75,7 +75,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
   const Overlay=load("components/booking/BookingSearchOverlay.tsx").BookingSearchOverlay,MyList=load("components/booking/MyBookingsList.tsx").MyBookingsList;
   const props={visible:true,demoRepository:repo,initialBusinessId:store.businessId,onClose(){navigation.push("close");},onBookingConfirmed(){liveCalls.push("real confirmed callback");},onHoldCreated(){liveCalls.push("real hold callback");},onGoToBooking(){liveCalls.push("real calendar");},onProviderSelected(){liveCalls.push("real provider");},onDemoGoToBooking(...args){navigation.push(args);}};
   const configure=async()=>{await store.updateConfig({businessName:"GO Peluquería Prueba",sectorId:"belleza",subId:"peluqueria",address:"Dirección DEMO",activeDays:[0,1,2,3,4],services:[{name:"Corte DEMO",duration:30,price:12}],plantillaItems:[{id:"pro",count:1,label:"Puesto",staffNames:["Raul 1 GO PRUEBA"],staffServices:[["Corte DEMO"]]}],completedSteps:[0,1,2,3,4,5,6,7]});await store.saveFloorPlan({id:store.planId,businessId:store.businessId,updatedAt:1,elements:[{id:"puesto",label:"Raul 1 GO PRUEBA",type:"silla",reservable:true,status:"disponible",x:10,y:20,width:30,height:40,capacity:1}]});};
-  return{store,repo,liveCalls,navigation,render,Overlay,MyList,props,configure,keyboardEvents,accent:load("components/booking/BookingSearchOverlay.tsx").bookingCategoryAccent};
+  return{store,repo,liveCalls,navigation,alerts,render,Overlay,MyList,props,configure,keyboardEvents,accent:load("components/booking/BookingSearchOverlay.tsx").bookingCategoryAccent};
 }
 // These positive scenarios require the selected professional to offer the
 // exact services introduced by each fixture, not an implicit all-services grant.
@@ -107,10 +107,10 @@ test("Landing search keeps the live activation/category filters and ignores late
       bookingPublication:modulePublicationPolicy.defaultGoModulePublication(),bookingInternalAccess:false,
       bookingActivityEnabled:modulePublicationPolicy.bookingActivityEnabled,canonicalBookingActivity:modulePublicationPolicy.canonicalBookingActivity,
       demoBookingRepository:demo?{searchBusinesses:()=>{calls.push("demo");return pending;}}:undefined,
-      getBusinesses:()=>{calls.push("live");return pending;},setGoSearchBusinesses:rows=>results.push(rows)};
+      getActivebusinesses:()=>{calls.push("live");return pending;},setGoSearchBusinesses:rows=>results.push(rows)};
     vm.runInNewContext(ts.transpileModule("exports.run="+effect.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,scope);
     scope.exports.run();resolve(rows);await turn();assert.deepEqual(calls,[demo?"demo":"live"]);assert.deepEqual(Array.from(results[0],r=>r.id),["live"]);
-    let resolveLate; scope.getBusinesses=()=>new Promise(done=>{resolveLate=done;});scope.demoBookingRepository=undefined;
+    let resolveLate; scope.getActivebusinesses=()=>new Promise(done=>{resolveLate=done;});scope.demoBookingRepository=undefined;
     const cancel=scope.exports.run();cancel();resolveLate(rows);await turn();assert.equal(results.length,1);
   }
 });
@@ -142,7 +142,7 @@ for(const context of ["USER","ADMIN"])test("New reservation keeps history separa
 
 test("New reservation removes only the history embed and reserves no history-specific layout height",()=>{
  const source=readFileSync("components/booking/BookingSearchOverlay.tsx","utf8");
- assert.equal(source.includes("MyBookingsList"),false);assert.ok(source.includes("visibleSectors.slice(rowIdx * 3, rowIdx * 3 + 3)"));
+ assert.equal(source.includes("MyBookingsList"),false);assert.ok(source.includes("SECTORS.slice(rowIdx * 3, rowIdx * 3 + 3)"));
  assert.ok(source.includes("Busca tu empresa"));assert.ok(source.includes("biz_recent_label"));assert.ok(source.includes("biz_search_business_service_ph"));
  const ast=ts.createSourceFile("overlay.tsx",source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let dock;
  (function walk(n){if(ts.isPropertyAssignment(n)&&n.name.getText(ast)==="actionDock")dock=n.initializer;ts.forEachChild(n,walk)})(ast);
@@ -218,10 +218,10 @@ test('professional heading, no preference and configured names use a clear selec
  assert.equal(flattened(pro.props.style).borderColor,'#eab30890');assert.ok(nodes(pro).some(n=>n.type==='Feather'&&n.props.color==='#eab308'));
  const servicesText=nodes(pro).find(n=>n.type==='Text'&&flattened(n.props.style).fontSize===12);if(servicesText)assert.equal(flattened(servicesText.props.style).color,'rgba(255,255,255,0.9)');
 });
-test('pilot category is a compact button and keyboard preserves the search, title, results and existing close controls',async()=>{
+test('pilot category retains the published row geometry and keyboard preserves search, results and close controls',async()=>{
  const sector={id:'belleza',label:'Belleza',emoji:'💇',color:'#eab308',subs:[{id:'peluqueria',name:'Peluquería',emoji:'✂️'}]},f=fixture({sectors:[sector]});await f.configure();const props={...f.props,initialBusinessId:undefined};
  let tree=f.render(f.Overlay,props);await turn();tree=f.render(f.Overlay,props);
- const category=control(tree,'booking-category-belleza');assert.equal(flattened(category.props.style).width,140);assert.equal(flattened(category.props.style).flex,0);assert.equal(flattened(category.props.style).borderColor,'#eab308');
+ const category=control(tree,'booking-category-belleza');assert.equal(flattened(category.props.style).flex,1);assert.equal(flattened(category.props.style).borderColor,'#eab308');
  input(tree).props.onChangeText('Peluquería');f.keyboardEvents.get('keyboardWillShow')({endCoordinates:{height:300,screenY:544}});tree=f.render(f.Overlay,props);await turn();tree=f.render(f.Overlay,props);
  assert.equal(text(control(tree,'booking-search-heading')),'Busca tu empresa');assert.equal(flattened(control(tree,'booking-business-search').props.style).borderColor,'#ffffff');assert.equal(input(tree).props.value,'Peluquería');
  const back=control(tree,'booking-back'),exit=control(tree,'booking-exit');assert.ok(back&&exit);assert.ok(nodes(tree).find(n=>n.children?.includes(back))||back);
@@ -233,6 +233,15 @@ test('pilot category is a compact button and keyboard preserves the search, titl
 test('beauty identity overrides only the category selection color and other sectors keep their configured color',()=>{
  const f=fixture();for(const category of ['peluqueria','Belleza Peluquería','belleza'])assert.equal(f.accent({category,bookingColor:'#123456'}),'#eab308');
  assert.equal(f.accent({category:'hotel',bookingColor:'#123456'}),'#123456');
+});
+
+test('service load failure stays in the existing selection flow and cannot offer or confirm a reservation',async()=>{
+ const f=fixture();await f.configure();
+ f.repo.getBookableItems=async()=>{throw Error('El backend de reservas no ofrece el enlace de esta empresa (HTTP 404).');};
+ f.render(f.Overlay,f.props);await turn();f.render(f.Overlay,f.props);await turn();const tree=f.render(f.Overlay,f.props);
+ assert.ok(f.alerts.some(([title,message])=>title==='No se pudieron cargar servicios'&&message.includes('HTTP 404')));
+ assert.equal(button(tree,'BIZ_CONFIRM_BOOKING_BTN'),undefined);assert.equal(f.store.getSnapshot().bookings.length,0);
+ assert.deepEqual(f.navigation,[]);assert.deepEqual(f.liveCalls,[]);
 });
 
 test('a saved pending reservation keeps its real status, yellow presentation and unique ID when opening the calendar',async()=>{

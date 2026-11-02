@@ -15,7 +15,16 @@ type Identity = Pick<BusinessDemoStore, "ownerUserId" | "businessId">;
 const cloud = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 async function sourceFor(store: Identity): Promise<Source> {
   if (await getAuthenticatedUserId() !== store.ownerUserId) throw new Error("La cuenta ha cambiado. Vuelve a abrir la reserva.");
-  const source = await supabaseApiRequest<Source>(`/supabase/booking-calendar-business?${new URLSearchParams({source_id:store.businessId})}`, {}, true, store.ownerUserId);
+  let source: Source;
+  try {
+    source = await supabaseApiRequest<Source>(`/supabase/booking-calendar-business?${new URLSearchParams({source_id:store.businessId})}`, {}, true, store.ownerUserId);
+  } catch (error) {
+    if (error instanceof BookingApiError && [404, 501].includes(error.status)
+      && error.code !== "BOOKING_CALENDAR_BUSINESS_NOT_LINKED") {
+      throw new BookingApiError(`El backend de reservas no ofrece el enlace de esta empresa (HTTP ${error.status}). Debe recuperarse el backend compatible antes de cargar servicios y reservar. No se ha creado ninguna reserva.`, error.status, "BOOKING_BACKEND_INCOMPATIBLE");
+    }
+    throw error;
+  }
   if (source.sourceId !== store.businessId || !cloud(source.businessId) || !source.timezone ||
     [source.serviceLinks,source.staffLinks,source.bookingLinks].some(links => !Array.isArray(links) || links.some(l => !cloud(l.id))))
     throw new Error("El servidor debe actualizar el enlace de esta empresa antes de reservar. No se ha creado ninguna reserva.");

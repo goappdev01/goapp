@@ -1,0 +1,47 @@
+diff --git a/artifacts/api-server/src/routes/bookingSourceRead.ts b/artifacts/api-server/src/routes/bookingSourceRead.ts
+new file mode 100644
+index 0000000..a5d91b6
+--- /dev/null
++++ b/artifacts/api-server/src/routes/bookingSourceRead.ts
+@@ -0,0 +1,22 @@
++import {Router} from "express";
++import {bearerHeader,supabaseRequest} from "../lib/supabase";
++const router=Router();
++const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
++const id = (value: unknown): value is string => typeof value === "string" && uuid.test(value);
++router.get("/booking-calendar-business", async (req, res) => {
++  res.setHeader("Cache-Control", "no-store");
++  const source = req.query.source_id, headers = bearerHeader(req.header("authorization"));
++  if (!/^Bearer \S+$/.test(headers.Authorization ?? "")) { res.status(401).json({ error: "Inicia sesión." }); return; }
++  if (typeof source !== "string" || !source || source.length > 256) { res.status(400).json({ error: "Empresa no válida." }); return; }
++  try {
++    const upstream = await supabaseRequest("/rest/v1/rpc/go_booking_calendar_business", { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ p_source_id: source }) });
++    const body = await upstream.json().catch(() => null) as Record<string, unknown> | null;
++    if (upstream.ok && body && id(body.businessId) && body.sourceId === source && typeof body.timezone === "string" && typeof body.name === "string") { res.json(body); return; }
++    const code = String(body?.code ?? "");
++    if (["PGRST202", "42883", "42P01"].includes(code)) { res.status(501).json({ error: "El servidor todavía no permite consultar la empresa sincronizada." }); return; }
++    res.status(upstream.ok ? 502 : code === "42501" ? 403 : code === "PT404" ? 404 : 503).json({ code: code === "PT404" ? "BOOKING_CALENDAR_BUSINESS_NOT_LINKED" : "BOOKING_CALENDAR_UNAVAILABLE", error: code === "PT404" ? "Este negocio local todavía no está vinculado a su registro del servidor. No se ha guardado ningún cambio." : "No se pudo comprobar la empresa de esta cuenta." });
++  } catch { res.status(503).json({ error: "No se pudo comprobar la empresa. Reintenta cuando haya conexión." }); }
++});
++
++
++export default router;
+diff --git a/artifacts/api-server/src/routes/index.ts b/artifacts/api-server/src/routes/index.ts
+index 3335718..4bf3d01 100644
+--- a/artifacts/api-server/src/routes/index.ts
++++ b/artifacts/api-server/src/routes/index.ts
+@@ -1,5 +1,6 @@
+ import { Router, type IRouter } from "express";
+ import healthRouter from "./health";
++import bookingSourceReadRouter from "./bookingSourceRead";
+ import supabaseRouter from "./supabase";
+ 
+ import adminRouter from "./admin";
+@@ -11,6 +12,7 @@ const router: IRouter = Router();
+ router.use(healthRouter);
+ router.use("/supabase/admin", adminRouter);
+ router.use("/supabase/manage", managementRouter);
++router.use("/supabase", bookingSourceReadRouter);
+ router.use("/supabase", supabaseRouter);
+ 
+ export default router;

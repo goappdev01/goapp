@@ -133,6 +133,8 @@ function fixture(kind = "provider", overrides = {}) {
   const apiScope = { exports: {}, Headers, URLSearchParams, Intl, Date: Clock,
     process: { env: { EXPO_PUBLIC_API_URL: "https://timeline.test.invalid/api" } }, console: { log() {}, warn() {}, error() {} },
     require(name) {
+      if (name === "react-native") return { Platform: { OS: "ios" } };
+      if (name === "@/lib/loginResponse") return loadPure("lib/loginResponse.ts");
       if (name === "@workspace/api-zod") return modulePublicationPolicy;
       if (name === "@react-native-async-storage/async-storage") return { default: storage };
       if (name === "@/lib/authSession") return auth;

@@ -12,6 +12,7 @@ import { useGoLog } from "@/hooks/useGoLog";
 import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
 import { bookingActivityEnabled, canonicalBookingActivity, visibleBookingSectors } from "@workspace/api-zod";
 import { setInternalBookingContext, getBookingParticipantIdentity } from "@/data/booking";
+import { orbitAccountLabelSize } from "@/lib/orbitAccountLabel";
 import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
 import { useActionCompletion } from "@/hooks/useActionCompletion";
@@ -18300,8 +18301,8 @@ function HomeScreenContent() {
                   const _labelLen   = displayLabel?.length ?? 0;
                   const _isMasSat   = s.key === "mas" && _labelLen > 5;
                   const _labelPadH  = _isMasSat ? 1 : 3;
-                  const _labelFs    = displayLabel === "EMPRESA" && s.key === "mas"
-                    ? Math.min(Math.round(12 * uiScaleFactor), (microSz - 2 * _labelPadH - 4) / 5.25)
+                  const _labelFs    = s.key === "mas"
+                    ? orbitAccountLabelSize(displayLabel ?? "", microSz, _labelPadH, uiScaleFactor)
                     : Math.max(8, Math.round(9 * uiScaleFactor));
 
                   return (
@@ -18594,8 +18595,8 @@ function HomeScreenContent() {
                           ) : (
                             <Text
                               numberOfLines={1}
-                              adjustsFontSizeToFit={displayLabel === "EMPRESA" || s.key !== "mas"}
-                              maxFontSizeMultiplier={displayLabel === "EMPRESA" ? 1 : undefined}
+                              adjustsFontSizeToFit
+                              maxFontSizeMultiplier={s.key === "mas" ? 1 : undefined}
                               minimumFontScale={0.6}
                               style={{
                                 color: isOrigin ? "rgba(255,255,255,0.35)" : "#ffffff",
@@ -18604,7 +18605,7 @@ function HomeScreenContent() {
                                 letterSpacing: _isMasSat ? 0 : 0.2,
                                 textAlign: "center",
                                 paddingHorizontal: _labelPadH,
-                                ...(displayLabel === "EMPRESA" ? { width: "100%", textAlignVertical: "center" as const } : {}),
+                                ...(s.key === "mas" ? { width: "100%", textAlignVertical: "center" as const } : {}),
                               }}
                             >
                               {displayLabel ?? ""}
