@@ -187,7 +187,9 @@ test("short tap creates once; hold, horizontal swipe, vertical scroll and cancel
   });
   const calls = [];
   const props = { dateISO: "2026-10-09", timeHHMM: "09:15", onPress: (...args) => calls.push(args), children: {} };
-  component.GoCalendarSlot(props);
+  const measureSlot = () => {};
+  const slot = component.GoCalendarSlot({ ...props, onLayout: measureSlot });
+  assert.equal(slot.children[0].props.onLayout, measureSlot, "measure the outer slot at its position in the day");
   assert.equal(config.duration, 250); assert.equal(config.distance, 8);
   for (const [duration, distance, nativeSuccess] of [[100, 0, true], [600, 0, false], [100, 30, false], [100, 40, false], [100, 0, false]])
     config.end({}, nativeSuccess && duration <= config.duration && distance <= config.distance);

@@ -71,19 +71,28 @@ for(const [density,expected] of [['15min','13:45'],['30min','13:30'],['1h','13:0
   const {entry}=await disk.api().saveUnifiedNote(disk.draft({id:`slot-${density}`,destination:'pending',dateISO:'',time:''}),disk.scope,disk.active),app=fixture({now:'2027-01-01T12:00:00'}),{AgendaBoard}=app.load('components/AgendaOperativa.tsx'),moves=[],created=[];
   const props={goLog:[entry],archiveNotes:[],onOpenNote(){},onMoveNote:(...args)=>moves.push(args),onCreateTaskAtTime:(...args)=>created.push(args),density,viewMode:'mes_lineal',selectedDateISO:'2027-01-15',calViewMonth:'2027-01'};
   let tree=app.render(AgendaBoard,props);const root=tree,boardX=24,boardY=100,viewportY=52;root.props.ref.current={measureInWindow:cb=>cb(boardX,boardY)};root.props.onLayout();
-  const columns=nodes(tree,n=>n.props.key&&n.props.onLayout&&style(n.props.style).width);let columnX=0,targetColumn;
+  const columns=nodes(tree,n=>n.type==='View'&&n.props.key&&n.props.onLayout&&style(n.props.style)?.width);let columnX=0,targetColumn;
   for(const col of columns){const width=style(col.props.style).width;col.props.onLayout({nativeEvent:{layout:{x:columnX,y:0,width,height:2600}}});if(col.props.key==='day_2027-01-15')targetColumn={x:columnX,width};columnX+=width+10;}
   assert.ok(targetColumn,'target day exists');const targetRow=nodes(tree,n=>n.props.testID===`calendar-drop-slot-2027-01-15-${expected}`)[0];assert.ok(targetRow,'configured interval renders the expected slot');
   const horizontal=nodes(tree,n=>n.type==='GHScrollView'&&n.props.horizontal)[0];horizontal.props.onLayout({nativeEvent:{layout:{x:0,y:viewportY,width:390,height:520}}});horizontal.props.onScroll({nativeEvent:{contentOffset:{x:targetColumn.x+targetColumn.width/2-100}}});
   const dayScroll=nodes(tree,n=>n.type==='ScrollView'&&n.props.testID==='calendar-day-scroll-day_2027-01-15')[0];assert.ok(dayScroll,'target day has its own measured vertical scroll viewport');dayScroll.props.onLayout({nativeEvent:{layout:{x:0,y:70,width:176,height:420}}});
-  const rowY=expected==='13:45'?700:expected==='13:30'?600:500,rowHeight=expected==='13:45'?28:expected==='13:30'?36:50;targetRow.props.onLayout({nativeEvent:{layout:{x:0,y:rowY,width:176,height:rowHeight}}});
+  const rowY=expected==='13:45'?700:expected==='13:30'?600:500,rowHeight=expected==='13:45'?28:expected==='13:30'?36:50;
+  const wrapper=nodes(dayScroll,n=>n.type?.name==="GoCalendarSlot"&&n.props.timeHHMM===expected)[0];
+  assert.ok(wrapper,"empty slot has a tap wrapper");
+  assert.equal(targetRow.props.onLayout,undefined);
+  wrapper.props.onLayout({nativeEvent:{layout:{x:0,y:rowY,width:176,height:rowHeight}}});
   const scrollY=400; dayScroll.props.onScroll({nativeEvent:{contentOffset:{y:scrollY}}});
   const absX=boardX+100,absY=boardY+viewportY+70+rowY-scrollY+rowHeight/2,event={absoluteX:absX,absoluteY:absY,y:18,velocityX:0};
   const card=nodes(tree,n=>n.type==='GestureDetector'&&n.props.key===entry.id)[0];assert.ok(card,'pending note uses the real pan recognizer');let pan=card.props.gesture;
-  pan._onStart(event);pan._onUpdate(event);tree=app.render(AgendaBoard,props);const highlighted=nodes(tree,n=>n.props.testID===targetRow.props.testID)[0],highlightStyle=style(highlighted.props.style);assert.equal(highlightStyle.borderColor,'rgba(34,211,238,0.92)','the exact slot under the finger is highlighted');
-  assert.equal(created.length,0,'a drag cannot trigger the empty-slot tap action');pan._onFinalize(event,false);tree=app.render(AgendaBoard,props);assert.equal(moves.length,0,'cancel does not move the note');assert.equal(style(nodes(tree,n=>n.props.testID===targetRow.props.testID)[0].props.style).borderColor,undefined,'cancel clears the slot cue');
+  pan._onStart(event);pan._onUpdate(event);tree=app.render(AgendaBoard,props);const highlighted=nodes(tree,n=>n.props.testID===targetRow.props.testID)[0],highlight=nodes(highlighted,n=>n.props.testID==="calendar-drop-slot-highlight")[0];assert.deepEqual(style(highlighted.props.style),style(targetRow.props.style));assert.equal(style(highlight.props.style).borderColor,'rgba(34,211,238,0.92)','the exact slot under the finger is highlighted');
+  assert.equal(created.length,0,'a drag cannot trigger the empty-slot tap action');pan._onFinalize(event,false);tree=app.render(AgendaBoard,props);assert.equal(moves.length,0,'cancel does not move the note');assert.equal(nodes(tree,n=>n.props.testID==="calendar-drop-slot-highlight").length,0,'cancel clears the slot cue');
   const nextCard=nodes(tree,n=>n.type==='GestureDetector'&&n.props.key===entry.id)[0];pan=nextCard.props.gesture;pan._onStart(event);pan._onUpdate(event);tree=app.render(AgendaBoard,props);pan._onFinalize(event,true);
-  assert.equal(moves.length,1,'drop dispatches one move');assert.equal(moves[0][0].id,entry.id);assert.equal(moves[0][1],'calendar');assert.deepEqual(JSON.parse(JSON.stringify(moves[0][2])),{dateISO:'2027-01-15',time:expected});assert.equal(disk.rows.length,1,'calendar targeting never duplicates the note');
+  assert.equal(moves.length,1,'drop dispatches one move');assert.equal(moves[0][0].id,entry.id);assert.equal(moves[0][1],'calendar');assert.deepEqual(JSON.parse(JSON.stringify(moves[0][2])),{dateISO:'2027-01-15',time:expected});
+  await disk.api().moveUnifiedNote(moves[0][0],moves[0][1],disk.scope,disk.active,moves[0][2]);
+  assert.equal(disk.rows.length,1,'saving the drop keeps one note');
+  assert.equal(disk.rows[0].id,entry.id);
+  assert.equal(disk.rows[0].dateISO,'2027-01-15');
+  assert.equal(disk.rows[0].time,expected);
  }finally{disk.close();}
 });
 test('existing calendar note can remove its date by moving to pending and can remove its time without losing its date',async()=>{

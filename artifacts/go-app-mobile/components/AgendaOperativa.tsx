@@ -1,5 +1,5 @@
 import { BookingPhaseAvailability } from "./booking/BookingPhaseAvailability";
-import type { ScrollViewInstance, ViewInstance } from "react-native";
+import type { LayoutChangeEvent, ScrollViewInstance, ViewInstance } from "react-native";
 import { useGoCalendarEntries } from "@/hooks/useGoCalendarEntries";
 import { GoCalendarSlot } from "@/components/ui/GoCalendarSlot";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -2532,24 +2532,27 @@ export function AgendaBoard({
                   const wxColor = slotWeather
                     ? getSlotIconColor(slotWeather.weatherCode, isNightSlot)
                     : "#b8c8f0";
+                  const isDropSlot = dragTargetSlot?.columnId === col.id && dragTargetSlot.start === slotStart;
+                  const slotDateISO = col.dateISO;
+                  const hasSlotTap = slotCards.length === 0 && !!slotDateISO && !!onCreateTaskAtTime;
+                  const measureSlot = ({ nativeEvent: { layout: { y, height } } }: LayoutChangeEvent) => {
+                    (timeSlotLayouts.current[col.id] ??= {})[slotStart] = { y, h: height };
+                  };
                   const row = (
                     <View key={slotStart} style={[
                       { minHeight: slotCards.length === 0 ? SLOT_H : undefined },
                       slotDayNightStyle(dnProgress),
-                      dragTargetSlot?.columnId===col.id&&dragTargetSlot.start===slotStart&&{
-                        backgroundColor:"rgba(34,211,238,0.20)",
-                        borderWidth:1.5,
-                        borderColor:"rgba(34,211,238,0.92)",
-                        borderRadius:7,
-                        marginHorizontal:2,
-                        transform:[{scale:1.015}],
-                        zIndex:2,
-                      },
                     ]}
                       testID={`calendar-drop-slot-${col.dateISO||""}-${label}`}
                       accessibilityLabel={`Franja horaria ${label}`}
-                      onLayout={event=>{const {y,height}=event.nativeEvent.layout;(timeSlotLayouts.current[col.id]??={})[slotStart]={y,h:height};}}
+                      onLayout={hasSlotTap ? undefined : measureSlot}
                     >
+                      {/* Keep the row hosting the active recognizer in the same native stacking context. */}
+                      {isDropSlot && <View
+                        testID="calendar-drop-slot-highlight"
+                        pointerEvents="none"
+                        style={s.dropSlotHighlight}
+                      />}
                       {/* ── "NOW" indicator line ── */}
                       {isCurrentSlot && (
                         <View style={{ flexDirection: "row", alignItems: "center", marginHorizontal: 5, marginBottom: 2 }}>
@@ -2594,8 +2597,9 @@ export function AgendaBoard({
                       )}
                     </View>
                   );
-                  return slotCards.length === 0 && col.dateISO && onCreateTaskAtTime ? (
-                    <GoCalendarSlot key={slotStart} dateISO={col.dateISO} timeHHMM={label}
+                  // Measure the direct child of the scroll content for either row shape.
+                  return hasSlotTap ? (
+                    <GoCalendarSlot key={slotStart} dateISO={slotDateISO} timeHHMM={label} onLayout={measureSlot}
                       disabled={isSelecting || !!dragItem} onPress={onCreateTaskAtTime}>
                       {row}
                     </GoCalendarSlot>
@@ -4305,6 +4309,17 @@ const s = StyleSheet.create({
     flex: 1,
     height: 1,
     backgroundColor: "rgba(255,255,255,0.13)",
+  },
+  dropSlotHighlight: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 2,
+    right: 2,
+    backgroundColor: "rgba(34,211,238,0.20)",
+    borderWidth: 1.5,
+    borderColor: "rgba(34,211,238,0.92)",
+    borderRadius: 7,
   },
   slotCards: {
     paddingHorizontal: 5,

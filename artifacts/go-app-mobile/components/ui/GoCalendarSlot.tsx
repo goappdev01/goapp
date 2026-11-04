@@ -1,5 +1,5 @@
 import React, { type ReactElement } from "react";
-import { View } from "react-native";
+import { View, type ViewProps } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useLanguage } from "@/contexts/LanguageContext";
 
@@ -7,12 +7,13 @@ type Props = {
   dateISO: string;
   timeHHMM: string;
   disabled?: boolean;
+  onLayout?: ViewProps["onLayout"];
   onPress: (dateISO: string, timeHHMM: string) => void;
   children: ReactElement;
 };
 
 /** Attach only to empty slots; a hold or a scroll must never create a task. */
-export function GoCalendarSlot({ dateISO, timeHHMM, disabled = false, onPress, children }: Props) {
+export function GoCalendarSlot({ dateISO, timeHHMM, disabled = false, onLayout, onPress, children }: Props) {
   const { t } = useLanguage();
   const tap = Gesture.Tap()
     .enabled(!disabled)
@@ -25,6 +26,7 @@ export function GoCalendarSlot({ dateISO, timeHHMM, disabled = false, onPress, c
   return (
     <GestureDetector gesture={tap}>
       <View
+        onLayout={onLayout}
         accessibilityRole="button"
         accessibilityLabel={t("new_task_label") + ": " + dateISO + " " + timeHHMM}
         accessibilityState={{ disabled }}
