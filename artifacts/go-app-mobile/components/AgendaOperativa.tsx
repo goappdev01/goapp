@@ -1055,6 +1055,7 @@ export function AgendaBoard({
   // Reanimated shared values — updated on the UI thread for butter-smooth movement
   const floatL  = useSharedValue(0);
   const boardLeftShared=useSharedValue(0),boardTopShared=useSharedValue(0),fingerOffsetX=useSharedValue(0);
+  const boardWidthShared=useSharedValue(screenW),boardHeightShared=useSharedValue(Dimensions.get("window").height);
   const floatT  = useSharedValue(0);
   const floatOp = useSharedValue(0);
   const floatSc = useSharedValue(1);
@@ -1083,6 +1084,30 @@ export function AgendaBoard({
     shadowOffset: { width: 0, height: 10 },
     elevation: 18,
   }));
+  const dropClockWidth = Math.min(236, Math.max(168, Math.round(screenW * 0.48)));
+  const dropClockHeight = screenW >= 700 ? 96 : 86;
+  const dropClockFontSize = Math.min(66, Math.max(46, Math.round(screenW * 0.145)));
+  const dropClockStyle = useAnimatedStyle(() => {
+    const edge = 12;
+    const fingerX = floatL.value + fingerOffsetX.value;
+    const fingerY = floatT.value + fingerOffsetY.value;
+    const left = Math.max(edge, Math.min(boardWidthShared.value - dropClockWidth - edge, fingerX - dropClockWidth / 2));
+    const above = fingerY - dropClockHeight - 22;
+    const below = fingerY + 22;
+    const top = above >= edge
+      ? above
+      : Math.min(below, Math.max(edge, boardHeightShared.value - dropClockHeight - edge));
+    return {
+      position: "absolute" as const,
+      left,
+      top,
+      width: dropClockWidth,
+      height: dropClockHeight,
+      zIndex: 1200,
+      elevation: 24,
+      pointerEvents: "none" as const,
+    };
+  });
 
   // ── Layout refs (never trigger re-renders) ───────────────────────
   const boardViewRef  = useRef<ViewInstance>(null);
@@ -2661,6 +2686,29 @@ export function AgendaBoard({
     );
   };
 
+  const dropClockIsDark = (() => {
+    if (!dragTargetSlot) return true;
+    const targetColumn = allColumns.find(column => column.id === dragTargetSlot.columnId);
+    if (!targetColumn?.dateISO) return true;
+    const timedItems = getItemsForDay(targetColumn.dateISO).filter(item => !!item.time);
+    const interval = getEffectiveDensityMin(density, timedItems.length);
+    let sunriseMin = 6 * 60;
+    let sunsetMin = 22 * 60;
+    const dayData = (weatherDays as Record<string, { sunrise?: string; sunset?: string }>)[targetColumn.dateISO];
+    if (dayData?.sunrise) {
+      const sunrise = new Date(dayData.sunrise);
+      sunriseMin = sunrise.getHours() * 60 + sunrise.getMinutes();
+    }
+    if (dayData?.sunset) {
+      const sunset = new Date(dayData.sunset);
+      sunsetMin = sunset.getHours() * 60 + sunset.getMinutes();
+    }
+    const progress = calDayNightMode === "claro" ? 1
+      : calDayNightMode === "oscuro" ? 0
+      : getSlotDayNightProgress(dragTargetSlot.start + interval / 2, sunriseMin, sunsetMin);
+    return progress < 0.5;
+  })();
+
   // ── FLOATING DRAG CARD ────────────────────────────────────────────
   const renderFloatCard = () => {
     if (!dragItem || !allowedEntryIdsRef.current.has(dragItem.id)&&!canRestoreArchive(dragItem.id)) return null;
@@ -2673,13 +2721,7 @@ export function AgendaBoard({
             { borderLeftColor: dragItem.color || "#555" },
           ]}
         >
-          {dragTargetSlot ? (
-            <View style={s.dropTimeBadge} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              <Text testID="calendar-drop-time" numberOfLines={1} style={s.dropTimeLabel}>
-                {timeLabelForSlot(dragTargetSlot.start)}
-              </Text>
-            </View>
-          ) : dragItem.time ? (
+          {!dragTargetSlot && dragItem.time ? (
             <Text numberOfLines={1} style={s.cardTime}>{formatTimeDisplay(dragItem.time)}</Text>
           ) : null}
           <Text style={s.cardTitle} numberOfLines={2}>
@@ -2708,6 +2750,27 @@ export function AgendaBoard({
     );
   };
 
+  const renderDropClock = () => {
+    if (!dragItem || !dragTargetSlot) return null;
+    return (
+      <ReAnimated.View
+        testID="calendar-drop-time-window"
+        pointerEvents="none"
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+        style={[s.dropClockWindow, dropClockStyle, dropClockIsDark ? s.dropClockWindowDark : s.dropClockWindowLight]}
+      >
+        <Text
+          testID="calendar-drop-time"
+          numberOfLines={1}
+          style={[s.dropClockLabel, { fontSize: dropClockFontSize }, dropClockIsDark ? s.dropClockLabelDark : s.dropClockLabelLight]}
+        >
+          {timeLabelForSlot(dragTargetSlot.start)}
+        </Text>
+      </ReAnimated.View>
+    );
+  };
+
   // ── RENDER ────────────────────────────────────────────────────────
   // Same active month and callbacks in the embedded header or standalone board.
   const monthNavigation = viewMode === "mes_lineal" ? (<View style={[s.monthNavBar, !!renderHeader && s.monthNavInline]}>
@@ -2729,8 +2792,11 @@ export function AgendaBoard({
     <View
       ref={boardViewRef}
       style={[{ flex: 1 }, style]}
-      onLayout={() => {
-        boardViewRef.current?.measureInWindow((x, y) => {
+      onLayout={(event?: LayoutChangeEvent) => {
+        const layout = event?.nativeEvent?.layout;
+        if (layout && typeof layout.width === "number" && layout.width > 0) boardWidthShared.value = layout.width;
+        if (layout && typeof layout.height === "number" && layout.height > 0) boardHeightShared.value = layout.height;
+        boardViewRef.current?.measureInWindow((x: number, y: number) => {
           boardX.current = x;
           boardLeftShared.value=x;
           boardY.current = y;
@@ -2869,6 +2935,7 @@ export function AgendaBoard({
 
       {/* Float card lives outside the scroll view so it can move freely */}
       {renderFloatCard()}
+      {renderDropClock()}
 
       {!!verificationEntry && (()=>{const {ReservationVerificationPanel}=require("@/components/booking/ReservationVerificationPanel") as typeof import("@/components/booking/ReservationVerificationPanel");return <ReservationVerificationPanel bookingId={verificationEntry.customerBooking?verificationEntry.reservationId:undefined} businessId={verificationEntry.businessBooking?verificationEntry.businessId:undefined} key={verificationEntry.id} onClose={()=>setVerificationEntry(null)}/>;})()}
 
@@ -4205,21 +4272,39 @@ const s = StyleSheet.create({
     fontWeight: "600",
     marginTop: 1,
   },
-  dropTimeBadge: {
-    alignSelf: "flex-start",
-    backgroundColor: "#123742",
-    borderColor: "#67e8f9",
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+  dropClockWindow: {
+    position: "absolute",
+    borderRadius: 20,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000000",
+    shadowOpacity: 0.34,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
   },
-  dropTimeLabel: {
-    color: "#a5f3fc",
-    fontSize: 20,
+  dropClockWindowDark: {
+    backgroundColor: "#101114",
+    borderColor: "#facc15",
+  },
+  dropClockWindowLight: {
+    backgroundColor: "#ffffff",
+    borderColor: "#111318",
+  },
+  dropClockLabel: {
     fontFamily: "Inter_900Black",
     fontWeight: "900",
     fontVariant: ["tabular-nums"],
+    letterSpacing: 0.5,
+    includeFontPadding: false,
+  },
+  dropClockLabelDark: {
+    color: "#ffdf00",
+    textShadowColor: "rgba(250,204,21,0.28)",
+    textShadowRadius: 8,
+  },
+  dropClockLabelLight: {
+    color: "#111318",
   },
   cardFloat: {
     backgroundColor: "rgba(14,16,28,0.98)",

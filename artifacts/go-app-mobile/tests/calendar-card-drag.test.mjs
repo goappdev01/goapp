@@ -32,6 +32,7 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     const moves = [], fallback = [];
     const props = {
       goLog: [task], viewMode: "semana", density, selectedDateISO: date,
+      calDayNightMode: "oscuro",
       onCreateTaskAtTime() {},
       onMoveItem: (...args) => moves.push(args), onOpenMoveFlow: (...args) => fallback.push(args),
     };
@@ -82,6 +83,8 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     assert.equal(nodes(sourceRow, n => n.props.testID === "calendar-entry-" + task.id).length, 1);
     const cue = (tree, time) => nodes(row(tree, time), n => n.props.testID === "calendar-drop-slot-highlight")[0];
     const dropTime = tree => nodes(tree, n => n.props.testID === "calendar-drop-time")[0];
+    const dropWindow = tree => nodes(tree, n => n.props.testID === "calendar-drop-time-window")[0];
+    const float = tree => nodes(tree, n => n.type === "ReAnimated.View" && n.props.pointerEvents === "none")[0];
     assert.equal(dropTime(tree), undefined);
     const at = (y, x = 0) => ({
       absoluteX: boardX + 85 + x, absoluteY: boardY + columnsY + viewportY + y - 500 + 15,
@@ -109,8 +112,19 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     assert.equal(style(cue(tree, sourceTime).props.style).position, "absolute");
     assert.ok(style(cue(tree, sourceTime).props.style).borderWidth >= 2);
     assert.equal(dropTime(tree).children[0], sourceTime);
-    assert.ok(style(dropTime(tree).props.style).fontSize >= 18);
-    const float = tree => nodes(tree, n => n.type === "ReAnimated.View" && n.props.pointerEvents === "none")[0];
+    assert.ok(dropWindow(tree), "destination time has its own floating window above the dragged card");
+    assert.equal(dropWindow(tree).props.pointerEvents, "none", "clock window never captures the native drag");
+    assert.ok(style(dropWindow(tree).props.style).width >= 160);
+    assert.ok(style(dropWindow(tree).props.style).height >= 80);
+    assert.equal(style(dropWindow(tree).props.style).backgroundColor, "#101114");
+    assert.equal(style(dropTime(tree).props.style).fontSize >= 46, true, "destination time uses large type");
+    assert.equal(nodes(float(tree), n => n.props.testID === "calendar-drop-time").length, 0,
+      "the same destination time is not duplicated inside the finger-covered card");
+    const clockStyle = style(dropWindow(tree).props.style);
+    assert.ok(clockStyle.top + clockStyle.height <= pickup.absoluteY - boardY - 20,
+      "the clock remains clearly above the thumb with a stable gap");
+    assert.ok(clockStyle.left >= 12 && clockStyle.left + clockStyle.width <= width - 12,
+      "the clock stays inside the iPhone or iPad side edges");
     assert.equal(style(float(tree).props.style).left, pickup.absoluteX - boardX - pickup.x);
     assert.equal(horizontal(tree).props.scrollEnabled, true, "do not reset the native scroll while it owns a touch sequence");
     assert.equal(dayScroll(tree).props.scrollEnabled, true);
@@ -127,6 +141,12 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     assert.equal(cue(tree, firstTarget), undefined);
     assert.ok(cue(tree, secondTarget));
     assert.equal(dropTime(tree).children[0], secondTarget);
+    props.calDayNightMode = "claro";
+    tree = render();
+    assert.equal(style(dropWindow(tree).props.style).backgroundColor, "#ffffff");
+    assert.equal(style(dropTime(tree).props.style).color, "#111318");
+    props.calDayNightMode = "oscuro";
+    tree = render();
     assert.deepEqual(style(row(tree, sourceTime).props.style), sourceStyle);
     assert.equal(moves.length, 0, "hover does not move the record");
     pan._onFinalize(slotTwo, false);
@@ -134,6 +154,7 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     assert.equal(float(tree), undefined);
     assert.equal(cue(tree, secondTarget), undefined);
     assert.equal(dropTime(tree), undefined);
+    assert.equal(dropWindow(tree), undefined, "clock window disappears as soon as the drag is cancelled");
     assert.deepEqual(moves, []);
     assert.equal(task.time, "13:00");
 
