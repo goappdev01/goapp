@@ -98,9 +98,9 @@ for(const type of ['GO_BOOKING','TAREA_INTERNA'])test(`${type}: opening/closing 
  const f=fixture({now:'2030-10-26T08:00:00'}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');
  const entry={...base,type,...(type==='TAREA_INTERNA'?{customerBooking:false,kind:'sent',phone:'',contactName:'',notes:'Tarea registrada'}:{})};
  const saved=JSON.stringify(entry),props={goLog:[entry],viewMode:'dia',selectedDateISO:entry.dateISO};let tree=f.render(AgendaBoard,props);
- const card=t=>nodes(t,n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85)[0];const style=JSON.stringify(card(tree).props.style);
+ const card=t=>nodes(t,n=>n.props.testID?.startsWith('calendar-entry-open-'))[0];const style=JSON.stringify(card(tree).props.style);
  for(let i=0;i<4;i++){
-   card(tree).props.onPress();tree=f.render(AgendaBoard,props);assert.ok(nodes(tree,n=>n.props.testID==='entry-details-overlay').length);
+   card(tree).props.onAccessibilityTap();tree=f.render(AgendaBoard,props);assert.ok(nodes(tree,n=>n.props.testID==='entry-details-overlay').length);
    assert.equal(JSON.stringify(card(tree).props.style),style);const close=nodes(tree,n=>n.props.accessibilityLabel==='Cerrar detalle')[0];assert.ok(close);close.props.onPress();nodes(tree,n=>n.props.testID==='entry-details-modal')[0].props.onDismiss();tree=f.render(AgendaBoard,props);
    assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,0);assert.equal(props.selectedDateISO,entry.dateISO);assert.equal(props.goLog.length,1);assert.equal(JSON.stringify(entry),saved);
  }
@@ -140,7 +140,7 @@ test('calendar reservation primary heading stays the real counterpart even when 
  const f=fixture({now:'2030-10-26T08:00:00'}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');
  for(const entry of [{...base,slotKey:undefined,professionalName:'María',intentLabel:'Corte + Tinte'},{...base,businessBooking:true,customerBooking:false,contactName:'Cliente vinculado',intentLabel:'Corte + Tinte'}]){
   const tree=f.render(AgendaBoard,{goLog:[entry],viewMode:'dia',selectedDateISO:entry.dateISO});
-  const card=nodes(tree,n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85)[0];assert.ok(texts(card).includes(entry.contactName));assert.ok(!texts(card).includes('Corte + Tinte'));
+  const card=nodes(tree,n=>n.props.testID?.startsWith('calendar-entry-open-'))[0];assert.ok(texts(card).includes(entry.contactName));assert.ok(!texts(card).includes('Corte + Tinte'));
  }
 });
 
@@ -148,7 +148,7 @@ test('calendar compact cards omit follow-up; expanded personal actions and conte
  const f=fixture({now:'2030-10-26T08:00:00'}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');let returnTo,resolved=[];
  const props={goLog:[base],viewMode:'dia',selectedDateISO:base.dateISO,canResolveEntry:()=>true,onResolveEntry:(entry,status,current)=>resolved.push([entry.id,status,current().id]),onOpenMessage:(entry,back)=>{assert.equal(entry.id,base.id);returnTo=back;}};
  let tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-micro-actions').length,0);
- const card=nodes(tree,n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85)[0];card.props.onPress();tree=f.render(AgendaBoard,props);
+ const card=nodes(tree,n=>n.props.testID?.startsWith('calendar-entry-open-'))[0];card.props.onAccessibilityTap();tree=f.render(AgendaBoard,props);
  const done=nodes(tree,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0];assert.ok(done);done.props.onPress({stopPropagation(){}});assert.deepEqual(resolved,[[base.id,'done',base.id]]);
  nodes(tree,n=>n.props.testID==='entry-message-go')[0].props.onPress();
  tree=f.render(AgendaBoard,props);nodes(tree,n=>n.props.testID==='entry-details-modal')[0]?.props.onDismiss();f.runTimers();assert.equal(typeof returnTo,'function');tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,0);

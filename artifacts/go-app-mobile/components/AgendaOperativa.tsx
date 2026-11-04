@@ -1048,13 +1048,13 @@ export function AgendaBoard({
   const showHoursRef=useRef(showHours);showHoursRef.current=showHours;
   const dragItemRef = useRef<GoEntry | null>(null);
   const dropConsumed=useRef(false);
-  useEffect(() => { dragItemRef.current = dragItem; }, [dragItem]);
+  const dragPressEntryId = useRef<string | null>(null);
 
   // ── MOVE FLOW REF (stores handler ref for cross-day drops) ──────
 
   // Reanimated shared values — updated on the UI thread for butter-smooth movement
   const floatL  = useSharedValue(0);
-  const boardLeftShared=useSharedValue(0),fingerOffsetX=useSharedValue(0);
+  const boardLeftShared=useSharedValue(0),boardTopShared=useSharedValue(0),fingerOffsetX=useSharedValue(0);
   const floatT  = useSharedValue(0);
   const floatOp = useSharedValue(0);
   const floatSc = useSharedValue(1);
@@ -1300,7 +1300,7 @@ export function AgendaBoard({
   // Called when long press fires — record which item is being dragged
   const jsStartDrag = useCallback((item: GoEntry) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
-    dropConsumed.current=false;dragItemRef.current=item;setDragItem(item);
+    dropConsumed.current=false;dragItemRef.current=item;dragPressEntryId.current=item.id;setDragItem(item);
     setDragTargetColId(null);
     setDragTargetSlot(null);
   }, []);
@@ -1315,19 +1315,23 @@ export function AgendaBoard({
     const rows=archiveEntriesRef.current.filter(item=>item.id===itemId),item=rows[0],origin=dragItemRef.current;
     return !!(onMoveNoteRef.current&&rows.length===1&&origin?.id===itemId&&noteDocument(item)?.destination==="archive"&&!entryIsReservation(item)&&!item.deleted&&item.estado!=="rechazado"&&item.ownerUserId===origin.ownerUserId&&item.taskContext===origin.taskContext);
   };
-  const archiveContainsY=(absY:number,lay:{y?:number;h?:number})=>Number.isFinite(absY)&&!!lay.h&&absY>=boardY.current+columnsViewportY.current+(lay.y||0)&&absY<=boardY.current+columnsViewportY.current+(lay.y||0)+lay.h;
+  const columnContainsY=(absY:number,lay:{y?:number;h?:number})=>Number.isFinite(absY)&&!!lay.h&&absY>=boardY.current+columnsViewportY.current+(lay.y||0)&&absY<=boardY.current+columnsViewportY.current+(lay.y||0)+lay.h;
   // Resolve the actual laid-out interval under the finger. Row layout is measured
   // inside the day ScrollView, then translated using that column's live scroll offset.
   const slotAtScreenY=(column:Column,absY:number):number|null=>{
     if(!column.dateISO||!showHoursRef.current)return null;
     const columnLayout=colLayouts.current[column.id],viewportTop=colScrollViewportTop.current[column.id];
     if(!columnLayout||viewportTop==null)return null;
-    const contentY=absY-(boardY.current+columnsViewportY.current+(columnLayout.y||0)+viewportTop)+(colScrollY.current[column.id]||0);
+    const localY = absY - (boardY.current + columnsViewportY.current + (columnLayout.y || 0) + viewportTop);
+    const viewportHeight = colScrollViewH.current[column.id];
+    if (localY < 0 || localY >= viewportHeight) return null;
+    const contentY = localY + (colScrollY.current[column.id] || 0);
     const rows=timeSlotLayouts.current[column.id],starts=timeSlotStarts.current[column.id];if(!rows||!starts)return null;
     for(const start of starts){const layout=rows[start];if(layout&&contentY>=layout.y&&contentY<layout.y+layout.h)return start;}
     return null;
   };
   const jsUpdateTarget = useCallback((absX: number,absY:number) => {
+    if (!dragItemRef.current || dropConsumed.current) return;
     // ── Edge auto-scroll ──────────────────────────────────────────
     const EDGE_ZONE = 60;
     const newDir: "left" | "right" | null =
@@ -1357,9 +1361,9 @@ export function AgendaBoard({
       const lay = colLayouts.current[col.id];
       if (lay && relX >= lay.x && relX <= lay.x + lay.w) {
         const dragged=dragItemRef.current,destination=noteEntryDestination(dragged);
-        if(col.isNotes&&(!dragged||destination==="archive"||!canMoveNoteFromCalendar(dragged.id)||!archiveContainsY(absY,lay)))break;
-        if(destination==="archive"&&(!canRestoreArchive(dragged!.id)||(!col.dateISO&&!col.isRetrasados)||!archiveContainsY(absY,lay)))break;
-        if(col.isRetrasados&&destination&&destination!=="archive"&&destination!=="pending"&&(!dragged||!canMoveNoteFromCalendar(dragged.id)||!archiveContainsY(absY,lay)))break;
+        if(col.isNotes&&(!dragged||destination==="archive"||!canMoveNoteFromCalendar(dragged.id)||!columnContainsY(absY,lay)))break;
+        if(destination==="archive"&&(!canRestoreArchive(dragged!.id)||(!col.dateISO&&!col.isRetrasados)||!columnContainsY(absY,lay)))break;
+        if(col.isRetrasados&&destination&&destination!=="archive"&&destination!=="pending"&&(!dragged||!canMoveNoteFromCalendar(dragged.id)||!columnContainsY(absY,lay)))break;
         found = col.id;
         break;
       }
@@ -1406,7 +1410,7 @@ export function AgendaBoard({
       const dropTime=selectedSlot==null?itemTime:timeLabelForSlot(selectedSlot);
       const movingCalendarTime=targetDestination==="calendar"&&!!current&&!!dropTime&&(current.time||noteDocument(current)?.schedule.time||"")!==dropTime;
       try{
-        if(current&&targetDestination&&(targetDestination!==noteDestination||movingCalendarDay||movingCalendarTime)&&eligible&&targetLayout&&archiveContainsY(absY,targetLayout)){
+        if(current&&targetDestination&&(targetDestination!==noteDestination||movingCalendarDay||movingCalendarTime)&&eligible&&targetLayout&&columnContainsY(absY,targetLayout)){
           if(targetDestination==="calendar"&&targetCol?.dateISO){
             const time=dropTime||noteDocument(current)?.schedule.time||"";
             onMoveNoteRef.current!(current,"calendar",{dateISO:targetCol.dateISO,time});
@@ -1415,11 +1419,15 @@ export function AgendaBoard({
       }finally{dragItemRef.current=null;setDragItem(null);setDragTargetColId(null);setDragTargetSlot(null);}
       return;
     }
-    if (targetCol?.dateISO) {
+    if (targetCol?.dateISO && columnContainsY(absY, colLayouts.current[targetCol.id])) {
       const fromDateISO = dragItemRef.current?.dateISO ?? "";
       const isCrossDay = fromDateISO !== targetCol.dateISO;
       const item = dragItemRef.current;
       const isExternalMove = isCrossDay && item?.kind === "received";
+      const slotStart = slotAtScreenY(targetCol, absY);
+      const dropTime = slotStart == null ? itemTime : timeLabelForSlot(slotStart);
+      const isPersonalTask = item?.kind === "sent" && !item.receiverPhone && !entryIsReservation(item)
+        && (item.type === "TAREA" || item.type === "TAREA_INTERNA");
       const currentSelectedIds = selectedIdsRef.current;
       const isDraggingSelected = itemId && currentSelectedIds.has(itemId);
       const isMultiDrag = isDraggingSelected && currentSelectedIds.size > 1;
@@ -1433,8 +1441,10 @@ export function AgendaBoard({
         setSelectedIds(new Set());
         setSelectionMode(false);
         setBulkMovePicking(false);
+      } else if (slotStart != null && isPersonalTask && onMoveItemRef.current) {
+        if (isCrossDay || dropTime !== itemTime) onMoveItemRef.current(itemId, targetCol.dateISO, dropTime);
       } else if (onOpenMoveFlow) {
-        // Delegate to the real system clock flow (skips the date step)
+        // Shared bookings and untimed columns keep their existing move flow.
         onOpenMoveFlow(itemId, targetCol.dateISO, fromDateISO, itemTime, isExternalMove);
       } else if (onMoveItemRef.current) {
         // Fallback: direct move without time selection
@@ -1518,28 +1528,35 @@ export function AgendaBoard({
     </View>;
   };
 
-  // One native recognizer for both calendar and archive cards; preserve its approved parameters/worklets.
-  const makeEntryDragGesture = (item:GoEntry) => {
-    const archiveOrigin=noteDocument(item)?.destination==="archive";
+  // Keep the native scroll recognizers mounted and enabled throughout an iOS touch.
+  // A swipe can win before the pan activates. After activation the card owns the touch.
+  const scrollEnabledDuringDrag = Platform.OS === "ios" || !dragItem;
+  const makeEntryTapGesture = (drag: ReturnType<typeof Gesture.Pan>, open: () => void) => Gesture.Tap()
+    .maxDuration(350)
+    .maxDistance(10)
+    .requireExternalGestureToFail(drag)
+    .onEnd((_event, success) => { if (success) runOnJS(open)(); });
+
+  const makeEntryDragGesture = (item: GoEntry) => {
     const startThis  = () => jsStartDragRef.current(item);
     const dropThis   = (absX: number,absY:number) => jsDropAtRef.current(absX, item.id, item.time || noteDocument(item)?.schedule.time || "",absY);
-    const cancelThis = () => jsCancelDragRef.current();
-    const updateThis = (absX: number,absY:number) => jsUpdateTargetRef.current(absX,absY);
+    const cancelThis = () => {
+      if (dragItemRef.current?.id === item.id) jsCancelDragRef.current();
+    };
+    const updateThis = (absX: number, absY: number) => {
+      if (dragItemRef.current?.id === item.id) jsUpdateTargetRef.current(absX, absY);
+    };
     return Gesture.Pan()
       .activateAfterLongPress(400)
+      .shouldCancelWhenOutside(false)
+      .cancelsTouchesInView(true)
       .onStart((e) => {
-        // ── Coordinate space fix ────────────────────────────────────────
-        // e.absoluteY is in SCREEN coords; the float card is positioned
-        // inside the board View (which starts at boardY.current below the
-        // screen top).  Subtracting boardY converts screen → board-local.
-        //
-        // e.y = finger Y relative to the card's own View at long-press
-        // activation — this is the exact pick-up point within the card.
-        // Result: float card top = card's board-local top → zero jump.
+        // Anchor the floating card to the point where this finger picked it up.
+        // Board coordinates are shared with the UI thread and include the iPad inset.
         fingerOffsetY.value = e.y;
         fingerOffsetX.value=Number.isFinite(e.x)?e.x:(colWShared.value-14)/2;
-        floatL.value  = e.absoluteX - (archiveOrigin?fingerOffsetX.value+boardLeftShared.value:(colWShared.value - 14) / 2);
-        floatT.value  = e.absoluteY - e.y - boardY.current;
+        floatL.value = e.absoluteX - fingerOffsetX.value - boardLeftShared.value;
+        floatT.value = e.absoluteY - fingerOffsetY.value - boardTopShared.value;
         floatOp.value = withSpring(1, { damping: 10, stiffness: 320 });
         floatSc.value = withSpring(1.06, { damping: 9, stiffness: 300 });
         // Start neutral — tilt builds dynamically in onUpdate
@@ -1549,9 +1566,8 @@ export function AgendaBoard({
         runOnJS(startThis)();
       })
       .onUpdate((e) => {
-        // Track finger in board-local coords (absoluteY − boardY = board Y).
-        floatL.value  = e.absoluteX - (archiveOrigin?fingerOffsetX.value+boardLeftShared.value:(colWShared.value - 14) / 2);
-        floatT.value  = e.absoluteY - fingerOffsetY.value - boardY.current;
+        floatL.value = e.absoluteX - fingerOffsetX.value - boardLeftShared.value;
+        floatT.value = e.absoluteY - fingerOffsetY.value - boardTopShared.value;
         lastAbsX.value = e.absoluteX;
         lastAbsY.value = e.absoluteY;
         // Bidirectional tilt — increased to ±5° for a more physical feel.
@@ -1675,13 +1691,8 @@ export function AgendaBoard({
       }
     };
 
-    // Short tap opens the card
-    const tapGesture = Gesture.Tap()
-      .maxDuration(350)
-      .onEnd(() => { runOnJS(tapThis)(); });
-
-    // Long press (400ms) activates the drag; pan then tracks the finger
     const dragGesture = makeEntryDragGesture(item);
+    const tapGesture = makeEntryTapGesture(dragGesture, tapThis);
 
     const badge = getCardBadge(item);
 
@@ -1725,8 +1736,7 @@ export function AgendaBoard({
     const accentColor = hasProposal ? _proposalColor : (isDeleted ? "#dc2626" : (item.color || "#555"));
 
     return (
-      // Only dragGesture here — tap is handled by the TouchableOpacity body below.
-      // This ensures footer action buttons never accidentally trigger card open/close.
+      // The pan covers the card. Only its body has the native open gesture.
       <GestureDetector key={item.id} gesture={dragGesture}>
         <View testID={"calendar-entry-"+item.id} collapsable={false}
           ref={node=>{if(node)entryViews.current[item.id]={node,dateISO:item.dateISO};else delete entryViews.current[item.id];queueBookingFocus();}}
@@ -1793,7 +1803,11 @@ export function AgendaBoard({
           )}
           {/* ── Tappable body: opens/closes card on tap.
               Lives outside the footer so button presses never bubble here. ── */}
-          <TouchableOpacity onPress={tapThis} activeOpacity={0.85} style={{ gap: colMode === "stress" ? 2 : colMode === "relax" ? 7 : 4 }}>
+          <GestureDetector gesture={tapGesture}>
+          <View testID={"calendar-entry-open-" + item.id} collapsable={false} accessible accessibilityRole="button"
+            onAccessibilityTap={tapThis} accessibilityActions={[{ name: "activate" }]}
+            onAccessibilityAction={event => { if (event.nativeEvent.actionName === "activate") tapThis(); }}
+            style={{ gap: colMode === "stress" ? 2 : colMode === "relax" ? 7 : 4 }}>
             {/* Pending tasks keep time/type together; other cards retain their metadata layout. */}
             <View testID="calendar-time-type-row" style={[s.cardTopRow, { flexWrap: "nowrap" }]}>
               <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0, flexWrap: "nowrap", maxWidth: "100%" }}>
@@ -1960,7 +1974,8 @@ export function AgendaBoard({
                 )}
               </View>
             )}
-          </TouchableOpacity>
+          </View>
+          </GestureDetector>
 
           {/* ── PROPUESTA DE CAMBIO — siempre visible cuando existe ── */}
           {hasProposal && (() => {
@@ -2082,7 +2097,9 @@ export function AgendaBoard({
           {/* ── Footer: estado buttons + delete.
               Inner buttons claim their own touches; tapping the gap between them
               falls through to this wrapper which toggles the card open/closed. ── */}
-          <TouchableOpacity activeOpacity={1} onPress={tapThis} style={s.cardFooter}>
+          <TouchableOpacity activeOpacity={1} style={s.cardFooter}
+            onPressIn={() => { if (!dragItemRef.current) dragPressEntryId.current = null; }}
+            onPress={() => { if (dragPressEntryId.current !== item.id) tapThis(); }}>
             {reservationCardPolicy(item).canonical && renderReservationControls(item)}
             {onChangeEstado && !reservationCardPolicy(item).canonical && (
               <View style={s.estadoRow}>
@@ -2145,7 +2162,13 @@ export function AgendaBoard({
     if(col.isNotes&&onOpenNote)return <View key={col.id} style={[s.column,{width:columnW,borderColor:"#475569"},dragTargetColId===col.id&&s.columnDragTarget]}
       onLayout={event=>{const {x,y,width,height}=event.nativeEvent.layout;colLayouts.current[col.id]={x,y,w:width,h:height};queueBookingFocus();}}>
       <GoNoteArchiveColumn entries={archiveNotes||[]} expanded={notesExpanded} onOpen={onOpenNote} onMove={onMoveNote}
-        dragging={!!dragItem} renderDraggable={(entry,card)=><GestureDetector key={entry.id} gesture={makeEntryDragGesture(entry)}><View collapsable={false} style={{opacity:dragItem?.id===entry.id?0.2:1}}>{card}</View></GestureDetector>}
+        dragging={!scrollEnabledDuringDrag} renderDraggable={(entry, renderCard) => {
+          const drag = makeEntryDragGesture(entry);
+          const open = makeEntryTapGesture(drag, () => onOpenNote(entry));
+          return <GestureDetector key={entry.id} gesture={drag}>
+            <View collapsable={false} style={{ opacity: dragItem?.id === entry.id ? 0.2 : 1 }}>{renderCard(open)}</View>
+          </GestureDetector>;
+        }}
         compact={!!renderHeader} headerHeight={archiveHeaderHeight} titleFont={hdrFont} dateFont={hdrDateFt} dropActive={dragTargetColId===col.id}
         focus={scrollToDateToken?.destination==="archive"&&scrollToDateToken.entryId?{
           entryId:scrollToDateToken.entryId,highlightEntryId:activeGlowId,
@@ -2450,7 +2473,7 @@ export function AgendaBoard({
                 onScrollBeginDrag={()=>{pendingBookingFocus.current=null;}}
                 showsVerticalScrollIndicator={false}
                 nestedScrollEnabled
-                scrollEnabled={!dragItem}
+                scrollEnabled={scrollEnabledDuringDrag}
                 scrollEventThrottle={50}
                 onScroll={(e) => { colScrollY.current[col.id] = e.nativeEvent.contentOffset.y; }}
                 onLayout={(e) => { colScrollViewH.current[col.id] = e.nativeEvent.layout.height;colScrollViewportTop.current[col.id]=e.nativeEvent.layout.y;timeSlotStarts.current[col.id]=effectiveSlots;queueBookingFocus(); }}
@@ -2622,7 +2645,7 @@ export function AgendaBoard({
                 contentContainerStyle={[s.colContent, { justifyContent: "flex-start", gap: compactGap },scrollToDateToken?.entryId&&scrollToDateToken.dateISO===col.dateISO&&{paddingBottom:Math.max(12,(colScrollViewH.current[col.id]||Dimensions.get("window").height)/2)}]}
                 showsVerticalScrollIndicator={false}
                 nestedScrollEnabled
-                scrollEnabled={!dragItem}
+                scrollEnabled={scrollEnabledDuringDrag}
               >
                 {compactItems.map((item) => renderItemCard(item, colDnProgress, colHumanMode, col.dateISO, !!col.isRetrasados))}
               </ScrollView>
@@ -2701,6 +2724,7 @@ export function AgendaBoard({
           boardX.current = x;
           boardLeftShared.value=x;
           boardY.current = y;
+          boardTopShared.value = y;
         });
       }}
     >
@@ -2720,7 +2744,7 @@ export function AgendaBoard({
         directionalLockEnabled
         scrollEventThrottle={4}
         bounces
-        scrollEnabled={!dragItem}
+        scrollEnabled={scrollEnabledDuringDrag}
         onScroll={(e) => {
           const ox = e.nativeEvent.contentOffset.x;
           scrollX.current = ox;
@@ -4031,7 +4055,6 @@ const s = StyleSheet.create({
   },
   cardGhost: {
     opacity: 0.20,
-    transform: [{ scale: 0.95 }],
   },
   // ── Multi-selection ────────────────────────────────────────────
   cardMultiSelected: {

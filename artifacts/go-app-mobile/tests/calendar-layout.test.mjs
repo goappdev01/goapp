@@ -113,15 +113,15 @@ test('Pending cards keep one closed line; personal tasks have no false chat and 
   assert.equal(style(top.props.style).flexWrap, 'nowrap');
   assert.equal(nodes(top, n => n.type === 'Feather' && n.props.name === 'message-circle').length, 0);
   assert.equal(nodes(card, n => n.props.accessibilityLabel === 'agenda_write_msg').length, 0);
-  const body = nodes(card, n => n.type === 'TouchableOpacity' && texts(n).includes('17:00') && texts(n).includes('TAREA.INT'))[0];
-  body.props.onPress(); tree = app.render(AgendaBoard, props);
+  const body = nodes(card, n => n.props.testID?.startsWith('calendar-entry-open-') && texts(n).includes('17:00') && texts(n).includes('TAREA.INT'))[0];
+  body.props.onAccessibilityTap(); tree = app.render(AgendaBoard, props);
   assert.equal(nodes(tree, n => n.props.testID === 'entry-message-go').length, 0, 'a personal task must not invent a recipient');
   nodes(tree, n => n.type === 'Modal' && n.props.visible && n.props.onRequestClose)[0].props.onRequestClose();
   const shared = {...pending,id:'pending-shared',type:'TAREA_EXTERNA',intentKey:'tarea_externa',contactName:'Participante de prueba'};
   const sharedSnapshot=JSON.stringify(shared), sharedProps={...props,goLog:[pending,shared]};
   tree=app.render(AgendaBoard,sharedProps);
   const sharedCard=nodes(tree,n=>n.type==='GestureDetector'&&n.props.key===shared.id)[0];assert.ok(sharedCard);
-  nodes(sharedCard,n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85)[0].props.onPress();
+  nodes(sharedCard,n=>n.props.testID==='calendar-entry-open-'+shared.id)[0].props.onAccessibilityTap();
   tree=app.render(AgendaBoard,sharedProps);
   const expanded=nodes(tree,n=>n.props.testID==='entry-details-scroll')[0];assert.ok(expanded);
   const message = nodes(expanded, n => n.type === 'TouchableOpacity' && n.props.testID === 'entry-message-go')[0];
@@ -168,7 +168,9 @@ test('the restored full calendar width accepts a valid right-edge drop once, whi
       allowedEntryIdsRef: { current: new Set(['pending-note']) }, dropConsumed:{current:false}, canRestoreArchive:()=>false,noteDocument:()=>undefined,jsCancelDragRef: { current: () => calls.push('cancelled') },
       boardX: { current: 0 }, scrollX: { current: 0 }, allColumnsRef: { current: [{ id: 'day', dateISO: '2026-10-15' }] }, colLayouts: { current: { day: { x: 200, w: 180 } } },
       clearEdgeScroll() {}, floatOp: {}, floatSc: {}, withTiming: value => value, withSpring: value => value,
-      dragItemRef: { current: pending }, selectedIdsRef: { current: new Set() }, onOpenMoveFlow: (...args) => moves.push(args),
+      dragItemRef: { current: pending }, selectedIdsRef: { current: new Set() }, noteEntryDestination: () => null,
+      isNoteEntry: () => false, slotAtScreenY: () => null, entryIsReservation: () => false, columnContainsY: () => true,
+      setDragTargetSlot() {}, onOpenMoveFlow: (...args) => moves.push(args),
       onMoveItemRef: { current: null }, Haptics: { notificationAsync: async () => {}, NotificationFeedbackType: { Success: 'success' } },
       setDragItem() {}, setDragTargetColId() {},
     };
@@ -187,7 +189,8 @@ test('drag edge scrolling uses the original screen boundary on both sides, with 
   for (const [pointerX, expectedTimers, expectedClears] of [[350, 1, 0], [300, 0, 0], [25, 1, 0]]) {
     const timers = [], cleared = [], scope = { exports: {}, screenW: 390,
       boardX: { current: 0 }, scrollX: { current: 0 }, allColumnsRef: { current: [{ id: 'day' }] }, colLayouts: { current: { day: { x: 200, w: 180 } } },
-      edgeScrollDir: { current: null }, edgeScrollTimer: { current: null }, scrollViewRef: { current: null },noteDocument:()=>undefined,dragItemRef:{current:null},
+      edgeScrollDir: { current: null }, edgeScrollTimer: { current: null }, scrollViewRef: { current: null }, dragItemRef: { current: pending }, dropConsumed: { current: false },
+      noteEntryDestination: () => null, slotAtScreenY: () => null, setDragTargetSlot() {},
       clearEdgeScroll: () => cleared.push(true), clearInterval() {}, setInterval: callback => { timers.push(callback); return 1; },
       Haptics: { selectionAsync: async () => {} }, setDragTargetColId() {},
     };
@@ -264,6 +267,6 @@ test('only the Calendar Pending title moves left; counter, font and column width
     assert.equal(style(column(after).props.style).width, style(column(before).props.style).width);
     assert.deepEqual(style(badge(after).props.style), style(badge(before).props.style));
     assert.equal(badge(after).children[0].children[0], count);
-    assert.equal(nodes(column(after), n => n.type === 'GestureDetector').length, count);
+    assert.equal(nodes(column(after), n => n.type === 'GestureDetector' && n.props.gesture?._activateAfterLongPress === 400).length, count);
   }
 });

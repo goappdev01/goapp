@@ -165,8 +165,8 @@ test("existing card opens its real detail and has no empty-slot creation recogni
   let tree = app.render(AgendaBoard, props);
   assert.ok(!nodes(tree, node => node.type?.name === "GoCalendarSlot").some(node => node.props.timeHHMM === "09:15"));
   assert.ok(!texts(tree).includes("Detalle guardado"));
-  const card = nodes(tree, node => node.type === "TouchableOpacity" && node.props.onPress?.name === "tapThis")[0];
-  assert.ok(card); card.props.onPress();
+  const tap = nodes(tree, node => node.type === "GestureDetector" && node.props.gesture?._maxDuration === 350)[0];
+  assert.ok(tap); tap.props.gesture._onEnd({}, true);
   tree = app.render(AgendaBoard, props);
   assert.ok(texts(tree).includes("Detalle guardado")); assert.equal(creates, 0);
 });

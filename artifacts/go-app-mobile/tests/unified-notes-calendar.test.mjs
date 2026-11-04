@@ -12,7 +12,9 @@ for(const viewMode of ['dia','semana','mes_lineal'])test(viewMode+': NOTAS ARCHI
  const component=nodes(tree,n=>n.type?.name==='GoNoteArchiveColumn')[0];assert.equal(component.props.expanded,true);assert.equal(component.props.entries[0].id,entry.id);
  const dayWidth=style(columns[noteIndex+1].props.style).width;component.props.onToggle();tree=app.render(AgendaBoard,props);
  const folded=nodes(tree,n=>n.type?.name==='GoNoteArchiveColumn')[0];assert.equal(folded.props.expanded,false);columns=nodes(tree,n=>n.props.key&&n.props.onLayout&&style(n.props.style)?.width);assert.equal(style(columns.find(c=>c.props.key==='retrasados').props.style).width,dayWidth);assert.equal(style(columns.find(c=>c.props.key==='notes').props.style).width,dayWidth);folded.props.onToggle();tree=app.render(AgendaBoard,props);const expanded=nodes(tree,n=>n.type?.name==='GoNoteArchiveColumn')[0];assert.equal(expanded.props.expanded,true);
- const content=expanded.type(expanded.props),open=nodes(content,n=>n.props.accessibilityLabel==='Abrir nota '+entry.notes)[0];open.props.onPress();assert.equal(opens[0].id,entry.id);
+ const content=expanded.type(expanded.props),open=nodes(content,n=>n.type==='GestureDetector'&&n.props.gesture?._maxDuration===350)[0];
+ open.props.gesture._onEnd({},false);assert.equal(opens.length,0);
+ open.props.gesture._onEnd({},true);assert.equal(opens[0].id,entry.id);
  const actions=nodes(content,n=>n.props.onPress&&n.props.key==='pending');assert.equal(actions.length,1);actions[0].props.onPress();assert.equal(moves[0][0].id,entry.id);assert.equal(moves[0][1],'pending');assert.equal(disk.rows.length,1,'render and opening cannot duplicate/write notes');
  }finally{disk.close();}
 });
@@ -75,7 +77,8 @@ for(const [density,expected] of [['15min','13:45'],['30min','13:30'],['1h','13:0
   const horizontal=nodes(tree,n=>n.type==='GHScrollView'&&n.props.horizontal)[0];horizontal.props.onLayout({nativeEvent:{layout:{x:0,y:viewportY,width:390,height:520}}});horizontal.props.onScroll({nativeEvent:{contentOffset:{x:targetColumn.x+targetColumn.width/2-100}}});
   const dayScroll=nodes(tree,n=>n.type==='ScrollView'&&n.props.testID==='calendar-day-scroll-day_2027-01-15')[0];assert.ok(dayScroll,'target day has its own measured vertical scroll viewport');dayScroll.props.onLayout({nativeEvent:{layout:{x:0,y:70,width:176,height:420}}});
   const rowY=expected==='13:45'?700:expected==='13:30'?600:500,rowHeight=expected==='13:45'?28:expected==='13:30'?36:50;targetRow.props.onLayout({nativeEvent:{layout:{x:0,y:rowY,width:176,height:rowHeight}}});
-  const absX=boardX+100,absY=boardY+viewportY+70+rowY+rowHeight/2,event={absoluteX:absX,absoluteY:absY,y:18,velocityX:0};
+  const scrollY=400; dayScroll.props.onScroll({nativeEvent:{contentOffset:{y:scrollY}}});
+  const absX=boardX+100,absY=boardY+viewportY+70+rowY-scrollY+rowHeight/2,event={absoluteX:absX,absoluteY:absY,y:18,velocityX:0};
   const card=nodes(tree,n=>n.type==='GestureDetector'&&n.props.key===entry.id)[0];assert.ok(card,'pending note uses the real pan recognizer');let pan=card.props.gesture;
   pan._onStart(event);pan._onUpdate(event);tree=app.render(AgendaBoard,props);const highlighted=nodes(tree,n=>n.props.testID===targetRow.props.testID)[0],highlightStyle=style(highlighted.props.style);assert.equal(highlightStyle.borderColor,'rgba(34,211,238,0.92)','the exact slot under the finger is highlighted');
   assert.equal(created.length,0,'a drag cannot trigger the empty-slot tap action');pan._onFinalize(event,false);tree=app.render(AgendaBoard,props);assert.equal(moves.length,0,'cancel does not move the note');assert.equal(style(nodes(tree,n=>n.props.testID===targetRow.props.testID)[0].props.style).borderColor,undefined,'cancel clears the slot cue');

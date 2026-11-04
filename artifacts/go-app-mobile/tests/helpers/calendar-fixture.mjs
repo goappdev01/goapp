@@ -12,7 +12,7 @@ vm.runInNewContext(ts.transpileModule(readFileSync("i18n/translations.ts", "utf8
 
 // Run the real calendar components with deterministic native adapters. Keep hook
 // state across renders so navigation and closing are tested without remounting.
-export function fixture({ now, viewport = {width:390,height:844,fontScale:1} } = {}) {
+export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, platform = "web" } = {}) {
   const urls = [];
   class Clock extends Date {
     constructor(...args) { super(...(args.length ? args : [now ?? Date.now()])); }
@@ -47,7 +47,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1} } =
     StyleSheet: { create: value => value, absoluteFill: {} },
     Dimensions: { get: () => viewport },
     useWindowDimensions: () => viewport,
-    Platform: { OS: 'web' },
+    Platform: { OS: platform },
     AppState: { addEventListener: () => ({remove(){}}) },
     Linking: { openURL: async url => { urls.push(url); } },
     Alert: { alert() {} },

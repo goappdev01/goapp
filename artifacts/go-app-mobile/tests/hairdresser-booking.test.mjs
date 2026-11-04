@@ -160,7 +160,7 @@ for(const bookingSource of ['canonical','DEMO'])test(bookingSource+' customer Ca
  const nodes=n=>!n||typeof n!=='object'?[]:[n,...(n.children??[]).flatMap(nodes)];
  const text=n=>typeof n==='string'?n:(n?.children??[]).map(text).join(' ');
  let tree=cal.render(AgendaBoard,props);
- const body=nodes(tree).find(n=>n.type==='TouchableOpacity'&&n.props.activeOpacity===0.85&&text(n).includes(entry.contactName));assert.ok(body);body.props.onPress();
+ const body=nodes(tree).find(n=>n.props.testID==='calendar-entry-open-'+entry.id&&text(n).includes(entry.contactName));assert.ok(body);body.props.onAccessibilityTap();
  tree=cal.render(AgendaBoard,props);
  const detail=nodes(tree).find(n=>n.props.testID==='entry-details-scroll');assert.ok(detail);
  const propose=nodes(detail).find(n=>n.props.accessibilityLabel==='tasks_propose_change');
