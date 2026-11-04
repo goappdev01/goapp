@@ -81,6 +81,8 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     const sourceStyle = style(sourceRow.props.style);
     assert.equal(nodes(sourceRow, n => n.props.testID === "calendar-entry-" + task.id).length, 1);
     const cue = (tree, time) => nodes(row(tree, time), n => n.props.testID === "calendar-drop-slot-highlight")[0];
+    const dropTime = tree => nodes(tree, n => n.props.testID === "calendar-drop-time")[0];
+    assert.equal(dropTime(tree), undefined);
     const at = (y, x = 0) => ({
       absoluteX: boardX + 85 + x, absoluteY: boardY + columnsY + viewportY + y - 500 + 15,
       x: 22, y: 15, velocityX: 0,
@@ -105,6 +107,9 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     assert.equal(nodes(row(tree, sourceTime), n => n.props.testID === "calendar-entry-" + task.id).length, 1);
     assert.equal(cue(tree, sourceTime).props.pointerEvents, "none");
     assert.equal(style(cue(tree, sourceTime).props.style).position, "absolute");
+    assert.ok(style(cue(tree, sourceTime).props.style).borderWidth >= 2);
+    assert.equal(dropTime(tree).children[0], sourceTime);
+    assert.ok(style(dropTime(tree).props.style).fontSize >= 18);
     const float = tree => nodes(tree, n => n.type === "ReAnimated.View" && n.props.pointerEvents === "none")[0];
     assert.equal(style(float(tree).props.style).left, pickup.absoluteX - boardX - pickup.x);
     assert.equal(horizontal(tree).props.scrollEnabled, true, "do not reset the native scroll while it owns a touch sequence");
@@ -115,17 +120,20 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     assert.equal(detail(tree), false);
     assert.equal(style(float(tree).props.style).top, slotOne.absoluteY - boardY - pickup.y);
     assert.equal(cue(tree, sourceTime), undefined);
-    assert.equal(style(cue(tree, firstTarget).props.style).borderColor, "rgba(34,211,238,0.92)");
+    assert.ok(cue(tree, firstTarget));
+    assert.equal(dropTime(tree).children[0], firstTarget);
     pan._onUpdate(slotTwo);
     tree = render();
     assert.equal(cue(tree, firstTarget), undefined);
-    assert.equal(style(cue(tree, secondTarget).props.style).borderColor, "rgba(34,211,238,0.92)");
+    assert.ok(cue(tree, secondTarget));
+    assert.equal(dropTime(tree).children[0], secondTarget);
     assert.deepEqual(style(row(tree, sourceTime).props.style), sourceStyle);
     assert.equal(moves.length, 0, "hover does not move the record");
     pan._onFinalize(slotTwo, false);
     tree = render();
     assert.equal(float(tree), undefined);
     assert.equal(cue(tree, secondTarget), undefined);
+    assert.equal(dropTime(tree), undefined);
     assert.deepEqual(moves, []);
     assert.equal(task.time, "13:00");
 

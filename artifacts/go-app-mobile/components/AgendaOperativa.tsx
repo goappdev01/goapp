@@ -2673,7 +2673,13 @@ export function AgendaBoard({
             { borderLeftColor: dragItem.color || "#555" },
           ]}
         >
-          {dragItem.time ? (
+          {dragTargetSlot ? (
+            <View style={s.dropTimeBadge} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+              <Text testID="calendar-drop-time" numberOfLines={1} style={s.dropTimeLabel}>
+                {timeLabelForSlot(dragTargetSlot.start)}
+              </Text>
+            </View>
+          ) : dragItem.time ? (
             <Text numberOfLines={1} style={s.cardTime}>{formatTimeDisplay(dragItem.time)}</Text>
           ) : null}
           <Text style={s.cardTitle} numberOfLines={2}>
@@ -4199,6 +4205,22 @@ const s = StyleSheet.create({
     fontWeight: "600",
     marginTop: 1,
   },
+  dropTimeBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "#123742",
+    borderColor: "#67e8f9",
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  dropTimeLabel: {
+    color: "#a5f3fc",
+    fontSize: 20,
+    fontFamily: "Inter_900Black",
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
+  },
   cardFloat: {
     backgroundColor: "rgba(14,16,28,0.98)",
     borderRadius: 11,
@@ -4316,9 +4338,10 @@ const s = StyleSheet.create({
     bottom: 0,
     left: 2,
     right: 2,
-    backgroundColor: "rgba(34,211,238,0.20)",
-    borderWidth: 1.5,
-    borderColor: "rgba(34,211,238,0.92)",
+    backgroundColor: "rgba(34,211,238,0.30)",
+    borderWidth: 2,
+    borderLeftWidth: 4,
+    borderColor: "#67e8f9",
     borderRadius: 7,
   },
   slotCards: {
