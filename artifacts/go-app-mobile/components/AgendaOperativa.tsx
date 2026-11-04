@@ -396,6 +396,12 @@ function getEffectiveDensityMin(density: DensityKey, timedTaskCount: number): 60
   return 15;
 }
 
+function timeLabelForSlot(startMinute: number): string {
+  const hour = Math.floor(startMinute / 60);
+  const minute = startMinute % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 // Returns 0 (full night) → 1 (full day) for a given slot start minute,
 // with 45-minute smooth transitions around sunrise and sunset.
 function getSlotDayNightProgress(slotMid: number, sunriseMin: number, sunsetMin: number): number {
@@ -1038,6 +1044,8 @@ export function AgendaBoard({
   // ── DRAG & DROP STATE ────────────────────────────────────────────
   const [dragItem, setDragItem] = useState<GoEntry | null>(null);
   const [dragTargetColId, setDragTargetColId] = useState<string | null>(null);
+  const [dragTargetSlot, setDragTargetSlot] = useState<{ columnId: string; start: number } | null>(null);
+  const showHoursRef=useRef(showHours);showHoursRef.current=showHours;
   const dragItemRef = useRef<GoEntry | null>(null);
   const dropConsumed=useRef(false);
   useEffect(() => { dragItemRef.current = dragItem; }, [dragItem]);
@@ -1087,6 +1095,9 @@ export function AgendaBoard({
   const scrollViewRef = useRef<any>(null);
   // Refs for each column's inner vertical ScrollView (hourly mode)
   const colScrollRefs    = useRef<Record<string, any>>({});
+  const colScrollViewportTop = useRef<Record<string, number>>({});
+  const timeSlotLayouts = useRef<Record<string, Record<number, { y: number; h: number }>>>({});
+  const timeSlotStarts = useRef<Record<string, number[]>>({});
   // Current vertical scroll offset per column (tracked via onScroll)
   const colScrollY       = useRef<Record<string, number>>({});
   // Visible height of each column's ScrollView (tracked via onLayout)
@@ -1291,6 +1302,7 @@ export function AgendaBoard({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
     dropConsumed.current=false;dragItemRef.current=item;setDragItem(item);
     setDragTargetColId(null);
+    setDragTargetSlot(null);
   }, []);
 
   // Called on every finger move — determine which column is under the finger
@@ -1304,6 +1316,17 @@ export function AgendaBoard({
     return !!(onMoveNoteRef.current&&rows.length===1&&origin?.id===itemId&&noteDocument(item)?.destination==="archive"&&!entryIsReservation(item)&&!item.deleted&&item.estado!=="rechazado"&&item.ownerUserId===origin.ownerUserId&&item.taskContext===origin.taskContext);
   };
   const archiveContainsY=(absY:number,lay:{y?:number;h?:number})=>Number.isFinite(absY)&&!!lay.h&&absY>=boardY.current+columnsViewportY.current+(lay.y||0)&&absY<=boardY.current+columnsViewportY.current+(lay.y||0)+lay.h;
+  // Resolve the actual laid-out interval under the finger. Row layout is measured
+  // inside the day ScrollView, then translated using that column's live scroll offset.
+  const slotAtScreenY=(column:Column,absY:number):number|null=>{
+    if(!column.dateISO||!showHoursRef.current)return null;
+    const columnLayout=colLayouts.current[column.id],viewportTop=colScrollViewportTop.current[column.id];
+    if(!columnLayout||viewportTop==null)return null;
+    const contentY=absY-(boardY.current+columnsViewportY.current+(columnLayout.y||0)+viewportTop)+(colScrollY.current[column.id]||0);
+    const rows=timeSlotLayouts.current[column.id],starts=timeSlotStarts.current[column.id];if(!rows||!starts)return null;
+    for(const start of starts){const layout=rows[start];if(layout&&contentY>=layout.y&&contentY<layout.y+layout.h)return start;}
+    return null;
+  };
   const jsUpdateTarget = useCallback((absX: number,absY:number) => {
     // ── Edge auto-scroll ──────────────────────────────────────────
     const EDGE_ZONE = 60;
@@ -1341,13 +1364,17 @@ export function AgendaBoard({
         break;
       }
     }
+    const foundColumn=found?allColumnsRef.current.find(column=>column.id===found):undefined;
+    const slotStart=foundColumn?slotAtScreenY(foundColumn,absY):null;
+    const nextSlot=slotStart==null?null:{columnId:foundColumn!.id,start:slotStart};
+    setDragTargetSlot(previous=>previous?.columnId===nextSlot?.columnId&&previous?.start===nextSlot?.start?previous:nextSlot);
     setDragTargetColId((prev) => {
       if (found !== prev && found !== null) {
         Haptics.selectionAsync().catch(() => {});
       }
       return found;
     });
-  }, [screenW, clearEdgeScroll]);
+  }, [screenW, clearEdgeScroll, showHours]);
 
   // Called on successful drop — compute final column and trigger onMoveItem
   const jsDropAt = useCallback((absX: number, itemId: string, itemTime: string,absY:number) => {
@@ -1375,14 +1402,17 @@ export function AgendaBoard({
       const targetLayout=targetCol&&colLayouts.current[targetCol.id];
       const eligible=noteDestination==="archive"?canRestoreArchive(itemId):canMoveNoteFromCalendar(itemId);
       const movingCalendarDay=targetDestination==="calendar"&&!!targetCol?.dateISO&&!!current&&current.dateISO!==targetCol.dateISO;
+      const selectedSlot=targetCol?slotAtScreenY(targetCol,absY):null;
+      const dropTime=selectedSlot==null?itemTime:timeLabelForSlot(selectedSlot);
+      const movingCalendarTime=targetDestination==="calendar"&&!!current&&!!dropTime&&(current.time||noteDocument(current)?.schedule.time||"")!==dropTime;
       try{
-        if(current&&targetDestination&&(targetDestination!==noteDestination||movingCalendarDay)&&eligible&&targetLayout&&archiveContainsY(absY,targetLayout)){
+        if(current&&targetDestination&&(targetDestination!==noteDestination||movingCalendarDay||movingCalendarTime)&&eligible&&targetLayout&&archiveContainsY(absY,targetLayout)){
           if(targetDestination==="calendar"&&targetCol?.dateISO){
-            const time=itemTime||noteDocument(current)?.schedule.time||"";
+            const time=dropTime||noteDocument(current)?.schedule.time||"";
             onMoveNoteRef.current!(current,"calendar",{dateISO:targetCol.dateISO,time});
           }else onMoveNoteRef.current!(current,targetDestination);
         }
-      }finally{dragItemRef.current=null;setDragItem(null);setDragTargetColId(null);}
+      }finally{dragItemRef.current=null;setDragItem(null);setDragTargetColId(null);setDragTargetSlot(null);}
       return;
     }
     if (targetCol?.dateISO) {
@@ -1415,6 +1445,7 @@ export function AgendaBoard({
 
     dragItemRef.current=null;setDragItem(null);
     setDragTargetColId(null);
+    setDragTargetSlot(null);
   }, [clearEdgeScroll]);
 
   // Called on cancelled/failed gesture
@@ -1424,6 +1455,7 @@ export function AgendaBoard({
     floatSc.value = withSpring(1, { damping: 10, stiffness: 320 });
     dropConsumed.current=true;dragItemRef.current=null;setDragItem(null);
     setDragTargetColId(null);
+    setDragTargetSlot(null);
   }, [clearEdgeScroll]);
 
   // Ref so jsDropAt can read selectedIds without stale closure
@@ -2410,6 +2442,7 @@ export function AgendaBoard({
             return (
               <ScrollView
                 ref={(r) => { colScrollRefs.current[col.id] = r;queueBookingFocus(); }}
+                testID={`calendar-day-scroll-${col.id}`}
                 style={s.colScroll}
                 contentContainerStyle={{ paddingBottom: scrollToDateToken?.entryId&&scrollToDateToken.dateISO===col.dateISO?Math.max(12,(colScrollViewH.current[col.id]||Dimensions.get("window").height)/2):12 }}
                 removeClippedSubviews={scrollToDateToken?.entryId?false:undefined}
@@ -2420,7 +2453,7 @@ export function AgendaBoard({
                 scrollEnabled={!dragItem}
                 scrollEventThrottle={50}
                 onScroll={(e) => { colScrollY.current[col.id] = e.nativeEvent.contentOffset.y; }}
-                onLayout={(e) => { colScrollViewH.current[col.id] = e.nativeEvent.layout.height;queueBookingFocus(); }}
+                onLayout={(e) => { colScrollViewH.current[col.id] = e.nativeEvent.layout.height;colScrollViewportTop.current[col.id]=e.nativeEvent.layout.y;timeSlotStarts.current[col.id]=effectiveSlots;queueBookingFocus(); }}
               >
                 {untimedItems.length > 0 && (
                   <View style={{ padding: 5, gap: 5, borderBottomWidth: 1, borderBottomColor: colDnProgress >= 0.5 ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.07)" }}>
@@ -2480,7 +2513,20 @@ export function AgendaBoard({
                     <View key={slotStart} style={[
                       { minHeight: slotCards.length === 0 ? SLOT_H : undefined },
                       slotDayNightStyle(dnProgress),
-                    ]}>
+                      dragTargetSlot?.columnId===col.id&&dragTargetSlot.start===slotStart&&{
+                        backgroundColor:"rgba(34,211,238,0.20)",
+                        borderWidth:1.5,
+                        borderColor:"rgba(34,211,238,0.92)",
+                        borderRadius:7,
+                        marginHorizontal:2,
+                        transform:[{scale:1.015}],
+                        zIndex:2,
+                      },
+                    ]}
+                      testID={`calendar-drop-slot-${col.dateISO||""}-${label}`}
+                      accessibilityLabel={`Franja horaria ${label}`}
+                      onLayout={event=>{const {y,height}=event.nativeEvent.layout;(timeSlotLayouts.current[col.id]??={})[slotStart]={y,h:height};}}
+                    >
                       {/* ── "NOW" indicator line ── */}
                       {isCurrentSlot && (
                         <View style={{ flexDirection: "row", alignItems: "center", marginHorizontal: 5, marginBottom: 2 }}>
