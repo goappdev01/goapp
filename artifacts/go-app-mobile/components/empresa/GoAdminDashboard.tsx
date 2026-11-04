@@ -23,7 +23,6 @@ import { GoRoadmapScreen, RoadmapNode } from "./GoRoadmapScreen";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { useGoView } from "@/contexts/GoViewContext";
-import { GoModulePublicationPanel } from "./GoModulePublicationPanel";
 
 const { width: SW } = Dimensions.get("window");
 
@@ -1055,7 +1054,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         {section === "consumos"    && <ConsumoScreen dark />}
         {section === "publicidad"  && <PublicidadScreen />}
         {section === "facturacion" && <FacturacionScreen />}
-        {section === "sistema"     && <><GoModulePublicationPanel /><AdminScreen /></>}
+        {section === "sistema"     && <AdminScreen />}
 
         {section === "metricas" && (
           <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: 120 }}>
