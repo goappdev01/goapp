@@ -77,6 +77,7 @@ for(const time of ['00:00','03:15','05:20','13:45','18:30','23:59'])test('numeri
  const calls=[],a=await mountComponent('components/notes/GoTaskScheduleStep.tsx',{}, {step:'clock',dateLabel:'30/12/2027',time:'12:00',duration:'30m',handedness:'right',onTime:t=>calls.push(t),onDuration(){},onDurationDraft(){},onDate(){},onBack(){}});
  try{
   await a.run(()=>a.hosts.get('note-hour').onChangeText(time.slice(0,2)));await a.run(()=>a.hosts.get('note-minute').onChangeText(time.slice(3)));
+  if(Number(time.slice(0,2))>=1&&Number(time.slice(0,2))<=12)await a.run(()=>a.hosts.get('time-period-AM').onPress());
   assert.equal(a.hosts.get('note-hour').value,time.slice(0,2));assert.equal(a.hosts.get('note-hour').autoFocus,undefined);
   const press=a.hosts.get('note-schedule-continue').onPress;await a.run(()=>{press();press();});assert.deepEqual(calls,[time]);
  }finally{await a.close();}

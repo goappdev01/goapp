@@ -7723,6 +7723,7 @@ function HomeScreenContent() {
   const returnToBookingCompany=()=>{if(bookingContextRef.current.view==="BUSINESS"){if(ownerDemo.demo)setEmpresaDemoRoute("reservations");else setEmpresaModulo("reservas_config");setTimeout(()=>setEmpresaOpen(true),350);}};
   const showBookingChangeError = (error: Error) => {
     const reasons: Record<string, string> = {
+      BOOKING_CONFLICT: "El profesional asignado a esta reserva no está disponible en la fecha y hora seleccionadas",
       BOOKING_OUTSIDE_AVAILABILITY: "El establecimiento está cerrado en la fecha u hora seleccionada",
       BOOKING_STAFF_UNAVAILABLE: "El profesional asignado a esta reserva no está disponible en la fecha y hora seleccionadas",
       BOOKING_RESOURCE_UNAVAILABLE: "No hay capacidad disponible en los recursos necesarios para el servicio completo.",
@@ -7750,7 +7751,7 @@ function HomeScreenContent() {
   const openBookingProposal = (entry:GoEntry,actor:"customer"|"business"="customer",initial?:{dateISO:string;time:string}) => {
     const keepCalendar=actor==="customer" && calOpen;
     const open=()=>{setCalOpen(true);calFlow.open({startAt:"date",initialDateISO:initial?.dateISO ?? entry.dateISO,initialDateDraft:entry.date,initialTime:initial?.time ?? entry.time,initialDuration:entry.duration,skipDuration:true,
-      validate:r=>!r.time?(lang==="en"?"Choose a future date and time.":"Elige una fecha y hora futuras."):null,
+      validate:r=>!r.time || isGoDateTimePast(r.dateISO,r.time)?(lang==="en"?"Choose a future date and time.":"Elige una fecha y hora futuras."):null,
       onSave:result=>{if(!keepCalendar)setCalOpen(false);confirmBookingDraft(entry,result,actor);},onCancel:()=>{if(!keepCalendar)setCalOpen(false);if(actor==="business")returnToBookingCompany();}});};
     if(actor==="business"){bookingReturnDateRef.current=entry.dateISO;setEmpresaOpen(false);setTimeout(open,350);}else open();
   };

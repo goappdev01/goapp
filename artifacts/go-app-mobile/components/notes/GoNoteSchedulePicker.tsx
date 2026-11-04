@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View, type TextInputProps } from "react-native";
 import { validNoteTime, NOTE_MAX_DURATION_MINUTES } from "@/lib/unifiedNotes";
-import { GoMinuteInput } from "@/components/ui/GoMinuteInput";
+import { GoMinuteInput, GoTimePeriodButtons, manualTime, periodForHour, type TimePeriod } from "@/components/ui/GoMinuteInput";
 import { durationMinutes } from "@/lib/goActionCompletion";
 import { GoNoteToolFooter, type NoteToolEdit } from "./GoNoteToolFooter";
 const pad=(value:number)=>String(value).padStart(2,"0");
@@ -14,14 +14,17 @@ function numbers(kind:"time"|"duration",hours:string,minutes:string,setHours:(va
 }
 export function GoNoteTimePicker({value,onApply,onClear,disabled=false,onInputFocus,handedness,onPendingChange}:Props){
  const initial=validNoteTime(value)?value.split(":").map(Number):[0,0], [hour,setHour]=useState(pad(initial[0])),[minute,setMinute]=useState(pad(initial[1])),[error,setError]=useState(""),[touched,setTouched]=useState(false);
- const exact=`${/^\d{1,2}$/.test(hour)?pad(Number(hour)):"--"}:${/^\d{1,2}$/.test(minute)?pad(Number(minute)):"--"}`;
- const valid=/^\d{1,2}$/.test(hour)&&/^\d{1,2}$/.test(minute)&&validNoteTime(exact),invalid="Introduce horas de 00 a 23 y minutos de 00 a 59.";
- useEffect(()=>{onPendingChange?.({changed:touched&&exact!==value,value:valid?exact:undefined,error:valid?undefined:invalid});},[hour,minute,touched,value,onPendingChange]);
+ const [period,setPeriod]=useState<TimePeriod|null>(validNoteTime(value)?(initial[0]>=12?"PM":"AM"):null);
+ const exact=manualTime(hour,minute,period);
+ const ambiguous=Number(hour)>=1&&Number(hour)<=12&&!period;
+ const invalid=ambiguous?"Selecciona AM o PM para continuar":"Introduce horas de 00 a 23 y minutos de 00 a 59.";
+ useEffect(()=>{onPendingChange?.({changed:touched&&exact!==value,value:exact??undefined,error:exact?undefined:invalid});},[exact,touched,value,invalid,onPendingChange]);
  return <View testID="note-time-picker" style={s.form}>
-  <Text testID="note-time-preview" accessibilityLiveRegion="polite" style={s.preview}>{exact}</Text>
-  {numbers("time",hour,minute,v=>{setHour(v);setTouched(true);},v=>{setMinute(v);setTouched(true);},disabled,onInputFocus)}
+  <Text testID="note-time-preview" accessibilityLiveRegion="polite" style={s.preview}>{exact??hour.padStart(2,"0")+":"+minute.padStart(2,"0")}</Text>
+  {numbers("time",hour,minute,v=>{setHour(v);setPeriod(periodForHour(v));setTouched(true);},v=>{setMinute(v);setTouched(true);},disabled,onInputFocus)}
+  <GoTimePeriodButtons light value={period} disabled={disabled} invalid={!!error&&ambiguous} onChange={value=>{setPeriod(value);setTouched(true);setError("");}}/>
   {!!error&&<Text accessibilityRole="alert" style={s.error}>{error}</Text>}
-  <GoNoteToolFooter testID="note-time-apply" removeID="note-time-clear" handedness={handedness} disabled={disabled} onSave={()=>{if(!valid){setError(invalid);return;}setError("");onApply(exact);}} onRemove={value?onClear:undefined} removeLabel="QUITAR HORA"/>
+  <GoNoteToolFooter testID="note-time-apply" removeID="note-time-clear" handedness={handedness} disabled={disabled} onSave={()=>{if(!exact){setError(invalid);return;}setError("");onApply(exact);}} onRemove={value?onClear:undefined} removeLabel="QUITAR HORA"/>
  </View>;
 }
 export function GoNoteDurationPicker({value,onApply,onClear,disabled=false,onInputFocus,handedness,onPendingChange}:Props){

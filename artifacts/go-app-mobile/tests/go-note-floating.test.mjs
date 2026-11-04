@@ -5,6 +5,38 @@ const press=ui=>ui.run(()=>{const button=ui.hosts.get('note-tools-toggle');butto
 const layout=(ui,width,height)=>ui.run(()=>ui.hosts.get('note-writing-workspace').onLayout({nativeEvent:{layout:{x:12,y:99,width,height}}}));
 async function drag(ui,dy,dx=0){const start=ui.fab.style();await ui.run(()=>{const button=ui.hosts.get('note-tools-toggle');button.onPressIn();button.onLongPress();const gesture=ui.fab.gesture;assert.equal(gesture._activateAfterLongPress,500);gesture._onStart({translationX:0,translationY:0});gesture._onUpdate({translationX:dx,translationY:dy});gesture._onEnd();gesture._onFinalize();});return start;}
 
+test('time tool requires a period for ambiguous input, preserves exact minutes and keeps the arrow in its own draggable space',async()=>{
+ const ui=await h.editorFixture();
+ try {
+  await ui.tool('time');
+  assert.equal(ui.fab.style().top,0);
+  assert.equal(flat(ui.hosts.get('note-tools-panel').style).paddingTop,48);
+  const before=await drag(ui,65,-90);
+  assert.equal(ui.fab.style().top,65);
+  assert.equal(ui.fab.style().left,before.left-90);
+  for(const [hour,minute,period,expected] of [
+   ['05','00','AM','05:00'],['05','02','PM','17:02'],
+   ['12','58','AM','00:58'],['12','59','PM','12:59'],
+   ['17','30',null,'17:30'],['00','30',null,'00:30'],
+  ]){
+   if(!ui.hosts.has('note-time-hour'))await ui.tool('time');
+   await ui.run(()=>ui.hosts.get('note-time-hour').onChangeText(hour));
+   await ui.run(()=>ui.hosts.get('note-time-minute').onChangeText(minute));
+   if(period){
+    await ui.tap('note-time-apply');
+    assert.match(ui.container.textContent,/Selecciona AM o PM para continuar/);
+    assert.ok(ui.hosts.has('note-time-picker'));
+    await ui.tap('time-period-'+period);
+   }
+   assert.equal(ui.hosts.get('note-time-preview').children,expected);
+   await ui.tap('note-time-apply');
+   await ui.tool('time');
+   assert.equal(ui.hosts.get('note-time-hour').value,expected.slice(0,2));
+   assert.equal(ui.hosts.get('note-time-minute').value,expected.slice(3));
+  }
+ } finally {await ui.close();}
+});
+
 test('definitive footer order, edge-aligned tray and floating ownership are independent of the sheet close recognizer',async()=>{
  for(const handedness of ['left','right']){const ui=await h.editorFixture({handedness});try{
   const children=ui.hosts.get('note-editor-footer').children;assert.equal(children[0].props.testID,'unified-note-save');assert.equal(children[1].props.testID,'note-microphone');assert.equal(children[2].props.accessibilityLabel,'Cerrar nota');assert.equal(flat(ui.hosts.get('note-editor-footer').style).flexDirection,handedness==='right'?'row':'row-reverse');

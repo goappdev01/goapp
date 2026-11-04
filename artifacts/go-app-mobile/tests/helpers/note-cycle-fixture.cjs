@@ -44,6 +44,7 @@ async function mountComponent(file,extraImports={},initialProps={}){
  const host=name=>React.forwardRef((props,ref)=>{hosts.set(props.testID||props.accessibilityLabel||name,props);React.useImperativeHandle(ref,()=>({scrollTo(){}}));return React.createElement('div',null,props.children);});
  const native={...life.rn,View:host('View'),Text:host('Text'),TextInput:host('Input'),ScrollView:host('ScrollView'),TouchableOpacity:host('Button'),Keyboard:{dismiss(){}},StyleSheet:{create:x=>x,absoluteFill:{}}};
  const imports={'react-native':native,'react-native-keyboard-controller':{KeyboardAvoidingView:host('KeyboardFrame')},'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},'@expo/vector-icons':{Feather:host('Feather')},'@/components/ui/GoCloseButton':{GoCloseButton:host('Close')},'@/components/ui/GoScreenCloseSurface':{GoScreenCloseSurface:host('Surface'),GoScreenCloseGuide:host('Guide')},...extraImports};
+ imports['@/components/ui/GoMinuteInput']=load('components/ui/GoMinuteInput.tsx',imports);
  const exports=load(file,imports),Component=Object.values(exports)[0];let props=initialProps;
  const render=async next=>{props={...props,...next};await settle(()=>root.render(React.createElement(Component,props)));};
  await render({});return{hosts,container,render,run:settle,close:()=>settle(()=>root.unmount())};

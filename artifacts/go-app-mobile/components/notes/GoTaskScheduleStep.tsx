@@ -3,6 +3,7 @@ import { Keyboard, ScrollView, Text, TextInput, TouchableOpacity, View } from "r
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
+import { GoTimePeriodButtons, manualTime, periodForHour, type TimePeriod } from "@/components/ui/GoMinuteInput";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoScreenCloseGuide, GoScreenCloseSurface } from "@/components/ui/GoScreenCloseSurface";
 
@@ -19,13 +20,13 @@ export function GoTaskScheduleStep({ step, dateLabel, time, duration, handedness
   const edited = useRef(false);
   const [pending, setPending] = useState(false);
   const [hour, setHour] = useState(time.split(":")[0] || "00"), [minute, setMinute] = useState(time.split(":")[1] || "00");
+  const [period,setPeriod]=useState<TimePeriod|null>(time?(Number(time.slice(0,2))>=12?"PM":"AM"):null);
   const [selected, setSelected] = useState(duration || "30m"), [error, setError] = useState("");
-  useEffect(() => { if (time) { setHour(time.split(":")[0]); setMinute(time.split(":")[1]); } }, [time]);
+  useEffect(() => { if (time) { setHour(time.split(":")[0]); setMinute(time.split(":")[1]); setPeriod(Number(time.slice(0,2))>=12?"PM":"AM"); } }, [time]);
   const clock = step !== "duration";
-  const exact = `${String(Number(hour)).padStart(2,"0")}:${String(Number(minute)).padStart(2,"0")}`;
-  const valid = /^\d{1,2}$/.test(hour) && /^\d{1,2}$/.test(minute) && Number(hour) <= 23 && Number(minute) <= 59;
-  const back = () => { if (locked.current) return; if (clock && edited.current && valid) onTime(exact); onBack(); };
-  const date = () => { if (locked.current) return; if (clock && edited.current && valid) onTime(exact); onDate(); };
+  const exact = manualTime(hour,minute,period);
+  const back = () => { if (!locked.current) onBack(); };
+  const date = () => { if (locked.current) return; if (clock && edited.current && exact) onTime(exact); onDate(); };
   return <GoScreenCloseSurface testID="note-schedule-step" handedness={handedness} onClose={back} enabled={!pending} scrollRefs={[scroll]}
     style={{ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, zIndex: 190,
       backgroundColor: "#0e0e10" }}>
@@ -40,12 +41,13 @@ export function GoTaskScheduleStep({ step, dateLabel, time, duration, handedness
             <View key={id as string} style={{ flex: 1, gap: 8 }}>
               <Text style={{ color: "#ffffff", fontSize: 13 }}>{label as string}</Text>
               <TextInput testID={id as string} accessibilityLabel={label as string} value={value as string}
-                onChangeText={value => { edited.current = true; (setter as (value: string) => void)(value); }} keyboardType="number-pad" maxLength={2} selectTextOnFocus
+                onChangeText={value => { edited.current = true; if(id==="note-hour")setPeriod(periodForHour(value)); (setter as (value: string) => void)(value); }} keyboardType="number-pad" maxLength={2} selectTextOnFocus
                 style={{ minHeight: 64, borderWidth: 1.5, borderColor: "rgba(255,255,255,0.5)", borderRadius: 12,
                   color: "#ffffff", fontSize: 30, textAlign: "center" }} />
             </View>)}
         </View>
-        <Text testID="note-exact-time" style={{ color: "#ffffff", fontSize: 28, textAlign: "center" }}>{exact}</Text>
+        <GoTimePeriodButtons value={period} invalid={!!error&&!period} onChange={value=>{setPeriod(value);setError("");}}/>
+        <Text testID="note-exact-time" style={{ color: "#ffffff", fontSize: 28, textAlign: "center" }}>{exact??hour.padStart(2,"0")+":"+minute.padStart(2,"0")}</Text>
       </> : <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
         {[["15m","15 minutos"],["30m","30 minutos"],["1h","1 hora"],["2h","2 horas"]].map(([value,label]) =>
           <TouchableOpacity key={value} testID={"note-duration-"+value} accessibilityRole="radio" accessibilityState={{checked:selected===value}}
@@ -57,9 +59,9 @@ export function GoTaskScheduleStep({ step, dateLabel, time, duration, handedness
       {!!error&&<Text accessibilityRole="alert" style={{color:"#fbbf24"}}>{error}</Text>}
       <TouchableOpacity testID="note-schedule-continue" accessibilityRole="button" disabled={pending} onPress={()=>{
         if(locked.current)return;
-        if(clock && !valid){setError("Introduce una hora entre 00:00 y 23:59.");return;}
+        if(clock && !exact){setError(Number(hour)>=1&&Number(hour)<=12&&!period?"Selecciona AM o PM para continuar":"Introduce una hora entre 00:00 y 23:59.");return;}
         locked.current=true;setPending(true);
-        if(clock){Keyboard.dismiss();onTime(exact);}
+        if(clock && exact){Keyboard.dismiss();onTime(exact);}
         else onDuration(selected);
       }} style={{minHeight:48,borderRadius:12,backgroundColor:"#6ee7b7",alignItems:"center",justifyContent:"center"}}>
         <Text style={{color:"#0e0e10",fontSize:15,fontWeight:"800"}}>CONTINUAR</Text>

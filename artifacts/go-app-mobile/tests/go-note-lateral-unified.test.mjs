@@ -32,7 +32,7 @@ test('numeric time supports exact two-digit values, rejects invalid ranges and r
  const ui=await h.editorFixture();try{
   for(const [hour,minute]of [['00','00'],['03','15'],['05','20'],['13','45'],['18','30'],['23','59']]){
    await ui.tool('time');for(const id of ['note-time-hour','note-time-minute']){assert.equal(ui.hosts.get(id).keyboardType,'number-pad');assert.equal(ui.hosts.get(id).maxLength,2);}
-   await edit(ui,'note-time-hour',hour);await edit(ui,'note-time-minute',minute);await focus(ui,'note-time-minute');await ui.back();assert.equal(ui.hosts.get('note-time-minute').value,minute);await ui.tap('note-time-apply');assert.equal(ui.keyboard.visible,false);assert.equal(ui.hosts.has('note-time-picker'),false);assert.match(ui.hosts.get('note-summary').children,new RegExp(hour+':'+minute));
+   await edit(ui,'note-time-hour',hour);await edit(ui,'note-time-minute',minute);if(Number(hour)>=1&&Number(hour)<=12)await ui.tap('time-period-AM');await focus(ui,'note-time-minute');await ui.back();assert.equal(ui.hosts.get('note-time-minute').value,minute);await ui.tap('note-time-apply');assert.equal(ui.keyboard.visible,false);assert.equal(ui.hosts.has('note-time-picker'),false);assert.match(ui.hosts.get('note-summary').children,new RegExp(hour+':'+minute));
   }
   for(const [hour,minute]of [['24','00'],['23','60'],['-1','00'],['','30']]){if(!ui.hosts.has('note-time-picker'))await ui.tool('time');await edit(ui,'note-time-hour',hour);await edit(ui,'note-time-minute',minute);await ui.tap('note-time-apply');assert.match(ui.container.textContent,/horas de 00 a 23/);assert.ok(ui.hosts.has('note-time-picker'));}
   await ui.tap('note-time-clear');assert.equal(ui.hosts.get('note-option-time').accessibilityState.selected,false);
