@@ -36,7 +36,7 @@ test('a failed disk write restores the source card and a new drag retries withou
 });
 
 test('a normal GO task without a unified note cannot be archived and account changes cannot commit a dragged private note',async()=>{
- const f=await setup();try{await f.disk.store.updateGoLog(rows=>({entries:rows.map(({note,...entry})=>entry),result:null}));f.render();let g=f.start();f.update(g);assert.equal(f.archive().props.dropActive,false);f.drop(g);assert.equal(f.calls.length,0);assert.equal(f.disk.rows.length,1);}finally{f.close();}
+ const f=await setup();try{await f.disk.store.updateGoLog(rows=>({entries:rows.map(({note,...entry})=>({...entry,intentKey:'accion_generica'})),result:null}));f.render();let g=f.start();f.update(g);assert.equal(f.archive().props.dropActive,false);f.drop(g);assert.equal(f.calls.length,0);assert.equal(f.disk.rows.length,1);}finally{f.close();}
  const owned=await setup();try{const g=owned.start();owned.update(g);await owned.disk.setUser('another-user');owned.drop(g);await assert.rejects(owned.ctx.pending);assert.equal(owned.disk.rows[0].note.destination,'pending');}finally{owned.close();}
 });
 
