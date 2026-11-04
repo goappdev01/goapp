@@ -26309,6 +26309,7 @@ function HomeScreenContent() {
       seed={{...unifiedNoteSeed,title:quickNoteText,content:quickNoteDetail}}
       onClose={state=>{cacheNoteDraft(state,unifiedNoteInitial?.id);setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}
       onSaved={openSavedNoteDestination}
+      onDelete={unifiedNoteInitial?deleteSavedNote:undefined}
       renderActions={renderSavedNoteActions}
       onSave={saveNoteDraft}/ >;
   }
@@ -26320,6 +26321,12 @@ function HomeScreenContent() {
         watchNoteReminderReceipt(result);
         if(!draft.original){setQuickNoteText("");setQuickNoteDetail("");void AsyncStorage.removeItem("go_task_draft_v1").catch(()=>{});}
         return result;
+  }
+  function deleteSavedNote(entry:GoEntry){
+    const identity=noteIdentityRef.current;
+    if(!identity.ready||!identity.scope||!noteInScope(entry,identity.scope))throw new Error("No se puede verificar el propietario de esta nota.");
+    if(goLog.filter(row=>row.id===entry.id).length!==1)throw new Error("La nota ya no está disponible. Actualiza la vista e inténtalo de nuevo.");
+    softDeleteGo(entry.id);
   }
   function watchNoteReminderReceipt(result:Awaited<ReturnType<typeof saveUnifiedNote>>){
     const identity=noteIdentityRef.current,expected=identity.scope;
@@ -26342,7 +26349,7 @@ function HomeScreenContent() {
     const scope=noteIdentity.scope;
     return <GoNoteEditor key={entry.id} visible initial={entry} scope={scope} ready={noteIdentity.ready} handedness={handedness}
       cached={unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+entry.id)}
-      onSave={saveNoteDraft} renderActions={renderSavedNoteActions} onGoToLanding={navigation?.onGoToLanding} closeRequested={navigation?.closeRequested}
+      onSave={saveNoteDraft} onDelete={deleteSavedNote} renderActions={renderSavedNoteActions} onGoToLanding={navigation?.onGoToLanding} closeRequested={navigation?.closeRequested}
       onClose={state=>{cacheNoteDraft(state,entry.id);onClose();}}/ >;
   }
   // Reuse the same task form inside Calendar or in its original standalone modal.

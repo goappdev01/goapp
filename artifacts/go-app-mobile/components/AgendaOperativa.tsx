@@ -61,7 +61,7 @@ import { trSector } from "@/data/goSectorTranslations";
 import { reservationCardPolicy } from "@/data/reservationCardPolicy";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "./GoEntryDetails";
 import { GoNoteArchiveColumn } from "./notes/GoNoteArchiveColumn";
-import { noteDocument } from "@/lib/unifiedNotes";
+import { isNoteEntry, noteDocument, noteEntryDestination } from "@/lib/unifiedNotes";
 import { noteRevealColumn } from "@/lib/goNoteNavigation";
 import { entryHeading, entryIdentity, entryIsReservation } from "@/data/goEntryPresentation";
 import { GoCloseButton } from "./ui/GoCloseButton";
@@ -1295,9 +1295,9 @@ export function AgendaBoard({
 
   // Called on every finger move — determine which column is under the finger
   // Also triggers edge-auto-scroll when near screen edges during drag
-  const canArchiveDrop=(itemId:string)=>{
+  const canMoveNoteFromCalendar=(itemId:string)=>{
     const rows=currentEntriesRef.current.filter(item=>item.id===itemId),item=rows[0],origin=dragItemRef.current;
-    return !!(onMoveNoteRef.current&&rows.length===1&&origin?.id===itemId&&noteDocument(item)&&!entryIsReservation(item)&&!item.deleted&&item.estado!=="rechazado"&&item.ownerUserId===origin.ownerUserId&&item.taskContext===origin.taskContext);
+    return !!(onMoveNoteRef.current&&rows.length===1&&origin?.id===itemId&&isNoteEntry(item)&&noteEntryDestination(item)!=="archive"&&!entryIsReservation(item)&&!item.deleted&&item.estado!=="rechazado"&&item.ownerUserId===origin.ownerUserId&&item.taskContext===origin.taskContext);
   };
   const canRestoreArchive=(itemId:string)=>{
     const rows=archiveEntriesRef.current.filter(item=>item.id===itemId),item=rows[0],origin=dragItemRef.current;
@@ -1333,8 +1333,10 @@ export function AgendaBoard({
     for (const col of allColumnsRef.current) {
       const lay = colLayouts.current[col.id];
       if (lay && relX >= lay.x && relX <= lay.x + lay.w) {
-        if(col.isNotes&&(!dragItemRef.current||!canArchiveDrop(dragItemRef.current.id)||!archiveContainsY(absY,lay)))break;
-        if(noteDocument(dragItemRef.current)?.destination==="archive"&&(!col.dateISO||!canRestoreArchive(dragItemRef.current!.id)||!archiveContainsY(absY,lay)))break;
+        const dragged=dragItemRef.current,destination=noteEntryDestination(dragged);
+        if(col.isNotes&&(!dragged||destination==="archive"||!canMoveNoteFromCalendar(dragged.id)||!archiveContainsY(absY,lay)))break;
+        if(destination==="archive"&&(!canRestoreArchive(dragged!.id)||(!col.dateISO&&!col.isRetrasados)||!archiveContainsY(absY,lay)))break;
+        if(col.isRetrasados&&destination&&destination!=="archive"&&destination!=="pending"&&(!dragged||!canMoveNoteFromCalendar(dragged.id)||!archiveContainsY(absY,lay)))break;
         found = col.id;
         break;
       }
@@ -1365,18 +1367,22 @@ export function AgendaBoard({
     floatOp.value = withTiming(0, { duration: 120 });
     floatSc.value = withSpring(1, { damping: 10, stiffness: 320 });
 
-    if(noteDocument(dragItemRef.current)?.destination==="archive"){
+    const dragged=dragItemRef.current,noteDestination=noteEntryDestination(dragged);
+    if(isNoteEntry(dragged)&&noteDestination&&onMoveNoteRef.current){
+      const targetDestination=targetCol?.isNotes?"archive":targetCol?.isRetrasados?"pending":targetCol?.dateISO?"calendar":null;
+      const source=noteDestination==="archive"?archiveEntriesRef.current:currentEntriesRef.current;
+      const current=source.find(item=>item.id===itemId);
+      const targetLayout=targetCol&&colLayouts.current[targetCol.id];
+      const eligible=noteDestination==="archive"?canRestoreArchive(itemId):canMoveNoteFromCalendar(itemId);
+      const movingCalendarDay=targetDestination==="calendar"&&!!targetCol?.dateISO&&!!current&&current.dateISO!==targetCol.dateISO;
       try{
-        if(targetCol?.dateISO&&canRestoreArchive(itemId)&&archiveContainsY(absY,colLayouts.current[targetCol.id])){
-          const current=archiveEntriesRef.current.find(item=>item.id===itemId)!;
-          onMoveNoteRef.current!(current,"calendar",{dateISO:targetCol.dateISO,time:current.note!.schedule.time});
+        if(current&&targetDestination&&(targetDestination!==noteDestination||movingCalendarDay)&&eligible&&targetLayout&&archiveContainsY(absY,targetLayout)){
+          if(targetDestination==="calendar"&&targetCol?.dateISO){
+            const time=itemTime||noteDocument(current)?.schedule.time||"";
+            onMoveNoteRef.current!(current,"calendar",{dateISO:targetCol.dateISO,time});
+          }else onMoveNoteRef.current!(current,targetDestination);
         }
       }finally{dragItemRef.current=null;setDragItem(null);setDragTargetColId(null);}
-      return;
-    }
-    if(targetCol?.isNotes&&canArchiveDrop(itemId)&&archiveContainsY(absY,colLayouts.current[targetCol.id])){
-      const current=currentEntriesRef.current.find(item=>item.id===itemId)!;
-      try{onMoveNoteRef.current!(current,"archive");}finally{dragItemRef.current=null;setDragItem(null);setDragTargetColId(null);}
       return;
     }
     if (targetCol?.dateISO) {

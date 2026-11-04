@@ -18,6 +18,15 @@ export type UnifiedNoteDraft = {
 };
 export const noteId = () => "note_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
 export const noteDocument = (entry?: GoEntry | null): NoteDocument | undefined => entry?.note?.version === 1 ? entry.note : undefined;
+/** Legacy personal notes predate NoteDocument v1 but still use the same stable GO identity. */
+export const isNoteEntry = (entry?: GoEntry | null): entry is GoEntry => !!entry && (
+  !!noteDocument(entry) ||
+  (entry.kind === "sent" && entry.type === "TAREA_INTERNA" && entry.intentKey === "nota_interna")
+);
+export const noteEntryDestination = (entry?: GoEntry | null): NoteDestination | null => {
+  if (!isNoteEntry(entry)) return null;
+  return noteDocument(entry)?.destination || (entry.dateISO ? "calendar" : "pending");
+};
 export const isArchivedNote = (entry: GoEntry) => noteDocument(entry)?.destination === "archive";
 export const noteInScope = (entry: GoEntry, scope: TaskScope) => entry.ownerUserId === scope.userId
   && (entry.taskContext ?? entry.actionContext ?? "live:USER") === scope.context;

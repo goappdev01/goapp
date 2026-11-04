@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { Keyboard, KeyboardAvoidingView, Linking, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View, type TextInputProps } from "react-native";
+import { Alert, Keyboard, KeyboardAvoidingView, Linking, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View, type TextInputProps } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
@@ -28,7 +28,7 @@ import { getNoteReminderProgress, subscribeNoteReminderProgress, startNoteSaveTr
 type Props = { visible:boolean; initial?:GoEntry|null; seed?:{title?:string;content?:string;destination?:NoteDestination;dateISO?:string;time?:string};
   scope:TaskScope|null; ready:boolean; handedness:"left"|"right"; cached?:UnifiedNoteDraft; onClose:(state?:{draft:UnifiedNoteDraft;saved:boolean})=>void;
   onSave:(draft:UnifiedNoteDraft)=>Promise<{entry:GoEntry;message:string;notice?:string;performance?:NoteSaveTrace}>;
-  onSaved?:(entry:GoEntry,notice:string)=>void;
+  onSaved?:(entry:GoEntry,notice:string)=>void; onDelete?:(entry:GoEntry)=>void|Promise<void>;
   onGoToLanding?:()=>void; closeRequested?:boolean; initialToolsOpen?:boolean; confirmScheduleOnSave?:boolean;
   renderActions?:(entry:GoEntry,onEdit:()=>void)=>React.ReactNode };
 const destinations: [NoteDestination,string][]=[["calendar","CALENDARIO"],["pending","PENDIENTES"],["archive","ARCHIVO"]];
@@ -36,13 +36,13 @@ const configurationKeys=["destination","dateISO","time","duration","place","loca
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 
 /** One ordinary-note editor, one native presenter, and one acknowledged save operation. */
-export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClose,onSave,onSaved,cached,renderActions,onGoToLanding,closeRequested=false,initialToolsOpen=false,confirmScheduleOnSave=false}:Props) {
+export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClose,onSave,onSaved,onDelete,cached,renderActions,onGoToLanding,closeRequested=false,initialToolsOpen=false,confirmScheduleOnSave=false}:Props) {
   const insets=useSafeAreaInsets(),scroll=useRef<React.ElementRef<typeof ScrollView>>(null),keyboard=useGoNoteKeyboard(visible);
   const [draft,setDraft]=useState<UnifiedNoteDraft>(()=>cached||noteDraft(initial)),[panel,setPanel]=useState(""),[error,setError]=useState(""),[message,setMessage]=useState("");
   const [busy,setBusy]=useState(false),[attachmentBusy,setAttachmentBusy]=useState(false),[link,setLink]=useState("");
   const [toolDraft,setToolDraft]=useState<UnifiedNoteDraft|null>(null),toolDraftRef=useRef(toolDraft);toolDraftRef.current=toolDraft;
   const pendingTool=useRef<NoteToolEdit<Partial<UnifiedNoteDraft>>|null>(null),persistedEntry=useRef(cached?.original&&cached.id===initial?.id?cached.original:initial||null);
-  const toolCloseLock=useRef(false),[toolFinishing,setToolFinishing]=useState(false);
+  const toolCloseLock=useRef(false),deleteLock=useRef(false),[toolFinishing,setToolFinishing]=useState(false);
   const pendingCommit=useRef<Partial<UnifiedNoteDraft>|null>(null);
   const [locationSource,setLocationSource]=useState<"current"|"manual"|null>(null);
   const [toolsOpen,setToolsOpen]=useState(initialToolsOpen),[writingHeight,setWritingHeight]=useState(240);
@@ -199,11 +199,14 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   };
   async function persistConfiguration(patch:Partial<UnifiedNoteDraft>):Promise<boolean>{
     if(saveLock.current||workLock.current||savedExit.current)return false;
-    const next={...draftRef.current,...patch};
+    // Removing the date from a scheduled note must also move it to PENDIENTES;
+    // CALENDARIO requires a date, so never persist an invalid calendar note.
+    const appliedPatch=patch.dateISO===""&&draftRef.current.destination==="calendar"?{...patch,destination:"pending" as const}:patch;
+    const next={...draftRef.current,...appliedPatch};
     // A restore with missing schedule is a pending destination change, including its recovered local draft.
     // Only the main GUARDAR may confirm that transition; ordinary note-tool autosaves are unchanged.
     const unconfirmedSchedule=confirmScheduleOnSave||(cached?.original?.note?.destination==="archive"&&cached.destination==="calendar");
-    if(!persistedEntry.current||unconfirmedSchedule&&next.destination==="calendar"){change(patch);return true;}
+    if(!persistedEntry.current||unconfirmedSchedule&&next.destination==="calendar"){change(appliedPatch);return true;}
     const original=persistedEntry.current,base=noteDraft(original),configured={...base};
     for(const key of configurationKeys)Object.assign(configured,{[key]:next[key]});
     if(configurationKeys.every(key=>same(base[key],configured[key])))return true;
@@ -215,7 +218,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       const result=await onSave(operationDraft(configured));
       if(!latest.current.visible||latest.current.id!==id||latest.current.scope?.userId!==expected.userId||latest.current.scope?.context!==expected.context)return false;
       persistedEntry.current=result.entry;
-      change({...patch,original:result.entry});
+      change({...appliedPatch,original:result.entry});
       requestAnimationFrame(()=>result.performance?.mark("visible"));
       saved.current=same(draftRef.current.title,noteDraft(result.entry).title)&&same(draftRef.current.content,noteDraft(result.entry).content);
       setFloatingNotice(result.notice?.includes("revisa")?result.notice:"Configuración guardada.");return true;
@@ -307,6 +310,17 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
     return <React.Fragment key={key}>{choice(item[key][0],()=>void openTool(key),item[key][1],"note-option-"+key,true)}</React.Fragment>;
   });
   const applyTool=(patch:Partial<UnifiedNoteDraft>)=>{void finishTool(patch);};
+  const requestDeleteNote=()=>{
+    const entry=persistedEntry.current||initial;if(!entry||!onDelete||deleteLock.current)return;
+    Alert.alert("Eliminar nota","¿Quieres eliminar esta nota? Podrás recuperarla desde Eliminados.",[
+      {text:"Cancelar",style:"cancel"},
+      {text:"ELIMINAR NOTA",style:"destructive",onPress:()=>{
+        if(deleteLock.current)return;deleteLock.current=true;setError("");
+        void Promise.resolve().then(()=>onDelete(entry)).then(()=>onClose({draft:draftRef.current,saved:true})).catch(error=>setError(error instanceof Error?error.message:"No se ha podido eliminar la nota."))
+          .finally(()=>{deleteLock.current=false;});
+      }},
+    ]);
+  };
   const working=toolDraft||draft;
   const recordPending=(key:"time"|"duration"|"reminderMinutes",edit:NoteToolEdit<string|number>)=>{const next={changed:edit.changed,error:edit.error,value:edit.value===undefined?undefined:{[key]:edit.value}};if(pendingTool.current&&!same(pendingTool.current,next))pendingCommit.current=null;pendingTool.current=next;};
   if(!visible)return null;
@@ -371,6 +385,9 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
             style={[s.choice,s.destination,{calendar:s.calendar,pending:s.pending,archive:s.archive}[value],draft.destination===value&&[s.selectedDestination,{backgroundColor:{calendar:"#23674f",pending:"#806017",archive:"#315f9c"}[value]}]]}><LinearGradient pointerEvents="none" colors={draft.destination===value?["rgba(255,255,255,0.08)","rgba(0,0,0,0.07)"]:["rgba(255,255,255,0.55)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,s.buttonSheen]}/><Text testID={"note-destination-label-"+value} maxFontSizeMultiplier={1.3} style={[s.destinationText,draft.destination===value&&s.destinationActiveText]}>{label}</Text>{draft.destination===value&&<Text testID="note-destination-selected" maxFontSizeMultiplier={1.3} style={{color:"#ffffff",fontSize:11,fontWeight:"800",textAlign:"center",marginTop:3}}>✓ SELECCIONADO</Text>}</TouchableOpacity>)}</View></>}
           {panel==="destinations"&&<GoNoteToolFooter testID="note-destination-save" disabled={busy||toolFinishing} handedness={handedness} onSave={()=>{if(!draftRef.current.destination){setError("Selecciona CALENDARIO, PENDIENTES o ARCHIVO.");return;}void finishTool({destination:draftRef.current.destination});}}/>}
           {!panel&&<>
+            {!!initial&&!!onDelete&&<TouchableOpacity testID="note-delete" accessibilityRole="button" accessibilityLabel="Eliminar nota" accessibilityHint="Solicita confirmación antes de mover esta nota a Eliminados" disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPress={requestDeleteNote} activeOpacity={0.78} style={[s.choice,s.deleteNote]}>
+              <Feather name="trash-2" size={16} color="#ffffff"/><Text style={s.deleteNoteText}>ELIMINAR NOTA</Text>
+            </TouchableOpacity>}
             <TouchableOpacity testID="note-security-info" accessibilityRole="button" accessibilityLabel="NOTA DE SEGURIDAD, no disponible, información" activeOpacity={0.78} onPress={()=>setFloatingNotice("Aún no disponible: falta validar el cifrado y el acceso seguro de las notas.")} style={[s.choice,s.security]}><LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.65)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,s.buttonSheen]}/><Feather name="lock" color="#323b44" size={16}/><View style={{flex:1}}><Text maxFontSizeMultiplier={1.5} style={s.securityText}>NOTA DE SEGURIDAD</Text><Text maxFontSizeMultiplier={1.5} style={[s.hint,{fontSize:11,textAlign:"center"}]}>No disponible</Text></View></TouchableOpacity>
             {!!(draft.dateISO||draft.time||draft.duration||draft.place)&&<Text testID="note-summary" style={s.hint}>{[validNoteDate(draft.dateISO)?noteDateLabel(draft.dateISO):draft.dateISO?"Fecha no válida":"",draft.time,noteDurationLabel(draft.duration),draft.place].filter(Boolean).join(" · ")}</Text>}
           </>}
@@ -406,7 +423,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
 const s=StyleSheet.create({keyboardBack:{position:"absolute",width:44,height:44,alignItems:"center",justifyContent:"center",borderRadius:10,backgroundColor:"#eaf0f3"},root:{flex:1,backgroundColor:"#FAFAF7"},header:{justifyContent:"center",alignItems:"center",minHeight:44},heading:{color:"#18212a",fontSize:20,fontWeight:"800",textAlign:"center",width:"100%"},
   workspace:{flex:1,minHeight:0},writing:{flex:1},field:{gap:6,flexShrink:0},label:{color:"#424b55",fontSize:12,fontWeight:"700"},input:{minHeight:48,color:"#17212b",fontSize:16,borderWidth:1.5,borderColor:"#9aa3ad",backgroundColor:"rgba(255,255,255,0.86)",borderRadius:12,padding:12},content:{borderColor:"#b8bfc5",fontSize:17},
   number:{fontSize:28,textAlign:"center",minHeight:64},row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:8},choice:{minHeight:44,paddingVertical:8,paddingHorizontal:10,borderWidth:1,borderColor:"#adbac3",borderTopColor:"#ffffff",borderBottomColor:"#a0afb9",backgroundColor:"rgba(231,237,242,0.96)",borderRadius:12,justifyContent:"center",width:"100%",shadowColor:"#2b3d45",shadowOpacity:0.13,shadowRadius:5,shadowOffset:{width:0,height:3},elevation:3},buttonSheen:{borderRadius:12},choiceText:{textAlign:"center",fontWeight:"500"},configured:{borderColor:"#16834a",backgroundColor:"rgba(212,243,222,0.90)"},destinationList:{gap:8},destination:{width:"100%"},calendar:{backgroundColor:"rgba(199,236,224,0.90)",borderColor:"#84ab9e"},pending:{backgroundColor:"rgba(255,239,168,0.90)",borderColor:"#b5a15c"},archive:{backgroundColor:"rgba(211,229,255,0.90)",borderColor:"#93adc9"},selectedDestination:{borderColor:"#446657",borderWidth:2.5,shadowOpacity:0.24,shadowRadius:7,shadowOffset:{width:0,height:4},elevation:6,transform:[{translateY:-1}]},destinationText:{color:"#17212b",fontSize:13,fontWeight:"700",textAlign:"center"},destinationActiveText:{color:"#ffffff"},
-  text:{color:"#17212b",fontSize:13,flexShrink:1},hint:{color:"#515d69",fontSize:12},warning:{color:"#8a3d0a",fontSize:13,paddingVertical:6},success:{color:"#146339",fontSize:13,paddingVertical:6},section:{gap:10,padding:8,borderWidth:1.5,borderColor:"#aeb8bf",borderRadius:12},
+  text:{color:"#17212b",fontSize:13,flexShrink:1},hint:{color:"#515d69",fontSize:12},warning:{color:"#8a3d0a",fontSize:13,paddingVertical:6},success:{color:"#146339",fontSize:13,paddingVertical:6},section:{gap:10,padding:8,borderWidth:1.5,borderColor:"#aeb8bf",borderRadius:12},deleteNote:{flexDirection:"row",gap:8,backgroundColor:"#b4232f",borderColor:"#8f1d28",minHeight:48},deleteNoteText:{color:"#ffffff",fontSize:13,fontWeight:"800",textAlign:"center"},
   tools:{position:"absolute",bottom:0,maxHeight:"100%",borderWidth:1,borderColor:"#b2bdc5",borderRadius:20,backgroundColor:"rgba(249,252,251,0.97)",zIndex:5,shadowColor:"#2b3d45",shadowOpacity:0.17,shadowRadius:16,shadowOffset:{width:0,height:6},elevation:5},toolsToggle:{width:44,height:48,alignItems:"center",justifyContent:"center",borderRadius:14,borderWidth:1,borderColor:"#a5b0b8",backgroundColor:"rgba(233,239,243,0.94)",zIndex:6,shadowColor:"#2b3d45",shadowOpacity:0.14,shadowRadius:6,shadowOffset:{width:0,height:3},elevation:3},
   icon:{width:44,height:44,alignItems:"center",justifyContent:"center"},attachment:{flexDirection:"row",alignItems:"center",gap:8,borderWidth:1.5,borderColor:"#aeb8bf",paddingHorizontal:10,borderRadius:10},
   security:{flexDirection:"row",alignItems:"center",gap:6},securityText:{color:"#323b44",fontSize:11,fontWeight:"600",textAlign:"center",flexShrink:1},floating:{position:"absolute",left:12,right:12,padding:14,borderRadius:14,borderWidth:1.5,borderColor:"#89949d",backgroundColor:"#eef2f4",zIndex:20},

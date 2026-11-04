@@ -29,6 +29,65 @@ test('the actual card drag finalizer targets the laid-out day once; cancellation
  await disk.api().moveUnifiedNote(entry,'calendar',disk.scope,disk.active,{dateISO:drops[0][1],time:'05:20'});assert.equal(disk.rows.length,1);assert.equal(disk.rows[0].id,entry.id);assert.equal(disk.rows[0].time,'05:20');
  }finally{disk.close();}
 });
+test('the shared native note drag supports all six moves between Calendar, Pending and Archive, including a legacy note',async()=>{
+ const disk=await h.diskFixture();try{
+  const {entry:archived}=await disk.api().saveUnifiedNote(disk.draft({destination:'archive',id:'archived-drag',dateISO:'2027-01-12',time:'17:30'}),disk.scope,disk.active);
+  const {entry:pending}=await disk.api().saveUnifiedNote(disk.draft({destination:'pending',id:'pending-drag'}),disk.scope,disk.active);
+  const {entry:calendar}=await disk.api().saveUnifiedNote(disk.draft({destination:'calendar',id:'calendar-drag',dateISO:'2027-01-10',time:'17:30'}),disk.scope,disk.active);
+  const legacy={id:'legacy-note',kind:'sent',type:'TAREA_INTERNA',intentKey:'nota_interna',intentLabel:'Tarea interna',ownerUserId:disk.scope.userId,taskContext:disk.scope.context,estado:'pendiente',notes:'Nota antigua',detail:'Conservar la nota anterior',dateISO:'2027-01-11',time:'16:00',duration:'30min'};
+  assert.equal(disk.model.noteEntryDestination(legacy),'calendar');
+  const cases=[
+   {name:'calendar to pending',entry:calendar,destination:'pending',source:'calendar'},
+   {name:'pending to calendar',entry:pending,destination:'calendar',source:'pending'},
+   {name:'calendar to archive (legacy)',entry:legacy,destination:'archive',source:'calendar'},
+   {name:'pending to archive',entry:pending,destination:'archive',source:'pending'},
+   {name:'archive to calendar',entry:archived,destination:'calendar',source:'archive'},
+   {name:'archive to pending',entry:archived,destination:'pending',source:'archive'},
+  ];
+  for(const scenario of cases){
+   const app=fixture({now:'2027-01-01T12:00:00'}),{AgendaBoard}=app.load('components/AgendaOperativa.tsx'),moves=[];
+   const props={goLog:scenario.source==='archive'?[]:[scenario.entry],archiveNotes:scenario.source==='archive'?[scenario.entry]:[],onOpenNote(){},onMoveNote:(...args)=>moves.push(args),viewMode:'mes_lineal',calViewMonth:'2027-01'};
+   const tree=app.render(AgendaBoard,props),columns=nodes(tree,n=>n.props.key&&n.props.onLayout&&style(n.props.style)?.width);let x=0,targetX,archiveView;
+   for(const col of columns){const width=style(col.props.style).width;col.props.onLayout({nativeEvent:{layout:{x,width,y:0,height:500}}});if((scenario.destination==='calendar'&&col.props.key==='day_2027-01-15')||(scenario.destination==='pending'&&col.props.key==='retrasados')||(scenario.destination==='archive'&&col.props.key==='notes'))targetX=x+width/2;x+=width+10;}
+   assert.ok(targetX,scenario.name+': destination column was laid out');
+   let card=nodes(tree,n=>n.type==='GestureDetector'&&n.props.key===scenario.entry.id)[0];
+   if(!card&&scenario.source==='archive'){
+    archiveView=nodes(tree,n=>n.type?.name==='GoNoteArchiveColumn')[0];assert.ok(archiveView,scenario.name+': archive column rendered');
+    card=nodes(archiveView.type(archiveView.props),n=>n.type==='GestureDetector'&&n.props.key===scenario.entry.id)[0];
+   }
+   assert.ok(card,scenario.name+': actual note drag recognizer rendered');
+   const pan=card.props.gesture,event={absoluteX:targetX,absoluteY:200,y:18,velocityX:0};pan._onStart(event);pan._onUpdate(event);pan._onFinalize(event,true);
+   assert.equal(moves.length,1,scenario.name+': one shared drag dispatch');assert.equal(moves[0][0].id,scenario.entry.id);assert.equal(moves[0][1],scenario.destination);
+   if(scenario.destination==='calendar'){assert.equal(moves[0][2].dateISO,'2027-01-15');assert.equal(moves[0][2].time,scenario.entry.time||scenario.entry.note?.schedule.time||'');}
+   assert.equal(disk.rows.length,3,'dragging legacy/current notes must not write or duplicate data itself');
+  }
+ }finally{disk.close();}
+});
+test('existing calendar note can remove its date by moving to pending and can remove its time without losing its date',async()=>{
+ const disk=await h.diskFixture();try{
+  const {entry}=await disk.api().saveUnifiedNote(disk.draft({destination:'calendar',id:'clear-date-time',dateISO:'2027-01-12',time:'19:45'}),disk.scope,disk.active);
+  const dateEditor=await h.editorFixture({initial:entry,onSave:d=>disk.api().saveUnifiedNote(d,disk.scope,disk.active)});try{
+   await dateEditor.tool('date');assert.ok(dateEditor.hosts.has('note-date-clear'));await dateEditor.tap('note-date-clear');await dateEditor.idle();
+   assert.equal(disk.rows[0].note.destination,'pending');assert.equal(disk.rows[0].note.schedule.dateISO,'');assert.equal(disk.rows[0].id,entry.id);
+  }finally{await dateEditor.close();}
+  const restored=await disk.api().moveUnifiedNote(disk.rows[0],'calendar',disk.scope,disk.active,{dateISO:'2027-01-12',time:'19:45'});
+  const timeEditor=await h.editorFixture({initial:restored.entry,onSave:d=>disk.api().saveUnifiedNote(d,disk.scope,disk.active)});try{
+   await timeEditor.tool('time');assert.ok(timeEditor.hosts.has('note-time-clear'));await timeEditor.tap('note-time-clear');await timeEditor.idle();
+   assert.equal(disk.rows.length,1);assert.equal(disk.rows[0].note.schedule.time,'');assert.equal(disk.rows[0].note.schedule.dateISO,'2027-01-12');assert.equal(disk.rows[0].id,entry.id);
+  }finally{await timeEditor.close();}
+ }finally{disk.close();}
+});
+test('existing note offers red delete action in tools and only soft deletes after explicit confirmation',async()=>{
+ const disk=await h.diskFixture();try{
+  const {entry}=await disk.api().saveUnifiedNote(disk.draft({destination:'archive',id:'delete-note-confirm'}),disk.scope,disk.active),deleted=[];
+  const ui=await h.editorFixture({initial:entry,onDelete:async item=>deleted.push(item.id)});try{
+   if(!ui.hosts.get('note-tools-toggle').accessibilityState.expanded)await ui.tap('note-tools-toggle');
+   const action=ui.hosts.get('note-delete');assert.ok(action);assert.equal(action.accessibilityLabel,'Eliminar nota');assert.match(JSON.stringify(action.style),/b4232f/i);
+   await ui.tap('note-delete');assert.equal(deleted.length,0);assert.equal(ui.alerts.length,1);assert.equal(ui.alerts[0].buttons.at(-1).style,'destructive');assert.equal(ui.alerts[0].buttons.at(-1).text,'ELIMINAR NOTA');
+   await ui.run(()=>ui.alerts[0].buttons.at(-1).onPress());await ui.idle();assert.deepEqual(deleted,[entry.id]);assert.equal(ui.calls.filter(call=>call[0]==='close').length,1);
+  }finally{await ui.close();}
+ }finally{disk.close();}
+});
 test('Home scheduling opens the same note editor, preserves content on cancellation, and never runs booking or generic GO writes',async()=>{
  const disk=await h.diskFixture();try{const {entry}=await disk.api().saveUnifiedNote(disk.draft({destination:'pending'}),disk.scope,disk.active);
  const source=fs.readFileSync('app/index.tsx','utf8'),ast=h.ts.createSourceFile('home.tsx',source,h.ts.ScriptTarget.Latest,true,h.ts.ScriptKind.TSX),all=[];function visit(n){all.push(n);h.ts.forEachChild(n,visit);}visit(ast);
@@ -68,7 +127,7 @@ test('the real saved-note Home renderer reuses the editor/save path without clea
  const disk=await h.diskFixture();try{
   const {entry}=await disk.api().saveUnifiedNote(disk.draft({content:'Nota existente',time:'19:30'}),disk.scope,disk.active),source=fs.readFileSync('app/index.tsx','utf8'),tree=h.ts.createSourceFile('home.tsx',source,h.ts.ScriptTarget.Latest,true,h.ts.ScriptKind.TSX),all=[];function visit(n){all.push(n);h.ts.forEachChild(n,visit);}visit(tree);
   const functions=['renderExistingNote','saveNoteDraft','cacheNoteDraft'].map(name=>{const fn=all.find(n=>h.ts.isFunctionDeclaration(n)&&n.name?.text===name);assert.ok(fn);return fn.getText(tree);}).join('\n');
-  const calls=[],identity={ready:true,scope:disk.scope},creation=disk.draft({content:'Borrador de otra nota'}),cache={current:{scope:JSON.stringify(disk.scope),draft:creation}},edits={current:new Map()},ctx={watchNoteReminderReceipt(){},React:h.React,GoNoteEditor:'Editor',noteIdentity:identity,noteIdentityRef:{current:identity},handedness:'left',unifiedNoteCache:cache,unifiedNoteEditCache:edits,renderSavedNoteActions(){},saveUnifiedNote:disk.api().saveUnifiedNote,AsyncStorage:{removeItem:async key=>calls.push(['remove',key])},setQuickNoteText:text=>calls.push(['title',text]),setQuickNoteDetail:text=>calls.push(['detail',text])};
+  const calls=[],identity={ready:true,scope:disk.scope},creation=disk.draft({content:'Borrador de otra nota'}),cache={current:{scope:JSON.stringify(disk.scope),draft:creation}},edits={current:new Map()},ctx={watchNoteReminderReceipt(){},React:h.React,GoNoteEditor:'Editor',noteIdentity:identity,noteIdentityRef:{current:identity},handedness:'left',unifiedNoteCache:cache,unifiedNoteEditCache:edits,renderSavedNoteActions(){},deleteSavedNote:entry=>calls.push(['delete',entry.id]),saveUnifiedNote:disk.api().saveUnifiedNote,AsyncStorage:{removeItem:async key=>calls.push(['remove',key])},setQuickNoteText:text=>calls.push(['title',text]),setQuickNoteDetail:text=>calls.push(['detail',text])};
   vm.runInNewContext(h.compile(functions+';globalThis.renderExisting=renderExistingNote;'),ctx);const element=ctx.renderExisting(entry,()=>calls.push(['close']),{onGoToLanding:()=>calls.push(['landing'])});assert.equal(element.props.initial.id,entry.id);assert.equal(element.props.handedness,'left');assert.equal(element.props.visible,true);
   const ui=await h.editorFixture({initial:element.props.initial,scope:element.props.scope,onSave:element.props.onSave});try{await ui.pickTime('20','00');await ui.idle();assert.equal(disk.rows.length,1);assert.equal(disk.rows[0].note.schedule.time,'20:00');assert.equal(calls.length,0);assert.equal(cache.current.draft.id,creation.id);
    const draft={...disk.model.noteDraft(disk.rows[0]),content:'Texto recuperable'};element.props.onClose({draft,saved:false});assert.equal(edits.current.get(JSON.stringify(disk.scope)+':'+entry.id).content,'Texto recuperable');assert.equal(cache.current.draft.content,'Borrador de otra nota');assert.equal(calls.at(-1)[0],'close');

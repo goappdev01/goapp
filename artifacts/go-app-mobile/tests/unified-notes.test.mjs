@@ -33,6 +33,17 @@ test('editing and destination moves retain legacy independent reminder offsets a
  }finally{f.close();}
 });
 
+test('legacy personal notes migrate in place across all three destinations without losing ID or original fields',async()=>{
+ const f=await h.diskFixture();try{
+  const legacy={id:'legacy-note-id',kind:'sent',type:'TAREA_INTERNA',intentKey:'nota_interna',intentLabel:'Tarea interna',ownerUserId:f.scope.userId,taskContext:f.scope.context,actionContext:f.scope.context,estado:'pendiente',createdAt:123,notes:'Nota antigua',detail:'Contenido heredado',place:'Lugar anterior',dateISO:'2027-12-30',date:'30/12/2027',time:'18:30',duration:'45min',reminders:[20,5]};
+  await f.store.updateGoLog(rows=>({entries:[legacy,...rows],result:null}));
+  assert.equal(f.model.isNoteEntry(legacy),true);assert.equal(f.model.noteEntryDestination(legacy),'calendar');
+  let result=await move(f.api(),legacy,'archive',f.scope,f.active);assert.equal(result.entry.id,legacy.id);assert.equal(result.entry.note.destination,'archive');assert.equal(result.entry.notes,legacy.notes);assert.equal(result.entry.detail,legacy.detail);assert.equal(result.entry.createdAt,legacy.createdAt);assert.equal(f.rows.length,1);
+  result=await move(f.api(),result.entry,'pending',f.scope,f.active);assert.equal(result.entry.id,legacy.id);assert.equal(result.entry.note.destination,'pending');assert.equal(result.entry.place,legacy.place);assert.equal(f.rows.length,1);
+  result=await move(f.api(),result.entry,'calendar',f.scope,f.active,{dateISO:'2027-12-31',time:'19:00'});assert.equal(result.entry.id,legacy.id);assert.equal(result.entry.note.destination,'calendar');assert.equal(result.entry.dateISO,'2027-12-31');assert.equal(result.entry.time,'19:00');assert.equal(result.entry.detail,legacy.detail);assert.equal(f.rows.length,1);
+ }finally{f.close();}
+});
+
 test('full note retains content, location, exact schedule, attachments and native reminder after reload and edit',async()=>{
  const f=await h.diskFixture();try{const draft=f.draft({destination:'calendar',title:'Título completo',content:'Párrafo uno\nPárrafo dos',dateISO:'2027-12-30',time:'18:30',duration:'2h',reminderMinutes:75,place:'Dirección',location:{latitude:38,longitude:-1}});
   const asset=await f.sourceFile();draft.attachments=[await f.fileApi.importNoteFile(f.scope,draft.id,asset),{id:'web',kind:'link',name:'Referencia',uri:'https://example.com/manual'}];
