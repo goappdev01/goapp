@@ -4271,13 +4271,38 @@ function HomeScreenContent() {
   const [noteDetailCloseRequested, setNoteDetailCloseRequested] = useState(false);
   const [noteReminderTargetId, setNoteReminderTargetId] = useState<string | null>(null);
   const [noteReminderBusy, setNoteReminderBusy] = useState(false);
+  type UnifiedNoteOrigin = "landing" | "calendar" | "list";
   const [unifiedNoteInitial,setUnifiedNoteInitial]=useState<GoEntry|null>(null);
-  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;toolsOpen?:boolean;confirmSchedule?:boolean}>({});
+  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;title?:string;content?:string;toolsOpen?:boolean;confirmSchedule?:boolean}>({});
+  const unifiedNoteOriginRef=useRef<UnifiedNoteOrigin>("landing");
   const unifiedNoteCache=useRef<{scope:string;draft:UnifiedNoteDraft}|null>(null);
   const unifiedNoteEditCache=useRef(new Map<string,UnifiedNoteDraft>());
-  const openUnifiedNote=(entry:GoEntry,seed:typeof unifiedNoteSeed={})=>{
+  const openUnifiedNote=(entry:GoEntry,seed:typeof unifiedNoteSeed={},origin:UnifiedNoteOrigin="landing")=>{
+    unifiedNoteOriginRef.current=origin;
     setUnifiedNoteInitial(entry);setUnifiedNoteSeed(seed);setNotesOpen(true);
   };
+  function openUnifiedNoteComposer(seed:typeof unifiedNoteSeed={},origin:UnifiedNoteOrigin="landing"){
+    unifiedNoteOriginRef.current=origin;
+    setUnifiedNoteInitial(null);setUnifiedNoteSeed(seed);setNotesOpen(true);
+  }
+  function openQuickNoteFrom(origin:Extract<UnifiedNoteOrigin,"calendar"|"list">,kind:"NOTA_INTERNA"|"NOTA_EXTERNA",title:string,dateISO?:string){
+    // An external note created while a GO is actively being composed belongs
+    // to that GO; preserve its established attachment flow and permissions.
+    if(kind==="NOTA_EXTERNA"&&(isActivelyCreating||categorySelected)){
+      openFieldSelector(kind,title,"",dateISO);
+      return;
+    }
+    openUnifiedNoteComposer({title,...(dateISO?{dateISO}:{})},origin);
+  }
+  function handleUnifiedNoteSaved(entry:GoEntry,notice:string){
+    const origin=unifiedNoteOriginRef.current;
+    unifiedNoteOriginRef.current="landing";
+    if(origin==="list"){
+      showToast(notice,"success");
+      return;
+    }
+    openSavedNoteDestination(entry,notice);
+  }
   const moveNoteDestination=(entry:GoEntry,destination:NoteDestination,schedule?:{dateISO:string;time?:string})=>{
     if(schedule){const current=noteIdentityRef.current;if(!current.ready||!current.scope||!noteInScope(entry,current.scope)){showToast("La cuenta o el calendario han cambiado. Vuelve a abrir la nota.","error");return;}}
     const time=schedule?.time??entry.note?.schedule.time??"";
@@ -20570,7 +20595,7 @@ function HomeScreenContent() {
                 const text = calQuickCreateText.trim();
                 setCalQuickCreateText("");
                 setCalQuickCreateOpen(false);
-                openFieldSelector(kind, text, "", dateISODraft || formatISODate(getToday()));
+                openQuickNoteFrom("calendar",kind,text,dateISODraft || formatISODate(getToday()));
               };
               return (
                 <View
@@ -22487,7 +22512,7 @@ function HomeScreenContent() {
               const text = quickCreateText.trim();
               setQuickCreateText("");
               setQuickCreateOpen(false);
-              openFieldSelector(kind, text);
+              openQuickNoteFrom("list",kind,text);
             };
             return (
               <View style={{ width: "100%" }}>
@@ -25518,7 +25543,7 @@ function HomeScreenContent() {
                         activeOpacity={0.8}
                         onPress={() => {
                           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                          openFieldSelector(o.kind as "NOTA_INTERNA" | "NOTA_EXTERNA", "", "", calAddDateISO || undefined);
+                          openQuickNoteFrom("calendar",o.kind,"",calAddDateISO || undefined);
                         }}
                         style={{
                           flex: 1, borderRadius: 14, padding: 14,
@@ -26296,9 +26321,9 @@ function HomeScreenContent() {
       initialToolsOpen={unifiedNoteSeed.toolsOpen===true}
       confirmScheduleOnSave={unifiedNoteSeed.confirmSchedule===true}
       cached={unifiedNoteInitial?unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+unifiedNoteInitial.id):unifiedNoteCache.current?.scope===JSON.stringify(scope)?unifiedNoteCache.current.draft:undefined}
-      seed={{...unifiedNoteSeed,title:quickNoteText,content:quickNoteDetail}}
-      onClose={state=>{cacheNoteDraft(state,unifiedNoteInitial?.id);setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}
-      onSaved={openSavedNoteDestination}
+      seed={{...unifiedNoteSeed,title:unifiedNoteSeed.title??quickNoteText,content:unifiedNoteSeed.content??quickNoteDetail}}
+      onClose={state=>{cacheNoteDraft(state,unifiedNoteInitial?.id);if(!state?.saved)unifiedNoteOriginRef.current="landing";setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}
+      onSaved={handleUnifiedNoteSaved}
       onDelete={unifiedNoteInitial?deleteSavedNote:undefined}
       renderActions={renderSavedNoteActions}
       onSave={saveNoteDraft}/ >;
