@@ -104,7 +104,8 @@ interface GoReservasConfigScreenProps {
   onOpenMessage?: (entry:GoEntry,returnTo?:()=>void)=>void;
   onResolveEntry?: (entry:GoEntry,status:"done"|"pending"|"discard",current?:()=>GoEntry|undefined)=>void;
   canResolveEntry?: (entry:GoEntry)=>boolean;
-  onProposeBookingChange?: (entry:GoEntry)=>void;
+  onDropBooking?: (entry:GoEntry,destination:{dateISO:string;time:string})=>void;
+  onProposeBookingChange?: (entry:GoEntry,destination?:{dateISO:string;time:string})=>void;
   onOpenVerificacion?:    () => void;
   onOpenCalendarPanel?:   () => void;
   onOpenGo?:              () => void;
@@ -155,7 +156,7 @@ export function GoReservasDemoScreen(props: GoReservasConfigScreenProps) {
   });
 }
 
-function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, onProposeBookingChange, onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot, liveBookingMutate }: GoReservasConfigScreenProps & {
+function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, onProposeBookingChange, onDropBooking, onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot, liveBookingMutate }: GoReservasConfigScreenProps & {
   allGoLog: GoEntry[];
   setGoLog: React.Dispatch<React.SetStateAction<GoEntry[]>>;
   demoStore?: BusinessDemoStore;
@@ -629,7 +630,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
         )}
 
         {viewMode === "calendario" && (
-          <AgendaBoard onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness}
+          <AgendaBoard onDropBooking={onDropBooking ?? onProposeBookingChange} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness}
             goLog={filteredLog}
             bookingProfessionalId={liveProfessionals.some(person=>person.id===selectedPro)?selectedPro:undefined}
             embedded

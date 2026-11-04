@@ -29,11 +29,12 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
   test(device + ": a quick tap opens the card, the long press owns the drag, and only release moves it", () => {
     const app = fixture({ platform: "ios", viewport: { width, height, fontScale: 1 }, now: date + "T08:00:00" });
     const { AgendaBoard } = app.load("components/AgendaOperativa.tsx");
-    const moves = [], fallback = [];
+    const moves = [], fallback = [], proposals = [];
     const props = {
       goLog: [task], viewMode: "semana", density, selectedDateISO: date,
       calDayNightMode: "oscuro",
       onCreateTaskAtTime() {},
+      onDropBooking: (entry, destination) => proposals.push([entry.id, destination.dateISO, destination.time]),
       onMoveItem: (...args) => moves.push(args), onOpenMoveFlow: (...args) => fallback.push(args),
     };
     const render = () => app.render(AgendaBoard, props);
@@ -114,6 +115,9 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     assert.equal(dropTime(tree).children[0], sourceTime);
     assert.ok(dropWindow(tree), "destination time has its own floating window above the dragged card");
     assert.equal(dropWindow(tree).props.pointerEvents, "none", "clock window never captures the native drag");
+    assert.equal(dropTime(tree).props.ellipsizeMode,"clip");
+    assert.equal(dropTime(tree).props.allowFontScaling,false);
+    assert.ok(style(dropWindow(tree).props.style).width >= 272, "five large glyphs get screen space beyond the day column");
     assert.ok(style(dropWindow(tree).props.style).width >= 160);
     assert.ok(style(dropWindow(tree).props.style).height >= 80);
     assert.equal(style(dropWindow(tree).props.style).backgroundColor, "#101114");
@@ -173,8 +177,28 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     retry._onFinalize(slotTwo, true);
     tree = render();
     assert.deepEqual(moves, task.customerBooking ? [] : [[task.id, date, secondTarget]]);
-    assert.deepEqual(fallback, task.customerBooking ? [[task.id, date, date, "13:00", false]] : []);
+    assert.deepEqual(fallback, [], "dropping a reservation never opens the manual flow");
+    assert.deepEqual(proposals, task.customerBooking ? [[task.id, date, secondTarget]] : []);
     assert.equal(detail(tree), false);
     assert.equal(float(tree), undefined);
+
+    if (task.customerBooking) {
+      const nextDate = "2027-01-02";
+      const nextColumn = nodes(tree,n=>n.props.key==="day_"+nextDate&&n.props.onLayout)[0];
+      const nextScroll = nodes(tree,n=>n.props.testID==="calendar-day-scroll-day_"+nextDate)[0];
+      nextColumn.props.onLayout({nativeEvent:{layout:{x:240,y:0,width:176,height:550}}});
+      nextScroll.props.onLayout({nativeEvent:{layout:{x:0,y:viewportY,width:176,height:440}}});
+      nextScroll.props.onScroll({nativeEvent:{contentOffset:{y:500}}});
+      const slot = nodes(nextScroll,n=>n.type?.name==="GoCalendarSlot"&&n.props.timeHHMM===firstTarget)[0];
+      slot.props.onLayout({nativeEvent:{layout:{x:0,y:700,width:176,height:36}}});
+      const across = {...slotOne,absoluteX:boardX+290};
+      const crossDayPan = getPan(tree);
+      crossDayPan._onStart(pickup);
+      crossDayPan._onUpdate(across);
+      assert.equal(dropTime(render()).children[0],firstTarget);
+      crossDayPan._onFinalize(across,true);
+      assert.deepEqual(proposals, [[task.id,date,secondTarget],[task.id,nextDate,firstTarget]]);
+      assert.deepEqual(fallback, []);
+    }
   });
 }

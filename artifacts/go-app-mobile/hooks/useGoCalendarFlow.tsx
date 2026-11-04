@@ -90,6 +90,9 @@ export function useGoCalendarFlow() {
   const [monthGridYear,  setMonthGridYear]  = useState(() => getToday().getFullYear());
   const [monthGridMonth, setMonthGridMonth] = useState(() => getToday().getMonth());
 
+  const [clockMinuteDraft, setClockMinuteDraft] = useState("00");
+  const clockPeriodPicked = useRef(false);
+
   // ── Error ────────────────────────────────────────────────────────────────
   const [calError, setCalError] = useState<string | null>(null);
 
@@ -140,6 +143,8 @@ export function useGoCalendarFlow() {
 
   const _initClock = useCallback((initialTime: string) => {
     const m = (initialTime || "").match(/^(\d{1,2}):(\d{2})$/);
+    clockPeriodPicked.current = false;
+    setClockMinuteDraft(m?.[2] ?? "00");
     if (m) {
       const h = parseInt(m[1], 10);
       const p: "AM" | "PM" = h >= 12 ? "PM" : "AM";
@@ -316,77 +321,51 @@ export function useGoCalendarFlow() {
 
   // ── Interacción con el reloj ──────────────────────────────────────────────
 
-  /** Procesa el toque en la esfera del reloj (hora y minutos). */
+  /** Procesa el toque en la esfera de horas. Los minutos se escriben. */
   const handleClockTouch = useCallback((relX: number, relY: number, isRelease: boolean, CLOCK_R: number) => {
     const dx = relX - CLOCK_R;
     const dy = relY - CLOCK_R;
     if (Math.sqrt(dx * dx + dy * dy) < 18) return;
     const angle = ((Math.atan2(dx, -dy) * 180 / Math.PI) + 360) % 360;
 
-    if (clockPhase === "hours") {
-      const rawH = Math.round(angle / 30);
-      const h = rawH === 0 ? 12 : rawH;
-      if (h !== clockLastHaptic.current) {
-        Haptics.selectionAsync().catch(() => {});
-        clockLastHaptic.current = h;
-      }
-      setClockH12(h);
-      const h24 = (h % 12) + (clockPeriod === "PM" ? 12 : 0);
-      setTime(`${String(h24).padStart(2, "0")}:${String(clockMins).padStart(2, "0")}`);
-      if (isRelease) {
-        clockLastHaptic.current = -1;
-        setClockPhase("minutes");
-      }
-    } else {
-      const rawMins = Math.round(angle / 6) % 60;
-      if (rawMins !== clockLastHaptic.current) {
-        Haptics.selectionAsync().catch(() => {});
-        clockLastHaptic.current = rawMins;
-      }
-      setClockMins(rawMins);
-      const h24 = (clockH12 % 12) + (clockPeriod === "PM" ? 12 : 0);
-      const newTimeStr = `${String(h24).padStart(2, "0")}:${String(rawMins).padStart(2, "0")}`;
-      setTime(newTimeStr);
-      if (isRelease) {
-        clockLastHaptic.current = -1;
-        _closeClock(() => {
-          if (clockPeriod !== null) {
-            if (skipDurationRef.current) {
-              const s = flowSnapshotRef.current;
-              _tryFinalize({ dateISO: s.dateISO, dateDraft: s.dateDraft, time: newTimeStr, duration: s.duration });
-            } else {
-              setStep("duration");
-              setPanelOpen(true);
-            }
-          } else {
-            setStep("ampm");
-            setPanelOpen(true);
-          }
-        });
-      }
+    if (clockPhase !== "hours") return;
+    const hour = Math.round(angle / 30) || 12;
+    if (hour !== clockLastHaptic.current) {
+      Haptics.selectionAsync().catch(() => {});
+      clockLastHaptic.current = hour;
     }
-  }, [clockPhase, clockH12, clockMins, clockPeriod, _closeClock, _tryFinalize]);
+    if (hour !== clockH12 && !clockPeriodPicked.current) setClockPeriod(null);
+    setClockH12(hour);
+    if (isRelease) {
+      clockLastHaptic.current = -1;
+      setClockPhase("minutes");
+    }
+  }, [clockPhase, clockH12]);
 
   /** Confirma la hora actual y cierra el reloj (tap en backdrop u OK). */
   const commitClock = useCallback(() => {
+    if (!/^\d{1,2}$/.test(clockMinuteDraft) || Number(clockMinuteDraft) > 59) {
+      setCalError("Introduce minutos entre 00 y 59.");
+      return;
+    }
+    if (!clockPeriod) {
+      setCalError("Selecciona AM o PM para continuar");
+      return;
+    }
+    setCalError(null);
     const h24 = (clockH12 % 12) + (clockPeriod === "PM" ? 12 : 0);
-    const newTimeStr = `${String(h24).padStart(2, "0")}:${String(clockMins).padStart(2, "0")}`;
+    const newTimeStr = `${String(h24).padStart(2, "0")}:${clockMinuteDraft.padStart(2, "0")}`;
     setTime(newTimeStr);
     _closeClock(() => {
-      if (clockPeriod !== null) {
-        if (skipDurationRef.current) {
-          const s = flowSnapshotRef.current;
-          _tryFinalize({ dateISO: s.dateISO, dateDraft: s.dateDraft, time: newTimeStr, duration: s.duration });
-        } else {
-          setStep("duration");
-          setPanelOpen(true);
-        }
+      if (skipDurationRef.current) {
+        const s = flowSnapshotRef.current;
+        _tryFinalize({ ...s, time: newTimeStr });
       } else {
-        setStep("ampm");
+        setStep("duration");
         setPanelOpen(true);
       }
     });
-  }, [clockH12, clockMins, clockPeriod, _closeClock, _tryFinalize]);
+  }, [clockH12, clockMinuteDraft, clockPeriod, _closeClock, _tryFinalize]);
 
   /** SALTAR HORA — omite la hora y avanza a duración (o callback personalizado). */
   const skipTime = useCallback(() => {
@@ -466,6 +445,8 @@ export function useGoCalendarFlow() {
    * panel AM/PM extra).
    */
   const setPeriodDraft = useCallback((p: "AM" | "PM" | null) => {
+    clockPeriodPicked.current = p !== null;
+    setCalError(null);
     setClockPeriod(p);
   }, []);
 
@@ -503,7 +484,7 @@ export function useGoCalendarFlow() {
     // Borradores
     dateISO, dateDraft, time, duration,
     // Reloj
-    clockH12, clockMins, clockPeriod, clockPhase,
+    clockH12, clockMins, clockPeriod, clockPhase, clockMinuteDraft, setClockMinuteDraft,
     // Cuadrícula mensual
     monthGridYear, monthGridMonth,
     // Animaciones (refs, no disparan re-renders)

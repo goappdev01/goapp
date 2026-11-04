@@ -55,6 +55,7 @@ async function editorFixture({scope={userId:'note-user',context:'demo:USER'},onS
  const controller={isVisible:()=>keyboard.visible,dismiss:async options=>{calls.push(['keyboard']);calls.push(['keyboard-dismiss',options]);if(ports.dismiss)await ports.dismiss(options);keyboard.hide();}};
  const model=load('lib/unifiedNotes.ts'),common={'react-native':native,'@/lib/unifiedNotes':model,'@expo/vector-icons':{Feather:host('Feather')},'@/lib/time':{getToday:()=>ports.today?new Date(ports.today):new Date(2027,0,1),formatISODate:d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}};
  const footer=load('components/notes/GoNoteToolFooter.tsx',common);common['./GoNoteToolFooter']=footer;
+ common['@/components/ui/GoMinuteInput']=load('components/ui/GoMinuteInput.tsx',common);
  const tools=load('lib/goNoteTools.ts'),picker=load('components/notes/GoNoteReminderPicker.tsx',{...common,'@/lib/goNoteTools':tools}),date=load('components/notes/GoNoteDatePicker.tsx',common),schedule=load('components/notes/GoNoteSchedulePicker.tsx',{...common,'@/lib/goActionCompletion':load('lib/goActionCompletion.ts')});
  let receive;const voice={status:'idle',error:'',transcript:'',abort:()=>calls.push(['abort']),start:async()=>calls.push(['microphone']),stop:async()=>calls.push(['stop'])};
  const voiceHook=load('hooks/useGoNoteVoice.ts',{'./useBookingVoice':{useBookingVoice:callback=>{receive=callback;return voice;}},'@/lib/goNoteTools':tools});

@@ -9,8 +9,9 @@ const owner='11111111-1111-4111-8111-111111111111',company='33333333-3333-4333-8
 const config={businessName:'',address:'',cartaUrl:'',sectorId:null,subId:null,plantillaItems:[],activeDays:[],openFrom:'09:00',openTo:'18:00',daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};
 async function fixture(companyId=company,memory=new Map()){
  let allowed=true;const make=()=>storeModule.createBusinessDemoStore({ownerUserId:owner,companyId,initialConfig:config,canUse:()=>allowed,storage:{getItem:async key=>memory.get(key)??null,setItem:async(key,value)=>memory.set(key,value)}}),store=make();
- await store.updateConfig({businessName:'GO PELUQUERÍA',address:'Calle ficticia, Murcia',sectorId:'belleza',subId:'peluqueria',activeDays:[0,1,2,3,4],services:[{name:'Corte',duration:30,price:12}],plantillaItems:[{id:'staff',count:2,label:'Puestos',staffNames:['Ana','Luis']}],completedSteps:[0,1,2,3,4,5,6,7]});
- await store.saveFloorPlan({id:store.planId,businessId:store.businessId,updatedAt:1,elements:[0,1].map(i=>({id:'chair-'+i,label:i?'Luis':'Ana',type:'silla',reservable:true,status:'disponible',x:0,y:0,width:30,height:40,capacity:1}))});
+ await store.updateConfig({businessName:'GO PELUQUERÍA',address:'Calle ficticia, Murcia',sectorId:'belleza',subId:'peluqueria',activeDays:[0,1,2,3,4],services:[{name:'Corte',duration:30,price:12}],plantillaItems:[{id:'staff',count:2,label:'Puestos',staffNames:['Ana','Luis'],staffServices:[['Corte'],['Corte']]}],completedSteps:[0,1,2,3,4,5,6,7]});
+ const professionals=storeModule.getBusinessDemoProfessionals(store.getSnapshot().config,store.businessId);
+ await store.saveFloorPlan({id:store.planId,businessId:store.businessId,updatedAt:1,elements:professionals.map((person,i)=>({id:'chair-'+i,label:person.name,demoStaffId:person.id,demoKind:'professional',type:'silla',reservable:true,status:'disponible',x:0,y:0,width:30,height:40,capacity:1}))});
  const repo=repoModule.createDemoBookingRepository(store,{now:()=>clock}),service=(await repo.getBookableItems(store.businessId))[0],staff=(await repo.getStaff(store.businessId))[0];
  const create=async(time='10:00')=>{const start='2030-01-07T'+time+':00',end=new Date(Date.parse(start)+1800000),result=await repo.claimSlot({businessId:store.businessId,bookableItemId:service.id,staffId:staff.id,customerId:owner,startDatetime:start,endDatetime:'2030-01-07T'+String(end.getHours()).padStart(2,'0')+':'+String(end.getMinutes()).padStart(2,'0')+':00',unitsReserved:1,peopleCount:1,status:'CONFIRMED',paymentStatus:'none'});assert.equal(result.ok,true);return result.booking;};
  return {store,repo,service,staff,make,memory,create,allow:value=>allowed=value,propose:(id,actor='customer',time='12:00')=>repo.changeBooking(id,store.businessId,actor,'propose',{dateISO:'2030-01-07',date:'Lunes 7',time,acceptFinancialTerms:true})};
@@ -43,7 +44,8 @@ test('double submission/acceptance is idempotent and stale proposal IDs cannot c
 test('acceptance rechecks occupancy and professional shifts, preserving the pending request and original slot on conflict',async()=>{
  const f=await fixture(),b=await f.create(),request=await f.propose(b.id);await f.create('12:00');const before=plain(f.store.getSnapshot());
  await assert.rejects(f.repo.changeBooking(b.id,f.store.businessId,'business','accept',{proposalId:request.changeProposal.id}),/no está disponible/);assert.deepEqual(plain(f.store.getSnapshot()),before);
- await assert.rejects(f.propose(b.id,'customer','08:30'),/no está disponible/);assert.deepEqual(plain(f.store.getSnapshot()),before);
+ await assert.rejects(f.propose(b.id,'customer','08:30'),/establecimiento está cerrado/);
+ await assert.rejects(f.propose(b.id,'customer','17:45'),/establecimiento está cerrado/);assert.deepEqual(plain(f.store.getSnapshot()),before);
 });
 test('paid reservations require explicit financial acceptance by both parties and never modify payment or create another booking',async()=>{
  const f=await fixture(),b=await f.create();await f.store.transactBookings(data=>{data.bookings[0].paymentStatus='paid';});
@@ -148,12 +150,13 @@ for(const bookingSource of ['canonical','DEMO'])test(bookingSource+' customer Ca
  const alerts=[],mutations=[],toasts=[],calendarStates=[];
  const scope={exports:{},Date:Clock,lang:'es',calOpen:true,showToast:(...args)=>toasts.push(args),Alert:{alert:(...args)=>alerts.push(args)},
   setCalOpen:value=>calendarStates.push(value),getToday:()=>new Clock(),formatISODate:d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-'),
+  formatDayLabel:()=> 'Martes 8', BookingApiError: class extends Error {},
   calFlow:{open:options=>{scope.draft=options}},customerBookings:{entries:[entry],mutate:(selected,operation,input)=>{
     assert.equal(selected.id,entry.id);const promise=f.repo.changeBooking(selected.reservationId,selected.businessId,'customer',operation,input);
     mutations.push({operation,input,promise});return promise;
   }},goLog:[],
  };
- const code=['isGoDateTimePast','runCustomerBooking','confirmBookingDraft','openBookingProposal'].map(name=>'const '+decl(name).getText(ast)+';').join('\n')+'\nexports.propose='+calendarHandler.initializer.expression.getText(ast)+';';
+ const code=['isGoDateTimePast','showBookingChangeError','runCustomerBooking','confirmBookingDraft','openBookingProposal','dropBookingProposal'].map(name=>'const '+decl(name).getText(ast)+';').join('\n')+'\nexports.propose='+calendarHandler.initializer.expression.getText(ast)+';exports.drop=dropBookingProposal;';
  vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,scope);
  const cal=calendarFixture({now:'2030-01-07T08:00:00'}),{AgendaBoard}=cal.load('components/AgendaOperativa.tsx');
  const props={goLog:[entry],viewMode:'dia',selectedDateISO:entry.dateISO,onProposeItem:scope.exports.propose,onDeleteItem:()=>{throw Error('Propose must not cancel the booking')}};
@@ -175,10 +178,14 @@ for(const bookingSource of ['canonical','DEMO'])test(bookingSource+' customer Ca
  assert.equal(scope.draft.validate(result),null);scope.draft.onSave(result);
  assert.equal(alerts.at(-1)[0],'Confirmar propuesta de cambio');assert.equal(mutations.length,0);assert.deepEqual(plain(f.store.getSnapshot()),before);
  alerts.at(-1)[2].find(button=>button.style==='cancel').onPress();assert.equal(mutations.length,0);assert.deepEqual(plain(f.store.getSnapshot()),before);
- scope.draft.onSave(result);alerts.at(-1)[2].find(button=>button.text==='Confirmar propuesta').onPress();
+ const manualDraft=scope.draft;
+ scope.exports.drop(entry,{dateISO:'2030-01-08',time:'17:30'},'customer');
+ assert.equal(scope.draft,manualDraft,'drop does not open any selector');
+ assert.match(alerts.at(-1)[1],/2030-01-08 · 17:30/);
+ alerts.at(-1)[2].find(button=>button.text==='Confirmar propuesta').onPress();
  assert.equal(mutations.length,1);assert.equal(mutations[0].operation,'propose');assert.equal(mutations[0].input.acceptFinancialTerms,true);await mutations[0].promise;
  const saved=f.store.getSnapshot().bookings[0];assert.equal(saved.id,booking.id);assert.equal(saved.startDatetime,booking.startDatetime);assert.equal(saved.paymentStatus,booking.paymentStatus);
- assert.equal(saved.changeProposal.time,'12:00');assert.equal(saved.changeProposal.dateISO,'2030-01-07');assert.equal(f.store.getSnapshot().bookings.length,1);
+ assert.equal(saved.changeProposal.time,'17:30');assert.equal(saved.changeProposal.dateISO,'2030-01-08');assert.equal(f.store.getSnapshot().bookings.length,1);
 });
 
 test('legacy booking without slotKey projects its original key without storage writes or cross-company adoption after Reload',async()=>{

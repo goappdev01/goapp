@@ -20,6 +20,9 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   Modal,
   Pressable,
   StyleSheet,
@@ -29,6 +32,7 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { GoMinuteInput } from "./GoMinuteInput";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -81,15 +85,11 @@ export function GoTimeField({
 
   const [phase, setPhase]   = useState<"hours" | "minutes">("hours");
   const [h12, setH12]       = useState(9);
-  const [mins, setMins]     = useState(0);
-  const [period, setPeriod] = useState<"AM" | "PM">("AM");
-
-  const h12Ref    = useRef(h12);
-  const minsRef   = useRef(mins);
-  const periodRef = useRef(period);
-  h12Ref.current    = h12;
-  minsRef.current   = mins;
-  periodRef.current = period;
+  const [mins, setMins] = useState("00");
+  const [period, setPeriod] = useState<"AM" | "PM" | null>(null);
+  const [error, setError] = useState("");
+  const initialHour = useRef(9);
+  const periodPicked = useRef(false);
 
   const lastHaptic = useRef(-1);
   const slideAnim  = useRef(new Animated.Value(600)).current;
@@ -97,8 +97,11 @@ export function GoTimeField({
   const openPicker = useCallback(() => {
     const p = parseTime(value);
     setH12(p.h12);
-    setMins(p.mins);
-    setPeriod(p.period);
+    setMins(String(p.mins).padStart(2, "0"));
+    setPeriod(/^([01]\d|2[0-3]):[0-5]\d$/.test(value) ? p.period : null);
+    initialHour.current = p.h12;
+    periodPicked.current = false;
+    setError("");
     setPhase("hours");
     lastHaptic.current = -1;
     setOpen(true);
@@ -111,16 +114,15 @@ export function GoTimeField({
       .start(() => { setOpen(false); cb?.(); });
   }, [slideAnim]);
 
-  const commit = useCallback((finalH12: number, finalMins: number, finalPeriod: "AM" | "PM") => {
-    const t = formatTime(finalH12, finalMins, finalPeriod);
-    closePicker(() => onConfirm(t));
-  }, [closePicker, onConfirm]);
-
-  const snapMins = (raw: number): number => {
-    if (minuteStep === 1) return raw;
-    const snapped = Math.round(raw / minuteStep) * minuteStep;
-    return snapped >= 60 ? 0 : snapped;
+  const commit = () => {
+    if (phase === "hours") { setPhase("minutes"); return; }
+    if (!period) { setError("Selecciona AM o PM para continuar"); return; }
+    if (!/^\d{1,2}$/.test(mins) || Number(mins) > 59) { setError("Introduce minutos entre 00 y 59."); return; }
+    const time = formatTime(h12, Number(mins), period);
+    Keyboard.dismiss();
+    closePicker(() => onConfirm(time));
   };
+  const cancel = () => { Keyboard.dismiss(); closePicker(); };
 
   const handleTouch = useCallback((relX: number, relY: number, isRelease: boolean) => {
     const dx = relX - CLOCK_R;
@@ -139,21 +141,11 @@ export function GoTimeField({
       setH12(h);
       if (isRelease) {
         lastHaptic.current = -1;
-        setTimeout(() => setPhase("minutes"), 120);
-      }
-    } else {
-      const rawMins = Math.round(angle / 6) % 60;
-      const snapped = snapMins(rawMins);
-      if (snapped !== lastHaptic.current) {
-        Haptics.selectionAsync().catch(() => {});
-        lastHaptic.current = snapped;
-      }
-      setMins(snapped);
-      if (isRelease) {
-        commit(h12Ref.current, snapped, periodRef.current);
+        if (h !== initialHour.current && !periodPicked.current) setPeriod(null);
+        setPhase("minutes");
       }
     }
-  }, [phase, commit, snapMins]);
+  }, [phase]);
 
   // Number positions on the clock face
   const positions = Array.from({ length: 12 }, (_, i) => {
@@ -164,8 +156,8 @@ export function GoTimeField({
     return { n, x, y };
   });
 
-  const handAngle  = phase === "hours" ? h12 * 30 : mins * 6;
-  const handLength = phase === "hours" ? 62 : 72;
+  const handAngle = h12 * 30;
+  const handLength = 62;
   const displayTime = `${String(h12).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
 
   return (
@@ -188,18 +180,19 @@ export function GoTimeField({
         transparent
         animationType="none"
         statusBarTranslucent
-        onRequestClose={() => commit(h12Ref.current, minsRef.current, periodRef.current)}
+        onRequestClose={cancel}
       >
         <View style={{ flex: 1 }}>
 
           {/* Backdrop */}
           <Pressable
             style={StyleSheet.absoluteFill}
-            onPress={() => commit(h12Ref.current, minsRef.current, periodRef.current)}
+            onPress={cancel}
             accessible={false}
           />
 
           {/* Sheet */}
+          <KeyboardAvoidingView pointerEvents="box-none" behavior={Platform.OS==="ios"?"padding":"height"} style={StyleSheet.absoluteFill}>
           <Animated.View style={[tp.sheet, { transform: [{ translateY: slideAnim }] }]}>
             <View style={[tp.sheetInner, { paddingBottom: insets.bottom + 20 }]}>
 
@@ -230,7 +223,7 @@ export function GoTimeField({
                 <View style={{ alignItems: "flex-start", justifyContent: "flex-end", paddingBottom: 8 }}>
                   <TouchableOpacity
                     activeOpacity={0.7}
-                    onPress={() => commit(h12Ref.current, minsRef.current, periodRef.current)}
+                    onPress={commit}
                     style={tp.okBtn}
                   >
                     <Text style={tp.okTxt}>OK</Text>
@@ -250,6 +243,8 @@ export function GoTimeField({
                           activeOpacity={0.75}
                           onPress={() => {
                             Haptics.selectionAsync().catch(() => {});
+                            periodPicked.current = true;
+                            setError("");
                             setPeriod(p);
                           }}
                           style={[tp.ampmBtn, active && tp.ampmBtnActive]}
@@ -260,23 +255,24 @@ export function GoTimeField({
                     })}
                   </View>
 
-                  {/* ── Minute phase: :00 / :30 buttons OR standard clock ── */}
-                  {phase === "minutes" && minuteStep === 30 ? (
+                  {!!error && <Text accessibilityRole="alert" style={tp.error}>{error}</Text>}
+                  {phase === "minutes" ? (
                     <View style={tp.halfRow}>
-                      {[0, 30].map((m) => (
+                      <GoMinuteInput value={mins} onChangeText={setMins} style={tp.minutes} />
+                      {minuteStep === 30 && [0, 30].map((m) => (
                         <TouchableOpacity
                           key={m}
                           activeOpacity={0.8}
                           onPress={() => {
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                            commit(h12Ref.current, m, periodRef.current);
+                            setMins(String(m).padStart(2, "0"));
                           }}
                           style={[
                             tp.halfBtn,
-                            mins === m && { backgroundColor: accentColor, borderColor: accentColor },
+                            Number(mins) === m && { backgroundColor: accentColor, borderColor: accentColor },
                           ]}
                         >
-                          <Text style={[tp.halfTxt, mins === m && { color: "#fff" }]}>
+                          <Text style={[tp.halfTxt, Number(mins) === m && { color: "#fff" }]}>
                             :{String(m).padStart(2, "0")}
                           </Text>
                         </TouchableOpacity>
@@ -296,12 +292,8 @@ export function GoTimeField({
 
                       {/* Numbers */}
                       {positions.map(({ n, x, y }) => {
-                        const isActive = phase === "hours"
-                          ? h12 === n
-                          : mins === (n === 12 ? 0 : n * 5);
-                        const lbl = phase === "hours"
-                          ? String(n)
-                          : `:${String(n === 12 ? 0 : n * 5).padStart(2, "0")}`;
+                        const isActive = h12 === n;
+                        const lbl = String(n);
                         return (
                           <View
                             key={n}
@@ -314,7 +306,7 @@ export function GoTimeField({
                           >
                             <Text style={[
                               tp.numTxt,
-                              { fontSize: phase === "hours" ? 13 : 11 },
+                              { fontSize: 13 },
                               isActive && { color: "#fff", fontWeight: "700" },
                             ]}>
                               {lbl}
@@ -346,6 +338,7 @@ export function GoTimeField({
               </View>
             </View>
           </Animated.View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </>
@@ -381,10 +374,7 @@ const tp = StyleSheet.create({
   },
 
   sheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
+    marginTop: "auto",
   },
   sheetInner: {
     backgroundColor: "#0a0a0a",
@@ -474,6 +464,8 @@ const tp = StyleSheet.create({
   ampmTxtActive: {
     color: "#0e0e10",
   },
+  error: { color: "#fde047", maxWidth: FACE, marginBottom: 8 },
+  minutes: { color: "#fff", fontSize: 28, textAlign: "center", minHeight: 48, borderWidth: 1, borderColor: "#aaa", borderRadius: 12 },
   halfRow: {
     width: FACE,
     gap: 10,

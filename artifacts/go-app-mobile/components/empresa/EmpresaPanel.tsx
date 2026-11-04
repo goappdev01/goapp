@@ -250,7 +250,7 @@ interface EmpresaPanelProps {
   onResolveEntry?: (entry:import("@/components/AgendaOperativa").GoEntry,status:"done"|"pending"|"discard",current?:()=>import("@/components/AgendaOperativa").GoEntry|undefined)=>void;
   canResolveEntry?: (entry:import("@/components/AgendaOperativa").GoEntry)=>boolean;
   handedness?: "left"|"right";
-  onProposeBookingChange?: (entry:import("@/components/AgendaOperativa").GoEntry)=>void;
+  onProposeBookingChange?: (entry:import("@/components/AgendaOperativa").GoEntry,destination?:{dateISO:string;time:string})=>void;
   onClose: () => void;
   initialModulo?: ModuloKey;
   onModuloChange?: () => void;

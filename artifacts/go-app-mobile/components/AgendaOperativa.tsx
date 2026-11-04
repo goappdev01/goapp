@@ -320,6 +320,7 @@ export type AgendaBoardProps = {
   onSelectItem?: (item: GoEntry) => void;
   onMoveItem?: (id: string, newDateISO: string, newTime: string) => void;
   onOpenMoveFlow?: (itemId: string, toDateISO: string, fromDateISO: string, itemTime: string, isExternal: boolean) => void;
+  onDropBooking?: (entry: GoEntry, destination: { dateISO: string; time: string }) => void;
   onCompleteItem?: (id: string) => void;
   onChangeEstado?: (id: string, estado: GoEntry["estado"]) => void;
   onDeleteItem?: (id: string) => void;
@@ -719,6 +720,7 @@ export function AgendaBoard({
   onSelectItem,
   onMoveItem,
   onOpenMoveFlow,
+  onDropBooking,
   onCompleteItem,
   onChangeEstado,
   onDeleteItem,
@@ -1047,6 +1049,8 @@ export function AgendaBoard({
   const [dragTargetSlot, setDragTargetSlot] = useState<{ columnId: string; start: number } | null>(null);
   const showHoursRef=useRef(showHours);showHoursRef.current=showHours;
   const dragItemRef = useRef<GoEntry | null>(null);
+  const onDropBookingRef = useRef(onDropBooking);
+  onDropBookingRef.current = onDropBooking;
   const dropConsumed=useRef(false);
   const dragPressEntryId = useRef<string | null>(null);
 
@@ -1084,14 +1088,14 @@ export function AgendaBoard({
     shadowOffset: { width: 0, height: 10 },
     elevation: 18,
   }));
-  const dropClockWidth = Math.min(236, Math.max(168, Math.round(screenW * 0.48)));
   const dropClockHeight = screenW >= 700 ? 96 : 86;
   const dropClockFontSize = Math.min(66, Math.max(46, Math.round(screenW * 0.145)));
   const dropClockStyle = useAnimatedStyle(() => {
     const edge = 12;
+    const width = Math.min(boardWidthShared.value - edge * 2, screenW >= 700 ? 320 : 272);
     const fingerX = floatL.value + fingerOffsetX.value;
     const fingerY = floatT.value + fingerOffsetY.value;
-    const left = Math.max(edge, Math.min(boardWidthShared.value - dropClockWidth - edge, fingerX - dropClockWidth / 2));
+    const left = Math.max(edge, Math.min(boardWidthShared.value - width - edge, fingerX - width / 2));
     const above = fingerY - dropClockHeight - 22;
     const below = fingerY + 22;
     const top = above >= edge
@@ -1101,7 +1105,7 @@ export function AgendaBoard({
       position: "absolute" as const,
       left,
       top,
-      width: dropClockWidth,
+      width,
       height: dropClockHeight,
       zIndex: 1200,
       elevation: 24,
@@ -1448,6 +1452,7 @@ export function AgendaBoard({
       const fromDateISO = dragItemRef.current?.dateISO ?? "";
       const isCrossDay = fromDateISO !== targetCol.dateISO;
       const item = dragItemRef.current;
+      const bookingPolicy = item && reservationCardPolicy(item);
       const isExternalMove = isCrossDay && item?.kind === "received";
       const slotStart = slotAtScreenY(targetCol, absY);
       const dropTime = slotStart == null ? itemTime : timeLabelForSlot(slotStart);
@@ -1457,7 +1462,11 @@ export function AgendaBoard({
       const isDraggingSelected = itemId && currentSelectedIds.has(itemId);
       const isMultiDrag = isDraggingSelected && currentSelectedIds.size > 1;
 
-      if (isMultiDrag && onMoveItemRef.current) {
+      if (item && bookingPolicy?.canonical) {
+        if (slotStart != null && (isCrossDay || dropTime !== itemTime) && bookingPolicy.canPropose) {
+          onDropBookingRef.current?.(item, { dateISO: targetCol.dateISO, time: dropTime });
+        }
+      } else if (isMultiDrag && onMoveItemRef.current) {
         // Move all selected cards to the target column directly (no modal per card)
         currentSelectedIds.forEach((sid) => {
           if (!allowedEntryIdsRef.current.has(sid)) return;
@@ -1475,7 +1484,7 @@ export function AgendaBoard({
         // Fallback: direct move without time selection
         onMoveItemRef.current(itemId, targetCol.dateISO, itemTime);
       }
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      if (!bookingPolicy?.canonical) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
 
     dragItemRef.current=null;setDragItem(null);
@@ -2762,7 +2771,9 @@ export function AgendaBoard({
       >
         <Text
           testID="calendar-drop-time"
+          allowFontScaling={false}
           numberOfLines={1}
+          ellipsizeMode="clip"
           style={[s.dropClockLabel, { fontSize: dropClockFontSize }, dropClockIsDark ? s.dropClockLabelDark : s.dropClockLabelLight]}
         >
           {timeLabelForSlot(dragTargetSlot.start)}
@@ -3204,6 +3215,7 @@ export function AgendaOperativa({
   onSelectItem,
   onMoveItem,
   onOpenMoveFlow,
+  onDropBooking,
   onCompleteItem,
   onDeleteItem,
   onProposeItem,
@@ -3499,6 +3511,7 @@ export function AgendaOperativa({
           onSelectItem={onSelectItem}
           onMoveItem={onMoveItem}
           onOpenMoveFlow={onOpenMoveFlow}
+          onDropBooking={onDropBooking}
           onCompleteItem={onCompleteItem}
           onDeleteItem={onDeleteItem}
           onProposeItem={onProposeItem}

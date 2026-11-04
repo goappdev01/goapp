@@ -366,7 +366,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
     </GoScreenCloseSurface>
     <View testID="note-tools-floating-layer" pointerEvents="box-none" style={{position:"absolute",left:workspaceBounds.x,top:workspaceBounds.y,width:workspaceBounds.width,height:workspaceBounds.height,zIndex:40}}>
         <View testID="note-tools-panel" pointerEvents={toolsOpen?"auto":"none"} accessibilityElementsHidden={!toolsOpen} importantForAccessibility={toolsOpen?"auto":"no-hide-descendants"}
-          style={[s.tools,handedness==="right"?{right:0}:{left:0},{width:toolsWidth,height:toolsHeight,maxHeight:workspaceBounds.height||"100%",display:toolsOpen?"flex":"none"}]}>
+          style={[s.tools,panel==="time"&&{paddingTop:48},handedness==="right"?{right:0}:{left:0},{width:toolsWidth,height:toolsHeight,maxHeight:workspaceBounds.height||"100%",display:toolsOpen?"flex":"none"}]}>
           {!!openingTool&&<View style={{padding:16}}><Text accessibilityLiveRegion="polite" style={s.text}>Preparando herramienta…</Text></View>}
           <View style={{flex:panel==="date"?1:undefined,flexShrink:1,minHeight:0,display:openingTool?"none":"flex"}}>
           {!!panel&&panel!=="date"&&!keyboardVisible&&<View testID="note-tool-header" style={{paddingHorizontal:8,paddingVertical:4}}>
@@ -410,8 +410,8 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
           </View>
         </View>
       {workspaceBounds.width>=44&&workspaceBounds.height>=64&&
-      <DraggableFAB screenKey="note-editor" buttonKey="tools-toggle" bounds={{width:workspaceBounds.width,height:toggleBoundsHeight}} boundsVerticalInset={panel?0:8} buttonWidth={44} maxH={48} initialTop={toggleTop} fixedLeft={toggleLeft} onDragStart={markToggleDrag}>
-        <TouchableOpacity testID="note-tools-toggle" accessibilityRole="button" accessibilityLabel={toolsOpen?"Ocultar herramientas de la nota":"Mostrar herramientas de la nota"} accessibilityHint="Mantén pulsado medio segundo para mover la flecha verticalmente" accessibilityState={{expanded:toolsOpen}}
+      <DraggableFAB key={panel==="time"?"time-toggle":"tools-toggle"} screenKey="note-editor" buttonKey={panel==="time"?"time-toggle":"tools-toggle"} bounds={{width:workspaceBounds.width,height:toggleBoundsHeight}} boundsVerticalInset={panel?0:8} buttonWidth={44} maxH={48} initialTop={panel==="time"?0:toggleTop} initialRight={handedness==="right"?0:Math.max(0,workspaceBounds.width-44)} fixedLeft={panel==="time"?undefined:toggleLeft} onDragStart={markToggleDrag}>
+        <TouchableOpacity testID="note-tools-toggle" accessibilityRole="button" accessibilityLabel={toolsOpen?"Ocultar herramientas de la nota":"Mostrar herramientas de la nota"} accessibilityHint={panel==="time"?"Mantén pulsado medio segundo para mover la flecha":"Mantén pulsado medio segundo para mover la flecha verticalmente"} accessibilityState={{expanded:toolsOpen}}
           delayLongPress={500} disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPressIn={()=>{suppressToggle.current=false;}} onLongPress={markToggleDrag} activeOpacity={0.78} onPress={()=>{if(suppressToggle.current||saveLock.current||workLock.current)return;if(!toolsOpen){void openTool("");return;}if(panel){void finishTool(undefined,true);return;}toolRequest.current++;setOpeningTool("");setAwaitingTool(null);if(focusedToolTarget.current)void hideKeyboard();setToolsOpen(false);}} style={s.toolsToggle}>
           <LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.65)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,{borderRadius:14}]}/><Feather name={handedness==="right"?(toolsOpen?"chevron-right":"chevron-left"):(toolsOpen?"chevron-left":"chevron-right")} size={22} color="#202830"/>
         </TouchableOpacity>

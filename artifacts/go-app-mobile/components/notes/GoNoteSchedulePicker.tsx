@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, TextInput, TouchableOpacity, View, type TextInputProps } from "react-native";
 import { validNoteTime, NOTE_MAX_DURATION_MINUTES } from "@/lib/unifiedNotes";
+import { GoMinuteInput } from "@/components/ui/GoMinuteInput";
 import { durationMinutes } from "@/lib/goActionCompletion";
 import { GoNoteToolFooter, type NoteToolEdit } from "./GoNoteToolFooter";
 const pad=(value:number)=>String(value).padStart(2,"0");
 export const noteDurationLabel=(value:string)=>/^\d+m$/.test(value)?`${parseInt(value)} minutos`:/^\d+h$/.test(value)?`${parseInt(value)} ${parseInt(value)===1?"hora":"horas"}`:value;
 type Props={value:string;onApply:(value:string)=>void;onClear:()=>void;disabled?:boolean;onInputFocus?:TextInputProps["onFocus"];handedness?:"left"|"right";onPendingChange?:(edit:NoteToolEdit<string>)=>void};
 function numbers(kind:"time"|"duration",hours:string,minutes:string,setHours:(value:string)=>void,setMinutes:(value:string)=>void,disabled:boolean,onFocus?:TextInputProps["onFocus"]){
- return <View style={s.row}>{[["HORAS",hours,setHours,kind==="time"?2:4,"hour"],["MINUTOS",minutes,setMinutes,2,"minute"]].map(([label,value,set,length,key])=><View key={key as string} style={{flex:1,gap:4}}>
-  <Text style={s.label}>{label as string}</Text><TextInput testID={`note-${kind}-${key}`} accessibilityLabel={(kind==="time"?"Hora: ":"Duración: ")+label} value={value as string} onChangeText={set as (value:string)=>void} onFocus={onFocus} keyboardType="number-pad" inputMode="numeric" maxLength={length as number} selectTextOnFocus editable={!disabled} style={s.input}/>
- </View>)}</View>;
+ return <View style={s.row}>{[[kind==="time"?"HORAS (00–23)":"HORAS",hours,setHours,kind==="time"?2:4,"hour"],["MINUTOS",minutes,setMinutes,2,"minute"]].map(([label,value,set,length,key])=>{const Input=key==="minute"?GoMinuteInput:TextInput;return <View key={key as string} style={{flex:1,gap:4}}>
+  <Text style={s.label}>{label as string}</Text><Input testID={`note-${kind}-${key}`} accessibilityLabel={(kind==="time"?"Hora: ":"Duración: ")+label} value={value as string} onChangeText={set as (value:string)=>void} onFocus={onFocus} keyboardType="number-pad" inputMode="numeric" maxLength={length as number} selectTextOnFocus editable={!disabled} style={s.input}/>
+ </View>;})}</View>;
 }
 export function GoNoteTimePicker({value,onApply,onClear,disabled=false,onInputFocus,handedness,onPendingChange}:Props){
  const initial=validNoteTime(value)?value.split(":").map(Number):[0,0], [hour,setHour]=useState(pad(initial[0])),[minute,setMinute]=useState(pad(initial[1])),[error,setError]=useState(""),[touched,setTouched]=useState(false);

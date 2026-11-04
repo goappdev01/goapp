@@ -188,7 +188,20 @@ function createLocalDemoBookingRepository(store: BusinessDemoStore, options: Rep
     if(!isValidDemoLocalInterval(startDatetime,endDatetime,duration) || Date.parse(startDatetime)<=now() || endDatetime.slice(0,10)!==dateISO)throw new Error("Elige una hora futura válida.");
     requireSupportedTiming(data.config,bookingServiceIds(booking));
     const serviceIds=bookingServiceIds(booking),item=summarizeBookingServices(servicesFor(data.config),serviceIds).item,member=staffFor(data.config).find(person=>person.id===booking.staffId);
-    if(!item || item.durationMinutes!==duration || booking.staffId && !member || !freeResource(data,item,{startDatetime,endDatetime},member,booking.id,booking.elementId,serviceIds))throw new Error("Esta hora no está disponible para el servicio y profesional originales.");
+    if (!item || item.durationMinutes !== duration) throw new Error("El servicio ya no admite la duración original de la reserva.");
+    const start = minutes(timeHHMM);
+    const covers = (shift: { from: number; to: number }) => start >= shift.from && start + duration <= shift.to;
+    if (!companyShifts(data.config, dateISO).some(covers)) {
+      throw new Error("El establecimiento está cerrado en la fecha u hora seleccionada");
+    }
+    if (booking.staffId && (!member || !professionalShifts(data.config, dateISO, member).some(covers)
+      || data.bookings.some(other => other.id !== booking.id && other.staffId === booking.staffId
+        && blocks(other, now()) && overlap(other, { startDatetime, endDatetime })))) {
+      throw new Error("El profesional asignado a esta reserva no está disponible en la fecha y hora seleccionadas");
+    }
+    if (!freeResource(data,item,{startDatetime,endDatetime},member,booking.id,booking.elementId,serviceIds)) {
+      throw new Error("El servicio o el puesto reservado no dispone de capacidad durante todo el intervalo.");
+    }
     if(operation==="propose"){
       const financialAcceptanceRequired=booking.paymentStatus!=="none";
       if(financialAcceptanceRequired && !input.acceptFinancialTerms)throw new Error("Confirma las condiciones económicas. No se ha realizado ningún cobro ni devolución.");

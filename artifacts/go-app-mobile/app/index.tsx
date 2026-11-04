@@ -21,7 +21,8 @@ import { ownedCompletionEntry, completionEligible, completionSchedule, mergeComp
 import { GoNoteReminderPicker } from "@/components/notes/GoNoteReminderPicker";
 import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, type NoteReminderDraft } from "@/lib/goNoteTools";
 import { saveGoNoteReminder, changeGoNoteReminder, confirmAttachedGoNoteReminder } from "@/lib/goNoteReminder";
-import { changeBookingRequest as negotiateRealBooking } from "@/data/booking";
+import { GoMinuteInput } from "@/components/ui/GoMinuteInput";
+import { BookingApiError, changeBookingRequest as negotiateRealBooking } from "@/data/booking";
 import { readGoLog, flushGoLog, commitGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
 import { onSessionChanged } from "@/lib/sessionEvents";
 import { recordAuthTrace } from "@/lib/authTrace";
@@ -3167,7 +3168,8 @@ function HomeScreenContent() {
   const [remindAlertType, setRemindAlertType] = useState<"discreta" | "despertador">("discreta");
   const remindClockModeRef = useRef(false);
   const [remindClockOpen, setRemindClockOpen] = useState(false);
-  const [remindAmPmVisible, setRemindAmPmVisible] = useState(false);
+  const [remindMinuteDraft, setRemindMinuteDraft] = useState("00");
+  const [remindClockError, setRemindClockError] = useState("");
   const [remindInputHeight, setRemindInputHeight] = useState(44);
   const [listFiltersHidden, setListFiltersHidden] = useState(false);
   // SharedValue que indica al worklet del dragGesture si debe bajar un nivel
@@ -4870,8 +4872,8 @@ function HomeScreenContent() {
   const commitAndCloseClock = () => {
     if (remindClockModeRef.current) {
       remindClockModeRef.current = false;
-      setRemindAmPmVisible(false);
-      closeClock();
+      Keyboard.dismiss();
+      closeClock(() => setRemindOpen(true));
       return;
     }
     // Flujo GO: delegar al hook universal
@@ -4891,27 +4893,9 @@ function HomeScreenContent() {
       const dy = relY - CLOCK_R;
       if (Math.sqrt(dx * dx + dy * dy) < 18) return;
       const angle = ((Math.atan2(dx, -dy) * 180 / Math.PI) + 360) % 360;
-      if (clockPhase === "hours") {
-        const rawH = Math.round(angle / 30);
-        const h = rawH === 0 ? 12 : rawH;
-        setClockH12(h);
-        if (isRelease) setTimeout(() => setClockPhase("minutes"), 120);
-      } else {
-        const rawMins = Math.round(angle / 6) % 60;
-        setClockMins(rawMins);
-        if (isRelease) {
-          const h24 = (clockH12 % 12) + (clockPeriod === "PM" ? 12 : 0);
-          const t = `${String(h24).padStart(2, "0")}:${String(rawMins).padStart(2, "0")}`;
-          if (clockPeriod !== null) {
-            setRemindTime(t);
-            remindClockModeRef.current = false;
-            closeClock();
-            setRemindOpen(true);
-          } else {
-            setRemindAmPmVisible(true);
-          }
-        }
-      }
+      if (clockPhase !== "hours") return;
+      setClockH12(Math.round(angle / 30) || 12);
+      if (isRelease) setClockPhase("minutes");
       return;
     }
     // Flujo GO: delegar al hook universal
@@ -7737,27 +7721,41 @@ function HomeScreenContent() {
   const bookingContextRef=useRef({view:goView.view,businessId:ownerDemo.demo?.businessId ?? bCfg.businessId,ownerId:adminAccess.userId});
   bookingContextRef.current={view:goView.view,businessId:ownerDemo.demo?.businessId ?? bCfg.businessId,ownerId:adminAccess.userId};
   const returnToBookingCompany=()=>{if(bookingContextRef.current.view==="BUSINESS"){if(ownerDemo.demo)setEmpresaDemoRoute("reservations");else setEmpresaModulo("reservas_config");setTimeout(()=>setEmpresaOpen(true),350);}};
+  const showBookingChangeError = (error: Error) => {
+    const reasons: Record<string, string> = {
+      BOOKING_OUTSIDE_AVAILABILITY: "El establecimiento está cerrado en la fecha u hora seleccionada",
+      BOOKING_STAFF_UNAVAILABLE: "El profesional asignado a esta reserva no está disponible en la fecha y hora seleccionadas",
+      BOOKING_RESOURCE_UNAVAILABLE: "No hay capacidad disponible en los recursos necesarios para el servicio completo.",
+      BOOKING_RESOURCE_CONFLICT: "Un recurso necesario ya está ocupado durante el servicio.",
+    };
+    const reason = error instanceof BookingApiError && error.code ? reasons[error.code] : undefined;
+    Alert.alert("GO", reason || error.message);
+  };
   const runCustomerBooking = (entry:CustomerBookingEntry,operation:"cancel"|"propose"|"accept"|"reject",input:Parameters<typeof customerBookings.mutate>[2]={}) => {
     void customerBookings.mutate(entry,operation,input).then(()=>showToast(lang==="en"?"Reservation updated":"Reserva actualizada","success"))
-      .catch(error=>Alert.alert("GO",error.message));
+      .catch(showBookingChangeError);
   };
-  const confirmBookingDraft = (entry:GoEntry,result:CalFlowResult,actor:"customer"|"business"="customer") => {
+  const confirmBookingDraft = (entry:GoEntry,result:Pick<CalFlowResult,"dateISO"|"dateDraft"|"time">,actor:"customer"|"business"="customer",fromDrop=false) => {
+    const restoreCompany = () => { if (actor === "business" && !fromDrop) returnToBookingCompany(); };
     Alert.alert(lang==="en"?"Confirm change proposal":"Confirmar propuesta de cambio",result.dateISO+" · "+result.time+"\n"+(lang==="en"?"The original reservation remains unchanged until agreement. Existing payments and financial conditions remain unchanged; no charge or refund is made.":"La reserva original se mantiene hasta el acuerdo. Se conservan los pagos y condiciones económicas; no se realiza ningún cobro ni devolución."),[
-      {text:lang==="en"?"Cancel":"Cancelar",style:"cancel",onPress:()=>{if(actor==="business")returnToBookingCompany();}},
+      {text:lang==="en"?"Cancel":"Cancelar",style:"cancel",onPress:restoreCompany},
       {text:lang==="en"?"Confirm proposal":"Confirmar propuesta",onPress:()=>{
         const input={dateISO:result.dateISO,date:result.dateDraft,time:result.time,acceptFinancialTerms:true};
         if(actor==="customer")runCustomerBooking(entry as CustomerBookingEntry,"propose",input);
-        else if(ownerDemo.demo && entry.businessId===ownerDemo.demo.businessId && bookingContextRef.current.view==="BUSINESS" && bookingContextRef.current.businessId===entry.businessId)void createDemoBookingRepository(ownerDemo.demo).changeBooking(String(entry.reservationId),String(entry.businessId),"business","propose",input).then(()=>{showToast(lang==="en"?"Proposal saved":"Propuesta guardada","success");returnToBookingCompany();}).catch(error=>{Alert.alert("GO",error.message);returnToBookingCompany();});
-        else if(entry.businessBooking && entry.ownerUserId && bookingContextRef.current.view==="BUSINESS" && bookingContextRef.current.businessId===entry.businessId)void negotiateRealBooking(String(entry.reservationId),"propose",{...input,expectedRevision:entry.bookingChangeRevision??0,proposalId:entry.changeProposal?.id},entry.ownerUserId).then(()=>{showToast(lang==="en"?"Proposal saved":"Propuesta guardada","success");returnToBookingCompany();}).catch(error=>{Alert.alert("GO",error.message);returnToBookingCompany();});
+        else if(ownerDemo.demo && entry.businessId===ownerDemo.demo.businessId && bookingContextRef.current.view==="BUSINESS" && bookingContextRef.current.businessId===entry.businessId)void createDemoBookingRepository(ownerDemo.demo).changeBooking(String(entry.reservationId),String(entry.businessId),"business","propose",input).then(()=>{showToast(lang==="en"?"Proposal saved":"Propuesta guardada","success");restoreCompany();}).catch(error=>{showBookingChangeError(error);restoreCompany();});
+        else if(entry.businessBooking && entry.ownerUserId && bookingContextRef.current.view==="BUSINESS" && bookingContextRef.current.businessId===entry.businessId)void negotiateRealBooking(String(entry.reservationId),"propose",{...input,expectedRevision:entry.bookingChangeRevision??0,proposalId:entry.changeProposal?.id},entry.ownerUserId).then(()=>{showToast(lang==="en"?"Proposal saved":"Propuesta guardada","success");restoreCompany();}).catch(error=>{showBookingChangeError(error);restoreCompany();});
         else Alert.alert("GO",lang==="en"?"The company context changed.":"Ha cambiado el contexto de empresa.");
       }}]);
   };
   const openBookingProposal = (entry:GoEntry,actor:"customer"|"business"="customer",initial?:{dateISO:string;time:string}) => {
     const keepCalendar=actor==="customer" && calOpen;
     const open=()=>{setCalOpen(true);calFlow.open({startAt:"date",initialDateISO:initial?.dateISO ?? entry.dateISO,initialDateDraft:entry.date,initialTime:initial?.time ?? entry.time,initialDuration:entry.duration,skipDuration:true,
-      validate:r=>!r.time || isGoDateTimePast(r.dateISO,r.time)?(lang==="en"?"Choose a future date and time.":"Elige una fecha y hora futuras."):null,
+      validate:r=>!r.time?(lang==="en"?"Choose a future date and time.":"Elige una fecha y hora futuras."):null,
       onSave:result=>{if(!keepCalendar)setCalOpen(false);confirmBookingDraft(entry,result,actor);},onCancel:()=>{if(!keepCalendar)setCalOpen(false);if(actor==="business")returnToBookingCompany();}});};
     if(actor==="business"){bookingReturnDateRef.current=entry.dateISO;setEmpresaOpen(false);setTimeout(open,350);}else open();
+  };
+  const dropBookingProposal = (entry:GoEntry, destination:{dateISO:string;time:string}, actor:"customer"|"business") => {
+    confirmBookingDraft(entry, {...destination,dateDraft:formatDayLabel(new Date(destination.dateISO+"T00:00:00"))},actor,true);
   };
   const respondCustomerBooking = (entry:CustomerBookingEntry,operation:"accept"|"reject") => {
     const proposal=entry.changeProposal as import("@/data/booking").BookingChangeProposal|undefined;if(!proposal)return;
@@ -11943,6 +11941,7 @@ function HomeScreenContent() {
       setCalOpen(false);
       return;
     }
+    if (calFlow.step === "clock" || calFlow.step === "ampm") { calFlow.cancel(); return; }
     // Flujo normal: delegar al hook (dispara onSave si hay duración)
     calFlow.skip();
   };
@@ -20224,7 +20223,7 @@ function HomeScreenContent() {
             {/* AgendaBoard shares the existing view/settings header with month navigation. */}
             <View testID="calendar-agenda-viewport" style={{ flex: 1 }}>
             {demoCustomerCalendarSelected ? (demoBookingRepository
-              ? <View style={{ flex: 1 }}><DemoCustomerCalendar onGoToLanding={goDirectlyToLanding} renderMessageScreen={renderEntryMessageScreen} scrollToTodayToken={calScrollToTodayToken} onOpenMessage={(entry, back) => openEntryMessage(entry, back, true)} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
+              ? <View style={{ flex: 1 }}><DemoCustomerCalendar onGoToLanding={goDirectlyToLanding} renderMessageScreen={renderEntryMessageScreen} scrollToTodayToken={calScrollToTodayToken} onOpenMessage={(entry, back) => openEntryMessage(entry, back, true)} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onDropBooking={(entry,destination)=>dropBookingProposal(entry,destination,"customer")} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
               : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
                 renderHeader={monthNavigation => (<View testID="calendar-header"
               pointerEvents={showBookingFromCal ? "none" : "auto"}
@@ -20275,6 +20274,7 @@ function HomeScreenContent() {
                 onOpenNote={openUnifiedNote} onMoveNote={moveNoteDestination} renderNote={renderExistingNote}
                 onMoveItem={moveGoToDay}
                 onOpenMoveFlow={openMoveFlow}
+                onDropBooking={(entry,destination)=>dropBookingProposal(entry,destination,entry.businessBooking?"business":"customer")}
                 onCreateTaskAtTime={openCalendarSlotTask}
                 onAddEntry={(dateISO) => {
                   // Regla de flujo V1: solo abrir flujo de tarea si hay contacto seleccionado
@@ -21405,9 +21405,10 @@ function HomeScreenContent() {
             <>
               <Pressable
                 style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)" }}
-                onPress={commitAndCloseClock}
+                onPress={Keyboard.dismiss}
               />
-              <Animated.View style={{ position: "absolute", left: 0, right: 0, bottom: 0, transform: [{ translateY: clockSlide }] }}>
+              <KeyboardAvoidingView pointerEvents="box-none" behavior={Platform.OS==="ios"?"padding":"height"} style={StyleSheet.absoluteFill}>
+              <Animated.View style={{ marginTop:"auto", transform: [{ translateY: clockSlide }] }}>
                 <View style={{ backgroundColor: BACKGROUND_MASTER.baseColor, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", paddingLeft: 18, paddingRight: Math.max(insets.right + 28, 28), paddingTop: 14, paddingBottom: paddingBottom + 16 }}>
 
                   {/* Handle */}
@@ -21416,7 +21417,7 @@ function HomeScreenContent() {
                   {/* HORA GRANDE — centrada, protagonista */}
                   <View style={{ alignItems: "center", marginBottom: 6 }}>
                     <Text style={{ color: "#ffffff", fontSize: 52, fontWeight: "100", letterSpacing: 4 }}>
-                      {String(clockH12).padStart(2, "0")}:{String(clockMins).padStart(2, "0")}
+                      {String(clockH12).padStart(2, "0")}:{calFlow.clockMinuteDraft.padStart(2,"0")}
                     </Text>
                     {/* Fase: HORA / MINUTOS — con botón de retroceso */}
                     <TouchableOpacity
@@ -21493,7 +21494,7 @@ function HomeScreenContent() {
                                 width: 52, height: 44, borderRadius: 12,
                                 alignItems: "center", justifyContent: "center",
                                 borderWidth: active ? 2 : 1,
-                                borderColor: active ? "#ffffff" : "rgba(255,255,255,0.25)",
+                                borderColor: active ? "#ffffff" : calFlow.calError === "Selecciona AM o PM para continuar" ? "#fde047" : "rgba(255,255,255,0.25)",
                                 backgroundColor: active ? "#ffffff" : "#0e0e10",
                               }}
                             >
@@ -21503,8 +21504,17 @@ function HomeScreenContent() {
                         })}
                       </View>
 
-                      {/* Reloj circular — desplazado izquierda por el paddingRight del contenedor */}
-                      <View
+                      {!!calFlow.calError && <Text accessibilityRole="alert" style={{color:"#fde047",marginBottom:8}}>{calFlow.calError}</Text>}
+                      {clockPhase === "minutes" ? (
+                        <View style={{width:FACE,gap:10}}>
+                          <GoMinuteInput testID="calendar-clock-minute" value={calFlow.clockMinuteDraft}
+                            onChangeText={calFlow.setClockMinuteDraft}
+                            style={{color:"#fff",fontSize:28,textAlign:"center",minHeight:48,borderColor:"#aaa",borderWidth:1,borderRadius:12}} />
+                          <TouchableOpacity accessibilityRole="button" onPress={()=>{Keyboard.dismiss();calFlow.commitClock();}} style={{minHeight:44,justifyContent:"center",alignItems:"center"}}>
+                            <Text style={{color:"#fff",fontWeight:"800"}}>CONTINUAR</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : <View
                         onStartShouldSetResponder={() => true}
                         onMoveShouldSetResponder={() => true}
                         onResponderGrant={(e) => handleClockTouch(e.nativeEvent.locationX, e.nativeEvent.locationY, false)}
@@ -21544,11 +21554,12 @@ function HomeScreenContent() {
 
                         {/* Punto central */}
                         <View pointerEvents="none" style={{ position: "absolute", width: 8, height: 8, borderRadius: 4, backgroundColor: "#ffffff", left: CLOCK_R - 4, top: CLOCK_R - 4 }} />
-                      </View>
+                      </View>}
                     </View>
                   </View>
                 </View>
               </Animated.View>
+              </KeyboardAvoidingView>
             </>
           );
         })()}
@@ -21558,6 +21569,7 @@ function HomeScreenContent() {
             <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
               <GoReservasConfigScreen onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry}
                 onClose={() => setCalReservasOpen(false)}
+                onDropBooking={(entry,destination)=>dropBookingProposal(entry,destination,"business")}
                 onOpenGo={openAi}
                 onCreateTaskAtTime={openCalendarSlotTask}
                 dayNightMode={calBgDayNightMode}
@@ -21623,12 +21635,13 @@ function HomeScreenContent() {
             return (
               <>
                 <Pressable style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "rgba(0,0,0,0.5)" }} onPress={commitAndCloseClock} />
-                <Animated.View style={{ position: "absolute", left: 0, right: 0, bottom: 0, transform: [{ translateY: clockSlide }] }}>
+                <KeyboardAvoidingView pointerEvents="box-none" behavior={Platform.OS==="ios"?"padding":"height"} style={StyleSheet.absoluteFill}>
+                <Animated.View style={{ marginTop:"auto", transform: [{ translateY: clockSlide }] }}>
                   <View style={{ backgroundColor: BACKGROUND_MASTER.baseColor, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: "rgba(255,255,255,0.1)", paddingLeft: 18, paddingRight: Math.max(insets.right + 28, 28), paddingTop: 14, paddingBottom: paddingBottom + 16 }}>
                     <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.2)", alignSelf: "center", marginBottom: 14 }} />
                     <View style={{ alignItems: "center", marginBottom: 6 }}>
                       <Text style={{ color: "#ffffff", fontSize: 52, fontWeight: "100", letterSpacing: 4 }}>
-                        {String(clockH12).padStart(2, "0")}:{String(clockMins).padStart(2, "0")}
+                        {String(clockH12).padStart(2, "0")}:{remindMinuteDraft.padStart(2,"0")}
                       </Text>
                       <TouchableOpacity hitSlop={12} onPress={() => clockPhase === "minutes" ? setClockPhase("hours") : null} style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 }}>
                         {clockPhase === "minutes" && <Feather name="chevron-left" size={12} color="rgba(255,255,255,0.35)" />}
@@ -21637,37 +21650,31 @@ function HomeScreenContent() {
                     </View>
                     <View style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "flex-end", gap: 14 }}>
                       <View style={{ alignItems: "flex-end", flexShrink: 0 }}>
-                        {/* AM/PM — solo visible si el usuario los seleccionó manualmente (antes de que aparezca la mini ventana) */}
-                        {clockPeriod !== null && !remindAmPmVisible && (
-                          <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
-                            {(["AM", "PM"] as const).map((p) => {
-                              const active = clockPeriod === p;
-                              return (
-                                <TouchableOpacity
-                                  key={p}
-                                  onPress={() => {
-                                    Haptics.selectionAsync();
-                                    setClockPeriod(p);
-                                    const h24 = (clockH12 % 12) + (p === "PM" ? 12 : 0);
-                                    const t = `${String(h24).padStart(2, "0")}:${String(clockMins).padStart(2, "0")}`;
-                                    setRemindTime(t);
-                                    remindClockModeRef.current = false;
-                                    closeClock(() => setRemindOpen(true));
-                                  }}
-                                  activeOpacity={0.75}
-                                  style={{ width: 52, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: active ? 2 : 1, borderColor: active ? "#ffffff" : "rgba(255,255,255,0.25)", backgroundColor: active ? "#ffffff" : "#0e0e10" }}
-                                >
-                                  <Text style={{ color: active ? "#0e0e10" : "rgba(255,255,255,0.85)", fontSize: 13, fontWeight: "800", letterSpacing: 0.8 }}>{p}</Text>
-                                </TouchableOpacity>
-                              );
-                            })}
+                        <View style={{ flexDirection: "row", gap: 8, marginBottom: 10 }}>
+                          {(["AM", "PM"] as const).map(period => (
+                            <TouchableOpacity key={period} accessibilityRole="radio"
+                              accessibilityState={{checked:clockPeriod===period}} onPress={()=>{setClockPeriod(period);setRemindClockError("");}}
+                              style={{width:52,height:44,borderRadius:12,alignItems:"center",justifyContent:"center",backgroundColor:clockPeriod===period?"#fff":"#202025"}}>
+                              <Text style={{color:clockPeriod===period?"#111":"#fff",fontWeight:"800"}}>{period}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                        {!!remindClockError && <Text accessibilityRole="alert" style={{color:"#fde047"}}>{remindClockError}</Text>}
+                        {clockPhase === "minutes" ? (
+                          <View style={{width:FACE,gap:10}}>
+                            <GoMinuteInput value={remindMinuteDraft} onChangeText={setRemindMinuteDraft}
+                              style={{color:"#fff",fontSize:28,textAlign:"center",minHeight:48,borderColor:"#aaa",borderWidth:1,borderRadius:12}} />
+                            <TouchableOpacity accessibilityRole="button" style={{minHeight:44,justifyContent:"center",alignItems:"center"}} onPress={()=>{
+                              if (!clockPeriod) {setRemindClockError("Selecciona AM o PM para continuar");return;}
+                              if (!/^\d{1,2}$/.test(remindMinuteDraft) || Number(remindMinuteDraft)>59) {setRemindClockError("Introduce minutos entre 00 y 59.");return;}
+                              const hour = (clockH12 % 12) + (clockPeriod === "PM" ? 12 : 0);
+                              setRemindTime(String(hour).padStart(2,"0")+":"+remindMinuteDraft.padStart(2,"0"));
+                              Keyboard.dismiss();
+                              remindClockModeRef.current = false;
+                              closeClock(()=>setRemindOpen(true));
+                            }}><Text style={{color:"#fff",fontWeight:"800"}}>CONTINUAR</Text></TouchableOpacity>
                           </View>
-                        )}
-                        {/* Spacer when AM/PM not yet chosen so clock stays right-aligned */}
-                        {clockPeriod === null && !remindAmPmVisible && (
-                          <View style={{ height: 52, marginBottom: 10 }} />
-                        )}
-                        <View
+                        ) :                        <View
                           onStartShouldSetResponder={() => true}
                           onMoveShouldSetResponder={() => true}
                           onResponderGrant={(e) => handleClockTouch(e.nativeEvent.locationX, e.nativeEvent.locationY, false)}
@@ -21689,35 +21696,12 @@ function HomeScreenContent() {
                             <View style={{ width: 2, height: handLength, backgroundColor: "rgba(255,255,255,0.85)", borderRadius: 1 }} />
                           </View>
                           <View pointerEvents="none" style={{ position: "absolute", width: 8, height: 8, borderRadius: 4, backgroundColor: "#ffffff", left: CLOCK_R - 4, top: CLOCK_R - 4 }} />
-                        </View>
+                        </View>}
                       </View>
                     </View>
                   </View>
                 </Animated.View>
-                {/* ── MINI AM/PM — aparece automáticamente si el usuario terminó minutos sin elegir período ── */}
-                {remindAmPmVisible && (
-                  <View style={{ position: "absolute", bottom: paddingBottom + 96, right: Math.max(insets.right + 28, 28), backgroundColor: BACKGROUND_MASTER.baseColor, borderRadius: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", padding: 10, gap: 8, shadowColor: "#000", shadowOpacity: 0.6, shadowRadius: 24, elevation: 20 }}>
-                    {(["AM", "PM"] as const).map((p) => (
-                      <TouchableOpacity
-                        key={p}
-                        onPress={() => {
-                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-                          const h24 = (clockH12 % 12) + (p === "PM" ? 12 : 0);
-                          const t = `${String(h24).padStart(2, "0")}:${String(clockMins).padStart(2, "0")}`;
-                          setClockPeriod(p);
-                          setRemindTime(t);
-                          setRemindAmPmVisible(false);
-                          remindClockModeRef.current = false;
-                          closeClock(() => setRemindOpen(true));
-                        }}
-                        activeOpacity={0.82}
-                        style={{ width: 72, height: 60, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#0e0e10", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)" }}
-                      >
-                        <Text style={{ color: "#ffffff", fontSize: 20, fontWeight: "200", letterSpacing: 2 }}>{p}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
+                </KeyboardAvoidingView>
               </>
             );
           })()}
@@ -21740,7 +21724,12 @@ function HomeScreenContent() {
             onPress={() => {
               Haptics.selectionAsync();
               setRemindOpen(false);
-              setClockH12(12); setClockMins(0); setClockPeriod(null); setClockPhase("hours");
+              const [hour, minute] = remindTime.split(":");
+              setClockH12(Number(hour) % 12 || 12);
+              setClockPeriod(remindTime ? (Number(hour) >= 12 ? "PM" : "AM") : null);
+              setClockPhase("hours");
+              setRemindMinuteDraft(minute || "00");
+              setRemindClockError("");
               remindClockModeRef.current = true;
               setRemindClockOpen(true);
             }}
@@ -26147,7 +26136,7 @@ function HomeScreenContent() {
         visible={empresaOpen}
         initialModulo={empresaModulo as any}
         onClose={() => { setEmpresaOpen(false); setEmpresaModulo("home"); }}
-        bookingChangeReturnDate={bookingReturnDateRef.current} onProposeBookingChange={entry=>openBookingProposal(entry,"business")}
+        bookingChangeReturnDate={bookingReturnDateRef.current} onProposeBookingChange={(entry,destination)=>destination?dropBookingProposal(entry,destination,"business"):openBookingProposal(entry,"business")}
         onModuloChange={refreshRutasBadges}
         guidanceLevel={effectiveGuidanceLevel}
         onOpenVerificacion={() => { setEmpresaOpen(false); setVerificacionOpen(true); }}
@@ -26169,7 +26158,7 @@ function HomeScreenContent() {
       />}
 
       {goView.isBusinessPreview && <GoBusinessPreviewProvider>
-        <EmpresaPanel onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} key={ownerDemo.demo?.businessId} visible={empresaOpen} previewReadOnly bookingChangeReturnDate={bookingReturnDateRef.current} onProposeBookingChange={entry=>openBookingProposal(entry,"business")}
+        <EmpresaPanel onOpenMessage={openEntryMessage} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} key={ownerDemo.demo?.businessId} visible={empresaOpen} previewReadOnly bookingChangeReturnDate={bookingReturnDateRef.current} onProposeBookingChange={(entry,destination)=>destination?dropBookingProposal(entry,destination,"business"):openBookingProposal(entry,"business")}
           initialModulo={empresaDemoRoute === "configuration" ? "empresa_config" : empresaDemoRoute === "reservations" ? "reservas_config" : "home"}
           initialCompaniesOpen={empresaDemoRoute === "companies"} onDemoNavigate={setEmpresaDemoRoute}
           onClose={() => { setEmpresaOpenState(false); setEmpresaDemoRoute("home"); }} onOpenContext={openOwnerContextSelector} />

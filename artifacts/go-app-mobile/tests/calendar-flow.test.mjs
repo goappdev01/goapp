@@ -58,7 +58,12 @@ test('hours switch immediately to minutes, support returning to hours, and lead 
   flow.goBackToHours(); flow = app.render();
   assert.equal(flow.clockPhase, 'hours');
   flow.handleClockTouch(170, 108, true, 108); flow = app.render();
-  flow.handleClockTouch(108, 26, true, 108); flow = app.render(); // :00
+  flow.setClockMinuteDraft("00"); flow = app.render();
+  flow.commitClock(); flow = app.render();
+  assert.equal(flow.calError, "Selecciona AM o PM para continuar");
+  assert.equal(flow.clockOpen, true);
+  flow.setPeriodDraft("AM"); flow = app.render();
+  flow.commitClock(); flow = app.render();
   assert.equal(flow.time, '03:00');
   assert.equal(flow.clockOpen, false);
   assert.equal(flow.step, 'duration'); assert.equal(flow.panelOpen, true);
@@ -76,6 +81,42 @@ for (const duration of ['15m', '30m', '1h', '2h']) {
     assert.deepEqual(app.saves, [{ dateISO: '2026-10-20', dateDraft: 'Mar 20', time: '09:45', duration }]);
   });
 }
+
+for (const [hour, period, minutes, expected] of [
+  [5, "AM", "00", "05:00"], [5, "PM", "00", "17:00"],
+  [12, "AM", "00", "00:00"], [12, "PM", "00", "12:00"],
+  [5, "AM", "02", "05:02"], [5, "PM", "58", "17:58"], [12, "AM", "59", "00:59"],
+]) {
+  test(`manual clock saves ${hour}:${minutes} ${period} as ${expected}`, () => {
+    const app = fixture();
+    let flow = app.open({initialTime:"",skipDuration:true});
+    const angle = hour * Math.PI / 6;
+    flow.handleClockTouch(108 + 82 * Math.sin(angle),108 - 82 * Math.cos(angle),true,108);
+    flow = app.render();
+    flow.setClockMinuteDraft(minutes);
+    flow.setPeriodDraft(period);
+    app.render().commitClock();
+    app.flush();
+    assert.equal(app.saves[0]?.time, expected);
+  });
+}
+
+test("editing preserves the saved period, invalid minutes stay editable, and cancelling discards the draft", () => {
+  const app = fixture();
+  let flow = app.open({initialTime:"17:30",skipDuration:true});
+  assert.equal(flow.clockPeriod,"PM");
+  flow.setClockMinuteDraft("60");
+  app.render().commitClock();
+  assert.match(app.render().calError,/00 y 59/);
+  app.render().cancel();
+  app.flush();
+  assert.equal(app.saves.length,0);
+  flow = app.open({initialTime:"00:30",skipDuration:true});
+  assert.equal(flow.clockPeriod,"AM");
+  flow.commitClock();
+  app.flush();
+  assert.equal(app.saves[0]?.time,"00:30");
+});
 
 test('omitting time and duration emits empty values instead of inventing values or retaining initial drafts', () => {
   const app = fixture();
