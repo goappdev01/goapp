@@ -10,8 +10,8 @@ type Props={value:string;onApply:(value:string)=>void;onClear:()=>void;disabled?
 function numbers(kind:"time"|"duration",hours:string,minutes:string,setHours:(value:string)=>void,setMinutes:(value:string)=>void,disabled:boolean,onFocus?:TextInputProps["onFocus"]){
  return <View style={{gap:kind==="time"?4:0}}>
   {kind==="time"&&<View style={s.row}>
-   <Text style={[s.label,{flex:1}]}>HORAS (00–23)</Text>
-   <Text style={[s.label,{flex:1}]}>MINUTOS</Text>
+   <Text style={[s.label,{flex:1,lineHeight:16}]}>HORAS{"\n"}<Text style={{fontSize:10}}>(00–23)</Text></Text>
+   <Text style={[s.label,{flex:1,lineHeight:16}]}>MINUTOS{"\n"}<Text style={{fontSize:10}}>{" "}</Text></Text>
   </View>}
   <View style={s.row}>{[[kind==="time"?"HORAS (00–23)":"HORAS",hours,setHours,kind==="time"?2:4,"hour"],["MINUTOS",minutes,setMinutes,2,"minute"]].map(([label,value,set,length,key])=>{const Input=key==="minute"?GoMinuteInput:TextInput;return <View key={key as string} style={{flex:1,gap:4}}>
   {kind!=="time"&&<Text style={s.label}>{label as string}</Text>}<Input testID={`note-${kind}-${key}`} accessibilityLabel={(kind==="time"?"Hora: ":"Duración: ")+label} value={value as string} onChangeText={set as (value:string)=>void} onFocus={onFocus} keyboardType="number-pad" inputMode="numeric" maxLength={length as number} selectTextOnFocus editable={!disabled} style={s.input}/>
