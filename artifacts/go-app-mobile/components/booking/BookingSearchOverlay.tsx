@@ -1060,7 +1060,11 @@ export function BookingSearchOverlay({
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
-      <View testID="booking-overlay-frame" style={[s.overlay, { paddingTop: insets.top, paddingBottom: keyboardHeight }]}>
+      <View testID="booking-overlay-frame" style={[s.overlay, {
+        paddingTop: insets.top,
+        paddingBottom: keyboardVisible ? keyboardHeight + 8 : Math.max(insets.bottom, 12),
+        paddingLeft: insets.left, paddingRight: insets.right,
+      }]}>
         <Animated.View
           testID="booking-sheet"
           style={[
@@ -1072,6 +1076,7 @@ export function BookingSearchOverlay({
         >
           {/* Accent glow border — softer intensity */}
           <View
+            testID="booking-frame-border"
             style={[s.glowBorder, { borderColor: accentColor + "99", shadowColor: accentColor }]}
             pointerEvents="none"
           />
@@ -1119,7 +1124,7 @@ export function BookingSearchOverlay({
               <View style={[s.stepWrap, s.searchStepInner]}>
 
                 {/* ── Dock de interacción — primero en DOM → fondo visual con column-reverse ── */}
-                <View style={[s.actionDock, { paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 16) }]}>
+                <View style={[s.actionDock, { paddingBottom: keyboardVisible ? 8 : 16 }]}>
 
                   {/* Grid de categorías / subcategorías — prioridad principal */}
                   {!keyboardVisible && query.length === 0 && (
@@ -1915,11 +1920,8 @@ const s = StyleSheet.create({
   },
   sheet: {
     backgroundColor: "#070B12",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
+    borderRadius: 28,
+    borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
     // Fill the safe-area-adjusted viewport so the step content and bottom controls
     // are not clipped by a fixed fraction of the full device height.
@@ -1929,8 +1931,8 @@ const s = StyleSheet.create({
   },
   glowBorder: {
     position: "absolute",
-    top: 0, left: 0, right: 0, bottom: 0,
-    borderRadius: 28,
+    top: 1, left: 1, right: 1, bottom: 1,
+    borderRadius: 27,
     borderWidth: 1.5,
     shadowOpacity: 0.24,
     shadowRadius: 18,
