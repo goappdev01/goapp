@@ -4631,9 +4631,11 @@ function HomeScreenContent() {
   const [monthGridOpen, setMonthGridOpen] = useState(false);
   const [reservasNavDay, setReservasNavDay] = useState<string | null>(null);
   const [showBookingFromCal, setShowBookingFromCal] = useState(false);
+  const [bookingInitialDateISO, setBookingInitialDateISO] = useState<string | null>(null);
   // Personal calendar context: identical entry to RESERVAR, regardless of account role.
-  const openCalendarReservation = () => {
+  const openCalendarReservation = (dateISO?: unknown) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setBookingInitialDateISO(typeof dateISO === "string" ? dateISO : null);
     setShowBookingFromCal(true);
   };
   // Vista del timeline de fondo: semanal o mensual lineal
@@ -13676,7 +13678,7 @@ function HomeScreenContent() {
     setMessagesOpen(false); setGoChatOpen(false); setMessageEntryId(null);
     setInitialMessagesContact(null); setInitialMessagesBookingId(null); setInitialMessagesContext(null);
     setLandingDetailsId(null); setCalBookingDetailEntry(null);
-    setCalReservasOpen(false); setShowBookingFromCal(false); setAgendaOpOpen(false); setEmpresaOpen(false);
+    setCalReservasOpen(false); setShowBookingFromCal(false); setBookingInitialDateISO(null); setAgendaOpOpen(false); setEmpresaOpen(false);
     closeAllOverlays();
     setDirectLandingExit(false);
   };
@@ -20992,20 +20994,23 @@ function HomeScreenContent() {
         <BookingSearchOverlay
           key={demoBookingRepository ? "demo_" + demoBookingRepository.ownerUserId : "real"}
           visible={showBookingFromCal && !adminAccess.checking && (!demoInitialBusinessId || !!demoBookingRepository)}
+          initialDateISO={bookingInitialDateISO ?? undefined}
           demoRepository={demoBookingRepository}
           initialBusinessId={demoInitialBusinessId}
           onDemoGoToBooking={(dateISO, timeHHMM, entryId) => {
             setShowBookingFromCal(false);
+            setBookingInitialDateISO(null);
             setDemoCalendarFocus({ dateISO, timeHHMM, entryId, token: Date.now() });
             setDemoCustomerCalendarSelected(true);
             setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid();
             setCalOpen(true);
           }}
-          onClose={() => { setShowBookingFromCal(false); setDemoInitialBusinessId(undefined); }}
+          onClose={() => { setShowBookingFromCal(false); setBookingInitialDateISO(null); setDemoInitialBusinessId(undefined); }}
           onDismissAll={() => {
             // Paso 1: cerrar el modal interior (BookingSearchOverlay) inmediatamente.
             // Como usa animationType="none", se desmonta en el siguiente frame.
             setShowBookingFromCal(false);
+            setBookingInitialDateISO(null);
             // Paso 2: tras dejar un ciclo de runloop para que UIKit procese el
             // cierre del modal interior, cerrar el modal exterior (calendario) y
             // todos sus sub-estados. Hacer ambos cierres simultáneos en un Modal
@@ -21021,6 +21026,7 @@ function HomeScreenContent() {
           onHoldCreated={refreshHoldBookings}
           onGoToBooking={(dateISO, timeHHMM, entryId) => {
             setShowBookingFromCal(false);
+            setBookingInitialDateISO(null);
             setDateISODraft(dateISO);setCalBgViewMonth(dateISO.slice(0,7));setCalOpen(true);
             setCalScrollToDateTarget({ dateISO, timeHHMM, entryId, token: Date.now() });
             setCalHighlightEntryId(entryId);
@@ -25316,6 +25322,7 @@ function HomeScreenContent() {
                         if (demoBookingRepository) {
                           setDemoInitialBusinessId(provider.id);
                           setCalOpen(true);
+                          setBookingInitialDateISO(null);
                           setShowBookingFromCal(true);
                           return;
                         }
