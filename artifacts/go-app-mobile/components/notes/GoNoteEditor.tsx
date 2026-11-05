@@ -394,7 +394,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
           <TouchableOpacity testID="note-discard" accessibilityRole="button" accessibilityLabel="Descartar borrador" accessibilityHint="Elimina este borrador y cierra la nota"
             disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPress={requestDiscard} activeOpacity={0.78}
             style={{width:44,minHeight:52,flexShrink:0,alignItems:"center",justifyContent:"center",borderRadius:12}}>
-            <Feather name="trash-2" size={19} color="#b4232f"/>
+            <Feather name="trash-2" size={22} color="#b4232f"/>
           </TouchableOpacity>}
           <TouchableOpacity testID="unified-note-save" accessibilityRole="button" disabled={busy||toolFinishing||closingSaved||attachmentBusy||preparing||voice.status!=="idle"} activeOpacity={0.78} onPress={()=>void save()} style={s.save}><LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.58)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,{borderRadius:18}]}/><Text style={s.saveText}>{busy?"GUARDANDO…":"GUARDAR"}</Text></TouchableOpacity>
           <TouchableOpacity testID="note-microphone" accessibilityRole="button" accessibilityLabel={voice.status==="listening"?"Detener escucha de GO":"Hablar con GO para preparar la nota"} accessibilityState={{selected:voice.status==="listening",disabled:busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"}}
