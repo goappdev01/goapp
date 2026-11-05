@@ -284,3 +284,50 @@ test('Mis reservas is operable only in USER while ADMIN and BUSINESS retain the 
     }
   }
 });
+
+test('three real Listados task cards place the complete actions below their headers in both hands', () => {
+  const detailsSource = readFileSync('components/GoEntryDetails.tsx', 'utf8');
+  const details = ts.createSourceFile('GoEntryDetails.tsx', detailsSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const component = find(details, node => ts.isFunctionDeclaration(node) && node.name?.text === 'GoEntryMicroActions');
+  const adapter = find(home, node => ts.isVariableDeclaration(node) && node.name.getText(home) === 'renderEntryMicroActions');
+  assert.ok(component && adapter);
+  const tasks = ['pendiente', 'aceptado', 'pendiente'].map((estado, index) => ({
+    id: 'task-' + index, kind: 'sent', type: 'TAREA_INTERNA', intentKey: 'nota_interna',
+    intentLabel: 'Tarea de prueba con título largo ' + index, notes: 'Contenido sintético ' + index,
+    estado, localResolutionStatus: index === 1 ? 'done' : 'pending',
+  }));
+  const flatten = style => Object.assign({}, ...[style].flat(Infinity).filter(Boolean));
+  for (const handedness of ['left', 'right']) for (const listGoSize of ['compacto', 'medio', 'grande']) {
+    const f = fixture('es', { goLog: tasks, handedness, listGoSize, canResolveEntry: () => true });
+    Object.assign(f.context, {
+      exports: {}, C: policyContext.exports.GO_ENTRY_COLORS, useLanguage: () => ({ lang: 'es' }),
+      followedEntry: entry => entry, resolveEntry: (entry, status) => f.calls.push([entry.id, status]),
+    });
+    f.context.actionCompletion.isSaving = () => false;
+    vm.runInNewContext(compile(component.getText(details) + '\nglobalThis.GoEntryMicroActions = GoEntryMicroActions;\nglobalThis.renderEntryMicroActions = ' + adapter.initializer.getText(home)), f.context);
+    const cards = nodes(f.render(), n => n.type === 'Pressable' && n.props.testID?.startsWith('list-entry-card-task-'));
+    assert.equal(cards.length, 3);
+    for (const card of cards) {
+      const index = card.props.children.findIndex(node => node?.type === f.context.GoEntryMicroActions);
+      assert.equal(index, 1, 'actions own a row directly beneath the header');
+      assert.equal(nodes(card.props.children[0], node => node.type === 'Feather' && node.props.name === 'circle').length, 0);
+      const mounted = card.props.children[index];
+      assert.equal(mounted.props.layout, 'list');
+      const row = mounted.type(mounted.props);
+      assert.equal(flatten(row.props.style).flexWrap, 'wrap');
+      assert.equal(flatten(row.props.style).alignSelf, 'stretch');
+      const buttons = nodes(row, node => node.type === 'TouchableOpacity');
+      assert.deepEqual(buttons.map(node => node.props.accessibilityLabel), ['REALIZADA', 'PENDIENTE', 'ELIMINAR']);
+      buttons.forEach((button, position) => {
+        const style = flatten(button.props.style);
+        const label = nodes(button, node => node.type === 'Text')[0];
+        assert.equal(label.props.numberOfLines, undefined);
+        assert.equal(style.minHeight, 44);
+        assert.equal(style.maxWidth, '100%');
+        assert.equal(style.borderColor, [f.context.C.done, f.context.C.pending, f.context.C.destructive][position]);
+        button.props.onPress({ stopPropagation() {} });
+      });
+      assert.deepEqual(f.calls.slice(-3), ['done', 'pending', 'discard'].map(status => [mounted.props.entry.id, status]));
+    }
+  }
+});

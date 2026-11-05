@@ -28,8 +28,9 @@ export type GoEntryActionCallbacks = {
 };
 
 /** Personal follow-up never writes the contractual acceptance or completion of a reservation. */
-export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean}){
+export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list"}){
   const {lang}=useLanguage(),personal=!!(entry.reservationId||entry.customerBooking||entry.businessBooking);
+  const list = layout === "list";
   const label=(es:string,en:string)=>lang==="en"?en:es;
   const actions=[
     {key:"done",text:label("REALIZADA","DONE"),color:C.done,icon:"check-circle" as const,run:onDone},
@@ -37,16 +38,16 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
     {key:"discard",text:label("ELIMINAR","DELETE"),color:C.destructive,icon:"trash-2" as const,run:onDiscard},
   ].filter(action=>action.run);
   if(!actions.length)return null;
-  return <View testID="entry-micro-actions" pointerEvents="box-none" style={{flexDirection:"row",flexShrink:0,gap:4,padding:0}}>
+  return <View testID="entry-micro-actions" pointerEvents="box-none" style={{flexDirection:"row",flexShrink:0,gap:4,padding:0,...(list && {flexWrap:"wrap",alignSelf:"stretch",marginBottom:6})}}>
     {actions.map(action=><TouchableOpacity key={action.key} accessibilityRole="button"
       accessibilityLabel={personal?label("Mi seguimiento: ","My follow-up: ")+action.text:action.text}
       accessibilityHint={action.key==="discard"?label("Oculta solo tu ficha. No cancela el compromiso.","Hides only your card. Does not cancel the commitment."):undefined}
       disabled={disabled} accessibilityState={{disabled,selected:entry.localResolutionStatus===action.key}}
       hitSlop={{top:inline?4:0,bottom:inline?4:0,left:0,right:0}} activeOpacity={0.7}
       onPress={event=>{event?.stopPropagation();action.run?.();}}
-      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:1,borderColor:action.color,backgroundColor:action.color+"12",flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center"}}>
+      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:1,borderColor:action.color,backgroundColor:action.color+"12",flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",...(list && {flexBasis:100,maxWidth:"100%",flexWrap:"wrap"})}}>
       <Feather name={action.icon} size={inline?12:14} color={action.color}/>
-      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2}
+      <Text numberOfLines={list?undefined:1} adjustsFontSizeToFit={!list} minimumFontScale={0.75} maxFontSizeMultiplier={list?undefined:1.2}
         style={{color:action.color,fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.text}</Text>
     </TouchableOpacity>)}
   </View>;

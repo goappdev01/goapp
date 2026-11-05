@@ -13691,7 +13691,7 @@ function HomeScreenContent() {
     if(!entry.changeProposal&&!entry.proposal)void actionCompletion.decide(entry,status,true,read);
   };
   const followedEntry=(entry:GoEntry)=>({...entry,localResolutionStatus:actionCompletion.status(entry)});
-  const renderEntryMicroActions=(entry:GoEntry,inline=false)=><GoEntryMicroActions inline={inline} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
+  const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list")=><GoEntryMicroActions inline={inline} layout={layout} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
     onDone={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"done"):undefined}
     onPending={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"pending"):undefined}
     onDiscard={canResolveEntry(entry)?()=>resolveEntry(entry,"discard"):undefined}/>;
@@ -23171,9 +23171,9 @@ function HomeScreenContent() {
                         </TouchableOpacity>
                       )}
                       {/* Icono intent */}
-                      <View style={{ width: lv(18), height: lv(18), borderRadius: 5, backgroundColor: intentColor + "28", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {(isProposalEstado || !canResolveEntry(g)) && <View style={{ width: lv(18), height: lv(18), borderRadius: 5, backgroundColor: intentColor + "28", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                         <Feather name={(intentDef?.icon || "circle") as keyof typeof Feather.glyphMap} size={lv(10)} color={intentColor} />
-                      </View>
+                      </View>}
                       {/* TÍTULO — ocupa todo el espacio restante hasta el checkbox */}
                       <TouchableOpacity
                         testID={"list-entry-title-"+g.id}
@@ -23273,7 +23273,6 @@ function HomeScreenContent() {
                         </TouchableOpacity>
                       )}
                       {handedness === "right" && isProposalEstado && statusPill}
-                      {!isProposalEstado && (canResolveEntry(g)||entryIsReservation(g)) && renderEntryMicroActions(g)}
                       {/* CHECKBOX — derecha si DIESTRO */}
                       {handedness === "right" && !canResolveEntry(g) && !entryIsReservation(g) && (
                         <TouchableOpacity
@@ -23302,6 +23301,8 @@ function HomeScreenContent() {
                         </TouchableOpacity>
                       )}
                     </View>
+
+                    {!isProposalEstado && canResolveEntry(g) && renderEntryMicroActions(g, false, "list")}
 
                     {/* ── FILA 2: INFO + ESTADO + BADGE ── */}
                     {(!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8) }}>
