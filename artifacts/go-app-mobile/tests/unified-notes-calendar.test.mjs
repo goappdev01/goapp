@@ -146,11 +146,11 @@ test('the real Home GUARDAR callback and mounted editor persist/read back a phra
  }finally{disk.close();}
 });
 
-test('the real Home projection excludes archived and other-account/context notes while preserving existing reservations',async()=>{
+test('the real Home projection excludes archived, GO attachments and other-account/context notes while preserving existing reservations',async()=>{
  const disk=await h.diskFixture();try{const make=(destination,id,owner=disk.scope.userId,context=disk.scope.context)=>({...disk.model.buildNoteEntry(disk.draft({destination,dateISO:'2027-01-15',time:'18:30',id}),disk.scope),ownerUserId:owner,taskContext:context});
- const archive=make('archive','archive'),pending=make('pending','pending'),calendar=make('calendar','calendar'),foreign=make('calendar','foreign','another'),company=make('pending','company',disk.scope.userId,'demo:BUSINESS:another'),booking={id:'booking',customerBooking:true};
+ const archive=make('archive','archive'),pending=make('pending','pending'),calendar=make('calendar','calendar'),attachment=make('go','go-attachment'),foreign=make('calendar','foreign','another'),company=make('pending','company',disk.scope.userId,'demo:BUSINESS:another'),booking={id:'booking',customerBooking:true};
  const source=fs.readFileSync('app/index.tsx','utf8'),ast=h.ts.createSourceFile('home.tsx',source,h.ts.ScriptTarget.Latest,true,h.ts.ScriptKind.TSX);let declaration;function visit(n){if(h.ts.isVariableDeclaration(n)&&n.name.getText(ast)==='completionEntries')declaration=n;h.ts.forEachChild(n,visit);}visit(ast);
- const ctx={useMemo:fn=>fn(),personalGoLog:[archive,pending,calendar,foreign,company],customerBookings:{entries:[booking]},mergeCustomerBookingEntries:(a,b)=>[...a,...b],canReadBoardTask:()=>true,isArchivedNote:disk.model.isArchivedNote,noteDocument:disk.model.noteDocument,noteInScope:disk.model.noteInScope,goView:{view:'USER'},adminAccess:{allowed:true,checking:false},completionIdentity:{ready:true,scope:disk.scope}};
+ const ctx={useMemo:fn=>fn(),personalGoLog:[archive,pending,calendar,attachment,foreign,company],customerBookings:{entries:[booking]},mergeCustomerBookingEntries:(a,b)=>[...a,...b],canReadBoardTask:()=>true,isArchivedNote:disk.model.isArchivedNote,noteDocument:disk.model.noteDocument,noteInScope:disk.model.noteInScope,goView:{view:'USER'},adminAccess:{allowed:true,checking:false},completionIdentity:{ready:true,scope:disk.scope}};
  vm.runInNewContext(h.compile('globalThis.rows='+declaration.initializer.getText(ast)),ctx);assert.deepEqual(h.plain(ctx.rows).map(e=>e.id),['pending','calendar','booking']);ctx.completionIdentity.ready=false;
  vm.runInNewContext(h.compile('globalThis.rows='+declaration.initializer.getText(ast)),ctx);assert.deepEqual(h.plain(ctx.rows).map(e=>e.id),['booking']);
  }finally{disk.close();}

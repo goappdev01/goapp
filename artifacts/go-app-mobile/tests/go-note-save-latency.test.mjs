@@ -86,11 +86,11 @@ const homeCallbacks=(f)=>{
  vm.runInNewContext(h.compile(declarations+';globalThis.save=saveNoteDraft;'),ctx);return {ctx,calls};
 };
 
-test('the actual Home save callback does not wait for legacy draft cleanup or native services after verified persistence',async()=>{
- const f=await h.performanceFixture();let release,cleanup;try{await f.prime();f.block('pending',new Promise(r=>release=r));const home=homeCallbacks(f);home.ctx.AsyncStorage.removeItem=()=>new Promise(r=>cleanup=r);
-  const result=await Promise.race([home.ctx.save(f.draft({content:'Persistencia antes de limpiar un borrador antiguo'})),h.pause(1500).then(()=>assert.fail('Home held the verified note behind cleanup'))]);
-  assert.equal(f.rows.length,1);assert.equal((await f.reopen())[0].id,result.entry.id);assert.ok(cleanup);assert.equal(home.calls.length,0);cleanup();release();await result.reminderSync;
- }finally{cleanup?.();release?.();f.close();}
+test('the actual Home save callback preserves the separate legacy draft and does not wait for native services',async()=>{
+ const f=await h.performanceFixture();let release;try{await f.prime();f.block('pending',new Promise(r=>release=r));const home=homeCallbacks(f);home.ctx.AsyncStorage.removeItem=()=>assert.fail('a unified note must preserve the separate legacy draft');
+  const result=await Promise.race([home.ctx.save(f.draft({content:'Persistencia antes de comprobar avisos'})),h.pause(1500).then(()=>assert.fail('Home held the verified note behind native reminders'))]);
+  assert.equal(f.rows.length,1);assert.equal((await f.reopen())[0].id,result.entry.id);assert.equal(home.calls.length,0);release();await result.reminderSync;
+ }finally{release?.();f.close();}
 });
 
 test('the actual Home observer warns on a late native failure only for the current note operation and account',async()=>{

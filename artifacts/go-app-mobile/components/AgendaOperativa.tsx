@@ -609,7 +609,7 @@ const MONTH_NAMES_ES = [
 ];
 
 function isOverdue(g: GoEntry): boolean {
-  if(g.note?.version===1 && g.note.destination==="archive")return false;
+  if(g.note?.version===1 && (g.note.destination==="archive" || g.note.destination==="go"))return false;
   if (g.deleted || g.estado === "rechazado" || g.localResolutionStatus === "done") return false;
   if (g.localResolutionStatus === "pending") return true;
   return !g.dateISO && g.estado === "pendiente";

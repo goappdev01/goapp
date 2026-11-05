@@ -29,14 +29,14 @@ type Props = { visible:boolean; initial?:GoEntry|null; seed?:{title?:string;cont
   scope:TaskScope|null; ready:boolean; handedness:"left"|"right"; cached?:UnifiedNoteDraft; onClose:(state?:{draft:UnifiedNoteDraft;saved:boolean})=>void;
   onSave:(draft:UnifiedNoteDraft)=>Promise<{entry:GoEntry;message:string;notice?:string;performance?:NoteSaveTrace}>;
   onSaved?:(entry:GoEntry,notice:string)=>void; onDelete?:(entry:GoEntry)=>void|Promise<void>;
-  onGoToLanding?:()=>void; closeRequested?:boolean; initialToolsOpen?:boolean; confirmScheduleOnSave?:boolean;
+  onGoToLanding?:()=>void; closeRequested?:boolean; initialToolsOpen?:boolean; confirmScheduleOnSave?:boolean; goAttachment?:boolean;
   renderActions?:(entry:GoEntry,onEdit:()=>void)=>React.ReactNode };
 const destinations: [NoteDestination,string][]=[["calendar","CALENDARIO"],["pending","PENDIENTES"],["archive","ARCHIVO"]];
 const configurationKeys=["destination","dateISO","time","duration","place","location","reminderMinutes","attachments"] as const;
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 
 /** One ordinary-note editor, one native presenter, and one acknowledged save operation. */
-export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClose,onSave,onSaved,onDelete,cached,renderActions,onGoToLanding,closeRequested=false,initialToolsOpen=false,confirmScheduleOnSave=false}:Props) {
+export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClose,onSave,onSaved,onDelete,cached,renderActions,onGoToLanding,closeRequested=false,initialToolsOpen=false,confirmScheduleOnSave=false,goAttachment=false}:Props) {
   const insets=useSafeAreaInsets(),scroll=useRef<React.ElementRef<typeof ScrollView>>(null),keyboard=useGoNoteKeyboard(visible);
   const [draft,setDraft]=useState<UnifiedNoteDraft>(()=>cached||noteDraft(initial)),[panel,setPanel]=useState(""),[error,setError]=useState(""),[message,setMessage]=useState("");
   const [busy,setBusy]=useState(false),[attachmentBusy,setAttachmentBusy]=useState(false),[link,setLink]=useState("");
@@ -127,7 +127,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       if(epoch!==preparation.current||!latest.current.visible||latest.current.id!==base.id||latest.current.scope?.userId!==expected?.userId||latest.current.scope?.context!==expected?.context)return;
       setDraft(current=>{
         const next={...current},keys=["title","dateISO","time","duration","place","reminderMinutes"] as const;
-        for(const key of keys)if(result.patch[key]!==undefined&&current[key]===base[key]&&(key!=="title"||!base.title))Object.assign(next,{[key]:result.patch[key]});
+        for(const key of keys)if((!goAttachment||key==="title")&&result.patch[key]!==undefined&&current[key]===base[key]&&(key!=="title"||!base.title))Object.assign(next,{[key]:result.patch[key]});
         if(current.content===captured)next.content=appendNoteDictation(base.content,result.patch.content??text);
         if(next.place!==current.place)next.location=undefined;
         return next;
@@ -140,6 +140,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       const key=initial?.id||"new";
       if(session.current!==key || saved.current || initial){const next=cached||noteDraft(initial);if(!initial&&!cached){next.title=seed?.title||"";next.content=seed?.content||"";}
         if(seed?.destination)next.destination=seed.destination;if(seed?.dateISO)next.dateISO=seed.dateISO;if(seed?.time!==undefined)next.time=seed.time;
+        if(goAttachment&&!initial)next.destination="go";
         setDraft(next);draftRef.current=next;persistedEntry.current=initial&&cached?.id===initial.id?cached.original||initial:initial||null;toolDraftRef.current=null;setToolDraft(null);pendingTool.current=null;pendingCommit.current=null;setLink("");setLocationSource(null);setPanel("");setToolsOpen(initialToolsOpen);setClosingSaved(false);savedExit.current=null;setLocations([]);setError("");setMessage("");setPreparedNotice("");saved.current=false;}
       session.current=key;voice.focus("detail");
     }
@@ -333,11 +334,12 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
         <ScrollView ref={scroll} testID="unified-note-scroll" style={s.writing}
           onLayout={event=>{const height=Math.max(120,Math.floor(event.nativeEvent.layout.height-110));setWritingHeight(current=>Math.abs(current-height)<=2?current:height);}}
           keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" bounces={false} alwaysBounceVertical={false} overScrollMode="never" automaticallyAdjustKeyboardInsets={false} automaticallyAdjustContentInsets={false} contentInsetAdjustmentBehavior="never" removeClippedSubviews={false} contentContainerStyle={{paddingBottom:12,gap:12}}>
+          {goAttachment&&<Text testID="note-go-target" style={s.hint}>Destino · GO</Text>}
           {input("note-title","TÍTULO (OPCIONAL)",draft.title,title=>change({title}),{onFocus:(event:Parameters<NonNullable<TextInputProps["onFocus"]>>[0])=>{focusedToolTarget.current=null;focusedWritingTarget.current=event.target??event.nativeEvent.target??null;voice.focus("title");},maxLength:200})}
           {input("note-content","CONTENIDO",draft.content,content=>change({content}),{onFocus:(event:Parameters<NonNullable<TextInputProps["onFocus"]>>[0])=>{focusedToolTarget.current=null;focusedWritingTarget.current=event.target??event.nativeEvent.target??null;voice.focus("detail");},multiline:true,textAlignVertical:"top",scrollEnabled:true,
             style:[s.input,s.content,writingInset,{height:writingHeight}]})}
           {!!initial&&<View testID="note-current-settings" style={{gap:6}}>
-            <Text style={s.hint}>{[draft.destination&&destinations.find(([key])=>key===draft.destination)?.[1],validNoteDate(draft.dateISO)&&noteDateLabel(draft.dateISO),draft.time,noteDurationLabel(draft.duration)].filter(Boolean).join(" · ")}</Text>
+            {!goAttachment&&<Text style={s.hint}>{[draft.destination&&destinations.find(([key])=>key===draft.destination)?.[1],validNoteDate(draft.dateISO)&&noteDateLabel(draft.dateISO),draft.time,noteDurationLabel(draft.duration)].filter(Boolean).join(" · ")}</Text>}
             {draft.reminderMinutes!==null&&<Text style={s.hint}>{noteReminderLabel(draft.reminderMinutes,false)}</Text>}
             {!!draft.place&&<Text style={s.hint}>{draft.place}</Text>}
             {!!draft.attachments.length&&<Text style={s.hint}>{draft.attachments.map(a=>a.name).join(" · ")}</Text>}
@@ -377,13 +379,13 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
           {panel==="time"&&<GoNoteTimePicker value={draft.time} disabled={busy||toolFinishing} handedness={handedness} onPendingChange={edit=>recordPending("time",edit)} onInputFocus={focusToolInput} onApply={time=>applyTool({time})} onClear={()=>applyTool({time:""})}/>}
           {panel==="duration"&&<GoNoteDurationPicker value={draft.duration} disabled={busy||toolFinishing} handedness={handedness} onPendingChange={edit=>recordPending("duration",edit)} onInputFocus={focusToolInput} onApply={duration=>applyTool({duration})} onClear={()=>applyTool({duration:""})}/>}
           {!panel&&<>
-            <View testID="note-primary-controls" style={controlRow}>{options(["date","time","duration","reminder"])}</View>
-            <View testID="note-secondary-controls" style={controlRow}>{options(["place","attachments"])}</View>
+            {!goAttachment&&<View testID="note-primary-controls" style={controlRow}>{options(["date","time","duration","reminder"])}</View>}
+            <View testID="note-secondary-controls" style={controlRow}>{options(goAttachment?["attachments"]:["place","attachments"])}</View>
           </>}
-          {(!panel||panel==="destinations")&&<><Text style={s.label}>DESTINO</Text><View testID="note-destinations" style={s.destinationList}>{destinations.map(([value,label])=><TouchableOpacity key={value} testID={"note-destination-"+value}
+          {!goAttachment&&(!panel||panel==="destinations")&&<><Text style={s.label}>DESTINO</Text><View testID="note-destinations" style={s.destinationList}>{destinations.map(([value,label])=><TouchableOpacity key={value} testID={"note-destination-"+value}
             accessibilityRole="radio" accessibilityLabel={label} accessibilityState={{checked:draft.destination===value,selected:draft.destination===value}} disabled={busy} activeOpacity={0.78} onPress={()=>{setError("");void persistConfiguration({destination:value}).then(ok=>{if(ok&&panel==="destinations")setPanel("");});}}
             style={[s.choice,s.destination,{calendar:s.calendar,pending:s.pending,archive:s.archive}[value],draft.destination===value&&[s.selectedDestination,{backgroundColor:{calendar:"#23674f",pending:"#806017",archive:"#315f9c"}[value]}]]}><LinearGradient pointerEvents="none" colors={draft.destination===value?["rgba(255,255,255,0.08)","rgba(0,0,0,0.07)"]:["rgba(255,255,255,0.55)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,s.buttonSheen]}/><Text testID={"note-destination-label-"+value} maxFontSizeMultiplier={1.3} style={[s.destinationText,draft.destination===value&&s.destinationActiveText]}>{label}</Text>{draft.destination===value&&<Text testID="note-destination-selected" maxFontSizeMultiplier={1.3} style={{color:"#ffffff",fontSize:11,fontWeight:"800",textAlign:"center",marginTop:3}}>✓ SELECCIONADO</Text>}</TouchableOpacity>)}</View></>}
-          {panel==="destinations"&&<GoNoteToolFooter testID="note-destination-save" disabled={busy||toolFinishing} handedness={handedness} onSave={()=>{if(!draftRef.current.destination){setError("Selecciona CALENDARIO, PENDIENTES o ARCHIVO.");return;}void finishTool({destination:draftRef.current.destination});}}/>}
+          {!goAttachment&&panel==="destinations"&&<GoNoteToolFooter testID="note-destination-save" disabled={busy||toolFinishing} handedness={handedness} onSave={()=>{if(!draftRef.current.destination){setError("Selecciona CALENDARIO, PENDIENTES o ARCHIVO.");return;}void finishTool({destination:draftRef.current.destination});}}/>}
           {!panel&&<>
             {!!initial&&!!onDelete&&<TouchableOpacity testID="note-delete" accessibilityRole="button" accessibilityLabel="Eliminar nota" accessibilityHint="Solicita confirmación antes de mover esta nota a Eliminados" disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPress={requestDeleteNote} activeOpacity={0.78} style={[s.choice,s.deleteNote]}>
               <Feather name="trash-2" size={16} color="#ffffff"/><Text style={s.deleteNoteText}>ELIMINAR NOTA</Text>

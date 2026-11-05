@@ -23,7 +23,7 @@ import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMin
 import { saveGoNoteReminder, changeGoNoteReminder, confirmAttachedGoNoteReminder } from "@/lib/goNoteReminder";
 import { GoMinuteInput } from "@/components/ui/GoMinuteInput";
 import { BookingApiError, changeBookingRequest as negotiateRealBooking } from "@/data/booking";
-import { readGoLog, flushGoLog, commitGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
+import { readGoLog, flushGoLog, commitGoLogSnapshot, getGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
 import { onSessionChanged } from "@/lib/sessionEvents";
 import { recordAuthTrace } from "@/lib/authTrace";
 import { clearAuthSession, restoreStoredAuthentication, consumeAuthRecoveryNotice } from "@/lib/authSession";
@@ -3541,7 +3541,7 @@ function HomeScreenContent() {
   const completionIdentity = useAssistantZoneScope();
   const [personalGoLog, setGoLog] = useGoLog(completionIdentity.ready ? completionIdentity.scope : null);
   const customerBookings=useCustomerBookings(demoBookingRepository,goView.loaded && goView.view==="USER" && !adminAccess.checking && (!adminAccess.isOwner || ownerDemo.loaded));
-  const completionEntries=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER").filter(entry=>canReadBoardTask(entry)&&!isArchivedNote(entry)&&(!noteDocument(entry)||completionIdentity.ready&&!!completionIdentity.scope&&noteInScope(entry,completionIdentity.scope))),[personalGoLog,customerBookings.entries,goView.view,adminAccess.allowed,adminAccess.checking,completionIdentity.ready,completionIdentity.scope?.userId,completionIdentity.scope?.context]);
+  const completionEntries=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER").filter(entry=>canReadBoardTask(entry)&&!isArchivedNote(entry)&&noteDocument(entry)?.destination!=="go"&&(!noteDocument(entry)||completionIdentity.ready&&!!completionIdentity.scope&&noteInScope(entry,completionIdentity.scope))),[personalGoLog,customerBookings.entries,goView.view,adminAccess.allowed,adminAccess.checking,completionIdentity.ready,completionIdentity.scope?.userId,completionIdentity.scope?.context]);
   const actionCompletion = useActionCompletion(completionEntries);
   const goLog=useMemo(()=>completionEntries.filter(entry=>!actionCompletion.isDiscarded(entry)),[completionEntries,actionCompletion.isDiscarded]);
   const [landingDetailsId, setLandingDetailsId] = useState<string | null>(null);
@@ -4294,7 +4294,7 @@ function HomeScreenContent() {
   const [noteReminderBusy, setNoteReminderBusy] = useState(false);
   type UnifiedNoteOrigin = "landing" | "calendar" | "list";
   const [unifiedNoteInitial,setUnifiedNoteInitial]=useState<GoEntry|null>(null);
-  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;title?:string;content?:string;toolsOpen?:boolean;confirmSchedule?:boolean;linkedEntryId?:string;attachToGo?:boolean}>({});
+  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;title?:string;content?:string;toolsOpen?:boolean;confirmSchedule?:boolean;linkedEntryId?:string;goDraftId?:string}>({});
   const unifiedNoteOriginRef=useRef<UnifiedNoteOrigin>("landing");
   const listNoteLayerBackRef=useRef<(() => boolean)|null>(null);
   const unifiedNoteCache=useRef<{scope:string;draft:UnifiedNoteDraft}|null>(null);
@@ -4379,9 +4379,9 @@ function HomeScreenContent() {
   const noteReminderTarget = savedGoNoteReminderTargets.find(entry => entry.id === noteReminderTargetId);
   const [goVisibility, setGoVisibility] = useState<'publico' | 'clientes' | 'proveedores' | 'interno' | 'privado'>('publico');
   const [pendingEnvioNota, setPendingEnvioNota] = useState<{ phone: string; contactName: string; text: string; detail?: string } | null>(null);
-  // Nota externa adjunta al GO activo — viaja dentro del mismo envío.
-  // Se limpia al resetear el GO (resetContactFields).
-  const [attachedExternalNote, setAttachedExternalNote] = useState<{ noteId: string } | null>(null);
+  type GoNoteContext = { id: string; scope: NonNullable<typeof noteIdentity.scope>; referencedNoteId?: string };
+  const [goNoteContext, setGoNoteContext] = useState<GoNoteContext | null>(null);
+  const goNoteContextRef = useRef(goNoteContext);
   const linkedNoteParentsRef = useRef(goLog);
   linkedNoteParentsRef.current = goLog;
   function canAttachNoteToGo() {
@@ -4389,18 +4389,60 @@ function HomeScreenContent() {
     return goView.view === "ADMIN" && adminAccess.allowed && !adminAccess.checking
       && identity.ready && !!identity.scope && identity.scope.userId === adminAccess.userId;
   }
+  const goAttachmentAllowedRef = useRef(false);
+  goAttachmentAllowedRef.current = canAttachNoteToGo();
+  function updateGoNoteContext(context: GoNoteContext | null) {
+    goNoteContextRef.current = context;
+    setGoNoteContext(context);
+  }
+  function getOrStartGoNoteContext() {
+    const scope = noteIdentityRef.current.scope;
+    if (!scope || !canAttachNoteToGo() || !isActivelyCreating) return null;
+    const current = goNoteContextRef.current;
+    if (current?.scope.userId === scope.userId && current.scope.context === scope.context) return current;
+    const context = { id: makeUid(), scope: { ...scope } };
+    updateGoNoteContext(context);
+    return context;
+  }
+  function currentGoAttachmentEntry(context = goNoteContextRef.current) {
+    const scope = noteIdentityRef.current.scope;
+    if (!context || !scope || !canAttachNoteToGo() || context.scope.userId !== scope.userId || context.scope.context !== scope.context) return null;
+    return getGoLogSnapshot().find(row => {
+      const note = noteDocument(row);
+      return !!note && !row.deleted && row.estado !== "rechazado" && noteInScope(row, scope)
+        && (context.referencedNoteId ? row.id === context.referencedNoteId : note.destination === "go" && row.noteLinkedEntryId === context.id);
+    }) ?? null;
+  }
   function currentGoAttachment() {
-    if (!attachedExternalNote || !canAttachNoteToGo()) return null;
-    const scope = noteIdentityRef.current.scope!;
-    const entry = personalGoLog.find(row => row.id === attachedExternalNote.noteId);
-    const note = entry && !entry.deleted && entry.estado !== "rechazado" && noteInScope(entry, scope) ? noteDocument(entry) : undefined;
-    return note ? { id: attachedExternalNote.noteId, title: note.title, detail: note.content } : null;
+    const entry = currentGoAttachmentEntry();
+    const note = noteDocument(entry);
+    return entry && note ? { id: entry.id, title: note.title, detail: note.content } : null;
+  }
+  function openComposeGoNote() {
+    const context = getOrStartGoNoteContext();
+    if (!context || notesOpen) return;
+    const entry = currentGoAttachmentEntry(context);
+    const seed = { goDraftId: context.id };
+    if (entry) openUnifiedNote(entry, seed);
+    else openUnifiedNoteComposer(seed);
+  }
+  function renderComposeGoNote() {
+    if (!isActivelyCreating || !canAttachNoteToGo()) return null;
+    const attached = !!currentGoAttachmentEntry(goNoteContext);
+    return <TouchableOpacity accessibilityRole="button" testID="compose-go-note" onPress={openComposeGoNote}
+      accessibilityLabel={attached ? (lang === "en" ? "Note attached, open and edit" : "Nota adjuntada, abrir y editar") : undefined}
+      style={{ flexDirection: "row", alignItems: "center", gap: 5, minHeight: 44, paddingHorizontal: 8 }}>
+      <Feather name={attached ? "edit-2" : "paperclip"} size={14} color="#93c5fd" />
+      <Text style={{color:"#93c5fd",fontWeight:attached?"800":"500"}}>{attached
+        ? (lang === "en" ? "NOTE ATTACHED · EDIT" : "NOTA ADJUNTADA · EDITAR")
+        : (lang === "en" ? "Attach note to GO" : "Adjuntar nota GO")}</Text>
+    </TouchableOpacity>;
   }
   function stageGoNote(entry: GoEntry) {
-    const scope = noteIdentityRef.current.scope;
-    if (!scope || !canAttachNoteToGo() || !noteInScope(entry, scope) || !noteDocument(entry)
-      || entry.deleted || entry.estado === "rechazado") return false;
-    setAttachedExternalNote({ noteId: entry.id });
+    const context = getOrStartGoNoteContext();
+    if (!context || notesOpen || currentGoAttachmentEntry(context) || !noteInScope(entry, context.scope)
+      || !noteDocument(entry) || noteDocument(entry)?.destination === "go" || entry.deleted || entry.estado === "rechazado") return false;
+    updateGoNoteContext({ ...context, referencedNoteId: entry.id });
     showToast(lang === "en" ? "Note attached to GO." : "Nota adjuntada al GO.", "success");
     return true;
   }
@@ -4411,8 +4453,10 @@ function HomeScreenContent() {
   function renderLinkedNotes(parent: GoEntry) {
     const { ready, scope } = noteIdentityRef.current;
     if (!ready || !scope || parent.deleted) return null;
-    const linked = linkedNotesForEntry(personalGoLog, parent, scope).find(canReadBoardTask);
-    const attachSavedNote = !!noteDocument(parent) && noteInScope(parent, scope) && isActivelyCreating && canAttachNoteToGo();
+    const linked = linkedNotesForEntry(personalGoLog, parent, scope).find(note =>
+      canReadBoardTask(note) && (noteDocument(note)?.destination !== "go" || canAttachNoteToGo()));
+    const attachSavedNote = !!noteDocument(parent) && noteDocument(parent)?.destination !== "go" && noteInScope(parent, scope)
+      && isActivelyCreating && canAttachNoteToGo() && !currentGoAttachmentEntry();
     if (!attachSavedNote && !linked && !canLinkNoteTo(parent, scope)) return null;
     const label = attachSavedNote ? (lang === "en" ? "Attach to GO" : "Adjuntar al GO")
       : linked ? (lang === "en" ? "Open linked note" : "Abrir nota vinculada")
@@ -7131,6 +7175,7 @@ function HomeScreenContent() {
   // éxito para que el siguiente GO empiece en blanco. No toca el
   // contacto / lugar / fecha del GO en sí, solo los extras.
   const resetAdvancedDrafts = () => {
+    updateGoNoteContext(null);
     setGoActionType("GO");
     setAssignedToDraft("");
     setScheduleEnabled(false);
@@ -7162,7 +7207,7 @@ function HomeScreenContent() {
     setDateISO(formatISODate(getToday()));
     setTime("");
     setDuration("");
-    setAttachedExternalNote(null);
+    updateGoNoteContext(null);
   };
   swipeHandlersRef.current.resetContactFields = resetContactFields;
 
@@ -9152,7 +9197,7 @@ function HomeScreenContent() {
     // ensuciar el almacenamiento ni cambiar la apariencia visual.
     if (extra?.notes && extra.notes.trim()) entry.notes = extra.notes.trim();
     if (extra?.attachedNote && extra.attachedNote.trim()) entry.attachedNote = extra.attachedNote.trim();
-    if (kind === "sent" && extra?.attachedNoteId && extra.attachedNote) entry.attachedNoteId = extra.attachedNoteId;
+    if (kind === "sent" && extra?.attachedNoteId) entry.attachedNoteId = extra.attachedNoteId;
     if (extra?.sugerencia?.trim()) entry.sugerencia = extra.sugerencia.trim();
     if (extra?.isGeneric === true) entry.isGeneric = true;
     // Visibilidad — siempre se guarda para filtrado posterior.
@@ -14410,21 +14455,7 @@ function HomeScreenContent() {
                     </View>
                   </View>
                 )}
-                {/* NOTA EXTERNA ADJUNTA pill — orange, paperclip+edit icon */}
-                {canAttachNoteToGo() && isActivelyCreating && <TouchableOpacity accessibilityRole="button" testID="compose-go-note" onPress={() => openUnifiedNoteComposer({attachToGo:true})}>
-                  <Text style={{color:"#93c5fd",padding:8}}>{lang === "en" ? "Attach note to GO" : "Adjuntar nota al GO"}</Text>
-                </TouchableOpacity>}
-                {(() => {
-                  const noteTitle = currentGoAttachment()?.title;
-                  if (noteTitle === undefined) return null;
-                  return (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: "rgba(251,146,60,0.14)", borderWidth: 1, borderColor: "rgba(251,146,60,0.50)" }}>
-                      <Feather name="paperclip" size={9} color="#fb923c" />
-                      <Feather name="edit-2" size={9} color="#fb923c" />
-                      {!!noteTitle && <Text style={{ color: "#fb923c", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }} numberOfLines={1}>{noteTitle}</Text>}
-                    </View>
-                  );
-                })()}
+                {renderComposeGoNote()}
                 {!!selectedSugerencia && (
                   <StatusPill icon="star" text={selectedSugerencia} color={activeColor} fg={intentTextOnWhite} />
                 )}
@@ -25528,30 +25559,44 @@ function HomeScreenContent() {
   }
   function renderUnifiedNoteEditor(){
     const scope=noteIdentity.scope;
-    const {linkedEntryId,attachToGo}=unifiedNoteSeed;
-    const cacheId=unifiedNoteInitial?.id ?? (linkedEntryId ? "linked:"+linkedEntryId : attachToGo ? "compose:go" : undefined);
+    const {linkedEntryId,goDraftId}=unifiedNoteSeed;
+    const goAttachment=!!goDraftId || unifiedNoteInitial?.note?.destination==="go";
+    const cacheId=goDraftId ? "compose:"+goDraftId+":"+(unifiedNoteInitial?.id ?? "new") : unifiedNoteInitial?.id ?? (linkedEntryId ? "linked:"+linkedEntryId : undefined);
     return <GoNoteEditor key={cacheId} visible={notesOpen} initial={unifiedNoteInitial} handedness={handedness} ready={noteIdentity.ready} scope={scope}
       initialToolsOpen={unifiedNoteSeed.toolsOpen===true}
       confirmScheduleOnSave={unifiedNoteSeed.confirmSchedule===true}
+      goAttachment={goAttachment}
       cached={cacheId?unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+cacheId):unifiedNoteCache.current?.scope===JSON.stringify(scope)?unifiedNoteCache.current.draft:undefined}
-      seed={{...unifiedNoteSeed,title:unifiedNoteSeed.title??quickNoteText,content:unifiedNoteSeed.content??quickNoteDetail}}
+      seed={{...unifiedNoteSeed,title:unifiedNoteSeed.title??(goAttachment?"":quickNoteText),content:unifiedNoteSeed.content??(goAttachment?"":quickNoteDetail)}}
       onClose={state=>{cacheNoteDraft(state,cacheId);if(!state?.saved)unifiedNoteOriginRef.current="landing";setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}
-      onSaved={attachToGo ? (entry,notice) => { if(!stageGoNote(entry))showToast(notice,"success"); } : (entry,notice) => handleUnifiedNoteSaved(entry,notice,!unifiedNoteInitial && !linkedEntryId)}
-      onDelete={unifiedNoteInitial?deleteSavedNote:undefined}
-      renderActions={renderSavedNoteActions}
-      onSave={linkedEntryId ? draft=>saveNoteDraft(draft,linkedEntryId) : saveNoteDraft}/ >;
+      onSaved={goDraftId ? () => {
+        if(goNoteContextRef.current?.id===goDraftId&&goAttachmentAllowedRef.current)showToast(lang === "en" ? "Note attached to GO." : "Nota adjuntada al GO.", "success");
+      } : (entry,notice) => handleUnifiedNoteSaved(entry,notice,!unifiedNoteInitial && !linkedEntryId)}
+      onDelete={unifiedNoteInitial&&!goAttachment?deleteSavedNote:undefined}
+      renderActions={goAttachment?undefined:renderSavedNoteActions}
+      onSave={goDraftId || linkedEntryId ? draft=>saveNoteDraft(draft,linkedEntryId,goDraftId) : saveNoteDraft}/ >;
   }
-  async function saveNoteDraft(draft:UnifiedNoteDraft,linkedEntryId?:string){
+  async function saveNoteDraft(draft:UnifiedNoteDraft,linkedEntryId?:string,goDraftId?:string){
         const identity=noteIdentityRef.current;
         if(!identity.ready||!identity.scope)throw new Error("No se puede verificar tu cuenta. La nota permanece en el editor.");
         const expected={...identity.scope};
+        const goAttachment=draft.destination==="go";
+        const activeGo=()=>{
+          if (!goDraftId) return !goAttachment || !!draft.original && goAttachmentAllowedRef.current;
+          const context=goNoteContextRef.current;
+          return goAttachmentAllowedRef.current && context?.id===goDraftId
+            && context.scope.userId===expected.userId && context.scope.context===expected.context
+            && (goAttachment ? !context.referencedNoteId : context.referencedNoteId===draft.id && draft.original?.note?.destination===draft.destination);
+        };
         const active=()=>noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===expected.userId
           && noteIdentityRef.current.scope.context===expected.context
+          && activeGo()
           && (!linkedEntryId || linkedNoteParentsRef.current.some(entry=>entry.id===linkedEntryId&&canLinkNoteTo(entry,expected)));
         if(!active())throw new Error("El elemento vinculado ya no está disponible. Tu nota sigue en el editor.");
-        const result=linkedEntryId ? await saveUnifiedNote(draft,expected,active,linkedEntryId) : await saveUnifiedNote(draft,expected,active);
+        const parentId=goAttachment ? goDraftId : linkedEntryId;
+        const result=parentId ? await saveUnifiedNote(draft,expected,active,parentId) : await saveUnifiedNote(draft,expected,active);
         watchNoteReminderReceipt(result);
-        if(!draft.original){setQuickNoteText("");setQuickNoteDetail("");}
+        if(!draft.original&&!goAttachment){setQuickNoteText("");setQuickNoteDetail("");}
         return result;
   }
   function deleteSavedNote(entry:GoEntry){

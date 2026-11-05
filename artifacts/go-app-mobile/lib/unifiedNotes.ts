@@ -2,17 +2,18 @@ import type { GoEntry } from "@/components/AgendaOperativa";
 import type { TaskScope } from "./goTaskReminders";
 
 export type NoteDestination = "pending" | "calendar" | "archive";
+export type NoteTarget = NoteDestination | "go";
 export type NoteAttachment = { id: string; name: string; kind: "file" | "link"; uri: string; mime?: string; size?: number };
 export type NoteSchedule = { dateISO: string; time: string; duration: string };
 export type NoteDocument = {
-  version: 1; revision: number; operationId: string; destination: NoteDestination;
+  version: 1; revision: number; operationId: string; destination: NoteTarget;
   title: string; content: string; schedule: NoteSchedule; reminderMinutes: number | null;
   reminderOffsets?: number[]; notificationsMuted?: boolean;
   attachments: NoteAttachment[]; location?: { latitude: number; longitude: number };
-  history: { at: number; from: NoteDestination; to: NoteDestination; schedule: NoteSchedule }[];
+  history: { at: number; from: NoteTarget; to: NoteTarget; schedule: NoteSchedule }[];
 };
 export type UnifiedNoteDraft = {
-  id: string; operationId: string; title: string; content: string; destination: NoteDestination | null;
+  id: string; operationId: string; title: string; content: string; destination: NoteTarget | null;
   dateISO: string; time: string; duration: string; place: string; reminderMinutes: number | null;
   attachments: NoteAttachment[]; location?: NoteDocument["location"]; original?: GoEntry; security?: boolean;
 };
@@ -25,7 +26,8 @@ export const isNoteEntry = (entry?: GoEntry | null): entry is GoEntry => !!entry
 );
 export const noteEntryDestination = (entry?: GoEntry | null): NoteDestination | null => {
   if (!isNoteEntry(entry)) return null;
-  return noteDocument(entry)?.destination || (entry.dateISO ? "calendar" : "pending");
+  const destination = noteDocument(entry)?.destination;
+  return destination === "go" ? null : destination || (entry.dateISO ? "calendar" : "pending");
 };
 export const isArchivedNote = (entry: GoEntry) => noteDocument(entry)?.destination === "archive";
 export const noteInScope = (entry: GoEntry, scope: TaskScope) => entry.ownerUserId === scope.userId
@@ -58,10 +60,10 @@ export function noteDraft(entry?: GoEntry | null): UnifiedNoteDraft {
     place: entry?.place || "", reminderMinutes: n?.reminderMinutes ?? entry?.reminders?.[0] ?? null,
     attachments: n?.attachments || [], location: n?.location, original: entry || undefined };
 }
-export function validateNote(draft: UnifiedNoteDraft): asserts draft is UnifiedNoteDraft & {destination:NoteDestination} {
+export function validateNote(draft: UnifiedNoteDraft): asserts draft is UnifiedNoteDraft & {destination:NoteTarget} {
   if (draft.security) throw new Error("Las notas de seguridad no están activadas. No se ha guardado contenido protegido.");
   if (!draft.title.trim() && !draft.content.trim() && !draft.attachments.length) throw new Error("Escribe una nota o adjunta un archivo antes de guardar.");
-  if (!draft.destination || !["pending", "calendar", "archive"].includes(draft.destination)) throw new Error("Selecciona CALENDARIO, PENDIENTES o ARCHIVO antes de guardar.");
+  if (!draft.destination || !["pending", "calendar", "archive", "go"].includes(draft.destination)) throw new Error("Selecciona CALENDARIO, PENDIENTES o ARCHIVO antes de guardar.");
   if(draft.dateISO&&!validNoteDate(draft.dateISO))throw new Error("La fecha no es válida.");
   if(draft.time&&!validNoteTime(draft.time))throw new Error("Introduce una hora entre 00:00 y 23:59.");
   // Calendar already has an untimed-note lane; explicitly removing time keeps the day.

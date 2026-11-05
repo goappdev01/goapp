@@ -103,7 +103,7 @@ function fixture(origin = 'calendar') {
   for (const state of ['notesOpen', 'unifiedNoteInitial', 'unifiedNoteSeed', 'calOpen', 'listOpen',
     'calQuickCreateOpen', 'quickCreateOpen', 'quickCreateText', 'fieldSelectorOpen', 'calReservasOpen', 'calConfigVisible',
     'calAddOpen', 'calPanelOpen', 'demoCustomerCalendarSelected', 'calBgViewMode', 'calBgViewMonth', 'dateISODraft',
-    'calScrollToDateTarget', 'calHighlightEntryId', 'quickNoteText', 'quickNoteDetail', 'attachedExternalNote',
+    'calScrollToDateTarget', 'calHighlightEntryId', 'quickNoteText', 'quickNoteDetail', 'goNoteContext',
     'listFilter', 'typeFilter', 'activityFilter', 'llamadasListOpen']) {
     ctx[`set${state[0].toUpperCase()}${state.slice(1)}`] = value => {
       ctx[state] = typeof value === 'function' ? value(ctx[state]) : value;
@@ -364,20 +364,37 @@ for (const target of ['card', 'title']) {
   });
 }
 
-test('administrator stages a saved note for GO and the send path reads only its scoped text', () => {
+function goComposerFixture() {
   const f = fixture('landing');
-  const entry = model.buildNoteEntry({ ...model.noteDraft(), title: 'Aviso', destination: 'pending', content: 'Texto adjunto' }, f.scope);
+  let draftNumber = 0;
   Object.assign(f.ctx, {
     goView: { view: 'ADMIN' }, adminAccess: { allowed: true, checking: false, userId: f.scope.userId },
-    personalGoLog: [entry], noteDocument: model.noteDocument, noteInScope: model.noteInScope,
-    setAttachedExternalNote: value => { f.ctx.attachedExternalNote = value; },
+    isActivelyCreating: true, goNoteContext: null, goNoteContextRef: { current: null },
+    goAttachmentAllowedRef: { current: true },
+    makeUid: () => 'active-go-' + ++draftNumber,
+    TouchableOpacity: 'TouchableOpacity', Feather: 'Feather', Text: 'Text',
+    proposalModeRef: { current: false }, genericMode: false, activeLabelUpper: 'REUNIÓN', selectedSugerencia: null,
+    notesDraft: '', place: '', coords: null, date: '15/01/2027', time: '18:00', duration: '', shareRoute: false, t: key => key,
   });
-  loadFunctions(f.ctx, ['canAttachNoteToGo', 'stageGoNote', 'currentGoAttachment']);
-  valueOf(f.ctx, expression(control('compose-go-note'), 'onPress'))();
-  const editor = assertComposer(f, 'landing', { attachToGo: true });
-  editor.props.onSaved(entry, 'Nota guardada');
+  loadFunctions(f.ctx, ['canAttachNoteToGo', 'updateGoNoteContext', 'getOrStartGoNoteContext',
+    'currentGoAttachmentEntry', 'currentGoAttachment', 'stageGoNote', 'openComposeGoNote', 'renderComposeGoNote', 'buildMessage']);
+  return f;
+}
+
+test('ADMIN can attach one existing standalone note while preserving its own destination', () => {
+  const f = goComposerFixture();
+  const entry = model.buildNoteEntry({ ...model.noteDraft(), title: 'Aviso', destination: 'pending', content: 'Texto adjunto' }, f.scope);
+  const other = { ...entry, id: 'other-note' };
+  f.ctx.getGoLogSnapshot = () => [entry, other];
+  assert.equal(f.ctx.stageGoNote(entry), true);
+  assert.equal(f.ctx.stageGoNote(other), false);
+  f.ctx.renderComposeGoNote().props.onPress();
+  const editor = assertComposer(f, 'landing', { goDraftId: 'active-go-1' }, entry);
+  assert.equal(editor.props.goAttachment, true);
+  assert.equal(entry.note.destination, 'pending');
   assert.deepEqual(h.plain(f.ctx.currentGoAttachment()), { id: entry.id, title: 'Aviso', detail: 'Texto adjunto' });
   f.ctx.goView.view = 'USER';
+  assert.equal(f.ctx.renderComposeGoNote(), null);
   assert.equal(f.ctx.stageGoNote(entry), false);
   assert.equal(f.ctx.currentGoAttachment(), null);
   f.ctx.goView.view = 'ADMIN';
@@ -386,6 +403,113 @@ test('administrator stages a saved note for GO and the send path reads only its 
   assert.equal(f.ctx.stageGoNote(entry), false);
 });
 
+test('the real GO compose button creates one attached note, reopens it, and sends its updated text only', async () => {
+  const disk = await h.diskFixture();
+  let ui;
+  try {
+    const f = goComposerFixture(), { ctx } = f;
+    const asset = await disk.sourceFile();
+    Object.assign(ctx, { getGoLogSnapshot: () => disk.store.getGoLogSnapshot(), saveUnifiedNote: disk.api().saveUnifiedNote,
+      watchNoteReminderReceipt() {} });
+    loadFunctions(ctx, ['saveNoteDraft']);
+    const label = control => nodes(control, node => node.type === 'Text')[0].children[0];
+    assert.equal(label(ctx.renderComposeGoNote()), 'Adjuntar nota GO');
+    const open = ctx.renderComposeGoNote().props.onPress;
+    open(); open();
+    let editor = assertComposer(f, 'landing', { goDraftId: 'active-go-1' });
+    ui = await h.editorFixture({ ...editor.props, ports: {
+      documents: { getDocumentAsync: async () => ({ canceled: false, assets: [asset] }) }, importFile: disk.fileApi.importNoteFile,
+    } });
+    assert.ok(ui.hosts.has('note-go-target'));
+    await ui.run(() => ui.hosts.get('note-title').onChangeText('Aviso'));
+    await ui.run(() => ui.hosts.get('note-content').onChangeText('Primera versión'));
+    await ui.tap('note-tools-toggle');
+    assert.ok(ui.hosts.has('note-option-attachments'));
+    assert.equal(ui.hosts.has('note-destinations'), false);
+    await ui.tool('attachments');
+    await ui.tap('PDF o documento');
+    await ui.idle();
+    const save = ui.hosts.get('unified-note-save').onPress;
+    await ui.run(() => { save(); save(); });
+    await ui.idle();
+    assert.equal(disk.rows.length, 1);
+    const [saved] = disk.rows;
+    assert.equal(saved.note.destination, 'go');
+    assert.equal(saved.noteLinkedEntryId, 'active-go-1');
+    assert.equal(saved.dateISO, '');
+    assert.equal(saved.time, '');
+    assert.equal(saved.note.attachments.length, 1);
+    assert.equal(model.noteEntryDestination(saved), null);
+    assert.equal(disk.refreshes.length, 0);
+    assert.throws(() => navigation.savedNoteTarget(saved, disk.scope, 0));
+    await ui.dismissSaved();
+    await ui.close(); ui = null;
+    assert.equal(ctx.notesOpen, false);
+    assert.equal(ctx.calOpen, false);
+    assert.equal(ctx.goNoteContextRef.current.id, 'active-go-1');
+    assert.equal(label(ctx.renderComposeGoNote()), 'NOTA ADJUNTADA · EDITAR');
+    assert.equal(ctx.buildMessage().includes('Primera versión'), true);
+
+    const second = disk.draft({ destination: 'go', content: 'No es una segunda nota' });
+    await assert.rejects(disk.api().saveUnifiedNote(second, disk.scope, disk.active, 'active-go-1'), /ya tiene una nota/);
+    await assert.rejects(disk.api().saveUnifiedNote(second, disk.scope, disk.active), /GO al que pertenece/);
+    await assert.rejects(disk.api().saveUnifiedNote({ ...model.noteDraft(saved), destination: 'archive' }, disk.scope, disk.active), /cambiar el destino/);
+    ctx.renderComposeGoNote().props.onPress();
+    editor = assertComposer(f, 'landing', { goDraftId: 'active-go-1' }, disk.store.getGoLogSnapshot()[0]);
+    assert.equal(editor.props.initial.id, saved.id);
+    ui = await h.editorFixture(editor.props);
+    assert.equal(ui.hosts.get('note-content').value, 'Primera versión');
+    await ui.run(() => ui.hosts.get('note-content').onChangeText('Texto actualizado'));
+    await ui.tap('unified-note-save');
+    await ui.idle();
+    await ui.dismissSaved();
+    const [changed] = await disk.reopen();
+    assert.equal(disk.rows.length, 1);
+    assert.equal(changed.id, saved.id);
+    assert.equal(changed.noteLinkedEntryId, saved.noteLinkedEntryId);
+    assert.deepEqual(h.plain(changed.note.attachments), h.plain(saved.note.attachments));
+    const message = ctx.buildMessage();
+    assert.equal(message.split('Aviso — Texto actualizado').length, 2);
+    assert.doesNotMatch(message, /Primera versión|documento\.pdf|file:/);
+    assert.equal(ctx.currentGoAttachment().id, saved.id);
+    const outgoing = { id: 'sent-go', ownerUserId: disk.scope.userId, taskContext: disk.scope.context, attachedNoteId: saved.id };
+    assert.equal(model.linkedNotesForEntry([changed], outgoing, disk.scope).length, 1);
+    ctx.updateGoNoteContext(null);
+    assert.equal(ctx.currentGoAttachment(), null);
+    ctx.renderComposeGoNote().props.onPress();
+    assertComposer(f, 'landing', { goDraftId: 'active-go-2' });
+  } finally { if (ui) await ui.close(); disk.close(); }
+});
+
+test('a GO reset or loss of ADMIN access prevents a stale editor from writing', async () => {
+  const f = goComposerFixture(), { ctx } = f;
+  Object.assign(ctx, { getGoLogSnapshot: () => [], saveUnifiedNote: () => assert.fail('invalid compose scope must not persist') });
+  loadFunctions(ctx, ['saveNoteDraft']);
+  ctx.renderComposeGoNote().props.onPress();
+  const editor = assertComposer(f, 'landing', { goDraftId: 'active-go-1' });
+  const draft = { ...model.noteDraft(), destination: 'go', content: 'Nota privada' };
+  ctx.goAttachmentAllowedRef.current = false;
+  await assert.rejects(editor.props.onSave(draft), /ya no está disponible/);
+  ctx.goAttachmentAllowedRef.current = true;
+  ctx.updateGoNoteContext(null);
+  await assert.rejects(editor.props.onSave(draft), /ya no está disponible/);
+});
+
+test('the committed store permits only one simultaneous creation per GO and keeps other GOs separate', async () => {
+  const disk = await h.diskFixture();
+  try {
+    const save = disk.api().saveUnifiedNote;
+    const create = (parent, content) => save(disk.draft({ destination: 'go', content }), disk.scope, disk.active, parent);
+    const raced = await Promise.allSettled([create('go-one', 'Primera'), create('go-one', 'Segunda')]);
+    assert.deepEqual(raced.map(result => result.status).sort(), ['fulfilled', 'rejected']);
+    assert.match(raced.find(result => result.status === 'rejected').reason.message, /ya tiene una nota/);
+    const other = await create('go-two', 'Otro GO');
+    const rows = await disk.reopen();
+    assert.equal(rows.length, 2);
+    assert.equal(rows.filter(entry => entry.noteLinkedEntryId === 'go-one').length, 1);
+    assert.equal(rows.find(entry => entry.id === other.entry.id).noteLinkedEntryId, 'go-two');
+  } finally { disk.close(); }
+});
 test('linked note survives local persistence and reopens only for the owning GO or reservation scope', async () => {
   const disk = await h.diskFixture();
   try {

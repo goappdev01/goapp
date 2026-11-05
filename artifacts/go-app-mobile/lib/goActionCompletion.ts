@@ -88,7 +88,7 @@ export function plannedActionEnd(entry: CompletionEntry, fallbackMinutes=60): nu
   return duration!==null && positiveMinutes(duration)?start+duration*60000:null;
 }
 export function completionEligible(entry: CompletionEntry): boolean {
-  if(entry.note?.version===1 && entry.note.destination==="archive")return false;
+  if(entry.note?.version===1 && (entry.note.destination==="archive" || entry.note.destination==="go"))return false;
   return !entry.deleted && entry.estado!=="rechazado" && entry.bookingStatus!=="cancelada"
     && !(entry as GoEntry & {scheduled?:boolean}).scheduled;
 }
