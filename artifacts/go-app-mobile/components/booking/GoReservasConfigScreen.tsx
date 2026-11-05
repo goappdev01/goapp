@@ -63,7 +63,7 @@ const GRAY   = "#6B7280";
 const DIM    = "#9CA3AF";
 const BLUE   = "#4A80BD";
 const GREEN  = "#3D9A84";
-const GOLD   = "#C4883A";
+import { GO_ASSISTANT_GOLD, GO_ASSISTANT_LABEL } from "@/theme/goAssistantColors";
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
@@ -712,8 +712,8 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
           {onOpenGo && (
             <TouchableOpacity onPress={onOpenGo} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Open GO" : "Abrir GO"}
               hitSlop={2} activeOpacity={0.8}
-              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: GOLD, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: "#FFFFFF", fontSize: 15, fontWeight: "900" }}>GO</Text>
+              style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: GO_ASSISTANT_GOLD, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ ...GO_ASSISTANT_LABEL, fontSize: 15, fontWeight: "900" }}>GO</Text>
             </TouchableOpacity>
           )}
           {/* No internal panel is open here: only the container exit is shown. */}

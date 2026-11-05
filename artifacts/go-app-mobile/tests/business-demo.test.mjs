@@ -257,6 +257,7 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
     vm.runInNewContext(compile(name, reactCompiler && ["contexts/GoBusinessConfigContext.tsx", "components/booking/GoReservasConfigScreen.tsx", "components/empresa/EmpresaConfigScreen.tsx"].includes(name)), { exports, console, Date, Set, Map, setTimeout: () => 1, clearTimeout() {},
       setInterval: () => 1, clearInterval() {}, require(key) {
         if (key in imports) return imports[key];
+        if (key === "@/theme/goAssistantColors") return load("theme/goAssistantColors.ts");
         if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };
         if (key === "./ProfessionalGapPolicy") return load("components/empresa/ProfessionalGapPolicy.tsx");
         // The remote-only date editor has its own real component and SQL integration tests.

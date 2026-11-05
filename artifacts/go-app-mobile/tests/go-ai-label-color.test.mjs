@@ -7,7 +7,8 @@ const h=createRequire(import.meta.url)('./helpers/unified-note-fixture.cjs'),ts=
 const flat=value=>Object.assign({},...[value].flat(Infinity).filter(Boolean));
 function parsed(file){const text=fs.readFileSync(file,'utf8');return ts.createSourceFile(file,text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);}
 function all(tree,predicate){const found=[];function walk(n){if(predicate(n))found.push(n);ts.forEachChild(n,walk);}walk(tree);return found;}
-function evaluate(node,tree,context={}){const scope={...context};vm.runInNewContext(h.compile('globalThis.result=('+node.getText(tree)+');'),scope);return scope.result;}
+const colors=h.load('theme/goAssistantColors.ts');
+function evaluate(node,tree,context={}){const scope={...colors,...context};vm.runInNewContext(h.compile('globalThis.result=('+node.getText(tree)+');'),scope);return scope.result;}
 function attr(node,name){return node.attributes.properties.find(p=>p.name?.text===name)?.initializer;}
 function value(node,tree,context){return ts.isJsxExpression(node)?evaluate(node.expression,tree,context):node.text;}
 function style(file,key){const tree=parsed(file);const property=all(tree,n=>ts.isPropertyAssignment(n)&&n.name.getText(tree)===key)[0];assert.ok(property,key);return evaluate(property.initializer,tree);}
@@ -15,6 +16,7 @@ function style(file,key){const tree=parsed(file);const property=all(tree,n=>ts.i
 for(const [file,handler] of [['app/index.tsx','openAi'],['components/booking/GoReservasConfigScreen.tsx','onOpenGo']])test(file+' AI GO label is white without changing the action',()=>{
  const tree=parsed(file);const text=all(tree,n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(tree)==='Text'&&n.children.some(c=>ts.isJsxText(c)&&c.text.trim()==='GO')&&n.parent.getText(tree).includes(handler))[0];
  assert.ok(text);assert.equal(value(attr(text.openingElement,'style'),tree).color.toUpperCase(),'#FFFFFF');
+ assert.equal(value(attr(text.parent.openingElement,'style'),tree,{GO_GOLD:colors.GO_ASSISTANT_GOLD}).backgroundColor,colors.GO_ASSISTANT_GOLD);
  assert.ok(attr(text.parent.openingElement,'onPress').getText(tree).includes(handler));
 });
 
@@ -38,11 +40,21 @@ for(const handedness of ['left','right'])for(const width of [320,390,768])test(`
  try{const button=ui.hosts.get('note-microphone');const children=[button.children].flat(Infinity).filter(Boolean);
  const label=children.find(n=>n.props?.children==='GO');assert.ok(label);assert.equal(flat(label.props.style).color,'#FFFFFF');
  const mic=children.find(n=>n.props?.name==='mic');assert.equal(mic.props.color,'#FFFFFF');
- assert.equal(flat(button.style).backgroundColor,'rgba(211,241,224,0.94)');assert.equal(typeof button.onPress,'function');
+ assert.equal(flat(button.style).backgroundColor,colors.GO_ASSISTANT_GOLD);assert.equal(typeof button.onPress,'function');
  }finally{await ui.close();}
 });
 
 test('Landing approved white GO foreground remains present',()=>{
  const tree=parsed('app/index.tsx');const label=all(tree,n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(tree)==='Text'&&n.getText(tree).includes('marketplaceCheckout.brand.label.slice(0, 7)'))[0];
  assert.ok(label);assert.match(attr(label.openingElement,'style').getText(tree),/color: "#ffffff"/);
+});
+
+test('Calendar RESERVAR uses white on the approved gold',()=>{
+ const tree=parsed('app/index.tsx');
+ const label=all(tree,n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(tree)==='Text'&&n.getText(tree).includes('t("biz_book_btn").toUpperCase()'))[0];
+ assert.ok(label);
+ assert.equal(value(attr(label.openingElement,'style'),tree).color,'#FFFFFF');
+ assert.equal(value(attr(label.parent.openingElement,'style'),tree).backgroundColor,colors.GO_ASSISTANT_GOLD);
+ assert.equal(style('components/booking-assistant/BookingAssistantUI.tsx','goButton').backgroundColor,colors.GO_ASSISTANT_GOLD);
+ assert.equal(style('components/MessagesScreen.tsx','actionBtnGo').backgroundColor,colors.GO_ASSISTANT_GOLD);
 });

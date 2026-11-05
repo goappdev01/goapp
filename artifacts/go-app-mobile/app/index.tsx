@@ -1,3 +1,4 @@
+import { GO_ASSISTANT_GOLD, GO_ASSISTANT_LABEL } from "@/theme/goAssistantColors";
 import { GoScreenHost } from "@/components/ui/GoScreenModal";
 import type { ScrollViewInstance, ViewInstance } from "react-native";
 import {useCustomerBookings} from "@/hooks/useCustomerBookings";
@@ -2727,7 +2728,7 @@ function HomeScreenContent() {
   // Dedicated color for the GO button, halo, glow, and status pills.
   // Neutral grey when no orbit is selected — the system feels "asleep".
   // Snaps to the exact orbit color the instant a category is chosen.
-  const GO_GOLD        = "#C8A037";
+  const GO_GOLD        = GO_ASSISTANT_GOLD;
   const goButtonColor  = otroSelected ? "#9ca3af" : categorySelected ? intent.color    : GO_GOLD;
 
   const [phone, setPhone] = useState("");
@@ -20579,7 +20580,7 @@ function HomeScreenContent() {
                 accessibilityLabel={t("biz_book_btn")}
                 style={{ flexGrow: 1, flexShrink: 1, minWidth: 104, maxWidth: 180, paddingHorizontal: 16, height: 52, borderRadius: 18, backgroundColor: "#C8A037", borderWidth: 1.5, borderColor: "#F8DF8B", alignItems: "center", justifyContent: "center" }}
               >
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2} style={{ color: "#17120B", fontSize: 12, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.2, maxWidth: "100%", flexShrink: 1, textAlign: "center", textAlignVertical: "center", includeFontPadding: false }}>{t("biz_book_btn").toUpperCase()}</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2} style={{ ...GO_ASSISTANT_LABEL, fontSize: 12, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.2, maxWidth: "100%", flexShrink: 1, textAlign: "center", textAlignVertical: "center", includeFontPadding: false }}>{t("biz_book_btn").toUpperCase()}</Text>
               </TouchableOpacity>
               {/* IA */}
               <TouchableOpacity
@@ -20591,7 +20592,7 @@ function HomeScreenContent() {
                 accessibilityLabel={lang === "en" ? "Open GO (hold for voice)" : "Abrir GO (mantén para voz)"}
                 style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: GO_GOLD, alignItems: "center", justifyContent: "center", shadowColor: GO_GOLD, shadowOpacity: 0.55, shadowRadius: 10, elevation: 6 }}
               >
-                <Text style={{ color: "#FFFFFF", fontSize: 15, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.4 }}>GO</Text>
+                <Text style={{ ...GO_ASSISTANT_LABEL, fontSize: 15, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.4 }}>GO</Text>
               </TouchableOpacity>
             </View>
 

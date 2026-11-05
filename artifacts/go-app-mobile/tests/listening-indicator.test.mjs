@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 const require=createRequire(import.meta.url), ts=require('typescript');
-function load(file,modules){const scope={exports:{},require(name){if(name in modules)return modules[name];if(name==='@/components/ui/GoScreenModal')return {GoScreenModal:modules['react-native'].Modal};throw Error('Unexpected '+name);}};
+function load(file,modules){const scope={exports:{},require(name){if(name in modules)return modules[name];if(name==="@/theme/goAssistantColors")return load("theme/goAssistantColors.ts",{});if(name==='@/components/ui/GoScreenModal')return {GoScreenModal:modules['react-native'].Modal};throw Error('Unexpected '+name);}};
  vm.runInNewContext(ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);return scope.exports;}
 function nodes(tree){return tree?[tree,...(tree.props?.children??[]).flat(Infinity).flatMap(n=>typeof n==='object'?nodes(n):[])]:[];}
 function fixture(reduced=false){
@@ -59,7 +59,7 @@ function relativeLuminance(hex) {
     .map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
   return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
 }
-test('GO stays green before and after recording, with a red stop state and unchanged touch area', () => {
+test('GO stays gold before and after recording, with a red stop state and unchanged touch area', () => {
   for (const [uiScale, size] of [['compacto', 48], ['estandar', 64], ['grande', 72]]) {
     const f = screenFixture();
     f.voice.status = 'idle';
@@ -67,8 +67,8 @@ test('GO stays green before and after recording, with a red stop state and uncha
       node.props?.accessibilityLabel === (f.voice.status === 'listening' ? 'Detener escucha y enviar' : 'Escuchar con GO'));
     let go = button();
     const initial = styleOf(go);
-    assert.equal(initial.backgroundColor, '#D2E7D9');
-    assert.equal(initial.borderColor, '#174D3C');
+    assert.equal(initial.backgroundColor, '#C8A037');
+    assert.equal(initial.borderColor, '#967018');
     assert.equal(go.props.disabled, false);
     assert.ok(nodes(go).some(node => node.props?.name === 'mic'));
     assert.ok(nodes(go).some(node => node.props?.children?.includes('GO')));
@@ -81,9 +81,9 @@ test('GO stays green before and after recording, with a red stop state and uncha
     assert.equal(stopStyle.borderColor, '#C62828');
     assert.equal(go.props.disabled, false);
     assert.equal(go.props.accessibilityState.selected, true);
-    assert.ok(nodes(go).some(node => node.props?.name === 'square' && node.props.color === '#FFF'));
+    assert.ok(nodes(go).some(node => node.props?.name === 'square' && node.props.color === '#FFFFFF'));
     const label = nodes(go).find(node => node.props?.children?.includes('Parar'));
-    assert.equal(styleOf(label).color, '#FFF');
+    assert.equal(styleOf(label).color, '#FFFFFF');
     assert.ok(1.05 / (relativeLuminance(stopStyle.backgroundColor) + 0.05) >= 4.5);
     for (const key of ['width', 'height', 'minWidth', 'minHeight', 'maxWidth', 'borderRadius', 'paddingVertical', 'marginHorizontal']) {
       assert.equal(stopStyle[key], initial[key]);

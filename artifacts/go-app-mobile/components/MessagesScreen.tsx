@@ -1,3 +1,4 @@
+import { GO_ASSISTANT_GOLD, GO_ASSISTANT_LABEL } from "@/theme/goAssistantColors";
 import { GoScreenCloseSurface, GoScreenCloseGuide } from "@/components/ui/GoScreenCloseSurface";
 import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
 import type { ScrollViewInstance } from "react-native";
@@ -1015,7 +1016,7 @@ const s = StyleSheet.create({
     elevation: 4,
   },
   actionBtnGo: {
-    backgroundColor: "#C8A037",
+    backgroundColor: GO_ASSISTANT_GOLD,
     borderWidth: 1.5,
     borderColor: "#F8DF8B",
   },
@@ -1025,7 +1026,7 @@ const s = StyleSheet.create({
     borderColor: "rgba(0,0,0,0.1)",
   },
   actionBtnLabel:      { color: "#FFFFFF", fontSize: 10, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.8 },
-  actionBtnLabelGo:    { color: "#FFFFFF", fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.5 },
+  actionBtnLabelGo:    { ...GO_ASSISTANT_LABEL, fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.5 },
   actionBtnLabelClose: { color: "#9CA3AF", fontSize: 9, fontWeight: "700", letterSpacing: 0.6 },
 
   // Messages

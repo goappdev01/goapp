@@ -100,6 +100,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
       setTimeout: fn => {timers.push(fn);return timers.length;}, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
       require(name) {
         if (name in mocks) return mocks[name];
+        if (name === '@/theme/goAssistantColors') return load('theme/goAssistantColors.ts');
         if (name === '@/components/ui/GoScreenModal') return {GoScreenModal: mocks['react-native'].Modal};
         if (name === '@/components/ui/GoScreenCloseSurface') return {GoScreenCloseSurface:'View',GoScreenCloseGuide:'Guide'};
         if (name === '@/hooks/useBusinessBookings') return load('hooks/useBusinessBookings.ts');

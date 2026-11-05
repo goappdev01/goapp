@@ -1,3 +1,4 @@
+import { GO_ASSISTANT_GOLD, GO_ASSISTANT_LABEL } from "@/theme/goAssistantColors";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
@@ -265,7 +266,7 @@ export const s = StyleSheet.create({
     gap: 4,
   },
   dockLabel: { fontSize: 11, fontWeight: "700", color: "#163F60" },
-  goLabel: { color: "#FFFFFF", textShadowColor: "rgba(0,0,0,0.55)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+  goLabel: GO_ASSISTANT_LABEL,
   radiusLabel: { fontSize: 10, color: "#39574B" },
   goButton: {
     flex: 0,
@@ -277,10 +278,10 @@ export const s = StyleSheet.create({
     overflow: "hidden",
     borderRadius: 32,
     borderWidth: 2,
-    borderColor: "#174D3C",
+    borderColor: "#967018",
     maxWidth: 64,
     height: 64,
-    backgroundColor: "#D2E7D9",
+    backgroundColor: GO_ASSISTANT_GOLD,
     marginHorizontal: 4,
   },
   listening: { backgroundColor: "#C62828", borderColor: "#C62828" },
