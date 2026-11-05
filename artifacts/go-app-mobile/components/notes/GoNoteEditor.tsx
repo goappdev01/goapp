@@ -351,7 +351,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
     <GoScreenCloseSurface testID="unified-note-screen" handedness={handedness} onClose={back} enabled={!busy&&!toolFinishing&&!attachmentBusy&&!closingSaved} scrollRefs={[scroll,toolsScroll]} style={s.root}>
       <KeyboardAvoidingView testID="KeyboardFrame" behavior="padding" style={{flex:1,paddingTop:insets.top+8,paddingHorizontal:Math.max(12,insets.left,insets.right)}}>
         <View style={s.header}><Text testID="note-heading" accessibilityRole="header" onPress={()=>void hideKeyboard()} style={s.heading}>NOTA</Text>
-          {(onDiscard||onDelete)&&<TouchableOpacity testID="note-discard" accessibilityRole="button" accessibilityLabel={initial?"Eliminar nota":"Descartar borrador"} disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPress={requestDiscard}
+          {(goAttachment||!!initial)&&(onDiscard||onDelete)&&<TouchableOpacity testID="note-discard" accessibilityRole="button" accessibilityLabel={initial?"Eliminar nota":"Descartar borrador"} disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPress={requestDiscard}
             style={{position:"absolute",width:44,height:44,alignItems:"center",justifyContent:"center",...(handedness==="right"?{right:0}:{left:0})}}>
             <Feather name="trash-2" size={19} color="#b4232f"/>
           </TouchableOpacity>}
@@ -383,6 +383,13 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
         {!!message&&<Text testID="note-save-confirmation" accessibilityLiveRegion="polite" style={s.success}>{message}</Text>}
         <GoScreenCloseGuide/>
         {!!floatingNotice&&<View testID="note-floating-notice" pointerEvents="none" accessibilityRole="alert" accessibilityLiveRegion="polite" style={[s.floating,{top:insets.top+64}]}><Text style={s.text}>{floatingNotice}</Text></View>}
+        {!goAttachment&&!initial&&onDiscard&&<View testID="note-draft-discard-row" style={{flexShrink:0,alignItems:handedness==="right"?"flex-end":"flex-start",paddingTop:4}}>
+          <TouchableOpacity testID="note-discard" accessibilityRole="button" accessibilityLabel="Descartar borrador" accessibilityHint="Elimina este borrador y cierra la nota"
+            disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPress={requestDiscard} activeOpacity={0.78}
+            style={{minHeight:44,maxWidth:"100%",paddingHorizontal:12,paddingVertical:8,flexDirection:"row",alignItems:"center",gap:8,borderRadius:12,borderWidth:1,borderColor:"#b4232f",backgroundColor:"#fff5f5"}}>
+            <Feather name="trash-2" size={19} color="#b4232f"/><Text style={{color:"#b4232f",fontSize:13,fontWeight:"700",flexShrink:1}}>DESCARTAR BORRADOR</Text>
+          </TouchableOpacity>
+        </View>}
         <View testID="note-editor-footer" onLayout={event=>{const {height,y}=event.nativeEvent.layout;footerHeight.current=height;if(Number.isFinite(y))setFooterBottom(y+height);}} style={[s.footer,{paddingBottom:Math.max(insets.bottom,12),flexDirection:handedness==="left"?"row-reverse":"row"}]}>
           <TouchableOpacity testID="unified-note-save" accessibilityRole="button" disabled={busy||toolFinishing||closingSaved||attachmentBusy||preparing||voice.status!=="idle"} activeOpacity={0.78} onPress={()=>void save()} style={s.save}><LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.58)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,{borderRadius:18}]}/><Text style={s.saveText}>{busy?"GUARDANDO…":"GUARDAR"}</Text></TouchableOpacity>
           <TouchableOpacity testID="note-microphone" accessibilityRole="button" accessibilityLabel={voice.status==="listening"?"Detener escucha de GO":"Hablar con GO para preparar la nota"} accessibilityState={{selected:voice.status==="listening",disabled:busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"}}

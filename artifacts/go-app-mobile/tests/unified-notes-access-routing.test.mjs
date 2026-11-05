@@ -66,6 +66,19 @@ function loadFunctions(ctx, names) {
 const nodes = (tree, predicate) => !tree || typeof tree !== 'object' ? [] : [
   ...(predicate(tree) ? [tree] : []), ...(tree.children || []).flatMap(child => nodes(child, predicate)),
 ];
+function mountedControl(root, id) {
+  if (root.attributes?.['data-testid'] === id) return root;
+  for (const child of root.childNodes || []) {
+    const match = mountedControl(child, id);
+    if (match) return match;
+  }
+  return null;
+}
+function mountedAncestor(node, attribute, value) {
+  for (let current = node?.parentNode; current; current = current.parentNode)
+    if (current.attributes?.[attribute] === value) return current;
+  return null;
+}
 
 function fixture(origin = 'calendar') {
   const calls = [];
@@ -619,17 +632,26 @@ function installDiscardCallbacks(f, disk) {
     'discardComposeGoNote', 'renderComposeGoNoteDiscard']);
 }
 
-test('closing retains the standalone draft while its trash removes recovery and temporary files only', async () => {
+test('the actual Landing satellite shows draft trash immediately, preserves normal close and discards recovery and files', async () => {
   const disk = await h.diskFixture();
   let ui;
   try {
-    const f = fixture('landing'), { ctx } = f;
+    const f = goComposerFixture(), { ctx } = f;
+    ctx.categorySelected = false; ctx.phone = '';
     installDiscardCallbacks(f, disk);
     const other = await disk.api().saveUnifiedNote(disk.draft({ content: 'Otra nota guardada' }), disk.scope, disk.active);
     const asset = await disk.sourceFile();
-    ctx.openUnifiedNoteComposer();
+    pressLandingSatellite(f);
     const ports = { documents: { getDocumentAsync: async () => ({ canceled: false, assets: [asset] }) }, importFile: disk.fileApi.importNoteFile };
     ui = await h.editorFixture({ ...ctx.renderUnifiedNoteEditor().props, ports });
+    assert.ok(ui.hosts.has('note-draft-discard-row'));
+    assert.equal(ui.hosts.get('note-discard').disabled, false);
+    assert.equal(ui.hosts.has('note-destination-selected'), false);
+    const trashElement = mountedControl(ui.container, 'note-discard');
+    assert.ok(trashElement);
+    assert.ok(mountedAncestor(trashElement,'data-testid','note-draft-discard-row'));
+    assert.equal(mountedAncestor(trashElement,'data-testid','note-tools-panel'), null);
+    assert.equal(mountedAncestor(trashElement,'data-testid','unified-note-scroll'), null);
     await ui.run(() => ui.hosts.get('note-title').onChangeText('Borrador'));
     await ui.run(() => ui.hosts.get('note-content').onChangeText('Texto recuperable'));
     await ui.tool('attachments'); await ui.tap('PDF o documento'); await ui.idle();
@@ -639,7 +661,7 @@ test('closing retains the standalone draft while its trash removes recovery and 
     assert.equal(draft.content, 'Texto recuperable');
     assert.equal(await disk.fileApi.verifyNoteFiles(disk.scope, draft.id, draft.attachments), undefined);
     await ui.close(); ui = null;
-    ctx.openUnifiedNoteComposer();
+    pressLandingSatellite(f);
     ui = await h.editorFixture(ctx.renderUnifiedNoteEditor().props);
     assert.equal(ui.hosts.get('note-content').value, 'Texto recuperable');
     const trash = ui.hosts.get('note-discard').onPress;
@@ -652,11 +674,35 @@ test('closing retains the standalone draft while its trash removes recovery and 
     assert.equal(fs.existsSync(new URL(uri)), false);
     assert.equal((await disk.reopen())[0].id, other.entry.id);
     await ui.close(); ui = null;
-    ctx.openUnifiedNoteComposer();
+    pressLandingSatellite(f);
     ui = await h.editorFixture(ctx.renderUnifiedNoteEditor().props);
     assert.equal(ui.hosts.get('note-title').value, '');
     assert.equal(ui.hosts.get('note-content').value, '');
   } finally { if (ui) await ui.close(); disk.close(); }
+});
+
+test('standalone draft trash stays outside scrolling tools with keyboard, text scaling and either hand', async () => {
+  for (const handedness of ['left','right']) for (const width of [320,390,430]) for (const keyboardVisible of [false,true]) {
+    const ui = await h.editorFixture({ handedness, onDiscard: async()=>{}, ports: {
+      keyboardVisible, viewport: { width, height: width===320?568:932, scale:3, fontScale:1.5 },
+    } });
+    try {
+      const row = ui.hosts.get('note-draft-discard-row');
+      assert.ok(row);
+      assert.equal(row.style.flexShrink, 0);
+      assert.equal(row.style.position, undefined);
+      assert.equal(row.style.alignItems, handedness==='right'?'flex-end':'flex-start');
+      assert.equal(ui.hosts.get('note-discard').style.minHeight,44);
+      assert.match(ui.container.textContent,/DESCARTAR BORRADOR/);
+      const button = mountedControl(ui.container, 'note-discard');
+      assert.ok(button);
+      assert.ok(mountedAncestor(button,'data-native','KeyboardFrame'));
+      assert.equal(mountedAncestor(button,'data-testid','note-tools-panel'),null);
+      await ui.tap('note-tools-toggle');
+      for(const destination of ['calendar','pending','archive'])assert.ok(ui.hosts.has('note-destination-'+destination));
+      assert.ok(ui.hosts.has('note-discard'));
+    } finally { await ui.close(); }
+  }
 });
 
 test('GO trash discards a partial draft, removes one exclusive note, and preserves the action and sent history', async () => {
