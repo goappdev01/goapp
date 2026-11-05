@@ -320,6 +320,7 @@ export type AgendaBoardProps = {
   onSelectDay?: (dateISO: string) => void;
   onAddEntry?: (dateISO: string) => void;
   onCreateTaskAtTime?: (dateISO: string, timeHHMM: string) => void;
+  onReserveAtTime?: (dateISO: string, timeHHMM: string) => void;
   onSelectItem?: (item: GoEntry) => void;
   onMoveItem?: (id: string, newDateISO: string, newTime: string) => void;
   onOpenMoveFlow?: (itemId: string, toDateISO: string, fromDateISO: string, itemTime: string, isExternal: boolean) => void;
@@ -720,6 +721,7 @@ export function AgendaBoard({
   onSelectDay,
   onAddEntry,
   onCreateTaskAtTime,
+  onReserveAtTime,
   onSelectItem,
   onMoveItem,
   onOpenMoveFlow,
@@ -2571,7 +2573,7 @@ export function AgendaBoard({
                     : "#b8c8f0";
                   const isDropSlot = dragTargetSlot?.columnId === col.id && dragTargetSlot.start === slotStart;
                   const slotDateISO = col.dateISO;
-                  const hasSlotTap = slotCards.length === 0 && !!slotDateISO && !!onCreateTaskAtTime;
+                  const hasSlotTap = slotCards.length === 0 && !!slotDateISO && !!(onCreateTaskAtTime || onReserveAtTime);
                   const measureSlot = ({ nativeEvent: { layout: { y, height } } }: LayoutChangeEvent) => {
                     (timeSlotLayouts.current[col.id] ??= {})[slotStart] = { y, h: height };
                   };
@@ -2637,7 +2639,7 @@ export function AgendaBoard({
                   // Measure the direct child of the scroll content for either row shape.
                   return hasSlotTap ? (
                     <GoCalendarSlot key={slotStart} dateISO={slotDateISO} timeHHMM={label} onLayout={measureSlot}
-                      disabled={isSelecting || !!dragItem} onPress={onCreateTaskAtTime}>
+                      disabled={isSelecting || !!dragItem} onPress={onCreateTaskAtTime} onLongPress={onReserveAtTime}>
                       {row}
                     </GoCalendarSlot>
                   ) : row;

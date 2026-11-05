@@ -4631,6 +4631,11 @@ function HomeScreenContent() {
   const [monthGridOpen, setMonthGridOpen] = useState(false);
   const [reservasNavDay, setReservasNavDay] = useState<string | null>(null);
   const [showBookingFromCal, setShowBookingFromCal] = useState(false);
+  // Personal calendar context: identical entry to RESERVAR, regardless of account role.
+  const openCalendarReservation = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setShowBookingFromCal(true);
+  };
   // Vista del timeline de fondo: semanal o mensual lineal
   const [calBgViewMode, setCalBgViewMode] = useState<"dia" | "semana" | "mes_lineal">("semana");
   const [calBgShowHours, setCalBgShowHours] = useState(true);
@@ -20282,6 +20287,7 @@ function HomeScreenContent() {
                 onOpenMoveFlow={openMoveFlow}
                 onDropBooking={(entry,destination)=>dropBookingProposal(entry,destination,entry.businessBooking?"business":"customer")}
                 onCreateTaskAtTime={openCalendarSlotTask}
+                onReserveAtTime={openCalendarReservation}
                 onAddEntry={openCalendarDayNote}
                 onSelectDay={(dateISO) => {
                   Haptics.selectionAsync();
@@ -20520,7 +20526,7 @@ function HomeScreenContent() {
               </TouchableOpacity>
               {/* RESERVAR — amarillo: crear algo nuevo. Long-press → panel diagnóstico booking */}
               <TouchableOpacity
-                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {}); setShowBookingFromCal(true); }}
+                onPress={openCalendarReservation}
                 onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {}); setDiagBookingOpen(true); }}
                 delayLongPress={800}
                 activeOpacity={0.8}

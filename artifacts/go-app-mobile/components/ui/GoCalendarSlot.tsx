@@ -8,28 +8,38 @@ type Props = {
   timeHHMM: string;
   disabled?: boolean;
   onLayout?: ViewProps["onLayout"];
-  onPress: (dateISO: string, timeHHMM: string) => void;
+  onPress?: (dateISO: string, timeHHMM: string) => void;
+  onLongPress?: (dateISO: string, timeHHMM: string) => void;
   children: ReactElement;
 };
 
-/** Attach only to empty slots; a hold or a scroll must never create a task. */
-export function GoCalendarSlot({ dateISO, timeHHMM, disabled = false, onLayout, onPress, children }: Props) {
+/** Empty-slot actions only. Movement cancels recognition before a scroll/drag. */
+export function GoCalendarSlot({ dateISO, timeHHMM, disabled = false, onLayout, onPress, onLongPress, children }: Props) {
   const { t } = useLanguage();
   const tap = Gesture.Tap()
-    .enabled(!disabled)
+    .enabled(!disabled && !!onPress)
     .maxDuration(250)
     .maxDistance(8)
     .runOnJS(true)
     .onEnd((_event, success) => {
-      if (success && !disabled) onPress(dateISO, timeHHMM);
+      if (success && !disabled) onPress?.(dateISO, timeHHMM);
     });
+  const gesture = onLongPress ? Gesture.Exclusive(
+    Gesture.LongPress().enabled(!disabled).minDuration(500).maxDistance(8).runOnJS(true)
+      .onEnd((_event, success) => { if (success && !disabled) onLongPress(dateISO, timeHHMM); }),
+    tap,
+  ) : tap;
   return (
-    <GestureDetector gesture={tap}>
+    <GestureDetector gesture={gesture}>
       <View
         onLayout={onLayout}
         accessibilityRole="button"
-        accessibilityLabel={t("new_task_label") + ": " + dateISO + " " + timeHHMM}
+        accessibilityLabel={(onPress ? t("new_task_label") : t("biz_book_btn")) + ": " + dateISO + " " + timeHHMM}
         accessibilityState={{ disabled }}
+        accessibilityActions={onLongPress ? [{ name: "longpress", label: t("biz_book_btn") }] : undefined}
+        onAccessibilityAction={onLongPress ? event => {
+          if (!disabled && event.nativeEvent.actionName === "longpress") onLongPress(dateISO, timeHHMM);
+        } : undefined}
       >
         {children}
       </View>
