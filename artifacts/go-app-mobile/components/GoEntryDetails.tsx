@@ -45,10 +45,10 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
       disabled={disabled} accessibilityState={{disabled,selected:entry.localResolutionStatus===action.key}}
       hitSlop={{top:inline?4:0,bottom:inline?4:0,left:0,right:0}} activeOpacity={0.7}
       onPress={event=>{event?.stopPropagation();action.run?.();}}
-      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:1,borderColor:action.color,backgroundColor:action.color+"12",flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",...(list && {flexBasis:100,maxWidth:"100%",flexWrap:"wrap"})}}>
+      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:1,borderColor:action.color,backgroundColor:action.color+"12",flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",...(list && {flex:undefined,flexGrow:1,flexShrink:0,flexBasis:"auto",maxWidth:"100%"})}}>
       <Feather name={action.icon} size={inline?12:14} color={action.color}/>
-      <Text numberOfLines={list?undefined:1} adjustsFontSizeToFit={!list} minimumFontScale={0.75} maxFontSizeMultiplier={list?undefined:1.2}
-        style={{color:action.color,fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.text}</Text>
+      <Text numberOfLines={1} adjustsFontSizeToFit={!list} minimumFontScale={0.75} maxFontSizeMultiplier={list?2:1.2}
+        style={{color:action.color,fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:list?0:1}}>{action.text}</Text>
     </TouchableOpacity>)}
   </View>;
 }

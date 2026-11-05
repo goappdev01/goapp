@@ -14435,6 +14435,7 @@ function HomeScreenContent() {
         }}
       />);
   const renderEntryMessageScreen = (entry: GoEntry) => messageEntryId === entry.id ? messagesScreen : null;
+  const listBookingDetail = calBookingDetailEntry ? goLog.find(entry => entry.id === calBookingDetailEntry.id && entryIsReservation(entry)) : undefined;
 
   return (
     <>
@@ -21851,8 +21852,10 @@ function HomeScreenContent() {
       {/* LISTADO GLOBAL — vista de todos los GO */}
       <BottomSheet
         visible={listOpen}
-        modalOverlay={notesOpen ? <GoScreenHost registerBack={handler=>{listNoteLayerBackRef.current=handler;}}>{renderUnifiedNoteEditor()}</GoScreenHost> : undefined}
-        blockPan={notesOpen}
+        modalOverlay={notesOpen || listBookingDetail ? <GoScreenHost registerBack={handler=>{listNoteLayerBackRef.current=handler;}}>
+          {notesOpen ? renderUnifiedNoteEditor() : listBookingDetail && renderListBookingDetail(listBookingDetail)}
+        </GoScreenHost> : undefined}
+        blockPan={notesOpen || !!listBookingDetail}
         onPanelHeightChange={setOverlayPanelHeight}
         onClose={() => { if(listNoteLayerBackRef.current?.())return;setListOpen(false); setLlamadasListOpen(false); setListMinimized(false); setListFiltersHidden(false); }}
         // Gesto de deslizar hacia abajo en dos niveles:
@@ -23105,8 +23108,7 @@ function HomeScreenContent() {
                     testID={"list-entry-card-"+g.id}
                     onPress={() => {
                       if(openListSavedNote(g))return;
-                      // GO_BOOKING: abrir tarjeta de detalle ampliada encima del calendario
-                      if ((g as any).type === "GO_BOOKING") {
+                      if (entryIsReservation(g)) {
                         Haptics.selectionAsync().catch(() => {});
                         setCalBookingDetailEntry(g);
                         return;
@@ -23181,8 +23183,7 @@ function HomeScreenContent() {
                         onPress={() => {
                           if(openListSavedNote(g))return;
                           Haptics.selectionAsync();
-                          // GO_BOOKING: abrir tarjeta de detalle ampliada
-                          if ((g as any).type === "GO_BOOKING") {
+                          if (entryIsReservation(g)) {
                             setCalBookingDetailEntry(g);
                             return;
                           }
@@ -23311,7 +23312,7 @@ function HomeScreenContent() {
                         activeOpacity={0.75}
                         onPress={() => {
                           Haptics.selectionAsync();
-                          if ((g as any).type === "GO_BOOKING") {
+                          if (entryIsReservation(g)) {
                             setCalBookingDetailEntry(g);
                             return;
                           }
@@ -23372,7 +23373,22 @@ function HomeScreenContent() {
                         </View>
                       </TouchableOpacity>
 
-                      {/* DERECHA: estado + badge — separación vertical clara entre ellos */}
+                      {entryIsReservation(g) ? (() => {
+                        const policy = reservationCardPolicy(g);
+                        const status = policy.stateKey === "booking_state_accepted" ? t("status_confirmed")
+                          : g.bookingStatus === "cambio_pendiente" && policy.stateKey === "booking_state_pending"
+                            ? t("floor_reservation_cambio_pendiente") : t(policy.stateKey as Parameters<typeof t>[0]);
+                        const color = g.bookingStatus === "cambio_pendiente" && policy.stateKey === "booking_state_pending"
+                          ? ENTRY_COLORS.change : policy.stateColor;
+                        return <View testID={"list-reservation-status-" + g.id} style={{
+                          flexShrink: 1, maxWidth: "100%", paddingHorizontal: lv(6), paddingVertical: lv(3),
+                          borderRadius: lv(5), borderWidth: 1, borderColor: color + "80", backgroundColor: color + "20",
+                        }}>
+                          <Text style={{ color, fontSize: lv(9), fontFamily: "Inter_700Bold", fontWeight: "800" }}>
+                            {t("biz_booking_intent_label").toUpperCase() + " · " + status.toUpperCase()}
+                          </Text>
+                        </View>;
+                      })() : (
                       <View style={{ flexDirection: "column", alignItems: "flex-end", gap: lv(6), flexShrink: 0 }}>
                         {/* Estado pill */}
                         {!isProposalEstado && statusPill}
@@ -23380,8 +23396,7 @@ function HomeScreenContent() {
                         {!compactProposal && ((() => {
                           const entryType = (g as any).type || "";
                           const lbl =
-                            entryType === "GO_BOOKING"      ? t('biz_booking_intent_label').toUpperCase()
-                            : entryType === "GO_INTERNO"    ? t('tasks_badge_go_internal')
+                            entryType === "GO_INTERNO"    ? t('tasks_badge_go_internal')
                             : entryType === "TAREA_INTERNA" ? t('tasks_badge_task_internal')
                             : entryType === "TAREA"         ? t('tasks_badge_task_external')
                             : entryType === "LLAMADA"       ? t('tasks_call').toUpperCase()
@@ -23390,8 +23405,7 @@ function HomeScreenContent() {
                             : g.kind === "received" ? t('tasks_badge_go_external')
                             : t('tasks_badge_go_external');
                           const badgeColor =
-                            entryType === "GO_BOOKING"      ? "#818cf8"
-                            : entryType === "GO_INTERNO"    ? "#16a34a"
+                            entryType === "GO_INTERNO"    ? "#16a34a"
                             : entryType === "TAREA_INTERNA" ? "#d97706"
                             : entryType === "TAREA"         ? "#f59e0b"
                             : entryType === "LLAMADA"       ? "#3b82f6"
@@ -23412,33 +23426,8 @@ function HomeScreenContent() {
                             </View>
                           );
                         })())}
-                        {/* ── bookingStatus pill — solo en GO_BOOKING ────────── */}
-                        {(g as any).type === "GO_BOOKING" && (() => {
-                          const bs: ReservationStatus = (g as any).bookingStatus ?? "confirmada";
-                          const bsConfig: Record<ReservationStatus, { label: string; color: string }> = {
-                            pendiente:        { label: t('status_pending_label').toUpperCase(),        color: ENTRY_COLORS.pending },
-                            confirmada:       { label: t('status_confirmed').toUpperCase(),       color: "#22c55e" },
-                            cancelada:        { label: t('label_visit_cancelled_tag').toUpperCase(),        color: ENTRY_COLORS.destructive },
-                            cambio_pendiente: { label: t('floor_reservation_cambio_pendiente').toUpperCase(), color: ENTRY_COLORS.change },
-                            completada:       { label: t('floor_reservation_completada').toUpperCase(),       color: "#94a3b8" },
-                          };
-                          const { label: bsLabel, color: bsColor } = bsConfig[bs] ?? bsConfig.confirmada;
-                          return (
-                            <View style={{
-                              paddingHorizontal: lv(5),
-                              paddingVertical: lv(2),
-                              borderRadius: lv(4),
-                              backgroundColor: bsColor + "20",
-                              borderWidth: 1,
-                              borderColor: bsColor + "80",
-                            }}>
-                              <Text style={{ color: bsColor, fontSize: lv(8), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4 }}>
-                                {bsLabel}
-                              </Text>
-                            </View>
-                          );
-                        })()}
                       </View>
+                      )}
                     </View>}
 
                     {/* ── PROPUESTA DE CAMBIO: siempre visible cuando existe ── */}
@@ -26310,14 +26299,6 @@ function HomeScreenContent() {
         </TouchableOpacity>
       </Animated.View>
 
-      {/* Lists and Calendar share the same expanded entry, contract and messaging. */}
-      <GoEntryDetailsSheet renderNote={renderExistingNote} onGoToLanding={goDirectlyToLanding} entry={calBookingDetailEntry?goLog.find(e=>e.id===calBookingDetailEntry.id)??null:null} handedness={handedness}
-        onClose={()=>setCalBookingDetailEntry(null)}
-        renderMessageScreen={calBookingDetailEntry ? () => renderEntryMessageScreen(calBookingDetailEntry) : undefined}
-        onMessage={calBookingDetailEntry?()=>{const entry=calBookingDetailEntry;openEntryMessage(entry,()=>setCalBookingDetailEntry(entry),true);}:undefined}>
-        {calBookingDetailEntry&&<>{renderEntryMicroActions(calBookingDetailEntry)}{renderEntryQuickActions(calBookingDetailEntry,!(calBookingDetailEntry.customerBooking||calBookingDetailEntry.businessBooking))}</>}
-      </GoEntryDetailsSheet>
-
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
@@ -26340,6 +26321,16 @@ function HomeScreenContent() {
     />
     </>
   );
+
+  function renderListBookingDetail(entry: GoEntry) {
+    return <GoEntryDetailsSheet entry={entry} handedness={handedness} onGoToLanding={goDirectlyToLanding}
+      onClose={() => setCalBookingDetailEntry(null)}
+      renderMessageScreen={() => renderEntryMessageScreen(entry)}
+      onMessage={() => openEntryMessage(entry, () => setCalBookingDetailEntry(entry), true)}>
+      {renderEntryMicroActions(entry)}
+      {renderEntryQuickActions(entry, !(entry.customerBooking || entry.businessBooking))}
+    </GoEntryDetailsSheet>;
+  }
 
   function openSavedNoteDestination(entry:GoEntry,notice:string){
     const identity=noteIdentityRef.current;if(!identity.ready||!identity.scope)return;

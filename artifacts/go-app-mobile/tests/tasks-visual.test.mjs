@@ -65,7 +65,7 @@ function fixture(lang = 'es', overrides = {}) {
     listOpen: true, listSwipeStepAllowed: true, llamadasListOpen: false, listMinimized: false, listFiltersHidden: false, listFilter: 'todos', typeFilter: 'todos', activityFilter: 'todas',
     quickCreateOpen: false, quickCreateKbVisible: false, quickCreateText: '', paddingBottom: 34, screenBgColors: {}, listGoSize: 'medio', goSortOrder: 'asc',
     calAddOpen: false, calQuickCreateOpen: false, fieldSelectorOpen: false, isActivelyCreating: false, categorySelected: false,
-    unifiedNoteOriginRef: { current: 'landing' }, unifiedNoteInitial: null, unifiedNoteSeed: {}, listNoteLayerBackRef: { current: null },
+    unifiedNoteOriginRef: { current: 'landing' }, unifiedNoteInitial: null, unifiedNoteSeed: {}, listNoteLayerBackRef: { current: null }, listBookingDetail: undefined,
     noteIdentityRef: { current: { ready: true, scope: { userId: 'tasks-fixture', context: 'live:USER' } } },
     noteDocument: noteModel.noteDocument, noteInScope: noteModel.noteInScope, isGoNoteReminderTarget: toolsContext.exports.isGoNoteReminderTarget,
     goLog: entries, handedness: 'right', allExpanded: false, expandedId: null, isBusinessMode: false, isUserMode: true, altSlotsEntry: null,
@@ -321,13 +321,66 @@ test('three real Listados task cards place the complete actions below their head
       buttons.forEach((button, position) => {
         const style = flatten(button.props.style);
         const label = nodes(button, node => node.type === 'Text')[0];
-        assert.equal(label.props.numberOfLines, undefined);
+        assert.equal(label.props.numberOfLines, 1);
+        assert.equal(flatten(label.props.style).flexShrink, 0);
+        assert.equal(style.flexBasis, "auto");
         assert.equal(style.minHeight, 44);
         assert.equal(style.maxWidth, '100%');
         assert.equal(style.borderColor, [f.context.C.done, f.context.C.pending, f.context.C.destructive][position]);
         button.props.onPress({ stopPropagation() {} });
       });
       assert.deepEqual(f.calls.slice(-3), ['done', 'pending', 'discard'].map(status => [mounted.props.entry.id, status]));
+    }
+  }
+});
+
+test('three Listados reservations show one real state and open the Calendar detail inside their native host', () => {
+  const rows = [
+    { estado: 'aceptado', bookingStatus: 'confirmada', label: 'CONFIRMADA' },
+    { estado: 'aceptado', bookingStatus: 'pendiente', label: 'PENDIENTE DE ACEPTACIÓN' },
+    { estado: 'aceptado', bookingStatus: 'confirmada', bookingServerStatus: 'COMPLETED', label: 'COMPLETADA' },
+  ].map((row, i) => ({ ...row, id: 'reservation-' + i, type: i === 1 ? 'GO_RESERVA' : 'GO_BOOKING',
+    kind: 'received', customerBooking: true, reservationId: 'booking-' + i, contactName: 'Cliente ' + i,
+    professionalName: 'Profesional', dateISO: '2030-01-07', date: '07/01/2030', time: '10:00' }));
+  const calendar = ts.createSourceFile('Calendar', readFileSync('components/AgendaOperativa.tsx', 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const calendarDetail = find(calendar, n => ts.isJsxOpeningElement(n) && n.tagName.getText(calendar) === 'GoEntryDetailsSheet');
+  const renderer = find(home, n => ts.isFunctionDeclaration(n) && n.name?.text === 'renderListBookingDetail');
+  const select = find(home, n => ts.isVariableDeclaration(n) && n.name.getText(home) === 'listBookingDetail');
+  assert.ok(calendarDetail && renderer && select);
+  for (const handedness of ['left', 'right']) for (const listGoSize of ['compacto', 'grande']) {
+    const f = fixture('es', { goLog: rows, handedness, listGoSize, calBookingDetailEntry: null });
+    Object.assign(f.context, {
+      exports: {}, GoEntryDetailsSheet: calendarDetail.tagName.getText(calendar), renderEntryQuickActions: () => null,
+      goDirectlyToLanding() {}, renderEntryMessageScreen: entry => 'message-screen-' + entry.id,
+      openEntryMessage: (...args) => f.calls.push(['message', ...args]),
+    });
+    const refresh = () => vm.runInNewContext(compile('globalThis.listBookingDetail = ' + select.initializer.getText(home)), f.context);
+    vm.runInNewContext(compile(renderer.getText(home) + '\nglobalThis.renderListBookingDetail = renderListBookingDetail;'), f.context);
+    for (const entry of rows) {
+      const card = nodes(f.render(), n => n.props.testID === 'list-entry-card-' + entry.id)[0];
+      const state = nodes(card, n => n.props.testID === 'list-reservation-status-' + entry.id);
+      assert.equal(state.length, 1);
+      assert.equal(texts(state[0]), 'RESERVA · ' + entry.label);
+      assert.ok(!texts(card).split(' | ').includes('ACEPTADO'));
+      for (const target of [card, nodes(card, n => n.props.testID === 'list-entry-title-' + entry.id)[0]]) {
+        target.props.onPress();
+        refresh();
+        const list = f.render();
+        assert.equal(list.props.blockPan, true);
+        assert.equal(list.props.modalOverlay.type, 'GoScreenHost');
+        const detail = nodes(list.props.modalOverlay, n => n.type === 'GoEntryDetailsSheet')[0];
+        assert.equal(detail.props.entry, entry);
+        assert.equal(detail.props.handedness, handedness);
+        detail.props.onMessage();
+        assert.equal(f.calls.at(-1)[0], 'message');
+        assert.equal(f.calls.at(-1)[1], entry);
+        assert.equal(f.calls.at(-1)[3], true);
+        assert.equal(detail.props.renderMessageScreen(), 'message-screen-' + entry.id);
+        detail.props.onClose();
+        refresh();
+        assert.equal(f.context.listOpen, true);
+        assert.equal(f.render().props.modalOverlay, undefined);
+      }
     }
   }
 });

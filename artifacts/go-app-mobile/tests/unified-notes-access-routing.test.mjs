@@ -85,7 +85,7 @@ function fixture(origin = 'calendar') {
     calendarTaskContextRef: { current: null }, calendarSlotRequestRef: { current: 0 },
     calendarSlotOpeningRef: { current: false }, calendarSlotSavingRef: { current: false },
     calendarSlotDraftRef: { current: null }, noteTaskDraftRef: { current: null },
-    listNoteLayerBackRef: { current: null }, lang: 'es', contactName: '', phone: '',
+    listNoteLayerBackRef: { current: null }, listBookingDetail: undefined, lang: 'es', contactName: '', phone: '',
     getToday: () => new Date(2027, 0, 1),
     formatISODate: date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
     savedNoteTarget: navigation.savedNoteTarget, noteDocument: model.noteDocument, noteInScope: model.noteInScope,
