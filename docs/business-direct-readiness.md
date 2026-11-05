@@ -1,5 +1,9 @@
 # GO Empresa: acceso y citas directas — preparación, no activada
 
+> Informe de la preparación original `71debe1`. La continuación FAST reutiliza
+> las pantallas existentes y sustituye la ficha alternativa no montada. Consultar
+> [GO_RESERVAS_FAST.md](./GO_RESERVAS_FAST.md) para el estado y las pruebas actuales.
+
 Base inspeccionada: `af57e7ee3d292958a41a27e747350ab60224f40d` (MAIN 194).
 Rama de trabajo: `codex/agent4-business-calendar-direct`.
 

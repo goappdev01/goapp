@@ -101,12 +101,14 @@ export function buildDirectEntry(context: DirectEntryContext, draft: DirectEntry
 }
 
 /** Single-flight and retry identity only; does not confirm or calculate availability. */
-export function createDirectEntryCommitter(gateway: DirectEntryGateway | null, nextRequestId: () => string) {
-  let pending: { signature: string; promise: Promise<DirectEntryReceipt> } | null = null;
-  const operations = new Map<string, { requestId: string; receipt?: DirectEntryReceipt }>();
-  return function commit(command: DirectEntryCommand): Promise<DirectEntryReceipt> {
+export function createDirectEntryCommitter<C extends { businessId: string; kind: "booking" | "block" } = DirectEntryCommand,
+  R extends DirectEntryReceipt = DirectEntryReceipt>(gateway: { currentIdentity: () => Promise<string | null>; commit: (command: C, requestId: string) => Promise<R> } | null,
+  nextRequestId: () => string, validateReceipt: (command: C, receipt: R) => void = () => {}) {
+  let pending: { signature: string; promise: Promise<R> } | null = null;
+  const operations = new Map<string, { requestId: string; receipt?: R }>();
+  return function commit(command: C): Promise<R> {
     // Capture an immutable value before the async boundary; callers may keep editing.
-    const snapshot: DirectEntryCommand = JSON.parse(JSON.stringify(command));
+    const snapshot: C = JSON.parse(JSON.stringify(command));
     const signature = JSON.stringify(snapshot);
     if (pending) return pending.signature === signature ? pending.promise : Promise.reject(new Error("Espera a comprobar la operación anterior."));
     const promise = (async () => {
@@ -125,6 +127,7 @@ export function createDirectEntryCommitter(gateway: DirectEntryGateway | null, n
       if (identity !== await gateway.currentIdentity()) throw new Error("La sesión ha cambiado. Vuelve a consultar la agenda de tu cuenta.");
       if (!receipt || !isStableBookingId(receipt.id) || receipt.businessId !== snapshot.businessId
         || receipt.requestId !== operation.requestId || receipt.kind !== snapshot.kind) throw new Error("No se pudo confirmar el resultado. Reintenta sin cambiar los datos.");
+      validateReceipt(snapshot, receipt);
       operation.receipt = receipt;
       return receipt;
     })();

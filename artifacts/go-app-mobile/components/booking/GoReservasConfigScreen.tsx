@@ -52,6 +52,7 @@ import {
   type FloorElement,
 } from "@/data/floorPlan";
 import { formatISODate, getToday } from "@/lib/time";
+import type { BusinessFastGateway, FastCalendarEntry } from "@/data/businessFastBooking";
 
 // ─── Visual tokens ─────────────────────────────────────────────────────────────
 
@@ -100,6 +101,8 @@ const VIEW_MODES: { key: ViewMode; icon: keyof typeof Feather.glyphMap; label: s
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface GoReservasConfigScreenProps {
+  /** Not supplied until a real guest-booking/directory contract is deployed. */
+  fastGateway?: BusinessFastGateway;
   onClose:                () => void;
   onOpenMessage?: (entry:GoEntry,returnTo?:()=>void)=>void;
   onResolveEntry?: (entry:GoEntry,status:"done"|"pending"|"discard",current?:()=>GoEntry|undefined)=>void;
@@ -138,9 +141,18 @@ export function GoReservasConfigScreen(props: GoReservasConfigScreenProps) {
   const {useBusinessBookings,mergeBusinessBookingEntries}:typeof import("@/hooks/useBusinessBookings")=require("@/hooks/useBusinessBookings");
   const [personalGoLog, setGoLog] = useGoLog();
   const bookings=useBusinessBookings(config.businessId,true);
+  const [fastEntry,setFastEntry]=useState<FastCalendarEntry|null>(null);
+  const fastConfig=useMemo(()=>fastEntry&&props.fastGateway?{entry:fastEntry,gateway:props.fastGateway,
+    onConfirmed:()=>{void bookings.refresh();},onGoToBooking:()=>{setFastEntry(null);}}:undefined,[fastEntry,props.fastGateway,bookings.refresh]);
   const allGoLog=useMemo(()=>mergeBusinessBookingEntries(personalGoLog,bookings.entries),[personalGoLog,bookings.entries]);
   useEffect(()=>{if(bookings.error)Alert.alert("GO",bookings.error);},[bookings.error]);
-  return useGoReservasContent({ ...props, allGoLog, setGoLog,liveBookingMutate:bookings.mutate });
+  const content=useGoReservasContent({ ...props, allGoLog, setGoLog,liveBookingMutate:bookings.mutate,
+    onFastReserveAtTime:props.fastGateway?(dateISO,timeHHMM,staffId)=>{
+      if(config.businessId)setFastEntry({businessId:config.businessId,staffId,dateISO,timeHHMM});
+    }:undefined });
+  if(!fastConfig)return content;
+  const {BookingSearchOverlay}:typeof import("./BookingSearchOverlay")=require("./BookingSearchOverlay");
+  return <>{content}<BookingSearchOverlay visible fast={fastConfig} onClose={()=>setFastEntry(null)} /></>;
 }
 export function GoReservasDemoScreen(props: GoReservasConfigScreenProps) {
   const { demo } = useBusinessConfig();
@@ -156,7 +168,8 @@ export function GoReservasDemoScreen(props: GoReservasConfigScreenProps) {
   });
 }
 
-function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, onProposeBookingChange, onDropBooking, onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot, liveBookingMutate }: GoReservasConfigScreenProps & {
+function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, onProposeBookingChange, onDropBooking, onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot, liveBookingMutate, onFastReserveAtTime }: GoReservasConfigScreenProps & {
+  onFastReserveAtTime?: (dateISO:string,timeHHMM:string,staffId:string)=>void;
   allGoLog: GoEntry[];
   setGoLog: React.Dispatch<React.SetStateAction<GoEntry[]>>;
   demoStore?: BusinessDemoStore;
@@ -642,6 +655,10 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             calSizeKey={calSize}
             calDayNightMode={(actualDayNightMode ?? "mixto") as CalDayNightMode}
             onCreateTaskAtTime={onCreateTaskAtTime}
+            onReserveAtTime={onFastReserveAtTime ? (dateISO,timeHHMM)=>{
+              if(liveProfessionals.some(person=>person.id===selectedPro))onFastReserveAtTime(dateISO,timeHHMM,selectedPro);
+              else Alert.alert("Calendario profesional","Selecciona el calendario de una profesional para crear una reserva FAST.");
+            }:undefined}
             onChangeEstado={handleChangeEstado}
             onConfirmBooking={liveBookingMutate?id=>{const entry=allGoLog.find(e=>e.id===id);if(!entry)return;Alert.alert(lang==="en"?"Accept reservation":"Aceptar reserva",lang==="en"?"Confirm this reservation without changing its financial conditions.":"Confirmar esta reserva sin modificar sus condiciones económicas.",[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Accept":"Aceptar",onPress:()=>void liveBookingMutate(entry,"confirm").catch(error=>Alert.alert("GO",error.message))}]);}:undefined}
             onDeleteItem={handleDeleteItem}

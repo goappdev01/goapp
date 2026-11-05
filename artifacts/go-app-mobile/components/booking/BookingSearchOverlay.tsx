@@ -56,6 +56,7 @@ import { summarizeBookingServices, staffSupportsBookingServices, type BookingSer
 import { compactTimelineOptions, timelineOptionLabel } from "@/data/bookingTimeline";
 import { bookingActivityEnabled, canonicalBookingActivity, visibleBookingSectors } from "@workspace/api-zod";
 import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
+import type { BusinessFastGateway, FastBooking, FastCalendarEntry, FastContext, FastGuest, FastReview, PrivateBusinessCustomer } from "@/data/businessFastBooking";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -341,6 +342,9 @@ const bc = StyleSheet.create({
 // ── Main overlay ───────────────────────────────────────────────────────────────
 
 export type BookingSearchOverlayProps = {
+  /** Prepared integration only: no production guest gateway is currently registered. */
+  fast?: { entry: FastCalendarEntry; gateway: BusinessFastGateway;
+    onConfirmed?: (booking: FastBooking) => void; onGoToBooking?: (booking: FastBooking) => void };
   /** Owner-authorized local test data. Never falls back to live booking or agenda writes. */
   demoRepository?: DemoBookingRepository;
   initialBusinessId?: string;
@@ -376,7 +380,10 @@ export function BookingSearchOverlay({
   demoRepository,
   initialBusinessId,
   onDemoGoToBooking,
+  fast,
 }: BookingSearchOverlayProps) {
+  if (fast && demoRepository) throw new Error("FAST requiere el contrato empresarial real, sin adaptador DEMO.");
+  const fastApi: typeof import("@/data/businessFastBooking") | null = fast ? require("@/data/businessFastBooking") : null;
   const { publication, internalAccess } = useBookingModulePublication(visible, !!demoRepository);
   const visibleSectors = visibleBookingSectors(SECTORS, publication, internalAccess);
   const businessVisible = (business: Business) => bookingActivityEnabled(business.category, publication, internalAccess);
@@ -473,7 +480,7 @@ export function BookingSearchOverlay({
     return () => { onShow.remove(); onHide.remove(); };
   }, []);
 
-  const [step, setStep] = useState<Step>("search");
+  const [step, setStep] = useState<Step>(fast ? "item" : "search");
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
@@ -499,9 +506,20 @@ export function BookingSearchOverlay({
   const [slots, setSlots] = useState<SlotWithStatus[]>([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [activeHold, setActiveHold] = useState<Booking | null>(null);
-  const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
+  const [confirmedBooking, setConfirmedBooking] = useState<Booking | FastBooking | null>(null);
   const [confirming, setConfirming] = useState(false);
   const confirmInFlight = useRef(false);
+  const [fastContext, setFastContext] = useState<FastContext | null>(null);
+  const [fastReview, setFastReview] = useState<FastReview | null>(null);
+  const [guest, setGuest] = useState<FastGuest>({ name: "", phone: "", contactId: null, remember: false });
+  const [customerMatches, setCustomerMatches] = useState<PrivateBusinessCustomer[]>([]);
+  const [fastError, setFastError] = useState("");
+  const [sharingConfirmation,setSharingConfirmation] = useState(false);
+  const fastGeneration = useRef(0);
+  const fastCommitter = useRef<ReturnType<typeof import("@/data/businessFastBooking").createFastCommitter> | null>(null);
+  const confirmationShare: typeof import("@/data/bookingConfirmationShare") | null = fast ? require("@/data/bookingConfirmationShare") : null;
+  const discoveryLink = confirmationShare?.officialGoDiscoveryLink() ?? null;
+  const DiscoveryQRCode = fast && discoveryLink ? require("react-native-qrcode-svg").default : null;
   // Anti-doble-reserva: true cuando claimSlot o isSlotOccupied detectan conflicto
   const [slotTakenError, setSlotTakenError] = useState(false);
 
@@ -524,7 +542,7 @@ export function BookingSearchOverlay({
   useEffect(() => {
     let current = true;
     if (visible) {
-      setStep("search");
+      setStep(fast ? "item" : "search");
       setQuery("");
       setSelectedCategory(null);
       setSelectedSubCategory(null);
@@ -536,10 +554,21 @@ export function BookingSearchOverlay({
       setSelectedStaff(null);
       setActiveHold(null);
       setConfirmedBooking(null);
+      setFastReview(null); setFastContext(null); setFastError(""); setCustomerMatches([]);
+      setGuest({ name: "", phone: "", contactId: null, remember: false });
+      fastGeneration.current++;
       dragAnim.setValue(0);
       stepAnim.setValue(0);
       // Cargar negocios recientes
-      if (demoRepository) {
+      if (fast && fastApi) {
+        const generation = fastGeneration.current;
+        fastCommitter.current = fastApi.createFastCommitter(fast.gateway, () => `fast_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+        void fastApi.resolveFastContext(fast.gateway, fast.entry).then(context => {
+          if (!current || generation !== fastGeneration.current) return;
+          setFastContext(context); setSelectedBusiness(context.business); setSelectedStaff(context.professional);
+          setSelectedDate(fast.entry.dateISO); setStep("item");
+        }).catch(error => { if (current) setFastError(error.message); });
+      } else if (demoRepository) {
         demoRepository.getActiveBusinesses().then(all => {
           if (!current) return;
           const available = all.filter(businessVisible);
@@ -575,7 +604,29 @@ export function BookingSearchOverlay({
       }).start();
     }
     return () => { current = false; };
-  }, [visible, demoRepository, initialBusinessId]);
+  }, [visible, demoRepository, initialBusinessId, fast]);
+
+  useEffect(() => {
+    let current = true;
+    setCustomerMatches([]);
+    if (!fast || !fastApi || !fastContext || step !== "hold" || guest.contactId || guest.name.trim().length < 2) return;
+    void fastApi.findFastCustomers(fast.gateway, fastContext, guest.name).then(rows => {
+      if (current) setCustomerMatches(rows);
+    }).catch(error => { if (current) setFastError(error.message); });
+    return () => { current = false; };
+  }, [fast, fastContext, guest.name, guest.contactId, step]);
+
+  useEffect(() => {
+    if (!visible || !fast || !fastContext) return;
+    let current = true;
+    const { onSessionChanged }: typeof import("@/lib/sessionEvents") = require("@/lib/sessionEvents");
+    const unsubscribe = onSessionChanged(() => { void fast.gateway.currentIdentity().then(identity => {
+      if (!current || identity === fastContext.identity) return;
+      fastGeneration.current++; setFastContext(null); setFastReview(null); setConfirmedBooking(null); setCustomerMatches([]);
+      setGuest({ name: "", phone: "", contactId: null, remember: false }); onClose();
+    }).catch(() => { if(current)setFastError("No se pudo comprobar la sesión. Se conservan los datos hasta volver a identificarte."); }); });
+    return () => { current = false; unsubscribe(); };
+  }, [visible, fast, fastContext]);
 
   useEffect(() => {
     if (!visible || step !== "search") return;
@@ -738,12 +789,27 @@ export function BookingSearchOverlay({
     setSelectedServiceIds(ids => ids.includes(item.id) ? ids.filter(id => id !== item.id) : [...ids, item.id]);
   };
 
-  const handleSaveServices = () => {
+  const handleSaveServices = async () => {
     if (!serviceSelection) return;
+    let services: BookingService[], item: BookableItem;
     {
       if (!catalogQuote?.ready || catalogQuote.businessId !== selectedBusiness?.id || JSON.stringify(catalogQuote.rootIds) !== JSON.stringify(selectedServiceIds)) return;
-      const services = catalogBookingServices(catalogQuote);
-      setSelectedItem({ ...serviceSelection.item, price: catalogQuote.totalPrice, durationMinutes: services.reduce((minutes, service) => minutes + service.durationMinutes, 0) }); setSelectedServices(services);
+      services = catalogBookingServices(catalogQuote);
+      item = { ...serviceSelection.item, price: catalogQuote.totalPrice, durationMinutes: services.reduce((minutes, service) => minutes + service.durationMinutes, 0) };
+      setSelectedItem(item); setSelectedServices(services);
+    }
+    if (fast && fastApi) {
+      if (!fastContext || confirmInFlight.current) return;
+      confirmInFlight.current = true; setConfirming(true); setFastError("");
+      const generation = fastGeneration.current;
+      try {
+        if (fastContext.identity !== await fast.gateway.currentIdentity()) throw Error("La sesión ha cambiado. Abre de nuevo la reserva.");
+        const review = await fastApi.prepareFastReview(fastContext, fast.entry, services, catalogQuote, item);
+        if (generation !== fastGeneration.current || fastContext.identity !== await fast.gateway.currentIdentity()) return;
+        setFastReview(review); setSelectedStaff(fastContext.professional); goToStep("hold");
+      } catch (error) { if (generation === fastGeneration.current) setFastError(error instanceof Error ? error.message : "No se pudo comprobar la franja."); }
+      finally { confirmInFlight.current = false; setConfirming(false); }
+      return;
     }
     setSelectedStaff(null); setSlots([]);
     goToStep("professional", "forward");
@@ -757,6 +823,18 @@ export function BookingSearchOverlay({
 
   const handleSelectSlot = async (slot: AvailableSlot) => {
     if (!selectedBusiness || !selectedItem) return;
+    if (fast && fastApi) {
+      if (!fastContext || !catalogQuote?.ready || confirmInFlight.current) return;
+      confirmInFlight.current = true; setConfirming(true); setFastError("");
+      const generation = fastGeneration.current;
+      try {
+        if (fastContext.identity !== await fast.gateway.currentIdentity()) throw Error("La sesión ha cambiado.");
+        const review = await fastApi.prepareFastReview(fastContext, { ...fast.entry, dateISO: slot.startDatetime.slice(0, 10), timeHHMM: slot.startDatetime.slice(11, 16) }, selectedServices, catalogQuote, selectedItem);
+        if (generation === fastGeneration.current && fastContext.identity === await fast.gateway.currentIdentity()) { setFastReview(review); goToStep("hold"); }
+      } catch (error) { if (generation === fastGeneration.current) setFastError(error instanceof Error ? error.message : "No se pudo comprobar la hora."); }
+      finally { confirmInFlight.current = false; setConfirming(false); }
+      return;
+    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
       const staffId = slot.staffId ?? (selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined);
@@ -802,6 +880,21 @@ export function BookingSearchOverlay({
   };
 
   const handleConfirm = async () => {
+    if (fast && fastApi) {
+      if (!fastReview || !fastCommitter.current || confirmInFlight.current) return;
+      confirmInFlight.current = true; setConfirming(true); setFastError("");
+      const generation = fastGeneration.current;
+      try {
+        if (fastReview.context.identity !== await fast.gateway.currentIdentity()) throw Error("La sesión ha cambiado. Abre de nuevo la reserva.");
+        const receipt = await fastCommitter.current(fastApi.fastCommand(fastReview, guest));
+        if (generation !== fastGeneration.current) return;
+        setConfirmedBooking(receipt.booking); goToStep("confirmed");
+        // Refresh the business canonical repository; never mirror this guest as the signed-in customer.
+        fast.onConfirmed?.(receipt.booking);
+      } catch (error) { if (generation === fastGeneration.current) setFastError(error instanceof Error ? error.message : "No se pudo confirmar. Se conservan los datos."); }
+      finally { confirmInFlight.current = false; setConfirming(false); }
+      return;
+    }
     console.log("[ENTER_FUNCTION] BookingSearchOverlay.handleConfirm ENTERED", {
       hasActiveHold: !!activeHold,
       holdId:        activeHold?.id,
@@ -897,6 +990,20 @@ export function BookingSearchOverlay({
     }
   };
 
+  const handleShareConfirmation = async () => {
+    if (!fast || !fastContext || !confirmedBooking || !selectedBusiness || !confirmationShare || sharingConfirmation) return;
+    setSharingConfirmation(true); setFastError("");
+    try {
+      if(fastContext.identity!==await fast.gateway.currentIdentity())throw Error("La sesión ha cambiado.");
+      const message=confirmationShare.bookingConfirmationMessage(confirmedBooking,selectedBusiness,fastContext.professional.name,discoveryLink);
+      const {Linking,Share}:typeof import("react-native")=require("react-native");
+      const url=confirmationShare.whatsappConfirmationURL(guest.phone,message);
+      if(url)await Linking.openURL(url);else await Share.share({message});
+      // Opening a composer is not delivery confirmation. The professional sends it.
+    } catch(error) { setFastError(error instanceof Error?error.message:"No se pudo abrir la opción de compartir."); }
+    finally{setSharingConfirmation(false);}
+  };
+
   const handleHoldExpired = () => {
     if (activeHold) cancelSelectedBooking(activeHold.id);
     setActiveHold(null);
@@ -928,6 +1035,8 @@ export function BookingSearchOverlay({
   };
 
   const handleClose = () => {
+    if (fast && confirmInFlight.current) return;
+    fastGeneration.current++;
     if (activeHold) cancelSelectedBooking(activeHold.id);
     if (!demoRepository) onProviderSelected?.(null);
     onClose();
@@ -941,6 +1050,7 @@ export function BookingSearchOverlay({
   // 4. Llama onDismissAll (el caller secuencia el cierre del modal exterior).
   // Si no se proveyó onDismissAll, cae a handleClose como fallback.
   const handleDismissAll = () => {
+    if (fast) { handleClose(); return; }
     // Parar animaciones en curso
     slideAnim.stopAnimation();
     dragAnim.stopAnimation();
@@ -980,6 +1090,13 @@ export function BookingSearchOverlay({
   //   (el estado de resultados es el mismo nivel conceptual que "Nueva Reserva raíz";
   //    no existe un paso intermedio "limpiar búsqueda")
   const handleBackOneLevel = () => {
+    if (fast) {
+      if (confirmInFlight.current) return;
+      if (keyboardVisible) { Keyboard.dismiss(); return; }
+      if (step === "slots" && fastReview) { goToStep("hold", "back"); return; }
+      if (step === "hold" || step === "slots") { setFastReview(null); goToStep("item", "back"); return; }
+      handleClose(); return;
+    }
     Haptics.selectionAsync().catch(() => {});
     if (step === "confirmed") { handleClose(); return; }
     if (step === "hold") {
@@ -1009,11 +1126,12 @@ export function BookingSearchOverlay({
   const beauty=SECTORS.find(sector=>sector.id==="belleza");
   const beautySelection=selectedCategory==="belleza"||beauty?.subs.some(sub=>sub.id===selectedSubCategory)||visibleSectors.length===1&&visibleSectors[0].id==="belleza";
   const accentColor = selectedBusiness?bookingCategoryAccent(selectedBusiness):beautySelection?beauty?.color||"#eab308":"#00e5ff";
-  const reviewedPlan = confirmedBooking?.timingSnapshot ?? activeHold?.timingSnapshot;
+  const reviewedPlan = confirmedBooking?.timingSnapshot ?? fastReview?.slot.timingSnapshot ?? activeHold?.timingSnapshot;
+  const reviewedTime = fastReview?.slot ?? activeHold;
   const summaryItem = selectedItem && reviewedPlan ? { ...selectedItem,
-    title: (confirmedBooking?.catalogSnapshot ?? activeHold?.catalogSnapshot)?.lines.map(line => line.name).join(" + ") || reviewedPlan.serviceDetails.map(service => service.title).join(" + "),
+    title: (confirmedBooking?.catalogSnapshot ?? fastReview?.quote ?? activeHold?.catalogSnapshot)?.lines.map(line => line.name).join(" + ") || reviewedPlan.serviceDetails.map(service => service.title).join(" + "),
     durationMinutes: reviewedPlan.totalClientMinutes,
-    price: (confirmedBooking?.catalogSnapshot ?? activeHold?.catalogSnapshot)?.totalPrice ?? reviewedPlan.totalPrice ?? selectedItem.price,
+    price: (confirmedBooking?.catalogSnapshot ?? fastReview?.quote ?? activeHold?.catalogSnapshot)?.totalPrice ?? reviewedPlan.totalPrice ?? selectedItem.price,
   } : selectedItem;
 
   // Sheet compacto (sin flex:1) siempre en el paso "search" y cuando el teclado está visible.
@@ -1095,6 +1213,8 @@ export function BookingSearchOverlay({
           <Animated.View
             style={[s.stepContainer, { flex: 1 }, { transform: [{ translateX: stepAnim }] }]}
           >
+            {!!fastError && <Text testID="fast-booking-error" accessibilityRole="alert" style={{ color: "#FCA5A5", paddingHorizontal: 20, paddingVertical: 8 }}>{fastError}</Text>}
+            {fast && !fastContext && !fastError && <ActivityIndicator accessibilityLabel="Comprobando calendario profesional" color={accentColor} />}
             {/* ── STEP: SEARCH ── */}
             {step === "search" && (
               <View style={[s.stepWrap, s.searchStepInner]}>
@@ -1364,7 +1484,7 @@ export function BookingSearchOverlay({
                     {serviceSelection && <Text testID="booking-services-total" style={[s.metaBadgeText,{color:accentColor}]}>
                       {catalogQuote?.ready ? catalogBookingServices(catalogQuote).reduce((minutes, service) => minutes + service.durationMinutes, 0) : serviceSelection.item.durationMinutes} min · {(catalogQuote?.ready ? catalogQuote.totalPrice : serviceSelection.item.priceKnown === false ? null : serviceSelection.item.price) ?? (lang === "en" ? "Price to confirm" : "Precio por confirmar")} {serviceSelection.item.currency}
                     </Text>}
-                    <TouchableOpacity testID="booking-save-services" accessibilityRole="button" disabled={!serviceSelection || !catalogQuote?.ready} onPress={handleSaveServices}
+                    <TouchableOpacity testID="booking-save-services" accessibilityRole="button" disabled={!serviceSelection || !catalogQuote?.ready || confirming} onPress={handleSaveServices}
                       style={[s.serviceCard, { borderColor: accentColor, opacity: serviceSelection && catalogQuote?.ready ? 1 : 0.45 }]}>
                       <Text style={s.serviceTitle}>{t("save")}</Text>
                     </TouchableOpacity>
@@ -1594,7 +1714,7 @@ export function BookingSearchOverlay({
             )}
 
             {/* ── STEP: HOLD ── */}
-            {step === "hold" && activeHold && selectedBusiness && selectedItem && (
+            {step === "hold" && reviewedTime && selectedBusiness && selectedItem && (
               <View style={s.stepWrap}>
                 <ScrollView
                   style={{ flex: 1 }}
@@ -1624,13 +1744,13 @@ export function BookingSearchOverlay({
                       <View style={s.summaryRow}>
                         <Feather name="calendar" size={15} color="rgba(255,255,255,0.40)" />
                         <Text style={s.summaryRowText}>
-                          {formatDateLabel(activeHold.startDatetime.slice(0, 10), t)}
+                          {formatDateLabel(reviewedTime.startDatetime.slice(0, 10), t)}
                         </Text>
                       </View>
                       <View style={s.summaryRow}>
                         <Feather name="clock" size={15} color="rgba(255,255,255,0.40)" />
                         <Text style={s.summaryRowText}>
-                          {formatTime(activeHold.startDatetime)} — {formatTime(activeHold.endDatetime)}
+                          {formatTime(reviewedTime.startDatetime)} — {formatTime(reviewedTime.endDatetime)}
                           {"  ·  "}{summaryItem!.durationMinutes} min
                         </Text>
                       </View>
@@ -1645,8 +1765,31 @@ export function BookingSearchOverlay({
                     </View>
                   </View>
 
+                  {fast && <View testID="fast-customer-fields" style={{ gap: 10, marginBottom: 12 }}>
+                    <TouchableOpacity testID="fast-change-time" disabled={confirming} onPress={() => goToStep("slots", "back")}>
+                      <Text style={{ color: accentColor, paddingVertical: 10 }}>Cambiar hora</Text>
+                    </TouchableOpacity>
+                    <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>NOMBRE DEL CLIENTE</Text>
+                    <TextInput testID="fast-customer-name" accessibilityLabel="Nombre del cliente, obligatorio" value={guest.name} maxLength={120}
+                      editable={!confirming} style={[s.searchInput,{flex:0,minHeight:44}]} placeholder="Nombre del cliente" placeholderTextColor="#9CA3AF"
+                      onChangeText={name => { setGuest(value => ({ ...value, name, contactId: null })); setFastError(""); }} />
+                    {customerMatches.map(customer => <TouchableOpacity key={customer.id} testID={`fast-customer-${customer.id}`} disabled={confirming}
+                      style={s.summaryCard} onPress={() => { setGuest(value => ({ ...value, name: customer.name, phone: customer.phone ?? "", contactId: customer.id })); setCustomerMatches([]); }}>
+                      <Text style={{ color: "#FFFFFF", padding: 12 }}>{customer.name}{customer.phone ? ` · ${customer.phone}` : ""}</Text>
+                    </TouchableOpacity>)}
+                    <Text style={{ color: "#FFFFFF", fontWeight: "700" }}>TELÉFONO · OPCIONAL</Text>
+                    <TextInput testID="fast-customer-phone" accessibilityLabel="Teléfono opcional" value={guest.phone} maxLength={40}
+                      editable={!confirming} keyboardType="phone-pad" style={[s.searchInput,{flex:0,minHeight:44}]} placeholder="Teléfono" placeholderTextColor="#9CA3AF"
+                      onChangeText={phone => setGuest(value => ({ ...value, phone }))} />
+                    <TouchableOpacity testID="fast-remember-customer" accessibilityRole="checkbox" accessibilityState={{ checked: guest.remember }}
+                      disabled={confirming} onPress={() => setGuest(value => ({ ...value, remember: !value.remember }))} style={{ flexDirection: "row", gap: 8, paddingVertical: 10 }}>
+                      <Feather name={guest.remember ? "check-square" : "square"} size={20} color={accentColor} />
+                      <Text style={{ color: "#FFFFFF", flex: 1 }}>Conservar en la agenda privada del establecimiento</Text>
+                    </TouchableOpacity>
+                  </View>}
+
                   {/* Cancellation Policy — solo si el negocio tiene una política explícita */}
-                  {selectedBusiness.cancellationPolicy ? (() => {
+                  {activeHold && selectedBusiness.cancellationPolicy ? (() => {
                     const policy = selectedBusiness.cancellationPolicy;
                     const price  = summaryItem!.price;
                     const info   = computeRefundInfo(policy, activeHold, price);
@@ -1698,7 +1841,7 @@ export function BookingSearchOverlay({
                   )}
 
                   {/* Silent hold expiry watcher — no visual countdown in V1 */}
-                  {activeHold.holdExpiresAt && (
+                  {activeHold?.holdExpiresAt && (
                     <HoldCountdown
                       expiresAt={activeHold.holdExpiresAt}
                       onExpire={handleHoldExpired}
@@ -1807,6 +1950,13 @@ export function BookingSearchOverlay({
                   </Text>
                 </View>
 
+                {fast && <View style={{alignItems:"center",gap:10,marginBottom:16}}>
+                  {DiscoveryQRCode && discoveryLink && <View accessibilityLabel="Código QR oficial de GO" style={{backgroundColor:"#FFFFFF",padding:8,borderRadius:10}}><DiscoveryQRCode value={discoveryLink} size={80}/></View>}
+                  <TouchableOpacity testID="fast-share-confirmation" disabled={sharingConfirmation} onPress={()=>void handleShareConfirmation()} style={{padding:12,minHeight:44}}>
+                    <Text style={{color:"#FFFFFF",fontWeight:"700"}}>ENVIAR AL CLIENTE</Text>
+                  </TouchableOpacity>
+                </View>}
+
                 {/* Botón OK / Ver en calendario — único botón, hace todo */}
                 <TouchableOpacity
                   style={{
@@ -1818,7 +1968,9 @@ export function BookingSearchOverlay({
                   }}
                   onPress={() => {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-                    if (confirmedBooking) {
+                    if (fast && confirmedBooking && confirmedBooking.customerId===null) {
+                      fast.onGoToBooking?.(confirmedBooking);
+                    } else if (confirmedBooking && typeof confirmedBooking.customerId==="string") {
                       const savedEntry=demoRepository?.getCustomerEntries().find(entry=>entry.reservationId===confirmedBooking.id)??customerBookingEntry(confirmedBooking,selectedBusiness,selectedItem,proShortName??undefined);
                       const dateISO=savedEntry.dateISO!,timeHHMM=savedEntry.time;
                       if (demoRepository) onDemoGoToBooking?.(dateISO, timeHHMM, savedEntry.id);
