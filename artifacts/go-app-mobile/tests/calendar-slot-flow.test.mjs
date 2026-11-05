@@ -8,7 +8,9 @@ import { fixture as boardFixture } from "./helpers/calendar-fixture.mjs";
 import { fixture as containerFixture, find, ast, declaration, transpile } from "./helpers/calendar-container-fixture.mjs";
 const require = createRequire(path.join(process.cwd(), "package.json"));
 const ts = require("typescript");
+const noteFixture = require("./tests/helpers/unified-note-fixture.cjs");
 const plain = value => JSON.parse(JSON.stringify(value));
+const functionSource = name => find(node => ts.isFunctionDeclaration(node) && node.name?.text === name).getText(ast);
 function load(file, modules) {
   const scope = { exports: {}, Date, Error, Map, Set, JSON, console,
     require(name) { if (name in modules) return modules[name]; throw new Error("Unexpected import " + name); } };
@@ -25,10 +27,11 @@ const entry = (id, ownerUserId, extra = {}) => ({
 
 function flowFixture(initial = []) {
   const { scope, calls } = containerFixture();
-  let user = "account-a", raw = JSON.stringify(initial), writes = 0, fail = false, serial = 0;
+  let user = "account-a", raw = JSON.stringify(initial), writes = 0, fail = false;
   const storage = {
     async getItem(key) { assert.equal(key, "go_log_v1"); return raw; },
     async setItem(key, value) { assert.equal(key, "go_log_v1"); if (fail) throw new Error("Storage unavailable"); raw = value; writes++; },
+    async removeItem(key) { calls.push(["removeItem", key]); },
   };
   const access = load("lib/goTaskAccess.ts", { "@/data/booking": { getAuthenticatedUserId: async () => user } });
   const store = load("lib/goLogStore.ts", {
@@ -38,11 +41,12 @@ function flowFixture(initial = []) {
     Error, lang: "es", calendarSlotOpeningRef: { current: false }, calendarSlotRequestRef: { current: 0 },
     completionIdentity: { ready: true, scope: { userId: "account-a", context: "live:USER" } },
     noteIdentityRef: { current: { ready: true, scope: { userId: "account-a", context: "live:USER" } } },
+    unifiedNoteOriginRef: { current: "landing" }, unifiedNoteInitial: null, unifiedNoteSeed: {},
     quickNoteReminderMinutes: null,
     calendarSlotSavingRef: { current: false }, calendarSlotDraftRef: { current: null },
     fieldSelectorSaveBusyRef: { current: false }, directLandingRef: { current: false }, pendingCalendarGoRef: { current: false }, pendingCalendarGoListenRef: { current: false }, goChatListenSequence: { current: 0 },
     getTaskUser: access.getTaskUser, assertTaskUser: access.assertTaskUser, updateGoLog: store.updateGoLog,
-    makeUid: () => "go_slot_" + (++serial), t: key => key, isUserMode: false,
+    t: key => key, isUserMode: false,
     showToast: (...args) => calls.push(["toast", ...args]),
     setGoLog: () => { throw new Error("Slot tasks must use the existing authenticated queue"); },
     Haptics: { selectionAsync: async () => {}, impactAsync: async () => {}, ImpactFeedbackStyle: { Medium: "medium" } },
@@ -50,41 +54,59 @@ function flowFixture(initial = []) {
     aiDraftBaseRef: { current: "" }, startIaListening() {},
     setTimeout: callback => { calls.push(["timer", callback]); return 1; },
   });
-  for (const name of ["GoChatOpen", "GoChatListenRequest", "AiDraft", "AiOpen", "AiListening", "Time", "Duration", "Date", "DateISO"]) {
+  for (const name of ["GoChatOpen", "GoChatListenRequest", "AiDraft", "AiOpen", "AiListening", "Time", "Duration", "Date", "DateISO", "UnifiedNoteInitial", "UnifiedNoteSeed", "QuickNoteText", "QuickNoteDetail"]) {
     const key = name[0].toLowerCase() + name.slice(1);
     scope["set" + name] = value => { scope[key] = value; calls.push(["set" + name, value]); };
   }
-  for (const name of ["openCalendarSlotTask", "commitCalendarSelectorEntry", "createEntryFromSelector", "openAi", "completeCalendarGoOpen"]) {
+  for (const name of ["openCalendarSlotTask", "openAi", "completeCalendarGoOpen"]) {
     vm.runInContext(transpile("exports." + name + " = " + declaration(name)), scope);
     scope[name] = scope.exports[name];
   }
-  const tools = load("lib/goNoteTools.ts", {});
-  const noteApi = load("lib/goNoteReminder.ts", {"./goLogStore":store,"./goTaskAccess":access,"./goNoteTools":tools,
-    "./goTaskReminderRuntime":{refreshNativeTaskReminders:async()=>[]},"./goTaskReminders":{describeReminders:()=>""}});
-  scope.saveGoNoteReminder=noteApi.saveGoNoteReminder;
-  scope.setQuickNoteReminderMinutes=()=>{};
-  for(const name of ["saveQuickNoteEntry","saveFieldSelector"]){vm.runInContext(transpile("exports."+name+" = "+declaration(name)),scope);scope[name]=scope.exports[name];}
-  scope.exports.saveForm=scope.saveFieldSelector;
+  const model = load("lib/unifiedNotes.ts", {});
+  const files = load("lib/goNoteFiles.ts", { "expo-file-system/legacy": {}, "./unifiedNotes": model });
+  const progress = load("lib/goNoteSaveProgress.ts", {});
+  const noteApi = load("lib/unifiedNoteStore.ts", {
+    "@react-native-async-storage/async-storage": { default: storage }, "./goLogStore": store,
+    "./goTaskAccess": access, "./goNoteFiles": files, "./unifiedNotes": model, "./goNoteSaveProgress": progress,
+    "./goTaskReminderRuntime": { refreshNativeTaskReminders: async () => [] }, "./goTaskReminders": { describeReminders: () => "" },
+  });
+  scope.saveUnifiedNote = noteApi.saveUnifiedNote;
+  scope.watchNoteReminderReceipt = () => {};
+  scope.AsyncStorage.removeItem = storage.removeItem;
+  scope.openFieldSelector = () => { throw new Error("An empty slot must open the shared note editor"); };
+  for (const name of ["openUnifiedNoteComposer", "saveNoteDraft"]) {
+    vm.runInContext(transpile(functionSource(name) + ";exports." + name + "=" + name), scope);
+    scope[name] = scope.exports[name];
+  }
   const session = find(node => ts.isCallExpression(node) && node.expression.getText(ast) === "onSessionChanged"
     && node.arguments[0]?.getText(ast).includes("calendarSlotRequestRef.current"));
   assert.ok(session, "Execute the existing calendar identity-change listener");
   vm.runInContext(transpile("exports.sessionChanged = " + session.arguments[0].getText(ast)), scope);
   return { scope, calls, access, store, storage,
     user(value) { user = value; }, fail(value) { fail = value; },
-    get saved() { return JSON.parse(raw); }, get writes() { return writes; }, get idsCreated() { return serial; },
+    get saved() { return JSON.parse(raw); }, get writes() { return writes; },
+    editor: onSave => noteFixture.editorFixture({ scope: scope.noteIdentityRef.current.scope, seed: plain(scope.unifiedNoteSeed), onSave: onSave || scope.saveNoteDraft }),
   };
 }
 
 for (const [iso, time] of [["2026-10-08", "09:15"], ["2026-10-09", "23:45"]]) {
-  test("empty slot " + iso + " " + time + " opens the existing form with exact values and restores context", async () => {
+  test("empty slot " + iso + " " + time + " opens the shared editor with exact values and preserves its Calendar", async () => {
     const f = flowFixture(); const { scope } = f; const scroll = scope.scrollTarget;
     scope.place = "Landing location"; scope.date = "Otra fecha"; scope.dateISO = "2026-12-31"; scope.time = "18:00";
     await scope.openCalendarSlotTask(iso, time);
-    assert.equal(scope.fieldSelectorOpen, true); assert.equal(scope.calOpen, true);
-    assert.equal(scope.fsFilledValues.dateISO, iso); assert.equal(scope.fsFilledValues.time, time);
-    assert.equal(scope.fsFilledValues.place, undefined, "A slot must not inherit another draft's location");
+    assert.equal(scope.notesOpen, true); assert.equal(scope.fieldSelectorOpen, false); assert.equal(scope.calOpen, true);
+    assert.equal(scope.unifiedNoteOriginRef.current, "calendar");
+    assert.deepEqual(plain(scope.unifiedNoteSeed), { destination: "calendar", dateISO: iso, time });
+    assert.equal(scope.calendarSlotDraftRef.current, null); assert.equal(scope.calendarTaskContextRef.current, null);
     assert.equal(f.writes, 0); assert.ok(!f.calls.some(call => call[0] === "setItem"));
-    scope.closeFieldSelectorPanel();
+    const ui = await f.editor();
+    try {
+      assert.equal(ui.hosts.get("note-title").value, "");
+      assert.ok(ui.hosts.has("note-content"));
+      await ui.exit();
+      assert.ok(ui.calls.some(call => call[0] === "close"));
+      assert.equal(f.writes, 0);
+    } finally { await ui.close(); }
     assert.equal(scope.calOpen, true); assert.equal(scope.fieldSelectorOpen, false);
     assert.equal(scope.dateISODraft, "2027-02-28"); assert.equal(scope.calBgViewMode, "mes_lineal");
     assert.equal(scope.calBgViewMonth, "2027-02"); assert.equal(scope.scrollTarget, scroll);
@@ -95,50 +117,85 @@ test("save, reopen and repeated taps preserve one task, its owner, details and r
   const foreign = entry("foreign", "account-b");
   const f = flowFixture([foreign]); const { scope } = f;
   await Promise.all([scope.openCalendarSlotTask("2026-10-09", "00:15"), scope.openCalendarSlotTask("2026-10-09", "00:15")]);
-  scope.fieldSelectorText = "Revisar piloto"; scope.fieldSelectorDetail = "Detalle exacto";
-  await Promise.all([scope.exports.saveForm(), scope.exports.saveForm()]);
-  await scope.exports.saveForm();
-  assert.equal(f.saved.length, 2); assert.equal(f.writes, 1); assert.equal(f.idsCreated, 1);
+  assert.equal(f.calls.filter(call => call[0] === "setUnifiedNoteSeed").length, 1);
+  let savedDraft;
+  const ui = await f.editor(draft => { savedDraft = draft; return scope.saveNoteDraft(draft); });
+  try {
+    await ui.run(() => ui.hosts.get("note-title").onChangeText("Revisar piloto"));
+    await ui.run(() => ui.hosts.get("note-content").onChangeText("Detalle exacto"));
+    const save = ui.hosts.get("unified-note-save").onPress;
+    await ui.run(() => { save(); save(); }); await ui.idle();
+    assert.equal(f.saved.length, 2); assert.equal(f.writes, 1);
+  } finally { await ui.close(); }
   const task = f.saved.find(record => record.id !== "foreign");
   assert.equal(task.ownerUserId, "account-a"); assert.equal(task.dateISO, "2026-10-09"); assert.equal(task.time, "00:15");
   assert.equal(task.notes, "Revisar piloto"); assert.equal(task.detail, "Detalle exacto"); assert.equal(task.duration, "");
+  assert.equal(task.note.destination, "calendar"); assert.equal(task.taskContext, "live:USER");
   assert.deepEqual(f.saved.find(record => record.id === "foreign"), foreign);
   const reopened = load("lib/goLogStore.ts", {
     "@react-native-async-storage/async-storage": { default: f.storage }, "./goTaskAccess": f.access,
   });
   assert.deepEqual(plain(await reopened.readGoLog()), f.saved);
-  await scope.commitCalendarSelectorEntry(task, "account-a");
-  assert.equal(f.writes, 1, "A repeated commit of the same id is idempotent");
+  await scope.saveNoteDraft(savedDraft);
+  assert.equal(f.writes, 1, "The shared save pipeline replays the same operation idempotently");
 });
 
-test("failed persistence keeps the form and reuses the same id on an explicit retry", async () => {
+test("failed persistence keeps the shared editor and reuses the same id on an explicit retry", async () => {
   const f = flowFixture(); const { scope } = f;
   await scope.openCalendarSlotTask("2026-10-09", "10:30");
-  scope.fieldSelectorText = "Conservar borrador"; scope.fieldSelectorDetail = "No perder";
-  f.fail(true); await scope.exports.saveForm();
-  assert.equal(f.saved.length, 0); assert.equal(scope.fieldSelectorOpen, true);
-  assert.equal(scope.fieldSelectorText, "Conservar borrador"); assert.equal(scope.fieldSelectorSaveBusyRef.current, false);
-  f.fail(false); await scope.exports.saveForm();
-  assert.equal(f.saved.length, 1); assert.equal(f.idsCreated, 1); assert.equal(f.saved[0].id, "go_slot_1");
+  const attempts = [], ui = await f.editor(draft => { attempts.push(draft.id); return scope.saveNoteDraft(draft); });
+  try {
+    await ui.run(() => ui.hosts.get("note-title").onChangeText("Conservar borrador"));
+    await ui.run(() => ui.hosts.get("note-content").onChangeText("No perder"));
+    f.fail(true); await ui.tap("unified-note-save"); await ui.idle();
+    assert.equal(f.saved.length, 0); assert.ok(ui.hosts.has("note-save-error"));
+    assert.equal(ui.hosts.get("note-title").value, "Conservar borrador");
+    assert.equal(ui.hosts.get("unified-note-save").disabled, false);
+    f.fail(false); await ui.tap("unified-note-save"); await ui.idle();
+    assert.equal(f.saved.length, 1); assert.equal(f.saved[0].id, attempts[0]);
+    assert.deepEqual(attempts, [attempts[0], attempts[0]]);
+  } finally { await ui.close(); }
 });
 
 test("a different account cannot save the previous account's task or adopt its draft", async () => {
   const f = flowFixture(); const { scope } = f;
-  await scope.openCalendarSlotTask("2026-10-09", "10:00"); scope.fieldSelectorText = "Privado";
-  f.user("account-b"); await scope.exports.saveForm();
-  assert.equal(f.writes, 0); assert.equal(f.saved.length, 0);
-  scope.exports.sessionChanged();
-  assert.equal(scope.fieldSelectorOpen, false); assert.equal(scope.fieldSelectorText, "");
+  await scope.openCalendarSlotTask("2026-10-09", "10:00");
+  const ui = await f.editor();
+  try {
+    await ui.run(() => ui.hosts.get("note-content").onChangeText("Privado"));
+    f.user("account-b"); await ui.tap("unified-note-save"); await ui.idle();
+    assert.equal(f.writes, 0); assert.equal(f.saved.length, 0);
+    assert.ok(ui.hosts.has("note-save-error"));
+    scope.exports.sessionChanged();
+    await ui.render({ scope: { userId: "account-b", context: "live:USER" } });
+    assert.equal(ui.hosts.get("note-content").value, "");
+    assert.ok(ui.calls.some(call => call[0] === "close"));
+  } finally { await ui.close(); }
+  assert.equal(scope.fieldSelectorOpen, false);
   assert.equal(scope.calendarSlotDraftRef.current, null); assert.equal(scope.calOpen, true);
 });
 test("anonymous creation and a cancelled pending opening never create an unowned record", async () => {
   const f = flowFixture(); f.user(null);
   await f.scope.openCalendarSlotTask("2026-10-09", "10:00");
-  assert.equal(f.scope.fieldSelectorOpen, false); assert.equal(f.writes, 0);
+  assert.equal(f.scope.notesOpen, false); assert.equal(f.scope.fieldSelectorOpen, false); assert.equal(f.writes, 0);
   f.user("account-a");
   const opening = f.scope.openCalendarSlotTask("2026-10-09", "10:00");
   f.scope.exports.sessionChanged(); await opening;
-  assert.equal(f.scope.fieldSelectorOpen, false); assert.equal(f.writes, 0);
+  assert.equal(f.scope.notesOpen, false); assert.equal(f.scope.fieldSelectorOpen, false); assert.equal(f.writes, 0);
+});
+
+test("slots wait for a matching verified note scope and cannot replace an already open note", async () => {
+  for (const identity of [{ ready: false, scope: { userId: "account-a", context: "live:USER" } }, { ready: true, scope: null }, { ready: true, scope: { userId: "account-b", context: "live:USER" } }]) {
+    const f = flowFixture(); f.scope.noteIdentityRef.current = identity;
+    await f.scope.openCalendarSlotTask("2026-10-09", "10:00");
+    assert.equal(f.scope.notesOpen, false); assert.equal(f.writes, 0);
+    assert.ok(f.calls.some(call => call[0] === "toast"));
+  }
+  const f = flowFixture(); f.scope.notesOpen = true;
+  const original = f.scope.unifiedNoteSeed = { title: "Borrador abierto" };
+  await f.scope.openCalendarSlotTask("2026-10-09", "10:00");
+  assert.equal(f.scope.unifiedNoteSeed, original);
+  assert.equal(f.calls.some(call => call[0] === "setUnifiedNoteSeed"), false);
 });
 
 for (const viewMode of ["dia", "semana", "mes_lineal"]) {
@@ -246,9 +303,14 @@ test("calendar ownership refresh hides foreign and unowned tasks, including late
 test("slot notes with list-like text still persist their authenticated owner", async () => {
   const f = flowFixture(); const { scope } = f;
   await scope.openCalendarSlotTask("2026-10-09", "10:30");
-  scope.fieldSelectorText = "Lista compra"; scope.fieldSelectorDetail = "- Leche\n- Pan";
-  await scope.exports.saveForm();
-  assert.equal(f.saved.length, 1); assert.equal(f.saved[0].ownerUserId, "account-a");
+  const ui = await f.editor();
+  try {
+    await ui.run(() => ui.hosts.get("note-title").onChangeText("Lista compra"));
+    await ui.run(() => ui.hosts.get("note-content").onChangeText("- Leche\n- Pan"));
+    await ui.tap("unified-note-save"); await ui.idle();
+    assert.equal(f.saved.length, 1); assert.equal(f.saved[0].ownerUserId, "account-a");
+    assert.equal(f.saved[0].note.content, "- Leche\n- Pan");
+  } finally { await ui.close(); }
 });
 test("bulk actions ignore selected ids that are no longer in the authorized calendar", () => {
   const app = boardFixture({ now: "2026-10-08T08:00:00" });

@@ -4275,6 +4275,7 @@ function HomeScreenContent() {
   const [unifiedNoteInitial,setUnifiedNoteInitial]=useState<GoEntry|null>(null);
   const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;title?:string;content?:string;toolsOpen?:boolean;confirmSchedule?:boolean}>({});
   const unifiedNoteOriginRef=useRef<UnifiedNoteOrigin>("landing");
+  const listNoteLayerBackRef=useRef<(() => boolean)|null>(null);
   const unifiedNoteCache=useRef<{scope:string;draft:UnifiedNoteDraft}|null>(null);
   const unifiedNoteEditCache=useRef(new Map<string,UnifiedNoteDraft>());
   const openUnifiedNote=(entry:GoEntry,seed:typeof unifiedNoteSeed={},origin:UnifiedNoteOrigin="landing")=>{
@@ -4286,6 +4287,7 @@ function HomeScreenContent() {
     setUnifiedNoteInitial(null);setUnifiedNoteSeed(seed);setNotesOpen(true);
   }
   function openQuickNoteFrom(origin:Extract<UnifiedNoteOrigin,"calendar"|"list">,kind:"NOTA_INTERNA"|"NOTA_EXTERNA",title:string,dateISO?:string){
+    setCalAddOpen(false);setCalQuickCreateOpen(false);setQuickCreateOpen(false);
     // An external note created while a GO is actively being composed belongs
     // to that GO; preserve its established attachment flow and permissions.
     if(kind==="NOTA_EXTERNA"&&(isActivelyCreating||categorySelected)){
@@ -4293,6 +4295,29 @@ function HomeScreenContent() {
       return;
     }
     openUnifiedNoteComposer({title,...(dateISO?{dateISO}:{})},origin);
+  }
+  function openCalendarNote(){
+    Haptics.selectionAsync().catch(()=>{});
+    setCalConfigVisible(false);
+    openQuickNoteFrom("calendar","NOTA_INTERNA","",dateISODraft||formatISODate(getToday()));
+  }
+  function openCalendarDayNote(selectedDateISO:string){
+    Haptics.selectionAsync().catch(()=>{});
+    openQuickNoteFrom("calendar","NOTA_INTERNA","",selectedDateISO);
+  }
+  function openListNote(){
+    Haptics.selectionAsync().catch(()=>{});
+    setQuickCreateText("");
+    openQuickNoteFrom("list","NOTA_INTERNA","");
+  }
+  function openListSavedNote(entry:GoEntry){
+    if(!noteDocument(entry)&&!(entry.kind==="sent"&&["TAREA","TAREA_INTERNA"].includes(entry.type||"")
+      &&(isGoNoteReminderTarget(entry)||["nota_interna","nota_externa"].includes(entry.intentKey))))return false;
+    const identity=noteIdentityRef.current;
+    if(!identity.ready||!identity.scope||!noteInScope(entry,identity.scope)){
+      showToast("No se puede verificar la cuenta y el contexto de esta nota.","error");return true;
+    }
+    openUnifiedNote(entry,{},"list");return true;
   }
   function handleUnifiedNoteSaved(entry:GoEntry,notice:string){
     const origin=unifiedNoteOriginRef.current;
@@ -8620,7 +8645,7 @@ function HomeScreenContent() {
   };
 
   const openCalendarSlotTask = async (slotDateISO: string, slotTime: string) => {
-    if (fieldSelectorOpen || calendarSlotDraftRef.current || calendarSlotOpeningRef.current || calendarSlotSavingRef.current) return;
+    if (notesOpen || fieldSelectorOpen || calendarSlotDraftRef.current || calendarSlotOpeningRef.current || calendarSlotSavingRef.current) return;
     const request = ++calendarSlotRequestRef.current;
     calendarSlotOpeningRef.current = true;
     try {
@@ -8632,8 +8657,13 @@ function HomeScreenContent() {
       }
       await assertTaskUser(ownerUserId);
       if (request !== calendarSlotRequestRef.current) return;
-      calendarSlotDraftRef.current = { ownerUserId, actionContext: completionIdentity.scope?.userId===ownerUserId ? completionIdentity.scope.context : undefined };
-      openFieldSelector("NOTA_INTERNA", "", "", slotDateISO, slotTime);
+      const identity=noteIdentityRef.current;
+      if(!identity.ready||!identity.scope||identity.scope.userId!==ownerUserId){
+        showToast("Espera a que GO verifique tu cuenta y contexto antes de crear la nota.","error");
+        return;
+      }
+      setCalAddOpen(false);setCalQuickCreateOpen(false);
+      openUnifiedNoteComposer({destination:"calendar",dateISO:slotDateISO,time:slotTime},"calendar");
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), "error");
     } finally {
@@ -20302,13 +20332,7 @@ function HomeScreenContent() {
                 onOpenMoveFlow={openMoveFlow}
                 onDropBooking={(entry,destination)=>dropBookingProposal(entry,destination,entry.businessBooking?"business":"customer")}
                 onCreateTaskAtTime={openCalendarSlotTask}
-                onAddEntry={(dateISO) => {
-                  // Regla de flujo V1: solo abrir flujo de tarea si hay contacto seleccionado
-                  const _hasContactAdd = !!(contactName.trim() || phone.trim());
-                  if (!_hasContactAdd) return;
-                  setCalAddDateISO(dateISO);
-                  setCalAddOpen(true);
-                }}
+                onAddEntry={openCalendarDayNote}
                 onSelectDay={(dateISO) => {
                   Haptics.selectionAsync();
                   const todayISOCal = formatISODate(getToday());
@@ -20517,9 +20541,10 @@ function HomeScreenContent() {
               {/* NUEVA TAREA */}
               {!calQuickCreateOpen && (
                 <TouchableOpacity
+                  testID="calendar-notes-open"
                   accessibilityRole="button"
-                  accessibilityLabel={t("new_task_label")}
-                  onPress={() => { Haptics.selectionAsync(); setCalQuickCreateOpen(true); }}
+                  accessibilityLabel={lang === "en" ? "Notes" : "Notas"}
+                  onPress={openCalendarNote}
                   activeOpacity={0.7}
                   hitSlop={2}
                   style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(255,255,255,0.14)", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.55)", alignItems: "center", justifyContent: "center" }}
@@ -21820,13 +21845,14 @@ function HomeScreenContent() {
         </View>
       </BottomSheet>
 
-      {!calOpen && renderUnifiedNoteEditor()}
+      {!calOpen && !listOpen && renderUnifiedNoteEditor()}
 
       {/* LISTADO GLOBAL — vista de todos los GO */}
       <BottomSheet
         visible={listOpen}
+        modalOverlay={notesOpen ? <GoScreenHost registerBack={handler=>{listNoteLayerBackRef.current=handler;}}>{renderUnifiedNoteEditor()}</GoScreenHost> : undefined}
         onPanelHeightChange={setOverlayPanelHeight}
-        onClose={() => { setListOpen(false); setLlamadasListOpen(false); setListMinimized(false); setListFiltersHidden(false); }}
+        onClose={() => { if(listNoteLayerBackRef.current?.())return;setListOpen(false); setLlamadasListOpen(false); setListMinimized(false); setListFiltersHidden(false); }}
         // Gesto de deslizar hacia abajo en dos niveles:
         //   1.er deslizamiento (filtros visibles) → oculta menús secundarios, fichas siguen arriba.
         //   2.º deslizamiento (filtros ya ocultos) → cierra el listado completo.
@@ -22752,7 +22778,10 @@ function HomeScreenContent() {
                   >
                     {/* BOTÓN + CREACIÓN RÁPIDA */}
                     <Pressable
-                      onPress={() => { Haptics.selectionAsync(); setQuickCreateOpen((v) => !v); }}
+                      testID="list-notes-open"
+                      accessibilityRole="button"
+                      accessibilityLabel={lang === "en" ? "Notes" : "Notas"}
+                      onPress={openListNote}
                       hitSlop={6}
                       style={({ pressed }) => ({
                         width: BTN, height: BTN,
@@ -23071,7 +23100,9 @@ function HomeScreenContent() {
                     borderRadius={16}
                   >
                   <Pressable
+                    testID={"list-entry-card-"+g.id}
                     onPress={() => {
+                      if(openListSavedNote(g))return;
                       // GO_BOOKING: abrir tarjeta de detalle ampliada encima del calendario
                       if ((g as any).type === "GO_BOOKING") {
                         Haptics.selectionAsync().catch(() => {});
@@ -23143,8 +23174,10 @@ function HomeScreenContent() {
                       </View>
                       {/* TÍTULO — ocupa todo el espacio restante hasta el checkbox */}
                       <TouchableOpacity
+                        testID={"list-entry-title-"+g.id}
                         activeOpacity={0.75}
                         onPress={() => {
+                          if(openListSavedNote(g))return;
                           Haptics.selectionAsync();
                           // GO_BOOKING: abrir tarjeta de detalle ampliada
                           if ((g as any).type === "GO_BOOKING") {

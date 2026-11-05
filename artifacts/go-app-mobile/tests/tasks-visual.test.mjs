@@ -25,13 +25,25 @@ function compile(text) {
 const compactFormatter = find(home, node => ts.isFunctionDeclaration(node) && node.name?.text === 'formatCompactProposalSlot');
 assert.ok(compactFormatter, 'use the actual compact slot formatter');
 const listCode = compile(`${compactFormatter.getText(home)}\ntree = (${sheet('listOpen').getText(home)});`);
-const notesCode = compile(`tree = (${sheet('notesOpen').getText(home)});`);
+const routeNames = ['openUnifiedNote', 'openUnifiedNoteComposer', 'openQuickNoteFrom', 'openListNote', 'openListSavedNote'];
+const routes = routeNames.map(name => {
+  const node = find(home, node => (ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node)) && node.name?.getText(home) === name);
+  assert.ok(node, `execute the real ${name} route`);
+  return { name, node, code: ts.isFunctionDeclaration(node) ? node.getText(home) : node.initializer.getText(home) };
+});
 const translationsContext = { exports: {} };
 vm.runInNewContext(compile(readFileSync('i18n/translations.ts', 'utf8')), translationsContext);
 const translations = translationsContext.exports.translations;
 const completionContext = { exports: {} };
 vm.runInNewContext(compile(readFileSync('lib/goActionCompletion.ts', 'utf8')), completionContext);
 const completionModel = completionContext.exports;
+const noteContext = { exports: {} }, toolsContext = { exports: {} };
+vm.runInNewContext(compile(readFileSync('lib/unifiedNotes.ts', 'utf8')), noteContext);
+vm.runInNewContext(compile(readFileSync('lib/goNoteTools.ts', 'utf8')), toolsContext);
+const noteModel = noteContext.exports;
+const presentationContext = { exports: {} }, policyContext = { exports: {} };
+vm.runInNewContext(compile(readFileSync('data/goEntryPresentation.ts', 'utf8')), presentationContext);
+vm.runInNewContext(compile(readFileSync('data/reservationCardPolicy.ts', 'utf8')), policyContext);
 function nodes(tree, predicate) {
   if (!tree || typeof tree !== 'object') return [];
   if (Array.isArray(tree)) return tree.flatMap(c => nodes(c, predicate));
@@ -47,14 +59,20 @@ function fixture(lang = 'es', overrides = {}) {
   const calls = [];
   const completionDocument = completionModel.emptyCompletionDocument({ userId: 'tasks-fixture', context: 'live:USER' });
   const React = { Fragment: 'Fragment', createElement: (type, props, ...children) => ({ type, props: { ...props, children: children.flat(Infinity) } }) };
-  const hosts = Object.fromEntries(['BottomSheet', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable', 'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(x => [x, x]));
+  const hosts = Object.fromEntries(['BottomSheet', 'GoScreenHost', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable', 'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(x => [x, x]));
   const context = { ...hosts, React, Date, Math, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""}, console,
     t: key => { assert.equal(typeof translations[lang][key], 'string', key); return translations[lang][key]; },
     listOpen: true, listSwipeStepAllowed: true, llamadasListOpen: false, listMinimized: false, listFiltersHidden: false, listFilter: 'todos', typeFilter: 'todos', activityFilter: 'todas',
     quickCreateOpen: false, quickCreateKbVisible: false, quickCreateText: '', paddingBottom: 34, screenBgColors: {}, listGoSize: 'medio', goSortOrder: 'asc',
+    calAddOpen: false, calQuickCreateOpen: false, fieldSelectorOpen: false, isActivelyCreating: false, categorySelected: false,
+    unifiedNoteOriginRef: { current: 'landing' }, unifiedNoteInitial: null, unifiedNoteSeed: {}, listNoteLayerBackRef: { current: null },
+    noteIdentityRef: { current: { ready: true, scope: { userId: 'tasks-fixture', context: 'live:USER' } } },
+    noteDocument: noteModel.noteDocument, noteInScope: noteModel.noteInScope, isGoNoteReminderTarget: toolsContext.exports.isGoNoteReminderTarget,
     goLog: entries, handedness: 'right', allExpanded: false, expandedId: null, isBusinessMode: false, isUserMode: true, altSlotsEntry: null,
     mergeCompletionEntries: completionModel.mergeCompletionEntries,
     actionCompletion: { candidates: [], status: entry => completionModel.completionDecision(entry, completionDocument)?.status },
+    ...presentationContext.exports, reservationCardPolicy: policyContext.exports.reservationCardPolicy, ENTRY_COLORS: policyContext.exports.GO_ENTRY_COLORS,
+    canResolveEntry: () => false, renderEntryMicroActions: entry => ({ type: 'MicroActions', props: { entry, children: [] } }),
     INTENTS: [{ key: 'comida', color: '#f97316', icon: 'disc' }, { key: 'deporte', color: '#22c55e', icon: 'activity' }], TRASH_DISPLAY_LIMIT: 50,
     slotOf: e => e.deleted || e.estado === 'rechazado' ? 'papelera' : e.estado === 'aceptado' ? 'aceptado' : 'pendiente',
     noTranslate: {}, localizeLabel: x => x, displayContact: name => name || '', getGoActivityKey: g => g.intentKey,
@@ -62,38 +80,39 @@ function fixture(lang = 'es', overrides = {}) {
     noteInputGoId: null, noteInputDraft: '', pendingUndos: {}, goChats: {}, speakingMsgId: null, place: '', sharedChatKey: g => g.id, currentReceivedIdRef: { current: null }, proposalReturnRef: { current: null }, calFlow: {}, marketplacePedidos: [], lastTapRef: { current: { id: null, t: 0 } }, quickNoteAlarm: false,
     Keyboard: { dismiss: () => calls.push(['dismiss']) }, AsyncStorage: { setItem: (...args) => { calls.push(['store', ...args]); return Promise.resolve(); } },
     Haptics: { selectionAsync: () => Promise.resolve(), notificationAsync: () => Promise.resolve(), NotificationFeedbackType: { Warning: 'warning' } },
-    date: '', time: '', notesOpen: true, notaDateISO: null, notaTime: '', quickNoteText: '', quickNoteDetail: '', notaAudioRecording: false, notaAudioUri: null,
-    notaKbVisible: false, notaSaving: false, notaTextRef: { current: null },
-    noteVoice: { status: 'idle', error: '', notice: '', focus() {} }, noteReminderPickerOpen: false,
-    quickNoteReminderMinutes: null, lang, GoNoteReminderPicker: 'GoNoteReminderPicker',
+    date: '', time: '', notesOpen: false, lang,
     ...overrides,
   };
   const setterNames = new Set();
   const collect = n => { if (ts.isIdentifier(n) && /^set[A-Z]/.test(n.text) && !['setTimeout', 'setInterval'].includes(n.text)) setterNames.add(n.text); ts.forEachChild(n, collect); };
-  for (const name of ['listOpen', 'notesOpen']) collect(sheet(name));
+  collect(sheet('listOpen'));
+  for (const route of routes) collect(route.node);
   for (const name of setterNames) context[name] = value => { calls.push([name, value]); const field = name.slice(3, 4).toLowerCase() + name.slice(4); context[field] = typeof value === 'function' ? value(context[field]) : value; };
   for (const name of ['updateGoStatus', 'acceptProposal', 'rejectProposal', 'openProposalFromList', 'openFieldSelector', 'showToast', 'scheduleUndo', 'rejectGo', 'toggleGoSortOrder', 'sendExpandedNote', 'toggleNotaRecording', 'resetNotaAudio', 'saveGoNoteOnly', 'sendGoNote', 'applyAlternativeSlot', 'sendSuggestChangeFromCal', 'speakMsg', 'undoStatusChange', 'updateLogStatus']) context[name] = (...args) => calls.push([name, ...args]);
   context.cycleGoSlot = (id, direction) => { calls.push(['cycleGoSlot', id, direction]); return direction === 'advance' ? 'aceptado' : 'pendiente'; };
-  return { context, calls, render: (name = 'listOpen') => { vm.runInNewContext(name === 'listOpen' ? listCode : notesCode, context); return context.tree; } };
+  context.renderUnifiedNoteEditor = () => ({ type: 'SharedNoteEditor', props: { children: [], visible: context.notesOpen, initial: context.unifiedNoteInitial, seed: context.unifiedNoteSeed } });
+  for (const route of routes) vm.runInNewContext(compile(`globalThis.${route.name} = ${route.code};`), context);
+  return { context, calls, render: () => { vm.runInNewContext(listCode, context); return context.tree; } };
 }
 
 for (const lang of ['es', 'en']) {
-  test(`Tasks menus, titles and existing note creation follow ${lang}`, () => {
+  test(`Tasks menus keep ${lang} labels and their real note button opens the shared editor directly`, () => {
     const f = fixture(lang), tree = f.render(), footer = tree.props.footer;
     assert.equal(tree.props.title, lang === 'es' ? 'GO · TAREAS' : 'GO · TASKS');
     const labels = texts(footer);
     for (const k of ['tasks_calls', 'label_task_internal', 'stat_tasks_label', 'tasks_go_internal', 'filter_todos']) assert.ok(labels.includes(translations[lang][k]), k);
-    const noteButton = nodes(footer, n => n.type === 'Pressable' && nodes(n, x => x.type === 'MaterialCommunityIcons' && x.props.name === 'note-edit-outline').length === 1)[0];
+    const noteButton = nodes(footer, n => n.props.testID === 'list-notes-open')[0];
     assert.ok(noteButton);
     noteButton.props.onPress();
-    assert.equal(f.context.quickCreateOpen, true);
-    const next = f.render().props.footer;
-    assert.ok(texts(next).includes(translations[lang].new_task_label.toUpperCase()));
-    childWith(next, translations[lang].label_task_internal.toUpperCase()).props.onPress();
-    assert.deepEqual(f.calls.at(-1), ['openFieldSelector', 'NOTA_INTERNA', '']);
-    f.context.quickCreateOpen = true; f.context.quickCreateText = 'Título propio';
-    childWith(f.render().props.footer, translations[lang].label_task_external.toUpperCase()).props.onPress();
-    assert.deepEqual(f.calls.at(-1), ['openFieldSelector', 'NOTA_EXTERNA', 'Título propio']);
+    assert.equal(f.context.quickCreateOpen, false); assert.equal(f.context.fieldSelectorOpen, false);
+    assert.equal(f.context.notesOpen, true); assert.equal(f.context.listOpen, true);
+    assert.equal(f.context.unifiedNoteOriginRef.current, 'list');
+    assert.deepEqual(JSON.parse(JSON.stringify(f.context.unifiedNoteSeed)), { title: '' });
+    assert.equal(f.calls.some(call => call[0] === 'openFieldSelector'), false);
+    const next = f.render();
+    assert.ok(!texts(next.props.footer).includes(translations[lang].new_task_label.toUpperCase()));
+    const editor = nodes(next.props.modalOverlay, n => n.type === 'SharedNoteEditor')[0];
+    assert.ok(editor); assert.equal(editor.props.visible, true);
   });
   test(`Proposal cards in ${lang} keep dates and actions in their compact layout`, () => {
     for (const handedness of ['left', 'right']) {
@@ -108,7 +127,7 @@ for (const lang of ['es', 'en']) {
       const indicatorIndex = upperButtons.findIndex(n => texts(n) === label);
       assert.ok(indicatorIndex >= 0);
       const orange = upperButtons[indicatorIndex + 1];
-      assert.equal(orange.props.style.backgroundColor, '#f97316');
+      assert.equal(orange.props.style.backgroundColor, policyContext.exports.GO_ENTRY_COLORS.change);
       orange.props.onPress({ stopPropagation() {} });
       assert.deepEqual(f.calls.at(-1), ['updateGoStatus', 'food']);
       assert.equal(card.props.style.paddingVertical, 4);
@@ -133,15 +152,31 @@ for (const lang of ['es', 'en']) {
       assert.ok(f.calls.some(c => c[0] === 'cycleGoSlot' && c[1] === 'food' && c[2] === 'advance'));
     }
   });
-  test(`Notes labels and audio/reminder actions follow ${lang}`, () => {
-    const f = fixture(lang), tree = f.render('notesOpen'), labels = texts(tree);
-    for (const k of ['board_title_label', 'label_task_internal', 'tasks_internal_short', 'tasks_external_short']) assert.ok(labels.includes(translations[lang][k].toUpperCase()), k);
-    const a11y = nodes(tree, n => n.props?.accessibilityLabel).map(n => n.props.accessibilityLabel);
-    assert.ok(a11y.includes(translations[lang].tasks_record_audio));
-    assert.ok(a11y.includes(translations[lang].tasks_enable_reminder));
-    assert.ok(a11y.includes(translations[lang].close));
+}
+
+for (const type of ['TAREA_INTERNA', 'TAREA']) for (const target of ['card', 'title']) {
+  test(`Listados ${target} opens saved ${type} in the shared editor without changing its state`, () => {
+    const note = { id: 'saved-note', kind: 'sent', type, intentKey: type === 'TAREA' ? 'nota_externa' : 'nota_interna', intentLabel: 'Nota conservada', notes: 'Mi texto', detail: 'Contenido completo', ownerUserId: 'tasks-fixture', taskContext: 'live:USER', estado: 'pendiente', dateISO: '', time: '' };
+    const f = fixture('es', { goLog: [note] });
+    const card = nodes(f.render(), n => n.type === 'SwipeableRow')[0].props.children[0];
+    const button = target === 'card' ? card : nodes(card, n => n.type === 'TouchableOpacity' && n.props.onPress?.toString().includes('openListSavedNote'))[0];
+    assert.ok(button); button.props.onPress();
+    assert.equal(f.context.notesOpen, true); assert.equal(f.context.listOpen, true);
+    assert.equal(f.context.unifiedNoteInitial, note); assert.equal(f.context.unifiedNoteOriginRef.current, 'list');
+    assert.equal(f.context.expandedId, null); assert.equal(note.estado, 'pendiente');
+    assert.equal(f.calls.some(call => ['openFieldSelector', 'updateGoStatus', 'updateLogStatus'].includes(call[0])), false);
   });
 }
+
+test('Listados refuses to open a saved note from a different owner or context', () => {
+  for (const [ownerUserId, taskContext] of [['other-account', 'live:USER'], ['tasks-fixture', 'demo:USER']]) {
+    const note = { id: 'foreign-note', kind: 'sent', type: 'TAREA_INTERNA', intentKey: 'nota_interna', intentLabel: 'Privada', notes: 'Otro borrador', ownerUserId, taskContext, estado: 'pendiente' };
+    const f = fixture('es', { goLog: [note] });
+    nodes(f.render(), n => n.type === 'SwipeableRow')[0].props.children[0].props.onPress();
+    assert.equal(f.context.notesOpen, false); assert.equal(f.context.unifiedNoteInitial, null);
+    assert.equal(f.context.expandedId, null); assert.ok(f.calls.some(call => call[0] === 'showToast'));
+  }
+});
 
 const visibilityEffect = find(home, node => ts.isCallExpression(node) && node.expression.getText(home) === 'useEffect' && node.arguments[0]?.getText(home).includes('setListGoVisible'));
 function visibility(overrides = {}) {
