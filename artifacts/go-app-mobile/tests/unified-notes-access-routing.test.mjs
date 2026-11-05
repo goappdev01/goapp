@@ -372,7 +372,8 @@ function goComposerFixture() {
     isActivelyCreating: true, goNoteContext: null, goNoteContextRef: { current: null },
     goAttachmentAllowedRef: { current: true },
     makeUid: () => 'active-go-' + ++draftNumber,
-    TouchableOpacity: 'TouchableOpacity', Feather: 'Feather', Text: 'Text',
+    TouchableOpacity: 'TouchableOpacity', Feather: 'Feather', Text: 'Text', StatusPill: 'StatusPill',
+    goButtonColor: '#1e40af', intentTextOnWhite: '#1e40af',
     proposalModeRef: { current: false }, genericMode: false, activeLabelUpper: 'REUNIÓN', selectedSugerencia: null,
     notesDraft: '', place: '', coords: null, date: '15/01/2027', time: '18:00', duration: '', shareRoute: false, t: key => key,
   });
@@ -403,6 +404,41 @@ test('ADMIN can attach one existing standalone note while preserving its own des
   assert.equal(f.ctx.stageGoNote(entry), false);
 });
 
+test('both GO note states use the same live category pill as Contacto, Ubicación and Fecha', () => {
+  const f = goComposerFixture(), { ctx } = f;
+  Object.assign(ctx, { View: 'View', styles: { statusPill: { maxWidth: '100%', gap: 6 },
+    statusPillText: { fontSize: 12, fontWeight: '700', maxWidth: 220 } } });
+  loadFunctions(ctx, ['StatusPill', 'isLightHex']);
+  const palette = valueOf(ctx, findAll(node => ts.isVariableDeclaration(node) && node.name.getText(ast) === 'GO_COLORS')[0].initializer);
+  const contrast = findAll(node => ts.isVariableDeclaration(node) && node.name.getText(ast) === 'intentTextOnWhite')[0].initializer;
+  const entry = model.buildNoteEntry({ ...model.noteDraft(), title: 'Nota conservada', destination: 'pending', content: 'Texto íntegro' }, f.scope);
+  ctx.getGoLogSnapshot = () => [entry];
+  for (const attached of [false, true]) {
+    if (attached) assert.equal(ctx.stageGoNote(entry), true);
+    for (const category of Object.keys(palette)) for (const handedness of ['left', 'right']) {
+      Object.assign(ctx, { handedness, activeIntentColor: palette[category], goButtonColor: palette[category] });
+      ctx.intentTextOnWhite = valueOf(ctx, contrast);
+      const button = ctx.renderComposeGoNote();
+      const pill = nodes(button, node => node.type === ctx.StatusPill)[0];
+      assert.equal(pill.props.color, palette[category]);
+      assert.equal(pill.props.fg, ctx.intentTextOnWhite);
+      assert.equal(pill.props.wrapText, true);
+      assert.equal(pill.props.text, attached ? 'NOTA ADJUNTADA · EDITAR' : 'Adjuntar nota GO');
+      assert.equal(pill.props.icon, attached ? 'edit-2' : 'paperclip');
+      const rendered = ctx.StatusPill(pill.props);
+      const reference = ctx.StatusPill({ icon: 'user', text: 'Contacto', color: ctx.goButtonColor, fg: ctx.intentTextOnWhite });
+      assert.deepEqual(h.plain(rendered.props.style), h.plain(reference.props.style));
+      assert.equal(rendered.children[0].props.color, reference.children[0].props.color);
+      assert.equal(rendered.children[1].props.numberOfLines, undefined, 'full note label can wrap within narrow iPhones');
+      assert.equal(reference.children[1].props.numberOfLines, 1, 'other pills preserve their approved rendering');
+      assert.equal(button.props.style.maxWidth, '100%');
+      assert.equal(button.props.style.flexShrink, 1);
+      assert.equal(button.props.style.minHeight, 44);
+      if (attached) assert.equal(ctx.currentGoAttachment().detail, 'Texto íntegro');
+    }
+  }
+});
+
 test('the real GO compose button creates one attached note, reopens it, and sends its updated text only', async () => {
   const disk = await h.diskFixture();
   let ui;
@@ -412,7 +448,7 @@ test('the real GO compose button creates one attached note, reopens it, and send
     Object.assign(ctx, { getGoLogSnapshot: () => disk.store.getGoLogSnapshot(), saveUnifiedNote: disk.api().saveUnifiedNote,
       watchNoteReminderReceipt() {} });
     loadFunctions(ctx, ['saveNoteDraft']);
-    const label = control => nodes(control, node => node.type === 'Text')[0].children[0];
+    const label = control => nodes(control, node => node.type === 'StatusPill')[0].props.text;
     assert.equal(label(ctx.renderComposeGoNote()), 'Adjuntar nota GO');
     const open = ctx.renderComposeGoNote().props.onPress;
     open(); open();

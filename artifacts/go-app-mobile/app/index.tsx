@@ -4431,11 +4431,10 @@ function HomeScreenContent() {
     const attached = !!currentGoAttachmentEntry(goNoteContext);
     return <TouchableOpacity accessibilityRole="button" testID="compose-go-note" onPress={openComposeGoNote}
       accessibilityLabel={attached ? (lang === "en" ? "Note attached, open and edit" : "Nota adjuntada, abrir y editar") : undefined}
-      style={{ flexDirection: "row", alignItems: "center", gap: 5, minHeight: 44, paddingHorizontal: 8 }}>
-      <Feather name={attached ? "edit-2" : "paperclip"} size={14} color="#93c5fd" />
-      <Text style={{color:"#93c5fd",fontWeight:attached?"800":"500"}}>{attached
+      style={{ maxWidth: "100%", flexShrink: 1, minHeight: 44, justifyContent: "center" }}>
+      <StatusPill icon={attached ? "edit-2" : "paperclip"} color={goButtonColor} fg={intentTextOnWhite} wrapText text={attached
         ? (lang === "en" ? "NOTE ATTACHED · EDIT" : "NOTA ADJUNTADA · EDITAR")
-        : (lang === "en" ? "Attach note to GO" : "Adjuntar nota GO")}</Text>
+        : (lang === "en" ? "Attach note to GO" : "Adjuntar nota GO")} />
     </TouchableOpacity>;
   }
   function stageGoNote(entry: GoEntry) {
@@ -25683,17 +25682,19 @@ function StatusPill({
   text,
   color = "rgba(255,255,255,0.6)",
   fg,
+  wrapText = false,
 }: {
   icon: keyof typeof Feather.glyphMap;
   text: string;
   color?: string;
   fg?: string;
+  wrapText?: boolean;
 }) {
   const fgColor = fg ?? color;
   return (
     <View style={[styles.statusPill, { borderColor: color }]}>
       <Feather name={icon} size={12} color={fgColor} />
-      <Text style={[styles.statusPillText, { color: fgColor }]} numberOfLines={1}>
+      <Text style={[styles.statusPillText, { color: fgColor }, wrapText && { flexShrink: 1 }]} numberOfLines={wrapText ? undefined : 1}>
         {text}
       </Text>
     </View>
