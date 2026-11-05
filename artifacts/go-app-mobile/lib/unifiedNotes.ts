@@ -30,6 +30,13 @@ export const noteEntryDestination = (entry?: GoEntry | null): NoteDestination | 
 export const isArchivedNote = (entry: GoEntry) => noteDocument(entry)?.destination === "archive";
 export const noteInScope = (entry: GoEntry, scope: TaskScope) => entry.ownerUserId === scope.userId
   && (entry.taskContext ?? entry.actionContext ?? "live:USER") === scope.context;
+
+export function linkedNotesForEntry(entries: GoEntry[], parent: GoEntry, scope: TaskScope): GoEntry[] {
+  if (!noteInScope(parent, scope)) return [];
+  return entries.filter(entry => entry.id !== parent.id && !entry.deleted && entry.estado !== "rechazado"
+    && !!noteDocument(entry) && noteInScope(entry, scope)
+    && (entry.id === parent.attachedNoteId || entry.noteLinkedEntryId === parent.id));
+}
 export const validNoteTime=(value:string)=>/^([01]?\d|2[0-3]):[0-5]?\d$/.test(value);
 // Canonical durations from the optional four-digit hour / two-digit minute form.
 export const NOTE_MAX_DURATION_MINUTES=9999*60+59;

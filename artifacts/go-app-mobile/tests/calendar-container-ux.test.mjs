@@ -13,34 +13,6 @@ function evaluate(code, globals = {}) {
   const scope = { exports: {}, ...globals }; vm.runInNewContext(transpile(code), scope); return scope.exports;
 }
 
-for (const kind of ['NOTA_INTERNA', 'NOTA_EXTERNA']) {
-  test(kind + ': close the existing task layer without resetting the mounted calendar', () => {
-    const { scope, calls } = fixture(); const scroll = scope.scrollTarget;
-    scope.openFieldSelector(kind, 'Revisar piloto', '', '2027-02-28');
-    assert.equal(scope.calOpen, true); assert.equal(scope.fieldSelectorOpen, true); assert.equal(scope.fieldSelectorKind, kind);
-    assert.equal(scope.fsFilledValues.dateISO, '2027-02-28');
-    scope.dateISODraft = '2027-03-12'; scope.dateDraft = '12/03'; scope.calBgViewMode = 'dia'; scope.calBgViewMonth = '2027-03';
-    scope.qdReturnTimerRef.current = 77; scope.qdFlowActiveRef.current = true; scope.calFlow.isActive = true;
-    scope.onCancel = () => { scope.fieldSelectorOpen = true; };
-    scope.closeFieldSelectorPanel();
-    assert.equal(scope.fieldSelectorOpen, false); assert.equal(scope.calOpen, true);
-    assert.equal(scope.dateISODraft, '2027-02-28'); assert.equal(scope.dateDraft, 'Dom 28/02');
-    assert.equal(scope.calBgViewMode, 'mes_lineal'); assert.equal(scope.calBgViewMonth, '2027-02');
-    assert.equal(scope.scrollTarget, scroll); assert.equal(scope.todayToken, 7);
-    assert.equal(scope.calendarTaskContextRef.current, null); assert.equal(scope.qdFlowActiveRef.current, false);
-    assert.equal(scope.qdReturnTimerRef.current, null);
-    assert.ok(calls.some(call => call[0] === 'clearTimer' && call[1] === 77));
-    assert.ok(!calls.some(call => call[0] === 'setCalOpen'));
-  });
-}
-test('container exit cancels the task and closes Calendar without saving', () => {
-  const { scope, calls } = fixture();
-  scope.openFieldSelector('NOTA_INTERNA', 'Borrador', '', '2027-02-28'); scope.calFlow.isActive = true;
-  scope.exitCalendarContainer();
-  assert.equal(scope.fieldSelectorOpen, false); assert.equal(scope.calOpen, false);
-  assert.equal(scope.calConfigVisible, false); assert.equal(scope.calReservasOpen, false);
-  assert.ok(!calls.some(call => call[0] === 'saveCal'));
-});
 test('quick panel close preserves the day; container exit safely cancels an existing move', () => {
   const { scope, calls } = fixture(); scope.calQuickCreateOpen = true; scope.closeCalendarTaskPanel();
   assert.equal(scope.calQuickCreateOpen, false); assert.equal(scope.calOpen, true); assert.equal(scope.dateISODraft, '2027-02-28');
@@ -68,12 +40,6 @@ test('month navigation crosses years and targets the chosen date', () => {
   assert.equal(scope.dateISODraft, '2028-01-10'); assert.equal(scope.calBgViewMonth, '2028-01');
   assert.equal(scope.dateDraft, '2028-01-10'); assert.equal(scope.scrollTarget.dateISO, '2028-01-10');
 });
-test('closing month correction returns to the internal form without exiting Calendar', () => {
-  const { scope, calls } = fixture(); scope.openFieldSelector('NOTA_INTERNA', '', '', '2027-02-28');
-  scope.fieldSelectorOpen = false; scope.closeMonthGrid();
-  assert.equal(scope.fieldSelectorOpen, true); assert.equal(scope.calOpen, true); assert.ok(calls.some(call => call[0] === 'closeMonth'));
-});
-
 const byId = id => find(n => ts.isJsxAttribute(n) && n.name.getText(ast) === 'testID' && n.initializer?.text === id).parent.parent.parent;
 const nodes = (tree, predicate) => !tree || typeof tree !== 'object' ? [] :
   [...(predicate(tree) ? [tree] : []), ...(tree.children ?? []).flatMap(child => nodes(child, predicate))];
@@ -90,9 +56,9 @@ function renderFragment(node, globals = {}) {
 test('bottom controls emphasize RESERVAR, fit a narrow viewport and retain every action', () => {
   const calls = [];
   const tree = renderFragment(byId('calendar-actions'), {
-    GO_GOLD: '#C8A037', t: key => ({ new_task_label: 'Nueva tarea', cal_today_btn: 'HOY', biz_book_btn: 'RESERVAR' })[key],
+    GO_GOLD: '#C8A037', GO_ASSISTANT_LABEL: { color: '#FFFFFF' }, t: key => ({ new_task_label: 'Nueva tarea', cal_today_btn: 'HOY', biz_book_btn: 'RESERVAR' })[key],
     Haptics: { selectionAsync: async () => {}, impactAsync: async () => {}, ImpactFeedbackStyle: { Medium: 'medium', Heavy: 'heavy' } },
-    setCalQuickCreateOpen: value => calls.push(['task', value]), setCalScrollToTodayToken: update => calls.push(['today', update(7)]),
+    openCalendarNote: () => calls.push(['task', true]), setCalScrollToTodayToken: update => calls.push(['today', update(7)]),
     setShowBookingFromCal: value => calls.push(['book', value]), setDiagBookingOpen: value => calls.push(['diagnostics', value]),
     openAi: () => calls.push(['go']), startVoiceMode: () => calls.push(['voice']),
   });
@@ -134,39 +100,16 @@ test('root keeps hierarchical closes and overlays the original floats without re
   assert.deepEqual(nodes(demoTree, n => n.type === 'GoCloseButton').map(n => n.props.level), ['container']);
   assert.equal(nodes(demoTree, n => n.type === 'TouchableOpacity').length, 0, 'DEMO keeps its container exit without exposing the personal calendar shortcut');
 });
-test('one existing form is embedded in Calendar while the agenda stays mounted', () => {
-  const body = find(n => ts.isFunctionDeclaration(n) && n.name?.text === 'renderFieldSelector').getText(ast);
-  assert.equal((body.match(/<SelectorKeyboardFrame/g) ?? []).length, 1); assert.match(body, /if \(embedded\)/);
-  assert.match(body,/isNoteSelector \? KeyboardControllerAvoidingView : KeyboardAvoidingView/);
-  const agenda = byId('calendar-agenda-viewport');
-  assert.equal(agenda.parent.kind, ts.SyntaxKind.JsxElement, 'Agenda is always mounted, outside any conditional layer');
-  const call = find(n => ts.isCallExpression(n) && n.getText(ast) === 'renderFieldSelector(true)');
-  let modal = call.parent;
+test('the shared note editor is embedded in Calendar and the former task layer is absent', () => {
+  const call = find(n => ts.isCallExpression(n) && n.getText(ast) === 'renderUnifiedNoteEditor()');
+  let modal = call?.parent;
   while (modal && !(ts.isJsxElement(modal) && modal.openingElement.tagName.getText(ast) === 'Modal')) modal = modal.parent;
-  assert.ok(modal);
-  assert.equal(modal.openingElement.attributes.properties.find(n => n.name?.getText(ast) === 'visible').initializer.expression.getText(ast), 'calOpen');
-  assert.match(source, /!calendarTaskContextRef.current && renderFieldSelector\(false\)/);
+  assert.equal(modal?.openingElement.attributes.properties.find(n => n.name?.getText(ast) === 'visible').initializer.expression.getText(ast), 'calOpen');
+  assert.ok(!source.includes('renderFieldSelector('));
 });
-
-
 test('exiting month navigation never calls a stale creation callback', () => {
   const { scope, calls } = fixture(); scope.calFlow.step = 'nav'; scope.calFlow.isActive = true;
   scope.exitCalendarContainer();
   assert.equal(scope.calOpen, false); assert.ok(calls.some(call => call[0] === 'closeMonth'));
   assert.ok(!calls.some(call => call[0] === 'saveCal' || call[0] === 'cancelFlow'));
-});
-
-test("cancelling the existing date tool returns to the embedded task form", () => {
-  const { scope } = fixture(); scope.openFieldSelector("NOTA_INTERNA", "Piloto", "", "2027-02-28");
-  scope.isNoteSelector=true;scope.embedded=true;scope.noteCalendarAfterSelectorDismissRef={current:null};
-  let options;
-  scope.calFlow.open = value => { options = value; };
-  scope._handleCalFlowSave = () => {};
-  vm.runInContext(transpile("exports.openDateTool = " + declaration("openFechaHora")), scope);
-  scope.exports.openDateTool();
-  assert.equal(scope.fieldSelectorOpen, false); assert.equal(scope.calOpen, true);
-  assert.equal(options.initialDateISO, "2027-02-28");
-  options.onCancel();
-  assert.equal(scope.fieldSelectorOpen, true); assert.equal(scope.calOpen, true);
-  assert.equal(scope.calendarTaskContextRef.current.dateISO, "2027-02-28");
 });

@@ -70,9 +70,9 @@ function fixture(lang = 'es', overrides = {}) {
   }) };
   const hosts = Object.fromEntries(['BottomSheet', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable',
     'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(name => [name, name]));
-  const context = { ...hosts, React, Date, Math,lang,ENTRY_COLORS:colorContext.exports.GO_ENTRY_COLORS,entryIsReservation:presentationContext.exports.entryIsReservation,entryHeading:presentationContext.exports.entryHeading,canResolveEntry:()=>false, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""},
+  const context = { ...hosts, React, Date, Math,lang,ENTRY_COLORS:colorContext.exports.GO_ENTRY_COLORS,reservationCardPolicy:colorContext.exports.reservationCardPolicy,entryIsReservation:presentationContext.exports.entryIsReservation,entryHeading:presentationContext.exports.entryHeading,canResolveEntry:()=>false, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""},
     mergeCompletionEntries: completionContext.exports.mergeCompletionEntries,
-    actionCompletion: { candidates: [], status: () => undefined },
+    actionCompletion: { candidates: [], status: () => undefined }, noteIdentity: {ready:false}, renderLinkedNotes: () => null, listBookingDetail: undefined, notesOpen: false, openListNote() {}, openListSavedNote: () => false,
     t: key => { assert.equal(typeof translations[lang][key], 'string', key); return translations[lang][key]; },
     listOpen: true, listSwipeStepAllowed: true, llamadasListOpen: false, listMinimized: false,
     listFiltersHidden: false, listFilter: 'todos', typeFilter: 'todos', activityFilter: 'todas',
@@ -229,8 +229,8 @@ test('group contact uses its existing first participant and missing contact crea
 for (const [bookingStatus, labelKey, color] of [
   ['confirmada', 'status_confirmed', '#22c55e'],
   ['cambio_pendiente', 'floor_reservation_cambio_pendiente', '#FF8C00'],
-  ['cancelada', 'label_visit_cancelled_tag', '#FF0000'],
-  [undefined, 'status_confirmed', '#22c55e'],
+  ['cancelada', 'booking_state_cancelled', '#FF0000'],
+  [undefined, 'booking_state_pending', '#FFD700'],
 ]) test(`compact booking ${bookingStatus ?? 'default'} preserves professional/state and isolates its contact`, () => {
   for (const lang of ['es', 'en']) {
     const entry = freeze(sample({ type: 'GO_BOOKING', reservationId: 'booking-compact',
@@ -239,7 +239,7 @@ for (const [bookingStatus, labelKey, color] of [
     const contact = byId(card, 'go-proposal-contact-compact');
     assert.equal(nodes(card, node => node.props?.testID === 'go-proposal-contact-compact').length, 1);
     assert.equal(texts(card).split('ProAna').length - 1, 1, 'the original professional remains visible');
-    const statusLabel = translations[lang][labelKey].toUpperCase();
+    const statusLabel = translations[lang].biz_booking_intent_label.toUpperCase() + " · " + translations[lang][labelKey].toUpperCase();
     const status = nodes(card, node => node.type === 'Text' && texts(node) === statusLabel);
     assert.equal(status.length, 1, 'retain the existing localized booking-state pill and default');
     assert.equal(status[0].props.style.color, color);

@@ -314,22 +314,13 @@ for (const origin of ['list', 'calendar']) for (const destination of ['calendar'
   });
 }
 
-for (const active of ['isActivelyCreating', 'categorySelected']) {
-  test(`external notes retain direct GO attachment when ${active}, without mounting either form`, () => {
-    const f = fixture('list');
-    loadFunctions(f.ctx, ['openFieldSelector']);
-    f.ctx[active] = true;
-    f.ctx.openQuickNoteFrom('list', 'NOTA_EXTERNA', 'Avisar al cliente', '2027-01-15');
-    assert.equal(f.ctx.attachedExternalNote.title, 'Avisar al cliente');
-    assert.equal(f.ctx.attachedExternalNote.detail, '');
-    assert.equal(f.ctx.noteTaskDraftRef.current, null);
-    assert.equal(f.ctx.renderUnifiedNoteEditor().props.visible, false);
-    assert.equal(f.ctx.fieldSelectorOpen, false);
-    assert.equal(f.ctx.listOpen, true);
-    assert.ok(!f.calls.some(call => ['fieldSelectorOpen', 'notesOpen', 'quickCreateOpen', 'calQuickCreateOpen'].includes(call[0]) && call[1] === true));
-    assert.deepEqual(f.calls.filter(call => call[0] === 'remove-draft'), [['remove-draft', 'go_task_draft_v1']]);
-  });
-}
+test('a note opened from Listados while GO is active remains in the shared editor', () => {
+  const f = fixture('list');
+  f.ctx.isActivelyCreating = true;
+  f.ctx.openQuickNoteFrom('list', 'NOTA_EXTERNA', 'Avisar al cliente', '2027-01-15');
+  assertComposer(f, 'list', { title: 'Avisar al cliente', dateISO: '2027-01-15' });
+  assert.equal(f.ctx.fieldSelectorOpen, false);
+});
 
 test('an external note without an active GO still opens the shared editor with its supplied title and date', () => {
   const f = fixture('list');
@@ -366,3 +357,66 @@ for (const target of ['card', 'title']) {
     assert.equal(f.calls.filter(call => call[0] === 'toast' && call[2] === 'error').length, 1);
   });
 }
+
+test('administrator stages a saved note for GO and the send path reads only its scoped text', () => {
+  const f = fixture('landing');
+  const entry = model.buildNoteEntry({ ...model.noteDraft(), title: 'Aviso', destination: 'pending', content: 'Texto adjunto' }, f.scope);
+  Object.assign(f.ctx, {
+    goView: { view: 'ADMIN' }, adminAccess: { allowed: true, checking: false, userId: f.scope.userId },
+    personalGoLog: [entry], noteDocument: model.noteDocument, noteInScope: model.noteInScope,
+    setAttachedExternalNote: value => { f.ctx.attachedExternalNote = value; },
+  });
+  loadFunctions(f.ctx, ['canAttachNoteToGo', 'stageGoNote', 'currentGoAttachment']);
+  valueOf(f.ctx, expression(control('compose-go-note'), 'onPress'))();
+  const editor = assertComposer(f, 'landing', { attachToGo: true });
+  editor.props.onSaved(entry, 'Nota guardada');
+  assert.deepEqual(h.plain(f.ctx.currentGoAttachment()), { id: entry.id, title: 'Aviso', detail: 'Texto adjunto' });
+  f.ctx.goView.view = 'USER';
+  assert.equal(f.ctx.stageGoNote(entry), false);
+  assert.equal(f.ctx.currentGoAttachment(), null);
+  f.ctx.goView.view = 'ADMIN';
+  f.ctx.noteIdentityRef.current = { ready: true, scope: { ...f.scope, context: 'other' } };
+  assert.equal(f.ctx.currentGoAttachment(), null);
+  assert.equal(f.ctx.stageGoNote(entry), false);
+});
+
+test('linked note survives local persistence and reopens only for the owning GO or reservation scope', async () => {
+  const disk = await h.diskFixture();
+  try {
+    const parent = { id: 'reservation-fixture', type: 'GO_BOOKING', customerBooking: true,
+      ownerUserId: disk.scope.userId, actionContext: disk.scope.context, estado: 'aceptado' };
+    const draft = disk.draft({ content: 'Nota de reserva' });
+    const saved = await disk.api().saveUnifiedNote(draft, disk.scope, disk.active, parent.id);
+    await saved.reminderSync;
+    const rows = await disk.reopen();
+    assert.equal(rows[0].noteLinkedEntryId, parent.id);
+    assert.equal(disk.model.linkedNotesForEntry(rows, parent, disk.scope)[0].id, saved.entry.id);
+    assert.equal(disk.model.linkedNotesForEntry(rows, { ...parent, ownerUserId: 'other' }, disk.scope).length, 0);
+    assert.equal(disk.model.linkedNotesForEntry(rows, { ...parent, actionContext: 'other' }, disk.scope).length, 0);
+    const go = { ...parent, id: 'sent-go', customerBooking: false, type: 'GO', attachedNoteId: saved.entry.id };
+    assert.equal(disk.model.linkedNotesForEntry(rows, go, disk.scope)[0].id, saved.entry.id);
+    const edit = { ...disk.model.noteDraft(rows[0]), content: 'Actualizada' };
+    const changed = await disk.api().saveUnifiedNote(edit, disk.scope, disk.active);
+    assert.equal(changed.entry.noteLinkedEntryId, parent.id);
+  } finally { disk.close(); }
+});
+
+test('the card note control opens the existing editor and consumes the press', () => {
+  const f = fixture('list');
+  const parent = { id: 'reservation-fixture', type: 'GO_BOOKING', customerBooking: true,
+    ownerUserId: f.scope.userId, actionContext: f.scope.context, estado: 'aceptado' };
+  const entry = { ...model.buildNoteEntry({ ...model.noteDraft(), destination: 'archive', content: 'Recuperable' }, f.scope), noteLinkedEntryId: parent.id };
+  Object.assign(f.ctx, {
+    personalGoLog: [], linkedNotesForEntry: model.linkedNotesForEntry, canReadBoardTask: () => true,
+    Feather: 'Feather', Text: 'Text', TouchableOpacity: 'TouchableOpacity',
+  });
+  loadFunctions(f.ctx, ['canLinkNoteTo', 'renderLinkedNotes']);
+  let stopped = 0;
+  f.ctx.renderLinkedNotes(parent).props.onPress({ stopPropagation: () => stopped++ });
+  assertComposer(f, 'list', { linkedEntryId: parent.id });
+  f.ctx.personalGoLog = [entry];
+  f.ctx.renderLinkedNotes(parent).props.onPress({ stopPropagation: () => stopped++ });
+  assert.equal(f.ctx.renderUnifiedNoteEditor().props.initial.id, entry.id);
+  assert.equal(stopped, 2);
+  assert.equal(f.ctx.renderLinkedNotes({ ...parent, ownerUserId: 'other' }), null);
+});

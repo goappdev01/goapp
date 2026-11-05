@@ -19,7 +19,6 @@ import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
 import { useActionCompletion } from "@/hooks/useActionCompletion";
 import { LandingActionCompletion, completionFrame, completionPanelFrame, LANDING_COMPLETION_PANEL_GAP, type CompletionFrame } from "@/components/landing/LandingActionCompletion";
 import { ownedCompletionEntry, completionEligible, completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
-import { GoNoteReminderPicker } from "@/components/notes/GoNoteReminderPicker";
 import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, type NoteReminderDraft } from "@/lib/goNoteTools";
 import { saveGoNoteReminder, changeGoNoteReminder, confirmAttachedGoNoteReminder } from "@/lib/goNoteReminder";
 import { GoMinuteInput } from "@/components/ui/GoMinuteInput";
@@ -37,12 +36,10 @@ import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScr
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoNoteEditor } from "@/components/notes/GoNoteEditor";
-import { isArchivedNote, noteDocument, noteInScope, validNoteDate, validNoteTime, type UnifiedNoteDraft, type NoteDestination } from "@/lib/unifiedNotes";
+import { isArchivedNote, linkedNotesForEntry, noteDocument, noteInScope, validNoteDate, validNoteTime, type UnifiedNoteDraft, type NoteDestination } from "@/lib/unifiedNotes";
 import { saveUnifiedNote, moveUnifiedNote } from "@/lib/unifiedNoteStore";
 import { noteReminderOperationCurrent } from "@/lib/goNoteSaveProgress";
 import { savedNoteTarget, type NoteRevealTarget } from "@/lib/goNoteNavigation";
-import { GoNoteControls } from "@/components/notes/GoNoteControls";
-import { GoTaskScheduleStep } from "@/components/notes/GoTaskScheduleStep";
 import { CalendarCloseGuide } from "@/components/ui/CalendarCloseGuide";
 import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
 import { GoBoardsPanel } from "@/components/boards/GoBoardsPanel";
@@ -4274,7 +4271,7 @@ function HomeScreenContent() {
   const [noteReminderBusy, setNoteReminderBusy] = useState(false);
   type UnifiedNoteOrigin = "landing" | "calendar" | "list";
   const [unifiedNoteInitial,setUnifiedNoteInitial]=useState<GoEntry|null>(null);
-  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;title?:string;content?:string;toolsOpen?:boolean;confirmSchedule?:boolean}>({});
+  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;title?:string;content?:string;toolsOpen?:boolean;confirmSchedule?:boolean;linkedEntryId?:string;attachToGo?:boolean}>({});
   const unifiedNoteOriginRef=useRef<UnifiedNoteOrigin>("landing");
   const listNoteLayerBackRef=useRef<(() => boolean)|null>(null);
   const unifiedNoteCache=useRef<{scope:string;draft:UnifiedNoteDraft}|null>(null);
@@ -4289,12 +4286,6 @@ function HomeScreenContent() {
   }
   function openQuickNoteFrom(origin:Extract<UnifiedNoteOrigin,"calendar"|"list">,kind:"NOTA_INTERNA"|"NOTA_EXTERNA",title:string,dateISO?:string){
     setCalAddOpen(false);setCalQuickCreateOpen(false);setQuickCreateOpen(false);
-    // An external note created while a GO is actively being composed belongs
-    // to that GO; preserve its established attachment flow and permissions.
-    if(kind==="NOTA_EXTERNA"&&(isActivelyCreating||categorySelected)){
-      openFieldSelector(kind,title,"",dateISO);
-      return;
-    }
     openUnifiedNoteComposer({title,...(dateISO?{dateISO}:{})},origin);
   }
   function openCalendarNote(){
@@ -4364,16 +4355,59 @@ function HomeScreenContent() {
   const [pendingEnvioNota, setPendingEnvioNota] = useState<{ phone: string; contactName: string; text: string; detail?: string } | null>(null);
   // Nota externa adjunta al GO activo — viaja dentro del mismo envío.
   // Se limpia al resetear el GO (resetContactFields).
-  const [attachedExternalNote, setAttachedExternalNote] = useState<{ title: string; detail: string; reminder?: NoteReminderDraft } | null>(null);
+  const [attachedExternalNote, setAttachedExternalNote] = useState<{ noteId: string } | null>(null);
+  const linkedNoteParentsRef = useRef(goLog);
+  linkedNoteParentsRef.current = goLog;
+  function canAttachNoteToGo() {
+    const identity = noteIdentityRef.current;
+    return goView.view === "ADMIN" && adminAccess.allowed && !adminAccess.checking
+      && identity.ready && !!identity.scope && identity.scope.userId === adminAccess.userId;
+  }
+  function currentGoAttachment() {
+    if (!attachedExternalNote || !canAttachNoteToGo()) return null;
+    const scope = noteIdentityRef.current.scope!;
+    const entry = personalGoLog.find(row => row.id === attachedExternalNote.noteId);
+    const note = entry && !entry.deleted && entry.estado !== "rechazado" && noteInScope(entry, scope) ? noteDocument(entry) : undefined;
+    return note ? { id: attachedExternalNote.noteId, title: note.title, detail: note.content } : null;
+  }
+  function stageGoNote(entry: GoEntry) {
+    const scope = noteIdentityRef.current.scope;
+    if (!scope || !canAttachNoteToGo() || !noteInScope(entry, scope) || !noteDocument(entry)
+      || entry.deleted || entry.estado === "rechazado") return false;
+    setAttachedExternalNote({ noteId: entry.id });
+    showToast(lang === "en" ? "Note attached to GO." : "Nota adjuntada al GO.", "success");
+    return true;
+  }
+  function canLinkNoteTo(entry: GoEntry, scope: NonNullable<typeof noteIdentity.scope>) {
+    return !entry.deleted && entry.estado !== "rechazado" && !noteDocument(entry)
+      && !["TAREA", "TAREA_INTERNA"].includes(entry.type || "") && noteInScope(entry, scope);
+  }
+  function renderLinkedNotes(parent: GoEntry) {
+    const { ready, scope } = noteIdentityRef.current;
+    if (!ready || !scope || parent.deleted) return null;
+    const linked = linkedNotesForEntry(personalGoLog, parent, scope).find(canReadBoardTask);
+    const attachSavedNote = !!noteDocument(parent) && noteInScope(parent, scope) && isActivelyCreating && canAttachNoteToGo();
+    if (!attachSavedNote && !linked && !canLinkNoteTo(parent, scope)) return null;
+    const label = attachSavedNote ? (lang === "en" ? "Attach to GO" : "Adjuntar al GO")
+      : linked ? (lang === "en" ? "Open linked note" : "Abrir nota vinculada")
+      : (lang === "en" ? "Link a note" : "Vincular nota");
+    return <TouchableOpacity testID={"list-linked-note-" + parent.id} accessibilityRole="button"
+      onPress={event => {
+        event?.stopPropagation();
+        if (attachSavedNote) stageGoNote(parent);
+        else if (linked) openUnifiedNote(linked, {}, "list");
+        else openUnifiedNoteComposer({ linkedEntryId: parent.id, content: parent.attachedNote }, "list");
+      }}
+      style={{ alignSelf: "flex-start", minHeight: 44, flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <Feather name="paperclip" size={14} color="#93c5fd" />
+      <Text style={{ color: "#93c5fd", fontWeight: "700" }}>{label}</Text>
+    </TouchableOpacity>;
+  }
   const [quickNoteInternal, setQuickNoteInternal] = useState(false);
   const [internalNotes, setInternalNotes] = useState<
     Array<{ id: string; text: string; createdAt: number }>
   >([]);
   // ── NOTA RÁPIDA SOBRE UN GO ESPECÍFICO ────────────────────────────
-  // noteInputGoId = id del GO al que se está escribiendo el mensaje
-  // noteInputDraft = texto en curso del input
-  const [noteInputGoId, setNoteInputGoId] = useState<string | null>(null);
-  const [noteInputDraft, setNoteInputDraft] = useState("");
   const [goChats, setGoChats] = useState<Record<string, GoReservationMessage[]>>({});
   // ID del mensaje que se está reproduciendo por voz (null = silencio)
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
@@ -5977,8 +6011,9 @@ function HomeScreenContent() {
       : [`GO · ${headTitle}`];
     if (selectedSugerencia) parts.push(`⭐ ${selectedSugerencia}`);
     if (notesDraft.trim()) parts.push(`📝 ${notesDraft.trim()}`);
-    if (attachedExternalNote) {
-      const extNoteText = [attachedExternalNote.title, attachedExternalNote.detail].filter(Boolean).join(' — ');
+    const attachment = currentGoAttachment();
+    if (attachment) {
+      const extNoteText = [attachment.title, attachment.detail].filter(Boolean).join(' — ');
       if (extNoteText.trim()) parts.push(`📎 ${extNoteText.trim()}`);
     }
     if (place) parts.push(`📍 ${place}`);
@@ -7167,8 +7202,9 @@ function HomeScreenContent() {
     // (useEffect) lo dispara cuando llegue el momento.
     const advancedAssigned = assignedToDraft.trim();
     const advancedType = goActionType;
-    const attachedNoteText = attachedExternalNote
-      ? [attachedExternalNote.title, attachedExternalNote.detail].filter(Boolean).join(' — ')
+    const attachment = currentGoAttachment();
+    const attachedNoteText = attachment
+      ? [attachment.title, attachment.detail].filter(Boolean).join(' — ')
       : undefined;
     let scheduledAt: number | null = null;
     if (scheduleEnabled) {
@@ -7218,7 +7254,7 @@ function HomeScreenContent() {
         scheduled: true,
         notes: notesDraft,
         attachedNote: attachedNoteText || undefined,
-        attachedNoteReminder: attachedExternalNote?.reminder,
+        attachedNoteId: attachment?.id,
         isGeneric: genericMode,
         reminders: remindersDraft,
         notificationsEnabled: notificationsEnabledDraft,
@@ -7250,7 +7286,7 @@ function HomeScreenContent() {
         assignedTo: advancedAssigned,
         notes: notesDraft,
         attachedNote: attachedNoteText || undefined,
-        attachedNoteReminder: attachedExternalNote?.reminder,
+        attachedNoteId: attachment?.id,
         isGeneric: genericMode,
         reminders: remindersDraft,
         notificationsEnabled: notificationsEnabledDraft,
@@ -7289,7 +7325,7 @@ function HomeScreenContent() {
           assignedTo: advancedAssigned,
           notes: notesDraft,
           attachedNote: attachedNoteText || undefined,
-          attachedNoteReminder: attachedExternalNote?.reminder,
+          attachedNoteId: attachment?.id,
           reminders: remindersDraft,
           notificationsEnabled: notificationsEnabledDraft,
           isGeneric: genericMode,
@@ -7364,7 +7400,7 @@ function HomeScreenContent() {
                 assignedTo: advAssigned,
                 notes: notesDraft,
                 attachedNote: attachedNoteText || undefined,
-        attachedNoteReminder: attachedExternalNote?.reminder,
+        attachedNoteId: attachment?.id,
                 isGeneric: genericMode,
                 reminders: remindersDraft,
                 notificationsEnabled: notificationsEnabledDraft,
@@ -7403,7 +7439,7 @@ function HomeScreenContent() {
         assignedTo: advancedAssigned,
         notes: notesDraft,
         attachedNote: attachedNoteText || undefined,
-        attachedNoteReminder: attachedExternalNote?.reminder,
+        attachedNoteId: attachment?.id,
         isGeneric: true,
         reminders: remindersDraft,
         notificationsEnabled: notificationsEnabledDraft,
@@ -7447,7 +7483,7 @@ function HomeScreenContent() {
         assignedTo: advancedAssigned,
         notes: notesDraft,
         attachedNote: attachedNoteText || undefined,
-        attachedNoteReminder: attachedExternalNote?.reminder,
+        attachedNoteId: attachment?.id,
         isGeneric: genericMode,
         reminders: remindersDraft,
         notificationsEnabled: notificationsEnabledDraft,
@@ -7473,7 +7509,7 @@ function HomeScreenContent() {
         assignedTo: advancedAssigned,
         notes: notesDraft,
         attachedNote: attachedNoteText || undefined,
-        attachedNoteReminder: attachedExternalNote?.reminder,
+        attachedNoteId: attachment?.id,
         isGeneric: genericMode,
         reminders: remindersDraft,
         notificationsEnabled: notificationsEnabledDraft,
@@ -8542,109 +8578,6 @@ function HomeScreenContent() {
     showToast(`Retraso notificado al cliente: +${delayMinutes} min`, "info");
   };
 
-  // ── FIELD SELECTOR — abre el selector de campos opcionales ──────────────
-  const openFieldSelector = (
-    kind: "GO_INTERNO" | "GO_EXTERNO" | "NOTA_INTERNA" | "NOTA_EXTERNA",
-    initialText?: string,
-    initialDetail?: string,
-    prefillDateISO?: string,
-    prefillTime?: string,
-    noteReminder?: NoteReminderDraft,
-  ) => {
-    if (calendarSlotSavingRef.current) return;
-    noteTaskDraftRef.current = noteReminder ?? null;
-    const fromTimeSlot = prefillTime !== undefined;
-    // ── NOTA EXTERNA DURANTE GO ACTIVO ─────────────────────────────────────
-    // Si hay un GO en construcción (categoría elegida o campos ya rellenos),
-    // la nota externa NO crea una entrada separada: se adjunta al GO activo
-    // y viajará dentro del mismo envío. El botón central permanece "SEND GO".
-    if (!fromTimeSlot && kind === "NOTA_EXTERNA" && !noteReminder?.edit && (isActivelyCreating || categorySelected)) {
-      setAttachedExternalNote({
-        title:  initialText   || "",
-        detail: initialDetail || "",
-        reminder: noteReminder,
-      });
-      noteTaskDraftRef.current = null;
-      setNotesOpen(false);
-      setQuickNoteText("");
-      setQuickNoteDetail("");
-      AsyncStorage.removeItem("go_task_draft_v1").catch(() => {});
-      showToast(lang === 'en' ? "Note attached to GO" : "Nota adjuntada al GO", 'success');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      return;
-    }
-
-    const landingPhone    = phone.trim();
-    const landingContact  = contactName.trim();
-    const landingDate     = date.trim();
-    const landingDateISO  = dateISO?.trim() ?? "";
-    const landingTime     = time.trim();
-    const landingPlace    = place.trim();
-
-    // Abrir el formulario conservando los datos disponibles. GUARDAR confirma la persistencia.
-    // Los campos ya rellenados en el Landing aparecerán iluminados/marcados
-    // automáticamente a través de fsFilledValues.
-    calendarTaskContextRef.current = calOpen
-      ? { dateISO: dateISODraft, dateLabel: dateDraft, viewMode: calBgViewMode, viewMonth: calBgViewMonth }
-      : null;
-    qdOriginContextRef.current = { listOpen, notesOpen, agendaOpOpen };
-    fieldSelectorSaveBusyRef.current = false;
-    setFieldSelectorKind(kind);
-    setFieldSelectorText(initialText || "");
-    setFieldSelectorDetail(initialDetail || "");
-    setFieldSelectorFields(new Set());
-
-    // Pre-rellenar con datos Landing disponibles
-    const landingPrefill: typeof fsFilledValues = {};
-    if (!fromTimeSlot && (landingContact || landingPhone)) {
-      landingPrefill.contactName = landingContact || undefined;
-      landingPrefill.phone       = landingPhone   || undefined;
-    }
-    if (!fromTimeSlot && (landingDate || landingDateISO)) {
-      landingPrefill.date    = landingDate    || undefined;
-      landingPrefill.dateISO = landingDateISO || undefined;
-      landingPrefill.time    = landingTime    || undefined;
-    }
-    if (!fromTimeSlot && landingPlace) {
-      landingPrefill.place = landingPlace;
-    }
-
-    if (prefillDateISO) {
-      const todayISONow = formatISODate(getToday());
-      const d = new Date(prefillDateISO + "T00:00:00");
-      const dateLabel = prefillDateISO === todayISONow ? "HOY" : formatDayLabel(d);
-      setFsFilledValues({ ...landingPrefill, date: dateLabel, dateISO: prefillDateISO,
-        ...(fromTimeSlot ? { time: prefillTime } : {}) });
-      if (fromTimeSlot) setFsPlaceDraft("");
-    } else {
-      setFsFilledValues(Object.keys(landingPrefill).length > 0 ? landingPrefill : {});
-    }
-    setFsActivityKey(null);
-    setFsOrbitalOpen(false);
-    setFsCustomOpen(false);
-    setFsCustomLabel("");
-    qdCapContactNameRef.current = "";
-    qdCapPhoneRef.current = "";
-    qdCapDateRef.current = "";
-    qdCapDateISORef.current = "";
-    qdCapTimeRef.current = "";
-    qdCapPlaceRef.current = "";
-    qdFlowActiveRef.current = false;
-    if (notesOpen && !calOpen && Platform.OS === "ios") { noteSelectorAfterNotesDismissRef.current = true; setFieldSelectorOpen(false); }
-    else setFieldSelectorOpen(true);
-    // Persist draft immediately so content is never lost if user navigates away
-    if (!fromTimeSlot) AsyncStorage.setItem(
-      "go_task_draft_v1",
-      JSON.stringify({ kind, text: initialText || "", detail: initialDetail || "", ...(noteReminder ? { noteReminder } : {}) }),
-    ).catch(() => {});
-    setListOpen(false);
-    setListMinimized(false);
-    setListFiltersHidden(false);
-    setNotesOpen(false);
-    setAgendaOpOpen(false);
-    setCalAddOpen(false);
-  };
-
   const openCalendarSlotTask = async (slotDateISO: string, slotTime: string) => {
     if (notesOpen || fieldSelectorOpen || calendarSlotDraftRef.current || calendarSlotOpeningRef.current || calendarSlotSavingRef.current) return;
     const request = ++calendarSlotRequestRef.current;
@@ -8690,20 +8623,6 @@ function HomeScreenContent() {
     });
   };
 
-  const startGoNoteTask = (kind: "NOTA_INTERNA" | "NOTA_EXTERNA", text: string, detail: string) => {
-    if (noteStartLockRef.current) return;
-    const identity = noteIdentityRef.current;
-    if (!identity.ready || !identity.scope) {
-      showToast(lang === "en" ? "Wait for GO to verify your account and context before saving the note."
-        : "Espera a que GO verifique tu cuenta y contexto antes de guardar la nota.", "warning");
-      setQuickNoteText(text); setQuickNoteDetail(detail);
-      return;
-    }
-    const draft = identity.ready && identity.scope
-      ? { scope: { ...identity.scope }, minutes: quickNoteReminderMinutes } : undefined;
-    noteStartLockRef.current = true;
-    openFieldSelector(kind, text, detail, undefined, undefined, draft);
-  };
   const saveQuickNoteEntry = async (entry: GoEntry, draft: NoteReminderDraft) => {
     const active = () => { const current = noteIdentityRef.current;
       return current.ready && current.scope?.userId === draft.scope.userId && current.scope?.context === draft.scope.context; };
@@ -9138,6 +9057,7 @@ function HomeScreenContent() {
       sentAt?: number;
       notes?: string;
       attachedNote?: string;
+      attachedNoteId?: string;
       attachedNoteReminder?: NoteReminderDraft;
       sugerencia?: string;
       isGeneric?: boolean;
@@ -9206,6 +9126,7 @@ function HomeScreenContent() {
     // ensuciar el almacenamiento ni cambiar la apariencia visual.
     if (extra?.notes && extra.notes.trim()) entry.notes = extra.notes.trim();
     if (extra?.attachedNote && extra.attachedNote.trim()) entry.attachedNote = extra.attachedNote.trim();
+    if (kind === "sent" && extra?.attachedNoteId && extra.attachedNote) entry.attachedNoteId = extra.attachedNoteId;
     if (extra?.sugerencia?.trim()) entry.sugerencia = extra.sugerencia.trim();
     if (extra?.isGeneric === true) entry.isGeneric = true;
     // Visibilidad — siempre se guarda para filtrado posterior.
@@ -9284,95 +9205,6 @@ function HomeScreenContent() {
       });
     }
   }, [speakingMsgId]);
-
-  // Guarda el mensaje/nota en el chat compartido de la reserva sin enviarlo por WhatsApp.
-  const saveGoNoteOnly = (goId: string, text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    const g = goLog.find((e) => e.id === goId);
-    if (!g) return;
-    const chatKey = sharedChatKey(g);
-    const senderType: "cliente" | "empresa" = g.kind === "received" ? "empresa" : "cliente";
-    const senderName = g.kind === "received"
-      ? (g.contactName || "Empresa")
-      : "Yo";
-    const msg: GoReservationMessage = {
-      messageId: makeUid(),
-      reservationId: chatKey,
-      senderType,
-      senderName,
-      text: trimmed,
-      createdAt: Date.now(),
-      readByCliente: senderType === "cliente",
-      readByEmpresa: senderType === "empresa",
-    };
-    setGoChats((prev) => {
-      const existing = prev[chatKey] || [];
-      const next = { ...prev, [chatKey]: [...existing, msg].sort((a, b) => a.createdAt - b.createdAt) };
-      persistChats(next);
-      return next;
-    });
-    showToast(t('toast_note_saved'), 'success');
-    setNoteInputDraft("");
-    setNoteInputGoId(null);
-  };
-
-  // Guarda en el chat compartido Y abre WhatsApp.
-  const sendGoNote = (goId: string, text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    const g = goLog.find((e) => e.id === goId);
-    if (!g) return;
-
-    const chatKey = sharedChatKey(g);
-    const senderType: "cliente" | "empresa" = g.kind === "received" ? "empresa" : "cliente";
-    const senderName = g.kind === "received"
-      ? (g.contactName || "Empresa")
-      : "Yo";
-
-    const msg: GoReservationMessage = {
-      messageId: makeUid(),
-      reservationId: chatKey,
-      senderType,
-      senderName,
-      text: trimmed,
-      createdAt: Date.now(),
-      readByCliente: senderType === "cliente",
-      readByEmpresa: senderType === "empresa",
-    };
-
-    setGoChats((prev) => {
-      const existing = prev[chatKey] || [];
-      const next = { ...prev, [chatKey]: [...existing, msg].sort((a, b) => a.createdAt - b.createdAt) };
-      persistChats(next);
-      return next;
-    });
-
-    // Determinar canal de entrega
-    const phone = g.phone || g.recipients?.[0]?.phone || "";
-    const cleanPhone = normalizePhoneForWhatsApp(phone);
-
-    // Entregar por WhatsApp si hay teléfono
-    if (cleanPhone) {
-      const goSummary = [
-        g.intentLabel,
-        [g.date, g.time].filter(Boolean).join(" · "),
-        g.place,
-      ].filter(Boolean).join(" · ");
-      const contact = g.contactName || g.recipients?.[0]?.name || "";
-      const header = contact ? `${t('task_for_contact')} ${contact}` : t('task_go_label');
-      const waText = `📌 ${header}:\n${goSummary}\n\n💬 ${trimmed}`;
-      Linking.openURL(
-        `https://wa.me/${cleanPhone}?text=${encodeURIComponent(waText)}`,
-      ).catch(() => {});
-      showToast(t('toast_saved_sent_wa'), 'success');
-    } else {
-      showToast(t('toast_note_saved'), 'success');
-    }
-
-    setNoteInputDraft("");
-    setNoteInputGoId(null);
-  };
 
   const updateLogStatus = (id: string, estado: "pendiente" | "aceptado" | "rechazado" | "propuesto" | "propuesta_pendiente") => {
     const customerBooking=customerBookings.entries.find(entry=>entry.id===id);if(customerBooking){if(estado==="rechazado")softDeleteGo(id);else showToast(lang==="en"?"Use the reservation actions.":"Utiliza las acciones de la reserva.","warning");return;}
@@ -11856,7 +11688,6 @@ function HomeScreenContent() {
   // La validación de fecha pasada la gestiona el hook internamente via `validate`;
   // este callback solo se ejecuta cuando la fecha/hora ya es válida.
   const noteScheduleActive = qdFlowActiveRef.current && (fieldSelectorKind === "NOTA_INTERNA" || fieldSelectorKind === "NOTA_EXTERNA");
-  const noteSchedulePhase = ["clock", "ampm", "duration"].includes(calFlow.step) ? calFlow.step : "duration";
   const _handleCalFlowSave = (r: CalFlowResult) => {
     if (qdFlowActiveRef.current && (fieldSelectorKind === "NOTA_INTERNA" || fieldSelectorKind === "NOTA_EXTERNA")) {
       qdCapDateRef.current = r.dateDraft;
@@ -13091,21 +12922,6 @@ function HomeScreenContent() {
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) setInternalNotes(parsed.slice(0, 200));
-        }
-      } catch {}
-      // Restore any unsaved task draft from a previous session
-      try {
-        const rawDraft = await AsyncStorage.getItem("go_task_draft_v1");
-        if (rawDraft) {
-          const draft = JSON.parse(rawDraft);
-          if (draft && typeof draft.text === "string" && draft.text.trim()) {
-            setQuickNoteText(draft.text);
-            if (typeof draft.detail === "string" && draft.detail.trim()) {
-              setQuickNoteDetail(draft.detail);
-            }
-            setNotesOpen(true);
-            showToast(t('toast_draft_restored'), "info");
-          }
         }
       } catch {}
       // ── Gesto Serpiente ─────────────────────────────────────────────────
@@ -14568,8 +14384,12 @@ function HomeScreenContent() {
                   </View>
                 )}
                 {/* NOTA EXTERNA ADJUNTA pill — orange, paperclip+edit icon */}
-                {!!attachedExternalNote && (() => {
-                  const noteTitle = attachedExternalNote.title || '';
+                {canAttachNoteToGo() && isActivelyCreating && <TouchableOpacity accessibilityRole="button" testID="compose-go-note" onPress={() => openUnifiedNoteComposer({attachToGo:true})}>
+                  <Text style={{color:"#93c5fd",padding:8}}>{lang === "en" ? "Attach note to GO" : "Adjuntar nota al GO"}</Text>
+                </TouchableOpacity>}
+                {(() => {
+                  const noteTitle = currentGoAttachment()?.title;
+                  if (noteTitle === undefined) return null;
                   return (
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, backgroundColor: "rgba(251,146,60,0.14)", borderWidth: 1, borderColor: "rgba(251,146,60,0.50)" }}>
                       <Feather name="paperclip" size={9} color="#fb923c" />
@@ -17862,7 +17682,7 @@ function HomeScreenContent() {
                 label: t('orbit_note'),
                 onPress: () => {
                   Haptics.selectionAsync();
-                  setNotesOpen(true);
+                  openUnifiedNoteComposer();
                 },
               },
               // ─── LISTADOS (-67.5°) — entre COMIDA y REUNIÓN ──────────────
@@ -18028,7 +17848,7 @@ function HomeScreenContent() {
                 { deg: 135, icon: "map-pin"      as const, label: "PLACE",   step: 2,
                   action: () => { setMapOpen(true);       setCheckoutStep(2); } },
                 { deg: 180, icon: "edit-2"       as const, label: "NOTE",    step: 3,
-                  action: () => { setNotesOpen(true);     setCheckoutStep(3); } },
+                  action: () => { openUnifiedNoteComposer(); setCheckoutStep(3); } },
                 { deg: 225, icon: "credit-card"  as const, label: "PAY",     step: 4,
                   action: () => { showToast("Pago · próximamente", "info"); setCheckoutStep(4); setCheckoutDone(p => { const n = new Set(p); n.add(4); return n; }); } },
                 { deg: 270, icon: "check-circle" as const, label: "REVIEW",  step: 5,
@@ -20611,121 +20431,6 @@ function HomeScreenContent() {
                 </View>
               )}
 
-            {/* ── PANEL CREACIÓN RÁPIDA — idéntico al de Listados ── */}
-            {calQuickCreateOpen && (() => {
-              const calQuickCreateOptions = [
-                { kind: "NOTA_INTERNA" as const, label: t('label_task_internal').toUpperCase(), icon: "file-text" as const, color: "#7c3aed", iconOn: "#ffffff" },
-                { kind: "NOTA_EXTERNA" as const, label: t('label_task_external').toUpperCase(), icon: "file-text" as const, color: "#f97316", iconOn: "#ffffff" },
-              ];
-              const handleCalQuickCreate = (kind: "NOTA_INTERNA" | "NOTA_EXTERNA") => {
-                Haptics.selectionAsync().catch(() => {});
-                const text = calQuickCreateText.trim();
-                setCalQuickCreateText("");
-                setCalQuickCreateOpen(false);
-                openQuickNoteFrom("calendar",kind,text,dateISODraft || formatISODate(getToday()));
-              };
-              return (
-                <View
-                  style={{
-                    backgroundColor: "#131316",
-                    borderRadius: 16,
-                    borderWidth: 1,
-                    borderColor: "rgba(255,255,255,0.10)",
-                    paddingHorizontal: 12,
-                    paddingVertical: quickCreateKbVisible ? 8 : 10,
-                    marginTop: quickCreateKbVisible ? 4 : 8,
-                    marginBottom: quickCreateKbVisible ? 0 : 8,
-                    shadowColor: "#000",
-                    shadowOpacity: 0.55,
-                    shadowRadius: 14,
-                    shadowOffset: { width: 0, height: 3 },
-                  }}
-                >
-                  {quickCreateKbVisible ? (
-                    <>
-                      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                        <Text style={{ color: "rgba(255,255,255,0.28)", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.2 }}>
-                          {t('new_task_label')}
-                        </Text>
-                      </View>
-                      <View
-                        style={{
-                          flexDirection: "row", alignItems: "center",
-                          backgroundColor: "rgba(255,255,255,0.06)",
-                          borderRadius: 9, borderWidth: 1, borderColor: "rgba(255,255,255,0.14)",
-                          paddingHorizontal: 9, paddingVertical: 7,
-                        }}
-                      >
-                        <Feather name="edit-3" size={12} color="rgba(255,255,255,0.35)" style={{ marginRight: 6 }} />
-                        <TextInput
-                          value={calQuickCreateText}
-                          onChangeText={setCalQuickCreateText}
-                          placeholder={t('placeholder_task_title')}
-                          placeholderTextColor="rgba(255,255,255,0.55)"
-                          multiline={false}
-                          numberOfLines={1}
-                          maxLength={16}
-                          returnKeyType="done"
-                          style={{ flex: 1, color: "#ffffff", fontSize: 14, fontWeight: "500" }}
-                        />
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.2, marginBottom: 7 }}>
-                        {t('new_task_label')}
-                      </Text>
-                      <View
-                        style={{
-                          flexDirection: "row", alignItems: "center",
-                          backgroundColor: "rgba(255,255,255,0.05)",
-                          borderRadius: 9, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)",
-                          paddingHorizontal: 9, paddingVertical: 6, marginBottom: 8,
-                        }}
-                      >
-                        <Feather name="edit-3" size={12} color="rgba(255,255,255,0.3)" style={{ marginRight: 6 }} />
-                        <TextInput
-                          value={calQuickCreateText}
-                          onChangeText={setCalQuickCreateText}
-                          placeholder={t('placeholder_task_title')}
-                          placeholderTextColor="rgba(255,255,255,0.70)"
-                          multiline={false}
-                          numberOfLines={1}
-                          maxLength={16}
-                          returnKeyType="done"
-                          style={{ flex: 1, color: "#ffffff", fontSize: 13, fontWeight: "500" }}
-                        />
-                      </View>
-                      <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 6 }}>
-                        <View style={{ flex: 1, gap: 6 }}>
-                          <View style={{ flexDirection: "row", gap: 6 }}>
-                            {calQuickCreateOptions.map((opt) => (
-                              <Pressable
-                                key={opt.kind}
-                                onPress={() => handleCalQuickCreate(opt.kind)}
-                                style={({ pressed }) => ({
-                                  flex: 1, flexDirection: "row", alignItems: "center", gap: 6,
-                                  paddingHorizontal: 8, paddingVertical: 7, borderRadius: 10,
-                                  backgroundColor: pressed ? `${opt.color}30` : `${opt.color}18`,
-                                  borderWidth: 1, borderColor: `${opt.color}55`,
-                                  transform: [{ scale: pressed ? 0.97 : 1 }],
-                                })}
-                              >
-                                <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: opt.color, alignItems: "center", justifyContent: "center" }}>
-                                  <Feather name={opt.icon} size={10} color={opt.iconOn} />
-                                </View>
-                                <Text style={{ color: "#ffffff", fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, flexShrink: 1 }}>{opt.label}</Text>
-                              </Pressable>
-                            ))}
-                          </View>
-                        </View>
-                      </View>
-                    </>
-                  )}
-                </View>
-              );
-            })()}
-
             {/* PASO 2b — AM/PM: solo si el usuario no seleccionó período en el reloj */}
             {calPanelOpen && calStep === "ampm" && !noteScheduleActive && (
               <>
@@ -21642,13 +21347,6 @@ function HomeScreenContent() {
             </View>
           )}
 
-          {noteScheduleActive && !fieldSelectorOpen && !monthGridOpen && <GoTaskScheduleStep
-            key={noteSchedulePhase} step={noteSchedulePhase as "clock" | "ampm" | "duration"} dateLabel={calFlow.dateDraft || calFlow.dateISO}
-            time={calFlow.time} duration={calFlow.duration} handedness={handedness}
-            onDurationDraft={calFlow.setDurationDraft}
-            onTime={calFlow.selectExactTime} onDuration={calFlow.selectDuration} onDate={calFlow.returnToDate}
-            onBack={() => calFlow.step === "duration" ? calFlow.reopenClock() : calFlow.returnToDate()} />}
-          {calendarTaskContextRef.current && fieldSelectorOpen && renderFieldSelector(true)}
           {calOpen && renderUnifiedNoteEditor()}
           <GoBoardsPanel visible={boardsOpen && calOpen} onClose={() => setBoardsOpen(false)} manager={goBoards} fontScale={uiScaleFactor} handedness={handedness} />
         </View>
@@ -21925,7 +21623,6 @@ function HomeScreenContent() {
             // Si los 8 botones (incluido el chevron de mano) no caben a lo
             // ancho, el cluster es desplazable horizontalmente para que
             // siempre se pueda alcanzar la papelera.
-            if (noteInputGoId) return null;
             // ── ESCALA DEL MENÚ ─────────────────────────────────────────────
             // Todos los valores numéricos del footer (botones, chips, iconos,
             // gaps) se derivan de listGoSize para que el menú escale junto con
@@ -22534,165 +22231,8 @@ function HomeScreenContent() {
                 })}
               </ScrollView>
             );
-            const quickCreateOptions = [
-              { kind: "NOTA_INTERNA" as const, label: t('label_task_internal').toUpperCase(), icon: "file-text" as const, color: "#7c3aed", iconOn: "#ffffff" },
-              { kind: "NOTA_EXTERNA" as const, label: t('label_task_external').toUpperCase(), icon: "file-text" as const, color: "#f97316", iconOn: "#ffffff" },
-            ];
-            const handleQuickCreate = (kind: "NOTA_INTERNA" | "NOTA_EXTERNA") => {
-              Haptics.selectionAsync().catch(() => {});
-              const text = quickCreateText.trim();
-              setQuickCreateText("");
-              setQuickCreateOpen(false);
-              openQuickNoteFrom("list",kind,text);
-            };
             return (
               <View style={{ width: "100%" }}>
-                {/* PANEL CREACIÓN RÁPIDA — modo limpio dentro del panel LISTADO */}
-                {quickCreateOpen && (
-                  <View
-                    style={{
-                      backgroundColor: "#131316",
-                      borderRadius: 16,
-                      borderWidth: 1,
-                      borderColor: "rgba(255,255,255,0.10)",
-                      paddingHorizontal: 12,
-                      paddingVertical: quickCreateKbVisible ? 8 : 10,
-                      marginTop: quickCreateKbVisible ? 4 : 20,
-                      marginBottom: quickCreateKbVisible ? 0 : 8,
-                      shadowColor: "#000",
-                      shadowOpacity: 0.55,
-                      shadowRadius: 14,
-                      shadowOffset: { width: 0, height: 3 },
-                    }}
-                  >
-                    {quickCreateKbVisible ? (
-                      /* ── MODO ESCRITURA: botón ↑ arriba, input abajo, sin relleno muerto ── */
-                      <>
-                        {/* Fila superior: label tenue + botón ↑ a la derecha */}
-                        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                          <Text style={{ color: "rgba(255,255,255,0.28)", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.2 }}>
-                            {t('new_task_label').toUpperCase()}
-                          </Text>
-                          <Pressable
-                            onPress={() => Keyboard.dismiss()}
-                            hitSlop={10}
-                            style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: 14,
-                              alignItems: "center",
-                              justifyContent: "center",
-                              backgroundColor: "rgba(255,255,255,0.10)",
-                              borderWidth: 1,
-                              borderColor: "rgba(255,255,255,0.28)",
-                            }}
-                          >
-                            <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.70)" />
-                          </Pressable>
-                        </View>
-                        {/* Input pegado al fondo del panel, cerca del teclado */}
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            backgroundColor: "rgba(255,255,255,0.06)",
-                            borderRadius: 9,
-                            borderWidth: 1,
-                            borderColor: "rgba(255,255,255,0.14)",
-                            paddingHorizontal: 9,
-                            paddingVertical: 7,
-                          }}
-                        >
-                          <Feather name="edit-3" size={12} color="rgba(255,255,255,0.35)" style={{ marginRight: 6 }} />
-                          <TextInput
-                            value={quickCreateText}
-                            onChangeText={setQuickCreateText}
-                            placeholder={t('placeholder_task_title')}
-                            placeholderTextColor="rgba(255,255,255,0.55)"
-                            multiline={false}
-                            numberOfLines={1}
-                            maxLength={16}
-                            returnKeyType="done"
-                            style={{ flex: 1, color: "#ffffff", fontSize: 14, fontWeight: "500" }}
-                          />
-                        </View>
-                      </>
-                    ) : (
-                      /* ── MODO SELECCIÓN: layout normal con 2×2 botones ── */
-                      <>
-                        <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.2, marginBottom: 7 }}>
-                          {t('new_task_label').toUpperCase()}
-                        </Text>
-                        {/* Campo título */}
-                        <View
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            backgroundColor: "rgba(255,255,255,0.05)",
-                            borderRadius: 9,
-                            borderWidth: 1,
-                            borderColor: "rgba(255,255,255,0.10)",
-                            paddingHorizontal: 9,
-                            paddingVertical: 6,
-                            marginBottom: 8,
-                          }}
-                        >
-                          <Feather name="edit-3" size={12} color="rgba(255,255,255,0.3)" style={{ marginRight: 6 }} />
-                          <TextInput
-                            value={quickCreateText}
-                            onChangeText={setQuickCreateText}
-                            placeholder={t('placeholder_task_title')}
-                            placeholderTextColor="rgba(255,255,255,0.70)"
-                            multiline={false}
-                            numberOfLines={1}
-                            maxLength={16}
-                            returnKeyType="done"
-                            style={{ flex: 1, color: "#ffffff", fontSize: 13, fontWeight: "500" }}
-                          />
-                        </View>
-                        {/* Botones TAREA + botón ↓ */}
-                        <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 6 }}>
-                          <View style={{ flex: 1, gap: 6 }}>
-                            {/* Fila única: TAREA INTERNA · TAREA EXTERNA */}
-                            <View style={{ flexDirection: "row", gap: 6 }}>
-                              {quickCreateOptions.map((opt) => (
-                                <Pressable
-                                  key={opt.kind}
-                                  onPress={() => handleQuickCreate(opt.kind)}
-                                  style={({ pressed }) => ({
-                                    flex: 1, flexDirection: "row", alignItems: "center", gap: 6,
-                                    paddingHorizontal: 8, paddingVertical: 7, borderRadius: 10,
-                                    backgroundColor: pressed ? `${opt.color}30` : `${opt.color}18`,
-                                    borderWidth: 1, borderColor: `${opt.color}55`,
-                                    transform: [{ scale: pressed ? 0.97 : 1 }],
-                                  })}
-                                >
-                                  <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: opt.color, alignItems: "center", justifyContent: "center" }}>
-                                    <Feather name={opt.icon} size={10} color={opt.iconOn} />
-                                  </View>
-                                  <Text style={{ color: "#ffffff", fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, flexShrink: 1 }}>{opt.label}</Text>
-                                </Pressable>
-                              ))}
-                            </View>
-                          </View>
-                          {/* Botón ↓ — cerrar panel */}
-                          <Pressable
-                            onPress={() => { setQuickCreateOpen(false); setQuickCreateText(""); }}
-                            hitSlop={10}
-                            style={{
-                              width: 30, height: 30, borderRadius: 15,
-                              alignItems: "center", justifyContent: "center",
-                              backgroundColor: "rgba(255,255,255,0.10)",
-                              borderWidth: 1, borderColor: "rgba(255,255,255,0.35)",
-                            }}
-                          >
-                            <Feather name="chevron-down" size={14} color="#ffffff" />
-                          </Pressable>
-                        </View>
-                      </>
-                    )}
-                  </View>
-                )}
                 {/* ── Fila de controles: [↕ · ●●● · ↗] ──spacer── [↓ · ↓↓] ── */}
                 {!quickCreateOpen && (
                   <View style={{ flexDirection: "row", alignItems: "center", marginBottom: GAP_CTRL }}>
@@ -22825,7 +22365,10 @@ function HomeScreenContent() {
           //   • Resto      → excluye papelera y aplica el filtro de estado.
           const isPapelaraView = listFilter === "papelera";
           const inPapelera = (g: typeof goLog[number]) => !!(g.deleted || g.estado === "rechazado");
-          const listEntries = mergeCompletionEntries(goLog, actionCompletion.candidates.filter(entry => actionCompletion.status(entry) === "pending" || !!entry.changeProposal));
+          const scope = noteIdentity.scope;
+          const archive = noteIdentity.ready && scope ? personalGoLog.filter(entry =>
+            isArchivedNote(entry) && noteInScope(entry, scope) && canReadBoardTask(entry) && !actionCompletion.isDiscarded(entry)) : [];
+          const listEntries = mergeCompletionEntries([...goLog, ...archive], actionCompletion.candidates.filter(entry => actionCompletion.status(entry) === "pending" || !!entry.changeProposal));
           const filtered = listEntries.filter((g) => {
             if(listFilter==="reservas")return g.customerBooking===true && customerBookings.entries.some(entry=>entry.id===g.id);
             if (isPapelaraView) {
@@ -23698,259 +23241,7 @@ function HomeScreenContent() {
                       </TouchableOpacity>
                     )}
 
-                    {/* ── MENSAJES / NOTAS DEL GO ─────────────────────── */}
-                    {(expandedId === g.id || allExpanded) && (
-                      <View style={{ marginTop: lv(12) }}>
-                        {/* Chat compartido cliente ↔ empresa */}
-                        {(() => {
-                          const chatKey = sharedChatKey(g);
-                          const chatMessages = (goChats[chatKey] || []).slice().sort((a, b) => a.createdAt - b.createdAt);
-                          if (chatMessages.length === 0) return null;
-                          return (
-                            <View style={{ marginBottom: lv(10) }}>
-                              <View style={{ flexDirection: "row", alignItems: "center", gap: lv(5), marginBottom: lv(8) }}>
-                                <Feather name="message-square" size={lv(10)} color="rgba(255,255,255,0.45)" />
-                                <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: lv(10), fontWeight: "700", letterSpacing: 0.5 }}>
-                                  {t('tasks_chat').toUpperCase()}
-                                </Text>
-                              </View>
-                              {chatMessages.map((m) => {
-                                const d = new Date(m.createdAt);
-                                const timeStr = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-                                const isOnRight = g.kind === "received"
-                                  ? m.senderType === "empresa"
-                                  : m.senderType === "cliente";
-                                const isCliente = m.senderType === "cliente";
-                                const bubbleBg = isCliente
-                                  ? "rgba(59,130,246,0.15)"
-                                  : "rgba(110,231,183,0.12)";
-                                const bubbleBorder = isCliente
-                                  ? "rgba(59,130,246,0.30)"
-                                  : "rgba(110,231,183,0.30)";
-                                const isSpeaking = speakingMsgId === m.messageId;
-                                return (
-                                  <View
-                                    key={m.messageId}
-                                    style={{
-                                      marginBottom: lv(6),
-                                      alignItems: isOnRight ? "flex-end" : "flex-start",
-                                    }}
-                                  >
-                                    <Text style={{
-                                      color: isCliente ? "rgba(147,197,253,0.80)" : "rgba(110,231,183,0.80)",
-                                      fontSize: lv(9),
-                                      fontWeight: "700",
-                                      letterSpacing: 0.4,
-                                      marginBottom: lv(2),
-                                      paddingHorizontal: lv(4),
-                                    }}>
-                                      {m.senderName.toUpperCase()}
-                                    </Text>
-                                    <View
-                                      style={{
-                                        flexDirection: "row",
-                                        alignItems: "stretch",
-                                        maxWidth: "78%",
-                                        backgroundColor: bubbleBg,
-                                        borderRadius: lv(10),
-                                        borderTopRightRadius: isOnRight ? lv(3) : lv(10),
-                                        borderTopLeftRadius: isOnRight ? lv(10) : lv(3),
-                                        borderWidth: 1,
-                                        borderColor: isSpeaking ? "rgba(250,204,21,0.55)" : bubbleBorder,
-                                      }}
-                                    >
-                                      {/* Altavoz IZQUIERDA */}
-                                      {!isOnRight && (
-                                        <TouchableOpacity
-                                          onPress={(e) => {
-                                            if ((e as any)?.stopPropagation) (e as any).stopPropagation();
-                                            speakMsg(m.messageId, m.text);
-                                          }}
-                                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 4 }}
-                                          activeOpacity={0.65}
-                                          style={{
-                                            width: lv(36),
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                            borderRightWidth: 1,
-                                            borderRightColor: isSpeaking ? "rgba(250,204,21,0.30)" : "rgba(255,255,255,0.07)",
-                                          }}
-                                        >
-                                          <Feather
-                                            name={isSpeaking ? "pause-circle" : "volume-2"}
-                                            size={lv(15)}
-                                            color={isSpeaking ? "#facc15" : "rgba(255,255,255,0.90)"}
-                                          />
-                                        </TouchableOpacity>
-                                      )}
-
-                                      {/* Contenido */}
-                                      <TouchableOpacity
-                                        onPress={(e) => {
-                                          if ((e as any)?.stopPropagation) (e as any).stopPropagation();
-                                          setFullMsgText(m.text);
-                                          setFullMsgOpen(true);
-                                        }}
-                                        activeOpacity={0.75}
-                                        style={{ flex: 1, paddingHorizontal: lv(11), paddingVertical: lv(8) }}
-                                      >
-                                        <Text style={{ color: "#e5e7eb", fontSize: lv(13), lineHeight: lv(18) }}>
-                                          {m.text}
-                                        </Text>
-                                        <View style={{ flexDirection: "row", alignItems: "center", gap: lv(5), marginTop: lv(4), justifyContent: isOnRight ? "flex-end" : "flex-start" }}>
-                                          <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: lv(10) }}>{timeStr}</Text>
-                                          <Feather name="lock" size={lv(9)} color="rgba(255,255,255,0.40)" />
-                                          <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: lv(10) }}>{t('tasks_internal_short')}</Text>
-                                        </View>
-                                      </TouchableOpacity>
-
-                                      {/* Altavoz DERECHA */}
-                                      {isOnRight && (
-                                        <TouchableOpacity
-                                          onPress={(e) => {
-                                            if ((e as any)?.stopPropagation) (e as any).stopPropagation();
-                                            speakMsg(m.messageId, m.text);
-                                          }}
-                                          hitSlop={{ top: 10, bottom: 10, left: 4, right: 10 }}
-                                          activeOpacity={0.65}
-                                          style={{
-                                            width: lv(36),
-                                            alignItems: "center",
-                                            justifyContent: "center",
-                                            borderLeftWidth: 1,
-                                            borderLeftColor: isSpeaking ? "rgba(250,204,21,0.30)" : "rgba(255,255,255,0.07)",
-                                          }}
-                                        >
-                                          <Feather
-                                            name={isSpeaking ? "pause-circle" : "volume-2"}
-                                            size={lv(15)}
-                                            color={isSpeaking ? "#facc15" : "rgba(255,255,255,0.90)"}
-                                          />
-                                        </TouchableOpacity>
-                                      )}
-                                    </View>
-                                  </View>
-                                );
-                              })}
-                            </View>
-                          );
-                        })()}
-
-                        {/* Input siempre visible — canal único */}
-                        <View style={{ gap: lv(8) }}>
-                          {/* Canal label — neutral, refleja doble comportamiento */}
-                          <View style={{ flexDirection: "row", alignItems: "center", gap: lv(5) }}>
-                            <Feather name="edit-3" size={lv(10)} color="rgba(255,255,255,0.40)" />
-                            <Text style={{ color: "rgba(255,255,255,0.40)", fontSize: lv(10), fontWeight: "700", letterSpacing: 0.4 }}>
-                              {t('tasks_note_message').toUpperCase()}
-                            </Text>
-                          </View>
-                          {/* TextInput — siempre interactivo */}
-                          <TextInput
-                            value={noteInputGoId === g.id ? noteInputDraft : ""}
-                            onChangeText={(t) => {
-                              setNoteInputGoId(g.id);
-                              setNoteInputDraft(t);
-                            }}
-                            onFocus={(e) => {
-                              (e as any)?.stopPropagation?.();
-                              setNoteInputGoId(g.id);
-                              if (noteInputGoId !== g.id) setNoteInputDraft("");
-                            }}
-                            placeholder={t('placeholder_note')}
-                            placeholderTextColor="rgba(255,255,255,0.38)"
-                            multiline
-                            style={{
-                              color: "#ffffff",
-                              fontSize: lv(13),
-                              paddingHorizontal: lv(13),
-                              paddingVertical: lv(11),
-                              borderRadius: lv(12),
-                              backgroundColor: "rgba(255,255,255,0.05)",
-                              borderWidth: 1.5,
-                              borderColor: noteInputGoId === g.id && noteInputDraft.trim()
-                                ? "rgba(255,255,255,0.55)"
-                                : "rgba(255,255,255,0.18)",
-                              minHeight: lv(46),
-                              maxHeight: lv(120),
-                              textAlignVertical: "top",
-                            }}
-                          />
-                          {/* Botones — aparecen solo cuando hay texto */}
-                          {noteInputGoId === g.id && noteInputDraft.trim() ? (
-                            (g.phone || g.recipients?.[0]?.phone) ? (
-                              /* Con teléfono: dos canales — GO (azul) y WS (verde) */
-                              <View style={{ flexDirection: "row", gap: lv(8) }}>
-                                <TouchableOpacity
-                                  onPress={(e) => {
-                                    if ((e as any)?.stopPropagation) (e as any).stopPropagation();
-                                    saveGoNoteOnly(g.id, noteInputDraft);
-                                  }}
-                                  activeOpacity={0.75}
-                                  style={{
-                                    flex: 1,
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    paddingVertical: lv(11),
-                                    borderRadius: lv(12),
-                                    backgroundColor: "rgba(59,130,246,0.18)",
-                                    borderWidth: 1.5,
-                                    borderColor: "rgba(59,130,246,0.55)",
-                                  }}
-                                >
-                                  <Text style={{ color: "#93c5fd", fontSize: lv(14), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.2 }}>
-                                    GO
-                                  </Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                  onPress={(e) => {
-                                    if ((e as any)?.stopPropagation) (e as any).stopPropagation();
-                                    sendGoNote(g.id, noteInputDraft);
-                                  }}
-                                  activeOpacity={0.75}
-                                  style={{
-                                    flex: 1,
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    paddingVertical: lv(11),
-                                    borderRadius: lv(12),
-                                    backgroundColor: "rgba(37,211,102,0.14)",
-                                    borderWidth: 1.5,
-                                    borderColor: "rgba(37,211,102,0.50)",
-                                  }}
-                                >
-                                  <Text style={{ color: "#25d366", fontSize: lv(14), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.2 }}>
-                                    WS
-                                  </Text>
-                                </TouchableOpacity>
-                              </View>
-                            ) : (
-                              /* Sin teléfono: solo canal GO */
-                              <TouchableOpacity
-                                onPress={(e) => {
-                                  if ((e as any)?.stopPropagation) (e as any).stopPropagation();
-                                  saveGoNoteOnly(g.id, noteInputDraft);
-                                }}
-                                activeOpacity={0.75}
-                                style={{
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  paddingVertical: lv(12),
-                                  borderRadius: lv(12),
-                                  backgroundColor: "rgba(59,130,246,0.18)",
-                                  borderWidth: 1.5,
-                                  borderColor: "rgba(59,130,246,0.55)",
-                                }}
-                              >
-                                <Text style={{ color: "#93c5fd", fontSize: lv(14), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.2 }}>
-                                  GO
-                                </Text>
-                              </TouchableOpacity>
-                            )
-                          ) : null}
-                        </View>
-                      </View>
-                    )}
+                    {renderLinkedNotes(g)}
 
                     {/* ── OPCIONES CONTEXTUALES (demo visual) ── */}
                     {(expandedId === g.id || allExpanded) && (() => {
@@ -25512,88 +24803,6 @@ function HomeScreenContent() {
         </Pressable>
       </Modal>
 
-      {/* ── CAL ADD — selector 4 opciones desde el calendario ── */}
-      <Modal
-        visible={calAddOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setCalAddOpen(false)}
-        statusBarTranslucent
-      >
-        <Pressable
-          style={{ flex: 1, justifyContent: "flex-end" }}
-          onPress={() => setCalAddOpen(false)}
-        >
-          <Pressable onPress={(e) => e.stopPropagation()}>
-            <View
-              style={{
-                backgroundColor: "#131316",
-                borderTopLeftRadius: 24,
-                borderTopRightRadius: 24,
-                paddingHorizontal: 18,
-                paddingTop: 14,
-                paddingBottom: Math.max(paddingBottom + 14, 30),
-              }}
-            >
-              {/* Handle */}
-              <View style={{ width: 40, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.22)", alignSelf: "center", marginBottom: 16 }} />
-
-              {/* Header */}
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-                <View>
-                  <Text style={{ color: "#ffffff", fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.2 }}>AÑADIR</Text>
-                  {!!calAddDateISO && (() => {
-                    const todayISONow = formatISODate(getToday());
-                    const d = new Date(calAddDateISO + "T00:00:00");
-                    const lbl = calAddDateISO === todayISONow ? "HOY" : formatDayLabel(d);
-                    return <Text style={{ color: "rgba(255,255,255,0.45)", fontSize: 10, fontWeight: "600", letterSpacing: 0.5, marginTop: 2 }}>{lbl.toUpperCase()}</Text>;
-                  })()}
-                </View>
-                <TouchableOpacity onPress={() => setCalAddOpen(false)} hitSlop={10} style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", alignItems: "center", justifyContent: "center" }}>
-                  <Feather name="x" size={14} color="rgba(255,255,255,0.55)" />
-                </TouchableOpacity>
-              </View>
-
-              {/* 2 opciones: TAREA INTERNA · TAREA EXTERNA */}
-              {([
-                { kind: "NOTA_INTERNA" as const, label: "TAREA INTERNA", sub: "Nota rápida", icon: "file-text" as const, color: "#7c3aed" },
-                { kind: "NOTA_EXTERNA" as const, label: "TAREA EXTERNA", sub: "Nota rápida", icon: "file-text" as const, color: "#f97316" },
-              ] as const).map((opt) => (
-                <View key={opt.kind} style={{ flexDirection: "row", gap: 10, marginBottom: 10 }}>
-                  {[opt].map((o) => {
-                    const isGo = false;
-                    return (
-                      <TouchableOpacity
-                        key={o.kind}
-                        activeOpacity={0.8}
-                        onPress={() => {
-                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                          openQuickNoteFrom("calendar",o.kind,"",calAddDateISO || undefined);
-                        }}
-                        style={{
-                          flex: 1, borderRadius: 14, padding: 14,
-                          backgroundColor: o.color + "14",
-                          borderWidth: 1.5, borderColor: o.color + "55",
-                        }}
-                      >
-                        <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: o.color, alignItems: "center", justifyContent: "center", marginBottom: 10 }}>
-                          <Feather name={o.icon} size={15} color="#ffffff" />
-                        </View>
-                        <Text style={{ color: "#ffffff", fontSize: 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4 }}>{opt.label}</Text>
-                        <Text style={{ color: opt.color, fontSize: 9, fontWeight: "600", letterSpacing: 0.3, marginTop: 3 }}>{isGo ? "→ Landing" : "→ Panel"}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              ))}
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* ── FIELD SELECTOR — selector de campos opcionales ─────────────────── */}
-      {!calendarTaskContextRef.current && renderFieldSelector(false)}
-
       {/* ── QUICK DETAIL — el flujo ahora abre los componentes reales (contacto/cal/mapa) ── */}
       {/* Ver qdFlowAdvance() + intercepts en saveContact/saveCal/saveMap */}
       {null /* placeholder – no IIFE needed anymore */}
@@ -26329,6 +25538,7 @@ function HomeScreenContent() {
       onMessage={() => openEntryMessage(entry, () => setCalBookingDetailEntry(entry), true)}>
       {renderEntryMicroActions(entry)}
       {renderEntryQuickActions(entry, !(entry.customerBooking || entry.businessBooking))}
+      {renderLinkedNotes(entry)}
     </GoEntryDetailsSheet>;
   }
 
@@ -26344,24 +25554,30 @@ function HomeScreenContent() {
   }
   function renderUnifiedNoteEditor(){
     const scope=noteIdentity.scope;
-    return <GoNoteEditor visible={notesOpen} initial={unifiedNoteInitial} handedness={handedness} ready={noteIdentity.ready} scope={scope}
+    const {linkedEntryId,attachToGo}=unifiedNoteSeed;
+    const cacheId=unifiedNoteInitial?.id ?? (linkedEntryId ? "linked:"+linkedEntryId : attachToGo ? "compose:go" : undefined);
+    return <GoNoteEditor key={cacheId} visible={notesOpen} initial={unifiedNoteInitial} handedness={handedness} ready={noteIdentity.ready} scope={scope}
       initialToolsOpen={unifiedNoteSeed.toolsOpen===true}
       confirmScheduleOnSave={unifiedNoteSeed.confirmSchedule===true}
-      cached={unifiedNoteInitial?unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+unifiedNoteInitial.id):unifiedNoteCache.current?.scope===JSON.stringify(scope)?unifiedNoteCache.current.draft:undefined}
+      cached={cacheId?unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+cacheId):unifiedNoteCache.current?.scope===JSON.stringify(scope)?unifiedNoteCache.current.draft:undefined}
       seed={{...unifiedNoteSeed,title:unifiedNoteSeed.title??quickNoteText,content:unifiedNoteSeed.content??quickNoteDetail}}
-      onClose={state=>{cacheNoteDraft(state,unifiedNoteInitial?.id);if(!state?.saved)unifiedNoteOriginRef.current="landing";setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}
-      onSaved={handleUnifiedNoteSaved}
+      onClose={state=>{cacheNoteDraft(state,cacheId);if(!state?.saved)unifiedNoteOriginRef.current="landing";setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}
+      onSaved={attachToGo ? (entry,notice) => { if(!stageGoNote(entry))showToast(notice,"success"); } : handleUnifiedNoteSaved}
       onDelete={unifiedNoteInitial?deleteSavedNote:undefined}
       renderActions={renderSavedNoteActions}
-      onSave={saveNoteDraft}/ >;
+      onSave={linkedEntryId ? draft=>saveNoteDraft(draft,linkedEntryId) : saveNoteDraft}/ >;
   }
-  async function saveNoteDraft(draft:UnifiedNoteDraft){
+  async function saveNoteDraft(draft:UnifiedNoteDraft,linkedEntryId?:string){
         const identity=noteIdentityRef.current;
         if(!identity.ready||!identity.scope)throw new Error("No se puede verificar tu cuenta. La nota permanece en el editor.");
         const expected={...identity.scope};
-        const result=await saveUnifiedNote(draft,expected,()=>noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===expected.userId&&noteIdentityRef.current.scope.context===expected.context);
+        const active=()=>noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===expected.userId
+          && noteIdentityRef.current.scope.context===expected.context
+          && (!linkedEntryId || linkedNoteParentsRef.current.some(entry=>entry.id===linkedEntryId&&canLinkNoteTo(entry,expected)));
+        if(!active())throw new Error("El elemento vinculado ya no está disponible. Tu nota sigue en el editor.");
+        const result=linkedEntryId ? await saveUnifiedNote(draft,expected,active,linkedEntryId) : await saveUnifiedNote(draft,expected,active);
         watchNoteReminderReceipt(result);
-        if(!draft.original){setQuickNoteText("");setQuickNoteDetail("");void AsyncStorage.removeItem("go_task_draft_v1").catch(()=>{});}
+        if(!draft.original){setQuickNoteText("");setQuickNoteDetail("");}
         return result;
   }
   function deleteSavedNote(entry:GoEntry){
@@ -26395,518 +25611,6 @@ function HomeScreenContent() {
       onClose={state=>{cacheNoteDraft(state,entry.id);onClose();}}/ >;
   }
   // Reuse the same task form inside Calendar or in its original standalone modal.
-  function renderFieldSelector(embedded: boolean) {
-    const isNoteSelector = fieldSelectorKind === "NOTA_INTERNA" || fieldSelectorKind === "NOTA_EXTERNA";
-    const SelectorKeyboardFrame = isNoteSelector ? KeyboardControllerAvoidingView : KeyboardAvoidingView;
-    const FormScroll = isNoteSelector ? (Platform.OS === "web" ? ScrollView : KeyboardAwareScrollView) : View;
-    const content = (
-      <SelectorKeyboardFrame
-          style={{ flex: 1, justifyContent: "flex-end", ...(isNoteSelector ? { backgroundColor: "#0e0e10", paddingTop: insets.top + 4 } : {}) }}
-          behavior={isNoteSelector ? "height" : Platform.OS === "ios" ? "padding" : "height"}
-        >
-          <Pressable
-            style={{ ...(isNoteSelector ? { height: embedded ? 108 : 8, flexShrink: 0 } : { flex: 1 }), alignItems: "center", justifyContent: "center", backgroundColor: embedded ? "rgba(0,0,0,0.42)" : "transparent" }}
-            onPress={closeFieldSelectorPanel}
-          >
-            {!embedded && !isNoteSelector && (
-              <View pointerEvents="none" style={{ opacity: 0.78 }}>
-                {renderGoOrbit(GO_SIZE_4, intent)}
-              </View>
-            )}
-            {embedded && (
-              <View testID="calendar-task-closes" style={{ position: "absolute", ...(isNoteSelector && handedness === "left" ? {left: Math.max(insets.left + 14,14)} : {right: Math.max(insets.right + 14, 14)}), bottom: 10, gap: 8 }}>
-                <GoCloseButton level="panel" onPress={closeFieldSelectorPanel} accessibilityLabel={lang === "en" ? "Close new task" : "Cerrar Nueva tarea"} />
-                <GoCloseButton level="container" onPress={exitCalendarContainer} accessibilityLabel={lang === "en" ? "Exit Calendar" : "Salir de Calendario"} />
-              </View>
-            )}
-          </Pressable>
-          <FormScroll testID={isNoteSelector ? "note-task-form-scroll" : undefined} {...(isNoteSelector ? {
-            keyboardShouldPersistTaps: "handled" as const, style: { flex: 1 }, bottomOffset: 20,
-            contentContainerStyle: { paddingBottom: 4 },
-          } : {})}>
-          <Pressable onPress={(e) => { e.stopPropagation(); if (!isNoteSelector) Keyboard.dismiss(); }}>
-            <View
-              style={{
-                backgroundColor: "#131316",
-                borderTopLeftRadius: 24,
-                borderTopRightRadius: 24,
-                paddingHorizontal: 18,
-                paddingTop: fsKbVisible ? 8 : 10,
-                paddingBottom: fsKbVisible ? 8 : Math.max(paddingBottom + 12, 28),
-              }}
-            >
-              {/* Header */}
-              {(() => {
-                const meta: Record<string, { label: string; icon: keyof typeof Feather.glyphMap; color: string }> = {
-                  GO_INTERNO:   { label: "GO INTERNO",   icon: "zap",       color: "#3b82f6" },
-                  GO_EXTERNO:   { label: "GO EXTERNO",   icon: "send",      color: "#10b981" },
-                  NOTA_INTERNA: { label: "TAREA INTERNA", icon: "file-text", color: "#7c3aed" },
-                  NOTA_EXTERNA: { label: "TAREA EXTERNA", icon: "file-text", color: "#f97316" },
-                };
-                const m = meta[fieldSelectorKind] ?? { label: "NUEVA TAREA", icon: "plus" as any, color: "#ffffff" };
-                return (
-                  <View style={{ flexDirection: "row", alignItems: "center", marginBottom: fsKbVisible ? 6 : 10 }}>
-                    <View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: m.color + "22", alignItems: "center", justifyContent: "center", marginRight: 9 }}>
-                      <Feather name={m.icon} size={14} color={m.color} />
-                    </View>
-                    <Text style={{ color: "#ffffff", fontSize: 13, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1 }}>{m.label}</Text>
-                  </View>
-                );
-              })()}
-
-              {/* DETALLES — campo principal; solo visible cuando no hay teclado o cuando este campo está enfocado */}
-              {(isNoteSelector || !fsKbVisible || fsFocusedField === "detail") && (
-                <TextInput
-                  testID="task-detail"
-                  value={fieldSelectorDetail}
-                  onChangeText={setFieldSelectorDetail}
-                  onFocus={() => setFsFocusedField("detail")}
-                  onBlur={() => setFsFocusedField(null)}
-                  placeholder={t('placeholder_task_details')}
-                  placeholderTextColor="rgba(255,255,255,0.38)"
-                  multiline
-                  scrollEnabled={false}
-                  textAlignVertical="top"
-                  style={{
-                    color: "#ffffff",
-                    fontSize: 13,
-                    lineHeight: 19,
-                    backgroundColor: "#1e1e22",
-                    borderRadius: 12,
-                    borderWidth: 1.5,
-                    borderColor: fieldSelectorDetail.trim() ? "rgba(167,139,250,0.70)" : "rgba(255,255,255,0.18)",
-                    paddingHorizontal: 14,
-                    paddingTop: 8,
-                    paddingBottom: 8,
-                    marginBottom: 8,
-                    minHeight: 40,
-                  }}
-                />
-              )}
-
-              {/* TÍTULO — solo visible cuando no hay teclado o cuando este campo está enfocado */}
-              {(isNoteSelector || !fsKbVisible || fsFocusedField === "title") && (
-                <>
-                  <Text style={{ color: "#ffffff", fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.4, marginBottom: 4, marginLeft: 2 }}>
-                    TÍTULO
-                  </Text>
-                  <TextInput
-                    testID="task-title"
-                    value={fieldSelectorText}
-                    onChangeText={setFieldSelectorText}
-                    onFocus={() => setFsFocusedField("title")}
-                    onBlur={() => setFsFocusedField(null)}
-                    placeholder={t('placeholder_operational')}
-                    placeholderTextColor="rgba(255,255,255,0.40)"
-                    maxLength={16}
-                    returnKeyType="done"
-                    numberOfLines={1}
-                    multiline={false}
-                    style={{
-                      color: "#ffffff",
-                      fontSize: 16,
-                      fontWeight: "700",
-                      backgroundColor: "#1e1e22",
-                      borderRadius: 12,
-                      borderWidth: 1.5,
-                      borderColor: fieldSelectorText.trim() ? "rgba(96,165,250,0.65)" : "rgba(255,255,255,0.18)",
-                      paddingHorizontal: 14,
-                      paddingTop: 10,
-                      paddingBottom: 10,
-                      marginBottom: 12,
-                    }}
-                  />
-                </>
-              )}
-
-
-              {/* UBICACIÓN — fila inline para todos los tipos (oculta mientras el teclado está abierto) */}
-              {!fsKbVisible && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                  {/* Botón MAPA — abre Google Maps para buscar */}
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    onPress={() => {
-                      Haptics.selectionAsync().catch(() => {});
-                      const query = fsPlaceDraft.trim()
-                        ? encodeURIComponent(fsPlaceDraft.trim())
-                        : "";
-                      const url = query
-                        ? `https://www.google.com/maps/search/?api=1&query=${query}`
-                        : "https://www.google.com/maps/";
-                      Linking.openURL(url).catch(() => showToast(t('toast_maps_error'), "error"));
-                    }}
-                    style={[
-                      styles.locIconBtn,
-                      fsPlaceDraft.trim() ? { backgroundColor: "rgba(96,165,250,0.18)", borderColor: "rgba(96,165,250,0.60)" } : null,
-                    ]}
-                  >
-                    <Feather name="map" size={20} color="#ffffff" />
-                  </TouchableOpacity>
-
-                  {/* Input BUSCAR */}
-                  <View style={[
-                    styles.locInputWrap,
-                    fsPlaceDraft.trim() ? { backgroundColor: "rgba(96,165,250,0.12)", borderColor: "rgba(96,165,250,0.50)" } : null,
-                  ]}>
-                    <Feather name="search" size={14} color="rgba(255,255,255,0.75)" style={{ marginRight: 6 }} />
-                    <TextInput
-                      value={fsPlaceDraft}
-                      onChangeText={(v) => {
-                        setFsPlaceDraft(v);
-                        setFsFilledValues(prev => ({ ...prev, place: v || undefined }));
-                        qdCapPlaceRef.current = v;
-                      }}
-                      placeholder={t('placeholder_search')}
-                      placeholderTextColor="rgba(255,255,255,0.65)"
-                      style={styles.locInput}
-                      returnKeyType="search"
-                    />
-                    {!!fsPlaceDraft && (
-                      <TouchableOpacity
-                        onPress={() => {
-                          setFsPlaceDraft("");
-                          setFsFilledValues(prev => ({ ...prev, place: undefined }));
-                          qdCapPlaceRef.current = "";
-                          Haptics.selectionAsync().catch(() => {});
-                        }}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        style={{ paddingHorizontal: 4 }}
-                      >
-                        <Feather name="x" size={16} color="#ffffffcc" />
-                      </TouchableOpacity>
-                    )}
-                  </View>
-
-                  {/* Botón AQUÍ — GPS aislado, no toca estado del Landing */}
-                  <TouchableOpacity
-                    activeOpacity={0.8}
-                    disabled={fsLocating}
-                    onPress={async () => {
-                      try {
-                        setFsLocating(true);
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                        const perms = await Location.getForegroundPermissionsAsync();
-                        let status = perms.status;
-                        if (status !== "granted") {
-                          if (!perms.canAskAgain) { showToast(t('toast_location_denied')); return; }
-                          const req = await Location.requestForegroundPermissionsAsync();
-                          status = req.status;
-                          if (status !== "granted") { showToast(t('toast_location_denied')); return; }
-                        }
-                        let c: { lat: number; lng: number } | null = null;
-                        try {
-                          const last = await Location.getLastKnownPositionAsync({ maxAge: 1000 * 60 * 30 });
-                          if (last?.coords) c = { lat: last.coords.latitude, lng: last.coords.longitude };
-                        } catch {}
-                        if (!c) {
-                          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-                          c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                        }
-                        const text = await reverseGeocodeSafe(c);
-                        setFsPlaceDraft(text);
-                        setFsFilledValues(prev => ({ ...prev, place: text }));
-                        qdCapPlaceRef.current = text;
-                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-                      } catch {
-                        showToast(t('toast_location_error'), "error");
-                      } finally {
-                        setFsLocating(false);
-                      }
-                    }}
-                    style={[
-                      styles.locAquiBtn,
-                      fsPlaceDraft.trim() ? { backgroundColor: "rgba(96,165,250,0.18)", borderColor: "rgba(96,165,250,0.60)" } : null,
-                    ]}
-                  >
-                    {fsLocating ? (
-                      <ActivityIndicator size="small" color="#ffffff" />
-                    ) : (
-                      <>
-                        <Feather name="navigation" size={14} color="#ffffff" />
-                        <Text style={[styles.locAquiText, { color: "#ffffff" }]}>{t('location_here')}</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* ACTIVIDAD — botones GO y OTRO, solo GO EXTERNO */}
-              {fieldSelectorKind === "GO_EXTERNO" && !fsKbVisible && (() => {
-                const selIntent = INTENTS.find(i => i.key === fsActivityKey);
-                const isCustomAct = fsActivityKey === "custom" && !!fsCustomLabel.trim();
-                const actLabel = isCustomAct ? fsCustomLabel.trim() : (selIntent?.label ?? null);
-                const actColor = isCustomAct ? "#a78bfa" : (selIntent?.color ?? "#10b981");
-                return (
-                  <>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                      {/* GO — abre orbital completo */}
-                      <TouchableOpacity
-                        activeOpacity={0.8}
-                        onPress={() => { Haptics.selectionAsync().catch(() => {}); setFsCustomOpen(false); setFsOrbitalOpen(true); }}
-                        style={{
-                          flexDirection: "row", alignItems: "center", gap: 6,
-                          paddingVertical: 7, paddingHorizontal: 14, borderRadius: 20,
-                          backgroundColor: actLabel ? actColor + "22" : "rgba(16,185,129,0.10)",
-                          borderWidth: 1.5,
-                          borderColor: actLabel ? actColor : "rgba(16,185,129,0.45)",
-                        }}
-                      >
-                        <Text style={{ color: actLabel ? actColor : "#10b981", fontSize: 13, fontWeight: "900", letterSpacing: 2 }}>GO</Text>
-                        {actLabel && !isCustomAct && (
-                          <Text style={{ color: actColor, fontSize: 9, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.8 }}>{actLabel.toUpperCase()}</Text>
-                        )}
-                      </TouchableOpacity>
-                      {/* OTRO — abre input personalizado */}
-                      <TouchableOpacity
-                        activeOpacity={0.8}
-                        onPress={() => { Haptics.selectionAsync().catch(() => {}); setFsOrbitalOpen(false); setFsCustomOpen(v => !v); }}
-                        style={{
-                          paddingVertical: 7, paddingHorizontal: 14, borderRadius: 20,
-                          backgroundColor: isCustomAct ? "rgba(167,139,250,0.14)" : "rgba(255,255,255,0.07)",
-                          borderWidth: 1.5,
-                          borderColor: isCustomAct ? "#a78bfa" : "rgba(255,255,255,0.18)",
-                        }}
-                      >
-                        <Text style={{ color: isCustomAct ? "#a78bfa" : "rgba(255,255,255,0.50)", fontSize: 11, fontWeight: "700", letterSpacing: 0.6 }}>
-                          {isCustomAct ? fsCustomLabel.toUpperCase() : "OTHER"}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                    {/* OTRO — input personalizado */}
-                    {fsCustomOpen && (
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                        <TextInput
-                          value={fsCustomLabel}
-                          onChangeText={setFsCustomLabel}
-                          placeholder={t('placeholder_specialty')}
-                          placeholderTextColor="rgba(255,255,255,0.35)"
-                          autoFocus
-                          returnKeyType="done"
-                          onSubmitEditing={() => { if (fsCustomLabel.trim()) setFsActivityKey("custom"); setFsCustomOpen(false); }}
-                          style={{
-                            flex: 1, color: "#ffffff", fontSize: 13,
-                            backgroundColor: "#1e1e22", borderRadius: 12, borderWidth: 1.5,
-                            borderColor: "rgba(167,139,250,0.50)", paddingHorizontal: 12, paddingVertical: 8,
-                          }}
-                        />
-                        <TouchableOpacity
-                          onPress={() => { Haptics.selectionAsync().catch(() => {}); if (fsCustomLabel.trim()) setFsActivityKey("custom"); setFsCustomOpen(false); }}
-                          style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: "#a78bfa", alignItems: "center", justifyContent: "center" }}
-                        >
-                          <Feather name="check" size={15} color="#ffffff" />
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                  </>
-                );
-              })()}
-
-              {isNoteSelector && <View style={{ marginBottom: 10 }}>
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Aviso de esta tarea" onPress={() => setNoteReminderPickerOpen(open => !open)}
-                  style={{minHeight:44,flexDirection:"row",alignItems:"center",gap:8}}>
-                  <Feather name="bell" size={18} color="#fbbf24"/><Text style={{color:"#ffffff",flexShrink:1}}>{quickNoteReminderMinutes === null ? "Sin aviso" : noteReminderLabel(quickNoteReminderMinutes)}</Text>
-                </TouchableOpacity>
-                {noteReminderPickerOpen && <GoNoteReminderPicker value={quickNoteReminderMinutes} dateISO={fsFilledValues.dateISO} time={fsFilledValues.time}
-                  onChange={minutes => { void changeQuickNoteReminder(minutes); }} />}
-              </View>}
-              {/* Fila inferior: GUARDAR · FECHA/HORA · ↓ — todos los tipos */}
-              {!fsKbVisible && (() => {
-                const anyFilled = Boolean(fsFilledValues.date || fsFilledValues.time);
-                const openFechaHora = () => {
-                  Haptics.selectionAsync().catch(() => {});
-                  qdFlowActiveRef.current = true;
-                  qdCapContactNameRef.current = fsFilledValues.contactName || "";
-                  qdCapPhoneRef.current       = fsFilledValues.phone       || "";
-                  qdCapDateRef.current        = fsFilledValues.date        || "";
-                  qdCapDateISORef.current     = fsFilledValues.dateISO     || "";
-                  qdCapTimeRef.current        = fsFilledValues.time        || "";
-                  qdCapPlaceRef.current       = fsFilledValues.place       || "";
-                  const openSchedule = () => {
-                  setCalOpen(true);
-                  calFlow.open({
-                    startAt: "date",
-                    initialDateISO: fsFilledValues.dateISO || formatISODate(getToday()),
-                    initialDateDraft: fsFilledValues.date || "",
-                    initialTime: fsFilledValues.time || "",
-                    initialDuration: fsFilledValues.duration || "",
-                    onSave: _handleCalFlowSave,
-                    onCancel: () => {
-                      qdFlowActiveRef.current = false;
-                      if (calendarTaskContextRef.current) setFieldSelectorOpen(true);
-                      else {
-                        if (isNoteSelector && Platform.OS === "ios") noteSelectorAfterCalendarDismissRef.current = true;
-                        else setFieldSelectorOpen(true);
-                        setCalOpen(false);
-                      }
-                    },
-                  });
-                  };
-                  if (isNoteSelector && !embedded && Platform.OS === "ios") noteCalendarAfterSelectorDismissRef.current = openSchedule;
-                  setFieldSelectorOpen(false);
-                  if (!noteCalendarAfterSelectorDismissRef.current) openSchedule();
-                };
-                return (
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10, ...(isNoteSelector ? { flexWrap: "wrap" } : {}) }}>
-                    {/* GUARDAR conserva todos los valores seleccionados. */}
-                    <TouchableOpacity
-                      onPress={saveFieldSelector}
-                      style={{ paddingVertical: 9, paddingHorizontal: 12, borderRadius: 10, backgroundColor: "#6ee7b7", alignItems: "center", ...(isNoteSelector ? { minHeight: 44, justifyContent: "center" } : {}) }}
-                    >
-                      <Text style={{ color: "#000000", fontSize: 11, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.5 }}>GUARDAR</Text>
-                    </TouchableOpacity>
-                    {/* FECHA / HORA — centro/derecha, más cómodo */}
-                    <TouchableOpacity
-                      onPress={openFechaHora}
-                      style={{ flex: 1, ...(isNoteSelector ? { minWidth: 128, minHeight: 44 } : {}), flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingVertical: 9, borderRadius: 10, backgroundColor: anyFilled ? "rgba(34,197,94,0.15)" : "#1e1e22", borderWidth: 1.5, borderColor: anyFilled ? "#6ee7b7" : "rgba(255,255,255,0.18)" }}
-                    >
-                      <Feather name={anyFilled ? "check" : "calendar"} size={13} color={anyFilled ? "#6ee7b7" : "#ffffff"} />
-                      <Text style={{ color: anyFilled ? "#6ee7b7" : "#ffffff", fontSize: 12, fontWeight: "700", ...(isNoteSelector ? { flexShrink: 1 } : {}) }}>{t('date_time_label')}</Text>
-                    </TouchableOpacity>
-                    {/* CONTACTO circular — solo TAREA EXTERNA y GO EXTERNO */}
-                    {(fieldSelectorKind === "NOTA_EXTERNA" || fieldSelectorKind === "GO_EXTERNO") && (() => {
-                      const contactFilled = Boolean(fsFilledValues.contactName || fsFilledValues.phone);
-                      return (
-                        <TouchableOpacity
-                          onPress={async () => {
-                            try {
-                              Haptics.selectionAsync().catch(() => {});
-                              const { status } = await Contacts.requestPermissionsAsync();
-                              if (status !== "granted") { showToast(t('toast_contacts_permission_denied')); return; }
-                              const picked = await Contacts.presentContactPickerAsync();
-                              if (!picked) return;
-                              const nameStr = (picked.name || "").trim();
-                              const telStr = (picked.phoneNumbers && picked.phoneNumbers[0]?.number) || "";
-                              const cleanTel = String(telStr).replace(/[^\d+]/g, "");
-                              setFsFilledValues(prev => ({ ...prev, contactName: nameStr || undefined, phone: cleanTel || undefined }));
-                              await persistRecent(nameStr, cleanTel).catch(() => {});
-                              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-                              showToast(t('toast_contact').replace('__NAME__', nameStr || cleanTel || t('word_contact')));
-                            } catch {
-                              showToast(t('toast_contacts_error'), "error");
-                            }
-                          }}
-                          hitSlop={6}
-                          style={{
-                            width: 38, height: 38, borderRadius: 19,
-                            backgroundColor: contactFilled ? "rgba(34,197,94,0.18)" : "#1e1e22",
-                            borderWidth: 1.5,
-                            borderColor: contactFilled ? "#6ee7b7" : "rgba(255,255,255,0.16)",
-                            alignItems: "center", justifyContent: "center",
-                          }}
-                        >
-                          <Feather name={contactFilled ? "check" : "user"} size={16} color={contactFilled ? "#6ee7b7" : "rgba(255,255,255,0.75)"} />
-                        </TouchableOpacity>
-                      );
-                    })()}
-                    {/* ↓ — bajar panel */}
-{!embedded && (
-                    <TouchableOpacity
-                      onPress={() => { setFieldSelectorOpen(false); setFsLocationExpanded(false); setFsPlaceDraft(""); }}
-                      hitSlop={8}
-                      style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: "#1e1e22", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", alignItems: "center", justifyContent: "center" }}
-                    >
-                      <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.45)" />
-                    </TouchableOpacity>
-                    )}
-                  </View>
-                );
-              })()}
-
-              {/* El mismo guardado persistente también con teclado abierto. */}
-              {fsKbVisible && (
-                <TouchableOpacity
-                  onPress={saveFieldSelector}
-                  style={{
-                    alignSelf: "flex-end",
-                    marginTop: 6,
-                    paddingVertical: 9,
-                    paddingHorizontal: 18,
-                    borderRadius: 10,
-                    backgroundColor: "#6ee7b7",
-                    ...(isNoteSelector ? { minHeight: 44, justifyContent: "center" } : {}),
-                  }}
-                >
-                  <Text style={{ color: "#000000", fontSize: 12, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.8 }}>GUARDAR</Text>
-                </TouchableOpacity>
-              )}
-
-            </View>
-          </Pressable>
-
-          </FormScroll>
-          {/* ── ORBITAL COMPLETO — aparece al pulsar GO, flota sobre el panel ── */}
-          {!isNoteSelector && fsOrbitalOpen && !fsKbVisible && (() => {
-            const goSz  = 80;
-            const orbR  = 68;
-            const btnSz = 44;
-            const wrapSz = (orbR + btnSz / 2) * 2 + 12; // 192
-            const iconSz  = Math.round(btnSz * 0.34);
-            const labelSz = Math.max(7, Math.round(btnSz * 0.155));
-            const activeC = INTENTS.find(i => i.key === fsActivityKey)?.color ?? "#10b981";
-            return (
-              <Pressable
-                style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "flex-end", paddingBottom: 260 }}
-                onPress={() => setFsOrbitalOpen(false)}
-              >
-                <Pressable onPress={e => e.stopPropagation()}>
-                  <View style={{ width: wrapSz, height: wrapSz }}>
-                    {/* Breathing glow */}
-                    <Animated.View pointerEvents="none" style={{ position: "absolute", left: wrapSz/2-(goSz+12)/2, top: wrapSz/2-(goSz+12)/2, width: goSz+12, height: goSz+12, borderRadius: (goSz+12)/2, borderWidth: 2.5, borderColor: activeC, opacity: goBreath.interpolate({ inputRange:[0,1], outputRange:[0.18,0.55] }), shadowColor: activeC, shadowOpacity: 0.25, shadowRadius: 6, shadowOffset: {width:0,height:0} }} />
-                    {/* Pulse 1 */}
-                    <Animated.View pointerEvents="none" style={{ position: "absolute", left: wrapSz/2-goSz/2, top: wrapSz/2-goSz/2, width: goSz, height: goSz, borderRadius: goSz/2, borderWidth: 1.5, borderColor: "#ffffff", opacity: goPulse1.interpolate({ inputRange:[0,0.15,1], outputRange:[0,0.30,0] }), transform:[{scale: goPulse1.interpolate({inputRange:[0,1],outputRange:[1,1.45]})}] }} />
-                    {/* Pulse 2 */}
-                    <Animated.View pointerEvents="none" style={{ position: "absolute", left: wrapSz/2-goSz/2, top: wrapSz/2-goSz/2, width: goSz, height: goSz, borderRadius: goSz/2, borderWidth: 1.2, borderColor: "#ffffff", opacity: goPulse2.interpolate({ inputRange:[0,0.15,1], outputRange:[0,0.22,0] }), transform:[{scale: goPulse2.interpolate({inputRange:[0,1],outputRange:[1,1.6]})}] }} />
-                    {/* Satellites */}
-                    {INTENTS.map((it, idx) => {
-                      const angle = -Math.PI / 2 + (idx * 2 * Math.PI) / INTENTS.length;
-                      const sel = it.key === fsActivityKey;
-                      const lx = wrapSz / 2 + Math.cos(angle) * orbR - btnSz / 2;
-                      const ly = wrapSz / 2 + Math.sin(angle) * orbR - btnSz / 2;
-                      return (
-                        <View key={it.key} style={{ position: "absolute", left: lx, top: ly }}>
-                          <PremiumOrbitBtn
-                            color={it.color}
-                            selected={sel}
-                            onPress={() => {
-                              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-                              setFsActivityKey(it.key);
-                              setFsCustomLabel("");
-                              setFsOrbitalOpen(false);
-                            }}
-                            icon={it.icon as keyof typeof Feather.glyphMap}
-                            isComida={it.key === "comida"}
-                            label={it.label}
-                            size={btnSz}
-                            iconSize={iconSz}
-                            labelSize={labelSz}
-                            labelSpacing={0.5}
-                            paddingH={4}
-                          />
-                        </View>
-                      );
-                    })}
-                    {/* Center GO circle */}
-                    <View style={{ position: "absolute", left: wrapSz/2-goSz/2, top: wrapSz/2-goSz/2, width: goSz, height: goSz, borderRadius: goSz/2, backgroundColor: activeC, borderWidth: 2, borderColor: "#ffffff", alignItems: "center", justifyContent: "center", shadowColor: activeC, shadowOpacity: 0.7, shadowRadius: 22, shadowOffset: {width:0,height:0}, elevation: 12 }}>
-                      <Text style={{ fontSize: Math.round(goSz * 0.34), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 4, color: "#ffffff" }} {...noTranslate}>GO</Text>
-                    </View>
-                  </View>
-                </Pressable>
-              </Pressable>
-            );
-          })()}
-        </SelectorKeyboardFrame>
-    );
-    if (embedded) {
-      return <View testID="calendar-task-layer" style={{ ...StyleSheet.absoluteFill, zIndex: 200 }}>{content}</View>;
-    }
-    return (
-      <Modal visible={fieldSelectorOpen} transparent animationType="slide" onRequestClose={closeFieldSelectorPanel} statusBarTranslucent
-        onDismiss={() => { const open = noteCalendarAfterSelectorDismissRef.current; noteCalendarAfterSelectorDismissRef.current = null; open?.(); }}>
-        {content}
-      </Modal>
-    );
-  }
 }
 
 function SideIcon({

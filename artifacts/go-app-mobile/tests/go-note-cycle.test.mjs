@@ -96,14 +96,11 @@ test('invalid time remains editable; date/back commit the valid draft and durati
  }finally{await b.close();}
 });
 
-test('both real task SAVE buttons use acknowledged save; notes never render the old orbit and inputs remain mounted across keyboard/blur',()=>{
- const form=nodes.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='renderFieldSelector');assert.ok(form);const text=form.getText(ast);
- assert.equal((text.match(/onPress=\{saveFieldSelector\}/g)||[]).length,2);assert.ok(!text.includes('>SAVE<'));assert.ok(!text.includes('INTERNAL TASK'));
- assert.ok(text.includes('!embedded && !isNoteSelector'));assert.ok(text.includes('!isNoteSelector && fsOrbitalOpen'));
- for(const field of ['title','detail'])assert.ok(text.includes('isNoteSelector || !fsKbVisible || fsFocusedField === "'+field+'"'));
- assert.ok(text.includes('style: { flex: 1 }'),'the native form has a definite flex viewport rather than zero intrinsic ScrollView height');
+test('notes use the single current editor and the retired task form cannot mount',()=>{
+ assert.ok(source.includes('<GoNoteEditor'));
+ assert.ok(!source.includes('renderFieldSelector('));
+ assert.ok(!source.includes('handleCalQuickCreate'));
 });
-
 test('note native viewport is definite before first touch and only note sheets change their flex sizing',()=>{
  const sheet=nodes.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='BottomSheet').getText(ast);
  assert.ok(sheet.includes('noteKeyboardScroll && { height: "100%", maxHeight: 440, flexShrink: 1'));
@@ -112,39 +109,18 @@ test('note native viewport is definite before first touch and only note sheets c
  assert.ok(!sheet.includes('setNoteKeyboardTop'));
 });
 
-test('dictation, temporary native blur, selection replacement and deletion keep the real task inputs mounted and editable',async()=>{
- const a=await f.taskFormFixture();try{
-  const title=a.hosts.get('task-title').instance,detail=a.hosts.get('task-detail').instance;
-  await a.run(()=>{a.hosts.get('task-detail').onFocus();a.live.setKeyboard(true);});
-  await a.run(()=>a.hosts.get('task-detail').onChangeText('Texto dictado por iPhone'));
-  await a.run(()=>a.hosts.get('task-detail').onBlur());assert.equal(a.live.fsFocusedField,null);
-  assert.equal(a.hosts.get('task-title').instance,title);assert.equal(a.hosts.get('task-detail').instance,detail);
-  for(const text of ['Texto dictado por iPhon','Texto dictado por GO','Texto nuevo dictado por GO','Texto nuevo escrito']){
-   await a.run(()=>a.hosts.get('task-detail').onChangeText(text));assert.equal(a.live.fieldSelectorDetail,text);assert.equal(a.hosts.get('task-detail').instance,detail);
-   assert.equal(a.hosts.get('task-detail').selection,undefined,'native cursor/IME owns selection; JS does not force it to the end');
-  }
-  await a.run(()=>a.hosts.get('task-title').onChangeText('Título editado'));assert.equal(a.live.fieldSelectorText,'Título editado');
-  // Locate the actual keyboard-open GUARDAR callback, not a reconstructed button.
-  const text=node=>Array.isArray(node)?node.map(text).join(''):React.isValidElement(node)?text(node.props.children):node??'';
-  const save=[...a.hosts.values()].find(p=>p.onPress&&text(p.children)==='GUARDAR');assert.ok(save);await a.run(()=>save.onPress());assert.deepEqual(a.calls,[['save']]);
- }finally{await a.close();}
+test('the actual note editor retains its inputs through native blur, dictation and editing', async () => {
+ const ui = await require('./helpers/unified-note-fixture.cjs').editorFixture();
+ try {
+  const input = ui.instances.get('note-content');
+  await ui.run(() => ui.hosts.get('note-content').onChangeText('Texto dictado por iPhone'));
+  await ui.run(() => ui.hosts.get('note-content').onBlur?.());
+  await ui.run(() => ui.hosts.get('note-content').onChangeText('Texto editado'));
+  assert.equal(ui.instances.get('note-content'), input);
+  assert.equal(ui.hosts.get('note-content').value, 'Texto editado');
+  assert.equal(ui.hosts.get('note-content').selection, undefined);
+ } finally { await ui.close(); }
 });
-
-test('iOS date transition waits for the actual editor onDismiss; returning cancels only its schedule and preserves the draft',async()=>{
- const a=await f.taskFormFixture();try{
-  const text=node=>Array.isArray(node)?node.map(text).join(''):React.isValidElement(node)?text(node.props.children):node??'';
-  // Host maps retain only the last unnamed button; evaluate JSX to find date's actual closure.
-  const fn=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='openFechaHora');assert.ok(fn);
-  a.context.isNoteSelector=true;a.context.embedded=false;
-  vm.runInNewContext(compile('globalThis.openDate = '+fn.initializer.getText(ast)),a.context);a.context.openDate();
-  assert.equal(a.calls.some(c=>c[0]==='calendar'),false);assert.equal(typeof a.context.noteCalendarAfterSelectorDismissRef.current,'function');
-  await a.run(()=>a.hosts.get('Modal').onDismiss());assert.equal(a.calls.filter(c=>c[0]==='calendar'&&c[1]===true).length,1);
-  await a.run(()=>a.hosts.get('Modal').onDismiss());assert.equal(a.calls.filter(c=>c[0]==='calendar'&&c[1]===true).length,1);
-  const options=a.calls.find(c=>c[0]==='schedule')[1];assert.equal(options.initialTime,'13:45');assert.equal(options.initialDuration,'1h');options.onCancel();
-  assert.equal(a.context.noteSelectorAfterCalendarDismissRef.current,true);assert.equal(a.context.qdFlowActiveRef.current,false);
- }finally{await a.close();}
-});
-
 test('real shared Calendar hook accepts exact task times and keeps date/time/duration through backwards navigation',async()=>{
  class Value{setValue(){}};const animation={Value,timing:()=>({start:done=>done?.()}),spring:()=>({start:done=>done?.()})};
  const api=f.load('hooks/useGoCalendarFlow.tsx',{'react-native':{Animated:animation},'expo-haptics':{selectionAsync:async()=>{},notificationAsync:async()=>{},NotificationFeedbackType:{Success:'success',Error:'error'}},'@/lib/time':{getToday:()=>new Date('2027-01-01'),formatISODate:d=>d.toISOString().slice(0,10),formatDayLabel:()=> '30/12/2027'}});

@@ -68,6 +68,7 @@ function fixture(lang = 'es', overrides = {}) {
     unifiedNoteOriginRef: { current: 'landing' }, unifiedNoteInitial: null, unifiedNoteSeed: {}, listNoteLayerBackRef: { current: null }, listBookingDetail: undefined,
     noteIdentityRef: { current: { ready: true, scope: { userId: 'tasks-fixture', context: 'live:USER' } } },
     noteDocument: noteModel.noteDocument, noteInScope: noteModel.noteInScope, isGoNoteReminderTarget: toolsContext.exports.isGoNoteReminderTarget,
+    noteIdentity: { ready: false }, personalGoLog: [], renderLinkedNotes: () => null,
     goLog: entries, handedness: 'right', allExpanded: false, expandedId: null, isBusinessMode: false, isUserMode: true, altSlotsEntry: null,
     mergeCompletionEntries: completionModel.mergeCompletionEntries,
     actionCompletion: { candidates: [], status: entry => completionModel.completionDecision(entry, completionDocument)?.status },
@@ -243,9 +244,10 @@ test('expanded cards and their notes use ES/EN labels while preserving accept/re
     f.context.calFlow.open = args => f.calls.push(['calendarOpen', args]);
     const tree = f.render(), card = nodes(tree, n => n.type === 'SwipeableRow')[0].props.children[0];
     const labels = texts(card);
-    for (const k of ['tasks_chat', 'tasks_note_message', 'tasks_propose', 'tasks_change_noun']) assert.ok(labels.includes(translations[lang][k].toUpperCase()), k);
-    assert.ok(labels.includes('Contenido propio'));
-    assert.ok(labels.includes(translations[lang].tasks_internal_short));
+    for (const k of ['tasks_chat', 'tasks_note_message']) assert.ok(!labels.includes(translations[lang][k].toUpperCase()), k);
+    for (const k of ['tasks_propose', 'tasks_change_noun']) assert.ok(labels.includes(translations[lang][k].toUpperCase()), k);
+    assert.ok(!labels.includes('Contenido propio'));
+    assert.equal(f.context.goChats.food[0].text, 'Contenido propio');
     const accept = nodes(card, n => n.props.accessibilityLabel === translations[lang].accept.toUpperCase())[0];
     const reject = nodes(card, n => n.props.accessibilityLabel === translations[lang].reject.toUpperCase())[0];
     accept.props.onPress({ stopPropagation() {} });
@@ -383,4 +385,20 @@ test('three Listados reservations show one real state and open the Calendar deta
       }
     }
   }
+});
+
+test('Listados shows an archived note from the current scope and excludes foreign and discarded notes', () => {
+  const scope = { userId: 'tasks-fixture', context: 'live:USER' };
+  const entry = noteModel.buildNoteEntry({ ...noteModel.noteDraft(), content: 'Nota del archivo', destination: 'archive' }, scope);
+  const foreign = { ...entry, id: 'foreign-note', ownerUserId: 'other' };
+  const discarded = { ...entry, id: 'discarded-note' };
+  const f = fixture('es', {
+    goLog: [], personalGoLog: [entry, foreign, discarded], noteIdentity: { ready: true, scope },
+    isArchivedNote: noteModel.isArchivedNote, canReadBoardTask: () => true,
+    actionCompletion: { candidates: [], status: () => undefined, isDiscarded: row => row.id === discarded.id },
+  });
+  const cards = nodes(f.render(), n => n.props.testID?.startsWith('list-entry-card-'));
+  assert.deepEqual(cards.map(card => card.props.testID), ['list-entry-card-' + entry.id]);
+  cards[0].props.onPress();
+  assert.equal(f.context.unifiedNoteInitial.id, entry.id);
 });

@@ -203,20 +203,6 @@ for(const english of [false,true])test('compact bell '+(english?'EN':'ES')+': nu
   }finally{await run(()=>root.unmount());}
 });
 
-test('the real Note creation connection carries the selected offset and guards duplicate taps',()=>{
-  const declaration=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='startGoNoteTask');assert.ok(declaration);
-  const calls=[],ctx={result:null,lang:'es',noteStartLockRef:{current:false},quickNoteAlarm:true,quickNoteReminderMinutes:15,
-    noteIdentityRef:{current:{ready:true,scope}},showToast:(...args)=>calls.push(['toast',...args]),
-    setQuickNoteText:text=>calls.push(['title',text]),setQuickNoteDetail:text=>calls.push(['detail',text]),
-    openFieldSelector:(...args)=>calls.push(['open',...args])};
-  vm.runInNewContext(ts.transpileModule('result = '+declaration.initializer.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,ctx);
-  ctx.result('NOTA_INTERNA','Título','Detalle');ctx.result('NOTA_INTERNA','Título','Detalle');
-  assert.equal(calls.length,1);assert.equal(calls[0][0],'open');assert.deepEqual(plain(calls[0].at(-1)),{scope,minutes:15});
-  ctx.noteStartLockRef.current=false;ctx.noteIdentityRef.current.ready=false;ctx.result('NOTA_INTERNA','Conservado','Detalle');
-  assert.equal(calls.filter(call=>call[0]==='open').length,1);assert.ok(calls.some(call=>call[0]==='title'&&call[1]==='Conservado'));
-  assert.equal(ctx.noteStartLockRef.current,false,'an unverified account does not consume the creation gesture');
-});
-
 async function persistLinkedGo(f, extra = {}, minutes = 15) {
   const entry=tools.bindAttachedNoteReminder(futureEntry({id:'parent-go',type:'GO',attachedNote:'Nota adjunta intacta',reminders:[15],...extra}),{scope,minutes});
   await f.store.updateGoLog(entries=>({entries:[...entries,entry],result:entry}));
@@ -283,16 +269,6 @@ test('linking a note does not drop existing distinct GO offsets or invent schedu
   assert.deepEqual(plain(entry.reminders),[180,60,30,15]);assert.equal(f.os.size,0);assert.match(message,/no programado|permite las notificaciones/i);
   assert.ok(f.calls.permissions.includes(true));assert.equal(JSON.parse(f.raw).length,1);
 });
-test('the real attachment branch carries the chosen alarm inside GO without creating a separate note entry',()=>{
-  const declaration=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='openFieldSelector');assert.ok(declaration);
-  const calls=[],ctx={result:null,calendarSlotSavingRef:{current:false},noteTaskDraftRef:{current:null},isActivelyCreating:true,categorySelected:false,lang:'es',
-    setAttachedExternalNote:note=>calls.push(['attached',plain(note)]),setNotesOpen:()=>{},setQuickNoteText:()=>{},setQuickNoteDetail:()=>{},
-    AsyncStorage:{removeItem:async()=>{}},showToast:()=>{},Haptics:{NotificationFeedbackType:{Success:'success'},notificationAsync:async()=>{}},
-    Alert:{alert:()=>assert.fail('The selected alarm must not be discarded with an unsupported warning')}};
-  vm.runInNewContext(ts.transpileModule('result = '+declaration.initializer.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,ctx);
-  ctx.result('NOTA_EXTERNA','Título','Detalle',undefined,undefined,{scope,minutes:15});
-  assert.deepEqual(calls,[['attached',{title:'Título',detail:'Detalle',reminder:{scope,minutes:15}}]]);
-});
 test('the real GO creation connection persists one shared note/GO record and confirms through the existing queue',async()=>{
   const f=await fixture(),declaration=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='addLogEntry');assert.ok(declaration);
   const confirmations=[],day=futureEntry(),ctx={result:null,makeUid:()=> 'parent-go',t:x=>x,activeLabel:'Nota',activeColor:'#fff',activeKey:'nota',
@@ -303,10 +279,10 @@ test('the real GO creation connection persists one shared note/GO record and con
     confirmAttachedGoNoteReminder:(...args)=>{confirmations.push(args);return f.api().confirmAttachedGoNoteReminder(...args);},
     lang:'es',Alert:{alert:()=>{}},showToast:()=>{},console:{log:()=>{}}};
   vm.runInNewContext(ts.transpileModule('result = '+declaration.initializer.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,ctx);
-  assert.equal(ctx.result('sent',{type:'GO',notes:'Padre',attachedNote:'Texto intacto',reminders:[15],attachedNoteReminder:{scope,minutes:15}}),'parent-go');
+  assert.equal(ctx.result('sent',{type:'GO',notes:'Padre',attachedNote:'Texto intacto',attachedNoteId:'note-fixture',reminders:[15],attachedNoteReminder:{scope,minutes:15}}),'parent-go');
   await f.store.readGoLog();await new Promise(resolve=>setImmediate(resolve));await f.scheduler.refresh(scope);
   assert.equal(confirmations.length,1);assert.equal(JSON.parse(f.raw).length,1);assert.equal(f.os.size,1);
-  assert.deepEqual(JSON.parse(f.raw)[0].reminders,[15]);assert.equal(JSON.parse(f.raw)[0].attachedNote,'Texto intacto');
+  assert.deepEqual(JSON.parse(f.raw)[0].reminders,[15]);assert.equal(JSON.parse(f.raw)[0].attachedNote,'Texto intacto'); assert.equal(JSON.parse(f.raw)[0].attachedNoteId,'note-fixture');
 });
 
 for(const operation of ['save','change'])test('real Note '+operation+' rechecks company context after the final identity await and preserves the shared write queue',async()=>{

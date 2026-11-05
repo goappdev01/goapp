@@ -60,7 +60,7 @@ export function fixture() {
     cancel() { calls.push(['cancelFlow']); this.isActive = false; scope.onCancel?.(); },
     closeMonthGridManual: () => calls.push(['closeMonth']),
   };
-  for (const name of ['closeFieldSelectorPanel', 'closeCalendarTaskPanel', 'changeCalendarView', 'navigateCalendarDay', 'closeMonthGrid', 'exitCalendarContainer', 'openFieldSelector']) {
+  for (const name of ['closeFieldSelectorPanel', 'closeCalendarTaskPanel', 'changeCalendarView', 'navigateCalendarDay', 'closeMonthGrid', 'exitCalendarContainer']) {
     vm.runInContext(transpile('exports.' + name + ' = ' + declaration(name)), scope);
     scope[name] = scope.exports[name];
   }

@@ -10,7 +10,7 @@ import { buildNoteEntry, noteDocument, noteDraft, noteInScope, validateNote, typ
 import { notePerformanceNow, startNoteSaveTrace, setNoteReminderProgress, noteReminderOperationCurrent, type NoteReminderReceipt } from "./goNoteSaveProgress";
 
 /** Ordinary notes use GO's existing committed store; saving is independent of IA and HTTP availability. */
-export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope, active: () => boolean) {
+export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope, active: () => boolean, linkedEntryId?: string) {
   const now=notePerformanceNow,started=now();
   const previousDraft=draft.original?noteDraft(draft.original):null;
   const kind=previousDraft?["title","content","destination","dateISO","time","duration","reminderMinutes","place","location","attachments"].filter(key=>JSON.stringify(draft[key as keyof UnifiedNoteDraft])!==JSON.stringify(previousDraft[key as keyof UnifiedNoteDraft])).join("+")||"unchanged":"create";
@@ -25,7 +25,7 @@ export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope,
     if(previous && noteDocument(previous)?.operationId===draft.operationId){
       const committed=noteDraft(previous),incoming={...draft,time:draft.time?draft.time.split(":").map(n=>n.padStart(2,"0")).join(":"):""};
       const fields=["title","content","destination","dateISO","time","duration","place","reminderMinutes","attachments","location"] as const;
-      if(fields.some(key=>JSON.stringify(committed[key])!==JSON.stringify(incoming[key])))throw new Error("La operación ya guardada contiene otros datos. Vuelve a abrir la nota antes de modificarla.");
+      if((linkedEntryId && previous.noteLinkedEntryId !== linkedEntryId) || fields.some(key=>JSON.stringify(committed[key])!==JSON.stringify(incoming[key])))throw new Error("La operación ya guardada contiene otros datos. Vuelve a abrir la nota antes de modificarla.");
       return {entries:rows,result:previous};
     }
     if(previous && !draft.original || !previous && draft.original)throw new Error("La nota ha cambiado o ya no está disponible. Vuelve a abrirla.");
@@ -34,6 +34,7 @@ export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope,
       if(keys.some(k=>JSON.stringify(previous[k])!==JSON.stringify(draft.original![k])))throw new Error("La nota se modificó durante la edición. Tus cambios siguen en el editor.");
     }
     const entry=buildNoteEntry(draft,scope,previous);
+    if (!previous && linkedEntryId) entry.noteLinkedEntryId = linkedEntryId;
     return {entries:previous?rows.map(row=>row.id===entry.id?entry:row):[entry,...rows],result:entry};
   },()=>{if(!active())throw new Error("El contexto ha cambiado. No se ha confirmado el guardado.");});
   const persisted=now();
@@ -42,7 +43,7 @@ export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope,
   const disk:unknown=JSON.parse(await AsyncStorage.getItem("go_log_v1") || "null");
   const verified=Array.isArray(disk)?disk.filter(row=>row?.id===saved.id):[];
   if(verified.length!==1 || !noteInScope(verified[0],scope) || noteDocument(verified[0])?.operationId!==draft.operationId
-    || ["note","notes","detail","place"].some(k=>JSON.stringify(verified[0][k])!==JSON.stringify(saved[k as keyof GoEntry])))
+    || ["note","notes","detail","place","noteLinkedEntryId"].some(k=>JSON.stringify(verified[0][k])!==JSON.stringify(saved[k as keyof GoEntry])))
     throw new Error("No se ha podido verificar el guardado en el teléfono. Conserva la nota y vuelve a pulsar GUARDAR.");
   await check();
   const verifiedAt=now();performance.duration("identityChecksMs",identityCheckMs);performance.duration("attachmentsMs",filesVerified-validated);performance.duration("writeAndQueueMs",persisted-filesVerified);performance.duration("readbackMs",verifiedAt-persisted);performance.mark("dataReady");

@@ -71,6 +71,9 @@ import { GoCalendarViewSelector } from "./ui/GoCalendarViewSelector";
 
 export type GoEntry = {
   note?: import("@/lib/unifiedNotes").NoteDocument;
+  noteLinkedEntryId?: string;
+  attachedNoteId?: string;
+  attachedNote?: string;
   goNoteReminder?: boolean;
   taskContext?: string;
   actionContext?: string;
