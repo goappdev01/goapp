@@ -41,3 +41,14 @@ export function logBusinessEnrollmentFailure(stage: string, cause: unknown): voi
   const error = cause as { name?: string; status?: number; code?: string } | null;
   console.warn("[business-enrollment]", { stage, name: error?.name, status: error?.status, code: error?.code });
 }
+
+export function saveBusinessVerificationDraft(key: string, data: BusinessEnrollment & { activity: string }): Promise<void> {
+  const value = JSON.stringify(data);
+  return ordered(key, () => AsyncStorage.setItem(key, value));
+}
+export function clearBusinessVerificationDraft(key: string, data: BusinessEnrollment & { activity: string }): Promise<void> {
+  const expected = JSON.stringify(data);
+  return ordered(key, async () => {
+    if (await AsyncStorage.getItem(key) === expected) await AsyncStorage.removeItem(key);
+  });
+}

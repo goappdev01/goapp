@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getGuidanceConfig, swipeGuideMaxOpacity } from "@/utils/guidance";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
+import { BusinessDossierWorkspace } from "../auth/BusinessDossierWorkspace";
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { DemoCompanyManager } from "./DemoCompanyManager";
 import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
@@ -297,6 +298,7 @@ function computeConfigProgress(cfg: typeof import("@/contexts/GoBusinessConfigCo
 }
 
 export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, guidanceLevel = 5, onOpenVerificacion, onFinalizarWizard, previewReadOnly = false, bookingChangeReturnDate, onProposeBookingChange,onOpenMessage,onResolveEntry,canResolveEntry,handedness, onOpenContext, initialCompaniesOpen = false, onDemoNavigate }: EmpresaPanelProps) {
+  const [dossierOpen, setDossierOpen] = useState(false);
   const insets  = useSafeAreaInsets();
   const { t, locale, lang } = useLanguage();
   const SUITES = useMemo(() => getSuites(t), [t]);
@@ -594,6 +596,12 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
 
         {demo && modulo === "home" && <DemoCompanyManager open={demoManagerOpen} onOpenChange={setDemoManagerOpen} onOpenConfiguration={openDemoConfiguration} />}
 
+        {!preview && !demo && modulo === "home" && <TouchableOpacity onPress={() => setDossierOpen(true)} style={{ padding: 12, alignSelf: "center" }}><Text style={{ color: "#111827", fontWeight: "700" }}>Mis empresas · NUEVO NEGOCIO</Text></TouchableOpacity>}
+        <Modal visible={dossierOpen} onRequestClose={() => setDossierOpen(false)} animationType="slide">
+          <KeyboardAvoidingView style={{ flex: 1, paddingTop: insets.top }} behavior={Platform.OS === "ios" ? "padding" : "height"}>
+            <BusinessDossierWorkspace onClose={() => setDossierOpen(false)} />
+          </KeyboardAvoidingView>
+        </Modal>
         {/* ── Centered header — oculto en empresa_config (el asistente tiene su propia cabecera) ── */}
         {modulo !== "empresa_config" ? (
         <View style={s.header}>

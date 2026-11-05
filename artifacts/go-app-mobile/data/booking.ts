@@ -553,8 +553,9 @@ export async function createOwnedBusiness(data: Omit<Business, "id" | "createdAt
   if (!Array.isArray(rows)) throw new BookingApiError("El servidor no confirmó el alta de la empresa.", 502);
   return mapRemoteBusiness(firstRow(rows));
 }
-export async function getCloudConfiguration<T>(): Promise<T | null> {
-  const rows = await supabaseApiRequest<{ business_id: string; payload: T }[]>(`${management}/configuration`, {}, true);
+export async function getCloudConfiguration<T>(businessId?: string): Promise<T | null> {
+  const query = businessId ? `?businessId=${encodeURIComponent(businessId)}` : "";
+  const rows = await supabaseApiRequest<{ business_id: string; payload: T }[]>(`${management}/configuration${query}`, {}, true);
   return rows[0] ? { ...rows[0].payload, businessId: rows[0].business_id } : null;
 }
 export async function saveCloudConfiguration(businessId: string, payload: unknown): Promise<void> {

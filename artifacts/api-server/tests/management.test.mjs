@@ -18,6 +18,7 @@ test('owner management denies cross-business writes and preserves server-owned f
  globalThis.fetch=async(url,init)=>{
   if(!String(url).startsWith('https://test.invalid'))return fetchOriginal(url,init);
   const u=new URL(url);
+  if(u.pathname.endsWith('/rpc/go_business_operational'))return Response.json(owner);
   if(u.pathname.endsWith('/user'))return Response.json({id});
   if(init.method==='GET'&&u.pathname.endsWith('/businesses')){assert.equal(u.searchParams.get('owner_id'),`eq.${id}`);return Response.json(owner?[{id,timezone:'Europe/Madrid',verified:true}]:[]);}
   if(init.method==='GET'&&u.pathname.endsWith('/staff'))return Response.json([]);

@@ -52,7 +52,8 @@ function gate(access, businessMode = true) {
     if (name === 'react') return { default: React, ...React };
     if (name === '@/contexts/GoBusinessAccessContext') return { useBusinessAccess: () => access };
     if (name === '@/contexts/GoModeContext') return { useGoMode: () => ({ loaded: true, isBusinessMode: businessMode }) };
-    if (name === 'react-native') return { View: 'view', Text: 'text', ActivityIndicator: 'spinner', StyleSheet: { create: value => value } };
+    if (name === 'react-native-safe-area-context') return {useSafeAreaInsets:()=>({top:0})};
+    if (name === 'react-native') return { KeyboardAvoidingView:'keyboard', Platform:{OS:'ios'}, View: 'view', Text: 'text', ActivityIndicator: 'spinner', StyleSheet: { create: value => value } };
     return {};
   } };
   vm.createContext(context); vm.runInContext(transpile(read('components/auth/BusinessAccessGate.tsx')), context);
@@ -65,23 +66,27 @@ test('only an actual server boolean true grants business access; local/demo/role
     const snapshot = f.api.resolveBusinessAccess([{ id, verified, ui_metadata: { verified: true }, role: 'empresa' }], user);
     assert.equal(snapshot.status, 'pendiente_verificacion');
     const result = gate({ snapshot, allowed: false, loading: false, error: null });
-    assert.equal(result.type.name, 'BusinessVerificationScreen');
+    assert.equal(result.type, 'keyboard');
     assert.equal(result.children.includes('private-child'), false);
   }
   const verified = f.api.resolveBusinessAccess([{ id, verified: true }], user);
   assert.equal(verified.status, 'verificada');
   assert.deepEqual(gate({ snapshot: verified, allowed: true, loading: false, error: null }).children, ['private-child']);
   assert.equal(f.api.resolveBusinessAccess([{ id, verified: false, verification_request: { status: 'rejected' } }], user).status, 'rechazada');
+  assert.equal(f.api.resolveBusinessAccess([{ id, verified: true, verification_request: { status: 'rejected' } }], user).status, 'rechazada');
+  const independent = f.api.resolveBusinessAccess([{id,verified:true,verification_request:{status:'authorized'}},
+    {id:'33333333-3333-4333-8333-333333333333',verified:false,verification_request:{status:'pending'}}],user,'33333333-3333-4333-8333-333333333333');
+  assert.equal(independent.business.id,'33333333-3333-4333-8333-333333333333');assert.equal(independent.status,'pendiente_verificacion');
 });
 
 test('personal mode remains accessible; pending business and loading/error states never mount private content', () => {
   const f = dataFixture();
   const snapshot = f.api.resolveBusinessAccess([], user);
   assert.equal(snapshot.status, 'sin_empresa');
-  assert.equal(gate({ snapshot, allowed: false, loading: false, error: null }).type.name, 'BusinessVerificationScreen');
+  assert.equal(gate({ snapshot, allowed: false, loading: false, error: null }).type, 'keyboard');
   assert.deepEqual(gate({ snapshot, allowed: false, loading: true, error: 'offline' }, false).children, ['private-child']);
   assert.equal(gate({ snapshot, allowed: true, loading: true, error: null }).type, 'view');
-  assert.equal(gate({ snapshot: null, allowed: false, loading: false, error: 'offline' }).type.name, 'BusinessVerificationScreen');
+  assert.equal(gate({ snapshot: null, allowed: false, loading: false, error: 'offline' }).type, 'keyboard');
 });
 
 test('server lookup uses the existing authenticated API; logout/new session invalidates its result', async () => {
@@ -129,7 +134,8 @@ function providerFixture() {
     if (name === 'react') return { default: React, ...React };
     if (name === 'react-native') return { AppState: { currentState: 'active', addEventListener: (_event, listener) => { appListener = listener; return { remove() {} }; } } };
     if (name === './GoModeContext') return { useGoMode: () => mode };
-    if (name === '@/data/businessAccess') return { getBusinessAccess: () => { const next = deferred(); requests.push(next); return next.promise; } };
+    if (name === '@react-native-async-storage/async-storage') return {default:{getItem:async()=>null,setItem:async()=>{}}};
+    if (name === '@/data/businessAccess') return { resolveBusinessAccess:dataFixture().api.resolveBusinessAccess, getBusinessAccess: () => { const next = deferred(); requests.push(next); return next.promise; } };
     if (name === '@/lib/sessionEvents') return { onSessionChanged: listener => { sessionListeners.add(listener); return () => sessionListeners.delete(listener); } };
     throw new Error(`Unexpected import ${name}`);
   } };

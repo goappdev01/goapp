@@ -27,6 +27,7 @@ test('private management requires server verification while enrollment preserves
     if (!String(url).startsWith(process.env.SUPABASE_URL)) return realFetch(url, init);
     const route = new URL(url); upstream.push(route.pathname);
     assert.equal(init.headers.Authorization, 'Bearer test');
+    if (route.pathname.endsWith('/go_business_operational')) return Response.json(owned && verified === true);
     if (route.pathname.endsWith('/user')) return Response.json({ id });
     if (upstreamFailure) return Response.json({ code: 'XX000' }, { status: 503 });
     if (route.pathname.endsWith('/businesses') && init.method === 'GET') {

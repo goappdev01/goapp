@@ -34,7 +34,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api", router);
 
 const handleError: ErrorRequestHandler = (error, _req, res, _next) => {
-  const status = error?.type === "entity.parse.failed" ? 400 : 502;
+  const status = error?.type === "entity.parse.failed" ? 400 : error?.type === "entity.too.large" ? 413 : 502;
   res.status(status).json({ error: status === 400 ? "Invalid JSON" : "No se pudo conectar con el servicio. Intenta de nuevo." });
 };
 app.use(handleError);

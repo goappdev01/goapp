@@ -22,6 +22,7 @@ import { ConsumoScreen }    from "./ConsumoScreen";
 import { GoRoadmapScreen, RoadmapNode } from "./GoRoadmapScreen";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
+import { BusinessDossierWorkspace } from "../auth/BusinessDossierWorkspace";
 import { useGoView } from "@/contexts/GoViewContext";
 
 const { width: SW } = Dimensions.get("window");
@@ -48,6 +49,7 @@ type AdminSection =
   | "consumos"
   | "publicidad"
   | "facturacion"
+  | "verificacion_empresas"
   | "sistema"
   | "metricas"
   | "empresas"
@@ -666,6 +668,7 @@ const SECTIONS: Array<{
   { key: "facturacion", label: "Facturación",     label_en: "Billing",       sublabel: "Facturas e ingresos",              sublabel_en: "Invoices and revenue",               icon: "file-text",   color: "#4A80BD" },
   { key: "metricas",    label: "Métricas",        label_en: "Metrics",       sublabel: "Campañas y conversión",            sublabel_en: "Campaigns and conversion",           icon: "activity",    color: "#7C69BE" },
   { key: "empresas",    label: "Empresas",        label_en: "Companies",     sublabel: "Negocios conectados",              sublabel_en: "Connected businesses",               icon: "briefcase",   color: "#8b5cf6" },
+  { key: "verificacion_empresas", label: "Verificación empresarial", label_en: "Business verification", sublabel: "Expedientes y autorizaciones", sublabel_en: "Dossiers and authorization", icon: "shield", color: "#D49A22" },
   { key: "sistema",     label: "Sistema",         label_en: "System",        sublabel: "Precios, límites y promos",        sublabel_en: "Prices, limits and promos",          icon: "settings",    color: "#ef4444" },
 ];
 
@@ -682,6 +685,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
   const insets  = useSafeAreaInsets();
   const { lang } = useLanguage();
   const [section, setSection]           = useState<AdminSection>("overview");
+  const [ownDossiers, setOwnDossiers] = useState(false);
   const [roadmapStack, setRoadmapStack] = useState<RoadmapNode[]>([]);
   const [infoPanel, setInfoPanel]       = useState<{ title: string; desc: string } | null>(null);
 
@@ -1054,6 +1058,12 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         {section === "consumos"    && <ConsumoScreen dark />}
         {section === "publicidad"  && <PublicidadScreen />}
         {section === "facturacion" && <FacturacionScreen />}
+        {section === "verificacion_empresas" && adminAccess.permissions.includes("businesses.verify") && <View style={{ flex: 1 }}>
+          <TouchableOpacity onPress={() => setOwnDossiers(value => !value)} style={{ padding: 14 }}>
+            <Text style={{ color: "#FFFFFF", textAlign: "center" }}>{ownDossiers ? "Revisar solicitudes" : "Mis empresas · NUEVO NEGOCIO"}</Text>
+          </TouchableOpacity>
+          <BusinessDossierWorkspace key={ownDossiers ? "own" : "admin"} admin={!ownDossiers} />
+        </View>}
         {section === "sistema"     && <AdminScreen />}
 
         {section === "metricas" && (
