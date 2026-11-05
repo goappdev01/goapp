@@ -176,6 +176,53 @@ test('Listados places the visible editor in its own native modal host and delega
   assert.equal(f.ctx.notesOpen, true);
 });
 
+test('Listados blocks both sheet pans while notes are hosted and restores them after closing', () => {
+  const f = fixture('list');
+  const blockPan = expression(listSheet(), 'blockPan');
+  const initializers = ['dragGesture', 'rightZoneGesture'].map(name => {
+    const found = findAll(node => ts.isVariableDeclaration(node) && node.name.getText(ast) === name);
+    assert.equal(found.length, 1, `execute the real ${name} useMemo`);
+    assert.ok(found[0].initializer && ts.isCallExpression(found[0].initializer));
+    return found[0].initializer;
+  });
+  const memo = [];
+  let cursor = 0;
+  const pan = () => {
+    const chain = {};
+    for (const name of ['enabled', 'activeOffsetY', 'failOffsetY', 'failOffsetX',
+      'simultaneousWithExternalGesture', 'onStart', 'onUpdate', 'onEnd', 'onFinalize']) {
+      chain[name] = value => { chain[`_${name}`] = value; return chain; };
+    }
+    return chain;
+  };
+  const ctx = vm.createContext({
+    Gesture: { Pan: pan }, dragToClose: true, rightZoneClose: true, blockPan: false,
+    noteKeyboardScroll: false, kbVisible: false, nativeScrollGesture: {},
+    onClose() {}, onSwipeStepDown() {}, doClose() {}, swipeStepDown: { value: 1 },
+    translateY: { value: 0 }, scrollOffset: { value: 0 }, panelH: { value: 600 },
+    keyboardVisible: { value: false }, rzStartedInZone: { value: false }, rzScreenW: { value: 390 },
+    useMemo(factory, dependencies) {
+      const index = cursor++;
+      if (!memo[index] || dependencies.some((value, i) => !Object.is(value, memo[index].dependencies[i]))) {
+        memo[index] = { dependencies, value: factory() };
+      }
+      return memo[index].value;
+    },
+  });
+  // Retain memo values across renders: omitting blockPan from either dependency
+  // list must fail just as surely as leaving its native recognizer enabled.
+  for (const notesOpen of [false, true, false]) {
+    f.ctx.notesOpen = notesOpen;
+    ctx.blockPan = valueOf(f.ctx, blockPan);
+    assert.equal(ctx.blockPan, notesOpen, 'only the hosted note session blocks the sheet pans');
+    cursor = 0;
+    for (const initializer of initializers) {
+      assert.equal(valueOf(ctx, initializer)._enabled, !notesOpen,
+        'both actual native Pan recognizers must follow the hosted editor lifecycle');
+    }
+  }
+});
+
 test('the root editor mount is suppressed while either Calendar or Listados presents its own editor', () => {
   const rootCalls = findAll(node => ts.isCallExpression(node) && node.expression.getText(ast) === 'renderUnifiedNoteEditor')
     .filter(node => {

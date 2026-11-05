@@ -21851,6 +21851,7 @@ function HomeScreenContent() {
       <BottomSheet
         visible={listOpen}
         modalOverlay={notesOpen ? <GoScreenHost registerBack={handler=>{listNoteLayerBackRef.current=handler;}}>{renderUnifiedNoteEditor()}</GoScreenHost> : undefined}
+        blockPan={notesOpen}
         onPanelHeightChange={setOverlayPanelHeight}
         onClose={() => { if(listNoteLayerBackRef.current?.())return;setListOpen(false); setLlamadasListOpen(false); setListMinimized(false); setListFiltersHidden(false); }}
         // Gesto de deslizar hacia abajo en dos niveles:
@@ -27133,6 +27134,7 @@ function BottomSheet({
   rightZoneClose,
   containerBg,
   noteKeyboardScroll,
+  blockPan,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -27212,6 +27214,7 @@ function BottomSheet({
   // backgroundColor del panel sin alterar el BACKGROUND_MASTER global.
   containerBg?: string;
   noteKeyboardScroll?: boolean;
+  blockPan?: boolean;
 }) {
   // Notifica al padre cuando el sheet deja de estar visible para que
   // resetee la altura del panel a 0 (modo "sin overlay").
@@ -27305,7 +27308,7 @@ function BottomSheet({
   const dragGesture = useMemo(
     () =>
       Gesture.Pan()
-        .enabled(!!dragToClose)
+        .enabled(!!dragToClose && !blockPan)
         .activeOffsetY([0, 8])
         .failOffsetY([-8, 0])
         .failOffsetX([-8, 8])
@@ -27360,7 +27363,7 @@ function BottomSheet({
             });
           }
         }),
-    [dragToClose, nativeScrollGesture, onClose, swipeStepDown, onSwipeStepDown, translateY, scrollOffset, panelH, keyboardVisible],
+    [dragToClose, blockPan, nativeScrollGesture, onClose, swipeStepDown, onSwipeStepDown, translateY, scrollOffset, panelH, keyboardVisible],
   );
 
   // ── Gesto zona derecha (22 %) — bypass keyboard ──────────────────
@@ -27377,7 +27380,7 @@ function BottomSheet({
   const rightZoneGesture = useMemo(
     () =>
       Gesture.Pan()
-        .enabled(!!rightZoneClose && !!dragToClose && !(noteKeyboardScroll && kbVisible))
+        .enabled(!!rightZoneClose && !!dragToClose && !blockPan && !(noteKeyboardScroll && kbVisible))
         // Activa tras 4 px (antes: 8) — respuesta casi inmediata.
         .activeOffsetY([0, 4])
         // Falla si el gesto va claramente hacia arriba.
@@ -27416,7 +27419,7 @@ function BottomSheet({
             translateY.value = withSpring(0, { damping: 22, stiffness: 240, mass: 0.7 });
           }
         }),
-    [rightZoneClose, dragToClose, noteKeyboardScroll, kbVisible, rzStartedInZone, rzScreenW, doClose, translateY, panelH],
+    [rightZoneClose, dragToClose, blockPan, noteKeyboardScroll, kbVisible, rzStartedInZone, rzScreenW, doClose, translateY, panelH],
   );
 
   const sheetAnimStyle = useAnimatedStyle(() => {
