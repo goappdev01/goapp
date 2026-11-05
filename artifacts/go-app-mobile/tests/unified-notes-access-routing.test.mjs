@@ -644,12 +644,12 @@ test('the actual Landing satellite shows draft trash immediately, preserves norm
     pressLandingSatellite(f);
     const ports = { documents: { getDocumentAsync: async () => ({ canceled: false, assets: [asset] }) }, importFile: disk.fileApi.importNoteFile };
     ui = await h.editorFixture({ ...ctx.renderUnifiedNoteEditor().props, ports });
-    assert.ok(ui.hosts.has('note-draft-discard-row'));
+    assert.equal(ui.hosts.has('note-draft-discard-row'),false);
     assert.equal(ui.hosts.get('note-discard').disabled, false);
     assert.equal(ui.hosts.has('note-destination-selected'), false);
     const trashElement = mountedControl(ui.container, 'note-discard');
     assert.ok(trashElement);
-    assert.ok(mountedAncestor(trashElement,'data-testid','note-draft-discard-row'));
+    assert.ok(mountedAncestor(trashElement,'data-testid','note-editor-footer'));
     assert.equal(mountedAncestor(trashElement,'data-testid','note-tools-panel'), null);
     assert.equal(mountedAncestor(trashElement,'data-testid','unified-note-scroll'), null);
     await ui.run(() => ui.hosts.get('note-title').onChangeText('Borrador'));
@@ -681,28 +681,83 @@ test('the actual Landing satellite shows draft trash immediately, preserves norm
   } finally { if (ui) await ui.close(); disk.close(); }
 });
 
-test('standalone draft trash stays outside scrolling tools with keyboard, text scaling and either hand', async () => {
+test('standalone draft trash shares the compact footer with keyboard, text scaling and either hand', async () => {
   for (const handedness of ['left','right']) for (const width of [320,390,430]) for (const keyboardVisible of [false,true]) {
     const ui = await h.editorFixture({ handedness, onDiscard: async()=>{}, ports: {
       keyboardVisible, viewport: { width, height: width===320?568:932, scale:3, fontScale:1.5 },
     } });
     try {
-      const row = ui.hosts.get('note-draft-discard-row');
-      assert.ok(row);
-      assert.equal(row.style.flexShrink, 0);
-      assert.equal(row.style.position, undefined);
-      assert.equal(row.style.alignItems, handedness==='right'?'flex-end':'flex-start');
-      assert.equal(ui.hosts.get('note-discard').style.minHeight,44);
-      assert.match(ui.container.textContent,/DESCARTAR BORRADOR/);
+      assert.equal(ui.hosts.has('note-draft-discard-row'),false);
+      const footer=ui.hosts.get('note-editor-footer');
+      assert.deepEqual(footer.children.map(child=>child.props.testID||'close'),['note-discard','unified-note-save','note-microphone','close']);
+      const footerStyle=Object.assign({},...footer.style.flat(Infinity).filter(Boolean));
+      assert.equal(footerStyle.flexDirection,handedness==='right'?'row':'row-reverse');
+      assert.equal(ui.hosts.get('note-discard').style.width,44);
+      assert.ok(ui.hosts.get('note-discard').style.minHeight>=44);
+      assert.doesNotMatch(ui.container.textContent,/DESCARTAR BORRADOR/);
+      assert.equal(footer.children.at(-1).props.touchSize,56);
+      assert.equal(ui.hosts.get('unified-note-save').style.flex,1);
       const button = mountedControl(ui.container, 'note-discard');
       assert.ok(button);
       assert.ok(mountedAncestor(button,'data-native','KeyboardFrame'));
+      assert.ok(mountedAncestor(button,'data-testid','note-editor-footer'));
       assert.equal(mountedAncestor(button,'data-testid','note-tools-panel'),null);
       await ui.tap('note-tools-toggle');
       for(const destination of ['calendar','pending','archive'])assert.ok(ui.hosts.has('note-destination-'+destination));
       assert.ok(ui.hosts.has('note-discard'));
     } finally { await ui.close(); }
   }
+});
+
+test('discarding from the real satellite starts a new blank draft even when the same editor remains mounted', async () => {
+  const disk = await h.diskFixture();
+  let ui;
+  try {
+    const f = goComposerFixture(), { ctx } = f;
+    ctx.categorySelected=false;ctx.phone='';
+    installDiscardCallbacks(f,disk);
+    const ids=[];
+    const props=()=>{
+      const editor=ctx.renderUnifiedNoteEditor().props;
+      return {...editor,onDiscard:async draft=>{ids.push(draft.id);await editor.onDiscard(draft);}};
+    };
+    pressLandingSatellite(f);
+    ui=await h.editorFixture(props());
+    for(let cycle=0;cycle<3;cycle++){
+      await ui.run(()=>ui.hosts.get('note-title').onChangeText('Título '+cycle));
+      await ui.run(()=>ui.hosts.get('note-content').onChangeText('Texto descartado '+cycle));
+      await ui.destination('pending');
+      await ui.tap('note-discard');await ui.idle();
+      assert.equal(ctx.notesOpen,false);
+      assert.equal(ctx.unifiedNoteCache.current,null);
+      await ui.render(props());
+      pressLandingSatellite(f);
+      await ui.render(props());
+      assert.equal(ui.hosts.get('note-title').value,'');
+      assert.equal(ui.hosts.get('note-content').value,'');
+      await ui.tap('note-tools-toggle');
+      assert.equal(ui.hosts.has('note-destination-selected'),false);
+      await ui.tap('note-tools-toggle');
+    }
+    assert.equal(new Set(ids).size,3);
+    await ui.run(()=>ui.hosts.get('note-content').onChangeText('Cerrar conserva'));
+    await ui.back();
+    assert.equal(ctx.notesOpen,false);
+    const retainedId=ctx.unifiedNoteCache.current.draft.id;
+    await ui.render(props());
+    pressLandingSatellite(f);await ui.render(props());
+    assert.equal(ui.hosts.get('note-content').value,'Cerrar conserva');
+    await ui.close();ui=null;
+    ui=await h.editorFixture(props());
+    assert.equal(ui.hosts.get('note-content').value,'Cerrar conserva');
+    await ui.tap('note-discard');await ui.idle();
+    assert.equal(ids.at(-1),retainedId);
+    await ui.close();ui=null;
+    pressLandingSatellite(f);ui=await h.editorFixture(props());
+    assert.equal(ui.hosts.get('note-title').value,'');
+    assert.equal(ui.hosts.get('note-content').value,'');
+    assert.equal(disk.rows.length,0);
+  }finally{if(ui)await ui.close();disk.close();}
 });
 
 test('GO trash discards a partial draft, removes one exclusive note, and preserves the action and sent history', async () => {

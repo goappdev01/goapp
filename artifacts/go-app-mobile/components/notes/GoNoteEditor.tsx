@@ -334,6 +334,12 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       const current={...draftRef.current,original:entry||undefined};
       void onDiscard(current).then(()=>{
         Keyboard.dismiss();pendingTool.current=null;pendingCommit.current=null;savedExit.current=null;
+        if(!goAttachment){
+          const empty=noteDraft();draftRef.current=empty;setDraft(empty);persistedEntry.current=null;
+          session.current="";saved.current=true;toolRequest.current++;toolDraftRef.current=null;setToolDraft(null);
+          setPanel("");setToolsOpen(false);setLink("");setLocations([]);setOpeningTool("");setAwaitingTool(null);
+          setMessage("");setPreparedNotice("");
+        }
         onClose({draft:current,saved:true});
       }).catch(error=>setError(error instanceof Error?error.message:"No se ha podido descartar. La nota se conserva."))
         .finally(()=>{deleteLock.current=false;saveLock.current=false;setBusy(false);});
@@ -383,14 +389,13 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
         {!!message&&<Text testID="note-save-confirmation" accessibilityLiveRegion="polite" style={s.success}>{message}</Text>}
         <GoScreenCloseGuide/>
         {!!floatingNotice&&<View testID="note-floating-notice" pointerEvents="none" accessibilityRole="alert" accessibilityLiveRegion="polite" style={[s.floating,{top:insets.top+64}]}><Text style={s.text}>{floatingNotice}</Text></View>}
-        {!goAttachment&&!initial&&onDiscard&&<View testID="note-draft-discard-row" style={{flexShrink:0,alignItems:handedness==="right"?"flex-end":"flex-start",paddingTop:4}}>
+        <View testID="note-editor-footer" onLayout={event=>{const {height,y}=event.nativeEvent.layout;footerHeight.current=height;if(Number.isFinite(y))setFooterBottom(y+height);}} style={[s.footer,{paddingBottom:Math.max(insets.bottom,12),flexDirection:handedness==="left"?"row-reverse":"row"}]}>
+        {!goAttachment&&!initial&&onDiscard&&
           <TouchableOpacity testID="note-discard" accessibilityRole="button" accessibilityLabel="Descartar borrador" accessibilityHint="Elimina este borrador y cierra la nota"
             disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPress={requestDiscard} activeOpacity={0.78}
-            style={{minHeight:44,maxWidth:"100%",paddingHorizontal:12,paddingVertical:8,flexDirection:"row",alignItems:"center",gap:8,borderRadius:12,borderWidth:1,borderColor:"#b4232f",backgroundColor:"#fff5f5"}}>
-            <Feather name="trash-2" size={19} color="#b4232f"/><Text style={{color:"#b4232f",fontSize:13,fontWeight:"700",flexShrink:1}}>DESCARTAR BORRADOR</Text>
-          </TouchableOpacity>
-        </View>}
-        <View testID="note-editor-footer" onLayout={event=>{const {height,y}=event.nativeEvent.layout;footerHeight.current=height;if(Number.isFinite(y))setFooterBottom(y+height);}} style={[s.footer,{paddingBottom:Math.max(insets.bottom,12),flexDirection:handedness==="left"?"row-reverse":"row"}]}>
+            style={{width:44,minHeight:52,flexShrink:0,alignItems:"center",justifyContent:"center",borderRadius:12}}>
+            <Feather name="trash-2" size={19} color="#b4232f"/>
+          </TouchableOpacity>}
           <TouchableOpacity testID="unified-note-save" accessibilityRole="button" disabled={busy||toolFinishing||closingSaved||attachmentBusy||preparing||voice.status!=="idle"} activeOpacity={0.78} onPress={()=>void save()} style={s.save}><LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.58)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,{borderRadius:18}]}/><Text style={s.saveText}>{busy?"GUARDANDO…":"GUARDAR"}</Text></TouchableOpacity>
           <TouchableOpacity testID="note-microphone" accessibilityRole="button" accessibilityLabel={voice.status==="listening"?"Detener escucha de GO":"Hablar con GO para preparar la nota"} accessibilityState={{selected:voice.status==="listening",disabled:busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"}}
             disabled={busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"} activeOpacity={0.78} onPress={()=>{if(draftRef.current.security){setFloatingNotice("Las notas de seguridad no están activadas y no se envían a la IA.");return;}if(!latest.current.ready){setFloatingNotice("Espera a que se verifique tu cuenta para hablar con GO.");return;}void voice.toggle();}} style={[assistantStyles.goButton,s.go,voice.status==="listening"&&assistantStyles.listening]}>
