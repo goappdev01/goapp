@@ -1405,6 +1405,19 @@ const ACTIVITY_DEFS: Array<{ key: GoActivityKey; label: string; color: string; i
   { key: "viaje",   label: "Travel",   color: GO_COLORS.viaje,    icon: "compass"      },
   { key: "generico",label: "Genérico", color: "#a78bfa", icon: "circle"       },
 ];
+function isEditableListNote(entry: GoEntry): boolean {
+  return !!noteDocument(entry) || (entry.kind === "sent" && ["TAREA", "TAREA_INTERNA"].includes(entry.type || "")
+    && (isGoNoteReminderTarget(entry) || ["nota_interna", "nota_externa"].includes(entry.intentKey)));
+}
+
+function isPendingListEntry(entry: GoEntry, resolution?: "done" | "pending"): boolean {
+  if (entry.deleted || entry.estado === "rechazado") return false;
+  if (isEditableListNote(entry)) {
+    return !isArchivedNote(entry) && resolution !== "done" && (resolution === "pending" || entry.estado === "pendiente");
+  }
+  return resolution === "pending" || (entry.estado === "pendiente" && (!entry.dateISO || !entry.time));
+}
+
 function getGoActivityKey(g: { intentKey?: string; isGeneric?: boolean }): GoActivityKey {
   if (g.isGeneric) return "generico";
   switch (g.intentKey) {
@@ -3169,6 +3182,7 @@ function HomeScreenContent() {
   const [remindMinuteDraft, setRemindMinuteDraft] = useState("00");
   const [remindClockError, setRemindClockError] = useState("");
   const [remindInputHeight, setRemindInputHeight] = useState(44);
+  const showClassicListFilters = goView.view === "ADMIN" && adminAccess.allowed && !adminAccess.checking;
   const [listFiltersHidden, setListFiltersHidden] = useState(false);
   // SharedValue que indica al worklet del dragGesture si debe bajar un nivel
   // (0 = aún hay un nivel antes del cierre completo) o cerrar directamente (1).
@@ -3396,6 +3410,15 @@ function HomeScreenContent() {
   // del footer del listado global. Muestra solo items LLAMADA ordenados
   // por fecha ascendente. La llamada directa NO se ejecuta aquí.
   const [llamadasListOpen, setLlamadasListOpen] = useState(false);
+  const listTypeFilter = showClassicListFilters ? typeFilter : "todos";
+  const listActivityFilter = showClassicListFilters ? activityFilter : "todas";
+  const listCallsOpen = showClassicListFilters && llamadasListOpen;
+
+  function clearClassicListFilters() {
+    setTypeFilter("todos");
+    setActivityFilter("todas");
+    setLlamadasListOpen(false);
+  }
   // V1 BLOQUE — uso de los botones del cluster del listado.
   // Persiste un contador por cada botón pulsado en la barra de acción
   // del listado, para reordenar dinámicamente el cluster: el botón más
@@ -4303,18 +4326,21 @@ function HomeScreenContent() {
     openQuickNoteFrom("list","NOTA_INTERNA","");
   }
   function openListSavedNote(entry:GoEntry){
-    if(!noteDocument(entry)&&!(entry.kind==="sent"&&["TAREA","TAREA_INTERNA"].includes(entry.type||"")
-      &&(isGoNoteReminderTarget(entry)||["nota_interna","nota_externa"].includes(entry.intentKey))))return false;
+    if(!isEditableListNote(entry))return false;
     const identity=noteIdentityRef.current;
     if(!identity.ready||!identity.scope||!noteInScope(entry,identity.scope)){
       showToast("No se puede verificar la cuenta y el contexto de esta nota.","error");return true;
     }
     openUnifiedNote(entry,{},"list");return true;
   }
-  function handleUnifiedNoteSaved(entry:GoEntry,notice:string){
+  function handleUnifiedNoteSaved(entry:GoEntry,notice:string,revealNewInList=false){
     const origin=unifiedNoteOriginRef.current;
     unifiedNoteOriginRef.current="landing";
     if(origin==="list"){
+      if(revealNewInList){
+        clearClassicListFilters();
+        setListFilter(current => current === "pendiente" && isPendingListEntry(entry) ? "pendiente" : "todos");
+      }
       showToast(notice,"success");
       return;
     }
@@ -12310,36 +12336,37 @@ function HomeScreenContent() {
   // Límite de visualización para la papelera: máx 50 elementos visibles.
   const TRASH_DISPLAY_LIMIT = 50;
 
-  const listItemCount = useMemo(() => {
-    if (!listOpen) return 0;
-    // En vista "Listado de llamadas": cuenta solo items LLAMADA no eliminados.
-    if (llamadasListOpen) {
-      return goLog.filter((g) => !g.deleted && g.type === "LLAMADA").length;
-    }
-    const isPapelera = listFilter === "papelera";
-    const inPapelera = (g: typeof goLog[number]) => !!(g.deleted || g.estado === "rechazado");
-    const count = goLog.filter((g) => {
-      if(listFilter==="reservas")return g.customerBooking===true && customerBookings.entries.some(entry=>entry.id===g.id);
-      if (isPapelera) return inPapelera(g);
-      if (inPapelera(g)) return false;
-      if (listFilter === "propuesta") {
-        if (!["propuesto", "propuesta_pendiente"].includes(g.estado)) return false;
-      } else if (listFilter !== "todos" && g.estado !== listFilter) return false;
-      if (activityFilter !== "todas" && getGoActivityKey(g) !== activityFilter) return false;
-      if (typeFilter !== "todos") {
-        const t: string = (g as any).type || "GO";
-        if (typeFilter === "GO") {
-          if (t !== "GO" && t !== "WHATSAPP") return false;
-        } else if (typeFilter === "GO_INTERNO") {
-          if (t !== "GO_INTERNO") return false;
-        } else if (typeFilter === "TAREA_INTERNA") {
-          if (t !== "TAREA_INTERNA") return false;
-        } else if (t !== typeFilter) return false;
+  const filteredListEntries = useMemo(() => {
+    if (!listOpen) return [];
+    const scope = noteIdentity.scope;
+    const archive = noteIdentity.ready && scope ? personalGoLog.filter(entry =>
+      isArchivedNote(entry) && noteInScope(entry, scope) && canReadBoardTask(entry) && !actionCompletion.isDiscarded(entry)) : [];
+    const entries = mergeCompletionEntries([...goLog, ...archive], actionCompletion.candidates.filter(entry =>
+      actionCompletion.status(entry) === "pending" || !!entry.changeProposal));
+
+    return entries.filter(entry => {
+      if (listFilter === "reservas") return entry.customerBooking === true && customerBookings.entries.some(row => row.id === entry.id);
+      const inTrash = !!(entry.deleted || entry.estado === "rechazado");
+      if ((listFilter === "papelera") !== inTrash) return false;
+      if (!inTrash) {
+        if (isBusinessMode && entry.id.startsWith("go_booking_cli_")) return false;
+        if (isUserMode && entry.id.startsWith("go_booking_prv_")) return false;
+        if (listFilter === "propuesta") {
+          if (!["propuesto", "propuesta_pendiente"].includes(entry.estado)) return false;
+        } else if (listFilter === "pendiente") {
+          if (!isPendingListEntry(entry, actionCompletion.status(entry))) return false;
+        } else if (listFilter !== "todos" && entry.estado !== listFilter) return false;
       }
-      return true;
-    }).length;
-    return isPapelera ? Math.min(count, TRASH_DISPLAY_LIMIT) : count;
-  }, [listOpen, llamadasListOpen, goLog, listFilter, activityFilter, typeFilter]);
+      if (listActivityFilter !== "todas" && getGoActivityKey(entry) !== listActivityFilter) return false;
+      const type = entry.type || "GO";
+      if (listCallsOpen) return type === "LLAMADA";
+      if (listTypeFilter === "GO") return type === "GO" || type === "WHATSAPP";
+      return listTypeFilter === "todos" || type === listTypeFilter;
+    });
+  }, [listOpen, noteIdentity.ready, noteIdentity.scope, personalGoLog, goLog, actionCompletion.candidates, actionCompletion.status,
+    actionCompletion.isDiscarded, listFilter, customerBookings.entries, isBusinessMode, isUserMode, listActivityFilter, listCallsOpen, listTypeFilter]);
+
+  const listItemCount = listFilter === "papelera" ? Math.min(filteredListEntries.length, TRASH_DISPLAY_LIMIT) : filteredListEntries.length;
 
   // ── Adaptación dinámica del GO al espacio disponible (modo overlay) ──
   // Se declara aquí (no más arriba) porque depende de minX/maxX/minY/maxY/
@@ -21559,7 +21586,7 @@ function HomeScreenContent() {
         // Gesto de deslizar hacia abajo en dos niveles:
         //   1.er deslizamiento (filtros visibles) → oculta menús secundarios, fichas siguen arriba.
         //   2.º deslizamiento (filtros ya ocultos) → cierra el listado completo.
-        swipeStepDown={listSwipeStepAllowed}
+        swipeStepDown={showClassicListFilters ? listSwipeStepAllowed : undefined}
         onSwipeStepDown={() => {
           setListMinimized(false);
           setListFiltersHidden(true);
@@ -21569,15 +21596,15 @@ function HomeScreenContent() {
         compactHeader
         minimized={listMinimized}
         title={(() => {
-          if (llamadasListOpen || typeFilter === "LLAMADA") return t('tasks_call_log').toUpperCase();
+          if (listCallsOpen || listTypeFilter === "LLAMADA") return t('tasks_call_log').toUpperCase();
           if (listFilter === "reservas") return t('tasks_my_bookings').toUpperCase();
           if (listFilter === "papelera") return t('status_deleted').toUpperCase();
           if (listFilter === "pendiente") return t('status_pending_label').toUpperCase();
           if (listFilter === "aceptado") return t('status_accepted').toUpperCase();
           if (listFilter === "propuesta") return t('tasks_change_proposals').toUpperCase();
-          if (typeFilter === "TAREA_INTERNA") return t('tasks_internal_tasks').toUpperCase();
-          if (typeFilter === "TAREA") return t('stat_tasks_label').toUpperCase();
-          if (typeFilter === "GO_INTERNO") return t('tasks_internal_gos').toUpperCase();
+          if (listTypeFilter === "TAREA_INTERNA") return t('tasks_internal_tasks').toUpperCase();
+          if (listTypeFilter === "TAREA") return t('stat_tasks_label').toUpperCase();
+          if (listTypeFilter === "GO_INTERNO") return t('tasks_internal_gos').toUpperCase();
           return t('tasks_title');
         })()}
         protectBrand
@@ -21652,7 +21679,7 @@ function HomeScreenContent() {
             //   Diestro  derecha→izquierda: Todos · Aceptados · Pendientes · Rechazados · Eliminados · Expandir
             //   Zurdo    izquierda→derecha: Expandir · Eliminados · Rechazados · Pendientes · Aceptados · Todos
             const resolutionEntries = mergeCompletionEntries(goLog, actionCompletion.candidates.filter(entry => actionCompletion.status(entry) === "pending" || !!entry.changeProposal));
-            const countPendiente = resolutionEntries.filter(g => !g.deleted && g.estado !== "rechazado" && (actionCompletion.status(g) === "pending" || g.estado === "pendiente" && (!g.dateISO || !g.time))).length;
+            const countPendiente = resolutionEntries.filter(g => isPendingListEntry(g, actionCompletion.status(g))).length;
             const countPropuesta = resolutionEntries.filter((g) => !g.deleted && (g.estado === "propuesto" || g.estado === "propuesta_pendiente")).length;
             const filterDefs = [
               ...(goView.view === "USER" ? [{ k:"reservas" as const,icon:"calendar" as const,label:t('tasks_my_bookings'),color:"#4A80BD",iconOn:"#ffffff",count:customerBookings.entries.length }] : []),
@@ -21669,7 +21696,7 @@ function HomeScreenContent() {
                 <Pressable
                   onPress={() => {
                     Haptics.selectionAsync();
-                    if(f.k==="reservas"){setTypeFilter("todos");setActivityFilter("todas");setLlamadasListOpen(false);}
+                    if (f.k === "reservas" || f.k === "todos" || f.k === "pendiente") clearClassicListFilters();
                     setListFilter((cur) => (cur === f.k ? "todos" : f.k));
                   }}
                   accessibilityLabel={f.label}
@@ -22300,17 +22327,14 @@ function HomeScreenContent() {
                     </View>
                     {/* Derecha: ↓ y ↓↓ pegados al borde — flex:1 para equilibrar */}
                     <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: GAP_CTRL }}>
-                      {minimizeBtn}
+                      {showClassicListFilters && minimizeBtn}
                       {closeAllBtn}
                     </View>
                   </View>
                 )}
                 {/* Filtros de categoría y tipo — se ocultan con ↓ */}
-                {!listFiltersHidden && (
-                  <>
-                    {!quickCreateOpen && categoryFilterRow}
-                    {!quickCreateOpen && typeFilterRow}
-                  </>
+                {showClassicListFilters && !listFiltersHidden && !quickCreateOpen && (
+                  <>{categoryFilterRow}{typeFilterRow}</>
                 )}
                 {/* Botones de acción (cluster) — ocultos en modo creación */}
                 {!quickCreateOpen && (
@@ -22359,65 +22383,15 @@ function HomeScreenContent() {
         {!quickCreateOpen && (
         <>{/* LISTA — único modo. Calendario: botón abre AgendaOperativa (Calendario madre). */}
         {(() => {
-          // Filtro:
-          //   • "papelera" → GOs eliminados por el usuario (deleted=true)
-          //                  + rechazados por el otro (estado="rechazado").
-          //   • Resto      → excluye papelera y aplica el filtro de estado.
           const isPapelaraView = listFilter === "papelera";
-          const inPapelera = (g: typeof goLog[number]) => !!(g.deleted || g.estado === "rechazado");
-          const scope = noteIdentity.scope;
-          const archive = noteIdentity.ready && scope ? personalGoLog.filter(entry =>
-            isArchivedNote(entry) && noteInScope(entry, scope) && canReadBoardTask(entry) && !actionCompletion.isDiscarded(entry)) : [];
-          const listEntries = mergeCompletionEntries([...goLog, ...archive], actionCompletion.candidates.filter(entry => actionCompletion.status(entry) === "pending" || !!entry.changeProposal));
-          const filtered = listEntries.filter((g) => {
-            if(listFilter==="reservas")return g.customerBooking===true && customerBookings.entries.some(entry=>entry.id===g.id);
-            if (isPapelaraView) {
-              if (!inPapelera(g)) return false;
-            } else {
-              if (inPapelera(g)) return false;
-              // Dedup GO_BOOKING cli+prv pairs: show only the mode-matching
-              // perspective so the same booking never appears twice in Listados.
-              if (isBusinessMode && g.id.startsWith("go_booking_cli_")) return false;
-              if (isUserMode     && g.id.startsWith("go_booking_prv_")) return false;
-              if (listFilter === "propuesta") {
-                if (!["propuesto", "propuesta_pendiente"].includes(g.estado)) return false;
-              } else if (listFilter === "pendiente") {
-                if (actionCompletion.status(g) !== "pending" && (g.estado !== "pendiente" || !!g.dateISO && !!g.time)) return false;
-              } else if (listFilter !== "todos" && g.estado !== listFilter) return false;
-            }
-            // Filtro por actividad: independiente del filtro de estado
-            // y de la papelera. "todas" no acota nada.
-            if (activityFilter !== "todas") {
-              if (getGoActivityKey(g) !== activityFilter) return false;
-            }
-            // Vista "Listado de llamadas": solo items de tipo LLAMADA.
-            if (llamadasListOpen) {
-              if ((g.type || "GO") !== "LLAMADA") return false;
-            } else {
-              // Filtro por tipo de acción. "GO" agrupa también WHATSAPP.
-              if (typeFilter !== "todos") {
-                const t: string = g.type || "GO";
-                if (typeFilter === "GO") {
-                  if (t !== "GO" && t !== "WHATSAPP") return false;
-                } else if (typeFilter === "GO_INTERNO") {
-                  if (t !== "GO_INTERNO") return false;
-                } else if (typeFilter === "TAREA_INTERNA") {
-                  if (t !== "TAREA_INTERNA") return false;
-                } else if (t !== typeFilter) {
-                  return false;
-                }
-              }
-            }
-            return true;
-          });
           // Orden ESTABLE (respeta goSortOrder):
           // • Listado de llamadas    → cronológico (siempre ASC por createdAt)
           // • Resto                  → items CON fecha: fecha/hora según orden;
           //                           items SIN fecha: al final, createdAt según orden
           // El estado del GO NUNCA influye en la posición.
           const sortDir = goSortOrder === "desc" ? -1 : 1;
-          const allOrdered = [...filtered].sort((a, b) => {
-            if (llamadasListOpen) return ((a.createdAt ?? 0) - (b.createdAt ?? 0)) * sortDir;
+          const allOrdered = [...filteredListEntries].sort((a, b) => {
+            if (listCallsOpen) return ((a.createdAt ?? 0) - (b.createdAt ?? 0)) * sortDir;
             const aDate = (a as any).dateISO || null;
             const bDate = (b as any).dateISO || null;
             // Items con fecha van ANTES que items sin fecha (siempre)
@@ -25562,7 +25536,7 @@ function HomeScreenContent() {
       cached={cacheId?unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+cacheId):unifiedNoteCache.current?.scope===JSON.stringify(scope)?unifiedNoteCache.current.draft:undefined}
       seed={{...unifiedNoteSeed,title:unifiedNoteSeed.title??quickNoteText,content:unifiedNoteSeed.content??quickNoteDetail}}
       onClose={state=>{cacheNoteDraft(state,cacheId);if(!state?.saved)unifiedNoteOriginRef.current="landing";setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}
-      onSaved={attachToGo ? (entry,notice) => { if(!stageGoNote(entry))showToast(notice,"success"); } : handleUnifiedNoteSaved}
+      onSaved={attachToGo ? (entry,notice) => { if(!stageGoNote(entry))showToast(notice,"success"); } : (entry,notice) => handleUnifiedNoteSaved(entry,notice,!unifiedNoteInitial && !linkedEntryId)}
       onDelete={unifiedNoteInitial?deleteSavedNote:undefined}
       renderActions={renderSavedNoteActions}
       onSave={linkedEntryId ? draft=>saveNoteDraft(draft,linkedEntryId) : saveNoteDraft}/ >;

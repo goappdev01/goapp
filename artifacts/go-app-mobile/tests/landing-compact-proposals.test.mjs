@@ -26,7 +26,12 @@ function compile(text) {
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
   } }).outputText;
 }
-const code = compile(`${formatter?.getText(ast) || ''}\ntree = (${sheet.getText(ast)});`);
+const listFunctions = ['isEditableListNote', 'isPendingListEntry', 'clearClassicListFilters'].map(name =>
+  find(ast, node => ts.isFunctionDeclaration(node) && node.name?.text === name));
+const listState = ['showClassicListFilters', 'listTypeFilter', 'listActivityFilter', 'listCallsOpen', 'filteredListEntries'].map(name =>
+  'const ' + find(ast, node => ts.isVariableDeclaration(node) && node.name?.getText(ast) === name).getText(ast) + ';');
+const code = compile(['{', formatter.getText(ast), ...listFunctions.map(node => node.getText(ast)), ...listState,
+  `tree = (${sheet.getText(ast)});`, '}'].join('\n'));
 const translationsContext = { exports: {} };
 vm.runInNewContext(compile(fs.readFileSync('i18n/translations.ts', 'utf8')), translationsContext);
 const translations = translationsContext.exports.translations;
@@ -35,12 +40,16 @@ vm.runInNewContext(compile(fs.readFileSync('data/goEntryPresentation.ts','utf8')
 vm.runInNewContext(compile(fs.readFileSync('data/reservationCardPolicy.ts','utf8')),colorContext);
 const completionContext = { exports: {} };
 vm.runInNewContext(compile(fs.readFileSync('lib/goActionCompletion.ts', 'utf8')), completionContext);
+const noteContext = { exports: {} }, toolsContext = { exports: {} };
+vm.runInNewContext(compile(fs.readFileSync('lib/unifiedNotes.ts', 'utf8')), noteContext);
+vm.runInNewContext(compile(fs.readFileSync('lib/goNoteTools.ts', 'utf8')), toolsContext);
 const setterNames = new Set();
 function setters(node) {
   if (ts.isIdentifier(node) && /^set[A-Z]/.test(node.text) && !['setTimeout', 'setInterval'].includes(node.text)) setterNames.add(node.text);
   ts.forEachChild(node, setters);
 }
 setters(sheet);
+for (const fn of listFunctions) setters(fn);
 function nodes(tree, predicate = () => true) {
   if (!tree || typeof tree !== 'object') return [];
   if (Array.isArray(tree)) return tree.flatMap(child => nodes(child, predicate));
@@ -71,8 +80,9 @@ function fixture(lang = 'es', overrides = {}) {
   const hosts = Object.fromEntries(['BottomSheet', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable',
     'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(name => [name, name]));
   const context = { ...hosts, React, Date, Math,lang,ENTRY_COLORS:colorContext.exports.GO_ENTRY_COLORS,reservationCardPolicy:colorContext.exports.reservationCardPolicy,entryIsReservation:presentationContext.exports.entryIsReservation,entryHeading:presentationContext.exports.entryHeading,canResolveEntry:()=>false, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""},
-    mergeCompletionEntries: completionContext.exports.mergeCompletionEntries,
-    actionCompletion: { candidates: [], status: () => undefined }, noteIdentity: {ready:false}, renderLinkedNotes: () => null, listBookingDetail: undefined, notesOpen: false, openListNote() {}, openListSavedNote: () => false,
+    mergeCompletionEntries: completionContext.exports.mergeCompletionEntries, useMemo: fn => fn(), adminAccess: { allowed: false, checking: false },
+    noteDocument: noteContext.exports.noteDocument, isGoNoteReminderTarget: toolsContext.exports.isGoNoteReminderTarget,
+    actionCompletion: { candidates: [], status: () => undefined }, noteIdentity: {ready:false}, personalGoLog: [], renderLinkedNotes: () => null, listBookingDetail: undefined, notesOpen: false, openListNote() {}, openListSavedNote: () => false,
     t: key => { assert.equal(typeof translations[lang][key], 'string', key); return translations[lang][key]; },
     listOpen: true, listSwipeStepAllowed: true, llamadasListOpen: false, listMinimized: false,
     listFiltersHidden: false, listFilter: 'todos', typeFilter: 'todos', activityFilter: 'todas',

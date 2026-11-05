@@ -89,7 +89,8 @@ function fixture(origin = 'calendar') {
     getToday: () => new Date(2027, 0, 1),
     formatISODate: date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
     savedNoteTarget: navigation.savedNoteTarget, noteDocument: model.noteDocument, noteInScope: model.noteInScope,
-    isGoNoteReminderTarget: tools.isGoNoteReminderTarget,
+    isGoNoteReminderTarget: tools.isGoNoteReminderTarget, isArchivedNote: model.isArchivedNote,
+    listFilter: 'propuesta', typeFilter: 'GO', activityFilter: 'comida', llamadasListOpen: true,
     showToast: (...args) => calls.push(['toast', ...args]),
     closeMonthGrid: () => calls.push(['close-month']),
     getTaskUser: async () => { calls.push(['get-user']); return scope.userId; },
@@ -102,7 +103,8 @@ function fixture(origin = 'calendar') {
   for (const state of ['notesOpen', 'unifiedNoteInitial', 'unifiedNoteSeed', 'calOpen', 'listOpen',
     'calQuickCreateOpen', 'quickCreateOpen', 'quickCreateText', 'fieldSelectorOpen', 'calReservasOpen', 'calConfigVisible',
     'calAddOpen', 'calPanelOpen', 'demoCustomerCalendarSelected', 'calBgViewMode', 'calBgViewMonth', 'dateISODraft',
-    'calScrollToDateTarget', 'calHighlightEntryId', 'quickNoteText', 'quickNoteDetail', 'attachedExternalNote']) {
+    'calScrollToDateTarget', 'calHighlightEntryId', 'quickNoteText', 'quickNoteDetail', 'attachedExternalNote',
+    'listFilter', 'typeFilter', 'activityFilter', 'llamadasListOpen']) {
     ctx[`set${state[0].toUpperCase()}${state.slice(1)}`] = value => {
       ctx[state] = typeof value === 'function' ? value(ctx[state]) : value;
       calls.push([state, h.plain(ctx[state])]);
@@ -110,7 +112,7 @@ function fixture(origin = 'calendar') {
   }
   loadFunctions(ctx, ['openUnifiedNote', 'openUnifiedNoteComposer', 'openQuickNoteFrom', 'openCalendarNote', 'openListNote',
     'openCalendarDayNote', 'openCalendarSlotTask', 'openListSavedNote', 'handleUnifiedNoteSaved', 'openSavedNoteDestination',
-    'cacheNoteDraft', 'renderUnifiedNoteEditor']);
+    'cacheNoteDraft', 'renderUnifiedNoteEditor', 'isEditableListNote', 'isPendingListEntry', 'clearClassicListFilters']);
   return { ctx, calls, scope };
 }
 function assertComposer(f, origin, expectedSeed, initial = null) {
@@ -303,6 +305,10 @@ for (const origin of ['list', 'calendar']) for (const destination of ['calendar'
       assert.equal(f.ctx.listOpen, true);
       assert.equal(f.ctx.calOpen, false);
       assert.equal(f.calls.some(call => call[0] === 'calScrollToDateTarget'), false);
+      assert.equal(f.ctx.listFilter, 'todos');
+      assert.equal(f.ctx.typeFilter, 'todos');
+      assert.equal(f.ctx.activityFilter, 'todas');
+      assert.equal(f.ctx.llamadasListOpen, false);
     } else {
       assert.equal(f.ctx.calOpen, true);
       assert.equal(f.ctx.calHighlightEntryId, entry.id);

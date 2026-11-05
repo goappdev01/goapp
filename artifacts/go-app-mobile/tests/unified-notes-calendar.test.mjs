@@ -139,7 +139,8 @@ test('the real Home GUARDAR callback and mounted editor persist/read back a phra
  vm.runInNewContext(h.compile(save.getText(ast)+';'+saved.getText(ast)+';'+fn.getText(ast)+';globalThis.renderEditor=renderUnifiedNoteEditor;'),ctx);const element=ctx.renderEditor();assert.equal(element.props.visible,true);
  const ui=await h.editorFixture({scope:element.props.scope,onSave:element.props.onSave});try{
  await ui.run(()=>ui.hosts.get('note-content').onChangeText('Frase del Landing sin título'));await ui.run(()=>ui.hosts.get('note-destination-pending').onPress());disk.failWrite(true);await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(calls.length,0);assert.equal(disk.rows.length,0);
- disk.failWrite(false);await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(disk.rows.length,1);assert.equal(disk.rows[0].note.content,'Frase del Landing sin título');assert.deepEqual(calls,[['title',''],['detail',''],['remove','go_task_draft_v1']]);
+ disk.failWrite(false);await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();assert.equal(disk.rows.length,1);assert.equal(disk.rows[0].note.content,'Frase del Landing sin título');
+ assert.deepEqual(calls,[['title',''],['detail','']],'saving a unified note preserves the separate legacy GO task draft');
  const [loaded]=await disk.reopen(),reopened=await h.editorFixture({initial:loaded});try{assert.equal(reopened.hosts.get('note-content').value,'Frase del Landing sin título');}finally{await reopened.close();}
  }finally{await ui.close();}
  }finally{disk.close();}

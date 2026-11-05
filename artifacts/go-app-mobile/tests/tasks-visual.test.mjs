@@ -7,6 +7,7 @@ import vm from 'node:vm';
 
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const ts = require('typescript');
+const notesFixture = require('./tests/helpers/unified-note-fixture.cjs');
 const source = readFileSync('app/index.tsx', 'utf8');
 const home = ts.createSourceFile('home.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function find(node, predicate) {
@@ -24,8 +25,13 @@ function compile(text) {
 }
 const compactFormatter = find(home, node => ts.isFunctionDeclaration(node) && node.name?.text === 'formatCompactProposalSlot');
 assert.ok(compactFormatter, 'use the actual compact slot formatter');
-const listCode = compile(`${compactFormatter.getText(home)}\ntree = (${sheet('listOpen').getText(home)});`);
-const routeNames = ['openUnifiedNote', 'openUnifiedNoteComposer', 'openQuickNoteFrom', 'openListNote', 'openListSavedNote'];
+const listFunctions = ['isPendingListEntry', 'clearClassicListFilters'].map(name =>
+  find(home, node => ts.isFunctionDeclaration(node) && node.name?.text === name));
+const listState = ['showClassicListFilters', 'listTypeFilter', 'listActivityFilter', 'listCallsOpen', 'filteredListEntries', 'listItemCount'].map(name =>
+  'const ' + find(home, node => ts.isVariableDeclaration(node) && node.name?.getText(home) === name).getText(home) + ';');
+const listCode = compile(['{', compactFormatter.getText(home), ...listFunctions.map(node => node.getText(home)), ...listState,
+  'itemCount = listItemCount;', `tree = (${sheet('listOpen').getText(home)});`, '}'].join('\n'));
+const routeNames = ['isEditableListNote', 'openUnifiedNote', 'openUnifiedNoteComposer', 'openQuickNoteFrom', 'openCalendarNote', 'openListNote', 'openListSavedNote'];
 const routes = routeNames.map(name => {
   const node = find(home, node => (ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node)) && node.name?.getText(home) === name);
   assert.ok(node, `execute the real ${name} route`);
@@ -51,6 +57,8 @@ function nodes(tree, predicate) {
 }
 const texts = tree => nodes(tree, n => n.type === 'Text').flatMap(n => n.props.children).filter(x => typeof x === 'string').join(' | ');
 const childWith = (tree, text) => nodes(tree, n => ['TouchableOpacity', 'Pressable'].includes(n.type) && texts(n) === text)[0];
+const listControl = (tree, label) => nodes(tree.props.footer, n => n.props.accessibilityLabel === label)[0];
+const listCard = (tree, id) => nodes(tree, n => n.props.testID === 'list-entry-card-' + id)[0];
 const entries = [
   { id: 'food', intentKey: 'comida', intentLabel: 'COMIDA', notes: 'COMIDA', type: 'GO', estado: 'propuesta_pendiente', dateISO: '2030-06-03', date: '03/06/2030', time: '12:00', changeProposal: { date: '04/06/2030', time: '13:00' } },
   { id: 'sport', intentKey: 'deporte', intentLabel: 'DEPORTE', notes: 'DEPORTE', type: 'GO', estado: 'propuesto', dateISO: '2030-06-05', date: '05/06/2030', time: '18:00', changeProposal: { date: '06/06/2030', time: '19:00' } },
@@ -60,14 +68,15 @@ function fixture(lang = 'es', overrides = {}) {
   const completionDocument = completionModel.emptyCompletionDocument({ userId: 'tasks-fixture', context: 'live:USER' });
   const React = { Fragment: 'Fragment', createElement: (type, props, ...children) => ({ type, props: { ...props, children: children.flat(Infinity) } }) };
   const hosts = Object.fromEntries(['BottomSheet', 'GoScreenHost', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable', 'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(x => [x, x]));
-  const context = { ...hosts, React, Date, Math, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""}, console,
+  const context = { ...hosts, React, Date, Math, goView:{view:"USER"},adminAccess:{allowed:false,checking:false},useMemo: fn => fn(),customerBookings:{entries:[],loading:false,error:""}, console,
     t: key => { assert.equal(typeof translations[lang][key], 'string', key); return translations[lang][key]; },
     listOpen: true, listSwipeStepAllowed: true, llamadasListOpen: false, listMinimized: false, listFiltersHidden: false, listFilter: 'todos', typeFilter: 'todos', activityFilter: 'todas',
     quickCreateOpen: false, quickCreateKbVisible: false, quickCreateText: '', paddingBottom: 34, screenBgColors: {}, listGoSize: 'medio', goSortOrder: 'asc',
     calAddOpen: false, calQuickCreateOpen: false, fieldSelectorOpen: false, isActivelyCreating: false, categorySelected: false,
     unifiedNoteOriginRef: { current: 'landing' }, unifiedNoteInitial: null, unifiedNoteSeed: {}, listNoteLayerBackRef: { current: null }, listBookingDetail: undefined,
     noteIdentityRef: { current: { ready: true, scope: { userId: 'tasks-fixture', context: 'live:USER' } } },
-    noteDocument: noteModel.noteDocument, noteInScope: noteModel.noteInScope, isGoNoteReminderTarget: toolsContext.exports.isGoNoteReminderTarget,
+    noteDocument: noteModel.noteDocument, noteInScope: noteModel.noteInScope, isArchivedNote: noteModel.isArchivedNote,
+    canReadBoardTask: () => true, isGoNoteReminderTarget: toolsContext.exports.isGoNoteReminderTarget,
     noteIdentity: { ready: false }, personalGoLog: [], renderLinkedNotes: () => null,
     goLog: entries, handedness: 'right', allExpanded: false, expandedId: null, isBusinessMode: false, isUserMode: true, altSlotsEntry: null,
     mergeCompletionEntries: completionModel.mergeCompletionEntries,
@@ -81,12 +90,13 @@ function fixture(lang = 'es', overrides = {}) {
     noteInputGoId: null, noteInputDraft: '', pendingUndos: {}, goChats: {}, speakingMsgId: null, place: '', sharedChatKey: g => g.id, currentReceivedIdRef: { current: null }, proposalReturnRef: { current: null }, calFlow: {}, marketplacePedidos: [], lastTapRef: { current: { id: null, t: 0 } }, quickNoteAlarm: false,
     Keyboard: { dismiss: () => calls.push(['dismiss']) }, AsyncStorage: { setItem: (...args) => { calls.push(['store', ...args]); return Promise.resolve(); } },
     Haptics: { selectionAsync: () => Promise.resolve(), notificationAsync: () => Promise.resolve(), NotificationFeedbackType: { Warning: 'warning' } },
-    date: '', time: '', notesOpen: false, lang,
+    date: '', time: '', notesOpen: false, lang, dateISODraft: '2027-01-15', itemCount: 0,
     ...overrides,
   };
   const setterNames = new Set();
   const collect = n => { if (ts.isIdentifier(n) && /^set[A-Z]/.test(n.text) && !['setTimeout', 'setInterval'].includes(n.text)) setterNames.add(n.text); ts.forEachChild(n, collect); };
   collect(sheet('listOpen'));
+  for (const fn of listFunctions) collect(fn);
   for (const route of routes) collect(route.node);
   for (const name of setterNames) context[name] = value => { calls.push([name, value]); const field = name.slice(3, 4).toLowerCase() + name.slice(4); context[field] = typeof value === 'function' ? value(context[field]) : value; };
   for (const name of ['updateGoStatus', 'acceptProposal', 'rejectProposal', 'openProposalFromList', 'openFieldSelector', 'showToast', 'scheduleUndo', 'rejectGo', 'toggleGoSortOrder', 'sendExpandedNote', 'toggleNotaRecording', 'resetNotaAudio', 'saveGoNoteOnly', 'sendGoNote', 'applyAlternativeSlot', 'sendSuggestChangeFromCal', 'speakMsg', 'undoStatusChange', 'updateLogStatus']) context[name] = (...args) => calls.push([name, ...args]);
@@ -98,7 +108,8 @@ function fixture(lang = 'es', overrides = {}) {
 
 for (const lang of ['es', 'en']) {
   test(`Tasks menus keep ${lang} labels and their real note button opens the shared editor directly`, () => {
-    const f = fixture(lang), tree = f.render(), footer = tree.props.footer;
+    const f = fixture(lang, { goView: { view: 'ADMIN' }, adminAccess: { allowed: true, checking: false } });
+    const tree = f.render(), footer = tree.props.footer;
     assert.equal(tree.props.title, lang === 'es' ? 'GO · TAREAS' : 'GO · TASKS');
     const labels = texts(footer);
     for (const k of ['tasks_calls', 'label_task_internal', 'stat_tasks_label', 'tasks_go_internal', 'filter_todos']) assert.ok(labels.includes(translations[lang][k]), k);
@@ -401,4 +412,111 @@ test('Listados shows an archived note from the current scope and excludes foreig
   assert.deepEqual(cards.map(card => card.props.testID), ['list-entry-card-' + entry.id]);
   cards[0].props.onPress();
   assert.equal(f.context.unifiedNoteInitial.id, entry.id);
+});
+
+test('only verified ADMIN gets the two classic GO menus at every list size and handedness', () => {
+  const labels = translations.es;
+  for (const handedness of ['left', 'right']) for (const listGoSize of ['compacto', 'medio', 'grande']) {
+    for (const [view, allowed, checking] of [
+      ['USER', false, false], ['USER', true, false], ['BUSINESS', false, false],
+      ['ADMIN', false, false], ['ADMIN', true, true], ['ADMIN', true, false],
+    ]) {
+      const f = fixture('es', { handedness, listGoSize, goView: { view }, adminAccess: { allowed, checking },
+        typeFilter: 'GO', activityFilter: 'comida', llamadasListOpen: true });
+      const tree = f.render();
+      const classic = view === 'ADMIN' && allowed && !checking;
+      const footer = texts(tree.props.footer);
+      for (const label of ['GO', labels.cat_coffee, labels.cat_food, labels.tasks_calls, labels.tasks_go_internal, labels.label_task_internal]) {
+        assert.equal(footer.split(' | ').includes(label), classic, label);
+      }
+      assert.equal(!!tree.props.swipeStepDown, classic);
+      assert.ok(listControl(tree, labels.tasks_close_list));
+      assert.ok(listControl(tree, labels.status_pending_label));
+      assert.ok(listControl(tree, labels.filter_todos));
+      assert.ok(listControl(tree, 'Notas'));
+      assert.equal(!!listControl(tree, labels.tasks_my_bookings), view === 'USER');
+      if (!classic) assert.ok(listCard(tree, 'food'), 'stored classic filters cannot hide records in V1');
+      if (classic) {
+        assert.equal(tree.props.title, labels.tasks_call_log.toUpperCase());
+        listControl(tree, labels.filter_todos).props.onPress();
+        assert.equal(f.context.activityFilter, 'todas');
+        assert.equal(f.context.typeFilter, 'todos');
+        assert.equal(f.context.llamadasListOpen, false);
+        assert.ok(listCard(f.render(), 'food'));
+      }
+    }
+  }
+});
+
+test('notes saved through the shared editor from all three entry points reopen from both Listados filters', async () => {
+  const disk = await notesFixture.diskFixture();
+  try {
+    const f = fixture('es', { noteIdentity: { ready: true, scope: disk.scope },
+      noteIdentityRef: { current: { ready: true, scope: disk.scope } }, goLog: [],
+      actionCompletion: { candidates: [], status: entry => entry.id === 'done' ? 'done' : undefined, isDiscarded: () => false } });
+    const labels = translations.es;
+    const routes = [
+      ['Landing', 'pending', () => f.context.openUnifiedNoteComposer()],
+      ['Calendario', 'calendar', () => f.context.openCalendarNote()],
+      ['Listados', 'pending', () => nodes(f.render().props.footer, n => n.props.testID === 'list-notes-open')[0].props.onPress()],
+    ];
+    for (const [origin, destination, open] of routes) {
+      open();
+      assert.equal(f.context.notesOpen, true);
+      const ui = await notesFixture.editorFixture({ scope: disk.scope, seed: f.context.unifiedNoteSeed,
+        onSave: draft => disk.api().saveUnifiedNote(draft, disk.scope, disk.active) });
+      try {
+        await ui.run(() => ui.hosts.get('note-title').onChangeText('Nota de ' + origin));
+        await ui.run(() => ui.hosts.get('note-content').onChangeText('Contenido de ' + origin));
+        await ui.destination(destination);
+        if (destination === 'calendar') await ui.pickTime('18', '37');
+        await ui.tap('unified-note-save');
+        await ui.idle();
+        assert.equal(disk.rows.filter(entry => entry.note.title === 'Nota de ' + origin).length, 1);
+      } finally { await ui.close(); }
+    }
+    const rows = await disk.reopen();
+    const scheduled = rows.find(entry => entry.note.destination === 'calendar');
+    assert.equal(scheduled.dateISO, '2027-01-15');
+    assert.equal(scheduled.time, '18:37');
+    const archive = (await disk.api().saveUnifiedNote(disk.draft({ content: 'Nota archivada' }), disk.scope, disk.active)).entry;
+    const legacy = { ...scheduled, id: 'legacy-note', note: undefined };
+    const done = { ...scheduled, id: 'done' };
+    const booking = { ...scheduled, id: 'scheduled-booking', note: undefined, type: 'GO_RESERVA', intentKey: 'generico' };
+    f.context.personalGoLog = [...rows, archive];
+    f.context.goLog = [...rows, legacy, done, booking];
+    Object.assign(f.context, { notesOpen: false, typeFilter: 'GO', activityFilter: 'comida', llamadasListOpen: true });
+    let tree = f.render();
+    listControl(tree, labels.filter_todos).props.onPress();
+    tree = f.render();
+    assert.equal(f.context.itemCount, 7);
+    assert.ok(listCard(tree, archive.id));
+    assert.ok(listCard(tree, 'done'));
+    for (const entry of rows) assert.ok(listCard(tree, entry.id));
+
+    listControl(tree, labels.status_pending_label).props.onPress();
+    tree = f.render();
+    assert.equal(f.context.itemCount, 4);
+    for (const excluded of [archive.id, 'done', 'scheduled-booking']) assert.equal(listCard(tree, excluded), undefined);
+    assert.ok(listCard(tree, legacy.id));
+    for (const entry of rows) {
+      listCard(tree, entry.id).props.onPress();
+      assert.equal(f.context.unifiedNoteInitial.id, entry.id);
+      assert.equal(f.context.unifiedNoteOriginRef.current, 'list');
+    }
+    listCard(tree, scheduled.id).props.onPress();
+    const editor = await notesFixture.editorFixture({ scope: disk.scope, initial: f.context.unifiedNoteInitial,
+      onSave: draft => disk.api().saveUnifiedNote(draft, disk.scope, disk.active) });
+    try {
+      await editor.run(() => editor.hosts.get('note-content').onChangeText('Editada desde Listados'));
+      await editor.tap('unified-note-save');
+      await editor.idle();
+      const reopened = await disk.reopen();
+      assert.equal(reopened.length, 4);
+      const edited = reopened.find(entry => entry.id === scheduled.id);
+      assert.equal(edited.note.content, 'Editada desde Listados');
+      assert.equal(edited.time, '18:37');
+      assert.equal(edited.estado, 'pendiente');
+    } finally { await editor.close(); }
+  } finally { disk.close(); }
 });
