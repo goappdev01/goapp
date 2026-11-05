@@ -370,13 +370,14 @@ function goComposerFixture() {
   Object.assign(f.ctx, {
     goView: { view: 'ADMIN' }, adminAccess: { allowed: true, checking: false, userId: f.scope.userId },
     isActivelyCreating: true, goNoteContext: null, goNoteContextRef: { current: null },
-    goAttachmentAllowedRef: { current: true },
+    goAttachmentAllowedRef: { current: true }, goNoteDiscardingRef: { current: false }, goNoteDiscarding: false,
     goNoteTargetActiveRef: { current: true }, goPhase: 'creating', categorySelected: true, intentIndex: 0,
     INTENTS: [{ key: 'reunion' }, { key: 'comida' }, { key: 'cafe' }], otroSelected: false, customOtroLabel: '',
     phone: '+34600000001', multiMode: false, multiRecipients: [],
     makeUid: () => 'active-go-' + ++draftNumber,
     TouchableOpacity: 'TouchableOpacity', Feather: 'Feather', Text: 'Text', StatusPill: 'StatusPill',
     goButtonColor: '#1e40af', intentTextOnWhite: '#1e40af',
+    setGoNoteDiscarding: value => { f.ctx.goNoteDiscarding = value; },
     proposalModeRef: { current: false }, genericMode: false, activeLabelUpper: 'REUNIÓN', selectedSugerencia: null,
     notesDraft: '', place: '', coords: null, date: '15/01/2027', time: '18:00', duration: '', shareRoute: false, t: key => key,
   });
@@ -605,6 +606,191 @@ test('a GO reset or loss of ADMIN access prevents a stale editor from writing', 
   ctx.goAttachmentAllowedRef.current = true;
   ctx.updateGoNoteContext(null);
   await assert.rejects(editor.props.onSave(draft), /ya no está disponible/);
+});
+
+function installDiscardCallbacks(f, disk) {
+  const { ctx } = f;
+  ctx.getGoLogSnapshot = () => disk.store.getGoLogSnapshot();
+  ctx.discardUnifiedNoteDraft = disk.api().discardUnifiedNoteDraft;
+  ctx.discardExclusiveGoNote = disk.api().discardExclusiveGoNote;
+  ctx.alerts = [];
+  ctx.Alert = { alert: (title, message, buttons) => ctx.alerts.push({ title, message, buttons }) };
+  loadFunctions(ctx, ['currentGoNoteDraft', 'clearNoteRecovery', 'discardNewNoteDraft',
+    'discardComposeGoNote', 'renderComposeGoNoteDiscard']);
+}
+
+test('closing retains the standalone draft while its trash removes recovery and temporary files only', async () => {
+  const disk = await h.diskFixture();
+  let ui;
+  try {
+    const f = fixture('landing'), { ctx } = f;
+    installDiscardCallbacks(f, disk);
+    const other = await disk.api().saveUnifiedNote(disk.draft({ content: 'Otra nota guardada' }), disk.scope, disk.active);
+    const asset = await disk.sourceFile();
+    ctx.openUnifiedNoteComposer();
+    const ports = { documents: { getDocumentAsync: async () => ({ canceled: false, assets: [asset] }) }, importFile: disk.fileApi.importNoteFile };
+    ui = await h.editorFixture({ ...ctx.renderUnifiedNoteEditor().props, ports });
+    await ui.run(() => ui.hosts.get('note-title').onChangeText('Borrador'));
+    await ui.run(() => ui.hosts.get('note-content').onChangeText('Texto recuperable'));
+    await ui.tool('attachments'); await ui.tap('PDF o documento'); await ui.idle();
+    await ui.exit();
+    const draft = ctx.unifiedNoteCache.current.draft;
+    const uri = draft.attachments[0].uri;
+    assert.equal(draft.content, 'Texto recuperable');
+    assert.equal(await disk.fileApi.verifyNoteFiles(disk.scope, draft.id, draft.attachments), undefined);
+    await ui.close(); ui = null;
+    ctx.openUnifiedNoteComposer();
+    ui = await h.editorFixture(ctx.renderUnifiedNoteEditor().props);
+    assert.equal(ui.hosts.get('note-content').value, 'Texto recuperable');
+    const trash = ui.hosts.get('note-discard').onPress;
+    await ui.run(() => { trash(); trash(); });
+    await ui.idle();
+    assert.equal(ui.alerts.length, 0);
+    assert.equal(ctx.notesOpen, false);
+    assert.equal(ctx.unifiedNoteCache.current, null);
+    assert.equal(ctx.unifiedNoteEditCache.current.size, 0);
+    assert.equal(fs.existsSync(new URL(uri)), false);
+    assert.equal((await disk.reopen())[0].id, other.entry.id);
+    await ui.close(); ui = null;
+    ctx.openUnifiedNoteComposer();
+    ui = await h.editorFixture(ctx.renderUnifiedNoteEditor().props);
+    assert.equal(ui.hosts.get('note-title').value, '');
+    assert.equal(ui.hosts.get('note-content').value, '');
+  } finally { if (ui) await ui.close(); disk.close(); }
+});
+
+test('GO trash discards a partial draft, removes one exclusive note, and preserves the action and sent history', async () => {
+  const disk = await h.diskFixture();
+  let ui;
+  try {
+    const f = goComposerFixture(), { ctx } = f;
+    installDiscardCallbacks(f, disk);
+    Object.assign(ctx, { saveUnifiedNote: disk.api().saveUnifiedNote, watchNoteReminderReceipt() {} });
+    loadFunctions(ctx, ['saveNoteDraft']);
+    const action = () => [ctx.phone, ctx.categorySelected, ctx.intentIndex, ctx.date, ctx.time];
+    const original = action();
+    pressLandingSatellite(f);
+    ui = await h.editorFixture(ctx.renderUnifiedNoteEditor().props);
+    await ui.run(() => ui.hosts.get('note-content').onChangeText('Borrador GO descartado'));
+    await ui.exit();
+    assert.ok(ctx.currentGoNoteDraft());
+    ctx.renderComposeGoNoteDiscard().props.onPress();
+    for (let i=0;i<20;i++) await h.settle(() => new Promise(setImmediate));
+    assert.equal(ctx.alerts.length, 0);
+    assert.equal(ctx.currentGoNoteDraft(), undefined);
+    assert.deepEqual(action(), original);
+    await ui.close(); ui = null;
+    ctx.renderComposeGoNote().props.onPress();
+    ui = await h.editorFixture(ctx.renderUnifiedNoteEditor().props);
+    assert.equal(ui.hosts.get('note-content').value, '');
+    await ui.run(() => ui.hosts.get('note-content').onChangeText('Adjunta guardada'));
+    await ui.tap('unified-note-save'); await ui.idle(); await ui.dismissSaved();
+    const saved = disk.rows[0];
+    ctx.goNoteDiscardingRef.current = true;
+    assert.doesNotMatch(ctx.buildMessage(), /Adjunta guardada/);
+    ctx.goNoteDiscardingRef.current = false;
+    await ui.close(); ui = null;
+    ctx.renderComposeGoNoteDiscard().props.onPress();
+    assert.equal(ctx.alerts.length, 1);
+    assert.equal(disk.rows[0].deleted, undefined);
+    ctx.alerts[0].buttons[0].onPress?.();
+    assert.equal(ctx.currentGoAttachment().id, saved.id);
+    ctx.alerts[0].buttons.at(-1).onPress();
+    for(let i=0;i<20;i++) await h.settle(() => new Promise(setImmediate));
+    assert.equal(disk.rows[0].deleted, true);
+    assert.equal(disk.rows[0].noteLinkedEntryId, undefined);
+    assert.equal(ctx.currentGoAttachment(), null);
+    assert.doesNotMatch(ctx.buildMessage(), /Adjunta guardada|Borrador GO descartado/);
+    assert.deepEqual(action(), original);
+    pressLandingSatellite(f);
+    ui = await h.editorFixture(ctx.renderUnifiedNoteEditor().props);
+    await ui.run(() => ui.hosts.get('note-content').onChangeText('Nueva nota GO'));
+    await ui.tap('unified-note-save'); await ui.idle(); await ui.dismissSaved();
+    const replacement = disk.rows.find(row => !row.deleted);
+    assert.notEqual(replacement.id, saved.id);
+    await ui.close(); ui = null;
+    pressLandingSatellite(f);
+    ui = await h.editorFixture(ctx.renderUnifiedNoteEditor().props);
+    await ui.tap('note-discard');
+    assert.equal(ui.alerts.length, 1);
+    await ui.run(() => ui.alerts[0].buttons.at(-1).onPress());
+    await ui.idle();
+    assert.equal(ctx.notesOpen, false);
+    assert.equal(ctx.currentGoAttachment(), null);
+    assert.equal(disk.rows.filter(row => !row.deleted).length, 0);
+    assert.deepEqual(action(), original);
+  } finally { if(ui) await ui.close(); disk.close(); }
+});
+
+test('unlinking an existing independent note preserves its record, files and destination', async () => {
+  const disk = await h.diskFixture();
+  let ui;
+  try {
+    const f = goComposerFixture(), { ctx } = f;
+    installDiscardCallbacks(f, disk);
+    const draft = disk.draft({ content: 'Original independiente', destination: 'pending' });
+    draft.attachments = [await disk.fileApi.importNoteFile(disk.scope, draft.id, await disk.sourceFile())];
+    const saved = await disk.api().saveUnifiedNote(draft, disk.scope, disk.active);
+    const independentCacheKey = JSON.stringify(disk.scope)+":"+saved.entry.id;
+    const independentDraft = { ...model.noteDraft(saved.entry), content: 'Edición independiente recuperable' };
+    ctx.unifiedNoteEditCache.current.set(independentCacheKey, independentDraft);
+    assert.equal(ctx.stageGoNote(saved.entry), true);
+    ctx.renderComposeGoNote().props.onPress();
+    ui = await h.editorFixture(ctx.renderUnifiedNoteEditor().props);
+    await ui.tap('note-discard');
+    assert.equal(ui.alerts.length, 1);
+    await ui.run(() => ui.alerts[0].buttons.at(-1).onPress()); await ui.idle();
+    assert.equal(ctx.currentGoAttachment(), null);
+    const rows = await disk.reopen();
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, saved.entry.id);
+    assert.equal(rows[0].note.destination, 'pending');
+    assert.equal(rows[0].note.content, 'Original independiente');
+    assert.equal(rows[0].deleted, undefined);
+    assert.equal(ctx.unifiedNoteEditCache.current.get(independentCacheKey).content, 'Edición independiente recuperable');
+    await disk.fileApi.verifyNoteFiles(disk.scope, rows[0].id, rows[0].note.attachments);
+    assert.doesNotMatch(ctx.buildMessage(), /Original independiente/);
+  } finally { if(ui)await ui.close(); disk.close(); }
+});
+
+test('failed or foreign-context discard preserves recovery and refuses to remove a committed note as a draft', async () => {
+  const disk = await h.diskFixture();
+  try {
+    const draft = disk.draft();
+    const result = await disk.api().saveUnifiedNote(draft, disk.scope, disk.active);
+    await assert.rejects(disk.api().discardUnifiedNoteDraft(draft, disk.scope, disk.active), /ya está guardada/);
+    await assert.rejects(disk.api().discardExclusiveGoNote(result.entry.id, 'wrong-go', disk.scope, disk.active), /verificar/);
+    await assert.rejects(disk.api().discardUnifiedNoteDraft(disk.draft(), disk.scope, () => false), /contexto/);
+    assert.equal(disk.rows[0].deleted, undefined);
+  } finally { disk.close(); }
+});
+
+test('removing a GO attachment preserves the content and reference already used in sent history', async () => {
+  const disk = await h.diskFixture();
+  try {
+    const result = await disk.api().saveUnifiedNote(disk.draft({ destination: 'go', content: 'Texto enviado' }), disk.scope, disk.active, 'sent-context');
+    const sent = { id: 'sent-go-history', attachedNoteId: result.entry.id, attachedNote: 'Texto enviado', estado: 'pendiente' };
+    await disk.store.updateGoLog(rows => ({ entries: [...rows, sent], result: undefined }));
+    await disk.api().discardExclusiveGoNote(result.entry.id, 'sent-context', disk.scope, disk.active);
+    const rows = await disk.reopen();
+    assert.deepEqual(h.plain(rows.find(row => row.id === sent.id)), sent);
+    assert.equal(rows.find(row => row.id === result.entry.id).note.content, 'Texto enviado');
+    assert.equal(rows.find(row => row.id === result.entry.id).deleted, undefined);
+  } finally { disk.close(); }
+});
+
+test('a discard failure keeps the editor content recoverable and allows an ordinary close', async () => {
+  const ui = await h.editorFixture({ onDiscard: async () => { throw Error('No se pudo quitar el borrador'); } });
+  try {
+    await ui.run(() => ui.hosts.get('note-content').onChangeText('Contenido conservado'));
+    await ui.tap('note-discard'); await ui.idle();
+    assert.equal(ui.hosts.get('note-content').value, 'Contenido conservado');
+    assert.ok(ui.hosts.has('note-save-error'));
+    assert.equal(ui.calls.filter(call => call[0] === 'close').length, 0);
+    await ui.exit();
+    assert.equal(ui.calls.find(call => call[0] === 'close')[1].saved, false);
+    assert.equal(ui.calls.find(call => call[0] === 'close')[1].draft.content, 'Contenido conservado');
+  } finally { await ui.close(); }
 });
 
 test('the committed store permits only one simultaneous creation per GO and keeps other GOs separate', async () => {

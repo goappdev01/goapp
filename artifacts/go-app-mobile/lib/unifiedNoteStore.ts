@@ -5,7 +5,7 @@ import { assertTaskUser } from "./goTaskAccess";
 import { getGoLogSnapshot, updateGoLog } from "./goLogStore";
 import { refreshNativeTaskReminders } from "./goTaskReminderRuntime";
 import { describeReminders } from "./goTaskReminders";
-import { assertNoteAttachments, verifyNoteFiles } from "./goNoteFiles";
+import { assertNoteAttachments, removeNoteDraftFiles, verifyNoteFiles } from "./goNoteFiles";
 import { buildNoteEntry, noteDocument, noteDraft, noteInScope, validateNote, type NoteDestination, type UnifiedNoteDraft } from "./unifiedNotes";
 import { notePerformanceNow, startNoteSaveTrace, setNoteReminderProgress, noteReminderOperationCurrent, type NoteReminderReceipt } from "./goNoteSaveProgress";
 
@@ -28,7 +28,7 @@ export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope,
     const goDraftId = goAttachment ? linkedEntryId ?? previous?.noteLinkedEntryId : undefined;
     if (goAttachment && (!goDraftId || previous && previous.noteLinkedEntryId !== goDraftId))
       throw new Error("El GO al que pertenece la nota ya no está disponible.");
-    if (goDraftId && rows.some(row => row.id !== draft.id && row.noteLinkedEntryId === goDraftId
+    if (goDraftId && rows.some(row => row.id !== draft.id && !row.deleted && row.estado !== "rechazado" && row.noteLinkedEntryId === goDraftId
       && noteDocument(row)?.destination === "go" && noteInScope(row, scope)))
       throw new Error("Este GO ya tiene una nota adjunta. Abre esa nota para editarla.");
     if(previous && noteDocument(previous)?.operationId===draft.operationId){
@@ -91,4 +91,29 @@ export async function moveUnifiedNote(entry:GoEntry,destination:NoteDestination,
   const draft=noteDraft(entry);draft.destination=destination;
   if(schedule){draft.dateISO=schedule.dateISO;draft.time=schedule.time;if(schedule.duration!==undefined)draft.duration=schedule.duration;}
   return saveUnifiedNote(draft,scope,active);
+}
+
+export async function discardUnifiedNoteDraft(draft: UnifiedNoteDraft, scope: TaskScope, active: () => boolean) {
+  await assertTaskUser(scope.userId);
+  await updateGoLog(async rows => {
+    if (!active()) throw new Error("El contexto ha cambiado. El borrador se conserva.");
+    if (draft.original || rows.some(row => row.id === draft.id || row.note?.attachments.some(a =>
+      a.kind === "file" && a.uri.includes("/" + encodeURIComponent(draft.id) + "/"))))
+      throw new Error("La nota ya está guardada. Vuelve a abrirla para eliminarla con confirmación.");
+    await removeNoteDraftFiles(scope, draft.id);
+    return { entries: rows, result: undefined };
+  }, () => { if (!active()) throw new Error("El contexto ha cambiado. Vuelve a abrir la nota."); });
+}
+
+export async function discardExclusiveGoNote(id: string, goDraftId: string, scope: TaskScope, active: () => boolean) {
+  await assertTaskUser(scope.userId);
+  await updateGoLog(rows => {
+    const matches = rows.filter(row => row.id === id);
+    const entry = matches[0];
+    if (matches.length !== 1 || !noteInScope(entry, scope) || noteDocument(entry)?.destination !== "go" || entry.noteLinkedEntryId !== goDraftId)
+      throw new Error("No se puede verificar la nota adjunta a este GO.");
+    // Sent GO records keep their own text and attachment reference as history.
+    const usedBySentGo = rows.some(row => row.attachedNoteId === id);
+    return { entries: usedBySentGo ? rows : rows.map(row => row.id === id ? { ...row, deleted: true, noteLinkedEntryId: undefined } : row), result: undefined };
+  }, () => { if (!active()) throw new Error("El GO o la cuenta ha cambiado. No se ha eliminado la nota."); });
 }

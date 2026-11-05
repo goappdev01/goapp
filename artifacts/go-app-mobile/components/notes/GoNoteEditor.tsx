@@ -29,6 +29,7 @@ type Props = { visible:boolean; initial?:GoEntry|null; seed?:{title?:string;cont
   scope:TaskScope|null; ready:boolean; handedness:"left"|"right"; cached?:UnifiedNoteDraft; onClose:(state?:{draft:UnifiedNoteDraft;saved:boolean})=>void;
   onSave:(draft:UnifiedNoteDraft)=>Promise<{entry:GoEntry;message:string;notice?:string;performance?:NoteSaveTrace}>;
   onSaved?:(entry:GoEntry,notice:string)=>void; onDelete?:(entry:GoEntry)=>void|Promise<void>;
+  onDiscard?:(draft:UnifiedNoteDraft)=>Promise<void>;
   onGoToLanding?:()=>void; closeRequested?:boolean; initialToolsOpen?:boolean; confirmScheduleOnSave?:boolean; goAttachment?:boolean;
   renderActions?:(entry:GoEntry,onEdit:()=>void)=>React.ReactNode };
 const destinations: [NoteDestination,string][]=[["calendar","CALENDARIO"],["pending","PENDIENTES"],["archive","ARCHIVO"]];
@@ -36,7 +37,7 @@ const configurationKeys=["destination","dateISO","time","duration","place","loca
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 
 /** One ordinary-note editor, one native presenter, and one acknowledged save operation. */
-export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClose,onSave,onSaved,onDelete,cached,renderActions,onGoToLanding,closeRequested=false,initialToolsOpen=false,confirmScheduleOnSave=false,goAttachment=false}:Props) {
+export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClose,onSave,onSaved,onDelete,onDiscard,cached,renderActions,onGoToLanding,closeRequested=false,initialToolsOpen=false,confirmScheduleOnSave=false,goAttachment=false}:Props) {
   const insets=useSafeAreaInsets(),scroll=useRef<React.ElementRef<typeof ScrollView>>(null),keyboard=useGoNoteKeyboard(visible);
   const [draft,setDraft]=useState<UnifiedNoteDraft>(()=>cached||noteDraft(initial)),[panel,setPanel]=useState(""),[error,setError]=useState(""),[message,setMessage]=useState("");
   const [busy,setBusy]=useState(false),[attachmentBusy,setAttachmentBusy]=useState(false),[link,setLink]=useState("");
@@ -322,6 +323,26 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       }},
     ]);
   };
+  const requestDiscard=()=>{
+    if(deleteLock.current||saveLock.current||workLock.current||toolCloseLock.current||closingSaved)return;
+    const entry=persistedEntry.current||initial;
+    if(entry&&!goAttachment){requestDeleteNote();return;}
+    if(!onDiscard)return;
+    const discard=()=>{
+      if(deleteLock.current||saveLock.current||workLock.current||toolCloseLock.current)return;
+      deleteLock.current=true;saveLock.current=true;setBusy(true);setError("");preparation.current++;voice.abort();
+      const current={...draftRef.current,original:entry||undefined};
+      void onDiscard(current).then(()=>{
+        Keyboard.dismiss();pendingTool.current=null;pendingCommit.current=null;savedExit.current=null;
+        onClose({draft:current,saved:true});
+      }).catch(error=>setError(error instanceof Error?error.message:"No se ha podido descartar. La nota se conserva."))
+        .finally(()=>{deleteLock.current=false;saveLock.current=false;setBusy(false);});
+    };
+    if(entry)Alert.alert("Quitar nota del GO","¿Quieres quitar la nota de este GO? Las notas independientes se conservan.",[
+      {text:"Cancelar",style:"cancel"},{text:"QUITAR NOTA",style:"destructive",onPress:discard},
+    ]);
+    else discard();
+  };
   const working=toolDraft||draft;
   const recordPending=(key:"time"|"duration"|"reminderMinutes",edit:NoteToolEdit<string|number>)=>{const next={changed:edit.changed,error:edit.error,value:edit.value===undefined?undefined:{[key]:edit.value}};if(pendingTool.current&&!same(pendingTool.current,next))pendingCommit.current=null;pendingTool.current=next;};
   if(!visible)return null;
@@ -329,7 +350,12 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
     <View testID="note-editor-root" style={s.root} onLayout={event=>setFrameHeight(event.nativeEvent.layout.height)}>
     <GoScreenCloseSurface testID="unified-note-screen" handedness={handedness} onClose={back} enabled={!busy&&!toolFinishing&&!attachmentBusy&&!closingSaved} scrollRefs={[scroll,toolsScroll]} style={s.root}>
       <KeyboardAvoidingView testID="KeyboardFrame" behavior="padding" style={{flex:1,paddingTop:insets.top+8,paddingHorizontal:Math.max(12,insets.left,insets.right)}}>
-        <View style={s.header}><Text testID="note-heading" accessibilityRole="header" onPress={()=>void hideKeyboard()} style={s.heading}>NOTA</Text></View>
+        <View style={s.header}><Text testID="note-heading" accessibilityRole="header" onPress={()=>void hideKeyboard()} style={s.heading}>NOTA</Text>
+          {(onDiscard||onDelete)&&<TouchableOpacity testID="note-discard" accessibilityRole="button" accessibilityLabel={initial?"Eliminar nota":"Descartar borrador"} disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPress={requestDiscard}
+            style={{position:"absolute",width:44,height:44,alignItems:"center",justifyContent:"center",...(handedness==="right"?{right:0}:{left:0})}}>
+            <Feather name="trash-2" size={19} color="#b4232f"/>
+          </TouchableOpacity>}
+        </View>
         <View ref={workspaceView} collapsable={false} testID="note-writing-workspace" style={s.workspace} onLayout={event=>{const {x,y,width,height}=event.nativeEvent.layout;setWorkspaceBounds(current=>Math.abs(current.width-width)<=1&&Math.abs(current.height-height)<=1&&Math.abs(current.x-x)<=1&&Math.abs(current.y-y)<=1?current:{x,y,width,height});}}>
         <ScrollView ref={scroll} testID="unified-note-scroll" style={s.writing}
           onLayout={event=>{const height=Math.max(120,Math.floor(event.nativeEvent.layout.height-110));setWritingHeight(current=>Math.abs(current-height)<=2?current:height);}}

@@ -37,7 +37,7 @@ import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoNoteEditor } from "@/components/notes/GoNoteEditor";
 import { isArchivedNote, linkedNotesForEntry, noteDocument, noteInScope, validNoteDate, validNoteTime, type UnifiedNoteDraft, type NoteDestination } from "@/lib/unifiedNotes";
-import { saveUnifiedNote, moveUnifiedNote } from "@/lib/unifiedNoteStore";
+import { saveUnifiedNote, moveUnifiedNote, discardUnifiedNoteDraft, discardExclusiveGoNote } from "@/lib/unifiedNoteStore";
 import { noteReminderOperationCurrent } from "@/lib/goNoteSaveProgress";
 import { savedNoteTarget, type NoteRevealTarget } from "@/lib/goNoteNavigation";
 import { CalendarCloseGuide } from "@/components/ui/CalendarCloseGuide";
@@ -4382,6 +4382,8 @@ function HomeScreenContent() {
   type GoNoteContext = { id: string; scope: NonNullable<typeof noteIdentity.scope>; referencedNoteId?: string };
   const [goNoteContext, setGoNoteContext] = useState<GoNoteContext | null>(null);
   const goNoteContextRef = useRef(goNoteContext);
+  const goNoteDiscardingRef = useRef(false);
+  const [goNoteDiscarding, setGoNoteDiscarding] = useState(false);
   const linkedNoteParentsRef = useRef(goLog);
   linkedNoteParentsRef.current = goLog;
   function canAttachNoteToGo() {
@@ -4427,13 +4429,14 @@ function HomeScreenContent() {
     }) ?? null;
   }
   function currentGoAttachment() {
+    if(goNoteDiscardingRef.current)return null;
     const entry = currentGoAttachmentEntry();
     const note = noteDocument(entry);
     return entry && note ? { id: entry.id, title: note.title, detail: note.content } : null;
   }
   function openComposeGoNote() {
     const context = getOrStartGoNoteContext();
-    if (!context || notesOpen) return;
+    if (!context || notesOpen || goNoteDiscardingRef.current) return;
     const entry = currentGoAttachmentEntry(context);
     const seed = { goDraftId: context.id };
     if (entry) openUnifiedNote(entry, seed);
@@ -4443,6 +4446,7 @@ function HomeScreenContent() {
     if (!hasActiveGoNoteTarget()) return null;
     const attached = !!currentGoAttachmentEntry(goNoteContext);
     return <TouchableOpacity accessibilityRole="button" testID="compose-go-note" onPress={openComposeGoNote}
+      disabled={goNoteDiscarding}
       accessibilityLabel={attached ? (lang === "en" ? "Note attached, open and edit" : "Nota adjuntada, abrir y editar") : undefined}
       style={{ maxWidth: "100%", flexShrink: 1, minHeight: 44, justifyContent: "center" }}>
       <StatusPill icon={attached ? "edit-2" : "paperclip"} color={goButtonColor} fg={intentTextOnWhite} wrapText text={attached
@@ -4450,9 +4454,62 @@ function HomeScreenContent() {
         : (lang === "en" ? "Attach note to GO" : "Adjuntar nota GO")} />
     </TouchableOpacity>;
   }
+  function currentGoNoteDraft() {
+    const context=goNoteContextRef.current;
+    if(!context)return undefined;
+    const prefix=JSON.stringify(context.scope)+":compose:"+context.id+":";
+    return [...unifiedNoteEditCache.current].find(([key])=>key.startsWith(prefix))?.[1];
+  }
+  function clearNoteRecovery(id:string,scope:NonNullable<typeof noteIdentity.scope>) {
+    const owner=JSON.stringify(scope);
+    for(const [key,draft] of unifiedNoteEditCache.current)if(key.startsWith(owner+":")&&draft.id===id)unifiedNoteEditCache.current.delete(key);
+    if(unifiedNoteCache.current?.scope===owner&&unifiedNoteCache.current.draft.id===id)unifiedNoteCache.current=null;
+  }
+  async function discardNewNoteDraft(draft:UnifiedNoteDraft) {
+    const identity=noteIdentityRef.current;
+    if(!identity.ready||!identity.scope)throw new Error("No se puede verificar la cuenta del borrador.");
+    const scope={...identity.scope};
+    const active=()=>noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===scope.userId&&noteIdentityRef.current.scope.context===scope.context;
+    await discardUnifiedNoteDraft(draft,scope,active);
+    clearNoteRecovery(draft.id,scope);
+    if(draft.destination!=="go"){setQuickNoteText("");setQuickNoteDetail("");}
+  }
+  async function discardComposeGoNote(contextId:string,draft?:UnifiedNoteDraft) {
+    if(goNoteDiscardingRef.current)throw new Error("Ya se está quitando la nota.");
+    const context=goNoteContextRef.current;
+    const active=()=>goNoteContextRef.current?.id===contextId&&goAttachmentAllowedRef.current
+      &&noteIdentityRef.current.ready&&noteIdentityRef.current.scope?.userId===context?.scope.userId
+      &&noteIdentityRef.current.scope?.context===context?.scope.context;
+    if(!context||!active())throw new Error("El GO o la cuenta ha cambiado.");
+    goNoteDiscardingRef.current=true;setGoNoteDiscarding(true);
+    try {
+      const entry=currentGoAttachmentEntry(context);
+      const pending=draft||currentGoNoteDraft();
+      if(entry?.note?.destination==="go")await discardExclusiveGoNote(entry.id,contextId,context.scope,active);
+      else if(!entry&&pending)await discardUnifiedNoteDraft(pending,context.scope,active);
+      if(!active())throw new Error("El GO o la cuenta ha cambiado.");
+      if(!context.referencedNoteId&&pending)clearNoteRecovery(pending.id,context.scope);
+      if(entry?.note?.destination==="go")clearNoteRecovery(entry.id,context.scope);
+      const prefix=JSON.stringify(context.scope)+":compose:"+contextId+":";
+      for(const key of unifiedNoteEditCache.current.keys())if(key.startsWith(prefix))unifiedNoteEditCache.current.delete(key);
+      updateGoNoteContext(null);
+    } finally {goNoteDiscardingRef.current=false;setGoNoteDiscarding(false);}
+  }
+  function renderComposeGoNoteDiscard() {
+    if(!hasActiveGoNoteTarget()||(!currentGoAttachmentEntry()&&!currentGoNoteDraft()))return null;
+    return <TouchableOpacity testID="compose-go-note-discard" accessibilityRole="button" accessibilityLabel="Quitar nota del GO"
+      disabled={goNoteDiscarding} style={{width:44,height:44,alignItems:"center",justifyContent:"center"}}
+      onPress={()=>{
+        const context=goNoteContextRef.current;if(!context)return;
+        const remove=()=>{void discardComposeGoNote(context.id).catch(error=>showToast(error.message,"error"));};
+        if(currentGoAttachmentEntry())Alert.alert("Quitar nota del GO","¿Quieres quitar la nota de este GO? Las notas independientes se conservan.",[
+          {text:"Cancelar",style:"cancel"},{text:"QUITAR NOTA",style:"destructive",onPress:remove},
+        ]);else remove();
+      }}><Feather name="trash-2" size={17} color={intentTextOnWhite}/></TouchableOpacity>;
+  }
   function stageGoNote(entry: GoEntry) {
     const context = getOrStartGoNoteContext();
-    if (!context || notesOpen || currentGoAttachmentEntry(context) || !noteInScope(entry, context.scope)
+    if (!context || notesOpen || goNoteDiscardingRef.current || currentGoAttachmentEntry(context) || !noteInScope(entry, context.scope)
       || !noteDocument(entry) || noteDocument(entry)?.destination === "go" || entry.deleted || entry.estado === "rechazado") return false;
     updateGoNoteContext({ ...context, referencedNoteId: entry.id });
     showToast(lang === "en" ? "Note attached to GO." : "Nota adjuntada al GO.", "success");
@@ -14468,6 +14525,7 @@ function HomeScreenContent() {
                   </View>
                 )}
                 {renderComposeGoNote()}
+                {renderComposeGoNoteDiscard()}
                 {!!selectedSugerencia && (
                   <StatusPill icon="star" text={selectedSugerencia} color={activeColor} fg={intentTextOnWhite} />
                 )}
@@ -25585,6 +25643,7 @@ function HomeScreenContent() {
         if(goNoteContextRef.current?.id===goDraftId&&goAttachmentAllowedRef.current)showToast(lang === "en" ? "Note attached to GO." : "Nota adjuntada al GO.", "success");
       } : (entry,notice) => handleUnifiedNoteSaved(entry,notice,!unifiedNoteInitial && !linkedEntryId)}
       onDelete={unifiedNoteInitial&&!goAttachment?deleteSavedNote:undefined}
+      onDiscard={goDraftId ? draft=>discardComposeGoNote(goDraftId,draft) : !goAttachment ? draft=>discardNewNoteDraft(draft) : undefined}
       renderActions={goAttachment?undefined:renderSavedNoteActions}
       onSave={goDraftId || linkedEntryId ? draft=>saveNoteDraft(draft,linkedEntryId,goDraftId) : saveNoteDraft}/ >;
   }
@@ -25596,7 +25655,7 @@ function HomeScreenContent() {
         const activeGo=()=>{
           if (!goDraftId) return !goAttachment || !!draft.original && goAttachmentAllowedRef.current;
           const context=goNoteContextRef.current;
-          return goAttachmentAllowedRef.current && goNoteTargetActiveRef.current && context?.id===goDraftId
+          return goAttachmentAllowedRef.current && goNoteTargetActiveRef.current && !goNoteDiscardingRef.current && context?.id===goDraftId
             && context.scope.userId===expected.userId && context.scope.context===expected.context
             && (goAttachment ? !context.referencedNoteId : context.referencedNoteId===draft.id && draft.original?.note?.destination===draft.destination);
         };

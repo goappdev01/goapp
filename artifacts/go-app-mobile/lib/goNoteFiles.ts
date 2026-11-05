@@ -32,3 +32,7 @@ export async function verifyNoteFiles(scope:TaskScope,id:string,attachments:Note
   for(const attachment of attachments){if(attachment.kind!=="file")continue;const info=await FileSystem.getInfoAsync(attachment.uri);
     if(!info.exists || info.isDirectory || attachment.size!==undefined&&info.size!==attachment.size)throw new Error("No se encuentra un adjunto de esta nota. Puedes recuperarlo o quitar su referencia antes de guardar.");}
 }
+export async function removeNoteDraftFiles(scope: TaskScope, id: string) {
+  if (!/^note_[a-z0-9]+_[a-z0-9]+$/i.test(id)) throw new Error("No se puede verificar la carpeta de este borrador.");
+  await FileSystem.deleteAsync(directory(scope, id), { idempotent: true });
+}
