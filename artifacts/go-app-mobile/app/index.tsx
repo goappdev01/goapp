@@ -4391,13 +4391,26 @@ function HomeScreenContent() {
   }
   const goAttachmentAllowedRef = useRef(false);
   goAttachmentAllowedRef.current = canAttachNoteToGo();
+  function hasActiveGoNoteTarget() {
+    const actionSelected = categorySelected && !!INTENTS[intentIndex] || otroSelected && !!customOtroLabel.trim();
+    const recipientSelected = multiMode
+      ? multiRecipients.some(recipient => !!normalizePhoneForWhatsApp(recipient.phone))
+      : !!normalizePhoneForWhatsApp(phone);
+    return canAttachNoteToGo() && goPhase === "creating" && !!actionSelected && recipientSelected;
+  }
+  const goNoteTargetActiveRef = useRef(false);
+  goNoteTargetActiveRef.current = hasActiveGoNoteTarget();
+  function openLandingNote() {
+    if (hasActiveGoNoteTarget()) openComposeGoNote();
+    else openUnifiedNoteComposer();
+  }
   function updateGoNoteContext(context: GoNoteContext | null) {
     goNoteContextRef.current = context;
     setGoNoteContext(context);
   }
   function getOrStartGoNoteContext() {
     const scope = noteIdentityRef.current.scope;
-    if (!scope || !canAttachNoteToGo() || !isActivelyCreating) return null;
+    if (!scope || !hasActiveGoNoteTarget()) return null;
     const current = goNoteContextRef.current;
     if (current?.scope.userId === scope.userId && current.scope.context === scope.context) return current;
     const context = { id: makeUid(), scope: { ...scope } };
@@ -4406,7 +4419,7 @@ function HomeScreenContent() {
   }
   function currentGoAttachmentEntry(context = goNoteContextRef.current) {
     const scope = noteIdentityRef.current.scope;
-    if (!context || !scope || !canAttachNoteToGo() || context.scope.userId !== scope.userId || context.scope.context !== scope.context) return null;
+    if (!context || !scope || !hasActiveGoNoteTarget() || context.scope.userId !== scope.userId || context.scope.context !== scope.context) return null;
     return getGoLogSnapshot().find(row => {
       const note = noteDocument(row);
       return !!note && !row.deleted && row.estado !== "rechazado" && noteInScope(row, scope)
@@ -4427,7 +4440,7 @@ function HomeScreenContent() {
     else openUnifiedNoteComposer(seed);
   }
   function renderComposeGoNote() {
-    if (!isActivelyCreating || !canAttachNoteToGo()) return null;
+    if (!hasActiveGoNoteTarget()) return null;
     const attached = !!currentGoAttachmentEntry(goNoteContext);
     return <TouchableOpacity accessibilityRole="button" testID="compose-go-note" onPress={openComposeGoNote}
       accessibilityLabel={attached ? (lang === "en" ? "Note attached, open and edit" : "Nota adjuntada, abrir y editar") : undefined}
@@ -17739,7 +17752,7 @@ function HomeScreenContent() {
                 label: t('orbit_note'),
                 onPress: () => {
                   Haptics.selectionAsync();
-                  openUnifiedNoteComposer();
+                  openLandingNote();
                 },
               },
               // ─── LISTADOS (-67.5°) — entre COMIDA y REUNIÓN ──────────────
@@ -25583,7 +25596,7 @@ function HomeScreenContent() {
         const activeGo=()=>{
           if (!goDraftId) return !goAttachment || !!draft.original && goAttachmentAllowedRef.current;
           const context=goNoteContextRef.current;
-          return goAttachmentAllowedRef.current && context?.id===goDraftId
+          return goAttachmentAllowedRef.current && goNoteTargetActiveRef.current && context?.id===goDraftId
             && context.scope.userId===expected.userId && context.scope.context===expected.context
             && (goAttachment ? !context.referencedNoteId : context.referencedNoteId===draft.id && draft.original?.note?.destination===draft.destination);
         };

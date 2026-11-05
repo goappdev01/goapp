@@ -371,16 +371,89 @@ function goComposerFixture() {
     goView: { view: 'ADMIN' }, adminAccess: { allowed: true, checking: false, userId: f.scope.userId },
     isActivelyCreating: true, goNoteContext: null, goNoteContextRef: { current: null },
     goAttachmentAllowedRef: { current: true },
+    goNoteTargetActiveRef: { current: true }, goPhase: 'creating', categorySelected: true, intentIndex: 0,
+    INTENTS: [{ key: 'reunion' }, { key: 'comida' }, { key: 'cafe' }], otroSelected: false, customOtroLabel: '',
+    phone: '+34600000001', multiMode: false, multiRecipients: [],
     makeUid: () => 'active-go-' + ++draftNumber,
     TouchableOpacity: 'TouchableOpacity', Feather: 'Feather', Text: 'Text', StatusPill: 'StatusPill',
     goButtonColor: '#1e40af', intentTextOnWhite: '#1e40af',
     proposalModeRef: { current: false }, genericMode: false, activeLabelUpper: 'REUNIÓN', selectedSugerencia: null,
     notesDraft: '', place: '', coords: null, date: '15/01/2027', time: '18:00', duration: '', shareRoute: false, t: key => key,
   });
-  loadFunctions(f.ctx, ['canAttachNoteToGo', 'updateGoNoteContext', 'getOrStartGoNoteContext',
+  loadFunctions(f.ctx, ['normalizePhoneForWhatsApp', 'hasActiveGoNoteTarget', 'openLandingNote',
+    'canAttachNoteToGo', 'updateGoNoteContext', 'getOrStartGoNoteContext',
     'currentGoAttachmentEntry', 'currentGoAttachment', 'stageGoNote', 'openComposeGoNote', 'renderComposeGoNote', 'buildMessage']);
   return f;
 }
+function pressLandingSatellite(f) {
+  const satellite = findAll(node => ts.isObjectLiteralExpression(node) && node.properties.some(prop =>
+    ts.isPropertyAssignment(prop) && prop.name.getText(ast) === 'key' && prop.initializer.getText(ast) === '"bell"'));
+  assert.equal(satellite.length, 1);
+  const press = satellite[0].properties.find(prop => prop.name?.getText(ast) === 'onPress');
+  valueOf(f.ctx, press.initializer)();
+}
+
+test('the actual NOTA satellite requires both a selected action and a valid recipient before attaching', () => {
+  for (const [categorySelected, phone, goPhase, view, expected] of [
+    [false, '', 'creating', 'ADMIN', false], [true, '', 'creating', 'ADMIN', false],
+    [false, '+34600000001', 'creating', 'ADMIN', false], [true, '123', 'creating', 'ADMIN', false],
+    [true, '+34600000001', 'creating', 'ADMIN', true], [true, '+34600000001', 'executing', 'ADMIN', false],
+    [true, '+34600000001', 'receiving', 'ADMIN', false], [true, '+34600000001', 'creating', 'USER', false],
+  ]) {
+    const f = goComposerFixture(), { ctx } = f;
+    Object.assign(ctx, { categorySelected, phone, goPhase, goView: { view }, getGoLogSnapshot: () => [] });
+    pressLandingSatellite(f);
+    assert.equal(ctx.renderUnifiedNoteEditor().props.goAttachment, expected);
+    assert.equal(!!ctx.renderComposeGoNote(), expected);
+    if (!expected) assert.deepEqual(h.plain(ctx.unifiedNoteSeed), {});
+  }
+});
+
+test('a temporary contact/action removal preserves the same attached note, while GO reset restores standalone creation', () => {
+  const f = goComposerFixture(), { ctx } = f;
+  let rows = [];
+  ctx.getGoLogSnapshot = () => rows;
+  pressLandingSatellite(f);
+  const contextId = ctx.goNoteContextRef.current.id;
+  const saved = { ...model.buildNoteEntry({ ...model.noteDraft(), destination: 'go', content: 'Conservada' }, f.scope), noteLinkedEntryId: contextId };
+  rows = [saved];
+  ctx.notesOpen = false;
+  ctx.intentIndex = 1;
+  ctx.renderComposeGoNote().props.onPress();
+  assert.equal(ctx.renderUnifiedNoteEditor().props.initial.id, saved.id);
+  ctx.notesOpen = false;
+  for (const missing of ['phone', 'categorySelected']) {
+    const old = ctx[missing];
+    ctx[missing] = missing === 'phone' ? '' : false;
+    pressLandingSatellite(f);
+    assert.equal(ctx.renderUnifiedNoteEditor().props.goAttachment, false);
+    assert.equal(ctx.goNoteContextRef.current.id, contextId);
+    ctx.notesOpen = false; ctx[missing] = old;
+    pressLandingSatellite(f);
+    assert.equal(ctx.renderUnifiedNoteEditor().props.initial.id, saved.id);
+    ctx.notesOpen = false;
+  }
+  for (const name of ['resetContactFields', 'resetAdvancedDrafts']) {
+    const node = findAll(node => ts.isVariableDeclaration(node) && node.name.getText(ast) === name)[0];
+    const install = current => {
+      if (ts.isIdentifier(current) && /^set[A-Z]/.test(current.text)) {
+        const field = current.text.slice(3,4).toLowerCase() + current.text.slice(4);
+        ctx[current.text] = value => { ctx[field] = value; };
+      }
+      ts.forEachChild(current, install);
+    };
+    install(node);
+    loadFunctions(ctx, [name]);
+    Object.assign(ctx, { categorySelected: true, phone: '+34600000001', goNoteContext: { id: contextId, scope: f.scope } });
+    ctx.goNoteContextRef.current = ctx.goNoteContext;
+    ctx[name]();
+    assert.equal(ctx.goNoteContextRef.current, null);
+    pressLandingSatellite(f);
+    assert.equal(ctx.renderUnifiedNoteEditor().props.goAttachment, false);
+    assert.equal(rows[0].note.content, 'Conservada');
+    ctx.notesOpen = false;
+  }
+});
 
 test('ADMIN can attach one existing standalone note while preserving its own destination', () => {
   const f = goComposerFixture();
@@ -450,8 +523,7 @@ test('the real GO compose button creates one attached note, reopens it, and send
     loadFunctions(ctx, ['saveNoteDraft']);
     const label = control => nodes(control, node => node.type === 'StatusPill')[0].props.text;
     assert.equal(label(ctx.renderComposeGoNote()), 'Adjuntar nota GO');
-    const open = ctx.renderComposeGoNote().props.onPress;
-    open(); open();
+    pressLandingSatellite(f); pressLandingSatellite(f);
     let editor = assertComposer(f, 'landing', { goDraftId: 'active-go-1' });
     ui = await h.editorFixture({ ...editor.props, ports: {
       documents: { getDocumentAsync: async () => ({ canceled: false, assets: [asset] }) }, importFile: disk.fileApi.importNoteFile,
@@ -504,6 +576,10 @@ test('the real GO compose button creates one attached note, reopens it, and send
     assert.equal(changed.id, saved.id);
     assert.equal(changed.noteLinkedEntryId, saved.noteLinkedEntryId);
     assert.deepEqual(h.plain(changed.note.attachments), h.plain(saved.note.attachments));
+    pressLandingSatellite(f);
+    assert.equal(ctx.renderUnifiedNoteEditor().props.initial.id, changed.id);
+    assert.equal(ctx.renderUnifiedNoteEditor().props.initial.note.content, 'Texto actualizado');
+    ctx.notesOpen = false;
     const message = ctx.buildMessage();
     assert.equal(message.split('Aviso — Texto actualizado').length, 2);
     assert.doesNotMatch(message, /Primera versión|documento\.pdf|file:/);
