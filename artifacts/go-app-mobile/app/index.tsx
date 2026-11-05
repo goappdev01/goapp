@@ -20591,7 +20591,7 @@ function HomeScreenContent() {
                 accessibilityLabel={lang === "en" ? "Open GO (hold for voice)" : "Abrir GO (mantén para voz)"}
                 style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: GO_GOLD, alignItems: "center", justifyContent: "center", shadowColor: GO_GOLD, shadowOpacity: 0.55, shadowRadius: 10, elevation: 6 }}
               >
-                <Text style={{ color: "#17120B", fontSize: 15, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.4 }}>GO</Text>
+                <Text style={{ color: "#FFFFFF", fontSize: 15, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.4 }}>GO</Text>
               </TouchableOpacity>
             </View>
 

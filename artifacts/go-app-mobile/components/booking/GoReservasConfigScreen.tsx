@@ -713,7 +713,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             <TouchableOpacity onPress={onOpenGo} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Open GO" : "Abrir GO"}
               hitSlop={2} activeOpacity={0.8}
               style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: GOLD, alignItems: "center", justifyContent: "center" }}>
-              <Text style={{ color: "#17120B", fontSize: 15, fontWeight: "900" }}>GO</Text>
+              <Text style={{ color: "#FFFFFF", fontSize: 15, fontWeight: "900" }}>GO</Text>
             </TouchableOpacity>
           )}
           {/* No internal panel is open here: only the container exit is shown. */}

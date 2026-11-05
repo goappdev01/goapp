@@ -258,9 +258,9 @@ export function BookingAssistantScreen({
                   <Feather
                     name={listening ? "square" : "mic"}
                     size={goSize === 48 ? 18 : 25}
-                    color={listening ? "#FFF" : "#142D2A"}
+                    color="#FFFFFF"
                   />
-                  <Text style={[s.dockLabel, listening && { color: "#FFF" }]}>
+                  <Text style={[s.dockLabel, s.goLabel]}>
                     {listening ? "Parar" : "GO"}
                   </Text>
                 </TouchableOpacity>

@@ -265,6 +265,7 @@ export const s = StyleSheet.create({
     gap: 4,
   },
   dockLabel: { fontSize: 11, fontWeight: "700", color: "#163F60" },
+  goLabel: { color: "#FFFFFF", textShadowColor: "rgba(0,0,0,0.55)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
   radiusLabel: { fontSize: 10, color: "#39574B" },
   goButton: {
     flex: 0,

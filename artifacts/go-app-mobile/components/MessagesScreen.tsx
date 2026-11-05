@@ -1025,7 +1025,7 @@ const s = StyleSheet.create({
     borderColor: "rgba(0,0,0,0.1)",
   },
   actionBtnLabel:      { color: "#FFFFFF", fontSize: 10, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.8 },
-  actionBtnLabelGo:    { color: "#17120B", fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.5 },
+  actionBtnLabelGo:    { color: "#FFFFFF", fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.5 },
   actionBtnLabelClose: { color: "#9CA3AF", fontSize: 9, fontWeight: "700", letterSpacing: 0.6 },
 
   // Messages
