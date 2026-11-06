@@ -1,5 +1,11 @@
 # Reservas: autorización externa pendiente (6/11/2026)
 
+> Actualización: la reparación del emisor local ha sido autorizada y aplicada
+> el 6/11/2026. El catálogo vuelve a HTTP 200. La autorización de infraestructura
+> para clientes invitados FAST sigue pendiente. Véase
+> [resultado de la reparación](./GO_RESERVAS_JWT_REPARADO_20261106.md).
+> El diagnóstico y propuesta de abajo se conservan como registro previo.
+
 ## Catálogo empresarial: causa vigente
 
 La API de validación accesible por Tailscale 8088 devuelve HTTP 401,

@@ -1,5 +1,9 @@
 # Reservas: catálogo, marco inferior y bloqueo FAST
 
+> Estado posterior: el proveedor JWT local ya está reparado y el catálogo
+> responde 200. Véase [verificación](./GO_RESERVAS_JWT_REPARADO_20261106.md).
+> FAST sigue sin activarse hasta autorizar y validar su contrato invitado.
+
 Base: `09fd5df115ef715d0c2bf57fca3029c7f9992b50`. Comprobación del 6/11/2026.
 
 ## Calendario personal de una cuenta empresarial
