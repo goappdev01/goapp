@@ -20412,7 +20412,7 @@ function HomeScreenContent() {
           {/* ── BOTONES FLOTANTES — zona pulgar derecho ───────────────────
               CONFIG toggle + ↑↓ fecha.
               Solo visibles cuando el panel mensual está CERRADO y GO Reservas no está activo. */}
-          {!monthGridOpen && !calReservasOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={(demoCustomerCalendarSelected?0:52)+((calQuickCreateOpen||calConfigVisible)?72:0)+64} protectedBottom={overlayPanelHeight+10}>
+          {!monthGridOpen && !calReservasOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={(demoCustomerCalendarSelected?0:52)+((calQuickCreateOpen||calConfigVisible)?72:0)+64} protectedBottom={Math.max(0,overlayPanelHeight-insets.bottom)+10}>
             {!demoCustomerCalendarSelected && (<TouchableOpacity
               onPress={() => {
                 Haptics.selectionAsync();

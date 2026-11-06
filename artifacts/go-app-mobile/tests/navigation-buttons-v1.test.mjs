@@ -47,3 +47,24 @@ test('floating hosts measure real local bounds, protect the composer and mirror 
 });
 
 test('Calendar actual recognizer reaches each safe edge for every visible group and both hands',async()=>{for(const width of [320,390,430])for(const hand of ['left','right'])for(const group of [64,108,136,180]){const f=await fixture({width,hand});try{await f.render({buttonWidth:group});const g=f.gesture();await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:2000,translationY:-2000});g._onEnd();g._onFinalize();});assert.equal(f.style().left+group,width-8);assert.equal(f.style().top,8);await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:-2000,translationY:2000});g._onEnd();g._onFinalize();});assert.equal(f.style().left,8);assert.equal(f.style().top+64,592);}finally{await f.close();}}});
+
+test('Calendar exit reaches the sheet edge without counting the iPhone bottom inset twice',async()=>{
+ const source=readFileSync('app/index.tsx','utf8');
+ const expression=source.match(/screenKey="personal-calendar"[^\n]*protectedBottom=\{([^}]+)\}/)?.[1];
+ assert.ok(expression);
+ for(const sheetHeight of [80,120,240])for(const hand of ['left','right']){
+  const f=await fixture({width:390,hand});
+  try{
+   const inset=34,protectedBottom=Function('overlayPanelHeight','insets','return '+expression)(sheetHeight,{bottom:inset});
+   await f.floating({safeArea:true,protectedBottom});
+   const host=f.hosts.get('floating-test-navigation-host');
+   assert.equal(host.style.bottom,sheetHeight+10);
+   const availableHeight=600-47-host.style.bottom;
+   await f.settle(()=>host.onLayout({nativeEvent:{layout:{width:390,height:availableHeight}}}));
+   const g=f.gesture();
+   await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:0,translationY:2000});g._onEnd();g._onFinalize();});
+   assert.equal(f.style().top+64,availableHeight);
+   assert.equal(600-47-f.style().top-64,host.style.bottom);
+  }finally{await f.close();}
+ }
+});
