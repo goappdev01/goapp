@@ -7,6 +7,7 @@ import vm from 'node:vm';
 
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const ts = require('typescript');
+const listFixture=require('./tests/helpers/listados-fixture.cjs');
 const notesFixture = require('./tests/helpers/unified-note-fixture.cjs');
 const source = readFileSync('app/index.tsx', 'utf8');
 const home = ts.createSourceFile('home.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -50,6 +51,12 @@ const noteModel = noteContext.exports;
 const presentationContext = { exports: {} }, policyContext = { exports: {} };
 vm.runInNewContext(compile(readFileSync('data/goEntryPresentation.ts', 'utf8')), presentationContext);
 vm.runInNewContext(compile(readFileSync('data/reservationCardPolicy.ts', 'utf8')), policyContext);
+const historyContext = {exports:{},Date,require:name=>({
+  './goActionCompletion':completionModel,
+  '@/data/goEntryPresentation':presentationContext.exports,
+  './unifiedNotes':noteModel,
+}[name])};
+vm.runInNewContext(compile(readFileSync('lib/listadosHistory.ts','utf8')),historyContext);
 function nodes(tree, predicate) {
   if (!tree || typeof tree !== 'object') return [];
   if (Array.isArray(tree)) return tree.flatMap(c => nodes(c, predicate));
@@ -67,10 +74,17 @@ function fixture(lang = 'es', overrides = {}) {
   const calls = [];
   const completionDocument = completionModel.emptyCompletionDocument({ userId: 'tasks-fixture', context: 'live:USER' });
   const React = { Fragment: 'Fragment', createElement: (type, props, ...children) => ({ type, props: { ...props, children: children.flat(Infinity) } }) };
+  const originalElement=React.createElement;
+  const proposalActions=listFixture.visual(React);
+  React.createElement=(type,props,...children)=>type==='ListadosProposalActions'?proposalActions(props):originalElement(type,props,...children);
   const hosts = Object.fromEntries(['BottomSheet', 'GoScreenHost', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable', 'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(x => [x, x]));
   const context = { ...hosts, React, Date, Math, goView:{view:"USER"},adminAccess:{allowed:false,checking:false},useMemo: fn => fn(),customerBookings:{entries:[],loading:false,error:""}, console,
     t: key => { assert.equal(typeof translations[lang][key], 'string', key); return translations[lang][key]; },
     listOpen: true, listSwipeStepAllowed: true, llamadasListOpen: false, listMinimized: false, listFiltersHidden: false, listFilter: 'todos', typeFilter: 'todos', activityFilter: 'todas',
+    listSettingsOpen:false,listArchiveSection:'manual',listSwipeUsed:null,listHistory:{days:90,save:()=>{},error:''},
+    completionIdentity:{scope:{userId:'tasks-fixture',context:'live:USER'}},
+    ListadosProposalActions:'ListadosProposalActions',ListadosSwipeHint:'ListadosSwipeHint',
+    listHistoryBucket:historyContext.exports.listHistoryBucket,completionDecision:completionModel.completionDecision,
     quickCreateOpen: false, quickCreateKbVisible: false, quickCreateText: '', paddingBottom: 34, screenBgColors: {}, listGoSize: 'medio', goSortOrder: 'asc',
     calAddOpen: false, calQuickCreateOpen: false, fieldSelectorOpen: false, isActivelyCreating: false, categorySelected: false,
     unifiedNoteOriginRef: { current: 'landing' }, unifiedNoteInitial: null, unifiedNoteSeed: {}, listNoteLayerBackRef: { current: null }, listBookingDetail: undefined,
@@ -110,7 +124,7 @@ for (const lang of ['es', 'en']) {
   test(`Tasks menus keep ${lang} labels and their real note button opens the shared editor directly`, () => {
     const f = fixture(lang, { goView: { view: 'ADMIN' }, adminAccess: { allowed: true, checking: false } });
     const tree = f.render(), footer = tree.props.footer;
-    assert.equal(tree.props.title, lang === 'es' ? 'GO · TAREAS' : 'GO · TASKS');
+    assert.equal(tree.props.title, lang === 'es' ? 'GO · TAREAS · RESERVAS · NOTAS' : 'GO · TASKS · BOOKINGS · NOTES');
     const labels = texts(footer);
     for (const k of ['tasks_calls', 'label_task_internal', 'stat_tasks_label', 'tasks_go_internal', 'filter_todos']) assert.ok(labels.includes(translations[lang][k]), k);
     const noteButton = nodes(footer, n => n.props.testID === 'list-notes-open')[0];
@@ -133,15 +147,10 @@ for (const lang of ['es', 'en']) {
       assert.equal(swipes.length, 2);
       const card = swipes[0].props.children[0],children=card.props.children.filter(Boolean),top=children[0],info=children[1];
       const label = translations[lang].biz_change_proposed;
-      assert.equal(texts(top).split(label).length - 1, 1);
-      assert.ok(!texts(info).includes(label));
-      const upperButtons = top.props.children.filter(n => n?.type === 'TouchableOpacity');
-      const indicatorIndex = upperButtons.findIndex(n => texts(n) === label);
-      assert.ok(indicatorIndex >= 0);
-      const orange = upperButtons[indicatorIndex + 1];
-      assert.equal(orange.props.style.backgroundColor, policyContext.exports.GO_ENTRY_COLORS.change);
-      orange.props.onPress({ stopPropagation() {} });
-      assert.deepEqual(f.calls.at(-1), ['updateGoStatus', 'food']);
+      assert.equal(texts(card).split(label).length - 1, 1);
+      assert.equal(texts(card).split(label).length-1,1);
+      assert.ok(!texts(top).includes(label),'state owns a separate row');
+      assert.equal(nodes(top,n=>n.type==='Feather'&&n.props.name==='circle').length,0);
       assert.equal(card.props.style.paddingVertical, 4);
       const body = texts(card);
       for (const value of ['03/06/30', '12:00', '04/06/2030', '13:00', translations[lang].biz_booking_awaiting]) assert.ok(body.includes(value), value);
@@ -156,9 +165,9 @@ for (const lang of ['es', 'en']) {
       assert.equal(proposal.props.style.gap, 3);
       assert.equal(proposal.props.style.height, undefined);
       const received = swipes[1].props.children[0];
-      childWith(received, '🟢 ' + translations[lang].accept).props.onPress({ stopPropagation() {} });
+      childWith(received, translations[lang].accept.toUpperCase()).props.onPress({ stopPropagation() {} });
       assert.deepEqual(f.calls.at(-1), ['acceptProposal', 'sport']);
-      childWith(received, '🔴 ' + translations[lang].reject).props.onPress({ stopPropagation() {} });
+      childWith(received, translations[lang].reject.toUpperCase()).props.onPress({ stopPropagation() {} });
       assert.deepEqual(f.calls.at(-1), ['rejectProposal', 'sport']);
       swipes[0].props.onSwipeRight();
       assert.ok(f.calls.some(c => c[0] === 'cycleGoSlot' && c[1] === 'food' && c[2] === 'advance'));
@@ -237,7 +246,7 @@ test('the task note button uses exactly the approved Calendar icon and preserves
   const icon = find(calendar, n => ts.isJsxSelfClosingElement(n) && n.tagName.getText(home) === 'MaterialCommunityIcons' && n.attributes.properties.some(p => p.name?.text === 'name' && p.initializer?.getText(home) === '"note-edit-outline"'));
   assert.ok(icon);
   const attrs = Object.fromEntries(icon.attributes.properties.map(p => [p.name.text, p.initializer.getText(home).replace(/^[{"']|[}"']$/g, '')]));
-  for (const [listGoSize, size] of [['compacto', 36], ['medio', 44], ['grande', 54]]) {
+  for (const [listGoSize, size] of [['compacto', 44], ['medio', 44], ['grande', 54]]) {
     const tree = fixture('es', { listGoSize }).render().props.footer;
     const button = nodes(tree, n => n.type === 'Pressable' && nodes(n, x => x.type === 'MaterialCommunityIcons').length === 1)[0];
     const actual = nodes(button, n => n.type === 'MaterialCommunityIcons')[0];
@@ -274,18 +283,18 @@ test('expanded cards and their notes use ES/EN labels while preserving accept/re
 
 for(const lang of ['es','en'])for(const size of ['compacto','medio','grande'])test('Mis reservas / '+lang+' / '+size+': canonical bookings only, all statuses, original card renderer',()=>{
  const booking={id:'go_booking_booking',customerBooking:true,type:'GO_BOOKING',kind:'received',reservationId:'booking',contactName:'GO PELUQUERÍA',intentLabel:'Corte',notes:'Corte',dateISO:'2030-01-07',date:'07/01/2030',time:'10:00',estado:'aceptado',bookingStatus:'confirmada'},cancelled={...booking,id:'go_booking_cancelled',reservationId:'cancelled',deleted:true,estado:'rechazado',bookingStatus:'cancelada'};
- const f=fixture(lang,{listFilter:'reservas',listGoSize:size,goLog:[...entries,booking,cancelled],customerBookings:{entries:[booking,cancelled],loading:false,error:''}}),tree=f.render();assert.equal(tree.props.title,translations[lang].tasks_my_bookings.toUpperCase());
- const rows=nodes(tree,n=>n.type==='SwipeableRow');assert.equal(rows.length,2);assert.ok(texts(tree).includes('GO PELUQUERÍA'));assert.ok(!texts(tree).includes('COMIDA'));assert.ok(!texts(tree).includes('DEPORTE'));
- assert.ok(nodes(tree.props.footer,n=>n.props.accessibilityLabel===translations[lang].tasks_my_bookings).length);assert.equal(f.context.listGoSize,size);
+ const f=fixture(lang,{listFilter:'reservas',listGoSize:size,goLog:[...entries,booking,cancelled],customerBookings:{entries:[booking,cancelled],loading:false,error:''}}),tree=f.render();assert.equal(tree.props.title,lang==='es'?'GO · TAREAS · RESERVAS · NOTAS':'GO · TASKS · BOOKINGS · NOTES');
+ const rows=nodes(tree,n=>n.type==='SwipeableRow');assert.equal(rows.length,1);assert.ok(texts(tree).includes('GO PELUQUERÍA'));assert.ok(!texts(tree).includes('COMIDA'));assert.ok(!texts(tree).includes('DEPORTE'));
+ assert.ok(nodes(tree.props.footer,n=>n.props.accessibilityLabel==='RESERVAS').length);assert.equal(f.context.listGoSize,size);
 });
 
-test('Mis reservas is operable only in USER while ADMIN and BUSINESS retain the original filters',()=>{
+test('RESERVAS is operable in all roles while preserving every original filter',()=>{
   for(const view of ['USER','ADMIN','BUSINESS']){
     const f=fixture('es',{goView:{view},isUserMode:view==='USER',isBusinessMode:view==='BUSINESS'});
     const footer=f.render().props.footer;
     const findControl=key=>nodes(footer,n=>n.type==='Pressable'&&n.props.accessibilityLabel===translations.es[key])[0];
-    const reservations=findControl('tasks_my_bookings');
-    assert.equal(!!reservations,view==='USER',view+' reservation filter visibility');
+    const reservations=nodes(footer,n=>n.props.accessibilityLabel==='RESERVAS')[0];
+    assert.ok(reservations,view+' reservation filter visibility');
     for(const [label,key] of [['filter_todos','todos'],['status_accepted','aceptado'],['status_pending_label','pendiente'],['tasks_proposals','propuesta'],['tasks_trash','papelera']]){
       const control=findControl(label);assert.ok(control,view+' retains '+key);
       f.context.listFilter=key==='todos'?'aceptado':'todos';control.props.onPress();assert.equal(f.context.listFilter,key,view+' operates '+key);
@@ -409,8 +418,8 @@ test('premium reservation cards use the real beauty category, a short accent and
   Object.assign(f.context,{exports:{},C:policyContext.exports.GO_ENTRY_COLORS,useLanguage:()=>({lang:'es'}),followedEntry:e=>e,resolveEntry:(e,status)=>f.calls.push([e.id,status])});f.context.actionCompletion.isSaving=()=>false;
   vm.runInNewContext(compile(component.getText(details)+'\nglobalThis.GoEntryMicroActions=GoEntryMicroActions;globalThis.renderEntryMicroActions='+adapter.initializer.getText(home)),f.context);
   const tree=f.render(),card=listCard(tree,'hair'),accent=nodes(card,n=>n.props.testID==='list-category-accent-hair')[0];
-  assert.equal(accent.props.style.backgroundColor,'#eab308');assert.equal(accent.props.style.height,24);assert.equal(accent.props.style.width,3);assert.equal(card.props.style.borderLeftWidth,1);
-  assert.equal(nodes(listCard(tree,'sport-reservation'),n=>n.props.testID?.startsWith('list-category-accent')).length,0);assert.equal(nodes(listCard(tree,'ordinary-task'),n=>n.props.testID?.startsWith('list-category-accent')).length,0);assert.equal(listCard(tree,'ordinary-task').props.style.borderLeftWidth,4);
+  assert.equal(accent.props.style.backgroundColor,'#eab308');assert.equal(accent.props.style.height,12);assert.equal(accent.props.style.width,3);assert.equal(card.props.style.borderLeftWidth,1);
+  assert.equal(nodes(listCard(tree,'sport-reservation'),n=>n.props.testID?.startsWith('list-category-accent')).length,0);assert.equal(nodes(listCard(tree,'ordinary-task'),n=>n.props.testID?.startsWith('list-category-accent')).length,0);assert.equal(listCard(tree,'ordinary-task').props.style.borderLeftWidth,1);
   const actionMounts=nodes(card,n=>n.type===f.context.GoEntryMicroActions),trashMount=actionMounts.find(n=>n.props.layout==='list-discard'),stateMount=actionMounts.find(n=>n.props.layout==='list');assert.ok(trashMount&&stateMount);
   const trash=nodes(trashMount.type(trashMount.props),n=>n.type==='TouchableOpacity')[0];assert.equal(trash.props.style.width,44);assert.equal(trash.props.style.height,44);assert.equal(texts(trash),'');assert.equal(nodes(trash,n=>n.type==='Feather')[0].props.name,'trash-2');assert.equal(nodes(trash,n=>n.type==='Feather')[0].props.color,f.context.C.destructive);
   const buttons=nodes(stateMount.type(stateMount.props),n=>n.type==='TouchableOpacity');assert.equal(buttons.length,2);assert.deepEqual(buttons.map(b=>texts(b)),['REALIZADA','PENDIENTE']);assert.equal(buttons.filter(b=>b.props.accessibilityState.selected).length,1);assert.ok(buttons.every(b=>b.props.style.minHeight>=44&&b.props.style.backgroundColor.length===9));
@@ -430,7 +439,7 @@ test('Listados shows an archived note from the current scope and excludes foreig
   const foreign = { ...entry, id: 'foreign-note', ownerUserId: 'other' };
   const discarded = { ...entry, id: 'discarded-note' };
   const f = fixture('es', {
-    goLog: [], personalGoLog: [entry, foreign, discarded], noteIdentity: { ready: true, scope },
+    listFilter:'archivo',goLog: [], personalGoLog: [entry, foreign, discarded], noteIdentity: { ready: true, scope },
     isArchivedNote: noteModel.isArchivedNote, canReadBoardTask: () => true,
     actionCompletion: { candidates: [], status: () => undefined, isDiscarded: row => row.id === discarded.id },
   });
@@ -460,10 +469,10 @@ test('only verified ADMIN gets the two classic GO menus at every list size and h
       assert.ok(listControl(tree, labels.status_pending_label));
       assert.ok(listControl(tree, labels.filter_todos));
       assert.ok(listControl(tree, 'Notas'));
-      assert.equal(!!listControl(tree, labels.tasks_my_bookings), view === 'USER');
+      assert.ok(listControl(tree, 'RESERVAS'));
       if (!classic) assert.ok(listCard(tree, 'food'), 'stored classic filters cannot hide records in V1');
       if (classic) {
-        assert.equal(tree.props.title, labels.tasks_call_log.toUpperCase());
+        assert.equal(tree.props.title, 'GO · TAREAS · RESERVAS · NOTAS');
         listControl(tree, labels.filter_todos).props.onPress();
         assert.equal(f.context.activityFilter, 'todas');
         assert.equal(f.context.typeFilter, 'todos');
@@ -515,8 +524,8 @@ test('notes saved through the shared editor from all three entry points reopen f
     let tree = f.render();
     listControl(tree, labels.filter_todos).props.onPress();
     tree = f.render();
-    assert.equal(f.context.itemCount, 7);
-    assert.ok(listCard(tree, archive.id));
+    assert.equal(f.context.itemCount, 6);
+    assert.equal(listCard(tree, archive.id),undefined,'archive stays separate');
     assert.ok(listCard(tree, 'done'));
     for (const entry of rows) assert.ok(listCard(tree, entry.id));
 
@@ -545,4 +554,41 @@ test('notes saved through the shared editor from all three entry points reopen f
       assert.equal(edited.estado, 'pendiente');
     } finally { await editor.close(); }
   } finally { disk.close(); }
+});
+
+test('one floating configuration preserves sort, size and expand handlers while filters remain separate',()=>{
+ const f=fixture('es');let tree=f.render();
+ assert.equal(nodes(tree.props.footer,n=>n.props.testID==='list-settings-menu').length,0);
+ assert.equal(listControl(tree,translations.es.tasks_card_size),undefined);
+ tree.props.floatingConfig.onPress();tree=f.render();assert.ok(nodes(tree.props.footer,n=>n.props.testID==='list-settings-menu')[0]);
+ listControl(tree,translations.es.tasks_card_size).props.onPress();assert.equal(f.context.listGoSize,'grande');
+ listControl(tree,translations.es.tasks_expand_all).props.onPress();assert.equal(f.context.allExpanded,true);
+ listControl(tree,translations.es.tasks_sort_natural).props.onPress();assert.deepEqual(f.calls.at(-1),['toggleGoSortOrder']);
+ tree.props.floatingConfig.onPress();assert.equal(f.context.listSettingsOpen,false);assert.equal(f.context.listOpen,true);
+ for(const label of ['RESERVAS','ARCHIVO',translations.es.filter_todos,translations.es.status_pending_label])assert.ok(listControl(f.render(),label));
+});
+
+test('ANTIGUAS is separate from manual archive, preserves unresolved actions and never duplicates or deletes sources',()=>{
+ const now=Date.parse('2030-11-06T12:00:00Z'),scope={userId:'tasks-fixture',context:'live:USER'};
+ const confirmed={id:'confirmed-past',type:'GO_RESERVA',bookingServerStatus:'CONFIRMED',estado:'aceptado',startDatetime:'2030-11-01T09:00:00Z',endDatetime:'2030-11-01T09:30:00Z'};
+ const old={...confirmed,id:'completed',bookingServerStatus:'COMPLETED'},expired={...old,id:'hidden',startDatetime:'2029-01-01T09:00:00Z',endDatetime:'2029-01-01T09:30:00Z'};
+ const pending={id:'overdue',type:'TAREA_INTERNA',estado:'pendiente',localResolutionStatus:'pending',dateISO:'2029-01-01',time:'09:00',duration:'30min'};
+ const archived=noteModel.buildNoteEntry({...noteModel.noteDraft(),content:'Manual',destination:'archive'},scope);
+ const entries=[confirmed,old,expired,pending],before=JSON.stringify(entries);
+ const f=fixture('es',{goLog:entries,personalGoLog:[archived],noteIdentity:{ready:true,scope},actionCompletion:{candidates:[old],status:()=>undefined,now,isDiscarded:()=>false}});
+ const ids=()=>nodes(f.render(),n=>n.props.testID?.startsWith('list-entry-card-')).map(n=>n.props.testID);
+ assert.deepEqual(ids(),['list-entry-card-overdue','list-entry-card-confirmed-past']);
+ f.context.listFilter='archivo';assert.deepEqual(ids(),['list-entry-card-'+archived.id]);
+ f.context.listArchiveSection='old';assert.deepEqual(ids(),['list-entry-card-completed']);
+ assert.equal(JSON.stringify(entries),before);assert.equal(entries.length,4);
+ f.context.goLog=[];f.context.personalGoLog=[];f.context.actionCompletion.candidates=[];assert.deepEqual(ids(),[]);
+});
+
+for(const hand of ['left','right'])for(const fontScale of [1,1.5,2.5])test(hand+'/'+fontScale+': proposal actions preserve order, callbacks and accessible wrapping without decorative icons',()=>{
+ const React={createElement:(type,props,...children)=>({type,props:{...props,children:children.flat(Infinity)}})},calls=[];
+ const render=listFixture.visual(React,fontScale),tree=render({handedness:hand,labels:{accept:'ACEPTAR',propose:'PROPONER',reject:'RECHAZAR'},onAccept:()=>calls.push('accept'),onPropose:()=>calls.push('propose'),onReject:()=>calls.push('reject')});
+ const buttons=nodes(tree,n=>n.type==='TouchableOpacity');assert.deepEqual(buttons.map(n=>texts(n)),hand==='left'?['ACEPTAR','PROPONER','RECHAZAR']:['RECHAZAR','PROPONER','ACEPTAR']);
+ assert.equal(tree.props.style.flexWrap,'wrap');assert.equal(tree.props.style.flexDirection,'row');
+ for(const b of buttons){assert.ok(b.props.style.minHeight>=44);assert.equal(b.props.style.flexBasis,Math.ceil(80*fontScale));assert.equal(b.props.style.maxWidth,'100%');let stopped=false;b.props.onPress({stopPropagation:()=>stopped=true});assert.ok(stopped);}
+ assert.deepEqual(calls,hand==='left'?['accept','propose','reject']:['reject','propose','accept']);assert.equal(nodes(tree,n=>n.type==='Feather').length,0);
 });

@@ -14,7 +14,7 @@ function fixture(width=390,height=844,hand='right'){
   Dimensions:{get:()=>({width,height})},Keyboard:{addListener:(event,fn)=>{const listeners=events.get(event)||[];listeners.push(fn);events.set(event,listeners);return{remove(){}};}},
   Gesture:{Pan:gesture,Native:gesture,Race:(...g)=>g},runOnJS:fn=>fn,withSpring:value=>value,withTiming:(value,_config,fn)=>{fn?.(true);return value;},
   Reanimated:{View:'Sheet',ScrollView:'ScrollView'},StyleSheet:{absoluteFill:{}},styles:{sheet:{backgroundColor:'#0e0e10'},sheetHandle:{},sheetTitle:{}},Platform:{OS:'ios'},containsGoBrand:()=>false,noTranslate:{},
-  Modal:'Modal',View:'View',Pressable:'Pressable',AnimatedPressable:'Backdrop',GestureDetector:'GestureDetector',KeyboardAvoidingView:'KeyboardFrame',KeyboardControllerAvoidingView:'ControllerFrame',KeyboardAwareScrollView:'ScrollView',Text:'Text',LinearGradient:'Gradient',DraggableFAB:'DraggableFAB',GoCloseButton:'GoCloseButton'};
+  Modal:'Modal',View:'View',ScrollView:'ScrollView',Pressable:'Pressable',TouchableOpacity:'TouchableOpacity',Feather:'Feather',AnimatedPressable:'Backdrop',GestureDetector:'GestureDetector',KeyboardAvoidingView:'KeyboardFrame',KeyboardControllerAvoidingView:'ControllerFrame',KeyboardAwareScrollView:'ScrollView',Text:'Text',LinearGradient:'Gradient',DraggableFAB:'DraggableFAB',GoCloseButton:'GoCloseButton'};
  vm.runInNewContext(compile(sheet.getText(ast)+'\nglobalThis.BottomSheet=BottomSheet;'),scope);
  const props={visible:true,onClose:()=>calls.push('close'),title:'GO · TAREAS',paddingBottom:38,dragToClose:true,compactHeader:true,expandToSafeTop:true,floatingClose:{screenKey:'listados',handedness:hand,label:'Cerrar listado'},footer:'original-footer',children:'real-cards'};
  return{scope,calls,props,gestures,events,render(overrides={}){cursor=0;effects.length=0;gestures.length=0;const tree=scope.BottomSheet({...props,...overrides});effects.splice(0).forEach(fn=>fn());return tree;},keyboard(show){for(const event of [show?'keyboardWillShow':'keyboardWillHide',show?'keyboardDidShow':'keyboardDidHide'])events.get(event)?.forEach(fn=>fn({endCoordinates:{height:300}}));}};
@@ -44,4 +44,18 @@ test('read projection carries the real establishment category without changing s
  const booking={id:'original',customerId:'client',businessId:'business',bookableItemId:'service',startDatetime:'2030-01-07T10:00:00',endDatetime:'2030-01-07T10:30:00',status:'CONFIRMED'},business={id:'business',name:'Salón',category:'peluqueria',timezone:'Europe/Madrid',location:'Lugar'},item={title:'Lavado + Corte'};
  const before=JSON.stringify([booking,business,item]),row=scope.exports.customerBookingEntry(booking,business,item,'Profesional');
  assert.equal(row.bookingCategory,'peluqueria');assert.equal(row.reservationId,'original');assert.equal(row.bookingStatus,'confirmada');assert.equal(row.estado,'aceptado');assert.equal(JSON.stringify([booking,business,item]),before);
+});
+
+for(const[width,height]of[[320,568],[390,844],[768,1024],[1024,768]])for(const hand of ['left','right'])test(width+'×'+height+'/'+hand+': configuration and close have separate draggable safe lanes; short lists grow from bottom without reversing',()=>{
+ const f=fixture(width,height,hand),options={anchorBottom:true,floatingConfig:{label:'Configurar Listados',open:false,onPress:()=>f.calls.push('settings')}};
+ let tree=f.render(options);nodes(tree).find(n=>n.type==='View'&&n.props.onLayout).props.onLayout({nativeEvent:{layout:{height:190}}});tree=f.render(options);
+ const scroll=nodes(tree).find(n=>n.props.testID==='listados-scroll');
+ assert.equal(scroll.props.contentContainerStyle.flexGrow,1);assert.equal(scroll.props.contentContainerStyle.justifyContent,'flex-end');assert.ok(scroll.props.contentContainerStyle.paddingBottom>=44);
+ assert.ok(nodes(tree).find(n=>n.props.testID==='listados-footer-scroll').props.style.maxHeight<=height*.45);assert.equal(scroll.props.children[0],'real-cards');assert.equal(scroll.props.inverted,undefined);
+ const floating=nodes(tree).find(n=>n.props.testID==='listados-floating-close'),fabs=nodes(floating).filter(n=>n.type==='DraggableFAB');
+ assert.equal(fabs.length,2);assert.equal(fabs[0].props.buttonKey,'config-'+hand);assert.equal(fabs[1].props.buttonKey,'close-'+hand);
+ for(const fab of fabs){assert.equal(fab.props.bounds.width,width/2);assert.ok(fab.props.bounds.height>44);assert.equal(fab.props.buttonWidth,44);}
+ const lanes=floating.props.children.filter(n=>n?.type==='View');assert.equal(lanes[0].props.style.width,'50%');assert.equal(lanes[1].props.style.width,'50%');assert.equal(lanes[0].props.style[hand==='right'?'left':'right'],0);assert.equal(lanes[1].props.style[hand==='right'?'right':'left'],0);
+ nodes(tree).find(n=>n.props.testID==='listados-config-button').props.onPress();assert.deepEqual(f.calls,['settings']);
+ f.keyboard(true);tree=f.render(options);assert.equal(nodes(tree).find(n=>n.type==='DraggableFAB').props.bounds.height,Math.max(44,height-55-300-190-20));
 });

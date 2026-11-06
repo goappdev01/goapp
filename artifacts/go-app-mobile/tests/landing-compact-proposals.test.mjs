@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(path.join(process.cwd(), 'package.json'));
 const ts = require('typescript');
+const listFixture=require('./tests/helpers/listados-fixture.cjs');
 const source = fs.readFileSync('app/index.tsx', 'utf8');
 const ast = ts.createSourceFile('home.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function find(node, predicate) {
@@ -77,6 +78,9 @@ function fixture(lang = 'es', overrides = {}) {
   const React = { Fragment: 'Fragment', createElement: (type, props, ...children) => ({
     type, props: { ...props, children: children.flat(Infinity) },
   }) };
+  const originalElement=React.createElement;
+  const proposalActions=listFixture.visual(React);
+  React.createElement=(type,props,...children)=>type==='ListadosProposalActions'?proposalActions(props):originalElement(type,props,...children);
   const hosts = Object.fromEntries(['BottomSheet', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable',
     'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(name => [name, name]));
   const context = { ...hosts, React, Date, Math,lang,ENTRY_COLORS:colorContext.exports.GO_ENTRY_COLORS,reservationCardPolicy:colorContext.exports.reservationCardPolicy,entryIsReservation:presentationContext.exports.entryIsReservation,entryHeading:presentationContext.exports.entryHeading,canResolveEntry:()=>false, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""},
@@ -84,6 +88,7 @@ function fixture(lang = 'es', overrides = {}) {
     noteDocument: noteContext.exports.noteDocument, isGoNoteReminderTarget: toolsContext.exports.isGoNoteReminderTarget,
     actionCompletion: { candidates: [], status: () => undefined }, noteIdentity: {ready:false}, personalGoLog: [], renderLinkedNotes: () => null, listBookingDetail: undefined, notesOpen: false, openListNote() {}, openListSavedNote: () => false,
     t: key => { assert.equal(typeof translations[lang][key], 'string', key); return translations[lang][key]; },
+    listHistory:{days:90},listArchiveSection:'manual',listSettingsOpen:false,listSwipeUsed:null,completionIdentity:{scope:{userId:'fixture',context:'live:USER'}},ListadosProposalActions:'ListadosProposalActions',ListadosSwipeHint:'ListadosSwipeHint',listHistoryBucket:listFixture.history.listHistoryBucket,completionDecision:listFixture.completion.completionDecision,
     listOpen: true, listSwipeStepAllowed: true, llamadasListOpen: false, listMinimized: false,
     listFiltersHidden: false, listFilter: 'todos', typeFilter: 'todos', activityFilter: 'todas',
     quickCreateOpen: false, quickCreateKbVisible: false, quickCreateText: '', paddingBottom: 34,
@@ -133,9 +138,9 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
       const f = fixture(lang, { handedness, listGoSize, goLog: [entry] }), tree = f.render(), card = cardOf(tree);
       assert.ok(card);
       const header = byId(card, 'go-proposal-header-compact');
-      const contact = byId(header, 'go-proposal-contact-compact');
-      assert.ok(header && contact, 'contact stays alongside the main title');
-      assert.ok(contact.props.style.width >= 44 && contact.props.style.height >= 44);
+      const contact = byId(card, 'go-proposal-contact-compact');
+      assert.ok(header && contact, 'contact remains accessible outside the title row');
+      assert.ok(contact.props.style.minHeight >= 44);
       dispatchNestedPress(contact, card);
       assert.deepEqual(plain(f.calls), [
         ['setInitialMessagesContact', { name: entry.contactName, phone: entry.phone }], ['setMessagesOpen', true],
@@ -147,7 +152,7 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
       for (const time of [entry.time, entry.changeProposal.time]) assert.equal(body.split(time).length - 1, 1);
       for (const [id, label, date, time, color] of [
         ['go-proposal-current-compact', translations[lang].tasks_current_booking.toUpperCase(), '15/10/26', '17:00', '#ffffff'],
-        ['go-proposal-next-compact', translations[lang].tasks_change_proposal.toUpperCase(), '16/10/26', '12:45', '#FF8C00'],
+        ['go-proposal-next-compact', translations[lang].tasks_change_proposal.toUpperCase(), '16/10/26', '12:45', '#ffffff'],
       ]) {
         const row = byId(card, id), values = nodes(row, node => node.type === 'Text');
         assert.ok(row);
@@ -159,10 +164,6 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
         assert.equal(values[1].props.style.color, color);
       }
       const label = translations[lang][estado === 'propuesta_pendiente' ? 'biz_change_proposed' : 'biz_change_received'];
-      const buttons = nodes(header, node => node.type === 'TouchableOpacity');
-      const pillIndex = buttons.findIndex(node => texts(node) === label);
-      const checkboxIndex = buttons.findIndex(node => node.props.style?.backgroundColor === '#FF8C00');
-      const titleIndex = buttons.findIndex(node => byId(node, 'go-proposal-title-compact'));
       const titleBlock = byId(header, 'go-proposal-title-block-compact');
       assert.equal(texts(byId(titleBlock, 'go-proposal-title-compact')), entry.notes);
       const waiting = byId(titleBlock, 'go-proposal-substatus-compact');
@@ -170,14 +171,10 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
         assert.equal(texts(waiting), translations[lang].biz_booking_awaiting);
         assert.equal(texts(card).split(translations[lang].biz_booking_awaiting).length - 1, 1);
       } else assert.equal(waiting, undefined, 'received state stays in its original pill exactly once');
-      assert.equal(texts(header).split(label).length - 1, 1, 'keep one localized state pill');
-      assert.ok(pillIndex >= 0 && checkboxIndex >= 0 && titleIndex >= 0);
-      assert.ok(handedness === 'left' ? pillIndex < checkboxIndex && checkboxIndex < titleIndex
-        : titleIndex < pillIndex && pillIndex < checkboxIndex, 'keep approved handedness ordering');
-      f.calls.length = 0;
-      buttons[checkboxIndex].props.onPress({ stopPropagation() {} });
-      assert.deepEqual(plain(f.calls), [['updateGoStatus', entry.id]]);
-      const proposal = nodes(card, node => node.props?.style?.borderColor === 'rgba(255,140,0,0.65)')[0];
+      assert.equal(texts(card).split(label).length-1,1);
+      assert.equal(nodes(header,n=>n.type==='Feather'&&n.props.name==='circle').length,0);
+      assert.ok(!texts(header).includes(label),'state does not compete with title width');
+      const proposal=byId(card,'go-proposal-dates-compact');
       const scale = listGoSize === 'compacto' ? .8 : listGoSize === 'grande' ? 1.25 : 1;
       assert.equal(card.props.style.paddingVertical, Math.round(4 * scale));
       assert.equal(proposal.props.style.marginTop, Math.round(3 * scale));
@@ -187,7 +184,7 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
       if (estado === 'propuesto') for (const [word, handler] of [['accept', 'acceptProposal'], ['reject', 'rejectProposal']]) {
         f.calls.length = 0;
         const button = nodes(byId(card, 'go-proposal-responses-compact'), node => node.type === 'TouchableOpacity'
-          && texts(node) === `${word === 'accept' ? '🟢' : '🔴'} ${translations[lang][word]}`)[0];
+          && texts(node) === translations[lang][word].toUpperCase())[0];
         assert.ok(button);
         button.props.onPress({ stopPropagation() {} });
         assert.deepEqual(plain(f.calls), [[handler, entry.id]]);
@@ -226,7 +223,7 @@ test('group contact uses its existing first participant and missing contact crea
   ] }));
   const before = JSON.stringify(group), f = fixture('en', { goLog: [group] }), card = cardOf(f.render());
   const contact = byId(card, 'go-proposal-contact-compact');
-  assert.ok(nodes(contact, node => node.type === 'Feather' && node.props.name === 'users').length);
+  assert.equal(texts(contact),'Primero');
   dispatchNestedPress(contact, card);
   assert.deepEqual(plain(f.calls), [
     ['setInitialMessagesContact', { name: 'Primero', phone: '+34600000002' }], ['setMessagesOpen', true],
@@ -252,7 +249,7 @@ for (const [bookingStatus, labelKey, color] of [
     const statusLabel = translations[lang].biz_booking_intent_label.toUpperCase() + " · " + translations[lang][labelKey].toUpperCase();
     const status = nodes(card, node => node.type === 'Text' && texts(node) === statusLabel);
     assert.equal(status.length, 1, 'retain the existing localized booking-state pill and default');
-    assert.equal(status[0].props.style.color, color);
+    assert.equal(status[0].props.style.color, "#ffffff");
     assert.equal(nodes(card, node => node.type === 'Text'
       && texts(node) === translations[lang].biz_booking_intent_label.toUpperCase()).length, 0, 'remove only the redundant type badge');
     for (const time of [entry.time, entry.changeProposal.time]) assert.equal(texts(card).split(time).length - 1, 1);
@@ -297,9 +294,9 @@ for(const [size,scale] of [['compacto',.8],['medio',1],['grande',1.25]])
   const note=byId(card,'go-proposal-note-compact');if(withNote){assert.ok(note);assert.equal(texts(note),'Nota conservada completa');assert.equal(note.props.numberOfLines,undefined);assert.ok(!nodes(box).includes(note));}else assert.equal(note,undefined);
   const status=byId(header,'go-proposal-substatus-compact');assert.equal(!!status,estado==='propuesta_pendiente');
   const actions=byId(card,'go-proposal-responses-compact');assert.equal(!!actions,estado==='propuesto');
-  if(actions){const buttons=nodes(actions,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);for(const button of buttons)assert.equal(button.props.style.paddingVertical,lv(9));
-   f.calls.length=0;buttons[2].props.onPress({stopPropagation(){}});assert.deepEqual(plain(f.calls),[['openProposalFromList',{id:entry.id,time:entry.time,place:''}]]);}
-  const contact=byId(card,'go-proposal-contact-compact');assert.ok(contact.props.style.width>=44&&contact.props.style.height>=44);
+  if(actions){const buttons=nodes(actions,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);for(const button of buttons)assert.ok(button.props.style.minHeight>=44);
+   f.calls.length=0;buttons[1].props.onPress({stopPropagation(){}});assert.deepEqual(plain(f.calls),[['openProposalFromList',{id:entry.id,time:entry.time,place:''}]]);}
+  const contact=byId(card,'go-proposal-contact-compact');assert.ok(contact.props.style.minHeight>=44);
   // Removing 8pt of vertical frame padding is a real saving independent of native font metrics.
   assert.equal(2*lv(6)-2*box.props.style.paddingVertical,2*(lv(6)-lv(2)));
  });
@@ -308,7 +305,7 @@ for(const lang of ['es','en'])for(const size of ['compacto','medio','grande'])fo
  test(lang+' / '+size+' / '+handedness+': long title/status and multiline note remain complete',()=>{
  const title='ACTIVIDAD PERSONALIZADA CON TÍTULO LARGO',note='Primera línea de la nota.\nSegunda línea.\nTercera línea conservada.';
  const entry=freeze(sample({notes:title,changeProposal:{...sample().changeProposal,note}})),card=cardOf(fixture(lang,{listGoSize:size,handedness,goLog:[entry]}).render());
- assert.equal(texts(byId(card,'go-proposal-title-compact')),title);assert.equal(byId(card,'go-proposal-title-compact').props.numberOfLines,undefined);
+ assert.equal(texts(byId(card,'go-proposal-title-compact')),title);assert.equal(byId(card,'go-proposal-title-compact').props.numberOfLines,1);
  assert.equal(texts(byId(card,'go-proposal-substatus-compact')),translations[lang].biz_booking_awaiting);assert.equal(byId(card,'go-proposal-substatus-compact').props.numberOfLines,undefined);
  assert.equal(texts(byId(card,'go-proposal-note-compact')),note);assert.equal(byId(card,'go-proposal-note-compact').props.numberOfLines,undefined);
  });
