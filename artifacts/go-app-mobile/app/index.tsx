@@ -25624,7 +25624,7 @@ function HomeScreenContent() {
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
-    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} onClose={()=>setSupportOpen(false)} onExit={()=>{setSupportOpen(false);setSupportMode(false);}} scopeKey={adminAccess.userId ?? "anonymous"}/>
+    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {
