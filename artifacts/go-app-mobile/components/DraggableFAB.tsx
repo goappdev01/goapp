@@ -37,7 +37,7 @@ const EDGE = 8;
 
 interface DraggableFABProps {
   navigation?:boolean;
-  temporaryKeyboardBounds?:boolean;
+  keyboardResponsive?:boolean;
   handedness?:"left"|"right";
   screenKey: string;
   buttonKey: string;
@@ -68,7 +68,7 @@ export function DraggableFAB({
   fixedLeft,
   onDragStart,
   navigation=false,
-  temporaryKeyboardBounds=false,
+  keyboardResponsive=false,
   handedness,
   children,
 }: DraggableFABProps) {
@@ -98,13 +98,13 @@ export function DraggableFAB({
   const shadowOp = useSharedValue(0.18);
   const isDragging = useSharedValue(false);
   const hasDragged = useSharedValue(false);
-  const preKeyboardTop = useSharedValue<number|null>(null);
-
+  const lastBoundsHeight=useRef<number|null>(null),currentBoundsHeight=useRef(SH);
+  currentBoundsHeight.current=SH;
   useEffect(()=>{
-    if(!navigation)return;
-    if(temporaryKeyboardBounds){if(preKeyboardTop.value===null)preKeyboardTop.value=posT.value;}
-    else if(preKeyboardTop.value!==null){posT.value=preKeyboardTop.value;preKeyboardTop.value=null;}
-  },[navigation,temporaryKeyboardBounds]);
+    if(!keyboardResponsive||!bounds)return;
+    const previous=lastBoundsHeight.current;lastBoundsHeight.current=bounds.height;
+    if(previous!==null&&previous!==bounds.height)posT.value+=bounds.height-previous;
+  },[keyboardResponsive,bounds?.height]);
 
   // ── Safe area clamp bounds ───────────────────────────────────────────────
   const fixed = fixedLeft === undefined ? undefined : Math.max(0, Math.min(SW - buttonWidth, fixedLeft));
@@ -122,10 +122,11 @@ export function DraggableFAB({
       if(!raw&&navigation&&hand==="right")raw=await AsyncStorage.getItem(`fab_pos:${screenKey}:${buttonKey}`);
       if (!active||!raw) return;
       try {
-        const { l, t } = JSON.parse(raw) as { l: number; t: number };
+        const { l, t, h } = JSON.parse(raw) as { l: number; t: number; h?:number };
         if (!Number.isFinite(l) || !Number.isFinite(t) || hasDragged.value) return;
         posL.value = bounds ? l : Math.max(minL, Math.min(maxL, l));
-        posT.value = bounds ? t : Math.max(minT, Math.min(maxT, t));
+        const restored=keyboardResponsive&&typeof h==="number"&&Number.isFinite(h)?t+currentBoundsHeight.current-h:t;
+        posT.value = bounds ? restored : Math.max(minT, Math.min(maxT, restored));
       } catch {
         // ignore corrupt data
       }
@@ -141,9 +142,9 @@ export function DraggableFAB({
 
   const savePos = useCallback(
     (l: number, t: number) => {
-      AsyncStorage.setItem(storageKey, JSON.stringify({ l, t })).catch(() => console.info("[fab-preference]", { code: "WRITE_FAILED" }));
+      AsyncStorage.setItem(storageKey, JSON.stringify(keyboardResponsive&&bounds?{l,t,h:currentBoundsHeight.current}:{l,t})).catch(() => console.info("[fab-preference]", { code: "WRITE_FAILED" }));
     },
-    [storageKey]
+    [storageKey,keyboardResponsive,!!bounds]
   );
 
   // ── Gesture ──────────────────────────────────────────────────────────────
@@ -173,7 +174,7 @@ export function DraggableFAB({
           isDragging.value = false;
           scale.value = withSpring(1, { damping: 14, stiffness: 160 });
           shadowOp.value = 0.18;
-          if(!temporaryKeyboardBounds)runOnJS(savePos)(posL.value, posT.value);
+          runOnJS(savePos)(posL.value, posT.value);
           runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
         })
         .onFinalize(() => {
@@ -183,7 +184,7 @@ export function DraggableFAB({
           shadowOp.value = 0.18;
           if(navigation)runOnJS(finishNavigationDrag)();
         }),
-    [minL, maxL, minT, maxT, savePos, onDragStart, fixed,navigation,temporaryKeyboardBounds,markNavigationDrag,finishNavigationDrag]
+    [minL, maxL, minT, maxT, savePos, onDragStart, fixed,navigation,markNavigationDrag,finishNavigationDrag]
   );
 
   // ── Animated style ───────────────────────────────────────────────────────

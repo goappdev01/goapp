@@ -25441,7 +25441,7 @@ function HomeScreenContent() {
                 )}
               </View>
             </View>
-            <GoNavigationFloating testID="landing-search-floating-close" screenKey="landing-search" handedness={handedness} protectedBottom={panelBottom+20}><GoCloseButton level="panel" accessibilityLabel={lang==="en"?"Close business search":"Cerrar buscador de empresas"} onPress={closeSearch}/></GoNavigationFloating>
+            <GoNavigationFloating testID="landing-search-floating-close" screenKey="landing-search" handedness={handedness} keyboardResponsive protectedBottom={panelBottom+20}><GoCloseButton level="panel" accessibilityLabel={lang==="en"?"Close business search":"Cerrar buscador de empresas"} onPress={closeSearch}/></GoNavigationFloating>
           </View>
         );
       })()}

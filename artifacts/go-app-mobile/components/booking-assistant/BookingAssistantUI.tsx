@@ -34,6 +34,7 @@ export function IconButton({
     <TouchableOpacity
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{disabled}}
       disabled={disabled}
       onPress={onPress}
       style={[s.iconButton,appearance==="note"&&{backgroundColor:"#f4f6f8",borderColor:"#b4bdc6"},appearance==="supportAction"&&s.supportAction, disabled && s.disabled]}

@@ -478,7 +478,7 @@ export function BookingSearchOverlay({
 
   useEffect(() => {
     const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const hideEvt = "keyboardDidHide";
     const onShow = Keyboard.addListener(showEvt, (e) => {
       setKeyboardVisible(true);
       setKeyboardHeight(Math.max(0,SCREEN_H-(e.endCoordinates.screenY??(SCREEN_H-e.endCoordinates.height))));
@@ -1000,6 +1000,7 @@ export function BookingSearchOverlay({
   //   (el estado de resultados es el mismo nivel conceptual que "Nueva Reserva raíz";
   //    no existe un paso intermedio "limpiar búsqueda")
   const handleBackOneLevel = () => {
+    if (keyboardVisible || Keyboard.isVisible()) { Keyboard.dismiss(); return; }
     Haptics.selectionAsync().catch(() => {});
     if (step === "confirmed") { handleClose(); return; }
     if (step === "hold") {
@@ -1892,9 +1893,9 @@ export function BookingSearchOverlay({
             • Arriba  (flecha simple):  retrocede un nivel
             • Abajo   (doble flecha):   cierra el panel → Landing           */}
         {step !== "confirmed" && (
-          <GoNavigationFloating screenKey="booking-search" width={136} safeArea={false} protectedTop={insets.top+8} protectedBottom={keyboardHeight+(keyboardVisible?12:insets.bottom+24)}>
+          <GoNavigationFloating screenKey="booking-search" width={136} safeArea={false} keyboardResponsive protectedTop={insets.top+8} protectedBottom={keyboardHeight+(keyboardVisible?12:insets.bottom+24)}>
             {/* ↓  Retroceder un nivel — ARRIBA */}
-            <GoCloseButton level="panel" testID="booking-back" accessibilityLabel={lang==="en"?"Back":"Volver"} hitSlop={4} style={s.fabClose} onPress={handleBackOneLevel} activeOpacity={0.7}/>
+            <GoCloseButton level="panel" testID="booking-back" keyboardVisible={keyboardVisible} accessibilityLabel={keyboardVisible?(lang==="en"?"Hide keyboard":"Ocultar teclado"):(lang==="en"?"Back":"Volver")} hitSlop={4} style={s.fabClose} onPress={handleBackOneLevel} activeOpacity={0.7}/>
             {/* ↓↓  Landing — ABAJO */}
             <GoCloseButton level="container" testID="booking-exit" accessibilityLabel={lang==="en"?"Return to GO":"Volver a GO"} hitSlop={4} style={s.fabClose} onPress={handleDismissAll} activeOpacity={0.7}/>
           </GoNavigationFloating>

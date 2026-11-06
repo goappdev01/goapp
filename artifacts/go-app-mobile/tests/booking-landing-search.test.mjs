@@ -40,3 +40,18 @@ test('both booking exits preserve the exact booking ID and real route selects th
  scope.exports.go('2031-12-28','11:37','exact-booking-id');const target=calls.find(c=>c[0]==='target')[1];assert.equal(target.entryId,'exact-booking-id');assert.equal(target.dateISO,'2031-12-28');assert.ok(calls.some(c=>c[0]==='month'&&c[1]==='2031-12'));
  const wrapper=fs.readFileSync('components/booking/GoProveedorReservaSheet.tsx','utf8');assert.equal(wrapper.split('props.onBookingConfirmed?.(dateISO, time,entryId)').length-1,2);
 });
+test('the booking search back control closes the keyboard before navigating, including after reopening it',()=>{
+ const overlay=fs.readFileSync('components/booking/BookingSearchOverlay.tsx','utf8');
+ const overlayAst=ts.createSourceFile('BookingSearchOverlay.tsx',overlay,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+ const handler=find(overlayAst,n=>ts.isVariableDeclaration(n)&&n.name.getText(overlayAst)==='handleBackOneLevel')?.initializer;
+ assert.ok(handler,'exercise the real booking search back handler');
+ const code=ts.transpileModule('exports.back='+handler.getText(overlayAst),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+ let open=true;const calls=[];
+ const scope={exports:{},keyboardVisible:true,Keyboard:{isVisible:()=>open,dismiss(){open=false;calls.push('dismiss');}},Haptics:{selectionAsync:async()=>{}},step:'search',selectedSubCategory:null,selectedCategory:null,handleClose(){calls.push('close');}};
+ vm.runInNewContext(code,scope);
+ scope.exports.back();assert.deepEqual(calls,['dismiss']);
+ scope.keyboardVisible=false;scope.exports.back();assert.deepEqual(calls,['dismiss','close']);
+ open=true;scope.keyboardVisible=true;scope.exports.back();assert.deepEqual(calls,['dismiss','close','dismiss']);
+ assert.match(overlay,/keyboardDidHide/);assert.match(overlay,/<GoNavigationFloating screenKey="booking-search"[^>]*keyboardResponsive/);
+ assert.match(overlay,/<GoCloseButton level="panel" testID="booking-back" keyboardVisible=\{keyboardVisible\}/);
+});

@@ -14,8 +14,8 @@ test('every migrated navigation callback is unchanged, no duplicates were added 
  for(const row of baseline.excluded)assert.ok(readFileSync(row.file,'utf8').includes(row.source),'non-navigation arrow remains exact');
 });
 
-async function fixture({hand='right',width=390,height=600,stored=new Map(),navigation=true,read,bridge=false}={}){
- const hosts=new Map(),gestures=[],styles=[],calls=[];let props={navigation,screenKey:'synthetic-nav',buttonKey:'pair',bounds:{width,height},buttonWidth:136,maxH:64,initialBottom:12,initialRight:20};
+async function fixture({hand='right',width=390,height=600,stored=new Map(),navigation=true,keyboardResponsive=false,read,bridge=false}={}){
+ const hosts=new Map(),gestures=[],styles=[],calls=[];let props={navigation,keyboardResponsive,screenKey:'synthetic-nav',buttonKey:'pair',bounds:{width,height},buttonWidth:136,maxH:64,initialBottom:12,initialRight:20};
  const host=name=>p=>{if(p.accessibilityLabel)hosts.set(p.accessibilityLabel,p);if(p.testID)hosts.set(p.testID,p);return React.createElement('div',{'data-native':name},p.children);};
  const native={...life.rn,View:host('View'),Text:host('Text'),TouchableOpacity:host('Button'),StyleSheet:{create:x=>x,absoluteFill:{}},Dimensions:{get:()=>({width,height})},useWindowDimensions:()=>({width,height})};
  const safe={'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})}},handContext=evaluate('components/ui/GoNavigationHand.tsx');
@@ -39,11 +39,26 @@ test('long press uses the existing 500ms recognizer, persists clamped movement a
 test('right/left positions are independent, restore after remount and remain safe after keyboard/orientation changes',async()=>{
  const stored=new Map();let f=await fixture({stored});try{assert.equal(f.style().left,234);await f.hand('left');assert.equal(f.style().left,20);const g=f.gesture();await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:15,translationY:-80});g._onEnd();g._onFinalize();});assert.deepEqual(JSON.parse(stored.get('fab_pos:synthetic-nav:pair:left')),{l:35,t:444});await f.render({bounds:{width:250,height:180}});assert.ok(f.style().left>=8&&f.style().left+136<=242);assert.ok(f.style().top>=8&&f.style().top+64<=172);await f.render({bounds:{width:390,height:600}});assert.equal(f.style().top,444);}finally{await f.close();}f=await fixture({stored,hand:'left'});try{assert.equal(f.style().left,35);assert.equal(f.style().top,444);}finally{await f.close();}
 });
+test('keyboard responsive controls preserve their lower gap through repeated show, hide and manual movement',async()=>{
+ const stored=new Map();let f=await fixture({stored,keyboardResponsive:true});
+ try{
+  assert.equal(f.style().top,524);
+  for(let cycle=0;cycle<3;cycle++){
+   await f.render({bounds:{width:390,height:300}});assert.equal(f.style().top,224);assert.equal(300-f.style().top-64,12);
+   await f.render({bounds:{width:390,height:600}});assert.equal(f.style().top,524);
+  }
+  await f.render({bounds:{width:390,height:300}});
+  const gesture=f.gesture();await f.settle(()=>{gesture._onStart({translationX:0,translationY:0});gesture._onUpdate({translationX:0,translationY:-30});gesture._onEnd();gesture._onFinalize();});
+  assert.equal(f.style().top,194);assert.deepEqual(JSON.parse(stored.get('fab_pos:synthetic-nav:pair:right')),{l:234,t:194,h:300});
+  await f.render({bounds:{width:390,height:600}});assert.equal(f.style().top,494);
+ }finally{await f.close();}
+ f=await fixture({stored,keyboardResponsive:true});try{assert.equal(f.style().top,494);}finally{await f.close();}
+});
 test('old right-hand preferences migrate safely, corrupted storage and obsolete hydration cannot hide navigation',async()=>{
  const stored=new Map([['fab_pos:synthetic-nav:pair',JSON.stringify({l:1000,t:1000})]]);const f=await fixture({stored});try{assert.ok(f.style().left+136<=382);assert.ok(f.style().top+64<=592);stored.set('fab_pos:synthetic-nav:pair:left','broken');await f.hand('left');assert.equal(f.style().left,20);}finally{await f.close();}
 });
 test('floating hosts measure real local bounds, protect the composer and mirror near-thumb initial placement at iPhone sizes',async()=>{
- for(const width of [320,375,430,844])for(const hand of ['left','right']){const f=await fixture({width,hand});try{await f.floating({safeArea:false,protectedBottom:120,height:64});const host=f.hosts.get('floating-test-navigation-host');assert.equal(host.style.bottom,120);await f.settle(()=>host.onLayout({nativeEvent:{layout:{width,height:200}}}));const s=f.style();assert.ok(s.left>=0&&s.left+136<=width);assert.ok(s.top>=0&&s.top+64<=200);assert.equal(s.left,hand==='left'?12:width-148);}finally{await f.close();}}
+ for(const width of [320,375,430,844])for(const hand of ['left','right']){const f=await fixture({width,hand});try{await f.floating({safeArea:false,protectedBottom:120,height:64});const host=f.hosts.get('floating-test-navigation-host');assert.equal(host.style.bottom,120);assert.equal(f.style().top,408,'initial modal bounds do not subtract safe areas twice');await f.settle(()=>host.onLayout({nativeEvent:{layout:{width,height:200}}}));const s=f.style();assert.ok(s.left>=0&&s.left+136<=width);assert.ok(s.top>=0&&s.top+64<=200);assert.equal(s.left,hand==='left'?12:width-148);}finally{await f.close();}}
 });
 
 test('Calendar actual recognizer reaches each safe edge for every visible group and both hands',async()=>{for(const width of [320,390,430])for(const hand of ['left','right'])for(const group of [64,108,136,180]){const f=await fixture({width,hand});try{await f.render({buttonWidth:group});const g=f.gesture();await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:2000,translationY:-2000});g._onEnd();g._onFinalize();});assert.equal(f.style().left+group,width-8);assert.equal(f.style().top,8);await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:-2000,translationY:2000});g._onEnd();g._onFinalize();});assert.equal(f.style().left,8);assert.equal(f.style().top+64,592);}finally{await f.close();}}});

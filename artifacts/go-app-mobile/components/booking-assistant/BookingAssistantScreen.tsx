@@ -772,7 +772,7 @@ export function BookingAssistantScreen({
             }}
           />
         )}
-          {consultation&&<GoNavigationFloating screenKey="support-assistant" safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} protectedBottom={footerHeight} width={goSize+72} height={Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
+          {consultation&&<GoNavigationFloating screenKey="support-assistant" safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} keyboardResponsive protectedBottom={footerHeight+(keyboardVisible?10:0)} width={goSize+72} height={Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
             {dock}<GoCloseButton level="panel" appearance="light" keyboardVisible={keyboardVisible} disabled={saving} accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a AYUDA"} onPress={consultationBack}/>
           </View></GoNavigationFloating>}
           </View>

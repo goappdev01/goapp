@@ -17,6 +17,10 @@ test('support paper bin and attachment have equal surfaces; keyboard back change
  assert.equal(clear.props.style[0].width,44);assert.equal(clear.props.style[0].height,44);
  assert.equal(JSON.stringify(clear.props.style),JSON.stringify(attach.props.style));
  assert.equal(nodes(clear).find(n=>n.type==='Feather').props.size,nodes(attach).find(n=>n.type==='Feather').props.size);
+ const empty=ui.IconButton({icon:'trash-2',label:'Limpiar texto',appearance:'supportAction',disabled:true,onPress(){}});
+ assert.equal(empty.props.disabled,true);assert.equal(empty.props.accessibilityState.disabled,true);
+ assert.equal(empty.props.style[0],clear.props.style[0]);assert.equal(empty.props.style[2],clear.props.style[2]);
+ assert.equal(empty.props.style[3].opacity,0.45);
  const close=load('components/ui/GoCloseButton.tsx').GoCloseButton;
  const hidden=close({level:'panel',onPress(){},accessibilityLabel:'Volver'});
  const shown=close({level:'panel',keyboardVisible:true,onPress(){},accessibilityLabel:'Ocultar teclado'});
