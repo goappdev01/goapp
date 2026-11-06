@@ -530,6 +530,9 @@ export function BookingSearchOverlay({
   const [customerMatches, setCustomerMatches] = useState<PrivateBusinessCustomer[]>([]);
   const [fastError, setFastError] = useState("");
   const [sharingConfirmation,setSharingConfirmation] = useState(false);
+  const [confirmationOptions,setConfirmationOptions]=useState(false);
+  const confirmationImage=useRef<import("@/data/bookingConfirmationShare").ConfirmationImageRenderer|null>(null),shareFlight=useRef(false);
+  const ConfirmationImage=fast?require("./BookingConfirmationImage").BookingConfirmationImage:null;
   const fastGeneration = useRef(0);
   const fastCommitter = useRef<ReturnType<typeof import("@/data/businessFastBooking").createFastCommitter> | null>(null);
   const confirmationShare: typeof import("@/data/bookingConfirmationShare") | null = fast ? require("@/data/bookingConfirmationShare") : null;
@@ -572,7 +575,7 @@ export function BookingSearchOverlay({
       setSelectedStaff(null);
       setActiveHold(null);
       setConfirmedBooking(null);
-      setFastReview(null); setFastContext(null); setFastError(""); setCustomerMatches([]);
+      setFastReview(null); setFastContext(null); setFastError(""); setCustomerMatches([]); setConfirmationOptions(false);
       setGuest({ name: "", phone: "", contactId: null, remember: false });
       fastGeneration.current++;
       dragAnim.setValue(0);
@@ -1011,17 +1014,18 @@ export function BookingSearchOverlay({
   };
 
   const handleShareConfirmation = async () => {
-    if (!fast || !fastContext || !confirmedBooking || !selectedBusiness || !confirmationShare || sharingConfirmation) return;
+    if (!fast || !fastContext || !confirmedBooking || !selectedBusiness || !confirmationShare || !confirmationImage.current || shareFlight.current) return;
+    shareFlight.current=true; const generation=fastGeneration.current;
     setSharingConfirmation(true); setFastError("");
     try {
       if(fastContext.identity!==await fast.gateway.currentIdentity())throw Error("La sesión ha cambiado.");
       const message=confirmationShare.bookingConfirmationMessage(confirmedBooking,selectedBusiness,fastContext.professional.name,discoveryLink);
-      const {Linking,Share}:typeof import("react-native")=require("react-native");
-      const url=confirmationShare.whatsappConfirmationURL(guest.phone,message);
-      if(url)await Linking.openURL(url);else await Share.share({message});
+      const {Share}:typeof import("react-native")=require("react-native");
+      const fs:typeof import("expo-file-system/legacy")=require("expo-file-system/legacy");
+      await confirmationShare.shareConfirmationImage(confirmationImage.current,message,{...fs,share:content=>Share.share(content),stillCurrent:async()=>generation===fastGeneration.current&&fastContext.identity===await fast.gateway.currentIdentity()});
       // Opening a composer is not delivery confirmation. The professional sends it.
     } catch(error) { setFastError(error instanceof Error?error.message:"No se pudo abrir la opción de compartir."); }
-    finally{setSharingConfirmation(false);}
+    finally{shareFlight.current=false;setSharingConfirmation(false);}
   };
 
   const handleHoldExpired = () => {
@@ -1981,9 +1985,15 @@ export function BookingSearchOverlay({
 
                 {fast && <View style={{alignItems:"center",gap:10,marginBottom:16}}>
                   {DiscoveryQRCode && discoveryLink && <View accessibilityLabel="Código QR oficial de GO" style={{backgroundColor:"#FFFFFF",padding:8,borderRadius:10}}><DiscoveryQRCode value={discoveryLink} size={80}/></View>}
-                  <TouchableOpacity testID="fast-share-confirmation" disabled={sharingConfirmation} onPress={()=>void handleShareConfirmation()} style={{padding:12,minHeight:44}}>
-                    <Text style={{color:"#FFFFFF",fontWeight:"700"}}>ENVIAR AL CLIENTE</Text>
+                  <TouchableOpacity testID="fast-share-confirmation" disabled={sharingConfirmation} onPress={()=>setConfirmationOptions(value=>!value)} style={{padding:12,minHeight:44}}>
+                    <Text style={{color:"#FFFFFF",fontWeight:"700"}}>ENVIAR CONFIRMACIÓN</Text>
                   </TouchableOpacity>
+                  {confirmationOptions&&<View testID="fast-confirmation-options" style={{width:"100%",gap:12}}>
+                    {ConfirmationImage&&confirmationShare&&fastContext&&selectedBusiness&&<ConfirmationImage ref={confirmationImage} accent={accentColor} message={confirmationShare.bookingConfirmationMessage(confirmedBooking,selectedBusiness,fastContext.professional.name,discoveryLink)}/>}
+                    <TouchableOpacity testID="fast-share-go" disabled accessibilityRole="button" accessibilityState={{disabled:true}} accessibilityHint="Requiere vínculo verificado y mensajería autorizada" style={{padding:12,minHeight:44,opacity:0.55}}><Text style={{color:"#FFFFFF"}}>ENVIAR POR GO · Próximamente</Text></TouchableOpacity>
+                    {!!confirmationShare?.whatsappConfirmationURL(guest.phone,"")&&<TouchableOpacity testID="fast-share-whatsapp" disabled={sharingConfirmation} onPress={()=>void handleShareConfirmation()} style={{padding:12,minHeight:44}}><Text style={{color:"#FFFFFF",fontWeight:"700"}}>{sharingConfirmation?"Preparando imagen…":"ENVIAR POR WHATSAPP"}</Text></TouchableOpacity>}
+                    <Text style={{color:"#FFFFFF",fontSize:13}}>{confirmationShare?.whatsappConfirmationURL(guest.phone,"")?"Elige WhatsApp en Compartir y selecciona el destinatario. El envío lo confirmas allí.":"WhatsApp requiere un teléfono con prefijo internacional."}</Text>
+                  </View>}
                 </View>}
 
                 {/* Botón OK / Ver en calendario — único botón, hace todo */}

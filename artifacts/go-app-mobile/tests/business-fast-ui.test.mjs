@@ -25,7 +25,9 @@ async function mount(){
   'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},
   '@/data/booking':booking,'@/data/bookingServices':services,'@/data/bookingTimeline':evaluate('data/bookingTimeline.ts'),
   '@/data/catalogAssociations':catalog,'./CatalogComplementSelector':{CatalogComplementSelector:Selector},
-  '@/data/businessFastBooking':f.api,'@/data/bookingConfirmationShare':{officialGoDiscoveryLink:()=>null,bookingConfirmationMessage:()=> 'RESERVA CONFIRMADA',whatsappConfirmationURL:()=>null},
+  '@/data/businessFastBooking':f.api,'@/data/bookingConfirmationShare':{...evaluate('data/bookingConfirmationShare.ts'),officialGoDiscoveryLink:()=>null},
+  './BookingConfirmationImage':{BookingConfirmationImage:React.forwardRef((props,ref)=>{React.useImperativeHandle(ref,()=>({toDataURL:callback=>callback('iVBORw0KGgoAAA==')}));return React.createElement('div',null,props.message);})},
+  'expo-file-system/legacy':{cacheDirectory:'file:///private/',makeDirectoryAsync:async()=>{},writeAsStringAsync:async()=>{},deleteAsync:async()=>{}},
   '@/lib/sessionEvents':{onSessionChanged:fn=>{sessionListeners.add(fn);return()=>sessionListeners.delete(fn);}},
   '@/data/customerBookingProjection':{customerBookingEntry:never},'@/lib/goLogBridge':{syncBookingToGoLog:never},
   '@/data/goRecentBusinesses':{getRecentBusinessIds:never,recordBusinessVisit:never},
@@ -49,9 +51,11 @@ test('FAST renders the EXISTING services, confirmation and confirmed views; no p
   await f.press('booking-service-'+f.serviceId);await f.press('booking-save-services');
   assert.ok(f.controls.has('fast-customer-fields'));assert.match(f.text(),/45 min/);assert.match(f.text(),/23/);
   await f.act(()=>f.controls.get('fast-customer-name').onChangeText('Cliente sintético'));
+  await f.act(()=>f.controls.get('fast-customer-phone').onChangeText('+34000000000'));
   await f.act(()=>f.confirm());assert.equal(f.received.length,1);assert.equal(f.received[0].customerId,null);
   assert.ok(f.controls.has('booking-confirmed-state'));assert.equal(f.received[0].staffId,f.staffId);
-  assert.equal(f.shareCalls.length,0);await f.press('fast-share-confirmation');assert.equal(f.shareCalls.length,1);
+  assert.equal(f.shareCalls.length,0);await f.press('fast-share-confirmation');assert.ok(f.controls.has('fast-confirmation-options'));assert.equal(f.shareCalls.length,0);assert.equal(f.controls.get('fast-share-go').disabled,true);await f.press('fast-share-whatsapp');assert.equal(f.shareCalls.length,1);assert.ok(f.shareCalls[0].url.endsWith('/reserva.png'));assert.match(f.shareCalls[0].message,/Referencia:/);assert.equal(f.received.length,1);
+  await f.act(()=>{const tap=f.controls.get('fast-share-whatsapp').onPress;tap();tap();});assert.equal(f.shareCalls.length,2,'simultaneous taps share only once');assert.equal(f.received.length,1,'sharing again never creates another booking');assert.ok(f.controls.has('booking-confirmed-state'));
  }finally{await f.close();}
 });
 test('name validation retains the review and optional phone remains optional',async()=>{
