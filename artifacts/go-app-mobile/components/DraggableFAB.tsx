@@ -37,6 +37,7 @@ const EDGE = 8;
 
 interface DraggableFABProps {
   navigation?:boolean;
+  temporaryKeyboardBounds?:boolean;
   handedness?:"left"|"right";
   screenKey: string;
   buttonKey: string;
@@ -67,6 +68,7 @@ export function DraggableFAB({
   fixedLeft,
   onDragStart,
   navigation=false,
+  temporaryKeyboardBounds=false,
   handedness,
   children,
 }: DraggableFABProps) {
@@ -96,6 +98,13 @@ export function DraggableFAB({
   const shadowOp = useSharedValue(0.18);
   const isDragging = useSharedValue(false);
   const hasDragged = useSharedValue(false);
+  const preKeyboardTop = useSharedValue<number|null>(null);
+
+  useEffect(()=>{
+    if(!navigation)return;
+    if(temporaryKeyboardBounds){if(preKeyboardTop.value===null)preKeyboardTop.value=posT.value;}
+    else if(preKeyboardTop.value!==null){posT.value=preKeyboardTop.value;preKeyboardTop.value=null;}
+  },[navigation,temporaryKeyboardBounds]);
 
   // ── Safe area clamp bounds ───────────────────────────────────────────────
   const fixed = fixedLeft === undefined ? undefined : Math.max(0, Math.min(SW - buttonWidth, fixedLeft));
@@ -164,7 +173,7 @@ export function DraggableFAB({
           isDragging.value = false;
           scale.value = withSpring(1, { damping: 14, stiffness: 160 });
           shadowOp.value = 0.18;
-          runOnJS(savePos)(posL.value, posT.value);
+          if(!temporaryKeyboardBounds)runOnJS(savePos)(posL.value, posT.value);
           runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
         })
         .onFinalize(() => {
@@ -174,7 +183,7 @@ export function DraggableFAB({
           shadowOp.value = 0.18;
           if(navigation)runOnJS(finishNavigationDrag)();
         }),
-    [minL, maxL, minT, maxT, savePos, onDragStart, fixed,navigation,markNavigationDrag,finishNavigationDrag]
+    [minL, maxL, minT, maxT, savePos, onDragStart, fixed,navigation,temporaryKeyboardBounds,markNavigationDrag,finishNavigationDrag]
   );
 
   // ── Animated style ───────────────────────────────────────────────────────

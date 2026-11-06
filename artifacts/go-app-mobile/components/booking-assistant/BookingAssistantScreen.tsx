@@ -139,7 +139,7 @@ export function BookingAssistantScreen({
     };
     const subscriptions = [
       Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow", update(true)),
-      Keyboard.addListener(Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide", update(false)),
+      Keyboard.addListener("keyboardDidHide", update(false)),
     ];
     return () => subscriptions.forEach(subscription => subscription.remove());
   }, [visible]);
@@ -772,8 +772,8 @@ export function BookingAssistantScreen({
             }}
           />
         )}
-          {consultation&&<GoNavigationFloating screenKey="support-assistant" safeArea={false} handedness={handedness} protectedBottom={footerHeight} width={goSize+72} height={Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
-            {dock}<GoCloseButton level="panel" appearance="light" disabled={saving} accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a AYUDA"} onPress={consultationBack}/>
+          {consultation&&<GoNavigationFloating screenKey="support-assistant" safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} protectedBottom={footerHeight} width={goSize+72} height={Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
+            {dock}<GoCloseButton level="panel" appearance="light" keyboardVisible={keyboardVisible} disabled={saving} accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a AYUDA"} onPress={consultationBack}/>
           </View></GoNavigationFloating>}
           </View>
         </KeyboardAvoidingView>

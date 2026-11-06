@@ -6,13 +6,13 @@ import {GoNavigationHand} from "./GoNavigationHand";
 import {GestureHandlerRootView} from "react-native-gesture-handler";
 
 /** A full-size touch host for the existing persistent drag recognizer. No navigation logic. */
-export function GoNavigationFloating({screenKey,buttonKey="navigation",children,width=64,height=64,protectedBottom=0,protectedTop=0,safeArea=true,handedness,initialBottom=8,initialTop,initialRight=12,testID,pointerEvents="box-none"}:{
- screenKey:string;buttonKey?:string;children:React.ReactNode;width?:number;height?:number;protectedBottom?:number;protectedTop?:number;safeArea?:boolean;handedness?:"left"|"right";initialBottom?:number;initialTop?:number;initialRight?:number;testID?:string;pointerEvents?:"box-none"|"none";
+export function GoNavigationFloating({screenKey,buttonKey="navigation",children,width=64,height=64,protectedBottom=0,protectedTop=0,safeArea=true,handedness,initialBottom=8,initialTop,initialRight=12,testID,pointerEvents="box-none",keyboardVisible=false}:{
+ screenKey:string;buttonKey?:string;children:React.ReactNode;width?:number;height?:number;protectedBottom?:number;protectedTop?:number;safeArea?:boolean;handedness?:"left"|"right";initialBottom?:number;initialTop?:number;initialRight?:number;testID?:string;pointerEvents?:"box-none"|"none";keyboardVisible?:boolean;
 }){
  const window=useWindowDimensions(),insets=useSafeAreaInsets(),preferred=useContext(GoNavigationHand);
  const [bounds,setBounds]=useState({width:window.width-insets.left-insets.right,height:window.height-insets.top-insets.bottom-protectedTop-protectedBottom});
  return <GestureHandlerRootView testID={testID??screenKey+"-navigation-host"} pointerEvents={pointerEvents} onLayout={event=>{const {width,height}=event.nativeEvent.layout;setBounds(old=>old.width===width&&old.height===height?old:{width,height});}}
   style={{position:"absolute",left:safeArea?insets.left:0,right:safeArea?insets.right:0,top:protectedTop+(safeArea?insets.top:0),bottom:protectedBottom+(safeArea?insets.bottom:0),zIndex:80}}>
-  <DraggableFAB navigation handedness={handedness??preferred} screenKey={screenKey} buttonKey={buttonKey} bounds={bounds} boundsVerticalInset={0} buttonWidth={width} maxH={height} initialTop={initialTop} initialBottom={initialBottom} initialRight={initialRight}><View style={{flexDirection:(handedness??preferred)==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>{children}</View></DraggableFAB>
+  <DraggableFAB navigation temporaryKeyboardBounds={keyboardVisible} handedness={handedness??preferred} screenKey={screenKey} buttonKey={buttonKey} bounds={bounds} boundsVerticalInset={0} buttonWidth={width} maxH={height} initialTop={initialTop} initialBottom={initialBottom} initialRight={initialRight}><View style={{flexDirection:(handedness??preferred)==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>{children}</View></DraggableFAB>
  </GestureHandlerRootView>;
 }

@@ -28,7 +28,7 @@ export function IconButton({
   label: string;
   onPress: () => void;
   disabled?: boolean;
-  appearance?:"default"|"note";
+  appearance?:"default"|"note"|"supportAction";
 }) {
   return (
     <TouchableOpacity
@@ -36,9 +36,9 @@ export function IconButton({
       accessibilityLabel={label}
       disabled={disabled}
       onPress={onPress}
-      style={[s.iconButton,appearance==="note"&&{backgroundColor:"#f4f6f8",borderColor:"#b4bdc6"}, disabled && s.disabled]}
+      style={[s.iconButton,appearance==="note"&&{backgroundColor:"#f4f6f8",borderColor:"#b4bdc6"},appearance==="supportAction"&&s.supportAction, disabled && s.disabled]}
     >
-      <Feather name={icon} size={22} color={appearance==="note"?"#17212b":"#163F60"} />
+      <Feather name={icon} size={22} color={appearance==="supportAction"&&icon==="trash-2"?"#b4232f":appearance==="note"||appearance==="supportAction"?"#17212b":"#163F60"} />
     </TouchableOpacity>
   );
 }
@@ -140,6 +140,7 @@ export const s = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  supportAction:{backgroundColor:"#f4f6f8",borderColor:"#b4bdc6",borderWidth:1,borderRadius:12,shadowColor:"#18202A",shadowOffset:{width:0,height:2},shadowOpacity:.12,shadowRadius:3,elevation:2,flexShrink:0},
   conversation: { padding: 16, gap: 12, paddingBottom: 20 },
   bubble: {
     maxWidth: "88%",

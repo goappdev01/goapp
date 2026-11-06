@@ -456,8 +456,8 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
         </TouchableOpacity>
       </DraggableFAB>}
     </View>
-    <GoNavigationFloating screenKey="note-navigation" safeArea={false} handedness={handedness} width={initial&&onGoToLanding?136:64} protectedTop={insets.top+52} protectedBottom={(footerBottom?Math.max(0,frameHeight-footerBottom):0)+Math.max(insets.bottom,12)} initialBottom={0}>
-      <GoCloseButton testID="note-navigation-back" level="panel" touchSize={56} hitSlop={0} onPress={back} accessibilityLabel={keyboardVisible||keyboard.dismissing?"Ocultar teclado":toolsOpen&&!!panel?"Volver a herramientas":toolsOpen?"Ocultar herramientas":"Cerrar nota"} disabled={busy||toolFinishing||closingSaved} appearance="light"/>
+    <GoNavigationFloating screenKey="note-navigation" safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible||keyboard.dismissing} width={initial&&onGoToLanding?136:64} protectedTop={insets.top+52} protectedBottom={(footerBottom?Math.max(0,frameHeight-footerBottom):0)+Math.max(insets.bottom,12)} initialBottom={0}>
+      <GoCloseButton testID="note-navigation-back" level="panel" keyboardVisible={keyboardVisible||keyboard.dismissing} touchSize={56} hitSlop={0} onPress={back} accessibilityLabel={keyboardVisible||keyboard.dismissing?"Ocultar teclado":toolsOpen&&!!panel?"Volver a herramientas":toolsOpen?"Ocultar herramientas":"Cerrar nota"} disabled={busy||toolFinishing||closingSaved} appearance="light"/>
       {!!initial&&onGoToLanding&&<GoCloseButton level="container" touchSize={56} hitSlop={0} appearance="light" accessibilityLabel="Ir directamente al Landing" disabled={busy||toolFinishing||closingSaved} onPress={()=>void requestNoteExit(onGoToLanding)}/>}
     </GoNavigationFloating>
     </View>

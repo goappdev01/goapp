@@ -19,7 +19,7 @@ function fixture(gateway){let cursor=0,slots=[],effects=[];const files=supportFi
  useState(initial){const i=cursor++;slots[i]??={value:initial};return[slots[i].value,value=>{slots[i].value=typeof value==='function'?value(slots[i].value):value;}];},
  useRef(value){return React.useState({current:value})[0];},
  useEffect(fn,deps){const i=cursor++,old=slots[i];if(!old||!equal(old.deps,deps)){slots[i]={deps};effects.push(()=>{old?.cleanup?.();slots[i].cleanup=fn();});}}};
- const scope={exports:{},Error,require(name){if(name==='react')return {...React,default:React};if(name==='react-native')return new Proxy({Platform:{OS:'ios'},StyleSheet:{create:v=>v},Keyboard:{addListener:(name,fn)=>{events.set(name,fn);return{remove(){events.delete(name);}};},dismiss:()=>{navigation.push('keyboard');events.get('keyboardWillHide')?.();}}},{get:(o,k)=>o[k]??k});
+ const scope={exports:{},Error,require(name){if(name==='react')return {...React,default:React};if(name==='react-native')return new Proxy({Platform:{OS:'ios'},StyleSheet:{create:v=>v},Keyboard:{addListener:(name,fn)=>{events.set(name,fn);return{remove(){events.delete(name);}};},dismiss:()=>{navigation.push('keyboard');events.get('keyboardDidHide')?.();}}},{get:(o,k)=>o[k]??k});
  if(name==='@/components/ui/GoNavigationFloating')return{GoNavigationFloating:'GoNavigationFloating'};if(name==='@/components/ui/GoScreenModal')return{GoScreenHost:'GoScreenHost'};
  if(name==='@/components/GOChatScreen')return{GOChatScreen:'GOChatScreen'};
  if(name==='@/components/notes/GoNoteAttachmentMenu')return{GoNoteAttachmentMenu:'GoNoteAttachmentMenu'};
@@ -123,7 +123,16 @@ test('AYUDA groups its four real actions consecutively and leaves the normal orb
   const nav=nodes(tree).filter(n=>n.type==='GoCloseButton');assert.equal(nav.length,1);assert.equal(nav[0].props.level,'panel');assert.equal(nav[0].props.appearance,'light');nav[0].props.onPress();assert.deepEqual(f.navigation,['abort','back']);}
 });
 test('floating back hides the keyboard first and preserves the current form',()=>{
- const f=fixture();f.render();f.events.get('keyboardWillShow')();let tree=f.render();nodes(tree).find(n=>n.type==='GoCloseButton').props.onPress();assert.deepEqual(f.navigation,['keyboard']);tree=f.render();nodes(tree).find(n=>n.type==='GoCloseButton').props.onPress();assert.deepEqual(f.navigation,['keyboard','abort','back']);
+ const f=fixture();f.render();let tree=f.render(),nav=()=>nodes(tree).find(n=>n.type==='GoCloseButton');
+ nodes(tree).find(n=>n.type==='TextInput').props.onChangeText('Conservar texto');
+ f.events.get('keyboardWillShow')();tree=f.render();assert.equal(nav().props.keyboardVisible,true);
+ assert.equal(nodes(tree).find(n=>n.type==='GoNavigationFloating').props.keyboardVisible,true);
+ assert.equal(nodes(tree).find(n=>n.type==='KeyboardAvoidingView').props.style[1].paddingBottom,0);
+ nav().props.onPress();assert.deepEqual(f.navigation,['keyboard']);tree=f.render();assert.equal(nav().props.keyboardVisible,false);
+ assert.equal(nodes(tree).find(n=>n.type==='GoNavigationFloating').props.keyboardVisible,false);
+ assert.equal(nodes(tree).find(n=>n.type==='KeyboardAvoidingView').props.style[1].paddingBottom,34);
+ assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'Conservar texto');
+ nav().props.onPress();assert.deepEqual(f.navigation,['keyboard','abort','back']);
 });
 test('orbit is in the dominant bottom corner, safe and at least 44pt for both hands and iPhone widths',()=>{
  for(const width of [320,375,430])for(const hand of ['left','right']){const r=api.supportOrbitRect(width,844,{left:0,right:0,bottom:34},hand);
@@ -222,7 +231,7 @@ test('GO and close float as a compact thumb group above a fixed editor with inte
  for(const width of [320,375,390,430,768])for(const height of [140,180,220,480,690])for(const handedness of ['right','left']){
   const f=fixture(),p={...f.props,handedness};f.render(p);let tree=f.render(p);nodes(tree).find(n=>n.props.testID==='support-workspace').props.onLayout({nativeEvent:{layout:{height}}});nodes(tree).find(n=>n.type==='TextInput').props.onContentSizeChange({nativeEvent:{contentSize:{height:1800}}});f.events.get('keyboardWillShow')();tree=f.render(p);
   const input=nodes(tree).find(n=>n.type==='TextInput'),footer=nodes(tree).find(n=>n.props.testID==='support-thumb-controls'),send=nodes(tree).find(n=>n.props.testID==='support-send'),composer=nodes(tree).find(n=>n.props.testID==='support-composer'),workspace=nodes(tree).find(n=>n.props.testID==='support-workspace');assert.ok(input.props.style[1].height<=(height<220?Math.max(44,height-90):Math.max(96,height-104)));assert.ok(input.props.scrollEnabled);assert.equal(footer.props.style[1].flexDirection,handedness==='right'?'row':'row-reverse');
-  const floating=nodes(tree).find(n=>n.type==='GoNavigationFloating');assert.equal(floating.props.handedness,handedness);assert.equal(floating.props.width,220);assert.ok(nodes(workspace).includes(footer));assert.ok(!nodes(composer).includes(footer),'group stays inside full-size touch host, not outside composer hit bounds');assert.ok(nodes(composer).includes(send));assert.ok(44+44+56+64+3*8<width-32);
+  const floating=nodes(tree).find(n=>n.type==='GoNavigationFloating');assert.equal(floating.props.handedness,handedness);assert.equal(floating.props.width,236);assert.ok(nodes(workspace).includes(footer));assert.ok(!nodes(composer).includes(footer),'group stays inside full-size touch host, not outside composer hit bounds');assert.ok(nodes(composer).includes(send));assert.ok(44+44+56+64+3*8<width-32);
   composer.props.onLayout({nativeEvent:{layout:{height:input.props.style[1].height+12}}});tree=f.render(p);const moved=nodes(tree).find(n=>n.props.testID==='support-thumb-controls');assert.equal(nodes(tree).find(n=>n.type==='GoNavigationFloating').props.protectedBottom,input.props.style[1].height+22);assert.deepEqual(moved.children.map(n=>n.type),['IconButton','IconButton','GoAssistantButton','GoCloseButton']);assert.equal(nodes(tree).find(n=>n.type==='KeyboardAvoidingView').props.style[1].paddingBottom,0);
   icon(tree,'Adjuntar referencia').props.onPress();tree=f.render(p);assert.equal(menu(tree).props.handedness,handedness);assert.ok(menu(tree).props.maxHeight<=Math.max(80,height-16));
  }

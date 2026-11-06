@@ -25,14 +25,14 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
   const insets = useSafeAreaInsets();
   const [keyboardVisible,setKeyboardVisible]=useState(false);
   useEffect(()=>{const show=Keyboard.addListener(Platform.OS==="ios"?"keyboardWillShow":"keyboardDidShow",()=>setKeyboardVisible(true));
-    const hide=Keyboard.addListener(Platform.OS==="ios"?"keyboardWillHide":"keyboardDidHide",()=>setKeyboardVisible(false));return()=>{show.remove();hide.remove();};},[]);
+    const hide=Keyboard.addListener("keyboardDidHide",()=>setKeyboardVisible(false));return()=>{show.remove();hide.remove();};},[]);
   const editor=useRef<TextInputInstance|null>(null),nestedBack=useRef<(()=>boolean)|null>(null);
   const [toolsOpen,setToolsOpen]=useState(false),[bodyHeight,setBodyHeight]=useState(360),[textHeight,setTextHeight]=useState(96);
   const [voiceAttempt,setVoiceAttempt]=useState(0);
   const [composerHeight,setComposerHeight]=useState(108);
   const [aiSession,setAiSession]=useState<{key:string;kind:typeof kind;source:string}|null>(null),aiSequence=useRef(0);
   const liveAi=useRef(aiSession);liveAi.current=aiSession;
-  const back=()=>{if(nestedBack.current?.())return;if(keyboardVisible||Keyboard.isVisible?.()){editor.current?.blur();Keyboard.dismiss();return;}voice.abort();setToolsOpen(false);onClose();};
+  const back=()=>{if(keyboardVisible||Keyboard.isVisible?.()){editor.current?.blur();Keyboard.dismiss();return;}if(nestedBack.current?.())return;voice.abort();setToolsOpen(false);onClose();};
   const [drafts, setDrafts] = useState({ incident: "", improvement: "", help: "" });
   const [busy,setBusy]=useState(false),[picking,setPicking]=useState(false);
   const [files,setFiles]=useState<Record<SupportKind,SupportAttachment[]>>({incident:[],improvement:[],help:[]});
@@ -112,11 +112,11 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
     {file.mime.startsWith("image/")?<Image accessibilityLabel={file.name} source={{uri:file.uri}} style={s.preview}/>:<Feather name="file-text" size={24} color="#17212b"/>}
     <Text style={[s.text,{flex:1}]}>{file.name}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel={"Quitar "+file.name} disabled={busy||picking} onPress={()=>void remove(file)} style={s.remove}><Feather name="x" size={22} color="#a1232e"/></TouchableOpacity>
   </View>);
-  const thumbControls=<GoNavigationFloating screenKey={"support-"+kind} safeArea={false} handedness={handedness} protectedBottom={kind==="mine"?0:composerHeight+10} width={kind==="mine"?136:kind==="help"?176:220}><View testID="support-thumb-controls" style={[s.controls,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
-    {kind!=="mine"&&<IconButton appearance="note" icon="trash-2" label="Limpiar texto del borrador" disabled={busy||picking||!drafts[kind]} onPress={clearCurrentText}/>}
-    {kind!=="mine"&&kind!=="help"&&<IconButton appearance="note" icon="paperclip" label={toolsOpen?"Ocultar adjuntos":"Adjuntar referencia"} disabled={busy||picking} onPress={()=>{editor.current?.blur();Keyboard.dismiss();setToolsOpen(open=>!open);}}/>}
+  const thumbControls=<GoNavigationFloating screenKey={"support-"+kind} safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} protectedBottom={kind==="mine"?0:composerHeight+10} width={kind==="mine"?136:kind==="help"?184:236}><View testID="support-thumb-controls" style={[s.controls,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
+    {kind!=="mine"&&<IconButton appearance="supportAction" icon="trash-2" label="Limpiar texto del borrador" disabled={busy||picking||!drafts[kind]} onPress={clearCurrentText}/>}
+    {kind!=="mine"&&kind!=="help"&&<IconButton appearance="supportAction" icon="paperclip" label={toolsOpen?"Ocultar adjuntos":"Adjuntar referencia"} disabled={busy||picking} onPress={()=>{editor.current?.blur();Keyboard.dismiss();setToolsOpen(open=>!open);}}/>}
     <GoAssistantButton size={kind==="mine"?64:56} onPress={openAI} disabled={busy||picking||voice.status==="transcribing"}/>
-    <GoCloseButton level="panel" appearance="light" accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a las órbitas de ayuda"} onPress={back}/>
+    <GoCloseButton level="panel" appearance="light" keyboardVisible={keyboardVisible} accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a las órbitas de ayuda"} onPress={back}/>
   </View></GoNavigationFloating>;
   return <Modal visible={visible} animationType="slide" onRequestClose={back}>
     <GoScreenHost registerBack={handler=>{nestedBack.current=handler;}}>
