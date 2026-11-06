@@ -1,5 +1,36 @@
 import type { HumanityRect } from "./humanityPlacement";
 
+/** Pair the two existing targets in the lower hand-side gap. Decorative orbit shells are excluded by the caller. */
+export function placeLandingHelpQr({ width, height, insets, handedness, helpSize, qrSize, qrHit, obstacles }: {
+  width: number; height: number; insets: { top: number; bottom: number; left: number; right: number };
+  handedness: "left" | "right"; helpSize: number; qrSize: number; qrHit: number;
+  obstacles: readonly (HumanityRect & { circular?: boolean })[];
+}): { help: HumanityRect; qr: { x: number; y: number } } | null {
+  const qrTouch = qrSize + 2 * qrHit;
+  const minY = Math.max(insets.top + 8, Math.floor(height * .55));
+  const maxY = height - Math.max(insets.bottom, 8) - helpSize;
+  const gap = 2;
+  const clear = (rect: HumanityRect) => obstacles.every(other => other.circular
+    ? Math.hypot(rect.x + rect.width / 2 - other.x - other.width / 2,
+        rect.y + rect.height / 2 - other.y - other.height / 2) >= (rect.width + other.width) / 2
+    : rect.x + rect.width <= other.x || rect.x >= other.x + other.width
+      || rect.y + rect.height <= other.y || rect.y >= other.y + other.height);
+  for (let y = maxY; y >= minY; y--) {
+    const edge = handedness === "right" ? width - insets.right - 8 - helpSize : insets.left + 8;
+    const limit = handedness === "right" ? Math.floor(width / 2) : Math.ceil(width / 2) - helpSize;
+    for (let x = edge; handedness === "right" ? x >= limit : x <= limit; x += handedness === "right" ? -1 : 1) {
+      const help = { x, y, width: helpSize, height: helpSize };
+      const touch = { x: handedness === "right" ? x - qrTouch - gap : x + helpSize + gap,
+        y: y + Math.floor((helpSize - qrTouch) / 2), width: qrTouch, height: qrTouch };
+      if (touch.x < insets.left + 8 || touch.x + touch.width > width - insets.right - 8
+        || touch.y < insets.top + 8 || touch.y + touch.height > height - insets.bottom
+        || !clear(help) || !clear(touch)) continue;
+      return { help, qr: { x: touch.x + qrHit, y: touch.y + qrHit } };
+    }
+  }
+  return null;
+}
+
 /** Place the existing QR target beside AYUDA when a safe shared gap exists. */
 export function placeLandingQr({ company: _company, size, hitSlop, bounds, obstacles, handedness = "right", companion }: {
   company: HumanityRect; size: number; hitSlop: number;

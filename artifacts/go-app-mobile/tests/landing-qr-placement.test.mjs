@@ -11,11 +11,13 @@ for(const profile of ['ADMIN','BUSINESS','USER'])for(const preset of ['compacto'
    assert.ok(p.width+hit*2>=44);assert.ok(p.left!==f.closeQrX||p.top!==f.closeQrY,'the former header location is not used');
    const touch={x:p.left-hit,y:p.top-hit,width:p.width+2*hit,height:p.height+2*hit};
    assert.ok(touch.x>=d.insets.left+8&&touch.x+touch.width<=d.width-d.insets.right-8);
-   assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=d.height-d.insets.bottom-8);
+   assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=d.height-d.insets.bottom);
    const root=r=>f.toLandingRootRect(r),move=r=>({...r,y:r.y+f.landingOffsetY});
    const commands=move(root(f.landingPanels.commands));
-   const obstacles=[...f.landingOrbitObstacles.map(move),commands,move(root(f.landingPanels.region)),{x:f.landingDisplayCloseRect.x-8,y:f.landingDisplayCloseRect.y-8,width:56,height:56},f.supportRect,...(f.humanityPlacement?[move(f.humanityPlacement)]:f.landingInlineHumanity?[move(f.inlineHumanityRect)]:[])];
-   for(const o of obstacles)assert.ok(!overlaps(touch,o,1.99),JSON.stringify({d,profile,preset,hand,touch,o}));
+   const active=(f.landingArrangement.obstacles??[]).filter((_,i)=>i===0||i>8);
+   const obstacles=[commands,move(root(f.landingPanels.region)),{x:f.landingDisplayCloseRect.x-8,y:f.landingDisplayCloseRect.y-8,width:56,height:56},f.supportRect,...(f.humanityPlacement?[move(f.humanityPlacement)]:f.landingInlineHumanity?[move(f.inlineHumanityRect)]:[])];
+   for(const o of active)assert.ok(Math.hypot(touch.x+touch.width/2-o.x-o.width/2,touch.y+touch.height/2-o.y-o.height/2)>=(touch.width+o.width)/2,JSON.stringify({d,profile,preset,hand,touch,o}));
+   for(const o of obstacles)assert.ok(!overlaps(touch,o),JSON.stringify({d,profile,preset,hand,touch,o}));
    for(const minimized of [true,false]){const other=fixture(d,preset,profile,hand,{nextAptMinimized:minimized,landingNextHeight:minimized?46:480,landingPendingHeight:400});assert.deepEqual({...other.landingQrPosition},{...f.landingQrPosition},'content/open panel cannot move QR or rings');}
   }
  });
@@ -24,8 +26,24 @@ test('AYUDA and QR share the nearest safe lower gap when the fixed satellites al
   const f=fixture(d,'estandar','ADMIN',hand),h=f.supportRect,q=f.landingQrPosition;
   const distance=Math.hypot(q.x+f.closeQrSize/2-h.x-h.width/2,q.y+f.closeQrSize/2-h.y-h.height/2);
   assert.ok(distance<=100,JSON.stringify({d,hand,h,q,distance}));
+  assert.ok(hand==='right'?h.x>=d.width/2:q.x<d.width/2);
   assert.ok(h.y>=d.height/2&&q.y>=d.height/2);
   assert.ok(!overlaps({x:q.x-f.closeQrHit,y:q.y-f.closeQrHit,width:f.closeQrSize+2*f.closeQrHit,height:f.closeQrSize+2*f.closeQrHit},h));
+ }
+});
+test('the photographed 393 × 852 Landing places AYUDA and QR together below active RESERVAS on the correct side',()=>{
+ const d={width:393,height:852,insets:{top:59,bottom:34,left:0,right:0}};
+ for(const hand of ['right','left']){
+  const f=fixture(d,'estandar','USER',hand),help=f.supportRect,button=f.render(),hit=button.props.hitSlop;
+  const qr={x:f.landingQrPosition.x-hit,y:f.landingQrPosition.y-hit,
+    width:button.props.style.width+2*hit,height:button.props.style.height+2*hit};
+  assert.ok(f.landingCornerPair,'both targets fit without moving an active orbit');
+  assert.ok(hand==='right'?help.x>qr.x+qr.width&&help.x>=300:qr.x>help.x+help.width&&help.x<=60);
+  assert.ok(help.y>=d.height*.85&&qr.y>=d.height*.85);
+  assert.ok(help.y+help.height<=d.height-d.insets.bottom&&qr.y+qr.height<=d.height-d.insets.bottom);
+  assert.ok(!overlaps(help,qr));
+  assert.deepEqual(JSON.parse(JSON.stringify(f.landingArrangement.offsets)),
+    JSON.parse(JSON.stringify(fixture(d,'estandar','USER',hand).landingArrangement.offsets)));
  }
 });
 test('the unique original QR keeps its appearance and exact action; overlays still hide it',()=>{

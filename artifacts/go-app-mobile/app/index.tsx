@@ -133,7 +133,7 @@ import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingSupport } from "@/components/landing/LandingSupport";
 import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, type SupportKind } from "@/lib/supportRequests";
-import { placeLandingQr } from "@/components/landing/landingQrPlacement";
+import { placeLandingHelpQr, placeLandingQr } from "@/components/landing/landingQrPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
@@ -14246,18 +14246,16 @@ function HomeScreenContent() {
         : landingInlineHumanity ? [{ ...inlineHumanityRect, y: inlineHumanityRect.y + landingOffsetY }] : []),
     ],
   };
-  const helpQrPair = (side: "right" | "left") => {
-    const help = supportOrbitRect(screen.width, screen.height, insets, side, 44, supportObstacles);
-    const qr = placeLandingQr({ ...qrBase, handedness: side, companion: help,
-      obstacles: [...qrBase.obstacles, help] });
-    const distance = qr ? Math.hypot(qr.x + closeQrSize / 2 - help.x - help.width / 2,
-      qr.y + closeQrSize / 2 - help.y - help.height / 2) : Infinity;
-    return { help, qr, distance };
-  };
-  const rightHelpQr = helpQrPair("right");
-  const helpQr = rightHelpQr.distance <= 100 ? rightHelpQr : helpQrPair("left");
-  const supportRect = helpQr.distance <= 100 ? helpQr.help : rightHelpQr.help;
-  const landingQrPosition = (helpQr.distance <= 100 ? helpQr.qr : rightHelpQr.qr) ?? { x: closeQrX, y: closeQrY };
+  // The eight quiet orbit shells are decorative. Keep GO, active satellites, cards and navigation clear.
+  const landingCornerPair = placeLandingHelpQr({ width: screen.width, height: screen.height, insets, handedness,
+    helpSize: Math.max(44, screen.width < 440 ? 48 : 60), qrSize: closeQrSize, qrHit: closeQrHit,
+    obstacles: [...supportObstacles.filter((_, index) => index === 0 || index > 8),
+      { x: landingDisplayCloseRect.x - 8, y: landingDisplayCloseRect.y - 8,
+        width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 }],
+  });
+  const supportRect = landingCornerPair?.help ?? supportOrbitRect(screen.width, screen.height, insets, handedness, 44, supportObstacles);
+  const landingQrPosition = landingCornerPair?.qr ?? placeLandingQr({ ...qrBase, handedness, companion: supportRect,
+    obstacles: [...qrBase.obstacles, supportRect] }) ?? { x: closeQrX, y: closeQrY };
   // Keep the approved header reservation: relocating QR must not shift panels or confirmations.
   const landingHeaderControls = [
     { x: closeQrX, y: closeQrY - landingOffsetY, width: closeQrSize, height: closeQrSize },
@@ -15573,7 +15571,7 @@ function HomeScreenContent() {
         {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry)}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}</>}
       </GoEntryDetailsSheet>
 
-      {/* Same QR control, in the free left orbital pocket below CAMBIOS and above EMPRESA. */}
+      {/* Same QR control, beside AYUDA in the lower hand-side gap. */}
       {!anyOverlayOpen && (() => {
         const BTN_SZ = Math.round(32 * uiScaleFactor);
         return (

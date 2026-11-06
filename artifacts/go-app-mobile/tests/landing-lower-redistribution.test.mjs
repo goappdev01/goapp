@@ -19,7 +19,7 @@ const statement=name=>decl(name).parent.parent;
 const code=ts.transpileModule([
  source.slice(statement('landingOrbitTop').getStart(ast),statement('landingBaseline').end),
  ...['landingSafeTop','landingBaseFrame','landingPanels','toLandingRootRect','humanityBlocks','humanityPanelsMeasured','humanityPlacement',
- 'landingInlineHumanity','inlineHumanityWidth','inlineHumanityRect','landingArrangement','landingOffsetY','supportObstacles','landingDisplayCloseRect','qrBase','helpQrPair','rightHelpQr','helpQr','supportRect'].map(name=>'const '+decl(name).getText(ast)+';'),
+ 'landingInlineHumanity','inlineHumanityWidth','inlineHumanityRect','landingArrangement','landingOffsetY','supportObstacles','landingDisplayCloseRect','qrBase','landingCornerPair','supportRect'].map(name=>'const '+decl(name).getText(ast)+';'),
  'result={supportRect,landingArrangement,landingCenter,landingPanels,landingBaseFrame,humanityPlacement,landingCloseRect,closeHeaderObstacles,closeReservedColumn,inlineHumanityRect};',
 ].join('\n'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.None,target:ts.ScriptTarget.ES2022}}).outputText;
 const devices=[
@@ -43,12 +43,12 @@ function fixture(d,preset,profile,handedness,overrides={}){
  vm.runInNewContext(code,context);return {context,...context.result,scale};
 }
 const overlaps=(a,b)=>a.x<b.x+b.width-1e-5&&a.x+a.width>b.x+1e-5&&a.y<b.y+b.height-1e-5&&a.y+a.height>b.y+1e-5;
-test('support corner does not cover the approved GO or orbital circles on iPhone in either hand',()=>{
+test('support corner stays on the configured side without covering GO or active satellites',()=>{
  for(const d of devices.slice(0,3))for(const hand of ['left','right'])for(const preset of ['compacto','estandar','grande'])for(const supportMode of [false,true]){
   const g=fixture(d,preset,'ADMIN',hand,{supportMode}),r=g.supportRect;
-  assert.ok(Math.abs(d.width-d.insets.right-r.x-r.width-12)<1e-5||Math.abs(r.x-d.insets.left-12)<1e-5);
+  assert.ok(hand==='right'?r.x>=d.width/2:r.x+r.width<=d.width/2+12);
   assert.ok(r.y>=d.height/2&&r.y+r.height<=d.height-d.insets.bottom,JSON.stringify({d,hand,preset,supportMode,r}));
-  for(const o of g.landingArrangement.obstacles??[]){const distance=Math.hypot(r.x+r.width/2-o.x-o.width/2,r.y+r.height/2-o.y-o.height/2);
+  for(const [i,o] of (g.landingArrangement.obstacles??[]).entries()){if(i>0&&i<=8)continue;const distance=Math.hypot(r.x+r.width/2-o.x-o.width/2,r.y+r.height/2-o.y-o.height/2);
    assert.ok(distance>=(r.width+o.width)/2,JSON.stringify({width:d.width,hand,preset,r,o}));}
  }
 });
