@@ -25,8 +25,10 @@ export function placeLandingHelpQr({ width, height, insets, handedness, helpSize
       if (touch.x < insets.left + 8 || touch.x + touch.width > width - insets.right - 8
         || touch.y < insets.top + 8 || touch.y + touch.height > height - insets.bottom
         || !clear(help) || !clear(touch)) continue;
-      // Keep the 44pt touch area fixed; use its upper allowance to lower the smaller visible QR.
-      return { help, qr: { x: touch.x + qrHit, y: touch.y + 2 * qrHit } };
+      // QR is independent of AYUDA. Keep its full touch area and at least 8pt above the physical edge.
+      let qrDrop = Math.min(12, Math.max(0, height - 8 - touch.y - qrTouch));
+      while (qrDrop > 0 && !clear({ ...touch, y: touch.y + qrDrop })) qrDrop--;
+      return { help, qr: { x: touch.x + qrHit, y: touch.y + 2 * qrHit + qrDrop } };
     }
   }
   return null;

@@ -12,7 +12,7 @@ for(const profile of ['ADMIN','BUSINESS','USER'])for(const preset of ['compacto'
    assert.ok(p.width+slop.left+slop.right>=44&&p.height+slop.top+slop.bottom>=44);assert.ok(p.left!==f.closeQrX||p.top!==f.closeQrY,'the former header location is not used');
    const touch={x:p.left-slop.left,y:p.top-slop.top,width:p.width+slop.left+slop.right,height:p.height+slop.top+slop.bottom};
    assert.ok(touch.x>=d.insets.left+8&&touch.x+touch.width<=d.width-d.insets.right-8);
-   assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=d.height-d.insets.bottom);
+   assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=(f.landingCornerPair?d.height-8:d.height-d.insets.bottom));
    const root=r=>f.toLandingRootRect(r),move=r=>({...r,y:r.y+f.landingOffsetY});
    const commands=move(root(f.landingPanels.commands));
    const active=(f.landingArrangement.obstacles??[]).filter((_,i)=>i===0||i>8);
@@ -42,8 +42,8 @@ test('the photographed 393 × 852 Landing places AYUDA and QR together below act
   assert.ok(f.landingCornerPair,'both targets fit without moving an active orbit');
   assert.ok(hand==='right'?help.x>qr.x+qr.width&&help.x>=300:qr.x>help.x+help.width&&help.x<=60);
   assert.ok(help.y>=d.height*.85&&qr.y>=d.height*.85);
-  assert.ok(help.y+help.height<=d.height-d.insets.bottom&&qr.y+qr.height<=d.height-d.insets.bottom);
-  assert.ok(f.landingQrPosition.y>=help.y+14,'the smaller QR sits visibly lower while its touch area remains safe');
+  assert.ok(help.y+help.height<=d.height-d.insets.bottom&&qr.y+qr.height<=d.height-8);
+  assert.ok(f.landingQrPosition.y>=help.y+26,'QR sits independently below AYUDA on the photographed iPhone');
   assert.ok(!overlaps(help,qr));
   assert.deepEqual(JSON.parse(JSON.stringify(f.landingArrangement.offsets)),
     JSON.parse(JSON.stringify(fixture(d,'estandar','USER',hand).landingArrangement.offsets)));
