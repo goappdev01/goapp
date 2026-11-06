@@ -25,7 +25,8 @@ export function placeLandingHelpQr({ width, height, insets, handedness, helpSize
       if (touch.x < insets.left + 8 || touch.x + touch.width > width - insets.right - 8
         || touch.y < insets.top + 8 || touch.y + touch.height > height - insets.bottom
         || !clear(help) || !clear(touch)) continue;
-      return { help, qr: { x: touch.x + qrHit, y: touch.y + qrHit } };
+      // Keep the 44pt touch area fixed; use its upper allowance to lower the smaller visible QR.
+      return { help, qr: { x: touch.x + qrHit, y: touch.y + 2 * qrHit } };
     }
   }
   return null;

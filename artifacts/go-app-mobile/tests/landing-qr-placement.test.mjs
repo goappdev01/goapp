@@ -7,9 +7,10 @@ for(const profile of ['ADMIN','BUSINESS','USER'])for(const preset of ['compacto'
  test(`${profile}/${preset}/${hand}: QR stays safe without colliding with controls`,()=>{
   for(const d of devices){
    const f=fixture(d,preset,profile,hand),button=f.render(),p=button.props.style,hit=button.props.hitSlop;
+   const slop=typeof hit==='number'?{top:hit,bottom:hit,left:hit,right:hit}:hit;
    assert.equal(p.width,Math.round(32*f.scale));assert.equal(p.height,p.width);assert.equal(p.borderRadius,p.width/2);
-   assert.ok(p.width+hit*2>=44);assert.ok(p.left!==f.closeQrX||p.top!==f.closeQrY,'the former header location is not used');
-   const touch={x:p.left-hit,y:p.top-hit,width:p.width+2*hit,height:p.height+2*hit};
+   assert.ok(p.width+slop.left+slop.right>=44&&p.height+slop.top+slop.bottom>=44);assert.ok(p.left!==f.closeQrX||p.top!==f.closeQrY,'the former header location is not used');
+   const touch={x:p.left-slop.left,y:p.top-slop.top,width:p.width+slop.left+slop.right,height:p.height+slop.top+slop.bottom};
    assert.ok(touch.x>=d.insets.left+8&&touch.x+touch.width<=d.width-d.insets.right-8);
    assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=d.height-d.insets.bottom);
    const root=r=>f.toLandingRootRect(r),move=r=>({...r,y:r.y+f.landingOffsetY});
@@ -35,12 +36,14 @@ test('the photographed 393 × 852 Landing places AYUDA and QR together below act
  const d={width:393,height:852,insets:{top:59,bottom:34,left:0,right:0}};
  for(const hand of ['right','left']){
   const f=fixture(d,'estandar','USER',hand),help=f.supportRect,button=f.render(),hit=button.props.hitSlop;
-  const qr={x:f.landingQrPosition.x-hit,y:f.landingQrPosition.y-hit,
-    width:button.props.style.width+2*hit,height:button.props.style.height+2*hit};
+  const slop=typeof hit==='number'?{top:hit,bottom:hit,left:hit,right:hit}:hit;
+  const qr={x:f.landingQrPosition.x-slop.left,y:f.landingQrPosition.y-slop.top,
+    width:button.props.style.width+slop.left+slop.right,height:button.props.style.height+slop.top+slop.bottom};
   assert.ok(f.landingCornerPair,'both targets fit without moving an active orbit');
   assert.ok(hand==='right'?help.x>qr.x+qr.width&&help.x>=300:qr.x>help.x+help.width&&help.x<=60);
   assert.ok(help.y>=d.height*.85&&qr.y>=d.height*.85);
   assert.ok(help.y+help.height<=d.height-d.insets.bottom&&qr.y+qr.height<=d.height-d.insets.bottom);
+  assert.ok(f.landingQrPosition.y>=help.y+14,'the smaller QR sits visibly lower while its touch area remains safe');
   assert.ok(!overlaps(help,qr));
   assert.deepEqual(JSON.parse(JSON.stringify(f.landingArrangement.offsets)),
     JSON.parse(JSON.stringify(fixture(d,'estandar','USER',hand).landingArrangement.offsets)));

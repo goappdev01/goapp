@@ -15574,10 +15574,11 @@ function HomeScreenContent() {
       {/* Same QR control, beside AYUDA in the lower hand-side gap. */}
       {!anyOverlayOpen && (() => {
         const BTN_SZ = Math.round(32 * uiScaleFactor);
+        const qrHit = Math.max(6, (44 - BTN_SZ) / 2);
         return (
           <TouchableOpacity
             key="qr-permanent-btn"
-            hitSlop={Math.max(6, (44 - BTN_SZ) / 2)}
+            hitSlop={landingCornerPair ? { top: 2 * qrHit, bottom: 0, left: qrHit, right: qrHit } : qrHit}
             onPress={() => { Haptics.selectionAsync().catch(() => {}); setQrOpen(true); }}
             activeOpacity={0.8}
             style={{
@@ -25515,9 +25516,10 @@ function HomeScreenContent() {
 
 
       {!anyOverlayOpen && !goAuthOpen && !empresaOpen && !adminDashOpen && !rutasMode && kbHeight === 0 && (
-        <View testID="landing-support-orbit" style={{position:"absolute",left:supportRect.x,top:supportRect.y,width:supportRect.width,height:supportRect.height,zIndex:100}}>
+        <View testID="landing-support-orbit" style={{position:"absolute",left:supportRect.x,top:supportRect.y,width:supportRect.width,height:supportRect.height,zIndex:100,
+          alignItems:"center",paddingTop:!supportMode&&landingCornerPair?1:0}}>
           {supportMode ? <GoCloseButton level="container" preserveTouchSize touchSize={supportRect.width} accessibilityLabel="Salir del modo ayuda" onPress={()=>setSupportMode(active=>!active)}/> : <PremiumOrbitBtn color="#4A80BD" selected={false} onPress={()=>setSupportMode(active=>!active)} icon="message-circle"
-            label="AYUDA" accessibilityLabel="AYÚDANOS A MEJORAR" size={supportRect.width} iconSize={22} labelSize={8} labelSpacing={0} paddingH={6}/>}
+            label="AYUDA" accessibilityLabel="AYÚDANOS A MEJORAR" size={supportRect.width-(landingCornerPair?1:0)} iconSize={22} labelSize={8} labelSpacing={0} paddingH={6}/>}
         </View>
       )}
       {/* HUMANITY retains its original slot whenever it fits. */}
