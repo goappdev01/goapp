@@ -1,3 +1,4 @@
+import {GoNavigationAppearanceControl} from "@/components/ui/GoNavigationAppearanceControl";
 import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import { useGoDockPreference } from "@/hooks/useGoDockPreference";
 import React, { useRef, useState, useCallback } from "react";
@@ -169,6 +170,7 @@ export function HerramientasPanel({
           ══════════════════════════════════════════════════════════ */}
           <Text style={s.familyLabel}>PERSONALIZACIÓN</Text>
           {landingVariantControls}
+          <GoNavigationAppearanceControl/>
           <View style={s.card}>
 
             {/* Lateralidad */}

@@ -20257,15 +20257,7 @@ function HomeScreenContent() {
             >
               <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}><GoCalendarViewSelector compact value={calBgViewMode} onChange={changeCalendarView} />{demoBookingRepository && <TouchableOpacity accessibilityRole="button" testID="customer-calendar-shortcut" accessibilityLabel={lang === "en" ? "Customer calendar" : "Calendario cliente"} onPress={event => { event.stopPropagation(); setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{paddingHorizontal:2,paddingVertical:8,width:44,minHeight:44,justifyContent:"center"}}><Feather name="calendar" size={14} color="#ff7474" /></TouchableOpacity>}</View>
               <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>{monthNavigation}</View>
-              <TouchableOpacity
-                onPress={(e) => { e.stopPropagation(); Haptics.selectionAsync(); setCalConfigVisible(true); }}
-                activeOpacity={0.7}
-                hitSlop={{ top: 10, bottom: 10, left: 2, right: 2 }}
-                style={{ flexDirection: "row", alignItems: "center", flexShrink: 0, gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 9, backgroundColor: calConfigVisible ? "rgba(255,255,255,0.10)" : "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: calConfigVisible ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.14)" }}
-              >
-                <Feather name={calConfigVisible ? "chevron-up" : "settings"} size={9} color="#ffffff" />
-                {!calConfigVisible && <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 8, fontWeight: "700", letterSpacing: 0.8 }}>CONFIG</Text>}
-              </TouchableOpacity>
+              <GoCloseButton level="settings" accessibilityLabel="Configuración de Calendario" onPress={() => { Haptics.selectionAsync(); setCalConfigVisible(true); }}/>
             </View>)}
                 goLog={goLog.filter((e: any) => {
                   const id: string = e.id ?? "";
@@ -20420,7 +20412,7 @@ function HomeScreenContent() {
           {/* ── BOTONES FLOTANTES — zona pulgar derecho ───────────────────
               CONFIG toggle + ↑↓ fecha.
               Solo visibles cuando el panel mensual está CERRADO y GO Reservas no está activo. */}
-          {!monthGridOpen && !calReservasOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={188} protectedBottom={overlayPanelHeight+10}>
+          {!monthGridOpen && !calReservasOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={(demoCustomerCalendarSelected?0:52)+((calQuickCreateOpen||calConfigVisible)?72:0)+64} protectedBottom={overlayPanelHeight+10}>
             {!demoCustomerCalendarSelected && (<TouchableOpacity
               onPress={() => {
                 Haptics.selectionAsync();

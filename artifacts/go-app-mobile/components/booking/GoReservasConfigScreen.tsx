@@ -491,29 +491,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
           )}
         </View>
         {/* CONFIG button — exact same style as the normal Calendar */}
-        <TouchableOpacity
-          onPress={() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }}
-          activeOpacity={0.7}
-          hitSlop={10}
-          style={{
-            flexDirection: "row", alignItems: "center", gap: 4,
-            paddingHorizontal: 7, paddingVertical: 7, borderRadius: 9,
-            backgroundColor: configVisible ? "rgba(74,128,189,0.18)" : "rgba(0,0,0,0.05)",
-            borderWidth: 1,
-            borderColor: configVisible ? "rgba(74,128,189,0.55)" : "rgba(0,0,0,0.10)",
-          }}
-        >
-          <Feather
-            name={configVisible ? "chevron-up" : "settings"}
-            size={9}
-            color={configVisible ? "#4A80BD" : tk.gray}
-          />
-          {!configVisible && (
-            <Text style={{ color: tk.gray, fontSize: 10, fontWeight: "700", letterSpacing: 0.1 }}>
-              {t("floor_configuration")}
-            </Text>
-          )}
-        </TouchableOpacity>
+        <GoCloseButton level="settings"  accessibilityLabel="Configuración de reservas" onPress={() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }}/>
       </View>
 
       {/* ── Panel de config — mismos controles que el Calendario normal ── */}
