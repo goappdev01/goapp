@@ -130,7 +130,7 @@ import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingSupport } from "@/components/landing/LandingSupport";
-import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, type SupportKind } from "@/lib/supportRequests";
+import { supportOrbitRect, supportOrbitSlot, SUPPORT_ORBIT_ACTIONS, type SupportKind } from "@/lib/supportRequests";
 import { placeLandingQr } from "@/components/landing/landingQrPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
@@ -17125,12 +17125,12 @@ function HomeScreenContent() {
                 const angle = -Math.PI / 2 + (i * 2 * Math.PI) / (INTENTS.length + 1);
                 const x = orbitWrapSize / 2 + Math.cos(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
                 const y = orbitWrapSize / 2 + Math.sin(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
-                const action = supportMode ? SUPPORT_ORBIT_ACTIONS.find(action=>action.slot===i) : undefined;
-                const exit = supportMode && i===INTENTS.length;
+                const action = supportMode ? SUPPORT_ORBIT_ACTIONS.find(action=>supportOrbitSlot(action.slot,handedness)===i) : undefined;
+                const exit = supportMode && i===supportOrbitSlot(3,handedness);
                 const active = !!action || exit;
                 return <View key={it.key} testID={`landing-quiet-orbit-${i}`} pointerEvents={active?"auto":"none"}
                   style={{ position: "absolute", left: x, top: y }}>
-                  <PremiumOrbitBtn color={it.color} selected={false} onPress={()=>{if(action)openSupportAction(action.kind);else if(exit)setSupportMode(false);}}
+                  <PremiumOrbitBtn color={it.color} selected={false} dimmed={supportMode&&!active} onPress={()=>{if(action)openSupportAction(action.kind);else if(exit)setSupportMode(false);}}
                     icon={action?.icon??(exit?"chevron-down":"circle")} label={action?.label??(exit?"VOLVER":"")} accessibilityLabel={action?.title??(exit?"Salir del modo ayuda":undefined)}
                     size={orbitBtnVisualSize} iconSize={active?Math.round(24*uiScaleFactor):0} labelSize={active?Math.max(8,Math.round(10*uiScaleFactor)):0}
                     labelOpacity={active?1:0} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />
@@ -25600,7 +25600,7 @@ function HomeScreenContent() {
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
-    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
+    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {

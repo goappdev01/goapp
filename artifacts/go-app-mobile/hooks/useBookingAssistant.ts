@@ -48,11 +48,11 @@ export type AssistantPanel =
   | null;
 const INTRO =
   "¿Qué necesitas hacer?\nPuedo ayudarte con reservas y gestionar tareas o actividades para tu calendario. Dímelo o escríbelo aquí.";
-export function useBookingAssistant({ visible = true, scope = null, scopeReady = true }: {
-  visible?: boolean; scope?: AssistantZoneScope | null; scopeReady?: boolean;
+export function useBookingAssistant({ visible = true, scope = null, scopeReady = true, introduction = INTRO }: {
+  visible?: boolean; scope?: AssistantZoneScope | null; scopeReady?: boolean; introduction?:string;
 } = {}) {
   const [messages, setMessages] = useState([
-    { id: 0, role: "assistant", text: INTRO },
+    { id: 0, role: "assistant", text: introduction },
   ]);
   const [request, setRequest] = useState<BookingRequest>(emptyBookingRequest);
   const [zone, setZone] = useState<SearchZone | null>(null);
@@ -459,7 +459,7 @@ export function useBookingAssistant({ visible = true, scope = null, scopeReady =
       radiusKm: zoneRef.current?.radiusKm || null,
     });
     lastPlace.current = zoneRef.current?.label || null;
-    setMessages([{ id: id.current++, role: "assistant", text: INTRO }]);
+    setMessages([{ id: id.current++, role: "assistant", text: introduction }]);
   }
   async function send(text: string, useAI: boolean, echo = true) {
     if (!text.trim() || lock.current) return;

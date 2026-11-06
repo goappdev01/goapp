@@ -45,6 +45,8 @@ import {
 } from "./BookingAssistantUI";
 
 export interface BookingAssistantProps {
+  /** Read-only consultation; no booking/task dispatcher or automatic draft replacement. */
+  consultation?:{scopeKey:string;title:string;sourceText:string;respond?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;onAcceptDraft?:(draft:string,baseline:string)=>void};
   uiScale?: "compacto" | "estandar" | "grande";
   visible: boolean;
   listenRequest?: number;
@@ -65,6 +67,7 @@ export function BookingAssistantScreen({
   handedness = "right",
   uiScale = "estandar",
   onHandednessChange,
+  consultation,
 }: BookingAssistantProps) {
   const consumedListenRequest = useRef<number | undefined>(undefined);
   const insets = useSafeAreaInsets();
@@ -74,8 +77,11 @@ export function BookingAssistantScreen({
   const [footerHeight, setFooterHeight] = useState(144);
   const [headerHeight, setHeaderHeight] = useState(68);
   const zoneIdentity = useAssistantZoneScope();
-  const a = useBookingAssistant({ visible, scope: zoneIdentity.scope, scopeReady: zoneIdentity.ready });
-  const go = useGoActions(a, zoneIdentity.ready ? zoneIdentity.scope : null);
+  const a = useBookingAssistant({ visible, scope: consultation?null:zoneIdentity.scope, scopeReady: !consultation&&zoneIdentity.ready,
+    introduction:consultation?"Consulta sobre "+consultation.title.toLowerCase()+". Tu borrador permanece en AYUDA.":undefined });
+  const go = useGoActions(a, !consultation&&zoneIdentity.ready ? zoneIdentity.scope : null);
+  const [consultationDraft,setConsultationDraft]=useState<string|null>(null),consultationFlight=useRef(false),consultationEpoch=useRef(0);
+  const consultationCurrent=useRef({visible,key:consultation?.scopeKey});consultationCurrent.current={visible,key:consultation?.scopeKey};
   const [input, setInput] = useState("");
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const followEnd = useRef(true);
@@ -88,7 +94,8 @@ export function BookingAssistantScreen({
   const [conversationLayout, setConversationLayout] = useState({ width: 0, height: 0 });
   const [conversationMeasurement, setConversationMeasurement] = useState({ height: 0, messages: -1 });
   const voice = useBookingVoice((text, isZone) => {
-    if (isZone) {
+    if(consultation){setInput(text);void consult(text);}
+    else if (isZone) {
       a.setPlaceQuery(text);
       a.setPanel("zone");
       void a.searchPlaces(text);
@@ -96,7 +103,8 @@ export function BookingAssistantScreen({
       setInput("");
       void go.dispatch(text, aiEnabled);
     }
-  });
+  },{requireTranscriptionReady:!!consultation});
+  useEffect(()=>{if(!consultation)return;consultationEpoch.current++;consultationFlight.current=false;setConsultationDraft(null);return()=>{consultationEpoch.current++;};},[visible,consultation?.scopeKey]);
   useEffect(() => {
     if (!visible) {
       a.invalidate();
@@ -148,13 +156,26 @@ export function BookingAssistantScreen({
     voice.abort();
     Keyboard.dismiss();
     const text = input;
-    setInput("");
-    void go.dispatch(text, aiEnabled);
+    if(consultation){void consult(text);return;}
+    setInput("");void go.dispatch(text, aiEnabled);
+  }
+  async function consult(text:string){
+    if(!consultation||consultationFlight.current||!text.trim())return;
+    if(!consultation.respond){a.setNotice("GO no puede procesar esta consulta ahora. Tu borrador sigue intacto.");return;}
+    const key=consultation.scopeKey,source=consultation.sourceText,epoch=++consultationEpoch.current;
+    consultationFlight.current=true;a.setBusy("Consultando GO…");a.setNotice("");
+    try{const result=await consultation.respond(text,source);
+      if(epoch!==consultationEpoch.current||!consultationCurrent.current.visible||consultationCurrent.current.key!==key)return;
+      if(typeof result.answer!=="string"||!result.answer.trim()||result.answer.length>8000||result.draft!==undefined&&(typeof result.draft!=="string"||result.draft.length>4000))throw Error("Respuesta inválida");
+      a.say(text,"user");a.say(result.answer);setConsultationDraft(consultation.onAcceptDraft?result.draft??null:null);setInput("");
+    }catch{if(epoch===consultationEpoch.current&&consultationCurrent.current.visible)a.setNotice("No se pudo completar la consulta. Conservamos el texto.");}
+    finally{if(epoch===consultationEpoch.current){consultationFlight.current=false;a.setBusy("");}}
   }
   function close(toLanding = false) {
     if (a.busy === "Guardando en GO…" || a.busy === "Confirmando reserva…" || a.busy === "Cancelando reserva…")
       return;
     a.invalidate();
+    if(consultation){consultationEpoch.current++;consultationFlight.current=false;setConsultationDraft(null);}
     voice.abort();
     if (toLanding && onGoToLanding) onGoToLanding();
     else onClose();
@@ -232,7 +253,7 @@ export function BookingAssistantScreen({
   const panelState = { ...a, reset };
   const dock = (
           <View style={s.dock}>
-            {bookingDockOrder(position).map((key) =>
+            {bookingDockOrder(position).filter(key=>!consultation||key==="go").map((key) =>
               key === "go" ? (
                 <TouchableOpacity
                   key={key}
@@ -324,7 +345,7 @@ export function BookingAssistantScreen({
         <View style={s.header} onLayout={event => setHeaderHeight(event.nativeEvent.layout.height)}>
           <View style={{ flex: 1 }}>
             <Text style={s.eyebrow}>GO · ASISTENTE</Text>
-            <Text style={s.title}>¿Qué necesitas hacer?</Text>
+            <Text style={s.title}>{consultation?.title??"¿Qué necesitas hacer?"}</Text>
           </View>
           {!a.panel && (a.phase === "review" || onBack) && (
             <IconButton
@@ -695,6 +716,7 @@ export function BookingAssistantScreen({
             </>
           )}
           {!a.panel && <View onLayout={event => setFooterHeight(event.nativeEvent.layout.height)}>
+          {consultation&&consultationDraft!==null&&<View testID="assistant-draft-review" style={{padding:12,gap:8}}><Text style={s.body}>{consultationDraft}</Text><Action text="Usar propuesta en AYUDA" onPress={()=>{consultation.onAcceptDraft?.(consultationDraft,consultation.sourceText);setConsultationDraft(null);close();}}/></View>}
           <View style={s.composer}>
             <TextInput
               accessibilityLabel="Solicitud a GO"

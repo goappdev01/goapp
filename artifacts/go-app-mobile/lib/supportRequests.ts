@@ -1,11 +1,13 @@
 export type SupportKind = "incident" | "improvement" | "help";
 import type { SupportAttachment } from "./supportAttachments";
 export const SUPPORT_ORBIT_ACTIONS = [
-  {kind:"incident",label:"INCIDENCIA",title:"Comunicar incidencia",icon:"alert-circle",slot:0},
+  {kind:"incident",label:"INCIDENCIA",title:"Comunicar incidencia",icon:"alert-circle",slot:4},
   {kind:"improvement",label:"MEJORA",title:"Proponer mejora",icon:"edit-3",slot:2},
-  {kind:"help",label:"AYUDA",title:"Necesito ayuda",icon:"help-circle",slot:4},
-  {kind:"mine",label:"SOLICITUDES",title:"Mis solicitudes",icon:"inbox",slot:6},
+  {kind:"help",label:"AYUDA",title:"Necesito ayuda",icon:"help-circle",slot:5},
+  {kind:"mine",label:"SOLICITUDES",title:"Mis solicitudes",icon:"inbox",slot:1},
 ] as const;
+/** Reflect functions only; the original eight coordinates/colours never move. */
+export const supportOrbitSlot=(slot:number,hand:"left"|"right")=>hand==="left"?(8-slot)%8:slot;
 export type SupportCommand = { kind:SupportKind; message:string; context?:"Landing"; requestKey:string };
 export type SupportReceipt = { id:string; reference:string; requestKey:string; status:"received"|"in_progress"|"answered"|"closed"; response?:string;
   kind?:SupportKind;summary?:string;createdAt?:string;detail?:string;attachments?:{id:string;name:string;clientId:string}[] };

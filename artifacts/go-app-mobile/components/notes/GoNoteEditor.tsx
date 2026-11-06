@@ -15,6 +15,7 @@ import { GoNoteDatePicker, noteDateLabel } from "./GoNoteDatePicker";
 import { GoNoteTimePicker, GoNoteDurationPicker, noteDurationLabel } from "./GoNoteSchedulePicker";
 import { GoNoteToolFooter, type NoteToolEdit } from "./GoNoteToolFooter";
 import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
+import { GoNoteAttachmentMenu } from "./GoNoteAttachmentMenu";
 import { useGoNoteKeyboard } from "@/hooks/useGoNoteKeyboard";
 import { s as assistantStyles } from "@/components/booking-assistant/BookingAssistantUI";
 import { prepareGoNote } from "@/lib/goNotePreparation";
@@ -438,10 +439,8 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
           </View>}
           {panel==="reminder"&&<GoNoteReminderPicker value={draft.reminderMinutes} onChange={reminderMinutes=>applyTool({reminderMinutes})} onInputFocus={focusToolInput} onPendingChange={edit=>recordPending("reminderMinutes",edit)} handedness={handedness} unified dateISO={draft.dateISO} time={draft.time} busy={busy||toolFinishing} light/>}
           {panel==="attachments"&&<View style={s.section}>
-            {input("note-link","ENLACE O UBICACIÓN COMPARTIDA",link,value=>{pendingCommit.current=null;setLink(value);},{autoCapitalize:"none",keyboardType:"url",placeholder:"https://…"})}
-            {choice("Añadir enlace",()=>{try{attachmentPatch();setError("");}catch(e){setError((e as Error).message);}})}
-            {choice("PDF o documento",()=>void attach("file"))}
-            {choice("Fotografías",()=>void attach("image"))}
+            <GoNoteAttachmentMenu link={input("note-link","ENLACE O UBICACIÓN COMPARTIDA",link,value=>{pendingCommit.current=null;setLink(value);},{autoCapitalize:"none",keyboardType:"url",placeholder:"https://…"})}
+              renderAction={choice} onAddLink={()=>{try{attachmentPatch();setError("");}catch(e){setError((e as Error).message);}}} onFile={()=>void attach("file")} onPhotos={()=>void attach("image")}/>
           </View>}
           {(!panel||panel==="attachments")&&(panel==="attachments"?working:draft).attachments.map(a=><View key={a.id} style={s.attachment}><TouchableOpacity accessibilityRole="button" disabled={busy||toolFinishing||attachmentBusy} style={{flex:1,minHeight:44,justifyContent:"center"}} onPress={()=>void (a.kind==="link"?Linking.openURL(a.uri):Share.share({url:a.uri,title:a.name})).catch(()=>setError("No se ha podido abrir el adjunto."))}><Text style={s.text}>{a.name}</Text></TouchableOpacity>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel={"Quitar "+a.name} disabled={busy||toolFinishing||attachmentBusy} style={s.icon} onPress={()=>{if(panel==="attachments")stage({attachments:(toolDraftRef.current||draftRef.current).attachments.filter(b=>b.id!==a.id)});else void persistConfiguration({attachments:draftRef.current.attachments.filter(b=>b.id!==a.id)});}}><Feather name="x" size={20} color="#242b34"/></TouchableOpacity></View>)}

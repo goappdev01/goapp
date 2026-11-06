@@ -2,16 +2,21 @@
 
 AYUDA cambia temporalmente las etiquetas/acciones de las ocho órbitas reales
 de Landing, sin sustituir sus colores ni coordenadas. Cuatro posiciones abren
-incidencia, mejora, ayuda y mis solicitudes; la órbita gris permite volver.
-SALIR en la esquina también restaura el estado normal. No existe panel intermedio.
+incidencia, mejora, ayuda y mis solicitudes; una quinta permite volver.
+Las cinco acciones conservan su luminosidad y las otras tres quedan visibles,
+atenuadas y sin interacción. La asignación funcional se refleja para zurdos,
+con prioridad inferior/derecha para diestros. No existe panel intermedio.
 La órbita reutiliza PremiumOrbitBtn y la preferencia handedness. Tamaño de 48
 puntos en iPhone (60 en anchos mayores), azul GO y mayor espacio para la etiqueta.
 La etiqueta AYUDA usa 8 puntos y margen interior de 6 puntos. Los formularios
-reutilizan GoCloseButton con una sola flecha flotante inferior derecha: primero
+reutilizan GoCloseButton con una sola flecha inferior en el lado dominante: primero
 oculta el teclado, y con el teclado cerrado vuelve a las órbitas de ayuda.
 Las cuatro superficies son blancas, con texto oscuro y bordes discretos.
-Los campos conservan su borrador al volver. ENVIAR inactivo usa gris neutro
-y texto oscuro; «Disponible próximamente» comunica su estado sin avisos extensos.
+Los campos conservan su borrador al volver. El editor crece hasta un límite,
+permanece cerca del pie y admite desplazamiento para textos largos. El teclado
+utiliza un único KeyboardAvoidingView y su flecha lo oculta sin borrar el texto.
+ENVIAR ocupa aproximadamente un tercio del ancho útil, verde/blanco al estar
+habilitado y gris neutro inactivo. No hay mensajes provisionales permanentes.
 No se ha encontrado una API, almacenamiento o panel de soporte reutilizable.
 No se instala ni configura un gateway de producción: ENVIAR está desactivado,
 Mis solicitudes tiene una plantilla para resumen, tipo, fecha, estado y detalle/
@@ -19,8 +24,32 @@ respuesta expandible de registros reales. El estado vacío no inventa tickets
 ni afirma que se ha consultado un servidor que todavía no está conectado.
 Los textos permanecen solo en memoria al cerrar; un cambio de cuenta los limpia.
 El dictado nativo del teclado funciona como en cualquier campo de texto.
+Un micrófono independiente reutiliza useGoNoteVoice/useBookingVoice: comprueba
+disponibilidad antes de pedir permisos o grabar, inserta una sola transcripción
+final en el cursor y conserva el texto previo. Cancelar/cambiar cuenta invalida
+la captura. No hay cuentas regresivas ni envío automático del formulario.
 No se capturan pantallas, voz, archivos ni datos privados automáticamente.
 No hay casilla ni envío automático de contexto Landing, ni placeholder de dictado.
+
+## GO IA y adjuntos compartidos
+
+Las cuatro pantallas abren el GOChatScreen existente en modo de consulta sin
+acceso al dispatcher de tareas/reservas. GoScreenHost conserva un solo modal
+nativo. La consulta no sustituye el borrador; una propuesta válida requiere
+«Usar propuesta en AYUDA» y comprobar que el texto original sigue intacto.
+No se incorpora automáticamente el historial privado de Mis solicitudes.
+No hay otro motor de IA ni peticiones de interpretación de pago.
+El puerto de respuesta está preparado y probado con transporte sintético,
+pero no está conectado en producción: la API actual declara interpretation:
+false y transcription: false. La consulta informa brevemente de su ausencia
+solo al intentarlo y conserva el texto. No se afirma que IA/dictado estén activos.
+Activar asistencia real requiere un servicio existente compatible/autorizado.
+
+Incidencia/mejora usan un único acceso compacto y GoNoteAttachmentMenu, extraído
+de las opciones reales del editor de Notas. Notas conserva su campo de enlace,
+su estilo de opciones y sus manejadores originales. AYUDA reutiliza sus opciones
+de PDF/fotografías dentro de la bandeja lateral, reflejada según la mano; conserva
+el almacén privado de soporte y la retirada individual descritos más abajo.
 
 ## Contrato para activar recepción real
 

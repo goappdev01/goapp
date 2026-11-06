@@ -22,11 +22,13 @@ export function IconButton({
   label,
   onPress,
   disabled = false,
+  appearance = "default",
 }: {
   icon: React.ComponentProps<typeof Feather>["name"];
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  appearance?:"default"|"note";
 }) {
   return (
     <TouchableOpacity
@@ -34,11 +36,18 @@ export function IconButton({
       accessibilityLabel={label}
       disabled={disabled}
       onPress={onPress}
-      style={[s.iconButton, disabled && s.disabled]}
+      style={[s.iconButton,appearance==="note"&&{backgroundColor:"#f4f6f8",borderColor:"#b4bdc6"}, disabled && s.disabled]}
     >
-      <Feather name={icon} size={22} color="#163F60" />
+      <Feather name={icon} size={22} color={appearance==="note"?"#17212b":"#163F60"} />
     </TouchableOpacity>
   );
+}
+/** Approved GO gold surface/white label, without coupling its action to dictation. */
+export function GoAssistantButton({onPress,disabled=false}:{onPress:()=>void;disabled?:boolean}){
+ return <TouchableOpacity accessibilityRole="button" accessibilityLabel="Consultar a GO IA" accessibilityState={{disabled}} disabled={disabled} activeOpacity={0.78} onPress={onPress}
+  style={[s.goButton,{width:56,minWidth:56,maxWidth:56,height:56,minHeight:56,borderRadius:28,marginHorizontal:0,alignItems:"center",justifyContent:"center"},disabled&&s.disabled]}>
+  <Text style={[s.goLabel,{fontSize:19,fontWeight:"900"}]}>GO</Text>
+ </TouchableOpacity>;
 }
 export function Detail({ label, value }: { label: string; value: string }) {
   return (
