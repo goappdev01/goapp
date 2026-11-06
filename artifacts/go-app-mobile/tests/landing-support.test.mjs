@@ -32,6 +32,35 @@ function fixture(gateway){let cursor=0,slots=[],effects=[];const files=supportFi
 }
 const tick=()=>new Promise(setImmediate);
 
+test('paper bin clears only the current AYUDA text without sending or removing attachments',async()=>{
+ const sends=[];const f=fixture({supportsAttachments:true,create:async command=>{sends.push(command);throw Error('unexpected send');}});
+ const drafts={incident:'Incidencia parcial',improvement:'Mejora parcial',help:'Ayuda parcial'};
+ for(const kind of ['incident','improvement','help']){
+  const props={...f.props,kind};let tree=f.render(props);
+  const input=()=>nodes(tree).find(n=>n.type==='TextInput');
+  input().props.onChangeText(drafts[kind]);tree=f.render(props);
+  const clear=icon(tree,'Limpiar texto del borrador');assert.ok(clear);assert.equal(clear.props.disabled,false);
+  if(kind!=='help'){
+   const controls=nodes(tree).find(n=>n.props?.testID==='support-thumb-controls');
+   const actions=controls.children.filter(n=>n.type==='IconButton');
+   assert.equal(actions[0].props.label,'Limpiar texto del borrador');
+   assert.equal(actions[1].props.label,'Adjuntar referencia');
+  }
+  if(kind==='incident'){
+   const pdf=f.files.asset('Reference.pdf',256,'application/pdf');
+   f.picker.document=async()=>({canceled:false,assets:[pdf]});
+   icon(tree,'Adjuntar referencia').props.onPress();tree=f.render(props);
+   menu(tree).props.onFile();await tick();tree=f.render(props);
+   assert.ok(text(tree).includes('Reference.pdf'));
+  }
+  clear.props.onPress();tree=f.render(props);assert.equal(input().props.value,'');
+  if(kind==='incident')assert.ok(nodes(tree).some(n=>n.props?.accessibilityLabel==='Quitar Reference.pdf'));
+  assert.equal(icon(tree,'Limpiar texto del borrador').props.disabled,true);
+  f.render({...props,visible:false});tree=f.render(props);assert.equal(input().props.value,'');
+ }
+ assert.deepEqual(sends,[]);
+});
+
 test('real AYUDA buttons render only their centered label without changing the normal orbit renderer',()=>{
  const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
  const declarations=['_orbitLighten','_orbitDarken','PremiumOrbitBtn'].map(name=>ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text===name).getText(ast)).join('\n');
@@ -193,8 +222,8 @@ test('GO and close float as a compact thumb group above a fixed editor with inte
  for(const width of [320,375,390,430,768])for(const height of [140,180,220,480,690])for(const handedness of ['right','left']){
   const f=fixture(),p={...f.props,handedness};f.render(p);let tree=f.render(p);nodes(tree).find(n=>n.props.testID==='support-workspace').props.onLayout({nativeEvent:{layout:{height}}});nodes(tree).find(n=>n.type==='TextInput').props.onContentSizeChange({nativeEvent:{contentSize:{height:1800}}});f.events.get('keyboardWillShow')();tree=f.render(p);
   const input=nodes(tree).find(n=>n.type==='TextInput'),footer=nodes(tree).find(n=>n.props.testID==='support-thumb-controls'),send=nodes(tree).find(n=>n.props.testID==='support-send'),composer=nodes(tree).find(n=>n.props.testID==='support-composer'),workspace=nodes(tree).find(n=>n.props.testID==='support-workspace');assert.ok(input.props.style[1].height<=(height<220?Math.max(44,height-90):Math.max(96,height-104)));assert.ok(input.props.scrollEnabled);assert.equal(footer.props.style[1].flexDirection,handedness==='right'?'row':'row-reverse');
-  const floating=nodes(tree).find(n=>n.type==='GoNavigationFloating');assert.equal(floating.props.handedness,handedness);assert.equal(floating.props.width,180);assert.ok(nodes(workspace).includes(footer));assert.ok(!nodes(composer).includes(footer),'group stays inside full-size touch host, not outside composer hit bounds');assert.ok(nodes(composer).includes(send));assert.ok(44+56+64+2*8<width-32);
-  composer.props.onLayout({nativeEvent:{layout:{height:input.props.style[1].height+12}}});tree=f.render(p);const moved=nodes(tree).find(n=>n.props.testID==='support-thumb-controls');assert.equal(nodes(tree).find(n=>n.type==='GoNavigationFloating').props.protectedBottom,input.props.style[1].height+22);assert.deepEqual(moved.children.map(n=>n.type),['IconButton','GoAssistantButton','GoCloseButton']);assert.equal(nodes(tree).find(n=>n.type==='KeyboardAvoidingView').props.style[1].paddingBottom,0);
+  const floating=nodes(tree).find(n=>n.type==='GoNavigationFloating');assert.equal(floating.props.handedness,handedness);assert.equal(floating.props.width,220);assert.ok(nodes(workspace).includes(footer));assert.ok(!nodes(composer).includes(footer),'group stays inside full-size touch host, not outside composer hit bounds');assert.ok(nodes(composer).includes(send));assert.ok(44+44+56+64+3*8<width-32);
+  composer.props.onLayout({nativeEvent:{layout:{height:input.props.style[1].height+12}}});tree=f.render(p);const moved=nodes(tree).find(n=>n.props.testID==='support-thumb-controls');assert.equal(nodes(tree).find(n=>n.type==='GoNavigationFloating').props.protectedBottom,input.props.style[1].height+22);assert.deepEqual(moved.children.map(n=>n.type),['IconButton','IconButton','GoAssistantButton','GoCloseButton']);assert.equal(nodes(tree).find(n=>n.type==='KeyboardAvoidingView').props.style[1].paddingBottom,0);
   icon(tree,'Adjuntar referencia').props.onPress();tree=f.render(p);assert.equal(menu(tree).props.handedness,handedness);assert.ok(menu(tree).props.maxHeight<=Math.max(80,height-16));
  }
 });

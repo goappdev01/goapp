@@ -99,6 +99,11 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
   const statusLabel={received:"Recibida",in_progress:"En revisión",answered:"Resuelta",closed:"Cerrada"};
   const title=SUPPORT_ORBIT_ACTIONS.find(a=>a.kind===kind)!.title;
   const toggleVoice=()=>{if(kind==="mine"||busy||picking)return;if(voice.status==="idle"){setVoiceAttempt(value=>value+1);speechTarget.current={owner:formIdentity.current,kind,base:draftsRef.current[kind],end:selection.current.end};}voice.focus("detail");void voice.toggle();};
+  const clearCurrentText=()=>{if(kind==="mine"||busy||picking||!draftsRef.current[kind])return;
+    voice.abort();speechTarget.current=null;selection.current={start:0,end:0};
+    draftsRef.current={...draftsRef.current,[kind]:""};setDrafts(current=>({...current,[kind]:""}));
+    requestKey.current=null;setReceipt(null);
+  };
   const openAI=()=>{if(busy||picking)return;voice.abort();editor.current?.blur();Keyboard.dismiss();setToolsOpen(false);setAiSession({key:scopeKey+":"+kind+":"+(++aiSequence.current),kind,source:kind==="mine"?"":draftsRef.current[kind]});};
   const handledAssistantRequest=useRef(0);
   useEffect(()=>{if(visible&&initialAssistantRequest>handledAssistantRequest.current){handledAssistantRequest.current=initialAssistantRequest;setAiSession({key:scopeKey+":help:"+(++aiSequence.current),kind:"help",source:""});}},[visible,initialAssistantRequest,scopeKey]);
@@ -107,7 +112,8 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
     {file.mime.startsWith("image/")?<Image accessibilityLabel={file.name} source={{uri:file.uri}} style={s.preview}/>:<Feather name="file-text" size={24} color="#17212b"/>}
     <Text style={[s.text,{flex:1}]}>{file.name}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel={"Quitar "+file.name} disabled={busy||picking} onPress={()=>void remove(file)} style={s.remove}><Feather name="x" size={22} color="#a1232e"/></TouchableOpacity>
   </View>);
-  const thumbControls=<GoNavigationFloating screenKey={"support-"+kind} safeArea={false} handedness={handedness} protectedBottom={kind==="mine"?0:composerHeight+10} width={kind==="mine"?136:kind==="help"?128:180}><View testID="support-thumb-controls" style={[s.controls,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
+  const thumbControls=<GoNavigationFloating screenKey={"support-"+kind} safeArea={false} handedness={handedness} protectedBottom={kind==="mine"?0:composerHeight+10} width={kind==="mine"?136:kind==="help"?176:220}><View testID="support-thumb-controls" style={[s.controls,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
+    {kind!=="mine"&&<IconButton appearance="note" icon="trash-2" label="Limpiar texto del borrador" disabled={busy||picking||!drafts[kind]} onPress={clearCurrentText}/>}
     {kind!=="mine"&&kind!=="help"&&<IconButton appearance="note" icon="paperclip" label={toolsOpen?"Ocultar adjuntos":"Adjuntar referencia"} disabled={busy||picking} onPress={()=>{editor.current?.blur();Keyboard.dismiss();setToolsOpen(open=>!open);}}/>}
     <GoAssistantButton size={kind==="mine"?64:56} onPress={openAI} disabled={busy||picking||voice.status==="transcribing"}/>
     <GoCloseButton level="panel" appearance="light" accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a las órbitas de ayuda"} onPress={back}/>
