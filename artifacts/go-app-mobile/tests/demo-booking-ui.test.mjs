@@ -11,7 +11,7 @@ const turn=async()=>{for(let i=0;i<15;i++)await new Promise(resolve=>setTimeout(
 const compile=name=>ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 function pure(name,imports={}){const exports={};vm.runInNewContext(compile(name),{exports,require:key=>{if(key in imports)return imports[key];throw Error("Unexpected dependency "+key);},Date,Intl,Map,Set});return exports;}
 const storeModule=pure("data/businessDemoStore.ts"),repoModule=pure("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":pure("data/bookingServices.ts")});
-function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
+function fixture({real=false,sectors,context="USER",ownerAccess=false,initialDateISO,viewport={width:390,height:844},insets={top:47,bottom:34,left:0,right:0}}={}){
   const keyboardEvents=new Map();
   const memory=new Map(),liveCalls=[],navigation=[],alerts=[],hooks=new Map(),cache=new Map();
   const initial={businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],activeDays:[],openFrom:"09:00",openTo:"18:00",daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};
@@ -29,7 +29,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
   };
   class Value{constructor(value){this.value=value;}setValue(value){this.value=value;}interpolate(){return 0;}stopAnimation(){}}
   const animation={start(fn){fn?.({finished:true});},stop(){}};
-  const native=new Proxy({Dimensions:{get:()=>({width:390,height:844})},Platform:{OS:"ios",select:x=>x.ios??x.default},
+  const native=new Proxy({Dimensions:{get:()=>viewport},Platform:{OS:"ios",select:x=>x.ios??x.default},
     StyleSheet:{create:x=>x,absoluteFillObject:{}},Alert:{alert(title,message){alerts.push([title,message]);}},Keyboard:{addListener:(event,fn)=>{keyboardEvents.set(event,fn);return{remove(){keyboardEvents.delete(event);}};},dismiss(){keyboardEvents.get("keyboardWillHide")?.();}},
     Animated:{Value,View:"Animated.View",spring:()=>animation,timing:()=>animation,add:()=>0},
     PanResponder:{create:config=>({panHandlers:config})}
@@ -47,7 +47,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
     "@react-native-async-storage/async-storage":{default:{getItem:()=>live("storage read"),setItem:()=>live("storage write")}},
     "expo-linear-gradient":{LinearGradient:"LinearGradient"},"@expo/vector-icons":{Feather:"Feather"},
     "expo-haptics":{selectionAsync:async()=>{},impactAsync:async()=>{},notificationAsync:async()=>{},ImpactFeedbackStyle:{Medium:"medium"},NotificationFeedbackType:{Success:"success"}},
-    "react-native-safe-area-context":{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},
+    "react-native-safe-area-context":{useSafeAreaInsets:()=>insets},
     "@/data/customerBookingProjection":pure("data/customerBookingProjection.ts"),
     "@/data/booking":booking,"@/data/goRecentBusinesses":{getRecentBusinessIds:()=>live("recent read"),recordBusinessVisit:()=>live("recent write")},
     "@/lib/goLogBridge":{syncBookingToGoLog:()=>live("agenda bridge")},
@@ -73,7 +73,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false}={}){
       return render(fn,props);
     }return tree;}
   const Overlay=load("components/booking/BookingSearchOverlay.tsx").BookingSearchOverlay,MyList=load("components/booking/MyBookingsList.tsx").MyBookingsList;
-  const props={visible:true,demoRepository:repo,initialBusinessId:store.businessId,onClose(){navigation.push("close");},onBookingConfirmed(){liveCalls.push("real confirmed callback");},onHoldCreated(){liveCalls.push("real hold callback");},onGoToBooking(){liveCalls.push("real calendar");},onProviderSelected(){liveCalls.push("real provider");},onDemoGoToBooking(...args){navigation.push(args);}};
+  const props={visible:true,demoRepository:repo,initialBusinessId:store.businessId,initialDateISO,onClose(){navigation.push("close");},onBookingConfirmed(){liveCalls.push("real confirmed callback");},onHoldCreated(){liveCalls.push("real hold callback");},onGoToBooking(){liveCalls.push("real calendar");},onProviderSelected(){liveCalls.push("real provider");},onDemoGoToBooking(...args){navigation.push(args);}};
   const configure=async()=>{await store.updateConfig({businessName:"GO Peluquería Prueba",sectorId:"belleza",subId:"peluqueria",address:"Dirección DEMO",activeDays:[0,1,2,3,4],services:[{name:"Corte DEMO",duration:30,price:12}],plantillaItems:[{id:"pro",count:1,label:"Puesto",staffNames:["Raul 1 GO PRUEBA"],staffServices:[["Corte DEMO"]]}],completedSteps:[0,1,2,3,4,5,6,7]});await store.saveFloorPlan({id:store.planId,businessId:store.businessId,updatedAt:1,elements:[{id:"puesto",label:"Raul 1 GO PRUEBA",type:"silla",reservable:true,status:"disponible",x:10,y:20,width:30,height:40,capacity:1}]});};
   return{store,repo,liveCalls,navigation,alerts,render,Overlay,MyList,props,configure,keyboardEvents,accent:load("components/booking/BookingSearchOverlay.tsx").bookingCategoryAccent};
 }
@@ -89,6 +89,23 @@ function button(tree,label){return nodes(tree).find(node=>node.type==="Touchable
 function input(tree){return nodes(tree).find(node=>node.type==="TextInput");}
 async function services(f){f.render(f.Overlay,f.props);await turn();f.render(f.Overlay,f.props);await turn();return f.render(f.Overlay,f.props);}
 async function selectSlot(f){let tree=await services(f);await button(tree,"Corte DEMO").props.onPress();tree=f.render(f.Overlay,f.props);await button(tree,"save").props.onPress();tree=f.render(f.Overlay,f.props);await button(tree,"Raul 1 GO PRUEBA").props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);assert.ok(button(tree,"09:00"),text(tree));await button(tree,"09:00").props.onPress();return f.render(f.Overlay,f.props);}
+
+test("calendar-origin date survives business selection and remains selected through slots, including an unavailable initial day",async()=>{
+ const f=fixture({initialDateISO:"2030-02-08"});await f.configure();const props={...f.props,initialBusinessId:undefined};
+ const getSlots=f.repo.getAllSlots.bind(f.repo);f.repo.getAllSlots=(businessId,itemId,date,staffId,serviceIds)=>date==="2030-02-08"?Promise.resolve([]):getSlots(businessId,itemId,date,staffId,serviceIds);
+ let tree=f.render(f.Overlay,props);await turn();tree=f.render(f.Overlay,props);
+ input(tree).props.onChangeText("peluquería");f.render(f.Overlay,props);await turn();tree=f.render(f.Overlay,props);
+ await button(tree,"GO Peluquería Prueba").props.onPress();tree=f.render(f.Overlay,props);await turn();tree=f.render(f.Overlay,props);
+ await button(tree,"Corte DEMO").props.onPress();tree=f.render(f.Overlay,props);
+ await button(tree,"save").props.onPress();tree=f.render(f.Overlay,props);
+ await button(tree,"Raul 1 GO PRUEBA").props.onPress();f.render(f.Overlay,props);await turn();tree=f.render(f.Overlay,props);
+ assert.equal(control(tree,"booking-date-2030-02-08").props.accessibilityState.selected,true);
+ assert.equal(button(tree,"09:00"),undefined,"the unavailable selected day remains selected while the real slot result is empty");
+ await control(tree,"booking-date-2030-01-08").props.onPress();f.render(f.Overlay,props);await turn();tree=f.render(f.Overlay,props);
+ assert.equal(control(tree,"booking-date-2030-01-08").props.accessibilityState.selected,true);
+ assert.equal(control(tree,"booking-date-2030-02-08").props.accessibilityState.selected,false);
+ assert.deepEqual(f.liveCalls,[]);
+});
 
 test("real overlay callbacks confirm DEMO and navigate only the isolated calendar with zero live side effects",async()=>{const f=fixture();await f.configure();let tree=await selectSlot(f);const confirm=nodes(tree).find(node=>node.props.onPress?.name==="handleConfirm");assert.ok(confirm);await confirm.props.onPress();tree=f.render(f.Overlay,f.props);assert.equal(f.store.getSnapshot().reservations.length,1);await button(tree,"biz_ok_view_calendar").props.onPress();await turn();assert.equal(f.store.getSnapshot().bookings[0].status,"CONFIRMED");assert.deepEqual(f.liveCalls,[]);assert.equal(f.navigation[0][0],"2030-01-07");assert.equal(f.navigation[0][1],"09:00");assert.match(f.navigation[0][2],/^demo_customer_/);assert.equal(f.navigation[1],"close");});
 test("closing an interactive DEMO HOLD releases only local availability",async()=>{const f=fixture();await f.configure();const tree=await selectSlot(f),modal=nodes(tree).find(node=>node.type==="Modal");await modal.props.onRequestClose();await turn();assert.equal(f.store.getSnapshot().bookings[0].status,"CANCELLED");assert.deepEqual(f.liveCalls,[]);});
@@ -201,6 +218,37 @@ test('authorized internal preview retains the shared multi-service flow for an u
 });
 
 const flattened=value=>Array.isArray(value)?Object.assign({},...value.map(flattened)):value??{};
+test("the existing search, services, professional, slots, review and confirmed views retain the same complete safe frame",async()=>{
+ const f=fixture();await f.configure();
+ const check=tree=>{assert.equal(flattened(control(tree,'booking-overlay-frame').props.style).paddingBottom,34);
+   const modal=nodes(tree).find(n=>n.type==='Modal');assert.equal(modal.props.transparent,false);assert.equal(modal.props.presentationStyle,'fullScreen');
+   assert.equal(flattened(control(tree,'booking-overlay-frame').props.style).backgroundColor,'#070B12');
+   assert.equal(flattened(control(tree,'booking-sheet').props.style).borderRadius,28);
+   assert.equal(flattened(control(tree,'booking-frame-border').props.style).bottom,1);};
+ let tree=f.render(f.Overlay,{...f.props,initialBusinessId:undefined});check(tree);
+ tree=await services(f);check(tree);
+ button(tree,'Corte DEMO').props.onPress();tree=f.render(f.Overlay,f.props);button(tree,'save').props.onPress();tree=f.render(f.Overlay,f.props);check(tree);
+ button(tree,'Raul 1 GO PRUEBA').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);check(tree);
+ await button(tree,'09:00').props.onPress();tree=f.render(f.Overlay,f.props);check(tree);
+ await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();tree=f.render(f.Overlay,f.props);check(tree);
+ assert.ok(text(tree).includes('BIZ_BOOKING_CONFIRMED'));assert.deepEqual(f.liveCalls,[]);
+});
+test("the complete booking frame and both lower corners stay inside the safe area and above the keyboard on compact and tall iPhones",()=>{
+ for(const [width,height,bottom] of [[320,568,0],[375,667,16],[390,844,34]]){
+  const f=fixture({viewport:{width,height},insets:{top:20,bottom,left:0,right:0}});let tree=f.render(f.Overlay,f.props);
+  const frame=flattened(control(tree,"booking-overlay-frame").props.style),sheet=flattened(control(tree,"booking-sheet").props.style);
+  const border=flattened(control(tree,"booking-frame-border").props.style);
+  assert.equal(frame.paddingTop,20);assert.equal(frame.paddingBottom,bottom);assert.equal(sheet.maxHeight,"100%");assert.equal(sheet.minHeight,0);
+  assert.equal(sheet.borderRadius,28);assert.equal(sheet.borderWidth,1);
+  assert.equal(border.bottom,1);assert.equal(border.left,1);assert.equal(border.right,1);assert.equal(border.borderRadius,27);
+  assert.ok(height-frame.paddingBottom-border.bottom<height-bottom,"the lower stroke is above the home-indicator area");
+  f.keyboardEvents.get("keyboardWillShow")({endCoordinates:{screenY:height-280,height:280}});tree=f.render(f.Overlay,f.props);
+  assert.equal(flattened(control(tree,"booking-overlay-frame").props.style).paddingBottom,280);
+  assert.equal(flattened(control(tree,"booking-sheet").props.style).flex,1);
+  f.keyboardEvents.get("keyboardWillHide")();tree=f.render(f.Overlay,f.props);
+  assert.equal(flattened(control(tree,"booking-overlay-frame").props.style).paddingBottom,bottom);
+ }
+});
 test('beauty services use visible yellow borders/prices and retain multi-selection until Save',async()=>{
  const f=fixture();await f.configure();await setReservableServices(f,[{name:'Corte',duration:30,price:12},{name:'Tinte',duration:60,price:25}]);
  let tree=await services(f);const saved=JSON.stringify(f.store.getSnapshot().config.services),items=await f.repo.getBookableItems(f.store.businessId);

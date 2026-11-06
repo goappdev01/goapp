@@ -61,14 +61,21 @@ test('personal calendar and RESERVAR execute the same real Home handler, even fo
   const button = find(node => ts.isJsxOpeningElement(node) && node.tagName.getText(ast) === 'TouchableOpacity'
     && node.attributes.properties.some(p => p.name?.getText(ast) === 'onPress' && p.initializer?.expression?.getText(ast) === 'openCalendarReservation'));
   assert.ok(button);
+  const overlay = find(node => (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(ast) === 'BookingSearchOverlay');
+  assert.equal(overlay.attributes.properties.find(p => p.name?.getText(ast) === 'initialDateISO')?.initializer.expression.getText(ast), 'bookingInitialDateISO ?? undefined');
   for (const isBusinessMode of [false, true]) {
     const calls = [], scope = { exports: {}, isBusinessMode,
       Haptics: { ImpactFeedbackStyle: { Medium: 'medium' }, impactAsync: async () => {} },
       setShowBookingFromCal: value => calls.push(value),
+      setBookingInitialDateISO: value => calls.push(['initial-date', value]),
     };
     vm.runInNewContext(transpile('exports.open = ' + declaration('openCalendarReservation')), scope);
-    scope.exports.open('2030-01-07', '11:15');
-    assert.deepEqual(calls, [true]);
+    scope.exports.open('2030-01-22', '11:15');
+    assert.deepEqual(calls, [['initial-date', '2030-01-22'], true]);
+    calls.length = 0;
+    // RESERVAR is also wired directly to this handler and passes a native event.
+    scope.exports.open({ nativeEvent: {} });
+    assert.deepEqual(calls, [['initial-date', null], true]);
   }
 });
 

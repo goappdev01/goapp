@@ -128,6 +128,8 @@ import { MessagesScreen } from "@/components/MessagesScreen";
 import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
+import { LandingSupport } from "@/components/landing/LandingSupport";
+import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, type SupportKind } from "@/lib/supportRequests";
 import { placeLandingQr } from "@/components/landing/landingQrPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
@@ -1939,6 +1941,7 @@ function _orbitDarken(hex: string, amt: number): string {
  *  · White border: 2.5 px when selected, 1.5 px with 22 % alpha otherwise
  */
 function PremiumOrbitBtn({
+  accessibilityLabel,
   color,
   selected,
   dimmed = false,
@@ -1966,6 +1969,7 @@ function PremiumOrbitBtn({
   logoScale,
   flat = false,
 }: {
+  accessibilityLabel?: string;
   color: string;
   selected: boolean;
   dimmed?: boolean;
@@ -2122,6 +2126,8 @@ function PremiumOrbitBtn({
       )}
 
       <TouchableOpacity
+        accessibilityRole={accessibilityLabel ? "button" : undefined}
+        accessibilityLabel={accessibilityLabel}
         activeOpacity={1}
         onPress={onPress}
         onLongPress={handleLongPress}
@@ -4276,6 +4282,11 @@ function HomeScreenContent() {
   //                   el próximo GO que se envíe (o al actual si ya
   //                   hay contacto/fecha seleccionados).
   const [notesOpen, setNotesOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [supportMode, setSupportMode] = useState(false);
+  const [supportKind, setSupportKind] = useState<SupportKind | "mine">("incident");
+  const openSupportAction = (kind: SupportKind | "mine") => { setSupportKind(kind); setSupportOpen(true); };
+  useEffect(()=>{setSupportMode(false);setSupportOpen(false);},[adminAccess.userId]);
   const [qrOpen, setQrOpen] = useState(false);
   const [cartaOpen, setCartaOpen] = useState(false);
   const [quickNoteText, setQuickNoteText] = useState("");
@@ -4631,9 +4642,11 @@ function HomeScreenContent() {
   const [monthGridOpen, setMonthGridOpen] = useState(false);
   const [reservasNavDay, setReservasNavDay] = useState<string | null>(null);
   const [showBookingFromCal, setShowBookingFromCal] = useState(false);
+  const [bookingInitialDateISO, setBookingInitialDateISO] = useState<string | null>(null);
   // Personal calendar context: identical entry to RESERVAR, regardless of account role.
-  const openCalendarReservation = () => {
+  const openCalendarReservation = (dateISO?: unknown) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setBookingInitialDateISO(typeof dateISO === "string" ? dateISO : null);
     setShowBookingFromCal(true);
   };
   // Vista del timeline de fondo: semanal o mensual lineal
@@ -6391,6 +6404,7 @@ function HomeScreenContent() {
   //   BottomSheet). La cabecera/título superior se mantiene visible
   //   en todas las capas para no perder orientación.
   const anyOverlayOpen =
+    supportOpen ||
     aiOpen ||
     calOpen ||
     listOpen ||
@@ -13676,7 +13690,7 @@ function HomeScreenContent() {
     setMessagesOpen(false); setGoChatOpen(false); setMessageEntryId(null);
     setInitialMessagesContact(null); setInitialMessagesBookingId(null); setInitialMessagesContext(null);
     setLandingDetailsId(null); setCalBookingDetailEntry(null);
-    setCalReservasOpen(false); setShowBookingFromCal(false); setAgendaOpOpen(false); setEmpresaOpen(false);
+    setCalReservasOpen(false); setShowBookingFromCal(false); setBookingInitialDateISO(null); setAgendaOpOpen(false); setEmpresaOpen(false);
     closeAllOverlays();
     setDirectLandingExit(false);
   };
@@ -13827,7 +13841,8 @@ function HomeScreenContent() {
   // PR15/PR16 frozen close position. Reserve its touch lane before laying out commands.
   const legacyLandingClose = { x: screen.width - Math.max(18, insets.right + 18) - 40,
     y: screen.height - (bottomReserved + orbitWrapSize - 50) - 40, width: 40, height: 40 };
-  const landingOrbitObstacles: HumanityRect[] = [];
+  const supportRect = supportOrbitRect(screen.width, screen.height, insets, handedness);
+  const landingOrbitObstacles: HumanityRect[] = [supportRect];
   const landingCenter = { x: screen.width - dockRight - systemBoundingRadius + (handedness === "right" ? maxX : minX),
     y: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + landingDock.maxY };
   const addLandingOrbitObstacle = (degrees: number, radius: number, size: number) => {
@@ -13875,7 +13890,8 @@ function HomeScreenContent() {
   const landingPendingOffset = landingHasNext && !nextAptMinimized
     ? landingNextHeight + Math.round(8 * uiScaleFactor) : cambiosOpen && landingHasNext ? 54 : 0;
   const landingHelpBottom = landingBaseline + 12;
-  const landingBaseFrame = landingContentFrame({ width: screen.width, height: screen.height, insets,
+  const landingBaseFrame = landingContentFrame({ width: screen.width, height: screen.height,
+    insets: screen.width > screen.height ? {...insets,bottom:insets.bottom+supportRect.height+16} : insets,
     safeTop: landingSafeTop, baseline: landingBaseline, boundingRadius: systemBoundingRadius, handedness,
     controlSize: Math.max(44, Math.round(32 * uiScaleFactor), fullLandingArchitecture ? Math.round(56 * uiScaleFactor) + 16 - 20 : 0),
     naturalHeight: Math.max(landingNextHeight, landingPendingHeight + landingPendingOffset,
@@ -14130,7 +14146,7 @@ function HomeScreenContent() {
   const toLandingRootRect = (rect: HumanityRect): HumanityRect => landingBaseFrame.virtual
     ? { ...rect, x: rect.x + landingBaseFrame.left, y: rect.y + landingBaseFrame.top } : rect;
   // Reserve the shared region even when minimized, so Humanity never moves on panel changes.
-  const humanityBlocks = [landingCloseRect, toLandingRootRect(landingPanels.commands),
+  const humanityBlocks = [supportRect, landingCloseRect, toLandingRootRect(landingPanels.commands),
     toLandingRootRect(landingPanels.region)];
   const humanityPanelsMeasured = true;
   const humanityPlacement = humanityPanelsMeasured && posReady ? placeHumanity({
@@ -14178,7 +14194,7 @@ function HomeScreenContent() {
     if (!arc.fitted) return unchanged;
     const move = (rect: HumanityRect) => ({ ...rect, y: rect.y + arc.offsetY });
     const humanity = humanityPlacement ?? (landingInlineHumanity ? inlineHumanityRect : null);
-    const exclusions = [move(toLandingRootRect(landingPanels.commands)), move(toLandingRootRect(landingPanels.region)),
+    const exclusions = [supportRect, move(toLandingRootRect(landingPanels.commands)), move(toLandingRootRect(landingPanels.region)),
       ...closeHeaderObstacles, ...closeReservedColumn, ...(humanity ? [move(humanity)] : [])];
     const closeRect = placeLandingClose({ ...landingCloseRect, y: landingCloseRect.y + arc.offsetY },
       { x: insets.left, y: insets.top, width: screen.width - insets.left - insets.right,
@@ -17101,18 +17117,22 @@ function HomeScreenContent() {
               TOQUE CORTO  → selecciona categoría GO (comportamiento original)
               PULSADO LARGO → abre segundo nivel comercial de esa órbita     */}
           {/* Public/business shells share ADMIN's exact rings, without enabling intent actions. */}
-          {!fullLandingArchitecture && !anyOverlayOpen && !rutasMode && !reservasOrbitalOpen && orbitSecondLevel === null ? (
-            <View pointerEvents="none" accessible={false} accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants" testID="landing-quiet-orbits" style={StyleSheet.absoluteFill}>
+          {(supportMode || !fullLandingArchitecture && !anyOverlayOpen && !rutasMode && !reservasOrbitalOpen && orbitSecondLevel === null) ? (
+            <View pointerEvents={supportMode?"box-none":"none"} accessible={false} accessibilityElementsHidden={!supportMode}
+              importantForAccessibility={supportMode?"auto":"no-hide-descendants"} testID="landing-quiet-orbits" style={StyleSheet.absoluteFill}>
               {[...INTENTS, { key: "otro", color: "#9ca3af" }].map((it, i) => {
                 const angle = -Math.PI / 2 + (i * 2 * Math.PI) / (INTENTS.length + 1);
                 const x = orbitWrapSize / 2 + Math.cos(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
                 const y = orbitWrapSize / 2 + Math.sin(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
-                return <View key={it.key} testID={`landing-quiet-orbit-${i}`}
+                const action = supportMode ? SUPPORT_ORBIT_ACTIONS.find(action=>action.slot===i) : undefined;
+                const exit = supportMode && i===INTENTS.length;
+                const active = !!action || exit;
+                return <View key={it.key} testID={`landing-quiet-orbit-${i}`} pointerEvents={active?"auto":"none"}
                   style={{ position: "absolute", left: x, top: y }}>
-                  <PremiumOrbitBtn color={it.color} selected={false} onPress={() => {}}
-                    icon="circle" label="" size={orbitBtnVisualSize} iconSize={0} labelSize={0}
-                    labelOpacity={0} labelSpacing={0} paddingH={0} cafeDepth={it.key === "cafe"} />
+                  <PremiumOrbitBtn color={it.color} selected={false} onPress={()=>{if(action)openSupportAction(action.kind);else if(exit)setSupportMode(false);}}
+                    icon={action?.icon??(exit?"chevron-down":"circle")} label={action?.label??(exit?"VOLVER":"")} accessibilityLabel={action?.title??(exit?"Salir del modo ayuda":undefined)}
+                    size={orbitBtnVisualSize} iconSize={active?Math.round(24*uiScaleFactor):0} labelSize={active?Math.max(8,Math.round(10*uiScaleFactor)):0}
+                    labelOpacity={active?1:0} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />
                 </View>;
               })}
             </View>
@@ -17769,6 +17789,7 @@ function HomeScreenContent() {
               El usuario navega por capas sin salir del Landing. */}
           {(() => {
             const microSz = Math.round(50 * uiScaleFactor);
+            if (supportMode) return null;
             const ctxSz   = Math.round(56 * uiScaleFactor); // sub-sat más grandes
             // Satellites sit at the midpoint angle between each orbit button (22.5°
             // offset). The meaningful gap is ANGULAR, not radial. Placing them at
@@ -20992,20 +21013,23 @@ function HomeScreenContent() {
         <BookingSearchOverlay
           key={demoBookingRepository ? "demo_" + demoBookingRepository.ownerUserId : "real"}
           visible={showBookingFromCal && !adminAccess.checking && (!demoInitialBusinessId || !!demoBookingRepository)}
+          initialDateISO={bookingInitialDateISO ?? undefined}
           demoRepository={demoBookingRepository}
           initialBusinessId={demoInitialBusinessId}
           onDemoGoToBooking={(dateISO, timeHHMM, entryId) => {
             setShowBookingFromCal(false);
+            setBookingInitialDateISO(null);
             setDemoCalendarFocus({ dateISO, timeHHMM, entryId, token: Date.now() });
             setDemoCustomerCalendarSelected(true);
             setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid();
             setCalOpen(true);
           }}
-          onClose={() => { setShowBookingFromCal(false); setDemoInitialBusinessId(undefined); }}
+          onClose={() => { setShowBookingFromCal(false); setBookingInitialDateISO(null); setDemoInitialBusinessId(undefined); }}
           onDismissAll={() => {
             // Paso 1: cerrar el modal interior (BookingSearchOverlay) inmediatamente.
             // Como usa animationType="none", se desmonta en el siguiente frame.
             setShowBookingFromCal(false);
+            setBookingInitialDateISO(null);
             // Paso 2: tras dejar un ciclo de runloop para que UIKit procese el
             // cierre del modal interior, cerrar el modal exterior (calendario) y
             // todos sus sub-estados. Hacer ambos cierres simultáneos en un Modal
@@ -21021,6 +21045,7 @@ function HomeScreenContent() {
           onHoldCreated={refreshHoldBookings}
           onGoToBooking={(dateISO, timeHHMM, entryId) => {
             setShowBookingFromCal(false);
+            setBookingInitialDateISO(null);
             setDateISODraft(dateISO);setCalBgViewMonth(dateISO.slice(0,7));setCalOpen(true);
             setCalScrollToDateTarget({ dateISO, timeHHMM, entryId, token: Date.now() });
             setCalHighlightEntryId(entryId);
@@ -25316,6 +25341,7 @@ function HomeScreenContent() {
                         if (demoBookingRepository) {
                           setDemoInitialBusinessId(provider.id);
                           setCalOpen(true);
+                          setBookingInitialDateISO(null);
                           setShowBookingFromCal(true);
                           return;
                         }
@@ -25521,6 +25547,12 @@ function HomeScreenContent() {
       />}
 
 
+      {!anyOverlayOpen && !goAuthOpen && !empresaOpen && !adminDashOpen && !rutasMode && kbHeight === 0 && (
+        <View testID="landing-support-orbit" style={{position:"absolute",left:supportRect.x,top:supportRect.y,width:supportRect.width,height:supportRect.height,zIndex:100}}>
+          <PremiumOrbitBtn color="#4A80BD" selected={supportMode} onPress={()=>setSupportMode(active=>!active)} icon={supportMode?"x":"message-circle"}
+            label={supportMode?"SALIR":"AYUDA"} accessibilityLabel={supportMode?"Salir del modo ayuda":"AYÚDANOS A MEJORAR"} size={supportRect.width} iconSize={22} labelSize={8} labelSpacing={0} paddingH={6}/>
+        </View>
+      )}
       {/* HUMANITY retains its original slot whenever it fits. */}
       {fullLandingArchitecture && !anyOverlayOpen && !rutasMode && kbHeight === 0 && orbitSecondLevel === null && humanityPlacement && (
         renderLandingHumanity(humanityPlacement)
@@ -25592,6 +25624,7 @@ function HomeScreenContent() {
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
+    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {

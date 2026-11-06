@@ -261,11 +261,20 @@ function getApiBase(): string {
   return loginApiBase(process.env.EXPO_PUBLIC_API_URL, process.env.EXPO_PUBLIC_DOMAIN, Platform.OS);
 }
 
+/** Only server-public catalogue reads may be independent of the customer's session. */
+function isPublicBookingCatalogue(path: string, init: RequestInit): boolean {
+  if ((init.method ?? "GET").toUpperCase() !== "GET") return false;
+  const route = path.split("?")[0];
+  return ["/supabase/businesses", "/supabase/services", "/supabase/staff", "/supabase/availability", "/supabase/module-publication"].includes(route)
+    || /^\/supabase\/businesses\/[a-zA-Z0-9-]{1,64}\/services$/.test(route);
+}
+
 async function performSupabaseRequest<T>(
   path: string,
   init: RequestInit = {},
   requireToken = false,
   session: StoredSupabaseSession | null = null,
+  publicCatalogue = false,
 ): Promise<T> {
   const token = session?.access_token;
   if (requireToken && !token) throw new BookingAuthenticationError();
@@ -277,9 +286,17 @@ async function performSupabaseRequest<T>(
   }
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (token && session?.user.id === internalBookingIdentity) headers.set("x-go-internal-modules", "1");
+  if (publicCatalogue) {
+    headers.delete("Authorization");
+    headers.delete("x-go-internal-modules");
+  }
 
   let response: Response;
-  try { response = await fetchWithAuth(`${getApiBase()}${path}`, { ...init, headers }, requireToken, session?.user.id); }
+  try {
+    response = publicCatalogue
+      ? await fetch(`${getApiBase()}${path}`, { ...init, headers })
+      : await fetchWithAuth(`${getApiBase()}${path}`, { ...init, headers }, requireToken, session?.user.id);
+  }
   catch (error) {
     if (error instanceof AuthSessionRequiredError) throw new BookingAuthenticationError();
     throw error;
@@ -306,9 +323,13 @@ async function performSupabaseRequest<T>(
 
 let managementWrites: Promise<unknown> = Promise.resolve();
 export async function supabaseApiRequest<T>(path: string, init: RequestInit = {}, requireToken = false, expectedUserId?: string): Promise<T> {
-  const session = await getStoredSession();
+  const publicRead = !requireToken && !expectedUserId && isPublicBookingCatalogue(path, init);
+  // ADMIN preview still needs a live, matching identity and server authorization.
+  // Ordinary public discovery must not wait for renewal of an unrelated session.
+  const session = publicRead && !internalBookingIdentity ? null : await getStoredSession();
   if (expectedUserId && session?.user?.id !== expectedUserId) throw new BookingAuthenticationError();
-  const run = () => performSupabaseRequest<T>(path, init, requireToken, session);
+  const publicCatalogue = publicRead && (!session || session.user.id !== internalBookingIdentity);
+  const run = () => performSupabaseRequest<T>(path, init, requireToken, session, publicCatalogue);
   if (path.startsWith("/supabase/manage") && init.method && init.method !== "GET") {
     const result = managementWrites.then(run, run);
     managementWrites = result.catch(() => undefined);

@@ -202,6 +202,18 @@ function getDaysRange(count = 21, timezone?: string): string[] {
   return days;
 }
 
+function isValidBookingDateISO(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day, 12);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+}
+
+function withSelectedBookingDate(days: string[], selectedDate: string): string[] {
+  if (!isValidBookingDateISO(selectedDate) || days.includes(selectedDate)) return days;
+  return [...days, selectedDate].sort();
+}
+
 // ── Hold Countdown ─────────────────────────────────────────────────────────────
 
 function HoldCountdown({
@@ -348,6 +360,8 @@ export type BookingSearchOverlayProps = {
   /** Owner-authorized local test data. Never falls back to live booking or agenda writes. */
   demoRepository?: DemoBookingRepository;
   initialBusinessId?: string;
+  /** Optional local calendar date to preselect without changing the existing booking steps. */
+  initialDateISO?: string;
   onDemoGoToBooking?: (dateISO: string, timeHHMM: string, entryId: string) => void;
   visible: boolean;
   onClose: () => void;
@@ -379,6 +393,7 @@ export function BookingSearchOverlay({
   onGoToBooking,
   demoRepository,
   initialBusinessId,
+  initialDateISO,
   onDemoGoToBooking,
   fast,
 }: BookingSearchOverlayProps) {
@@ -500,7 +515,7 @@ export function BookingSearchOverlay({
   try { if (selectedServiceIds.length) serviceSelection = summarizeBookingServices(items, selectedServiceIds); } catch { /* catalogue changed: keep selection, disallow continuation */ }
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [selectedStaff, setSelectedStaff] = useState<Staff | null | "none">(null);
-  const [selectedDate, setSelectedDate] = useState(formatISODate(getToday()));
+  const [selectedDate, setSelectedDate] = useState(isValidBookingDateISO(initialDateISO) ? initialDateISO : formatISODate(getToday()));
   const selectionScope = `${selectedBusiness?.id ?? ""}|${selectedServiceIds.join(",")}|${selectedStaff && selectedStaff !== "none" ? selectedStaff.id : "any"}`;
   const currentSlotScope = useRef(""); currentSlotScope.current = `${selectionScope}|${selectedDate}|${visible}`;
   const [slots, setSlots] = useState<SlotWithStatus[]>([]);
@@ -523,7 +538,9 @@ export function BookingSearchOverlay({
   // Anti-doble-reserva: true cuando claimSlot o isSlotOccupied detectan conflicto
   const [slotTakenError, setSlotTakenError] = useState(false);
 
-  const days = getDaysRange(21, demoRepository && !demoRepository.store.serverBookings ? undefined : selectedBusiness?.timezone);
+  const availabilityDays = getDaysRange(21, demoRepository && !demoRepository.store.serverBookings ? undefined : selectedBusiness?.timezone);
+  const daysWithInitialDate = withSelectedBookingDate(availabilityDays, isValidBookingDateISO(initialDateISO) ? initialDateISO : "");
+  const days = withSelectedBookingDate(daysWithInitialDate, selectedDate);
 
   const goToStep = (next: Step, direction: "forward" | "back" = "forward") => {
     const offset = direction === "forward" ? SCREEN_W : -SCREEN_W;
@@ -542,6 +559,7 @@ export function BookingSearchOverlay({
   useEffect(() => {
     let current = true;
     if (visible) {
+      setSelectedDate(isValidBookingDateISO(initialDateISO) ? initialDateISO : formatISODate(getToday()));
       setStep(fast ? "item" : "search");
       setQuery("");
       setSelectedCategory(null);
@@ -574,7 +592,7 @@ export function BookingSearchOverlay({
           const available = all.filter(businessVisible);
           setRecentBizs(available);
           const initial = initialBusinessId && available.find(business => business.id === initialBusinessId);
-          if (initial) { setSelectedBusiness(initial); setSelectedDate(getDaysRange(1)[0]); setStep("item"); }
+          if (initial) { setSelectedBusiness(initial); setSelectedDate(isValidBookingDateISO(initialDateISO) ? initialDateISO : getDaysRange(1)[0]); setStep("item"); }
         }).catch(() => { if (current) setRecentBizs([]); });
       } else {
         getRecentBusinessIds(5).then(async (ids) => {
@@ -585,7 +603,7 @@ export function BookingSearchOverlay({
           if (current) {
             setRecentBizs(ordered);
             const initial = initialBusinessId && all.find(business => business.id === initialBusinessId && businessVisible(business));
-            if (initial) { setSelectedBusiness(initial); setSelectedDate(getDaysRange(1, initial.timezone)[0]); setStep("item"); }
+            if (initial) { setSelectedBusiness(initial); setSelectedDate(isValidBookingDateISO(initialDateISO) ? initialDateISO : getDaysRange(1, initial.timezone)[0]); setStep("item"); }
           }
         }).catch(() => { if (current) setRecentBizs([]); });
       }
@@ -604,7 +622,8 @@ export function BookingSearchOverlay({
       }).start();
     }
     return () => { current = false; };
-  }, [visible, demoRepository, initialBusinessId, fast]);
+
+  }, [visible, demoRepository, initialBusinessId, initialDateISO, fast]);
 
   useEffect(() => {
     let current = true;
@@ -627,6 +646,7 @@ export function BookingSearchOverlay({
     }).catch(() => { if(current)setFastError("No se pudo comprobar la sesión. Se conservan los datos hasta volver a identificarte."); }); });
     return () => { current = false; unsubscribe(); };
   }, [visible, fast, fastContext]);
+
 
   useEffect(() => {
     if (!visible || step !== "search") return;
@@ -760,7 +780,7 @@ export function BookingSearchOverlay({
     setAvailableDates(null);
     if (!visible || demoRepository && !demoRepository.getAvailableDates || step !== "slots" || !selectedBusiness || !selectedItem) return;
     const staffId = selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined;
-    void (demoRepository?.getAvailableDates ? demoRepository.getAvailableDates(selectedBusiness.id, selectedServices.map(service => service.id), days[0], staffId, days.length).then(availableDates=>({availableDates})) : getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), days[0], staffId, { days: days.length, datesOnly: true }))
+    void (demoRepository?.getAvailableDates ? demoRepository.getAvailableDates(selectedBusiness.id, selectedServices.map(service => service.id), availabilityDays[0], staffId, availabilityDays.length).then(availableDates=>({availableDates})) : getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), availabilityDays[0], staffId, { days: availabilityDays.length, datesOnly: true }))
       .then(result => { if (current) setAvailableDates(result.availableDates); })
       .catch(error => { if (current) { setAvailableDates([]); setSlotError(error instanceof Error ? error.message : "No se pudieron consultar las fechas."); } });
     return () => { current = false; };
@@ -775,7 +795,7 @@ export function BookingSearchOverlay({
     Keyboard.dismiss();
     Haptics.selectionAsync().catch(() => {});
     setSelectedBusiness(b);
-    setSelectedDate(getDaysRange(1, demoRepository && !demoRepository.store.serverBookings ? undefined : b.timezone)[0]);
+    setSelectedDate(isValidBookingDateISO(initialDateISO) ? initialDateISO : getDaysRange(1, demoRepository && !demoRepository.store.serverBookings ? undefined : b.timezone)[0]);
     setItems([]); setSelectedItem(null); setSelectedServiceIds([]); setSelectedServices([]); setSelectedStaff(null); setSlots([]);
     if (!demoRepository) {
       onProviderSelected?.(b);
@@ -1159,9 +1179,14 @@ export function BookingSearchOverlay({
   const confirmationColor=bookingAccepted?"#22c55e":"#FFD700";
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
-      <View style={[s.overlay, { paddingTop: insets.top, paddingBottom: keyboardHeight }]}>
+    <Modal visible={visible} transparent={false} presentationStyle="fullScreen" animationType="none" onRequestClose={handleClose}>
+      <View testID="booking-overlay-frame" style={[s.overlay, {
+        paddingTop: insets.top,
+        paddingBottom: keyboardVisible ? keyboardHeight : insets.bottom,
+        paddingLeft: insets.left, paddingRight: insets.right,
+      }]}>
         <Animated.View
+          testID="booking-sheet"
           style={[
             s.sheet,
             { flex: 1 },
@@ -1171,6 +1196,7 @@ export function BookingSearchOverlay({
         >
           {/* Accent glow border — softer intensity */}
           <View
+            testID="booking-frame-border"
             style={[s.glowBorder, { borderColor: accentColor + "99", shadowColor: accentColor }]}
             pointerEvents="none"
           />
@@ -1220,7 +1246,7 @@ export function BookingSearchOverlay({
               <View style={[s.stepWrap, s.searchStepInner]}>
 
                 {/* ── Dock de interacción — primero en DOM → fondo visual con column-reverse ── */}
-                <View style={[s.actionDock, { paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 16) }]}>
+                <View style={[s.actionDock, { paddingBottom: keyboardVisible ? 8 : 16 }]}>
 
                   {/* Grid de categorías / subcategorías — prioridad principal */}
                   {!keyboardVisible && query.length === 0 && (
@@ -1600,6 +1626,9 @@ export function BookingSearchOverlay({
                     const dayNames = DATE_DAY_KEYS.map(k => t(k));
                     return (
                       <TouchableOpacity
+                        testID={`booking-date-${d}`}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: isActive, disabled: !demoRepository && (availableDates === null || !availableDates.includes(d)) }}
                         key={d}
                         disabled={!demoRepository && (availableDates === null || !availableDates.includes(d))}
                         onPress={() => {
@@ -2040,25 +2069,24 @@ export function BookingSearchOverlay({
 const s = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.75)",
+    backgroundColor: "#070B12",
     justifyContent: "flex-end",
   },
   sheet: {
     backgroundColor: "#070B12",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-    borderRightWidth: 1,
+    borderRadius: 28,
+    borderWidth: 1,
     borderColor: "rgba(255,255,255,0.10)",
-    // Lower the complete sheet, preserving its bottom dock and internal scroll.
-    maxHeight: SCREEN_H * 0.92 - 16,
+    // Fill the safe-area-adjusted viewport so the step content and bottom controls
+    // are not clipped by a fixed fraction of the full device height.
+    maxHeight: "100%",
+    minHeight: 0,
     overflow: "hidden",
   },
   glowBorder: {
     position: "absolute",
-    top: 0, left: 0, right: 0, bottom: 0,
-    borderRadius: 28,
+    top: 1, left: 1, right: 1, bottom: 1,
+    borderRadius: 27,
     borderWidth: 1.5,
     shadowOpacity: 0.24,
     shadowRadius: 18,

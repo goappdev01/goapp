@@ -694,6 +694,7 @@ test('standalone draft trash shares the compact footer with keyboard, text scali
       assert.equal(footerStyle.flexDirection,handedness==='right'?'row':'row-reverse');
       assert.equal(ui.hosts.get('note-discard').style.width,44);
       assert.ok(ui.hosts.get('note-discard').style.minHeight>=44);
+      assert.equal(ui.hosts.get('note-discard').children.props.size,28);
       assert.doesNotMatch(ui.container.textContent,/DESCARTAR BORRADOR/);
       assert.equal(footer.children.at(-1).props.touchSize,56);
       assert.equal(ui.hosts.get('unified-note-save').style.flex,1);
