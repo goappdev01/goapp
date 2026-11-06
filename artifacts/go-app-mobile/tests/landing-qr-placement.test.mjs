@@ -4,7 +4,7 @@ import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),{fixture,devices,source,qrNode,load}=require('./helpers/landing-qr-fixture.cjs');
 const overlaps=(a,b,gap=0)=>a.x<b.x+b.width+gap&&a.x+a.width+gap>b.x&&a.y<b.y+b.height+gap&&a.y+a.height+gap>b.y;
 for(const profile of ['ADMIN','BUSINESS','USER'])for(const preset of ['compacto','estandar','grande'])for(const hand of ['right','left'])
- test(`${profile}/${preset}/${hand}: QR stays in the dominant lower corner without colliding with controls`,()=>{
+ test(`${profile}/${preset}/${hand}: QR stays safe without colliding with controls`,()=>{
   for(const d of devices){
    const f=fixture(d,preset,profile,hand),button=f.render(),p=button.props.style,hit=button.props.hitSlop;
    assert.equal(p.width,Math.round(32*f.scale));assert.equal(p.height,p.width);assert.equal(p.borderRadius,p.width/2);
@@ -14,11 +14,20 @@ for(const profile of ['ADMIN','BUSINESS','USER'])for(const preset of ['compacto'
    assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=d.height-d.insets.bottom-8);
    const root=r=>f.toLandingRootRect(r),move=r=>({...r,y:r.y+f.landingOffsetY});
    const commands=move(root(f.landingPanels.commands));
-   const obstacles=[...f.landingOrbitObstacles.map(move),commands,move(root(f.landingPanels.region)),{x:f.landingDisplayCloseRect.x-8,y:f.landingDisplayCloseRect.y-8,width:56,height:56},...(f.humanityPlacement?[move(f.humanityPlacement)]:f.landingInlineHumanity?[move(f.inlineHumanityRect)]:[])];
+   const obstacles=[...f.landingOrbitObstacles.map(move),commands,move(root(f.landingPanels.region)),{x:f.landingDisplayCloseRect.x-8,y:f.landingDisplayCloseRect.y-8,width:56,height:56},f.supportRect,...(f.humanityPlacement?[move(f.humanityPlacement)]:f.landingInlineHumanity?[move(f.inlineHumanityRect)]:[])];
    for(const o of obstacles)assert.ok(!overlaps(touch,o,1.99),JSON.stringify({d,profile,preset,hand,touch,o}));
    for(const minimized of [true,false]){const other=fixture(d,preset,profile,hand,{nextAptMinimized:minimized,landingNextHeight:minimized?46:480,landingPendingHeight:400});assert.deepEqual({...other.landingQrPosition},{...f.landingQrPosition},'content/open panel cannot move QR or rings');}
   }
  });
+test('AYUDA and QR share the nearest safe lower gap when the fixed satellites allow both targets',()=>{
+ for(const d of devices.filter(device=>device.width>=375&&device.width<500))for(const hand of ['right','left']){
+  const f=fixture(d,'estandar','ADMIN',hand),h=f.supportRect,q=f.landingQrPosition;
+  const distance=Math.hypot(q.x+f.closeQrSize/2-h.x-h.width/2,q.y+f.closeQrSize/2-h.y-h.height/2);
+  assert.ok(distance<=100,JSON.stringify({d,hand,h,q,distance}));
+  assert.ok(h.y>=d.height/2&&q.y>=d.height/2);
+  assert.ok(!overlaps({x:q.x-f.closeQrHit,y:q.y-f.closeQrHit,width:f.closeQrSize+2*f.closeQrHit,height:f.closeQrSize+2*f.closeQrHit},h));
+ }
+});
 test('the unique original QR keeps its appearance and exact action; overlays still hide it',()=>{
  assert.equal(source.split('key="qr-permanent-btn"').length-1,1);
  const f=fixture(devices[2]),b=f.render(),style=b.props.style;

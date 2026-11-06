@@ -63,6 +63,16 @@ test('the real Landing entry toggles orbital help instead of opening the former 
  const calls=[];vm.runInNewContext(ts.transpileModule('const tap=('+handler.getText(ast)+');tap();tap();',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{setSupportMode:fn=>calls.push(fn(calls.at(-1)??false))});assert.deepEqual(calls,[true,false]);
  assert.equal(mount.attributes.properties.some(p=>p.name?.text==='gateway'),false,'no test or undeployed gateway is mounted');
 });
+test('central GO opens the existing help consultation only in AYUDA mode',()=>{
+ const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let go;
+ (function visit(n){if(ts.isJsxOpeningElement(n)&&n.tagName.getText(ast)==='TouchableOpacity'&&n.attributes.properties.some(p=>p.name?.getText(ast)==='delayLongPress'&&p.initializer?.getText(ast).includes('450')))go=n;ts.forEachChild(n,visit);})(ast);
+ assert.ok(go);const press=go.attributes.properties.find(p=>p.name?.getText(ast)==='onPress').initializer.expression.getText(ast),long=go.attributes.properties.find(p=>p.name?.getText(ast)==='onLongPress').initializer.expression.getText(ast),calls=[];
+ const scope={supportMode:true,voiceActive:false,setSupportKind:v=>calls.push(['kind',v]),setSupportOpen:v=>calls.push(['open',v]),setSupportAiRequest:fn=>calls.push(['ai',fn(0)]),openAi:v=>calls.push(['ordinary',v]),isUserV1Surface:true,aiOpen:false};
+ vm.runInNewContext(ts.transpileModule('const tap='+press+';const hold='+long+';tap();hold();',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,scope);
+ assert.deepEqual(calls,[['kind','help'],['open',true],['ai',1],['kind','help'],['open',true],['ai',1]]);
+ calls.length=0;vm.runInNewContext(ts.transpileModule('const tap='+press+';tap();',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{...scope,supportMode:false});assert.deepEqual(calls,[['ordinary',true]]);
+ const f=fixture();let p={...f.props,kind:'help',initialAssistantRequest:1};f.render(p);let tree=f.render(p);const chat=nodes(tree).find(n=>n.type==='GOChatScreen');assert.ok(chat);assert.equal(chat.props.consultation.title,'AYUDA GO');assert.equal(chat.props.consultation.respond,undefined);
+});
 test('AYUDA groups its four real actions consecutively and leaves the normal orbit renderer unchanged',()=>{
  const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),all=[];
  (function walk(n){all.push(n);ts.forEachChild(n,walk)})(ast);
@@ -74,7 +84,8 @@ test('AYUDA groups its four real actions consecutively and leaves the normal orb
  vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{alwaysStrict:false,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
  const help=scope.result.children;assert.equal(help.length,4);
  scope.supportMode=false;vm.runInNewContext(ts.transpileModule('result='+mode.getText(ast),{compilerOptions:{alwaysStrict:false,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
- for(let i=0;i<4;i++){const h=help[i].children[0].props;assert.equal(h.labelOnly,true);assert.equal(h.label,api.SUPPORT_ORBIT_ACTIONS[i].label);h.onPress();}
+ const colors={mine:'#f97316',improvement:'#78350f',help:'#15803d',incident:'#c026d3'};
+ for(let i=0;i<4;i++){const h=help[i].children[0].props;assert.equal(h.labelOnly,true);assert.equal(h.label,api.SUPPORT_ORBIT_ACTIONS[i].label);assert.equal(h.color,colors[api.SUPPORT_ORBIT_ACTIONS[i].kind]);h.onPress();}
  assert.deepEqual(calls,['incident','improvement','help','mine']);
  assert.equal(help.filter(n=>n.children[0].props.dimmed).length,0);assert.equal(help.filter(n=>n.props.pointerEvents==='none').length,0);
  scope.supportMode=true;scope.handedness='left';vm.runInNewContext(ts.transpileModule('result='+mode.getText(ast),{compilerOptions:{alwaysStrict:false,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);

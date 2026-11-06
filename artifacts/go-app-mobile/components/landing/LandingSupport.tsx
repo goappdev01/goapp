@@ -18,9 +18,9 @@ import { SupportVoiceNotice } from "./SupportVoiceNotice";
 import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 
 /** No production gateway is configured until receipt, privacy and authorization are verified. */
-export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="incident",handedness="right",assistanceResponder }: {
+export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="incident",handedness="right",assistanceResponder,initialAssistantRequest=0 }: {
   visible: boolean; onClose: () => void; scopeKey: string; gateway?: SupportGateway; kind?: SupportKind | "mine";
-  handedness?:"left"|"right";assistanceResponder?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;
+  handedness?:"left"|"right";assistanceResponder?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;initialAssistantRequest?:number;
 }) {
   const insets = useSafeAreaInsets();
   const [keyboardVisible,setKeyboardVisible]=useState(false);
@@ -100,6 +100,8 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
   const title=SUPPORT_ORBIT_ACTIONS.find(a=>a.kind===kind)!.title;
   const toggleVoice=()=>{if(kind==="mine"||busy||picking)return;if(voice.status==="idle"){setVoiceAttempt(value=>value+1);speechTarget.current={owner:formIdentity.current,kind,base:draftsRef.current[kind],end:selection.current.end};}voice.focus("detail");void voice.toggle();};
   const openAI=()=>{if(busy||picking)return;voice.abort();editor.current?.blur();Keyboard.dismiss();setToolsOpen(false);setAiSession({key:scopeKey+":"+kind+":"+(++aiSequence.current),kind,source:kind==="mine"?"":draftsRef.current[kind]});};
+  const handledAssistantRequest=useRef(0);
+  useEffect(()=>{if(visible&&initialAssistantRequest>handledAssistantRequest.current){handledAssistantRequest.current=initialAssistantRequest;setAiSession({key:scopeKey+":help:"+(++aiSequence.current),kind:"help",source:""});}},[visible,initialAssistantRequest,scopeKey]);
   const compact=bodyHeight<220;
   const fileList=kind!=="mine"&&files[kind].map(file=><View key={file.id} style={s.file}>
     {file.mime.startsWith("image/")?<Image accessibilityLabel={file.name} source={{uri:file.uri}} style={s.preview}/>:<Feather name="file-text" size={24} color="#17212b"/>}
@@ -148,7 +150,7 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
       </View>
       {kind==="mine"&&!!error&&<Text accessibilityRole="alert" style={s.error}>{error}</Text>}
     </KeyboardAvoidingView>
-    {aiSession&&visible&&<GOChatScreen key={aiSession.key} visible handedness={handedness} onClose={()=>setAiSession(null)} consultation={{scopeKey:aiSession.key,title,sourceText:aiSession.source,respond:assistanceResponder,onAcceptDraft:aiSession.kind==="mine"?undefined:(proposal,baseline)=>{
+    {aiSession&&visible&&<GOChatScreen key={aiSession.key} visible handedness={handedness} onClose={()=>setAiSession(null)} consultation={{scopeKey:aiSession.key,title:aiSession.kind==="help"?"AYUDA GO":title,sourceText:aiSession.source,respond:assistanceResponder,onAcceptDraft:aiSession.kind==="mine"?undefined:(proposal,baseline)=>{
       const target=aiSession.kind;if(target==="mine"||!identity.current.visible||liveAi.current?.key!==aiSession.key||formIdentity.current.key!==scopeKey||formIdentity.current.kind!==target)return;
       if(draftsRef.current[target]!==baseline){setError("El texto ha cambiado. Conservamos tu borrador.");return;}
       setDrafts(values=>({...values,[target]:proposal}));requestKey.current=null;

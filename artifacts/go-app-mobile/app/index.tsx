@@ -4289,7 +4289,9 @@ function HomeScreenContent() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportMode, setSupportMode] = useState(false);
+  const supportGoColor = supportMode ? GO_GOLD : goButtonColor;
   const [supportKind, setSupportKind] = useState<SupportKind | "mine">("incident");
+  const [supportAiRequest, setSupportAiRequest] = useState(0);
   const openSupportAction = (kind: SupportKind | "mine") => { setSupportKind(kind); setSupportOpen(true); };
   useEffect(()=>{setSupportMode(false);setSupportOpen(false);},[adminAccess.userId]);
   const [qrOpen, setQrOpen] = useState(false);
@@ -14217,22 +14219,21 @@ function HomeScreenContent() {
     landingInlineHumanity, inlineHumanityRect.x, inlineHumanityRect.y, inlineHumanityRect.width,
     inlineHumanityRect.height, closeQrX, closeQrY, closeQrSize, closeQrHit, closeHeaderHeight]);
   const landingOffsetY = landingArrangement.offsetY;
-  const supportRect = supportOrbitRect(screen.width, screen.height, insets, handedness, 44, [
+  const supportObstacles = [
     ...((landingArrangement as {obstacles?:HumanityRect[]}).obstacles ?? landingOrbitObstacles.slice(1)).map(rect=>({...rect,circular:true})),
     ...[landingPanels.commands, landingPanels.region].map(rect=>{const root=toLandingRootRect(rect);return {...root,y:root.y+landingOffsetY};}),
     ...closeHeaderObstacles,
     ...(humanityPlacement ? [{...humanityPlacement,y:humanityPlacement.y+landingOffsetY}]
       : landingInlineHumanity ? [{...inlineHumanityRect,y:inlineHumanityRect.y+landingOffsetY}] : []),
-  ]);
+  ];
   const landingLowerOffsets = landingArrangement.offsets;
   const landingDisplayCloseRect = landingArrangement.closeRect;
   const landingNavigationCloseRect = placeLandingClose({...landingDisplayCloseRect,x:handedness==="right"?landingDisplayCloseRect.x-24:landingDisplayCloseRect.x,y:landingDisplayCloseRect.y-24,width:64,height:64},{x:insets.left,y:insets.top,width:screen.width-insets.left-insets.right,height:screen.height-insets.top-insets.bottom},[...landingOrbitObstacles,...closeHeaderObstacles,...closeReservedColumn]) ?? {x:Math.max(insets.left,Math.min(screen.width-insets.right-64,landingDisplayCloseRect.x)),y:Math.max(insets.top,Math.min(screen.height-insets.bottom-64,landingDisplayCloseRect.y)),width:64,height:64};
-  const landingQrPosition = placeLandingQr({
+  const qrBase = {
     company: { x: landingCenter.x + Math.cos(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
       y: landingCenter.y + landingOffsetY + Math.sin(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
       width: Math.max(44, microSz), height: Math.max(44, microSz) },
     size: closeQrSize, hitSlop: closeQrHit,
-    handedness,
     bounds: { x: insets.left + 8, y: insets.top + 8,
       width: screen.width - insets.left - insets.right - 16, height: screen.height - insets.top - insets.bottom - 16 },
     obstacles: [
@@ -14243,9 +14244,20 @@ function HomeScreenContent() {
         width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 },
       ...(humanityPlacement ? [{ ...humanityPlacement, y: humanityPlacement.y + landingOffsetY }]
         : landingInlineHumanity ? [{ ...inlineHumanityRect, y: inlineHumanityRect.y + landingOffsetY }] : []),
-      { ...supportRect, y: supportRect.y + landingOffsetY },
     ],
-  }) ?? { x: closeQrX, y: closeQrY };
+  };
+  const helpQrPair = (side: "right" | "left") => {
+    const help = supportOrbitRect(screen.width, screen.height, insets, side, 44, supportObstacles);
+    const qr = placeLandingQr({ ...qrBase, handedness: side, companion: help,
+      obstacles: [...qrBase.obstacles, help] });
+    const distance = qr ? Math.hypot(qr.x + closeQrSize / 2 - help.x - help.width / 2,
+      qr.y + closeQrSize / 2 - help.y - help.height / 2) : Infinity;
+    return { help, qr, distance };
+  };
+  const rightHelpQr = helpQrPair("right");
+  const helpQr = rightHelpQr.distance <= 100 ? rightHelpQr : helpQrPair("left");
+  const supportRect = helpQr.distance <= 100 ? helpQr.help : rightHelpQr.help;
+  const landingQrPosition = (helpQr.distance <= 100 ? helpQr.qr : rightHelpQr.qr) ?? { x: closeQrX, y: closeQrY };
   // Keep the approved header reservation: relocating QR must not shift panels or confirmations.
   const landingHeaderControls = [
     { x: closeQrX, y: closeQrY - landingOffsetY, width: closeQrSize, height: closeQrSize },
@@ -16802,7 +16814,7 @@ function HomeScreenContent() {
                 height: goSize + 10,
                 borderRadius: (goSize + 10) / 2,
                 borderWidth: 2,
-                borderColor: goButtonColor,
+                borderColor: supportGoColor,
                 opacity: goBreath.interpolate({ inputRange: [0, 1], outputRange: [0, 0.35] }),
               }}
             />
@@ -16829,7 +16841,7 @@ function HomeScreenContent() {
               height: goSize,
               borderRadius: goSize / 2,
               borderWidth: 2.5,
-              borderColor: goButtonColor,
+              borderColor: supportGoColor,
               opacity: goSendWave.interpolate({
                 inputRange: [0, 0.12, 1],
                 outputRange: [0, 0.85, 0],
@@ -16917,7 +16929,7 @@ function HomeScreenContent() {
                   position: "absolute",
                   left: -3, right: -3, top: -3, bottom: -3,
                   borderRadius: 999,
-                  shadowColor: goButtonColor,
+                  shadowColor: supportGoColor,
                   shadowOpacity: 0.65,
                   shadowRadius: 13,
                   shadowOffset: { width: 0, height: 0 },
@@ -16928,7 +16940,9 @@ function HomeScreenContent() {
             <TouchableOpacity
               onPressIn={() => { if (!voiceActive) pauseBreath(); }}
               onPress={() => {
-                if (voiceActive) {
+                if (supportMode) {
+                  setSupportKind("help"); setSupportOpen(true); setSupportAiRequest(value=>value+1);
+                } else if (voiceActive) {
                   exitVoiceMode();
                 } else if (isUserV1Surface && !aiOpen) {
                   openAi(true);
@@ -16955,7 +16969,9 @@ function HomeScreenContent() {
                 }
               }}
               onLongPress={() => {
-                if (!voiceActive) {
+                if (supportMode) {
+                  setSupportKind("help"); setSupportOpen(true); setSupportAiRequest(value=>value+1);
+                } else if (!voiceActive) {
                   if (marketplaceCheckout !== null) {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
                     setMarketplaceCheckout(null);
@@ -17024,7 +17040,7 @@ function HomeScreenContent() {
                 <>
                   {/* Gradient + overhead highlight — same visual system as PremiumOrbitBtn */}
                   {(() => {
-                    const _ckColor = marketplaceCheckout?.brand.color ?? goButtonColor;
+                    const _ckColor = supportMode ? GO_GOLD : marketplaceCheckout?.brand.color ?? goButtonColor;
                     const gc: [string, string, string] = [
                       _orbitLighten(_ckColor, 0.28),
                       _ckColor,
@@ -17136,7 +17152,7 @@ function HomeScreenContent() {
           {(supportMode || !fullLandingArchitecture && !anyOverlayOpen && !rutasMode && !reservasOrbitalOpen && orbitSecondLevel === null) ? (
             <View pointerEvents={supportMode?"box-none":"none"} accessible={false} accessibilityElementsHidden={!supportMode}
               importantForAccessibility={supportMode?"auto":"no-hide-descendants"} testID="landing-quiet-orbits" style={StyleSheet.absoluteFill}>
-              {(supportMode ? SUPPORT_ORBIT_ACTIONS.map((action, i) => ({ key: action.kind, color: "#9ca3af", action })) : [...INTENTS, { key: "otro", color: "#9ca3af" }].map(it => ({ ...it, action: undefined }))).map((it, i, items) => {
+              {(supportMode ? SUPPORT_ORBIT_ACTIONS.map(action => ({ key: action.kind, color: ({mine:GO_COLORS.comida,improvement:GO_COLORS.cafe,help:GO_COLORS.deporte,incident:GO_COLORS.fiesta} as const)[action.kind], action })) : [...INTENTS, { key: "otro", color: "#9ca3af" }].map(it => ({ ...it, action: undefined }))).map((it, i, items) => {
                 const angle = -Math.PI / 2 + (i * 2 * Math.PI) / items.length;
                 const x = orbitWrapSize / 2 + Math.cos(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
                 const y = orbitWrapSize / 2 + Math.sin(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
@@ -25555,7 +25571,7 @@ function HomeScreenContent() {
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
-    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
+    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} initialAssistantRequest={supportAiRequest} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {

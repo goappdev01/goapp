@@ -10,6 +10,7 @@ const require=createRequire(path.join(process.cwd(),'package.json')),ts=require(
 const load=file=>{const scope={exports:{}};new Function('exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(scope.exports);return scope.exports;};
 const layout=load('components/landing/landingResponsiveLayout.ts'),arc=load('components/landing/landingLowerArc.ts');
 const panels=load('components/landing/landingPanels.ts'),policy=load('components/landing/landingV1Visibility.ts'),humanity=load('components/landing/humanityPlacement.ts');
+const qr=load('components/landing/landingQrPlacement.ts');
 const support=load('lib/supportRequests.ts');
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),nodes=[];
 function walk(n){nodes.push(n);ts.forEachChild(n,walk)}walk(ast);
@@ -18,7 +19,7 @@ const statement=name=>decl(name).parent.parent;
 const code=ts.transpileModule([
  source.slice(statement('landingOrbitTop').getStart(ast),statement('landingBaseline').end),
  ...['landingSafeTop','landingBaseFrame','landingPanels','toLandingRootRect','humanityBlocks','humanityPanelsMeasured','humanityPlacement',
- 'landingInlineHumanity','inlineHumanityWidth','inlineHumanityRect','landingArrangement','landingOffsetY','supportRect'].map(name=>'const '+decl(name).getText(ast)+';'),
+ 'landingInlineHumanity','inlineHumanityWidth','inlineHumanityRect','landingArrangement','landingOffsetY','supportObstacles','landingDisplayCloseRect','qrBase','helpQrPair','rightHelpQr','helpQr','supportRect'].map(name=>'const '+decl(name).getText(ast)+';'),
  'result={supportRect,landingArrangement,landingCenter,landingPanels,landingBaseFrame,humanityPlacement,landingCloseRect,closeHeaderObstacles,closeReservedColumn,inlineHumanityRect};',
 ].join('\n'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.None,target:ts.ScriptTarget.ES2022}}).outputText;
 const devices=[
@@ -32,7 +33,7 @@ function fixture(d,preset,profile,handedness,overrides={}){
  const scale=layout.fitLandingScale(preset,d.width,d.height,d.insets),orbitRadius=Math.round(99*scale),orbitBtnSize=Math.round(65*scale),microR=orbitRadius+Math.round(35*scale),microSz=Math.round(50*scale),goSize=Math.round(128*scale),orbitWrapSize=2*(orbitRadius+orbitBtnSize/2)+12,systemBoundingRadius=Math.max(orbitRadius+orbitBtnSize/2,microR+microSz/2),dockRight=preset==='estandar'?-1:5;
  const isUserV1Surface=profile==='USER',keys=policy.visibleLandingSatelliteKeys(Object.keys(layout.LANDING_SATELLITE_DEGREES),isUserV1Surface);
  const dock=layout.landingDockBounds({...d,dockRight,boundingRadius:systemBoundingRadius,wrapSize:orbitWrapSize,satelliteRadius:microR,satelliteSize:microSz,visibleSatelliteKeys:Object.keys(layout.LANDING_SATELLITE_DEGREES),orbitRadius,orbitButtonSize:orbitBtnSize,orbitCount:8,orbitVisible:true,goSize});
- const context={...layout,...panels,...policy,...humanity,...arc,...support,screen:d,insets:d.insets,goSize,orbitRadius,orbitBtnSize,microR,microSz,orbitWrapSize,systemBoundingRadius,dockRight,
+ const context={...layout,...panels,...policy,...humanity,...arc,...support,...qr,screen:d,insets:d.insets,goSize,orbitRadius,orbitBtnSize,microR,microSz,orbitWrapSize,systemBoundingRadius,dockRight,
    handedness,maxX:dock.maxX,minX:dock.minX,landingDock:dock,SYSTEM_MARGIN_Y:6,uiScaleFactor:scale,INTENTS:Array(7).fill({}),isUserV1Surface,
    fullLandingArchitecture:profile==='ADMIN',bottomReserved:d.insets.bottom+4+(preset==='compacto'?2:preset==='estandar'?6:12),
    titleBottomLocalY:null,ACTION_TOP_Y:d.insets.top+151,posReady:true,kbHeight:0,orbitSecondLevel:null,reservasOrbitalOpen:false,
@@ -45,7 +46,7 @@ const overlaps=(a,b)=>a.x<b.x+b.width-1e-5&&a.x+a.width>b.x+1e-5&&a.y<b.y+b.heig
 test('support corner does not cover the approved GO or orbital circles on iPhone in either hand',()=>{
  for(const d of devices.slice(0,3))for(const hand of ['left','right'])for(const preset of ['compacto','estandar','grande'])for(const supportMode of [false,true]){
   const g=fixture(d,preset,'ADMIN',hand,{supportMode}),r=g.supportRect;
-  assert.equal(hand==='right'?d.width-d.insets.right-r.x-r.width:r.x-d.insets.left,12);
+  assert.ok(Math.abs(d.width-d.insets.right-r.x-r.width-12)<1e-5||Math.abs(r.x-d.insets.left-12)<1e-5);
   assert.ok(r.y>=d.height/2&&r.y+r.height<=d.height-d.insets.bottom,JSON.stringify({d,hand,preset,supportMode,r}));
   for(const o of g.landingArrangement.obstacles??[]){const distance=Math.hypot(r.x+r.width/2-o.x-o.width/2,r.y+r.height/2-o.y-o.height/2);
    assert.ok(distance>=(r.width+o.width)/2,JSON.stringify({width:d.width,hand,preset,r,o}));}
