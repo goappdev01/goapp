@@ -1983,7 +1983,7 @@ export function BookingSearchOverlay({
                   </Text>
                 </View>
 
-                {fast && <View style={{alignItems:"center",gap:10,marginBottom:16}}>
+                {fast && <View style={{width:"100%",alignItems:"center",gap:10,marginBottom:16}}>
                   {DiscoveryQRCode && discoveryLink && <View accessibilityLabel="Código QR oficial de GO" style={{backgroundColor:"#FFFFFF",padding:8,borderRadius:10}}><DiscoveryQRCode value={discoveryLink} size={80}/></View>}
                   <TouchableOpacity testID="fast-share-confirmation" disabled={sharingConfirmation} onPress={()=>setConfirmationOptions(value=>!value)} style={{padding:12,minHeight:44}}>
                     <Text style={{color:"#FFFFFF",fontWeight:"700"}}>ENVIAR CONFIRMACIÓN</Text>
