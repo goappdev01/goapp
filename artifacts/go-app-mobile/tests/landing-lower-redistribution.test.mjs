@@ -180,7 +180,7 @@ test('the original ADMIN orbit renderer is preserved apart from the authorized m
  assert.equal(createHash('sha256').update(unchangedRenderer).digest('hex'),'6efc8e73210cfb019f29b3500998eab9538f10065c6108ec7908d69a5d723d79');
  const compile=text=>ts.transpileModule(text,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
  for(const fullLandingArchitecture of [true,false]){
-  const matched=vm.runInNewContext(compile('result='+shell.condition.getText(ast)),{fullLandingArchitecture,anyOverlayOpen:false,rutasMode:false,reservasOrbitalOpen:false,orbitSecondLevel:null});
+  const matched=vm.runInNewContext(compile('result='+shell.condition.getText(ast)),{supportMode:false,fullLandingArchitecture,anyOverlayOpen:false,rutasMode:false,reservasOrbitalOpen:false,orbitSecondLevel:null});
   assert.equal(matched,!fullLandingArchitecture,'ADMIN always takes its preserved renderer');
  }
 });
@@ -191,7 +191,7 @@ test('USUARIO and EMPRESA mount exactly eight original-color passive shells with
  const output=ts.transpileModule(setup+'\nresult='+shell.whenTrue.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None,jsx:ts.JsxEmit.React}}).outputText;
  const colors=vm.runInNewContext(ts.transpileModule(setup+'\nresult=INTENTS.map(it=>it.color)',{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,{});
  for(const preset of ['compacto','estandar','grande']){
-  const g=fixture(devices[1],preset,'ADMIN','right'),ctx={React:react,View:'View',PremiumOrbitBtn:'PremiumOrbitBtn',StyleSheet:{absoluteFill:{position:'absolute',top:0,left:0,right:0,bottom:0}},orbitWrapSize:g.context.orbitWrapSize,orbitRadiusVisual:g.context.orbitRadius,orbitBtnVisualSize:g.context.orbitBtnSize};
+  const g=fixture(devices[1],preset,'ADMIN','right'),ctx={supportMode:false,React:react,View:'View',PremiumOrbitBtn:'PremiumOrbitBtn',StyleSheet:{absoluteFill:{position:'absolute',top:0,left:0,right:0,bottom:0}},orbitWrapSize:g.context.orbitWrapSize,orbitRadiusVisual:g.context.orbitRadius,orbitBtnVisualSize:g.context.orbitBtnSize};
   vm.runInNewContext(output,ctx);const tree=ctx.result,orbits=tree.children[0];
   assert.equal(tree.props.pointerEvents,'none');assert.equal(tree.props.accessible,false);assert.equal(tree.props.accessibilityElementsHidden,true);assert.equal(tree.props.importantForAccessibility,'no-hide-descendants');assert.equal(orbits.length,8);
   for(let i=0;i<8;i++){

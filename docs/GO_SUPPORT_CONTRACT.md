@@ -1,10 +1,16 @@
 # Soporte GO: acceso preparado, recepción pendiente
 
-AYUDA activa cuatro posiciones del anillo existente de Landing: incidencia,
-mejora, ayuda y mis solicitudes. Cada una abre directamente su formulario/vista;
-SALIR en la esquina restaura las órbitas normales. No existe panel intermedio.
+AYUDA cambia temporalmente las etiquetas/acciones de las ocho órbitas reales
+de Landing, sin sustituir sus colores ni coordenadas. Cuatro posiciones abren
+incidencia, mejora, ayuda y mis solicitudes; la órbita gris permite volver.
+SALIR en la esquina también restaura el estado normal. No existe panel intermedio.
 La órbita reutiliza PremiumOrbitBtn y la preferencia handedness. Tamaño de 48
 puntos en iPhone (60 en anchos mayores), azul GO y mayor espacio para la etiqueta.
+La etiqueta AYUDA usa 8 puntos y margen interior de 6 puntos. Los formularios
+reutilizan GoCloseButton en una pila flotante inferior derecha: una flecha vuelve
+al modo ayuda (primero oculta el teclado); la doble flecha cierra también el modo.
+Los campos conservan su borrador al volver. Un solo aviso informa de que el
+servicio está pendiente; ENVIAR inactivo usa gris neutro y texto blanco.
 No se ha encontrado una API, almacenamiento o panel de soporte reutilizable.
 No se instala ni configura un gateway de producción: ENVIAR está desactivado,
 se informa de la indisponibilidad y Mis solicitudes no muestra un vacío ficticio.

@@ -17117,29 +17117,22 @@ function HomeScreenContent() {
               TOQUE CORTO  → selecciona categoría GO (comportamiento original)
               PULSADO LARGO → abre segundo nivel comercial de esa órbita     */}
           {/* Public/business shells share ADMIN's exact rings, without enabling intent actions. */}
-          {supportMode ? (
-            <View testID="landing-help-orbits" pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-              {SUPPORT_ORBIT_ACTIONS.map(action=>{
-                const angle=-Math.PI/2+action.slot*2*Math.PI/8;
-                return <View key={action.kind} style={{position:"absolute",left:orbitWrapSize/2+Math.cos(angle)*orbitRadiusVisual-orbitBtnVisualSize/2,
-                  top:orbitWrapSize/2+Math.sin(angle)*orbitRadiusVisual-orbitBtnVisualSize/2}}>
-                  <PremiumOrbitBtn color="#4A80BD" selected={false} onPress={()=>openSupportAction(action.kind)} icon={action.icon}
-                    label={action.label} accessibilityLabel={action.title} size={orbitBtnVisualSize} iconSize={Math.round(24*uiScaleFactor)} labelSize={Math.max(7,Math.round(9*uiScaleFactor))} labelSpacing={0} paddingH={4}/>
-                </View>;
-              })}
-            </View>
-          ) : !fullLandingArchitecture && !anyOverlayOpen && !rutasMode && !reservasOrbitalOpen && orbitSecondLevel === null ? (
-            <View pointerEvents="none" accessible={false} accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants" testID="landing-quiet-orbits" style={StyleSheet.absoluteFill}>
+          {(supportMode || !fullLandingArchitecture && !anyOverlayOpen && !rutasMode && !reservasOrbitalOpen && orbitSecondLevel === null) ? (
+            <View pointerEvents={supportMode?"box-none":"none"} accessible={false} accessibilityElementsHidden={!supportMode}
+              importantForAccessibility={supportMode?"auto":"no-hide-descendants"} testID="landing-quiet-orbits" style={StyleSheet.absoluteFill}>
               {[...INTENTS, { key: "otro", color: "#9ca3af" }].map((it, i) => {
                 const angle = -Math.PI / 2 + (i * 2 * Math.PI) / (INTENTS.length + 1);
                 const x = orbitWrapSize / 2 + Math.cos(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
                 const y = orbitWrapSize / 2 + Math.sin(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
-                return <View key={it.key} testID={`landing-quiet-orbit-${i}`}
+                const action = supportMode ? SUPPORT_ORBIT_ACTIONS.find(action=>action.slot===i) : undefined;
+                const exit = supportMode && i===INTENTS.length;
+                const active = !!action || exit;
+                return <View key={it.key} testID={`landing-quiet-orbit-${i}`} pointerEvents={active?"auto":"none"}
                   style={{ position: "absolute", left: x, top: y }}>
-                  <PremiumOrbitBtn color={it.color} selected={false} onPress={() => {}}
-                    icon="circle" label="" size={orbitBtnVisualSize} iconSize={0} labelSize={0}
-                    labelOpacity={0} labelSpacing={0} paddingH={0} cafeDepth={it.key === "cafe"} />
+                  <PremiumOrbitBtn color={it.color} selected={false} onPress={()=>{if(action)openSupportAction(action.kind);else if(exit)setSupportMode(false);}}
+                    icon={action?.icon??(exit?"chevron-down":"circle")} label={action?.label??(exit?"VOLVER":"")} accessibilityLabel={action?.title??(exit?"Salir del modo ayuda":undefined)}
+                    size={orbitBtnVisualSize} iconSize={active?Math.round(24*uiScaleFactor):0} labelSize={active?Math.max(8,Math.round(10*uiScaleFactor)):0}
+                    labelOpacity={active?1:0} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />
                 </View>;
               })}
             </View>
@@ -25557,7 +25550,7 @@ function HomeScreenContent() {
       {!anyOverlayOpen && !goAuthOpen && !empresaOpen && !adminDashOpen && !rutasMode && kbHeight === 0 && (
         <View testID="landing-support-orbit" style={{position:"absolute",left:supportRect.x,top:supportRect.y,width:supportRect.width,height:supportRect.height,zIndex:100}}>
           <PremiumOrbitBtn color="#4A80BD" selected={supportMode} onPress={()=>setSupportMode(active=>!active)} icon={supportMode?"x":"message-circle"}
-            label={supportMode?"SALIR":"AYUDA"} accessibilityLabel={supportMode?"Salir del modo ayuda":"AYÚDANOS A MEJORAR"} size={supportRect.width} iconSize={22} labelSize={9} labelSpacing={0} paddingH={4}/>
+            label={supportMode?"SALIR":"AYUDA"} accessibilityLabel={supportMode?"Salir del modo ayuda":"AYÚDANOS A MEJORAR"} size={supportRect.width} iconSize={22} labelSize={8} labelSpacing={0} paddingH={6}/>
         </View>
       )}
       {/* HUMANITY retains its original slot whenever it fits. */}
@@ -25631,7 +25624,7 @@ function HomeScreenContent() {
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
-    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
+    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} onClose={()=>setSupportOpen(false)} onExit={()=>{setSupportOpen(false);setSupportMode(false);}} scopeKey={adminAccess.userId ?? "anonymous"}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {
