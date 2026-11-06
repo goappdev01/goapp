@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import React, { useState, useRef, useEffect } from "react";
 import {
   Alert,
@@ -423,7 +424,7 @@ export function PerfilPanel({ visible, onClose, onLogout, onOpenEmpresa, onOpenH
             <ScrollView
               style={s.scroll}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: fabBottom + 80 }}
+              contentContainerStyle={{ paddingBottom: fabBottom + (subScreen!==null?152:80) }}
             >
 
               {/* ── HUB: lista de sub-opciones de perfil ── */}
@@ -694,38 +695,17 @@ export function PerfilPanel({ visible, onClose, onLogout, onOpenEmpresa, onOpenH
         )}
 
         {/* ── FABs flotantes ──────────────────────────────────────── */}
-        <DraggableFAB
-          screenKey="perfil"
+        <DraggableFAB navigation screenKey="perfil"
           buttonKey="main"
           initialRight={20}
           initialBottom={fabBottom}
-          maxH={90}
-        >
+          maxH={subScreen!==null?138:64} buttonWidth={64}>
           {subScreen !== null && (
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => setSubScreen(
+            <GoCloseButton level="panel" activeOpacity={0.8} onPress={() => setSubScreen(
                 subScreen === "perfil_hub" ? null : "perfil_hub"
-              )}
-              hitSlop={8}
-              accessibilityLabel="Volver"
-              style={s.fabBtn}
-            >
-              <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
-            </TouchableOpacity>
+              )} hitSlop={8} accessibilityLabel="Volver" style={s.fabBtn}/>
           )}
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={onClose}
-            hitSlop={8}
-            accessibilityLabel="Cerrar Mi Perfil"
-            style={s.fabBtn}
-          >
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
+          <GoCloseButton level="container" activeOpacity={0.8} onPress={onClose} hitSlop={8} accessibilityLabel="Cerrar Mi Perfil" style={s.fabBtn}/>
         </DraggableFAB>
 
         {/* ── Guía gestual derecha ─────────────────────────────────── */}

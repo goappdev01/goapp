@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -487,17 +488,10 @@ export function OrderTrackingScreen({ visible, pedido, onClose, onStatusUpdate, 
           </ScrollView>
 
           {/* ── Cierre flotante inferior ── */}
-          <TouchableOpacity
-            onPress={() => {
+          <GoCloseButton level="panel" onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
               onClose();
-            }}
-            activeOpacity={0.75}
-            style={styles.floatingClose}
-          >
-            <Feather name="chevron-down" size={18} color="#6B7280" />
-            <Text style={styles.floatingCloseLabel}>Cerrar</Text>
-          </TouchableOpacity>
+            }} activeOpacity={0.75} style={styles.floatingClose} accessibilityLabel="Volver"/>
           <View style={{ height: insets.bottom + 8 }} />
         </Animated.View>
       </View>

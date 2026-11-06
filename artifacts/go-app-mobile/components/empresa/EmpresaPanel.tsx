@@ -1,3 +1,5 @@
+import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   View,
@@ -525,7 +527,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   const planColor    = PLAN_COLORS[MOCK_EMPRESA.plan] ?? "#6ee7b7";
 
   const fabBottom = insets.bottom + 24;
-  const contentPadBottom = fabBottom + 80;
+  const contentPadBottom = fabBottom + ((modulo!=="home"||currentSuite!==null)?152:80);
   const fabButtons = (
     <>
           {/* Botón 1: volver un paso atrás en la ruta real
@@ -533,35 +535,16 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                  (navega por la ruta interna: paso→paso, activity→sector, etc.)
                – Si no → goHome (módulo → suite home) */}
           {(modulo !== "home" || currentSuite !== null) && (
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => {
+            <GoCloseButton level="panel" activeOpacity={0.8} onPress={() => {
                 if (modulo === "empresa_config" && modulePrevRef.current) {
                   modulePrevRef.current();
                 } else {
                   goHome();
                 }
-              }}
-              hitSlop={8}
-              accessibilityLabel={t("biz_panel_back")}
-              style={s.fabBtn}
-            >
-              <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
-            </TouchableOpacity>
+              }} hitSlop={8} accessibilityLabel={t("biz_panel_back")} style={s.fabBtn}/>
           )}
           {/* Botón 2: cerrar todo el panel — doble flecha para distinguirlo */}
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={closePanel}
-            hitSlop={8}
-            accessibilityLabel={t("biz_panel_close")}
-            style={s.fabBtn}
-          >
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
+          <GoCloseButton level="container" activeOpacity={0.8} onPress={closePanel} hitSlop={8} accessibilityLabel={t("biz_panel_close")} style={s.fabBtn}/>
     </>
   );
 
@@ -1056,9 +1039,9 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
 
         {/* ── FABs flotantes — arrastrable con long-press ──────────────────── */}
         {!configKeyboardVisible && (previewReadOnly ? (
-          <View style={{ position: "absolute", right: 20, bottom: fabBottom, gap: 8 }}>{fabButtons}</View>
+          <GoNavigationFloating screenKey="empresa-demo" width={(modulo!=="home"||currentSuite!==null)?136:64}>{fabButtons}</GoNavigationFloating>
         ) : (
-          <DraggableFAB screenKey="empresa" buttonKey="main" initialRight={20} initialBottom={fabBottom} maxH={90}>
+          <DraggableFAB navigation screenKey="empresa" buttonKey="main" initialRight={20} initialBottom={fabBottom} maxH={(modulo!=="home"||currentSuite!==null)?138:64} buttonWidth={64}>
             {fabButtons}
           </DraggableFAB>
         ))}

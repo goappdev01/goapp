@@ -1,49 +1,17 @@
 import React from "react";
-import { StyleSheet, TouchableOpacity, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
-
-type Props = {
-  disabled?: boolean;
-  level: "panel" | "container";
-  onPress: () => void;
-  accessibilityLabel: string;
-  hitSlop?: number;
-  touchSize?: number;
-  appearance?: "default" | "light";
-};
-
-/** ↓ closes one open panel; ⇓ exits its containing screen. */
-export function GoCloseButton({ level, onPress, accessibilityLabel, disabled = false, hitSlop = 2, touchSize = 44, appearance = "default" }: Props) {
-  const size = Math.max(44, touchSize);
-  const buttonStyle = appearance === "light" ? [styles.button, styles.light] : styles.button;
-  const icon = <Feather name={level === "panel" ? "chevron-down" : "chevrons-down"} size={20} color={appearance === "light" ? "#17212b" : "#ffffff"} />;
-  return (
-    <TouchableOpacity
-      onPress={event => { event?.stopPropagation(); onPress(); }}
-      disabled={disabled}
-      accessibilityState={{ disabled }}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      activeOpacity={0.75}
-      hitSlop={hitSlop}
-      delayPressIn={0}
-      style={size === 44 ? buttonStyle : { width: size, height: size, alignItems: "center", justifyContent: "center" }}
-    >
-      {size === 44 ? icon : <View pointerEvents="none" style={buttonStyle}>{icon}</View>}
-    </TouchableOpacity>
-  );
+import {StyleSheet,TouchableOpacity,Text,View,type StyleProp,type ViewStyle} from "react-native";
+import {Feather} from "@expo/vector-icons";
+import {LinearGradient} from "expo-linear-gradient";
+export const GO_NAVIGATION_SIZE=64;
+type Props={disabled?:boolean;level:"panel"|"container";onPress:()=>void;accessibilityLabel:string;hitSlop?:number;touchSize?:number;appearance?:"default"|"light";style?:StyleProp<ViewStyle>;testID?:string;activeOpacity?:number;onPressIn?:()=>void};
+/** Visual equivalents only: the caller's original callback defines every action. */
+export function GoCloseButton({level,onPress,accessibilityLabel,disabled=false,hitSlop=2,touchSize=GO_NAVIGATION_SIZE,style,testID,activeOpacity=.75,onPressIn}:Props){
+ const size=Math.max(GO_NAVIGATION_SIZE,touchSize),exit=level==="container";
+ return <TouchableOpacity testID={testID} onPress={event=>{event?.stopPropagation();onPress();}} onPressIn={onPressIn} disabled={disabled} accessibilityState={{disabled}} accessibilityRole="button" accessibilityLabel={accessibilityLabel} activeOpacity={activeOpacity} hitSlop={Math.min(2,hitSlop)} delayPressIn={0} style={[style,s.button,exit?s.exit:s.back,{width:size,height:size},disabled&&s.disabled]}>
+  <LinearGradient pointerEvents="none" colors={exit?["#F84350","#D51326","#A7091A"]:["#FFAF2B","#E57600","#B94C00"]} style={[StyleSheet.absoluteFill,s.surface]}/>
+  <View pointerEvents="none" style={s.sheen}/><Feather name={exit?"x":"corner-up-left"} size={32} color="#FFFFFF"/>
+  <Text maxFontSizeMultiplier={1.2} numberOfLines={1} style={s.label}>{exit?"SALIR":"ATRÁS"}</Text>
+ </TouchableOpacity>;
 }
-
-const styles = StyleSheet.create({
-  light: { backgroundColor: "rgba(238,244,248,0.96)", borderColor: "#91a4b1", borderWidth: 1, shadowColor: "#314955", shadowOpacity: 0.14, shadowRadius: 5, shadowOffset: { width: 0, height: 3 }, elevation: 3 },
-  button: {
-    width: 44,
-    height: 44,
-    borderRadius: 16,
-    backgroundColor: "#0e0e10",
-    borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.50)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-});
+GoCloseButton.displayName="GoCloseButton";
+const s=StyleSheet.create({button:{flexDirection:"column",paddingVertical:0,paddingHorizontal:0,paddingTop:0,paddingBottom:0,paddingLeft:0,paddingRight:0,borderRadius:17,borderWidth:1.5,alignItems:"center",justifyContent:"center",padding:0,gap:1,flexShrink:0,shadowColor:"#281900",shadowOffset:{width:0,height:3},shadowOpacity:.22,shadowRadius:5,elevation:4},surface:{borderRadius:15},back:{backgroundColor:"#D66500",borderColor:"#FFCA64"},exit:{backgroundColor:"#C61325",borderColor:"#FF7D89"},sheen:{position:"absolute",top:3,left:4,right:4,height:18,borderRadius:12,backgroundColor:"rgba(255,255,255,.18)",borderTopWidth:1,borderTopColor:"rgba(255,255,255,.55)"},label:{color:"#FFFFFF",fontSize:13,fontWeight:"800",lineHeight:16,textAlign:"center",letterSpacing:.2},disabled:{opacity:.45}});

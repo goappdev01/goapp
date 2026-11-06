@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 /**
  * GoDevPanel.tsx
  * ═══════════════════════════════════════════════════════════════════════════
@@ -429,24 +430,12 @@ export function GoDevPanel({ visible, onClose }: GoDevPanelProps) {
         </ScrollView>
 
         {/* FAB cerrar */}
-        <DraggableFAB
-          screenKey="dev_panel"
+        <DraggableFAB navigation screenKey="dev_panel"
           buttonKey="close"
           initialRight={20}
           initialBottom={fabBottom}
-          maxH={40}
-        >
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={onClose}
-            hitSlop={8}
-            style={d.fabBtn}
-          >
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
+          maxH={64} buttonWidth={64}>
+          <GoCloseButton level="container" activeOpacity={0.8} onPress={onClose} hitSlop={8} style={d.fabBtn} accessibilityLabel="Salir"/>
         </DraggableFAB>
 
       </View>

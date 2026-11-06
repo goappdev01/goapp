@@ -4,6 +4,7 @@ import type { ScrollViewInstance } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AssistantCloseControls } from "./AssistantCloseControls";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
 import { SupportVoiceNotice } from "@/components/landing/SupportVoiceNotice";
 import { useGoDockPreference } from "@/hooks/useGoDockPreference";
 import React, { useEffect, useRef, useState } from "react";
@@ -358,9 +359,9 @@ export function BookingAssistantScreen({
             <Text style={s.title}>{consultation?.title??"¿Qué necesitas hacer?"}</Text>
           </View>
           {!a.panel && (a.phase === "review" || onBack) && (
-            <IconButton
-              icon="chevron-down"
-              label="Retroceder un paso"
+            <GoCloseButton
+              level="panel"
+              accessibilityLabel="Retroceder un paso"
               onPress={back}
               disabled={!!a.busy}
             />
@@ -771,9 +772,9 @@ export function BookingAssistantScreen({
             }}
           />
         )}
-          {consultation&&<View testID="support-assistant-thumb-controls" style={{position:"absolute",bottom:footerHeight+8,[handedness==="left"?"left":"right"]:22,flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
+          {consultation&&<GoNavigationFloating screenKey="support-assistant" safeArea={false} handedness={handedness} protectedBottom={footerHeight} width={goSize+72} height={Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
             {dock}<GoCloseButton level="panel" appearance="light" disabled={saving} accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a AYUDA"} onPress={consultationBack}/>
-          </View>}
+          </View></GoNavigationFloating>}
           </View>
         </KeyboardAvoidingView>
         {!consultation&&!a.panel && <AssistantCloseControls disabled={saving} onClose={() => close()} onGoToLanding={onGoToLanding ? () => close(true) : undefined}

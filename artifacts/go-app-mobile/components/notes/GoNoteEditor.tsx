@@ -10,6 +10,7 @@ import { DraggableFAB } from "@/components/DraggableFAB";
 import { GoScreenModal } from "@/components/ui/GoScreenModal";
 import { GoScreenCloseGuide, GoScreenCloseSurface } from "@/components/ui/GoScreenCloseSurface";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
 import { GoNoteReminderPicker } from "./GoNoteReminderPicker";
 import { GoNoteDatePicker, noteDateLabel } from "./GoNoteDatePicker";
 import { GoNoteTimePicker, GoNoteDurationPicker, noteDurationLabel } from "./GoNoteSchedulePicker";
@@ -377,7 +378,6 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
             {!!draft.place&&<Text style={s.hint}>{draft.place}</Text>}
             {!!draft.attachments.length&&<Text style={s.hint}>{draft.attachments.map(a=>a.name).join(" · ")}</Text>}
             {renderActions&&<View testID="note-existing-actions" pointerEvents={busy||toolFinishing?"none":"auto"} style={{backgroundColor:"#0e0e10",padding:10,borderRadius:12,gap:10}}>{renderActions(initial,()=>setToolsOpen(true))}</View>}
-            {onGoToLanding&&<View style={{alignItems:handedness==="right"?"flex-end":"flex-start"}}><GoCloseButton level="container" touchSize={56} hitSlop={0} appearance="light" accessibilityLabel="Ir directamente al Landing" disabled={busy||toolFinishing||closingSaved} onPress={()=>void requestNoteExit(onGoToLanding)}/></View>}
           </View>}
           {!!reminderProgress?.message&&<Text testID="note-reminder-sync-status" accessibilityLiveRegion="polite" style={reminderProgress.phase==="warning"?s.warning:s.hint}>{reminderProgress.message}</Text>}
           {voice.status!=="idle"&&<Text style={s.hint}>{voice.status==="listening"?"Escuchando…":voice.status==="transcribing"?"Transcribiendo…":"Comprobando dictado…"}</Text>}
@@ -401,7 +401,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
           <TouchableOpacity testID="note-microphone" accessibilityRole="button" accessibilityLabel={voice.status==="listening"?"Detener escucha de GO":"Hablar con GO para preparar la nota"} accessibilityState={{selected:voice.status==="listening",disabled:busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"}}
             disabled={busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"} activeOpacity={0.78} onPress={()=>{if(draftRef.current.security){setFloatingNotice("Las notas de seguridad no están activadas y no se envían a la IA.");return;}if(!latest.current.ready){setFloatingNotice("Espera a que se verifique tu cuenta para hablar con GO.");return;}void voice.toggle();}} style={[assistantStyles.goButton,s.go,voice.status==="listening"&&assistantStyles.listening]}>
             <LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.50)","rgba(255,255,255,0.00)"]} style={[StyleSheet.absoluteFill,{borderRadius:32}]}/><Feather name={voice.status==="listening"?"square":"mic"} size={22} color="#FFFFFF"/><Text style={[s.goText,assistantStyles.goLabel]}>{voice.status==="listening"?"Parar":"GO"}</Text></TouchableOpacity>
-          <GoCloseButton level="panel" touchSize={56} hitSlop={0} onPress={back} accessibilityLabel={keyboardVisible||keyboard.dismissing?"Ocultar teclado":toolsOpen&&!!panel?"Volver a herramientas":toolsOpen?"Ocultar herramientas":"Cerrar nota"} disabled={busy||toolFinishing||closingSaved} appearance="light"/>
+          <View testID="note-navigation-slot" pointerEvents="none" accessibilityElementsHidden style={{width:initial&&onGoToLanding?136:64,height:64}}/>
         </View>
       </KeyboardAvoidingView>
     </GoScreenCloseSurface>
@@ -456,6 +456,10 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
         </TouchableOpacity>
       </DraggableFAB>}
     </View>
+    <GoNavigationFloating screenKey="note-navigation" safeArea={false} handedness={handedness} width={initial&&onGoToLanding?136:64} protectedTop={insets.top+52} protectedBottom={(footerBottom?Math.max(0,frameHeight-footerBottom):0)+Math.max(insets.bottom,12)} initialBottom={0}>
+      <GoCloseButton testID="note-navigation-back" level="panel" touchSize={56} hitSlop={0} onPress={back} accessibilityLabel={keyboardVisible||keyboard.dismissing?"Ocultar teclado":toolsOpen&&!!panel?"Volver a herramientas":toolsOpen?"Ocultar herramientas":"Cerrar nota"} disabled={busy||toolFinishing||closingSaved} appearance="light"/>
+      {!!initial&&onGoToLanding&&<GoCloseButton level="container" touchSize={56} hitSlop={0} appearance="light" accessibilityLabel="Ir directamente al Landing" disabled={busy||toolFinishing||closingSaved} onPress={()=>void requestNoteExit(onGoToLanding)}/>}
+    </GoNavigationFloating>
     </View>
   </GoScreenModal>;
 }

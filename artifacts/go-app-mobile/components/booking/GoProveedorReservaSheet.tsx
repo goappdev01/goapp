@@ -1,3 +1,5 @@
+import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import type { ScrollViewInstance } from "react-native";
 /**
  * GoProveedorReservaSheet
@@ -2207,20 +2209,10 @@ function LocalProveedorReservaSheet({
         </TouchableOpacity>
 
         {/* ── Botones de navegación flotantes ── */}
-        <View style={{
-          position: "absolute", right: 20, bottom: insets.bottom + 100,
-          flexDirection: "column", alignItems: "center", gap: 8, zIndex: 200,
-        }}>
-          <TouchableOpacity onPress={handleClose} activeOpacity={0.75} style={navBtnStyle}>
-            <Feather name="chevron-down" size={20} color="rgba(255,255,255,0.60)" />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleClose} activeOpacity={0.75} style={navBtnStyle}>
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={12} color="rgba(255,255,255,0.60)" />
-              <Feather name="chevron-down" size={12} color="rgba(255,255,255,0.60)" style={{ marginTop: -4 }} />
-            </View>
-          </TouchableOpacity>
-        </View>
+        <GoNavigationFloating screenKey="provider-booking" width={136} safeArea={false} protectedTop={insets.top} protectedBottom={insets.bottom+100}>
+          <GoCloseButton level="panel" onPress={handleClose} activeOpacity={0.75} style={navBtnStyle} accessibilityLabel="Volver"/>
+          <GoCloseButton level="container" onPress={handleClose} activeOpacity={0.75} style={navBtnStyle} accessibilityLabel="Salir"/>
+        </GoNavigationFloating>
 
       </View>
       )}

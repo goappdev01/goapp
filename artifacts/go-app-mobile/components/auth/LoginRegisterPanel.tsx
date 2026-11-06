@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import type { TextInputInstance } from "react-native";
 import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import { notifySessionChanged, onSessionChanged } from "@/lib/sessionEvents";
@@ -789,19 +790,12 @@ export function LoginRegisterPanel({
 
         {/* FAB close — draggable, posición guardada por pantalla */}
         {userAccountType !== null && (
-        <DraggableFAB
-          screenKey="login-register"
+        <DraggableFAB navigation screenKey="login-register"
           buttonKey="main"
           initialRight={20}
           initialBottom={fabBottom}
-          maxH={40}
-        >
-          <TouchableOpacity onPress={onClose} activeOpacity={0.8} hitSlop={8} style={s.fabBtn}>
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
+          maxH={64} buttonWidth={64}>
+          <GoCloseButton level="container" onPress={onClose} activeOpacity={0.8} hitSlop={8} style={s.fabBtn} accessibilityLabel="Salir"/>
         </DraggableFAB>
         )}
 

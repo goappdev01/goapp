@@ -14,13 +14,13 @@ export function GoNoteControls({ internal, external, microphone, reminder, hande
   const wide = width - insets.left - insets.right - 36 >= Math.max(440, 220 * fontScale + 220);
   return <View testID="note-controls" style={{ position: "relative" }}>
     <View style={{ flexDirection: wide ? "row" : "column", alignItems: "stretch", gap: 6,
-      ...(wide ? handedness === "left" ? { paddingLeft: 60 } : { paddingRight: 60 } : {}) }}>
+      ...(wide ? handedness === "left" ? { paddingLeft: 76 } : { paddingRight: 76 } : {}) }}>
       <View testID="note-task-controls" style={{ flexDirection: "row", gap: 12, ...(wide ? { flex: 1 } : {}) }}>
         {internal}{external}
       </View>
       <View testID="note-tool-controls" style={{ flexDirection: "row", gap: 12,
         justifyContent: handedness === "left" ? "flex-start" : "flex-end",
-        ...(!wide ? handedness === "left" ? { paddingLeft: 60 } : { paddingRight: 60 } : {}) }}>
+        ...(!wide ? handedness === "left" ? { paddingLeft: 76 } : { paddingRight: 76 } : {}) }}>
         {microphone}{reminder}
       </View>
     </View>

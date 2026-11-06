@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import React from "react";
 import {
   Modal,
@@ -1704,42 +1705,21 @@ function NodeDetail({ node, breadcrumb, onOpen, lang, onGoLanding }: {
          *   • Botón superior (↓ simple)  — volver al Roadmap
          *   • Botón inferior (↓↓ doble) — ir al Landing
          */}
-        <DraggableFAB
-          screenKey="etica_modal"
+        <DraggableFAB navigation screenKey="etica_modal"
           buttonKey="nav"
           initialRight={20}
           initialBottom={fabBottom}
-          maxH={98}
-        >
+          maxH={138} buttonWidth={64}>
           {/* ↓ simple — volver al Roadmap */}
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => setEticaModule(null)}
-            hitSlop={8}
-            accessibilityLabel={lang === 'en' ? "Back" : "Volver"}
-            style={ETICA_FAB_BTN}
-          >
-            <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.90)" />
-          </TouchableOpacity>
+          <GoCloseButton level="panel" activeOpacity={0.8} onPress={() => setEticaModule(null)} hitSlop={8} accessibilityLabel={lang === 'en' ? "Back" : "Volver"} style={ETICA_FAB_BTN}/>
 
           {/* ↓↓ doble — ir al Landing (mismo método que el resto de GO) */}
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => {
+          <GoCloseButton level="container" activeOpacity={0.8} onPress={() => {
               setEticaModule(null);
               // Esperar a que el modal ético cierre antes de navegar al Landing,
               // igual que hacen el resto de pantallas con paneles apilados.
               setTimeout(() => onGoLanding?.(), 350);
-            }}
-            hitSlop={8}
-            accessibilityLabel={lang === 'en' ? "Go to Landing" : "Ir al Landing"}
-            style={ETICA_FAB_BTN}
-          >
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
+            }} hitSlop={8} accessibilityLabel={lang === 'en' ? "Go to Landing" : "Ir al Landing"} style={ETICA_FAB_BTN}/>
         </DraggableFAB>
       </View>
     </Modal>

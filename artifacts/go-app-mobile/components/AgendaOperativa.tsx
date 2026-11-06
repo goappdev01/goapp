@@ -3190,18 +3190,12 @@ export function AgendaBoard({
                   <Feather name="send" size={16} color={bookingMsgDraft.trim() ? "#ffffff" : "rgba(255,255,255,0.25)"} />
                 </TouchableOpacity>
                 {/* Botón Cerrar */}
-                <TouchableOpacity
-                  onPress={() => { setBookingMsgEntry(null); setBookingMsgDraft(""); }}
-                  activeOpacity={0.7}
-                  style={{
+                <GoCloseButton level="panel" onPress={() => { setBookingMsgEntry(null); setBookingMsgDraft(""); }} activeOpacity={0.7} style={{
                     width: 40, height: 40, borderRadius: 11,
                     alignItems: "center", justifyContent: "center",
                     backgroundColor: "rgba(255,255,255,0.07)",
                     borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
-                  }}
-                >
-                  <Feather name="chevron-down" size={17} color="rgba(255,255,255,0.55)" />
-                </TouchableOpacity>
+                  }} accessibilityLabel="Volver"/>
               </View>
             </View>
           </View>

@@ -1,3 +1,5 @@
+import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
+import {GoNavigationHand} from "@/components/ui/GoNavigationHand";
 import { GO_ASSISTANT_GOLD, GO_ASSISTANT_LABEL } from "@/theme/goAssistantColors";
 import { GoScreenHost } from "@/components/ui/GoScreenModal";
 import type { ScrollViewInstance, ViewInstance } from "react-native";
@@ -14214,6 +14216,7 @@ function HomeScreenContent() {
   const landingOffsetY = landingArrangement.offsetY;
   const landingLowerOffsets = landingArrangement.offsets;
   const landingDisplayCloseRect = landingArrangement.closeRect;
+  const landingNavigationCloseRect = placeLandingClose({...landingDisplayCloseRect,x:handedness==="right"?landingDisplayCloseRect.x-24:landingDisplayCloseRect.x,y:landingDisplayCloseRect.y-24,width:64,height:64},{x:insets.left,y:insets.top,width:screen.width-insets.left-insets.right,height:screen.height-insets.top-insets.bottom},[...landingOrbitObstacles,...closeHeaderObstacles,...closeReservedColumn]) ?? {x:Math.max(insets.left,Math.min(screen.width-insets.right-64,landingDisplayCloseRect.x)),y:Math.max(insets.top,Math.min(screen.height-insets.bottom-64,landingDisplayCloseRect.y)),width:64,height:64};
   const landingQrPosition = placeLandingQr({
     company: { x: landingCenter.x + Math.cos(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
       y: landingCenter.y + landingOffsetY + Math.sin(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
@@ -14417,7 +14420,7 @@ function HomeScreenContent() {
   const listBookingDetail = calBookingDetailEntry ? goLog.find(entry => entry.id === calBookingDetailEntry.id && entryIsReservation(entry)) : undefined;
 
   return (
-    <>
+    <GoNavigationHand.Provider value={handedness}>
     <GestureDetector gesture={universalSwipeGesture}>
     <View style={[styles.root, { paddingTop }]} onLayout={(e) => {
       const { width, height } = e.nativeEvent.layout;
@@ -19008,9 +19011,7 @@ function HomeScreenContent() {
               </View>
               {/* Columna derecha: CERRAR encima de CONTACTO — todo al alcance del pulgar */}
               <View style={{ flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <TouchableOpacity onPress={() => { Haptics.selectionAsync().catch(() => {}); saveContact(); }} hitSlop={8} activeOpacity={0.8} accessibilityLabel="Cerrar" style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#0e0e10", borderWidth: 1.2, borderColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center" }}>
-                  <Feather name="chevron-down" size={18} color="rgba(255,255,255,0.7)" />
-                </TouchableOpacity>
+                <GoCloseButton level="panel" onPress={() => { Haptics.selectionAsync().catch(() => {}); saveContact(); }} hitSlop={8} activeOpacity={0.8} accessibilityLabel="Cerrar" style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#0e0e10", borderWidth: 1.2, borderColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center" }}/>
                 <TouchableOpacity onPress={() => { Haptics.selectionAsync(); pickFromDeviceContacts(); }} activeOpacity={0.85} accessibilityRole="button" accessibilityLabel="Abrir agenda de contactos" hitSlop={8} style={{ width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", backgroundColor: "#1a1a1c", borderWidth: 1.5, borderColor: "rgba(255,255,255,0.35)", shadowColor: "#93c5fd", shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.2, shadowRadius: 10, elevation: 4 }}>
                   <Feather name="users" size={24} color="#ffffff" />
                 </TouchableOpacity>
@@ -19785,12 +19786,7 @@ function HomeScreenContent() {
                 {...qrSwipeRef.panHandlers}
                 style={{ flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 2, paddingBottom: 10, paddingTop: 2 }}
               >
-                <TouchableOpacity
-                  onPress={() => { Haptics.selectionAsync().catch(() => {}); setQrOpen(false); }}
-                  activeOpacity={0.8}
-                  accessibilityLabel="Cerrar"
-                  hitSlop={8}
-                  style={{
+                <GoCloseButton level="panel" onPress={() => { Haptics.selectionAsync().catch(() => {}); setQrOpen(false); }} activeOpacity={0.8} accessibilityLabel="Cerrar" hitSlop={8} style={{
                     width: 40,
                     height: 40,
                     borderRadius: 20,
@@ -19803,10 +19799,7 @@ function HomeScreenContent() {
                     shadowOpacity: 0.07,
                     shadowRadius: 8,
                     shadowOffset: { width: 0, height: 0 },
-                  }}
-                >
-                  <Feather name="chevron-down" size={18} color="rgba(255,255,255,0.70)" />
-                </TouchableOpacity>
+                  }}/>
               </View>
 
             <ScrollView
@@ -20427,10 +20420,7 @@ function HomeScreenContent() {
           {/* ── BOTONES FLOTANTES — zona pulgar derecho ───────────────────
               CONFIG toggle + ↑↓ fecha.
               Solo visibles cuando el panel mensual está CERRADO y GO Reservas no está activo. */}
-          {!monthGridOpen && !calReservasOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <View
-            testID="calendar-floating-controls"
-            style={{ position: "absolute", right: Math.max(insets.right + 14, 14), bottom: overlayPanelHeight + 10, flexDirection: "row", alignItems: "center", gap: 8, zIndex: 30 }}
-          >
+          {!monthGridOpen && !calReservasOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={188} protectedBottom={overlayPanelHeight+10}>
             {!demoCustomerCalendarSelected && (<TouchableOpacity
               onPress={() => {
                 Haptics.selectionAsync();
@@ -20469,7 +20459,7 @@ function HomeScreenContent() {
               onPress={() => { Haptics.selectionAsync(); exitCalendarContainer(); }}
               accessibilityLabel={lang === "en" ? "Exit Calendar" : "Salir de Calendario"}
             />
-          </View>}
+          </GoNavigationFloating>}
 
           {/* ── ZONA INFERIOR — Selector de fecha/hora/duración ──────────── */}
           <Pressable
@@ -23672,15 +23662,7 @@ function HomeScreenContent() {
             );
           })()}
           {/* Minimizar */}
-          <TouchableOpacity
-            onPress={() => { stopRecognition(); resetAudio(); setAiListening(false); setAiOpen(false); }}
-            hitSlop={8}
-            activeOpacity={0.8}
-            accessibilityLabel="Cerrar"
-            style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#0e0e10", borderWidth: 1.2, borderColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center" }}
-          >
-            <Feather name="chevron-down" size={18} color="rgba(255,255,255,0.7)" />
-          </TouchableOpacity>
+          <GoCloseButton level="panel" onPress={() => { stopRecognition(); resetAudio(); setAiListening(false); setAiOpen(false); }} hitSlop={8} activeOpacity={0.8} accessibilityLabel="Cerrar" style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#0e0e10", borderWidth: 1.2, borderColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center" }}/>
         </View>
       </BottomSheet>
 
@@ -24243,15 +24225,7 @@ function HomeScreenContent() {
               </TouchableOpacity>
             );
           })()}
-          <TouchableOpacity
-            onPress={cancelAiSummary}
-            hitSlop={8}
-            activeOpacity={0.8}
-            accessibilityLabel="Cerrar"
-            style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#0e0e10", borderWidth: 1.2, borderColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center", shadowColor: "#ffffff", shadowOpacity: 0.07, shadowRadius: 8 }}
-          >
-            <Feather name="chevron-down" size={18} color="rgba(255,255,255,0.7)" />
-          </TouchableOpacity>
+          <GoCloseButton level="panel" onPress={cancelAiSummary} hitSlop={8} activeOpacity={0.8} accessibilityLabel="Cerrar" style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#0e0e10", borderWidth: 1.2, borderColor: "rgba(255,255,255,0.22)", alignItems: "center", justifyContent: "center", shadowColor: "#ffffff", shadowOpacity: 0.07, shadowRadius: 8 }}/>
         </View>
       </BottomSheet>
 
@@ -25449,7 +25423,7 @@ function HomeScreenContent() {
                 )}
               </View>
             </View>
-            <View testID="landing-search-floating-close" style={{position:"absolute",right:36,bottom:panelBottom+20,zIndex:2}}><GoCloseButton level="panel" accessibilityLabel={lang==="en"?"Close business search":"Cerrar buscador de empresas"} onPress={closeSearch}/></View>
+            <GoNavigationFloating testID="landing-search-floating-close" screenKey="landing-search" handedness={handedness} protectedBottom={panelBottom+20}><GoCloseButton level="panel" accessibilityLabel={lang==="en"?"Close business search":"Cerrar buscador de empresas"} onPress={closeSearch}/></GoNavigationFloating>
           </View>
         );
       })()}
@@ -25544,9 +25518,7 @@ function HomeScreenContent() {
           Tap → closeTopLayer() baja exactamente una capa.
           Excluido cuando listOpen: el panel de listados ya tiene sus
           propios botones de cierre (↓ y ↓↓) en el footer inferior.    */}
-      <Animated.View
-        pointerEvents={
-          rutasMode ||
+      <GoNavigationFloating screenKey="landing-back" handedness={handedness} pointerEvents={rutasMode ||
           (anyOverlayOpen && !listOpen) ||
           pedidoTrackingOpen ||
           empresaOpen ||
@@ -25562,24 +25534,8 @@ function HomeScreenContent() {
           otroSelected ||
           isActivelyCreating ||
           kbHeight > 0
-            ? "auto"
-            : "none"
-        }
-        style={{
-          position: "absolute",
-          ...(!anyOverlayOpen && !empresaOpen && !adminDashOpen && !verificacionOpen && !pedidoTrackingOpen && !rutasMode
-            ? { left: landingDisplayCloseRect.x, top: landingDisplayCloseRect.y }
-            : { right: Math.max(18, insets.right + 18), bottom: bottomReserved + orbitWrapSize - 50 }),
-          opacity: listOpen ? 0 : backBtnAnim,
-          transform: [{ scale: backBtnAnim.interpolate({ inputRange: [0, 1], outputRange: [0.70, 1] }) }],
-          zIndex: 9998,
-        }}
-      >
-        <TouchableOpacity
-          onPress={() => { Haptics.selectionAsync(); closeTopLayer(); }}
-          activeOpacity={0.8}
-          hitSlop={8}
-          style={{
+            ? "box-none"
+            : "none"} initialBottom={bottomReserved+orbitWrapSize-50} initialTop={Math.max(0,landingNavigationCloseRect.y-insets.top)} initialRight={handedness==="right"?screen.width-insets.right-landingNavigationCloseRect.x-64:landingNavigationCloseRect.x-insets.left}><Animated.View style={{opacity:listOpen?0:backBtnAnim,transform:[{scale:backBtnAnim.interpolate({inputRange:[0,1],outputRange:[0.70,1]})}]}}><GoCloseButton level="panel" onPress={() => { Haptics.selectionAsync(); closeTopLayer(); }} activeOpacity={0.8} hitSlop={8} style={{
             width: 40,
             height: 40,
             borderRadius: 20,
@@ -25591,11 +25547,7 @@ function HomeScreenContent() {
             shadowColor: "#ffffff",
             shadowOpacity: 0.07,
             shadowRadius: 8,
-          }}
-        >
-          <Feather name="chevron-down" size={18} color="rgba(255,255,255,0.70)" />
-        </TouchableOpacity>
-      </Animated.View>
+          }} accessibilityLabel="Volver"/></Animated.View></GoNavigationFloating>
 
     </View>
     </GestureDetector>
@@ -25618,7 +25570,7 @@ function HomeScreenContent() {
       onOpenAdmin={handleOpenAdmin}
       onSelectOwnerView={handleSelectOwnerView}
     />
-    </>
+    </GoNavigationHand.Provider>
   );
 
   function renderListBookingDetail(entry: GoEntry) {
@@ -26455,9 +26407,9 @@ function BottomSheet({
         </View>
         </GestureDetector>
         {floatingClose&&!modalOverlay&&noteFooterHeight>0&&<View testID={floatingClose.screenKey+"-floating-close"} pointerEvents="box-none" style={{position:"absolute",top:noteInsets.top+8,left:noteInsets.left,right:noteInsets.right,bottom:(kbVisible?floatingKeyboardHeight:noteInsets.bottom)+noteFooterHeight+20,zIndex:50}}>
-          <DraggableFAB screenKey={floatingClose.screenKey} buttonKey={"close-"+floatingClose.handedness} buttonWidth={44} maxH={44}
-            bounds={{width:sheetViewport.width-noteInsets.left-noteInsets.right,height:Math.max(44,sheetViewport.height-noteInsets.top-8-(kbVisible?floatingKeyboardHeight:noteInsets.bottom)-noteFooterHeight-20)}}
-            initialBottom={8} initialRight={floatingClose.handedness==="right"?14:Math.max(14,sheetViewport.width-noteInsets.left-noteInsets.right-58)}>
+          <DraggableFAB navigation handedness={floatingClose.handedness} screenKey={floatingClose.screenKey} buttonKey={"close-"+floatingClose.handedness} buttonWidth={64} maxH={64}
+            bounds={{width:sheetViewport.width-noteInsets.left-noteInsets.right,height:Math.max(80,sheetViewport.height-noteInsets.top-8-(kbVisible?floatingKeyboardHeight:noteInsets.bottom)-noteFooterHeight-20)}}
+            initialBottom={8} initialRight={14}>
             <GoCloseButton level="panel" accessibilityLabel={floatingClose.label} onPress={onClose}/>
           </DraggableFAB>
         </View>}

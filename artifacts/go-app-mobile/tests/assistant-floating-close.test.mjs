@@ -9,7 +9,7 @@ function fixture(saved = new Map(), getItem = async key => saved.get(key) ?? nul
   const values = [], effects = [];
   const react = {
     default: { createElement(type, props, ...children) { return { type, props: { ...props, children } }; } },
-    useMemo: fn => fn(), useCallback: fn => fn,
+    useContext:()=>"right",useRef:value=>{const i=cursor++;return values[i]??={current:value};},useMemo: fn => fn(), useCallback: fn => fn,
     useEffect(fn, deps) { const i = cursor++, old = values[i];
       if (!old || deps.some((d,k) => d !== old[k])) { values[i] = deps; effects.push(fn); }
     },
@@ -25,7 +25,7 @@ function fixture(saved = new Map(), getItem = async key => saved.get(key) ?? nul
     return chain;
   }
   const storage = { getItem, setItem: async (key, raw) => saved.set(key, raw) };
-  const modules = { react, "react-native": { Dimensions: { get: () => ({ width: 390, height: 844 }) }, StyleSheet: { create: x => x } },
+  const modules = {"@/components/ui/GoNavigationHand":{GoNavigationHand:{}}, react, "react-native": { Dimensions: { get: () => ({ width: 390, height: 844 }) }, StyleSheet: { create: x => x } },
     "react-native-reanimated": animation, "react-native-gesture-handler": { Gesture: { Pan: pan }, GestureDetector: "GestureDetector" },
     "@react-native-async-storage/async-storage": { default: storage }, "expo-haptics": { selectionAsync() {}, impactAsync() {}, ImpactFeedbackStyle: { Light: "light" } },
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34, left: 0, right: 0 }) }

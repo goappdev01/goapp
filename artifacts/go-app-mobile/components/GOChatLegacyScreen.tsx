@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import React, { useState, useRef } from "react";
 import {
   View,
@@ -228,45 +229,22 @@ export function GOChatLegacyScreen({ visible, onClose, onBack }: Props) {
         {/* ── FABs flotantes — misma lógica que el resto del sistema GO ── */}
 
         {/* FAB doble flecha — ir al Landing Page */}
-        <DraggableFAB
-          screenKey="go_chat"
+        <DraggableFAB navigation screenKey="go_chat"
           buttonKey="landing"
           initialRight={20}
           initialBottom={fabBottom}
-          maxH={90}
-        >
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={handleClose}
-            hitSlop={8}
-            accessibilityLabel="Ir al Landing"
-            style={styles.fabBtn}
-          >
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
+          maxH={138} buttonWidth={64}>
+          <GoCloseButton level="container" activeOpacity={0.8} onPress={handleClose} hitSlop={8} accessibilityLabel="Ir al Landing" style={styles.fabBtn}/>
         </DraggableFAB>
 
         {/* FAB flecha simple — retroceder un paso (solo si se abrió desde un panel más profundo) */}
         {onBack && (
-          <DraggableFAB
-            screenKey="go_chat"
+          <DraggableFAB navigation screenKey="go_chat"
             buttonKey="back"
             initialRight={20}
             initialBottom={fabBottom + 64}
-            maxH={90}
-          >
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => { stopPulse(); setIsListening(false); onBack(); }}
-              hitSlop={8}
-              accessibilityLabel="Retroceder un paso"
-              style={styles.fabBtn}
-            >
-              <Feather name="chevron-down" size={16} color="rgba(255,255,255,0.90)" />
-            </TouchableOpacity>
+            maxH={138} buttonWidth={64}>
+            <GoCloseButton level="panel" activeOpacity={0.8} onPress={() => { stopPulse(); setIsListening(false); onBack(); }} hitSlop={8} accessibilityLabel="Retroceder un paso" style={styles.fabBtn}/>
           </DraggableFAB>
         )}
 

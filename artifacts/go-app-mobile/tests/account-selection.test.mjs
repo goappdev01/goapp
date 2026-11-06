@@ -50,7 +50,7 @@ function panelFixture({ view = { view: "USER", isOwner: false, isAdminView: fals
     StyleSheet: { create: styles => styles },
     PanResponder: { create: callbacks => ({ panHandlers: callbacks }) },
   });
-  const modules = {
+  const modules = {'@/components/ui/GoCloseButton':{GoCloseButton:p=>React.createElement('TouchableOpacity',p)},
     react: { __esModule: true, default: React, ...React },
     'react-native': native,
     '@/components/debug/OwnerContextIndicator': { OwnerContextModal: 'Modal' },

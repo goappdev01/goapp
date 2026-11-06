@@ -1,3 +1,5 @@
+import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
@@ -1890,19 +1892,12 @@ export function BookingSearchOverlay({
             • Arriba  (flecha simple):  retrocede un nivel
             • Abajo   (doble flecha):   cierra el panel → Landing           */}
         {step !== "confirmed" && (
-          <View style={[s.fabNavStack, { bottom: keyboardHeight+(keyboardVisible?12:insets.bottom+24) }]}>
+          <GoNavigationFloating screenKey="booking-search" width={136} safeArea={false} protectedTop={insets.top+8} protectedBottom={keyboardHeight+(keyboardVisible?12:insets.bottom+24)}>
             {/* ↓  Retroceder un nivel — ARRIBA */}
-            <TouchableOpacity testID="booking-back" accessibilityRole="button" accessibilityLabel={lang==="en"?"Back":"Volver"} hitSlop={4} style={s.fabClose} onPress={handleBackOneLevel} activeOpacity={0.7}>
-              <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
-            </TouchableOpacity>
+            <GoCloseButton level="panel" testID="booking-back" accessibilityLabel={lang==="en"?"Back":"Volver"} hitSlop={4} style={s.fabClose} onPress={handleBackOneLevel} activeOpacity={0.7}/>
             {/* ↓↓  Landing — ABAJO */}
-            <TouchableOpacity testID="booking-exit" accessibilityRole="button" accessibilityLabel={lang==="en"?"Return to GO":"Volver a GO"} hitSlop={4} style={s.fabClose} onPress={handleDismissAll} activeOpacity={0.7}>
-              <View style={{ alignItems: "center" }}>
-                <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-                <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-              </View>
-            </TouchableOpacity>
-          </View>
+            <GoCloseButton level="container" testID="booking-exit" accessibilityLabel={lang==="en"?"Return to GO":"Volver a GO"} hitSlop={4} style={s.fabClose} onPress={handleDismissAll} activeOpacity={0.7}/>
+          </GoNavigationFloating>
         )}
 
       </View>

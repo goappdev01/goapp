@@ -2330,25 +2330,12 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
 
       {/* ── GO close FAB — arrastrable con long-press ── */}
       {!hideFAB && !showBackButton && (
-        <DraggableFAB
-          screenKey="plano"
+        <DraggableFAB navigation screenKey="plano"
           buttonKey="close"
           initialRight={20}
           initialBottom={insets.bottom + 165}
-          maxH={40}
-        >
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={t("floor_close")}
-            style={s.goFab}
-            onPress={onClose}
-            activeOpacity={0.85}
-            hitSlop={6}
-          >
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-            </View>
-          </TouchableOpacity>
+          maxH={64} buttonWidth={64}>
+          <GoCloseButton level="panel" accessibilityLabel={t("floor_close")} style={s.goFab} onPress={onClose} activeOpacity={0.85} hitSlop={6}/>
         </DraggableFAB>
       )}
 

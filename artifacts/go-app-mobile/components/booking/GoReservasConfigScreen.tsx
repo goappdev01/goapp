@@ -688,13 +688,11 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
 
       {/* ── FABs flotantes — botones redondos, mismo sistema visual que el calendario ── */}
       {!hideFAB && !monthPickerOpen && (
-        <DraggableFAB
-          screenKey="go_reservas"
+        <DraggableFAB navigation screenKey="go_reservas"
           buttonKey="main"
           initialRight={20}
           initialBottom={insets.bottom + 24}
-          maxH={140}
-        >
+          maxH={168} buttonWidth={64}>
           <View style={{ gap: 8, alignItems: "center" }}>
           {/* ↑ Abre el selector mensual — solo en pestaña Calendario.
                Usa Modal propio para evitar conflictos z-order con el Modal padre. */}

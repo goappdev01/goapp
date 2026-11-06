@@ -1,3 +1,5 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
+import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef } from "react";
@@ -24,17 +26,10 @@ type HumanityScreenProps = {
 
 function GoBackButton({ onPress }: { onPress: () => void }) {
   return (
-    <TouchableOpacity
-      activeOpacity={0.8}
-      onPress={onPress}
-      hitSlop={8}
-      accessibilityLabel="Volver"
-      style={styles.goBackBtn}
-    >
-      <Feather name="chevron-down" size={18} color="#6B7280" />
-    </TouchableOpacity>
+    <GoCloseButton level="panel" activeOpacity={0.8} onPress={onPress} hitSlop={8} accessibilityLabel="Volver" style={styles.goBackBtn}/>
   );
 }
+GoBackButton.displayName="GoNavigationButton";
 
 // ─── Web iframe component ─────────────────────────────────────────────────────
 // On Expo web (react-native-web) we can inject a real <iframe> via createElement.
@@ -129,9 +124,9 @@ export function HumanityScreen({ visible, onClose }: HumanityScreenProps) {
         </View>
 
         {/* GO back button — floating bottom-right */}
-        <View style={[styles.backRow, { bottom: insets.bottom + 20 }]}>
+        <GoNavigationFloating screenKey="humanity" protectedBottom={20}>
           <GoBackButton onPress={handleClose} />
-        </View>
+        </GoNavigationFloating>
 
       </Animated.View>
     </Modal>

@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
@@ -103,15 +104,7 @@ export function ContactosScreen({ onBack, guidanceLevel = 5 }: Props) {
     return (
       <View style={s.importWrapper}>
         <View style={s.importHeader}>
-          <TouchableOpacity
-            onPress={() => setShowImport(false)}
-            hitSlop={8}
-            activeOpacity={0.8}
-            accessibilityLabel="Volver"
-            style={s.backBtn}
-          >
-            <Feather name="chevron-down" size={18} color="rgba(255,255,255,0.70)" />
-          </TouchableOpacity>
+          <GoCloseButton level="panel" onPress={() => setShowImport(false)} hitSlop={8} activeOpacity={0.8} accessibilityLabel="Volver" style={s.backBtn}/>
           <Text style={s.importTitle}>
             {lang === "en" ? "Import file" : "Importar archivo"}
           </Text>

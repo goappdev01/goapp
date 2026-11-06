@@ -1,0 +1,258 @@
+{
+  "handlers": [
+    {
+      "file": "components/AgendaOperativa.tsx",
+      "handler": "() => { Haptics.selectionAsync().catch(() => {}); setConfigPanelOpen(false); }"
+    },
+    {
+      "file": "components/AgendaOperativa.tsx",
+      "handler": "() => { setBookingMsgEntry(null); setBookingMsgDraft(\"\"); }"
+    },
+    {
+      "file": "components/auth/LoginRegisterPanel.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/auth/VerificacionEmpresaPanel.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/boards/GoBoardsPanel.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/booking/BookingSearchOverlay.tsx",
+      "handler": "handleBackOneLevel"
+    },
+    {
+      "file": "components/booking/BookingSearchOverlay.tsx",
+      "handler": "handleDismissAll"
+    },
+    {
+      "file": "components/booking/GoProveedorReservaSheet.tsx",
+      "handler": "handleClose"
+    },
+    {
+      "file": "components/booking/GoProveedorReservaSheet.tsx",
+      "handler": "handleClose"
+    },
+    {
+      "file": "components/booking/GoReservasConfigScreen.tsx",
+      "handler": "() => { Haptics.selectionAsync().catch(() => {}); onClose(); }"
+    },
+    {
+      "file": "components/booking/GoReservasConfigScreen.tsx",
+      "handler": "() => { Haptics.selectionAsync().catch(() => {}); closeMonthPicker(); }"
+    },
+    {
+      "file": "components/booking/GoReservasConfigScreen.tsx",
+      "handler": "() => {\r\n                      Haptics.selectionAsync().catch(() => {});\r\n                      closeMonthPicker(() => { onGoToLanding ? onGoToLanding() : onClose(); });\r\n                    }"
+    },
+    {
+      "file": "components/booking/PlanoEmpresaScreen.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/booking/PlanoEmpresaScreen.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/booking/ReservationVerificationPanel.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/booking-assistant/AssistantCloseControls.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/booking-assistant/AssistantCloseControls.tsx",
+      "handler": "onGoToLanding!"
+    },
+    {
+      "file": "components/booking-assistant/BookingAssistantScreen.tsx",
+      "handler": "consultationBack"
+    },
+    {
+      "file": "components/contactos/ContactosScreen.tsx",
+      "handler": "() => setShowImport(false)"
+    },
+    {
+      "file": "components/dev/GoDevPanel.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/empresa/EmpresaPanel.tsx",
+      "handler": "() => {\r\n                if (modulo === \"empresa_config\" && modulePrevRef.current) {\r\n                  modulePrevRef.current();\r\n                } else {\r\n                  goHome();\r\n                }\r\n              }"
+    },
+    {
+      "file": "components/empresa/EmpresaPanel.tsx",
+      "handler": "closePanel"
+    },
+    {
+      "file": "components/empresa/EmpresaSetupGuide.tsx",
+      "handler": "handleClose"
+    },
+    {
+      "file": "components/empresa/GoAdminDashboard.tsx",
+      "handler": "handleBack"
+    },
+    {
+      "file": "components/empresa/GoAdminDashboard.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/empresa/GoRoadmapScreen.tsx",
+      "handler": "() => setEticaModule(null)"
+    },
+    {
+      "file": "components/empresa/GoRoadmapScreen.tsx",
+      "handler": "() => {\r\n              setEticaModule(null);\r\n              // Esperar a que el modal ético cierre antes de navegar al Landing,\r\n              // igual que hacen el resto de pantallas con paneles apilados.\r\n              setTimeout(() => onGoLanding?.(), 350);\r\n            }"
+    },
+    {
+      "file": "components/GOChatLegacyScreen.tsx",
+      "handler": "handleClose"
+    },
+    {
+      "file": "components/GOChatLegacyScreen.tsx",
+      "handler": "() => { stopPulse(); setIsListening(false); onBack(); }"
+    },
+    {
+      "file": "components/GoEntryDetails.tsx",
+      "handler": "dismiss"
+    },
+    {
+      "file": "components/GoEntryDetails.tsx",
+      "handler": "onGoToLanding"
+    },
+    {
+      "file": "components/herramientas/HerramientasPanel.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/HumanityScreen.tsx",
+      "handler": "onPress"
+    },
+    {
+      "file": "components/landing/LandingActionCompletion.tsx",
+      "handler": "()=>setExpanded(false)"
+    },
+    {
+      "file": "components/landing/LandingSupport.tsx",
+      "handler": "back"
+    },
+    {
+      "file": "components/marketplace/MarketplaceHistorialScreen.tsx",
+      "handler": "handleClose"
+    },
+    {
+      "file": "components/marketplace/MarketplaceHistorialScreen.tsx",
+      "handler": "() => {\r\n            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});\r\n            onClose();\r\n          }"
+    },
+    {
+      "file": "components/MessagesScreen.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/MessagesScreen.tsx",
+      "handler": "() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); backToList(); }"
+    },
+    {
+      "file": "components/MessagesScreen.tsx",
+      "handler": "() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); onGoToLanding(); }"
+    },
+    {
+      "file": "components/notes/GoNoteControls.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/notes/GoNoteEditor.tsx",
+      "handler": "()=>void requestNoteExit(onGoToLanding)"
+    },
+    {
+      "file": "components/notes/GoNoteEditor.tsx",
+      "handler": "back"
+    },
+    {
+      "file": "components/notes/GoTaskScheduleStep.tsx",
+      "handler": "back"
+    },
+    {
+      "file": "components/OrderTrackingScreen.tsx",
+      "handler": "() => {\r\n              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});\r\n              onClose();\r\n            }"
+    },
+    {
+      "file": "components/perfil/PerfilPanel.tsx",
+      "handler": "() => setSubScreen(\r\n                subScreen === \"perfil_hub\" ? null : \"perfil_hub\"\r\n              )"
+    },
+    {
+      "file": "components/perfil/PerfilPanel.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/ResiduosPanel.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "components/TablerosScreen.tsx",
+      "handler": "() => slide(\"boards\")"
+    },
+    {
+      "file": "components/TablerosScreen.tsx",
+      "handler": "() => slide(editBoardId && activeBoardId ? \"board\" : \"boards\")"
+    },
+    {
+      "file": "components/TablerosScreen.tsx",
+      "handler": "() => slide(\"board\")"
+    },
+    {
+      "file": "app/index.tsx",
+      "handler": "() => {\n                  Haptics.selectionAsync();\n                  if (calQuickCreateOpen) closeCalendarTaskPanel();\n                  else setCalConfigVisible(false);\n                }"
+    },
+    {
+      "file": "app/index.tsx",
+      "handler": "() => { Haptics.selectionAsync(); exitCalendarContainer(); }"
+    },
+    {
+      "file": "app/index.tsx",
+      "handler": "() => {\n                      Haptics.selectionAsync();\n                      closeMonthGrid();\n                    }"
+    },
+    {
+      "file": "app/index.tsx",
+      "handler": "exitCalendarContainer"
+    },
+    {
+      "file": "app/index.tsx",
+      "handler": "closeSearch"
+    },
+    {
+      "file": "app/index.tsx",
+      "handler": "onClose"
+    },
+    {
+      "file": "app/index.tsx",
+      "handler": "() => { Haptics.selectionAsync().catch(() => {}); saveContact(); }"
+    },
+    {
+      "file": "app/index.tsx",
+      "handler": "() => { Haptics.selectionAsync().catch(() => {}); setQrOpen(false); }"
+    },
+    {
+      "file": "app/index.tsx",
+      "handler": "() => { stopRecognition(); resetAudio(); setAiListening(false); setAiOpen(false); }"
+    },
+    {
+      "file": "app/index.tsx",
+      "handler": "cancelAiSummary"
+    },
+    {
+      "file": "app/index.tsx",
+      "handler": "() => { Haptics.selectionAsync(); closeTopLayer(); }"
+    }
+  ],
+  "excluded": [
+    {
+      "file": "components/AgendaOperativa.tsx",
+      "source": "<TouchableOpacity\r\n              onPress={() => { Haptics.selectionAsync().catch(() => {}); if (sortOrder !== \"asc\") onToggleSortOrder(); }}\r\n              hitSlop={10}\r\n              activeOpacity={0.7}\r\n              accessibilityLabel=\"Ordenar desde abajo\"\r\n              style={[s.sortFab, sortOrder === \"asc\" && s.sortFabActive]}\r\n            >\r\n              <Feather\r\n                name=\"chevron-down\"\r\n                size={14}\r\n                color={sortOrder === \"asc\" ? \"#00e5ff\" : \"rgba(255,255,255,0.45)\"}\r\n              />\r\n            </TouchableOpacity>"
+    }
+  ]
+}

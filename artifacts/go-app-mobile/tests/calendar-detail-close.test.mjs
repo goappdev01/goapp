@@ -5,14 +5,14 @@ import { detailFixture, detailEntry } from './helpers/calendar-detail-lifecycle.
 const nodes = n => n ? [n, ...n.childNodes.flatMap(nodes)] : [];
 const byId = (root, id) => nodes(root).find(n => n.attributes?.['data-testid'] === id);
 
-for (const hand of ['right', 'left']) test(`${hand}: a single real 56-point close target has its own safe footer outside actions and gestures`, async () => {
+for (const hand of ['right', 'left']) test(`${hand}: a single real 64-point close target has its own safe footer outside actions and gestures`, async () => {
   const f = await detailFixture({ handedness: hand }); let closed = 0;
   try {
     await f.render({ onClose: () => closed++ });
     const footer = f.props.get('entry-detail-close-footer'), target = f.props.get('Cerrar detalle');
     assert.equal(footer.style.position, undefined); assert.equal(footer.style.flexShrink, 0);
-    assert.equal(footer.style.justifyContent, hand === 'left' ? 'flex-start' : 'flex-end'); assert.equal(footer.style.paddingBottom, 6);assert.equal(footer.style.height, 66, "The original panel footer height is preserved; controls are overlays");
-    assert.equal(target.style.width, 56); assert.equal(target.style.height, 56); assert.equal(target.children.props.style.width, 44); assert.equal(target.children.props.style.borderRadius, 16);
+    assert.equal(footer.style.justifyContent, hand === 'left' ? 'flex-start' : 'flex-end'); assert.equal(footer.style.paddingBottom, 6);assert.equal(footer.style.height, 74, "The original panel footer height is preserved; controls are overlays");
+    assert.equal(Object.assign({},...target.style.filter(Boolean)).width, 64); assert.equal(Object.assign({},...target.style.filter(Boolean)).height, 64); assert.equal(Object.assign({},...target.style.filter(Boolean)).borderRadius,17);
     assert.equal(target.hitSlop, 0); assert.equal(target.delayPressIn, 0);
     for (const id of ['entry-details-scroll', 'entry-details-gesture-body']) assert.equal(byId(byId(f.container, id), 'entry-detail-close-footer'), undefined);
     assert.equal(f.props.has('Salir del calendario'), false); assert.equal(f.props.has('entry-detail-floating-close'), false);
@@ -21,7 +21,7 @@ for (const hand of ['right', 'left']) test(`${hand}: a single real 56-point clos
     assert.equal(closed, 0, 'selection and parent navigation wait for native iOS dismissal');
     await f.nativeDismiss(); assert.equal(closed, 1);
     await f.nativeDismiss(); await f.pressClose(); assert.equal(closed, 1);
-    assert.equal(f.close.GoCloseButton({ level: 'panel', onPress() {}, accessibilityLabel: 'default' }).props.style.width, 44);
+    assert.equal(f.close.GoCloseButton({ level: 'panel', onPress() {}, accessibilityLabel: 'default' }).props.style[3].width, 64);
   } finally { await f.dispose(); }
 });
 

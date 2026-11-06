@@ -184,7 +184,7 @@ test('all direct business entries and configuration effects use the same permiss
   assert.match(config, /if \(!permission.current\) return;/);
   assert.doesNotMatch(read('hooks/useVerification.ts'), /loadVerification/);
   assert.match(home, /color: "#ffffff",/);
-  assert.equal((read('components/auth/LoginRegisterPanel.tsx').match(/name="chevron-down" size=\{13\}/g) ?? []).length, 2);
+  assert.match(read('components/auth/LoginRegisterPanel.tsx'), /<GoCloseButton level="container" onPress=\{onClose\}/);
 });
 
 test('pending-company logout waits for local deletion and returns to existing authentication', async () => {

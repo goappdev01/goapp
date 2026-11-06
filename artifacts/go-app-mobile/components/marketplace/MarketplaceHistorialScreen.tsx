@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useState, useRef, useEffect, useCallback } from "react";
@@ -431,14 +432,7 @@ function RepetirReviewSheet({ pedido, onClose, onConfirm }: RepetirReviewSheetPr
           </TouchableOpacity>
 
           {/* Cierre flotante inferior */}
-          <TouchableOpacity
-            onPress={handleClose}
-            activeOpacity={0.75}
-            style={[r.floatingClose, { marginTop: 8 }]}
-          >
-            <Feather name="chevron-down" size={16} color="#9CA3AF" />
-            <Text style={r.floatingCloseLabel}>Cancelar</Text>
-          </TouchableOpacity>
+          <GoCloseButton level="panel" onPress={handleClose} activeOpacity={0.75} style={[r.floatingClose, { marginTop: 8 }]} accessibilityLabel="Volver"/>
 
           <View style={{ height: insets.bottom + 16 }} />
         </ScrollView>
@@ -613,17 +607,10 @@ export function MarketplaceHistorialScreen({
         </ScrollView>
 
         {/* Cierre flotante inferior */}
-        <TouchableOpacity
-          onPress={() => {
+        <GoCloseButton level="panel" onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
             onClose();
-          }}
-          activeOpacity={0.75}
-          style={s.floatingClose}
-        >
-          <Feather name="chevron-down" size={18} color="#6B7280" />
-          <Text style={s.floatingCloseLabel}>Cerrar</Text>
-        </TouchableOpacity>
+          }} activeOpacity={0.75} style={s.floatingClose} accessibilityLabel="Volver"/>
         <View style={{ height: insets.bottom + 8 }} />
 
         {/* Review overlay — slides up over the historial panel */}

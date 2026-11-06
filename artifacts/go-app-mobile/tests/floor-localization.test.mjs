@@ -146,7 +146,7 @@ test('wizard back suppresses the standalone FAB for both real-parent and DEMO co
  for(const hideFAB of [false,true]){let back=0;const wizard=await setupFloor('es',{hideFAB,showBackButton:true,onClose:()=>back++});
   const closes=nodes(wizard.tree).filter(n=>n.type?.name==='GoCloseButton');assert.equal(closes.length,1);assert.equal(closes[0].props.level,'panel');assert.equal(component(wizard.tree,'DraggableFAB'),undefined);closes[0].props.onPress();assert.equal(back,1);
  }
- const standalone=await setupFloor('es',{hideFAB:false,showBackButton:false});assert.equal(component(standalone.tree,'GoCloseButton'),undefined);assert.equal(nodes(standalone.tree).filter(n=>n.type?.name==='DraggableFAB').length,1);
+ const standalone=await setupFloor('es',{hideFAB:false,showBackButton:false});assert.equal(component(standalone.tree,'GoCloseButton').props.level,'panel');assert.equal(nodes(standalone.tree).filter(n=>n.type?.name==='DraggableFAB').length,1);
 });
 
 

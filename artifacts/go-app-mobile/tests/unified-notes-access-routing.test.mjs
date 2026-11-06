@@ -689,14 +689,14 @@ test('standalone draft trash shares the compact footer with keyboard, text scali
     try {
       assert.equal(ui.hosts.has('note-draft-discard-row'),false);
       const footer=ui.hosts.get('note-editor-footer');
-      assert.deepEqual(footer.children.map(child=>child.props.testID||'close'),['note-discard','unified-note-save','note-microphone','close']);
+      assert.deepEqual(footer.children.map(child=>child.props.testID||'close'),['note-discard','unified-note-save','note-microphone','note-navigation-slot']);
       const footerStyle=Object.assign({},...footer.style.flat(Infinity).filter(Boolean));
       assert.equal(footerStyle.flexDirection,handedness==='right'?'row':'row-reverse');
       assert.equal(ui.hosts.get('note-discard').style.width,44);
       assert.ok(ui.hosts.get('note-discard').style.minHeight>=44);
       assert.equal(ui.hosts.get('note-discard').children.props.size,28);
       assert.doesNotMatch(ui.container.textContent,/DESCARTAR BORRADOR/);
-      assert.equal(footer.children.at(-1).props.touchSize,56);
+      assert.equal(ui.hosts.get('note-navigation-back').touchSize,56);
       assert.equal(ui.hosts.get('unified-note-save').style.flex,1);
       const button = mountedControl(ui.container, 'note-discard');
       assert.ok(button);

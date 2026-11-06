@@ -78,7 +78,7 @@ test('failed write/readback leaves the tool and draft recoverable; save, back an
 test('concurrent finish events during the disk write commit once and do not close the editor',async()=>{
  const disk=await h.diskFixture(),{entry}=await disk.api().saveUnifiedNote(disk.draft({destination:'calendar',dateISO:'2027-10-31',time:'19:30',reminderMinutes:15}),disk.scope,disk.active);let release;disk.gate(new Promise(r=>release=r));
  const ui=await h.editorFixture({initial:entry,scope:disk.scope,onSave:d=>disk.api().saveUnifiedNote(d,disk.scope,disk.active)});try{
-  await number(ui,'time','20','00');await ui.run(()=>{ui.hosts.get('note-time-apply').onPress();ui.hosts.get('note-editor-footer').children[2].props.onPress();ui.hosts.get('note-tools-toggle').onPress();});await ui.idle();assert.equal(disk.writes,1);assert.equal(ui.calls.some(c=>c[0]==='close'),false);assert.equal(ui.hosts.get('unified-note-save').disabled,true);
+  await number(ui,'time','20','00');await ui.run(()=>{ui.hosts.get('note-time-apply').onPress();ui.hosts.get('note-navigation-back').onPress();ui.hosts.get('note-tools-toggle').onPress();});await ui.idle();assert.equal(disk.writes,1);assert.equal(ui.calls.some(c=>c[0]==='close'),false);assert.equal(ui.hosts.get('unified-note-save').disabled,true);
   await ui.run(()=>release());await ui.idle();assert.equal(disk.rows.length,1);assert.equal(disk.rows[0].note.revision,2);assert.equal(disk.osRequests.size,1);assert.equal(ui.calls.some(c=>c[0]==='close'),false);
  }finally{release?.();await ui.close();disk.close();}
 });

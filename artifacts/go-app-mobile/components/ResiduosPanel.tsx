@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
@@ -298,9 +299,7 @@ export function ResiduosPanel({ visible, onClose }: Props) {
             <Text style={styles.headerTitle}>RESIDUOS</Text>
             <Text style={styles.headerSub}>Prueba de tamaños GO</Text>
           </View>
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={8} activeOpacity={0.8} accessibilityLabel="Cerrar">
-            <Feather name="chevron-down" size={18} color="rgba(255,255,255,0.70)" />
-          </TouchableOpacity>
+          <GoCloseButton level="panel" onPress={onClose} style={styles.closeBtn} hitSlop={8} activeOpacity={0.8} accessibilityLabel="Cerrar"/>
         </View>
 
         {/* Size name label */}

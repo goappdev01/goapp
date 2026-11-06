@@ -30,6 +30,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
       return [ownSlots[index], value => { ownSlots[index] = typeof value === 'function' ? value(ownSlots[index]) : value; }];
     },
     useRef(initial) { return react.useState(() => ({ current: initial }))[0]; },
+    createContext:value=>({value}),useContext:ctx=>ctx.value,
     useMemo: fn => fn(),
     useCallback: fn => fn,
     useEffect(fn, deps) {

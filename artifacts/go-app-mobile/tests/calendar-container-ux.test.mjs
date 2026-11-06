@@ -49,7 +49,7 @@ function renderFragment(node, globals = {}) {
     goView: { view: 'USER' }, adminAccess: { allowed: false, checking: false },
     React: { createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }) },
     View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', Feather: 'Feather',
-    MaterialCommunityIcons: 'MaterialCommunityIcons', GoCloseButton: 'GoCloseButton',
+    MaterialCommunityIcons: 'MaterialCommunityIcons', GoCloseButton: 'GoCloseButton',GoNavigationFloating:'GoNavigationFloating',handedness:'right',
     lang: 'es', isBusinessMode: false, demoCustomerCalendarSelected: false, calQuickCreateOpen: false, calConfigVisible: false, ...globals,
   }).tree;
 }
@@ -86,16 +86,14 @@ test('root keeps hierarchical closes and overlays the original floats without re
   const style = byId('calendar-agenda-viewport').openingElement.attributes.properties.find(n => n.name?.getText(ast) === 'style').initializer.expression.getText(ast);
   const viewport = evaluate('exports.style = (' + style + ')', { insets: globals.insets }).style;
   assert.equal(viewport.paddingBottom ?? 0, 0, 'The calendar regains the full available height');
-  assert.equal(tree.props.style.position, 'absolute');
-  assert.equal(tree.props.style.flexDirection, 'row');
-  assert.equal(tree.props.style.backgroundColor, undefined);
-  assert.equal(tree.props.style.width, undefined);
-  assert.equal(tree.props.style.height, undefined);
+  assert.equal(tree.type, 'GoNavigationFloating');
+  assert.equal(tree.props.screenKey, 'personal-calendar');
+  assert.equal(tree.props.width, 188);
   assert.equal(calendar.props.style.width, 44);
   assert.equal(calendar.props.style.height, 44);
-  assert.ok(calendar.props.hitSlop * 2 < tree.props.style.gap);
+  assert.ok(calendar.props.hitSlop * 2 < 8);
   assert.ok(!source.includes('contentRightInset'), 'No inset narrows the Calendar or DEMO customer viewport');
-  assert.ok(tree.props.style.bottom > globals.overlayPanelHeight);
+  assert.ok(tree.props.protectedBottom > globals.overlayPanelHeight);
   const demoTree = renderFragment(byId('calendar-floating-controls'), { ...globals, demoCustomerCalendarSelected: true });
   assert.deepEqual(nodes(demoTree, n => n.type === 'GoCloseButton').map(n => n.props.level), ['container']);
   assert.equal(nodes(demoTree, n => n.type === 'TouchableOpacity').length, 0, 'DEMO keeps its container exit without exposing the personal calendar shortcut');

@@ -38,7 +38,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false,initialDat
   class BookingApiError extends Error{}
   const booking={BookingApiError,computeRefundInfo:()=>({isFree:true}),getAuthenticatedUserId:()=>live("getAuthenticatedUserId")};
   for(const name of ["cancelBooking","claimSlot","createHold","getAllSlots","getActivebusinesses","getBookableItems","getStaff","searchBusinesses","getMyBookings"])booking[name]=()=>live(name);
-  const mocks={
+  const mocks={"@/components/ui/GoNavigationFloating":{GoNavigationFloating:"GoNavigationFloating"},"@/components/ui/GoCloseButton":{GoCloseButton:"GoCloseButton"},
     "@workspace/api-zod":modulePublicationPolicy,
     "@/hooks/useBookingModulePublication":loadModulePublicationHook(React,{context,owner:ownerAccess}),
     "./CatalogComplementSelector":{CatalogComplementSelector:()=>null},

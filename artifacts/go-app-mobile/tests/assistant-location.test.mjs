@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const ts = require("typescript");
 function load(file, modules, globals = {}) {
   const context = { exports: {}, console, Date, Error, setTimeout, clearTimeout, ...globals,
-    require(name) { if (name in modules) return modules[name];if(name==="@/components/ui/GoCloseButton")return {GoCloseButton:"GoCloseButton"};if(name==="@/components/landing/SupportVoiceNotice")return {SupportVoiceNotice:"SupportVoiceNotice"}; if(name==="@/theme/goAssistantColors")return load("theme/goAssistantColors.ts",{}); if(name === '@/components/ui/GoScreenCloseSurface') return {GoScreenCloseSurface:'GestureHandlerRootView',GoScreenCloseGuide:'Guide'}; if(name === '@/components/ui/GoScreenModal') return {GoScreenModal: modules['react-native'].Modal}; throw Error("Unexpected " + name); } };
+    require(name) { if (name in modules) return modules[name];if(name==="@/components/ui/GoNavigationFloating")return {GoNavigationFloating:"GoNavigationFloating"};if(name==="expo-linear-gradient")return {LinearGradient:"LinearGradient"};if(name==="@/components/ui/GoCloseButton")return {GoCloseButton:"GoCloseButton"};if(name==="@/components/landing/SupportVoiceNotice")return {SupportVoiceNotice:"SupportVoiceNotice"}; if(name==="@/theme/goAssistantColors")return load("theme/goAssistantColors.ts",{}); if(name === '@/components/ui/GoScreenCloseSurface') return {GoScreenCloseSurface:'GestureHandlerRootView',GoScreenCloseGuide:'Guide'}; if(name === '@/components/ui/GoScreenModal') return {GoScreenModal: modules['react-native'].Modal}; throw Error("Unexpected " + name); } };
   if (file === "lib/bookingAssistant.ts") modules["./authSession"] = loadAuthSession(context, modules["@react-native-async-storage/async-storage"].default);
   vm.runInNewContext(ts.transpileModule(readFileSync(file, "utf8"), {
     compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React }
@@ -215,12 +215,12 @@ test("the same GO appears once, remains circular at every size and routes zone d
 test("inner panel keeps its close and the assistant uses one-level Back without an additional footer row", () => {
   for (const panel of [null, "zone"]) {
     const f = screenFixture(panel);
-    assert.equal(f.all.filter(n => n.props?.accessibilityLabel === (panel ? "Cerrar panel" : "Volver a la pantalla anterior") && n.type === "TouchableOpacity" && n.props.style?.width === 44).length, 1);
+    assert.equal(f.all.filter(n => n.props?.accessibilityLabel === (panel ? "Cerrar panel" : "Volver a la pantalla anterior") && n.type === "TouchableOpacity" && Object.assign({},...[n.props.style].flat(Infinity).filter(Boolean)).width === 64).length, 1);
     assert.ok(f.all.some(n => n.type === "KeyboardAvoidingView" && n.props.behavior === "padding"));
     const draggable = f.all.find(n => n.type === "DraggableFAB");
-    assert.ok(draggable.props.bounds.height > 60); assert.equal(draggable.props.maxH, 44);
+    assert.ok(draggable.props.bounds.height > 60); assert.equal(draggable.props.maxH, 64);
     assert.ok(!f.all.some(n => n.type === "Feather" && (n.props.name === "x" || n.props.name === "sliders")));
-    const button = f.all.find(n => n.type === "TouchableOpacity" && n.props.style?.width === 44);
+    const button = f.all.find(n => n.props.accessibilityLabel===(panel ? "Cerrar panel" : "Volver a la pantalla anterior") && n.type === "TouchableOpacity" && Object.assign({},...[n.props.style].flat(Infinity).filter(Boolean)).width === 64);
     let stopped = false; button.props.onPress({ stopPropagation() { stopped = true; } }); assert.equal(stopped, true);
     if (!panel) assert.equal(f.closed.length, 1);
   }

@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import type { ScrollViewInstance } from "react-native";
 /**
  * EmpresaSetupGuide
@@ -1176,24 +1177,12 @@ export function EmpresaSetupGuide({
       </View>
 
       {/* ── FAB flotante de cierre — igual que en todos los paneles GO ── */}
-      <DraggableFAB
-        screenKey="empresa_setup"
+      <DraggableFAB navigation screenKey="empresa_setup"
         buttonKey="close"
         initialRight={20}
         initialBottom={insets.bottom + 90}
-        maxH={48}
-      >
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={handleClose}
-          accessibilityLabel={t("biz_close_config")}
-          style={g.fabCloseBtn}
-        >
-          <View style={{ alignItems: "center" }}>
-            <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-            <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-          </View>
-        </TouchableOpacity>
+        maxH={64} buttonWidth={64}>
+        <GoCloseButton level="container" activeOpacity={0.85} onPress={handleClose} accessibilityLabel={t("biz_close_config")} style={g.fabCloseBtn}/>
       </DraggableFAB>
 
     </Animated.View>

@@ -188,7 +188,7 @@ function fixture(kind = "provider", overrides = {}) {
     { id: "legacy", emoji: "👤", staffNames: ["Fake local professional"], staffServices: [[]] },
   ], activeDays: [], daySchedules: {}, staffSchedules: {}, openFrom: "00:00", openTo: "00:01" };
   const timers = new Map(); let timerId = 0;
-  const modules = {
+  const modules = {"@/components/ui/GoNavigationFloating":{GoNavigationFloating:"GoNavigationFloating"},"@/components/ui/GoCloseButton":{GoCloseButton:"GoCloseButton"},
     "@workspace/api-zod": modulePublicationPolicy,
     "@/hooks/useBookingModulePublication": loadModulePublicationHook(React),
     "./CatalogComplementSelector": { CatalogComplementSelector: "CatalogComplementSelector" },

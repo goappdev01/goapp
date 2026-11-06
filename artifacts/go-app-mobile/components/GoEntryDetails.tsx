@@ -1,3 +1,4 @@
+import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
 import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -120,7 +121,7 @@ export function GoEntryContract({ entry }: { entry: GoEntry }) {
 }
 
 // Same activation, side-control lane and full-dismiss distance as Calendar's calTopSwipeRef.
-export const ENTRY_DETAIL_CLOSE = Object.freeze({ headerHeight: 44, touchSize: 56 });
+export const ENTRY_DETAIL_CLOSE = Object.freeze({ headerHeight: 44, touchSize: 64 });
 
 type EntryDetailsProps = {
   closeRequested?: boolean;
@@ -201,12 +202,12 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
         </ScrollView>
         <GoScreenCloseGuide testID="entry-detail-swipe-guide" />
         </View>
-        {/* Preserve the original 66-point footer; overlays never participate in layout. */}
-        <View testID="entry-detail-close-footer" pointerEvents="none" style={{ flexShrink: 0, height: 66, flexDirection: "row", justifyContent: handedness === "left" ? "flex-start" : "flex-end", paddingHorizontal: 6, paddingTop: 4, paddingBottom: 6 }} />
-        <View testID="entry-detail-floating-navigation" pointerEvents="box-none" style={{ position: "absolute", right: 6, ...(navigationTop === undefined ? { bottom: 6 } : { top: navigationTop }), flexDirection: "row", gap: 8, zIndex: 30 }}>
+        {/* Preserve the 74-point navigation footer; overlays never participate in layout. */}
+        <View testID="entry-detail-close-footer" pointerEvents="none" style={{ flexShrink: 0, height: 74, flexDirection: "row", justifyContent: handedness === "left" ? "flex-start" : "flex-end", paddingHorizontal: 6, paddingTop: 4, paddingBottom: 6 }} />
+        <GoNavigationFloating testID="entry-detail-floating-navigation" screenKey="entry-details" width={onGoToLanding?136:64} safeArea={false} handedness={handedness} initialTop={navigationTop}>
           <GoCloseButton level="panel" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Close details" : "Cerrar detalle"} onPress={dismiss} />
           {onGoToLanding && <GoCloseButton level="container" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Go directly to Landing" : "Ir directamente al Landing"} onPress={onGoToLanding} />}
-        </View>
+        </GoNavigationFloating>
       </GoScreenCloseSurface>
       {renderMessageScreen?.()}
     </View>

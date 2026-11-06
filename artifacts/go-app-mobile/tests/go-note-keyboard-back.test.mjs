@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),h=require('./helpers/unified-note-fixture.cjs');
-const bottom=ui=>ui.hosts.get('note-editor-footer').children[2].props;
+const bottom=ui=>ui.hosts.get('note-navigation-back');
 const pressBack=ui=>ui.run(()=>bottom(ui).onPress());
 const flat=value=>Object.assign({},...(Array.isArray(value)?value.flat(Infinity):[value]).filter(Boolean));
 const write=async ui=>{

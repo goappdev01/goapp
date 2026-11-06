@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -365,9 +366,7 @@ export const TablerosView = forwardRef<TablerosViewHandle, Props>(
               borderBottomWidth: 1,
               borderBottomColor: "rgba(0,0,0,0.06)",
             }}>
-              <TouchableOpacity onPress={() => slide("boards")} hitSlop={8} activeOpacity={0.8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#F7F8FA", borderWidth: 1, borderColor: "rgba(0,0,0,0.1)", alignItems: "center", justifyContent: "center" }}>
-                <Feather name="chevron-down" size={18} color="#6B7280" />
-              </TouchableOpacity>
+              <GoCloseButton level="panel" onPress={() => slide("boards")} hitSlop={8} activeOpacity={0.8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#F7F8FA", borderWidth: 1, borderColor: "rgba(0,0,0,0.1)", alignItems: "center", justifyContent: "center" }} accessibilityLabel="Volver"/>
               <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: activeBoard.color }} />
               <Text style={{ flex: 1, color: "#111827", fontSize: 13, fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 1.2 }}>
                 {activeBoard.name.toUpperCase()}
@@ -437,14 +436,7 @@ export const TablerosView = forwardRef<TablerosViewHandle, Props>(
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              <TouchableOpacity
-                onPress={() => slide(editBoardId && activeBoardId ? "board" : "boards")}
-                hitSlop={8}
-                activeOpacity={0.8}
-                style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#F7F8FA", borderWidth: 1, borderColor: "rgba(0,0,0,0.1)", alignItems: "center", justifyContent: "center", alignSelf: "flex-start" }}
-              >
-                <Feather name="chevron-down" size={18} color="#6B7280" />
-              </TouchableOpacity>
+              <GoCloseButton level="panel" onPress={() => slide(editBoardId && activeBoardId ? "board" : "boards")} hitSlop={8} activeOpacity={0.8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#F7F8FA", borderWidth: 1, borderColor: "rgba(0,0,0,0.1)", alignItems: "center", justifyContent: "center", alignSelf: "flex-start" }} accessibilityLabel="Volver"/>
 
               <View style={{ gap: 8 }}>
                 <Text style={{ color: "#9CA3AF", fontSize: 10, fontWeight: "700", letterSpacing: 1.2 }}>
@@ -552,14 +544,7 @@ export const TablerosView = forwardRef<TablerosViewHandle, Props>(
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              <TouchableOpacity
-                onPress={() => slide("board")}
-                hitSlop={8}
-                activeOpacity={0.8}
-                style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#F7F8FA", borderWidth: 1, borderColor: "rgba(0,0,0,0.1)", alignItems: "center", justifyContent: "center", alignSelf: "flex-start" }}
-              >
-                <Feather name="chevron-down" size={18} color="#6B7280" />
-              </TouchableOpacity>
+              <GoCloseButton level="panel" onPress={() => slide("board")} hitSlop={8} activeOpacity={0.8} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "#F7F8FA", borderWidth: 1, borderColor: "rgba(0,0,0,0.1)", alignItems: "center", justifyContent: "center", alignSelf: "flex-start" }} accessibilityLabel="Volver"/>
 
               <View style={{
                 flexDirection: "row", alignItems: "center", gap: 8,

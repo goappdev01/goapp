@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import React, { useState } from "react";
 import {
@@ -741,7 +742,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
 
         {/* ── Overview ── */}
         {section === "overview" && (
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 8, paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 8, paddingBottom: fabBottom + 152 }} showsVerticalScrollIndicator={false}>
             <Text style={[s.sectionTitle, { fontSize: 12, color: GRAY, paddingTop: 8 }]}>{lang === 'en' ? "MODULES" : "MÓDULOS"}</Text>
             <View style={s.sectGrid}>
               {SECTIONS.map(sec => (
@@ -783,7 +784,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
           <ScrollView
             style={{ flex: 1 }}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+            contentContainerStyle={{ padding: 16, paddingBottom: fabBottom + 152 }}
           >
             <View style={{ marginBottom: 18, backgroundColor: "rgba(124,105,190,0.10)", borderRadius: 14,
               padding: 14, borderWidth: 1, borderColor: "rgba(124,105,190,0.25)", flexDirection: "row",
@@ -958,7 +959,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
           <ScrollView
             style={{ flex: 1 }}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+            contentContainerStyle={{ padding: 16, paddingBottom: fabBottom + 152 }}
           >
             <View style={{ marginBottom: 16, backgroundColor: "rgba(139,92,246,0.10)", borderRadius: 14,
               padding: 14, borderWidth: 1, borderColor: "rgba(139,92,246,0.25)", flexDirection: "row",
@@ -1057,7 +1058,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         {section === "sistema"     && <AdminScreen />}
 
         {section === "metricas" && (
-          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: 120 }}>
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: fabBottom + 152 }}>
             <View style={s.metricsGrid}>
               <MetricCard label={lang === 'en' ? "Revenue Today" : "Ingresos hoy"}  value={MOCK_METRICS.ingresosHoy}  color="#3D9A84" icon="trending-up" />
               <MetricCard label={lang === 'en' ? "Revenue / Month" : "Ingresos mes"}  value={MOCK_METRICS.ingresosMes}  color="#4A80BD" icon="dollar-sign" />
@@ -1090,7 +1091,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         )}
 
         {section === "empresas" && (
-          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: 120 }}>
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: fabBottom + 152 }}>
             <Text style={s.sectionTitle}>{lang === 'en' ? "CONNECTED BUSINESSES" : "NEGOCIOS CONECTADOS"}</Text>
             {MOCK_EMPRESAS.map((e, i) => (
               <View key={i} style={s.empresaRow}>
@@ -1117,35 +1118,14 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         )}
 
         {/* ── FABs flotantes ────────────────────────────────────────────────── */}
-        <DraggableFAB
-          screenKey="admin_dashboard"
+        <DraggableFAB navigation screenKey="admin_dashboard"
           buttonKey="main"
           initialRight={20}
           initialBottom={fabBottom}
-          maxH={90}
-        >
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={handleBack}
-            hitSlop={8}
-            accessibilityLabel={lang === 'en' ? "Go back one step" : "Volver al paso anterior"}
-            style={s.fabBtn}
-          >
-            <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
-          </TouchableOpacity>
+          maxH={138} buttonWidth={64}>
+          <GoCloseButton level="panel" activeOpacity={0.8} onPress={handleBack} hitSlop={8} accessibilityLabel={lang === 'en' ? "Go back one step" : "Volver al paso anterior"} style={s.fabBtn}/>
 
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={onClose}
-            hitSlop={8}
-            accessibilityLabel={lang === 'en' ? "Return to GO Landing" : "Volver al Landing GO"}
-            style={s.fabBtn}
-          >
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
+          <GoCloseButton level="container" activeOpacity={0.8} onPress={onClose} hitSlop={8} accessibilityLabel={lang === 'en' ? "Return to GO Landing" : "Volver al Landing GO"} style={s.fabBtn}/>
         </DraggableFAB>
 
         {/* ── Info panel (module descriptions) ── */}

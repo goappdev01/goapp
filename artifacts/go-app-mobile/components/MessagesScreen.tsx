@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import { GO_ASSISTANT_GOLD, GO_ASSISTANT_LABEL } from "@/theme/goAssistantColors";
 import { GoScreenCloseSurface, GoScreenCloseGuide } from "@/components/ui/GoScreenCloseSurface";
 import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
@@ -625,9 +626,7 @@ export function MessagesScreen({
               </TouchableOpacity>
 
               {/* Close */}
-              <TouchableOpacity onPress={onClose} style={s.iconBtn} activeOpacity={0.75}>
-                <Feather name="chevron-down" size={20} color={C.icon} />
-              </TouchableOpacity>
+              <GoCloseButton level="panel" onPress={onClose} style={s.iconBtn} activeOpacity={0.75} accessibilityLabel="Volver"/>
             </View>
           </KeyboardAvoidingView>
         )}
@@ -671,7 +670,7 @@ export function MessagesScreen({
                   <View style={s.chatArea} onLayout={event => setChatArea(event.nativeEvent.layout)}>
                   <ScrollView
                     ref={threadScrollRef}
-                    style={{ marginBottom: 60 }}
+                    style={{ marginBottom: 80 }}
                     contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", paddingHorizontal: 12, paddingTop: 14, paddingBottom: 14 }}
                     showsVerticalScrollIndicator={false}
                     onLayout={() => threadScrollRef.current?.scrollToEnd({ animated: false })}
@@ -780,28 +779,17 @@ export function MessagesScreen({
                       </TouchableOpacity>
                     </View>
                   </View>
-                  {chatArea.height >= 60 && <View testID="message-floating-return" pointerEvents="box-none" style={{ position: "absolute", left: chatArea.x, top: chatArea.y + chatArea.height - 60, width: chatArea.width, height: 60 }}>
-                    <DraggableFAB
-                screenKey="messages"
+                  {chatArea.height >= 80 && <View testID="message-floating-return" pointerEvents="box-none" style={{ position: "absolute", left: chatArea.x, top: chatArea.y + chatArea.height - 80, width: chatArea.width, height: 80 }}>
+                    <DraggableFAB navigation screenKey="messages"
                 buttonKey="back"
                 initialRight={8}
                 initialTop={8}
-                bounds={{ width: chatArea.width, height: 60 }}
-                buttonWidth={onGoToLanding ? 96 : 44}
-                maxH={44}
-              >
+                bounds={{ width: chatArea.width, height: 80 }}
+                buttonWidth={onGoToLanding ? 136 : 64}
+                maxH={64}>
                 <View testID="message-navigation-controls" style={{ flexDirection: "row", gap: 8 }}>
-                <TouchableOpacity
-                  onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); backToList(); }}
-                  activeOpacity={0.8}
-                  style={s.fabBack}
-                  accessibilityLabel={initialContext?(lang==="en"?"Back to card":"Volver a la ficha"):(lang === "en" ? "Back to conversations" : "Volver a conversaciones")}
-                >
-                  <Feather name="chevron-down" size={22} color="rgba(255,255,255,0.90)" />
-                </TouchableOpacity>
-                {onGoToLanding && <TouchableOpacity testID="message-direct-landing" accessibilityRole="button" accessibilityLabel={lang === "en" ? "Go directly to Landing" : "Ir directamente al Landing"} activeOpacity={0.8} style={s.fabBack} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); onGoToLanding(); }}>
-                  <Feather name="chevrons-down" size={22} color="rgba(255,255,255,0.90)" />
-                </TouchableOpacity>}
+                <GoCloseButton level="panel" onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); backToList(); }} activeOpacity={0.8} style={s.fabBack} accessibilityLabel={initialContext?(lang==="en"?"Back to card":"Volver a la ficha"):(lang === "en" ? "Back to conversations" : "Volver a conversaciones")}/>
+                {onGoToLanding && <GoCloseButton level="container" testID="message-direct-landing" accessibilityLabel={lang === "en" ? "Go directly to Landing" : "Ir directamente al Landing"} activeOpacity={0.8} style={s.fabBack} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); onGoToLanding(); }}/>}
                 </View>
               </DraggableFAB>
                   </View>}

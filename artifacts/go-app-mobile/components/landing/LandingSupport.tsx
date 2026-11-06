@@ -9,6 +9,7 @@ import {createSupportAttachmentStore,type SupportAttachment} from "@/lib/support
 import type { SupportGateway, SupportKind, SupportReceipt } from "@/lib/supportRequests";
 import { sendSupportRequest, SUPPORT_ORBIT_ACTIONS } from "@/lib/supportRequests";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
 import { GoScreenHost } from "@/components/ui/GoScreenModal";
 import { GOChatScreen } from "@/components/GOChatScreen";
 import { GoNoteAttachmentMenu } from "@/components/notes/GoNoteAttachmentMenu";
@@ -104,11 +105,11 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
     {file.mime.startsWith("image/")?<Image accessibilityLabel={file.name} source={{uri:file.uri}} style={s.preview}/>:<Feather name="file-text" size={24} color="#17212b"/>}
     <Text style={[s.text,{flex:1}]}>{file.name}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel={"Quitar "+file.name} disabled={busy||picking} onPress={()=>void remove(file)} style={s.remove}><Feather name="x" size={22} color="#a1232e"/></TouchableOpacity>
   </View>);
-  const thumbControls=<View testID="support-thumb-controls" style={[s.controls,{bottom:composerHeight+(compact?10:18),flexDirection:handedness==="left"?"row-reverse":"row",[handedness==="left"?"left":"right"]:6},kind==="mine"&&{position:"relative",bottom:undefined,alignSelf:handedness==="left"?"flex-start":"flex-end"}]}>
+  const thumbControls=<GoNavigationFloating screenKey={"support-"+kind} safeArea={false} handedness={handedness} protectedBottom={kind==="mine"?0:composerHeight+10} width={kind==="mine"?136:kind==="help"?128:180}><View testID="support-thumb-controls" style={[s.controls,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
     {kind!=="mine"&&kind!=="help"&&<IconButton appearance="note" icon="paperclip" label={toolsOpen?"Ocultar adjuntos":"Adjuntar referencia"} disabled={busy||picking} onPress={()=>{editor.current?.blur();Keyboard.dismiss();setToolsOpen(open=>!open);}}/>}
     <GoAssistantButton size={kind==="mine"?64:56} onPress={openAI} disabled={busy||picking||voice.status==="transcribing"}/>
     <GoCloseButton level="panel" appearance="light" accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a las órbitas de ayuda"} onPress={back}/>
-  </View>;
+  </View></GoNavigationFloating>;
   return <Modal visible={visible} animationType="slide" onRequestClose={back}>
     <GoScreenHost registerBack={handler=>{nestedBack.current=handler;}}>
     <KeyboardAvoidingView style={[s.screen,{paddingTop:insets.top,paddingBottom:keyboardVisible?0:insets.bottom}]} behavior={Platform.OS==="ios"?"padding":"height"}>
@@ -143,8 +144,9 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
           {thumbControls}
         {toolsOpen&&kind!=="help"&&<View pointerEvents="box-none" style={{position:"absolute",left:0,right:0,bottom:composerHeight+82,top:0}}><GoNoteAttachmentMenu tray handedness={handedness} maxHeight={Math.max(80,Math.min(260,bodyHeight-composerHeight-90))} disabled={busy||picking} onFile={()=>void attach(false)} onPhotos={()=>void attach(true)}/></View>}
       </>}
+      {kind==="mine"&&thumbControls}
       </View>
-      {kind==="mine"&&<>{!!error&&<Text accessibilityRole="alert" style={s.error}>{error}</Text>}<View style={{paddingHorizontal:16,paddingBottom:10}}>{thumbControls}</View></>}
+      {kind==="mine"&&!!error&&<Text accessibilityRole="alert" style={s.error}>{error}</Text>}
     </KeyboardAvoidingView>
     {aiSession&&visible&&<GOChatScreen key={aiSession.key} visible handedness={handedness} onClose={()=>setAiSession(null)} consultation={{scopeKey:aiSession.key,title,sourceText:aiSession.source,respond:assistanceResponder,onAcceptDraft:aiSession.kind==="mine"?undefined:(proposal,baseline)=>{
       const target=aiSession.kind;if(target==="mine"||!identity.current.visible||liveAi.current?.key!==aiSession.key||formIdentity.current.key!==scopeKey||formIdentity.current.kind!==target)return;
@@ -156,9 +158,9 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
 }
 const s=StyleSheet.create({
  screen:{flex:1,backgroundColor:"#ffffff"},workspace:{flex:1,minHeight:0,marginHorizontal:16,paddingBottom:10},header:{paddingHorizontal:18,paddingVertical:12},title:{color:"#17212b",fontSize:22,fontWeight:"700"},
- writing:{flexGrow:1,justifyContent:"flex-end",paddingTop:10,paddingBottom:82,gap:10},history:{paddingVertical:12,gap:14},text:{color:"#17212b",fontSize:16,lineHeight:23,flexShrink:1},hint:{color:"#515d69",fontSize:13,lineHeight:19,paddingHorizontal:16},
+ writing:{flexGrow:1,justifyContent:"flex-end",paddingTop:10,paddingBottom:82,gap:10},history:{paddingTop:12,paddingBottom:88,gap:14},text:{color:"#17212b",fontSize:16,lineHeight:23,flexShrink:1},hint:{color:"#515d69",fontSize:13,lineHeight:19,paddingHorizontal:16},
  composer:{borderWidth:1,borderColor:"#b4bdc6",borderRadius:16,backgroundColor:"#fafbfc",padding:6,gap:4,alignItems:"flex-end"},input:{flex:1,minWidth:0,color:"#17212b",padding:10,fontSize:18,lineHeight:25,textAlignVertical:"top"},
  row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:10},file:{flexDirection:"row",alignItems:"center",gap:8,padding:6,borderWidth:1,borderColor:"#d2d8de",borderRadius:12},preview:{width:44,height:44,borderRadius:8},remove:{minWidth:44,minHeight:44,alignItems:"center",justifyContent:"center"},
- controls:{position:"absolute",alignItems:"flex-end",gap:8,flexShrink:0},
+ controls:{alignItems:"flex-end",gap:8,flexShrink:0},
  empty:{alignItems:"center",paddingVertical:36,gap:14},card:{padding:16,gap:10,borderWidth:1,borderColor:"#d2d8de",borderRadius:16,backgroundColor:"#fff"},badge:{color:"#343d47",fontSize:12,fontWeight:"600",backgroundColor:"#eef0f3",paddingHorizontal:10,paddingVertical:6,borderRadius:12},error:{color:"#a1232e",fontSize:14,lineHeight:20,paddingHorizontal:16},activity:{color:"#a1232e",fontSize:13,paddingHorizontal:16}
 });

@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 /**
  * VerificacionEmpresaPanel
  * Full-screen panel for business verification flow.
@@ -418,19 +419,12 @@ export function VerificacionEmpresaPanel({ visible, onClose, onVerificationChang
         )}
 
         {/* Floating close button */}
-        <DraggableFAB
-          screenKey="verificacion-empresa"
+        <DraggableFAB navigation screenKey="verificacion-empresa"
           buttonKey="main"
           initialRight={20}
           initialBottom={insets.bottom + 24}
-          maxH={46}
-        >
-          <TouchableOpacity onPress={onClose} activeOpacity={0.8} hitSlop={8} style={s.floatingClose}>
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
+          maxH={64} buttonWidth={64}>
+          <GoCloseButton level="container" onPress={onClose} activeOpacity={0.8} hitSlop={8} style={s.floatingClose} accessibilityLabel="Salir"/>
         </DraggableFAB>
 
       </View>

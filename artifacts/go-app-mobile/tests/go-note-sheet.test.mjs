@@ -38,7 +38,7 @@ test('repeated manual folding keeps long dictated text, native input instance, s
 test('Close stays at the dominant edge with save, GO, close order; left-handed mode mirrors controls, panel and tab without reversing text',async()=>{
  const ui=await h.editorFixture();try{
   await ui.run(()=>ui.hosts.get('note-content').onChangeText('Texto con sentido de lectura normal'));const instance=ui.instances.get('note-content');
-  const footer=ui.hosts.get('note-editor-footer');assert.equal(footer.children[0].props.testID,'unified-note-save');assert.equal(footer.children[1].props.testID,'note-microphone');assert.equal(footer.children[2].props.accessibilityLabel,'Cerrar nota');
+  const footer=ui.hosts.get('note-editor-footer');assert.equal(footer.children[0].props.testID,'unified-note-save');assert.equal(footer.children[1].props.testID,'note-microphone');assert.equal(ui.hosts.get('note-navigation-back').accessibilityLabel,'Cerrar nota');
   assert.equal(flat(footer.style).flexDirection,'row');assert.equal(flat(ui.hosts.get('note-tools-panel').style).right,0);
   await open(ui);await ui.render({handedness:'left'});
   assert.equal(flat(ui.hosts.get('note-editor-footer').style).flexDirection,'row-reverse');assert.equal(flat(ui.hosts.get('note-tools-panel').style).left,0);
@@ -75,10 +75,9 @@ test('saving without a destination reveals its controls and text intact; securit
  }finally{await ui.close();}
 });
 
-test('light close appearance is opt-in; every other screen retains the original dark button, size, icon and propagation behavior',()=>{
- const native={TouchableOpacity:'button',View:'view',StyleSheet:{create:x=>x}},icons={Feather:'icon'},Close=h.load('components/ui/GoCloseButton.tsx',{'react-native':native,'@expo/vector-icons':icons}).GoCloseButton;
- const defaults=Close({level:'panel',onPress(){},accessibilityLabel:'Cerrar'});assert.equal(defaults.props.style.backgroundColor,'#0e0e10');assert.equal(defaults.props.children.props.color,'#ffffff');assert.equal(defaults.props.style.width,44);
- let stopped=0,closed=0;const light=Close({level:'panel',onPress(){closed++;},accessibilityLabel:'Cerrar nota',touchSize:56,appearance:'light'});assert.equal(light.props.style.width,56);assert.equal(light.props.children.props.children.props.color,'#17212b');light.props.onPress({stopPropagation(){stopped++;}});assert.equal(stopped,1);assert.equal(closed,1);
+test('shared navigation appearance uses the approved large orange button for either former theme and preserves propagation',()=>{
+ const native={TouchableOpacity:'button',View:'view',Text:'text',StyleSheet:{create:x=>x}},Close=h.load('components/ui/GoCloseButton.tsx',{'react-native':native,'@expo/vector-icons':{Feather:'icon'}}).GoCloseButton;
+ let stopped=0,closed=0;for(const appearance of ['default','light']){const tree=Close({level:'panel',onPress(){closed++;},accessibilityLabel:'Cerrar nota',touchSize:56,appearance}),style=flat(tree.props.style);assert.equal(style.width,64);assert.equal(style.height,64);assert.equal(style.backgroundColor,'#D66500');tree.props.onPress({stopPropagation(){stopped++;}});}assert.equal(stopped,2);assert.equal(closed,2);
 });
 
 test('premium heading stays centered; the approved lateral menu uses bounded lower height and one scrollable column with its tab still lower',async()=>{

@@ -1,3 +1,4 @@
+import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import { useGoDockPreference } from "@/hooks/useGoDockPreference";
 import React, { useRef, useState, useCallback } from "react";
 import {
@@ -660,25 +661,12 @@ export function HerramientasPanel({
         </ScrollView>
 
         {/* FAB cerrar — arrastrable con long-press */}
-        <DraggableFAB
-          screenKey="herramientas"
+        <DraggableFAB navigation screenKey="herramientas"
           buttonKey="close"
           initialRight={20}
           initialBottom={fabBottom}
-          maxH={40}
-        >
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={onClose}
-            hitSlop={8}
-            accessibilityLabel={t('close_tools')}
-            style={s.fabBtn}
-          >
-            <View style={{ alignItems: "center" }}>
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" />
-              <Feather name="chevron-down" size={13} color="rgba(255,255,255,0.90)" style={{ marginTop: -5 }} />
-            </View>
-          </TouchableOpacity>
+          maxH={64} buttonWidth={64}>
+          <GoCloseButton level="container" activeOpacity={0.8} onPress={onClose} hitSlop={8} accessibilityLabel={t('close_tools')} style={s.fabBtn}/>
         </DraggableFAB>
 
         <LinearGradient

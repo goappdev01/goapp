@@ -18,7 +18,8 @@
  *   • Posición clampeada a safe areas en todo momento
  *   • Taps cortos pasan a los hijos normalmente (TouchableOpacity funciona)
  */
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useContext, useRef } from "react";
+import {GoNavigationHand} from "@/components/ui/GoNavigationHand";
 import { Dimensions, StyleSheet } from "react-native";
 import Animated, {
   runOnJS,
@@ -35,6 +36,8 @@ const FAB_BTN = 40;
 const EDGE = 8;
 
 interface DraggableFABProps {
+  navigation?:boolean;
+  handedness?:"left"|"right";
   screenKey: string;
   buttonKey: string;
   initialRight?: number;
@@ -63,14 +66,20 @@ export function DraggableFAB({
   buttonWidth = FAB_BTN,
   fixedLeft,
   onDragStart,
+  navigation=false,
+  handedness,
   children,
 }: DraggableFABProps) {
   const { width: SW, height: SH } = bounds || Dimensions.get("window");
   const insets = useSafeAreaInsets();
-  const storageKey = `fab_pos:${screenKey}:${buttonKey}`;
+  const preferredHand=useContext(GoNavigationHand),hand=handedness??preferredHand;
+  const storageKey = `fab_pos:${screenKey}:${buttonKey}`+(navigation?":"+hand:"");
+  const dragPress=useRef({active:false,suppress:false});
+  const markNavigationDrag=useCallback(()=>{dragPress.current={active:true,suppress:true};},[]);
+  const finishNavigationDrag=useCallback(()=>{dragPress.current.active=false;},[]);
 
   // ── Compute initial (left, top) ──────────────────────────────────────────
-  const initLeft = SW - initialRight - buttonWidth;
+  const initLeft = navigation&&hand==="left"?initialRight:SW - initialRight - buttonWidth;
   const initTop =
     initialTop !== undefined
       ? initialTop
@@ -98,8 +107,11 @@ export function DraggableFAB({
 
   // ── Persist ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    AsyncStorage.getItem(storageKey).then((raw) => {
-      if (!raw) return;
+    let active=true;
+    if(navigation){posL.value=initLeft;posT.value=initTop;hasDragged.value=false;}
+    AsyncStorage.getItem(storageKey).then(async(raw) => {
+      if(!raw&&navigation&&hand==="right")raw=await AsyncStorage.getItem(`fab_pos:${screenKey}:${buttonKey}`);
+      if (!active||!raw) return;
       try {
         const { l, t } = JSON.parse(raw) as { l: number; t: number };
         if (!Number.isFinite(l) || !Number.isFinite(t) || hasDragged.value) return;
@@ -109,6 +121,7 @@ export function DraggableFAB({
         // ignore corrupt data
       }
     }).catch(() => console.info("[fab-preference]", { code: "READ_FAILED" }));
+    return()=>{active=false;};
   }, [storageKey]);
 
   useEffect(() => {
@@ -134,9 +147,10 @@ export function DraggableFAB({
           isDragging.value = true;
           hasDragged.value = true;
           if (onDragStart) runOnJS(onDragStart)();
+          if(navigation)runOnJS(markNavigationDrag)();
           startL.value = Math.max(minL, Math.min(maxL, posL.value)) - event.translationX;
           startT.value = Math.max(minT, Math.min(maxT, posT.value)) - event.translationY;
-          scale.value = withSpring(fixed === undefined ? 1.1 : 1, { damping: 10, stiffness: 180 });
+          scale.value = withSpring(fixed === undefined && !navigation ? 1.1 : 1, { damping: 10, stiffness: 180 });
           shadowOp.value = fixed === undefined ? 0.42 : 0.22;
           runOnJS(Haptics.selectionAsync)();
         })
@@ -158,8 +172,9 @@ export function DraggableFAB({
           isDragging.value = false;
           scale.value = withSpring(1);
           shadowOp.value = 0.18;
+          if(navigation)runOnJS(finishNavigationDrag)();
         }),
-    [minL, maxL, minT, maxT, savePos, onDragStart, fixed]
+    [minL, maxL, minT, maxT, savePos, onDragStart, fixed,navigation,markNavigationDrag,finishNavigationDrag]
   );
 
   // ── Animated style ───────────────────────────────────────────────────────
@@ -176,10 +191,22 @@ export function DraggableFAB({
   return (
     <GestureDetector gesture={gesture}>
       <Animated.View style={[styles.cluster, animStyle]}>
-        {children}
+        {navigation?guardNavigationPress(children,dragPress):children}
       </Animated.View>
     </GestureDetector>
   );
+}
+
+/** The existing recognizer owns movement; suppress only the trailing drag touch. */
+function guardNavigationPress(children:React.ReactNode,state:React.RefObject<{active:boolean;suppress:boolean}>):React.ReactNode{
+ return React.Children.map(children,child=>{
+  if(!React.isValidElement<{children?:React.ReactNode;onPress?:()=>void;onPressIn?:()=>void}>(child))return child;
+  if(["GoCloseButton","GoNavigationButton"].includes((child.type as {displayName?:string})?.displayName??""))return React.cloneElement(child,{
+   onPressIn:()=>{if(!state.current.active)state.current.suppress=false;child.props.onPressIn?.();},
+   onPress:()=>{if(!state.current.suppress&&!state.current.active)child.props.onPress?.();}
+  });
+  return child.props.children?React.cloneElement(child,{},guardNavigationPress(child.props.children,state)):child;
+ });
 }
 
 const styles = StyleSheet.create({
