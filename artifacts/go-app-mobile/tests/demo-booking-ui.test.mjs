@@ -221,6 +221,8 @@ const flattened=value=>Array.isArray(value)?Object.assign({},...value.map(flatte
 test("the existing search, services, professional, slots, review and confirmed views retain the same complete safe frame",async()=>{
  const f=fixture();await f.configure();
  const check=tree=>{assert.equal(flattened(control(tree,'booking-overlay-frame').props.style).paddingBottom,34);
+   const modal=nodes(tree).find(n=>n.type==='Modal');assert.equal(modal.props.transparent,false);assert.equal(modal.props.presentationStyle,'fullScreen');
+   assert.equal(flattened(control(tree,'booking-overlay-frame').props.style).backgroundColor,'#070B12');
    assert.equal(flattened(control(tree,'booking-sheet').props.style).borderRadius,28);
    assert.equal(flattened(control(tree,'booking-frame-border').props.style).bottom,1);};
  let tree=f.render(f.Overlay,{...f.props,initialBusinessId:undefined});check(tree);
@@ -236,15 +238,15 @@ test("the complete booking frame and both lower corners stay inside the safe are
   const f=fixture({viewport:{width,height},insets:{top:20,bottom,left:0,right:0}});let tree=f.render(f.Overlay,f.props);
   const frame=flattened(control(tree,"booking-overlay-frame").props.style),sheet=flattened(control(tree,"booking-sheet").props.style);
   const border=flattened(control(tree,"booking-frame-border").props.style);
-  assert.equal(frame.paddingTop,20);assert.equal(frame.paddingBottom,Math.max(bottom,12));assert.equal(sheet.maxHeight,"100%");assert.equal(sheet.minHeight,0);
+  assert.equal(frame.paddingTop,20);assert.equal(frame.paddingBottom,bottom);assert.equal(sheet.maxHeight,"100%");assert.equal(sheet.minHeight,0);
   assert.equal(sheet.borderRadius,28);assert.equal(sheet.borderWidth,1);
   assert.equal(border.bottom,1);assert.equal(border.left,1);assert.equal(border.right,1);assert.equal(border.borderRadius,27);
   assert.ok(height-frame.paddingBottom-border.bottom<height-bottom,"the lower stroke is above the home-indicator area");
   f.keyboardEvents.get("keyboardWillShow")({endCoordinates:{screenY:height-280,height:280}});tree=f.render(f.Overlay,f.props);
-  assert.equal(flattened(control(tree,"booking-overlay-frame").props.style).paddingBottom,288);
+  assert.equal(flattened(control(tree,"booking-overlay-frame").props.style).paddingBottom,280);
   assert.equal(flattened(control(tree,"booking-sheet").props.style).flex,1);
   f.keyboardEvents.get("keyboardWillHide")();tree=f.render(f.Overlay,f.props);
-  assert.equal(flattened(control(tree,"booking-overlay-frame").props.style).paddingBottom,Math.max(bottom,12));
+  assert.equal(flattened(control(tree,"booking-overlay-frame").props.style).paddingBottom,bottom);
  }
 });
 test('beauty services use visible yellow borders/prices and retain multi-selection until Save',async()=>{

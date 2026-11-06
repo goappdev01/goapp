@@ -1059,10 +1059,10 @@ export function BookingSearchOverlay({
   const confirmationColor=bookingAccepted?"#22c55e":"#FFD700";
 
   return (
-    <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
+    <Modal visible={visible} transparent={false} presentationStyle="fullScreen" animationType="none" onRequestClose={handleClose}>
       <View testID="booking-overlay-frame" style={[s.overlay, {
         paddingTop: insets.top,
-        paddingBottom: keyboardVisible ? keyboardHeight + 8 : Math.max(insets.bottom, 12),
+        paddingBottom: keyboardVisible ? keyboardHeight : insets.bottom,
         paddingLeft: insets.left, paddingRight: insets.right,
       }]}>
         <Animated.View
@@ -1915,7 +1915,7 @@ export function BookingSearchOverlay({
 const s = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.75)",
+    backgroundColor: "#070B12",
     justifyContent: "flex-end",
   },
   sheet: {
