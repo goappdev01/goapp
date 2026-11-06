@@ -29,7 +29,7 @@ const listFunctions = ['isPendingListEntry', 'clearClassicListFilters'].map(name
   find(home, node => ts.isFunctionDeclaration(node) && node.name?.text === name));
 const listState = ['showClassicListFilters', 'listTypeFilter', 'listActivityFilter', 'listCallsOpen', 'filteredListEntries', 'listItemCount'].map(name =>
   'const ' + find(home, node => ts.isVariableDeclaration(node) && node.name?.getText(home) === name).getText(home) + ';');
-const listCode = compile(['{', compactFormatter.getText(home), ...listFunctions.map(node => node.getText(home)), ...listState,
+const listCode = compile(['{', compactFormatter.getText(home), ...listFunctions.map(node => node.getText(home)), "const "+find(home,n=>ts.isVariableDeclaration(n)&&n.name.getText(home)==="RESERVAS_ORBITAL_CATS").getText(home)+";", ...listState,
   'itemCount = listItemCount;', `tree = (${sheet('listOpen').getText(home)});`, '}'].join('\n'));
 const routeNames = ['isEditableListNote', 'openUnifiedNote', 'openUnifiedNoteComposer', 'openQuickNoteFrom', 'openCalendarNote', 'openListNote', 'openListSavedNote'];
 const routes = routeNames.map(name => {
@@ -131,7 +131,7 @@ for (const lang of ['es', 'en']) {
       const f = fixture(lang, { handedness }), tree = f.render();
       const swipes = nodes(tree, n => n.type === 'SwipeableRow');
       assert.equal(swipes.length, 2);
-      const card = swipes[0].props.children[0], top = card.props.children[0], info = card.props.children[1];
+      const card = swipes[0].props.children[0],children=card.props.children.filter(Boolean),top=children[0],info=children[1];
       const label = translations[lang].biz_change_proposed;
       assert.equal(texts(top).split(label).length - 1, 1);
       assert.ok(!texts(info).includes(label));
@@ -321,10 +321,10 @@ test('three real Listados task cards place the complete actions below their head
     const cards = nodes(f.render(), n => n.type === 'Pressable' && n.props.testID?.startsWith('list-entry-card-task-'));
     assert.equal(cards.length, 3);
     for (const card of cards) {
-      const index = card.props.children.findIndex(node => node?.type === f.context.GoEntryMicroActions);
+      const children=card.props.children.filter(Boolean); const index = children.findIndex(node => node?.type === f.context.GoEntryMicroActions);
       assert.equal(index, 1, 'actions own a row directly beneath the header');
-      assert.equal(nodes(card.props.children[0], node => node.type === 'Feather' && node.props.name === 'circle').length, 0);
-      const mounted = card.props.children[index];
+      assert.equal(nodes(children[0], node => node.type === 'Feather' && node.props.name === 'circle').length, 0);
+      const mounted = children[index];
       assert.equal(mounted.props.layout, 'list');
       const row = mounted.type(mounted.props);
       assert.equal(flatten(row.props.style).flexWrap, 'wrap');
@@ -398,6 +398,32 @@ test('three Listados reservations show one real state and open the Calendar deta
   }
 });
 
+test('premium reservation cards use the real beauty category, a short accent and header trash without changing other entry types',()=>{
+ const details=ts.createSourceFile('details.tsx',readFileSync('components/GoEntryDetails.tsx','utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+ const component=find(details,n=>ts.isFunctionDeclaration(n)&&n.name?.text==='GoEntryMicroActions');
+ const adapter=find(home,n=>ts.isVariableDeclaration(n)&&n.name.getText(home)==='renderEntryMicroActions');
+ const base={id:'hair',intentKey:'generico',intentLabel:'Corte',notes:'Lavado + Corte',color:'#16a34a',type:'GO_RESERVA',kind:'sent',customerBooking:true,reservationId:'original-booking',contactName:'Salón de prueba',professionalName:'Profesional',date:'07/01/2030',dateISO:'2030-01-07',time:'10:00',estado:'aceptado',bookingStatus:'confirmada',bookingCategory:'peluqueria'};
+ for(const handedness of ['left','right'])for(const listGoSize of ['compacto','medio','grande'])for(const localResolutionStatus of ['pending','done']){
+  const hair={...base,localResolutionStatus},sport={...base,id:'sport-reservation',bookingCategory:'padel'},task={...base,id:'ordinary-task',type:'TAREA_INTERNA',customerBooking:false,reservationId:undefined};
+  const f=fixture('es',{goLog:[hair,sport,task],handedness,listGoSize,canResolveEntry:()=>true});
+  Object.assign(f.context,{exports:{},C:policyContext.exports.GO_ENTRY_COLORS,useLanguage:()=>({lang:'es'}),followedEntry:e=>e,resolveEntry:(e,status)=>f.calls.push([e.id,status])});f.context.actionCompletion.isSaving=()=>false;
+  vm.runInNewContext(compile(component.getText(details)+'\nglobalThis.GoEntryMicroActions=GoEntryMicroActions;globalThis.renderEntryMicroActions='+adapter.initializer.getText(home)),f.context);
+  const tree=f.render(),card=listCard(tree,'hair'),accent=nodes(card,n=>n.props.testID==='list-category-accent-hair')[0];
+  assert.equal(accent.props.style.backgroundColor,'#eab308');assert.equal(accent.props.style.height,24);assert.equal(accent.props.style.width,3);assert.equal(card.props.style.borderLeftWidth,1);
+  assert.equal(nodes(listCard(tree,'sport-reservation'),n=>n.props.testID?.startsWith('list-category-accent')).length,0);assert.equal(nodes(listCard(tree,'ordinary-task'),n=>n.props.testID?.startsWith('list-category-accent')).length,0);assert.equal(listCard(tree,'ordinary-task').props.style.borderLeftWidth,4);
+  const actionMounts=nodes(card,n=>n.type===f.context.GoEntryMicroActions),trashMount=actionMounts.find(n=>n.props.layout==='list-discard'),stateMount=actionMounts.find(n=>n.props.layout==='list');assert.ok(trashMount&&stateMount);
+  const trash=nodes(trashMount.type(trashMount.props),n=>n.type==='TouchableOpacity')[0];assert.equal(trash.props.style.width,44);assert.equal(trash.props.style.height,44);assert.equal(texts(trash),'');assert.equal(nodes(trash,n=>n.type==='Feather')[0].props.name,'trash-2');assert.equal(nodes(trash,n=>n.type==='Feather')[0].props.color,f.context.C.destructive);
+  const buttons=nodes(stateMount.type(stateMount.props),n=>n.type==='TouchableOpacity');assert.equal(buttons.length,2);assert.deepEqual(buttons.map(b=>texts(b)),['REALIZADA','PENDIENTE']);assert.equal(buttons.filter(b=>b.props.accessibilityState.selected).length,1);assert.ok(buttons.every(b=>b.props.style.minHeight>=44&&b.props.style.backgroundColor.length===9));
+  buttons[0].props.onPress({stopPropagation(){}});buttons[1].props.onPress({stopPropagation(){}});trash.props.onPress({stopPropagation(){}});assert.deepEqual(f.calls.slice(-3),[['hair','done'],['hair','pending'],['hair','discard']]);assert.equal(hair.reservationId,'original-booking');assert.equal(hair.bookingStatus,'confirmada');
+ }
+});
+
+test('list trash uses the unchanged real confirmation before discarding only the personal card',async()=>{
+ const resolve=find(home,n=>ts.isVariableDeclaration(n)&&n.name.getText(home)==='resolveEntry');const calls=[],alerts=[];const entry={id:'reservation',reservationId:'same-booking'};
+ const context={canResolveEntry:()=>true,goLog:[entry],lang:'es',Alert:{alert:(...args)=>alerts.push(args)},actionCompletion:{discard:async(e,read)=>{calls.push([e.id,read().reservationId]);}},setLandingDetailsId(){}};
+ vm.runInNewContext(compile('globalThis.resolve='+resolve.initializer.getText(home)),context);context.resolve(entry,'discard');assert.equal(calls.length,0);assert.equal(alerts.length,1);assert.equal(alerts[0][2][1].style,'destructive');alerts[0][2][1].onPress();await new Promise(setImmediate);assert.deepEqual(calls,[['reservation','same-booking']]);
+});
+
 test('Listados shows an archived note from the current scope and excludes foreign and discarded notes', () => {
   const scope = { userId: 'tasks-fixture', context: 'live:USER' };
   const entry = noteModel.buildNoteEntry({ ...noteModel.noteDraft(), content: 'Nota del archivo', destination: 'archive' }, scope);
@@ -430,7 +456,7 @@ test('only verified ADMIN gets the two classic GO menus at every list size and h
         assert.equal(footer.split(' | ').includes(label), classic, label);
       }
       assert.equal(!!tree.props.swipeStepDown, classic);
-      assert.ok(listControl(tree, labels.tasks_close_list));
+      assert.equal(tree.props.floatingClose.label,labels.tasks_close_list);assert.equal(tree.props.floatingClose.handedness,handedness);assert.equal(tree.props.expandToSafeTop,true);
       assert.ok(listControl(tree, labels.status_pending_label));
       assert.ok(listControl(tree, labels.filter_todos));
       assert.ok(listControl(tree, 'Notas'));

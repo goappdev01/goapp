@@ -28,15 +28,16 @@ export type GoEntryActionCallbacks = {
 };
 
 /** Personal follow-up never writes the contractual acceptance or completion of a reservation. */
-export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list"}){
+export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list"|"list-discard"}){
   const {lang}=useLanguage(),personal=!!(entry.reservationId||entry.customerBooking||entry.businessBooking);
   const list = layout === "list";
+  const premium=list&&personal,trash=layout==="list-discard";
   const label=(es:string,en:string)=>lang==="en"?en:es;
   const actions=[
     {key:"done",text:label("REALIZADA","DONE"),color:C.done,icon:"check-circle" as const,run:onDone},
     {key:"pending",text:label("PENDIENTE","PENDING"),color:C.pending,icon:"clock" as const,run:onPending},
     {key:"discard",text:label("ELIMINAR","DELETE"),color:C.destructive,icon:"trash-2" as const,run:onDiscard},
-  ].filter(action=>action.run);
+  ].filter(action=>action.run&&(trash?action.key==="discard":premium?action.key!=="discard":true));
   if(!actions.length)return null;
   return <View testID="entry-micro-actions" pointerEvents="box-none" style={{flexDirection:"row",flexShrink:0,gap:4,padding:0,...(list && {flexWrap:"wrap",alignSelf:"stretch",marginBottom:6})}}>
     {actions.map(action=><TouchableOpacity key={action.key} accessibilityRole="button"
@@ -45,10 +46,10 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
       disabled={disabled} accessibilityState={{disabled,selected:entry.localResolutionStatus===action.key}}
       hitSlop={{top:inline?4:0,bottom:inline?4:0,left:0,right:0}} activeOpacity={0.7}
       onPress={event=>{event?.stopPropagation();action.run?.();}}
-      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:1,borderColor:action.color,backgroundColor:action.color+"12",flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",...(list && {flex:undefined,flexGrow:1,flexShrink:0,flexBasis:"auto",maxWidth:"100%"})}}>
-      <Feather name={action.icon} size={inline?12:14} color={action.color}/>
-      <Text numberOfLines={1} adjustsFontSizeToFit={!list} minimumFontScale={0.75} maxFontSizeMultiplier={list?2:1.2}
-        style={{color:action.color,fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:list?0:1}}>{action.text}</Text>
+      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:1,borderColor:action.color,backgroundColor:action.color+"12",flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",...(list && {flex:undefined,flexGrow:1,flexShrink:0,flexBasis:"auto",maxWidth:"100%"}),...(premium&&{flex:1,flexBasis:0,paddingVertical:4,borderColor:entry.localResolutionStatus===action.key?action.color+"99":"rgba(255,255,255,0.10)",backgroundColor:action.color+(entry.localResolutionStatus===action.key?"20":"0a")}),...(trash&&{flex:undefined,width:44,height:44,padding:0,borderWidth:0,backgroundColor:"transparent"})}}>
+      <Feather name={action.icon} size={trash?20:inline?12:14} color={action.color}/>
+      {!trash&&<Text numberOfLines={premium?undefined:1} adjustsFontSizeToFit={!list} minimumFontScale={0.75} maxFontSizeMultiplier={list?2:1.2}
+        style={{color:action.color,fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:premium?1:list?0:1}}>{action.text}</Text>}
     </TouchableOpacity>)}
   </View>;
 }

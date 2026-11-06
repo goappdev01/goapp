@@ -30,7 +30,7 @@ const listFunctions = ['isEditableListNote', 'isPendingListEntry', 'clearClassic
   find(ast, node => ts.isFunctionDeclaration(node) && node.name?.text === name));
 const listState = ['showClassicListFilters', 'listTypeFilter', 'listActivityFilter', 'listCallsOpen', 'filteredListEntries'].map(name =>
   'const ' + find(ast, node => ts.isVariableDeclaration(node) && node.name?.getText(ast) === name).getText(ast) + ';');
-const code = compile(['{', formatter.getText(ast), ...listFunctions.map(node => node.getText(ast)), ...listState,
+const code = compile(['{', formatter.getText(ast), ...listFunctions.map(node => node.getText(ast)), "const "+find(ast,n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==="RESERVAS_ORBITAL_CATS").getText(ast)+";", ...listState,
   `tree = (${sheet.getText(ast)});`, '}'].join('\n'));
 const translationsContext = { exports: {} };
 vm.runInNewContext(compile(fs.readFileSync('i18n/translations.ts', 'utf8')), translationsContext);

@@ -70,6 +70,8 @@ import { GO_PENDING_YELLOW } from "../constants/colors";
 import { GoCalendarViewSelector } from "./ui/GoCalendarViewSelector";
 
 export type GoEntry = {
+  /** Read-only catalogue category used by list presentation, never a state. */
+  bookingCategory?: string;
   note?: import("@/lib/unifiedNotes").NoteDocument;
   noteLinkedEntryId?: string;
   attachedNoteId?: string;

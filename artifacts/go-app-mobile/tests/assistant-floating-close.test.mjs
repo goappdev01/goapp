@@ -35,9 +35,9 @@ function fixture(saved = new Map(), getItem = async key => saved.get(key) ?? nul
     compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React }
   }).outputText, context);
   return { saved, get gesture() { return callbacks; },
-    render(height = 500) {
+    render(height = 500, options = {}) {
       cursor = 0; size = { width: 390, height };
-      const tree = context.exports.DraggableFAB({ screenKey: "booking-assistant", buttonKey: "close", initialBottom: 12, maxH: 44, buttonWidth: 44, bounds: size, children: "close" });
+      const tree = context.exports.DraggableFAB({ screenKey: "booking-assistant", buttonKey: "close", initialBottom: 12, maxH: 44, buttonWidth: 44, bounds: size, children: "close",...options });
       effects.splice(0).forEach(fn => fn());
       return tree.props.children[0].props.style[1];
     },
@@ -74,4 +74,11 @@ test("a delayed preference read cannot move the button after dragging has starte
   f.gesture.onUpdate({ translationX: -20, translationY: -30 }); f.gesture.onEnd();
   finish(JSON.stringify({ l: 10, t: 10 })); await f.settled();
   assert.equal(f.render().left, start.left - 20); assert.equal(f.render().top, start.top - 30);
+});
+for(const hand of ['left','right'])test(`Listados/${hand}: homologated long-press drag persists, clamps on resize/keyboard and never invokes close on release`,async()=>{
+ const saved=new Map(),options={screenKey:'listados',buttonKey:'close-'+hand,initialRight:hand==='right'?14:332};let closed=0;options.children={onPress:()=>closed++};const f=fixture(saved);let start=f.render(500,options);await f.settled();
+ assert.equal(f.gesture.delay,500);f.gesture.onStart({translationX:0,translationY:0});f.gesture.onUpdate({translationX:hand==='right'?-70:70,translationY:-110});f.gesture.onEnd();assert.equal(closed,0);
+ const moved=f.render(500,options),key='fab_pos:listados:close-'+hand;assert.equal(JSON.parse(saved.get(key)).t,moved.top);assert.equal(moved.top,start.top-110);
+ const reopened=fixture(saved);reopened.render(500,options);await reopened.settled();assert.equal(reopened.render(500,options).top,moved.top);assert.equal(reopened.render(100,options).top,48);assert.equal(reopened.render(500,options).top,moved.top);
+ f.gesture.onStart({translationX:0,translationY:0});f.gesture.onUpdate({translationX:999,translationY:999});const limited=f.render(100,options);assert.ok(limited.left<=338);assert.ok(limited.top<=48);f.gesture.onFinalize();assert.equal(closed,0);
 });

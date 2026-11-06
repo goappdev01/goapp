@@ -101,11 +101,13 @@ test('notes use the single current editor and the retired task form cannot mount
  assert.ok(!source.includes('renderFieldSelector('));
  assert.ok(!source.includes('handleCalQuickCreate'));
 });
-test('note native viewport is definite before first touch and only note sheets change their flex sizing',()=>{
+test('note native viewport stays definite and expanded Listados is an explicit opt-in',()=>{
  const sheet=nodes.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='BottomSheet').getText(ast);
  assert.ok(sheet.includes('noteKeyboardScroll && { height: "100%", maxHeight: 440, flexShrink: 1'));
- assert.ok(sheet.includes('noteKeyboardScroll ? { flex: 1 } : undefined'));
- assert.ok(sheet.includes('noteKeyboardScroll ? { flexGrow: 1, flexShrink: 1 } : {}'));
+ const compact=sheet.replace(/\s+/g,'');
+ assert.ok(compact.includes('noteKeyboardScroll?{flex:1}:expandToSafeTop&&!minimized?{flex:1,minHeight:0}:undefined'));
+ assert.ok(compact.includes('...(noteKeyboardScroll?{flexGrow:1,flexShrink:1}:{})'));
+ assert.ok(compact.includes('expandToSafeTop?:boolean;'));
  assert.ok(!sheet.includes('setNoteKeyboardTop'));
 });
 

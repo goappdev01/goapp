@@ -35,6 +35,7 @@ import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import { DraggableFAB } from "@/components/DraggableFAB";
 import { GoNoteEditor } from "@/components/notes/GoNoteEditor";
 import { isArchivedNote, linkedNotesForEntry, noteDocument, noteInScope, validNoteDate, validNoteTime, type UnifiedNoteDraft, type NoteDestination } from "@/lib/unifiedNotes";
 import { saveUnifiedNote, moveUnifiedNote, discardUnifiedNoteDraft, discardExclusiveGoNote } from "@/lib/unifiedNoteStore";
@@ -13667,7 +13668,7 @@ function HomeScreenContent() {
     if(!entry.changeProposal&&!entry.proposal)void actionCompletion.decide(entry,status,true,read);
   };
   const followedEntry=(entry:GoEntry)=>({...entry,localResolutionStatus:actionCompletion.status(entry)});
-  const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list")=><GoEntryMicroActions inline={inline} layout={layout} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
+  const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list"|"list-discard")=><GoEntryMicroActions inline={inline} layout={layout} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
     onDone={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"done"):undefined}
     onPending={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"pending"):undefined}
     onDiscard={canResolveEntry(entry)?()=>resolveEntry(entry,"discard"):undefined}/>;
@@ -21709,6 +21710,8 @@ function HomeScreenContent() {
       {/* LISTADO GLOBAL — vista de todos los GO */}
       <BottomSheet
         visible={listOpen}
+        expandToSafeTop
+        floatingClose={{screenKey:"listados",handedness,label:t('tasks_close_list')}}
         modalOverlay={notesOpen || listBookingDetail ? <GoScreenHost registerBack={handler=>{listNoteLayerBackRef.current=handler;}}>
           {notesOpen ? renderUnifiedNoteEditor() : listBookingDetail && renderListBookingDetail(listBookingDetail)}
         </GoScreenHost> : undefined}
@@ -22057,43 +22060,7 @@ function HomeScreenContent() {
                 />
               </Pressable>
             );
-            // ↓↓ — cierra/minimiza TODO: baja el panel completo,
-            //      cierra la pantalla de listado, deja solo el menú inferior mínimo.
-            // Tamaño 30 px para alinearse con el botón + de la misma fila.
-            const closeAllBtn = (
-              <Pressable
-                key="closeAll"
-                onPress={() => {
-                  Haptics.selectionAsync();
-                  setListOpen(false);
-                  setLlamadasListOpen(false);
-                  setListMinimized(false);
-                  setListFiltersHidden(false);
-                }}
-                hitSlop={6}
-                accessibilityLabel={t('tasks_close_list')}
-                style={({ pressed }) => ({
-                  width: BTN_MINI,
-                  height: BTN_MINI,
-                  borderRadius: BTN_MINI / 2,
-                  backgroundColor: "#0e0e10",
-                  borderWidth: 1.2,
-                  borderColor: "rgba(255,255,255,0.22)",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  shadowColor: "#ffffff",
-                  shadowOpacity: pressed ? 0 : 0.07,
-                  shadowRadius: 8,
-                  transform: [{ scale: pressed ? 0.95 : 1 }],
-                })}
-              >
-                {/* Dos flechas apiladas — indica cierre total hasta Landing */}
-                <View style={{ alignItems: "center", gap: 0 }}>
-                  <Feather name="chevron-down" size={Math.round(BTN_MINI * 0.40)} color="rgba(255,255,255,0.75)" />
-                  <Feather name="chevron-down" size={Math.round(BTN_MINI * 0.40)} color="rgba(255,255,255,0.75)" style={{ marginTop: -4 }} />
-                </View>
-              </Pressable>
-            );
+            // Container exit is the shared floating close outside this footer.
             // ↕ ORDEN — invertir orden visual de fichas (arriba/abajo)
             // Vive en el cluster de herramientas visuales, no en la barra de navegación.
             const sortOrderBtn = (
@@ -22460,7 +22427,7 @@ function HomeScreenContent() {
                     {/* Derecha: ↓ y ↓↓ pegados al borde — flex:1 para equilibrar */}
                     <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: GAP_CTRL }}>
                       {showClassicListFilters && minimizeBtn}
-                      {closeAllBtn}
+
                     </View>
                   </View>
                 )}
@@ -22593,6 +22560,10 @@ function HomeScreenContent() {
                 const isProposalEstado =
                   g.estado === "propuesto" || g.estado === "propuesta_pendiente";
                 const compactProposal = !isPapelaraView && isProposalEstado && !!(g as any).changeProposal;
+                const premiumReservation=entryIsReservation(g)&&!compactProposal;
+                const category=(g.bookingCategory||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+                const beauty=RESERVAS_ORBITAL_CATS.find(item=>item.id==="belleza");
+                const beautyReservation=entryIsReservation(g)&&!!beauty&&(category===beauty.id||beauty.subs.some(item=>item.id===category));
                 // Color semántico por estado — fuente única de verdad para
                 // borde lateral, check y glow. No depende de g.color.
                 const stateColor =
@@ -22789,10 +22760,14 @@ function HomeScreenContent() {
                       shadowOffset: { width: 0, height: 2 },
                       elevation: 3,
                       opacity: g.deleted ? 0.7 : 1,
+                      ...(premiumReservation&&{paddingHorizontal:lv(12),paddingVertical:lv(6),backgroundColor:"#161618",borderColor:"rgba(255,255,255,0.12)",shadowColor:"#000000",shadowOpacity:0.12,shadowRadius:5}),
+                      ...(beautyReservation&&{borderLeftWidth:1,borderLeftColor:"rgba(255,255,255,0.12)"}),
                     }}
                   >
+                    {beautyReservation&&<View testID={"list-category-accent-"+g.id} pointerEvents="none" style={{position:"absolute",left:0,top:12,width:3,height:24,borderRadius:2,backgroundColor:beauty!.color}}/>}
+                    {premiumReservation&&!isProposalEstado&&canResolveEntry(g)&&<View testID={"list-card-trash-"+g.id} style={{position:"absolute",top:2,right:4,zIndex:2}}>{renderEntryMicroActions(g,false,"list-discard")}</View>}
                     {/* ── FILA 1: TÍTULO COMPLETO — todo el ancho hasta el checkbox ── */}
-                    <View testID={compactProposal ? "go-proposal-header-" + g.id : undefined} style={{ flexDirection: "row", alignItems: "center", flexWrap: compactProposal ? "wrap" : undefined, gap: compactProposal ? lv(3) : lv(8), marginBottom: lv(compactProposal ? 1 : 3) }}>
+                    <View testID={compactProposal ? "go-proposal-header-" + g.id : undefined} style={{ flexDirection: "row", alignItems: "center", flexWrap: compactProposal ? "wrap" : undefined, gap: compactProposal ? lv(3) : lv(8), marginBottom: lv(compactProposal ? 1 : 3),...(premiumReservation&&!isProposalEstado&&canResolveEntry(g)?{paddingRight:44}: {}) }}>
                       {handedness === "left" && isProposalEstado && statusPill}
                       {/* CHECKBOX — izquierda si ZURDO */}
                       {handedness === "left" && !canResolveEntry(g) && !entryIsReservation(g) && (
@@ -22893,7 +22868,7 @@ function HomeScreenContent() {
                         {(() => {
                           const realTitle = entryIsReservation(g)?entryHeading(g,lang==="en"?"Reservation":"Reserva"):g.notes?.trim() || g.intentLabel;
                           const title = (
-                            <Text testID={compactProposal ? "go-proposal-title-" + g.id : undefined} style={{ color: "#ffffff", fontSize: lv(14), fontWeight: "700", lineHeight: lv(18) }} numberOfLines={compactProposal ? undefined : 1}>
+                            <Text testID={compactProposal ? "go-proposal-title-" + g.id : undefined} style={{ color: "#ffffff", fontSize: premiumReservation?Math.max(14,lv(14)):lv(14), fontWeight: "700", lineHeight: premiumReservation?Math.max(18,lv(18)):lv(18) }} numberOfLines={compactProposal||premiumReservation ? undefined : 1}>
                               {realTitle}
                             </Text>
                           );
@@ -22952,10 +22927,10 @@ function HomeScreenContent() {
                       )}
                     </View>
 
-                    {!isProposalEstado && canResolveEntry(g) && renderEntryMicroActions(g, false, "list")}
+                    {!premiumReservation&&!isProposalEstado && canResolveEntry(g) && renderEntryMicroActions(g, false, "list")}
 
                     {/* ── FILA 2: INFO + ESTADO + BADGE ── */}
-                    {(!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8) }}>
+                    {(!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8),...(premiumReservation&&!isProposalEstado&&canResolveEntry(g)?{paddingRight:44}:{}),...(premiumReservation?{flexWrap:"wrap"}: {}) }}>
                       {/* INFO — fecha/hora + destinatarios */}
                       <TouchableOpacity
                         activeOpacity={0.75}
@@ -23031,9 +23006,9 @@ function HomeScreenContent() {
                           ? ENTRY_COLORS.change : policy.stateColor;
                         return <View testID={"list-reservation-status-" + g.id} style={{
                           flexShrink: 1, maxWidth: "100%", paddingHorizontal: lv(6), paddingVertical: lv(3),
-                          borderRadius: lv(5), borderWidth: 1, borderColor: color + "80", backgroundColor: color + "20",
+                          borderRadius: lv(5), borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)",
                         }}>
-                          <Text style={{ color, fontSize: lv(9), fontFamily: "Inter_700Bold", fontWeight: "800" }}>
+                          <Text style={{ color, fontSize: Math.max(11,lv(9)), fontFamily: "Inter_700Bold", fontWeight: "700" }}>
                             {t("biz_booking_intent_label").toUpperCase() + " · " + status.toUpperCase()}
                           </Text>
                         </View>;
@@ -23079,6 +23054,7 @@ function HomeScreenContent() {
                       )}
                     </View>}
 
+                    {premiumReservation&&!isProposalEstado&&canResolveEntry(g)&&renderEntryMicroActions(g,false,"list")}
                     {/* ── PROPUESTA DE CAMBIO: siempre visible cuando existe ── */}
                     {!isPapelaraView && isProposalEstado && !!(g as any).changeProposal && (<React.Fragment>
 <View testID={"go-proposal-dates-" + g.id} style={{
@@ -25963,6 +25939,8 @@ function BottomSheet({
   containerBg,
   noteKeyboardScroll,
   blockPan,
+  expandToSafeTop,
+  floatingClose,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -26043,6 +26021,9 @@ function BottomSheet({
   containerBg?: string;
   noteKeyboardScroll?: boolean;
   blockPan?: boolean;
+  /** Listados-only viewport expansion; other sheets keep their existing geometry. */
+  expandToSafeTop?: boolean;
+  floatingClose?: {screenKey:string;handedness:"left"|"right";label:string};
 }) {
   // Notifica al padre cuando el sheet deja de estar visible para que
   // resetee la altura del panel a 0 (modo "sin overlay").
@@ -26057,6 +26038,8 @@ function BottomSheet({
   // del safe-area completo. La propia animación del teclado hace la transición suave.
   const [kbVisible, setKbVisible] = useState(false);
   const noteInsets = useSafeAreaInsets();
+  const sheetViewport=useWindowDimensions();
+  const [floatingKeyboardHeight,setFloatingKeyboardHeight]=useState(0);
   const effectivePaddingBottom = noteKeyboardScroll
     ? kbVisible ? 6 : Math.max(12, noteInsets.bottom) : kbVisible ? 0 : paddingBottom;
   const [noteFooterHeight, setNoteFooterHeight] = useState(0);
@@ -26065,10 +26048,12 @@ function BottomSheet({
   const SheetKeyboardFrame = noteKeyboardScroll && Platform.OS !== "web"
     ? KeyboardControllerAvoidingView : KeyboardAvoidingView;
   useEffect(() => {
-    const show = Keyboard.addListener("keyboardWillShow", () => setKbVisible(true));
-    const showDid = Keyboard.addListener("keyboardDidShow", () => setKbVisible(true));
-    const hide = Keyboard.addListener("keyboardWillHide", () => setKbVisible(false));
-    const hideDid = Keyboard.addListener("keyboardDidHide", () => setKbVisible(false));
+    const showKeyboard=(event:{endCoordinates:{height:number}})=>{setKbVisible(true);setFloatingKeyboardHeight(event.endCoordinates.height);};
+    const hideKeyboard=()=>{setKbVisible(false);setFloatingKeyboardHeight(0);};
+    const show = Keyboard.addListener("keyboardWillShow", showKeyboard);
+    const showDid = Keyboard.addListener("keyboardDidShow", showKeyboard);
+    const hide = Keyboard.addListener("keyboardWillHide", hideKeyboard);
+    const hideDid = Keyboard.addListener("keyboardDidHide", hideKeyboard);
     return () => { show.remove(); showDid.remove(); hide.remove(); hideDid.remove(); };
   }, []);
   const subtitleNoTranslate =
@@ -26160,6 +26145,7 @@ function BottomSheet({
         .onEnd((e) => {
           "worklet";
           if (keyboardVisible.value) return;
+          if (expandToSafeTop && scrollOffset.value > 0) return;
           const h = panelH.value || 600;
           // Umbral máximo 80 px para respuesta inmediata.
           const threshold = Math.min(h * 0.28, 80);
@@ -26191,7 +26177,7 @@ function BottomSheet({
             });
           }
         }),
-    [dragToClose, blockPan, nativeScrollGesture, onClose, swipeStepDown, onSwipeStepDown, translateY, scrollOffset, panelH, keyboardVisible],
+    [dragToClose, blockPan, expandToSafeTop, nativeScrollGesture, onClose, swipeStepDown, onSwipeStepDown, translateY, scrollOffset, panelH, keyboardVisible],
   );
 
   // ── Gesto zona derecha (22 %) — bypass keyboard ──────────────────
@@ -26323,17 +26309,18 @@ function BottomSheet({
           <SheetKeyboardFrame
             behavior={noteKeyboardScroll ? "height" : Platform.OS === "ios" ? "padding" : "height"}
             keyboardVerticalOffset={0}
-            style={{ width: "100%", ...(noteKeyboardScroll ? {
+            style={{ width: "100%", ...(expandToSafeTop?{flex:1,justifyContent:"flex-end",paddingTop:noteInsets.top+8}:{}), ...(noteKeyboardScroll ? {
               flex: 1, justifyContent: "flex-end", paddingTop: noteInsets.top + 4,
             } : {}) }}
             pointerEvents="box-none"
           >
               <Reanimated.View
-                testID={noteKeyboardScroll ? "note-sheet" : undefined}
+                testID={noteKeyboardScroll ? "note-sheet" : expandToSafeTop?"listados-sheet":undefined}
                 style={[
                   styles.sheet,
                   compact && { paddingTop: 6, paddingHorizontal: 18 },
                   { paddingBottom: effectivePaddingBottom },
+                  expandToSafeTop&&!minimized&&{flex:1,minHeight:0,maxHeight:"100%"},
                   noteKeyboardScroll && { height: "100%", maxHeight: 440, flexShrink: 1,
                     paddingLeft: 18 + noteInsets.left, paddingRight: 18 + noteInsets.right },
                   liftBottom && liftBottom > 0
@@ -26356,7 +26343,7 @@ function BottomSheet({
                     propaguen al backdrop (que los interpretaría como
                     "cerrar"). No interfiere con el Pan: gesture-handler
                     se queda con el drag, Pressable solo recibe taps. */}
-                <Pressable onPress={(e) => e.stopPropagation?.()} style={noteKeyboardScroll ? { flex: 1 } : undefined}>
+                <Pressable onPress={(e) => e.stopPropagation?.()} style={noteKeyboardScroll ? {flex:1}:expandToSafeTop&&!minimized?{flex:1,minHeight:0}:undefined}>
                   {!minimized && (
                     <View collapsable={false}>
                       <View
@@ -26412,9 +26399,10 @@ function BottomSheet({
                     <GestureDetector gesture={nativeScrollGesture}>
                       {Platform.OS === "web" ? (
                         <Reanimated.ScrollView
+                          testID={expandToSafeTop?"listados-scroll":undefined}
                           style={[
-                            { maxHeight: minimized ? 0 : noteKeyboardScroll ? undefined : 460, overflow: "hidden",
-                              ...(noteKeyboardScroll ? { flexGrow: 1, flexShrink: 1 } : {}) },
+                            { maxHeight: minimized ? 0 : noteKeyboardScroll||expandToSafeTop ? undefined : 460, overflow: "hidden",
+                              ...(noteKeyboardScroll ? {flexGrow:1,flexShrink:1}:{}),...(expandToSafeTop&&!minimized?{flex:1,minHeight:0}: {}) },
                             { WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", touchAction: "pan-y" } as any,
                           ]}
                           keyboardShouldPersistTaps="handled"
@@ -26424,13 +26412,14 @@ function BottomSheet({
                           nestedScrollEnabled
                           scrollEventThrottle={16}
                           onScroll={scrollHandler}
-                          contentContainerStyle={anchorBottom ? { flexGrow: 1, justifyContent: "flex-end" } : undefined}
+                          contentContainerStyle={expandToSafeTop?{paddingBottom:64}:anchorBottom ? { flexGrow: 1, justifyContent: "flex-end" } : undefined}
                         >
                           {sheetContents}
                         </Reanimated.ScrollView>
                       ) : (
                         <KeyboardAwareScrollView
-                          style={{ maxHeight: minimized ? 0 : noteKeyboardScroll ? undefined : 460, overflow: "hidden", ...(noteKeyboardScroll ? { flexGrow: 1, flexShrink: 1 } : {}) }}
+                          testID={expandToSafeTop?"listados-scroll":undefined}
+                          style={{ maxHeight: minimized ? 0 : noteKeyboardScroll||expandToSafeTop ? undefined : 460, overflow: "hidden", ...(noteKeyboardScroll ? {flexGrow:1,flexShrink:1}:{}),...(expandToSafeTop&&!minimized?{flex:1,minHeight:0}: {}) }}
                           keyboardShouldPersistTaps="handled"
                           showsVerticalScrollIndicator={false}
                           bounces={!noteKeyboardScroll}
@@ -26439,7 +26428,7 @@ function BottomSheet({
                           scrollEventThrottle={16}
                           bottomOffset={noteKeyboardScroll ? noteFooterHeight + effectivePaddingBottom + 26 : 16}
                           onScroll={(e) => { scrollOffset.value = e.nativeEvent.contentOffset.y; }}
-                          contentContainerStyle={anchorBottom ? { flexGrow: 1, justifyContent: "flex-end" } : undefined}
+                          contentContainerStyle={expandToSafeTop?{paddingBottom:64}:anchorBottom ? { flexGrow: 1, justifyContent: "flex-end" } : undefined}
                         >
                           {sheetContents}
                         </KeyboardAwareScrollView>
@@ -26448,7 +26437,7 @@ function BottomSheet({
                   )}
                   {footer ? (
                     <View style={{ marginTop: minimized || noteKeyboardScroll ? 4 : 10, ...(noteKeyboardScroll ? { flexShrink: 0 } : {}) }}
-                      onLayout={noteKeyboardScroll ? event => setNoteFooterHeight(event.nativeEvent.layout.height) : undefined}>{footer}</View>
+                      onLayout={noteKeyboardScroll||expandToSafeTop ? event => setNoteFooterHeight(event.nativeEvent.layout.height) : undefined}>{footer}</View>
                   ) : null}
                 </Pressable>
                 {overlay ? (
@@ -26465,6 +26454,13 @@ function BottomSheet({
           </SheetKeyboardFrame>
         </View>
         </GestureDetector>
+        {floatingClose&&!modalOverlay&&noteFooterHeight>0&&<View testID={floatingClose.screenKey+"-floating-close"} pointerEvents="box-none" style={{position:"absolute",top:noteInsets.top+8,left:noteInsets.left,right:noteInsets.right,bottom:(kbVisible?floatingKeyboardHeight:noteInsets.bottom)+noteFooterHeight+20,zIndex:50}}>
+          <DraggableFAB screenKey={floatingClose.screenKey} buttonKey={"close-"+floatingClose.handedness} buttonWidth={44} maxH={44}
+            bounds={{width:sheetViewport.width-noteInsets.left-noteInsets.right,height:Math.max(44,sheetViewport.height-noteInsets.top-8-(kbVisible?floatingKeyboardHeight:noteInsets.bottom)-noteFooterHeight-20)}}
+            initialBottom={8} initialRight={floatingClose.handedness==="right"?14:Math.max(14,sheetViewport.width-noteInsets.left-noteInsets.right-58)}>
+            <GoCloseButton level="panel" accessibilityLabel={floatingClose.label} onPress={onClose}/>
+          </DraggableFAB>
+        </View>}
       </Modal>
     );
   }

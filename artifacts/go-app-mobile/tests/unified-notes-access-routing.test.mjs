@@ -212,7 +212,7 @@ test('Listados blocks both sheet pans while notes are hosted and restores them a
   };
   const ctx = vm.createContext({
     Gesture: { Pan: pan }, dragToClose: true, rightZoneClose: true, blockPan: false,
-    noteKeyboardScroll: false, kbVisible: false, nativeScrollGesture: {},
+    noteKeyboardScroll: false, expandToSafeTop:true, kbVisible: false, nativeScrollGesture: {},
     onClose() {}, onSwipeStepDown() {}, doClose() {}, swipeStepDown: { value: 1 },
     translateY: { value: 0 }, scrollOffset: { value: 0 }, panelH: { value: 600 },
     keyboardVisible: { value: false }, rzStartedInZone: { value: false }, rzScreenW: { value: 390 },
