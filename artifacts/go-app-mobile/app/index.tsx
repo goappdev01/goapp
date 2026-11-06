@@ -132,7 +132,7 @@ import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingSupport } from "@/components/landing/LandingSupport";
-import { supportOrbitRect, supportOrbitSlot, SUPPORT_ORBIT_ACTIONS, type SupportKind } from "@/lib/supportRequests";
+import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, type SupportKind } from "@/lib/supportRequests";
 import { placeLandingQr } from "@/components/landing/landingQrPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
@@ -14232,6 +14232,7 @@ function HomeScreenContent() {
       y: landingCenter.y + landingOffsetY + Math.sin(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
       width: Math.max(44, microSz), height: Math.max(44, microSz) },
     size: closeQrSize, hitSlop: closeQrHit,
+    handedness,
     bounds: { x: insets.left + 8, y: insets.top + 8,
       width: screen.width - insets.left - insets.right - 16, height: screen.height - insets.top - insets.bottom - 16 },
     obstacles: [
@@ -14242,6 +14243,7 @@ function HomeScreenContent() {
         width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 },
       ...(humanityPlacement ? [{ ...humanityPlacement, y: humanityPlacement.y + landingOffsetY }]
         : landingInlineHumanity ? [{ ...inlineHumanityRect, y: inlineHumanityRect.y + landingOffsetY }] : []),
+      { ...supportRect, y: supportRect.y + landingOffsetY },
     ],
   }) ?? { x: closeQrX, y: closeQrY };
   // Keep the approved header reservation: relocating QR must not shift panels or confirmations.
@@ -17134,19 +17136,18 @@ function HomeScreenContent() {
           {(supportMode || !fullLandingArchitecture && !anyOverlayOpen && !rutasMode && !reservasOrbitalOpen && orbitSecondLevel === null) ? (
             <View pointerEvents={supportMode?"box-none":"none"} accessible={false} accessibilityElementsHidden={!supportMode}
               importantForAccessibility={supportMode?"auto":"no-hide-descendants"} testID="landing-quiet-orbits" style={StyleSheet.absoluteFill}>
-              {[...INTENTS, { key: "otro", color: "#9ca3af" }].map((it, i) => {
-                const angle = -Math.PI / 2 + (i * 2 * Math.PI) / (INTENTS.length + 1);
+              {(supportMode ? SUPPORT_ORBIT_ACTIONS.map((action, i) => ({ key: action.kind, color: "#9ca3af", action })) : [...INTENTS, { key: "otro", color: "#9ca3af" }].map(it => ({ ...it, action: undefined }))).map((it, i, items) => {
+                const angle = -Math.PI / 2 + (i * 2 * Math.PI) / items.length;
                 const x = orbitWrapSize / 2 + Math.cos(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
                 const y = orbitWrapSize / 2 + Math.sin(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
-                const action = supportMode ? SUPPORT_ORBIT_ACTIONS.find(action=>supportOrbitSlot(action.slot,handedness)===i) : undefined;
-                const exit = supportMode && i===supportOrbitSlot(3,handedness);
-                const active = !!action || exit;
+                const action = it.action;
+                const active = !!action;
                 return <View key={it.key} testID={`landing-quiet-orbit-${i}`} pointerEvents={active?"auto":"none"}
                   style={{ position: "absolute", left: x, top: y }}>
-                  {exit ? <GoCloseButton level="container" preserveTouchSize touchSize={orbitBtnVisualSize} accessibilityLabel="Salir del modo ayuda" onPress={()=>setSupportMode(false)}/> : <PremiumOrbitBtn color={it.color} selected={false} dimmed={supportMode&&!active} onPress={()=>{if(action)openSupportAction(action.kind);else if(exit)setSupportMode(false);}}
-                    icon={action?.icon??(exit?"chevron-down":"circle")} label={action?.label??(exit?"VOLVER":"")} accessibilityLabel={action?.title??(exit?"Salir del modo ayuda":undefined)}
+                  <PremiumOrbitBtn color={it.color} selected={false} dimmed={!active} onPress={()=>{if(action)openSupportAction(action.kind);}}
+                    icon={action?.icon??"circle"} label={action?.label??""} accessibilityLabel={action?.title}
                     size={orbitBtnVisualSize} iconSize={active?Math.round(24*uiScaleFactor):0} labelSize={active?Math.max(8,Math.round(10*uiScaleFactor)):0}
-                    labelOpacity={active?1:0} labelOnly={!!action} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />}
+                    labelOpacity={active?1:0} labelOnly={!!action} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />
                 </View>;
               })}
             </View>
