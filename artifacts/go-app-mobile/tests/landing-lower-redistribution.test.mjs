@@ -10,6 +10,7 @@ const require=createRequire(path.join(process.cwd(),'package.json')),ts=require(
 const load=file=>{const scope={exports:{}};new Function('exports',ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(scope.exports);return scope.exports;};
 const layout=load('components/landing/landingResponsiveLayout.ts'),arc=load('components/landing/landingLowerArc.ts');
 const panels=load('components/landing/landingPanels.ts'),policy=load('components/landing/landingV1Visibility.ts'),humanity=load('components/landing/humanityPlacement.ts');
+const support=load('lib/supportRequests.ts');
 const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),nodes=[];
 function walk(n){nodes.push(n);ts.forEachChild(n,walk)}walk(ast);
 const decl=name=>nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name);
@@ -31,7 +32,7 @@ function fixture(d,preset,profile,handedness,overrides={}){
  const scale=layout.fitLandingScale(preset,d.width,d.height,d.insets),orbitRadius=Math.round(99*scale),orbitBtnSize=Math.round(65*scale),microR=orbitRadius+Math.round(35*scale),microSz=Math.round(50*scale),goSize=Math.round(128*scale),orbitWrapSize=2*(orbitRadius+orbitBtnSize/2)+12,systemBoundingRadius=Math.max(orbitRadius+orbitBtnSize/2,microR+microSz/2),dockRight=preset==='estandar'?-1:5;
  const isUserV1Surface=profile==='USER',keys=policy.visibleLandingSatelliteKeys(Object.keys(layout.LANDING_SATELLITE_DEGREES),isUserV1Surface);
  const dock=layout.landingDockBounds({...d,dockRight,boundingRadius:systemBoundingRadius,wrapSize:orbitWrapSize,satelliteRadius:microR,satelliteSize:microSz,visibleSatelliteKeys:Object.keys(layout.LANDING_SATELLITE_DEGREES),orbitRadius,orbitButtonSize:orbitBtnSize,orbitCount:8,orbitVisible:true,goSize});
- const context={...layout,...panels,...policy,...humanity,...arc,screen:d,insets:d.insets,goSize,orbitRadius,orbitBtnSize,microR,microSz,orbitWrapSize,systemBoundingRadius,dockRight,
+ const context={...layout,...panels,...policy,...humanity,...arc,...support,screen:d,insets:d.insets,goSize,orbitRadius,orbitBtnSize,microR,microSz,orbitWrapSize,systemBoundingRadius,dockRight,
    handedness,maxX:dock.maxX,minX:dock.minX,landingDock:dock,SYSTEM_MARGIN_Y:6,uiScaleFactor:scale,INTENTS:Array(7).fill({}),isUserV1Surface,
    fullLandingArchitecture:profile==='ADMIN',bottomReserved:d.insets.bottom+4+(preset==='compacto'?2:preset==='estandar'?6:12),
    titleBottomLocalY:null,ACTION_TOP_Y:d.insets.top+151,posReady:true,kbHeight:0,orbitSecondLevel:null,reservasOrbitalOpen:false,
@@ -41,6 +42,22 @@ function fixture(d,preset,profile,handedness,overrides={}){
  vm.runInNewContext(code,context);return {context,...context.result,scale};
 }
 const overlaps=(a,b)=>a.x<b.x+b.width-1e-5&&a.x+a.width>b.x+1e-5&&a.y<b.y+b.height-1e-5&&a.y+a.height>b.y+1e-5;
+test('support corner does not cover the approved GO or orbital circles on iPhone in either hand',()=>{
+ for(const d of devices.slice(0,3))for(const hand of ['left','right'])for(const preset of ['compacto','estandar','grande']){
+  const g=fixture(d,preset,'ADMIN',hand),r=support.supportOrbitRect(d.width,d.height,d.insets,hand);
+  for(const o of g.landingArrangement.obstacles??[]){const distance=Math.hypot(r.x+r.width/2-o.x-o.width/2,r.y+r.height/2-o.y-o.height/2);
+   assert.ok(distance>=(r.width+o.width)/2,JSON.stringify({width:d.width,hand,preset,r,o}));}
+ }
+});
+test('support has a reserved gutter outside content and commands, including the horizontal content column',()=>{
+ for(const d of devices)for(const hand of ['left','right']){
+  const g=fixture(d,'estandar','ADMIN',hand),r=support.supportOrbitRect(d.width,d.height,d.insets,hand);
+  for(const panel of [g.landingPanels.region,g.landingPanels.commands]){
+   const rect=g.landingBaseFrame.virtual?{...panel,x:panel.x+g.landingBaseFrame.left,y:panel.y+g.landingBaseFrame.top}:panel;
+   assert.ok(!overlaps(r,{...rect,y:rect.y+g.landingArrangement.offsetY}),JSON.stringify({d,hand,r,rect}));
+  }
+ }
+});
 for(const profile of ['ADMIN','USER','BUSINESS'])for(const preset of ['compacto','estandar','grande'])for(const handedness of ['right','left'])
  test(`${profile} / ${preset} / ${handedness}: real Home geometry keeps complete buttons, cards and 56pt close target accessible`,()=>{
   for(const d of devices){
@@ -132,10 +149,20 @@ test('the restored slot remains associated with DEPORTE, never with a different 
 });
 
 // Frozen immediately before this profile-only correction, after the user's iPhone acceptance.
-test('frozen ADMIN geometry matrix remains exact across screens, all three sizes and both hands',()=>{
+test('frozen ADMIN geometry stays exact without support; adding support preserves the approved orbital centers and offsets',()=>{
  const records=[];
  for(const d of devices)for(const preset of ['compacto','estandar','grande'])for(const hand of ['right','left']){
-  const g=fixture(d,preset,'ADMIN',hand);records.push({center:g.landingCenter,arrangement:g.landingArrangement,panels:g.landingPanels,frame:g.landingBaseFrame,humanity:g.humanityPlacement});
+  const g=fixture(d,preset,'ADMIN',hand,{
+   supportOrbitRect:()=>({x:-10000,y:-10000,width:0,height:0}),
+   landingContentFrame:input=>layout.landingContentFrame({...input,insets:d.insets}),
+  });
+  const current=fixture(d,preset,'ADMIN',hand);
+  assert.equal(JSON.stringify(current.landingCenter),JSON.stringify(g.landingCenter));
+  assert.equal(JSON.stringify(current.landingArrangement.offsets),JSON.stringify(g.landingArrangement.offsets));
+  assert.equal(current.landingArrangement.offsetY,g.landingArrangement.offsetY);
+  if(!g.landingBaseFrame.virtual)assert.equal(JSON.stringify(current.landingBaseFrame),JSON.stringify(g.landingBaseFrame));
+  else assert.equal(g.landingBaseFrame.height-current.landingBaseFrame.height,support.supportOrbitRect(d.width,d.height,d.insets,hand).height+16);
+  records.push({center:g.landingCenter,arrangement:g.landingArrangement,panels:g.landingPanels,frame:g.landingBaseFrame,humanity:g.humanityPlacement});
  }
  assert.equal(createHash('sha256').update(JSON.stringify(records)).digest('hex'),'26d3b12b89b1a64255af344ff72c6dfd13bf5bd6330ad93e79afb5148db7407a');
 });

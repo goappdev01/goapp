@@ -128,6 +128,8 @@ import { MessagesScreen } from "@/components/MessagesScreen";
 import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
+import { LandingSupport } from "@/components/landing/LandingSupport";
+import { supportOrbitRect } from "@/lib/supportRequests";
 import { placeLandingQr } from "@/components/landing/landingQrPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
@@ -1939,6 +1941,7 @@ function _orbitDarken(hex: string, amt: number): string {
  *  · White border: 2.5 px when selected, 1.5 px with 22 % alpha otherwise
  */
 function PremiumOrbitBtn({
+  accessibilityLabel,
   color,
   selected,
   dimmed = false,
@@ -1966,6 +1969,7 @@ function PremiumOrbitBtn({
   logoScale,
   flat = false,
 }: {
+  accessibilityLabel?: string;
   color: string;
   selected: boolean;
   dimmed?: boolean;
@@ -2122,6 +2126,8 @@ function PremiumOrbitBtn({
       )}
 
       <TouchableOpacity
+        accessibilityRole={accessibilityLabel ? "button" : undefined}
+        accessibilityLabel={accessibilityLabel}
         activeOpacity={1}
         onPress={onPress}
         onLongPress={handleLongPress}
@@ -4276,6 +4282,7 @@ function HomeScreenContent() {
   //                   el próximo GO que se envíe (o al actual si ya
   //                   hay contacto/fecha seleccionados).
   const [notesOpen, setNotesOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
   const [cartaOpen, setCartaOpen] = useState(false);
   const [quickNoteText, setQuickNoteText] = useState("");
@@ -6393,6 +6400,7 @@ function HomeScreenContent() {
   //   BottomSheet). La cabecera/título superior se mantiene visible
   //   en todas las capas para no perder orientación.
   const anyOverlayOpen =
+    supportOpen ||
     aiOpen ||
     calOpen ||
     listOpen ||
@@ -13829,7 +13837,8 @@ function HomeScreenContent() {
   // PR15/PR16 frozen close position. Reserve its touch lane before laying out commands.
   const legacyLandingClose = { x: screen.width - Math.max(18, insets.right + 18) - 40,
     y: screen.height - (bottomReserved + orbitWrapSize - 50) - 40, width: 40, height: 40 };
-  const landingOrbitObstacles: HumanityRect[] = [];
+  const supportRect = supportOrbitRect(screen.width, screen.height, insets, handedness);
+  const landingOrbitObstacles: HumanityRect[] = [supportRect];
   const landingCenter = { x: screen.width - dockRight - systemBoundingRadius + (handedness === "right" ? maxX : minX),
     y: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + landingDock.maxY };
   const addLandingOrbitObstacle = (degrees: number, radius: number, size: number) => {
@@ -13877,7 +13886,8 @@ function HomeScreenContent() {
   const landingPendingOffset = landingHasNext && !nextAptMinimized
     ? landingNextHeight + Math.round(8 * uiScaleFactor) : cambiosOpen && landingHasNext ? 54 : 0;
   const landingHelpBottom = landingBaseline + 12;
-  const landingBaseFrame = landingContentFrame({ width: screen.width, height: screen.height, insets,
+  const landingBaseFrame = landingContentFrame({ width: screen.width, height: screen.height,
+    insets: screen.width > screen.height ? {...insets,bottom:insets.bottom+supportRect.height+16} : insets,
     safeTop: landingSafeTop, baseline: landingBaseline, boundingRadius: systemBoundingRadius, handedness,
     controlSize: Math.max(44, Math.round(32 * uiScaleFactor), fullLandingArchitecture ? Math.round(56 * uiScaleFactor) + 16 - 20 : 0),
     naturalHeight: Math.max(landingNextHeight, landingPendingHeight + landingPendingOffset,
@@ -14132,7 +14142,7 @@ function HomeScreenContent() {
   const toLandingRootRect = (rect: HumanityRect): HumanityRect => landingBaseFrame.virtual
     ? { ...rect, x: rect.x + landingBaseFrame.left, y: rect.y + landingBaseFrame.top } : rect;
   // Reserve the shared region even when minimized, so Humanity never moves on panel changes.
-  const humanityBlocks = [landingCloseRect, toLandingRootRect(landingPanels.commands),
+  const humanityBlocks = [supportRect, landingCloseRect, toLandingRootRect(landingPanels.commands),
     toLandingRootRect(landingPanels.region)];
   const humanityPanelsMeasured = true;
   const humanityPlacement = humanityPanelsMeasured && posReady ? placeHumanity({
@@ -14180,7 +14190,7 @@ function HomeScreenContent() {
     if (!arc.fitted) return unchanged;
     const move = (rect: HumanityRect) => ({ ...rect, y: rect.y + arc.offsetY });
     const humanity = humanityPlacement ?? (landingInlineHumanity ? inlineHumanityRect : null);
-    const exclusions = [move(toLandingRootRect(landingPanels.commands)), move(toLandingRootRect(landingPanels.region)),
+    const exclusions = [supportRect, move(toLandingRootRect(landingPanels.commands)), move(toLandingRootRect(landingPanels.region)),
       ...closeHeaderObstacles, ...closeReservedColumn, ...(humanity ? [move(humanity)] : [])];
     const closeRect = placeLandingClose({ ...landingCloseRect, y: landingCloseRect.y + arc.offsetY },
       { x: insets.left, y: insets.top, width: screen.width - insets.left - insets.right,
@@ -25528,6 +25538,12 @@ function HomeScreenContent() {
       />}
 
 
+      {!anyOverlayOpen && !goAuthOpen && !empresaOpen && !adminDashOpen && !rutasMode && kbHeight === 0 && (
+        <View testID="landing-support-orbit" style={{position:"absolute",left:supportRect.x,top:supportRect.y,width:supportRect.width,height:supportRect.height,zIndex:100}}>
+          <PremiumOrbitBtn color="#7dd3fc" selected={false} onPress={()=>setSupportOpen(true)} icon="message-circle"
+            label="AYUDA" accessibilityLabel="AYÚDANOS A MEJORAR" size={supportRect.width} iconSize={supportRect.width<50?20:23} labelSize={9} labelSpacing={0} paddingH={2}/>
+        </View>
+      )}
       {/* HUMANITY retains its original slot whenever it fits. */}
       {fullLandingArchitecture && !anyOverlayOpen && !rutasMode && kbHeight === 0 && orbitSecondLevel === null && humanityPlacement && (
         renderLandingHumanity(humanityPlacement)
@@ -25599,6 +25615,7 @@ function HomeScreenContent() {
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
+    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {
