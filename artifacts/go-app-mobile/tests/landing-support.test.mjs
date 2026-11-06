@@ -9,7 +9,7 @@ const compile=file=>ts.transpileModule(readFileSync(file,'utf8'),{compilerOption
 const port={exports:{}};vm.runInNewContext(compile('lib/supportRequests.ts'),port);const api=port.exports;
 const nodes=t=>!t||typeof t!=='object'?[]:[t,...(t.children??[]).flatMap(nodes)];
 const text=t=>typeof t==='string'?t:(t?.children??[]).map(text).join(' ');
-const button=(tree,label)=>nodes(tree).find(n=>n.type==='TouchableOpacity'&&text(n).includes(label));
+const button=(tree,label)=>nodes(tree).find(n=>label==='ENVIAR'?n.type==='GoSendButton':n.type==='TouchableOpacity'&&text(n).includes(label));
 const icon=(tree,label)=>nodes(tree).find(n=>n.type==='IconButton'&&n.props.label===label);
 const menu=tree=>nodes(tree).find(n=>n.type==='GoNoteAttachmentMenu');
 function fixture(gateway){let cursor=0,slots=[],effects=[];const files=supportFiles(),picker={photo:async()=>({canceled:true}),document:async()=>({canceled:true})};const events=new Map(),navigation=[];
@@ -23,8 +23,8 @@ function fixture(gateway){let cursor=0,slots=[],effects=[];const files=supportFi
  if(name==='@/components/ui/GoScreenModal')return{GoScreenHost:'GoScreenHost'};
  if(name==='@/components/GOChatScreen')return{GOChatScreen:'GOChatScreen'};
  if(name==='@/components/notes/GoNoteAttachmentMenu')return{GoNoteAttachmentMenu:'GoNoteAttachmentMenu'};
- if(name==='@/components/booking-assistant/BookingAssistantUI')return{IconButton:'IconButton',GoAssistantButton:'GoAssistantButton'};
- if(name==='@/hooks/useGoNoteVoice')return{useGoNoteVoice:p=>{voiceProps=p;return speech;}};
+ if(name==='@/components/booking-assistant/BookingAssistantUI')return{IconButton:'IconButton',GoAssistantButton:'GoAssistantButton',GoSendButton:'GoSendButton'};
+ if(name==='./SupportVoiceNotice')return {SupportVoiceNotice:'SupportVoiceNotice'};if(name==='@/hooks/useGoNoteVoice')return{useGoNoteVoice:p=>{voiceProps=p;return speech;}};
  if(name==='react-native-safe-area-context')return{useSafeAreaInsets:()=>({top:47,bottom:34})};if(name==='@expo/vector-icons')return{Feather:'Feather'};if(name==='@/components/ui/GoCloseButton')return {GoCloseButton:'GoCloseButton'};if(name==='@/lib/supportRequests')return api;if(name==='@/lib/supportAttachments')return{createSupportAttachmentStore:files.create};if(name==='expo-image-picker')return{launchImageLibraryAsync:options=>picker.photo(options)};if(name==='expo-document-picker')return{getDocumentAsync:options=>picker.document(options)};throw Error(name);}};
  vm.runInNewContext(compile('components/landing/LandingSupport.tsx'),scope);
  const props={visible:true,scopeKey:'user-a',onClose(){navigation.push('back');},onExit(){navigation.push('exit');},gateway};
@@ -93,7 +93,7 @@ test('four white surfaces keep one arrow and a safe bottom composer without prov
   assert.equal(all.filter(n=>n.type==='GoCloseButton').length,1);const nav=all.find(n=>n.props.testID==='support-thumb-controls');assert.equal(nav.props.style[0].flexShrink,0);assert.equal(nav.props.style[1].flexDirection,'row');
   assert.equal(all.filter(n=>n.type==='GoAssistantButton').length,1);assert.equal(text(tree).includes('Disponible próximamente'),false);
   assert.equal(text(tree).includes('Incluir contexto'),false);assert.equal(text(tree).includes('contraseñas'),false);assert.equal(all.some(n=>n.props.accessibilityRole==='checkbox'),false);
-  const input=all.find(n=>n.type==='TextInput');if(input){assert.equal(input.props.placeholder,undefined);assert.equal(input.props.style[0].color,'#17212b');assert.ok(input.props.style[1].height>=56);assert.equal(all.find(n=>n.props.testID==='support-writing-scroll').props.contentContainerStyle.justifyContent,'flex-end');}else assert.equal(kind,'mine');
+  const input=all.find(n=>n.type==='TextInput');if(input){assert.equal(input.props.placeholder,undefined);assert.equal(input.props.style[0].color,'#17212b');assert.ok(input.props.style[1].height>=44);assert.equal(all.find(n=>n.props.testID==='support-writing-scroll').props.contentContainerStyle.justifyContent,'flex-end');}else assert.equal(kind,'mine');
  }
 });
 test('real photo/document handlers import privately, preview and remove individually without network or note changes',async()=>{
@@ -154,11 +154,16 @@ test('separate microphone inserts one final transcript at the native cursor with
  icon(tree,'Dictar solicitud').props.onPress();f.render({...f.props,kind:'help'});f.voice.onPreparedText('antiguo');tree=f.render({...f.props,kind:'help'});assert.equal(input().props.value,'');
 });
 
-test('composer and one-third send remain bounded above the footer for both hands and short/long keyboard viewports',()=>{
- for(const width of [320,375,390,430,768])for(const height of [100,220,480,690])for(const handedness of ['right','left']){
+test('GO and close float as a compact thumb group above a fixed editor with integrated paper plane for both hands',()=>{
+ for(const width of [320,375,390,430,768])for(const height of [140,180,220,480,690])for(const handedness of ['right','left']){
   const f=fixture(),p={...f.props,handedness};f.render(p);let tree=f.render(p);nodes(tree).find(n=>n.props.testID==='support-workspace').props.onLayout({nativeEvent:{layout:{height}}});nodes(tree).find(n=>n.type==='TextInput').props.onContentSizeChange({nativeEvent:{contentSize:{height:1800}}});f.events.get('keyboardWillShow')();tree=f.render(p);
-  const input=nodes(tree).find(n=>n.type==='TextInput'),footer=nodes(tree).find(n=>n.props.testID==='support-thumb-controls'),send=nodes(tree).find(n=>n.props.testID==='support-send');assert.ok(input.props.style[1].height<=Math.max(56,height-48));assert.ok(input.props.scrollEnabled);assert.equal(footer.props.style[1].flexDirection,handedness==='right'?'row':'row-reverse');
-  const available=width-2*footer.props.style[0].paddingHorizontal,sendWidth=Math.min(available*.33,send.props.style[0].maxWidth);assert.ok(44+56+44+3*footer.props.style[0].gap+sendWidth<=available);assert.ok(send.props.style[0].minHeight>=44);assert.equal(nodes(tree).find(n=>n.type==='KeyboardAvoidingView').props.style[1].paddingBottom,0);
+  const input=nodes(tree).find(n=>n.type==='TextInput'),footer=nodes(tree).find(n=>n.props.testID==='support-thumb-controls'),send=nodes(tree).find(n=>n.props.testID==='support-send'),composer=nodes(tree).find(n=>n.props.testID==='support-composer'),workspace=nodes(tree).find(n=>n.props.testID==='support-workspace');assert.ok(input.props.style[1].height<=(height<220?Math.max(44,height-90):Math.max(96,height-104)));assert.ok(input.props.scrollEnabled);assert.equal(footer.props.style[1].flexDirection,handedness==='right'?'row':'row-reverse');
+  assert.equal(footer.props.style[0].position,'absolute');assert.ok(nodes(workspace).includes(footer));assert.ok(!nodes(composer).includes(footer),'group stays inside full-size touch host, not outside composer hit bounds');assert.ok(nodes(composer).includes(send));assert.equal(footer.props.style[1][handedness==='right'?'right':'left'],6);assert.ok(44+56+44+2*8<width-32);
+  composer.props.onLayout({nativeEvent:{layout:{height:input.props.style[1].height+12}}});tree=f.render(p);const moved=nodes(tree).find(n=>n.props.testID==='support-thumb-controls');assert.equal(moved.props.style[1].bottom,input.props.style[1].height+(height<220?22:30));assert.deepEqual(moved.children.map(n=>n.type),['IconButton','GoAssistantButton','GoCloseButton']);assert.equal(nodes(tree).find(n=>n.type==='KeyboardAvoidingView').props.style[1].paddingBottom,0);
   icon(tree,'Adjuntar referencia').props.onPress();tree=f.render(p);assert.equal(menu(tree).props.handedness,handedness);assert.ok(menu(tree).props.maxHeight<=Math.max(80,height-16));
  }
+});
+
+test('Mis solicitudes enlarges GO moderately and keeps its single close immediately beside it for either hand',()=>{
+ for(const handedness of ['left','right']){const f=fixture(),p={...f.props,kind:'mine',handedness};f.render(p);const tree=f.render(p),group=nodes(tree).find(n=>n.props.testID==='support-thumb-controls');assert.equal(group.props.style[2].position,'relative');assert.equal(group.props.style[2].alignSelf,handedness==='left'?'flex-start':'flex-end');assert.deepEqual(group.children.filter(Boolean).map(n=>n.type),['GoAssistantButton','GoCloseButton']);assert.equal(group.children.filter(Boolean)[0].props.size,64);assert.equal(nodes(tree).some(n=>n.type==='TextInput'),false);}
 });

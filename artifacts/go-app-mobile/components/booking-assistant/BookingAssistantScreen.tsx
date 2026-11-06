@@ -3,6 +3,8 @@ import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
 import type { ScrollViewInstance } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AssistantCloseControls } from "./AssistantCloseControls";
+import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import { SupportVoiceNotice } from "@/components/landing/SupportVoiceNotice";
 import { useGoDockPreference } from "@/hooks/useGoDockPreference";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -39,6 +41,7 @@ import {
   Choice,
   Detail,
   IconButton,
+  GoSendButton,
   bookingDate,
   money,
   s,
@@ -74,7 +77,7 @@ export function BookingAssistantScreen({
   const goSize = uiScale === "compacto" ? 48 : uiScale === "grande" ? 72 : 64;
   const window = useWindowDimensions();
   const [viewport, setViewport] = useState({ width: window.width, height: window.height - insets.top - insets.bottom - 68 });
-  const [footerHeight, setFooterHeight] = useState(144);
+  const [footerHeight, setFooterHeight] = useState(consultation?78:144);
   const [headerHeight, setHeaderHeight] = useState(68);
   const zoneIdentity = useAssistantZoneScope();
   const a = useBookingAssistant({ visible, scope: consultation?null:zoneIdentity.scope, scopeReady: !consultation&&zoneIdentity.ready,
@@ -84,6 +87,7 @@ export function BookingAssistantScreen({
   const consultationCurrent=useRef({visible,key:consultation?.scopeKey});consultationCurrent.current={visible,key:consultation?.scopeKey};
   const [input, setInput] = useState("");
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [voiceAttempt,setVoiceAttempt]=useState(0);
   const followEnd = useRef(true);
   const { position } = useGoDockPreference(handedness, visible);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -180,6 +184,10 @@ export function BookingAssistantScreen({
     if (toLanding && onGoToLanding) onGoToLanding();
     else onClose();
   }
+  function consultationBack(){
+    if(keyboardVisible||Keyboard.isVisible()){Keyboard.dismiss();return;}
+    close();
+  }
   function back() {
     if (a.busy) return;
     if (a.panel) a.setPanel(null);
@@ -252,7 +260,7 @@ export function BookingAssistantScreen({
   const saving = ["Guardando en GO…", "Confirmando reserva…", "Cancelando reserva…"].includes(a.busy);
   const panelState = { ...a, reset };
   const dock = (
-          <View style={s.dock}>
+          <View style={consultation?{flexDirection:"row",alignItems:"center"}:s.dock}>
             {bookingDockOrder(position).filter(key=>!consultation||key==="go").map((key) =>
               key === "go" ? (
                 <TouchableOpacity
@@ -269,12 +277,13 @@ export function BookingAssistantScreen({
                   onPress={() => {
                     if (listening) void voice.stop();
                     else {
+                      if(consultation)setVoiceAttempt(value=>value+1);
                       const isZone = a.panel === "zone";
                       if (!isZone) a.setPanel(null);
                       void voice.start(isZone);
                     }
                   }}
-                  style={[s.dockButton, s.goButton, { width: goSize, minWidth: goSize, maxWidth: goSize, minHeight: goSize, height: goSize, borderRadius: goSize / 2, paddingVertical: goSize === 48 ? 2 : 6, gap: goSize === 48 ? 2 : 4 }, listening && s.listening]}
+                  style={[s.dockButton, s.goButton, { width: goSize, minWidth: goSize, maxWidth: goSize, minHeight: goSize, height: goSize, borderRadius: goSize / 2, paddingVertical: goSize === 48 ? 2 : 6, gap: goSize === 48 ? 2 : 4 },consultation&&{marginHorizontal:0}, listening && s.listening]}
                 >
                   <Feather
                     name={listening ? "square" : "mic"}
@@ -333,12 +342,13 @@ export function BookingAssistantScreen({
       }}
       animationType="slide"
       presentationStyle="fullScreen"
-      onRequestClose={() => (a.panel ? back() : close())}
+      onRequestClose={() => consultation?consultationBack():(a.panel ? back() : close())}
     >
       <StatusBar style="dark" />
-      <GoScreenCloseSurface as={GestureHandlerRootView} testID="assistant-close-surface" handedness={handedness} enabled={visible && !saving} onClose={() => close()} scrollRefs={[scroll, panelScroll]}
+      <GoScreenCloseSurface as={GestureHandlerRootView} testID="assistant-close-surface" handedness={handedness} enabled={visible && !saving} onClose={() => consultation?consultationBack():close()} scrollRefs={[scroll, panelScroll]}
         style={[
           s.root,
+          consultation&&{backgroundColor:"#ffffff"},
           { paddingTop: insets.top, paddingBottom: keyboardVisible ? 0 : insets.bottom },
         ]}
       >
@@ -356,6 +366,7 @@ export function BookingAssistantScreen({
             />
           )}
         </View>
+        {consultation&&<SupportVoiceNotice key={consultation.scopeKey} message={voiceAttempt>0?voice.error:""} attempt={voiceAttempt}/>}
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -383,7 +394,7 @@ export function BookingAssistantScreen({
               if (followEnd.current) scroll.current?.scrollToEnd({ animated: true });
             }}
           >
-            <View testID="assistant-conversation-content" style={{ gap: s.conversation.gap }} onLayout={event => {
+            <View testID="assistant-conversation-content" style={{ gap: s.conversation.gap,paddingBottom:consultation?82:0 }} onLayout={event => {
               const height = event.nativeEvent.layout.height + s.conversation.padding + s.conversation.paddingBottom;
               setConversationMeasurement(previous => previous.height === height && previous.messages === a.messages.length
                 ? previous : { height, messages: a.messages.length });
@@ -664,6 +675,10 @@ export function BookingAssistantScreen({
               </View>
             )}
             </>}
+            {consultation&&<>
+              {consultationDraft!==null&&<View testID="assistant-draft-review" style={{padding:12,gap:8}}><Text style={s.body}>{consultationDraft}</Text><Action text="Usar propuesta en AYUDA" onPress={()=>{consultation.onAcceptDraft?.(consultationDraft,consultation.sourceText);setConsultationDraft(null);close();}}/></View>}
+              {!!(a.busy||voiceText||a.notice)&&<Text accessibilityLiveRegion="polite" style={s.statusText}>{a.busy||voiceText||a.notice}</Text>}
+            </>}
             </View>
           </ScrollView>
           {indicatorPlacement && (
@@ -672,7 +687,7 @@ export function BookingAssistantScreen({
             </View>
           )}
           </View>
-          {!!(a.busy || voiceText || a.notice || voice.error) && (
+          {!consultation&&!!(a.busy || voiceText || a.notice || voice.error) && (
             <View style={s.status} accessibilityLiveRegion="polite">
               {!indicatorPlacement && <ListeningIndicator active={indicatorActive} compact />}
               {!!a.busy && <ActivityIndicator size="small" color="#174D3C" />}
@@ -716,28 +731,28 @@ export function BookingAssistantScreen({
             </>
           )}
           {!a.panel && <View onLayout={event => setFooterHeight(event.nativeEvent.layout.height)}>
-          {consultation&&consultationDraft!==null&&<View testID="assistant-draft-review" style={{padding:12,gap:8}}><Text style={s.body}>{consultationDraft}</Text><Action text="Usar propuesta en AYUDA" onPress={()=>{consultation.onAcceptDraft?.(consultationDraft,consultation.sourceText);setConsultationDraft(null);close();}}/></View>}
-          <View style={s.composer}>
+          <View testID={consultation?"support-assistant-composer":undefined} style={consultation?{marginHorizontal:16,marginBottom:10,padding:6,gap:6,flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",borderWidth:1,borderColor:"#b4bdc6",borderRadius:18,backgroundColor:"#fafbfc"}:s.composer}>
             <TextInput
               accessibilityLabel="Solicitud a GO"
               value={input}
               onChangeText={setInput}
               placeholder="Escribe a GO…"
               placeholderTextColor="#56686B"
-              style={s.input}
+              style={consultation?[s.input,{minHeight:44,maxHeight:Math.max(44,Math.min(144,viewport.height-goSize-40)),borderWidth:0,borderRadius:12,backgroundColor:"#fafbfc"}]:s.input}
+              scrollEnabled
               multiline
               maxLength={2000}
               onFocus={() => voice.abort()}
               editable={!a.busy}
             />
-            <IconButton
+            {consultation?<GoSendButton testID="support-assistant-send" onPress={send} disabled={!input.trim()||!!a.busy||!consultation.respond}/>:<IconButton
               icon="send"
               label="Enviar solicitud"
               onPress={send}
               disabled={!input.trim() || !!a.busy}
-            />
+            />}
           </View>
-          {!keyboardVisible && dock}
+          {!consultation&&!keyboardVisible && dock}
           </View>}
         {a.panel && (
           <BookingAssistantPanels scrollRef={panelScroll}
@@ -756,9 +771,12 @@ export function BookingAssistantScreen({
             }}
           />
         )}
+          {consultation&&<View testID="support-assistant-thumb-controls" style={{position:"absolute",bottom:footerHeight+8,[handedness==="left"?"left":"right"]:22,flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
+            {dock}<GoCloseButton level="panel" appearance="light" disabled={saving} accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a AYUDA"} onPress={consultationBack}/>
+          </View>}
           </View>
         </KeyboardAvoidingView>
-        {!a.panel && <AssistantCloseControls disabled={saving} onClose={() => close()} onGoToLanding={onGoToLanding ? () => close(true) : undefined}
+        {!consultation&&!a.panel && <AssistantCloseControls disabled={saving} onClose={() => close()} onGoToLanding={onGoToLanding ? () => close(true) : undefined}
           viewport={{ width: viewport.width, height: viewport.height + headerHeight }}
           protectedBottom={footerHeight} topInset={insets.top} />}
         <GoScreenCloseGuide testID="assistant-swipe-guide" />

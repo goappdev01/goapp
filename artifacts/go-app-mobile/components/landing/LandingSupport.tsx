@@ -12,7 +12,8 @@ import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoScreenHost } from "@/components/ui/GoScreenModal";
 import { GOChatScreen } from "@/components/GOChatScreen";
 import { GoNoteAttachmentMenu } from "@/components/notes/GoNoteAttachmentMenu";
-import { IconButton,GoAssistantButton } from "@/components/booking-assistant/BookingAssistantUI";
+import { IconButton,GoAssistantButton,GoSendButton } from "@/components/booking-assistant/BookingAssistantUI";
+import { SupportVoiceNotice } from "./SupportVoiceNotice";
 import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 
 /** No production gateway is configured until receipt, privacy and authorization are verified. */
@@ -26,6 +27,8 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
     const hide=Keyboard.addListener(Platform.OS==="ios"?"keyboardWillHide":"keyboardDidHide",()=>setKeyboardVisible(false));return()=>{show.remove();hide.remove();};},[]);
   const editor=useRef<TextInputInstance|null>(null),nestedBack=useRef<(()=>boolean)|null>(null);
   const [toolsOpen,setToolsOpen]=useState(false),[bodyHeight,setBodyHeight]=useState(360),[textHeight,setTextHeight]=useState(96);
+  const [voiceAttempt,setVoiceAttempt]=useState(0);
+  const [composerHeight,setComposerHeight]=useState(108);
   const [aiSession,setAiSession]=useState<{key:string;kind:typeof kind;source:string}|null>(null),aiSequence=useRef(0);
   const liveAi=useRef(aiSession);liveAi.current=aiSession;
   const back=()=>{if(nestedBack.current?.())return;if(keyboardVisible||Keyboard.isVisible?.()){editor.current?.blur();Keyboard.dismiss();return;}voice.abort();setToolsOpen(false);onClose();};
@@ -55,7 +58,8 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
     setDrafts({incident:"",improvement:"",help:""}); setFiles({incident:[],improvement:[],help:[]});setExpanded(null); setReceipt(null);
     setRequests(null); setError(""); setBusy(false);setAiSession(null);setToolsOpen(false); requestKey.current=null; flight.current=false;
   }, [scopeKey]);
-  useEffect(()=>{setReceipt(null);setError("");setBusy(false);setToolsOpen(false);setAiSession(null);selection.current={start:0,end:0};flight.current=false;requestKey.current=null;},[kind]);
+  useEffect(()=>{setReceipt(null);setError("");setBusy(false);setToolsOpen(false);setAiSession(null);setVoiceAttempt(0);selection.current={start:0,end:0};flight.current=false;requestKey.current=null;},[kind,scopeKey]);
+  useEffect(()=>{if(!visible)setVoiceAttempt(0);},[visible]);
   useEffect(() => {
     if (!visible || kind !== "mine" || !gateway) return;
     let active = true; const owner = identity.current;
@@ -93,16 +97,23 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
   const disabled=kind==="mine"||!gateway||busy||picking||voice.status!=="idle"||!drafts[kind].trim()||drafts[kind].length>4000||files[kind].length>0&&!gateway.supportsAttachments;
   const statusLabel={received:"Recibida",in_progress:"En revisión",answered:"Resuelta",closed:"Cerrada"};
   const title=SUPPORT_ORBIT_ACTIONS.find(a=>a.kind===kind)!.title;
-  const toggleVoice=()=>{if(kind==="mine"||busy||picking)return;if(voice.status==="idle")speechTarget.current={owner:formIdentity.current,kind,base:draftsRef.current[kind],end:selection.current.end};voice.focus("detail");void voice.toggle();};
+  const toggleVoice=()=>{if(kind==="mine"||busy||picking)return;if(voice.status==="idle"){setVoiceAttempt(value=>value+1);speechTarget.current={owner:formIdentity.current,kind,base:draftsRef.current[kind],end:selection.current.end};}voice.focus("detail");void voice.toggle();};
   const openAI=()=>{if(busy||picking)return;voice.abort();editor.current?.blur();Keyboard.dismiss();setToolsOpen(false);setAiSession({key:scopeKey+":"+kind+":"+(++aiSequence.current),kind,source:kind==="mine"?"":draftsRef.current[kind]});};
+  const compact=bodyHeight<220;
   const fileList=kind!=="mine"&&files[kind].map(file=><View key={file.id} style={s.file}>
     {file.mime.startsWith("image/")?<Image accessibilityLabel={file.name} source={{uri:file.uri}} style={s.preview}/>:<Feather name="file-text" size={24} color="#17212b"/>}
     <Text style={[s.text,{flex:1}]}>{file.name}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel={"Quitar "+file.name} disabled={busy||picking} onPress={()=>void remove(file)} style={s.remove}><Feather name="x" size={22} color="#a1232e"/></TouchableOpacity>
   </View>);
+  const thumbControls=<View testID="support-thumb-controls" style={[s.controls,{bottom:composerHeight+(compact?10:18),flexDirection:handedness==="left"?"row-reverse":"row",[handedness==="left"?"left":"right"]:6},kind==="mine"&&{position:"relative",bottom:undefined,alignSelf:handedness==="left"?"flex-start":"flex-end"}]}>
+    {kind!=="mine"&&kind!=="help"&&<IconButton appearance="note" icon="paperclip" label={toolsOpen?"Ocultar adjuntos":"Adjuntar referencia"} disabled={busy||picking} onPress={()=>{editor.current?.blur();Keyboard.dismiss();setToolsOpen(open=>!open);}}/>}
+    <GoAssistantButton size={kind==="mine"?64:56} onPress={openAI} disabled={busy||picking||voice.status==="transcribing"}/>
+    <GoCloseButton level="panel" appearance="light" accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a las órbitas de ayuda"} onPress={back}/>
+  </View>;
   return <Modal visible={visible} animationType="slide" onRequestClose={back}>
     <GoScreenHost registerBack={handler=>{nestedBack.current=handler;}}>
     <KeyboardAvoidingView style={[s.screen,{paddingTop:insets.top,paddingBottom:keyboardVisible?0:insets.bottom}]} behavior={Platform.OS==="ios"?"padding":"height"}>
       <View style={s.header}><Text accessibilityRole="header" style={s.title}>{title}</Text></View>
+      {kind!=="mine"&&<SupportVoiceNotice key={kind+":"+scopeKey} message={voiceAttempt>0?voice.error||voice.notice:""} attempt={voiceAttempt}/>}
       <View testID="support-workspace" style={s.workspace} onLayout={event=>setBodyHeight(event.nativeEvent.layout.height)}>
       {kind==="mine"?<ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.history}>
         {gateway&&requests===null&&!error?<Text style={s.hint}>Cargando…</Text>:(!gateway||requests?.length===0)?<View testID="support-empty" style={s.empty}><Feather name="inbox" size={30} color="#535c66"/><Text style={s.text}>Tus solicitudes aparecerán aquí.</Text></View>:null}
@@ -114,28 +125,26 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
       </ScrollView>:<>
         <ScrollView testID="support-writing-scroll" style={{flex:1,minHeight:0}} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={s.writing}>
           {fileList}
-          <View testID="support-composer" style={[s.composer,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
+          {!!error&&<Text accessibilityRole="alert" style={s.error}>{error}</Text>}
+          {voice.status==="listening"&&<Text accessibilityLiveRegion="polite" style={s.activity}>● Escuchando</Text>}
+          {(voice.status==="preparing"||voice.status==="transcribing")&&<Text accessibilityLiveRegion="polite" style={s.hint}>{voice.status==="transcribing"?"Transcribiendo…":"Preparando micrófono…"}</Text>}
+          {!!receipt&&<Text accessibilityLiveRegion="polite" style={s.text}>Recibida · {receipt.reference}</Text>}
+        </ScrollView>
+          <View testID="support-composer" onLayout={event=>setComposerHeight(event.nativeEvent.layout.height)} style={[s.composer,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
             <TextInput ref={editor} testID="support-text" accessibilityLabel="Descripción de la solicitud" multiline scrollEnabled maxLength={4000} value={drafts[kind]} editable={!busy}
-              style={[s.input,{height:Math.max(56,Math.min(textHeight,220,Math.max(56,bodyHeight-48)))}]}
+              style={[s.input,{height:compact?Math.max(44,Math.min(textHeight,88,bodyHeight-90)):Math.max(96,Math.min(textHeight,220,Math.max(96,bodyHeight-104)))}]}
               onFocus={()=>{setToolsOpen(false);voice.focus("detail");}} onContentSizeChange={event=>setTextHeight(event.nativeEvent.contentSize.height)}
               onSelectionChange={event=>{selection.current=event.nativeEvent.selection;}}
               onChangeText={value=>{setDrafts(current=>({...current,[kind]:value}));requestKey.current=null;setReceipt(null);}}/>
-            <View style={{alignSelf:"flex-end"}}><IconButton appearance="note" icon={voice.status==="listening"?"square":"mic"} label={voice.status==="listening"?"Detener dictado":"Dictar solicitud"} disabled={busy||picking||voice.status==="preparing"||voice.status==="transcribing"} onPress={toggleVoice}/></View>
+            <View style={{alignSelf:"flex-end",gap:4,flexDirection:compact?(handedness==="left"?"row-reverse":"row"):"column"}}><IconButton appearance="note" icon={voice.status==="listening"?"square":"mic"} label={voice.status==="listening"?"Detener dictado":"Dictar solicitud"} disabled={busy||picking||voice.status==="preparing"||voice.status==="transcribing"} onPress={toggleVoice}/>
+              <GoSendButton testID="support-send" disabled={disabled} busy={busy} onPress={submit}/>
+            </View>
           </View>
-        </ScrollView>
-        {toolsOpen&&kind!=="help"&&<GoNoteAttachmentMenu tray handedness={handedness} maxHeight={Math.max(80,Math.min(260,bodyHeight-16))} disabled={busy||picking} onFile={()=>void attach(false)} onPhotos={()=>void attach(true)}/>}
+          {thumbControls}
+        {toolsOpen&&kind!=="help"&&<View pointerEvents="box-none" style={{position:"absolute",left:0,right:0,bottom:composerHeight+82,top:0}}><GoNoteAttachmentMenu tray handedness={handedness} maxHeight={Math.max(80,Math.min(260,bodyHeight-composerHeight-90))} disabled={busy||picking} onFile={()=>void attach(false)} onPhotos={()=>void attach(true)}/></View>}
       </>}
       </View>
-      {!!(voice.error||voice.notice||error)&&<Text accessibilityRole="alert" style={s.error}>{error||voice.error||voice.notice}</Text>}
-      {voice.status==="listening"&&<Text accessibilityLiveRegion="polite" style={s.activity}>● Escuchando</Text>}
-      {(voice.status==="preparing"||voice.status==="transcribing")&&<Text accessibilityLiveRegion="polite" style={s.hint}>{voice.status==="transcribing"?"Transcribiendo…":"Preparando micrófono…"}</Text>}
-      {!!receipt&&<Text accessibilityLiveRegion="polite" style={s.text}>Recibida · {receipt.reference}</Text>}
-      <View testID="support-thumb-controls" style={[s.controls,{flexDirection:handedness==="left"?"row-reverse":"row",justifyContent:kind==="mine"?"flex-end":"space-between"}]}>
-        {kind!=="mine"&&kind!=="help"&&<IconButton appearance="note" icon="paperclip" label={toolsOpen?"Ocultar adjuntos":"Adjuntar referencia"} disabled={busy||picking} onPress={()=>{editor.current?.blur();Keyboard.dismiss();setToolsOpen(open=>!open);}}/>}
-        <GoAssistantButton onPress={openAI} disabled={busy||picking||voice.status==="transcribing"}/>
-        {kind!=="mine"&&<TouchableOpacity testID="support-send" accessibilityRole="button" accessibilityState={{disabled}} accessibilityHint={!gateway?"Envío no disponible":undefined} disabled={disabled} onPress={submit} style={[s.send,disabled&&s.sendDisabled]}><Text style={[s.sendText,disabled&&s.sendTextDisabled]}>{busy?"Enviando…":"ENVIAR"}</Text></TouchableOpacity>}
-        <GoCloseButton level="panel" appearance="light" accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a las órbitas de ayuda"} onPress={back}/>
-      </View>
+      {kind==="mine"&&<>{!!error&&<Text accessibilityRole="alert" style={s.error}>{error}</Text>}<View style={{paddingHorizontal:16,paddingBottom:10}}>{thumbControls}</View></>}
     </KeyboardAvoidingView>
     {aiSession&&visible&&<GOChatScreen key={aiSession.key} visible handedness={handedness} onClose={()=>setAiSession(null)} consultation={{scopeKey:aiSession.key,title,sourceText:aiSession.source,respond:assistanceResponder,onAcceptDraft:aiSession.kind==="mine"?undefined:(proposal,baseline)=>{
       const target=aiSession.kind;if(target==="mine"||!identity.current.visible||liveAi.current?.key!==aiSession.key||formIdentity.current.key!==scopeKey||formIdentity.current.kind!==target)return;
@@ -146,10 +155,10 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="inci
   </Modal>;
 }
 const s=StyleSheet.create({
- screen:{flex:1,backgroundColor:"#ffffff"},workspace:{flex:1,minHeight:0,marginHorizontal:16},header:{paddingHorizontal:18,paddingVertical:12},title:{color:"#17212b",fontSize:22,fontWeight:"700"},
- writing:{flexGrow:1,justifyContent:"flex-end",paddingVertical:10,gap:10},history:{paddingVertical:12,gap:14},text:{color:"#17212b",fontSize:16,lineHeight:23,flexShrink:1},hint:{color:"#515d69",fontSize:13,lineHeight:19,paddingHorizontal:16},
+ screen:{flex:1,backgroundColor:"#ffffff"},workspace:{flex:1,minHeight:0,marginHorizontal:16,paddingBottom:10},header:{paddingHorizontal:18,paddingVertical:12},title:{color:"#17212b",fontSize:22,fontWeight:"700"},
+ writing:{flexGrow:1,justifyContent:"flex-end",paddingTop:10,paddingBottom:82,gap:10},history:{paddingVertical:12,gap:14},text:{color:"#17212b",fontSize:16,lineHeight:23,flexShrink:1},hint:{color:"#515d69",fontSize:13,lineHeight:19,paddingHorizontal:16},
  composer:{borderWidth:1,borderColor:"#b4bdc6",borderRadius:16,backgroundColor:"#fafbfc",padding:6,gap:4,alignItems:"flex-end"},input:{flex:1,minWidth:0,color:"#17212b",padding:10,fontSize:18,lineHeight:25,textAlignVertical:"top"},
  row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:10},file:{flexDirection:"row",alignItems:"center",gap:8,padding:6,borderWidth:1,borderColor:"#d2d8de",borderRadius:12},preview:{width:44,height:44,borderRadius:8},remove:{minWidth:44,minHeight:44,alignItems:"center",justifyContent:"center"},
- controls:{paddingHorizontal:16,paddingTop:6,paddingBottom:10,alignItems:"center",gap:8,flexShrink:0},send:{width:"33%",maxWidth:140,minHeight:48,borderRadius:16,backgroundColor:"#16834a",alignItems:"center",justifyContent:"center"},sendDisabled:{backgroundColor:"#e7eaee",borderWidth:1,borderColor:"#c2cad2"},sendText:{color:"#ffffff",fontSize:14,fontWeight:"800"},sendTextDisabled:{color:"#515d69"},
+ controls:{position:"absolute",alignItems:"flex-end",gap:8,flexShrink:0},
  empty:{alignItems:"center",paddingVertical:36,gap:14},card:{padding:16,gap:10,borderWidth:1,borderColor:"#d2d8de",borderRadius:16,backgroundColor:"#fff"},badge:{color:"#343d47",fontSize:12,fontWeight:"600",backgroundColor:"#eef0f3",paddingHorizontal:10,paddingVertical:6,borderRadius:12},error:{color:"#a1232e",fontSize:14,lineHeight:20,paddingHorizontal:16},activity:{color:"#a1232e",fontSize:13,paddingHorizontal:16}
 });

@@ -43,10 +43,17 @@ export function IconButton({
   );
 }
 /** Approved GO gold surface/white label, without coupling its action to dictation. */
-export function GoAssistantButton({onPress,disabled=false}:{onPress:()=>void;disabled?:boolean}){
+export function GoAssistantButton({onPress,disabled=false,size=56}:{onPress:()=>void;disabled?:boolean;size?:56|64}){
  return <TouchableOpacity accessibilityRole="button" accessibilityLabel="Consultar a GO IA" accessibilityState={{disabled}} disabled={disabled} activeOpacity={0.78} onPress={onPress}
-  style={[s.goButton,{width:56,minWidth:56,maxWidth:56,height:56,minHeight:56,borderRadius:28,marginHorizontal:0,alignItems:"center",justifyContent:"center"},disabled&&s.disabled]}>
+  style={[s.goButton,{width:size,minWidth:size,maxWidth:size,height:size,minHeight:size,borderRadius:size/2,marginHorizontal:0,alignItems:"center",justifyContent:"center"},disabled&&s.disabled]}>
   <Text style={[s.goLabel,{fontSize:19,fontWeight:"900"}]}>GO</Text>
+ </TouchableOpacity>;
+}
+/** Compact paper plane; disabled transport is explicit and never implies delivery. */
+export function GoSendButton({onPress,disabled,busy=false,label="Enviar solicitud",testID}:{onPress:()=>void;disabled:boolean;busy?:boolean;label?:string;testID?:string}){
+ return <TouchableOpacity testID={testID} accessibilityRole="button" accessibilityLabel={busy?"Enviando…":label} accessibilityState={{disabled,busy}} accessibilityHint={disabled?"Envío no disponible":undefined} disabled={disabled} onPress={onPress} activeOpacity={0.75}
+  style={{width:44,height:44,alignItems:"center",justifyContent:"center",borderRadius:14,backgroundColor:disabled?"#edf0ee":"#e7f3eb",borderWidth:1,borderColor:disabled?"#d2d9d4":"#9bc6ac"}}>
+  <Feather name="send" size={22} color={disabled?"#728578":"#16834a"}/>
  </TouchableOpacity>;
 }
 export function Detail({ label, value }: { label: string; value: string }) {

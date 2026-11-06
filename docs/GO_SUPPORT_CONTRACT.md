@@ -15,8 +15,14 @@ Las cuatro superficies son blancas, con texto oscuro y bordes discretos.
 Los campos conservan su borrador al volver. El editor crece hasta un límite,
 permanece cerca del pie y admite desplazamiento para textos largos. El teclado
 utiliza un único KeyboardAvoidingView y su flecha lo oculta sin borrar el texto.
-ENVIAR ocupa aproximadamente un tercio del ancho útil, verde/blanco al estar
-habilitado y gris neutro inactivo. No hay mensajes provisionales permanentes.
+El envío se integra en el editor con avión de papel pequeño verde y objetivo
+táctil de 44 puntos. Sin transporte real permanece desactivado y atenuado.
+GO y la flecha quedan juntos justo sobre el editor, en el lado dominante,
+reflejados para zurdos. La altura real del editor determina su posición, dentro
+de una superficie táctil completa; no se reserva una fila exclusiva para GO.
+Las vistas de poca altura redistribuyen micrófono/envío y limitan el campo sin
+perder desplazamiento. Mis solicitudes conserva su lista y amplía GO de 56 a
+64 puntos, junto al cierre. No hay mensajes provisionales permanentes.
 No se ha encontrado una API, almacenamiento o panel de soporte reutilizable.
 No se instala ni configura un gateway de producción: ENVIAR está desactivado,
 Mis solicitudes tiene una plantilla para resumen, tipo, fecha, estado y detalle/
@@ -28,6 +34,9 @@ Un micrófono independiente reutiliza useGoNoteVoice/useBookingVoice: comprueba
 disponibilidad antes de pedir permisos o grabar, inserta una sola transcripción
 final en el cursor y conserva el texto previo. Cancelar/cambiar cuenta invalida
 la captura. No hay cuentas regresivas ni envío automático del formulario.
+Los fallos del dictado solo se muestran tras intentarlo, como un aviso breve,
+neutro y cerrable. Se mantiene la distinción de permiso, sesión y disponibilidad;
+las validaciones y los errores nativos originales no se modifican.
 No se capturan pantallas, voz, archivos ni datos privados automáticamente.
 No hay casilla ni envío automático de contexto Landing, ni placeholder de dictado.
 
@@ -37,6 +46,11 @@ Las cuatro pantallas abren el GOChatScreen existente en modo de consulta sin
 acceso al dispatcher de tareas/reservas. GoScreenHost conserva un solo modal
 nativo. La consulta no sustituye el borrador; una propuesta válida requiere
 «Usar propuesta en AYUDA» y comprobar que el texto original sigue intacto.
+En este contexto el asistente presenta GO y una única flecha a su derecha
+(espejo zurdo) flotando sobre el editor inferior, con avión verde integrado.
+La flecha oculta primero el teclado y después regresa al formulario; aceptar
+una propuesta conserva su retorno directo. El asistente general de reservas y
+tareas mantiene su dock, sus controles y su comportamiento anteriores.
 No se incorpora automáticamente el historial privado de Mis solicitudes.
 No hay otro motor de IA ni peticiones de interpretación de pago.
 El puerto de respuesta está preparado y probado con transporte sintético,
