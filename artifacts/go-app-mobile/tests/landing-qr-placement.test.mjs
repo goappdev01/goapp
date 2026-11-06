@@ -42,8 +42,9 @@ test('the photographed 393 × 852 Landing places AYUDA and QR together below act
   assert.ok(f.landingCornerPair,'both targets fit without moving an active orbit');
   assert.ok(hand==='right'?help.x>qr.x+qr.width&&help.x>=300:qr.x>help.x+help.width&&help.x<=60);
   assert.ok(help.y>=d.height*.85&&qr.y>=d.height*.85);
-  assert.ok(help.y+help.height<=d.height-d.insets.bottom&&qr.y+qr.height<=d.height-8);
-  assert.ok(f.landingQrPosition.y>=help.y+26,'QR sits independently below AYUDA on the photographed iPhone');
+  assert.equal(help.y,780,'AYUDA is 10pt lower than the approved position');
+  assert.equal(f.landingQrPosition.y,811,'QR is 15pt lower than its previous position');
+  assert.ok(help.y+help.height<=d.height-8&&qr.y+qr.height<=d.height-8);
   assert.ok(!overlaps(help,qr));
   assert.deepEqual(JSON.parse(JSON.stringify(f.landingArrangement.offsets)),
     JSON.parse(JSON.stringify(fixture(d,'estandar','USER',hand).landingArrangement.offsets)));

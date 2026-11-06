@@ -25,10 +25,12 @@ export function placeLandingHelpQr({ width, height, insets, handedness, helpSize
       if (touch.x < insets.left + 8 || touch.x + touch.width > width - insets.right - 8
         || touch.y < insets.top + 8 || touch.y + touch.height > height - insets.bottom
         || !clear(help) || !clear(touch)) continue;
-      // QR is independent of AYUDA. Keep its full touch area and at least 8pt above the physical edge.
-      let qrDrop = Math.min(12, Math.max(0, height - 8 - touch.y - qrTouch));
+      // Lower each control independently, preserving its touch area and an 8pt physical edge margin.
+      let helpDrop = Math.min(10, Math.max(0, height - 8 - help.y - helpSize));
+      while (helpDrop > 0 && !clear({ ...help, y: help.y + helpDrop })) helpDrop--;
+      let qrDrop = Math.min(27, Math.max(0, height - 8 - touch.y - qrTouch));
       while (qrDrop > 0 && !clear({ ...touch, y: touch.y + qrDrop })) qrDrop--;
-      return { help, qr: { x: touch.x + qrHit, y: touch.y + 2 * qrHit + qrDrop } };
+      return { help: { ...help, y: help.y + helpDrop }, qr: { x: touch.x + qrHit, y: touch.y + 2 * qrHit + qrDrop } };
     }
   }
   return null;

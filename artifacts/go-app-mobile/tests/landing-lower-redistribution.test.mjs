@@ -47,7 +47,7 @@ test('support corner stays on the configured side without covering GO or active 
  for(const d of devices.slice(0,3))for(const hand of ['left','right'])for(const preset of ['compacto','estandar','grande'])for(const supportMode of [false,true]){
   const g=fixture(d,preset,'ADMIN',hand,{supportMode}),r=g.supportRect;
   assert.ok(hand==='right'?r.x>=d.width/2:r.x+r.width<=d.width/2+12);
-  assert.ok(r.y>=d.height/2&&r.y+r.height<=d.height-d.insets.bottom,JSON.stringify({d,hand,preset,supportMode,r}));
+  assert.ok(r.y>=d.height/2&&r.y+r.height<=d.height-8,JSON.stringify({d,hand,preset,supportMode,r}));
   for(const [i,o] of (g.landingArrangement.obstacles??[]).entries()){if(i>0&&i<=8)continue;const distance=Math.hypot(r.x+r.width/2-o.x-o.width/2,r.y+r.height/2-o.y-o.height/2);
    assert.ok(distance>=(r.width+o.width)/2,JSON.stringify({width:d.width,hand,preset,r,o}));}
  }
