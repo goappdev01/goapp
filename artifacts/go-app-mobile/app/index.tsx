@@ -1971,6 +1971,7 @@ function PremiumOrbitBtn({
   fillLogo = false,
   logoScale,
   flat = false,
+  labelOnly = false,
 }: {
   accessibilityLabel?: string;
   color: string;
@@ -1999,6 +2000,7 @@ function PremiumOrbitBtn({
   fillLogo?: boolean;
   logoScale?: number;
   flat?: boolean;
+  labelOnly?: boolean;
 }) {
   const { t } = useLanguage();
   const pressAnim = React.useRef(new Animated.Value(1)).current;
@@ -2153,13 +2155,13 @@ function PremiumOrbitBtn({
               height: "100%",
               alignItems: "center",
               justifyContent: "center",
-              gap: 2,
+              gap: labelOnly ? 0 : 2,
               paddingHorizontal: paddingH,
               borderRadius: 999,
               backgroundColor: "#05070D",
             }}
           >
-            {(!logoUri || imgFailed) && (
+            {!labelOnly && (!logoUri || imgFailed) && (
               <Feather name={icon} size={iconSize} color={iconColor} />
             )}
             {labelOpacity > 0 && (!logoUri || imgFailed) && (
@@ -2231,15 +2233,15 @@ function PremiumOrbitBtn({
             height: "100%",
             alignItems: "center",
             justifyContent: "center",
-            gap: 2,
+            gap: labelOnly ? 0 : 2,
             paddingHorizontal: paddingH,
             borderRadius: 999,
           }}
         >
-          {isComida
+          {!labelOnly && (isComida
             ? <Ionicons name="restaurant" size={iconSize} color={iconColor} />
             : <Feather name={icon} size={iconSize} color={iconColor} />
-          }
+          )}
           {labelOpacity > 0 && (
             <Text
               style={{
@@ -13844,8 +13846,9 @@ function HomeScreenContent() {
   // PR15/PR16 frozen close position. Reserve its touch lane before laying out commands.
   const legacyLandingClose = { x: screen.width - Math.max(18, insets.right + 18) - 40,
     y: screen.height - (bottomReserved + orbitWrapSize - 50) - 40, width: 40, height: 40 };
-  const supportRect = supportOrbitRect(screen.width, screen.height, insets, handedness);
-  const landingOrbitObstacles: HumanityRect[] = [supportRect];
+  // Keep the approved content/orbital layout reservation; only AYUDA's painted position changes.
+  const supportLayoutRect = supportOrbitRect(screen.width, screen.height, insets, handedness === "right" ? "left" : "right");
+  const landingOrbitObstacles: HumanityRect[] = [supportLayoutRect];
   const landingCenter = { x: screen.width - dockRight - systemBoundingRadius + (handedness === "right" ? maxX : minX),
     y: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + landingDock.maxY };
   const addLandingOrbitObstacle = (degrees: number, radius: number, size: number) => {
@@ -13894,7 +13897,7 @@ function HomeScreenContent() {
     ? landingNextHeight + Math.round(8 * uiScaleFactor) : cambiosOpen && landingHasNext ? 54 : 0;
   const landingHelpBottom = landingBaseline + 12;
   const landingBaseFrame = landingContentFrame({ width: screen.width, height: screen.height,
-    insets: screen.width > screen.height ? {...insets,bottom:insets.bottom+supportRect.height+16} : insets,
+    insets: screen.width > screen.height ? {...insets,bottom:insets.bottom+supportLayoutRect.height+16} : insets,
     safeTop: landingSafeTop, baseline: landingBaseline, boundingRadius: systemBoundingRadius, handedness,
     controlSize: Math.max(44, Math.round(32 * uiScaleFactor), fullLandingArchitecture ? Math.round(56 * uiScaleFactor) + 16 - 20 : 0),
     naturalHeight: Math.max(landingNextHeight, landingPendingHeight + landingPendingOffset,
@@ -14149,7 +14152,7 @@ function HomeScreenContent() {
   const toLandingRootRect = (rect: HumanityRect): HumanityRect => landingBaseFrame.virtual
     ? { ...rect, x: rect.x + landingBaseFrame.left, y: rect.y + landingBaseFrame.top } : rect;
   // Reserve the shared region even when minimized, so Humanity never moves on panel changes.
-  const humanityBlocks = [supportRect, landingCloseRect, toLandingRootRect(landingPanels.commands),
+  const humanityBlocks = [supportLayoutRect, landingCloseRect, toLandingRootRect(landingPanels.commands),
     toLandingRootRect(landingPanels.region)];
   const humanityPanelsMeasured = true;
   const humanityPlacement = humanityPanelsMeasured && posReady ? placeHumanity({
@@ -14197,7 +14200,7 @@ function HomeScreenContent() {
     if (!arc.fitted) return unchanged;
     const move = (rect: HumanityRect) => ({ ...rect, y: rect.y + arc.offsetY });
     const humanity = humanityPlacement ?? (landingInlineHumanity ? inlineHumanityRect : null);
-    const exclusions = [supportRect, move(toLandingRootRect(landingPanels.commands)), move(toLandingRootRect(landingPanels.region)),
+    const exclusions = [supportLayoutRect, move(toLandingRootRect(landingPanels.commands)), move(toLandingRootRect(landingPanels.region)),
       ...closeHeaderObstacles, ...closeReservedColumn, ...(humanity ? [move(humanity)] : [])];
     const closeRect = placeLandingClose({ ...landingCloseRect, y: landingCloseRect.y + arc.offsetY },
       { x: insets.left, y: insets.top, width: screen.width - insets.left - insets.right,
@@ -14214,6 +14217,13 @@ function HomeScreenContent() {
     landingInlineHumanity, inlineHumanityRect.x, inlineHumanityRect.y, inlineHumanityRect.width,
     inlineHumanityRect.height, closeQrX, closeQrY, closeQrSize, closeQrHit, closeHeaderHeight]);
   const landingOffsetY = landingArrangement.offsetY;
+  const supportRect = supportOrbitRect(screen.width, screen.height, insets, handedness, 44, [
+    ...((landingArrangement as {obstacles?:HumanityRect[]}).obstacles ?? landingOrbitObstacles.slice(1)).map(rect=>({...rect,circular:true})),
+    ...[landingPanels.commands, landingPanels.region].map(rect=>{const root=toLandingRootRect(rect);return {...root,y:root.y+landingOffsetY};}),
+    ...closeHeaderObstacles,
+    ...(humanityPlacement ? [{...humanityPlacement,y:humanityPlacement.y+landingOffsetY}]
+      : landingInlineHumanity ? [{...inlineHumanityRect,y:inlineHumanityRect.y+landingOffsetY}] : []),
+  ]);
   const landingLowerOffsets = landingArrangement.offsets;
   const landingDisplayCloseRect = landingArrangement.closeRect;
   const landingNavigationCloseRect = placeLandingClose({...landingDisplayCloseRect,x:handedness==="right"?landingDisplayCloseRect.x-24:landingDisplayCloseRect.x,y:landingDisplayCloseRect.y-24,width:64,height:64},{x:insets.left,y:insets.top,width:screen.width-insets.left-insets.right,height:screen.height-insets.top-insets.bottom},[...landingOrbitObstacles,...closeHeaderObstacles,...closeReservedColumn]) ?? {x:Math.max(insets.left,Math.min(screen.width-insets.right-64,landingDisplayCloseRect.x)),y:Math.max(insets.top,Math.min(screen.height-insets.bottom-64,landingDisplayCloseRect.y)),width:64,height:64};
@@ -17133,10 +17143,10 @@ function HomeScreenContent() {
                 const active = !!action || exit;
                 return <View key={it.key} testID={`landing-quiet-orbit-${i}`} pointerEvents={active?"auto":"none"}
                   style={{ position: "absolute", left: x, top: y }}>
-                  <PremiumOrbitBtn color={it.color} selected={false} dimmed={supportMode&&!active} onPress={()=>{if(action)openSupportAction(action.kind);else if(exit)setSupportMode(false);}}
+                  {exit ? <GoCloseButton level="container" preserveTouchSize touchSize={orbitBtnVisualSize} accessibilityLabel="Salir del modo ayuda" onPress={()=>setSupportMode(false)}/> : <PremiumOrbitBtn color={it.color} selected={false} dimmed={supportMode&&!active} onPress={()=>{if(action)openSupportAction(action.kind);else if(exit)setSupportMode(false);}}
                     icon={action?.icon??(exit?"chevron-down":"circle")} label={action?.label??(exit?"VOLVER":"")} accessibilityLabel={action?.title??(exit?"Salir del modo ayuda":undefined)}
                     size={orbitBtnVisualSize} iconSize={active?Math.round(24*uiScaleFactor):0} labelSize={active?Math.max(8,Math.round(10*uiScaleFactor)):0}
-                    labelOpacity={active?1:0} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />
+                    labelOpacity={active?1:0} labelOnly={!!action} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />}
                 </View>;
               })}
             </View>
@@ -25491,8 +25501,8 @@ function HomeScreenContent() {
 
       {!anyOverlayOpen && !goAuthOpen && !empresaOpen && !adminDashOpen && !rutasMode && kbHeight === 0 && (
         <View testID="landing-support-orbit" style={{position:"absolute",left:supportRect.x,top:supportRect.y,width:supportRect.width,height:supportRect.height,zIndex:100}}>
-          <PremiumOrbitBtn color="#4A80BD" selected={supportMode} onPress={()=>setSupportMode(active=>!active)} icon={supportMode?"x":"message-circle"}
-            label={supportMode?"SALIR":"AYUDA"} accessibilityLabel={supportMode?"Salir del modo ayuda":"AYÚDANOS A MEJORAR"} size={supportRect.width} iconSize={22} labelSize={8} labelSpacing={0} paddingH={6}/>
+          {supportMode ? <GoCloseButton level="container" preserveTouchSize touchSize={supportRect.width} accessibilityLabel="Salir del modo ayuda" onPress={()=>setSupportMode(active=>!active)}/> : <PremiumOrbitBtn color="#4A80BD" selected={false} onPress={()=>setSupportMode(active=>!active)} icon="message-circle"
+            label="AYUDA" accessibilityLabel="AYÚDANOS A MEJORAR" size={supportRect.width} iconSize={22} labelSize={8} labelSpacing={0} paddingH={6}/>}
         </View>
       )}
       {/* HUMANITY retains its original slot whenever it fits. */}

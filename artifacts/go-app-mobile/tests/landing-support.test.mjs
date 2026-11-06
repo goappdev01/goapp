@@ -31,6 +31,32 @@ function fixture(gateway){let cursor=0,slots=[],effects=[];const files=supportFi
  return{props,events,navigation,files,picker,speech,get voice(){return voiceProps;},render(p=props){cursor=0;effects=[];const tree=scope.exports.LandingSupport(p);for(const run of effects)run();return tree;}};
 }
 const tick=()=>new Promise(setImmediate);
+
+test('real AYUDA buttons render only their centered label without changing the normal orbit renderer',()=>{
+ const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+ const declarations=['_orbitLighten','_orbitDarken','PremiumOrbitBtn'].map(name=>ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text===name).getText(ast)).join('\n');
+ const scope={result:null,React:{createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),useRef:value=>({current:value}),useState:value=>[value,()=>{}],Fragment:'Fragment'},
+  useLanguage:()=>({t:x=>x}),Animated:{View:'AnimatedView',Value:class{}},View:'View',Text:'Text',TouchableOpacity:'TouchableOpacity',LinearGradient:'LinearGradient',Feather:'Feather',Ionicons:'Ionicons'};
+ vm.runInNewContext(ts.transpileModule(declarations,{compilerOptions:{target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
+ for(const flat of [false,true])for(const action of api.SUPPORT_ORBIT_ACTIONS){
+  const calls=[],props={color:'#4A80BD',selected:false,onPress:()=>calls.push(action.kind),icon:action.icon,label:action.label,size:65,iconSize:24,labelSize:10,labelSpacing:0,paddingH:4,flat};
+  const normal=scope.PremiumOrbitBtn(props),help=scope.PremiumOrbitBtn({...props,labelOnly:true});
+  assert.equal(nodes(normal).filter(n=>n.type==='Feather').length,1);assert.equal(nodes(help).filter(n=>n.type==='Feather'||n.type==='Ionicons').length,0);
+  const label=nodes(help).find(n=>n.type==='Text');assert.equal(text(label),action.label);assert.equal(label.props.style.textAlign,'center');
+  const surface=nodes(help).find(n=>n.children?.includes(label));assert.equal(surface.props.style.alignItems,'center');assert.equal(surface.props.style.justifyContent,'center');assert.equal(surface.props.style.gap,0);
+  const tap=nodes(help).find(n=>n.type==='TouchableOpacity');tap.props.onPress();assert.deepEqual(calls,[action.kind]);assert.equal(JSON.stringify(tap.props.style),JSON.stringify(nodes(normal).find(n=>n.type==='TouchableOpacity').props.style));
+ }
+});
+
+test('both real help exits retain their old action and reuse shared opacity-aware navigation',()=>{
+ const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),exits=[];
+ (function visit(n){if(ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='GoCloseButton'&&n.attributes.getText(ast).includes('Salir del modo ayuda'))exits.push(n);ts.forEachChild(n,visit);})(ast);
+ assert.equal(exits.length,2);
+ for(const node of exits){const attrs=node.attributes.properties;assert.equal(attrs.find(p=>p.name?.text==='level').initializer.text,'container');assert.ok(attrs.some(p=>p.name?.text==='preserveTouchSize'));
+  const handler=attrs.find(p=>p.name?.text==='onPress').initializer.expression.getText(ast),calls=[];
+  vm.runInNewContext(ts.transpileModule('const press='+handler+';press();',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{setSupportMode:v=>calls.push(typeof v==='function'?v(true):v)});assert.deepEqual(calls,[false]);
+ }
+});
 test('the real Landing entry toggles orbital help instead of opening the former options panel',()=>{
  const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let handler,mount;
  const visit=n=>{if((ts.isJsxOpeningElement(n)||ts.isJsxSelfClosingElement(n))&&n.tagName.getText(ast)==='PremiumOrbitBtn'&&n.attributes.getText(ast).includes('AYÚDANOS A MEJORAR'))handler=n.attributes.properties.find(p=>p.name?.getText(ast)==='onPress').initializer.expression;
@@ -43,14 +69,14 @@ test('help relabels the eight real Landing orbits without changing any original 
  (function walk(n){all.push(n);ts.forEachChild(n,walk)})(ast);
  const decl=name=>all.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name);
  const mode=all.find(n=>ts.isConditionalExpression(n)&&n.whenTrue.getText(ast).includes('testID="landing-quiet-orbits"')).whenTrue;
- const calls=[],scope={result:null,React:{createElement:(type,props,...children)=>({type,props,children:children.flat(Infinity)})},View:'View',PremiumOrbitBtn:'PremiumOrbitBtn',StyleSheet:{absoluteFill:{}},SUPPORT_ORBIT_ACTIONS:api.SUPPORT_ORBIT_ACTIONS,supportOrbitSlot:api.supportOrbitSlot,handedness:'right',
+ const calls=[],scope={result:null,React:{createElement:(type,props,...children)=>({type,props,children:children.flat(Infinity)})},View:'View',GoCloseButton:'GoCloseButton',PremiumOrbitBtn:'PremiumOrbitBtn',StyleSheet:{absoluteFill:{}},SUPPORT_ORBIT_ACTIONS:api.SUPPORT_ORBIT_ACTIONS,supportOrbitSlot:api.supportOrbitSlot,handedness:'right',
  supportMode:true,orbitWrapSize:275,orbitRadiusVisual:99,orbitBtnVisualSize:65,uiScaleFactor:1,openSupportAction:k=>calls.push(k),setSupportMode:v=>calls.push(v)};
  const code=['GO_COLORS','INTENTS'].map(n=>'const '+decl(n).getText(ast)+';').join('\n')+'result='+mode.getText(ast);
  vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{alwaysStrict:false,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
  const help=scope.result.children;assert.equal(help.length,8);
  scope.supportMode=false;vm.runInNewContext(ts.transpileModule('result='+mode.getText(ast),{compilerOptions:{alwaysStrict:false,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
  for(let i=0;i<8;i++){const h=help[i].children[0].props,n=scope.result.children[i].children[0].props;
-  assert.equal(h.color,n.color);assert.equal(JSON.stringify(help[i].props.style),JSON.stringify(scope.result.children[i].props.style));h.onPress();}
+  if(help[i].children[0].type==='GoCloseButton'){assert.equal(h.level,'container');}else{assert.equal(h.color,n.color);if(h.label)assert.equal(h.labelOnly,true);}assert.equal(JSON.stringify(help[i].props.style),JSON.stringify(scope.result.children[i].props.style));h.onPress();}
  assert.deepEqual(calls,['mine','improvement',false,'incident','help']);
  assert.equal(help.filter(n=>n.children[0].props.dimmed).length,3);assert.equal(help.filter(n=>n.props.pointerEvents==='none').length,3);
  scope.supportMode=true;scope.handedness='left';vm.runInNewContext(ts.transpileModule('result='+mode.getText(ast),{compilerOptions:{alwaysStrict:false,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
@@ -61,9 +87,9 @@ test('help relabels the eight real Landing orbits without changing any original 
 test('floating back hides the keyboard first and preserves the current form',()=>{
  const f=fixture();f.render();f.events.get('keyboardWillShow')();let tree=f.render();nodes(tree).find(n=>n.type==='GoCloseButton').props.onPress();assert.deepEqual(f.navigation,['keyboard']);tree=f.render();nodes(tree).find(n=>n.type==='GoCloseButton').props.onPress();assert.deepEqual(f.navigation,['keyboard','abort','back']);
 });
-test('orbit is in the opposite bottom corner, safe and at least 44pt for both hands and iPhone widths',()=>{
+test('orbit is in the dominant bottom corner, safe and at least 44pt for both hands and iPhone widths',()=>{
  for(const width of [320,375,430])for(const hand of ['left','right']){const r=api.supportOrbitRect(width,844,{left:0,right:0,bottom:34},hand);
- assert.ok(r.width>=44&&r.height>=44);assert.equal(r.y+r.height,844-34-8);assert.equal(hand==='right'?r.x:width-r.x-r.width,12);}
+ assert.ok(r.width>=44&&r.height>=44);assert.equal(r.y+r.height,844-34-8);assert.equal(hand==='left'?r.x:width-r.x-r.width,12);}
 });
 test('unconfigured real UI never sends or displays a fake empty history; close preserves draft and account change clears it',()=>{
  const f=fixture();f.render();let tree=f.render();assert.ok(text(tree).includes('Comunicar incidencia'));assert.equal(button(tree,'Proponer mejora'),undefined);

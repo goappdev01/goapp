@@ -23,7 +23,13 @@ export async function sendSupportRequest(gateway:SupportGateway, command:Support
     ||files.some(f=>!receipt.attachments?.some(a=>a.clientId===f.id&&!!a.id))))throw Error("Adjuntos sin confirmar.");
   return receipt;
 }
-export function supportOrbitRect(width:number,height:number,insets:{left:number;right:number;bottom:number},hand:"left"|"right") {
-  const size=width<440?48:60,edge=12;
-  return {x:hand==="right"?insets.left+edge:width-insets.right-edge-size,y:height-insets.bottom-8-size,width:size,height:size};
+export function supportOrbitRect(width:number,height:number,insets:{left:number;right:number;bottom:number;top?:number},hand:"left"|"right",minimumSize=44,obstacles:readonly {x:number;y:number;width:number;height:number;circular?:boolean}[]=[]) {
+  const size=Math.max(minimumSize,width<440?48:60),edge=12;
+  const rect={x:hand==="right"?width-insets.right-edge-size:insets.left+edge,y:height-insets.bottom-8-size,width:size,height:size};
+  // Move only AYUDA upward along its own edge, keeping every existing satellite fixed.
+  const minY=Math.max(8,(insets.top??0)+8);
+  while(rect.y>minY&&obstacles.some(o=>o.circular
+    ? Math.hypot(rect.x+size/2-o.x-o.width/2,rect.y+size/2-o.y-o.height/2)<(size+o.width)/2+2
+    : rect.x<o.x+o.width+8&&rect.x+size+8>o.x&&rect.y<o.y+o.height+8&&rect.y+size+8>o.y))rect.y=Math.max(minY,rect.y-4);
+  return rect;
 }
