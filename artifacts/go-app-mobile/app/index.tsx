@@ -16,11 +16,6 @@ import { setInternalBookingContext, getBookingParticipantIdentity } from "@/data
 import { orbitAccountLabelSize } from "@/lib/orbitAccountLabel";
 import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
-import { ListadosProposalActions } from "@/components/ListadosProposalActions";
-import { ListadosSwipeHint } from "@/components/ListadosSwipeHint";
-import { listHistoryBucket } from "@/lib/listadosHistory";
-import { completionDecision } from "@/lib/goActionCompletion";
-import { useListadosHistory } from "@/hooks/useListadosHistory";
 import { useActionCompletion } from "@/hooks/useActionCompletion";
 import { LandingActionCompletion, completionFrame, completionPanelFrame, LANDING_COMPLETION_PANEL_GAP, type CompletionFrame } from "@/components/landing/LandingActionCompletion";
 import { ownedCompletionEntry, completionEligible, completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
@@ -3395,10 +3390,7 @@ function HomeScreenContent() {
   const qdOriginContextRef = useRef<{ listOpen: boolean; notesOpen: boolean; agendaOpOpen: boolean }>({ listOpen: false, notesOpen: false, agendaOpOpen: false });
   // Origen del flujo principal (Landing directo desde Calendario / Listados)
   const goNavOriginRef = useRef<{ agendaOpOpen: boolean; listOpen: boolean }>({ agendaOpOpen: false, listOpen: false });
-  const [listFilter, setListFilter] = useState<"todos" | "pendiente" | "aceptado" | "propuesta" | "papelera" | "reservas" | "archivo">("todos");
-  const [listArchiveSection,setListArchiveSection]=useState<"manual"|"old">("manual");
-  const [listSettingsOpen,setListSettingsOpen]=useState(false);
-  const [listSwipeUsed,setListSwipeUsed]=useState<string|null>(null);
+  const [listFilter, setListFilter] = useState<"todos" | "pendiente" | "aceptado" | "propuesta" | "papelera" | "reservas">("todos");
   // Filtro por ACTIVIDAD del listado global. Independiente del filtro
   // de estado (listFilter): permite acotar los GO mostrados a una
   // categoría de actividad concreta. "todas" no acota nada.
@@ -3558,7 +3550,6 @@ function HomeScreenContent() {
   const customerBookings=useCustomerBookings(demoBookingRepository,goView.loaded && goView.view==="USER" && !adminAccess.checking && (!adminAccess.isOwner || ownerDemo.loaded));
   const completionEntries=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER").filter(entry=>canReadBoardTask(entry)&&!isArchivedNote(entry)&&noteDocument(entry)?.destination!=="go"&&(!noteDocument(entry)||completionIdentity.ready&&!!completionIdentity.scope&&noteInScope(entry,completionIdentity.scope))),[personalGoLog,customerBookings.entries,goView.view,adminAccess.allowed,adminAccess.checking,completionIdentity.ready,completionIdentity.scope?.userId,completionIdentity.scope?.context]);
   const actionCompletion = useActionCompletion(completionEntries);
-  const listHistory = useListadosHistory(completionIdentity.ready ? completionIdentity.scope : null);
   const goLog=useMemo(()=>completionEntries.filter(entry=>!actionCompletion.isDiscarded(entry)),[completionEntries,actionCompletion.isDiscarded]);
   const [landingDetailsId, setLandingDetailsId] = useState<string | null>(null);
   const [landingCompletionHeight, setLandingCompletionHeight] = useState(44);
@@ -12484,18 +12475,11 @@ function HomeScreenContent() {
     const scope = noteIdentity.scope;
     const archive = noteIdentity.ready && scope ? personalGoLog.filter(entry =>
       isArchivedNote(entry) && noteInScope(entry, scope) && canReadBoardTask(entry) && !actionCompletion.isDiscarded(entry)) : [];
-    const entries = mergeCompletionEntries([...goLog, ...archive], actionCompletion.candidates);
+    const entries = mergeCompletionEntries([...goLog, ...archive], actionCompletion.candidates.filter(entry =>
+      actionCompletion.status(entry) === "pending" || !!entry.changeProposal));
 
     return entries.filter(entry => {
-      if (actionCompletion.isDiscarded?.(entry) && listFilter !== "papelera") return false;
-      const bucket = listHistoryBucket(entry, actionCompletion.doc ? completionDecision(entry,actionCompletion.doc) : undefined,
-        actionCompletion.now ?? Date.now(),listHistory.days);
-      if (bucket === "hidden") return false;
-      if (listFilter === "archivo") return listArchiveSection === "old" ? bucket === "old" : bucket === "archive" && !entry.deleted;
-      if (bucket !== "current" && listFilter !== "papelera") return false;
-      if (listFilter === "reservas") return entryIsReservation(entry) && !entry.deleted
-        && !(isBusinessMode && entry.id.startsWith("go_booking_cli_"))
-        && !(isUserMode && entry.id.startsWith("go_booking_prv_"));
+      if (listFilter === "reservas") return entry.customerBooking === true && customerBookings.entries.some(row => row.id === entry.id);
       const inTrash = !!(entry.deleted || entry.estado === "rechazado");
       if ((listFilter === "papelera") !== inTrash) return false;
       if (!inTrash) {
@@ -12514,7 +12498,7 @@ function HomeScreenContent() {
       return listTypeFilter === "todos" || type === listTypeFilter;
     });
   }, [listOpen, noteIdentity.ready, noteIdentity.scope, personalGoLog, goLog, actionCompletion.candidates, actionCompletion.status,
-    actionCompletion.isDiscarded, actionCompletion.doc, actionCompletion.now, listHistory.days, listArchiveSection, listFilter, customerBookings.entries, isBusinessMode, isUserMode, listActivityFilter, listCallsOpen, listTypeFilter]);
+    actionCompletion.isDiscarded, listFilter, customerBookings.entries, isBusinessMode, isUserMode, listActivityFilter, listCallsOpen, listTypeFilter]);
 
   const listItemCount = listFilter === "papelera" ? Math.min(filteredListEntries.length, TRASH_DISPLAY_LIMIT) : filteredListEntries.length;
 
@@ -21726,9 +21710,7 @@ function HomeScreenContent() {
       {/* LISTADO GLOBAL — vista de todos los GO */}
       <BottomSheet
         visible={listOpen}
-        anchorBottom
         expandToSafeTop
-        floatingConfig={{label:"Configuración de GO Listados",open:listSettingsOpen,onPress:()=>setListSettingsOpen(value=>!value)}}
         floatingClose={{screenKey:"listados",handedness,label:t('tasks_close_list')}}
         modalOverlay={notesOpen || listBookingDetail ? <GoScreenHost registerBack={handler=>{listNoteLayerBackRef.current=handler;}}>
           {notesOpen ? renderUnifiedNoteEditor() : listBookingDetail && renderListBookingDetail(listBookingDetail)}
@@ -21748,7 +21730,18 @@ function HomeScreenContent() {
         dragToClose
         compactHeader
         minimized={listMinimized}
-        title={lang==="en"?"GO · TASKS · BOOKINGS · NOTES":"GO · TAREAS · RESERVAS · NOTAS"}
+        title={(() => {
+          if (listCallsOpen || listTypeFilter === "LLAMADA") return t('tasks_call_log').toUpperCase();
+          if (listFilter === "reservas") return t('tasks_my_bookings').toUpperCase();
+          if (listFilter === "papelera") return t('status_deleted').toUpperCase();
+          if (listFilter === "pendiente") return t('status_pending_label').toUpperCase();
+          if (listFilter === "aceptado") return t('status_accepted').toUpperCase();
+          if (listFilter === "propuesta") return t('tasks_change_proposals').toUpperCase();
+          if (listTypeFilter === "TAREA_INTERNA") return t('tasks_internal_tasks').toUpperCase();
+          if (listTypeFilter === "TAREA") return t('stat_tasks_label').toUpperCase();
+          if (listTypeFilter === "GO_INTERNO") return t('tasks_internal_gos').toUpperCase();
+          return t('tasks_title');
+        })()}
         protectBrand
         paddingBottom={quickCreateKbVisible ? 0 : paddingBottom + 4}
         containerBg={screenBgColors.listados || undefined}
@@ -21797,8 +21790,8 @@ function HomeScreenContent() {
             // gaps) se derivan de listGoSize para que el menú escale junto con
             // las fichas del listado.  compacto → máximo contenido, medio →
             // equilibrado, grande → táctil de calle.
-            const BTN         = listGoSize === "grande" ? 54 : 44;
-            const BTN_MINI    = 44;
+            const BTN         = listGoSize === "compacto" ? 36 : listGoSize === "grande" ? 54 : 44;
+            const BTN_MINI    = listGoSize === "compacto" ? 26 : listGoSize === "grande" ? 36 : 30;
             const BTN_ICON    = listGoSize === "compacto" ? 18 : listGoSize === "grande" ? 26 : 22;
             const CHIP_PH     = listGoSize === "compacto" ?  8 : listGoSize === "grande" ? 14 : 10;
             const CHIP_PV     = listGoSize === "compacto" ?  5 : listGoSize === "grande" ?  9 :  6;
@@ -21820,13 +21813,11 @@ function HomeScreenContent() {
             // Orden canónico (de pulgar hacia el centro):
             //   Diestro  derecha→izquierda: Todos · Aceptados · Pendientes · Rechazados · Eliminados · Expandir
             //   Zurdo    izquierda→derecha: Expandir · Eliminados · Rechazados · Pendientes · Aceptados · Todos
-            const resolutionEntries = mergeCompletionEntries(goLog, actionCompletion.candidates).filter(entry =>
-              listHistoryBucket(entry,actionCompletion.doc?completionDecision(entry,actionCompletion.doc):undefined,actionCompletion.now??Date.now(),listHistory.days)==="current"&&!actionCompletion.isDiscarded?.(entry));
+            const resolutionEntries = mergeCompletionEntries(goLog, actionCompletion.candidates.filter(entry => actionCompletion.status(entry) === "pending" || !!entry.changeProposal));
             const countPendiente = resolutionEntries.filter(g => isPendingListEntry(g, actionCompletion.status(g))).length;
             const countPropuesta = resolutionEntries.filter((g) => !g.deleted && (g.estado === "propuesto" || g.estado === "propuesta_pendiente")).length;
             const filterDefs = [
-              { k:"reservas" as const,icon:"calendar" as const,label:"RESERVAS",color:"#eab308",iconOn:"#111111",count:0 },
-              { k:"archivo" as const,icon:"archive" as const,label:"ARCHIVO",color:"#cbd5e1",iconOn:"#111111",count:0 },
+              ...(goView.view === "USER" ? [{ k:"reservas" as const,icon:"calendar" as const,label:t('tasks_my_bookings'),color:"#4A80BD",iconOn:"#ffffff",count:customerBookings.entries.length }] : []),
               { k: "todos" as const,     icon: "list" as const,       label: t('filter_todos'),       color: "#ffffff", iconOn: "#0a0a0a", count: 0 },
               { k: "aceptado" as const,  icon: "check" as const,      label: t('status_accepted'),  color: "#16a34a", iconOn: "#ffffff", count: 0 },
               { k: "pendiente" as const, icon: "mail" as const,       label: t('status_pending_label'),   color: "#eab308", iconOn: "#0a0a0a", count: countPendiente },
@@ -21840,7 +21831,7 @@ function HomeScreenContent() {
                 <Pressable
                   onPress={() => {
                     Haptics.selectionAsync();
-                    if (f.k === "reservas" || f.k === "todos" || f.k === "pendiente" || f.k === "archivo") clearClassicListFilters();
+                    if (f.k === "reservas" || f.k === "todos" || f.k === "pendiente") clearClassicListFilters();
                     setListFilter((cur) => (cur === f.k ? "todos" : f.k));
                   }}
                   accessibilityLabel={f.label}
@@ -22368,25 +22359,78 @@ function HomeScreenContent() {
             );
             return (
               <View style={{ width: "100%" }}>
-                <ListadosSwipeHint scopeKey={completionIdentity.scope?JSON.stringify(completionIdentity.scope):null} used={!!completionIdentity.scope&&listSwipeUsed===JSON.stringify(completionIdentity.scope)} visible={filteredListEntries.length>0&&!quickCreateOpen}/>
-                {listFilter==="archivo"&&<View style={{gap:6,paddingBottom:8}}>
-                  <View style={{flexDirection:"row",gap:6}}>{(["manual","old"] as const).map(section=><TouchableOpacity key={section} accessibilityRole="tab" accessibilityState={{selected:listArchiveSection===section}} onPress={()=>setListArchiveSection(section)} style={{flex:1,minHeight:44,justifyContent:"center",alignItems:"center",borderWidth:1,borderColor:listArchiveSection===section?"#eab308":"#64748b",borderRadius:9}}><Text style={{color:"#fff",fontWeight:"700"}}>{section==="manual"?"ARCHIVO":"ANTIGUAS"}</Text></TouchableOpacity>)}</View>
-                  <Text style={{color:"#cbd5e1",fontSize:11}}>Conservar historial · {listHistory.days} días de visibilidad en ANTIGUAS</Text>
-                </View>}
-                {listSettingsOpen && !quickCreateOpen && <ScrollView testID="list-settings-menu" nestedScrollEnabled style={{maxHeight:180}} contentContainerStyle={{gap:8,paddingVertical:8}}>
-                  <View style={{flexDirection:"row",flexWrap:"wrap",justifyContent:"space-around",gap:8}}>
-                    <View style={{alignItems:"center",gap:4}}><Text style={{color:"#fff",fontSize:12}}>Orden</Text>{sortOrderBtn}</View>
-                    <View style={{alignItems:"center",gap:4}}><Text style={{color:"#fff",fontSize:12}}>Tamaño</Text>{sizeFichaBtn}</View>
-                    <View style={{alignItems:"center",gap:4}}><Text style={{color:"#fff",fontSize:12}}>Expandir fichas</Text>{expandBtn}</View>
-                    {showClassicListFilters&&<View style={{alignItems:"center",gap:4}}><Text style={{color:"#fff",fontSize:12}}>Menús</Text>{minimizeBtn}</View>}
+                {/* ── Fila de controles: [↕ · ●●● · ↗] ──spacer── [↓ · ↓↓] ── */}
+                {!quickCreateOpen && (
+                  <View style={{ flexDirection: "row", alignItems: "center", marginBottom: GAP_CTRL }}>
+                    {/* Izquierda: spacer flexible (equilibra el lado derecho) */}
+                    <View style={{ flex: 1 }} />
+                    {/* CENTRO: 3 herramientas — misma altura que ↓ y ↓↓ */}
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: GAP_CTRL }}>
+                      {/* ↕ orden */}
+                      <Pressable
+                        onPress={() => { Haptics.selectionAsync(); toggleGoSortOrder(); }}
+                        hitSlop={6}
+                        style={({ pressed }) => ({
+                          width: BTN_MINI, height: BTN_MINI, borderRadius: BTN_MINI / 2,
+                          backgroundColor: goSortOrder === "desc" ? "rgba(150,160,255,0.18)" : "#1a1a1c",
+                          borderWidth: 1.5,
+                          borderColor: goSortOrder === "desc" ? "rgba(180,190,255,0.55)" : "rgba(255,255,255,0.35)",
+                          alignItems: "center", justifyContent: "center",
+                          transform: [{ scale: pressed ? 0.95 : 1 }],
+                        })}
+                      >
+                        <Text style={{ fontSize: Math.round(BTN_MINI * 0.47), color: goSortOrder === "desc" ? "rgba(190,200,255,0.95)" : "rgba(255,255,255,0.55)", fontWeight: "700", lineHeight: Math.round(BTN_MINI * 0.55) }}>↕</Text>
+                      </Pressable>
+                      {/* ●●● tamaño ficha */}
+                      <Pressable
+                        onPress={() => {
+                          Haptics.selectionAsync();
+                          const sizes: ListGoSize[] = ["compacto", "medio", "grande"];
+                          const next = sizes[(sizes.indexOf(listGoSize) + 1) % sizes.length];
+                          setListGoSize(next);
+                          AsyncStorage.setItem("go_list_size_v1", next).catch(() => {});
+                        }}
+                        hitSlop={6}
+                        style={({ pressed }) => ({
+                          width: BTN_MINI, height: BTN_MINI, borderRadius: BTN_MINI / 2,
+                          backgroundColor: "#1a1a1c",
+                          borderWidth: 1.5, borderColor: "rgba(255,255,255,0.35)",
+                          alignItems: "center", justifyContent: "center",
+                          transform: [{ scale: pressed ? 0.95 : 1 }],
+                        })}
+                      >
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+                          <View style={{ width: 4,  height: 4,  borderRadius: 2,   backgroundColor: "#ffffff", opacity: listGoSize === "compacto" ? 1 : 0.35 }} />
+                          <View style={{ width: 6,  height: 6,  borderRadius: 3,   backgroundColor: "#ffffff", opacity: listGoSize === "medio"    ? 1 : 0.35 }} />
+                          <View style={{ width: 9,  height: 9,  borderRadius: 4.5, backgroundColor: "#ffffff", opacity: listGoSize === "grande"   ? 1 : 0.35 }} />
+                        </View>
+                      </Pressable>
+                      {/* ↗ expandir/colapsar todas */}
+                      <Pressable
+                        onPress={() => {
+                          Haptics.selectionAsync();
+                          setAllExpanded((prev) => { const next = !prev; setExpandedId(null); return next; });
+                        }}
+                        hitSlop={6}
+                        style={({ pressed }) => ({
+                          width: BTN_MINI, height: BTN_MINI, borderRadius: BTN_MINI / 2,
+                          backgroundColor: allExpanded ? "#ffffff" : "#1a1a1c",
+                          borderWidth: 1.5,
+                          borderColor: allExpanded ? "#ffffff" : "rgba(255,255,255,0.35)",
+                          alignItems: "center", justifyContent: "center",
+                          transform: [{ scale: pressed ? 0.95 : 1 }],
+                        })}
+                      >
+                        <Feather name={allExpanded ? "minimize-2" : "maximize-2"} size={Math.round(BTN_MINI * 0.50)} color={allExpanded ? "#0a0a0a" : "#ffffff"} />
+                      </Pressable>
+                    </View>
+                    {/* Derecha: ↓ y ↓↓ pegados al borde — flex:1 para equilibrar */}
+                    <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: GAP_CTRL }}>
+                      {showClassicListFilters && minimizeBtn}
+
+                    </View>
                   </View>
-                  <Text style={{color:"#fff",fontSize:12}}>ANTIGUAS · {listHistory.days} días</Text>
-                  <View style={{flexDirection:"row",flexWrap:"wrap",gap:6}}>{[30,90,180,365].map(days=><TouchableOpacity key={days}
-                    accessibilityRole="radio" accessibilityState={{checked:listHistory.days===days}} accessibilityLabel={days+" días"}
-                    onPress={()=>void listHistory.save(days)} style={{minWidth:48,minHeight:44,padding:8,borderRadius:9,borderWidth:1,borderColor:listHistory.days===days?"#eab308":"#64748b",justifyContent:"center",alignItems:"center"}}>
-                    <Text style={{color:"#fff",fontWeight:"700"}}>{days}</Text></TouchableOpacity>)}</View>
-                  {!!listHistory.error&&<Text accessibilityRole="alert" style={{color:"#fca5a5"}}>{listHistory.error}</Text>}
-                </ScrollView>}
+                )}
                 {/* Filtros de categoría y tipo — se ocultan con ↓ */}
                 {showClassicListFilters && !listFiltersHidden && !quickCreateOpen && (
                   <>{categoryFilterRow}{typeFilterRow}</>
@@ -22479,7 +22523,7 @@ function HomeScreenContent() {
             ? ordered.findIndex((g) => !(g as any).dateISO)
             : -1;
           return (
-            <View testID="list-ordered-cards" style={{ gap: 5 }}>
+            <View style={{ gap: 5 }}>
               {trashCapped && (
                 <View style={{
                   flexDirection: "row",
@@ -22587,7 +22631,6 @@ function HomeScreenContent() {
                   const prev = g.estado;
                   const to = cycleGoSlot(g.id, "advance");
                   if (to) {
-                    setListSwipeUsed(completionIdentity.scope?JSON.stringify(completionIdentity.scope):null);
                     showToast(`${slotMeta[to].label} · ${g.intentLabel}`);
                     scheduleUndo(g.id, prev);
                   }
@@ -22596,14 +22639,12 @@ function HomeScreenContent() {
                   const prev = g.estado;
                   if (curSlot === "pendiente") {
                     rejectGo(g.id);
-                    setListSwipeUsed(completionIdentity.scope?JSON.stringify(completionIdentity.scope):null);
                     showToast(`${slotMeta["papelera"].label} · ${g.intentLabel}`);
                     scheduleUndo(g.id, prev);
                   } else if (curSlot === "aceptado") {
                     const to = cycleGoSlot(g.id, "regress");
                     if (to) {
-                      setListSwipeUsed(completionIdentity.scope?JSON.stringify(completionIdentity.scope):null);
-                    showToast(`${slotMeta[to].label} · ${g.intentLabel}`);
+                      showToast(`${slotMeta[to].label} · ${g.intentLabel}`);
                       scheduleUndo(g.id, prev);
                     }
                   }
@@ -22635,14 +22676,19 @@ function HomeScreenContent() {
                     }}
                   >
                     {isProposalEstado ? (
-                      <Text style={{ color: "#ffffff", fontSize: Math.max(10,lv(9)), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.6, textAlign: "center" }}>
+                      <Text style={{ color: ENTRY_COLORS.change, fontSize: lv(9), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.6, textAlign: "center" }}>
                         {g.estado === "propuesta_pendiente" ? t('biz_change_proposed') : t('biz_change_received')}
                       </Text>
                     ) : (
                       <Text
                         style={{
-                          color: "#ffffff",
-                          fontSize: Math.max(10,lv(9)),
+                          color:
+                            g.estado === "aceptado"
+                              ? stateColor
+                              : g.estado === "rechazado"
+                                ? ENTRY_COLORS.destructive
+                                : ENTRY_COLORS.pending,
+                          fontSize: lv(9),
                           fontFamily: "Inter_700Bold", fontWeight: "800",
                           letterSpacing: 0.6,
                         }}
@@ -22654,7 +22700,7 @@ function HomeScreenContent() {
                 );
                 const proposalStatusLine = compactProposal && g.estado === "propuesta_pendiente" ? (<View testID={"go-proposal-substatus-" + g.id} style={{ flexDirection: "row", alignItems: "center", gap: lv(5), paddingTop: 0 }}>
                             <Feather name="clock" size={lv(11)} color={ENTRY_COLORS.change} />
-                            <Text style={{ color: "#ffffff", fontSize: Math.max(10,lv(10)), fontWeight: "700", flexShrink: 1 }}>
+                            <Text style={{ color: ENTRY_COLORS.change, fontSize: lv(10), fontWeight: "700", flexShrink: 1 }}>
                               {t('biz_booking_awaiting')}
                             </Text>
                           </View>) : null;
@@ -22700,16 +22746,16 @@ function HomeScreenContent() {
                       borderRadius: lv(14),
                       backgroundColor: "#161618",
                       overflow: "hidden",
-                      borderLeftWidth: 1,
-                      borderLeftColor: "rgba(255,255,255,0.14)",
+                      borderLeftWidth: 4,
+                      borderLeftColor: g.deleted ? stateColor : intentColor,
                       borderTopWidth: 1,
                       borderBottomWidth: 1,
                       borderRightWidth: 1,
                       // Proposal state: keep original intent-color border (orange
                       // only shows inside the orange inner box, not on the card frame).
-                      borderColor: "rgba(255,255,255,0.14)",
-                      shadowColor: "#000000",
-                      shadowOpacity: 0.12,
+                      borderColor: (isProposalEstado ? intentColor : stateColor) + "77",
+                      shadowColor: isProposalEstado ? intentColor : stateColor,
+                      shadowOpacity: 0.28,
                       shadowRadius: 10,
                       shadowOffset: { width: 0, height: 2 },
                       elevation: 3,
@@ -22718,13 +22764,13 @@ function HomeScreenContent() {
                       ...(beautyReservation&&{borderLeftWidth:1,borderLeftColor:"rgba(255,255,255,0.12)"}),
                     }}
                   >
-                    {beautyReservation&&<View testID={"list-category-accent-"+g.id} pointerEvents="none" style={{position:"absolute",left:5,top:12,width:3,height:12,borderRadius:2,backgroundColor:beauty!.color}}/>}
+                    {beautyReservation&&<View testID={"list-category-accent-"+g.id} pointerEvents="none" style={{position:"absolute",left:0,top:12,width:3,height:24,borderRadius:2,backgroundColor:beauty!.color}}/>}
                     {premiumReservation&&!isProposalEstado&&canResolveEntry(g)&&<View testID={"list-card-trash-"+g.id} style={{position:"absolute",top:2,right:4,zIndex:2}}>{renderEntryMicroActions(g,false,"list-discard")}</View>}
                     {/* ── FILA 1: TÍTULO COMPLETO — todo el ancho hasta el checkbox ── */}
-                    <View testID={compactProposal ? "go-proposal-header-" + g.id : undefined} style={{ flexDirection: "row", alignItems: "center", flexWrap: undefined, gap: compactProposal ? lv(3) : lv(8), marginBottom: lv(compactProposal ? 1 : 3),...(premiumReservation&&!isProposalEstado&&canResolveEntry(g)?{paddingRight:44}: {}) }}>
-
+                    <View testID={compactProposal ? "go-proposal-header-" + g.id : undefined} style={{ flexDirection: "row", alignItems: "center", flexWrap: compactProposal ? "wrap" : undefined, gap: compactProposal ? lv(3) : lv(8), marginBottom: lv(compactProposal ? 1 : 3),...(premiumReservation&&!isProposalEstado&&canResolveEntry(g)?{paddingRight:44}: {}) }}>
+                      {handedness === "left" && isProposalEstado && statusPill}
                       {/* CHECKBOX — izquierda si ZURDO */}
-                      {handedness === "left" && !canResolveEntry(g) && !entryIsReservation(g) && g.type!=="TAREA_INTERNA" && !isProposalEstado && (
+                      {handedness === "left" && !canResolveEntry(g) && !entryIsReservation(g) && (
                         <TouchableOpacity
                           onPress={(e) => {
                             if ((e as any)?.stopPropagation) (e as any).stopPropagation();
@@ -22751,6 +22797,9 @@ function HomeScreenContent() {
                         </TouchableOpacity>
                       )}
                       {/* Icono intent */}
+                      {(isProposalEstado || !canResolveEntry(g)) && <View style={{ width: lv(18), height: lv(18), borderRadius: 5, backgroundColor: intentColor + "28", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Feather name={(intentDef?.icon || "circle") as keyof typeof Feather.glyphMap} size={lv(10)} color={intentColor} />
+                      </View>}
                       {/* TÍTULO — ocupa todo el espacio restante hasta el checkbox */}
                       <TouchableOpacity
                         testID={"list-entry-title-"+g.id}
@@ -22814,12 +22863,12 @@ function HomeScreenContent() {
                           }
                         }}
                         delayLongPress={420}
-                        style={{ flex: 1, minWidth: 0 }}
+                        style={{ flex: 1, minWidth: compactProposal ? lv((g.notes?.trim() || g.intentLabel || "").length > 18 ? 115 : 64) : 0 }}
                       >
                         {(() => {
                           const realTitle = entryIsReservation(g)?entryHeading(g,lang==="en"?"Reservation":"Reserva"):g.notes?.trim() || g.intentLabel;
                           const title = (
-                            <Text testID={compactProposal ? "go-proposal-title-" + g.id : undefined} style={{ color: "#ffffff", fontSize: premiumReservation?Math.max(14,lv(14)):lv(14), fontWeight: "700", lineHeight: premiumReservation?Math.max(18,lv(18)):lv(18) }} numberOfLines={1} ellipsizeMode="tail">
+                            <Text testID={compactProposal ? "go-proposal-title-" + g.id : undefined} style={{ color: "#ffffff", fontSize: premiumReservation?Math.max(14,lv(14)):lv(14), fontWeight: "700", lineHeight: premiumReservation?Math.max(18,lv(18)):lv(18) }} numberOfLines={compactProposal||premiumReservation ? undefined : 1}>
                               {realTitle}
                             </Text>
                           );
@@ -22831,8 +22880,26 @@ function HomeScreenContent() {
                           ) : title;
                         })()}
                       </TouchableOpacity>
+                      {compactProposal && !!(g.contactName || g.phone || g.recipients?.length) && (
+                        <TouchableOpacity
+                          testID={"go-proposal-contact-" + g.id}
+                          accessibilityRole="button"
+                          accessibilityLabel={"Contacto: " + displayContact(g.contactName || g.recipients?.[0]?.name || "", g.phone || g.recipients?.[0]?.phone || "")}
+                          onPress={(e) => {
+                            (e as any)?.stopPropagation?.();
+                            Haptics.selectionAsync().catch(() => {});
+                            setInitialMessagesContact({ name: g.contactName || g.recipients?.[0]?.name || "", phone: g.phone || g.recipients?.[0]?.phone || "" });
+                            setMessagesOpen(true);
+                          }}
+                          activeOpacity={0.75}
+                          style={{ width: Math.max(44, lv(36)), height: Math.max(44, lv(36)), alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                        >
+                          <Feather name={g.recipients && g.recipients.length > 1 ? "users" : "user"} size={lv(18)} color="rgba(255,255,255,0.70)" />
+                        </TouchableOpacity>
+                      )}
+                      {handedness === "right" && isProposalEstado && statusPill}
                       {/* CHECKBOX — derecha si DIESTRO */}
-                      {handedness === "right" && !canResolveEntry(g) && !entryIsReservation(g) && g.type!=="TAREA_INTERNA" && !isProposalEstado && (
+                      {handedness === "right" && !canResolveEntry(g) && !entryIsReservation(g) && (
                         <TouchableOpacity
                           onPress={(e) => {
                             if ((e as any)?.stopPropagation) (e as any).stopPropagation();
@@ -22860,31 +22927,10 @@ function HomeScreenContent() {
                       )}
                     </View>
 
-                      {compactProposal && !!(g.contactName || g.phone || g.recipients?.length) && (
-                        <TouchableOpacity
-                          testID={"go-proposal-contact-" + g.id}
-                          accessibilityRole="button"
-                          accessibilityLabel={"Contacto: " + displayContact(g.contactName || g.recipients?.[0]?.name || "", g.phone || g.recipients?.[0]?.phone || "")}
-                          onPress={(e) => {
-                            (e as any)?.stopPropagation?.();
-                            Haptics.selectionAsync().catch(() => {});
-                            setInitialMessagesContact({ name: g.contactName || g.recipients?.[0]?.name || "", phone: g.phone || g.recipients?.[0]?.phone || "" });
-                            setMessagesOpen(true);
-                          }}
-                          activeOpacity={0.75}
-                          style={{ minHeight:44,justifyContent:"center",alignSelf:"flex-start",maxWidth:"100%" }}
-                        >
-                          <Text numberOfLines={1} style={{color:"#ffffff",fontSize:12}}>{displayContact(g.contactName || g.recipients?.[0]?.name || "",g.phone || g.recipients?.[0]?.phone || "")}</Text>
-                        </TouchableOpacity>
-                      )}
-
-
-                    {isProposalEstado&&statusPill}
                     {!premiumReservation&&!isProposalEstado && canResolveEntry(g) && renderEntryMicroActions(g, false, "list")}
-                    {g.type==="TAREA_INTERNA"&&!canResolveEntry(g)&&(expandedId===g.id||allExpanded)&&<TouchableOpacity accessibilityRole="button" accessibilityLabel="Cambiar realización de la tarea" onPress={()=>updateGoStatus(g.id)} style={{minHeight:44,justifyContent:"center"}}><Text style={{color:"#fff"}}>{g.estado==="aceptado"?"PENDIENTE":"REALIZADA"}</Text></TouchableOpacity>}
 
                     {/* ── FILA 2: INFO + ESTADO + BADGE ── */}
-                    {(!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", flexWrap:"wrap", gap: lv(8),...(premiumReservation&&!isProposalEstado&&canResolveEntry(g)?{paddingRight:44}:{}) }}>
+                    {(!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8),...(premiumReservation&&!isProposalEstado&&canResolveEntry(g)?{paddingRight:44}:{}),...(premiumReservation?{flexWrap:"wrap"}: {}) }}>
                       {/* INFO — fecha/hora + destinatarios */}
                       <TouchableOpacity
                         activeOpacity={0.75}
@@ -22960,14 +23006,14 @@ function HomeScreenContent() {
                           ? ENTRY_COLORS.change : policy.stateColor;
                         return <View testID={"list-reservation-status-" + g.id} style={{
                           flexShrink: 1, maxWidth: "100%", paddingHorizontal: lv(6), paddingVertical: lv(3),
-                          borderRadius: lv(5), borderWidth: 1, borderColor: color+"66", backgroundColor: "rgba(255,255,255,0.04)",
+                          borderRadius: lv(5), borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)",
                         }}>
-                          <Text style={{ color:"#ffffff", fontSize: Math.max(11,lv(9)), fontFamily: "Inter_700Bold", fontWeight: "700" }}>
+                          <Text style={{ color, fontSize: Math.max(11,lv(9)), fontFamily: "Inter_700Bold", fontWeight: "700" }}>
                             {t("biz_booking_intent_label").toUpperCase() + " · " + status.toUpperCase()}
                           </Text>
                         </View>;
                       })() : (
-                      <View style={{ flexDirection: "column", alignItems: "flex-start", gap: lv(4), flexShrink: 1 }}>
+                      <View style={{ flexDirection: "column", alignItems: "flex-end", gap: lv(6), flexShrink: 0 }}>
                         {/* Estado pill */}
                         {!isProposalEstado && statusPill}
                         {/* Badge con EXACTO mismo color que filtro inferior correspondiente */}
@@ -23015,8 +23061,8 @@ function HomeScreenContent() {
                         marginTop: lv(3),
                         borderRadius: lv(10),
                         borderWidth: 1.5,
-                        borderColor: "rgba(253,186,116,0.28)",
-                        backgroundColor: "rgba(253,186,116,0.04)",
+                        borderColor: "rgba(255,140,0,0.65)",
+                        backgroundColor: "rgba(255,140,0,0.13)",
                         overflow: "hidden",
                         paddingHorizontal: lv(8),
                         paddingVertical: lv(2),
@@ -23024,7 +23070,7 @@ function HomeScreenContent() {
                       }}>
                         {/* Reserva actual */}
                         <View testID={"go-proposal-current-" + g.id} style={{ flexDirection: "row", alignItems: "center", gap: lv(8) }}>
-                          <Text numberOfLines={1} style={{ flexShrink: 0, color: "#ffffff", fontSize: Math.max(lv(9), 10), fontWeight: "700", letterSpacing: 0.6 }}>
+                          <Text numberOfLines={1} style={{ flexShrink: 0, color: "rgba(255,255,255,0.45)", fontSize: Math.min(lv(8), 8), fontWeight: "700", letterSpacing: 0.6 }}>
                             {t('tasks_current_booking').toUpperCase()}
                           </Text>
                           <Text
@@ -23040,14 +23086,14 @@ function HomeScreenContent() {
                         <View style={{ height: 1, backgroundColor: "rgba(255,140,0,0.25)" }} />
                         {/* Propuesta cambio */}
                         <View testID={"go-proposal-next-" + g.id} style={{ flexDirection: "row", alignItems: "center", gap: lv(8) }}>
-                          <Text numberOfLines={1} style={{ flexShrink: 0, color: "#ffffff", fontSize: Math.max(lv(9),10), fontWeight: "700", letterSpacing: 0.6 }}>
+                          <Text numberOfLines={1} style={{ flexShrink: 0, color: ENTRY_COLORS.change, fontSize: Math.min(lv(8), 8), fontWeight: "700", letterSpacing: 0.6 }}>
                             {t('tasks_change_proposal').toUpperCase()}
                           </Text>
                           <Text
                             numberOfLines={1}
                             adjustsFontSizeToFit minimumFontScale={0.85}
                             accessibilityLabel={[localizeLabel((g as any).changeProposal.date || ""), (g as any).changeProposal.time].filter(Boolean).join(" · ")}
-                            style={{ color: "#ffffff", fontSize: Math.min(lv(13), 13), fontFamily: "Inter_700Bold", fontWeight: "800", flex: 1, minWidth: 0, textAlign: "right" }}
+                            style={{ color: ENTRY_COLORS.change, fontSize: Math.min(lv(13), 13), fontFamily: "Inter_700Bold", fontWeight: "800", flex: 1, minWidth: 0, textAlign: "right" }}
                           >
                             {formatCompactProposalSlot(localizeLabel((g as any).changeProposal.date || ""), (g as any).changeProposal.dateISO, (g as any).changeProposal.time)}
                           </Text>
@@ -23059,13 +23105,34 @@ function HomeScreenContent() {
                             {(g as any).changeProposal.note}
                           </Text>
                         )}
-{g.estado !== "propuesta_pendiente" && (<View testID={"go-proposal-responses-" + g.id}>
-                          <ListadosProposalActions handedness={handedness}
-                            labels={{accept:t("accept"),propose:t("tasks_propose"),reject:t("reject")}}
-                            onAccept={()=>{Haptics.selectionAsync().catch(()=>{});acceptProposal(g.id);}}
-                            onReject={()=>{Haptics.selectionAsync().catch(()=>{});rejectProposal(g.id);}}
-                            onPropose={()=>{Haptics.selectionAsync().catch(()=>{});openProposalFromList({id:g.id,time:g.time,place:g.place||""});}}/>
-                        </View>)}
+{g.estado !== "propuesta_pendiente" && (<View testID={"go-proposal-responses-" + g.id} style={{ marginTop: lv(8), gap: lv(4), paddingTop: 0 }}>
+
+                            <View style={{ flexDirection: "row", gap: lv(8) }}>
+                              <TouchableOpacity
+                                onPress={(e) => { if ((e as any)?.stopPropagation) (e as any).stopPropagation(); Haptics.selectionAsync().catch(() => {}); acceptProposal(g.id); }}
+                                activeOpacity={0.7}
+                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: "#16a34a" }}
+                              >
+                                <Feather name="check" size={lv(13)} color="#fff" />
+                                <Text style={{ color: "#fff", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🟢 ' + t('accept')}</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                onPress={(e) => { if ((e as any)?.stopPropagation) (e as any).stopPropagation(); Haptics.selectionAsync().catch(() => {}); rejectProposal(g.id); }}
+                                activeOpacity={0.7}
+                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: ENTRY_COLORS.destructive }}
+                              >
+                                <Feather name="x" size={lv(13)} color="#fff" />
+                                <Text style={{ color: "#fff", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🔴 ' + t('reject')}</Text>
+                              </TouchableOpacity>
+                            </View>
+                            <TouchableOpacity
+                              onPress={(e) => { if ((e as any)?.stopPropagation) (e as any).stopPropagation(); Haptics.selectionAsync().catch(() => {}); openProposalFromList({ id: g.id, time: g.time, place: (g as any).place || "" }); }}
+                              activeOpacity={0.7}
+                              style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: "rgba(255,140,0,0.15)", borderWidth: 1, borderColor: "rgba(255,140,0,0.45)" }}
+                            >
+                              <Text style={{ color: ENTRY_COLORS.change, fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🟠 ' + t('tasks_propose')}</Text>
+                            </TouchableOpacity>
+                          </View>)}
 </React.Fragment>)}
                     {/* ── HUECOS ALTERNATIVOS: aparece tras rechazar una propuesta ── */}
                     {(expandedId === g.id || allExpanded) && altSlotsEntry?.entryId === g.id && altSlotsEntry.slots.length > 0 && (
@@ -25874,7 +25941,6 @@ function BottomSheet({
   blockPan,
   expandToSafeTop,
   floatingClose,
-  floatingConfig,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -25958,7 +26024,6 @@ function BottomSheet({
   /** Listados-only viewport expansion; other sheets keep their existing geometry. */
   expandToSafeTop?: boolean;
   floatingClose?: {screenKey:string;handedness:"left"|"right";label:string};
-  floatingConfig?: {label:string;open:boolean;onPress:()=>void};
 }) {
   // Notifica al padre cuando el sheet deja de estar visible para que
   // resetee la altura del panel a 0 (modo "sin overlay").
@@ -26302,9 +26367,7 @@ function BottomSheet({
                               style={[
                                 styles.sheetTitle,
                                 compactHeader && { fontSize: 14, fontWeight: "700", letterSpacing: 0.8, color: "#cccccc" },
-                                expandToSafeTop && {letterSpacing:0,fontSize:14,alignSelf:"stretch",color:"#ffffff"},
                               ]}
-                              numberOfLines={expandToSafeTop?1:undefined} adjustsFontSizeToFit={expandToSafeTop} minimumFontScale={0.8}
                               {...titleNoTranslate}
                             >
                               {title}
@@ -26349,7 +26412,7 @@ function BottomSheet({
                           nestedScrollEnabled
                           scrollEventThrottle={16}
                           onScroll={scrollHandler}
-                          contentContainerStyle={expandToSafeTop?{paddingBottom:64,...(anchorBottom?{flexGrow:1,justifyContent:"flex-end" as const}: {})}:anchorBottom ? { flexGrow: 1, justifyContent: "flex-end" } : undefined}
+                          contentContainerStyle={expandToSafeTop?{paddingBottom:64}:anchorBottom ? { flexGrow: 1, justifyContent: "flex-end" } : undefined}
                         >
                           {sheetContents}
                         </Reanimated.ScrollView>
@@ -26365,7 +26428,7 @@ function BottomSheet({
                           scrollEventThrottle={16}
                           bottomOffset={noteKeyboardScroll ? noteFooterHeight + effectivePaddingBottom + 26 : 16}
                           onScroll={(e) => { scrollOffset.value = e.nativeEvent.contentOffset.y; }}
-                          contentContainerStyle={expandToSafeTop?{paddingBottom:64,...(anchorBottom?{flexGrow:1,justifyContent:"flex-end" as const}: {})}:anchorBottom ? { flexGrow: 1, justifyContent: "flex-end" } : undefined}
+                          contentContainerStyle={expandToSafeTop?{paddingBottom:64}:anchorBottom ? { flexGrow: 1, justifyContent: "flex-end" } : undefined}
                         >
                           {sheetContents}
                         </KeyboardAwareScrollView>
@@ -26374,10 +26437,7 @@ function BottomSheet({
                   )}
                   {footer ? (
                     <View style={{ marginTop: minimized || noteKeyboardScroll ? 4 : 10, ...(noteKeyboardScroll ? { flexShrink: 0 } : {}) }}
-                      onLayout={noteKeyboardScroll||expandToSafeTop ? event => setNoteFooterHeight(event.nativeEvent.layout.height) : undefined}>
-                      {expandToSafeTop ? <ScrollView testID="listados-footer-scroll" nestedScrollEnabled
-                        style={{maxHeight:Math.max(96,(sheetViewport.height-noteInsets.top-noteInsets.bottom-(kbVisible?floatingKeyboardHeight:0))*0.45)}}>{footer}</ScrollView> : footer}
-                    </View>
+                      onLayout={noteKeyboardScroll||expandToSafeTop ? event => setNoteFooterHeight(event.nativeEvent.layout.height) : undefined}>{footer}</View>
                   ) : null}
                 </Pressable>
                 {overlay ? (
@@ -26395,24 +26455,11 @@ function BottomSheet({
         </View>
         </GestureDetector>
         {floatingClose&&!modalOverlay&&noteFooterHeight>0&&<View testID={floatingClose.screenKey+"-floating-close"} pointerEvents="box-none" style={{position:"absolute",top:noteInsets.top+8,left:noteInsets.left,right:noteInsets.right,bottom:(kbVisible?floatingKeyboardHeight:noteInsets.bottom)+noteFooterHeight+20,zIndex:50}}>
-          {floatingConfig&&<View pointerEvents="box-none" style={{position:"absolute",top:0,bottom:0,width:"50%",...(floatingClose.handedness==="right"?{left:0}:{right:0})}}>
-            <DraggableFAB screenKey={floatingClose.screenKey} buttonKey={"config-"+floatingClose.handedness} buttonWidth={44} maxH={44}
-              bounds={{width:(sheetViewport.width-noteInsets.left-noteInsets.right)/2,height:Math.max(44,sheetViewport.height-noteInsets.top-8-(kbVisible?floatingKeyboardHeight:noteInsets.bottom)-noteFooterHeight-20)}}
-              initialBottom={8} initialRight={floatingClose.handedness==="right"?Math.max(8,(sheetViewport.width-noteInsets.left-noteInsets.right)/2-58):14}>
-              <TouchableOpacity testID="listados-config-button" accessibilityRole="button" accessibilityLabel={floatingConfig.label}
-                accessibilityState={{expanded:floatingConfig.open}} onPress={floatingConfig.onPress}
-                style={{width:44,height:44,borderRadius:14,borderWidth:1,borderColor:"#94a3b8",backgroundColor:"#16181c",alignItems:"center",justifyContent:"center"}}>
-                <Feather name="sliders" size={22} color="#ffffff"/>
-              </TouchableOpacity>
-            </DraggableFAB>
-          </View>}
-          <View pointerEvents="box-none" style={{position:"absolute",top:0,bottom:0,...(floatingConfig?{width:"50%",...(floatingClose.handedness==="right"?{right:0}:{left:0})}:{left:0,right:0})}}>
           <DraggableFAB screenKey={floatingClose.screenKey} buttonKey={"close-"+floatingClose.handedness} buttonWidth={44} maxH={44}
-            bounds={{width:(sheetViewport.width-noteInsets.left-noteInsets.right)/(floatingConfig?2:1),height:Math.max(44,sheetViewport.height-noteInsets.top-8-(kbVisible?floatingKeyboardHeight:noteInsets.bottom)-noteFooterHeight-20)}}
-            initialBottom={8} initialRight={floatingClose.handedness==="right"?14:Math.max(14,(sheetViewport.width-noteInsets.left-noteInsets.right)/(floatingConfig?2:1)-58)}>
+            bounds={{width:sheetViewport.width-noteInsets.left-noteInsets.right,height:Math.max(44,sheetViewport.height-noteInsets.top-8-(kbVisible?floatingKeyboardHeight:noteInsets.bottom)-noteFooterHeight-20)}}
+            initialBottom={8} initialRight={floatingClose.handedness==="right"?14:Math.max(14,sheetViewport.width-noteInsets.left-noteInsets.right-58)}>
             <GoCloseButton level="panel" accessibilityLabel={floatingClose.label} onPress={onClose}/>
           </DraggableFAB>
-          </View>
         </View>}
       </Modal>
     );
