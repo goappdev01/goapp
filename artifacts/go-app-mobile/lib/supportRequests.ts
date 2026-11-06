@@ -1,4 +1,10 @@
 export type SupportKind = "incident" | "improvement" | "help";
+export const SUPPORT_ORBIT_ACTIONS = [
+  {kind:"incident",label:"INCIDENCIA",title:"Comunicar incidencia",icon:"alert-circle",slot:0},
+  {kind:"improvement",label:"MEJORA",title:"Proponer mejora",icon:"edit-3",slot:2},
+  {kind:"help",label:"AYUDA",title:"Necesito ayuda",icon:"help-circle",slot:4},
+  {kind:"mine",label:"SOLICITUDES",title:"Mis solicitudes",icon:"inbox",slot:6},
+] as const;
 export type SupportCommand = { kind:SupportKind; message:string; context?:"Landing"; requestKey:string };
 export type SupportReceipt = { id:string; reference:string; requestKey:string; status:"received"|"in_progress"|"answered"|"closed"; response?:string };
 /** Server must derive the sender and scope listOwn; no arbitrary sender/recipient IDs. */
@@ -11,6 +17,6 @@ export async function sendSupportRequest(gateway:SupportGateway, command:Support
   return receipt;
 }
 export function supportOrbitRect(width:number,height:number,insets:{left:number;right:number;bottom:number},hand:"left"|"right") {
-  const size=width<440?44:56,edge=18;
-  return {x:hand==="right"?insets.left+edge:width-insets.right-edge-size,y:height-insets.bottom-12-size,width:size,height:size};
+  const size=width<440?48:60,edge=12;
+  return {x:hand==="right"?insets.left+edge:width-insets.right-edge-size,y:height-insets.bottom-8-size,width:size,height:size};
 }

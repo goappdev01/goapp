@@ -129,7 +129,7 @@ import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingSupport } from "@/components/landing/LandingSupport";
-import { supportOrbitRect } from "@/lib/supportRequests";
+import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, type SupportKind } from "@/lib/supportRequests";
 import { placeLandingQr } from "@/components/landing/landingQrPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
@@ -4283,6 +4283,10 @@ function HomeScreenContent() {
   //                   hay contacto/fecha seleccionados).
   const [notesOpen, setNotesOpen] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
+  const [supportMode, setSupportMode] = useState(false);
+  const [supportKind, setSupportKind] = useState<SupportKind | "mine">("incident");
+  const openSupportAction = (kind: SupportKind | "mine") => { setSupportKind(kind); setSupportOpen(true); };
+  useEffect(()=>{setSupportMode(false);setSupportOpen(false);},[adminAccess.userId]);
   const [qrOpen, setQrOpen] = useState(false);
   const [cartaOpen, setCartaOpen] = useState(false);
   const [quickNoteText, setQuickNoteText] = useState("");
@@ -17113,7 +17117,18 @@ function HomeScreenContent() {
               TOQUE CORTO  → selecciona categoría GO (comportamiento original)
               PULSADO LARGO → abre segundo nivel comercial de esa órbita     */}
           {/* Public/business shells share ADMIN's exact rings, without enabling intent actions. */}
-          {!fullLandingArchitecture && !anyOverlayOpen && !rutasMode && !reservasOrbitalOpen && orbitSecondLevel === null ? (
+          {supportMode ? (
+            <View testID="landing-help-orbits" pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+              {SUPPORT_ORBIT_ACTIONS.map(action=>{
+                const angle=-Math.PI/2+action.slot*2*Math.PI/8;
+                return <View key={action.kind} style={{position:"absolute",left:orbitWrapSize/2+Math.cos(angle)*orbitRadiusVisual-orbitBtnVisualSize/2,
+                  top:orbitWrapSize/2+Math.sin(angle)*orbitRadiusVisual-orbitBtnVisualSize/2}}>
+                  <PremiumOrbitBtn color="#4A80BD" selected={false} onPress={()=>openSupportAction(action.kind)} icon={action.icon}
+                    label={action.label} accessibilityLabel={action.title} size={orbitBtnVisualSize} iconSize={Math.round(24*uiScaleFactor)} labelSize={Math.max(7,Math.round(9*uiScaleFactor))} labelSpacing={0} paddingH={4}/>
+                </View>;
+              })}
+            </View>
+          ) : !fullLandingArchitecture && !anyOverlayOpen && !rutasMode && !reservasOrbitalOpen && orbitSecondLevel === null ? (
             <View pointerEvents="none" accessible={false} accessibilityElementsHidden
               importantForAccessibility="no-hide-descendants" testID="landing-quiet-orbits" style={StyleSheet.absoluteFill}>
               {[...INTENTS, { key: "otro", color: "#9ca3af" }].map((it, i) => {
@@ -17781,6 +17796,7 @@ function HomeScreenContent() {
               El usuario navega por capas sin salir del Landing. */}
           {(() => {
             const microSz = Math.round(50 * uiScaleFactor);
+            if (supportMode) return null;
             const ctxSz   = Math.round(56 * uiScaleFactor); // sub-sat más grandes
             // Satellites sit at the midpoint angle between each orbit button (22.5°
             // offset). The meaningful gap is ANGULAR, not radial. Placing them at
@@ -25540,8 +25556,8 @@ function HomeScreenContent() {
 
       {!anyOverlayOpen && !goAuthOpen && !empresaOpen && !adminDashOpen && !rutasMode && kbHeight === 0 && (
         <View testID="landing-support-orbit" style={{position:"absolute",left:supportRect.x,top:supportRect.y,width:supportRect.width,height:supportRect.height,zIndex:100}}>
-          <PremiumOrbitBtn color="#7dd3fc" selected={false} onPress={()=>setSupportOpen(true)} icon="message-circle"
-            label="AYUDA" accessibilityLabel="AYÚDANOS A MEJORAR" size={supportRect.width} iconSize={supportRect.width<50?20:23} labelSize={9} labelSpacing={0} paddingH={2}/>
+          <PremiumOrbitBtn color="#4A80BD" selected={supportMode} onPress={()=>setSupportMode(active=>!active)} icon={supportMode?"x":"message-circle"}
+            label={supportMode?"SALIR":"AYUDA"} accessibilityLabel={supportMode?"Salir del modo ayuda":"AYÚDANOS A MEJORAR"} size={supportRect.width} iconSize={22} labelSize={9} labelSpacing={0} paddingH={4}/>
         </View>
       )}
       {/* HUMANITY retains its original slot whenever it fits. */}
@@ -25615,7 +25631,7 @@ function HomeScreenContent() {
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
-    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
+    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {

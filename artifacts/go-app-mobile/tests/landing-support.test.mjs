@@ -22,22 +22,34 @@ function fixture(gateway){let cursor=0,slots=[],effects=[];
  return{props,render(p=props){cursor=0;effects=[];const tree=scope.exports.LandingSupport(p);for(const run of effects)run();return tree;}};
 }
 const tick=()=>new Promise(setImmediate);
-test('the real Landing entry opens support directly and remains independent of USER navigation',()=>{
+test('the real Landing entry toggles orbital help instead of opening the former options panel',()=>{
  const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let handler,mount;
  const visit=n=>{if((ts.isJsxOpeningElement(n)||ts.isJsxSelfClosingElement(n))&&n.tagName.getText(ast)==='PremiumOrbitBtn'&&n.attributes.getText(ast).includes('AYÚDANOS A MEJORAR'))handler=n.attributes.properties.find(p=>p.name?.getText(ast)==='onPress').initializer.expression;
  if(ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='LandingSupport')mount=n;ts.forEachChild(n,visit);};visit(ast);assert.ok(handler&&mount);
- const calls=[];vm.runInNewContext(ts.transpileModule('('+handler.getText(ast)+')();',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{setSupportOpen:v=>calls.push(v)});assert.deepEqual(calls,[true]);
+ const calls=[];vm.runInNewContext(ts.transpileModule('const tap=('+handler.getText(ast)+');tap();tap();',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{setSupportMode:fn=>calls.push(fn(calls.at(-1)??false))});assert.deepEqual(calls,[true,false]);
  assert.equal(mount.attributes.properties.some(p=>p.name?.text==='gateway'),false,'no test or undeployed gateway is mounted');
+});
+test('the four real support orbits reuse existing ring positions and open only the selected view',()=>{
+ const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let mode,open;
+ const visit=n=>{if(ts.isConditionalExpression(n)&&n.condition.getText(ast)==='supportMode'&&n.whenTrue.getText(ast).includes('landing-help-orbits'))mode=n.whenTrue;
+ if(ts.isVariableDeclaration(n)&&n.name.getText(ast)==='openSupportAction')open=n.initializer;ts.forEachChild(n,visit);};visit(ast);assert.ok(mode&&open);
+ const calls=[],scope={result:null,openSupportAction:null,React:{createElement:(type,props,...children)=>({type,props,children:children.flat(Infinity)})},View:'View',PremiumOrbitBtn:'PremiumOrbitBtn',StyleSheet:{absoluteFill:{}},SUPPORT_ORBIT_ACTIONS:api.SUPPORT_ORBIT_ACTIONS,
+ orbitWrapSize:275,orbitRadiusVisual:99,orbitBtnVisualSize:65,uiScaleFactor:1,setSupportKind:k=>calls.push(['kind',k]),setSupportOpen:v=>calls.push(['open',v])};
+ vm.runInNewContext(ts.transpileModule('openSupportAction='+open.getText(ast)+';result='+mode.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
+ const orbits=scope.result.children.flatMap(n=>n.children);assert.equal(orbits.length,4);
+ for(let i=0;i<4;i++){const p=orbits[i].props;assert.equal(p.accessibilityLabel,api.SUPPORT_ORBIT_ACTIONS[i].title);p.onPress();assert.deepEqual(calls.splice(0),[['kind',api.SUPPORT_ORBIT_ACTIONS[i].kind],['open',true]]);
+  const f=fixture();f.render({...f.props,kind:api.SUPPORT_ORBIT_ACTIONS[i].kind});const tree=f.render({...f.props,kind:api.SUPPORT_ORBIT_ACTIONS[i].kind});assert.ok(text(tree).includes(p.accessibilityLabel));assert.equal(button(tree,'Proponer mejora'),undefined);
+ }
 });
 test('orbit is in the opposite bottom corner, safe and at least 44pt for both hands and iPhone widths',()=>{
  for(const width of [320,375,430])for(const hand of ['left','right']){const r=api.supportOrbitRect(width,844,{left:0,right:0,bottom:34},hand);
- assert.ok(r.width>=44&&r.height>=44);assert.equal(r.y+r.height,844-34-12);assert.equal(hand==='right'?r.x:width-r.x-r.width,18);}
+ assert.ok(r.width>=44&&r.height>=44);assert.equal(r.y+r.height,844-34-8);assert.equal(hand==='right'?r.x:width-r.x-r.width,12);}
 });
 test('unconfigured real UI never sends or displays a fake empty history; close preserves draft and account change clears it',()=>{
- const f=fixture();f.render();let tree=f.render();assert.ok(button(tree,'Comunicar incidencia'));assert.ok(button(tree,'Proponer mejora'));assert.ok(button(tree,'Necesito ayuda'));
+ const f=fixture();f.render();let tree=f.render();assert.ok(text(tree).includes('Comunicar incidencia'));assert.equal(button(tree,'Proponer mejora'),undefined);
  const input=()=>nodes(tree).find(n=>n.type==='TextInput');input().props.onChangeText('Texto privado');tree=f.render({...f.props,visible:false});tree=f.render();assert.equal(input().props.value,'Texto privado');assert.equal(button(tree,'ENVIAR').props.disabled,true);
- button(tree,'Mis solicitudes').props.onPress();tree=f.render();assert.ok(text(tree).includes('cuando el servicio esté habilitado'));assert.equal(text(tree).includes('No tienes solicitudes registradas'),false);
- f.render({...f.props,scopeKey:'user-b'});tree=f.render({...f.props,scopeKey:'user-b'});button(tree,'Comunicar incidencia').props.onPress();tree=f.render({...f.props,scopeKey:'user-b'});assert.equal(input().props.value,'');
+ tree=f.render({...f.props,kind:'mine'});assert.ok(text(tree).includes('cuando el servicio esté habilitado'));assert.equal(text(tree).includes('No tienes solicitudes registradas'),false);
+ f.render({...f.props,scopeKey:'user-b'});tree=f.render({...f.props,scopeKey:'user-b'});tree=f.render({...f.props,scopeKey:'user-b'});assert.equal(input().props.value,'');
 });
 test('real submit prevents concurrent sends, confirms only a valid receipt and keeps one request key for an uncertain retry',async()=>{
  let resolve,calls=0,keys=[];const gateway={listOwn:async()=>[],create:command=>{calls++;keys.push(command.requestKey);return new Promise(r=>{resolve=r;});}};
@@ -46,7 +58,7 @@ test('real submit prevents concurrent sends, confirms only a valid receipt and k
  const retry=button(tree,'ENVIAR').props.onPress();resolve({id:'r',reference:'GO-1',requestKey:keys[1],status:'received'});await retry;tree=f.render();assert.equal(keys[0],keys[1]);assert.ok(text(tree).includes('Solicitud recibida'));assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'');
 });
 test('old-account replies never appear after changing identity; history uses the own-only operation',async()=>{
- let release;const f=fixture({create:async()=>{},listOwn:()=>new Promise(r=>{release=r;})});f.render();let tree=f.render();button(tree,'Mis solicitudes').props.onPress();f.render();
+ let release;const f=fixture({create:async()=>{},listOwn:()=>new Promise(r=>{release=r;})});f.render();let tree=f.render();f.render({...f.props,kind:'mine'});
  const oldRelease=release;f.render({...f.props,scopeKey:'user-b'});oldRelease([{id:'old',reference:'PRIVATE',status:'answered'}]);await tick();tree=f.render({...f.props,scopeKey:'user-b'});assert.equal(text(tree).includes('PRIVATE'),false);
 });
 test('invalid messages cannot reach transport and mismatched receipts cannot confirm delivery',async()=>{

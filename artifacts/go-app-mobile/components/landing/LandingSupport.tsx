@@ -3,30 +3,25 @@ import { Modal, View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvo
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import type { SupportGateway, SupportKind, SupportReceipt } from "@/lib/supportRequests";
-import { sendSupportRequest } from "@/lib/supportRequests";
-
-const choices = [
-  ["incident", "Comunicar incidencia"], ["improvement", "Proponer mejora"],
-  ["help", "Necesito ayuda"], ["mine", "Mis solicitudes"],
-] as const;
+import { sendSupportRequest, SUPPORT_ORBIT_ACTIONS } from "@/lib/supportRequests";
 
 /** No production gateway is configured until receipt, privacy and authorization are verified. */
-export function LandingSupport({ visible, onClose, scopeKey, gateway }: {
-  visible: boolean; onClose: () => void; scopeKey: string; gateway?: SupportGateway;
+export function LandingSupport({ visible, onClose, scopeKey, gateway, kind="incident" }: {
+  visible: boolean; onClose: () => void; scopeKey: string; gateway?: SupportGateway; kind?: SupportKind | "mine";
 }) {
   const insets = useSafeAreaInsets();
-  const [kind, setKind] = useState<SupportKind | "mine">("incident");
   const [drafts, setDrafts] = useState({ incident: "", improvement: "", help: "" });
   const [context, setContext] = useState(false), [busy, setBusy] = useState(false);
   const [error, setError] = useState(""), [receipt, setReceipt] = useState<SupportReceipt | null>(null);
   const [requests, setRequests] = useState<SupportReceipt[] | null>(null);
-  const identity = useRef({key:scopeKey});
-  if(identity.current.key!==scopeKey)identity.current={key:scopeKey};
+  const identity = useRef({key:scopeKey,kind});
+  if(identity.current.key!==scopeKey||identity.current.kind!==kind)identity.current={key:scopeKey,kind};
   const flight = useRef(false), requestKey = useRef<string | null>(null);
   useEffect(() => {
     setDrafts({incident:"",improvement:"",help:""}); setContext(false); setReceipt(null);
     setRequests(null); setError(""); setBusy(false); requestKey.current=null; flight.current=false;
   }, [scopeKey]);
+  useEffect(()=>{setReceipt(null);setError("");setBusy(false);flight.current=false;requestKey.current=null;},[kind]);
   useEffect(() => {
     if (!visible || kind !== "mine" || !gateway) return;
     let active = true; const owner = identity.current;
@@ -48,11 +43,9 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway }: {
   };
   return <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
     <KeyboardAvoidingView style={[s.screen,{paddingTop:insets.top,paddingBottom:insets.bottom}]} behavior={Platform.OS==="ios"?"padding":undefined}>
-      <View style={s.header}><Text accessibilityRole="header" style={s.title}>AYÚDANOS A MEJORAR</Text>
+      <View style={s.header}><Text accessibilityRole="header" style={s.title}>{SUPPORT_ORBIT_ACTIONS.find(action=>action.kind===kind)?.title}</Text>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cerrar ayuda" onPress={onClose} style={s.close}><Feather name="x" size={24} color="#fff"/></TouchableOpacity></View>
       <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={s.content}>
-        {choices.map(([value,label])=><TouchableOpacity key={value} accessibilityRole="button" accessibilityState={{selected:kind===value,disabled:busy}} disabled={busy}
-          onPress={()=>{setKind(value);setReceipt(null);setError("");requestKey.current=null;}} style={[s.option,kind===value&&s.selected]}><Text style={s.text}>{label}</Text></TouchableOpacity>)}
         {!gateway&&<Text accessibilityRole="alert" style={s.notice}>La recepción de solicitudes todavía no está disponible. No se enviará ningún texto ni archivo.</Text>}
         {kind==="mine" ? <>{!gateway?<Text style={s.dim}>Tus solicitudes podrán consultarse aquí cuando el servicio esté habilitado.</Text>
           : requests===null?<Text style={s.dim}>Consultando…</Text>:requests.length===0?<Text style={s.dim}>No tienes solicitudes registradas.</Text>

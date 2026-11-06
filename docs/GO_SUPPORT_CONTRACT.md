@@ -1,7 +1,10 @@
 # Soporte GO: acceso preparado, recepción pendiente
 
-Landing abre directamente cuatro opciones: incidencia, mejora, ayuda y mis
-solicitudes. La órbita reutiliza PremiumOrbitBtn y la preferencia handedness.
+AYUDA activa cuatro posiciones del anillo existente de Landing: incidencia,
+mejora, ayuda y mis solicitudes. Cada una abre directamente su formulario/vista;
+SALIR en la esquina restaura las órbitas normales. No existe panel intermedio.
+La órbita reutiliza PremiumOrbitBtn y la preferencia handedness. Tamaño de 48
+puntos en iPhone (60 en anchos mayores), azul GO y mayor espacio para la etiqueta.
 No se ha encontrado una API, almacenamiento o panel de soporte reutilizable.
 No se instala ni configura un gateway de producción: ENVIAR está desactivado,
 se informa de la indisponibilidad y Mis solicitudes no muestra un vacío ficticio.
