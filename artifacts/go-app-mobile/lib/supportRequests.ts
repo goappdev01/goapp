@@ -20,7 +20,7 @@ export const SUPPORT_ADMIN_ORBITS = [
   {view:"all",label:"LISTADOS",title:"Listados de AYUDA",icon:"list"},
   {view:"pending",label:"PENDIENTES",title:"En revisión y pendientes",icon:"clock"},
   {view:"archive",label:"ARCHIVO",title:"Historial y archivo",icon:"archive"},
-  {view:"back",label:"VOLVER",title:"Volver a Landing",icon:"arrow-left"},
+  {view:"team",label:"EQUIPO",title:"Equipo de SOPORTE",icon:"users"},
 ] as const;
 /** Reflect functions only; the original eight coordinates/colours never move. */
 export const supportOrbitSlot=(slot:number,hand:"left"|"right")=>hand==="left"?(8-slot)%8:slot;

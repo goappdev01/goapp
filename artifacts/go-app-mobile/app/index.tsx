@@ -133,6 +133,7 @@ import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingSupport } from "@/components/landing/LandingSupport";
 import { SupportAdminPanel, type SupportAdminView } from "@/components/landing/SupportAdminPanel";
+import { SupportTeamPanel } from "@/components/landing/SupportTeamPanel";
 import { supportGateway } from "@/data/supportGateway";
 import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, SUPPORT_ADMIN_ORBITS, GO_SUPPORT_LIVE_ENABLED, type SupportKind } from "@/lib/supportRequests";
 import { placeLandingHelpQr, placeLandingQr } from "@/components/landing/landingQrPlacement";
@@ -1974,6 +1975,7 @@ function PremiumOrbitBtn({
   logoScale,
   flat = false,
   labelOnly = false,
+  labelLines = 1,
 }: {
   accessibilityLabel?: string;
   color: string;
@@ -2003,6 +2005,7 @@ function PremiumOrbitBtn({
   logoScale?: number;
   flat?: boolean;
   labelOnly?: boolean;
+  labelLines?: number;
 }) {
   const { t } = useLanguage();
   const pressAnim = React.useRef(new Animated.Value(1)).current;
@@ -2176,7 +2179,7 @@ function PremiumOrbitBtn({
                   textAlign: "center",
                   opacity: labelOpacity,
                 }}
-                numberOfLines={1}
+                numberOfLines={labelLines}
                 adjustsFontSizeToFit
                 minimumFontScale={0.75}
               >
@@ -2254,7 +2257,7 @@ function PremiumOrbitBtn({
                 textAlign: "center",
                 opacity: labelOpacity,
               }}
-              numberOfLines={1}
+              numberOfLines={labelLines}
               adjustsFontSizeToFit
               minimumFontScale={0.75}
             >
@@ -4294,11 +4297,15 @@ function HomeScreenContent() {
   const supportGoColor = supportMode ? GO_GOLD : goButtonColor;
   const [supportKind, setSupportKind] = useState<SupportKind | "mine">("incident");
   const [supportAdminOpen,setSupportAdminOpen]=useState(false);
+  const [supportTeamOpen,setSupportTeamOpen]=useState(false);
   const [supportAdminView,setSupportAdminView]=useState<SupportAdminView>("received");
   const [supportAiRequest, setSupportAiRequest] = useState(0);
   const openSupportAction = (kind: SupportKind | "mine") => { setSupportKind(kind); setSupportOpen(true); };
-  const openSupportAdmin=(view:SupportAdminView|"back")=>{if(view==="back"){setSupportMode(false);return;}setSupportAdminView(view);setSupportAdminOpen(true);};
-  useEffect(()=>{setSupportMode(false);setSupportOpen(false);setSupportAdminOpen(false);},[adminAccess.userId]);
+  const openSupportAdmin=(view:SupportAdminView|"team")=>{
+    if(view==="team"){setSupportTeamOpen(true);return;}
+    setSupportAdminView(view);setSupportAdminOpen(true);
+  };
+  useEffect(()=>{setSupportMode(false);setSupportOpen(false);setSupportAdminOpen(false);setSupportTeamOpen(false);},[adminAccess.userId]);
   const [qrOpen, setQrOpen] = useState(false);
   const [cartaOpen, setCartaOpen] = useState(false);
   const [quickNoteText, setQuickNoteText] = useState("");
@@ -25603,6 +25610,12 @@ function HomeScreenContent() {
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
     <LandingSupport key={`support-user:${adminAccess.userId ?? "anonymous"}`} visible={supportOpen} kind={supportKind} initialAssistantRequest={supportAiRequest} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"} gateway={GO_SUPPORT_LIVE_ENABLED&&adminAccess.userId?supportGateway:undefined} businessId={goView.view==="BUSINESS"&&businessAccess.allowed?businessAccess.snapshot?.business?.id:null}/>
     <SupportAdminPanel key={`support-admin:${adminAccess.userId??"anonymous"}`} visible={supportAdminOpen&&goView.isAdminView&&adminAccess.isOwner} onClose={()=>setSupportAdminOpen(false)} view={supportAdminView} gateway={supportGateway} backendReady={GO_SUPPORT_LIVE_ENABLED} handedness={handedness}/>
+    <SupportTeamPanel key={`support-team:${adminAccess.userId??"anonymous"}`} visible={supportTeamOpen&&goView.isAdminView&&adminAccess.isOwner}
+      onClose={()=>setSupportTeamOpen(false)} handedness={handedness}
+      onGoPress={()=>{setSupportTeamOpen(false);setSupportKind("help");setSupportOpen(true);setSupportAiRequest(value=>value+1);}}
+      renderSatellite={(satellite,size)=><PremiumOrbitBtn color={satellite.color} selected={false} dimmed={satellite.disabled}
+        onPress={satellite.onPress} icon="user" label={satellite.label} accessibilityLabel={satellite.title}
+        size={size} iconSize={0} labelSize={Math.max(10,Math.round(size*.18))} labelOnly labelLines={2} labelSpacing={0} paddingH={5}/>}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {

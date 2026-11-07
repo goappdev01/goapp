@@ -122,7 +122,7 @@ test('AYUDA groups its four real actions consecutively and leaves the normal orb
  for(const action of api.SUPPORT_ORBIT_ACTIONS){const f=fixture();f.render({...f.props,kind:action.kind});const tree=f.render({...f.props,kind:action.kind});assert.ok(text(tree).includes(action.title));
   const nav=nodes(tree).filter(n=>n.type==='GoCloseButton');assert.equal(nav.length,1);assert.equal(nav[0].props.level,'panel');assert.equal(nav[0].props.appearance,'light');nav[0].props.onPress();assert.deepEqual(f.navigation,['abort','back']);}
 });
-test('the ADMIN permission selects seven support queues and a return orbit, while USER keeps four forms',()=>{
+test('the ADMIN permission selects seven support queues and EQUIPO, while USER keeps four forms',()=>{
  const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),all=[];
  (function walk(n){all.push(n);ts.forEachChild(n,walk)})(ast);
  const mode=all.find(n=>ts.isConditionalExpression(n)&&n.whenTrue.getText(ast).includes('testID="landing-quiet-orbits"')).whenTrue;
@@ -132,6 +132,8 @@ test('the ADMIN permission selects seven support queues and a return orbit, whil
    goView:{isAdminView:true},adminAccess:{isOwner:true},openSupportAdmin:value=>opened.push(value),openSupportAction:value=>opened.push(value),orbitWrapSize:300,orbitRadiusVisual:99,orbitBtnVisualSize:65,uiScaleFactor:1};
  const run=()=>vm.runInNewContext(ts.transpileModule('result='+mode.getText(ast),{compilerOptions:{target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
  run();assert.equal(scope.result.children.length,8);
+ assert.equal(api.SUPPORT_ADMIN_ORBITS[7].view,'team');assert.equal(api.SUPPORT_ADMIN_ORBITS[7].label,'EQUIPO');
+ assert.equal(scope.result.children[7].children[0].props.color,'#9ca3af');
  scope.result.children.forEach((item,index)=>{assert.equal(item.children[0].props.label,api.SUPPORT_ADMIN_ORBITS[index].label);item.children[0].props.onPress();});
  assert.deepEqual(JSON.parse(JSON.stringify(opened)),JSON.parse(JSON.stringify(api.SUPPORT_ADMIN_ORBITS.map(item=>item.view))));
  scope.adminAccess.isOwner=false;opened.length=0;run();assert.equal(scope.result.children.length,4);

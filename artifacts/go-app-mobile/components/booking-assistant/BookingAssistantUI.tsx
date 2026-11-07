@@ -44,10 +44,10 @@ export function IconButton({
   );
 }
 /** Approved GO gold surface/white label, without coupling its action to dictation. */
-export function GoAssistantButton({onPress,disabled=false,size=56}:{onPress:()=>void;disabled?:boolean;size?:56|64}){
+export function GoAssistantButton({onPress,disabled=false,size=56}:{onPress:()=>void;disabled?:boolean;size?:number}){
  return <TouchableOpacity accessibilityRole="button" accessibilityLabel="Consultar a GO IA" accessibilityState={{disabled}} disabled={disabled} activeOpacity={0.78} onPress={onPress}
   style={[s.goButton,{width:size,minWidth:size,maxWidth:size,height:size,minHeight:size,borderRadius:size/2,marginHorizontal:0,alignItems:"center",justifyContent:"center"},disabled&&s.disabled]}>
-  <Text style={[s.goLabel,{fontSize:19,fontWeight:"900"}]}>GO</Text>
+  <Text style={[s.goLabel,{fontSize:size>64?Math.round(size*.34):19,fontWeight:"900"}]}>GO</Text>
  </TouchableOpacity>;
 }
 /** Compact paper plane; disabled transport is explicit and never implies delivery. */
