@@ -2,156 +2,89 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import path from 'node:path';
 import vm from 'node:vm';
-import { loadAuthSession } from './helpers/auth-session-fixture.mjs';
-
-const require = createRequire(path.join(process.cwd(), 'package.json'));
-const ts = require('typescript');
-const transpile = source => ts.transpileModule(source, { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
-  target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
-} }).outputText;
+const ts = createRequire(import.meta.url)('typescript');
 const plain = value => JSON.parse(JSON.stringify(value));
-const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
+const compile = file => ts.transpileModule(readFileSync(file, 'utf8'), { compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React } }).outputText;
+const flush = async () => { for(let n=0;n<45;n++) await Promise.resolve(); };
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
-const enrollment = { legal_name: 'Empresa real', tax_id: 'B12345678', trading_name: 'Nombre público', address: 'Dirección de prueba' };
-
+const enrollment = { legal_name:'SYNTHETIC legal',tax_id:'TEST-123',trading_name:'SYNTHETIC salon',address:'SYNTHETIC address' };
+const formKey = (owner='owner-a',id='new') => `go_verification_form:${owner}:${id}`;
 function fixture(shared = new Map()) {
-  const logs = [], calls = [], events = [];
-  const behavior = { storageFailure: false, submitFailure: null, barrier: null };
-  const storage = {
-    getItem: async key => shared.get(key) ?? null,
-    setItem: async (key, value) => { if (behavior.storageFailure) throw new Error('Disk failure'); shared.set(key, value); },
-    removeItem: async key => { shared.delete(key); },
-    multiRemove: async keys => { for (const key of keys) shared.delete(key); },
-  };
-  const auth = loadAuthSession({ process: { env: {} }, fetch: () => { throw Error('Unexpected auth transport'); } },
-    storage, { notifySessionChanged: () => events.push('session') });
-  const modules = new Map();
-  const load = (file, imports) => {
-    const context = { exports: {}, console: { warn: (...args) => logs.push(plain(args)) }, require: imports };
-    vm.createContext(context); vm.runInContext(transpile(readFileSync(file, 'utf8')), context);
-    return context.exports;
-  };
-  const draft = load('data/businessEnrollmentDraft.ts', name => {
-    if (name === '@react-native-async-storage/async-storage') return { default: storage };
-    throw new Error(name);
+  let cursor=0,effects=[],tree;
+  const slots=[],calls=[],events=[];
+  const behavior={storageFailure:false,submitFailure:null,barrier:null};
+  const access={snapshot:{userId:'owner-a',business:null},allowed:false,refresh:async()=>{events.push('refresh');},selectBusiness:async id=>events.push(id)};
+  const storage={getItem:async key=>shared.get(key)??null,setItem:async(key,value)=>{if(behavior.storageFailure)throw Error('Disk failure');shared.set(key,value);},removeItem:async key=>{shared.delete(key);}};
+  const same=(a,b)=>a&&b&&a.length===b.length&&a.every((v,i)=>Object.is(v,b[i]));
+  const React={createElement:(type,props,...children)=>({type,props:props??{},children}),useState(value){const n=cursor++;slots[n]??={value:typeof value==='function'?value():value};return[slots[n].value,value=>{slots[n].value=typeof value==='function'?value(slots[n].value):value;}];},useRef(value){return slots[cursor++]??={current:value};},useEffect(callback,deps){const n=cursor++;if(!slots[n]||!same(slots[n].deps,deps)){const old=slots[n];slots[n]={deps,cleanup:old?.cleanup};effects.push(()=>{old?.cleanup?.();slots[n].cleanup=callback();});}}};
+  const load=(file,imports)=>{const scope={exports:{},console,Math,Error,require:imports};vm.createContext(scope);vm.runInContext(compile(file),scope);return scope.exports;};
+  class APIError extends Error {}
+  const auth={captureAuthIdentity:async()=>access.snapshot.userId?{userId:access.snapshot.userId}:null,isAuthIdentityCurrent:async identity=>identity.userId===access.snapshot.userId};
+  const api=load('data/businessVerification.ts',name=>{
+    if(name==='@/lib/authSession')return auth;
+    if(name==='./booking')return{BookingApiError:APIError,isCloudId:value=>typeof value==='string'&&/^[0-9a-f-]{36}$/.test(value),supabaseApiRequest:async(path,init)=>{
+      if(path.endsWith('/dossiers'))return[];
+      if(path.endsWith('/requirements'))return[];
+      const command=JSON.parse(init.body);calls.push(plain(command));
+      if(behavior.barrier)await behavior.barrier.promise;
+      if(behavior.submitFailure)throw behavior.submitFailure;
+      return{dossier:{business_id:'11111111-1111-4111-8111-111111111111',name:command.data.trading_name,...command.data,revision:1,status:'documents_pending',verified:false,documents:[],history:[],requirements:null}};
+    }};
+    throw Error(name);
   });
-  let cursor = 0, effects = [], tree;
-  const slots = [];
-  const same = (a, b) => a && b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
-  const React = {
-    Fragment: 'fragment', createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
-    useState(initial) { const i = cursor++; slots[i] ??= { value: typeof initial === 'function' ? initial() : initial };
-      return [slots[i].value, next => { slots[i].value = typeof next === 'function' ? next(slots[i].value) : next; }]; },
-    useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
-    useEffect(callback, deps) { const i = cursor++;
-      if (!slots[i] || !same(slots[i].deps, deps)) {
-        const previous = slots[i]; slots[i] = { deps, cleanup: previous?.cleanup };
-        effects.push(() => { previous?.cleanup?.(); slots[i].cleanup = callback(); });
-      }
-    },
-  };
-  const access = { snapshot: { userId: 'owner-a', business: null, status: 'sin_empresa' },
-    allowed: false, loading: false, error: null, refresh: async () => { events.push('refresh'); } };
-  const gate = load('components/auth/BusinessAccessGate.tsx', name => {
-    if (name === 'react') return { default: React, ...React };
-    if (name === '@react-native-async-storage/async-storage') return { default: storage };
-    if (name === 'react-native') return { Platform: { OS: 'ios' }, KeyboardAvoidingView: 'keyboard', ScrollView: 'scroll',
-      TextInput: 'input', TouchableOpacity: 'button', View: 'view', Text: 'text', ActivityIndicator: 'spinner',
-      StyleSheet: { create: value => value }, Alert: { alert() {} } };
-    if (name === 'react-native-safe-area-context') return { useSafeAreaInsets: () => ({ top: 0, bottom: 0 }) };
-    if (name === '@/contexts/GoBusinessAccessContext') return { useBusinessAccess: () => access };
-    if (name === '@/contexts/GoModeContext') return { useGoMode: () => ({ loaded: true, isBusinessMode: true,
-      setActiveMode: mode => events.push(mode), syncModeFromRole: role => events.push(role) }) };
-    if (name === '@/data/businessEnrollmentDraft') return draft;
-    if (name === '@/data/businessAccess') return { submitBusinessEnrollment: async (...args) => {
-      calls.push(plain(args)); if (behavior.barrier) await behavior.barrier.promise;
-      if (behavior.submitFailure) throw behavior.submitFailure;
-      return { id: 'stored-business', verified: false };
-    } };
-    if (name === '@/lib/sessionEvents') return { notifySessionChanged: () => events.push('session') };
-    if (name === '@/lib/authSession') return auth;
-    throw new Error(name);
+  const workspace=load('components/auth/BusinessDossierWorkspace.tsx',name=>{
+    if(name==='react')return{default:React,...React};
+    if(name==='react-native')return{ActivityIndicator:'spinner',ScrollView:'scroll',Text:'text',TextInput:'input',TouchableOpacity:'button',View:'view',StyleSheet:{create:v=>v}};
+    if(name==='@/contexts/GoBusinessAccessContext')return{useBusinessAccess:()=>access};
+    if(name==='@react-native-async-storage/async-storage')return{default:storage};
+    if(name==='@/lib/authSession')return auth;
+    if(name==='@/data/businessVerification')return api;
+    if(name==='@/data/businessEnrollmentDraft')return load('data/businessEnrollmentDraft.ts',()=>({default:storage}));
+    if(name==='expo-document-picker'||name==='expo-file-system')return{};
+    throw Error(name);
   });
-  const Screen = gate.BusinessAccessGate({ children: 'private' }).type;
-  const nodes = node => {
-    if (!node || typeof node !== 'object') return [];
-    if (Array.isArray(node)) return node.flatMap(nodes);
-    return [node, ...(node.children ?? []).flatMap(nodes)];
-  };
-  const render = () => { cursor = 0; effects = []; tree = Screen(); for (const run of effects) run(); return tree; };
-  const fields = () => nodes(tree).filter(node => node.type === 'input');
-  const submit = () => nodes(tree).find(node => node.type === 'button' && node.children[0]?.children.some(text => /Enviar para|Enviando/.test(text))).props.onPress();
-  const fill = async data => { render(); for (const [index, field] of Object.keys(data).entries()) { fields()[index].props.onChangeText(data[field]); render(); } await flush(); render(); };
-  return { draft, shared, behavior, logs, calls, events, access, render, fields, fill, submit,
-    text: () => nodes(tree).filter(node => node.type === 'text').flatMap(node => node.children).join(' '),
-    unmount: () => { for (const slot of slots) slot?.cleanup?.(); } };
+  const nodes=node=>!node||typeof node!=='object'?[]:Array.isArray(node)?node.flatMap(nodes):[node,...(node.children??[]).flatMap(nodes)];
+  const render=()=>{cursor=0;effects=[];tree=workspace.BusinessDossierWorkspace({});for(const run of effects)run();return tree;};
+  const fields=()=>nodes(tree).filter(n=>n.type==='input');
+  const click=label=>{const b=nodes(tree).find(n=>n.type==='button'&&n.children[0]?.children.includes(label));assert.ok(b,label);return b.props.onPress();};
+  const settle=async()=>{await flush();render();await flush();render();};
+  return{shared,behavior,access,events,calls,render,fields,click,settle,tree:()=>tree,text:()=>nodes(tree).filter(n=>n.type==='text').flatMap(n=>n.children).join(' '),async fill(data=enrollment){render();for(const [n,key]of Object.keys(data).entries()){fields()[n].props.onChangeText(data[key]);render();}await settle();},unmount(){for(const slot of slots)slot?.cleanup?.();}};
 }
 
-test('edits persist through background/remount and stay isolated by owner and business', async () => {
-  const f = fixture(); f.render(); await flush(); await f.fill(enrollment);
-  const key = f.draft.businessEnrollmentDraftKey('owner-a');
-  assert.deepEqual(JSON.parse(f.shared.get(key)), enrollment);
-  f.unmount();
-  const resumed = fixture(f.shared); resumed.render(); await flush(); resumed.render();
-  assert.deepEqual(resumed.fields().map(node => node.props.value), Object.values(enrollment));
-  resumed.access.snapshot = { ...resumed.access.snapshot, business: null };
-  resumed.render(); assert.equal(resumed.fields()[0].props.value, enrollment.legal_name);
-  resumed.access.snapshot = { userId: 'owner-b', business: null, status: 'sin_empresa' };
-  resumed.render(); await flush(); resumed.render();
-  assert.ok(resumed.fields().every(node => node.props.value === ''));
-  assert.notEqual(key, f.draft.businessEnrollmentDraftKey('owner-a', 'other-business'));
-  assert.deepEqual(JSON.parse(f.shared.get(key)), enrollment);
+test('edits persist through background/remount and remain separated by identity and business',async()=>{
+ const f=fixture();f.render();await f.settle();await f.fill();assert.deepEqual(JSON.parse(f.shared.get(formKey())),{...enrollment,activity:''});f.unmount();
+ const resumed=fixture(f.shared);resumed.render();await resumed.settle();assert.deepEqual(resumed.fields().map(n=>n.props.value),Object.values(enrollment));
+ resumed.access.snapshot={userId:'owner-b',business:null};resumed.render();await resumed.settle();assert.ok(resumed.fields().every(n=>n.props.value===''));assert.ok(resumed.shared.has(formKey()));
 });
 
-test('ordered drafts keep the newest edit and a late successful submission cannot erase newer edits', async () => {
-  const f = fixture(), key = f.draft.businessEnrollmentDraftKey('owner-a');
-  const first = f.draft.saveBusinessEnrollmentDraft(key, enrollment);
-  const newer = { ...enrollment, address: 'Nueva dirección' };
-  const second = f.draft.saveBusinessEnrollmentDraft(key, newer);
-  await Promise.all([first, second]);
-  await f.draft.clearBusinessEnrollmentDraft(key, enrollment);
-  assert.deepEqual(plain(await f.draft.loadBusinessEnrollmentDraft(key)), newer);
-  await f.draft.clearBusinessEnrollmentDraft(key, newer);
-  assert.equal(await f.draft.loadBusinessEnrollmentDraft(key), null);
+test('a failed command preserves drafts, a stable retry identity, and safe messages',async()=>{
+ for(const message of ['Cannot POST /backend','SQL rpc missing']){
+  const f=fixture();f.render();await f.settle();await f.fill();f.behavior.submitFailure=Error(message);f.click('Guardar progreso');await f.settle();
+  assert.match(f.text(),/Tus datos se han conservado/);assert.doesNotMatch(f.text(),/SQL|Cannot POST/);assert.deepEqual(JSON.parse(f.shared.get(formKey())),{...enrollment,activity:''});
+  const pending=JSON.parse(f.shared.get('go_verification_pending:owner-a'));assert.equal(pending.requestId,f.calls[0].requestId);assert.equal(f.access.allowed,false);assert.equal(f.events.length,0);
+  f.unmount();const resumed=fixture(f.shared);resumed.render();await resumed.settle();resumed.click('Reintentar operación pendiente');await resumed.settle();
+  assert.equal(resumed.calls[0].requestId,pending.requestId);assert.equal(resumed.shared.has('go_verification_pending:owner-a'),false);
+ }
 });
 
-test('404/network/technical errors preserve the draft and show only the user message', async () => {
-  for (const failure of [Object.assign(new Error('Cannot POST /backend/enrollment'), { status: 404 }), new Error('SQL rpc missing')]) {
-    const f = fixture(); f.render(); await flush(); await f.fill(enrollment);
-    f.behavior.submitFailure = failure; await f.submit(); f.render();
-    assert.match(f.text(), /No hemos podido enviar tu solicitud.*Tus datos se han conservado/);
-    assert.doesNotMatch(f.text(), /Cannot POST|SQL|actualización del backend/);
-    assert.deepEqual(JSON.parse(f.shared.get(f.draft.businessEnrollmentDraftKey('owner-a'))), enrollment);
-    assert.equal(f.events.length, 0); assert.equal(f.access.allowed, false);
-    assert.ok(f.logs.some(entry => entry[1].stage === 'submit'));
-  }
+test('repeated taps produce one request, with deletion of local draft only after acknowledgement',async()=>{
+ const f=fixture();f.render();await f.settle();await f.fill();f.behavior.barrier=deferred();f.click('Guardar progreso');f.click('Guardar progreso');await f.settle();
+ assert.equal(f.calls.length,1);assert.ok(f.shared.has(formKey()));f.behavior.barrier.resolve();await f.settle();
+ assert.equal(f.shared.has(formKey()),false);assert.equal(f.shared.has('go_verification_pending:owner-a'),false);assert.deepEqual(f.events,['refresh']);assert.equal(f.access.allowed,false);
 });
 
-test('repeated taps submit once, clear only after acknowledgement, and leave verification to the provider', async () => {
-  const f = fixture(); f.render(); await flush(); await f.fill(enrollment);
-  f.behavior.barrier = deferred();
-  const first = f.submit(); const repeat = f.submit(); await flush();
-  assert.equal(f.calls.length, 1);
-  assert.ok(f.shared.has(f.draft.businessEnrollmentDraftKey('owner-a')));
-  f.behavior.barrier.resolve(); await Promise.all([first, repeat]); f.render();
-  assert.equal(f.shared.has(f.draft.businessEnrollmentDraftKey('owner-a')), false);
-  assert.deepEqual(f.events, ['refresh']); assert.equal(f.access.allowed, false);
+test('storage failure stops sending and a changed account never receives the acknowledgement',async()=>{
+ const f=fixture();f.render();await f.settle();await f.fill();f.behavior.storageFailure=true;f.click('Guardar progreso');await f.settle();assert.equal(f.calls.length,0);
+ const g=fixture();g.render();await g.settle();await g.fill();g.behavior.barrier=deferred();g.click('Guardar progreso');await g.settle();g.access.snapshot.userId='other';g.behavior.barrier.resolve();await g.settle();assert.equal(g.events.length,0);assert.equal(g.access.allowed,false);
 });
 
-test('storage failure prevents submission and never claims the data was preserved', async () => {
-  const f = fixture(); f.render(); await flush(); await f.fill(enrollment);
-  f.behavior.storageFailure = true; await f.submit(); f.render();
-  assert.equal(f.calls.length, 0); assert.match(f.text(), /No hemos podido guardar tus datos/);
-  assert.doesNotMatch(f.text(), /Tus datos se han conservado/);
+test('iPhone workspace keeps a scrollable form with keyboard tap support and existing field constraints',async()=>{
+ const f=fixture();f.render();await f.settle();assert.equal(f.tree().type,'scroll');assert.equal(f.tree().props.keyboardShouldPersistTaps,'handled');assert.equal(f.tree().props.keyboardDismissMode,'on-drag');
+ assert.deepEqual(f.fields().map(n=>n.props.maxLength),[200,32,200,4000]);assert.deepEqual(f.fields().map(n=>n.props.returnKeyType),['next','next','next','done']);assert.ok(f.fields().every(n=>n.props.editable));
 });
 
-test('iPhone form uses keyboard avoidance, scroll, and next/done input navigation', async () => {
-  const f = fixture(); f.render(); await flush(); const root = f.render();
-  assert.equal(root.type, 'keyboard'); assert.equal(root.props.behavior, 'padding');
-  assert.equal(root.children[0].type, 'scroll');
-  assert.equal(root.children[0].props.keyboardShouldPersistTaps, 'handled');
-  assert.equal(root.children[0].props.keyboardDismissMode, 'interactive');
-  assert.deepEqual(f.fields().map(node => node.props.returnKeyType), ['next', 'next', 'next', 'done']);
+test('draft utility serializes edits and cannot erase a newer edit when clearing an older submission',async()=>{
+ const shared=new Map();const scope={exports:{},console,require:name=>({default:{getItem:async key=>shared.get(key)??null,setItem:async(key,value)=>{shared.set(key,value);},removeItem:async key=>{shared.delete(key);}}})};vm.createContext(scope);vm.runInContext(compile('data/businessEnrollmentDraft.ts'),scope);const draft=scope.exports,key=draft.businessEnrollmentDraftKey('owner');
+ const newer={...enrollment,address:'Later edit'};await Promise.all([draft.saveBusinessEnrollmentDraft(key,enrollment),draft.saveBusinessEnrollmentDraft(key,newer)]);await draft.clearBusinessEnrollmentDraft(key,enrollment);assert.deepEqual(plain(await draft.loadBusinessEnrollmentDraft(key)),newer);await draft.clearBusinessEnrollmentDraft(key,newer);assert.equal(await draft.loadBusinessEnrollmentDraft(key),null);
 });

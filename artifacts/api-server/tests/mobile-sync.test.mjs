@@ -7,6 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 test('mobile saves cloud records, preserves form fields, archives and reports failures', async () => {
+ const previousApi = process.env.EXPO_PUBLIC_API_URL; process.env.EXPO_PUBLIC_API_URL='https://mobile-sync.invalid/api';
  const dir=await mkdtemp(path.join(tmpdir(),'go-mobile-sync-'));
  const outfile=path.join(dir,'booking.mjs');
  const storage=new Map(),secure=new Map();globalThis.__storageMock={getItem:async k=>storage.get(k)??null,setItem:async(k,v)=>storage.set(k,v),removeItem:async k=>storage.delete(k),multiRemove:async keys=>keys.forEach(k=>storage.delete(k))};
@@ -57,5 +58,5 @@ test('mobile saves cloud records, preserves form fields, archives and reports fa
   assert.equal(storage.has('go_supabase_session_v1'),false,'legacy credentials migrated');
   assert.ok(secure.has('go_auth_session_v2'),'protected session used by real requests');
   await api.clearAuthSession();assert.equal(secure.size,0);await assert.rejects(api.getOwnedBusinesses(),api.BookingAuthenticationError);
- }finally{globalThis.fetch=original;delete globalThis.__storageMock;delete globalThis.__secureMock;await rm(dir,{recursive:true,force:true});}
+ }finally{globalThis.fetch=original;if(previousApi===undefined)delete process.env.EXPO_PUBLIC_API_URL;else process.env.EXPO_PUBLIC_API_URL=previousApi;delete globalThis.__storageMock;delete globalThis.__secureMock;await rm(dir,{recursive:true,force:true});}
 });

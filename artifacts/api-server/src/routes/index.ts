@@ -13,10 +13,12 @@ import managementRouter from "./management";
 import adminRouter from "./admin";
 import financialPlansRouter from "./financial-plans";
 import boardsRouter from "./boards";
+import businessVerificationRouter from "./businessVerification";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use("/supabase/business-verification", businessVerificationRouter);
 router.use("/supabase/admin/finance", financialPlansRouter);
 router.use("/supabase/admin", adminRouter);
 router.use("/supabase/boards", boardsRouter);

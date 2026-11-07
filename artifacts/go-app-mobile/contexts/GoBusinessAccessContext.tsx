@@ -3,6 +3,8 @@ import { AppState } from "react-native";
 import { getBusinessAccess, type BusinessAccessSnapshot } from "@/data/businessAccess";
 import { onSessionChanged } from "@/lib/sessionEvents";
 import { useGoMode } from "./GoModeContext";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { resolveBusinessAccess } from "@/data/businessAccess";
 
 type BusinessAccessValue = {
   snapshot: BusinessAccessSnapshot | null;
@@ -10,8 +12,9 @@ type BusinessAccessValue = {
   allowed: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  selectBusiness: (id: string) => Promise<void>;
 };
-const Context = createContext<BusinessAccessValue>({ snapshot: null, loading: true, allowed: false, error: null, refresh: async () => {} });
+const Context = createContext<BusinessAccessValue>({ snapshot: null, loading: true, allowed: false, error: null, refresh: async () => {}, selectBusiness: async () => {} });
 
 export function GoBusinessAccessProvider({ children }: { children: React.ReactNode }) {
   const { activeMode } = useGoMode();
@@ -29,8 +32,10 @@ export function GoBusinessAccessProvider({ children }: { children: React.ReactNo
     if (inFlight.current?.revision === version) return inFlight.current.promise;
     setLoading(true);
     setError(null);
-    const promise = getBusinessAccess().then(result => {
-      if (mounted.current && version === revision.current) setSnapshot(result);
+    const promise = getBusinessAccess().then(async result => {
+      const selected = result.userId ? await AsyncStorage.getItem(`go_selected_business:${result.userId}`) : null;
+      const resolved = result.userId ? resolveBusinessAccess(result.businesses ?? (result.business ? [result.business] : []), result.userId, selected) : result;
+      if (mounted.current && version === revision.current) setSnapshot(resolved);
     }).catch(() => {
       if (mounted.current && version === revision.current) {
         setSnapshot(null);
@@ -69,8 +74,16 @@ export function GoBusinessAccessProvider({ children }: { children: React.ReactNo
   useEffect(() => { void refresh(); }, [activeMode, refresh]);
 
   const checking = loading || checkedMode !== activeMode;
-  return <Context.Provider value={{ snapshot, loading: checking, error, refresh,
-    allowed: !checking && !error && snapshot?.business?.verified === true }}>{children}</Context.Provider>;
+  const selectBusiness = async (id: string) => {
+    if (!snapshot?.userId || !snapshot.businesses?.some(business => business.id === id)) throw new Error("Empresa no disponible.");
+    revision.current++;
+    setLoading(true);
+    setSnapshot(null);
+    try { await AsyncStorage.setItem(`go_selected_business:${snapshot.userId}`, id); }
+    finally { await refresh(); }
+  };
+  return <Context.Provider value={{ snapshot, loading: checking, error, refresh, selectBusiness,
+    allowed: !checking && !error && snapshot?.status === "verificada" && snapshot.business?.verified === true }}>{children}</Context.Provider>;
 }
 
 export function useBusinessAccess() { return useContext(Context); }

@@ -16,8 +16,8 @@ export async function getAdminAccess(): Promise<AdminAccess> {
     // A legacy profiles.role response is insufficient: require the membership contract.
     const grants = access?.permissions;
     const permitted = access?.level === "owner"
-      ? ["admin.access", "development", "diagnostics", "maintenance", "memberships.manage", "ownership.manage"]
-      : ["admin.access", "development", "diagnostics", "maintenance"];
+      ? ["admin.access", "development", "diagnostics", "maintenance", "memberships.manage", "ownership.manage", "businesses.verify"]
+      : ["admin.access", "development", "diagnostics", "maintenance", "businesses.verify"];
     if (!access || access.userId !== userId || access.role !== "admin" || access.allowed !== true
       || !["owner", "technical"].includes(String(access.level))
       || !Array.isArray(grants) || !grants.includes("admin.access")

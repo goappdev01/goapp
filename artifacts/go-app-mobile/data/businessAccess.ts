@@ -13,26 +13,30 @@ export type OwnedBusinessAccess = {
   name: string;
   address?: string | null;
   verified?: boolean;
-  verification_request?: Partial<BusinessEnrollment> & { status?: "pending" | "rejected"; rejection_reason?: string | null };
+  verification_request?: Partial<BusinessEnrollment> & { status?: string; rejection_reason?: string | null; revision?: number; activity?: string };
 };
 export type BusinessAccessSnapshot = {
   userId: string | null;
   business: OwnedBusinessAccess | null;
+  businesses?: OwnedBusinessAccess[];
   status: BusinessVerificationStatus;
 };
 
 // Neither roles, demos nor local verification metadata authorize GO Empresa.
-export function resolveBusinessAccess(rows: OwnedBusinessAccess[], userId: string): BusinessAccessSnapshot {
-  const business = rows.find(row => row.verified === true) ?? rows[0] ?? null;
+export function resolveBusinessAccess(rows: OwnedBusinessAccess[], userId: string, selectedId?: string | null): BusinessAccessSnapshot {
+  const authorized = (row: OwnedBusinessAccess) => row.verified === true
+    && (!row.verification_request || row.verification_request.status === "authorized");
+  const business = rows.find(row => row.id === selectedId) ?? rows.find(authorized) ?? rows[0] ?? null;
   return {
     userId,
     business,
-    status: !business ? "sin_empresa" : business.verified === true ? "verificada"
+    businesses: rows,
+    status: !business ? "sin_empresa" : authorized(business) ? "verificada"
       : business.verification_request?.status === "rejected" ? "rechazada" : "pendiente_verificacion",
   };
 }
 
-export async function getBusinessAccess(): Promise<BusinessAccessSnapshot> {
+export async function getBusinessAccess(selectedId?: string | null): Promise<BusinessAccessSnapshot> {
   const identity = await captureAuthIdentity();
   const userId = identity?.userId;
   if (!identity || !userId) return { userId: null, business: null, status: "sin_empresa" };
@@ -43,7 +47,7 @@ export async function getBusinessAccess(): Promise<BusinessAccessSnapshot> {
   if (!Array.isArray(rows) || rows.some(row => !row || !isCloudId(row.id))) {
     throw new Error("No se pudo comprobar la verificación de tu empresa.");
   }
-  return resolveBusinessAccess(rows, userId);
+  return resolveBusinessAccess(rows, userId, selectedId);
 }
 
 export async function submitBusinessEnrollment(data: BusinessEnrollment, businessId?: string): Promise<OwnedBusinessAccess> {

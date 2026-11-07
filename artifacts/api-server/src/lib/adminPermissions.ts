@@ -1,11 +1,11 @@
 export const ADMIN_PERMISSIONS = [
   "admin.access", "development", "diagnostics", "maintenance",
-  "memberships.manage", "ownership.manage",
+  "memberships.manage", "ownership.manage", "businesses.verify",
 ] as const;
 export type AdminPermission = typeof ADMIN_PERMISSIONS[number];
 export type AdminLevel = "owner" | "technical";
 export const TECHNICAL_PERMISSIONS: readonly AdminPermission[] = [
-  "admin.access", "development", "diagnostics", "maintenance",
+  "admin.access", "development", "diagnostics", "maintenance", "businesses.verify",
 ];
 
 // Reject malformed or reserved grants rather than widening their meaning.

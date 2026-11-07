@@ -722,13 +722,16 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
           setLoaded(true);
           return;
         }
-        storageKey.current = userId ? `${BUSINESS_CONFIG_KEY}:${userId}` : BUSINESS_CONFIG_KEY;
+        const selectedBusinessId = enterprise.snapshot?.business?.id;
+        storageKey.current = userId ? `${BUSINESS_CONFIG_KEY}:${userId}:${selectedBusinessId}` : BUSINESS_CONFIG_KEY;
         if (userId) {
-          const cloud = await getCloudConfiguration<BusinessConfig>();
+          const cloud = await getCloudConfiguration<BusinessConfig>(selectedBusinessId);
           if (version !== generation.current) return;
-          const rawDraft = await AsyncStorage.getItem(storageKey.current);
+          const rawDraft = await AsyncStorage.getItem(storageKey.current)
+            ?? await AsyncStorage.getItem(`${BUSINESS_CONFIG_KEY}:${userId}`);
           const draft = rawDraft ? JSON.parse(rawDraft) : null;
-          setConfig({ ...DEFAULT_BUSINESS_CONFIG, ...(cloud ?? draft ?? {}) });
+          const matchingDraft = draft?.businessId === selectedBusinessId ? draft : null;
+          setConfig({ ...DEFAULT_BUSINESS_CONFIG, ...(cloud ?? matchingDraft ?? {}), businessId: selectedBusinessId });
           setLoaded(true);
           return;
         }
