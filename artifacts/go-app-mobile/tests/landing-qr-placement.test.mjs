@@ -11,12 +11,12 @@ for(const profile of ['ADMIN','BUSINESS','USER'])for(const preset of ['compacto'
    const slop=typeof hit==='number'?{top:hit,bottom:hit,left:hit,right:hit}:hit;
    assert.equal(p.width,Math.round(32*f.scale));assert.equal(p.height,p.width);assert.equal(p.borderRadius,p.width/2);
    assert.ok(p.width+slop.left+slop.right>=44&&p.height+slop.top+slop.bottom>=44);
-   const hostLeft=hand==='right'?d.width-host.initialRight-host.width:host.initialRight;
-   const visual={x:hostLeft+p.left,y:host.initialTop+p.top};
+   assert.equal(host.testID,'landing-qr-fixed-host');
+   const visual={x:host.style.left+p.left,y:host.style.top+p.top};
    assert.ok(visual.x!==f.closeQrX||visual.y!==f.closeQrY,'the former header location is not used');
    const touch={x:visual.x-slop.left,y:visual.y-slop.top,width:p.width+slop.left+slop.right,height:p.height+slop.top+slop.bottom};
    assert.ok(touch.x>=d.insets.left+8&&touch.x+touch.width<=d.width-d.insets.right-8);
-   assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=(f.pairedLandingQr?d.height-8:d.height-d.insets.bottom));
+   assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=d.height-Math.max(d.insets.bottom,8));
    const root=r=>f.toLandingRootRect(r),move=r=>({...r,y:r.y+f.landingOffsetY});
    const commands=move(root(f.landingPanels.commands));
    const active=(f.landingArrangement.obstacles??[]).filter((_,i)=>i===0||i>8);
@@ -49,7 +49,7 @@ test('the common Landing buttons and AYUDA retain the same geometry across profi
   }
  }
 });
-test('the photographed 393 × 852 Landing places AYUDA and QR together below active RESERVAS on the correct side',()=>{
+test('the photographed 393 × 852 Landing keeps QR opposite AYUDA in both hand modes',()=>{
  const d={width:393,height:852,insets:{top:59,bottom:34,left:0,right:0}};
  for(const hand of ['right','left']){
   const f=fixture(d,'estandar','USER',hand),help=f.supportRect,button=f.render(),hit=button.props.hitSlop;
@@ -67,7 +67,7 @@ test('the photographed 393 × 852 Landing places AYUDA and QR together below act
     JSON.parse(JSON.stringify(fixture(d,'estandar','USER',hand).landingArrangement.offsets)));
  }
 });
-test('ADMIN leaves CONTACTOS in place and moves only QR away from its touch area',()=>{
+test('ADMIN and USER share the fixed QR corner without covering CONTACTOS',()=>{
  const d={width:393,height:852,insets:{top:59,bottom:34,left:0,right:0}};
  for(const hand of ['right','left']){
   const user=fixture(d,'estandar','USER',hand),admin=fixture(d,'estandar','ADMIN',hand),i=admin.cornerSatelliteKeys.indexOf('contacts');
@@ -86,13 +86,15 @@ test('the unique original QR keeps its appearance and exact action; overlays sti
  b.props.onPress();assert.deepEqual(f.effects,['haptic',['qr',true]]);assert.equal(f.render(true),null);
  assert.ok(!qrNode.getText().includes('clampLandingControlBottom'));
 });
-test('only the Landing QR has a persisted draggable position and its long drag cannot open QR',()=>{
+test('the Landing QR is fixed, keeps its full touch area, and a tap still opens it',()=>{
  const f=fixture(devices[2]),button=f.render(),host=f.host().props;
- assert.equal(host.screenKey,'landing-qr-common-left-v3');assert.equal(host.buttonKey,'qr');
- assert.equal(host.width,button.props.style.width+2*button.props.hitSlop);
- assert.ok(host.avoidRects.length>0);
- host.onDragStart();button.props.onPress();assert.deepEqual(f.effects,[]);
- host.onDragEnd();button.props.onPress();assert.deepEqual(f.effects,[]);
+ assert.equal(host.testID,'landing-qr-fixed-host');
+ assert.equal(host.style.width,button.props.style.width+2*button.props.hitSlop);
+ assert.equal(host.style.height,host.style.width);
+ assert.equal(host.onDragStart,undefined);assert.equal(host.onDragEnd,undefined);
+ assert.equal(button.props.onLongPress,undefined);
+ assert.ok(!qrNode.getText().includes('GoNavigationFloating'));
+ button.props.onPress();assert.deepEqual(f.effects,['haptic',['qr',true]]);
 });
 test('QR placement never mutates any existing control and retains a safe no-slot fallback',()=>{
  const {placeLandingQr}=load('components/landing/landingQrPlacement.ts');

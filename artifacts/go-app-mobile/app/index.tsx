@@ -4300,9 +4300,6 @@ function HomeScreenContent() {
   const openSupportAdmin=(view:SupportAdminView|"back")=>{if(view==="back"){setSupportMode(false);return;}setSupportAdminView(view);setSupportAdminOpen(true);};
   useEffect(()=>{setSupportMode(false);setSupportOpen(false);setSupportAdminOpen(false);},[adminAccess.userId]);
   const [qrOpen, setQrOpen] = useState(false);
-  const qrDragUntil = useRef(0);
-  const onQrDragStart = useCallback(()=>{qrDragUntil.current=Number.POSITIVE_INFINITY;},[]);
-  const onQrDragEnd = useCallback(()=>{qrDragUntil.current=Date.now()+450;},[]);
   const [cartaOpen, setCartaOpen] = useState(false);
   const [quickNoteText, setQuickNoteText] = useState("");
   const quickNoteTitleRef = useRef<React.ElementRef<typeof TextInput>>(null);
@@ -15606,7 +15603,7 @@ function HomeScreenContent() {
         {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry)}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}</>}
       </GoEntryDetailsSheet>
 
-      {/* QR keeps its approved appearance; only this control can be repositioned. */}
+      {/* QR uses the approved fixed corner for the selected hand. */}
       {!anyOverlayOpen && (() => {
         const BTN_SZ = Math.round(32 * uiScaleFactor);
         const qrHit = Math.max(6, (44 - BTN_SZ) / 2);
@@ -15615,16 +15612,12 @@ function HomeScreenContent() {
         const initialLeft = landingQrPosition.x - qrHit;
         const initialTop = landingQrPosition.y - touchTop;
         return (
-          <GoNavigationFloating screenKey="landing-qr-common-left-v3" buttonKey="qr"
-            safeArea={false} handedness={handedness} width={touchSize} height={touchSize} boundsVerticalInset={8}
-            initialTop={initialTop} initialRight={handedness==="left"?initialLeft:screen.width-initialLeft-touchSize}
-            avoidRects={[...adminQrObstacles,...adminOnlyCornerObstacles,supportRect,landingNavigationCloseRect,
-              {x:0,y:0,width:screen.width,height:insets.top+8}]}
-            onDragStart={onQrDragStart} onDragEnd={onQrDragEnd}>
+          <View testID="landing-qr-fixed-host" pointerEvents="box-none"
+            style={{position:"absolute",left:initialLeft,top:initialTop,width:touchSize,height:touchSize,zIndex:80}}>
             <View style={{width:touchSize,height:touchSize}}>
               <TouchableOpacity key="qr-permanent-btn"
                 hitSlop={qrHit}
-                onPress={() => { if(Date.now()<qrDragUntil.current)return;Haptics.selectionAsync().catch(() => {});setQrOpen(true); }}
+                onPress={() => { Haptics.selectionAsync().catch(() => {});setQrOpen(true); }}
                 activeOpacity={0.8}
                 style={{
                   position: "absolute",left:qrHit,top:touchTop,zIndex:10,
@@ -15637,7 +15630,7 @@ function HomeScreenContent() {
                 <Feather name="grid" size={Math.round(12 * uiScaleFactor)} color="#ffffff" />
               </TouchableOpacity>
             </View>
-          </GoNavigationFloating>
+          </View>
         );
       })()}
 
