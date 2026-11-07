@@ -156,7 +156,7 @@ test("one shared viewport contains both cards, transport and existing help; caro
   assert.ok(!content.includes("minHeight: proximaExpanded ? panelMaxHeight"));
   assert.equal(s.match(/<LandingContentViewport /g).length,1);
   assert.ok(s.includes("setLandingSurfaceSize(prev => prev?.width === width"));
-  assert.ok(s.includes("hitSlop={pairedLandingQr ? { top: 2 * qrHit, bottom: 0, left: qrHit, right: qrHit } : qrHit}"));
+  assert.ok(s.includes("hitSlop={qrHit}"));
 });
 
 test("short landscape uses readable two-column actions and keeps transport in a separate lower row", () => {

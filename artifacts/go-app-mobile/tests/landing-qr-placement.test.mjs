@@ -7,6 +7,7 @@ for(const profile of ['ADMIN','BUSINESS','USER'])for(const preset of ['compacto'
  test(`${profile}/${preset}/${hand}: QR stays safe without colliding with controls`,()=>{
   for(const d of devices){
    const f=fixture(d,preset,profile,hand),button=f.render(),p=button.props.style,hit=button.props.hitSlop,host=f.host().props;
+   assert.equal(f.landingQrPosition.x,hand==='right'?d.insets.left+8+f.closeQrHit:d.width-d.insets.right-8-f.closeQrSize-f.closeQrHit);
    const slop=typeof hit==='number'?{top:hit,bottom:hit,left:hit,right:hit}:hit;
    assert.equal(p.width,Math.round(32*f.scale));assert.equal(p.height,p.width);assert.equal(p.borderRadius,p.width/2);
    assert.ok(p.width+slop.left+slop.right>=44&&p.height+slop.top+slop.bottom>=44);
@@ -29,7 +30,7 @@ test('ADMIN keeps the USER AYUDA anchor and places QR clear of its extra satelli
  for(const d of devices.filter(device=>device.width>=375&&device.width<500))for(const hand of ['right','left']){
   const f=fixture(d,'estandar','ADMIN',hand),user=fixture(d,'estandar','USER',hand),h=f.supportRect,q=f.landingQrPosition;
   assert.deepEqual(JSON.parse(JSON.stringify(h)),JSON.parse(JSON.stringify(user.supportRect)));
-  assert.ok(hand==='right'?h.x>=d.width/2:q.x<d.width/2);
+  assert.ok(hand==='right'?h.x>=d.width/2:h.x<d.width/2);
   assert.ok(h.y>=d.height/2&&q.y>=d.height/2);
   assert.ok(!overlaps({x:q.x-f.closeQrHit,y:q.y-f.closeQrHit,width:f.closeQrSize+2*f.closeQrHit,height:f.closeQrSize+2*f.closeQrHit},h));
  }
@@ -59,7 +60,7 @@ test('the photographed 393 × 852 Landing places AYUDA and QR together below act
   assert.ok(hand==='right'?help.x>qr.x+qr.width&&help.x>=300:qr.x>help.x+help.width&&help.x<=60);
   assert.ok(help.y>=d.height*.85&&qr.y>=d.height*.85);
   assert.equal(help.y,780,'AYUDA is 10pt lower than the approved position');
-  assert.equal(f.landingQrPosition.y,811,'QR is 15pt lower than its previous position');
+  assert.equal(f.landingQrPosition.y,780,'QR respects the bottom safe area');
   assert.ok(help.y+help.height<=d.height-8&&qr.y+qr.height<=d.height-8);
   assert.ok(!overlaps(help,qr));
   assert.deepEqual(JSON.parse(JSON.stringify(f.landingArrangement.offsets)),
@@ -73,7 +74,7 @@ test('ADMIN leaves CONTACTOS in place and moves only QR away from its touch area
   const contact=admin.landingArrangement.obstacles[9+i],qr={x:admin.landingQrPosition.x-admin.closeQrHit,
     y:admin.landingQrPosition.y-admin.closeQrHit,width:admin.closeQrSize+2*admin.closeQrHit,height:admin.closeQrSize+2*admin.closeQrHit};
   assert.deepEqual(JSON.parse(JSON.stringify(admin.supportRect)),JSON.parse(JSON.stringify(user.supportRect)));
-  assert.notDeepEqual(admin.landingQrPosition,user.landingQrPosition);
+  assert.deepEqual({...admin.landingQrPosition},{...user.landingQrPosition});
   assert.ok(!overlaps(qr,contact,2));
  }
 });
@@ -87,7 +88,7 @@ test('the unique original QR keeps its appearance and exact action; overlays sti
 });
 test('only the Landing QR has a persisted draggable position and its long drag cannot open QR',()=>{
  const f=fixture(devices[2]),button=f.render(),host=f.host().props;
- assert.equal(host.screenKey,'landing-qr-admin');assert.equal(host.buttonKey,'qr');
+ assert.equal(host.screenKey,'landing-qr-common-left-v3');assert.equal(host.buttonKey,'qr');
  assert.equal(host.width,button.props.style.width+2*button.props.hitSlop);
  assert.ok(host.avoidRects.length>0);
  host.onDragStart();button.props.onPress();assert.deepEqual(f.effects,[]);

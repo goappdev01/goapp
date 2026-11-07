@@ -14288,8 +14288,9 @@ function HomeScreenContent() {
     { x: landingDisplayCloseRect.x - 8, y: landingDisplayCloseRect.y - 8,
       width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 }];
   const pairedLandingQr = isUserV1Surface && !helpOverlapsAdminSatellite && !!landingCornerPair?.qr;
-  const landingQrPosition = (pairedLandingQr ? landingCornerPair?.qr : null) ?? placeLandingQr({ ...qrBase, handedness, companion: supportRect,
-    obstacles: [...adminQrObstacles, supportRect] }) ?? { x: closeQrX, y: closeQrY };
+  const landingQrPosition = { x: handedness === "left" ? screen.width - insets.right - 8 - closeQrSize - closeQrHit : insets.left + 8 + closeQrHit,
+    y: screen.height - Math.max(insets.bottom, 8) - closeQrSize - closeQrHit };
+
   // Keep the approved header reservation: relocating QR must not shift panels or confirmations.
   const landingHeaderControls = [
     { x: closeQrX, y: closeQrY - landingOffsetY, width: closeQrSize, height: closeQrSize },
@@ -15610,19 +15611,19 @@ function HomeScreenContent() {
         const BTN_SZ = Math.round(32 * uiScaleFactor);
         const qrHit = Math.max(6, (44 - BTN_SZ) / 2);
         const touchSize = BTN_SZ + 2 * qrHit;
-        const touchTop = pairedLandingQr ? 2 * qrHit : qrHit;
+        const touchTop = qrHit;
         const initialLeft = landingQrPosition.x - qrHit;
         const initialTop = landingQrPosition.y - touchTop;
         return (
-          <GoNavigationFloating screenKey={goView.isAdminView?"landing-qr-admin":"landing-qr-user"} buttonKey="qr"
+          <GoNavigationFloating screenKey="landing-qr-common-left-v3" buttonKey="qr"
             safeArea={false} handedness={handedness} width={touchSize} height={touchSize} boundsVerticalInset={8}
             initialTop={initialTop} initialRight={handedness==="left"?initialLeft:screen.width-initialLeft-touchSize}
-            avoidRects={[...adminQrObstacles,supportRect,landingNavigationCloseRect,
+            avoidRects={[...adminQrObstacles,...adminOnlyCornerObstacles,supportRect,landingNavigationCloseRect,
               {x:0,y:0,width:screen.width,height:insets.top+8}]}
             onDragStart={onQrDragStart} onDragEnd={onQrDragEnd}>
             <View style={{width:touchSize,height:touchSize}}>
               <TouchableOpacity key="qr-permanent-btn"
-                hitSlop={pairedLandingQr ? { top: 2 * qrHit, bottom: 0, left: qrHit, right: qrHit } : qrHit}
+                hitSlop={qrHit}
                 onPress={() => { if(Date.now()<qrDragUntil.current)return;Haptics.selectionAsync().catch(() => {});setQrOpen(true); }}
                 activeOpacity={0.8}
                 style={{
