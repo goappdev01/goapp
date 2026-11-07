@@ -34,6 +34,26 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const FAB_BTN = 40;
 const EDGE = 8;
+type FabRect={x:number;y:number;width:number;height:number};
+
+/** Let the finger cross occupied areas; settle only in a free position on release. */
+function settleClearPosition(x:number,y:number,originX:number,originY:number,width:number,height:number,
+  minL:number,maxL:number,minT:number,maxT:number,rects:readonly FabRect[]){
+  "worklet";
+  const clear=(left:number,top:number)=>!rects.some(rect=>left<rect.x+rect.width+2&&left+width>rect.x-2
+    &&top<rect.y+rect.height+2&&top+height>rect.y-2);
+  if(clear(x,y))return{x,y};
+  const xs=[x,originX,minL,maxL],ys=[y,originY,minT,maxT];
+  for(const rect of rects){xs.push(rect.x-width-2,rect.x+rect.width+2);ys.push(rect.y-height-2,rect.y+rect.height+2);}
+  let bestX=originX,bestY=originY,best=Number.POSITIVE_INFINITY;
+  for(const candidateX of xs)for(const candidateY of ys){
+    const left=Math.max(minL,Math.min(maxL,candidateX)),top=Math.max(minT,Math.min(maxT,candidateY));
+    if(!clear(left,top))continue;
+    const distance=(left-x)**2+(top-y)**2;
+    if(distance<best){best=distance;bestX=left;bestY=top;}
+  }
+  return{x:bestX,y:bestY};
+}
 
 interface DraggableFABProps {
   navigation?:boolean;
@@ -99,9 +119,12 @@ export function DraggableFAB({
   const posT = useSharedValue(initTop);
   const startL = useSharedValue(initLeft);
   const startT = useSharedValue(initTop);
+  const originL = useSharedValue(initLeft);
+  const originT = useSharedValue(initTop);
   const scale = useSharedValue(1);
   const shadowOp = useSharedValue(0.18);
   const isDragging = useSharedValue(false);
+  const dragStarted = useSharedValue(false);
   const hasDragged = useSharedValue(false);
   const lastBoundsHeight=useRef<number|null>(null),currentBoundsHeight=useRef(SH);
   currentBoundsHeight.current=SH;
@@ -170,9 +193,12 @@ export function DraggableFAB({
         .onStart((event) => {
           "worklet";
           isDragging.value = true;
+          dragStarted.value = true;
           hasDragged.value = true;
           if (onDragStart) runOnJS(onDragStart)();
           if(navigation)runOnJS(markNavigationDrag)();
+          originL.value=posL.value;
+          originT.value=posT.value;
           startL.value = Math.max(minL, Math.min(maxL, posL.value)) - event.translationX;
           startT.value = Math.max(minT, Math.min(maxT, posT.value)) - event.translationY;
           scale.value = withSpring(fixed === undefined && !navigation ? 1.1 : 1, { damping: 10, stiffness: 180 });
@@ -183,26 +209,35 @@ export function DraggableFAB({
           "worklet";
           const nextL=Math.max(minL, Math.min(maxL, startL.value + e.translationX));
           const nextT=Math.max(minT, Math.min(maxT, startT.value + e.translationY));
-          if(!avoidRects?.some(rect=>nextL<rect.x+rect.width+2&&nextL+buttonWidth>rect.x-2
-            &&nextT<rect.y+rect.height+2&&nextT+maxH>rect.y-2)){
-            posL.value=nextL;posT.value=nextT;
-          }
+          posL.value=nextL;posT.value=nextT;
         })
         .onEnd(() => {
           "worklet";
+          if(avoidRects?.length){
+            const target=settleClearPosition(posL.value,posT.value,originL.value,originT.value,
+              buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects);
+            posL.value=withSpring(target.x);
+            posT.value=withSpring(target.y);
+            runOnJS(savePos)(target.x,target.y);
+          }else runOnJS(savePos)(posL.value,posT.value);
           isDragging.value = false;
           scale.value = withSpring(1, { damping: 14, stiffness: 160 });
           shadowOp.value = 0.18;
-          runOnJS(savePos)(posL.value, posT.value);
           runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Light);
         })
         .onFinalize(() => {
           "worklet";
+          if(isDragging.value&&avoidRects?.length){
+            // A cancelled pan never parks the QR over another live control.
+            posL.value=withSpring(originL.value);
+            posT.value=withSpring(originT.value);
+          }
           isDragging.value = false;
           scale.value = withSpring(1);
           shadowOp.value = 0.18;
           if(navigation)runOnJS(finishNavigationDrag)();
-          if(onDragEnd)runOnJS(onDragEnd)();
+          if(dragStarted.value&&onDragEnd)runOnJS(onDragEnd)();
+          dragStarted.value=false;
         }),
     [minL, maxL, minT, maxT, savePos, onDragStart, onDragEnd, avoidRects, buttonWidth, maxH, fixed,navigation,markNavigationDrag,finishNavigationDrag]
   );

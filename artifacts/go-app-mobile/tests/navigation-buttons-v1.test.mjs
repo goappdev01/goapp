@@ -10,12 +10,12 @@ const walk=p=>readdirSync(p,{withFileTypes:true}).flatMap(e=>e.isDirectory()?['n
 const canonical=handler=>ts.createPrinter({removeComments:true}).printFile(ts.createSourceFile('callback.ts','const callback='+handler,ts.ScriptTarget.Latest,true));
 test('every migrated navigation callback is unchanged, no duplicates were added and sorting arrows remain untouched',()=>{
  const actual=[];for(const file of [...walk('components'),'app/index.tsx']){const ast=ts.createSourceFile(file,readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);(function visit(n){if(!file.endsWith('GoNavigationAppearanceControl.tsx')&&ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='GoCloseButton'){const h=n.attributes.properties.find(p=>p.name?.getText(ast)==='onPress');if(h)actual.push({file:file.replace(/\\/g,'/'),handler:h.initializer.expression.getText(ast)});}ts.forEachChild(n,visit);})(ast);}
- const keys=rows=>rows.map(r=>r.file+'\n'+canonical(r.handler)).sort();const expected=[...baseline.handlers,{file:'app/index.tsx',handler:'()=>setSupportMode(active=>!active)'},{file:'components/booking-assistant/BookingAssistantScreen.tsx',handler:'back'},{file:'app/index.tsx',handler:'() => { Haptics.selectionAsync(); setCalConfigVisible(true); }'},{file:'components/booking/GoReservasConfigScreen.tsx',handler:'() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }'}];assert.deepEqual(keys(actual),keys(expected));
+ const keys=rows=>rows.map(r=>r.file+'\n'+canonical(r.handler)).sort();const expected=[...baseline.handlers,{file:'app/index.tsx',handler:'()=>setSupportMode(active=>!active)'},{file:'components/booking-assistant/BookingAssistantScreen.tsx',handler:'back'},{file:'app/index.tsx',handler:'() => { Haptics.selectionAsync(); setCalConfigVisible(true); }'},{file:'components/booking/GoReservasConfigScreen.tsx',handler:'() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }'},{file:'components/landing/SupportAdminPanel.tsx',handler:'back'}];assert.deepEqual(keys(actual),keys(expected));
  for(const row of baseline.excluded)assert.ok(readFileSync(row.file,'utf8').includes(row.source),'non-navigation arrow remains exact');
 });
 
-async function fixture({hand='right',width=390,height=600,stored=new Map(),navigation=true,keyboardResponsive=false,read,bridge=false}={}){
- const hosts=new Map(),gestures=[],styles=[],calls=[];let props={navigation,keyboardResponsive,screenKey:'synthetic-nav',buttonKey:'pair',bounds:{width,height},buttonWidth:136,maxH:64,initialBottom:12,initialRight:20};
+async function fixture({hand='right',width=390,height=600,stored=new Map(),navigation=true,keyboardResponsive=false,read,bridge=false,initialProps={}}={}){
+ const hosts=new Map(),gestures=[],styles=[],calls=[];let props={navigation,keyboardResponsive,screenKey:'synthetic-nav',buttonKey:'pair',bounds:{width,height},buttonWidth:136,maxH:64,initialBottom:12,initialRight:20,...initialProps};
  const host=name=>p=>{if(p.accessibilityLabel)hosts.set(p.accessibilityLabel,p);if(p.testID)hosts.set(p.testID,p);return React.createElement('div',{'data-native':name},p.children);};
  const native={...life.rn,View:host('View'),Text:host('Text'),TouchableOpacity:host('Button'),StyleSheet:{create:x=>x,absoluteFill:{}},Dimensions:{get:()=>({width,height})},useWindowDimensions:()=>({width,height})};
  const safe={'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})}},handContext=evaluate('components/ui/GoNavigationHand.tsx');
@@ -35,6 +35,41 @@ test('smoke icon-only navigation shares a readable 64pt square, retain callbacks
 });
 test('long press uses the existing 500ms recognizer, persists clamped movement and never navigates on release',async()=>{
  const f=await fixture({bridge:true});try{const g=f.gesture();assert.equal(g._activateAfterLongPress,500);await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:-1000,translationY:1000});g._onEnd();g._onFinalize();});assert.equal(f.style().left,8);assert.equal(f.style().top,528);await f.press('Original back',false);assert.deepEqual(f.calls,['stop']);const saved=JSON.parse(f.stored.get('fab_pos:synthetic-nav:pair:right'));assert.deepEqual(saved,{l:8,t:528});await f.press('Original back');assert.deepEqual(f.calls,['stop','stop','back']);}finally{await f.close();}
+});
+test('the QR follows the finger across an occupied area, settles clear, and restores its saved position',async()=>{
+ const stored=new Map(),events=[],obstacle={x:260,y:440,width:50,height:50};
+ const initialProps={screenKey:'landing-qr-admin',buttonKey:'qr',buttonWidth:44,maxH:44,initialTop:390,initialRight:40,
+   boundsVerticalInset:8,avoidRects:[obstacle],onDragStart:()=>events.push('start'),onDragEnd:()=>events.push('end')};
+ let f=await fixture({stored,initialProps});
+ try{
+  assert.equal(f.style().left,306);assert.equal(f.style().top,390);
+  const g=f.gesture();
+  await f.settle(()=>g._onFinalize());
+  assert.deepEqual(events,[],'a short tap must not be mistaken for a completed drag');
+  await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:-12,translationY:8});});
+  assert.equal(f.style().left,294,'a crossed obstacle must not freeze the QR under the finger');
+  assert.equal(f.style().top,398);
+  await f.settle(()=>{g._onEnd();g._onFinalize();});
+  const saved=JSON.parse(stored.get('fab_pos:landing-qr-admin:qr:right'));
+  assert.ok(saved.l+44<=obstacle.x-2||saved.l>=obstacle.x+obstacle.width+2
+    ||saved.t+44<=obstacle.y-2||saved.t>=obstacle.y+obstacle.height+2);
+  assert.deepEqual(events,['start','end']);
+ }finally{await f.close();}
+ f=await fixture({stored,initialProps});try{
+  const saved=JSON.parse(stored.get('fab_pos:landing-qr-admin:qr:right'));
+  assert.equal(f.style().left,saved.l);assert.equal(f.style().top,saved.t);
+ }finally{await f.close();}
+});
+test('a cancelled QR drag returns to its previous clear position without saving the overlap',async()=>{
+ const stored=new Map(),events=[];
+ const initialProps={screenKey:'landing-qr-admin',buttonKey:'qr',buttonWidth:44,maxH:44,
+   initialTop:390,initialRight:40,boundsVerticalInset:8,avoidRects:[{x:260,y:440,width:50,height:50}],
+   onDragEnd:()=>events.push('end')};
+ const f=await fixture({stored,initialProps});
+ try{const g=f.gesture();await f.settle(()=>{g._onStart({translationX:0,translationY:0});
+   g._onUpdate({translationX:-12,translationY:60});g._onFinalize();});
+   assert.equal(f.style().left,306);assert.equal(f.style().top,390);
+   assert.equal(stored.size,0);assert.deepEqual(events,['end']);}finally{await f.close();}
 });
 test('right/left positions are independent, restore after remount and remain safe after keyboard/orientation changes',async()=>{
  const stored=new Map();let f=await fixture({stored});try{assert.equal(f.style().left,234);await f.hand('left');assert.equal(f.style().left,20);const g=f.gesture();await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:15,translationY:-80});g._onEnd();g._onFinalize();});assert.deepEqual(JSON.parse(stored.get('fab_pos:synthetic-nav:pair:left')),{l:35,t:444});await f.render({bounds:{width:250,height:180}});assert.ok(f.style().left>=8&&f.style().left+136<=242);assert.ok(f.style().top>=8&&f.style().top+64<=172);await f.render({bounds:{width:390,height:600}});assert.equal(f.style().top,444);}finally{await f.close();}f=await fixture({stored,hand:'left'});try{assert.equal(f.style().left,35);assert.equal(f.style().top,444);}finally{await f.close();}
