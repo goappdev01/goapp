@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
+import { GoNavigationFloating } from "@/components/ui/GoNavigationFloating";
 import { newSupportRequestKey } from "@/lib/supportRequests";
 import type { SupportGateway, SupportKind, SupportReceipt, SupportStatus } from "@/lib/supportRequests";
 
@@ -22,7 +23,18 @@ export function SupportAdminPanel({visible,onClose,view,gateway,backendReady=tru
   const [from,setFrom]=useState(""),[to,setTo]=useState(""),[sender,setSender]=useState("");
   const [applied,setApplied]=useState({from:"",to:"",sender:""});
   const [loading,setLoading]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState("");
+  const [keyboardVisible,setKeyboardVisible]=useState(false);
   const flight=useRef(false),revision=useRef(0),pendingCommand=useRef<{fingerprint:string;key:string}|null>(null);
+  useEffect(()=>{const shown=Keyboard.addListener("keyboardDidShow",()=>setKeyboardVisible(true));
+    const hidden=Keyboard.addListener("keyboardDidHide",()=>setKeyboardVisible(false));
+    return()=>{shown.remove();hidden.remove();};},[]);
+  const back=()=>{if(keyboardVisible||Keyboard.isVisible?.()){Keyboard.dismiss();return;}
+    if(backendReady&&selected){setSelected(null);return;}onClose();};
+  const navigation=<GoNavigationFloating screenKey="support-admin" safeArea={false} handedness={handedness}
+    keyboardResponsive protectedTop={insets.top+72} protectedBottom={insets.bottom+12} initialBottom={0}>
+    <GoCloseButton level={backendReady&&selected?"panel":"container"} appearance="light" keyboardVisible={keyboardVisible}
+      accessibilityLabel={keyboardVisible?"Ocultar teclado":backendReady&&selected?"Volver a la bandeja":"Volver a AYUDA"} onPress={back}/>
+  </GoNavigationFloating>;
   const filter=useCallback((offset=0)=>({offset,limit:30,archived:view==="archive",
     ...(applied.from?{from:applied.from}:{}),...(applied.to?{to:applied.to}:{}),...(applied.sender?{sender:applied.sender}:{}),
     ...(view==="received"?{status:"received" as SupportStatus}:{}),
@@ -83,12 +95,13 @@ export function SupportAdminPanel({visible,onClose,view,gateway,backendReady=tru
     <View style={styles.actions}><TouchableOpacity accessibilityRole="button" accessibilityLabel={`Solucionar ${row.reference}`} onPress={()=>status(row,"solved")} style={styles.action}><Text style={styles.actionText}>SOLUCIONAR</Text></TouchableOpacity>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Rechazar ${row.reference}`} onPress={()=>status(row,"rejected")} style={styles.action}><Text style={styles.actionText}>RECHAZAR</Text></TouchableOpacity></View>
   </View>;};
-  if(!backendReady)return <Modal visible={visible} animationType="slide" onRequestClose={onClose}><View style={[styles.screen,{paddingTop:insets.top,paddingBottom:insets.bottom}]}>
-    <View style={styles.header}><Text accessibilityRole="header" style={styles.title}>{titles[view]}</Text><GoCloseButton level="panel" appearance="light" accessibilityLabel="Volver a AYUDA" onPress={onClose}/></View>
+  if(!backendReady)return <Modal visible={visible} animationType="slide" onRequestClose={back}><View style={[styles.screen,{paddingTop:insets.top,paddingBottom:insets.bottom}]}>
+    <View style={styles.header}><Text accessibilityRole="header" style={styles.title}>{titles[view]}</Text></View>
     <Text accessibilityRole="alert" style={[styles.body,{paddingHorizontal:18,paddingTop:24}]}>La recepción de solicitudes está pendiente de conexión al servidor.</Text>
+    {navigation}
   </View></Modal>;
-  return <Modal visible={visible} animationType="slide" onRequestClose={onClose}><KeyboardAvoidingView style={[styles.screen,{paddingTop:insets.top,paddingBottom:insets.bottom}]} behavior={Platform.OS==="ios"?"padding":"height"}>
-    <View style={styles.header}><Text accessibilityRole="header" style={styles.title}>{titles[view]}</Text><GoCloseButton level="panel" appearance="light" accessibilityLabel="Volver a AYUDA" onPress={onClose}/></View>
+  return <Modal visible={visible} animationType="slide" onRequestClose={back}><KeyboardAvoidingView style={[styles.screen,{paddingTop:insets.top,paddingBottom:insets.bottom}]} behavior={Platform.OS==="ios"?"padding":"height"}>
+    <View style={styles.header}><Text accessibilityRole="header" style={styles.title}>{titles[view]}</Text></View>
     {view==="pending"&&<View style={styles.actions}>{(["in_review","pending"] as const).map(value=><TouchableOpacity key={value} accessibilityRole="button" accessibilityState={{selected:statusTab===value}} onPress={()=>setStatusTab(value)} style={[styles.filter,statusTab===value&&styles.active]}><Text style={styles.body}>{labels[value]}</Text></TouchableOpacity>)}</View>}
     <View style={styles.filterRow}><TextInput accessibilityLabel="Desde fecha" placeholder="Desde AAAA-MM-DD" value={from} onChangeText={setFrom} style={styles.filterInput}/><TextInput accessibilityLabel="Hasta fecha" placeholder="Hasta AAAA-MM-DD" value={to} onChangeText={setTo} style={styles.filterInput}/><TextInput accessibilityLabel="Filtrar remitente" placeholder="Remitente" value={sender} onChangeText={setSender} style={styles.filterInput}/><TouchableOpacity accessibilityRole="button" onPress={applyFilters} style={styles.action}><Text style={styles.actionText}>FILTRAR</Text></TouchableOpacity></View>
     {!!error&&<Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
@@ -113,6 +126,7 @@ export function SupportAdminPanel({visible,onClose,view,gateway,backendReady=tru
       </>}
       {loading&&<Text style={styles.meta}>Cargando…</Text>}
     </ScrollView>
+    {navigation}
   </KeyboardAvoidingView></Modal>;
 }
-const styles=StyleSheet.create({screen:{flex:1,backgroundColor:"#fff"},header:{minHeight:66,paddingHorizontal:18,flexDirection:"row",alignItems:"center",justifyContent:"space-between"},title:{fontSize:21,fontWeight:"700",color:"#17212b",flexShrink:1},content:{padding:16,gap:12,paddingBottom:36},card:{padding:14,borderWidth:1,borderColor:"#d2d8de",borderRadius:16,gap:10,backgroundColor:"#fff"},line:{flexDirection:"row",justifyContent:"space-between",gap:8,alignItems:"center"},heading:{color:"#17212b",fontSize:16,fontWeight:"700",flexShrink:1},body:{color:"#17212b",fontSize:15,lineHeight:21},meta:{color:"#59636e",fontSize:12},badge:{color:"#343d47",fontSize:11,fontWeight:"700",backgroundColor:"#eef0f3",paddingHorizontal:8,paddingVertical:5,borderRadius:10},actions:{flexDirection:"row",flexWrap:"wrap",gap:8,paddingHorizontal:14},action:{minHeight:44,minWidth:90,alignItems:"center",justifyContent:"center",borderRadius:11,borderWidth:1,borderColor:"#b4bdc6",paddingHorizontal:10,paddingVertical:6},actionText:{fontSize:12,fontWeight:"700",color:"#17212b"},filter:{minHeight:44,borderRadius:10,borderWidth:1,borderColor:"#b4bdc6",padding:10},filterRow:{paddingHorizontal:14,flexDirection:"row",flexWrap:"wrap",gap:6},filterInput:{minHeight:44,minWidth:120,flexGrow:1,borderWidth:1,borderColor:"#b4bdc6",borderRadius:10,paddingHorizontal:9,color:"#17212b"},active:{backgroundColor:"#e6eef5"},message:{borderTopWidth:1,borderColor:"#d2d8de",paddingTop:8,gap:4},input:{minHeight:50,borderWidth:1,borderColor:"#b4bdc6",borderRadius:10,padding:10,color:"#17212b",fontSize:16},link:{color:"#225fb0",fontSize:15,paddingVertical:8},error:{color:"#a1232e",paddingHorizontal:16,paddingVertical:4}});
+const styles=StyleSheet.create({screen:{flex:1,backgroundColor:"#fff"},header:{minHeight:66,paddingHorizontal:18,flexDirection:"row",alignItems:"center",justifyContent:"space-between"},title:{fontSize:21,fontWeight:"700",color:"#17212b",flexShrink:1},content:{padding:16,gap:12,paddingBottom:112},card:{padding:14,borderWidth:1,borderColor:"#d2d8de",borderRadius:16,gap:10,backgroundColor:"#fff"},line:{flexDirection:"row",justifyContent:"space-between",gap:8,alignItems:"center"},heading:{color:"#17212b",fontSize:16,fontWeight:"700",flexShrink:1},body:{color:"#17212b",fontSize:15,lineHeight:21},meta:{color:"#59636e",fontSize:12},badge:{color:"#343d47",fontSize:11,fontWeight:"700",backgroundColor:"#eef0f3",paddingHorizontal:8,paddingVertical:5,borderRadius:10},actions:{flexDirection:"row",flexWrap:"wrap",gap:8,paddingHorizontal:14},action:{minHeight:44,minWidth:90,alignItems:"center",justifyContent:"center",borderRadius:11,borderWidth:1,borderColor:"#b4bdc6",paddingHorizontal:10,paddingVertical:6},actionText:{fontSize:12,fontWeight:"700",color:"#17212b"},filter:{minHeight:44,borderRadius:10,borderWidth:1,borderColor:"#b4bdc6",padding:10},filterRow:{paddingHorizontal:14,flexDirection:"row",flexWrap:"wrap",gap:6},filterInput:{minHeight:44,minWidth:120,flexGrow:1,borderWidth:1,borderColor:"#b4bdc6",borderRadius:10,paddingHorizontal:9,color:"#17212b"},active:{backgroundColor:"#e6eef5"},message:{borderTopWidth:1,borderColor:"#d2d8de",paddingTop:8,gap:4},input:{minHeight:50,borderWidth:1,borderColor:"#b4bdc6",borderRadius:10,padding:10,color:"#17212b",fontSize:16},link:{color:"#225fb0",fontSize:15,paddingVertical:8},error:{color:"#a1232e",paddingHorizontal:16,paddingVertical:4}});

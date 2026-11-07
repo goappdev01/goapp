@@ -13,6 +13,7 @@ import managementRouter from "./management";
 import adminRouter from "./admin";
 import financialPlansRouter from "./financial-plans";
 import boardsRouter from "./boards";
+import supportRouter from "./support";
 
 const router: IRouter = Router();
 
@@ -20,6 +21,7 @@ router.use(healthRouter);
 router.use("/supabase/admin/finance", financialPlansRouter);
 router.use("/supabase/admin", adminRouter);
 router.use("/supabase/boards", boardsRouter);
+router.use("/supabase/support", supportRouter);
 router.use("/booking-assistant", bookingAssistantRouter);
 router.use("/supabase/manage", managementRouter);
 router.use("/supabase", modulePublicationRouter);

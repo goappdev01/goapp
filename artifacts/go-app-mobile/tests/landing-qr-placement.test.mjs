@@ -6,11 +6,14 @@ const overlaps=(a,b,gap=0)=>a.x<b.x+b.width+gap&&a.x+a.width+gap>b.x&&a.y<b.y+b.
 for(const profile of ['ADMIN','BUSINESS','USER'])for(const preset of ['compacto','estandar','grande'])for(const hand of ['right','left'])
  test(`${profile}/${preset}/${hand}: QR stays safe without colliding with controls`,()=>{
   for(const d of devices){
-   const f=fixture(d,preset,profile,hand),button=f.render(),p=button.props.style,hit=button.props.hitSlop;
+   const f=fixture(d,preset,profile,hand),button=f.render(),p=button.props.style,hit=button.props.hitSlop,host=f.host().props;
    const slop=typeof hit==='number'?{top:hit,bottom:hit,left:hit,right:hit}:hit;
    assert.equal(p.width,Math.round(32*f.scale));assert.equal(p.height,p.width);assert.equal(p.borderRadius,p.width/2);
-   assert.ok(p.width+slop.left+slop.right>=44&&p.height+slop.top+slop.bottom>=44);assert.ok(p.left!==f.closeQrX||p.top!==f.closeQrY,'the former header location is not used');
-   const touch={x:p.left-slop.left,y:p.top-slop.top,width:p.width+slop.left+slop.right,height:p.height+slop.top+slop.bottom};
+   assert.ok(p.width+slop.left+slop.right>=44&&p.height+slop.top+slop.bottom>=44);
+   const hostLeft=hand==='right'?d.width-host.initialRight-host.width:host.initialRight;
+   const visual={x:hostLeft+p.left,y:host.initialTop+p.top};
+   assert.ok(visual.x!==f.closeQrX||visual.y!==f.closeQrY,'the former header location is not used');
+   const touch={x:visual.x-slop.left,y:visual.y-slop.top,width:p.width+slop.left+slop.right,height:p.height+slop.top+slop.bottom};
    assert.ok(touch.x>=d.insets.left+8&&touch.x+touch.width<=d.width-d.insets.right-8);
    assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=(f.pairedLandingQr?d.height-8:d.height-d.insets.bottom));
    const root=r=>f.toLandingRootRect(r),move=r=>({...r,y:r.y+f.landingOffsetY});
@@ -81,6 +84,14 @@ test('the unique original QR keeps its appearance and exact action; overlays sti
  assert.equal(b.children[0].props.name,'grid');assert.equal(b.children[0].props.color,'#ffffff');
  b.props.onPress();assert.deepEqual(f.effects,['haptic',['qr',true]]);assert.equal(f.render(true),null);
  assert.ok(!qrNode.getText().includes('clampLandingControlBottom'));
+});
+test('only the Landing QR has a persisted draggable position and its long drag cannot open QR',()=>{
+ const f=fixture(devices[2]),button=f.render(),host=f.host().props;
+ assert.equal(host.screenKey,'landing-qr-admin');assert.equal(host.buttonKey,'qr');
+ assert.equal(host.width,button.props.style.width+2*button.props.hitSlop);
+ assert.ok(host.avoidRects.length>0);
+ host.onDragStart();button.props.onPress();assert.deepEqual(f.effects,[]);
+ host.onDragEnd();button.props.onPress();assert.deepEqual(f.effects,[]);
 });
 test('QR placement never mutates any existing control and retains a safe no-slot fallback',()=>{
  const {placeLandingQr}=load('components/landing/landingQrPlacement.ts');

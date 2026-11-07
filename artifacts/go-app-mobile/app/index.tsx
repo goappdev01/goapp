@@ -4300,6 +4300,9 @@ function HomeScreenContent() {
   const openSupportAdmin=(view:SupportAdminView|"back")=>{if(view==="back"){setSupportMode(false);return;}setSupportAdminView(view);setSupportAdminOpen(true);};
   useEffect(()=>{setSupportMode(false);setSupportOpen(false);setSupportAdminOpen(false);},[adminAccess.userId]);
   const [qrOpen, setQrOpen] = useState(false);
+  const qrDragUntil = useRef(0);
+  const onQrDragStart = useCallback(()=>{qrDragUntil.current=Number.POSITIVE_INFINITY;},[]);
+  const onQrDragEnd = useCallback(()=>{qrDragUntil.current=Date.now()+450;},[]);
   const [cartaOpen, setCartaOpen] = useState(false);
   const [quickNoteText, setQuickNoteText] = useState("");
   const quickNoteTitleRef = useRef<React.ElementRef<typeof TextInput>>(null);
@@ -15602,38 +15605,38 @@ function HomeScreenContent() {
         {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry)}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}</>}
       </GoEntryDetailsSheet>
 
-      {/* Same QR control, beside AYUDA in the lower hand-side gap. */}
+      {/* QR keeps its approved appearance; only this control can be repositioned. */}
       {!anyOverlayOpen && (() => {
         const BTN_SZ = Math.round(32 * uiScaleFactor);
         const qrHit = Math.max(6, (44 - BTN_SZ) / 2);
+        const touchSize = BTN_SZ + 2 * qrHit;
+        const touchTop = pairedLandingQr ? 2 * qrHit : qrHit;
+        const initialLeft = landingQrPosition.x - qrHit;
+        const initialTop = landingQrPosition.y - touchTop;
         return (
-          <TouchableOpacity
-            key="qr-permanent-btn"
-            hitSlop={pairedLandingQr ? { top: 2 * qrHit, bottom: 0, left: qrHit, right: qrHit } : qrHit}
-            onPress={() => { Haptics.selectionAsync().catch(() => {}); setQrOpen(true); }}
-            activeOpacity={0.8}
-            style={{
-              position: "absolute",
-              left: landingQrPosition.x,
-              top: landingQrPosition.y,
-              zIndex: 10,
-              width: BTN_SZ,
-              height: BTN_SZ,
-              borderRadius: BTN_SZ / 2,
-              backgroundColor: "rgba(8,12,28,0.92)",
-              borderWidth: 1.2,
-              borderColor: "rgba(147,197,253,0.55)",
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: "#93c5fd",
-              shadowOpacity: 0.45,
-              shadowRadius: 10,
-              shadowOffset: { width: 0, height: 0 },
-              elevation: 4,
-            }}
-          >
-            <Feather name="grid" size={Math.round(12 * uiScaleFactor)} color="#ffffff" />
-          </TouchableOpacity>
+          <GoNavigationFloating screenKey={goView.isAdminView?"landing-qr-admin":"landing-qr-user"} buttonKey="qr"
+            safeArea={false} handedness={handedness} width={touchSize} height={touchSize} boundsVerticalInset={8}
+            initialTop={initialTop} initialRight={handedness==="left"?initialLeft:screen.width-initialLeft-touchSize}
+            avoidRects={[...adminQrObstacles,supportRect,landingNavigationCloseRect,
+              {x:0,y:0,width:screen.width,height:insets.top+8}]}
+            onDragStart={onQrDragStart} onDragEnd={onQrDragEnd}>
+            <View style={{width:touchSize,height:touchSize}}>
+              <TouchableOpacity key="qr-permanent-btn"
+                hitSlop={pairedLandingQr ? { top: 2 * qrHit, bottom: 0, left: qrHit, right: qrHit } : qrHit}
+                onPress={() => { if(Date.now()<qrDragUntil.current)return;Haptics.selectionAsync().catch(() => {});setQrOpen(true); }}
+                activeOpacity={0.8}
+                style={{
+                  position: "absolute",left:qrHit,top:touchTop,zIndex:10,
+                  width:BTN_SZ,height:BTN_SZ,borderRadius:BTN_SZ/2,
+                  backgroundColor:"rgba(8,12,28,0.92)",borderWidth:1.2,
+                  borderColor:"rgba(147,197,253,0.55)",alignItems:"center",justifyContent:"center",
+                  shadowColor:"#93c5fd",shadowOpacity:0.45,shadowRadius:10,
+                  shadowOffset:{width:0,height:0},elevation:4,
+                }}>
+                <Feather name="grid" size={Math.round(12 * uiScaleFactor)} color="#ffffff" />
+              </TouchableOpacity>
+            </View>
+          </GoNavigationFloating>
         );
       })()}
 
@@ -25604,8 +25607,8 @@ function HomeScreenContent() {
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
-    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} initialAssistantRequest={supportAiRequest} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"} gateway={GO_SUPPORT_LIVE_ENABLED&&adminAccess.userId?supportGateway:undefined} businessId={goView.view==="BUSINESS"&&businessAccess.allowed?businessAccess.snapshot?.business?.id:null}/>
-    <SupportAdminPanel key={adminAccess.userId??"anonymous"} visible={supportAdminOpen&&goView.isAdminView&&adminAccess.isOwner} onClose={()=>setSupportAdminOpen(false)} view={supportAdminView} gateway={supportGateway} backendReady={GO_SUPPORT_LIVE_ENABLED} handedness={handedness}/>
+    <LandingSupport key={`support-user:${adminAccess.userId ?? "anonymous"}`} visible={supportOpen} kind={supportKind} initialAssistantRequest={supportAiRequest} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"} gateway={GO_SUPPORT_LIVE_ENABLED&&adminAccess.userId?supportGateway:undefined} businessId={goView.view==="BUSINESS"&&businessAccess.allowed?businessAccess.snapshot?.business?.id:null}/>
+    <SupportAdminPanel key={`support-admin:${adminAccess.userId??"anonymous"}`} visible={supportAdminOpen&&goView.isAdminView&&adminAccess.isOwner} onClose={()=>setSupportAdminOpen(false)} view={supportAdminView} gateway={supportGateway} backendReady={GO_SUPPORT_LIVE_ENABLED} handedness={handedness}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {

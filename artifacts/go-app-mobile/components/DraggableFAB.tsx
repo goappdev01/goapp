@@ -52,6 +52,9 @@ interface DraggableFABProps {
   /** Opt-in vertical rail, inside an already safe local viewport. */
   fixedLeft?: number;
   onDragStart?: () => void;
+  onDragEnd?: () => void;
+  /** Optional clear-space constraint for a control with a movable home, such as Landing QR. */
+  avoidRects?: readonly {x:number;y:number;width:number;height:number}[];
   children: React.ReactNode;
 }
 
@@ -67,6 +70,8 @@ export function DraggableFAB({
   buttonWidth = FAB_BTN,
   fixedLeft,
   onDragStart,
+  onDragEnd,
+  avoidRects,
   navigation=false,
   keyboardResponsive=false,
   handedness,
@@ -113,6 +118,8 @@ export function DraggableFAB({
   const verticalEdge = bounds ? Math.max(0,boundsVerticalInset??EDGE) : EDGE;
   const minT = (bounds ? 0 : insets.top) + verticalEdge;
   const maxT = Math.max(minT, SH - (bounds ? 0 : insets.bottom) - verticalEdge - maxH);
+  const clearAt=(l:number,t:number)=>!avoidRects?.some(rect=>l<rect.x+rect.width+2&&l+buttonWidth>rect.x-2
+    &&t<rect.y+rect.height+2&&t+maxH>rect.y-2);
 
   // ── Persist ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -124,15 +131,23 @@ export function DraggableFAB({
       try {
         const { l, t, h } = JSON.parse(raw) as { l: number; t: number; h?:number };
         if (!Number.isFinite(l) || !Number.isFinite(t) || hasDragged.value) return;
-        posL.value = bounds ? l : Math.max(minL, Math.min(maxL, l));
+        const nextL=Math.max(minL,Math.min(maxL,l));
         const restored=keyboardResponsive&&typeof h==="number"&&Number.isFinite(h)?t+currentBoundsHeight.current-h:t;
-        posT.value = bounds ? restored : Math.max(minT, Math.min(maxT, restored));
+        const nextT=Math.max(minT,Math.min(maxT,restored));
+        if(avoidRects?.length){posL.value=clearAt(nextL,nextT)?nextL:initLeft;
+          posT.value=clearAt(nextL,nextT)?nextT:initTop;}
+        else{posL.value=bounds?l:nextL;posT.value=bounds?restored:nextT;}
       } catch {
         // ignore corrupt data
       }
     }).catch(() => console.info("[fab-preference]", { code: "READ_FAILED" }));
     return()=>{active=false;};
   }, [storageKey]);
+
+  useEffect(()=>{if(!bounds||!avoidRects?.length||clearAt(posL.value,posT.value))return;
+    posL.value=Math.max(minL,Math.min(maxL,initLeft));
+    posT.value=Math.max(minT,Math.min(maxT,initTop));
+  },[bounds?.width,bounds?.height,JSON.stringify(avoidRects)]);
 
   useEffect(() => {
     if (bounds) return; // Keep the chosen position while the keyboard temporarily clamps its display.
@@ -166,8 +181,12 @@ export function DraggableFAB({
         })
         .onUpdate((e) => {
           "worklet";
-          posL.value = Math.max(minL, Math.min(maxL, startL.value + e.translationX));
-          posT.value = Math.max(minT, Math.min(maxT, startT.value + e.translationY));
+          const nextL=Math.max(minL, Math.min(maxL, startL.value + e.translationX));
+          const nextT=Math.max(minT, Math.min(maxT, startT.value + e.translationY));
+          if(!avoidRects?.some(rect=>nextL<rect.x+rect.width+2&&nextL+buttonWidth>rect.x-2
+            &&nextT<rect.y+rect.height+2&&nextT+maxH>rect.y-2)){
+            posL.value=nextL;posT.value=nextT;
+          }
         })
         .onEnd(() => {
           "worklet";
@@ -183,8 +202,9 @@ export function DraggableFAB({
           scale.value = withSpring(1);
           shadowOp.value = 0.18;
           if(navigation)runOnJS(finishNavigationDrag)();
+          if(onDragEnd)runOnJS(onDragEnd)();
         }),
-    [minL, maxL, minT, maxT, savePos, onDragStart, fixed,navigation,markNavigationDrag,finishNavigationDrag]
+    [minL, maxL, minT, maxT, savePos, onDragStart, onDragEnd, avoidRects, buttonWidth, maxH, fixed,navigation,markNavigationDrag,finishNavigationDrag]
   );
 
   // ── Animated style ───────────────────────────────────────────────────────
