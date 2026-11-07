@@ -132,7 +132,9 @@ import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingSupport } from "@/components/landing/LandingSupport";
-import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, type SupportKind } from "@/lib/supportRequests";
+import { SupportAdminPanel, type SupportAdminView } from "@/components/landing/SupportAdminPanel";
+import { supportGateway } from "@/data/supportGateway";
+import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, SUPPORT_ADMIN_ORBITS, type SupportKind } from "@/lib/supportRequests";
 import { placeLandingHelpQr, placeLandingQr } from "@/components/landing/landingQrPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
@@ -4291,9 +4293,12 @@ function HomeScreenContent() {
   const [supportMode, setSupportMode] = useState(false);
   const supportGoColor = supportMode ? GO_GOLD : goButtonColor;
   const [supportKind, setSupportKind] = useState<SupportKind | "mine">("incident");
+  const [supportAdminOpen,setSupportAdminOpen]=useState(false);
+  const [supportAdminView,setSupportAdminView]=useState<SupportAdminView>("received");
   const [supportAiRequest, setSupportAiRequest] = useState(0);
   const openSupportAction = (kind: SupportKind | "mine") => { setSupportKind(kind); setSupportOpen(true); };
-  useEffect(()=>{setSupportMode(false);setSupportOpen(false);},[adminAccess.userId]);
+  const openSupportAdmin=(view:SupportAdminView|"back")=>{if(view==="back"){setSupportMode(false);return;}setSupportAdminView(view);setSupportAdminOpen(true);};
+  useEffect(()=>{setSupportMode(false);setSupportOpen(false);setSupportAdminOpen(false);},[adminAccess.userId]);
   const [qrOpen, setQrOpen] = useState(false);
   const [cartaOpen, setCartaOpen] = useState(false);
   const [quickNoteText, setQuickNoteText] = useState("");
@@ -17151,18 +17156,20 @@ function HomeScreenContent() {
           {(supportMode || !fullLandingArchitecture && !anyOverlayOpen && !rutasMode && !reservasOrbitalOpen && orbitSecondLevel === null) ? (
             <View pointerEvents={supportMode?"box-none":"none"} accessible={false} accessibilityElementsHidden={!supportMode}
               importantForAccessibility={supportMode?"auto":"no-hide-descendants"} testID="landing-quiet-orbits" style={StyleSheet.absoluteFill}>
-              {(supportMode ? SUPPORT_ORBIT_ACTIONS.map(action => ({ key: action.kind, color: ({mine:GO_COLORS.comida,improvement:GO_COLORS.cafe,help:GO_COLORS.deporte,incident:GO_COLORS.fiesta} as const)[action.kind], action })) : [...INTENTS, { key: "otro", color: "#9ca3af" }].map(it => ({ ...it, action: undefined }))).map((it, i, items) => {
+              {(supportMode ? (goView.isAdminView && adminAccess.isOwner
+                ? SUPPORT_ADMIN_ORBITS.map((action,i)=>({key:action.view,color:[GO_COLORS.comida,GO_COLORS.fiesta,GO_COLORS.cafe,GO_COLORS.deporte,GO_COLORS.shopping,GO_COLORS.viaje,GO_COLORS.reunion,"#9ca3af"][i],label:action.label,title:action.title,icon:action.icon,onPress:()=>openSupportAdmin(action.view)}))
+                : SUPPORT_ORBIT_ACTIONS.map(action => ({ key: action.kind, color: ({mine:GO_COLORS.comida,improvement:GO_COLORS.cafe,help:GO_COLORS.deporte,incident:GO_COLORS.fiesta} as const)[action.kind],label:action.label,title:action.title,icon:action.icon,onPress:()=>openSupportAction(action.kind) })))
+                : [...INTENTS, { key: "otro", color: "#9ca3af" }].map(it => ({ ...it, label:"",title:"",icon:"circle",onPress:undefined as undefined|(()=>void) }))).map((it, i, items) => {
                 const angle = -Math.PI / 2 + (i * 2 * Math.PI) / items.length;
                 const x = orbitWrapSize / 2 + Math.cos(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
                 const y = orbitWrapSize / 2 + Math.sin(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
-                const action = it.action;
-                const active = !!action;
+                const active = !!it.onPress;
                 return <View key={it.key} testID={`landing-quiet-orbit-${i}`} pointerEvents={active?"auto":"none"}
                   style={{ position: "absolute", left: x, top: y }}>
-                  <PremiumOrbitBtn color={it.color} selected={false} dimmed={!active} onPress={()=>{if(action)openSupportAction(action.kind);}}
-                    icon={action?.icon??"circle"} label={action?.label??""} accessibilityLabel={action?.title}
+                  <PremiumOrbitBtn color={it.color} selected={false} dimmed={!active} onPress={()=>it.onPress?.()}
+                    icon={it.icon as "circle"} label={it.label} accessibilityLabel={it.title}
                     size={orbitBtnVisualSize} iconSize={active?Math.round(24*uiScaleFactor):0} labelSize={active?Math.max(8,Math.round(10*uiScaleFactor)):0}
-                    labelOpacity={active?1:0} labelOnly={!!action} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />
+                    labelOpacity={active?1:0} labelOnly={active} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />
                 </View>;
               })}
             </View>
@@ -25571,7 +25578,8 @@ function HomeScreenContent() {
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
-    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} initialAssistantRequest={supportAiRequest} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
+    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} initialAssistantRequest={supportAiRequest} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"} gateway={adminAccess.userId?supportGateway:undefined} businessId={goView.view==="BUSINESS"&&businessAccess.allowed?businessAccess.snapshot?.business?.id:null}/>
+    <SupportAdminPanel key={adminAccess.userId??"anonymous"} visible={supportAdminOpen&&goView.isAdminView&&adminAccess.isOwner} onClose={()=>setSupportAdminOpen(false)} view={supportAdminView} gateway={supportGateway} handedness={handedness}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {

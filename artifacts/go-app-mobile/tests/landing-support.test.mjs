@@ -90,7 +90,7 @@ test('the real Landing entry toggles orbital help instead of opening the former 
  const visit=n=>{if((ts.isJsxOpeningElement(n)||ts.isJsxSelfClosingElement(n))&&n.tagName.getText(ast)==='PremiumOrbitBtn'&&n.attributes.getText(ast).includes('AYÚDANOS A MEJORAR'))handler=n.attributes.properties.find(p=>p.name?.getText(ast)==='onPress').initializer.expression;
  if(ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='LandingSupport')mount=n;ts.forEachChild(n,visit);};visit(ast);assert.ok(handler&&mount);
  const calls=[];vm.runInNewContext(ts.transpileModule('const tap=('+handler.getText(ast)+');tap();tap();',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{setSupportMode:fn=>calls.push(fn(calls.at(-1)??false))});assert.deepEqual(calls,[true,false]);
- assert.equal(mount.attributes.properties.some(p=>p.name?.text==='gateway'),false,'no test or undeployed gateway is mounted');
+ assert.equal(mount.attributes.properties.find(p=>p.name?.text==='gateway')?.initializer?.getText(ast).includes('supportGateway'),true,'the real gateway is mounted for an authenticated user');
 });
 test('central GO opens the existing help consultation only in AYUDA mode',()=>{
  const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('index.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);let go;
@@ -107,7 +107,7 @@ test('AYUDA groups its four real actions consecutively and leaves the normal orb
  (function walk(n){all.push(n);ts.forEachChild(n,walk)})(ast);
  const decl=name=>all.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name);
  const mode=all.find(n=>ts.isConditionalExpression(n)&&n.whenTrue.getText(ast).includes('testID="landing-quiet-orbits"')).whenTrue;
- const calls=[],scope={result:null,React:{createElement:(type,props,...children)=>({type,props,children:children.flat(Infinity)})},View:'View',GoCloseButton:'GoCloseButton',PremiumOrbitBtn:'PremiumOrbitBtn',StyleSheet:{absoluteFill:{}},SUPPORT_ORBIT_ACTIONS:api.SUPPORT_ORBIT_ACTIONS,supportOrbitSlot:api.supportOrbitSlot,handedness:'right',
+ const calls=[],scope={result:null,React:{createElement:(type,props,...children)=>({type,props,children:children.flat(Infinity)})},View:'View',GoCloseButton:'GoCloseButton',PremiumOrbitBtn:'PremiumOrbitBtn',StyleSheet:{absoluteFill:{}},SUPPORT_ORBIT_ACTIONS:api.SUPPORT_ORBIT_ACTIONS,SUPPORT_ADMIN_ORBITS:api.SUPPORT_ADMIN_ORBITS,supportOrbitSlot:api.supportOrbitSlot,handedness:'right',goView:{isAdminView:false},adminAccess:{isOwner:false},openSupportAdmin:v=>calls.push(v),
  supportMode:true,orbitWrapSize:275,orbitRadiusVisual:99,orbitBtnVisualSize:65,uiScaleFactor:1,openSupportAction:k=>calls.push(k),setSupportMode:v=>calls.push(v)};
  const code=['GO_COLORS','INTENTS'].map(n=>'const '+decl(n).getText(ast)+';').join('\n')+'result='+mode.getText(ast);
  vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{alwaysStrict:false,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
@@ -150,9 +150,25 @@ test('real submit prevents concurrent sends, confirms only a valid receipt and k
  const first=send();await send();assert.equal(calls,1);resolve({id:'r',reference:'GO-1',requestKey:'wrong',status:'received'});await first;tree=f.render();assert.ok(text(tree).includes('No se ha confirmado'));assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'Ayuda');
  const retry=button(tree,'ENVIAR').props.onPress();resolve({id:'r',reference:'GO-1',requestKey:keys[1],status:'received'});await retry;tree=f.render();assert.equal(keys[0],keys[1]);assert.ok(text(tree).includes('Recibida ·'));assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'');
 });
+test('an uncertain send cannot become a second request when the draft changes',async()=>{
+ const keys=[];const gateway={listOwn:async()=>[],create:async command=>{keys.push(command.requestKey);throw Error('upload failed after persistence');}};
+ const f=fixture(gateway);let tree=f.render();tree=f.render();
+ nodes(tree).find(n=>n.type==='TextInput').props.onChangeText('Texto original');tree=f.render();
+ await button(tree,'ENVIAR').props.onPress();tree=f.render();assert.equal(keys.length,1);
+ nodes(tree).find(n=>n.type==='TextInput').props.onChangeText('Texto cambiado');tree=f.render();
+ await button(tree,'ENVIAR').props.onPress();tree=f.render();
+ assert.equal(keys.length,1);assert.ok(text(tree).includes('El envío anterior puede haberse recibido'));
+});
 test('old-account replies never appear after changing identity; history uses the own-only operation',async()=>{
  let release;const f=fixture({create:async()=>{},listOwn:()=>new Promise(r=>{release=r;})});f.render();let tree=f.render();f.render({...f.props,kind:'mine'});
  const oldRelease=release;f.render({...f.props,scopeKey:'user-b'});oldRelease([{id:'old',reference:'PRIVATE',status:'answered'}]);await tick();tree=f.render({...f.props,scopeKey:'user-b'});assert.equal(text(tree).includes('PRIVATE'),false);
+});
+test('Mis solicitudes loads later pages without duplicating existing requests',async()=>{
+ const pages=[];const gateway={create:async()=>{},listOwn:async()=>[],listOwnPage:async(offset,limit)=>{pages.push([offset,limit]);
+   return {items:offset?[{id:'second',reference:'AY-2',status:'pending',kind:'help',summary:'Segunda',detail:'Segunda'}]:[{id:'first',reference:'AY-1',status:'received',kind:'help',summary:'Primera',detail:'Primera'}],total:2};}};
+ const f=fixture(gateway),props={...f.props,kind:'mine'};f.render(props);await tick();let tree=f.render(props);
+ assert.ok(text(tree).includes('Primera'));nodes(tree).find(n=>n.props.accessibilityLabel==='Cargar más solicitudes').props.onPress();await tick();tree=f.render(props);
+ assert.deepEqual(pages,[[0,30],[1,30]]);assert.ok(text(tree).includes('Primera'));assert.ok(text(tree).includes('Segunda'));
 });
 test('invalid messages cannot reach transport and mismatched receipts cannot confirm delivery',async()=>{
  let calls=0;const gateway={create:async()=>{calls++;return {}},listOwn:async()=>[]};
@@ -183,10 +199,10 @@ test('cancellation, invalid file and stale native picker results never add a mis
  let resolve;f.picker.photo=()=>new Promise(r=>resolve=r);menu(tree).props.onPhotos();f.render({...f.props,scopeKey:'user-b'});resolve({canceled:false,assets:[f.files.asset()]});await tick();tree=f.render({...f.props,scopeKey:'user-b'});assert.equal(nodes(tree).filter(n=>n.type==='Image').length,0);assert.equal(f.files.copied.length,0);
 });
 test('request template renders real summaries, type/date/status and expands real detail and response',async()=>{
- const rows=[{id:'one',reference:'GO-123',requestKey:'k',kind:'incident',summary:'Problema de prueba',createdAt:'2026-11-06T10:00:00Z',status:'in_progress',detail:'Detalle sintético',response:'Respuesta sintética'}];
- const f=fixture({listOwn:async()=>rows,create:async()=>{throw Error('unexpected')}});f.render({...f.props,kind:'mine'});await tick();let tree=f.render({...f.props,kind:'mine'});
+ const rows=[{id:'one',reference:'GO-123',requestKey:'k',kind:'incident',summary:'Problema de prueba',createdAt:'2026-11-06T10:00:00Z',status:'in_review',detail:'Detalle sintético',revision:1}];
+ const f=fixture({listOwn:async()=>rows,detail:async()=>({...rows[0],messages:[{id:'m',authorId:'admin',body:'Respuesta sintética',internal:false,createdAt:'2026-11-06T11:00:00Z'}]}),create:async()=>{throw Error('unexpected')}});f.render({...f.props,kind:'mine'});await tick();let tree=f.render({...f.props,kind:'mine'});
  for(const value of ['Problema de prueba','Comunicar incidencia','6/11/2026','En revisión'])assert.ok(text(tree).includes(value));assert.equal(text(tree).includes('Respuesta sintética'),false);
- button(tree,'Problema de prueba').props.onPress();tree=f.render({...f.props,kind:'mine'});assert.ok(text(tree).includes('Detalle sintético'));assert.ok(text(tree).includes('Respuesta sintética'));
+ button(tree,'Problema de prueba').props.onPress();await tick();tree=f.render({...f.props,kind:'mine'});assert.ok(text(tree).includes('Detalle sintético'));assert.ok(text(tree).includes('Respuesta sintética'));
 });
 test('attachment transport requires explicit capability and matching stored receipt for every file',async()=>{
  const files=[{id:'local1',uri:'file:///private/a.pdf',name:'a.pdf',mime:'application/pdf',size:128}],command={kind:'incident',message:'Incidencia',requestKey:'one'};let calls=0;
