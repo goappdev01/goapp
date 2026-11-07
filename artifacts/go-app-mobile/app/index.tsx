@@ -25614,8 +25614,10 @@ function HomeScreenContent() {
       onClose={()=>setSupportTeamOpen(false)} handedness={handedness}
       onGoPress={()=>{setSupportTeamOpen(false);setSupportKind("help");setSupportOpen(true);setSupportAiRequest(value=>value+1);}}
       renderSatellite={(satellite,size)=><PremiumOrbitBtn color={satellite.color} selected={false} dimmed={satellite.disabled}
-        onPress={satellite.onPress} icon="user" label={satellite.label} accessibilityLabel={satellite.title}
-        size={size} iconSize={0} labelSize={Math.max(10,Math.round(size*.18))} labelOnly labelLines={2} labelSpacing={0} paddingH={5}/>}/>
+        onPress={satellite.onPress} onLongPress={satellite.onLongPress} delayLongPress={550}
+        icon="user" label={satellite.label} accessibilityLabel={satellite.title}
+        size={size} iconSize={0} labelSize={Math.max(10,Math.round(size*.18))} labelOnly labelLines={2}
+        labelOpacity={satellite.empty?0:1} labelSpacing={0} paddingH={5}/>}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {

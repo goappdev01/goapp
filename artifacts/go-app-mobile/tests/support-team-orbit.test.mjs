@@ -13,7 +13,8 @@ const labels = value => typeof value === 'string' ? value : (value?.children ?? 
 const tick = () => new Promise(setImmediate);
 const library = { exports: {} };
 vm.runInNewContext(compile('lib/orbitalPeople.ts'), library);
-const { browsePeople, peopleOrbitPage } = library.exports;
+const { browsePeople, peopleOrbitPage, orbitalPeopleLayout, orbitalPeopleAvoidRects,
+  orbitalPeopleSearchScrollOffset } = library.exports;
 const people = count => Array.from({ length: count }, (_, index) => ({
   id: `id-${index}`, code: `T-${String(index).padStart(3, '0')}`, name: `Trabajador ${String(index).padStart(3, '0')}`,
   role: 'Soporte', active: true,
@@ -54,6 +55,7 @@ function fixture(source, dimensions = { width: 390, height: 844 }, handedness = 
     createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }),
     useState(initial) { const index = cursor++; slots[index] ??= { value: initial }; return [slots[index].value,
       value => { slots[index].value = typeof value === 'function' ? value(slots[index].value) : value; }]; },
+    useRef(value) { return React.useState({ current: value })[0]; },
     useMemo: fn => fn(),
     useEffect(fn, deps) { const index = cursor++, old = slots[index]; if (!old || !equal(old.deps, deps)) {
       slots[index] = { deps }; effects.push(() => { old?.cleanup?.(); slots[index].cleanup = fn(); });
@@ -62,8 +64,8 @@ function fixture(source, dimensions = { width: 390, height: 844 }, handedness = 
   const scope = { exports: {}, require(name) {
     if (name === 'react') return { ...React, default: React };
     if (name === 'react-native') return {
-      ActivityIndicator: 'ActivityIndicator', KeyboardAvoidingView: 'KeyboardAvoidingView', Modal: 'Modal', ScrollView: 'ScrollView',
-      Platform: { OS: 'ios' }, StyleSheet: { create: value => value }, Text: 'Text', TextInput: 'TextInput', View: 'View',
+      ActivityIndicator: 'ActivityIndicator', Modal: 'Modal', ScrollView: 'ScrollView', TouchableOpacity: 'TouchableOpacity',
+      StyleSheet: { create: value => value }, Text: 'Text', TextInput: 'TextInput', View: 'View',
       useWindowDimensions: () => dimensions,
       Keyboard: { addListener: (event, handler) => { keyboardListeners[event] = handler; return { remove() { delete keyboardListeners[event]; } }; },
         isVisible: () => false, dismiss: () => calls.push('dismiss') },
@@ -78,7 +80,8 @@ function fixture(source, dimensions = { width: 390, height: 844 }, handedness = 
   vm.runInNewContext(compile('components/landing/SupportTeamPanel.tsx'), scope);
   const props = { visible: true, source, onClose: () => calls.push('close'), onGoPress: () => calls.push('GO'),
     handedness, renderSatellite: (satellite, size) => ({ type: 'OrbitButton', props: { ...satellite, size }, children: [] }) };
-  return { props, calls, keyboardShow: () => keyboardListeners.keyboardDidShow?.(), keyboardHide: () => keyboardListeners.keyboardDidHide?.(),
+  return { props, calls, keyboardShow: (height = 300) => keyboardListeners.keyboardDidShow?.({ endCoordinates: { height } }),
+    keyboardHide: () => keyboardListeners.keyboardDidHide?.(),
     render(p = props) { cursor = 0; effects = []; const tree = scope.exports.SupportTeamPanel(p); for (const run of effects) run(); return tree; } };
 }
 
@@ -89,7 +92,8 @@ test('EQUIPO renders real records, navigates forward/back and returns from the s
   assert.equal(orbit().length, 8);
   assert.equal(orbit().at(-1).props.label, 'SOPORTE'); assert.equal(orbit().at(-1).props.disabled, false);
   orbit().at(-1).props.onPress(); tree = f.render(); assert.ok(labels(tree).includes('Página 2 de 2'));
-  assert.equal(orbit().length, 2); assert.equal(orbit().at(-1).props.disabled, true);
+  assert.equal(orbit().length, 8); assert.equal(orbit()[0].props.label, 'Trabajador 007');
+  assert.equal(orbit()[1].props.empty, true); assert.equal(orbit().at(-1).props.disabled, true);
   orbit()[0].props.onPress(); tree = f.render(); assert.ok(labels(tree).includes('T-007'));
   back().props.onPress(); tree = f.render(); assert.ok(labels(tree).includes('Página 2 de 2'));
   back().props.onPress(); tree = f.render(); assert.ok(labels(tree).includes('Página 1 de 2'));
@@ -101,7 +105,7 @@ test('search finds a unique worker code, clears to original list, and keyboard b
   const f = fixture({ list: async () => people(15) }); f.render(); await tick(); let tree = f.render();
   const input = () => nodes(tree).find(node => node.type === 'TextInput');
   input().props.onChangeText('T-014'); tree = f.render();
-  assert.equal(nodes(tree).filter(node => node.type === 'OrbitButton').length, 2);
+  assert.equal(nodes(tree).filter(node => node.type === 'OrbitButton').length, 8);
   assert.ok(nodes(tree).some(node => node.props.title?.includes('T-014')));
   f.keyboardShow(); tree = f.render(); nodes(tree).find(node => node.type === 'GoCloseButton').props.onPress();
   assert.deepEqual(f.calls, ['dismiss']);
@@ -111,8 +115,9 @@ test('search finds a unique worker code, clears to original list, and keyboard b
 test('without an authorized team source, no synthetic people or false activity appear', () => {
   const f = fixture(undefined); f.render(); const tree = f.render();
   assert.ok(labels(tree).includes('pendiente de conexión'));
-  assert.equal(nodes(tree).filter(node => node.type === 'OrbitButton').length, 1);
-  assert.equal(nodes(tree).find(node => node.type === 'OrbitButton').props.disabled, true);
+  assert.equal(nodes(tree).filter(node => node.type === 'OrbitButton').length, 8);
+  assert.equal(nodes(tree).filter(node => node.type === 'OrbitButton' && node.props.empty).length, 7);
+  assert.ok(nodes(tree).filter(node => node.type === 'OrbitButton').every(node => node.props.disabled));
 });
 
 test('compact and tall iPhone layouts keep the eight orbital touch targets and floating back in the chosen hand', async () => {
@@ -126,4 +131,106 @@ test('compact and tall iPhone layouts keep the eight orbital touch targets and f
       assert.ok(nodes(tree).some(node => node.type === 'ScrollView' && node.props.keyboardShouldPersistTaps === 'handled'));
     }
   }
+});
+
+test('GO and seven worker slots keep Landing proportions at the safe bottom; the search stays immediately above', () => {
+  for (const dimensions of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 430, height: 932 }]) {
+    const insets = { top: 47, bottom: 34, left: 0, right: 0 };
+    const layout = orbitalPeopleLayout(dimensions.width, dimensions.height, insets);
+    assert.ok(Math.abs(layout.goSize / layout.orbitSize - 128 / 65) < 0.04);
+    assert.ok(Math.abs(layout.radius / layout.orbitSize - 99 / 65) < 0.04);
+    assert.equal(layout.bottom, dimensions.width < 370 ? 64 : 46);
+    assert.equal(layout.navigationBottom, 34);
+    assert.equal(layout.orbitTop - layout.searchTop, 52);
+    assert.equal(layout.contentHeight - layout.orbitTop, layout.wrap);
+    assert.ok(layout.wrap <= dimensions.width - 20);
+    const withKeyboard = orbitalPeopleLayout(dimensions.width, dimensions.height, insets, 300);
+    assert.equal(withKeyboard.bottom, dimensions.width < 370 ? 330 : 312);
+    assert.equal(withKeyboard.navigationBottom, 308);
+    assert.equal(withKeyboard.scrollNeeded, withKeyboard.contentHeight > withKeyboard.viewportHeight);
+  }
+});
+
+test('floating back starts clear of the search and every orbit on compact phones, both hands, with or without keyboard', () => {
+  const insets = { top: 47, bottom: 34, left: 0, right: 0 };
+  for (const dimensions of [{ width: 320, height: 568 }, { width: 360, height: 740 },
+    { width: 375, height: 667 }, { width: 390, height: 844 }, { width: 430, height: 932 }]) {
+    for (const keyboard of [0, 280]) {
+      const layout = orbitalPeopleLayout(dimensions.width, dimensions.height, insets, keyboard);
+      const showOrbit = keyboard === 0 || !layout.scrollNeeded;
+      const blockers = orbitalPeopleAvoidRects(dimensions.width, dimensions.height, insets, layout, showOrbit);
+      assert.equal(blockers.length, showOrbit ? 10 : 1);
+      const searchOnScreen = layout.searchTop - orbitalPeopleSearchScrollOffset(layout, insets);
+      assert.ok(searchOnScreen >= 0 && searchOnScreen + layout.searchHeight <= layout.viewportHeight);
+      const navTop = dimensions.height - insets.top - 72 - layout.navigationBottom - 64;
+      for (const hand of ['left', 'right']) {
+        const navLeft = hand === 'left' ? 8 : dimensions.width - 8 - 64;
+        for (const rect of blockers) {
+          const overlaps = navLeft < rect.x + rect.width + 2 && navLeft + 64 > rect.x - 2
+            && navTop < rect.y + rect.height + 2 && navTop + 64 > rect.y - 2;
+          assert.equal(overlaps, false, `${dimensions.width} × ${dimensions.height}, ${hand}, keyboard ${keyboard}`);
+        }
+      }
+    }
+  }
+});
+
+test('an authorized long press edits only the visible name after a confirmed server response', async () => {
+  const worker = people(1)[0], writes = [];
+  const source = { list: async () => [worker], canEditName: () => true,
+    renameVisibleName: async (id, name) => { writes.push({ id, name }); return { ...worker, name }; } };
+  const f = fixture(source); f.render(); await tick(); let tree = f.render();
+  const person = nodes(tree).find(node => node.type === 'OrbitButton' && node.props.key === `person:${worker.id}`);
+  person.props.onLongPress(); person.props.onPress(); tree = f.render();
+  assert.ok(labels(tree).includes('Nombre visible'));
+  assert.equal(labels(tree).includes('Ficha de trabajador'), false, 'long press must not open the regular record');
+  nodes(tree).find(node => node.props.accessibilityLabel === 'Nombre visible del trabajador').props.onChangeText('Nombre autorizado');
+  tree = f.render(); nodes(tree).find(node => node.type === 'TouchableOpacity' && labels(node) === 'GUARDAR').props.onPress();
+  await tick(); tree = f.render();
+  assert.deepEqual(writes, [{ id: worker.id, name: 'Nombre autorizado' }]);
+  assert.equal(nodes(tree).find(node => node.type === 'OrbitButton' && node.props.key === `person:${worker.id}`).props.label, 'Nombre autorizado');
+  assert.equal(worker.code, 'T-000'); assert.equal(worker.role, 'Soporte');
+});
+
+test('unauthorized long press cannot edit; invalid, cancelled and rejected edits never change the orbit', async () => {
+  const worker = people(1)[0], writes = [];
+  const denied = fixture({ list: async () => [worker], canEditName: () => false,
+    renameVisibleName: async () => { writes.push('denied'); return worker; } });
+  denied.render(); await tick(); let tree = denied.render();
+  assert.equal(nodes(tree).find(node => node.type === 'OrbitButton' && node.props.key === `person:${worker.id}`).props.onLongPress, undefined);
+  assert.equal(writes.length, 0);
+  const permitted = fixture({ list: async () => [worker], canEditName: () => true,
+    renameVisibleName: async () => { writes.push('attempt'); throw Error('offline'); } });
+  permitted.render(); await tick(); tree = permitted.render();
+  nodes(tree).find(node => node.type === 'OrbitButton' && node.props.key === `person:${worker.id}`).props.onLongPress();
+  tree = permitted.render(); const input = () => nodes(tree).find(node => node.props.accessibilityLabel === 'Nombre visible del trabajador');
+  input().props.onChangeText('x'); tree = permitted.render();
+  nodes(tree).find(node => node.type === 'TouchableOpacity' && labels(node) === 'GUARDAR').props.onPress();
+  tree = permitted.render(); assert.ok(labels(tree).includes('2 a 80 caracteres')); assert.equal(writes.length, 0);
+  input().props.onChangeText('Nombre sin guardar'); tree = permitted.render();
+  nodes(tree).find(node => node.type === 'TouchableOpacity' && labels(node) === 'GUARDAR').props.onPress();
+  await tick(); tree = permitted.render(); assert.ok(labels(tree).includes('No se confirmó')); assert.equal(writes.length, 1);
+  nodes(tree).find(node => node.type === 'TouchableOpacity' && labels(node) === 'CANCELAR').props.onPress();
+  tree = permitted.render(); assert.equal(nodes(tree).find(node => node.type === 'OrbitButton' && node.props.key === `person:${worker.id}`).props.label, worker.name);
+});
+
+test('keyboard lifts only the orbital viewport and floating back, then restores their original safe position', async () => {
+  const f = fixture({ list: async () => people(1) }, { width: 320, height: 568 });
+  f.render(); await tick(); let tree = f.render();
+  const viewport = () => nodes(tree).find(node => node.type === 'ScrollView');
+  const navigation = () => nodes(tree).find(node => node.type === 'GoNavigationFloating');
+  assert.equal(viewport().props.style[1].bottom, 64);
+  assert.equal(navigation().props.protectedBottom, 34);
+  assert.equal(navigation().props.avoidRects.length, 10);
+  f.keyboardShow(280); tree = f.render();
+  assert.equal(viewport().props.style[1].bottom, 310);
+  assert.equal(navigation().props.protectedBottom, 288);
+  assert.equal(nodes(tree).find(node => node.type === 'GoCloseButton').props.keyboardVisible, true);
+  assert.equal(navigation().props.avoidRects.length, 1);
+  viewport().props.ref.current = { scrollTo: options => f.calls.push(`scroll-to-search:${options.y}`) };
+  viewport().props.onContentSizeChange(); assert.ok(f.calls.some(call => call.startsWith('scroll-to-search:')));
+  f.keyboardHide(); tree = f.render();
+  assert.equal(viewport().props.style[1].bottom, 64);
+  assert.equal(navigation().props.protectedBottom, 34);
+  assert.equal(navigation().props.avoidRects.length, 10);
 });
