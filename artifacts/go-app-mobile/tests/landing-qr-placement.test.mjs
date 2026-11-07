@@ -12,7 +12,7 @@ for(const profile of ['ADMIN','BUSINESS','USER'])for(const preset of ['compacto'
    assert.ok(p.width+slop.left+slop.right>=44&&p.height+slop.top+slop.bottom>=44);assert.ok(p.left!==f.closeQrX||p.top!==f.closeQrY,'the former header location is not used');
    const touch={x:p.left-slop.left,y:p.top-slop.top,width:p.width+slop.left+slop.right,height:p.height+slop.top+slop.bottom};
    assert.ok(touch.x>=d.insets.left+8&&touch.x+touch.width<=d.width-d.insets.right-8);
-   assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=(f.landingCornerPair?d.height-8:d.height-d.insets.bottom));
+   assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=(f.pairedLandingQr?d.height-8:d.height-d.insets.bottom));
    const root=r=>f.toLandingRootRect(r),move=r=>({...r,y:r.y+f.landingOffsetY});
    const commands=move(root(f.landingPanels.commands));
    const active=(f.landingArrangement.obstacles??[]).filter((_,i)=>i===0||i>8);
@@ -22,14 +22,27 @@ for(const profile of ['ADMIN','BUSINESS','USER'])for(const preset of ['compacto'
    for(const minimized of [true,false]){const other=fixture(d,preset,profile,hand,{nextAptMinimized:minimized,landingNextHeight:minimized?46:480,landingPendingHeight:400});assert.deepEqual({...other.landingQrPosition},{...f.landingQrPosition},'content/open panel cannot move QR or rings');}
   }
  });
-test('AYUDA and QR share the nearest safe lower gap when the fixed satellites allow both targets',()=>{
+test('ADMIN keeps the USER AYUDA anchor and places QR clear of its extra satellites',()=>{
  for(const d of devices.filter(device=>device.width>=375&&device.width<500))for(const hand of ['right','left']){
-  const f=fixture(d,'estandar','ADMIN',hand),h=f.supportRect,q=f.landingQrPosition;
-  const distance=Math.hypot(q.x+f.closeQrSize/2-h.x-h.width/2,q.y+f.closeQrSize/2-h.y-h.height/2);
-  assert.ok(distance<=100,JSON.stringify({d,hand,h,q,distance}));
+  const f=fixture(d,'estandar','ADMIN',hand),user=fixture(d,'estandar','USER',hand),h=f.supportRect,q=f.landingQrPosition;
+  assert.deepEqual(JSON.parse(JSON.stringify(h)),JSON.parse(JSON.stringify(user.supportRect)));
   assert.ok(hand==='right'?h.x>=d.width/2:q.x<d.width/2);
   assert.ok(h.y>=d.height/2&&q.y>=d.height/2);
   assert.ok(!overlaps({x:q.x-f.closeQrHit,y:q.y-f.closeQrHit,width:f.closeQrSize+2*f.closeQrHit,height:f.closeQrSize+2*f.closeQrHit},h));
+ }
+});
+test('the common Landing buttons and AYUDA retain the same geometry across profiles, scales and hands',()=>{
+ const common=['bell','list','calendar','settings','mas'];
+ for(const d of devices)for(const preset of ['compacto','estandar','grande'])for(const hand of ['right','left']){
+  const user=fixture(d,preset,'USER',hand),admin=fixture(d,preset,'ADMIN',hand);
+  assert.deepEqual(JSON.parse(JSON.stringify(admin.supportRect)),JSON.parse(JSON.stringify(user.supportRect)));
+  assert.deepEqual(JSON.parse(JSON.stringify(admin.landingCenter)),JSON.parse(JSON.stringify(user.landingCenter)));
+  const rows=f=>f.landingArrangement.obstacles??f.landingOrbitObstacles.slice(1);
+  for(const key of common){const ui=user.ctx.isUserV1Surface?user.cornerSatelliteKeys.indexOf(key):-1;
+    const ai=admin.cornerSatelliteKeys.indexOf(key);
+    if(ui<0||ai<0)continue;
+    assert.deepEqual(JSON.parse(JSON.stringify(rows(admin)[9+ai])),JSON.parse(JSON.stringify(rows(user)[9+ui])),key);
+  }
  }
 });
 test('the photographed 393 × 852 Landing places AYUDA and QR together below active RESERVAS on the correct side',()=>{
@@ -48,6 +61,17 @@ test('the photographed 393 × 852 Landing places AYUDA and QR together below act
   assert.ok(!overlaps(help,qr));
   assert.deepEqual(JSON.parse(JSON.stringify(f.landingArrangement.offsets)),
     JSON.parse(JSON.stringify(fixture(d,'estandar','USER',hand).landingArrangement.offsets)));
+ }
+});
+test('ADMIN leaves CONTACTOS in place and moves only QR away from its touch area',()=>{
+ const d={width:393,height:852,insets:{top:59,bottom:34,left:0,right:0}};
+ for(const hand of ['right','left']){
+  const user=fixture(d,'estandar','USER',hand),admin=fixture(d,'estandar','ADMIN',hand),i=admin.cornerSatelliteKeys.indexOf('contacts');
+  const contact=admin.landingArrangement.obstacles[9+i],qr={x:admin.landingQrPosition.x-admin.closeQrHit,
+    y:admin.landingQrPosition.y-admin.closeQrHit,width:admin.closeQrSize+2*admin.closeQrHit,height:admin.closeQrSize+2*admin.closeQrHit};
+  assert.deepEqual(JSON.parse(JSON.stringify(admin.supportRect)),JSON.parse(JSON.stringify(user.supportRect)));
+  assert.notDeepEqual(admin.landingQrPosition,user.landingQrPosition);
+  assert.ok(!overlaps(qr,contact,2));
  }
 });
 test('the unique original QR keeps its appearance and exact action; overlays still hide it',()=>{

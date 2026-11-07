@@ -19,7 +19,7 @@ const statement=name=>decl(name).parent.parent;
 const code=ts.transpileModule([
  source.slice(statement('landingOrbitTop').getStart(ast),statement('landingBaseline').end),
  ...['landingSafeTop','landingBaseFrame','landingPanels','toLandingRootRect','humanityBlocks','humanityPanelsMeasured','humanityPlacement',
- 'landingInlineHumanity','inlineHumanityWidth','inlineHumanityRect','landingArrangement','landingOffsetY','supportObstacles','landingDisplayCloseRect','qrBase','landingCornerPair','supportRect'].map(name=>'const '+decl(name).getText(ast)+';'),
+ 'landingInlineHumanity','inlineHumanityWidth','inlineHumanityRect','landingArrangement','landingOffsetY','supportObstacles','landingDisplayCloseRect','qrBase','cornerSatelliteKeys','sharedCornerKeys','sharedCornerObstacles','adminOnlyCornerObstacles','allCornerHelpObstacles','landingCornerPair','sharedHelpCandidate','helpOverlapsAdminSatellite','supportRect'].map(name=>'const '+decl(name).getText(ast)+';'),
  'result={supportRect,landingArrangement,landingCenter,landingPanels,landingBaseFrame,humanityPlacement,landingCloseRect,closeHeaderObstacles,closeReservedColumn,inlineHumanityRect};',
 ].join('\n'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.None,target:ts.ScriptTarget.ES2022}}).outputText;
 const devices=[

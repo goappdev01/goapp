@@ -132,7 +132,9 @@ import { GOChatScreen } from "@/components/GOChatScreen";
 import { HumanityScreen } from "@/components/HumanityScreen";
 import { placeHumanity, type HumanityRect } from "@/components/landing/humanityPlacement";
 import { LandingSupport } from "@/components/landing/LandingSupport";
-import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, type SupportKind } from "@/lib/supportRequests";
+import { SupportAdminPanel, type SupportAdminView } from "@/components/landing/SupportAdminPanel";
+import { supportGateway } from "@/data/supportGateway";
+import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, SUPPORT_ADMIN_ORBITS, GO_SUPPORT_LIVE_ENABLED, type SupportKind } from "@/lib/supportRequests";
 import { placeLandingHelpQr, placeLandingQr } from "@/components/landing/landingQrPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
@@ -4291,9 +4293,12 @@ function HomeScreenContent() {
   const [supportMode, setSupportMode] = useState(false);
   const supportGoColor = supportMode ? GO_GOLD : goButtonColor;
   const [supportKind, setSupportKind] = useState<SupportKind | "mine">("incident");
+  const [supportAdminOpen,setSupportAdminOpen]=useState(false);
+  const [supportAdminView,setSupportAdminView]=useState<SupportAdminView>("received");
   const [supportAiRequest, setSupportAiRequest] = useState(0);
   const openSupportAction = (kind: SupportKind | "mine") => { setSupportKind(kind); setSupportOpen(true); };
-  useEffect(()=>{setSupportMode(false);setSupportOpen(false);},[adminAccess.userId]);
+  const openSupportAdmin=(view:SupportAdminView|"back")=>{if(view==="back"){setSupportMode(false);return;}setSupportAdminView(view);setSupportAdminOpen(true);};
+  useEffect(()=>{setSupportMode(false);setSupportOpen(false);setSupportAdminOpen(false);},[adminAccess.userId]);
   const [qrOpen, setQrOpen] = useState(false);
   const [cartaOpen, setCartaOpen] = useState(false);
   const [quickNoteText, setQuickNoteText] = useState("");
@@ -14246,16 +14251,42 @@ function HomeScreenContent() {
         : landingInlineHumanity ? [{ ...inlineHumanityRect, y: inlineHumanityRect.y + landingOffsetY }] : []),
     ],
   };
-  // The eight quiet orbit shells are decorative. Keep GO, active satellites, cards and navigation clear.
+  // Use the common USER satellite geometry for the shared AYUDA anchor. ADMIN-only
+  // satellites can move QR to another clear slot, but must not move AYUDA.
+  const cornerSatelliteKeys = visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface)
+    .filter(key => key !== "payment" || !(landingArrangement as { obstacles?: HumanityRect[] }).obstacles);
+  const sharedCornerKeys = new Set(visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), true));
+  const sharedCornerObstacles = supportObstacles.filter((_, index) => index === 0
+    || index > 8 && (index >= 9 + cornerSatelliteKeys.length || sharedCornerKeys.has(cornerSatelliteKeys[index - 9])));
+  const adminOnlyCornerObstacles = Object.entries(LANDING_SATELLITE_DEGREES)
+    .filter(([key]) => !sharedCornerKeys.has(key) && key !== "payment")
+    .map(([, degrees]) => { const size = Math.max(44, microSz), angle = degrees * Math.PI / 180;
+      return { x: landingCenter.x + Math.cos(angle) * microR - size / 2,
+        y: landingCenter.y + landingOffsetY + Math.sin(angle) * microR - size / 2,
+        width: size, height: size, circular: true };
+    });
+  const allCornerHelpObstacles = [...sharedCornerObstacles, ...adminOnlyCornerObstacles];
+  // The eight quiet orbit shells are decorative. Keep GO, common satellites, cards and navigation clear.
   const landingCornerPair = placeLandingHelpQr({ width: screen.width, height: screen.height, insets, handedness,
     helpSize: Math.max(44, screen.width < 440 ? 48 : 60), qrSize: closeQrSize, qrHit: closeQrHit,
-    obstacles: [...supportObstacles.filter((_, index) => index === 0 || index > 8),
+    obstacles: [...sharedCornerObstacles,
       { x: landingDisplayCloseRect.x - 8, y: landingDisplayCloseRect.y - 8,
         width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 }],
   });
-  const supportRect = landingCornerPair?.help ?? supportOrbitRect(screen.width, screen.height, insets, handedness, 44, supportObstacles);
-  const landingQrPosition = landingCornerPair?.qr ?? placeLandingQr({ ...qrBase, handedness, companion: supportRect,
-    obstacles: [...qrBase.obstacles, supportRect] }) ?? { x: closeQrX, y: closeQrY };
+  const sharedHelpCandidate = landingCornerPair?.help ?? supportOrbitRect(screen.width, screen.height, insets, handedness, 44, sharedCornerObstacles);
+  const helpOverlapsAdminSatellite = adminOnlyCornerObstacles.some(other => Math.hypot(
+    sharedHelpCandidate.x + sharedHelpCandidate.width / 2 - other.x - other.width / 2,
+    sharedHelpCandidate.y + sharedHelpCandidate.height / 2 - other.y - other.height / 2)
+    < (sharedHelpCandidate.width + other.width) / 2);
+  const supportRect = helpOverlapsAdminSatellite
+    ? supportOrbitRect(screen.width, screen.height, insets, handedness, 44, allCornerHelpObstacles)
+    : sharedHelpCandidate;
+  const adminQrObstacles = [...supportObstacles.filter((_, index) => index === 0 || index > 8),
+    { x: landingDisplayCloseRect.x - 8, y: landingDisplayCloseRect.y - 8,
+      width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 }];
+  const pairedLandingQr = isUserV1Surface && !helpOverlapsAdminSatellite && !!landingCornerPair?.qr;
+  const landingQrPosition = (pairedLandingQr ? landingCornerPair?.qr : null) ?? placeLandingQr({ ...qrBase, handedness, companion: supportRect,
+    obstacles: [...adminQrObstacles, supportRect] }) ?? { x: closeQrX, y: closeQrY };
   // Keep the approved header reservation: relocating QR must not shift panels or confirmations.
   const landingHeaderControls = [
     { x: closeQrX, y: closeQrY - landingOffsetY, width: closeQrSize, height: closeQrSize },
@@ -15578,7 +15609,7 @@ function HomeScreenContent() {
         return (
           <TouchableOpacity
             key="qr-permanent-btn"
-            hitSlop={landingCornerPair ? { top: 2 * qrHit, bottom: 0, left: qrHit, right: qrHit } : qrHit}
+            hitSlop={pairedLandingQr ? { top: 2 * qrHit, bottom: 0, left: qrHit, right: qrHit } : qrHit}
             onPress={() => { Haptics.selectionAsync().catch(() => {}); setQrOpen(true); }}
             activeOpacity={0.8}
             style={{
@@ -17151,18 +17182,20 @@ function HomeScreenContent() {
           {(supportMode || !fullLandingArchitecture && !anyOverlayOpen && !rutasMode && !reservasOrbitalOpen && orbitSecondLevel === null) ? (
             <View pointerEvents={supportMode?"box-none":"none"} accessible={false} accessibilityElementsHidden={!supportMode}
               importantForAccessibility={supportMode?"auto":"no-hide-descendants"} testID="landing-quiet-orbits" style={StyleSheet.absoluteFill}>
-              {(supportMode ? SUPPORT_ORBIT_ACTIONS.map(action => ({ key: action.kind, color: ({mine:GO_COLORS.comida,improvement:GO_COLORS.cafe,help:GO_COLORS.deporte,incident:GO_COLORS.fiesta} as const)[action.kind], action })) : [...INTENTS, { key: "otro", color: "#9ca3af" }].map(it => ({ ...it, action: undefined }))).map((it, i, items) => {
+              {(supportMode ? (goView.isAdminView && adminAccess.isOwner
+                ? SUPPORT_ADMIN_ORBITS.map((action,i)=>({key:action.view,color:[GO_COLORS.comida,GO_COLORS.fiesta,GO_COLORS.cafe,GO_COLORS.deporte,GO_COLORS.shopping,GO_COLORS.viaje,GO_COLORS.reunion,"#9ca3af"][i],label:action.label,title:action.title,icon:action.icon,onPress:()=>openSupportAdmin(action.view)}))
+                : SUPPORT_ORBIT_ACTIONS.map(action => ({ key: action.kind, color: ({mine:GO_COLORS.comida,improvement:GO_COLORS.cafe,help:GO_COLORS.deporte,incident:GO_COLORS.fiesta} as const)[action.kind],label:action.label,title:action.title,icon:action.icon,onPress:()=>openSupportAction(action.kind) })))
+                : [...INTENTS, { key: "otro", color: "#9ca3af" }].map(it => ({ ...it, label:"",title:"",icon:"circle",onPress:undefined as undefined|(()=>void) }))).map((it, i, items) => {
                 const angle = -Math.PI / 2 + (i * 2 * Math.PI) / items.length;
                 const x = orbitWrapSize / 2 + Math.cos(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
                 const y = orbitWrapSize / 2 + Math.sin(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
-                const action = it.action;
-                const active = !!action;
+                const active = !!it.onPress;
                 return <View key={it.key} testID={`landing-quiet-orbit-${i}`} pointerEvents={active?"auto":"none"}
                   style={{ position: "absolute", left: x, top: y }}>
-                  <PremiumOrbitBtn color={it.color} selected={false} dimmed={!active} onPress={()=>{if(action)openSupportAction(action.kind);}}
-                    icon={action?.icon??"circle"} label={action?.label??""} accessibilityLabel={action?.title}
+                  <PremiumOrbitBtn color={it.color} selected={false} dimmed={!active} onPress={()=>it.onPress?.()}
+                    icon={it.icon as "circle"} label={it.label} accessibilityLabel={it.title}
                     size={orbitBtnVisualSize} iconSize={active?Math.round(24*uiScaleFactor):0} labelSize={active?Math.max(8,Math.round(10*uiScaleFactor)):0}
-                    labelOpacity={active?1:0} labelOnly={!!action} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />
+                    labelOpacity={active?1:0} labelOnly={active} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />
                 </View>;
               })}
             </View>
@@ -25571,7 +25604,8 @@ function HomeScreenContent() {
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
-    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} initialAssistantRequest={supportAiRequest} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"}/>
+    <LandingSupport key={adminAccess.userId ?? "anonymous"} visible={supportOpen} kind={supportKind} initialAssistantRequest={supportAiRequest} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"} gateway={GO_SUPPORT_LIVE_ENABLED&&adminAccess.userId?supportGateway:undefined} businessId={goView.view==="BUSINESS"&&businessAccess.allowed?businessAccess.snapshot?.business?.id:null}/>
+    <SupportAdminPanel key={adminAccess.userId??"anonymous"} visible={supportAdminOpen&&goView.isAdminView&&adminAccess.isOwner} onClose={()=>setSupportAdminOpen(false)} view={supportAdminView} gateway={supportGateway} backendReady={GO_SUPPORT_LIVE_ENABLED} handedness={handedness}/>
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {
