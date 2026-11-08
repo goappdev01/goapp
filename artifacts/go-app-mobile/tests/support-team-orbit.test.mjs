@@ -79,7 +79,7 @@ test('name and code search ignores accents and case, sorts with stable code tie 
 
 function fixture(source, dimensions = { width: 390, height: 844 }, handedness = 'left', storage = new Map(), accountScope = 'account-a') {
   let cursor = 0, slots = [], effects = [], keyboardListeners = {};
-  const calls = [];
+  const calls = [], confirmations = [];
   const equal = (a, b) => a && b && a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
   const React = {
     createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }),
@@ -94,12 +94,14 @@ function fixture(source, dimensions = { width: 390, height: 844 }, handedness = 
   const scope = { exports: {}, require(name) {
     if (name === 'react') return { ...React, default: React };
     if (name === 'react-native') return {
+      Alert: { alert: (...args) => confirmations.push(args) },
       ActivityIndicator: 'ActivityIndicator', Modal: 'Modal', ScrollView: 'ScrollView', TouchableOpacity: 'TouchableOpacity',
       StyleSheet: { create: value => value }, Text: 'Text', TextInput: 'TextInput', View: 'View',
       useWindowDimensions: () => dimensions,
       Keyboard: { addListener: (event, handler) => { keyboardListeners[event] = handler; return { remove() { delete keyboardListeners[event]; } }; },
         isVisible: () => false, dismiss: () => calls.push('dismiss') },
     };
+    if (name === '@expo/vector-icons') return { Feather: 'Feather' };
     if (name === 'react-native-safe-area-context') return { useSafeAreaInsets: () => ({ top: 47, bottom: 34, left: 0, right: 0 }) };
     if (name === '@react-native-async-storage/async-storage') return { __esModule: true, default: {
       getItem: async key => storage.get(key) ?? null,
@@ -116,7 +118,7 @@ function fixture(source, dimensions = { width: 390, height: 844 }, handedness = 
   const props = { visible: true, source, onClose: () => calls.push('close'), onGoPress: () => calls.push('GO'),
     handedness, accountScope, renderSatellite: (satellite, size) => ({ type: 'OrbitButton', props: { ...satellite, size },
       children: [orbitScope.renderSatellite(satellite, size)] }) };
-  return { props, calls, storage, keyboardShow: (height = 300) => keyboardListeners.keyboardDidShow?.({ endCoordinates: { height } }),
+  return { props, calls, storage, confirmations, keyboardShow: (height = 300) => keyboardListeners.keyboardDidShow?.({ endCoordinates: { height } }),
     keyboardHide: () => keyboardListeners.keyboardDidHide?.(),
     render(p = props) { cursor = 0; effects = []; const tree = scope.exports.SupportTeamPanel(p); for (const run of effects) run(); return tree; } };
 }
@@ -539,4 +541,160 @@ test('cancelling a local demo edit keeps the stored record and code unchanged', 
   const stored = parseOrbitalDemoDirectory(storage.get(orbitalDemoStorageKey('support', 'account-a')));
   assert.equal(stored.people[0].name, 'Prueba 1');
   assert.equal(stored.people[0].code, 'DEMO-001');
+});
+
+const trash = tree => nodes(tree).find(node => node.props.accessibilityLabel === 'Eliminar permanentemente al trabajador');
+const confirmDelete = f => f.confirmations.at(-1)[2].find(action => action.style === 'destructive');
+async function demoEditor(storage = new Map(), hand = 'right') {
+  const f = fixture(undefined, undefined, hand, storage); f.render(); await tick(); let tree = f.render();
+  const activate = button(tree, 'ACTIVAR DEMOSTRACIÓN');
+  if (activate) { activate.props.onPress(); await tick(); tree = f.render(); }
+  orbits(tree)[0].props.onPress(); tree = f.render(); button(tree, 'EDITAR').props.onPress(); tree = f.render();
+  return { f, tree };
+}
+
+test('permanent demo removal deletes only the chosen record, preserves inactivity, and never reseeds or reuses its identifier', () => {
+  const directory = newOrbitalDemoDirectory();directory.enabled = true;
+  directory.people[1] = { ...directory.people[1], active: false };
+  const removed = demoLibrary.exports.deleteOrbitalDemoPerson(directory, directory.people[0].id);
+  assert.equal(directory.people.length, 7);assert.equal(removed.people.length, 6);
+  assert.deepEqual(removed.people, directory.people.slice(1));assert.equal(removed.people[0].active, false);
+  assert.equal(removed.nextId, directory.nextId);assert.equal(removed.enabled, true);
+  let empty = removed;
+  for (const person of removed.people) empty = demoLibrary.exports.deleteOrbitalDemoPerson(empty, person.id);
+  const restored = parseOrbitalDemoDirectory(JSON.stringify(empty));assert.equal(restored.people.length, 0);
+  const created = createOrbitalDemoPerson(restored, 'Nueva persona');assert.equal(created.person.id, 'demo:8');
+  for (const id of ['real-user', 'demo:999']) assert.throws(() => demoLibrary.exports.deleteOrbitalDemoPerson(directory, id));
+});
+
+test('editing has an accessible red trash button beside its title for both hands; cancel preserves record and unsaved draft', async () => {
+  for (const hand of ['left', 'right']) {
+    const { f, tree:initial } = await demoEditor(new Map(), hand);let tree = initial;
+    const control = trash(tree);assert.ok(control);assert.equal(control.props.disabled, false);
+    assert.equal(control.props.style[0].width, 44);assert.equal(control.props.style[0].height, 44);
+    const icon = nodes(control).find(node => node.type === 'Feather');assert.equal(icon.props.name, 'trash-2');assert.equal(icon.props.color, '#EF4444');
+    const header = nodes(tree).find(node => node.type === 'View' && node.children.includes(control));
+    assert.equal(header.props.style[1].flexDirection, hand === 'left' ? 'row-reverse' : 'row');assert.ok(labels(header).includes('EDITAR PERSONA'));
+    const key = orbitalDemoStorageKey('support', 'account-a'), before = f.storage.get(key);
+    input(tree, 'Nombre visible del trabajador').props.onChangeText('Borrador sin guardar');tree = f.render();
+    trash(tree).props.onPress();trash(tree).props.onPress();assert.equal(f.confirmations.length, 1);
+    assert.equal(f.confirmations[0][0], '¿Desea eliminar permanentemente este trabajador?');
+    assert.ok(f.confirmations[0][1].includes('Prueba 1'));assert.ok(f.confirmations[0][1].includes('DEMO-001'));
+    assert.equal(f.storage.get(key), before);
+    f.confirmations[0][2].find(action => action.style === 'cancel').onPress();tree = f.render();
+    assert.equal(input(tree, 'Nombre visible del trabajador').props.value, 'Borrador sin guardar');assert.equal(f.storage.get(key), before);
+    trash(tree).props.onPress();assert.equal(f.confirmations.length, 2);
+  }
+});
+
+test('confirmed deletion persists and closes the editor without a separate Save, leaving other people unchanged', async () => {
+  const { f, tree:initial } = await demoEditor();let tree = initial;
+  const key = orbitalDemoStorageKey('support', 'account-a'), prior = JSON.parse(f.storage.get(key));
+  trash(tree).props.onPress();const yes = confirmDelete(f);yes.onPress();yes.onPress();await tick();tree = f.render();
+  assert.equal(input(tree, 'Nombre visible del trabajador'), undefined);
+  const saved = JSON.parse(f.storage.get(key));assert.equal(saved.people.length, 6);assert.deepEqual(saved.people, prior.people.slice(1));assert.equal(saved.nextId, prior.nextId);
+  assert.ok(!orbits(tree).some(orbit => orbit.props.title.includes('DEMO-001')));
+  yes.onPress();await tick();assert.equal(f.storage.get(key), JSON.stringify(saved));
+  const reopened = fixture(undefined, undefined, 'right', f.storage);reopened.render();await tick();const next = reopened.render();
+  assert.equal(orbits(next).filter(orbit => !orbit.props.empty && orbit.props.key !== 'team-next').length, 6);
+  assert.ok(!orbits(next).some(orbit => orbit.props.title.includes('DEMO-001')));
+});
+
+test('inactive is retained in the roster and can be deleted later only through the separate confirmed action', async () => {
+  const { f, tree:initial } = await demoEditor();let tree = initial;
+  nodes(tree).find(node => node.props.accessibilityLabel === 'Cambiar estado del miembro').props.onPress();tree = f.render();
+  button(tree, 'GUARDAR').props.onPress();await tick();tree = f.render();
+  const key = orbitalDemoStorageKey('support', 'account-a'), inactive = JSON.parse(f.storage.get(key));
+  assert.equal(inactive.people.length, 7);assert.equal(inactive.people[0].active, false);assert.equal(f.confirmations.length, 0);
+  button(tree, 'EDITAR').props.onPress();tree = f.render();assert.ok(labels(tree).includes('Inactivo conserva al trabajador en plantilla.'));
+  trash(tree).props.onPress();confirmDelete(f).onPress();await tick();tree = f.render();
+  assert.equal(JSON.parse(f.storage.get(key)).people.length, 6);assert.ok(!JSON.parse(f.storage.get(key)).people.some(person => person.id === 'demo:1'));
+});
+
+test('deleting the last member on the final page clamps pagination and an empty directory stays empty after reopening', async () => {
+  for (const count of [1, 8]) {
+    const storage = new Map(), key = orbitalDemoStorageKey('support', 'account-a');
+    const rows = people(count).map((person, index) => ({ ...person, id:`demo:${index+1}`,code:`DEMO-${String(index+1).padStart(3,'0')}` }));
+    storage.set(key, JSON.stringify({ version:1,enabled:true,nextId:count+1,people:rows }));
+    const f = fixture(undefined, undefined, 'right', storage);f.render();await tick();let tree = f.render();
+    if (count === 8) { nativeButton(orbits(tree)[7]).props.onPress();tree = f.render(); }
+    orbits(tree)[0].props.onPress();tree = f.render();button(tree, 'EDITAR').props.onPress();tree = f.render();
+    trash(tree).props.onPress();confirmDelete(f).onPress();await tick();tree = f.render();
+    assert.equal(JSON.parse(storage.get(key)).people.length, count-1);
+    assert.equal(orbits(tree)[7].props.disabled, true);if (count === 8) assert.ok(labels(tree).includes('Página 1 de 1'));
+    const reopened = fixture(undefined, undefined, 'right', storage);reopened.render();await tick();const restored = reopened.render();
+    assert.equal(orbits(restored).filter(orbit => !orbit.props.empty && orbit.props.key !== 'team-next').length, count-1);
+    if (count === 1) assert.ok(labels(restored).includes('No hay trabajadores registrados'));
+  }
+});
+
+test('a failed local deletion keeps its editor, draft and stored record and does not retry automatically', async () => {
+  const { f, tree:initial } = await demoEditor();let tree = initial;
+  const key = orbitalDemoStorageKey('support','account-a'), before = f.storage.get(key);
+  input(tree,'Nombre visible del trabajador').props.onChangeText('Mi borrador');tree = f.render();
+  f.storage.set = () => { throw Error('synthetic storage failure'); };
+  trash(tree).props.onPress();confirmDelete(f).onPress();await tick();tree = f.render();
+  assert.equal(f.storage.get(key), before);assert.equal(input(tree,'Nombre visible del trabajador').props.value,'Mi borrador');
+  assert.ok(labels(tree).includes('No se ha confirmado la eliminación'));assert.equal(trash(tree).props.disabled,false);
+});
+
+test('real directory deletion requires its own permission and endpoint, rather than name-edit or inactive permissions', async () => {
+  const worker = people(1)[0], writes=[];
+  for (const capabilities of [{canDeleteMember:()=>false,deleteMember:async()=>writes.push('denied')},{canDeleteMember:()=>true}]) {
+    const f = fixture({list:async()=>[worker],canEditName:()=>true,renameVisibleName:async()=>worker,...capabilities});f.render();await tick();let tree=f.render();
+    orbits(tree)[0].props.onPress();tree=f.render();button(tree,'EDITAR').props.onPress();tree=f.render();
+    assert.equal(trash(tree).props.disabled,true);trash(tree).props.onPress();assert.equal(f.confirmations.length,0);
+    assert.ok(labels(tree).includes('La eliminación permanente no está disponible'));
+  }
+  assert.deepEqual(writes,[]);
+});
+
+test('real deletion waits for the matching server receipt, suppresses duplicate confirmations and does not touch other members', async () => {
+  const rows=people(2),writes=[];let finish;
+  const f=fixture({list:async()=>rows,canDeleteMember:()=>true,deleteMember:id=>{writes.push(id);return new Promise(resolve=>{finish=resolve;});}});
+  f.render();await tick();let tree=f.render();orbits(tree)[0].props.onPress();tree=f.render();
+  button(tree,'EDITAR').props.onPress();tree=f.render();assert.equal(input(tree,'Nombre visible del trabajador').props.editable,false);
+  trash(tree).props.onPress();assert.equal(writes.length,0);const yes=confirmDelete(f);yes.onPress();yes.onPress();tree=f.render();
+  assert.deepEqual(writes,[rows[0].id]);assert.ok(labels(tree).includes('ELIMINANDO…'));assert.equal(trash(tree).props.disabled,true);
+  const calls=f.calls.length;nodes(tree).find(node=>node.type==='GoCloseButton').props.onPress();assert.equal(f.calls.length,calls);
+  finish({id:rows[0].id,deleted:true});await tick();tree=f.render();assert.equal(input(tree,'Nombre visible del trabajador'),undefined);
+  assert.deepEqual(orbits(tree).filter(orbit=>!orbit.props.empty&&orbit.props.key!=='team-next').map(orbit=>orbit.props.label),[rows[1].name]);
+  yes.onPress();await tick();assert.equal(writes.length,1);
+});
+
+test('an unconfirmed or failed server deletion never removes the row locally or reports success', async () => {
+  const worker=people(1)[0];
+  for (const response of [null,{id:'someone-else',deleted:true},{id:worker.id,deleted:false},new Error('offline')]) {
+    let count=0;const f=fixture({list:async()=>[worker],canDeleteMember:()=>true,deleteMember:async()=>{count++;if(response instanceof Error)throw response;return response;}});
+    f.render();await tick();let tree=f.render();orbits(tree)[0].props.onPress();tree=f.render();button(tree,'EDITAR').props.onPress();tree=f.render();
+    trash(tree).props.onPress();confirmDelete(f).onPress();await tick();tree=f.render();
+    assert.ok(input(tree,'Nombre visible del trabajador'));assert.ok(labels(tree).includes('No se ha confirmado la eliminación'));assert.equal(count,1);
+    button(tree,'CANCELAR').props.onPress();tree=f.render();assert.ok(labels(tree).includes(worker.name));
+  }
+});
+
+test('stale confirmation and revoked delete permission cannot delete a member after context changes', async () => {
+  const worker=people(1)[0],writes=[];let permitted=true;
+  const source={list:async()=>[worker],canDeleteMember:()=>permitted,deleteMember:async id=>{writes.push(id);return{id,deleted:true};}};
+  const f=fixture(source);f.render();await tick();let tree=f.render();orbits(tree)[0].props.onPress();tree=f.render();button(tree,'EDITAR').props.onPress();tree=f.render();
+  trash(tree).props.onPress();permitted=false;confirmDelete(f).onPress();await tick();tree=f.render();assert.deepEqual(writes,[]);
+  permitted=true;trash(tree).props.onPress();const stale=confirmDelete(f);
+  const next={...f.props,accountScope:'account-b',source:{list:async()=>[{...worker,id:'other',name:'Otra cuenta'}]}};
+  f.render(next);await tick();tree=f.render(next);stale.onPress();await tick();tree=f.render(next);
+  assert.deepEqual(writes,[]);assert.ok(orbits(tree).some(orbit=>orbit.props.label==='Otra cuenta'));
+});
+
+test('a late deletion receipt cannot erase a different account directory or leave it blocked', async () => {
+  const worker=people(1)[0];let finish;
+  const f=fixture({list:async()=>[worker],canDeleteMember:()=>true,deleteMember:()=>new Promise(resolve=>{finish=resolve;})});
+  f.render();await tick();let tree=f.render();orbits(tree)[0].props.onPress();tree=f.render();button(tree,'EDITAR').props.onPress();tree=f.render();trash(tree).props.onPress();confirmDelete(f).onPress();
+  const next={...f.props,accountScope:'account-b',source:{list:async()=>[{...worker,id:'other',name:'Miembro de otra cuenta'}]}};
+  f.render(next);await tick();tree=f.render(next);finish({id:worker.id,deleted:true});await tick();tree=f.render(next);
+  assert.ok(orbits(tree).some(orbit=>orbit.props.label==='Miembro de otra cuenta'));assert.ok(!labels(tree).includes('ELIMINANDO…'));
+});
+
+test('creating a new person offers cancel and save without a permanent-delete control for an unsaved record', async () => {
+  const f=fixture();f.render();await tick();let tree=f.render();button(tree,'ACTIVAR DEMOSTRACIÓN').props.onPress();await tick();tree=f.render();
+  nodes(tree).find(node=>node.props.accessibilityLabel==='Añadir persona').props.onPress();tree=f.render();
+  assert.ok(labels(tree).includes('AÑADIR PERSONA'));assert.equal(trash(tree),undefined);assert.ok(button(tree,'CANCELAR'));assert.ok(button(tree,'GUARDAR'));
 });

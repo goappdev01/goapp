@@ -1,14 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Keyboard, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Alert, Keyboard, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import type { ScrollViewInstance } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { GoAssistantButton } from "@/components/booking-assistant/BookingAssistantUI";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoNavigationFloating } from "@/components/ui/GoNavigationFloating";
 import { browsePeople, orbitalPeopleAvoidRects, orbitalPeopleLayout, orbitalPeopleSearchScrollOffset, peopleOrbitPage, type OrbitalPerson } from "@/lib/orbitalPeople";
 import { createOrbitalDemoPerson, orbitalDemoStorageKey, parseOrbitalDemoDirectory,
-  updateOrbitalDemoPerson, validVisibleName, type OrbitalDemoDirectory } from "@/lib/orbitalPeopleDemo";
+  updateOrbitalDemoPerson, deleteOrbitalDemoPerson, validVisibleName, type OrbitalDemoDirectory } from "@/lib/orbitalPeopleDemo";
 
 /** Every real operation must enforce team scope and permission on the server again. */
 export type SupportTeamSource = {
@@ -20,6 +21,9 @@ export type SupportTeamSource = {
   updateMember?: (id: string, changes: { name?: string; role?: string; active?: boolean }) => Promise<OrbitalPerson>;
   canCreateMember?: () => boolean;
   createMember?: (name: string, code?: string) => Promise<OrbitalPerson>;
+  canDeleteMember?: (person: OrbitalPerson) => boolean;
+  /** Delete only this team's member record, never the account or other teams. Server permission is mandatory. */
+  deleteMember?: (id: string) => Promise<{ id: string; deleted: true }>;
 };
 export type OrbitalPeopleSource = SupportTeamSource;
 export type TeamSatellite = { key: string; label: string; title: string; color: string; disabled: boolean; empty?: boolean; inactive?: boolean;
@@ -45,6 +49,9 @@ export function SupportTeamPanel({ visible, onClose, onGoPress, source, renderSa
   const [roleDraft, setRoleDraft] = useState(""), [activeDraft, setActiveDraft] = useState(true);
   const [creating, setCreating] = useState(false), [codeDraft, setCodeDraft] = useState("");
   const [editError, setEditError] = useState(""), [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const editingRef = useRef(editing); editingRef.current = editing;
+  const deletePrompt = useRef<{ person: OrbitalPerson; session: number } | null>(null), deleteBusy = useRef(false);
   const lastLongPress = useRef<{ id: string; at: number } | null>(null), scroll = useRef<ScrollViewInstance | null>(null);
   const writeBusy = useRef(false), session = useRef(0);
   const demoKey = orbitalDemoStorageKey(directoryKey, accountScope);
@@ -60,7 +67,7 @@ export function SupportTeamPanel({ visible, onClose, onGoPress, source, renderSa
     const currentSession = ++session.current;
     setQuery(""); setPage(0); setSelected(null); setEditing(null); setCreating(false);
     setNameDraft(""); setMembers([]); setDemo(null); setShowInactive(false); setError("");
-    writeBusy.current = false; setSaving(false);
+    writeBusy.current = false; deleteBusy.current = false; deletePrompt.current = null; setSaving(false); setDeleting(false);
     setLoading(true);
     if (!source) {
       AsyncStorage.getItem(demoKey).then(raw => {
@@ -83,6 +90,7 @@ export function SupportTeamPanel({ visible, onClose, onGoPress, source, renderSa
   const matching = useMemo(() => browsePeople(directory, query, showInactive), [directory, query, showInactive]);
   const slice = peopleOrbitPage(matching, page);
   const back = () => {
+    if (deleteBusy.current) return;
     if (keyboardHeight > 0 || Keyboard.isVisible?.()) { Keyboard.dismiss(); return; }
     if (creating) { setCreating(false); setEditError(""); return; }
     if (editing) { setEditing(null); setEditError(""); return; }
@@ -102,6 +110,7 @@ export function SupportTeamPanel({ visible, onClose, onGoPress, source, renderSa
     (!!(source?.renameVisibleName || source?.updateMember) && source?.canEditName?.(person) === true);
   const canEditRole = (person: OrbitalPerson) => demoMode || (!!source?.updateMember && source.canEditRole?.(person) === true);
   const canSetActive = (person: OrbitalPerson) => demoMode || (!!source?.updateMember && source.canSetActive?.(person) === true);
+  const canDelete = (person: OrbitalPerson) => demoMode || (!!source?.deleteMember && source.canDeleteMember?.(person) === true);
   const canCreate = demoMode || (!!source?.createMember && source.canCreateMember?.() === true);
   const openEditor = (person: OrbitalPerson) => {
     setEditing(person); setCreating(false); setNameDraft(person.name); setRoleDraft(person.role);
@@ -179,6 +188,48 @@ export function SupportTeamPanel({ visible, onClose, onGoPress, source, renderSa
       setEditError(demoMode && reason instanceof Error ? reason.message : "No se confirmó el cambio en el servidor."); }
     finally { if (session.current === startedIn) { writeBusy.current = false; setSaving(false); } }
   };
+  const deleteMember = async (target: { person: OrbitalPerson; session: number }) => {
+    const person = target.person;
+    if (target.session !== session.current || editingRef.current?.id !== person.id || writeBusy.current) return;
+    if (!canDelete(person)) { setEditError("Este directorio no permite eliminar permanentemente a esta persona."); return; }
+    writeBusy.current = true; deleteBusy.current = true; setSaving(true); setDeleting(true); setEditError("");
+    try {
+      let nextRows: readonly OrbitalPerson[];
+      if (demoMode && demo) {
+        const next = deleteOrbitalDemoPerson(demo, person.id);
+        if (!await storeDemo(next, target.session)) return;
+        nextRows = next.people;
+      } else if (source?.deleteMember && source.canDeleteMember?.(person) === true) {
+        const confirmed = await source.deleteMember(person.id);
+        if (session.current !== target.session) return;
+        if (!confirmed || confirmed.id !== person.id || confirmed.deleted !== true) throw Error("Eliminación no confirmada");
+        nextRows = members.filter(row => row.id !== person.id); setMembers(nextRows);
+      } else throw Error("Eliminación no disponible");
+      if (session.current !== target.session) return;
+      setSelected(null); setEditing(null); setNameDraft(""); setRoleDraft("");
+      setPage(current => Math.min(current, Math.max(0, Math.ceil(browsePeople(nextRows, query, showInactive).length / 7) - 1)));
+      Keyboard.dismiss();
+    } catch {
+      if (session.current === target.session)
+        setEditError("No se ha confirmado la eliminación. Revisa el directorio antes de volver a intentarlo.");
+    } finally {
+      if (session.current === target.session) { writeBusy.current = false; deleteBusy.current = false; setSaving(false); setDeleting(false); }
+    }
+  };
+  const requestDelete = () => {
+    if (!editing || !canDelete(editing) || writeBusy.current || deletePrompt.current) return;
+    const target = { person: editing, session: session.current };
+    deletePrompt.current = target;
+    const cancel = () => { if (deletePrompt.current === target) deletePrompt.current = null; };
+    Alert.alert(`¿Desea eliminar permanentemente este ${memberSingular}?`,
+      `${editing.name} · ${editing.code}\nEsta acción no se puede deshacer.`, [
+        { text: "Cancelar", style: "cancel", onPress: cancel },
+        { text: "Sí, eliminar", style: "destructive", onPress: () => {
+          if (deletePrompt.current !== target) return;
+          deletePrompt.current = null; void deleteMember(target);
+        } },
+      ], { cancelable: true, onDismiss: cancel });
+  };
   const saveCreate = async () => {
     const name = nameDraft.trim(), code = codeDraft.trim();
     if (!creating || !canCreate || writeBusy.current) return;
@@ -250,7 +301,7 @@ export function SupportTeamPanel({ visible, onClose, onGoPress, source, renderSa
             {selected.handledRequests != null && <Text style={styles.detailText}>Expedientes atendidos: {selected.handledRequests}</Text>}
             {selected.assignedRequests == null && selected.pendingTasks == null && selected.handledRequests == null &&
               <Text style={styles.meta}>La actividad individual todavía no está disponible.</Text>}
-            {(canRename(selected) || canEditRole(selected) || canSetActive(selected)) &&
+            {(canRename(selected) || canEditRole(selected) || canSetActive(selected) || canDelete(selected)) &&
               <TouchableOpacity accessibilityRole="button" accessibilityLabel="Editar persona" onPress={() => openEditor(selected)}
                 style={styles.detailAction}><Text style={styles.detailActionText}>EDITAR</Text></TouchableOpacity>}
           </View> : <View style={styles.dock}>
@@ -288,10 +339,18 @@ export function SupportTeamPanel({ visible, onClose, onGoPress, source, renderSa
       {(editing || creating) && <View style={[styles.editOverlay, { bottom: layout.bottom }]}>
         <ScrollView style={styles.editorScroll} contentContainerStyle={styles.editorScrollContent} keyboardShouldPersistTaps="handled">
           <View style={styles.editCard}>
-            <Text style={styles.editTitle}>{creating ? "AÑADIR PERSONA" : "EDITAR PERSONA"}</Text>
+            <View style={[styles.editHeader, { flexDirection: handedness === "left" ? "row-reverse" : "row" }]}>
+              <Text style={[styles.editTitle, { flex: 1 }]}>{creating ? "AÑADIR PERSONA" : "EDITAR PERSONA"}</Text>
+              {!creating && editing && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Eliminar permanentemente al trabajador"
+                accessibilityHint={`${editing.name}, código ${editing.code}. Requiere confirmación.`}
+                accessibilityState={{ disabled: saving || !canDelete(editing) }} disabled={saving || !canDelete(editing)}
+                onPress={requestDelete} style={[styles.deleteButton, (saving || !canDelete(editing)) && styles.addDisabled]}>
+                <Feather name="trash-2" size={26} color="#EF4444"/>
+              </TouchableOpacity>}
+            </View>
             <Text style={styles.meta}>{creating ? demoMode ? "Alta local de demostración" : "Alta autorizada" : editing?.code}</Text>
             <TextInput accessibilityLabel="Nombre visible del trabajador" placeholder="Nombre o alias"
-              value={nameDraft} onChangeText={setNameDraft} editable={creating || !!editing && canRename(editing)}
+              value={nameDraft} onChangeText={setNameDraft} editable={!deleting && (creating || !!editing && canRename(editing))}
               maxLength={80} selectTextOnFocus style={styles.editInput}/>
             {creating ? <>
               <TextInput accessibilityLabel="Código identificador" placeholder="Código automático si se deja vacío"
@@ -299,11 +358,13 @@ export function SupportTeamPanel({ visible, onClose, onGoPress, source, renderSa
               {demoMode && <Text style={styles.demoNotice}>El código llevará el prefijo DEMO-.</Text>}
             </> : editing && <>
               <TextInput accessibilityLabel="Función del miembro" value={roleDraft} onChangeText={setRoleDraft}
-                editable={canEditRole(editing)} maxLength={80} style={styles.editInput}/>
+                editable={!deleting && canEditRole(editing)} maxLength={80} style={styles.editInput}/>
               <TouchableOpacity accessibilityRole="button" accessibilityLabel="Cambiar estado del miembro"
-                disabled={!canSetActive(editing)} onPress={() => setActiveDraft(value => !value)} style={styles.stateButton}>
+                disabled={deleting || !canSetActive(editing)} onPress={() => setActiveDraft(value => !value)} style={styles.stateButton}>
                 <Text style={styles.stateText}>Estado: {activeDraft ? "ACTIVO" : "INACTIVO"}</Text>
               </TouchableOpacity>
+              <Text style={styles.notice}>Inactivo conserva al trabajador en plantilla.</Text>
+              {!canDelete(editing) && <Text style={styles.notice}>La eliminación permanente no está disponible en este directorio.</Text>}
             </>}
             {!!editError && <Text accessibilityRole="alert" style={styles.editError}>{editError}</Text>}
             <View style={styles.editActions}>
@@ -314,7 +375,7 @@ export function SupportTeamPanel({ visible, onClose, onGoPress, source, renderSa
               </TouchableOpacity>
               <TouchableOpacity accessibilityRole="button" disabled={saving} onPress={() => void (creating ? saveCreate() : saveEdit())}
                 style={styles.editAction}>
-                <Text style={styles.editActionText}>{saving ? "GUARDANDO…" : "GUARDAR"}</Text>
+                <Text style={styles.editActionText}>{deleting ? "ELIMINANDO…" : saving ? "GUARDANDO…" : "GUARDAR"}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -361,6 +422,8 @@ const styles = StyleSheet.create({
   editorScrollContent: { flexGrow: 1, paddingVertical: 12, alignItems: "center", justifyContent: "center" },
   editCard: { width: "86%", maxWidth: 360, borderRadius: 18, backgroundColor: "#18293B", borderWidth: 1,
     borderColor: "#718394", padding: 18, gap: 8 },
+  editHeader: { alignItems: "center", gap: 8 },
+  deleteButton: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   editTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "800", textAlign: "center" },
   editInput: { minHeight: 44, borderRadius: 12, backgroundColor: "#F7F9FB", color: "#17212B", paddingHorizontal: 12, fontSize: 16 },
   stateButton: { minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: "#9EAFBD",

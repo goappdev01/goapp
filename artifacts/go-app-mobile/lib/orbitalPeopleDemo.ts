@@ -74,3 +74,10 @@ export function updateOrbitalDemoPerson(directory: OrbitalDemoDirectory, id: str
   people[index] = { ...people[index], name: changes.name.trim(), role: changes.role.trim(), active: changes.active };
   return { ...directory, people };
 }
+
+/** Permanent removal from this local demo only; inactivity remains a separate state. */
+export function deleteOrbitalDemoPerson(directory: OrbitalDemoDirectory, id: string): OrbitalDemoDirectory {
+  if (!/^demo:\d+$/.test(id) || !directory.people.some(person => person.id === id))
+    throw Error("La persona de prueba ya no está disponible.");
+  return { ...directory, people: directory.people.filter(person => person.id !== id) };
+}
