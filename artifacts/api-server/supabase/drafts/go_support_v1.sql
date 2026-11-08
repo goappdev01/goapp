@@ -71,7 +71,22 @@ create table go_support_private.commands (
   request_id uuid not null,
   primary key(actor_id,request_key)
 );
+-- A durable claim prevents reopening after private object deletion has begun.
+create table go_support_private.retention_claims (
+  request_id uuid primary key references public.go_support_requests(id) on delete restrict,
+  started_at timestamptz not null default now()
+);
+alter table go_support_private.commands enable row level security;
+alter table go_support_private.retention_claims enable row level security;
 revoke all on all tables in schema go_support_private from public,anon,authenticated;
+
+create function public.go_support_readiness() returns jsonb
+language plpgsql stable security invoker set search_path='' as $$
+begin
+  if auth.uid() is null then raise exception using errcode='42501',message='AUTH_REQUIRED'; end if;
+  return jsonb_build_object('ready',true,'version',1,'retentionMonths',12);
+end;
+$$;
 
 create function public.go_support_admin() returns boolean
 language sql stable security definer set search_path='' as $$
@@ -173,6 +188,7 @@ begin
       raise exception using errcode='PT409',message='SUPPORT_REQUEST_KEY_REUSED'; end if;
     return public.go_support_detail(r.id);
   end if;
+  perform pg_advisory_xact_lock(hashtextextended(actor::text,709));
   if (select count(*) from public.go_support_requests where sender_id=actor and created_at>now()-interval '1 day')>=20 then
     raise exception using errcode='22023',message='SUPPORT_DAILY_LIMIT'; end if;
   insert into public.go_support_requests(sender_id,business_id,kind,body,request_key)
@@ -197,6 +213,8 @@ begin
   end if;
   select * into r from public.go_support_requests where id=p_id for update;
   if r.id is null or not public.go_support_can_read(p_id) then raise exception using errcode='42501',message='SUPPORT_ACCESS_DENIED'; end if;
+  if exists(select 1 from go_support_private.retention_claims where request_id=p_id) then
+    raise exception using errcode='PT409',message='SUPPORT_RETENTION_IN_PROGRESS'; end if;
   if p_revision is distinct from r.revision then raise exception using errcode='PT409',message='SUPPORT_CHANGED'; end if;
   if p_action='reply' then
     if r.archived_at is not null or length(btrim(coalesce(p_body,''))) not between 1 and 4000 then
@@ -321,11 +339,24 @@ create function public.go_support_expired(p_limit integer default 20) returns js
 language plpgsql stable security definer set search_path='' as $$
 begin
   if not public.go_support_admin() then raise exception using errcode='42501',message='SUPPORT_ACCESS_DENIED'; end if;
-  if p_limit not between 1 and 50 then raise exception using errcode='22023',message='SUPPORT_LIMIT_INVALID'; end if;
+  if p_limit is null or p_limit not between 1 and 50 then raise exception using errcode='22023',message='SUPPORT_LIMIT_INVALID'; end if;
   return coalesce((select jsonb_agg(jsonb_build_object('id',r.id,'files',coalesce((
     select jsonb_agg(jsonb_build_object('id',f.id,'path',f.object_path)) from public.go_support_files f
     where f.request_id=r.id),'[]'::jsonb)))
     from (select id from public.go_support_requests where retention_until<=now() order by retention_until,id limit p_limit) r),'[]'::jsonb);
+end;
+$$;
+create function public.go_support_claim_expired(p_id uuid) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare r public.go_support_requests;
+begin
+  if not public.go_support_admin() then raise exception using errcode='42501',message='SUPPORT_ACCESS_DENIED'; end if;
+  select * into r from public.go_support_requests where id=p_id for update;
+  if r.id is null or r.archived_at is null or r.retention_until is null or r.retention_until>now() then
+    raise exception using errcode='PT409',message='SUPPORT_RETENTION_NOT_DUE'; end if;
+  insert into go_support_private.retention_claims(request_id) values(p_id) on conflict do nothing;
+  return jsonb_build_object('id',p_id,'files',coalesce((select jsonb_agg(jsonb_build_object('id',f.id,'path',f.object_path))
+    from public.go_support_files f where f.request_id=p_id),'[]'::jsonb));
 end;
 $$;
 create function public.go_support_purge_expired(p_id uuid) returns boolean
@@ -334,8 +365,10 @@ declare r public.go_support_requests;
 begin
   if not public.go_support_admin() then raise exception using errcode='42501',message='SUPPORT_ACCESS_DENIED'; end if;
   select * into r from public.go_support_requests where id=p_id for update;
-  if r.id is null or r.retention_until is null or r.retention_until>now() then
+  if r.id is null or r.archived_at is null or r.retention_until is null or r.retention_until>now() then
     raise exception using errcode='42501',message='SUPPORT_RETENTION_NOT_DUE'; end if;
+  if not exists(select 1 from go_support_private.retention_claims where request_id=p_id) then
+    raise exception using errcode='PT409',message='SUPPORT_RETENTION_NOT_CLAIMED'; end if;
   -- The API must remove each private object first; never orphan blob content.
   if exists(select 1 from storage.objects o join public.go_support_files f
     on f.object_path=o.name where f.request_id=p_id and o.bucket_id='go-support-private') then
@@ -344,6 +377,7 @@ begin
     values(date_trunc('month',r.created_at)::date,r.kind,r.status,1)
     on conflict(month,kind,status) do update set request_count=public.go_support_monthly_totals.request_count+1;
   delete from go_support_private.commands where request_id=p_id;
+  delete from go_support_private.retention_claims where request_id=p_id;
   delete from public.go_support_files where request_id=p_id;
   delete from public.go_support_messages where request_id=p_id;
   delete from public.go_support_events where request_id=p_id;
@@ -362,16 +396,16 @@ create policy go_support_download on storage.objects for select to authenticated
 create policy go_support_delete on storage.objects for delete to authenticated
   using(bucket_id='go-support-private' and public.go_support_file_access(name,'delete'));
 
-revoke all on function public.go_support_admin(),public.go_support_can_read(uuid),public.go_support_detail(uuid),
+revoke all on function public.go_support_readiness(),public.go_support_admin(),public.go_support_can_read(uuid),public.go_support_detail(uuid),
   public.go_support_list(boolean,text,text,boolean,integer,integer,date,date,text),public.go_support_create(text,text,uuid,uuid),
   public.go_support_act(uuid,uuid,text,text,text,integer),public.go_support_file_access(text,text),
   public.go_support_reserve_file(uuid,text,text,text,integer),public.go_support_file(uuid,text),
   public.go_support_confirm_file(uuid),public.go_support_remove_file(uuid),
-  public.go_support_expired(integer),public.go_support_purge_expired(uuid) from public,anon;
-grant execute on function public.go_support_admin(),public.go_support_can_read(uuid),public.go_support_detail(uuid),
+  public.go_support_expired(integer),public.go_support_claim_expired(uuid),public.go_support_purge_expired(uuid) from public,anon;
+grant execute on function public.go_support_readiness(),public.go_support_admin(),public.go_support_can_read(uuid),public.go_support_detail(uuid),
   public.go_support_list(boolean,text,text,boolean,integer,integer,date,date,text),public.go_support_create(text,text,uuid,uuid),
   public.go_support_act(uuid,uuid,text,text,text,integer),public.go_support_file_access(text,text),
   public.go_support_reserve_file(uuid,text,text,text,integer),public.go_support_file(uuid,text),
   public.go_support_confirm_file(uuid),public.go_support_remove_file(uuid),
-  public.go_support_expired(integer),public.go_support_purge_expired(uuid) to authenticated;
+  public.go_support_expired(integer),public.go_support_claim_expired(uuid),public.go_support_purge_expired(uuid) to authenticated;
 commit;

@@ -52,6 +52,8 @@ async function rpc(req: express.Request, name: string, payload: object) {
   });
   const result = await response.json().catch(() => null) as { code?: string; message?: string } | null;
   if (!response.ok) {
+    if (["PGRST202", "42P01", "42883"].includes(result?.code ?? ""))
+      throw fail("SUPPORT_SETUP_REQUIRED", "AYUDA aún no está activada en el servidor.", 503);
     const denied = response.status === 401 || response.status === 403 || result?.code === "42501";
     const conflict = response.status === 409 || result?.code === "PT409";
     throw fail(conflict ? "SUPPORT_CHANGED" : denied ? "SUPPORT_ACCESS_DENIED" : "SUPPORT_UNAVAILABLE",
@@ -67,6 +69,7 @@ function handle(operation: (req: express.Request) => Promise<unknown>): RequestH
     res.status(safe.status).json({ code: safe.code, error: safe.error });
   }); };
 }
+router.get("/capabilities", handle(async req => rpc(req, "go_support_readiness", {})));
 router.post("/requests", handle(async req => {
   const { kind, body, requestKey, businessId } = req.body ?? {};
   if (!kinds.has(kind) || !validText(body, 4000) || !isUuid(requestKey) || businessId != null && !isUuid(businessId))
@@ -183,8 +186,14 @@ router.post("/retention/purge", handle(async req => {
   let purged = 0, pending = 0;
   for (const row of due) {
     if (!isUuid(row.id) || !Array.isArray(row.files)) throw fail("SUPPORT_UNAVAILABLE", "Resultado de retención inválido.", 502);
+    // Claim under the request row lock before deleting any object. Reopening is blocked until cleanup finishes.
+    let claimed: { id: string; files: { id: string; path: string }[] };
+    try { claimed = await rpc(req, "go_support_claim_expired", { p_id: row.id }) as typeof claimed; }
+    catch (error) { if ((error as SupportError)?.status === 409) { pending++; continue; } throw error; }
+    if (claimed?.id !== row.id || !Array.isArray(claimed.files))
+      throw fail("SUPPORT_UNAVAILABLE", "Resultado de retención inválido.", 502);
     let cleaned = true;
-    for (const file of row.files) {
+    for (const file of claimed.files) {
       if (!isUuid(file.id) || typeof file.path !== "string" || !file.path.startsWith(row.id + "/"))
         throw fail("SUPPORT_UNAVAILABLE", "Archivo de retención inválido.", 502);
       const removed = await storage(req, file.path, "DELETE");
@@ -195,4 +204,10 @@ router.post("/retention/purge", handle(async req => {
   }
   return { purged, pending };
 }));
+router.use(((error, _req, res, next) => {
+  if (error?.type === "entity.too.large") {
+    res.status(413).json({ code: "SUPPORT_FILE_TOO_LARGE", error: "El archivo supera el tamaño permitido." }); return;
+  }
+  next(error);
+}) as express.ErrorRequestHandler);
 export default router;

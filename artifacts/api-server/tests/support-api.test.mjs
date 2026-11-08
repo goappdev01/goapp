@@ -20,7 +20,7 @@ test('GO AYUDA API validates input, live JWT, RLS failures and private file oper
   const server=app.listen(0,'127.0.0.1');await new Promise(done=>server.once('listening',done));
   const original=globalThis.fetch,oldUrl=process.env.SUPABASE_URL,oldKey=process.env.SUPABASE_PUBLISHABLE_KEY;
   process.env.SUPABASE_URL='https://support-test.invalid';process.env.SUPABASE_PUBLISHABLE_KEY='test-public';
-  let authStatus=200,rpcStatus=200,upstream=[],storage=[];
+  let authStatus=200,rpcStatus=200,rpcCode='42501',upstream=[],storage=[];
   globalThis.fetch=async(url,init={})=>{
     if(!String(url).startsWith('https://support-test.invalid'))return original(url,init);
     const target=new URL(url),head=init.headers??{};
@@ -28,10 +28,12 @@ test('GO AYUDA API validates input, live JWT, RLS failures and private file oper
     if(target.pathname==='/auth/v1/user')return Response.json({id},{status:authStatus});
     if(target.pathname.startsWith('/rest/v1/rpc/')){
       upstream.push({name:target.pathname.split('/').at(-1),body:JSON.parse(init.body)});
-      if(rpcStatus!==200)return Response.json({code:'42501',message:'private detail'}, {status:rpcStatus});
+      if(rpcStatus!==200)return Response.json({code:rpcCode,message:'private detail'}, {status:rpcStatus});
       const name=target.pathname.split('/').at(-1);
       if(name==='go_support_file')return Response.json({id:fileId,object_path:`${requestId}/${fileId}`,mime_type:'application/pdf',byte_size:5});
       if(name==='go_support_expired')return Response.json([{id:requestId,files:[{id:fileId,path:`${requestId}/${fileId}` }]}]);
+      if(name==='go_support_claim_expired')return Response.json({id:requestId,files:[{id:fileId,path:`${requestId}/${fileId}` }]});
+      if(name==='go_support_readiness')return Response.json({ready:true,version:1,retentionMonths:12});
       if(name==='go_support_purge_expired')return Response.json(true);
       if(name==='go_support_reserve_file')return Response.json({id:fileId,clientId:'local1',fileName:'a.pdf',status:'uploading'});
       if(name==='go_support_confirm_file')return Response.json({id:fileId,status:'ready'});
@@ -49,6 +51,11 @@ test('GO AYUDA API validates input, live JWT, RLS failures and private file oper
     assert.equal((await request('/requests','GET',undefined,null)).status,401);
     assert.equal(upstream.length,0);
     authStatus=401;assert.equal((await request('/requests')).status,401);authStatus=200;
+    assert.deepEqual(await (await request('/capabilities')).json(),{ready:true,version:1,retentionMonths:12});
+    rpcStatus=404;rpcCode='PGRST202';
+    assert.equal((await request('/capabilities')).status,503);
+    assert.equal((await (await request('/requests')).json()).code,'SUPPORT_SETUP_REQUIRED');
+    rpcStatus=200;rpcCode='42501';upstream=[];
     assert.equal((await request('/requests','POST',{kind:'help',body:'',requestKey:key})).status,400);
     assert.equal(upstream.length,0);
     let response=await request('/requests','POST',{kind:'help',body:'  Necesito ayuda  ',requestKey:key,senderId:'forged'});

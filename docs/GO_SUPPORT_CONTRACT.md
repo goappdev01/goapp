@@ -1,4 +1,12 @@
-# Soporte GO: acceso preparado, recepción pendiente
+# Soporte GO: API implementada, activación de datos pendiente
+
+Estado actual: las rutas reales, gateway, permisos SQL, adjuntos y retención están
+implementados y probados de forma aislada. La activación alojada sigue el documento
+`artifacts/api-server/supabase/drafts/GO_SUPPORT_ACTIVATION.md`: requiere respaldo
+restaurado y autorización específica para la migración. Los apartados siguientes
+conservan el historial de diseño; las referencias antiguas a ausencia de API no
+describen el código actual. No se declara operativo el circuito alojado hasta
+verificar envío → ADMIN → respuesta → remitente con persistencia y Storage reales.
 
 AYUDA cambia temporalmente las etiquetas/acciones de las ocho órbitas reales
 de Landing, sin sustituir sus colores ni coordenadas. Cuatro posiciones abren

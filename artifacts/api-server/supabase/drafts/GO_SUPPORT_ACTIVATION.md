@@ -1,5 +1,54 @@
 # GO AYUDA: activación pendiente
 
+## Comprobación del 8 de noviembre de 2026
+
+Proyecto alojado comprobado en lectura: `goapp` / `xiyxziyjpgnqfecbhmqn`, PostgreSQL 17.
+SQL revisado SHA-256: `B49121044B7F8D7530282F06B95B420C13C7C3AA89C2A41438E0DEC665EB1041`.
+No existen `go_support_requests`, `go_support_messages`, el esquema privado ni el
+bucket `go-support-private`. Las columnas utilizadas de profiles/businesses/admin_memberships
+son compatibles. Storage no tiene políticas de objetos existentes que amplíen este
+acceso y no están instaladas pg_cron/pg_net. No se ejecutó SQL de escritura alojado.
+
+La ruta `/capabilities` requiere una sesión y solo declara disponibilidad cuando
+la RPC de disponibilidad está instalada. Una RPC/tabla ausente devuelve 503
+`SUPPORT_SETUP_REQUIRED`, sin fingir recepción. El cliente continúa protegido por
+su interruptor de activación hasta superar la prueba alojada con cuentas autorizadas.
+
+El borrador completo crea cinco tablas públicas, dos privadas con RLS, quince
+funciones y un bucket privado con tres políticas. No modifica registros de otros
+módulos. Todos los ejecutables privilegiados tienen search_path vacío, controles
+de identidad/propiedad y EXECUTE revocado a PUBLIC/anon. Los permisos authenticated
+son exclusivamente las RPC y lecturas filtradas por RLS del módulo.
+
+La purga ahora reclama el expediente bajo bloqueo de fila antes de borrar objetos.
+Una reapertura concurrente queda rechazada durante la limpieza; las reclamaciones
+persisten para reintentar tras fallos/reinicios. El borrado de filas exige que ya no
+existan objetos. Reabrir antes de reclamar elimina el vencimiento. Las pruebas solo
+borran registros sintéticos aislados.
+
+No se ha acreditado una copia recuperable del proyecto alojado ni una restauración
+de esa copia. El archivo encontrado `local-database.dump` pertenece al entorno local
+de validación y no acredita respaldo de Supabase. Por ello **no se solicita aún la
+ejecución de la migración**: primero obtener un respaldo autorizado y restaurarlo
+en un PostgreSQL aislado. Después solicitar aprobación específica del SQL completo
+con su SHA-256, revisar el resultado del preflight y ejecutar una sola transacción.
+El rollback previo a datos reales solo se autorizará tras verificar que las nuevas
+estructuras siguen vacías; con expedientes reales se conserva el esquema y se
+revierte la versión del API, nunca se destruyen expedientes como rollback.
+
+`scripts/run-support-retention.mjs` es el ejecutor para un programador existente.
+Por defecto solo consulta capacidades; `--execute` procesa lotes acotados. Requiere
+base HTTPS y una identidad vigente inyectada por un almacén de secretos autorizado,
+no acepta credenciales en argumentos y no registra su valor. No se ha instalado un
+programador ni una identidad renovable. No almacenar un refresh token OWNER para
+resolverlo: aprobar primero una identidad limitada a retención y su mecanismo de
+renovación. Abrir Archivo en ADMIN no constituye limpieza automática garantizada.
+
+La prueba `support-persistence.test.mjs` une Express con PostgreSQL persistente y
+archivos de prueba, comprueba la conversación, la separación de notas internas y
+la recuperación al reiniciar. Sus adaptadores Auth/Storage son sintéticos: no
+sustituye la prueba con sesiones y Storage alojados tras la activación autorizada.
+
 `go_support_v1.sql` es un borrador ejecutable, probado en PostgreSQL aislado mediante
 `tests/support-db.test.mjs`. Su presencia en MAIN no aplica cambios a producción.
 
@@ -14,7 +63,7 @@ Por tanto, la interfaz no anuncia una recepción que aún no existe.
    El borrador presupone `auth.users`, `public.profiles`, `public.businesses`,
    `public.admin_memberships` y Storage. No modifica sus registros existentes.
 2. Revisar y autorizar específicamente el SQL completo. Crea cinco tablas públicas,
-   una tabla privada, funciones `SECURITY DEFINER` con `search_path` vacío, políticas
+   dos tablas privadas, funciones `SECURITY DEFINER` con `search_path` vacío, políticas
    RLS y el bucket privado `go-support-private`. La función
    `go_support_purge_expired` contiene `DELETE` de solicitudes, mensajes, eventos,
    adjuntos y claves de idempotencia **solo tras el plazo de 12 meses desde archivo**.
