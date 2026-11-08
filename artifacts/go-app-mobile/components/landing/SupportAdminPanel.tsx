@@ -5,6 +5,7 @@ import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoNavigationFloating } from "@/components/ui/GoNavigationFloating";
 import { newSupportRequestKey } from "@/lib/supportRequests";
 import type { SupportGateway, SupportKind, SupportReceipt, SupportStatus } from "@/lib/supportRequests";
+import {useSupportRefresh} from "@/hooks/useSupportRefresh";
 
 export type SupportAdminView = "received"|"incident"|"improvement"|"help"|"all"|"pending"|"archive";
 const titles:Record<SupportAdminView,string>={received:"Solicitudes recibidas",incident:"Incidencias",improvement:"Propuestas de mejora",
@@ -25,6 +26,9 @@ export function SupportAdminPanel({visible,onClose,view,gateway,backendReady=tru
   const [loading,setLoading]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState("");
   const [keyboardVisible,setKeyboardVisible]=useState(false);
   const flight=useRef(false),revision=useRef(0),pendingCommand=useRef<{fingerprint:string;key:string}|null>(null);
+  const active=useRef({visible,gateway,view,statusTab,applied});
+  if(active.current.visible!==visible||active.current.gateway!==gateway||active.current.view!==view||active.current.statusTab!==statusTab||active.current.applied!==applied)active.current={visible,gateway,view,statusTab,applied};
+  useEffect(()=>{revision.current++;flight.current=false;setBusy(false);},[visible,view,statusTab,applied,gateway]);
   useEffect(()=>{const shown=Keyboard.addListener("keyboardDidShow",()=>setKeyboardVisible(true));
     const hidden=Keyboard.addListener("keyboardDidHide",()=>setKeyboardVisible(false));
     return()=>{shown.remove();hidden.remove();};},[]);
@@ -53,19 +57,24 @@ export function SupportAdminPanel({visible,onClose,view,gateway,backendReady=tru
   useEffect(()=>{if(!visible||!backendReady)return;setSelected(null);setRows([]);setTotal(0);
     if(view==="archive"&&gateway.purgeExpired)void gateway.purgeExpired().then(()=>load()).catch(()=>{setError("La limpieza de solicitudes vencidas está pendiente.");void load();});
     else void load();return()=>{revision.current++;};},[visible,view,statusTab,gateway,applied,backendReady]);
-  const open=async(row:SupportReceipt)=>{if(!gateway.detail)return;setError("");setSelected(row);setReply("");setReason("");
-    try{setSelected(await gateway.detail(row.id));}catch{setError("No se pudo abrir la solicitud.");}};
+  useSupportRefresh(visible&&backendReady,()=>{
+    if(flight.current)return;void load();
+    if(selected&&gateway.detail){const stamp=revision.current;void gateway.detail(selected.id).then(row=>{if(stamp===revision.current&&active.current.visible)setSelected(current=>current?.id===row.id?row:current);}).catch(()=>{});}
+  },()=>{active.current={...active.current};revision.current++;flight.current=false;setBusy(false);setRows([]);setTotal(0);setSelected(null);setReply("");setReason("");pendingCommand.current=null;});
+  const open=async(row:SupportReceipt)=>{if(!gateway.detail)return;const stamp=++revision.current;setError("");setSelected(row);setReply("");setReason("");
+    try{const latest=await gateway.detail(row.id);if(stamp===revision.current&&active.current.visible)setSelected(current=>current?.id===row.id?latest:current);}catch{if(stamp===revision.current)setError("No se pudo abrir la solicitud.");}};
   const perform=async(row:SupportReceipt,action:"reply"|"internal_note"|"status"|"archive"|"reopen",body?:string,status?:SupportStatus)=>{
-    if(!gateway.act||!row.revision||flight.current)return;flight.current=true;setBusy(true);setError("");
+    if(!gateway.act||!row.revision||flight.current)return;const owner=active.current;flight.current=true;setBusy(true);setError("");
     const fingerprint=JSON.stringify({id:row.id,action,body,status,revision:row.revision});
     if(pendingCommand.current?.fingerprint!==fingerprint)pendingCommand.current={fingerprint,key:newSupportRequestKey()};
     try{const updated=await gateway.act(row.id,{key:pendingCommand.current.key,action,body,status,revision:row.revision});
+      if(active.current!==owner)return;
       pendingCommand.current=null;
       setSelected(current=>current?.id===updated.id?updated:current);setRows(current=>current.map(item=>item.id===updated.id?updated:item));
       setReply("");setReason("");void load();}
-    catch{setError("No se confirmó el cambio. Recarga el hilo antes de repetirlo.");
-      if(gateway.detail)try{const latest=await gateway.detail(row.id);setSelected(current=>current?.id===latest.id?latest:current);}catch{}}
-    finally{flight.current=false;setBusy(false);}
+    catch{if(active.current!==owner)return;setError("No se confirmó el cambio. Recarga el hilo antes de repetirlo.");
+      if(gateway.detail)try{const latest=await gateway.detail(row.id);if(active.current===owner)setSelected(current=>current?.id===latest.id?latest:current);}catch{}}
+    finally{if(active.current===owner){flight.current=false;setBusy(false);}}
   };
   const status=(row:SupportReceipt,next:SupportStatus)=>{
     if(next==="solved"||next==="rejected"){

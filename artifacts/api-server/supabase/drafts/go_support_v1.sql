@@ -138,7 +138,7 @@ end;
 $$;
 create function public.go_support_list(p_admin boolean default false,p_status text default null,p_kind text default null,
   p_archived boolean default false,p_offset integer default 0,p_limit integer default 30,
-  p_from date default null,p_to date default null,p_sender text default null) returns jsonb
+  p_from date default null,p_to date default null,p_sender text default null,p_scope text default 'all',p_business_id uuid default null) returns jsonb
 language plpgsql stable security definer set search_path='' as $$
 begin
   if auth.uid() is null or (p_admin and not public.go_support_admin()) then
@@ -147,10 +147,15 @@ begin
     or (p_status is not null and p_status not in ('received','in_review','pending','solved','rejected'))
     or (p_kind is not null and p_kind not in ('incident','improvement','help'))
     or (p_from is not null and p_to is not null and p_from>p_to)
-    or length(coalesce(p_sender,''))>80 then
+    or length(coalesce(p_sender,''))>80 or p_scope is null or p_scope not in ('all','personal','business')
+    or (p_admin and p_scope<>'all') or (p_scope='business')<>(p_business_id is not null) then
     raise exception using errcode='22023',message='SUPPORT_FILTER_INVALID'; end if;
+  if p_scope='business' and not exists(select 1 from public.businesses b
+    where b.id=p_business_id and b.owner_id=auth.uid() and b.verified) then
+    raise exception using errcode='42501',message='BUSINESS_ACCESS_DENIED'; end if;
   return jsonb_build_object(
     'total',(select count(*) from public.go_support_requests r where (p_admin or public.go_support_can_read(r.id))
+      and (p_scope='all' or (p_scope='personal' and r.business_id is null) or (p_scope='business' and r.business_id=p_business_id))
       and (p_status is null or r.status=p_status) and (p_kind is null or r.kind=p_kind)
       and (r.archived_at is not null)=p_archived
       and (p_from is null or r.created_at>=p_from) and (p_to is null or r.created_at<p_to+1)
@@ -163,6 +168,7 @@ begin
         'AY-'||lpad(r.ticket_no::text,8,'0') as reference,
         exists(select 1 from public.go_support_messages m where m.request_id=r.id and m.author_id<>r.sender_id and not m.internal) as has_response
       from public.go_support_requests r where (p_admin or public.go_support_can_read(r.id))
+        and (p_scope='all' or (p_scope='personal' and r.business_id is null) or (p_scope='business' and r.business_id=p_business_id))
         and (p_status is null or r.status=p_status) and (p_kind is null or r.kind=p_kind)
         and (r.archived_at is not null)=p_archived
         and (p_from is null or r.created_at>=p_from) and (p_to is null or r.created_at<p_to+1)
@@ -397,13 +403,13 @@ create policy go_support_delete on storage.objects for delete to authenticated
   using(bucket_id='go-support-private' and public.go_support_file_access(name,'delete'));
 
 revoke all on function public.go_support_readiness(),public.go_support_admin(),public.go_support_can_read(uuid),public.go_support_detail(uuid),
-  public.go_support_list(boolean,text,text,boolean,integer,integer,date,date,text),public.go_support_create(text,text,uuid,uuid),
+  public.go_support_list(boolean,text,text,boolean,integer,integer,date,date,text,text,uuid),public.go_support_create(text,text,uuid,uuid),
   public.go_support_act(uuid,uuid,text,text,text,integer),public.go_support_file_access(text,text),
   public.go_support_reserve_file(uuid,text,text,text,integer),public.go_support_file(uuid,text),
   public.go_support_confirm_file(uuid),public.go_support_remove_file(uuid),
   public.go_support_expired(integer),public.go_support_claim_expired(uuid),public.go_support_purge_expired(uuid) from public,anon;
 grant execute on function public.go_support_readiness(),public.go_support_admin(),public.go_support_can_read(uuid),public.go_support_detail(uuid),
-  public.go_support_list(boolean,text,text,boolean,integer,integer,date,date,text),public.go_support_create(text,text,uuid,uuid),
+  public.go_support_list(boolean,text,text,boolean,integer,integer,date,date,text,text,uuid),public.go_support_create(text,text,uuid,uuid),
   public.go_support_act(uuid,uuid,text,text,text,integer),public.go_support_file_access(text,text),
   public.go_support_reserve_file(uuid,text,text,text,integer),public.go_support_file(uuid,text),
   public.go_support_confirm_file(uuid),public.go_support_remove_file(uuid),

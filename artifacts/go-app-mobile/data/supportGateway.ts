@@ -49,19 +49,22 @@ async function uploadFile(id:string,file:SupportAttachment,expectedUserId:string
 }
 export const supportGateway:SupportGateway={
   supportsAttachments:true,
-  async create(command:SupportCommand,files:readonly SupportAttachment[]=[]):Promise<SupportReceipt>{
+  async create(command:SupportCommand,files:readonly SupportAttachment[]=[],expectedUserId?:string):Promise<SupportReceipt>{
     const owner=await identity();
+    if(expectedUserId&&owner.userId!==expectedUserId)throw Error("La sesión ha cambiado.");
     const raw=await checked<RawRow>("/requests",{method:"POST",body:JSON.stringify({kind:command.kind,body:command.message,
       requestKey:command.requestKey,businessId:command.businessId??null})},owner.userId);
-    if(!raw?.id||raw.request_key!==command.requestKey||raw.sender_id!==owner.userId)throw Error("No se confirmó la solicitud.");
+    if(!raw?.id||raw.request_key!==command.requestKey||raw.sender_id!==owner.userId||raw.business_id!==(command.businessId??null))throw Error("No se confirmó la solicitud.");
     const attachments=[];
     for(const file of files)attachments.push(await uploadFile(raw.id,file,owner.userId));
     if(!await isAuthIdentityCurrent(owner))throw Error("La sesión ha cambiado.");
     return {...mapped(raw),attachments};
   },
   async listOwn(){return (await this.listOwnPage!(0,30)).items;},
-  async listOwnPage(offset:number,limit:number):Promise<SupportPage>{const owner=await identity();
+  async listOwnPage(offset:number,limit:number,businessId?:string|null,expectedUserId?:string):Promise<SupportPage>{const owner=await identity();
+    if(expectedUserId&&owner.userId!==expectedUserId)throw Error("La sesión ha cambiado.");
     const params=new URLSearchParams({offset:String(offset),limit:String(limit)});
+    if(businessId!==undefined){params.set("scope",businessId?"business":"personal");if(businessId)params.set("businessId",businessId);}
     const data=await checked<{items:RawRow[];total:number}>(`/requests?${params}`,{},owner.userId);
     if(!await isAuthIdentityCurrent(owner))throw Error("La sesión ha cambiado.");return {items:data.items.map(mapped),total:data.total};},
   async listAdmin(filter:SupportListFilter={}):Promise<SupportPage>{const owner=await identity();

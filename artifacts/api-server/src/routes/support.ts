@@ -78,7 +78,7 @@ router.post("/requests", handle(async req => {
   return rpc(req, "go_support_create", { p_kind: kind, p_body: body.trim(), p_request_key: requestKey, p_business_id: businessId ?? null });
 }));
 router.get("/requests", handle(async req => {
-  const { admin, status, kind, archived, offset, limit, from, to, sender } = req.query;
+  const { admin, status, kind, archived, offset, limit, from, to, sender, scope, businessId } = req.query;
   const adminFlag = admin === "true", archivedFlag = archived === "true";
   const start = offset === undefined ? 0 : Number(offset), count = limit === undefined ? 30 : Number(limit);
   if (admin !== undefined && !["true", "false"].includes(String(admin)) || archived !== undefined && !["true", "false"].includes(String(archived))
@@ -86,9 +86,13 @@ router.get("/requests", handle(async req => {
     || from !== undefined && !validDate(from) || to !== undefined && !validDate(to)
     || from !== undefined && to !== undefined && String(from)>String(to)
     || sender !== undefined && (typeof sender !== "string" || sender.length>80)
+    || scope!==undefined&&!["all","personal","business"].includes(String(scope))
+    || (scope==="business")!==(businessId!==undefined) || businessId!==undefined&&!isUuid(businessId)
+    || adminFlag&&scope!==undefined&&scope!=="all"
     || !integer(start, 0, 100000) || !integer(count, 1, 50)) throw fail("SUPPORT_FILTER_INVALID", "Filtro inválido.");
   return rpc(req, "go_support_list", { p_admin: adminFlag, p_status: status ?? null, p_kind: kind ?? null,
-    p_archived: archivedFlag, p_offset: start, p_limit: count,p_from:from??null,p_to:to??null,p_sender:sender??null });
+    p_archived: archivedFlag, p_offset: start, p_limit: count,p_from:from??null,p_to:to??null,p_sender:sender??null,
+    p_scope:scope??"all",p_business_id:businessId??null });
 }));
 router.get("/requests/:id", handle(async req => {
   if (!isUuid(req.params.id)) throw fail("SUPPORT_INVALID", "Referencia inválida.");

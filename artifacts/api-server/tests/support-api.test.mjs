@@ -62,6 +62,13 @@ test('GO AYUDA API validates input, live JWT, RLS failures and private file oper
     let response=await request('/requests','POST',{kind:'help',body:'  Necesito ayuda  ',requestKey:key,senderId:'forged'});
     assert.equal(response.status,200);assert.deepEqual(upstream.at(-1).body,{p_kind:'help',p_body:'Necesito ayuda',p_request_key:key,p_business_id:null});
     rpcStatus=403;response=await request('/requests?admin=true');assert.equal(response.status,403);assert.equal((await response.json()).code,'SUPPORT_ACCESS_DENIED');rpcStatus=200;
+    assert.equal((await request('/requests?scope=personal')).status,200);
+    assert.equal(upstream.at(-1).body.p_scope,'personal');assert.equal(upstream.at(-1).body.p_business_id,null);
+    assert.equal((await request('/requests?scope=business&businessId='+requestId)).status,200);
+    assert.equal(upstream.at(-1).body.p_business_id,requestId);
+    for(const query of ['scope=business','scope=personal&businessId='+requestId,'businessId='+requestId,'admin=true&scope=personal','scope=unexpected']){
+      const before=upstream.length;assert.equal((await request('/requests?'+query)).status,400);assert.equal(upstream.length,before);
+    }
     assert.equal((await request(`/requests/${requestId}/actions`,'POST',{key,action:'status',status:'solved',revision:1})).status,200);
     assert.equal((await request(`/requests/${requestId}/actions`,'POST',{key,action:'status',status:'invalid',revision:1})).status,400);
     assert.equal((await request(`/requests/${requestId}/files`,'POST',{clientId:'local1',name:'a.pdf',mime:'application/pdf',size:5})).status,200);

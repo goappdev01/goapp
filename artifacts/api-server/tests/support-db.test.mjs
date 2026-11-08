@@ -44,8 +44,13 @@ test('GO AYUDA isolated PostgreSQL: identity, queue, thread, audit, RLS, attachm
     assert.equal((await rpc('go_support_create',["incident","SYNTHETIC issue",key(1),null])).id,first.id);
     await assert.rejects(rpc('go_support_create',["help","changed",key(1),null]), e => e.code==='PT409');
     const second = await rpc('go_support_create',["improvement","SYNTHETIC business improvement",key(2),business]);
+    const personal=await rpc('go_support_list',[false,null,null,false,0,30,null,null,null,'personal',null]);
+    const company=await rpc('go_support_list',[false,null,null,false,0,30,null,null,null,'business',business]);
+    assert.equal(personal.total,1);assert.equal(personal.items[0].id,first.id);
+    assert.equal(company.total,1);assert.equal(company.items[0].id,second.id);
     assert.equal((await rpc('go_support_list',[false,null,null,false,0,30])).total,2);
     await user(bob);
+    await assert.rejects(rpc('go_support_list',[false,null,null,false,0,30,null,null,null,'business',business]),e=>e.code==='42501');
     await assert.rejects(rpc('go_support_detail',[first.id]),e=>e.code==='42501');
     assert.equal((await rpc('go_support_list',[false,null,null,false,0,30])).total,0);
     await assert.rejects(rpc('go_support_create',["help","spoof",key(3),business]),e=>e.code==='42501');

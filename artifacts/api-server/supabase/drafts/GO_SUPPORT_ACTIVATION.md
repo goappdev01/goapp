@@ -1,5 +1,103 @@
 # GO AYUDA: activación pendiente
 
+## Revalidación y entrega del 9 de noviembre de 2026
+
+**SERVICIO ALOJADO PENDIENTE. No hay prueba autenticada alojada de ida y vuelta.**
+La publicación del código no ejecuta ninguno de los tres archivos SQL de este
+directorio. No se han creado usuarios, membresías, buckets ni permisos productivos.
+
+SQL vigente revisado: `go_support_v1.sql`, SHA-256
+`FE7413B64EC58FB86EC62A6AC88A42704529DC9A4A27D7F05364D065D7DD2961`.
+Las huellas de esta sección corresponden a los blobs Git UTF-8 con finales LF.
+Antes de solicitar ejecución, extraer esos bytes de la revisión aprobada y verificar
+SHA-256; no ejecutar una copia transformada a CRLF con una huella diferente.
+La revisión incluye el filtro explícito de contexto personal/empresa, con la misma
+comprobación de titularidad verificada en servidor que la creación. Los permisos
+de empleados no se deducen de una fila activa de personal: este contrato admite
+al titular verificado del negocio. ADMIN exige una membresía activa OWNER de la
+base de datos; la aplicación no puede concederse ese rol.
+
+El inventario de lectura confirma PostgreSQL 17.6 y las columnas requeridas de
+profiles, businesses y admin_memberships. Continúan ausentes las tablas/RPC de
+SOPORTE, el esquema go_support_private y el bucket go-support-private. Railway
+ofrece healthz 200 y capacidades 401 sin sesión; estos códigos no acreditan
+recepción. Su revisión desplegada al iniciar esta intervención era c259730,
+distinta del código local; debe verificarse por separado después de publicar.
+
+El cliente conserva borradores y copias privadas locales de adjuntos por identidad
+y empresa, junto con la clave de idempotencia anterior al primer POST. Una
+respuesta incierta conserva esa clave al reiniciar. Limpiar texto no elimina
+adjuntos. El cambio de sesión invalida la pantalla antes de consultar de nuevo;
+las respuestas tardías no repueblan la cuenta anterior. Mis solicitudes solicita
+su contexto personal/empresarial explícito. Las bandejas se actualizan al volver al
+primer plano y, visibles, cada 30 segundos. No cambia el diseño ni se habilita el
+interruptor GO_SUPPORT_LIVE_ENABLED mientras falta la activación alojada.
+
+### Acceso que falta para el respaldo
+
+El conector disponible no lista ni descarga backups y el navegador local está
+deshabilitado en Work. No se ha localizado una exportación privada acreditada del
+proyecto alojado ni una credencial Management disponible. No se solicitan secretos
+en el chat. Hace falta habilitar el navegador para que el agente compruebe la copia
+existente, o identificar la ruta privada de una exportación alojada autorizada.
+No se considera respaldo el dump local antiguo encontrado. Los binarios portátiles
+existentes son PostgreSQL 15.19: sirven para pruebas sintéticas, no para pg_dump de
+un servidor 17.6.
+
+Tras conseguir acceso: registrar origen/proyecto/fecha/alcance/checksum del respaldo,
+restaurarlo realmente en un PostgreSQL aislado compatible y verificar esquema,
+roles, relaciones y recuentos sin publicar datos personales. Registrar por separado
+inventario, bytes y restauración de Storage: el backup de base de datos no contiene
+los archivos. El bucket de SOPORTE aún no existe; no hay bytes previos de ese bucket
+que restaurar, pero debe quedar definido su respaldo antes de recibir adjuntos.
+
+### Operación exacta preparada, todavía no autorizada
+
+1. Comparar estos archivos con el último origin/main y repetir
+   `go_support_preflight.sql` (solo lectura; SHA-256
+   `00A715327C26280A3CE6B2298A1E4B41149FA29D3A28B7BB36F0CD9215D8CF38`).
+   Si aparece un objeto SOPORTE previamente inexistente o cambia una dependencia,
+   detenerse y reconciliar: el SQL de creación no se repite automáticamente.
+2. Tras acreditar respaldo y restauración, solicitar autorización específica del
+   propietario para el SQL completo con su huella, proyecto y resultado de
+   preflight. Crea cinco tablas públicas, dos privadas, índices, quince funciones,
+   RLS y tres políticas limitadas al bucket privado. No modifica roles globales,
+   membresías, negocios ni reservas. Contiene una purga irreversible, ejecutable
+   solo por ADMIN y únicamente para expedientes reclamados tras doce meses
+   archivados y después de retirar sus objetos.
+3. Ejecutar una sola vez la transacción exacta autorizada. Inventariar después
+   objetos, ACL, RLS, search_path y bucket; comprobar anon denegado, identidad
+   ajena denegada y notas internas invisibles al remitente. No conceder permisos
+   nuevos a personas para facilitar la prueba.
+4. Autorizar e identificar previamente cuentas sintéticas separadas de remitente,
+   titular empresarial, tercero y ADMIN existente, y el negocio de pruebas.
+   Probar los tres tipos y ambos contextos por la API Railway autenticada:
+   ID/fila persistida, bandeja correcta, respuesta ADMIN, respuesta remitente,
+   lectura desde una sesión nueva, reintentos y archivos privados. La prueba
+   alojada y la comprobación táctil en iPhone son evidencias diferentes.
+5. Solo entonces habilitar el cliente y repetir el circuito con el código publicado,
+   comprobando SHA remoto, despliegue API y fuentes realmente servidas por Metro.
+   El texto no depende de adjuntos opcionales para poder probarse.
+
+Reversión no destructiva preparada en `go_support_disable.sql`, SHA-256
+`0C24FC47FC16520225AF509D6052DCFB4219004B0122E3AB781C334B6A87BAD8`.
+Requiere su propia autorización productiva: cierra las tres políticas de ese
+bucket y revoca únicamente acceso a tablas/RPC SOPORTE. Conserva expedientes,
+mensajes, historial, claves de reintento y objetos. No ejecutar DROP, borrar
+bucket ni retirar datos para revertir. Antes del commit de la creación, un error
+revierte la transacción completa. Después, conservar datos y deshabilitar acceso.
+
+La prueba `support-native-postgres.test.mjs` ejecutada con PostgreSQL 15.19 real
+crea un cluster temporal exclusivo en localhost, utiliza identidades/esquemas
+Auth/Storage sintéticos y verifica persistencia tras parada/arranque y la
+reversión sin pérdida de datos. Complementa las pruebas Express/PGlite persistente;
+ninguna constituye restauración del backup alojado ni E2E de producción.
+
+La retención sigue siendo doce meses desde archivo. Existe ejecutor acotado pero
+no un programador ni una identidad limitada y renovable autorizados: no se declara
+garantizado el borrado automático. No almacenar un refresh token OWNER para
+resolver esta dependencia ni activar la limpieza productiva por esta publicación.
+
 ## Controles fijos y bloqueo de envío — 8 de noviembre de 2026
 
 La corrección de los formularios no activa la infraestructura. Incidencia, Mejora

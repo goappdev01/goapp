@@ -11,12 +11,13 @@ const labels=value=>typeof value==='string'?value:(value?.children??[]).map(labe
 const tick=()=>new Promise(setImmediate);
 
 function fixture(gateway){let cursor=0,slots=[],effects=[];const confirmations=[];const calls=[],keyboardListeners={};
+  let lifecycle;
   const equal=(a,b)=>a&&b&&a.length===b.length&&a.every((v,i)=>Object.is(v,b[i]));
   const React={createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),
     useState(initial){const i=cursor++;slots[i]??={value:initial};return [slots[i].value,value=>{slots[i].value=typeof value==='function'?value(slots[i].value):value;}];},
     useRef(value){return React.useState({current:value})[0];},useCallback:fn=>fn,
     useEffect(fn,deps){const i=cursor++,old=slots[i];if(!old||!equal(old.deps,deps)){slots[i]={deps};effects.push(()=>{old?.cleanup?.();slots[i].cleanup=fn();});}}};
-  const scope={exports:{},setTimeout,require(name){if(name==='react')return {...React,default:React};
+  const scope={exports:{},setTimeout,require(name){if(name==='@/hooks/useSupportRefresh')return{useSupportRefresh:(enabled,refresh,invalidate)=>{lifecycle={enabled,refresh,invalidate};}};if(name==='react')return {...React,default:React};
     if(name==='react-native')return {Platform:{OS:'ios'},StyleSheet:{create:value=>value},Alert:{alert:(...args)=>confirmations.push(args),prompt:(...args)=>confirmations.push(args)},Linking:{openURL:async()=>{}},
       Keyboard:{addListener:(event,listener)=>{keyboardListeners[event]=listener;return {remove(){delete keyboardListeners[event];}};},isVisible:()=>false,dismiss:()=>calls.push('keyboard-dismiss')},
       Modal:'Modal',KeyboardAvoidingView:'KeyboardAvoidingView',ScrollView:'ScrollView',Text:'Text',TextInput:'TextInput',TouchableOpacity:'TouchableOpacity',View:'View'};
@@ -27,7 +28,7 @@ function fixture(gateway){let cursor=0,slots=[],effects=[];const confirmations=[
     throw Error(name);}};
   vm.runInNewContext(compile('components/landing/SupportAdminPanel.tsx'),scope);
   const props={visible:true,onClose:()=>calls.push('close'),view:'received',gateway,handedness:'right'};
-  return {props,calls,confirmations,keyboardShow:()=>keyboardListeners.keyboardDidShow?.(),keyboardHide:()=>keyboardListeners.keyboardDidHide?.(),render(p=props){cursor=0;effects=[];const tree=scope.exports.SupportAdminPanel(p);for(const run of effects)run();return tree;}};
+  return {props,calls,confirmations,foreground:()=>{if(lifecycle.enabled)lifecycle.refresh();},sessionChanged:()=>lifecycle.invalidate(),keyboardShow:()=>keyboardListeners.keyboardDidShow?.(),keyboardHide:()=>keyboardListeners.keyboardDidHide?.(),render(p=props){cursor=0;effects=[];const tree=scope.exports.SupportAdminPanel(p);for(const run of effects)run();return tree;}};
 }
 
 test('ADMIN actual panel loads the real queue, opens a thread and sends a revisioned response',async()=>{
@@ -43,6 +44,21 @@ test('ADMIN actual panel loads the real queue, opens a thread and sends a revisi
   nodes(tree).find(node=>node.type==='TouchableOpacity'&&labels(node)==='ENVIAR').props.onPress();await tick();tree=f.render();
   assert.ok(seen.some(command=>command.action==='reply'&&command.body==='Respuesta real'&&command.revision===1));
   assert.ok(labels(tree).includes('Respuesta real'));
+});
+
+test('ADMIN refreshes foreground data and discards late detail after identity or view changes',async()=>{
+  const row={id:'one',reference:'AY-1',kind:'help',detail:'Old account',status:'received',revision:1};
+  let loads=0,resolveDetail;
+  const f=fixture({listAdmin:async()=>{loads++;return{items:[row],total:1};},detail:()=>new Promise(resolve=>{resolveDetail=resolve;})});
+  f.render();await tick();let tree=f.render();assert.equal(loads,1);
+  f.foreground();await tick();tree=f.render();assert.equal(loads,2);
+  nodes(tree).find(node=>node.props.accessibilityLabel==='Abrir AY-1').props.onPress();
+  f.sessionChanged();tree=f.render();resolveDetail({...row,detail:'Private late response'});await tick();tree=f.render();
+  assert.equal(labels(tree).includes('Private late response'),false);assert.equal(labels(tree).includes('AY-1'),false);
+  f.render({...f.props,view:'help'});await tick();tree=f.render({...f.props,view:'help'});
+  nodes(tree).find(node=>node.props.accessibilityLabel==='Abrir AY-1').props.onPress();
+  f.render({...f.props,view:'improvement'});resolveDetail({...row,detail:'Wrong view'});await tick();
+  assert.equal(labels(f.render({...f.props,view:'improvement'})).includes('Wrong view'),false);
 });
 
 test('ADMIN swipe requires confirmation and does not also open the card',async()=>{

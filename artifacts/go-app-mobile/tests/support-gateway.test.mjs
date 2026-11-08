@@ -30,6 +30,15 @@ test('real mobile AYUDA gateway sends once, confirms private attachments, reads 
   assert.equal(uploads[0].options.headers.Authorization,'Bearer synthetic');
   fileState='ready';receipt=await gateway.create({kind:'incident',message:'Prueba sintética',requestKey:fid},[file]);assert.equal(receipt.id,rid);assert.equal(uploads.length,1);
   assert.equal((await gateway.listOwn())[0].reference,'AY-00000001');
+  await gateway.listOwnPage(0,30,null,uid);
+  assert.equal(new URL('https://test.invalid'+calls.at(-1).path).searchParams.get('scope'),'personal');
+  await gateway.listOwnPage(0,30,rid,uid);
+  assert.equal(new URL('https://test.invalid'+calls.at(-1).path).searchParams.get('businessId'),rid);
+  const beforeWrongIdentity=calls.length;
+  await assert.rejects(gateway.listOwnPage(0,30,null,rid),/sesión/);
+  await assert.rejects(gateway.create({kind:'incident',message:'Prueba',requestKey:fid},[],rid),/sesión/);
+  assert.equal(calls.length,beforeWrongIdentity);
+  await assert.rejects(gateway.create({kind:'incident',message:'Prueba',requestKey:fid,businessId:rid},[],uid),/confirmó/);
   assert.equal((await gateway.listAdmin({status:'received',kind:'incident'})).total,1);
   assert.equal((await gateway.detail(rid)).id,rid);
   assert.equal((await gateway.act(rid,{key:fid,action:'reply',body:'Respuesta',revision:1})).id,rid);

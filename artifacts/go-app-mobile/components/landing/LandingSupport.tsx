@@ -16,12 +16,22 @@ import { GoNoteAttachmentMenu } from "@/components/notes/GoNoteAttachmentMenu";
 import { IconButton,GoAssistantButton,GoSendButton } from "@/components/booking-assistant/BookingAssistantUI";
 import { SupportVoiceNotice } from "./SupportVoiceNotice";
 import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
+import {loadSupportDraft,saveSupportDraft,supportDraftScope,type PendingSupportDraft} from "@/data/supportDrafts";
+import {captureAuthIdentity} from "@/lib/authSession";
+import {useSupportRefresh} from "@/hooks/useSupportRefresh";
 
 export function LandingSupport({ visible, onClose, scopeKey, gateway, businessId, kind="incident",handedness="right",assistanceResponder,initialAssistantRequest=0 }: {
   visible: boolean; onClose: () => void; scopeKey: string; gateway?: SupportGateway; businessId?:string|null; kind?: SupportKind | "mine";
   handedness?:"left"|"right";assistanceResponder?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;initialAssistantRequest?:number;
 }) {
   const insets = useSafeAreaInsets();
+  const recoveryScope=supportDraftScope(scopeKey,businessId);
+  const [recoveryEpoch,setRecoveryEpoch]=useState(0);
+  const [identityReady,setIdentityReady]=useState(true);
+  const mounted=useRef(true),recoveryGeneration=useRef(0);
+  const currentScope=useRef(recoveryScope);currentScope.current=recoveryScope;
+  const loaded=useRef(false),loadingDraft=useRef<Promise<void>>(Promise.resolve());
+  const edited=useRef(new Set<SupportKind>()),pendingByKind=useRef<Partial<Record<SupportKind,PendingSupportDraft>>>({});
   const [keyboardVisible,setKeyboardVisible]=useState(false);
   useEffect(()=>{const show=Keyboard.addListener(Platform.OS==="ios"?"keyboardWillShow":"keyboardDidShow",()=>setKeyboardVisible(true));
     const hide=Keyboard.addListener("keyboardDidHide",()=>setKeyboardVisible(false));return()=>{show.remove();hide.remove();};},[]);
@@ -37,7 +47,7 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, businessId
   const [files,setFiles]=useState<Record<SupportKind,SupportAttachment[]>>({incident:[],improvement:[],help:[]});
   const [expanded,setExpanded]=useState<string|null>(null);
   const store=useRef<ReturnType<typeof createSupportAttachmentStore>|null>(null),pickerFlight=useRef(false);
-  useEffect(()=>{const owned=createSupportAttachmentStore();store.current=owned;return()=>{store.current=null;void owned.dispose().catch(()=>{});};},[scopeKey]);
+  useEffect(()=>{const owned=createSupportAttachmentStore(undefined,undefined,recoveryScope);store.current=owned;return()=>{store.current=null;void owned.dispose().catch(()=>{});};},[recoveryScope]);
   const [error, setError] = useState(""), [receipt, setReceipt] = useState<SupportReceipt | null>(null);
   const [requests, setRequests] = useState<SupportReceipt[] | null>(null);
   const [ownTotal,setOwnTotal]=useState(0),[loadingMore,setLoadingMore]=useState(false);
@@ -45,55 +55,112 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, businessId
   const [replyText,setReplyText]=useState("");
   const replyKey=useRef<string|null>(null);
   const identity = useRef({key:scopeKey,kind,visible});
-  if(identity.current.key!==scopeKey||identity.current.kind!==kind||identity.current.visible!==visible)identity.current={key:scopeKey,kind,visible};
+  if(identity.current.key!==recoveryScope||identity.current.kind!==kind||identity.current.visible!==visible)identity.current={key:recoveryScope,kind,visible};
   const formIdentity=useRef({key:scopeKey,kind});
-  if(formIdentity.current.key!==scopeKey||formIdentity.current.kind!==kind)formIdentity.current={key:scopeKey,kind};
+  if(formIdentity.current.key!==recoveryScope||formIdentity.current.kind!==kind)formIdentity.current={key:recoveryScope,kind};
   const draftsRef=useRef(drafts);draftsRef.current=drafts;
+  const filesRef=useRef(files);filesRef.current=files;
+  const persist=()=>{
+    if(!loaded.current)return;
+    void saveSupportDraft(recoveryScope,{drafts:draftsRef.current,files:filesRef.current,pending:pendingByKind.current})
+      .catch(()=>{if(currentScope.current===recoveryScope)setError("No se pudo conservar el borrador en este dispositivo. Mantén esta pantalla abierta y vuelve a intentarlo.");});
+  };
   const selection=useRef({start:0,end:0}),speechTarget=useRef<{owner:typeof formIdentity.current;kind:SupportKind;base:string;end:number}|null>(null);
-  const voice=useGoNoteVoice({visible:visible&&kind!=="mine"&&!aiSession,identity:scopeKey+":"+kind,title:"",setTitle:()=>{},setDetail:()=>{},english:false,
+  const voice=useGoNoteVoice({visible:visible&&kind!=="mine"&&!aiSession,identity:recoveryScope+":"+kind,title:"",setTitle:()=>{},setDetail:()=>{},english:false,
     onPreparedText:text=>{const target=speechTarget.current;speechTarget.current=null;if(!target||formIdentity.current!==target.owner)return;
       const current=draftsRef.current[target.kind],point=Math.max(0,Math.min(current.length,current===target.base?target.end:selection.current.end));
       const before=current.slice(0,point),after=current.slice(point),spoken=text.trim();if(!spoken)return;
       const inserted=(before&&!/\s$/.test(before)?" ":"")+spoken+(after&&!/^\s/.test(after)?" ":"");
-      setDrafts(values=>({...values,[target.kind]:before+inserted+after}));selection.current={start:point+inserted.length,end:point+inserted.length};requestKey.current=null;
+      edited.current.add(target.kind);setDrafts(values=>({...values,[target.kind]:before+inserted+after}));selection.current={start:point+inserted.length,end:point+inserted.length};requestKey.current=null;
     }});
   const flight = useRef(false), requestKey = useRef<string | null>(null);
   const pendingSubmission=useRef<{key:string;message:string;businessId:string|null;fileIds:string}|null>(null);
   useEffect(() => {
+    mounted.current=true;
+    const generation=++recoveryGeneration.current;
+    const isCurrent=()=>mounted.current&&currentScope.current===recoveryScope&&recoveryGeneration.current===generation;
+    loaded.current=false;edited.current.clear();pendingByKind.current={};
     setDrafts({incident:"",improvement:"",help:""}); setFiles({incident:[],improvement:[],help:[]});setExpanded(null); setReceipt(null);
     setRequests(null);setOwnTotal(0);setLoadingMore(false);setDetails({});setReplyText("");replyKey.current=null; setError(""); setBusy(false);setAiSession(null);setToolsOpen(false); requestKey.current=null;pendingSubmission.current=null; flight.current=false;
-  }, [scopeKey]);
-  useEffect(()=>{setReceipt(null);setError("");setBusy(false);setToolsOpen(false);setAiSession(null);setVoiceAttempt(0);selection.current={start:0,end:0};flight.current=false;requestKey.current=null;pendingSubmission.current=null;},[kind,scopeKey]);
+    const owned=store.current;
+    let authorizedScope=false;
+    loadingDraft.current=(async()=>{
+      const account=await captureAuthIdentity();
+      if(scopeKey!=="anonymous"&&account?.userId!==scopeKey)return;
+      authorizedScope=true;
+      const saved=await loadSupportDraft(recoveryScope);
+      if(!isCurrent()||!saved)return;
+      const restored=await owned?.restore?.(Object.values(saved.files).flat())??[];
+      if(!isCurrent())return;
+      const next={...saved.drafts};
+      for(const changed of edited.current)next[changed]=draftsRef.current[changed];
+      draftsRef.current=next;setDrafts(next);
+      const nextFiles={incident:saved.files.incident.filter(f=>restored.some(r=>r.id===f.id)),improvement:saved.files.improvement.filter(f=>restored.some(r=>r.id===f.id)),help:saved.files.help.filter(f=>restored.some(r=>r.id===f.id))};
+      filesRef.current=nextFiles;setFiles(nextFiles);pendingByKind.current=saved.pending;
+      const activeKind=formIdentity.current.kind;
+      if(activeKind!=="mine"){pendingSubmission.current=saved.pending[activeKind]??null;requestKey.current=saved.pending[activeKind]?.key??null;}
+      if(restored.length!==Object.values(saved.files).flat().length)setError("Se recuperó el texto; revisa los adjuntos que ya no estén disponibles en este dispositivo.");
+    })().catch(()=>{if(isCurrent())setError("No se pudo recuperar el borrador local.");})
+      .finally(()=>{if(isCurrent()){setIdentityReady(authorizedScope);if(authorizedScope){loaded.current=true;persist();}}});
+    return()=>{mounted.current=false;recoveryGeneration.current++;if(currentScope.current===recoveryScope)loaded.current=false;};
+  }, [recoveryScope,recoveryEpoch]);
+  useEffect(()=>{persist();},[drafts,files,busy,recoveryScope]);
+  useEffect(()=>{setReceipt(null);setError("");setBusy(false);setToolsOpen(false);setAiSession(null);setVoiceAttempt(0);selection.current={start:0,end:0};flight.current=false;requestKey.current=kind==="mine"?null:pendingByKind.current[kind]?.key??null;pendingSubmission.current=kind==="mine"?null:pendingByKind.current[kind]??null;},[kind,recoveryScope]);
   useEffect(()=>{if(!visible)setVoiceAttempt(0);},[visible]);
   useEffect(() => {
     if (!visible || kind !== "mine" || !gateway) return;
     let active = true; const owner = identity.current;
     setRequests(null); setError("");
-    (gateway.listOwnPage?gateway.listOwnPage(0,30):gateway.listOwn().then(items=>({items,total:items.length})))
+    (gateway.listOwnPage?gateway.listOwnPage(0,30,businessId??null,scopeKey):gateway.listOwn().then(items=>({items,total:items.length})))
       .then(page => { if (active && identity.current === owner){setRequests(page.items);setOwnTotal(page.total);} })
       .catch(() => { if (active && identity.current === owner) setError("No se pudieron consultar tus solicitudes. Inténtalo de nuevo."); });
     return () => { active=false; };
-  }, [visible, kind, gateway, scopeKey]);
+  }, [visible, kind, gateway, scopeKey,businessId]);
   const loadMore=async()=>{if(!gateway?.listOwnPage||!requests||loadingMore||requests.length>=ownTotal)return;
     const owner=identity.current;setLoadingMore(true);setError("");
-    try{const page=await gateway.listOwnPage(requests.length,30);if(identity.current!==owner)return;
+    try{const page=await gateway.listOwnPage(requests.length,30,businessId??null,scopeKey);if(identity.current!==owner)return;
       setRequests(current=>current?[...current,...page.items.filter(item=>!current.some(old=>old.id===item.id))]:page.items);setOwnTotal(page.total);}
     catch{if(identity.current===owner)setError("No se pudieron cargar más solicitudes.");}
     finally{if(identity.current===owner)setLoadingMore(false);}
   };
+  const refreshOwn=()=>{
+    if(!gateway||kind!=="mine"||!visible)return;
+    const owner=identity.current;
+    void (gateway.listOwnPage?gateway.listOwnPage(0,30,businessId??null,scopeKey):gateway.listOwn().then(items=>({items,total:items.length})))
+      .then(page=>{if(identity.current===owner){setRequests(page.items);setOwnTotal(page.total);}})
+      .catch(()=>{if(identity.current===owner)setError("No se pudieron actualizar tus solicitudes.");});
+    if(expanded&&gateway.detail)void gateway.detail(expanded).then(row=>{if(identity.current===owner)setDetails(current=>({...current,[row.id]:row}));}).catch(()=>{});
+  };
+  useSupportRefresh(visible&&kind==="mine"&&!!gateway,refreshOwn,()=>{
+    recoveryGeneration.current++;
+    identity.current={...identity.current};formIdentity.current={...formIdentity.current};
+    loaded.current=false;setIdentityReady(false);setRequests(null);setDetails({});setExpanded(null);setReplyText("");setReceipt(null);
+    setDrafts({incident:"",improvement:"",help:""});setFiles({incident:[],improvement:[],help:[]});setRecoveryEpoch(v=>v+1);
+  });
   const submit = async () => {
-    if (!gateway || kind === "mine" || flight.current || picking ||voice.status!=="idle"|| !drafts[kind].trim() || files[kind].length>0&&!gateway.supportsAttachments) return;
-    const message=drafts[kind].trim(),fileIds=files[kind].map(file=>file.id).join("|"),target=businessId??null;
+    if (!identityReady || !gateway || kind === "mine" || flight.current || picking ||voice.status!=="idle"|| !drafts[kind].trim() || files[kind].length>0&&!gateway.supportsAttachments) return;
+    const formOwner=formIdentity.current;
+    flight.current=true;setBusy(true);await loadingDraft.current;
+    if(formIdentity.current!==formOwner)return;
+    flight.current=false;setBusy(false);
+    const message=draftsRef.current[kind].trim(),fileIds=filesRef.current[kind].map(file=>file.id).join("|"),target=businessId??null;
+    if(!message)return;
+    pendingSubmission.current=pendingByKind.current[kind]??pendingSubmission.current;
+    requestKey.current=pendingSubmission.current?.key??requestKey.current;
     if(pendingSubmission.current&&(pendingSubmission.current.message!==message||pendingSubmission.current.businessId!==target||pendingSubmission.current.fileIds!==fileIds)){
       setError("El envío anterior puede haberse recibido. Consulta Mis solicitudes antes de empezar otra solicitud; para descartarla, limpia el texto.");return;
     }
     flight.current=true; setBusy(true); setError(""); const owner=formIdentity.current;
     requestKey.current ??= newSupportRequestKey();
     pendingSubmission.current??={key:requestKey.current,message,businessId:target,fileIds};
+    pendingByKind.current[kind]=pendingSubmission.current;persist();
     try {
-      const saved=await sendSupportRequest(gateway,{kind,message:drafts[kind],requestKey:requestKey.current,businessId},files[kind]);
+      await saveSupportDraft(recoveryScope,{drafts:draftsRef.current,files:filesRef.current,pending:pendingByKind.current});
+      if(formIdentity.current!==owner)return;
+      const saved=await sendSupportRequest(gateway,{kind,message,requestKey:requestKey.current,businessId},filesRef.current[kind],scopeKey);
       if(formIdentity.current!==owner)return;
       setReceipt(saved); for(const file of files[kind])void store.current?.remove(file.id).catch(()=>{});setFiles(values=>({...values,[kind]:[]})); setDrafts(values=>({...values,[kind]:""})); requestKey.current=null;pendingSubmission.current=null;
+      delete pendingByKind.current[kind];
     } catch { if(formIdentity.current===owner)setError("No se ha confirmado el envío. Conservamos tu texto y adjuntos."); }
     finally { if(formIdentity.current===owner){flight.current=false;setBusy(false);} }
   };
@@ -112,20 +179,25 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, businessId
   const remove=async(file:SupportAttachment)=>{if(kind==="mine"||!store.current)return;const owner=identity.current,selectedKind=kind;
     try{await store.current.remove(file.id);if(identity.current===owner){setFiles(current=>({...current,[selectedKind]:current[selectedKind].filter(f=>f.id!==file.id)}));}}
     catch{if(identity.current===owner)setError("No se pudo quitar el archivo. Reintenta.");}};
-  const disabled=kind==="mine"||!gateway||busy||picking||voice.status!=="idle"||!drafts[kind].trim()||drafts[kind].length>4000||files[kind].length>0&&!gateway.supportsAttachments;
+  const disabled=!identityReady||kind==="mine"||!gateway||busy||picking||voice.status!=="idle"||!drafts[kind].trim()||drafts[kind].length>4000||files[kind].length>0&&!gateway.supportsAttachments;
   const statusLabel:Record<SupportStatus,string>={received:"Recibida",in_review:"En revisión",pending:"Pendiente",solved:"Solucionada",rejected:"Rechazada"};
-  const openRequest=(row:SupportReceipt)=>{if(expanded===row.id){setExpanded(null);return;}setExpanded(row.id);setReplyText("");replyKey.current=null;
-    if(!gateway?.detail)return;void gateway.detail(row.id).then(value=>setDetails(current=>({...current,[row.id]:value})))
-      .catch(()=>setError("No se pudo abrir la solicitud. Inténtalo de nuevo."));};
-  const sendReply=async(row:SupportReceipt)=>{if(!gateway?.act||!replyText.trim()||busy||!row.revision)return;
-    setBusy(true);setError("");replyKey.current??=newSupportRequestKey();try{const updated=await gateway.act(row.id,{key:replyKey.current,action:"reply",body:replyText,revision:row.revision});
+  const openRequest=(row:SupportReceipt)=>{if(flight.current)return;if(expanded===row.id){setExpanded(null);return;}setExpanded(row.id);setReplyText("");replyKey.current=null;
+    const owner=identity.current;
+    if(!gateway?.detail)return;void gateway.detail(row.id).then(value=>{if(identity.current===owner)setDetails(current=>({...current,[row.id]:value}));})
+      .catch(()=>{if(identity.current===owner)setError("No se pudo abrir la solicitud. Inténtalo de nuevo.");});};
+  const sendReply=async(row:SupportReceipt)=>{if(!gateway?.act||!replyText.trim()||flight.current||busy||!row.revision)return;
+    const owner=identity.current;flight.current=true;setBusy(true);setError("");replyKey.current??=newSupportRequestKey();
+    try{const updated=await gateway.act(row.id,{key:replyKey.current,action:"reply",body:replyText,revision:row.revision});
+      if(!mounted.current||identity.current!==owner)return;
       setDetails(current=>({...current,[row.id]:updated}));setRequests(current=>current?.map(item=>item.id===row.id?updated:item)??null);setReplyText("");replyKey.current=null;}
-    catch{setError("No se confirmó la respuesta. Consulta el hilo antes de reintentar.");}finally{setBusy(false);}};
+    catch{if(mounted.current&&identity.current===owner)setError("No se confirmó la respuesta. Consulta el hilo antes de reintentar.");}
+    finally{if(mounted.current&&identity.current===owner){flight.current=false;setBusy(false);}}};
   const openFile=async(id:string)=>{if(!gateway?.fileUrl)return;try{await Linking.openURL(await gateway.fileUrl(id));}
     catch{setError("No se pudo abrir el adjunto privado.");}};
   const title=SUPPORT_ORBIT_ACTIONS.find(a=>a.kind===kind)!.title;
   const toggleVoice=()=>{if(kind==="mine"||busy||picking)return;if(voice.status==="idle"){setVoiceAttempt(value=>value+1);speechTarget.current={owner:formIdentity.current,kind,base:draftsRef.current[kind],end:selection.current.end};}voice.focus("detail");void voice.toggle();};
   const clearCurrentText=()=>{if(kind==="mine"||busy||picking||!draftsRef.current[kind])return;
+    edited.current.add(kind);delete pendingByKind.current[kind];
     voice.abort();speechTarget.current=null;selection.current={start:0,end:0};
     draftsRef.current={...draftsRef.current,[kind]:""};setDrafts(current=>({...current,[kind]:""}));
     requestKey.current=null;pendingSubmission.current=null;setReceipt(null);
@@ -177,11 +249,11 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, businessId
         <View testID="support-composer-dock" style={s.composerDock} onLayout={event=>setComposerDockHeight(event.nativeEvent.layout.height)}>
           <View testID="support-fixed-controls" style={[s.fixedControls,{alignItems:handedness==="left"?"flex-start":"flex-end"}]}>{thumbControls}</View>
           <View testID="support-composer" style={[s.composer,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
-            <TextInput ref={editor} testID="support-text" accessibilityLabel="Descripción de la solicitud" multiline scrollEnabled maxLength={4000} value={drafts[kind]} editable={!busy}
+            <TextInput ref={editor} testID="support-text" accessibilityLabel="Descripción de la solicitud" multiline scrollEnabled maxLength={4000} value={drafts[kind]} editable={!busy&&identityReady}
               style={[s.input,{height:compact?Math.max(44,Math.min(textHeight,88,bodyHeight-90)):Math.max(96,Math.min(textHeight,220,Math.max(96,bodyHeight-104)))}]}
               onFocus={()=>{setToolsOpen(false);voice.focus("detail");}} onContentSizeChange={event=>setTextHeight(event.nativeEvent.contentSize.height)}
               onSelectionChange={event=>{selection.current=event.nativeEvent.selection;}}
-              onChangeText={value=>{setDrafts(current=>({...current,[kind]:value}));setReceipt(null);}}/>
+              onChangeText={value=>{edited.current.add(kind);setDrafts(current=>({...current,[kind]:value}));setReceipt(null);}}/>
             <View style={{alignSelf:"flex-end",gap:4,flexDirection:compact?(handedness==="left"?"row-reverse":"row"):"column"}}><IconButton appearance="note" icon={voice.status==="listening"?"square":"mic"} label={voice.status==="listening"?"Detener dictado":"Dictar solicitud"} disabled={busy||picking||voice.status==="preparing"||voice.status==="transcribing"} onPress={toggleVoice}/>
               <GoSendButton testID="support-send" disabled={disabled} busy={busy} onPress={submit}/>
             </View>
@@ -195,7 +267,7 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, businessId
       {kind==="mine"&&!!error&&<Text accessibilityRole="alert" style={s.error}>{error}</Text>}
     </KeyboardAvoidingView>
     {aiSession&&visible&&<GOChatScreen key={aiSession.key} visible handedness={handedness} onClose={()=>setAiSession(null)} consultation={{scopeKey:aiSession.key,title:aiSession.kind==="help"?"AYUDA GO":title,sourceText:aiSession.source,respond:assistanceResponder,onAcceptDraft:aiSession.kind==="mine"?undefined:(proposal,baseline)=>{
-      const target=aiSession.kind;if(target==="mine"||!identity.current.visible||liveAi.current?.key!==aiSession.key||formIdentity.current.key!==scopeKey||formIdentity.current.kind!==target)return;
+      const target=aiSession.kind;if(target==="mine"||!identity.current.visible||liveAi.current?.key!==aiSession.key||formIdentity.current.key!==recoveryScope||formIdentity.current.kind!==target)return;
       if(draftsRef.current[target]!==baseline){setError("El texto ha cambiado. Conservamos tu borrador.");return;}
       setDrafts(values=>({...values,[target]:proposal}));requestKey.current=null;
     }}}/>}

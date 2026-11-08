@@ -12,14 +12,16 @@ const text=t=>typeof t==='string'?t:(t?.children??[]).map(text).join(' ');
 const button=(tree,label)=>nodes(tree).find(n=>label==='ENVIAR'?n.type==='GoSendButton':n.type==='TouchableOpacity'&&text(n).includes(label));
 const icon=(tree,label)=>nodes(tree).find(n=>n.type==='IconButton'&&n.props.label===label);
 const menu=tree=>nodes(tree).find(n=>n.type==='GoNoteAttachmentMenu');
-function fixture(gateway){let cursor=0,slots=[],effects=[];const files=supportFiles(),picker={photo:async()=>({canceled:true}),document:async()=>({canceled:true})};const events=new Map(),navigation=[];
+function fixture(gateway,options={}){let cursor=0,slots=[],effects=[];const files=options.files??supportFiles(),picker={photo:async()=>({canceled:true}),document:async()=>({canceled:true})};const events=new Map(),navigation=[];
+ const local=options.local??new Map(),recovery={exports:{}};let lifecycle;
+ vm.runInNewContext(compile('data/supportDrafts.ts'),{exports:recovery.exports,require:name=>{if(name==='@react-native-async-storage/async-storage')return{default:{getItem:async key=>options.getItem?options.getItem(key):local.get(key)??null,setItem:async(key,value)=>local.set(key,value)}};throw Error(name);}});
  const speech={status:'idle',error:'',notice:'',focus:()=>{},abort:()=>navigation.push('abort'),toggle:async()=>{speech.toggles++;},toggles:0};let voiceProps;
  const equal=(a,b)=>a&&b&&a.length===b.length&&a.every((v,i)=>Object.is(v,b[i]));
  const React={createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),Fragment:'Fragment',
  useState(initial){const i=cursor++;slots[i]??={value:initial};return[slots[i].value,value=>{slots[i].value=typeof value==='function'?value(slots[i].value):value;}];},
  useRef(value){return React.useState({current:value})[0];},
  useEffect(fn,deps){const i=cursor++,old=slots[i];if(!old||!equal(old.deps,deps)){slots[i]={deps};effects.push(()=>{old?.cleanup?.();slots[i].cleanup=fn();});}}};
- const scope={exports:{},Error,require(name){if(name==='react')return {...React,default:React};if(name==='react-native')return new Proxy({Platform:{OS:'ios'},StyleSheet:{create:v=>v},Keyboard:{addListener:(name,fn)=>{events.set(name,fn);return{remove(){events.delete(name);}};},dismiss:()=>{navigation.push('keyboard');events.get('keyboardDidHide')?.();}}},{get:(o,k)=>o[k]??k});
+ const scope={exports:{},Error,require(name){if(name==='@/data/supportDrafts')return recovery.exports;if(name==='@/lib/authSession')return{captureAuthIdentity:async()=>({userId:options.authUid??props.scopeKey})};if(name==='@/hooks/useSupportRefresh')return{useSupportRefresh:(enabled,refresh,invalidate)=>{lifecycle={enabled,refresh,invalidate};}};if(name==='react')return {...React,default:React};if(name==='react-native')return new Proxy({Platform:{OS:'ios'},StyleSheet:{create:v=>v},Keyboard:{addListener:(name,fn)=>{events.set(name,fn);return{remove(){events.delete(name);}};},dismiss:()=>{navigation.push('keyboard');events.get('keyboardDidHide')?.();}}},{get:(o,k)=>o[k]??k});
  if(name==='@/components/ui/GoNavigationFloating')return{GoNavigationFloating:'GoNavigationFloating'};if(name==='@/components/ui/GoScreenModal')return{GoScreenHost:'GoScreenHost'};
  if(name==='@/components/GOChatScreen')return{GOChatScreen:'GOChatScreen'};
  if(name==='@/components/notes/GoNoteAttachmentMenu')return{GoNoteAttachmentMenu:'GoNoteAttachmentMenu'};
@@ -28,9 +30,57 @@ function fixture(gateway){let cursor=0,slots=[],effects=[];const files=supportFi
  if(name==='react-native-safe-area-context')return{useSafeAreaInsets:()=>({top:47,bottom:34})};if(name==='@expo/vector-icons')return{Feather:'Feather'};if(name==='@/components/ui/GoCloseButton')return {GoCloseButton:'GoCloseButton'};if(name==='@/lib/supportRequests')return api;if(name==='@/lib/supportAttachments')return{createSupportAttachmentStore:files.create};if(name==='expo-image-picker')return{launchImageLibraryAsync:options=>picker.photo(options)};if(name==='expo-document-picker')return{getDocumentAsync:options=>picker.document(options)};throw Error(name);}};
  vm.runInNewContext(compile('components/landing/LandingSupport.tsx'),scope);
  const props={visible:true,scopeKey:'user-a',onClose(){navigation.push('back');},onExit(){navigation.push('exit');},gateway};
- return{props,events,navigation,files,picker,speech,get voice(){return voiceProps;},render(p=props){cursor=0;effects=[];const tree=scope.exports.LandingSupport(p);for(const run of effects)run();return tree;}};
+ return{props,events,navigation,files,picker,speech,local,recovery:recovery.exports,unmount:()=>slots.forEach(s=>s?.cleanup?.()),foreground:()=>{if(lifecycle.enabled)lifecycle.refresh();},sessionChanged:()=>lifecycle.invalidate(),get voice(){return voiceProps;},render(p=props){cursor=0;effects=[];const tree=scope.exports.LandingSupport(p);for(const run of effects)run();return tree;}};
 }
 const tick=()=>new Promise(setImmediate);
+
+test('actual support draft and PDF recover after unmount; clearing text preserves the file and another business stays empty',async()=>{
+ const f=fixture();let tree=f.render();await tick();tree=f.render();
+ nodes(tree).find(n=>n.props.testID==='support-text').props.onChangeText('Borrador persistente');tree=f.render();
+ const pdf=f.files.asset('private.pdf',200,'application/pdf');f.picker.document=async()=>({canceled:false,assets:[pdf]});
+ icon(tree,'Adjuntar referencia').props.onPress();tree=f.render();await menu(tree).props.onFile();await tick();f.render();await tick();
+ f.unmount();await tick();
+ const next=fixture(undefined,{local:f.local,files:f.files});next.render();await tick();tree=next.render();
+ assert.equal(nodes(tree).find(n=>n.props.testID==='support-text').props.value,'Borrador persistente');
+ assert.ok(text(tree).includes('private.pdf'));
+ icon(tree,'Limpiar texto del borrador').props.onPress();next.render();await tick();next.unmount();
+ const last=fixture(undefined,{local:f.local,files:f.files});last.render();await tick();tree=last.render();
+ assert.equal(nodes(tree).find(n=>n.props.testID==='support-text').props.value,'');assert.ok(text(tree).includes('private.pdf'));
+ last.unmount();
+ const business=fixture(undefined,{local:f.local,files:f.files});business.props.businessId='44444444-4444-4444-8444-444444444444';
+ business.render();await tick();tree=business.render();
+ assert.equal(nodes(tree).find(n=>n.props.testID==='support-text').props.value,'');assert.equal(text(tree).includes('private.pdf'),false);business.unmount();
+});
+
+test('a delayed draft recovery cannot repopulate the old account after a session change',async()=>{
+ let resolveRead;
+ const options={authUid:'user-a',getItem:()=>new Promise(resolve=>{resolveRead=resolve;})};
+ const f=fixture(undefined,options);f.render();await tick();
+ options.authUid='user-b';f.sessionChanged();f.render();await tick();
+ resolveRead(JSON.stringify({drafts:{incident:'Private old account',improvement:'',help:''},files:{incident:[],improvement:[],help:[]},pending:{}}));
+ await tick();const tree=f.render();
+ assert.equal(nodes(tree).find(n=>n.props.testID==='support-text').props.value,'');
+ assert.equal(nodes(tree).find(n=>n.props.testID==='support-text').props.editable,false);f.unmount();
+});
+
+test('an uncertain request keeps its idempotency key across a complete editor remount',async()=>{
+ const keys=[];let fail=true;const gateway={create:async command=>{keys.push(command.requestKey);if(fail)throw Error('lost response');return{id:'r',reference:'AY-TEST',requestKey:command.requestKey,status:'received'};}};
+ const f=fixture(gateway);f.render();await tick();let tree=f.render();nodes(tree).find(n=>n.props.testID==='support-text').props.onChangeText('Solicitud sintética');tree=f.render();
+ await button(tree,'ENVIAR').props.onPress();f.render();await tick();f.unmount();fail=false;
+ const next=fixture(gateway,{local:f.local,files:f.files});next.render();await tick();tree=next.render();
+ assert.equal(nodes(tree).find(n=>n.props.testID==='support-text').props.value,'Solicitud sintética');
+ await button(tree,'ENVIAR').props.onPress();tree=next.render();await tick();
+ assert.equal(keys.length,2);assert.equal(keys[0],keys[1]);assert.ok(text(tree).includes('AY-TEST'));next.unmount();
+});
+
+test('own requests pass explicit business context and foreground refresh receives the real new response',async()=>{
+ const scopes=[];let answered=false;
+ const f=fixture({listOwn:async()=>[],listOwnPage:async(offset,limit,businessId,owner)=>{scopes.push({businessId,owner});return{total:1,items:[{id:'r',reference:'AY-SYNTHETIC',status:'received',response:answered?'Respuesta real de prueba':undefined}]};}});
+ f.props.kind='mine';f.props.businessId='44444444-4444-4444-8444-444444444444';
+ f.render();await tick();f.render();answered=true;f.foreground();await tick();f.render();
+ assert.ok(scopes.length>=2);assert.ok(scopes.every(s=>s.businessId===f.props.businessId&&s.owner==='user-a'));
+ f.sessionChanged();const tree=f.render();assert.equal(text(tree).includes('AY-SYNTHETIC'),false);f.unmount();
+});
 
 test('paper bin clears only the current AYUDA text without sending or removing attachments',async()=>{
  const sends=[];const f=fixture({supportsAttachments:true,create:async command=>{sends.push(command);throw Error('unexpected send');}});
@@ -164,8 +214,8 @@ test('unconfigured real UI never sends or displays a fake empty history; close p
 test('real submit prevents concurrent sends, confirms only a valid receipt and keeps one request key for an uncertain retry',async()=>{
  let resolve,calls=0,keys=[];const gateway={listOwn:async()=>[],create:command=>{calls++;keys.push(command.requestKey);return new Promise(r=>{resolve=r;});}};
  const f=fixture(gateway);f.render();let tree=f.render();nodes(tree).find(n=>n.type==='TextInput').props.onChangeText('Ayuda');tree=f.render();const send=button(tree,'ENVIAR').props.onPress;
- const first=send();await send();assert.equal(calls,1);resolve({id:'r',reference:'GO-1',requestKey:'wrong',status:'received'});await first;tree=f.render();assert.ok(text(tree).includes('No se ha confirmado'));assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'Ayuda');
- const retry=button(tree,'ENVIAR').props.onPress();resolve({id:'r',reference:'GO-1',requestKey:keys[1],status:'received'});await retry;tree=f.render();assert.equal(keys[0],keys[1]);assert.ok(text(tree).includes('Recibida ·'));assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'');
+ const first=send();await send();await tick();assert.equal(calls,1);resolve({id:'r',reference:'GO-1',requestKey:'wrong',status:'received'});await first;tree=f.render();assert.ok(text(tree).includes('No se ha confirmado'));assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'Ayuda');
+ const retry=button(tree,'ENVIAR').props.onPress();await tick();resolve({id:'r',reference:'GO-1',requestKey:keys[1],status:'received'});await retry;tree=f.render();assert.equal(keys[0],keys[1]);assert.ok(text(tree).includes('Recibida ·'));assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'');
 });
 test('an uncertain send cannot become a second request when the draft changes',async()=>{
  const keys=[];const gateway={listOwn:async()=>[],create:async command=>{keys.push(command.requestKey);throw Error('upload failed after persistence');}};
@@ -230,7 +280,7 @@ test('attachment transport requires explicit capability and matching stored rece
 });
 test('closing during an authorized request cannot leave the reopened form stuck or cause a duplicate',async()=>{
  let release,calls=0;const f=fixture({listOwn:async()=>[],create:command=>{calls++;return new Promise(r=>release=()=>r({id:'r',reference:'GO-2',status:'received',requestKey:command.requestKey}));}});
- f.render();let tree=f.render();nodes(tree).find(n=>n.type==='TextInput').props.onChangeText('Ayuda');tree=f.render();const sent=button(tree,'ENVIAR').props.onPress();f.render({...f.props,visible:false});
+ f.render();let tree=f.render();nodes(tree).find(n=>n.type==='TextInput').props.onChangeText('Ayuda');tree=f.render();const sent=button(tree,'ENVIAR').props.onPress();await tick();f.render({...f.props,visible:false});
  release();await sent;tree=f.render();assert.equal(calls,1);assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'');assert.ok(text(tree).includes('Recibida ·'));assert.equal(text(tree).includes('Enviando'),false);
 });
 

@@ -36,15 +36,15 @@ export type SupportListFilter={status?:SupportStatus;kind?:SupportKind;archived?
 export type SupportPage={items:SupportReceipt[];total:number};
 export type SupportAction={key:string;action:"reply"|"internal_note"|"status"|"archive"|"reopen";body?:string;status?:SupportStatus;revision:number};
 /** Server must derive the sender and scope listOwn; no arbitrary sender/recipient IDs. */
-export type SupportGateway = { supportsAttachments?:boolean;create(command:SupportCommand, files?:readonly SupportAttachment[]):Promise<SupportReceipt>;
-  listOwn():Promise<SupportReceipt[]>;listOwnPage?(offset:number,limit:number):Promise<SupportPage>;listAdmin?(filter?:SupportListFilter):Promise<SupportPage>;
+export type SupportGateway = { supportsAttachments?:boolean;create(command:SupportCommand, files?:readonly SupportAttachment[],expectedUserId?:string):Promise<SupportReceipt>;
+  listOwn():Promise<SupportReceipt[]>;listOwnPage?(offset:number,limit:number,businessId?:string|null,expectedUserId?:string):Promise<SupportPage>;listAdmin?(filter?:SupportListFilter):Promise<SupportPage>;
   detail?(id:string):Promise<SupportReceipt>;act?(id:string,command:SupportAction):Promise<SupportReceipt>;
   fileUrl?(id:string):Promise<string>;purgeExpired?():Promise<{purged:number;pending:number}> };
-export async function sendSupportRequest(gateway:SupportGateway, command:SupportCommand, files:readonly SupportAttachment[]=[]):Promise<SupportReceipt> {
+export async function sendSupportRequest(gateway:SupportGateway, command:SupportCommand, files:readonly SupportAttachment[]=[],expectedUserId?:string):Promise<SupportReceipt> {
   const message=command.message.trim();
   if(!["incident","improvement","help"].includes(command.kind)||!message||message.length>4000||!command.requestKey||command.context!==undefined&&command.context!=="Landing")throw Error("Solicitud inválida");
   if(files.length&&!gateway.supportsAttachments)throw Error("El servicio no admite adjuntos todavía.");
-  const receipt=await gateway.create({...command,message},files);
+  const receipt=await gateway.create({...command,message},files,expectedUserId);
   if(!receipt?.id||!receipt.reference||receipt.requestKey!==command.requestKey||!["received","in_review","pending","solved","rejected"].includes(receipt.status))throw Error("Recepción no confirmada");
   if(files.length&&(receipt.attachments?.length!==files.length||new Set(receipt.attachments.map(a=>a.clientId)).size!==files.length
     ||files.some(f=>!receipt.attachments?.some(a=>a.clientId===f.id&&!!a.id))))throw Error("Adjuntos sin confirmar.");

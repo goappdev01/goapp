@@ -25612,7 +25612,7 @@ function HomeScreenContent() {
     </View>
     </GestureDetector>
     {/* The account modal owns its touches; Landing gestures stay behind it. */}
-    <LandingSupport key={`support-user:${adminAccess.userId ?? "anonymous"}`} visible={supportOpen} kind={supportKind} initialAssistantRequest={supportAiRequest} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"} gateway={GO_SUPPORT_LIVE_ENABLED&&adminAccess.userId?supportGateway:undefined} businessId={goView.view==="BUSINESS"&&businessAccess.allowed?businessAccess.snapshot?.business?.id:null}/>
+    <LandingSupport key={`support-user:${adminAccess.userId ?? "anonymous"}:${goView.view==="BUSINESS"&&businessAccess.allowed?businessAccess.snapshot?.business?.id??"personal":"personal"}`} visible={supportOpen} kind={supportKind} initialAssistantRequest={supportAiRequest} handedness={handedness} onClose={()=>setSupportOpen(false)} scopeKey={adminAccess.userId ?? "anonymous"} gateway={GO_SUPPORT_LIVE_ENABLED&&adminAccess.userId?supportGateway:undefined} businessId={goView.view==="BUSINESS"&&businessAccess.allowed?businessAccess.snapshot?.business?.id:null}/>
     <SupportAdminPanel key={`support-admin:${adminAccess.userId??"anonymous"}`} visible={supportAdminOpen&&goView.isAdminView&&adminAccess.isOwner} onClose={()=>setSupportAdminOpen(false)} view={supportAdminView} gateway={supportGateway} backendReady={GO_SUPPORT_LIVE_ENABLED} handedness={handedness}/>
     <SupportTeamPanel key={`support-team:${adminAccess.userId??"anonymous"}`} visible={supportTeamOpen&&goView.isAdminView&&adminAccess.isOwner}
       onClose={()=>setSupportTeamOpen(false)} handedness={handedness} accountScope={adminAccess.userId??"anonymous"}

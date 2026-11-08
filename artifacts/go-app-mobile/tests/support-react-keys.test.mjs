@@ -20,7 +20,14 @@ test('the three mounted support panels have distinct keys for the same user and 
   assert.equal(keys.size,3);
   for(const userId of [null,'11111111-1111-4111-8111-111111111111']){
     const adminAccess={userId};
-    const actual=[...keys.values()].map(expression=>vm.runInNewContext(expression,{adminAccess}));
-    assert.equal(new Set(actual).size,actual.length);
+    const contexts=[{view:"USER",allowed:false,id:null},{view:"BUSINESS",allowed:true,id:"company-a"},{view:"BUSINESS",allowed:true,id:"company-b"}];
+    const userKeys=[];
+    for(const context of contexts){
+      const goView={view:context.view},businessAccess={allowed:context.allowed,snapshot:{business:{id:context.id}}};
+      const actual=[...keys.values()].map(expression=>vm.runInNewContext(expression,{adminAccess,goView,businessAccess}));
+      assert.equal(new Set(actual).size,actual.length);
+      userKeys.push(vm.runInNewContext(keys.get("LandingSupport"),{adminAccess,goView,businessAccess}));
+    }
+    assert.equal(new Set(userKeys).size,3,'changing business remounts the request screen before exposing another draft or thread');
   }
 });
