@@ -11,7 +11,7 @@ const capturedCompanies=(market:number|null,share:number|null)=>valid(market,1e1
 const key=(activity:string,country:string)=>activity+"|"+country;
 export function calculatorCatalog(doc:FinancialDocument){
  let names:Intl.DisplayNames|undefined;try{names=new Intl.DisplayNames(["es"],{type:"region"});}catch{}
- const activities=ACTIVITIES.map(item=>{const saved=doc.activities.find(a=>a.id===item.id)||doc.activities.find(a=>normal(a.name)===normal(item.name));return saved?{...saved,name:item.name}:{...item,unit:"empresa" as const,enabled:true};});
+ const originals=ACTIVITIES.map(item=>doc.activities.find(a=>a.id===item.id)||doc.activities.find(a=>normal(a.name)===normal(item.name)&&!ACTIVITIES.some(original=>original.id===a.id))||{...item,unit:"empresa" as const,enabled:true}); const activities=[...originals,...doc.activities.filter(a=>!originals.some(item=>item.id===a.id))];
  const countries=(doc.countries.length?doc.countries:COUNTRIES.map(code=>({code,name:names?.of(code)||code,currency:"EUR"}))).map(c=>({...c,name:names?.of(c.code)||c.name}));
  return{activities,countries};
 }
@@ -20,10 +20,10 @@ function euroRate(doc:FinancialDocument,countryCode:string){const currency=doc.c
 export type RevenueCalculatorRow={id:string;activityId:string;countryCode:string;activity:string;country:string;market:number|null;marketUsable:boolean;marketInReview:boolean;unit:string;share:number|null;fee:number|null;feeEditable:boolean;companies:number|null;monthly:number|null;annual:number|null;projection:FinancialProjection};
 /** A full-portfolio, twelve-month income view through the existing engine. It never changes the saved growth, costs, currencies or annual exceptions. */
 export function revenueCalculatorRows(doc:FinancialDocument,scenario:FinancialScenario):RevenueCalculatorRow[]{
- const catalog=calculatorCatalog(doc),view=emptyFinancialDocument("Proyección de ingresos GO",doc.startYear);view.horizon=1;view.activities=catalog.activities.map(a=>({...a,enabled:true}));view.countries=catalog.countries.map(c=>({...c,currency:"EUR"}));
+ const catalog=calculatorCatalog(doc),view=emptyFinancialDocument("Proyección de ingresos GO",doc.startYear);view.horizon=1;view.activities=catalog.activities.filter(a=>a.enabled);view.countries=catalog.countries.map(c=>({...c,currency:"EUR"}));
  const marketMap=new Map<string,FinancialDocument["markets"][number]>();for(const item of doc.markets){const k=key(item.activityId,item.countryCode),old=marketMap.get(k);if(!old||item.referenceYear>old.referenceYear)marketMap.set(k,item);}
  const assumptions=new Map(doc.assumptions.filter(a=>a.scenario===scenario).map(a=>[key(a.activityId,a.countryCode),a]));
- const inputs=catalog.countries.flatMap(country=>catalog.activities.map(activity=>{const id=key(activity.id,country.code),assumption=assumptions.get(id),market=marketMap.get(id),price=monthlyPrice(doc,assumption?.id),rate=euroRate(doc,country.code);return{id,activityId:activity.id,countryCode:country.code,activity:activity.name,country:country.name,market:market?.companies??null,marketUsable:valid(market?.companies,1e12)!==null,marketInReview:market?.verification==="CONFLICTO",unit:market?.unit||activity.unit,share:assumption?.penetrationPct??null,fee:price?.value==null||rate===null?null:price.value*rate,feeEditable:rate!==null};}));
+ const inputs=catalog.countries.flatMap(country=>catalog.activities.filter(a=>a.enabled).map(activity=>{const id=key(activity.id,country.code),assumption=assumptions.get(id),market=marketMap.get(id),price=monthlyPrice(doc,assumption?.id),rate=euroRate(doc,country.code);return{id,activityId:activity.id,countryCode:country.code,activity:activity.name,country:country.name,market:market?.companies??null,marketUsable:valid(market?.companies,1e12)!==null,marketInReview:market?.verification==="CONFLICTO",unit:market?.unit||activity.unit,share:assumption?.penetrationPct??null,fee:price?.value==null||rate===null?null:price.value*rate,feeEditable:rate!==null};}));
  for(const [i,row] of inputs.entries()){const id="calculator_"+i;view.assumptions.push({...newFinancialAssumption(id,row.activityId,row.countryCode,scenario,doc.startYear),marketCompanies:null,newCompanies:capturedCompanies(row.market,row.share),penetrationPct:valid(row.share,100),churnPct:0,acquisitionTiming:"start",costsConfirmed:true});view.revenues.push({id:"calculator_fee_"+i,assumptionId:id,year:0,name:"Cuota hipotética EUR",kind:"monthly",value:valid(row.fee,1e12)});}
  const projections=calculateFinancialPlan(view);
  return inputs.map((row,index)=>{const projection=projections[index],known=row.marketUsable&&row.market!==null&&valid(row.share,100)!==null&&valid(row.fee,1e12)!==null;const annual=known?projection.original.recurring:null;return{...row,companies:capturedCompanies(row.market,row.share),monthly:annual===null?null:annual/12,annual,projection:{...projection,complete:known&&annual!==null,consolidated:projection.consolidated?{...projection.consolidated,revenue:annual}:null}};});
@@ -44,7 +44,7 @@ export function updateRevenueCalculator(doc:FinancialDocument,activityId:string,
 export function revenueCalculatorTotals(rows:RevenueCalculatorRow[]){
  const known=rows.filter(r=>r.annual!==null),captured=rows.filter(r=>r.companies!==null),total=consolidateFinancialRows(rows.map(r=>r.projection))[0];
  const annual=known.length?total?.knownRevenueSubtotal??null:null;
- return{companies:captured.length?captured.reduce((sum,r)=>sum+r.companies!,0):null,monthly:annual===null?null:annual/12,annual,incomplete:known.length<rows.length,companiesIncomplete:captured.length<rows.length,known:known.length,rows:rows.length};
+ const mixedUnits=new Set(captured.map(r=>r.unit)).size>1; return{companies:captured.length&&!mixedUnits?captured.reduce((sum,r)=>sum+r.companies!,0):null,monthly:annual===null?null:annual/12,annual,incomplete:known.length<rows.length,companiesIncomplete:mixedUnits||captured.length<rows.length,known:known.length,rows:rows.length};
 }
 
 export function applyRevenueCalculatorInputs(doc:FinancialDocument,countryCodes:string[],activityIds:string[],scenario:FinancialScenario,values:{share?:number|null;fee?:number|null}):FinancialDocument{

@@ -35,11 +35,33 @@ test('System shows the original AdminScreen without the overlapping publication 
  const h=screen();h.button('Sistema').props.onPress();assert.equal(h.all().filter(n=>n.type==='GoModulePublicationPanel').length,0);assert.equal(h.all().filter(n=>n.type==='AdminScreen').length,1);h.button('Volver al paso anterior').props.onPress();h.button('Métricas').props.onPress();assert.equal(h.all().filter(n=>n.type?.name==='MetricCard').length,4);assert.ok(h.all().some(n=>n.children?.includes('Ingreso total estimado')));assert.ok(h.all().some(n=>n.children?.includes('Partner más rentable')));
 });
 test('administrative guard still denies unauthorized identities or a non-admin context',()=>{assert.equal(screen({allowed:false}).render(),null);assert.equal(screen({adminView:false}).render(),null);const h=screen({owner:false});assert.equal(h.all().some(n=>n.children?.includes('Cambiar contexto')),false);});
+
+test('ADMIN projection shortcut opens the same finance destination and returns to its original menu',()=>{
+ const h=screen();h.button('GO Proyecciones').props.onPress();
+ const route=h.all().find(n=>n.type==='GoRoadmapScreen');
+ assert.equal(route.props.navStack.at(-1).key,'plan_financiero_y_proyecciones');
+ assert.equal(route.props.allowFinancialPlan,true);
+ h.button('Volver al paso anterior').props.onPress();
+ assert.ok(h.all().some(n=>n.children?.includes('MÓDULOS')));
+ assert.equal(h.closed(),0);
+ const card=h.catalogue.filter(m=>m.key==='go_proyecciones');
+ assert.equal(card.length,1);assert.equal(card[0].commercial.available,false);
+ assert.equal(card[0].commercial.productId,'go_proyecciones');
+ assert.ok(card[0].info.includes('pendientes'));assert.ok(card[0].info_en);
+ h.button('Módulos empresariales').props.onPress();
+ assert.ok(h.all().some(n=>n.children?.includes('GO Proyecciones')));
+ const cardNode=h.all().find(n=>n.props.key==='go_proyecciones');
+ assert.ok(cardNode);cardNode.children.find(n=>n.type?.name==='InfoButton').props.onPress();
+ const information=h.all().find(n=>n.props.accessibilityLabel==='Información del módulo');
+ assert.ok(information);assert.equal(information.children[0].children[0],card[0].info);
+ h.button('Cerrar').props.onPress();
+ assert.equal(h.all().some(n=>n.props.accessibilityLabel==='Información del módulo'),false);
+});
 test('module catalogue and existing floating GO controls are unchanged; Expo Go controls are not included',()=>{
  const original=execFileSync('git',['show',(process.env.GO_FINANCE_NAV_BASE_REF||'HEAD')+':artifacts/go-app-mobile/components/empresa/GoAdminDashboard.tsx'],{encoding:'utf8'});
  function ast(text){return ts.createSourceFile(file,text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);}
  function constant(text,name){const f=ast(text);for(const s of f.statements)if(ts.isVariableStatement(s))for(const d of s.declarationList.declarations)if(d.name.getText(f)===name){
-   if(name==='MODULOS_EMPRESA_ROADMAP')return d.initializer.elements.filter(e=>!e.properties.some(p=>p.name?.getText(f)==='key'&&p.initializer?.text==='soporte')).map(e=>e.getText(f).replace(/\r\n/g,'\n')).join('\n');
+   if(name==='MODULOS_EMPRESA_ROADMAP'||name==='SECTIONS')return d.initializer.elements.filter(e=>!e.properties.some(p=>p.name?.getText(f)==='key'&&['go_proyecciones','projections'].includes(p.initializer?.text))).map(e=>e.getText(f).replace(/\r\n/g,'\n')).join('\n');
    return d.initializer.getText(f).replace(/\r\n/g,'\n');}throw Error(name);}
  for(const name of ['SECTIONS','MODULOS_EMPRESA_ROADMAP','SIGUIENTES_MODULOS','MOCK_METRICS']){if(source.includes('const '+name))assert.equal(constant(source,name),constant(original,name));}
  function controls(text){const f=ast(text),found=[];function visit(n){if(ts.isJsxElement(n)&&n.openingElement.tagName.getText(f)==='DraggableFAB'){function callbacks(c){if(ts.isJsxAttribute(c)&&c.name.getText(f)==='onPress')found.push(c.initializer.expression.getText(f).replace(/\r\n/g,'\n'));ts.forEachChild(c,callbacks);}callbacks(n);}ts.forEachChild(n,visit);}visit(f);return found;}

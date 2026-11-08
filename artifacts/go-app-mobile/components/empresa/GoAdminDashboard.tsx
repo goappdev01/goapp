@@ -53,6 +53,7 @@ type AdminSection =
   | "metricas"
   | "empresas"
   | "roadmap"
+  | "projections"
   | "modulos_empresa"
   | "siguientes_modulos";
 
@@ -101,7 +102,7 @@ type ModuloEmpresaDef = {
     billingInterval: "month";
     activationScope: "business";
     available: false;
-    sharedModule: "go_support";
+    sharedModule: "go_support" | "financial_plan";
   };
 };
 
@@ -396,6 +397,20 @@ const MODULOS_EMPRESA_ROADMAP: ModuloEmpresaDef[] = [
 
   // ── MÓDULOS EMPRESA / OPERACIÓN ──────────────────────────────────────
   {
+    key: "go_proyecciones", emoji: "📊", label: "GO Proyecciones", label_en: "GO Projections", color: "#59BA83",
+    desc: "Estimación de facturación, costes directos y beneficio bruto de productos, servicios y suscripciones por mercado",
+    desc_en: "Estimated revenue, direct costs and gross profit for products, services and subscriptions by market",
+    info: "GO Proyecciones reutiliza la calculadora GO: permite mantener actividades, cantidades por país, seleccionar mercados y simular captación, cuotas, costes directos y beneficio bruto. Los datos compatibles se guardan en el documento financiero privado y versionado.\n\nLa calculadora GO existente está operativa. El catálogo tipado de productos y servicios, sus precios permanentes y periodicidades están preparados, pendientes de ampliar y validar el contrato del servidor. No se ofrecen como funciones activas.\n\nPrevisto como módulo de suscripción mensual independiente, sin contratación, precios ni activación empresarial en esta versión.",
+    info_en: "GO Projections reuses the GO calculator for activities, country market quantities, market selection, acquisition, fees, direct costs and gross profit. Compatible data uses the private versioned financial document.\n\nThe existing GO calculator is operational. Typed products and services, permanent catalogue prices and periods are prepared, pending server contract integration and validation. These extensions are not active.\n\nPlanned as an independent monthly subscription, without purchasing, prices or business activation in this version.",
+    estado: "Calculadora GO operativa · Extensiones por tipos pendientes",
+    estado_en: "GO calculator operational · Typed extensions pending",
+    chips: ["Catálogo", "Mercados", "Escenarios", "Costes directos", "Beneficio bruto", "Documento privado"],
+    chips_en: ["Catalogue", "Markets", "Scenarios", "Direct costs", "Gross profit", "Private document"],
+    categoria: "empresa",
+    commercial: { productId: "go_proyecciones", billingInterval: "month", activationScope: "business", available: false, sharedModule: "financial_plan" },
+    scrollableInfo: true,
+  },
+  {
     key: "soporte",
     emoji: "🎧",
     label: "Soporte",
@@ -684,6 +699,7 @@ const SECTIONS: Array<{
   icon: React.ComponentProps<typeof Feather>["name"];
   color: string;
 }> = [
+  { key: "projections", label: "GO Proyecciones", label_en: "GO Projections", sublabel: "Calculadora financiera actual", sublabel_en: "Existing financial calculator", icon: "pie-chart", color: "#59BA83" },
   { key: "tools", label: "Herramientas", label_en: "Tools", sublabel: "Configuración compartida y variantes del Landing USUARIO", sublabel_en: "Shared settings and USER Landing variants", icon: "settings", color: "#4A80BD" },
   { key: "roadmap",            label: "Roadmap GO",              label_en: "GO Roadmap",        sublabel: "Tablero maestro del ecosistema",          sublabel_en: "Ecosystem master board",                 icon: "map",         color: "#f59e0b" },
   { key: "modulos_empresa",    label: "Módulos empresariales",   label_en: "Business Modules",  sublabel: "Fases y estado de módulos contratables",  sublabel_en: "Phases and status of contractable modules", icon: "layers",    color: "#7C69BE" },
@@ -712,11 +728,19 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
   const { lang } = useLanguage();
   const [section, setSection]           = useState<AdminSection>("overview");
   const [roadmapStack, setRoadmapStack] = useState<RoadmapNode[]>([]);
+  const [directProjection, setDirectProjection] = useState(false);
   const [infoPanel, setInfoPanel]       = useState<{ title: string; desc: string; scrollable?: boolean } | null>(null);
 
   const fabBottom = insets.bottom + 24;
 
   const goSection = (sec: AdminSection) => {
+    if (sec === "projections") {
+      if (!adminAccess.allowed || !goView.isAdminView) return;
+      setDirectProjection(true);
+      setRoadmapStack([{ key: "plan_financiero_y_proyecciones", emoji: "📊", label: "Plan Financiero y Proyecciones", color: "#59BA83", progress: 0, desc: "Herramienta privada de planificación" }]);
+      setSection("roadmap"); return;
+    }
+    setDirectProjection(false);
     if (sec === "tools") {
       if (adminAccess.allowed && goView.isAdminView) onOpenTools?.();
       return;
@@ -726,6 +750,9 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
   };
 
   const handleBack = () => {
+    if (directProjection) {
+      setDirectProjection(false); setRoadmapStack([]); setSection("overview"); return;
+    }
     if (roadmapStack.length > 0) {
       setRoadmapStack(prev => prev.slice(0, -1));
     } else if (section !== "overview") {
