@@ -24,8 +24,8 @@ const people = count => Array.from({ length: count }, (_, index) => ({
   role: 'Soporte', active: true,
 }));
 
-test('orbital pagination has seven people plus one next control for 0, 1, 7, 8, 15 and 100 records', () => {
-  for (const count of [0, 1, 7, 8, 15, 100]) {
+test('orbital pagination has seven people plus one next control for 0, 1, 7, 8, 13, 15 and 100 records', () => {
+  for (const count of [0, 1, 7, 8, 13, 15, 100]) {
     const rows = people(count);
     const expectedPages = Math.max(1, Math.ceil(count / 7));
     for (let page = 0; page < expectedPages; page++) {
@@ -37,6 +37,31 @@ test('orbital pagination has seven people plus one next control for 0, 1, 7, 8, 
     assert.equal(peopleOrbitPage(rows, 999).page, expectedPages - 1);
   }
 });
+
+// Exercise the production render callback and PremiumOrbitBtn, not just the panel's satellite descriptor.
+const home = ts.createSourceFile('index.tsx', readFileSync('app/index.tsx', 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let satelliteRenderer;
+(function visit(node) {
+  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(home) === 'SupportTeamPanel')
+    satelliteRenderer = node.attributes.properties.find(prop => prop.name?.getText(home) === 'renderSatellite').initializer.expression.getText(home);
+  ts.forEachChild(node, visit);
+})(home);
+assert.ok(satelliteRenderer);
+const orbitDeclarations = ['_orbitLighten', '_orbitDarken', 'PremiumOrbitBtn'].map(name =>
+  home.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name).getText(home)).join('\n');
+const springCalls = [];
+const orbitReact = {
+  createElement: (type, props, ...children) => typeof type === 'function' ? type(props) :
+    ({ type, props: props ?? {}, children: children.flat(Infinity) }),
+  useRef: value => ({ current: value }), useState: value => [value, () => {}], Fragment: 'Fragment',
+};
+const orbitScope = { React: orbitReact, useLanguage: () => ({ t: value => value }),
+  Animated: { View: 'AnimatedView', Value: class {}, spring: (_value, options) => ({ start: () => springCalls.push(options) }) },
+  View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', LinearGradient: 'LinearGradient', Feather: 'Feather', Ionicons: 'Ionicons' };
+vm.runInNewContext(ts.transpileModule(orbitDeclarations + '\nvar renderSatellite = ' + satelliteRenderer, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React },
+}).outputText, orbitScope);
+const nativeButton = orbit => nodes(orbit).find(node => node.type === 'TouchableOpacity');
 
 test('name and code search ignores accents and case, sorts with stable code tie break and hides inactive/duplicate IDs', () => {
   const rows = [
@@ -89,11 +114,107 @@ function fixture(source, dimensions = { width: 390, height: 844 }, handedness = 
   } };
   vm.runInNewContext(compile('components/landing/SupportTeamPanel.tsx'), scope);
   const props = { visible: true, source, onClose: () => calls.push('close'), onGoPress: () => calls.push('GO'),
-    handedness, accountScope, renderSatellite: (satellite, size) => ({ type: 'OrbitButton', props: { ...satellite, size }, children: [] }) };
+    handedness, accountScope, renderSatellite: (satellite, size) => ({ type: 'OrbitButton', props: { ...satellite, size },
+      children: [orbitScope.renderSatellite(satellite, size)] }) };
   return { props, calls, storage, keyboardShow: (height = 300) => keyboardListeners.keyboardDidShow?.({ endCoordinates: { height } }),
     keyboardHide: () => keyboardListeners.keyboardDidHide?.(),
     render(p = props) { cursor = 0; effects = []; const tree = scope.exports.SupportTeamPanel(p); for (const run of effects) run(); return tree; } };
 }
+
+for (const count of [0, 1, 7, 8, 13, 15, 100]) for (const mode of ['source contract', 'local demo'])
+test(`${mode}: real orbit render callbacks traverse ${count} people and preserve the page after opening a member`, async () => {
+  const rows = people(count).map((person, index) => mode === 'local demo' ?
+    { ...person, id: `demo:${index + 1}`, code: `DEMO-${String(index + 1).padStart(3, '0')}` } : person);
+  const storage = new Map();
+  if (mode === 'local demo') storage.set(orbitalDemoStorageKey('support', 'account-a'),
+    JSON.stringify({ version: 1, enabled: true, nextId: count + 1, people: rows }));
+  const f = fixture(mode === 'local demo' ? undefined : { list: async () => rows }, undefined, 'right', storage);
+  f.render(); await tick(); let tree = f.render();
+  const orbit = () => nodes(tree).filter(node => node.type === 'OrbitButton');
+  const back = () => nodes(tree).find(node => node.type === 'GoCloseButton');
+  const pages = Math.max(1, Math.ceil(count / 7));
+  for (let page = 0; page < pages; page++) {
+    const expected = rows.slice(page * 7, (page + 1) * 7);
+    assert.deepEqual(orbit().slice(0, 7).filter(node => !node.props.empty).map(node => node.props.label), expected.map(row => row.name));
+    if (count) assert.ok(labels(tree).includes(`Página ${page + 1} de ${pages}`));
+    assert.equal(labels(tree).includes('DEMOSTRACIÓN LOCAL'), mode === 'local demo');
+    if (expected.length) {
+      nativeButton(orbit()[0]).props.onPress(); tree = f.render();
+      assert.ok(labels(tree).replace(/\s+/g, " ").includes(`Código: ${expected[0].code}`));
+      back().props.onPress(); tree = f.render();
+      assert.ok(labels(tree).includes(`Página ${page + 1} de ${pages}`));
+    }
+    const next = orbit()[7], touch = nativeButton(next), hasNext = page + 1 < pages;
+    assert.equal(next.props.label, 'SOPORTE');
+    assert.equal(touch.props.disabled, !hasNext);
+    assert.equal(touch.props.accessibilityState.disabled, !hasNext);
+    assert.equal(nodes(next).find(node => node.type === 'AnimatedView').props.style.opacity, hasNext ? 1 : 0.22);
+    if (hasNext) {
+      touch.props.onPressIn(); assert.equal(springCalls.at(-1).toValue, 0.93);
+      touch.props.onPressOut(); assert.equal(springCalls.at(-1).toValue, 1);
+    }
+    touch.props.onPress(); tree = f.render();
+    if (!hasNext && count) assert.ok(labels(tree).includes(`Página ${pages} de ${pages}`));
+  }
+  for (let page = pages - 2; page >= 0; page--) {
+    assert.equal(back().props.accessibilityLabel, 'Página anterior');
+    back().props.onPress(); tree = f.render();
+    assert.ok(labels(tree).includes(`Página ${page + 1} de ${pages}`));
+    assert.equal(orbit()[0].props.label, rows[page * 7].name);
+  }
+  if (mode === 'local demo') assert.deepEqual(JSON.parse(storage.get(orbitalDemoStorageKey('support', 'account-a'))).people, rows);
+});
+
+test('diagonal orbital hit boxes stay above the overlapping GO box without changing their geometry', async () => {
+  for (const dimensions of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 430, height: 932 }]) {
+    const f = fixture({ list: async () => people(13) }, dimensions); f.render(); await tick(); const tree = f.render();
+    const wrap = nodes(tree).find(node => node.type === 'View' && node.children?.some(child =>
+      child?.type === 'View' && child.children?.some(orbit => orbit?.type === 'OrbitButton')));
+    const go = wrap.children.find(child => child?.children?.some(node => node.type === 'GoAssistantButton'));
+    const next = wrap.children.find(child => child?.children?.some(node => node.props?.key === 'team-next'));
+    const layout = orbitalPeopleLayout(dimensions.width, dimensions.height, { top: 47, bottom: 34, left: 0, right: 0 });
+    assert.equal(go.props.pointerEvents, 'box-none'); assert.equal(next.props.pointerEvents, 'box-none');
+    assert.equal(next.props.style.width, layout.orbitSize); assert.equal(next.props.style.height, layout.orbitSize);
+    assert.equal(go.props.style.width, layout.goSize); assert.equal(go.props.style.height, layout.goSize);
+    const x = next.props.style.left + layout.orbitSize * 0.7, y = next.props.style.top + layout.orbitSize * 0.7;
+    assert.ok(x > go.props.style.left && y > go.props.style.top, 'a visible inner part of SOPORTE overlaps GO’s rectangular hit box');
+    assert.ok(x < go.props.style.left + layout.goSize && y < go.props.style.top + layout.goSize);
+    assert.ok(next.props.style.zIndex > (go.props.style.zIndex ?? 0));
+    assert.ok(wrap.children.indexOf(next) > wrap.children.indexOf(go));
+    assert.equal(nativeButton(next.children[0]).props.disabled, false);
+  }
+});
+
+test('disabled final and empty satellite targets absorb overlapping taps without falling through to central GO', async () => {
+  for (const dimensions of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 430, height: 932 }]) {
+    for (const handedness of ['left', 'right']) for (const count of [0, 1, 7, 8]) {
+      const f = fixture({ list: async () => people(count) }, dimensions, handedness);
+      f.render(); await tick(); let tree = f.render();
+      if (count === 8) {
+        const next = nodes(tree).filter(node => node.type === 'OrbitButton')[7];
+        nativeButton(next).props.onPress(); tree = f.render();
+      }
+      const go = nodes(tree).find(node => node.type === 'GoAssistantButton');
+      const wrap = nodes(tree).find(node => node.type === 'View' && node.children.some(child => child?.children?.includes(go)));
+      assert.ok(wrap);
+      const slots = wrap.children.filter(child => child?.children?.[0]?.type === 'OrbitButton');
+      assert.equal(slots.length, 8);
+      for (const slot of slots.filter(slot => slot.children[0].props.disabled)) {
+        const orbit = slot.children[0], touch = nativeButton(orbit);
+        assert.equal(slot.props.pointerEvents, 'auto', 'a disabled wrapper still owns its rectangle and cannot pass a tap to GO');
+        assert.equal(touch.props.disabled, true);
+        assert.equal(touch.props.accessibilityState.disabled, true);
+        assert.equal(slot.props.style.zIndex, 1);
+        const before = JSON.stringify(tree);
+        // Even a direct callback invocation cannot advance past the last page or open an empty slot.
+        touch.props.onPress(); tree = f.render();
+        assert.equal(JSON.stringify(tree), before);
+      }
+      assert.equal(f.calls.includes('GO'), false);
+      go.props.onPress();assert.equal(f.calls.at(-1), 'GO', 'GO keeps its own functional center');
+    }
+  }
+});
 
 test('EQUIPO renders real records, navigates forward/back and returns from the selected record', async () => {
   const f = fixture({ list: async () => people(8) }); f.render(); await tick(); let tree = f.render();

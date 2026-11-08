@@ -1951,6 +1951,7 @@ function PremiumOrbitBtn({
   color,
   selected,
   dimmed = false,
+  disabled = false,
   onPress,
   onLongPress,
   delayLongPress = 500,
@@ -1981,6 +1982,7 @@ function PremiumOrbitBtn({
   color: string;
   selected: boolean;
   dimmed?: boolean;
+  disabled?: boolean;
   onPress: () => void;
   onLongPress?: () => void;
   delayLongPress?: number;
@@ -2138,6 +2140,8 @@ function PremiumOrbitBtn({
       <TouchableOpacity
         accessibilityRole={accessibilityLabel ? "button" : undefined}
         accessibilityLabel={accessibilityLabel}
+        accessibilityState={{ disabled }}
+        disabled={disabled}
         activeOpacity={1}
         onPress={onPress}
         onLongPress={handleLongPress}
@@ -25614,6 +25618,7 @@ function HomeScreenContent() {
       onClose={()=>setSupportTeamOpen(false)} handedness={handedness} accountScope={adminAccess.userId??"anonymous"}
       onGoPress={()=>{setSupportTeamOpen(false);setSupportKind("help");setSupportOpen(true);setSupportAiRequest(value=>value+1);}}
       renderSatellite={(satellite,size)=><PremiumOrbitBtn color={satellite.color} selected={false} dimmed={satellite.disabled}
+        disabled={satellite.disabled}
         onPress={satellite.onPress} onLongPress={satellite.onLongPress} delayLongPress={550}
         icon="user" label={satellite.label} accessibilityLabel={satellite.title}
         size={size} iconSize={0} labelSize={Math.max(10,Math.round(size*.18))} labelOnly labelLines={2}

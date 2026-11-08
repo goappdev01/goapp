@@ -123,7 +123,7 @@ export function SupportTeamPanel({ visible, onClose, onGoPress, source, renderSa
       } : undefined };
   });
   satellites.push({ key: "team-next", label: nextLabel, title: slice.hasNext ? "Siguiente página del equipo" : "Fin del equipo",
-    color: "#9ca3af", disabled: !slice.hasNext, onPress: () => setPage(slice.page + 1) });
+    color: "#9ca3af", disabled: !slice.hasNext, onPress: () => { if (slice.hasNext) setPage(slice.page + 1); } });
   const storeDemo = async (next: OrbitalDemoDirectory, startedIn: number) => {
     await AsyncStorage.setItem(demoKey, JSON.stringify(next));
     if (session.current !== startedIn) return false;
@@ -267,17 +267,20 @@ export function SupportTeamPanel({ visible, onClose, onGoPress, source, renderSa
             </View>
             <View pointerEvents={showOrbit ? "auto" : "none"}
               style={{ width: layout.wrap, height: layout.wrap, opacity: showOrbit ? 1 : 0 }}>
+              {/* Preserve orbital touch priority over GO; disabled slots absorb taps instead of activating GO behind them. */}
+              <View pointerEvents="box-none" style={{ position: "absolute", left: (layout.wrap - layout.goSize) / 2,
+                top: (layout.wrap - layout.goSize) / 2, width: layout.goSize, height: layout.goSize }}>
+                <GoAssistantButton size={layout.goSize} onPress={onGoPress}/>
+              </View>
               {satellites.map((satellite, slot) => {
                 const angle = -Math.PI / 2 + slot * Math.PI / 4;
-                return <View key={satellite.key} pointerEvents={satellite.disabled ? "none" : "auto"}
-                  style={{ position: "absolute", left: layout.wrap / 2 + Math.cos(angle) * layout.radius - layout.orbitSize / 2,
+                return <View key={satellite.key} pointerEvents={satellite.disabled ? "auto" : "box-none"}
+                  style={{ position: "absolute", zIndex: 1, width: layout.orbitSize, height: layout.orbitSize,
+                    left: layout.wrap / 2 + Math.cos(angle) * layout.radius - layout.orbitSize / 2,
                     top: layout.wrap / 2 + Math.sin(angle) * layout.radius - layout.orbitSize / 2 }}>
                   {renderSatellite(satellite, layout.orbitSize)}
                 </View>;
               })}
-              <View style={{ position: "absolute", left: (layout.wrap - layout.goSize) / 2, top: (layout.wrap - layout.goSize) / 2 }}>
-                <GoAssistantButton size={layout.goSize} onPress={onGoPress}/>
-              </View>
             </View>
           </View>}
         </View>
