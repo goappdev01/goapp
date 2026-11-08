@@ -95,6 +95,14 @@ type ModuloEmpresaDef = {
   submodulos?: SubModuloDef[];
   nota?: string;
   nota_en?: string;
+  scrollableInfo?: boolean;
+  commercial?: {
+    productId: string;
+    billingInterval: "month";
+    activationScope: "business";
+    available: false;
+    sharedModule: "go_support";
+  };
 };
 
 const CATEGORIA_LABEL: Record<ModuloEmpresaCategoria, string> = {
@@ -387,6 +395,26 @@ const MODULOS_EMPRESA_ROADMAP: ModuloEmpresaDef[] = [
   },
 
   // ── MÓDULOS EMPRESA / OPERACIÓN ──────────────────────────────────────
+  {
+    key: "soporte",
+    emoji: "🎧",
+    label: "Soporte",
+    label_en: "Support",
+    color: "#4A80BD",
+    desc: "Gestión de incidencias, consultas, propuestas de mejora, comunicación con clientes y organización de equipos de soporte",
+    desc_en: "Incident management, enquiries, improvement proposals, customer communication and support team organisation",
+    info: "Soporte permite a empresas y organizaciones disponer de su propio sistema de atención y gestión de solicitudes dentro de GO. Los clientes pueden comunicar incidencias, solicitar ayuda y proponer mejoras. El personal autorizado recibe, clasifica, responde y realiza el seguimiento desde su propio entorno de trabajo.\n\nEl módulo utiliza una arquitectura compartida con GO, adaptando sus vistas, trabajadores, permisos y expedientes a cada empresa. Está previsto como servicio de contratación mensual.",
+    info_en: "Support gives businesses and organisations their own customer support and request management system within GO. Customers can report incidents, ask for help and suggest improvements. Authorised staff receive, classify, respond to and track requests from their own workspace.\n\nThe module uses GO's shared architecture, adapting its views, team members, permissions and cases to each business. It is planned as a monthly subscription service.",
+    estado: "En desarrollo · Interfaz disponible / Conexión funcional pendiente",
+    estado_en: "In development · Interface available / Functional connection pending",
+    chips: ["Solicitudes y expedientes", "Comunicación bidireccional", "Gestión de incidencias", "Respuestas y seguimiento", "Equipo de soporte", "Historial y archivo", "Adjuntos privados", "Gestión de permisos"],
+    chips_en: ["Requests and cases", "Two-way communication", "Incident management", "Replies and tracking", "Support team", "History and archive", "Private attachments", "Permission management"],
+    categoria: "empresa",
+    nota: "Contratación mensual prevista. No disponible para activación empresarial hasta completar y validar el backend.",
+    nota_en: "Monthly subscription planned. Business activation is unavailable until the backend is completed and validated.",
+    commercial: { productId: "soporte", billingInterval: "month", activationScope: "business", available: false, sharedModule: "go_support" },
+    scrollableInfo: true,
+  },
   {
     key: "industry",
     emoji: "🏭",
@@ -684,7 +712,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
   const { lang } = useLanguage();
   const [section, setSection]           = useState<AdminSection>("overview");
   const [roadmapStack, setRoadmapStack] = useState<RoadmapNode[]>([]);
-  const [infoPanel, setInfoPanel]       = useState<{ title: string; desc: string } | null>(null);
+  const [infoPanel, setInfoPanel]       = useState<{ title: string; desc: string; scrollable?: boolean } | null>(null);
 
   const fabBottom = insets.bottom + 24;
 
@@ -840,6 +868,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
                             onPress={() => setInfoPanel({
                               title: lang === 'en' ? (mod.label_en ?? mod.label) : mod.label,
                               desc: lang === 'en' ? (mod.info_en ?? mod.info) : mod.info,
+                              scrollable: mod.scrollableInfo === true,
                             })}
                           />
                           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
@@ -1144,6 +1173,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
               activeOpacity={1}
               onPress={() => {}}
               style={{ width: "100%", maxWidth: 340, backgroundColor: CARD, borderRadius: 18,
+                maxHeight: infoPanel?.scrollable ? "80%" : undefined,
                 borderWidth: 1, borderColor: BORD, padding: 18, gap: 10 }}
             >
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
@@ -1160,9 +1190,12 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
                   <Feather name="x" size={14} color={DESC} />
                 </TouchableOpacity>
               </View>
-              <Text style={{ fontSize: 13, color: DESC, lineHeight: 19 }}>
+              {infoPanel?.scrollable ? <ScrollView style={{ flexShrink: 1 }} showsVerticalScrollIndicator
+                accessibilityLabel={lang === 'en' ? "Module information" : "Información del módulo"}>
+                <Text style={{ fontSize: 13, color: DESC, lineHeight: 19 }}>{infoPanel.desc}</Text>
+              </ScrollView> : <Text style={{ fontSize: 13, color: DESC, lineHeight: 19 }}>
                 {infoPanel?.desc}
-              </Text>
+              </Text>}
             </TouchableOpacity>
           </TouchableOpacity>
         </Modal>

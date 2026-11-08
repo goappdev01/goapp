@@ -7,19 +7,20 @@ import vm from 'node:vm';
 const require=createRequire(import.meta.url),ts=require('typescript'),file='components/empresa/GoAdminDashboard.tsx';
 const source=readFileSync(file,'utf8');
 const sections=['Herramientas','Roadmap GO','Módulos empresariales','Siguientes módulos','Partners','Zonas y tarifas','Consumos','Publicidad','Facturación','Métricas','Empresas','Sistema'];
-function screen({allowed=true,adminView=true,owner=true}={}){
+function screen({allowed=true,adminView=true,owner=true,lang='es'}={}){
  const states=[];let cursor=0,tree,tools=0,context=0,closed=0;
  const react={createElement(type,props,...children){return{type,props:props||{},children:children.flat(Infinity)};},Fragment:'Fragment',useState(initial){const i=cursor++;if(!(i in states))states[i]=initial;return[states[i],next=>{states[i]=typeof next==='function'?next(states[i]):next;}];}};
  const native=Object.fromEntries(['SafeAreaView','ScrollView','Text','TouchableOpacity','View'].map(n=>[n,n]));native.Dimensions={get:()=>({width:390,height:844})};native.StyleSheet={create:s=>s};
  const modules={"@/components/ui/GoCloseButton":{GoCloseButton:"GoCloseButton"},react:{...react,default:react},'react-native':native,'@/components/debug/OwnerContextIndicator':{OwnerContextModal:'Modal'},'@expo/vector-icons':{Feather:'Icon'},'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34})},'expo-status-bar':{StatusBar:'StatusBar'},'@/contexts/LanguageContext':{useLanguage:()=>({lang:'es'})},'@/contexts/GoAdminAccessContext':{useAdminAccess:()=>({allowed,userId:'SYNTHETIC',isOwner:owner})},'@/contexts/GoViewContext':{useGoView:()=>({isAdminView:adminView,isOwner:owner})}};
  const c={exports:{},console,require:k=>{if(k in modules)return modules[k];if(k.startsWith('./')||k==='../DraggableFAB')return new Proxy({},{get:(_,name)=>String(name)});throw Error('Unexpected import '+k);}};
- vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText,c);
+ modules['@/contexts/LanguageContext']={useLanguage:()=>({lang})};
+ vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText+'\nexports.catalogue=MODULOS_EMPRESA_ROADMAP;',c);
  const props={visible:true,onClose:()=>closed++,onOpenTools:()=>tools++,onOpenContext:()=>context++};
  function render(){cursor=0;tree=c.exports.GoAdminDashboard(props);return tree;}
  function* walk(n){if(!n||typeof n!=='object')return;yield n;for(const child of n.children||[])yield*walk(child);}
  function all(){render();return[...walk(tree)];}
  function button(label){const b=all().find(n=>n.props.accessibilityLabel===label);assert.ok(b,'Button '+label);return b;}
- return{render,all,button,setVisible:value=>{props.visible=value;},tools:()=>tools,context:()=>context,closed:()=>closed};
+ return{render,all,button,catalogue:c.exports.catalogue,setVisible:value=>{props.visible=value;},tools:()=>tools,context:()=>context,closed:()=>closed};
 }
 test('administrator opens with MODULES and exactly the existing cards in the approved order',()=>{
  const h=screen(),nodes=h.all(),scroll=nodes.find(n=>n.type==='ScrollView');assert.equal(scroll.children[0].type,'Text');assert.ok(scroll.children[0].children.includes('MÓDULOS'));
@@ -37,7 +38,9 @@ test('administrative guard still denies unauthorized identities or a non-admin c
 test('module catalogue and existing floating GO controls are unchanged; Expo Go controls are not included',()=>{
  const original=execFileSync('git',['show',(process.env.GO_FINANCE_NAV_BASE_REF||'HEAD')+':artifacts/go-app-mobile/components/empresa/GoAdminDashboard.tsx'],{encoding:'utf8'});
  function ast(text){return ts.createSourceFile(file,text,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);}
- function constant(text,name){const f=ast(text);for(const s of f.statements)if(ts.isVariableStatement(s))for(const d of s.declarationList.declarations)if(d.name.getText(f)===name)return d.initializer.getText(f).replace(/\r\n/g,'\n');throw Error(name);}
+ function constant(text,name){const f=ast(text);for(const s of f.statements)if(ts.isVariableStatement(s))for(const d of s.declarationList.declarations)if(d.name.getText(f)===name){
+   if(name==='MODULOS_EMPRESA_ROADMAP')return d.initializer.elements.filter(e=>!e.properties.some(p=>p.name?.getText(f)==='key'&&p.initializer?.text==='soporte')).map(e=>e.getText(f).replace(/\r\n/g,'\n')).join('\n');
+   return d.initializer.getText(f).replace(/\r\n/g,'\n');}throw Error(name);}
  for(const name of ['SECTIONS','MODULOS_EMPRESA_ROADMAP','SIGUIENTES_MODULOS','MOCK_METRICS']){if(source.includes('const '+name))assert.equal(constant(source,name),constant(original,name));}
  function controls(text){const f=ast(text),found=[];function visit(n){if(ts.isJsxElement(n)&&n.openingElement.tagName.getText(f)==='DraggableFAB'){function callbacks(c){if(ts.isJsxAttribute(c)&&c.name.getText(f)==='onPress')found.push(c.initializer.expression.getText(f).replace(/\r\n/g,'\n'));ts.forEachChild(c,callbacks);}callbacks(n);}ts.forEachChild(n,visit);}visit(f);return found;}
  assert.deepEqual(controls(source),controls(original));assert.doesNotMatch(source,/expo-dev-client|DevMenu|RCTEventEmitter/);
@@ -60,3 +63,24 @@ test('compact light header is exclusive to Finance and returns to the original A
 });
 
 test('closing the financial modal unmounts its orientation scope immediately',()=>{const h=screen();h.button('Roadmap GO').props.onPress();h.all().find(n=>n.type==='GoRoadmapScreen').props.setNavStack([{key:'plan_financiero_y_proyecciones',label:'Plan Financiero y Proyecciones'}]);h.setVisible(false);assert.equal(h.all().some(n=>n.type==='GoRoadmapScreen'),false);assert.deepEqual(Array.from(h.all().find(n=>n.type==='Modal').props.supportedOrientations),['portrait']);});
+
+test('Soporte appears once in the ADMIN business catalogue with the existing card and translated information window',()=>{
+ for(const lang of ['es','en']){
+  const h=screen({lang}),support=h.catalogue.filter(m=>m.key==='soporte');assert.equal(support.length,1);
+  const mod=support[0];assert.equal(new Set(h.catalogue.map(m=>m.key)).size,h.catalogue.length);
+  assert.equal(mod.categoria,'empresa');assert.equal(mod.chips.length,8);assert.equal(mod.chips_en.length,8);
+  assert.equal(mod.commercial.productId,mod.key);assert.equal(mod.commercial.billingInterval,'month');
+  assert.equal(mod.commercial.activationScope,'business');assert.equal(mod.commercial.available,false);assert.equal(mod.commercial.sharedModule,'go_support');
+  assert.equal(mod.estado.toLowerCase().startsWith('terminado'),false);
+  h.button(lang==='en'?'Business Modules':'Módulos empresariales').props.onPress();
+  const card=h.all().find(n=>n.props.key==='soporte'),other=h.all().find(n=>n.props.key==='industry');
+  assert.ok(card);assert.deepEqual(card.props.style,other.props.style);
+  const info=card.children.find(n=>n.type?.name==='InfoButton');assert.ok(info);info.props.onPress();
+  let modal=h.all().find(n=>n.type==='Modal'&&n.props.transparent===true);assert.equal(modal.props.visible,true);
+  const nodes=h.all();assert.ok(nodes.some(n=>n.type==='Text'&&n.children.includes(lang==='en'?'Support':'Soporte')));
+  assert.ok(nodes.some(n=>n.type==='Text'&&n.children.includes(lang==='en'?mod.info_en:mod.info)));
+  assert.ok(nodes.some(n=>n.type==='ScrollView'&&n.props.accessibilityLabel===(lang==='en'?'Module information':'Información del módulo')));
+  h.button(lang==='en'?'Close':'Cerrar').props.onPress();modal=h.all().find(n=>n.type==='Modal'&&n.props.transparent===true);assert.equal(modal.props.visible,false);
+ }
+ assert.equal(screen({allowed:false}).render(),null);assert.equal(screen({adminView:false}).render(),null);
+});
