@@ -51,6 +51,7 @@ test('GO AYUDA API validates input, live JWT, RLS failures and private file oper
     assert.equal((await request('/requests','GET',undefined,null)).status,401);
     assert.equal(upstream.length,0);
     authStatus=401;assert.equal((await request('/requests')).status,401);authStatus=200;
+    authStatus=403;assert.equal((await request('/requests')).status,401);authStatus=200;
     assert.deepEqual(await (await request('/capabilities')).json(),{ready:true,version:1,retentionMonths:12});
     rpcStatus=404;rpcCode='PGRST202';
     assert.equal((await request('/capabilities')).status,503);

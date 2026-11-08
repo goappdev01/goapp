@@ -37,7 +37,8 @@ const authorized: RequestHandler = async (req, res, next) => {
   if (!authorization?.match(/^Bearer \S+$/)) { res.status(401).json(fail("AUTH_REQUIRED", "Inicia sesión.", 401)); return; }
   try {
     const response = await supabaseRequest("/auth/v1/user", { headers: bearerHeader(authorization) });
-    if (!response.ok) { res.status(response.status === 401 ? 401 : 502).json(fail("AUTH_UNAVAILABLE", "No se pudo comprobar la sesión.", response.status === 401 ? 401 : 502)); return; }
+    if (!response.ok) { const status = [401,403].includes(response.status) ? 401 : 502;
+      res.status(status).json(fail(status === 401 ? "AUTH_REQUIRED" : "AUTH_UNAVAILABLE", "No se pudo comprobar la sesión.", status)); return; }
     const user = await response.json() as { id?: unknown };
     if (!isUuid(user.id)) throw Error("Invalid identity");
     res.locals.supportUserId = user.id;
