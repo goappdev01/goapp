@@ -13,8 +13,12 @@ const labels = value => typeof value === 'string' ? value : (value?.children ?? 
 const tick = () => new Promise(setImmediate);
 const library = { exports: {} };
 vm.runInNewContext(compile('lib/orbitalPeople.ts'), library);
+const demoLibrary = { exports: {} };
+vm.runInNewContext(compile('lib/orbitalPeopleDemo.ts'), demoLibrary);
 const { browsePeople, peopleOrbitPage, orbitalPeopleLayout, orbitalPeopleAvoidRects,
   orbitalPeopleSearchScrollOffset } = library.exports;
+const { newOrbitalDemoDirectory, parseOrbitalDemoDirectory, createOrbitalDemoPerson,
+  updateOrbitalDemoPerson, orbitalDemoStorageKey } = demoLibrary.exports;
 const people = count => Array.from({ length: count }, (_, index) => ({
   id: `id-${index}`, code: `T-${String(index).padStart(3, '0')}`, name: `Trabajador ${String(index).padStart(3, '0')}`,
   role: 'Soporte', active: true,
@@ -44,10 +48,11 @@ test('name and code search ignores accents and case, sorts with stable code tie 
   assert.deepEqual(Array.from(browsePeople(rows, 'ALVARO')).map(row => row.code), ['T-1', 'T-2']);
   assert.deepEqual(Array.from(browsePeople(rows, 't-2')).map(row => row.id), ['b']);
   assert.equal(browsePeople(rows, 'Beatriz').length, 0);
+  assert.equal(browsePeople(rows, 'Beatriz', true).length, 1);
   assert.equal(browsePeople(rows, 'sin resultado').length, 0);
 });
 
-function fixture(source, dimensions = { width: 390, height: 844 }, handedness = 'left') {
+function fixture(source, dimensions = { width: 390, height: 844 }, handedness = 'left', storage = new Map(), accountScope = 'account-a') {
   let cursor = 0, slots = [], effects = [], keyboardListeners = {};
   const calls = [];
   const equal = (a, b) => a && b && a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
@@ -71,16 +76,21 @@ function fixture(source, dimensions = { width: 390, height: 844 }, handedness = 
         isVisible: () => false, dismiss: () => calls.push('dismiss') },
     };
     if (name === 'react-native-safe-area-context') return { useSafeAreaInsets: () => ({ top: 47, bottom: 34, left: 0, right: 0 }) };
+    if (name === '@react-native-async-storage/async-storage') return { __esModule: true, default: {
+      getItem: async key => storage.get(key) ?? null,
+      setItem: async (key, value) => { storage.set(key, value); },
+    } };
     if (name === '@/components/booking-assistant/BookingAssistantUI') return { GoAssistantButton: 'GoAssistantButton' };
     if (name === '@/components/ui/GoCloseButton') return { GoCloseButton: 'GoCloseButton' };
     if (name === '@/components/ui/GoNavigationFloating') return { GoNavigationFloating: 'GoNavigationFloating' };
     if (name === '@/lib/orbitalPeople') return library.exports;
+    if (name === '@/lib/orbitalPeopleDemo') return demoLibrary.exports;
     throw Error(name);
   } };
   vm.runInNewContext(compile('components/landing/SupportTeamPanel.tsx'), scope);
   const props = { visible: true, source, onClose: () => calls.push('close'), onGoPress: () => calls.push('GO'),
-    handedness, renderSatellite: (satellite, size) => ({ type: 'OrbitButton', props: { ...satellite, size }, children: [] }) };
-  return { props, calls, keyboardShow: (height = 300) => keyboardListeners.keyboardDidShow?.({ endCoordinates: { height } }),
+    handedness, accountScope, renderSatellite: (satellite, size) => ({ type: 'OrbitButton', props: { ...satellite, size }, children: [] }) };
+  return { props, calls, storage, keyboardShow: (height = 300) => keyboardListeners.keyboardDidShow?.({ endCoordinates: { height } }),
     keyboardHide: () => keyboardListeners.keyboardDidHide?.(),
     render(p = props) { cursor = 0; effects = []; const tree = scope.exports.SupportTeamPanel(p); for (const run of effects) run(); return tree; } };
 }
@@ -112,9 +122,11 @@ test('search finds a unique worker code, clears to original list, and keyboard b
   f.keyboardHide(); input().props.onChangeText(''); tree = f.render(); assert.ok(labels(tree).includes('15 trabajadores'));
 });
 
-test('without an authorized team source, no synthetic people or false activity appear', () => {
-  const f = fixture(undefined); f.render(); const tree = f.render();
+test('without an authorized team source, demo stays opt-in and no synthetic people appear as real', async () => {
+  const f = fixture(undefined); f.render(); await tick(); const tree = f.render();
   assert.ok(labels(tree).includes('pendiente de conexión'));
+  assert.ok(labels(tree).includes('ACTIVAR DEMOSTRACIÓN'));
+  assert.equal(nodes(tree).find(node => node.props.accessibilityLabel === 'Añadir persona').props.disabled, true);
   assert.equal(nodes(tree).filter(node => node.type === 'OrbitButton').length, 8);
   assert.equal(nodes(tree).filter(node => node.type === 'OrbitButton' && node.props.empty).length, 7);
   assert.ok(nodes(tree).filter(node => node.type === 'OrbitButton').every(node => node.props.disabled));
@@ -159,7 +171,9 @@ test('floating back starts clear of the search and every orbit on compact phones
       const layout = orbitalPeopleLayout(dimensions.width, dimensions.height, insets, keyboard);
       const showOrbit = keyboard === 0 || !layout.scrollNeeded;
       const blockers = orbitalPeopleAvoidRects(dimensions.width, dimensions.height, insets, layout, showOrbit);
-      assert.equal(blockers.length, showOrbit ? 10 : 1);
+      assert.equal(blockers.length, showOrbit ? 11 : 2);
+      const [search, add] = blockers.slice(-2);
+      assert.ok(search.x + search.width + 2 <= add.x, 'search and plus must not overlap');
       const searchOnScreen = layout.searchTop - orbitalPeopleSearchScrollOffset(layout, insets);
       assert.ok(searchOnScreen >= 0 && searchOnScreen + layout.searchHeight <= layout.viewportHeight);
       const navTop = dimensions.height - insets.top - 72 - layout.navigationBottom - 64;
@@ -182,7 +196,7 @@ test('an authorized long press edits only the visible name after a confirmed ser
   const f = fixture(source); f.render(); await tick(); let tree = f.render();
   const person = nodes(tree).find(node => node.type === 'OrbitButton' && node.props.key === `person:${worker.id}`);
   person.props.onLongPress(); person.props.onPress(); tree = f.render();
-  assert.ok(labels(tree).includes('Nombre visible'));
+  assert.ok(labels(tree).includes('EDITAR PERSONA'));
   assert.equal(labels(tree).includes('Ficha de trabajador'), false, 'long press must not open the regular record');
   nodes(tree).find(node => node.props.accessibilityLabel === 'Nombre visible del trabajador').props.onChangeText('Nombre autorizado');
   tree = f.render(); nodes(tree).find(node => node.type === 'TouchableOpacity' && labels(node) === 'GUARDAR').props.onPress();
@@ -206,7 +220,7 @@ test('unauthorized long press cannot edit; invalid, cancelled and rejected edits
   tree = permitted.render(); const input = () => nodes(tree).find(node => node.props.accessibilityLabel === 'Nombre visible del trabajador');
   input().props.onChangeText('x'); tree = permitted.render();
   nodes(tree).find(node => node.type === 'TouchableOpacity' && labels(node) === 'GUARDAR').props.onPress();
-  tree = permitted.render(); assert.ok(labels(tree).includes('2 a 80 caracteres')); assert.equal(writes.length, 0);
+  tree = permitted.render(); assert.ok(labels(tree).includes('Comprueba el nombre')); assert.equal(writes.length, 0);
   input().props.onChangeText('Nombre sin guardar'); tree = permitted.render();
   nodes(tree).find(node => node.type === 'TouchableOpacity' && labels(node) === 'GUARDAR').props.onPress();
   await tick(); tree = permitted.render(); assert.ok(labels(tree).includes('No se confirmó')); assert.equal(writes.length, 1);
@@ -221,16 +235,187 @@ test('keyboard lifts only the orbital viewport and floating back, then restores 
   const navigation = () => nodes(tree).find(node => node.type === 'GoNavigationFloating');
   assert.equal(viewport().props.style[1].bottom, 64);
   assert.equal(navigation().props.protectedBottom, 34);
-  assert.equal(navigation().props.avoidRects.length, 10);
+  assert.equal(navigation().props.avoidRects.length, 11);
   f.keyboardShow(280); tree = f.render();
   assert.equal(viewport().props.style[1].bottom, 310);
   assert.equal(navigation().props.protectedBottom, 288);
   assert.equal(nodes(tree).find(node => node.type === 'GoCloseButton').props.keyboardVisible, true);
-  assert.equal(navigation().props.avoidRects.length, 1);
+  assert.equal(navigation().props.avoidRects.length, 2);
   viewport().props.ref.current = { scrollTo: options => f.calls.push(`scroll-to-search:${options.y}`) };
   viewport().props.onContentSizeChange(); assert.ok(f.calls.some(call => call.startsWith('scroll-to-search:')));
   f.keyboardHide(); tree = f.render();
   assert.equal(viewport().props.style[1].bottom, 64);
   assert.equal(navigation().props.protectedBottom, 34);
-  assert.equal(navigation().props.avoidRects.length, 10);
+  assert.equal(navigation().props.avoidRects.length, 11);
+});
+
+const button = (tree, label) => nodes(tree).find(node => node.type === 'TouchableOpacity' && labels(node) === label);
+const input = (tree, label) => nodes(tree).find(node => node.type === 'TextInput' && node.props.accessibilityLabel === label);
+const orbits = tree => nodes(tree).filter(node => node.type === 'OrbitButton');
+
+test('demo records stay local, explicit, editable and persistent across panel sessions', async () => {
+  const storage = new Map(), f = fixture(undefined, undefined, 'right', storage);
+  f.render(); await tick(); let tree = f.render();
+  assert.equal(orbits(tree).filter(node => node.props.empty).length, 7);
+  button(tree, 'ACTIVAR DEMOSTRACIÓN').props.onPress(); await tick(); tree = f.render();
+  assert.ok(labels(tree).includes('DEMOSTRACIÓN LOCAL'));
+  assert.deepEqual(orbits(tree).slice(0, 7).map(node => node.props.label),
+    ['Prueba 1', 'Prueba 2', 'Prueba 3', 'Prueba 4', 'Prueba 5', 'Prueba 6', 'Prueba 7']);
+  assert.equal(orbits(tree)[7].props.label, 'SOPORTE');
+  const first = orbits(tree)[0]; first.props.onLongPress(); first.props.onPress(); tree = f.render();
+  assert.ok(labels(tree).includes('EDITAR PERSONA'));
+  assert.equal(labels(tree).includes('Ficha de trabajador'), false);
+  input(tree, 'Nombre visible del trabajador').props.onChangeText('Prueba editada');
+  tree = f.render(); button(tree, 'GUARDAR').props.onPress(); await tick(); tree = f.render();
+  assert.ok(orbits(tree).some(node => node.props.label === 'Prueba editada'));
+  assert.ok([...storage.keys()].every(key => key.includes('go_orbital_people_demo_v1')));
+  const reopened = fixture(undefined, undefined, 'right', storage);
+  reopened.render(); await tick(); const restored = reopened.render();
+  assert.ok(labels(restored).includes('DEMOSTRACIÓN LOCAL'));
+  assert.ok(orbits(restored).some(node => node.props.label === 'Prueba editada'));
+  assert.equal(orbits(restored).filter(node => !node.props.empty && node.props.label !== 'SOPORTE').length, 7);
+  button(restored, 'DEMOSTRACIÓN LOCAL · SALIR').props.onPress(); await tick(); let paused = reopened.render();
+  assert.equal(orbits(paused).filter(node => node.props.empty).length, 7);
+  button(paused, 'ACTIVAR DEMOSTRACIÓN').props.onPress(); await tick(); paused = reopened.render();
+  assert.ok(orbits(paused).some(node => node.props.label === 'Prueba editada'));
+});
+
+test('demo plus creates a unique eighth member and pagination finds it; inactive members remain stored', async () => {
+  const storage = new Map(), f = fixture(undefined, undefined, 'left', storage);
+  f.render(); await tick(); let tree = f.render();
+  button(tree, 'ACTIVAR DEMOSTRACIÓN').props.onPress(); await tick(); tree = f.render();
+  const add = nodes(tree).find(node => node.props.accessibilityLabel === 'Añadir persona');
+  assert.equal(add.props.disabled, false); add.props.onPress(); tree = f.render();
+  input(tree, 'Nombre visible del trabajador').props.onChangeText('Prueba 8');
+  tree = f.render(); button(tree, 'GUARDAR').props.onPress(); await tick(); tree = f.render();
+  assert.ok(labels(tree).includes('Página 2 de 2'));
+  assert.equal(orbits(tree)[0].props.label, 'Prueba 8');
+  assert.equal(orbits(tree)[0].props.title.includes('DEMO-008'), true);
+  nodes(tree).find(node => node.type === 'GoCloseButton').props.onPress(); tree = f.render();
+  assert.ok(labels(tree).includes('Página 1 de 2'));
+  orbits(tree)[0].props.onPress(); tree = f.render();
+  assert.ok(labels(tree).includes('FICHA DE DEMOSTRACIÓN'));
+  button(tree, 'EDITAR').props.onPress(); tree = f.render();
+  input(tree, 'Función del miembro').props.onChangeText('Coordinación de prueba');
+  tree = f.render(); nodes(tree).find(node => node.props.accessibilityLabel === 'Cambiar estado del miembro').props.onPress();
+  tree = f.render(); button(tree, 'GUARDAR').props.onPress(); await tick(); tree = f.render();
+  assert.match(labels(tree), /Estado:\s+INACTIVO/);
+  assert.ok(labels(tree).includes('Coordinación de prueba'));
+  nodes(tree).find(node => node.type === 'GoCloseButton').props.onPress(); tree = f.render();
+  assert.ok(labels(tree).includes('VER INACTIVOS'));
+  button(tree, 'VER INACTIVOS').props.onPress(); tree = f.render();
+  assert.ok(orbits(tree).some(node => node.props.title.includes('inactivo')));
+  const saved = parseOrbitalDemoDirectory(storage.get(orbitalDemoStorageKey('support', 'account-a')));
+  assert.equal(saved.people.length, 8);
+  assert.equal(saved.people[0].active, false);
+  assert.equal(saved.people[0].role, 'Coordinación de prueba');
+});
+
+test('demo storage rejects duplicate codes, invalid names and does not leak across accounts or real sources', async () => {
+  let directory = newOrbitalDemoDirectory();
+  assert.equal(directory.people.length, 7);
+  assert.throws(() => createOrbitalDemoPerson(directory, ' ', ''), /nombre visible/);
+  assert.throws(() => createOrbitalDemoPerson(directory, 'Repetida', '001'), /pertenece/);
+  assert.throws(() => createOrbitalDemoPerson(directory, 'Nueva', 'código no válido'), /código/);
+  const result = createOrbitalDemoPerson(directory, 'Nueva', 'X1'); directory = result.directory;
+  assert.equal(result.person.code, 'DEMO-X1');
+  assert.throws(() => updateOrbitalDemoPerson(directory, 'real:1', { name: 'Otra', role: 'Prueba', active: true }));
+  assert.throws(() => parseOrbitalDemoDirectory(JSON.stringify({ ...directory,
+    people: [{ ...directory.people[0], id: 'real:1' }] })));
+  const storage = new Map([[orbitalDemoStorageKey('support', 'account-a'), JSON.stringify({ ...directory, enabled: true })]]);
+  const otherAccount = fixture(undefined, undefined, 'right', storage, 'account-b');
+  otherAccount.render(); await tick(); let tree = otherAccount.render();
+  assert.equal(orbits(tree).filter(node => node.props.empty).length, 7);
+  const real = fixture({ list: async () => people(1) }, undefined, 'right', storage, 'account-a');
+  real.render(); await tick(); tree = real.render();
+  assert.equal(orbits(tree)[0].props.label, 'Trabajador 000');
+  assert.equal(orbits(tree).some(node => node.props.label === 'Nueva'), false);
+  assert.equal(nodes(tree).find(node => node.props.accessibilityLabel === 'Añadir persona').props.disabled, true);
+  assert.equal(labels(tree).includes('DEMOSTRACIÓN LOCAL'), false);
+});
+
+test('real creation and editing require explicit capabilities and confirmed server responses', async () => {
+  const worker = people(1)[0], writes = [], created = { id: 'real:2', code: 'T-002', name: 'Nueva autorizada', role: 'Soporte', active: true };
+  const source = { list: async () => [worker], canEditName: () => true,
+    renameVisibleName: async (id, name) => ({ ...worker, name }),
+    canCreateMember: () => true, createMember: async (name, code) => { writes.push({ name, code }); return created; } };
+  const f = fixture(source); f.render(); await tick(); let tree = f.render();
+  nodes(tree).find(node => node.props.accessibilityLabel === 'Añadir persona').props.onPress(); tree = f.render();
+  input(tree, 'Nombre visible del trabajador').props.onChangeText('Nueva autorizada');
+  tree = f.render(); button(tree, 'GUARDAR').props.onPress(); button(tree, 'GUARDAR').props.onPress();
+  await tick(); tree = f.render();
+  assert.deepEqual(writes, [{ name: 'Nueva autorizada', code: undefined }]);
+  assert.ok(orbits(tree).some(node => node.props.label === 'Nueva autorizada'));
+  assert.equal(f.storage.size, 0, 'real records never write to the local demo store');
+  const denied = fixture({ list: async () => [worker], canCreateMember: () => false,
+    createMember: async () => { throw Error('must not run'); } });
+  denied.render(); await tick(); tree = denied.render();
+  assert.equal(nodes(tree).find(node => node.props.accessibilityLabel === 'Añadir persona').props.disabled, true);
+});
+
+test('real role and active changes require per-person capabilities and do not appear before server confirmation', async () => {
+  const worker = people(1)[0], writes = [];
+  let finish;
+  const source = { list: async () => [worker], canEditRole: () => true, canSetActive: () => true,
+    updateMember: (id, changes) => { writes.push({ id, changes }); return new Promise(resolve => { finish = resolve; }); } };
+  const f = fixture(source); f.render(); await tick(); let tree = f.render();
+  assert.equal(orbits(tree)[0].props.onLongPress, undefined, 'name long press needs name permission');
+  orbits(tree)[0].props.onPress(); tree = f.render();
+  button(tree, 'EDITAR').props.onPress(); tree = f.render();
+  assert.equal(input(tree, 'Nombre visible del trabajador').props.editable, false);
+  input(tree, 'Función del miembro').props.onChangeText('Coordinación');
+  tree = f.render(); nodes(tree).find(node => node.props.accessibilityLabel === 'Cambiar estado del miembro').props.onPress();
+  tree = f.render(); button(tree, 'GUARDAR').props.onPress(); tree = f.render();
+  assert.equal(writes.length, 1);
+  assert.ok(labels(tree).includes('GUARDANDO'));
+  assert.match(labels(tree), /Estado:\s+ACTIVO/);
+  finish({ ...worker, role: 'Coordinación', active: false }); await tick(); tree = f.render();
+  assert.match(labels(tree), /Estado:\s+INACTIVO/);
+  assert.ok(labels(tree).includes('Coordinación'));
+  const denied = fixture({ list: async () => [worker], canEditRole: () => false,
+    canSetActive: () => false, updateMember: async () => { throw Error('must not run'); } });
+  denied.render(); await tick(); tree = denied.render();
+  orbits(tree)[0].props.onPress(); tree = denied.render();
+  assert.equal(button(tree, 'EDITAR'), undefined);
+});
+
+test('a late real write from the previous account cannot repaint the next account or leave its editor blocked', async () => {
+  const worker = people(1)[0]; let finish;
+  const source = { list: async () => [worker], canEditName: () => true,
+    renameVisibleName: () => new Promise(resolve => { finish = resolve; }) };
+  const f = fixture(source); f.render(); await tick(); let tree = f.render();
+  orbits(tree)[0].props.onLongPress(); tree = f.render();
+  input(tree, 'Nombre visible del trabajador').props.onChangeText('Nombre antiguo');
+  tree = f.render(); button(tree, 'GUARDAR').props.onPress();
+  f.props.accountScope = 'account-b'; f.render(); await tick(); tree = f.render();
+  finish({ ...worker, name: 'Nombre antiguo' }); await tick(); tree = f.render();
+  assert.equal(orbits(tree)[0].props.label, worker.name);
+  assert.equal(labels(tree).includes('GUARDANDO'), false);
+  assert.equal(f.storage.size, 0);
+});
+
+test('the orbital browser accepts a distinct team context without changing SOPORTE or sharing demo storage', async () => {
+  assert.notEqual(orbitalDemoStorageKey('support', 'account-a'), orbitalDemoStorageKey('enterprise-1', 'account-a'));
+  const f = fixture({ list: async () => people(8) });
+  Object.assign(f.props, { directoryKey: 'enterprise-1', directoryLabel: 'PERSONAL', nextLabel: 'EMPRESA',
+    memberSingular: 'colaborador', memberPlural: 'colaboradores', originLabel: 'EMPRESA' });
+  f.render(); await tick(); const tree = f.render();
+  assert.ok(labels(tree).includes('PERSONAL'));
+  assert.ok(labels(tree).includes('8 colaboradores'));
+  assert.equal(orbits(tree)[7].props.label, 'EMPRESA');
+  assert.equal(nodes(tree).find(node => node.type === 'GoCloseButton').props.accessibilityLabel, 'Volver a EMPRESA');
+  assert.equal(f.storage.size, 0);
+});
+
+test('cancelling a local demo edit keeps the stored record and code unchanged', async () => {
+  const storage = new Map(), f = fixture(undefined, undefined, 'left', storage);
+  f.render(); await tick(); let tree = f.render();
+  button(tree, 'ACTIVAR DEMOSTRACIÓN').props.onPress(); await tick(); tree = f.render();
+  orbits(tree)[0].props.onLongPress(); tree = f.render();
+  input(tree, 'Nombre visible del trabajador').props.onChangeText('No guardar');
+  tree = f.render(); button(tree, 'CANCELAR').props.onPress(); tree = f.render();
+  assert.equal(orbits(tree)[0].props.label, 'Prueba 1');
+  const stored = parseOrbitalDemoDirectory(storage.get(orbitalDemoStorageKey('support', 'account-a')));
+  assert.equal(stored.people[0].name, 'Prueba 1');
+  assert.equal(stored.people[0].code, 'DEMO-001');
 });

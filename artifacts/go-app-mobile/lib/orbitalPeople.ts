@@ -49,9 +49,12 @@ export function orbitalPeopleAvoidRects(width: number, height: number, insets: O
   }) : [];
   if (showOrbit) rects.push({ x: wrapLeft + (layout.wrap - layout.goSize) / 2,
     y: wrapTop + (layout.wrap - layout.goSize) / 2, width: layout.goSize, height: layout.goSize });
-  rects.push({ x: (width - Math.min(width - insets.left - insets.right - 36, 320)) / 2,
+  const searchWidth = Math.min(width - insets.left - insets.right - 118, 280);
+  rects.push({ x: (width - searchWidth) / 2,
     y: layout.searchTop - scrollOffset - hostTop,
-    width: Math.min(width - insets.left - insets.right - 36, 320), height: layout.searchHeight });
+    width: searchWidth, height: layout.searchHeight });
+  rects.push({ x: width - insets.right - 12 - 44,
+    y: layout.searchTop - scrollOffset - hostTop, width: 44, height: layout.searchHeight });
   return rects;
 }
 
@@ -61,11 +64,11 @@ export function normalizePeopleSearch(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLocaleLowerCase("es-ES");
 }
 
-export function browsePeople(people: readonly OrbitalPerson[], query: string): OrbitalPerson[] {
+export function browsePeople(people: readonly OrbitalPerson[], query: string, includeInactive = false): OrbitalPerson[] {
   const term = normalizePeopleSearch(query);
   const seen = new Set<string>();
   return people.filter(person => {
-    if (!person.active || seen.has(person.id) || term && !normalizePeopleSearch(person.name).includes(term)
+    if ((!includeInactive && !person.active) || seen.has(person.id) || term && !normalizePeopleSearch(person.name).includes(term)
       && !normalizePeopleSearch(person.code).includes(term)) return false;
     seen.add(person.id);
     return true;
