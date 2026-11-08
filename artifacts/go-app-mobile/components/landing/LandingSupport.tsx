@@ -28,7 +28,7 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, businessId
   const editor=useRef<TextInputInstance|null>(null),nestedBack=useRef<(()=>boolean)|null>(null);
   const [toolsOpen,setToolsOpen]=useState(false),[bodyHeight,setBodyHeight]=useState(360),[textHeight,setTextHeight]=useState(96);
   const [voiceAttempt,setVoiceAttempt]=useState(0);
-  const [composerHeight,setComposerHeight]=useState(108);
+  const [composerDockHeight,setComposerDockHeight]=useState(200);
   const [aiSession,setAiSession]=useState<{key:string;kind:typeof kind;source:string}|null>(null),aiSequence=useRef(0);
   const liveAi=useRef(aiSession);liveAi.current=aiSession;
   const back=()=>{if(keyboardVisible||Keyboard.isVisible?.()){editor.current?.blur();Keyboard.dismiss();return;}if(nestedBack.current?.())return;voice.abort();setToolsOpen(false);onClose();};
@@ -138,12 +138,15 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, businessId
     {file.mime.startsWith("image/")?<Image accessibilityLabel={file.name} source={{uri:file.uri}} style={s.preview}/>:<Feather name="file-text" size={24} color="#17212b"/>}
     <Text style={[s.text,{flex:1}]}>{file.name}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel={"Quitar "+file.name} disabled={busy||picking} onPress={()=>void remove(file)} style={s.remove}><Feather name="x" size={22} color="#a1232e"/></TouchableOpacity>
   </View>);
-  const thumbControls=<GoNavigationFloating screenKey={"support-"+kind} safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} keyboardResponsive protectedBottom={kind==="mine"?0:composerHeight+10} width={kind==="mine"?136:236}><View testID="support-thumb-controls" style={[s.controls,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
+  const controlButtons=<View testID="support-thumb-controls" style={[s.controls,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
     {kind!=="mine"&&<IconButton appearance="supportAction" icon="trash-2" label="Limpiar texto del borrador" disabled={busy||picking||!drafts[kind]} onPress={clearCurrentText}/>}
     {kind!=="mine"&&<IconButton appearance="supportAction" icon="paperclip" label={toolsOpen?"Ocultar adjuntos":"Adjuntar referencia"} disabled={busy||picking} onPress={()=>{editor.current?.blur();Keyboard.dismiss();setToolsOpen(open=>!open);}}/>}
     <GoAssistantButton size={kind==="mine"?64:56} onPress={openAI} disabled={busy||picking||voice.status==="transcribing"}/>
     <GoCloseButton level="panel" appearance="light" keyboardVisible={keyboardVisible} accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a las órbitas de ayuda"} onPress={back}/>
-  </View></GoNavigationFloating>;
+  </View>;
+  // Writing controls belong to the composer flow: no drag host, saved coordinates
+  // or second keyboard displacement. Mis solicitudes keeps its existing navigation.
+  const thumbControls=kind==="mine"?<GoNavigationFloating screenKey="support-mine" safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} keyboardResponsive width={136}>{controlButtons}</GoNavigationFloating>:controlButtons;
   return <Modal visible={visible} animationType="slide" onRequestClose={back}>
     <GoScreenHost registerBack={handler=>{nestedBack.current=handler;}}>
     <KeyboardAvoidingView style={[s.screen,{paddingTop:insets.top,paddingBottom:keyboardVisible?0:insets.bottom}]} behavior={Platform.OS==="ios"?"padding":"height"}>
@@ -167,12 +170,13 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, businessId
         <ScrollView testID="support-writing-scroll" style={{flex:1,minHeight:0}} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={s.writing}>
           {fileList}
           {!!error&&<Text accessibilityRole="alert" style={s.error}>{error}</Text>}
-          {!gateway&&<Text style={s.hint}>El envío de solicitudes está pendiente de conexión al servidor.</Text>}
           {voice.status==="listening"&&<Text accessibilityLiveRegion="polite" style={s.activity}>● Escuchando</Text>}
           {(voice.status==="preparing"||voice.status==="transcribing")&&<Text accessibilityLiveRegion="polite" style={s.hint}>{voice.status==="transcribing"?"Transcribiendo…":"Preparando micrófono…"}</Text>}
           {!!receipt&&<Text accessibilityLiveRegion="polite" style={s.text}>Recibida · {receipt.reference}</Text>}
         </ScrollView>
-          <View testID="support-composer" onLayout={event=>setComposerHeight(event.nativeEvent.layout.height)} style={[s.composer,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
+        <View testID="support-composer-dock" style={s.composerDock} onLayout={event=>setComposerDockHeight(event.nativeEvent.layout.height)}>
+          <View testID="support-fixed-controls" style={[s.fixedControls,{alignItems:handedness==="left"?"flex-start":"flex-end"}]}>{thumbControls}</View>
+          <View testID="support-composer" style={[s.composer,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
             <TextInput ref={editor} testID="support-text" accessibilityLabel="Descripción de la solicitud" multiline scrollEnabled maxLength={4000} value={drafts[kind]} editable={!busy}
               style={[s.input,{height:compact?Math.max(44,Math.min(textHeight,88,bodyHeight-90)):Math.max(96,Math.min(textHeight,220,Math.max(96,bodyHeight-104)))}]}
               onFocus={()=>{setToolsOpen(false);voice.focus("detail");}} onContentSizeChange={event=>setTextHeight(event.nativeEvent.contentSize.height)}
@@ -182,8 +186,9 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, businessId
               <GoSendButton testID="support-send" disabled={disabled} busy={busy} onPress={submit}/>
             </View>
           </View>
-          {thumbControls}
-        {toolsOpen&&<View pointerEvents="box-none" style={{position:"absolute",left:0,right:0,bottom:composerHeight+82,top:0}}><GoNoteAttachmentMenu tray handedness={handedness} maxHeight={Math.max(80,Math.min(260,bodyHeight-composerHeight-90))} disabled={busy||picking} onFile={()=>void attach(false)} onPhotos={()=>void attach(true)}/></View>}
+          {!gateway&&<Text testID="support-send-unavailable" accessibilityLiveRegion="polite" style={s.sendUnavailable}>Envío temporalmente deshabilitado.</Text>}
+        </View>
+        {toolsOpen&&<View pointerEvents="box-none" style={{position:"absolute",left:0,right:0,bottom:composerDockHeight+18,top:0}}><GoNoteAttachmentMenu tray handedness={handedness} maxHeight={Math.max(80,Math.min(260,bodyHeight-composerDockHeight-18))} disabled={busy||picking} onFile={()=>void attach(false)} onPhotos={()=>void attach(true)}/></View>}
       </>}
       {kind==="mine"&&thumbControls}
       </View>
@@ -199,7 +204,8 @@ export function LandingSupport({ visible, onClose, scopeKey, gateway, businessId
 }
 const s=StyleSheet.create({
  screen:{flex:1,backgroundColor:"#ffffff"},workspace:{flex:1,minHeight:0,marginHorizontal:16,paddingBottom:10},header:{paddingHorizontal:18,paddingVertical:12},title:{color:"#17212b",fontSize:22,fontWeight:"700"},
- writing:{flexGrow:1,justifyContent:"flex-end",paddingTop:10,paddingBottom:82,gap:10},history:{paddingTop:12,paddingBottom:88,gap:14},text:{color:"#17212b",fontSize:16,lineHeight:23,flexShrink:1},hint:{color:"#515d69",fontSize:13,lineHeight:19,paddingHorizontal:16},
+ writing:{flexGrow:1,justifyContent:"flex-end",paddingTop:10,paddingBottom:10,gap:10},history:{paddingTop:12,paddingBottom:88,gap:14},text:{color:"#17212b",fontSize:16,lineHeight:23,flexShrink:1},hint:{color:"#515d69",fontSize:13,lineHeight:19,paddingHorizontal:16},
+ composerDock:{flexShrink:0},fixedControls:{marginBottom:6,marginHorizontal:12},sendUnavailable:{color:"#515d69",fontSize:13,lineHeight:18,marginTop:6},
  composer:{borderWidth:1,borderColor:"#b4bdc6",borderRadius:16,backgroundColor:"#fafbfc",padding:6,gap:4,alignItems:"flex-end"},input:{flex:1,minWidth:0,color:"#17212b",padding:10,fontSize:18,lineHeight:25,textAlignVertical:"top"},
  row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:10},file:{flexDirection:"row",alignItems:"center",gap:8,padding:6,borderWidth:1,borderColor:"#d2d8de",borderRadius:12},preview:{width:44,height:44,borderRadius:8},remove:{minWidth:44,minHeight:44,alignItems:"center",justifyContent:"center"},
  controls:{alignItems:"flex-end",gap:8,flexShrink:0},

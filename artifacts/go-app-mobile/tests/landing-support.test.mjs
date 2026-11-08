@@ -143,10 +143,10 @@ test('floating back hides the keyboard first and preserves the current form',()=
  const f=fixture();f.render();let tree=f.render(),nav=()=>nodes(tree).find(n=>n.type==='GoCloseButton');
  nodes(tree).find(n=>n.type==='TextInput').props.onChangeText('Conservar texto');
  f.events.get('keyboardWillShow')();tree=f.render();assert.equal(nav().props.keyboardVisible,true);
- assert.equal(nodes(tree).find(n=>n.type==='GoNavigationFloating').props.keyboardVisible,true);
+ assert.equal(nodes(tree).some(n=>n.type==='GoNavigationFloating'),false,'writing controls never mount a persisted drag host');
  assert.equal(nodes(tree).find(n=>n.type==='KeyboardAvoidingView').props.style[1].paddingBottom,0);
  nav().props.onPress();assert.deepEqual(f.navigation,['keyboard']);tree=f.render();assert.equal(nav().props.keyboardVisible,false);
- assert.equal(nodes(tree).find(n=>n.type==='GoNavigationFloating').props.keyboardVisible,false);
+ assert.equal(nodes(tree).some(n=>n.type==='GoNavigationFloating'),false);
  assert.equal(nodes(tree).find(n=>n.type==='KeyboardAvoidingView').props.style[1].paddingBottom,34);
  assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'Conservar texto');
  nav().props.onPress();assert.deepEqual(f.navigation,['keyboard','abort','back']);
@@ -260,13 +260,63 @@ test('separate microphone inserts one final transcript at the native cursor with
  icon(tree,'Dictar solicitud').props.onPress();f.render({...f.props,kind:'help'});f.voice.onPreparedText('antiguo');tree=f.render({...f.props,kind:'help'});assert.equal(input().props.value,'');
 });
 
-test('GO and close float as a compact thumb group above a fixed editor with integrated paper plane for both hands',()=>{
- for(const width of [320,375,390,430,768])for(const height of [140,180,220,480,690])for(const handedness of ['right','left']){
-  const f=fixture(),p={...f.props,handedness};f.render(p);let tree=f.render(p);nodes(tree).find(n=>n.props.testID==='support-workspace').props.onLayout({nativeEvent:{layout:{height}}});nodes(tree).find(n=>n.type==='TextInput').props.onContentSizeChange({nativeEvent:{contentSize:{height:1800}}});f.events.get('keyboardWillShow')();tree=f.render(p);
-  const input=nodes(tree).find(n=>n.type==='TextInput'),footer=nodes(tree).find(n=>n.props.testID==='support-thumb-controls'),send=nodes(tree).find(n=>n.props.testID==='support-send'),composer=nodes(tree).find(n=>n.props.testID==='support-composer'),workspace=nodes(tree).find(n=>n.props.testID==='support-workspace');assert.ok(input.props.style[1].height<=(height<220?Math.max(44,height-90):Math.max(96,height-104)));assert.ok(input.props.scrollEnabled);assert.equal(footer.props.style[1].flexDirection,handedness==='right'?'row':'row-reverse');
-  const floating=nodes(tree).find(n=>n.type==='GoNavigationFloating');assert.equal(floating.props.handedness,handedness);assert.equal(floating.props.width,236);assert.ok(nodes(workspace).includes(footer));assert.ok(!nodes(composer).includes(footer),'group stays inside full-size touch host, not outside composer hit bounds');assert.ok(nodes(composer).includes(send));assert.ok(44+44+56+64+3*8<width-32);
-  composer.props.onLayout({nativeEvent:{layout:{height:input.props.style[1].height+12}}});tree=f.render(p);const moved=nodes(tree).find(n=>n.props.testID==='support-thumb-controls');assert.equal(nodes(tree).find(n=>n.type==='GoNavigationFloating').props.protectedBottom,input.props.style[1].height+22);assert.deepEqual(moved.children.map(n=>n.type),['IconButton','IconButton','GoAssistantButton','GoCloseButton']);assert.equal(nodes(tree).find(n=>n.type==='KeyboardAvoidingView').props.style[1].paddingBottom,0);
-  icon(tree,'Adjuntar referencia').props.onPress();tree=f.render(p);assert.equal(menu(tree).props.handedness,handedness);assert.ok(menu(tree).props.maxHeight<=Math.max(80,height-16));
+test('all three writing forms dock four fixed controls 6pt above the real composer for both hands and compact heights',()=>{
+ for(const kind of ['incident','improvement','help'])for(const width of [320,375,390,430,768])for(const height of [140,180,220,480,690])for(const handedness of ['right','left']){
+  const f=fixture(),p={...f.props,kind,handedness};f.render(p);let tree=f.render(p);
+  nodes(tree).find(n=>n.props.testID==='support-workspace').props.onLayout({nativeEvent:{layout:{height}}});
+  nodes(tree).find(n=>n.type==='TextInput').props.onContentSizeChange({nativeEvent:{contentSize:{height:1800}}});
+  f.events.get('keyboardWillShow')();tree=f.render(p);
+  const input=nodes(tree).find(n=>n.type==='TextInput'),footer=nodes(tree).find(n=>n.props.testID==='support-thumb-controls'),dock=nodes(tree).find(n=>n.props.testID==='support-composer-dock'),fixed=nodes(tree).find(n=>n.props.testID==='support-fixed-controls'),composer=nodes(tree).find(n=>n.props.testID==='support-composer');
+  assert.ok(input.props.style[1].height<=(height<220?Math.max(44,height-90):Math.max(96,height-104)));assert.ok(input.props.scrollEnabled);
+  assert.equal(footer.props.style[1].flexDirection,handedness==='right'?'row':'row-reverse');
+  assert.equal(fixed.props.style[1].alignItems,handedness==='right'?'flex-end':'flex-start');
+  assert.equal(dock.props.style.flexShrink,0);assert.equal(fixed.props.style[0].marginBottom,6);
+  assert.ok(!dock.props.style.position&&!fixed.props.style[0].position&&!footer.props.style[0].position,'layout follows the composer, not absolute screen coordinates');
+  assert.equal(dock.children.filter(n=>n&&typeof n==='object')[0],fixed);assert.equal(dock.children.filter(n=>n&&typeof n==='object')[1],composer);
+  assert.ok(nodes(fixed).includes(footer));assert.ok(nodes(composer).some(n=>n.type==='GoSendButton'));
+  assert.equal(nodes(tree).some(n=>n.type==='GoNavigationFloating'||n.type==='DraggableFAB'||n.type==='GestureDetector'),false,'no gesture or AsyncStorage position is mounted');
+  assert.deepEqual(footer.children.map(n=>n.type),['IconButton','IconButton','GoAssistantButton','GoCloseButton']);
+  assert.ok(44+44+56+64+3*8<=width-32-24,'unchanged controls fit the available width including side margins');
+  const dockHeight=input.props.style[1].height+124;
+  dock.props.onLayout({nativeEvent:{layout:{height:dockHeight}}});tree=f.render(p);
+  icon(tree,'Adjuntar referencia').props.onPress();tree=f.render(p);
+  assert.equal(menu(tree).props.handedness,handedness);assert.ok(menu(tree).props.maxHeight<=Math.max(80,height-dockHeight-18));
+  const tray=nodes(tree).find(n=>n.props.pointerEvents==='box-none'&&n.props.style?.bottom===dockHeight+18);assert.ok(tray,'attachment menu clears the measured dock, including its unavailable-send notice');
+ }
+});
+
+test('keyboard open, system hide, back dismissal, reopens and multiline resize never change the fixed composer gap',()=>{
+ for(const kind of ['incident','improvement','help'])for(const handedness of ['right','left']){
+  const f=fixture(),p={...f.props,kind,handedness};f.render(p);let tree=f.render(p);
+  nodes(tree).find(n=>n.type==='TextInput').props.onChangeText('Borrador que se conserva');
+  for(let i=0;i<4;i++){
+   f.events.get('keyboardWillShow')();tree=f.render(p);
+   nodes(tree).find(n=>n.type==='TextInput').props.onContentSizeChange({nativeEvent:{contentSize:{height:80+i*75}}});tree=f.render(p);
+   assert.equal(nodes(tree).find(n=>n.props.testID==='support-fixed-controls').props.style[0].marginBottom,6);
+   assert.equal(nodes(tree).find(n=>n.type==='GoCloseButton').props.keyboardVisible,true);
+   if(i%2)nodes(tree).find(n=>n.type==='GoCloseButton').props.onPress();else f.events.get('keyboardDidHide')();
+   tree=f.render(p);assert.equal(nodes(tree).find(n=>n.type==='GoCloseButton').props.keyboardVisible,false);
+   assert.equal(nodes(tree).find(n=>n.type==='KeyboardAvoidingView').props.style[1].paddingBottom,34);
+   assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'Borrador que se conserva');
+   assert.equal(nodes(tree).find(n=>n.props.testID==='support-fixed-controls').props.style[0].marginBottom,6);
+   assert.equal(nodes(tree).some(n=>n.type==='GoNavigationFloating'),false);
+  }
+  const reopened=fixture();reopened.render(p);const newTree=reopened.render(p);
+  assert.equal(nodes(newTree).find(n=>n.props.testID==='support-fixed-controls').props.style[0].marginBottom,6,'fresh mount uses the same flow and cannot restore legacy fab_pos coordinates');
+ }
+});
+
+test('disabled send has an adjacent visible explanation and keeps each form draft and attachment',async()=>{
+ for(const kind of ['incident','improvement','help']){
+  const f=fixture(),p={...f.props,kind};f.render(p);let tree=f.render(p);
+  nodes(tree).find(n=>n.type==='TextInput').props.onChangeText('Conservar mi solicitud');tree=f.render(p);
+  f.picker.document=async()=>({canceled:false,assets:[f.files.asset('referencia.pdf',10,'application/pdf')]});
+  icon(tree,'Adjuntar referencia').props.onPress();tree=f.render(p);menu(tree).props.onFile();await tick();tree=f.render(p);
+  const dock=nodes(tree).find(n=>n.props.testID==='support-composer-dock'),notice=nodes(tree).find(n=>n.props.testID==='support-send-unavailable');
+  assert.ok(nodes(dock).includes(notice));assert.match(text(notice),/Envío temporalmente deshabilitado/);
+  assert.equal(button(tree,'ENVIAR').props.disabled,true);await button(tree,'ENVIAR').props.onPress();tree=f.render(p);
+  assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'Conservar mi solicitud');assert.ok(text(tree).includes('referencia.pdf'));assert.ok(!text(tree).includes('Recibida ·'));
+  f.render({...p,visible:false});tree=f.render(p);assert.equal(nodes(tree).find(n=>n.type==='TextInput').props.value,'Conservar mi solicitud');assert.ok(text(tree).includes('referencia.pdf'));
  }
 });
 

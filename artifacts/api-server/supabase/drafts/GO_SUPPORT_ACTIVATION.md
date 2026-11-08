@@ -1,5 +1,52 @@
 # GO AYUDA: activación pendiente
 
+## Controles fijos y bloqueo de envío — 8 de noviembre de 2026
+
+La corrección de los formularios no activa la infraestructura. Incidencia, Mejora
+y Ayuda anclan Papelera, Adjuntar, GO y Volver en el mismo flujo que el editor, con
+6 puntos de separación. No montan el reconocedor de arrastre ni leen posiciones
+`fab_pos` anteriores. KeyboardAvoidingView es el único desplazamiento por teclado;
+la bandeja de adjuntos utiliza la altura medida del conjunto. Mis solicitudes,
+ADMIN y los controles flotantes de otros módulos conservan su implementación.
+
+Cuando falta la conexión autorizada, ENVIAR permanece deshabilitado y la explicación
+«Envío temporalmente deshabilitado» está junto al editor, fuera del scroll de
+adjuntos. No se descartan borradores ni archivos y no se muestra recepción ficticia.
+`GO_SUPPORT_LIVE_ENABLED` sigue en `false`.
+
+Se ha vuelto a comprobar en lectura el proyecto `xiyxziyjpgnqfecbhmqn`: las cuatro
+tablas operativas, el esquema privado y el bucket continúan ausentes. Railway
+responde 200 en `/api/healthz` y 401 `AUTH_REQUIRED` en capacidades de SOPORTE sin
+sesión; esto acredita la ruta y su protección, no una recepción persistida.
+
+Revisión íntegra del SQL: conserva la huella indicada abajo y no se ha modificado
+ni ejecutado en producción. Las escrituras y `DELETE` de la purga están limitados
+a objetos de SOPORTE; no hay `DROP` ni cambios de registros de otros módulos.
+Las funciones privilegiadas conservan comprobación de identidad/autorización,
+`search_path` vacío y revocación a PUBLIC/anon. El acceso Storage está limitado al
+bucket privado y al expediente autorizado. Estas operaciones privilegiadas y la
+purga irreversible de expedientes vencidos siguen requiriendo revisión y
+autorización específica antes de aplicar la migración alojada.
+
+Las pruebas aisladas ejecutan el contrato real de Express y SQL sobre PostgreSQL
+PGlite persistente, con identidades y adaptador de Storage sintéticos: envío de los
+tres tipos, respuesta ADMIN y del remitente, notas internas ocultas, adjuntos,
+idempotencia, retención y reapertura del almacenamiento tras reiniciar. No son una
+restauración de un respaldo alojado ni una prueba de Auth/Storage de producción.
+
+**Bloqueo productivo conservado:** no se ha acreditado un respaldo recuperable del
+proyecto alojado ni la restauración aislada de ese respaldo; tampoco existe
+autorización específica para ejecutar este SQL en producción. El conector
+disponible no expone el inventario de copias. Se debe identificar la copia en
+Supabase → Database → Backups (o un respaldo privado equivalente), verificar su
+origen e integridad y restaurarla en un entorno aislado antes de pedir autorización
+del SQL exacto. El respaldo de base de datos no incluye los objetos de Storage:
+debe documentarse también su recuperación antes de activar adjuntos reales.
+
+No se solicita ni ejecuta un cambio productivo saltando estas condiciones. Tras
+cumplirlas, la activación requiere una transacción autenticada real completa
+USUARIO → ADMIN → respuesta → MIS SOLICITUDES antes de habilitar el cliente.
+
 ## Comprobación del 8 de noviembre de 2026
 
 Proyecto alojado comprobado en lectura: `goapp` / `xiyxziyjpgnqfecbhmqn`, PostgreSQL 17.
