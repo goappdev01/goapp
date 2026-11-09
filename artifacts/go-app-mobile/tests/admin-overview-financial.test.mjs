@@ -11,13 +11,13 @@ function screen({allowed=true,adminView=true,owner=true,lang='es'}={}){
  const states=[];let cursor=0,tree,tools=0,context=0,closed=0;
  const react={createElement(type,props,...children){return{type,props:props||{},children:children.flat(Infinity)};},Fragment:'Fragment',useState(initial){const i=cursor++;if(!(i in states))states[i]=initial;return[states[i],next=>{states[i]=typeof next==='function'?next(states[i]):next;}];}};
  const native=Object.fromEntries(['SafeAreaView','ScrollView','Text','TouchableOpacity','View'].map(n=>[n,n]));native.Dimensions={get:()=>({width:390,height:844})};native.StyleSheet={create:s=>s};
- const modules={"@/components/ui/GoCloseButton":{GoCloseButton:"GoCloseButton"},react:{...react,default:react},'react-native':native,'@/components/debug/OwnerContextIndicator':{OwnerContextModal:'Modal'},'@expo/vector-icons':{Feather:'Icon'},'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34})},'expo-status-bar':{StatusBar:'StatusBar'},'@/contexts/LanguageContext':{useLanguage:()=>({lang:'es'})},'@/contexts/GoAdminAccessContext':{useAdminAccess:()=>({allowed,userId:'SYNTHETIC',isOwner:owner})},'@/contexts/GoViewContext':{useGoView:()=>({isAdminView:adminView,isOwner:owner})}};
+ const modules={"@/components/ui/GoCloseButton":{GoCloseButton:"GoCloseButton"},"@/components/ui/GoNavigationRail":{GoNavigationRail:"GoNavigationRail"},react:{...react,default:react},'react-native':native,'@/components/debug/OwnerContextIndicator':{OwnerContextModal:'Modal'},'@expo/vector-icons':{Feather:'Icon'},'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34})},'expo-status-bar':{StatusBar:'StatusBar'},'@/contexts/LanguageContext':{useLanguage:()=>({lang:'es'})},'@/contexts/GoAdminAccessContext':{useAdminAccess:()=>({allowed,userId:'SYNTHETIC',isOwner:owner})},'@/contexts/GoViewContext':{useGoView:()=>({isAdminView:adminView,isOwner:owner})}};
  const c={exports:{},console,require:k=>{if(k in modules)return modules[k];if(k.startsWith('./')||k==='../DraggableFAB')return new Proxy({},{get:(_,name)=>String(name)});throw Error('Unexpected import '+k);}};
  modules['@/contexts/LanguageContext']={useLanguage:()=>({lang})};
  vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText+'\nexports.catalogue=MODULOS_EMPRESA_ROADMAP;',c);
  const props={visible:true,onClose:()=>closed++,onOpenTools:()=>tools++,onOpenContext:()=>context++};
  function render(){cursor=0;tree=c.exports.GoAdminDashboard(props);return tree;}
- function* walk(n){if(!n||typeof n!=='object')return;yield n;for(const child of n.children||[])yield*walk(child);}
+ function* walk(n){if(!n||typeof n!=='object')return;yield n;for(const child of n.children||[])yield*walk(child);if(n.type==="GoNavigationRail")yield*walk(n.props.controls);}
  function all(){render();return[...walk(tree)];}
  function button(label){const b=all().find(n=>n.props.accessibilityLabel===label);assert.ok(b,'Button '+label);return b;}
  return{render,all,button,catalogue:c.exports.catalogue,setVisible:value=>{props.visible=value;},tools:()=>tools,context:()=>context,closed:()=>closed};
@@ -64,7 +64,7 @@ test('module catalogue and existing floating GO controls are unchanged; Expo Go 
    if(name==='MODULOS_EMPRESA_ROADMAP'||name==='SECTIONS')return d.initializer.elements.filter(e=>!e.properties.some(p=>p.name?.getText(f)==='key'&&['go_proyecciones','projections'].includes(p.initializer?.text))).map(e=>e.getText(f).replace(/\r\n/g,'\n')).join('\n');
    return d.initializer.getText(f).replace(/\r\n/g,'\n');}throw Error(name);}
  for(const name of ['SECTIONS','MODULOS_EMPRESA_ROADMAP','SIGUIENTES_MODULOS','MOCK_METRICS']){if(source.includes('const '+name))assert.equal(constant(source,name),constant(original,name));}
- function controls(text){const f=ast(text),found=[];function visit(n){if(ts.isJsxElement(n)&&n.openingElement.tagName.getText(f)==='DraggableFAB'){function callbacks(c){if(ts.isJsxAttribute(c)&&c.name.getText(f)==='onPress')found.push(c.initializer.expression.getText(f).replace(/\r\n/g,'\n'));ts.forEachChild(c,callbacks);}callbacks(n);}ts.forEachChild(n,visit);}visit(f);return found;}
+ function controls(text){const f=ast(text),found=[];function visit(n){if(ts.isJsxSelfClosingElement(n)&&n.tagName.getText(f)==='GoCloseButton'){const callback=n.attributes.properties.find(p=>p.name?.getText(f)==='onPress');found.push(callback.initializer.expression.getText(f));}ts.forEachChild(n,visit);}visit(f);return found;}
  assert.deepEqual(controls(source),controls(original));assert.doesNotMatch(source,/expo-dev-client|DevMenu|RCTEventEmitter/);
 });
 
@@ -82,6 +82,22 @@ test('compact light header is exclusive to Finance and returns to the original A
  assert.deepEqual(Array.from(roadmap.find(n=>n.type==='Modal').props.supportedOrientations),['portrait']);
  assert.equal(roadmap.some(n=>n.type==='Text'&&n.children.includes('Roadmap GO')),true);
  assert.equal(roadmap.find(n=>n.type==='SafeAreaView').props.style[1],false);
+});
+
+test('only the financial view replaces persisted dragging with a rail and retains both navigation actions',()=>{
+ const h=screen();
+ assert.equal(h.all().find(n=>n.type==='DraggableFAB').props.screenKey,'admin_dashboard');
+ h.button('GO Proyecciones').props.onPress();
+ assert.equal(h.all().filter(n=>n.type==='DraggableFAB').length,0);
+ const rail=h.all().find(n=>n.type==='GoNavigationRail');
+ assert.equal(rail.children[0].type,'GoRoadmapScreen');
+ assert.deepEqual(Array.from(rail.props.controls.children,n=>n.props.level),['panel','container']);
+ h.button('Volver al paso anterior').props.onPress();
+ assert.equal(h.all().some(n=>n.type==='GoNavigationRail'),false);
+ assert.equal(h.closed(),0);
+ h.button('GO Proyecciones').props.onPress();
+ h.button('Volver al Landing GO').props.onPress();
+ assert.equal(h.closed(),1);
 });
 
 test('closing the financial modal unmounts its orientation scope immediately',()=>{const h=screen();h.button('Roadmap GO').props.onPress();h.all().find(n=>n.type==='GoRoadmapScreen').props.setNavStack([{key:'plan_financiero_y_proyecciones',label:'Plan Financiero y Proyecciones'}]);h.setVisible(false);assert.equal(h.all().some(n=>n.type==='GoRoadmapScreen'),false);assert.deepEqual(Array.from(h.all().find(n=>n.type==='Modal').props.supportedOrientations),['portrait']);});

@@ -242,6 +242,7 @@ test('ADMIN dashboard Tools opens the single existing Herramientas connection, w
   '@/components/debug/OwnerContextIndicator':{OwnerContextModal:({visible,children})=>visible?React.createElement('div',null,children):null},
   '@expo/vector-icons':{Feather:native('Icon')},'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:44,bottom:34})},
   'expo-status-bar':{StatusBar:native('StatusBar')},'../DraggableFAB':{DraggableFAB:native('Fab')},
+  '@/components/ui/GoNavigationRail':{GoNavigationRail:native('NavigationRail')},
   '@/contexts/LanguageContext':{useLanguage:()=>({lang:'es'})},'@/contexts/GoAdminAccessContext':{useAdminAccess:()=>currentAdmin},
   '@/contexts/GoViewContext':{useGoView:()=>currentView},
  };

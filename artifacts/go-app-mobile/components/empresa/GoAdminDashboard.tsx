@@ -1,4 +1,5 @@
 import {GoCloseButton} from "@/components/ui/GoCloseButton";
+import {GoNavigationRail} from "@/components/ui/GoNavigationRail";
 import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import React, { useState } from "react";
 import {
@@ -778,6 +779,17 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
 
   if (!adminAccess.allowed || !goView.isAdminView) return null;
 
+  const navigationButtons = <>
+    <GoCloseButton level="panel" activeOpacity={0.8} onPress={handleBack} hitSlop={8} accessibilityLabel={lang === 'en' ? "Go back one step" : "Volver al paso anterior"} style={s.fabBtn}/>
+    <GoCloseButton level="container" activeOpacity={0.8} onPress={onClose} hitSlop={8} accessibilityLabel={lang === 'en' ? "Return to GO Landing" : "Volver al Landing GO"} style={s.fabBtn}/>
+  </>;
+  const roadmap = <GoRoadmapScreen
+    navStack={roadmapStack}
+    allowFinancialPlan
+    setNavStack={setRoadmapStack}
+    onGoLanding={onClose}
+  />;
+
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose} supportedOrientations={financialView && visible ? ["portrait", "landscape-left", "landscape-right"] : ["portrait"]}>
       <StatusBar style={financialView ? "dark" : "light"} />
@@ -827,12 +839,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
 
         {/* ── Sub-sections ── */}
         {section === "roadmap" && (!financialView || visible) && (
-          <GoRoadmapScreen
-            navStack={roadmapStack}
-            allowFinancialPlan
-            setNavStack={setRoadmapStack}
-            onGoLanding={onClose}
-          />
+          financialView ? <GoNavigationRail controls={navigationButtons}>{roadmap}</GoNavigationRail> : roadmap
         )}
 
         {section === "modulos_empresa" && (
@@ -1174,15 +1181,13 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         )}
 
         {/* ── FABs flotantes ────────────────────────────────────────────────── */}
-        <DraggableFAB navigation screenKey="admin_dashboard"
+        {!financialView && <DraggableFAB navigation screenKey="admin_dashboard"
           buttonKey="main"
           initialRight={20}
           initialBottom={fabBottom}
           maxH={138} buttonWidth={64}>
-          <GoCloseButton level="panel" activeOpacity={0.8} onPress={handleBack} hitSlop={8} accessibilityLabel={lang === 'en' ? "Go back one step" : "Volver al paso anterior"} style={s.fabBtn}/>
-
-          <GoCloseButton level="container" activeOpacity={0.8} onPress={onClose} hitSlop={8} accessibilityLabel={lang === 'en' ? "Return to GO Landing" : "Volver al Landing GO"} style={s.fabBtn}/>
-        </DraggableFAB>
+          {navigationButtons}
+        </DraggableFAB>}
 
         {/* ── Info panel (module descriptions) ── */}
         <Modal
