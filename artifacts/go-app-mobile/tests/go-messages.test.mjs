@@ -4,16 +4,18 @@ import lifecycle from './helpers/react-lifecycle.cjs';
 const {React,createRoot,document,evaluate,rn,native}=lifecycle;
 const bookingId='11111111-1111-4111-8111-111111111111';
 const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<20;i++)await Promise.resolve();});
-async function fixture({initial=true,context,offline=false,account='customer',platform='ios',contact}={}){
+async function fixture({initial=true,context,offline=false,account='customer',platform='ios',contact,businessId,seed=[]}={}){
  const memory=new Map(),storage={getItem:async k=>memory.get(k)??null,setItem:async(k,v)=>{memory.set(k,v);},removeItem:async k=>{memory.delete(k);}};
- let owner=account,fail=offline,loseResponse=false,sending=0,attempts=0,closed=0,landings=0,aiOpens=0;const records=[],events=new Set(),inputs=[],buttons=[];let modalProps,dismissed=0;
- const thread=()=>({id:'booking:'+bookingId,bookingId,businessId:'salon',counterpartId:owner==='customer'?'business-owner':'customer',contactName:owner==='customer'?'Registered salon':'Registered customer',lastUpdated:1,messages:records.map(x=>({...x,senderId:x.sender===owner?'yo':x.sender})),unread:0});
+ let owner=account,fail=offline,loseResponse=false,sending=0,attempts=0,closed=0,landings=0,aiOpens=0;const records=[...seed],events=new Set(),inputs=[],buttons=[],requests=[],appListeners=new Set();let modalProps,dismissed=0,malformed=false,holdRead=false,releaseRead,legacy=false;
+ const appState={currentState:'active',addEventListener:(event,fn)=>{appListeners.add(fn);return{remove:()=>appListeners.delete(fn)};}};
+ const thread=()=>({id:'booking:'+bookingId,bookingId,businessId:businessId??'salon',counterpartId:owner==='customer'?'business-owner':'customer',contactName:owner==='customer'?'Registered salon':'Registered customer',lastUpdated:1,messages:records.map(x=>({...x,senderId:x.sender===owner?'yo':x.sender})),unread:0});
  const booking={getAuthenticatedUserId:async()=>owner,supabaseApiRequest:async(path,init={},required,expected)=>{
   assert.equal(required,true);assert.equal(expected,owner);if(fail)throw new Error('Servidor no disponible');
-  if(path.startsWith('/supabase/booking-conversations'))return records.length||path.includes('booking_id=')?[thread()]:[];
+  requests.push(path);
+  if(path.startsWith('/supabase/booking-conversations')){const row=thread();if(path.includes('scope=')&&!legacy)row.inboxScope=path.includes('scope=business')?'business:'+businessId:'personal';const result=records.length||path.includes('booking_id=')?[row]:[];if(holdRead){holdRead=false;return new Promise(resolve=>{releaseRead=()=>resolve(result);});}return result;}
   const {messageId,text}=JSON.parse(init.body);attempts++;sending++;await Promise.resolve();
   if(!records.some(m=>m.id===messageId))records.push({id:messageId,text,sender:owner,createdAt:1,channel:'go'});sending--;
-  if(loseResponse){loseResponse=false;throw new Error('Respuesta de envío perdida');}return thread();
+  if(loseResponse){loseResponse=false;throw new Error('Respuesta de envío perdida');}return malformed?{...thread(),messages:[]}:thread();
  }};
  const data=evaluate('data/goMessages.ts',{'./booking':booking,'@react-native-async-storage/async-storage':storage});
  const text=n=>Array.isArray(n)?n.map(text).join(''):typeof n==='string'?n:n?.props?text(n.props.children):'';
@@ -29,7 +31,7 @@ async function fixture({initial=true,context,offline=false,account='customer',pl
   'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34})},
   'react-native-gesture-handler':{Gesture:{Pan:()=>chain},GestureDetector:({children})=>children},
   'react-native-reanimated':{__esModule:true,default:{View},useSharedValue:v=>React.useRef({value:v}).current,useAnimatedStyle:fn=>fn(),withSpring:v=>v},
-  'react-native':{...rn,View,Text:native('Text'),Platform:{OS:platform},Modal:props=>{modalProps=props;return props.visible?props.children:null;},
+  'react-native':{...rn,AppState:appState,View,Text:native('Text'),Platform:{OS:platform},Modal:props=>{modalProps=props;return props.visible?props.children:null;},
    Dimensions:{get:()=>({width:390,height:844})},Easing:{out:x=>x,cubic:0},PanResponder:{create:()=>({panHandlers:{}})},
    Animated:{Value,View,spring:()=>motion,timing:()=>motion},ScrollView:View,KeyboardAvoidingView:View,
    FlatList:props=>React.createElement(View,null,(props.data||[]).map((item,index)=>React.createElement(React.Fragment,{key:item.id},props.renderItem({item,index})))),
@@ -38,11 +40,11 @@ async function fixture({initial=true,context,offline=false,account='customer',pl
   },
  });
  let shown=true,initialBookingId=initial?bookingId:undefined;const container=document.createElement('div'),root=createRoot(container);
- const render=()=>{inputs.length=0;buttons.length=0;root.render(React.createElement(screen.MessagesScreen,{visible:shown,onClose(){closed++;},onGoToLanding(){landings++;},onDismiss(){dismissed++;},recentContacts:[],initialContact:contact,userGoPhone:'',onCreateGo(){aiOpens++;},onPickDeviceContact:async()=>null,initialBookingId,initialContext:context}));};
+ const render=()=>{inputs.length=0;buttons.length=0;root.render(React.createElement(screen.MessagesScreen,{visible:shown,onClose(){closed++;},onGoToLanding(){landings++;},onDismiss(){dismissed++;},recentContacts:[],initialContact:contact,userGoPhone:'',onCreateGo(){aiOpens++;},onPickDeviceContact:async()=>null,initialBookingId,initialContext:context,businessId}));};
  await settle(render);
  const input=()=>inputs.findLast(p=>p.placeholder==='Escribe un mensaje...');
  const send=()=>buttons.findLast(p=>p.label==='msg_send_btn');
- return{memory,records,container,data,get dismissed(){return dismissed;},async hide(){shown=false;await settle(render);},async nativeDismiss(){await settle(()=>modalProps.onDismiss());},get closed(){return closed;},get landings(){return landings;},get aiOpens(){return aiOpens;},get attempts(){return attempts;},get input(){return input();},get send(){return send();},
+ return{memory,records,container,data,requests,oldServer:()=>{legacy=true;},holdRead:()=>{holdRead=true;},async releaseRead(){await settle(()=>releaseRead());},malformed:()=>{malformed=true;},async foreground(){await settle(()=>{for(const state of ['background','active']){appState.currentState=state;for(const fn of appListeners)fn(state);}});},get dismissed(){return dismissed;},async hide(){shown=false;await settle(render);},async nativeDismiss(){await settle(()=>modalProps.onDismiss());},get closed(){return closed;},get landings(){return landings;},get aiOpens(){return aiOpens;},get attempts(){return attempts;},get input(){return input();},get send(){return send();},
   async type(value){await settle(()=>input().onChangeText(value));},async submit(){await settle(()=>send().onPress());},
   async double(){await settle(()=>Promise.all([send().onPress(),send().onPress()]));},fail(v){fail=v;},lose(){loseResponse=true;},
   async account(next){await settle(()=>{owner=next;for(const fn of events)fn();});},
@@ -51,7 +53,7 @@ async function fixture({initial=true,context,offline=false,account='customer',pl
   async go(){await settle(()=>buttons.findLast(p=>p.label==='GO').onPress());},
   async back(){await settle(()=>buttons.findLast(p=>p.accessibilityLabel==='Volver a la ficha'||p.accessibilityLabel==='Volver a conversaciones').onPress());},
   async reopen(){context={...context};initialBookingId=undefined;await settle(()=>root.render(null));initialBookingId=initial?bookingId:undefined;await settle(render);},
-  async close(){await settle(()=>root.unmount());assert.equal(events.size,0);assert.equal(sending,0);}
+  async close(){await settle(()=>root.unmount());assert.equal(events.size,0);assert.equal(appListeners.size,0);assert.equal(sending,0);}
  };
 }
 test('booking detail opens the existing GO Communication thread and double tap sends once',async()=>{
@@ -100,3 +102,53 @@ test('conversation header retains the actual business and reservation, with no r
 });
 
 test('non-GO conversation header keeps its existing WA identification and contact unchanged',async()=>{const contact={name:'Existing contact',phone:'+34600123456'},f=await fixture({initial:false,contact});try{const dom=n=>[n,...n.childNodes.flatMap(dom)],header=dom(f.container).find(n=>n.attributes?.['data-testid']==='go-message-header');assert.ok(header);assert.ok(header.textContent.includes(contact.name));assert.ok(header.textContent.includes(contact.phone));assert.ok(header.textContent.includes('WA'));assert.equal(f.records.length,0);}finally{await f.close();}});
+
+test('foreground refresh receives an incoming reply in the same thread without losing the composer draft',async()=>{
+ const f=await fixture();try{
+  await f.type('Unsent draft');f.records.push({id:'remote-one',text:'Incoming company reply',sender:'business-owner',createdAt:2,channel:'go'});
+  await f.foreground();assert.ok(f.container.textContent.includes('Incoming company reply'));assert.equal(f.input.value,'Unsent draft');
+ }finally{await f.close();}
+});
+test('message IDs scoped to two different authors render with unique React keys',async()=>{
+ const f=await fixture({seed:[{id:'same-id',sender:'customer',text:'Customer message',createdAt:1,channel:'go'},{id:'same-id',sender:'business-owner',text:'Company message',createdAt:1,channel:'go'}]});
+ try{assert.ok(f.container.textContent.includes('Customer message'));assert.ok(f.container.textContent.includes('Company message'));
+  const customer=(await f.data.readBookingConversations('customer',bookingId))[0].messages.map(m=>m.text);await f.account('business-owner');
+  const business=(await f.data.readBookingConversations('business-owner',bookingId))[0].messages.map(m=>m.text);assert.deepEqual(customer,business);
+ }finally{await f.close();}
+});
+test('a slow foreground read cannot overwrite a newer confirmed outgoing message',async()=>{
+ const f=await fixture();try{f.holdRead();await f.foreground();await f.type('Newest confirmed message');await f.submit();await f.releaseRead();
+  assert.ok(f.container.textContent.includes('Newest confirmed message'));assert.equal(f.input.value,'');
+ }finally{await f.close();}
+});
+test('the business inbox refreshes on foreground and forwards only its selected business context',async()=>{
+ const f=await fixture({initial:false,businessId:bookingId,account:'business-owner'});try{
+  assert.ok(f.requests.some(path=>path.includes('scope=business')&&path.includes('business_id='+bookingId)));
+  f.records.push({id:'remote-one',text:'Incoming customer request',sender:'customer',createdAt:2,channel:'go'});
+  await f.foreground();assert.ok(f.container.textContent.includes('Incoming customer request'));
+ }finally{await f.close();}
+});
+test('HTTP success without the persisted outgoing message is unconfirmed and retains draft and retry key',async()=>{
+ const f=await fixture();try{
+  await f.type('Do not fake delivery');f.malformed();await f.submit();
+  assert.equal(f.input.value,'Do not fake delivery');assert.ok(f.container.textContent.includes('No se confirmó la persistencia'));
+  assert.ok([...f.memory.keys()].some(key=>key.startsWith('go_message_outbox_v1:')));
+ }finally{await f.close();}
+});
+test('an older API which ignores the inbox scope cannot expose a mixed personal/company inbox',async()=>{
+ const f=await fixture({businessId:bookingId});try{
+  f.oldServer();f.records.push({id:'existing',text:'Existing authorized thread',sender:'customer',createdAt:1,channel:'go'});
+  await assert.rejects(f.data.readBookingConversations('customer',undefined,bookingId),/contexto de esta bandeja/);
+ }finally{await f.close();}
+});
+test('direct concurrent delivery shares one durable retry and draft clearing cannot erase a newer edit',async()=>{
+ const f=await fixture();try{
+  await Promise.all([f.data.deliverBookingMessage('customer',bookingId,'Same message'),f.data.deliverBookingMessage('customer',bookingId,'Same message')]);
+  assert.equal(f.attempts,1);assert.equal(f.records.length,1);
+  const id='booking:'+bookingId;
+  await Promise.all([f.data.saveBookingMessageDraft('customer',id,'Old'),f.data.saveBookingMessageDraft('customer',id,'New')]);
+  await f.data.clearBookingMessageDraft('customer',id,'Old');
+  assert.equal(await f.data.loadBookingMessageDraft('customer',id),'New');
+  assert.equal(await f.data.loadBookingMessageDraft('other',id),'');
+ }finally{await f.close();}
+});

@@ -28,6 +28,7 @@ for(const hand of ['right','left'])for(const platform of ['ios','android'])test(
 test('Calendar keeps its modal and source detail while the SAME Communication screen opens and returns after native dismissal',()=>{
  const calls=[],returnRef={current:null};let calOpen=true;
  const scope={exports:{},React:{createElement:tree},MessagesScreen:'MessagesScreen',goDirectlyToLanding:()=>calls.push(['landing']),entryMessageContext:presentation.entryMessageContext,
+  adminAccess:{userId:'session-user'},goView:{view:'USER'},businessAccess:{allowed:false},
   messageReturnRef:returnRef,directLandingRef:{current:false},messagesOpen:true,goChatOpen:false,goChatScreen:null,setMessageEntryId:v=>calls.push(["host",v]),recentContacts:[],userGoPhone:'',handedness:'right',initialMessagesContact:null,
   initialMessagesBookingId:booking.reservationId,initialMessagesContext:presentation.entryMessageContext(booking),
   setMessagesOpen:v=>calls.push(['messages',v]),setLandingDetailsId:v=>calls.push(['landing-detail',v]),
@@ -38,6 +39,10 @@ test('Calendar keeps its modal and source detail while the SAME Communication sc
  scope.exports.open(booking,()=>calls.push(['restore',booking.id]),true);assert.equal(calOpen,true);assert.deepEqual(calls.at(-1),['messages',true]);assert.equal(calls.some(x=>x[0]==='landing-detail'),false,'The selected source detail must remain mounted');
  vm.runInContext(transpile('exports.screen='+declaration('messagesScreen')+';'),scope);
  const screen=scope.exports.screen;assert.equal(screen.type,'MessagesScreen');assert.equal(screen.props.onGoToLanding,scope.goDirectlyToLanding,'Messages reuses the exact approved Landing coordinator');assert.equal(screen.props.initialBookingId,booking.reservationId);assert.equal(screen.props.initialContext.name,booking.contactName);
+ assert.equal(screen.props.key,'messages:session-user:personal');assert.equal(screen.props.businessId,null);
+ scope.goView.view='BUSINESS';scope.businessAccess={allowed:true,snapshot:{business:{id:'selected-company'}}};
+ vm.runInContext(transpile('exports.businessScreen='+declaration('messagesScreen')+';'),scope);
+ assert.equal(scope.exports.businessScreen.props.key,'messages:session-user:selected-company');assert.equal(scope.exports.businessScreen.props.businessId,'selected-company');
  screen.props.onClose();assert.equal(calls.filter(x=>x[0]==='restore').length,0,'Back waits until Communication is actually dismissed');
  screen.props.onDismiss();screen.props.onDismiss();assert.equal(calls.filter(x=>x[0]==='restore').length,1);assert.equal(calOpen,true,'Calendar and its scroll position remain mounted');
 });
@@ -54,15 +59,16 @@ test('the only Communication component is presented by the active Calendar, not 
 });
 
 const actions=find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='View'&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='testID'&&a.initializer?.text==='calendar-actions'));
+const palette={exports:{}};vm.runInNewContext(transpile(readFileSync('theme/goAssistantColors.ts','utf8')),palette);
 for(const customer of [false,true])test(`${customer?'customer after booking':'personal from Landing'}: original four controls, styles and working actions remain together`,()=>{
- const calls=[];let token=3;const scope={exports:{},React:{createElement:tree},View:'View',Text:'Text',TouchableOpacity:'TouchableOpacity',MaterialCommunityIcons:'Icon',
+ const calls=[];let token=3;const scope={exports:{},...palette.exports,React:{createElement:tree},View:'View',Text:'Text',TouchableOpacity:'TouchableOpacity',MaterialCommunityIcons:'Icon',
   goView:{view:'USER'},adminAccess:{},calQuickCreateOpen:false,isBusinessMode:false,demoCustomerCalendarSelected:customer,GO_GOLD:'#C8A037',lang:'es',
   t:k=>({new_task_label:'NOTAS',cal_today_btn:'HOY',biz_book_btn:'Reservar'}[k]??k),Haptics:{selectionAsync:()=>{},impactAsync:async()=>{},ImpactFeedbackStyle:{Medium:1,Heavy:2}},
-  setCalQuickCreateOpen:v=>calls.push(['notes',v]),setCalScrollToTodayToken:fn=>{token=fn(token);},setDemoCalendarFocus:v=>calls.push(['focus',v]),
+  openCalendarNote:()=>calls.push(['notes',true]),openCalendarReservation:()=>calls.push(['reserve',true]),setCalQuickCreateOpen:v=>calls.push(['notes',v]),setCalScrollToTodayToken:fn=>{token=fn(token);},setDemoCalendarFocus:v=>calls.push(['focus',v]),
   getNow:()=>new Date(2030,2,15,11,37),getToday:()=>new Date(2030,2,15),formatISODate:()=> '2030-03-15',Date,
   setShowBookingFromCal:v=>calls.push(['reserve',v]),setDiagBookingOpen:v=>calls.push(['diagnostic',v]),openAi:()=>calls.push(['ai']),startVoiceMode:()=>calls.push(['voice'])};
  vm.runInNewContext(transpile('exports.bar=('+actions.getText(ast)+');'),scope);
- const buttons=nodes(scope.exports.bar).filter(n=>n.type==='TouchableOpacity');assert.equal(buttons.length,4);assert.deepEqual(buttons.map(n=>n.props.accessibilityLabel==='NOTAS'?'NOTAS':label(n)),['NOTAS','HOY','RESERVAR','GO']);
+ const buttons=nodes(scope.exports.bar).filter(n=>n.type==='TouchableOpacity');assert.equal(buttons.length,4);assert.equal(buttons[0].props.accessibilityLabel,'Notas');assert.deepEqual(buttons.map(n=>n.props.testID==='calendar-notes-open'?'NOTAS':label(n)),['NOTAS','HOY','RESERVAR','GO']);
  buttons.forEach(n=>n.props.onPress());assert.deepEqual(calls.filter(x=>x[0]!=='focus'),[['notes',true],['reserve',true],['ai']]);assert.equal(token,4);
  if(customer){const focus=calls.find(x=>x[0]==='focus')[1];assert.equal(focus.dateISO,'2030-03-15');assert.equal(focus.timeHHMM,'11:37');}
  assert.equal(buttons[0].props.style.width,44);assert.equal(buttons[1].props.style.height,42);assert.equal(buttons[2].props.style.height,52);assert.equal(buttons[2].props.style.backgroundColor,'#C8A037');assert.equal(buttons[3].props.style.width,44);

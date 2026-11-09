@@ -14448,7 +14448,8 @@ function HomeScreenContent() {
         }}
       />);
 
-  const messagesScreen = (<MessagesScreen handedness={handedness}
+  const messagesScreen = (<MessagesScreen key={`messages:${adminAccess.userId??"anonymous"}:${goView.view==="BUSINESS"&&businessAccess.allowed?businessAccess.snapshot?.business?.id??"personal":"personal"}`} handedness={handedness}
+        businessId={goView.view==="BUSINESS"&&businessAccess.allowed?businessAccess.snapshot?.business?.id:null}
         onGoToLanding={goDirectlyToLanding}
         visible={messagesOpen}
         assistant={messagesOpen && goChatOpen ? goChatScreen : null}

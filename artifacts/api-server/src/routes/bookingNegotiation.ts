@@ -31,7 +31,7 @@ async function relay(response: globalThis.Response, res: Response, communication
   if (response.ok) { res.status(response.status).type("application/json").send(body); return; }
   let issue: RpcError = {};
   try { issue = JSON.parse(body) as RpcError; } catch { /* Do not expose proxy or SQL diagnostics. */ }
-  if (["PGRST202", "42883"].includes(issue.code ?? "")) {
+  if (["PGRST202", "42883"].includes(issue.code ?? "") || communication&&issue.code==="42P01") {
     if(communication){res.status(501).json({code:"GO_MESSAGES_UNAVAILABLE",error:"Comunicación GO aún no está disponible en este servidor. El texto se conserva."});return;}
     res.status(501).json({ code: "BOOKING_NEGOTIATION_UNAVAILABLE", error: "La negociación requiere la migración revisada del servidor. La reserva y sus pagos permanecen intactos." }); return;
   }
@@ -103,12 +103,44 @@ router.get("/bookings", async (req: Request, res: Response, next) => {
 
 // The same participant authorization as reservation receipts. The authenticated
 // identity and recipient are resolved in PostgreSQL, never supplied by the UI.
+async function messageActor(req:Request,res:Response):Promise<string|null>{
+  const auth=bearerHeader(req.header("authorization"));
+  if(!auth.Authorization?.match(/^Bearer \S+$/)){res.status(401).json({code:"GO_MESSAGES_AUTH_REQUIRED",error:"Inicia sesión para utilizar Comunicación GO."});return null;}
+  try{const response=await supabaseRequest("/auth/v1/user",{headers:auth});
+    if(!response.ok){res.status([401,403].includes(response.status)?401:503).json({code:"GO_MESSAGES_AUTH_REQUIRED",error:"No se pudo comprobar la sesión."});return null;}
+    const actor=await response.json() as {id?:unknown};
+    if(typeof actor.id==="string"&&uuid.test(actor.id))return actor.id;
+  }catch{}
+  res.status(503).json({code:"GO_MESSAGES_AUTH_UNAVAILABLE",error:"No se pudo comprobar la sesión."});return null;
+}
 router.get("/booking-conversations", async (req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
-  const auth = bearerHeader(req.header("authorization")), id = req.query.booking_id;
-  if (!auth.Authorization) { res.status(401).json({error:"Authentication required"}); return; }
+  const auth = bearerHeader(req.header("authorization")), id = req.query.booking_id,scope=req.query.scope,business=req.query.business_id;
+  if(!auth.Authorization){res.status(401).json({error:"Authentication required"});return;}
   if (id != null && (typeof id !== "string" || !uuid.test(id))) { res.status(400).json({error:"Esta reserva local no tiene una conversación compartida en el servidor."}); return; }
-  try { await relay(await supabaseRequest("/rest/v1/rpc/go_booking_conversations", {method:"POST",headers:{...auth,"Content-Type":"application/json"},body:JSON.stringify({p_booking_id:id??null})}),res,true); }
+  if(scope!==undefined&&(typeof scope!=="string"||!["personal","business"].includes(scope))||(scope==="business")!==(business!==undefined)||business!==undefined&&(typeof business!=="string"||!uuid.test(business))){res.status(400).json({error:"Contexto de conversación inválido."});return;}
+  const actor=await messageActor(req,res);if(!actor)return;
+  try {
+    // The RPC authorizes every participant independently of catalogue visibility.
+    // business_id only narrows its authorized result; it grants no membership or sender role.
+    const response=await supabaseRequest("/rest/v1/rpc/go_booking_conversations", {method:"POST",headers:{...auth,"Content-Type":"application/json"},body:JSON.stringify({p_booking_id:id??null})});
+    if(!response.ok||scope===undefined){await relay(response,res,true);return;}
+    const rows=await response.json() as {bookingId:string;businessId:string}[];
+    if(!Array.isArray(rows)||rows.some(row=>!row||!uuid.test(row.bookingId)))throw Error("Invalid conversation receipt");
+    let allowed=new Set<string>();
+    if(scope==="personal"){
+      for(let start=0;start<rows.length;start+=100){
+        const ids=rows.slice(start,start+100).map(row=>row.bookingId).join(",");
+        const owned=await supabaseRequest("/rest/v1/bookings?select=id&customer_id=eq."+actor+"&id=in.("+ids+")",{headers:auth});
+        if(!owned.ok){await relay(owned,res,true);return;}
+        const bookings=await owned.json() as {id:string}[];if(!Array.isArray(bookings))throw Error("Invalid ownership receipt");
+        for(const booking of bookings)allowed.add(booking.id);
+      }
+    }
+    const filtered=rows.filter(row=>scope==="business"?row.businessId===business:allowed.has(row.bookingId));
+    if(id&&filtered.length!==1){res.status(403).json({code:"GO_MESSAGES_FORBIDDEN",error:"Acceso no autorizado."});return;}
+    res.json(filtered.map(row=>({...row,inboxScope:scope==="personal"?"personal":"business:"+business})));
+  }
   catch { res.status(503).json({error:"No se pudo conectar con Comunicación GO. El texto escrito se conserva."}); }
 });
 router.post("/bookings/:bookingId/messages", async (req: Request, res: Response) => {
@@ -118,6 +150,7 @@ router.post("/bookings/:bookingId/messages", async (req: Request, res: Response)
   if (typeof id!=="string" || !uuid.test(id) || !input || typeof input!=="object" || Array.isArray(input)
     || Object.keys(input).some(key=>!["messageId","text"].includes(key)) || typeof input.messageId!=="string" || !uuid.test(input.messageId)
     || typeof input.text!=="string" || !input.text.trim() || input.text.length>1000) { res.status(400).json({error:"Mensaje o reserva no válidos."}); return; }
+  if(!await messageActor(req,res))return;
   try { await relay(await supabaseRequest("/rest/v1/rpc/go_send_booking_message", {method:"POST",headers:{...auth,"Content-Type":"application/json"},body:JSON.stringify({p_booking_id:id,p_message_id:input.messageId,p_text:input.text})}),res,true); }
   catch { res.status(503).json({error:"No se pudo confirmar el envío. Tu texto se conserva; reintenta para comprobarlo sin duplicar el mensaje."}); }
 });

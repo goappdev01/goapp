@@ -11,10 +11,11 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getAuthenticatedUserId } from "@/data/booking";
-import { readBookingConversations, deliverBookingMessage } from "@/data/goMessages";
+import { readBookingConversations, deliverBookingMessage,loadBookingMessageDraft,saveBookingMessageDraft,clearBookingMessageDraft } from "@/data/goMessages";
 import { onSessionChanged } from "@/lib/sessionEvents";
 import {
   Animated,
+  AppState,
   Dimensions,
   Easing,
   FlatList,
@@ -82,6 +83,8 @@ type MessagesScreenProps = {
   /** Cuando se provee, abre directamente el hilo de este contacto al abrir la pantalla. */
   initialContact?: { name: string; phone: string };
   initialBookingId?: string;
+  /** Undefined preserves legacy all-authorized inbox; null is personal, UUID selects one business. */
+  businessId?:string|null;
   initialContext?:GoMessageContext;
 };
 
@@ -262,7 +265,7 @@ export function MessagesScreen({
   onCreateGo,
   onPickDeviceContact,
   initialContact,
-  initialBookingId, initialContext,
+  initialBookingId, initialContext,businessId,
 }: MessagesScreenProps) {
   const insets = useSafeAreaInsets();
   const { lang, t } = useLanguage();
@@ -282,10 +285,11 @@ export function MessagesScreen({
   const listScrollRef = useRef<FlatList<GoConversation>>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [messageError,setMessageError]=useState("");
+  const [loadingMessages,setLoadingMessages]=useState(false);
   const [sending,setSending]=useState(false);
   const [chatArea, setChatArea] = useState({ x: 0, y: 0, width: 0, height: 0 });
-  const ownerRef=useRef<string|null>(null),generation=useRef(0),sendLock=useRef(false);
-  const draftKey=(owner:string,id:string)=>`go_message_draft_v1:${owner}:${id}`;
+  const ownerRef=useRef<string|null>(null),generation=useRef(0),sendLock=useRef(false),localReadGeneration=useRef(0),readRevision=useRef(0);
+  const screenState=useRef({view,activeConv});screenState.current={view,activeConv};
   const errorText=(error:unknown)=>error && typeof error==="object" && "message" in error && typeof error.message==="string" ? error.message : "No se pudo conectar con Comunicación GO. Tu texto se conserva.";
 
   // ── Persist ───────────────────────────────────────────────────────────────
@@ -297,9 +301,11 @@ export function MessagesScreen({
 
   useEffect(() => {
     if (visible && !initialBookingId && !initialContext) {
+      const localToken=++localReadGeneration.current;let alive=true;
       AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
+        if(!alive||localReadGeneration.current!==localToken)return;
         let convs: GoConversation[] = [];
-        if (raw) { try { convs = JSON.parse(raw); } catch {} }
+        if (raw) { try { const saved=JSON.parse(raw);if(Array.isArray(saved))convs=saved.filter(c=>c&&!c.bookingId&&!c.actionId); } catch {} }
 
         // Si viene un contacto inicial desde un GO, abrir directamente su hilo.
         if (initialContact?.phone || initialContact?.name) {
@@ -335,7 +341,8 @@ export function MessagesScreen({
           setView("list");
         }
         setSearch("");
-      });
+      }).catch(()=>{});
+      return()=>{alive=false;};
     }
   }, [visible]);
 
@@ -347,6 +354,8 @@ export function MessagesScreen({
     const token=++generation.current;
     const contextLabel=initialContext ? [initialContext.kind==="booking"?(lang==="en"?"Reservation":"Reserva"):(lang==="en"?"Shared task":"Tarea compartida"),initialContext.date,initialContext.time].filter(Boolean).join(" · ") : undefined;
     const contextual=!!initialContext;
+    ownerRef.current=null;setConversations([]);setActiveConv(null);setInput("");inputRef.current="";setSending(false);
+    if(!initialBookingId&&!contextual&&!initialContact)setView("list");
     if(initialBookingId||contextual){
       ownerRef.current=null;setInput("");inputRef.current="";setMessageError("");
       if(initialContext){
@@ -356,47 +365,62 @@ export function MessagesScreen({
       }else{setActiveConv(null);setView("list");}
     }
     const load=async()=>{
+      setLoadingMessages(true);
       try{
         const owner=await getAuthenticatedUserId();if(!alive||generation.current!==token)return;
         ownerRef.current=owner;if(!owner)throw new Error("Inicia sesión para utilizar Comunicación GO.");
         if(initialContext){
           const id=initialBookingId?"booking:"+initialBookingId:"action:"+initialContext.actionId;
-          const draft=await AsyncStorage.getItem(draftKey(owner,id));
+          const draft=await loadBookingMessageDraft(owner,id);
           if(!alive||generation.current!==token)return;
           if(!inputRef.current){inputRef.current=draft||"";setInput(draft||"");}
-          else await AsyncStorage.setItem(draftKey(owner,id),inputRef.current);
+          else await saveBookingMessageDraft(owner,id,inputRef.current);
           if(!initialBookingId)throw new Error("Esta tarea no dispone de un vínculo de comunicación verificable en el servidor. Tu borrador se conserva; no se ha enviado ningún mensaje.");
         }
-        const rows=await readBookingConversations(owner,initialBookingId);
-        if(!alive||generation.current!==token)return;
+        const read=++readRevision.current,rows=await readBookingConversations(owner,initialBookingId,initialBookingId?undefined:businessId);
+        if(!alive||generation.current!==token||readRevision.current!==read)return;
         setMessageError("");setConversations(old=>[...rows,...old.filter(c=>!c.bookingId&&!c.actionId)]);
         if(initialBookingId){
           const thread=rows.find(c=>c.bookingId===initialBookingId);
           if(!thread)throw new Error("No se pudo recuperar la conversación de esta reserva.");
-          if(!contextual){const draft=await AsyncStorage.getItem(draftKey(owner,thread.id));if(!alive||generation.current!==token)return;inputRef.current=draft||"";setInput(draft||"");}
+          if(!contextual){const draft=await loadBookingMessageDraft(owner,thread.id);if(!alive||generation.current!==token)return;inputRef.current=draft||"";setInput(draft||"");}
           setActiveConv({...thread,actionId:initialContext?.actionId,contextLabel});setView("thread");slideAnim.setValue(0);
         }
       }catch(error){if(alive&&generation.current===token)setMessageError(errorText(error));}
+      finally{if(alive&&generation.current===token)setLoadingMessages(false);}
     };
     void load();
-    const unsubscribe=onSessionChanged(()=>{generation.current++;ownerRef.current=null;setActiveConv(null);setConversations([]);setInput("");setView("list");setMessageError("La sesión ha cambiado. Vuelve a abrir Comunicación GO.");});
+    const unsubscribe=onSessionChanged(()=>{generation.current++;localReadGeneration.current++;ownerRef.current=null;setActiveConv(null);setConversations([]);setInput("");inputRef.current="";setSending(false);setLoadingMessages(false);setView("list");setMessageError("La sesión ha cambiado. Vuelve a abrir Comunicación GO.");});
     return()=>{alive=false;generation.current++;unsubscribe();};
-  },[visible,initialBookingId,initialContext?.actionId]);
+  },[visible,initialBookingId,initialContext?.actionId,businessId]);
 
   useEffect(()=>{
-    if(!visible||!activeConv?.bookingId||!activeConv.counterpartId||!ownerRef.current)return;
-    let alive=true,busy=false;const owner=ownerRef.current,bookingId=activeConv.bookingId;
-    const timer=setInterval(()=>{if(busy)return;busy=true;void readBookingConversations(owner,bookingId).then(rows=>{
-      if(!alive||ownerRef.current!==owner)return;const thread=rows.find(c=>c.bookingId===bookingId);if(!thread)return;
-      setActiveConv(current=>current?.bookingId===bookingId?{...thread,actionId:current.actionId,contextLabel:current.contextLabel}:current);
-      setConversations(old=>[thread,...old.filter(c=>c.id!==thread.id)]);setMessageError("");
-    }).catch(error=>{if(alive){setMessageError(errorText(error));if(error?.status===401||error?.status===403){setActiveConv(null);setView("list");setConversations(old=>old.filter(c=>c.bookingId!==bookingId));}}}).finally(()=>{busy=false;});},15000);
-    return()=>{alive=false;clearInterval(timer);};
-  },[visible,activeConv?.bookingId,activeConv?.counterpartId]);
+    if(!visible)return;
+    let alive=true,busy=false,foreground=AppState.currentState==="active";
+    const refresh=async()=>{
+      const owner=ownerRef.current;if(!alive||busy||!foreground||!owner||sendLock.current)return;
+      const token=generation.current,current=screenState.current,bookingId=current.view==="thread"?current.activeConv?.bookingId:undefined;
+      const read=++readRevision.current;
+      busy=true;
+      try{const rows=await readBookingConversations(owner,bookingId,bookingId?undefined:businessId);
+        if(!alive||ownerRef.current!==owner||generation.current!==token||readRevision.current!==read)return;
+        if(bookingId){const thread=rows.find(c=>c.bookingId===bookingId);if(!thread)return;
+          setActiveConv(value=>value?.bookingId===bookingId?{...thread,actionId:value.actionId,contextLabel:value.contextLabel}:value);
+          setConversations(old=>[thread,...old.filter(c=>c.id!==thread.id)]);
+        }else setConversations(old=>[...rows,...old.filter(c=>!c.bookingId&&!c.actionId)]);
+        setMessageError("");
+      }catch(error){if(alive&&ownerRef.current===owner&&generation.current===token&&readRevision.current===read){setMessageError(errorText(error));
+        if((error as {status?:number})?.status===401||(error as {status?:number})?.status===403){setActiveConv(null);setView("list");setConversations([]);}}}
+      finally{busy=false;}
+    };
+    const listener=AppState.addEventListener("change",state=>{const entered=state==="active"&&!foreground;foreground=state==="active";if(entered)void refresh();});
+    const timer=setInterval(()=>void refresh(),15000);
+    return()=>{alive=false;listener.remove();clearInterval(timer);};
+  },[visible,businessId]);
 
   const changeInput=(text:string)=>{
     inputRef.current=text;setInput(text);
-    if((activeConv?.bookingId||activeConv?.actionId)&&ownerRef.current){void AsyncStorage.setItem(draftKey(ownerRef.current,activeConv.id),text).catch(()=>setMessageError("No se pudo guardar el borrador en este dispositivo."));}
+    if((activeConv?.bookingId||activeConv?.actionId)&&ownerRef.current){const token=generation.current;void saveBookingMessageDraft(ownerRef.current,activeConv.id,text).catch(()=>{if(generation.current===token)setMessageError("No se pudo guardar el borrador en este dispositivo.");});}
   };
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -411,8 +435,8 @@ export function MessagesScreen({
       return updated;
     });
     setActiveConv({ ...conv, unread: 0 });
-    setMessageError("");setInput("");
-    if(conv.bookingId&&ownerRef.current){const owner=ownerRef.current;void AsyncStorage.getItem(draftKey(owner,conv.id)).then(value=>{if(ownerRef.current===owner)setInput(value||"");});}
+    setMessageError("");setInput("");inputRef.current="";
+    if(conv.bookingId&&ownerRef.current){const owner=ownerRef.current,token=generation.current;void loadBookingMessageDraft(owner,conv.id).then(value=>{if(ownerRef.current===owner&&generation.current===token&&screenState.current.activeConv?.id===conv.id&&!inputRef.current){inputRef.current=value;setInput(value);}}).catch(()=>{if(ownerRef.current===owner)setMessageError("No se pudo recuperar el borrador.");});}
     slideAnim.setValue(screen.width);
     setView("thread");
     Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, speed: 22, bounciness: 4 }).start();
@@ -421,7 +445,8 @@ export function MessagesScreen({
   const backToList = () => {
     if(initialContext){onClose();return;}
     const owner=ownerRef.current;
-    if(owner)void readBookingConversations(owner).then(rows=>{if(ownerRef.current===owner)setConversations(old=>[...rows,...old.filter(c=>!c.bookingId)]);}).catch(error=>setMessageError(errorText(error)));
+    const token=generation.current,read=++readRevision.current;
+    if(owner)void readBookingConversations(owner,undefined,businessId).then(rows=>{if(ownerRef.current===owner&&generation.current===token&&readRevision.current===read)setConversations(old=>[...rows,...old.filter(c=>!c.bookingId&&!c.actionId)]);}).catch(error=>{if(ownerRef.current===owner&&generation.current===token&&readRevision.current===read)setMessageError(errorText(error));});
     Animated.timing(slideAnim, {
       toValue: screen.width, duration: 220,
       easing: Easing.out(Easing.cubic), useNativeDriver: true,
@@ -449,17 +474,18 @@ export function MessagesScreen({
     if(activeConv.actionId&&!activeConv.bookingId){setMessageError("Esta tarea no dispone de un vínculo de comunicación verificable en el servidor. Tu borrador se conserva; no se ha enviado ningún mensaje.");return;}
     if(activeConv.bookingId){
       if(sendLock.current)return;
-      const owner=ownerRef.current,token=generation.current,text=input.trim(),thread=activeConv,bookingId=activeConv.bookingId;
+      const owner=ownerRef.current,token=generation.current,text=input.trim(),draft=input,thread=activeConv,bookingId=activeConv.bookingId;
       if(!owner){setMessageError("Inicia sesión para enviar el mensaje.");return;}
-      sendLock.current=true;setSending(true);setMessageError("");
+      readRevision.current++;sendLock.current=true;setSending(true);setMessageError("");
       try{
         const saved=await deliverBookingMessage(owner,bookingId,text);
         if(ownerRef.current!==owner||generation.current!==token)return;
-        setActiveConv({...saved,actionId:thread.actionId,contextLabel:thread.contextLabel});setConversations(old=>[saved,...old.filter(c=>c.id!==saved.id)]);
-        setInput(current=>{if(current.trim()===text){inputRef.current="";return "";}return current;});
-        await AsyncStorage.removeItem(draftKey(owner,thread.id));
+        if(screenState.current.activeConv?.id===thread.id){setActiveConv({...saved,actionId:thread.actionId,contextLabel:thread.contextLabel});
+          setInput(current=>{if(current.trim()===text){inputRef.current="";return "";}return current;});}
+        setConversations(old=>[saved,...old.filter(c=>c.id!==saved.id)]);
+        await clearBookingMessageDraft(owner,thread.id,draft);
       }catch(error){if(ownerRef.current===owner&&generation.current===token)setMessageError(errorText(error));}
-      finally{sendLock.current=false;setSending(false);}
+      finally{sendLock.current=false;if(generation.current===token)setSending(false);}
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -533,6 +559,7 @@ export function MessagesScreen({
       <GoScreenCloseSurface testID="messages-close-surface" handedness={handedness} enabled={visible && !assistant} onClose={onClose} scrollRefs={[threadScrollRef, listScrollRef]} style={[s.root, { paddingTop: insets.top }]}>
         {/* Pure black background — no blue gradient */}
         <View style={[StyleSheet.absoluteFill, { backgroundColor: C.bg }]} pointerEvents="none" />
+        {loadingMessages&&<Text testID="go-message-loading" accessibilityLiveRegion="polite" style={{color:C.textSub,paddingHorizontal:16,paddingVertical:10}}>{lang==="en"?"Loading conversation…":"Cargando conversación…"}</Text>}
         {!!messageError&&<Text testID="go-message-error" accessibilityRole="alert" style={{color:C.red,paddingHorizontal:16,paddingVertical:10}}>{messageError}</Text>}
 
         {/* ═══ LIST VIEW ═══════════════════════════════════════════════════ */}
@@ -696,7 +723,7 @@ export function MessagesScreen({
                         new Date(msg.createdAt).toDateString() !==
                           new Date(activeConv.messages[i - 1]?.createdAt).toDateString();
                       return (
-                        <View key={msg.id}>
+                        <View key={msg.senderId+":"+msg.id}>
                           {showDate && (
                             <View style={s.dateDivider}>
                               <View style={s.dateLine} />
@@ -717,7 +744,7 @@ export function MessagesScreen({
                                   {new Date(msg.createdAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
                                 </Text>
                                 <>
-                                  <Text style={[s.checkMark, { color: msg.channel === "go" ? C.green : C.whatsapp }]}>✓</Text>
+                                  <Text accessibilityLabel={activeConv.bookingId?(lang==="en"?"Saved on server":"Guardado en servidor"):undefined} style={[s.checkMark, { color: msg.channel === "go" ? C.green : C.whatsapp }]}>✓</Text>
                                   <View style={[s.channelDot, { backgroundColor: msg.channel === "go" ? C.green : C.whatsapp }]} />
                                 </>
                               </View>
