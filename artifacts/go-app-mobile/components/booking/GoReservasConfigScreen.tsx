@@ -41,6 +41,10 @@ import { DraggableFAB } from "@/components/DraggableFAB";
 import { AgendaBoard } from "@/components/AgendaOperativa";
 import type { GoEntry, DensityKey, CalDayNightMode } from "@/components/AgendaOperativa";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
+import { BusinessWorkHoursSwitch } from "@/components/ui/BusinessWorkHoursSwitch";
+import { businessCalendarClock, businessWorkHoursForDate } from "@/data/businessCalendarWorkHours";
+import type { CalendarException } from "@/data/calendarExceptions";
+import type { AvailabilityWindow } from "@/data/booking";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
 import type { CalSizeKey } from "@/constants/goSizes";
@@ -70,8 +74,8 @@ import { GO_ASSISTANT_GOLD, GO_ASSISTANT_LABEL } from "@/theme/goAssistantColors
 const CFG_DAY_KEYS   = ["day_sun","day_mon","day_tue","day_wed","day_thu","day_fri","day_sat"] as const;
 const CFG_MONTH_KEYS = ["month_jan","month_feb","month_mar","month_apr","month_may","month_jun","month_jul","month_aug","month_sep","month_oct","month_nov","month_dec"] as const;
 
-function formatTodayLabel(tFn: ReturnType<typeof useLanguage>["t"]): string {
-  const d = getToday();
+function formatTodayLabel(tFn: ReturnType<typeof useLanguage>["t"], dateISO?: string): string {
+  const d = dateISO ? new Date(dateISO + "T12:00:00") : getToday();
   return `${tFn(CFG_DAY_KEYS[d.getDay()])} ${d.getDate()} ${tFn(CFG_MONTH_KEYS[d.getMonth()]).slice(0, 3)}`;
 }
 
@@ -171,7 +175,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
     await createDemoBookingRepository(demoStore).changeBooking(String(entry.reservationId),String(entry.businessId),"business",operation,{proposalId:proposal.id,acceptFinancialTerms});
   };
   const insets    = useSafeAreaInsets();
-  const { config } = useBusinessConfig();
+  const { config, calendarWorkHours } = useBusinessConfig();
   const { lang, t }  = useLanguage();
   const [liveProfessionals, setLiveProfessionals] = useState<import("@/data/booking").Staff[]>([]);
   useEffect(() => {
@@ -262,6 +266,56 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
   const [calInnerView, setCalInnerView] = useState<"semana" | "mes_lineal" | "dia">("semana");
   // Día seleccionado en el calendario de Reservas (navegación pura, sin flujo GO)
   const [reservasNavSelectedDay, setReservasNavSelectedDay] = useState<string | null>(null);
+  const [workHoursStart, setWorkHoursStart] = useState<string>();
+  const [exceptionRead, setExceptionRead] = useState<{
+    businessId: string; since: string; timezone: string;
+    exceptions: Pick<CalendarException, "dateISO" | "staffId" | "intervals">[];
+  }>();
+  const [weeklyRead, setWeeklyRead] = useState<{ businessId: string; windows: AvailabilityWindow[] }>();
+  const workHoursEnabled = calendarWorkHours?.value ?? true;
+  const liveWorkHoursId = !demoStore && calendarWorkHours?.ready && workHoursEnabled && viewMode === "calendario"
+    ? config.businessId : undefined;
+  useEffect(() => {
+    setWeeklyRead(undefined);
+    if (!liveWorkHoursId) return;
+    let active = true;
+    void (async () => {
+      try {
+        const { getOwnedAvailabilityWindows, getAuthenticatedUserId, isCloudId } = await import("@/data/booking");
+        if (!isCloudId(liveWorkHoursId)) return;
+        const owner = await getAuthenticatedUserId();
+        if (!owner || !active) return;
+        const windows = await getOwnedAvailabilityWindows(liveWorkHoursId);
+        if (active && await getAuthenticatedUserId() === owner && active)
+          setWeeklyRead({ businessId: liveWorkHoursId, windows });
+      } catch { /* The saved company schedule remains available offline. */ }
+    })();
+    return () => { active = false; };
+  }, [liveWorkHoursId]);
+  useEffect(() => {
+    if (!liveWorkHoursId || !workHoursStart) return;
+    let active = true;
+    void (async () => {
+      try {
+        const { getAuthenticatedUserId, isCloudId } = await import("@/data/booking");
+        if (!isCloudId(liveWorkHoursId)) return;
+        const owner = await getAuthenticatedUserId();
+        if (!owner || !active) return;
+        const { getCalendarExceptions } = await import("@/data/calendarExceptions");
+        const result = await getCalendarExceptions(liveWorkHoursId, workHoursStart, null, workHoursStart, owner);
+        if (active) setExceptionRead({
+          businessId: liveWorkHoursId, since: workHoursStart, timezone: result.timezone,
+          exceptions: result.exceptions.filter(row => row.businessId === liveWorkHoursId)
+            .map(({ dateISO, staffId, intervals }) => ({ dateISO, staffId, intervals })),
+        });
+      } catch { /* An unavailable exceptions endpoint leaves the weekly display intact. */ }
+    })();
+    return () => { active = false; };
+  }, [liveWorkHoursId, workHoursStart]);
+  const calendarExceptions = !demoStore && calendarWorkHours?.ready && exceptionRead?.businessId === config.businessId
+    ? exceptionRead : undefined;
+  const calendarTimezone = calendarExceptions?.timezone ?? config.timezone;
+  const businessToday = businessCalendarClock(calendarTimezone)?.dateISO;
 
   // ── Month picker — self-contained Modal (evita conflictos z-order con calOpen) ──
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
@@ -269,7 +323,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
   const [pickerMonth, setPickerMonth] = useState(() => new Date().getMonth());
   const pickerSlide = useRef(new Animated.Value(700)).current;
 
-  const [calViewMonth, setCalViewMonth] = useState<string>(getCurrentYearMonth);
+  const [calViewMonth, setCalViewMonth] = useState<string>(() => businessToday?.slice(0, 7) ?? getCurrentYearMonth());
 
   const openMonthPicker = useCallback(() => {
     const [y, m] = calViewMonth.split("-").map(Number);
@@ -395,6 +449,15 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
     if (demoStore && !professionals.includes(selectedPro)) setSelectedPro("Todos");
   }, [demoStore, professionals, selectedPro]);
 
+  const calendarProfessional = (demoStore ? demoProfessionals : liveProfessionals).find(person => person.id === selectedPro)
+    ?? (selectedPro !== "Todos" && selectedPro !== "Sin asignar" && professionals.includes(selectedPro) && !liveProfessionals.length && !demoStore
+      ? { id: selectedPro, name: selectedPro } : undefined);
+  const activeStaffIds = useMemo(() => new Set(liveProfessionals.map(person => person.id)), [liveProfessionals]);
+  const intervalsForDate = (dateISO: string) => businessWorkHoursForDate(config, dateISO, calendarProfessional,
+    calendarExceptions && dateISO >= calendarExceptions.since
+      ? calendarExceptions.exceptions : [],
+    liveWorkHoursId && weeklyRead?.businessId === liveWorkHoursId ? weeklyRead.windows : [], activeStaffIds);
+
   // ── Booking action handlers — persisten en go_log_v1 ──────────────────────
   const handleChangeEstado = useCallback(async (id: string, estado: GoEntry["estado"]) => {
     if(allGoLog.some(entry=>entry.id===id && entry.businessBooking)){Alert.alert("GO",lang==="en"?"Use the reservation actions. No local status is changed.":"Utiliza las acciones de la reserva. No se cambia su estado localmente.");return;}
@@ -485,7 +548,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
         <View style={g.backBtn} />
         <View style={g.headerCenter}>
           <Text style={[g.headerTitle, { color: tk.text }]}>{lang === "en" ? "GO Bookings" : "GO Reservas"}</Text>
-          <Text style={[g.headerSub, { color: tk.dim }]}>{formatTodayLabel(t)}{demoStore ? "" : lang === "en" ? " · live" : " · en tiempo real"}</Text>
+          <Text style={[g.headerSub, { color: tk.dim }]}>{formatTodayLabel(t, businessToday)}{demoStore ? "" : lang === "en" ? " · live" : " · en tiempo real"}</Text>
           {viewMode === "calendario" && (
             <GoCalendarViewSelector value={calInnerView} onChange={setCalInnerView} />
           )}
@@ -512,6 +575,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             monthGridOpen={monthPickerOpen}
             onToggleMonthGrid={() => monthPickerOpen ? closeMonthPicker() : openMonthPicker()}
           />
+          {calendarWorkHours && <BusinessWorkHoursSwitch preference={calendarWorkHours} lang={lang} color={tk.text} />}
         </View>
       )}
 
@@ -614,7 +678,12 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             embedded
             viewMode={calInnerView}
             calViewMonth={calViewMonth}
-            selectedDateISO={reservasNavSelectedDay ?? undefined}
+            selectedDateISO={reservasNavSelectedDay ?? businessToday}
+            businessWorkHours={{
+              timezone: calendarTimezone,
+              intervalsForDate: workHoursEnabled ? intervalsForDate : undefined,
+              onStartDateChange: workHoursEnabled ? setWorkHoursStart : undefined,
+            }}
             density={calDensity}
             showHours={calShowHours}
             calSizeKey={calSize}

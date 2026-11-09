@@ -1203,3 +1203,37 @@ test('the timezone selector recovers the actual registered value without opening
  assert.ok(text(nodes(tree).find(n=>n.props?.testID==='business-timezone-selector')).includes('España peninsular'));assert.equal(component(tree,'CalendarExceptionsSection'),undefined);
  const again=f.make();await again.load();assert.equal(again.getSnapshot().config.timezone,'Europe/Madrid');const saved=plain(again.getSnapshot().config);delete saved.timezone;assert.deepEqual(saved,before);
 });
+
+test("Horarios and the existing calendar tools share one default-on business setting across reopening", async () => {
+  const f = dataFixture();
+  await f.store.updateConfig({sectorId:"belleza",subId:"peluqueria",timezone:"Europe/Madrid"});
+  const ui = uiFixture(f,{reactCompiler:true});
+  const {GoBusinessPreviewProvider:Provider} = ui.load("contexts/GoBusinessConfigContext.tsx");
+  const {EmpresaConfigScreen:Config} = ui.load("components/empresa/EmpresaConfigScreen.tsx");
+  const {GoReservasDemoScreen:Calendar} = ui.load("components/booking/GoReservasConfigScreen.tsx");
+  const provider = () => ui.render(Provider,{children:"test"});
+  const calendar = () => ui.render(Calendar,{onClose(){},hideFAB:true});
+  provider(); await turn(); provider();
+  const step = component(ui.render(Config,{onBack(){},startAtSteps:true,initialStep:2}),"StepHorario");
+  const option = tree => component(tree,"BusinessWorkHoursSwitch").props.preference;
+  const inSetup = () => option(ui.render(step.type,step.props));
+  assert.equal(inSetup().value,true);
+  assert.equal(inSetup().ready,true);
+  const gear = () => nodes(calendar()).filter(node=>node.props.accessibilityLabel==="Configuración de reservas");
+  assert.equal(gear().length,1);
+  gear()[0].props.onPress();
+  assert.equal(option(calendar()).value,true);
+  option(calendar()).setValue(false);
+  provider();
+  assert.equal(inSetup().value,false);
+  await turn();
+  const reopened = f.make();
+  assert.equal(await reopened.preferences.getItem("go_business_calendar_work_hours"),"false");
+  inSetup().setValue(true); provider();
+  assert.equal(option(calendar()).value,true);
+  await turn();
+  assert.equal(await f.make().preferences.getItem("go_business_calendar_work_hours"),"true");
+  assert.deepEqual(plain(f.store.getSnapshot().entries),[]);
+  assert.equal(ui.calls.liveFloor,0);
+  assert.equal(ui.calls.liveAgenda,0);
+});

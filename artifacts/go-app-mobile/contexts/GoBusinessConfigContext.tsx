@@ -27,6 +27,7 @@ import { useBusinessAccess } from "./GoBusinessAccessContext";
 import { useGoView } from "./GoViewContext";
 import { useAdminAccess } from "./GoAdminAccessContext";
 import type { BusinessDemoStore } from "@/data/businessDemoStore";
+import { BUSINESS_WORK_HOURS_PREFERENCE, businessWorkHoursKey } from "@/data/businessCalendarWorkHours";
 import { useOwnerBusinessDemo } from "./OwnerBusinessDemoContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { serializeServiceConfiguration, isServiceTimingPending, validateBookingResources, validateBusinessTimezone, validateScheduleRange,
@@ -151,8 +152,15 @@ export const DEFAULT_BUSINESS_CONFIG: BusinessConfig = {
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 
+export type CalendarWorkHoursPreference = {
+  value: boolean;
+  ready: boolean;
+  setValue: (value: boolean) => void;
+};
+
 type GoBusinessConfigContextType = {
   demo?: BusinessDemoStore;
+  calendarWorkHours?: CalendarWorkHoursPreference;
   config:             BusinessConfig;
   loaded:             boolean;
   updateConfig:       (patch: Partial<BusinessConfig>, expectedBusinessId?: string) => void;
@@ -168,11 +176,46 @@ const GoBusinessConfigContext = createContext<GoBusinessConfigContextType>({
   resetConfig:        async () => {},
 });
 
+// This display preference uses the existing device storage, never updateConfig's booking sync.
+function useCalendarWorkHoursPreference(
+  scope: string | undefined,
+  storage: Pick<typeof AsyncStorage, "getItem" | "setItem">,
+  key = scope,
+): CalendarWorkHoursPreference {
+  const [stored, setStored] = useState<{ scope: string; value: boolean }>();
+  const currentScope = useRef(scope);
+  currentScope.current = scope;
+  const revision = useRef(0);
+  useEffect(() => {
+    if (!scope || !key) return;
+    let active = true;
+    void storage.getItem(key).then(raw => {
+      if (active) setStored({ scope, value: raw !== "false" });
+    }).catch(() => { /* Keep the default without overwriting an unread preference. */ });
+    return () => { active = false; };
+  }, [scope, storage, key]);
+  const ready = !!scope && stored?.scope === scope;
+  const setValue = (value: boolean) => {
+    if (!ready || !scope || !key || currentScope.current !== scope) return;
+    const edit = ++revision.current;
+    setStored({ scope, value });
+    void storage.setItem(key, String(value)).catch(async () => {
+      if (currentScope.current !== scope || revision.current !== edit) return;
+      const raw = await storage.getItem(key).catch(() => null);
+      if (currentScope.current !== scope || revision.current !== edit) return;
+      setStored({ scope, value: raw !== "false" });
+      Alert.alert("Calendario", "No se pudo guardar la preferencia de visualización.");
+    });
+  };
+  return { ready, value: ready ? stored!.value : true, setValue };
+}
+
 /** Functional local DEMO, available only inside the currently authorized owner context. */
 export function GoBusinessPreviewProvider({ children }: { children: React.ReactNode }) {
   const { isBusinessPreview } = useGoView();
   const admin = useAdminAccess();
   const { demo, loaded, config } = useOwnerBusinessDemo();
+  const calendarWorkHours = useCalendarWorkHoursPreference(demo?.businessId, demo?.preferences ?? AsyncStorage, BUSINESS_WORK_HOURS_PREFERENCE);
   const report = useCallback((operation: Promise<void>) => {
     void operation.catch(error => Alert.alert("Empresa", String(error)));
   }, []);
@@ -192,7 +235,7 @@ export function GoBusinessPreviewProvider({ children }: { children: React.ReactN
   const resetConfig = useCallback(async () => { if (demo) await demo.reset(); }, [demo]);
   if (!isBusinessPreview || !admin.isOwner || admin.checking || !demo || !loaded || !config) return null;
   return <GoBusinessConfigContext.Provider value={{
-    config, loaded: true, updateConfig, resetToSubActivity, resetConfig, demo,
+    config, loaded: true, updateConfig, resetToSubActivity, resetConfig, demo, calendarWorkHours,
   }}>{children}</GoBusinessConfigContext.Provider>;
 }
 
@@ -689,6 +732,13 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   const [config, setConfig] = useState<BusinessConfig>(DEFAULT_BUSINESS_CONFIG);
   const [loaded, setLoaded]   = useState(false);
   const [sessionVersion, setSessionVersion] = useState(0);
+  const calendarAccount = enterprise.snapshot?.userId;
+  const calendarBusiness = config.businessId;
+  const calendarWorkHours = useCalendarWorkHoursPreference(
+    enterprise.allowed && loaded && calendarAccount && calendarBusiness
+      ? businessWorkHoursKey(calendarAccount, calendarBusiness) : undefined,
+    AsyncStorage,
+  );
   const dirty = useRef(false);
   const revision = useRef(0);
   const configRef = useRef(config);
@@ -951,7 +1001,7 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   }, []);
 
   return (
-    <GoBusinessConfigContext.Provider value={{ config, loaded, updateConfig, resetToSubActivity, resetConfig }}>
+    <GoBusinessConfigContext.Provider value={{ config, loaded, updateConfig, resetToSubActivity, resetConfig, calendarWorkHours }}>
       {children}
     </GoBusinessConfigContext.Provider>
   );

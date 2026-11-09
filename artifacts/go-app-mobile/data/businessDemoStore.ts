@@ -16,7 +16,7 @@ export type BusinessDemoData = {
 };
 const queues = new Map<string, Promise<unknown>>();
 const revisions = new Map<string, number>();
-const preferenceKeys = new Set(["cal_density", "cal_show_hours", "go_cal_size_v1", "cal_day_night_mode_v1"]);
+const preferenceKeys = new Set(["cal_density", "cal_show_hours", "go_cal_size_v1", "cal_day_night_mode_v1", "go_business_calendar_work_hours"]);
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const stamp = (dateISO: string, time: string) => `${dateISO}T${time}:00`;
 const overlaps = (a: Booking, b: Booking) => a.startDatetime < b.endDatetime && a.endDatetime > b.startDatetime;

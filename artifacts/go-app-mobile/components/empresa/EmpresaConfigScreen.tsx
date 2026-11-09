@@ -1,4 +1,5 @@
 import type { ScrollViewInstance, TextInputInstance, ViewInstance } from "react-native";
+import { BusinessWorkHoursSwitch } from "@/components/ui/BusinessWorkHoursSwitch";
 /**
  * EmpresaConfigScreen
  * ═══════════════════════════════════════════════════════════════════════════
@@ -964,7 +965,7 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
   const { t, lang } = useLanguage();
   const SCHED_DAYS_FULL_T  = [t("biz_day_mon_full"), t("biz_day_tue_full"), t("biz_day_wed_full"), t("biz_day_thu_full"), t("biz_day_fri_full"), t("biz_day_sat_full"), t("biz_day_sun_full")];
   const SCHED_DAYS_SHORT_T = buildDaysShortT(t);
-  const { config, updateConfig, demo } = useBusinessConfig();
+  const { config, updateConfig, demo, calendarWorkHours } = useBusinessConfig();
   const color = currentSector?.color ?? PURPLE;
   const [selectedDay, setSelectedDay] = useState(0);
   const [exceptionsOpen, setExceptionsOpen] = useState(false);
@@ -1277,6 +1278,7 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
             );
           })}
         </View>
+        {calendarWorkHours && <BusinessWorkHoursSwitch preference={calendarWorkHours} lang={lang} color={TEXT} />}
         <TouchableOpacity
           testID="calendar-exceptions-access"
           accessibilityRole="button"

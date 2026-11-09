@@ -68,6 +68,7 @@ import { GoCloseButton } from "./ui/GoCloseButton";
 import { goCalendarColumnHeaderStyles } from "./ui/goCalendarColumnStyles";
 import { GO_PENDING_YELLOW } from "../constants/colors";
 import { GoCalendarViewSelector } from "./ui/GoCalendarViewSelector";
+import { businessCalendarClock, splitWorkHourEntries, workHourSlots, type WorkRange, type WorkSlot } from "@/data/businessCalendarWorkHours";
 
 export type GoEntry = {
   /** Read-only catalogue category used by list presentation, never a state. */
@@ -354,6 +355,12 @@ export type AgendaBoardProps = {
   /** false = GPS denied; shows subtle fallback indicator instead of weather data */
   hasLocation?: boolean;
   officeMode?: boolean;
+  /** Opt-in business display. Undefined ranges mean no confirmed schedule. */
+  businessWorkHours?: {
+    timezone?: string;
+    intervalsForDate?: (dateISO: string) => readonly WorkRange[] | undefined;
+    onStartDateChange?: (dateISO: string) => void;
+  };
   /** Modo visual día/noche: claro=siempre blanco, oscuro=siempre negro, mixto=automático por hora. */
   calDayNightMode?: CalDayNightMode;
   /** Incrementar este token fuerza un scroll inmediato a HOY (columna actual + hora). */
@@ -564,7 +571,9 @@ interface DayColI18n {
 const DAY_COL_ES: DayColI18n = { today: "HOY", tomorrow: "MAÑANA", shortDays: SHORT_DAY_ES, deleted: "ELIMINADOS", pending: "PENDIENTES" };
 const DAY_COL_EN: DayColI18n = { today: "TODAY", tomorrow: "TMRW", shortDays: SHORT_DAY_EN, deleted: "DELETED", pending: "PENDING" };
 
-function getDayColumns(i18n: DayColI18n = DAY_COL_ES, startISO = formatISODate(getToday())): Column[] {
+function getDayColumns(i18n: DayColI18n = DAY_COL_ES, startISO = formatISODate(getToday()), calendarToday?: string): Column[] {
+  const tomorrow = calendarToday ? new Date(calendarToday + "T12:00:00") : getDayOffset(1);
+  if (calendarToday) tomorrow.setDate(tomorrow.getDate() + 1);
   const cols: Column[] = [
     { id: "retrasados", label: i18n.pending, isRetrasados: true },
   ];
@@ -575,8 +584,8 @@ function getDayColumns(i18n: DayColI18n = DAY_COL_ES, startISO = formatISODate(g
     const dayNum = d.getDate();
     const monNum = d.getMonth() + 1;
     const dayDate = `${String(dayNum).padStart(2, "0")}/${String(monNum).padStart(2, "0")}`;
-    const isToday = iso === formatISODate(getToday());
-    const isTomorrow = iso === formatISODate(getDayOffset(1));
+    const isToday = iso === (calendarToday ?? formatISODate(getToday()));
+    const isTomorrow = iso === formatISODate(tomorrow);
     const dayName = isToday ? i18n.today : isTomorrow ? i18n.tomorrow : i18n.shortDays[d.getDay()];
     const label = isToday ? i18n.today : isTomorrow ? i18n.tomorrow : `${i18n.shortDays[d.getDay()]} ${dayDate}`;
     cols.push({ id: `day_${iso}`, label, dayName, dayDate, dateISO: iso });
@@ -585,10 +594,10 @@ function getDayColumns(i18n: DayColI18n = DAY_COL_ES, startISO = formatISODate(g
   return cols;
 }
 
-function getMonthColumns(yearMonth: string, shortDays: readonly string[] = SHORT_DAY_ES, todayLabel = "HOY"): Column[] {
+function getMonthColumns(yearMonth: string, shortDays: readonly string[] = SHORT_DAY_ES, todayLabel = "HOY",
+  todayISO = formatISODate(getToday())): Column[] {
   const [year, month] = yearMonth.split("-").map(Number);
   const daysInMonth = new Date(year, month, 0).getDate();
-  const todayISO = formatISODate(getToday());
   const cols: Column[] = [];
   for (let day = 1; day <= daysInMonth; day++) {
     const d = new Date(year, month - 1, day);
@@ -749,6 +758,7 @@ export function AgendaBoard({
   weatherDays = {},
   hasLocation = true,
   officeMode = false,
+  businessWorkHours,
   calDayNightMode = "mixto",
   scrollToTodayToken = 0,
   scrollToDateToken,
@@ -769,7 +779,10 @@ export function AgendaBoard({
   const currentEntriesRef=useRef(goLog);currentEntriesRef.current=goLog;
   const allowedEntryIdsRef = useRef(new Set<string>());
   allowedEntryIdsRef.current = new Set(goLog.map(entry => entry.id));
-  const todayISO = formatISODate(getToday());
+  const workHoursRef = useRef(businessWorkHours);
+  workHoursRef.current = businessWorkHours;
+  const businessClock = businessCalendarClock(businessWorkHours?.timezone);
+  const todayISO = businessClock?.dateISO ?? formatISODate(getToday());
   const { lang, t } = useLanguage();
   // Traduce intentKey estable ("comida", "viaje"…) → etiqueta localizada.
   // Cubre entradas antiguas que puedan tener intentLabel en otro idioma.
@@ -788,7 +801,7 @@ export function AgendaBoard({
   const dayColI18n = lang === "en" ? DAY_COL_EN : DAY_COL_ES;
   const monthNamesArr = lang === "en" ? MONTH_NAMES_EN : MONTH_NAMES_ES;
   const [weekStartISO, setWeekStartISO] = useState(selectedDateISO || todayISO);
-  const dayColumns = useMemo(() => getDayColumns(dayColI18n, weekStartISO), [lang, weekStartISO]);
+  const dayColumns = useMemo(() => getDayColumns(dayColI18n, weekStartISO, businessClock?.dateISO), [lang, weekStartISO, businessClock?.dateISO]);
   useEffect(() => {
     // Keep the existing window when selecting within it, preserving scroll context.
     if (!selectedDateISO) return;
@@ -862,7 +875,7 @@ export function AgendaBoard({
   }, [bookingMsgEntry, bookingMsgDraft, onSendGoChat]);
 
   // ── "NOW" indicator: current time in minutes, refreshed every 30s ─
-  const [nowMinutes, setNowMinutes] = useState<number>(() => {
+  const [localNowMinutes, setNowMinutes] = useState<number>(() => {
     const n = new Date();
     return n.getHours() * 60 + n.getMinutes();
   });
@@ -873,6 +886,8 @@ export function AgendaBoard({
     }, 30000);
     return () => clearInterval(id);
   }, []);
+
+  const nowMinutes = businessClock?.minute ?? localNowMinutes;
 
   // Month columns for mes_lineal mode
   const [localMonth, setLocalMonth] = useState(calViewMonth ?? getCurrentYearMonth());
@@ -892,8 +907,8 @@ export function AgendaBoard({
     }
   };
   const monthColumns = useMemo(
-    () => getMonthColumns(activeMonth, dayColI18n.shortDays, dayColI18n.today),
-    [activeMonth, lang]
+    () => getMonthColumns(activeMonth, dayColI18n.shortDays, dayColI18n.today, todayISO),
+    [activeMonth, lang, todayISO]
   );
 
   // ── CALENDAR SIZE SYSTEM ─────────────────────────────────────────
@@ -923,15 +938,14 @@ export function AgendaBoard({
   // "dia" mode: derive single column for the selected day
   const diaColumn = useMemo(() => {
     if (viewMode !== "dia") return null;
-    const iso = selectedDateISO || formatISODate(getToday());
+    const iso = selectedDateISO || todayISO;
     const existing = dayColumns.find((c) => c.dateISO === iso);
     if (existing) return existing;
     // Selected date may be outside the rolling 7-day window — build on the fly
     const d = new Date(iso + "T00:00:00");
-    const todayISO2 = formatISODate(getToday());
-    const label = iso === todayISO2 ? dayColI18n.today : formatDayLabel(d);
+    const label = iso === todayISO ? dayColI18n.today : formatDayLabel(d);
     return { id: iso, dateISO: iso, label } as Column;
-  }, [viewMode, selectedDateISO, dayColumns, lang]);
+  }, [viewMode, selectedDateISO, dayColumns, lang, todayISO]);
 
   const baseColumns = useMemo(() => {
     if (viewMode === "mes_lineal") {
@@ -948,6 +962,11 @@ export function AgendaBoard({
     if (viewMode === "dia" && diaColumn) return [diaColumn];
     return dayColumns;
   }, [viewMode, monthColumns, dayColumns, diaColumn, todayISO]);
+  const firstWorkDate = baseColumns.find(column => !!column.dateISO)?.dateISO;
+  const onWorkHoursStartDateChange = businessWorkHours?.onStartDateChange;
+  useEffect(() => {
+    if (firstWorkDate) onWorkHoursStartDateChange?.(firstWorkDate);
+  }, [firstWorkDate, onWorkHoursStartDateChange]);
   const allColumns=useMemo(()=>{
     if(!onOpenNote)return baseColumns;
     const columns=viewMode==="dia"?[{id:"retrasados",label:t("col_pendientes"),isRetrasados:true},...baseColumns]:[...baseColumns];
@@ -1134,6 +1153,7 @@ export function AgendaBoard({
   const colScrollViewportTop = useRef<Record<string, number>>({});
   const timeSlotLayouts = useRef<Record<string, Record<number, { y: number; h: number }>>>({});
   const timeSlotStarts = useRef<Record<string, number[]>>({});
+  const workLayoutKeys = useRef<Record<string, string>>({});
   // Current vertical scroll offset per column (tracked via onScroll)
   const colScrollY       = useRef<Record<string, number>>({});
   // Visible height of each column's ScrollView (tracked via onLayout)
@@ -1188,7 +1208,7 @@ export function AgendaBoard({
         scrollViewRef.current?.scrollTo({ x, animated });
       }
       // 2. Vertical scroll inside today's column → current time (semana only)
-      if (viewMode === "semana") {
+      if (viewMode === "semana" && !workHoursRef.current?.intervalsForDate) {
         const todayColRef = colScrollRefs.current[`day_${formatISODate(getToday())}`];
         if (todayColRef) {
           const n = new Date();
@@ -2471,6 +2491,10 @@ export function AgendaBoard({
               : 0.5;
             const timedItems = items.filter((i) => !!i.time);
             const untimedItems = items.filter((i) => !i.time);
+            const workRanges = col.dateISO ? businessWorkHours?.intervalsForDate?.(col.dateISO) : undefined;
+            const { inside, outside } = workRanges
+              ? splitWorkHourEntries(timedItems, workRanges)
+              : { inside: timedItems, outside: [] };
             console.log("[CALENDAR_RENDER_ITEMS]", items.length, items.map(i => ({ id: (i as any).id, source: (i as any).source, slotKey: (i as any).slotKey, time: (i as any).time, staffId: (i as any).staffId })));
             const slotIntervalMin = getEffectiveDensityMin(density, timedItems.length);
             const SLOT_H = slotIntervalMin === 60 ? 50 : slotIntervalMin === 30 ? 36 : 28;
@@ -2482,6 +2506,17 @@ export function AgendaBoard({
             const effectiveSlots = officeMode
               ? slots.filter(m => m >= OFFICE_S && m < OFFICE_E)
               : slots;
+            const rows: WorkSlot[] = workRanges
+              ? workHourSlots(workRanges, slotIntervalMin)
+              : effectiveSlots.map(start => ({ start, end: start + slotIntervalMin }));
+            const layoutKey = businessWorkHours
+              ? [slotIntervalMin, outside.length, workRanges?.map(range => range.start + "-" + range.end).join(",") ?? "all"].join(":")
+              : undefined;
+            if (layoutKey !== undefined && workLayoutKeys.current[col.id] !== layoutKey) {
+              workLayoutKeys.current[col.id] = layoutKey;
+              timeSlotLayouts.current[col.id] = {};
+              timeSlotStarts.current[col.id] = rows.map(row => row.start);
+            }
             const earlyOfficeItems = officeMode
               ? timedItems.filter(it => { const tm = it.time.match(/^(\d{1,2}):(\d{2})$/); if (!tm) return false; return parseInt(tm[1],10)*60+parseInt(tm[2],10) < OFFICE_S; })
               : [];
@@ -2517,11 +2552,30 @@ export function AgendaBoard({
                 scrollEnabled={scrollEnabledDuringDrag}
                 scrollEventThrottle={50}
                 onScroll={(e) => { colScrollY.current[col.id] = e.nativeEvent.contentOffset.y; }}
-                onLayout={(e) => { colScrollViewH.current[col.id] = e.nativeEvent.layout.height;colScrollViewportTop.current[col.id]=e.nativeEvent.layout.y;timeSlotStarts.current[col.id]=effectiveSlots;queueBookingFocus(); }}
+                onLayout={(e) => { colScrollViewH.current[col.id] = e.nativeEvent.layout.height;colScrollViewportTop.current[col.id]=e.nativeEvent.layout.y;if (layoutKey === undefined) timeSlotStarts.current[col.id]=effectiveSlots;queueBookingFocus(); }}
               >
                 {untimedItems.length > 0 && (
                   <View style={{ padding: 5, gap: 5, borderBottomWidth: 1, borderBottomColor: colDnProgress >= 0.5 ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.07)" }}>
                     {untimedItems.map((item) => renderItemCard(item, colDnProgress, colHumanMode, col.dateISO))}
+                  </View>
+                )}
+                {businessWorkHours?.intervalsForDate && !workRanges && (
+                  <Text testID={"business-calendar-missing-hours-" + col.dateISO} style={[s.workHoursNote, { color: slotLabelColor(colDnProgress) }]}>
+                    {lang === "en" ? "Set your working hours in Company settings. Showing 24 hours."
+                      : "Configura el horario en Empresa → Horarios. Se muestran 24 horas."}
+                  </Text>
+                )}
+                {workRanges?.length === 0 && (
+                  <Text testID={"business-calendar-closed-" + col.dateISO} style={[s.workHoursNote, { color: slotLabelColor(colDnProgress) }]}>
+                    {lang === "en" ? "No working hours on this date" : "Sin horario de trabajo en esta fecha"}
+                  </Text>
+                )}
+                {outside.length > 0 && (
+                  <View testID={"business-calendar-outside-hours-" + col.dateISO} style={s.workHoursOutside}>
+                    <Text accessibilityRole="header" style={[s.workHoursNote, { color: slotLabelColor(colDnProgress) }]}>
+                      {lang === "en" ? "Outside working hours" : "Fuera del horario de trabajo"} · {outside.length}
+                    </Text>
+                    {outside.map(item => renderItemCard(item, colDnProgress, colHumanMode, col.dateISO))}
                   </View>
                 )}
                 {/* ── Office mode: hidden early hours indicator ── */}
@@ -2538,12 +2592,11 @@ export function AgendaBoard({
                     <View style={{ flex: 1, height: 0.5, backgroundColor: "rgba(148,180,200,0.30)", marginLeft: 6 }} />
                   </View>
                 )}
-                {effectiveSlots.map((slotStart) => {
+                {rows.map(({ start: slotStart, end: slotEnd, shift, previousEnd }) => {
                   const h = Math.floor(slotStart / 60);
                   const m = slotStart % 60;
                   const label = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-                  const slotEnd = slotStart + slotIntervalMin;
-                  const slotCards = timedItems.filter((item) => {
+                  const slotCards = inside.filter((item) => {
                     const tm = item.time?.match(/^(\d{1,2}):(\d{2})$/);
                     if (!tm) return false;
                     const iMin = parseInt(tm[1], 10) * 60 + parseInt(tm[2], 10);
@@ -2556,7 +2609,7 @@ export function AgendaBoard({
                   const showWeatherAlert = slotWeather &&
                     (isAdverseWeather(slotWeather.weatherCode) || slotWeather.precipProbability >= 40);
                   const baseDnProgress = getSlotDayNightProgress(
-                    slotStart + slotIntervalMin / 2,
+                    (slotStart + slotEnd) / 2,
                     colSunriseMin,
                     colSunsetMin,
                   );
@@ -2577,11 +2630,12 @@ export function AgendaBoard({
                   const slotDateISO = col.dateISO;
                   const hasSlotTap = slotCards.length === 0 && !!slotDateISO && !!(onCreateTaskAtTime || onReserveAtTime);
                   const measureSlot = ({ nativeEvent: { layout: { y, height } } }: LayoutChangeEvent) => {
-                    (timeSlotLayouts.current[col.id] ??= {})[slotStart] = { y, h: height };
+                    if (layoutKey === undefined || workLayoutKeys.current[col.id] === layoutKey)
+                      (timeSlotLayouts.current[col.id] ??= {})[slotStart] = { y, h: height };
                   };
                   const row = (
                     <View key={slotStart} style={[
-                      { minHeight: slotCards.length === 0 ? SLOT_H : undefined },
+                      { minHeight: slotCards.length === 0 ? (workRanges ? Math.max(20, SLOT_H * (slotEnd - slotStart) / slotIntervalMin) : SLOT_H) : undefined },
                       slotDayNightStyle(dnProgress),
                     ]}
                       testID={`calendar-drop-slot-${col.dateISO||""}-${label}`}
@@ -2639,12 +2693,28 @@ export function AgendaBoard({
                     </View>
                   );
                   // Measure the direct child of the scroll content for either row shape.
-                  return hasSlotTap ? (
+                  const slot = hasSlotTap ? (
                     <GoCalendarSlot key={slotStart} dateISO={slotDateISO} timeHHMM={label} onLayout={measureSlot}
                       disabled={isSelecting || !!dragItem} onPress={onCreateTaskAtTime} onLongPress={onReserveAtTime}>
                       {row}
                     </GoCalendarSlot>
                   ) : row;
+                  if (layoutKey === undefined) return slot;
+                  return <React.Fragment key={layoutKey + ":" + slotStart}>
+                    {shift && (
+                      <View testID={"business-calendar-shift-" + col.dateISO + "-" + label} style={[s.workHoursShift, slotDayNightStyle(colDnProgress)]}>
+                        {previousEnd !== undefined && (
+                          <Text style={[s.workHoursNote, { color: slotLabelColor(colDnProgress) }]}>
+                            {lang === "en" ? "Break" : "Descanso"} · {timeLabelForSlot(previousEnd)}–{label}
+                          </Text>
+                        )}
+                        <Text style={[s.workHoursNote, { color: slotLabelColor(colDnProgress) }]}>
+                          {label}–{timeLabelForSlot(shift.end)}
+                        </Text>
+                      </View>
+                    )}
+                    {slot}
+                  </React.Fragment>;
                 })}
                 {/* ── Office mode: hidden late hours indicator ── */}
                 {officeMode && (
@@ -3818,6 +3888,10 @@ const s = StyleSheet.create({
   calHoursBtnTextActive: {
     color: "#111827",
   },
+
+  workHoursNote: { fontSize: 11, fontWeight: "600", paddingHorizontal: 7, paddingVertical: 4 },
+  workHoursShift: { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: "rgba(148,163,184,0.35)" },
+  workHoursOutside: { padding: 5, gap: 5, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: "rgba(148,163,184,0.45)" },
 
   // ── Month nav bar (inside AgendaBoard for mes_lineal) ─────────────
   monthNavBar: {

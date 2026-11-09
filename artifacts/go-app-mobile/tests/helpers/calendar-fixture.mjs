@@ -107,6 +107,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
         if (name === '@/hooks/useBusinessBookings') return load('hooks/useBusinessBookings.ts');
         if (name === '@/data/reservationCardPolicy') return load('data/reservationCardPolicy.ts');
         if (name === '@/data/goEntryPresentation') return load('data/goEntryPresentation.ts');
+        if (name === '@/data/businessCalendarWorkHours') return load('data/businessCalendarWorkHours.ts');
         if (name === '@/data/customerBookingProjection') return load('data/customerBookingProjection.ts');
         if (name.startsWith('@/components/')) return load(name.replace('@/', '') + '.tsx');
         if (name === '@/lib/time') return load('lib/time.ts');
