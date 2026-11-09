@@ -17,7 +17,7 @@ function fixture(gateway){let cursor=0,slots=[],effects=[];const confirmations=[
     useState(initial){const i=cursor++;slots[i]??={value:initial};return [slots[i].value,value=>{slots[i].value=typeof value==='function'?value(slots[i].value):value;}];},
     useRef(value){return React.useState({current:value})[0];},useCallback:fn=>fn,
     useEffect(fn,deps){const i=cursor++,old=slots[i];if(!old||!equal(old.deps,deps)){slots[i]={deps};effects.push(()=>{old?.cleanup?.();slots[i].cleanup=fn();});}}};
-  const scope={exports:{},setTimeout,require(name){if(name==='@/hooks/useSupportRefresh')return{useSupportRefresh:(enabled,refresh,invalidate)=>{lifecycle={enabled,refresh,invalidate};}};if(name==='react')return {...React,default:React};
+  const scope={exports:{},setTimeout,require(name){if(name==='@/components/pilots/PilotLabPanel')return{PilotLabPanel:'PilotLabPanel'};if(name==='@/hooks/useSupportRefresh')return{useSupportRefresh:(enabled,refresh,invalidate)=>{lifecycle={enabled,refresh,invalidate};}};if(name==='react')return {...React,default:React};
     if(name==='react-native')return {Platform:{OS:'ios'},StyleSheet:{create:value=>value},Alert:{alert:(...args)=>confirmations.push(args),prompt:(...args)=>confirmations.push(args)},Linking:{openURL:async()=>{}},
       Keyboard:{addListener:(event,listener)=>{keyboardListeners[event]=listener;return {remove(){delete keyboardListeners[event];}};},isVisible:()=>false,dismiss:()=>calls.push('keyboard-dismiss')},
       Modal:'Modal',KeyboardAvoidingView:'KeyboardAvoidingView',ScrollView:'ScrollView',Text:'Text',TextInput:'TextInput',TouchableOpacity:'TouchableOpacity',View:'View'};
@@ -94,4 +94,11 @@ test('ADMIN uses one persistent bottom floating control: X closes, detail arrow 
   f.keyboardHide();tree=f.render();nodes(tree).find(node=>node.props.accessibilityLabel==='Abrir AY-1').props.onPress();await tick();tree=f.render();
   assert.equal(control().props.level,'panel');control().props.onPress();tree=f.render();assert.equal(control().props.level,'container');
   control().props.onPress();assert.deepEqual(f.calls,['keyboard-dismiss','close']);
+});
+
+test('Pilotos opens a native laboratory even while support reception is disabled',()=>{
+ const f=fixture({});let tree=f.render({...f.props,backendReady:false});
+ const entry=nodes(tree).find(n=>n.props.accessibilityLabel==='Abrir Pilotos Laboratorio');assert.ok(entry);entry.props.onPress();
+ tree=f.render({...f.props,backendReady:false});assert.equal(tree.type,'PilotLabPanel');assert.equal(tree.props.backendReady,false);assert.equal(tree.props.gateway,f.props.gateway);
+ tree.props.onClose();tree=f.render({...f.props,backendReady:false});assert.ok(nodes(tree).some(n=>n.props.accessibilityLabel==='Abrir Pilotos Laboratorio'));
 });

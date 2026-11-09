@@ -7,6 +7,8 @@ import { newSupportRequestKey } from "@/lib/supportRequests";
 import type { SupportGateway, SupportKind, SupportReceipt, SupportStatus } from "@/lib/supportRequests";
 import {useSupportRefresh} from "@/hooks/useSupportRefresh";
 
+import { PilotLabPanel } from "@/components/pilots/PilotLabPanel";
+
 export type SupportAdminView = "received"|"incident"|"improvement"|"help"|"all"|"pending"|"archive";
 const titles:Record<SupportAdminView,string>={received:"Solicitudes recibidas",incident:"Incidencias",improvement:"Propuestas de mejora",
   help:"Consultas de ayuda",all:"Listados de AYUDA",pending:"En revisión / Pendientes",archive:"Historial / Archivo"};
@@ -17,6 +19,9 @@ export function SupportAdminPanel({visible,onClose,view,gateway,backendReady=tru
   visible:boolean;onClose:()=>void;view:SupportAdminView;gateway:SupportGateway;backendReady?:boolean;handedness?:"left"|"right";
 }) {
   const insets=useSafeAreaInsets();
+  const [pilotLabOpen,setPilotLabOpen]=useState(false);
+  useEffect(()=>{if(!visible)setPilotLabOpen(false);},[visible]);
+
   const [statusTab,setStatusTab]=useState<"in_review"|"pending">("in_review");
   const [rows,setRows]=useState<SupportReceipt[]>([]),[total,setTotal]=useState(0);
   const [selected,setSelected]=useState<SupportReceipt|null>(null);
@@ -104,13 +109,16 @@ export function SupportAdminPanel({visible,onClose,view,gateway,backendReady=tru
     <View style={styles.actions}><TouchableOpacity accessibilityRole="button" accessibilityLabel={`Solucionar ${row.reference}`} onPress={()=>status(row,"solved")} style={styles.action}><Text style={styles.actionText}>SOLUCIONAR</Text></TouchableOpacity>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Rechazar ${row.reference}`} onPress={()=>status(row,"rejected")} style={styles.action}><Text style={styles.actionText}>RECHAZAR</Text></TouchableOpacity></View>
   </View>;};
+  if(pilotLabOpen&&visible)return <PilotLabPanel visible onClose={()=>setPilotLabOpen(false)} gateway={gateway} backendReady={backendReady} handedness={handedness}/>;
   if(!backendReady)return <Modal visible={visible} animationType="slide" onRequestClose={back}><View style={[styles.screen,{paddingTop:insets.top,paddingBottom:insets.bottom}]}>
     <View style={styles.header}><Text accessibilityRole="header" style={styles.title}>{titles[view]}</Text></View>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Abrir Pilotos Laboratorio" onPress={()=>setPilotLabOpen(true)} style={styles.action}><Text style={styles.actionText}>PILOTOS · LABORATORIO</Text></TouchableOpacity>
     <Text accessibilityRole="alert" style={[styles.body,{paddingHorizontal:18,paddingTop:24}]}>La recepción de solicitudes está pendiente de conexión al servidor.</Text>
     {navigation}
   </View></Modal>;
   return <Modal visible={visible} animationType="slide" onRequestClose={back}><KeyboardAvoidingView style={[styles.screen,{paddingTop:insets.top,paddingBottom:insets.bottom}]} behavior={Platform.OS==="ios"?"padding":"height"}>
     <View style={styles.header}><Text accessibilityRole="header" style={styles.title}>{titles[view]}</Text></View>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel="Abrir Pilotos Laboratorio" onPress={()=>setPilotLabOpen(true)} style={styles.action}><Text style={styles.actionText}>PILOTOS · LABORATORIO</Text></TouchableOpacity>
     {view==="pending"&&<View style={styles.actions}>{(["in_review","pending"] as const).map(value=><TouchableOpacity key={value} accessibilityRole="button" accessibilityState={{selected:statusTab===value}} onPress={()=>setStatusTab(value)} style={[styles.filter,statusTab===value&&styles.active]}><Text style={styles.body}>{labels[value]}</Text></TouchableOpacity>)}</View>}
     <View style={styles.filterRow}><TextInput accessibilityLabel="Desde fecha" placeholder="Desde AAAA-MM-DD" value={from} onChangeText={setFrom} style={styles.filterInput}/><TextInput accessibilityLabel="Hasta fecha" placeholder="Hasta AAAA-MM-DD" value={to} onChangeText={setTo} style={styles.filterInput}/><TextInput accessibilityLabel="Filtrar remitente" placeholder="Remitente" value={sender} onChangeText={setSender} style={styles.filterInput}/><TouchableOpacity accessibilityRole="button" onPress={applyFilters} style={styles.action}><Text style={styles.actionText}>FILTRAR</Text></TouchableOpacity></View>
     {!!error&&<Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
