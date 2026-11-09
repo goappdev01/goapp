@@ -77,7 +77,8 @@ function fixture(kind = "provider", overrides = {}) {
   const fetch = async (url, init = {}) => {
     const parsed = new URL(url), body = init.body ? JSON.parse(init.body) : null;
     calls.push({ url: parsed, body, init });
-    assert.equal(new Headers(init.headers).get("Authorization"), "Bearer test-only");
+    const publicCatalogue = /\/(businesses|services|staff)$/.test(parsed.pathname);
+    assert.equal(new Headers(init.headers).get("Authorization"), publicCatalogue ? null : "Bearer test-only");
     const selectedBusiness = parsed.searchParams.get("business_id") ?? business;
     if (parsed.pathname.endsWith("/businesses")) return Response.json([
       remoteBusiness(business, "Peluquería primera"), remoteBusiness(otherBusiness, "Peluquería segunda"),
@@ -130,7 +131,7 @@ function fixture(kind = "provider", overrides = {}) {
   };
   const auth = { readAuthSession: async () => ({ access_token: "test-only", user: { id: user } }),
     fetchWithAuth: fetch, AuthSessionRequiredError: class extends Error {} };
-  const apiScope = { exports: {}, Headers, URLSearchParams, Intl, Date: Clock,
+  const apiScope = { exports: {}, Headers, URLSearchParams, Intl, Date: Clock, fetch,
     process: { env: { EXPO_PUBLIC_API_URL: "https://timeline.test.invalid/api" } }, console: { log() {}, warn() {}, error() {} },
     require(name) {
       if (name === "react-native") return { Platform: { OS: "ios" } };
@@ -177,9 +178,9 @@ function fixture(kind = "provider", overrides = {}) {
   };
   class Value { constructor(value) { this.value = value; } setValue(value) { this.value = value; } interpolate() { return 0; } }
   const animation = { start(callback) { callback?.({ finished: true }); } };
-  const native = new Proxy({ Dimensions: { get: () => ({ width: 390, height: 844 }) }, Platform: { OS: "ios" },
+  const native = new Proxy({ Dimensions: { get: () => ({ width: overrides.width ?? 390, height: overrides.height ?? 844 }) }, Platform: { OS: "ios" },
     StyleSheet: { create: value => value, absoluteFillObject: {} }, Alert: { alert: (...args) => alerts.push(args) },
-    Keyboard: { addListener: () => ({ remove() {} }), dismiss() {} },
+    Keyboard: { isVisible: () => false, addListener: () => ({ remove() {} }), dismiss() {} },
     Animated: { Value, View: "Animated.View", timing: () => animation, spring: () => animation, add: () => 0 },
     PanResponder: { create: handlers => ({ panHandlers: handlers }) },
   }, { get: (target, key) => target[key] ?? key });
@@ -415,3 +416,23 @@ for (const kind of ["provider", "overlay"]) {
     assert.equal(posted(f)[0].body.ends_at, plan.endsAt);
   });
 }
+
+const flatStyle = n => Object.assign({}, ...[n.props.style].flat(Infinity).filter(Boolean));
+for (const [width,height] of [[320,568],[375,667],[390,844],[430,932]]) test(`compact services ${width}x${height} keep complete context, two rows, touch target, accurate total and unchanged Save`, async()=>{
+ const f=fixture("overlay",{width,height});await f.start();await f.press("Peluquería primera");
+ const context=nodes(f.tree()).find(n=>n.props.testID==="booking-service-context");
+ assert.equal(text(context),"Peluquería primera");assert.equal(context.props.numberOfLines,undefined);
+ const header=nodes(f.tree()).filter(n=>n.type==="View"&&nodes(n).includes(context)).at(-1);assert.equal(flatStyle(header).flexDirection,"row");
+ const list=nodes(f.tree()).find(n=>n.props.testID==="booking-services-list");assert.equal(flatStyle(list).paddingHorizontal,12);assert.ok(list.props.contentContainerStyle.paddingBottom>=32);
+ const card=nodes(f.tree()).find(n=>n.props.testID==="booking-service-"+firstService);
+ assert.equal(flatStyle(card).flexDirection,"column");assert.equal(flatStyle(card).height,undefined);
+ const rows=nodes(card).filter(n=>n.type==="View"&&flatStyle(n).flexDirection==="row"&&flatStyle(n).gap===8);assert.equal(rows.length,2);assert.ok(text(rows[0]).includes("Corte exacto"));assert.ok(text(rows[0]).includes("12"));assert.match(text(rows[1]),/13\s+min/);
+ const mark=nodes(card).find(n=>flatStyle(n).width===44);assert.equal(flatStyle(mark).minHeight,44);
+ const save=nodes(f.tree()).find(n=>n.props.testID==="booking-save-services");assert.equal(save.props.disabled,true);assert.equal(flatStyle(save).paddingVertical,18);const original=plain(save.props.style[0]);
+ await f.press("Corte exacto");let total=nodes(f.tree()).find(n=>n.props.testID==="booking-services-total");assert.match(text(total),/TOTAL:.*12,00.*€/);assert.match(text(total),/13\s+min/);assert.equal(flatStyle(total).flexWrap,"wrap");assert.equal(flatStyle(total).justifyContent,"space-between");
+ assert.equal(nodes(f.tree()).find(n=>n.type==="CatalogComplementSelector").props.showTotal,false);
+ await f.press("Lavado exacto");total=nodes(f.tree()).find(n=>n.props.testID==="booking-services-total");assert.match(text(total),/TOTAL:.*24,00.*€/);assert.match(text(total),/40\s+min/);
+ await f.press("Corte exacto");total=nodes(f.tree()).find(n=>n.props.testID==="booking-services-total");assert.match(text(total),/TOTAL:.*12,00.*€/);assert.match(text(total),/27\s+min/);
+ assert.deepEqual(plain(nodes(f.tree()).find(n=>n.props.testID==="booking-save-services").props.style[0]),original);
+ await f.press("save");assert.ok(button(f.tree(),"Ana"));assert.equal(posted(f).length,0);
+});

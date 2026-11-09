@@ -7,7 +7,7 @@ import vm from 'node:vm';
 const ts=createRequire(path.join(process.cwd(),'package.json'))('typescript');
 const plain=v=>JSON.parse(JSON.stringify(v));
 const compile=file=>ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
-function fixture(){
+function fixture(showTotal=true){
  const calls=[],listeners=new Set();let business='business-A',roots=['tinte'];
  const sample=selected=>({version:1,businessId:business,rootIds:roots,selectedAssociationIds:selected,ready:true,missingRequired:[],currency:'EUR',totalPrice:selected.includes('ampolla-link')?37:30,serviceIds:['tinte'],
   lines:[{itemId:'tinte',name:'Tinte',kind:'service',quantity:1,durationMinutes:30,unitPrice:30,charge:30,currency:'EUR'}],
@@ -20,7 +20,7 @@ function fixture(){
  const scope={exports:{},require:n=>{if(n==='react')return {...React,default:React};if(n==='react-native')return native;if(n==='@/data/catalogAssociations')return data;if(n==='@/contexts/LanguageContext')return{useLanguage:()=>({lang:'es'})};if(n==='@/lib/sessionEvents')return{onSessionChanged:cb=>{listeners.add(cb);return()=>listeners.delete(cb)}};throw Error(n)}};
  vm.runInNewContext(compile('components/booking/CatalogComplementSelector.tsx'),scope);
  let latest;const changed=q=>{latest=q};
- const render=()=>{cursor=0;dirty=false;tree=scope.exports.CatalogComplementSelector({businessId:business,rootIds:roots,onChange:changed});const pending=effects;effects=[];for(const e of pending)e()};
+ const render=()=>{cursor=0;dirty=false;tree=scope.exports.CatalogComplementSelector({businessId:business,rootIds:roots,onChange:changed,showTotal});const pending=effects;effects=[];for(const e of pending)e()};
  const settle=async()=>{for(let n=0;n<10;n++){if(dirty)render();await new Promise(r=>setImmediate(r));if(!dirty)return}throw Error('Non-settling selector')};
  const walk=node=>!node||typeof node!=='object'?[]:[node,...(node.children??[]).flatMap(walk)];
  return {data,calls,sample,start:settle,settle,tree:()=>tree,latest:()=>latest,nodes:()=>walk(tree),press:async()=>{walk(tree).find(n=>n.props.accessibilityRole==='checkbox').props.onPress();await settle()},change:async(b,r)=>{business=b;roots=r;dirty=true;await settle()},session:async()=>{for(const cb of listeners)cb();await settle()}};
@@ -31,3 +31,10 @@ test('changing business, root or account clears prior optional choices',async()=
 test('included service uses server charge once and keeps its exact time; product does not create a service',()=>{const f=fixture();const q={...f.sample([]),lines:[{itemId:'s',name:'Tinte',kind:'service',durationMinutes:27,charge:30,currency:'EUR'},{itemId:'s2',name:'Acabado',kind:'service',durationMinutes:13,charge:0,currency:'EUR'},{itemId:'p',name:'Ampolla',kind:'product',durationMinutes:0,charge:0,currency:'EUR'}]};assert.deepEqual(plain(f.data.catalogBookingServices(q)),[{id:'s',title:'Tinte',durationMinutes:27,price:30,currency:'EUR'},{id:'s2',title:'Acabado',durationMinutes:13,price:0,currency:'EUR'}])});
 test('removing an optional parent prunes its now unreachable descendants',()=>{const f=fixture(),q={...f.sample(['parent','child']),rootIds:['root'],options:[{associationId:'parent',sourceId:'root',itemId:'second',mode:'optional'},{associationId:'child',sourceId:'second',itemId:'third',mode:'required'}]};assert.deepEqual(plain(f.data.toggleCatalogOption(q,'parent')),[])});
 test('association writes reuse the authenticated API transport and selected existing IDs',async()=>{const f=fixture();await f.data.manageAssociations('business-A','create',{sourceId:'tinte',targetId:'ampolla',mode:'optional'});assert.equal(f.calls[0].route,'/supabase/catalog/associations');assert.equal(f.calls[0].token,true);assert.deepEqual(f.calls[0].body.input,{sourceId:'tinte',targetId:'ampolla',mode:'optional'})});
+
+test('hiding duplicate summary preserves quote and extras while other usages keep their total',async()=>{
+ const f=fixture(false);await f.start();assert.equal(f.latest().totalPrice,30);
+ const hasTotal=f=>f.nodes().some(n=>n.type==='Text'&&n.children.includes('Total revisado'));
+ assert.equal(hasTotal(f),false);await f.press();assert.equal(f.latest().totalPrice,37);assert.equal(hasTotal(f),false);
+ const original=fixture();await original.start();assert.equal(hasTotal(original),true);
+});

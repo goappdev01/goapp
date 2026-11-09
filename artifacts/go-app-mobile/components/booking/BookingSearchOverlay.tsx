@@ -1030,6 +1030,7 @@ export function BookingSearchOverlay({
   const beauty=SECTORS.find(sector=>sector.id==="belleza");
   const beautySelection=selectedCategory==="belleza"||beauty?.subs.some(sub=>sub.id===selectedSubCategory)||visibleSectors.length===1&&visibleSectors[0].id==="belleza";
   const accentColor = selectedBusiness?bookingCategoryAccent(selectedBusiness):beautySelection?beauty?.color||"#eab308":"#00e5ff";
+  const compactServices = canonicalBookingActivity(selectedBusiness?.category) === "peluqueria";
   const reviewedPlan = confirmedBooking?.timingSnapshot ?? activeHold?.timingSnapshot;
   const summaryItem = selectedItem && reviewedPlan ? { ...selectedItem,
     title: (confirmedBooking?.catalogSnapshot ?? activeHold?.catalogSnapshot)?.lines.map(line => line.name).join(" + ") || reviewedPlan.serviceDetails.map(service => service.title).join(" + "),
@@ -1091,16 +1092,18 @@ export function BookingSearchOverlay({
 
           {/* Header — también recibe dragHandlePan para que el arrastre hacia abajo
               funcione desde aquí (los navBtn son Views de layout, sin toques) */}
-          <View style={s.header} {...dragHandlePan.panHandlers}>
+          <View style={[s.header, step === "item" && compactServices && s.serviceHeader]} {...dragHandlePan.panHandlers}>
+            {step === "item" && compactServices ? <>
+              <Text testID="booking-service-context" style={[s.serviceContext, { color: accentColor }]}>{selectedBusiness?.name}</Text>
+              <Text style={[s.headerTitle, s.serviceHeading]}>{t("biz_step_service_label").toUpperCase()}</Text>
+            </> : <>
             <View style={s.navBtn} />
 
             <View style={s.headerCenter}>
               {step === "search" && (
                 <Text testID="booking-search-heading" style={[s.headerTitle,s.stepHeading]}>{lang==="en"?"Find your business":"Busca tu empresa"}</Text>
               )}
-              {step === "item" && (
-                <Text style={s.headerTitle}>{t("biz_step_service_label").toUpperCase()}</Text>
-              )}
+              {step === "item" && <Text style={s.headerTitle}>{t("biz_step_service_label").toUpperCase()}</Text>}
               {step === "professional" && (
                 <Text testID="booking-professional-heading" style={[s.headerTitle,s.stepHeading]}>{lang==="en"?"Choose your professional":"Elige tu profesional"}</Text>
               )}
@@ -1116,6 +1119,7 @@ export function BookingSearchOverlay({
             </View>
 
             <View style={s.navBtn} />
+            </>}
           </View>
 
           {/* Animated step content */}
@@ -1336,24 +1340,53 @@ export function BookingSearchOverlay({
             {/* ── STEP: SELECT ITEM ── */}
             {step === "item" && (
               <View style={s.stepWrap}>
-                <BreadcrumbStrip business={selectedBusiness} item={null} accentColor={accentColor} />
+                {!compactServices && <BreadcrumbStrip business={selectedBusiness} item={null} accentColor={accentColor} />}
                 {items.length === 0 ? (
                   <View style={s.emptyWrap}>
                     <Feather name="package" size={32} color="rgba(255,255,255,0.08)" />
                     <Text style={s.emptyText}>{t("biz_no_active_services")}</Text>
                   </View>
                 ) : (
-                  <ScrollView style={s.list} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }}>
+                  <ScrollView testID="booking-services-list" style={[s.list, compactServices && s.servicesList]} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
                     {items.filter(isCatalogService).map((item) => (
                       <TouchableOpacity
                         key={item.id}
                         testID={"booking-service-" + item.id}
                         accessibilityRole="checkbox"
                         accessibilityState={{ checked: selectedServiceIds.includes(item.id) }}
-                        style={[s.serviceCard, { borderColor: selectedServiceIds.includes(item.id) ? accentColor : `${accentColor}90`, borderWidth:selectedServiceIds.includes(item.id)?2:1, backgroundColor:selectedServiceIds.includes(item.id)?`${accentColor}18`:"rgba(255,255,255,0.04)" }]}
+                        style={[s.serviceCard, compactServices && s.compactServiceCard, { borderColor: selectedServiceIds.includes(item.id) ? accentColor : `${accentColor}90`, borderWidth:selectedServiceIds.includes(item.id)?2:1, backgroundColor:selectedServiceIds.includes(item.id)?`${accentColor}18`:"rgba(255,255,255,0.04)" }]}
                         onPress={() => handleSelectItem(item)}
                         activeOpacity={0.72}
                       >
+                        {compactServices ? <>
+                        <View style={s.compactServiceRow}>
+                          <Text style={[s.serviceTitle, s.compactServiceName]}>{trSector(item.title, lang)}</Text>
+                          {item.price > 0 ? (
+                            <Text style={[s.servicePrice, s.compactServicePrice, { color: accentColor }]}>{item.price}€</Text>
+                          ) : (
+                            <Text style={[s.servicePriceFree, s.compactServicePrice, { color: accentColor }]}>{t("biz_free")}</Text>
+                          )}
+                        </View>
+                        <View style={s.compactServiceRow}>
+                          <View style={s.compactServiceDetails}>
+                            <View style={s.serviceMetaRow}>
+                              <View style={s.metaBadge}>
+                                <Feather name="clock" size={11} color="rgba(255,255,255,0.40)" />
+                                <Text style={s.metaBadgeText}>{item.durationMinutes} min</Text>
+                              </View>
+                              {item.customerCapacity > 1 && <View style={s.metaBadge}>
+                                <Feather name="users" size={11} color="rgba(255,255,255,0.40)" />
+                                <Text style={s.metaBadgeText}>{item.customerCapacity} pers.</Text>
+                              </View>}
+                              {!!item.type && <View style={s.metaBadge}><Text style={s.metaBadgeText}>{trSector(item.type, lang)}</Text></View>}
+                            </View>
+                            {!!item.description && <Text style={s.metaBadgeText}>{item.description}</Text>}
+                          </View>
+                          <View style={s.serviceSelectionMark} pointerEvents="none">
+                            <Feather name={selectedServiceIds.includes(item.id) ? "check-square" : "chevron-right"} size={18} color={accentColor} />
+                          </View>
+                        </View>
+                        </> : <>
                         <View style={{ flex: 1, gap: 8 }}>
                           <Text style={s.serviceTitle}>{trSector(item.title, lang)}</Text>
                           {!!item.description && <Text style={s.metaBadgeText}>{item.description}</Text>}
@@ -1385,12 +1418,20 @@ export function BookingSearchOverlay({
                           )}
                           <Feather name={selectedServiceIds.includes(item.id) ? "check-square" : "chevron-right"} size={18} color={accentColor} />
                         </View>
+                        </>}
                       </TouchableOpacity>
                     ))}
-                    {selectedBusiness && <CatalogComplementSelector businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} repository={demoRepository} accentColor={accentColor} />}
-                    {serviceSelection && <Text testID="booking-services-total" style={[s.metaBadgeText,{color:accentColor}]}>
+                    {selectedBusiness && <CatalogComplementSelector businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} repository={demoRepository} accentColor={accentColor} showTotal={!compactServices} />}
+                    {serviceSelection && (compactServices ? <View testID="booking-services-total" style={s.servicesTotal}>
+                      <Text style={[s.serviceTitle, s.servicesTotalPrice, { color: accentColor }]}>
+                        TOTAL: {((catalogQuote?.ready ? catalogQuote.totalPrice : serviceSelection.item.priceKnown === false ? null : serviceSelection.item.price) == null)
+                          ? (lang === "en" ? "Price to confirm" : "Precio por confirmar")
+                          : new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: catalogQuote?.ready ? catalogQuote.currency : serviceSelection.item.currency }).format(catalogQuote?.ready ? catalogQuote.totalPrice : serviceSelection.item.price)}
+                      </Text>
+                      <Text style={[s.metaBadgeText, { color: accentColor }]}>{catalogQuote?.ready ? catalogBookingServices(catalogQuote).reduce((minutes, service) => minutes + service.durationMinutes, 0) : serviceSelection.item.durationMinutes} min</Text>
+                    </View> : <Text testID="booking-services-total" style={[s.metaBadgeText,{color:accentColor}]}>
                       {catalogQuote?.ready ? catalogBookingServices(catalogQuote).reduce((minutes, service) => minutes + service.durationMinutes, 0) : serviceSelection.item.durationMinutes} min · {(catalogQuote?.ready ? catalogQuote.totalPrice : serviceSelection.item.priceKnown === false ? null : serviceSelection.item.price) ?? (lang === "en" ? "Price to confirm" : "Precio por confirmar")} {serviceSelection.item.currency}
-                    </Text>}
+                    </Text>)}
                     <TouchableOpacity testID="booking-save-services" accessibilityRole="button" disabled={!serviceSelection || !catalogQuote?.ready} onPress={handleSaveServices}
                       style={[s.serviceCard, { borderColor: accentColor, opacity: serviceSelection && catalogQuote?.ready ? 1 : 0.45 }]}>
                       <Text style={s.serviceTitle}>{t("save")}</Text>
@@ -1909,6 +1950,19 @@ export function BookingSearchOverlay({
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
+  // Compact composition is scoped to service selection; Save keeps serviceCard.
+  serviceHeader: { paddingHorizontal: 12, paddingTop: 4, paddingBottom: 10, gap: 12, alignItems: "flex-start" },
+  serviceContext: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: "700" },
+  serviceHeading: { flexShrink: 1, textAlign: "right", letterSpacing: 1 },
+  servicesList: { paddingHorizontal: 12 },
+  compactServiceCard: { flexDirection: "column", alignItems: "stretch", paddingVertical: 8, paddingHorizontal: 12, gap: 0, marginBottom: 8 },
+  compactServiceRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  compactServiceName: { flex: 1, minWidth: 0 },
+  compactServicePrice: { flexShrink: 1, textAlign: "right", maxWidth: "50%" },
+  compactServiceDetails: { flex: 1, minWidth: 0, gap: 4 },
+  serviceSelectionMark: { width: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
+  servicesTotal: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8, paddingBottom: 10 },
+  servicesTotalPrice: { flexShrink: 1 },
   overlay: {
     flex: 1,
     backgroundColor: "#070B12",
