@@ -30,7 +30,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false,initialDat
   class Value{constructor(value){this.value=value;}setValue(value){this.value=value;}interpolate(){return 0;}stopAnimation(){}}
   const animation={start(fn){fn?.({finished:true});},stop(){}};
   const native=new Proxy({Dimensions:{get:()=>viewport},Platform:{OS:"ios",select:x=>x.ios??x.default},
-    StyleSheet:{create:x=>x,absoluteFillObject:{}},Alert:{alert(title,message){alerts.push([title,message]);}},Keyboard:{addListener:(event,fn)=>{keyboardEvents.set(event,fn);return{remove(){keyboardEvents.delete(event);}};},dismiss(){keyboardEvents.get("keyboardWillHide")?.();}},
+    StyleSheet:{create:x=>x,absoluteFillObject:{}},Alert:{alert(title,message){alerts.push([title,message]);}},Keyboard:{addListener:(event,fn)=>{keyboardEvents.set(event,fn);return{remove(){keyboardEvents.delete(event);}};},dismiss(){keyboardEvents.get("keyboardDidHide")?.();}},
     Animated:{Value,View:"Animated.View",spring:()=>animation,timing:()=>animation,add:()=>0},
     PanResponder:{create:config=>({panHandlers:config})}
   },{get:(target,key)=>target[key]??key});
@@ -218,6 +218,34 @@ test('authorized internal preview retains the shared multi-service flow for an u
 });
 
 const flattened=value=>Array.isArray(value)?Object.assign({},...value.map(flattened)):value??{};
+test('long review keeps complete data and both actions in one scroll, changes time and confirms only once',async()=>{
+ for(const viewport of [{width:320,height:568},{width:390,height:844},{width:430,height:932}]){
+  const f=fixture({viewport});await f.configure();
+  const businessName='GO Peluquería con un nombre completo especialmente largo para revisar la reserva';
+  const selectedServices=[{name:'Corte y acabado con asesoramiento personalizado',duration:30,price:12},{name:'Coloración completa para cabello largo',duration:60,price:20},{name:'Tratamiento de hidratación intensiva',duration:15,price:8}];
+  await setReservableServices(f,selectedServices,{businessName});let tree=await services(f);
+  for(const item of await f.repo.getBookableItems(f.store.businessId)){control(tree,'booking-service-'+item.id).props.onPress();tree=f.render(f.Overlay,f.props);}
+  control(tree,'booking-save-services').props.onPress();tree=f.render(f.Overlay,f.props);button(tree,'Raul 1 GO PRUEBA').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
+  await button(tree,'09:00').props.onPress();tree=f.render(f.Overlay,f.props);
+  const review=control(tree,'booking-review-scroll'),reviewNodes=nodes(review);
+  assert.ok(review,'the complete review has a scroll viewport');
+  for(const value of [businessName,...selectedServices.map(service=>service.name),'Raul 1 GO PRUEBA','09:00','10:45','biz_no_advance_payment'])assert.ok(text(review).includes(value),value);
+  assert.match(text(review),/105\s+min/,'the full computed duration remains visible');
+  assert.match(text(review),/40\s*€/,'the full total remains visible');
+  assert.ok(reviewNodes.filter(node=>node.type==='Text').every(node=>node.props.numberOfLines==null),'no review field is truncated');
+  const confirm=button(tree,'BIZ_CONFIRM_BOOKING_BTN'),change=button(tree,'biz_change_time');
+  assert.ok(reviewNodes.includes(confirm)&&reviewNodes.includes(change),'both controls scroll with the complete review');
+  assert.ok(reviewNodes.indexOf(confirm)<reviewNodes.indexOf(change));assert.equal(confirm.props.disabled,false);assert.notEqual(change.props.disabled,true);
+  assert.equal(flattened(nodes(change).find(node=>node.type==='Text').props.style).color,'#FFFFFF');
+  await change.props.onPress();await turn();tree=f.render(f.Overlay,f.props);
+  assert.equal(control(tree,'booking-review-scroll'),undefined);assert.ok(button(tree,'09:00'));assert.equal(f.store.getSnapshot().bookings[0].status,'CANCELLED');
+  await button(tree,'09:00').props.onPress();tree=f.render(f.Overlay,f.props);
+  let claims=0;const claim=f.repo.claimSlot;f.repo.claimSlot=input=>{claims++;return claim(input);};
+  const press=button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress;await Promise.all([press(),press()]);tree=f.render(f.Overlay,f.props);
+  assert.equal(claims,1);assert.equal(f.store.getSnapshot().bookings.filter(booking=>booking.status==='CONFIRMED').length,1);assert.ok(text(tree).includes('BIZ_BOOKING_CONFIRMED'));assert.deepEqual(f.liveCalls,[]);
+ }
+});
+
 test("the existing search, services, professional, slots, review and confirmed views retain the same complete safe frame",async()=>{
  const f=fixture();await f.configure();
  const check=tree=>{assert.equal(flattened(control(tree,'booking-overlay-frame').props.style).paddingBottom,34);
@@ -245,7 +273,7 @@ test("the complete booking frame and both lower corners stay inside the safe are
   f.keyboardEvents.get("keyboardWillShow")({endCoordinates:{screenY:height-280,height:280}});tree=f.render(f.Overlay,f.props);
   assert.equal(flattened(control(tree,"booking-overlay-frame").props.style).paddingBottom,280);
   assert.equal(flattened(control(tree,"booking-sheet").props.style).flex,1);
-  f.keyboardEvents.get("keyboardWillHide")();tree=f.render(f.Overlay,f.props);
+  f.keyboardEvents.get("keyboardDidHide")();tree=f.render(f.Overlay,f.props);
   assert.equal(flattened(control(tree,"booking-overlay-frame").props.style).paddingBottom,bottom);
  }
 });

@@ -1092,12 +1092,12 @@ export function BookingSearchOverlay({
 
           {/* Header — también recibe dragHandlePan para que el arrastre hacia abajo
               funcione desde aquí (los navBtn son Views de layout, sin toques) */}
-          <View style={[s.header, step === "item" && compactServices && s.serviceHeader]} {...dragHandlePan.panHandlers}>
+          <View style={[s.header, step === "item" && compactServices && s.serviceHeader, step === "hold" && s.holdHeader]} {...dragHandlePan.panHandlers}>
             {step === "item" && compactServices ? <>
               <Text testID="booking-service-context" style={[s.serviceContext, { color: accentColor }]}>{selectedBusiness?.name}</Text>
               <Text style={[s.headerTitle, s.serviceHeading]}>{t("biz_step_service_label").toUpperCase()}</Text>
             </> : <>
-            <View style={s.navBtn} />
+            <View style={[s.navBtn, step === "hold" && s.holdNavSpacer]} />
 
             <View style={s.headerCenter}>
               {step === "search" && (
@@ -1118,7 +1118,7 @@ export function BookingSearchOverlay({
               )}
             </View>
 
-            <View style={s.navBtn} />
+            <View style={[s.navBtn, step === "hold" && s.holdNavSpacer]} />
             </>}
           </View>
 
@@ -1668,11 +1668,13 @@ export function BookingSearchOverlay({
             {step === "hold" && activeHold && selectedBusiness && selectedItem && (
               <View style={s.stepWrap}>
                 <ScrollView
-                  style={{ flex: 1 }}
+                  testID="booking-review-scroll"
+                  style={{ flex: 1, minHeight: 0 }}
                   showsVerticalScrollIndicator={false}
-                  contentContainerStyle={{ paddingBottom: 16 }}
+                  contentContainerStyle={s.holdContent}
                 >
-                  <View style={s.promptWrap}>
+                  <View style={s.holdDetails}>
+                  <View style={[s.promptWrap, s.holdPrompt]}>
                     <Text style={s.promptText}>{t("biz_confirm_booking_title")}</Text>
                   </View>
 
@@ -1776,7 +1778,11 @@ export function BookingSearchOverlay({
                       accentColor={accentColor}
                     />
                   )}
-                </ScrollView>
+                  </View>
+
+                  {/* Preserve the approved gap while space permits; long content scrolls
+                      together with both actions rather than clipping a fixed footer. */}
+                  <View style={s.holdSpacer} />
 
                 <View style={s.holdActions}>
                   <TouchableOpacity
@@ -1797,6 +1803,7 @@ export function BookingSearchOverlay({
                     <Text style={s.cancelBtnText}>{t("biz_change_time")}</Text>
                   </TouchableOpacity>
                 </View>
+                </ScrollView>
               </View>
             )}
 
@@ -2299,6 +2306,31 @@ const s = StyleSheet.create({
     letterSpacing: 2,
   },
   // Hold / Summary
+  holdHeader: {
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
+  holdNavSpacer: {
+    height: 24,
+  },
+  holdPrompt: {
+    paddingBottom: 8,
+  },
+  holdContent: {
+    flexGrow: 1,
+    // Keep either handedness clear of the existing 64pt floating navigation,
+    // whose default position is 24 + 8pt above the bottom safe area.
+    paddingBottom: 96,
+  },
+  holdDetails: {
+    flexShrink: 0,
+  },
+  holdSpacer: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 16,
+    minHeight: 16,
+  },
   holdTimerWrap: {
     marginHorizontal: 20,
     marginTop: 4,
@@ -2347,11 +2379,13 @@ const s = StyleSheet.create({
     gap: 10,
   },
   summaryRowText: {
+    flexShrink: 1,
     color: "rgba(255,255,255,0.65)",
     fontSize: 15,
     fontWeight: "600",
   },
   holdActions: {
+    flexShrink: 0,
     paddingTop: 8,
     paddingBottom: 16,
     gap: 4,
@@ -2365,16 +2399,19 @@ const s = StyleSheet.create({
     marginBottom: 6,
   },
   confirmBtnText: {
+    textAlign: "center",
     fontSize: 14,
     fontWeight: "900",
     letterSpacing: 2,
   },
   cancelBtn: {
     paddingVertical: 12,
+    minHeight: 44,
     alignItems: "center",
+    justifyContent: "center",
   },
   cancelBtnText: {
-    color: "rgba(255,255,255,0.28)",
+    color: "#FFFFFF",
     fontSize: 13,
     fontWeight: "600",
     letterSpacing: 0.3,
@@ -2549,6 +2586,7 @@ const s = StyleSheet.create({
     gap: 6,
   },
   policyLabel: {
+    flexShrink: 1,
     fontSize: 13,
     fontWeight: "700",
     letterSpacing: 0.1,
