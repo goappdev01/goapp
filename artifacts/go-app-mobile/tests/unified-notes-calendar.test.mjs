@@ -20,7 +20,7 @@ for(const viewMode of ['dia','semana','mes_lineal'])test(viewMode+': NOTAS ARCHI
 });
 test('the actual card drag finalizer targets the laid-out day once; cancellation does not move and pending identity survives scheduling',async()=>{
  const disk=await h.diskFixture();try{const {entry}=await disk.api().saveUnifiedNote(disk.draft({destination:'pending'}),disk.scope,disk.active),app=fixture({now:'2027-01-01T12:00:00'}),{AgendaBoard}=app.load('components/AgendaOperativa.tsx'),drops=[];
- const props={goLog:[entry],archiveNotes:[],onOpenNote:()=>{},viewMode:'mes_lineal',calViewMonth:'2027-01',onOpenMoveFlow:(...args)=>drops.push(args)};
+ const props={goLog:[entry],archiveNotes:[],onOpenNote:()=>{},viewMode:'mes_lineal',showHours:false,calViewMonth:'2027-01',onOpenMoveFlow:(...args)=>drops.push(args)};
  let tree=app.render(AgendaBoard,props),columns=nodes(tree,n=>n.props.key&&n.props.onLayout&&style(n.props.style)?.width);let x=0,target;
  for(const col of columns){const width=style(col.props.style).width;col.props.onLayout({nativeEvent:{layout:{x,width,y:0,height:500}}});if(col.props.key==='day_2027-01-15')target=x+width/2;x+=width+10;}
  assert.ok(target);const card=nodes(tree,n=>n.type==='GestureDetector'&&n.props.key===entry.id)[0];assert.ok(card);
@@ -48,7 +48,7 @@ test('the shared native note drag supports all six moves between Calendar, Pendi
   ];
   for(const scenario of cases){
    const app=fixture({now:'2027-01-01T12:00:00'}),{AgendaBoard}=app.load('components/AgendaOperativa.tsx'),moves=[];
-   const props={goLog:scenario.source==='archive'?[]:[scenario.entry],archiveNotes:scenario.source==='archive'?[scenario.entry]:[],onOpenNote(){},onMoveNote:(...args)=>moves.push(args),viewMode:'mes_lineal',calViewMonth:'2027-01'};
+   const props={goLog:scenario.source==='archive'?[]:[scenario.entry],archiveNotes:scenario.source==='archive'?[scenario.entry]:[],onOpenNote(){},onMoveNote:(...args)=>moves.push(args),viewMode:'mes_lineal',showHours:false,calViewMonth:'2027-01'};
    const tree=app.render(AgendaBoard,props),columns=nodes(tree,n=>n.props.key&&n.props.onLayout&&style(n.props.style)?.width);let x=0,targetX,archiveView;
    for(const col of columns){const width=style(col.props.style).width;col.props.onLayout({nativeEvent:{layout:{x,width,y:0,height:500}}});if((scenario.destination==='calendar'&&col.props.key==='day_2027-01-15')||(scenario.destination==='pending'&&col.props.key==='retrasados')||(scenario.destination==='archive'&&col.props.key==='notes'))targetX=x+width/2;x+=width+10;}
    assert.ok(targetX,scenario.name+': destination column was laid out');

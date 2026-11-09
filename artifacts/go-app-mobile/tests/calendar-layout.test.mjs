@@ -15,7 +15,7 @@ const header = find(n => ts.isJsxAttribute(n) && n.name.getText(ast) === 'render
 function renderHeader(monthNavigation, demo = false, insets = { top: 44, left: 0, right: 0 }) {
   const calls = [];
   const scope = { exports: {}, monthNavigation, React: { createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }) },
-    View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', Feather: 'Feather', GoCalendarViewSelector: 'GoCalendarViewSelector',
+    View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', Feather: 'Feather', GoCalendarViewSelector: 'GoCalendarViewSelector', GoCloseButton: 'GoCloseButton',
     lang: 'es', insets, calBgViewMode: 'mes_lineal', calConfigVisible: false, showBookingFromCal: false, demoBookingRepository: demo,
     changeCalendarView: value => calls.push(['view', value]), Haptics: { selectionAsync() {} },
     setCalConfigVisible: value => calls.push(['settings', value]), setCalQuickCreateOpen: value => calls.push(['task', value]), setCalPanelOpen: value => calls.push(['panel', value]), closeMonthGrid: () => calls.push(['monthGrid']), setDemoCustomerCalendarSelected: value => calls.push(['demo', value]),
@@ -35,7 +35,7 @@ test('the embedded header reuses one month navigation between MES and configurat
     assert.equal(nodes(tree.children[0], n => n.type === 'GoCalendarViewSelector').length, 1);
     assert.equal(tree.children[1].children[0], nav);
     assert.equal(nodes(tree, n => n.type === 'MonthNavigation').length, 1);
-    assert.deepEqual(texts(tree.children[2]), ['CONFIG']);
+    assert.equal(tree.children[2].props.accessibilityLabel, 'Configuración de Calendario');
     const selector = nodes(tree, n => n.type === 'GoCalendarViewSelector')[0];
     assert.equal(selector.props.compact, true);
     selector.props.onChange('semana');
@@ -154,48 +154,6 @@ test('day, week and month keep full-width scrolling and the original column size
     assert.equal(style(scroll.props.style).marginRight ?? 0, 0);
     const columns = nodes(tree, n => typeof n.props.key === 'string' && n.props.key.startsWith('day_'));
     assert.ok(columns.length); assert.equal(style(columns[0].props.style).width, viewMode === 'dia' ? 366 : 176);
-  }
-});
-
-test('the restored full calendar width accepts a valid right-edge drop once, while rejecting foreign entries', () => {
-  const source = require('node:fs').readFileSync('components/AgendaOperativa.tsx', 'utf8');
-  const boardAst = ts.createSourceFile('board.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  let callback;
-  const scan = node => { if (ts.isVariableDeclaration(node) && node.name.getText(boardAst) === 'jsDropAt') callback = node.initializer.arguments[0]; ts.forEachChild(node, scan); };
-  scan(boardAst); assert.ok(callback);
-  for (const [pointerX, itemId, expectedMoves, expectedCancelled] of [[350, 'pending-note', 1, 0], [280, 'pending-note', 1, 0], [350, 'foreign-entry', 0, 1]]) {
-    const calls = [], moves = [], scope = { exports: {}, screenW: 390,
-      allowedEntryIdsRef: { current: new Set(['pending-note']) }, dropConsumed:{current:false}, canRestoreArchive:()=>false,noteDocument:()=>undefined,jsCancelDragRef: { current: () => calls.push('cancelled') },
-      boardX: { current: 0 }, scrollX: { current: 0 }, allColumnsRef: { current: [{ id: 'day', dateISO: '2026-10-15' }] }, colLayouts: { current: { day: { x: 200, w: 180 } } },
-      clearEdgeScroll() {}, floatOp: {}, floatSc: {}, withTiming: value => value, withSpring: value => value,
-      dragItemRef: { current: pending }, selectedIdsRef: { current: new Set() }, noteEntryDestination: () => null,
-      isNoteEntry: () => false, slotAtScreenY: () => null, entryIsReservation: () => false, columnContainsY: () => true,
-      setDragTargetSlot() {}, onOpenMoveFlow: (...args) => moves.push(args),
-      onMoveItemRef: { current: null }, Haptics: { notificationAsync: async () => {}, NotificationFeedbackType: { Success: 'success' } },
-      setDragItem() {}, setDragTargetColId() {},
-    };
-    vm.runInNewContext(transpile(`(${callback.getText(boardAst)})(${pointerX}, '${itemId}', '17:00');`), scope);
-    assert.equal(moves.length, expectedMoves); assert.equal(calls.length, expectedCancelled);
-    if (moves.length) assert.deepEqual(moves[0], ['pending-note', '2026-10-15', pending.dateISO, '17:00', false]);
-  }
-});
-
-test('drag edge scrolling uses the original screen boundary on both sides, with no inactive lateral strip', () => {
-  const source = require('node:fs').readFileSync('components/AgendaOperativa.tsx', 'utf8');
-  const boardAst = ts.createSourceFile('board.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  let callback;
-  const scan = node => { if (ts.isVariableDeclaration(node) && node.name.getText(boardAst) === 'jsUpdateTarget') callback = node.initializer.arguments[0]; ts.forEachChild(node, scan); };
-  scan(boardAst); assert.ok(callback);
-  for (const [pointerX, expectedTimers, expectedClears] of [[350, 1, 0], [300, 0, 0], [25, 1, 0]]) {
-    const timers = [], cleared = [], scope = { exports: {}, screenW: 390,
-      boardX: { current: 0 }, scrollX: { current: 0 }, allColumnsRef: { current: [{ id: 'day' }] }, colLayouts: { current: { day: { x: 200, w: 180 } } },
-      edgeScrollDir: { current: null }, edgeScrollTimer: { current: null }, scrollViewRef: { current: null }, dragItemRef: { current: pending }, dropConsumed: { current: false },
-      noteEntryDestination: () => null, slotAtScreenY: () => null, setDragTargetSlot() {},
-      clearEdgeScroll: () => cleared.push(true), clearInterval() {}, setInterval: callback => { timers.push(callback); return 1; },
-      Haptics: { selectionAsync: async () => {} }, setDragTargetColId() {},
-    };
-    vm.runInNewContext(transpile(`(${callback.getText(boardAst)})(${pointerX});`), scope);
-    assert.equal(timers.length, expectedTimers); assert.equal(cleared.length, expectedClears);
   }
 });
 

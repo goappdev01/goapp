@@ -29,6 +29,7 @@ import * as Haptics from "expo-haptics";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   Dimensions,
   KeyboardAvoidingView,
   Modal,
@@ -304,7 +305,16 @@ export type BookingChatMessage = {
   createdAt: number;
 };
 
+const DRAG_EDGE_SIZE = 48;
+const DRAG_VERTICAL_SPEED = 120; // points per second, independent of finger position
+const DRAG_HORIZONTAL_SPEED = 600;
+const DRAG_DAY_HOLD_MS = 550;
+type DragPoint = { x: number; y: number };
+type DragRect = DragPoint & { width: number; height: number };
+
 export type AgendaBoardProps = {
+  dragEnabled?: boolean;
+  dragOverlayRef?: React.RefObject<ViewInstance | null>;
   selection?: {
     selectedIds: Set<string>;
     setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -768,8 +778,13 @@ export function AgendaBoard({
   onRejectProposal,
   onProposeProposal,
   onGoToLanding,
+  dragEnabled = true,
+  dragOverlayRef,
 }: AgendaBoardProps) {
   const goLog = useGoCalendarEntries(calendarEntries);
+  const dragInsets = useSafeAreaInsets();
+  const dragEnabledRef = useRef(dragEnabled);
+  dragEnabledRef.current = dragEnabled;
   const [notesExpanded,setNotesExpanded]=useState(true);
   const [archiveHeaderHeight,setArchiveHeaderHeight]=useState<number>();
   const archiveEntriesRef=useRef(archiveNotes||[]);archiveEntriesRef.current=archiveNotes||[];
@@ -962,7 +977,10 @@ export function AgendaBoard({
     if (viewMode === "dia" && diaColumn) return [diaColumn];
     return dayColumns;
   }, [viewMode, monthColumns, dayColumns, diaColumn, todayISO]);
-  const firstWorkDate = baseColumns.find(column => !!column.dateISO)?.dateISO;
+  const [dragPreviewDay, setDragPreviewDay] = useState<Column | null>(null);
+  const boardStart = baseColumns.find(column => !!column.dateISO)?.dateISO;
+  const previewStart = dragPreviewDay?.dateISO;
+  const firstWorkDate = previewStart && boardStart && previewStart < boardStart ? previewStart : boardStart;
   const onWorkHoursStartDateChange = businessWorkHours?.onStartDateChange;
   useEffect(() => {
     if (firstWorkDate) onWorkHoursStartDateChange?.(firstWorkDate);
@@ -1147,6 +1165,7 @@ export function AgendaBoard({
   const scrollX       = useRef(0); // horizontal scroll offset
   const colLayouts    = useRef<Record<string, { x: number; w: number; y?:number; h?:number }>>({});
   const columnsViewportY=useRef(0);
+  const columnsViewportHeight = useRef(0);
   const scrollViewRef = useRef<any>(null);
   // Refs for each column's inner vertical ScrollView (hourly mode)
   const colScrollRefs    = useRef<Record<string, any>>({});
@@ -1173,20 +1192,39 @@ export function AgendaBoard({
   // Animated scroll X for mini-map (no state re-renders, pure Animated)
   const scrollXAnim = useRef(new Animated.Value(0)).current;
 
-  // ── Edge auto-scroll during drag ─────────────────────────────────
-  const edgeScrollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const edgeScrollDir   = useRef<"left" | "right" | null>(null);
-
+  const dragScroll = useRef({
+    pickup: null as DragPoint | null,
+    point: null as DragPoint | null,
+    overlay: null as DragRect | null,
+    frame: null as number | null,
+    lastFrame: null as number | null,
+    dayDirection: 0,
+    daySince: null as number | null,
+    dayTriggered: false,
+    previewOffset: null as number | null,
+    previewId: null as string | null,
+    initialX: null as number | null,
+    initialY: new Map<string, number>(),
+    horizontalCommand: null as number | null,
+    verticalCommands: new Map<string, number>(),
+  });
   const clearEdgeScroll = useCallback(() => {
-    if (edgeScrollTimer.current !== null) {
-      clearInterval(edgeScrollTimer.current);
-      edgeScrollTimer.current = null;
-    }
-    edgeScrollDir.current = null;
+    const drag = dragScroll.current;
+    if (drag.frame !== null) cancelAnimationFrame(drag.frame);
+    drag.frame = drag.lastFrame = null;
+    drag.pickup = drag.point = drag.overlay = null;
+    drag.dayDirection = 0;
+    drag.daySince = null;
+    drag.dayTriggered = false;
+    drag.previewOffset = drag.previewId = null;
+    drag.initialX = drag.horizontalCommand = null;
+    drag.initialY.clear();
+    drag.verticalCommands.clear();
   }, []);
-
-  // useEffect cleanup on unmount
-  useEffect(() => () => clearEdgeScroll(), [clearEdgeScroll]);
+  useEffect(() => () => {
+    clearEdgeScroll();
+    dragItemRef.current = null;
+  }, [clearEdgeScroll]);
 
   // Always-latest refs for callbacks used inside gesture worklets
   const onMoveItemRef  = useRef(onMoveItem);
@@ -1200,7 +1238,7 @@ export function AgendaBoard({
   useEffect(() => {
     if (scrollToDateToken?.entryId || viewMode !== "mes_lineal" && viewMode !== "semana") return;
     function doScroll(animated: boolean) {
-      if(currentFocusRequest.current?.entryId)return;
+      if (currentFocusRequest.current?.entryId || dragItemRef.current) return;
       // 1. Horizontal scroll → PENDIENTES column (just before HOY)
       const lay = colLayouts.current["retrasados"];
       if (lay) {
@@ -1228,6 +1266,7 @@ export function AgendaBoard({
   useEffect(() => {
     if (scrollToTodayToken === 0) return;
     const t = setTimeout(() => {
+      if (dragItemRef.current) return;
       const lay = colLayouts.current["retrasados"];
       if (lay) {
         const x = Math.max(0, lay.x - 12);
@@ -1311,6 +1350,7 @@ export function AgendaBoard({
     if (!scrollToDateToken || scrollToDateToken.token === 0 || scrollToDateToken.entryId) return;
     const { dateISO, timeHHMM } = scrollToDateToken;
     const t = setTimeout(() => {
+      if (dragItemRef.current) return;
       // Scroll horizontal → columna del día reservado
       const dateLay = colLayouts.current[`day_${dateISO}`];
       if (dateLay) {
@@ -1354,15 +1394,20 @@ export function AgendaBoard({
   // ── JS-thread drag callbacks (called via runOnJS) ────────────────
 
   // Called when long press fires — record which item is being dragged
-  const jsStartDrag = useCallback((item: GoEntry) => {
+  const jsStartDrag = useCallback((item: GoEntry, x: number, y: number) => {
+    if (!dragEnabledRef.current || dragItemRef.current) return;
+    pendingBookingFocus.current = null;
+    const pickup = { x, y };
+    dragScroll.current.pickup = pickup;
+    dragOverlayRef?.current?.measureInWindow((x, y, width, height) => {
+      if (dragScroll.current.pickup === pickup) dragScroll.current.overlay = { x, y, width, height };
+    });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
     dropConsumed.current=false;dragItemRef.current=item;dragPressEntryId.current=item.id;setDragItem(item);
     setDragTargetColId(null);
     setDragTargetSlot(null);
-  }, []);
+  }, [dragOverlayRef]);
 
-  // Called on every finger move — determine which column is under the finger
-  // Also triggers edge-auto-scroll when near screen edges during drag
   const canMoveNoteFromCalendar=(itemId:string)=>{
     const rows=currentEntriesRef.current.filter(item=>item.id===itemId),item=rows[0],origin=dragItemRef.current;
     return !!(onMoveNoteRef.current&&rows.length===1&&origin?.id===itemId&&isNoteEntry(item)&&noteEntryDestination(item)!=="archive"&&!entryIsReservation(item)&&!item.deleted&&item.estado!=="rechazado"&&item.ownerUserId===origin.ownerUserId&&item.taskContext===origin.taskContext);
@@ -1372,60 +1417,67 @@ export function AgendaBoard({
     return !!(onMoveNoteRef.current&&rows.length===1&&origin?.id===itemId&&noteDocument(item)?.destination==="archive"&&!entryIsReservation(item)&&!item.deleted&&item.estado!=="rechazado"&&item.ownerUserId===origin.ownerUserId&&item.taskContext===origin.taskContext);
   };
   const columnContainsY=(absY:number,lay:{y?:number;h?:number})=>Number.isFinite(absY)&&!!lay.h&&absY>=boardY.current+columnsViewportY.current+(lay.y||0)&&absY<=boardY.current+columnsViewportY.current+(lay.y||0)+lay.h;
-  // Resolve the actual laid-out interval under the finger. Row layout is measured
-  // inside the day ScrollView, then translated using that column's live scroll offset.
-  const slotAtScreenY=(column:Column,absY:number):number|null=>{
-    if(!column.dateISO||!showHoursRef.current)return null;
-    const columnLayout=colLayouts.current[column.id],viewportTop=colScrollViewportTop.current[column.id];
-    if(!columnLayout||viewportTop==null)return null;
-    const localY = absY - (boardY.current + columnsViewportY.current + (columnLayout.y || 0) + viewportTop);
-    const viewportHeight = colScrollViewH.current[column.id];
-    if (localY < 0 || localY >= viewportHeight) return null;
+  const dayPreviewRef = useRef({ origin: diaColumn, column: dragPreviewDay });
+  dayPreviewRef.current = { origin: diaColumn, column: dragPreviewDay };
+  const layoutForDrop = (id: string) => {
+    const { origin, column } = dayPreviewRef.current;
+    return colLayouts.current[id === column?.id && origin ? origin.id : id];
+  };
+  const columnAtScreenX = (absX: number) => {
+    const x = absX - boardX.current;
+    if (x < 0 || (horizontalSize.current.viewport > 0 && x >= horizontalSize.current.viewport)) return;
+    const relX = x + scrollX.current;
+    const column = allColumnsRef.current.find(col => {
+      const layout = colLayouts.current[col.id];
+      return layout && relX >= layout.x && relX < layout.x + layout.w;
+    });
+    const preview = dayPreviewRef.current;
+    return preview.column && column?.id === preview.origin?.id ? preview.column : column;
+  };
+  const dayViewport = (column: Column) => {
+    if (!column.dateISO || !showHoursRef.current) return null;
+    const layout = layoutForDrop(column.id);
+    const offset = colScrollViewportTop.current[column.id];
+    const height = colScrollViewH.current[column.id];
+    if (!layout || offset == null || !(height > 0)) return null;
+    return { top: boardY.current + columnsViewportY.current + (layout.y || 0) + offset, height };
+  };
+  // Use the actual row under the finger, including variable-height cards.
+  const slotAtScreenY = (column: Column, absY: number): number | null => {
+    const viewport = dayViewport(column);
+    if (!viewport || (dragScroll.current.previewId === column.id && dragScroll.current.previewOffset !== null)) return null;
+    const localY = absY - viewport.top;
+    if (localY < 0 || localY >= viewport.height) return null;
     const contentY = localY + (colScrollY.current[column.id] || 0);
-    const rows=timeSlotLayouts.current[column.id],starts=timeSlotStarts.current[column.id];if(!rows||!starts)return null;
-    for(const start of starts){const layout=rows[start];if(layout&&contentY>=layout.y&&contentY<layout.y+layout.h)return start;}
+    const rows = timeSlotLayouts.current[column.id], starts = timeSlotStarts.current[column.id];
+    if (!rows || !starts) return null;
+    for (const start of starts) {
+      const row = rows[start];
+      if (row && contentY >= row.y && contentY < row.y + row.h) return start;
+    }
     return null;
   };
-  const jsUpdateTarget = useCallback((absX: number,absY:number) => {
-    if (!dragItemRef.current || dropConsumed.current) return;
-    // ── Edge auto-scroll ──────────────────────────────────────────
-    const EDGE_ZONE = 60;
-    const newDir: "left" | "right" | null =
-      absX < EDGE_ZONE ? "left" : absX > screenW - EDGE_ZONE ? "right" : null;
-
-    if (newDir !== edgeScrollDir.current) {
-      // Direction changed — stop previous and start new if needed
-      if (edgeScrollTimer.current !== null) {
-        clearInterval(edgeScrollTimer.current);
-        edgeScrollTimer.current = null;
-      }
-      edgeScrollDir.current = newDir;
-      if (newDir !== null) {
-        edgeScrollTimer.current = setInterval(() => {
-          const step = newDir === "right" ? 10 : -10;
-          const next = Math.max(0, scrollX.current + step);
-          scrollViewRef.current?.scrollTo({ x: next, animated: false });
-          scrollX.current = next;
-        }, 16);
+  const isOverDragOverlay = ({ x, y }: DragPoint) => {
+    const overlay = dragScroll.current.overlay;
+    return !!overlay && x >= overlay.x - 2 && x <= overlay.x + overlay.width + 2
+      && y >= overlay.y - 2 && y <= overlay.y + overlay.height + 2;
+  };
+  const updateDragTarget = (absX: number, absY: number) => {
+    const dragged = dragItemRef.current;
+    if (!dragged || dropConsumed.current) return;
+    let foundColumn = isValidDragPoint({ x: absX, y: absY }) ? columnAtScreenX(absX) : undefined;
+    if (foundColumn) {
+      const layout = layoutForDrop(foundColumn.id);
+      const destination = noteEntryDestination(dragged);
+      if (!layout || !columnContainsY(absY, layout)
+        || (foundColumn.isNotes && (destination === "archive" || !canMoveNoteFromCalendar(dragged.id)))
+        || (destination === "archive" && (!canRestoreArchive(dragged.id) || (!foundColumn.dateISO && !foundColumn.isRetrasados)))
+        || (foundColumn.isRetrasados && destination && destination !== "archive" && destination !== "pending" && !canMoveNoteFromCalendar(dragged.id))) {
+        foundColumn = undefined;
       }
     }
-
-    // ── Column detection ──────────────────────────────────────────
-    const relX = absX - boardX.current + scrollX.current;
-    let found: string | null = null;
-    for (const col of allColumnsRef.current) {
-      const lay = colLayouts.current[col.id];
-      if (lay && relX >= lay.x && relX <= lay.x + lay.w) {
-        const dragged=dragItemRef.current,destination=noteEntryDestination(dragged);
-        if(col.isNotes&&(!dragged||destination==="archive"||!canMoveNoteFromCalendar(dragged.id)||!columnContainsY(absY,lay)))break;
-        if(destination==="archive"&&(!canRestoreArchive(dragged!.id)||(!col.dateISO&&!col.isRetrasados)||!columnContainsY(absY,lay)))break;
-        if(col.isRetrasados&&destination&&destination!=="archive"&&destination!=="pending"&&(!dragged||!canMoveNoteFromCalendar(dragged.id)||!columnContainsY(absY,lay)))break;
-        found = col.id;
-        break;
-      }
-    }
-    const foundColumn=found?allColumnsRef.current.find(column=>column.id===found):undefined;
-    const slotStart=foundColumn?slotAtScreenY(foundColumn,absY):null;
+    const found = foundColumn?.id ?? null;
+    const slotStart = foundColumn && !getDragEdges({ x: absX, y: absY }).day ? slotAtScreenY(foundColumn, absY) : null;
     const nextSlot=slotStart==null?null:{columnId:foundColumn!.id,start:slotStart};
     setDragTargetSlot(previous=>previous?.columnId===nextSlot?.columnId&&previous?.start===nextSlot?.start?previous:nextSlot);
     setDragTargetColId((prev) => {
@@ -1434,100 +1486,273 @@ export function AgendaBoard({
       }
       return found;
     });
-  }, [screenW, clearEdgeScroll, showHours]);
+  };
+  const updateDragTargetRef = useRef(updateDragTarget);
+  updateDragTargetRef.current = updateDragTarget;
 
-  // Called on successful drop — compute final column and trigger onMoveItem
-  const jsDropAt = useCallback((absX: number, itemId: string, itemTime: string,absY:number) => {
-    if (!allowedEntryIdsRef.current.has(itemId)&&!canRestoreArchive(itemId)) { jsCancelDragRef.current(); return; }
-    if(dropConsumed.current||dragItemRef.current?.id!==itemId)return;
-    dropConsumed.current=true;
-    clearEdgeScroll();
-    const relX = absX - boardX.current + scrollX.current;
-    let targetCol: Column | undefined;
-    for (const col of allColumnsRef.current) {
-      const lay = colLayouts.current[col.id];
-      if (lay && relX >= lay.x && relX <= lay.x + lay.w) {
-        targetCol = col;
-        break;
+  const scrollDragColumn = (id: string, offset: number) => {
+    dragScroll.current.verticalCommands.set(id, offset);
+    colScrollY.current[id] = offset;
+    colScrollRefs.current[id]?.scrollTo({ y: offset, animated: false });
+  };
+  const applyPreviewOffset = (id: string) => {
+    const drag = dragScroll.current;
+    if (drag.previewId !== id || drag.previewOffset === null || !colScrollRefs.current[id]
+      || !colScrollViewH.current[id] || colContentH.current[id] === undefined) return;
+    const max = Math.max(0, colContentH.current[id] - colScrollViewH.current[id]);
+    const offset = Math.min(max, drag.previewOffset);
+    drag.previewOffset = null;
+    if (offset !== (colScrollY.current[id] || 0)) scrollDragColumn(id, offset);
+    if (drag.point) jsUpdateTargetRef.current(drag.point.x, drag.point.y);
+  };
+  const dragBounds = () => {
+    const { width, height } = Dimensions.get("window");
+    return {
+      left: Math.max(boardX.current, dragInsets.left),
+      right: Math.min(boardX.current + horizontalSize.current.viewport, width - dragInsets.right),
+      top: Math.max(boardY.current + columnsViewportY.current, dragInsets.top),
+      bottom: Math.min(boardY.current + columnsViewportY.current + columnsViewportHeight.current, height - dragInsets.bottom),
+    };
+  };
+  const isValidDragPoint = (point: DragPoint, bounds = dragBounds()) => {
+    if (!dragEnabledRef.current || isOverDragOverlay(point) || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return false;
+    return !columnsViewportHeight.current
+      || (point.x >= bounds.left && point.x < bounds.right && point.y >= bounds.top && point.y < bounds.bottom);
+  };
+  const getDragEdges = (point: DragPoint): { day?: number; vertical?: number; horizontal?: number; id?: string; max?: number } => {
+    const bounds = dragBounds();
+    if (!columnsViewportHeight.current || !isValidDragPoint(point, bounds)) return {};
+    const { left, right, top, bottom } = bounds;
+    const { x, y } = point;
+    const bandX = Math.min(DRAG_EDGE_SIZE, (right - left) / 4);
+    const side = x < left + bandX ? -1 : x >= right - bandX ? 1 : 0;
+    const centerColumn = viewMode === "dia" ? columnAtScreenX((left + right) / 2) : undefined;
+    if (centerColumn?.dateISO && showHoursRef.current && side && Math.abs(y - (top + bottom) / 2) <= DRAG_EDGE_SIZE / 2) {
+      return { day: side };
+    }
+    const column = columnAtScreenX(x);
+    const viewport = column && dayViewport(column);
+    if (column && viewport && dragScroll.current.previewOffset === null) {
+      const id = column.id;
+      const visibleTop = Math.max(top, viewport.top);
+      const visibleBottom = Math.min(bottom, viewport.top + viewport.height);
+      const band = Math.min(DRAG_EDGE_SIZE, (visibleBottom - visibleTop) / 3);
+      if (band > 0 && y >= visibleTop && y < visibleBottom) {
+        const vertical = y < visibleTop + band ? -1 : y >= visibleBottom - band ? 1 : 0;
+        if (vertical) {
+          const max = Math.max(0, (colContentH.current[id] || 0) - viewport.height);
+          const offset = Math.max(0, colScrollY.current[id] || 0);
+          return colScrollRefs.current[id] && (vertical < 0 ? offset > 0 : offset < max)
+            ? { vertical, id, max } : {};
+        }
       }
     }
+    if (side) {
+      const max = Math.max(0, horizontalSize.current.content - horizontalSize.current.viewport);
+      if (scrollViewRef.current && (side < 0 ? scrollX.current > 0 : scrollX.current < max)) return { horizontal: side, max };
+    }
+    return {};
+  };
+  const previewAdjacentDay = (direction: number) => {
+    const { origin, column } = dayPreviewRef.current;
+    if (!origin?.dateISO) return;
+    const source = column ?? origin;
+    const date = new Date((source.dateISO ?? origin.dateISO) + "T12:00:00");
+    date.setDate(date.getDate() + direction);
+    const dateISO = formatISODate(date);
+    const drag = dragScroll.current;
+    if (dateISO === origin.dateISO) {
+      drag.previewId = null;
+      drag.previewOffset = null;
+      setDragPreviewDay(null);
+    } else {
+      const id = "drag-day_" + dateISO;
+      drag.previewId = id;
+      drag.previewOffset = Math.max(0, colScrollY.current[source.id] || 0);
+      delete colScrollY.current[id];
+      delete colScrollViewH.current[id];
+      delete colContentH.current[id];
+      delete timeSlotLayouts.current[id];
+      delete workLayoutKeys.current[id];
+      drag.verticalCommands.delete(id);
+      setDragPreviewDay({ id, dateISO, label: formatDayLabel(date) });
+    }
+    setDragTargetColId(null);
+    setDragTargetSlot(null);
+  };
+  const getDragEdgesRef = useRef(getDragEdges);
+  const previewAdjacentDayRef = useRef(previewAdjacentDay);
+  getDragEdgesRef.current = getDragEdges;
+  previewAdjacentDayRef.current = previewAdjacentDay;
+  const hasDragEdge = (edge: ReturnType<typeof getDragEdges>) =>
+    (edge.day && !dragScroll.current.dayTriggered) || edge.vertical || edge.horizontal;
+  const runDragFrame = (now: number) => {
+    const drag = dragScroll.current;
+    drag.frame = null;
+    if (!drag.point || !dragItemRef.current || dropConsumed.current) return;
+    const edge = getDragEdgesRef.current(drag.point);
+    const elapsed = drag.lastFrame === null ? 0 : Math.max(0, Math.min(32, now - drag.lastFrame));
+    drag.lastFrame = now;
+    if (edge.day && !drag.dayTriggered) {
+      if (drag.daySince === null) drag.daySince = now;
+      if (now - drag.daySince >= DRAG_DAY_HOLD_MS) {
+        drag.dayTriggered = true;
+        previewAdjacentDayRef.current(edge.day);
+      }
+    } else if (elapsed > 0 && edge.id && edge.vertical) {
+      const current = colScrollY.current[edge.id] || 0;
+      if (edge.id !== drag.previewId && !drag.initialY.has(edge.id)) drag.initialY.set(edge.id, current);
+      const next = Math.max(0, Math.min(edge.max ?? 0, current + edge.vertical * DRAG_VERTICAL_SPEED * elapsed / 1000));
+      scrollDragColumn(edge.id, next);
+      updateDragTargetRef.current(drag.point.x, drag.point.y);
+    } else if (elapsed > 0 && edge.horizontal) {
+      const next = Math.max(0, Math.min(edge.max ?? 0, scrollX.current + edge.horizontal * DRAG_HORIZONTAL_SPEED * elapsed / 1000));
+      if (drag.initialX === null) drag.initialX = scrollX.current;
+      drag.horizontalCommand = next;
+      scrollX.current = next;
+      scrollXAnim.setValue(next);
+      scrollViewRef.current?.scrollTo({ x: next, animated: false });
+      updateDragTargetRef.current(drag.point.x, drag.point.y);
+    }
+    if (hasDragEdge(getDragEdgesRef.current(drag.point))) drag.frame = requestAnimationFrame(runDragFrame);
+    else drag.lastFrame = null;
+  };
+  const jsUpdateTarget = (x: number, y: number) => {
+    const drag = dragScroll.current;
+    if (!dragItemRef.current || dropConsumed.current || !drag.pickup) return;
+    drag.point = { x, y };
+    updateDragTargetRef.current(x, y);
+    if (Math.hypot(x - drag.pickup.x, y - drag.pickup.y) < 6 && drag.frame === null) return;
+    const edge = getDragEdgesRef.current(drag.point);
+    const direction = edge.day ?? 0;
+    if (direction !== drag.dayDirection) {
+      drag.dayDirection = direction;
+      drag.daySince = null;
+      drag.dayTriggered = false;
+    }
+    if (hasDragEdge(edge)) {
+      if (drag.frame === null) drag.frame = requestAnimationFrame(runDragFrame);
+    } else {
+      if (drag.frame !== null) cancelAnimationFrame(drag.frame);
+      drag.frame = drag.lastFrame = null;
+    }
+  };
+
+  const restoreDragViewport = () => {
+    const { initialX, initialY } = dragScroll.current;
+    if (initialX !== null) {
+      scrollX.current = initialX;
+      scrollXAnim.setValue(initialX);
+      scrollViewRef.current?.scrollTo({ x: initialX, animated: false });
+    }
+    for (const [id, y] of initialY) {
+      colScrollY.current[id] = y;
+      colScrollRefs.current[id]?.scrollTo({ y, animated: false });
+    }
+  };
+
+  const finishDrag = (restoreViewport: boolean) => {
+    if (restoreViewport) restoreDragViewport();
+    clearEdgeScroll();
     floatOp.value = withTiming(0, { duration: 120 });
     floatSc.value = withSpring(1, { damping: 10, stiffness: 320 });
+    dropConsumed.current = true;
+    dragItemRef.current = null;
+    setDragItem(null);
+    setDragPreviewDay(null);
+    setDragTargetColId(null);
+    setDragTargetSlot(null);
+  };
+  const jsCancelDrag = () => finishDrag(true);
 
-    const dragged=dragItemRef.current,noteDestination=noteEntryDestination(dragged);
-    if(isNoteEntry(dragged)&&noteDestination&&onMoveNoteRef.current){
-      const targetDestination=targetCol?.isNotes?"archive":targetCol?.isRetrasados?"pending":targetCol?.dateISO?"calendar":null;
-      const source=noteDestination==="archive"?archiveEntriesRef.current:currentEntriesRef.current;
-      const current=source.find(item=>item.id===itemId);
-      const targetLayout=targetCol&&colLayouts.current[targetCol.id];
-      const eligible=noteDestination==="archive"?canRestoreArchive(itemId):canMoveNoteFromCalendar(itemId);
-      const movingCalendarDay=targetDestination==="calendar"&&!!targetCol?.dateISO&&!!current&&current.dateISO!==targetCol.dateISO;
-      const selectedSlot=targetCol?slotAtScreenY(targetCol,absY):null;
-      const dropTime=selectedSlot==null?itemTime:timeLabelForSlot(selectedSlot);
-      const movingCalendarTime=targetDestination==="calendar"&&!!current&&!!dropTime&&(current.time||noteDocument(current)?.schedule.time||"")!==dropTime;
-      try{
-        if(current&&targetDestination&&(targetDestination!==noteDestination||movingCalendarDay||movingCalendarTime)&&eligible&&targetLayout&&columnContainsY(absY,targetLayout)){
-          if(targetDestination==="calendar"&&targetCol?.dateISO){
-            const time=dropTime||noteDocument(current)?.schedule.time||"";
-            onMoveNoteRef.current!(current,"calendar",{dateISO:targetCol.dateISO,time});
-          }else onMoveNoteRef.current!(current,targetDestination);
-        }
-      }finally{dragItemRef.current=null;setDragItem(null);setDragTargetColId(null);setDragTargetSlot(null);}
+  // Only a valid release can dispatch an existing move or proposal.
+  const jsDropAt = (absX: number, itemId: string, itemTime: string, absY: number) => {
+    const item = dragItemRef.current;
+    if (dropConsumed.current || item?.id !== itemId) return;
+    if (!allowedEntryIdsRef.current.has(itemId) && !canRestoreArchive(itemId)) {
+      jsCancelDrag();
       return;
     }
-    if (targetCol?.dateISO && columnContainsY(absY, colLayouts.current[targetCol.id])) {
-      const fromDateISO = dragItemRef.current?.dateISO ?? "";
-      const isCrossDay = fromDateISO !== targetCol.dateISO;
-      const item = dragItemRef.current;
-      const bookingPolicy = item && reservationCardPolicy(item);
-      const isExternalMove = isCrossDay && item?.kind === "received";
-      const slotStart = slotAtScreenY(targetCol, absY);
-      const dropTime = slotStart == null ? itemTime : timeLabelForSlot(slotStart);
-      const isPersonalTask = item?.kind === "sent" && !item.receiverPhone && !entryIsReservation(item)
-        && (item.type === "TAREA" || item.type === "TAREA_INTERNA");
-      const currentSelectedIds = selectedIdsRef.current;
-      const isDraggingSelected = itemId && currentSelectedIds.has(itemId);
-      const isMultiDrag = isDraggingSelected && currentSelectedIds.size > 1;
+    dropConsumed.current = true;
+    const point = { x: absX, y: absY };
+    const targetCol = isValidDragPoint(point) && !getDragEdges(point).day ? columnAtScreenX(absX) : undefined;
+    const targetLayout = targetCol && layoutForDrop(targetCol.id);
+    if (!targetCol || !targetLayout || !columnContainsY(absY, targetLayout)) {
+      jsCancelDrag();
+      return;
+    }
+    const slotStart = slotAtScreenY(targetCol, absY);
+    if (targetCol.dateISO && showHoursRef.current && slotStart === null) {
+      jsCancelDrag();
+      return;
+    }
 
-      if (item && bookingPolicy?.canonical) {
-        if (slotStart != null && (isCrossDay || dropTime !== itemTime) && bookingPolicy.canPropose) {
-          onDropBookingRef.current?.(item, { dateISO: targetCol.dateISO, time: dropTime });
-        }
-      } else if (isMultiDrag && onMoveItemRef.current) {
-        // Move all selected cards to the target column directly (no modal per card)
-        currentSelectedIds.forEach((sid) => {
-          if (!allowedEntryIdsRef.current.has(sid)) return;
-          onMoveItemRef.current!(sid, targetCol!.dateISO!, "");
-        });
+    const dropTime = slotStart === null ? itemTime : timeLabelForSlot(slotStart);
+    const noteDestination = noteEntryDestination(item);
+    let valid = false;
+    try {
+      if (isNoteEntry(item) && noteDestination && onMoveNoteRef.current) {
+        const destination = targetCol.isNotes ? "archive" : targetCol.isRetrasados ? "pending" : targetCol.dateISO ? "calendar" : null;
+        const source = noteDestination === "archive" ? archiveEntriesRef.current : currentEntriesRef.current;
+        const current = source.find(entry => entry.id === itemId);
+        const eligible = noteDestination === "archive" ? canRestoreArchive(itemId) : canMoveNoteFromCalendar(itemId);
+        if (!destination || !current || !eligible) return;
+        valid = true;
+        if (destination === "calendar" && targetCol.dateISO) {
+          const time = dropTime || noteDocument(current)?.schedule.time || "";
+          if (destination !== noteDestination || current.dateISO !== targetCol.dateISO
+            || (!!time && time !== (current.time || noteDocument(current)?.schedule.time || ""))) {
+            onMoveNoteRef.current(current, destination, { dateISO: targetCol.dateISO, time });
+          }
+        } else if (destination !== noteDestination) onMoveNoteRef.current(current, destination);
+        return;
+      }
+
+      const dateISO = targetCol.dateISO;
+      if (!dateISO) return;
+      const fromDateISO = item.dateISO ?? "";
+      const isCrossDay = fromDateISO !== dateISO;
+      const bookingPolicy = reservationCardPolicy(item);
+      if (bookingPolicy.canonical) {
+        valid = slotStart !== null && bookingPolicy.canPropose && !!onDropBookingRef.current;
+        if (valid && (isCrossDay || dropTime !== itemTime)) onDropBookingRef.current?.(item, { dateISO, time: dropTime });
+        return;
+      }
+      const isPersonalTask = item.kind === "sent" && !item.receiverPhone && !entryIsReservation(item)
+        && (item.type === "TAREA" || item.type === "TAREA_INTERNA");
+      const selected = selectedIdsRef.current;
+      const moveItem = onMoveItemRef.current;
+      if (moveItem && selected.has(itemId) && selected.size > 1) {
+        valid = true;
+        selected.forEach(id => { if (allowedEntryIdsRef.current.has(id)) moveItem(id, dateISO, ""); });
         setSelectedIds(new Set());
         setSelectionMode(false);
         setBulkMovePicking(false);
-      } else if (slotStart != null && isPersonalTask && onMoveItemRef.current) {
-        if (isCrossDay || dropTime !== itemTime) onMoveItemRef.current(itemId, targetCol.dateISO, dropTime);
+      } else if (slotStart !== null && isPersonalTask && moveItem) {
+        valid = true;
+        if (isCrossDay || dropTime !== itemTime) moveItem(itemId, dateISO, dropTime);
       } else if (onOpenMoveFlow) {
-        // Shared bookings and untimed columns keep their existing move flow.
-        onOpenMoveFlow(itemId, targetCol.dateISO, fromDateISO, itemTime, isExternalMove);
-      } else if (onMoveItemRef.current) {
-        // Fallback: direct move without time selection
-        onMoveItemRef.current(itemId, targetCol.dateISO, itemTime);
+        valid = true;
+        onOpenMoveFlow(itemId, dateISO, fromDateISO, dropTime, isCrossDay && item.kind === "received");
+      } else if (moveItem) {
+        valid = true;
+        moveItem(itemId, dateISO, dropTime);
       }
-      if (!bookingPolicy?.canonical) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      if (valid) Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } finally {
+      finishDrag(!valid);
     }
+  };
 
-    dragItemRef.current=null;setDragItem(null);
-    setDragTargetColId(null);
-    setDragTargetSlot(null);
-  }, [clearEdgeScroll]);
-
-  // Called on cancelled/failed gesture
-  const jsCancelDrag = useCallback(() => {
-    clearEdgeScroll();
-    floatOp.value = withTiming(0, { duration: 100 });
-    floatSc.value = withSpring(1, { damping: 10, stiffness: 320 });
-    dropConsumed.current=true;dragItemRef.current=null;setDragItem(null);
-    setDragTargetColId(null);
-    setDragTargetSlot(null);
-  }, [clearEdgeScroll]);
+  useEffect(() => {
+    if (dragItemRef.current) jsCancelDragRef.current();
+  }, [dragEnabled, selectedDateISO, viewMode, activeMonth, showHours, density]);
+  useEffect(() => {
+    const subscription = AppState?.addEventListener?.("change", state => {
+      if (state !== "active" && dragItemRef.current) jsCancelDragRef.current();
+    });
+    return () => subscription?.remove();
+  }, []);
 
   // Ref so jsDropAt can read selectedIds without stale closure
   const selectedIdsRef = useRef(selectedIds);
@@ -1599,7 +1824,7 @@ export function AgendaBoard({
     .onEnd((_event, success) => { if (success) runOnJS(open)(); });
 
   const makeEntryDragGesture = (item: GoEntry) => {
-    const startThis  = () => jsStartDragRef.current(item);
+    const startThis = (x: number, y: number) => jsStartDragRef.current(item, x, y);
     const dropThis   = (absX: number,absY:number) => jsDropAtRef.current(absX, item.id, item.time || noteDocument(item)?.schedule.time || "",absY);
     const cancelThis = () => {
       if (dragItemRef.current?.id === item.id) jsCancelDragRef.current();
@@ -1608,6 +1833,7 @@ export function AgendaBoard({
       if (dragItemRef.current?.id === item.id) jsUpdateTargetRef.current(absX, absY);
     };
     return Gesture.Pan()
+      .enabled(dragEnabled)
       .activateAfterLongPress(400)
       .shouldCancelWhenOutside(false)
       .cancelsTouchesInView(true)
@@ -1624,7 +1850,7 @@ export function AgendaBoard({
         floatRot.value = withSpring(0, { damping: 8, stiffness: 200 });
         lastAbsX.value = e.absoluteX;
         lastAbsY.value = e.absoluteY;
-        runOnJS(startThis)();
+        runOnJS(startThis)(e.absoluteX, e.absoluteY);
       })
       .onUpdate((e) => {
         floatL.value = e.absoluteX - fingerOffsetX.value - boardLeftShared.value;
@@ -2219,7 +2445,7 @@ export function AgendaBoard({
   };
 
   // ── COLUMN ───────────────────────────────────────────────────────
-  const renderColumn = (col: Column) => {
+  const renderColumn = (col: Column, isPreview = false) => {
     if(col.isNotes&&onOpenNote)return <View key={col.id} style={[s.column,{width:columnW,borderColor:"#475569"},dragTargetColId===col.id&&s.columnDragTarget]}
       onLayout={event=>{const {x,y,width,height}=event.nativeEvent.layout;colLayouts.current[col.id]={x,y,w:width,h:height};queueBookingFocus();}}>
       <GoNoteArchiveColumn entries={archiveNotes||[]} expanded={notesExpanded} onOpen={onOpenNote} onMove={onMoveNote}
@@ -2289,12 +2515,12 @@ export function AgendaBoard({
             y: e.nativeEvent.layout.y,
             h: e.nativeEvent.layout.height,
           };
-          if(onOpenNote&&viewMode==="dia"&&col.dateISO&&!noteDayFocus.current.done){noteDayFocus.current.done=true;scrollViewRef.current?.scrollTo({x:Math.max(0,e.nativeEvent.layout.x-12),animated:false});}
+          if(!isPreview&&onOpenNote&&viewMode==="dia"&&col.dateISO&&!noteDayFocus.current.done){noteDayFocus.current.done=true;scrollViewRef.current?.scrollTo({x:Math.max(0,e.nativeEvent.layout.x-12),animated:false});}
           queueBookingFocus();
         }}
         style={[
           s.column,
-          { width: columnW },
+          { width: isPreview ? "100%" : columnW },
           col.isRetrasados && s.columnRetrasados,
           col.isEliminados && s.columnEliminados,
           !isEmpty && isToday && s.columnToday,
@@ -2540,19 +2766,32 @@ export function AgendaBoard({
             }
             return (
               <ScrollView
-                ref={(r) => { colScrollRefs.current[col.id] = r;queueBookingFocus(); }}
+                ref={r => { colScrollRefs.current[col.id] = r; applyPreviewOffset(col.id); queueBookingFocus(); }}
                 testID={`calendar-day-scroll-${col.id}`}
                 style={s.colScroll}
                 contentContainerStyle={{ paddingBottom: scrollToDateToken?.entryId&&scrollToDateToken.dateISO===col.dateISO?Math.max(12,(colScrollViewH.current[col.id]||Dimensions.get("window").height)/2):12 }}
-                removeClippedSubviews={scrollToDateToken?.entryId?false:undefined}
-                onContentSizeChange={(_w,h)=>{colContentH.current[col.id]=h;queueBookingFocus();}}
-                onScrollBeginDrag={()=>{pendingBookingFocus.current=null;}}
+                removeClippedSubviews={isPreview || (dragItem && dragItem.dateISO === col.dateISO) || scrollToDateToken?.entryId ? false : undefined}
+                onContentSizeChange={(_w, h) => { colContentH.current[col.id] = h; applyPreviewOffset(col.id); queueBookingFocus(); }}
+                onScrollBeginDrag={() => { pendingBookingFocus.current = null; dragScroll.current.verticalCommands.delete(col.id); }}
                 showsVerticalScrollIndicator={false}
                 nestedScrollEnabled
                 scrollEnabled={scrollEnabledDuringDrag}
-                scrollEventThrottle={50}
-                onScroll={(e) => { colScrollY.current[col.id] = e.nativeEvent.contentOffset.y; }}
-                onLayout={(e) => { colScrollViewH.current[col.id] = e.nativeEvent.layout.height;colScrollViewportTop.current[col.id]=e.nativeEvent.layout.y;if (layoutKey === undefined) timeSlotStarts.current[col.id]=effectiveSlots;queueBookingFocus(); }}
+                scrollEventThrottle={16}
+                onScroll={event => {
+                  const offset = event.nativeEvent.contentOffset.y;
+                  const commanded = dragScroll.current.verticalCommands.get(col.id);
+                  if (commanded !== undefined && Math.abs(offset - commanded) > 1) return;
+                  dragScroll.current.verticalCommands.delete(col.id);
+                  colScrollY.current[col.id] = offset;
+                }}
+                onLayout={event => {
+                  const { height, y } = event.nativeEvent.layout;
+                  colScrollViewH.current[col.id] = height;
+                  colScrollViewportTop.current[col.id] = y;
+                  if (layoutKey === undefined) timeSlotStarts.current[col.id] = effectiveSlots;
+                  applyPreviewOffset(col.id);
+                  queueBookingFocus();
+                }}
               >
                 {untimedItems.length > 0 && (
                   <View style={{ padding: 5, gap: 5, borderBottomWidth: 1, borderBottomColor: colDnProgress >= 0.5 ? "rgba(0,0,0,0.07)" : "rgba(255,255,255,0.07)" }}>
@@ -2768,13 +3007,19 @@ export function AgendaBoard({
           })()
         )}
 
+        {/* Keep the source card mounted in its native scroll view while another day is previewed. */}
+        {!isPreview && col.id === diaColumn?.id && dragPreviewDay && (
+          <View pointerEvents="none" style={s.dragDayPreview} testID="calendar-drag-day-preview">
+            {renderColumn(dragPreviewDay, true)}
+          </View>
+        )}
       </View>
     );
   };
 
   const dropClockIsDark = (() => {
     if (!dragTargetSlot) return true;
-    const targetColumn = allColumns.find(column => column.id === dragTargetSlot.columnId);
+    const targetColumn = dragPreviewDay?.id === dragTargetSlot.columnId ? dragPreviewDay : allColumns.find(column => column.id === dragTargetSlot.columnId);
     if (!targetColumn?.dateISO) return true;
     const timedItems = getItemsForDay(targetColumn.dateISO).filter(item => !!item.time);
     const interval = getEffectiveDensityMin(density, timedItems.length);
@@ -2897,10 +3142,17 @@ export function AgendaBoard({
 
       <GHScrollView
         ref={scrollViewRef}
-        onLayout={e=>{horizontalSize.current.viewport=e.nativeEvent.layout.width;columnsViewportY.current=e.nativeEvent.layout.y||0;queueBookingFocus();}}
+        onLayout={event => {
+          const { width, height, y } = event.nativeEvent.layout;
+          horizontalSize.current.viewport = width;
+          columnsViewportY.current = y || 0;
+          columnsViewportHeight.current = height;
+          queueBookingFocus();
+        }}
         onContentSizeChange={w=>{horizontalSize.current.content=w;queueBookingFocus();}}
-        onScrollBeginDrag={()=>{pendingBookingFocus.current=null;}}
+        onScrollBeginDrag={() => { pendingBookingFocus.current = null; dragScroll.current.horizontalCommand = null; }}
         horizontal
+        removeClippedSubviews={dragItem ? false : undefined}
         showsHorizontalScrollIndicator={false}
         style={s.colsScroll}
         contentContainerStyle={[s.colsContent, !!renderHeader && s.compactColsContent]}
@@ -2911,12 +3163,26 @@ export function AgendaBoard({
         scrollEnabled={scrollEnabledDuringDrag}
         onScroll={(e) => {
           const ox = e.nativeEvent.contentOffset.x;
+          const commanded = dragScroll.current.horizontalCommand;
+          if (commanded !== null && Math.abs(ox - commanded) > 1) return;
+          dragScroll.current.horizontalCommand = null;
           scrollX.current = ox;
           scrollXAnim.setValue(ox);
         }}
       >
-        {allColumns.map(renderColumn)}
+        {allColumns.map(column => renderColumn(column))}
       </GHScrollView>
+
+      {dragItem && diaColumn && showHours && (["left", "right"] as const).map(side => {
+        const { left, right, top, bottom } = dragBounds();
+        return <View key={side} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
+          testID={`calendar-drag-day-${side}`} style={[s.dragDayArrow, {
+            left: (side === "left" ? left + 3 : right - 27) - boardX.current,
+            top: (top + bottom - DRAG_EDGE_SIZE) / 2 - boardY.current,
+          }]}>
+          <Feather name={side === "left" ? "chevron-left" : "chevron-right"} size={20} color="#ffffff" />
+        </View>;
+      })}
 
       {/* ── MINI MAPA TEMPORAL — indicador de posición en el mes ──
           Solo en mes_lineal. Barra fina centrada en la base del board.
@@ -3573,6 +3839,7 @@ export function AgendaOperativa({
 
         {/* ── Board — always visible in background ── */}
         <AgendaBoard
+          dragEnabled={visible && !peekMode}
           selection={{ selectedIds, setSelectedIds, selectionMode, setSelectionMode }}
           goLog={goLog}
           selectedDateISO={navigationDateISO}
@@ -4080,6 +4347,20 @@ const s = StyleSheet.create({
   columnSelected: {
     borderColor: "#00e5ff",
     backgroundColor: "#0d0d10",
+  },
+  dragDayPreview: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 2,
+  },
+  dragDayArrow: {
+    position: "absolute",
+    zIndex: 4,
+    width: 24,
+    height: DRAG_EDGE_SIZE,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#282a31",
+    borderRadius: 12,
   },
   columnDragTarget: {
     borderColor: "#22c55e",

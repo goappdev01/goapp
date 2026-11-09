@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Text, TouchableOpacity, View, type ViewInstance } from "react-native";
 import { AgendaBoard, type GoEntry } from "@/components/AgendaOperativa";
 import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -7,7 +7,9 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import type { DemoBookingRepository } from "@/data/demoBookingRepository";
 
 /** Customer projection of the owner-local repository; never mounted with the personal agenda hooks. */
-export function DemoCustomerCalendar({ repository, focus, scrollToTodayToken, onPersonal, onGoToLanding, entries: suppliedEntries, onProposeChange, onDropBooking, onAcceptProposal, onRejectProposal, onOpenMessage,renderMessageScreen,onResolveEntry,canResolveEntry,handedness }: {
+export function DemoCustomerCalendar({ repository, focus, scrollToTodayToken, onPersonal, onGoToLanding, entries: suppliedEntries, onProposeChange, onDropBooking, onAcceptProposal, onRejectProposal, onOpenMessage,renderMessageScreen,onResolveEntry,canResolveEntry,handedness,dragEnabled,dragOverlayRef }: {
+  dragEnabled?: boolean;
+  dragOverlayRef?: React.RefObject<ViewInstance | null>;
   onOpenMessage?: (entry:GoEntry,returnTo?:()=>void)=>void;
   renderMessageScreen?: (entry:GoEntry)=>React.ReactNode;
   onResolveEntry?: (entry:GoEntry,status:"done"|"pending"|"discard",current?:()=>GoEntry|undefined)=>void;
@@ -53,7 +55,7 @@ export function DemoCustomerCalendar({ repository, focus, scrollToTodayToken, on
         </TouchableOpacity>
       </View>
     </View>
-    <AgendaBoard onDropBooking={onDropBooking} onGoToLanding={onGoToLanding} renderMessageScreen={renderMessageScreen} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} goLog={suppliedEntries ?? entries} embedded viewMode={view} calViewMonth={month} showHours density="30min"
+    <AgendaBoard dragEnabled={dragEnabled} dragOverlayRef={dragOverlayRef} onDropBooking={onDropBooking} onGoToLanding={onGoToLanding} renderMessageScreen={renderMessageScreen} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} goLog={suppliedEntries ?? entries} embedded viewMode={view} calViewMonth={month} showHours density="30min"
       selectedDateISO={focus?.dateISO} scrollToTodayToken={scrollToTodayToken} scrollToDateToken={focus} highlightEntryId={focus?.entryId}
       onChangeMonth={direction => { const [year, value] = month.split("-").map(Number); const date = new Date(year, value - 1 + direction, 1, 12); setMonth(String(date.getFullYear()) + "-" + String(date.getMonth() + 1).padStart(2, "0")); }}
       onDeleteItem={id=>Alert.alert("GO",lang==="en"?"Cancel this reservation?":"¿Cancelar esta reserva?",[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Cancel reservation":"Cancelar reserva",style:"destructive",onPress:()=>void cancel(id)}])} onProposeItem={id=>{const entry=(suppliedEntries ?? entries).find(e=>e.id===id);if(entry)onProposeChange?.(entry);}}

@@ -12,7 +12,7 @@ vm.runInNewContext(ts.transpileModule(readFileSync("i18n/translations.ts", "utf8
 
 // Run the real calendar components with deterministic native adapters. Keep hook
 // state across renders so navigation and closing are tested without remounting.
-export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, platform = "web" } = {}) {
+export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, platform = "web", insets = {top:0,right:0,left:0,bottom:0} } = {}) {
   const urls = [];
   class Clock extends Date {
     constructor(...args) { super(...(args.length ? args : [now ?? Date.now()])); }
@@ -20,7 +20,8 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
   }
   let slots = [];
   const cache = new Map(), timers=[], sessionSlots = new Map();
-  let cursor = 0, effects = [], language = 'es';
+  let cursor = 0, effects = [], language = 'es', frameId = 0;
+  const frames = new Map(), appStateListeners = new Set();
   const react = {
     createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.length ? children.flat(Infinity) : [props?.children].flat(Infinity).filter(v => v !== undefined) }),
     useState(initial) {
@@ -49,7 +50,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
     Dimensions: { get: () => viewport },
     useWindowDimensions: () => viewport,
     Platform: { OS: platform },
-    AppState: { addEventListener: () => ({remove(){}}) },
+    AppState: { addEventListener: (_event, listener) => { appStateListeners.add(listener); return {remove: () => appStateListeners.delete(listener)}; } },
     Linking: { openURL: async url => { urls.push(url); } },
     Alert: { alert() {} },
     PanResponder: actualResponder,
@@ -65,7 +66,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
     '@react-native-async-storage/async-storage': { default: { getItem: async () => null, setItem: async () => {} } },
     'react-native-gesture-handler': { Gesture: { Tap: gestureChain, Pan: gestureChain, Race: (...gestures) => ({gestures}), Simultaneous: (...gestures) => ({gestures}) }, GestureDetector: 'GestureDetector', ScrollView: 'GHScrollView', LegacyScrollView: 'GHScrollView' },
     'react-native-reanimated': { default: { View: 'ReAnimated.View' }, useSharedValue: value => react.useRef({ value }).current, useAnimatedStyle: fn => fn(), withSpring: value => value, withTiming: value => value, runOnJS: fn => fn, interpolateColor: () => '#000' },
-    'react-native-safe-area-context': { useSafeAreaInsets: () => ({ top: 0, right: 0, left: 0, bottom: 0 }) },
+    'react-native-safe-area-context': { useSafeAreaInsets: () => insets },
     '@/hooks/useGoLog': { useGoLog: () => react.useState([]) },
     '@/lib/sessionEvents': { onSessionChanged: () => () => {} },
     '@/data/booking': { subscribeBookingUpdates: () => () => {},
@@ -98,6 +99,8 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
     }).outputText;
     vm.runInNewContext(code, {
       exports, console: { log() {}, warn() {}, error: console.error }, Date: Clock, Set, Map,
+      requestAnimationFrame: fn => { const id = ++frameId; frames.set(id, fn); return id; },
+      cancelAnimationFrame: id => frames.delete(id),
       setTimeout: fn => {timers.push(fn);return timers.length;}, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
       require(name) {
         if (name in mocks) return mocks[name];
@@ -124,6 +127,9 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
   }
   return {
     urls,
+    frameCount: () => frames.size,
+    runFrame(time) { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn(time)); },
+    setAppState: state => appStateListeners.forEach(listener => listener(state)),
     runTimers(){const pending=timers.splice(0);pending.forEach(fn=>fn());},
     load,
     setLanguage: value => { language = value; },

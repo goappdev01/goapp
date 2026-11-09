@@ -9,6 +9,7 @@
  *                + selector de profesional: Todos · Empresa · Isa · Rosa · Juani · Antonio · Personal
  * ═══════════════════════════════════════════════════════════════════════════
  */
+import type { ViewInstance } from "react-native";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   Animated,
@@ -319,6 +320,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
 
   // ── Month picker — self-contained Modal (evita conflictos z-order con calOpen) ──
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const calendarDragOverlay = useRef<ViewInstance>(null);
   const [pickerYear,  setPickerYear]  = useState(() => new Date().getFullYear());
   const [pickerMonth, setPickerMonth] = useState(() => new Date().getMonth());
   const pickerSlide = useRef(new Animated.Value(700)).current;
@@ -672,7 +674,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
         )}
 
         {viewMode === "calendario" && (
-          <AgendaBoard onDropBooking={onDropBooking ?? onProposeBookingChange} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness}
+          <AgendaBoard dragEnabled={!monthPickerOpen} dragOverlayRef={calendarDragOverlay} onDropBooking={onDropBooking ?? onProposeBookingChange} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness}
             goLog={filteredLog}
             bookingProfessionalId={liveProfessionals.some(person=>person.id===selectedPro)?selectedPro:undefined}
             embedded
@@ -740,7 +742,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
           initialRight={20}
           initialBottom={insets.bottom + 24}
           maxH={168} buttonWidth={64}>
-          <View style={{ gap: 8, alignItems: "center" }}>
+          <View ref={calendarDragOverlay} collapsable={false} style={{ gap: 8, alignItems: "center" }}>
           {/* ↑ Abre el selector mensual — solo en pestaña Calendario.
                Usa Modal propio para evitar conflictos z-order con el Modal padre. */}
           {viewMode === "calendario" && (

@@ -3119,6 +3119,7 @@ function HomeScreenContent() {
 
   const [mapOpen, setMapOpen] = useState(false);
   const [calOpen, setCalOpen] = useState(false);
+  const calendarDragOverlay = useRef<ViewInstance>(null);
   const [boardsOpen, setBoardsOpen] = useState(false);
   // ── Flujo universal de calendario — hook sin lógica de módulo ──────────
   // Todos los módulos (normal, mover, propuesta, QD, reservas nav, etc.)
@@ -11951,7 +11952,7 @@ function HomeScreenContent() {
       originalEntry: entry ?? null,
     };
 
-    const existingTime = entry?.time || itemTime || "";
+    const existingTime = itemTime || entry?.time || "";
     // Close AgendaOperativa if open
     setAgendaOpOpen(false);
     setCalOpen(true);
@@ -20317,8 +20318,10 @@ function HomeScreenContent() {
             {/* AgendaBoard shares the existing view/settings header with month navigation. */}
             <View testID="calendar-agenda-viewport" style={{ flex: 1 }}>
             {demoCustomerCalendarSelected ? (demoBookingRepository
-              ? <View style={{ flex: 1 }}><DemoCustomerCalendar onGoToLanding={goDirectlyToLanding} renderMessageScreen={renderEntryMessageScreen} scrollToTodayToken={calScrollToTodayToken} onOpenMessage={(entry, back) => openEntryMessage(entry, back, true)} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onDropBooking={(entry,destination)=>dropBookingProposal(entry,destination,"customer")} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
+              ? <View style={{ flex: 1 }}><DemoCustomerCalendar dragEnabled={calOpen && !monthGridOpen && !calReservasOpen && !showBookingFromCal} dragOverlayRef={calendarDragOverlay} onGoToLanding={goDirectlyToLanding} renderMessageScreen={renderEntryMessageScreen} scrollToTodayToken={calScrollToTodayToken} onOpenMessage={(entry, back) => openEntryMessage(entry, back, true)} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onDropBooking={(entry,destination)=>dropBookingProposal(entry,destination,"customer")} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
               : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
+                dragEnabled={calOpen && !monthGridOpen && !calReservasOpen && !showBookingFromCal}
+                dragOverlayRef={calendarDragOverlay}
                 renderHeader={monthNavigation => (<View testID="calendar-header"
               pointerEvents={showBookingFromCal ? "none" : "auto"}
               style={{ zIndex: 20, opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top, paddingLeft: Math.max(insets.left + 8, 8), paddingRight: Math.max(insets.right + 8, 8), gap: 4, paddingBottom: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
@@ -20480,7 +20483,7 @@ function HomeScreenContent() {
           {/* ── BOTONES FLOTANTES — zona pulgar derecho ───────────────────
               CONFIG toggle + ↑↓ fecha.
               Solo visibles cuando el panel mensual está CERRADO y GO Reservas no está activo. */}
-          {!monthGridOpen && !calReservasOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={(demoCustomerCalendarSelected?0:52)+((calQuickCreateOpen||calConfigVisible)?72:0)+64} protectedBottom={Math.max(0,overlayPanelHeight-insets.bottom)+10}>
+          {!monthGridOpen && !calReservasOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating contentRef={calendarDragOverlay} testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={(demoCustomerCalendarSelected?0:52)+((calQuickCreateOpen||calConfigVisible)?72:0)+64} protectedBottom={Math.max(0,overlayPanelHeight-insets.bottom)+10}>
             {!demoCustomerCalendarSelected && (<TouchableOpacity
               onPress={() => {
                 Haptics.selectionAsync();

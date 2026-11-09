@@ -49,7 +49,7 @@ function renderFragment(node, globals = {}) {
     goView: { view: 'USER' }, adminAccess: { allowed: false, checking: false },
     React: { createElement: (type, props, ...children) => ({ type, props: props ?? {}, children: children.flat(Infinity) }) },
     View: 'View', Text: 'Text', TouchableOpacity: 'TouchableOpacity', Feather: 'Feather',
-    MaterialCommunityIcons: 'MaterialCommunityIcons', GoCloseButton: 'GoCloseButton',GoNavigationFloating:'GoNavigationFloating',handedness:'right',
+    MaterialCommunityIcons: 'MaterialCommunityIcons', GoCloseButton: 'GoCloseButton',GoNavigationFloating:'GoNavigationFloating',handedness:'right',calendarDragOverlay:{current:null},
     lang: 'es', isBusinessMode: false, demoCustomerCalendarSelected: false, calQuickCreateOpen: false, calConfigVisible: false, ...globals,
   }).tree;
 }
