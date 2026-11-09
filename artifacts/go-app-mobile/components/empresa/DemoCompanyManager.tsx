@@ -5,8 +5,8 @@ import * as Clipboard from "expo-clipboard";
 import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 /** Selection/storage tools only. Configuration stays in the existing company wizard. */
-export function DemoCompanyManager({ open, onOpenChange, onOpenConfiguration }: {
-  open: boolean; onOpenChange: (value: boolean) => void; onOpenConfiguration?: () => void;
+export function DemoCompanyManager({ open, onOpenChange, onOpenConfiguration, compact = false }: {
+  open: boolean; onOpenChange: (value: boolean) => void; onOpenConfiguration?: () => void; compact?: boolean;
 }) {
   const { catalog, demo } = useOwnerBusinessDemo(); const { lang } = useLanguage();
   const [name, setName] = useState(""), [busy, setBusy] = useState(false), [backupText, setBackupText] = useState(""), [importOpen, setImportOpen] = useState(false);
@@ -38,15 +38,18 @@ export function DemoCompanyManager({ open, onOpenChange, onOpenConfiguration }: 
     if (archived) await catalog.recover(id); else await catalog.select(id);
     openConfiguration();
   });
-  const button = (label: string, action: () => void, id?: string) => <TouchableOpacity key={id ?? label} testID={id} accessibilityRole="button" disabled={busy} onPress={action} style={{ padding: 10, borderRadius: 10, backgroundColor: "#edf3fa", opacity: busy ? 0.5 : 1 }}><Text style={{ color: "#24527c", fontWeight: "700" }}>{label}</Text></TouchableOpacity>;
+  const button = (label: string, action: () => void, id?: string) => <TouchableOpacity key={id ?? label} testID={id} accessibilityRole="button"
+    accessibilityLabel={compact && id === "demo-company-toggle" ? (en ? "Change business: " : "Cambiar negocio: ") + currentName : undefined}
+    accessibilityState={id === "demo-company-toggle" ? { expanded: open } : undefined}
+    disabled={busy} onPress={action} style={{ padding: 10, borderRadius: 10, backgroundColor: compact && id === "demo-company-toggle" ? "transparent" : "#edf3fa", opacity: busy ? 0.5 : 1 }}><Text style={{ color: "#24527c", fontWeight: "700" }}>{label}</Text></TouchableOpacity>;
   const archiveCurrent = () => Alert.alert("GO", en ? "Archive this test company? Its data can be recovered here." : "¿Archivar esta empresa de prueba? Sus datos se podrán recuperar aquí.", [{ text: en ? "Cancel" : "Cancelar", style: "cancel" }, { text: en ? "Archive" : "Archivar", onPress: () => void run(async () => { await demo.load(); await catalog.archive(catalog.getSelectedId()); }) }]);
   return <View style={{ marginHorizontal: 18, marginBottom: 8, gap: 6 }} testID="demo-company-manager">
-    <Text testID="demo-selected-company" style={{ color: "#111827", fontWeight: "700" }}>{en ? "Current business: " : "Negocio actual: "}{currentName}</Text>
+    {!compact && <Text testID="demo-selected-company" style={{ color: "#111827", fontWeight: "700" }}>{en ? "Current business: " : "Negocio actual: "}{currentName}</Text>}
     <View style={{ flexDirection: "row", gap: 8 }}>
-      <View style={{ flex: 1 }}>{button((en ? "My businesses · " : "Mis negocios · ") + activeCompanies.length + (open ? " ▴" : " ▾"), () => onOpenChange(!open), "demo-company-toggle")}</View>
-      <View style={{ flex: 1 }}>{button(en ? "New business" : "Nuevo negocio", () => { setCreating(true); setCreateError(""); setToolsOpen(false); onOpenChange(true); nameInput.current?.focus(); }, "demo-company-new")}</View>
+      <View style={{ flex: 1 }}>{button((compact ? currentName : (en ? "My businesses · " : "Mis negocios · ") + activeCompanies.length) + (open ? " ▴" : " ▾"), () => onOpenChange(!open), "demo-company-toggle")}</View>
+      {(!compact || open) && <View style={{ flex: 1 }}>{button(en ? "New business" : "Nuevo negocio", () => { setCreating(true); setCreateError(""); setToolsOpen(false); onOpenChange(true); nameInput.current?.focus(); }, "demo-company-new")}</View>}
     </View>
-    {creating && <ScrollView style={{ maxHeight: 200 }} contentContainerStyle={{ gap: 6, paddingBottom: 8 }} keyboardShouldPersistTaps="always" nestedScrollEnabled testID="demo-company-create-form">
+    {creating && (!compact || open) && <ScrollView style={{ maxHeight: 200 }} contentContainerStyle={{ gap: 6, paddingBottom: 8 }} keyboardShouldPersistTaps="always" nestedScrollEnabled testID="demo-company-create-form">
       <Text style={{ color: "#4b5563", fontSize: 12 }}>{en ? "Create an independent business and open its configuration." : "Crea un negocio independiente y abre su configuración."}</Text>
       <TextInput ref={nameInput} autoFocus testID="demo-company-name" accessibilityLabel={en ? "New company name" : "Nombre de nueva empresa"} placeholder={en ? "New business name" : "Nombre del nuevo negocio"} value={name} onChangeText={value => { latestName.current = value; setName(value); setCreateError(""); }} returnKeyType="go" onSubmitEditing={createCompany} maxLength={100} editable={!busy} style={{ borderWidth: 1, borderColor: "#aab8ca", padding: 10, borderRadius: 10, color: "#111827" }} />
       {!!createError && <Text testID="demo-company-create-error" accessibilityRole="alert" style={{ color: "#b91c1c", fontSize: 13 }}>{createError}</Text>}
@@ -59,10 +62,10 @@ export function DemoCompanyManager({ open, onOpenChange, onOpenConfiguration }: 
       {activeCompanies.map(company => button((company.id === catalog.getSelectedId() ? "✓ " : "") + (company.name || (en ? "Unnamed business" : "Negocio sin nombre")), () => void switchCompany(company.id, false), "demo-company-" + company.id))}
       {activeCompanies.length === 0 && <Text style={{ color: "#4b5563", fontSize: 12 }}>{en ? "Create your first business with New business." : "Crea tu primer negocio con Nuevo negocio."}</Text>}
     </ScrollView>}
-    <TouchableOpacity testID="demo-company-tools-toggle" accessibilityRole="button" accessibilityState={{ expanded: toolsOpen }} disabled={busy} onPress={() => setToolsOpen(!toolsOpen)} style={{ paddingVertical: 7 }}>
+    {(!compact || open) && <TouchableOpacity testID="demo-company-tools-toggle" accessibilityRole="button" accessibilityState={{ expanded: toolsOpen }} disabled={busy} onPress={() => setToolsOpen(!toolsOpen)} style={{ paddingVertical: 7 }}>
       <Text style={{ color: "#4b5563", fontSize: 12 }}>{en ? "Administration" : "Administración"} {toolsOpen ? "▴" : "▾"}</Text>
-    </TouchableOpacity>
-    {toolsOpen && <ScrollView testID="demo-company-tools" style={{ maxHeight: 210 }} contentContainerStyle={{ gap: 8, paddingBottom: 12 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
+    </TouchableOpacity>}
+    {toolsOpen && (!compact || open) && <ScrollView testID="demo-company-tools" style={{ maxHeight: 210 }} contentContainerStyle={{ gap: 8, paddingBottom: 12 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
       <Text style={{ color: "#4b5563", fontSize: 12 }}>{en ? "Local backups and recovery. These tools preserve your companies and calendars." : "Copias y recuperación locales. Estas herramientas conservan tus negocios y calendarios."}</Text>
       {button(en ? "Export test backup" : "Exportar copia de prueba", () => void run(async () => { const content = await catalog.exportBackup(); await Share.share({ message: content, title: "GO backup" }); }), "demo-company-backup")}
       {button(en ? "Copy test backup" : "Copiar copia de prueba", () => void run(async () => {

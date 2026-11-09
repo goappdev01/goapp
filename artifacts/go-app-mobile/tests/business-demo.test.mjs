@@ -159,7 +159,7 @@ test("reset clears only the local configuration, plan, reservations and preferen
 });
 
 // Execute the real providers and screen callbacks with deterministic native APIs.
-function uiFixture(data, { authorized = true, reactCompiler = false, bookingToday, realActivity = false, gpsAdapter, timezoneAdapter = async (_source,zone) => zone, timezoneResolver = async () => { throw Object.assign(Error("Unlinked"),{code:"BOOKING_CALENDAR_BUSINESS_NOT_LINKED"}); } } = {}) {
+function uiFixture(data, { authorized = true, businessPreview = authorized, adminView = false, adminAllowed = authorized, ownerIdentity = authorized, realCompanyManager = false, reactCompiler = false, bookingToday, realActivity = false, gpsAdapter, timezoneAdapter = async (_source,zone) => zone, timezoneResolver = async () => { throw Object.assign(Error("Unlinked"),{code:"BOOKING_CALENDAR_BUSINESS_NOT_LINKED"}); } } = {}) {
   const cache = new Map(), hooks = new Map(), alerts = [], calls = { liveAgenda: 0, liveFloor: 0, external: 0 };
   let current, cursor = 0, effects = [], lang = "es", keyboardVisible = false, focusedInput = null, keyboardDismisses = 0;
   const keyboardListeners = new Map();
@@ -198,8 +198,8 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
   }, { get: (target,key) => target[key] ?? key });
   const chain = new Proxy({}, { get: () => () => chain });
   const external = () => { calls.external++; throw new Error("External service must not run"); };
-  const storage = { getItem: async () => { calls.liveFloor++; throw new Error("Live key read"); },
-    setItem: async () => { calls.liveFloor++; throw new Error("Live key write"); } };
+  const storage = { getItem: async key => { if (key === "go_empresa_open_count_v1") return null; calls.liveFloor++; throw new Error("Live key read"); },
+    setItem: async key => { if (key === "go_empresa_open_count_v1") return; calls.liveFloor++; throw new Error("Live key write"); } };
   const componentMocks = new Proxy({ __esModule: true }, { get(target,key) {
     if (key in target) return target[key];
     const component = { [key]: function() {} }[key]; target[key] = component; return component;
@@ -214,13 +214,13 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
     react: { ...React, default: React }, "react-native": native,
     "react/compiler-runtime": { c: size => React.useMemo(() => new Array(size).fill(Symbol.for("react.memo_cache_sentinel")), []) },
     "@react-native-async-storage/async-storage": { default: storage },
-    "@/contexts/GoViewContext": { useGoView: () => ({ isBusinessPreview: authorized, isOwner: authorized, isAdminView: false }) },
+    "@/contexts/GoViewContext": { useGoView: () => ({ isBusinessPreview: businessPreview, isOwner: ownerIdentity, isAdminView: adminView }) },
     "./GoViewContext": { useGoView: () => ({ isBusinessPreview: authorized }) },
     "./GoAdminAccessContext": { useAdminAccess: () => ({ userId: owner, isOwner: authorized, checking: false }) },
-    "@/contexts/GoAdminAccessContext": { useAdminAccess: () => ({ userId: owner, isOwner: authorized, allowed: authorized }) },
+    "@/contexts/GoAdminAccessContext": { useAdminAccess: () => ({ userId: owner, isOwner: ownerIdentity, allowed: adminAllowed }) },
     "./OwnerBusinessDemoContext": { useOwnerBusinessDemo: () => ({ demo: authorized ? data.store : undefined, loaded: authorized, config: authorized ? data.store.getSnapshot().config : undefined }) },
     "./DemoCompanyManager": { DemoCompanyManager: "DemoCompanyManager" },
-    "@/contexts/OwnerBusinessDemoContext": { useOwnerBusinessDemo: () => ({ demo: authorized ? data.store : undefined, loaded: authorized, locationReturn: undefined, beginLocationReturn: () => 1, consumeLocationReturn: () => true, finishLocationReturn() {}, clearLocationReturn() {}, saveDeviceCoordinates: async (coordinates, expectedUserId, countryCode) => { if (!authorized || expectedUserId !== owner) throw new Error("Denied owner"); await data.store.updateConfig({coordinates, ...(countryCode ? {countryCode} : {})}); } }) },
+    "@/contexts/OwnerBusinessDemoContext": { useOwnerBusinessDemo: () => ({ catalog: data.catalog, demo: authorized ? data.store : undefined, loaded: authorized, locationReturn: undefined, beginLocationReturn: () => 1, consumeLocationReturn: () => true, finishLocationReturn() {}, clearLocationReturn() {}, saveDeviceCoordinates: async (coordinates, expectedUserId, countryCode) => { if (!authorized || expectedUserId !== owner) throw new Error("Denied owner"); await data.store.updateConfig({coordinates, ...(countryCode ? {countryCode} : {})}); } }) },
     "./GoBusinessAccessContext": { useBusinessAccess: () => ({ allowed: false }) },
     "@/contexts/GoBusinessConfigContext": { useBusinessConfig: configApi },
     "@/contexts/LanguageContext": { useLanguage: () => ({ lang, locale: lang === "en" ? "en-US" : "es-ES", t: key => key.startsWith("floor_") ? localized[lang][key] : key }) },
@@ -256,6 +256,7 @@ function uiFixture(data, { authorized = true, reactCompiler = false, bookingToda
     const exports = {}; cache.set(name,exports);
     vm.runInNewContext(compile(name, reactCompiler && ["contexts/GoBusinessConfigContext.tsx", "components/booking/GoReservasConfigScreen.tsx", "components/empresa/EmpresaConfigScreen.tsx"].includes(name)), { exports, console, Date, Set, Map, setTimeout: () => 1, clearTimeout() {},
       setInterval: () => 1, clearInterval() {}, require(key) {
+        if (realCompanyManager && key === "./DemoCompanyManager") return load("components/empresa/DemoCompanyManager.tsx");
         if (key in imports) return imports[key];
         if (key === "@/theme/goAssistantColors") return load("theme/goAssistantColors.ts");
         if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };
@@ -356,6 +357,130 @@ test("the panel opens existing configuration and DEMO bookings without activatio
   }
   assert.equal(ui.calls.liveAgenda,0);
 });
+
+test("GO Empresa opens its existing two booking paths and returns to them without a module selector", async () => {
+  const f=dataFixture();await configuredSalon(f);
+  const ui=uiFixture(f),Panel=ui.load("components/empresa/EmpresaPanel.tsx").EmpresaPanel;
+  let closed=0,contextOpened=0;
+  const props={visible:true,previewReadOnly:true,onClose:()=>closed++,onOpenContext:()=>contextOpened++};
+  const render=()=>ui.render(Panel,props);
+  render();let tree=render();
+  const assertHome=tree=>{
+    const actions=nodes(tree).filter(n=>n.type==="TouchableOpacity" && /biz_panel_(configuration|daily)/.test(text(n)));
+    assert.equal(actions.length,2);
+    for(const label of ["GO Rutas","GO IA","GO Negocio","GO Empresa","GO Deportes","biz_panel_platform","empresa_info_text"])
+      assert.equal(text(tree).includes(label),false,label);
+    assert.equal(nodes(tree).filter(n=>n.type==="DemoCompanyManager").length,1);
+    assert.equal(nodes(tree).find(n=>n.type==="DemoCompanyManager").props.compact,true);
+    assert.equal(nodes(tree).some(n=>n.props.accessibilityLabel==="biz_panel_back"),false);
+    assert.equal(component(tree,"ActivacionCobrosScreen"),undefined);
+  };
+  assertHome(tree);
+  const ready=storeModule.getBusinessDemoSetupState(f.store.getSnapshot().config,f.store.getSnapshot().plan);
+  assert.equal(ready.completed,8);
+  assert.ok(nodes(tree).some(n=>n.props.style?.width==="100%" && n.props.style?.height===4));
+  button(tree,"biz_panel_configuration").props.onPress();tree=render();
+  const wizard=component(tree,"EmpresaConfigScreen");assert.ok(wizard);assert.equal(wizard.props.startAtSteps,true);
+  assert.equal(wizard.props.initialStep,ready.nextStep);assert.equal(wizard.props.onOpenVerificacion,undefined);
+  const Wizard=ui.load("components/empresa/EmpresaConfigScreen.tsx").EmpresaConfigScreen;
+  for(let step=0;step<8;step++){
+    const page=ui.render(Wizard,wizard.props);assert.ok(button(page,step===7?"biz_finish_config":"biz_next"));
+    button(page,step===7?"biz_finish_config":"biz_next").props.onPress();await turn();
+  }
+  tree=render();assertHome(tree);
+  button(tree,"biz_panel_daily").props.onPress();tree=render();
+  const operations=component(tree,"GoReservasDemoScreen");assert.ok(operations);assert.equal(operations.props.hideFAB,true);
+  const Operations=ui.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen;
+  ui.render(Operations,operations.props);await turn();let daily=ui.render(Operations,operations.props);
+  button(daily,"view_mode_calendario").props.onPress();daily=ui.render(Operations,operations.props);
+  assert.ok(component(daily,"AgendaBoard"));
+  button(daily,"view_mode_dividido").props.onPress();daily=ui.render(Operations,operations.props);
+  assert.ok(component(daily,"PlanoEmpresaScreen"));assert.ok(component(daily,"ReservasList"));
+  operations.props.onClose();tree=render();assertHome(tree);
+  nodes(tree).find(n=>n.props.accessibilityLabel==="context_change").props.onPress();assert.equal(contextOpened,1);
+  nodes(tree).find(n=>n.props.accessibilityLabel==="biz_panel_close").props.onPress();assert.equal(closed,1);
+  assert.equal(f.store.getSnapshot().config.isBusinessActive,false);
+  assert.equal(ui.calls.liveFloor,0);assert.equal(ui.calls.liveAgenda,0);assert.equal(ui.calls.external,0);
+});
+
+test("the business entry shows the same two paths for live and sports businesses without activating backend services", async () => {
+  const f=dataFixture();await configuredSalon(f);await f.store.updateConfig({sectorId:"deportes",subId:"padel"});
+  const before=plain(f.store.getSnapshot()),ui=uiFixture(f,{businessPreview:false,ownerIdentity:false,adminAllowed:false});
+  const Panel=ui.load("components/empresa/EmpresaPanel.tsx").EmpresaPanel,props={visible:true,onClose(){}};
+  ui.render(Panel,props);let tree=ui.render(Panel,props);await turn();
+  assert.equal(text(tree).split(before.config.businessName).length-1,1);
+  assert.ok(button(tree,"biz_panel_configuration"));assert.ok(button(tree,"biz_panel_daily"));
+  for(const label of ["GO Deportes","GO Rutas","GO IA","GO Negocio","biz_panel_new"])assert.equal(text(tree).includes(label),false);
+  assert.equal(component(tree,"ActivacionCobrosScreen").props.visible,false);
+  button(tree,"biz_panel_daily").props.onPress();tree=ui.render(Panel,props);
+  assert.ok(component(tree,"GoReservasConfigScreen"));assert.equal(component(tree,"GoReservasDemoScreen"),undefined);
+  component(tree,"GoReservasConfigScreen").props.onClose();tree=ui.render(Panel,props);
+  assert.ok(button(tree,"biz_panel_configuration"));assert.ok(button(tree,"biz_panel_daily"));
+  assert.deepEqual(plain(f.store.getSnapshot()),before);
+});
+
+test("direct booking paths survive a company-panel remount and retain their home return", async () => {
+  const f=dataFixture();await configuredSalon(f);
+  const ui=uiFixture(f),Panel=ui.load("components/empresa/EmpresaPanel.tsx").EmpresaPanel;
+  let route="home";
+  const props=()=>({visible:true,previewReadOnly:true,initialModulo:route==="configuration"?"empresa_config":route==="reservations"?"reservas_config":"home",onDemoNavigate:value=>route=value,onClose(){}});
+  const render=()=>ui.render(Panel,props());render();let tree=render();
+  for(const [label,target,name] of [["biz_panel_configuration","configuration","EmpresaConfigScreen"],["biz_panel_daily","reservations","GoReservasDemoScreen"]]){
+    button(tree,label).props.onPress();assert.equal(route,target);
+    ui.unmount(Panel);render();tree=render();const screen=component(tree,name);assert.ok(screen);
+    (screen.props.onBack??screen.props.onClose)();assert.equal(route,"home");tree=render();
+    assert.ok(button(tree,"biz_panel_configuration"));assert.ok(button(tree,"biz_panel_daily"));
+  }
+  assert.equal(ui.calls.external,0);
+});
+
+test("the compact business control keeps selection, independent data and management tools through company remounts", async () => {
+  const f=dataFixture(),catalogAPI=loadPure("data/businessDemoCatalog.ts",{"./businessDemoStore":storeModule});
+  f.catalog=catalogAPI.createBusinessDemoCatalog({ownerUserId:owner,storage:f.storage,initialConfig:initial,canUse:()=>true});
+  await f.catalog.create("GO PELUQUERIA");const first=f.catalog.getSelectedId();f.store=f.catalog.getSelectedStore();await configuredSalon(f);
+  const beforeFirst=plain(f.store.getSnapshot());
+  await f.catalog.create("GO RESTAURANTE");const second=f.catalog.getSelectedId(),beforeSecond=plain(f.catalog.getSelectedStore().getSnapshot());
+  await f.catalog.select(first);f.store=f.catalog.getSelectedStore();
+  const ui=uiFixture(f,{realCompanyManager:true}),Panel=ui.load("components/empresa/EmpresaPanel.tsx").EmpresaPanel;
+  let route="home";const props=()=>({visible:true,previewReadOnly:true,initialModulo:route==="configuration"?"empresa_config":"home",initialCompaniesOpen:route==="companies",onDemoNavigate:value=>route=value,onClose(){}});
+  const render=()=>ui.render(Panel,props()),manager=tree=>{const node=component(tree,"DemoCompanyManager");return ui.render(node.type,node.props);};
+  const byID=(tree,id)=>nodes(tree).find(n=>n.props.testID===id);
+  render();let tree=render(),control=manager(tree);
+  assert.equal(text(control).split(beforeFirst.config.businessName).length-1,1);
+  assert.equal(text(tree).includes(beforeFirst.config.businessName),false);
+  for(const id of ["demo-company-new","demo-company-tools-toggle","demo-company-list"])assert.equal(byID(control,id),undefined);
+  assert.match(byID(control,"demo-company-toggle").props.accessibilityLabel,/Cambiar negocio/);
+  byID(control,"demo-company-toggle").props.onPress();tree=render();control=manager(tree);
+  assert.ok(byID(control,"demo-company-new"));assert.ok(byID(control,"demo-company-tools-toggle"));
+  byID(control,"demo-company-tools-toggle").props.onPress();assert.ok(byID(manager(tree),"demo-company-backup"));
+  byID(control,"demo-company-"+second).props.onPress();await turn();await turn();
+  assert.equal(f.catalog.getSelectedId(),second);assert.equal(route,"configuration");
+  ui.unmount(Panel);f.store=f.catalog.getSelectedStore();render();tree=render();
+  let wizard=component(tree,"EmpresaConfigScreen");assert.ok(wizard);assert.ok(wizard.props.key.includes(f.store.businessId));
+  wizard.props.onOpenCompanies();tree=render();control=manager(tree);
+  byID(control,"demo-company-"+first).props.onPress();await turn();await turn();
+  ui.unmount(Panel);f.store=f.catalog.getSelectedStore();render();tree=render();
+  wizard=component(tree,"EmpresaConfigScreen");wizard.props.onBack();tree=render();control=manager(tree);
+  assert.equal(byID(control,"demo-company-toggle").props.accessibilityState.expanded,false);
+  assert.deepEqual(plain(f.store.getSnapshot()),beforeFirst);
+  await f.catalog.select(second);assert.deepEqual(plain(f.catalog.getSelectedStore().getSnapshot()),beforeSecond);
+  assert.equal(ui.calls.external,0);assert.equal(ui.calls.liveFloor,0);
+});
+
+test("Admin retains business modules behind its existing role and context guards", async () => {
+  const f=dataFixture(),props={visible:true,onClose(){}};
+  const ui=uiFixture(f,{businessPreview:false,adminView:true}),Dashboard=ui.load("components/empresa/GoAdminDashboard.tsx").GoAdminDashboard;
+  let tree=ui.render(Dashboard,props);button(tree,"Módulos empresariales").props.onPress();tree=ui.render(Dashboard,props);
+  for(const label of ["GO Reservas","GO Rutas","GO IA","GO Negocio"])assert.ok(text(tree).includes(label),label);
+  assert.match(source("components/empresa/GoRoadmapScreen.tsx"),/label: "GO EMPRESA"/);
+  for(const options of [{adminView:false,adminAllowed:true},{adminView:true,adminAllowed:false}]){
+    const denied=uiFixture(f,options),Screen=denied.load("components/empresa/GoAdminDashboard.tsx").GoAdminDashboard;
+    assert.equal(denied.render(Screen,props),null);
+    const Panel=denied.load("components/empresa/EmpresaPanel.tsx").EmpresaPanel;
+    const panelProps={...props,initialModulo:"admin"};denied.render(Panel,panelProps);tree=denied.render(Panel,panelProps);
+    assert.equal(component(tree,"AdminScreen"),undefined);assert.ok(button(tree,"biz_panel_daily"));
+  }
+});
 test("the real floor booking form commits a pending DEMO reservation before closing", async () => {
   const f=dataFixture(); await f.store.updateConfig({ activeDays:[0,1,2,3,4,5,6],openFrom:"09:00",openTo:"20:00",services:[{name:"Corte DEMO",duration:30,price:0}] }); await f.store.saveFloorPlan(floor(f.store));
   const ui=uiFixture(f), Plano=ui.load("components/booking/PlanoEmpresaScreen.tsx").PlanoEmpresaScreen;
@@ -451,7 +576,7 @@ test("NEXT in the DEMO floor waits for persistence even when the floor has no un
 });
 test("DEMO calendar controls persist locally without altering public calendar preferences", async () => {
   const f=dataFixture(),ui=uiFixture(f),Screen=ui.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen;
-  let tree=ui.render(Screen,{onClose(){},hideFAB:true}); button(tree,"Configuración").props.onPress();
+  let tree=ui.render(Screen,{onClose(){},hideFAB:true}); nodes(tree).find(node=>node.props.accessibilityLabel === "Configuración de reservas").props.onPress();
   tree=ui.render(Screen,{onClose(){},hideFAB:true}); const panel=component(tree,"GoCalConfigPanel");
   panel.props.onDensityChange("15min"); panel.props.onDayNightModeChange("oscuro"); await turn();
   assert.equal(f.store.getSnapshot().preferences.cal_density,"15min");

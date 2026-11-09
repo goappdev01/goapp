@@ -56,7 +56,6 @@ import { GoDeportesScreen }       from "@/components/booking/GoDeportesScreen";
 import { EmpresaConfigScreen }    from "@/components/empresa/EmpresaConfigScreen";
 import { ActivacionCobrosScreen }  from "@/components/empresa/ActivacionCobrosScreen";
 import { SuscripcionGoScreen }     from "@/components/empresa/SuscripcionGoScreen";
-import { MOCK_EMPRESA }            from "@/data/mockEconomia";
 
 type ModuloKey =
   | "home"
@@ -108,62 +107,6 @@ const getModulos = (t: (k: import("@/i18n/translations").TranslationKey) => stri
   { key: "partners",       label: t('mod_partners_label'),       icon: "link",      color: "#4A80BD", desc: t('mod_partners_desc')        },
   { key: "publicidad",     label: t('mod_publicidad_label'),     icon: "radio",     color: "#8A9BB5", desc: t('mod_publicidad_desc'),      badge: "Beta" },
   { key: "admin",          label: t('mod_admin_label'),          icon: "settings",  color: "#C25A5A", desc: t('mod_admin_desc')           },
-];
-
-// ─── Suite architecture — 5 product modules ──────────────────────────────────
-
-type SuiteKey = "reservas" | "rutas" | "ia" | "negocio" | "empresa_admin";
-
-type SuiteDef = {
-  key: SuiteKey;
-  label: string;
-  icon: keyof typeof Feather.glyphMap;
-  color: string;
-  desc: string;
-  modules: ModuloKey[];
-};
-
-const getSuites = (t: (key: import("@/i18n/translations").TranslationKey) => string): SuiteDef[] => [
-  {
-    key: "reservas",
-    label: "GO Reservas",
-    icon: "calendar",
-    color: "#3D9A84",
-    desc: t("biz_suite_bookings_desc"),
-    modules: ["empresa_config", "reservas_config"],
-  },
-  {
-    key: "rutas",
-    label: "GO Rutas",
-    icon: "navigation",
-    color: "#4A80BD",
-    desc: t("biz_suite_routes_desc"),
-    modules: ["agenda", "operativo", "zonas", "disponibilidad"],
-  },
-  {
-    key: "ia",
-    label: "GO IA",
-    icon: "cpu",
-    color: "#7C69BE",
-    desc: t("biz_suite_ai_desc"),
-    modules: ["interpretacion", "sugerencias", "intenciones"],
-  },
-  {
-    key: "negocio",
-    label: "GO Negocio",
-    icon: "briefcase",
-    color: "#C4883A",
-    desc: t("biz_suite_business_desc"),
-    modules: ["suscripcion", "plan", "orbitas", "facturacion", "consumo", "partners", "publicidad"],
-  },
-  {
-    key: "empresa_admin",
-    label: "GO Empresa",
-    icon: "shield",
-    color: "#C25A5A",
-    desc: t("biz_suite_admin_desc"),
-    modules: ["admin", "contactos"],
-  },
 ];
 
 // ─── Bloques madre — hoja de ruta interna (área ADMIN) ───────────────────────
@@ -238,13 +181,6 @@ const BLOQUES_MADRE: BloqueMadreDef[] = [
 ];
 
 
-const PLAN_COLORS: Record<string, string> = {
-  free:       "#8A9BB5",
-  pro:        "#4A80BD",
-  empresa:    "#3D9A84",
-  enterprise: "#C4883A",
-};
-
 interface EmpresaPanelProps {
   visible: boolean;
   bookingChangeReturnDate?:string;
@@ -266,7 +202,7 @@ interface EmpresaPanelProps {
   previewReadOnly?: boolean;
   onOpenContext?: () => void;
   initialCompaniesOpen?: boolean;
-  onDemoNavigate?: (route: "configuration" | "companies") => void;
+  onDemoNavigate?: (route: "home" | "configuration" | "companies" | "reservations") => void;
 }
 
 // Modules that require Empresa Verificada to access.
@@ -300,15 +236,14 @@ function computeConfigProgress(cfg: typeof import("@/contexts/GoBusinessConfigCo
 
 export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, guidanceLevel = 5, onOpenVerificacion, onFinalizarWizard, previewReadOnly = false, bookingChangeReturnDate, onProposeBookingChange,onOpenMessage,onResolveEntry,canResolveEntry,handedness, onOpenContext, initialCompaniesOpen = false, onDemoNavigate }: EmpresaPanelProps) {
   const insets  = useSafeAreaInsets();
-  const { t, locale, lang } = useLanguage();
-  const SUITES = useMemo(() => getSuites(t), [t]);
+  const { t, lang } = useLanguage();
   const GATE_LABELS = useMemo(() => getGateLabels(t), [t]);
   const adminAccess = useAdminAccess();
   const { isBusinessPreview, isAdminView, isOwner } = useGoView();
   const preview = previewReadOnly && isBusinessPreview;
   const panelVisible = visible && (!previewReadOnly || isBusinessPreview);
   const canOpenAdmin = !previewReadOnly && isAdminView && adminAccess.allowed;
-  const { config: businessConfig, updateConfig, resetConfig, demo: businessDemo } = useBusinessConfig();
+  const { config: businessConfig, resetConfig, demo: businessDemo } = useBusinessConfig();
   const demo = preview && Boolean(businessDemo);
   const { locationReturn, clearLocationReturn } = useOwnerBusinessDemo();
   const closePanel = () => { if (demo) clearLocationReturn(); onClose(); };
@@ -325,7 +260,6 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   const swipeDownAnim = useRef(new Animated.Value(0)).current;
   const swipeDownLoop = useRef<Animated.CompositeAnimation | null>(null);
 
-  const [currentSuite, setCurrentSuite] = useState<SuiteKey | null>(null);
   const [configInitialStep,  setConfigInitialStep]  = useState(0);
   const [exceptionCalendarDate, setExceptionCalendarDate] = useState<string | null>(null);
   useEffect(() => { if (modulo !== "reservas_config") setExceptionCalendarDate(null); }, [modulo]);
@@ -377,8 +311,6 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
     return () => { swipeDownLoop.current?.stop(); };
   }, [swipeDownOpacity, panelVisible]);
 
-  const showBadges = guidanceCfg.labelOpacity(0) > 0;
-
   React.useEffect(() => {
     if (panelVisible) {
       // Read the breadcrumb only on an opening edge. Consuming it must not reset the restored module.
@@ -386,13 +318,8 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
         ? locationReturn.module : initialModulo ?? "home";
       const targetModulo = (requested === "admin" && !canOpenAdmin) || (previewReadOnly && !isBusinessPreviewModule(requested)) ? "home" : requested;
       setModulo(targetModulo);
-      if (targetModulo !== "home") {
-        const suite = SUITES.find(s => s.modules.includes(targetModulo as ModuloKey));
-        setCurrentSuite(suite?.key ?? null);
-      }
     } else {
       setModulo("home");
-      setCurrentSuite(null);
     }
   }, [panelVisible, initialModulo, previewReadOnly, canOpenAdmin]);
 
@@ -403,14 +330,12 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
 
   // Refs para que el PanResponder acceda siempre al estado más reciente
   const moduloRef       = useRef(modulo);
-  const currentSuiteRef = useRef<SuiteKey | null>(null);
   const onCloseRef      = useRef(closePanel);
   const goHomeRef       = useRef<() => void>(() => {});
   // Ref que EmpresaConfigScreen registra con su goPrev interno.
   // El FAB de una flecha lo llama para respetar la ruta real.
   const modulePrevRef   = useRef<(() => void) | null>(null);
   moduloRef.current       = modulo;
-  currentSuiteRef.current = currentSuite;
   onCloseRef.current      = closePanel;
 
   // ── ZONA DERECHA (≥75% del ancho) ────────────────────────────────────────
@@ -470,11 +395,9 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
           onCloseRef.current();
         } else if (gs.dy > 140) {
           if (moduloRef.current !== "home") {
-            goHomeRef.current(); // módulo → suite home
-          } else if (currentSuiteRef.current !== null) {
-            goHomeRef.current(); // suite home → suite selector
+            goHomeRef.current(); // módulo → GO Reservas
           } else {
-            onCloseRef.current(); // suite selector → cerrar panel
+            onCloseRef.current();
           }
         }
       },
@@ -496,6 +419,8 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
     }).start(() => {
       setModulo(key);
       slideAnim.setValue(0);
+      if (demo && key === "empresa_config") onDemoNavigate?.("configuration");
+      if (demo && key === "reservas_config") onDemoNavigate?.("reservations");
       try { if (!previewReadOnly) onModuloChange?.(); } catch { /* silencioso */ }
     });
   };
@@ -503,38 +428,42 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   const goHome = () => {
     if (demo) clearLocationReturn();
     if (modulo !== "home") {
-      // Module → suite sub-grid
+      // Return to the existing two-path GO Reservas home.
       setModulo("home");
+      setDemoManagerOpen(false);
+      onDemoNavigate?.("home");
+    } else if (demoManagerOpen) {
+      setDemoManagerOpen(false);
+      onDemoNavigate?.("home");
     } else {
-      // Suite sub-grid → suite selector
-      setCurrentSuite(null);
+      closePanel();
     }
     try { if (!previewReadOnly) onModuloChange?.(); } catch { /* silencioso */ }
   };
   const openDemoConfiguration = () => {
     setDemoManagerOpen(false); setConfigInitialStep(0); setOpenSelectedConfig(true);
-    setNewEmpresaKey(key => key + 1); setCurrentSuite("reservas");
+    setNewEmpresaKey(key => key + 1);
     if (onDemoNavigate) { setModulo("empresa_config"); slideAnim.setValue(0); onDemoNavigate("configuration"); }
     else goToModulo("empresa_config");
   };
   const openDemoBusinesses = () => {
-    clearLocationReturn(); setModulo("home"); setCurrentSuite(null); setDemoManagerOpen(true);
+    clearLocationReturn(); setModulo("home"); setDemoManagerOpen(true);
     onDemoNavigate?.("companies");
   };
   goHomeRef.current = goHome;
 
   const moduloActual = MODULOS.find(m => m.key === modulo);
-  const planColor    = PLAN_COLORS[MOCK_EMPRESA.plan] ?? "#6ee7b7";
 
   const fabBottom = insets.bottom + 24;
-  const contentPadBottom = fabBottom + ((modulo!=="home"||currentSuite!==null)?152:80);
+  const hasPrevious = modulo !== "home" || demoManagerOpen;
+  const contentPadBottom = fabBottom + (hasPrevious ? 152 : 80);
   const fabButtons = (
     <>
           {/* Botón 1: volver un paso atrás en la ruta real
                – Si EmpresaConfigScreen tiene registrado su goPrev → lo llama
                  (navega por la ruta interna: paso→paso, activity→sector, etc.)
-               – Si no → goHome (módulo → suite home) */}
-          {(modulo !== "home" || currentSuite !== null) && (
+               – Si no → goHome (módulo → GO Reservas) */}
+          {hasPrevious && (
             <GoCloseButton level="panel" activeOpacity={0.8} onPress={() => {
                 if (modulo === "empresa_config" && modulePrevRef.current) {
                   modulePrevRef.current();
@@ -575,149 +504,14 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
         {preview && !demo && <Text style={[s.headerSub, { textAlign: "center", color: "#4A80BD", fontWeight: "700" }]}>{t("biz_preview_title")}</Text>}
 
 
-        {demo && modulo === "home" && <DemoCompanyManager open={demoManagerOpen} onOpenChange={setDemoManagerOpen} onOpenConfiguration={openDemoConfiguration} />}
-
-        {/* ── Centered header — oculto en empresa_config (el asistente tiene su propia cabecera) ── */}
-        {modulo !== "empresa_config" ? (
-        <View style={s.header}>
-          <View style={s.headerCenter}>
-            {modulo === "home" && currentSuite === null ? (
-              <>
-                <Text style={s.headerTitle}>GO Empresa</Text>
-                <Text style={s.headerSub}>{demo ? (businessConfig.businessName || demoTitle) : preview ? t("biz_preview_data") : MOCK_EMPRESA.nombre}</Text>
-                {/* Verification badge — derived from businessConfig + verification status */}
-                {(() => {
-                  const st              = verification.status;
-                  const isConfigured    = !!businessConfig.sectorId;
-                  const isFullyConfigured = !!businessConfig.sectorId && businessConfig.services.length > 0;
-
-                  let color: string;
-                  let label: string;
-                  let sub: string;
-
-                  if (preview) {
-                    color = "#4A80BD";
-                    label = demo ? (lang === "en" ? "Configuration" : "Configuración") : t("biz_preview_read_only");
-                    sub = demo ? (lang === "en" ? "No real company is linked or verified" : "Sin vincular ni verificar empresas reales") : t("biz_preview_unlinked");
-                  } else if (st === "verified") {
-                    color = "#10B981";
-                    label = t("biz_panel_verified");
-                    sub   = t("biz_panel_all_active");
-                  } else if (st === "pending") {
-                    color = "#F59E0B";
-                    label = t("biz_panel_verification_sent");
-                    sub   = t("biz_panel_under_review");
-                  } else if (st === "rejected") {
-                    color = "#EF4444";
-                    label = t("biz_panel_verification_rejected");
-                    sub   = t("biz_panel_resubmit");
-                  } else if (isFullyConfigured) {
-                    color = "#4A80BD";
-                    label = t("biz_panel_ready_verify");
-                    sub   = t("biz_panel_send_documents");
-                  } else if (isConfigured) {
-                    color = "#F59E0B";
-                    label = t("biz_panel_config_progress");
-                    sub   = t("biz_panel_complete_steps");
-                  } else {
-                    color = "#9CA3AF";
-                    label = t("biz_panel_not_configured");
-                    sub   = t("biz_panel_configure_bookings");
-                  }
-
-                  return (
-                    <TouchableOpacity
-                      activeOpacity={!demo && (preview || st === "verified") ? 1 : 0.8}
-                      onPress={!demo && (preview || st === "verified") ? undefined : () => {
-                        if (previewReadOnly && !demo) { showPreviewUnavailable(); return; }
-                        if (!demo && isFullyConfigured && onOpenVerificacion) {
-                          onOpenVerificacion();
-                        } else {
-                          const { nextStep } = computeConfigProgress(businessConfig, demo ? businessDemo?.getSnapshot().plan : undefined);
-                          setConfigInitialStep(nextStep >= 0 ? nextStep : 0);
-                          goToModulo("empresa_config");
-                        }
-                      }}
-                      style={[s.verifBadge, { borderColor: color + "40", backgroundColor: color + "0D" }]}
-                    >
-                      <View style={[s.verifDot, { backgroundColor: color }]} />
-                      <View style={s.verifTexts}>
-                        <Text style={[s.verifTxt, { color }]}>{label}</Text>
-                        <Text style={[s.verifSubTxt, { color: color + "CC" }]}>{sub}</Text>
-                      </View>
-                      {!preview && st !== "verified" && (
-                        <Feather name="chevron-right" size={11} color={color + "99"} />
-                      )}
-                    </TouchableOpacity>
-                  );
-                })()}
-
-                {/* ── Nueva empresa — siempre desde cero, sin heredar datos ── */}
-                {!demo && <TouchableOpacity
-                  activeOpacity={0.75}
-                  onPress={() => {
-                    if (previewReadOnly && !demo) { showPreviewUnavailable(); return; }
-                    if (demo) { setDemoManagerOpen(true); return; }
-                    Alert.alert(
-                      t("biz_panel_new"),
-                      t("biz_panel_reset_warning"),
-                      [
-                        { text: t("cancel"), style: "cancel" },
-                        {
-                          text: t("biz_panel_create_new"),
-                          style: "destructive",
-                          onPress: async () => {
-                            if (demo) clearLocationReturn(); try { await resetConfig(); } catch (error) { Alert.alert(demoTitle, String(error)); return; }
-                            setNewEmpresaKey(k => k + 1);
-                            setConfigInitialStep(0);
-                            goToModulo("empresa_config");
-                          },
-                        },
-                      ]
-                    );
-                  }}
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 5,
-                    marginTop: 6,
-                    paddingVertical: 5,
-                    paddingHorizontal: 12,
-                    borderRadius: 8,
-                    borderWidth: 1,
-                    borderColor: "rgba(74,128,189,0.25)",
-                    backgroundColor: "rgba(74,128,189,0.06)",
-                    alignSelf: "center",
-                  }}
-                >
-                  <Feather name="plus" size={11} color="#4A80BD" />
-                  <Text style={{ fontSize: 11, fontWeight: "700", color: "#4A80BD", letterSpacing: 0.5 }}>{t("biz_panel_new")}</Text>
-                </TouchableOpacity>}
-              </>
-            ) : modulo === "home" && currentSuite !== null ? (
-              // Suite sub-home header
-              (() => {
-                const suite = SUITES.find(su => su.key === currentSuite)!;
-                return (
-                  <>
-                    <View style={[s.suiteHeaderIcon, { backgroundColor: suite.color + "18" }]}>
-                      <Feather name={suite.icon} size={18} color={suite.color} />
-                    </View>
-                    <Text style={[s.headerTitle, { marginTop: 4 }]}>{suite.label}</Text>
-                    <Text style={s.headerSub}>{suite.desc}</Text>
-                  </>
-                );
-              })()
-            ) : (
-              <>
-                <Text style={s.headerTitle}>{moduloActual?.label ?? ""}</Text>
-                <Text style={s.headerSub}>{moduloActual?.desc ?? ""}</Text>
-              </>
-            )}
+        {modulo !== "home" && modulo !== "empresa_config" && (
+          <View style={s.header}>
+            <View style={s.headerCenter}>
+              <Text style={s.headerTitle}>{moduloActual?.label ?? ""}</Text>
+              <Text style={s.headerSub}>{moduloActual?.desc ?? ""}</Text>
+            </View>
           </View>
-        </View>
-        ) : null}
+        )}
 
         {/* ── Content area ── */}
         {modulo === "home" ? (
@@ -726,102 +520,34 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{ paddingBottom: contentPadBottom }}
           >
-            {!demo ? (
-            <View style={s.empresaHero}>
-              <View style={s.empresaHeroTop}>
-                <View style={[s.planPill, { backgroundColor: planColor + "22", borderColor: planColor + "44" }]}>
-                  <Feather name="star" size={11} color={planColor} />
-                  <Text style={[s.planPillTxt, { color: planColor }]}>
-                    GO {MOCK_EMPRESA.plan.charAt(0).toUpperCase() + MOCK_EMPRESA.plan.slice(1)}
-                  </Text>
-                </View>
-                <Text style={s.renovacionTxt}>
-                  {t('renews_label')} {new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(MOCK_EMPRESA.proximaRenovacion + "T12:00:00"))}
-                </Text>
-              </View>
-
-              <View style={s.metricsRow}>
-                <MetricCard
-                  label={t('users_label')}
-                  value={`${MOCK_EMPRESA.usuariosActivos}`}
-                  sub={`/${MOCK_EMPRESA.usuariosLicencia}`}
-                  warn={MOCK_EMPRESA.usuariosActivos >= MOCK_EMPRESA.limiteAlerta}
-                />
-                <MetricCard
-                  label={t('monthly_cost_label')}
-                  value={`${MOCK_EMPRESA.costeEstimadoMes.toFixed(0)} €`}
-                  sub={t('estimated_label')}
-                />
-                <MetricCard
-                  label={t('orbits_label')}
-                  value="4"
-                  sub={t('active_label_sub')}
-                />
-              </View>
-            </View>
+            {contextNavigation}
+            {demo ? (
+              <DemoCompanyManager compact open={demoManagerOpen} onOpenChange={setDemoManagerOpen} onOpenConfiguration={openDemoConfiguration} />
             ) : (
-              <View style={s.empresaHero}>
-                <Text style={[s.headerSub, { marginTop: 6 }]}>{businessConfig.businessName || demoTitle}</Text>
+              <View style={s.header}>
+                <TouchableOpacity testID="empresa-business-toggle" accessibilityRole="button"
+                  accessibilityLabel={lang === "en" ? "Manage businesses" : "Gestionar negocios"}
+                  accessibilityState={{ expanded: demoManagerOpen }} onPress={() => setDemoManagerOpen(!demoManagerOpen)}
+                  style={{ paddingVertical: 12 }}>
+                  <Text style={s.headerTitle}>{businessConfig.businessName || t("mod_booking_label")} {demoManagerOpen ? "▴" : "▾"}</Text>
+                </TouchableOpacity>
+                {demoManagerOpen && <TouchableOpacity accessibilityRole="button" onPress={() => {
+                  if (previewReadOnly) { showPreviewUnavailable(); return; }
+                  Alert.alert(t("biz_panel_new"), t("biz_panel_reset_warning"), [
+                    { text: t("cancel"), style: "cancel" },
+                    { text: t("biz_panel_create_new"), style: "destructive", onPress: async () => {
+                      try { await resetConfig(); } catch (error) { Alert.alert(demoTitle, String(error)); return; }
+                      setNewEmpresaKey(key => key + 1); setConfigInitialStep(0); setDemoManagerOpen(false);
+                      goToModulo("empresa_config");
+                    } },
+                  ]);
+                }} style={{ paddingVertical: 12 }}>
+                  <Text style={{ color: "#4A80BD", fontWeight: "700" }}>{t("biz_panel_new")}</Text>
+                </TouchableOpacity>}
               </View>
             )}
-
-            {currentSuite === null ? (
-              // ── Suite selector ──────────────────────────────────────────
-              <>
-                <Text style={s.secTitle}>{t("biz_panel_platform")}</Text>
-                <View style={s.suitesGrid}>
-                  {SUITES.map((suite) => {
-                    const suiteModules = MODULOS.filter(m => suite.modules.includes(m.key));
-                    const hasBadge = suiteModules.some(m => m.badge);
-                    return (
-                      <TouchableOpacity
-                        key={suite.key}
-                        activeOpacity={0.88}
-                        onPress={() => {
-                          if (suiteModules.length === 1) {
-                            goToModulo(suiteModules[0].key);
-                          } else {
-                            setCurrentSuite(suite.key);
-                          }
-                        }}
-                        style={s.suiteCard}
-                      >
-                        <View style={s.suiteCardTop}>
-                          <View style={[s.suiteCardIcon, { backgroundColor: suite.color + "18" }]}>
-                            <Feather name={suite.icon} size={22} color={suite.color} />
-                            {hasBadge && showBadges && (
-                              <View style={[s.moduloBadge, { backgroundColor: suite.color }]}>
-                                <Text style={s.moduloBadgeTxt}>!</Text>
-                              </View>
-                            )}
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={[s.suiteLabel, { color: suite.color }]}>{suite.key === "reservas" ? t('mod_booking_label') : suite.label}</Text>
-                            <Text style={s.suiteDesc} numberOfLines={2}>{suite.key === "reservas" ? t("biz_suite_bookings_desc") : suite.desc}</Text>
-                          </View>
-                          <Feather name="chevron-right" size={16} color={suite.color + "80"} />
-                        </View>
-                        <View style={s.suiteChipsRow}>
-                          {suiteModules.slice(0, 4).map(m => (
-                            <View key={m.key} style={[s.suiteChip, { borderColor: suite.color + "30" }]}>
-                              <Text style={[s.suiteChipTxt, { color: suite.color }]}>{m.label}</Text>
-                            </View>
-                          ))}
-                          {suiteModules.length > 4 && (
-                            <View style={[s.suiteChip, { borderColor: suite.color + "30" }]}>
-                              <Text style={[s.suiteChipTxt, { color: suite.color }]}>+{suiteModules.length - 4}</Text>
-                            </View>
-                          )}
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-              </>
-            ) : currentSuite === "reservas" ? (
-              // ── GO Reservas sub-view: Configuración + Daily operations ──
-              (() => {
+            {/* Existing GO Reservas home: configuration and daily operations. */}
+            {(() => {
                 const { completed, total, nextStep, statusColor, statusDot } = computeConfigProgress(businessConfig, demo ? businessDemo?.getSnapshot().plan : undefined);
                 const isAllDone = completed === total;
                 const progressFraction = completed / total;
@@ -835,6 +561,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                         activeOpacity={0.88}
                         onPress={() => {
                           if (previewReadOnly && !demo) { showPreviewUnavailable(); return; }
+                          setOpenSelectedConfig(demo && Boolean(businessConfig.sectorId && businessConfig.subId));
                           setConfigInitialStep(nextStep >= 0 ? nextStep : 0);
                           goToModulo("empresa_config");
                         }}
@@ -921,77 +648,10 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
                         </View>
                       </TouchableOpacity>
 
-                      {/* ── GO Deportes — solo si el negocio es sector deportes ── */}
-                      {businessConfig.sectorId === "deportes" && (
-                        <TouchableOpacity
-                          activeOpacity={0.88}
-                          onPress={() => goToModulo("deportes_screen")}
-                          style={[s.suiteCard, { borderWidth: 1.5, borderColor: "#15803d40" }]}
-                        >
-                          <View style={s.suiteCardTop}>
-                            <View style={[s.suiteCardIcon, { backgroundColor: "#15803d18" }]}>
-                              <Feather name="activity" size={22} color="#15803d" />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                              <Text style={[s.suiteLabel, { color: "#15803d" }]}>GO Deportes</Text>
-                              <Text style={s.suiteDesc}>{t("biz_panel_sports_desc")}</Text>
-                            </View>
-                            <Feather name="chevron-right" size={16} color="#15803d80" />
-                          </View>
-                          <View style={s.suiteChipsRow}>
-                            {["Pádel","Tenis","Fútbol","Fitness","Piscina"].map(label => (
-                              <View key={label} style={[s.suiteChip, { borderColor: "#15803d30" }]}>
-                                <Text style={[s.suiteChipTxt, { color: "#15803d" }]}>{label}</Text>
-                              </View>
-                            ))}
-                          </View>
-                        </TouchableOpacity>
-                      )}
-
                     </View>
                   </>
                 );
-              })()
-            ) : (
-              // ── Suite sub-grid genérica ──────────────────────────────────
-              (() => {
-                const suite = SUITES.find(su => su.key === currentSuite)!;
-                const suiteModules = MODULOS.filter(m => suite.modules.includes(m.key));
-                return (
-                  <>
-                    <Text style={s.secTitle}>{t("biz_panel_modules")}</Text>
-                    <View style={s.modulosGrid}>
-                      {suiteModules.map((m) => (
-                        <TouchableOpacity
-                          key={m.key}
-                          activeOpacity={0.85}
-                          onPress={() => goToModulo(m.key)}
-                          style={s.moduloCard}
-                        >
-                          <View style={[s.moduloIcon, { backgroundColor: m.color + "22" }]}>
-                            <Feather name={m.icon} size={20} color={m.color} />
-                            {m.badge && showBadges && (
-                              <View style={[s.moduloBadge, { backgroundColor: m.color }]}>
-                                <Text style={s.moduloBadgeTxt}>{m.badge}</Text>
-                              </View>
-                            )}
-                          </View>
-                          <Text style={s.moduloLabel}>{m.label}</Text>
-                          <Text style={s.moduloDesc} numberOfLines={2}>{m.desc}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </>
-                );
-              })()
-            )}
-
-            <View style={s.infoBox}>
-              <Feather name="info" size={13} color="#3b82f6" />
-              <Text style={s.infoTxt}>
-                {t('empresa_info_text')}
-              </Text>
-            </View>
+              })()}
           </ScrollView>
         ) : (!previewReadOnly || isBusinessPreviewModule(modulo)) ? (
           <Animated.View
@@ -1039,9 +699,9 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
 
         {/* ── FABs flotantes — arrastrable con long-press ──────────────────── */}
         {!configKeyboardVisible && (previewReadOnly ? (
-          <GoNavigationFloating screenKey="empresa-demo" width={(modulo!=="home"||currentSuite!==null)?136:64}>{fabButtons}</GoNavigationFloating>
+          <GoNavigationFloating screenKey="empresa-demo" width={hasPrevious ? 136 : 64}>{fabButtons}</GoNavigationFloating>
         ) : (
-          <DraggableFAB navigation screenKey="empresa" buttonKey="main" initialRight={20} initialBottom={fabBottom} maxH={(modulo!=="home"||currentSuite!==null)?138:64} buttonWidth={64}>
+          <DraggableFAB navigation screenKey="empresa" buttonKey="main" initialRight={20} initialBottom={fabBottom} maxH={hasPrevious ? 138 : 64} buttonWidth={64}>
             {fabButtons}
           </DraggableFAB>
         ))}
