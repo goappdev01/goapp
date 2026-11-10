@@ -172,3 +172,77 @@ test("confirmation area adapts its frame without moving protected content",()=>{
  const opened=ui.completionFrame({width:390,left:0,right:0,safeTop:100,commandsTop:485,openHeight:250,open:true});
  assert.ok(opened.y<=closed.y);assert.equal(closed.width,354);assert.ok(opened.y+opened.height<=485-250-8);
 });
+
+function confirmationView({width=390,fontScale=1,inset=0,compact=false}={}){
+ const state=[];let cursor=0;
+ const react={__esModule:true,Fragment:"Fragment",createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),
+  useEffect(){},useState(initial){const i=cursor++;if(!(i in state))state[i]=initial;return[state[i],value=>state[i]=value];}};react.default=react;
+ const native=Object.fromEntries(["View","Text","TouchableOpacity","Modal","ScrollView","KeyboardAvoidingView","TextInput","Switch"].map(name=>[name,name]));
+ native.Platform={OS:"ios"};native.PixelRatio={getFontScale:()=>fontScale};
+ const ui=load("components/landing/LandingActionCompletion.tsx",{react,"react-native":native,
+  "react-native-safe-area-context":{useSafeAreaInsets:()=>({top:59,bottom:34,left:inset,right:inset})},
+  "@/components/ui/GoCloseButton":{GoCloseButton:"GoCloseButton"},"@/lib/goActionCompletion":core});
+ const entries=[action({id:"short",notes:"Revisar cita"}),action({id:"long",notes:"Información extensa de la acción. ".repeat(40),contactName:"Nombre del contacto",professionalName:"Nombre del profesional"})],calls=[];
+ const model={scope:S,doc:doc(),unresolved:entries,pending:[],selected:entries[0].id,
+  setSelected:id=>{model.selected=id;},decide:(entry,status)=>calls.push([entry.id,status])};
+ const props={model,availableWidth:width-inset*2,frame:{x:18+inset,y:100,width:width-inset*2-36,height:compact?44:280},
+  onPropose:entry=>calls.push([entry.id,"change"]),onPendingList(){}};
+ return{model,calls,entries,props,render(){cursor=0;return ui.LandingActionCompletion(props);}};
+}
+const viewNodes=(node,predicate=()=>true)=>!node||typeof node!=="object"?[]:[...(predicate(node)?[node]:[]),...(node.children??[]).flatMap(child=>viewNodes(child,predicate))];
+const viewText=node=>typeof node==="string"||typeof node==="number"?String(node):(node?.children??[]).map(viewText).join("");
+const byId=(tree,id)=>viewNodes(tree,node=>node.props.testID===id)[0];
+const byLabel=(tree,label)=>viewNodes(tree,node=>node.props.accessibilityLabel===label)[0];
+
+test("one bordered card contains identity, dates, status controls and pagination in inline and compact presentations",()=>{
+ for(const compact of [false,true]){
+  const f=confirmationView({compact});let tree=f.render();
+  if(compact){viewNodes(tree,node=>node.type==="TouchableOpacity"&&viewText(node).startsWith("Confirma tus acciones"))[0].props.onPress();tree=f.render();}
+  const card=byId(tree,compact?"completion-expanded-card":"completion-inline-card");
+  assert.ok(card.props.style.borderWidth>=1);assert.ok(card.props.style.borderColor);
+  assert.ok(viewText(card).includes(f.entries[0].dateISO));assert.ok(viewText(card).includes(f.entries[0].time));
+  assert.ok(byId(card,"completion-action-identity"));assert.ok(byId(card,"completion-counter"));
+  for(const label of ["REALIZADO","PENDIENTE","PROPONER CAMBIO","Acción anterior","Acción siguiente"])assert.ok(byLabel(card,label),label);
+  const geometry=JSON.stringify(card.props.style),details=JSON.stringify(byId(card,"completion-action-details").props.style);
+  assert.equal(viewText(byId(card,"completion-counter")),"1 / 2");
+  byLabel(card,"Acción siguiente").props.onPress();tree=f.render();
+  const next=byId(tree,compact?"completion-expanded-card":"completion-inline-card");
+  assert.equal(JSON.stringify(next.props.style),geometry);assert.equal(JSON.stringify(byId(next,"completion-action-details").props.style),details);
+  assert.ok(viewText(next).includes(f.entries[1].notes),"long information remains available in its scroll viewport");
+  assert.equal(viewText(byId(next,"completion-counter")),"2 / 2");
+  for(const label of ["REALIZADO","PENDIENTE","PROPONER CAMBIO"])byLabel(next,label).props.onPress();
+  assert.deepEqual(f.calls,[["long","done"],["long","pending"],["long","change"]]);
+  byLabel(next,"Acción siguiente").props.onPress();assert.equal(f.model.selected,"short");
+  byLabel(byId(f.render(),compact?"completion-expanded-card":"completion-inline-card"),"Acción anterior").props.onPress();assert.equal(f.model.selected,"long");
+  assert.equal(Object.keys(f.model.doc.records).length,0);
+ }
+});
+
+test("decision controls fit narrow iPhone and landscape widths with larger text, retaining equal touch targets",()=>{
+ for(const width of [320,375,390,430,844])for(const fontScale of [1,1.3,2.2,3])for(const compact of [false,true]){
+  const inset=width>600?44:0,f=confirmationView({width,fontScale,inset,compact});let tree=f.render();
+  if(compact){viewNodes(tree,node=>node.type==="TouchableOpacity"&&viewText(node).startsWith("Confirma tus acciones"))[0].props.onPress();tree=f.render();}
+  const card=byId(tree,compact?"completion-expanded-card":"completion-inline-card"),buttons=["REALIZADO","PENDIENTE","PROPONER CAMBIO"].map(label=>byLabel(card,label));
+  const available=compact?width-2*Math.max(18,inset)-26:f.props.frame.width-18,side=buttons[0].props.style.width;
+  const columns=Math.min(3,Math.floor((available+8)/(side+8)));
+  assert.ok(columns>=1&&columns*side+(columns-1)*8<=available+.01,`${width}px at ${fontScale}x`);
+  for(const button of buttons){assert.equal(button.props.style.width,side);assert.equal(button.props.style.height,side);assert.ok(side>=44);}
+  const pager=byId(card,"completion-pagination"),arrows=["Acción anterior","Acción siguiente"].map(label=>byLabel(pager,label));
+  assert.deepEqual(plain(arrows[0].props.style),plain(arrows[1].props.style));assert.ok(arrows[0].props.style.width>=44);
+  f.model.unresolved=[f.entries[0]];tree=f.render();const single=byId(tree,compact?"completion-expanded-card":"completion-inline-card");
+  assert.equal(viewText(byId(single,"completion-counter")),"1 / 1");
+  assert.equal(byLabel(single,"Acción anterior").props.disabled,true);assert.equal(byLabel(single,"Acción siguiente").props.disabled,true);
+ }
+});
+
+test("enabled status labels and the counter meet 4.5:1 text contrast",()=>{
+ const luminance=hex=>{const rgb=hex.slice(1).match(/../g).map(value=>parseInt(value,16)/255).map(value=>value<=.04045?value/12.92:((value+.055)/1.055)**2.4);return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};
+ const contrast=(a,b)=>{const x=luminance(a),y=luminance(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
+ const card=byId(confirmationView().render(),"completion-inline-card"),fills=[];
+ for(const label of ["REALIZADO","PENDIENTE","PROPONER CAMBIO"]){
+  const button=byLabel(card,label),text=viewNodes(button,node=>node.type==="Text")[0];fills.push(button.props.style.backgroundColor);
+  assert.ok(contrast(text.props.style.color,button.props.style.backgroundColor)>=4.5,label);
+ }
+ assert.equal(new Set(fills).size,3);const counter=byId(card,"completion-counter");
+ assert.ok(contrast(counter.props.style.color,counter.props.style.backgroundColor)>=4.5);
+});

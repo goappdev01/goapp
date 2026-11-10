@@ -60,29 +60,36 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
  </View>;
  if(!document || !model.scope || !model.unresolved.length && !model.pending.length && !model.savingCount && !model.failedDecisions?.length)return null;
  const compact=anchorAbove || frame.height<180;
- const {side}=completionDecisionLayout(expanded?(availableWidth ?? frame.width)-60:frame.width-16,PixelRatio?.getFontScale?.() ?? 1);
- const button={minHeight:44,paddingHorizontal:8,justifyContent:"center" as const};
+ const fontScale=Math.max(1,PixelRatio?.getFontScale?.() ?? 1);
+ const modalPadding=Math.max(18,insets.left,insets.right);
+ const modalWidth=(availableWidth ?? frame.width)+insets.left+insets.right-modalPadding*2;
+ const {side}=completionDecisionLayout(expanded?modalWidth-26:frame.width-18,fontScale);
+ const card={backgroundColor:"#0e1624",borderColor:"rgba(251,146,60,0.48)",borderWidth:1,borderRadius:18};
+ const button={minHeight:44,paddingHorizontal:8,justifyContent:"center" as const,flexShrink:1};
+ const arrow={...button,width:44,flexShrink:0,alignItems:"center" as const,borderRadius:12,borderWidth:1,borderColor:"#43536a",backgroundColor:"#1e293b",opacity:rows.length<2?0.35:1};
  const text={color:"#ffffff",fontSize:12,fontWeight:"700" as const};
  const controls=()=> <View testID="action-completion-controls" style={{gap:8}}>
   <View style={{flexDirection:"row",alignItems:"center",justifyContent:"space-between",gap:4}}>
    <TouchableOpacity style={button} onPress={()=>setTab("unresolved")}><Text style={{...text,color:tab==="unresolved"?"#ffffff":"#aeb7c6"}}>{label("Por confirmar","To confirm")} · {model.unresolved.length}</Text></TouchableOpacity>
    <TouchableOpacity style={button} onPress={()=>setTab("pending")}><Text style={{...text,color:tab==="pending"?"#facc15":"#aeb7c6"}}>{label("Pendientes","Pending")} · {model.pending.length}</Text></TouchableOpacity>
   </View>
-  {entry?<><Text testID="completion-action-identity" style={{...text,fontSize:13}}>{entry.notes || entry.intentLabel || label("Acción","Action")}{entry.contactName?" · "+entry.contactName:""}</Text>
-   <Text style={{color:"#cbd5e1",fontSize:12}}>{entry.dateISO} · {entry.time}{entry.professionalName?" · "+entry.professionalName:""}</Text>
+  {entry?<><ScrollView key={entry.id} testID="completion-action-details" nestedScrollEnabled bounces={false} style={{height:Math.round(64*fontScale),flexGrow:0,flexShrink:0}} contentContainerStyle={{gap:4}}>
+    <Text testID="completion-action-identity" style={{...text,fontSize:13,lineHeight:18}}>{entry.notes || entry.intentLabel || label("Acción","Action")}{entry.contactName?" · "+entry.contactName:""}</Text>
+    <Text style={{color:"#cbd5e1",fontSize:12,lineHeight:17}}>{entry.dateISO} · {entry.time}{entry.professionalName?" · "+entry.professionalName:""}</Text>
+   </ScrollView>
    <View style={{flexDirection:"row",flexWrap:"wrap",justifyContent:"space-between",gap:8}}>
-    {([{status:"done",color:"#22c55e",es:"REALIZADO",en:"DONE"}, {status:"pending",color:"#facc15",es:"PENDIENTE",en:"PENDING"}, {status:"change",color:"#fb923c",es:"PROPONER\nCAMBIO",en:"PROPOSE\nCHANGE"}] as const).map(action=><TouchableOpacity key={action.status}
+    {([{status:"done",color:"#43b77a",background:"#167346",ink:"#ffffff",es:"REALIZADO",en:"DONE"}, {status:"pending",color:"#f2ce6c",background:"#e6b83d",ink:"#241b07",es:"PENDIENTE",en:"PENDING"}, {status:"change",color:"#ef9c5c",background:"#ae4d13",ink:"#ffffff",es:"PROPONER\nCAMBIO",en:"PROPOSE\nCHANGE"}] as const).map(action=><TouchableOpacity key={action.status}
       accessibilityRole="button" accessibilityLabel={(en?action.en:action.es).replace("\n"," ")} disabled={model.isSaving?.(entry) ?? false}
       onPress={()=>{if(action.status==="change"){setExpanded(false);onPropose(entry);}else void model.decide(entry,action.status);}}
-      style={{width:side,height:side,minWidth:44,minHeight:44,borderRadius:16,borderWidth:1,borderColor:action.color,
-       backgroundColor:action.color+"28",alignItems:"center",justifyContent:"center",padding:4,opacity:model.isSaving?.(entry)?0.45:1}}>
-      <Text numberOfLines={action.status==="change"?2:1} adjustsFontSizeToFit minimumFontScale={0.85} style={{width:"100%",color:action.color,fontSize:12,fontWeight:"900",textAlign:"center"}}>{en?action.en:action.es}</Text>
+      style={{width:side,height:side,minWidth:44,minHeight:44,borderRadius:14,borderWidth:1,borderColor:action.color,
+       backgroundColor:action.background,alignItems:"center",justifyContent:"center",padding:4,opacity:model.isSaving?.(entry)?0.45:1}}>
+      <Text numberOfLines={action.status==="change"?2:1} adjustsFontSizeToFit minimumFontScale={0.85} style={{width:"100%",color:action.ink,fontSize:12,fontWeight:"700",textAlign:"center"}}>{en?action.en:action.es}</Text>
      </TouchableOpacity>)}
    </View>
-   <View style={{flexDirection:"row",alignItems:"center",justifyContent:"space-between"}}>
-    <TouchableOpacity style={button} accessibilityLabel={label("Acción anterior","Previous action")} disabled={rows.length<2} onPress={()=>model.setSelected(rows[(index+rows.length-1)%rows.length].id)}><Text style={text}>‹</Text></TouchableOpacity>
-    <Text style={{color:"#cbd5e1",fontSize:11}}>{index+1} / {rows.length}</Text>
-    <TouchableOpacity style={button} accessibilityLabel={label("Acción siguiente","Next action")} disabled={rows.length<2} onPress={()=>model.setSelected(rows[(index+1)%rows.length].id)}><Text style={text}>›</Text></TouchableOpacity>
+   <View testID="completion-pagination" style={{flexDirection:"row",alignItems:"center",justifyContent:"space-between",gap:8}}>
+    <TouchableOpacity style={arrow} accessibilityRole="button" accessibilityLabel={label("Acción anterior","Previous action")} disabled={rows.length<2} onPress={()=>model.setSelected(rows[(index+rows.length-1)%rows.length].id)}><Text style={{...text,fontSize:24,lineHeight:28}}>‹</Text></TouchableOpacity>
+    <Text testID="completion-counter" style={{color:"#f8fafc",fontSize:12,fontWeight:"700",fontVariant:["tabular-nums"],textAlign:"center",backgroundColor:"#26354b",borderWidth:1,borderColor:"#566b88",borderRadius:10,paddingHorizontal:12,paddingVertical:6,flexShrink:1}}>{index+1} / {rows.length}</Text>
+    <TouchableOpacity style={arrow} accessibilityRole="button" accessibilityLabel={label("Acción siguiente","Next action")} disabled={rows.length<2} onPress={()=>model.setSelected(rows[(index+1)%rows.length].id)}><Text style={{...text,fontSize:24,lineHeight:28}}>›</Text></TouchableOpacity>
    </View>
   </>:<Text style={text}>{label("No hay acciones en este grupo.","No actions in this group.")}</Text>}
   <View style={{flexDirection:"row",justifyContent:"space-between"}}>
@@ -124,11 +131,11 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
   <View testID="landing-action-completion" pointerEvents="box-none" onLayout={event=>{if(anchorAbove)onCompactHeight?.(event.nativeEvent.layout.height);}} style={{position:"absolute",left:frame.x,...position,width:frame.width,...(anchorAbove?{minHeight:44}:{height:Math.max(0,frame.height)}),zIndex:90}}>
    {compact?<TouchableOpacity accessibilityRole="button" style={{...button,minHeight:44,backgroundColor:"#141b29",borderColor:"#fb923c",borderWidth:1,borderRadius:12}}
      onPress={()=>setExpanded(true)}><Text style={text}>{label("Confirma tus acciones","Confirm your actions")} · {model.unresolved.length+model.pending.length}</Text></TouchableOpacity>
-    :<ScrollView bounces={false} nestedScrollEnabled style={{maxHeight:frame.height,backgroundColor:"rgba(9,14,24,0.94)",borderRadius:14}} contentContainerStyle={{padding:8}}>{controls()}</ScrollView>}
+    :<ScrollView testID="completion-inline-card" bounces={false} nestedScrollEnabled style={{...card,height:frame.height}} contentContainerStyle={{padding:8}}>{controls()}</ScrollView>}
   </View>
   <Modal transparent visible={expanded} animationType="fade" onRequestClose={()=>setExpanded(false)}>
-   <KeyboardAvoidingView behavior={Platform.OS==="ios"?"padding":undefined} style={{flex:1,backgroundColor:"rgba(0,0,0,0.6)",justifyContent:"center",paddingHorizontal:Math.max(18,insets.left,insets.right),paddingTop:insets.top+8,paddingBottom:insets.bottom+8}}>
-    <View style={{backgroundColor:"#0e1624",borderRadius:18,padding:12,maxHeight:"100%",gap:8}}>
+   <KeyboardAvoidingView behavior={Platform.OS==="ios"?"padding":undefined} style={{flex:1,backgroundColor:"rgba(0,0,0,0.6)",justifyContent:"center",paddingHorizontal:modalPadding,paddingTop:insets.top+8,paddingBottom:insets.bottom+8}}>
+    <View testID="completion-expanded-card" style={{...card,padding:12,height:"100%",maxHeight:520,gap:8}}>
      <GoCloseButton level="panel" accessibilityLabel={label("Cerrar confirmación","Close confirmation")} onPress={()=>setExpanded(false)}/>
      <ScrollView style={{flexGrow:0,flexShrink:1,minHeight:0}} keyboardShouldPersistTaps="handled" bounces={false} contentContainerStyle={{paddingBottom:12}}>{controls()}</ScrollView>
     </View>
