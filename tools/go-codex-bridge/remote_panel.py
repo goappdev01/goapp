@@ -26,6 +26,7 @@ class RemotePanel:
         self.nonce=secrets.token_urlsafe(32)
         path=bridge.home/"estado"/"remote-panel.json"
         self.config=json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        self.expo_links=None
 
     def authorize(self,handler,mutation=False):
         config=self.config
@@ -101,10 +102,22 @@ class RemotePanel:
         else:
             state="pausada"
         from owner_expo import OwnerExpo
+        owner=OwnerExpo(self.b)
+        expo=owner.status()
+        launches={'checked_at':0,'expires_at':0,'links':{}}
+        document=owner.load()
+        if document and self.config.get('hostname'):
+            from expo_links import ExpoLinks
+            if self.expo_links is None:
+                owner_root=Path(document['workspace'])/'artifacts/go-app-mobile' if document.get('workspace') else None
+                self.expo_links=ExpoLinks(document['host'],self.config['hostname'],owner_root)
+            launches=self.expo_links.status()
+        # Also correct an already-open older panel, whose script reads expo.url.
+        expo['url']=launches['links'].get('owner',{}).get('url')
         return {"version":__import__("puente").EXECUTOR_VERSION,"source_sha256":getattr(self.b,'loaded_code_sha256',None),"updated":self.f.utc(),
                 "wheel":{"enabled":enabled,"state":state,"reason":wheel["reason"],"batch_id":(batch or {}).get("id")},
                 "cards":cards,"questions":pending,"quota":self.b.quota_status(),
-                "expo":OwnerExpo(self.b).status(),"chat":{"state":"PENDIENTE DE COMPROBACIÓN REAL",
+                "expo":expo,"expo_launches":launches,"chat":{"state":"PENDIENTE DE COMPROBACIÓN REAL",
                 "note":"Las pruebas alojadas requieren dos sesiones de prueba autorizadas. La versión Expo comparte el backend existente."}}
 
     def preview(self,action,payload,principal):
