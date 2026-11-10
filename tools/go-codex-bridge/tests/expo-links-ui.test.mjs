@@ -11,9 +11,10 @@ function setup() {
     get href(){return this.attrs.href;}
     setAttribute(key,value){this.attrs[key]=value;}
     removeAttribute(key){delete this.attrs[key];}
+    addEventListener(){}
   }
   const document={getElementById(id){if(!elements.has(id))elements.set(id,new Element());return elements.get(id);},addEventListener(){}};
-  const context=vm.createContext({document,URL,Date,fetch:()=>new Promise(()=>{}),setInterval(){},navigator:{clipboard:{writeText(text){context.copied=text;return Promise.resolve();}}}});
+  const context=vm.createContext({document,URL,Date,location:{hash:'',pathname:'/remote/',search:''},history:{replaceState(){}},sessionStorage:{getItem(){return null;},setItem(){}},fetch:()=>new Promise(()=>{}),setInterval(){},navigator:{clipboard:{writeText(text){context.copied=text;return Promise.resolve();}}}});
   vm.runInContext(readFileSync(new URL('../remote.js',import.meta.url),'utf8'),context);
   const payload={expires_at:Date.now()/1000+20,links:{
     main:{available:true,port:8088,url:'exp://100.64.0.1:8088'},

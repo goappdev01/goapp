@@ -27,6 +27,8 @@ class RemotePanel:
         path=bridge.home/"estado"/"remote-panel.json"
         self.config=json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
         self.expo_links=None
+        from device_probes import DeviceProbes
+        self.device_probes=DeviceProbes(bridge,self.config)
 
     def authorize(self,handler,mutation=False):
         config=self.config
@@ -120,10 +122,12 @@ class RemotePanel:
                 owner_link.update(available=False,url=None,message='La carpeta no coincide con la versión fijada. No se abrirá otra versión.')
         # Also correct an already-open older panel, whose script reads expo.url.
         expo['url']=launches['links'].get('owner',{}).get('url')
+        try:device_diagnostics=self.device_probes.latest()
+        except Exception:device_diagnostics={'browser':None,'launch':None,'limits':'No se pudo leer el registro.'}
         return {"version":__import__("puente").EXECUTOR_VERSION,"source_sha256":getattr(self.b,'loaded_code_sha256',None),"updated":self.f.utc(),
                 "wheel":{"enabled":enabled,"state":state,"reason":wheel["reason"],"batch_id":(batch or {}).get("id")},
                 "cards":cards,"questions":pending,"quota":self.b.quota_status(),
-                "expo":expo,"expo_launches":launches,"chat":{"state":"PENDIENTE DE COMPROBACIÓN REAL",
+                "expo":expo,"expo_launches":launches,"device_diagnostics":device_diagnostics,"chat":{"state":"PENDIENTE DE COMPROBACIÓN REAL",
                 "note":"Las pruebas alojadas requieren dos sesiones de prueba autorizadas. La versión Expo comparte el backend existente."}}
 
     def preview(self,action,payload,principal):
@@ -182,7 +186,16 @@ class RemotePanel:
         if length<2 or length>16000:self.w.fail("REMOTE_BODY_INVALID","Solicitud no válida.")
         body=json.loads(handler.rfile.read(length))
         if not isinstance(body,dict):self.w.fail("REMOTE_BODY_INVALID","Solicitud no válida.")
-        if path=="/remote/pause" and not body:
+        from device_probes import peer_from_headers
+        peer=peer_from_headers(handler.headers)
+        agent=handler.headers.get('User-Agent','')
+        if path=="/remote/device-probe/start" and not body:
+            result=self.device_probes.start(principal,peer,agent)
+        elif path=="/remote/device-probe/report":
+            result=self.device_probes.report(body,principal,peer,agent)
+        elif path=="/remote/device-probe/launch":
+            result=self.device_probes.launch(body,principal,peer,agent)
+        elif path=="/remote/pause" and not body:
             self.w.pause("OWNER_PAUSED")
             result={"paused":True}
         elif path=="/remote/preview" and set(body)=={"action","payload"} and isinstance(body["payload"],dict):

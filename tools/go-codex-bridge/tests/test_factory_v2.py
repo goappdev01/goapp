@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+import urllib.parse
 from unittest.mock import patch
 
 import test_bridge as fixtures
@@ -14,6 +15,7 @@ from factory import normalize_guide
 from factory_v2 import Continuity
 from remote_panel import RemotePanel,private_text
 from owner_expo import OwnerExpo
+from device_probes import DeviceProbes,peer_from_headers
 from wheel_effects import WheelEffects,WheelPublication
 
 
@@ -175,6 +177,29 @@ class RemoteTests(unittest.TestCase):
         h=SimpleNamespace(client_address=('127.0.0.1',123),headers={'Host':'test.tail.invalid',
             'X-Forwarded-Proto':'https','Tailscale-User-Login':'owner@example.invalid'})
         return p,h
+
+    def test_iphone_probe_rejects_windows_and_binds_phone_origin_and_single_use_nonce(self):
+        p,h=self.panel();p.config.update(expo_phone='100.64.0.9');p.device_probes.config=p.config
+        manager=OwnerExpo(p.b);owner={'port':8089,'sha':'a'*40,'host':'100.64.0.1','workspace':'C:/pinned'}
+        with patch('owner_expo.OwnerExpo.load',return_value=owner):
+            with self.assertRaises(BridgeError):p.device_probes.start('owner@example.invalid','100.64.0.8','Mozilla iPhone')
+            started=p.device_probes.start('owner@example.invalid','100.64.0.9','Mozilla iPhone')
+            self.assertIn(':8089/__go_device_probe.local.html#',started['url'])
+            cfg=json.loads(urllib.parse.unquote(urllib.parse.urlsplit(started['url']).fragment))
+            stages=[{'key':k,'ok':True,'bytes':100,'count':1,'elapsed_ms':10,'error':''} for k in ('document','metro','manifest','bundle','assets','websocket')]
+            report={'origin':'http://100.64.0.1:8089','browser_iphone':True,'stages':stages,'elapsed_ms':200}
+            body={'id':cfg['id'],'nonce':cfg['nonce'],'report':report}
+            saved=p.device_probes.report(body,'owner@example.invalid','100.64.0.9','Mozilla iPhone')
+            self.assertEqual(saved['state'],'browser_transport_passed')
+            self.assertEqual(saved['app_loaded'],'not_verified')
+            with self.assertRaises(BridgeError):p.device_probes.report(body,'owner@example.invalid','100.64.0.9','Mozilla iPhone')
+            self.assertEqual(p.device_probes.latest('owner@example.invalid')['browser']['state'],'browser_transport_passed')
+
+    def test_iphone_browser_report_validates_schema_and_tcp_observation_is_labelled_windows(self):
+        self.assertEqual(peer_from_headers({'X-Forwarded-For':'spoofed, 100.64.0.9'}),'100.64.0.9')
+        self.assertIsNone(peer_from_headers({'X-Forwarded-For':'spoofed'}))
+        p,_=self.panel();self.assertEqual(p.device_probes.sample()['source'],'windows_observation')
+        self.assertFalse(p.device_probes.sample()['phone_tcp_seen'])
 
     def test_remote_auth_requires_private_proxy_and_exact_owner(self):
         p,h=self.panel();self.assertEqual(p.authorize(h)[0],'owner@example.invalid')
