@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "port": 8765,
+  "redirect_uri": "http://localhost:8765/trello/callback",
+  "authorization_endpoint": "https://auth.atlassian.com/authorize",
+  "token_endpoint": "https://auth.atlassian.com/oauth/token",
+  "scopes": [
+    "read:board:trello",
+    "write:board:trello",
+    "offline_access"
+  ],
+  "codex_executable": "codex",
+  "python_executable": "python",
+  "reference_repository": "goappdev01/goapp",
+  "reference_branch": "main",
+  "test_card": "https://trello.com/c/AbCdEf12",
+  "protected_card_ids": [
+    "6ae2a09e067abd6d0ca70ed6"
+  ],
+  "agents": {
+    "PRUEBA": {
+      "name": "Prueba aislada del puente",
+      "workspace": "sandbox",
+      "sandbox": "read-only",
+      "enabled": false
+    },
+    "1": {
+      "name": "AGENTE 1",
+      "workspace": "../work/agent-1",
+      "sandbox": "workspace-write",
+      "enabled": false
+    },
+    "2": {
+      "name": "AGENTE 2",
+      "workspace": "../work/agent-2",
+      "sandbox": "workspace-write",
+      "enabled": false
+    },
+    "3": {
+      "name": "AGENTE 3",
+      "workspace": "../work/agent-3",
+      "sandbox": "workspace-write",
+      "enabled": false
+    },
+    "4": {
+      "name": "AGENTE 4",
+      "workspace": "../work/agent-4",
+      "sandbox": "workspace-write",
+      "enabled": false
+    },
+    "5": {
+      "name": "AGENTE 5",
+      "workspace": "../work/agent-5",
+      "sandbox": "workspace-write",
+      "enabled": false
+    }
+  }
+}

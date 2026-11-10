@@ -1,0 +1,11 @@
+config.json
+estado/
+ejecuciones/
+lecturas/
+preparadas/
+sandbox/
+__pycache__/
+*.pyc
+*.dpapi
+*.log
+*.sqlite*

@@ -1,0 +1,231 @@
+"""No real CLI, Trello mutation, hosted data or live activation in this suite."""
+import copy
+from http import cookies
+import json
+from pathlib import Path
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+import test_bridge as fixtures
+import test_wheel as wheel_fixtures
+from puente import Bridge,BridgeError
+from factory import normalize_guide
+from factory_v2 import Continuity
+from remote_panel import RemotePanel,private_text
+from owner_expo import OwnerExpo
+from wheel_effects import WheelEffects,WheelPublication
+
+
+class V2WheelTests(unittest.TestCase):
+    setUp=wheel_fixtures.WheelTests.setUp
+    tearDown=wheel_fixtures.WheelTests.tearDown
+    git=wheel_fixtures.WheelTests.git
+    configure=wheel_fixtures.WheelTests.configure
+    api=wheel_fixtures.WheelTests.api
+    snapshot=wheel_fixtures.WheelTests.snapshot
+    synthetic_codex=wheel_fixtures.WheelTests.synthetic_codex
+    decisions=wheel_fixtures.WheelTests.decisions
+    five_card_queue=wheel_fixtures.WheelTests.five_card_queue
+
+    def batch(self):
+        self.five_card_queue()
+        w=self.bridge.factory.wheel
+        ids=[cid for cid in wheel_fixtures.REAL_BATCH_IDS if cid!=wheel_fixtures.REAL_BATCH_IDS[3]]
+        self.card_files=dict(zip(ids,self.files))
+        self.cards[wheel_fixtures.REAL_BATCH_IDS[3]]['idList']='v2'
+        w.prepare_frozen_batch(ids)
+        ds=self.decisions()
+        ds[2]['depends_on']=[ds[1]['card_id']]
+        w.approve(ds,start_frozen_batch=True)
+        w.pause('TEST_INSTALL_PAUSED')
+        w.continuity.activate(w.continuity.review_activation(),'synthetic-owner')
+        return w,ids
+
+    def block(self,w,cid,state='blocked'):
+        with self.bridge.db() as db:db.execute('UPDATE wheel_grants SET state=?,reason=? WHERE card_id=?',(state,'synthetic',cid))
+
+    def test_blocked_and_dependent_cards_yield_to_independent(self):
+        w,ids=self.batch()
+        self.block(w,ids[0]);self.block(w,ids[1],'waiting_response')
+        selected=w._trial_limit()
+        self.assertEqual(selected['expected'],ids[3])
+        self.assertTrue(w.enabled())
+        self.assertFalse(self.runs or self.changes)
+
+    def test_no_eligible_card_waits_without_false_completion(self):
+        w,ids=self.batch()
+        for cid in ids:self.block(w,cid)
+        self.assertEqual(w._trial_limit()['waiting'],'NO_SAFE_ELIGIBLE_CARD')
+        self.assertTrue(w.enabled())
+        self.assertEqual(w.status()['frozen_batch']['state'],'active')
+
+    def test_startup_pauses_and_preserves_all_stages(self):
+        w,ids=self.batch()
+        with self.bridge.db() as db:
+            before=[tuple(row) for row in db.execute('SELECT * FROM wheel_grants')]
+        self.bridge.factory.pause_on_startup()
+        self.assertFalse(w.enabled())
+        with self.bridge.db() as db:self.assertEqual(before,[tuple(row) for row in db.execute('SELECT * FROM wheel_grants')])
+        self.assertEqual(w.tick(),{'enabled':False})
+
+    def test_account_change_does_not_enable_or_replay(self):
+        w,_=self.batch();w.pause('OWNER_PAUSED')
+        self.codex_identity='another-synthetic-account'
+        with self.assertRaises(BridgeError):w.continuity.activate(w.continuity.review_activation(),'synthetic-owner')
+        self.assertFalse(w.enabled())
+        review={**w.continuity.review_activation(),'binding_only':True}
+        self.assertFalse(w.continuity.rebind(review,'synthetic-owner')['enabled'])
+        self.assertFalse(self.runs or self.changes)
+        self.assertFalse(w.enabled())
+
+    def test_activation_pins_exact_review_and_never_enlarges_operations(self):
+        w,ids=self.batch();w.pause('OWNER_PAUSED')
+        review=w.continuity.review_activation()
+        changed=copy.deepcopy(review);changed['cards'][0]['operations']=[]
+        with self.assertRaises(BridgeError):w.continuity.activate(changed,'synthetic-owner')
+        self.assertFalse(w.enabled())
+
+    def test_transient_retry_is_bounded_and_survives_restart(self):
+        w,ids=self.batch()
+        with self.bridge.db() as db:g=w._verified(db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[0],)).fetchone())
+        for _ in range(3):self.assertTrue(w.continuity.defer_retry(g,'B','HTTP_503'))
+        restored=Bridge(self.home,self.home/'private',fixtures.TestProtector(),actor=self.bridge.actor)
+        self.assertFalse(restored.factory.wheel.continuity.defer_retry(g,'B','HTTP_503'))
+        self.assertFalse(self.runs or self.changes)
+
+    def test_backoff_retains_the_only_workspace_without_selecting_another_card(self):
+        w,ids=self.batch()
+        with self.bridge.db() as db:
+            g=w._verified(db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[0],)).fetchone())
+            db.execute("UPDATE wheel_grants SET state='working' WHERE card_id=?",(ids[0],))
+        self.assertTrue(w.continuity.defer_retry(g,'B','HTTP_503'))
+        self.assertEqual(w._trial_limit()['waiting'],'RETRY_BACKOFF')
+        self.assertTrue(w.enabled())
+        self.assertFalse(self.runs or self.changes)
+
+    def test_question_decision_is_exact_durable_and_single_use(self):
+        w,ids=self.batch()
+        with self.bridge.db() as db:g=w._verified(db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[0],)).fetchone())
+        q=w.continuity.question(g,'permission','¿Permitir la prueba sintética descrita?','Operación sintética aislada')
+        self.assertEqual(q,w.continuity.question(g,'permission','¿Permitir la prueba sintética descrita?','Operación sintética aislada'))
+        self.assertEqual(w.continuity.answer(q,'deny','','synthetic-owner')['state'],'denied')
+        with self.assertRaises(BridgeError):w.continuity.answer(q,'allow_once','','synthetic-owner')
+        self.assertFalse(self.runs or self.changes)
+
+    def test_answer_does_not_claim_live_cli_resume(self):
+        w,ids=self.batch()
+        with self.bridge.db() as db:g=w._verified(db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[0],)).fetchone())
+        q=w.continuity.question(g,'answer','¿Qué resultado hay que comprobar?','Precisar la comprobación')
+        response=w.continuity.answer(q,'respond','La ficha visible.','synthetic-owner')
+        self.assertEqual(response['state'],'review_required')
+        self.assertIn('no admite respuestas en vivo',response['message'])
+        self.assertFalse(self.runs or self.changes)
+
+    def test_long_guide_is_repaired_without_new_cli_or_lost_words(self):
+        steps=[wheel_fixtures.TWO_STEPS[0]+' '+('Revisa el nombre y la hora. '*20),wheel_fixtures.TWO_STEPS[1]]
+        job={'id':'synthetic','result':{'response':'GO_FACTORY_EVIDENCE: '+json.dumps({'validation':steps})}}
+        fixed=WheelEffects(self.bridge.factory)._validation(job)
+        self.assertTrue(all(len(s)<=280 for s in fixed))
+        self.assertEqual(' '.join(' '.join(steps).split()),' '.join(' '.join(fixed).split()))
+        self.assertFalse(self.runs)
+
+    def test_pending_real_diagnosis_is_not_a_fabrication_failure(self):
+        job={'state':'blocked','result':{'exit_code':0,'turn_completed':True,'file_change_events':0,
+             'response':'GO_FACTORY_DIAGNOSIS: {}'}}
+        self.assertTrue(Continuity.diagnostic_ready(job))
+        for key,value in [('file_change_events',1),('policy_errors',['unsafe']),('credit_limited',True)]:
+            other=copy.deepcopy(job);other['result'][key]=value
+            self.assertFalse(Continuity.diagnostic_ready(other))
+
+    def test_failed_card_yields_complete_synthetic_cycles_without_replay(self):
+        w,ids=self.batch()
+        original=WheelPublication.git_command
+        def git(pub,workspace,*args):
+            if args[:2]==('remote','get-url'):return 'https://github.com/goappdev01/goapp.git\n'
+            return original(pub,workspace,*args)
+        def execute(payload):
+            cid=self.bridge.job(payload['job'])['data']['source']['card_id']
+            if cid==ids[0]:
+                self.runs.append(cid)
+                self.bridge.finish_job(payload['job'],'blocked',{'exit_code':0,'turn_completed':True,
+                    'file_change_events':0,'response':'Falta la respuesta de prueba.'})
+            else:self.synthetic_codex(self.bridge,payload)
+        self.bridge.run_codex=execute
+        with patch.object(WheelPublication,'git_command',git),patch.object(WheelEffects,'_dependencies'),patch.object(WheelEffects,'_tests',return_value=[{'check':'synthetic assertion','passed':True}]):
+            for _ in range(45):
+                result=w.tick()
+                self.assertFalse(result.get('paused') or result.get('blocked'),str(result))
+                if result.get('waiting'):break
+        states={g['card_id']:g['state'] for g in w.status()['grants']}
+        self.assertEqual(states[ids[0]],'blocked')
+        self.assertTrue(all(states[cid]=='closed' for cid in ids[1:]),states)
+        self.assertEqual(self.runs,ids)
+        self.assertEqual(self.changes,[(cid,phase) for cid in ids[1:] for phase in 'CD'])
+        self.assertTrue(w.enabled())
+
+
+class RemoteTests(unittest.TestCase):
+    setUp=fixtures.BridgeTests.setUp
+    tearDown=fixtures.BridgeTests.tearDown
+
+    def panel(self):
+        p=RemotePanel(self.bridge)
+        p.config={'hostname':'test.tail.invalid','owner_hash':self.bridge.sign({'tailnet_owner':'owner@example.invalid'})}
+        h=SimpleNamespace(client_address=('127.0.0.1',123),headers={'Host':'test.tail.invalid',
+            'X-Forwarded-Proto':'https','Tailscale-User-Login':'owner@example.invalid'})
+        return p,h
+
+    def test_remote_auth_requires_private_proxy_and_exact_owner(self):
+        p,h=self.panel();self.assertEqual(p.authorize(h)[0],'owner@example.invalid')
+        for key,value in [('Host','localhost:8765'),('Tailscale-User-Login','outsider@example.invalid'),('X-Forwarded-Proto','http')]:
+            bad=copy.deepcopy(h);bad.headers[key]=value
+            with self.assertRaises(BridgeError):p.authorize(bad)
+        h.client_address=('100.64.0.2',123)
+        with self.assertRaises(BridgeError):p.authorize(h)
+
+    def test_mutations_need_origin_cookie_and_csrf(self):
+        p,h=self.panel();_,csrf=p.authorize(h)
+        with self.assertRaises(BridgeError):p.authorize(h,True)
+        h.headers.update(Origin='https://test.tail.invalid',Cookie='go_remote='+csrf,**{'X-GO-CSRF':csrf})
+        p.authorize(h,True)
+        h.headers['Origin']='https://evil.invalid'
+        with self.assertRaises(BridgeError):p.authorize(h,True)
+
+    def test_private_values_are_not_exposed_in_panel_text(self):
+        value=private_text('Bearer secret-test https://private.invalid owner@example.invalid 40.12345,-3.23456 +34 600 111 222')
+        for forbidden in ['secret-test','private.invalid','owner@','40.12345','600']:self.assertNotIn(forbidden,value)
+
+    def test_confirmation_ticket_is_single_use_and_owner_bound(self):
+        p,_=self.panel();p.previews['test']={'principal':'owner','expires':10**12,'action':'activate','review':{}}
+        with self.assertRaises(BridgeError):p.decide('test','ACTIVAR FÁBRICA','other')
+        with self.assertRaises(BridgeError):p.decide('test','ACTIVAR FÁBRICA','owner')
+
+    def test_install_leaves_owner_version_absent_and_wheel_paused(self):
+        self.assertEqual(OwnerExpo(self.bridge).status()['state'],'not_configured')
+        self.assertFalse(self.bridge.factory.wheel.enabled())
+
+    def test_owner_config_signed_and_port_cannot_be_changed(self):
+        manager=OwnerExpo(self.bridge)
+        manager.save({'port':8089,'sha':'a'*40})
+        self.assertEqual(manager.load()['sha'],'a'*40)
+        manager.path.write_text(manager.path.read_text().replace('8089','8088'))
+        with self.assertRaises(BridgeError):manager.load()
+
+    def test_owner_update_requires_known_sha_and_unchanged_dependencies(self):
+        manager=OwnerExpo(self.bridge)
+        doc={'port':8089,'workspace':'synthetic','sha':'a'*40}
+        with patch.object(manager,'load',return_value=doc),patch.object(manager,'clean'),patch.object(manager,'git') as git,patch('owner_expo.subprocess.run'):
+            with self.assertRaises(BridgeError):manager.review('expo_select',{'sha':'main'})
+            git.side_effect=[doc['sha'],'pnpm-lock.yaml']
+            with self.assertRaises(BridgeError):manager.review('expo_select',{'sha':'b'*40})
+        self.assertFalse(self.bridge.factory.wheel.enabled())
+
+    def test_owner_running_version_is_not_automatically_main(self):
+        manager=OwnerExpo(self.bridge)
+        doc={'port':8089,'workspace':'synthetic','sha':'a'*40,'host':'100.64.0.1','state':'verified'}
+        with patch.object(manager,'load',return_value=doc),patch.object(manager,'git',return_value=doc['sha']) as git,patch('owner_expo.urllib.request.urlopen',side_effect=OSError):
+            s=manager.status()
+            self.assertEqual(s['sha'],'a'*40)
+            self.assertEqual(git.call_args.args[1:],('rev-parse','HEAD'))
+        self.assertFalse(self.bridge.factory.wheel.enabled())
