@@ -36,21 +36,76 @@ class Continuity:
         if (not hmac.compare_digest(self.b.sign(doc),row["signature"])
                 or doc["batch_sha"]!=self.f.digest(self.f.canonical(document)) or doc["actor"]!=self.b.actor):
             self.w.fail("WHEEL_GRANT_INTEGRITY","La activación V2 no coincide con el lote.")
+        fallbacks=doc.get("dependency_fallbacks",[])
+        if (not isinstance(fallbacks,list) or len(fallbacks)>100 or any(
+                not isinstance(edge,dict) or set(edge)!={"dependency_card_id","dependent_card_id","reason"}
+                or not re.fullmatch(r"[0-9a-f]{24}",str(edge.get("dependency_card_id","")))
+                or not re.fullmatch(r"[0-9a-f]{24}",str(edge.get("dependent_card_id","")))
+                or edge["dependency_card_id"]==edge["dependent_card_id"]
+                or edge.get("reason")!="La instrucción del dependiente permite continuar con su alternativa explícita si el diagnóstico queda bloqueado."
+                for edge in fallbacks)):
+            self.w.fail("WHEEL_GRANT_INTEGRITY","La alternativa de dependencia no se puede verificar.")
+        return doc
+
+    @staticmethod
+    def _allows_blocked_diagnosis_fallback(instruction):
+        text=" ".join(str(instruction or "").casefold().split())
+        return all(fragment in text for fragment in (
+            "si ese resultado no está disponible",
+            "implementar la ergonomía reutilizable",
+            "acciones de servidor pendientes",
+            "sin inventar éxito",
+        ))
 
     def review_activation(self):
+        self.f._identity()
+        self.f._lists()
         with self.b.db() as db:
             batch=self.w._latest_trial(db)
             if not batch or batch[0]["state"]!="active":
                 self.w.fail("WHEEL_V2_BATCH_REQUIRED","Revisa y autoriza antes un lote concreto de tarjetas.")
             row,doc=batch
             grants=[]
+            grant_by_card={}
             for item in doc["cards"]:
                 saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(item["grant_id"],)).fetchone()
                 grant=self.w._verified(saved)
+                grant_by_card[grant["card_id"]]=(saved,grant)
                 grants.append({"card_id":grant["card_id"],"title":grant["title"],"state":saved["state"],
-                               "operations":grant["operations"],"expires_at":grant["expires_at"]})
+                               "operations":grant["operations"],"expires_at":grant["expires_at"],
+                               "depends_on":grant["depends_on"]})
+        pending=[item for item in doc["cards"] if grant_by_card[item["card_id"]][0]["state"]!="closed"]
+        live_cards={card["id"]:card for card in self.w._available(self.f._cards())}
+        expected=[item["card_id"] for item in pending]
+        if [card_id for card_id in live_cards if card_id in expected]!=expected:
+            self.w.fail("WHEEL_BATCH_ORDER_CHANGED","La cola actual ya no conserva el orden autorizado del lote.")
+        if list(live_cards)[:len(expected)]!=expected:
+            self.w.fail("WHEEL_BATCH_ORDER_CHANGED","Hay tarjetas anteriores al lote autorizado en la cola actual.")
+        instructions={}
+        for item in pending:
+            card_id=item["card_id"]
+            subject,spec=self.w._subject(live_cards[card_id],review=True)
+            saved,grant=grant_by_card[card_id]
+            if (subject["binding"]!=grant["binding"] or grant["instruction_sha"]!=item["instruction_sha"]
+                    or grant["position"]!=live_cards[card_id]["pos"]):
+                self.w.fail("WHEEL_SUBJECT_CHANGED","Una tarjeta del lote cambió desde su revisión.")
+            instructions[card_id]=(grant,spec["instruction"])
+        fallback_reason="La instrucción del dependiente permite continuar con su alternativa explícita si el diagnóstico queda bloqueado."
+        fallbacks=[]
+        for card_id,(grant,instruction) in instructions.items():
+            for dependency_id in grant["depends_on"]:
+                dependency=grant_by_card.get(dependency_id)
+                expected_dependency=grant.get("dependency_versions",{}).get(dependency_id,{})
+                if (dependency and dependency[0]["state"]!="closed"
+                        and dependency[1].get("work_kind")=="diagnosis"
+                        and dependency[1]["attempt"]==expected_dependency.get("attempt")
+                        and dependency[1]["instruction_sha"]==expected_dependency.get("instruction_sha")
+                        and self._allows_blocked_diagnosis_fallback(instruction)):
+                    fallbacks.append({"dependency_card_id":dependency_id,"dependent_card_id":card_id,
+                                      "reason":fallback_reason})
         return {"batch_id":row["id"],"batch_sha":self.f.digest(self.f.canonical(doc)),
-                "cards":grants,"policy":"independent-v2","maximum_cards":doc["maximum_cards"]}
+                "cards":grants,"policy":"independent-v2","maximum_cards":doc["maximum_cards"],
+                "dependency_fallbacks":fallbacks}
 
     def activate(self,review,principal):
         if self.review_activation()!=review:
@@ -65,7 +120,8 @@ class Continuity:
                     self.w.fail("WHEEL_WORKSPACE_BUSY","Espera al trabajo en curso.")
                 doc={**doc,"policy":"independent-v2"}
                 activation={"batch_sha":self.f.digest(self.f.canonical(doc)),"actor":self.b.actor,
-                            "principal":principal,"at":self.f.utc(),"codex_identity":identity}
+                            "principal":principal,"at":self.f.utc(),"codex_identity":identity,
+                            "dependency_fallbacks":review.get("dependency_fallbacks",[])}
                 db.execute("UPDATE wheel_trials SET document=?,signature=? WHERE id=?",
                            (self.f.canonical(doc),self.b.sign(doc),row["id"]))
                 db.execute("INSERT OR REPLACE INTO factory_v2_activation VALUES(?,?,?)",
@@ -126,7 +182,9 @@ class Continuity:
         return {'recovered':True,'phase':'B','enabled':False,'programming_replayed':False}
 
     def select_batch(self,db,trial,doc):
-        self.verify_activation(trial["id"],doc)
+        activation=self.verify_activation(trial["id"],doc)
+        fallback_edges={(edge["dependency_card_id"],edge["dependent_card_id"])
+                        for edge in activation.get("dependency_fallbacks",[])}
         rows=[]
         for item in doc["cards"]:
             row=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(item["grant_id"],)).fetchone()
@@ -149,14 +207,36 @@ class Continuity:
                 return {'waiting':'RETRY_BACKOFF','again':False}
             if row["state"] not in ("working","ready") or runtime and runtime[0]>time.time():
                 continue
-            if any(not db.execute("SELECT 1 FROM wheel_grants WHERE card_id=? AND attempt=? AND state='closed'",
-                                  (dep,grant["dependency_versions"][dep]["attempt"])).fetchone() for dep in grant["depends_on"]):
+            explicit_fallback=False
+            dependencies_ready=True
+            for dep in grant["depends_on"]:
+                version=grant["dependency_versions"][dep]
+                if db.execute("SELECT 1 FROM wheel_grants WHERE card_id=? AND attempt=? AND state='closed'",
+                              (dep,version["attempt"])).fetchone():
+                    continue
+                # Only the exact, signed activation edge can bypass a blocked, read-only
+                # diagnosis, and only while that same authorized attempt remains blocked.
+                if (dep,grant["card_id"]) in fallback_edges:
+                    dependency_row=db.execute("SELECT * FROM wheel_grants WHERE card_id=? AND attempt=?",
+                                              (dep,version["attempt"])).fetchone()
+                    if dependency_row:
+                        dependency=self.w._verified(dependency_row)
+                        if (dependency_row["state"]=="blocked" and dependency.get("work_kind")=="diagnosis"
+                                and dependency["attempt"]==version["attempt"]
+                                and dependency["instruction_sha"]==version["instruction_sha"]):
+                            explicit_fallback=True
+                            continue
+                dependencies_ready=False
+                break
+            if not dependencies_ready:
                 continue
             skipped=[g["card_id"] for _,g in rows if g["card_id"]!=grant["card_id"] and g["position"]<grant["position"]]
             if skipped:
                 self.b.audit("wheel_independent_selected",{"card":grant["card_id"],"skipped":skipped,
-                    "reason":"Tarjetas previas bloqueadas, en espera o con dependencias pendientes."},db)
-            return {"expected":grant["card_id"],"grant_id":grant["grant_id"],"codex_identity":doc["codex_identity"],"independent":True}
+                    "reason":"Tarjetas previas bloqueadas, en espera o con dependencias pendientes.",
+                    "explicit_diagnostic_fallback":explicit_fallback},db)
+            return {"expected":grant["card_id"],"grant_id":grant["grant_id"],"codex_identity":doc["codex_identity"],
+                    "independent":True,"explicit_diagnostic_fallback":explicit_fallback}
         return {"waiting":"NO_SAFE_ELIGIBLE_CARD","again":False}
 
     def card_error(self,grant,code):

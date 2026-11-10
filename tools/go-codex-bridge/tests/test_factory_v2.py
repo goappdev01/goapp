@@ -30,18 +30,27 @@ class V2WheelTests(unittest.TestCase):
     decisions=wheel_fixtures.WheelTests.decisions
     five_card_queue=wheel_fixtures.WheelTests.five_card_queue
 
-    def batch(self):
+    def batch(self, *, diagnostic_fallback=False):
         self.five_card_queue()
         w=self.bridge.factory.wheel
         ids=[cid for cid in wheel_fixtures.REAL_BATCH_IDS if cid!=wheel_fixtures.REAL_BATCH_IDS[3]]
         self.card_files=dict(zip(ids,self.files))
         self.cards[wheel_fixtures.REAL_BATCH_IDS[3]]['idList']='v2'
+        if diagnostic_fallback:
+            self.cards[ids[1]]["comments"][0]["text"]=wheel_fixtures.DIAGNOSTIC_TEXT
+            self.cards[ids[2]]["comments"][0]["text"]=(
+                "Tarea sintética. Si ese resultado no está disponible, implementar la ergonomía reutilizable; "
+                "dejar identificadas las acciones de servidor pendientes, sin inventar éxito."
+            )
         w.prepare_frozen_batch(ids)
         ds=self.decisions()
         ds[2]['depends_on']=[ds[1]['card_id']]
         w.approve(ds,start_frozen_batch=True)
         w.pause('TEST_INSTALL_PAUSED')
         w.continuity.activate(w.continuity.review_activation(),'synthetic-owner')
+        if diagnostic_fallback:
+            self.block(w,ids[0])
+            self.block(w,ids[1])
         return w,ids
 
     def block(self,w,cid,state='blocked'):
@@ -52,7 +61,30 @@ class V2WheelTests(unittest.TestCase):
         self.block(w,ids[0]);self.block(w,ids[1],'waiting_response')
         selected=w._trial_limit()
         self.assertEqual(selected['expected'],ids[3])
+        self.assertFalse(selected.get('explicit_diagnostic_fallback',False))
         self.assertTrue(w.enabled())
+        self.assertFalse(self.runs or self.changes)
+
+    def test_signed_instruction_fallback_can_select_only_its_blocked_diagnosis_dependency(self):
+        w,ids=self.batch(diagnostic_fallback=True)
+        with self.bridge.db() as db:
+            row=db.execute("SELECT document,signature FROM factory_v2_activation").fetchone()
+            activation=json.loads(row["document"])
+            self.assertEqual(len(activation["dependency_fallbacks"]),1)
+            edge=activation["dependency_fallbacks"][0]
+            self.assertEqual((edge["dependency_card_id"],edge["dependent_card_id"]),(ids[1],ids[2]))
+            self.assertTrue(activation["dependency_fallbacks"])
+        selected=w._trial_limit()
+        self.assertEqual(selected["expected"],ids[2])
+        self.assertTrue(selected["explicit_diagnostic_fallback"])
+        self.assertFalse(self.runs or self.changes)
+
+    def test_signed_fallback_does_not_bypass_waiting_response(self):
+        w,ids=self.batch(diagnostic_fallback=True)
+        self.block(w,ids[1],"waiting_response")
+        selected=w._trial_limit()
+        self.assertEqual(selected["expected"],ids[3])
+        self.assertFalse(selected.get("explicit_diagnostic_fallback",False))
         self.assertFalse(self.runs or self.changes)
 
     def test_no_eligible_card_waits_without_false_completion(self):
