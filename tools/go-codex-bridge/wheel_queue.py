@@ -84,12 +84,21 @@ class Wheel:
             self.pause("OWNER_PAUSED")
             return self.status()
         with self.f.lock, self.b.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            already_enabled=bool(db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0])
+            if already_enabled:
+                return self.status()
             batch = self._latest_trial(db)
             if batch and batch[1].get("kind") == FROZEN_BATCH and batch[0]["state"] != "active":
                 self.fail("WHEEL_BATCH_START_REQUIRED", "El lote congelado requiere su confirmación conjunta de arranque.")
             if batch and batch[1].get("kind")==FROZEN_BATCH:
+                if batch[1].get("policy")!="independent-v2":
+                    self.fail("WHEEL_V2_ACTIVATION_REQUIRED","Revisa y confirma el lote en el panel privado antes de reactivarlo.")
+                reason=db.execute("SELECT reason FROM wheel_control WHERE id=1").fetchone()[0]
+                if reason not in (None,"OWNER_PAUSED","WHEEL_CODEX_AUTH","WHEEL_CODEX_QUOTA",
+                                  "CREDIT_LIMIT","CREDIT_RECOVERY_REQUIRED"):
+                    self.fail("WHEEL_REVIEW_REQUIRED","El bloqueo requiere revisar el lote en el panel privado antes de reactivarlo.")
                 self._require_codex_identity(batch[1]["codex_identity"])
-            if batch and batch[1].get("policy")=="independent-v2":
                 self.continuity.verify_activation(batch[0]["id"],batch[1])
             db.execute("UPDATE wheel_control SET enabled=?,reason=NULL,retry_after=0 WHERE id=1", (int(enabled),))
             if enabled:
@@ -103,6 +112,19 @@ class Wheel:
         with self.b.db() as db:
             db.execute("UPDATE wheel_control SET enabled=0,reason=?,retry_after=? WHERE id=1", (reason,retry_after))
             self.b.audit("wheel_paused", {"reason": reason}, db)
+
+    def activation_failed(self, code):
+        """Persist a sanitized activation rejection so the owner sees a real red state."""
+        safe_code=str(code)[:80]
+        if not re.fullmatch(r"[A-Z0-9_]+",safe_code):
+            safe_code="WHEEL_ACTIVATION_FAILED"
+        with self.f.lock,self.b.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            enabled=bool(db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0])
+            if enabled:
+                return
+            db.execute("UPDATE wheel_control SET reason=?,retry_after=0 WHERE id=1",(safe_code,))
+            self.b.audit("wheel_activation_rejected",{"code":safe_code},db)
 
     def resume_after_quota(self):
         # A reset timestamp is not proof of available credits or safe CLI continuation.
@@ -139,7 +161,8 @@ class Wheel:
         with self.b.db() as db:
             control = dict(db.execute("SELECT * FROM wheel_control WHERE id=1").fetchone())
             batch = self._latest_trial(db)
-            frozen = ({"id":batch[0]["id"], "state":batch[0]["state"], "cards":batch[1]["cards"]}
+            frozen = ({"id":batch[0]["id"], "state":batch[0]["state"], "policy":batch[1].get("policy"),
+                       "cards":batch[1]["cards"]}
                       if batch and batch[1].get("kind") == FROZEN_BATCH else None)
             grants = []
             for row in db.execute("SELECT * FROM wheel_grants ORDER BY rowid DESC"):
@@ -459,19 +482,26 @@ class Wheel:
                 if any(item["blocker"] for item in expected):
                     self.fail("WHEEL_BATCH_BLOCKED","El lote congelado contiene tarjetas que no permiten el ciclo completo.")
             terms = []
+            instructions = {}
             for item in decisions:
                 if not isinstance(item,dict) or not isinstance(item.get("card_id"),str) or item["card_id"] not in cards:
                     self.fail("WHEEL_CARD_CHANGED","La tarjeta no está disponible en la cola autorizada.")
                 terms.append(self._terms(item,cards[item["card_id"]],cards))
+                instructions[item["card_id"]]=self.f._spec(cards[item["card_id"]])["instruction"]
             if len({g["card_id"] for g in terms}) != len(terms):
                 self.fail("WHEEL_BATCH_INVALID","Una tarjeta aparece más de una vez en el lote.")
             if frozen and any(g["binding"]!=item["binding"] or g["operations"]!=self._operations_for(g)
                               for g,item in zip(terms,expected)):
                 self.fail("WHEEL_BATCH_SCOPE_CHANGED","Confirma las operaciones propias de cada instrucción congelada, sin cambios de alcance.")
             confirmation = {"cards":terms}
+            fallbacks=[]
             if frozen:
+                fallbacks=self.continuity.dependency_fallbacks(
+                    {g["card_id"]:("ready",g) for g in terms},instructions)
                 confirmation["start_frozen_batch"] = frozen[0]["id"]
                 confirmation["codex_identity"] = self._require_codex_identity()
+                confirmation["policy"] = "independent-v2"
+                confirmation["dependency_fallbacks"] = fallbacks
             if self.b.owner_confirmation("wheel-batch", confirmation) is not True:
                 self.fail("OWNER_CONFIRMATION_REQUIRED","Falta la decisión del propietario sobre estas tarjetas.")
             with self.b.mutex, self.b.db() as db:
@@ -491,13 +521,22 @@ class Wheel:
                     self._frozen_idle(db)
                     doc = {**frozen[1], "expires_at":min(g["expires_at"] for g in terms),
                            "codex_identity":confirmation["codex_identity"],
-                           "cards":[{**item,"grant_id":g["grant_id"]} for item,g in zip(expected,terms)]}
+                           "cards":[{**item,"grant_id":g["grant_id"]} for item,g in zip(expected,terms)],
+                           "policy":"independent-v2"}
+                    activation={"batch_sha":self.f.digest(self.f.canonical(doc)),"actor":self.b.actor,
+                                "principal":self.b.actor,"at":self.f.utc(),
+                                "codex_identity":confirmation["codex_identity"],
+                                "dependency_fallbacks":fallbacks}
                     db.execute("UPDATE wheel_trials SET state='superseded' WHERE state='active'")
                     db.execute("UPDATE wheel_trials SET state='active',document=?,signature=? WHERE id=?",
                                (self.f.canonical(doc),self.b.sign(doc),frozen[0]["id"]))
+                    db.execute("INSERT OR REPLACE INTO factory_v2_activation VALUES(?,?,?)",
+                               (frozen[0]["id"],self.f.canonical(activation),self.b.sign(activation)))
                     db.execute("UPDATE wheel_control SET enabled=1,reason=NULL,retry_after=0 WHERE id=1")
                     db.execute("UPDATE factory_control SET enabled=0 WHERE id=1")
-                    self.b.audit("wheel_frozen_started",{"batch":frozen[0]["id"]},db)
+                    self.b.audit("wheel_frozen_started",{"batch":frozen[0]["id"],"policy":"independent-v2"},db)
+                    self.b.audit("wheel_v2_owner_activated",{"batch":frozen[0]["id"],"principal":self.b.actor,
+                        "cards":[item["card_id"] for item in doc["cards"]]},db)
         return self.status()
 
     def _verified(self,row):

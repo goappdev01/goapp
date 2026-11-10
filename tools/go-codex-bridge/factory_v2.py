@@ -27,9 +27,11 @@ class Continuity:
             batch=self.w._latest_trial(db)
             return bool(batch and batch[0]["state"]=="active" and batch[1].get("policy")=="independent-v2")
 
-    def verify_activation(self,identifier,document):
-        with self.b.db() as db:
-            row=db.execute("SELECT * FROM factory_v2_activation WHERE batch_id=?",(identifier,)).fetchone()
+    def verify_activation(self,identifier,document,db=None):
+        if db is None:
+            with self.b.db() as connection:
+                return self.verify_activation(identifier,document,connection)
+        row=db.execute("SELECT * FROM factory_v2_activation WHERE batch_id=?",(identifier,)).fetchone()
         if not row:
             self.w.fail("WHEEL_V2_ACTIVATION_REQUIRED","El lote requiere una activación expresa para la continuidad V2.")
         doc=json.loads(row["document"])
@@ -46,6 +48,24 @@ class Continuity:
                 for edge in fallbacks)):
             self.w.fail("WHEEL_GRANT_INTEGRITY","La alternativa de dependencia no se puede verificar.")
         return doc
+
+    def dependency_fallbacks(self, grants, instructions):
+        """Derive only the explicitly worded fallback edges for this frozen batch."""
+        fallback_reason="La instrucción del dependiente permite continuar con su alternativa explícita si el diagnóstico queda bloqueado."
+        fallbacks=[]
+        for card_id,(state,grant) in grants.items():
+            instruction=instructions.get(card_id,"")
+            for dependency_id in grant.get("depends_on",[]):
+                dependency=grants.get(dependency_id)
+                expected=grant.get("dependency_versions",{}).get(dependency_id,{})
+                if (dependency and dependency[0]!="closed"
+                        and dependency[1].get("work_kind")=="diagnosis"
+                        and dependency[1].get("attempt")==expected.get("attempt")
+                        and dependency[1].get("instruction_sha")==expected.get("instruction_sha")
+                        and self._allows_blocked_diagnosis_fallback(instruction)):
+                    fallbacks.append({"dependency_card_id":dependency_id,"dependent_card_id":card_id,
+                                      "reason":fallback_reason})
+        return fallbacks
 
     @staticmethod
     def _allows_blocked_diagnosis_fallback(instruction):
@@ -90,29 +110,40 @@ class Continuity:
                     or grant["position"]!=live_cards[card_id]["pos"]):
                 self.w.fail("WHEEL_SUBJECT_CHANGED","Una tarjeta del lote cambió desde su revisión.")
             instructions[card_id]=(grant,spec["instruction"])
-        fallback_reason="La instrucción del dependiente permite continuar con su alternativa explícita si el diagnóstico queda bloqueado."
-        fallbacks=[]
-        for card_id,(grant,instruction) in instructions.items():
-            for dependency_id in grant["depends_on"]:
-                dependency=grant_by_card.get(dependency_id)
-                expected_dependency=grant.get("dependency_versions",{}).get(dependency_id,{})
-                if (dependency and dependency[0]["state"]!="closed"
-                        and dependency[1].get("work_kind")=="diagnosis"
-                        and dependency[1]["attempt"]==expected_dependency.get("attempt")
-                        and dependency[1]["instruction_sha"]==expected_dependency.get("instruction_sha")
-                        and self._allows_blocked_diagnosis_fallback(instruction)):
-                    fallbacks.append({"dependency_card_id":dependency_id,"dependent_card_id":card_id,
-                                      "reason":fallback_reason})
+        fallbacks=self.dependency_fallbacks(
+            {card_id:(saved["state"],grant) for card_id,(saved,grant) in grant_by_card.items()},
+            {card_id:instruction for card_id,(_,instruction) in instructions.items()})
         return {"batch_id":row["id"],"batch_sha":self.f.digest(self.f.canonical(doc)),
                 "cards":grants,"policy":"independent-v2","maximum_cards":doc["maximum_cards"],
                 "dependency_fallbacks":fallbacks}
 
     def activate(self,review,principal):
-        if self.review_activation()!=review:
-            self.w.fail("WHEEL_SUBJECT_CHANGED","El lote cambió desde que se mostró la autorización.")
         with self.f.lock:
+            # A second confirmation for the same active batch is a read-only success.
+            # It must never mint a new activation or relaunch work.
             with self.b.db() as db:
+                db.execute("BEGIN IMMEDIATE")
                 row,doc=self.w._latest_trial(db)
+                enabled=bool(db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0])
+                if enabled:
+                    if review.get("batch_id")!=row["id"] or doc.get("policy")!="independent-v2":
+                        self.w.fail("WHEEL_SUBJECT_CHANGED","La fábrica activa corresponde a otro lote; no se inició nada nuevo.")
+                    self.verify_activation(row["id"],doc,db)
+                    return {"enabled":True,"batch_id":row["id"],"idempotent":True,
+                            "message":"La fábrica ya estaba activada; se conservó la ejecución existente."}
+            if self.review_activation()!=review:
+                self.w.fail("WHEEL_SUBJECT_CHANGED","El lote cambió desde que se mostró la autorización.")
+            with self.b.db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                row,doc=self.w._latest_trial(db)
+                # Recheck under the serialized write transaction in case another
+                # request activated while the fresh Trello review was being read.
+                if db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0]:
+                    if review.get("batch_id")!=row["id"] or doc.get("policy")!="independent-v2":
+                        self.w.fail("WHEEL_SUBJECT_CHANGED","La fábrica activa corresponde a otro lote; no se inició nada nuevo.")
+                    self.verify_activation(row["id"],doc,db)
+                    return {"enabled":True,"batch_id":row["id"],"idempotent":True,
+                            "message":"La fábrica ya estaba activada; se conservó la ejecución existente."}
                 identity=self.w._require_codex_identity(doc["codex_identity"])
                 if time.time()>=doc["expires_at"]:
                     self.w.fail("WHEEL_EXPIRY_INVALID","Las autorizaciones del lote han caducado.")
@@ -130,7 +161,8 @@ class Continuity:
                 db.execute("UPDATE wheel_control SET enabled=1,reason=NULL,retry_after=0 WHERE id=1")
                 self.b.audit("wheel_v2_owner_activated",{"batch":row["id"],"principal":principal,
                     "cards":[item["card_id"] for item in doc["cards"]]},db)
-        return {"enabled":True,"batch_id":row["id"]}
+        return {"enabled":True,"batch_id":row["id"],"idempotent":False,
+                "message":"La fábrica quedó activada para el lote revisado."}
 
     def rebind(self,review,principal):
         if self.w.enabled():

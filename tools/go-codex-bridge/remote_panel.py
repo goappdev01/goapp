@@ -20,6 +20,20 @@ def private_text(value):
 
 
 class RemotePanel:
+    REASON_MESSAGES={
+        "FACTORY_JOB_FAILED":"La última tarjeta quedó bloqueada. Revisa el expediente y la autorización antes de continuar.",
+        "WHEEL_CODEX_AUTH":"La sesión de Codex no está verificada.",
+        "WHEEL_CODEX_QUOTA":"La cuota de Codex no está disponible.",
+        "WHEEL_CODEX_SESSION_CHANGED":"Cambió la cuenta de Codex vinculada al lote.",
+        "WHEEL_EXPIRY_INVALID":"La autorización del lote ha caducado.",
+        "WHEEL_WORKSPACE_BUSY":"Hay un trabajo en curso o pendiente de conciliar.",
+        "WHEEL_SUBJECT_CHANGED":"Cambió la cola o una instrucción desde su revisión.",
+        "WHEEL_BATCH_ORDER_CHANGED":"El orden actual de Trello no coincide con el lote revisado.",
+        "WHEEL_V2_ACTIVATION_REQUIRED":"El lote requiere una revisión de activación en el panel privado.",
+        "WHEEL_REVIEW_REQUIRED":"El bloqueo requiere revisar el lote antes de reactivarlo.",
+        "OWNER_PAUSED":"La fábrica está pausada por el propietario.",
+    }
+
     def __init__(self,bridge):
         self.b,self.f,self.w=bridge,bridge.factory,bridge.factory.wheel
         self.previews={}
@@ -29,6 +43,44 @@ class RemotePanel:
         self.expo_links=None
         from device_probes import DeviceProbes
         self.device_probes=DeviceProbes(bridge,self.config)
+
+    @classmethod
+    def activation_button(cls,wheel,cards):
+        """Build the button from server state, never from the last click."""
+        reason=wheel.get("reason")
+        batch_id=wheel.get("batch_id")
+        batch_state=wheel.get("batch_state")
+        active=bool(wheel.get("enabled"))
+        in_flight=any(card.get("state")=="working" or card.get("activity",{}).get("state") in ("running","detached")
+                      for card in cards)
+        completed=sum(card.get("state")=="closed" for card in cards)
+        total=len(cards)
+        if active:
+            state,label,disabled="active","FÁBRICA ACTIVADA",True
+        elif batch_state=="completed":
+            state,label,disabled="finished","FÁBRICA FINALIZADA",True
+        elif not batch_id or batch_state!="active":
+            state,label,disabled="inactive","FÁBRICA DESACTIVADA",True
+        else:
+            state="blocked" if reason and reason!="OWNER_PAUSED" else "paused"
+            label="FÁBRICA BLOQUEADA · REVISAR" if state=="blocked" else "FÁBRICA PAUSADA · ACTIVAR"
+            disabled=in_flight
+        if active:
+            current=next((card for card in cards if card.get("state")=="working"),None)
+            progress=(f"ACTIVA — {current.get('title','Tarjeta actual')} · {current.get('index',0)}/{current.get('total',total)} · Fase {current.get('phase','—')}"
+                      if current else f"ACTIVA — esperando una operación autorizada · {completed}/{total} tarjetas cerradas")
+        elif state=="finished":
+            progress=f"Lote finalizado · {completed}/{total} tarjetas cerradas"
+        elif state=="blocked":
+            progress=cls.REASON_MESSAGES.get(reason,"La activación anterior no se confirmó. Revisa el lote antes de continuar.")
+        elif state=="paused":
+            progress=f"Pausada · {completed}/{total} tarjetas cerradas"
+        else:
+            progress="No hay un lote activo autorizado para iniciar."
+        current=next((card for card in cards if card.get("state")=="working"),None)
+        working=bool(active and current and current.get("activity",{}).get("state")=="running")
+        return {"state":state,"label":label,"disabled":disabled,"progress":progress,"working":working,
+                "reason_message":cls.REASON_MESSAGES.get(reason,"" if not reason else "La rueda registra un bloqueo. Revisa el lote antes de continuar.")}
 
     def authorize(self,handler,mutation=False):
         config=self.config
@@ -86,7 +138,10 @@ class RemotePanel:
             cards.append({"card_id":item["card_id"],"title":item["title"],"index":index,"total":len(batch["cards"]),
                           "state":grant["state"] if grant else "unapproved","reason":grant["reason"] if grant else item.get("blocker"),
                           "phase":phase,"work_kind":item.get("work_kind"),"activity":self.activity(job),
-                          "published":next((s.get("receipt",{}).get("main_sha") for s in stages if s["letter"]=="B"),None)})
+                          "published":next((s.get("receipt",{}).get("main_sha") for s in stages if s["letter"]=="B"),None),
+                          "publication_state":next((s["state"] for s in stages if s["letter"]=="B"),"pending"),
+                          "comment_state":next((s["state"] for s in stages if s["letter"]=="C"),"pending"),
+                          "move_state":next((s["state"] for s in stages if s["letter"]=="D"),"pending")})
         pending=[]
         with self.b.db() as db:
             allowed={item["card_id"] for item in (batch or {}).get("cards",[])}
@@ -124,8 +179,11 @@ class RemotePanel:
         expo['url']=launches['links'].get('owner',{}).get('url')
         try:device_diagnostics=self.device_probes.latest()
         except Exception:device_diagnostics={'browser':None,'launch':None,'limits':'No se pudo leer el registro.'}
+        wheel_view={"enabled":enabled,"state":state,"reason":wheel["reason"],"batch_id":(batch or {}).get("id"),
+                    "batch_state":(batch or {}).get("state")}
+        wheel_view["button"]=self.activation_button(wheel_view,cards)
         return {"version":__import__("puente").EXECUTOR_VERSION,"source_sha256":getattr(self.b,'loaded_code_sha256',None),"updated":self.f.utc(),
-                "wheel":{"enabled":enabled,"state":state,"reason":wheel["reason"],"batch_id":(batch or {}).get("id")},
+                "wheel":wheel_view,
                 "cards":cards,"questions":pending,"quota":self.b.quota_status(),
                 "expo":expo,"expo_launches":launches,"device_diagnostics":device_diagnostics,"chat":{"state":"PENDIENTE DE COMPROBACIÓN REAL",
                 "note":"Las pruebas alojadas requieren dos sesiones de prueba autorizadas. La versión Expo comparte el backend existente."}}
@@ -160,7 +218,11 @@ class RemotePanel:
         self.b.audit("remote_owner_decision",{"principal_hash":self.b.sign({"tailnet_owner":principal}),
                      "action":action,"review_sha":self.f.digest(self.f.canonical(review))})
         if action=="activate":
-            return self.w.continuity.activate(review,principal)
+            try:
+                return self.w.continuity.activate(review,principal)
+            except self.w.f.Error as error:
+                self.w.activation_failed(error.code)
+                raise
         if action=="rebind":
             return self.w.continuity.rebind(review,principal)
         if action=="recover":

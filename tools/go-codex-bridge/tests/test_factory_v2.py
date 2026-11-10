@@ -46,12 +46,58 @@ class V2WheelTests(unittest.TestCase):
         ds=self.decisions()
         ds[2]['depends_on']=[ds[1]['card_id']]
         w.approve(ds,start_frozen_batch=True)
-        w.pause('TEST_INSTALL_PAUSED')
-        w.continuity.activate(w.continuity.review_activation(),'synthetic-owner')
         if diagnostic_fallback:
             self.block(w,ids[0])
             self.block(w,ids[1])
         return w,ids
+
+    def test_frozen_owner_approval_installs_v2_activation_atomically(self):
+        w,ids=self.batch(diagnostic_fallback=True)
+        self.assertTrue(w.enabled())
+        with self.bridge.db() as db:
+            row=db.execute("SELECT document,signature FROM wheel_trials WHERE state='active'").fetchone()
+            doc=json.loads(row['document'])
+            self.assertEqual(doc['policy'],'independent-v2')
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM factory_v2_activation').fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM audit WHERE event='wheel_v2_owner_activated'").fetchone()[0],1)
+        activation=w.continuity.verify_activation(w.status()['frozen_batch']['id'],doc)
+        self.assertEqual(len(activation['dependency_fallbacks']),1)
+        self.assertEqual((activation['dependency_fallbacks'][0]['dependency_card_id'],
+                          activation['dependency_fallbacks'][0]['dependent_card_id']),(ids[1],ids[2]))
+        self.assertFalse(self.runs or self.changes)
+
+    def test_repeated_activation_requests_return_existing_run_without_relaunch(self):
+        w,_=self.batch()
+        review=w.continuity.review_activation()
+        with self.bridge.db() as db:
+            before=db.execute("SELECT COUNT(*) FROM audit WHERE event='wheel_v2_owner_activated'").fetchone()[0]
+        self.assertTrue(w.toggle(True)['enabled'])
+        result=w.continuity.activate(review,'synthetic-owner')
+        self.assertTrue(result['enabled'])
+        self.assertTrue(result['idempotent'])
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM factory_v2_activation').fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM audit WHERE event='wheel_v2_owner_activated'").fetchone()[0],before)
+        self.assertFalse(self.runs or self.changes)
+
+    def test_main_button_model_reflects_server_state_and_refuses_duplicate_start(self):
+        paused=RemotePanel.activation_button({'enabled':False,'reason':'OWNER_PAUSED','batch_id':'batch','batch_state':'active'},[])
+        self.assertEqual(paused['state'],'paused')
+        self.assertEqual(paused['label'],'FÁBRICA PAUSADA · ACTIVAR')
+        self.assertFalse(paused['disabled'])
+        active=RemotePanel.activation_button({'enabled':True,'reason':None,'batch_id':'batch','batch_state':'active'},[])
+        self.assertEqual(active['state'],'active')
+        self.assertEqual(active['label'],'FÁBRICA ACTIVADA')
+        self.assertTrue(active['disabled'])
+        blocked=RemotePanel.activation_button({'enabled':False,'reason':'FACTORY_JOB_FAILED','batch_id':'batch','batch_state':'active'},[])
+        self.assertEqual(blocked['state'],'blocked')
+        self.assertIn('bloqueada',blocked['progress'].casefold())
+        finished=RemotePanel.activation_button({'enabled':False,'reason':None,'batch_id':'batch','batch_state':'completed'},[])
+        self.assertEqual(finished['label'],'FÁBRICA FINALIZADA')
+        self.assertTrue(finished['disabled'])
+        running=RemotePanel.activation_button({'enabled':False,'reason':None,'batch_id':'batch','batch_state':'active'},
+            [{'state':'working','activity':{'state':'running'}}])
+        self.assertTrue(running['disabled'])
 
     def block(self,w,cid,state='blocked'):
         with self.bridge.db() as db:db.execute('UPDATE wheel_grants SET state=?,reason=? WHERE card_id=?',(state,'synthetic',cid))

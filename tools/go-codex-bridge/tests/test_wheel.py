@@ -340,10 +340,13 @@ class WheelTests(unittest.TestCase):
         self.codex_state="available"
         wheel.toggle(True)
         self.cards[REAL_BATCH_IDS[0]]["comments"][0]["text"]+="; actualización que requiere nueva autorización"
-        self.assertEqual(wheel.tick()["blocked"],"WHEEL_SUBJECT_CHANGED")
+        outcome=wheel.tick()
+        self.assertEqual(outcome["card_blocked"],REAL_BATCH_IDS[0])
+        self.assertEqual(outcome["reason"],"WHEEL_SUBJECT_CHANGED")
+        self.assertTrue(wheel.enabled())
         self.assertFalse(self.runs or self.changes)
 
-    def test_frozen_batch_stops_after_first_cycle_if_next_job_fails(self):
+    def test_frozen_batch_continues_to_independent_card_after_diagnosis_error(self):
         self.five_card_queue()
         self.cards[REAL_BATCH_IDS[1]]["comments"][0]["text"]=DIAGNOSTIC_TEXT
         bridge=self.bridge
@@ -364,11 +367,15 @@ class WheelTests(unittest.TestCase):
                                                                "file_change_events":0,"response":"Informe sin comprobaciones."})
         bridge.run_codex=execute
         with patch.object(WheelPublication,"git_command",git),patch.object(WheelEffects,"_dependencies"),patch.object(WheelEffects,"_tests",return_value=[{"passed":True}]):
-            for _ in range(16):
+            for _ in range(40):
                 wheel.tick()
-                if not wheel.enabled():break
-        self.assertFalse(wheel.enabled())
-        self.assertEqual(wheel.status()["reason"],"WHEEL_DIAGNOSIS_UNVERIFIED")
+                with self.bridge.db() as db:
+                    diagnosis=db.execute("SELECT state FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
+                                         (REAL_BATCH_IDS[1],)).fetchone()
+                if diagnosis and diagnosis["state"]=="blocked":break
+        self.assertTrue(wheel.enabled())
+        self.assertEqual(diagnosis["state"],"blocked")
+        self.assertEqual(wheel._trial_limit()["expected"],REAL_BATCH_IDS[2])
         self.assertEqual(self.runs,list(REAL_BATCH_IDS[:2]))
         self.assertEqual(self.changes,[(REAL_BATCH_IDS[0],op) for op in "CD"])
 
