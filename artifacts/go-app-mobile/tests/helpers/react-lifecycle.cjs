@@ -31,7 +31,7 @@ const rn={View:native('View'),Text:native('Text'),Image:native('Image'),Modal:na
 const evaluate=(file,imports={})=>{
  const context={exports:{},__DEV__:true,console,Promise,Date,setTimeout,clearTimeout,setInterval,clearInterval,require(name){if(name==='react')return React;if(name==='./goNavigationAppearance')return imports[name]||{useNavigationOpacity:()=>75};if(name in imports)return imports[name];if(name==='@/components/ui/GoCloseButton')return evaluate('components/ui/GoCloseButton.tsx',{'react-native':imports['react-native']||rn,'@expo/vector-icons':imports['@expo/vector-icons']||{Feather:()=>null}});if(name==='expo-linear-gradient')return{LinearGradient:(imports['react-native']||rn).View};if(name==='@/components/ui/GoNavigationFloating')return {GoNavigationFloating:p=>React.createElement((imports['react-native']||rn).View,{...p,testID:p.testID??p.screenKey+'-navigation-host'},p.children)};if(name in imports)return imports[name];if(name==='@/theme/goAssistantColors')return evaluate('theme/goAssistantColors.ts');if(name==='@/components/ui/GoScreenModal')return {GoScreenModal:(imports['react-native']||rn).Modal};if(name==='react-native')return rn;if(name.endsWith('.png'))return 1;throw Error('Unexpected import '+name);}};
  const code=ts.transpileModule(fs.readFileSync(path.join(project,file),'utf8'),{compilerOptions:{ alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
- vm.runInNewContext(code,context,{filename:file});return context.exports;
+ vm.runInNewContext(code,{...context,URL,URLSearchParams},{filename:file});return context.exports;
 };
 
 module.exports={React,createRoot,document,req,ts,native,rn,evaluate};

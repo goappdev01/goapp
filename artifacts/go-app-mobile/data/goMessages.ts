@@ -45,15 +45,15 @@ function draftOperation(owner:string,id:string,operation:(key:string)=>Promise<v
 export async function loadBookingMessageDraft(owner:string,id:string){const key=draftKey(owner,id);await draftWrites.get(key)?.catch(()=>{});return await AsyncStorage.getItem(key)||"";}
 export const saveBookingMessageDraft=(owner:string,id:string,text:string)=>draftOperation(owner,id,key=>AsyncStorage.setItem(key,text));
 export const clearBookingMessageDraft=(owner:string,id:string,expectedText:string)=>draftOperation(owner,id,async key=>{if(await AsyncStorage.getItem(key)===expectedText)await AsyncStorage.removeItem(key);});
-export function deliverBookingMessage(owner:string,bookingId:string,text:string):Promise<BookingConversation>{
+export function deliverBookingMessage(owner:string,bookingId:string,text:string,kind:"text"|"location"="text"):Promise<BookingConversation>{
   const key=owner+":"+bookingId,active=deliveries.get(key);
   if(active)return active.text===text?active.promise:Promise.reject(Error("Espera a que termine el envío anterior."));
-  const promise=deliver(owner,bookingId,text);deliveries.set(key,{text,promise});
+  const promise=deliver(owner,bookingId,text,kind);deliveries.set(key,{text,promise});
   void promise.finally(()=>{if(deliveries.get(key)?.promise===promise)deliveries.delete(key);}).catch(()=>{});
   return promise;
 }
-async function deliver(owner:string,bookingId:string,text:string):Promise<BookingConversation>{
-  const key=`go_message_outbox_v1:${owner}:${bookingId}`;
+async function deliver(owner:string,bookingId:string,text:string,kind:"text"|"location"):Promise<BookingConversation>{
+  const key=`go_message_outbox_v1:${owner}:${bookingId}`+(kind==="location"?":location":"");
   let previous:{messageId:string;text:string}|null=null;
   try{previous=JSON.parse(await AsyncStorage.getItem(key)||"null");}catch{/* A corrupt draft cannot authorize a message. */}
   const pending=previous?.text===text&&typeof previous.messageId==="string"?previous:{text,messageId:"xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,c=>{const r=Math.floor(Math.random()*16);return(c==="x"?r:(r&3)|8).toString(16);})};

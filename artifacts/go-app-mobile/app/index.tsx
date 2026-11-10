@@ -53,6 +53,7 @@ import QRCode from "react-native-qrcode-svg";
 import { Accelerometer } from "expo-sensors";
 import * as Clipboard from "expo-clipboard";
 import * as Contacts from "expo-contacts/legacy";
+import { ContactPlacesPanel } from "@/components/contactos/ContactPlacesPanel";
 import * as Haptics from "expo-haptics";
 import * as Speech from "expo-speech";
 import { LinearGradient } from "expo-linear-gradient";
@@ -4253,6 +4254,8 @@ function HomeScreenContent() {
   //   · "multi"      → envío múltiple con chips + cupo
   //   · "groups"     → gestión de grupos predefinidos/personalizados
   const [contactTab, setContactTab] = useState<"none" | "individual" | "multi" | "groups">("none");
+  const [contactPlacesOpen,setContactPlacesOpen]=useState(false);
+  useEffect(()=>{if(!contactOpen)setContactPlacesOpen(false);},[contactOpen]);
   const [contactGroups, setContactGroups] = useState<ContactGroup[]>(DEFAULT_CONTACT_GROUPS);
   const [groupEditorOpen, setGroupEditorOpen] = useState(false);
   const [editingGroup, setEditingGroup] = useState<ContactGroup | null>(null);
@@ -19094,6 +19097,11 @@ function HomeScreenContent() {
           <Text style={{ color: "#ffffff", fontSize: 20, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 2 }}>
             {t('contacts_title')}
           </Text>
+          {!contactPlacesOpen&&<TouchableOpacity accessibilityRole="button" onPress={()=>setContactPlacesOpen(true)}
+            style={{minHeight:44,alignSelf:"flex-start",justifyContent:"center",paddingHorizontal:10,marginTop:6,borderRadius:8,backgroundColor:"#27262a"}}>
+            <Text style={{color:"#fff",fontWeight:"700"}}>Ubicaciones guardadas</Text>
+          </TouchableOpacity>}
+          {contactOpen&&contactPlacesOpen&&<ContactPlacesPanel onClose={()=>setContactPlacesOpen(false)}/>}
         </View>
 
         {/* ── SELECTOR DE MODO ── Múltiple / Grupos / Individual (orden ergonomía pulgar) ── */}

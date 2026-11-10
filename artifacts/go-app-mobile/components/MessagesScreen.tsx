@@ -13,6 +13,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getAuthenticatedUserId } from "@/data/booking";
 import { readBookingConversations, deliverBookingMessage,loadBookingMessageDraft,saveBookingMessageDraft,clearBookingMessageDraft } from "@/data/goMessages";
 import { onSessionChanged } from "@/lib/sessionEvents";
+import { locationMessage, readLocationMessage, type PlaceDraft } from "@/data/contactPlaces";
+import { MessageLocationBubble, MessageLocationTools } from "./MessageLocationTools";
 import {
   Animated,
   AppState,
@@ -287,6 +289,7 @@ export function MessagesScreen({
   const [messageError,setMessageError]=useState("");
   const [loadingMessages,setLoadingMessages]=useState(false);
   const [sending,setSending]=useState(false);
+  const [saveLocation,setSaveLocation]=useState<PlaceDraft>();
   const [chatArea, setChatArea] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const ownerRef=useRef<string|null>(null),generation=useRef(0),sendLock=useRef(false),localReadGeneration=useRef(0),readRevision=useRef(0);
   const screenState=useRef({view,activeConv});screenState.current={view,activeConv};
@@ -354,7 +357,7 @@ export function MessagesScreen({
     const token=++generation.current;
     const contextLabel=initialContext ? [initialContext.kind==="booking"?(lang==="en"?"Reservation":"Reserva"):(lang==="en"?"Shared task":"Tarea compartida"),initialContext.date,initialContext.time].filter(Boolean).join(" · ") : undefined;
     const contextual=!!initialContext;
-    ownerRef.current=null;setConversations([]);setActiveConv(null);setInput("");inputRef.current="";setSending(false);
+    ownerRef.current=null;setConversations([]);setActiveConv(null);setSaveLocation(undefined);setInput("");inputRef.current="";setSending(false);
     if(!initialBookingId&&!contextual&&!initialContact)setView("list");
     if(initialBookingId||contextual){
       ownerRef.current=null;setInput("");inputRef.current="";setMessageError("");
@@ -390,7 +393,7 @@ export function MessagesScreen({
       finally{if(alive&&generation.current===token)setLoadingMessages(false);}
     };
     void load();
-    const unsubscribe=onSessionChanged(()=>{generation.current++;localReadGeneration.current++;ownerRef.current=null;setActiveConv(null);setConversations([]);setInput("");inputRef.current="";setSending(false);setLoadingMessages(false);setView("list");setMessageError("La sesión ha cambiado. Vuelve a abrir Comunicación GO.");});
+    const unsubscribe=onSessionChanged(()=>{generation.current++;localReadGeneration.current++;ownerRef.current=null;setActiveConv(null);setSaveLocation(undefined);setConversations([]);setInput("");inputRef.current="";setSending(false);setLoadingMessages(false);setView("list");setMessageError("La sesión ha cambiado. Vuelve a abrir Comunicación GO.");});
     return()=>{alive=false;generation.current++;unsubscribe();};
   },[visible,initialBookingId,initialContext?.actionId,businessId]);
 
@@ -435,6 +438,7 @@ export function MessagesScreen({
       return updated;
     });
     setActiveConv({ ...conv, unread: 0 });
+    setSaveLocation(undefined);
     setMessageError("");setInput("");inputRef.current="";
     if(conv.bookingId&&ownerRef.current){const owner=ownerRef.current,token=generation.current;void loadBookingMessageDraft(owner,conv.id).then(value=>{if(ownerRef.current===owner&&generation.current===token&&screenState.current.activeConv?.id===conv.id&&!inputRef.current){inputRef.current=value;setInput(value);}}).catch(()=>{if(ownerRef.current===owner)setMessageError("No se pudo recuperar el borrador.");});}
     slideAnim.setValue(screen.width);
@@ -469,23 +473,32 @@ export function MessagesScreen({
 
   // ── Send ──────────────────────────────────────────────────────────────────
 
+  const sendBookingContent = async (thread:GoConversation,text:string,draft?:string) => {
+    const owner=ownerRef.current, token=generation.current, bookingId=thread.bookingId;
+    if(sendLock.current || !bookingId || !owner || screenState.current.activeConv?.id!==thread.id) return false;
+    readRevision.current++;sendLock.current=true;setSending(true);setMessageError("");
+    try{
+      const saved=await deliverBookingMessage(owner,bookingId,text,draft===undefined?"location":"text");
+      if(ownerRef.current!==owner||generation.current!==token)return false;
+      if(screenState.current.activeConv?.id===thread.id){
+        setActiveConv({...saved,actionId:thread.actionId,contextLabel:thread.contextLabel});
+        if(draft!==undefined)setInput(current=>{if(current.trim()===text){inputRef.current="";return "";}return current;});
+      }
+      setConversations(old=>[saved,...old.filter(c=>c.id!==saved.id)]);
+      if(draft!==undefined)await clearBookingMessageDraft(owner,thread.id,draft);
+      return true;
+    }catch(error){
+      if(ownerRef.current===owner&&generation.current===token)setMessageError(errorText(error));
+      throw error;
+    }finally{sendLock.current=false;if(generation.current===token)setSending(false);}
+  };
+
   const sendMessage = async () => {
     if (!input.trim() || !activeConv) return;
     if(activeConv.actionId&&!activeConv.bookingId){setMessageError("Esta tarea no dispone de un vínculo de comunicación verificable en el servidor. Tu borrador se conserva; no se ha enviado ningún mensaje.");return;}
     if(activeConv.bookingId){
-      if(sendLock.current)return;
-      const owner=ownerRef.current,token=generation.current,text=input.trim(),draft=input,thread=activeConv,bookingId=activeConv.bookingId;
-      if(!owner){setMessageError("Inicia sesión para enviar el mensaje.");return;}
-      readRevision.current++;sendLock.current=true;setSending(true);setMessageError("");
-      try{
-        const saved=await deliverBookingMessage(owner,bookingId,text);
-        if(ownerRef.current!==owner||generation.current!==token)return;
-        if(screenState.current.activeConv?.id===thread.id){setActiveConv({...saved,actionId:thread.actionId,contextLabel:thread.contextLabel});
-          setInput(current=>{if(current.trim()===text){inputRef.current="";return "";}return current;});}
-        setConversations(old=>[saved,...old.filter(c=>c.id!==saved.id)]);
-        await clearBookingMessageDraft(owner,thread.id,draft);
-      }catch(error){if(ownerRef.current===owner&&generation.current===token)setMessageError(errorText(error));}
-      finally{sendLock.current=false;if(generation.current===token)setSending(false);}
+      if(!ownerRef.current){setMessageError("Inicia sesión para enviar el mensaje.");return;}
+      await sendBookingContent(activeConv,input.trim(),input).catch(()=>{});
       return;
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -523,7 +536,7 @@ export function MessagesScreen({
     if (!activeConv) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const last5 = activeConv.messages.slice(-5)
-      .map((m) => `${m.senderId === "yo" ? "Yo" : activeConv.contactName}: ${m.text}`).join("\n");
+      .map((m) => `${m.senderId === "yo" ? "Yo" : activeConv.contactName}: ${readLocationMessage(m.text) ? "[Ubicación compartida]" : m.text}`).join("\n");
     onCreateGo({ contactName: activeConv.contactName, contactPhone: activeConv.contactPhone, contextText: last5 });
   };
 
@@ -604,7 +617,9 @@ export function MessagesScreen({
                       <View style={s.convBottom}>
                         <Text style={s.convPreview} numberOfLines={1}>
                           {conv.messages.length > 0
-                            ? conv.messages[conv.messages.length - 1].text
+                            ? (readLocationMessage(conv.messages[conv.messages.length - 1].text)
+                              ? (lang === "en" ? "Shared location" : "Ubicación compartida")
+                              : conv.messages[conv.messages.length - 1].text)
                             : t("msg_tap_to_write")}
                         </Text>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -698,7 +713,7 @@ export function MessagesScreen({
                   <ScrollView
                     ref={threadScrollRef}
                     style={{ marginBottom: 80 }}
-                    contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", paddingHorizontal: 12, paddingTop: 14, paddingBottom: 14 }}
+                    contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", paddingLeft: handedness==="left"?54:12, paddingRight: handedness==="right"?54:12, paddingTop: 14, paddingBottom: 14 }}
                     showsVerticalScrollIndicator={false}
                     onLayout={() => threadScrollRef.current?.scrollToEnd({ animated: false })}
                     onContentSizeChange={() => threadScrollRef.current?.scrollToEnd({ animated: true })}
@@ -718,6 +733,7 @@ export function MessagesScreen({
 
                     {activeConv.messages.map((msg, i) => {
                       const mine = msg.senderId === "yo";
+                      const place = activeConv.bookingId && activeConv.counterpartId ? readLocationMessage(msg.text) : undefined;
                       const showDate =
                         i === 0 ||
                         new Date(msg.createdAt).toDateString() !==
@@ -738,7 +754,7 @@ export function MessagesScreen({
                               end={{ x: 0.85, y: 1 }}
                               style={[s.bubble, s.bubbleMine]}
                             >
-                              <Text style={[s.bubbleText, { color: "#FFFFFF" }]}>{msg.text}</Text>
+                              {place?<MessageLocationBubble place={place} mine onSave={()=>setSaveLocation(place)}/>:<Text style={[s.bubbleText, { color: "#FFFFFF" }]}>{msg.text}</Text>}
                               <View style={s.bubbleMeta}>
                                 <Text style={[s.bubbleTime, { color: "rgba(255,255,255,0.7)" }]}>
                                   {new Date(msg.createdAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
@@ -751,7 +767,7 @@ export function MessagesScreen({
                             </LinearGradient>
                           ) : (
                             <View style={[s.bubble, s.bubbleTheirs]}>
-                              <Text style={s.bubbleText}>{msg.text}</Text>
+                              {place?<MessageLocationBubble place={place} mine={false} onSave={()=>setSaveLocation(place)}/>:<Text style={s.bubbleText}>{msg.text}</Text>}
                               <View style={s.bubbleMeta}>
                                 <Text style={s.bubbleTime}>
                                   {new Date(msg.createdAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}
@@ -763,6 +779,15 @@ export function MessagesScreen({
                       );
                     })}
                   </ScrollView>
+                  {visible && <MessageLocationTools key={activeConv.id} handedness={handedness}
+                    bounds={{width:chatArea.width,height:Math.max(0,chatArea.height-80)}}
+                    incoming={saveLocation} onIncomingHandled={()=>setSaveLocation(undefined)}
+                    canSend={!!(ownerRef.current&&activeConv.bookingId&&activeConv.counterpartId)&&!sending}
+                    recipient={activeConv.contactName}
+                    onSend={place=>{
+                      if(!activeConv.counterpartId)return Promise.resolve(false);
+                      return sendBookingContent(activeConv,locationMessage(place));
+                    }}/>}
                   </View>{/* end chatArea */}
 
                   {/* Thread input area — big input LEFT, 3-button column RIGHT */}

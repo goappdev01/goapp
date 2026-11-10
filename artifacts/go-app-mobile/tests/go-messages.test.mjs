@@ -6,7 +6,7 @@ const bookingId='11111111-1111-4111-8111-111111111111';
 const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<20;i++)await Promise.resolve();});
 async function fixture({initial=true,context,offline=false,account='customer',platform='ios',contact,businessId,seed=[]}={}){
  const memory=new Map(),storage={getItem:async k=>memory.get(k)??null,setItem:async(k,v)=>{memory.set(k,v);},removeItem:async k=>{memory.delete(k);}};
- let owner=account,fail=offline,loseResponse=false,sending=0,attempts=0,closed=0,landings=0,aiOpens=0;const records=[...seed],events=new Set(),inputs=[],buttons=[],requests=[],appListeners=new Set();let modalProps,dismissed=0,malformed=false,holdRead=false,releaseRead,legacy=false;
+ let owner=account,fail=offline,loseResponse=false,sending=0,attempts=0,closed=0,landings=0,aiOpens=0;const records=[...seed],events=new Set(),inputs=[],buttons=[],requests=[],appListeners=new Set();let modalProps,dismissed=0,malformed=false,holdRead=false,releaseRead,legacy=false,locationTools;
  const appState={currentState:'active',addEventListener:(event,fn)=>{appListeners.add(fn);return{remove:()=>appListeners.delete(fn)};}};
  const thread=()=>({id:'booking:'+bookingId,bookingId,businessId:businessId??'salon',counterpartId:owner==='customer'?'business-owner':'customer',contactName:owner==='customer'?'Registered salon':'Registered customer',lastUpdated:1,messages:records.map(x=>({...x,senderId:x.sender===owner?'yo':x.sender})),unread:0});
  const booking={getAuthenticatedUserId:async()=>owner,supabaseApiRequest:async(path,init={},required,expected)=>{
@@ -18,6 +18,7 @@ async function fixture({initial=true,context,offline=false,account='customer',pl
   if(loseResponse){loseResponse=false;throw new Error('Respuesta de envío perdida');}return malformed?{...thread(),messages:[]}:thread();
  }};
  const data=evaluate('data/goMessages.ts',{'./booking':booking,'@react-native-async-storage/async-storage':storage});
+ const places=evaluate('data/contactPlaces.ts',{});
  const text=n=>Array.isArray(n)?n.map(text).join(''):typeof n==='string'?n:n?.props?text(n.props.children):'';
  class Value{setValue(){}interpolate(){return 0;}}
  const motion={start:fn=>fn?.()};const chain=new Proxy({},{get:()=>()=>chain});
@@ -25,6 +26,8 @@ async function fixture({initial=true,context,offline=false,account='customer',pl
  const screen=evaluate('components/MessagesScreen.tsx',{
   '@/components/ui/GoScreenCloseSurface':{GoScreenCloseSurface:View,GoScreenCloseGuide:()=>null},
   '@/data/booking':booking,'@/data/goMessages':data,'@/lib/sessionEvents':{onSessionChanged:fn=>{events.add(fn);return()=>events.delete(fn);}},
+  '@/data/contactPlaces':places,'./MessageLocationTools':{MessageLocationTools:props=>{locationTools=props;return null;},
+   MessageLocationBubble:props=>React.createElement('span',null,props.place.title)},
   '@react-native-async-storage/async-storage':storage,'@expo/vector-icons':{Feather:()=>null},'./DraggableFAB':{DraggableFAB:({children})=>children},
   'expo-haptics':{selectionAsync:async()=>{},impactAsync:async()=>{},notificationAsync:async()=>{},ImpactFeedbackStyle:{Light:1},NotificationFeedbackType:{Warning:1}},
   '@/contexts/LanguageContext':{useLanguage:()=>({lang:'es',t:key=>key})},'expo-linear-gradient':{LinearGradient:View},
@@ -44,8 +47,9 @@ async function fixture({initial=true,context,offline=false,account='customer',pl
  await settle(render);
  const input=()=>inputs.findLast(p=>p.placeholder==='Escribe un mensaje...');
  const send=()=>buttons.findLast(p=>p.label==='msg_send_btn');
- return{memory,records,container,data,requests,oldServer:()=>{legacy=true;},holdRead:()=>{holdRead=true;},async releaseRead(){await settle(()=>releaseRead());},malformed:()=>{malformed=true;},async foreground(){await settle(()=>{for(const state of ['background','active']){appState.currentState=state;for(const fn of appListeners)fn(state);}});},get dismissed(){return dismissed;},async hide(){shown=false;await settle(render);},async nativeDismiss(){await settle(()=>modalProps.onDismiss());},get closed(){return closed;},get landings(){return landings;},get aiOpens(){return aiOpens;},get attempts(){return attempts;},get input(){return input();},get send(){return send();},
+ return{memory,records,container,data,requests,oldServer:()=>{legacy=true;},holdRead:()=>{holdRead=true;},async releaseRead(){await settle(()=>releaseRead());},malformed:()=>{malformed=true;},async foreground(){await settle(()=>{for(const state of ['background','active']){appState.currentState=state;for(const fn of appListeners)fn(state);}});},get dismissed(){return dismissed;},async hide(){shown=false;await settle(render);},async nativeDismiss(){await settle(()=>modalProps.onDismiss());},get closed(){return closed;},get landings(){return landings;},get aiOpens(){return aiOpens;},get attempts(){return attempts;},get input(){return input();},get send(){return send();},get locationTools(){return locationTools;},
   async type(value){await settle(()=>input().onChangeText(value));},async submit(){await settle(()=>send().onPress());},
+ async sendLocation(place){let result;await settle(async()=>{result=await locationTools.onSend(place);});return result;},
   async double(){await settle(()=>Promise.all([send().onPress(),send().onPress()]));},fail(v){fail=v;},lose(){loseResponse=true;},
   async account(next){await settle(()=>{owner=next;for(const fn of events)fn();});},
   async general(){initialBookingId=undefined;context=undefined;await settle(render);},
@@ -151,4 +155,33 @@ test('direct concurrent delivery shares one durable retry and draft clearing can
   assert.equal(await f.data.loadBookingMessageDraft('customer',id),'New');
   assert.equal(await f.data.loadBookingMessageDraft('other',id),'');
  }finally{await f.close();}
+});
+
+const sharedPlace={title:'Lugar de prueba',source:'current',coordinates:{latitude:40.4,longitude:-3.7}};
+test('an unverified conversation cannot send a location or create a local delivered bubble',async()=>{
+ const f=await fixture({context,offline:true});
+ try{
+  assert.equal(f.locationTools.canSend,false);
+  assert.equal(await f.sendLocation(sharedPlace),false);
+  assert.equal(f.attempts,0);
+  assert.equal(f.records.length,0);
+ }finally{await f.close();}
+});
+
+test('a confirmed location uses the authorized booking thread and preserves the ordinary draft',async()=>{
+ const sender=await fixture();
+ try{
+  await sender.type('Mi borrador');
+  assert.equal(sender.locationTools.canSend,true);
+  sender.lose();
+  await assert.rejects(sender.sendLocation(sharedPlace),/perdida/);
+  assert.equal(sender.records.length,1);
+  assert.equal(await sender.sendLocation(sharedPlace),true);
+  assert.equal(sender.records.length,1);
+  assert.equal(sender.input.value,'Mi borrador');
+  assert.ok(sender.requests.includes('/supabase/bookings/'+bookingId+'/messages'));
+  const receiver=await fixture({account:'business-owner',seed:sender.records});
+  try{assert.ok(receiver.container.textContent.includes(sharedPlace.title));}
+  finally{await receiver.close();}
+ }finally{await sender.close();}
 });
