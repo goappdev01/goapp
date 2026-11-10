@@ -95,7 +95,7 @@ class DeviceProbes:
                 keys.append(stage['key'])
             if len(set(keys))!=len(keys):self.fail('DEVICE_PROBE_INVALID','Hay fases repetidas.')
             required={'document','metro','manifest','bundle','assets'}
-            passed=required.issubset(keys) and all(x['ok'] for x in stages if x['key'] in required)
+            passed=required.issubset(keys) and all(x['ok'] for x in stages)
             doc.update(state='browser_transport_passed' if passed else 'browser_transport_failed',
                        report=report,recorded=time.time(),source='authenticated_iphone_browser',app_loaded='not_verified')
             self.save(doc)
