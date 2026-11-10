@@ -7,9 +7,15 @@ import {useLanguage} from "@/contexts/LanguageContext";
 import {getAuthenticatedUserId} from "@/data/booking";
 import {bookingVerification,type VerificationCommand,type VerificationResult,type VerificationSummary} from "@/data/bookingVerification";
 import {onSessionChanged} from "@/lib/sessionEvents";
-import {GoCloseButton} from "@/components/ui/GoCloseButton";
+import {GO_NAVIGATION_SIZE,GoCloseButton} from "@/components/ui/GoCloseButton";
+import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
+import {GoScreenModal} from "@/components/ui/GoScreenModal";
 
-export function ReservationVerificationPanel({bookingId,businessId,onClose}:{bookingId?:string;businessId?:string;onClose:()=>void}){
+export function ReservationVerificationPanel({bookingId,businessId,handedness,onClose}:{
+ bookingId?:string;businessId?:string;handedness?:"left"|"right";onClose:()=>void;
+}){
+ const isReservationQr = !!bookingId && !businessId;
+ const Presenter = bookingId || businessId ? GoScreenModal : Modal;
  const {t,lang}=useLanguage(),insets=useSafeAreaInsets();
  const [permission,askPermission]=useCameraPermissions();
  const [result,setResult]=useState<VerificationResult>(),[input,setInput]=useState(""),[scanning,setScanning]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState("");
@@ -41,8 +47,16 @@ export function ReservationVerificationPanel({bookingId,businessId,onClose}:{boo
  const scan=async()=>{try{const granted=permission?.granted || (await askPermission()).granted;if(granted){setResult(undefined);setScanning(true);setError("");}else setError(t('verification_camera_denied'));}catch{setError(t('verification_camera_unavailable'));}};
  const button=(label:string,action:()=>void,color="#93c5fd")=><TouchableOpacity accessibilityRole="button" disabled={busy} onPress={action} style={[s.button,{borderColor:color,opacity:busy?0.5:1}]}><Text style={[s.buttonText,{color}]}>{label}</Text></TouchableOpacity>;
  const preview=(secret:string)=>{if(businessId)void request({operation:"preview",businessId,secret});};
- return <Modal transparent animationType="fade" onRequestClose={onClose}><KeyboardAvoidingView behavior={Platform.OS==="ios"?"padding":undefined} style={{flex:1,backgroundColor:"#080b12",paddingTop:insets.top,paddingBottom:insets.bottom}}>
-  <View style={{flexDirection:"row",alignItems:"center",padding:12,gap:12}}><Text style={[s.title,{flex:1}]}>{businessId?t('verification_title'):t('verification_wallet')}</Text><GoCloseButton level="panel" onPress={onClose} accessibilityLabel={t('cancel')}/></View>
+ const closeLabel = isReservationQr ? (lang==="en"?"Close reservation QR":"Cerrar QR de reserva") : t('cancel');
+ const closeButton = <GoCloseButton level="panel" hitSlop={isReservationQr?0:undefined} onPress={onClose} accessibilityLabel={closeLabel} />;
+ return <Presenter transparent animationType="fade" onRequestClose={onClose}>
+ <KeyboardAvoidingView behavior={Platform.OS==="ios"?"padding":undefined} onAccessibilityEscape={isReservationQr?onClose:undefined}
+   style={{flex:1,backgroundColor:"#080b12",paddingTop:insets.top,paddingBottom:insets.bottom,
+     paddingLeft:isReservationQr?insets.left:0,paddingRight:isReservationQr?insets.right:0}}>
+  <View style={{flexDirection:"row",alignItems:"center",padding:12,gap:12}}>
+   <Text style={[s.title,{flex:1}]}>{businessId?t('verification_title'):t('verification_wallet')}</Text>
+   {!isReservationQr && closeButton}
+  </View>
   <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:18,gap:12}}>
    <Text style={s.secondary}>{t('verification_explanation')}</Text>
    {busy && <ActivityIndicator accessibilityLabel={t('verification_loading')} color="#93c5fd"/>}
@@ -82,6 +96,12 @@ export function ReservationVerificationPanel({bookingId,businessId,onClose}:{boo
     {button(t('verification_refresh_wallet'),()=>void request({operation:"wallet"}))}
    </>}
   </ScrollView>
- </KeyboardAvoidingView></Modal>;
+  {isReservationQr && <View testID="reservation-qr-close-lane" style={s.closeLane}>
+   <GoNavigationFloating screenKey="reservation-qr" buttonKey="close" safeArea={false} handedness={handedness}
+     initialTop={s.closeLane.height - GO_NAVIGATION_SIZE - 8} boundsVerticalInset={0}>
+    {closeButton}
+   </GoNavigationFloating>
+  </View>}
+ </KeyboardAvoidingView></Presenter>;
 }
-const s=StyleSheet.create({title:{fontSize:18,fontWeight:"700",color:"#fff"},text:{fontSize:15,color:"#fff"},secondary:{fontSize:13,color:"#b6c3d6",lineHeight:19},button:{minHeight:48,borderRadius:12,borderWidth:1,padding:12,alignItems:"center",justifyContent:"center"},buttonText:{fontSize:15,fontWeight:"700",textAlign:"center"},summary:{padding:14,borderRadius:12,borderWidth:1,borderColor:"#374151",gap:8},code:{color:"#fff",fontSize:16,textAlign:"center",lineHeight:24},input:{borderWidth:1,borderColor:"#64748b",borderRadius:10,color:"white",padding:12,minHeight:52,fontSize:16}});
+const s=StyleSheet.create({closeLane:{height:96,flexShrink:0},title:{fontSize:18,fontWeight:"700",color:"#fff"},text:{fontSize:15,color:"#fff"},secondary:{fontSize:13,color:"#b6c3d6",lineHeight:19},button:{minHeight:48,borderRadius:12,borderWidth:1,padding:12,alignItems:"center",justifyContent:"center"},buttonText:{fontSize:15,fontWeight:"700",textAlign:"center"},summary:{padding:14,borderRadius:12,borderWidth:1,borderColor:"#374151",gap:8},code:{color:"#fff",fontSize:16,textAlign:"center",lineHeight:24},input:{borderWidth:1,borderColor:"#64748b",borderRadius:10,color:"white",padding:12,minHeight:52,fontSize:16}});

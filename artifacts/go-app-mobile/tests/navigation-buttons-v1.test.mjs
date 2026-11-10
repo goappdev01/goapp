@@ -14,7 +14,7 @@ test('every migrated navigation callback is unchanged, no duplicates were added 
  for(const row of baseline.excluded)assert.ok(readFileSync(row.file,'utf8').includes(row.source),'non-navigation arrow remains exact');
 });
 
-async function fixture({hand='right',width=390,height=600,stored=new Map(),navigation=true,keyboardResponsive=false,read,bridge=false,initialProps={}}={}){
+async function fixture({hand='right',width=390,height=600,stored=new Map(),navigation=true,keyboardResponsive=false,read,bridge=false,oneButton=false,initialProps={}}={}){
  const hosts=new Map(),gestures=[],styles=[],calls=[];let props={navigation,keyboardResponsive,screenKey:'synthetic-nav',buttonKey:'pair',bounds:{width,height},buttonWidth:136,maxH:64,initialBottom:12,initialRight:20,...initialProps};
  const host=name=>p=>{if(p.accessibilityLabel)hosts.set(p.accessibilityLabel,p);if(p.testID)hosts.set(p.testID,p);return React.createElement('div',{'data-native':name},p.children);};
  const native={...life.rn,View:host('View'),Text:host('Text'),TouchableOpacity:host('Button'),StyleSheet:{create:x=>x,absoluteFill:{}},Dimensions:{get:()=>({width,height})},useWindowDimensions:()=>({width,height})};
@@ -25,7 +25,7 @@ async function fixture({hand='right',width=390,height=600,stored=new Map(),navig
  const floating=evaluate('components/ui/GoNavigationFloating.tsx',{'react-native':native,...safe,'@/components/DraggableFAB':fab,'./GoNavigationHand':handContext,'react-native-gesture-handler':{GestureHandlerRootView:host('Root')}});
  const container=document.createElement('div'),root=createRoot(container);const settle=async fn=>React.act(async()=>{fn?.();for(let i=0;i<10;i++)await Promise.resolve();});
  const Button=bridge?Object.assign(p=>React.createElement(button.GoCloseButton,p),{displayName:"GoNavigationButton"}):button.GoCloseButton;
- const children=React.createElement(native.View,{style:{flexDirection:'row',gap:8}},React.createElement(Button,{level:'panel',accessibilityLabel:'Original back',onPress:()=>calls.push('back')}),React.createElement(Button,{level:'container',accessibilityLabel:'Original exit',onPress:()=>calls.push('exit')}));
+ const children=React.createElement(native.View,{style:{flexDirection:'row',gap:8}},React.createElement(Button,{level:'panel',accessibilityLabel:'Original back',onPress:()=>calls.push('back')}),!oneButton&&React.createElement(Button,{level:'container',accessibilityLabel:'Original exit',onPress:()=>calls.push('exit')}));
  const render=async change=>{props={...props,...change};await settle(()=>root.render(React.createElement(handContext.GoNavigationHand.Provider,{value:hand},React.createElement(fab.DraggableFAB,props,children))));};await render({});
  return{hosts,styles,gestures,calls,stored,props,settle,render,hand:async value=>{hand=value;await render({});},gesture:()=>gestures.at(-1),style:()=>styles.at(-1)(),press:async(label,pressIn=true)=>settle(()=>{const p=hosts.get(label);if(pressIn)p.onPressIn?.();p.onPress({stopPropagation(){calls.push('stop');}});}),close:()=>settle(()=>root.unmount()),button,native,async floating(options){await settle(()=>root.render(React.createElement(handContext.GoNavigationHand.Provider,{value:hand},React.createElement(floating.GoNavigationFloating,{screenKey:'floating-test',width:136,handedness:hand,...options},children))));}};
 }
@@ -35,6 +35,22 @@ test('smoke icon-only navigation shares a readable 64pt square, retain callbacks
 });
 test('long press uses the existing 500ms recognizer, persists clamped movement and never navigates on release',async()=>{
  const f=await fixture({bridge:true});try{const g=f.gesture();assert.equal(g._activateAfterLongPress,500);await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:-1000,translationY:1000});g._onEnd();g._onFinalize();});assert.equal(f.style().left,8);assert.equal(f.style().top,528);await f.press('Original back',false);assert.deepEqual(f.calls,['stop']);const saved=JSON.parse(f.stored.get('fab_pos:synthetic-nav:pair:right'));assert.deepEqual(saved,{l:8,t:528});await f.press('Original back');assert.deepEqual(f.calls,['stop','stop','back']);}finally{await f.close();}
+});
+test('reservation QR close drags within its lower safe lane on iPhone and iPad',async()=>{
+ for(const width of [300,396,820,1024])for(const hand of ['left','right']){
+  const f=await fixture({width,hand,oneButton:true,initialProps:{screenKey:'reservation-qr',buttonKey:'close',buttonWidth:64,
+   maxH:64,bounds:{width,height:96},initialTop:24,initialRight:12,boundsVerticalInset:0}});
+  try{
+   assert.equal(f.style().top,24);assert.equal(f.style().left,hand==='left'?12:width-76);
+   const g=f.gesture();assert.equal(g._activateAfterLongPress,500);
+   await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:hand==='left'?80:-80,translationY:-1000});g._onEnd();g._onFinalize();});
+   assert.equal(f.style().top,0);assert.ok(f.style().left>12&&f.style().left+64<width-12);
+   await f.press('Original back',false);assert.deepEqual(f.calls,['stop']);
+   await f.press('Original back');assert.deepEqual(f.calls,['stop','stop','back']);
+   const saved=JSON.parse(f.stored.get('fab_pos:reservation-qr:close:'+hand));
+   assert.equal(saved.t,0);assert.equal(saved.l,f.style().left);
+  }finally{await f.close();}
+ }
 });
 test('the QR follows the finger across an occupied area, settles clear, and restores its saved position',async()=>{
  const stored=new Map(),events=[],obstacle={x:260,y:440,width:50,height:50};

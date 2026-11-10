@@ -24,16 +24,74 @@ test('real customer QR and professional verification are role-scoped; DEMO gets 
 test('name is read from authorized receipt, never professional/business labels, with truthful missing-name fallback',()=>{const f=fixture(),{businessBookingEntry}=f.load('hooks/useBusinessBookings.ts'),booking={id:base.reservationId,customerId:'customer',businessId:base.businessId,bookableItemId:'cut',startDatetime:'2030-01-07T10:00:00',endDatetime:'2030-01-07T11:00:00',status:'CONFIRMED'},business={id:base.businessId,name:'Salon',timezone:'UTC',location:''};for(const name of ['RAÚL','MARÍA JOSÉ']){const row=businessBookingEntry({...booking,receipt:{customerName:name,staffName:'Ana',serviceName:'Cut'}},business,'owner');assert.equal(row.contactName,name);assert.equal(row.professionalName,'Ana');assert.equal(row.reservationId,booking.id);}assert.equal(businessBookingEntry(booking,business,'owner').contactName,'');assert.ok(texts(opened({...base,contactName:''}).tree).includes('booking_customer_unknown'));});
 test('all booking state and verification labels are translated using the existing ES/EN dictionary',()=>{const scope={exports:{}};vm.runInNewContext(transpile(fs.readFileSync('i18n/translations.ts','utf8')),scope);for(const lang of ['es','en'])for(const key of ['booking_state_accepted','booking_customer_unknown','verification_title','verification_show','verification_confirm_arrival','verification_accept_right'])assert.equal(typeof scope.exports.translations[lang][key],'string');assert.equal(scope.exports.translations.es.booking_state_accepted,'ACEPTADA');});
 
-async function panelFixture({professional=false,granted=true,delay=false}={}){
- const actions=new Map(),inputs=new Map(),calls=[],timers=[];let camera,session,background,user='signed-user',deferred,closed=0;
- const native=name=>props=>{if(name==='Button')actions.set(props.children?.props?.children,props);if(name==='Input')inputs.set(props.accessibilityLabel,props);return React.createElement('div',null,props.children);};
+async function panelFixture({professional=false,granted=true,delay=false,stacked=false,insets={top:47,bottom:34,left:0,right:0},handedness="right"}={}){
+ const actions=new Map(),inputs=new Map(),hosts=new Map(),calls=[],timers=[];let camera,session,background,modal,detail,open,user='signed-user',deferred,closed=0;
+ const native=name=>props=>{if(name==='Button')actions.set(props.children?.props?.children,props);if(name==='Input')inputs.set(props.accessibilityLabel,props);if(name==='Modal')modal=props;hosts.set(props.testID??name,props);return React.createElement('div',{'data-testid':props.testID},props.children);};
  const nativeModule={View:native('View'),Text:native('Text'),Modal:native('Modal'),KeyboardAvoidingView:native('Keyboard'),ScrollView:native('Scroll'),TouchableOpacity:native('Button'),TextInput:native('Input'),ActivityIndicator:native('Spinner'),StyleSheet:{create:x=>x},Platform:{OS:'ios'},AppState:{addEventListener:(_event,fn)=>{background=fn;return{remove(){}};}},Alert:{alert:(_title,_message,buttons)=>buttons.at(-1).onPress?.()},Share:{share:async()=>{}}};
- const scope={exports:{},console,Date,setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},require(name){if(name==='react')return React;if(name==='react-native')return nativeModule;if(name==='expo-camera')return{useCameraPermissions:()=>[{granted},async()=>({granted})],CameraView:props=>{camera=props;return React.createElement('div');}};if(name==='react-native-qrcode-svg')return props=>React.createElement('div',null,props.value);if(name==='react-native-safe-area-context')return{useSafeAreaInsets:()=>({top:47,bottom:34})};if(name==='@/contexts/LanguageContext')return{useLanguage:()=>({lang:'es',t:key=>key})};if(name==='@/data/booking')return{getAuthenticatedUserId:async()=>user};if(name==='@/lib/sessionEvents')return{onSessionChanged:fn=>{session=fn;return()=>{};}};if(name==='@/components/ui/GoCloseButton')return{GoCloseButton:native('Close')};if(name==='@/data/bookingVerification')return{bookingVerification:async(command,actor)=>{calls.push({command,actor});if(delay)return new Promise(resolve=>{deferred=resolve;});if(command.operation==='preview')return{valid:true,challenge:'ephemeral-challenge',canConfirmArrival:true,customerName:'MARÍA JOSÉ',businessName:'Salon',serviceName:'Cut',startsAt:'2030-01-07T10:00:00Z',timezone:'UTC',arrivalVerified:false};if(command.operation==='arrive')return{valid:true,arrivalVerified:true,customerName:'MARÍA JOSÉ',businessName:'Salon',serviceName:'Cut',startsAt:'2030-01-07T10:00:00Z',timezone:'UTC'};return command.operation==='issue'?{qrPayload:'ephemeral-qr',manualCode:'0123456789ABCDEF0123456789ABCDEF',expiresAt:new Date(Date.now()+600000).toISOString()}:{items:[]};}};throw Error('Unexpected import '+name);}};
+ const screen=evaluate('components/ui/GoScreenModal.tsx',{'react-native':{...nativeModule,StyleSheet:{absoluteFill:{}}}});
+ const scope={exports:{},console,Date,setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},require(name){if(name==='react')return React;if(name==='react-native')return nativeModule;if(name==='expo-camera')return{useCameraPermissions:()=>[{granted},async()=>({granted})],CameraView:props=>{camera=props;return React.createElement('div');}};if(name==='react-native-qrcode-svg')return props=>React.createElement('div',null,props.value);if(name==='react-native-safe-area-context')return{useSafeAreaInsets:()=>insets};if(name==='@/contexts/LanguageContext')return{useLanguage:()=>({lang:'es',t:key=>key})};if(name==='@/data/booking')return{getAuthenticatedUserId:async()=>user};if(name==='@/lib/sessionEvents')return{onSessionChanged:fn=>{session=fn;return()=>{};}};if(name==='@/components/ui/GoCloseButton')return{GO_NAVIGATION_SIZE:64,GoCloseButton:native('Close')};if(name==='@/components/ui/GoNavigationFloating')return{GoNavigationFloating:native('Floating')};if(name==='@/components/ui/GoScreenModal')return screen;if(name==='@/data/bookingVerification')return{bookingVerification:async(command,actor)=>{calls.push({command,actor});if(delay)return new Promise(resolve=>{deferred=resolve;});if(command.operation==='preview')return{valid:true,challenge:'ephemeral-challenge',canConfirmArrival:true,customerName:'MARÍA JOSÉ',businessName:'Salon',serviceName:'Cut',startsAt:'2030-01-07T10:00:00Z',timezone:'UTC',arrivalVerified:false};if(command.operation==='arrive')return{valid:true,arrivalVerified:true,customerName:'MARÍA JOSÉ',businessName:'Salon',serviceName:'Cut',startsAt:'2030-01-07T10:00:00Z',timezone:'UTC'};return command.operation==='issue'?{qrPayload:'ephemeral-qr',manualCode:'0123456789ABCDEF0123456789ABCDEF',expiresAt:new Date(Date.now()+600000).toISOString()}:{items:[]};}};throw Error('Unexpected import '+name);}};
  vm.runInNewContext(transpile(fs.readFileSync('components/booking/ReservationVerificationPanel.tsx','utf8')),scope);const container=document.createElement('div'),root=createRoot(container),onClose=()=>closed++;
  const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<6;i++)await new Promise(resolve=>setImmediate(resolve));});
- await settle(()=>root.render(React.createElement(scope.exports.ReservationVerificationPanel,{bookingId:professional?undefined:base.reservationId,businessId:professional?base.businessId:undefined,onClose})));
- return{actions,inputs,calls,timers,get content(){return container.textContent;},get camera(){return camera;},get closed(){return closed;},settle,session:()=>session?.(),background:()=>background?.('background'),resolve:response=>deferred?.(response),async close(){await settle(()=>root.unmount());}};
+ function BookingStack(){
+  const [details,setDetails]=React.useState(true),[qr,setQr]=React.useState(true);
+  open=()=>setQr(true);
+  return React.createElement(screen.GoScreenModal,{onRequestClose:()=>{}},details&&React.createElement(screen.GoScreenModal,{onRequestClose:()=>setDetails(false)},
+    React.createElement('div',{ref:node=>{if(node)detail=node;}},'DETAIL '+base.reservationId),
+    qr&&React.createElement(scope.exports.ReservationVerificationPanel,{bookingId:base.reservationId,handedness,onClose:()=>{onClose();setQr(false);}})));
+ }
+ await settle(()=>root.render(stacked?React.createElement(BookingStack):React.createElement(scope.exports.ReservationVerificationPanel,{bookingId:professional?undefined:base.reservationId,businessId:professional?base.businessId:undefined,handedness,onClose})));
+ return{actions,inputs,hosts,calls,timers,get modal(){return modal;},get detail(){return detail;},open:()=>open(),get content(){return container.textContent;},get camera(){return camera;},get closed(){return closed;},settle,session:()=>session?.(),background:()=>background?.('background'),resolve:response=>deferred?.(response),async close(){await settle(()=>root.unmount());}};
 }
+test('the actual reservation detail stays selected when its QR is opened, closed and reopened',()=>{
+ const entry={...base,businessBooking:false,customerBooking:true}, landing=[];
+ const card=opened(entry,{handedness:"left",onGoToLanding:()=>landing.push(true)});
+ const show=tree=>nodes(tree,n=>n.props.accessibilityLabel==='verification_show')[0];
+ for(let i=0;i<2;i++){
+  show(card.render()).props.onPress();
+  const tree=card.render(),detail=nodes(tree,n=>n.props.testID==='entry-details-modal')[0];
+  const qr=nodes(detail,n=>n.type==='ReservationVerificationPanel')[0];
+  assert.ok(qr,'QR is presented from the same detail session');
+  assert.equal(qr.props.bookingId,entry.reservationId);assert.equal(qr.props.handedness,'left');
+  assert.ok(texts(detail).includes('booking_state_accepted'));
+  qr.props.onClose();
+  assert.ok(show(card.render()));assert.equal(nodes(card.render(),n=>n.type==='ReservationVerificationPanel').length,0);
+ }
+ const detail=nodes(card.render(),n=>n.props.testID==='entry-details-modal')[0];
+ detail.props.onRequestClose();
+ nodes(card.render(),n=>n.props.testID==='entry-details-modal')[0].props.onDismiss();
+ assert.equal(nodes(card.render(),n=>n.props.testID==='entry-details-modal').length,0);
+ assert.deepEqual(landing,[]);
+});
+
+test('reservation QR close lane stays outside scrolling content and button and Back return to the same mounted detail',async()=>{
+ for(const handedness of ['left','right']){
+  const insets={top:47,bottom:34,left:12,right:19};
+  const f=await panelFixture({stacked:true,insets,handedness});
+  try{
+   const detail=f.detail;
+   const lane=f.hosts.get('reservation-qr-close-lane'),floating=f.hosts.get('Floating'),close=f.hosts.get('Close');
+   assert.equal(lane.style.height,96);assert.equal(floating.initialTop+64+8,lane.style.height);
+   assert.equal(floating.handedness,handedness);assert.equal(floating.safeArea,false);
+   assert.equal(f.hosts.get('Keyboard').style.paddingBottom,34);
+   assert.equal(f.hosts.get('Keyboard').style.paddingRight,19);
+   const [header,scroll,footer]=f.hosts.get('Keyboard').children;
+   assert.equal(header.props.children.filter(Boolean).length,1,'only the title remains in the header');
+   assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
+   assert.equal(footer.props.testID,'reservation-qr-close-lane');
+   assert.equal(footer.props.children.props.children.props.accessibilityLabel,close.accessibilityLabel);
+   assert.equal(close.accessibilityLabel,'Cerrar QR de reserva');
+   assert.ok(f.content.includes('ephemeral-qr'));
+   await f.settle(()=>close.onPress());
+   assert.equal(f.detail,detail);assert.ok(f.content.includes('DETAIL'));assert.ok(!f.content.includes('ephemeral-qr'));
+   await f.settle(()=>f.open());assert.ok(f.content.includes('ephemeral-qr'));assert.equal(f.detail,detail);
+   await f.settle(()=>f.modal.onRequestClose({nativeEvent:{}}));
+   assert.equal(f.detail,detail);assert.equal(f.closed,2);assert.ok(!f.content.includes('ephemeral-qr'));assert.ok(f.content.includes('DETAIL'));
+   await f.settle(()=>f.modal.onRequestClose({nativeEvent:{}}));
+   assert.ok(!f.content.includes('DETAIL'));assert.equal(f.closed,2);
+  }finally{await f.close();}
+ }
+});
+
 test('camera scans only QR, suppresses repeated frames, and explicit arrival is a separate request',async()=>{const f=await panelFixture({professional:true});try{await f.settle(()=>f.actions.get('verification_scan').onPress());assert.deepEqual(Array.from(f.camera.barcodeScannerSettings.barcodeTypes),['qr']);await f.settle(()=>{f.camera.onBarcodeScanned({data:'opaque-token'});f.camera.onBarcodeScanned({data:'opaque-token'});});assert.equal(f.calls.filter(c=>c.command.operation==='preview').length,1);assert.equal(f.calls.filter(c=>c.command.operation==='arrive').length,0);await f.settle(()=>f.actions.get('verification_confirm_arrival').onPress());assert.equal(f.calls.at(-1).command.operation,'arrive');assert.equal(f.calls.at(-1).command.secret,undefined);}finally{await f.close();}});
 test('denied camera permission retains the manual alternative without pretending to scan',async()=>{const f=await panelFixture({professional:true,granted:false});try{await f.settle(()=>f.actions.get('verification_scan').onPress());assert.equal(f.camera,undefined);await f.settle(()=>f.inputs.get('verification_manual').onChangeText('0123 4567 89AB CDEF 0123 4567 89AB CDEF'));await f.settle(()=>f.actions.get('verification_check').onPress());assert.equal(f.calls.at(-1).command.operation,'preview');}finally{await f.close();}});
 test('temporary QR is removed on expiry/background and late responses cannot restore it after account change',async()=>{let f=await panelFixture();try{assert.ok(f.timers.some(t=>t.ms>590000));assert.ok(f.content.includes('ephemeral-qr'));await f.settle(()=>f.timers.at(-1).fn());assert.ok(!f.content.includes('ephemeral-qr'));await f.settle(()=>f.actions.get('verification_show').onPress());assert.ok(f.content.includes('ephemeral-qr'));await f.settle(()=>f.background());assert.ok(!f.content.includes('ephemeral-qr'));assert.equal(f.inputs.get('verification_invitation').value,'');}finally{await f.close();}f=await panelFixture({delay:true});try{await f.settle(()=>f.session());assert.equal(f.closed,1);await f.settle(()=>f.resolve({qrPayload:'must-not-return'}));assert.equal(f.calls.length,1);assert.ok(!f.content.includes('must-not-return'));}finally{await f.close();}});

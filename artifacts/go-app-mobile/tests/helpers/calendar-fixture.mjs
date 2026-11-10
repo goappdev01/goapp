@@ -80,6 +80,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
     '@/contexts/GoBusinessConfigContext': { useBusinessConfig: () => ({ config: { plantillaItems: [], businessName: 'Test', subId: '' } }) },
     'expo-linear-gradient': { LinearGradient: 'LinearGradient' },
     './PlanoEmpresaScreen': { PlanoEmpresaScreen: 'PlanoEmpresaScreen' },
+    '@/components/booking/ReservationVerificationPanel': { ReservationVerificationPanel: 'ReservationVerificationPanel' },
     '@/components/DraggableFAB': { DraggableFAB: 'DraggableFAB' },
     '@/components/GoCalConfigPanel': { GoCalConfigPanel: 'GoCalConfigPanel' },
     '@/data/floorPlan': { loadReservations: async () => [], loadFloorPlan: async () => null },

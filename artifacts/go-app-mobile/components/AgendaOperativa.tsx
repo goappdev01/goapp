@@ -836,10 +836,13 @@ export function AgendaBoard({
   const [expandedBookingId, setExpandedBookingId] = useState<string | null>(null);
   const expandedBookingItem = goLog.find(entry => entry.id === expandedBookingId) ?? null;
   const setExpandedBookingItem = useCallback((entry: GoEntry | null) => setExpandedBookingId(entry?.id ?? null), []);
-  const [verificationEntry,setVerificationEntry]=useState<GoEntry|null>(null);
+  const [verificationEntryId, setVerificationEntryId] = useState<string | null>(null);
   const bookingPolicy=expandedBookingItem?reservationCardPolicy(expandedBookingItem):null;
   useEffect(() => {
-    if (expandedBookingId && !expandedBookingItem) setExpandedBookingId(null);
+    if (expandedBookingId && !expandedBookingItem) {
+      setExpandedBookingId(null);
+      setVerificationEntryId(null);
+    }
   }, [expandedBookingId, expandedBookingItem?.id]);
   const [bookingMsgDraft, setBookingMsgDraft] = useState("");
   const chatScrollRef = useRef<ScrollViewInstance>(null);
@@ -3291,11 +3294,13 @@ export function AgendaBoard({
       {renderFloatCard()}
       {renderDropClock()}
 
-      {!!verificationEntry && (()=>{const {ReservationVerificationPanel}=require("@/components/booking/ReservationVerificationPanel") as typeof import("@/components/booking/ReservationVerificationPanel");return <ReservationVerificationPanel bookingId={verificationEntry.customerBooking?verificationEntry.reservationId:undefined} businessId={verificationEntry.businessBooking?verificationEntry.businessId:undefined} key={verificationEntry.id} onClose={()=>setVerificationEntry(null)}/>;})()}
-
       {/* One foreground detail for the same reservation or task. Calendar stays mounted. */}
       <GoEntryDetailsSheet renderNote={renderNote} onGoToLanding={onGoToLanding} renderMessageScreen={renderMessageScreen && expandedBookingItem ? () => renderMessageScreen(expandedBookingItem) : undefined} handedness={handedness} entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}
-        onClose={() => { setExpandedBookingItem(null); setExpandedCardId(null); }}
+        onClose={() => {
+          setVerificationEntryId(null);
+          setExpandedBookingItem(null);
+          setExpandedCardId(null);
+        }}
         onMessage={expandedBookingItem && onOpenMessage ? () => handleOpenMessage(expandedBookingItem) : undefined}
         >
         {expandedBookingItem && <>
@@ -3310,10 +3315,19 @@ export function AgendaBoard({
             onAccept={onAcceptProposal || onChangeEstado ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);if(item.changeProposal)onAcceptProposal?.(item.id);else onChangeEstado?.(item.id,"aceptado"); } : undefined}
             onReject={onRejectProposal || onChangeEstado ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);if(item.changeProposal)onRejectProposal?.(item.id);else onChangeEstado?.(item.id,"rechazado"); } : undefined} />}
           {(bookingPolicy?.canShowQr || bookingPolicy?.canVerify) && <TouchableOpacity accessibilityRole="button" accessibilityLabel={t(bookingPolicy.canVerify?'verification_title':'verification_show')}
-            onPress={()=>{setVerificationEntry(expandedBookingItem);setExpandedBookingItem(null);setExpandedCardId(null);}}
+            onPress={() => setVerificationEntryId(expandedBookingItem.id)}
             style={{minHeight:44,padding:12,borderRadius:12,borderWidth:1,borderColor:"#93c5fd",alignItems:"center"}}>
             <Text style={{color:"#93c5fd",fontWeight:"700"}}>{t(bookingPolicy.canVerify?'verification_title':'verification_show')}</Text>
           </TouchableOpacity>}
+          {verificationEntryId === expandedBookingItem.id && (() => {
+            const { ReservationVerificationPanel } = require("@/components/booking/ReservationVerificationPanel") as typeof import("@/components/booking/ReservationVerificationPanel");
+            return <ReservationVerificationPanel
+              bookingId={expandedBookingItem.customerBooking ? expandedBookingItem.reservationId : undefined}
+              businessId={expandedBookingItem.businessBooking ? expandedBookingItem.businessId : undefined}
+              handedness={handedness}
+              onClose={() => setVerificationEntryId(null)}
+            />;
+          })()}
         </>}
       </GoEntryDetailsSheet>
 
