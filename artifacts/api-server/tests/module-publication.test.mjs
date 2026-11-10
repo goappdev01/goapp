@@ -12,7 +12,7 @@ test('release boundaries: discovery, direct writes, internal authorization and p
   await build({ stdin: { contents: `import {Router} from 'express';
     import publication from './src/routes/modulePublication';import business from './src/routes/supabase';import admin from './src/routes/admin';
     const router=Router();router.use('/admin',admin);router.use(publication);
-    for(const route of ['/bookings/timeline','/bookings/catalog','/catalog/quote'])router.post(route,(_req,res)=>res.json({routed:true}));
+    for(const route of ['/bookings/timeline','/bookings/catalog','/catalog/quote','/booking-discounts/quote','/booking-discounts/prices'])router.post(route,(_req,res)=>res.json({routed:true}));
     router.get('/booking-availability',(_req,res)=>res.json({slots:[]}));router.use(business);export default router;`,
     resolveDir: process.cwd(), loader: 'ts' }, outfile, bundle: true, platform: 'node', format: 'esm',
     banner: { js: "import {createRequire} from 'node:module';const require=createRequire(import.meta.url);" } });
@@ -56,7 +56,7 @@ test('release boundaries: discovery, direct writes, internal authorization and p
       }
     });
     await t.test('every new booking route denies hidden modules before executing its handler', async () => {
-      for (const route of ['/bookings', '/bookings/timeline', '/bookings/catalog', '/catalog/quote']) {
+      for (const route of ['/bookings', '/bookings/timeline', '/bookings/catalog', '/catalog/quote', '/booking-discounts/quote', '/booking-discounts/prices']) {
         const response = await post(route); assert.equal(response.status, 403, route); assert.equal((await response.json()).code, 'MODULE_NOT_ENABLED');
       }
       assert.equal((await get(`/booking-availability?business_id=${restaurant}`)).status, 403);

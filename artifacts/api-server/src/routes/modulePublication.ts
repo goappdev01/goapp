@@ -8,7 +8,7 @@ router.get("/module-publication", (_req, res) => {
 });
 // No changes to history/cancel/negotiation RPCs or their existing ownership checks.
 router.use(async (req, res, next) => {
-  const guarded = req.method === "POST" && ["/bookings", "/bookings/timeline", "/bookings/catalog", "/catalog/quote"].includes(req.path)
+  const guarded = req.method === "POST" && ["/bookings", "/bookings/timeline", "/bookings/catalog", "/catalog/quote", "/booking-discounts/quote", "/booking-discounts/prices"].includes(req.path)
     || req.method === "GET" && req.path === "/booking-availability";
   if (!guarded) { next(); return; }
   if (!/^Bearer \S+$/.test(req.header("authorization") ?? "")) { res.status(401).json({ code: "AUTH_REQUIRED", error: "Inicia sesión." }); return; }

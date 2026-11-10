@@ -3,15 +3,19 @@ export type AssociationMode = "included" | "optional" | "recommended";
 /** Old required components are part of the main price, never a new charge. */
 export const associationMode = (mode: string): AssociationMode => mode === "required" ? "included" : mode as AssociationMode;
 export type CatalogAssociation = { id: string; business_id: string; source_id: string; target_id: string; mode: AssociationMode; active: boolean; revision: number };
-export type CatalogLine = { itemId: string; name: string; kind: "service" | "product"; durationMinutes: number; quantity: number; unitPrice: number; charge: number; included: boolean; currency: string };
+export type CatalogLine = { itemId: string; name: string; kind: "service" | "product"; durationMinutes: number; quantity: number; unitPrice: number; charge: number; included: boolean; currency: string;
+  originalCharge?: number; discountAmount?: number; discountBasisPoints?: number };
 export type CatalogOption = { associationId: string; sourceId: string; itemId: string; name: string; kind: "service" | "product"; price: number; currency: string; mode: AssociationMode; selected: boolean };
 export type CatalogQuote = { version: 1; businessId: string; rootIds: string[]; selectedAssociationIds: string[]; serviceIds: string[]; ready: boolean;
-  lines: CatalogLine[]; options: CatalogOption[]; missingRequired: string[]; totalPrice: number; currency: string };
+  lines: CatalogLine[]; options: CatalogOption[]; missingRequired: string[]; totalPrice: number; currency: string; originalTotal?: number; discountTotal?: number };
 export async function manageAssociations<T = CatalogAssociation[]>(businessId: string, operation: "list" | "create" | "update" | "delete", input: object = {}): Promise<T> {
   return supabaseApiRequest<T>("/supabase/catalog/associations", { method: "POST", body: JSON.stringify({ businessId, operation, input }) }, true);
 }
 export async function quoteCatalog(businessId: string, rootIds: string[], selectedIds: string[] = [], registeredSourceId?:string): Promise<CatalogQuote> {
   const quote = await supabaseApiRequest<CatalogQuote>("/supabase/catalog/quote", { method: "POST", ...(registeredSourceId ? {headers:{"x-go-booking-source":registeredSourceId}} : {}), body: JSON.stringify({ businessId, rootIds, selectedIds }) }, true);
+  return validateCatalogQuote(quote, businessId, rootIds);
+}
+export function validateCatalogQuote(quote: CatalogQuote, businessId: string, rootIds: string[]): CatalogQuote {
   if (quote.version !== 1 || quote.businessId !== businessId || !Array.isArray(quote.lines) || !Array.isArray(quote.options)
     || JSON.stringify(quote.rootIds) !== JSON.stringify(rootIds) || !Number.isFinite(quote.totalPrice)) throw Error("Respuesta de catálogo no válida.");
   return quote;

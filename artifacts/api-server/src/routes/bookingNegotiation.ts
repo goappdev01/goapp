@@ -16,6 +16,7 @@ const messages: Record<string, string> = {
   BOOKING_NOT_ACTIVE: "La reserva ya no admite esta operación.",
   BOOKING_ORIGINAL_CHANGED: "El horario original ha cambiado. Actualiza la reserva.",
   BOOKING_OTHER_PARTICIPANT_REQUIRED: "La decisión corresponde al otro participante.",
+  BOOKING_DISCOUNT_RESCHEDULE_REVIEW_REQUIRED: "Ese horario requiere revisar el importe con la empresa. La reserva conserva su horario y precio actuales.",
   BOOKING_FINANCIAL_ACCEPTANCE_REQUIRED: "Confirma expresamente las condiciones existentes. No se realizan cobros ni devoluciones.",
   BOOKING_OUTSIDE_AVAILABILITY: "El intervalo completo queda fuera de la disponibilidad.",
   BOOKING_BUSINESS_UNAVAILABLE: "El establecimiento no está disponible para este cambio.",

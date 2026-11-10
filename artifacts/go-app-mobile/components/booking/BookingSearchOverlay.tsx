@@ -22,6 +22,7 @@ import {
 import { Feather } from "@expo/vector-icons";
 import { CatalogComplementSelector } from "./CatalogComplementSelector";
 import { catalogBookingServices, isCatalogService, type CatalogQuote } from "@/data/catalogAssociations";
+import { getBookingDiscountPrices, quoteBookingDiscount, type BookingDiscountPrices } from "@/data/bookingDiscounts";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -775,8 +776,35 @@ export function BookingSearchOverlay({
     goToStep("slots", "forward");
   };
 
+  const useDatedDiscounts = !demoRepository && canonicalBookingActivity(selectedBusiness?.category) === "peluqueria";
+  const [comparison, setComparison] = useState<{ scope: string; prices: BookingDiscountPrices }>();
+  useEffect(() => {
+    let active = true;
+    setComparison(undefined);
+    if (step !== "slots" || !useDatedDiscounts || !catalogQuote || !slots.length) return;
+    const scope = currentSlotScope.current;
+    const starts = [...new Set(compactTimelineOptions(slots.filter(slot => slot.isAvailable)).flatMap(slot =>
+      slot.startInstant ? [new Date(slot.startInstant).toISOString()] : []))];
+    if (!starts.length || starts.length > 112) return;
+    void getBookingDiscountPrices(catalogQuote, starts).then(prices => {
+      if (active && currentSlotScope.current === scope && Object.values(prices).some(price => price.discountTotal > 0)) {
+        setComparison({ scope, prices });
+      }
+    }).catch(() => {}); // Optional comparison; the selected quote still gates confirmation.
+    return () => { active = false; };
+  }, [slots, step, useDatedDiscounts, catalogQuote, selectedDate, selectionScope]);
+  const showSlotPrice = (slot: AvailableSlot) => {
+    if (!slot.startInstant || comparison?.scope !== currentSlotScope.current || !catalogQuote) return null;
+    const price = comparison.prices[new Date(slot.startInstant).toISOString()];
+    if (!price) return null;
+    const money = new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: catalogQuote.currency });
+    return <Text style={[s.slotUnitsAvail, {color:price.discountTotal > 0 ? accentColor : "#fff"}]}>{money.format(price.totalPrice)}</Text>;
+  };
+  const reviewingSlot = useRef(false);
   const handleSelectSlot = async (slot: AvailableSlot) => {
-    if (!selectedBusiness || !selectedItem) return;
+    if (!selectedBusiness || !selectedItem || reviewingSlot.current) return;
+    reviewingSlot.current = true;
+    const scope = currentSlotScope.current;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
       const staffId = slot.staffId ?? (selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined);
@@ -792,11 +820,15 @@ export function BookingSearchOverlay({
       setSlotTakenError(false);
       // createHold llama a claimSlotOrReject internamente — READ→CHECK→WRITE atómico.
       // No hay pre-check por UI: el bloqueo vive en la capa de storage.
+      const timedQuote = useDatedDiscounts && catalogQuote && slot.startInstant
+        ? await quoteBookingDiscount(catalogQuote, slot.startInstant)
+        : catalogQuote;
+      if (scope !== currentSlotScope.current) return;
       const result = await (demoRepository?.createHold ?? createHold)({
         businessId: selectedBusiness.id,
         bookableItemId: selectedItem.id,
         ...(selectedServices.length ? { services: selectedServices } : {}),
-        ...(catalogQuote ? { catalogSnapshot: catalogQuote } : {}),
+        ...(timedQuote ? { catalogSnapshot: timedQuote } : {}),
         startInstant: slot.startInstant, endInstant: slot.endInstant, timingSnapshot: slot.timingSnapshot,
         customerId: demoRepository?.ownerUserId ?? "me",
         staffId,
@@ -805,6 +837,10 @@ export function BookingSearchOverlay({
         unitsReserved: 1,
         peopleCount: 1,
       });
+      if (scope !== currentSlotScope.current) {
+        if (result.ok) await cancelSelectedBooking(result.booking.id).catch(() => {});
+        return;
+      }
       if (!result.ok) {
         // El slot ya estaba ocupado en el momento de escribir el HOLD
         setSlotTakenError(true);
@@ -816,8 +852,9 @@ export function BookingSearchOverlay({
       // Notifica inmediatamente — sin esperar al polling de 3 min
       if (!demoRepository) onHoldCreated?.();
     } catch (error) {
-      setSlotError(error instanceof Error ? error.message : "No se pudo comprobar el horario. No se ha creado ninguna reserva.");
-      loadSlots();
+      if (scope === currentSlotScope.current) setSlotError(error instanceof Error ? error.message : "No se pudo comprobar el horario. No se ha creado ninguna reserva.");
+    } finally {
+      reviewingSlot.current = false;
     }
   };
 
@@ -861,6 +898,14 @@ export function BookingSearchOverlay({
         });
       } catch (error) {
         setConfirming(false);
+        if (error instanceof BookingApiError && error.code === "CATALOG_QUOTE_STALE") {
+          cancelSelectedBooking(activeHold.id).catch(() => {});
+          setActiveHold(null);
+          goToStep("slots", "back");
+          Alert.alert(lang === "en" ? "Price changed" : "El precio ha cambiado",
+            lang === "en" ? "Choose the time again and review the updated price." : "Vuelve a elegir el horario y revisa el nuevo precio.");
+          return;
+        }
         if (
           error instanceof BookingApiError &&
           (error.status === 409 || ["23P01","BOOKING_CONFLICT","BOOKING_OUTSIDE_AVAILABILITY","BOOKING_STAFF_UNAVAILABLE","BOOKING_GAP_NOT_MULTIPLE"].includes(error.code ?? ""))
@@ -1612,6 +1657,7 @@ export function BookingSearchOverlay({
                           <Text style={[s.singleSlotTime, { color: accentColor }]}>
                             {timelineOptionLabel(sl, slots)}
                           </Text>
+                          {showSlotPrice(sl)}
                           {isPartial && (
                             <Text style={[s.singleSlotUnits, { color: `${accentColor}BB` }]}>
                               {sl.availableUnits === 1
@@ -1647,6 +1693,7 @@ export function BookingSearchOverlay({
                               <Text style={[s.slotTimeAvail, { color: "#FFFFFF" }]}>
                                 {timelineOptionLabel(sl, slots)}
                               </Text>
+                              {showSlotPrice(sl)}
                               {isPartial && (
                                 <Text style={[s.slotUnitsAvail, { color: `${accentColor}CC` }]}>
                                   {sl.availableUnits === 1
@@ -1686,6 +1733,17 @@ export function BookingSearchOverlay({
                         {selectedBusiness.name}
                       </Text>
                       <Text style={s.summaryServiceName}>{trSector(summaryItem!.title, lang)}</Text>
+                      {activeHold.catalogSnapshot?.originalTotal !== undefined && (() => {
+                        const quote = activeHold.catalogSnapshot;
+                        const money = new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: quote.currency });
+                        return <View style={{ gap: 3, marginTop: 6 }}>
+                          <Text style={s.summaryRowText}>{lang === "en" ? "Original price" : "Precio original"} · {money.format(quote.originalTotal ?? quote.totalPrice)}</Text>
+                          {quote.lines.filter(line => line.discountBasisPoints !== undefined).map(line =>
+                            <Text key={line.itemId} style={s.summaryRowText}>{line.name} · {line.discountBasisPoints! / 100} % · −{money.format(line.discountAmount ?? 0)}</Text>)}
+                          <Text style={s.summaryRowText}>{lang === "en" ? "Total discount" : "Descuento total"} · −{money.format(quote.discountTotal ?? 0)}</Text>
+                          <Text style={[s.summaryRowText, {color:accentColor}]}>{lang === "en" ? "Final price" : "Precio final"} · {money.format(quote.totalPrice)}</Text>
+                        </View>;
+                      })()}
                       {/* Profesional — siempre visible si fue elegido */}
                       {proLabel && (
                         <View style={[s.summaryRow, { marginTop: 6 }]}>

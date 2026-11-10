@@ -102,12 +102,21 @@ function fixture(kind = "provider", overrides = {}) {
         ? [planFor({ ...parameters, fold: 0 }), planFor({ ...parameters, fold: 1 })] : [planFor(parameters)];
       return Response.json({ version: 1, phasePolicyVersion:1, gapPolicyVersion:1, timezone: "Europe/Madrid", availableDates: [parameters.date], slots: plans });
     }
-    if (parsed.pathname.endsWith("/catalog/quote")) {
+    if (parsed.pathname.endsWith("/booking-discounts/prices")) {
+      return state.discounts ? Response.json(Object.fromEntries(body.startsAt.map(instant=>[instant,{totalPrice:18,discountTotal:2}])))
+        : new Response(null,{status:404});
+    }
+    if (parsed.pathname.endsWith("/booking-discounts/quote") && !state.discounts) return new Response(null,{status:404});
+    if (parsed.pathname.endsWith("/catalog/quote") || parsed.pathname.endsWith("/booking-discounts/quote")) {
       const rows = body.rootIds.map(id => state.services.get(body.businessId)?.find(row => row.id === id));
       assert.ok(rows.every(Boolean), "catalogue quote uses actual selected fixture IDs");
+      const timed = parsed.pathname.endsWith("/booking-discounts/quote");
+      const originalTotal = rows.reduce((sum, row) => sum + row.price, 0);
       return Response.json({ version: 1, businessId: body.businessId, rootIds: body.rootIds, selectedAssociationIds: [], ready: true,
-        lines: rows.map(row => ({ itemId: row.id, name: row.name, kind: "service", durationMinutes: row.duration_minutes, charge: row.price, currency: row.currency })),
-        options: [], serviceIds: body.rootIds, totalPrice: rows.reduce((sum, row) => sum + row.price, 0), currency: "EUR" });
+        lines: rows.map(row => ({ itemId: row.id, name: row.name, kind: "service", durationMinutes: row.duration_minutes, charge: timed ? row.price * .9 : row.price, currency: row.currency,
+          ...(timed ? {originalCharge:row.price,discountBasisPoints:1000,discountAmount:row.price / 10} : {}) })),
+        options: [], serviceIds: body.rootIds, totalPrice: timed ? originalTotal * .9 : originalTotal, currency: "EUR",
+        ...(timed ? {originalTotal,discountTotal:originalTotal / 10} : {}) });
     }
     if (parsed.pathname.endsWith("/bookings/timeline") || parsed.pathname.endsWith("/bookings/catalog")) {
       assert.equal(init.method, "POST");
@@ -147,6 +156,8 @@ function fixture(kind = "provider", overrides = {}) {
   const api = apiScope.exports;
   const catalogScope = { exports: {}, require(name) { if (name === "./booking") return api; throw Error(name); } };
   vm.runInNewContext(source("data/catalogAssociations.ts"), catalogScope);
+  const discountScope={exports:{},require(name){if(name==="./booking")return api;if(name==="./catalogAssociations")return catalogScope.exports;throw Error(name);}};
+  vm.runInNewContext(source("data/bookingDiscounts.ts"),discountScope);
 
   let hookIndex = 0, effects = [], dirty = false, tree, props;
   const hooks = [];
@@ -193,7 +204,7 @@ function fixture(kind = "provider", overrides = {}) {
     "@workspace/api-zod": modulePublicationPolicy,
     "@/hooks/useBookingModulePublication": loadModulePublicationHook(React),
     "./CatalogComplementSelector": { CatalogComplementSelector: "CatalogComplementSelector" },
-    "@/data/catalogAssociations": catalogScope.exports,
+    "@/data/catalogAssociations": catalogScope.exports, "@/data/bookingDiscounts":discountScope.exports,
     react: { ...React, default: React }, "react-native": native,
     "@react-native-async-storage/async-storage": { default: storage },
     "expo-linear-gradient": { LinearGradient: "LinearGradient" }, "@expo/vector-icons": { Feather: "Feather" },
@@ -290,6 +301,21 @@ async function openOverlaySlots(f, person = "Ana") {
   await f.press("save"); await f.press(person); return f.tree();
 }
 
+for (const kind of ["provider", "overlay"]) test(`${kind} review shows the timed discount and submits the accepted breakdown`, async () => {
+  const f = fixture(kind, { discounts: true });
+  await (kind === "provider" ? openProviderSlots(f) : openOverlaySlots(f));
+  await f.press("02:37");
+  assert.match(text(f.tree()),/Precio original/);
+  assert.match(text(f.tree()),/Descuento total/);
+  assert.match(text(f.tree()),/Precio final/);
+  assert.equal(posted(f).length,0);
+  const quote=f.calls.find(call=>call.url.pathname.endsWith("/booking-discounts/quote"));
+  assert.equal(quote.body.startsAt,planFor().startsAt);
+  await f.press("biz_confirm_booking_btn");
+  const confirmed=posted(f)[0].body;
+  assert.equal(confirmed.expected_quote.discountTotal,confirmed.expected_quote.originalTotal / 10);
+  assert.equal(confirmed.expected_quote.totalPrice,confirmed.expected_quote.originalTotal * .9);
+});
 test("provider's real callback selects the canonical professional UUID and uses only server availability", async () => {
   const f = fixture(); await openProviderSlots(f);
   assert.ok(text(f.tree()).includes("02:37"));

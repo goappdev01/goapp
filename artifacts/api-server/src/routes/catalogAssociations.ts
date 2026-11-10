@@ -14,11 +14,19 @@ async function call(req: Request, res: Response, rpc: string, args: object, crea
     const response = await supabaseRequest(`/rest/v1/rpc/${rpc}`, { method: "POST", headers: { ...bearerHeader(req.header("authorization")), "Content-Type": "application/json" }, body: JSON.stringify(args) });
     const value = await response.json() as { code?: string; message?: string } | null;
     if (response.ok) { res.status(created ? 201 : 200).json(created ? [value] : value); return; }
-    const missing = ["PGRST202", "42883", "42703"].includes(value?.code ?? "");
-    const status = missing ? 501 : value?.code === "42501" ? 403 : ["23505", "23P01", "40001", "40P01"].includes(value?.code ?? "") ? 409
+    const missing = ["PGRST202", "42883", "42703", "42P01"].includes(value?.code ?? "");
+    const status = missing ? 501 : response.status === 401 ? 401 : value?.code === "42501" ? 403 : ["23505", "23P01", "40001", "40P01"].includes(value?.code ?? "") ? 409
       : /^PT(400|403|404|409|422)$/.test(value?.code ?? "") ? Number(value!.code!.slice(2)) : response.status >= 500 ? 503 : 400;
-    res.status(status).json({ code: missing ? "CATALOG_ASSOCIATIONS_UNAVAILABLE" : /^CATALOG_[A-Z_]+$/.test(value?.message ?? "") ? value!.message : "CATALOG_OPERATION_FAILED",
-      error: missing ? "Las asociaciones requieren revisión del servidor." : "No se pudo confirmar la selección. Revisa los complementos y sus precios." });
+    const discounts = rpc.startsWith("go_booking_discount");
+    const reason = value?.message ?? "";
+    res.status(status).json({ code: missing ? (discounts ? "BOOKING_DISCOUNTS_UNAVAILABLE" : "CATALOG_ASSOCIATIONS_UNAVAILABLE")
+      : /^(CATALOG|BOOKING_DISCOUNT)_[A-Z_]+$/.test(reason) ? reason : "CATALOG_OPERATION_FAILED",
+      error: reason === "BOOKING_DISCOUNT_OVERLAP" ? "Ya hay una promoción activa para alguno de esos servicios en esta franja."
+        : reason === "CATALOG_QUOTE_STALE" ? "El precio ha cambiado. Vuelve a elegir el horario y revisa el nuevo total."
+        : missing && discounts ? "Los descuentos aún no están disponibles en el servidor."
+        : reason === "BOOKING_DISCOUNT_ACTIVITY_FORBIDDEN" ? "Esta actividad no admite promociones de GO Peluquerías."
+        : discounts ? "No se pudo comprobar la promoción en el servidor."
+        : missing ? "Las asociaciones requieren revisión del servidor." : "No se pudo confirmar la selección. Revisa los complementos y sus precios." });
   } catch { res.status(503).json({ code: "CATALOG_UNAVAILABLE", error: "No se pudo comprobar el resultado. Reintenta con la misma referencia." }); }
 }
 router.post("/catalog/associations", async (req, res) => {
@@ -39,6 +47,37 @@ router.post("/catalog/quote", async (req, res) => {
   if (!object(b) || !id(b.businessId) || !ids(b.rootIds, 1) || b.rootIds.length > 32 || !ids(b.selectedIds ?? [])
     || Object.keys(b).some(k => !["businessId", "rootIds", "selectedIds"].includes(k))) { res.status(400).json({ error: "Selección inválida." }); return; }
   await call(req, res, "go_catalog_quote", { p_business_id: b.businessId, p_root_ids: b.rootIds, p_selected_ids: b.selectedIds ?? [] });
+});
+router.post("/booking-discounts", async (req, res) => {
+  const b = req.body;
+  if (!object(b) || !id(b.businessId) || !["list", "create", "update", "delete"].includes(String(b.action))
+    || !object(b.input ?? {}) || Object.keys(b).some(key => !["businessId", "action", "input"].includes(key))) {
+    res.status(400).json({ error: "Promoción inválida." }); return;
+  }
+  await call(req, res, "go_booking_discounts", { p_business_id: b.businessId, p_action: b.action, p_input: b.input ?? {} });
+});
+router.post("/booking-discounts/prices", async (req, res) => {
+  const b = req.body;
+  if (!object(b) || !id(b.businessId) || !ids(b.rootIds, 1) || b.rootIds.length > 32 || !ids(b.selectedIds)
+    || !Array.isArray(b.startsAt) || b.startsAt.length < 1 || b.startsAt.length > 112
+    || !b.startsAt.every(value => typeof value === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:00\.000Z$/.test(value) && Number.isFinite(Date.parse(value)))
+    || Object.keys(b).some(key => !["businessId", "rootIds", "selectedIds", "startsAt"].includes(key))) {
+    res.status(400).json({ error: "Horarios inválidos." }); return;
+  }
+  await call(req, res, "go_booking_discount_prices", {
+    p_business_id: b.businessId, p_root_ids: b.rootIds, p_selected_ids: b.selectedIds, p_starts_at: b.startsAt,
+  });
+});
+router.post("/booking-discounts/quote", async (req, res) => {
+  const b = req.body;
+  if (!object(b) || !id(b.businessId) || !ids(b.rootIds, 1) || b.rootIds.length > 32 || !ids(b.selectedIds)
+    || typeof b.startsAt !== "string" || !/(Z|[+-]\d{2}:\d{2})$/.test(b.startsAt) || !Number.isFinite(Date.parse(b.startsAt))
+    || Date.parse(b.startsAt) % 60000 !== 0 || Object.keys(b).some(key => !["businessId", "rootIds", "selectedIds", "startsAt"].includes(key))) {
+    res.status(400).json({ error: "Horario o selección inválidos." }); return;
+  }
+  await call(req, res, "go_booking_discount_quote", {
+    p_business_id: b.businessId, p_root_ids: b.rootIds, p_selected_ids: b.selectedIds, p_starts_at: b.startsAt,
+  });
 });
 router.post("/bookings/catalog", async (req, res) => {
   const b = req.body;

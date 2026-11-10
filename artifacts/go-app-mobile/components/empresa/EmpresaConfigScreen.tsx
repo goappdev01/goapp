@@ -56,6 +56,7 @@ import { Step0Actividad } from "@/components/empresa/EmpresaSetupGuide";
 import { captureAuthIdentity, isAuthIdentityCurrent } from "@/lib/authSession";
 import { resolveCalendarExceptionBusiness, setCalendarBusinessTimezone } from "@/data/calendarExceptions";
 import { CalendarExceptionsSection } from "./CalendarExceptionsSection";
+import { BookingDiscountSection } from "./BookingDiscountSection";
 
 import { GoTimeField } from "@/components/ui/GoTimePicker";
 import {
@@ -969,6 +970,7 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
   const color = currentSector?.color ?? PURPLE;
   const [selectedDay, setSelectedDay] = useState(0);
   const [exceptionsOpen, setExceptionsOpen] = useState(false);
+  const [discountsOpen, setDiscountsOpen] = useState(false);
   const [timezone, setTimezone] = useState(config.timezone ?? "");
   const [timezoneError, setTimezoneError] = useState("");
   const [timezonePickerOpen, setTimezonePickerOpen] = useState(false);
@@ -1293,6 +1295,18 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
           <Feather name={exceptionsOpen ? "chevron-up" : "chevron-down"} size={18} color={color} />
         </TouchableOpacity>
       </View>
+      {config.subId === "peluqueria" && !demo && !!config.businessId && <>
+        <TouchableOpacity testID="booking-discounts-access" accessibilityRole="button"
+          accessibilityState={{ expanded: discountsOpen }} onPress={() => setDiscountsOpen(open => !open)}
+          style={[c.copyBtn, { minHeight: 48, borderWidth: 1, borderColor: color }]}>
+          <Feather name="percent" size={18} color={color} />
+          <Text style={[c.copyBtnTxt, { color: TEXT, flex: 1 }]}>
+            {lang === "en" ? "Discounts by date and time" : "Descuentos por fecha y horario"}
+          </Text>
+          <Feather name={discountsOpen ? "chevron-up" : "chevron-down"} size={18} color={color} />
+        </TouchableOpacity>
+        {discountsOpen && <BookingDiscountSection key={config.businessId} sourceId={config.businessId} color={color} />}
+      </>}
       {exceptionsOpen && <CalendarExceptionsSection key={config.businessId ?? "unlinked"} businessId={config.businessId} timezone={config.timezone} color={color} onManageConflicts={onManageConflicts} onBusinessResolved={value => {
         // Recover only a missing zone from this exact owner-authorized registered business.
         // Never replace an existing setting or an unfinished edit of the weekly form.

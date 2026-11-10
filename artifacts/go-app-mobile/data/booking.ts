@@ -447,7 +447,7 @@ function mapRemoteBooking(row: RemoteBooking): Booking {
     startInstant:row.starts_at,endInstant:row.ends_at,
     timingSnapshot: row.timing_snapshot ?? undefined,
     catalogSnapshot: row.catalog_snapshot ?? undefined,
-    totalPrice: row.total_price != null ? Number(row.total_price) : undefined,
+    totalPrice: row.total_price != null ? Number(row.total_price) : row.catalog_snapshot?.totalPrice,
     currency: row.currency,
     services: (row.timing_snapshot?.serviceDetails ?? row.service_details)?.map(service => ({ ...service, price: service.price ?? 0, priceKnown: service.price != null && (!("priceKnown" in service) || service.priceKnown !== false) })),
     startDatetime: startsAt,
