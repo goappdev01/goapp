@@ -1,58 +1,54 @@
-# Accesos independientes de Expo Go desde el panel privado
+# Acceso real de Expo 8089 desde iPhone
 
-## Comprobación que motivó la corrección
+## Fallo y evidencia conservada
 
-La prueba física comunicada no mostró 8089 en Recently Opened. El enlace anterior
-del panel y su respuesta efectiva eran `exp://<IP Tailscale>:8089`; las peticiones
-reales de manifiesto y bundle no redirigían a 8088. Ambos manifiestos tenían el
-nombre correcto, puertos y carpetas diferentes, pero el mismo slug y scopeKey.
-No se ha inspeccionado el historial privado del iPhone ni se ha demostrado que
-ese scopeKey compartido sea por sí solo la causa del comportamiento físico.
+El iPhone comunicó timeout. Una respuesta del servidor desde Windows no probaba
+su accesibilidad desde el teléfono. La inspección del firewall encontró perfil
+Privado con entrada bloqueada por defecto y una excepción para ese iPhone a
+8088, sin excepción equivalente para 8089. Ambos Metro usaban el mismo Node y
+escuchaban correctamente; Tailscale alcanzaba el iPhone. No se halló una
+redirección 8089 → 8088.
 
-El código público actual de Expo Go distingue las URL de desarrollo por host y
-puerto en su gestor de enlaces, y trata además `release-channel` como
-discriminador de aplicación. El historial iOS se guarda localmente y no es una
-interfaz que el puente pueda modificar de forma fiable.
+Además, el puente había sustituido la IP anunciada por Expo CLI por un nombre
+MagicDNS para 8089, mientras su comprobación interna eludía DNS conectándose a
+la IP. Esa ruta ordinaria fallaba al resolverla desde Windows. No se atribuye el
+timeout concreto de iOS a DNS sin captura del teléfono, pero se elimina esa
+dependencia innecesaria y el falso positivo de la prueba.
 
-Fuentes:
+## Corrección
 
-- [Gestor nativo de enlaces](https://github.com/expo/expo/blob/main/apps/expo-go/ios/Exponent/Kernel/Services/EXKernelLinkingManager.m).
-- [Historial de Home](https://github.com/expo/expo/blob/main/apps/expo-go/ios/Client/SwiftUI/HomeViewModel.swift).
+Tras autorización específica del propietario se añadió una sola regla entrante
+TCP 8089, limitada al iPhone autorizado, IP Tailscale del PC, Node y perfil
+Privado. El respaldo, la prueba de igualdad de las demás reglas y la reversión
+exclusiva de esa regla se guardan fuera de Git, en el estado local del puente.
+No se cambian las reglas de 8088 ni políticas globales. No se reinician Metro,
+Tailscale o el backend.
 
-## Corrección acotada
+Los enlaces usan la IPv4 y el puerto anunciados por el endpoint oficial GET
+`/_expo/open?platform=ios&runtime=expo`. No se añaden nombres DNS ni canales de
+apertura artificiales, ni se propagan parámetros de automatización que oculten
+el menú de Expo Go. La identidad funcional, scopeKey y sesiones se conservan.
 
-El mismo panel muestra ahora dos botones permanentes y explícitos:
+`expo_links.py` comprueba en segundo plano, con límites y caché:
 
-- **ABRIR COLA TERMINADA · 8088**: IP Tailscale, puerto 8088 y discriminador
-  `release-channel=go-cola-terminada-8088`.
-- **ABRIR COMPROBACIONES · 8089**: nombre DNS privado del mismo equipo, puerto
-  8089 y discriminador `release-channel=go-comprobaciones-8089`.
+- Destino oficial, manifiesto, nombre, SDK 58, puerto y carpeta fijada de 8089.
+- Descarga completa del bundle iOS, tamaño y SHA-256.
+- Enumeración y descarga de sus recursos registrados, incluidas fuentes e imágenes.
+- Handshake WebSocket de desarrollo, registrado aparte de la carga funcional.
+- Lectura de la regla limitada autorizada y del perfil Tailscale, sin mutaciones.
 
-Son autoridades y URL de apertura diferentes. Este parámetro solo identifica el
-arranque de desarrollo; no publica canales EAS ni cambia configuración alojada.
-No se cambian slug, scheme, projectId, scopeKey, autenticación o almacenamiento.
-8089 conserva su SHA elegido, directorio y procesos independientes.
+En la instalación comprobada se descargaron realmente los dos bundles y 60
+recursos por entorno. Esto acredita Windows → Metro, no iPhone → GO. El panel
+lo dice expresamente y permite copiar el diagnóstico de cada entorno. Un fallo
+no sustituye 8089 por 8088 ni conserva un enlace anterior como éxito.
 
-`tools/go-codex-bridge/expo_links.py` obtiene el manifiesto real de cada destino,
-sin seguir redirecciones. Exige coincidencia de nombre, SDK 58, puerto de
-hostUri, debuggerHost y URL del bundle iOS. Un destino inválido no recibe enlace;
-jamás se sustituye 8089 por 8088. La consulta es de lectura y tiene caché de diez
-segundos, timeout acotado y caducidad de los enlaces. El navegador bloquea
-enlaces caducados o respuestas con puertos intercambiados. El clic válido sigue
-siendo síncrono para conservar el gesto requerido por Safari.
+## Límites de verificación
 
-El campo antiguo `expo.url` también entrega el nuevo acceso verificado a 8089,
-para corregir una pestaña antigua mientras se recarga la interfaz nueva.
+La carga física completa en Expo Go requiere la confirmación del propietario.
+No se marca como superada mediante HTTP 200, una conexión TCP ni el consumo de
+bytes de Tailscale. El historial Recently Opened no es requisito de esta prueba:
+se utiliza el botón específico del panel. 8089 conserva su SHA seleccionado;
+8088 conserva su función principal. Rueda pausada y tarjetas intactas.
 
-## Verificación y límites
-
-Pruebas Python: `python -m unittest discover -s tests -p test_expo_links.py`.
-Pruebas de enlaces visibles: `node --test tests/expo-links-ui.test.mjs`.
-Se conservan las pruebas de permisos HTTP y de los nombres Expo anteriores.
-
-El despliegue solo sustituye las fuentes propias del puente y utiliza su reinicio
-controlado con rueda pausada, sin ejecuciones activas. Metro, Tailscale, backend,
-autorizaciones y tarjetas se preservan. La publicación y el proceso cargado se
-verifican por separado. La comprobación física final usa los dos botones del
-panel y el menú de Expo Go; no depende de que Recently Opened se haya actualizado.
-No se declara resuelto el historial nativo sin validación física.
+Fuentes: [Expo CLI y endpoint oficial](https://docs.expo.dev/more/expo-cli/),
+[conectividad de dispositivos Tailscale](https://tailscale.com/docs/how-to/connect-to-devices).

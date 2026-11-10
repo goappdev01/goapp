@@ -6,15 +6,17 @@ async function api(route,body){const r=await fetch('/remote/'+route,{method:body
 function message(text){$('message').textContent=text;}
 function updateExpoLinks(launches){
   const expires=Number(launches?.expires_at||0)*1000;
-  for(const [key,id,status,port,channel] of [['main','expoMainLink','expoMainStatus',8088,'go-cola-terminada-8088'],['owner','expoLink','expoOwnerStatus',8089,'go-comprobaciones-8089']]){
+  for(const [key,id,status,port] of [['main','expoMainLink','expoMainStatus',8088],['owner','expoLink','expoOwnerStatus',8089]]){
     const link=$(id),item=launches?.links?.[key];let valid=false;
-    try{const target=new URL(item?.url);valid=Boolean(item?.available)&&item.port===port&&target.protocol==='exp:'&&target.port===String(port)&&!target.username&&!target.password&&!target.hash&&['','/'].includes(target.pathname)&&target.searchParams.get('release-channel')===channel&&Date.now()<expires;}catch{}
+    try{const target=new URL(item?.url);valid=Boolean(item?.available)&&item.port===port&&target.protocol==='exp:'&&target.port===String(port)&&/^100\.[0-9.]+$/.test(target.hostname)&&!target.username&&!target.password&&!target.hash&&!target.search&&['','/'].includes(target.pathname)&&Date.now()<expires;}catch{}
     link.setAttribute('aria-disabled',String(!valid));link.tabIndex=valid?0:-1;
     if(valid)link.href=item.url;else link.removeAttribute('href');
-    $(status).textContent=valid?'Destino comprobado. Listo para abrir.':(item?.message||'Esperando la comprobación de este entorno.');
+    $(status).textContent=item?.message||'Comprobación desde el PC pendiente; carga en iPhone sin confirmar.';
+    const diagnostic=$(key==='main'?'expoMainDiagnostic':'expoOwnerDiagnostic');if(diagnostic)diagnostic.textContent=item?.diagnostic||'Comprobación técnica en curso; iPhone pendiente.';
     link.onclick=event=>{if(!valid||Date.now()>=expires){event.preventDefault();link.removeAttribute('href');link.setAttribute('aria-disabled','true');$(status).textContent='Actualiza el panel para comprobar el destino antes de abrir.';return false;}return true;};
   }
 }
+async function copyExpoDiagnostic(id){try{await navigator.clipboard.writeText($(id).textContent);message('Diagnóstico técnico copiado.');}catch{message('No se pudo copiar automáticamente. El diagnóstico queda visible para seleccionarlo.');}}
 async function action(fn){if(busy)return;busy=true;try{await fn();await refresh();}catch(e){message(e.message);}finally{busy=false;}}
 async function review(actionName,payload={}){await action(async()=>{ticket=await api('preview',{action:actionName,payload});$('preview').textContent=JSON.stringify(ticket.review,null,2);$('confirmLabel').textContent=ticket.confirmation==='ACTIVAR FÁBRICA'?'Confirmar iniciará exclusivamente este lote autorizado y permitirá continuar con tarjetas independientes.':'Confirma solo la operación revisada. Esta operación no activa la fábrica.';$('decision').showModal();});}
 function render(s){last=s;csrf=s.csrf;$('connection').textContent='Conexión privada verificada';$('wheel').textContent='Rueda: '+s.wheel.state;$('reason').textContent=s.wheel.reason||'Sin bloqueo global registrado';$('updated').textContent='Actualización: '+s.updated;$('quota').textContent=JSON.stringify(s.quota);$('activate').disabled=s.wheel.enabled||!s.wheel.batch_id;$('rebind').disabled=s.wheel.enabled;$('version').textContent=s.version;
@@ -24,3 +26,4 @@ const e=s.expo;$('expo').textContent=`${e.state} · ${e.sha||'sin versión confi
 }
 async function refresh(){try{render(await api('status'));}catch(e){$('connection').textContent='Sin conexión verificada. Los datos anteriores pueden estar desactualizados.';$('activate').disabled=true;updateExpoLinks(null);message(e.message);}}
 $('pause').onclick=()=>action(async()=>{await api('pause',{});message('Pausa solicitada y confirmada. No se iniciarán nuevas fases.');});$('activate').onclick=()=>review('activate');$('rebind').onclick=()=>review('rebind');$('checkQuota').onclick=()=>action(async()=>{await api('quota',{});message('Cuota consultada. La rueda conserva su estado.');});$('select').onclick=()=>review('expo_select',{sha:$('sha').value.trim()});$('rollback').onclick=()=>review('expo_rollback');$('cancel').onclick=()=>{$('decision').close();ticket=null;};$('confirm').onclick=()=>action(async()=>{if(!ticket)return;const t=ticket;ticket=null;$('decision').close();const r=await api('decide',{ticket:t.ticket,confirmation:t.confirmation});message(r.message||JSON.stringify(r));});refresh();setInterval(()=>{if(!busy&&!document.hidden)refresh();},5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
+$('expoMainCopy').onclick=()=>copyExpoDiagnostic('expoMainDiagnostic');$('expoOwnerCopy').onclick=()=>copyExpoDiagnostic('expoOwnerDiagnostic');

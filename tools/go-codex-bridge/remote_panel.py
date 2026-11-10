@@ -110,8 +110,14 @@ class RemotePanel:
             from expo_links import ExpoLinks
             if self.expo_links is None:
                 owner_root=Path(document['workspace'])/'artifacts/go-app-mobile' if document.get('workspace') else None
-                self.expo_links=ExpoLinks(document['host'],self.config['hostname'],owner_root)
+                from expo_device_access import check
+                self.expo_links=ExpoLinks(document['host'],self.config['hostname'],owner_root,
+                    device_check=lambda:check(document['host'],self.config.get('expo_phone'),document['node']))
             launches=self.expo_links.status()
+        if expo.get('sha') and expo.get('head')!=expo['sha']:
+            owner_link=launches['links'].get('owner')
+            if owner_link:
+                owner_link.update(available=False,url=None,message='La carpeta no coincide con la versión fijada. No se abrirá otra versión.')
         # Also correct an already-open older panel, whose script reads expo.url.
         expo['url']=launches['links'].get('owner',{}).get('url')
         return {"version":__import__("puente").EXECUTOR_VERSION,"source_sha256":getattr(self.b,'loaded_code_sha256',None),"updated":self.f.utc(),

@@ -13,14 +13,14 @@ function setup() {
     removeAttribute(key){delete this.attrs[key];}
   }
   const document={getElementById(id){if(!elements.has(id))elements.set(id,new Element());return elements.get(id);},addEventListener(){}};
-  const context=vm.createContext({document,URL,Date,fetch:()=>new Promise(()=>{}),setInterval(){}});
+  const context=vm.createContext({document,URL,Date,fetch:()=>new Promise(()=>{}),setInterval(){},navigator:{clipboard:{writeText(text){context.copied=text;return Promise.resolve();}}}});
   vm.runInContext(readFileSync(new URL('../remote.js',import.meta.url),'utf8'),context);
   const payload={expires_at:Date.now()/1000+20,links:{
-    main:{available:true,port:8088,url:'exp://100.64.0.1:8088?release-channel=go-cola-terminada-8088'},
-    owner:{available:true,port:8089,url:'exp://desktop.test.ts.net:8089?release-channel=go-comprobaciones-8089'},
+    main:{available:true,port:8088,url:'exp://100.64.0.1:8088'},
+    owner:{available:true,port:8089,url:'exp://100.64.0.1:8089'},
   }};
   function render(data){context.payload=data;vm.runInContext('updateExpoLinks(payload)',context);}
-  return {elements,payload,render};
+  return {elements,payload,render,context};
 }
 
 test('two visible labels and exact, distinct native launch destinations',()=>{
@@ -59,9 +59,19 @@ test('expired clicks are blocked synchronously; valid clicks preserve Safari use
   assert.equal(prevented,true);
 });
 
-test('script destinations and ordinary unscoped links are rejected',()=>{
-  for(const url of ['javascript:alert(1)','exp://100.64.0.1:8089','exp://100.64.0.1:8089/--/other?release-channel=go-comprobaciones-8089']){
+test('script destinations, DNS dependencies and navigation-injected links are rejected',()=>{
+  for(const url of ['javascript:alert(1)','exp://desktop.test.ts.net:8089','exp://100.64.0.1:8089/--/other?release-channel=go-comprobaciones-8089']){
     const {elements,payload,render}=setup();payload.links.owner.url=url;render(payload);
     assert.equal(elements.get('expoLink').href,undefined);
   }
+});
+
+test('status says where verification occurred and preserves a copyable per-environment diagnosis',async()=>{
+  const {elements,payload,render,context}=setup();
+  payload.links.owner.message='Recursos comprobados desde el PC. iPhone pendiente.';
+  payload.links.owner.diagnostic='Comprobaciones 8089: Windows; falta prueba iPhone.';
+  render(payload);
+  assert.match(elements.get('expoOwnerStatus').textContent,/iPhone pendiente/);
+  await elements.get('expoOwnerCopy').onclick();
+  assert.equal(context.copied,payload.links.owner.diagnostic);
 });
