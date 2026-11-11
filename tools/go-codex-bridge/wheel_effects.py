@@ -192,8 +192,17 @@ class WheelEffects:
             self.fail("WHEEL_INDEX_BUSY", "Existe trabajo preparado en el índice.")
         for name in tracked | fresh:
             target = _assert_route(workspace, name)
-            if target.exists() and (not target.is_file() or target.stat().st_size > 1024 * 1024):
-                self.fail("WHEEL_PATCH_SIZE", "El cambio necesita revisión por tamaño o tipo.")
+            if target.exists():
+                if not target.is_file():
+                    self.fail("WHEEL_PATCH_SIZE", "El cambio necesita revisión por tamaño o tipo.")
+                if target.stat().st_size > 1024 * 1024:
+                    # Large established screens can receive small reviewed edits.
+                    # New large files and large growth still require separate review.
+                    if name in fresh:
+                        self.fail("WHEEL_PATCH_SIZE", "Un archivo nuevo supera el tamaño autorizado.")
+                    previous=pub.git_command(workspace,"show","HEAD:"+name).encode("utf-8")
+                    if len(previous)<=1024*1024 or target.stat().st_size-len(previous)>1024*1024:
+                        self.fail("WHEEL_PATCH_SIZE", "El archivo creció fuera del alcance autorizado.")
         if fresh:
             # Checked against the grant and initially clean pre-execution worktree.
             # Intent-to-add exposes the new file to the existing exact patch procedure.

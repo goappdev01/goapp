@@ -8,6 +8,7 @@ import unittest
 import test_factory_v2
 from factory import CHECK
 from puente import codex_resume_command, BridgeError
+from wheel_effects import WheelEffects,WheelPublication
 
 
 class ContinuousQueueTests(unittest.TestCase):
@@ -114,6 +115,25 @@ class ContinuousQueueTests(unittest.TestCase):
         self.assertEqual(selected["expected"],ids[0])
         self.assertTrue(selected["post_move_close"])
         self.assertFalse(self.runs or self.changes)
+
+    def test_large_existing_screen_allows_small_edit_but_new_large_file_does_not(self):
+        w,ids=self.batch()
+        path=self.root/self.files[0]
+        path.write_bytes(b"a"*(1024*1024+20))
+        self.git("add","--",self.files[0])
+        self.git("commit","-m","large established screen")
+        path.write_bytes(path.read_bytes()+b"\nsmall change\n")
+        with self.bridge.db() as db:
+            grant=w._verified(db.execute("SELECT * FROM wheel_grants WHERE card_id=?",(ids[0],)).fetchone())
+        grant={**grant,"allowed_files":["artifacts/go-app-mobile/"]}
+        pub=WheelPublication(self.bridge.factory,[])
+        effects=WheelEffects(self.bridge.factory)
+        self.assertIn("small change",effects._check_files(self.root,grant,pub,validate=False))
+        fresh=self.root/"artifacts/go-app-mobile/new-large.ts"
+        fresh.write_bytes(b"b"*(1024*1024+1))
+        with self.assertRaises(BridgeError) as failure:
+            effects._check_files(self.root,grant,pub,validate=False)
+        self.assertEqual(failure.exception.code,"WHEEL_PATCH_SIZE")
 
     def test_credit_recovery_claims_same_job_and_session_once(self):
         w,ids=self.batch()
