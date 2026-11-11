@@ -200,17 +200,20 @@ class Factory:
             if not isinstance(pos, (float, int)) or pos <= previous:
                 raise self.Error("FACTORY_ORDER_INVALID", "No se puede confirmar el orden real de la cola.")
             previous = pos
-        preview = [{"card_id": c["id"], "title": c["name"], "position":c["pos"], "eligible_agent4": set(re.findall(r"\b(?:A|AGENTE\s*)([1-5])\b", c["name"], re.I)) == {"4"}} for c in cards if c["id"] not in INSTALL_CARDS][:15]
+        live=bool(self.wheel.live_policy())
+        preview = [{"card_id": c["id"], "title": c["name"], "position":c["pos"],
+                    "eligible_agent4":live or set(re.findall(r"\b(?:A|AGENTE\s*)([1-5])\b", c["name"], re.I)) == {"4"}}
+                   for c in cards if c["id"] not in INSTALL_CARDS]
         with self.bridge.db() as db:
             db.execute("UPDATE factory_control SET queue_preview=? WHERE id=1", (self.canonical(preview),))
         return cards
 
-    def _spec(self, card):
+    def _spec(self, card, *, live_queue=False, initial_card_ids=()):
         if card["id"] in INSTALL_CARDS:
             raise self.Error("FACTORY_SELF_CARD", "La instalación de la fábrica está excluida de su propia cola.")
         title = card["name"]
         matches = set(re.findall(r"\b(?:A|AGENTE\s*)([1-5])\b", title, re.I))
-        if len(matches) != 1:
+        if not live_queue and len(matches) != 1:
             raise self.Error("FACTORY_AGENT_AMBIGUOUS", "El título no indica un agente único.")
         attempt_match = re.search(r"\bIntento\s+(\d+)\b", title, re.I)
         attempt = int(attempt_match[1]) if attempt_match else 1
@@ -225,7 +228,20 @@ class Factory:
                 or check.get("id") != card["id"] or check.get("idBoard") != BOARD
                 or check.get("idList") != QUEUE or check.get("desc") or check.get("name") != title):
             raise self.Error("FACTORY_CARD_CHANGED", "La tarjeta cambió durante la lectura.")
-        placement = self._authorized_placement(card["id"])
+        try:
+            placement = self._authorized_placement(card["id"])
+        except self.Error as error:
+            if not (live_queue and card["id"] in initial_card_ids and
+                    not self._row(card["id"],1) and
+                    error.code == "FACTORY_PLACEMENT_UNVERIFIED"):
+                raise
+            actions = self.bridge.api("/1/cards/" + card["id"] + "/actions",
+                                      {"filter": "createCard", "limit": 1000})
+            created = [action for action in actions if action.get("type") == "createCard" and
+                       action.get("idMemberCreator") == OWNER]
+            if len(created) != 1:
+                raise self.Error("FACTORY_PLACEMENT_UNVERIFIED", "No se puede verificar que el propietario creó esta tarjeta.")
+            placement = "initial-owner-card:" + created[0]["id"]
         comments = snapshot["comments"]
         if not comments or any(c.get("creatorId") != OWNER for c in comments):
             raise self.Error("FACTORY_AUTHOR_INVALID", "Hay comentarios de origen no verificado.")
@@ -234,18 +250,37 @@ class Factory:
         instructions = self.original_comments(card["id"], comments)
         if not instructions or not instructions[0]["text"].strip():
             raise self.Error("FACTORY_INSTRUCTION_MISSING", "Falta la instrucción original.")
-        if attempt == 1 and len(instructions) != 1:
+        if not live_queue and attempt == 1 and len(instructions) != 1:
             raise self.Error("FACTORY_COMMENTS_AMBIGUOUS", "Hay comentarios adicionales sin un intento nuevo.")
-        if attempt > 1 and (len(instructions) < attempt or
+        if not live_queue and attempt > 1 and (len(instructions) < attempt or
                             any(not CORRECTION_RE.match(c["text"]) for c in instructions[1:])):
             raise self.Error("FACTORY_CORRECTION_AMBIGUOUS", "No se puede distinguir una corrección autorizada de otros comentarios.")
         text = "\n\n".join(c["text"] for c in instructions)
         if len(text.encode("utf-8")) > 1024 * 1024:
             raise self.Error("FACTORY_INSTRUCTION_TOO_LARGE", "Instrucción demasiado larga.")
-        return {"card_id": card["id"], "attempt": attempt, "agent": matches.pop(),
-                "title": title, "instruction": text, "instruction_sha": self.digest(text),
+        instruction_sha=self.digest(text)
+        live_return=False
+        if live_queue:
+            with self.bridge.db() as db:
+                prior=db.execute("SELECT attempt,state,instruction_sha FROM factory_attempts WHERE card_id=? "
+                                 "ORDER BY attempt DESC LIMIT 1",(card["id"],)).fetchone()
+                if prior and prior["instruction_sha"]!=instruction_sha:
+                    receipt=db.execute("SELECT g.terms FROM wheel_grants g JOIN wheel_stages s "
+                                       "ON s.grant_id=g.grant_id AND s.letter='D' AND s.state='verified' "
+                                       "WHERE g.card_id=? AND g.attempt=?",(card["id"],prior["attempt"])).fetchone()
+                    former=json.loads(receipt["terms"]) if receipt else None
+                    if (prior["state"] not in ("closed","blocked") or not former or
+                            former["placement"]==placement):
+                        raise self.Error("FACTORY_RETRY_INVALID","La corrección todavía no tiene un regreso autorizado a COLA.")
+                    attempt=prior["attempt"]+1
+                    live_return=True
+                elif prior:
+                    attempt=prior["attempt"]
+        return {"card_id": card["id"], "attempt": attempt, "agent": "4" if live_queue else matches.pop(),
+                "title": title, "instruction": text, "instruction_sha": instruction_sha,
                 "comment_ids": [c["id"] for c in instructions],
-                "placement": placement, "activity": check.get("dateLastActivity")}
+                "placement": placement, "activity": check.get("dateLastActivity"),
+                "live_return":live_return}
 
     def original_comments(self, card_id, comments):
         with self.bridge.db() as db:
@@ -483,10 +518,12 @@ class Factory:
         before = self._git(workspace)
         card_id, attempt = spec["card_id"], spec["attempt"]
         with self.bridge.db() as db:
-            previous = db.execute("SELECT attempt,state FROM factory_attempts WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
+            previous = db.execute("SELECT attempt,state,instruction_sha FROM factory_attempts WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
                                   (card_id,)).fetchone()
             if previous:
-                if attempt != previous["attempt"] + 1 or previous["state"] != "await_review":
+                if attempt != previous["attempt"] + 1 or (previous["state"] != "await_review" and
+                        not (spec.get("live_return") and previous["state"] in ("closed","blocked") and
+                             previous["instruction_sha"]!=spec["instruction_sha"])):
                     raise self.Error("FACTORY_RETRY_INVALID", "El nuevo intento no sigue a una revisión humana.")
             elif attempt != 1:
                 raise self.Error("FACTORY_RETRY_UNTRACKED", "Un intento anterior no consta en el registro local.")

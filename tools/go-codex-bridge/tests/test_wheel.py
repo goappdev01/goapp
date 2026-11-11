@@ -12,6 +12,7 @@ import test_bridge as fixtures
 from factory import BOARD, QUEUE, CHECK, NAMES, OWNER, INSTALL_CARDS
 from puente import Bridge, BridgeError
 from wheel_effects import WheelPublication, WheelEffects
+from remote_panel import RemotePanel
 
 
 TWO_STEPS = [
@@ -715,3 +716,165 @@ class WheelTests(unittest.TestCase):
         record["receipt"]["tests"][0]["passed"]=False;receipt.write_text(json.dumps(record))
         with self.assertRaises(BridgeError) as forged:effect._tests(row,grant,self.root)
         self.assertEqual(forged.exception.code,"WHEEL_RECOVERY_INVALID")
+
+    def test_owner_live_queue_ignores_legacy_agent_title_and_materializes_once(self):
+        first=self.cards["a"*24]
+        first["name"]="V2-A2 antigua etiqueta"
+        first["comments"].append({"id":"f"*24,"text":"Regla adicional del propietario",
+                                  "creatorId":OWNER})
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("e"*64)
+        self.assertTrue(wheel.enabled())
+        self.assertTrue(wheel.status()["live_queue_authorized"])
+        cards={c["id"]:c for c in self.bridge.factory._cards()}
+        selected=wheel._live_selection(cards,wheel.live_policy())
+        self.assertEqual(selected["expected"],first["id"])
+        with self.bridge.db() as db:
+            rows=list(db.execute("SELECT * FROM wheel_grants WHERE card_id=?",(first["id"],)))
+        self.assertEqual(len(rows),1)
+        grant=wheel._verified(rows[0])
+        self.assertEqual(grant["agent"],"4")
+        self.assertEqual(grant["operations"],list("ABCD"))
+        self.assertEqual(len(grant["comment_ids"]),2)
+        wheel._live_selection(cards,wheel.live_policy())
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM wheel_grants WHERE card_id=?",
+                                        (first["id"],)).fetchone()[0],1)
+        wheel.revoke_live()
+        self.assertFalse(wheel.enabled())
+
+    def test_live_queue_skips_blocked_card_and_rechecks_new_order(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("d"*64)
+        cards={c["id"]:c for c in self.bridge.factory._cards()}
+        first=wheel._live_selection(cards,wheel.live_policy())
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='blocked',reason='WHEEL_TEST_FAILED' WHERE grant_id=?",
+                       (first["grant_id"],))
+        second=wheel._live_selection(cards,wheel.live_policy())
+        self.assertEqual(second["expected"],"b"*24)
+        self.cards["a"*24]["pos"]=3072
+        self.cards=dict(sorted(self.cards.items(),key=lambda item:item[1]["pos"]))
+        selected=wheel._live_selection({c["id"]:c for c in self.bridge.factory._cards()},wheel.live_policy())
+        self.assertEqual(selected["expected"],"b"*24)
+
+    def test_live_hosted_block_is_reported_and_moved_without_executing_codex(self):
+        self.cards["a"*24]["comments"][0]["text"]="Preparar soporte real conectado al backend alojado."
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("c"*64)
+        cards={c["id"]:c for c in self.bridge.factory._cards()}
+        selection=wheel._live_selection(cards,wheel.live_policy())
+        with self.bridge.db() as db:
+            grant=wheel._verified(db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",
+                                             (selection["grant_id"],)).fetchone())
+            db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=?",(selection["grant_id"],))
+        self.assertTrue(grant["backend_required"])
+        _,spec=wheel._subject(cards["a"*24])
+        with patch.object(wheel,"_preflight"):
+            with self.assertRaises(BridgeError) as blocked:
+                wheel._prepare(grant,spec)
+        self.assertEqual(blocked.exception.code,"WHEEL_HOSTED_PROOF_REQUIRED")
+        result=wheel._finish_error(grant,blocked.exception.code)
+        self.assertIn("card_blocked",result,str(result))
+        self.assertEqual(result["card_blocked"],"a"*24)
+        self.assertEqual(self.changes,[("a"*24,"C"),("a"*24,"D")])
+        self.assertEqual(self.cards["a"*24]["idList"],CHECK)
+        self.assertFalse(self.runs)
+        self.assertEqual(wheel._live_selection({c["id"]:c for c in self.bridge.factory._cards()},
+                                               wheel.live_policy())["expected"],"b"*24)
+
+    def test_live_queue_rejects_new_card_with_unverified_owner(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("b"*64)
+        third="c"*24
+        self.cards[third]={"id":third,"idBoard":BOARD,"idList":QUEUE,"name":"Nueva función",
+                           "shortLink":"c"*8,"closed":False,"pos":512,"desc":"",
+                           "dateLastActivity":"new","comments":[{"id":"c"*24,
+                           "text":"Instrucción de tercero","creatorId":"0"*24}]}
+        self.cards=dict(sorted(self.cards.items(),key=lambda item:item[1]["pos"]))
+        chosen=wheel._live_selection({c["id"]:c for c in self.bridge.factory._cards()},wheel.live_policy())
+        self.assertEqual(chosen["expected"],"a"*24)
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM wheel_grants WHERE card_id=?",
+                                        (third,)).fetchone()[0],0)
+
+    def test_live_queue_does_not_advance_declared_dependency(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("a"*64,{"b"*24:["a"*24]})
+        cards={c["id"]:c for c in self.bridge.factory._cards()}
+        first=wheel._live_selection(cards,wheel.live_policy())
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='blocked',reason='WHEEL_TEST_FAILED' WHERE grant_id=?",
+                       (first["grant_id"],))
+        selected=wheel._live_selection(cards,wheel.live_policy())
+        self.assertEqual(selected["waiting"],"NO_SAFE_ELIGIBLE_CARD")
+        with self.bridge.db() as db:
+            saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=?",("b"*24,)).fetchone()
+        self.assertEqual(wheel._verified(saved)["depends_on"],["a"*24])
+
+    def test_live_credit_wait_needs_original_session_and_checkpoint(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("9"*64)
+        cards={c["id"]:c for c in self.bridge.factory._cards()}
+        selected=wheel._live_selection(cards,wheel.live_policy())
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='credit_wait',reason='CREDIT_LIMIT' WHERE grant_id=?",
+                       (selected["grant_id"],))
+            db.execute("UPDATE wheel_control SET enabled=0,reason='CREDIT_LIMIT' WHERE id=1")
+        self.assertFalse(wheel.resume_after_quota())
+        self.assertFalse(wheel.enabled())
+        self.assertFalse(self.runs)
+
+    def test_owner_returned_correction_gets_new_attempt_without_replay(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("8"*64)
+        first=self.cards["a"*24]
+        selected=wheel._live_selection({c["id"]:c for c in self.bridge.factory._cards()},wheel.live_policy())
+        subject,spec=wheel._subject(first)
+        self.bridge.factory._start(spec)
+        with self.bridge.db() as db:
+            db.execute("UPDATE factory_attempts SET state='closed' WHERE card_id=?",(first["id"],))
+            db.execute("UPDATE wheel_grants SET state='closed' WHERE grant_id=?",(selected["grant_id"],))
+            db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started,finished,receipt) "
+                       "VALUES(?,'D','verified',?,?,?)",(selected["grant_id"],"now","now","{}"))
+        first["comments"].append({"id":"8"*24,"text":"Corrección concreta del propietario",
+                                  "creatorId":OWNER})
+        old_api=self.bridge.api
+        def returned_api(path,params=None,**kwargs):
+            if path=="/1/cards/"+first["id"]+"/actions":
+                return [{"id":"8"*24,"type":"updateCard","date":"2026-11-11",
+                         "idMemberCreator":OWNER,"data":{"listAfter":{"id":QUEUE}}}]
+            return old_api(path,params,**kwargs)
+        self.bridge.api=returned_api
+        chosen=wheel._live_selection({c["id"]:c for c in self.bridge.factory._cards()},wheel.live_policy())
+        self.assertEqual(chosen["expected"],first["id"])
+        with self.bridge.db() as db:
+            rows=list(db.execute("SELECT attempt FROM wheel_grants WHERE card_id=? ORDER BY attempt",
+                                 (first["id"],)))
+        self.assertEqual([r["attempt"] for r in rows],[1,2])
+        self.assertFalse(self.runs or self.changes)
+
+    def test_live_tick_starts_first_verified_card_once(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("7"*64)
+        with patch.object(wheel,"_preflight"),patch.object(WheelEffects,"_dependencies"):
+            result=wheel.tick()
+        self.assertTrue(result.get("again"),str(result))
+        self.assertEqual(self.runs,["a"*24])
+        self.assertFalse(self.changes)
+
+    def test_live_owner_panel_shows_queue_and_can_resume_after_pause(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("6"*64)
+        panel=RemotePanel(self.bridge)
+        state=panel.snapshot()
+        self.assertEqual(state["wheel"]["batch_id"],"owner-live-queue-v1")
+        self.assertEqual(len(state["cards"]),2)
+        self.assertEqual(state["wheel"]["button"]["state"],"active")
+        wheel.pause("OWNER_PAUSED")
+        state=panel.snapshot()
+        self.assertEqual(state["wheel"]["button"]["state"],"paused")
+        ticket=panel.preview("activate",{},"synthetic-owner")
+        panel.decide(ticket["ticket"],ticket["confirmation"],"synthetic-owner")
+        self.assertTrue(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)

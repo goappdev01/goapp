@@ -35,6 +35,22 @@ personales ni se conceden permisos sensibles de forma implícita.
 
 ## Continuidad por tarjeta
 
+La autorización continua del propietario para la cola viva de Peluquerías se
+guarda firmada en `wheel_live_authorization`. Registra tablero, lista origen y
+destino, identidad Trello, cuenta Codex, huella de la instrucción de autorización
+y las tarjetas presentes al activarla. Cada tarjeta nueva se vuelve a leer de
+Trello, exige comentario del propietario y entrada verificable en la cola, y
+recibe un permiso A/B/C/D firmado para su versión concreta. Los números de
+agente antiguos del título no asignan el ejecutor: esta cola usa únicamente la
+carpeta del Agente 4. Pausa y revocación conservan los checkpoints.
+
+La publicación automática de esta vía limita el parche a los archivos móviles;
+los cambios de API alojada, SQL e infraestructura quedan conservados para
+revisión y requieren autorización y prueba adicional. 8089 continúa fijado.
+El sondeo usa el bucle existente de 60 segundos. Una incidencia de tarjeta
+comprobada se comenta como pendiente y se traslada arriba de COMPROBAR cuando
+la escritura es verificable; un efecto externo incierto pausa la rueda.
+
 La política `independent-v2` solo se incorpora al lote mediante la acción
 explícita Activar fábrica. Las autorizaciones A–D siguen siendo individuales.
 El estado de cada tarjeta se conserva independientemente del global. Una tarjeta

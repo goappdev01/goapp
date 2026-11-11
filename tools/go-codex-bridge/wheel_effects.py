@@ -184,7 +184,7 @@ class WheelEffects:
         fresh = set(filter(None, pub.git_command(workspace, "ls-files", "--others", "--exclude-standard", "-z").split("\0")))
         if not tracked | fresh or not within_scope(tracked | fresh,allowed):
             self.fail("WHEEL_PATCH_SCOPE", "El parche es vacío o contiene archivos fuera del alcance autorizado.")
-        if validate and any(path.startswith(("artifacts/api-server/","lib/db/","supabase/migrations/")) for path in tracked|fresh):
+        if validate and any(path.startswith(("artifacts/api-server/","lib/api-zod/","lib/db/","supabase/migrations/")) for path in tracked|fresh):
             self.fail("WHEEL_HOSTED_PROOF_REQUIRED","El parche requiere comprobar el servicio alojado antes de publicarse.")
         if validate and any(re.search(r"^(?:railway\.(?:json|toml)|Dockerfile(?:[./]|$)|(?:infrastructure|terraform)/)|(?:\.pem|\.key)$",path,re.I) for path in tracked|fresh):
             self.fail("WHEEL_INFRASTRUCTURE_SCOPE","Este cambio requiere la revisión específica de infraestructura o secretos.")

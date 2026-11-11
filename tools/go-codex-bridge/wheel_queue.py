@@ -46,6 +46,9 @@ class Wheel:
             CREATE TABLE IF NOT EXISTS wheel_continuity_mode(
                 id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0);
             INSERT OR IGNORE INTO wheel_continuity_mode(id) VALUES(1);
+            CREATE TABLE IF NOT EXISTS wheel_live_authorization(
+                id INTEGER PRIMARY KEY CHECK(id=1), document TEXT NOT NULL,
+                signature TEXT NOT NULL, state TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS wheel_grants(
                 card_id TEXT NOT NULL, attempt INTEGER NOT NULL, grant_id TEXT NOT NULL UNIQUE,
                 terms TEXT NOT NULL, signature TEXT NOT NULL, state TEXT NOT NULL, reason TEXT,
@@ -86,6 +89,76 @@ class Wheel:
                 return self.continuous(connection)
         return bool(db.execute("SELECT enabled FROM wheel_continuity_mode WHERE id=1").fetchone()[0])
 
+    def live_policy(self, db=None):
+        if db is None:
+            with self.b.db() as connection:
+                return self.live_policy(connection)
+        row=db.execute("SELECT * FROM wheel_live_authorization WHERE id=1").fetchone()
+        if not row or row["state"]!="active":
+            return None
+        doc=json.loads(row["document"])
+        if (not hmac.compare_digest(self.b.sign(doc),row["signature"])
+                or doc.get("actor")!=self.b.actor or doc.get("board")!=BOARD
+                or doc.get("origin")!=QUEUE or doc.get("destination")!=CHECK
+                or doc.get("owner")!=OWNER or doc.get("operations")!=list(STAGES)
+                or not isinstance(doc.get("initial_card_ids"),list)
+                or not isinstance(doc.get("dependencies"),dict)):
+            self.fail("WHEEL_GRANT_INTEGRITY","La autorización continua no se puede verificar.")
+        return doc
+
+    def activate_live(self, consent_sha256, dependencies=None):
+        """Record the owner's explicit queue-wide consent, then start the existing wheel."""
+        if not re.fullmatch(r"[0-9a-f]{64}",str(consent_sha256)):
+            self.fail("WHEEL_CONSENT_INVALID","Falta la huella de la instrucción expresa del propietario.")
+        with self.f.lock:
+            self.f._identity()
+            self.f._lists()
+            cards=list(self._available(self.f._cards()))
+            if not cards:
+                self.fail("FACTORY_QUEUE_INCOMPLETE","No se ha podido verificar la cola inicial.")
+            initial=[card["id"] for card in cards]
+            dependencies=dependencies or {}
+            if (not isinstance(dependencies,dict) or set(dependencies)-set(initial) or
+                    any(not isinstance(items,list) or len(items)!=len(set(items)) or
+                        any(dep not in initial[:initial.index(card_id)] for dep in items)
+                        for card_id,items in dependencies.items())):
+                self.fail("WHEEL_DEPENDENCY_INVALID","Las dependencias iniciales no siguen el orden verificado de Trello.")
+            for card in cards:
+                self.f._spec(card,live_queue=True,initial_card_ids=initial)
+            refreshed=list(self._available(self.f._cards()))
+            if [(card["id"],card["pos"],card["name"]) for card in refreshed] != [
+                    (card["id"],card["pos"],card["name"]) for card in cards]:
+                self.fail("WHEEL_ORDER_CHANGED","La cola cambió durante la activación; vuelve a revisarla.")
+            identity=self._require_codex_identity()
+            doc={"kind":"owner-live-queue-v1","actor":self.b.actor,"board":BOARD,
+                 "origin":QUEUE,"destination":CHECK,"owner":OWNER,
+                 "operations":list(STAGES),"initial_card_ids":initial,
+                 "dependencies":dependencies,
+                 "codex_identity":identity,"consent_sha256":consent_sha256,
+                 "started_at":self.f.utc(),"extraordinary_operations":False}
+            with self.b.db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                if self.live_policy(db):
+                    return self.status()
+                if db.execute("SELECT 1 FROM wheel_grants WHERE state='working'").fetchone():
+                    self.fail("WHEEL_BATCH_BUSY","Hay una ejecución que debe conciliarse antes de activar.")
+                db.execute("UPDATE wheel_trials SET state='superseded' WHERE state='active'")
+                db.execute("INSERT OR REPLACE INTO wheel_live_authorization VALUES(1,?,?,'active')",
+                           (self.f.canonical(doc),self.b.sign(doc)))
+                db.execute("UPDATE wheel_continuity_mode SET enabled=1 WHERE id=1")
+                db.execute("UPDATE wheel_control SET enabled=1,reason=NULL,retry_after=0 WHERE id=1")
+                db.execute("UPDATE factory_control SET enabled=0 WHERE id=1")
+                self.b.audit("wheel_live_owner_activated",{"consent_sha256":consent_sha256,
+                    "initial_card_ids":initial,"count":len(initial)},db)
+        return self.status()
+
+    def revoke_live(self):
+        with self.f.lock,self.b.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("UPDATE wheel_control SET enabled=0,reason='OWNER_STOPPED' WHERE id=1")
+            db.execute("UPDATE wheel_live_authorization SET state='revoked' WHERE id=1")
+            self.b.audit("wheel_live_owner_revoked",{},db)
+
     def toggle(self, enabled):
         if type(enabled) is not bool:
             self.fail("WHEEL_STATE_INVALID", "Selecciona activar o pausar la rueda.")
@@ -97,7 +170,10 @@ class Wheel:
             already_enabled=bool(db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0])
             if already_enabled:
                 return self.status()
-            batch = self._latest_trial(db)
+            live=self.live_policy(db)
+            batch = None if live else self._latest_trial(db)
+            if live:
+                self._require_codex_identity(live["codex_identity"])
             if batch and batch[1].get("kind") == FROZEN_BATCH and batch[0]["state"] != "active":
                 self.fail("WHEEL_BATCH_START_REQUIRED", "El lote congelado requiere su confirmación conjunta de arranque.")
             if batch and batch[1].get("kind")==FROZEN_BATCH:
@@ -145,13 +221,15 @@ class Wheel:
             control=db.execute("SELECT * FROM wheel_control WHERE id=1").fetchone()
             if control["enabled"] or control["reason"]!="CREDIT_LIMIT":
                 return False
-            batch=self._latest_trial(db)
-            rows=([db.execute("SELECT * FROM wheel_grants WHERE grant_id=? AND state='credit_wait'",
+            live=self.live_policy(db)
+            batch=None if live else self._latest_trial(db)
+            rows=(list(db.execute("SELECT * FROM wheel_grants WHERE state='credit_wait'")) if live else
+                  [db.execute("SELECT * FROM wheel_grants WHERE grant_id=? AND state='credit_wait'",
                               (item["grant_id"],)).fetchone() for item in batch[1]["cards"]]
                   if batch and batch[1].get("kind")==FROZEN_BATCH else [])
             rows=[row for row in rows if row]
-            if (not batch or batch[0]["state"]!="active" or batch[1].get("policy")!="independent-v2"
-                    or len(rows)!=1 or time.time()>=batch[1]["expires_at"]):
+            if (len(rows)!=1 or not live and (not batch or batch[0]["state"]!="active"
+                    or batch[1].get("policy")!="independent-v2" or time.time()>=batch[1]["expires_at"])):
                 return False
             grant=self._verified(rows[0])
             attempt=self.f._row(grant["card_id"],grant["attempt"])
@@ -167,7 +245,7 @@ class Wheel:
             expected=json.loads(checkpoint["snapshot"])["workspace"]
             job_id=job["id"]
         try:
-            self._require_codex_identity(batch[1]["codex_identity"])
+            self._require_codex_identity(live["codex_identity"] if live else batch[1]["codex_identity"])
             if str(self.b.workspace("4")[0]) != grant["workspace"]:
                 return False
             from wheel_effects import WheelPublication
@@ -241,7 +319,8 @@ class Wheel:
         with self.b.db() as db:
             control = dict(db.execute("SELECT * FROM wheel_control WHERE id=1").fetchone())
             continuous=self.continuous(db)
-            batch = self._latest_trial(db)
+            live=self.live_policy(db)
+            batch = None if live else self._latest_trial(db)
             frozen = ({"id":batch[0]["id"], "state":batch[0]["state"], "policy":batch[1].get("policy"),
                        "cards":batch[1]["cards"]}
                       if batch and batch[1].get("kind") == FROZEN_BATCH else None)
@@ -298,11 +377,15 @@ class Wheel:
                 "credits":"Cuota agotada" if control["reason"]=="CREDIT_LIMIT" else None,
                 "quota":self.b.quota_status(),
                  "current":current, "queue_head":first, "automatic_credit_resume":continuous,
-                 "continuous_queue":continuous, "frozen_batch":frozen,
+                 "continuous_queue":continuous, "live_queue_authorized":bool(live),
+                 "live_queue_initial_count":len(live["initial_card_ids"]) if live else 0,
+                 "frozen_batch":frozen,
                 "recovery_required":control["reason"] in ("CREDIT_LIMIT","CREDIT_RECOVERY_REQUIRED")}
 
     def _subject(self, card, *, review=False):
-        spec = self.f._spec(card)
+        live=self.live_policy()
+        spec = self.f._spec(card,live_queue=bool(live),
+                            initial_card_ids=live["initial_card_ids"] if live else ())
         workspace, sandbox = self.b.workspace("4")
         from pathlib import Path
         for agent,settings in self.b.config["agents"].items():
@@ -314,6 +397,8 @@ class Wheel:
         if spec["agent"] != "4" or card["id"] in INSTALL_CARDS or sandbox != "workspace-write":
             self.fail("WHEEL_AGENT_INVALID", "Solo se autoriza el agente 4 en su carpeta independiente.")
         subject = {k:spec[k] for k in ("card_id","attempt","agent","title","instruction_sha","comment_ids","placement")}
+        if live:
+            subject["live_return"]=spec["live_return"]
         subject.update(position=card["pos"], board=BOARD, origin=QUEUE, destination=CHECK,
                        workspace=str(workspace), agent_settings=self.b.config["agents"]["4"],
                        owner=OWNER, publish_target="goappdev01/goapp:main",cli_settings=self.b.cli_defaults())
@@ -328,7 +413,7 @@ class Wheel:
         if card["id"] in self.b.config.get("protected_card_ids", []):
             self.fail("REFERENCE_READ_ONLY", "Esta tarjeta está protegida.")
 
-    def _history_guard(self, card_id, attempt, sha):
+    def _history_guard(self, card_id, attempt, sha, *, live_return=False):
         with self.b.db() as db:
             rows = list(db.execute("SELECT * FROM factory_attempts WHERE card_id=? ORDER BY attempt DESC", (card_id,)))
             latest = rows[0] if rows else None
@@ -338,7 +423,9 @@ class Wheel:
                 job = self.b.job(latest["job_id"])
                 if job["state"] != "prepared" or job["data"]["instruction_sha256"] != sha:
                     self.fail("WHEEL_JOB_REVIEW", "Ya existe una ejecución o cambió su instrucción.")
-            elif (latest and (latest["attempt"] + 1 != attempt or latest["state"] != "await_review")) or (not latest and attempt != 1):
+            elif (latest and (latest["attempt"] + 1 != attempt or
+                    latest["state"] != "await_review" and not (live_return and
+                    latest["state"] in ("closed","blocked") and latest["instruction_sha"]!=sha))) or (not latest and attempt != 1):
                 self.fail("WHEEL_ATTEMPT_REVIEW", "El intento anterior no está conciliado.")
             for job in db.execute("SELECT id,data FROM jobs"):
                 source = json.loads(job["data"]).get("source", {})
@@ -368,7 +455,8 @@ class Wheel:
                     subject, spec = self._subject(card, review=True)
                     row.update(subject)
                     self._operation_guard(card)
-                    self._history_guard(card["id"], spec["attempt"], spec["instruction_sha"])
+                    self._history_guard(card["id"], spec["attempt"], spec["instruction_sha"],
+                                        live_return=spec.get("live_return",False))
                     row["eligible"] = True
                     row["instruction"] = spec["instruction"]
                     row.update(self._suggestions(tracked, card["name"], spec["instruction"]))
@@ -496,7 +584,8 @@ class Wheel:
         if not isinstance(decision,dict) or set(decision) != expected:
             self.fail("WHEEL_DECISION_INVALID","Faltan términos concretos de la decisión.")
         subject, spec = self._subject(card)
-        self._history_guard(card["id"], spec["attempt"], spec["instruction_sha"])
+        self._history_guard(card["id"], spec["attempt"], spec["instruction_sha"],
+                            live_return=spec.get("live_return",False))
         if decision["binding"] != subject["binding"]:
             self.fail("WHEEL_SUBJECT_CHANGED","La tarjeta o el agente han cambiado desde la revisión.")
         ops = decision["operations"]
@@ -530,7 +619,7 @@ class Wheel:
             self.fail("WHEEL_EXPIRY_INVALID","Selecciona una vigencia futura para esta tarjeta.")
         if type(decision["backend_required"]) is not bool:
             self.fail("WHEEL_SCOPE_INVALID","Indica si se debe verificar un servicio backend alojado.")
-        hosted_code=any(path.startswith(("artifacts/api-server/","lib/db/","supabase/migrations/")) for path in files)
+        hosted_code=any(path.startswith(("artifacts/api-server/","lib/api-zod/","lib/db/","supabase/migrations/")) for path in files)
         if not diagnosis and (hosted_code or self._hosted_required(card["name"],spec["instruction"])) and not decision["backend_required"]:
             self.fail("WHEEL_HOSTED_PROOF_REQUIRED","Esta instrucción exige comprobar el servicio alojado.")
         if any(re.search(r"^(?:railway\.(?:json|toml)|Dockerfile(?:[./]|$)|(?:infrastructure|terraform)/)|(?:\.pem|\.key)$",p,re.I) for p in files):
@@ -702,15 +791,16 @@ class Wheel:
             self.f._git(workspace)
 
     def _prepare(self,g,spec):
-        self._history_guard(g["card_id"],g["attempt"],g["instruction_sha"])
+        self._history_guard(g["card_id"],g["attempt"],g["instruction_sha"],
+                            live_return=g.get("live_return",False))
         self._verify_dependencies(g)
         self._preflight(self.b.workspace("4")[0])
-        if g["backend_required"]:
-            self.fail("WHEEL_HOSTED_PROOF_REQUIRED","Falta configurar la prueba autenticada del servicio alojado que exige esta tarjeta.")
         row=self.f._row(g["card_id"],g["attempt"])
         if not row:
             self.f._start(spec)
             row=self.f._row(g["card_id"],g["attempt"])
+        if g["backend_required"]:
+            self.fail("WHEEL_HOSTED_PROOF_REQUIRED","Falta autorización para activar y verificar el servicio alojado que exige esta tarjeta.")
         if g.get("work_kind")!="diagnosis" and not json.loads(row["detail"]).get("work_branch"):
             from wheel_effects import WheelEffects
             branch=WheelEffects(self.f).start_branch(g)
@@ -931,6 +1021,8 @@ class Wheel:
         return {"closed":g["card_id"],"again":not bool(trial and trial.get("paused"))}
 
     def _trial_limit(self,cards=None):
+        if self.live_policy():
+            return None
         if cards is None and self.continuous():
             cards={c["id"]:c for c in self._available(self.f._cards())}
         with self.b.db() as db:
@@ -999,6 +1091,112 @@ class Wheel:
         return (dependency.get("work_kind")=="diagnosis" and dependency["attempt"]==version["attempt"]
                 and dependency["instruction_sha"]==version["instruction_sha"])
 
+    def _live_grant(self, card, policy):
+        """Materialize A/B/C/D for one freshly verified owner card, once only."""
+        subject,spec=self._subject(card)
+        self._history_guard(card["id"],spec["attempt"],spec["instruction_sha"],
+                            live_return=spec.get("live_return",False))
+        diagnosis=subject.get("work_kind")=="diagnosis"
+        instruction=spec["instruction"]
+        # Hosted source may be preserved on a local branch, but publication of
+        # API changes still requires the independent hosted proof in WheelEffects.
+        tracked=self.b.safety.git_command(self.b.workspace("4")[0],"ls-files","-z","--",
+                                           "artifacts/go-app-mobile").split("\0")
+        suggestions=self._suggestions(tracked,card["name"],instruction)
+        dependencies=policy["dependencies"].get(card["id"],[])
+        versions={}
+        for dependency_id in dependencies:
+            with self.b.db() as db:
+                previous=db.execute("SELECT * FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
+                                    (dependency_id,)).fetchone()
+            if previous:
+                dependency=self._verified(previous)
+            else:
+                dependency_card=next((item for item in self.f._cards() if item["id"]==dependency_id),None)
+                if not dependency_card:
+                    self.fail("WHEEL_DEPENDENCY_UNVERIFIED","La dependencia no está en la cola ni tiene cierre verificado.")
+                dependency=self.f._spec(dependency_card,live_queue=True,
+                                        initial_card_ids=policy["initial_card_ids"])
+            versions[dependency_id]={key:dependency[key] for key in ("attempt","instruction_sha","title")}
+        grant={**subject,"operations":self._operations_for(subject),
+               "allowed_files":[] if diagnosis else ["artifacts/go-app-mobile/",
+                   "artifacts/api-server/src/","artifacts/api-server/supabase/drafts/","lib/api-zod/"],
+               "test_files":[] if diagnosis else suggestions["suggested_test_files"],
+               "depends_on":dependencies,"dependency_versions":versions,
+               "backend_required":suggestions["hosted_required"],
+               "expires_at":32503680000.0,"actor":self.b.actor,
+               "approved_at":self.f.utc(),"grant_id":uuid.uuid4().hex,
+               "live_consent_sha256":policy["consent_sha256"]}
+        with self.b.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not self.live_policy(db):
+                self.fail("WHEEL_PERMISSION_REQUIRED","La autorización continua fue revocada.")
+            prior=db.execute("SELECT 1 FROM wheel_grants WHERE card_id=? AND attempt=?",
+                             (card["id"],spec["attempt"])).fetchone()
+            if prior:
+                return
+            db.execute("INSERT INTO wheel_grants VALUES(?,?,?,?,?,'ready',NULL)",
+                       (card["id"],spec["attempt"],grant["grant_id"],
+                        self.f.canonical(grant),self.b.sign(grant)))
+            self.b.audit("wheel_live_card_granted",{"card_id":card["id"],
+                "instruction_sha":spec["instruction_sha"],"operations":grant["operations"],
+                "consent_sha256":policy["consent_sha256"]},db)
+
+    def _live_selection(self,cards,policy):
+        with self.b.db() as db:
+            working=db.execute("SELECT * FROM wheel_grants WHERE state='working'").fetchone()
+        if working:
+            if working["card_id"] not in cards:
+                with self.b.db() as db:
+                    moved=db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter='D' AND state='verified'",
+                                     (working["grant_id"],)).fetchone()
+                if not moved:
+                    return {"waiting":"WHEEL_WORKING_CARD_MISSING","open_queue":True}
+            return {"expected":working["card_id"],"grant_id":working["grant_id"],
+                    "codex_identity":policy["codex_identity"],"independent":True,
+                    "open_queue":True,"post_move_close":working["card_id"] not in cards}
+        for card in cards.values():
+            with self.b.db() as db:
+                saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
+                                 (card["id"],)).fetchone()
+            if saved and saved["state"] in ("closed","blocked","waiting_response"):
+                try:
+                    subject,_=self._subject(card)
+                    if subject["attempt"]>saved["attempt"]:
+                        self._live_grant(card,policy)
+                        with self.b.db() as db:
+                            saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
+                                             (card["id"],)).fetchone()
+                except self.f.Error as error:
+                    if self._system(error.code):
+                        raise
+                    continue
+            if not saved:
+                try:
+                    self._live_grant(card,policy)
+                except self.f.Error as error:
+                    if self._system(error.code):
+                        raise
+                    self.b.audit("wheel_live_card_rejected",{"card_id":card["id"],
+                        "reason":error.code})
+                    continue
+                with self.b.db() as db:
+                    saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
+                                     (card["id"],)).fetchone()
+            if not saved:
+                continue
+            grant=self._verified(saved)
+            if saved["state"] in ("blocked","waiting_response","closed","uncertain","expired"):
+                continue
+            with self.b.db() as db:
+                dependencies_ready=self._dependencies_ready(db,grant,None,cards)
+            if saved["state"] not in ("ready","wait_permissions") or not dependencies_ready:
+                continue
+            return {"expected":card["id"],"grant_id":grant["grant_id"],
+                    "codex_identity":policy["codex_identity"],"independent":True,"open_queue":True}
+        return {"waiting":"NO_SAFE_ELIGIBLE_CARD" if cards else "ESPERANDO_TARJETAS",
+                "open_queue":True}
+
     def _dependencies_ready(self, db, grant, trial, cards):
         """Recheck each dependency, including only the signed V2 diagnostic fallback."""
         fallback_edges=set()
@@ -1006,6 +1204,10 @@ class Wheel:
             fallback_edges=self._signed_fallback_edges(db,grant)
         for dep in grant["depends_on"]:
             version=grant["dependency_versions"][dep]
+            latest=db.execute("SELECT attempt FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
+                              (dep,)).fetchone()
+            if latest and latest["attempt"]!=version["attempt"]:
+                return False
             row=db.execute("SELECT * FROM wheel_grants WHERE card_id=? AND attempt=?",
                            (dep,version["attempt"])).fetchone()
             if row and row["state"]=="closed" and dep not in cards:
@@ -1021,7 +1223,10 @@ class Wheel:
             self.f._identity()
             self.f._lists()
             cards={c["id"]:c for c in self._available(self.f._cards())}
-            trial=self._trial_limit(cards)
+            live=self.live_policy()
+            if live:
+                self._require_codex_identity(live["codex_identity"])
+            trial=self._live_selection(cards,live) if live else self._trial_limit(cards)
             if trial and trial.get("paused"):
                 return trial
             if trial and trial.get("waiting"):
@@ -1039,7 +1244,7 @@ class Wheel:
                     first=next(iter(cards.values()),None)
                     if trial and trial.get("independent"):
                         first=cards.get(trial["expected"]) or ({"id":trial["expected"]} if trial.get("post_move_close") else None)
-                    if trial and (not first or first["id"]!=trial["expected"]):
+                    if trial and trial.get("expected") and (not first or first["id"]!=trial["expected"]):
                         self._pause_head(db,"WHEEL_TRIAL_ORDER_CHANGED")
                         return {"paused":"WHEEL_TRIAL_ORDER_CHANGED"}
                     if not first:

@@ -195,6 +195,12 @@ class RemotePanel:
     def snapshot(self):
         wheel=self.w.status()
         batch=wheel["frozen_batch"]
+        live=self.w.live_policy()
+        if live:
+            preview=json.loads(self.f._control().get("queue_preview") or "[]")
+            batch={"id":"owner-live-queue-v1","state":"active",
+                   "cards":[{"card_id":item["card_id"],"title":item["title"]}
+                            for item in preview]}
         cards=[]
         for index,item in enumerate((batch or {}).get("cards",[]),1):
             grant=next((g for g in wheel["grants"] if g["card_id"]==item["card_id"]),None)
@@ -210,7 +216,8 @@ class RemotePanel:
             done={s["letter"] for s in stages if s["state"]=="verified"}
             phase=next((letter for letter in "ABCD" if letter not in done),"closed")
             cards.append({"card_id":item["card_id"],"title":item["title"],"index":index,"total":len(batch["cards"]),
-                          "state":grant["state"] if grant else "unapproved","reason":grant["reason"] if grant else item.get("blocker"),
+                          "state":grant["state"] if grant else "queued" if live else "unapproved",
+                          "reason":grant["reason"] if grant else item.get("blocker"),
                           "phase":phase,"work_kind":item.get("work_kind"),"activity":self.activity(job),
                           "published":next(((s.get("receipt") or {}).get("main_sha") for s in stages if s["letter"]=="B"),None) or published_result.get("main_sha"),
                           "publication_state":("published_waiting_metro" if published_operation and not any(
@@ -261,6 +268,8 @@ class RemotePanel:
         try:device_diagnostics=self.device_probes.latest()
         except Exception:device_diagnostics={'browser':None,'launch':None,'limits':'No se pudo leer el registro.'}
         activation_confirmed=False
+        if live:
+            activation_confirmed=True
         if batch and batch.get("policy")=="independent-v2":
             try:
                 with self.b.db() as db:
@@ -274,7 +283,7 @@ class RemotePanel:
                     "renewal_required":any(grant["state"] in ("ready","working") and grant["expires_at"]<=time.time()
                         for grant in wheel["grants"] if grant["card_id"] in {item["card_id"] for item in (batch or {}).get("cards",[])}),
                     "current":next((card["title"] for card in cards if card["state"]=="working"),None),
-                    "next":next((card["title"] for card in cards if card["state"]=="ready"),None)}
+                    "next":next((card["title"] for card in cards if card["state"] in ("ready","queued")),None)}
         wheel_view["button"]=self.activation_button(wheel_view,cards)
         return {"version":__import__("puente").EXECUTOR_VERSION,"source_sha256":getattr(self.b,'loaded_code_sha256',None),"updated":self.f.utc(),
                 "wheel":wheel_view,
@@ -285,7 +294,16 @@ class RemotePanel:
     def preview(self,action,payload,principal):
         from owner_expo import OwnerExpo
         if action=="activate":
-            review=self.w.continuity.review_activation()
+            live=self.w.live_policy()
+            if live:
+                self.w.f._identity();self.w.f._lists()
+                self.w._require_codex_identity(live["codex_identity"])
+                cards=list(self.w._available(self.w.f._cards()))
+                review={"live_queue":True,"consent_sha256":live["consent_sha256"],
+                        "count":len(cards),"first":cards[0]["name"] if cards else None,
+                        "account_changed":False,"renewals":[]}
+            else:
+                review=self.w.continuity.review_activation()
         elif action=="rebind":
             review=self.w.continuity.review_activation()
             review={**review,"binding_only":True}
@@ -320,6 +338,11 @@ class RemotePanel:
                      "action":action,"review_sha":self.f.digest(self.f.canonical(review))})
         if action=="activate":
             try:
+                if review.get("live_queue"):
+                    live=self.w.live_policy()
+                    if not live or live["consent_sha256"]!=review["consent_sha256"]:
+                        self.w.fail("WHEEL_PERMISSION_REQUIRED","La autorización continua cambió durante la revisión.")
+                    return self.w.toggle(True)
                 return self.w.continuity.activate(review,principal)
             except self.w.f.Error as error:
                 self.w.activation_failed(error.code)

@@ -28,6 +28,8 @@ class Continuity:
             """)
 
     def active(self):
+        if self.w.live_policy():
+            return True
         with self.b.db() as db:
             batch=self.w._latest_trial(db)
             return bool(batch and batch[0]["state"]=="active" and batch[1].get("policy")=="independent-v2")
@@ -545,12 +547,29 @@ class Continuity:
             except self.f.Error as error:
                 self.w.pause(error.code)
                 return {"paused":error.code,"card_id":grant["card_id"]}
+        elif (self.w.live_policy() and not waiting and job and
+              all(self.w._operation_authorized(grant,letter) for letter in "CD") and
+              not self.w._expired(grant)):
+            try:
+                if job["state"]=="prepared":
+                    self.b.finish_job(job["id"],"blocked",{"exit_code":None,
+                        "response":"","classification_reason":code,
+                        "programming_started":False})
+                    job=self.b.job(job["id"])
+                self._defer_question_to_trello(grant,{
+                    "question":"La tarjeta requiere una comprobación o autorización adicional. "
+                               "El trabajo conservado todavía no está publicado.",
+                    "operation":code},job,allow_prepared=True)
+            except self.f.Error as error:
+                self.w.pause(error.code)
+                return {"paused":error.code,"card_id":grant["card_id"]}
         self.w._transition(grant,"waiting_response" if waiting else "wait_permissions" if code=="WHEEL_PERMISSION_REQUIRED" else "blocked",code)
         return {"card_blocked":grant["card_id"],"reason":code,"again":True}
 
-    def _defer_question_to_trello(self,grant,request,job):
+    def _defer_question_to_trello(self,grant,request,job,*,allow_prepared=False):
         """Use the card's C/D grants without claiming an unverified publication."""
-        if not job or job["state"] not in ("failed","blocked","needs_review"):
+        valid_states=("failed","blocked","needs_review","prepared") if allow_prepared else ("failed","blocked","needs_review")
+        if not job or job["state"] not in valid_states:
             self.w.fail("WHEEL_QUESTION_JOB_INVALID","La ejecución no tiene un bloqueo verificable.")
         text=request["question"].strip()
         operation=request["operation"].strip()
