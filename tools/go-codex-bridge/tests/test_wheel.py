@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -824,6 +825,57 @@ class WheelTests(unittest.TestCase):
         self.assertFalse(wheel.resume_after_quota())
         self.assertFalse(wheel.enabled())
         self.assertFalse(self.runs)
+
+    def test_live_quota_preflight_pause_recovers_failed_original_session(self):
+        b=self.bridge; wheel=b.factory.wheel
+        wheel.activate_live("7"*64)
+        cards={c["id"]:c for c in self.bridge.factory._cards()}
+        selected=wheel._live_selection(cards,wheel.live_policy())
+        with b.db() as db:
+            grant=wheel._verified(db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",
+                                              (selected["grant_id"],)).fetchone())
+        card=self.cards[grant["card_id"]]
+        _,spec=wheel._subject(card)
+        job=b.prepare_text(spec["instruction"],"4",{"source":"verified-queue",
+            "card_id":grant["card_id"],"attempt":grant["attempt"],"board_id":grant["board"],
+            "list_id":grant["origin"],"comment_ids":grant["comment_ids"]})
+        session="synthetic-codex-session"
+        with b.db() as db:
+            db.execute("INSERT INTO factory_attempts(card_id,attempt,title,instruction_sha,state,job_id,before_sha) "
+                       "VALUES(?,?,?,?,?,?,?)",(grant["card_id"],grant["attempt"],spec["title"],
+                       grant["instruction_sha"],"running",job["id"],self.git("rev-parse","HEAD")))
+            db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started,finished,receipt) "
+                       "VALUES(?,'A','verified',?,?,?)",(grant["grant_id"],"started","finished",
+                       json.dumps({"job":job["id"],"state":"running"})))
+            db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=?",(grant["grant_id"],))
+            db.execute("UPDATE jobs SET state='failed',pid=987654,session_id=?,result=? WHERE id=?",
+                       (session,json.dumps({"credit_limited":True,"exit_code":1}),job["id"]))
+            db.execute("UPDATE wheel_control SET enabled=0,reason='WHEEL_CODEX_QUOTA' WHERE id=1")
+
+        self.codex_state="limited"
+        self.assertFalse(wheel.resume_after_quota())
+        with b.db() as db:
+            saved=db.execute("SELECT state,reason FROM wheel_grants WHERE grant_id=?",(grant["grant_id"],)).fetchone()
+            control=db.execute("SELECT enabled,reason FROM wheel_control WHERE id=1").fetchone()
+            attempt=db.execute("SELECT state FROM factory_attempts WHERE job_id=?",(job["id"],)).fetchone()
+            checkpoint=db.execute("SELECT snapshot FROM wheel_checkpoints WHERE grant_id=? AND phase='CREDIT_LIMIT' "
+                                  "ORDER BY id DESC LIMIT 1",(grant["grant_id"],)).fetchone()
+            stored=db.execute("SELECT state,session_id FROM jobs WHERE id=?",(job["id"],)).fetchone()
+        self.assertEqual((saved["state"],saved["reason"]),("credit_wait","CREDIT_LIMIT"))
+        self.assertEqual((control["enabled"],control["reason"]),(0,"CREDIT_LIMIT"))
+        self.assertEqual(attempt["state"],"limit_pause")
+        self.assertIsNotNone(checkpoint)
+        self.assertEqual((stored["state"],stored["session_id"]),("failed",session))
+
+        resumed=[]; started=threading.Event()
+        b.run_codex=lambda payload,session_id=None:(resumed.append((payload["job"],session_id)),started.set())
+        self.codex_state="available"
+        self.assertTrue(wheel.resume_after_quota())
+        self.assertTrue(started.wait(2))
+        self.assertEqual(resumed,[(job["id"],session)])
+        with b.db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM jobs").fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT state FROM jobs WHERE id=?",(job["id"],)).fetchone()[0],"running")
 
     def test_owner_returned_correction_gets_new_attempt_without_replay(self):
         wheel=self.bridge.factory.wheel

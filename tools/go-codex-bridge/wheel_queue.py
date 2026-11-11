@@ -9,6 +9,7 @@ import time
 import uuid
 
 from factory import BOARD, QUEUE, CHECK, OWNER, INSTALL_CARDS, LIMIT_RE, diagnostic_instruction
+from puente import process_alive
 
 STAGES = "ABCD"
 FROZEN_BATCH = "frozen-batch-v1"
@@ -213,11 +214,67 @@ class Wheel:
             db.execute("UPDATE wheel_control SET reason=?,retry_after=0 WHERE id=1",(safe_code,))
             self.b.audit("wheel_activation_rejected",{"code":safe_code},db)
 
+    def _reconcile_live_quota_failure(self):
+        """Persist a quota-failed live job before waiting for its exact session."""
+        with self.b.db() as db:
+            control=db.execute("SELECT enabled,reason FROM wheel_control WHERE id=1").fetchone()
+            if control["enabled"] or control["reason"]!="WHEEL_CODEX_QUOTA":
+                return False
+            if not self.continuous(db) or not self.live_policy(db):
+                return False
+            rows=list(db.execute("SELECT * FROM wheel_grants WHERE state='working'"))
+            if len(rows)!=1:
+                return False
+            grant=self._verified(rows[0])
+            attempt=db.execute("SELECT * FROM factory_attempts WHERE card_id=? AND attempt=?",
+                               (grant["card_id"],grant["attempt"])).fetchone()
+            job=db.execute("SELECT * FROM jobs WHERE id=?",(attempt["job_id"],)).fetchone() if attempt else None
+            if not job or job["state"]!="failed" or not job["session_id"]:
+                return False
+            if process_alive(job["pid"]):
+                return False
+            result=json.loads(job["result"] or "{}")
+            payload=json.loads(job["data"] or "{}")
+            source=payload.get("source") or {}
+            stages={row["letter"]:row["state"] for row in db.execute(
+                "SELECT letter,state FROM wheel_stages WHERE grant_id=?",(grant["grant_id"],))}
+            if (not result.get("credit_limited") or attempt["job_id"]!=job["id"]
+                    or payload.get("agent")!="4" or str(self.b.workspace("4")[0])!=grant["workspace"]
+                    or payload.get("instruction_sha256")!=grant["instruction_sha"]
+                    or source.get("card_id")!=grant["card_id"]
+                    or stages!={"A":"verified"}
+                    or db.execute("SELECT 1 FROM jobs WHERE id<>? AND state IN ('running','detached')",
+                                  (job["id"],)).fetchone()):
+                return False
+            if self._expired(grant):
+                return False
+            job_id=job["id"]
+            session_id=job["session_id"]
+        self._transition(grant,"credit_wait","CREDIT_LIMIT")
+        self.pause("CREDIT_LIMIT")
+        self.checkpoint(grant,"CREDIT_LIMIT")
+        self.b.audit("wheel_live_quota_failure_reconciled",{
+            "grant":grant["grant_id"],"job":job_id,"session_id":session_id,
+            "reprogramming":False})
+        return True
+
     def resume_after_quota(self):
         """Resume the exact credit-limited CLI session, never re-run its instruction."""
         with self.b.db() as db:
             if not self.continuous(db):
                 return False
+            control=db.execute("SELECT * FROM wheel_control WHERE id=1").fetchone()
+            enabled=bool(control["enabled"])
+            reason=control["reason"]
+        if enabled:
+            return False
+        if reason=="WHEEL_CODEX_QUOTA":
+            if not self._reconcile_live_quota_failure():
+                return False
+            return self.resume_after_quota()
+        if reason!="CREDIT_LIMIT":
+            return False
+        with self.b.db() as db:
             control=db.execute("SELECT * FROM wheel_control WHERE id=1").fetchone()
             if control["enabled"] or control["reason"]!="CREDIT_LIMIT":
                 return False
