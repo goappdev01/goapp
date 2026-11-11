@@ -805,6 +805,11 @@ class Wheel:
     def _check_card(self,g,card):
         if not card:
             self.fail("WHEEL_CARD_CHANGED","La tarjeta dejó de estar en COLA.")
+        live=self.live_policy()
+        if live and g.get("live_consent_sha256")==live["consent_sha256"]:
+            bound=g.get("codex_identity_sha256",self.f.digest(live["codex_identity"]))
+            if bound!=self.f.digest(live["codex_identity"]):
+                self.fail("WHEEL_CODEX_SESSION_CHANGED","La autorización de esta tarjeta pertenece a otra cuenta Codex.")
         subject, spec=self._subject(card)
         with self.b.db() as db:
             active=db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",(g["grant_id"],)).fetchone()
@@ -1183,7 +1188,8 @@ class Wheel:
                "backend_required":suggestions["hosted_required"],
                "expires_at":32503680000.0,"actor":self.b.actor,
                "approved_at":self.f.utc(),"grant_id":uuid.uuid4().hex,
-               "live_consent_sha256":policy["consent_sha256"]}
+               "live_consent_sha256":policy["consent_sha256"],
+               "codex_identity_sha256":self.f.digest(policy["codex_identity"])}
         with self.b.db() as db:
             db.execute("BEGIN IMMEDIATE")
             if not self.live_policy(db):

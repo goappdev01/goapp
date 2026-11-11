@@ -52,6 +52,36 @@ class V2WheelTests(unittest.TestCase):
             self.block(w,ids[1])
         return w,ids
 
+    def live_credit_wait(self):
+        b=self.bridge;w=b.factory.wheel
+        w.activate_live("1"*64)
+        cards={c["id"]:c for c in b.factory._cards()}
+        selected=w._live_selection(cards,w.live_policy())
+        with b.db() as db:
+            saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(selected["grant_id"],)).fetchone()
+            grant=w._verified(saved)
+        card=self.cards[grant["card_id"]]
+        _,spec=w._subject(card)
+        job=b.prepare_text(spec["instruction"],"4",{"source":"verified-queue",
+            "card_id":grant["card_id"],"attempt":grant["attempt"],"board_id":grant["board"],
+            "list_id":grant["origin"],"comment_ids":grant["comment_ids"]})
+        session="preserved-codex-session"
+        with b.db() as db:
+            db.execute("INSERT INTO factory_attempts(card_id,attempt,title,instruction_sha,state,job_id,before_sha) "
+                       "VALUES(?,?,?,?,?,?,?)",(grant["card_id"],grant["attempt"],spec["title"],
+                       grant["instruction_sha"],"limit_pause",job["id"],self.git("rev-parse","HEAD")))
+            db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started,finished,receipt) "
+                       "VALUES(?,'A','verified','started','finished',?)",
+                       (grant["grant_id"],json.dumps({"job":job["id"],"session":session})))
+            db.execute("UPDATE wheel_grants SET state='credit_wait',reason='CREDIT_LIMIT' WHERE grant_id=?",
+                       (grant["grant_id"],))
+            db.execute("UPDATE jobs SET state='failed',pid=NULL,session_id=?,result=? WHERE id=?",
+                       (session,json.dumps({"credit_limited":True,"exit_code":1}),job["id"]))
+        w.checkpoint(grant,"CREDIT_LIMIT")
+        w.pause("WHEEL_CODEX_SESSION_CHANGED")
+        self.codex_identity="new-synthetic-codex-account"
+        return w,grant,job["id"],session
+
     def test_frozen_owner_approval_installs_v2_activation_atomically(self):
         w,ids=self.batch(diagnostic_fallback=True)
         self.assertTrue(w.enabled())
@@ -324,6 +354,71 @@ class V2WheelTests(unittest.TestCase):
             self.assertEqual(doc['codex_identity'],'another-synthetic-account')
             self.assertEqual(db.execute("SELECT count(*) FROM audit WHERE event='wheel_owner_account_bound'").fetchone()[0],1)
         self.assertFalse(self.runs or self.changes)
+
+    def test_live_queue_rebind_requires_owner_review_and_resumes_exact_session(self):
+        w,grant,job_id,session=self.live_credit_wait()
+        panel=RemotePanel(self.bridge)
+        ticket=panel.preview("rebind",{},"synthetic-owner")
+        review=ticket["review"]
+        self.assertTrue(review["live_queue_rebind"])
+        self.assertTrue(review["resume_exact_session"])
+        self.assertEqual(ticket["confirmation"],"VINCULAR CUENTA Y REANUDAR COLA")
+        self.assertEqual(len(review["pending"]),1)
+        self.assertEqual(review["pending"][0]["card_id"],grant["card_id"])
+        self.assertEqual(review["pending"][0]["completed"],[])
+        self.assertEqual(review["pending"][0]["operations"],["A","B","C","D"])
+        self.assertNotIn(self.codex_identity,str(review))
+        before_checkpoint=None
+        with self.bridge.db() as db:
+            before_checkpoint=db.execute("SELECT id,snapshot FROM wheel_checkpoints WHERE grant_id=? "
+                                         "AND phase='CREDIT_LIMIT' ORDER BY id DESC LIMIT 1",
+                                         (grant["grant_id"],)).fetchone()
+        with patch.object(w,"resume_after_quota",return_value=True) as resume:
+            result=panel.decide(ticket["ticket"],ticket["confirmation"],"synthetic-owner")
+        self.assertTrue(result["resumed"])
+        resume.assert_called_once_with()
+        rebound=w.live_policy()
+        self.assertEqual(rebound["codex_identity"],self.codex_identity)
+        with self.bridge.db() as db:
+            saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(grant["grant_id"],)).fetchone()
+            updated=w._verified(saved)
+            current_job=db.execute("SELECT state,session_id FROM jobs WHERE id=?",(job_id,)).fetchone()
+            checkpoint=db.execute("SELECT id,snapshot FROM wheel_checkpoints WHERE grant_id=? "
+                                  "AND phase='CREDIT_LIMIT' ORDER BY id DESC LIMIT 1",
+                                  (grant["grant_id"],)).fetchone()
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM factory_live_rebindings").fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM audit WHERE event='wheel_live_account_rebound'").fetchone()[0],1)
+        self.assertEqual(updated["codex_identity_sha256"],self.bridge.factory.digest(self.codex_identity))
+        self.assertEqual(updated["grant_id"],grant["grant_id"])
+        self.assertEqual((current_job["state"],current_job["session_id"]),("failed",session))
+        self.assertEqual((checkpoint["id"],checkpoint["snapshot"]),(before_checkpoint["id"],before_checkpoint["snapshot"]))
+        self.assertEqual(updated["operations"],list("ABCD"))
+        self.assertFalse(w.enabled())
+        self.assertFalse(self.runs or self.changes)
+
+    def test_live_queue_rebind_rejects_queue_change_or_running_work(self):
+        w,grant,job_id,session=self.live_credit_wait()
+        review=w.continuity.review_live_rebind()
+        self.cards[grant["card_id"]]["pos"]+=100
+        with patch.object(w,"resume_after_quota") as resume:
+            with self.assertRaises(BridgeError) as changed:
+                w.continuity.rebind_live_queue(review,"synthetic-owner")
+        self.assertEqual(changed.exception.code,"WHEEL_SUBJECT_CHANGED")
+        resume.assert_not_called()
+        self.assertEqual(w.live_policy()["codex_identity"],"synthetic-codex-account")
+        self.assertFalse(w.enabled())
+        self.assertFalse(self.runs or self.changes)
+
+    def test_live_queue_rebind_refuses_running_jobs_without_mutation(self):
+        w,grant,job_id,session=self.live_credit_wait()
+        with self.bridge.db() as db:
+            db.execute("UPDATE jobs SET state='running' WHERE id=?",(job_id,))
+        with self.assertRaises(BridgeError) as busy:
+            w.continuity.review_live_rebind()
+        self.assertEqual(busy.exception.code,"WHEEL_WORKSPACE_BUSY")
+        self.assertEqual(w.live_policy()["codex_identity"],"synthetic-codex-account")
+        self.assertFalse(w.enabled())
 
     def test_activation_pins_exact_review_and_never_enlarges_operations(self):
         w,ids=self.batch();w.pause('OWNER_PAUSED')

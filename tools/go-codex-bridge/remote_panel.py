@@ -24,7 +24,7 @@ class RemotePanel:
         "FACTORY_JOB_FAILED":"La última tarjeta quedó bloqueada. Revisa el expediente y la autorización antes de continuar.",
         "WHEEL_CODEX_AUTH":"La sesión de Codex no está verificada.",
         "WHEEL_CODEX_QUOTA":"La cuota de Codex no está disponible.",
-        "WHEEL_CODEX_SESSION_CHANGED":"Cambió la cuenta de Codex vinculada al lote.",
+        "WHEEL_CODEX_SESSION_CHANGED":"Cambió la cuenta Codex vinculada. Revisa y confirma la nueva vinculación antes de continuar.",
         "WHEEL_EXPIRY_INVALID":"La autorización del lote ha caducado.",
         "WHEEL_WORKSPACE_BUSY":"Hay un trabajo en curso o pendiente de conciliar.",
         "WHEEL_SUBJECT_CHANGED":"Cambió la cola o una instrucción desde su revisión.",
@@ -280,6 +280,8 @@ class RemotePanel:
                 pass
         wheel_view={"enabled":enabled,"state":state,"reason":wheel["reason"],"batch_id":(batch or {}).get("id"),
                     "batch_state":(batch or {}).get("state"),"activation_confirmed":activation_confirmed,
+                    "live_queue_authorized":bool(live),
+                    "account_rebind_required":bool(live and wheel["reason"]=="WHEEL_CODEX_SESSION_CHANGED"),
                     "renewal_required":any(grant["state"] in ("ready","working") and grant["expires_at"]<=time.time()
                         for grant in wheel["grants"] if grant["card_id"] in {item["card_id"] for item in (batch or {}).get("cards",[])}),
                     "current":next((card["title"] for card in cards if card["state"]=="working"),None),
@@ -305,8 +307,11 @@ class RemotePanel:
             else:
                 review=self.w.continuity.review_activation()
         elif action=="rebind":
-            review=self.w.continuity.review_activation()
-            review={**review,"binding_only":True}
+            if self.w.live_policy():
+                review=self.w.continuity.review_live_rebind()
+            else:
+                review=self.w.continuity.review_activation()
+                review={**review,"binding_only":True}
         elif action in ("expo_select","expo_rollback"):
             review=OwnerExpo(self.b).review(action,payload)
         elif action=="recover":
@@ -317,8 +322,18 @@ class RemotePanel:
         record={"action":action,"review":review,"principal":principal,"expires":time.time()+180}
         self.previews[ticket]=record
         self.previews={key:value for key,value in self.previews.items() if value["expires"]>time.time()}
-        confirmation=self.activation_confirmation(review) if action=="activate" else "CONFIRMAR OPERACIÓN"
+        confirmation=self.confirmation(action,review)
         return {"ticket":ticket,"action":action,"review":review,"confirmation":confirmation}
+
+    @staticmethod
+    def confirmation(action,review):
+        if action=="activate":
+            return RemotePanel.activation_confirmation(review)
+        if action=="rebind" and review.get("live_queue_rebind"):
+            return "VINCULAR CUENTA Y REANUDAR COLA"
+        if action=="rebind":
+            return "VINCULAR CUENTA SIN ACTIVAR"
+        return "CONFIRMAR OPERACIÓN"
 
     @staticmethod
     def activation_confirmation(review):
@@ -331,7 +346,7 @@ class RemotePanel:
         if not record or record["principal"]!=principal or record["expires"]<=time.time():
             self.w.fail("REMOTE_PREVIEW_EXPIRED","La revisión caducó o ya fue utilizada.")
         action,review=record["action"],record["review"]
-        expected=self.activation_confirmation(review) if action=="activate" else "CONFIRMAR OPERACIÓN"
+        expected=self.confirmation(action,review)
         if confirmation!=expected:
             self.w.fail("REMOTE_CONFIRMATION_REQUIRED","Falta la confirmación explícita de esta operación.")
         self.b.audit("remote_owner_decision",{"principal_hash":self.b.sign({"tailnet_owner":principal}),
@@ -348,6 +363,8 @@ class RemotePanel:
                 self.w.activation_failed(error.code)
                 raise
         if action=="rebind":
+            if review.get("live_queue_rebind"):
+                return self.w.continuity.rebind_live_queue(review,principal)
             return self.w.continuity.rebind(review,principal)
         if action=="recover":
             return self.w.continuity.recover(review,principal)

@@ -6,6 +6,8 @@ import re
 import time
 import uuid
 
+from puente import process_alive
+
 
 class Continuity:
     def __init__(self,wheel):
@@ -24,6 +26,11 @@ class Continuity:
                 id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, grant_id TEXT NOT NULL,
                 old_terms TEXT NOT NULL, old_signature TEXT NOT NULL,
                 new_terms TEXT NOT NULL, new_signature TEXT NOT NULL,
+                principal TEXT NOT NULL, approved_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS factory_live_rebindings(
+                id TEXT PRIMARY KEY, consent_sha256 TEXT NOT NULL, grant_id TEXT NOT NULL,
+                old_terms_sha256 TEXT NOT NULL, new_terms_sha256 TEXT NOT NULL,
+                previous_identity_sha256 TEXT NOT NULL, current_identity_sha256 TEXT NOT NULL,
                 principal TEXT NOT NULL, approved_at TEXT NOT NULL);
             """)
 
@@ -365,6 +372,156 @@ class Continuity:
             db.execute('DELETE FROM factory_v2_activation WHERE batch_id=?',(row['id'],))
             self.b.audit('wheel_owner_account_bound',{'batch':row['id'],'principal':principal,'enabled':False},db)
         return {'bound':True,'enabled':False,'message':'Cuenta vinculada al lote revisado. La rueda sigue pausada y ningún intento se ha reiniciado.'}
+
+    def review_live_rebind(self):
+        """Review an owner-approved identity change without starting or changing work."""
+        self.f._identity()
+        self.f._lists()
+        current_identity=self.w._require_codex_identity()
+        live=self.w.live_policy()
+        if not live:
+            self.w.fail('WHEEL_LIVE_QUEUE_REQUIRED','No hay una autorización continua activa que revisar.')
+        if current_identity==live['codex_identity']:
+            self.w.fail('WHEEL_CODEX_SESSION_MATCHED','La cuenta actual ya coincide con la autorización de la cola.')
+        with self.b.db() as db:
+            control=db.execute('SELECT enabled,reason FROM wheel_control WHERE id=1').fetchone()
+            if control['enabled']:
+                self.w.fail('WHEEL_PAUSE_REQUIRED','Pausa la fábrica antes de revisar el cambio de cuenta.')
+            if control['reason']!='WHEEL_CODEX_SESSION_CHANGED':
+                self.w.fail('WHEEL_REBIND_STATE','La cola no está detenida por un cambio de cuenta.')
+            if (db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                    or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()
+                    or db.execute("SELECT 1 FROM wheel_grants WHERE state='working'").fetchone()):
+                self.w.fail('WHEEL_WORKSPACE_BUSY','Hay una ejecución o escritura pendiente de conciliar.')
+            rows=list(db.execute("SELECT * FROM wheel_grants WHERE state IN ('ready','wait_permissions','credit_wait') ORDER BY rowid"))
+            scoped=[]
+            for saved in rows:
+                grant=self.w._verified(saved)
+                if grant.get('live_consent_sha256')!=live['consent_sha256']:
+                    continue
+                if grant.get('codex_identity_sha256',self.f.digest(live['codex_identity']))!=self.f.digest(live['codex_identity']):
+                    self.w.fail('WHEEL_GRANT_INTEGRITY','Una autorización pendiente no coincide con la identidad anterior.')
+                stages={row['letter']:row['state'] for row in db.execute(
+                    'SELECT letter,state FROM wheel_stages WHERE grant_id=?',(grant['grant_id'],))}
+                if saved['state'] in ('ready','wait_permissions') and stages:
+                    self.w.fail('WHEEL_REBIND_UNCERTAIN','Una tarjeta tiene etapas previas y requiere conciliación específica.')
+                pending=[letter for letter in grant['operations'] if stages.get(letter)!='verified']
+                completed=sorted(letter for letter,state in stages.items() if state=='verified')
+                item={'grant_id':grant['grant_id'],'card_id':grant['card_id'],'title':grant['title'],
+                      'state':saved['state'],'completed':completed,
+                      'operations':pending,'session_sha256':None,'checkpoint_id':None}
+                if saved['state']=='credit_wait':
+                    if stages!={'A':'verified'} or not pending:
+                        self.w.fail('WHEEL_REBIND_UNCERTAIN','La sesión de Codex no tiene un checkpoint reanudable.')
+                    item['completed']=[]
+                    item['operations']=['A']+pending
+                    attempt=db.execute('SELECT * FROM factory_attempts WHERE card_id=? AND attempt=?',
+                                       (grant['card_id'],grant['attempt'])).fetchone()
+                    job=db.execute('SELECT * FROM jobs WHERE id=?',(attempt['job_id'],)).fetchone() if attempt else None
+                    checkpoint=db.execute("SELECT id,snapshot FROM wheel_checkpoints WHERE grant_id=? AND phase='CREDIT_LIMIT' ORDER BY id DESC LIMIT 1",
+                                          (grant['grant_id'],)).fetchone()
+                    if (not job or job['state']!='failed' or not job['session_id'] or process_alive(job['pid'])
+                            or not json.loads(job['result'] or '{}').get('credit_limited')
+                            or not checkpoint or attempt['state']!='limit_pause'):
+                        self.w.fail('WHEEL_REBIND_UNCERTAIN','No se puede verificar la misma sesión y su checkpoint de cuota.')
+                    checkpoint_doc=json.loads(checkpoint['snapshot'])
+                    checkpoint_job=checkpoint_doc.get('job') or {}
+                    if (checkpoint_job.get('id')!=job['id'] or checkpoint_job.get('session_id')!=job['session_id']
+                            or checkpoint_doc.get('authorization',{}).get('grant_id')!=grant['grant_id']):
+                        self.w.fail('WHEEL_REBIND_UNCERTAIN','El checkpoint no corresponde al trabajo y la sesión conservados.')
+                    payload=json.loads(job['data'] or '{}')
+                    source=payload.get('source') or {}
+                    if (payload.get('agent')!='4' or payload.get('instruction_sha256')!=grant['instruction_sha']
+                            or source.get('card_id')!=grant['card_id'] or attempt['job_id']!=job['id']):
+                        self.w.fail('WHEEL_REBIND_UNCERTAIN','La sesión conservada no corresponde a la instrucción autorizada.')
+                    item.update(session_sha256=self.f.digest(job['session_id']),checkpoint_id=checkpoint['id'])
+                scoped.append(item)
+            if sum(item['state']=='credit_wait' for item in scoped)>1:
+                self.w.fail('WHEEL_REBIND_UNCERTAIN','Hay más de una sesión de cuota pendiente.')
+
+        cards=list(self.w._available(self.f._cards()))
+        card_by_id={card['id']:card for card in cards}
+        for item in scoped:
+            card=card_by_id.get(item['card_id'])
+            if not card:
+                self.w.fail('WHEEL_SUBJECT_CHANGED','Una tarjeta pendiente ya no está en la cola autorizada.')
+            subject,spec=self.w._subject(card,review=True)
+            with self.b.db() as db:
+                saved=db.execute('SELECT * FROM wheel_grants WHERE grant_id=?',(item['grant_id'],)).fetchone()
+            grant=self.w._verified(saved)
+            if (subject['binding']!=grant['binding'] or subject['position']!=grant['position']
+                    or spec['instruction_sha']!=grant['instruction_sha']):
+                self.w.fail('WHEEL_SUBJECT_CHANGED','La posición o la instrucción cambió desde el checkpoint.')
+
+        visible_queue=[{'card_id':card['id'],'title':card['name'],'position':card['pos']} for card in cards]
+        fingerprint=self.f.digest(self.f.canonical([
+            {'card':card,'comments':card.get('comments',[])} for card in cards]))
+        return {'live_queue_rebind':True,'consent_sha256':live['consent_sha256'],
+                'previous_identity_sha256':self.f.digest(live['codex_identity']),
+                'current_identity_sha256':self.f.digest(current_identity),
+                'queue_sha256':fingerprint,'queue':visible_queue,'pending':scoped,
+                'scope_unchanged':True,'starts_new_task':False,
+                'resume_exact_session':any(item['state']=='credit_wait' for item in scoped)}
+
+    def rebind_live_queue(self,review,principal):
+        """Rebind only after fresh owner review; resume the exact live task/queue once."""
+        if not review.get('live_queue_rebind') or self.review_live_rebind()!=review:
+            self.w.fail('WHEEL_SUBJECT_CHANGED','La cola, la cuenta o el checkpoint cambió desde la revisión.')
+        identity=self.w._require_codex_identity()
+        if self.f.digest(identity)!=review['current_identity_sha256']:
+            self.w.fail('WHEEL_CODEX_SESSION_CHANGED','La cuenta Codex cambió durante la confirmación.')
+        with self.f.lock,self.b.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            control=db.execute('SELECT enabled,reason FROM wheel_control WHERE id=1').fetchone()
+            live=self.w.live_policy(db)
+            if (control['enabled'] or control['reason']!='WHEEL_CODEX_SESSION_CHANGED' or not live
+                    or live['consent_sha256']!=review['consent_sha256']
+                    or self.f.digest(live['codex_identity'])!=review['previous_identity_sha256']):
+                self.w.fail('WHEEL_SUBJECT_CHANGED','La autorización continua cambió durante la revisión.')
+            if (db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                    or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()
+                    or db.execute("SELECT 1 FROM wheel_grants WHERE state='working'").fetchone()):
+                self.w.fail('WHEEL_WORKSPACE_BUSY','Hay una ejecución o escritura pendiente de conciliar.')
+            old_policy=db.execute('SELECT * FROM wheel_live_authorization WHERE id=1').fetchone()
+            new_policy={**live,'codex_identity':identity,'identity_rebound_at':self.f.utc(),
+                        'identity_rebound_by':self.b.sign({'tailnet_owner':principal})}
+            changed_policy=db.execute('UPDATE wheel_live_authorization SET document=?,signature=? WHERE id=1 AND state=\'active\' AND signature=?',
+                (self.f.canonical(new_policy),self.b.sign(new_policy),old_policy['signature'])).rowcount
+            if changed_policy!=1:
+                self.w.fail('WHEEL_SUBJECT_CHANGED','La autorización continua cambió durante la confirmación.')
+            for item in review['pending']:
+                saved=db.execute('SELECT * FROM wheel_grants WHERE grant_id=?',(item['grant_id'],)).fetchone()
+                grant=self.w._verified(saved)
+                if saved['state']!=item['state'] or grant.get('live_consent_sha256')!=review['consent_sha256']:
+                    self.w.fail('WHEEL_SUBJECT_CHANGED','Una autorización pendiente cambió durante la confirmación.')
+                updated={**grant,'codex_identity_sha256':self.f.digest(identity),
+                         'identity_rebound_at':self.f.utc()}
+                terms=self.f.canonical(updated);signature=self.b.sign(updated)
+                old_sha=self.f.digest(saved['terms']);new_sha=self.f.digest(terms)
+                db.execute('UPDATE wheel_grants SET terms=?,signature=? WHERE grant_id=?',
+                           (terms,signature,grant['grant_id']))
+                db.execute('INSERT INTO factory_live_rebindings VALUES(?,?,?,?,?,?,?,?,?)',
+                    (uuid.uuid4().hex,review['consent_sha256'],grant['grant_id'],old_sha,new_sha,
+                     review['previous_identity_sha256'],review['current_identity_sha256'],principal,self.f.utc()))
+                self.b.audit('wheel_live_grant_rebound',{'consent_sha256':review['consent_sha256'],
+                    'grant':grant['grant_id'],'old_terms_sha256':old_sha,'new_terms_sha256':new_sha,
+                    'previous_identity_sha256':review['previous_identity_sha256'],
+                    'current_identity_sha256':review['current_identity_sha256'],'principal':principal},db)
+            self.b.audit('wheel_live_account_rebound',{'consent_sha256':review['consent_sha256'],
+                'previous_identity_sha256':review['previous_identity_sha256'],
+                'current_identity_sha256':review['current_identity_sha256'],
+                'queue_sha256':review['queue_sha256'],'principal':principal,
+                'same_session':review['resume_exact_session']},db)
+            db.execute("UPDATE wheel_control SET enabled=0,reason=?,retry_after=0 WHERE id=1",
+                       ('CREDIT_LIMIT' if review['resume_exact_session'] else None,))
+        if review['resume_exact_session']:
+            resumed=self.w.resume_after_quota()
+            return {'bound':True,'enabled':self.w.enabled(),'resumed':resumed,
+                    'message':('Cuenta vinculada y sesión conservada reanudada.' if resumed else
+                               'Cuenta vinculada; la sesión se conserva y sigue pendiente de reanudación segura.')}
+        result=self.w.toggle(True)
+        return {'bound':True,'enabled':bool(result.get('enabled')),'resumed':False,
+                'message':'Cuenta vinculada y cola autorizada reanudada.'}
 
     def review_recovery(self,card_id):
         if self.w.enabled():self.w.fail('WHEEL_PAUSE_REQUIRED','Pausa la fábrica para revisar la recuperación.')
