@@ -550,7 +550,7 @@ class Wheel:
     def _transition(self,g,state,reason=None):
         with self.b.db() as db:
             db.execute("UPDATE wheel_grants SET state=?,reason=? WHERE grant_id=?",(state,reason,g["grant_id"]))
-            attempt_state={"blocked":"blocked","expired":"blocked","credit_wait":"limit_pause"}.get(state)
+            attempt_state={"blocked":"blocked","credit_wait":"limit_pause"}.get(state)
             if attempt_state:
                 changed=db.execute(
                     "UPDATE factory_attempts SET state=?,finished=COALESCE(finished,?) "
