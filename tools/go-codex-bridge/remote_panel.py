@@ -157,9 +157,11 @@ class RemotePanel:
                                 "state":row["state"]})
         enabled=wheel["enabled"]
         if enabled:
-            state="activa" if any(c["state"]=="working" for c in cards) else "esperando"
+            state="trabajando"
         elif batch and batch["state"]=="completed":
-            state="finalizada"
+            state="terminada"
+        elif wheel["reason"] and wheel["reason"]!="OWNER_PAUSED":
+            state="bloqueada"
         else:
             state="pausada"
         from owner_expo import OwnerExpo
@@ -209,15 +211,16 @@ class RemotePanel:
         record={"action":action,"review":review,"principal":principal,"expires":time.time()+180}
         self.previews[ticket]=record
         self.previews={key:value for key,value in self.previews.items() if value["expires"]>time.time()}
-        return {"ticket":ticket,"action":action,"review":review,
-                "confirmation":"ACTIVAR FÁBRICA" if action=="activate" else "CONFIRMAR OPERACIÓN"}
+        confirmation=("VINCULAR CUENTA Y ACTIVAR FÁBRICA" if review.get("account_changed") else "ACTIVAR FÁBRICA") if action=="activate" else "CONFIRMAR OPERACIÓN"
+        return {"ticket":ticket,"action":action,"review":review,"confirmation":confirmation}
 
     def decide(self,ticket,confirmation,principal):
         record=self.previews.pop(ticket,None)
         if not record or record["principal"]!=principal or record["expires"]<=time.time():
             self.w.fail("REMOTE_PREVIEW_EXPIRED","La revisión caducó o ya fue utilizada.")
         action,review=record["action"],record["review"]
-        if confirmation!=("ACTIVAR FÁBRICA" if action=="activate" else "CONFIRMAR OPERACIÓN"):
+        expected=("VINCULAR CUENTA Y ACTIVAR FÁBRICA" if review.get("account_changed") else "ACTIVAR FÁBRICA") if action=="activate" else "CONFIRMAR OPERACIÓN"
+        if confirmation!=expected:
             self.w.fail("REMOTE_CONFIRMATION_REQUIRED","Falta la confirmación explícita de esta operación.")
         self.b.audit("remote_owner_decision",{"principal_hash":self.b.sign({"tailnet_owner":principal}),
                      "action":action,"review_sha":self.f.digest(self.f.canonical(review))})

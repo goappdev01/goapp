@@ -80,6 +80,7 @@ class Continuity:
     def review_activation(self):
         self.f._identity()
         self.f._lists()
+        current_identity=self.w._require_codex_identity()
         with self.b.db() as db:
             batch=self.w._latest_trial(db)
             if not batch or batch[0]["state"]!="active":
@@ -93,7 +94,8 @@ class Continuity:
                 grant_by_card[grant["card_id"]]=(saved,grant)
                 grants.append({"card_id":grant["card_id"],"title":grant["title"],"state":saved["state"],
                                "operations":grant["operations"],"expires_at":grant["expires_at"],
-                               "depends_on":grant["depends_on"]})
+                               "depends_on":grant["depends_on"],"allowed_files":grant["allowed_files"],
+                               "test_files":grant["test_files"],"backend_required":grant["backend_required"]})
         pending=[item for item in doc["cards"] if grant_by_card[item["card_id"]][0]["state"]!="closed"]
         live_cards={card["id"]:card for card in self.w._available(self.f._cards())}
         expected=[item["card_id"] for item in pending]
@@ -113,9 +115,28 @@ class Continuity:
         fallbacks=self.dependency_fallbacks(
             {card_id:(saved["state"],grant) for card_id,(saved,grant) in grant_by_card.items()},
             {card_id:instruction for card_id,(_,instruction) in instructions.items()})
+        fallback_pairs={(edge["dependency_card_id"],edge["dependent_card_id"]) for edge in fallbacks}
+        available={item["card_id"] for item in grants if item["state"]=="closed"}
+        plan=[]
+        for item in grants:
+            state=item["state"]
+            if state=="closed":
+                action,why="completed","Terminada y verificada; no se repetirá."
+            elif state=="blocked":
+                action,why="skip","Bloqueada; no se repetirá automáticamente."
+            elif state=="ready" and all(dep in available or (dep,item["card_id"]) in fallback_pairs for dep in item["depends_on"]):
+                action,why="run",("Continuará mediante la alternativa expresa de su instrucción."
+                    if any((dep,item["card_id"]) in fallback_pairs for dep in item["depends_on"])
+                    else "Pendiente autorizada; se ejecutará en su orden.")
+                available.add(item["card_id"])
+            else:
+                action,why="wait","Depende de un trabajo pendiente o requiere revisión."
+            plan.append({"card_id":item["card_id"],"title":item["title"],"action":action,"reason":why})
         return {"batch_id":row["id"],"batch_sha":self.f.digest(self.f.canonical(doc)),
                 "cards":grants,"policy":"independent-v2","maximum_cards":doc["maximum_cards"],
-                "dependency_fallbacks":fallbacks}
+                "dependency_fallbacks":fallbacks,"plan":plan,
+                "account_changed":current_identity!=doc.get("codex_identity"),
+                "current_codex_identity_sha256":self.f.digest(current_identity)}
 
     def activate(self,review,principal):
         with self.f.lock:
@@ -144,12 +165,15 @@ class Continuity:
                     self.verify_activation(row["id"],doc,db)
                     return {"enabled":True,"batch_id":row["id"],"idempotent":True,
                             "message":"La fábrica ya estaba activada; se conservó la ejecución existente."}
-                identity=self.w._require_codex_identity(doc["codex_identity"])
+                identity=self.w._require_codex_identity()
+                if self.f.digest(identity)!=review["current_codex_identity_sha256"]:
+                    self.w.fail("WHEEL_CODEX_SESSION_CHANGED","La cuenta Codex cambió durante la confirmación.")
                 if time.time()>=doc["expires_at"]:
                     self.w.fail("WHEEL_EXPIRY_INVALID","Las autorizaciones del lote han caducado.")
                 if db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone():
                     self.w.fail("WHEEL_WORKSPACE_BUSY","Espera al trabajo en curso.")
-                doc={**doc,"policy":"independent-v2"}
+                changed=identity!=doc.get("codex_identity")
+                doc={**doc,"policy":"independent-v2","codex_identity":identity}
                 activation={"batch_sha":self.f.digest(self.f.canonical(doc)),"actor":self.b.actor,
                             "principal":principal,"at":self.f.utc(),"codex_identity":identity,
                             "dependency_fallbacks":review.get("dependency_fallbacks",[])}
@@ -159,6 +183,9 @@ class Continuity:
                            (row["id"],self.f.canonical(activation),self.b.sign(activation)))
                 db.execute("UPDATE factory_control SET enabled=0 WHERE id=1")
                 db.execute("UPDATE wheel_control SET enabled=1,reason=NULL,retry_after=0 WHERE id=1")
+                if changed:
+                    self.b.audit("wheel_owner_account_bound",{"batch":row["id"],"principal":principal,
+                        "binding_review_sha":self.f.digest(self.f.canonical(review))},db)
                 self.b.audit("wheel_v2_owner_activated",{"batch":row["id"],"principal":principal,
                     "cards":[item["card_id"] for item in doc["cards"]]},db)
         return {"enabled":True,"batch_id":row["id"],"idempotent":False,

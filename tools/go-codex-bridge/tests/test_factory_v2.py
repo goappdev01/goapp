@@ -113,6 +113,10 @@ class V2WheelTests(unittest.TestCase):
 
     def test_signed_instruction_fallback_can_select_only_its_blocked_diagnosis_dependency(self):
         w,ids=self.batch(diagnostic_fallback=True)
+        review=w.continuity.review_activation()
+        self.assertEqual([item['action'] for item in review['plan']],['skip','skip','run','run'])
+        self.assertIn('alternativa expresa',review['plan'][2]['reason'])
+        self.assertEqual(review['cards'][1]['operations'],['A','C','D'])
         with self.bridge.db() as db:
             row=db.execute("SELECT document,signature FROM factory_v2_activation").fetchone()
             activation=json.loads(row["document"])
@@ -149,15 +153,22 @@ class V2WheelTests(unittest.TestCase):
         with self.bridge.db() as db:self.assertEqual(before,[tuple(row) for row in db.execute('SELECT * FROM wheel_grants')])
         self.assertEqual(w.tick(),{'enabled':False})
 
-    def test_account_change_does_not_enable_or_replay(self):
-        w,_=self.batch();w.pause('OWNER_PAUSED')
+    def test_account_change_requires_fresh_owner_review_and_never_replays(self):
+        w,ids=self.batch();w.pause('OWNER_PAUSED')
+        old_review=w.continuity.review_activation()
         self.codex_identity='another-synthetic-account'
-        with self.assertRaises(BridgeError):w.continuity.activate(w.continuity.review_activation(),'synthetic-owner')
+        with self.assertRaises(BridgeError):w.continuity.activate(old_review,'synthetic-owner')
         self.assertFalse(w.enabled())
-        review={**w.continuity.review_activation(),'binding_only':True}
-        self.assertFalse(w.continuity.rebind(review,'synthetic-owner')['enabled'])
+        review=w.continuity.review_activation()
+        self.assertTrue(review['account_changed'])
+        self.assertTrue(all(c['action']=='run' for c in review['plan']))
+        result=w.continuity.activate(review,'synthetic-owner')
+        self.assertTrue(result['enabled'])
+        with self.bridge.db() as db:
+            doc=json.loads(db.execute("SELECT document FROM wheel_trials WHERE state='active'").fetchone()[0])
+            self.assertEqual(doc['codex_identity'],'another-synthetic-account')
+            self.assertEqual(db.execute("SELECT count(*) FROM audit WHERE event='wheel_owner_account_bound'").fetchone()[0],1)
         self.assertFalse(self.runs or self.changes)
-        self.assertFalse(w.enabled())
 
     def test_activation_pins_exact_review_and_never_enlarges_operations(self):
         w,ids=self.batch();w.pause('OWNER_PAUSED')
