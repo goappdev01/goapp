@@ -1460,6 +1460,14 @@ def server(bridge, open_browser=True):
                     self.send(200, (bridge.home / "panel.js").read_bytes(), "text/javascript; charset=utf-8")
                 elif path == "/api/status":
                     self.send(200, {**bridge.status(), "csrf": session})
+                elif path == "/v2":
+                    self.send(200,(bridge.home/"orbit-v2.html").read_bytes(),"text/html; charset=utf-8")
+                elif path == "/v2.js":
+                    self.send(200,(bridge.home/"orbit-v2.js").read_bytes(),"text/javascript; charset=utf-8")
+                elif path == "/v2/state":
+                    self.send(200,{**remote.orbit_state(),"csrf":session})
+                elif path in ("/v2/verify/8088","/v2/verify/8089"):
+                    self.send(200,remote.orbit_verify_metro(int(path[-4:])))
                 elif path == "/api/wheel/review":
                     self.send(200, bridge.factory.wheel.review())
                 elif path == "/api/job":
@@ -1513,6 +1521,12 @@ def server(bridge, open_browser=True):
                     result = bridge.factory.wheel.prepare_frozen_batch(body["card_ids"])
                 elif path == "/api/wheel/codex-quota" and not body:
                     result = bridge.codex_quota()[0]
+                elif path == "/v2/move":
+                    result = remote.orbit_move(body)
+                elif path == "/v2/configure":
+                    result = remote.orbit_configure(body)
+                elif path in ("/v2/preview","/v2/decide","/v2/pause","/v2/stop"):
+                    result = remote.orbit_control(path.rsplit('/',1)[-1],body,"local:"+remote.orbit_owner())
                 elif path == "/api/wheel/approve" and set(body) == {"decisions", "start_frozen_batch"}:
                     result = bridge.factory.wheel.approve(body["decisions"], start_frozen_batch=body["start_frozen_batch"])
                 elif path == "/api/wheel/toggle" and set(body) == {"enabled"}:

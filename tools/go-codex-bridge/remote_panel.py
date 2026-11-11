@@ -46,6 +46,63 @@ class RemotePanel:
         self.expo_links=None
         from device_probes import DeviceProbes
         self.device_probes=DeviceProbes(bridge,self.config)
+        self.orbit_system_cache=None
+
+    def orbit_owner(self):
+        owner=self.config.get("owner_hash", "")
+        if not owner:
+            self.w.fail("REMOTE_OWNER_REQUIRED", "Falta la identidad verificada del propietario.")
+        return owner
+
+    def orbit_state(self):
+        from orbit_v2 import OrbitV2, REGISTRY
+        if not self.orbit_system_cache or time.time()-self.orbit_system_cache["checked_at"]>60:
+            self.orbit_system_cache=OrbitV2(self.b).system_probe()
+        return {"layout":OrbitV2(self.b).state(self.orbit_owner()),
+                "registry":{key:{"name":name,"description":description}
+                            for key,(name,description) in REGISTRY.items()},
+                "operational":self.snapshot(),"system":self.orbit_system_cache}
+
+    def orbit_move(self,body):
+        from orbit_v2 import OrbitV2
+        if set(body)!={"revision","module","orbit","position"}:
+            self.w.fail("ORBIT_V2_INPUT", "Indica acceso y destino concretos.")
+        try:
+            return OrbitV2(self.b).move(self.orbit_owner(),body["revision"],body["module"],
+                                        body["orbit"],body["position"])
+        except ValueError as error:
+            self.w.fail("ORBIT_V2_INPUT",str(error))
+
+    def orbit_configure(self,body):
+        from orbit_v2 import OrbitV2
+        if set(body)!={"revision","module","label","remove"}:
+            self.w.fail("ORBIT_V2_INPUT","Indica el acceso y su cambio concreto.")
+        try:
+            return OrbitV2(self.b).configure(self.orbit_owner(),body["revision"],body["module"],
+                                             label=body["label"],remove=body["remove"])
+        except ValueError as error:
+            self.w.fail("ORBIT_V2_INPUT",str(error))
+
+    def orbit_verify_metro(self,port):
+        from orbit_v2 import OrbitV2
+        import subprocess
+        try:
+            return OrbitV2(self.b).verify_metro(port)
+        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            self.w.fail("ORBIT_V2_METRO_UNVERIFIED",str(error)[:180])
+
+    def orbit_control(self,action,body,principal):
+        if action=="preview" and body=={"action":"activate"}:
+            return self.preview("activate",{},principal)
+        if action=="decide" and set(body)=={"ticket","confirmation"}:
+            return self.decide(body["ticket"],body["confirmation"],principal)
+        if action in ("pause","stop"):
+            word="PAUSAR FÁBRICA" if action=="pause" else "DETENER FÁBRICA"
+            if body!={"confirmation":word}:
+                self.w.fail("REMOTE_CONFIRMATION_REQUIRED","Confirma la operación exacta.")
+            self.w.pause("OWNER_PAUSED" if action=="pause" else "OWNER_STOPPED")
+            return {"enabled":False,"reason":"OWNER_PAUSED" if action=="pause" else "OWNER_STOPPED"}
+        self.w.fail("ORBIT_V2_ACTION_INVALID","La operación no está disponible en V2.")
 
     @classmethod
     def activation_button(cls,wheel,cards):
@@ -284,6 +341,14 @@ class RemotePanel:
                 self.send(handler,data,"text/html; charset=utf-8",csrf)
             elif path=="/remote/panel.js":
                 self.send(handler,(self.b.home/"remote.js").read_bytes(),"text/javascript; charset=utf-8")
+            elif path=="/remote/v2":
+                self.send(handler,(self.b.home/"orbit-v2.html").read_bytes(),"text/html; charset=utf-8",csrf)
+            elif path=="/remote/v2.js":
+                self.send(handler,(self.b.home/"orbit-v2.js").read_bytes(),"text/javascript; charset=utf-8")
+            elif path=="/remote/v2/state":
+                self.send(handler,{**self.orbit_state(),"csrf":csrf})
+            elif path in ("/remote/v2/verify/8088","/remote/v2/verify/8089"):
+                self.send(handler,self.orbit_verify_metro(int(path[-4:])))
             elif path=="/remote/status":
                 self.send(handler,{**self.snapshot(),"csrf":csrf})
             else:self.w.fail("REMOTE_NOT_FOUND","Ruta remota no disponible.")
@@ -315,6 +380,12 @@ class RemotePanel:
             result=self.w.continuity.answer(body["id"],body["decision"],body["text"],principal)
         elif path=="/remote/quota" and not body:
             result=self.b.codex_quota()[0]
+        elif path=="/remote/v2/move":
+            result=self.orbit_move(body)
+        elif path=="/remote/v2/configure":
+            result=self.orbit_configure(body)
+        elif path in ("/remote/v2/preview","/remote/v2/decide","/remote/v2/pause","/remote/v2/stop"):
+            result=self.orbit_control(path.rsplit('/',1)[-1],body,principal)
         else:self.w.fail("REMOTE_ACTION_INVALID","La operación no está admitida.")
         self.send(handler,result)
 

@@ -17,6 +17,7 @@ from remote_panel import RemotePanel,private_text
 from owner_expo import OwnerExpo
 from device_probes import DeviceProbes,peer_from_headers
 from wheel_effects import WheelEffects,WheelPublication
+from orbit_v2 import OrbitV2
 
 
 class V2WheelTests(unittest.TestCase):
@@ -477,6 +478,43 @@ class RemoteTests(unittest.TestCase):
         h=SimpleNamespace(client_address=('127.0.0.1',123),headers={'Host':'test.tail.invalid',
             'X-Forwarded-Proto':'https','Tailscale-User-Login':'owner@example.invalid'})
         return p,h
+
+    def test_orbit_v2_shares_owner_layout_without_touching_wheel_or_trello(self):
+        p,h=self.panel()
+        p.authorize(h)
+        owner=p.orbit_owner()
+        self.assertEqual(OrbitV2(self.bridge).state(owner)['revision'],0)
+        with patch.object(p,'snapshot',return_value={'wheel':{'enabled':False}}),patch.object(
+                OrbitV2,'system_probe',return_value={'checked_at':1,'tailscale':'sin verificar'}):
+            state=p.orbit_state()
+            self.assertEqual(len(state['layout']['layout'][0]),7)
+            moved=p.orbit_move({'revision':0,'module':'diagnostics','orbit':1,'position':0})
+            self.assertEqual(moved['layout'][1],['diagnostics'])
+            second,_=self.panel()
+            self.assertEqual(OrbitV2(second.b).state(second.orbit_owner())['layout'][1],['diagnostics'])
+            with self.assertRaises(BridgeError):
+                p.orbit_move({'revision':0,'module':'history','orbit':0,'position':0})
+        self.assertFalse(self.bridge.factory.wheel.enabled())
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],0)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM operations').fetchone()[0],0)
+
+    def test_orbit_v2_factory_controls_reuse_owner_review_and_confirmation(self):
+        p,_=self.panel()
+        principal='owner@example.invalid'
+        with patch.object(p,'preview',return_value={'ticket':'synthetic'}) as preview,patch.object(
+                p,'decide',return_value={'enabled':False}) as decide,patch.object(p.w,'pause') as pause:
+            self.assertEqual(p.orbit_control('preview',{'action':'activate'},principal)['ticket'],'synthetic')
+            preview.assert_called_once_with('activate',{},principal)
+            self.assertEqual(p.orbit_control('decide',{'ticket':'t','confirmation':'ACTIVAR FÁBRICA'},principal),
+                             {'enabled':False})
+            decide.assert_called_once_with('t','ACTIVAR FÁBRICA',principal)
+            with self.assertRaises(BridgeError):
+                p.orbit_control('stop',{'confirmation':'PAUSAR FÁBRICA'},principal)
+            pause.assert_not_called()
+            self.assertEqual(p.orbit_control('pause',{'confirmation':'PAUSAR FÁBRICA'},principal)['reason'],
+                             'OWNER_PAUSED')
+            pause.assert_called_once_with('OWNER_PAUSED')
 
     def test_iphone_probe_rejects_windows_and_binds_phone_origin_and_single_use_nonce(self):
         p,h=self.panel();p.config.update(expo_phone='100.64.0.9');p.device_probes.config=p.config

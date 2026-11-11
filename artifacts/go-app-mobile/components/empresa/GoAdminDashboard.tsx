@@ -2,7 +2,9 @@ import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import {GoNavigationRail} from "@/components/ui/GoNavigationRail";
 import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import React, { useState } from "react";
+import * as WebBrowser from "expo-web-browser";
 import {
+  Alert,
   Dimensions,
   SafeAreaView,
   ScrollView,
@@ -44,6 +46,7 @@ const ESTADO_CRITICO    = "#ef4444";
 
 type AdminSection =
   | "overview"
+  | "bridge"
   | "tools"
   | "partners"
   | "zones_rates"
@@ -700,6 +703,7 @@ const SECTIONS: Array<{
   icon: React.ComponentProps<typeof Feather>["name"];
   color: string;
 }> = [
+  { key: "bridge", label: "GO Puente Universal", label_en: "GO Universal Bridge", sublabel: "Fábrica y entornos privados", sublabel_en: "Private factory and environments", icon: "command", color: "#59BA83" },
   { key: "projections", label: "GO Proyecciones", label_en: "GO Projections", sublabel: "Calculadora financiera actual", sublabel_en: "Existing financial calculator", icon: "pie-chart", color: "#59BA83" },
   { key: "tools", label: "Herramientas", label_en: "Tools", sublabel: "Configuración compartida y variantes del Landing USUARIO", sublabel_en: "Shared settings and USER Landing variants", icon: "settings", color: "#4A80BD" },
   { key: "roadmap",            label: "Roadmap GO",              label_en: "GO Roadmap",        sublabel: "Tablero maestro del ecosistema",          sublabel_en: "Ecosystem master board",                 icon: "map",         color: "#f59e0b" },
@@ -731,10 +735,35 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
   const [roadmapStack, setRoadmapStack] = useState<RoadmapNode[]>([]);
   const [directProjection, setDirectProjection] = useState(false);
   const [infoPanel, setInfoPanel]       = useState<{ title: string; desc: string; scrollable?: boolean } | null>(null);
+  const [bridgeOpening, setBridgeOpening] = useState(false);
+
+  const bridgeUrl = (() => {
+    try {
+      const url = new URL(process.env.EXPO_PUBLIC_GO_BRIDGE_URL?.trim() ?? "");
+      return url.protocol === "https:" && url.hostname.endsWith(".ts.net") && !url.port
+        && !url.username && !url.password && url.pathname === "/remote/v2"
+        && !url.search && !url.hash ? url.toString() : null;
+    } catch { return null; }
+  })();
+
+  const openBridge = async () => {
+    if (bridgeOpening || !bridgeUrl || !adminAccess.isOwner || adminAccess.checking || !goView.isAdminView) return;
+    setBridgeOpening(true);
+    try {
+      if (!await adminAccess.refreshOwner(adminAccess.userId ?? undefined, { reportUnavailable: true })) {
+        Alert.alert("Acceso denegado", "La cuenta actual no tiene acceso OWNER verificado.");
+        return;
+      }
+      await WebBrowser.openBrowserAsync(bridgeUrl);
+    } catch {
+      Alert.alert("Puente no disponible", "Comprueba la conexión privada e inténtalo de nuevo.");
+    } finally { setBridgeOpening(false); }
+  };
 
   const fabBottom = insets.bottom + 24;
 
   const goSection = (sec: AdminSection) => {
+    if (sec === "bridge" && (!adminAccess.isOwner || adminAccess.checking || !goView.isAdminView)) return;
     if (sec === "projections") {
       if (!adminAccess.allowed || !goView.isAdminView) return;
       setDirectProjection(true);
@@ -812,7 +841,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 8, paddingBottom: fabBottom + 152 }} showsVerticalScrollIndicator={false}>
             <Text style={[s.sectionTitle, { fontSize: 12, color: GRAY, paddingTop: 8 }]}>{lang === 'en' ? "MODULES" : "MÓDULOS"}</Text>
             <View style={s.sectGrid}>
-              {SECTIONS.map(sec => (
+              {SECTIONS.filter(sec => sec.key !== "bridge" || (adminAccess.isOwner && !adminAccess.checking && goView.isAdminView)).map(sec => (
                 <TouchableOpacity
                   key={sec.key}
                   style={s.sectCard}
@@ -1119,6 +1148,26 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
         {section === "publicidad"  && <PublicidadScreen />}
         {section === "facturacion" && <FacturacionScreen />}
         {section === "sistema"     && <AdminScreen />}
+
+        {section === "bridge" && adminAccess.isOwner && !adminAccess.checking && goView.isAdminView && (
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: fabBottom + 152 }}>
+            <Text style={[s.sectionTitle, { paddingHorizontal: 0 }]}>{lang === "en" ? "PRIVATE GO BRIDGE" : "PUENTE GO PRIVADO"}</Text>
+            <Text style={{ color: DESC, fontSize: 14, lineHeight: 21 }}>
+              {lang === "en" ? "Open the orbital command center for the factory and its two Expo environments. Trello operations still require their own approvals."
+                : "Abre el centro orbital de la fábrica y sus dos entornos Expo. Las operaciones de Trello conservan sus autorizaciones propias."}
+            </Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={lang === "en" ? "Open GO Universal Bridge" : "Abrir GO Puente Universal"}
+              disabled={!bridgeUrl || bridgeOpening} onPress={() => { void openBridge(); }}
+              style={{ minHeight: 48, borderRadius: 12, backgroundColor: bridgeUrl ? "#59BA83" : "#555", justifyContent: "center", alignItems: "center", paddingHorizontal: 16 }}>
+              <Text style={{ color: "#0D0E11", fontWeight: "700", fontSize: 15 }}>
+                {bridgeOpening ? (lang === "en" ? "Opening…" : "Abriendo…") : lang === "en" ? "OPEN GO BRIDGE" : "ABRIR GO PUENTE"}
+              </Text>
+            </TouchableOpacity>
+            {!bridgeUrl && <Text style={{ color: GRAY, fontSize: 13 }}>
+              {lang === "en" ? "The private bridge URL is not configured in this Expo environment." : "La dirección privada del puente no está configurada en este entorno Expo."}
+            </Text>}
+          </ScrollView>
+        )}
 
         {section === "metricas" && (
           <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: fabBottom + 152 }}>
