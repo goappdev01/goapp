@@ -378,6 +378,7 @@ class Factory:
             raise self.Error("FACTORY_METRO_UNVERIFIED", "No se pudieron identificar las fuentes del commit servido.")
         tracked = {name.decode("utf-8", "surrogateescape").replace("\\", "/")
                    for name in tracked_result.stdout.split(b"\0") if name}
+        app_prefix = "artifacts/go-app-mobile/" if (root / "artifacts/go-app-mobile/package.json").is_file() else ""
         checked = 0
         for path, delivered in sources.items():
             try:
@@ -400,7 +401,7 @@ class Factory:
             checked += 1
         for relative in changed.stdout.splitlines():
             path = Path(relative)
-            if path.suffix.lower() not in (".tsx", ".ts", ".jsx", ".js") or any(
+            if (app_prefix and not relative.replace("\\", "/").startswith(app_prefix)) or path.suffix.lower() not in (".tsx", ".ts", ".jsx", ".js") or any(
                     part.lower() in ("tests", "__tests__") for part in path.parts):
                 continue
             expected = (root / path).resolve()

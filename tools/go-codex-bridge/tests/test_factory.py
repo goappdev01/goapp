@@ -251,9 +251,10 @@ class FactoryTests(unittest.TestCase):
 
     def test_metro_proof_uses_served_source_not_manifest_revision_label(self):
         factory = self.bridge.factory
-        root = self.home / "go"; (root/"app").mkdir(parents=True)
+        root = self.home / "go"; (root/"artifacts/go-app-mobile/app").mkdir(parents=True)
         (root/".git").mkdir(); (root/"package.json").write_text("{}")
-        source = root/"app"/"main.tsx"; source.write_text("export const value = 2;\n")
+        (root/"artifacts/go-app-mobile/package.json").write_text("{}")
+        source = root/"artifacts/go-app-mobile/app/main.tsx"; source.write_text("export const value = 2;\n")
         manifest = {"extra":{"expoClient":{"sdkVersion":"58.0.0"}},
             "revisionId":"old-label", "launchAsset":{"url":"http://100.1.2.3:8088/app.bundle?platform=ios"}}
         source_map = {"sections":[{"map":{"sources":["virtual\0module",str(source)],
@@ -273,9 +274,9 @@ class FactoryTests(unittest.TestCase):
                 raise AssertionError(url)
         def git_command(args, **_):
             if "diff" in args:
-                return type("Completed",(),{"returncode":0,"stdout":"app/main.tsx\n"})()
+                return type("Completed",(),{"returncode":0,"stdout":"artifacts/go-app-mobile/app/main.tsx\ntools/go-codex-bridge/panel.js\n"})()
             if "ls-files" in args:
-                return type("Completed",(),{"returncode":0,"stdout":b"app/main.tsx\0"})()
+                return type("Completed",(),{"returncode":0,"stdout":b"artifacts/go-app-mobile/app/main.tsx\0"})()
             if "show" in args:
                 return type("Completed",(),{"returncode":0,
                     "stdout":b"export const value = 2;\n"})()
