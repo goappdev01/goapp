@@ -122,6 +122,9 @@ class Continuity:
             state=item["state"]
             if state=="closed":
                 action,why="completed","Terminada y verificada; no se repetirá."
+            elif state=="blocked" and self._published_recovery_review(*grant_by_card[item["card_id"]]):
+                action,why="run","El cambio ya está publicado. Solo se conciliará Metro y se continuará desde el recibo pendiente, sin repetir Codex ni el push."
+                available.add(item["card_id"])
             elif state=="blocked":
                 action,why="skip","Bloqueada; no se repetirá automáticamente."
             elif state=="ready" and all(dep in available or (dep,item["card_id"]) in fallback_pairs for dep in item["depends_on"]):
@@ -137,6 +140,10 @@ class Continuity:
                 "dependency_fallbacks":fallbacks,"plan":plan,
                 "account_changed":current_identity!=doc.get("codex_identity"),
                 "current_codex_identity_sha256":self.f.digest(current_identity)}
+
+    def _published_recovery_review(self,row,grant):
+        with self.b.db() as db:
+            return self.published_recovery(db,row,grant)
 
     def activate(self,review,principal):
         with self.f.lock:
@@ -260,11 +267,13 @@ class Continuity:
             return None
         candidates=sorted(rows,key=lambda pair:pair[0]["state"]!="working")
         for row,grant in candidates:
+            published_recovery=self.published_recovery(db,row,grant)
             runtime=db.execute("SELECT retry_after FROM factory_card_runtime WHERE grant_id=?",(grant["grant_id"],)).fetchone()
             if row['state']=='working' and runtime and runtime[0]>time.time():
                 # Keep the single workspace lease while a known pre-effect retry waits.
                 return {'waiting':'RETRY_BACKOFF','again':False}
-            if row["state"] not in ("working","ready") or runtime and runtime[0]>time.time():
+            if ((row["state"] not in ("working","ready") and not published_recovery)
+                    or (runtime and runtime[0]>time.time())):
                 continue
             explicit_fallback=False
             dependencies_ready=True
@@ -295,8 +304,26 @@ class Continuity:
                     "reason":"Tarjetas previas bloqueadas, en espera o con dependencias pendientes.",
                     "explicit_diagnostic_fallback":explicit_fallback},db)
             return {"expected":grant["card_id"],"grant_id":grant["grant_id"],"codex_identity":doc["codex_identity"],
-                    "independent":True,"explicit_diagnostic_fallback":explicit_fallback}
+                    "independent":True,"explicit_diagnostic_fallback":explicit_fallback,
+                    "published_recovery":published_recovery}
         return {"waiting":"NO_SAFE_ELIGIBLE_CARD","again":False}
+
+    def published_recovery(self,db,row,grant):
+        """Resume only a verified push whose Metro receipt was never recorded."""
+        if row["state"]!="blocked" or row["reason"]!="FACTORY_METRO_OUTDATED":
+            return False
+        stages={stage["letter"]:stage for stage in db.execute(
+            "SELECT letter,state,approval_id FROM wheel_stages WHERE grant_id=?",(grant["grant_id"],))}
+        if (set(stages)!={"A","B"} or stages["A"]["state"]!="verified"
+                or stages["B"]["state"]!="claimed" or not stages["B"]["approval_id"]):
+            return False
+        attempt=self.f._row(grant["card_id"],grant["attempt"])
+        job=self.b.job(attempt["job_id"]) if attempt and attempt.get("job_id") else None
+        if not job or job["state"]!="completed":
+            return False
+        from wheel_effects import WheelEffects
+        publications=WheelEffects(self.f)._publications(job["id"])
+        return len(publications)==1 and publications[0]["state"]=="verified"
 
     def card_error(self,grant,code):
         # Every failed implementation must first be preserved by the existing handler.

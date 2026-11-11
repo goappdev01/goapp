@@ -934,7 +934,10 @@ class Wheel:
                         self._pause_head(db,"WHEEL_HEAD_PERMISSION_REQUIRED")
                         return {"paused":"WHEEL_HEAD_PERMISSION_REQUIRED","card_id":first["id"]}
                     g=self._verified(candidate)
-                    if candidate["state"] not in ("ready","wait_permissions"):
+                    recovering=bool(trial and trial.get("published_recovery") and
+                                    trial.get("grant_id")==candidate["grant_id"] and
+                                    self.continuity.published_recovery(db,candidate,g))
+                    if candidate["state"] not in ("ready","wait_permissions") and not recovering:
                         self._pause_head(db,"WHEEL_HEAD_REVIEW_REQUIRED")
                         return {"paused":"WHEEL_HEAD_REVIEW_REQUIRED","card_id":first["id"]}
                     if "A" not in g["operations"] or self._expired(g):
@@ -957,7 +960,10 @@ class Wheel:
                         db.execute("BEGIN IMMEDIATE")
                         if db.execute("SELECT 1 FROM wheel_grants WHERE state='working'").fetchone():
                             return {"running":"ocupado"}
-                        changed=db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=? AND state IN ('ready','wait_permissions')",(g["grant_id"],)).rowcount
+                        expected_states=("ready","wait_permissions","blocked") if recovering else ("ready","wait_permissions")
+                        changed=db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=? AND state IN ("+
+                                           ",".join("?" for _ in expected_states)+")",
+                                           (g["grant_id"],*expected_states)).rowcount
                         if changed != 1:
                             return {"paused":"WHEEL_HEAD_REVIEW_REQUIRED"}
                 return self._advance(g,cards.get(g["card_id"]),codex_identity=trial.get("codex_identity") if trial else None)

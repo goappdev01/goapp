@@ -294,6 +294,29 @@ class FactoryTests(unittest.TestCase):
                 factory._verify_metro("c"*40,"b"*40,root)
             self.assertEqual(error.exception.code,"FACTORY_METRO_OUTDATED")
 
+    def test_metro_fast_forwards_from_older_ancestor_without_replacing_pinned_checkout(self):
+        root=self.home/'served';cli=root/'node_modules/expo/bin/cli'
+        cli.parent.mkdir(parents=True);cli.write_text('synthetic')
+        old,before,new='a'*40,'b'*40,'c'*40
+        calls=[]
+        def git(*args):
+            calls.append(args)
+            if args==('rev-parse','HEAD'):return old
+            if args==('remote','get-url','origin'):return 'https://github.com/goappdev01/goapp.git'
+            if args==('ls-remote','origin','refs/heads/main'):return new+' refs/heads/main'
+            if args==('status','--porcelain'):return ''
+            if args==('rev-parse','FETCH_HEAD'):return new
+            return ''
+        def run(args,**kwargs):
+            if args[0]=='powershell.exe':
+                return type('Result',(),{'returncode':0,'stdout':f'node "{cli}" start --port 8088 --host lan'})()
+            self.assertEqual(args[-2:],[old,new])
+            return type('Result',(),{'returncode':0})()
+        with patch.object(self.bridge.safety,'git_command',side_effect=lambda _root,*args:git(*args)),\
+             patch('factory.subprocess.run',side_effect=run):
+            self.bridge.factory._advance_served_checkout(root,before,new)
+        self.assertIn(('-c','core.hooksPath=NUL','merge','--ff-only',new),calls)
+
     def test_legacy_monitor_stops_at_incompatible_first_card(self):
         factory=self.bridge.factory
         cards=[card("b"*24,"A2 Trabajo de otro agente",1),card("a"*24,"A4 Ajuste",2)]

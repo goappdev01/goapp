@@ -111,6 +111,58 @@ class V2WheelTests(unittest.TestCase):
         self.assertTrue(w.enabled())
         self.assertFalse(self.runs or self.changes)
 
+    def test_three_pending_cards_skip_blocked_and_dependent_without_cli(self):
+        w,ids=self.batch()
+        self.block(w,ids[0]);self.block(w,ids[1])
+        with patch.object(w,'_advance',return_value={'selected':ids[3]}) as advance:
+            self.assertEqual(w.tick(),{'selected':ids[3]})
+        self.assertEqual(advance.call_args.args[0]['card_id'],ids[3])
+        self.assertEqual(w.status()['current']['card_id'],ids[3])
+        self.assertFalse(self.runs or self.changes)
+
+    def test_verified_push_with_missing_metro_receipt_is_selected_for_reconciliation(self):
+        w,ids=self.batch()
+        with self.bridge.db() as db:
+            row=db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[0],)).fetchone()
+            grant=w._verified(row)
+            db.execute("UPDATE wheel_grants SET state='blocked',reason='FACTORY_METRO_OUTDATED' WHERE grant_id=?",
+                       (grant['grant_id'],))
+            db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started,approval_id) VALUES(?,?,'verified','synthetic',?)",
+                       (grant['grant_id'],'A','synthetic'))
+            db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started,approval_id) VALUES(?,?,'claimed','synthetic',?)",
+                       (grant['grant_id'],'B','synthetic'))
+        with patch.object(self.bridge.factory,'_row',return_value={'job_id':'synthetic-job'}),\
+             patch.object(self.bridge,'job',return_value={'id':'synthetic-job','state':'completed'}),\
+             patch.object(WheelEffects,'_publications',return_value=[{'state':'verified'}]):
+            selected=w._trial_limit()
+            self.assertEqual(selected['expected'],ids[0])
+            self.assertTrue(selected['published_recovery'])
+            self.assertEqual(w.continuity.review_activation()['plan'][0]['action'],'run')
+        self.assertFalse(self.runs or self.changes)
+
+    def test_published_card_reconciles_after_bridge_only_main_commit(self):
+        before,card_sha,bridge_sha='a'*40,'b'*40,'c'*40
+        effect=WheelEffects(self.bridge.factory)
+        operation={'state':'verified','id':'synthetic-operation',
+                   'payload':json.dumps({'diff':'synthetic patch','tests':[]}),
+                   'result':json.dumps({'main_sha':card_sha})}
+        def git(_root,*args):
+            if args[:2]==('ls-remote','origin'):return bridge_sha+' refs/heads/main'
+            if args[:2]==('fetch','--no-tags'):return ''
+            if args[:2]==('rev-parse','FETCH_HEAD'):return bridge_sha
+            if args[:2]==('diff','--name-only'):return 'tools/go-codex-bridge/factory.py'
+            if args[:2]==('rev-parse',card_sha+'^'):return before
+            if args[:2]==('diff','--binary'):return 'synthetic patch'
+            raise AssertionError(args)
+        with patch.object(effect,'_publications',return_value=[operation]),\
+             patch.object(self.bridge.safety,'git_command',side_effect=git),\
+             patch('wheel_effects.subprocess.run',return_value=SimpleNamespace(returncode=0)),\
+             patch.object(self.bridge.factory,'_verify_metro',return_value={'sha':bridge_sha}) as verify:
+            receipt=effect._published({'job_id':'synthetic','before_sha':before},self.root,sync=True)
+        self.assertEqual(receipt['main_sha'],card_sha)
+        self.assertEqual(receipt['served_sha'],bridge_sha)
+        verify.assert_called_once_with(bridge_sha,before,self.root,synchronize=True)
+
     def test_signed_instruction_fallback_can_select_only_its_blocked_diagnosis_dependency(self):
         w,ids=self.batch(diagnostic_fallback=True)
         review=w.continuity.review_activation()

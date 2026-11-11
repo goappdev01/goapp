@@ -277,13 +277,14 @@ function wheelReasonText(reason) {
     WHEEL_CODEX_SESSION_CHANGED:"Cambió la cuenta de Codex vinculada al lote.",WHEEL_SUBJECT_CHANGED:"Cambió la cola o una instrucción desde su revisión.",
     WHEEL_BATCH_ORDER_CHANGED:"El orden de Trello cambió desde la revisión.",WHEEL_WORKSPACE_BUSY:"Hay un trabajo en curso o pendiente de conciliar.",
     WHEEL_HEAD_DEPENDENCY_BLOCKED:"La alternativa de dependencia fue rechazada antes de iniciar el ejecutor.",
+    FACTORY_METRO_OUTDATED:"La publicación existe en MAIN; Metro 8088 aún no confirmó el código servido. No se repetirá el push.",
     OWNER_PAUSED:"La fábrica está pausada por el propietario.",
     OWNER_STOPPED:"La fábrica está detenida. Revisa el lote antes de continuar."})[reason] || (reason ? "Bloqueo registrado: "+reason : "");
 }
 function renderWheel(wheel) {
   const grants = wheel?.grants || [];
   el("wheelState").textContent = !wheel ? "ESTADO SIN VERIFICAR · La rueda no está disponible en este coordinador."
-    : (wheel.enabled ? "FÁBRICA ACTIVADA" : wheel.frozen_batch?.state === "completed" ? "FÁBRICA FINALIZADA"
+    : (wheel.enabled ? (wheel.current?.job_state==="running" ? "PROGRAMANDO · "+wheel.current.title : "FÁBRICA ACTIVADA") : wheel.frozen_batch?.state === "completed" ? "FÁBRICA FINALIZADA"
       : wheel.reason === "OWNER_STOPPED" ? "FÁBRICA DETENIDA · " + wheelReasonText(wheel.reason)
       : wheel.reason && wheel.reason !== "OWNER_PAUSED" ? "FÁBRICA BLOQUEADA · " + wheelReasonText(wheel.reason)
       : "FÁBRICA PAUSADA") + (wheel.reason && wheel.reason === "OWNER_PAUSED" ? " · " + wheelReasonText(wheel.reason) : "");

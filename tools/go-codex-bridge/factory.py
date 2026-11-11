@@ -452,10 +452,16 @@ class Factory:
         if process.returncode or not any(is_served_checkout(line) for line in process.stdout.splitlines()):
             raise self.Error("FACTORY_METRO_UNVERIFIED","El proceso Metro no identifica esta copia física.")
         git = lambda *args:self.bridge.safety.git_command(root,*args)
-        if (git("rev-parse","HEAD").strip()!=before or git("remote","get-url","origin").strip() not in
+        served_head=git("rev-parse","HEAD").strip()
+        if (git("remote","get-url","origin").strip() not in
             ("https://github.com/goappdev01/goapp.git","https://github.com/goappdev01/goapp","git@github.com:goappdev01/goapp.git")
             or git("ls-remote","origin","refs/heads/main").split()[0]!=sha):
-            raise self.Error("FACTORY_METRO_OUTDATED","La base del servidor o el MAIN remoto cambió.")
+            raise self.Error("FACTORY_METRO_OUTDATED","El destino del servidor o MAIN remoto cambió.")
+        # Metro can legitimately lag several published bridge commits. Advance
+        # only a clean, ancestral checkout; never replace a pinned 8089 version.
+        if subprocess.run(["git","-C",str(root),"merge-base","--is-ancestor",served_head,sha],
+                          capture_output=True,timeout=20).returncode:
+            raise self.Error("FACTORY_METRO_OUTDATED","La copia servida no es antecesora de MAIN.")
         allowed={" M artifacts/go-app-mobile/expo-env.d.ts","?? runtime/"}
         if set(git("status","--porcelain").splitlines())-allowed:
             raise self.Error("FACTORY_METRO_DIRTY","La copia de Metro tiene cambios concurrentes que requieren revisión.")

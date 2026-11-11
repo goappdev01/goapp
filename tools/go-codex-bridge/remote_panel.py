@@ -32,6 +32,7 @@ class RemotePanel:
         "WHEEL_V2_ACTIVATION_REQUIRED":"El lote requiere una revisión de activación en el panel privado.",
         "WHEEL_REVIEW_REQUIRED":"El bloqueo requiere revisar el lote antes de reactivarlo.",
         "WHEEL_HEAD_DEPENDENCY_BLOCKED":"La alternativa de dependencia fue rechazada antes de iniciar el ejecutor. No se ejecutó otra tarjeta.",
+        "FACTORY_METRO_OUTDATED":"La tarjeta se publicó en MAIN, pero Metro 8088 aún no confirmó el código servido. Se conserva la publicación para verificarla sin repetirla.",
         "OWNER_PAUSED":"La fábrica está pausada por el propietario.",
         "OWNER_STOPPED":"La fábrica está detenida. Para continuar hace falta revisar y confirmar el lote vigente.",
     }
@@ -142,13 +143,21 @@ class RemotePanel:
             attempt=self.f._row(item["card_id"],grant["attempt"]) if grant else None
             job=self.b.job(attempt["job_id"]) if attempt and attempt.get("job_id") else None
             stages=grant.get("stages",[]) if grant else []
+            published_operation=None
+            if job:
+                from wheel_effects import WheelEffects
+                operations=WheelEffects(self.f)._publications(job["id"])
+                published_operation=next((op for op in operations if op["state"]=="verified"),None)
+            published_result=json.loads(published_operation["result"]) if published_operation and published_operation.get("result") else {}
             done={s["letter"] for s in stages if s["state"]=="verified"}
             phase=next((letter for letter in "ABCD" if letter not in done),"closed")
             cards.append({"card_id":item["card_id"],"title":item["title"],"index":index,"total":len(batch["cards"]),
                           "state":grant["state"] if grant else "unapproved","reason":grant["reason"] if grant else item.get("blocker"),
                           "phase":phase,"work_kind":item.get("work_kind"),"activity":self.activity(job),
-                          "published":next((s.get("receipt",{}).get("main_sha") for s in stages if s["letter"]=="B"),None),
-                          "publication_state":next((s["state"] for s in stages if s["letter"]=="B"),"pending"),
+                          "published":next(((s.get("receipt") or {}).get("main_sha") for s in stages if s["letter"]=="B"),None) or published_result.get("main_sha"),
+                          "publication_state":("published_waiting_metro" if published_operation and not any(
+                              s["letter"]=="B" and s["state"]=="verified" for s in stages) else
+                              next((s["state"] for s in stages if s["letter"]=="B"),"pending")),
                           "comment_state":next((s["state"] for s in stages if s["letter"]=="C"),"pending"),
                           "move_state":next((s["state"] for s in stages if s["letter"]=="D"),"pending")})
         pending=[]
@@ -163,7 +172,7 @@ class RemotePanel:
         enabled=wheel["enabled"]
         working=any(card["state"]=="working" and card["activity"]["state"] in ("running","detached") for card in cards)
         if enabled:
-            state="trabajando" if working else "activada"
+            state="PROGRAMANDO" if working else "activada"
         elif batch and batch["state"]=="completed":
             state="terminada"
         elif wheel["reason"]=="OWNER_STOPPED":

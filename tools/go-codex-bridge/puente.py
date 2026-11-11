@@ -37,7 +37,7 @@ APP = "GO-Puente-Codex"
 SCOPES = {"read:board:trello", "write:board:trello", "offline_access"}
 TEST_INSTRUCTION = "Sin utilizar herramientas ni acceder a archivos, responde exactamente GO_PUENTE_CODEX_OK."
 TERMINAL = {"completed", "blocked", "failed", "interrupted", "needs_review"}
-EXECUTOR_VERSION = "2026-11-11-factory-activation-state-2"
+EXECUTOR_VERSION = "2026-11-11-factory-metro-recovery-3"
 
 
 def codex_command(executable, sandbox, workspace, answer_file):

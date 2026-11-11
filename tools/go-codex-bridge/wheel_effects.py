@@ -570,12 +570,23 @@ class WheelEffects:
         payload, result = json.loads(op["payload"]), json.loads(op["result"])
         sha = result.get("main_sha","")
         git = lambda *args: self.b.safety.git_command(workspace,*args)
-        if (not re.fullmatch("[a-f0-9]{40}",sha) or git("ls-remote","origin","refs/heads/main").split()[0]!=sha
+        remote_sha=git("ls-remote","origin","refs/heads/main").split()[0]
+        served_sha=sha
+        if remote_sha!=sha and re.fullmatch("[a-f0-9]{40}",sha):
+            git("fetch","--no-tags","origin","refs/heads/main")
+            if git("rev-parse","FETCH_HEAD").strip()!=remote_sha:
+                self.fail("PUBLICATION_UNVERIFIED","MAIN cambió durante la conciliación.")
+            ancestor=subprocess.run(["git","-C",str(workspace),"merge-base","--is-ancestor",sha,remote_sha],
+                                    capture_output=True,timeout=20)
+            delta=git("diff","--name-only",sha,remote_sha).splitlines() if ancestor.returncode==0 else []
+            if ancestor.returncode==0 and delta and all(path.startswith("tools/go-codex-bridge/") for path in delta):
+                served_sha=remote_sha
+        if (not re.fullmatch("[a-f0-9]{40}",sha) or served_sha!=remote_sha
                 or git("rev-parse",sha+"^").strip()!=row["before_sha"]
                 or git("diff","--binary",row["before_sha"],sha)!=payload["diff"]):
             self.fail("PUBLICATION_UNVERIFIED","MAIN ya no corresponde al parche exacto de esta tarjeta.")
-        metro = self.f._verify_metro(sha,row["before_sha"],workspace,synchronize=sync)
-        return {"main_sha":sha,"tests":payload["tests"],"metro":metro,
+        metro = self.f._verify_metro(served_sha,row["before_sha"],workspace,synchronize=sync)
+        return {"main_sha":sha,"served_sha":served_sha,"tests":payload["tests"],"metro":metro,
                 "api":metro.get("api","Sin comprobación"),"operation":op["id"]}
 
     def _snapshot(self,card_id):
