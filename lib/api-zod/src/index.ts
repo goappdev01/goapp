@@ -9,4 +9,5 @@ export * from "./go-boards";
 export * from "./financial-plan";
 export * from "./financial-calculations";
 export * from "./financial-import";
+export * from "./sports-events";
 export * from "./financial-projections";

@@ -47,6 +47,7 @@ import { savedNoteTarget, type NoteRevealTarget } from "@/lib/goNoteNavigation";
 import { CalendarCloseGuide } from "@/components/ui/CalendarCloseGuide";
 import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
 import { GoBoardsPanel } from "@/components/boards/GoBoardsPanel";
+import { SportsEventsAdminPanel } from "@/components/sports/SportsEventsAdminPanel";
 import { useGoBoards } from "@/hooks/useGoBoards";
 import { canReadBoardTask } from "@/lib/goTaskAccess";
 import Svg, { Circle, Path as SvgPath } from "react-native-svg";
@@ -293,6 +294,7 @@ type OrbitBrand = {
   logoBg?: string;
   fillLogo?: boolean;
   logoScale?: number;
+  adminAction?: "sports-events";
 };
 // Sub-intención: categoría intermedia (ej: "RÁPIDA", "DELIVERY").
 // No tiene URL propia — al pulsar entra al nivel de marcas.
@@ -557,6 +559,9 @@ const ORBIT_SECOND_LEVELS: Record<string, OrbitBrand[][]> = {
       { label: "PELOTON",     icon: "activity",     color: "#DE1C24", url: "https://onepeloton.com",        logoUri: SI("peloton") },
       { label: "WHOOP",       icon: "zap",          color: "#000000", url: "https://whoop.com",             logoUri: IH("whoop.com") },
       { label: "TRAINWELL",   icon: "trending-up",  color: "#3B82F6", url: "https://trainwell.net",         logoUri: IH("trainwell.net") },
+    ],
+    [
+      { label: "EVENTOS DEPORTIVOS", icon: "calendar", color: "#15803d", url: "", adminAction: "sports-events" },
     ],
   ],
   shopping: [
@@ -3123,6 +3128,7 @@ function HomeScreenContent() {
   const [calOpen, setCalOpen] = useState(false);
   const calendarDragOverlay = useRef<ViewInstance>(null);
   const [boardsOpen, setBoardsOpen] = useState(false);
+  const [sportsEventsOpen, setSportsEventsOpen] = useState(false);
   // ── Flujo universal de calendario — hook sin lógica de módulo ──────────
   // Todos los módulos (normal, mover, propuesta, QD, reservas nav, etc.)
   // pasan por calFlow.open({onSave}) — cero ramas de módulo aquí.
@@ -6455,7 +6461,8 @@ function HomeScreenContent() {
     receivedDetailOpen ||
     notesOpen ||
     fieldSelectorOpen ||
-    humanityOpen;
+    humanityOpen ||
+    sportsEventsOpen;
 
   const userLandingVariant = resolveUserLandingVariant(goView.view, landingVisual.ready,
     !anyOverlayOpen && !goAuthOpen && !empresaOpen && !adminDashOpen && !rutasMode,
@@ -11726,6 +11733,7 @@ function HomeScreenContent() {
   // FAB ancla y de la opción "GO" de su menú rápido. Si no hay
   // nada abierto, no hace nada (idempotente).
   const closeAllOverlays = () => {
+    setSportsEventsOpen(false);
     setListOpen(false);
     setLlamadasListOpen(false);
     setCalOpen(false);
@@ -11749,6 +11757,7 @@ function HomeScreenContent() {
   // Nunca salta pasos ni cierra todo de golpe — cada pulsación retrocede
   // exactamente un nivel.
   const closeTopLayer = () => {
+    if (sportsEventsOpen) { setSportsEventsOpen(false); return; }
     // ── -1. CHECKOUT MARKETPLACE — retrocede a orbit normal ───────────────
     if (marketplaceCheckout !== null) {
       setMarketplaceCheckout(null);
@@ -17736,11 +17745,14 @@ function HomeScreenContent() {
                 }
 
                 // ── MODO PLANO: sistema de capas existente ──────────────────────
-                const allLayers = orbitSecondLevel ? (
+                const sourceLayers = orbitSecondLevel ? (
                   MARKET_ORBIT_DATA[userMarket]?.[orbitSecondLevel] ??
                   ORBIT_SECOND_LEVELS[orbitSecondLevel] ??
                   []
                 ) : [];
+                const sportsAdminAllowed = goView.isAdminView && adminAccess.allowed && !adminAccess.checking;
+                const allLayers = sourceLayers.filter(layer =>
+                  sportsAdminAllowed || !layer.some(brand => brand.adminAction === "sports-events"));
                 const currentLayer = allLayers[orbitSecondLayerIndex] ?? [];
                 const hasNextLayer = orbitSecondLayerIndex < allLayers.length - 1;
                 const layerBrands = currentLayer.slice(0, 7);
@@ -17772,6 +17784,13 @@ function HomeScreenContent() {
                           dimmed={false}
                           onPress={() => {
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                            if (brand.adminAction === "sports-events") {
+                              if (!sportsAdminAllowed) return;
+                              setOrbitSecondLevel(null);
+                              setOrbitSecondLayerIndex(0);
+                              setSportsEventsOpen(true);
+                              return;
+                            }
                             setOrbitSecondLevel(null);
                             setOrbitSecondLayerIndex(0);
                             if (orbitSecondLevel === "comida" && brand.url) {
@@ -25636,6 +25655,8 @@ function HomeScreenContent() {
         icon="user" label={satellite.label} accessibilityLabel={satellite.title}
         size={size} iconSize={0} labelSize={Math.max(10,Math.round(size*.18))} labelOnly labelLines={2}
         labelOpacity={satellite.empty?0:1} labelSpacing={0} paddingH={5}/>}/>
+    <SportsEventsAdminPanel key={`sports-admin:${adminAccess.userId ?? "anonymous"}`} visible={sportsEventsOpen && goView.isAdminView && adminAccess.allowed && !adminAccess.checking}
+      onClose={() => setSportsEventsOpen(false)} fontScale={uiScaleFactor} />
     <LoginRegisterPanel
       visible={goAuthOpen}
       onClose={() => {
