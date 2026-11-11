@@ -146,6 +146,26 @@ function assertComposer(f, origin, expectedSeed, initial = null) {
 }
 const pressNotes = (f, origin) => valueOf(f.ctx, expression(control(`${origin === 'list' ? 'list' : 'calendar'}-notes-open`), 'onPress'))({ stopPropagation() {} });
 
+test('COMPRAS route: actual NOTAS button preserves ordinary draft and source, opens the specialized screen in the same personal scope',async()=>{
+ const f=fixture('list');f.ctx.GoShoppingNote=function GoShoppingNote(){};await pressNotes(f,'list');
+ const editor=f.ctx.renderUnifiedNoteEditor(),draft={...model.noteDraft(),content:'Borrador normal que conservar'};
+ const ui=await h.editorFixture();try{
+  await ui.render({onOpenShopping:editor.props.onOpenShopping});await ui.run(()=>ui.hosts.get('note-content').onChangeText(draft.content));
+  await ui.tap('note-open-shopping');const shopping=f.ctx.renderUnifiedNoteEditor();assert.equal(shopping.type,f.ctx.GoShoppingNote);assert.deepEqual(shopping.props.scope,f.scope);assert.equal(shopping.props.visible,true);
+  assert.equal(f.ctx.listOpen,true);shopping.props.onClose();const restored=f.ctx.renderUnifiedNoteEditor();assert.equal(restored.type,f.ctx.GoNoteEditor);assert.equal(restored.props.cached.content,draft.content);
+ }finally{await ui.close();}
+});
+
+test('COMPRAS route: existing canonical note opens full screen from Listados and Calendar, never the ordinary text form',()=>{
+ const shopping=h.load('lib/shoppingNote.ts');
+ for(const origin of ['list','calendar']){
+  const f=fixture(origin);f.ctx.GoShoppingNote=function GoShoppingNote(){};
+  const entry=model.buildNoteEntry({...model.noteDraft(),title:'COMPRAS',content:'Lista personal',destination:'pending'},f.scope);entry.note.shopping=shopping.emptyShopping();
+  f.ctx.openUnifiedNote(entry,{},origin);assert.equal(f.ctx.renderUnifiedNoteEditor().type,f.ctx.GoShoppingNote);
+  loadFunctions(f.ctx,['renderExistingNote']);assert.equal(f.ctx.renderExistingNote(entry,()=>{}).type,f.ctx.GoShoppingNote);
+ }
+});
+
 for (const origin of ['calendar', 'list']) {
   test(`${origin} notes icon executes its JSX onPress and immediately shows the shared editor`, async () => {
     const f = fixture(origin);

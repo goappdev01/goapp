@@ -6,6 +6,7 @@ export type NoteTarget = NoteDestination | "go";
 export type NoteAttachment = { id: string; name: string; kind: "file" | "link"; uri: string; mime?: string; size?: number };
 export type NoteSchedule = { dateISO: string; time: string; duration: string };
 export type NoteDocument = {
+  shopping?: import("./shoppingNote").ShoppingDocument;
   version: 1; revision: number; operationId: string; destination: NoteTarget;
   title: string; content: string; schedule: NoteSchedule; reminderMinutes: number | null;
   reminderOffsets?: number[]; notificationsMuted?: boolean;
@@ -87,7 +88,7 @@ export function buildNoteEntry(draft: UnifiedNoteDraft, scope: TaskScope, previo
   const reminderOffsets=draft.reminderMinutes===null?[]:[...new Set([...priorOffsets.filter(offset=>offset!==priorOffset),draft.reminderMinutes])];
   const notificationsMuted=old?.notificationsMuted??(previous?.notificationsEnabled===false);
   const history = old?.history || [];
-  const note: NoteDocument = { version:1,revision:(old?.revision || 0)+1,operationId:draft.operationId,destination:draft.destination,
+  const note: NoteDocument = { shopping:old?.shopping,version:1,revision:(old?.revision || 0)+1,operationId:draft.operationId,destination:draft.destination,
     title:draft.title,content:draft.content,schedule,reminderMinutes:draft.reminderMinutes,reminderOffsets,notificationsMuted,attachments:draft.attachments.map(a=>({...a})),location:draft.location,
     history:old && old.destination!==draft.destination ? [...history,{at:Date.now(),from:old.destination,to:draft.destination,schedule:old.schedule}] : history };
   return { ...previous, id:draft.id,kind:"sent",type:previous?.type || "TAREA_INTERNA",intentKey:previous?.intentKey || "nota_interna",intentLabel:previous?.intentLabel || "Nota",

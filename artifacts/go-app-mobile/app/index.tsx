@@ -39,6 +39,7 @@ import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { DraggableFAB } from "@/components/DraggableFAB";
 import { GoNoteEditor } from "@/components/notes/GoNoteEditor";
+import { GoShoppingNote } from "@/components/notes/GoShoppingNote";
 import { isArchivedNote, linkedNotesForEntry, noteDocument, noteInScope, validNoteDate, validNoteTime, type UnifiedNoteDraft, type NoteDestination } from "@/lib/unifiedNotes";
 import { saveUnifiedNote, moveUnifiedNote, discardUnifiedNoteDraft, discardExclusiveGoNote } from "@/lib/unifiedNoteStore";
 import { noteReminderOperationCurrent } from "@/lib/goNoteSaveProgress";
@@ -4332,7 +4333,7 @@ function HomeScreenContent() {
   const [noteReminderBusy, setNoteReminderBusy] = useState(false);
   type UnifiedNoteOrigin = "landing" | "calendar" | "list";
   const [unifiedNoteInitial,setUnifiedNoteInitial]=useState<GoEntry|null>(null);
-  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;title?:string;content?:string;toolsOpen?:boolean;confirmSchedule?:boolean;linkedEntryId?:string;goDraftId?:string}>({});
+  const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;title?:string;content?:string;toolsOpen?:boolean;confirmSchedule?:boolean;linkedEntryId?:string;goDraftId?:string;shopping?:boolean}>({});
   const unifiedNoteOriginRef=useRef<UnifiedNoteOrigin>("landing");
   const listNoteLayerBackRef=useRef<(() => boolean)|null>(null);
   const unifiedNoteCache=useRef<{scope:string;draft:UnifiedNoteDraft}|null>(null);
@@ -25678,10 +25679,13 @@ function HomeScreenContent() {
   }
   function renderUnifiedNoteEditor(){
     const scope=noteIdentity.scope;
+    if(unifiedNoteSeed.shopping||unifiedNoteInitial?.note?.shopping)return <GoShoppingNote visible={notesOpen} scope={scope} ready={noteIdentity.ready} handedness={handedness}
+      onClose={()=>{if(unifiedNoteSeed.shopping)setUnifiedNoteSeed(seed=>({...seed,shopping:false}));else{setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}}/>;
     const {linkedEntryId,goDraftId}=unifiedNoteSeed;
     const goAttachment=!!goDraftId || unifiedNoteInitial?.note?.destination==="go";
     const cacheId=goDraftId ? "compose:"+goDraftId+":"+(unifiedNoteInitial?.id ?? "new") : unifiedNoteInitial?.id ?? (linkedEntryId ? "linked:"+linkedEntryId : undefined);
     return <GoNoteEditor key={cacheId} visible={notesOpen} initial={unifiedNoteInitial} handedness={handedness} ready={noteIdentity.ready} scope={scope}
+      onOpenShopping={state=>{cacheNoteDraft(state,cacheId);setUnifiedNoteSeed(seed=>({...seed,shopping:true}));}}
       initialToolsOpen={unifiedNoteSeed.toolsOpen===true}
       confirmScheduleOnSave={unifiedNoteSeed.confirmSchedule===true}
       goAttachment={goAttachment}
@@ -25744,6 +25748,7 @@ function HomeScreenContent() {
   }
   function renderExistingNote(entry:GoEntry,onClose:()=>void,navigation?:{onGoToLanding?:()=>void;closeRequested?:boolean}){
     const scope=noteIdentity.scope;
+    if(entry.note?.shopping)return <GoShoppingNote key={entry.id} visible scope={scope} ready={noteIdentity.ready} handedness={handedness} onClose={onClose} closeRequested={navigation?.closeRequested}/>;
     return <GoNoteEditor key={entry.id} visible initial={entry} scope={scope} ready={noteIdentity.ready} handedness={handedness}
       cached={unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+entry.id)}
       onSave={saveNoteDraft} onDelete={deleteSavedNote} renderActions={renderSavedNoteActions} onGoToLanding={navigation?.onGoToLanding} closeRequested={navigation?.closeRequested}

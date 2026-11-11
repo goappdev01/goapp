@@ -22,6 +22,7 @@ export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope,
   const validated=now();await verifyNoteFiles(scope,draft.id,draft.attachments);await check();const filesVerified=now();
   const saved=await updateGoLog(async rows=>{
     await check();const matches=rows.filter(row=>row.id===draft.id),previous=matches[0];
+    if(previous?.note?.shopping)throw new Error("Abre COMPRAS para modificar su lista especializada.");
     if(matches.length>1 || previous && (!noteInScope(previous,scope) || previous.deleted || previous.estado==="rechazado"))throw new Error("No puedes modificar esta nota en este contexto.");
     if (previous && (noteDocument(previous)?.destination === "go") !== goAttachment)
       throw new Error("No se puede cambiar el destino de una nota adjunta a GO.");

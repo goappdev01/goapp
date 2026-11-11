@@ -32,6 +32,7 @@ type Props = { visible:boolean; initial?:GoEntry|null; seed?:{title?:string;cont
   onSave:(draft:UnifiedNoteDraft)=>Promise<{entry:GoEntry;message:string;notice?:string;performance?:NoteSaveTrace}>;
   onSaved?:(entry:GoEntry,notice:string)=>void; onDelete?:(entry:GoEntry)=>void|Promise<void>;
   onDiscard?:(draft:UnifiedNoteDraft)=>Promise<void>;
+  onOpenShopping?:(state:{draft:UnifiedNoteDraft;saved:boolean})=>void;
   onGoToLanding?:()=>void; closeRequested?:boolean; initialToolsOpen?:boolean; confirmScheduleOnSave?:boolean; goAttachment?:boolean;
   renderActions?:(entry:GoEntry,onEdit:()=>void)=>React.ReactNode };
 const destinations: [NoteDestination,string][]=[["calendar","CALENDARIO"],["pending","PENDIENTES"],["archive","ARCHIVO"]];
@@ -39,7 +40,7 @@ const configurationKeys=["destination","dateISO","time","duration","place","loca
 const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
 
 /** One ordinary-note editor, one native presenter, and one acknowledged save operation. */
-export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClose,onSave,onSaved,onDelete,onDiscard,cached,renderActions,onGoToLanding,closeRequested=false,initialToolsOpen=false,confirmScheduleOnSave=false,goAttachment=false}:Props) {
+export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClose,onSave,onSaved,onDelete,onDiscard,onOpenShopping,cached,renderActions,onGoToLanding,closeRequested=false,initialToolsOpen=false,confirmScheduleOnSave=false,goAttachment=false}:Props) {
   const insets=useSafeAreaInsets(),scroll=useRef<React.ElementRef<typeof ScrollView>>(null),keyboard=useGoNoteKeyboard(visible);
   const [draft,setDraft]=useState<UnifiedNoteDraft>(()=>cached||noteDraft(initial)),[panel,setPanel]=useState(""),[error,setError]=useState(""),[message,setMessage]=useState("");
   const [busy,setBusy]=useState(false),[attachmentBusy,setAttachmentBusy]=useState(false),[link,setLink]=useState("");
@@ -367,6 +368,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
           onLayout={event=>{const height=Math.max(120,Math.floor(event.nativeEvent.layout.height-110));setWritingHeight(current=>Math.abs(current-height)<=2?current:height);}}
           keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" bounces={false} alwaysBounceVertical={false} overScrollMode="never" automaticallyAdjustKeyboardInsets={false} automaticallyAdjustContentInsets={false} contentInsetAdjustmentBehavior="never" removeClippedSubviews={false} contentContainerStyle={{paddingBottom:12,gap:12}}>
           {goAttachment&&<Text testID="note-go-target" style={s.hint}>Destino · GO</Text>}
+          {!goAttachment&&onOpenShopping&&<TouchableOpacity testID="note-open-shopping" accessibilityRole="button" disabled={busy||toolFinishing||attachmentBusy||!ready} onPress={()=>{const expected=JSON.stringify(scope);void hideKeyboard().then(hidden=>{if(hidden&&latest.current.visible&&latest.current.ready&&JSON.stringify(latest.current.scope)===expected)onOpenShopping({draft:draftRef.current,saved:saved.current});});}} style={[s.choice,s.calendar]}><Text style={s.destinationText}>COMPRAS · LISTA PERSONAL</Text></TouchableOpacity>}
           {input("note-title","TÍTULO (OPCIONAL)",draft.title,title=>change({title}),{onFocus:(event:Parameters<NonNullable<TextInputProps["onFocus"]>>[0])=>{focusedToolTarget.current=null;focusedWritingTarget.current=event.target??event.nativeEvent.target??null;voice.focus("title");},maxLength:200})}
           {input("note-content","CONTENIDO",draft.content,content=>change({content}),{onFocus:(event:Parameters<NonNullable<TextInputProps["onFocus"]>>[0])=>{focusedToolTarget.current=null;focusedWritingTarget.current=event.target??event.nativeEvent.target??null;voice.focus("detail");},multiline:true,textAlignVertical:"top",scrollEnabled:true,
             style:[s.input,s.content,writingInset,{height:writingHeight}]})}
