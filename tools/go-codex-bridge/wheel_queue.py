@@ -43,6 +43,9 @@ class Wheel:
                 id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0,
                 reason TEXT, checked TEXT, retry_after REAL NOT NULL DEFAULT 0);
             INSERT OR IGNORE INTO wheel_control(id) VALUES(1);
+            CREATE TABLE IF NOT EXISTS wheel_continuity_mode(
+                id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL DEFAULT 0);
+            INSERT OR IGNORE INTO wheel_continuity_mode(id) VALUES(1);
             CREATE TABLE IF NOT EXISTS wheel_grants(
                 card_id TEXT NOT NULL, attempt INTEGER NOT NULL, grant_id TEXT NOT NULL UNIQUE,
                 terms TEXT NOT NULL, signature TEXT NOT NULL, state TEXT NOT NULL, reason TEXT,
@@ -76,6 +79,12 @@ class Wheel:
     def enabled(self):
         with self.b.db() as db:
             return bool(db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0])
+
+    def continuous(self,db=None):
+        if db is None:
+            with self.b.db() as connection:
+                return self.continuous(connection)
+        return bool(db.execute("SELECT enabled FROM wheel_continuity_mode WHERE id=1").fetchone()[0])
 
     def toggle(self, enabled):
         if type(enabled) is not bool:
@@ -129,13 +138,82 @@ class Wheel:
             self.b.audit("wheel_activation_rejected",{"code":safe_code},db)
 
     def resume_after_quota(self):
-        # A reset timestamp is not proof of available credits or safe CLI continuation.
-        # Retain the exact attempt; never enable a different card on this timer.
+        """Resume the exact credit-limited CLI session, never re-run its instruction."""
         with self.b.db() as db:
-            changed = db.execute("UPDATE wheel_control SET reason='CREDIT_RECOVERY_REQUIRED',retry_after=0 "
-                "WHERE enabled=0 AND reason='CREDIT_LIMIT' AND retry_after>0 AND retry_after<=?",(time.time(),)).rowcount
-            if changed:
-                self.b.audit("wheel_quota_review_required",{"automatic_resume":False},db)
+            if not self.continuous(db):
+                return False
+            control=db.execute("SELECT * FROM wheel_control WHERE id=1").fetchone()
+            if control["enabled"] or control["reason"]!="CREDIT_LIMIT":
+                return False
+            batch=self._latest_trial(db)
+            rows=([db.execute("SELECT * FROM wheel_grants WHERE grant_id=? AND state='credit_wait'",
+                              (item["grant_id"],)).fetchone() for item in batch[1]["cards"]]
+                  if batch and batch[1].get("kind")==FROZEN_BATCH else [])
+            rows=[row for row in rows if row]
+            if (not batch or batch[0]["state"]!="active" or batch[1].get("policy")!="independent-v2"
+                    or len(rows)!=1 or time.time()>=batch[1]["expires_at"]):
+                return False
+            grant=self._verified(rows[0])
+            attempt=self.f._row(grant["card_id"],grant["attempt"])
+            job=db.execute("SELECT * FROM jobs WHERE id=?",(attempt["job_id"],)).fetchone() if attempt else None
+            stage=db.execute("SELECT state FROM wheel_stages WHERE grant_id=? AND letter='A'",(grant["grant_id"],)).fetchone()
+            checkpoint=db.execute("SELECT snapshot FROM wheel_checkpoints WHERE grant_id=? AND phase='CREDIT_LIMIT' "
+                                  "ORDER BY id DESC LIMIT 1",(grant["grant_id"],)).fetchone()
+            if (not job or job["state"]!="failed" or not job["session_id"] or not stage
+                    or stage["state"]!="verified" or not checkpoint or self._expired(grant)
+                    or not json.loads(job["result"] or "{}").get("credit_limited")):
+                return False
+            session_id=job["session_id"]
+            expected=json.loads(checkpoint["snapshot"])["workspace"]
+            job_id=job["id"]
+        try:
+            self._require_codex_identity(batch[1]["codex_identity"])
+            if str(self.b.workspace("4")[0]) != grant["workspace"]:
+                return False
+            from wheel_effects import WheelPublication
+            pub=WheelPublication(self.f,[])
+            actual={"head":pub.git_command(grant["workspace"],"rev-parse","HEAD").strip(),
+                    "status":pub.git_command(grant["workspace"],"status","--porcelain"),
+                    "diff_sha256":self.f.digest(pub.git_command(grant["workspace"],"diff","--binary","HEAD"))}
+            if actual!=expected:
+                self.pause("WHEEL_RESUME_WORKSPACE_CHANGED")
+                return False
+            self.f._identity();self.f._lists()
+            card=next((c for c in self._available(self.f._cards()) if c["id"]==grant["card_id"]),None)
+            self._check_card(grant,card)
+            payload=self.b.execution_payload(job_id)
+        except self.f.Error as error:
+            if error.code not in ("WHEEL_CODEX_QUOTA","WHEEL_CODEX_AUTH"):
+                self.pause(error.code)
+            return False
+        with self.f.lock,self.b.mutex,self.b.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            control=db.execute("SELECT enabled,reason FROM wheel_control WHERE id=1").fetchone()
+            if control["enabled"] or control["reason"]!="CREDIT_LIMIT" or db.execute(
+                    "SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone():
+                return False
+            if db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=? AND state='credit_wait'",
+                          (grant["grant_id"],)).rowcount!=1:
+                return False
+            if db.execute("UPDATE jobs SET state='running',pid=NULL,updated=? WHERE id=? AND state='failed' "
+                          "AND session_id=?",(self.f.utc(),job_id,session_id)).rowcount!=1:
+                raise RuntimeError("Credit recovery lost the original job")
+            db.execute("UPDATE wheel_control SET enabled=1,reason=NULL,retry_after=0 WHERE id=1")
+            self.b.audit("wheel_codex_session_resumed",{"grant":grant["grant_id"],"job":job_id,
+                                                       "session_id":session_id},db)
+        import threading
+        try:
+            threading.Thread(target=self.b.run_codex,args=(payload,session_id),daemon=True).start()
+        except RuntimeError:
+            with self.b.db() as db:
+                db.execute("UPDATE jobs SET state='failed',updated=? WHERE id=? AND state='running' AND pid IS NULL",
+                           (self.f.utc(),job_id))
+                db.execute("UPDATE wheel_grants SET state='credit_wait',reason='CREDIT_LIMIT' "
+                           "WHERE grant_id=? AND state='working'",(grant["grant_id"],))
+                db.execute("UPDATE wheel_control SET enabled=0,reason='CREDIT_LIMIT' WHERE id=1")
+                self.b.audit("wheel_codex_resume_spawn_failed",{"job":job_id},db)
+            return False
+        return True
 
     def checkpoint(self, g, phase):
         from wheel_effects import WheelPublication
@@ -162,6 +240,7 @@ class Wheel:
     def status(self):
         with self.b.db() as db:
             control = dict(db.execute("SELECT * FROM wheel_control WHERE id=1").fetchone())
+            continuous=self.continuous(db)
             batch = self._latest_trial(db)
             frozen = ({"id":batch[0]["id"], "state":batch[0]["state"], "policy":batch[1].get("policy"),
                        "cards":batch[1]["cards"]}
@@ -218,7 +297,8 @@ class Wheel:
                 "comment":receipts.get("C"), "move":receipts.get("D"),
                 "credits":"Cuota agotada" if control["reason"]=="CREDIT_LIMIT" else None,
                 "quota":self.b.quota_status(),
-                "current":current, "queue_head":first, "automatic_credit_resume":False, "frozen_batch":frozen,
+                 "current":current, "queue_head":first, "automatic_credit_resume":continuous,
+                 "continuous_queue":continuous, "frozen_batch":frozen,
                 "recovery_required":control["reason"] in ("CREDIT_LIMIT","CREDIT_RECOVERY_REQUIRED")}
 
     def _subject(self, card, *, review=False):
@@ -468,13 +548,20 @@ class Wheel:
         with self.f.lock:
             with self.b.db() as db:
                 latest = self._latest_trial(db)
-                frozen = latest if latest and latest[1].get("kind")==FROZEN_BATCH else None
+                frozen = latest if latest and latest[1].get("kind")==FROZEN_BATCH and latest[0]["state"]=="prepared" else None
+                active_open = (latest if latest and latest[0]["state"]=="active"
+                               and latest[1].get("policy")=="independent-v2" and self.continuous(db) else None)
+                if latest and latest[1].get("kind")==FROZEN_BATCH and latest[0]["state"]=="active" and not active_open:
+                    self.fail("WHEEL_BATCH_START_REQUIRED","El lote activo conserva su autorización original.")
                 if frozen:
-                    if not start_frozen_batch or frozen[0]["state"]!="prepared":
+                    if not start_frozen_batch:
                         self.fail("WHEEL_BATCH_START_REQUIRED","El lote congelado exige una autorización conjunta de arranque.")
                     self._frozen_idle(db)
                 elif start_frozen_batch:
                     self.fail("WHEEL_BATCH_INVALID","No hay un lote congelado que autorizar.")
+                if active_open:
+                    self.continuity.verify_activation(active_open[0]["id"],active_open[1],db)
+                    self._require_codex_identity(active_open[1]["codex_identity"])
             self.f._identity()
             self.f._lists()
             cards = {c["id"]:c for c in self._available(self.f._cards())}
@@ -506,6 +593,9 @@ class Wheel:
                 confirmation["codex_identity"] = self._require_codex_identity()
                 confirmation["policy"] = "independent-v2"
                 confirmation["dependency_fallbacks"] = fallbacks
+            if active_open:
+                confirmation["codex_identity"] = active_open[1]["codex_identity"]
+                confirmation["continuous_queue"] = True
             if self.b.owner_confirmation("wheel-batch", confirmation) is not True:
                 self.fail("OWNER_CONFIRMATION_REQUIRED","Falta la decisión del propietario sobre estas tarjetas.")
             with self.b.mutex, self.b.db() as db:
@@ -571,8 +661,8 @@ class Wheel:
             self.fail("WHEEL_CARD_CHANGED","La tarjeta dejó de estar en COLA.")
         subject, spec=self._subject(card)
         with self.b.db() as db:
-            active=db.execute("SELECT 1 FROM wheel_grants WHERE grant_id=? AND state='working'",(g["grant_id"],)).fetchone()
-        if active:
+            active=db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",(g["grant_id"],)).fetchone()
+        if active and active["state"] in ("working","credit_wait"):
             subject["position"] = g["position"]
             subject.pop("binding",None)
             subject["binding"] = self.f.digest(self.f.canonical(subject))
@@ -737,9 +827,9 @@ class Wheel:
                     code="WHEEL_PRESERVATION_FAILED"
                 uncertain=True
                 state="uncertain"
-        self._transition(g,state,code)
         if self.continuity.active() and not uncertain and not self._system(code):
             return self.continuity.card_error(g,code)
+        self._transition(g,state,code)
         self.pause(code)
         return {"blocked":code,"again":self.enabled()}
 
@@ -840,7 +930,9 @@ class Wheel:
         trial=self._trial_limit()
         return {"closed":g["card_id"],"again":not bool(trial and trial.get("paused"))}
 
-    def _trial_limit(self):
+    def _trial_limit(self,cards=None):
+        if cards is None and self.continuous():
+            cards={c["id"]:c for c in self._available(self.f._cards())}
         with self.b.db() as db:
             latest = self._latest_trial(db)
             if not latest:
@@ -859,6 +951,7 @@ class Wheel:
                 return {"paused":"WHEEL_TRIAL_EXPIRED"}
             if frozen and not doc.get("codex_identity"):
                 self.fail("WHEEL_TRIAL_INVALID","Falta la sesión Codex asociada a este lote.")
+            open_queue=doc.get("policy")=="independent-v2" and self.continuous(db)
             for item in doc["cards"]:
                 row=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(item["grant_id"],)).fetchone()
                 if not row:
@@ -868,12 +961,14 @@ class Wheel:
                     self.fail("WHEEL_TRIAL_INVALID","Cambió el alcance individual de esta prueba.")
                 if frozen and g["binding"]!=item["binding"]:
                     self.fail("WHEEL_TRIAL_INVALID","Cambió la instrucción congelada.")
-                if row["state"]!="closed":
+                if row["state"]!="closed" and not open_queue:
                     if doc.get("policy")=="independent-v2":
                         return self.continuity.select_batch(db,trial,doc)
                     return {"expected":g["card_id"],"grant_id":g["grant_id"],"codex_identity":doc.get("codex_identity")}
-                if db.execute("SELECT COUNT(*) FROM wheel_stages WHERE grant_id=? AND state='verified'",(g["grant_id"],)).fetchone()[0]!=4:
+                if row["state"]=="closed" and db.execute("SELECT COUNT(*) FROM wheel_stages WHERE grant_id=? AND state='verified'",(g["grant_id"],)).fetchone()[0]!=4:
                     self.fail("WHEEL_TRIAL_INVALID","El ciclo no tiene cuatro recibos verificados.")
+            if open_queue:
+                return self.continuity.select_open_queue(db,trial,doc,cards)
             db.execute("UPDATE wheel_trials SET state='completed' WHERE id=?",(trial["id"],))
             self._pause_head(db,complete)
             event = "wheel_frozen_completed" if frozen else "wheel_two_card_trial_completed"
@@ -926,10 +1021,13 @@ class Wheel:
             self.f._identity()
             self.f._lists()
             cards={c["id"]:c for c in self._available(self.f._cards())}
-            trial=self._trial_limit()
+            trial=self._trial_limit(cards)
             if trial and trial.get("paused"):
                 return trial
             if trial and trial.get("waiting"):
+                if trial["waiting"]=="WHEEL_WORKING_CARD_MISSING":
+                    self.pause(trial["waiting"])
+                    return {"paused":trial["waiting"]}
                 return trial
             with self.b.db() as db:
                 db.execute("BEGIN IMMEDIATE")
@@ -940,7 +1038,7 @@ class Wheel:
                         return {"running":"ocupado"}
                     first=next(iter(cards.values()),None)
                     if trial and trial.get("independent"):
-                        first=cards.get(trial["expected"])
+                        first=cards.get(trial["expected"]) or ({"id":trial["expected"]} if trial.get("post_move_close") else None)
                     if trial and (not first or first["id"]!=trial["expected"]):
                         self._pause_head(db,"WHEEL_TRIAL_ORDER_CHANGED")
                         return {"paused":"WHEEL_TRIAL_ORDER_CHANGED"}

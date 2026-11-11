@@ -305,7 +305,7 @@ function renderWheel(wheel) {
     ["Metro / API", wheelText(wheel?.metro ?? last.stages?.metro) + " / " + wheelText(wheel?.api ?? last.stages?.api)],
     ["Comentario / traslado", wheelText(wheel?.comment ?? last.stages?.comment) + " / " + wheelText(wheel?.move ?? last.stages?.move)],
     ["Cuota de Codex", quotaText(wheel?.quota) + (wheel?.reason === "CREDIT_LIMIT" ? " · Pausa anterior conservada" : "")],
-    ["Recuperación", wheel?.recovery_required ? "Intento conservado. Requiere revisión y continuación de su sesión exacta; no se iniciará otra tarjeta." : "Puntos de recuperación persistentes; no se repiten etapas verificadas"]
+    ["Recuperación", wheel?.recovery_required ? (wheel?.automatic_credit_resume ? "La sesión exacta se reanudará al confirmarse la cuota y los permisos vigentes." : "Intento conservado. Requiere revisión y continuación de su sesión exacta.") : "Puntos de recuperación persistentes; no se repiten etapas verificadas"]
   ];
   summary.replaceChildren();
   for (const [title,value] of rows) {
@@ -351,7 +351,7 @@ function readDecision(form) {
 }
 function syncWheelControls() {
   const wheel = state?.factory?.wheel;
-  const frozen = wheel?.frozen_batch;
+  const frozen = wheel?.frozen_batch?.state === "prepared" ? wheel.frozen_batch : null;
   const ready = Boolean(wheel && state?.agents?.["4"]?.enabled && state.agents["4"].workspace);
   el("wheelReview").disabled = wheelBusy || !wheel;
   el("wheelQuota").disabled = wheelBusy || !wheel;
@@ -380,7 +380,7 @@ function syncWheelControls() {
   el("wheelCondition").textContent = !wheel ? "El coordinador debe cargar la versión con rueda."
     : !ready ? "Para activar la rueda, asigna y habilita la carpeta del Agente 4."
     : wheel.enabled ? "La pausa impide iniciar la siguiente operación. Consulta el estado del trabajo en curso."
-    : "La rueda respeta la primera tarjeta de Trello. Si falta permiso o está bloqueada, se detiene sin saltarla.";
+    : wheel?.continuous_queue ? "La rueda consulta Trello cada minuto y continúa con las tarjetas independientes que tengan permisos vigentes." : "La rueda respeta la primera tarjeta de Trello. Si falta permiso o está bloqueada, se detiene sin saltarla.";
   let reason = "", decisions = [];
   try { decisions = wheelForms.map(readDecision).filter(Boolean); } catch(error){ reason = error.message; }
   const count = decisions.length;
@@ -478,7 +478,7 @@ el("wheelReview").addEventListener("click",()=>wheelAction(async()=>{
 }));
 el("wheelApprove").addEventListener("click",()=>wheelAction(async()=>{
   const decisions = wheelForms.map(readDecision).filter(Boolean);
-  const frozen = state?.factory?.wheel?.frozen_batch;
+  const frozen = state?.factory?.wheel?.frozen_batch?.state === "prepared" ? state.factory.wheel.frozen_batch : null;
   if (!decisions.length) return;
   // Discard this snapshot even on transport failure. A new review reconciles the outcome before another submission.
   renderReview([]);

@@ -37,7 +37,7 @@ APP = "GO-Puente-Codex"
 SCOPES = {"read:board:trello", "write:board:trello", "offline_access"}
 TEST_INSTRUCTION = "Sin utilizar herramientas ni acceder a archivos, responde exactamente GO_PUENTE_CODEX_OK."
 TERMINAL = {"completed", "blocked", "failed", "interrupted", "needs_review"}
-EXECUTOR_VERSION = "2026-11-11-factory-post-publication-7"
+EXECUTOR_VERSION = "2026-11-11-factory-continuity-8"
 
 
 def codex_command(executable, sandbox, workspace, answer_file):
@@ -48,6 +48,16 @@ def codex_command(executable, sandbox, workspace, answer_file):
     return [executable, "-a", "never", "exec", "--json", "--color", "never",
             "--sandbox", sandbox, "--skip-git-repo-check", "-C", str(workspace),
             "-o", str(answer_file), "-"]
+
+
+def codex_resume_command(command, session_id, answer_file):
+    """Keep the worker's named permissions and resume its exact persisted session."""
+    if not isinstance(session_id, str) or not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", session_id):
+        raise BridgeError("CODEX_SESSION_INVALID", "La sesión anterior no tiene un identificador válido.")
+    prefix = command[:command.index("exec")]
+    return prefix + ["exec", "resume", "--json", "--ignore-user-config",
+                     "--skip-git-repo-check", "-o", str(answer_file), session_id, "-"]
 
 
 POLICY_RE = re.compile(
@@ -966,7 +976,7 @@ class Bridge:
             raise BridgeError("SANDBOX_REPAIR_FAILED","Windows no permitió reparar WRITE_DAC de SYSTEM; no se amplían otros permisos.")
         self.audit("sandbox_system_write_dac_ensured",{"path":str(expected),"sandbox_user_rights_changed":False})
 
-    def run_codex(self, payload):
+    def run_codex(self, payload, resume_session=None):
         identifier = payload["job"]
         folder = self.home / "ejecuciones" / identifier
         folder.mkdir(exist_ok=True)
@@ -1012,7 +1022,10 @@ class Bridge:
                        '"changes":"cambios mínimos propuestos","checks":[{"command":"comando exacto ejecutado",'
                        '"observed":"extracto literal de su salida registrada"}]}. '
                        'Redacta las cuatro secciones sin datos personales ni secretos; omite direcciones y enlaces.')
-        command = codex_command(self.config["codex_executable"], payload["sandbox"], payload["workspace"], folder / "respuesta.txt")
+        suffix = ("-reanudacion-" + str(1 + len(list(folder.glob("ejecucion-reanudacion-*.json"))))
+                  if resume_session else "")
+        answer_path = folder / ("respuesta" + suffix + ".txt")
+        command = codex_command(self.config["codex_executable"], payload["sandbox"], payload["workspace"], answer_path)
         with self.db() as db:
             bound=db.execute("SELECT g.terms FROM wheel_grants g JOIN factory_attempts a "
                              "ON a.card_id=g.card_id AND a.attempt=g.attempt WHERE a.job_id=? AND g.state='working'",
@@ -1047,6 +1060,17 @@ class Bridge:
             for key,value in settings.items():
                 command[1:1]=["-c",key+"="+canonical(value)]
             command.insert(command.index("--json"),"--ignore-user-config")
+        if resume_session:
+            if not bound or diagnosis:
+                raise BridgeError("CODEX_RESUME_SCOPE", "Solo se reanuda el trabajo autorizado de implementación.")
+            command = codex_resume_command(command, resume_session, answer_path)
+            prompt = ("Continúa la sesión anterior de esta misma tarjeta desde el punto donde se agotó la cuota. "
+                      "Conserva todos los cambios ya hechos en el worktree; no repitas tareas terminadas ni "
+                      "inicies otra sesión. Comprueba lo pendiente y completa únicamente la programación y "
+                      "pruebas locales dentro del alcance original. No hagas commit, push, despliegues ni "
+                      "escrituras en Trello. Al final incluye GO_BRIDGE_RESULT y GO_FACTORY_EVIDENCE "
+                      "con el formato acordado en la sesión anterior. Si necesitas una respuesta del propietario, "
+                      "incluye GO_FACTORY_QUESTION. No simules resultados.")
         environment = {k: v for k, v in os.environ.items() if not re.search(r"TRELLO|ATLASSIAN|CLIENT_SECRET", k, re.I)}
         if bound or diagnosis:
             from codex_quota import worker_environment
@@ -1059,7 +1083,7 @@ class Bridge:
             environment["GIT_CONFIG_VALUE_0"]="openssl"
             environment["NODE_OPTIONS"]=node_environment()["NODE_OPTIONS"]
         environment["PYTHONUTF8"] = "1"
-        save_json(folder / "ejecucion.json", {"job": identifier, "command": command, "authorization": payload,
+        save_json(folder / ("ejecucion" + suffix + ".json"), {"job": identifier, "command": command, "authorization": payload,
                                             "instruction_sha256": job["data"]["instruction_sha256"], "started": utc(),
                                             "executor_version": EXECUTOR_VERSION, "user_config_loaded": True,
                                             "approval_policy": "never", "sandbox_requested": payload["sandbox"]})
@@ -1075,7 +1099,7 @@ class Bridge:
                                        (utc(), identifier))
             errors, policy_errors = [], []
             def read_errors():
-                with (folder / "errores.log").open("w", encoding="utf-8") as output:
+                with (folder / ("errores" + suffix + ".log")).open("w", encoding="utf-8") as output:
                     for line in process.stderr:
                         clean = scrub(line)
                         output.write(clean)
@@ -1091,7 +1115,7 @@ class Bridge:
             turn_completed, turn_failed, final_message, session_id = False, False, "", None
             credit_limited, reset_at = False, None
             successful_commands, failed_commands, file_changes = 0, 0, 0
-            with (folder / "eventos.jsonl").open("w", encoding="utf-8") as events:
+            with (folder / ("eventos" + suffix + ".jsonl")).open("w", encoding="utf-8") as events:
                 for line in process.stdout:
                     try:
                         event = json.loads(line)
@@ -1130,7 +1154,7 @@ class Bridge:
                             policy_errors.extend(policy_evidence(canonical(item)))
             exit_code = process.wait()
             error_reader.join(timeout=5)
-            answer_file = folder / "respuesta.txt"
+            answer_file = answer_path
             if answer_file.exists():
                 final_message = answer_file.read_text(encoding="utf-8-sig")
                 atomic(answer_file, scrub(final_message).encode("utf-8"))
@@ -1142,7 +1166,9 @@ class Bridge:
                     and not classification["policy_errors"]):
                 classification.update(state="awaiting_validation",functional_status="awaiting_independent_tests",
                     classification_reason="La ejecución finalizó; hay comandos fallidos que exigen pruebas independientes del coordinador.")
-            result = {"exit_code": exit_code, "turn_completed": turn_completed, "session_id": session_id,
+            if resume_session and session_id and session_id != resume_session:
+                raise BridgeError("CODEX_RESUME_SESSION_CHANGED", "Codex devolvió una sesión distinta.")
+            result = {"exit_code": exit_code, "turn_completed": turn_completed, "session_id": session_id or resume_session,
                       "response": scrub(final_message), "response_received": bool(final_message.strip()),
                       "credit_limited":credit_limited,"quota_reset_at":reset_at,
                       **classification, "executor_version": EXECUTOR_VERSION,
@@ -1150,14 +1176,19 @@ class Bridge:
                       "file_change_events": file_changes,
                       "test_B_exact_response": final_message.strip() == "GO_PUENTE_CODEX_OK" if payload["agent"] == "PRUEBA" else None,
                       "finished": utc(), "artifacts": str(folder.relative_to(self.home)), "errors": scrub("".join(errors))}
-            self.finish_job(identifier, classification["state"], result)
+            if resume_session:
+                result["resumed_from"] = resume_session
+                result["previous_result"] = job.get("result")
+            self.finish_job(identifier, classification["state"], result,
+                            artifact_name="resultado" + suffix + ".json")
         except Exception as error:
             uncertain = process is not None and process.poll() is None
             self.finish_job(identifier, "detached" if uncertain else "failed", {"error_type": type(error).__name__,
-                "error": "La ejecución no se ha completado. Revisa los artefactos conservados; no se repetirá automáticamente.", "finished": utc()})
+                "error": "La ejecución no se ha completado. Revisa los artefactos conservados; no se repetirá automáticamente.", "finished": utc()},
+                artifact_name="resultado" + suffix + ".json")
 
-    def finish_job(self, identifier, state, result):
-        save_json(self.home / "ejecuciones" / identifier / "resultado.json", result)
+    def finish_job(self, identifier, state, result, *, artifact_name="resultado.json"):
+        save_json(self.home / "ejecuciones" / identifier / artifact_name, result)
         with self.mutex, self.db() as connection:
             connection.execute("UPDATE jobs SET state=?,result=?,updated=? WHERE id=?", (state, canonical(result), utc(), identifier))
             self.audit("execution_finished", {"job": identifier, "state": state, "exit_code": result.get("exit_code")}, connection)
@@ -1190,7 +1221,7 @@ class Bridge:
             raise BridgeError("WRITE_SCOPE_RESTRICTED", "Solo se preparan comentarios exactos o traslados individuales autorizados.", 403)
         # Build the exact mutation from a small schema, never from a URL or command in a card.
         fields = {"create": {"list_id", "name", "description"}, "comment": {"card_id", "text", "job_id"},
-                  "move": {"card_id", "list_id"}, "archive": {"card_id"}, "delete": {"card_id"},
+                   "move": {"card_id", "list_id", "pos"}, "archive": {"card_id"}, "delete": {"card_id"},
                   "update": {"card_id", "name", "description", "due", "due_complete"}}
         if action not in fields or set(payload) - fields[action]:
             raise BridgeError("WRITE_SCHEMA_INVALID", "Operación o campos no permitidos.")
@@ -1207,6 +1238,8 @@ class Bridge:
             raise BridgeError("WRITE_FIELDS_REQUIRED", "El comentario no puede estar vacío.")
         if action == "move" and not payload.get("list_id"):
             raise BridgeError("WRITE_FIELDS_REQUIRED", "Selecciona la lista de destino.")
+        if action == "move" and payload.get("pos", "top") != "top":
+            raise BridgeError("WRITE_SCHEMA_INVALID", "El traslado de la fábrica solo admite la primera posición.")
         if action == "update" and len(payload) == 1:
             raise BridgeError("WRITE_FIELDS_REQUIRED", "Indica qué campos se modificarán.")
         identifier = uuid.uuid4().hex
@@ -1261,7 +1294,7 @@ class Bridge:
             elif action == "delete":
                 response = self.api("/1/cards/" + payload["card_id"], method="DELETE", permit=self._write_capability)
             else:
-                body = {"idList": payload["list_id"]} if action == "move" else {"closed": True} if action == "archive" else {
+                body = {"idList": payload["list_id"], "pos": payload.get("pos", "top")} if action == "move" else {"closed": True} if action == "archive" else {
                     {"description": "desc", "due_complete": "dueComplete"}.get(k, k): v for k, v in payload.items() if k != "card_id"}
                 response = self.api("/1/cards/" + payload["card_id"], method="PUT", body=body, permit=self._write_capability)
             verified = self.verify_write(record, response)

@@ -456,6 +456,47 @@ class Continuity:
                     "published_recovery":published_recovery}
         return {"waiting":"NO_SAFE_ELIGIBLE_CARD","again":False}
 
+    def select_open_queue(self,db,trial,doc,cards):
+        """Use current Trello order; the signed batch binds identity, not queue length."""
+        self.verify_activation(trial["id"],doc,db)
+        working=db.execute("SELECT * FROM wheel_grants WHERE state='working'").fetchone()
+        if working and working["card_id"] not in cards:
+            final=db.execute("SELECT state FROM wheel_stages WHERE grant_id=? AND letter='D'",
+                             (working["grant_id"],)).fetchone()
+            if final and final["state"]=="verified":
+                return {"expected":working["card_id"],"grant_id":working["grant_id"],
+                        "codex_identity":doc["codex_identity"],"independent":True,
+                        "post_move_close":True,"open_queue":True}
+            return {"waiting":"WHEEL_WORKING_CARD_MISSING","again":False}
+        ordered=([cards.get(working["card_id"])] if working else [])+list(cards.values())
+        seen=set()
+        for card in ordered:
+            if not card or card["id"] in seen:
+                continue
+            seen.add(card["id"])
+            row=db.execute("SELECT * FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
+                           (card["id"],)).fetchone()
+            if not row:
+                continue
+            grant=self.w._verified(row)
+            if row["state"] not in ("working","ready","wait_permissions"):
+                continue
+            if self.w._expired(grant) or not self.w._operation_authorized(grant,"A"):
+                continue
+            runtime=db.execute("SELECT retry_after FROM factory_card_runtime WHERE grant_id=?",
+                               (grant["grant_id"],)).fetchone()
+            if runtime and runtime[0]>time.time():
+                if row["state"]=="working":
+                    return {"waiting":"RETRY_BACKOFF","again":False}
+                continue
+            if not self.w._dependencies_ready(db,grant,{"explicit_diagnostic_fallback":True,
+                                                        "grant_id":grant["grant_id"]},cards):
+                continue
+            return {"expected":card["id"],"grant_id":grant["grant_id"],
+                    "codex_identity":doc["codex_identity"],"independent":True,
+                    "explicit_diagnostic_fallback":True,"open_queue":True}
+        return {"waiting":"NO_AUTHORIZED_CARD","again":False,"open_queue":True}
+
     def published_recovery(self,db,row,grant):
         """Resume only a verified push whose Metro receipt was never recorded."""
         if row["state"]!="blocked" or row["reason"]!="FACTORY_METRO_OUTDATED":
@@ -497,8 +538,52 @@ class Continuity:
                     waiting=True
             except (ValueError,KeyError,TypeError):
                 pass
+        if waiting and self.w.continuous() and all(
+                self.w._operation_authorized(grant,letter) for letter in "CD") and not self.w._expired(grant):
+            try:
+                self._defer_question_to_trello(grant,request,job)
+            except self.f.Error as error:
+                self.w.pause(error.code)
+                return {"paused":error.code,"card_id":grant["card_id"]}
         self.w._transition(grant,"waiting_response" if waiting else "wait_permissions" if code=="WHEEL_PERMISSION_REQUIRED" else "blocked",code)
         return {"card_blocked":grant["card_id"],"reason":code,"again":True}
+
+    def _defer_question_to_trello(self,grant,request,job):
+        """Use the card's C/D grants without claiming an unverified publication."""
+        if not job or job["state"] not in ("failed","blocked","needs_review"):
+            self.w.fail("WHEEL_QUESTION_JOB_INVALID","La ejecución no tiene un bloqueo verificable.")
+        text=request["question"].strip()
+        operation=request["operation"].strip()
+        if (not text or re.search(r"@|https?://|(?:token|secret|password|contraseña)|\b\d{8,}\b",text+operation,re.I)):
+            self.w.fail("WHEEL_QUESTION_PRIVATE","La pregunta requiere revisión privada antes de compartirla.")
+        from wheel_effects import WheelEffects
+        from factory import CHECK
+        effects=WheelEffects(self.f)
+        row=self.f._row(grant["card_id"],grant["attempt"])
+        card,comments=effects._snapshot(grant["card_id"])
+        if card["idList"]!=grant["origin"] or [c["id"] for c in self.f.original_comments(card["id"],comments)]!=grant["comment_ids"]:
+            self.w.fail("WHEEL_TRELLO_CHANGED","La tarjeta cambió antes de registrar la pregunta.")
+        comment=("Pendiente de respuesta del propietario. El trabajo parcial está conservado; "
+                 "no hay publicación confirmada.\n\n1. Pregunta: "+text+"\n2. Operación pendiente: "+operation)
+        for letter,action,data in (("C","comment",{"card_id":card["id"],"text":comment,"job_id":job["id"]}),
+                                   ("D","move",{"card_id":card["id"],"list_id":CHECK,"pos":"top"})):
+            with self.b.db() as db:
+                if db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter=?",(grant["grant_id"],letter)).fetchone():
+                    self.w.fail("WHEEL_STAGE_UNCERTAIN","La operación de Trello ya tiene un intento registrado.")
+                db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started) VALUES(?,?,'claimed',?)",
+                           (grant["grant_id"],letter,self.f.utc()))
+            self.w.checkpoint(grant,"question-claimed:"+letter)
+            record=self.b.prepare_write(action,data,inline_marker=True)
+            self.f._update(row["card_id"],row["attempt"],**{
+                "comment_operation" if letter=="C" else "move_operation":record["operation"]})
+            permit=self.w._permit(grant,letter,row,"trello-write",record)
+            outcome=self.b.write(record["operation"],permit)
+            if outcome["state"]!="verified":
+                self.w.fail("WHEEL_TRELLO_UNCERTAIN","La escritura en Trello no quedó confirmada.")
+            operations=effects._operations(row,action)
+            if len(operations)!=1:
+                self.w.fail("WHEEL_STAGE_UNCERTAIN","La escritura no tiene una única operación.")
+            self.w._record_receipt(grant,letter,effects._trello_receipt(letter,row,grant,operations[0]))
 
     def defer_retry(self,grant,phase,code):
         # A claimed mutation with an issued permit is reconciled elsewhere, never replayed here.

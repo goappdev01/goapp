@@ -110,6 +110,10 @@ class WheelTests(unittest.TestCase):
         if method=="PUT":
             self.changes.append((cid,"D"))
             card["idList"]=body["idList"]
+            if body.get("pos")=="top":
+                card["pos"]=min((item["pos"] for item in self.cards.values()
+                                 if item["idList"]==body["idList"] and item["id"]!=cid),default=1024)-1
+                self.cards=dict(sorted(self.cards.items(),key=lambda item:item[1]["pos"]))
             return copy.deepcopy(card)
         if path.endswith("/actions"):
             return [{"id":"9"*24,"type":"createCard","date":"2026-01-01","idMemberCreator":OWNER,"data":{"list":{"id":QUEUE}}}]

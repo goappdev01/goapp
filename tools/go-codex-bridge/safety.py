@@ -129,12 +129,15 @@ class Safety:
         if len(found) != 1:
             raise self.Error("PUBLICATION_TESTS_MISSING", "Falta el informe de pruebas; el resultado de Codex no acredita una publicaciÃ³n.")
         evidence = json.loads(found[0])
-        log = self.b.home / "ejecuciones" / job["id"] / "eventos.jsonl"
+        folder = self.b.home / "ejecuciones" / job["id"]
         commands = []
-        for line in log.read_text(encoding="utf-8").splitlines():
-            event = json.loads(line); item = event.get("item") or {}
-            if event.get("type") == "item.completed" and item.get("type") == "command_execution" and item.get("status") == "completed" and item.get("exit_code") == 0:
-                commands.append(str(item.get("command") or item.get("cmd") or ""))
+        for log in (folder / "eventos.jsonl", *sorted(folder.glob("eventos-reanudacion-*.jsonl"))):
+            if not log.exists():
+                continue
+            for line in log.read_text(encoding="utf-8").splitlines():
+                event = json.loads(line); item = event.get("item") or {}
+                if event.get("type") == "item.completed" and item.get("type") == "command_execution" and item.get("status") == "completed" and item.get("exit_code") == 0:
+                    commands.append(str(item.get("command") or item.get("cmd") or ""))
         tests = evidence.get("tests")
         if not tests or any(not isinstance(t, dict) or t.get("passed") is not True or t.get("command") not in commands for t in tests) or not any(re.search(r"\btsc\b", c) for c in commands) or not any(re.search(r"\bexpo\s+export\b", c) for c in commands):
             raise self.Error("PUBLICATION_TESTS_MISSING", "TypeScript, exportaciÃ³n y pruebas deben constar como comandos terminados.")

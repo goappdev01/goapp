@@ -525,20 +525,22 @@ class Factory:
         if (not isinstance(tests, list) or not tests or not all(
                 isinstance(t, dict) and t.get("passed") is True and t.get("command") for t in tests)):
             raise self.Error("FACTORY_TESTS_UNVERIFIED", "No se acreditan pruebas satisfactorias.")
-        log = self.bridge.home / "ejecuciones" / job["id"] / "eventos.jsonl"
-        if not log.is_file():
+        folder = self.bridge.home / "ejecuciones" / job["id"]
+        logs = [path for path in [folder / "eventos.jsonl", *sorted(folder.glob("eventos-reanudacion-*.jsonl"))] if path.is_file()]
+        if not logs:
             raise self.Error("FACTORY_TESTS_UNVERIFIED", "No existe registro de los comandos ejecutados.")
         commands = []
-        with log.open(encoding="utf-8") as stream:
-            for line in stream:
-                try:
-                    event = json.loads(line)
-                except ValueError:
-                    raise self.Error("FACTORY_EVENTS_INVALID", "Registro de ejecución incompleto.") from None
-                item = event.get("item") or {}
-                if event.get("type") == "item.completed" and item.get("type") == "command_execution":
-                    if item.get("status") == "completed" and item.get("exit_code") == 0:
-                        commands.append(str(item.get("command") or item.get("cmd") or "").strip())
+        for log in logs:
+            with log.open(encoding="utf-8") as stream:
+                for line in stream:
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        raise self.Error("FACTORY_EVENTS_INVALID", "Registro de ejecución incompleto.") from None
+                    item = event.get("item") or {}
+                    if event.get("type") == "item.completed" and item.get("type") == "command_execution":
+                        if item.get("status") == "completed" and item.get("exit_code") == 0:
+                            commands.append(str(item.get("command") or item.get("cmd") or "").strip())
         if not all(t["command"] in commands for t in tests):
             raise self.Error("FACTORY_TESTS_UNVERIFIED", "Las pruebas declaradas no constan como comandos terminados.")
         if not any(re.search(r"\btsc\b", command) for command in commands):
@@ -670,15 +672,15 @@ class Factory:
     def loop(self, stop):
         delay = 1
         while not stop.wait(delay):
-            delay = 30
-            self.wheel.resume_after_quota()
-            if self._control()["enabled"] or self.wheel.enabled():
-                try:
+            delay = 60
+            try:
+                self.wheel.resume_after_quota()
+                if self._control()["enabled"] or self.wheel.enabled():
                     result = self.tick()
                     if result.get("again"):
                         delay = 0.1
                     elif result.get("running"):
                         delay = 2
-                except Exception:
-                    self.wheel.pause("FACTORY_UNEXPECTED_ERROR")
-                    self._pause("FACTORY_UNEXPECTED_ERROR")
+            except Exception:
+                self.wheel.pause("FACTORY_UNEXPECTED_ERROR")
+                self._pause("FACTORY_UNEXPECTED_ERROR")

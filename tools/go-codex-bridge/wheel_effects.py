@@ -647,6 +647,8 @@ class WheelEffects:
             matches=[item for item in entries if item.get("id")==card["id"]]
             if len(matches)!=count or (matches and (matches[0].get("pos")!=card["pos"] or matches[0].get("idBoard")!=BOARD)):
                 self.fail("WHEEL_MOVE_UNVERIFIED","No se confirmó una única tarjeta en la posición de destino.")
+            if list_id==CHECK and record["payload"].get("pos")=="top" and entries and entries[0].get("id")!=card["id"]:
+                self.fail("WHEEL_MOVE_UNVERIFIED","La tarjeta no quedó en primera posición de COMPROBAR.")
         return {"operation":op["id"],"card_id":card["id"],"board":BOARD,"list_id":CHECK,"position":card["pos"]}
 
     def _operations(self,row,action):
@@ -696,7 +698,7 @@ class WheelEffects:
             ops=self._operations(row,"comment")
             if len(ops)!=1 or self._trello_receipt("C",row,grant,ops[0])!=prior_comment:
                 self.fail("WHEEL_COMMENT_UNVERIFIED","El comentario ya no coincide con el que se verificó.")
-            data={"card_id":card["id"],"list_id":CHECK}
+            data={"card_id":card["id"],"list_id":CHECK,"pos":"top"}
         record=self.b.prepare_write(action,data,inline_marker=True)
         self.f._update(row["card_id"],row["attempt"],**{("comment_operation" if letter=="C" else "move_operation"):record["operation"]})
         outcome=self.b.write(record["operation"],permit("trello-write",record))
