@@ -432,6 +432,26 @@ class WheelTests(unittest.TestCase):
         self.assertTrue(reviewed[1]["eligible"])
         self.assertEqual(f._row("a"*24,1)["state"],"running")
 
+    def test_terminal_block_reconciles_stale_running_attempt_without_losing_detail(self):
+        wheel=self.bridge.factory.wheel
+        decision=self.decisions()[0]
+        wheel.approve([decision])
+        with self.bridge.db() as db:
+            grant=wheel._verified(db.execute("SELECT * FROM wheel_grants WHERE card_id=?",
+                                             (decision["card_id"],)).fetchone())
+            db.execute("INSERT INTO factory_attempts(card_id,attempt,title,instruction_sha,state,detail) "
+                       "VALUES(?,1,'synthetic blocked attempt','sha','running','preserve-me')",
+                       (decision["card_id"],))
+        wheel._transition(grant,"blocked","FACTORY_JOB_FAILED")
+        row=self.bridge.factory._row(decision["card_id"],1)
+        self.assertEqual(row["state"],"blocked")
+        self.assertIsNotNone(row["finished"])
+        self.assertEqual(row["detail"],"preserve-me")
+        wheel._transition(grant,"blocked","FACTORY_JOB_FAILED")
+        with self.bridge.db() as db:
+            reconciled=db.execute("SELECT count(*) FROM audit WHERE event='factory_attempt_reconciled'").fetchone()[0]
+        self.assertEqual(reconciled,1)
+
     def test_expired_dependencies_and_pause(self):
         wheel=self.bridge.factory.wheel
         ds=self.decisions()

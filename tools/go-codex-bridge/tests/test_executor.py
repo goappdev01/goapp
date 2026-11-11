@@ -113,6 +113,13 @@ class ExecutorTests(unittest.TestCase):
         self.assertEqual(classify_execution(0, True, 'GO_BRIDGE_RESULT: {"status":"completed"}',
                                             failed_commands=1)["state"], "needs_review")
 
+    def test_functional_blocked_report_is_not_misclassified_as_policy_block(self):
+        result = classify_execution(0, True, 'GO_BRIDGE_RESULT: {"status":"blocked"}',
+                                    failed_commands=3)
+        self.assertEqual(result["state"], "blocked")
+        self.assertEqual(result["policy_errors"], [])
+        self.assertIn("causa funcional", result["classification_reason"])
+
     def test_blocked_job_retry_only_prepares_and_needs_new_approval(self):
         job, _ = self.run_fake('GO_BRIDGE_RESULT: {"status":"blocked"}')
         with patch.object(self.bridge, "git_state", return_value={"git": False}), patch("puente.subprocess.Popen") as spawn:

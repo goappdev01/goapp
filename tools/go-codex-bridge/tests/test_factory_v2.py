@@ -299,6 +299,14 @@ class RemoteTests(unittest.TestCase):
         value=private_text('Bearer secret-test https://private.invalid owner@example.invalid 40.12345,-3.23456 +34 600 111 222')
         for forbidden in ['secret-test','private.invalid','owner@','40.12345','600']:self.assertNotIn(forbidden,value)
 
+    def test_panel_does_not_present_functional_diagnosis_as_policy_failure(self):
+        p,_=self.panel()
+        activity=p.activity({'id':'synthetic','state':'blocked','updated':'now','result':{
+            'reported_status':'blocked','failed_commands':3,'policy_errors':[],
+            'classification_reason':'Codex informa de un bloqueo de política, permisos o infraestructura.'}})
+        self.assertIn('no se registraron errores de política',activity['error'])
+        self.assertIn('bloqueo funcional',activity['error'])
+
     def test_confirmation_ticket_is_single_use_and_owner_bound(self):
         p,_=self.panel();p.previews['test']={'principal':'owner','expires':10**12,'action':'activate','review':{}}
         with self.assertRaises(BridgeError):p.decide('test','ACTIVAR FÁBRICA','other')

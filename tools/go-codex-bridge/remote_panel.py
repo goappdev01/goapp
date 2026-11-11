@@ -119,9 +119,13 @@ class RemotePanel:
                     elif event.get("type") in ("thread.started","turn.completed","turn.failed","error"):
                         events.append({"event":event["type"]})
         result=job.get("result") or {}
+        error=result.get("classification_reason","")
+        if (result.get("reported_status")=="blocked" and not result.get("policy_errors")
+                and "política" in str(error).casefold()):
+            error="Codex terminó el diagnóstico y marcó la tarea como bloqueada; no se registraron errores de política. Consulta el informe para conocer el bloqueo funcional."
         return {"state":job["state"],"updated":job["updated"],"events":events[-18:],
                 "commands":result.get("successful_commands"),"failed_commands":result.get("failed_commands"),
-                "error":private_text(result.get("classification_reason","")),
+                "error":private_text(error),
                 "response_live_supported":False}
 
     def snapshot(self):

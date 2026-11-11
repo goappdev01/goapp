@@ -37,7 +37,7 @@ APP = "GO-Puente-Codex"
 SCOPES = {"read:board:trello", "write:board:trello", "offline_access"}
 TEST_INSTRUCTION = "Sin utilizar herramientas ni acceder a archivos, responde exactamente GO_PUENTE_CODEX_OK."
 TERMINAL = {"completed", "blocked", "failed", "interrupted", "needs_review"}
-EXECUTOR_VERSION = "2026-11-10-factory-activation-state-1"
+EXECUTOR_VERSION = "2026-11-11-factory-block-reconciliation-1"
 
 
 def codex_command(executable, sandbox, workspace, answer_file):
@@ -82,8 +82,10 @@ def classify_execution(exit_code, turn_completed, response, *, policy_errors=(),
     explicit_inability = re.search(
         r"\bno (?:pude|he podido|puedo) (?:ejecutar|realizar|completar|modificar|trabajar)|"
         r"\b(?:unable to|could not|cannot|can't) (?:complete|perform|execute|work on) (?:the |this )?task", response, re.I)
-    if evidence or reported == "blocked":
-        state, reason = "blocked", "Codex informa de un bloqueo de política, permisos o infraestructura."
+    if evidence:
+        state, reason = "blocked", "Se detectó evidencia de bloqueo de política, permisos o sandbox."
+    elif reported == "blocked":
+        state, reason = "blocked", "Codex terminó la respuesta, pero marcó la tarea como bloqueada; revisa su causa funcional."
     elif not transport_ok or reported == "failed" or explicit_inability:
         state, reason = "failed", "El proceso o la tarea informa de un fallo; exit_code 0 no lo convierte en éxito."
     elif reported == "completed" and not failed_commands:

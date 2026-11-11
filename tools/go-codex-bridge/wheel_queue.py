@@ -550,6 +550,16 @@ class Wheel:
     def _transition(self,g,state,reason=None):
         with self.b.db() as db:
             db.execute("UPDATE wheel_grants SET state=?,reason=? WHERE grant_id=?",(state,reason,g["grant_id"]))
+            attempt_state={"blocked":"blocked","expired":"blocked","credit_wait":"limit_pause"}.get(state)
+            if attempt_state:
+                changed=db.execute(
+                    "UPDATE factory_attempts SET state=?,finished=COALESCE(finished,?) "
+                    "WHERE card_id=? AND attempt=? AND state IN ('prepared','running','commenting','moving')",
+                    (attempt_state,self.f.utc(),g["card_id"],g["attempt"])).rowcount
+                if changed:
+                    self.b.audit("factory_attempt_reconciled",{
+                        "card":g["card_id"],"attempt":g["attempt"],"state":attempt_state,
+                        "reason":reason},db)
             self.b.audit("wheel_state", {"grant":g["grant_id"],"state":state,"reason":reason},db)
 
     def _check_card(self,g,card):
