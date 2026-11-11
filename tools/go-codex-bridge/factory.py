@@ -402,7 +402,7 @@ class Factory:
         # The Metro checkout can contain generated or unrelated local files.
         # Verify the committed source actually delivered in the bundle instead
         # of treating its working-tree cleanliness as proof of publication.
-        served = self.bridge.git_state(root, check_main=True)
+        served = self.bridge.git_state(root, check_main=not pinned)
         if served["head"] != sha or (not pinned and served["origin_main"] != sha) or (pinned and root.resolve()!=Path(workspace).resolve()):
             raise self.Error("FACTORY_METRO_OUTDATED", "Metro sirve una carpeta con otro commit.")
         changed = subprocess.run(["git", "-C", str(workspace), "diff", "--name-only",

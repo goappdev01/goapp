@@ -268,7 +268,7 @@ class FactoryTests(unittest.TestCase):
             def open(self, request, timeout=None):
                 url = request.full_url if isinstance(request, urllib.request.Request) else request
                 if url.endswith("/status"): return Response(b"packager-status:running")
-                if url.endswith(":8088"): return Response(json.dumps(manifest).encode())
+                if url.endswith((":8088",":8089")): return Response(json.dumps(manifest).encode())
                 if ".bundle?" in url: return Response(b"synthetic ios JavaScript")
                 if ".map?" in url: return Response(json.dumps(source_map).encode())
                 raise AssertionError(url)
@@ -294,6 +294,14 @@ class FactoryTests(unittest.TestCase):
             with self.assertRaises(BridgeError) as error:
                 factory._verify_metro("c"*40,"b"*40,root)
             self.assertEqual(error.exception.code,"FACTORY_METRO_OUTDATED")
+            source_map["sections"][0]["map"]["sourcesContent"]=["ignored", "export const value = 2;\n"]
+            manifest["launchAsset"]["url"]="http://100.1.2.3:8089/app.bundle?platform=ios"
+            def pinned_git_state(workspace,check_main=False):
+                self.assertFalse(check_main,"La copia fijada no debe seguir origin/main")
+                return {"head":"c"*40,"tracked_dirty":True}
+            with patch.object(self.bridge,"git_state",side_effect=pinned_git_state):
+                self.assertEqual(factory._verify_metro("c"*40,"c"*40,root,
+                                                       port=8089,pinned=True)["checked_sources"],1)
 
     def test_metro_fast_forwards_from_older_ancestor_without_replacing_pinned_checkout(self):
         root=self.home/'served';cli=root/'node_modules/expo/bin/cli'
