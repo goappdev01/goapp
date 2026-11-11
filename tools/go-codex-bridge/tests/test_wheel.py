@@ -855,6 +855,7 @@ class WheelTests(unittest.TestCase):
         self.assertFalse(self.runs or self.changes)
 
     def test_live_tick_starts_first_verified_card_once(self):
+        self.cards["a"*24]["name"]="V2-A2 antigua etiqueta"
         wheel=self.bridge.factory.wheel
         wheel.activate_live("7"*64)
         with patch.object(wheel,"_preflight"),patch.object(WheelEffects,"_dependencies"):
@@ -878,3 +879,14 @@ class WheelTests(unittest.TestCase):
         panel.decide(ticket["ticket"],ticket["confirmation"],"synthetic-owner")
         self.assertTrue(wheel.enabled())
         self.assertFalse(self.runs or self.changes)
+
+    def test_legacy_agent_title_requires_a_signed_live_grant(self):
+        first=self.cards["a"*24]
+        first["name"]="V2-A2 antigua etiqueta"
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("5"*64)
+        with self.assertRaises(BridgeError) as denied:
+            self.bridge.safety.card(first["id"])
+        self.assertEqual(denied.exception.code,"AGENT_NOT_AUTHORIZED")
+        wheel._live_selection({c["id"]:c for c in self.bridge.factory._cards()},wheel.live_policy())
+        self.assertEqual(self.bridge.safety.card(first["id"])["card"]["id"],first["id"])

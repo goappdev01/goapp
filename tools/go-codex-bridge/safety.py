@@ -47,7 +47,19 @@ class Safety:
             raise self.Error("CARD_CONTEXT_INVALID", "La tarjeta no pertenece al Ã¡mbito autorizado de la cola.")
         agents = set(re.findall(r"\b(?:A|AGENTE\s*)([1-5])\b", card.get("name", ""), re.I))
         if agents != {"4"}:
-            raise self.Error("AGENT_NOT_AUTHORIZED", "Solo se permiten operaciones sobre tarjetas del agente 4.", 403)
+            wheel=self.b.factory.wheel
+            policy=wheel.live_policy()
+            if not policy:
+                raise self.Error("AGENT_NOT_AUTHORIZED", "Solo se permiten operaciones sobre tarjetas del agente 4.", 403)
+            with self.b.db() as db:
+                row=db.execute("SELECT * FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
+                               (card_id,)).fetchone()
+            if not row:
+                raise self.Error("AGENT_NOT_AUTHORIZED", "La tarjeta aún no tiene un permiso firmado para el agente 4.", 403)
+            grant=wheel._verified(row)
+            if (grant["agent"]!="4" or grant["origin"]!=QUEUE or grant["destination"]!=CHECK or
+                    grant["title"]!=card["name"] or grant.get("live_consent_sha256")!=policy["consent_sha256"]):
+                raise self.Error("AGENT_NOT_AUTHORIZED", "La tarjeta no coincide con la autorización continua.", 403)
         copied = self.b.read_card("https://trello.com/c/" + card["shortLink"])["data"]
         checks = copied.get("verification", {})
         actual = copied["card"]
@@ -70,7 +82,9 @@ class Safety:
         if source.get("card_id"):
             context["trello"] = self.card(source["card_id"])
             if source.get("source") == "verified-queue":
-                spec = self.b.factory._spec({**context["trello"]["card"], "shortLink":self.b.api("/1/cards/"+source["card_id"], {"fields":"shortLink"})["shortLink"]})
+                policy=self.b.factory.wheel.live_policy()
+                spec = self.b.factory._spec({**context["trello"]["card"], "shortLink":self.b.api("/1/cards/"+source["card_id"], {"fields":"shortLink"})["shortLink"]},
+                    live_queue=bool(policy),initial_card_ids=policy["initial_card_ids"] if policy else ())
                 if spec["instruction_sha"] != data["instruction_sha256"] or spec["comment_ids"] != source["comment_ids"]:
                     raise self.Error("INSTRUCTION_CHANGED", "Los comentarios completos cambiaron desde la preparaciÃ³n.")
         return context
