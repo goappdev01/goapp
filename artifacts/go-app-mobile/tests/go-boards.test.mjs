@@ -49,6 +49,15 @@ test('only the authorized ADMIN profile enables the shared module',()=>{
     assert.equal(contract.canUseGoBoards(profile,allowed,uid),profile==='ADMIN'&&allowed);
   assert.equal(contract.canUseGoBoards('ADMIN',true,null),false);
 });
+test('remote board access remains disabled until the database schema is verified',async()=>{
+  const f=fixture(),store=f.make();
+  await store.loadCalendar();assert.equal(store.snapshot().remoteReady,false);
+  await store.list();assert.equal(store.snapshot().remoteReady,true);
+  const unavailable=Error('Tableros alojados no disponibles');unavailable.code='BOARD_UNAVAILABLE';
+  const blocked=createBoardsStore(uid,f.storage,async()=>{throw unavailable;},()=>true);
+  await assert.rejects(()=>blocked.loadCalendar(),/no disponibles/);
+  assert.equal(blocked.snapshot().remoteReady,false);
+});
 test('dates and time are independent and never invent midnight',()=>{
   const b=board(1),c=card(b);
   assert.equal(c.entry.dateISO,'');assert.equal(c.entry.time,'');

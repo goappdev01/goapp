@@ -6,6 +6,7 @@ Tarjeta de origen: `V1 — SIGUIENTE PROMPT — GO TABLEROS: CORREGIR VISUAL, SI
 
 - La cabecera de GO Tableros deja espacio al título largo y a los controles de navegación en un iPhone compacto.
 - La fila horizontal de acciones deja de tener una altura máxima inferior a la necesaria para sus botones táctiles y márgenes.
+- El panel ADMIN mantiene las acciones de tablero deshabilitadas hasta que las consultas de lista y calendario confirmen el esquema remoto y sus RPC; la copia local pendiente se conserva y se ofrece reintentar.
 - No se cambian datos, importaciones, navegación, contratos, permisos ni la lógica de sincronización. La importación pertenece a otra tarjeta.
 
 ## Autorización existente comprobada
@@ -20,7 +21,7 @@ El borrador existente `artifacts/api-server/supabase/drafts/go_boards_v1.sql` ti
 
 ## Verificación realizada y pendiente
 
-- Móvil: 24/24 pruebas dirigidas de GO Tableros; servidor API: 4/4.
+- Móvil: 26 pruebas dirigidas de GO Tableros tras añadir la protección de disponibilidad; servidor API: 4/4.
 - TypeScript móvil y `git diff --check`: correctos.
 - La mejora de disposición sigue pendiente de comprobación física en iPhone. No se ha demostrado sincronización alojada ni persistencia entre dispositivos.
-- Esta rama no se integra en MAIN mientras falten la activación autorizada y la validación funcional requerida por la tarjeta. No se modificó Trello.
+- El ajuste visual y la barrera de disponibilidad son independientes del DDL y pueden publicarse en MAIN. El CRUD sincronizado sigue deshabilitado hasta activar el esquema alojado y verificar persistencia entre sesiones. La validación física en iPhone y la sincronización real quedan pendientes. No se modificó Trello.

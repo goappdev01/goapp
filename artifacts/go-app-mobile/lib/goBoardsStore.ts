@@ -7,9 +7,15 @@ type Pending = { base: BoardDocument; next: BoardDocument };
 export function createBoardsStore(owner: string, storage: Storage, api: Api, active: () => boolean) {
   const key = `go_boards_v1:ADMIN:${owner}`;
   let pending: Record<string, Pending> = {}, cache: Record<string, BoardDocument> = {};
-  let state = { boards: [] as BoardSummary[], selected: null as BoardDocument | null, error: "", busy: false, more: false, pending: 0 };
-  const listeners = new Set<() => void>(); let queue = Promise.resolve();
+  let state = { boards: [] as BoardSummary[], selected: null as BoardDocument | null, error: "", busy: false, more: false, pending: 0, remoteReady: false };
+  const listeners = new Set<() => void>(); let queue = Promise.resolve(), calendarReady = false, listReady = false;
   const assert = () => { if (!active()) throw new Error("El acceso o el perfil han cambiado."); };
+  const noteRemoteFailure = (error: unknown) => {
+    const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
+    if (["BOARD_UNAVAILABLE", "AUTH_REQUIRED", "ADMIN_REQUIRED", "ADMIN_ACCESS_UNAVAILABLE"].includes(String(code))) {
+      calendarReady = false; listReady = false; emit({ remoteReady: false });
+    }
+  };
   const emit = (patch: Partial<typeof state>) => { state = { ...state, ...patch, pending: Object.keys(pending).length }; for (const fn of listeners) fn(); };
   const persist = async () => { assert(); await storage.setItem(key, JSON.stringify({ cache, pending })); assert(); };
   const run = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -23,7 +29,7 @@ export function createBoardsStore(owner: string, storage: Storage, api: Api, act
         cache[id] = saved; delete pending[id]; await persist();
         emit({ selected: state.selected?.id === id ? saved : state.selected, error: "" });
       } catch (error) {
-        assert(); emit({ error: error instanceof Error ? error.message : "Sin conexión. Cambios conservados en este dispositivo." }); return;
+        assert(); noteRemoteFailure(error); emit({ error: error instanceof Error ? error.message : "Sin conexión. Cambios conservados en este dispositivo." }); return;
       }
     }
     emit({});
@@ -43,13 +49,15 @@ export function createBoardsStore(owner: string, storage: Storage, api: Api, act
       await flush();
     }); },
     async loadCalendar() { return run(async () => {
-      for (let offset = 0; ; offset += 30) {
-        const rows = await api<BoardDocument[]>(`/calendar?offset=${offset}`); assert();
-        for (const row of rows) { const doc = boardDocumentSchema.parse(row); if (doc.ownerUserId !== owner) throw new Error("Identidad incorrecta.");
-          if (!pending[doc.id]) cache[doc.id] = doc; }
-        if (rows.length < 30) break;
-      }
-      await persist(); emit({});
+      try {
+        for (let offset = 0; ; offset += 30) {
+          const rows = await api<BoardDocument[]>(`/calendar?offset=${offset}`); assert();
+          for (const row of rows) { const doc = boardDocumentSchema.parse(row); if (doc.ownerUserId !== owner) throw new Error("Identidad incorrecta.");
+            if (!pending[doc.id]) cache[doc.id] = doc; }
+          if (rows.length < 30) break;
+        }
+        await persist(); calendarReady = true; emit({ remoteReady: listReady, error: "" });
+      } catch (error) { noteRemoteFailure(error); throw error; }
     }); },
     async list(search = "", archived = "false", more = false) { return run(async () => {
       emit({ busy: true });
@@ -60,8 +68,10 @@ export function createBoardsStore(owner: string, storage: Storage, api: Api, act
           && (archived === "all" || next.archived === (archived === "true"))) {
           const index = items.findIndex(b => b.id === next.id); if (index < 0) items.unshift(next); else items[index] = next;
         }
-        emit({ boards: items.filter((b, i) => items.findIndex(x => x.id === b.id) === i), more: rows.length === 30, error: state.pending ? state.error : "" });
-      } catch (error) { assert(); emit({ boards: Object.values(cache).filter(b => !b.removed && b.name.toLowerCase().includes(search.toLowerCase())), error: String((error as Error).message) }); }
+        listReady = true;
+        emit({ boards: items.filter((b, i) => items.findIndex(x => x.id === b.id) === i), more: rows.length === 30,
+          remoteReady: calendarReady, error: state.pending ? state.error : "" });
+      } catch (error) { assert(); noteRemoteFailure(error); emit({ boards: Object.values(cache).filter(b => !b.removed && b.name.toLowerCase().includes(search.toLowerCase())), error: String((error as Error).message) }); }
       finally { if (active()) emit({ busy: false }); }
     }); },
     async open(id: string) { return run(async () => {
@@ -69,7 +79,7 @@ export function createBoardsStore(owner: string, storage: Storage, api: Api, act
       try {
         if (!pending[id]) { const remote = boardDocumentSchema.parse(await api<BoardDocument>(`/${id}`)); assert(); if (remote.ownerUserId !== owner) throw new Error("Identidad incorrecta."); cache[id] = remote; await persist(); }
         emit({ selected: pending[id]?.next || cache[id] || null });
-      } catch (error) { assert(); emit({ error: (error as Error).message }); }
+      } catch (error) { assert(); noteRemoteFailure(error); emit({ error: (error as Error).message }); }
       finally { if (active()) emit({ busy: false }); }
     }); },
     async save(board: BoardDocument, select = true) { return run(async () => {
@@ -81,27 +91,33 @@ export function createBoardsStore(owner: string, storage: Storage, api: Api, act
     async sync() { return run(flush); },
     close() { emit({ selected: null }); },
     async remove(doc: BoardDocument) { return run(async () => {
-      if (pending[doc.id]) throw new Error("Sincroniza el tablero antes de eliminarlo.");
-      const result = await api<{ deleted: true; document: BoardDocument }>(`/${doc.id}?version=${doc.version}`, "DELETE", undefined, { "X-GO-Confirm-Delete": "yes" }); assert();
-      // Keep only the durable task projection cache; discovery no longer exposes the deleted board.
-      cache[doc.id] = boardDocumentSchema.parse(result.document);
-      await persist(); emit({ selected: null, boards: state.boards.filter(b => b.id !== doc.id) });
+      try {
+        if (pending[doc.id]) throw new Error("Sincroniza el tablero antes de eliminarlo.");
+        const result = await api<{ deleted: true; document: BoardDocument }>(`/${doc.id}?version=${doc.version}`, "DELETE", undefined, { "X-GO-Confirm-Delete": "yes" }); assert();
+        // Keep only the durable task projection cache; discovery no longer exposes the deleted board.
+        cache[doc.id] = boardDocumentSchema.parse(result.document);
+        await persist(); emit({ selected: null, boards: state.boards.filter(b => b.id !== doc.id) });
+      } catch (error) { noteRemoteFailure(error); throw error; }
     }); },
     async transfer(task: string, target: BoardDocument, column: string) { return run(async () => {
-      const source = state.selected; if (!source || pending[source.id] || pending[target.id]) throw new Error("Sincroniza antes de trasladar.");
-      const moved = await api<{ source: BoardDocument; target: BoardDocument }>("/transfer", "POST", {
-        source: source.id, target: target.id, task, column, sourceVersion: source.version, targetVersion: target.version }); assert();
-      cache[source.id] = boardDocumentSchema.parse(moved.source); cache[target.id] = boardDocumentSchema.parse(moved.target);
-      await persist(); emit({ selected: cache[source.id] });
+      try {
+        const source = state.selected; if (!source || pending[source.id] || pending[target.id]) throw new Error("Sincroniza antes de trasladar.");
+        const moved = await api<{ source: BoardDocument; target: BoardDocument }>("/transfer", "POST", {
+          source: source.id, target: target.id, task, column, sourceVersion: source.version, targetVersion: target.version }); assert();
+        cache[source.id] = boardDocumentSchema.parse(moved.source); cache[target.id] = boardDocumentSchema.parse(moved.target);
+        await persist(); emit({ selected: cache[source.id] });
+      } catch (error) { noteRemoteFailure(error); throw error; }
     }); },
     async resolveConflict(keepLocal: boolean) { return run(async () => {
-      const doc = state.selected; if (!doc || !pending[doc.id]) return;
-      const remote = boardDocumentSchema.parse(await api<BoardDocument>(`/${doc.id}`)); assert();
-      if (remote.ownerUserId !== owner) throw new Error("Identidad incorrecta.");
-      // Explicit user decision; a conflict never silently overwrites another device.
-      if (keepLocal) { pending[doc.id].next = { ...pending[doc.id].next, version: remote.version }; cache[doc.id] = pending[doc.id].next; }
-      else { delete pending[doc.id]; cache[doc.id] = remote; }
-      await persist(); emit({ selected: cache[doc.id], error: "" }); if (keepLocal) await flush();
+      try {
+        const doc = state.selected; if (!doc || !pending[doc.id]) return;
+        const remote = boardDocumentSchema.parse(await api<BoardDocument>(`/${doc.id}`)); assert();
+        if (remote.ownerUserId !== owner) throw new Error("Identidad incorrecta.");
+        // Explicit user decision; a conflict never silently overwrites another device.
+        if (keepLocal) { pending[doc.id].next = { ...pending[doc.id].next, version: remote.version }; cache[doc.id] = pending[doc.id].next; }
+        else { delete pending[doc.id]; cache[doc.id] = remote; }
+        await persist(); emit({ selected: cache[doc.id], error: "" }); if (keepLocal) await flush();
+      } catch (error) { noteRemoteFailure(error); throw error; }
     }); },
   };
 }

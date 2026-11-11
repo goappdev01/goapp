@@ -41,10 +41,18 @@ function fixture(){
     async close(){await React.act(()=>root.unmount());},selectPhoto:v=>{picker=v}};
 }
 test('real module entry renders only for ADMIN and blocks profile changes',async()=>{
-  const f=fixture(),props={visible:true,onClose(){},manager:{state:{boards:[],pending:0,error:'',selected:null},store:{list:async()=>{}},allowed:true}};
+  const f=fixture(),props={visible:true,onClose(){},manager:{state:{boards:[],pending:0,error:'',selected:null,remoteReady:true},store:{list:async()=>{}},allowed:true}};
   try{for(const profile of ['USER','BUSINESS']){f.setProfile(profile);await f.render(f.panel.GoBoardsPanel,props);assert.equal(f.element.textContent,'');}
     f.setProfile('ADMIN');await f.render(f.panel.GoBoardsPanel,props);assert.match(f.element.textContent,/GO Tableros/);
     f.deny();await f.render(f.panel.GoBoardsPanel,props);assert.equal(f.element.textContent,'');
+  }finally{await f.close();}
+});
+test('board actions stay unavailable until the remote board schema is confirmed',async()=>{
+  const f=fixture(),props={visible:true,onClose(){},manager:{state:{boards:[],pending:0,error:'La sincronización no está disponible.',selected:null,remoteReady:false},store:{list:async()=>{},loadCalendar:async()=>{}},allowed:true}};
+  try{f.setProfile('ADMIN');await f.render(f.panel.GoBoardsPanel,props);
+    assert.match(f.element.textContent,/Sincronización de Tableros pendiente/);
+    assert.ok(f.button('Reintentar conexión'));
+    assert.equal(f.button('Crear tablero'),undefined);
   }finally{await f.close();}
 });
 test('task editor saves the exact dated/untimed record and notes use its same ID',async()=>{

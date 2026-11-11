@@ -130,7 +130,13 @@ function BoardsContent({ onClose, manager }: { onClose: () => void; manager: Man
         {state.error.includes("cambiado") && <Button label="Resolver conflicto" onPress={() => Alert.alert("Conflicto entre dispositivos", "La copia local se conserva. Elige qué versión utilizar.", [
           { text: "Cancelar", style: "cancel" }, { text: "Usar servidor", onPress: () => void work(() => store.resolveConflict(false)) },
           { text: "Conservar mi copia", onPress: () => void work(() => store.resolveConflict(true)) }])} />}</View></View>}
-      {editor && doc ? <TaskEditor card={editor} board={doc} onChange={setEditor}
+      {!state.remoteReady ? <View style={[styles.form, { flex: 1, justifyContent: "center" }]}>
+        <Text style={styles.title}>Sincronización de Tableros pendiente</Text>
+        <Text style={styles.muted}>{state.error || "Comprobando la conexión segura con el servidor…"}</Text>
+        {state.pending > 0 && <Text style={styles.muted}>{state.pending} cambio(s) local(es) conservados. No se perderán mientras se recupera la conexión.</Text>}
+        <Button label="Reintentar conexión" disabled={state.busy} onPress={() => void work(() => store.loadCalendar())} />
+      </View>
+      : editor && doc ? <TaskEditor card={editor} board={doc} onChange={setEditor}
         onSave={card => void work(async () => { await store.change({ type: "card", card }); setEditor(null); })}
         onDelete={() => confirm("¿Eliminar tarea?", () => removeTask(editor))}
         onComplete={() => void work(async () => { await complete(editor); setEditor(null); })}
