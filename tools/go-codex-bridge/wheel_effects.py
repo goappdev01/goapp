@@ -589,6 +589,25 @@ class WheelEffects:
         return {"main_sha":sha,"served_sha":served_sha,"tests":payload["tests"],"metro":metro,
                 "api":metro.get("api","Sin comprobación"),"operation":op["id"]}
 
+    def _published_head_valid(self,workspace,receipt):
+        """A later bridge-only commit does not invalidate an already verified app push."""
+        git=lambda *args:self.b.safety.git_command(workspace,*args)
+        served=receipt.get("served_sha",receipt.get("main_sha",""))
+        if not re.fullmatch(r"[a-f0-9]{40}",served):
+            self.fail("PUBLICATION_UNVERIFIED","Falta la versión publicada verificada.")
+        remote=git("ls-remote","origin","refs/heads/main").split()[0]
+        if remote==served:
+            return remote
+        git("fetch","--no-tags","origin","refs/heads/main")
+        if git("rev-parse","FETCH_HEAD").strip()!=remote:
+            self.fail("PUBLICATION_UNVERIFIED","MAIN cambió durante la comprobación.")
+        ancestor=subprocess.run(["git","-C",str(workspace),"merge-base","--is-ancestor",served,remote],
+                                capture_output=True,timeout=20)
+        changed=git("diff","--name-only",served,remote).splitlines() if ancestor.returncode==0 else []
+        if ancestor.returncode or not changed or any(not path.startswith("tools/go-codex-bridge/") for path in changed):
+            self.fail("PUBLICATION_UNVERIFIED","MAIN contiene cambios ajenos a la publicación verificada; revisa la tarjeta.")
+        return remote
+
     def _snapshot(self,card_id):
         card = self.b.api("/1/cards/"+card_id,{"fields":"id,idBoard,idList,shortLink,pos,closed"})
         if (card.get("id")!=card_id or card.get("idBoard")!=BOARD or card.get("closed")
@@ -656,8 +675,8 @@ class WheelEffects:
             verified,report = self._diagnosis(row,job,workspace)
             if prior!=verified:
                 self.fail("WHEEL_DIAGNOSIS_UNVERIFIED","El informe no coincide con el diagnóstico verificado.")
-        elif self.b.git_state(workspace,check_main=True)["origin_main"]!=prior.get("served_sha",prior["main_sha"]):
-            self.fail("PUBLICATION_UNVERIFIED","MAIN cambió antes de cerrar la tarjeta.")
+        else:
+            self._published_head_valid(workspace,prior)
         card,comments = self._snapshot(grant["card_id"])
         if card["idList"]!=QUEUE:
             self.fail("WHEEL_TRELLO_CHANGED","La tarjeta ya no ocupa el lugar autorizado.")

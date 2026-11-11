@@ -175,6 +175,27 @@ class V2WheelTests(unittest.TestCase):
         self.assertFalse(restored.factory.wheel.enabled())
         self.assertFalse(self.runs or self.changes)
 
+    def test_unreleased_comment_after_verified_publication_rearms_without_repeating_work(self):
+        w,ids=self.batch();w.pause('WHEEL_PRESERVATION_PUBLICATION')
+        with self.bridge.db() as db:
+            grant=w._verified(db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[0],)).fetchone())
+            db.execute("UPDATE wheel_grants SET state='uncertain',reason='WHEEL_PRESERVATION_PUBLICATION' WHERE grant_id=?",
+                       (grant['grant_id'],))
+            for letter,state,receipt in [('A','verified','{}'),('B','verified','{"main_sha":"a"}'),('C','claimed',None)]:
+                db.execute('INSERT INTO wheel_stages(grant_id,letter,state,started,receipt) VALUES(?,?,?,?,?)',
+                           (grant['grant_id'],letter,state,'synthetic',receipt))
+        with patch.object(self.bridge.factory,'_row',return_value={'job_id':'synthetic-job'}),\
+             patch.object(WheelEffects,'_operations',return_value=[]),\
+             patch.object(WheelEffects,'_published_head_valid',return_value='b'*40) as checked:
+            self.assertEqual(w.continuity.reconcile_unreleased_comment(),[ids[0]])
+            self.assertEqual(w.continuity.reconcile_unreleased_comment(),[])
+        checked.assert_called_once()
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT state FROM wheel_grants WHERE grant_id=?',(grant['grant_id'],)).fetchone()[0],'ready')
+            self.assertFalse(db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter='C'",(grant['grant_id'],)).fetchone())
+            self.assertEqual(db.execute('SELECT reason FROM wheel_control WHERE id=1').fetchone()[0],'OWNER_PAUSED')
+        self.assertFalse(self.runs or self.changes)
+
     def test_published_card_reconciles_after_bridge_only_main_commit(self):
         before,card_sha,bridge_sha='a'*40,'b'*40,'c'*40
         effect=WheelEffects(self.bridge.factory)
@@ -197,6 +218,22 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(receipt['main_sha'],card_sha)
         self.assertEqual(receipt['served_sha'],bridge_sha)
         verify.assert_called_once_with(bridge_sha,before,self.root,synchronize=True)
+
+    def test_comment_accepts_only_bridge_only_main_descendants(self):
+        old,new='a'*40,'b'*40
+        changed=['tools/go-codex-bridge/puente.py']
+        def git(_root,*args):
+            if args[:2]==('ls-remote','origin'):return new+' refs/heads/main'
+            if args[:2]==('fetch','--no-tags'):return ''
+            if args[:2]==('rev-parse','FETCH_HEAD'):return new
+            if args[:2]==('diff','--name-only'):return '\n'.join(changed)
+            raise AssertionError(args)
+        with patch.object(self.bridge.safety,'git_command',side_effect=git),\
+             patch('wheel_effects.subprocess.run',return_value=SimpleNamespace(returncode=0)):
+            effect=WheelEffects(self.bridge.factory)
+            self.assertEqual(effect._published_head_valid(self.root,{'served_sha':old}),new)
+            changed[:]=['artifacts/go-app-mobile/app/index.tsx']
+            with self.assertRaises(BridgeError):effect._published_head_valid(self.root,{'served_sha':old})
 
     def test_signed_instruction_fallback_can_select_only_its_blocked_diagnosis_dependency(self):
         w,ids=self.batch(diagnostic_fallback=True)

@@ -207,6 +207,54 @@ class Continuity:
                     repaired.append(grant["card_id"])
         return repaired
 
+    def reconcile_unreleased_comment(self):
+        """Rearm only a comment claimed before any authorization or Trello effect."""
+        from wheel_effects import WheelEffects
+        recovered=[]
+        with self.f.lock:
+            with self.b.db() as db:
+                if (db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0]
+                        or db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                        or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()):
+                    return recovered
+                candidates=[]
+                for saved in db.execute("SELECT * FROM wheel_grants WHERE state='uncertain' AND reason='WHEEL_PRESERVATION_PUBLICATION'"):
+                    grant=self.w._verified(saved)
+                    stages={row["letter"]:row for row in db.execute(
+                        "SELECT letter,state,approval_id,receipt FROM wheel_stages WHERE grant_id=?",(grant["grant_id"],))}
+                    if (set(stages)=={"A","B","C"} and stages["A"]["state"]=="verified"
+                            and stages["B"]["state"]=="verified" and stages["C"]["state"]=="claimed"
+                            and not stages["C"]["approval_id"] and stages["B"]["receipt"]):
+                        candidates.append((grant,json.loads(stages["B"]["receipt"])))
+            for grant,receipt in candidates:
+                attempt=self.f._row(grant["card_id"],grant["attempt"])
+                effects=WheelEffects(self.f)
+                if effects._operations(attempt,"comment"):
+                    continue
+                try:
+                    effects._published_head_valid(self.b.workspace("4")[0],receipt)
+                except (self.f.Error,OSError,KeyError,TypeError) as error:
+                    self.b.audit("wheel_comment_recovery_pending",{"grant":grant["grant_id"],
+                        "code":getattr(error,"code","VERIFICATION_UNAVAILABLE")})
+                    continue
+                with self.b.db() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(grant["grant_id"],)).fetchone()
+                    if (not saved or saved["state"]!="uncertain" or saved["reason"]!="WHEEL_PRESERVATION_PUBLICATION"
+                            or self.w._verified(saved)!=grant):
+                        continue
+                    removed=db.execute("DELETE FROM wheel_stages WHERE grant_id=? AND letter='C' AND state='claimed' AND approval_id IS NULL",
+                                       (grant["grant_id"],)).rowcount
+                    if removed!=1:
+                        continue
+                    db.execute("UPDATE wheel_grants SET state='ready',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
+                    if db.execute("SELECT reason FROM wheel_control WHERE id=1").fetchone()[0]=="WHEEL_PRESERVATION_PUBLICATION":
+                        db.execute("UPDATE wheel_control SET reason='OWNER_PAUSED',retry_after=0 WHERE id=1")
+                    self.b.audit("wheel_unreleased_comment_rearmed",{"grant":grant["grant_id"],
+                        "repeated_cli":False,"repeated_push":False,"trello_write":False},db)
+                    recovered.append(grant["card_id"])
+        return recovered
+
     def activate(self,review,principal):
         with self.f.lock:
             # A second confirmation for the same active batch is a read-only success.
@@ -427,10 +475,14 @@ class Continuity:
 
     def card_error(self,grant,code):
         # Every failed implementation must first be preserved by the existing handler.
-        state=self.b.git_state(grant["workspace"])
-        if state.get("tracked_dirty") or not state.get("git"):
-            self.w.pause("WHEEL_PRESERVATION_DIRTY")
-            return {"paused":"WHEEL_PRESERVATION_DIRTY"}
+        with self.b.db() as db:
+            published=bool(db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter='B' AND state='verified'",
+                                      (grant["grant_id"],)).fetchone())
+        if not published:
+            state=self.b.git_state(grant["workspace"])
+            if state.get("tracked_dirty") or not state.get("git"):
+                self.w.pause("WHEEL_PRESERVATION_DIRTY")
+                return {"paused":"WHEEL_PRESERVATION_DIRTY"}
         waiting=False
         attempt=self.f._row(grant["card_id"],grant["attempt"])
         job=self.b.job(attempt["job_id"]) if attempt and attempt.get("job_id") else None

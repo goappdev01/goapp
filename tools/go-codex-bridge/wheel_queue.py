@@ -276,6 +276,7 @@ class Wheel:
     def review(self):
         with self.f.lock:
             self.continuity.reconcile_published_stale()
+            self.continuity.reconcile_unreleased_comment()
             self.f._identity()
             self.f._lists()
             cards = []
@@ -723,7 +724,10 @@ class Wheel:
         else:
             state="uncertain" if uncertain else "blocked"
         self.checkpoint(g,code)
-        if not uncertain and not self._system(code) and g.get("work_kind")!="diagnosis":
+        with self.b.db() as db:
+            published=bool(db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter='B' AND state='verified'",
+                                      (g["grant_id"],)).fetchone())
+        if not uncertain and not published and not self._system(code) and g.get("work_kind")!="diagnosis":
             from wheel_effects import WheelEffects
             try:
                 WheelEffects(self.f).preserve_blocked_work(g,code)
