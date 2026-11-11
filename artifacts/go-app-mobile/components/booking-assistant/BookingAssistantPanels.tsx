@@ -1,4 +1,5 @@
 import { AssistantCloseControls } from "./AssistantCloseControls";
+import { GoToolAction } from "@/components/ui/GoToolRail";
 import React, { useState } from "react";
 import {
   Linking,
@@ -32,8 +33,10 @@ export function BookingAssistantPanels({
   saving,
   onClosePanel,
   attach,
-  viewReservation, scrollRef,
+  viewReservation, scrollRef, embedded = false, handedness = "right",
 }: {
+  embedded?: boolean;
+  handedness?: "left" | "right";
   scrollRef?: React.Ref<React.ElementRef<typeof ScrollView>>;
   a: Assistant;
   go: ReturnType<typeof useGoActions>;
@@ -65,17 +68,18 @@ export function BookingAssistantPanels({
   const disabled = !!a.busy || (a.panel === "zone" && (a.zoneLoading || a.zoneSaving));
   const [dockHeight, setDockHeight] = useState(84);
   return (
-    <View style={s.scrim}>
-      <TouchableOpacity
+    <View style={embedded ? {flex:1,minHeight:0} : s.scrim}>
+      {!embedded && <TouchableOpacity
         style={StyleSheet.absoluteFill}
         accessibilityLabel="Cerrar panel"
         onPress={() => !saving && onClosePanel()}
-      />
-      <View style={[s.sheet, { paddingBottom: Math.max(16, bottom) }]}>
+      />}
+      <View style={[s.sheet, { paddingBottom: Math.max(16, bottom) },embedded&&{flex:1,minHeight:0,maxHeight:"100%",padding:10,paddingLeft:handedness==="left"?54:10,paddingRight:handedness==="right"?54:10,backgroundColor:"transparent"}]}>
+        {embedded&&<GoToolAction label="Volver a herramientas" icon="arrow-left" disabled={saving} onPress={onClosePanel}/>}
         <View style={s.sheetHeader}>
           <Text style={a.panel === "zone" ? z.sectionTitle : s.sectionTitle}>{title}</Text>
         </View>
-        <ScrollView ref={scrollRef} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
+        <ScrollView ref={scrollRef} bounces={false} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
           {a.panel === "menu" && (
             <>
               <Action text="Nueva conversación" onPress={a.reset} />
@@ -382,8 +386,8 @@ export function BookingAssistantPanels({
           </Text>
         )}
       </View>
-      <View onLayout={event => setDockHeight(event.nativeEvent.layout.height)}>{dock}</View>
-      <AssistantCloseControls panel disabled={saving} onClose={onClosePanel} viewport={viewport} protectedBottom={dockHeight} />
+      {!embedded&&<View onLayout={event => setDockHeight(event.nativeEvent.layout.height)}>{dock}</View>}
+      {!embedded&&<AssistantCloseControls panel disabled={saving} onClose={onClosePanel} viewport={viewport} protectedBottom={dockHeight} />}
     </View>
   );
 }

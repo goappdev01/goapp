@@ -6,7 +6,7 @@ import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import { LinearGradient } from "expo-linear-gradient";
-import { DraggableFAB } from "@/components/DraggableFAB";
+import { GoToolPanel, GoToolRailToggle } from "@/components/ui/GoToolRail";
 import { GoScreenModal } from "@/components/ui/GoScreenModal";
 import { GoScreenCloseGuide, GoScreenCloseSurface } from "@/components/ui/GoScreenCloseSurface";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
@@ -66,8 +66,6 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   const toolsHeight=panel==="date"?Math.min(workspaceBounds.height||dateContentHeight,dateContentHeight):!panel?menuHeight:undefined;
   const toggleBoundsHeight=panel?Math.max(48,workspaceBounds.height-88):workspaceBounds.height;
   const toggleTop=Math.max(8,Math.min(toggleBoundsHeight-56,Math.round(workspaceBounds.height*.74)));
-  const suppressToggle=useRef(false),markToggleDrag=useCallback(()=>{suppressToggle.current=true;},[]);
-  const toggleLeft=handedness==="right"?usableWidth-44:0;
   const writingInset=handedness==="right"?{paddingRight:56}:{paddingLeft:56};
   const [locations,setLocations]=useState<{latitude:number;longitude:number;label:string}[]>([]);
   const [preparing,setPreparing]=useState(false),[preparedNotice,setPreparedNotice]=useState(""),[floatingNotice,setFloatingNotice]=useState("");
@@ -406,8 +404,8 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       </KeyboardAvoidingView>
     </GoScreenCloseSurface>
     <View testID="note-tools-floating-layer" pointerEvents="box-none" style={{position:"absolute",left:workspaceBounds.x,top:workspaceBounds.y,width:workspaceBounds.width,height:workspaceBounds.height,zIndex:40}}>
-        <View testID="note-tools-panel" pointerEvents={toolsOpen?"auto":"none"} accessibilityElementsHidden={!toolsOpen} importantForAccessibility={toolsOpen?"auto":"no-hide-descendants"}
-          style={[s.tools,panel==="time"&&{paddingTop:48},handedness==="right"?{right:0}:{left:0},{width:toolsWidth,height:toolsHeight,maxHeight:workspaceBounds.height||"100%",display:toolsOpen?"flex":"none"}]}>
+        <GoToolPanel handedness={handedness} testID="note-tools-panel" pointerEvents={toolsOpen?"auto":"none"} accessibilityElementsHidden={!toolsOpen} importantForAccessibility={toolsOpen?"auto":"no-hide-descendants"}
+          style={[panel==="time"&&{paddingTop:48},{width:toolsWidth,height:toolsHeight,maxHeight:workspaceBounds.height||"100%",display:toolsOpen?"flex":"none"}]}>
           {!!openingTool&&<View style={{padding:16}}><Text accessibilityLiveRegion="polite" style={s.text}>Preparando herramienta…</Text></View>}
           <View style={{flex:panel==="date"?1:undefined,flexShrink:1,minHeight:0,display:openingTool?"none":"flex"}}>
           {!!panel&&panel!=="date"&&!keyboardVisible&&<View testID="note-tool-header" style={{paddingHorizontal:8,paddingVertical:4}}>
@@ -447,14 +445,13 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
           {panel==="attachments"&&<GoNoteToolFooter testID="note-attachments-save" disabled={busy||toolFinishing||attachmentBusy} handedness={handedness} onSave={()=>void finishTool()}/>}
           </ScrollView>}
           </View>
-        </View>
-      {workspaceBounds.width>=44&&workspaceBounds.height>=64&&
-      <DraggableFAB key={panel==="time"?"time-toggle":"tools-toggle"} screenKey="note-editor" buttonKey={panel==="time"?"time-toggle":"tools-toggle"} bounds={{width:workspaceBounds.width,height:toggleBoundsHeight}} boundsVerticalInset={panel?0:8} buttonWidth={44} maxH={48} initialTop={panel==="time"?0:toggleTop} initialRight={handedness==="right"?0:Math.max(0,workspaceBounds.width-44)} fixedLeft={panel==="time"?undefined:toggleLeft} onDragStart={markToggleDrag}>
-        <TouchableOpacity testID="note-tools-toggle" accessibilityRole="button" accessibilityLabel={toolsOpen?"Ocultar herramientas de la nota":"Mostrar herramientas de la nota"} accessibilityHint={panel==="time"?"Mantén pulsado medio segundo para mover la flecha":"Mantén pulsado medio segundo para mover la flecha verticalmente"} accessibilityState={{expanded:toolsOpen}}
-          delayLongPress={500} disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPressIn={()=>{suppressToggle.current=false;}} onLongPress={markToggleDrag} activeOpacity={0.78} onPress={()=>{if(suppressToggle.current||saveLock.current||workLock.current)return;if(!toolsOpen){void openTool("");return;}if(panel){void finishTool(undefined,true);return;}toolRequest.current++;setOpeningTool("");setAwaitingTool(null);if(focusedToolTarget.current)void hideKeyboard();setToolsOpen(false);}} style={s.toolsToggle}>
-          <LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.65)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,{borderRadius:14}]}/><Feather name={handedness==="right"?(toolsOpen?"chevron-right":"chevron-left"):(toolsOpen?"chevron-left":"chevron-right")} size={22} color="#202830"/>
-        </TouchableOpacity>
-      </DraggableFAB>}
+        </GoToolPanel>
+      <GoToolRailToggle key={panel==="time"?"time-toggle":"tools-toggle"} buttonKey={panel==="time"?"time-toggle":"tools-toggle"}
+        bounds={{width:workspaceBounds.width,height:toggleBoundsHeight}} verticalInset={panel?0:8} initialTop={panel==="time"?0:toggleTop}
+        freeMovement={panel==="time"} handedness={handedness} open={toolsOpen} testID="note-tools-toggle"
+        accessibilityLabel={toolsOpen?"Ocultar herramientas de la nota":"Mostrar herramientas de la nota"}
+        disabled={busy||toolFinishing||attachmentBusy||closingSaved}
+        onPress={()=>{if(saveLock.current||workLock.current)return;if(!toolsOpen){void openTool("");return;}if(panel){void finishTool(undefined,true);return;}toolRequest.current++;setOpeningTool("");setAwaitingTool(null);if(focusedToolTarget.current)void hideKeyboard();setToolsOpen(false);}}/>
     </View>
     <GoNavigationFloating screenKey="note-navigation" safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible||keyboard.dismissing} keyboardResponsive width={initial&&onGoToLanding?136:64} protectedTop={insets.top+52} protectedBottom={(footerBottom?Math.max(0,frameHeight-footerBottom):0)+Math.max(insets.bottom,12)} initialBottom={0}>
       <GoCloseButton testID="note-navigation-back" level="panel" keyboardVisible={keyboardVisible||keyboard.dismissing} touchSize={56} hitSlop={0} onPress={back} accessibilityLabel={keyboardVisible||keyboard.dismissing?"Ocultar teclado":toolsOpen&&!!panel?"Volver a herramientas":toolsOpen?"Ocultar herramientas":"Cerrar nota"} disabled={busy||toolFinishing||closingSaved} appearance="light"/>
@@ -467,7 +464,6 @@ const s=StyleSheet.create({keyboardBack:{position:"absolute",width:44,height:44,
   workspace:{flex:1,minHeight:0},writing:{flex:1},field:{gap:6,flexShrink:0},label:{color:"#424b55",fontSize:12,fontWeight:"700"},input:{minHeight:48,color:"#17212b",fontSize:16,borderWidth:1.5,borderColor:"#9aa3ad",backgroundColor:"rgba(255,255,255,0.86)",borderRadius:12,padding:12},content:{borderColor:"#b8bfc5",fontSize:17},
   number:{fontSize:28,textAlign:"center",minHeight:64},row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:8},choice:{minHeight:44,paddingVertical:8,paddingHorizontal:10,borderWidth:1,borderColor:"#adbac3",borderTopColor:"#ffffff",borderBottomColor:"#a0afb9",backgroundColor:"rgba(231,237,242,0.96)",borderRadius:12,justifyContent:"center",width:"100%",shadowColor:"#2b3d45",shadowOpacity:0.13,shadowRadius:5,shadowOffset:{width:0,height:3},elevation:3},buttonSheen:{borderRadius:12},choiceText:{textAlign:"center",fontWeight:"500"},configured:{borderColor:"#16834a",backgroundColor:"rgba(212,243,222,0.90)"},destinationList:{gap:8},destination:{width:"100%"},calendar:{backgroundColor:"rgba(199,236,224,0.90)",borderColor:"#84ab9e"},pending:{backgroundColor:"rgba(255,239,168,0.90)",borderColor:"#b5a15c"},archive:{backgroundColor:"rgba(211,229,255,0.90)",borderColor:"#93adc9"},selectedDestination:{borderColor:"#446657",borderWidth:2.5,shadowOpacity:0.24,shadowRadius:7,shadowOffset:{width:0,height:4},elevation:6,transform:[{translateY:-1}]},destinationText:{color:"#17212b",fontSize:13,fontWeight:"700",textAlign:"center"},destinationActiveText:{color:"#ffffff"},
   text:{color:"#17212b",fontSize:13,flexShrink:1},hint:{color:"#515d69",fontSize:12},warning:{color:"#8a3d0a",fontSize:13,paddingVertical:6},success:{color:"#146339",fontSize:13,paddingVertical:6},section:{gap:10,padding:8,borderWidth:1.5,borderColor:"#aeb8bf",borderRadius:12},deleteNote:{flexDirection:"row",gap:8,backgroundColor:"#b4232f",borderColor:"#8f1d28",minHeight:48},deleteNoteText:{color:"#ffffff",fontSize:13,fontWeight:"800",textAlign:"center"},
-  tools:{position:"absolute",bottom:0,maxHeight:"100%",borderWidth:1,borderColor:"#b2bdc5",borderRadius:20,backgroundColor:"rgba(249,252,251,0.97)",zIndex:5,shadowColor:"#2b3d45",shadowOpacity:0.17,shadowRadius:16,shadowOffset:{width:0,height:6},elevation:5},toolsToggle:{width:44,height:48,alignItems:"center",justifyContent:"center",borderRadius:14,borderWidth:1,borderColor:"#a5b0b8",backgroundColor:"rgba(233,239,243,0.94)",zIndex:6,shadowColor:"#2b3d45",shadowOpacity:0.14,shadowRadius:6,shadowOffset:{width:0,height:3},elevation:3},
   icon:{width:44,height:44,alignItems:"center",justifyContent:"center"},attachment:{flexDirection:"row",alignItems:"center",gap:8,borderWidth:1.5,borderColor:"#aeb8bf",paddingHorizontal:10,borderRadius:10},
   security:{flexDirection:"row",alignItems:"center",gap:6},securityText:{color:"#323b44",fontSize:11,fontWeight:"600",textAlign:"center",flexShrink:1},floating:{position:"absolute",left:12,right:12,padding:14,borderRadius:14,borderWidth:1.5,borderColor:"#89949d",backgroundColor:"#eef2f4",zIndex:20},
   go:{marginHorizontal:0,alignItems:"center",justifyContent:"center",gap:2,borderWidth:1,shadowColor:"#2b3d45",shadowOpacity:0.16,shadowRadius:7,shadowOffset:{width:0,height:4},elevation:4},goText:{fontSize:13,fontWeight:"800"},

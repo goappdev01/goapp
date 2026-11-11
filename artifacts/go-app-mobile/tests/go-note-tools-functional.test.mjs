@@ -134,3 +134,27 @@ test('a syntactically valid hour missing during the local daylight-saving transi
  const script=`const h=require('./tests/helpers/unified-note-fixture.cjs'),a=require('node:assert/strict');(async()=>{const cached={...h.load('lib/unifiedNotes.ts').noteDraft(),content:'Acción',destination:'calendar',dateISO:'2027-03-28',time:'02:30'};const ui=await h.editorFixture({cached,onSave:()=>a.fail('Invalid local hour must not be saved')});try{await ui.tap('unified-note-save');a.match(ui.container.textContent,/Esa hora no existe/);a.ok(ui.hosts.has('note-time-picker'));process.stdout.write('dst-hour-routed');}finally{await ui.close();}})().catch(e=>{console.error(e);process.exitCode=1;});`;
  assert.equal(execFileSync(process.execPath,['-e',script],{cwd:process.cwd(),env:{...process.env,TZ:'Europe/Madrid'},encoding:'utf8'}),'dst-hour-routed');
 });
+
+test('the extracted rail preserves NOTA preference, 500ms gesture, dominant side and keyboard clamping across reopen',async()=>{
+ const memory=new Map([['fab_pos:note-editor:tools-toggle',JSON.stringify({l:322,t:390})]]),writes=[];
+ const fabStorage={getItem:async key=>memory.get(key)||null,setItem:async(key,value)=>{writes.push(key);memory.set(key,value);}};
+ let ui=await h.editorFixture({ports:{fabStorage}});try{
+  assert.equal(ui.fab.style().top,390);assert.equal(ui.fab.style().left,322);
+  await ui.run(()=>{const button=ui.hosts.get('note-tools-toggle'),gesture=ui.fab.gesture;button.onPressIn();button.onLongPress();assert.equal(gesture._activateAfterLongPress,500);gesture._onStart({translationX:0,translationY:0});gesture._onUpdate({translationX:-200,translationY:-90});gesture._onEnd();gesture._onFinalize();button.onPress();});
+  assert.equal(ui.fab.style().top,300);assert.equal(ui.fab.style().left,322);assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,false);
+  assert.deepEqual(writes,['fab_pos:note-editor:tools-toggle']);await ui.tap('note-tools-toggle');assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,true);
+  await ui.run(()=>ui.keyboard.show());assert.ok(ui.fab.style().top+48<=292);assert.equal(JSON.parse(memory.get(writes[0])).t,300);
+  await ui.render({handedness:'left'});assert.equal(ui.fab.style().left,0);await ui.run(()=>ui.keyboard.hide());assert.equal(ui.fab.style().top,300);
+  await ui.close();ui=await h.editorFixture({handedness:'left',ports:{fabStorage}});assert.equal(ui.fab.style().top,300);assert.equal(ui.fab.style().left,0);assert.equal(writes.length,1);
+ }finally{await ui.close();}
+});
+
+test('the shared rail consumes a cancelled long press but the next tap works, and HORA retains its separate movable preference',async()=>{
+ const ui=await h.editorFixture();try{
+  await ui.run(()=>{const button=ui.hosts.get('note-tools-toggle'),gesture=ui.fab.gesture;button.onPressIn();button.onLongPress();gesture._onStart({translationX:0,translationY:0});gesture._onFinalize();button.onPress();});
+  assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,false);await ui.tool('time');
+  await ui.run(()=>{const button=ui.hosts.get('note-tools-toggle'),gesture=ui.fab.gesture;button.onPressIn();button.onLongPress();gesture._onStart({translationX:0,translationY:0});gesture._onUpdate({translationX:-100,translationY:80});gesture._onEnd();gesture._onFinalize();});
+  const time=JSON.parse(await ui.fab.storage.getItem('fab_pos:note-editor:time-toggle'));assert.ok(time.l<322);assert.equal(time.t,80);
+  assert.equal(await ui.fab.storage.getItem('fab_pos:note-editor:tools-toggle'),null);assert.ok(ui.hosts.has('note-time-picker'));
+ }finally{await ui.close();}
+});

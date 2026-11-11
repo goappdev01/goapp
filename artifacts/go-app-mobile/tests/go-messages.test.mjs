@@ -1,12 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import lifecycle from './helpers/react-lifecycle.cjs';
+import assistantHarness from './helpers/assistant-tools-fixture.cjs';
 const {React,createRoot,document,evaluate,rn,native}=lifecycle;
 const bookingId='11111111-1111-4111-8111-111111111111';
 const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<20;i++)await Promise.resolve();});
-async function fixture({initial=true,context,offline=false,account='customer',platform='ios',contact,businessId,seed=[]}={}){
- const memory=new Map(),storage={getItem:async k=>memory.get(k)??null,setItem:async(k,v)=>{memory.set(k,v);},removeItem:async k=>{memory.delete(k);}};
- let owner=account,fail=offline,loseResponse=false,sending=0,attempts=0,closed=0,landings=0,aiOpens=0;const records=[...seed],events=new Set(),inputs=[],buttons=[],requests=[],appListeners=new Set();let modalProps,dismissed=0,malformed=false,holdRead=false,releaseRead,legacy=false,locationTools;
+async function fixture({initial=true,context,offline=false,account='customer',platform='ios',contact,businessId,seed=[],handedness='right',height=300,photos,documents,initialMemory=[]}={}){
+ const memory=new Map(initialMemory),storage={getItem:async k=>memory.get(k)??null,setItem:async(k,v)=>{memory.set(k,v);},removeItem:async k=>{memory.delete(k);}};
+ let owner=account,fail=offline,loseResponse=false,sending=0,attempts=0,closed=0,landings=0,aiOpens=0,keyboardVisible=false;const records=[...seed],events=new Set(),inputs=[],buttons=[],requests=[],appListeners=new Set(),keyboardEvents=new Map(),shares=[],copies=[],pickerCalls=[],scrolls=[];let modalProps,dismissed=0,malformed=false,holdRead=false,releaseRead,legacy=false,locationTools;
  const appState={currentState:'active',addEventListener:(event,fn)=>{appListeners.add(fn);return{remove:()=>appListeners.delete(fn)};}};
  const thread=()=>({id:'booking:'+bookingId,bookingId,businessId:businessId??'salon',counterpartId:owner==='customer'?'business-owner':'customer',contactName:owner==='customer'?'Registered salon':'Registered customer',lastUpdated:1,messages:records.map(x=>({...x,senderId:x.sender===owner?'yo':x.sender})),unread:0});
  const booking={getAuthenticatedUserId:async()=>owner,supabaseApiRequest:async(path,init={},required,expected)=>{
@@ -22,32 +23,42 @@ async function fixture({initial=true,context,offline=false,account='customer',pl
  const text=n=>Array.isArray(n)?n.map(text).join(''):typeof n==='string'?n:n?.props?text(n.props.children):'';
  class Value{setValue(){}interpolate(){return 0;}}
  const motion={start:fn=>fn?.()};const chain=new Proxy({},{get:()=>()=>chain});
- const NativeView=native('View');const View=props=>{React.useLayoutEffect(()=>{props.onLayout?.({nativeEvent:{layout:{x:10,y:0,width:370,height:300}}});},[]);return React.createElement(NativeView,props);};
+ const NativeView=native('View');const View=props=>{React.useLayoutEffect(()=>{props.onLayout?.({nativeEvent:{layout:{x:10,y:0,width:370,height}}});},[]);return React.createElement(NativeView,props);};
+ const keyboard={isVisible:()=>keyboardVisible,dismiss(){keyboardVisible=false;for(const fn of keyboardEvents.get('keyboardDidHide')||[])fn();},addListener:(name,fn)=>{const set=keyboardEvents.get(name)||new Set();set.add(fn);keyboardEvents.set(name,set);return{remove:()=>set.delete(fn)};}};
+ const runtime={...rn,AppState:appState,View,Text:native('Text'),Platform:{OS:platform},Keyboard:keyboard,Share:{share:async value=>shares.push(value)},Modal:props=>{modalProps=props;return props.visible?props.children:null;},
+   Dimensions:{get:()=>({width:390,height:844})},Easing:{out:x=>x,cubic:0},PanResponder:{create:()=>({panHandlers:{}})},
+   Animated:{Value,View,spring:()=>motion,timing:()=>motion},ScrollView:React.forwardRef((props,ref)=>{React.useImperativeHandle(ref,()=>({scrollToEnd:options=>scrolls.push(options)}));return React.createElement(View,props);}),KeyboardAvoidingView:View,
+   FlatList:props=>React.createElement(View,null,(props.data||[]).map((item,index)=>React.createElement(React.Fragment,{key:item.id},props.renderItem({item,index})))),
+   TextInput:props=>{inputs.push(props);return React.createElement('input',{'data-value':props.value,'data-placeholder':props.placeholder});},
+   TouchableOpacity:props=>{buttons.push({...props,label:props.accessibilityLabel||text(props.children)});return React.createElement('button',null,props.children);},
+ };
+ const railFrames=[];
+ const rail=evaluate('components/ui/GoToolRail.tsx',{'react-native':runtime,'@expo/vector-icons':{Feather:()=>null},'@/components/DraggableFAB':{DraggableFAB:props=>{railFrames.push(props);return props.children;}}});
+ const messageTools=evaluate('components/messages/MessageTools.tsx',{'react-native':runtime,'@/components/ui/GoToolRail':rail,'@/data/contactPlaces':places,
+   'expo-image-picker':{launchImageLibraryAsync:async options=>{pickerCalls.push(['photo',options]);return photos?photos():{canceled:false,assets:[{uri:'file:///private/photo.jpg',fileName:'elegida.jpg',mimeType:'image/jpeg',fileSize:2048}]};}},
+   'expo-document-picker':{getDocumentAsync:async options=>{pickerCalls.push(['document',options]);return documents?documents():{canceled:false,assets:[{uri:'file:///private/informe.pdf',name:'informe.pdf',mimeType:'application/pdf',size:4096}]};}},
+   'expo-clipboard':{setStringAsync:async value=>copies.push(value)},
+ });
  const screen=evaluate('components/MessagesScreen.tsx',{
   '@/components/ui/GoScreenCloseSurface':{GoScreenCloseSurface:View,GoScreenCloseGuide:()=>null},
   '@/data/booking':booking,'@/data/goMessages':data,'@/lib/sessionEvents':{onSessionChanged:fn=>{events.add(fn);return()=>events.delete(fn);}},
   '@/data/contactPlaces':places,'./MessageLocationTools':{MessageLocationTools:props=>{locationTools=props;return null;},
    MessageLocationBubble:props=>React.createElement('span',null,props.place.title)},
+  '@/components/ui/GoToolRail':rail,'./messages/MessageTools':messageTools,
   '@react-native-async-storage/async-storage':storage,'@expo/vector-icons':{Feather:()=>null},'./DraggableFAB':{DraggableFAB:({children})=>children},
   'expo-haptics':{selectionAsync:async()=>{},impactAsync:async()=>{},notificationAsync:async()=>{},ImpactFeedbackStyle:{Light:1},NotificationFeedbackType:{Warning:1}},
   '@/contexts/LanguageContext':{useLanguage:()=>({lang:'es',t:key=>key})},'expo-linear-gradient':{LinearGradient:View},
   'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34})},
   'react-native-gesture-handler':{Gesture:{Pan:()=>chain},GestureDetector:({children})=>children},
   'react-native-reanimated':{__esModule:true,default:{View},useSharedValue:v=>React.useRef({value:v}).current,useAnimatedStyle:fn=>fn(),withSpring:v=>v},
-  'react-native':{...rn,AppState:appState,View,Text:native('Text'),Platform:{OS:platform},Modal:props=>{modalProps=props;return props.visible?props.children:null;},
-   Dimensions:{get:()=>({width:390,height:844})},Easing:{out:x=>x,cubic:0},PanResponder:{create:()=>({panHandlers:{}})},
-   Animated:{Value,View,spring:()=>motion,timing:()=>motion},ScrollView:View,KeyboardAvoidingView:View,
-   FlatList:props=>React.createElement(View,null,(props.data||[]).map((item,index)=>React.createElement(React.Fragment,{key:item.id},props.renderItem({item,index})))),
-   TextInput:props=>{inputs.push(props);return React.createElement('input',{'data-value':props.value,'data-placeholder':props.placeholder});},
-   TouchableOpacity:props=>{buttons.push({...props,label:props.accessibilityLabel||text(props.children)});return React.createElement('button',null,props.children);},
-  },
+  'react-native':runtime,
  });
  let shown=true,initialBookingId=initial?bookingId:undefined;const container=document.createElement('div'),root=createRoot(container);
- const render=()=>{inputs.length=0;buttons.length=0;root.render(React.createElement(screen.MessagesScreen,{visible:shown,onClose(){closed++;},onGoToLanding(){landings++;},onDismiss(){dismissed++;},recentContacts:[],initialContact:contact,userGoPhone:'',onCreateGo(){aiOpens++;},onPickDeviceContact:async()=>null,initialBookingId,initialContext:context,businessId}));};
+ const render=()=>{inputs.length=0;buttons.length=0;root.render(React.createElement(screen.MessagesScreen,{visible:shown,handedness,onClose(){closed++;},onGoToLanding(){landings++;},onDismiss(){dismissed++;},recentContacts:[],initialContact:contact,userGoPhone:'',onCreateGo(){aiOpens++;},onPickDeviceContact:async()=>null,initialBookingId,initialContext:context,businessId}));};
  await settle(render);
  const input=()=>inputs.findLast(p=>p.placeholder==='Escribe un mensaje...');
  const send=()=>buttons.findLast(p=>p.label==='msg_send_btn');
- return{memory,records,container,data,requests,oldServer:()=>{legacy=true;},holdRead:()=>{holdRead=true;},async releaseRead(){await settle(()=>releaseRead());},malformed:()=>{malformed=true;},async foreground(){await settle(()=>{for(const state of ['background','active']){appState.currentState=state;for(const fn of appListeners)fn(state);}});},get dismissed(){return dismissed;},async hide(){shown=false;await settle(render);},async nativeDismiss(){await settle(()=>modalProps.onDismiss());},get closed(){return closed;},get landings(){return landings;},get aiOpens(){return aiOpens;},get attempts(){return attempts;},get input(){return input();},get send(){return send();},get locationTools(){return locationTools;},
+ return{memory,records,container,data,requests,shares,copies,pickerCalls,scrolls,railFrames,async press(label){await settle(()=>{const hit=buttons.findLast(p=>p.label===label);assert.ok(hit,label);hit.onPressIn?.();return hit.onPress();});},button:label=>buttons.findLast(p=>p.label===label),async keyboard(){await settle(()=>{keyboardVisible=true;for(const fn of keyboardEvents.get('keyboardDidShow')||[])fn();});},oldServer:()=>{legacy=true;},holdRead:()=>{holdRead=true;},async releaseRead(){await settle(()=>releaseRead());},malformed:()=>{malformed=true;},async foreground(){await settle(()=>{for(const state of ['background','active']){appState.currentState=state;for(const fn of appListeners)fn(state);}});},get dismissed(){return dismissed;},async hide(){shown=false;await settle(render);},async nativeDismiss(){await settle(()=>modalProps.onDismiss());},get closed(){return closed;},get landings(){return landings;},get aiOpens(){return aiOpens;},get attempts(){return attempts;},get input(){return input();},get send(){return send();},get locationTools(){return locationTools;},
   async type(value){await settle(()=>input().onChangeText(value));},async submit(){await settle(()=>send().onPress());},
  async sendLocation(place){let result;await settle(async()=>{result=await locationTools.onSend(place);});return result;},
   async double(){await settle(()=>Promise.all([send().onPress(),send().onPress()]));},fail(v){fail=v;},lose(){loseResponse=true;},
@@ -56,7 +67,7 @@ async function fixture({initial=true,context,offline=false,account='customer',pl
   async landing(){await settle(()=>buttons.findLast(p=>p.accessibilityLabel==='Ir directamente al Landing').onPress());},
   async go(){await settle(()=>buttons.findLast(p=>p.label==='GO').onPress());},
   async back(){await settle(()=>buttons.findLast(p=>p.accessibilityLabel==='Volver a la ficha'||p.accessibilityLabel==='Volver a conversaciones').onPress());},
-  async reopen(){context={...context};initialBookingId=undefined;await settle(()=>root.render(null));initialBookingId=initial?bookingId:undefined;await settle(render);},
+  async reopen(){context=context?{...context}:undefined;initialBookingId=undefined;await settle(()=>root.render(null));initialBookingId=initial?bookingId:undefined;await settle(render);},
   async close(){await settle(()=>root.unmount());assert.equal(events.size,0);assert.equal(appListeners.size,0);assert.equal(sending,0);}
  };
 }
@@ -184,4 +195,113 @@ test('a confirmed location uses the authorized booking thread and preserves the 
   try{assert.ok(receiver.container.textContent.includes(sharedPlace.title));}
   finally{await receiver.close();}
  }finally{await sender.close();}
+});
+
+test('photo and document previews stay local, removable and never travel through the text-only transport',async()=>{
+ const f=await fixture();try{
+  assert.equal(f.button('Mostrar herramientas de mensajes').accessibilityState.expanded,false);
+  await f.type('Borrador con adjuntos');await f.press('Mostrar herramientas de mensajes');
+  await f.press('Fotografía / imagen');await f.press('Archivo / documento');
+  assert.equal(f.pickerCalls.length,2);assert.ok(f.container.textContent.includes('elegida.jpg'));assert.ok(f.container.textContent.includes('informe.pdf'));
+  assert.ok(f.container.textContent.includes('application/pdf'));assert.ok(f.container.textContent.includes('4 KB'));
+  assert.ok(!f.container.textContent.includes('file:///private'));assert.ok(![...f.memory.values()].some(value=>value.includes('file:///private')));
+  assert.equal(f.send.disabled,true);await f.submit();assert.equal(f.records.length,0);assert.equal(f.attempts,0);assert.equal(f.input.value,'Borrador con adjuntos');
+  assert.ok(f.container.textContent.includes('No disponible hasta activar la conversación compartida'));
+  await f.press('Ocultar herramientas de mensajes');assert.equal(f.input.value,'Borrador con adjuntos');
+  await f.press('Retirar elegida.jpg');await f.press('Retirar informe.pdf');assert.equal(f.send.disabled,false);
+  await f.submit();assert.equal(f.records.length,1);assert.equal(f.records[0].text,'Borrador con adjuntos');
+ }finally{await f.close();}
+});
+
+test('native picker cancellation and denied access preserve the ordinary draft without transport side effects',async()=>{
+ const f=await fixture({photos:async()=>{throw Error('Permission denied');},documents:async()=>({canceled:true})});try{
+  await f.type('Texto intacto');await f.press('Mostrar herramientas de mensajes');await f.press('Fotografía / imagen');
+  assert.ok(f.container.textContent.includes('No se pudo abrir el selector'));await f.press('Archivo / documento');
+  assert.equal(f.input.value,'Texto intacto');assert.equal(f.attempts,0);assert.equal(f.send.disabled,false);
+ }finally{await f.close();}
+});
+
+for(const route of ['account','hide','general'])test('pending native selection cannot enter another editor after '+route,async()=>{
+ let release;const f=await fixture({photos:()=>new Promise(resolve=>release=resolve)});try{
+  await f.type('Borrador privado');await f.press('Mostrar herramientas de mensajes');await f.press('Fotografía / imagen');
+  if(route==='account')await f.account('other-account');else await f[route]();
+  await settle(()=>release({canceled:false,assets:[{uri:'file:///private/stale.jpg',fileName:'stale.jpg',mimeType:'image/jpeg'}]}));
+  assert.ok(!f.container.textContent.includes('stale.jpg'));assert.equal(f.attempts,0);
+ }finally{await f.close();}
+});
+
+test('sharing requires explicit selection and exports only that message text without conversation metadata',async()=>{
+ const seed=[{id:'first',sender:'customer',text:'Primer texto privado',createdAt:1,channel:'go'},{id:'second',sender:'business-owner',text:'Solo este texto',createdAt:2,channel:'go'}];
+ const f=await fixture({context,seed});try{
+  await f.type('Borrador que no se comparte');await f.press('Mostrar herramientas de mensajes');await f.press('Compartir mensaje');
+  assert.equal(f.shares.length,0);assert.equal(f.copies.length,0);await f.press('Seleccionar mensaje 2');assert.equal(f.shares.length,0);
+  await f.press('Compartir este mensaje');assert.equal(JSON.stringify(f.shares),JSON.stringify([{message:'Solo este texto'}]));
+  await f.press('Copiar este mensaje');assert.deepEqual(f.copies,['Solo este texto']);
+  assert.equal(f.input.value,'Borrador que no se comparte');assert.equal(f.attempts,0);assert.equal(f.records.length,2);
+  await f.account('other-account');assert.ok(!f.container.textContent.includes('Solo este texto'));
+ }finally{await f.close();}
+});
+
+test('an unavailable general contact cannot manufacture delivery or share nonexistent messages and retains its scoped draft on reopen',async()=>{
+ const f=await fixture({initial:false,contact:{name:'Contacto local',phone:'+34000000000'}});try{
+  await f.type('Sin enviar');assert.equal(f.send.disabled,true);await f.submit();assert.equal(f.attempts,0);assert.equal(f.records.length,0);
+  assert.equal(f.input.value,'Sin enviar');await f.press('Mostrar herramientas de mensajes');assert.equal(f.button('Compartir mensaje').disabled,true);
+  await f.reopen();assert.equal(f.input.value,'Sin enviar');assert.ok(f.container.textContent.includes('No disponible hasta activar la conversación compartida'));
+ }finally{await f.close();}
+});
+
+test('unscoped legacy contacts are preserved on disk but never shown to a different account',async()=>{
+ const legacy=JSON.stringify([{id:'legacy',contactName:'Contacto de otra cuenta',contactPhone:'+34000000000',messages:[{text:'Texto de otra cuenta'}]}]);
+ const f=await fixture({initial:false,initialMemory:[['go_messages_v1',legacy],['go_messages_v1:another-account',legacy]]});try{
+  assert.ok(!f.container.textContent.includes('Contacto de otra cuenta'));assert.ok(!f.container.textContent.includes('Texto de otra cuenta'));
+  assert.equal(f.memory.get('go_messages_v1'),legacy);assert.equal(f.memory.get('go_messages_v1:another-account'),legacy);
+ }finally{await f.close();}
+});
+
+for(const handedness of ['left','right'])for(const height of [130,300,500])test('shared Messages rail, keyboard and primary actions remain independent: '+handedness+'/'+height,async()=>{
+ const f=await fixture({handedness,height});try{
+  const rail=f.railFrames.at(-1);assert.equal(rail.screenKey,'note-editor');assert.equal(rail.buttonKey,'tools-toggle');
+  assert.equal(rail.fixedLeft,handedness==='right'?302:0);assert.equal(rail.bounds.height,height-(height>=208?80:0));
+  await f.type('Texto con teclado');await f.keyboard();await f.press('Mostrar herramientas de mensajes');
+  assert.equal(f.input.value,'Texto con teclado');assert.equal(f.send.disabled,false);assert.ok(f.button(height<208?'Volver a conversaciones':'Ir directamente al Landing'));
+  await f.press('Ocultar teclado');assert.equal(f.closed,0);assert.equal(f.input.value,'Texto con teclado');
+  await f.submit();assert.equal(f.records.length,1);assert.equal(f.input.value,'');
+ }finally{await f.close();}
+});
+
+for(const handedness of ['left','right'])for(const width of [320,430])test('GO assistant uses the same rail and keeps its actual composer, menu actions and voice stop accessible: '+handedness+'/'+width,async()=>{
+ const f=await assistantHarness.assistantToolsFixture({handedness,width});try{
+  assert.equal(f.button('Mostrar herramientas de GO').accessibilityState.expanded,false);assert.equal(f.container.textContent.includes('Menú'),false);
+  const rail=f.frames.at(-1);assert.equal(rail.screenKey,'note-editor');assert.equal(rail.buttonKey,'tools-toggle');assert.equal(rail.fixedLeft,handedness==='right'?width-68:0);
+  await f.type('Solicitud conservada');await f.keyboard();assert.ok(f.button('Escuchar con GO'));assert.equal(f.button('Enviar solicitud').disabled,false);
+  await f.press('Mostrar herramientas de GO');await f.press('Menú');assert.equal(f.panel,'menu');assert.equal(f.input().value,'Solicitud conservada');assert.equal(f.button('Enviar solicitud').disabled,false);
+  await f.press('Ayuda de GO');assert.equal(f.panel,'help');assert.ok(f.container.textContent.includes('Toca GO para hablar'));
+  await f.press('Volver a herramientas');await f.press('Adjuntar');assert.equal(f.panel,'attach');assert.ok(f.container.textContent.includes('Fotos'));assert.ok(f.container.textContent.includes('Archivo'));
+  await f.press('Volver a herramientas');await f.press('Acciones');assert.equal(f.panel,'actions');await f.press('Crear tarea');assert.deepEqual(f.calls.find(c=>c[0]==='start'),['start','task']);
+  await f.press('Volver a herramientas');await f.press('Zona');assert.equal(f.panel,'zone');assert.ok(f.calls.some(c=>c[0]==='zone'));
+  await f.press('Ocultar teclado');assert.equal(f.closed,0);assert.equal(f.input().value,'Solicitud conservada');
+  await f.press('Escuchar con GO');assert.ok(f.calls.some(c=>c[0]==='voice'&&c[1]===true));assert.ok(f.container.textContent.includes('Parar'));
+  assert.equal(f.button('Detener escucha y enviar').disabled,false);await f.press('Detener escucha y enviar');assert.ok(f.calls.some(c=>c[0]==='stop'));
+  await f.status('preparing');assert.ok(f.button('Parar captura de micrófono'));await f.press('Parar captura de micrófono');
+  await f.press('Enviar solicitud');assert.equal(f.input().value,'');assert.equal(f.calls.filter(c=>c[0]==='dispatch').length,1);
+ }finally{await f.close();}
+});
+
+test('existing location tools embed without a second arrow, capture only on demand and still require explicit confirmation',async()=>{
+ const buttons=[],sent=[];let positions=0,returned=0;
+ const text=n=>Array.isArray(n)?n.map(text).join(''):typeof n==='string'?n:n?.props?text(n.props.children):'';
+ const runtime={...rn,ScrollView:rn.View,TouchableOpacity:props=>{buttons.push(props);return React.createElement('button',null,props.children);}};
+ const places=evaluate('data/contactPlaces.ts',{});
+ const tools=evaluate('components/MessageLocationTools.tsx',{'react-native':runtime,'@/data/contactPlaces':places,'@expo/vector-icons':{Feather:()=>null},
+  './contactos/ContactPlacesPanel':{ContactPlacesPanel:()=>null,openPlace:async()=>{}},
+  'expo-location':{getForegroundPermissionsAsync:async()=>({status:'granted'}),getCurrentPositionAsync:async()=>{positions++;return{coords:{latitude:40.4,longitude:-3.7,accuracy:5}};},Accuracy:{Balanced:3}},
+ });
+ const container=document.createElement('div'),root=createRoot(container);
+ const press=label=>settle(()=>{const button=buttons.findLast(b=>(b.accessibilityLabel||text(b.children))===label);assert.ok(button,label);return button.onPress();});
+ try{
+  await settle(()=>root.render(React.createElement(tools.MessageLocationTools,{embedded:true,bounds:{width:350,height:220},handedness:'right',canSend:true,recipient:'Destino autorizado',onIncomingHandled(){},onClose(){returned++;},onSend:async place=>{sent.push(place);return true;}})));
+  assert.equal(buttons.some(b=>b.accessibilityLabel==='Herramientas de ubicación'),false);assert.equal(positions,0);
+  await press('Estoy aquí');assert.equal(positions,1);assert.equal(sent.length,0);await press('Compartir esta ubicación');
+  assert.equal(sent.length,1);assert.equal(returned,1);assert.equal(sent[0].title,'Estoy aquí');
+ }finally{await settle(()=>root.unmount());}
 });

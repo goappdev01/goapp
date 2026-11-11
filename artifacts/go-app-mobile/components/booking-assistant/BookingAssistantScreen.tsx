@@ -6,7 +6,7 @@ import { AssistantCloseControls } from "./AssistantCloseControls";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
 import { SupportVoiceNotice } from "@/components/landing/SupportVoiceNotice";
-import { useGoDockPreference } from "@/hooks/useGoDockPreference";
+import { GoToolAction, GoToolPanel, GoToolRailToggle } from "@/components/ui/GoToolRail";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -26,7 +26,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import { StatusBar } from "expo-status-bar";
-import { bookingDockOrder } from "@workspace/api-zod";
 import { assistantApi, localToday } from "@/lib/bookingAssistant";
 import {
   useBookingAssistant,
@@ -90,7 +89,7 @@ export function BookingAssistantScreen({
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [voiceAttempt,setVoiceAttempt]=useState(0);
   const followEnd = useRef(true);
-  const { position } = useGoDockPreference(handedness, visible);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [slotCount, setSlotCount] = useState(8);
@@ -150,7 +149,11 @@ export function BookingAssistantScreen({
     go.reset();
     a.reset();
   }
+  useEffect(() => { if (!visible) setToolsOpen(false); }, [visible]);
+  useEffect(() => { if (a.panel) setToolsOpen(true); }, [a.panel]);
   function openPanel(panel: AssistantPanel) {
+    Keyboard.dismiss();
+    setToolsOpen(true);
     voice.abort();
     a.setNotice("");
     if (panel === "zone") { a.openZonePanel(); return; }
@@ -257,15 +260,12 @@ export function BookingAssistantScreen({
         ? "Transcribiendo…"
         : "";
   const micDisabled =
-    !!a.busy || voice.status === "preparing" || voice.status === "transcribing";
+    !listening && (!!a.busy || voice.status === "preparing" || voice.status === "transcribing");
   const saving = ["Guardando en GO…", "Confirmando reserva…", "Cancelando reserva…"].includes(a.busy);
   const panelState = { ...a, reset };
   const dock = (
-          <View style={consultation?{flexDirection:"row",alignItems:"center"}:s.dock}>
-            {bookingDockOrder(position).filter(key=>!consultation||key==="go").map((key) =>
-              key === "go" ? (
+    <View style={consultation?{flexDirection:"row",alignItems:"center"}:[s.dock,{justifyContent:"center"}]}>
                 <TouchableOpacity
-                  key={key}
                   accessibilityRole="button"
                   accessibilityLabel={
                     listening ? "Detener escucha y enviar" : "Escuchar con GO"
@@ -295,44 +295,15 @@ export function BookingAssistantScreen({
                     {listening ? "Parar" : "GO"}
                   </Text>
                 </TouchableOpacity>
-              ) : (
-                <TouchableOpacity
-                  key={key}
-                  accessibilityRole="button"
-                  disabled={!!a.busy}
-                  onPress={() => openPanel(key as AssistantPanel)}
-                  style={s.dockButton}
-                >
-                  <Feather
-                    name={
-                      key === "menu"
-                        ? "menu"
-                        : key === "attach"
-                          ? "paperclip"
-                          : key === "actions"
-                            ? "zap"
-                            : "map-pin"
-                    }
-                    size={22}
-                    color="#163F60"
-                  />
-                  <Text style={s.dockLabel}>
-                    {key === "menu"
-                      ? "Menú"
-                      : key === "attach"
-                        ? "Adjuntar"
-                        : key === "actions"
-                          ? "Acciones"
-                          : "Zona"}
-                  </Text>
-                  {key === "zone" && a.zone && (
-                    <Text style={s.radiusLabel}>{a.zone.radiusKm} km</Text>
-                  )}
-                </TouchableOpacity>
-              ),
-            )}
-          </View>
+
+      {!consultation&&(voice.status === "preparing" || voice.status === "transcribing") && <TouchableOpacity
+        accessibilityRole="button" accessibilityLabel="Parar captura de micrófono" onPress={() => voice.abort()}
+        style={{minWidth:64,minHeight:48,padding:10,justifyContent:"center"}}><Text style={s.dockLabel}>PARAR</Text></TouchableOpacity>}
+    </View>
   );
+  const navigationHeight=conversationLayout.height>=208?80:0;
+  const toolBounds = { width: Math.max(0, conversationLayout.width - 24), height: Math.max(0,conversationLayout.height-navigationHeight) };
+  const closeTools = () => { if (!saving) { a.setPanel(null); setToolsOpen(false); } };
   return (
     <Modal
       visible={visible}
@@ -343,7 +314,7 @@ export function BookingAssistantScreen({
       }}
       animationType="slide"
       presentationStyle="fullScreen"
-      onRequestClose={() => consultation?consultationBack():(a.panel ? back() : close())}
+      onRequestClose={() => consultation?consultationBack():(toolsOpen ? closeTools() : close())}
     >
       <StatusBar style="dark" />
       <GoScreenCloseSurface as={GestureHandlerRootView} testID="assistant-close-surface" handedness={handedness} enabled={visible && !saving} onClose={() => consultation?consultationBack():close()} scrollRefs={[scroll, panelScroll]}
@@ -366,6 +337,8 @@ export function BookingAssistantScreen({
               disabled={!!a.busy}
             />
           )}
+          {!consultation&&keyboardVisible&&<IconButton icon="chevron-down" label="Ocultar teclado" onPress={()=>Keyboard.dismiss()}/>}
+          {!consultation&&!navigationHeight&&<GoCloseButton level="panel" accessibilityLabel="Volver a la pantalla anterior" onPress={()=>close()} disabled={saving}/>}
         </View>
         {consultation&&<SupportVoiceNotice key={consultation.scopeKey} message={voiceAttempt>0?voice.error:""} attempt={voiceAttempt}/>}
         <KeyboardAvoidingView
@@ -380,7 +353,8 @@ export function BookingAssistantScreen({
           <ScrollView
             ref={scroll}
             style={{ flex: 1 }}
-            contentContainerStyle={[s.conversation, { flexGrow: 1 }]}
+            contentContainerStyle={[s.conversation, { flexGrow: 1 },!consultation&&[{paddingBottom:navigationHeight+20},handedness==="right"?{paddingRight:68}:{paddingLeft:68}]]}
+            bounces={false}
             keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
             keyboardShouldPersistTaps="handled"
             scrollEventThrottle={16}
@@ -687,6 +661,24 @@ export function BookingAssistantScreen({
               <ListeningIndicator active={indicatorActive} diameter={indicatorPlacement.diameter} />
             </View>
           )}
+          {visible&&!consultation && <View pointerEvents="box-none" style={{position:"absolute",left:12,right:12,top:0,bottom:navigationHeight}}>
+            {toolsOpen && <GoToolPanel handedness={handedness} testID="assistant-tools-panel"
+              style={{width:a.panel?Math.min(toolBounds.width,Math.max(288,Math.ceil(toolBounds.width*.78))):Math.ceil(toolBounds.width*.56),height:a.panel?toolBounds.height:Math.min(toolBounds.height,Math.max(144,Math.round(toolBounds.height*.60)))}}>
+              {a.panel ? <BookingAssistantPanels embedded handedness={handedness} scrollRef={panelScroll} a={panelState} go={go} bottom={0} dock={null}
+                viewport={toolBounds} saving={saving} onClosePanel={() => { if (!saving) a.setPanel(null); }}
+                voiceStatus={voiceText || voice.error} attach={kind => void attach(kind)}
+                viewReservation={() => { a.setPanel(null);setToolsOpen(false);scroll.current?.scrollToEnd({animated:true}); }}/>
+              : <ScrollView keyboardShouldPersistTaps="handled" bounces={false} contentContainerStyle={handedness==="right"?{paddingRight:44}:{paddingLeft:44}}>
+                <GoToolAction label="Menú" icon="menu" disabled={!!a.busy} onPress={() => openPanel("menu")}/>
+                <GoToolAction label="Adjuntar" icon="paperclip" disabled={!!a.busy} onPress={() => openPanel("attach")}/>
+                <GoToolAction label="Acciones" icon="zap" disabled={!!a.busy} onPress={() => openPanel("actions")}/>
+                <GoToolAction label="Zona" icon="map-pin" disabled={!!a.busy} onPress={() => openPanel("zone")}/>
+              </ScrollView>}
+            </GoToolPanel>}
+            <GoToolRailToggle bounds={toolBounds} handedness={handedness} open={toolsOpen} testID="assistant-tools-toggle"
+              accessibilityLabel={toolsOpen?"Ocultar herramientas de GO":"Mostrar herramientas de GO"} disabled={saving}
+              onPress={() => { if(toolsOpen)closeTools();else setToolsOpen(true); }}/>
+          </View>}
           </View>
           {!consultation&&!!(a.busy || voiceText || a.notice || voice.error) && (
             <View style={s.status} accessibilityLiveRegion="polite">
@@ -731,7 +723,7 @@ export function BookingAssistantScreen({
               </Text>
             </>
           )}
-          {!a.panel && <View onLayout={event => setFooterHeight(event.nativeEvent.layout.height)}>
+          <View onLayout={event => setFooterHeight(event.nativeEvent.layout.height)}>
           <View testID={consultation?"support-assistant-composer":undefined} style={consultation?{marginHorizontal:16,marginBottom:10,padding:6,gap:6,flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",borderWidth:1,borderColor:"#b4bdc6",borderRadius:18,backgroundColor:"#fafbfc"}:s.composer}>
             <TextInput
               accessibilityLabel="Solicitud a GO"
@@ -753,31 +745,14 @@ export function BookingAssistantScreen({
               disabled={!input.trim() || !!a.busy}
             />}
           </View>
-          {!consultation&&!keyboardVisible && dock}
-          </View>}
-        {a.panel && (
-          <BookingAssistantPanels scrollRef={panelScroll}
-            a={panelState}
-            go={go}
-            bottom={0}
-            dock={keyboardVisible ? null : dock}
-            viewport={viewport}
-            saving={saving}
-            onClosePanel={() => { voice.abort(); a.invalidate(); a.setPanel(null); }}
-            voiceStatus={voiceText || voice.error}
-            attach={(kind) => void attach(kind)}
-            viewReservation={() => {
-              a.setPanel(null);
-              scroll.current?.scrollToEnd({ animated: true });
-            }}
-          />
-        )}
+          {!consultation && dock}
+          </View>
           {consultation&&<GoNavigationFloating screenKey="support-assistant" safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} keyboardResponsive protectedBottom={footerHeight+(keyboardVisible?10:0)} width={goSize+72} height={Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
             {dock}<GoCloseButton level="panel" appearance="light" keyboardVisible={keyboardVisible} disabled={saving} accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a AYUDA"} onPress={consultationBack}/>
           </View></GoNavigationFloating>}
           </View>
         </KeyboardAvoidingView>
-        {!consultation&&!a.panel && <AssistantCloseControls disabled={saving} onClose={() => close()} onGoToLanding={onGoToLanding ? () => close(true) : undefined}
+        {!consultation&&navigationHeight>0 && <AssistantCloseControls disabled={saving} onClose={() => close()} onGoToLanding={onGoToLanding ? () => close(true) : undefined}
           viewport={{ width: viewport.width, height: viewport.height + headerHeight }}
           protectedBottom={footerHeight} topInset={insets.top} />}
         <GoScreenCloseGuide testID="assistant-swipe-guide" />

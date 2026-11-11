@@ -1,14 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
-import { Feather } from "@expo/vector-icons";
 import * as Location from "expo-location";
-import { DraggableFAB } from "./DraggableFAB";
+import { GoToolAction, GoToolRailToggle } from "@/components/ui/GoToolRail";
 import { ContactPlacesPanel, openPlace } from "./contactos/ContactPlacesPanel";
 import { coordinateLabel, normalizePlace, type PlaceDraft } from "@/data/contactPlaces";
 
 type Tool = "capture" | "places" | "save";
 
-export function MessageLocationTools({ handedness, bounds, incoming, onIncomingHandled, canSend, recipient, onSend }: {
+export function MessageLocationTools({ handedness, bounds, incoming, onIncomingHandled, canSend, recipient, onSend, embedded=false, onClose }: {
+  embedded?: boolean; onClose?: () => void;
   handedness: "left" | "right"; bounds: {width:number;height:number}; incoming?: PlaceDraft;
   onIncomingHandled: () => void; canSend: boolean; recipient: string; onSend: (place:PlaceDraft) => Promise<boolean>;
 }) {
@@ -16,12 +16,11 @@ export function MessageLocationTools({ handedness, bounds, incoming, onIncomingH
   const [preview,setPreview]=useState<PlaceDraft>(), [manual,setManual]=useState("");
   const [notice,setNotice]=useState(""), [busy,setBusy]=useState(false);
   const active=useRef(true), revision=useRef(0), inFlight=useRef(false);
-  const press=useRef({dragging:false,suppress:false});
   useEffect(()=>{active.current=true;return()=>{active.current=false;revision.current++;};},[]);
   useEffect(()=>{
     if(incoming){setOpen(true);setTool("save");setPreview(incoming);onIncomingHandled();}
   },[incoming]);
-  const close=()=>{revision.current++;setTool(undefined);setPreview(undefined);setNotice("");setBusy(false);setOpen(false);};
+  const close=()=>{revision.current++;setTool(undefined);setPreview(undefined);setNotice("");setBusy(false);setOpen(false);onClose?.();};
   const capture=async()=>{
     const token=++revision.current;
     setOpen(true);setTool("capture");setPreview(undefined);setManual("");setNotice("");setBusy(true);
@@ -53,7 +52,8 @@ export function MessageLocationTools({ handedness, bounds, incoming, onIncomingH
     style={[s.action,disabled&&{opacity:0.45}]} onPress={onPress}><Text style={s.label}>{label}</Text></TouchableOpacity>;
   const side=handedness==="right"?"right":"left";
   return <>
-    {open && <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled" style={[s.tools,{[side]:50,maxHeight:Math.max(0,bounds.height-8)}]} contentContainerStyle={{gap:5}} testID="message-location-panel">
+    {(open||embedded) && <ScrollView bounces={false} nestedScrollEnabled keyboardShouldPersistTaps="handled" style={embedded?{flexGrow:1}: [s.tools,{[side]:50,maxHeight:Math.max(0,bounds.height-8)}]} contentContainerStyle={{gap:5}} testID="message-location-panel">
+      {embedded&&<GoToolAction label="Volver a herramientas" icon="arrow-left" onPress={close}/>}
       <View style={s.buttons}>
         {action("Estoy aquí",()=>void capture(),inFlight.current)}
         {action("IR",()=>choose("places"),inFlight.current)}
@@ -84,15 +84,8 @@ export function MessageLocationTools({ handedness, bounds, incoming, onIncomingH
       {(tool==="places"||tool==="save")&&<ContactPlacesPanel key={tool} initial={tool==="save"?(preview??{title:"",source:"manual"}):undefined} onClose={close}
         onShare={place=>{setPreview(place);setTool("capture");}}/>}
     </ScrollView>}
-    {bounds.width>=100 && bounds.height>=58&&<DraggableFAB screenKey="messages" buttonKey={"location-tools-"+handedness}
-      bounds={bounds} boundsVerticalInset={4} keyboardResponsive buttonWidth={44} maxH={44} initialTop={Math.max(4,bounds.height-122)}
-      fixedLeft={handedness==="right"?bounds.width-48:4}
-      onDragStart={()=>{press.current={dragging:true,suppress:true};}} onDragEnd={()=>{press.current.dragging=false;}}>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Herramientas de ubicación" accessibilityState={{expanded:open}} style={s.toggle}
-        onPressIn={()=>{if(!press.current.dragging)press.current.suppress=false;}} onPress={()=>{if(!press.current.suppress){if(open)close();else setOpen(true);}}}>
-        <Feather name={(open===(handedness==="right"))?"chevron-right":"chevron-left"} size={20} color="#fff"/>
-      </TouchableOpacity>
-    </DraggableFAB>}
+    {!embedded&&<GoToolRailToggle bounds={bounds} handedness={handedness} open={open} accessibilityLabel="Herramientas de ubicación"
+      onPress={()=>{if(open)close();else setOpen(true);}}/>}
   </>;
 }
 
@@ -110,10 +103,9 @@ export function MessageLocationBubble({ place, mine, onSave }: { place:PlaceDraf
 
 const s=StyleSheet.create({
   tools:{position:"absolute",top:4,left:5,right:5,maxWidth:405,zIndex:12,elevation:12,gap:5},
-  content:{padding:8,borderRadius:10,backgroundColor:"#202024",gap:7},
+  content:{padding:8,borderRadius:10,backgroundColor:"#eef3f3",gap:7},
   buttons:{flexDirection:"row",flexWrap:"wrap",gap:5},
-  action:{minHeight:44,paddingHorizontal:8,borderRadius:8,backgroundColor:"#302e32",justifyContent:"center"},
-  toggle:{width:44,height:44,borderRadius:22,backgroundColor:"#29272a",borderColor:"#d4af37",borderWidth:1,alignItems:"center",justifyContent:"center"},
-  label:{color:"#fff",fontWeight:"700",fontSize:12},text:{color:"#fff",fontSize:13},
-  input:{backgroundColor:"#171719",color:"#fff",borderRadius:8,minHeight:44,padding:8},
+  action:{minHeight:44,paddingHorizontal:8,borderRadius:8,backgroundColor:"#e0e9ed",justifyContent:"center"},
+  label:{color:"#273e4b",fontWeight:"700",fontSize:12},text:{color:"#273e4b",fontSize:13},
+  input:{backgroundColor:"#fff",color:"#273e4b",borderRadius:8,minHeight:44,padding:8},
 });

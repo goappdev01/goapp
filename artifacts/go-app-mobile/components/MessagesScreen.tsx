@@ -15,6 +15,8 @@ import { readBookingConversations, deliverBookingMessage,loadBookingMessageDraft
 import { onSessionChanged } from "@/lib/sessionEvents";
 import { locationMessage, readLocationMessage, type PlaceDraft } from "@/data/contactPlaces";
 import { MessageLocationBubble, MessageLocationTools } from "./MessageLocationTools";
+import { GoToolAction, GoToolPanel, GoToolRailToggle } from "@/components/ui/GoToolRail";
+import { MESSAGE_ATTACHMENT_UNAVAILABLE, MessageAttachmentPreview, MessageSharePicker, useMessageAttachments } from "./messages/MessageTools";
 import {
   Animated,
   AppState,
@@ -22,6 +24,7 @@ import {
   Easing,
   FlatList,
   KeyboardAvoidingView,
+  Keyboard,
   PanResponder,
   Platform,
   ScrollView,
@@ -282,7 +285,9 @@ export function MessagesScreen({
   const [search, setSearch] = useState("");
   const [input, setInput] = useState("");
   const inputRef=useRef("");
-  const [inputKey, setInputKey] = useState(0);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [toolsOpen,setToolsOpen]=useState(false),[toolSection,setToolSection]=useState<"menu"|"share"|"location">("menu");
+  const followEnd=useRef(true);
   const threadScrollRef = useRef<ScrollViewInstance>(null);
   const listScrollRef = useRef<FlatList<GoConversation>>(null);
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -291,21 +296,46 @@ export function MessagesScreen({
   const [sending,setSending]=useState(false);
   const [saveLocation,setSaveLocation]=useState<PlaceDraft>();
   const [chatArea, setChatArea] = useState({ x: 0, y: 0, width: 0, height: 0 });
+  const toolHeight=Math.max(0,chatArea.height-(chatArea.height>=208?80:0));
   const ownerRef=useRef<string|null>(null),generation=useRef(0),sendLock=useRef(false),localReadGeneration=useRef(0),readRevision=useRef(0);
   const screenState=useRef({view,activeConv});screenState.current={view,activeConv};
+  const attachmentIdentity=[ownerRef.current??"anonymous",businessId??"personal",activeConv?.id??"none"].join(":");
+  const attachments=useMessageAttachments(attachmentIdentity,visible&&!assistant&&view==="thread");
+  const confirmedThread=!!(ownerRef.current&&activeConv?.bookingId&&activeConv.counterpartId);
+  useEffect(()=>{setToolsOpen(false);setToolSection("menu");followEnd.current=true;},[visible,activeConv?.id]);
+  useEffect(()=>{
+    const owner=ownerRef.current,thread=activeConv,token=generation.current;
+    if(!visible||!owner||!thread||thread.bookingId||thread.actionId)return;
+    let alive=true;
+    void loadBookingMessageDraft(owner,thread.id).then(value=>{
+      if(alive&&ownerRef.current===owner&&generation.current===token&&screenState.current.activeConv?.id===thread.id&&!inputRef.current){inputRef.current=value;setInput(value);}
+    }).catch(()=>{if(alive)setMessageError("No se pudo recuperar el borrador local.");});
+    return()=>{alive=false;};
+  },[attachmentIdentity,visible]);
+  useEffect(()=>{if(saveLocation){setToolsOpen(true);setToolSection("location");}},[saveLocation]);
+  useEffect(()=>{
+    if(!visible){setKeyboardVisible(false);return;}
+    setKeyboardVisible(Keyboard.isVisible());
+    const subscriptions=[Keyboard.addListener("keyboardDidShow",()=>setKeyboardVisible(true)),Keyboard.addListener("keyboardDidHide",()=>setKeyboardVisible(false))];
+    return()=>subscriptions.forEach(subscription=>subscription.remove());
+  },[visible]);
   const errorText=(error:unknown)=>error && typeof error==="object" && "message" in error && typeof error.message==="string" ? error.message : "No se pudo conectar con Comunicación GO. Tu texto se conserva.";
 
   // ── Persist ───────────────────────────────────────────────────────────────
 
   const persist = useCallback((convs: GoConversation[]) => {
     // Server conversations are never written into the old local contact store.
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(convs.filter(c=>!c.bookingId&&!c.actionId))).catch(() => {});
-  }, []);
+    if(ownerRef.current)AsyncStorage.setItem(STORAGE_KEY+":"+ownerRef.current+":"+(businessId??"personal"), JSON.stringify(convs.filter(c=>!c.bookingId&&!c.actionId))).catch(() => {});
+  }, [businessId]);
 
   useEffect(() => {
     if (visible && !initialBookingId && !initialContext) {
       const localToken=++localReadGeneration.current;let alive=true;
-      AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
+      // The old unscoped store has no verifiable owner. Leave it intact on disk.
+      getAuthenticatedUserId().then(async owner => {
+        if(!owner||!alive||localReadGeneration.current!==localToken)return;
+        const raw=await AsyncStorage.getItem(STORAGE_KEY+":"+owner+":"+(businessId??"personal"));
+        if(await getAuthenticatedUserId()!==owner)return;
         if(!alive||localReadGeneration.current!==localToken)return;
         let convs: GoConversation[] = [];
         if (raw) { try { const saved=JSON.parse(raw);if(Array.isArray(saved))convs=saved.filter(c=>c&&!c.bookingId&&!c.actionId); } catch {} }
@@ -347,7 +377,7 @@ export function MessagesScreen({
       }).catch(()=>{});
       return()=>{alive=false;};
     }
-  }, [visible]);
+  }, [visible,businessId,initialContact?.phone,initialContact?.name,initialBookingId,initialContext?.actionId]);
 
   // Reservation cards and general Communication use this SAME screen and server
   // conversation. Merely opening a thread never creates a message or changes a booking.
@@ -378,7 +408,7 @@ export function MessagesScreen({
           if(!alive||generation.current!==token)return;
           if(!inputRef.current){inputRef.current=draft||"";setInput(draft||"");}
           else await saveBookingMessageDraft(owner,id,inputRef.current);
-          if(!initialBookingId)throw new Error("Esta tarea no dispone de un vínculo de comunicación verificable en el servidor. Tu borrador se conserva; no se ha enviado ningún mensaje.");
+          if(!initialBookingId)throw new Error(initialContext.kind==="booking"?"Esta reserva local no tiene una conversación compartida en el servidor. Tu borrador se conserva; no se ha enviado ningún mensaje.":"Esta tarea no dispone de un vínculo de comunicación verificable en el servidor. Tu borrador se conserva; no se ha enviado ningún mensaje.");
         }
         const read=++readRevision.current,rows=await readBookingConversations(owner,initialBookingId,initialBookingId?undefined:businessId);
         if(!alive||generation.current!==token||readRevision.current!==read)return;
@@ -423,7 +453,7 @@ export function MessagesScreen({
 
   const changeInput=(text:string)=>{
     inputRef.current=text;setInput(text);
-    if((activeConv?.bookingId||activeConv?.actionId)&&ownerRef.current){const token=generation.current;void saveBookingMessageDraft(ownerRef.current,activeConv.id,text).catch(()=>{if(generation.current===token)setMessageError("No se pudo guardar el borrador en este dispositivo.");});}
+    if(activeConv&&ownerRef.current){const token=generation.current;void saveBookingMessageDraft(ownerRef.current,activeConv.id,text).catch(()=>{if(generation.current===token)setMessageError("No se pudo guardar el borrador en este dispositivo.");});}
   };
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -440,7 +470,7 @@ export function MessagesScreen({
     setActiveConv({ ...conv, unread: 0 });
     setSaveLocation(undefined);
     setMessageError("");setInput("");inputRef.current="";
-    if(conv.bookingId&&ownerRef.current){const owner=ownerRef.current,token=generation.current;void loadBookingMessageDraft(owner,conv.id).then(value=>{if(ownerRef.current===owner&&generation.current===token&&screenState.current.activeConv?.id===conv.id&&!inputRef.current){inputRef.current=value;setInput(value);}}).catch(()=>{if(ownerRef.current===owner)setMessageError("No se pudo recuperar el borrador.");});}
+    if(ownerRef.current){const owner=ownerRef.current,token=generation.current;void loadBookingMessageDraft(owner,conv.id).then(value=>{if(ownerRef.current===owner&&generation.current===token&&screenState.current.activeConv?.id===conv.id&&!inputRef.current){inputRef.current=value;setInput(value);}}).catch(()=>{if(ownerRef.current===owner)setMessageError("No se pudo recuperar el borrador.");});}
     slideAnim.setValue(screen.width);
     setView("thread");
     Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, speed: 22, bounciness: 4 }).start();
@@ -494,32 +524,16 @@ export function MessagesScreen({
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || !activeConv) return;
-    if(activeConv.actionId&&!activeConv.bookingId){setMessageError("Esta tarea no dispone de un vínculo de comunicación verificable en el servidor. Tu borrador se conserva; no se ha enviado ningún mensaje.");return;}
+    if (!activeConv) return;
+    if(attachments.items.length){setMessageError(MESSAGE_ATTACHMENT_UNAVAILABLE+". No se ha enviado el texto ni los adjuntos; el borrador se conserva.");return;}
+    if (!input.trim()) return;
+    if(activeConv.actionId&&!activeConv.bookingId){setMessageError(initialContext?.kind==="booking"?"Esta reserva local no tiene una conversación compartida en el servidor. Tu borrador se conserva; no se ha enviado ningún mensaje.":"Esta tarea no dispone de un vínculo de comunicación verificable en el servidor. Tu borrador se conserva; no se ha enviado ningún mensaje.");return;}
     if(activeConv.bookingId){
       if(!ownerRef.current){setMessageError("Inicia sesión para enviar el mensaje.");return;}
       await sendBookingContent(activeConv,input.trim(),input).catch(()=>{});
       return;
     }
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const msg: GoDirectMessage = {
-      id: makeId(), text: input.trim(), senderId: "yo",
-      createdAt: Date.now(), channel: activeConv.isGoUser ? "go" : "whatsapp",
-    };
-    const updatedConv = { ...activeConv, messages: [...activeConv.messages, msg], lastUpdated: Date.now() };
-    setActiveConv(updatedConv);
-    setInput("");
-    setInputKey(k => k + 1);
-    setConversations(prev => {
-      const exists = prev.some((c) => c.id === activeConv.id);
-      const next = exists
-        ? prev.map((c) => c.id === activeConv.id ? updatedConv : c)
-        : [updatedConv, ...prev];
-      const sorted = [...next].sort((a, b) => b.lastUpdated - a.lastUpdated);
-      persist(sorted);
-      return sorted;
-    });
-    setTimeout(() => threadScrollRef.current?.scrollToEnd({ animated: true }), 60);
+    setMessageError("No disponible hasta activar la conversación compartida. Tu borrador se conserva; no se ha enviado ningún mensaje.");
   };
 
   // ── Delete ────────────────────────────────────────────────────────────────
@@ -700,23 +714,28 @@ export function MessagesScreen({
                       ) : null}
                     </View>
                   </View>
+                  {keyboardVisible&&<TouchableOpacity accessibilityRole="button" accessibilityLabel="Ocultar teclado" onPress={()=>Keyboard.dismiss()} style={{minWidth:44,minHeight:44,alignItems:"center",justifyContent:"center"}}><Feather name="chevron-down" size={22} color={C.icon}/></TouchableOpacity>}
+                  {chatArea.height<208&&<GoCloseButton level="panel" accessibilityLabel={initialContext?"Volver a la ficha":"Volver a conversaciones"} onPress={backToList}/>}
                 </View>
 
                 {/* Messages */}
                 <KeyboardAvoidingView
                   behavior={Platform.OS === "ios" ? "padding" : "height"}
-                  keyboardVerticalOffset={Platform.OS === "ios" ? 62 : 0}
+                  keyboardVerticalOffset={0}
                   style={s.flex}
                 >
                   {/* Chat area container — distinct background */}
                   <View style={s.chatArea} onLayout={event => setChatArea(event.nativeEvent.layout)}>
                   <ScrollView
                     ref={threadScrollRef}
-                    style={{ marginBottom: 80 }}
+                    style={{ marginBottom: 80, ...(chatArea.height<208?{marginBottom:0}:{}) }}
                     contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", paddingLeft: handedness==="left"?54:12, paddingRight: handedness==="right"?54:12, paddingTop: 14, paddingBottom: 14 }}
                     showsVerticalScrollIndicator={false}
-                    onLayout={() => threadScrollRef.current?.scrollToEnd({ animated: false })}
-                    onContentSizeChange={() => threadScrollRef.current?.scrollToEnd({ animated: true })}
+                    bounces={false} scrollEventThrottle={16}
+                    onScroll={event=>{const {contentOffset,contentSize,layoutMeasurement}=event.nativeEvent;followEnd.current=contentSize.height-layoutMeasurement.height-contentOffset.y<48;}}
+                    onLayout={() => {if(followEnd.current)threadScrollRef.current?.scrollToEnd({ animated: false });}}
+                    onContentSizeChange={() => {if(followEnd.current)threadScrollRef.current?.scrollToEnd({ animated: true });}}
+                    keyboardDismissMode={Platform.OS==="ios"?"interactive":"on-drag"}
                     keyboardShouldPersistTaps="handled"
                   >
                     {activeConv.messages.length === 0 && (
@@ -725,7 +744,7 @@ export function MessagesScreen({
                         <Text style={s.emptyHint}>{t("msg_conv_start")}</Text>
                         {!activeConv.isGoUser && (
                           <Text style={[s.emptyHint, { color: "#555", marginTop: 6, textAlign: "center", paddingHorizontal: 30 }]}>
-                            {lang === "en" ? "No GO — message will go via WhatsApp" : "Sin GO — el mensaje irá por WhatsApp"}
+                            {lang === "en" ? "Unavailable until the shared conversation is enabled" : "No disponible hasta activar la conversación compartida"}
                           </Text>
                         )}
                       </View>
@@ -778,28 +797,51 @@ export function MessagesScreen({
                         </View>
                       );
                     })}
+                    <MessageAttachmentPreview items={attachments.items} onRemove={attachments.remove}/>
+                    {!confirmedThread&&<Text testID="message-unavailable" style={{color:C.textSub,paddingHorizontal:12,fontSize:12}}>{activeConv.bookingId?"Conversación compartida pendiente de confirmar. Tu borrador se conserva.":initialContext?.kind==="booking"?"Esta reserva local no tiene una conversación compartida en el servidor.":activeConv.actionId?"Esta tarea no tiene una conversación compartida en el servidor.":"No disponible hasta activar la conversación compartida"}</Text>}
                   </ScrollView>
-                  {visible && <MessageLocationTools key={activeConv.id} handedness={handedness}
-                    bounds={{width:chatArea.width,height:Math.max(0,chatArea.height-80)}}
-                    incoming={saveLocation} onIncomingHandled={()=>setSaveLocation(undefined)}
-                    canSend={!!(ownerRef.current&&activeConv.bookingId&&activeConv.counterpartId)&&!sending}
-                    recipient={activeConv.contactName}
-                    onSend={place=>{
-                      if(!activeConv.counterpartId)return Promise.resolve(false);
-                      return sendBookingContent(activeConv,locationMessage(place));
-                    }}/>}
+                  <View pointerEvents="box-none" style={{position:"absolute",top:0,left:12,right:12,bottom:chatArea.height>=208?80:0}}>
+                    <GoToolPanel handedness={handedness} testID="message-tools-panel" pointerEvents={toolsOpen?"auto":"none"}
+                      accessibilityElementsHidden={!toolsOpen} importantForAccessibility={toolsOpen?"auto":"no-hide-descendants"}
+                      style={{display:toolsOpen?"flex":"none",width:toolSection==="menu"?Math.ceil(Math.max(0,chatArea.width-24)*.56):Math.min(Math.max(0,chatArea.width-24),Math.max(288,Math.ceil((chatArea.width-24)*.78))),height:toolSection==="menu"?Math.min(toolHeight,Math.max(144,Math.round(toolHeight*.60))):toolHeight}}>
+                      <ScrollView bounces={false} keyboardShouldPersistTaps="handled" contentContainerStyle={[{paddingVertical:6},handedness==="right"?{paddingRight:44}:{paddingLeft:44}]}>
+                        {toolSection==="menu"&&<>
+                          <GoToolAction label="Fotografía / imagen" icon="image" disabled={attachments.busy} onPress={()=>{Keyboard.dismiss();void attachments.pick("photo");}}/>
+                          <GoToolAction label="Archivo / documento" icon="file-text" disabled={attachments.busy} onPress={()=>{Keyboard.dismiss();void attachments.pick("document");}}/>
+                          <GoToolAction label="Compartir mensaje" icon="share" disabled={!confirmedThread||!activeConv.messages.length} onPress={()=>{Keyboard.dismiss();setToolSection("share");}}/>
+                          <GoToolAction label="Ubicación" icon="map-pin" onPress={()=>{Keyboard.dismiss();setToolSection("location");}}/>
+                          <Text style={{color:C.textSub,fontSize:12,padding:8}}>{MESSAGE_ATTACHMENT_UNAVAILABLE}. Puedes seleccionar y retirar adjuntos locales antes de enviar; este canal todavía no los transporta.</Text>
+                        </>}
+                        {toolSection==="share"&&<MessageSharePicker key={attachmentIdentity} messages={activeConv.messages} canShare={confirmedThread} onBack={()=>setToolSection("menu")}/>}
+                        <View style={{display:toolSection==="location"?"flex":"none"}}>
+                          {visible&&<MessageLocationTools embedded key={activeConv.id} handedness={handedness}
+                            bounds={{width:chatArea.width,height:toolHeight}}
+                            incoming={saveLocation} onIncomingHandled={()=>setSaveLocation(undefined)} onClose={()=>setToolSection("menu")}
+                            canSend={confirmedThread&&!sending&&attachments.items.length===0} recipient={activeConv.contactName}
+                            onSend={place=>{
+                              if(!activeConv.counterpartId||attachments.items.length)return Promise.resolve(false);
+                              return sendBookingContent(activeConv,locationMessage(place));
+                            }}/>}
+                        </View>
+                      </ScrollView>
+                    </GoToolPanel>
+                    {visible&&!assistant&&<GoToolRailToggle bounds={{width:Math.max(0,chatArea.width-24),height:toolHeight}}
+                      handedness={handedness} open={toolsOpen} testID="message-tools-toggle"
+                      accessibilityLabel={toolsOpen?"Ocultar herramientas de mensajes":"Mostrar herramientas de mensajes"}
+                      onPress={()=>setToolsOpen(value=>!value)}/>}
+                  </View>
                   </View>{/* end chatArea */}
 
-                  {/* Thread input area — big input LEFT, 3-button column RIGHT */}
-                  <View style={[s.inputArea, { paddingBottom: Math.max(insets.bottom, 10) + 4 }]}>
+                  {!!attachments.error&&<Text accessibilityRole="alert" style={{color:C.red,paddingHorizontal:12}}>{attachments.error}</Text>}
+                  {/* Thread input area — primary actions always accessible */}
+                  <View style={[s.inputArea, { paddingBottom: keyboardVisible?10:Math.max(insets.bottom, 10) + 4 }]}>
                     {/* Text input — takes all available width */}
                     <TextInput
-                      key={inputKey}
                       value={input}
                       editable={!sending}
                       onChangeText={changeInput}
                       placeholder={lang === "en" ? "Write a message..." : "Escribe un mensaje..."}
-                      placeholderTextColor="rgba(255,255,255,0.30)"
+                      placeholderTextColor={C.textSub}
                       style={s.msgInput}
                       multiline
                       maxLength={1000}
@@ -824,14 +866,14 @@ export function MessagesScreen({
                         onPress={sendMessage}
                         style={[s.actionBtn, s.actionBtnSend, { opacity: input.trim() ? 1 : 0.35 }]}
                         activeOpacity={0.75}
-                        disabled={!input.trim() || sending}
+                        disabled={!input.trim() || sending || !confirmedThread || attachments.items.length>0}
                       >
                         <Feather name="send" size={18} color="#fff" />
                         <Text style={s.actionBtnLabel}>{t("msg_send_btn")}</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
-                  {chatArea.height >= 80 && <View testID="message-floating-return" pointerEvents="box-none" style={{ position: "absolute", left: chatArea.x, top: chatArea.y + chatArea.height - 80, width: chatArea.width, height: 80 }}>
+                  {chatArea.height >= 208 && <View testID="message-floating-return" pointerEvents="box-none" style={{ position: "absolute", left: chatArea.x, top: chatArea.y + chatArea.height - 80, width: chatArea.width, height: 80 }}>
                     <DraggableFAB navigation screenKey="messages"
                 buttonKey="back"
                 initialRight={8}
@@ -1030,7 +1072,7 @@ const s = StyleSheet.create({
     color: "#111827",
     fontSize: 15,
     lineHeight: 21,
-    maxHeight: Math.round(screen.height * 0.52),
+    maxHeight: 120,
     minHeight: 52,
   },
   // Right action column
