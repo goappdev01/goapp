@@ -656,7 +656,7 @@ class WheelEffects:
             verified,report = self._diagnosis(row,job,workspace)
             if prior!=verified:
                 self.fail("WHEEL_DIAGNOSIS_UNVERIFIED","El informe no coincide con el diagnóstico verificado.")
-        elif self.b.git_state(workspace,check_main=True)["origin_main"]!=prior["main_sha"]:
+        elif self.b.git_state(workspace,check_main=True)["origin_main"]!=prior.get("served_sha",prior["main_sha"]):
             self.fail("PUBLICATION_UNVERIFIED","MAIN cambió antes de cerrar la tarjeta.")
         card,comments = self._snapshot(grant["card_id"])
         if card["idList"]!=QUEUE:
