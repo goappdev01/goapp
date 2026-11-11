@@ -364,6 +364,12 @@ function syncWheelControls() {
   else if(wheel.enabled){activate.textContent="FÁBRICA ACTIVADA";activate.classList.add("state-active");activate.disabled=true;}
   else if(frozen?.state==="completed"){activate.textContent="FÁBRICA FINALIZADA";activate.classList.add("state-finished");activate.disabled=true;}
   else if(frozen?.state==="prepared"){activate.textContent="FÁBRICA DESACTIVADA";activate.classList.add("state-inactive");activate.disabled=true;}
+  else if(frozen?.state==="active"&&frozen.policy==="independent-v2"&&wheel.grants?.some(grant=>
+      ["ready","working"].includes(grant.state)&&grant.expires_at<=Date.now()/1000)){
+    activate.textContent="FÁBRICA PAUSADA · REAUTORIZAR";activate.classList.add("state-paused");
+    activate.disabled=wheelBusy||!state?.private_panel_url;
+    activate.title="Abre la revisión privada para autorizar solo las operaciones pendientes.";
+  }
   else if(frozen?.state==="active"&&(frozen.policy!=="independent-v2"||(wheel.reason&&wheel.reason!=="OWNER_PAUSED"))){
     activate.textContent=wheel.reason==="OWNER_STOPPED"?"FÁBRICA DETENIDA · REVISAR":"FÁBRICA BLOQUEADA · REVISAR EN PANEL PRIVADO";activate.classList.add(wheel.reason==="OWNER_STOPPED"?"state-stopped":"state-blocked");activate.disabled=true;
     activate.title=wheelReasonText(wheel.reason)||"Este lote necesita la revisión de activación del panel privado.";
@@ -382,11 +388,11 @@ function syncWheelControls() {
     frozen.cards.every((card,i)=>card.card_id === decisions[i].card_id && card.binding === decisions[i].binding &&
       decisions[i].operations.join("") === decisionOperations(card));
   if (frozen) {
-    if (frozen.state !== "prepared") reason = "Este lote ya tiene una decisión registrada.";
+    if (frozen.state !== "prepared") reason = "La decisión anterior queda conservada. Pulsa el botón principal para revisar y autorizar únicamente las operaciones pendientes.";
     else if (frozen.cards.some(card=>card.blocker)) reason = "Hay tarjetas que requieren revisión antes de autorizar el lote.";
     else if (!reason && !reviewMatches) reason = "Revisa el alcance y selecciona las operaciones de cada una de las " + frozen.cards.length + " tarjetas.";
   }
-  el("wheelApprove").textContent = frozen ? "Autorizar y arrancar lote congelado" : "Autorizar operaciones seleccionadas";
+  el("wheelApprove").textContent = frozen?.state==="active" ? "Decisión anterior conservada" : frozen ? "Autorizar y arrancar lote congelado" : "Autorizar operaciones seleccionadas";
   el("wheelApprove").disabled = wheelBusy || !wheel || Boolean(reason) || !count || Boolean(frozen && !ready);
   el("wheelApprovalCondition").textContent = reason || (count ? count + " tarjeta(s) seleccionada(s) para revisar en la confirmación local."
     : wheelForms.length ? "Selecciona las operaciones que deseas conceder por tarjeta." : "Lee la cola para revisar las tarjetas elegibles.");
@@ -485,6 +491,12 @@ el("wheelApprove").addEventListener("click",()=>wheelAction(async()=>{
 for (const [id,enabled] of [["wheelActivate",true],["wheelPause",false]]) {
   el(id).addEventListener("click",()=>{if(enabled)wheelActivationPending=true;wheelAction(async()=>{
     if(enabled && (!state?.factory?.wheel || !state.agents?.["4"]?.enabled || !state.agents["4"].workspace)) return;
+    if(enabled&&state.factory.wheel.frozen_batch?.state==="active"&&state.factory.wheel.grants?.some(grant=>
+        ["ready","working"].includes(grant.state)&&grant.expires_at<=Date.now()/1000)){
+      window.open(state.private_panel_url,"_blank","noopener,noreferrer");
+      notice("Revisa en GO · Fábrica privada las operaciones pendientes y confirma allí la nueva autorización.");
+      return;
+    }
     await api("/api/wheel/toggle",{enabled});
     await refresh();
     notice(enabled ? "Rueda activa para tarjetas preautorizadas." : "Pausa solicitada. Consulta la tarea en curso.");

@@ -68,7 +68,8 @@ class RemotePanel:
             state,label,disabled="stopped","FÁBRICA DETENIDA · REVISAR",in_flight
         else:
             state="blocked" if reason and reason!="OWNER_PAUSED" else "paused"
-            label="FÁBRICA BLOQUEADA · REVISAR" if state=="blocked" else "FÁBRICA PAUSADA · ACTIVAR"
+            label=("FÁBRICA BLOQUEADA · REVISAR" if state=="blocked" else
+                   "FÁBRICA PAUSADA · REAUTORIZAR" if wheel.get("renewal_required") else "FÁBRICA PAUSADA · ACTIVAR")
             disabled=in_flight
         if active:
             current=next((card for card in cards if card.get("state")=="working"),None)
@@ -213,6 +214,8 @@ class RemotePanel:
                 pass
         wheel_view={"enabled":enabled,"state":state,"reason":wheel["reason"],"batch_id":(batch or {}).get("id"),
                     "batch_state":(batch or {}).get("state"),"activation_confirmed":activation_confirmed,
+                    "renewal_required":any(grant["state"] in ("ready","working") and grant["expires_at"]<=time.time()
+                        for grant in wheel["grants"] if grant["card_id"] in {item["card_id"] for item in (batch or {}).get("cards",[])}),
                     "current":next((card["title"] for card in cards if card["state"]=="working"),None),
                     "next":next((card["title"] for card in cards if card["state"]=="ready"),None)}
         wheel_view["button"]=self.activation_button(wheel_view,cards)
@@ -239,15 +242,21 @@ class RemotePanel:
         record={"action":action,"review":review,"principal":principal,"expires":time.time()+180}
         self.previews[ticket]=record
         self.previews={key:value for key,value in self.previews.items() if value["expires"]>time.time()}
-        confirmation=("VINCULAR CUENTA Y ACTIVAR FÁBRICA" if review.get("account_changed") else "ACTIVAR FÁBRICA") if action=="activate" else "CONFIRMAR OPERACIÓN"
+        confirmation=self.activation_confirmation(review) if action=="activate" else "CONFIRMAR OPERACIÓN"
         return {"ticket":ticket,"action":action,"review":review,"confirmation":confirmation}
+
+    @staticmethod
+    def activation_confirmation(review):
+        if review.get("renewals"):
+            return "REAUTORIZAR PENDIENTES Y ACTIVAR FÁBRICA"
+        return "VINCULAR CUENTA Y ACTIVAR FÁBRICA" if review.get("account_changed") else "ACTIVAR FÁBRICA"
 
     def decide(self,ticket,confirmation,principal):
         record=self.previews.pop(ticket,None)
         if not record or record["principal"]!=principal or record["expires"]<=time.time():
             self.w.fail("REMOTE_PREVIEW_EXPIRED","La revisión caducó o ya fue utilizada.")
         action,review=record["action"],record["review"]
-        expected=("VINCULAR CUENTA Y ACTIVAR FÁBRICA" if review.get("account_changed") else "ACTIVAR FÁBRICA") if action=="activate" else "CONFIRMAR OPERACIÓN"
+        expected=self.activation_confirmation(review) if action=="activate" else "CONFIRMAR OPERACIÓN"
         if confirmation!=expected:
             self.w.fail("REMOTE_CONFIRMATION_REQUIRED","Falta la confirmación explícita de esta operación.")
         self.b.audit("remote_owner_decision",{"principal_hash":self.b.sign({"tailnet_owner":principal}),

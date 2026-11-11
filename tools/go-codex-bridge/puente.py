@@ -37,7 +37,7 @@ APP = "GO-Puente-Codex"
 SCOPES = {"read:board:trello", "write:board:trello", "offline_access"}
 TEST_INSTRUCTION = "Sin utilizar herramientas ni acceder a archivos, responde exactamente GO_PUENTE_CODEX_OK."
 TERMINAL = {"completed", "blocked", "failed", "interrupted", "needs_review"}
-EXECUTOR_VERSION = "2026-11-11-factory-metro-recovery-5"
+EXECUTOR_VERSION = "2026-11-11-factory-renewal-recovery-6"
 
 
 def codex_command(executable, sandbox, workspace, answer_file):
@@ -428,7 +428,8 @@ class Bridge:
             if not enabled or not stage or stage["approval_id"] != approval:
                 raise BridgeError("WHEEL_PAUSED","La etapa ya no está autorizada.",403)
             terms=self.factory.wheel._verified(stage)
-            if time.time() >= terms["expires_at"] or letter not in terms["operations"]:
+            if (time.time() >= terms["expires_at"]
+                    or not self.factory.wheel._operation_authorized(terms,letter)):
                 raise BridgeError("WHEEL_PERMISSION_REQUIRED","Este permiso caducó antes del efecto.",403)
         connection.execute("UPDATE approvals SET used=? WHERE id=? AND used IS NULL", (time.time(), approval))
 
@@ -1334,12 +1335,18 @@ class Bridge:
                      "created": row["created"], "updated": row["updated"]} for row in connection.execute("SELECT * FROM jobs ORDER BY created DESC LIMIT 50")]
             operations = [dict(row) for row in connection.execute("SELECT id,action,state,created FROM operations ORDER BY created DESC LIMIT 50")]
         factory = self.factory.status()
+        remote_config=self.home / "estado" / "remote-panel.json"
+        remote_hostname=(json.loads(remote_config.read_text(encoding="utf-8")).get("hostname","")
+                         if remote_config.is_file() else "")
+        private_panel_url=("https://"+remote_hostname+"/remote" if
+                           re.fullmatch(r"[A-Za-z0-9.-]{1,253}",remote_hostname) else None)
         return {"application": APP, "home": str(self.home), "executor_version": EXECUTOR_VERSION, "oauth": self.oauth_status,
                 "credentials_encrypted": self.vault_path.exists(), "scopes_requested": self.config["scopes"],
                 "agents": self.config["agents"], "jobs": jobs, "operations": operations,
                 "automatic_execution": factory["automatic_execution"],
                 "factory": factory, "chatgpt_local_entry": True, "chatgpt_remote_enabled": False,
-                "receiver": self.receiver_status(), "port": self.config["port"]}
+                "receiver": self.receiver_status(), "port": self.config["port"],
+                "private_panel_url":private_panel_url}
 
 
 def server(bridge, open_browser=True):

@@ -100,6 +100,8 @@ class Wheel:
                     self.fail("WHEEL_REVIEW_REQUIRED","El bloqueo requiere revisar el lote en el panel privado antes de reactivarlo.")
                 self._require_codex_identity(batch[1]["codex_identity"])
                 self.continuity.verify_activation(batch[0]["id"],batch[1])
+                if time.time()>=batch[1]["expires_at"]:
+                    self.fail("WHEEL_EXPIRY_INVALID","Revisa y autoriza de nuevo las operaciones pendientes antes de activar.")
             db.execute("UPDATE wheel_control SET enabled=?,reason=NULL,retry_after=0 WHERE id=1", (int(enabled),))
             if enabled:
                 # Legacy observation may be enabled separately; it must never launch or
@@ -273,6 +275,7 @@ class Wheel:
 
     def review(self):
         with self.f.lock:
+            self.continuity.reconcile_published_stale()
             self.f._identity()
             self.f._lists()
             cards = []
@@ -651,7 +654,8 @@ class Wheel:
     def _permit(self,g,letter,row,action,payload,*,codex_identity=None):
         if not self.enabled():
             self.fail("WHEEL_PAUSED","La rueda está en pausa.")
-        if ACTIONS[letter]!=action or letter not in g["operations"] or self._expired(g) or not self.enabled():
+        if (ACTIONS[letter]!=action or not self._operation_authorized(g,letter)
+                or self._expired(g) or not self.enabled()):
             self.fail("WHEEL_PERMISSION_REQUIRED","Falta autorización vigente para esta operación.")
         self.f._identity()
         self.f._lists()
@@ -698,6 +702,10 @@ class Wheel:
     @staticmethod
     def _expired(g):
         return time.time()>=g["expires_at"]
+
+    @staticmethod
+    def _operation_authorized(g,letter):
+        return letter in g["operations"] and letter in g.get("reauthorized_letters",g["operations"])
 
     def _record_receipt(self,g,letter,receipt):
         if not isinstance(receipt,dict) or not receipt:
@@ -746,6 +754,11 @@ class Wheel:
                 return {"paused":"WHEEL_PERMISSION_REQUIRED","letter":letter}
             if step and step["state"]=="verified":
                 continue
+            if not self._operation_authorized(g,letter) and not (letter=="B" and g.get("work_kind")=="diagnosis"):
+                if self.continuity.active():
+                    return self.continuity.card_error(g,"WHEEL_PERMISSION_REQUIRED")
+                self.pause("WHEEL_PERMISSION_REQUIRED")
+                return {"paused":"WHEEL_PERMISSION_REQUIRED","letter":letter}
             if step:
                 receipt=effects.reconcile(letter,row,g)
                 if not receipt:

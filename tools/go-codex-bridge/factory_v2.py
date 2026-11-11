@@ -20,6 +20,11 @@ class Continuity:
             CREATE TABLE IF NOT EXISTS factory_questions(
                 id TEXT PRIMARY KEY, grant_id TEXT NOT NULL, document TEXT NOT NULL, signature TEXT NOT NULL,
                 state TEXT NOT NULL, answer TEXT, created TEXT NOT NULL, decided TEXT);
+            CREATE TABLE IF NOT EXISTS factory_v2_renewals(
+                id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, grant_id TEXT NOT NULL,
+                old_terms TEXT NOT NULL, old_signature TEXT NOT NULL,
+                new_terms TEXT NOT NULL, new_signature TEXT NOT NULL,
+                principal TEXT NOT NULL, approved_at TEXT NOT NULL);
             """)
 
     def active(self):
@@ -88,10 +93,18 @@ class Continuity:
             row,doc=batch
             grants=[]
             grant_by_card={}
+            renewals=[]
             for item in doc["cards"]:
                 saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(item["grant_id"],)).fetchone()
                 grant=self.w._verified(saved)
                 grant_by_card[grant["card_id"]]=(saved,grant)
+                renewable=saved["state"] in ("ready","working") or self.published_recovery(db,saved,grant)
+                if renewable and time.time()>=grant["expires_at"]:
+                    completed={stage["letter"] for stage in db.execute(
+                        "SELECT letter FROM wheel_stages WHERE grant_id=? AND state='verified'",(grant["grant_id"],))}
+                    pending=[letter for letter in "ABCD" if letter not in completed]
+                    renewals.append({"card_id":grant["card_id"],"grant_id":grant["grant_id"],
+                                     "operations":pending,"prior_expiry":grant["expires_at"]})
                 grants.append({"card_id":grant["card_id"],"title":grant["title"],"state":saved["state"],
                                "operations":grant["operations"],"expires_at":grant["expires_at"],
                                "depends_on":grant["depends_on"],"allowed_files":grant["allowed_files"],
@@ -138,12 +151,61 @@ class Continuity:
         return {"batch_id":row["id"],"batch_sha":self.f.digest(self.f.canonical(doc)),
                 "cards":grants,"policy":"independent-v2","maximum_cards":doc["maximum_cards"],
                 "dependency_fallbacks":fallbacks,"plan":plan,
+                "renewals":renewals,"renewal_hours":24 if renewals else 0,
                 "account_changed":current_identity!=doc.get("codex_identity"),
                 "current_codex_identity_sha256":self.f.digest(current_identity)}
 
     def _published_recovery_review(self,row,grant):
         with self.b.db() as db:
             return self.published_recovery(db,row,grant)
+
+    def reconcile_published_stale(self):
+        """Verify a prior push and Metro while paused; never run Codex or repeat a push."""
+        from wheel_effects import WheelEffects
+        repaired=[]
+        with self.f.lock:
+            with self.b.db() as db:
+                if (db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0]
+                        or db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                        or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()):
+                    return repaired
+                candidates=[]
+                for saved in db.execute("SELECT * FROM wheel_grants WHERE state='blocked' AND reason='FACTORY_METRO_OUTDATED'"):
+                    grant=self.w._verified(saved)
+                    if self.published_recovery(db,saved,grant):
+                        candidates.append(grant)
+            for grant in candidates:
+                attempt=self.f._row(grant["card_id"],grant["attempt"])
+                try:
+                    workspace=self.b.workspace("4")[0]
+                    effects=WheelEffects(self.f)
+                    if not effects._reconcile_publication(attempt,grant,workspace):
+                        continue
+                    receipt=effects._published(attempt,workspace,sync=False)
+                except (self.f.Error,OSError,KeyError,TypeError) as error:
+                    self.b.audit("wheel_published_metro_still_pending",{
+                        "grant":grant["grant_id"],"code":getattr(error,"code","VERIFICATION_UNAVAILABLE")})
+                    continue
+                with self.b.db() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(grant["grant_id"],)).fetchone()
+                    stage=db.execute("SELECT state FROM wheel_stages WHERE grant_id=? AND letter='B'",(grant["grant_id"],)).fetchone()
+                    if (not saved or saved["state"]!="blocked" or saved["reason"]!="FACTORY_METRO_OUTDATED"
+                            or self.w._verified(saved)!=grant or not stage or stage["state"]!="claimed"):
+                        continue
+                    db.execute("UPDATE wheel_stages SET state='verified',finished=?,receipt=? WHERE grant_id=? AND letter='B' AND state='claimed'",
+                               (self.f.utc(),self.f.canonical(receipt),grant["grant_id"]))
+                    db.execute("UPDATE wheel_grants SET state='ready',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
+                    db.execute("UPDATE factory_attempts SET state='await_review' WHERE card_id=? AND attempt=? AND state='blocked'",
+                               (grant["card_id"],grant["attempt"]))
+                    if (db.execute("SELECT reason FROM wheel_control WHERE id=1").fetchone()[0]=="FACTORY_METRO_OUTDATED"
+                            and not db.execute("SELECT 1 FROM wheel_grants WHERE state='blocked' AND reason='FACTORY_METRO_OUTDATED'").fetchone()):
+                        db.execute("UPDATE wheel_control SET reason='OWNER_PAUSED',retry_after=0 WHERE id=1")
+                    self.b.audit("wheel_published_metro_reconciled",{"grant":grant["grant_id"],
+                        "main_sha":receipt["main_sha"],"served_sha":receipt["served_sha"],
+                        "repeated_cli":False,"repeated_push":False},db)
+                    repaired.append(grant["card_id"])
+        return repaired
 
     def activate(self,review,principal):
         with self.f.lock:
@@ -175,12 +237,50 @@ class Continuity:
                 identity=self.w._require_codex_identity()
                 if self.f.digest(identity)!=review["current_codex_identity_sha256"]:
                     self.w.fail("WHEEL_CODEX_SESSION_CHANGED","La cuenta Codex cambió durante la confirmación.")
-                if time.time()>=doc["expires_at"]:
-                    self.w.fail("WHEEL_EXPIRY_INVALID","Las autorizaciones del lote han caducado.")
                 if db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone():
                     self.w.fail("WHEEL_WORKSPACE_BUSY","Espera al trabajo en curso.")
                 changed=identity!=doc.get("codex_identity")
-                doc={**doc,"policy":"independent-v2","codex_identity":identity}
+                if not any(item["action"]=="run" for item in review["plan"]):
+                    self.w.fail("WHEEL_NO_ELIGIBLE_CARD","No hay tarjetas pendientes que puedan continuar con este lote.")
+                renewal_by_card={item["card_id"]:item for item in review["renewals"]}
+                expiry=time.time()+review["renewal_hours"]*3600 if renewal_by_card else None
+                actionable_expiries=[]
+                for item in doc["cards"]:
+                    saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(item["grant_id"],)).fetchone()
+                    grant=self.w._verified(saved)
+                    if saved["state"] not in ("ready","working") and not self.published_recovery(db,saved,grant):
+                        continue
+                    renewal=renewal_by_card.get(grant["card_id"])
+                    if renewal:
+                        completed={stage["letter"] for stage in db.execute(
+                            "SELECT letter FROM wheel_stages WHERE grant_id=? AND state='verified'",(grant["grant_id"],))}
+                        pending=[letter for letter in "ABCD" if letter not in completed]
+                        if (renewal!={"card_id":grant["card_id"],"grant_id":grant["grant_id"],
+                                     "operations":pending,"prior_expiry":grant["expires_at"]}
+                                or not pending or time.time()<grant["expires_at"]):
+                            self.w.fail("WHEEL_SUBJECT_CHANGED","Las operaciones pendientes cambiaron desde la revisión.")
+                        updated={**grant,"expires_at":expiry,"reauthorized_letters":pending,
+                                 "reauthorized_at":self.f.utc(),"reauthorized_by":principal,
+                                 "original_expires_at":grant.get("original_expires_at",grant["expires_at"])}
+                        new_terms=self.f.canonical(updated)
+                        new_signature=self.b.sign(updated)
+                        db.execute("INSERT INTO factory_v2_renewals VALUES(?,?,?,?,?,?,?,?,?)",
+                                   (uuid.uuid4().hex,row["id"],grant["grant_id"],saved["terms"],saved["signature"],
+                                    new_terms,new_signature,principal,self.f.utc()))
+                        db.execute("UPDATE wheel_grants SET terms=?,signature=? WHERE grant_id=?",
+                                   (new_terms,new_signature,grant["grant_id"]))
+                        self.b.audit("wheel_v2_owner_reauthorized",{"batch":row["id"],"grant":grant["grant_id"],
+                            "operations":pending,"prior_terms_sha":self.f.digest(saved["terms"]),
+                            "expires_at":expiry,"principal":principal},db)
+                        actionable_expiries.append(expiry)
+                    else:
+                        if time.time()>=grant["expires_at"]:
+                            self.w.fail("WHEEL_EXPIRY_INVALID","Una autorización pendiente ha caducado sin renovación.")
+                        actionable_expiries.append(grant["expires_at"])
+                if not actionable_expiries:
+                    self.w.fail("WHEEL_NO_ELIGIBLE_CARD","No hay autorizaciones pendientes para continuar.")
+                doc={**doc,"policy":"independent-v2","codex_identity":identity,
+                     "expires_at":min(actionable_expiries)}
                 activation={"batch_sha":self.f.digest(self.f.canonical(doc)),"actor":self.b.actor,
                             "principal":principal,"at":self.f.utc(),"codex_identity":identity,
                             "dependency_fallbacks":review.get("dependency_fallbacks",[])}

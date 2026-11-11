@@ -98,6 +98,11 @@ class V2WheelTests(unittest.TestCase):
         running=RemotePanel.activation_button({'enabled':False,'reason':None,'batch_id':'batch','batch_state':'active'},
             [{'state':'working','activity':{'state':'running'}}])
         self.assertTrue(running['disabled'])
+        renewal=RemotePanel.activation_button({'enabled':False,'reason':'OWNER_PAUSED','batch_id':'batch',
+            'batch_state':'active','renewal_required':True},[])
+        self.assertEqual(renewal['label'],'FÁBRICA PAUSADA · REAUTORIZAR')
+        self.assertEqual(RemotePanel.activation_confirmation({'renewals':[{'operations':['C','D']}]}),
+                         'REAUTORIZAR PENDIENTES Y ACTIVAR FÁBRICA')
 
     def block(self,w,cid,state='blocked'):
         with self.bridge.db() as db:db.execute('UPDATE wheel_grants SET state=?,reason=? WHERE card_id=?',(state,'synthetic',cid))
@@ -138,6 +143,36 @@ class V2WheelTests(unittest.TestCase):
             self.assertEqual(selected['expected'],ids[0])
             self.assertTrue(selected['published_recovery'])
             self.assertEqual(w.continuity.review_activation()['plan'][0]['action'],'run')
+        self.assertFalse(self.runs or self.changes)
+
+    def test_paused_old_metro_block_reconciles_once_and_survives_restart(self):
+        w,ids=self.batch();w.pause('FACTORY_METRO_OUTDATED')
+        with self.bridge.db() as db:
+            row=db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[0],)).fetchone()
+            grant=w._verified(row)
+            db.execute("UPDATE wheel_grants SET state='blocked',reason='FACTORY_METRO_OUTDATED' WHERE grant_id=?",
+                       (grant['grant_id'],))
+            for letter,state in [('A','verified'),('B','claimed')]:
+                db.execute('INSERT INTO wheel_stages(grant_id,letter,state,started,approval_id) VALUES(?,?,?,?,?)',
+                           (grant['grant_id'],letter,state,'synthetic','synthetic'))
+        receipt={'main_sha':'a'*40,'served_sha':'b'*40}
+        with patch.object(self.bridge.factory,'_row',return_value={'job_id':'synthetic-job'}),\
+             patch.object(self.bridge,'job',return_value={'id':'synthetic-job','state':'completed'}),\
+             patch.object(WheelEffects,'_publications',return_value=[{'state':'verified'}]),\
+             patch.object(WheelEffects,'_reconcile_publication',return_value=True),\
+             patch.object(WheelEffects,'_published',return_value=receipt) as verified:
+            self.assertEqual(w.continuity.reconcile_published_stale(),[ids[0]])
+            self.assertEqual(w.continuity.reconcile_published_stale(),[])
+        verified.assert_called_once()
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT state FROM wheel_grants WHERE grant_id=?',(grant['grant_id'],)).fetchone()[0],'ready')
+            self.assertEqual(db.execute('SELECT state FROM wheel_stages WHERE grant_id=? AND letter=?',
+                                        (grant['grant_id'],'B')).fetchone()[0],'verified')
+            self.assertEqual(db.execute('SELECT reason FROM wheel_control WHERE id=1').fetchone()[0],'OWNER_PAUSED')
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM audit WHERE event='wheel_published_metro_reconciled'").fetchone()[0],1)
+        restored=Bridge(self.home,self.home/'private',fixtures.TestProtector(),actor=self.bridge.actor)
+        restored.factory.pause_on_startup()
+        self.assertFalse(restored.factory.wheel.enabled())
         self.assertFalse(self.runs or self.changes)
 
     def test_published_card_reconciles_after_bridge_only_main_commit(self):
@@ -257,6 +292,63 @@ class V2WheelTests(unittest.TestCase):
         review=w.continuity.review_activation()
         changed=copy.deepcopy(review);changed['cards'][0]['operations']=[]
         with self.assertRaises(BridgeError):w.continuity.activate(changed,'synthetic-owner')
+        self.assertFalse(w.enabled())
+
+    def expire_batch(self,w):
+        with self.bridge.db() as db:
+            row,doc=w._latest_trial(db)
+            doc['expires_at']=1
+            db.execute('UPDATE wheel_trials SET document=?,signature=? WHERE id=?',
+                       (self.bridge.factory.canonical(doc),self.bridge.sign(doc),row['id']))
+            for item in doc['cards']:
+                saved=db.execute('SELECT * FROM wheel_grants WHERE grant_id=?',(item['grant_id'],)).fetchone()
+                terms=w._verified(saved)
+                terms['expires_at']=1
+                db.execute('UPDATE wheel_grants SET terms=?,signature=? WHERE grant_id=?',
+                           (self.bridge.factory.canonical(terms),self.bridge.sign(terms),terms['grant_id']))
+
+    def test_expired_batch_requires_new_owner_decision_for_only_unfinished_stages(self):
+        w,ids=self.batch(diagnostic_fallback=True)
+        w.pause('OWNER_PAUSED')
+        with self.bridge.db() as db:
+            grant=w._verified(db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[2],)).fetchone())
+            for letter in 'AB':
+                db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started,finished,receipt) "
+                           "VALUES(?,?,'verified','synthetic','synthetic','{}')",(grant['grant_id'],letter))
+        self.expire_batch(w)
+        review=w.continuity.review_activation()
+        with self.bridge.db() as db:
+            note_grant=w._verified(db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[3],)).fetchone())
+        self.assertEqual(review['renewals'],[
+            {'card_id':ids[2],'grant_id':grant['grant_id'],'operations':['C','D'],'prior_expiry':1},
+            {'card_id':ids[3],'grant_id':note_grant['grant_id'],
+             'operations':['A','B','C','D'],'prior_expiry':1}])
+        self.assertFalse(w.enabled())
+        with self.assertRaises(BridgeError):w.toggle(True)
+        self.assertFalse(w.enabled())
+        result=w.continuity.activate(review,'synthetic-owner')
+        self.assertTrue(result['enabled'])
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM factory_v2_renewals').fetchone()[0],2)
+            renewed=w._verified(db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[2],)).fetchone())
+            self.assertEqual(renewed['reauthorized_letters'],['C','D'])
+            self.assertFalse(w._operation_authorized(renewed,'A'))
+            self.assertTrue(w._operation_authorized(renewed,'C'))
+            self.assertEqual([r['letter'] for r in db.execute('SELECT letter FROM wheel_stages WHERE grant_id=? ORDER BY letter',
+                             (grant['grant_id'],))],['A','B'])
+        restored=Bridge(self.home,self.home/'private',fixtures.TestProtector(),actor=self.bridge.actor)
+        self.assertEqual(restored.factory.wheel._trial_limit()['expected'],ids[2])
+        self.assertFalse(self.runs or self.changes)
+
+    def test_expired_batch_rejects_stale_or_modified_owner_review(self):
+        w,ids=self.batch(diagnostic_fallback=True);w.pause('OWNER_PAUSED');self.expire_batch(w)
+        review=w.continuity.review_activation()
+        altered=copy.deepcopy(review);altered['renewals'][0]['operations']=[]
+        with self.assertRaises(BridgeError):w.continuity.activate(altered,'synthetic-owner')
+        self.assertFalse(w.enabled())
+        with self.bridge.db() as db:self.assertEqual(db.execute('SELECT COUNT(*) FROM factory_v2_renewals').fetchone()[0],0)
+        self.cards[ids[2]]['pos']+=1
+        with self.assertRaises(BridgeError):w.continuity.activate(review,'synthetic-owner')
         self.assertFalse(w.enabled())
 
     def test_transient_retry_is_bounded_and_survives_restart(self):
