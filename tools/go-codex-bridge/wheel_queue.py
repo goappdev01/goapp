@@ -632,9 +632,14 @@ class Wheel:
 
     def _verify_dependencies(self,g):
         from factory import DONE
+        with self.b.db() as db:
+            fallback_edges=self._signed_fallback_edges(db,g)
         for identifier,version in g["dependency_versions"].items():
+            with self.b.db() as db:
+                fallback=self._diagnostic_fallback_valid(db,g,identifier,version,fallback_edges)
             card=self.b.api("/1/cards/"+identifier,{"fields":"id,idBoard,idList,name,shortLink"})
-            if card.get("idBoard")!=BOARD or card.get("idList") not in (CHECK,DONE) or card.get("name")!=version["title"]:
+            expected_lists=(QUEUE,) if fallback else (CHECK,DONE)
+            if card.get("idBoard")!=BOARD or card.get("idList") not in expected_lists or card.get("name")!=version["title"]:
                 self.fail("WHEEL_DEPENDENCY_CHANGED","La dependencia cambió después de la autorización.")
             snapshot=self.b.read_card("https://trello.com/c/"+card["shortLink"],archive=False)["data"]
             comments=self.f.original_comments(identifier,snapshot["comments"])
@@ -862,6 +867,41 @@ class Wheel:
         db.execute("UPDATE wheel_control SET enabled=0,reason=?,retry_after=0 WHERE id=1",(reason,))
         self.b.audit("wheel_head_blocked",{"reason":reason},db)
 
+    def _signed_fallback_edges(self,db,grant):
+        latest=self._latest_trial(db)
+        if not latest or latest[1].get("policy")!="independent-v2" or not any(
+                item["grant_id"]==grant["grant_id"] for item in latest[1]["cards"]):
+            return set()
+        activation=self.continuity.verify_activation(latest[0]["id"],latest[1],db)
+        return {(edge["dependency_card_id"],edge["dependent_card_id"])
+                for edge in activation.get("dependency_fallbacks",[])}
+
+    def _diagnostic_fallback_valid(self,db,grant,dep,version,edges):
+        if (dep,grant["card_id"]) not in edges:
+            return False
+        row=db.execute("SELECT * FROM wheel_grants WHERE card_id=? AND attempt=?",
+                       (dep,version["attempt"])).fetchone()
+        if not row or row["state"]!="blocked":
+            return False
+        dependency=self._verified(row)
+        return (dependency.get("work_kind")=="diagnosis" and dependency["attempt"]==version["attempt"]
+                and dependency["instruction_sha"]==version["instruction_sha"])
+
+    def _dependencies_ready(self, db, grant, trial, cards):
+        """Recheck each dependency, including only the signed V2 diagnostic fallback."""
+        fallback_edges=set()
+        if trial and trial.get("explicit_diagnostic_fallback") and trial.get("grant_id")==grant["grant_id"]:
+            fallback_edges=self._signed_fallback_edges(db,grant)
+        for dep in grant["depends_on"]:
+            version=grant["dependency_versions"][dep]
+            row=db.execute("SELECT * FROM wheel_grants WHERE card_id=? AND attempt=?",
+                           (dep,version["attempt"])).fetchone()
+            if row and row["state"]=="closed" and dep not in cards:
+                continue
+            if not self._diagnostic_fallback_valid(db,grant,dep,version,fallback_edges):
+                return False
+        return True
+
     def tick(self):
         if not self.enabled():
             return {"enabled":False}
@@ -900,9 +940,7 @@ class Wheel:
                     if "A" not in g["operations"] or self._expired(g):
                         self._pause_head(db,"WHEEL_HEAD_PERMISSION_REQUIRED")
                         return {"paused":"WHEEL_HEAD_PERMISSION_REQUIRED","card_id":first["id"]}
-                    if not all(dep not in cards and db.execute(
-                        "SELECT 1 FROM wheel_grants WHERE card_id=? AND attempt=? AND state='closed'",
-                        (dep,g["dependency_versions"][dep]["attempt"])).fetchone() for dep in g["depends_on"]):
+                    if not self._dependencies_ready(db,g,trial,cards):
                         self._pause_head(db,"WHEEL_HEAD_DEPENDENCY_BLOCKED")
                         return {"paused":"WHEEL_HEAD_DEPENDENCY_BLOCKED","card_id":first["id"]}
                     row=candidate

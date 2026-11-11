@@ -276,17 +276,22 @@ function wheelReasonText(reason) {
     WHEEL_CODEX_AUTH:"La sesión de Codex no está verificada.",WHEEL_CODEX_QUOTA:"La cuota de Codex no está disponible.",
     WHEEL_CODEX_SESSION_CHANGED:"Cambió la cuenta de Codex vinculada al lote.",WHEEL_SUBJECT_CHANGED:"Cambió la cola o una instrucción desde su revisión.",
     WHEEL_BATCH_ORDER_CHANGED:"El orden de Trello cambió desde la revisión.",WHEEL_WORKSPACE_BUSY:"Hay un trabajo en curso o pendiente de conciliar.",
-    OWNER_PAUSED:"La fábrica está pausada por el propietario."})[reason] || (reason ? "Bloqueo registrado: "+reason : "");
+    WHEEL_HEAD_DEPENDENCY_BLOCKED:"La alternativa de dependencia fue rechazada antes de iniciar el ejecutor.",
+    OWNER_PAUSED:"La fábrica está pausada por el propietario.",
+    OWNER_STOPPED:"La fábrica está detenida. Revisa el lote antes de continuar."})[reason] || (reason ? "Bloqueo registrado: "+reason : "");
 }
 function renderWheel(wheel) {
   const grants = wheel?.grants || [];
   el("wheelState").textContent = !wheel ? "ESTADO SIN VERIFICAR · La rueda no está disponible en este coordinador."
     : (wheel.enabled ? "FÁBRICA ACTIVADA" : wheel.frozen_batch?.state === "completed" ? "FÁBRICA FINALIZADA"
+      : wheel.reason === "OWNER_STOPPED" ? "FÁBRICA DETENIDA · " + wheelReasonText(wheel.reason)
       : wheel.reason && wheel.reason !== "OWNER_PAUSED" ? "FÁBRICA BLOQUEADA · " + wheelReasonText(wheel.reason)
       : "FÁBRICA PAUSADA") + (wheel.reason && wheel.reason === "OWNER_PAUSED" ? " · " + wheelReasonText(wheel.reason) : "");
   const current = wheel?.current;
   const last = grants.find(row => row.stages && Object.keys(row.stages).length) || {};
   const next = wheel?.queue_head || wheel?.next;
+  el("wheelCurrent").textContent="Trabajo actual: "+(current?.title||"ninguno");
+  el("wheelNext").textContent="Siguiente trabajo pendiente: "+(wheel?.grants?.filter(row=>row.state==="ready").sort((a,b)=>a.position-b.position)[0]?.title||next?.title||"ninguno");
   const frozen = wheel?.frozen_batch;
   const summary = el("wheelSummary");
   const rows = [
@@ -350,7 +355,7 @@ function syncWheelControls() {
   el("wheelReview").disabled = wheelBusy || !wheel;
   el("wheelQuota").disabled = wheelBusy || !wheel;
   const activate=el("wheelActivate");
-  activate.classList.remove("state-active","state-paused","state-blocked","state-inactive","state-finished","state-pending","state-unknown");
+  activate.classList.remove("state-active","state-paused","state-stopped","state-blocked","state-inactive","state-finished","state-pending","state-unknown");
   activate.classList.toggle("is-working",Boolean(wheel?.enabled&&wheel.current?.job_state==="running"));
   activate.title="";
   if(wheelActivationPending){activate.textContent="ACTIVANDO…";activate.classList.add("state-pending");activate.disabled=true;}
@@ -359,10 +364,11 @@ function syncWheelControls() {
   else if(frozen?.state==="completed"){activate.textContent="FÁBRICA FINALIZADA";activate.classList.add("state-finished");activate.disabled=true;}
   else if(frozen?.state==="prepared"){activate.textContent="FÁBRICA DESACTIVADA";activate.classList.add("state-inactive");activate.disabled=true;}
   else if(frozen?.state==="active"&&(frozen.policy!=="independent-v2"||(wheel.reason&&wheel.reason!=="OWNER_PAUSED"))){
-    activate.textContent="FÁBRICA BLOQUEADA · REVISAR EN PANEL PRIVADO";activate.classList.add("state-blocked");activate.disabled=true;
+    activate.textContent=wheel.reason==="OWNER_STOPPED"?"FÁBRICA DETENIDA · REVISAR":"FÁBRICA BLOQUEADA · REVISAR EN PANEL PRIVADO";activate.classList.add(wheel.reason==="OWNER_STOPPED"?"state-stopped":"state-blocked");activate.disabled=true;
     activate.title=wheelReasonText(wheel.reason)||"Este lote necesita la revisión de activación del panel privado.";
   } else {activate.textContent="FÁBRICA PAUSADA · ACTIVAR";activate.classList.add("state-paused");activate.disabled=wheelBusy||!ready||Boolean(frozen&&frozen.state!=="active");activate.title="El servidor confirmará la activación antes de mostrar el estado verde.";}
   el("wheelPause").disabled = wheelBusy || !wheel?.enabled;
+  el("wheelStop").disabled = wheelBusy || !wheel?.enabled;
   el("wheelRestart").disabled = wheelBusy || Boolean(state?.jobs?.some(job=>["running","detached"].includes(job.state)));
   el("wheelCondition").textContent = !wheel ? "El coordinador debe cargar la versión con rueda."
     : !ready ? "Para activar la rueda, asigna y habilita la carpeta del Agente 4."
@@ -483,6 +489,11 @@ for (const [id,enabled] of [["wheelActivate",true],["wheelPause",false]]) {
     notice(enabled ? "Rueda activa para tarjetas preautorizadas." : "Pausa solicitada. Consulta la tarea en curso.");
   });});
 }
+el("wheelStop").addEventListener("click",()=>wheelAction(async()=>{
+  await api("/api/wheel/stop",{});
+  await refresh();
+  notice("Fábrica detenida. Revisa el lote antes de una nueva activación.");
+}));
 
 el("wheelRestart").addEventListener("click",()=>wheelAction(async()=>{
   await api("/api/wheel/restart",{});

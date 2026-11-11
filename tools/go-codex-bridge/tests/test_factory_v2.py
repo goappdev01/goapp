@@ -129,6 +129,36 @@ class V2WheelTests(unittest.TestCase):
         self.assertTrue(selected["explicit_diagnostic_fallback"])
         self.assertFalse(self.runs or self.changes)
 
+    def test_signed_fallback_survives_final_head_check_without_running_codex(self):
+        w,ids=self.batch(diagnostic_fallback=True)
+        with self.bridge.db() as db:
+            grant=w._verified(db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[2],)).fetchone())
+        w._verify_dependencies(grant)
+        with patch.object(w,'_advance',return_value={'selected':ids[2]}) as advance:
+            result=w.tick()
+        self.assertEqual(result,{'selected':ids[2]})
+        self.assertTrue(w.enabled())
+        self.assertEqual(w.status()['current']['card_id'],ids[2])
+        self.assertEqual(advance.call_args.args[0]['card_id'],ids[2])
+        self.assertFalse(self.runs or self.changes)
+
+    def test_confirmed_activation_and_later_block_are_not_reported_as_unconfirmed(self):
+        button=RemotePanel.activation_button({'enabled':False,'reason':'WHEEL_HEAD_DEPENDENCY_BLOCKED',
+            'batch_id':'batch','batch_state':'active','activation_confirmed':True},[])
+        self.assertEqual(button['state'],'blocked')
+        self.assertIn('Activación confirmada',button['progress'])
+        self.assertNotIn('no se confirmó',button['progress'])
+        stopped=RemotePanel.activation_button({'enabled':False,'reason':'OWNER_STOPPED',
+            'batch_id':'batch','batch_state':'active','activation_confirmed':True},[])
+        self.assertEqual(stopped['state'],'stopped')
+        self.assertIn('DETENIDA',stopped['label'])
+
+    def test_fallback_revoked_by_dependency_state_never_selects_dependent(self):
+        w,ids=self.batch(diagnostic_fallback=True)
+        self.block(w,ids[1],'waiting_response')
+        self.assertEqual(w._trial_limit()['expected'],ids[3])
+        self.assertFalse(self.runs or self.changes)
+
     def test_signed_fallback_does_not_bypass_waiting_response(self):
         w,ids=self.batch(diagnostic_fallback=True)
         self.block(w,ids[1],"waiting_response")

@@ -31,7 +31,9 @@ class RemotePanel:
         "WHEEL_BATCH_ORDER_CHANGED":"El orden actual de Trello no coincide con el lote revisado.",
         "WHEEL_V2_ACTIVATION_REQUIRED":"El lote requiere una revisión de activación en el panel privado.",
         "WHEEL_REVIEW_REQUIRED":"El bloqueo requiere revisar el lote antes de reactivarlo.",
+        "WHEEL_HEAD_DEPENDENCY_BLOCKED":"La alternativa de dependencia fue rechazada antes de iniciar el ejecutor. No se ejecutó otra tarjeta.",
         "OWNER_PAUSED":"La fábrica está pausada por el propietario.",
+        "OWNER_STOPPED":"La fábrica está detenida. Para continuar hace falta revisar y confirmar el lote vigente.",
     }
 
     def __init__(self,bridge):
@@ -61,6 +63,8 @@ class RemotePanel:
             state,label,disabled="finished","FÁBRICA FINALIZADA",True
         elif not batch_id or batch_state!="active":
             state,label,disabled="inactive","FÁBRICA DESACTIVADA",True
+        elif reason=="OWNER_STOPPED":
+            state,label,disabled="stopped","FÁBRICA DETENIDA · REVISAR",in_flight
         else:
             state="blocked" if reason and reason!="OWNER_PAUSED" else "paused"
             label="FÁBRICA BLOQUEADA · REVISAR" if state=="blocked" else "FÁBRICA PAUSADA · ACTIVAR"
@@ -71,8 +75,9 @@ class RemotePanel:
                       if current else f"ACTIVA — esperando una operación autorizada · {completed}/{total} tarjetas cerradas")
         elif state=="finished":
             progress=f"Lote finalizado · {completed}/{total} tarjetas cerradas"
-        elif state=="blocked":
-            progress=cls.REASON_MESSAGES.get(reason,"La activación anterior no se confirmó. Revisa el lote antes de continuar.")
+        elif state in ("blocked","stopped"):
+            detail=cls.REASON_MESSAGES.get(reason,"La rueda se bloqueó después de registrar el estado anterior. Revisa el motivo antes de continuar.")
+            progress=("Activación confirmada; "+detail[0].lower()+detail[1:]) if wheel.get("activation_confirmed") else detail
         elif state=="paused":
             progress=f"Pausada · {completed}/{total} tarjetas cerradas"
         else:
@@ -156,10 +161,13 @@ class RemotePanel:
                                 "question":private_text(doc["question"]),"operation":private_text(doc["operation"]),
                                 "state":row["state"]})
         enabled=wheel["enabled"]
+        working=any(card["state"]=="working" and card["activity"]["state"] in ("running","detached") for card in cards)
         if enabled:
-            state="trabajando"
+            state="trabajando" if working else "activada"
         elif batch and batch["state"]=="completed":
             state="terminada"
+        elif wheel["reason"]=="OWNER_STOPPED":
+            state="detenida"
         elif wheel["reason"] and wheel["reason"]!="OWNER_PAUSED":
             state="bloqueada"
         else:
@@ -185,8 +193,19 @@ class RemotePanel:
         expo['url']=launches['links'].get('owner',{}).get('url')
         try:device_diagnostics=self.device_probes.latest()
         except Exception:device_diagnostics={'browser':None,'launch':None,'limits':'No se pudo leer el registro.'}
+        activation_confirmed=False
+        if batch and batch.get("policy")=="independent-v2":
+            try:
+                with self.b.db() as db:
+                    row,doc=self.w._latest_trial(db)
+                    self.w.continuity.verify_activation(row["id"],doc,db)
+                activation_confirmed=True
+            except (self.w.f.Error,TypeError,KeyError):
+                pass
         wheel_view={"enabled":enabled,"state":state,"reason":wheel["reason"],"batch_id":(batch or {}).get("id"),
-                    "batch_state":(batch or {}).get("state")}
+                    "batch_state":(batch or {}).get("state"),"activation_confirmed":activation_confirmed,
+                    "current":next((card["title"] for card in cards if card["state"]=="working"),None),
+                    "next":next((card["title"] for card in cards if card["state"]=="ready"),None)}
         wheel_view["button"]=self.activation_button(wheel_view,cards)
         return {"version":__import__("puente").EXECUTOR_VERSION,"source_sha256":getattr(self.b,'loaded_code_sha256',None),"updated":self.f.utc(),
                 "wheel":wheel_view,
@@ -267,6 +286,9 @@ class RemotePanel:
         elif path=="/remote/pause" and not body:
             self.w.pause("OWNER_PAUSED")
             result={"paused":True}
+        elif path=="/remote/stop" and not body:
+            self.w.pause("OWNER_STOPPED")
+            result={"stopped":True}
         elif path=="/remote/preview" and set(body)=={"action","payload"} and isinstance(body["payload"],dict):
             result=self.preview(body["action"],body["payload"],principal)
         elif path=="/remote/decide" and set(body)=={"ticket","confirmation"}:

@@ -37,7 +37,7 @@ APP = "GO-Puente-Codex"
 SCOPES = {"read:board:trello", "write:board:trello", "offline_access"}
 TEST_INSTRUCTION = "Sin utilizar herramientas ni acceder a archivos, responde exactamente GO_PUENTE_CODEX_OK."
 TERMINAL = {"completed", "blocked", "failed", "interrupted", "needs_review"}
-EXECUTOR_VERSION = "2026-11-11-factory-owner-review-1"
+EXECUTOR_VERSION = "2026-11-11-factory-activation-state-2"
 
 
 def codex_command(executable, sandbox, workspace, answer_file):
@@ -1477,6 +1477,9 @@ def server(bridge, open_browser=True):
                     result = bridge.factory.wheel.approve(body["decisions"], start_frozen_batch=body["start_frozen_batch"])
                 elif path == "/api/wheel/toggle" and set(body) == {"enabled"}:
                     result = bridge.factory.wheel.toggle(body["enabled"])
+                elif path == "/api/wheel/stop" and not body:
+                    bridge.factory.wheel.pause("OWNER_STOPPED")
+                    result = bridge.factory.wheel.status()
                 elif path == "/api/wheel/restart" and not body:
                     if not bridge.factory.lock.acquire(blocking=False):
                         raise BridgeError("BRIDGE_BUSY","Espera al límite seguro de la operación actual.",409)
