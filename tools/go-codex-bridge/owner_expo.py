@@ -32,7 +32,8 @@ class OwnerExpo:
     def fail(self,code,text):raise self.b.factory.Error(code,text)
 
     def git(self,doc,*args):
-        return subprocess.check_output(['git','-C',doc['workspace'],*args],text=True,stderr=subprocess.PIPE,timeout=30).strip()
+        # Porcelain's first two columns are meaningful, including a leading space.
+        return subprocess.check_output(['git','-C',doc['workspace'],*args],text=True,stderr=subprocess.PIPE,timeout=30).rstrip('\r\n')
 
     def clean(self,doc):
         # Expo may regenerate this tracked file with equivalent line endings.

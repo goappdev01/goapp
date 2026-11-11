@@ -592,6 +592,20 @@ class RemoteTests(unittest.TestCase):
             with self.assertRaises(BridgeError):manager.review('expo_select',{'sha':'b'*40})
         self.assertFalse(self.bridge.factory.wheel.enabled())
 
+    def test_owner_clean_preserves_porcelain_columns_for_equivalent_expo_file(self):
+        manager=OwnerExpo(self.bridge)
+        workspace=self.bridge.home/'synthetic-owner'
+        generated=workspace/'artifacts/go-app-mobile/expo-env.d.ts'
+        generated.parent.mkdir(parents=True)
+        generated.write_text('generated\n',encoding='utf-8')
+        with patch('owner_expo.subprocess.check_output',side_effect=[
+                ' M artifacts/go-app-mobile/expo-env.d.ts\n','generated\n']):
+            manager.clean({'workspace':str(workspace)})
+        generated.write_text('different\n',encoding='utf-8')
+        with patch('owner_expo.subprocess.check_output',side_effect=[
+                ' M artifacts/go-app-mobile/expo-env.d.ts\n','generated\n']):
+            with self.assertRaises(BridgeError):manager.clean({'workspace':str(workspace)})
+
     def test_owner_running_version_is_not_automatically_main(self):
         manager=OwnerExpo(self.bridge)
         doc={'port':8089,'workspace':'synthetic','sha':'a'*40,'host':'100.64.0.1','state':'verified'}
