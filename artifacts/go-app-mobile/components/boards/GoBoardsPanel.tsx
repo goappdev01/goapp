@@ -122,7 +122,7 @@ function BoardsContent({ onClose, manager }: { onClose: () => void; manager: Man
   return <Modal visible animationType="slide" onRequestClose={close}>
     <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 8), paddingLeft: insets.left, paddingRight: insets.right }]}>
       <View style={[styles.header, { flexDirection: appearance.handedness === "left" ? "row-reverse" : "row" }]}><TouchableOpacity accessibilityLabel="Volver a Calendario y Reservas" onPress={close} style={{ padding: 12 }}><Feather name="chevron-left" size={23} color="white" /></TouchableOpacity>
-        <View style={{ flex: 1 }}><Text style={styles.title}>{editor ? "Ficha de tarea" : boardEditor ? "Editar tablero" : columnEditor ? "Columna" : transfer ? "Mover tarea" : doc?.name || "GO Tableros"}</Text>
+        <View style={{ flex: 1, minWidth: 0 }}><Text style={[styles.title, { fontSize: Math.max(17, 17 * appearance.scale), flexShrink: 1 }]}>{editor ? "Ficha de tarea" : boardEditor ? "Editar tablero" : columnEditor ? "Columna" : transfer ? "Mover tarea" : doc?.name || "GO Tableros"}</Text>
           <Text style={styles.muted}>{state.pending ? `${state.pending} cambio(s) guardados en este dispositivo, pendientes de sincronizar` : "ADMIN · Tu organización privada"}</Text></View>
         <GoCloseButton level="container" accessibilityLabel="Cerrar Tablero" onPress={onClose} /></View>
       {!!(notice || state.error) && <View style={styles.banner}><Text style={styles.text}>{notice || state.error}</Text><View style={styles.row}>
@@ -158,7 +158,7 @@ function BoardsContent({ onClose, manager }: { onClose: () => void; manager: Man
           grid={grid} setGrid={setGrid}
           onOpen={board => void work(() => open(board.id))} onMore={() => void work(() => store.list(search, archive, true))}
           onCreate={() => setBoardEditor(newBoard(id(), admin.userId!, "Nuevo tablero", id(), today()))} />
-        : <><ScrollView horizontal style={{ maxHeight: 62 }} contentContainerStyle={{ gap: 8, padding: 10 }}>
+        : <><ScrollView horizontal style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 8, padding: 10 }}>
           <Button label="Editar tablero" onPress={() => setBoardEditor(doc)} />
           <Button label={doc.archived ? "Recuperar" : "Archivar"} onPress={() => void work(() => store.change({ type: "settings", patch: { archived: !doc.archived } }))} />
           <Button label="Duplicar estructura" onPress={() => setBoardEditor(duplicateBoardStructure(doc, id(), `${doc.name} · copia`, id))} />
