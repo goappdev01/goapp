@@ -527,7 +527,7 @@ class Continuity:
             if not cards or cards[0]['id']!=credit['card_id']:
                 self.w.pause('OWNER_PAUSED')
                 return {'bound':True,'enabled':False,'resumed':False,
-                        'message':'Cuenta vinculada; el checkpoint espera su turno. Pulsa PLAY para continuar la cola.'}
+                        'message':'Cuenta vinculada; el checkpoint espera su turno. El trabajo parcial conserva su carpeta.'}
             resumed=self.w.resume_after_quota()
             return {'bound':True,'enabled':self.w.enabled(),'resumed':resumed,
                     'message':('Cuenta vinculada y sesión conservada reanudada.' if resumed else
