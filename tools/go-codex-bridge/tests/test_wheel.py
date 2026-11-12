@@ -585,6 +585,77 @@ class WheelTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT reason,retry_after FROM wheel_control WHERE id=1").fetchone()[:],
                              (None,0))
         self.assertTrue(wheel.enabled())
+        with patch.object(wheel,"_trial_limit",side_effect=BridgeError("NETWORK_UNCERTAIN","Synthetic mid-cycle read")):
+            self.assertTrue(wheel.tick()["trello_retry"])
+        self.assertTrue(wheel.enabled())
+
+    def test_trello_failure_before_write_waits_then_resumes_same_card(self):
+        self.cards.pop("b"*24)
+        wheel=self.bridge.factory.wheel
+        wheel.approve(self.decisions())
+        wheel.toggle(True)
+        original=WheelEffects.perform
+        failures=[]
+        def perform(effect,letter,row,grant,permit):
+            if letter=="C" and not failures:
+                failures.append(True)
+                raise BridgeError("NETWORK_UNCERTAIN","Synthetic Trello outage before write")
+            return original(effect,letter,row,grant,permit)
+        original_git=WheelPublication.git_command
+        def git(pub,workspace,*args):
+            if args[:2]==("remote","get-url"):
+                return "https://github.com/goappdev01/goapp.git\n"
+            return original_git(pub,workspace,*args)
+        with patch.object(wheel,"_preflight"),patch.object(WheelPublication,"git_command",git),\
+             patch.object(WheelEffects,"_dependencies"),patch.object(WheelEffects,"_tests",return_value=[{"passed":True}]),\
+             patch.object(WheelEffects,"perform",perform):
+            for _ in range(12):
+                result=wheel.tick()
+                if result.get("trello_retry"):
+                    break
+            self.assertEqual(len(failures),1)
+            self.assertTrue(result["trello_retry"])
+            self.assertTrue(wheel.enabled())
+            self.assertEqual(self.changes,[])
+            with self.bridge.db() as db:
+                db.execute("UPDATE wheel_control SET retry_after=0 WHERE id=1")
+            for _ in range(8):
+                result=wheel.tick()
+                if result.get("closed"):
+                    break
+            self.assertEqual(result.get("closed"),"a"*24)
+        self.assertEqual(self.changes,[("a"*24,"C"),("a"*24,"D")])
+        self.assertEqual(self.runs,["a"*24])
+
+    def test_lost_trello_comment_response_reconciles_without_duplicate(self):
+        self.cards.pop("b"*24)
+        self.lose_response=True
+        wheel=self.bridge.factory.wheel
+        wheel.approve(self.decisions())
+        wheel.toggle(True)
+        original_git=WheelPublication.git_command
+        def git(pub,workspace,*args):
+            if args[:2]==("remote","get-url"):
+                return "https://github.com/goappdev01/goapp.git\n"
+            return original_git(pub,workspace,*args)
+        with patch.object(wheel,"_preflight"),patch.object(WheelPublication,"git_command",git),\
+             patch.object(WheelEffects,"_dependencies"),patch.object(WheelEffects,"_tests",return_value=[{"passed":True}]):
+            for _ in range(12):
+                result=wheel.tick()
+                if result.get("trello_retry"):
+                    break
+            self.assertTrue(result["trello_retry"])
+            self.assertTrue(wheel.enabled())
+            self.assertEqual(self.changes,[("a"*24,"C")])
+            with self.bridge.db() as db:
+                db.execute("UPDATE wheel_control SET retry_after=0 WHERE id=1")
+            for _ in range(8):
+                result=wheel.tick()
+                if result.get("closed"):
+                    break
+            self.assertEqual(result.get("closed"),"a"*24)
+        self.assertEqual(self.changes,[("a"*24,"C"),("a"*24,"D")])
+        self.assertEqual(len(self.cards["a"*24]["comments"]),2)
 
     def test_a_known_failed_patch_is_preserved_and_queue_stops_at_head(self):
         wheel=self.bridge.factory.wheel

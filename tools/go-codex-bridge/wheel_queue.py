@@ -25,6 +25,9 @@ SYSTEM_ERRORS.update({"WHEEL_VALIDATION_UNCERTAIN","WHEEL_INSTALL_UNCERTAIN"})
 CODEX_BLOCKERS = {"WHEEL_CODEX_AUTH", "WHEEL_CODEX_QUOTA", "WHEEL_CODEX_SESSION_CHANGED"}
 SYSTEM_ERRORS.update(CODEX_BLOCKERS | {"WHEEL_DIAGNOSIS_WORKSPACE_CHANGED"})
 FINISHED = {"closed", "blocked", "uncertain", "expired", "credit_wait"}
+TRELLO_RETRY_CODES = {"NETWORK_UNCERTAIN", "INVALID_RESPONSE", "HTTP_429", "HTTP_500",
+                      "HTTP_502", "HTTP_503", "HTTP_504", "HTTP_401", "HTTP_403",
+                      "REFRESH_UNCERTAIN", "WHEEL_TRELLO_UNCERTAIN"}
 
 
 class Wheel:
@@ -1065,6 +1068,14 @@ class Wheel:
         self.pause(code)
         return {"blocked":code,"again":self.enabled()}
 
+    def _trello_wait(self,code):
+        deadline=time.time()+30
+        with self.b.db() as db:
+            db.execute("UPDATE wheel_control SET reason='TRELLO_TEMPORARY_UNAVAILABLE',retry_after=? WHERE id=1 AND enabled=1",
+                       (deadline,))
+            self.b.audit("wheel_trello_retry",{"code":code,"seconds":30},db)
+        return {"trello_retry":True,"retry_after":deadline}
+
     def _advance(self,g,card,*,codex_identity=None):
         from wheel_effects import WheelEffects
         effects=WheelEffects(self.f)
@@ -1086,9 +1097,19 @@ class Wheel:
                 self.pause("WHEEL_PERMISSION_REQUIRED")
                 return {"paused":"WHEEL_PERMISSION_REQUIRED","letter":letter}
             if step:
-                receipt=effects.reconcile(letter,row,g)
+                try:
+                    receipt=effects.reconcile(letter,row,g)
+                except self.f.Error as error:
+                    if error.code in TRELLO_RETRY_CODES:
+                        return self._trello_wait(error.code)
+                    raise
                 if not receipt:
                     code = "PUBLICATION_UNCERTAIN" if letter=="B" else "WHEEL_EXECUTION_UNCERTAIN" if letter=="A" else "WHEEL_STAGE_UNCERTAIN"
+                    if letter in "CD" and step["approval_id"] and self.continuity.active():
+                        # A released Trello write was not found after a successful
+                        # read. Keep its journal for review; do not send it twice.
+                        self._transition(g,"uncertain",code)
+                        return {"again":True,"card_pending_review":g["card_id"]}
                     return self._finish_error(g,code,True)
                 self._record_receipt(g,letter,receipt)
                 return {"again":True}
@@ -1131,6 +1152,12 @@ class Wheel:
                 code=getattr(error,"code","WHEEL_EFFECT_UNCERTAIN")
                 with self.b.db() as db:
                     issued=db.execute("SELECT approval_id FROM wheel_stages WHERE grant_id=? AND letter=?",(g["grant_id"],letter)).fetchone()[0]
+                if letter in "CD" and code in TRELLO_RETRY_CODES:
+                    if not issued and effects.cancel_before_release(letter,row):
+                        with self.b.db() as db:
+                            db.execute("DELETE FROM wheel_stages WHERE grant_id=? AND letter=? AND state='claimed' AND approval_id IS NULL",
+                                       (g["grant_id"],letter))
+                    return self._trello_wait(code)
                 if code in CODEX_BLOCKERS and letter=="A" and not issued:
                     with self.b.db() as db:
                         db.execute("DELETE FROM wheel_stages WHERE grant_id=? AND letter='A' AND state='claimed' AND approval_id IS NULL",
@@ -1376,15 +1403,8 @@ class Wheel:
                 # A failed Trello read cannot establish current queue order. Keep
                 # the wheel enabled and retry only the read after 30 seconds;
                 # never replay a write whose response may have been lost.
-                if error.code in {"NETWORK_UNCERTAIN","INVALID_RESPONSE","HTTP_429","HTTP_500",
-                                  "HTTP_502","HTTP_503","HTTP_504","HTTP_401","HTTP_403",
-                                  "REFRESH_UNCERTAIN"}:
-                    deadline=time.time()+30
-                    with self.b.db() as db:
-                        db.execute("UPDATE wheel_control SET reason='TRELLO_TEMPORARY_UNAVAILABLE',retry_after=? WHERE id=1 AND enabled=1",
-                                   (deadline,))
-                        self.b.audit("wheel_trello_read_retry",{"code":error.code,"seconds":30},db)
-                    return {"trello_retry":True,"retry_after":deadline}
+                if error.code in TRELLO_RETRY_CODES:
+                    return self._trello_wait(error.code)
                 raise
             with self.b.db() as db:
                 db.execute("UPDATE wheel_control SET reason=NULL,retry_after=0 WHERE id=1 AND enabled=1 AND reason='TRELLO_TEMPORARY_UNAVAILABLE'")
@@ -1474,5 +1494,7 @@ class Wheel:
                 with self.b.card_workspace(g["workspace"]):
                     return self._finish_error(g,error.code)
         except self.f.Error as error:
+            if error.code in TRELLO_RETRY_CODES:
+                return self._trello_wait(error.code)
             self.pause(error.code)
             return {"paused":error.code}
