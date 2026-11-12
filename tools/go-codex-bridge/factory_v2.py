@@ -727,9 +727,9 @@ class Continuity:
                         "programming_started":False})
                     job=self.b.job(job["id"])
                 self._defer_question_to_trello(grant,{
-                    "question":"La tarjeta requiere una comprobación o autorización adicional. "
-                               "El trabajo conservado todavía no está publicado.",
-                    "operation":code},job,allow_prepared=True)
+                    "question":"Bloqueo individual " + code + ". El trabajo conservado todavía no está publicado.",
+                    "operation":"Resolver la causa indicada y revisar este intento antes de continuar."},
+                    job,allow_prepared=True)
             except self.f.Error as error:
                 self.w.pause(error.code)
                 return {"paused":error.code,"card_id":grant["card_id"]}
@@ -752,8 +752,8 @@ class Continuity:
         card,comments=effects._snapshot(grant["card_id"])
         if card["idList"]!=grant["origin"] or [c["id"] for c in self.f.original_comments(card["id"],comments)]!=grant["comment_ids"]:
             self.w.fail("WHEEL_TRELLO_CHANGED","La tarjeta cambió antes de registrar la pregunta.")
-        comment=("Pendiente de respuesta del propietario. El trabajo parcial está conservado; "
-                 "no hay publicación confirmada.\n\n1. Pregunta: "+text+"\n2. Operación pendiente: "+operation)
+        comment=("CONFLICTO. El trabajo parcial está conservado; no hay publicación confirmada.\n\n"
+                 "1. Causa: "+text+"\n2. Solución pendiente: "+operation)
         for letter,action,data in (("C","comment",{"card_id":card["id"],"text":comment,"job_id":job["id"]}),
                                    ("D","move",{"card_id":card["id"],"list_id":CHECK,"pos":"top"})):
             with self.b.db() as db:
