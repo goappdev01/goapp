@@ -1,9 +1,63 @@
-import React,{useRef,useState} from "react";
-import {View,Text,PanResponder} from "react-native";
-import {GoCloseButton} from "./GoCloseButton";
-import {useNavigationOpacity,setNavigationOpacity,clampNavigationOpacity} from "./goNavigationAppearance";
-export function GoNavigationAppearanceControl(){const opacity=useNavigationOpacity(),width=useRef(1),current=useRef(opacity),[error,setError]=useState(false);current.current=opacity;
- const update=(v:number)=>{void setNavigationOpacity(v).then(()=>setError(false)).catch(()=>setError(true));};
- const pan=useRef(PanResponder.create({onStartShouldSetPanResponder:()=>true,onMoveShouldSetPanResponder:()=>true,onPanResponderGrant:e=>update(11+88*e.nativeEvent.locationX/width.current),onPanResponderMove:e=>update(11+88*e.nativeEvent.locationX/width.current)})).current;
- return <View style={{padding:16,gap:12}}><Text style={{color:"#FFFFFF",fontSize:15}}>Opacidad de botones de navegación · {opacity}%</Text><View style={{flexDirection:"row",justifyContent:"space-around"}}>{(["panel","container","settings"] as const).map((level,i)=><GoCloseButton key={level} level={level} accessibilityLabel={["Vista previa de Atrás","Vista previa de Salir","Vista previa de Configuración"][i]} onPress={()=>{}}/>)}</View><View accessibilityRole="adjustable" accessibilityLabel="Opacidad de botones de navegación" accessibilityValue={{min:11,max:99,now:opacity,text:opacity+"%"}} accessibilityActions={[{name:"increment"},{name:"decrement"}]} onAccessibilityAction={e=>update(clampNavigationOpacity(current.current+(e.nativeEvent.actionName==="increment"?1:-1)))} onLayout={e=>{width.current=e.nativeEvent.layout.width;}} {...pan.panHandlers} style={{height:44,justifyContent:"center"}}><View pointerEvents="none" style={{height:5,borderRadius:3,backgroundColor:"#77818C"}}/><View pointerEvents="none" style={{position:"absolute",left:((opacity-11)/88*100)+"%",marginLeft:-10,width:20,height:20,borderRadius:10,backgroundColor:"#FFFFFF"}}/></View>{error&&<Text accessibilityRole="alert" style={{color:"#FFABAB"}}>No se pudo conservar la preferencia. Vuelve a ajustarla.</Text>}</View>;
+import React, { useRef, useState } from "react";
+import { View, Text, PanResponder, StyleSheet } from "react-native";
+import { GoCloseButton } from "./GoCloseButton";
+import { useNavigationOpacity, setNavigationOpacity, clampNavigationOpacity } from "./goNavigationAppearance";
+
+export function GoNavigationAppearanceControl() {
+  const opacity = useNavigationOpacity();
+  const width = useRef(1);
+  const current = useRef(opacity);
+  const [error, setError] = useState(false);
+  current.current = opacity;
+
+  const update = (value: number) => {
+    void setNavigationOpacity(value).then(() => setError(false)).catch(() => setError(true));
+  };
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: e => update(11 + 88 * e.nativeEvent.locationX / width.current),
+    onPanResponderMove: e => update(11 + 88 * e.nativeEvent.locationX / width.current),
+  })).current;
+
+  return (
+    <View style={s.control}>
+      <Text style={s.label} numberOfLines={1} adjustsFontSizeToFit>Opacidad · {opacity}%</Text>
+      <View style={s.previews}>
+        {(["panel", "container", "settings"] as const).map((level, i) => (
+          <GoCloseButton
+            key={level}
+            level={level}
+            accessibilityLabel={["Vista previa de Atrás", "Vista previa de Salir", "Vista previa de Configuración"][i]}
+            onPress={() => {}}
+          />
+        ))}
+      </View>
+      <View
+        accessibilityRole="adjustable"
+        accessibilityLabel="Opacidad de botones de navegación"
+        accessibilityValue={{ min: 11, max: 99, now: opacity, text: opacity + "%" }}
+        accessibilityActions={[{ name: "increment" }, { name: "decrement" }]}
+        onAccessibilityAction={e => update(clampNavigationOpacity(current.current + (e.nativeEvent.actionName === "increment" ? 1 : -1)))}
+        onLayout={e => { width.current = e.nativeEvent.layout.width; }}
+        {...pan.panHandlers}
+        style={s.slider}
+      >
+        <View pointerEvents="none" style={s.track} />
+        <View pointerEvents="none" style={[s.thumb, { left: ((opacity - 11) / 88 * 100) + "%" }]} />
+      </View>
+      {error && <Text accessibilityRole="alert" style={s.error}>No se pudo conservar la preferencia. Vuelve a ajustarla.</Text>}
+    </View>
+  );
 }
+
+// Herramientas has a fixed light surface, including when iOS uses dark mode.
+const s = StyleSheet.create({
+  control: { paddingHorizontal: 16, paddingVertical: 4, gap: 4 },
+  label: { color: "#17212B", fontSize: 15 },
+  previews: { flexDirection: "row", justifyContent: "space-around" },
+  slider: { height: 44, justifyContent: "center" },
+  track: { height: 5, borderRadius: 3, backgroundColor: "#77818C" },
+  thumb: { position: "absolute", marginLeft: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: "#17212B" },
+  error: { color: "#9B1C1C" },
+});

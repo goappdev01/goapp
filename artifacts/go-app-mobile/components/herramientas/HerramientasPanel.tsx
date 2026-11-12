@@ -180,16 +180,20 @@ export function HerramientasPanel({
               </View>
               <Text style={s.rowTitle}>{t("handedness")}</Text>
             </View>
-            <View style={[s.segRow, { marginTop: 10 }]}>
+            <View style={[s.segRow, { marginTop: 8 }]}>
               {([
                 { k: "left"  as const, label: t("left_handed"),  icon: "←" },
-                { k: "center" as const, label: lang === "en" ? "Center" : "Centro", icon: "·" },
+                { k: "center" as const, label: lang === "en" ? "Center" : "Centro", icon: null },
                 { k: "right" as const, label: t("right_handed"), icon: "→" },
               ]).map(({ k, label, icon }) => {
                 const active = dock.position === k;
                 return (
                   <TouchableOpacity
                     key={k}
+                    accessibilityRole="radio"
+                    accessibilityLabel={label}
+                    accessibilityState={{ checked: active, selected: active }}
+                    aria-checked={active}
                     onPress={() => {
                       if (dock.position === k) return;
                       void dock.setPosition(k, k === "center" ? handedness : k).then(() => {
@@ -198,10 +202,10 @@ export function HerramientasPanel({
                       }).catch(() => showToast("No se pudo guardar la posición de GO.", "error"));
                     }}
                     activeOpacity={0.7}
-                    style={[s.segBtn, active && s.segBtnActive]}
+                    style={[s.segBtn, s.dockBtn, active && s.segBtnActive]}
                   >
-                    <Text style={[s.segIcon, active && s.segIconActive]}>{icon}</Text>
-                    <Text style={[s.segLabel, active && s.segLabelActive]}>{label}</Text>
+                    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} style={[s.segLabel, s.dockLabel, active && s.segLabelActive]}>{label}</Text>
+                    {icon && <Text accessible={false} style={[s.segIcon, active && s.segIconActive]}>{icon}</Text>}
                   </TouchableOpacity>
                 );
               })}
@@ -753,6 +757,8 @@ const s = StyleSheet.create({
   segIconActive:{ color: BLUE },
   segLabel:     { color: "#6B7280", fontSize: 11, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1 },
   segLabelActive: { color: "#111827" },
+  dockBtn:      { minHeight: 44, minWidth: 0, flexDirection: "row", justifyContent: "center", paddingVertical: 6, paddingHorizontal: 4, gap: 4 },
+  dockLabel:    { flexShrink: 1, letterSpacing: 0 },
 
   // Compact row (for country, language, region)
   compactRow:   { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 4 },
