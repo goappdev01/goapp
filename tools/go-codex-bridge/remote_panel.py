@@ -306,11 +306,22 @@ class RemotePanel:
             live=self.w.live_policy()
             if live:
                 self.w.f._identity();self.w.f._lists()
-                self.w._require_codex_identity(live["codex_identity"])
-                cards=list(self.w._available(self.w.f._cards()))
-                review={"live_queue":True,"consent_sha256":live["consent_sha256"],
-                        "count":len(cards),"first":cards[0]["name"] if cards else None,
-                        "account_changed":False,"renewals":[]}
+                try:
+                    self.w._require_codex_identity(live["codex_identity"])
+                except self.f.Error as error:
+                    if error.code!="WHEEL_CODEX_SESSION_CHANGED":
+                        raise
+                    # A previously paused wheel can have a stale OWNER_PAUSED
+                    # reason. Route the owner's review to the existing guarded
+                    # rebind flow; the preview itself never starts the wheel.
+                    self.w.activation_failed(error.code)
+                    review=self.w.continuity.review_live_rebind()
+                    action="rebind"
+                else:
+                    cards=list(self.w._available(self.w.f._cards()))
+                    review={"live_queue":True,"consent_sha256":live["consent_sha256"],
+                            "count":len(cards),"first":cards[0]["name"] if cards else None,
+                            "account_changed":False,"renewals":[]}
             else:
                 review=self.w.continuity.review_activation()
         elif action=="rebind":

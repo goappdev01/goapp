@@ -360,6 +360,21 @@ class V2WheelTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT count(*) FROM audit WHERE event='wheel_owner_account_bound'").fetchone()[0],1)
         self.assertFalse(self.runs or self.changes)
 
+    def test_review_play_routes_changed_account_to_owner_rebind(self):
+        wheel,grant,job_id,session=self.live_credit_wait()
+        wheel.pause('OWNER_PAUSED')
+        panel=RemotePanel(self.bridge)
+        ticket=panel.preview('activate',{},'synthetic-owner')
+        self.assertEqual(ticket['action'],'rebind')
+        self.assertEqual(ticket['confirmation'],'VINCULAR CUENTA Y REANUDAR COLA')
+        self.assertEqual(ticket['review']['pending'][0]['card_id'],grant['card_id'])
+        self.assertEqual(wheel.status()['reason'],'WHEEL_CODEX_SESSION_CHANGED')
+        self.assertFalse(wheel.enabled())
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT session_id FROM jobs WHERE id=?',(job_id,)).fetchone()[0],session)
+        self.assertFalse(self.runs or self.changes)
+
     def test_live_queue_rebind_requires_owner_review_and_resumes_exact_session(self):
         w,grant,job_id,session=self.live_credit_wait()
         panel=RemotePanel(self.bridge)
