@@ -92,8 +92,8 @@ class RemotePanel:
             self.w.fail("ORBIT_V2_METRO_UNVERIFIED",str(error)[:180])
 
     def orbit_control(self,action,body,principal):
-        if action=="preview" and body=={"action":"activate"}:
-            return self.preview("activate",{},principal)
+        if action=="preview" and body in ({"action":"activate"},{"action":"rebind"}):
+            return self.preview(body["action"],{},principal)
         if action=="decide" and set(body)=={"ticket","confirmation"}:
             return self.decide(body["ticket"],body["confirmation"],principal)
         if action in ("pause","stop"):
@@ -377,8 +377,12 @@ class RemotePanel:
         principal,csrf=self.authorize(handler,mutation)
         if not mutation:
             if path in ("/remote","/remote/"):
-                data=(self.b.home/"remote.html").read_bytes()
+                data=(self.b.home/"orbit-v2.html").read_bytes().replace(
+                    b'<script src="v2.js" defer></script>',
+                    b'<script src="/remote/v2.js" defer></script>')
                 self.send(handler,data,"text/html; charset=utf-8",csrf)
+            elif path=="/remote/legacy":
+                self.send(handler,(self.b.home/"remote.html").read_bytes(),"text/html; charset=utf-8",csrf)
             elif path=="/remote/panel.js":
                 self.send(handler,(self.b.home/"remote.js").read_bytes(),"text/javascript; charset=utf-8")
             elif path=="/remote/v2":

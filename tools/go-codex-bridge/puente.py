@@ -1439,7 +1439,7 @@ def server(bridge, open_browser=True):
                 if self.headers.get("Host") != "localhost:" + str(bridge.config["port"]):
                     raise BridgeError("HOST_BLOCKED", "Host no autorizado.", 403)
                 if path == "/":
-                    self.send(200, (bridge.home / "panel.html").read_bytes(), "text/html; charset=utf-8", cookie=True)
+                    self.send(200, (bridge.home / "orbit-v2.html").read_bytes(), "text/html; charset=utf-8", cookie=True)
                     return
                 if path == "/api/health":
                     self.send(200, {"application": APP, "home": str(bridge.home), "port": bridge.config["port"], "executor_version": EXECUTOR_VERSION,
@@ -1458,6 +1458,8 @@ def server(bridge, open_browser=True):
                 self.allowed()
                 if path == "/panel.js":
                     self.send(200, (bridge.home / "panel.js").read_bytes(), "text/javascript; charset=utf-8")
+                elif path == "/legacy":
+                    self.send(200, (bridge.home / "panel.html").read_bytes(), "text/html; charset=utf-8")
                 elif path == "/api/status":
                     self.send(200, {**bridge.status(), "csrf": session})
                 elif path == "/v2":

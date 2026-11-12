@@ -611,6 +611,17 @@ class RemoteTests(unittest.TestCase):
                              'OWNER_PAUSED')
             pause.assert_called_once_with('OWNER_PAUSED')
 
+    def test_orbit_v2_rebind_preview_reuses_owner_review_without_activation(self):
+        p,_=self.panel()
+        principal='owner@example.invalid'
+        with patch.object(p,'preview',return_value={'ticket':'rebind-ticket'}) as preview:
+            self.assertEqual(p.orbit_control('preview',{'action':'rebind'},principal),
+                             {'ticket':'rebind-ticket'})
+            preview.assert_called_once_with('rebind',{},principal)
+        self.assertFalse(self.bridge.factory.wheel.enabled())
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],0)
+
     def test_iphone_probe_rejects_windows_and_binds_phone_origin_and_single_use_nonce(self):
         p,h=self.panel();p.config.update(expo_phone='100.64.0.9');p.device_probes.config=p.config
         manager=OwnerExpo(p.b);owner={'port':8089,'sha':'a'*40,'host':'100.64.0.1','workspace':'C:/pinned'}
