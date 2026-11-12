@@ -640,7 +640,9 @@ class Continuity:
                         "codex_identity":doc["codex_identity"],"independent":True,
                         "post_move_close":True,"open_queue":True}
             return {"waiting":"WHEEL_WORKING_CARD_MISSING","again":False}
-        ordered=([cards.get(working["card_id"])] if working else [])+list(cards.values())
+        # Trello's current order determines the next eligible card. A saved
+        # workspace remains available when its card is moved further down.
+        ordered=list(cards.values())
         seen=set()
         for card in ordered:
             if not card or card["id"] in seen:
@@ -668,6 +670,41 @@ class Continuity:
                     "codex_identity":doc["codex_identity"],"independent":True,
                     "explicit_diagnostic_fallback":True,"open_queue":True}
         return {"waiting":"NO_AUTHORIZED_CARD","again":False,"open_queue":True}
+
+    def resume_preserved_conflict(self,grant,row,card):
+        """Finish a claimed B stage whose work was archived before an error."""
+        if not row or row["state"]!="blocked" or not row.get("job_id"):
+            return None
+        detail=json.loads(row.get("detail") or "{}")
+        review=detail.get("local_review")
+        if not isinstance(review,dict) or review.get("published") is not False:
+            return None
+        job=self.b.job(row["job_id"])
+        if (review.get("job_id")!=job["id"] or review.get("reason")!="WHEEL_HOSTED_PROOF_REQUIRED"
+                or job["state"]!="awaiting_validation"):
+            self.w.fail("WHEEL_PRESERVATION_SCOPE","El trabajo archivado no coincide con la ejecución.")
+        from pathlib import Path
+        folder=self.b.home/"ejecuciones"/job["id"]/"revision-local"
+        try:
+            saved=json.loads((folder/"revision.json").read_text(encoding="utf8"))
+            patch=(folder/"cambio.patch").read_text(encoding="utf8")
+        except (OSError,ValueError):
+            self.w.fail("WHEEL_PRESERVATION_SCOPE","Falta el checkpoint local del trabajo.")
+        if (saved!=review or self.f.digest(patch)!=review.get("patch_sha256")
+                or not review.get("checkpoint_sha")):
+            self.w.fail("WHEEL_PRESERVATION_CHANGED","El checkpoint local no supera la verificación.")
+        with self.b.db() as db:
+            if db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter IN ('C','D')",
+                          (grant["grant_id"],)).fetchone():
+                self.w.fail("WHEEL_STAGE_UNCERTAIN","Ya existe una operación de Trello que requiere conciliación.")
+        from wheel_effects import WheelEffects,WheelPublication
+        if WheelEffects(self.f)._publications(job["id"]):
+            self.w.fail("WHEEL_PRESERVATION_PUBLICATION","Existe una publicación pendiente de conciliación.")
+        workspace=Path(grant["workspace"])
+        if WheelPublication(self.f,[]).git_command(workspace,"cat-file","-t",review["checkpoint_sha"]).strip()!="commit":
+            self.w.fail("WHEEL_PRESERVATION_CHANGED","No existe el commit local del checkpoint.")
+        self.w._check_card(grant,card)
+        return self.card_error(grant,review["reason"])
 
     def published_recovery(self,db,row,grant):
         """Resume only a verified push whose Metro receipt was never recorded."""
@@ -719,12 +756,25 @@ class Continuity:
                 return {"paused":error.code,"card_id":grant["card_id"]}
         elif (self.w.live_policy() and not waiting and job and
               all(self.w._operation_authorized(grant,letter) for letter in "CD") and
-              not self.w._expired(grant)):
+              not self.w._expired(grant) and
+              (job["state"]!="awaiting_validation" or code=="WHEEL_HOSTED_PROOF_REQUIRED")):
             try:
                 if job["state"]=="prepared":
                     self.b.finish_job(job["id"],"blocked",{"exit_code":None,
                         "response":"","classification_reason":code,
                         "programming_started":False})
+                    job=self.b.job(job["id"])
+                elif job["state"]=="awaiting_validation":
+                    # The original result and local WIP checkpoint stay intact.
+                    # This work cannot be published until the missing proof is
+                    # supplied, so record a terminal conflict for C/D instead.
+                    detail=json.loads(attempt.get("detail") or "{}")
+                    review=detail.get("local_review")
+                    if not review or review.get("job_id")!=job["id"]:
+                        self.w.fail("WHEEL_PRESERVATION_SCOPE","Falta el checkpoint del trabajo bloqueado.")
+                    self.b.finish_job(job["id"],"blocked",{**job["result"],
+                        "blocked_reason":code,"preserved_checkpoint_sha":review["checkpoint_sha"]},
+                        artifact_name="resultado-bloqueo.json")
                     job=self.b.job(job["id"])
                 self._defer_question_to_trello(grant,{
                     "question":"Bloqueo individual " + code + ". El trabajo conservado todavía no está publicado.",

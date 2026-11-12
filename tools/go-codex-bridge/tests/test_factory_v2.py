@@ -161,6 +161,77 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(w.status()['current']['card_id'],ids[3])
         self.assertFalse(self.runs or self.changes)
 
+    def test_open_queue_uses_current_order_before_a_preserved_working_card(self):
+        w,ids=self.batch()
+        with self.bridge.db() as db:
+            trial,doc=w._latest_trial(db)
+            db.execute("UPDATE wheel_grants SET state='working' WHERE card_id=?",(ids[0],))
+            cards={cid:self.cards[cid] for cid in (ids[1],ids[0],ids[2],ids[3])}
+            selected=w.continuity.select_open_queue(db,trial,doc,cards)
+        self.assertEqual(selected['expected'],ids[1])
+        self.assertFalse(self.runs or self.changes)
+
+    def test_preserved_awaiting_validation_job_is_recognized_without_replay(self):
+        w,g,jid,_=self.live_credit_wait()
+        row=self.bridge.factory._row(g['card_id'],g['attempt'])
+        folder=self.home/'ejecuciones'/jid/'revision-local'
+        folder.mkdir(parents=True,exist_ok=True)
+        patch_text='synthetic checkpoint\n'
+        review={'reason':'WHEEL_HOSTED_PROOF_REQUIRED','job_id':jid,'published':False,
+                'checkpoint_sha':self.git('rev-parse','HEAD'),
+                'patch_sha256':self.bridge.factory.digest(patch_text)}
+        (folder/'revision.json').write_text(json.dumps(review),encoding='utf8')
+        (folder/'cambio.patch').write_text(patch_text,encoding='utf8')
+        with self.bridge.db() as db:
+            db.execute("UPDATE factory_attempts SET state='blocked',detail=? WHERE card_id=? AND attempt=?",
+                       (json.dumps({'local_review':review}),g['card_id'],g['attempt']))
+            db.execute("UPDATE jobs SET state='awaiting_validation',result=? WHERE id=?",
+                       (json.dumps({'exit_code':0,'response':'No question marker'}),jid))
+        row=self.bridge.factory._row(g['card_id'],g['attempt'])
+        with patch.object(w,'_check_card'),patch.object(w.continuity,'card_error',return_value={'card_blocked':g['card_id']}) as recovered:
+            self.assertEqual(w.continuity.resume_preserved_conflict(g,row,self.cards[g['card_id']]),
+                             {'card_blocked':g['card_id']})
+            recovered.assert_called_once_with(g,'WHEEL_HOSTED_PROOF_REQUIRED')
+        self.assertEqual(self.bridge.job(jid)['state'],'awaiting_validation')
+        (folder/'cambio.patch').write_text('altered',encoding='utf8')
+        with self.assertRaises(BridgeError) as mismatch:
+            w.continuity.resume_preserved_conflict(g,row,self.cards[g['card_id']])
+        self.assertEqual(mismatch.exception.code,'WHEEL_PRESERVATION_CHANGED')
+        self.assertFalse(self.runs or self.changes)
+
+    def test_claimed_publication_stage_recovers_checkpoint_before_reconciliation(self):
+        w,g,_,_=self.live_credit_wait()
+        with self.bridge.db() as db:
+            db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started) VALUES(?,'B','claimed','synthetic')",
+                       (g['grant_id'],))
+        outcome={'card_blocked':g['card_id'],'again':True}
+        with patch.object(w.continuity,'resume_preserved_conflict',return_value=outcome) as recover,\
+             patch.object(WheelEffects,'reconcile',side_effect=AssertionError('publication replay')):
+            self.assertEqual(w._advance(g,self.cards[g['card_id']]),outcome)
+        recover.assert_called_once()
+        self.assertFalse(self.runs or self.changes)
+
+    def test_hosted_conflict_preserves_result_and_makes_job_terminal_for_comment(self):
+        w,g,jid,_=self.live_credit_wait()
+        review={'job_id':jid,'checkpoint_sha':'a'*40,'published':False}
+        with self.bridge.db() as db:
+            db.execute("UPDATE factory_attempts SET state='blocked',detail=? WHERE card_id=? AND attempt=?",
+                       (json.dumps({'local_review':review}),g['card_id'],g['attempt']))
+            db.execute("UPDATE jobs SET state='awaiting_validation',result=? WHERE id=?",
+                       (json.dumps({'exit_code':0,'response':'Original synthetic result'}),jid))
+        original=self.home/'ejecuciones'/jid/'resultado.json'
+        original.parent.mkdir(parents=True,exist_ok=True)
+        original.write_text('original artifact',encoding='utf8')
+        with patch.object(w.continuity,'_defer_question_to_trello') as defer:
+            outcome=w.continuity.card_error(g,'WHEEL_HOSTED_PROOF_REQUIRED')
+        self.assertEqual(outcome['reason'],'WHEEL_HOSTED_PROOF_REQUIRED')
+        self.assertEqual(self.bridge.job(jid)['state'],'blocked')
+        self.assertEqual(self.bridge.job(jid)['result']['response'],'Original synthetic result')
+        self.assertEqual(original.read_text(encoding='utf8'),'original artifact')
+        self.assertTrue((original.parent/'resultado-bloqueo.json').is_file())
+        defer.assert_called_once()
+        self.assertFalse(self.runs or self.changes)
+
     def test_verified_push_with_missing_metro_receipt_is_selected_for_reconciliation(self):
         w,ids=self.batch()
         with self.bridge.db() as db:

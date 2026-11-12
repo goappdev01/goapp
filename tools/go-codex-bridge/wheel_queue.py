@@ -1097,6 +1097,11 @@ class Wheel:
                 self.pause("WHEEL_PERMISSION_REQUIRED")
                 return {"paused":"WHEEL_PERMISSION_REQUIRED","letter":letter}
             if step:
+                if (letter=="B" and step["state"]=="claimed" and not step["approval_id"]
+                        and self.continuity.active()):
+                    preserved=self.continuity.resume_preserved_conflict(g,row,card)
+                    if preserved is not None:
+                        return preserved
                 try:
                     receipt=effects.reconcile(letter,row,g)
                 except self.f.Error as error:

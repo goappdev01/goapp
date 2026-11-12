@@ -192,6 +192,13 @@ class Factory:
             {"fields": "id,idBoard,idList,name,desc,url,pos,closed,shortLink", "filter": "open", "limit": 1000})
         if not isinstance(cards, list) or len(cards) >= 1000:
             raise self.Error("FACTORY_QUEUE_INCOMPLETE", "La cola no se ha leído íntegra.")
+        # Trello's `pos` increases from the top of the list to the bottom.
+        # Sort explicitly so selection stays top-to-bottom even if the API
+        # returns cards in a different array order.
+        if any(not isinstance(card, dict) or not isinstance(card.get("pos"), (float, int))
+               for card in cards):
+            raise self.Error("FACTORY_ORDER_INVALID", "No se puede confirmar el orden real de la cola.")
+        cards.sort(key=lambda card: card["pos"])
         previous = -1
         for card in cards:
             if (not isinstance(card, dict) or card.get("idBoard") != BOARD or card.get("idList") != QUEUE
