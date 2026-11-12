@@ -913,8 +913,8 @@ class RemoteTests(unittest.TestCase):
         for name in ('orbit-v2.html','remote.html'):
             (self.bridge.home/name).write_bytes((source/name).read_bytes())
         with patch.object(p,'authorize',return_value=('synthetic-owner','synthetic-csrf')):
-            for path,expected,script in (('/remote','Centro de mando V2','/remote/v2.js'),
-                                         ('/remote/','Centro de mando V2','/remote/v2.js'),
+            for path,expected,script in (('/remote','Fábrica Tecnológica','/remote/v2.js'),
+                                         ('/remote/','Fábrica Tecnológica','/remote/v2.js'),
                                          ('/remote/legacy','GO · Fábrica privada','/remote/panel.js')):
                 handler=SimpleNamespace(path=path,command='GET')
                 with patch.object(p,'send') as send:
