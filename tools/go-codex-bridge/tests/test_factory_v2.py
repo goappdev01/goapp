@@ -397,18 +397,101 @@ class V2WheelTests(unittest.TestCase):
         self.assertFalse(w.enabled())
         self.assertFalse(self.runs or self.changes)
 
-    def test_live_queue_rebind_rejects_queue_change_or_running_work(self):
+    def test_live_queue_rebind_accepts_position_change_after_review(self):
         w,grant,job_id,session=self.live_credit_wait()
         review=w.continuity.review_live_rebind()
-        self.cards[grant["card_id"]]["pos"]+=100
+        self.cards[grant["card_id"]]["pos"]=4096
+        self.cards=dict(sorted(self.cards.items(),key=lambda item:item[1]['pos']))
         with patch.object(w,"resume_after_quota") as resume:
-            with self.assertRaises(BridgeError) as changed:
-                w.continuity.rebind_live_queue(review,"synthetic-owner")
-        self.assertEqual(changed.exception.code,"WHEEL_SUBJECT_CHANGED")
+            result=w.continuity.rebind_live_queue(review,"synthetic-owner")
+        self.assertTrue(result['bound'])
+        self.assertFalse(result['resumed'])
         resume.assert_not_called()
-        self.assertEqual(w.live_policy()["codex_identity"],"synthetic-codex-account")
+        self.assertEqual(w.live_policy()["codex_identity"],self.codex_identity)
         self.assertFalse(w.enabled())
         self.assertFalse(self.runs or self.changes)
+
+    def test_live_rebind_accepts_reordered_checkpoint_and_keeps_original_job(self):
+        w,grant,job_id,session=self.live_credit_wait()
+        self.cards[grant['card_id']]['pos']=4096
+        self.cards=dict(sorted(self.cards.items(),key=lambda item:item[1]['pos']))
+        panel=RemotePanel(self.bridge)
+        ticket=panel.preview('rebind',{},'synthetic-owner')
+        self.assertEqual(ticket['review']['pending'][0]['checkpoint_id'],1)
+        self.assertEqual(ticket['review']['queue'][0]['card_id'],'b'*24)
+        with patch.object(w,'resume_after_quota',return_value=True) as resume:
+            result=panel.decide(ticket['ticket'],ticket['confirmation'],'synthetic-owner')
+        self.assertFalse(result['resumed'])
+        resume.assert_not_called()
+        self.assertFalse(w.enabled())
+        self.assertEqual(w.status()['reason'],'OWNER_PAUSED')
+        with self.bridge.db() as db:
+            saved=db.execute('SELECT * FROM wheel_grants WHERE grant_id=?',(grant['grant_id'],)).fetchone()
+            job=db.execute('SELECT state,session_id FROM jobs WHERE id=?',(job_id,)).fetchone()
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM wheel_stages WHERE grant_id=?',(grant['grant_id'],)).fetchone()[0],1)
+        self.assertEqual(w._verified(saved)['position'],grant['position'])
+        self.assertEqual((job['state'],job['session_id']),('failed',session))
+        w.pause('CREDIT_LIMIT')
+        self.assertFalse(w.resume_after_quota())
+        self.assertEqual(w.status()['reason'],'CREDIT_LIMIT')
+        current=w._live_selection({c['id']:c for c in self.bridge.factory._cards()},w.live_policy())
+        self.assertEqual(current['expected'],'b'*24)
+        self.assertFalse(current['resume_credit'])
+        self.cards.pop('b'*24)
+        current=w._live_selection({c['id']:c for c in self.bridge.factory._cards()},w.live_policy())
+        self.assertEqual(current['grant_id'],grant['grant_id'])
+        self.assertTrue(current['resume_credit'])
+        w.toggle(True)
+        with patch.object(w,'resume_after_quota',return_value=True) as resume:
+            self.assertTrue(w.tick()['resumed'])
+            resume.assert_called_once_with()
+        self.assertFalse(self.runs or self.changes)
+
+    def test_live_rebind_keeps_checkpoint_when_card_leaves_queue(self):
+        w,grant,job_id,session=self.live_credit_wait()
+        self.cards[grant['card_id']]['idList']='other-list'
+        panel=RemotePanel(self.bridge)
+        ticket=panel.preview('rebind',{},'synthetic-owner')
+        self.assertTrue(ticket['review']['pending'][0]['outside_queue'])
+        with patch.object(w,'resume_after_quota') as resume:
+            result=panel.decide(ticket['ticket'],ticket['confirmation'],'synthetic-owner')
+        self.assertTrue(result['bound'])
+        self.assertFalse(result['enabled'])
+        resume.assert_not_called()
+        with self.bridge.db() as db:
+            job=db.execute('SELECT state,session_id FROM jobs WHERE id=?',(job_id,)).fetchone()
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],1)
+        self.assertEqual((job['state'],job['session_id']),('failed',session))
+        self.assertFalse(self.runs or self.changes)
+
+    def test_live_rebind_does_not_mix_next_card_with_preserved_workspace(self):
+        w,grant,job_id,session=self.live_credit_wait()
+        self.cards[grant['card_id']]['pos']=4096
+        self.cards=dict(sorted(self.cards.items(),key=lambda item:item[1]['pos']))
+        panel=RemotePanel(self.bridge)
+        ticket=panel.preview('rebind',{},'synthetic-owner')
+        panel.decide(ticket['ticket'],ticket['confirmation'],'synthetic-owner')
+        w.toggle(True)
+        result=w.tick()
+        self.assertEqual(result['paused'],'WHEEL_PRESERVED_WORKSPACE_BUSY')
+        self.assertFalse(w.enabled())
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT state,session_id FROM jobs WHERE id=?',(job_id,)).fetchone()[:],
+                             ('failed',session))
+        self.assertFalse(self.runs or self.changes)
+
+    def test_live_rebind_rejects_changed_instruction_after_reorder(self):
+        w,grant,_,_=self.live_credit_wait()
+        self.cards[grant['card_id']]['pos']=4096
+        self.cards=dict(sorted(self.cards.items(),key=lambda item:item[1]['pos']))
+        self.cards[grant['card_id']]['comments'][0]['text']='Otra instrucción sintética'
+        with self.assertRaises(BridgeError) as changed:
+            w.continuity.review_live_rebind()
+        self.assertEqual(changed.exception.code,'FACTORY_RETRY_INVALID')
+        self.assertEqual(w.live_policy()['codex_identity'],'synthetic-codex-account')
+        self.assertFalse(w.enabled())
 
     def test_live_queue_rebind_refuses_running_jobs_without_mutation(self):
         w,grant,job_id,session=self.live_credit_wait()

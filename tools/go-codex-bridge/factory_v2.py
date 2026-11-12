@@ -444,14 +444,17 @@ class Continuity:
         for item in scoped:
             card=card_by_id.get(item['card_id'])
             if not card:
-                self.w.fail('WHEEL_SUBJECT_CHANGED','Una tarjeta pendiente ya no está en la cola autorizada.')
+                item['outside_queue']=True
+                continue
             subject,spec=self.w._subject(card,review=True)
             with self.b.db() as db:
                 saved=db.execute('SELECT * FROM wheel_grants WHERE grant_id=?',(item['grant_id'],)).fetchone()
             grant=self.w._verified(saved)
-            if (subject['binding']!=grant['binding'] or subject['position']!=grant['position']
+            subject['position']=grant['position']
+            subject.pop('binding',None)
+            if (self.f.digest(self.f.canonical(subject))!=grant['binding']
                     or spec['instruction_sha']!=grant['instruction_sha']):
-                self.w.fail('WHEEL_SUBJECT_CHANGED','La posición o la instrucción cambió desde el checkpoint.')
+                self.w.fail('WHEEL_SUBJECT_CHANGED','La instrucción o los permisos cambiaron desde el checkpoint.')
 
         visible_queue=[{'card_id':card['id'],'title':card['name'],'position':card['pos']} for card in cards]
         fingerprint=self.f.digest(self.f.canonical([
@@ -465,8 +468,12 @@ class Continuity:
 
     def rebind_live_queue(self,review,principal):
         """Rebind only after fresh owner review; resume the exact live task/queue once."""
-        if not review.get('live_queue_rebind') or self.review_live_rebind()!=review:
+        current=self.review_live_rebind()
+        mutable=('queue_sha256','queue')
+        if (not review.get('live_queue_rebind') or set(review)!=set(current)
+                or any(review[key]!=current[key] for key in current if key not in mutable)):
             self.w.fail('WHEEL_SUBJECT_CHANGED','La cola, la cuenta o el checkpoint cambió desde la revisión.')
+        review=current
         identity=self.w._require_codex_identity()
         if self.f.digest(identity)!=review['current_identity_sha256']:
             self.w.fail('WHEEL_CODEX_SESSION_CHANGED','La cuenta Codex cambió durante la confirmación.')
@@ -515,6 +522,12 @@ class Continuity:
             db.execute("UPDATE wheel_control SET enabled=0,reason=?,retry_after=0 WHERE id=1",
                        ('CREDIT_LIMIT' if review['resume_exact_session'] else None,))
         if review['resume_exact_session']:
+            cards=list(self.w._available(self.f._cards()))
+            credit=next(item for item in review['pending'] if item['state']=='credit_wait')
+            if not cards or cards[0]['id']!=credit['card_id']:
+                self.w.pause('OWNER_PAUSED')
+                return {'bound':True,'enabled':False,'resumed':False,
+                        'message':'Cuenta vinculada; el checkpoint espera su turno. Pulsa PLAY para continuar la cola.'}
             resumed=self.w.resume_after_quota()
             return {'bound':True,'enabled':self.w.enabled(),'resumed':resumed,
                     'message':('Cuenta vinculada y sesión conservada reanudada.' if resumed else

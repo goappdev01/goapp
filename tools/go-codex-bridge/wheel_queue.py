@@ -314,7 +314,10 @@ class Wheel:
                 self.pause("WHEEL_RESUME_WORKSPACE_CHANGED")
                 return False
             self.f._identity();self.f._lists()
-            card=next((c for c in self._available(self.f._cards()) if c["id"]==grant["card_id"]),None)
+            cards={c["id"]:c for c in self._available(self.f._cards())}
+            if live and self._live_selection(cards,live).get("grant_id")!=grant["grant_id"]:
+                return False
+            card=cards.get(grant["card_id"])
             self._check_card(grant,card)
             payload=self.b.execution_payload(job_id)
         except self.f.Error as error:
@@ -813,7 +816,13 @@ class Wheel:
         subject, spec=self._subject(card)
         with self.b.db() as db:
             active=db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",(g["grant_id"],)).fetchone()
-        if active and active["state"] in ("working","credit_wait"):
+        if live and g.get("live_consent_sha256")==live["consent_sha256"]:
+            # Trello priority may change while a live job is paused or pending.
+            # Its verified instruction and destination remain bound to this grant.
+            subject["position"] = g["position"]
+            subject.pop("binding",None)
+            subject["binding"] = self.f.digest(self.f.canonical(subject))
+        elif active and active["state"] in ("working","credit_wait"):
             subject["position"] = g["position"]
             subject.pop("binding",None)
             subject["binding"] = self.f.digest(self.f.canonical(subject))
@@ -1253,10 +1262,11 @@ class Wheel:
                 continue
             with self.b.db() as db:
                 dependencies_ready=self._dependencies_ready(db,grant,None,cards)
-            if saved["state"] not in ("ready","wait_permissions") or not dependencies_ready:
+            if saved["state"] not in ("ready","wait_permissions","credit_wait") or not dependencies_ready:
                 continue
             return {"expected":card["id"],"grant_id":grant["grant_id"],
-                    "codex_identity":policy["codex_identity"],"independent":True,"open_queue":True}
+                    "codex_identity":policy["codex_identity"],"independent":True,"open_queue":True,
+                    "resume_credit":saved["state"]=="credit_wait"}
         return {"waiting":"NO_SAFE_ELIGIBLE_CARD" if cards else "ESPERANDO_TARJETAS",
                 "open_queue":True}
 
@@ -1297,6 +1307,20 @@ class Wheel:
                     self.pause(trial["waiting"])
                     return {"paused":trial["waiting"]}
                 return trial
+            if trial and trial.get("resume_credit"):
+                self.pause("CREDIT_LIMIT")
+                resumed=self.resume_after_quota()
+                return {"resumed":resumed} if resumed else {"paused":self.status()["reason"]}
+            if live and trial and trial.get("grant_id"):
+                with self.b.db() as db:
+                    saved=db.execute("SELECT * FROM wheel_grants WHERE state='credit_wait'").fetchone()
+                    candidate=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",
+                                         (trial["grant_id"],)).fetchone()
+                if saved and saved["grant_id"]!=trial["grant_id"]:
+                    preserved=self._verified(saved)
+                    if candidate and preserved["workspace"]==self._verified(candidate)["workspace"]:
+                        self.pause("WHEEL_PRESERVED_WORKSPACE_BUSY")
+                        return {"paused":"WHEEL_PRESERVED_WORKSPACE_BUSY"}
             with self.b.db() as db:
                 db.execute("BEGIN IMMEDIATE")
                 db.execute("UPDATE wheel_control SET checked=? WHERE id=1",(self.f.utc(),))
