@@ -513,6 +513,46 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(shared.read_bytes(),file.read_bytes())
         self.assertFalse(os.path.samefile(shared,file))
 
+    def test_missing_offline_tarball_uses_private_store_then_sandbox(self):
+        from types import SimpleNamespace
+        mobile=self.root/"artifacts/go-app-mobile"
+        (mobile/"package.json").write_text('{"name":"synthetic"}',encoding="utf8")
+        lock=self.root/"pnpm-lock.yaml"
+        lock.write_text("lockfileVersion: '9.0'\n",encoding="utf8")
+        cli=self.home/"bin/node_modules/pnpm/bin/pnpm.cjs"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("",encoding="utf8")
+        seen=[]
+
+        def run(args,**kwargs):
+            seen.append(args)
+            if args[0]=="powershell.exe":
+                return SimpleNamespace(returncode=0,stdout="0\n")
+            if "fetch" in args:
+                self.assertIn("--frozen-lockfile",args)
+                self.assertIn("--ignore-scripts",args)
+                self.assertEqual(args[args.index("--store-dir")+1],str(self.root/".cache/pnpm-store"))
+                return SimpleNamespace(returncode=0)
+            self.assertEqual(args[1],"sandbox")
+            if "-e" in args:
+                return SimpleNamespace(returncode=0)
+            self.assertIn("--offline",args)
+            self.assertIn("--config.package-import-method=copy",args)
+            if len([call for call in seen if "install" in call])==1:
+                kwargs["stdout"].write(b"ERR_PNPM_NO_OFFLINE_TARBALL\n")
+                return SimpleNamespace(returncode=1)
+            self.assertIn("--store-dir",args)
+            for path in (mobile/"node_modules/typescript/bin/tsc",mobile/"node_modules/expo/bin/cli"):
+                path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_text("synthetic",encoding="utf8")
+            return SimpleNamespace(returncode=0)
+
+        with patch("wheel_effects.shutil.which",side_effect=lambda name:str(self.home/"bin/pnpm.cmd") if name=="pnpm.cmd" else str(self.home/"bin/node.exe")),\
+             patch("wheel_effects.subprocess.run",side_effect=run):
+            WheelEffects(self.bridge.factory)._dependencies(self.root,"synthetic")
+        self.assertEqual(["fetch" in args for args in seen],[False,False,True,False,False])
+        self.assertEqual(lock.read_text(encoding="utf8"),"lockfileVersion: '9.0'\n")
+
     def test_a_known_failed_patch_is_preserved_and_queue_stops_at_head(self):
         wheel=self.bridge.factory.wheel
         wheel.approve(self.decisions());wheel.toggle(True)

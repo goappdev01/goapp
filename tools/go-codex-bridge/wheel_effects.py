@@ -260,16 +260,44 @@ class WheelEffects:
         original=lock.read_bytes()
         logdir=self.b.home/"ejecuciones"/job_id
         logdir.mkdir(exist_ok=True)
-        with (logdir/("rueda-dependencias-"+uuid.uuid4().hex[:8]+".log")).open("xb") as log:
+        def offline_install(store=()):
+            path=logdir/("rueda-dependencias-"+uuid.uuid4().hex[:8]+".log")
+            with path.open("xb") as log:
+                try:
+                    result=subprocess.run([self.b.config["codex_executable"],"sandbox","--include-managed-config",
+                        "-C",str(workspace),"-P",":workspace","--",node,str(cli),"install","--offline",
+                        "--frozen-lockfile","--ignore-scripts","--ignore-pnpmfile",
+                        "--config.package-import-method=copy",*store],
+                        cwd=workspace,env=node_environment(),stdin=subprocess.DEVNULL,
+                        stdout=log,stderr=subprocess.STDOUT,timeout=600)
+                except subprocess.TimeoutExpired:
+                    self.fail("WHEEL_INSTALL_UNCERTAIN","PNPM excedió el plazo; se conserva su estado para revisar el proceso.")
+            return result,path
+
+        result,install_log=offline_install()
+        if result.returncode and b"ERR_PNPM_NO_OFFLINE_TARBALL" in install_log.read_bytes():
+            # The global PNPM store is not guaranteed to contain a fresh worktree's
+            # exact lockfile. Fetch packages only into this ignored, private cache;
+            # installation and all executable checks remain inside Codex's sandbox.
+            store=workspace/".cache/pnpm-store"
+            if store.resolve()!=store or not store.is_relative_to(workspace):
+                self.fail("WHEEL_DEPENDENCIES_SHARED","La caché de paquetes no pertenece al worktree.")
+            store.mkdir(parents=True,exist_ok=True)
+            fetch_env=node_environment()
+            fetch_env.pop("NODE_OPTIONS",None)
             try:
-                result=subprocess.run([self.b.config["codex_executable"],"sandbox","--include-managed-config","-C",str(workspace),"-P",":workspace",
-                    "--",node,str(cli),"install","--offline","--frozen-lockfile","--ignore-scripts","--ignore-pnpmfile",
-                    "--config.package-import-method=copy"],
-                    cwd=workspace,env=node_environment(),stdin=subprocess.DEVNULL,stdout=log,stderr=subprocess.STDOUT,timeout=600)
+                fetched=subprocess.run([node,str(cli),"fetch","--frozen-lockfile","--ignore-scripts",
+                    "--store-dir",str(store)],cwd=workspace,env=fetch_env,stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=600)
             except subprocess.TimeoutExpired:
-                self.fail("WHEEL_INSTALL_UNCERTAIN","PNPM excedió el plazo; se conserva su estado para revisar el proceso.")
+                self.fail("WHEEL_INSTALL_UNCERTAIN","La descarga privada excedió el plazo; se conserva su estado.")
+            if fetched.returncode or original!=lock.read_bytes():
+                self.fail("WHEEL_DEPENDENCIES","No se pudieron obtener las dependencias del lockfile para este worktree.")
+            result,install_log=offline_install(("--store-dir",str(store)))
         if result.returncode or original!=lock.read_bytes() or not all(path.is_file() for path in required):
             self.fail("WHEEL_DEPENDENCIES","La recuperación offline no completó las dependencias; consulta el registro de este intento.")
+        if not self._readable_packages(workspace,required):
+            self.fail("WHEEL_DEPENDENCIES","El sandbox no puede leer los paquetes instalados en este worktree.")
 
     def _readable_packages(self,workspace,required):
         node=shutil.which("node.exe" if os.name=="nt" else "node")
