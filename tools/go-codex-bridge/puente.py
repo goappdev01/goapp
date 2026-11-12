@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import contextvars
 import ctypes
 from ctypes import wintypes
 import datetime as dt
@@ -303,6 +304,7 @@ class Bridge:
         self.owner_confirmation = self.confirm_local_owner
         self.approval_actor = {**self.actor, "session": secrets.token_hex(24)}
         self.mutex = threading.RLock()
+        self._card_workspace = contextvars.ContextVar('go_card_workspace',default=None)
         self.stopping = False
         self.oauth = None
         self.oauth_status = "Sin conectar"
@@ -670,12 +672,20 @@ class Bridge:
             raise BridgeError("AGENT_NOT_BOUND", "Asocia este agente a su carpeta en Configuración antes de ejecutarlo; no se modificará GO durante la instalación.")
         if setting["sandbox"] not in ("read-only", "workspace-write"):
             raise BridgeError("SANDBOX_INVALID", "La asignación no tiene un modo de sandbox permitido.")
-        path = Path(setting["workspace"])
+        path = Path(self._card_workspace.get() or setting["workspace"]) if agent == "4" else Path(setting["workspace"])
         if not path.is_absolute():
             path = self.home / path
         if not path.is_dir():
             raise BridgeError("WORKSPACE_MISSING", "La carpeta asignada al agente no está disponible.")
         return path.resolve(), setting["sandbox"]
+
+    @contextlib.contextmanager
+    def card_workspace(self, path):
+        token=self._card_workspace.set(str(path))
+        try:
+            yield
+        finally:
+            self._card_workspace.reset(token)
 
     def cli_defaults(self):
         # Keep the owner's model choice while isolating plugins and MCP in the worker.

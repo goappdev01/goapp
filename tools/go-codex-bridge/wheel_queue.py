@@ -2,7 +2,7 @@
 import hmac
 import json
 import math
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import subprocess
 import time
@@ -239,7 +239,8 @@ class Wheel:
             stages={row["letter"]:row["state"] for row in db.execute(
                 "SELECT letter,state FROM wheel_stages WHERE grant_id=?",(grant["grant_id"],))}
             if (not result.get("credit_limited") or attempt["job_id"]!=job["id"]
-                    or payload.get("agent")!="4" or str(self.b.workspace("4")[0])!=grant["workspace"]
+                    or payload.get("agent")!="4" or payload.get("agent_settings")!=grant["agent_settings"]
+                    or not Path(grant["workspace"]).is_dir()
                     or payload.get("instruction_sha256")!=grant["instruction_sha"]
                     or source.get("card_id")!=grant["card_id"]
                     or stages!={"A":"verified"}
@@ -303,7 +304,7 @@ class Wheel:
             job_id=job["id"]
         try:
             self._require_codex_identity(live["codex_identity"] if live else batch[1]["codex_identity"])
-            if str(self.b.workspace("4")[0]) != grant["workspace"]:
+            if not Path(grant["workspace"]).is_dir():
                 return False
             from wheel_effects import WheelPublication
             pub=WheelPublication(self.f,[])
@@ -319,7 +320,8 @@ class Wheel:
                 return False
             card=cards.get(grant["card_id"])
             self._check_card(grant,card)
-            payload=self.b.execution_payload(job_id)
+            with self.b.card_workspace(grant["workspace"]):
+                payload=self.b.execution_payload(job_id)
         except self.f.Error as error:
             if error.code not in ("WHEEL_CODEX_QUOTA","WHEEL_CODEX_AUTH"):
                 self.pause(error.code)
@@ -447,7 +449,17 @@ class Wheel:
         spec = self.f._spec(card,live_queue=bool(live),
                             initial_card_ids=live["initial_card_ids"] if live else ())
         workspace, sandbox = self.b.workspace("4")
-        from pathlib import Path
+        if live:
+            with self.b.db() as db:
+                saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=? AND attempt=?",
+                                 (card["id"],spec["attempt"])).fetchone()
+                prior=db.execute("SELECT 1 FROM wheel_grants LIMIT 1").fetchone()
+            if saved:
+                workspace=Path(self._verified(saved)["workspace"])
+            elif prior:
+                base=Path(self.b.config["agents"]["4"]["workspace"])
+                base=(base if base.is_absolute() else self.b.home/base).resolve()
+                workspace=base.parent/("go-fabrica-a4-card-"+card["id"]+"-"+str(spec["attempt"]))
         for agent,settings in self.b.config["agents"].items():
             if agent in ("4","PRUEBA") or not settings.get("workspace"):
                 continue
@@ -865,6 +877,7 @@ class Wheel:
         self._history_guard(g["card_id"],g["attempt"],g["instruction_sha"],
                             live_return=g.get("live_return",False))
         self._verify_dependencies(g)
+        self._ensure_card_workspace(g)
         self._preflight(self.b.workspace("4")[0])
         row=self.f._row(g["card_id"],g["attempt"])
         if not row:
@@ -884,6 +897,29 @@ class Wheel:
                 job["data"]["source"].get("card_id")!=g["card_id"]):
             self.fail("WHEEL_JOB_REVIEW","El trabajo preparado no coincide con la tarjeta.")
         return row
+
+    def _ensure_card_workspace(self,g):
+        base=Path(self.b.config["agents"]["4"]["workspace"])
+        base=(base if base.is_absolute() else self.b.home/base).resolve()
+        target=Path(g["workspace"])
+        expected=base.parent/("go-fabrica-a4-card-"+g["card_id"]+"-"+str(g["attempt"]))
+        if target==base:
+            return
+        if target!=expected or not g.get("live_consent_sha256"):
+            self.fail("WHEEL_WORKSPACE_SCOPE","La carpeta no corresponde a esta tarjeta autorizada.")
+        git=lambda *args:self.b.safety.git_command(base,*args)
+        registered={line[9:].replace('/','\\').casefold() for line in
+                    git("worktree","list","--porcelain").splitlines() if line.startswith("worktree ")}
+        if str(target).casefold() in registered:
+            if not target.is_dir() or target.is_symlink():
+                self.fail("WHEEL_WORKSPACE_MISSING","El worktree registrado no está disponible.")
+            return
+        if target.exists():
+            self.fail("WHEEL_WORKSPACE_BUSY","La ruta de la tarjeta ya contiene archivos ajenos.")
+        git("fetch","--no-tags","origin","refs/heads/main")
+        from wheel_effects import WheelEffects
+        git("worktree","add","-b",WheelEffects.branch_name(g),str(target),"FETCH_HEAD")
+        self.b.audit("wheel_card_worktree_created",{"grant":g["grant_id"],"workspace":str(target)})
 
     def _verify_dependencies(self,g):
         from factory import DONE
@@ -1373,12 +1409,14 @@ class Wheel:
                                            (g["grant_id"],*expected_states)).rowcount
                         if changed != 1:
                             return {"paused":"WHEEL_HEAD_REVIEW_REQUIRED"}
-                return self._advance(g,cards.get(g["card_id"]),codex_identity=trial.get("codex_identity") if trial else None)
+                with self.b.card_workspace(g["workspace"]):
+                    return self._advance(g,cards.get(g["card_id"]),codex_identity=trial.get("codex_identity") if trial else None)
             except self.f.Error as error:
                 if error.code in CODEX_BLOCKERS:
                     self.pause(error.code)
                     return {"paused":error.code}
-                return self._finish_error(g,error.code)
+                with self.b.card_workspace(g["workspace"]):
+                    return self._finish_error(g,error.code)
         except self.f.Error as error:
             self.pause(error.code)
             return {"paused":error.code}

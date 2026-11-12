@@ -465,22 +465,54 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual((job['state'],job['session_id']),('failed',session))
         self.assertFalse(self.runs or self.changes)
 
-    def test_live_rebind_does_not_mix_next_card_with_preserved_workspace(self):
+    def test_live_rebind_isolates_next_card_from_preserved_workspace(self):
         w,grant,job_id,session=self.live_credit_wait()
+        partial=self.root/self.files[0]
+        partial.write_text('export default 17;\n')
+        w.checkpoint(grant,'CREDIT_LIMIT')
+        def state(path,check_main=False):
+            git=lambda *args:self.bridge.safety.git_command(path,*args).strip()
+            return {'git':True,'head':git('rev-parse','HEAD'),
+                    'tracked_dirty':bool(git('status','--porcelain')),
+                    'origin_main':self.git('ls-remote','origin','refs/heads/main').split()[0]}
+        self.bridge.git_state=state
         self.cards[grant['card_id']]['pos']=4096
         self.cards=dict(sorted(self.cards.items(),key=lambda item:item[1]['pos']))
         panel=RemotePanel(self.bridge)
         ticket=panel.preview('rebind',{},'synthetic-owner')
-        panel.decide(ticket['ticket'],ticket['confirmation'],'synthetic-owner')
-        w.toggle(True)
-        result=w.tick()
-        self.assertEqual(result['paused'],'WHEEL_PRESERVED_WORKSPACE_BUSY')
-        self.assertFalse(w.enabled())
+        with patch.object(type(w),'resume_after_quota',return_value=False):
+            panel.decide(ticket['ticket'],ticket['confirmation'],'synthetic-owner')
+        selection=w._live_selection({c['id']:c for c in self.bridge.factory._cards()},w.live_policy())
+        with self.bridge.db() as db:
+            next_grant=w._verified(db.execute('SELECT * FROM wheel_grants WHERE grant_id=?',
+                                               (selection['grant_id'],)).fetchone())
+        self.assertNotEqual(next_grant['card_id'],grant['card_id'])
+        self.assertNotEqual(next_grant['workspace'],grant['workspace'])
+        w._ensure_card_workspace(next_grant)
+        w._ensure_card_workspace(next_grant)
+        with self.bridge.card_workspace(next_grant['workspace']):
+            self.assertEqual(str(self.bridge.workspace('4')[0]),next_grant['workspace'])
+        self.assertEqual(str(self.bridge.workspace('4')[0]),grant['workspace'])
+        self.assertTrue(Path(next_grant['workspace']).is_dir())
         with self.bridge.db() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],1)
             self.assertEqual(db.execute('SELECT state,session_id FROM jobs WHERE id=?',(job_id,)).fetchone()[:],
                              ('failed',session))
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM wheel_checkpoints WHERE grant_id=? AND phase='CREDIT_LIMIT'",
+                                        (grant['grant_id'],)).fetchone()[0],2)
         self.assertFalse(self.runs or self.changes)
+        self.assertEqual(partial.read_text(),'export default 17;\n')
+        self.bridge.run_codex=lambda payload,session=None:self.synthetic_codex(self.bridge,payload)
+        w.toggle(True)
+        with patch.object(WheelEffects,'_dependencies',return_value=None):
+            result=w.tick()
+        self.assertNotIn('paused',result,result)
+        self.assertNotIn('card_blocked',result,result)
+        self.assertEqual(self.runs,[next_grant['card_id']],result)
+        self.assertEqual(partial.read_text(),'export default 17;\n')
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT state,session_id FROM jobs WHERE id=?',(job_id,)).fetchone()[:],
+                             ('failed',session))
 
     def test_live_rebind_rejects_changed_instruction_after_reorder(self):
         w,grant,_,_=self.live_credit_wait()

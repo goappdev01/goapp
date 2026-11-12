@@ -79,9 +79,13 @@ class WheelEffects:
     def fail(self, code, message):
         raise self.f.Error(code, message)
 
+    @staticmethod
+    def branch_name(grant):
+        return "codex/factory-a4-"+grant["card_id"][:12]+"-"+str(grant["attempt"])+"-"+grant["grant_id"][:6]
+
     def start_branch(self,grant):
         workspace=Path(grant["workspace"])
-        branch="codex/factory-a4-"+grant["card_id"][:12]+"-"+str(grant["attempt"])+"-"+grant["grant_id"][:6]
+        branch=self.branch_name(grant)
         pub=WheelPublication(self.f,[])
         if pub.git_command(workspace,"branch","--show-current").strip()==branch:
             return branch
