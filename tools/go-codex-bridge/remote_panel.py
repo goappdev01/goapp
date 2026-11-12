@@ -150,7 +150,9 @@ class RemotePanel:
         batch_id=wheel.get("batch_id")
         batch_state=wheel.get("batch_state")
         active=bool(wheel.get("enabled"))
-        in_flight=any(card.get("state")=="working" or card.get("activity",{}).get("state") in ("running","detached")
+        # A preserved checkpoint can keep its grant in "working" while the
+        # executor has finished. Only an actual live process blocks Play.
+        in_flight=any(card.get("activity",{}).get("state") in ("running","detached")
                       for card in cards)
         completed=sum(card.get("state")=="closed" for card in cards)
         total=len(cards)

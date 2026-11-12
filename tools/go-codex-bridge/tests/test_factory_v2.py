@@ -116,6 +116,10 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(paused['state'],'paused')
         self.assertEqual(paused['label'],'FÁBRICA PAUSADA · ACTIVAR')
         self.assertFalse(paused['disabled'])
+        preserved=RemotePanel.activation_button({'enabled':False,'reason':'OWNER_PAUSED',
+            'batch_id':'batch','batch_state':'active'},
+            [{'state':'working','activity':{'state':'awaiting_validation'}}])
+        self.assertFalse(preserved['disabled'])
         active=RemotePanel.activation_button({'enabled':True,'reason':None,'batch_id':'batch','batch_state':'active'},[])
         self.assertEqual(active['state'],'active')
         self.assertEqual(active['label'],'FÁBRICA ACTIVADA')
