@@ -119,6 +119,7 @@ class Factory:
             changed=db.execute("UPDATE wheel_control SET enabled=0,reason='RESTART_REQUIRES_ACTIVATION' WHERE enabled=1").rowcount
             if changed:
                 self.bridge.audit("wheel_startup_paused",{"requires_explicit_activation":True},db)
+        self.wheel.reconcile_unstarted_worktree()
         self.wheel.continuity.reconcile_published_stale()
         self.wheel.continuity.reconcile_unreleased_comment()
 

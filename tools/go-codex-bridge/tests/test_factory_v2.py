@@ -528,6 +528,41 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(w.live_policy()['codex_identity'],'synthetic-codex-account')
         self.assertFalse(w.enabled())
 
+    def test_unstarted_missing_worktree_reconciles_without_touching_credit_checkpoint(self):
+        w,partial,job_id,session=self.live_credit_wait()
+        self.cards[partial['card_id']]['pos']=4096
+        self.cards=dict(sorted(self.cards.items(),key=lambda item:item[1]['pos']))
+        selection=w._live_selection({c['id']:c for c in self.bridge.factory._cards()},w.live_policy())
+        with self.bridge.db() as db:
+            next_grant=w._verified(db.execute('SELECT * FROM wheel_grants WHERE grant_id=?',
+                                               (selection['grant_id'],)).fetchone())
+            db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=?",(next_grant['grant_id'],))
+        w.checkpoint(next_grant,'WORKSPACE_MISSING')
+        w.pause('WHEEL_PRESERVATION_DIRTY')
+        self.assertTrue(w.reconcile_unstarted_worktree())
+        self.assertFalse(w.reconcile_unstarted_worktree())
+        self.assertFalse(w.enabled())
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT reason FROM wheel_control WHERE id=1').fetchone()[0],'OWNER_PAUSED')
+            self.assertEqual(db.execute('SELECT state FROM wheel_grants WHERE grant_id=?',
+                                        (next_grant['grant_id'],)).fetchone()[0],'ready')
+            self.assertEqual(db.execute('SELECT state FROM wheel_grants WHERE grant_id=?',
+                                        (partial['grant_id'],)).fetchone()[0],'credit_wait')
+            self.assertEqual(db.execute('SELECT state,session_id FROM jobs WHERE id=?',(job_id,)).fetchone()[:],
+                             ('failed',session))
+        self.assertFalse(Path(next_grant['workspace']).exists())
+        self.assertFalse(self.runs or self.changes)
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=?",(next_grant['grant_id'],))
+            db.execute("INSERT INTO factory_attempts(card_id,attempt,title,instruction_sha,state) VALUES(?,?,?,?,?)",
+                       (next_grant['card_id'],next_grant['attempt'],next_grant['title'],
+                        next_grant['instruction_sha'],'prepared'))
+        w.pause('WHEEL_PRESERVATION_DIRTY')
+        self.assertFalse(w.reconcile_unstarted_worktree())
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT state FROM wheel_grants WHERE grant_id=?',
+                                        (next_grant['grant_id'],)).fetchone()[0],'working')
+
     def test_live_queue_rebind_refuses_running_jobs_without_mutation(self):
         w,grant,job_id,session=self.live_credit_wait()
         with self.bridge.db() as db:

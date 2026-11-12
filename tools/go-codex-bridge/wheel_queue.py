@@ -201,6 +201,40 @@ class Wheel:
             db.execute("UPDATE wheel_control SET enabled=0,reason=?,retry_after=? WHERE id=1", (reason,retry_after))
             self.b.audit("wheel_paused", {"reason": reason}, db)
 
+    def reconcile_unstarted_worktree(self):
+        """Clear only a failed preflight that never created a card workspace or job."""
+        with self.f.lock,self.b.mutex,self.b.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            control=db.execute("SELECT enabled,reason FROM wheel_control WHERE id=1").fetchone()
+            if control["enabled"] or control["reason"]!="WHEEL_PRESERVATION_DIRTY":
+                return False
+            rows=list(db.execute("SELECT * FROM wheel_grants WHERE state='working'"))
+            if len(rows)!=1:
+                return False
+            try:
+                g=self._verified(rows[0])
+            except self.f.Error:
+                return False
+            base=Path(self.b.config["agents"]["4"]["workspace"])
+            base=(base if base.is_absolute() else self.b.home/base).resolve()
+            expected=base.parent/("go-fabrica-a4-card-"+g["card_id"]+"-"+str(g["attempt"]))
+            checkpoint=db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
+                                  (g["grant_id"],)).fetchone()
+            if (not g.get("live_consent_sha256") or Path(g["workspace"])!=expected or expected.exists()
+                    or not checkpoint or checkpoint["phase"]!="WORKSPACE_MISSING"
+                    or db.execute("SELECT 1 FROM factory_attempts WHERE card_id=? AND attempt=?",
+                                  (g["card_id"],g["attempt"])).fetchone()
+                    or db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=?",(g["grant_id"],)).fetchone()
+                    or db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                    or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()):
+                return False
+            db.execute("UPDATE wheel_grants SET state='ready',reason=NULL WHERE grant_id=? AND state='working'",
+                       (g["grant_id"],))
+            db.execute("UPDATE wheel_control SET reason='OWNER_PAUSED',retry_after=0 WHERE id=1")
+            self.b.audit("wheel_unstarted_worktree_reconciled",{"grant":g["grant_id"],
+                "checkpoint":"WORKSPACE_MISSING","owner_activation_required":True},db)
+            return True
+
     def activation_failed(self, code):
         """Persist a sanitized activation rejection so the owner sees a real red state."""
         safe_code=str(code)[:80]
