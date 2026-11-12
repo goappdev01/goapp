@@ -24,7 +24,7 @@ class RemotePanel:
         "FACTORY_JOB_FAILED":"La última tarjeta quedó bloqueada. Revisa el expediente y la autorización antes de continuar.",
         "WHEEL_CODEX_AUTH":"La sesión de Codex no está verificada.",
         "WHEEL_CODEX_QUOTA":"La cuota de Codex no está disponible.",
-        "WHEEL_CODEX_SESSION_CHANGED":"Cambió la cuenta Codex vinculada. Revisa y confirma la nueva vinculación antes de continuar.",
+        "WHEEL_CODEX_SESSION_CHANGED":"Cambió la cuenta Codex vinculada. Pulsa GO para verificarla y activar la cola autorizada.",
         "WHEEL_EXPIRY_INVALID":"La autorización del lote ha caducado.",
         "WHEEL_WORKSPACE_BUSY":"Hay un trabajo en curso o pendiente de conciliar.",
         "WHEEL_SUBJECT_CHANGED":"Cambió la cola o una instrucción desde su revisión.",
@@ -34,7 +34,7 @@ class RemotePanel:
         "WHEEL_HEAD_DEPENDENCY_BLOCKED":"La alternativa de dependencia fue rechazada antes de iniciar el ejecutor. No se ejecutó otra tarjeta.",
         "FACTORY_METRO_OUTDATED":"La tarjeta se publicó en MAIN, pero Metro 8088 aún no confirmó el código servido. Se conserva la publicación para verificarla sin repetirla.",
         "OWNER_PAUSED":"La fábrica está pausada por el propietario.",
-        "OWNER_STOPPED":"La fábrica está detenida. Para continuar hace falta revisar y confirmar el lote vigente.",
+        "OWNER_STOPPED":"La fábrica está detenida. Pulsa GO para activar si la autorización sigue vigente.",
         "TRELLO_TEMPORARY_UNAVAILABLE":"Trello no respondió. La fábrica sigue activada y volverá a consultar la cola en 30 segundos.",
     }
 
@@ -93,6 +93,44 @@ class RemotePanel:
             self.w.fail("ORBIT_V2_METRO_UNVERIFIED",str(error)[:180])
 
     def orbit_control(self,action,body,principal):
+        if action=="power" and set(body)=={"enabled"} and type(body["enabled"]) is bool:
+            if not body["enabled"]:
+                if self.w.enabled():
+                    self.w.pause("OWNER_PAUSED")
+                return {"enabled":False,"reason":self.w.status()["reason"]}
+            if self.w.enabled():
+                return {"enabled":True,"reason":self.w.status()["reason"]}
+            live=self.w.live_policy()
+            if not live:
+                self.w.fail("WHEEL_PERMISSION_REQUIRED","No existe una autorización continua vigente para activar esta cola.")
+            reason=self.w.status().get("reason")
+            resumable={None,"OWNER_PAUSED","OWNER_STOPPED","WHEEL_CODEX_SESSION_CHANGED",
+                       "WHEEL_CODEX_AUTH","WHEEL_CODEX_QUOTA","CREDIT_LIMIT",
+                       "CREDIT_RECOVERY_REQUIRED"}
+            if reason not in resumable:
+                self.w.fail(reason or "WHEEL_REVIEW_REQUIRED",
+                            "La cola tiene un bloqueo que requiere revisión. El botón no omitirá esa protección.")
+            try:
+                self.w._require_codex_identity(live["codex_identity"])
+            except self.f.Error as error:
+                if error.code!="WHEEL_CODEX_SESSION_CHANGED":
+                    self.w.activation_failed(error.code)
+                    raise
+                self.w.activation_failed(error.code)
+                review=self.w.continuity.review_live_rebind()
+                result=self.w.continuity.rebind_live_queue(review,principal)
+                if result.get("enabled"):
+                    return result
+                credit=next((item for item in review["pending"] if item["state"]=="credit_wait"),None)
+                if credit and review["queue"] and review["queue"][0]["card_id"]==credit["card_id"]:
+                    # Quota recovery is still pending. Never turn it into a new
+                    # execution or claim that the wheel is running.
+                    return result
+            try:
+                return self.w.toggle(True)
+            except self.f.Error as error:
+                self.w.activation_failed(error.code)
+                raise
         if action=="preview" and body in ({"action":"activate"},{"action":"rebind"}):
             return self.preview(body["action"],{},principal)
         if action=="decide" and set(body)=={"ticket","confirmation"}:
@@ -446,7 +484,7 @@ class RemotePanel:
             result=self.orbit_move(body)
         elif path=="/remote/v2/configure":
             result=self.orbit_configure(body)
-        elif path in ("/remote/v2/preview","/remote/v2/decide","/remote/v2/pause","/remote/v2/stop"):
+        elif path in ("/remote/v2/power","/remote/v2/preview","/remote/v2/decide","/remote/v2/pause","/remote/v2/stop"):
             result=self.orbit_control(path.rsplit('/',1)[-1],body,principal)
         else:self.w.fail("REMOTE_ACTION_INVALID","La operación no está admitida.")
         self.send(handler,result)

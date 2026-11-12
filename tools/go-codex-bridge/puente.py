@@ -1537,7 +1537,7 @@ def server(bridge, open_browser=True):
                     result = remote.orbit_move(body)
                 elif path == "/v2/configure":
                     result = remote.orbit_configure(body)
-                elif path in ("/v2/preview","/v2/decide","/v2/pause","/v2/stop"):
+                elif path in ("/v2/power","/v2/preview","/v2/decide","/v2/pause","/v2/stop"):
                     result = remote.orbit_control(path.rsplit('/',1)[-1],body,"local:"+remote.orbit_owner())
                 elif path == "/api/wheel/approve" and set(body) == {"decisions", "start_frozen_batch"}:
                     result = bridge.factory.wheel.approve(body["decisions"], start_frozen_batch=body["start_frozen_batch"])

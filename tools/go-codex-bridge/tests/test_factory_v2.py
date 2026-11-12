@@ -375,6 +375,43 @@ class V2WheelTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT session_id FROM jobs WHERE id=?',(job_id,)).fetchone()[0],session)
         self.assertFalse(self.runs or self.changes)
 
+    def test_one_owner_button_rebinds_current_account_and_toggles_live_wheel(self):
+        wheel,grant,job_id,session=self.live_credit_wait()
+        self.cards[grant['card_id']]['pos']=4096
+        self.cards=dict(sorted(self.cards.items(),key=lambda item:item[1]['pos']))
+        wheel.pause('OWNER_PAUSED')
+        panel=RemotePanel(self.bridge)
+        started=panel.orbit_control('power',{'enabled':True},'synthetic-owner')
+        self.assertTrue(started['enabled'])
+        self.assertTrue(wheel.enabled())
+        self.assertEqual(wheel.live_policy()['codex_identity'],self.codex_identity)
+        self.assertEqual(panel.orbit_control('power',{'enabled':True},'synthetic-owner')['enabled'],True)
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM factory_live_rebindings').fetchone()[0],1)
+            self.assertEqual(db.execute('SELECT session_id FROM jobs WHERE id=?',(job_id,)).fetchone()[0],session)
+        self.assertFalse(self.runs or self.changes)
+        self.assertFalse(panel.orbit_control('power',{'enabled':False},'synthetic-owner')['enabled'])
+        self.assertFalse(panel.orbit_control('power',{'enabled':False},'synthetic-owner')['enabled'])
+        self.assertEqual(wheel.status()['reason'],'OWNER_PAUSED')
+
+    def test_one_owner_button_does_not_activate_without_live_permission(self):
+        panel=RemotePanel(self.bridge)
+        with self.assertRaises(BridgeError) as error:
+            panel.orbit_control('power',{'enabled':True},'synthetic-owner')
+        self.assertEqual(error.exception.code,'WHEEL_PERMISSION_REQUIRED')
+        self.assertFalse(panel.w.enabled())
+
+    def test_one_owner_button_does_not_clear_review_required_block(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("1"*64)
+        wheel.pause('WHEEL_SUBJECT_CHANGED')
+        panel=RemotePanel(self.bridge)
+        with self.assertRaises(BridgeError) as error:
+            panel.orbit_control('power',{'enabled':True},'synthetic-owner')
+        self.assertEqual(error.exception.code,'WHEEL_SUBJECT_CHANGED')
+        self.assertFalse(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)
+
     def test_live_queue_rebind_requires_owner_review_and_resumes_exact_session(self):
         w,grant,job_id,session=self.live_credit_wait()
         panel=RemotePanel(self.bridge)
