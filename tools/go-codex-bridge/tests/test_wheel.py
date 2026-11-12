@@ -553,6 +553,39 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(["fetch" in args for args in seen],[False,False,True,False,False])
         self.assertEqual(lock.read_text(encoding="utf8"),"lockfileVersion: '9.0'\n")
 
+    def test_trello_read_failure_retries_without_disabling_or_repeating_writes(self):
+        wheel=self.bridge.factory.wheel
+        wheel.approve(self.decisions())
+        wheel.toggle(True)
+        reads=[]
+        def unavailable():
+            reads.append(True)
+            raise BridgeError("NETWORK_UNCERTAIN","Synthetic Trello outage")
+        with patch.object(self.bridge.factory,"_cards",side_effect=unavailable):
+            result=wheel.tick()
+            self.assertTrue(result["trello_retry"])
+            self.assertGreaterEqual(result["retry_after"]-time.time(),29)
+            self.assertLessEqual(result["retry_after"]-time.time(),31)
+            self.assertTrue(wheel.enabled())
+            self.assertEqual(len(reads),1)
+            self.assertTrue(wheel.tick()["trello_retry"])
+            self.assertEqual(len(reads),1)
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_control SET retry_after=0 WHERE id=1")
+        with patch.object(self.bridge.factory,"_cards",side_effect=unavailable):
+            self.assertTrue(wheel.tick()["trello_retry"])
+        self.assertEqual(len(reads),2)
+        self.assertEqual(self.changes,[])
+        self.assertEqual(self.runs,[])
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_control SET retry_after=0 WHERE id=1")
+        with patch.object(wheel,"_trial_limit",return_value={"waiting":"synthetic"}):
+            self.assertEqual(wheel.tick()["waiting"],"synthetic")
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT reason,retry_after FROM wheel_control WHERE id=1").fetchone()[:],
+                             (None,0))
+        self.assertTrue(wheel.enabled())
+
     def test_a_known_failed_patch_is_preserved_and_queue_stops_at_head(self):
         wheel=self.bridge.factory.wheel
         wheel.approve(self.decisions());wheel.toggle(True)

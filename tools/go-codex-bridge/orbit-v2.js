@@ -7,6 +7,7 @@ const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefi
 function note(text){$('notice').textContent=text;}
 async function api(route,body){const r=await fetch(base+'/'+route,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json','X-GO-CSRF':state.csrf}:{},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.message||data.error||'No se pudo verificar la operación.');return data;}
 function factoryMode(s){const wheel=s?.wheel||{},job=s?.cards?.find(c=>c.state==='working')?.activity;
+  if(wheel.enabled&&wheel.reason==='TRELLO_TEMPORARY_UNAVAILABLE')return ['pending','ESPERANDO TRELLO'];
   if(wheel.enabled&&job?.state==='running')return ['programming','PROGRAMANDO'];
   if(wheel.reason==='OWNER_STOPPED'||(wheel.reason&&wheel.reason!=='OWNER_PAUSED'))return ['blocked',wheel.reason==='OWNER_STOPPED'?'PARADO':'BLOQUEADO'];
   return ['pending',wheel.enabled?'PENDIENTE':'PAUSADO'];}

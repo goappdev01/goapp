@@ -724,6 +724,8 @@ class Factory:
                         delay = 0.1
                     elif result.get("running"):
                         delay = 2
+                    elif result.get("trello_retry"):
+                        delay = max(0.1,min(30,result["retry_after"]-time.time()))
             except Exception:
                 self.wheel.pause("FACTORY_UNEXPECTED_ERROR")
                 self._pause("FACTORY_UNEXPECTED_ERROR")

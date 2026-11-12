@@ -35,6 +35,7 @@ class RemotePanel:
         "FACTORY_METRO_OUTDATED":"La tarjeta se publicó en MAIN, pero Metro 8088 aún no confirmó el código servido. Se conserva la publicación para verificarla sin repetirla.",
         "OWNER_PAUSED":"La fábrica está pausada por el propietario.",
         "OWNER_STOPPED":"La fábrica está detenida. Para continuar hace falta revisar y confirmar el lote vigente.",
+        "TRELLO_TEMPORARY_UNAVAILABLE":"Trello no respondió. La fábrica sigue activada y volverá a consultar la cola en 30 segundos.",
     }
 
     def __init__(self,bridge):
@@ -115,7 +116,9 @@ class RemotePanel:
                       for card in cards)
         completed=sum(card.get("state")=="closed" for card in cards)
         total=len(cards)
-        if active:
+        if active and reason=="TRELLO_TEMPORARY_UNAVAILABLE":
+            state,label,disabled="waiting","ESPERANDO TRELLO · REINTENTO AUTOMÁTICO",True
+        elif active:
             state,label,disabled="active","FÁBRICA ACTIVADA",True
         elif batch_state=="completed":
             state,label,disabled="finished","FÁBRICA FINALIZADA",True
@@ -128,7 +131,9 @@ class RemotePanel:
             label=("FÁBRICA BLOQUEADA · REVISAR" if state=="blocked" else
                    "FÁBRICA PAUSADA · REAUTORIZAR" if wheel.get("renewal_required") else "FÁBRICA PAUSADA · ACTIVAR")
             disabled=in_flight
-        if active:
+        if state=="waiting":
+            progress=cls.REASON_MESSAGES[reason]
+        elif active:
             current=next((card for card in cards if card.get("state")=="working"),None)
             progress=(f"ACTIVA — {current.get('title','Tarjeta actual')} · {current.get('index',0)}/{current.get('total',total)} · Fase {current.get('phase','—')}"
                       if current else f"ACTIVA — esperando una operación autorizada · {completed}/{total} tarjetas cerradas")
@@ -236,7 +241,9 @@ class RemotePanel:
                                 "state":row["state"]})
         enabled=wheel["enabled"]
         working=any(card["state"]=="working" and card["activity"]["state"] in ("running","detached") for card in cards)
-        if enabled:
+        if enabled and wheel["reason"]=="TRELLO_TEMPORARY_UNAVAILABLE":
+            state="esperando_trello"
+        elif enabled:
             state="PROGRAMANDO" if working else "activada"
         elif batch and batch["state"]=="completed":
             state="terminada"

@@ -1363,10 +1363,31 @@ class Wheel:
     def tick(self):
         if not self.enabled():
             return {"enabled":False}
+        with self.b.db() as db:
+            retry_after=db.execute("SELECT retry_after FROM wheel_control WHERE id=1").fetchone()[0]
+        if retry_after and time.time()<retry_after:
+            return {"trello_retry":True,"retry_after":retry_after}
         try:
-            self.f._identity()
-            self.f._lists()
-            cards={c["id"]:c for c in self._available(self.f._cards())}
+            try:
+                self.f._identity()
+                self.f._lists()
+                cards={c["id"]:c for c in self._available(self.f._cards())}
+            except self.f.Error as error:
+                # A failed Trello read cannot establish current queue order. Keep
+                # the wheel enabled and retry only the read after 30 seconds;
+                # never replay a write whose response may have been lost.
+                if error.code in {"NETWORK_UNCERTAIN","INVALID_RESPONSE","HTTP_429","HTTP_500",
+                                  "HTTP_502","HTTP_503","HTTP_504","HTTP_401","HTTP_403",
+                                  "REFRESH_UNCERTAIN"}:
+                    deadline=time.time()+30
+                    with self.b.db() as db:
+                        db.execute("UPDATE wheel_control SET reason='TRELLO_TEMPORARY_UNAVAILABLE',retry_after=? WHERE id=1 AND enabled=1",
+                                   (deadline,))
+                        self.b.audit("wheel_trello_read_retry",{"code":error.code,"seconds":30},db)
+                    return {"trello_retry":True,"retry_after":deadline}
+                raise
+            with self.b.db() as db:
+                db.execute("UPDATE wheel_control SET reason=NULL,retry_after=0 WHERE id=1 AND enabled=1 AND reason='TRELLO_TEMPORARY_UNAVAILABLE'")
             live=self.live_policy()
             if live:
                 self._require_codex_identity(live["codex_identity"])

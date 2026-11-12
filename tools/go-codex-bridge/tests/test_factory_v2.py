@@ -120,6 +120,11 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(active['state'],'active')
         self.assertEqual(active['label'],'FÁBRICA ACTIVADA')
         self.assertTrue(active['disabled'])
+        waiting=RemotePanel.activation_button({'enabled':True,'reason':'TRELLO_TEMPORARY_UNAVAILABLE',
+            'batch_id':'batch','batch_state':'active'},[])
+        self.assertEqual(waiting['state'],'waiting')
+        self.assertIn('30 segundos',waiting['progress'])
+        self.assertTrue(waiting['disabled'])
         blocked=RemotePanel.activation_button({'enabled':False,'reason':'FACTORY_JOB_FAILED','batch_id':'batch','batch_state':'active'},[])
         self.assertEqual(blocked['state'],'blocked')
         self.assertIn('bloqueada',blocked['progress'].casefold())
