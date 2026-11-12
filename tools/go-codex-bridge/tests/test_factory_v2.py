@@ -622,6 +622,23 @@ class RemoteTests(unittest.TestCase):
         with self.bridge.db() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],0)
 
+    def test_private_existing_entry_serves_v2_and_keeps_v1_backup(self):
+        p,_=self.panel()
+        source=Path(__file__).resolve().parent.parent
+        for name in ('orbit-v2.html','remote.html'):
+            (self.bridge.home/name).write_bytes((source/name).read_bytes())
+        with patch.object(p,'authorize',return_value=('synthetic-owner','synthetic-csrf')):
+            for path,expected,script in (('/remote','Centro de mando V2','/remote/v2.js'),
+                                         ('/remote/','Centro de mando V2','/remote/v2.js'),
+                                         ('/remote/legacy','GO · Fábrica privada','/remote/panel.js')):
+                handler=SimpleNamespace(path=path,command='GET')
+                with patch.object(p,'send') as send:
+                    p.handle(handler,'unused','unused')
+                content=send.call_args.args[1].decode('utf-8')
+                self.assertIn(expected,content)
+                self.assertIn(script,content)
+        self.assertFalse(self.bridge.factory.wheel.enabled())
+
     def test_iphone_probe_rejects_windows_and_binds_phone_origin_and_single_use_nonce(self):
         p,h=self.panel();p.config.update(expo_phone='100.64.0.9');p.device_probes.config=p.config
         manager=OwnerExpo(p.b);owner={'port':8089,'sha':'a'*40,'host':'100.64.0.1','workspace':'C:/pinned'}
