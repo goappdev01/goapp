@@ -448,7 +448,8 @@ class Wheel:
         live=self.live_policy()
         spec = self.f._spec(card,live_queue=bool(live),
                             initial_card_ids=live["initial_card_ids"] if live else ())
-        workspace, sandbox = self.b.workspace("4")
+        with self.b.card_workspace(None):
+            workspace, sandbox = self.b.workspace("4")
         if live:
             with self.b.db() as db:
                 saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=? AND attempt=?",

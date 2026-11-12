@@ -488,12 +488,8 @@ class V2WheelTests(unittest.TestCase):
                                                (selection['grant_id'],)).fetchone())
         self.assertNotEqual(next_grant['card_id'],grant['card_id'])
         self.assertNotEqual(next_grant['workspace'],grant['workspace'])
-        w._ensure_card_workspace(next_grant)
-        w._ensure_card_workspace(next_grant)
-        with self.bridge.card_workspace(next_grant['workspace']):
-            self.assertEqual(str(self.bridge.workspace('4')[0]),next_grant['workspace'])
+        self.assertFalse(Path(next_grant['workspace']).exists())
         self.assertEqual(str(self.bridge.workspace('4')[0]),grant['workspace'])
-        self.assertTrue(Path(next_grant['workspace']).is_dir())
         with self.bridge.db() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],1)
             self.assertEqual(db.execute('SELECT state,session_id FROM jobs WHERE id=?',(job_id,)).fetchone()[:],
@@ -502,6 +498,9 @@ class V2WheelTests(unittest.TestCase):
                                         (grant['grant_id'],)).fetchone()[0],2)
         self.assertFalse(self.runs or self.changes)
         self.assertEqual(partial.read_text(),'export default 17;\n')
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=?",(next_grant['grant_id'],))
+        w.pause('WHEEL_PRESERVATION_DIRTY')
         self.bridge.run_codex=lambda payload,session=None:self.synthetic_codex(self.bridge,payload)
         w.toggle(True)
         with patch.object(WheelEffects,'_dependencies',return_value=None):
@@ -509,6 +508,10 @@ class V2WheelTests(unittest.TestCase):
         self.assertNotIn('paused',result,result)
         self.assertNotIn('card_blocked',result,result)
         self.assertEqual(self.runs,[next_grant['card_id']],result)
+        self.assertTrue(Path(next_grant['workspace']).is_dir())
+        w._ensure_card_workspace(next_grant)
+        with self.bridge.card_workspace(next_grant['workspace']):
+            self.assertEqual(str(self.bridge.workspace('4')[0]),next_grant['workspace'])
         self.assertEqual(partial.read_text(),'export default 17;\n')
         with self.bridge.db() as db:
             self.assertEqual(db.execute('SELECT state,session_id FROM jobs WHERE id=?',(job_id,)).fetchone()[:],

@@ -681,7 +681,7 @@ class Bridge:
 
     @contextlib.contextmanager
     def card_workspace(self, path):
-        token=self._card_workspace.set(str(path))
+        token=self._card_workspace.set(None if path is None else str(path))
         try:
             yield
         finally:
