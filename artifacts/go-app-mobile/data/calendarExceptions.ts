@@ -101,6 +101,7 @@ export async function setCalendarBusinessTimezone(sourceId: string | undefined, 
     if (!isCloudId(sourceId) && cause && typeof cause === "object" && "code" in cause && cause.code === "BOOKING_CALENDAR_BUSINESS_NOT_LINKED") return timezone;
     throw cause;
   }
+  if (company.timezone === timezone) return timezone;
   const result = await supabaseApiRequest<{ businessId: string; timezone: string }>("/supabase/booking-calendar-timezone", { method: "PUT", body: JSON.stringify({ business_id: company.businessId, timezone, expectedTimezone: company.timezone }) }, true, expectedUserId);
   if (result.businessId !== company.businessId || result.timezone !== timezone) throw new Error("No se pudo comprobar el guardado de la zona horaria.");
   return result.timezone;

@@ -179,12 +179,15 @@ for (const resource of ["services", "staff", "availability"]) {
   }
 }
 router.get("/configuration", async (req, res) => {
-  const query = new URLSearchParams({ owner_id: `eq.${res.locals.userId}`, verified: "eq.true", select: "id" });
+  const selected = req.query.business_id;
+  if (selected !== undefined && (typeof selected !== "string" || !uuid.test(selected))) { res.status(400).json({ error: "Identificador inválido." }); return; }
+  res.setHeader("Cache-Control", "no-store");
+  const query = new URLSearchParams({ owner_id: `eq.${res.locals.userId}`, verified: "eq.true", select: "id", ...(selected ? { id: `eq.${selected}` } : {}) });
   const response = await request(req, `businesses?${query}`);
   if (!response.ok) { await relay(res, response); return; }
   const rows = await response.json() as { id: string }[];
   if (!Array.isArray(rows)) { res.status(502).json({ error: "No se pudo comprobar tu empresa." }); return; }
-  if (!rows.length) { res.json([]); return; }
+  if (!rows.length) { res.status(selected ? 404 : 200).json(selected ? { error: "Esta empresa no está disponible para esta cuenta." } : []); return; }
   if (rows.some(row => !uuid.test(row.id))) { res.status(502).json({ error: "Negocio inválido." }); return; }
   const settingsQuery = new URLSearchParams({ business_id: `in.(${rows.map(row => row.id).join(",")})`, order: "updated_at.desc", limit: "1" });
   await relay(res, await request(req, `business_settings?${settingsQuery}`));

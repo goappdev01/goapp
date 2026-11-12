@@ -318,7 +318,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
   const insets = useSafeAreaInsets();
   const { t, lang } = useLanguage();
   const STEPS = buildStepsCfg(t);
-  const { config, updateConfig, resetToSubActivity, demo } = useBusinessConfig();
+  const { config, loaded, loadError, reloadConfig, updateConfig, resetToSubActivity, demo } = useBusinessConfig();
   const { catalog, locationReturn, consumeLocationReturn } = useOwnerBusinessDemo();
   // Only a return from this owner's native GPS prompt skips the normal activity selector.
   const resumeLocation = useRef(demo && locationReturn?.userId === demo.getSnapshot().ownerUserId ? locationReturn : undefined).current;
@@ -532,6 +532,15 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  if (loaded === false) return <View style={c.root} testID="business-config-loading">
+    <Text accessibilityRole={loadError ? "alert" : "progressbar"} style={{ color: TEXT, padding: 20 }}>
+      {loadError || (lang === "en" ? "Loading your business…" : "Consultando tu empresa…")}
+    </Text>
+    {!!loadError && <TouchableOpacity testID="business-config-retry" accessibilityRole="button" onPress={reloadConfig} style={{ minHeight: 48, padding: 20 }}>
+      <Text style={{ color: BLUE }}>{lang === "en" ? "Retry" : "Reintentar"}</Text>
+    </TouchableOpacity>}
+  </View>;
+
   // ── Fase previa: selección de sector y actividad ────────────────────────────
   if (phase === "activity") {
     const canContinue = !!(config.sectorId && config.subId);
@@ -684,7 +693,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
           <View style={c.content}>
             {currentStep === 0 && <StepNombre onFocusField={compactFooter ? revealProfessional : undefined} />}
             {currentStep === 1 && <StepUbicacion onFocusField={compactFooter ? revealProfessional : undefined} />}
-            {currentStep === 2 && <StepHorario currentSector={currentSector} onManageConflicts={onManageCalendarConflicts} />}
+            {currentStep === 2 && <StepHorario key={config.businessId ?? "draft"} currentSector={currentSector} onManageConflicts={onManageCalendarConflicts} />}
             {currentStep === 3 && <StepServicios currentSector={currentSector} saveRef={stepSaveRef} />}
             {currentStep === 4 && <StepEspacios currentSector={currentSector} saveRef={stepSaveRef} onRevealProfessional={revealProfessional} />}
             {currentStep === 5 && <StepReservas />}
@@ -975,7 +984,10 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
   const [timezoneError, setTimezoneError] = useState("");
   const [timezonePickerOpen, setTimezonePickerOpen] = useState(false);
   const [timezoneSaving, setTimezoneSaving] = useState(false);
+  const [timezoneLoading, setTimezoneLoading] = useState(false);
+  const [timezoneAttempt, setTimezoneAttempt] = useState(0);
   const timezoneBusy = useRef(false), timezoneMounted = useRef(true);
+  const timezoneEditVersion = useRef(0);
   useEffect(() => { timezoneMounted.current = true; return () => { timezoneMounted.current = false; }; }, []);
   const timezoneOptions = [
     { value: "Europe/Madrid", label: lang === "en" ? "Europe/Madrid — Mainland Spain" : "Europe/Madrid — España peninsular" },
@@ -984,6 +996,7 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
   ];
   const selectTimezone = async (wanted: string) => {
     if (timezoneBusy.current) return;
+    timezoneEditVersion.current++;
     const source = config.businessId, target = demo;
     timezoneBusy.current = true; setTimezoneSaving(true); setTimezoneError("");
     try {
@@ -1005,22 +1018,24 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
   useEffect(() => {
     let active = true;
     const source = config.businessId, target = demo;
-    if (!source || config.timezone) return;
+    const editVersion = timezoneEditVersion.current;
+    if (!source || config.timezone) { setTimezoneLoading(false); return; }
+    setTimezoneLoading(true); setTimezoneError("");
     void (async () => {
       try {
         const who = await captureAuthIdentity(); if (!who) return;
         const saved = await resolveCalendarExceptionBusiness(source, who.userId);
-        if (!active || timezoneBusy.current || saved.sourceId !== source || !await isAuthIdentityCurrent(who)) return;
+        if (!active || timezoneBusy.current || timezoneEditVersion.current !== editVersion || saved.sourceId !== source || !await isAuthIdentityCurrent(who)) return;
         if (target) await target.updateConfig({ timezone: saved.timezone });
         else updateConfig({ timezone: saved.timezone }, source);
         if (active) setTimezone(saved.timezone);
       } catch (error) {
         if (active && !(error && typeof error === "object" && "code" in error && error.code === "BOOKING_CALENDAR_BUSINESS_NOT_LINKED"))
           setTimezoneError(error instanceof Error ? error.message : "No se pudo recuperar la zona horaria guardada.");
-      }
+      } finally { if (active) setTimezoneLoading(false); }
     })();
     return () => { active = false; };
-  }, [config.businessId, config.timezone, demo]);
+  }, [config.businessId, config.timezone, demo, timezoneAttempt]);
 
   const [daySchedules, setDaySchedules] = useState<Record<number, DaySchedule>>(() => {
     const stored  = config.daySchedules ?? {};
@@ -1128,7 +1143,11 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
             <Text style={{ flex: 1, color: TEXT, fontSize: 14, fontWeight: timezone === option.value ? "700" : "500" }}>{option.label}</Text>
           </TouchableOpacity>)}
         </View>}
-        {!!timezoneError && <Text accessibilityRole="alert" style={{ color: RED, marginBottom: 10 }}>{timezoneError}</Text>}
+        {timezoneLoading && <Text accessibilityRole="progressbar" style={{ color: TEXT }}>{lang === "en" ? "Loading saved time zone…" : "Consultando la zona horaria guardada…"}</Text>}
+        {!!timezoneError && <><Text accessibilityRole="alert" style={{ color: RED, marginBottom: 10 }}>{timezoneError}</Text>
+          <TouchableOpacity testID="business-timezone-retry" accessibilityRole="button" onPress={() => setTimezoneAttempt(value => value + 1)} style={{ minHeight: 48, padding: 12 }}>
+            <Text style={{ color: BLUE }}>{lang === "en" ? "Retry" : "Reintentar"}</Text>
+          </TouchableOpacity></>}
         {/* Day pills */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
           <View style={{ flexDirection: "row", gap: 6 }}>

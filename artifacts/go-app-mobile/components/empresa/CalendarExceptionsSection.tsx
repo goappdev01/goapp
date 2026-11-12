@@ -135,8 +135,8 @@ export function CalendarExceptionsSection({ businessId: sourceBusinessId, timezo
     <Text accessibilityRole="header" style={s.title}>{label("EXCEPCIONES DEL CALENDARIO", "CALENDAR EXCEPTIONS")}</Text>
     <Text style={s.description}>{label("Aperturas y cierres solo para las fechas elegidas. El horario semanal no cambia.", "Openings and closures only on selected dates. Weekly hours stay unchanged.")}</Text>
     {!cloud ? <View>
-      <Text accessibilityRole={connectionError ? "alert" : "progressbar"} style={connectionError ? s.error : s.description}>{connectionError || label("Consultando la empresa sincronizada…", "Loading synchronized business…")}</Text>
-      {button(label("Reintentar conexión", "Retry connection"), () => setConnectionRetry(r => r + 1), "calendar-exception-reconnect")}
+      <Text accessibilityRole={connectionError ? "alert" : sourceBusinessId ? "progressbar" : "text"} style={connectionError ? s.error : s.description}>{connectionError || (sourceBusinessId ? label("Consultando la empresa sincronizada…", "Loading synchronized business…") : label("Selecciona una empresa para consultar sus excepciones.", "Select a business to load its exceptions."))}</Text>
+      {!!sourceBusinessId && button(label("Reintentar conexión", "Retry connection"), () => setConnectionRetry(r => r + 1), "calendar-exception-reconnect")}
     </View> : <>
       {button(dateISO.split("-").reverse().join("/"), () => calendar.openForNav({ initialDateISO: dateISO, onDaySelect: selectDate }), "calendar-exception-date", false, saving)}
       {calendar.monthGridOpen && <View testID="calendar-exception-picker" style={s.picker}>

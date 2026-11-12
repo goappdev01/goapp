@@ -23,6 +23,7 @@ import React, {
 } from "react";
 import { Alert, AppState } from "react-native";
 import { onSessionChanged } from "@/lib/sessionEvents";
+import { loadSynchronizedBusinessConfig } from "@/data/synchronizedBusinessConfig";
 import { useBusinessAccess } from "./GoBusinessAccessContext";
 import { useGoView } from "./GoViewContext";
 import { useAdminAccess } from "./GoAdminAccessContext";
@@ -163,6 +164,8 @@ type GoBusinessConfigContextType = {
   calendarWorkHours?: CalendarWorkHoursPreference;
   config:             BusinessConfig;
   loaded:             boolean;
+  loadError?:         string;
+  reloadConfig?:      () => void;
   updateConfig:       (patch: Partial<BusinessConfig>, expectedBusinessId?: string) => void;
   resetToSubActivity: (sectorId: string, subId: string) => void;
   resetConfig:        () => Promise<void>;
@@ -550,11 +553,13 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
         const name = names[i]?.trim();
         if (!name || name.length < 3) continue;
         const normName = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        if (seenStaffNorm.has(normName)) continue;
-        seenStaffNorm.add(normName);
+        const selectedId = plantItem.staffIds?.[i];
+        const selectedStaff = selectedId ? existingStaff.find(member => member.id === selectedId) : undefined;
+        if (!selectedStaff && seenStaffNorm.has(normName)) continue;
+        if (!selectedStaff) seenStaffNorm.add(normName);
         // Reusar ID existente por nombre normalizado para no huerfanar reservas.
         // Solo si no existe previo, calcular el stableId determinista.
-        const existingMatch = existingByNormName.get(normName);
+        const existingMatch = selectedStaff ?? existingByNormName.get(normName);
         const stableId = existingMatch
           ? existingMatch.id
           : `${resolvedId}_staff_${name
@@ -573,7 +578,7 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
           serviceIds,
           bookingBlocks: existingMatch?.bookingBlocks,
           gapPolicy: (cfg.staffSchedules?.[stableId] ?? Object.entries(cfg.staffSchedules ?? {}).find(([key])=>key.endsWith(`_staff_${normName.replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,"")}`))?.[1])?.gapPolicy ?? existingMatch?.gapPolicy,
-          active:     true,
+          active:     existingMatch?.active ?? true,
         });
       }
     }
@@ -728,14 +733,20 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
 export function GoBusinessConfigProvider({ children }: { children: React.ReactNode }) {
   const enterprise = useBusinessAccess();
   const permission = useRef(false);
-  permission.current = enterprise.allowed;
   const [config, setConfig] = useState<BusinessConfig>(DEFAULT_BUSINESS_CONFIG);
   const [loaded, setLoaded]   = useState(false);
+  const [loadedScope, setLoadedScope] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [sessionVersion, setSessionVersion] = useState(0);
+  const selectedBusinessId = enterprise.snapshot?.business?.id;
+  const selectedScope = `${enterprise.snapshot?.userId ?? ""}:${selectedBusinessId ?? ""}`;
+  const ready = loaded && loadedScope === selectedScope;
+  permission.current = enterprise.allowed && ready;
   const calendarAccount = enterprise.snapshot?.userId;
   const calendarBusiness = config.businessId;
   const calendarWorkHours = useCalendarWorkHoursPreference(
-    enterprise.allowed && loaded && calendarAccount && calendarBusiness
+    enterprise.allowed && ready && calendarAccount && calendarBusiness
       ? businessWorkHoursKey(calendarAccount, calendarBusiness) : undefined,
     AsyncStorage,
   );
@@ -754,145 +765,47 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
 
   // ── Carga inicial ────────────────────────────────────────────────────────────
   useEffect(() => {
-    generation.current++;
+    const version = ++generation.current;
+    dirty.current = false;
+    setLoaded(false);
+    setLoadError("");
     if (!enterprise.allowed) {
-      dirty.current = false;
       setConfig({ ...DEFAULT_BUSINESS_CONFIG });
+      setLoadedScope(selectedScope);
       setLoaded(true);
       return;
     }
-    (async () => {
-      const version = generation.current;
+    if (!selectedBusinessId) { setLoadError("No hay una empresa seleccionada en esta cuenta."); return; }
+    void (async () => {
       try {
         const userId = await getAuthenticatedUserId();
         if (version !== generation.current) return;
-        if (!userId) {
-          storageKey.current = BUSINESS_CONFIG_KEY;
-          setConfig({ ...DEFAULT_BUSINESS_CONFIG });
-          setLoaded(true);
-          return;
+        if (!userId || userId !== enterprise.snapshot?.userId) throw new Error("La cuenta ha cambiado. Vuelve a consultar tu empresa.");
+        let cloud = await getCloudConfiguration<BusinessConfig>(selectedBusinessId, userId);
+        const scopedKey = `${BUSINESS_CONFIG_KEY}:${userId}:${selectedBusinessId}`;
+        if (!cloud) {
+          const raw = await AsyncStorage.getItem(scopedKey) ?? await AsyncStorage.getItem(`${BUSINESS_CONFIG_KEY}:${userId}`);
+          const draft = raw ? JSON.parse(raw) as BusinessConfig : null;
+          if (draft?.businessId === selectedBusinessId) cloud = draft;
         }
-        storageKey.current = userId ? `${BUSINESS_CONFIG_KEY}:${userId}` : BUSINESS_CONFIG_KEY;
-        if (userId) {
-          const cloud = await getCloudConfiguration<BusinessConfig>();
-          if (version !== generation.current) return;
-          const rawDraft = await AsyncStorage.getItem(storageKey.current);
-          const draft = rawDraft ? JSON.parse(rawDraft) : null;
-          setConfig({ ...DEFAULT_BUSINESS_CONFIG, ...(cloud ?? draft ?? {}) });
-          setLoaded(true);
-          return;
-        }
-        const raw = await AsyncStorage.getItem(BUSINESS_CONFIG_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as Partial<BusinessConfig>;
-          let needsWrite = false;
-
-          // Migrate old { from, to } daySchedules to new { shift1, shift2 } format
-          if (parsed.daySchedules) {
-            const migrated = migrateDaySchedules(parsed.daySchedules as any);
-            if (JSON.stringify(migrated) !== JSON.stringify(parsed.daySchedules)) {
-              parsed.daySchedules = migrated;
-              needsWrite = true;
-            }
-          }
-
-          // ── MIGRACIÓN: corregir activeDays corruptos del bug de race condition ──
-          // Patrón: [1,2,3,4,5,6] = Mar–Dom en convenio 0=Lun (lunes cerrado, domingo abierto).
-          // Ocurría cuando seedDemoBusinessIfNeeded ganaba la carrera a seedNemesiDemoIfNeeded
-          // en la primera instalación. Corrección: restar 1 a todos los índices → [0,1,2,3,4,5].
-          if (
-            Array.isArray(parsed.activeDays) &&
-            parsed.activeDays.length === 6 &&
-            parsed.activeDays.includes(6) &&
-            !parsed.activeDays.includes(0)
-          ) {
-            parsed.activeDays = parsed.activeDays.map((d: number) => d - 1);
-            if (parsed.daySchedules) {
-              const fixedDs: Record<string, typeof parsed.daySchedules[string]> = {};
-              for (const [k, v] of Object.entries(parsed.daySchedules)) {
-                const num = parseInt(k, 10);
-                fixedDs[num >= 1 && num <= 6 ? String(num - 1) : k] = v;
-              }
-              parsed.daySchedules = fixedDs;
-            }
-            needsWrite = true;
-          }
-
-          // ── Sanitizar plantillaItems: eliminar nombres parciales o inválidos ──
-          if (Array.isArray(parsed.plantillaItems)) {
-            const before = JSON.stringify(parsed.plantillaItems);
-            const sanitized = sanitizePlantillaItems(
-              parsed.plantillaItems,
-              parsed.businessId,
-              parsed.staffSchedules ?? {},
-            );
-            parsed.plantillaItems = sanitized.plantillaItems;
-            parsed.staffSchedules = sanitized.staffSchedules;
-            if (JSON.stringify(sanitized.plantillaItems) !== before) needsWrite = true;
-          }
-
-          // Solo escribir a AsyncStorage si algo cambió (migración o sanitizado)
-          if (needsWrite) {
-            await AsyncStorage.setItem(BUSINESS_CONFIG_KEY, JSON.stringify({ ...DEFAULT_BUSINESS_CONFIG, ...parsed }));
-          }
-
-          setConfig({ ...DEFAULT_BUSINESS_CONFIG, ...parsed });
-          setLoaded(true);
-          return;
-        }
-        // ── Migración desde keys anteriores ──
-        const [rawSetup, rawPlantilla] = await Promise.all([
-          AsyncStorage.getItem(LEGACY_SETUP_KEY),
-          AsyncStorage.getItem(LEGACY_PLANTILLA_KEY),
-        ]);
-        let migrated: BusinessConfig = { ...DEFAULT_BUSINESS_CONFIG };
-        if (rawSetup) {
-          try {
-            const s = JSON.parse(rawSetup);
-            migrated = {
-              ...migrated,
-              sectorId:       s.sectorId       ?? null,
-              subId:          s.subId           ?? null,
-              activeDays:     s.activeDays      ?? migrated.activeDays,
-              openFrom:       s.openFrom        ?? migrated.openFrom,
-              openTo:         s.openTo          ?? migrated.openTo,
-              services:       Array.isArray(s.services) ? s.services : [],
-              paymentPolicy:  s.paymentPolicy   ?? 0,
-              approvalPolicy: s.approvalPolicy  ?? 0,
-              cancelPolicy:   s.cancelPolicy    ?? 0,
-            };
-          } catch {}
-        }
-        if (rawPlantilla) {
-          try {
-            const p = JSON.parse(rawPlantilla);
-            if (Array.isArray(p.items)) migrated.plantillaItems = p.items;
-          } catch {}
-        }
-        if (migrated.subId && migrated.plantillaItems.length === 0) {
-          migrated.plantillaItems = initPlantillaItems(migrated.subId);
-        }
-        setConfig(migrated);
-        AsyncStorage.setItem(BUSINESS_CONFIG_KEY, JSON.stringify(migrated)).catch(() => {});
+        if (version !== generation.current) return;
+        const next = await loadSynchronizedBusinessConfig(selectedBusinessId, userId, DEFAULT_BUSINESS_CONFIG, cloud);
+        if (version !== generation.current) return;
+        storageKey.current = scopedKey;
+        configRef.current = next;
+        setConfig(next);
+        setLoadedScope(selectedScope);
+        setLoaded(true);
       } catch (error) {
-        if (version !== generation.current) return;
-        const userId = await getAuthenticatedUserId();
-        if (version !== generation.current) return;
-        if (!userId) {
-          setConfig({ ...DEFAULT_BUSINESS_CONFIG });
-          setLoaded(true);
-          return;
-        }
-        if (version === generation.current) Alert.alert("Configuración no cargada", "No se pudo consultar tu negocio. Comprueba la conexión e inicia sesión de nuevo.");
-        return;
+        if (version === generation.current) setLoadError(error instanceof Error ? error.message : "No se pudo consultar tu empresa. Comprueba la conexión y reintenta; tus datos se conservan.");
       }
-      if (version === generation.current) setLoaded(true);
     })();
-  }, [sessionVersion, enterprise.allowed, enterprise.snapshot?.business?.id]);
+    return () => { if (generation.current === version) generation.current++; };
+  }, [sessionVersion, enterprise.allowed, selectedBusinessId, selectedScope, loadAttempt]);
 
   // Debounce edits and serialize synchronizations. Never upload an old draft on login.
   useEffect(() => {
-    if (!permission.current || !loaded || !dirty.current || !config.businessName?.trim()) return;
+    if (!permission.current || !ready || !dirty.current || !config.businessName?.trim()) return;
     // Keep an unfinished new business draft local until its timezone is chosen
     // in Horarios; don't issue repeated failing writes while entering its name.
     if (!config.businessId && !config.timezone?.trim()) return;
@@ -923,7 +836,7 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
       });
     }, 800);
     return () => clearTimeout(timer);
-  }, [config, loaded]);
+  }, [config, ready]);
 
   // ── updateConfig ─────────────────────────────────────────────────────────────
   //
@@ -934,11 +847,13 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   const updateConfig = useCallback((patch: Partial<BusinessConfig>, expectedBusinessId?: string) => {
     if (expectedBusinessId !== undefined && (configRef.current.businessId ?? "") !== expectedBusinessId) throw new Error("La empresa seleccionada ha cambiado.");
     if (!permission.current) { if (expectedBusinessId !== undefined) throw new Error("No tienes permiso para guardar esta configuración."); return; }
+    const key = storageKey.current, version = generation.current;
     dirty.current = true;
     revision.current++;
     setConfig(prev => {
+      if (version !== generation.current || !permission.current) return prev;
       const next = { ...prev, ...patch };
-      AsyncStorage.setItem(storageKey.current, JSON.stringify(next)).catch(() => {});
+      AsyncStorage.setItem(key, JSON.stringify(next)).catch(() => {});
       return next;
     });
   }, []);
@@ -1001,7 +916,8 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
   }, []);
 
   return (
-    <GoBusinessConfigContext.Provider value={{ config, loaded, updateConfig, resetToSubActivity, resetConfig, calendarWorkHours }}>
+    <GoBusinessConfigContext.Provider value={{ config: ready ? config : DEFAULT_BUSINESS_CONFIG, loaded: ready, loadError,
+      reloadConfig: () => setLoadAttempt(value => value + 1), updateConfig, resetToSubActivity, resetConfig, calendarWorkHours }}>
       {children}
     </GoBusinessConfigContext.Provider>
   );

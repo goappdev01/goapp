@@ -25,25 +25,30 @@ export function mergeBusinessBookingEntries(personal:GoEntry[],entries:GoEntry[]
 }
 export function useBusinessBookings(businessId:string|undefined,enabled:boolean){
   const [state,setState]=useState<{entries:GoEntry[];ownerId:string|null;businessId?:string;error:string}>({entries:[],ownerId:null,error:""});
+  const [loading,setLoading]=useState(false);
+  const authRevision=useRef(0),actorRevision=authRevision.current;
   const generation=useRef(0),active=useRef({businessId,enabled});active.current={businessId,enabled};
   const refresh=useCallback(async()=>{
     const token=++generation.current;
     const current=()=>generation.current===token && active.current.businessId===businessId && active.current.enabled===enabled;
-    if(!enabled || !businessId){setState({entries:[],ownerId:null,error:""});return;}
+    if(!enabled || !businessId){setState({entries:[],ownerId:null,error:""});setLoading(false);return;}
+    setLoading(true);
     try{
       const user=await getAuthenticatedUserId();if(!current())return;
       if(!user){setState({entries:[],ownerId:null,error:""});return;}
-      const owned=await getOwnedBusinesses(),business=owned.find(item=>item.id===businessId);
+      const owned=await getOwnedBusinesses(user),business=owned.find(item=>item.id===businessId);
       if(!current())return;
       if(!business){setState({entries:[],ownerId:null,error:"No hay acceso a esta empresa."});return;}
-      const bookings=await getLiveBusinessBookings(businessId);
+      const bookings=await getLiveBusinessBookings(businessId,user);
+      if(bookings.some(booking=>booking.businessId!==businessId))throw new Error("Las reservas recibidas no corresponden a esta empresa.");
       const finalUser=await getAuthenticatedUserId();
       if(current() && finalUser===user)setState({entries:bookings.map(booking=>businessBookingEntry(booking,business,user)),ownerId:user,businessId,error:""});
-    }catch(error){if(current())setState(old=>({...old,error:error instanceof Error?error.message:"No se pudieron leer las reservas."}));}
+    }catch(error){if(current())setState(old=>({...(old.businessId===businessId?old:{entries:[],ownerId:null,businessId}),error:error instanceof Error?error.message:"No se pudieron leer las reservas."}));}
+    finally{if(current())setLoading(false);}
   },[businessId,enabled]);
   useEffect(()=>{
     void refresh();
-    const session=onSessionChanged(()=>{generation.current++;setState({entries:[],ownerId:null,error:""});void refresh();});
+    const session=onSessionChanged(()=>{authRevision.current++;generation.current++;setState({entries:[],ownerId:null,error:""});void refresh();});
     const updates=subscribeBookingUpdates(()=>void refresh());
     const foreground=AppState.addEventListener("change",value=>{if(value==="active")void refresh();});
     const timer=enabled?setInterval(()=>void refresh(),30000):undefined;
@@ -51,10 +56,10 @@ export function useBusinessBookings(businessId:string|undefined,enabled:boolean)
   },[refresh,enabled]);
   const mutate=async(entry:GoEntry,operation:"propose"|"accept"|"reject"|"cancel"|"confirm",input:{proposalId?:string;acceptFinancialTerms?:boolean;dateISO?:string;time?:string}={})=>{
     const user=state.ownerId;
-    if(!enabled || !active.current.enabled || active.current.businessId!==businessId || !user || entry.ownerUserId!==user
+    if(authRevision.current!==actorRevision || !enabled || !active.current.enabled || active.current.businessId!==businessId || !user || entry.ownerUserId!==user
       || entry.businessId!==businessId || await getAuthenticatedUserId()!==user)throw new Error("La identidad o la empresa han cambiado.");
     try{await changeBookingRequest(String(entry.reservationId),operation,{...input,expectedRevision:entry.bookingChangeRevision??0,
       proposalId:input.proposalId??entry.changeProposal?.id},user);}finally{await refresh();}
   };
-  return {...state,entries:enabled && state.businessId===businessId?state.entries:[],refresh,mutate};
+  return {...state,loading,ownerId:enabled && state.businessId===businessId?state.ownerId:null,entries:enabled && state.businessId===businessId?state.entries:[],refresh,mutate};
 }

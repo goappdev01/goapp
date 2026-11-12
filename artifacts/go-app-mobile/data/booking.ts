@@ -560,8 +560,8 @@ function firstRow<T extends { id: string }>(rows: T[]): T {
   if (!rows[0]?.id) throw new BookingApiError("No se pudo guardar el registro.", 502);
   return rows[0];
 }
-export async function getOwnedBusinesses(): Promise<Business[]> {
-  const rows = await supabaseApiRequest<RemoteBusiness[]>(`${management}/businesses`, {}, true);
+export async function getOwnedBusinesses(expectedUserId?: string): Promise<Business[]> {
+  const rows = await supabaseApiRequest<RemoteBusiness[]>(`${management}/businesses`, {}, true, expectedUserId);
   if (!Array.isArray(rows)) throw new BookingApiError("El servidor devolvió una lista de empresas inválida.", 502);
   return rows.map(mapRemoteBusiness);
 }
@@ -574,8 +574,11 @@ export async function createOwnedBusiness(data: Omit<Business, "id" | "createdAt
   if (!Array.isArray(rows)) throw new BookingApiError("El servidor no confirmó el alta de la empresa.", 502);
   return mapRemoteBusiness(firstRow(rows));
 }
-export async function getCloudConfiguration<T>(): Promise<T | null> {
-  const rows = await supabaseApiRequest<{ business_id: string; payload: T }[]>(`${management}/configuration`, {}, true);
+export async function getCloudConfiguration<T>(businessId?: string, expectedUserId?: string): Promise<T | null> {
+  if (businessId !== undefined && !isCloudId(businessId)) throw new BookingApiError("Selecciona una empresa válida.", 400);
+  const rows = await supabaseApiRequest<{ business_id: string; payload: T }[]>(`${management}/configuration${businessId ? `?${new URLSearchParams({ business_id: businessId })}` : ""}`, {}, true, expectedUserId);
+  if (!Array.isArray(rows) || rows.some(row => !row || !isCloudId(row.business_id) || businessId && row.business_id !== businessId || !row.payload || typeof row.payload !== "object" || Array.isArray(row.payload)))
+    throw new BookingApiError("No se pudo comprobar la configuración de esta empresa.", 502);
   return rows[0] ? { ...rows[0].payload, businessId: rows[0].business_id } : null;
 }
 export async function saveCloudConfiguration(businessId: string, payload: unknown): Promise<void> {
@@ -595,16 +598,16 @@ function windowBody(w: Omit<AvailabilityWindow, "id">) {
   const time = (h: number, m = 0) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   return { staff_id: w.staffId ?? null, weekday: w.weekday, start_time: time(w.visibleStartHour, w.visibleStartMinute), end_time: time(w.visibleEndHour, w.visibleEndMinute), active: w.active, ui_metadata: { shiftIndex: w.shiftIndex ?? 0, bookableItemId: w.bookableItemId, endNextDay: w.endNextDay === true } };
 }
-export async function getOwnedBookableItems(businessId: string): Promise<BookableItem[]> {
-  const rows = await supabaseApiRequest<RemoteService[]>(`${management}/businesses/${businessId}/services`, {}, true);
+export async function getOwnedBookableItems(businessId: string, expectedUserId?: string): Promise<BookableItem[]> {
+  const rows = await supabaseApiRequest<RemoteService[]>(`${management}/businesses/${businessId}/services`, {}, true, expectedUserId);
   return remember(rows.filter(row => !row.ui_metadata?.archived).map(mapRemoteService));
 }
-export async function getOwnedStaff(businessId: string): Promise<Staff[]> {
-  const rows = await supabaseApiRequest<RemoteStaff[]>(`${management}/businesses/${businessId}/staff`, {}, true);
+export async function getOwnedStaff(businessId: string, expectedUserId?: string): Promise<Staff[]> {
+  const rows = await supabaseApiRequest<RemoteStaff[]>(`${management}/businesses/${businessId}/staff`, {}, true, expectedUserId);
   return remember(rows.filter(row => !row.ui_metadata?.archived).map(mapStaff));
 }
-export async function getOwnedAvailabilityWindows(businessId: string): Promise<AvailabilityWindow[]> {
-  const rows = await supabaseApiRequest<RemoteWindow[]>(`${management}/businesses/${businessId}/availability`, {}, true);
+export async function getOwnedAvailabilityWindows(businessId: string, expectedUserId?: string): Promise<AvailabilityWindow[]> {
+  const rows = await supabaseApiRequest<RemoteWindow[]>(`${management}/businesses/${businessId}/availability`, {}, true, expectedUserId);
   return remember(rows.filter(row => !row.ui_metadata?.archived).map(mapWindow));
 }
 async function deactivateRemote(resource: string, id: string, businessId?: string): Promise<void> {
@@ -2867,10 +2870,11 @@ export async function changeBookingRequest(id:string,operation:"propose"|"accept
 }
 
 /** Caller-scoped business read of the same rows; ownership remains server-authoritative. */
-export async function getLiveBusinessBookings(businessId:string):Promise<Booking[]>{
+export async function getLiveBusinessBookings(businessId:string,expectedUserId?:string):Promise<Booking[]>{
  if(!isRemoteBookingId(businessId))throw new BookingApiError("Empresa real no válida.",400);
- const rows=await supabaseApiRequest<RemoteBooking[]>("/supabase/bookings?negotiation=1&business_id="+encodeURIComponent(businessId),{},true);
- return rows.filter(row=>row.business_id===businessId).map(mapRemoteBooking);
+ const rows=await supabaseApiRequest<RemoteBooking[]>("/supabase/bookings?negotiation=1&business_id="+encodeURIComponent(businessId),{},true,expectedUserId);
+ if(!Array.isArray(rows)||rows.some(row=>!row||row.business_id!==businessId))throw new BookingApiError("Las reservas recibidas no corresponden a esta empresa.",502);
+ return rows.map(mapRemoteBooking);
 }
 
 export type BookingDayAnalysis = {

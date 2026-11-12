@@ -20,6 +20,43 @@ const messages: Record<string, string> = {
   BOOKING_STAFF_UNAVAILABLE: "Selecciona un profesional activo de esta empresa.",
   BOOKING_FORBIDDEN: "No tienes permiso para modificar esta disponibilidad.",
 };
+
+/** Read the existing owner-scoped records when the optional source RPC is absent.
+ * A local ID is accepted only when an owned settings row explicitly stores it.
+ * This does not create links or grant the private-booking write authority.
+ */
+async function readBusinessSource(source: string, headers: Record<string, string>) {
+  const read = async (path: string) => {
+    const response = await supabaseRequest(path, { headers });
+    if (!response.ok) throw Object.assign(new Error("Business source unavailable"), { status: response.status === 404 ? 501 : response.status });
+    return response.json();
+  };
+  const user = await read("/auth/v1/user") as { id?: unknown } | null;
+  if (!id(user?.id)) throw Object.assign(new Error("Invalid session"), { status: 401 });
+  const canonical = id(source);
+  const query = new URLSearchParams({ owner_id: `eq.${user.id}`, verified: "eq.true", select: "id,name,timezone", ...(canonical ? { id: `eq.${source}` } : {}) });
+  const businesses = await read(`/rest/v1/businesses?${query}`);
+  if (!Array.isArray(businesses) || businesses.some(b => !id(b?.id) || typeof b.name !== "string" || typeof b.timezone !== "string")) throw new Error("Invalid businesses");
+  let business = canonical ? businesses.find(b => b.id === source) : undefined;
+  if (!canonical && businesses.length) {
+    const settingsQuery = new URLSearchParams({ business_id: `in.(${businesses.map(b => b.id).join(",")})`, "payload->>businessId": `eq.${source}`, select: "business_id,payload" });
+    const settings = await read(`/rest/v1/business_settings?${settingsQuery}`);
+    if (!Array.isArray(settings)) throw new Error("Invalid settings");
+    const matches = settings.filter(row => row?.payload?.businessId === source && businesses.some(b => b.id === row.business_id));
+    if (matches.length > 1) throw new Error("Ambiguous source linkage");
+    business = businesses.find(b => b.id === matches[0]?.business_id);
+  }
+  if (!business) return null;
+  try { new Intl.DateTimeFormat("en", { timeZone: business.timezone }); } catch { throw new Error("Invalid business timezone"); }
+  const links = async (table: string, key: string) => {
+    const rows = await read(`/rest/v1/${table}?${new URLSearchParams({ business_id: `eq.${business.id}`, select: "id,business_id,ui_metadata" })}`);
+    if (!Array.isArray(rows) || rows.some(row => !id(row?.id) || row.business_id !== business.id)) throw new Error("Invalid source links");
+    return rows.map(row => ({ id: row.id, sourceId: typeof row.ui_metadata?.[key] === "string" ? row.ui_metadata[key] : canonical ? row.id : null }));
+  };
+  const [serviceLinks, staffLinks] = await Promise.all([links("services", "calendarSourceServiceId"), links("staff", "calendarSourceStaffId")]);
+  return { businessId: business.id, sourceId: source, name: business.name, timezone: business.timezone,
+    bookingAuthority: false, serviceLinks, staffLinks, ...(canonical ? { bookingLinks: [] } : {}), bookingLinksComplete: canonical };
+}
 async function rpc(req: Request, res: Response, name: string, args: Record<string, unknown>) {
   res.setHeader("Cache-Control", "no-store");
   const headers = bearerHeader(req.header("authorization"));
@@ -60,9 +97,17 @@ router.get("/booking-calendar-business", async (req, res) => {
     const body = await upstream.json().catch(() => null) as Record<string, unknown> | null;
     if (upstream.ok && body && id(body.businessId) && body.sourceId === source && typeof body.timezone === "string" && typeof body.name === "string") { res.json(body); return; }
     const code = String(body?.code ?? "");
-    if (["PGRST202", "42883", "42P01"].includes(code)) { res.status(501).json({ error: "El servidor todavía no permite consultar la empresa sincronizada." }); return; }
+    if (["PGRST202", "42883", "42P01"].includes(code)) {
+      const existing = await readBusinessSource(source, headers);
+      if (existing) { res.json(existing); return; }
+      res.status(id(source) ? 404 : 501).json({ code: id(source) ? "BOOKING_CALENDAR_BUSINESS_NOT_LINKED" : "BOOKING_CALENDAR_LINK_UNAVAILABLE",
+        error: id(source) ? "Esta empresa no está disponible para esta cuenta." : "No se pudo consultar el vínculo de este negocio local. El servidor necesita recuperar su contrato de sincronización; se conservan los horarios y las reservas." }); return;
+    }
     res.status(upstream.ok ? 502 : code === "42501" ? 403 : code === "PT404" ? 404 : 503).json({ code: code === "PT404" ? "BOOKING_CALENDAR_BUSINESS_NOT_LINKED" : "BOOKING_CALENDAR_UNAVAILABLE", error: code === "PT404" ? "Este negocio local todavía no está vinculado a su registro del servidor. No se ha guardado ningún cambio." : "No se pudo comprobar la empresa de esta cuenta." });
-  } catch { res.status(503).json({ error: "No se pudo comprobar la empresa. Reintenta cuando haya conexión." }); }
+  } catch (cause) {
+    const status = cause && typeof cause === "object" && "status" in cause ? cause.status : undefined;
+    res.status(status === 401 || status === 403 || status === 501 ? status : 503).json({ code: status === 501 ? "BOOKING_CALENDAR_LINK_UNAVAILABLE" : "BOOKING_CALENDAR_UNAVAILABLE", error: "No se pudo comprobar la empresa. Reintenta cuando haya conexión." });
+  }
 });
 
 router.put("/booking-calendar-timezone", async (req, res) => {

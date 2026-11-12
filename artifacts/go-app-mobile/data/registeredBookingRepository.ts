@@ -10,7 +10,7 @@ import { businessDemoProfessionalElement } from "./businessDemoStore";
 import { businessWallTime } from "./bookingTimeline";
 
 type Link = { id: string; sourceId: string | null };
-type Source = { businessId: string; sourceId: string; timezone: string; serviceLinks: Link[]; staffLinks: Link[]; bookingLinks: Link[] };
+type Source = { businessId: string; sourceId: string; timezone: string; serviceLinks: Link[]; staffLinks: Link[]; bookingLinks: Link[]; bookingLinksComplete?: boolean };
 type Identity = Pick<BusinessDemoStore, "ownerUserId" | "businessId">;
 const cloud = (id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 async function sourceFor(store: Identity): Promise<Source> {
@@ -25,6 +25,9 @@ async function sourceFor(store: Identity): Promise<Source> {
     }
     throw error;
   }
+  // Older clients reject a partial source response. Only this reader understands
+  // its explicit incomplete flag; historical records still require exact links.
+  if (source.bookingLinksComplete === false && source.bookingLinks === undefined) source = { ...source, bookingLinks: [] };
   if (source.sourceId !== store.businessId || !cloud(source.businessId) || !source.timezone ||
     [source.serviceLinks,source.staffLinks,source.bookingLinks].some(links => !Array.isArray(links) || links.some(l => !cloud(l.id))))
     throw new Error("El servidor debe actualizar el enlace de esta empresa antes de reservar. No se ha creado ninguna reserva.");
@@ -53,7 +56,7 @@ function remoteInput<T extends Omit<Booking,"id"|"status"|"holdExpiresAt"|"payme
 }
 function localBooking(row: Booking, source:Source, data:BusinessDemoData):DemoBooking {
   if(row.businessId!==source.businessId||row.customerId!==data.ownerUserId)throw new Error("La reserva pertenece a otra empresa o participante. No se modifica su copia local.");
-  const old=data.bookings.find(b=>b.id===row.id || source.bookingLinks.some(l=>l.id===row.id&&l.sourceId===b.id));
+  const old=data.bookings.find(b=>b.id===row.id || b.serverBookingId===row.id || source.bookingLinks.some(l=>l.id===row.id&&l.sourceId===b.id));
   const staffId=row.staffId ? linked(source.staffLinks,row.staffId,false) : undefined;
   const member=source.staffLinks.find(l=>l.id===row.staffId), element=member?.sourceId ? businessDemoProfessionalElement(data,{id:member.sourceId}) : undefined;
   if (!element) throw new Error("El profesional de la reserva no tiene su puesto vinculado. La reserva se conserva en el servidor.");
@@ -85,7 +88,7 @@ export function withRegisteredBookingAuthority(base:DemoBookingRepository, store
     const data=await store.load(),local=data.bookings.find(b=>b.id===id || b.serverBookingId===id || data.reservations.some(r=>r.id===id&&store.reservationBookingId(r)===b.id));
     const remote=local?.serverBookingId ?? source.bookingLinks.find(l=>l.sourceId===local?.id)?.id ?? (cloud(id)?id:undefined);
     if(!remote)throw new Error("Esta reserva anterior aún necesita sincronizarse. Se conserva sin cambios.");
-    const row=(await getLiveBusinessBookings(source.businessId)).find(b=>b.id===remote);
+    const row=(await getLiveBusinessBookings(source.businessId,store.ownerUserId)).find(b=>b.id===remote);
     if(!row)throw new Error("No se pudo recuperar esta reserva del servidor. Se conserva sin cambios.");return row;
   };
   const change:DemoBookingRepository["changeBooking"]=async(id,businessId,actor,operation,input={})=>{
@@ -142,7 +145,7 @@ export function withRegisteredBookingAuthority(base:DemoBookingRepository, store
     },
     getMyBookings:async(customer=store.ownerUserId)=>{
       if(customer!==store.ownerUserId)throw new Error("Participante incorrecto.");
-      const existing=await store.load();if(!existing.config.services.length&&!existing.bookings.length)return [];
+      const existing=await store.load();
       let source:Source;
       try{source=await sourceFor(store);}catch(error){
         // Reading an old unregistered document is historical preservation only;
@@ -150,7 +153,9 @@ export function withRegisteredBookingAuthority(base:DemoBookingRepository, store
         if(error instanceof BookingApiError&&error.code==="BOOKING_CALENDAR_BUSINESS_NOT_LINKED")return existing.bookings;
         throw error;
       }
-      const rows=await getLiveBusinessBookings(source.businessId);
+      if(source.bookingLinksComplete===false && existing.bookings.some(b=>!cloud(b.id)&&!b.serverBookingId))
+        throw new Error("El servidor necesita recuperar los vínculos de las reservas anteriores de este negocio. Se conservan sin duplicarlas ni sustituirlas.");
+      const rows=await getLiveBusinessBookings(source.businessId,store.ownerUserId);
       // Preserve unresolved historical local records, never delete them on refresh.
       const snapshot=await store.load(),selected=rows.filter(b=>b.customerId===customer);
       const changed=selected.filter(row=>{const candidate=localBooking(row,source,snapshot),old=snapshot.bookings.find(b=>b.id===candidate.id);return !old||JSON.stringify(old)!==JSON.stringify(candidate);});
