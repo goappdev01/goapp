@@ -296,13 +296,18 @@ class Factory:
         if not isinstance(actions, list) or len(actions) >= 1000:
             raise self.Error("FACTORY_PLACEMENT_UNVERIFIED", "No se puede revisar todo el historial de entrada a COLA.")
         movements = []
-        for item in actions:
+        previous_list = None
+        for item in sorted(actions, key=lambda x: ((x.get("date") or "", x.get("id") or "")
+                           if isinstance(x,dict) else ("", ""))):
             if not isinstance(item, dict):
                 continue
             data = item.get("data") or {}
             destination = (data.get("listAfter") or data.get("list") or {}).get("id")
-            if destination == QUEUE and item.get("type") in ("updateCard", "createCard"):
+            before = (data.get("listBefore") or {}).get("id") or previous_list
+            if destination == QUEUE and before != QUEUE and item.get("type") in ("updateCard", "createCard"):
                 movements.append(item)
+            if destination:
+                previous_list = destination
         if not movements:
             raise self.Error("FACTORY_PLACEMENT_UNVERIFIED", "No consta quién incorporó la tarjeta a COLA.")
         latest = max(movements, key=lambda x: (x.get("date") or "", x.get("id") or ""))

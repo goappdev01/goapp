@@ -110,6 +110,29 @@ class FactoryTests(unittest.TestCase):
                 factory._authorized_placement("a"*24)
             self.assertEqual(error.exception.code,"FACTORY_PLACEMENT_UNAUTHORIZED")
 
+    def test_position_change_keeps_entry_but_real_reentry_needs_owner(self):
+        factory=self.bridge.factory
+        other="f"*24
+        created={"id":"1"*24,"type":"createCard","date":"2026-11-01T12:00:00Z",
+                 "idMemberCreator":OWNER,"data":{"list":{"id":other}}}
+        entered={"id":"2"*24,"type":"updateCard","date":"2026-11-02T12:00:00Z",
+                 "idMemberCreator":OWNER,"data":{"list":{"id":QUEUE},"old":{"pos":1024}}}
+        reordered={"id":"3"*24,"type":"updateCard","date":"2026-11-03T12:00:00Z",
+                   "idMemberCreator":OWNER,"data":{"list":{"id":QUEUE},"old":{"pos":2048}}}
+        actions=[reordered,entered,created]
+        with patch.object(self.bridge,"api",return_value=actions):
+            self.assertEqual(factory._authorized_placement("a"*24),entered["id"])
+        left={"id":"4"*24,"type":"updateCard","date":"2026-11-04T12:00:00Z",
+              "idMemberCreator":OWNER,"data":{"list":{"id":other},"old":{"idList":QUEUE}}}
+        returned={"id":"5"*24,"type":"updateCard","date":"2026-11-05T12:00:00Z",
+                  "idMemberCreator":"0"*24,"data":{"list":{"id":QUEUE},"old":{"pos":4096}}}
+        with patch.object(self.bridge,"api",return_value=[returned,left,*actions]):
+            with self.assertRaises(BridgeError) as error:
+                factory._authorized_placement("a"*24)
+            self.assertEqual(error.exception.code,"FACTORY_PLACEMENT_UNAUTHORIZED")
+            returned["idMemberCreator"]=OWNER
+            self.assertEqual(factory._authorized_placement("a"*24),returned["id"])
+
     def test_stale_or_foreign_queue_rejected(self):
         factory = self.bridge.factory
         for cards in ([card(pos=2), card("b"*24,pos=1)],
