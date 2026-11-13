@@ -27,7 +27,9 @@ const compactFormatter = find(home, node => ts.isFunctionDeclaration(node) && no
 const detailsSource = readFileSync('components/GoEntryDetails.tsx', 'utf8');
 const detailsAst = ts.createSourceFile('details.tsx', detailsSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const sharedActionRow = find(detailsAst, node => ts.isFunctionDeclaration(node) && node.name?.text === 'GoListActionRow');
-const sharedActionRowCode = compile(sharedActionRow.getText(detailsAst) + '\nglobalThis.GoListActionRow = GoListActionRow;');
+const actionPalette = find(detailsAst, node => ts.isVariableDeclaration(node) && node.name?.getText(detailsAst) === 'GO_ACTION_PALETTE');
+const actionVisual = find(detailsAst, node => ts.isFunctionDeclaration(node) && node.name?.text === 'goActionVisual');
+const sharedActionRowCode = compile('const '+actionPalette.getText(detailsAst)+';'+actionVisual.getText(detailsAst)+sharedActionRow.getText(detailsAst) + '\nglobalThis.GoListActionRow = GoListActionRow;globalThis.goActionVisual=goActionVisual;');
 assert.ok(compactFormatter, 'use the actual compact slot formatter');
 const listFunctions = ['isPendingListEntry', 'clearClassicListFilters'].map(name =>
   find(home, node => ts.isFunctionDeclaration(node) && node.name?.text === name));

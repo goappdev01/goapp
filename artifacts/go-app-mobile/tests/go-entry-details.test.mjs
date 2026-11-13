@@ -135,6 +135,21 @@ test('accepted visits offer cancellation and proposal without another acceptance
  const buttons=nodes(tree,n=>n.type==='TouchableOpacity');assert.deepEqual(buttons.map(n=>n.props.accessibilityLabel),['CANCELAR','PROPONER CAMBIO']);
  buttons.forEach(b=>b.props.onPress());assert.equal(cancelled,1);assert.equal(proposed,1);assert.equal(accepted,0);
 });
+test('opened and listed actions share solid semantic surfaces and white labels',()=>{
+ const f=fixture(),c=f.load('components/GoEntryDetails.tsx');
+ const received={...base,estado:'propuesto',changeProposal:{dateISO:'2030-10-27',date:'27/10/2030',time:'13:30',originalDateISO:base.dateISO,originalTime:base.time}};
+ const open=f.render(c.GoEntryQuickActions,{entry:received,onReject(){},onPropose(){},onAccept(){}});
+ const listed=f.render(c.GoListActionRow,{actions:[{key:'reject',label:'RECHAZAR',tone:'negative',onPress(){}},{key:'propose',label:'PROPONER',tone:'intermediate',onPress(){}},{key:'accept',label:'ACEPTAR',tone:'positive',onPress(){}}]});
+ const actual=nodes(open,n=>n.type==='TouchableOpacity').map(n=>[n.props.style.at(-1).backgroundColor,n.props.style.at(-1).borderColor,n.props.style.at(-1).shadowRadius]);
+ const expected=nodes(listed,n=>n.type==='TouchableOpacity').map(n=>[n.props.style.backgroundColor,n.props.style.borderColor,n.props.style.shadowRadius]);
+ assert.deepEqual(actual,expected);
+ assert.deepEqual(actual.map(row=>row[0]),['#D63443','#CC4D00','#00865D']);
+ assert.ok(nodes(open,n=>n.type==='TouchableOpacity').every(n=>nodes(n,x=>x.type==='Text')[0].props.style.color==='#FFFFFF'));
+ const pending=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'pending'},onDone(){},onPending(){},onDiscard(){}});
+ const done=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'done'},onDone(){},onPending(){},onDiscard(){}});
+ assert.equal(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0].props.style.backgroundColor,'#CC4D00');
+ assert.equal(nodes(done,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0].props.style.backgroundColor,'#00865D');
+});
 test('received proposals keep orange identity and the original date until the existing acceptance command',()=>{
  const entry={...base,estado:'propuesto',changeProposal:{dateISO:'2030-10-27',date:'27/10/2030',time:'13:30',originalDateISO:base.dateISO,originalTime:base.time}};
  const saved=JSON.stringify(entry),f=sheet(entry);const frame=nodes(f.tree,n=>n.props.testID==='entry-details-sheet')[0];
@@ -177,7 +192,7 @@ test('state colors and negative actions agree in compact and expanded cards with
  for(const [status,key,color]of [['pendiente','booking_state_pending','#FFD700'],['confirmada','booking_state_accepted','#22c55e'],['completada','booking_state_completed','#22c55e'],['cancelada','booking_state_cancelled','#FF0000']]){
   const entry={...base,bookingStatus:status};assert.equal(policy.reservationCardPolicy(entry).stateColor,color);assert.equal(policy.reservationCardPolicy(entry).stateKey,key);
   for(const compact of [false,true]){const tree=f.render(c.GoEntryQuickActions,{entry,compact,onCancel(){},onPropose(){}});const state=nodes(tree,n=>n.type==='Text')[0];assert.equal(state.props.style.color,color);
-   for(const action of nodes(tree,n=>n.props.accessibilityLabel==='CANCELAR'))assert.equal(action.props.style.at(-1).borderColor,'#FF0000');}
+   for(const action of nodes(tree,n=>n.props.accessibilityLabel==='CANCELAR')){assert.equal(action.props.style.at(-1).backgroundColor,'#D63443');assert.equal(action.props.style.at(-1).borderColor,'rgba(255,255,255,0.22)');}}
  }
  const personal=f.render(c.GoEntryQuickActions,{entry:{...base,localResolutionStatus:'pending'}});assert.ok(texts(personal).includes('booking_state_accepted'));assert.ok(texts(personal).includes('Mi seguimiento:'));
  assert.equal(JSON.stringify(base),original);assert.equal(base.color,'#00e5ff');
@@ -187,7 +202,7 @@ test('three microactions stop propagation, honor supplied permissions and retain
  const f=fixture(),{GoEntryMicroActions}=f.load('components/GoEntryDetails.tsx'),calls=[],saved=JSON.stringify(base);
  const tree=f.render(GoEntryMicroActions,{entry:base,onDone:()=>calls.push('done'),onPending:()=>calls.push('pending'),onDiscard:()=>calls.push('cancel')});
  const buttons=nodes(tree,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);let stopped=0;
- buttons.forEach(b=>{assert.equal(b.props.style.minHeight+b.props.hitSlop.top+b.props.hitSlop.bottom,44);assert.equal(b.props.hitSlop.left,0);assert.ok(nodes(b,n=>n.type==='Text').length);assert.ok(nodes(b,n=>n.type==='Feather').length);b.props.onPress({stopPropagation(){stopped++;}});});
+ buttons.forEach(b=>{assert.equal(b.props.style.minHeight+b.props.hitSlop.top+b.props.hitSlop.bottom,44);assert.equal(b.props.hitSlop.left,0);assert.ok(nodes(b,n=>n.type==='Text').length);assert.equal(nodes(b,n=>n.type==='Feather').length,0);assert.equal(nodes(b,n=>n.type==='Text')[0].props.style.color,'#FFFFFF');b.props.onPress({stopPropagation(){stopped++;}});});
  assert.deepEqual(calls,['done','pending','cancel']);assert.equal(stopped,3);assert.equal(JSON.stringify(base),saved);
  assert.ok(buttons[0].props.accessibilityLabel.includes('Mi seguimiento'));assert.equal(f.render(GoEntryMicroActions,{entry:base}),null);
  const denied=f.render(GoEntryMicroActions,{entry:base,onDiscard(){}});assert.equal(nodes(denied,n=>n.type==='TouchableOpacity').length,1);

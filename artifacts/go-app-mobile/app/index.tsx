@@ -22728,6 +22728,10 @@ function HomeScreenContent() {
                     }
                   }
                 };
+                const compactStateLabel = (isProposalEstado
+                  ? g.estado === "propuesta_pendiente" ? t('biz_booking_awaiting') : t('biz_change_received')
+                  : statusLabel).toUpperCase();
+                const longState = compactStateLabel.length > 14;
                 const statusPill = (
                   <TouchableOpacity
                     activeOpacity={1}
@@ -22740,6 +22744,7 @@ function HomeScreenContent() {
                     style={{
                       paddingHorizontal: lv(7),
                       paddingVertical: isProposalEstado ? lv(4) : lv(3),
+                      maxWidth: longState ? Math.max(120,lv(135)) : undefined,
                       borderRadius: lv(7),
                       backgroundColor: "#000000",
                       borderWidth: 1.5,
@@ -22755,8 +22760,8 @@ function HomeScreenContent() {
                     }}
                   >
                     {isProposalEstado ? (
-                      <Text style={{ color: ENTRY_COLORS.change, fontSize: Math.max(11,lv(11)), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textAlign: "center" }}>
-                        {(g.estado === "propuesta_pendiente" ? t('biz_booking_awaiting') : t('biz_change_received')).toUpperCase()}
+                      <Text numberOfLines={longState?2:1} style={{ color: ENTRY_COLORS.change, fontSize: Math.max(11,lv(11)), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textAlign: "center",flexShrink:1 }}>
+                        {compactStateLabel}
                       </Text>
                     ) : (
                       <Text
@@ -22769,10 +22774,11 @@ function HomeScreenContent() {
                                 : ENTRY_COLORS.pending,
                           fontSize: Math.max(11,lv(11)),
                           fontFamily: "Inter_700Bold", fontWeight: "800",
-                          letterSpacing: 0.6,
+                          letterSpacing: 0.6, textAlign:"center",flexShrink:1,
                         }}
+                        numberOfLines={longState?2:1}
                       >
-                        {statusLabel.toUpperCase()}
+                        {compactStateLabel}
                       </Text>
                     )}
                   </TouchableOpacity>
@@ -22784,9 +22790,10 @@ function HomeScreenContent() {
                       ? t("floor_reservation_cambio_pendiente") : t(policy.stateKey as Parameters<typeof t>[0]);
                   const color = g.bookingStatus === "cambio_pendiente" && policy.stateKey === "booking_state_pending"
                     ? ENTRY_COLORS.change : policy.stateColor;
-                  return <View testID={"list-reservation-status-" + g.id} style={{maxWidth:"100%",paddingHorizontal:lv(6),paddingVertical:lv(3),
+                  const longBookingState = status.length > 14;
+                  return <View testID={"list-reservation-status-" + g.id} style={{maxWidth:longBookingState?Math.max(125,lv(145)):"100%",paddingHorizontal:lv(6),paddingVertical:lv(3),
                     borderRadius:lv(5),borderWidth:1,borderColor:"rgba(255,255,255,0.10)",backgroundColor:"rgba(255,255,255,0.04)"}}>
-                    <Text style={{color,fontSize:Math.max(11,lv(10)),fontFamily:"Inter_700Bold",fontWeight:"700",textAlign:"right"}}>
+                    <Text numberOfLines={longBookingState?2:1} style={{color,fontSize:Math.max(11,lv(10)),fontFamily:"Inter_700Bold",fontWeight:"700",textAlign:"center",flexShrink:1}}>
                       {status.toUpperCase()}
                     </Text>
                   </View>;

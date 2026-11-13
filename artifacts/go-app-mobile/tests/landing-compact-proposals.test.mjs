@@ -23,6 +23,8 @@ assert.ok(sheet, 'exercise the actual task-list renderer');
 const formatter = find(ast, node => ts.isFunctionDeclaration(node) && node.name?.text === 'formatCompactProposalSlot');
 const details = ts.createSourceFile('details.tsx', fs.readFileSync('components/GoEntryDetails.tsx', 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const actionRow = find(details, node => ts.isFunctionDeclaration(node) && node.name?.text === 'GoListActionRow');
+const actionPalette = find(details, node => ts.isVariableDeclaration(node) && node.name?.getText(details) === 'GO_ACTION_PALETTE');
+const actionVisual = find(details, node => ts.isFunctionDeclaration(node) && node.name?.text === 'goActionVisual');
 function compile(text) {
   return ts.transpileModule(text, { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
@@ -116,7 +118,7 @@ function fixture(lang = 'es', overrides = {}) {
     context[name] = (...args) => calls.push([name, ...args]);
   }
   context.cycleGoSlot = (id, direction) => { calls.push(['cycleGoSlot', id, direction]); return direction === 'advance' ? 'aceptado' : 'pendiente'; };
-  vm.runInNewContext(compile(actionRow.getText(details) + '\nglobalThis.GoListActionRow = GoListActionRow;'), context);
+  vm.runInNewContext(compile('const '+actionPalette.getText(details)+';'+actionVisual.getText(details)+actionRow.getText(details) + '\nglobalThis.GoListActionRow = GoListActionRow;'), context);
   return { context, calls, render() { vm.runInNewContext(code, context); return context.tree; } };
 }
 const cardOf = tree => nodes(tree, node => node.type === 'SwipeableRow')[0]?.props.children[0];
@@ -216,6 +218,8 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
       assert.equal(waiting, undefined, 'the state lives once in the header pill, leaving title width free');
       assert.equal(texts(header).split(label).length - 1, 1, 'keep one localized state pill');
       assert.ok(pillIndex >= 0 && checkboxIndex >= 0 && titleIndex >= 0);
+      assert.equal(nodes(buttons[pillIndex],node=>node.type==='Text')[0].props.numberOfLines,label.length>14?2:1);
+      assert.ok(buttons[pillIndex].props.style.maxWidth<=170,'long state wraps inside a compact label');
       assert.ok(handedness === 'left' ? checkboxIndex < titleIndex && titleIndex < pillIndex
         : titleIndex < checkboxIndex && checkboxIndex < pillIndex, 'state remains at the right in both hands');
       const statusSlot = byId(header, 'list-entry-header-status-compact');
@@ -322,6 +326,7 @@ for (const [bookingStatus, labelKey, color] of [
     const status = nodes(card, node => node.type === 'Text' && texts(node) === statusLabel);
     assert.equal(status.length, 1, 'retain the existing localized booking-state pill and default');
     assert.equal(status[0].props.style.color, color);
+    assert.equal(status[0].props.numberOfLines,statusLabel.length>14?2:1);
     const statusRow=byId(card,'list-reservation-status-row-compact');
     assert.equal(statusRow.props.style.width,undefined);
     assert.equal(statusRow.props.style.marginLeft,'auto');

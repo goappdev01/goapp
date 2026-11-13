@@ -43,27 +43,33 @@ export type GoListAction = {
   accessibilityHint?: string;
 };
 
+/** Shared visual language for Listados and opened entry actions. */
+const GO_ACTION_PALETTE = {
+  negative:{base:"#D63443",muted:"#D63443"},
+  intermediate:{base:"#CC4D00",muted:"#B75000"},
+  positive:{base:"#00865D",muted:"#087D53"},
+};
+function goActionVisual(tone:GoListAction["tone"],selected=false,inactive=false,pressed=false){
+  const color=GO_ACTION_PALETTE[tone];
+  return {borderRadius:8,borderWidth:1,borderColor:selected?"rgba(255,255,255,0.38)":"rgba(255,255,255,0.22)",
+    backgroundColor:inactive?color.muted:color.base,shadowColor:color.base,shadowOffset:{width:0,height:2},
+    shadowOpacity:pressed?0.06:selected?0.22:0.14,shadowRadius:3,elevation:pressed?0:1,
+    opacity:pressed?0.88:1,transform:[{translateY:pressed?1:0}]};
+}
+
 /** The same footer geometry serves personal follow-up and contractual proposals. */
 export function GoListActionRow({actions,handedness="right",scale=1,testID="list-action-row"}:{actions:GoListAction[];handedness?:"left"|"right";scale?:number;testID?:string}){
   if(!actions.length)return null;
-  const tones={
-    negative:{base:"#CE3340",selected:"#CE3340",muted:"#CE3340"},
-    intermediate:{base:"#C45400",selected:"#C45400",muted:"#B95100"},
-    positive:{base:"#008456",selected:"#008456",muted:"#087A50"},
-  };
   const ordered=handedness==="left"?[...actions].reverse():actions;
   return <View testID={testID} pointerEvents="box-none" style={{flexDirection:"row",alignSelf:"stretch",gap:6,marginTop:6,marginBottom:4}}>
     {ordered.map(action=>{
-      const tone=tones[action.tone];
       const inactive=action.selectable&&!action.selected;
       return <TouchableOpacity key={action.key} accessibilityRole="button" accessibilityLabel={action.accessibilityLabel??action.label}
         accessibilityHint={action.accessibilityHint} accessibilityState={{disabled:!!action.disabled,selected:!!action.selected}}
         disabled={action.disabled} activeOpacity={0.7}
         onPress={event=>{event?.stopPropagation?.();action.onPress();}}
         style={{flex:1,flexBasis:0,flexShrink:1,minWidth:0,minHeight:Math.max(44,Math.round(44*scale)),paddingHorizontal:4,paddingVertical:8,
-          borderRadius:8,borderWidth:1,borderColor:action.selected?"rgba(255,255,255,0.38)":"rgba(255,255,255,0.22)",
-          backgroundColor:action.selected?tone.selected:inactive?tone.muted:tone.base,
-          shadowColor:tone.base,shadowOffset:{width:0,height:2},shadowOpacity:action.selected?0.22:0.14,shadowRadius:3,elevation:1,alignItems:"center",justifyContent:"center"}}>
+          ...goActionVisual(action.tone,!!action.selected,!!inactive),alignItems:"center",justifyContent:"center"}}>
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} maxFontSizeMultiplier={1.8}
           style={{color:"#FFFFFF",fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",alignSelf:"stretch",width:"100%",minWidth:0}}>{action.label}</Text>
       </TouchableOpacity>;
@@ -77,10 +83,11 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
   const [pressed,setPressed]=useState<string|null>(null);
   const list = layout === "list";
   const label=(es:string,en:string)=>lang==="en"?en:es;
+  const selected=(key:string)=>key==="pending"?entry.localResolutionStatus!=="done":entry.localResolutionStatus==="done";
   const actions=[
-    {key:"done",text:label("REALIZADA","DONE"),color:C.done,icon:"check-circle" as const,run:onDone},
-    {key:"pending",text:label("PENDIENTE","PENDING"),color:C.pending,icon:"clock" as const,run:onPending},
-    {key:"discard",text:label("ELIMINAR","DELETE"),color:C.destructive,icon:"trash-2" as const,run:onDiscard},
+    {key:"done",text:label("REALIZADA","DONE"),tone:"positive" as const,run:onDone},
+    {key:"pending",text:label("PENDIENTE","PENDING"),tone:"intermediate" as const,run:onPending},
+    {key:"discard",text:label("ELIMINAR","DELETE"),tone:"negative" as const,run:onDiscard},
   ].filter(action=>action.run);
   if(!actions.length)return null;
   if(list){
@@ -88,9 +95,9 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
     if(onDiscard)listActions.push({key:"discard",label:label("ELIMINAR","DELETE"),tone:"negative",onPress:onDiscard,disabled,
       accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("ELIMINAR","DELETE"):label("ELIMINAR","DELETE"),
       accessibilityHint:label("Oculta solo tu ficha. No cancela el compromiso.","Hides only your card. Does not cancel the commitment.")});
-    if(onPending)listActions.push({key:"pending",label:label("PENDIENTE","PENDING"),tone:"intermediate",onPress:onPending,disabled,selectable:!!onDone,selected:entry.localResolutionStatus!=="done",
+    if(onPending)listActions.push({key:"pending",label:label("PENDIENTE","PENDING"),tone:"intermediate",onPress:onPending,disabled,selectable:!!onDone,selected:selected("pending"),
       accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("PENDIENTE","PENDING"):label("PENDIENTE","PENDING")});
-    if(onDone)listActions.push({key:"done",label:label("REALIZADA","DONE"),tone:"positive",onPress:onDone,disabled,selectable:!!onPending,selected:entry.localResolutionStatus==="done",
+    if(onDone)listActions.push({key:"done",label:label("REALIZADA","DONE"),tone:"positive",onPress:onDone,disabled,selectable:!!onPending,selected:selected("done"),
       accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("REALIZADA","DONE"):label("REALIZADA","DONE")});
     return <GoListActionRow testID="entry-micro-actions" handedness={handedness} scale={listScale} actions={listActions}/>;
   }
@@ -98,14 +105,15 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
     {actions.map(action=><TouchableOpacity key={action.key} accessibilityRole="button"
       accessibilityLabel={personal?label("Mi seguimiento: ","My follow-up: ")+action.text:action.text}
       accessibilityHint={action.key==="discard"?label("Oculta solo tu ficha. No cancela el compromiso.","Hides only your card. Does not cancel the commitment."):undefined}
-      disabled={disabled} accessibilityState={{disabled,selected:entry.localResolutionStatus===action.key}}
+      disabled={disabled} accessibilityState={{disabled,selected:action.key==="discard"?false:selected(action.key)}}
       hitSlop={{top:inline?4:0,bottom:inline?4:0,left:0,right:0}} activeOpacity={0.7}
       onPressIn={()=>setPressed(action.key)} onPressOut={()=>setPressed(null)}
       onPress={event=>{event?.stopPropagation();action.run?.();}}
-      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:1.5,borderColor:action.color,backgroundColor:action.color+"18",opacity:disabled?0.48:pressed===action.key?0.88:1,flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",shadowColor:action.color,shadowOffset:{width:0,height:2},shadowOpacity:disabled||pressed===action.key?0.06:0.2,shadowRadius:3,elevation:disabled||pressed===action.key?0:2,transform:[{translateY:pressed===action.key?1:0}]}}>
-      <Feather name={action.icon} size={inline?12:14} color={action.color}/>
+      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,...goActionVisual(action.tone,action.key==="discard"?false:selected(action.key),
+        action.key!=="discard"&&!!onDone&&!!onPending&&!selected(action.key),pressed===action.key),
+        opacity:disabled?0.48:pressed===action.key?0.88:1,alignItems:"center",justifyContent:"center"}}>
       <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2}
-        style={{color:action.color,fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.text}</Text>
+        style={{color:"#FFFFFF",fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.text}</Text>
     </TouchableOpacity>)}
   </View>;
 }
@@ -123,16 +131,16 @@ export function GoEntryQuickActions({ entry, showState = true, compact = false, 
     : entry.localResolutionStatus === "pending" ? (lang === "en" ? "PENDING" : "PENDIENTE")
     : accepted ? (lang === "en" ? "ACCEPTED" : "ACEPTADA") : entry.estado === "rechazado" ? (lang === "en" ? "CANCELLED" : "CANCELADA") : (lang === "en" ? "PENDING" : "PENDIENTE");
   const pending = entryProposalPending(entry);
-  const button = (label: string, color: string, callback?: () => void) => callback && <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} activeOpacity={compact?0.72:0.82} onPressIn={compact?undefined:()=>setPressed(label)} onPressOut={compact?undefined:()=>setPressed(null)} onPress={event => { event?.stopPropagation(); callback(); }} style={[s.action, compact && s.compactAction, !compact&&pressed===label&&pressedSurface, { borderColor: color, backgroundColor: color+"18", shadowColor: color,...(!compact&&{shadowOpacity:pressed===label?0.06:0.2,shadowRadius:3}) }]}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{ color, fontSize: compact ? 10 : 12, fontWeight: "700", textAlign: "center" }}>{label}</Text></TouchableOpacity>;
+  const button = (label: string, tone: GoListAction["tone"], callback?: () => void) => callback && <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} activeOpacity={compact?0.72:0.82} onPressIn={compact?undefined:()=>setPressed(label)} onPressOut={compact?undefined:()=>setPressed(null)} onPress={event => { event?.stopPropagation(); callback(); }} style={[s.action, compact && s.compactAction, goActionVisual(tone,false,false,pressed===label)]}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{ color:"#FFFFFF", fontSize: compact ? 10 : 12, fontWeight: "800", textAlign: "center" }}>{label}</Text></TouchableOpacity>;
   return <View testID="entry-quick-actions" style={{ gap: compact ? 4 : 8 }}>
     {showState && <Text numberOfLines={1} style={{ color: canonical ? policy.stateColor : entry.localResolutionStatus==="done"?C.done:entry.localResolutionStatus==="pending"?C.pending:accepted?C.accepted:entry.estado==="rechazado"?C.destructive:C.pending, fontSize: compact ? 10 : 13, fontWeight: "800" }}>{pending ? "Original: " : ""}{state}</Text>}
     {canonical&&entry.localResolutionStatus&&<Text style={{color:entry.localResolutionStatus==="done"?C.done:C.pending,fontSize:compact?10:13}}>{lang==="en"?"My follow-up: ":"Mi seguimiento: "}{entry.localResolutionStatus==="done"?(lang==="en"?"DONE":"REALIZADA"):(lang==="en"?"PENDING":"PENDIENTE")}</Text>}
     {pending && <Text numberOfLines={1} style={{color:"#FF8C00",fontSize:compact?10:13,fontWeight:"700"}}>{received ? (lang === "en" ? "Change received · pending" : "Cambio recibido · pendiente") : (lang === "en" ? "Change · awaiting response" : "Cambio · esperando respuesta")}</Text>}
     {active && <View style={[s.actions, compact && {flexWrap:"nowrap",gap:6}]}>
-      {button(received ? (lang === "en" ? "REJECT" : "RECHAZAR") : (lang === "en" ? "CANCEL" : "CANCELAR"), C.destructive, received ? actions.onReject : actions.onCancel)}
-      {button(internal ? (lang === "en" ? "EDIT" : "MODIFICAR") : received ? (lang === "en" ? "PROPOSE" : "PROPONER") : (lang === "en" ? "PROPOSE CHANGE" : "PROPONER CAMBIO"), "#FF8C00", internal ? actions.onEdit : actions.onPropose)}
+      {button(received ? (lang === "en" ? "REJECT" : "RECHAZAR") : (lang === "en" ? "CANCEL" : "CANCELAR"), "negative", received ? actions.onReject : actions.onCancel)}
+      {button(internal ? (lang === "en" ? "EDIT" : "MODIFICAR") : received ? (lang === "en" ? "PROPOSE" : "PROPONER") : (lang === "en" ? "PROPOSE CHANGE" : "PROPONER CAMBIO"), "intermediate", internal ? actions.onEdit : actions.onPropose)}
       {(received || canonical && policy.canConfirm || !canonical && !internal && entry.kind === "received" && entry.estado === "pendiente")
-        && button(lang === "en" ? "ACCEPT" : "ACEPTAR", "#22c55e", received ? actions.onAccept : canonical ? actions.onConfirm : actions.onAccept)}
+        && button(lang === "en" ? "ACCEPT" : "ACEPTAR", "positive", received ? actions.onAccept : canonical ? actions.onConfirm : actions.onAccept)}
     </View>}
   </View>;
 }
