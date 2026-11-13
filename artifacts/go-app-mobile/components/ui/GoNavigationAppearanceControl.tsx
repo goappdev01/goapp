@@ -31,6 +31,8 @@ export function GoNavigationAppearanceControl() {
               level={level}
               touchSize={44}
               preserveTouchSize
+              cornerRadius={14}
+              iconSize={21}
               accessibilityLabel={["Vista previa de Atrás", "Vista previa de Salir", "Vista previa de Configuración"][i]}
               onPress={() => {}}
             />

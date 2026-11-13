@@ -24,7 +24,7 @@ function nativeFixture() {
 }
 
 test('compact opacity control updates its label, accessible value and real previews, persists and recovers from a failed save', async () => {
-  const f = nativeFixture(), stored = new Map();
+  const f = nativeFixture(), stored = new Map(), icons = [];
   let fail = false;
   const storage = {
     getItem: async key => stored.get(key) ?? null,
@@ -34,7 +34,7 @@ test('compact opacity control updates its label, accessible value and real previ
   const imports = {
     'react-native': { ...f.native, useColorScheme: () => 'dark' },
     './goNavigationAppearance': pref,
-    '@expo/vector-icons': { Feather: () => null },
+    '@expo/vector-icons': { Feather: props => { icons.push(props); return null; } },
   };
   const close = evaluate('components/ui/GoCloseButton.tsx', imports);
   const { GoNavigationAppearanceControl } = evaluate('components/ui/GoNavigationAppearanceControl.tsx', {
@@ -55,7 +55,9 @@ test('compact opacity control updates its label, accessible value and real previ
       const control = f.latest(p => p.accessibilityLabel === `Vista previa de ${name}`);
       assert.equal(flatten(control.style).width, 44);
       assert.equal(flatten(control.style).height, 44);
+      assert.equal(flatten(control.style).borderRadius, 14);
     }
+    assert.deepEqual(icons.slice(-3).map(icon => icon.size), [21, 21, 21]);
     assert.equal(flatten(slider().style).height, 44);
     slider().onLayout({ nativeEvent: { layout: { width: 240 } } });
     for (const [x, expected] of [[0, 11], [120, 55], [240, 99], [300, 99]]) {
