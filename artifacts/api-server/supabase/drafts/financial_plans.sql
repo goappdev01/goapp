@@ -236,7 +236,8 @@ create function go_finance_private.access() returns jsonb
 language plpgsql security definer set search_path='' as $$
 declare actor uuid:=auth.uid(); member text; plans jsonb;
 begin
- select level into member from public.admin_memberships where user_id=actor and active;
+ perform pg_advisory_xact_lock_shared(714082601);
+ select level into member from public.admin_memberships where user_id=actor and active and (level='owner' or permissions @> array['admin.access']::text[]);
  if actor is null or member is null or member not in ('owner','technical') then raise exception 'Admin required' using errcode='42501'; end if;
  select coalesce(jsonb_agg(jsonb_build_object('id',p.id,'title',p.title,'version',p.version,'ownerUserId',p.owner_user_id,'canWrite',p.owner_user_id=actor or g.can_write) order by p.created_at),'[]'::jsonb) into plans
  from go_finance_private.plans p left join go_finance_private.plan_grants g on g.plan_id=p.id and g.user_id=actor and g.active
@@ -279,7 +280,7 @@ declare actor uuid; result jsonb;
 begin
  actor:=go_finance_private.assert_access(null,true);
  if not exists(select 1 from go_finance_private.plans where id=p_id and owner_user_id=actor) then raise exception 'Owner required' using errcode='42501'; end if;
- if target is null or target=actor or write_access is null or is_active is null or not exists(select 1 from public.admin_memberships where user_id=target and level='technical' and (not is_active or active)) then
+ if target is null or target=actor or write_access is null or is_active is null or not exists(select 1 from public.admin_memberships where user_id=target and level='technical' and (not is_active or (active and permissions @> array['admin.access']::text[]))) then
   raise exception 'An active delegated admin is required' using errcode='22023'; end if;
  result:=go_finance_private.save_plan(p_id,p_version,go_finance_private.document(p_id),reason,'grant',jsonb_build_object('target',target,'canWrite',write_access,'active',is_active));
  insert into go_finance_private.plan_grants(plan_id,user_id,can_write,active,granted_by) values(p_id,target,write_access,is_active,actor)
