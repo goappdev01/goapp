@@ -22791,6 +22791,25 @@ function HomeScreenContent() {
                     </Text>
                   </View>;
                 })() : null;
+                const listCategoryBadge = !entryIsReservation(g) && !compactProposal ? (() => {
+                  const entryType = (g as any).type || "";
+                  const label = entryType === "GO_INTERNO" ? t('tasks_badge_go_internal')
+                    : entryType === "TAREA_INTERNA" ? t('tasks_badge_task_internal')
+                    : entryType === "TAREA" ? t('tasks_badge_task_external')
+                    : entryType === "LLAMADA" ? t('tasks_call').toUpperCase()
+                    : entryType === "WHATSAPP" ? "WHATSAPP"
+                    : g.isGeneric ? t('tasks_task').toUpperCase() : t('tasks_badge_go_external');
+                  const color = entryType === "GO_INTERNO" ? "#16a34a"
+                    : entryType === "TAREA_INTERNA" ? "#d97706"
+                    : entryType === "TAREA" ? "#f59e0b"
+                    : entryType === "LLAMADA" ? "#3b82f6"
+                    : g.isGeneric ? "#a78bfa" : "#6ee7b7";
+                  return <View testID={"list-category-badge-" + g.id} style={{paddingHorizontal:lv(5),paddingVertical:lv(2),borderRadius:lv(4),backgroundColor:color+"18",borderWidth:1,borderColor:color+"80"}}>
+                    <Text style={{color:"#ffffff",fontSize:lv(8),fontFamily:"Inter_700Bold",fontWeight:"800",letterSpacing:0.4}}>{label}</Text>
+                  </View>;
+                })() : null;
+                const hasListInfo = !!((!compactProposal && (g.date || g.time || g.recipients?.length || (!entryIsReservation(g) && (g.contactName || g.phone))))
+                  || ((g as any).type === "GO_BOOKING" && (g as any).professionalName));
                 return (
                   <React.Fragment key={g.id}>
                   {showNoDateSeparator && (
@@ -23008,14 +23027,18 @@ function HomeScreenContent() {
                           {g.estado === "rechazado" && <Feather name="x" size={lv(14)} color="#ffffff" />}
                         </TouchableOpacity>
                       )}
-                      {!hideRedundantFollowUpPending &&
-                        <View testID={(bookingStatusPill&&!isProposalEstado?"list-reservation-status-row-":"list-entry-header-status-")+g.id} style={{maxWidth:"100%",flexShrink:0,alignSelf:"flex-end",alignItems:"flex-end",marginLeft:"auto"}}>
-                          {bookingStatusPill && !isProposalEstado ? bookingStatusPill : statusPill}
+                      {(listCategoryBadge || !hideRedundantFollowUpPending) &&
+                        <View testID={(bookingStatusPill&&!isProposalEstado?"list-reservation-status-row-":"list-entry-header-status-")+g.id} style={{maxWidth:"100%",flexShrink:0,alignSelf:"flex-end",flexDirection:"row",flexWrap:"wrap",justifyContent:"flex-end",alignItems:"center",gap:lv(4),marginLeft:"auto"}}>
+                          {listCategoryBadge}
+                          {!hideRedundantFollowUpPending && (bookingStatusPill && !isProposalEstado ? bookingStatusPill : statusPill)}
+                          {bookingStatusPill && isProposalEstado && <View testID={"list-reservation-status-row-" + g.id} style={{marginLeft:"auto",flexDirection:"row",justifyContent:"flex-end"}}>
+                            {bookingStatusPill}
+                          </View>}
                         </View>}
                     </View>
 
                     {/* ── FILA 2: INFO + ESTADO + BADGE ── */}
-                    {(!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8),...(entryIsReservation(g)?{flexWrap:"wrap"}: {}) }}>
+                    {hasListInfo && (!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8),...(entryIsReservation(g)?{flexWrap:"wrap"}: {}) }}>
                       {/* INFO — fecha/hora + destinatarios */}
                       <TouchableOpacity
                         activeOpacity={0.75}
@@ -23041,7 +23064,6 @@ function HomeScreenContent() {
                           ))}
                           {(g as any).type === "GO_BOOKING" && !!(g as any).professionalName && (
                             <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-                              <Feather name="user" size={lv(10)} color="#818cf8" />
                               <Text style={{ color: "#a5b4fc", fontSize: Math.max(12,lv(11)), fontWeight: "600", flexShrink: 1 }}>
                                 {(g as any).professionalName}
                               </Text>
@@ -23058,7 +23080,6 @@ function HomeScreenContent() {
                                   : `${total} ${t('participants_count')}`;
                               return (
                                 <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-                                  <Feather name="users" size={lv(10)} color="rgba(255,255,255,0.70)" />
                                   <Text style={{ color: "#ffffff", fontSize: lv(11) }} numberOfLines={1}>
                                     {label}
                                   </Text>
@@ -23070,7 +23091,6 @@ function HomeScreenContent() {
                               if (!n) return null;
                               return (
                                 <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
-                                  <Feather name="user" size={lv(10)} color="rgba(255,255,255,0.70)" />
                                   <Text style={{ color: "#ffffff", fontSize: lv(11) }} numberOfLines={1}>
                                     {n}
                                   </Text>
@@ -23082,46 +23102,6 @@ function HomeScreenContent() {
                         </View>
                       </TouchableOpacity>
 
-                      {entryIsReservation(g) ? isProposalEstado && <View testID={"list-reservation-status-row-" + g.id} style={{ alignSelf: "flex-end", marginLeft: "auto", flexDirection: "row", justifyContent: "flex-end" }}>
-                        {bookingStatusPill}
-                      </View> : (
-                      <View style={{ flexDirection: "column", alignItems: "flex-end", gap: lv(6), flexShrink: 0 }}>
-                        {/* Badge con EXACTO mismo color que filtro inferior correspondiente */}
-                        {!compactProposal && ((() => {
-                          const entryType = (g as any).type || "";
-                          const lbl =
-                            entryType === "GO_INTERNO"    ? t('tasks_badge_go_internal')
-                            : entryType === "TAREA_INTERNA" ? t('tasks_badge_task_internal')
-                            : entryType === "TAREA"         ? t('tasks_badge_task_external')
-                            : entryType === "LLAMADA"       ? t('tasks_call').toUpperCase()
-                            : entryType === "WHATSAPP"      ? "WHATSAPP"
-                            : g.isGeneric           ? t('tasks_task').toUpperCase()
-                            : g.kind === "received" ? t('tasks_badge_go_external')
-                            : t('tasks_badge_go_external');
-                          const badgeColor =
-                            entryType === "GO_INTERNO"    ? "#16a34a"
-                            : entryType === "TAREA_INTERNA" ? "#d97706"
-                            : entryType === "TAREA"         ? "#f59e0b"
-                            : entryType === "LLAMADA"       ? "#3b82f6"
-                            : g.isGeneric           ? "#a78bfa"
-                            : "#6ee7b7";
-                          return (
-                            <View style={{
-                              paddingHorizontal: lv(5),
-                              paddingVertical: lv(2),
-                              borderRadius: lv(4),
-                              backgroundColor: badgeColor + "18",
-                              borderWidth: 1,
-                              borderColor: badgeColor + "80",
-                            }}>
-                              <Text style={{ color: "#ffffff", fontSize: lv(8), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.4 }}>
-                                {lbl}
-                              </Text>
-                            </View>
-                          );
-                        })())}
-                      </View>
-                      )}
                     </View>}
 
                     {/* ── PROPUESTA DE CAMBIO: siempre visible cuando existe ── */}

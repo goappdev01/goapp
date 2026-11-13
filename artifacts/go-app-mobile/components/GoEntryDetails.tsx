@@ -47,9 +47,9 @@ export type GoListAction = {
 export function GoListActionRow({actions,handedness="right",scale=1,testID="list-action-row"}:{actions:GoListAction[];handedness?:"left"|"right";scale?:number;testID?:string}){
   if(!actions.length)return null;
   const tones={
-    negative:{base:"#B53843",selected:"#B53843",muted:"#B53843"},
-    intermediate:{base:"#9C5A12",selected:"#A55F0E",muted:"#65471D"},
-    positive:{base:"#18744D",selected:"#1A7B4F",muted:"#345C48"},
+    negative:{base:"#CE3340",selected:"#CE3340",muted:"#CE3340"},
+    intermediate:{base:"#C45400",selected:"#C45400",muted:"#B95100"},
+    positive:{base:"#008456",selected:"#008456",muted:"#087A50"},
   };
   const ordered=handedness==="left"?[...actions].reverse():actions;
   return <View testID={testID} pointerEvents="box-none" style={{flexDirection:"row",alignSelf:"stretch",gap:6,marginTop:6,marginBottom:4}}>

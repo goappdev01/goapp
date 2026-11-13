@@ -329,7 +329,7 @@ test('three real Listados task cards place the complete actions below their head
     assert.equal(cards.length, 3);
     for (const card of cards) {
       const children=card.props.children.filter(Boolean); const index = children.findIndex(node => node?.type === f.context.GoEntryMicroActions);
-      assert.equal(index, 2, 'actions follow the header and readable content');
+      assert.equal(index, 1, 'a task without date or contact has no empty information row');
       assert.equal(nodes(children[0], node => node.type === 'Feather' && node.props.name === 'circle').length, 0);
       const mounted = children[index];
       assert.equal(mounted.props.layout, 'list');
@@ -347,7 +347,15 @@ test('three real Listados task cards place the complete actions below their head
       assert.equal(buttons.find(button => texts(button) === current).props.accessibilityState.selected, true);
       assert.equal(buttons.find(button => texts(button) === 'ELIMINAR').props.accessibilityState.selected, false);
       assert.equal(buttons.find(button => texts(button) !== current && texts(button) !== 'ELIMINAR').props.disabled, false);
-      if (mounted.props.entry.estado === 'pendiente') assert.equal(nodes(children[0], node => node.props.testID === 'list-entry-header-status-' + mounted.props.entry.id).length, 0);
+      const category=nodes(children[0],node=>node.props.testID==='list-category-badge-'+mounted.props.entry.id)[0];
+      assert.equal(texts(category),'TAREA INT');
+      assert.equal(nodes(children[1],node=>node.props.testID==='list-category-badge-'+mounted.props.entry.id).length,0);
+      if (mounted.props.entry.estado === 'pendiente') {
+        const headerBadge=nodes(children[0], node => node.props.testID === 'list-entry-header-status-' + mounted.props.entry.id)[0];
+        assert.ok(headerBadge);
+        assert.ok(!texts(headerBadge).includes('PENDIENTE'));
+        assert.ok(nodes(headerBadge,node=>node.props.testID==='list-category-badge-'+mounted.props.entry.id).length);
+      }
       assert.equal(nodes(row, node => node.type === 'Feather').length, 0);
       buttons.forEach((button, position) => {
         const style = flatten(button.props.style);
@@ -405,7 +413,7 @@ test('three Listados reservations show one real state and open the Calendar deta
       const state = nodes(card, n => n.props.testID === 'list-reservation-status-' + entry.id);
       assert.equal(state.length, 1);
       const statusRow = nodes(card, n => n.props.testID === 'list-reservation-status-row-' + entry.id)[0];
-      assert.equal(statusRow.props.style.marginLeft, 'auto');assert.equal(statusRow.props.style.alignItems, 'flex-end');assert.equal(statusRow.props.style.position, undefined);
+      assert.equal(statusRow.props.style.marginLeft, 'auto');assert.equal(statusRow.props.style.justifyContent, 'flex-end');assert.equal(statusRow.props.style.position, undefined);
       assert.ok(nodes(card.props.children.filter(Boolean)[0], n => n === statusRow).length, 'reservation state belongs to the header');
       assert.equal(texts(state[0]), entry.label);
       assert.ok(!texts(card).split(' | ').includes('ACEPTADO'));

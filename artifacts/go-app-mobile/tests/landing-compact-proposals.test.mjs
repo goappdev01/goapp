@@ -144,11 +144,21 @@ test('shared Listados footer keeps equal accessible buttons with one, two or thr
     assert.equal(calls.at(-1),(handedness==='right'?actions[0]:actions.at(-1)).key);
   }
 });
+test('selected and unselected follow-up colors keep white text at AA contrast',()=>{
+  const f=fixture('es');
+  for(const tone of ['intermediate','positive'])for(const selected of [false,true]){
+    const row=f.context.GoListActionRow({actions:[{key:tone,label:'ESTADO',tone,selectable:true,selected,onPress:()=>{}}]});
+    const button=nodes(row,node=>node.type==='TouchableOpacity')[0];
+    assert.ok(whiteContrast(button.props.style.backgroundColor)>=4.5);
+    assert.equal(nodes(button,node=>node.type==='Text')[0].props.style.color,'#FFFFFF');
+  }
+});
 test('personal follow-up omits only its duplicate pending header, never a booking contract state', () => {
   const followUpAccess={canResolveEntry:()=>true,renderEntryMicroActions:()=>null};
   const followUp=freeze(sample({estado:'pendiente',changeProposal:undefined}));
   const ordinary=cardOf(fixture('es',{...followUpAccess,goLog:[followUp]}).render());
-  assert.equal(byId(ordinary,'list-entry-header-status-compact'),undefined);
+  assert.equal(texts(byId(ordinary,'list-entry-header-status-compact')),'GO EXT');
+  assert.ok(byId(byId(ordinary,'list-entry-header-status-compact'),'list-category-badge-compact'));
   const booking=freeze(sample({estado:'pendiente',changeProposal:undefined,type:'GO_BOOKING',reservationId:'real-booking',bookingStatus:'confirmada'}));
   const contractual=cardOf(fixture('es',{...followUpAccess,goLog:[booking]}).render());
   assert.equal(texts(byId(contractual,'list-reservation-status-compact')),'CONFIRMADA');
@@ -263,6 +273,8 @@ test('ordinary cards and trash retain their date/contact/badge content for every
       assert.ok(texts(card).includes(entry.date));
       assert.ok(texts(card).includes(entry.contactName));
       assert.ok(texts(card).includes('GO EXT'));
+      const info=card.props.children.filter(Boolean)[1];
+      assert.equal(nodes(info,node=>node.type==='Feather'&&['user','users'].includes(node.props.name)).length,0,'names keep their text without decorative person icons');
     }
     for (const estado of ['propuesto', 'propuesta_pendiente']) {
       const entry = freeze(sample({ estado, deleted: true }));
@@ -304,6 +316,8 @@ for (const [bookingStatus, labelKey, color] of [
     const contact = byId(card, 'go-proposal-contact-compact');
     assert.equal(nodes(card, node => node.props?.testID === 'go-proposal-contact-compact').length, 1);
     assert.equal(texts(card).split('ProAna').length - 1, 1, 'the original professional remains visible');
+    const info=card.props.children.filter(Boolean)[1];
+    assert.equal(nodes(info,node=>node.type==='Feather'&&['user','users'].includes(node.props.name)).length,0);
     const statusLabel = translations[lang][labelKey].toUpperCase();
     const status = nodes(card, node => node.type === 'Text' && texts(node) === statusLabel);
     assert.equal(status.length, 1, 'retain the existing localized booking-state pill and default');
@@ -311,6 +325,7 @@ for (const [bookingStatus, labelKey, color] of [
     const statusRow=byId(card,'list-reservation-status-row-compact');
     assert.equal(statusRow.props.style.width,undefined);
     assert.equal(statusRow.props.style.marginLeft,'auto');
+    assert.ok(nodes(byId(card,'go-proposal-header-compact'),node=>node===statusRow).length,'original reservation and proposal states share the compact header');
     assert.equal(texts(card).includes(translations[lang].biz_booking_intent_label.toUpperCase() + " · "), false, 'booking status has no redundant type prefix');
     for (const time of [entry.time, entry.changeProposal.time]) assert.equal(texts(card).split(time).length - 1, 1);
     dispatchNestedPress(contact, card);
