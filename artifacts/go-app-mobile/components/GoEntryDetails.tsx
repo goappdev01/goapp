@@ -31,12 +31,48 @@ export type GoEntryActionCallbacks = {
   onAccept?: () => void; onReject?: () => void; onConfirm?: () => void;
 };
 
+export type GoListAction = {
+  key: string;
+  label: string;
+  tone: "negative" | "intermediate" | "positive";
+  onPress: () => void;
+  selected?: boolean;
+  disabled?: boolean;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+};
+
+/** The same footer geometry serves personal follow-up and contractual proposals. */
+export function GoListActionRow({actions,handedness="right",scale=1,testID="list-action-row"}:{actions:GoListAction[];handedness?:"left"|"right";scale?:number;testID?:string}){
+  if(!actions.length)return null;
+  const tones={
+    negative:{text:"#E98A84",border:"rgba(233,138,132,0.55)",background:"rgba(233,138,132,0.09)",selected:"rgba(233,138,132,0.16)"},
+    intermediate:{text:"#E9B76A",border:"rgba(233,183,106,0.55)",background:"rgba(233,183,106,0.09)",selected:"rgba(233,183,106,0.16)"},
+    positive:{text:"#81CDA0",border:"rgba(129,205,160,0.55)",background:"rgba(129,205,160,0.09)",selected:"rgba(129,205,160,0.16)"},
+  };
+  const ordered=handedness==="left"?[...actions].reverse():actions;
+  return <View testID={testID} pointerEvents="box-none" style={{flexDirection:"row",alignSelf:"stretch",gap:6,marginTop:6,marginBottom:4}}>
+    {ordered.map(action=>{
+      const tone=tones[action.tone];
+      return <TouchableOpacity key={action.key} accessibilityRole="button" accessibilityLabel={action.accessibilityLabel??action.label}
+        accessibilityHint={action.accessibilityHint} accessibilityState={{disabled:!!action.disabled,selected:!!action.selected}}
+        disabled={action.disabled} activeOpacity={0.7}
+        onPress={event=>{event?.stopPropagation?.();action.onPress();}}
+        style={{flex:1,flexBasis:0,flexShrink:1,minWidth:0,minHeight:Math.max(44,Math.round(44*scale)),paddingHorizontal:4,paddingVertical:8,
+          borderRadius:8,borderWidth:1,borderColor:action.selected?tone.text:tone.border,
+          backgroundColor:action.selected?tone.selected:tone.background,
+          shadowColor:tone.text,shadowOffset:{width:0,height:2},shadowOpacity:0.08,shadowRadius:3,elevation:1,alignItems:"center",justifyContent:"center"}}>
+        <Text style={{color:tone.text,fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.label}</Text>
+      </TouchableOpacity>;
+    })}
+  </View>;
+}
+
 /** Personal follow-up never writes the contractual acceptance or completion of a reservation. */
-export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout,handedness="right"}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list";handedness?:"left"|"right"}){
+export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout,handedness="right",listScale=1}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list";handedness?:"left"|"right";listScale?:number}){
   const {lang}=useLanguage(),personal=!!(entry.reservationId||entry.customerBooking||entry.businessBooking);
   const [pressed,setPressed]=useState<string|null>(null);
   const list = layout === "list";
-  const premium=list&&personal;
   const label=(es:string,en:string)=>lang==="en"?en:es;
   const actions=[
     {key:"done",text:label("REALIZADA","DONE"),color:C.done,icon:"check-circle" as const,run:onDone},
@@ -44,19 +80,29 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
     {key:"discard",text:label("ELIMINAR","DELETE"),color:C.destructive,icon:"trash-2" as const,run:onDiscard},
   ].filter(action=>action.run);
   if(!actions.length)return null;
-  const ordered=list&&handedness==="right"?[...actions].reverse():actions;
-  return <View testID="entry-micro-actions" pointerEvents="box-none" style={{flexDirection:"row",flexShrink:0,gap:4,padding:0,...(list && {alignSelf:"stretch",marginBottom:6})}}>
-    {ordered.map(action=><TouchableOpacity key={action.key} accessibilityRole="button"
+  if(list){
+    const listActions:GoListAction[]=[];
+    if(onDiscard)listActions.push({key:"discard",label:label("ELIMINAR","DELETE"),tone:"negative",onPress:onDiscard,disabled,
+      accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("ELIMINAR","DELETE"):label("ELIMINAR","DELETE"),
+      accessibilityHint:label("Oculta solo tu ficha. No cancela el compromiso.","Hides only your card. Does not cancel the commitment.")});
+    if(onPending)listActions.push({key:"pending",label:label("PENDIENTE","PENDING"),tone:"intermediate",onPress:onPending,disabled,selected:entry.localResolutionStatus==="pending",
+      accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("PENDIENTE","PENDING"):label("PENDIENTE","PENDING")});
+    if(onDone)listActions.push({key:"done",label:label("REALIZADA","DONE"),tone:"positive",onPress:onDone,disabled,selected:entry.localResolutionStatus==="done",
+      accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("REALIZADA","DONE"):label("REALIZADA","DONE")});
+    return <GoListActionRow testID="entry-micro-actions" handedness={handedness} scale={listScale} actions={listActions}/>;
+  }
+  return <View testID="entry-micro-actions" pointerEvents="box-none" style={{flexDirection:"row",flexShrink:0,gap:4,padding:0}}>
+    {actions.map(action=><TouchableOpacity key={action.key} accessibilityRole="button"
       accessibilityLabel={personal?label("Mi seguimiento: ","My follow-up: ")+action.text:action.text}
       accessibilityHint={action.key==="discard"?label("Oculta solo tu ficha. No cancela el compromiso.","Hides only your card. Does not cancel the commitment."):undefined}
       disabled={disabled} accessibilityState={{disabled,selected:entry.localResolutionStatus===action.key}}
       hitSlop={{top:inline?4:0,bottom:inline?4:0,left:0,right:0}} activeOpacity={0.7}
-      onPressIn={list?undefined:()=>setPressed(action.key)} onPressOut={list?undefined:()=>setPressed(null)}
+      onPressIn={()=>setPressed(action.key)} onPressOut={()=>setPressed(null)}
       onPress={event=>{event?.stopPropagation();action.run?.();}}
-      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:list?1:1.5,borderColor:action.color,backgroundColor:action.color+(list?"12":"18"),opacity:disabled?0.48:pressed===action.key?0.88:1,flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",...(!list&&{shadowColor:action.color,shadowOffset:{width:0,height:2},shadowOpacity:disabled||pressed===action.key?0.06:0.2,shadowRadius:3,elevation:disabled||pressed===action.key?0:2,transform:[{translateY:pressed===action.key?1:0}]}),...(list && {flexBasis:0,flexShrink:1}),...(premium&&{paddingVertical:4,borderColor:action.key==="discard"?action.color+"99":entry.localResolutionStatus===action.key?action.color+"99":"rgba(255,255,255,0.10)",backgroundColor:action.color+(entry.localResolutionStatus===action.key?"20":"0a")})}}>
-      {!list&&<Feather name={action.icon} size={inline?12:14} color={action.color}/>}
-      <Text numberOfLines={list?undefined:1} adjustsFontSizeToFit={!list} minimumFontScale={0.75} maxFontSizeMultiplier={list?2:1.2}
-        style={{color:action.color,fontSize:list?11:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.text}</Text>
+      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:1.5,borderColor:action.color,backgroundColor:action.color+"18",opacity:disabled?0.48:pressed===action.key?0.88:1,flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",shadowColor:action.color,shadowOffset:{width:0,height:2},shadowOpacity:disabled||pressed===action.key?0.06:0.2,shadowRadius:3,elevation:disabled||pressed===action.key?0:2,transform:[{translateY:pressed===action.key?1:0}]}}>
+      <Feather name={action.icon} size={inline?12:14} color={action.color}/>
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2}
+        style={{color:action.color,fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.text}</Text>
     </TouchableOpacity>)}
   </View>;
 }

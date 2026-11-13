@@ -24,6 +24,10 @@ function compile(text) {
   return ts.transpileModule(text, { compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React } }).outputText;
 }
 const compactFormatter = find(home, node => ts.isFunctionDeclaration(node) && node.name?.text === 'formatCompactProposalSlot');
+const detailsSource = readFileSync('components/GoEntryDetails.tsx', 'utf8');
+const detailsAst = ts.createSourceFile('details.tsx', detailsSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const sharedActionRow = find(detailsAst, node => ts.isFunctionDeclaration(node) && node.name?.text === 'GoListActionRow');
+const sharedActionRowCode = compile(sharedActionRow.getText(detailsAst) + '\nglobalThis.GoListActionRow = GoListActionRow;');
 assert.ok(compactFormatter, 'use the actual compact slot formatter');
 const listFunctions = ['isPendingListEntry', 'clearClassicListFilters'].map(name =>
   find(home, node => ts.isFunctionDeclaration(node) && node.name?.text === name));
@@ -67,8 +71,8 @@ function fixture(lang = 'es', overrides = {}) {
   const calls = [];
   const completionDocument = completionModel.emptyCompletionDocument({ userId: 'tasks-fixture', context: 'live:USER' });
   const React = { Fragment: 'Fragment', createElement: (type, props, ...children) => ({ type, props: { ...props, children: children.flat(Infinity) } }) };
-  const hosts = Object.fromEntries(['BottomSheet', 'GoScreenHost', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable', 'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(x => [x, x]));
-  const context = { ...hosts, React, Date, Math, goView:{view:"USER"},adminAccess:{allowed:false,checking:false},useMemo: fn => fn(),customerBookings:{entries:[],loading:false,error:""}, console,
+  const hosts = Object.fromEntries(['BottomSheet', 'GoScreenHost', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable', 'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image', 'GoListActionRow'].map(x => [x, x]));
+  const context = { ...hosts, exports:{}, React, Date, Math, goView:{view:"USER"},adminAccess:{allowed:false,checking:false},useMemo: fn => fn(),customerBookings:{entries:[],loading:false,error:""}, console,
     t: key => { assert.equal(typeof translations[lang][key], 'string', key); return translations[lang][key]; },
     listOpen: true, listSwipeStepAllowed: true, llamadasListOpen: false, listMinimized: false, listFiltersHidden: false, listFilter: 'todos', typeFilter: 'todos', activityFilter: 'todas',
     quickCreateOpen: false, quickCreateKbVisible: false, quickCreateText: '', paddingBottom: 34, screenBgColors: {}, listGoSize: 'medio', goSortOrder: 'asc',
@@ -101,6 +105,7 @@ function fixture(lang = 'es', overrides = {}) {
   for (const name of setterNames) context[name] = value => { calls.push([name, value]); const field = name.slice(3, 4).toLowerCase() + name.slice(4); context[field] = typeof value === 'function' ? value(context[field]) : value; };
   for (const name of ['updateGoStatus', 'acceptProposal', 'rejectProposal', 'openProposalFromList', 'openFieldSelector', 'showToast', 'scheduleUndo', 'rejectGo', 'toggleGoSortOrder', 'sendExpandedNote', 'toggleNotaRecording', 'resetNotaAudio', 'saveGoNoteOnly', 'sendGoNote', 'applyAlternativeSlot', 'sendSuggestChangeFromCal', 'speakMsg', 'undoStatusChange', 'updateLogStatus']) context[name] = (...args) => calls.push([name, ...args]);
   context.cycleGoSlot = (id, direction) => { calls.push(['cycleGoSlot', id, direction]); return direction === 'advance' ? 'aceptado' : 'pendiente'; };
+  vm.runInNewContext(sharedActionRowCode, context);
   context.renderUnifiedNoteEditor = () => ({ type: 'SharedNoteEditor', props: { children: [], visible: context.notesOpen, initial: context.unifiedNoteInitial, seed: context.unifiedNoteSeed } });
   for (const route of routes) vm.runInNewContext(compile(`globalThis.${route.name} = ${route.code};`), context);
   return { context, calls, render: () => { vm.runInNewContext(listCode, context); return context.tree; } };
@@ -135,14 +140,14 @@ for (const lang of ['es', 'en']) {
       const label = translations[lang].biz_change_proposed;
       assert.equal(texts(top).split(label).length - 1, 1);
       assert.ok(!texts(info).includes(label));
-      const upperButtons = top.props.children.filter(n => n?.type === 'TouchableOpacity');
+      const upperButtons = nodes(top, n => n.type === 'TouchableOpacity');
       const indicatorIndex = upperButtons.findIndex(n => texts(n) === label);
       assert.ok(indicatorIndex >= 0);
-      const orange = upperButtons[indicatorIndex + 1];
+      const orange = upperButtons.find(n => n.props.style?.backgroundColor === policyContext.exports.GO_ENTRY_COLORS.change);
       assert.equal(orange.props.style.backgroundColor, policyContext.exports.GO_ENTRY_COLORS.change);
       orange.props.onPress({ stopPropagation() {} });
       assert.deepEqual(f.calls.at(-1), ['updateGoStatus', 'food']);
-      assert.equal(card.props.style.paddingVertical, 4);
+      assert.equal(card.props.style.paddingVertical, 8);
       const body = texts(card);
       for (const value of ['03/06/30', '12:00', '04/06/2030', '13:00', translations[lang].biz_booking_awaiting]) assert.ok(body.includes(value), value);
       const proposal = nodes(card, n => n.props?.testID === 'go-proposal-dates-food')[0];
@@ -150,15 +155,17 @@ for (const lang of ['es', 'en']) {
       assert.equal(proposal.props.children.filter(n => n && typeof n === 'object').length, 3);
       assert.ok(!texts(proposal).includes(translations[lang].biz_booking_awaiting));
       assert.ok(texts(top).includes(translations[lang].biz_booking_awaiting));
-      assert.equal(proposal.props.style.paddingHorizontal, 8);
-      assert.equal(proposal.props.style.paddingVertical, 2);
-      assert.equal(proposal.props.style.marginTop, 3);
-      assert.equal(proposal.props.style.gap, 3);
+      assert.equal(proposal.props.style.paddingHorizontal, 9);
+      assert.equal(proposal.props.style.paddingVertical, 7);
+      assert.equal(proposal.props.style.marginTop, 4);
+      assert.equal(proposal.props.style.gap, 5);
       assert.equal(proposal.props.style.height, undefined);
       const received = swipes[1].props.children[0];
-      childWith(received, '🟢 ' + translations[lang].accept).props.onPress({ stopPropagation() {} });
+      const mounted = nodes(received, n => n.props.testID === 'go-proposal-responses-sport')[0];
+      const buttons = nodes(mounted.type(mounted.props), n => n.type === 'TouchableOpacity');
+      buttons.find(n => texts(n) === translations[lang].accept.toUpperCase()).props.onPress({ stopPropagation() {} });
       assert.deepEqual(f.calls.at(-1), ['acceptProposal', 'sport']);
-      childWith(received, '🔴 ' + translations[lang].reject).props.onPress({ stopPropagation() {} });
+      buttons.find(n => texts(n) === translations[lang].reject.toUpperCase()).props.onPress({ stopPropagation() {} });
       assert.deepEqual(f.calls.at(-1), ['rejectProposal', 'sport']);
       swipes[0].props.onSwipeRight();
       assert.ok(f.calls.some(c => c[0] === 'cycleGoSlot' && c[1] === 'food' && c[2] === 'advance'));
@@ -322,12 +329,15 @@ test('three real Listados task cards place the complete actions below their head
     assert.equal(cards.length, 3);
     for (const card of cards) {
       const children=card.props.children.filter(Boolean); const index = children.findIndex(node => node?.type === f.context.GoEntryMicroActions);
-      assert.equal(index, 1, 'actions own a row directly beneath the header');
+      assert.equal(index, 2, 'actions follow the header and readable content');
       assert.equal(nodes(children[0], node => node.type === 'Feather' && node.props.name === 'circle').length, 0);
       const mounted = children[index];
       assert.equal(mounted.props.layout, 'list');
       assert.equal(mounted.props.handedness, handedness);
-      const row = mounted.type(mounted.props);
+      const rowMount = mounted.type(mounted.props);
+      assert.equal(rowMount.type, f.context.GoListActionRow);
+      assert.equal(rowMount.props.scale, listGoSize === 'compacto' ? .8 : listGoSize === 'grande' ? 1.25 : 1);
+      const row = rowMount.type(rowMount.props);
       assert.equal(flatten(row.props.style).flexWrap, undefined);
       assert.equal(flatten(row.props.style).alignSelf, 'stretch');
       const buttons = nodes(row, node => node.type === 'TouchableOpacity');
@@ -340,8 +350,9 @@ test('three real Listados task cards place the complete actions below their head
         assert.equal(label.props.numberOfLines, undefined);
         assert.equal(flatten(label.props.style).flexShrink, 1);
         assert.equal(style.flexBasis, 0);
-        assert.equal(style.minHeight, 44);
-        assert.equal(style.borderColor, ({REALIZADA:f.context.C.done,PENDIENTE:f.context.C.pending,ELIMINAR:f.context.C.destructive})[labels[position]]);
+        assert.ok(style.minHeight >= 44);
+        assert.equal(style.flex, 1);
+        assert.ok(style.backgroundColor.startsWith('rgba('));
         button.props.onPress({ stopPropagation() {} });
       });
       assert.deepEqual(f.calls.slice(-3), (handedness === 'right' ? ['discard', 'pending', 'done'] : ['done', 'pending', 'discard']).map(status => [mounted.props.entry.id, status]));
@@ -354,7 +365,8 @@ test('three real Listados task cards place the complete actions below their head
     assert.equal(reopenedActions.props.handedness, handedness);
     f.context.handedness = handedness === 'right' ? 'left' : 'right';
     const switched = nodes(listCard(f.render(), 'task-0'), node => node.type === f.context.GoEntryMicroActions)[0];
-    assert.deepEqual(nodes(switched.type(switched.props), node => node.type === 'TouchableOpacity').map(node => node.props.accessibilityLabel),
+    const switchedRow = switched.type(switched.props);
+    assert.deepEqual(nodes(switchedRow.type(switchedRow.props), node => node.type === 'TouchableOpacity').map(node => node.props.accessibilityLabel),
       handedness === 'right' ? ['REALIZADA', 'PENDIENTE', 'ELIMINAR'] : ['ELIMINAR', 'PENDIENTE', 'REALIZADA']);
   }
 });
@@ -386,7 +398,8 @@ test('three Listados reservations show one real state and open the Calendar deta
       const state = nodes(card, n => n.props.testID === 'list-reservation-status-' + entry.id);
       assert.equal(state.length, 1);
       const statusRow = nodes(card, n => n.props.testID === 'list-reservation-status-row-' + entry.id)[0];
-      assert.equal(statusRow.props.style.width, '100%');assert.equal(statusRow.props.style.justifyContent, 'flex-end');assert.equal(statusRow.props.style.position, undefined);
+      assert.equal(statusRow.props.style.marginLeft, 'auto');assert.equal(statusRow.props.style.alignItems, 'flex-end');assert.equal(statusRow.props.style.position, undefined);
+      assert.ok(nodes(card.props.children.filter(Boolean)[0], n => n === statusRow).length, 'reservation state belongs to the header');
       assert.equal(texts(state[0]), 'RESERVA · ' + entry.label);
       assert.ok(!texts(card).split(' | ').includes('ACEPTADO'));
       for (const target of [card, nodes(card, n => n.props.testID === 'list-entry-title-' + entry.id)[0]]) {
@@ -426,9 +439,9 @@ test('premium reservation cards keep their category and place all personal actio
   assert.equal(accent.props.style.backgroundColor,'#eab308');assert.equal(accent.props.style.height,24);assert.equal(accent.props.style.width,3);assert.equal(card.props.style.borderLeftWidth,1);
   assert.equal(nodes(listCard(tree,'sport-reservation'),n=>n.props.testID?.startsWith('list-category-accent')).length,0);assert.equal(nodes(listCard(tree,'ordinary-task'),n=>n.props.testID?.startsWith('list-category-accent')).length,0);assert.equal(listCard(tree,'ordinary-task').props.style.borderLeftWidth,4);
   const actionMounts=nodes(card,n=>n.type===f.context.GoEntryMicroActions);assert.equal(actionMounts.length,1);assert.equal(nodes(card,n=>n.props.testID==='list-card-trash-hair').length,0);
-  const row=actionMounts[0].type(actionMounts[0].props),buttons=nodes(row,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);
+  const rowMount=actionMounts[0].type(actionMounts[0].props),row=rowMount.type(rowMount.props),buttons=nodes(row,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);
   assert.deepEqual(buttons.map(b=>texts(b)),handedness==='right'?['ELIMINAR','PENDIENTE','REALIZADA']:['REALIZADA','PENDIENTE','ELIMINAR']);
-  assert.equal(nodes(row,n=>n.type==='Feather').length,0);assert.equal(buttons.filter(b=>b.props.accessibilityState.selected).length,1);assert.ok(buttons.every(b=>b.props.style.minHeight>=44&&b.props.style.backgroundColor.length===9));
+  assert.equal(nodes(row,n=>n.type==='Feather').length,0);assert.equal(buttons.filter(b=>b.props.accessibilityState.selected).length,1);assert.ok(buttons.every(b=>b.props.style.minHeight>=44&&b.props.style.backgroundColor.startsWith('rgba(')));
   for(const label of ['REALIZADA','PENDIENTE','ELIMINAR'])buttons.find(b=>texts(b)===label).props.onPress({stopPropagation(){}});
   assert.deepEqual(f.calls.slice(-3),[['hair','done'],['hair','pending'],['hair','discard']]);assert.equal(hair.reservationId,'original-booking');assert.equal(hair.bookingStatus,'confirmada');
  }

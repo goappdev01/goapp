@@ -143,7 +143,7 @@ import { placeLandingHelpQr, placeLandingQr } from "@/components/landing/landing
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
-import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions } from "@/components/GoEntryDetails";
+import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions, GoListActionRow } from "@/components/GoEntryDetails";
 import { entryHeading, entryIdentity, entryIsReservation, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand } from "@/data/goEntryPresentation";
 import { changeTask } from "@/lib/goTaskManagement";
 import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands";
@@ -13705,7 +13705,7 @@ function HomeScreenContent() {
     if(!entry.changeProposal&&!entry.proposal)void actionCompletion.decide(entry,status,true,read);
   };
   const followedEntry=(entry:GoEntry)=>({...entry,localResolutionStatus:actionCompletion.status(entry)});
-  const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list")=><GoEntryMicroActions inline={inline} layout={layout} handedness={handedness} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
+  const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list",listScale=1)=><GoEntryMicroActions inline={inline} layout={layout} handedness={handedness} listScale={listScale} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
     onDone={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"done"):undefined}
     onPending={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"pending"):undefined}
     onDiscard={canResolveEntry(entry)?()=>resolveEntry(entry,"discard"):undefined}/>;
@@ -22753,7 +22753,7 @@ function HomeScreenContent() {
                     }}
                   >
                     {isProposalEstado ? (
-                      <Text style={{ color: ENTRY_COLORS.change, fontSize: lv(9), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.6, textAlign: "center" }}>
+                      <Text style={{ color: ENTRY_COLORS.change, fontSize: Math.max(11,lv(11)), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textAlign: "center" }}>
                         {g.estado === "propuesta_pendiente" ? t('biz_change_proposed') : t('biz_change_received')}
                       </Text>
                     ) : (
@@ -22765,7 +22765,7 @@ function HomeScreenContent() {
                               : g.estado === "rechazado"
                                 ? ENTRY_COLORS.destructive
                                 : ENTRY_COLORS.pending,
-                          fontSize: lv(9),
+                          fontSize: Math.max(11,lv(11)),
                           fontFamily: "Inter_700Bold", fontWeight: "800",
                           letterSpacing: 0.6,
                         }}
@@ -22775,9 +22775,22 @@ function HomeScreenContent() {
                     )}
                   </TouchableOpacity>
                 );
-                const proposalStatusLine = compactProposal && g.estado === "propuesta_pendiente" ? (<View testID={"go-proposal-substatus-" + g.id} style={{ flexDirection: "row", alignItems: "center", gap: lv(5), paddingTop: 0 }}>
-                            <Feather name="clock" size={lv(11)} color={ENTRY_COLORS.change} />
-                            <Text style={{ color: ENTRY_COLORS.change, fontSize: lv(10), fontWeight: "700", flexShrink: 1 }}>
+                const bookingStatusPill = entryIsReservation(g) ? (() => {
+                  const policy = reservationCardPolicy(g);
+                  const status = policy.stateKey === "booking_state_accepted" ? t("status_confirmed")
+                    : g.bookingStatus === "cambio_pendiente" && policy.stateKey === "booking_state_pending"
+                      ? t("floor_reservation_cambio_pendiente") : t(policy.stateKey as Parameters<typeof t>[0]);
+                  const color = g.bookingStatus === "cambio_pendiente" && policy.stateKey === "booking_state_pending"
+                    ? ENTRY_COLORS.change : policy.stateColor;
+                  return <View testID={"list-reservation-status-" + g.id} style={{maxWidth:"100%",paddingHorizontal:lv(6),paddingVertical:lv(3),
+                    borderRadius:lv(5),borderWidth:1,borderColor:"rgba(255,255,255,0.10)",backgroundColor:"rgba(255,255,255,0.04)"}}>
+                    <Text style={{color,fontSize:Math.max(11,lv(10)),fontFamily:"Inter_700Bold",fontWeight:"700",textAlign:"right"}}>
+                      {t("biz_booking_intent_label").toUpperCase() + " · " + status.toUpperCase()}
+                    </Text>
+                  </View>;
+                })() : null;
+                const proposalStatusLine = compactProposal && g.estado === "propuesta_pendiente" ? (<View testID={"go-proposal-substatus-" + g.id} style={{ flexDirection: "row", alignItems: "center" }}>
+                            <Text style={{ color: ENTRY_COLORS.change, fontSize: Math.max(11,lv(11)), fontWeight: "700", flexShrink: 1 }}>
                               {t('biz_booking_awaiting')}
                             </Text>
                           </View>) : null;
@@ -22818,7 +22831,7 @@ function HomeScreenContent() {
                       setExpandedId((prev) => (prev === g.id ? null : g.id));
                     }}
                     style={{
-                      paddingVertical: lv(compactProposal ? 4 : isProposalEstado ? 6 : 8),
+                      paddingVertical: lv(8),
                       paddingHorizontal: lv(14),
                       borderRadius: lv(14),
                       backgroundColor: "#161618",
@@ -22837,14 +22850,13 @@ function HomeScreenContent() {
                       shadowOffset: { width: 0, height: 2 },
                       elevation: 3,
                       opacity: g.deleted ? 0.7 : 1,
-                      ...(premiumReservation&&{paddingHorizontal:lv(12),paddingVertical:lv(6),backgroundColor:"#161618",borderColor:"rgba(255,255,255,0.12)",shadowColor:"#000000",shadowOpacity:0.12,shadowRadius:5}),
+                      ...(premiumReservation&&{paddingHorizontal:lv(12),backgroundColor:"#161618",borderColor:"rgba(255,255,255,0.12)",shadowColor:"#000000",shadowOpacity:0.12,shadowRadius:5}),
                       ...(beautyReservation&&{borderLeftWidth:1,borderLeftColor:"rgba(255,255,255,0.12)"}),
                     }}
                   >
                     {beautyReservation&&<View testID={"list-category-accent-"+g.id} pointerEvents="none" style={{position:"absolute",left:0,top:12,width:3,height:24,borderRadius:2,backgroundColor:beauty!.color}}/>}
                     {/* ── FILA 1: TÍTULO COMPLETO — todo el ancho hasta el checkbox ── */}
-                    <View testID={compactProposal ? "go-proposal-header-" + g.id : undefined} style={{ flexDirection: "row", alignItems: "center", flexWrap: compactProposal ? "wrap" : undefined, gap: compactProposal ? lv(3) : lv(8), marginBottom: lv(compactProposal ? 1 : 3) }}>
-                      {handedness === "left" && isProposalEstado && statusPill}
+                    <View testID={compactProposal ? "go-proposal-header-" + g.id : undefined} style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: lv(6), marginBottom: lv(4) }}>
                       {/* CHECKBOX — izquierda si ZURDO */}
                       {handedness === "left" && !canResolveEntry(g) && !entryIsReservation(g) && (
                         <TouchableOpacity
@@ -22873,7 +22885,7 @@ function HomeScreenContent() {
                         </TouchableOpacity>
                       )}
                       {/* Icono intent */}
-                      {(isProposalEstado || !canResolveEntry(g)) && <View style={{ width: lv(18), height: lv(18), borderRadius: 5, backgroundColor: intentColor + "28", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {!canResolveEntry(g) && <View style={{ width: lv(18), height: lv(18), borderRadius: 5, backgroundColor: intentColor + "28", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                         <Feather name={(intentDef?.icon || "circle") as keyof typeof Feather.glyphMap} size={lv(10)} color={intentColor} />
                       </View>}
                       {/* TÍTULO — ocupa todo el espacio restante hasta el checkbox */}
@@ -22939,12 +22951,12 @@ function HomeScreenContent() {
                           }
                         }}
                         delayLongPress={420}
-                        style={{ flex: 1, minWidth: compactProposal ? lv((g.notes?.trim() || g.intentLabel || "").length > 18 ? 115 : 64) : 0 }}
+                        style={{ flex: 1, minWidth: lv(120) }}
                       >
                         {(() => {
                           const realTitle = entryIsReservation(g)?entryHeading(g,lang==="en"?"Reservation":"Reserva"):g.notes?.trim() || g.intentLabel;
                           const title = (
-                            <Text testID={compactProposal ? "go-proposal-title-" + g.id : undefined} style={{ color: "#ffffff", fontSize: premiumReservation?Math.max(14,lv(14)):lv(14), fontWeight: "700", lineHeight: premiumReservation?Math.max(18,lv(18)):lv(18) }} numberOfLines={compactProposal||premiumReservation ? undefined : 1}>
+                            <Text testID={compactProposal ? "go-proposal-title-" + g.id : undefined} style={{ color: "#ffffff", fontSize: Math.max(14,lv(14)), fontWeight: "700", lineHeight: Math.max(18,lv(18)) }}>
                               {realTitle}
                             </Text>
                           );
@@ -22973,7 +22985,6 @@ function HomeScreenContent() {
                           <Feather name={g.recipients && g.recipients.length > 1 ? "users" : "user"} size={lv(18)} color="rgba(255,255,255,0.70)" />
                         </TouchableOpacity>
                       )}
-                      {handedness === "right" && isProposalEstado && statusPill}
                       {/* CHECKBOX — derecha si DIESTRO */}
                       {handedness === "right" && !canResolveEntry(g) && !entryIsReservation(g) && (
                         <TouchableOpacity
@@ -23001,9 +23012,10 @@ function HomeScreenContent() {
                           {g.estado === "rechazado" && <Feather name="x" size={lv(14)} color="#ffffff" />}
                         </TouchableOpacity>
                       )}
+                      <View testID={(bookingStatusPill&&!isProposalEstado?"list-reservation-status-row-":"list-entry-header-status-")+g.id} style={{maxWidth:"55%",flexShrink:1,alignItems:"flex-end",marginLeft:"auto"}}>
+                        {bookingStatusPill && !isProposalEstado ? bookingStatusPill : statusPill}
+                      </View>
                     </View>
-
-                    {!premiumReservation&&!isProposalEstado && canResolveEntry(g) && renderEntryMicroActions(g, false, "list")}
 
                     {/* ── FILA 2: INFO + ESTADO + BADGE ── */}
                     {(!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8),...(entryIsReservation(g)?{flexWrap:"wrap"}: {}) }}>
@@ -23023,9 +23035,9 @@ function HomeScreenContent() {
                       >
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                           {!compactProposal && ((!!g.date || !!g.time) && (
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 1 }}>
                               <Feather name="clock" size={lv(10)} color="rgba(255,255,255,0.70)" />
-                              <Text style={{ color: "#ffffff", fontSize: lv(11), fontWeight: "600" }} numberOfLines={1}>
+                              <Text style={{ color: "#ffffff", fontSize: Math.max(12,lv(11)), fontWeight: "600", flexShrink: 1 }}>
                                 {[localizeLabel(g.date || ""), g.time].filter(Boolean).join(" · ")}
                               </Text>
                             </View>
@@ -23033,7 +23045,7 @@ function HomeScreenContent() {
                           {(g as any).type === "GO_BOOKING" && !!(g as any).professionalName && (
                             <View style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
                               <Feather name="user" size={lv(10)} color="#818cf8" />
-                              <Text style={{ color: "#a5b4fc", fontSize: lv(11), fontWeight: "600" }} numberOfLines={1}>
+                              <Text style={{ color: "#a5b4fc", fontSize: Math.max(12,lv(11)), fontWeight: "600", flexShrink: 1 }}>
                                 {(g as any).professionalName}
                               </Text>
                             </View>
@@ -23073,27 +23085,10 @@ function HomeScreenContent() {
                         </View>
                       </TouchableOpacity>
 
-                      {entryIsReservation(g) ? (() => {
-                        const policy = reservationCardPolicy(g);
-                        const status = policy.stateKey === "booking_state_accepted" ? t("status_confirmed")
-                          : g.bookingStatus === "cambio_pendiente" && policy.stateKey === "booking_state_pending"
-                            ? t("floor_reservation_cambio_pendiente") : t(policy.stateKey as Parameters<typeof t>[0]);
-                        const color = g.bookingStatus === "cambio_pendiente" && policy.stateKey === "booking_state_pending"
-                          ? ENTRY_COLORS.change : policy.stateColor;
-                        return <View testID={"list-reservation-status-row-" + g.id} style={{ width: "100%", flexDirection: "row", justifyContent: "flex-end" }}>
-                          <View testID={"list-reservation-status-" + g.id} style={{
-                            maxWidth: "100%", paddingHorizontal: lv(6), paddingVertical: lv(3),
-                            borderRadius: lv(5), borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)",
-                          }}>
-                            <Text style={{ color, fontSize: Math.max(11,lv(9)), fontFamily: "Inter_700Bold", fontWeight: "700" }}>
-                              {t("biz_booking_intent_label").toUpperCase() + " · " + status.toUpperCase()}
-                            </Text>
-                          </View>
-                        </View>;
-                      })() : (
+                      {entryIsReservation(g) ? isProposalEstado && <View testID={"list-reservation-status-row-" + g.id} style={{ width: "100%", flexDirection: "row", justifyContent: "flex-end" }}>
+                        {bookingStatusPill}
+                      </View> : (
                       <View style={{ flexDirection: "column", alignItems: "flex-end", gap: lv(6), flexShrink: 0 }}>
-                        {/* Estado pill */}
-                        {!isProposalEstado && statusPill}
                         {/* Badge con EXACTO mismo color que filtro inferior correspondiente */}
                         {!compactProposal && ((() => {
                           const entryType = (g as any).type || "";
@@ -23132,30 +23127,27 @@ function HomeScreenContent() {
                       )}
                     </View>}
 
-                    {premiumReservation&&!isProposalEstado&&canResolveEntry(g)&&renderEntryMicroActions(g,false,"list")}
                     {/* ── PROPUESTA DE CAMBIO: siempre visible cuando existe ── */}
                     {!isPapelaraView && isProposalEstado && !!(g as any).changeProposal && (<React.Fragment>
 <View testID={"go-proposal-dates-" + g.id} style={{
-                        marginTop: lv(3),
+                        marginTop: lv(4),
                         borderRadius: lv(10),
-                        borderWidth: 1.5,
-                        borderColor: "rgba(255,140,0,0.65)",
-                        backgroundColor: "rgba(255,140,0,0.13)",
+                        borderWidth: 1,
+                        borderColor: "rgba(255,140,0,0.35)",
+                        backgroundColor: "rgba(255,140,0,0.07)",
                         overflow: "hidden",
-                        paddingHorizontal: lv(8),
-                        paddingVertical: lv(2),
-                        gap: lv(3),
+                        paddingHorizontal: lv(9),
+                        paddingVertical: lv(7),
+                        gap: lv(5),
                       }}>
                         {/* Reserva actual */}
-                        <View testID={"go-proposal-current-" + g.id} style={{ flexDirection: "row", alignItems: "center", gap: lv(8) }}>
-                          <Text numberOfLines={1} style={{ flexShrink: 0, color: "rgba(255,255,255,0.45)", fontSize: Math.min(lv(8), 8), fontWeight: "700", letterSpacing: 0.6 }}>
+                        <View testID={"go-proposal-current-" + g.id} style={{ gap: lv(2) }}>
+                          <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: Math.max(10,lv(10)), fontWeight: "700", letterSpacing: 0.4 }}>
                             {t('tasks_current_booking').toUpperCase()}
                           </Text>
                           <Text
-                            numberOfLines={1}
-                            adjustsFontSizeToFit minimumFontScale={0.85}
                             accessibilityLabel={[localizeLabel(g.date || ""), g.time].filter(Boolean).join(" · ")}
-                            style={{ color: "#ffffff", fontSize: Math.min(lv(12), 12), fontWeight: "700", flex: 1, minWidth: 0, textAlign: "right" }}
+                            style={{ color: "#ffffff", fontSize: Math.max(13,lv(13)), fontWeight: "700" }}
                           >
                             {formatCompactProposalSlot(localizeLabel(g.date || ""), g.dateISO, g.time)}
                           </Text>
@@ -23163,15 +23155,13 @@ function HomeScreenContent() {
                         {/* Separador */}
                         <View style={{ height: 1, backgroundColor: "rgba(255,140,0,0.25)" }} />
                         {/* Propuesta cambio */}
-                        <View testID={"go-proposal-next-" + g.id} style={{ flexDirection: "row", alignItems: "center", gap: lv(8) }}>
-                          <Text numberOfLines={1} style={{ flexShrink: 0, color: ENTRY_COLORS.change, fontSize: Math.min(lv(8), 8), fontWeight: "700", letterSpacing: 0.6 }}>
+                        <View testID={"go-proposal-next-" + g.id} style={{ gap: lv(2) }}>
+                          <Text style={{ color: ENTRY_COLORS.change, fontSize: Math.max(10,lv(10)), fontWeight: "700", letterSpacing: 0.4 }}>
                             {t('tasks_change_proposal').toUpperCase()}
                           </Text>
                           <Text
-                            numberOfLines={1}
-                            adjustsFontSizeToFit minimumFontScale={0.85}
                             accessibilityLabel={[localizeLabel((g as any).changeProposal.date || ""), (g as any).changeProposal.time].filter(Boolean).join(" · ")}
-                            style={{ color: ENTRY_COLORS.change, fontSize: Math.min(lv(13), 13), fontFamily: "Inter_700Bold", fontWeight: "800", flex: 1, minWidth: 0, textAlign: "right" }}
+                            style={{ color: ENTRY_COLORS.change, fontSize: Math.max(13,lv(13)), fontFamily: "Inter_700Bold", fontWeight: "800" }}
                           >
                             {formatCompactProposalSlot(localizeLabel((g as any).changeProposal.date || ""), (g as any).changeProposal.dateISO, (g as any).changeProposal.time)}
                           </Text>
@@ -23179,39 +23169,17 @@ function HomeScreenContent() {
                         {/* Nota opcional */}
                         </View>
 {!!(g as any).changeProposal.note && (
-                          <Text testID={"go-proposal-note-" + g.id} style={{ marginTop: lv(3), color: "rgba(255,140,0,0.80)", fontSize: lv(9), lineHeight: lv(13) }}>
+                          <Text testID={"go-proposal-note-" + g.id} style={{ marginTop: lv(4), color: "#E9B76A", fontSize: Math.max(12,lv(12)), lineHeight: Math.max(16,lv(16)) }}>
                             {(g as any).changeProposal.note}
                           </Text>
                         )}
-{g.estado !== "propuesta_pendiente" && (<View testID={"go-proposal-responses-" + g.id} style={{ marginTop: lv(8), gap: lv(4), paddingTop: 0 }}>
-
-                            <View style={{ flexDirection: "row", gap: lv(8) }}>
-                              <TouchableOpacity
-                                onPress={(e) => { if ((e as any)?.stopPropagation) (e as any).stopPropagation(); Haptics.selectionAsync().catch(() => {}); acceptProposal(g.id); }}
-                                activeOpacity={0.7}
-                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: "#16a34a" }}
-                              >
-                                <Feather name="check" size={lv(13)} color="#fff" />
-                                <Text style={{ color: "#fff", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🟢 ' + t('accept')}</Text>
-                              </TouchableOpacity>
-                              <TouchableOpacity
-                                onPress={(e) => { if ((e as any)?.stopPropagation) (e as any).stopPropagation(); Haptics.selectionAsync().catch(() => {}); rejectProposal(g.id); }}
-                                activeOpacity={0.7}
-                                style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: ENTRY_COLORS.destructive }}
-                              >
-                                <Feather name="x" size={lv(13)} color="#fff" />
-                                <Text style={{ color: "#fff", fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🔴 ' + t('reject')}</Text>
-                              </TouchableOpacity>
-                            </View>
-                            <TouchableOpacity
-                              onPress={(e) => { if ((e as any)?.stopPropagation) (e as any).stopPropagation(); Haptics.selectionAsync().catch(() => {}); openProposalFromList({ id: g.id, time: g.time, place: (g as any).place || "" }); }}
-                              activeOpacity={0.7}
-                              style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: lv(4), paddingVertical: lv(9), borderRadius: lv(8), backgroundColor: "rgba(255,140,0,0.15)", borderWidth: 1, borderColor: "rgba(255,140,0,0.45)" }}
-                            >
-                              <Text style={{ color: ENTRY_COLORS.change, fontSize: lv(10), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.3 }}>{'🟠 ' + t('tasks_propose')}</Text>
-                            </TouchableOpacity>
-                          </View>)}
 </React.Fragment>)}
+                    {!isProposalEstado && canResolveEntry(g) && renderEntryMicroActions(g,false,"list",listScale)}
+                    {compactProposal && g.estado !== "propuesta_pendiente" && <GoListActionRow testID={"go-proposal-responses-" + g.id} handedness={handedness} scale={listScale} actions={[
+                      {key:"reject",label:t('reject').toUpperCase(),tone:"negative",onPress:()=>{Haptics.selectionAsync().catch(()=>{});rejectProposal(g.id);}},
+                      {key:"propose",label:t('tasks_propose').toUpperCase(),tone:"intermediate",onPress:()=>{Haptics.selectionAsync().catch(()=>{});openProposalFromList({id:g.id,time:g.time,place:(g as any).place||""});}},
+                      {key:"accept",label:t('accept').toUpperCase(),tone:"positive",onPress:()=>{Haptics.selectionAsync().catch(()=>{});acceptProposal(g.id);}},
+                    ]}/>}
                     {/* ── HUECOS ALTERNATIVOS: aparece tras rechazar una propuesta ── */}
                     {(expandedId === g.id || allExpanded) && altSlotsEntry?.entryId === g.id && altSlotsEntry.slots.length > 0 && (
                       <View style={{ marginTop: lv(8), borderRadius: lv(10), borderWidth: 1.5, borderColor: "rgba(74,128,189,0.40)", backgroundColor: "rgba(74,128,189,0.07)", padding: lv(10), gap: lv(6) }}>

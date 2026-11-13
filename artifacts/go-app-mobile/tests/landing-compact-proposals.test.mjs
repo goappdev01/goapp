@@ -21,6 +21,8 @@ const sheet = find(ast, node => ts.isJsxElement(node)
     && p.initializer?.getText(ast) === '{listOpen}'));
 assert.ok(sheet, 'exercise the actual task-list renderer');
 const formatter = find(ast, node => ts.isFunctionDeclaration(node) && node.name?.text === 'formatCompactProposalSlot');
+const details = ts.createSourceFile('details.tsx', fs.readFileSync('components/GoEntryDetails.tsx', 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const actionRow = find(details, node => ts.isFunctionDeclaration(node) && node.name?.text === 'GoListActionRow');
 function compile(text) {
   return ts.transpileModule(text, { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
@@ -79,7 +81,7 @@ function fixture(lang = 'es', overrides = {}) {
   }) };
   const hosts = Object.fromEntries(['BottomSheet', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable',
     'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(name => [name, name]));
-  const context = { ...hosts, React, Date, Math,lang,ENTRY_COLORS:colorContext.exports.GO_ENTRY_COLORS,reservationCardPolicy:colorContext.exports.reservationCardPolicy,entryIsReservation:presentationContext.exports.entryIsReservation,entryHeading:presentationContext.exports.entryHeading,canResolveEntry:()=>false, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""},
+  const context = { ...hosts, exports:{}, React, Date, Math,lang,ENTRY_COLORS:colorContext.exports.GO_ENTRY_COLORS,reservationCardPolicy:colorContext.exports.reservationCardPolicy,entryIsReservation:presentationContext.exports.entryIsReservation,entryHeading:presentationContext.exports.entryHeading,canResolveEntry:()=>false, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""},
     mergeCompletionEntries: completionContext.exports.mergeCompletionEntries, useMemo: fn => fn(), adminAccess: { allowed: false, checking: false },
     noteDocument: noteContext.exports.noteDocument, isGoNoteReminderTarget: toolsContext.exports.isGoNoteReminderTarget,
     actionCompletion: { candidates: [], status: () => undefined }, noteIdentity: {ready:false}, personalGoLog: [], renderLinkedNotes: () => null, listBookingDetail: undefined, notesOpen: false, openListNote() {}, openListSavedNote: () => false,
@@ -96,7 +98,7 @@ function fixture(lang = 'es', overrides = {}) {
     catScrollRef: { current: null }, typeScrollRef: { current: null }, noteInputGoId: null, noteInputDraft: '',
     pendingUndos: {}, goChats: {}, speakingMsgId: null, place: '', sharedChatKey: entry => entry.id,
     currentReceivedIdRef: { current: null }, proposalReturnRef: { current: null }, calFlow: {},
-    marketplacePedidos: [], lastTapRef: { current: { id: null, t: 0 } }, quickNoteAlarm: false,
+    marketplacePedidos: [], lastTapRef: { current: { id: null, t: 0 } }, quickNoteAlarm: false, finishListBookingProposal: () => {},
     Keyboard: { dismiss: () => calls.push(['dismiss']) },
     AsyncStorage: { setItem: (...args) => { calls.push(['store', ...args]); return Promise.resolve(); } },
     Haptics: { selectionAsync: () => Promise.resolve(), notificationAsync: () => Promise.resolve(),
@@ -114,10 +116,31 @@ function fixture(lang = 'es', overrides = {}) {
     context[name] = (...args) => calls.push([name, ...args]);
   }
   context.cycleGoSlot = (id, direction) => { calls.push(['cycleGoSlot', id, direction]); return direction === 'advance' ? 'aceptado' : 'pendiente'; };
+  vm.runInNewContext(compile(actionRow.getText(details) + '\nglobalThis.GoListActionRow = GoListActionRow;'), context);
   return { context, calls, render() { vm.runInNewContext(code, context); return context.tree; } };
 }
 const cardOf = tree => nodes(tree, node => node.type === 'SwipeableRow')[0]?.props.children[0];
 const plain = value => JSON.parse(JSON.stringify(value));
+test('shared Listados footer keeps equal accessible buttons with one, two or three valid actions', () => {
+  const f=fixture('es'), calls=[];
+  for(const scale of [.8,1,1.25])for(const count of [1,2,3])for(const handedness of ['left','right']){
+    const actions=[
+      {key:'remove',label:'ELIMINAR',tone:'negative',onPress:()=>calls.push('remove')},
+      {key:'wait',label:'PENDIENTE',tone:'intermediate',onPress:()=>calls.push('wait')},
+      {key:'done',label:'REALIZADA',tone:'positive',onPress:()=>calls.push('done')},
+    ].slice(0,count);
+    const row=f.context.GoListActionRow({actions,handedness,scale});
+    const buttons=nodes(row,node=>node.type==='TouchableOpacity');
+    assert.equal(buttons.length,count);
+    assert.equal(row.props.style.flexWrap,undefined);
+    assert.equal(nodes(row,node=>node.type==='Feather').length,0);
+    assert.ok(buttons.every(button=>button.props.style.flexBasis===0 && button.props.style.minHeight>=44));
+    assert.ok(buttons.every(button=>nodes(button,node=>node.type==='Text')[0].props.numberOfLines===undefined));
+    assert.deepEqual(buttons.map(button=>texts(button)),(handedness==='right'?actions:[...actions].reverse()).map(action=>action.label));
+    buttons[0].props.onPress({stopPropagation(){}});
+    assert.equal(calls.at(-1),(handedness==='right'?actions[0]:actions.at(-1)).key);
+  }
+});
 function dispatchNestedPress(button, parent) {
   let stopped = false;
   button.props.onPress({ stopPropagation() { stopped = true; } });
@@ -151,12 +174,13 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
       ]) {
         const row = byId(card, id), values = nodes(row, node => node.type === 'Text');
         assert.ok(row);
-        assert.equal(row.props.style.flexDirection, 'row');
+        assert.equal(row.props.style.flexDirection, undefined);
         assert.equal(values.length, 2);
         assert.equal(texts(values[0]), label);
         assert.equal(texts(values[1]), `${date} · ${time}`);
-        assert.ok(values.every(node => node.props.numberOfLines === 1));
+        assert.ok(values.every(node => node.props.numberOfLines === undefined));
         assert.equal(values[1].props.style.color, color);
+        assert.ok(values[1].props.style.fontSize >= 13);
       }
       const label = translations[lang][estado === 'propuesta_pendiente' ? 'biz_change_proposed' : 'biz_change_received'];
       const buttons = nodes(header, node => node.type === 'TouchableOpacity');
@@ -172,25 +196,42 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
       } else assert.equal(waiting, undefined, 'received state stays in its original pill exactly once');
       assert.equal(texts(header).split(label).length - 1, 1, 'keep one localized state pill');
       assert.ok(pillIndex >= 0 && checkboxIndex >= 0 && titleIndex >= 0);
-      assert.ok(handedness === 'left' ? pillIndex < checkboxIndex && checkboxIndex < titleIndex
-        : titleIndex < pillIndex && pillIndex < checkboxIndex, 'keep approved handedness ordering');
+      assert.ok(handedness === 'left' ? checkboxIndex < titleIndex && titleIndex < pillIndex
+        : titleIndex < checkboxIndex && checkboxIndex < pillIndex, 'state remains at the right in both hands');
+      const statusSlot = byId(header, 'list-entry-header-status-compact');
+      assert.equal(statusSlot.props.style.marginLeft, 'auto');
       f.calls.length = 0;
       buttons[checkboxIndex].props.onPress({ stopPropagation() {} });
       assert.deepEqual(plain(f.calls), [['updateGoStatus', entry.id]]);
-      const proposal = nodes(card, node => node.props?.style?.borderColor === 'rgba(255,140,0,0.65)')[0];
+      const proposal = byId(card, 'go-proposal-dates-compact');
       const scale = listGoSize === 'compacto' ? .8 : listGoSize === 'grande' ? 1.25 : 1;
-      assert.equal(card.props.style.paddingVertical, Math.round(4 * scale));
-      assert.equal(proposal.props.style.marginTop, Math.round(3 * scale));
-      assert.equal(proposal.props.style.paddingHorizontal, Math.round(8 * scale));
-      assert.equal(proposal.props.style.paddingVertical, Math.round(2 * scale));
-      assert.equal(proposal.props.style.gap, Math.round(3 * scale));
+      assert.equal(card.props.style.paddingVertical, Math.round(8 * scale));
+      assert.equal(proposal.props.style.marginTop, Math.round(4 * scale));
+      assert.equal(proposal.props.style.paddingHorizontal, Math.round(9 * scale));
+      assert.equal(proposal.props.style.paddingVertical, Math.round(7 * scale));
+      assert.equal(proposal.props.style.gap, Math.round(5 * scale));
       if (estado === 'propuesto') for (const [word, handler] of [['accept', 'acceptProposal'], ['reject', 'rejectProposal']]) {
         f.calls.length = 0;
-        const button = nodes(byId(card, 'go-proposal-responses-compact'), node => node.type === 'TouchableOpacity'
-          && texts(node) === `${word === 'accept' ? '🟢' : '🔴'} ${translations[lang][word]}`)[0];
+        const mounted = byId(card, 'go-proposal-responses-compact');
+        const button = nodes(mounted.type(mounted.props), node => node.type === 'TouchableOpacity'
+          && texts(node) === translations[lang][word].toUpperCase())[0];
         assert.ok(button);
         button.props.onPress({ stopPropagation() {} });
         assert.deepEqual(plain(f.calls), [[handler, entry.id]]);
+      }
+      if (estado === 'propuesto') {
+        const mounted = byId(card, 'go-proposal-responses-compact');
+        const row = mounted.type(mounted.props), buttons = nodes(row, node => node.type === 'TouchableOpacity');
+        const expected = handedness === 'right' ? ['RECHAZAR', 'PROPONER', 'ACEPTAR'] : ['ACEPTAR', 'PROPONER', 'RECHAZAR'];
+        const localized = lang === 'en' ? expected.map(word => ({RECHAZAR:'REJECT',PROPONER:'PROPOSE',ACEPTAR:'ACCEPT'})[word]) : expected;
+        assert.deepEqual(buttons.map(button => texts(button)), localized);
+        assert.equal(row.props.style.flexDirection, 'row');
+        assert.equal(row.props.style.flexWrap, undefined);
+        assert.equal(nodes(row, node => node.type === 'Feather').length, 0);
+        assert.ok(buttons.every(button => button.props.style.flexBasis === 0 && button.props.style.minHeight >= 44));
+        f.calls.length = 0;
+        buttons.find(button => texts(button) === localized[1]).props.onPress({stopPropagation(){}});
+        assert.deepEqual(plain(f.calls), [['openProposalFromList', {id:entry.id,time:entry.time,place:''}]]);
       }
       assert.equal(JSON.stringify(entry), before, 'render and touch preserve saved entry/proposal data');
     });
@@ -277,7 +318,7 @@ test('dates without ISO values preserve the saved labels and full accessible dat
   }
 });
 
-// The new frame contract is exactly two date rows and a divider. No state/note/actions inside.
+// The comparison retains its two dates and divider, with readable text and a separate shared action footer.
 for(const [size,scale] of [['compacto',.8],['medio',1],['grande',1.25]])
  for(const estado of ['propuesta_pendiente','propuesto'])for(const withNote of [false,true])
  test(size+' / '+estado+' / note '+withNote+': date-only frame, state under title, all actions retained',()=>{
@@ -285,23 +326,23 @@ for(const [size,scale] of [['compacto',.8],['medio',1],['grande',1.25]])
   const f=fixture('es',{listGoSize:size,goLog:[entry]}),card=cardOf(f.render()),header=byId(card,'go-proposal-header-compact');
   const box=byId(card,'go-proposal-dates-compact'),lv=n=>Math.round(n*scale);
   assert.equal(box.props.children.filter(n=>n&&typeof n==='object').length,3);
-  assert.equal(box.props.style.paddingVertical,lv(2));assert.equal(box.props.style.marginTop,lv(3));assert.equal(box.props.style.gap,lv(3));
-  assert.equal(card.props.style.paddingHorizontal,lv(14));assert.equal(box.props.style.paddingHorizontal,lv(8));
-  assert.equal(card.props.style.paddingVertical,lv(4));assert.equal(header.props.style.marginBottom,lv(1));
+  assert.equal(box.props.style.paddingVertical,lv(7));assert.equal(box.props.style.marginTop,lv(4));assert.equal(box.props.style.gap,lv(5));
+  assert.equal(card.props.style.paddingHorizontal,lv(14));assert.equal(box.props.style.paddingHorizontal,lv(9));
+  assert.equal(card.props.style.paddingVertical,lv(8));assert.equal(header.props.style.marginBottom,lv(4));
   assert.ok(!texts(box).includes('Esperando respuesta')&&!texts(box).includes('CAMBIO RECIBIDO'));
   assert.equal(nodes(box,n=>n.type==='TouchableOpacity').length,0);
   for(const id of ['go-proposal-current-compact','go-proposal-next-compact']){
-   const row=byId(box,id);assert.equal(row.props.style.flexDirection,'row');
-   for(const text of nodes(row,n=>n.type==='Text'))assert.equal(text.props.numberOfLines,1);
+   const row=byId(box,id);assert.equal(row.props.style.flexDirection,undefined);
+   for(const text of nodes(row,n=>n.type==='Text'))assert.equal(text.props.numberOfLines,undefined);
+   assert.ok(nodes(row,n=>n.type==='Text')[1].props.style.fontSize>=13);
   }
   const note=byId(card,'go-proposal-note-compact');if(withNote){assert.ok(note);assert.equal(texts(note),'Nota conservada completa');assert.equal(note.props.numberOfLines,undefined);assert.ok(!nodes(box).includes(note));}else assert.equal(note,undefined);
   const status=byId(header,'go-proposal-substatus-compact');assert.equal(!!status,estado==='propuesta_pendiente');
   const actions=byId(card,'go-proposal-responses-compact');assert.equal(!!actions,estado==='propuesto');
-  if(actions){const buttons=nodes(actions,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);for(const button of buttons)assert.equal(button.props.style.paddingVertical,lv(9));
-   f.calls.length=0;buttons[2].props.onPress({stopPropagation(){}});assert.deepEqual(plain(f.calls),[['openProposalFromList',{id:entry.id,time:entry.time,place:''}]]);}
+  if(actions){const row=actions.type(actions.props),buttons=nodes(row,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);for(const button of buttons)assert.ok(button.props.style.minHeight>=44);
+   f.calls.length=0;buttons[1].props.onPress({stopPropagation(){}});assert.deepEqual(plain(f.calls),[['openProposalFromList',{id:entry.id,time:entry.time,place:''}]]);}
   const contact=byId(card,'go-proposal-contact-compact');assert.ok(contact.props.style.width>=44&&contact.props.style.height>=44);
-  // Removing 8pt of vertical frame padding is a real saving independent of native font metrics.
-  assert.equal(2*lv(6)-2*box.props.style.paddingVertical,2*(lv(6)-lv(2)));
+  assert.equal(box.props.style.borderColor,'rgba(255,140,0,0.35)');
  });
 
 for(const lang of ['es','en'])for(const size of ['compacto','medio','grande'])for(const handedness of ['left','right'])
