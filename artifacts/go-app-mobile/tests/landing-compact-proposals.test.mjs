@@ -135,7 +135,7 @@ test('shared Listados footer keeps equal accessible buttons with one, two or thr
     assert.equal(row.props.style.flexWrap,undefined);
     assert.equal(nodes(row,node=>node.type==='Feather').length,0);
     assert.ok(buttons.every(button=>button.props.style.flexBasis===0 && button.props.style.minHeight>=44));
-    assert.ok(buttons.every(button=>nodes(button,node=>node.type==='Text')[0].props.numberOfLines===undefined));
+    assert.ok(buttons.every(button=>{const label=nodes(button,node=>node.type==='Text')[0];return label.props.numberOfLines===1&&label.props.adjustsFontSizeToFit===true&&label.props.style.width==='100%';}));
     assert.deepEqual(buttons.map(button=>texts(button)),(handedness==='right'?actions:[...actions].reverse()).map(action=>action.label));
     buttons[0].props.onPress({stopPropagation(){}});
     assert.equal(calls.at(-1),(handedness==='right'?actions[0]:actions.at(-1)).key);
@@ -182,18 +182,16 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
         assert.equal(values[1].props.style.color, color);
         assert.ok(values[1].props.style.fontSize >= 13);
       }
-      const label = translations[lang][estado === 'propuesta_pendiente' ? 'biz_change_proposed' : 'biz_change_received'];
+      const label = translations[lang][estado === 'propuesta_pendiente' ? 'biz_booking_awaiting' : 'biz_change_received'].toUpperCase();
       const buttons = nodes(header, node => node.type === 'TouchableOpacity');
       const pillIndex = buttons.findIndex(node => texts(node) === label);
       const checkboxIndex = buttons.findIndex(node => node.props.style?.backgroundColor === '#FF8C00');
       const titleIndex = buttons.findIndex(node => byId(node, 'go-proposal-title-compact'));
       const titleBlock = byId(header, 'go-proposal-title-block-compact');
       assert.equal(texts(byId(titleBlock, 'go-proposal-title-compact')), entry.notes);
+      assert.ok(byId(header, 'list-entry-title-compact').props.style.minWidth >= 155, 'title keeps room before the state wraps');
       const waiting = byId(titleBlock, 'go-proposal-substatus-compact');
-      if (estado === 'propuesta_pendiente') {
-        assert.equal(texts(waiting), translations[lang].biz_booking_awaiting);
-        assert.equal(texts(card).split(translations[lang].biz_booking_awaiting).length - 1, 1);
-      } else assert.equal(waiting, undefined, 'received state stays in its original pill exactly once');
+      assert.equal(waiting, undefined, 'the state lives once in the header pill, leaving title width free');
       assert.equal(texts(header).split(label).length - 1, 1, 'keep one localized state pill');
       assert.ok(pillIndex >= 0 && checkboxIndex >= 0 && titleIndex >= 0);
       assert.ok(handedness === 'left' ? checkboxIndex < titleIndex && titleIndex < pillIndex
@@ -229,6 +227,7 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
         assert.equal(row.props.style.flexWrap, undefined);
         assert.equal(nodes(row, node => node.type === 'Feather').length, 0);
         assert.ok(buttons.every(button => button.props.style.flexBasis === 0 && button.props.style.minHeight >= 44));
+        assert.ok(buttons.every(button => button.props.accessibilityState.selected === false), 'proposal decisions are never preselected');
         f.calls.length = 0;
         buttons.find(button => texts(button) === localized[1]).props.onPress({stopPropagation(){}});
         assert.deepEqual(plain(f.calls), [['openProposalFromList', {id:entry.id,time:entry.time,place:''}]]);
@@ -290,12 +289,11 @@ for (const [bookingStatus, labelKey, color] of [
     const contact = byId(card, 'go-proposal-contact-compact');
     assert.equal(nodes(card, node => node.props?.testID === 'go-proposal-contact-compact').length, 1);
     assert.equal(texts(card).split('ProAna').length - 1, 1, 'the original professional remains visible');
-    const statusLabel = translations[lang].biz_booking_intent_label.toUpperCase() + " · " + translations[lang][labelKey].toUpperCase();
+    const statusLabel = translations[lang][labelKey].toUpperCase();
     const status = nodes(card, node => node.type === 'Text' && texts(node) === statusLabel);
     assert.equal(status.length, 1, 'retain the existing localized booking-state pill and default');
     assert.equal(status[0].props.style.color, color);
-    assert.equal(nodes(card, node => node.type === 'Text'
-      && texts(node) === translations[lang].biz_booking_intent_label.toUpperCase()).length, 0, 'remove only the redundant type badge');
+    assert.equal(texts(card).includes(translations[lang].biz_booking_intent_label.toUpperCase() + " · "), false, 'booking status has no redundant type prefix');
     for (const time of [entry.time, entry.changeProposal.time]) assert.equal(texts(card).split(time).length - 1, 1);
     dispatchNestedPress(contact, card);
     assert.deepEqual(plain(f.calls), [
@@ -321,7 +319,7 @@ test('dates without ISO values preserve the saved labels and full accessible dat
 // The comparison retains its two dates and divider, with readable text and a separate shared action footer.
 for(const [size,scale] of [['compacto',.8],['medio',1],['grande',1.25]])
  for(const estado of ['propuesta_pendiente','propuesto'])for(const withNote of [false,true])
- test(size+' / '+estado+' / note '+withNote+': date-only frame, state under title, all actions retained',()=>{
+ test(size+' / '+estado+' / note '+withNote+': date-only frame, state in header, all actions retained',()=>{
   const entry=freeze(sample({estado,changeProposal:{...sample().changeProposal,note:withNote?'Nota conservada completa':''}}));
   const f=fixture('es',{listGoSize:size,goLog:[entry]}),card=cardOf(f.render()),header=byId(card,'go-proposal-header-compact');
   const box=byId(card,'go-proposal-dates-compact'),lv=n=>Math.round(n*scale);
@@ -337,7 +335,8 @@ for(const [size,scale] of [['compacto',.8],['medio',1],['grande',1.25]])
    assert.ok(nodes(row,n=>n.type==='Text')[1].props.style.fontSize>=13);
   }
   const note=byId(card,'go-proposal-note-compact');if(withNote){assert.ok(note);assert.equal(texts(note),'Nota conservada completa');assert.equal(note.props.numberOfLines,undefined);assert.ok(!nodes(box).includes(note));}else assert.equal(note,undefined);
-  const status=byId(header,'go-proposal-substatus-compact');assert.equal(!!status,estado==='propuesta_pendiente');
+  assert.equal(byId(header,'go-proposal-substatus-compact'),undefined);
+  assert.equal(texts(header).split(estado==='propuesta_pendiente'?'ESPERANDO RESPUESTA':'CAMBIO RECIBIDO').length-1,1);
   const actions=byId(card,'go-proposal-responses-compact');assert.equal(!!actions,estado==='propuesto');
   if(actions){const row=actions.type(actions.props),buttons=nodes(row,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);for(const button of buttons)assert.ok(button.props.style.minHeight>=44);
    f.calls.length=0;buttons[1].props.onPress({stopPropagation(){}});assert.deepEqual(plain(f.calls),[['openProposalFromList',{id:entry.id,time:entry.time,place:''}]]);}
@@ -350,6 +349,6 @@ for(const lang of ['es','en'])for(const size of ['compacto','medio','grande'])fo
  const title='ACTIVIDAD PERSONALIZADA CON TÍTULO LARGO',note='Primera línea de la nota.\nSegunda línea.\nTercera línea conservada.';
  const entry=freeze(sample({notes:title,changeProposal:{...sample().changeProposal,note}})),card=cardOf(fixture(lang,{listGoSize:size,handedness,goLog:[entry]}).render());
  assert.equal(texts(byId(card,'go-proposal-title-compact')),title);assert.equal(byId(card,'go-proposal-title-compact').props.numberOfLines,undefined);
- assert.equal(texts(byId(card,'go-proposal-substatus-compact')),translations[lang].biz_booking_awaiting);assert.equal(byId(card,'go-proposal-substatus-compact').props.numberOfLines,undefined);
+ assert.equal(byId(card,'go-proposal-substatus-compact'),undefined);assert.equal(texts(byId(card,'list-entry-header-status-compact')).split(translations[lang].biz_booking_awaiting.toUpperCase()).length-1,1);
  assert.equal(texts(byId(card,'go-proposal-note-compact')),note);assert.equal(byId(card,'go-proposal-note-compact').props.numberOfLines,undefined);
  });

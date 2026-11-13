@@ -137,7 +137,7 @@ for (const lang of ['es', 'en']) {
       const swipes = nodes(tree, n => n.type === 'SwipeableRow');
       assert.equal(swipes.length, 2);
       const card = swipes[0].props.children[0],children=card.props.children.filter(Boolean),top=children[0],info=children[1];
-      const label = translations[lang].biz_change_proposed;
+      const label = translations[lang].biz_booking_awaiting.toUpperCase();
       assert.equal(texts(top).split(label).length - 1, 1);
       assert.ok(!texts(info).includes(label));
       const upperButtons = nodes(top, n => n.type === 'TouchableOpacity');
@@ -149,12 +149,12 @@ for (const lang of ['es', 'en']) {
       assert.deepEqual(f.calls.at(-1), ['updateGoStatus', 'food']);
       assert.equal(card.props.style.paddingVertical, 8);
       const body = texts(card);
-      for (const value of ['03/06/30', '12:00', '04/06/2030', '13:00', translations[lang].biz_booking_awaiting]) assert.ok(body.includes(value), value);
+      for (const value of ['03/06/30', '12:00', '04/06/2030', '13:00', translations[lang].biz_booking_awaiting.toUpperCase()]) assert.ok(body.includes(value), value);
       const proposal = nodes(card, n => n.props?.testID === 'go-proposal-dates-food')[0];
       assert.ok(proposal);
       assert.equal(proposal.props.children.filter(n => n && typeof n === 'object').length, 3);
-      assert.ok(!texts(proposal).includes(translations[lang].biz_booking_awaiting));
-      assert.ok(texts(top).includes(translations[lang].biz_booking_awaiting));
+      assert.ok(!texts(proposal).includes(translations[lang].biz_booking_awaiting.toUpperCase()));
+      assert.ok(texts(top).includes(translations[lang].biz_booking_awaiting.toUpperCase()));
       assert.equal(proposal.props.style.paddingHorizontal, 9);
       assert.equal(proposal.props.style.paddingVertical, 7);
       assert.equal(proposal.props.style.marginTop, 4);
@@ -343,12 +343,18 @@ test('three real Listados task cards place the complete actions below their head
       const buttons = nodes(row, node => node.type === 'TouchableOpacity');
       const labels = handedness === 'right' ? ['ELIMINAR', 'PENDIENTE', 'REALIZADA'] : ['REALIZADA', 'PENDIENTE', 'ELIMINAR'];
       assert.deepEqual(buttons.map(node => node.props.accessibilityLabel), labels);
+      const current = mounted.props.entry.localResolutionStatus === 'done' ? 'REALIZADA' : 'PENDIENTE';
+      assert.equal(buttons.find(button => texts(button) === current).props.accessibilityState.selected, true);
+      assert.equal(buttons.find(button => texts(button) === 'ELIMINAR').props.accessibilityState.selected, false);
+      assert.equal(buttons.find(button => texts(button) !== current && texts(button) !== 'ELIMINAR').props.disabled, false);
+      if (mounted.props.entry.estado === 'pendiente') assert.equal(nodes(children[0], node => node.props.testID === 'list-entry-header-status-' + mounted.props.entry.id).length, 0);
       assert.equal(nodes(row, node => node.type === 'Feather').length, 0);
       buttons.forEach((button, position) => {
         const style = flatten(button.props.style);
         const label = nodes(button, node => node.type === 'Text')[0];
-        assert.equal(label.props.numberOfLines, undefined);
-        assert.equal(flatten(label.props.style).flexShrink, 1);
+        assert.equal(label.props.numberOfLines, 1);
+        assert.equal(label.props.adjustsFontSizeToFit, true);
+        assert.equal(flatten(label.props.style).width, '100%');
         assert.equal(style.flexBasis, 0);
         assert.ok(style.minHeight >= 44);
         assert.equal(style.flex, 1);
@@ -400,7 +406,7 @@ test('three Listados reservations show one real state and open the Calendar deta
       const statusRow = nodes(card, n => n.props.testID === 'list-reservation-status-row-' + entry.id)[0];
       assert.equal(statusRow.props.style.marginLeft, 'auto');assert.equal(statusRow.props.style.alignItems, 'flex-end');assert.equal(statusRow.props.style.position, undefined);
       assert.ok(nodes(card.props.children.filter(Boolean)[0], n => n === statusRow).length, 'reservation state belongs to the header');
-      assert.equal(texts(state[0]), 'RESERVA · ' + entry.label);
+      assert.equal(texts(state[0]), entry.label);
       assert.ok(!texts(card).split(' | ').includes('ACEPTADO'));
       for (const target of [card, nodes(card, n => n.props.testID === 'list-entry-title-' + entry.id)[0]]) {
         target.props.onPress();
@@ -442,6 +448,11 @@ test('premium reservation cards keep their category and place all personal actio
   const rowMount=actionMounts[0].type(actionMounts[0].props),row=rowMount.type(rowMount.props),buttons=nodes(row,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);
   assert.deepEqual(buttons.map(b=>texts(b)),handedness==='right'?['ELIMINAR','PENDIENTE','REALIZADA']:['REALIZADA','PENDIENTE','ELIMINAR']);
   assert.equal(nodes(row,n=>n.type==='Feather').length,0);assert.equal(buttons.filter(b=>b.props.accessibilityState.selected).length,1);assert.ok(buttons.every(b=>b.props.style.minHeight>=44&&b.props.style.backgroundColor.startsWith('rgba(')));
+  const activeLabel=localResolutionStatus==='done'?'REALIZADA':'PENDIENTE',inactiveLabel=localResolutionStatus==='done'?'PENDIENTE':'REALIZADA';
+  const active=buttons.find(b=>texts(b)===activeLabel),inactive=buttons.find(b=>texts(b)===inactiveLabel),deleteButton=buttons.find(b=>texts(b)==='ELIMINAR');
+  assert.equal(active.props.accessibilityState.selected,true);assert.equal(inactive.props.accessibilityState.selected,false);assert.equal(deleteButton.props.accessibilityState.selected,false);
+  assert.notEqual(active.props.style.backgroundColor,inactive.props.style.backgroundColor);assert.notEqual(active.props.style.borderColor,inactive.props.style.borderColor);assert.equal(inactive.props.disabled,false);
+  assert.equal(texts(nodes(card,n=>n.props.testID==='list-reservation-status-hair')[0]),'CONFIRMADA');
   for(const label of ['REALIZADA','PENDIENTE','ELIMINAR'])buttons.find(b=>texts(b)===label).props.onPress({stopPropagation(){}});
   assert.deepEqual(f.calls.slice(-3),[['hair','done'],['hair','pending'],['hair','discard']]);assert.equal(hair.reservationId,'original-booking');assert.equal(hair.bookingStatus,'confirmada');
  }

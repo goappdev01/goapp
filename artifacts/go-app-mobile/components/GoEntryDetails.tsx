@@ -37,6 +37,7 @@ export type GoListAction = {
   tone: "negative" | "intermediate" | "positive";
   onPress: () => void;
   selected?: boolean;
+  selectable?: boolean;
   disabled?: boolean;
   accessibilityLabel?: string;
   accessibilityHint?: string;
@@ -46,23 +47,25 @@ export type GoListAction = {
 export function GoListActionRow({actions,handedness="right",scale=1,testID="list-action-row"}:{actions:GoListAction[];handedness?:"left"|"right";scale?:number;testID?:string}){
   if(!actions.length)return null;
   const tones={
-    negative:{text:"#E98A84",border:"rgba(233,138,132,0.55)",background:"rgba(233,138,132,0.09)",selected:"rgba(233,138,132,0.16)"},
-    intermediate:{text:"#E9B76A",border:"rgba(233,183,106,0.55)",background:"rgba(233,183,106,0.09)",selected:"rgba(233,183,106,0.16)"},
-    positive:{text:"#81CDA0",border:"rgba(129,205,160,0.55)",background:"rgba(129,205,160,0.09)",selected:"rgba(129,205,160,0.16)"},
+    negative:{text:"#F09189",muted:"#B77D79",border:"rgba(240,145,137,0.72)",background:"rgba(240,145,137,0.13)",selected:"rgba(240,145,137,0.22)"},
+    intermediate:{text:"#F2BC6D",muted:"#A98A60",border:"rgba(242,188,109,0.72)",background:"rgba(242,188,109,0.13)",selected:"rgba(242,188,109,0.22)"},
+    positive:{text:"#87D9A9",muted:"#729C82",border:"rgba(135,217,169,0.72)",background:"rgba(135,217,169,0.13)",selected:"rgba(135,217,169,0.22)"},
   };
   const ordered=handedness==="left"?[...actions].reverse():actions;
   return <View testID={testID} pointerEvents="box-none" style={{flexDirection:"row",alignSelf:"stretch",gap:6,marginTop:6,marginBottom:4}}>
     {ordered.map(action=>{
       const tone=tones[action.tone];
+      const inactive=action.selectable&&!action.selected;
       return <TouchableOpacity key={action.key} accessibilityRole="button" accessibilityLabel={action.accessibilityLabel??action.label}
         accessibilityHint={action.accessibilityHint} accessibilityState={{disabled:!!action.disabled,selected:!!action.selected}}
         disabled={action.disabled} activeOpacity={0.7}
         onPress={event=>{event?.stopPropagation?.();action.onPress();}}
         style={{flex:1,flexBasis:0,flexShrink:1,minWidth:0,minHeight:Math.max(44,Math.round(44*scale)),paddingHorizontal:4,paddingVertical:8,
-          borderRadius:8,borderWidth:1,borderColor:action.selected?tone.text:tone.border,
-          backgroundColor:action.selected?tone.selected:tone.background,
-          shadowColor:tone.text,shadowOffset:{width:0,height:2},shadowOpacity:0.08,shadowRadius:3,elevation:1,alignItems:"center",justifyContent:"center"}}>
-        <Text style={{color:tone.text,fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.label}</Text>
+          borderRadius:8,borderWidth:1,borderColor:inactive?"rgba(255,255,255,0.16)":tone.border,
+          backgroundColor:action.selected?tone.selected:inactive?"rgba(255,255,255,0.035)":tone.background,
+          shadowColor:tone.text,shadowOffset:{width:0,height:2},shadowOpacity:action.selected?0.16:0.09,shadowRadius:3,elevation:1,alignItems:"center",justifyContent:"center"}}>
+        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} maxFontSizeMultiplier={1.8}
+          style={{color:inactive?tone.muted:tone.text,fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",alignSelf:"stretch",width:"100%",minWidth:0}}>{action.label}</Text>
       </TouchableOpacity>;
     })}
   </View>;
@@ -85,9 +88,9 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
     if(onDiscard)listActions.push({key:"discard",label:label("ELIMINAR","DELETE"),tone:"negative",onPress:onDiscard,disabled,
       accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("ELIMINAR","DELETE"):label("ELIMINAR","DELETE"),
       accessibilityHint:label("Oculta solo tu ficha. No cancela el compromiso.","Hides only your card. Does not cancel the commitment.")});
-    if(onPending)listActions.push({key:"pending",label:label("PENDIENTE","PENDING"),tone:"intermediate",onPress:onPending,disabled,selected:entry.localResolutionStatus==="pending",
+    if(onPending)listActions.push({key:"pending",label:label("PENDIENTE","PENDING"),tone:"intermediate",onPress:onPending,disabled,selectable:!!onDone,selected:entry.localResolutionStatus!=="done",
       accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("PENDIENTE","PENDING"):label("PENDIENTE","PENDING")});
-    if(onDone)listActions.push({key:"done",label:label("REALIZADA","DONE"),tone:"positive",onPress:onDone,disabled,selected:entry.localResolutionStatus==="done",
+    if(onDone)listActions.push({key:"done",label:label("REALIZADA","DONE"),tone:"positive",onPress:onDone,disabled,selectable:!!onPending,selected:entry.localResolutionStatus==="done",
       accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("REALIZADA","DONE"):label("REALIZADA","DONE")});
     return <GoListActionRow testID="entry-micro-actions" handedness={handedness} scale={listScale} actions={listActions}/>;
   }

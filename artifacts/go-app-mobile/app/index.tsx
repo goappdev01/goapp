@@ -22636,6 +22636,8 @@ function HomeScreenContent() {
                           : t('status_pending_label');
                 const isProposalEstado =
                   g.estado === "propuesto" || g.estado === "propuesta_pendiente";
+                const hideRedundantTaskPending = canResolveEntry(g) &&
+                  (g.type === "TAREA" || g.type === "TAREA_INTERNA") && g.estado === "pendiente";
                 const compactProposal = !isPapelaraView && isProposalEstado && !!(g as any).changeProposal;
                 const premiumReservation=entryIsReservation(g)&&!compactProposal;
                 const category=(g.bookingCategory||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
@@ -22754,7 +22756,7 @@ function HomeScreenContent() {
                   >
                     {isProposalEstado ? (
                       <Text style={{ color: ENTRY_COLORS.change, fontSize: Math.max(11,lv(11)), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textAlign: "center" }}>
-                        {g.estado === "propuesta_pendiente" ? t('biz_change_proposed') : t('biz_change_received')}
+                        {(g.estado === "propuesta_pendiente" ? t('biz_booking_awaiting') : t('biz_change_received')).toUpperCase()}
                       </Text>
                     ) : (
                       <Text
@@ -22785,15 +22787,10 @@ function HomeScreenContent() {
                   return <View testID={"list-reservation-status-" + g.id} style={{maxWidth:"100%",paddingHorizontal:lv(6),paddingVertical:lv(3),
                     borderRadius:lv(5),borderWidth:1,borderColor:"rgba(255,255,255,0.10)",backgroundColor:"rgba(255,255,255,0.04)"}}>
                     <Text style={{color,fontSize:Math.max(11,lv(10)),fontFamily:"Inter_700Bold",fontWeight:"700",textAlign:"right"}}>
-                      {t("biz_booking_intent_label").toUpperCase() + " · " + status.toUpperCase()}
+                      {status.toUpperCase()}
                     </Text>
                   </View>;
                 })() : null;
-                const proposalStatusLine = compactProposal && g.estado === "propuesta_pendiente" ? (<View testID={"go-proposal-substatus-" + g.id} style={{ flexDirection: "row", alignItems: "center" }}>
-                            <Text style={{ color: ENTRY_COLORS.change, fontSize: Math.max(11,lv(11)), fontWeight: "700", flexShrink: 1 }}>
-                              {t('biz_booking_awaiting')}
-                            </Text>
-                          </View>) : null;
                 return (
                   <React.Fragment key={g.id}>
                   {showNoDateSeparator && (
@@ -22951,7 +22948,7 @@ function HomeScreenContent() {
                           }
                         }}
                         delayLongPress={420}
-                        style={{ flex: 1, minWidth: lv(120) }}
+                        style={{ flex: 1, minWidth: Math.max(155,lv(155)) }}
                       >
                         {(() => {
                           const realTitle = entryIsReservation(g)?entryHeading(g,lang==="en"?"Reservation":"Reserva"):g.notes?.trim() || g.intentLabel;
@@ -22963,7 +22960,6 @@ function HomeScreenContent() {
                           return compactProposal ? (
                             <View testID={"go-proposal-title-block-" + g.id}>
                               {title}
-                              {proposalStatusLine}
                             </View>
                           ) : title;
                         })()}
@@ -23012,9 +23008,10 @@ function HomeScreenContent() {
                           {g.estado === "rechazado" && <Feather name="x" size={lv(14)} color="#ffffff" />}
                         </TouchableOpacity>
                       )}
-                      <View testID={(bookingStatusPill&&!isProposalEstado?"list-reservation-status-row-":"list-entry-header-status-")+g.id} style={{maxWidth:"55%",flexShrink:1,alignItems:"flex-end",marginLeft:"auto"}}>
-                        {bookingStatusPill && !isProposalEstado ? bookingStatusPill : statusPill}
-                      </View>
+                      {!hideRedundantTaskPending &&
+                        <View testID={(bookingStatusPill&&!isProposalEstado?"list-reservation-status-row-":"list-entry-header-status-")+g.id} style={{maxWidth:"55%",flexShrink:1,alignItems:"flex-end",marginLeft:"auto"}}>
+                          {bookingStatusPill && !isProposalEstado ? bookingStatusPill : statusPill}
+                        </View>}
                     </View>
 
                     {/* ── FILA 2: INFO + ESTADO + BADGE ── */}
