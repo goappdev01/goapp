@@ -45,14 +45,14 @@ export type GoListAction = {
 
 /** Shared visual language for Listados and opened entry actions. */
 const GO_ACTION_PALETTE = {
-  negative:{base:"#D63443",muted:"#D63443"},
-  intermediate:{base:"#CC4D00",muted:"#B75000"},
-  positive:{base:"#00865D",muted:"#087D53"},
+  negative:{base:"#D92D32",muted:"#D92D32"},
+  intermediate:{base:"#C25300",muted:"#B75000"},
+  positive:{base:"#008754",muted:"#087D53"},
 };
 function goActionVisual(tone:GoListAction["tone"],selected=false,inactive=false,pressed=false){
   const color=GO_ACTION_PALETTE[tone];
   return {borderRadius:8,borderWidth:1,borderColor:selected?"rgba(255,255,255,0.38)":"rgba(255,255,255,0.22)",
-    backgroundColor:inactive?color.muted:color.base,shadowColor:color.base,shadowOffset:{width:0,height:2},
+    backgroundColor:inactive?color.muted:color.base,shadowColor:"#000000",shadowOffset:{width:0,height:2},
     shadowOpacity:pressed?0.06:selected?0.22:0.14,shadowRadius:3,elevation:pressed?0:1,
     opacity:pressed?0.88:1,transform:[{translateY:pressed?1:0}]};
 }

@@ -27,12 +27,12 @@ test('Listados closes its detail and sheet before dispatching the existing reser
  assert.equal(listSheet.attributes.properties.find(p=>p.name?.getText(ast)==='onDismiss')?.initializer?.expression?.getText(ast),'finishListBookingProposal');
 });
 const style=s=>Object.assign({},...[s].flat(Infinity).filter(Boolean));
-function fixture(width=390,height=844,hand='right'){
+function fixture(width=390,height=844,hand='right',sideInsets={left:0,right:0}){
  let cursor=0;const slots=[],events=new Map(),effects=[],gestures=[],calls=[];
  const React={createElement:(type,props,...children)=>({type,props:{...props,children:children.flat(Infinity)}}),useState(initial){const i=cursor++;slots[i]??={value:initial};return[slots[i].value,value=>slots[i].value=typeof value==='function'?value(slots[i].value):value];}};
  function gesture(){const result={};const proxy=new Proxy(result,{get:(o,k)=>k in o?o[k]:(...args)=>{if(k.startsWith('on'))o[k]=args[0];else o[k+'Value']=args;return proxy;}});gestures.push(result);return proxy;}
  const scope={React,useState:React.useState,useEffect:fn=>effects.push(fn),useMemo:fn=>fn(),useCallback:fn=>fn,useSharedValue:value=>React.useState({value})[0],useAnimatedStyle:fn=>fn(),useAnimatedScrollHandler:value=>value,
-  useSheetSwipeDown:()=>gesture(),useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0}),useWindowDimensions:()=>({width,height}),
+  useSheetSwipeDown:()=>gesture(),useSafeAreaInsets:()=>({top:47,bottom:34,...sideInsets}),useWindowDimensions:()=>({width,height}),
   Dimensions:{get:()=>({width,height})},Keyboard:{addListener:(event,fn)=>{const listeners=events.get(event)||[];listeners.push(fn);events.set(event,listeners);return{remove(){}};}},
   Gesture:{Pan:gesture,Native:gesture,Race:(...g)=>g},runOnJS:fn=>fn,withSpring:value=>value,withTiming:(value,_config,fn)=>{fn?.(true);return value;},
   Reanimated:{View:'Sheet',ScrollView:'ScrollView'},StyleSheet:{absoluteFill:{}},styles:{sheet:{backgroundColor:'#0e0e10'},sheetHandle:{},sheetTitle:{}},Platform:{OS:'ios'},containsGoBrand:()=>false,noTranslate:{},
@@ -43,12 +43,18 @@ function fixture(width=390,height=844,hand='right'){
 }
 for(const [width,height] of [[320,568],[375,667],[390,844],[430,932],[844,390]])for(const hand of ['left','right'])test(`${width}×${height}/${hand}: expanded Listados uses safe viewport, flexible inner scroll and the shared floating close outside the panel pan`,()=>{
  const f=fixture(width,height,hand);let tree=f.render(),sheet=nodes(tree).find(n=>n.props.testID==='listados-sheet'),frame=nodes(tree).find(n=>n.type==='KeyboardFrame'),scroll=nodes(tree).find(n=>n.props.testID==='listados-scroll');
- assert.equal(style(sheet.props.style).flex,1);assert.equal(style(sheet.props.style).maxHeight,'100%');assert.equal(frame.props.style.paddingTop,55);assert.equal(frame.props.style.flex,1);assert.equal(scroll.props.style.maxHeight,undefined);assert.equal(scroll.props.style.flex,1);assert.equal(scroll.props.contentContainerStyle.paddingBottom,64);
+ assert.equal(style(sheet.props.style).flex,1);assert.equal(style(sheet.props.style).maxHeight,'100%');assert.equal(style(sheet.props.style).paddingLeft,10);assert.equal(style(sheet.props.style).paddingRight,10);assert.equal(frame.props.style.paddingTop,55);assert.equal(frame.props.style.flex,1);assert.equal(scroll.props.style.maxHeight,undefined);assert.equal(scroll.props.style.flex,1);assert.equal(scroll.props.contentContainerStyle.paddingBottom,64);
  const footer=nodes(tree).find(n=>n.type==='View'&&n.props.onLayout);footer.props.onLayout({nativeEvent:{layout:{height:120}}});tree=f.render();const floating=nodes(tree).find(n=>n.props.testID==='listados-floating-close'),fab=nodes(floating).find(n=>n.type==='DraggableFAB'),close=nodes(fab).find(n=>n.type==='GoCloseButton');
  assert.equal(fab.props.screenKey,'listados');assert.equal(fab.props.buttonWidth,64);assert.equal(fab.props.maxH,64);assert.equal(fab.props.bounds.height,height-55-34-120-20);assert.equal(close.props.level,'panel');assert.equal(fab.props.initialRight,14);
  const panelGesture=nodes(tree).find(n=>n.type==='GestureDetector');assert.equal(nodes(panelGesture).some(n=>n.type==='DraggableFAB'),false,'moving the shared FAB cannot drive the sheet close gesture');close.props.onPress();assert.deepEqual(f.calls,['close']);
  const minimized=f.render({minimized:true});assert.equal(style(nodes(minimized).find(n=>n.props.testID==='listados-sheet').props.style).flex,undefined);assert.equal(nodes(minimized).find(n=>n.props.testID==='listados-scroll').props.style.maxHeight,0);
  assert.equal(nodes(f.render({modalOverlay:'note-editor'})).some(n=>n.type==='DraggableFAB'),false,'child editor owns its own close');
+});
+test('Listados keeps a 10-point outer margin beyond each landscape safe inset',()=>{
+ const tree=fixture(844,390,'left',{left:44,right:21}).render();
+ const panel=nodes(tree).find(n=>n.props.testID==='listados-sheet');
+ assert.equal(style(panel.props.style).paddingLeft,54);
+ assert.equal(style(panel.props.style).paddingRight,31);
 });
 test('inner scroll, two-stage swipe and keyboard gating retain their actual existing gesture handlers',()=>{
  const f=fixture(),step={value:0};let stages=0;let tree=f.render({swipeStepDown:step,onSwipeStepDown:()=>stages++});const scroll=nodes(tree).find(n=>n.props.testID==='listados-scroll');

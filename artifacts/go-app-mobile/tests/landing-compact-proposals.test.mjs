@@ -221,12 +221,14 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
       assert.equal(nodes(buttons[pillIndex],node=>node.type==='Text')[0].props.numberOfLines,label.length>14?2:1);
       assert.ok(buttons[pillIndex].props.style.maxWidth<=170,'long state wraps inside a compact label');
       assert.ok(handedness === 'left' ? checkboxIndex < titleIndex && titleIndex < pillIndex
-        : titleIndex < checkboxIndex && checkboxIndex < pillIndex, 'state remains at the right in both hands');
+        : titleIndex < checkboxIndex && checkboxIndex < pillIndex, 'proposal state follows the title for both hands');
       const statusSlot = byId(header, 'list-entry-header-status-compact');
-      assert.equal(statusSlot.props.style.marginLeft, 'auto');
+      assert.equal(statusSlot.props.style.marginLeft, 0);
       assert.equal(statusSlot.props.style.maxWidth, '100%');
       assert.equal(statusSlot.props.style.flexShrink, 0);
-      assert.equal(statusSlot.props.style.width, undefined, 'status uses its content width');
+      assert.equal(statusSlot.props.style.width, '100%', 'proposal state starts on its own line below the title');
+      assert.equal(statusSlot.props.style.alignSelf, 'flex-start');
+      assert.equal(statusSlot.props.style.justifyContent, 'space-between');
       f.calls.length = 0;
       buttons[checkboxIndex].props.onPress({ stopPropagation() {} });
       assert.deepEqual(plain(f.calls), [['updateGoStatus', entry.id]]);
@@ -331,6 +333,9 @@ for (const [bookingStatus, labelKey, color] of [
     assert.equal(statusRow.props.style.width,undefined);
     assert.equal(statusRow.props.style.marginLeft,'auto');
     assert.ok(nodes(byId(card,'go-proposal-header-compact'),node=>node===statusRow).length,'original reservation and proposal states share the compact header');
+    const proposalStates=byId(card,'list-entry-header-status-compact');
+    assert.equal(proposalStates.props.style.marginLeft,0,'sent proposal stays flush left');
+    assert.equal(proposalStates.props.style.width,'100%');
     assert.equal(texts(card).includes(translations[lang].biz_booking_intent_label.toUpperCase() + " · "), false, 'booking status has no redundant type prefix');
     for (const time of [entry.time, entry.changeProposal.time]) assert.equal(texts(card).split(time).length - 1, 1);
     dispatchNestedPress(contact, card);

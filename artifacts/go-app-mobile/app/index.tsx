@@ -23035,7 +23035,7 @@ function HomeScreenContent() {
                         </TouchableOpacity>
                       )}
                       {(listCategoryBadge || !hideRedundantFollowUpPending) &&
-                        <View testID={(bookingStatusPill&&!isProposalEstado?"list-reservation-status-row-":"list-entry-header-status-")+g.id} style={{maxWidth:"100%",flexShrink:0,alignSelf:"flex-end",flexDirection:"row",flexWrap:"wrap",justifyContent:"flex-end",alignItems:"center",gap:lv(4),marginLeft:"auto"}}>
+                        <View testID={(bookingStatusPill&&!isProposalEstado?"list-reservation-status-row-":"list-entry-header-status-")+g.id} style={{maxWidth:"100%",flexShrink:0,alignSelf:isProposalEstado?"flex-start":"flex-end",flexDirection:"row",flexWrap:"wrap",justifyContent:isProposalEstado?"space-between":"flex-end",alignItems:"center",gap:lv(4),marginLeft:isProposalEstado?0:"auto",...(isProposalEstado?{width:"100%"}: {})}}>
                           {listCategoryBadge}
                           {!hideRedundantFollowUpPending && (bookingStatusPill && !isProposalEstado ? bookingStatusPill : statusPill)}
                           {bookingStatusPill && isProposalEstado && <View testID={"list-reservation-status-row-" + g.id} style={{marginLeft:"auto",flexDirection:"row",justifyContent:"flex-end"}}>
@@ -26331,6 +26331,7 @@ function BottomSheet({
                 style={[
                   styles.sheet,
                   compact && { paddingTop: 6, paddingHorizontal: 18 },
+                  expandToSafeTop && { paddingLeft: noteInsets.left + 10, paddingRight: noteInsets.right + 10 },
                   { paddingBottom: effectivePaddingBottom },
                   expandToSafeTop&&!minimized&&{flex:1,minHeight:0,maxHeight:"100%"},
                   noteKeyboardScroll && { height: "100%", maxHeight: 440, flexShrink: 1,

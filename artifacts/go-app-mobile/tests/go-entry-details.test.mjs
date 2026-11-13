@@ -140,15 +140,16 @@ test('opened and listed actions share solid semantic surfaces and white labels',
  const received={...base,estado:'propuesto',changeProposal:{dateISO:'2030-10-27',date:'27/10/2030',time:'13:30',originalDateISO:base.dateISO,originalTime:base.time}};
  const open=f.render(c.GoEntryQuickActions,{entry:received,onReject(){},onPropose(){},onAccept(){}});
  const listed=f.render(c.GoListActionRow,{actions:[{key:'reject',label:'RECHAZAR',tone:'negative',onPress(){}},{key:'propose',label:'PROPONER',tone:'intermediate',onPress(){}},{key:'accept',label:'ACEPTAR',tone:'positive',onPress(){}}]});
- const actual=nodes(open,n=>n.type==='TouchableOpacity').map(n=>[n.props.style.at(-1).backgroundColor,n.props.style.at(-1).borderColor,n.props.style.at(-1).shadowRadius]);
- const expected=nodes(listed,n=>n.type==='TouchableOpacity').map(n=>[n.props.style.backgroundColor,n.props.style.borderColor,n.props.style.shadowRadius]);
+  const actual=nodes(open,n=>n.type==='TouchableOpacity').map(n=>[n.props.style.at(-1).backgroundColor,n.props.style.at(-1).borderColor,n.props.style.at(-1).shadowColor,n.props.style.at(-1).shadowRadius]);
+  const expected=nodes(listed,n=>n.type==='TouchableOpacity').map(n=>[n.props.style.backgroundColor,n.props.style.borderColor,n.props.style.shadowColor,n.props.style.shadowRadius]);
  assert.deepEqual(actual,expected);
- assert.deepEqual(actual.map(row=>row[0]),['#D63443','#CC4D00','#00865D']);
+  assert.deepEqual(actual.map(row=>row[0]),['#D92D32','#C25300','#008754']);
+  assert.ok(actual.every(row=>row[2]==='#000000'),'all action shadows remain neutral');
  assert.ok(nodes(open,n=>n.type==='TouchableOpacity').every(n=>nodes(n,x=>x.type==='Text')[0].props.style.color==='#FFFFFF'));
  const pending=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'pending'},onDone(){},onPending(){},onDiscard(){}});
  const done=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'done'},onDone(){},onPending(){},onDiscard(){}});
- assert.equal(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0].props.style.backgroundColor,'#CC4D00');
- assert.equal(nodes(done,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0].props.style.backgroundColor,'#00865D');
+  assert.equal(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0].props.style.backgroundColor,'#C25300');
+  assert.equal(nodes(done,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0].props.style.backgroundColor,'#008754');
 });
 test('received proposals keep orange identity and the original date until the existing acceptance command',()=>{
  const entry={...base,estado:'propuesto',changeProposal:{dateISO:'2030-10-27',date:'27/10/2030',time:'13:30',originalDateISO:base.dateISO,originalTime:base.time}};
@@ -192,7 +193,7 @@ test('state colors and negative actions agree in compact and expanded cards with
  for(const [status,key,color]of [['pendiente','booking_state_pending','#FFD700'],['confirmada','booking_state_accepted','#22c55e'],['completada','booking_state_completed','#22c55e'],['cancelada','booking_state_cancelled','#FF0000']]){
   const entry={...base,bookingStatus:status};assert.equal(policy.reservationCardPolicy(entry).stateColor,color);assert.equal(policy.reservationCardPolicy(entry).stateKey,key);
   for(const compact of [false,true]){const tree=f.render(c.GoEntryQuickActions,{entry,compact,onCancel(){},onPropose(){}});const state=nodes(tree,n=>n.type==='Text')[0];assert.equal(state.props.style.color,color);
-   for(const action of nodes(tree,n=>n.props.accessibilityLabel==='CANCELAR')){assert.equal(action.props.style.at(-1).backgroundColor,'#D63443');assert.equal(action.props.style.at(-1).borderColor,'rgba(255,255,255,0.22)');}}
+    for(const action of nodes(tree,n=>n.props.accessibilityLabel==='CANCELAR')){assert.equal(action.props.style.at(-1).backgroundColor,'#D92D32');assert.equal(action.props.style.at(-1).borderColor,'rgba(255,255,255,0.22)');}}
  }
  const personal=f.render(c.GoEntryQuickActions,{entry:{...base,localResolutionStatus:'pending'}});assert.ok(texts(personal).includes('booking_state_accepted'));assert.ok(texts(personal).includes('Mi seguimiento:'));
  assert.equal(JSON.stringify(base),original);assert.equal(base.color,'#00e5ff');
