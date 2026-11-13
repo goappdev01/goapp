@@ -229,7 +229,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
         {/* The 64-point controls sit inside this reserved footer, 11 points above its border. */}
         <View testID="entry-detail-close-footer" pointerEvents="none" style={{ flexShrink: 0, height: 76, flexDirection: "row", justifyContent: handedness === "left" ? "flex-start" : "flex-end", paddingHorizontal: 6, paddingTop: 1, paddingBottom: 11 }} />
         <GoNavigationFloating testID="entry-detail-floating-navigation" screenKey="entry-details" buttonKey={hasMessage ? "navigation-with-message-inset" : "navigation-inset"} width={navigationWidth} safeArea={false} handedness={handedness} initialBottom={11} boundsVerticalInset={11} initialTop={hasMessage ? undefined : navigationTop}>
-          {handedness === "left" ? <>{panelClose}{messageButton}{landingClose}</> : <>{messageButton}{panelClose}{landingClose}</>}
+          {messageButton}{panelClose}{landingClose}
         </GoNavigationFloating>
       </GoScreenCloseSurface>
       {renderMessageScreen?.()}

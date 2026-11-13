@@ -33,7 +33,11 @@ test('expanded sheet reserves bottom navigation outside the scroll and places GO
  for(const handedness of ['right','left']){
   const side=sheet(base,{handedness,onMessage(){},onGoToLanding(){}}, {viewport:{width:320,height:568,fontScale:1}}),sideNav=nodes(side.tree,n=>n.props.testID==='entry-detail-floating-navigation')[0];
   const labels=nodes(sideNav,n=>n.props.testID==='entry-message-go'||['Cerrar detalle','Ir directamente al Landing'].includes(n.props.accessibilityLabel)).map(n=>n.props.testID==='entry-message-go'?'MENSAJE GO':n.props.accessibilityLabel);
-  assert.deepEqual(labels,handedness==='right'?['MENSAJE GO','Cerrar detalle','Ir directamente al Landing']:['Cerrar detalle','MENSAJE GO','Ir directamente al Landing']);
+  const host=side.render(sideNav.type,{...sideNav.props,children:sideNav.children});
+  const row=nodes(host,n=>n.type==='View'&&n.props.style?.alignItems==='flex-end'&&n.props.style?.gap===8)[0];
+  assert.equal(row.props.style.flexDirection,handedness==='left'?'row-reverse':'row');
+  const visualOrder=handedness==='left'?[...labels].reverse():labels;
+  assert.deepEqual(visualOrder,handedness==='right'?['MENSAJE GO','Cerrar detalle','Ir directamente al Landing']:['Ir directamente al Landing','Cerrar detalle','MENSAJE GO']);
   assert.equal(sideNav.props.handedness,handedness);
   assert.ok(sideNav.props.width<=304,'the three controls fit the usable width of a compact iPhone');
  }
