@@ -13705,7 +13705,7 @@ function HomeScreenContent() {
     if(!entry.changeProposal&&!entry.proposal)void actionCompletion.decide(entry,status,true,read);
   };
   const followedEntry=(entry:GoEntry)=>({...entry,localResolutionStatus:actionCompletion.status(entry)});
-  const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list"|"list-discard")=><GoEntryMicroActions inline={inline} layout={layout} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
+  const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list")=><GoEntryMicroActions inline={inline} layout={layout} handedness={handedness} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
     onDone={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"done"):undefined}
     onPending={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"pending"):undefined}
     onDiscard={canResolveEntry(entry)?()=>resolveEntry(entry,"discard"):undefined}/>;
@@ -22842,9 +22842,8 @@ function HomeScreenContent() {
                     }}
                   >
                     {beautyReservation&&<View testID={"list-category-accent-"+g.id} pointerEvents="none" style={{position:"absolute",left:0,top:12,width:3,height:24,borderRadius:2,backgroundColor:beauty!.color}}/>}
-                    {premiumReservation&&!isProposalEstado&&canResolveEntry(g)&&<View testID={"list-card-trash-"+g.id} style={{position:"absolute",top:2,right:4,zIndex:2}}>{renderEntryMicroActions(g,false,"list-discard")}</View>}
                     {/* ── FILA 1: TÍTULO COMPLETO — todo el ancho hasta el checkbox ── */}
-                    <View testID={compactProposal ? "go-proposal-header-" + g.id : undefined} style={{ flexDirection: "row", alignItems: "center", flexWrap: compactProposal ? "wrap" : undefined, gap: compactProposal ? lv(3) : lv(8), marginBottom: lv(compactProposal ? 1 : 3),...(premiumReservation&&!isProposalEstado&&canResolveEntry(g)?{paddingRight:44}: {}) }}>
+                    <View testID={compactProposal ? "go-proposal-header-" + g.id : undefined} style={{ flexDirection: "row", alignItems: "center", flexWrap: compactProposal ? "wrap" : undefined, gap: compactProposal ? lv(3) : lv(8), marginBottom: lv(compactProposal ? 1 : 3) }}>
                       {handedness === "left" && isProposalEstado && statusPill}
                       {/* CHECKBOX — izquierda si ZURDO */}
                       {handedness === "left" && !canResolveEntry(g) && !entryIsReservation(g) && (
@@ -23007,7 +23006,7 @@ function HomeScreenContent() {
                     {!premiumReservation&&!isProposalEstado && canResolveEntry(g) && renderEntryMicroActions(g, false, "list")}
 
                     {/* ── FILA 2: INFO + ESTADO + BADGE ── */}
-                    {(!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8),...(premiumReservation&&!isProposalEstado&&canResolveEntry(g)?{paddingRight:44}:{}),...(premiumReservation?{flexWrap:"wrap"}: {}) }}>
+                    {(!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8),...(entryIsReservation(g)?{flexWrap:"wrap"}: {}) }}>
                       {/* INFO — fecha/hora + destinatarios */}
                       <TouchableOpacity
                         activeOpacity={0.75}
@@ -23081,13 +23080,15 @@ function HomeScreenContent() {
                             ? t("floor_reservation_cambio_pendiente") : t(policy.stateKey as Parameters<typeof t>[0]);
                         const color = g.bookingStatus === "cambio_pendiente" && policy.stateKey === "booking_state_pending"
                           ? ENTRY_COLORS.change : policy.stateColor;
-                        return <View testID={"list-reservation-status-" + g.id} style={{
-                          flexShrink: 1, maxWidth: "100%", paddingHorizontal: lv(6), paddingVertical: lv(3),
-                          borderRadius: lv(5), borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)",
-                        }}>
-                          <Text style={{ color, fontSize: Math.max(11,lv(9)), fontFamily: "Inter_700Bold", fontWeight: "700" }}>
-                            {t("biz_booking_intent_label").toUpperCase() + " · " + status.toUpperCase()}
-                          </Text>
+                        return <View testID={"list-reservation-status-row-" + g.id} style={{ width: "100%", flexDirection: "row", justifyContent: "flex-end" }}>
+                          <View testID={"list-reservation-status-" + g.id} style={{
+                            maxWidth: "100%", paddingHorizontal: lv(6), paddingVertical: lv(3),
+                            borderRadius: lv(5), borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)",
+                          }}>
+                            <Text style={{ color, fontSize: Math.max(11,lv(9)), fontFamily: "Inter_700Bold", fontWeight: "700" }}>
+                              {t("biz_booking_intent_label").toUpperCase() + " · " + status.toUpperCase()}
+                            </Text>
+                          </View>
                         </View>;
                       })() : (
                       <View style={{ flexDirection: "column", alignItems: "flex-end", gap: lv(6), flexShrink: 0 }}>

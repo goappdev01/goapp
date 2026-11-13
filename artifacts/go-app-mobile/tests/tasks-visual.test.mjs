@@ -87,7 +87,7 @@ function fixture(lang = 'es', overrides = {}) {
     slotOf: e => e.deleted || e.estado === 'rechazado' ? 'papelera' : e.estado === 'aceptado' ? 'aceptado' : 'pendiente',
     noTranslate: {}, localizeLabel: x => x, displayContact: name => name || '', getGoActivityKey: g => g.intentKey,
     StyleSheet: { absoluteFill: {} }, styles: {}, Platform: { OS: 'ios' }, catScrollRef: { current: null }, typeScrollRef: { current: null },
-    noteInputGoId: null, noteInputDraft: '', pendingUndos: {}, goChats: {}, speakingMsgId: null, place: '', sharedChatKey: g => g.id, currentReceivedIdRef: { current: null }, proposalReturnRef: { current: null }, calFlow: {}, marketplacePedidos: [], lastTapRef: { current: { id: null, t: 0 } }, quickNoteAlarm: false,
+    noteInputGoId: null, noteInputDraft: '', pendingUndos: {}, goChats: {}, speakingMsgId: null, place: '', sharedChatKey: g => g.id, currentReceivedIdRef: { current: null }, proposalReturnRef: { current: null }, calFlow: {}, marketplacePedidos: [], lastTapRef: { current: { id: null, t: 0 } }, quickNoteAlarm: false, finishListBookingProposal: () => {},
     Keyboard: { dismiss: () => calls.push(['dismiss']) }, AsyncStorage: { setItem: (...args) => { calls.push(['store', ...args]); return Promise.resolve(); } },
     Haptics: { selectionAsync: () => Promise.resolve(), notificationAsync: () => Promise.resolve(), NotificationFeedbackType: { Warning: 'warning' } },
     date: '', time: '', notesOpen: false, lang, dateISODraft: '2027-01-15', itemCount: 0,
@@ -313,7 +313,7 @@ test('three real Listados task cards place the complete actions below their head
   for (const handedness of ['left', 'right']) for (const listGoSize of ['compacto', 'medio', 'grande']) {
     const f = fixture('es', { goLog: tasks, handedness, listGoSize, canResolveEntry: () => true });
     Object.assign(f.context, {
-      exports: {}, C: policyContext.exports.GO_ENTRY_COLORS, useLanguage: () => ({ lang: 'es' }),
+      exports: {}, C: policyContext.exports.GO_ENTRY_COLORS, useLanguage: () => ({ lang: 'es' }), useState: initial => [initial, () => {}],
       followedEntry: entry => entry, resolveEntry: (entry, status) => f.calls.push([entry.id, status]),
     });
     f.context.actionCompletion.isSaving = () => false;
@@ -326,24 +326,36 @@ test('three real Listados task cards place the complete actions below their head
       assert.equal(nodes(children[0], node => node.type === 'Feather' && node.props.name === 'circle').length, 0);
       const mounted = children[index];
       assert.equal(mounted.props.layout, 'list');
+      assert.equal(mounted.props.handedness, handedness);
       const row = mounted.type(mounted.props);
-      assert.equal(flatten(row.props.style).flexWrap, 'wrap');
+      assert.equal(flatten(row.props.style).flexWrap, undefined);
       assert.equal(flatten(row.props.style).alignSelf, 'stretch');
       const buttons = nodes(row, node => node.type === 'TouchableOpacity');
-      assert.deepEqual(buttons.map(node => node.props.accessibilityLabel), ['REALIZADA', 'PENDIENTE', 'ELIMINAR']);
+      const labels = handedness === 'right' ? ['ELIMINAR', 'PENDIENTE', 'REALIZADA'] : ['REALIZADA', 'PENDIENTE', 'ELIMINAR'];
+      assert.deepEqual(buttons.map(node => node.props.accessibilityLabel), labels);
+      assert.equal(nodes(row, node => node.type === 'Feather').length, 0);
       buttons.forEach((button, position) => {
         const style = flatten(button.props.style);
         const label = nodes(button, node => node.type === 'Text')[0];
-        assert.equal(label.props.numberOfLines, 1);
-        assert.equal(flatten(label.props.style).flexShrink, 0);
-        assert.equal(style.flexBasis, "auto");
+        assert.equal(label.props.numberOfLines, undefined);
+        assert.equal(flatten(label.props.style).flexShrink, 1);
+        assert.equal(style.flexBasis, 0);
         assert.equal(style.minHeight, 44);
-        assert.equal(style.maxWidth, '100%');
-        assert.equal(style.borderColor, [f.context.C.done, f.context.C.pending, f.context.C.destructive][position]);
+        assert.equal(style.borderColor, ({REALIZADA:f.context.C.done,PENDIENTE:f.context.C.pending,ELIMINAR:f.context.C.destructive})[labels[position]]);
         button.props.onPress({ stopPropagation() {} });
       });
-      assert.deepEqual(f.calls.slice(-3), ['done', 'pending', 'discard'].map(status => [mounted.props.entry.id, status]));
+      assert.deepEqual(f.calls.slice(-3), (handedness === 'right' ? ['discard', 'pending', 'done'] : ['done', 'pending', 'discard']).map(status => [mounted.props.entry.id, status]));
     }
+    f.context.listOpen = false;
+    f.render();
+    f.context.listOpen = true;
+    const reopened = listCard(f.render(), 'task-0');
+    const reopenedActions = nodes(reopened, node => node.type === f.context.GoEntryMicroActions)[0];
+    assert.equal(reopenedActions.props.handedness, handedness);
+    f.context.handedness = handedness === 'right' ? 'left' : 'right';
+    const switched = nodes(listCard(f.render(), 'task-0'), node => node.type === f.context.GoEntryMicroActions)[0];
+    assert.deepEqual(nodes(switched.type(switched.props), node => node.type === 'TouchableOpacity').map(node => node.props.accessibilityLabel),
+      handedness === 'right' ? ['REALIZADA', 'PENDIENTE', 'ELIMINAR'] : ['ELIMINAR', 'PENDIENTE', 'REALIZADA']);
   }
 });
 
@@ -373,6 +385,8 @@ test('three Listados reservations show one real state and open the Calendar deta
       const card = nodes(f.render(), n => n.props.testID === 'list-entry-card-' + entry.id)[0];
       const state = nodes(card, n => n.props.testID === 'list-reservation-status-' + entry.id);
       assert.equal(state.length, 1);
+      const statusRow = nodes(card, n => n.props.testID === 'list-reservation-status-row-' + entry.id)[0];
+      assert.equal(statusRow.props.style.width, '100%');assert.equal(statusRow.props.style.justifyContent, 'flex-end');assert.equal(statusRow.props.style.position, undefined);
       assert.equal(texts(state[0]), 'RESERVA · ' + entry.label);
       assert.ok(!texts(card).split(' | ').includes('ACEPTADO'));
       for (const target of [card, nodes(card, n => n.props.testID === 'list-entry-title-' + entry.id)[0]]) {
@@ -398,7 +412,7 @@ test('three Listados reservations show one real state and open the Calendar deta
   }
 });
 
-test('premium reservation cards use the real beauty category, a short accent and header trash without changing other entry types',()=>{
+test('premium reservation cards keep their category and place all personal actions in one handed row',()=>{
  const details=ts.createSourceFile('details.tsx',readFileSync('components/GoEntryDetails.tsx','utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
  const component=find(details,n=>ts.isFunctionDeclaration(n)&&n.name?.text==='GoEntryMicroActions');
  const adapter=find(home,n=>ts.isVariableDeclaration(n)&&n.name.getText(home)==='renderEntryMicroActions');
@@ -406,15 +420,17 @@ test('premium reservation cards use the real beauty category, a short accent and
  for(const handedness of ['left','right'])for(const listGoSize of ['compacto','medio','grande'])for(const localResolutionStatus of ['pending','done']){
   const hair={...base,localResolutionStatus},sport={...base,id:'sport-reservation',bookingCategory:'padel'},task={...base,id:'ordinary-task',type:'TAREA_INTERNA',customerBooking:false,reservationId:undefined};
   const f=fixture('es',{goLog:[hair,sport,task],handedness,listGoSize,canResolveEntry:()=>true});
-  Object.assign(f.context,{exports:{},C:policyContext.exports.GO_ENTRY_COLORS,useLanguage:()=>({lang:'es'}),followedEntry:e=>e,resolveEntry:(e,status)=>f.calls.push([e.id,status])});f.context.actionCompletion.isSaving=()=>false;
+  Object.assign(f.context,{exports:{},C:policyContext.exports.GO_ENTRY_COLORS,useLanguage:()=>({lang:'es'}),useState:initial=>[initial,()=>{}],followedEntry:e=>e,resolveEntry:(e,status)=>f.calls.push([e.id,status])});f.context.actionCompletion.isSaving=()=>false;
   vm.runInNewContext(compile(component.getText(details)+'\nglobalThis.GoEntryMicroActions=GoEntryMicroActions;globalThis.renderEntryMicroActions='+adapter.initializer.getText(home)),f.context);
   const tree=f.render(),card=listCard(tree,'hair'),accent=nodes(card,n=>n.props.testID==='list-category-accent-hair')[0];
   assert.equal(accent.props.style.backgroundColor,'#eab308');assert.equal(accent.props.style.height,24);assert.equal(accent.props.style.width,3);assert.equal(card.props.style.borderLeftWidth,1);
   assert.equal(nodes(listCard(tree,'sport-reservation'),n=>n.props.testID?.startsWith('list-category-accent')).length,0);assert.equal(nodes(listCard(tree,'ordinary-task'),n=>n.props.testID?.startsWith('list-category-accent')).length,0);assert.equal(listCard(tree,'ordinary-task').props.style.borderLeftWidth,4);
-  const actionMounts=nodes(card,n=>n.type===f.context.GoEntryMicroActions),trashMount=actionMounts.find(n=>n.props.layout==='list-discard'),stateMount=actionMounts.find(n=>n.props.layout==='list');assert.ok(trashMount&&stateMount);
-  const trash=nodes(trashMount.type(trashMount.props),n=>n.type==='TouchableOpacity')[0];assert.equal(trash.props.style.width,44);assert.equal(trash.props.style.height,44);assert.equal(texts(trash),'');assert.equal(nodes(trash,n=>n.type==='Feather')[0].props.name,'trash-2');assert.equal(nodes(trash,n=>n.type==='Feather')[0].props.color,f.context.C.destructive);
-  const buttons=nodes(stateMount.type(stateMount.props),n=>n.type==='TouchableOpacity');assert.equal(buttons.length,2);assert.deepEqual(buttons.map(b=>texts(b)),['REALIZADA','PENDIENTE']);assert.equal(buttons.filter(b=>b.props.accessibilityState.selected).length,1);assert.ok(buttons.every(b=>b.props.style.minHeight>=44&&b.props.style.backgroundColor.length===9));
-  buttons[0].props.onPress({stopPropagation(){}});buttons[1].props.onPress({stopPropagation(){}});trash.props.onPress({stopPropagation(){}});assert.deepEqual(f.calls.slice(-3),[['hair','done'],['hair','pending'],['hair','discard']]);assert.equal(hair.reservationId,'original-booking');assert.equal(hair.bookingStatus,'confirmada');
+  const actionMounts=nodes(card,n=>n.type===f.context.GoEntryMicroActions);assert.equal(actionMounts.length,1);assert.equal(nodes(card,n=>n.props.testID==='list-card-trash-hair').length,0);
+  const row=actionMounts[0].type(actionMounts[0].props),buttons=nodes(row,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);
+  assert.deepEqual(buttons.map(b=>texts(b)),handedness==='right'?['ELIMINAR','PENDIENTE','REALIZADA']:['REALIZADA','PENDIENTE','ELIMINAR']);
+  assert.equal(nodes(row,n=>n.type==='Feather').length,0);assert.equal(buttons.filter(b=>b.props.accessibilityState.selected).length,1);assert.ok(buttons.every(b=>b.props.style.minHeight>=44&&b.props.style.backgroundColor.length===9));
+  for(const label of ['REALIZADA','PENDIENTE','ELIMINAR'])buttons.find(b=>texts(b)===label).props.onPress({stopPropagation(){}});
+  assert.deepEqual(f.calls.slice(-3),[['hair','done'],['hair','pending'],['hair','discard']]);assert.equal(hair.reservationId,'original-booking');assert.equal(hair.bookingStatus,'confirmada');
  }
 });
 
