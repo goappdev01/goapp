@@ -121,6 +121,7 @@ function fixture(lang = 'es', overrides = {}) {
 }
 const cardOf = tree => nodes(tree, node => node.type === 'SwipeableRow')[0]?.props.children[0];
 const plain = value => JSON.parse(JSON.stringify(value));
+const whiteContrast = hex => {const [r,g,b]=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return 1.05/(.2126*r+.7152*g+.0722*b+.05);};
 test('shared Listados footer keeps equal accessible buttons with one, two or three valid actions', () => {
   const f=fixture('es'), calls=[];
   for(const scale of [.8,1,1.25])for(const count of [1,2,3])for(const handedness of ['left','right']){
@@ -136,6 +137,8 @@ test('shared Listados footer keeps equal accessible buttons with one, two or thr
     assert.equal(nodes(row,node=>node.type==='Feather').length,0);
     assert.ok(buttons.every(button=>button.props.style.flexBasis===0 && button.props.style.minHeight>=44));
     assert.ok(buttons.every(button=>{const label=nodes(button,node=>node.type==='Text')[0];return label.props.numberOfLines===1&&label.props.adjustsFontSizeToFit===true&&label.props.style.width==='100%';}));
+    assert.ok(buttons.every(button=>/^#[0-9A-F]{6}$/.test(button.props.style.backgroundColor)&&whiteContrast(button.props.style.backgroundColor)>=4.5));
+    assert.ok(buttons.every(button=>nodes(button,node=>node.type==='Text')[0].props.style.color==='#FFFFFF'));
     assert.deepEqual(buttons.map(button=>texts(button)),(handedness==='right'?actions:[...actions].reverse()).map(action=>action.label));
     buttons[0].props.onPress({stopPropagation(){}});
     assert.equal(calls.at(-1),(handedness==='right'?actions[0]:actions.at(-1)).key);
@@ -198,7 +201,7 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
       const titleIndex = buttons.findIndex(node => byId(node, 'go-proposal-title-compact'));
       const titleBlock = byId(header, 'go-proposal-title-block-compact');
       assert.equal(texts(byId(titleBlock, 'go-proposal-title-compact')), entry.notes);
-      assert.ok(byId(header, 'list-entry-title-compact').props.style.minWidth >= 155, 'title keeps room before the state wraps');
+      assert.equal(byId(header, 'list-entry-title-compact').props.style.flexShrink, 0, 'the state cannot squeeze the title');
       const waiting = byId(titleBlock, 'go-proposal-substatus-compact');
       assert.equal(waiting, undefined, 'the state lives once in the header pill, leaving title width free');
       assert.equal(texts(header).split(label).length - 1, 1, 'keep one localized state pill');
@@ -207,6 +210,9 @@ for (const lang of ['es', 'en']) for (const handedness of ['left', 'right']) {
         : titleIndex < checkboxIndex && checkboxIndex < pillIndex, 'state remains at the right in both hands');
       const statusSlot = byId(header, 'list-entry-header-status-compact');
       assert.equal(statusSlot.props.style.marginLeft, 'auto');
+      assert.equal(statusSlot.props.style.maxWidth, '100%');
+      assert.equal(statusSlot.props.style.flexShrink, 0);
+      assert.equal(statusSlot.props.style.width, undefined, 'status uses its content width');
       f.calls.length = 0;
       buttons[checkboxIndex].props.onPress({ stopPropagation() {} });
       assert.deepEqual(plain(f.calls), [['updateGoStatus', entry.id]]);
@@ -302,6 +308,9 @@ for (const [bookingStatus, labelKey, color] of [
     const status = nodes(card, node => node.type === 'Text' && texts(node) === statusLabel);
     assert.equal(status.length, 1, 'retain the existing localized booking-state pill and default');
     assert.equal(status[0].props.style.color, color);
+    const statusRow=byId(card,'list-reservation-status-row-compact');
+    assert.equal(statusRow.props.style.width,undefined);
+    assert.equal(statusRow.props.style.marginLeft,'auto');
     assert.equal(texts(card).includes(translations[lang].biz_booking_intent_label.toUpperCase() + " · "), false, 'booking status has no redundant type prefix');
     for (const time of [entry.time, entry.changeProposal.time]) assert.equal(texts(card).split(time).length - 1, 1);
     dispatchNestedPress(contact, card);

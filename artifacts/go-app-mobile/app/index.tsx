@@ -22948,7 +22948,7 @@ function HomeScreenContent() {
                           }
                         }}
                         delayLongPress={420}
-                        style={{ flex: 1, minWidth: Math.max(155,lv(155)) }}
+                        style={{ flexShrink: 0, maxWidth: "100%" }}
                       >
                         {(() => {
                           const realTitle = entryIsReservation(g)?entryHeading(g,lang==="en"?"Reservation":"Reserva"):g.notes?.trim() || g.intentLabel;
@@ -23009,7 +23009,7 @@ function HomeScreenContent() {
                         </TouchableOpacity>
                       )}
                       {!hideRedundantFollowUpPending &&
-                        <View testID={(bookingStatusPill&&!isProposalEstado?"list-reservation-status-row-":"list-entry-header-status-")+g.id} style={{maxWidth:"55%",flexShrink:1,alignItems:"flex-end",marginLeft:"auto"}}>
+                        <View testID={(bookingStatusPill&&!isProposalEstado?"list-reservation-status-row-":"list-entry-header-status-")+g.id} style={{maxWidth:"100%",flexShrink:0,alignSelf:"flex-end",alignItems:"flex-end",marginLeft:"auto"}}>
                           {bookingStatusPill && !isProposalEstado ? bookingStatusPill : statusPill}
                         </View>}
                     </View>
@@ -23082,7 +23082,7 @@ function HomeScreenContent() {
                         </View>
                       </TouchableOpacity>
 
-                      {entryIsReservation(g) ? isProposalEstado && <View testID={"list-reservation-status-row-" + g.id} style={{ width: "100%", flexDirection: "row", justifyContent: "flex-end" }}>
+                      {entryIsReservation(g) ? isProposalEstado && <View testID={"list-reservation-status-row-" + g.id} style={{ alignSelf: "flex-end", marginLeft: "auto", flexDirection: "row", justifyContent: "flex-end" }}>
                         {bookingStatusPill}
                       </View> : (
                       <View style={{ flexDirection: "column", alignItems: "flex-end", gap: lv(6), flexShrink: 0 }}>

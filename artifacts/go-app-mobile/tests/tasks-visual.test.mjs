@@ -358,7 +358,8 @@ test('three real Listados task cards place the complete actions below their head
         assert.equal(style.flexBasis, 0);
         assert.ok(style.minHeight >= 44);
         assert.equal(style.flex, 1);
-        assert.ok(style.backgroundColor.startsWith('rgba('));
+        assert.match(style.backgroundColor, /^#[0-9A-F]{6}$/);
+        assert.equal(flatten(label.props.style).color, '#FFFFFF');
         button.props.onPress({ stopPropagation() {} });
       });
       assert.deepEqual(f.calls.slice(-3), (handedness === 'right' ? ['discard', 'pending', 'done'] : ['done', 'pending', 'discard']).map(status => [mounted.props.entry.id, status]));
@@ -447,7 +448,7 @@ test('premium reservation cards keep their category and place all personal actio
   const actionMounts=nodes(card,n=>n.type===f.context.GoEntryMicroActions);assert.equal(actionMounts.length,1);assert.equal(nodes(card,n=>n.props.testID==='list-card-trash-hair').length,0);
   const rowMount=actionMounts[0].type(actionMounts[0].props),row=rowMount.type(rowMount.props),buttons=nodes(row,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);
   assert.deepEqual(buttons.map(b=>texts(b)),handedness==='right'?['ELIMINAR','PENDIENTE','REALIZADA']:['REALIZADA','PENDIENTE','ELIMINAR']);
-  assert.equal(nodes(row,n=>n.type==='Feather').length,0);assert.equal(buttons.filter(b=>b.props.accessibilityState.selected).length,1);assert.ok(buttons.every(b=>b.props.style.minHeight>=44&&b.props.style.backgroundColor.startsWith('rgba(')));
+  assert.equal(nodes(row,n=>n.type==='Feather').length,0);assert.equal(buttons.filter(b=>b.props.accessibilityState.selected).length,1);assert.ok(buttons.every(b=>b.props.style.minHeight>=44&&/^#[0-9A-F]{6}$/.test(b.props.style.backgroundColor)));
   const activeLabel=localResolutionStatus==='done'?'REALIZADA':'PENDIENTE',inactiveLabel=localResolutionStatus==='done'?'PENDIENTE':'REALIZADA';
   const active=buttons.find(b=>texts(b)===activeLabel),inactive=buttons.find(b=>texts(b)===inactiveLabel),deleteButton=buttons.find(b=>texts(b)==='ELIMINAR');
   assert.equal(active.props.accessibilityState.selected,true);assert.equal(inactive.props.accessibilityState.selected,false);assert.equal(deleteButton.props.accessibilityState.selected,false);

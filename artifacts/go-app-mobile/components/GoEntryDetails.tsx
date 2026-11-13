@@ -47,9 +47,9 @@ export type GoListAction = {
 export function GoListActionRow({actions,handedness="right",scale=1,testID="list-action-row"}:{actions:GoListAction[];handedness?:"left"|"right";scale?:number;testID?:string}){
   if(!actions.length)return null;
   const tones={
-    negative:{text:"#F09189",muted:"#B77D79",border:"rgba(240,145,137,0.72)",background:"rgba(240,145,137,0.13)",selected:"rgba(240,145,137,0.22)"},
-    intermediate:{text:"#F2BC6D",muted:"#A98A60",border:"rgba(242,188,109,0.72)",background:"rgba(242,188,109,0.13)",selected:"rgba(242,188,109,0.22)"},
-    positive:{text:"#87D9A9",muted:"#729C82",border:"rgba(135,217,169,0.72)",background:"rgba(135,217,169,0.13)",selected:"rgba(135,217,169,0.22)"},
+    negative:{base:"#B53843",selected:"#B53843",muted:"#B53843"},
+    intermediate:{base:"#9C5A12",selected:"#A55F0E",muted:"#65471D"},
+    positive:{base:"#18744D",selected:"#1A7B4F",muted:"#345C48"},
   };
   const ordered=handedness==="left"?[...actions].reverse():actions;
   return <View testID={testID} pointerEvents="box-none" style={{flexDirection:"row",alignSelf:"stretch",gap:6,marginTop:6,marginBottom:4}}>
@@ -61,11 +61,11 @@ export function GoListActionRow({actions,handedness="right",scale=1,testID="list
         disabled={action.disabled} activeOpacity={0.7}
         onPress={event=>{event?.stopPropagation?.();action.onPress();}}
         style={{flex:1,flexBasis:0,flexShrink:1,minWidth:0,minHeight:Math.max(44,Math.round(44*scale)),paddingHorizontal:4,paddingVertical:8,
-          borderRadius:8,borderWidth:1,borderColor:inactive?"rgba(255,255,255,0.16)":tone.border,
-          backgroundColor:action.selected?tone.selected:inactive?"rgba(255,255,255,0.035)":tone.background,
-          shadowColor:tone.text,shadowOffset:{width:0,height:2},shadowOpacity:action.selected?0.16:0.09,shadowRadius:3,elevation:1,alignItems:"center",justifyContent:"center"}}>
+          borderRadius:8,borderWidth:1,borderColor:action.selected?"rgba(255,255,255,0.38)":"rgba(255,255,255,0.22)",
+          backgroundColor:action.selected?tone.selected:inactive?tone.muted:tone.base,
+          shadowColor:tone.base,shadowOffset:{width:0,height:2},shadowOpacity:action.selected?0.22:0.14,shadowRadius:3,elevation:1,alignItems:"center",justifyContent:"center"}}>
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} maxFontSizeMultiplier={1.8}
-          style={{color:inactive?tone.muted:tone.text,fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",alignSelf:"stretch",width:"100%",minWidth:0}}>{action.label}</Text>
+          style={{color:"#FFFFFF",fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",alignSelf:"stretch",width:"100%",minWidth:0}}>{action.label}</Text>
       </TouchableOpacity>;
     })}
   </View>;
