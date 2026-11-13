@@ -28,8 +28,8 @@ test('older and new receipts expose the same compact accepted actions, including
 test('expanded sheet reserves bottom navigation outside the scroll and places GO message beside Back',()=>{
  let closed=0,message=0;const f=sheet(base,{onClose:()=>closed++,onMessage:()=>message++});
  const modal=nodes(f.tree,n=>n.type==='Modal')[0],footer=nodes(f.tree,n=>n.props.testID==='entry-detail-close-footer')[0],scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0];
- assert.equal(modal.props.animationType,'none');assert.equal(footer.props.style.position,undefined);assert.equal(footer.props.style.flexShrink,0);assert.equal(footer.props.style.paddingBottom,6);assert.equal(footer.props.style.flexDirection,'row');assert.equal(nodes(scroll,n=>n.props.testID==='entry-detail-close-footer').length,0);assert.equal(scroll.props.contentContainerStyle.paddingBottom,8);assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');assert.equal(nodes(scroll,n=>n.props.testID==='entry-message-go').length,0);
- const nav=nodes(f.tree,n=>n.props.testID==='entry-detail-floating-navigation')[0],close=nodes(f.tree,n=>n.props.accessibilityLabel==='Cerrar detalle')[0],msg=nodes(nav,n=>n.props.testID==='entry-message-go')[0];assert.equal(nav.props.screenKey,'entry-details');assert.equal(nav.props.buttonKey,'navigation-with-message');assert.equal(nav.props.initialTop,undefined,'the reserved footer anchors the group below the scroll');assert.ok(msg);assert.equal(msg.props.accessibilityLabel,'MENSAJE GO');assert.equal(msg.props.accessibilityRole,'button');assert.equal(msg.props.style.minHeight,44);assert.equal(msg.props.activeOpacity,0.72);assert.ok(msg.props.style.backgroundColor);assert.equal(close.props.hitSlop,0);const touch=f.render(close.type,close.props);assert.equal(Object.assign({},...touch.props.style.filter(Boolean)).width,64);assert.equal(Object.assign({},...touch.props.style.filter(Boolean)).height,64);assert.equal(touch.props.delayPressIn,0);touch.props.onPress({stopPropagation(){}});assert.equal(closed,0);modal.props.onDismiss();assert.equal(closed,1);
+ assert.equal(modal.props.animationType,'none');assert.equal(footer.props.style.position,undefined);assert.equal(footer.props.style.flexShrink,0);assert.equal(footer.props.style.height,76);assert.equal(footer.props.style.paddingBottom,11);assert.equal(footer.props.style.flexDirection,'row');assert.equal(nodes(scroll,n=>n.props.testID==='entry-detail-close-footer').length,0);assert.equal(scroll.props.contentContainerStyle.paddingBottom,8);assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');assert.equal(nodes(scroll,n=>n.props.testID==='entry-message-go').length,0);
+ const nav=nodes(f.tree,n=>n.props.testID==='entry-detail-floating-navigation')[0],close=nodes(f.tree,n=>n.props.accessibilityLabel==='Cerrar detalle')[0],msg=nodes(nav,n=>n.props.testID==='entry-message-go')[0];assert.equal(nav.props.screenKey,'entry-details');assert.equal(nav.props.buttonKey,'navigation-with-message-inset');assert.equal(nav.props.initialTop,undefined,'the reserved footer anchors the group below the scroll');assert.equal(nav.props.initialBottom,11);assert.equal(nav.props.boundsVerticalInset,11);assert.ok(msg);assert.equal(msg.props.accessibilityLabel,'MENSAJE GO');assert.equal(msg.props.accessibilityRole,'button');assert.equal(msg.props.style.height,64);assert.equal(msg.props.activeOpacity,0.82);assert.ok(msg.props.style.backgroundColor);assert.equal(close.props.hitSlop,0);const touch=f.render(close.type,close.props);assert.equal(Object.assign({},...touch.props.style.filter(Boolean)).width,64);assert.equal(Object.assign({},...touch.props.style.filter(Boolean)).height,64);assert.equal(touch.props.delayPressIn,0);touch.props.onPress({stopPropagation(){}});assert.equal(closed,0);modal.props.onDismiss();assert.equal(closed,1);
  for(const handedness of ['right','left']){
   const side=sheet(base,{handedness,onMessage(){},onGoToLanding(){}}, {viewport:{width:320,height:568,fontScale:1}}),sideNav=nodes(side.tree,n=>n.props.testID==='entry-detail-floating-navigation')[0];
   const labels=nodes(sideNav,n=>n.props.testID==='entry-message-go'||['Cerrar detalle','Ir directamente al Landing'].includes(n.props.accessibilityLabel)).map(n=>n.props.testID==='entry-message-go'?'MENSAJE GO':n.props.accessibilityLabel);
@@ -43,10 +43,17 @@ test('expanded sheet reserves bottom navigation outside the scroll and places GO
 test('original and proposed booking dates show full local year without changing persisted values',()=>{
  const entry={...base,estado:'propuesta_pendiente',date:'16/11/26',dateISO:'2026-11-16',time:'11:00',bookingTimeline:{timezone:'Pacific/Kiritimati',workMinutes:0,waitMinutes:0,phases:[]},changeProposal:{originalDateISO:'2026-11-16',originalTime:'11:00',date:'20/11/26',dateISO:'2026-11-20',time:'11:11',note:'Cambiar horario',proposedAt:1}};
  const snapshot=JSON.stringify(entry),f=sheet(entry),summary=nodes(f.tree,n=>n.props.testID==='entry-original-date-time')[0],proposal=nodes(f.tree,n=>n.props.testID==='entry-proposed-date-time')[0];
- assert.equal(texts(summary),'Lun 16/11/2026 · 11:00 · 60min');assert.equal(texts(proposal).replace(/\s+/g,' '),'Propuesto: Vie 20/11/2026 · 11:11');assert.equal(JSON.stringify(entry),snapshot);
+ assert.equal(texts(summary),'Lun 16/11/2026 · 11:00 · Duración: 60 min');assert.equal(texts(proposal).replace(/\s+/g,' '),'Propuesto: Vie 20/11/2026 · 11:11');assert.equal(JSON.stringify(entry),snapshot);
  const info=nodes(f.tree,n=>n.props.testID==='entry-proposal')[0];assert.equal(info.type,'View');assert.equal(info.props.onPress,undefined);assert.equal(info.props.accessibilityRole,undefined);assert.equal(info.props.style.elevation,undefined);assert.ok(info.props.style.borderColor.startsWith('rgba('));
  const presentation=f.load('data/goEntryPresentation.ts');assert.equal(presentation.formatBookingLocalDate('2026-11-16','16/11/26','es','Pacific/Kiritimati'),'Lun 16/11/2026');
  assert.equal(presentation.formatBookingLocalDate(undefined,'','es','America/Los_Angeles','2026-11-16T00:30:00Z'),'Dom 15/11/2026');
+});
+
+test('duration adds a readable unit once and never invents an unknown booking duration',()=>{
+ for(const raw of ['30','30m','30min','30 min','30 minutos'])assert.equal(presentation.entryDurationLabel(raw),'Duración: 30 min');
+ assert.equal(presentation.entryDurationLabel('1h 30min'),'Duración: 1 h 30 min');
+ for(const raw of ['', '0', 'unknown'])assert.equal(presentation.entryDurationLabel(raw),null);
+ const f=sheet({...base,duration:'unknown'}),summary=nodes(f.tree,n=>n.props.testID==='entry-original-date-time')[0];assert.ok(!texts(summary).includes('Duración:'));
 });
 
 test('a proposal from the reservation detail waits for native dismissal before opening the shared flow',()=>{
@@ -72,7 +79,7 @@ test('calendar expanded reservation uses its existing proposal callback after de
  tree=f.render(AgendaBoard,props);
  const envelope=nodes(tree,n=>n.props.accessibilityLabel==='booking_state_pending').at(-1);assert.ok(envelope);assert.equal(nodes(envelope,n=>n.type==='Feather')[0].props.name,'mail','the yellow envelope controls Pending status, not GO messaging');
  const proposal=nodes(tree,n=>n.props.accessibilityLabel==='tasks_propose_change').at(-1);
- assert.ok(proposal,'expanded reservation proposal is available');proposal.props.onPress();
+ assert.ok(proposal,'expanded reservation proposal is available');assert.equal(proposal.props.style[1].borderColor,'#D1A166');assert.equal(proposal.props.style[1].shadowColor,'#000000');assert.equal(proposal.props.style[1].minHeight,44);proposal.props.onPress();
  tree=f.render(AgendaBoard,props);
  const modal=nodes(tree,n=>n.props.testID==='entry-details-modal')[0];assert.equal(modal.props.visible,false);assert.deepEqual(proposed,[]);
  modal.props.onDismiss();assert.deepEqual(proposed,[base.id]);
@@ -104,9 +111,18 @@ test('the same receipt projects client vs business identity and never calls the 
 test('WhatsApp and Call open the authorized numbers only on press, never transmit a message automatically',async()=>{
  const f=fixture(),c=f.load('components/GoEntryDetails.tsx'),tree=f.render(c.GoEntryCommunication,{entry:base});
  assert.equal(f.urls.length,0);
- for(const label of ['WhatsApp','Llamar']){const button=nodes(tree,n=>n.type==='TouchableOpacity'&&n.props.accessibilityLabel===label)[0];assert.ok(button);await button.props.onPress();}
+ for(const label of ['WhatsApp','Llamar']){const button=nodes(tree,n=>n.type==='TouchableOpacity'&&n.props.accessibilityLabel===label)[0];assert.ok(button);assert.equal(button.props.style[0].shadowColor,'#000000');assert.equal(button.props.style[0].backgroundColor,'#202827');assert.ok(button.props.onPressIn&&button.props.onPressOut);await button.props.onPress();}
  assert.deepEqual(f.urls,['https://wa.me/34611123456','tel:+34600123456']);
  assert.equal(f.render(c.GoEntryCommunication,{entry:{...base,phone:'bad',whatsapp:''}}),null);
+});
+
+test('detail contact visibly depresses while held and returns to its neutral shadow on release',()=>{
+ const f=fixture(),c=f.load('components/GoEntryDetails.tsx'),props={entry:base};
+ let button=nodes(f.render(c.GoEntryCommunication,props),n=>n.props.accessibilityLabel==='WhatsApp')[0];
+ button.props.onPressIn();button=nodes(f.render(c.GoEntryCommunication,props),n=>n.props.accessibilityLabel==='WhatsApp')[0];
+ assert.equal(button.props.style[1].transform[0].translateY,1);assert.equal(button.props.style[1].elevation,0);
+ button.props.onPressOut();button=nodes(f.render(c.GoEntryCommunication,props),n=>n.props.accessibilityLabel==='WhatsApp')[0];
+ assert.ok(!button.props.style[1]);assert.equal(button.props.style[0].elevation,2);
 });
 test('accepted visits offer cancellation and proposal without another acceptance',()=>{
  let cancelled=0,proposed=0,accepted=0;const f=fixture(),c=f.load('components/GoEntryDetails.tsx');
@@ -157,7 +173,7 @@ test('state colors and negative actions agree in compact and expanded cards with
  for(const [status,key,color]of [['pendiente','booking_state_pending','#FFD700'],['confirmada','booking_state_accepted','#22c55e'],['completada','booking_state_completed','#22c55e'],['cancelada','booking_state_cancelled','#FF0000']]){
   const entry={...base,bookingStatus:status};assert.equal(policy.reservationCardPolicy(entry).stateColor,color);assert.equal(policy.reservationCardPolicy(entry).stateKey,key);
   for(const compact of [false,true]){const tree=f.render(c.GoEntryQuickActions,{entry,compact,onCancel(){},onPropose(){}});const state=nodes(tree,n=>n.type==='Text')[0];assert.equal(state.props.style.color,color);
-   for(const action of nodes(tree,n=>n.props.accessibilityLabel==='CANCELAR'))assert.equal(action.props.style.at(-1).borderColor,'#FF0000');}
+   for(const action of nodes(tree,n=>n.props.accessibilityLabel==='CANCELAR'))assert.equal(action.props.style.at(-1).borderColor,compact?'#FF0000':'#C98282');}
  }
  const personal=f.render(c.GoEntryQuickActions,{entry:{...base,localResolutionStatus:'pending'}});assert.ok(texts(personal).includes('booking_state_accepted'));assert.ok(texts(personal).includes('Mi seguimiento:'));
  assert.equal(JSON.stringify(base),original);assert.equal(base.color,'#00e5ff');

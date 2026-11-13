@@ -75,6 +75,19 @@ export function entryIsReservation(entry: GoEntry): boolean {
   return !!(entry.customerBooking || entry.businessBooking || entry.bookingPerspective || ["GO_BOOKING","GO_RESERVA"].includes(entry.type ?? ""));
 }
 
+/** Keep the stored duration intact; show only values with a known unit. */
+export function entryDurationLabel(value?: string, lang = "es"): string | null {
+  const raw = value?.trim() ?? "";
+  const minutes = /^(\d+(?:[.,]\d+)?)\s*(?:m|min|mins|minuto|minutos)?$/i.exec(raw);
+  const hours = /^(\d+(?:[.,]\d+)?)\s*(?:h|hora|horas)$/i.exec(raw);
+  const hoursAndMinutes = /^(\d+)\s*h\s*(\d+)\s*(?:m|min|mins|minuto|minutos)?$/i.exec(raw);
+  const amount = minutes?.[1] ?? hours?.[1];
+  if (amount && Number(amount.replace(",", ".")) > 0) return `${lang === "en" ? "Duration" : "Duración"}: ${amount} ${hours ? "h" : "min"}`;
+  if (hoursAndMinutes && Number(hoursAndMinutes[1]) > 0 && Number(hoursAndMinutes[2]) < 60)
+    return `${lang === "en" ? "Duration" : "Duración"}: ${hoursAndMinutes[1]} h ${hoursAndMinutes[2]} min`;
+  return null;
+}
+
 /** Read context from the same authorized card; server still resolves every recipient. */
 export function entryMessageContext(entry: GoEntry) {
   if(entryIsInternal(entry))return null;

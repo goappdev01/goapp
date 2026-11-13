@@ -11,8 +11,8 @@ for (const hand of ['right', 'left']) test(`${hand}: a single real 64-point clos
     await f.render({ onClose: () => closed++ });
     const footer = f.props.get('entry-detail-close-footer'), target = f.props.get('Cerrar detalle');
     assert.equal(footer.style.position, undefined); assert.equal(footer.style.flexShrink, 0);
-    assert.equal(footer.style.justifyContent, hand === 'left' ? 'flex-start' : 'flex-end'); assert.equal(footer.style.paddingBottom, 6);assert.equal(footer.style.height, 74, "The original panel footer height is preserved; controls are overlays");
-    assert.equal(Object.assign({},...target.style.filter(Boolean)).width, 64); assert.equal(Object.assign({},...target.style.filter(Boolean)).height, 64); assert.equal(Object.assign({},...target.style.filter(Boolean)).borderRadius,17);
+    assert.equal(footer.style.justifyContent, hand === 'left' ? 'flex-start' : 'flex-end'); assert.equal(footer.style.paddingBottom, 11);assert.equal(footer.style.height, 76, "The reserved footer keeps all controls clear of the lower border");
+    assert.equal(Object.assign({},...target.style.filter(Boolean)).width, 64); assert.equal(Object.assign({},...target.style.filter(Boolean)).height, 64); assert.equal(Object.assign({},...target.style.filter(Boolean)).borderRadius,21);
     assert.equal(target.hitSlop, 0); assert.equal(target.delayPressIn, 0);
     for (const id of ['entry-details-scroll', 'entry-details-gesture-body']) assert.equal(byId(byId(f.container, id), 'entry-detail-close-footer'), undefined);
     assert.equal(f.props.has('Salir del calendario'), false); assert.equal(f.props.has('entry-detail-floating-close'), false);

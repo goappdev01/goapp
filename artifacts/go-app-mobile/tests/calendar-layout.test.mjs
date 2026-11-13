@@ -128,7 +128,7 @@ test('Pending cards keep one closed line; personal tasks have no false chat and 
   assert.equal(nodes(expanded,n=>n.props.testID==='entry-message-go').length,0,'the message action no longer consumes card body height');
   const message = nodes(navigation, n => n.type === 'TouchableOpacity' && n.props.testID === 'entry-message-go')[0];
   assert.ok(message);
-  assert.equal(message.props.style.minHeight, 44);
+  assert.equal(message.props.style.height, 64);
   assert.equal(message.props.accessibilityRole, 'button');
   assert.ok(texts(message).includes('MENSAJE GO'));
   message.props.onPress();

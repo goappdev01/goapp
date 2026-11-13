@@ -786,6 +786,7 @@ export function AgendaBoard({
   const dragEnabledRef = useRef(dragEnabled);
   dragEnabledRef.current = dragEnabled;
   const [notesExpanded,setNotesExpanded]=useState(true);
+  const [pressedDetailControl,setPressedDetailControl]=useState<string|null>(null);
   const [archiveHeaderHeight,setArchiveHeaderHeight]=useState<number>();
   const archiveEntriesRef=useRef(archiveNotes||[]);archiveEntriesRef.current=archiveNotes||[];
   const noteDayFocus=useRef({key:"",done:false});
@@ -1803,15 +1804,18 @@ export function AgendaBoard({
     return <View style={expanded ? { flexDirection: "row", gap: 10, marginBottom: 14 } : s.estadoRow}>
       {ESTADO_OPTIONS.map(opt => {
         const active = opt.key === "propuesto" ? !!item.changeProposal : opt.key === "aceptado" ? policy.stateKey === "booking_state_accepted" : opt.key === "rechazado" ? ["booking_state_cancelled","booking_state_rejected"].includes(policy.stateKey) : policy.stateKey === "booking_state_pending";
+        const detailColor = opt.key === "rechazado" ? "#C98282" : opt.key === "aceptado" ? "#83B899" : "#D1A166";
+        const pressedKey = `${item.id}:${opt.key}`;
+        const pressed = expanded && pressedDetailControl === pressedKey;
         const perform = opt.key === "propuesto" && policy.canPropose && onProposeItem ? () => onProposeItem(item.id)
           : opt.key === "rechazado" && policy.received && onRejectProposal ? () => onRejectProposal(item.id)
           : opt.key === "rechazado" && policy.canCancel && onDeleteItem ? () => onDeleteItem(item.id)
           : opt.key === "aceptado" && policy.received && onAcceptProposal ? () => onAcceptProposal(item.id)
           : opt.key === "aceptado" && policy.canConfirm && onConfirmBooking ? () => onConfirmBooking(item.id) : undefined;
-        return <TouchableOpacity key={opt.key} accessibilityRole="button" accessibilityLabel={names[opt.key]} accessibilityState={{ selected: active, disabled: !perform }} activeOpacity={expanded ? 0.72 : 0.8}
-          disabled={!perform} onPress={() => { if (!perform) return; Haptics.selectionAsync().catch(() => {}); if (expanded && opt.key === "propuesto" && dismissThen) { dismissThen(perform); return; } if (expanded) { setExpandedBookingItem(null); setExpandedCardId(null); } perform(); }}
-          style={[s.estadoPill, { flex: 1, minHeight: expanded ? 44 : 30, backgroundColor: active ? opt.color : expanded && perform ? opt.color + "18" : "transparent", borderColor: opt.color + "80", ...(expanded && {borderWidth:1.5,opacity:perform?1:0.58,shadowColor:opt.color,shadowOffset:{width:0,height:2},shadowOpacity:perform?0.2:0,shadowRadius:4,elevation:perform?2:0}) }]}>
-          <Feather name={(active ? opt.icon : opt.iconInactive) as any} size={expanded ? 18 : 12} color={active ? "#101018" : opt.color + "90"} />
+        return <TouchableOpacity key={opt.key} accessibilityRole="button" accessibilityLabel={names[opt.key]} accessibilityState={{ selected: active, disabled: !perform }} activeOpacity={expanded ? 0.82 : 0.8}
+          disabled={!perform} onPressIn={expanded?()=>setPressedDetailControl(pressedKey):undefined} onPressOut={expanded?()=>setPressedDetailControl(null):undefined} onPress={() => { if (!perform) return; Haptics.selectionAsync().catch(() => {}); if (expanded && opt.key === "propuesto" && dismissThen) { dismissThen(perform); return; } if (expanded) { setExpandedBookingItem(null); setExpandedCardId(null); } perform(); }}
+          style={[s.estadoPill, { flex: 1, minHeight: expanded ? 44 : 30, backgroundColor: expanded ? active ? "#2A302D" : "#202429" : active ? opt.color : "transparent", borderColor: expanded ? detailColor : opt.color + "80", ...(expanded && {borderWidth:1.5,opacity:perform?pressed?0.88:1:0.48,shadowColor:"#000000",shadowOffset:{width:0,height:2},shadowOpacity:perform&&!pressed?0.2:0.06,shadowRadius:3,elevation:perform&&!pressed?2:0,transform:[{translateY:pressed?1:0}]}) }]}>
+          <Feather name={(active ? opt.icon : opt.iconInactive) as any} size={expanded ? 18 : 12} color={expanded ? detailColor : active ? "#101018" : opt.color + "90"} />
         </TouchableOpacity>;
       })}
     </View>;

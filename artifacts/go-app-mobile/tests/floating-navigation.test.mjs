@@ -14,7 +14,7 @@ test('detail Back and Landing are distinct overlays and never resize the origina
  const layout=async(summaryEnd,actionsTop,offset=0)=>f.settle(()=>{f.props.get('entry-details-scroll').onLayout({nativeEvent:{layout:{y:44,height:600}}});f.props.get('entry-details-information').onLayout({nativeEvent:{layout:{y:0,height:summaryEnd}}});f.props.get('entry-details-actions').onLayout({nativeEvent:{layout:{y:actionsTop}}});f.props.get('entry-details-scroll').onScroll({nativeEvent:{contentOffset:{y:offset}}});});
  await layout(160,440);let floating=f.props.get('entry-detail-floating-navigation');assert.equal(floating.screenKey,'entry-details');assert.equal(floating.initialTop,408);assert.ok(floating.initialTop>=44+160+12);assert.ok(floating.initialTop+64<=44+440-12);
  await layout(420,440);floating=f.props.get('entry-detail-floating-navigation');assert.equal(floating.initialTop,undefined);assert.equal(floating.safeArea,false);
- assert.equal(f.props.get('entry-detail-close-footer').style.height,74);assert.equal(f.props.get('entry-detail-close-footer').style.paddingBottom,6);assert.equal(JSON.stringify(f.props.get('entry-details-sheet').style),sheet);
+ assert.equal(f.props.get('entry-detail-close-footer').style.height,76);assert.equal(f.props.get('entry-detail-close-footer').style.paddingBottom,11);assert.equal(JSON.stringify(f.props.get('entry-details-sheet').style),sheet);
  await f.settle(()=>f.props.get('Ir directamente al Landing').onPress({stopPropagation(){}}));assert.equal(landing,1);assert.equal(back,0,'Double arrow must not invoke one-level Back');
  await f.pressClose();assert.equal(back,0);await f.nativeDismiss();assert.equal(back,1);assert.equal(landing,1);
  }finally{await f.dispose();}

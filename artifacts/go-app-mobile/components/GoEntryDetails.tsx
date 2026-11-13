@@ -6,20 +6,24 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { GoEntry } from "./AgendaOperativa";
-import { entryCommunication, entryHeading, entryIdentity, entryIsInternal, entryIsReservation, entryProposalPending, formatBookingLocalDate } from "@/data/goEntryPresentation";
+import { entryCommunication, entryDurationLabel, entryHeading, entryIdentity, entryIsInternal, entryIsReservation, entryProposalPending, formatBookingLocalDate } from "@/data/goEntryPresentation";
 import { reservationCardPolicy, GO_ENTRY_COLORS as C } from "@/data/reservationCardPolicy";
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { landingCurrentEntry } from "./landing/landingPanels";
 import { GoScreenCloseSurface, GoScreenCloseGuide } from "@/components/ui/GoScreenCloseSurface";
 
+const detailTone = (color: string) => ({"#ff0000":"#C98282","#ff8c00":"#D1A166","#22c55e":"#83B899","#4ade80":"#83B899","#ffd700":"#D3BC79"}[color.toLowerCase()] ?? color);
+const pressedSurface = {transform:[{translateY:1}],elevation:0,shadowOpacity:0.06,opacity:0.88};
+
 export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
   const { lang } = useLanguage();
+  const [pressed,setPressed]=useState<string|null>(null);
   const links = entryCommunication(entry);
   if (!links.call && !links.whatsapp) return null;
   const open = (url: string) => { void Linking.openURL(url).catch(() => Alert.alert("GO", lang === "en" ? "Could not open this contact." : "No se pudo abrir este contacto.")); };
   return <View testID="entry-communication" style={s.actions}>
-    {links.whatsapp && <TouchableOpacity accessibilityRole="button" accessibilityLabel="WhatsApp" activeOpacity={0.72} onPress={() => open(links.whatsapp!)} style={s.contact}><Text style={s.contactText}>WhatsApp</Text></TouchableOpacity>}
-    {links.call && <TouchableOpacity accessibilityRole="button" accessibilityLabel={lang === "en" ? "Call" : "Llamar"} activeOpacity={0.72} onPress={() => open(links.call!)} style={s.contact}><Text style={s.contactText}>{lang === "en" ? "Call" : "Llamar"}</Text></TouchableOpacity>}
+    {links.whatsapp && <TouchableOpacity accessibilityRole="button" accessibilityLabel="WhatsApp" activeOpacity={0.82} onPressIn={()=>setPressed("whatsapp")} onPressOut={()=>setPressed(null)} onPress={() => open(links.whatsapp!)} style={[s.contact,pressed==="whatsapp"&&pressedSurface]}><Text style={s.contactText}>WhatsApp</Text></TouchableOpacity>}
+    {links.call && <TouchableOpacity accessibilityRole="button" accessibilityLabel={lang === "en" ? "Call" : "Llamar"} activeOpacity={0.82} onPressIn={()=>setPressed("call")} onPressOut={()=>setPressed(null)} onPress={() => open(links.call!)} style={[s.contact,pressed==="call"&&pressedSurface]}><Text style={s.contactText}>{lang === "en" ? "Call" : "Llamar"}</Text></TouchableOpacity>}
   </View>;
 }
 
@@ -31,6 +35,7 @@ export type GoEntryActionCallbacks = {
 /** Personal follow-up never writes the contractual acceptance or completion of a reservation. */
 export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list"|"list-discard"}){
   const {lang}=useLanguage(),personal=!!(entry.reservationId||entry.customerBooking||entry.businessBooking);
+  const [pressed,setPressed]=useState<string|null>(null);
   const list = layout === "list";
   const premium=list&&personal,trash=layout==="list-discard";
   const label=(es:string,en:string)=>lang==="en"?en:es;
@@ -46,11 +51,12 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
       accessibilityHint={action.key==="discard"?label("Oculta solo tu ficha. No cancela el compromiso.","Hides only your card. Does not cancel the commitment."):undefined}
       disabled={disabled} accessibilityState={{disabled,selected:entry.localResolutionStatus===action.key}}
       hitSlop={{top:inline?4:0,bottom:inline?4:0,left:0,right:0}} activeOpacity={0.7}
+      onPressIn={list||trash?undefined:()=>setPressed(action.key)} onPressOut={list||trash?undefined:()=>setPressed(null)}
       onPress={event=>{event?.stopPropagation();action.run?.();}}
-      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:list?1:1.5,borderColor:action.color,backgroundColor:action.color+(list?"12":"18"),opacity:disabled?0.48:1,flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",...(!list&&{shadowColor:action.color,shadowOffset:{width:0,height:2},shadowOpacity:disabled?0:0.18,shadowRadius:4,elevation:disabled?0:2}),...(list && {flex:undefined,flexGrow:1,flexShrink:0,flexBasis:"auto",maxWidth:"100%"}),...(premium&&{flex:1,flexBasis:0,paddingVertical:4,borderColor:entry.localResolutionStatus===action.key?action.color+"99":"rgba(255,255,255,0.10)",backgroundColor:action.color+(entry.localResolutionStatus===action.key?"20":"0a")}),...(trash&&{flex:undefined,width:44,height:44,padding:0,borderWidth:0,backgroundColor:"transparent"})}}>
-      <Feather name={action.icon} size={trash?20:inline?12:14} color={action.color}/>
+      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:list?1:1.5,borderColor:list?action.color:detailTone(action.color),backgroundColor:list?action.color+"12":"#202429",opacity:disabled?0.48:pressed===action.key?0.88:1,flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",...(!list&&{shadowColor:"#000000",shadowOffset:{width:0,height:2},shadowOpacity:disabled||pressed===action.key?0.06:0.2,shadowRadius:3,elevation:disabled||pressed===action.key?0:2,transform:[{translateY:pressed===action.key?1:0}]}),...(list && {flex:undefined,flexGrow:1,flexShrink:0,flexBasis:"auto",maxWidth:"100%"}),...(premium&&{flex:1,flexBasis:0,paddingVertical:4,borderColor:entry.localResolutionStatus===action.key?action.color+"99":"rgba(255,255,255,0.10)",backgroundColor:action.color+(entry.localResolutionStatus===action.key?"20":"0a")}),...(trash&&{flex:undefined,width:44,height:44,padding:0,borderWidth:0,backgroundColor:"transparent"})}}>
+      <Feather name={action.icon} size={trash?20:inline?12:14} color={list?action.color:detailTone(action.color)}/>
       {!trash&&<Text numberOfLines={premium?undefined:1} adjustsFontSizeToFit={!list} minimumFontScale={0.75} maxFontSizeMultiplier={list?2:1.2}
-        style={{color:action.color,fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:premium?1:list?0:1}}>{action.text}</Text>}
+        style={{color:list?action.color:detailTone(action.color),fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:premium?1:list?0:1}}>{action.text}</Text>}
     </TouchableOpacity>)}
   </View>;
 }
@@ -58,6 +64,7 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
 /** Callers supply the same existing commands used in Calendar. This component never mutates a record. */
 export function GoEntryQuickActions({ entry, showState = true, compact = false, ...actions }: { entry: GoEntry; showState?: boolean; compact?: boolean } & GoEntryActionCallbacks) {
   const { lang, t } = useLanguage(), policy = reservationCardPolicy(entry);
+  const [pressed,setPressed]=useState<string|null>(null);
   const canonical = policy.canonical;
   const active = canonical ? policy.active : !entry.deleted && entry.estado !== "rechazado" && entry.localResolutionStatus !== "done";
   const received = canonical ? policy.received : entryProposalPending(entry) && entry.estado === "propuesto";
@@ -67,7 +74,7 @@ export function GoEntryQuickActions({ entry, showState = true, compact = false, 
     : entry.localResolutionStatus === "pending" ? (lang === "en" ? "PENDING" : "PENDIENTE")
     : accepted ? (lang === "en" ? "ACCEPTED" : "ACEPTADA") : entry.estado === "rechazado" ? (lang === "en" ? "CANCELLED" : "CANCELADA") : (lang === "en" ? "PENDING" : "PENDIENTE");
   const pending = entryProposalPending(entry);
-  const button = (label: string, color: string, callback?: () => void) => callback && <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} activeOpacity={0.72} onPress={event => { event?.stopPropagation(); callback(); }} style={[s.action, compact && s.compactAction, { borderColor: color, backgroundColor: color + "18", shadowColor: color }]}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{ color, fontSize: compact ? 10 : 12, fontWeight: "700", textAlign: "center" }}>{label}</Text></TouchableOpacity>;
+  const button = (label: string, color: string, callback?: () => void) => callback && <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} activeOpacity={compact?0.72:0.82} onPressIn={compact?undefined:()=>setPressed(label)} onPressOut={compact?undefined:()=>setPressed(null)} onPress={event => { event?.stopPropagation(); callback(); }} style={[s.action, compact && s.compactAction, !compact&&pressed===label&&pressedSurface, { borderColor: compact?color:detailTone(color), backgroundColor: compact?color+"18":"#202429", shadowColor: compact?color:"#000000",...(!compact&&{shadowOpacity:pressed===label?0.06:0.2,shadowRadius:3}) }]}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{ color:compact?color:detailTone(color), fontSize: compact ? 10 : 12, fontWeight: "700", textAlign: "center" }}>{label}</Text></TouchableOpacity>;
   return <View testID="entry-quick-actions" style={{ gap: compact ? 4 : 8 }}>
     {showState && <Text numberOfLines={1} style={{ color: canonical ? policy.stateColor : entry.localResolutionStatus==="done"?C.done:entry.localResolutionStatus==="pending"?C.pending:accepted?C.accepted:entry.estado==="rechazado"?C.destructive:C.pending, fontSize: compact ? 10 : 13, fontWeight: "800" }}>{pending ? "Original: " : ""}{state}</Text>}
     {canonical&&entry.localResolutionStatus&&<Text style={{color:entry.localResolutionStatus==="done"?C.done:C.pending,fontSize:compact?10:13}}>{lang==="en"?"My follow-up: ":"Mi seguimiento: "}{entry.localResolutionStatus==="done"?(lang==="en"?"DONE":"REALIZADA"):(lang==="en"?"PENDING":"PENDIENTE")}</Text>}
@@ -89,7 +96,7 @@ export function GoEntrySummary({ entry }: { entry: GoEntry }) {
   return <View testID="entry-summary" style={{ gap: 6 }}>
     <Text style={s.title}>{entryHeading(entry, unknown)}</Text>
     {policy.canonical && <Text style={{ color: policy.stateColor, fontWeight: "800" }}>{entryProposalPending(entry) ? (lang === "en" ? "Original reservation: " : "Reserva original: ") : ""}{t(policy.stateKey as any)}</Text>}
-    <Text testID="entry-original-date-time" style={s.text}>{[entryIsReservation(entry) ? formatBookingLocalDate(entry.dateISO, entry.date, lang, entry.bookingTimeline?.timezone, entry.bookingStartsAt || entry.startDatetime) : entry.date || entry.dateISO, entry.time, entry.duration].filter(Boolean).join(" · ")}</Text>
+    <Text testID="entry-original-date-time" style={s.text}>{[entryIsReservation(entry) ? formatBookingLocalDate(entry.dateISO, entry.date, lang, entry.bookingTimeline?.timezone, entry.bookingStartsAt || entry.startDatetime) : entry.date || entry.dateISO, entry.time, entryIsReservation(entry) ? entryDurationLabel(entry.duration,lang) : entry.duration].filter(Boolean).join(" · ")}</Text>
     {!!professional && <Text style={s.text}>{lang === "en" ? "Professional: " : "Profesional: "}{professional}</Text>}
     {!!entry.place && <Text style={s.secondary}>{entry.place}</Text>}
   </View>;
@@ -141,6 +148,7 @@ export function GoEntryDetailsSheet(props: EntryDetailsProps) {
 function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, renderMessageScreen, handedness = "right", children, closeRequested = false }: EntryDetailsProps & { entry: GoEntry }) {
   const insets = useSafeAreaInsets(), window = useWindowDimensions(), { lang } = useLanguage();
   const [closing, setClosing] = useState(false);
+  const [messagePressed,setMessagePressed]=useState(false);
   const [navigationGeometry, setNavigationGeometry] = useState({ y: 0, height: 0, summaryEnd: 0, actionsTop: 0, offset: 0 });
   const gapStart = Math.max(navigationGeometry.y, navigationGeometry.y + navigationGeometry.summaryEnd - navigationGeometry.offset + 12);
   const gapEnd = Math.min(navigationGeometry.y + navigationGeometry.height, navigationGeometry.y + navigationGeometry.actionsTop - navigationGeometry.offset - 12);
@@ -191,9 +199,9 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
   const navigationAvailableWidth = Math.max(0, window.width - Math.max(insets.left, insets.right, 8) * 2);
   const messageButtonWidth = hasMessage ? Math.max(52, Math.min(132, navigationAvailableWidth - closeButtonCount * ENTRY_DETAIL_CLOSE.touchSize - navigationGapWidth)) : 0;
   const navigationWidth = closeButtonCount * ENTRY_DETAIL_CLOSE.touchSize + navigationGapWidth + messageButtonWidth;
-  const messageButton = hasMessage && <TouchableOpacity testID="entry-message-go" accessibilityRole="button" accessibilityLabel="MENSAJE GO" activeOpacity={0.72} onPress={() => { if (phase.current !== "open") return; if (renderMessageScreen) { onMessage?.(); return; } messageAfterDismiss.current = true; dismiss(); }}
-    style={{width:messageButtonWidth,minHeight:44,paddingHorizontal:8,paddingVertical:8,borderWidth:1.5,borderRadius:10,borderColor:"#93c5fd",backgroundColor:"rgba(147,197,253,0.14)",shadowColor:"#93c5fd",shadowOffset:{width:0,height:2},shadowOpacity:0.2,shadowRadius:4,elevation:2,alignItems:"center",justifyContent:"center"}}>
-    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} style={{color:"#93c5fd",fontWeight:"800",fontSize:12}}>MENSAJE GO</Text>
+  const messageButton = hasMessage && <TouchableOpacity testID="entry-message-go" accessibilityRole="button" accessibilityLabel="MENSAJE GO" activeOpacity={0.82} onPressIn={()=>setMessagePressed(true)} onPressOut={()=>setMessagePressed(false)} onPress={() => { if (phase.current !== "open") return; if (renderMessageScreen) { onMessage?.(); return; } messageAfterDismiss.current = true; dismiss(); }}
+    style={{width:messageButtonWidth,height:ENTRY_DETAIL_CLOSE.touchSize,paddingHorizontal:7,paddingVertical:4,borderWidth:1.5,borderRadius:20,borderColor:"#94AFC9",backgroundColor:"#20262D",shadowColor:"#000000",shadowOffset:{width:0,height:2},shadowOpacity:messagePressed?0.06:0.2,shadowRadius:3,elevation:messagePressed?0:2,transform:[{translateY:messagePressed?1:0}],opacity:messagePressed?0.88:1,alignItems:"center",justifyContent:"center"}}>
+    <Text numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={2} style={{color:"#B9D1E8",fontWeight:"800",fontSize:12,textAlign:"center"}}>MENSAJE GO</Text>
   </TouchableOpacity>;
   const panelClose = <GoCloseButton level="panel" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Close details" : "Cerrar detalle"} onPress={dismiss} />;
   const landingClose = onGoToLanding && <GoCloseButton level="container" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Go directly to Landing" : "Ir directamente al Landing"} onPress={onGoToLanding} />;
@@ -206,8 +214,8 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
           <View testID="entry-details-information" onLayout={event => { const { y, height } = event.nativeEvent.layout; setNavigationGeometry(value => ({ ...value, summaryEnd: y + height })); }} style={{ gap: 8 }}>
           <GoEntrySummary entry={current} />
           <GoEntryContract entry={current} />
-          {pending && <View testID="entry-proposal" style={{ borderColor: "rgba(255,140,0,0.42)", borderWidth: 1, borderRadius: 12, padding: 10, gap: 6, backgroundColor:"rgba(12,10,8,0.72)" }}>
-            <Text style={{ color: "#FF8C00", fontWeight: "800" }}>{entry.estado === "propuesto" ? (lang === "en" ? "CHANGE RECEIVED" : "CAMBIO RECIBIDO") : (lang === "en" ? "AWAITING RESPONSE" : "ESPERANDO RESPUESTA")}</Text>
+          {pending && <View testID="entry-proposal" style={{ borderColor: "rgba(209,161,102,0.42)", borderWidth: 1, borderRadius: 12, padding: 10, gap: 6, backgroundColor:"#171512" }}>
+            <Text style={{ color: "#D1A166", fontWeight: "800" }}>{entry.estado === "propuesto" ? (lang === "en" ? "CHANGE RECEIVED" : "CAMBIO RECIBIDO") : (lang === "en" ? "AWAITING RESPONSE" : "ESPERANDO RESPUESTA")}</Text>
             <Text testID="entry-proposed-date-time" style={s.text}>{lang === "en" ? "Proposed: " : "Propuesto: "}{[entryIsReservation(entry) ? formatBookingLocalDate(entry.changeProposal!.dateISO, entry.changeProposal!.date, lang, entry.bookingTimeline?.timezone) : entry.changeProposal!.date || entry.changeProposal!.dateISO, entry.changeProposal!.time].filter(Boolean).join(" · ")}</Text>
             {!!entry.changeProposal!.note && <Text style={s.secondary}>{entry.changeProposal!.note}</Text>}
           </View>}
@@ -219,9 +227,9 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
         </ScrollView>
         <GoScreenCloseGuide testID="entry-detail-swipe-guide" />
         </View>
-        {/* Preserve the 74-point navigation footer; overlays never participate in layout. */}
-        <View testID="entry-detail-close-footer" pointerEvents="none" style={{ flexShrink: 0, height: 74, flexDirection: "row", justifyContent: handedness === "left" ? "flex-start" : "flex-end", paddingHorizontal: 6, paddingTop: 4, paddingBottom: 6 }} />
-        <GoNavigationFloating testID="entry-detail-floating-navigation" screenKey="entry-details" buttonKey={hasMessage ? "navigation-with-message" : "navigation"} width={navigationWidth} safeArea={false} handedness={handedness} initialTop={hasMessage ? undefined : navigationTop}>
+        {/* The 64-point controls sit inside this reserved footer, 11 points above its border. */}
+        <View testID="entry-detail-close-footer" pointerEvents="none" style={{ flexShrink: 0, height: 76, flexDirection: "row", justifyContent: handedness === "left" ? "flex-start" : "flex-end", paddingHorizontal: 6, paddingTop: 1, paddingBottom: 11 }} />
+        <GoNavigationFloating testID="entry-detail-floating-navigation" screenKey="entry-details" buttonKey={hasMessage ? "navigation-with-message-inset" : "navigation-inset"} width={navigationWidth} safeArea={false} handedness={handedness} initialBottom={11} boundsVerticalInset={11} initialTop={hasMessage ? undefined : navigationTop}>
           {handedness === "left" ? <>{panelClose}{messageButton}{landingClose}</> : <>{messageButton}{panelClose}{landingClose}</>}
         </GoNavigationFloating>
       </GoScreenCloseSurface>
@@ -239,6 +247,6 @@ const s = StyleSheet.create({
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   action: { flexGrow: 1, flexBasis: 90, minHeight: 44, padding: 10, borderWidth: 1.5, borderRadius: 10, alignItems: "center", justifyContent: "center", shadowOffset:{width:0,height:2}, shadowOpacity:0.18, shadowRadius:4, elevation:2 },
   compactAction: { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 36, paddingVertical: 7, paddingHorizontal: 4, borderRadius: 8 },
-  contact: { flex: 1, minHeight: 44, padding: 10, borderWidth: 1.4, borderColor: "#4ade80", backgroundColor:"rgba(74,222,128,0.12)", borderRadius: 10, alignItems: "center", justifyContent: "center", shadowColor:"#4ade80", shadowOffset:{width:0,height:2}, shadowOpacity:0.18, shadowRadius:4, elevation:2 },
-  contactText: { color: "#4ade80", fontWeight: "700" },
+  contact: { flex: 1, minHeight: 44, padding: 10, borderWidth: 1.5, borderColor: "#83B899", backgroundColor:"#202827", borderRadius: 10, alignItems: "center", justifyContent: "center", shadowColor:"#000000", shadowOffset:{width:0,height:2}, shadowOpacity:0.2, shadowRadius:3, elevation:2 },
+  contactText: { color: "#A8D6BA", fontWeight: "700" },
 });

@@ -22,9 +22,9 @@ for(const platform of ['ios','android'])test(platform+': Ficha → Mensajes → 
  }finally{await f.dispose();}
 });
 for(const height of [568,667,844,932])test('floating detail controls preserve original panel bounds at '+height+' logical points',async()=>{
- const f=await detailFixture();try{await f.render({onGoToLanding(){}});const footer=f.props.get('entry-detail-close-footer'),bodyHeight=height-47-34-74-44;
+ const f=await detailFixture();try{await f.render({onGoToLanding(){}});const footer=f.props.get('entry-detail-close-footer'),bodyHeight=height-47-34-76-44;
  await f.settle(()=>{f.props.get('entry-details-scroll').onLayout({nativeEvent:{layout:{y:44,height:bodyHeight}}});f.props.get('entry-details-information').onLayout({nativeEvent:{layout:{y:0,height:100}}});f.props.get('entry-details-actions').onLayout({nativeEvent:{layout:{y:bodyHeight-80,height:80}}});});
- const floated=f.props.get('entry-detail-floating-navigation');assert.equal(footer.style.height,74);assert.equal(footer.style.paddingBottom,6);assert.equal(floated.screenKey,'entry-details');assert.ok(floated.initialTop>=156);assert.ok(floated.initialTop+64<=44+bodyHeight-80-12);assert.equal(Object.assign({},...f.props.get('Cerrar detalle').style.filter(Boolean)).width,64);assert.equal(f.props.get('entry-details-overlay').style.paddingBottom,42);
+ const floated=f.props.get('entry-detail-floating-navigation');assert.equal(footer.style.height,76);assert.equal(footer.style.paddingBottom,11);assert.equal(floated.screenKey,'entry-details');assert.ok(floated.initialTop>=156);assert.ok(floated.initialTop+64<=44+bodyHeight-80-12);assert.equal(Object.assign({},...f.props.get('Cerrar detalle').style.filter(Boolean)).width,64);assert.equal(f.props.get('entry-details-overlay').style.paddingBottom,42);
  }finally{await f.dispose();}
 });
 
