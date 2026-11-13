@@ -22636,8 +22636,8 @@ function HomeScreenContent() {
                           : t('status_pending_label');
                 const isProposalEstado =
                   g.estado === "propuesto" || g.estado === "propuesta_pendiente";
-                const hideRedundantTaskPending = canResolveEntry(g) &&
-                  (g.type === "TAREA" || g.type === "TAREA_INTERNA") && g.estado === "pendiente";
+                const hideRedundantFollowUpPending = canResolveEntry(g) &&
+                  !entryIsReservation(g) && !isProposalEstado && g.estado === "pendiente";
                 const compactProposal = !isPapelaraView && isProposalEstado && !!(g as any).changeProposal;
                 const premiumReservation=entryIsReservation(g)&&!compactProposal;
                 const category=(g.bookingCategory||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
@@ -23008,7 +23008,7 @@ function HomeScreenContent() {
                           {g.estado === "rechazado" && <Feather name="x" size={lv(14)} color="#ffffff" />}
                         </TouchableOpacity>
                       )}
-                      {!hideRedundantTaskPending &&
+                      {!hideRedundantFollowUpPending &&
                         <View testID={(bookingStatusPill&&!isProposalEstado?"list-reservation-status-row-":"list-entry-header-status-")+g.id} style={{maxWidth:"55%",flexShrink:1,alignItems:"flex-end",marginLeft:"auto"}}>
                           {bookingStatusPill && !isProposalEstado ? bookingStatusPill : statusPill}
                         </View>}

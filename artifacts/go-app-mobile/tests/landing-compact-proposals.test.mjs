@@ -141,6 +141,15 @@ test('shared Listados footer keeps equal accessible buttons with one, two or thr
     assert.equal(calls.at(-1),(handedness==='right'?actions[0]:actions.at(-1)).key);
   }
 });
+test('personal follow-up omits only its duplicate pending header, never a booking contract state', () => {
+  const followUpAccess={canResolveEntry:()=>true,renderEntryMicroActions:()=>null};
+  const followUp=freeze(sample({estado:'pendiente',changeProposal:undefined}));
+  const ordinary=cardOf(fixture('es',{...followUpAccess,goLog:[followUp]}).render());
+  assert.equal(byId(ordinary,'list-entry-header-status-compact'),undefined);
+  const booking=freeze(sample({estado:'pendiente',changeProposal:undefined,type:'GO_BOOKING',reservationId:'real-booking',bookingStatus:'confirmada'}));
+  const contractual=cardOf(fixture('es',{...followUpAccess,goLog:[booking]}).render());
+  assert.equal(texts(byId(contractual,'list-reservation-status-compact')),'CONFIRMADA');
+});
 function dispatchNestedPress(button, parent) {
   let stopped = false;
   button.props.onPress({ stopPropagation() { stopped = true; } });
