@@ -12,17 +12,15 @@ import { GoCloseButton } from "./ui/GoCloseButton";
 import { landingCurrentEntry } from "./landing/landingPanels";
 import { GoScreenCloseSurface, GoScreenCloseGuide } from "@/components/ui/GoScreenCloseSurface";
 
-const pressedSurface = {transform:[{translateY:1}],elevation:0,shadowOpacity:0.06,opacity:0.88};
-
 export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
   const { lang } = useLanguage();
   const [pressed,setPressed]=useState<string|null>(null);
   const links = entryCommunication(entry);
   if (!links.call && !links.whatsapp) return null;
   const open = (url: string) => { void Linking.openURL(url).catch(() => Alert.alert("GO", lang === "en" ? "Could not open this contact." : "No se pudo abrir este contacto.")); };
-  return <View testID="entry-communication" style={s.actions}>
-    {links.whatsapp && <TouchableOpacity accessibilityRole="button" accessibilityLabel="WhatsApp" activeOpacity={0.82} onPressIn={()=>setPressed("whatsapp")} onPressOut={()=>setPressed(null)} onPress={() => open(links.whatsapp!)} style={[s.contact,pressed==="whatsapp"&&pressedSurface]}><Text style={s.contactText}>WhatsApp</Text></TouchableOpacity>}
-    {links.call && <TouchableOpacity accessibilityRole="button" accessibilityLabel={lang === "en" ? "Call" : "Llamar"} activeOpacity={0.82} onPressIn={()=>setPressed("call")} onPressOut={()=>setPressed(null)} onPress={() => open(links.call!)} style={[s.contact,pressed==="call"&&pressedSurface]}><Text style={s.contactText}>{lang === "en" ? "Call" : "Llamar"}</Text></TouchableOpacity>}
+  return <View testID="entry-communication" style={s.contactRow}>
+    {links.whatsapp && <TouchableOpacity accessibilityRole="button" accessibilityLabel="WhatsApp" activeOpacity={0.82} onPressIn={()=>setPressed("whatsapp")} onPressOut={()=>setPressed(null)} onPress={() => open(links.whatsapp!)} style={[s.contact,goActionVisual("positive",false,false,pressed==="whatsapp")]}><Text numberOfLines={1} adjustsFontSizeToFit style={s.contactText}>WhatsApp</Text></TouchableOpacity>}
+    {links.call && <TouchableOpacity accessibilityRole="button" accessibilityLabel={lang === "en" ? "Call" : "Llamar"} activeOpacity={0.82} onPressIn={()=>setPressed("call")} onPressOut={()=>setPressed(null)} onPress={() => open(links.call!)} style={[s.contact,goActionVisual("positive",false,false,pressed==="call")]}><Text numberOfLines={1} adjustsFontSizeToFit style={s.contactText}>{lang === "en" ? "Call" : "Llamar"}</Text></TouchableOpacity>}
   </View>;
 }
 
@@ -34,7 +32,7 @@ export type GoEntryActionCallbacks = {
 export type GoListAction = {
   key: string;
   label: string;
-  tone: "negative" | "intermediate" | "positive";
+  tone: "negative" | "pending" | "intermediate" | "positive";
   onPress: () => void;
   selected?: boolean;
   selectable?: boolean;
@@ -46,9 +44,11 @@ export type GoListAction = {
 /** Shared visual language for Listados and opened entry actions. */
 const GO_ACTION_PALETTE = {
   negative:{base:"#D92D32",muted:"#D92D32"},
+  pending:{base:"#D9AD00",muted:"#BFA000"},
   intermediate:{base:"#C25300",muted:"#B75000"},
   positive:{base:"#008754",muted:"#087D53"},
 };
+function goActionTextColor(tone:GoListAction["tone"]){return tone==="pending"?"#181818":"#FFFFFF";}
 function goActionVisual(tone:GoListAction["tone"],selected=false,inactive=false,pressed=false){
   const color=GO_ACTION_PALETTE[tone];
   return {borderRadius:8,borderWidth:1,borderColor:selected?"rgba(255,255,255,0.38)":"rgba(255,255,255,0.22)",
@@ -71,7 +71,7 @@ export function GoListActionRow({actions,handedness="right",scale=1,testID="list
         style={{flex:1,flexBasis:0,flexShrink:1,minWidth:0,minHeight:Math.max(44,Math.round(44*scale)),paddingHorizontal:4,paddingVertical:8,
           ...goActionVisual(action.tone,!!action.selected,!!inactive),alignItems:"center",justifyContent:"center"}}>
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} maxFontSizeMultiplier={1.8}
-          style={{color:"#FFFFFF",fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",alignSelf:"stretch",width:"100%",minWidth:0}}>{action.label}</Text>
+          style={{color:goActionTextColor(action.tone),fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",alignSelf:"stretch",width:"100%",minWidth:0}}>{action.label}</Text>
       </TouchableOpacity>;
     })}
   </View>;
@@ -85,9 +85,9 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
   const label=(es:string,en:string)=>lang==="en"?en:es;
   const selected=(key:string)=>key==="pending"?entry.localResolutionStatus!=="done":entry.localResolutionStatus==="done";
   const actions=[
-    {key:"done",text:label("REALIZADA","DONE"),tone:"positive" as const,run:onDone},
-    {key:"pending",text:label("PENDIENTE","PENDING"),tone:"intermediate" as const,run:onPending},
     {key:"discard",text:label("ELIMINAR","DELETE"),tone:"negative" as const,run:onDiscard},
+    {key:"pending",text:label("PENDIENTE","PENDING"),tone:"pending" as const,run:onPending},
+    {key:"done",text:label("REALIZADA","DONE"),tone:"positive" as const,run:onDone},
   ].filter(action=>action.run);
   if(!actions.length)return null;
   if(list){
@@ -95,14 +95,14 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
     if(onDiscard)listActions.push({key:"discard",label:label("ELIMINAR","DELETE"),tone:"negative",onPress:onDiscard,disabled,
       accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("ELIMINAR","DELETE"):label("ELIMINAR","DELETE"),
       accessibilityHint:label("Oculta solo tu ficha. No cancela el compromiso.","Hides only your card. Does not cancel the commitment.")});
-    if(onPending)listActions.push({key:"pending",label:label("PENDIENTE","PENDING"),tone:"intermediate",onPress:onPending,disabled,selectable:!!onDone,selected:selected("pending"),
+    if(onPending)listActions.push({key:"pending",label:label("PENDIENTE","PENDING"),tone:"pending",onPress:onPending,disabled,selectable:!!onDone,selected:selected("pending"),
       accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("PENDIENTE","PENDING"):label("PENDIENTE","PENDING")});
     if(onDone)listActions.push({key:"done",label:label("REALIZADA","DONE"),tone:"positive",onPress:onDone,disabled,selectable:!!onPending,selected:selected("done"),
       accessibilityLabel:personal?label("Mi seguimiento: ","My follow-up: ")+label("REALIZADA","DONE"):label("REALIZADA","DONE")});
     return <GoListActionRow testID="entry-micro-actions" handedness={handedness} scale={listScale} actions={listActions}/>;
   }
   return <View testID="entry-micro-actions" pointerEvents="box-none" style={{flexDirection:"row",flexShrink:0,gap:4,padding:0}}>
-    {actions.map(action=><TouchableOpacity key={action.key} accessibilityRole="button"
+    {(handedness==="left"?[...actions].reverse():actions).map(action=><TouchableOpacity key={action.key} accessibilityRole="button"
       accessibilityLabel={personal?label("Mi seguimiento: ","My follow-up: ")+action.text:action.text}
       accessibilityHint={action.key==="discard"?label("Oculta solo tu ficha. No cancela el compromiso.","Hides only your card. Does not cancel the commitment."):undefined}
       disabled={disabled} accessibilityState={{disabled,selected:action.key==="discard"?false:selected(action.key)}}
@@ -113,7 +113,7 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
         action.key!=="discard"&&!!onDone&&!!onPending&&!selected(action.key),pressed===action.key),
         opacity:disabled?0.48:pressed===action.key?0.88:1,alignItems:"center",justifyContent:"center"}}>
       <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2}
-        style={{color:"#FFFFFF",fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.text}</Text>
+        style={{color:goActionTextColor(action.tone),fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.text}</Text>
     </TouchableOpacity>)}
   </View>;
 }
@@ -304,6 +304,7 @@ const s = StyleSheet.create({
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   action: { flexGrow: 1, flexBasis: 90, minHeight: 44, padding: 10, borderWidth: 1.5, borderRadius: 10, alignItems: "center", justifyContent: "center", shadowOffset:{width:0,height:2}, shadowOpacity:0.18, shadowRadius:4, elevation:2 },
   compactAction: { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 36, paddingVertical: 7, paddingHorizontal: 4, borderRadius: 8 },
-  contact: { flex: 1, minHeight: 44, padding: 10, borderWidth: 1.5, borderColor: "#4ade80", backgroundColor:"rgba(74,222,128,0.12)", borderRadius: 10, alignItems: "center", justifyContent: "center", shadowColor:"#4ade80", shadowOffset:{width:0,height:2}, shadowOpacity:0.2, shadowRadius:3, elevation:2 },
-  contactText: { color: "#4ade80", fontWeight: "700" },
+  contactRow: { flexDirection: "row", gap: 8 },
+  contact: { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 44, padding: 10, alignItems: "center", justifyContent: "center" },
+  contactText: { color: "#FFFFFF", fontWeight: "800" },
 });

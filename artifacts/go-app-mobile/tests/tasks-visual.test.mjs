@@ -29,7 +29,8 @@ const detailsAst = ts.createSourceFile('details.tsx', detailsSource, ts.ScriptTa
 const sharedActionRow = find(detailsAst, node => ts.isFunctionDeclaration(node) && node.name?.text === 'GoListActionRow');
 const actionPalette = find(detailsAst, node => ts.isVariableDeclaration(node) && node.name?.getText(detailsAst) === 'GO_ACTION_PALETTE');
 const actionVisual = find(detailsAst, node => ts.isFunctionDeclaration(node) && node.name?.text === 'goActionVisual');
-const sharedActionRowCode = compile('const '+actionPalette.getText(detailsAst)+';'+actionVisual.getText(detailsAst)+sharedActionRow.getText(detailsAst) + '\nglobalThis.GoListActionRow = GoListActionRow;globalThis.goActionVisual=goActionVisual;');
+const actionTextColor = find(detailsAst, node => ts.isFunctionDeclaration(node) && node.name?.text === 'goActionTextColor');
+const sharedActionRowCode = compile('const '+actionPalette.getText(detailsAst)+';'+actionVisual.getText(detailsAst)+actionTextColor.getText(detailsAst)+sharedActionRow.getText(detailsAst) + '\nglobalThis.GoListActionRow = GoListActionRow;globalThis.goActionVisual=goActionVisual;globalThis.goActionTextColor=goActionTextColor;');
 assert.ok(compactFormatter, 'use the actual compact slot formatter');
 const listFunctions = ['isPendingListEntry', 'clearClassicListFilters'].map(name =>
   find(home, node => ts.isFunctionDeclaration(node) && node.name?.text === name));
@@ -369,7 +370,7 @@ test('three real Listados task cards place the complete actions below their head
         assert.ok(style.minHeight >= 44);
         assert.equal(style.flex, 1);
         assert.match(style.backgroundColor, /^#[0-9A-F]{6}$/);
-        assert.equal(flatten(label.props.style).color, '#FFFFFF');
+        assert.equal(flatten(label.props.style).color, texts(button)==='PENDIENTE'?'#181818':'#FFFFFF');
         button.props.onPress({ stopPropagation() {} });
       });
       assert.deepEqual(f.calls.slice(-3), (handedness === 'right' ? ['discard', 'pending', 'done'] : ['done', 'pending', 'discard']).map(status => [mounted.props.entry.id, status]));

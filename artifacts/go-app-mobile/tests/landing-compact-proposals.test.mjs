@@ -25,6 +25,7 @@ const details = ts.createSourceFile('details.tsx', fs.readFileSync('components/G
 const actionRow = find(details, node => ts.isFunctionDeclaration(node) && node.name?.text === 'GoListActionRow');
 const actionPalette = find(details, node => ts.isVariableDeclaration(node) && node.name?.getText(details) === 'GO_ACTION_PALETTE');
 const actionVisual = find(details, node => ts.isFunctionDeclaration(node) && node.name?.text === 'goActionVisual');
+const actionTextColor = find(details, node => ts.isFunctionDeclaration(node) && node.name?.text === 'goActionTextColor');
 function compile(text) {
   return ts.transpileModule(text, { compilerOptions: { esModuleInterop: false, alwaysStrict: false,
     target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React,
@@ -118,7 +119,7 @@ function fixture(lang = 'es', overrides = {}) {
     context[name] = (...args) => calls.push([name, ...args]);
   }
   context.cycleGoSlot = (id, direction) => { calls.push(['cycleGoSlot', id, direction]); return direction === 'advance' ? 'aceptado' : 'pendiente'; };
-  vm.runInNewContext(compile('const '+actionPalette.getText(details)+';'+actionVisual.getText(details)+actionRow.getText(details) + '\nglobalThis.GoListActionRow = GoListActionRow;'), context);
+  vm.runInNewContext(compile('const '+actionPalette.getText(details)+';'+actionVisual.getText(details)+(actionTextColor?.getText(details) ?? '')+actionRow.getText(details) + '\nglobalThis.GoListActionRow = GoListActionRow;'), context);
   return { context, calls, render() { vm.runInNewContext(code, context); return context.tree; } };
 }
 const cardOf = tree => nodes(tree, node => node.type === 'SwipeableRow')[0]?.props.children[0];
@@ -322,8 +323,16 @@ for (const [bookingStatus, labelKey, color] of [
     const contact = byId(card, 'go-proposal-contact-compact');
     assert.equal(nodes(card, node => node.props?.testID === 'go-proposal-contact-compact').length, 1);
     assert.equal(texts(card).split('ProAna').length - 1, 1, 'the original professional remains visible');
-    const info=card.props.children.filter(Boolean)[1];
-    assert.equal(nodes(info,node=>node.type==='Feather'&&['user','users'].includes(node.props.name)).length,0);
+    const comparison=byId(card,'go-proposal-dates-compact');
+    assert.equal(byId(card.props.children.filter(Boolean)[1],'go-proposal-dates-compact'),comparison,'the professional has no isolated row');
+    const current=byId(comparison,'go-proposal-current-compact');
+    const details=byId(current,'go-proposal-current-details-compact');
+    const professional=byId(details,'go-proposal-professional-compact');
+    assert.equal(texts(professional),'ProAna');
+    assert.equal(details.props.style.flexDirection,'row');
+    assert.equal(details.props.style.flexWrap,'wrap');
+    assert.equal(nodes(details,node=>node.type==='Text')[0].props.accessibilityLabel,'Jueves, 15 octubre 2026 · 17:00');
+    assert.equal(nodes(comparison,node=>node.type==='Feather'&&['user','users'].includes(node.props.name)).length,0);
     const statusLabel = translations[lang][labelKey].toUpperCase();
     const status = nodes(card, node => node.type === 'Text' && texts(node) === statusLabel);
     assert.equal(status.length, 1, 'retain the existing localized booking-state pill and default');
@@ -336,6 +345,7 @@ for (const [bookingStatus, labelKey, color] of [
     const proposalStates=byId(card,'list-entry-header-status-compact');
     assert.equal(proposalStates.props.style.marginLeft,0,'sent proposal stays flush left');
     assert.equal(proposalStates.props.style.width,'100%');
+    assert.equal(proposalStates.props.style.justifyContent,'space-between','proposal stays left and original booking state stays right');
     assert.equal(texts(card).includes(translations[lang].biz_booking_intent_label.toUpperCase() + " · "), false, 'booking status has no redundant type prefix');
     for (const time of [entry.time, entry.changeProposal.time]) assert.equal(texts(card).split(time).length - 1, 1);
     dispatchNestedPress(contact, card);
@@ -344,6 +354,36 @@ for (const [bookingStatus, labelKey, color] of [
     ]);
     assert.ok(!f.calls.some(call => ['setCalBookingDetailEntry', 'setExpandedId', 'updateGoStatus', 'store'].includes(call[0])));
     assert.equal(JSON.stringify(entry), before, 'reservation identity, status and payment stay untouched');
+  }
+});
+
+test('sent and received booking proposals keep the professional beside the original time at every card size', () => {
+  for (const type of ['GO_BOOKING', 'GO_RESERVA']) for (const estado of ['propuesta_pendiente', 'propuesto']) {
+    for (const bookingStatus of ['pendiente', 'confirmada']) for (const [size, scale] of [['compacto', .8], ['medio', 1], ['grande', 1.25]]) {
+      const entry = freeze(sample({ type, estado, bookingStatus, reservationId: 'booking-compact',
+        professionalName: 'Profesional de nombre completo' }));
+      const card = cardOf(fixture('es', { listGoSize: size, goLog: [entry] }).render());
+      const comparison = byId(card, 'go-proposal-dates-compact');
+      const current = byId(comparison, 'go-proposal-current-compact');
+      const details = byId(current, 'go-proposal-current-details-compact');
+      const professional = byId(details, 'go-proposal-professional-compact');
+      const header = byId(card, 'list-entry-header-status-compact');
+      const booking = byId(header, 'list-reservation-status-compact');
+      assert.equal(byId(card.props.children.filter(Boolean)[1], 'go-proposal-dates-compact'), comparison, 'no detached professional-only row');
+      assert.equal(card.props.style.paddingHorizontal, Math.round(14 * scale), 'card width stays unchanged');
+      assert.equal(texts(professional), entry.professionalName);
+      assert.equal(professional.props.numberOfLines, undefined, 'long names remain readable');
+      assert.equal(details.props.style.flexWrap, 'wrap');
+      assert.equal(texts(nodes(details, node => node.type === 'Text')[0]), '15/10/26 · 17:00');
+      assert.equal(texts(byId(comparison, 'go-proposal-next-compact')).includes('16/10/26 · 12:45'), true);
+      assert.equal(texts(card).split('17:00').length - 1, 1);
+      assert.equal(texts(card).split('12:45').length - 1, 1);
+      assert.equal(texts(header).includes(estado === 'propuesto' ? 'CAMBIO RECIBIDO' : 'ESPERANDO RESPUESTA'), true);
+      assert.equal(texts(booking), bookingStatus === 'pendiente' ? 'PENDIENTE DE ACEPTACIÓN' : 'CONFIRMADA');
+      assert.equal(header.props.style.flexWrap, 'wrap');
+      assert.equal(header.props.style.justifyContent, 'space-between');
+      assert.equal(byId(header, 'list-reservation-status-row-compact').props.style.marginLeft, 'auto');
+    }
   }
 });
 

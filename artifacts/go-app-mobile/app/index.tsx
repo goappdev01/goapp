@@ -22815,7 +22815,8 @@ function HomeScreenContent() {
                     <Text style={{color:"#ffffff",fontSize:lv(8),fontFamily:"Inter_700Bold",fontWeight:"800",letterSpacing:0.4}}>{label}</Text>
                   </View>;
                 })() : null;
-                const hasListInfo = !!((!compactProposal && (g.date || g.time || g.recipients?.length || (!entryIsReservation(g) && (g.contactName || g.phone))))
+                const hasListInfo = !compactProposal && !!(g.date || g.time || g.recipients?.length
+                  || (!entryIsReservation(g) && (g.contactName || g.phone))
                   || ((g as any).type === "GO_BOOKING" && (g as any).professionalName));
                 return (
                   <React.Fragment key={g.id}>
@@ -23045,7 +23046,7 @@ function HomeScreenContent() {
                     </View>
 
                     {/* ── FILA 2: INFO + ESTADO + BADGE ── */}
-                    {hasListInfo && (!compactProposal || (g as any).type === "GO_BOOKING") && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8),...(entryIsReservation(g)?{flexWrap:"wrap"}: {}) }}>
+                    {hasListInfo && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8),...(entryIsReservation(g)?{flexWrap:"wrap"}: {}) }}>
                       {/* INFO — fecha/hora + destinatarios */}
                       <TouchableOpacity
                         activeOpacity={0.75}
@@ -23129,12 +23130,19 @@ function HomeScreenContent() {
                           <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: Math.max(10,lv(10)), fontWeight: "700", letterSpacing: 0.4 }}>
                             {t('tasks_current_booking').toUpperCase()}
                           </Text>
-                          <Text
-                            accessibilityLabel={[localizeLabel(g.date || ""), g.time].filter(Boolean).join(" · ")}
-                            style={{ color: "#ffffff", fontSize: Math.max(13,lv(13)), fontWeight: "700" }}
-                          >
-                            {formatCompactProposalSlot(localizeLabel(g.date || ""), g.dateISO, g.time)}
-                          </Text>
+                          <View testID={"go-proposal-current-details-" + g.id} style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: lv(8) }}>
+                            <Text
+                              accessibilityLabel={[localizeLabel(g.date || ""), g.time].filter(Boolean).join(" · ")}
+                              style={{ color: "#ffffff", fontSize: Math.max(13,lv(13)), fontWeight: "700" }}
+                            >
+                              {formatCompactProposalSlot(localizeLabel(g.date || ""), g.dateISO, g.time)}
+                            </Text>
+                            {entryIsReservation(g) && !!(g as any).professionalName && (
+                              <Text testID={"go-proposal-professional-" + g.id} style={{ color: "#a5b4fc", fontSize: Math.max(12,lv(11)), fontWeight: "600", flexShrink: 1 }}>
+                                {(g as any).professionalName}
+                              </Text>
+                            )}
+                          </View>
                         </View>
                         {/* Separador */}
                         <View style={{ height: 1, backgroundColor: "rgba(255,140,0,0.25)" }} />

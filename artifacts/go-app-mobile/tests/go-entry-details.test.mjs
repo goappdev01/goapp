@@ -115,7 +115,11 @@ test('the same receipt projects client vs business identity and never calls the 
 test('WhatsApp and Call open the authorized numbers only on press, never transmit a message automatically',async()=>{
  const f=fixture(),c=f.load('components/GoEntryDetails.tsx'),tree=f.render(c.GoEntryCommunication,{entry:base});
  assert.equal(f.urls.length,0);
- for(const label of ['WhatsApp','Llamar']){const button=nodes(tree,n=>n.type==='TouchableOpacity'&&n.props.accessibilityLabel===label)[0];assert.ok(button);assert.equal(button.props.style[0].shadowColor,'#4ade80');assert.equal(button.props.style[0].backgroundColor,'rgba(74,222,128,0.12)');assert.ok(button.props.onPressIn&&button.props.onPressOut);await button.props.onPress();}
+  const contacts=['WhatsApp','Llamar'].map(label=>nodes(tree,n=>n.type==='TouchableOpacity'&&n.props.accessibilityLabel===label)[0]);
+  assert.ok(contacts.every(Boolean));
+  assert.equal(tree.props.style.flexDirection,'row');
+  for(const button of contacts){assert.equal(button.props.style[0].flex,1);assert.equal(button.props.style[0].flexBasis,0);assert.equal(button.props.style[0].minHeight,44);assert.equal(button.props.style[1].backgroundColor,'#008754');assert.equal(button.props.style[1].shadowColor,'#000000');assert.equal(nodes(button,n=>n.type==='Text')[0].props.style.color,'#FFFFFF');assert.ok(button.props.onPressIn&&button.props.onPressOut);await button.props.onPress();}
+  assert.deepEqual(contacts[0].props.style,contacts[1].props.style,'contact actions share width, border, surface and relief');
  assert.deepEqual(f.urls,['https://wa.me/34611123456','tel:+34600123456']);
  assert.equal(f.render(c.GoEntryCommunication,{entry:{...base,phone:'bad',whatsapp:''}}),null);
 });
@@ -124,9 +128,9 @@ test('detail contact visibly depresses while held and returns to its neutral sha
  const f=fixture(),c=f.load('components/GoEntryDetails.tsx'),props={entry:base};
  let button=nodes(f.render(c.GoEntryCommunication,props),n=>n.props.accessibilityLabel==='WhatsApp')[0];
  button.props.onPressIn();button=nodes(f.render(c.GoEntryCommunication,props),n=>n.props.accessibilityLabel==='WhatsApp')[0];
- assert.equal(button.props.style[1].transform[0].translateY,1);assert.equal(button.props.style[1].elevation,0);
+  assert.equal(button.props.style[1].transform[0].translateY,1);assert.equal(button.props.style[1].elevation,0);
  button.props.onPressOut();button=nodes(f.render(c.GoEntryCommunication,props),n=>n.props.accessibilityLabel==='WhatsApp')[0];
- assert.ok(!button.props.style[1]);assert.equal(button.props.style[0].elevation,2);
+  assert.equal(button.props.style[1].transform[0].translateY,0);assert.equal(button.props.style[1].elevation,1);
 });
 test('accepted visits offer cancellation and proposal without another acceptance',()=>{
  let cancelled=0,proposed=0,accepted=0;const f=fixture(),c=f.load('components/GoEntryDetails.tsx');
@@ -148,8 +152,22 @@ test('opened and listed actions share solid semantic surfaces and white labels',
  assert.ok(nodes(open,n=>n.type==='TouchableOpacity').every(n=>nodes(n,x=>x.type==='Text')[0].props.style.color==='#FFFFFF'));
  const pending=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'pending'},onDone(){},onPending(){},onDiscard(){}});
  const done=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'done'},onDone(){},onPending(){},onDiscard(){}});
-  assert.equal(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0].props.style.backgroundColor,'#C25300');
+  assert.equal(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0].props.style.backgroundColor,'#D9AD00');
+   assert.equal(nodes(nodes(pending,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0],n=>n.type==='Text')[0].props.style.color,'#181818');
   assert.equal(nodes(done,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA')[0].props.style.backgroundColor,'#008754');
+});
+test('PENDIENTE uses readable yellow in selected and muted states while PROPONER remains orange',()=>{
+  const f=fixture(),c=f.load('components/GoEntryDetails.tsx');
+  const luminance=hex=>{const [r,g,b]=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return .2126*r+.7152*g+.0722*b;};
+  for(const selected of [true,false]){
+    const row=f.render(c.GoListActionRow,{actions:[{key:'pending',label:'PENDIENTE',tone:'pending',selectable:true,selected,onPress(){}}]});
+    const button=nodes(row,n=>n.type==='TouchableOpacity')[0],text=nodes(button,n=>n.type==='Text')[0];
+    assert.equal(button.props.style.backgroundColor,selected?'#D9AD00':'#BFA000');
+    assert.equal(text.props.style.color,'#181818');
+    assert.ok((luminance(button.props.style.backgroundColor)+.05)/(luminance(text.props.style.color)+.05)>=4.5);
+  }
+  const proposal=f.render(c.GoListActionRow,{actions:[{key:'propose',label:'PROPONER',tone:'intermediate',onPress(){}}]});
+  assert.equal(nodes(proposal,n=>n.type==='TouchableOpacity')[0].props.style.backgroundColor,'#C25300');
 });
 test('received proposals keep orange identity and the original date until the existing acceptance command',()=>{
  const entry={...base,estado:'propuesto',changeProposal:{dateISO:'2030-10-27',date:'27/10/2030',time:'13:30',originalDateISO:base.dateISO,originalTime:base.time}};
@@ -199,14 +217,18 @@ test('state colors and negative actions agree in compact and expanded cards with
  assert.equal(JSON.stringify(base),original);assert.equal(base.color,'#00e5ff');
 });
 
-test('three microactions stop propagation, honor supplied permissions and retain the reservation contract',()=>{
- const f=fixture(),{GoEntryMicroActions}=f.load('components/GoEntryDetails.tsx'),calls=[],saved=JSON.stringify(base);
- const tree=f.render(GoEntryMicroActions,{entry:base,onDone:()=>calls.push('done'),onPending:()=>calls.push('pending'),onDiscard:()=>calls.push('cancel')});
- const buttons=nodes(tree,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);let stopped=0;
- buttons.forEach(b=>{assert.equal(b.props.style.minHeight+b.props.hitSlop.top+b.props.hitSlop.bottom,44);assert.equal(b.props.hitSlop.left,0);assert.ok(nodes(b,n=>n.type==='Text').length);assert.equal(nodes(b,n=>n.type==='Feather').length,0);assert.equal(nodes(b,n=>n.type==='Text')[0].props.style.color,'#FFFFFF');b.props.onPress({stopPropagation(){stopped++;}});});
- assert.deepEqual(calls,['done','pending','cancel']);assert.equal(stopped,3);assert.equal(JSON.stringify(base),saved);
- assert.ok(buttons[0].props.accessibilityLabel.includes('Mi seguimiento'));assert.equal(f.render(GoEntryMicroActions,{entry:base}),null);
- const denied=f.render(GoEntryMicroActions,{entry:base,onDiscard(){}});assert.equal(nodes(denied,n=>n.type==='TouchableOpacity').length,1);
+test('three open microactions match Listados order in both hands without changing their commands',()=>{
+  const f=fixture(),{GoEntryMicroActions}=f.load('components/GoEntryDetails.tsx'),saved=JSON.stringify(base);
+  for(const handedness of ['right','left']){
+    const calls=[];
+    const tree=f.render(GoEntryMicroActions,{entry:base,handedness,onDone:()=>calls.push('done'),onPending:()=>calls.push('pending'),onDiscard:()=>calls.push('cancel')});
+    const buttons=nodes(tree,n=>n.type==='TouchableOpacity');assert.equal(buttons.length,3);let stopped=0;
+    assert.deepEqual(buttons.map(b=>b.props.accessibilityLabel.replace('Mi seguimiento: ','')),handedness==='right'?['ELIMINAR','PENDIENTE','REALIZADA']:['REALIZADA','PENDIENTE','ELIMINAR']);
+    buttons.forEach(b=>{assert.equal(b.props.style.minHeight+b.props.hitSlop.top+b.props.hitSlop.bottom,44);assert.equal(b.props.hitSlop.left,0);assert.ok(nodes(b,n=>n.type==='Text').length);assert.equal(nodes(b,n=>n.type==='Feather').length,0);assert.equal(nodes(b,n=>n.type==='Text')[0].props.style.color,b.props.accessibilityLabel.endsWith('PENDIENTE')?'#181818':'#FFFFFF');b.props.onPress({stopPropagation(){stopped++;}});});
+    assert.deepEqual(calls,handedness==='right'?['cancel','pending','done']:['done','pending','cancel']);assert.equal(stopped,3);
+  }
+  assert.equal(JSON.stringify(base),saved);assert.equal(f.render(GoEntryMicroActions,{entry:base}),null);
+  const denied=f.render(GoEntryMicroActions,{entry:base,onDiscard(){}});assert.equal(nodes(denied,n=>n.type==='TouchableOpacity').length,1);
 });
 
 test('personal ELIMINAR and booking CANCELAR remain distinct destructive actions',()=>{
