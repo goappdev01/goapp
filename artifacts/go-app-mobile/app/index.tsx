@@ -3473,6 +3473,7 @@ function HomeScreenContent() {
   const [allExpanded, setAllExpanded] = useState(false);
   // Tarjeta de detalle ampliada — se muestra encima del calendario al tocar una reserva GO_BOOKING
   const [calBookingDetailEntry, setCalBookingDetailEntry] = useState<typeof goLog[number] | null>(null);
+  const listBookingProposalAfterDismissRef = useRef<GoEntry | null>(null);
   // modo_visualizacion — escala global de toda la UI (GO + barra + tarjetas).
   //   • "compacto" → factor 0.70 — más contenido en pantalla.
   //   • "estandar" → factor 0.85 — tamaño equilibrado. DEFAULT.
@@ -13708,8 +13709,8 @@ function HomeScreenContent() {
     onDone={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"done"):undefined}
     onPending={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"pending"):undefined}
     onDiscard={canResolveEntry(entry)?()=>resolveEntry(entry,"discard"):undefined}/>;
-  const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false, editNote?:()=>void) => <GoEntryQuickActions entry={followedEntry(entry)} showState={showState} compact={compact}
-    onCancel={() => cancelEntryFromDetails(entry)} onEdit={editNote||(()=>openEntryChange(entry))} onPropose={() => openEntryChange(entry)}
+  const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false, editNote?:()=>void, propose?:()=>void) => <GoEntryQuickActions entry={followedEntry(entry)} showState={showState} compact={compact}
+    onCancel={() => cancelEntryFromDetails(entry)} onEdit={editNote||(()=>openEntryChange(entry))} onPropose={propose??(()=>openEntryChange(entry))}
     onAccept={() => { if (entry.changeProposal) acceptProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "aceptado"); }}
     onConfirm={entry.businessBooking && entry.ownerUserId ? () => {
       if(bookingContextRef.current.view!=="BUSINESS" || bookingContextRef.current.businessId!==entry.businessId)return;
@@ -13717,6 +13718,14 @@ function HomeScreenContent() {
         .catch(error=>Alert.alert("GO",error.message));
     } : undefined}
     onReject={() => { if (entry.changeProposal) rejectProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "rechazado"); }} />;
+
+  const finishListBookingProposal = () => {
+    const entry = listBookingProposalAfterDismissRef.current;
+    if (!entry) return;
+    listBookingProposalAfterDismissRef.current = null;
+    openEntryChange(entry);
+  };
+  useEffect(() => { if (!listOpen && Platform.OS !== "ios") finishListBookingProposal(); }, [listOpen]);
 
   const finishDirectLanding = () => {
     if (!directLandingRef.current) return;
@@ -21791,6 +21800,7 @@ function HomeScreenContent() {
       {/* LISTADO GLOBAL — vista de todos los GO */}
       <BottomSheet
         visible={listOpen}
+        onDismiss={finishListBookingProposal}
         expandToSafeTop
         floatingClose={{screenKey:"listados",handedness,label:t('tasks_close_list')}}
         modalOverlay={notesOpen || listBookingDetail ? <GoScreenHost registerBack={handler=>{listNoteLayerBackRef.current=handler;}}>
@@ -25682,9 +25692,12 @@ function HomeScreenContent() {
       onClose={() => setCalBookingDetailEntry(null)}
       renderMessageScreen={() => renderEntryMessageScreen(entry)}
       onMessage={() => openEntryMessage(entry, () => setCalBookingDetailEntry(entry), true)}>
-      {renderEntryMicroActions(entry)}
-      {renderEntryQuickActions(entry, !(entry.customerBooking || entry.businessBooking))}
-      {renderLinkedNotes(entry)}
+      {dismissThen => <>
+        {renderEntryMicroActions(entry)}
+        {renderEntryQuickActions(entry, !(entry.customerBooking || entry.businessBooking), false, undefined,
+          () => dismissThen(() => { listBookingProposalAfterDismissRef.current = entry; setListOpen(false); }))}
+        {renderLinkedNotes(entry)}
+      </>}
     </GoEntryDetailsSheet>;
   }
 

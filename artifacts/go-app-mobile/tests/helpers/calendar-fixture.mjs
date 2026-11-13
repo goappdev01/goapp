@@ -33,6 +33,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
     useRef(initial) { return react.useState(() => ({ current: initial }))[0]; },
     createContext:value=>({value}),useContext:ctx=>ctx.value,
     useMemo: fn => fn(),
+    useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
     useCallback: fn => fn,
     useEffect(fn, deps) {
       const index = cursor++;
@@ -49,6 +50,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
     StyleSheet: { create: value => value, absoluteFill: {} },
     Dimensions: { get: () => viewport },
     useWindowDimensions: () => viewport,
+    useColorScheme: () => 'dark',
     Platform: { OS: platform },
     AppState: { addEventListener: (_event, listener) => { appStateListeners.add(listener); return {remove: () => appStateListeners.delete(listener)}; } },
     Linking: { openURL: async url => { urls.push(url); } },
@@ -146,7 +148,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
           const id = node.props.entry.id; mountedSessions.add(id);
           const previousSlots = slots, previousCursor = cursor, previousEffects = effects;
           slots = sessionSlots.get(id) ?? []; sessionSlots.set(id, slots); cursor = 0; effects = [];
-          const child = node.type({ ...node.props, children: node.children });
+          const child = node.type({ ...node.props, children: node.children.length === 1 && typeof node.children[0] === 'function' ? node.children[0] : node.children });
           const childEffects = effects; effects = []; childEffects.forEach(fn => fn());
           const expanded = expand(child);
           slots = previousSlots; cursor = previousCursor; effects = previousEffects;

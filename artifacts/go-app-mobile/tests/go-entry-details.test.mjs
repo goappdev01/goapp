@@ -32,6 +32,34 @@ test('expanded sheet reserves one bottom close outside the scroll and keeps GO m
  const fresh=sheet(base,{onMessage:()=>message++});const msg=nodes(fresh.tree,n=>n.props.testID==='entry-message-go')[0];assert.equal(msg.props.accessibilityLabel,'MENSAJE GO');assert.equal(msg.props.style.alignSelf,'flex-end');msg.props.onPress();fresh.render(fresh.components.GoEntryDetailsSheet,{entry:base,onClose(){},onMessage:()=>message++});nodes(fresh.tree,n=>n.props.testID==='entry-details-modal')[0]?.props.onDismiss();assert.equal(message,1);
 });
 
+test('a proposal from the reservation detail waits for native dismissal before opening the shared flow',()=>{
+ for(const source of ['calendar','list']){
+  const f=fixture({platform:'ios'}),c=f.load('components/GoEntryDetails.tsx');let closed=0,proposed=0;
+  const props={entry:base,onClose:()=>closed++,children:dismissThen=>({type:c.GoEntryQuickActions,props:{entry:base,onPropose:()=>dismissThen(()=>proposed++)},children:[]})};
+  let tree=f.render(c.GoEntryDetailsSheet,props);
+  const propose=nodes(tree,n=>n.props.accessibilityLabel==='PROPONER CAMBIO')[0];assert.ok(propose,source);
+  propose.props.onPress({stopPropagation(){}});
+  tree=f.render(c.GoEntryDetailsSheet,props);
+  const modal=nodes(tree,n=>n.props.testID==='entry-details-modal')[0];assert.equal(modal.props.visible,false);
+  assert.equal(proposed,0,'the calendar cannot open underneath the native detail');
+  modal.props.onDismiss();assert.equal(closed,1);assert.equal(proposed,1);
+  modal.props.onDismiss();assert.equal(proposed,1,'a duplicate native callback cannot reopen the proposal');
+ }
+});
+
+test('calendar expanded reservation uses its existing proposal callback after detail dismissal',()=>{
+ const f=fixture({now:'2030-10-26T08:00:00',platform:'ios'}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');let proposed=[];
+ const props={goLog:[base],viewMode:'dia',selectedDateISO:base.dateISO,onProposeItem:id=>proposed.push(id)};
+ let tree=f.render(AgendaBoard,props);
+ nodes(tree,n=>n.props.testID?.startsWith('calendar-entry-open-'))[0].props.onAccessibilityTap();
+ tree=f.render(AgendaBoard,props);
+ const proposal=nodes(tree,n=>n.props.accessibilityLabel==='tasks_propose_change').at(-1);
+ assert.ok(proposal,'expanded reservation proposal is available');proposal.props.onPress();
+ tree=f.render(AgendaBoard,props);
+ const modal=nodes(tree,n=>n.props.testID==='entry-details-modal')[0];assert.equal(modal.props.visible,false);assert.deepEqual(proposed,[]);
+ modal.props.onDismiss();assert.deepEqual(proposed,[base.id]);
+});
+
 test('identity suppression is limited to historic placeholders; real business names are kept',()=>{
  assert.equal(presentation.entryIdentity('Cliente DEMO local'),'');assert.equal(presentation.entryIdentity('Cliente DEMO local '),'');
  assert.equal(presentation.entryIdentity('Peluquería DEMO S.L.'),'Peluquería DEMO S.L.');

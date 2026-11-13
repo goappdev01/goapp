@@ -126,7 +126,7 @@ export const ENTRY_DETAIL_CLOSE = Object.freeze({ headerHeight: 44, touchSize: 6
 type EntryDetailsProps = {
   closeRequested?: boolean;
   renderNote?:(entry:GoEntry,onClose:()=>void,navigation?:{onGoToLanding?:()=>void;closeRequested?:boolean})=>React.ReactNode;
-  entry: GoEntry | null; onClose: () => void; onMessage?: () => void; onGoToLanding?: () => void; renderMessageScreen?: () => React.ReactNode; handedness?: "right" | "left"; children?: React.ReactNode;
+  entry: GoEntry | null; onClose: () => void; onMessage?: () => void; onGoToLanding?: () => void; renderMessageScreen?: () => React.ReactNode; handedness?: "right" | "left"; children?: React.ReactNode | ((dismissThen: (action: () => void) => void) => React.ReactNode);
 };
 
 export function GoEntryDetailsSheet(props: EntryDetailsProps) {
@@ -148,6 +148,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
   const phase = useRef<"open" | "dismissing" | "closed">("open");
   const scroll = useRef<React.ElementRef<typeof ScrollView>>(null);
   const messageAfterDismiss = useRef(false);
+  const actionAfterDismiss = useRef<(() => void) | null>(null);
   const live = useRef({ onClose, onMessage, handedness });
   live.current = { onClose, onMessage, handedness };
   const finishDismiss = useCallback(() => {
@@ -155,15 +156,23 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
     phase.current = "closed";
     // iOS has now removed the native touch-blocking modal before selection/navigation changes.
     const message = messageAfterDismiss.current ? live.current.onMessage : undefined;
+    const action = actionAfterDismiss.current;
     messageAfterDismiss.current = false;
+    actionAfterDismiss.current = null;
     live.current.onClose();
     message?.();
+    action?.();
   }, []);
   const dismiss = useCallback(() => {
     if (phase.current !== "open") return;
     phase.current = "dismissing";
     setClosing(true);
   }, []);
+  const dismissThen = useCallback((action: () => void) => {
+    if (phase.current !== "open") return;
+    actionAfterDismiss.current = action;
+    dismiss();
+  }, [dismiss]);
   // A note editor may open only after this native presenter has released its touches.
   useEffect(() => { if (closeRequested) dismiss(); }, [closeRequested, dismiss]);
   useLayoutEffect(() => {
@@ -197,7 +206,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
             style={{alignSelf:handedness==="left"?"flex-start":"flex-end",minHeight:44,paddingHorizontal:14,paddingVertical:10,borderWidth:1,borderRadius:10,borderColor:"#93c5fd"}}>
             <Text numberOfLines={1} style={{color:"#93c5fd",fontWeight:"700",fontSize:12}}>MENSAJE GO</Text>
           </TouchableOpacity>}
-          {children}
+          {typeof children === "function" ? children(dismissThen) : children}
           </View>
         </ScrollView>
         <GoScreenCloseGuide testID="entry-detail-swipe-guide" />

@@ -1797,7 +1797,7 @@ export function AgendaBoard({
   );
 
   // ── CARD ─────────────────────────────────────────────────────────
-  const renderReservationControls = (item: GoEntry, expanded = false) => {
+  const renderReservationControls = (item: GoEntry, expanded = false, dismissThen?: (action: () => void) => void) => {
     const policy = reservationCardPolicy(item);
     const names = { pendiente: t("booking_state_pending"), aceptado: t("booking_state_accepted"), rechazado: t("booking_state_rejected"), propuesto: t("tasks_propose_change"), propuesta_pendiente: t("tasks_propose_change") };
     return <View style={expanded ? { flexDirection: "row", gap: 10, marginBottom: 14 } : s.estadoRow}>
@@ -1809,7 +1809,7 @@ export function AgendaBoard({
           : opt.key === "aceptado" && policy.received && onAcceptProposal ? () => onAcceptProposal(item.id)
           : opt.key === "aceptado" && policy.canConfirm && onConfirmBooking ? () => onConfirmBooking(item.id) : undefined;
         return <TouchableOpacity key={opt.key} accessibilityRole="button" accessibilityLabel={names[opt.key]} accessibilityState={{ selected: active, disabled: !perform }}
-          disabled={!perform} onPress={() => { if (!perform) return; Haptics.selectionAsync().catch(() => {}); if (expanded) { setExpandedBookingItem(null); setExpandedCardId(null); } perform(); }}
+          disabled={!perform} onPress={() => { if (!perform) return; Haptics.selectionAsync().catch(() => {}); if (expanded && opt.key === "propuesto" && dismissThen) { dismissThen(perform); return; } if (expanded) { setExpandedBookingItem(null); setExpandedCardId(null); } perform(); }}
           style={[s.estadoPill, { flex: 1, minHeight: expanded ? 44 : 30, backgroundColor: active ? opt.color : "transparent", borderColor: opt.color + "80" }]}>
           <Feather name={(active ? opt.icon : opt.iconInactive) as any} size={expanded ? 18 : 12} color={active ? "#101018" : opt.color + "90"} />
         </TouchableOpacity>;
@@ -3303,15 +3303,15 @@ export function AgendaBoard({
         }}
         onMessage={expandedBookingItem && onOpenMessage ? () => handleOpenMessage(expandedBookingItem) : undefined}
         >
-        {expandedBookingItem && <>
+        {expandedBookingItem && (dismissThen => <>
           {onResolveEntry && canResolveEntry?.(expandedBookingItem) && <GoEntryMicroActions entry={expandedBookingItem}
             onDone={!expandedBookingItem.changeProposal&&!expandedBookingItem.proposal?()=>onResolveEntry(expandedBookingItem,"done",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id)):undefined}
             onPending={!expandedBookingItem.changeProposal&&!expandedBookingItem.proposal?()=>onResolveEntry(expandedBookingItem,"pending",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id)):undefined}
             onDiscard={()=>onResolveEntry(expandedBookingItem,"discard",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id))}/> }
-          {bookingPolicy?.canonical ? renderReservationControls(expandedBookingItem, true) : <GoEntryQuickActions entry={expandedBookingItem}
+          {bookingPolicy?.canonical ? renderReservationControls(expandedBookingItem, true, dismissThen) : <GoEntryQuickActions entry={expandedBookingItem}
             onCancel={onDeleteItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);onDeleteItem(item.id); } : undefined}
             onEdit={onProposeItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);onProposeItem(item.id); } : undefined}
-            onPropose={onProposeItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);onProposeItem(item.id); } : undefined}
+            onPropose={onProposeItem ? () => { const item=expandedBookingItem;dismissThen(() => onProposeItem(item.id)); } : undefined}
             onAccept={onAcceptProposal || onChangeEstado ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);if(item.changeProposal)onAcceptProposal?.(item.id);else onChangeEstado?.(item.id,"aceptado"); } : undefined}
             onReject={onRejectProposal || onChangeEstado ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);if(item.changeProposal)onRejectProposal?.(item.id);else onChangeEstado?.(item.id,"rechazado"); } : undefined} />}
           {(bookingPolicy?.canShowQr || bookingPolicy?.canVerify) && <TouchableOpacity accessibilityRole="button" accessibilityLabel={t(bookingPolicy.canVerify?'verification_title':'verification_show')}
@@ -3328,7 +3328,7 @@ export function AgendaBoard({
               onClose={() => setVerificationEntryId(null)}
             />;
           })()}
-        </>}
+        </>)}
       </GoEntryDetailsSheet>
 
       {/* ── Chat GO de la reserva — mismo sistema visual que el Chat GO ── */}

@@ -4,6 +4,28 @@ const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.
 const sheet=all.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='BottomSheet');
 const compile=value=>ts.transpileModule(value,{compilerOptions:{target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,module:ts.ModuleKind.CommonJS}}).outputText;
 const nodes=t=>!t||typeof t!=='object'?[]:Array.isArray(t)?t.flatMap(nodes):[t,...nodes(t.props?.children)];
+
+test('Listados closes its detail and sheet before dispatching the existing reservation proposal once',()=>{
+ const detail=all.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='renderListBookingDetail');
+ const finish=all.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='finishListBookingProposal');
+ assert.ok(detail&&finish);
+ const calls=[],entry={id:'booking-1',reservationId:'real-booking'};
+ const scope={React:{Fragment:'Fragment',createElement:(type,props,...children)=>({type,props,children})},
+  GoEntryDetailsSheet:'Details',handedness:'right',goDirectlyToLanding(){},renderEntryMessageScreen(){},openEntryMessage(){},
+  setCalBookingDetailEntry:value=>calls.push(['close-detail',value]),renderEntryMicroActions:()=>null,
+  renderEntryQuickActions:(_entry,_state,_compact,_edit,propose)=>({type:'QuickActions',propose}),renderLinkedNotes:()=>null,
+  listBookingProposalAfterDismissRef:{current:null},setListOpen:value=>calls.push(['close-list',value]),
+  openEntryChange:value=>calls.push(['proposal',value.id])};
+ vm.runInNewContext(compile(finish.getText(ast)+';'+detail.getText(ast)+';globalThis.openDetail=renderListBookingDetail;globalThis.finish=finishListBookingProposal;'),scope);
+ const sheet=scope.openDetail(entry),dismissed=[];
+ const content=sheet.children[0](action=>dismissed.push(action));
+ content.children.find(child=>child?.type==='QuickActions').propose();
+ assert.deepEqual(calls,[]);assert.equal(dismissed.length,1);
+ dismissed[0]();assert.deepEqual(calls,[['close-list',false]]);
+ scope.finish();scope.finish();assert.deepEqual(calls,[['close-list',false],['proposal',entry.id]]);
+ const listSheet=all.find(n=>ts.isJsxOpeningElement(n)&&n.tagName.getText(ast)==='BottomSheet'&&n.attributes.properties.some(p=>p.name?.getText(ast)==='visible'&&p.initializer?.expression?.getText(ast)==='listOpen'));
+ assert.equal(listSheet.attributes.properties.find(p=>p.name?.getText(ast)==='onDismiss')?.initializer?.expression?.getText(ast),'finishListBookingProposal');
+});
 const style=s=>Object.assign({},...[s].flat(Infinity).filter(Boolean));
 function fixture(width=390,height=844,hand='right'){
  let cursor=0;const slots=[],events=new Map(),effects=[],gestures=[],calls=[];
