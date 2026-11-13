@@ -165,10 +165,6 @@ export function HerramientasPanel({
           keyboardShouldPersistTaps="handled"
         >
 
-          {/* ══════════════════════════════════════════════════════════
-              1 · PERSONALIZACIÓN
-          ══════════════════════════════════════════════════════════ */}
-          <Text style={s.familyLabel}>PERSONALIZACIÓN</Text>
           {landingVariantControls}
           <GoNavigationAppearanceControl/>
           <View style={s.card}>
@@ -697,19 +693,19 @@ export function HerramientasPanel({
 const s = StyleSheet.create({
   root:         { flex: 1, backgroundColor: "#F5F3EF" },
 
-  handleZone:   { paddingTop: 10, paddingBottom: 4, alignItems: "center" },
+  handleZone:   { paddingTop: 6, paddingBottom: 2, alignItems: "center" },
   handlePill:   { width: 40, height: 4, backgroundColor: "rgba(0,0,0,0.12)", borderRadius: 2 },
 
   header:       {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
-    paddingHorizontal: 16, paddingVertical: 14,
+    paddingHorizontal: 16, paddingVertical: 10,
     borderBottomWidth: 1, borderBottomColor: "rgba(0,0,0,0.08)",
     backgroundColor: "#FFFFFF", gap: 8,
   },
   headerIconWrap: { width: 32, height: 32, borderRadius: 10, backgroundColor: BLUE_BG, alignItems: "center", justifyContent: "center" },
   headerTitle:  { fontSize: 16, color: "#111827", fontFamily: "Inter_700Bold", fontWeight: "800" },
 
-  scroll:       { flex: 1, paddingHorizontal: 16, paddingTop: 18 },
+  scroll:       { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
 
   // Section family label
   familyLabel:  {
