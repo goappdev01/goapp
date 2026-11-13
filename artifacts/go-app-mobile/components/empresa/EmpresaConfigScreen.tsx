@@ -1000,14 +1000,24 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
     const source = config.businessId, target = demo;
     timezoneBusy.current = true; setTimezoneSaving(true); setTimezoneError("");
     try {
-      const who = await captureAuthIdentity();
-      if (!who) throw new Error(lang === "en" ? "Sign in to save your business." : "Inicia sesión para guardar la empresa.");
-      const saved = await setCalendarBusinessTimezone(source, wanted, who.userId);
-      if (!await isAuthIdentityCurrent(who)) throw new Error(lang === "en" ? "The account changed." : "La cuenta ha cambiado.");
+      let saved: string;
       if (target) {
+        // An owner's preview business is deliberately local: never submit its
+        // source ID to the production synchronization RPC.
         if (target.businessId !== source) throw new Error("La empresa seleccionada ha cambiado.");
-        await target.updateConfig({ timezone: saved });
-      } else updateConfig({ timezone: saved }, source ?? "");
+        await target.updateConfig({ timezone: wanted });
+        saved = wanted;
+      } else if (!source) {
+        // New, unlinked draft: persist the choice; registration happens later.
+        updateConfig({ timezone: wanted });
+        saved = wanted;
+      } else {
+        const who = await captureAuthIdentity();
+        if (!who) throw new Error(lang === "en" ? "Sign in to save your business." : "Inicia sesión para guardar la empresa.");
+        saved = await setCalendarBusinessTimezone(source, wanted, who.userId);
+        if (!await isAuthIdentityCurrent(who)) throw new Error(lang === "en" ? "The account changed." : "La cuenta ha cambiado.");
+        updateConfig({ timezone: saved }, source);
+      }
       if (timezoneMounted.current) { setTimezone(saved); setTimezonePickerOpen(false); }
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo guardar la zona horaria.";
@@ -1019,7 +1029,8 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
     let active = true;
     const source = config.businessId, target = demo;
     const editVersion = timezoneEditVersion.current;
-    if (!source || config.timezone) { setTimezoneLoading(false); return; }
+    // Preview records have no server link; querying the RPC here caused HTTP 501.
+    if (!source || target || config.timezone) { setTimezoneLoading(false); return; }
     setTimezoneLoading(true); setTimezoneError("");
     void (async () => {
       try {

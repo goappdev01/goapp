@@ -1188,20 +1188,48 @@ test('the timezone selector has real dark readable choices, saves immediately, s
  const again=ui.render(step.type,step.props);assert.ok(text(byId(again,'business-timezone-selector')).includes('Europe/Madrid'));
  const after=plain(restored.getSnapshot().config);delete after.timezone;assert.deepEqual(after,before);
 });
-test('timezone writes finish for their captured company after Next, and a failed save keeps the previous selection',async()=>{
- const shared=new Map(),a=dataFixture(owner,shared),b=dataFixture(other,shared);await a.store.updateConfig({sectorId:'belleza',subId:'peluqueria',timezone:'Europe/Madrid'});await b.store.updateConfig({timezone:'Europe/Madrid'});
- let release;const waiting=new Promise(r=>{release=r;}),ui=uiFixture(a,{timezoneAdapter:async(_source,zone)=>{await waiting;return zone;}}),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
- let parent=ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:2}),step=component(parent,'StepHorario'),tree=ui.render(step.type,step.props);const byId=(tree,id)=>nodes(tree).find(n=>n.props?.testID===id);
- byId(tree,'business-timezone-selector').props.onPress();tree=ui.render(step.type,step.props);byId(tree,'business-timezone-option-Atlantic/Canary').props.onPress();await turn();ui.unmount(step.type);release();await turn();assert.equal(a.store.getSnapshot().config.timezone,'Atlantic/Canary');assert.equal(b.store.getSnapshot().config.timezone,'Europe/Madrid');
- const failing=uiFixture(a,{timezoneAdapter:async()=>{throw Error('Servidor no disponible');}}),Failed=failing.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
- parent=failing.render(Failed,{onBack(){},startAtSteps:true,initialStep:2});step=component(parent,'StepHorario');tree=failing.render(step.type,step.props);byId(tree,'business-timezone-selector').props.onPress();tree=failing.render(step.type,step.props);byId(tree,'business-timezone-option-Europe/Madrid').props.onPress();await turn();tree=failing.render(step.type,step.props);assert.ok(nodes(tree).some(n=>n.props?.accessibilityRole==='alert'&&text(n).length>0));assert.equal(a.store.getSnapshot().config.timezone,'Atlantic/Canary');
+test('DEMO timezone selection stays in the owner store, never calls production, and preserves other companies',async()=>{
+ const shared=new Map(),a=dataFixture(owner,shared),b=dataFixture(other,shared);
+ await a.store.updateConfig({sectorId:'belleza',subId:'peluqueria',timezone:'Europe/Madrid'});
+ await b.store.updateConfig({timezone:'Europe/Madrid'});
+ let remoteCalls=0;
+ const ui=uiFixture(a,{timezoneAdapter:async()=>{remoteCalls++;throw Error('No debe usar el servidor');},timezoneResolver:async()=>{remoteCalls++;throw Error('No debe consultar el vínculo');}});
+ const Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
+ const parent=ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:2}),step=component(parent,'StepHorario');
+ let tree=ui.render(step.type,step.props);
+ const byId=(view,id)=>nodes(view).find(n=>n.props?.testID===id);
+ byId(tree,'business-timezone-selector').props.onPress();tree=ui.render(step.type,step.props);
+ byId(tree,'business-timezone-option-Atlantic/Canary').props.onPress();await turn();
+ assert.equal(a.store.getSnapshot().config.timezone,'Atlantic/Canary');
+ assert.equal(b.store.getSnapshot().config.timezone,'Europe/Madrid');
+ assert.equal(remoteCalls,0,'Local preview must not call remote business synchronization');
+ ui.unmount(step.type);
+ const restored=a.make();await restored.load();
+ assert.equal(restored.getSnapshot().config.timezone,'Atlantic/Canary');
+ const failing=uiFixture(a,{timezoneAdapter:async()=>{remoteCalls++;throw Error('Unexpected remote write');}}),Failed=failing.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
+ a.failWrites(true);
+ const failedParent=failing.render(Failed,{onBack(){},startAtSteps:true,initialStep:2}),failedStep=component(failedParent,'StepHorario');
+ tree=failing.render(failedStep.type,failedStep.props);
+ byId(tree,'business-timezone-selector').props.onPress();tree=failing.render(failedStep.type,failedStep.props);
+ byId(tree,'business-timezone-option-Europe/Madrid').props.onPress();await turn();tree=failing.render(failedStep.type,failedStep.props);
+ assert.ok(nodes(tree).some(n=>n.props?.accessibilityRole==='alert'&&text(n).length>0));
+ assert.equal(a.store.getSnapshot().config.timezone,'Atlantic/Canary','A failed local save must not claim success');
+ assert.equal(remoteCalls,0);
+ a.failWrites(false);failing.unmount(failedStep.type);
 });
 
-test('the timezone selector recovers the actual registered value without opening calendar exceptions',async()=>{
- const f=dataFixture();await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria'});const before=plain(f.store.getSnapshot().config),ui=uiFixture(f,{timezoneResolver:async source=>({sourceId:source,businessId:owner,timezone:'Europe/Madrid',name:'Registered'})}),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
- const parent=ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:2}),step=component(parent,'StepHorario');ui.render(step.type,step.props);await turn();let tree=ui.render(step.type,step.props);
- assert.ok(text(nodes(tree).find(n=>n.props?.testID==='business-timezone-selector')).includes('España peninsular'));assert.equal(component(tree,'CalendarExceptionsSection'),undefined);
- const again=f.make();await again.load();assert.equal(again.getSnapshot().config.timezone,'Europe/Madrid');const saved=plain(again.getSnapshot().config);delete saved.timezone;assert.deepEqual(saved,before);
+test('an unlinked preview company does not resolve a fake registered timezone on opening Horarios',async()=>{
+ const f=dataFixture();await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria'});
+ const before=plain(f.store.getSnapshot().config);
+ let resolutions=0;
+ const ui=uiFixture(f,{timezoneResolver:async()=>{resolutions++;return {sourceId:before.businessId,businessId:owner,timezone:'Europe/Madrid',name:'Wrong remote match'};}}),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
+ const parent=ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:2}),step=component(parent,'StepHorario');ui.render(step.type,step.props);
+ await turn();const tree=ui.render(step.type,step.props);
+ assert.equal(text(nodes(tree).find(n=>n.props?.testID==='business-timezone-selector')),'Seleccionar zona horaria');
+ assert.equal(component(tree,'CalendarExceptionsSection'),undefined);
+ assert.equal(resolutions,0,'A local draft must not seek a cloud identity');
+ const again=f.make();await again.load();
+ assert.deepEqual(plain(again.getSnapshot().config),before);
 });
 
 test("Horarios and the existing calendar tools share one default-on business setting across reopening", async () => {
