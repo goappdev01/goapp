@@ -17,7 +17,7 @@ export async function detailFixture({ handedness = 'right', platform = 'ios', st
   };
   const TouchableOpacity = p => { props.set(p.accessibilityLabel, p); return React.createElement('button', { 'aria-label': p.accessibilityLabel }, p.children); };
   const NativeScroll = p => { React.useLayoutEffect(()=>{nativeScroll.enabled=true;},[]); React.useImperativeHandle(p.ref, () => ({ setNativeProps(update) { nativeScroll.enabled=update.scrollEnabled;nativeScroll.updates.push(update.scrollEnabled); } }), []); return React.createElement(View,p); };
-  const native = { ...rn, StyleSheet:{...rn.StyleSheet,absoluteFill:{position:'absolute',top:0,right:0,bottom:0,left:0}}, View, TouchableOpacity, ScrollView: NativeScroll, Modal: View, Platform: { OS: platform }, Dimensions: { get: () => ({ width, height: 844 }) },
+  const native = { ...rn, useWindowDimensions: () => ({width,height:844,scale:1,fontScale:1}), StyleSheet:{...rn.StyleSheet,absoluteFill:{position:'absolute',top:0,right:0,bottom:0,left:0}}, View, TouchableOpacity, ScrollView: NativeScroll, Modal: View, Platform: { OS: platform }, Dimensions: { get: () => ({ width, height: 844 }) },
     PanResponder: { create: config => { panCreations++; return (responder || actualResponder).create(config); } } };
   const close = evaluate('components/ui/GoCloseButton.tsx', { 'react-native': native, '@expo/vector-icons': { Feather: () => null } });
   const calendarCloseResponder = evaluate('lib/calendarCloseResponder.ts', { 'react-native': native, './calendarGestureOwnership': { calendarGestureOwnership: ownership } });

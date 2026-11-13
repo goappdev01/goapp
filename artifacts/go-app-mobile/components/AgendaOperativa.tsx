@@ -1808,9 +1808,9 @@ export function AgendaBoard({
           : opt.key === "rechazado" && policy.canCancel && onDeleteItem ? () => onDeleteItem(item.id)
           : opt.key === "aceptado" && policy.received && onAcceptProposal ? () => onAcceptProposal(item.id)
           : opt.key === "aceptado" && policy.canConfirm && onConfirmBooking ? () => onConfirmBooking(item.id) : undefined;
-        return <TouchableOpacity key={opt.key} accessibilityRole="button" accessibilityLabel={names[opt.key]} accessibilityState={{ selected: active, disabled: !perform }}
+        return <TouchableOpacity key={opt.key} accessibilityRole="button" accessibilityLabel={names[opt.key]} accessibilityState={{ selected: active, disabled: !perform }} activeOpacity={expanded ? 0.72 : 0.8}
           disabled={!perform} onPress={() => { if (!perform) return; Haptics.selectionAsync().catch(() => {}); if (expanded && opt.key === "propuesto" && dismissThen) { dismissThen(perform); return; } if (expanded) { setExpandedBookingItem(null); setExpandedCardId(null); } perform(); }}
-          style={[s.estadoPill, { flex: 1, minHeight: expanded ? 44 : 30, backgroundColor: active ? opt.color : "transparent", borderColor: opt.color + "80" }]}>
+          style={[s.estadoPill, { flex: 1, minHeight: expanded ? 44 : 30, backgroundColor: active ? opt.color : expanded && perform ? opt.color + "18" : "transparent", borderColor: opt.color + "80", ...(expanded && {borderWidth:1.5,opacity:perform?1:0.58,shadowColor:opt.color,shadowOffset:{width:0,height:2},shadowOpacity:perform?0.2:0,shadowRadius:4,elevation:perform?2:0}) }]}>
           <Feather name={(active ? opt.icon : opt.iconInactive) as any} size={expanded ? 18 : 12} color={active ? "#101018" : opt.color + "90"} />
         </TouchableOpacity>;
       })}

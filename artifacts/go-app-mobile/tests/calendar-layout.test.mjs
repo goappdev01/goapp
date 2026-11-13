@@ -124,7 +124,9 @@ test('Pending cards keep one closed line; personal tasks have no false chat and 
   nodes(sharedCard,n=>n.props.testID==='calendar-entry-open-'+shared.id)[0].props.onAccessibilityTap();
   tree=app.render(AgendaBoard,sharedProps);
   const expanded=nodes(tree,n=>n.props.testID==='entry-details-scroll')[0];assert.ok(expanded);
-  const message = nodes(expanded, n => n.type === 'TouchableOpacity' && n.props.testID === 'entry-message-go')[0];
+  const navigation=nodes(tree,n=>n.props.testID==='entry-detail-floating-navigation')[0];
+  assert.equal(nodes(expanded,n=>n.props.testID==='entry-message-go').length,0,'the message action no longer consumes card body height');
+  const message = nodes(navigation, n => n.type === 'TouchableOpacity' && n.props.testID === 'entry-message-go')[0];
   assert.ok(message);
   assert.equal(message.props.style.minHeight, 44);
   assert.equal(message.props.accessibilityRole, 'button');

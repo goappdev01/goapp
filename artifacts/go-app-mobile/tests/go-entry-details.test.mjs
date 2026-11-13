@@ -11,7 +11,7 @@ const presentation=scope.exports;
 const nodes=(tree,p)=>tree&&typeof tree==='object'?[...(p(tree)?[tree]:[]),...(tree.children??[]).flatMap(n=>nodes(n,p))]:[];
 const texts=tree=>nodes(tree,n=>n.type==='Text').flatMap(n=>n.children).filter(x=>typeof x==='string'||typeof x==='number').join(' ');
 const base={id:'one-reservation',reservationId:'11111111-1111-4111-8111-111111111111',businessId:'salon',type:'GO_BOOKING',customerBooking:true,slotKey:'slot',kind:'received',contactName:'Peluquería Nemesi',professionalName:'María José',phone:'+34 600 123 456',whatsapp:'0034 611 123 456',date:'26/10/2030',dateISO:'2030-10-26',time:'12:00',duration:'60min',estado:'aceptado',bookingStatus:'confirmada',color:'#00e5ff',place:'Dirección vigente'};
-const sheet=(entry,extra={})=>{const f=fixture(),c=f.load('components/GoEntryDetails.tsx');return {...f,components:c,tree:f.render(c.GoEntryDetailsSheet,{entry,onClose(){},...extra})};};
+const sheet=(entry,extra={},fixtureOptions={})=>{const f=fixture(fixtureOptions),c=f.load('components/GoEntryDetails.tsx');return {...f,components:c,tree:f.render(c.GoEntryDetailsSheet,{entry,onClose(){},...extra})};};
 
 test('older and new receipts expose the same compact accepted actions, including receipts with only server status',()=>{
  const f=fixture(),c=f.load('components/GoEntryDetails.tsx');
@@ -20,16 +20,33 @@ test('older and new receipts expose the same compact accepted actions, including
   assert.deepEqual(nodes(tree,n=>n.type==='TouchableOpacity').map(n=>n.props.accessibilityLabel),['CANCELAR','PROPONER CAMBIO']);
   assert.ok(texts(tree).includes('booking_state_accepted'));assert.equal(nodes(tree,n=>n.props.accessibilityLabel==='ACEPTAR').length,0);
   for(const button of nodes(tree,n=>n.type==='TouchableOpacity')){assert.equal(button.props.style[1].minWidth,0);assert.equal(button.props.style[1].minHeight,36);assert.equal(nodes(button,n=>n.type==='Text')[0].props.numberOfLines,1);}
+  for(const button of nodes(tree,n=>n.type==='TouchableOpacity')){assert.equal(button.props.activeOpacity,0.72);assert.ok(button.props.style.at(-1).backgroundColor);assert.equal(button.props.style[0].elevation,2);}
  }
  const terminal=f.render(c.GoEntryQuickActions,{entry:{...base,bookingServerStatus:'REJECTED'},onCancel(){},onPropose(){}});assert.equal(nodes(terminal,n=>n.type==='TouchableOpacity').length,0);
 });
 
-test('expanded sheet reserves one bottom close outside the scroll and keeps GO message compact',()=>{
+test('expanded sheet reserves bottom navigation outside the scroll and places GO message beside Back',()=>{
  let closed=0,message=0;const f=sheet(base,{onClose:()=>closed++,onMessage:()=>message++});
  const modal=nodes(f.tree,n=>n.type==='Modal')[0],footer=nodes(f.tree,n=>n.props.testID==='entry-detail-close-footer')[0],scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0];
- assert.equal(modal.props.animationType,'none');assert.equal(footer.props.style.position,undefined);assert.equal(footer.props.style.flexShrink,0);assert.equal(footer.props.style.paddingBottom,6);assert.equal(footer.props.style.flexDirection,'row');assert.equal(nodes(scroll,n=>n.props.testID==='entry-detail-close-footer').length,0);assert.equal(scroll.props.contentContainerStyle.paddingBottom,12);assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');
- const close=nodes(f.tree,n=>n.props.accessibilityLabel==='Cerrar detalle')[0];assert.equal(nodes(f.tree,n=>n.props.testID==='entry-detail-floating-navigation')[0].props.screenKey,'entry-details');assert.equal(close.props.hitSlop,0);const touch=f.render(close.type,close.props);assert.equal(Object.assign({},...touch.props.style.filter(Boolean)).width,64);assert.equal(Object.assign({},...touch.props.style.filter(Boolean)).height,64);assert.equal(touch.props.delayPressIn,0);touch.props.onPress({stopPropagation(){}});assert.equal(closed,0);modal.props.onDismiss();assert.equal(closed,1);
- const fresh=sheet(base,{onMessage:()=>message++});const msg=nodes(fresh.tree,n=>n.props.testID==='entry-message-go')[0];assert.equal(msg.props.accessibilityLabel,'MENSAJE GO');assert.equal(msg.props.style.alignSelf,'flex-end');msg.props.onPress();fresh.render(fresh.components.GoEntryDetailsSheet,{entry:base,onClose(){},onMessage:()=>message++});nodes(fresh.tree,n=>n.props.testID==='entry-details-modal')[0]?.props.onDismiss();assert.equal(message,1);
+ assert.equal(modal.props.animationType,'none');assert.equal(footer.props.style.position,undefined);assert.equal(footer.props.style.flexShrink,0);assert.equal(footer.props.style.paddingBottom,6);assert.equal(footer.props.style.flexDirection,'row');assert.equal(nodes(scroll,n=>n.props.testID==='entry-detail-close-footer').length,0);assert.equal(scroll.props.contentContainerStyle.paddingBottom,8);assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');assert.equal(nodes(scroll,n=>n.props.testID==='entry-message-go').length,0);
+ const nav=nodes(f.tree,n=>n.props.testID==='entry-detail-floating-navigation')[0],close=nodes(f.tree,n=>n.props.accessibilityLabel==='Cerrar detalle')[0],msg=nodes(nav,n=>n.props.testID==='entry-message-go')[0];assert.equal(nav.props.screenKey,'entry-details');assert.equal(nav.props.buttonKey,'navigation-with-message');assert.equal(nav.props.initialTop,undefined,'the reserved footer anchors the group below the scroll');assert.ok(msg);assert.equal(msg.props.accessibilityLabel,'MENSAJE GO');assert.equal(msg.props.accessibilityRole,'button');assert.equal(msg.props.style.minHeight,44);assert.equal(msg.props.activeOpacity,0.72);assert.ok(msg.props.style.backgroundColor);assert.equal(close.props.hitSlop,0);const touch=f.render(close.type,close.props);assert.equal(Object.assign({},...touch.props.style.filter(Boolean)).width,64);assert.equal(Object.assign({},...touch.props.style.filter(Boolean)).height,64);assert.equal(touch.props.delayPressIn,0);touch.props.onPress({stopPropagation(){}});assert.equal(closed,0);modal.props.onDismiss();assert.equal(closed,1);
+ for(const handedness of ['right','left']){
+  const side=sheet(base,{handedness,onMessage(){},onGoToLanding(){}}, {viewport:{width:320,height:568,fontScale:1}}),sideNav=nodes(side.tree,n=>n.props.testID==='entry-detail-floating-navigation')[0];
+  const labels=nodes(sideNav,n=>n.props.testID==='entry-message-go'||['Cerrar detalle','Ir directamente al Landing'].includes(n.props.accessibilityLabel)).map(n=>n.props.testID==='entry-message-go'?'MENSAJE GO':n.props.accessibilityLabel);
+  assert.deepEqual(labels,handedness==='right'?['MENSAJE GO','Cerrar detalle','Ir directamente al Landing']:['Cerrar detalle','MENSAJE GO','Ir directamente al Landing']);
+  assert.equal(sideNav.props.handedness,handedness);
+  assert.ok(sideNav.props.width<=304,'the three controls fit the usable width of a compact iPhone');
+ }
+ const fresh=sheet(base,{onMessage:()=>message++}),freshMsg=nodes(fresh.tree,n=>n.props.testID==='entry-message-go')[0];freshMsg.props.onPress();fresh.render(fresh.components.GoEntryDetailsSheet,{entry:base,onClose(){},onMessage:()=>message++});nodes(fresh.tree,n=>n.props.testID==='entry-details-modal')[0]?.props.onDismiss();assert.equal(message,1);
+});
+
+test('original and proposed booking dates show full local year without changing persisted values',()=>{
+ const entry={...base,estado:'propuesta_pendiente',date:'16/11/26',dateISO:'2026-11-16',time:'11:00',bookingTimeline:{timezone:'Pacific/Kiritimati',workMinutes:0,waitMinutes:0,phases:[]},changeProposal:{originalDateISO:'2026-11-16',originalTime:'11:00',date:'20/11/26',dateISO:'2026-11-20',time:'11:11',note:'Cambiar horario',proposedAt:1}};
+ const snapshot=JSON.stringify(entry),f=sheet(entry),summary=nodes(f.tree,n=>n.props.testID==='entry-original-date-time')[0],proposal=nodes(f.tree,n=>n.props.testID==='entry-proposed-date-time')[0];
+ assert.equal(texts(summary),'Lun 16/11/2026 · 11:00 · 60min');assert.equal(texts(proposal).replace(/\s+/g,' '),'Propuesto: Vie 20/11/2026 · 11:11');assert.equal(JSON.stringify(entry),snapshot);
+ const info=nodes(f.tree,n=>n.props.testID==='entry-proposal')[0];assert.equal(info.type,'View');assert.equal(info.props.onPress,undefined);assert.equal(info.props.accessibilityRole,undefined);assert.equal(info.props.style.elevation,undefined);assert.ok(info.props.style.borderColor.startsWith('rgba('));
+ const presentation=f.load('data/goEntryPresentation.ts');assert.equal(presentation.formatBookingLocalDate('2026-11-16','16/11/26','es','Pacific/Kiritimati'),'Lun 16/11/2026');
+ assert.equal(presentation.formatBookingLocalDate(undefined,'','es','America/Los_Angeles','2026-11-16T00:30:00Z'),'Dom 15/11/2026');
 });
 
 test('a proposal from the reservation detail waits for native dismissal before opening the shared flow',()=>{
@@ -53,6 +70,7 @@ test('calendar expanded reservation uses its existing proposal callback after de
  let tree=f.render(AgendaBoard,props);
  nodes(tree,n=>n.props.testID?.startsWith('calendar-entry-open-'))[0].props.onAccessibilityTap();
  tree=f.render(AgendaBoard,props);
+ const envelope=nodes(tree,n=>n.props.accessibilityLabel==='booking_state_pending').at(-1);assert.ok(envelope);assert.equal(nodes(envelope,n=>n.type==='Feather')[0].props.name,'mail','the yellow envelope controls Pending status, not GO messaging');
  const proposal=nodes(tree,n=>n.props.accessibilityLabel==='tasks_propose_change').at(-1);
  assert.ok(proposal,'expanded reservation proposal is available');proposal.props.onPress();
  tree=f.render(AgendaBoard,props);
@@ -155,10 +173,17 @@ test('three microactions stop propagation, honor supplied permissions and retain
  const denied=f.render(GoEntryMicroActions,{entry:base,onDiscard(){}});assert.equal(nodes(denied,n=>n.type==='TouchableOpacity').length,1);
 });
 
+test('personal ELIMINAR and booking CANCELAR remain distinct destructive actions',()=>{
+ const f=fixture(),c=f.load('components/GoEntryDetails.tsx'),calls=[];
+ const personal=f.render(c.GoEntryMicroActions,{entry:base,onDiscard:()=>calls.push('hide-personal-card')}),discard=nodes(personal,n=>n.props.accessibilityLabel==='Mi seguimiento: ELIMINAR')[0];assert.ok(discard);assert.match(discard.props.accessibilityHint,/No cancela el compromiso/);
+ const reservation=f.render(c.GoEntryQuickActions,{entry:base,onCancel:()=>calls.push('cancel-reservation')});nodes(reservation,n=>n.props.accessibilityLabel==='CANCELAR')[0].props.onPress({stopPropagation(){}});discard.props.onPress({stopPropagation(){}});
+ assert.deepEqual(calls,['cancel-reservation','hide-personal-card']);
+});
+
 test('expanded short cards push actions towards the useful bottom; long cards still use a single scroll and handed close',()=>{
  for(const handedness of ['left','right']){const f=sheet({...base,detail:'Detail '.repeat(500)},{handedness,onMessage(){}});
   const scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0],actions=nodes(scroll,n=>n.props.testID==='entry-details-actions')[0],close=nodes(f.tree,n=>n.props.testID==='entry-detail-close-footer')[0];
-  assert.equal(scroll.props.contentContainerStyle.flexGrow,1);assert.equal(actions.props.style.marginTop,'auto');assert.equal(close.props.style.justifyContent,handedness==='left'?'flex-start':'flex-end');assert.equal(scroll.props.contentContainerStyle.paddingBottom,12);assert.equal(close.props.style.flexShrink,0);
+  assert.equal(scroll.props.contentContainerStyle.flexGrow,1);assert.equal(actions.props.style.marginTop,'auto');assert.equal(close.props.style.justifyContent,handedness==='left'?'flex-start':'flex-end');assert.equal(scroll.props.contentContainerStyle.paddingBottom,8);assert.equal(close.props.style.flexShrink,0);
  }
  const personal={...base,type:'TAREA_INTERNA',customerBooking:false,kind:'sent',direction:'self',contactName:'',phone:'',whatsapp:''};
  assert.equal(nodes(sheet(personal,{onMessage(){}}).tree,n=>n.props.testID==='entry-message-go').length,0);

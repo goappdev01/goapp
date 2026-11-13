@@ -34,6 +34,43 @@ export function entryHeading(entry: GoEntry, unknown: string): string {
     : entryIdentity(entry.notes) || entry.intentLabel || unknown);
 }
 
+/**
+ * Format the canonical calendar date without interpreting a local YYYY-MM-DD
+ * as a device-zone instant. Booking projections already derive dateISO from
+ * the business timezone, so retaining that wall date avoids day shifts around
+ * UTC and daylight-saving boundaries.
+ */
+export function formatBookingLocalDate(dateISO?: string, fallback?: string, lang = "es", timezone?: string, instant?: string): string {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateISO ?? "");
+  let year: number, month: number, day: number, weekday: string;
+  if (iso) {
+    year = Number(iso[1]); month = Number(iso[2]); day = Number(iso[3]);
+    const wallDate = new Date(Date.UTC(year, month - 1, day, 12));
+    if (wallDate.getUTCFullYear() !== year || wallDate.getUTCMonth() !== month - 1 || wallDate.getUTCDate() !== day) return fallback?.trim() ?? "";
+    weekday = new Intl.DateTimeFormat(lang === "en" ? "en-GB" : "es-ES", { weekday: "short", timeZone: "UTC" }).format(wallDate);
+  } else {
+    const legacy = /^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$/.exec(fallback?.trim() ?? "");
+    if (legacy) {
+      day = Number(legacy[1]); month = Number(legacy[2]); year = Number(legacy[3]);
+      const wallDate = new Date(Date.UTC(year, month - 1, day, 12));
+      if (wallDate.getUTCFullYear() !== year || wallDate.getUTCMonth() !== month - 1 || wallDate.getUTCDate() !== day) return fallback?.trim() ?? "";
+      weekday = new Intl.DateTimeFormat(lang === "en" ? "en-GB" : "es-ES", { weekday: "short", timeZone: "UTC" }).format(wallDate);
+    } else if (instant && timezone) {
+      const stamp = new Date(instant);
+      if (!Number.isFinite(stamp.getTime())) return fallback?.trim() ?? "";
+      try {
+        const parts = new Intl.DateTimeFormat(lang === "en" ? "en-GB" : "es-ES", {
+          weekday: "short", day: "2-digit", month: "2-digit", year: "numeric", timeZone: timezone,
+        }).formatToParts(stamp);
+        const part = (key: string) => parts.find(value => value.type === key)?.value ?? "";
+        weekday = part("weekday"); day = Number(part("day")); month = Number(part("month")); year = Number(part("year"));
+      } catch { return fallback?.trim() ?? ""; }
+    } else return fallback?.trim() ?? "";
+  }
+  const shortDay = weekday ? weekday[0].toLocaleUpperCase(lang === "en" ? "en-GB" : "es-ES") + weekday.slice(1) : "";
+  return `${shortDay} ${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`;
+}
+
 export function entryIsReservation(entry: GoEntry): boolean {
   return !!(entry.customerBooking || entry.businessBooking || entry.bookingPerspective || ["GO_BOOKING","GO_RESERVA"].includes(entry.type ?? ""));
 }

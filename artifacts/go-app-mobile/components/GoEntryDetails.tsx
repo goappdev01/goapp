@@ -1,12 +1,12 @@
 import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
 import { GoScreenModal as Modal } from "@/components/ui/GoScreenModal";
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { GoEntry } from "./AgendaOperativa";
-import { entryCommunication, entryHeading, entryIdentity, entryIsInternal, entryProposalPending } from "@/data/goEntryPresentation";
+import { entryCommunication, entryHeading, entryIdentity, entryIsInternal, entryIsReservation, entryProposalPending, formatBookingLocalDate } from "@/data/goEntryPresentation";
 import { reservationCardPolicy, GO_ENTRY_COLORS as C } from "@/data/reservationCardPolicy";
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { landingCurrentEntry } from "./landing/landingPanels";
@@ -18,8 +18,8 @@ export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
   if (!links.call && !links.whatsapp) return null;
   const open = (url: string) => { void Linking.openURL(url).catch(() => Alert.alert("GO", lang === "en" ? "Could not open this contact." : "No se pudo abrir este contacto.")); };
   return <View testID="entry-communication" style={s.actions}>
-    {links.whatsapp && <TouchableOpacity accessibilityRole="button" accessibilityLabel="WhatsApp" onPress={() => open(links.whatsapp!)} style={s.contact}><Text style={s.contactText}>WhatsApp</Text></TouchableOpacity>}
-    {links.call && <TouchableOpacity accessibilityRole="button" accessibilityLabel={lang === "en" ? "Call" : "Llamar"} onPress={() => open(links.call!)} style={s.contact}><Text style={s.contactText}>{lang === "en" ? "Call" : "Llamar"}</Text></TouchableOpacity>}
+    {links.whatsapp && <TouchableOpacity accessibilityRole="button" accessibilityLabel="WhatsApp" activeOpacity={0.72} onPress={() => open(links.whatsapp!)} style={s.contact}><Text style={s.contactText}>WhatsApp</Text></TouchableOpacity>}
+    {links.call && <TouchableOpacity accessibilityRole="button" accessibilityLabel={lang === "en" ? "Call" : "Llamar"} activeOpacity={0.72} onPress={() => open(links.call!)} style={s.contact}><Text style={s.contactText}>{lang === "en" ? "Call" : "Llamar"}</Text></TouchableOpacity>}
   </View>;
 }
 
@@ -47,7 +47,7 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
       disabled={disabled} accessibilityState={{disabled,selected:entry.localResolutionStatus===action.key}}
       hitSlop={{top:inline?4:0,bottom:inline?4:0,left:0,right:0}} activeOpacity={0.7}
       onPress={event=>{event?.stopPropagation();action.run?.();}}
-      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:1,borderColor:action.color,backgroundColor:action.color+"12",flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",...(list && {flex:undefined,flexGrow:1,flexShrink:0,flexBasis:"auto",maxWidth:"100%"}),...(premium&&{flex:1,flexBasis:0,paddingVertical:4,borderColor:entry.localResolutionStatus===action.key?action.color+"99":"rgba(255,255,255,0.10)",backgroundColor:action.color+(entry.localResolutionStatus===action.key?"20":"0a")}),...(trash&&{flex:undefined,width:44,height:44,padding:0,borderWidth:0,backgroundColor:"transparent"})}}>
+      style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,borderRadius:8,borderWidth:list?1:1.5,borderColor:action.color,backgroundColor:action.color+(list?"12":"18"),opacity:disabled?0.48:1,flexDirection:"row",gap:3,alignItems:"center",justifyContent:"center",...(!list&&{shadowColor:action.color,shadowOffset:{width:0,height:2},shadowOpacity:disabled?0:0.18,shadowRadius:4,elevation:disabled?0:2}),...(list && {flex:undefined,flexGrow:1,flexShrink:0,flexBasis:"auto",maxWidth:"100%"}),...(premium&&{flex:1,flexBasis:0,paddingVertical:4,borderColor:entry.localResolutionStatus===action.key?action.color+"99":"rgba(255,255,255,0.10)",backgroundColor:action.color+(entry.localResolutionStatus===action.key?"20":"0a")}),...(trash&&{flex:undefined,width:44,height:44,padding:0,borderWidth:0,backgroundColor:"transparent"})}}>
       <Feather name={action.icon} size={trash?20:inline?12:14} color={action.color}/>
       {!trash&&<Text numberOfLines={premium?undefined:1} adjustsFontSizeToFit={!list} minimumFontScale={0.75} maxFontSizeMultiplier={list?2:1.2}
         style={{color:action.color,fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:premium?1:list?0:1}}>{action.text}</Text>}
@@ -67,7 +67,7 @@ export function GoEntryQuickActions({ entry, showState = true, compact = false, 
     : entry.localResolutionStatus === "pending" ? (lang === "en" ? "PENDING" : "PENDIENTE")
     : accepted ? (lang === "en" ? "ACCEPTED" : "ACEPTADA") : entry.estado === "rechazado" ? (lang === "en" ? "CANCELLED" : "CANCELADA") : (lang === "en" ? "PENDING" : "PENDIENTE");
   const pending = entryProposalPending(entry);
-  const button = (label: string, color: string, callback?: () => void) => callback && <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} onPress={event => { event?.stopPropagation(); callback(); }} style={[s.action, compact && s.compactAction, { borderColor: color }]}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{ color, fontSize: compact ? 10 : 12, fontWeight: "700", textAlign: "center" }}>{label}</Text></TouchableOpacity>;
+  const button = (label: string, color: string, callback?: () => void) => callback && <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} activeOpacity={0.72} onPress={event => { event?.stopPropagation(); callback(); }} style={[s.action, compact && s.compactAction, { borderColor: color, backgroundColor: color + "18", shadowColor: color }]}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{ color, fontSize: compact ? 10 : 12, fontWeight: "700", textAlign: "center" }}>{label}</Text></TouchableOpacity>;
   return <View testID="entry-quick-actions" style={{ gap: compact ? 4 : 8 }}>
     {showState && <Text numberOfLines={1} style={{ color: canonical ? policy.stateColor : entry.localResolutionStatus==="done"?C.done:entry.localResolutionStatus==="pending"?C.pending:accepted?C.accepted:entry.estado==="rechazado"?C.destructive:C.pending, fontSize: compact ? 10 : 13, fontWeight: "800" }}>{pending ? "Original: " : ""}{state}</Text>}
     {canonical&&entry.localResolutionStatus&&<Text style={{color:entry.localResolutionStatus==="done"?C.done:C.pending,fontSize:compact?10:13}}>{lang==="en"?"My follow-up: ":"Mi seguimiento: "}{entry.localResolutionStatus==="done"?(lang==="en"?"DONE":"REALIZADA"):(lang==="en"?"PENDING":"PENDIENTE")}</Text>}
@@ -86,10 +86,10 @@ export function GoEntrySummary({ entry }: { entry: GoEntry }) {
   const policy = reservationCardPolicy(entry);
   const unknown = entry.businessBooking || entry.bookingPerspective === "business" ? t("booking_customer_unknown") : lang === "en" ? "Reservation" : "Reserva";
   const professional = entry.professionalName === "Sin preferencia" ? "" : entryIdentity(entry.professionalName);
-  return <View testID="entry-summary" style={{ gap: 8 }}>
+  return <View testID="entry-summary" style={{ gap: 6 }}>
     <Text style={s.title}>{entryHeading(entry, unknown)}</Text>
     {policy.canonical && <Text style={{ color: policy.stateColor, fontWeight: "800" }}>{entryProposalPending(entry) ? (lang === "en" ? "Original reservation: " : "Reserva original: ") : ""}{t(policy.stateKey as any)}</Text>}
-    <Text style={s.text}>{[entry.date || entry.dateISO, entry.time, entry.duration].filter(Boolean).join(" · ")}</Text>
+    <Text testID="entry-original-date-time" style={s.text}>{[entryIsReservation(entry) ? formatBookingLocalDate(entry.dateISO, entry.date, lang, entry.bookingTimeline?.timezone, entry.bookingStartsAt || entry.startDatetime) : entry.date || entry.dateISO, entry.time, entry.duration].filter(Boolean).join(" · ")}</Text>
     {!!professional && <Text style={s.text}>{lang === "en" ? "Professional: " : "Profesional: "}{professional}</Text>}
     {!!entry.place && <Text style={s.secondary}>{entry.place}</Text>}
   </View>;
@@ -139,7 +139,7 @@ export function GoEntryDetailsSheet(props: EntryDetailsProps) {
 }
 
 function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, renderMessageScreen, handedness = "right", children, closeRequested = false }: EntryDetailsProps & { entry: GoEntry }) {
-  const insets = useSafeAreaInsets(), { lang } = useLanguage();
+  const insets = useSafeAreaInsets(), window = useWindowDimensions(), { lang } = useLanguage();
   const [closing, setClosing] = useState(false);
   const [navigationGeometry, setNavigationGeometry] = useState({ y: 0, height: 0, summaryEnd: 0, actionsTop: 0, offset: 0 });
   const gapStart = Math.max(navigationGeometry.y, navigationGeometry.y + navigationGeometry.summaryEnd - navigationGeometry.offset + 12);
@@ -185,27 +185,35 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
   }, [closing, finishDismiss]);
   const current = landingCurrentEntry(entry);
   const pending = entryProposalPending(entry);
+  const hasMessage = !!onMessage && !entryIsInternal(entry);
+  const closeButtonCount = onGoToLanding ? 2 : 1;
+  const navigationGapWidth = (closeButtonCount + (hasMessage ? 1 : 0) - 1) * 8;
+  const navigationAvailableWidth = Math.max(0, window.width - Math.max(insets.left, insets.right, 8) * 2);
+  const messageButtonWidth = hasMessage ? Math.max(52, Math.min(132, navigationAvailableWidth - closeButtonCount * ENTRY_DETAIL_CLOSE.touchSize - navigationGapWidth)) : 0;
+  const navigationWidth = closeButtonCount * ENTRY_DETAIL_CLOSE.touchSize + navigationGapWidth + messageButtonWidth;
+  const messageButton = hasMessage && <TouchableOpacity testID="entry-message-go" accessibilityRole="button" accessibilityLabel="MENSAJE GO" activeOpacity={0.72} onPress={() => { if (phase.current !== "open") return; if (renderMessageScreen) { onMessage?.(); return; } messageAfterDismiss.current = true; dismiss(); }}
+    style={{width:messageButtonWidth,minHeight:44,paddingHorizontal:8,paddingVertical:8,borderWidth:1.5,borderRadius:10,borderColor:"#93c5fd",backgroundColor:"rgba(147,197,253,0.14)",shadowColor:"#93c5fd",shadowOffset:{width:0,height:2},shadowOpacity:0.2,shadowRadius:4,elevation:2,alignItems:"center",justifyContent:"center"}}>
+    <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72} style={{color:"#93c5fd",fontWeight:"800",fontSize:12}}>MENSAJE GO</Text>
+  </TouchableOpacity>;
+  const panelClose = <GoCloseButton level="panel" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Close details" : "Cerrar detalle"} onPress={dismiss} />;
+  const landingClose = onGoToLanding && <GoCloseButton level="container" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Go directly to Landing" : "Ir directamente al Landing"} onPress={onGoToLanding} />;
   return <Modal testID="entry-details-modal" visible={!closing} transparent animationType="none" onRequestClose={dismiss} onDismiss={finishDismiss}>
     <View testID="entry-details-overlay" style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, paddingTop: insets.top + 8, paddingBottom: insets.bottom + 8, paddingHorizontal: Math.max(insets.left, insets.right, 8), backgroundColor: "#0e0e10" }}>
       <GoScreenCloseSurface testID="entry-details-sheet" handedness={handedness} enabled={!closing} onClose={dismiss} scrollRefs={[scroll]} pointerEvents={closing ? "none" : "auto"} onAccessibilityEscape={dismiss} style={[s.sheet, { borderColor: pending ? "#FF8C00" : entry.color || "#4A80BD" }]}>
         <View testID="entry-details-gesture-body" style={{ flex: 1, minHeight: 0 }}>
         <View testID="entry-detail-close-gesture" style={{ height: ENTRY_DETAIL_CLOSE.headerHeight, alignItems: "center", justifyContent: "center" }}><View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.35)" }} /></View>
-        <ScrollView ref={scroll} testID="entry-details-scroll" style={{ flex: 1 }} onLayout={event => { const { y, height } = event.nativeEvent.layout; setNavigationGeometry(value => ({ ...value, y, height })); }} onScroll={event => setNavigationGeometry(value => ({ ...value, offset: event.nativeEvent.contentOffset.y }))} scrollEventThrottle={32} keyboardShouldPersistTaps="handled" bounces={false} alwaysBounceVertical={false} overScrollMode="never" directionalLockEnabled contentContainerStyle={{ flexGrow:1, paddingHorizontal: 18, paddingBottom: 12, gap: 12 }}>
-          <View testID="entry-details-information" onLayout={event => { const { y, height } = event.nativeEvent.layout; setNavigationGeometry(value => ({ ...value, summaryEnd: y + height })); }} style={{ gap: 12 }}>
+        <ScrollView ref={scroll} testID="entry-details-scroll" style={{ flex: 1 }} onLayout={event => { const { y, height } = event.nativeEvent.layout; setNavigationGeometry(value => ({ ...value, y, height })); }} onScroll={event => setNavigationGeometry(value => ({ ...value, offset: event.nativeEvent.contentOffset.y }))} scrollEventThrottle={32} keyboardShouldPersistTaps="handled" bounces={false} alwaysBounceVertical={false} overScrollMode="never" directionalLockEnabled contentContainerStyle={{ flexGrow:1, paddingHorizontal: 18, paddingBottom: 8, gap: 8 }}>
+          <View testID="entry-details-information" onLayout={event => { const { y, height } = event.nativeEvent.layout; setNavigationGeometry(value => ({ ...value, summaryEnd: y + height })); }} style={{ gap: 8 }}>
           <GoEntrySummary entry={current} />
           <GoEntryContract entry={current} />
-          {pending && <View testID="entry-proposal" style={{ borderColor: "#FF8C00", borderWidth: 1, borderRadius: 12, padding: 12, gap: 8 }}>
+          {pending && <View testID="entry-proposal" style={{ borderColor: "rgba(255,140,0,0.42)", borderWidth: 1, borderRadius: 12, padding: 10, gap: 6, backgroundColor:"rgba(12,10,8,0.72)" }}>
             <Text style={{ color: "#FF8C00", fontWeight: "800" }}>{entry.estado === "propuesto" ? (lang === "en" ? "CHANGE RECEIVED" : "CAMBIO RECIBIDO") : (lang === "en" ? "AWAITING RESPONSE" : "ESPERANDO RESPUESTA")}</Text>
-            <Text style={s.text}>{lang === "en" ? "Proposed: " : "Propuesto: "}{[entry.changeProposal!.date || entry.changeProposal!.dateISO, entry.changeProposal!.time].filter(Boolean).join(" · ")}</Text>
+            <Text testID="entry-proposed-date-time" style={s.text}>{lang === "en" ? "Proposed: " : "Propuesto: "}{[entryIsReservation(entry) ? formatBookingLocalDate(entry.changeProposal!.dateISO, entry.changeProposal!.date, lang, entry.bookingTimeline?.timezone) : entry.changeProposal!.date || entry.changeProposal!.dateISO, entry.changeProposal!.time].filter(Boolean).join(" · ")}</Text>
             {!!entry.changeProposal!.note && <Text style={s.secondary}>{entry.changeProposal!.note}</Text>}
           </View>}
           </View>
-          <View testID="entry-details-actions" onLayout={event => setNavigationGeometry(value => ({ ...value, actionsTop: event.nativeEvent.layout.y }))} style={{marginTop:"auto",paddingTop:12,gap:12}}>
+          <View testID="entry-details-actions" onLayout={event => setNavigationGeometry(value => ({ ...value, actionsTop: event.nativeEvent.layout.y }))} style={{marginTop:"auto",paddingTop:8,gap:8}}>
           <GoEntryCommunication entry={entry} />
-          {onMessage&&!entryIsInternal(entry)&&<TouchableOpacity testID="entry-message-go" accessibilityRole="button" accessibilityLabel="MENSAJE GO" onPress={() => { if (phase.current !== "open") return; if (renderMessageScreen) { onMessage(); return; } messageAfterDismiss.current = true; dismiss(); }}
-            style={{alignSelf:handedness==="left"?"flex-start":"flex-end",minHeight:44,paddingHorizontal:14,paddingVertical:10,borderWidth:1,borderRadius:10,borderColor:"#93c5fd"}}>
-            <Text numberOfLines={1} style={{color:"#93c5fd",fontWeight:"700",fontSize:12}}>MENSAJE GO</Text>
-          </TouchableOpacity>}
           {typeof children === "function" ? children(dismissThen) : children}
           </View>
         </ScrollView>
@@ -213,9 +221,8 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
         </View>
         {/* Preserve the 74-point navigation footer; overlays never participate in layout. */}
         <View testID="entry-detail-close-footer" pointerEvents="none" style={{ flexShrink: 0, height: 74, flexDirection: "row", justifyContent: handedness === "left" ? "flex-start" : "flex-end", paddingHorizontal: 6, paddingTop: 4, paddingBottom: 6 }} />
-        <GoNavigationFloating testID="entry-detail-floating-navigation" screenKey="entry-details" width={onGoToLanding?136:64} safeArea={false} handedness={handedness} initialTop={navigationTop}>
-          <GoCloseButton level="panel" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Close details" : "Cerrar detalle"} onPress={dismiss} />
-          {onGoToLanding && <GoCloseButton level="container" touchSize={ENTRY_DETAIL_CLOSE.touchSize} hitSlop={0} accessibilityLabel={lang === "en" ? "Go directly to Landing" : "Ir directamente al Landing"} onPress={onGoToLanding} />}
+        <GoNavigationFloating testID="entry-detail-floating-navigation" screenKey="entry-details" buttonKey={hasMessage ? "navigation-with-message" : "navigation"} width={navigationWidth} safeArea={false} handedness={handedness} initialTop={hasMessage ? undefined : navigationTop}>
+          {handedness === "left" ? <>{panelClose}{messageButton}{landingClose}</> : <>{messageButton}{panelClose}{landingClose}</>}
         </GoNavigationFloating>
       </GoScreenCloseSurface>
       {renderMessageScreen?.()}
@@ -230,8 +237,8 @@ const s = StyleSheet.create({
   secondary: { color: "rgba(255,255,255,0.65)", fontSize: 14, lineHeight: 21 },
   label: { color: "#fff", fontWeight: "700", fontSize: 16 },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  action: { flexGrow: 1, flexBasis: 90, minHeight: 44, padding: 10, borderWidth: 1, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  action: { flexGrow: 1, flexBasis: 90, minHeight: 44, padding: 10, borderWidth: 1.5, borderRadius: 10, alignItems: "center", justifyContent: "center", shadowOffset:{width:0,height:2}, shadowOpacity:0.18, shadowRadius:4, elevation:2 },
   compactAction: { flex: 1, flexBasis: 0, minWidth: 0, minHeight: 36, paddingVertical: 7, paddingHorizontal: 4, borderRadius: 8 },
-  contact: { flex: 1, minHeight: 44, padding: 10, borderWidth: 1, borderColor: "#4ade80", borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  contact: { flex: 1, minHeight: 44, padding: 10, borderWidth: 1.4, borderColor: "#4ade80", backgroundColor:"rgba(74,222,128,0.12)", borderRadius: 10, alignItems: "center", justifyContent: "center", shadowColor:"#4ade80", shadowOffset:{width:0,height:2}, shadowOpacity:0.18, shadowRadius:4, elevation:2 },
   contactText: { color: "#4ade80", fontWeight: "700" },
 });
