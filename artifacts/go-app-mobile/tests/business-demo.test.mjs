@@ -579,6 +579,14 @@ test("DEMO calendar controls persist locally without altering public calendar pr
   let tree=ui.render(Screen,{onClose(){},hideFAB:true}); nodes(tree).find(node=>node.props.accessibilityLabel === "Configuración de reservas").props.onPress();
   tree=ui.render(Screen,{onClose(){},hideFAB:true}); const panel=component(tree,"GoCalConfigPanel");
   panel.props.onDensityChange("15min"); panel.props.onDayNightModeChange("oscuro"); await turn();
+  panel.props.onViewModeChange("mes_lineal");
+  tree=ui.render(Screen,{onClose(){},hideFAB:true});
+  assert.equal(component(tree,"GoCalConfigPanel").props.viewMode,"mes_lineal");
+  nodes(tree).find(node=>node.props.accessibilityLabel === "Configuración de reservas").props.onPress();
+  tree=ui.render(Screen,{onClose(){},hideFAB:true});
+  nodes(tree).find(node=>node.props.accessibilityLabel === "Configuración de reservas").props.onPress();
+  tree=ui.render(Screen,{onClose(){},hideFAB:true});
+  assert.equal(component(tree,"GoCalConfigPanel").props.viewMode,"mes_lineal");
   assert.equal(f.store.getSnapshot().preferences.cal_density,"15min");
   assert.equal(f.store.getSnapshot().preferences.cal_day_night_mode_v1,"oscuro");
   assert.equal(ui.calls.liveFloor,0); assert.equal(ui.calls.liveAgenda,0);

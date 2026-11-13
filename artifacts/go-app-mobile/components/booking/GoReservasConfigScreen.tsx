@@ -572,10 +572,8 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             onDayNightModeChange={(m) => { if (demoStore) setDemoDayNightMode(m); else onDayNightModeChange?.(m); calendarStorage.setItem("cal_day_night_mode_v1", m).catch(reportStorageError); }}
             calSize={calSize}
             onCalSizeChange={(s) => { setCalSize(s); calendarStorage.setItem("go_cal_size_v1", s).catch(reportStorageError); }}
-            viewMode={calInnerView === "semana" ? "semana" : "dia"}
+            viewMode={calInnerView}
             onViewModeChange={(v) => setCalInnerView(v)}
-            monthGridOpen={monthPickerOpen}
-            onToggleMonthGrid={() => monthPickerOpen ? closeMonthPicker() : openMonthPicker()}
           />
           {calendarWorkHours && <BusinessWorkHoursSwitch preference={calendarWorkHours} lang={lang} color={tk.text} />}
         </View>

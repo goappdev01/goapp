@@ -25,10 +25,8 @@ export interface GoCalConfigPanelProps {
   onDayNightModeChange: (m: CalDayNightMode) => void;
   calSize: CalSizeKey;
   onCalSizeChange: (s: CalSizeKey) => void;
-  viewMode: "dia" | "semana";
-  onViewModeChange: (v: "dia" | "semana") => void;
-  monthGridOpen?: boolean;
-  onToggleMonthGrid?: () => void;
+  viewMode: "dia" | "semana" | "mes_lineal";
+  onViewModeChange: (v: "dia" | "semana" | "mes_lineal") => void;
 }
 
 function chip(active: boolean) {
@@ -63,8 +61,6 @@ export function GoCalConfigPanel({
   onCalSizeChange,
   viewMode,
   onViewModeChange,
-  monthGridOpen = false,
-  onToggleMonthGrid,
 }: GoCalConfigPanelProps) {
   const effectiveMin =
     density === "auto"
@@ -93,22 +89,20 @@ export function GoCalConfigPanel({
             </TouchableOpacity>
           );
         })}
-        {/* MES — solo si el padre provee onToggleMonthGrid */}
-        {!!onToggleMonthGrid && (
-          <TouchableOpacity
-            onPress={() => { Haptics.selectionAsync(); onToggleMonthGrid(); }}
-            activeOpacity={0.7}
-            hitSlop={6}
-            style={[chip(monthGridOpen), { flexDirection: "row", alignItems: "center", gap: 4 }]}
-          >
-            <Feather
-              name="calendar"
-              size={9}
-              color={monthGridOpen ? "#ffffff" : "rgba(255,255,255,0.75)"}
-            />
-            <Text style={chipTxt(monthGridOpen)} numberOfLines={1}>MES</Text>
-          </TouchableOpacity>
-        )}
+        {/* MES selecciona la vista lineal; el selector de fecha sigue en el botón flotante. */}
+        <TouchableOpacity
+          onPress={() => { Haptics.selectionAsync(); onViewModeChange("mes_lineal"); }}
+          activeOpacity={0.7}
+          hitSlop={6}
+          style={[chip(viewMode === "mes_lineal"), { flexDirection: "row", alignItems: "center", gap: 4 }]}
+        >
+          <Feather
+            name="calendar"
+            size={9}
+            color={viewMode === "mes_lineal" ? "#ffffff" : "rgba(255,255,255,0.75)"}
+          />
+          <Text style={chipTxt(viewMode === "mes_lineal")} numberOfLines={1}>MES</Text>
+        </TouchableOpacity>
         {/* HORAS */}
         <TouchableOpacity
           onPress={() => { Haptics.selectionAsync(); onShowHoursChange(!showHours); }}

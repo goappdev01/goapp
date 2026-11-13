@@ -20581,22 +20581,8 @@ function HomeScreenContent() {
                 onDayNightModeChange={(m) => { setCalBgDayNightMode(m); AsyncStorage.setItem("cal_day_night_mode_v1", m).catch(() => {}); }}
                 calSize={calSize}
                 onCalSizeChange={(s) => { setCalSize(s); AsyncStorage.setItem("go_cal_size_v1", s).catch(() => {}); }}
-                viewMode={calBgViewMode as "dia" | "semana"}
+                viewMode={calBgViewMode}
                 onViewModeChange={changeCalendarView}
-                monthGridOpen={monthGridOpen}
-                onToggleMonthGrid={() => {
-                  if (calFlow.monthGridOpen) {
-                    calFlow.closeMonthGridManual();
-                  } else if (calFlow.isActive) {
-                    calFlow.openDateCorrection();
-                  } else {
-                    const baseISO = dateISODraft || formatISODate(getToday());
-                    calFlow.openForNav({
-                      initialDateISO: baseISO,
-                      onDaySelect: navigateCalendarDay,
-                    });
-                  }
-                }}
               />
             )}
             {/* Acciones principales: Nueva tarea · HOY · RESERVAR · GO */}
