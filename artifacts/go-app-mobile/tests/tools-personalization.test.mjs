@@ -46,8 +46,8 @@ test('compact opacity control updates its label, accessible value and real previ
   const action = async callback => { await React.act(async () => { callback(); }); };
   try {
     await action(() => root.render(React.createElement(GoNavigationAppearanceControl)));
-    assert.match(host.textContent, /^Opacidad75%$/);
-    const label = f.latest(p => p.children === 'Opacidad');
+    assert.match(host.textContent, /^OPACIDAD75%$/);
+    const label = f.latest(p => p.children === 'OPACIDAD');
     assert.equal(label.numberOfLines, 1);
     assert.equal(flatten(label.style).color, '#17212B', 'The fixed beige tools surface stays readable in system dark mode');
     assert.equal(flatten(f.latest(p => p.testID === 'navigation-opacity-header').style).flexDirection, 'row');
@@ -60,7 +60,7 @@ test('compact opacity control updates its label, accessible value and real previ
     slider().onLayout({ nativeEvent: { layout: { width: 240 } } });
     for (const [x, expected] of [[0, 11], [120, 55], [240, 99], [300, 99]]) {
       await action(() => slider().onPanResponderMove({ nativeEvent: { locationX: x } }));
-      assert.equal(host.textContent, `Opacidad${expected}%`);
+      assert.equal(host.textContent, `OPACIDAD${expected}%`);
       assert.equal(slider().accessibilityValue.now, expected);
       assert.equal(stored.get(pref.NAVIGATION_OPACITY_KEY), String(expected));
       assert.equal(flatten(preview().style).backgroundColor, `rgba(60,68,78,${expected / 100})`);
@@ -76,7 +76,7 @@ test('compact opacity control updates its label, accessible value and real previ
     assert.match(host.textContent, /No se pudo conservar la preferencia/);
     fail = false;
     await action(() => slider().onAccessibilityAction({ nativeEvent: { actionName: 'increment' } }));
-    assert.equal(host.textContent, 'Opacidad34%');
+    assert.equal(host.textContent, 'OPACIDAD34%');
     assert.equal(stored.get(pref.NAVIGATION_OPACITY_KEY), '34');
   } finally {
     await action(() => root.unmount());

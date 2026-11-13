@@ -23,7 +23,7 @@ export function GoNavigationAppearanceControl() {
   return (
     <View style={s.control}>
       <View testID="navigation-opacity-header" style={s.header}>
-        <Text style={s.label} numberOfLines={1} adjustsFontSizeToFit>Opacidad</Text>
+        <Text style={s.label} numberOfLines={1} adjustsFontSizeToFit>OPACIDAD</Text>
         <View style={s.previews}>
           {(["panel", "container", "settings"] as const).map((level, i) => (
             <GoCloseButton
