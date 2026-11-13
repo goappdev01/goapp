@@ -1037,8 +1037,7 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
         const who = await captureAuthIdentity(); if (!who) return;
         const saved = await resolveCalendarExceptionBusiness(source, who.userId);
         if (!active || timezoneBusy.current || timezoneEditVersion.current !== editVersion || saved.sourceId !== source || !await isAuthIdentityCurrent(who)) return;
-        if (target) await target.updateConfig({ timezone: saved.timezone });
-        else updateConfig({ timezone: saved.timezone }, source);
+        updateConfig({ timezone: saved.timezone }, source);
         if (active) setTimezone(saved.timezone);
       } catch (error) {
         if (active && !(error && typeof error === "object" && "code" in error && error.code === "BOOKING_CALENDAR_BUSINESS_NOT_LINKED"))
