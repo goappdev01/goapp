@@ -241,6 +241,7 @@ interface EmpresaConfigScreenProps {
   onOpenVerificacion?: () => void;
   onManageCalendarConflicts?: (dateISO: string) => void;
   onFinalizarConfig?:  () => void;
+  onFooterHeight?: (height: number) => void;
   initialStep?:        number;
   onOpenCompanies?:    () => void;
   contextNavigation?:  React.ReactNode;
@@ -314,7 +315,7 @@ function useStepSave(saveRef: StepSaveRef | undefined, flush: () => Promise<void
   }, [saveRef]);
 }
 
-export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalendarConflicts, onFinalizarConfig, initialStep = 0, goPrevRef, onOpenCompanies, contextNavigation, keyboardManagedByParent = false, startAtSteps = false }: EmpresaConfigScreenProps & { goPrevRef?: React.MutableRefObject<(() => void) | null> }) {
+export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalendarConflicts, onFinalizarConfig, onFooterHeight, initialStep = 0, goPrevRef, onOpenCompanies, contextNavigation, keyboardManagedByParent = false, startAtSteps = false }: EmpresaConfigScreenProps & { goPrevRef?: React.MutableRefObject<(() => void) | null> }) {
   const insets = useSafeAreaInsets();
   const { t, lang } = useLanguage();
   const STEPS = buildStepsCfg(t);
@@ -338,7 +339,6 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
     if (phase === "steps" && (currentStep === 0 || currentStep === 1)) Keyboard.dismiss();
   }, [phase, currentStep]);
   const [planoEditorOpen, setPlanoEditorOpen] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(() => Keyboard.isVisible());
   const compactFooter = Boolean(demo) && Platform.OS === "ios" && (currentStep === 0 || currentStep === 1);
   useEffect(() => { if (resumeLocation) consumeLocationReturn(resumeLocation.token); }, [resumeLocation, consumeLocationReturn]);
   // Paso Ubicación — protección: el botón Siguiente solo se activa cuando
@@ -518,14 +518,12 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
     const onShow = Keyboard.addListener(showEvent, () => {
-      setKeyboardVisible(true);
       Animated.timing(headerAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
     });
     const onDidShow = Keyboard.addListener("keyboardDidShow", () => {
       if (activeNewInput.current?.isFocused()) revealProfessional(activeNewInput.current);
     });
     const onHide = Keyboard.addListener(hideEvent, () => {
-      setKeyboardVisible(false);
       Animated.timing(headerAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
     });
     return () => { onShow.remove(); onHide.remove(); onDidShow.remove(); };
@@ -614,7 +612,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
           ref={scrollRef}
           onLayout={compactFooter ? () => { if (activeNewInput.current?.isFocused()) revealProfessional(activeNewInput.current); } : undefined}
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
+          contentContainerStyle={{ paddingBottom: 64 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
@@ -712,23 +710,24 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
       </Animated.View>
 
       {/* ── Footer navigation — solo avance; retroceso via FAB flotante ── */}
-      <View style={[c.footer, { paddingBottom: insets.bottom + 12, justifyContent: "flex-end" }, compactFooter && { paddingTop: 4, paddingBottom: keyboardVisible ? 4 : insets.bottom + 4 }]}>
+      <View testID="business-wizard-footer" onLayout={event => onFooterHeight?.(event.nativeEvent.layout.height)}
+        style={[c.footer, { height: 62 + insets.bottom, paddingBottom: insets.bottom + 6, justifyContent: "flex-end" }]}>
         <TouchableOpacity
           activeOpacity={canProceed ? 0.88 : 1}
           onPress={canProceed && !isAdvancing ? goNext : undefined}
           disabled={isAdvancing}
-          style={[c.nextBtn, compactFooter && c.nextBtnCompact, {
+          style={[c.nextBtn, {
             backgroundColor: canProceed ? GREEN : "rgba(0,0,0,0.10)",
             borderWidth: canProceed ? 0 : 1,
             borderColor: "rgba(0,0,0,0.10)",
           }]}
         >
-          <Text style={[c.nextBtnTxt, compactFooter && c.nextBtnTxtCompact, { color: canProceed ? "#fff" : "rgba(0,0,0,0.30)" }]}>
+          <Text style={[c.nextBtnTxt, { color: canProceed ? "#fff" : "rgba(0,0,0,0.30)" }]}>
             {isLast ? t("biz_finish_config") : t("biz_next")}
           </Text>
           <Feather
             name={isLast ? "check-circle" : "arrow-right"}
-            size={compactFooter ? 16 : 17}
+            size={17}
             color={canProceed ? "#fff" : "rgba(0,0,0,0.25)"}
           />
         </TouchableOpacity>
@@ -3334,13 +3333,11 @@ const c = StyleSheet.create({
 
   footer:       {
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    paddingHorizontal: 20, paddingTop: 12,
+    paddingHorizontal: 20, paddingTop: 6,
     backgroundColor: CARD, borderTopWidth: 1, borderTopColor: BORDER,
   },
   backFooterBtn:{ flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 10 },
   backFooterTxt:{ fontSize: 14, fontWeight: "600", color: GRAY },
-  nextBtn:      { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 13, paddingHorizontal: 24, borderRadius: 14 },
-  nextBtnCompact: { minHeight: 44, paddingVertical: 10, paddingHorizontal: 20 },
-  nextBtnTxtCompact: { fontSize: 14 },
+  nextBtn:      { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44, paddingVertical: 10, paddingHorizontal: 24, borderRadius: 14 },
   nextBtnTxt:   { fontSize: 15, fontFamily: "Inter_700Bold", fontWeight: "800", color: "#fff" },
 });

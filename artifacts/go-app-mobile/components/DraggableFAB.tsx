@@ -157,8 +157,8 @@ export function DraggableFAB({
         const nextL=Math.max(minL,Math.min(maxL,l));
         const restored=keyboardResponsive&&typeof h==="number"&&Number.isFinite(h)?t+currentBoundsHeight.current-h:t;
         const nextT=Math.max(minT,Math.min(maxT,restored));
-        if(avoidRects?.length){posL.value=clearAt(nextL,nextT)?nextL:initLeft;
-          posT.value=clearAt(nextL,nextT)?nextT:initTop;}
+        if(avoidRects?.length){const safe=settleClearPosition(nextL,nextT,initLeft,initTop,buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects);
+          posL.value=safe.x;posT.value=safe.y;}
         else{posL.value=bounds?l:nextL;posT.value=bounds?restored:nextT;}
       } catch {
         // ignore corrupt data
@@ -167,9 +167,9 @@ export function DraggableFAB({
     return()=>{active=false;};
   }, [storageKey]);
 
-  useEffect(()=>{if(!bounds||!avoidRects?.length||clearAt(posL.value,posT.value))return;
-    posL.value=Math.max(minL,Math.min(maxL,initLeft));
-    posT.value=Math.max(minT,Math.min(maxT,initTop));
+  useEffect(()=>{if(!avoidRects?.length||isDragging.value||clearAt(posL.value,posT.value))return;
+    const safe=settleClearPosition(posL.value,posT.value,initLeft,initTop,buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects);
+    posL.value=safe.x;posT.value=safe.y;
   },[bounds?.width,bounds?.height,JSON.stringify(avoidRects)]);
 
   useEffect(() => {

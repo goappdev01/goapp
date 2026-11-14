@@ -75,6 +75,15 @@ test("a delayed preference read cannot move the button after dragging has starte
   finish(JSON.stringify({ l: 10, t: 10 })); await f.settled();
   assert.equal(f.render().left, start.left - 20); assert.equal(f.render().top, start.top - 30);
 });
+test("a saved floating control stays put when clear and moves above a newly occupied footer",async()=>{
+ const key='fab_pos:booking-assistant:close',saved=new Map([[key,JSON.stringify({l:200,t:430})]]);
+ const f=fixture(saved),clear={avoidRects:[{x:0,y:480,width:390,height:20}]};
+ f.render(500,clear);await f.settled();assert.equal(f.render(500,clear).top,430);
+ const occupied={avoidRects:[{x:0,y:400,width:390,height:100}]};
+ f.render(500,occupied);
+ const moved=f.render(500,occupied);assert.ok(moved.top<=354,JSON.stringify(moved));
+ assert.equal(JSON.parse(saved.get(key)).t,430,'the manual preference is retained for later layouts');
+});
 for(const hand of ['left','right'])test(`Listados/${hand}: homologated long-press drag persists, clamps on resize/keyboard and never invokes close on release`,async()=>{
  const saved=new Map(),options={screenKey:'listados',buttonKey:'close-'+hand,initialRight:hand==='right'?14:332};let closed=0;options.children={onPress:()=>closed++};const f=fixture(saved);let start=f.render(500,options);await f.settled();
  assert.equal(f.gesture.delay,500);f.gesture.onStart({translationX:0,translationY:0});f.gesture.onUpdate({translationX:hand==='right'?-70:70,translationY:-110});f.gesture.onEnd();assert.equal(closed,0);

@@ -1182,6 +1182,32 @@ test('Name and Location keep the scrollable form and tappable Next outside it wi
  }
 });
 
+test('all eight business steps share one compact safe-area footer and keep navigation clear of its CTA',async()=>{
+ const f=dataFixture();await configuredSalon(f);
+ for(let step=0;step<8;step++){
+  const ui=configurationUI(f,step);ui.props.startAtSteps=true;
+  const tree=ui.render();
+  const footer=nodes(tree).find(n=>n.props.testID==='business-wizard-footer');
+  assert.ok(footer,`step ${step+1} footer`);
+  const style=Object.assign({},...footer.props.style);
+  assert.equal(style.height,96,`step ${step+1} shares 62pt bar plus 34pt safe area`);
+  assert.equal(style.paddingBottom,40);
+  const action=nodes(footer).find(n=>n.type==='TouchableOpacity');
+  assert.ok(action,`step ${step+1} action`);
+  assert.equal(Object.assign({},...action.props.style).minHeight,44);
+  assert.equal(nodes(tree).find(n=>n.type==='ScrollView'&&n.props.ref).props.contentContainerStyle.paddingBottom,64);
+  assert.ok(text(action).includes(step===7?'biz_finish_config':'biz_next'));
+ }
+ const panel=uiFixture(f),Panel=panel.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel;
+ const panelProps={visible:true,initialModulo:'empresa_config',onClose(){}};
+ panel.render(Panel,panelProps);
+ const outer=panel.render(Panel,panelProps);
+ const fab=component(outer,'DraggableFAB');
+ assert.ok(fab?.props.avoidRects?.length);
+ assert.equal(fab.props.avoidRects[0].y,844-(96+8));
+ assert.ok(fab.props.initialBottom>=96+16);
+});
+
 test('guided addition follows the last professional, scrolls/focuses its stable input and prevents rapid/unfinished duplicate cards',async()=>{
  const f=dataFixture();await configuredSalon(f);const before=plain(f.store.getSnapshot().plan),ui=configurationUI(f,4),{step,page}=ui.enterStep('StepEspacios');
  const scrolled=[],focused=[],content={nativeContent:true};let tree=ui.render();nodes(tree).find(n=>n.type==='ScrollView'&&n.props.ref).props.ref.current={scrollTo:value=>scrolled.push(value)};
