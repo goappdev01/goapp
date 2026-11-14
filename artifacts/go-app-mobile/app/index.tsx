@@ -17224,7 +17224,7 @@ function HomeScreenContent() {
                 const active = !!it.onPress;
                 return <View key={it.key} testID={`landing-quiet-orbit-${i}`} pointerEvents={active?"auto":"none"}
                   style={{ position: "absolute", left: x, top: y }}>
-                  <PremiumOrbitBtn color={it.color} selected={false} dimmed={!active} onPress={()=>it.onPress?.()}
+                  <PremiumOrbitBtn color={it.color} selected={false} dimmed={supportMode && !active} onPress={()=>it.onPress?.()}
                     icon={it.icon as "circle"} label={it.label} accessibilityLabel={it.title}
                     size={orbitBtnVisualSize} iconSize={active?Math.round(24*uiScaleFactor):0} labelSize={active?Math.max(8,Math.round(10*uiScaleFactor)):0}
                     labelOpacity={active?1:0} labelOnly={active} labelSpacing={0} paddingH={active?4:0} cafeDepth={it.key === "cafe"} />

@@ -163,6 +163,11 @@ test('AYUDA groups its four real actions consecutively and leaves the normal orb
  vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{alwaysStrict:false,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
  const help=scope.result.children;assert.equal(help.length,4);
  scope.supportMode=false;vm.runInNewContext(ts.transpileModule('result='+mode.getText(ast),{compilerOptions:{alwaysStrict:false,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,scope);
+ const userOrbits=scope.result.children;
+ assert.equal(userOrbits.length,8,'the complete user orbit remains visible');
+ assert.deepEqual(userOrbits.map(n=>n.children[0].props.color),['#1e40af','#f97316','#78350f','#0d9488','#c026d3','#15803d','#eab308','#9ca3af']);
+ assert.ok(userOrbits.every(n=>n.children[0].props.dimmed===false),'inactive user orbit slots retain their original full opacity');
+ assert.ok(userOrbits.every(n=>n.props.pointerEvents==='none'),'the restored colors do not activate restricted actions');
  const colors={mine:'#f97316',improvement:'#78350f',help:'#15803d',incident:'#c026d3'};
  for(let i=0;i<4;i++){const h=help[i].children[0].props;assert.equal(h.labelOnly,true);assert.equal(h.label,api.SUPPORT_ORBIT_ACTIONS[i].label);assert.equal(h.color,colors[api.SUPPORT_ORBIT_ACTIONS[i].kind]);h.onPress();}
  assert.deepEqual(calls,['incident','improvement','help','mine']);
