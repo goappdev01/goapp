@@ -75,12 +75,15 @@ test('a real company never loads cached services or bookings when the server is 
   assert.deepEqual(Array.from(await f.api.getBookableItems(own),row=>row.id),[]);
   assert.deepEqual(Array.from(await f.api.getBookableItems(),row=>row.id),[demoService]);
   assert.deepEqual(Array.from(await f.api.getBookings({businessId:own}),row=>row.id),[]);
+  assert.deepEqual(Array.from(await f.api.getBookings(),row=>row.id),['demo_booking_1']);
   assert.ok(f.calls.some(call=>call.url.includes('/bookings?negotiation=1&business_id='+own)));
   assert.deepEqual(Array.from(await f.api.getBookings({businessId:demo}),row=>row.id),['demo_booking_1']);
   unavailable=true;
   await assert.rejects(f.api.getBookableItems(own),error=>error.status===503);
   await assert.rejects(f.api.getBookings({businessId:own}),error=>error.status===503);
+  assert.deepEqual(Array.from(await f.api.getBookings(),row=>row.id),['demo_booking_1']);
   assert.deepEqual(Array.from(await f.api.getBookings({businessId:demo}),row=>row.id),['demo_booking_1']);
+  assert.equal(JSON.parse(f.memory.get('go_bookings_v1')).length,2,'historical rows remain untouched');
 });
 
 for (const role of ['usuario','empresa']) test(`public discovery with an expired ${role} session finds the same published businesses without refreshing`, async () => {

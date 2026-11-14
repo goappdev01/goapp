@@ -869,18 +869,22 @@ export async function getBookings(filters?: {
     return remote.filter(b => (!filters.customerId || b.customerId === filters.customerId)
       && (!filters.status || filters.status.includes(b.status)));
   }
-  let all = await loadAll<Booking>(KEY_BOOKINGS);
+  let stored = await loadAll<Booking>(KEY_BOOKINGS);
   // Expire old HOLDs
   const now = new Date().toISOString();
   let changed = false;
-  all = all.map((b) => {
+  stored = stored.map((b) => {
     if (b.status === "HOLD" && b.holdExpiresAt && b.holdExpiresAt < now) {
       changed = true;
       return { ...b, status: "EXPIRED" as BookingStatus };
     }
     return b;
   });
-  if (changed) await saveAll(KEY_BOOKINGS, all);
+  if (changed) await saveAll(KEY_BOOKINGS, stored);
+
+  // Preserve historical local rows without presenting a canonical reservation
+  // as current when its authoritative server read fails or the account changes.
+  let all = stored.filter(b => !isCloudId(b.businessId));
 
   // Las reservas confirmadas viven en Supabase. Los HOLD locales se mantienen
   // aquí porque son exclusivamente temporales y todavía no se han confirmado.
