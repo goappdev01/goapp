@@ -47,8 +47,41 @@ function fixture({ role = 'empresa', expired = true, reply, secureRead } = {}) {
       throw Error('Unexpected booking dependency '+name);
     } };
   vm.runInNewContext(compile('data/booking.ts'), scope);
-  return {api:scope.exports, auth, secure, calls};
+  return {api:scope.exports, auth, secure, memory, calls};
 }
+
+test('registered catalogue does not hide or copy a local DEMO company', async () => {
+  const demo={id:'demo_business_1',name:'DEMO peluquería',bookingActive:true};
+  const f=fixture({expired:false,reply:async()=>Response.json([{id:own,name:'Registrada',booking_enabled:true}])});
+  f.memory.set('go_businesses_v1',JSON.stringify([demo]));
+  assert.deepEqual(Array.from(await f.api.getBusinesses(),row=>row.id),[own,demo.id]);
+  assert.deepEqual(Array.from(await f.api.getActivebusinesses(),row=>row.id),[own]);
+  await f.api.saveBusiness({...demo,name:'DEMO actualizada'});
+  assert.deepEqual(JSON.parse(f.memory.get('go_businesses_v1')).map(row=>row.id),[demo.id]);
+});
+
+test('a real company never loads cached services or bookings when the server is empty or unavailable', async () => {
+  let unavailable=false;
+  const f=fixture({expired:false,reply:async(url)=>unavailable?Response.json({error:'Offline'},{status:503}):Response.json([])});
+  const demo='demo_business_1',demoService='demo_service_1';
+  f.memory.set('go_bookable_items_v1',JSON.stringify([
+    {id:service,businessId:own,title:'Antiguo'},
+    {id:demoService,businessId:demo,title:'Prueba local'},
+  ]));
+  f.memory.set('go_bookings_v1',JSON.stringify([
+    {id:booking,businessId:own,customerId:user,status:'CONFIRMED',startDatetime:'2035-01-01T10:00:00',endDatetime:'2035-01-01T10:30:00'},
+    {id:'demo_booking_1',businessId:demo,customerId:user,status:'CONFIRMED',startDatetime:'2035-01-01T10:00:00',endDatetime:'2035-01-01T10:30:00'},
+  ]));
+  assert.deepEqual(Array.from(await f.api.getBookableItems(own),row=>row.id),[]);
+  assert.deepEqual(Array.from(await f.api.getBookableItems(),row=>row.id),[demoService]);
+  assert.deepEqual(Array.from(await f.api.getBookings({businessId:own}),row=>row.id),[]);
+  assert.ok(f.calls.some(call=>call.url.includes('/bookings?negotiation=1&business_id='+own)));
+  assert.deepEqual(Array.from(await f.api.getBookings({businessId:demo}),row=>row.id),['demo_booking_1']);
+  unavailable=true;
+  await assert.rejects(f.api.getBookableItems(own),error=>error.status===503);
+  await assert.rejects(f.api.getBookings({businessId:own}),error=>error.status===503);
+  assert.deepEqual(Array.from(await f.api.getBookings({businessId:demo}),row=>row.id),['demo_booking_1']);
+});
 
 for (const role of ['usuario','empresa']) test(`public discovery with an expired ${role} session finds the same published businesses without refreshing`, async () => {
   const f=fixture({role}), before=f.secure.get('go_auth_session_v2');

@@ -622,11 +622,13 @@ async function deactivateRemote(resource: string, id: string, businessId?: strin
 // ── Businesses ─────────────────────────────────────────────────────────────────
 
 export async function getBusinesses(): Promise<Business[]> {
-  const local = await loadAll<Business>(KEY_BUSINESSES);
+  const local = (await loadAll<Business>(KEY_BUSINESSES)).filter(b => !isCloudId(b.id));
   try {
     const remote = await supabaseApiRequest<RemoteBusiness[]>("/supabase/businesses");
     if (!Array.isArray(remote)) throw new BookingApiError("El servidor devolvió una lista de empresas inválida.", 502);
-    if (remote.length > 0) return remote.map(mapRemoteBusiness);
+    const registered = remote.map(mapRemoteBusiness);
+    const remoteIds = new Set(registered.map(b => b.id));
+    return [...registered, ...local.filter(b => !remoteIds.has(b.id))];
   } catch (error) {
     console.warn("[booking] No se pudieron cargar negocios remotos:", error);
   }
@@ -646,7 +648,7 @@ export async function saveBusiness(b: Business): Promise<void> {
     await supabaseApiRequest(`${management}/businesses/${b.id}`, { method: "PATCH", body: JSON.stringify(businessBody(b)) }, true);
     return;
   }
-  const all = await getBusinesses();
+  const all = (await loadAll<Business>(KEY_BUSINESSES)).filter(row => !isCloudId(row.id));
   const idx = all.findIndex((x) => x.id === b.id);
   if (idx >= 0) all[idx] = b;
   else all.push(b);
@@ -657,7 +659,7 @@ export async function createBusiness(
   data: Omit<Business, "id" | "createdAt">
 ): Promise<Business> {
   const b: Business = { ...data, id: uid(), createdAt: new Date().toISOString() };
-  const all = await getBusinesses();
+  const all = (await loadAll<Business>(KEY_BUSINESSES)).filter(row => !isCloudId(row.id));
   all.push(b);
   await saveAll(KEY_BUSINESSES, all);
   return b;
@@ -667,7 +669,7 @@ export async function deleteBusiness(id: string): Promise<void> {
   if (isCloudId(id)) {
     await supabaseApiRequest(`${management}/businesses/${id}`, { method: "PATCH", body: JSON.stringify({ booking_enabled: false }) }, true); return;
   }
-  const all = await getBusinesses();
+  const all = (await loadAll<Business>(KEY_BUSINESSES)).filter(row => !isCloudId(row.id));
   await saveAll(KEY_BUSINESSES, all.filter((b) => b.id !== id));
 }
 
@@ -708,19 +710,23 @@ export async function searchBusinesses(query: string): Promise<Business[]> {
 // ── Bookable items ─────────────────────────────────────────────────────────────
 
 export async function getBookableItems(businessId?: string, remoteOnly = false): Promise<BookableItem[]> {
-  const local = await loadAll<BookableItem>(KEY_BOOKABLE_ITEMS);
+  // A canonical business is always server-authoritative, even when a legacy
+  // caller omits remoteOnly. A failed/empty response cannot expose stale items.
+  const requiresRemote = remoteOnly || isCloudId(businessId);
+  const local = requiresRemote ? [] : (await loadAll<BookableItem>(KEY_BOOKABLE_ITEMS)).filter(item => !isCloudId(item.businessId));
   try {
     const path = businessId
       ? `/supabase/services?business_id=${encodeURIComponent(businessId)}`
       : "/supabase/services";
     const remote = await supabaseApiRequest<RemoteService[]>(path);
     if (!Array.isArray(remote)) throw new BookingApiError("El servidor devolvió una lista de servicios inválida.", 502);
-    if (remote.length > 0 || remoteOnly) {
+    if (remote.length > 0 || requiresRemote) {
       const mapped = remember(remote.map(mapRemoteService));
-      return businessId ? mapped.filter((x) => x.businessId === businessId) : mapped;
+      return businessId ? mapped.filter((x) => x.businessId === businessId)
+        : [...mapped, ...local.filter(item => !mapped.some(row => row.id === item.id))];
     }
   } catch (error) {
-    if (remoteOnly) throw error;
+    if (requiresRemote) throw error;
     console.warn("[booking] No se pudieron cargar servicios remotos:", error);
   }
   const all = local;
@@ -855,6 +861,14 @@ export async function getBookings(filters?: {
   customerId?: string;
   status?: BookingStatus[];
 }): Promise<Booking[]> {
+  const businessId = filters?.businessId;
+  if (businessId && isCloudId(businessId)) {
+    // A real company's reservations must never be replaced with a local cache
+    // when the server is unavailable or the current account lacks access.
+    const remote = await getLiveBusinessBookings(businessId);
+    return remote.filter(b => (!filters.customerId || b.customerId === filters.customerId)
+      && (!filters.status || filters.status.includes(b.status)));
+  }
   let all = await loadAll<Booking>(KEY_BOOKINGS);
   // Expire old HOLDs
   const now = new Date().toISOString();
