@@ -70,7 +70,7 @@ export function GoBusinessAccessProvider({ children }: { children: React.ReactNo
 
   const checking = loading || checkedMode !== activeMode;
   return <Context.Provider value={{ snapshot, loading: checking, error, refresh,
-    allowed: !checking && !error && snapshot?.business?.verified === true }}>{children}</Context.Provider>;
+    allowed: !checking && !error && snapshot?.status === "verificada" }}>{children}</Context.Provider>;
 }
 
 export function useBusinessAccess() { return useContext(Context); }

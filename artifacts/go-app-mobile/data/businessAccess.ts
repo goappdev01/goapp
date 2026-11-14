@@ -1,7 +1,15 @@
 import { captureAuthIdentity, isAuthIdentityCurrent } from "@/lib/authSession";
 import { BookingApiError, isCloudId, supabaseApiRequest } from "./booking";
 
-export type BusinessVerificationStatus = "sin_empresa" | "pendiente_verificacion" | "rechazada" | "verificada";
+export type BusinessVerificationStatus = "sin_empresa" | "pendiente_verificacion" | "rechazada" | "verificada" | "trial_expirada";
+export type BusinessTrial = {
+  status: "documents_pending" | "pending_review" | "needs_changes" | "rejected" | "approved";
+  accepted_at: string;
+  trial_starts_at: string | null;
+  trial_ends_at: string | null;
+  review_notes?: string | null;
+};
+export type BusinessDocument = { id: string; kind: string; file_name: string; mime_type: string; byte_size: number };
 export type BusinessEnrollment = {
   legal_name: string;
   tax_id: string;
@@ -13,6 +21,8 @@ export type OwnedBusinessAccess = {
   name: string;
   address?: string | null;
   verified?: boolean;
+  trial?: BusinessTrial | null;
+  documents?: BusinessDocument[];
   verification_request?: Partial<BusinessEnrollment> & { status?: "pending" | "rejected"; rejection_reason?: string | null };
 };
 export type BusinessAccessSnapshot = {
@@ -27,7 +37,8 @@ export function resolveBusinessAccess(rows: OwnedBusinessAccess[], userId: strin
   return {
     userId,
     business,
-    status: !business ? "sin_empresa" : business.verified === true ? "verificada"
+    status: !business ? "sin_empresa" : business.verified === true
+      ? business.trial && (!business.trial.trial_ends_at || Date.parse(business.trial.trial_ends_at) <= Date.now()) ? "trial_expirada" : "verificada"
       : business.verification_request?.status === "rejected" ? "rechazada" : "pendiente_verificacion",
   };
 }
@@ -64,4 +75,35 @@ export async function submitBusinessEnrollment(data: BusinessEnrollment, busines
     throw new BookingApiError("Enrollment session changed", 401, "ENROLLMENT_SESSION_CHANGED");
   }
   return rows[0];
+}
+
+export async function acceptBusinessTrial(): Promise<OwnedBusinessAccess> {
+  const identity = await captureAuthIdentity();
+  if (!identity?.userId) throw new Error("Inicia sesión.");
+  const rows = await supabaseApiRequest<OwnedBusinessAccess[]>("/supabase/manage/trial/accept", {
+    method: "POST", body: JSON.stringify({ terms_version: "go-trial-v1" }),
+  }, true, identity.userId);
+  if (!Array.isArray(rows) || rows.length !== 1 || !isCloudId(rows[0]?.id) || rows[0].verified !== false
+    || !await isAuthIdentityCurrent(identity)) throw new Error("No pudimos confirmar la prueba gratuita.");
+  return rows[0];
+}
+
+export async function uploadBusinessDocument(businessId: string, data: {
+  kind: string; name: string; mime_type: string; content_base64: string;
+}): Promise<void> {
+  const identity = await captureAuthIdentity();
+  if (!identity?.userId || !isCloudId(businessId)) throw new Error("Sesión o empresa inválida.");
+  const rows = await supabaseApiRequest<BusinessDocument[]>("/supabase/manage/trial/documents", {
+    method: "POST", body: JSON.stringify({ business_id: businessId, ...data }),
+  }, true, identity.userId);
+  if (!Array.isArray(rows) || rows.length !== 1 || !isCloudId(rows[0]?.id)
+    || !await isAuthIdentityCurrent(identity)) throw new Error("No se confirmó el archivo privado.");
+}
+
+export async function getTrialCapabilities(): Promise<boolean> {
+  const identity = await captureAuthIdentity();
+  if (!identity?.userId) throw new Error("Inicia sesión.");
+  const payload = await supabaseApiRequest<{ enabled: boolean }>("/supabase/manage/trial/capabilities", {}, true, identity.userId);
+  if (typeof payload?.enabled !== "boolean" || !await isAuthIdentityCurrent(identity)) throw new Error("No se pudo comprobar el alta de empresas.");
+  return payload.enabled;
 }

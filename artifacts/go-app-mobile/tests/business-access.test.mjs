@@ -74,6 +74,18 @@ test('only an actual server boolean true grants business access; local/demo/role
   assert.equal(f.api.resolveBusinessAccess([{ id, verified: false, verification_request: { status: 'rejected' } }], user).status, 'rechazada');
 });
 
+test('approved trial starts on approval and an expired trial never grants business mode', () => {
+  const f = dataFixture();
+  const trial = { status: 'approved', accepted_at: '2026-11-01T00:00:00.000Z',
+    trial_starts_at: '2026-11-10T00:00:00.000Z', trial_ends_at: '2026-11-11T00:00:00.000Z' };
+  const expired = f.api.resolveBusinessAccess([{ id, verified: true, trial }], user);
+  assert.equal(expired.status, 'trial_expirada');
+  assert.equal(gate({ snapshot: expired, allowed: false, loading: false, error: null }).type.name, 'BusinessVerificationScreen');
+  const current = f.api.resolveBusinessAccess([{ id, verified: true, trial: {
+    ...trial, trial_ends_at: '2099-01-01T00:00:00.000Z' } }], user);
+  assert.equal(current.status, 'verificada');
+});
+
 test('personal mode remains accessible; pending business and loading/error states never mount private content', () => {
   const f = dataFixture();
   const snapshot = f.api.resolveBusinessAccess([], user);

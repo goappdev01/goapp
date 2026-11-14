@@ -54,6 +54,10 @@ function fixture({ marker = null, storedSession = null, me = async () => Respons
   const context = {
     exports: {}, process: { env: { EXPO_PUBLIC_API_URL: 'https://test.invalid/api' } },
     AbortController, setTimeout, clearTimeout,
+    Platform: { OS: 'ios' },
+    loginApiBase: api => api,
+    loginSessionPayload: data => data?.access_token && data?.user ? data : null,
+    invalidLoginResponse: () => 'Respuesta de inicio de sesión inválida.',
     require: name => {
       if (name === './authSession') return sessionApi;
       assert.equal(name, '@react-native-async-storage/async-storage'); return { default: AsyncStorage };
@@ -66,7 +70,8 @@ function fixture({ marker = null, storedSession = null, me = async () => Respons
     fetch: async (url, init) => { requests.push({ url, init }); return url.endsWith('/auth/register')
       ? respondRegister ? respondRegister(init) : Response.json(registered, { status: registerStatus }) : me(); },
     ownerLogin: false,
-    authEmail: pending.email, authPassword: state.password, authName: 'New user', selectedRole: 'usuario', authMode: 'register',
+    authEmail: pending.email, authPassword: state.password, authName: 'New user', authPhone: '+34600000000',
+    authPrivacy: true, authContact: true, authMarketing: false, selectedRole: 'usuario', authMode: 'register',
     onSetAccountType: authContextRef.current.onSetAccountType,
     setAuthMode: value => { state.mode = value; }, setAuthStep: value => { state.step = value; },
     setAuthEmail: value => { state.email = value; context.authEmail = value; }, setAuthPassword: value => { state.password = value; },
@@ -99,6 +104,11 @@ test('successful registration without a token persists only email and role, then
   assert.equal(f.state.error, null); assert.equal(f.state.account, null);
   assert.equal(f.storage.has(pendingKey), false); assert.equal(f.storage.has(sessionKey), false);
   assert.equal(f.requests.length, 1); // Only the explicit register request; no automatic password login.
+  const submitted = JSON.parse(f.requests[0].init.body);
+  assert.equal(submitted.phone, '+34600000000');
+  assert.equal(submitted.privacy_accepted, true);
+  assert.equal(submitted.contact_authorized, true);
+  assert.equal(submitted.marketing_opt_in, false);
 });
 
 test('an unsubmitted or failed registration is not changed by returning to the app', async () => {

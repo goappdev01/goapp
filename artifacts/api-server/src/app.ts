@@ -28,6 +28,8 @@ app.use(
 app.use(cors());
 app.use("/api/booking-assistant/transcribe", express.json({ limit: "8mb" }));
 app.use("/api/supabase/boards", express.json({ limit: "2mb" }));
+// Solo los documentos de alta admiten el cuerpo base64; el resto conserva el límite general.
+app.use("/api/supabase/manage/trial/documents", express.json({ limit: "7mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

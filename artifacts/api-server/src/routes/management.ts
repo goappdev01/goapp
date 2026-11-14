@@ -1,8 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
-import { bearerHeader, supabaseRequest } from "../lib/supabase";
+import { bearerHeader, supabaseRequest, supabaseStorageRequest } from "../lib/supabase";
 
 const router = Router();
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const trialEnabled = () => process.env.GO_BUSINESS_TRIAL_ONBOARDING === "enabled";
+const trialUnavailable = (res: Response) => res.status(503).json({ code: "TRIAL_SETUP_PENDING", error: "El alta empresarial está pendiente de activación." });
 const fields: Record<string, string[]> = {
   businesses: ["name", "description", "address", "timezone", "booking_enabled", "ui_metadata"],
   services: ["name", "description", "duration_minutes", "price", "currency", "active", "ui_metadata"],
@@ -84,6 +87,15 @@ async function ownsBusiness(req: Request, res: Response): Promise<boolean> {
   if (rows[0].verified !== true) {
     res.status(403).json({ error: "Empresa pendiente de verificación.", code: "BUSINESS_NOT_VERIFIED" }); return false;
   }
+  if (trialEnabled()) {
+    const trials = await request(req, `business_trial_requests?${new URLSearchParams({ business_id: `eq.${id}`, select: "trial_ends_at,status" })}`);
+    if (!trials.ok) { await relay(res, trials); return false; }
+    const items = await trials.json() as { trial_ends_at: string | null; status: string }[];
+    if (!Array.isArray(items)) { res.status(502).json({ error: "No se pudo comprobar la prueba gratuita." }); return false; }
+    if (items.length && (items[0].status !== "approved" || !items[0].trial_ends_at || Date.parse(items[0].trial_ends_at) <= Date.now())) {
+      res.status(403).json({ code: "BUSINESS_TRIAL_INACTIVE", error: "La prueba gratuita ha finalizado." }); return false;
+    }
+  }
   res.locals.businessTimezone = rows[0].timezone;
   return true;
 }
@@ -98,11 +110,68 @@ router.get("/businesses", async (req, res) => {
   if (!verification.ok) { await relay(res, verification); return; }
   const requests = await verification.json() as { business_id: string }[];
   if (!Array.isArray(requests)) { res.status(502).json({ error: "No se pudo comprobar tu empresa." }); return; }
-  res.json(rows.map(row => ({ ...row, verification_request: requests.find(item => item.business_id === row.id) ?? null })));
+  if (!trialEnabled()) {
+    res.json(rows.map(row => ({ ...row, verification_request: requests.find(item => item.business_id === row.id) ?? null }))); return;
+  }
+  const trialsResponse = await request(req, "business_trial_requests?select=business_id,terms_version,accepted_at,status,trial_starts_at,trial_ends_at,review_notes");
+  if (!trialsResponse.ok) { await relay(res, trialsResponse); return; }
+  const trials = await trialsResponse.json() as { business_id: string }[];
+  if (!Array.isArray(trials)) { res.status(502).json({ error: "No se pudo comprobar la prueba gratuita." }); return; }
+  const docsResponse = await request(req, "business_trial_documents?select=id,business_id,kind,file_name,mime_type,byte_size,created_at");
+  if (!docsResponse.ok) { await relay(res, docsResponse); return; }
+  const docs = await docsResponse.json() as { business_id: string }[];
+  if (!Array.isArray(docs)) { res.status(502).json({ error: "No se pudo comprobar la documentación." }); return; }
+  res.json(rows.map(row => ({ ...row, verification_request: requests.find(item => item.business_id === row.id) ?? null,
+    trial: trials.find(item => item.business_id === row.id) ?? null,
+    documents: docs.filter(item => item.business_id === row.id) })));
+});
+router.get("/trial/capabilities", (_req, res) => res.json({ enabled: trialEnabled(), terms_version: "go-trial-v1", days: 30, messages_provider_configured: false }));
+router.post("/trial/accept", async (req, res) => {
+  if (!trialEnabled()) { trialUnavailable(res); return; }
+  if (req.body?.terms_version !== "go-trial-v1" || Object.keys(req.body).length !== 1) {
+    res.status(400).json({ error: "Debes aceptar expresamente la prueba gratuita de 30 días." }); return;
+  }
+  const response = await request(req, "rpc/accept_business_trial", "POST", { p_terms_version: "go-trial-v1" });
+  await relay(res, response, true);
+});
+router.post("/trial/documents", async (req, res) => {
+  if (!trialEnabled()) { trialUnavailable(res); return; }
+  const { business_id, kind, name, mime_type, content_base64 } = req.body ?? {};
+  if (typeof business_id !== "string" || !uuid.test(business_id)
+    || !["identidad", "fiscal", "actividad", "otro"].includes(kind)
+    || typeof name !== "string" || !name.trim() || name.length > 180
+    || !["application/pdf", "image/jpeg", "image/png"].includes(mime_type)
+    || typeof content_base64 !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content_base64)) {
+    res.status(400).json({ error: "Documento inválido. Adjunta un PDF, JPG o PNG." }); return;
+  }
+  const content = Buffer.from(content_base64, "base64");
+  if (content.length < 1 || content.length > 5 * 1024 * 1024
+    || !(mime_type === "application/pdf" && content.subarray(0, 5).toString() === "%PDF-"
+      || mime_type === "image/png" && content.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))
+      || mime_type === "image/jpeg" && content[0] === 255 && content[1] === 216 && content[2] === 255)) {
+    res.status(400).json({ error: "El archivo no coincide con el formato o supera 5 MB." }); return;
+  }
+  const path = `${res.locals.userId}/${business_id}/${randomUUID()}`;
+  // Los permisos de Storage verifican el dueño y el estado de la solicitud.
+  let upload: Awaited<ReturnType<typeof supabaseStorageRequest>>;
+  try {
+    upload = await supabaseStorageRequest(`/storage/v1/object/go-business-documents/${path}`,
+      req.header("authorization"), { method: "POST", contentType: mime_type,
+        body: new Uint8Array(content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength)) });
+  } catch { res.status(502).json({ error: "No se pudo conectar con el almacén privado." }); return; }
+  if (!upload.ok) { res.status(upload.status === 403 ? 403 : 502).json({ error: "No se pudo guardar el archivo privado." }); return; }
+  const response = await request(req, "rpc/register_business_document", "POST", {
+    p_business_id: business_id, p_kind: kind, p_file_name: name.trim(), p_mime_type: mime_type,
+    p_byte_size: content.length, p_object_path: path,
+  });
+  await relay(res, response, true);
 });
 // Enrollment is the only pending-company write path. Supabase checks ownership
 // and fixes status to pending; the caller cannot supply approval or an owner ID.
 router.post("/enrollment", async (req, res) => {
+  if (trialEnabled() && (!req.body?.business_id || !uuid.test(req.body.business_id))) {
+    res.status(400).json({ error: "Primero acepta la prueba gratuita y adjunta los documentos." }); return;
+  }
   const data = req.body;
   const keys = ["business_id", "legal_name", "tax_id", "trading_name", "address"];
   if (!data || typeof data !== "object" || Array.isArray(data)

@@ -22,6 +22,21 @@ export async function supabaseRequest(
   });
 }
 
+// Storage needs raw bytes; never re-encode private files as a UTF-8 string.
+// Production uses the configured publishable key + user's JWT, not a service key.
+export async function supabaseStorageRequest(path: string, authorization: string | undefined, init: {
+  method?: string; contentType?: string; body?: Uint8Array<ArrayBuffer>;
+} = {}) {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.SUPABASE_ANON_KEY;
+  if (!url || !key || !authorization?.startsWith("Bearer ")) throw new Error("Authenticated storage unavailable");
+  return fetch(`${url.replace(/\/$/, "")}${path}`, {
+    method: init.method ?? "GET", headers: { apikey: key, Authorization: authorization,
+      ...(init.contentType ? { "Content-Type": init.contentType, "x-upsert": "false" } : {}) },
+    ...(init.body ? { body: init.body } : {}), signal: AbortSignal.timeout(20000),
+  });
+}
+
 export function bearerHeader(authorization: string | undefined) {
   if (authorization?.startsWith("Bearer ")) return { Authorization: authorization };
   return {} as Record<string, string>;

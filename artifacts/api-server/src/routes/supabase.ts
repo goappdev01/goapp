@@ -50,9 +50,15 @@ router.get("/auth/email-confirmed", (_req: Request, res: Response) => {
 });
 
 router.post("/auth/register", async (req: Request, res: Response) => {
-  const { email, password, full_name, role } = req.body ?? {};
+  const { email, password, full_name, role, phone, privacy_accepted, contact_authorized, marketing_opt_in } = req.body ?? {};
   if (typeof email !== "string" || typeof password !== "string" || password.length < 8) {
     res.status(400).json({ error: "A valid email and a password of at least 8 characters are required" });
+    return;
+  }
+  if (process.env.GO_BUSINESS_TRIAL_ONBOARDING === "enabled" && (typeof full_name !== "string" || full_name.trim().length < 2 || full_name.length > 200
+    || typeof phone !== "string" || !/^\+[1-9]\d{7,14}$/.test(phone)
+    || privacy_accepted !== true || contact_authorized !== true || typeof marketing_opt_in !== "boolean")) {
+    res.status(400).json({ code: "REGISTRATION_DETAILS_REQUIRED", error: "Indica tu nombre, teléfono internacional y acepta las condiciones de privacidad y contacto." });
     return;
   }
   const acceptedRoles = new Set(["usuario", "empresa"]);
@@ -61,7 +67,11 @@ router.post("/auth/register", async (req: Request, res: Response) => {
   const response = await supabaseRequest(`/auth/v1/signup?${new URLSearchParams({ redirect_to: emailConfirmationUrl })}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password, data: { full_name: full_name ?? null, role: accountRole } }),
+    body: JSON.stringify({ email, password, data: { full_name: typeof full_name === "string" ? full_name.trim() : null, role: accountRole,
+      ...(typeof phone === "string" && /^\+[1-9]\d{7,14}$/.test(phone)
+        && privacy_accepted === true && contact_authorized === true
+        ? { phone, privacy_accepted: true, contact_authorized: true, marketing_opt_in: marketing_opt_in === true,
+          privacy_version: "go-registration-v1" } : {}) } }),
   });
   const body = await response.text();
   res.status(response.status).type("application/json").send(body);

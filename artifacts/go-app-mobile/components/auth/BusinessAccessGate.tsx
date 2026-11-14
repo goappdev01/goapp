@@ -4,7 +4,9 @@ import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView, S
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBusinessAccess } from "@/contexts/GoBusinessAccessContext";
 import { useGoMode } from "@/contexts/GoModeContext";
-import { submitBusinessEnrollment, type BusinessEnrollment } from "@/data/businessAccess";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
+import { acceptBusinessTrial, getTrialCapabilities, submitBusinessEnrollment, uploadBusinessDocument, type BusinessEnrollment } from "@/data/businessAccess";
 import { businessEnrollmentDraftKey, clearBusinessEnrollmentDraft, loadBusinessEnrollmentDraft,
   logBusinessEnrollmentFailure, saveBusinessEnrollmentDraft } from "@/data/businessEnrollmentDraft";
 import { clearAuthSession } from "@/lib/authSession";
@@ -41,12 +43,18 @@ function BusinessVerificationScreen() {
   const [data, setData] = useState<BusinessEnrollment>(empty);
   const [readyKey, setReadyKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [trialConsent, setTrialConsent] = useState(false);
+  const [trialFeature, setTrialFeature] = useState<boolean | null>(null);
+  const [documentKind, setDocumentKind] = useState<"identidad" | "fiscal" | "actividad">("fiscal");
   const [error, setError] = useState<string | null>(null);
   const latest = useRef<{ key: string | null; data: BusinessEnrollment }>({ key: null, data: empty });
   const inputs = useRef<Partial<Record<keyof BusinessEnrollment, TextInputInstance>>>({});
   const saving = useRef(false);
   const mounted = useRef(false);
   const ready = !!draftKey && readyKey === draftKey;
+  const trial = business?.trial;
+  const needsDocuments = trialFeature === true && !!business && trial?.status !== "approved"
+    && (!trial || ["documents_pending", "needs_changes", "rejected"].includes(trial.status));
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +80,17 @@ function BusinessVerificationScreen() {
     // Server refresh must not replace edits. Rehydrate only for a new owner/business.
   }, [draftKey]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setTrialFeature(null);
+    if (userId) void getTrialCapabilities().then(enabled => {
+      if (!cancelled) setTrialFeature(enabled);
+    }).catch(() => {
+      if (!cancelled) setError("No se pudo comprobar si el alta está disponible. Comprueba tu conexión.");
+    });
+    return () => { cancelled = true; };
+  }, [userId]);
+
   const change = (field: keyof BusinessEnrollment, value: string) => {
     if (!ready || !draftKey || saving.current) return;
     const next = { ...latest.current.data, [field]: value };
@@ -89,6 +108,10 @@ function BusinessVerificationScreen() {
     const submitted = { ...latest.current.data };
     if (submitted.legal_name.trim().length < 2 || submitted.tax_id.trim().length < 3 || !submitted.address.trim()) {
       setError("Completa la razón social, el NIF/CIF y la dirección."); return;
+    }
+    if (trialFeature === true && (!business?.id || !trial || !business.documents?.some(doc => doc.kind === "identidad")
+      || !business.documents?.some(doc => doc.kind === "fiscal"))) {
+      setError("Acepta la prueba y adjunta al menos un documento de identidad y uno fiscal."); return;
     }
     saving.current = true;
     setBusy(true); setError(null);
@@ -110,6 +133,34 @@ function BusinessVerificationScreen() {
       if (mounted.current) setBusy(false);
     }
   };
+  const acceptTrial = async () => {
+    if (!trialConsent || busy) return;
+    setBusy(true); setError(null);
+    try { await acceptBusinessTrial(); setEditing(true); await access.refresh(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo aceptar la prueba."); }
+    finally { setBusy(false); }
+  };
+  const addDocument = async () => {
+    if (!business?.id || !trial || !needsDocuments || busy) return;
+    const result = await DocumentPicker.getDocumentAsync({ type: ["application/pdf", "image/jpeg", "image/png"],
+      copyToCacheDirectory: true, multiple: false });
+    if (result.canceled || !result.assets?.[0]) return;
+    const file = result.assets[0];
+    if (!file.size || file.size > 5 * 1024 * 1024) { setError("El documento debe pesar entre 1 byte y 5 MB."); return; }
+    const mime = file.mimeType || (file.name.toLowerCase().endsWith(".pdf") ? "application/pdf"
+      : file.name.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
+    if (!["application/pdf", "image/jpeg", "image/png"].includes(mime)) { setError("Solo PDF, JPG o PNG."); return; }
+    setBusy(true); setError(null);
+    try {
+      const content_base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+      await uploadBusinessDocument(business.id, { kind: documentKind, name: file.name, mime_type: mime, content_base64 });
+      await access.refresh();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo guardar el documento privado."); }
+    finally {
+      await FileSystem.deleteAsync(file.uri, { idempotent: true }).catch(() => {});
+      setBusy(false);
+    }
+  };
   const logout = async () => {
     try {
       await clearAuthSession();
@@ -120,13 +171,47 @@ function BusinessVerificationScreen() {
     <ScrollView style={s.root} contentContainerStyle={[s.content, { paddingTop: insets.top + 32, paddingBottom: insets.bottom + 24 }]}
       keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}>
       <Text style={s.title}>{access.error ? "No se pudo comprobar tu empresa"
+        : status === "trial_expirada" ? "Prueba gratuita finalizada"
         : status === "rechazada" ? "Empresa no aprobada"
-        : status === "sin_empresa" ? "Alta de empresa" : "Empresa pendiente de verificación"}</Text>
-      <Text style={s.description}>{access.error ? "Comprueba la conexión y vuelve a intentarlo." : status === "rechazada"
+        : status === "sin_empresa" || !trial ? "Alta de empresa" : "Empresa pendiente de verificación"}</Text>
+      <Text style={s.description}>{access.error ? "Comprueba la conexión y vuelve a intentarlo." : trialFeature === null
+        ? "Comprobando disponibilidad del alta…"
+        : trialFeature === false ? "Solicita el alta con tu misma cuenta GO. La verificación será revisada manualmente."
+        : status === "trial_expirada"
+        ? "Los 30 días han terminado. Tu configuración se conserva. GO comunicará los pasos para continuar cuando esté disponible el servicio comercial."
+        : trial?.status === "pending_review" ? "GO está revisando la documentación. No podrás entrar en los ocho pasos hasta recibir la aprobación."
+        : trial?.status === "needs_changes" ? trial.review_notes || "Debes corregir la documentación indicada por GO."
+        : status === "rechazada"
         ? business?.verification_request?.rejection_reason || "Revisa los datos y vuelve a enviar tu solicitud."
-        : status === "sin_empresa" ? "Solicita el alta con tu misma cuenta GO. La verificación será revisada manualmente."
-        : "Estamos comprobando los datos de tu empresa. Cuando sea verificada podrás acceder a GO Empresa."}</Text>
-      {!access.error && (editing || status === "sin_empresa") && <View style={s.form}>
+        : !trial ? "Antes de configurar tu empresa debes aceptar la prueba gratuita y presentar la documentación."
+        : "Adjunta tus documentos y envía tu solicitud. Al aprobarla GO empezarán los 30 días gratuitos."}</Text>
+      {!!error && trialFeature === null && <Text style={s.error}>{error}</Text>}
+      {!access.error && trialFeature === true && !trial && status !== "trial_expirada" && <View style={s.form}>
+        <Text style={s.label}>Prueba gratuita: 30 días, sin cargo ni renovación automática. Comienza solo tras la aprobación de GO.</Text>
+        <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: trialConsent }}
+          style={s.secondary} disabled={busy} onPress={() => setTrialConsent(v => !v)}>
+          <Text>{trialConsent ? "☑" : "☐"} Acepto las condiciones de la prueba gratuita de 30 días.</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.primary} disabled={!trialConsent || busy} onPress={acceptTrial}>
+          <Text style={s.primaryText}>{busy ? "Guardando…" : "Aceptar prueba gratuita"}</Text>
+        </TouchableOpacity>
+      </View>}
+      {!access.error && needsDocuments && !!trial && <View style={s.form}>
+        <Text style={s.label}>Documentación privada (PDF, JPG o PNG; máximo 5 MB por archivo).</Text>
+        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+          {(["identidad", "fiscal", "actividad"] as const).map(kind => <TouchableOpacity key={kind}
+            style={[s.secondary, { padding: 10, backgroundColor: documentKind === kind ? "#CBECE2" : "#FFFFFF" }]}
+            onPress={() => setDocumentKind(kind)} disabled={busy}>
+            <Text>{kind === "identidad" ? "Identidad" : kind === "fiscal" ? "Fiscal" : "Actividad"}</Text>
+          </TouchableOpacity>)}
+        </View>
+        <TouchableOpacity onPress={() => { void addDocument(); }} disabled={busy} style={s.primary}>
+          <Text style={s.primaryText}>{busy ? "Guardando…" : "Adjuntar documento"}</Text>
+        </TouchableOpacity>
+        {business.documents?.map(doc => <Text key={doc.id} style={s.label}>✓ {doc.kind}: {doc.file_name}</Text>)}
+      </View>}
+      {!access.error && ((trialFeature === true && !!trial && (editing || needsDocuments && !business?.verification_request))
+        || (trialFeature === false && (editing || status === "sin_empresa"))) && <View style={s.form}>
         {!ready && !error && <ActivityIndicator accessibilityLabel="Recuperando datos" />}
         {([['legal_name', 'Nombre o razón social'], ['tax_id', 'NIF/CIF'], ['trading_name', 'Nombre comercial (opcional)'], ['address', 'Dirección']] as const).map(([key, label], index, fields) => <View key={key}>
           <Text style={s.label}>{label}</Text>
@@ -137,9 +222,10 @@ function BusinessVerificationScreen() {
             onChangeText={value => change(key, value)} style={s.input} />
         </View>)}
         {error && <Text style={s.error}>{error}</Text>}
-        <TouchableOpacity style={s.primary} disabled={!ready || busy} onPress={save}><Text style={s.primaryText}>{busy ? "Enviando…" : "Enviar para verificación"}</Text></TouchableOpacity>
+        <TouchableOpacity style={s.primary} disabled={!ready || busy} onPress={save}><Text style={s.primaryText}>{busy ? "Enviando…" : "Enviar documentos y solicitud"}</Text></TouchableOpacity>
       </View>}
-      {!access.error && status !== "sin_empresa" && !editing && <TouchableOpacity style={s.secondary} disabled={busy} onPress={() => setEditing(true)}><Text>Completar / corregir datos</Text></TouchableOpacity>}
+      {!access.error && !editing && (needsDocuments && !!trial || trialFeature === false && status !== "sin_empresa")
+        && <TouchableOpacity style={s.secondary} disabled={busy} onPress={() => setEditing(true)}><Text>Completar / corregir datos</Text></TouchableOpacity>}
       {access.error && <TouchableOpacity style={s.secondary} onPress={() => { void access.refresh(); }}><Text>Volver a comprobar</Text></TouchableOpacity>}
       <TouchableOpacity style={s.secondary} disabled={busy} onPress={() => setActiveMode("USER")}><Text>Volver al modo Usuario</Text></TouchableOpacity>
       <TouchableOpacity style={s.secondary} disabled={busy} onPress={logout}><Text style={s.error}>Cerrar sesión</Text></TouchableOpacity>

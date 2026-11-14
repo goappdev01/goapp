@@ -181,6 +181,10 @@ export function LoginRegisterPanel({
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authName, setAuthName] = useState("");
+  const [authPhone, setAuthPhone] = useState("");
+  const [authPrivacy, setAuthPrivacy] = useState(false);
+  const [authContact, setAuthContact] = useState(false);
+  const [authMarketing, setAuthMarketing] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const authRequestInFlightRef = useRef(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -344,6 +348,11 @@ export function LoginRegisterPanel({
       setAuthError("Introduce un email válido y una contraseña de al menos 8 caracteres.");
       return;
     }
+    if (authMode === "register" && (!authName.trim() || authName.trim().length < 2
+      || !/^\+[1-9]\d{7,14}$/.test(authPhone.replace(/[\s()-]/g, "")) || !authPrivacy || !authContact)) {
+      setAuthError("Indica tu nombre, teléfono con prefijo internacional y acepta privacidad y comunicaciones necesarias.");
+      return;
+    }
     authRequestInFlightRef.current = true;
     setAuthBusy(true);
     setAuthError(null);
@@ -355,7 +364,9 @@ export function LoginRegisterPanel({
         body: JSON.stringify({
           email,
           password: authPassword,
-          ...(authMode === "register" ? { full_name: authName.trim() || null, role: selectedRole } : {}),
+          ...(authMode === "register" ? { full_name: authName.trim(), role: selectedRole,
+            phone: authPhone.replace(/[\s()-]/g, ""), privacy_accepted: authPrivacy,
+            contact_authorized: authContact, marketing_opt_in: authMarketing } : {}),
         }),
       }).catch(() => { throw new Error("No se pudo conectar con el servidor de inicio de sesión (LOGIN_NETWORK). No se han comprobado las credenciales ni los permisos."); });
       let payload;
@@ -536,9 +547,30 @@ export function LoginRegisterPanel({
               </View>
               <Text style={s.welcomeTitle}>{authMode === "login" ? "Inicia sesión en GO" : "Crea tu cuenta GO"}</Text>
               <Text style={s.welcomeSub}>{ownerLogin ? t("owner_login_label") : selectedRole === "empresa" ? "Cuenta Empresa" : "Cuenta Usuario"}</Text>
-              {authMode === "register" && (
-                <TextInput value={authName} onChangeText={setAuthName} placeholder="Nombre completo" placeholderTextColor="#94A3B8" autoCapitalize="words" style={s.authInput} />
-              )}
+              {authMode === "register" && <>
+                <TextInput value={authName} onChangeText={setAuthName}
+                  placeholder={selectedRole === "empresa" ? "Nombre de la empresa" : "Nombre y apellidos"}
+                  placeholderTextColor="#94A3B8" autoCapitalize="words" autoComplete="name" maxLength={200} style={s.authInput} />
+                <TextInput value={authPhone} onChangeText={setAuthPhone}
+                  placeholder="Teléfono con prefijo, ej. +34…" placeholderTextColor="#94A3B8"
+                  keyboardType="phone-pad" autoComplete="tel" maxLength={24} style={s.authInput} />
+                <Text style={{ color: "#64748B", lineHeight: 19, fontSize: 12 }}>GO utilizará este teléfono para avisos necesarios de tu cuenta. Todavía no se verifica por SMS.</Text>
+                <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: authPrivacy }}
+                  onPress={() => setAuthPrivacy(value => !value)} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <Feather name={authPrivacy ? "check-square" : "square"} color="#4A80BD" size={21} />
+                  <Text style={{ color: "#334155", flex: 1 }}>Acepto el tratamiento de mis datos para crear y gestionar mi cuenta GO.</Text>
+                </TouchableOpacity>
+                <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: authContact }}
+                  onPress={() => setAuthContact(value => !value)} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <Feather name={authContact ? "check-square" : "square"} color="#4A80BD" size={21} />
+                  <Text style={{ color: "#334155", flex: 1 }}>Autorizo los avisos necesarios sobre mi registro y, si soy empresa, mi solicitud de alta.</Text>
+                </TouchableOpacity>
+                <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: authMarketing }}
+                  onPress={() => setAuthMarketing(value => !value)} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <Feather name={authMarketing ? "check-square" : "square"} color="#4A80BD" size={21} />
+                  <Text style={{ color: "#334155", flex: 1 }}>Deseo recibir promociones de GO (opcional).</Text>
+                </TouchableOpacity>
+              </>}
               <TextInput
                 value={authEmail}
                 onChangeText={handleAuthEmailChange}

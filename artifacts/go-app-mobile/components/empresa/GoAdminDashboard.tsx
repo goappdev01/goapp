@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar }        from "expo-status-bar";
 import { DraggableFAB }     from "../DraggableFAB";
 import { AdminScreen }      from "./AdminScreen";
+import { BusinessTrialReviewPanel } from "./BusinessTrialReviewPanel";
 import { PartnersScreen }   from "./PartnersScreen";
 import { PublicidadScreen } from "./PublicidadScreen";
 import { FacturacionScreen } from "./FacturacionScreen";
@@ -1204,28 +1205,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
 
         {section === "empresas" && (
           <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 8, paddingBottom: fabBottom + 152 }}>
-            <Text style={s.sectionTitle}>{lang === 'en' ? "CONNECTED BUSINESSES" : "NEGOCIOS CONECTADOS"}</Text>
-            {MOCK_EMPRESAS.map((e, i) => (
-              <View key={i} style={s.empresaRow}>
-                <View style={[s.empresaDot, { backgroundColor: e.activa ? "#3D9A84" : "#555" }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.empresaNombre}>{e.nombre}</Text>
-                  <Text style={s.empresaSub}>
-                    {lang === 'en'
-                      ? `${e.orbitas} active orbit${e.orbitas !== 1 ? "s" : ""}`
-                      : `${e.orbitas} órbita${e.orbitas !== 1 ? "s" : ""} activa${e.orbitas !== 1 ? "s" : ""}`}
-                  </Text>
-                </View>
-                <View style={[s.empresaStatus, {
-                  backgroundColor: e.activa ? "rgba(61,154,132,0.15)" : "rgba(255,255,255,0.06)",
-                  borderColor:     e.activa ? "rgba(61,154,132,0.30)" : "rgba(255,255,255,0.10)",
-                }]}>
-                  <Text style={[s.empresaStatusTxt, { color: e.activa ? "#3D9A84" : DIM }]}>
-                    {e.activa ? (lang === 'en' ? "Active" : "Activa") : (lang === 'en' ? "Inactive" : "Inactiva")}
-                  </Text>
-                </View>
-              </View>
-            ))}
+            <BusinessTrialReviewPanel />
           </ScrollView>
         )}
 
