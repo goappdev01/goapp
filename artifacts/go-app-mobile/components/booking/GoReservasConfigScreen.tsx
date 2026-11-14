@@ -15,6 +15,7 @@ import {
   Animated,
   Alert,
   Dimensions,
+  Platform,
 
   PanResponder,
   Pressable,
@@ -24,6 +25,7 @@ import {
   TouchableOpacity,
   View,
   type LayoutChangeEvent,
+  useWindowDimensions,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
@@ -176,6 +178,9 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
     await createDemoBookingRepository(demoStore).changeBooking(String(entry.reservationId),String(entry.businessId),"business",operation,{proposalId:proposal.id,acceptFinancialTerms});
   };
   const insets    = useSafeAreaInsets();
+  const { width: viewportWidth } = useWindowDimensions();
+  // iPhone keeps the compact layout in landscape; tablets retain the split view.
+  const isPhone = Platform.OS === "ios" ? !Platform.isPad : viewportWidth < 600;
   const { config, calendarWorkHours } = useBusinessConfig();
   const { lang, t }  = useLanguage();
   const [liveProfessionals, setLiveProfessionals] = useState<import("@/data/booking").Staff[]>([]);
@@ -263,7 +268,10 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
     })
   ).current;
 
-  const [viewMode, setViewMode] = useState<ViewMode>("split");
+  const [viewMode, setViewMode] = useState<ViewMode>(isPhone ? "plano" : "split");
+  const [todayListVisible, setTodayListVisible] = useState(false);
+  const [calendarFocus, setCalendarFocus] = useState<{dateISO:string;timeHHMM:string;entryId?:string;token:number}>();
+  useEffect(() => { if (isPhone && viewMode === "split") setViewMode("plano"); }, [isPhone, viewMode]);
   const [calInnerView, setCalInnerView] = useState<"semana" | "mes_lineal" | "dia">("semana");
   // Día seleccionado en el calendario de Reservas (navegación pura, sin flujo GO)
   const [reservasNavSelectedDay, setReservasNavSelectedDay] = useState<string | null>(null);
@@ -381,20 +389,25 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
   const businessId   = demoStore?.businessId ?? "my_business";
   const businessName = config.businessName?.trim() || "Mi negocio";
   const templateId   = config.subId ?? undefined;
+  const [floorReadRevision, setFloorReadRevision] = useState(0);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
-    Promise.all([
-      (demoStore ? demoStore.loadReservations(demoStore.planId) : loadReservations(businessId)).catch(error => { reportStorageError(error); return [] as FloorReservation[]; }),
-      (demoStore ? demoStore.loadFloorPlan(businessId) : loadFloorPlan(businessId)).then(p => p?.elements ?? []).catch(error => { reportStorageError(error); return [] as FloorElement[]; }),
-    ]).then(([res, els]) => {
+    (async () => {
+      const plan = await (demoStore ? demoStore.loadFloorPlan(businessId) : loadFloorPlan(businessId))
+        .catch(error => { reportStorageError(error); return null; });
+      const planId = plan?.id ?? demoStore?.planId;
+      const res = planId
+        ? await (demoStore ? demoStore.loadReservations(planId) : loadReservations(planId))
+          .catch(error => { reportStorageError(error); return [] as FloorReservation[]; })
+        : [];
       if (!active) return;
       setReservas(res);
-      setElements(els);
-    }).finally(() => { if (active) setLoading(false); });
+      setElements(plan?.elements ?? []);
+    })().finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [businessId, demoStore, demoSnapshot]);
+  }, [businessId, demoStore, demoSnapshot, floorReadRevision]);
 
   // Calendar entries are supplied by the live wrapper or the owner-local DEMO adapter.
 
@@ -538,25 +551,35 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
   }, []);
 
   const selectMode = (m: ViewMode) => {
+    if (isPhone && m === "split") return;
     Haptics.selectionAsync().catch(() => {});
+    setCalendarFocus(undefined);
     setViewMode(m);
+  };
+
+  const openTodayReservation = (reservation: FloorReservation) => {
+    const dateISO = (reservation as FloorReservation & { dateISO?: string }).dateISO ?? reservation.date;
+    const entryId = goLog.find(entry => entry.reservationId === reservation.id)?.id;
+    setCalViewMonth(dateISO.slice(0, 7));
+    setReservasNavSelectedDay(dateISO);
+    setCalInnerView("dia");
+    setSelectedPro("Todos");
+    setCalendarFocus({ dateISO, timeHHMM: reservation.time, entryId, token: Date.now() });
+    setTodayListVisible(false);
+    setViewMode("calendario");
   };
 
   return (
     <View style={[g.root, { backgroundColor: tk.bg }]} {...swipeGestureRef.panHandlers}>
 
       {/* ── Header — same safe area top + CONFIG button as the normal Calendar ── */}
-      <View style={[g.header, { backgroundColor: tk.card, borderBottomColor: tk.border, paddingTop: insets.top + 8 }]}>
-        <View style={g.backBtn} />
-        <View style={g.headerCenter}>
-          <Text style={[g.headerTitle, { color: tk.text }]}>{lang === "en" ? "GO Bookings" : "GO Reservas"}</Text>
-          <Text style={[g.headerSub, { color: tk.dim }]}>{formatTodayLabel(t, businessToday)}{demoStore ? "" : lang === "en" ? " · live" : " · en tiempo real"}</Text>
-          {viewMode === "calendario" && (
-            <GoCalendarViewSelector value={calInnerView} onChange={setCalInnerView} />
-          )}
+      <View testID="go-reservas-compact-header" style={[g.header, { backgroundColor: tk.card, borderBottomColor: tk.border, paddingTop: insets.top + 4, paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}>
+        <View style={g.headerLabels}>
+          <Text style={[g.headerTitle, { color: tk.text }]} numberOfLines={1}>{lang === "en" ? "Operations panel" : "Panel operativo"}</Text>
+          <Text style={[g.headerBusiness, { color: tk.gray }]} numberOfLines={1} ellipsizeMode="tail">{businessName}</Text>
         </View>
         {/* CONFIG button — exact same style as the normal Calendar */}
-        <GoCloseButton level="settings"  accessibilityLabel="Configuración de reservas" onPress={() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }}/>
+        <GoCloseButton level="settings" accessibilityLabel={lang === "en" ? "Booking settings" : "Configuración de reservas"} onPress={() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }}/>
       </View>
 
       {/* ── Panel de config — mismos controles que el Calendario normal ── */}
@@ -581,7 +604,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
 
       {/* ── View mode tabs ── */}
       <View style={[g.modeTabs, { backgroundColor: tk.card, borderBottomColor: tk.border }]}>
-        {VIEW_MODES.map(m => {
+        {VIEW_MODES.filter(m => !isPhone || m.key !== "split").map(m => {
           const active = m.key === viewMode;
           return (
             <TouchableOpacity
@@ -590,20 +613,36 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
               onPress={() => selectMode(m.key)}
               style={[g.modeTab, { backgroundColor: tk.bg, borderColor: tk.border }, active && { backgroundColor: BLUE, borderColor: BLUE }]}
             >
-              <Feather name={m.icon} size={14} color={active ? "#fff" : tk.gray} />
+              {!isPhone && <Feather name={m.icon} size={14} color={active ? "#fff" : tk.gray} />}
               <Text style={[g.modeTabTxt, { color: tk.gray }, active && { color: "#fff" }]} adjustsFontSizeToFit minimumFontScale={0.8} numberOfLines={1}>
                 {m.key === "plano" ? t("view_mode_plano") : m.key === "split" ? t("view_mode_dividido") : t("view_mode_calendario")}
               </Text>
             </TouchableOpacity>
           );
         })}
+        {isPhone && (
+          <TouchableOpacity
+            testID="go-reservas-today-open"
+            accessibilityRole="button"
+            accessibilityLabel={lang === "en" ? "Today's reservations" : "Reservas de hoy"}
+            activeOpacity={0.8}
+            onPress={() => { Haptics.selectionAsync().catch(() => {}); setFloorReadRevision(value => value + 1); setTodayListVisible(true); }}
+            style={[g.modeTab, g.todayTab, { backgroundColor: tk.bg, borderColor: tk.border }]}
+          >
+            <Text style={[g.modeTabTxt, { color: tk.gray }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {t("status_today")} · {reservas.filter(r => ((r as FloorReservation & { dateISO?: string }).dateISO ?? r.date) === (businessToday ?? todayISO()) && r.status !== "cancelada").length}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* ── Professional selector — solo visible en Calendario ── */}
       {viewMode === "calendario" && (
         <View style={[g.proBar, { backgroundColor: tk.card, borderBottomColor: tk.border }]}>
+          <GoCalendarViewSelector compact value={calInnerView} onChange={setCalInnerView} />
           <ScrollView
             horizontal
+            style={g.proScrollViewport}
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={g.proScroll}
           >
@@ -639,6 +678,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             templateId={templateId}
             onClose={onClose}
             hideFAB
+            embeddedInBookingPanel
           />
         )}
 
@@ -651,6 +691,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
                 templateId={templateId}
                 onClose={() => selectMode("calendario")}
                 hideFAB
+                embeddedInBookingPanel
               />
             </View>
 
@@ -679,6 +720,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             viewMode={calInnerView}
             calViewMonth={calViewMonth}
             selectedDateISO={reservasNavSelectedDay ?? businessToday}
+            scrollToDateToken={calendarFocus}
             businessWorkHours={{
               timezone: calendarTimezone,
               intervalsForDate: workHoursEnabled ? intervalsForDate : undefined,
@@ -769,6 +811,26 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
           />
           </View>
         </DraggableFAB>
+      )}
+
+      {/* The existing reservation list remains reachable without dividing the floor plan. */}
+      {isPhone && (
+        <Modal visible={todayListVisible} transparent animationType="slide" onRequestClose={() => setTodayListVisible(false)}>
+          <View style={g.todayModal}>
+            <Pressable style={g.todayBackdrop} onPress={() => setTodayListVisible(false)} accessibilityLabel={lang === "en" ? "Close today's reservations" : "Cerrar reservas de hoy"} />
+            <View testID="go-reservas-today-sheet" style={[g.todaySheet, { backgroundColor: tk.card, paddingBottom: insets.bottom + 8, paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}>
+              <View style={g.todaySheetHeader}>
+                <Text style={[g.todaySheetTitle, { color: tk.text }]}>{lang === "en" ? "Today's reservations" : "Reservas de hoy"}</Text>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={lang === "en" ? "Close list" : "Cerrar listado"} onPress={() => setTodayListVisible(false)} style={g.todayClose}>
+                  <Feather name="x" size={22} color={tk.text} />
+                </TouchableOpacity>
+              </View>
+              <View style={g.todayList}>
+                <ReservasList reservas={reservas} elements={elements} loading={loading} isDark={isDark} todayOnly dateISO={businessToday ?? todayISO()} onOpenReservation={openTodayReservation} />
+              </View>
+            </View>
+          </View>
+        </Modal>
       )}
 
       {/* ── Month Picker Modal — self-contained, evita conflictos z-order ───────── */}
@@ -930,16 +992,22 @@ function ReservasList({
   loading,
   compact = false,
   isDark  = false,
+  todayOnly = false,
+  dateISO,
+  onOpenReservation,
 }: {
   reservas:  FloorReservation[];
   elements:  FloorElement[];
   loading:   boolean;
   compact?:  boolean;
   isDark?:   boolean;
+  todayOnly?: boolean;
+  dateISO?: string;
+  onOpenReservation?: (reservation: FloorReservation) => void;
 }) {
   const insets    = useSafeAreaInsets();
   const { t }     = useLanguage();
-  const today     = todayISO();
+  const today     = dateISO ?? todayISO();
 
   const todayReservas = useMemo(() =>
     reservas
@@ -981,7 +1049,7 @@ function ReservasList({
     >
 
       {/* Espacios overview — solo en vista completa dentro del split */}
-      {!compact && elements.length > 0 && (
+      {!compact && !todayOnly && elements.length > 0 && (
         <>
           <Text style={rl.sectionTitle}>ESPACIOS HOY</Text>
 
@@ -1015,7 +1083,7 @@ function ReservasList({
       )}
 
       <Text style={rl.sectionTitle}>
-        {t("status_today").toUpperCase()} — {formatTodayLabel(t).toUpperCase()}
+        {todayOnly ? formatTodayLabel(t, today).toUpperCase() : `${t("status_today").toUpperCase()} — ${formatTodayLabel(t, today).toUpperCase()}`}
         {todayReservas.length > 0 && (
           <Text style={[rl.sectionTitle, { color: BLUE }]}> · {todayReservas.length}</Text>
         )}
@@ -1036,11 +1104,12 @@ function ReservasList({
             element={getElementById(r.elementId)}
             compact={compact}
             isDark={isDark}
+            onPress={onOpenReservation ? () => onOpenReservation(r) : undefined}
           />
         ))
       )}
 
-      {!compact && upcomingReservas.length > 0 && (
+      {!compact && !todayOnly && upcomingReservas.length > 0 && (
         <>
           <Text style={[rl.sectionTitle, { marginTop: 16 }]}>{t("floor_upcoming_bookings").toUpperCase()}</Text>
           {upcomingReservas.map(r => (
@@ -1075,12 +1144,14 @@ function ReservaRow({
   showDate = false,
   compact  = false,
   isDark   = false,
+  onPress,
 }: {
   reserva:   FloorReservation;
   element:   FloorElement | undefined;
   showDate?: boolean;
   compact?:  boolean;
   isDark?:   boolean;
+  onPress?: () => void;
 }) {
   const { t } = useLanguage();
   const color = STATUS_ROW_COLORS[reserva.status] ?? DIM;
@@ -1094,7 +1165,7 @@ function ReservaRow({
   const dimColor   = isDark ? "rgba(255,255,255,0.38)" : DIM;
 
   return (
-    <View style={[rl.row, { backgroundColor: rowBg, borderColor: rowBorder }]}>
+    <TouchableOpacity accessibilityRole={onPress ? "button" : undefined} disabled={!onPress} onPress={onPress} activeOpacity={0.8} style={[rl.row, { backgroundColor: rowBg, borderColor: rowBorder }]}>
       <View style={[rl.rowAccent, { backgroundColor: color }]} />
       <View style={rl.rowBody}>
         <View style={rl.rowTopLine}>
@@ -1112,7 +1183,7 @@ function ReservaRow({
           <Text style={[rl.rowNotes, { color: dimColor }]} numberOfLines={1}>{reserva.notes}</Text>
         ) : null}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -1123,36 +1194,39 @@ const g = StyleSheet.create({
 
   header:       {
     flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 12, paddingVertical: 12,
+    paddingHorizontal: 12, paddingVertical: 6,
     borderBottomWidth: 1, borderBottomColor: BORDER, backgroundColor: CARD,
   },
-  backBtn:      { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  headerCenter: { flex: 1, alignItems: "center" },
+  headerLabels: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingRight: 8 },
   headerTitle:  { fontSize: 15, fontWeight: "800", color: TEXT },
-  headerSub:    { fontSize: 11, fontWeight: "500", color: DIM, marginTop: 1 },
+  headerBusiness: { flex: 1, minWidth: 0, textAlign: "right", fontSize: 13, fontWeight: "600" },
 
   modeTabs: {
-    flexDirection: "row", gap: 8, backgroundColor: CARD,
-    paddingHorizontal: 14, paddingVertical: 10,
+    flexDirection: "row", gap: 6, backgroundColor: CARD,
+    paddingHorizontal: 10, paddingVertical: 6,
     borderBottomWidth: 1, borderBottomColor: BORDER,
   },
   modeTab: {
     flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 5, paddingVertical: 8, paddingHorizontal: 10,
+    gap: 5, minHeight: 44, paddingVertical: 7, paddingHorizontal: 6,
     borderRadius: 10, borderWidth: 1, borderColor: BORDER, backgroundColor: BG,
   },
   modeTabTxt:    { fontSize: 12, fontWeight: "700", color: GRAY, flexShrink: 1, textAlign: "center" },
+  todayTab: { flex: 0.8 },
 
   proBar: {
+    flexDirection: "row", alignItems: "center", zIndex: 20,
     backgroundColor: CARD,
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
+    paddingLeft: 10,
   },
+  proScrollViewport: { flex: 1, minWidth: 0 },
   proScroll: {
     flexDirection: "row",
     gap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 9,
+    paddingVertical: 5,
   },
   proChip: {
     paddingHorizontal: 12,
@@ -1169,6 +1243,14 @@ const g = StyleSheet.create({
   },
 
   contentArea:   { flex: 1 },
+
+  todayModal: { flex: 1, justifyContent: "flex-end" },
+  todayBackdrop: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(0,0,0,0.55)" },
+  todaySheet: { height: "65%", maxHeight: 640, borderTopLeftRadius: 18, borderTopRightRadius: 18, paddingTop: 8 },
+  todaySheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 4 },
+  todaySheetTitle: { fontSize: 16, fontWeight: "800" },
+  todayClose: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
+  todayList: { flex: 1, minHeight: 0 },
 
   dragHandle: {
     height: 28, backgroundColor: CARD,

@@ -159,8 +159,8 @@ test("reset clears only the local configuration, plan, reservations and preferen
 });
 
 // Execute the real providers and screen callbacks with deterministic native APIs.
-function uiFixture(data, { authorized = true, businessPreview = authorized, adminView = false, adminAllowed = authorized, ownerIdentity = authorized, realCompanyManager = false, reactCompiler = false, bookingToday, realActivity = false, gpsAdapter, timezoneAdapter = async (_source,zone) => zone, timezoneResolver = async () => { throw Object.assign(Error("Unlinked"),{code:"BOOKING_CALENDAR_BUSINESS_NOT_LINKED"}); } } = {}) {
-  const cache = new Map(), hooks = new Map(), alerts = [], calls = { liveAgenda: 0, liveFloor: 0, external: 0 };
+function uiFixture(data, { authorized = true, businessPreview = authorized, adminView = false, adminAllowed = authorized, ownerIdentity = authorized, realCompanyManager = false, reactCompiler = false, bookingToday, realActivity = false, width = 390, isPad = false, liveMode = false, liveEntries = [], liveReservations = [], gpsAdapter, timezoneAdapter = async (_source,zone) => zone, timezoneResolver = async () => { throw Object.assign(Error("Unlinked"),{code:"BOOKING_CALENDAR_BUSINESS_NOT_LINKED"}); } } = {}) {
+  const cache = new Map(), hooks = new Map(), alerts = [], calls = { liveAgenda: 0, liveFloor: 0, external: 0, liveReservationReads: [] };
   let current, cursor = 0, effects = [], lang = "es", keyboardVisible = false, focusedInput = null, keyboardDismisses = 0;
   const keyboardListeners = new Map();
   const hook = () => { const i = cursor++; return [current, i]; };
@@ -190,8 +190,8 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
       addListener: (event, fn) => { const listeners = keyboardListeners.get(event) ?? new Set(); listeners.add(fn); keyboardListeners.set(event, listeners); return { remove: () => listeners.delete(fn) }; },
       dismiss() { keyboardDismisses++; focusedInput?.blur(); focusedInput = null; keyboardVisible = false; for (const event of ["keyboardWillHide", "keyboardDidHide"]) for (const fn of keyboardListeners.get(event) ?? []) fn(); },
     },
-    StyleSheet: { create: v => v, absoluteFill: {}, absoluteFillObject: {} }, Dimensions: { get: () => ({ width: 390, height: 844 }) },
-    Platform: { OS: "ios", select: options => options.ios ?? options.default },
+    StyleSheet: { create: v => v, absoluteFill: {}, absoluteFillObject: {} }, Dimensions: { get: () => ({ width, height: 844 }) }, useWindowDimensions: () => ({ width, height: 844 }),
+    Platform: { OS: "ios", isPad, select: options => options.ios ?? options.default },
     Animated: { Value, View: "Animated.View", timing: () => animation, spring: () => animation, add: () => 0, sequence: () => animation, loop: () => animation },
     Easing: { in: () => 0, inOut: () => 0, quad: 0 },
     PanResponder: { create: config => ({ panHandlers: config }) },
@@ -204,7 +204,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
     if (key in target) return target[key];
     const component = { [key]: function() {} }[key]; target[key] = component; return component;
   } });
-  const configApi = () => reactCompiler ? load("contexts/GoBusinessConfigContext.tsx").useBusinessConfig() : ({ config: data.store.getSnapshot().config, loaded: true, demo: data.store,
+  const configApi = () => reactCompiler ? load("contexts/GoBusinessConfigContext.tsx").useBusinessConfig() : ({ config: liveMode ? { ...data.store.getSnapshot().config, businessId: "live-business" } : data.store.getSnapshot().config, loaded: true, demo: liveMode ? undefined : data.store,
     updateConfig: patch => data.store.updateConfig(patch), resetConfig: () => data.store.reset(),
     resetToSubActivity: (sectorId,subId) => data.store.transformConfig(config => ({ ...config, sectorId, subId })),
   });
@@ -227,12 +227,13 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
     "@/lib/authSession": { captureAuthIdentity:async()=>({userId:data.store.getSnapshot().ownerUserId}), isAuthIdentityCurrent:async who=>authorized&&who.userId===data.store.getSnapshot().ownerUserId },
     "@/data/calendarExceptions": { setCalendarBusinessTimezone:timezoneAdapter, resolveCalendarExceptionBusiness:timezoneResolver },
     "@/lib/sessionEvents": { onSessionChanged: () => () => {} },
-    "@/data/booking": new Proxy({ BookingApiError: class BookingApiError extends Error {} }, { get: (target,key) => target[key] ?? external }),
+    "@/data/booking": new Proxy({ BookingApiError: class BookingApiError extends Error {}, getOwnedStaff: async () => [] }, { get: (target,key) => target[key] ?? external }),
     "@/data/goRecentBusinesses": { getRecentBusinessIds: external, recordBusinessVisit: external },
     "@/lib/goLogBridge": { syncBookingToGoLog: external },
     "@/data/businessDemoCatalog": loadPure("data/businessDemoCatalog.ts", { "./businessDemoStore": storeModule }),
     "@/data/businessDemoStore": { ...storeModule, createBusinessDemoStore: options => storeModule.createBusinessDemoStore({ ...options, storage: data.storage }) },
     "@/hooks/useGoLog": { useGoLog: () => { calls.liveAgenda++; return React.useState([]); } },
+    "@/hooks/useBusinessBookings": { useBusinessBookings: () => ({ entries: liveEntries, error: null, mutate: external }), mergeBusinessBookingEntries: (personal, business) => [...personal, ...business] },
     "@/hooks/useVerification": { useVerification: () => ({ status: "unverified" }) },
     "@/utils/guidance": { getGuidanceConfig: () => ({ labelOpacity: () => 0 }), swipeGuideMaxOpacity: () => 0 },
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 44, bottom: 34, left: 0, right: 0 }) },
@@ -245,6 +246,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
     "react-native-gesture-handler": { Gesture: new Proxy({}, { get: () => () => chain }), GestureDetector: "GestureDetector" },
     "expo-image": { Image: "Image" }, "expo-status-bar": { StatusBar: "StatusBar" },
     "expo-location": gpsAdapter ?? { Accuracy: { Balanced: 3 }, requestForegroundPermissionsAsync: async () => ({ status: "denied" }), getCurrentPositionAsync: external, reverseGeocodeAsync: external },
+    "expo-web-browser": { openBrowserAsync: external },
     "expo-image-picker": new Proxy({}, { get: () => external }),
     "expo-document-picker": new Proxy({}, { get: () => external }),
     "expo-clipboard": new Proxy({}, { get: () => external }),
@@ -264,11 +266,13 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
         // The remote-only date editor has its own real component and SQL integration tests.
         if (key === "./CalendarExceptionsSection") return componentMocks;
         if (key === "./CatalogComplementSelector") return { CatalogComplementSelector: () => null };
+        if (key === "./BookingDiscountSection") return componentMocks;
         if (key === "./booking") return imports["@/data/booking"];
+        if (key === "./catalogAssociations") return load("data/catalogAssociations.ts");
         if (key === "./serviceTiming") return load("data/serviceTiming.ts");
         if (key === "@/data/floorPlan") {
           const module = load("data/floorPlan.ts");
-          return { ...module, loadFloorPlan: external, saveFloorPlan: external, loadReservations: external, saveReservations: external };
+          return { ...module, loadFloorPlan: liveMode ? async () => ({ id: "live-plan", businessId: "live-business", elements: [] }) : external, saveFloorPlan: external, loadReservations: liveMode ? async id => { calls.liveReservationReads.push(id); return liveReservations; } : external, saveReservations: external };
         }
         if (key.startsWith("@/data/")) return load(key.replace("@/","") + ".ts");
         if (key === "@/utils/countryConfig") return load("utils/countryConfig.ts");
@@ -358,9 +362,9 @@ test("the panel opens existing configuration and DEMO bookings without activatio
   assert.equal(ui.calls.liveAgenda,0);
 });
 
-test("GO Empresa opens its existing two booking paths and returns to them without a module selector", async () => {
+test("GO Empresa opens its existing two booking paths and keeps the split on iPad", async () => {
   const f=dataFixture();await configuredSalon(f);
-  const ui=uiFixture(f),Panel=ui.load("components/empresa/EmpresaPanel.tsx").EmpresaPanel;
+  const ui=uiFixture(f,{width:1024,isPad:true}),Panel=ui.load("components/empresa/EmpresaPanel.tsx").EmpresaPanel;
   let closed=0,contextOpened=0;
   const props={visible:true,previewReadOnly:true,onClose:()=>closed++,onOpenContext:()=>contextOpened++};
   const render=()=>ui.render(Panel,props);
@@ -392,6 +396,8 @@ test("GO Empresa opens its existing two booking paths and returns to them withou
   const operations=component(tree,"GoReservasDemoScreen");assert.ok(operations);assert.equal(operations.props.hideFAB,true);
   const Operations=ui.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen;
   ui.render(Operations,operations.props);await turn();let daily=ui.render(Operations,operations.props);
+  assert.ok(button(daily,"view_mode_dividido"));
+  assert.ok(component(daily,"PlanoEmpresaScreen"));assert.ok(component(daily,"ReservasList"));
   button(daily,"view_mode_calendario").props.onPress();daily=ui.render(Operations,operations.props);
   assert.ok(component(daily,"AgendaBoard"));
   button(daily,"view_mode_dividido").props.onPress();daily=ui.render(Operations,operations.props);
@@ -401,6 +407,70 @@ test("GO Empresa opens its existing two booking paths and returns to them withou
   nodes(tree).find(n=>n.props.accessibilityLabel==="biz_panel_close").props.onPress();assert.equal(closed,1);
   assert.equal(f.store.getSnapshot().config.isBusinessActive,false);
   assert.equal(ui.calls.liveFloor,0);assert.equal(ui.calls.liveAgenda,0);assert.equal(ui.calls.external,0);
+});
+
+test("iPhone DEMO opens one compact booking header, two views and today's reservations", async () => {
+  const f=dataFixture();await f.store.updateConfig({businessName:"Salón de prueba"});
+  await f.store.saveFloorPlan(floor(f.store));await f.store.saveReservations(f.store.planId,[reservation(f.store)]);
+  const before=plain(f.store.getSnapshot()),writes=f.writes.length;
+  const ui=uiFixture(f,{width:390,bookingToday:futureReservationISO+"T08:00:00"});
+  const Screen=ui.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen;
+  const props={onClose(){},hideFAB:true},byID=(tree,id)=>nodes(tree).find(node=>node.props.testID===id);
+  ui.render(Screen,props);await turn();let tree=ui.render(Screen,props);
+  const header=byID(tree,"go-reservas-compact-header");assert.ok(header);
+  assert.ok(text(header).includes("Panel operativo"));assert.ok(text(header).includes("Salón de prueba"));
+  assert.equal(header.props.style[0].flexDirection,"row");
+  assert.equal(header.children[0].props.style.justifyContent,"space-between");
+  assert.ok(nodes(header).some(node=>node.props.accessibilityLabel==="Configuración de reservas"));
+  assert.ok(button(tree,"view_mode_plano"));assert.ok(button(tree,"view_mode_calendario"));
+  assert.equal(button(tree,"view_mode_dividido"),undefined);
+  assert.equal(component(tree,"AgendaBoard"),undefined);
+  const plan=component(tree,"PlanoEmpresaScreen");assert.ok(plan);assert.equal(plan.props.embeddedInBookingPanel,true);
+  const todayModal=tree=>nodes(tree).find(node=>node.props.visible!==undefined && byID(node,"go-reservas-today-sheet"));
+  assert.equal(todayModal(tree).props.visible,false);
+  const today=byID(tree,"go-reservas-today-open");assert.ok(today);
+  const tabRow=nodes(tree).find(node=>node.children.includes(today) && node.children.includes(button(tree,"view_mode_plano")) && node.children.includes(button(tree,"view_mode_calendario")));
+  assert.ok(tabRow);assert.equal(tabRow.props.style[0].flexDirection,"row");
+  today.props.onPress();tree=ui.render(Screen,props);
+  assert.equal(todayModal(tree).props.visible,true);
+  const sheet=byID(tree,"go-reservas-today-sheet");assert.ok(sheet);
+  const list=component(sheet,"ReservasList");assert.ok(list);
+  const rows=ui.render(list.type,list.props),row=component(rows,"ReservaRow");assert.ok(row);
+  const detail=ui.render(row.type,row.props);assert.ok(text(detail).includes("Cliente de prueba"));assert.ok(text(detail).includes("12:00"));
+  row.props.onPress();tree=ui.render(Screen,props);
+  assert.equal(todayModal(tree).props.visible,false);
+  const calendar=component(tree,"AgendaBoard");assert.ok(calendar);assert.equal(component(tree,"PlanoEmpresaScreen"),undefined);
+  assert.equal(calendar.props.viewMode,"dia");assert.equal(calendar.props.selectedDateISO,futureReservationISO);
+  assert.equal(calendar.props.scrollToDateToken.timeHHMM,"12:00");
+  assert.equal(button(tree,"view_mode_dividido"),undefined);
+  assert.deepEqual(plain(f.store.getSnapshot()),before);assert.equal(f.writes.length,writes);
+  assert.equal(ui.calls.liveAgenda,0);assert.equal(ui.calls.external,0);
+});
+
+test("registered iPhone bookings use the same compact plan and calendar navigation", async () => {
+  const f=dataFixture();await f.store.updateConfig({businessName:"Negocio registrado"});
+  const before=plain(f.store.getSnapshot()),writes=f.writes.length;
+  const ui=uiFixture(f,{width:393,liveMode:true,bookingToday:futureReservationISO+"T08:00:00",liveReservations:[{...reservation(f.store),planId:"live-plan"}]}),Screen=ui.load("components/booking/GoReservasConfigScreen.tsx").GoReservasConfigScreen;
+  const props={onClose(){},hideFAB:true},byID=(tree,id)=>nodes(tree).find(node=>node.props.testID===id);
+  ui.render(Screen,props);await turn();let tree=ui.render(Screen,props);
+  const header=byID(tree,"go-reservas-compact-header");assert.ok(header);
+  assert.ok(text(header).includes("Panel operativo"));assert.ok(text(header).includes("Negocio registrado"));
+  assert.ok(component(tree,"PlanoEmpresaScreen"));
+  const todayModal=tree=>nodes(tree).find(node=>node.props.visible!==undefined && byID(node,"go-reservas-today-sheet"));
+  assert.equal(todayModal(tree).props.visible,false);
+  assert.equal(button(tree,"view_mode_dividido"),undefined);
+  byID(tree,"go-reservas-today-open").props.onPress();ui.render(Screen,props);await turn();tree=ui.render(Screen,props);
+  assert.equal(todayModal(tree).props.visible,true);
+  const list=component(byID(tree,"go-reservas-today-sheet"),"ReservasList");assert.ok(list);
+  assert.equal(list.props.reservas[0].id,"demo-reservation");
+  assert.ok(ui.calls.liveReservationReads.length>=2);assert.ok(ui.calls.liveReservationReads.every(id=>id==="live-plan"));
+  nodes(tree).find(node=>node.props.accessibilityLabel==="Cerrar listado").props.onPress();tree=ui.render(Screen,props);
+  assert.equal(todayModal(tree).props.visible,false);
+  button(tree,"view_mode_calendario").props.onPress();tree=ui.render(Screen,props);
+  assert.ok(component(tree,"AgendaBoard"));assert.equal(component(tree,"PlanoEmpresaScreen"),undefined);
+  button(tree,"view_mode_plano").props.onPress();tree=ui.render(Screen,props);
+  assert.ok(component(tree,"PlanoEmpresaScreen"));assert.equal(component(tree,"AgendaBoard"),undefined);
+  assert.deepEqual(plain(f.store.getSnapshot()),before);assert.equal(f.writes.length,writes);
 });
 
 test("the business entry shows the same two paths for live and sports businesses without activating backend services", async () => {
