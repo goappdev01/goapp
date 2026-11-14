@@ -140,10 +140,10 @@ router.post("/enrollment", async (req, res) => {
     res.status(502).json({ error: "No hemos podido enviar tu solicitud en este momento. Inténtalo de nuevo más tarde." });
   }
 });
-router.post("/businesses", async (req, res) => {
-  const data = validate("businesses", req.body, true);
-  if (!data) { res.status(400).json({ error: "Datos de negocio inválidos." }); return; }
-  await relay(res, await request(req, "businesses", "POST", { timezone: "Europe/Madrid", booking_enabled: false, ...data, owner_id: res.locals.userId }), true);
+router.post("/businesses", (_req, res) => {
+  // A direct insert cannot be made idempotent or linked to the verification
+  // request. Enrollment's database RPC owns both writes in one transaction.
+  res.status(409).json({ error: "Solicita el alta desde la verificación de empresa.", code: "BUSINESS_ENROLLMENT_REQUIRED" });
 });
 router.patch("/businesses/:businessId", async (req, res) => {
   const data = validate("businesses", req.body, false);

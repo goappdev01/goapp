@@ -17,7 +17,6 @@ import {
   Business,
   createAvailabilityWindow,
   createBookableItem,
-  createOwnedBusiness as createBusiness,
   deleteAvailabilityWindow,
   deleteBookableItem,
   getOwnedAvailabilityWindows as getAvailabilityWindows,
@@ -28,6 +27,7 @@ import {
   saveBookableItem,
 } from "@/data/booking";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useBusinessAccess } from "@/contexts/GoBusinessAccessContext";
 
 function showSaveError(error: unknown) {
   Alert.alert("Cambios sin guardar", error instanceof Error ? error.message : "Comprueba tu conexión e inténtalo de nuevo.");
@@ -227,6 +227,8 @@ function ScheduleCard({
 
 export function GoBusinessContent({ onBack }: { onBack: () => void }) {
   const { t } = useLanguage();
+  const access = useBusinessAccess();
+  const selectedBusinessId = access.allowed ? access.snapshot?.business?.id : undefined;
   const [biz,     setBiz]     = useState<Business | null>(null);
   const [items,   setItems]   = useState<BookableItem[]>([]);
   const [windows, setWindows] = useState<AvailabilityWindow[]>([]);
@@ -234,16 +236,11 @@ export function GoBusinessContent({ onBack }: { onBack: () => void }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    let all   = await getBusinesses();
-    let found = all[0] ?? null;
-    if (!found) {
-      found = await createBusiness({
-        name: "Mi negocio", category: "", location: "", phone: "",
-        bookingActive: false,
-        bookingColor: "#4A80BD",
-        timezone: "Europe/Madrid",
-      });
-    }
+    setBiz(null); setItems([]); setWindows([]);
+    if (!selectedBusinessId) throw new Error("Selecciona una empresa verificada antes de configurar reservas.");
+    const all = await getBusinesses(access.snapshot?.userId ?? undefined);
+    const found = all.find(row => row.id === selectedBusinessId);
+    if (!found) throw new Error("La empresa seleccionada no pertenece a esta cuenta.");
 
     setBiz(found);
     const [its, wins] = await Promise.all([
@@ -253,9 +250,9 @@ export function GoBusinessContent({ onBack }: { onBack: () => void }) {
     setItems(its);
     setWindows(wins);
     setLoading(false);
-  }, []);
+  }, [selectedBusinessId, access.snapshot?.userId]);
 
-  useEffect(() => { load().catch(error => { setLoading(false); Alert.alert("No se pudo cargar el negocio", error instanceof Error ? error.message : "Comprueba tu sesión."); }); }, []);
+  useEffect(() => { if (selectedBusinessId) load().catch(error => { setLoading(false); Alert.alert("No se pudo cargar el negocio", error instanceof Error ? error.message : "Comprueba tu sesión."); }); }, [load, selectedBusinessId]);
 
   const saveBizField = async (field: keyof Business, value: any) => {
     if (!biz) return;

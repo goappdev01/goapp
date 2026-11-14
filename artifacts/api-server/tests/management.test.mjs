@@ -26,10 +26,11 @@ test('owner management denies cross-business writes and preserves server-owned f
  const req=(route,body,auth=true,method='POST')=>fetchOriginal(`http://127.0.0.1:${server.address().port}${route}`,{method,headers:{'Content-Type':'application/json',...(auth?{Authorization:'Bearer test'}:{})},body:JSON.stringify(body)});
  try{
   assert.equal((await req('/businesses',{name:'Piloto'},false)).status,401);
-  assert.equal((await req('/businesses',{name:'Piloto',owner_id:id})).status,400);
-  assert.equal((await req('/businesses',{name:'Piloto',verified:true})).status,400);
-  assert.equal((await req('/businesses',{name:'Piloto'})).status,201);
-  assert.equal(writes[0].owner_id,id);assert.equal(writes[0].booking_enabled,false);
+  for (const body of [{name:'Piloto'},{name:'Piloto',owner_id:id},{name:'Piloto',verified:true},{name:'Piloto',booking_enabled:true}]) {
+   const response=await req('/businesses',body);assert.equal(response.status,409);
+   assert.equal((await response.json()).code,'BUSINESS_ENROLLMENT_REQUIRED');
+  }
+  assert.equal(writes.length,0,'Direct creates never reach Supabase');
   assert.equal((await req(`/businesses/${id}/services`,{name:'Cita',duration_minutes:30,price:25})).status,201);
   assert.equal(writes.at(-1).currency,'EUR');assert.equal(writes.at(-1).business_id,id);
   assert.equal((await req(`/businesses/${id}/services`,{name:'Cita',duration_minutes:0,price:25})).status,400);

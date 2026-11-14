@@ -8,9 +8,8 @@
  * Cualquier cambio desde cualquier pantalla se refleja inmediatamente en todas.
  *
  * Sincronización estructural con go_businesses_v1 (booking system):
- * Si businessName está presente, existe siempre un registro vinculado en
- * go_businesses_v1 con bookingActive: true. El campo businessId en este
- * config es el enlace permanente entre los dos sistemas.
+ * La empresa verificada seleccionada conserva su ID de Supabase. La
+ * activación pública se escribe solo tras sincronizar catálogo y horarios.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 import React, {
@@ -41,7 +40,6 @@ import {
 } from "@/data/goSectorData";
 import {
   createAvailabilityWindow,
-  createOwnedBusiness as createBusiness,
   createBookableItem,
   deleteAvailabilityWindow,
   deleteBookableItem,
@@ -59,6 +57,7 @@ import {
   saveStaff,
   deleteStaff,
   type CancellationPolicy,
+  type Business,
   type Staff,
 } from "@/data/booking";
 
@@ -363,17 +362,20 @@ function deriveCancellationPolicy(cfg: BusinessConfig): CancellationPolicy | und
 
 // ─── Booking sync helper ───────────────────────────────────────────────────────
 //
-// Garantiza que existe un registro en go_businesses_v1 vinculado al config,
+// Verifica el registro empresarial ya vinculado al config,
 // siembra go_bookable_items_v1 con TODOS los servicios del config (dedup por
 // título — no borra ítems existentes, solo añade los que faltan), y siembra
 // go_availability_windows_v1 desde activeDays/openFrom/openTo si está vacío.
 //
 // Se ejecuta en cada arranque de la app (prevSigRef resetea a "" en cada mount).
-// Devuelve el businessId definitivo (existente o recién creado).
+// Devuelve el businessId verificado; nunca crea otro registro durante el guardado.
 
-async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string) => Promise<void>, userId: string): Promise<string | null> {
+async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string) => Promise<void>, userId: string, selectedBusinessId: string): Promise<string | null> {
+  if (!isCloudId(selectedBusinessId) || cfg.businessId !== selectedBusinessId) {
+    throw new Error("La empresa seleccionada ha cambiado. Vuelve a cargar la configuración.");
+  }
   const name = cfg.businessName?.trim();
-  if (!name) return cfg.businessId ?? null;
+  if (!name) return selectedBusinessId;
   const bookingResources = cfg.bookingResources === undefined ? undefined : validateBookingResources(cfg.bookingResources);
   const services = serializeServiceConfiguration(cfg.services, { resources: bookingResources ?? [] });
   // Validate before any remote write; an earlier closing time explicitly means next day.
@@ -391,45 +393,36 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
   const sectorColor =
     SECTORS.find((s) => s.id === cfg.sectorId)?.color ?? "#3B82F6";
 
-  let resolvedId: string;
+  const resolvedId = selectedBusinessId;
+  let activateAfterSync: Business | null = null;
 
   const cancellationPolicy = deriveCancellationPolicy(cfg);
 
-  if (cfg.businessId && isCloudId(cfg.businessId)) {
-    const all = await getBusinesses();
-    const existing = all.find((b) => b.id === cfg.businessId);
+  {
+    const all = await getBusinesses(userId);
+    const existing = all.find((b) => b.id === selectedBusinessId);
     if (existing) {
-      await saveBusiness({
+      const updated: Business = {
         ...existing,
         name,
         category,
         location,
         bookingColor: sectorColor,
-        bookingActive: existing.bookingActive,
+        // Deactivate immediately; publish an activation only after the full
+        // catalogue, staff and hours have synchronized successfully.
+        bookingActive: cfg.bookingEnabled === false ? false : existing.bookingActive,
         cancellationPolicy,
         phone:    cfg.phone    ?? existing.phone ?? "",
         whatsapp: cfg.whatsapp ?? existing.whatsapp,
         timezone: cfg.timezone ? validateBusinessTimezone(cfg.timezone) : existing.timezone,
         bookingResources: bookingResources ?? existing.bookingResources,
         bookingBlocks: cfg.bookingBlocks ?? existing.bookingBlocks,
-      });
-      resolvedId = cfg.businessId;
+      };
+      await saveBusiness(updated);
+      if (cfg.bookingEnabled === true && !existing.bookingActive) activateAfterSync = updated;
     } else {
       throw new Error("El negocio configurado no pertenece a esta cuenta. Vuelve a cargar la configuración.");
     }
-  } else {
-    const created = await createBusiness({
-      name, category, location,
-      phone:    cfg.phone    ?? "",
-      whatsapp: cfg.whatsapp,
-      bookingActive: false,
-      bookingColor: sectorColor,
-      timezone: validateBusinessTimezone(cfg.timezone ?? ""),
-      bookingResources,
-      bookingBlocks: cfg.bookingBlocks,
-      cancellationPolicy,
-    }, userId);
-    resolvedId = created.id;
   }
 
   await onResolved(resolvedId);
@@ -725,6 +718,10 @@ async function ensureBookingRecord(cfg: BusinessConfig, onResolved: (id: string)
     }
   }
 
+  if (activateAfterSync) {
+    if (await getAuthenticatedUserId() !== userId) throw new Error("La cuenta ha cambiado. Vuelve a cargar tu empresa.");
+    await saveBusiness({ ...activateAfterSync, bookingActive: true });
+  }
   return resolvedId;
 }
 
@@ -822,7 +819,7 @@ export function GoBusinessConfigProvider({ children }: { children: React.ReactNo
           configRef.current = { ...configRef.current, businessId: id };
           setConfig(prev => ({ ...prev, businessId: id }));
           await AsyncStorage.setItem(storageKey.current, JSON.stringify(configRef.current));
-        }, userId);
+        }, userId, selectedBusinessId!);
         if (version !== generation.current || !resolvedId) return;
         const updated = { ...snapshot, businessId: resolvedId };
         await saveCloudConfiguration(resolvedId, updated);

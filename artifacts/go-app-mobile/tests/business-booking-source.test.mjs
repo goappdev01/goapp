@@ -288,6 +288,26 @@ test('saving renamed professionals preserves their persisted IDs, distinct equal
  const scope={exports:{},Error,SECTORS:[],isCloudId:value=>/^[0-9a-f-]{36}$/.test(value),serializeServiceConfiguration:rows=>rows,validateBookingResources:value=>value,validateBusinessTimezone:value=>value,deriveCancellationPolicy:()=>({}),
   getBusinesses:async()=>[{id:company,timezone:'UTC',bookingActive:false}],saveBusiness:async()=>{},getBookableItems:async()=>[],
   getStaff:async()=>staffIds.map((id,index)=>({id,businessId:company,name:'Previous '+index,active:index===0})),saveStaff:async row=>saved.push(plain(row)),getAvailabilityWindows:async()=>[],deleteStaff:async()=>{throw Error('Existing professional must not be removed');}};
- vm.runInNewContext(compile('export '+fn),scope);await scope.exports.ensureBookingRecord({businessId:company,businessName:'Existing',services:[],activeDays:[],plantillaItems:[{staffNames:['Renamed','Renamed'],staffIds,staffServices:[[],[]]}]},async()=>{},owner);
+ vm.runInNewContext(compile('export '+fn),scope);await scope.exports.ensureBookingRecord({businessId:company,businessName:'Existing',services:[],activeDays:[],plantillaItems:[{staffNames:['Renamed','Renamed'],staffIds,staffServices:[[],[]]}]},async()=>{},owner,company);
  assert.deepEqual(saved.map(row=>row.id),staffIds);assert.deepEqual(saved.map(row=>row.name),['Renamed','Renamed']);assert.deepEqual(saved.map(row=>row.active),[true,false]);
+});
+
+test('a verified owner activates the existing company only after its catalogue sync, with no duplicate company',async()=>{
+ const source=fs.readFileSync('contexts/GoBusinessConfigContext.tsx','utf8'),ast=ts.createSourceFile('provider.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),fn=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='ensureBookingRecord').getText(ast);
+ const events=[];let fail=false;
+ const scope={exports:{},Error,SECTORS:[],isCloudId:value=>/^[0-9a-f-]{36}$/.test(value),serializeServiceConfiguration:rows=>rows,validateBookingResources:value=>value,validateBusinessTimezone:value=>value,deriveCancellationPolicy:()=>({}),
+  getAuthenticatedUserId:async()=>owner,getBusinesses:async user=>{assert.equal(user,owner);return[{id:company,timezone:'Europe/Madrid',bookingActive:false}];},
+  saveBusiness:async row=>events.push(['business',row.bookingActive]),getBookableItems:async()=>{events.push(['catalogue']);if(fail)throw Error('Catalogue offline');return[];},
+  getStaff:async()=>[],getAvailabilityWindows:async()=>[],createBusiness:async()=>{throw Error('Duplicate business');}};
+ vm.runInNewContext(compile('export '+fn),scope);
+ const cfg={businessId:company,businessName:'Existing',timezone:'Europe/Madrid',bookingEnabled:true,services:[],activeDays:[],plantillaItems:[]};
+ assert.equal(await scope.exports.ensureBookingRecord(cfg,async id=>assert.equal(id,company),owner,company),company);
+ assert.equal(events.at(-1)[0],'business');assert.equal(events.at(-1)[1],true);
+ assert.equal(events.filter(event=>event[0]==='business'&&event[1]===true).length,1);
+ events.length=0;fail=true;
+ await assert.rejects(scope.exports.ensureBookingRecord(cfg,async()=>{},owner,company),/Catalogue offline/);
+ assert.equal(events.some(event=>event[0]==='business'&&event[1]===true),false);
+ events.length=0;
+ await assert.rejects(scope.exports.ensureBookingRecord({...cfg,businessId:undefined},async()=>{},owner,company),/empresa seleccionada ha cambiado/);
+ assert.equal(events.length,0);
 });

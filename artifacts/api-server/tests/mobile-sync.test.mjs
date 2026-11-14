@@ -7,6 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 test('mobile saves cloud records, preserves form fields, archives and reports failures', async () => {
+ const previousApi=process.env.EXPO_PUBLIC_API_URL;process.env.EXPO_PUBLIC_API_URL='https://test.invalid/api';
  const dir=await mkdtemp(path.join(tmpdir(),'go-mobile-sync-'));
  const outfile=path.join(dir,'booking.mjs');
  const storage=new Map(),secure=new Map();globalThis.__storageMock={getItem:async k=>storage.get(k)??null,setItem:async(k,v)=>storage.set(k,v),removeItem:async k=>storage.delete(k),multiRemove:async keys=>keys.forEach(k=>storage.delete(k))};
@@ -39,9 +40,8 @@ test('mobile saves cloud records, preserves form fields, archives and reports fa
   throw new Error('Unexpected route '+route);
  };
  try{
-  const data={name:'Piloto',category:'Salón',location:'Madrid',phone:'123',bookingActive:false,bookingColor:'#123456',timezone:'Europe/Madrid'};
-  const b=await api.createOwnedBusiness(data,user);assert.equal(b.id,business);assert.equal(b.phone,'123');
-  await assert.rejects(api.createOwnedBusiness(data,'different-account'),api.BookingAuthenticationError);
+  const b=(await api.getOwnedBusinesses(user))[0];assert.equal(b.id,business);assert.equal(b.phone,'123');
+  await assert.rejects(api.getOwnedBusinesses('different-account'),api.BookingAuthenticationError);
   const item=await api.createBookableItem({businessId:business,title:'Corte',type:'hair',durationMinutes:30,customerCapacity:1,unitQuantity:1,price:25,paymentRequired:false,active:true,visible:true});
   assert.equal(item.id,service);assert.equal(item.type,'hair');
   await Promise.all([api.saveBookableItem({...item,price:26}),api.saveBookableItem({...item,price:27})]);
@@ -57,5 +57,7 @@ test('mobile saves cloud records, preserves form fields, archives and reports fa
   assert.equal(storage.has('go_supabase_session_v1'),false,'legacy credentials migrated');
   assert.ok(secure.has('go_auth_session_v2'),'protected session used by real requests');
   await api.clearAuthSession();assert.equal(secure.size,0);await assert.rejects(api.getOwnedBusinesses(),api.BookingAuthenticationError);
- }finally{globalThis.fetch=original;delete globalThis.__storageMock;delete globalThis.__secureMock;await rm(dir,{recursive:true,force:true});}
+ }finally{globalThis.fetch=original;delete globalThis.__storageMock;delete globalThis.__secureMock;
+  if(previousApi===undefined)delete process.env.EXPO_PUBLIC_API_URL;else process.env.EXPO_PUBLIC_API_URL=previousApi;
+  await rm(dir,{recursive:true,force:true});}
 });

@@ -569,11 +569,6 @@ function businessBody(b: Omit<Business, "id" | "createdAt">) {
   return { name: b.name.trim(), address: b.location, timezone: b.timezone, booking_enabled: b.bookingActive,
     ui_metadata: { category: b.category, phone: b.phone, whatsapp: b.whatsapp, bookingColor: b.bookingColor, cancellationPolicy: b.cancellationPolicy, bookingResources: b.bookingResources, bookingBlocks: b.bookingBlocks } };
 }
-export async function createOwnedBusiness(data: Omit<Business, "id" | "createdAt">, expectedUserId?: string): Promise<Business> {
-  const rows = await supabaseApiRequest<RemoteBusiness[]>(`${management}/businesses`, { method: "POST", body: JSON.stringify(businessBody(data)) }, true, expectedUserId);
-  if (!Array.isArray(rows)) throw new BookingApiError("El servidor no confirmó el alta de la empresa.", 502);
-  return mapRemoteBusiness(firstRow(rows));
-}
 export async function getCloudConfiguration<T>(businessId?: string, expectedUserId?: string): Promise<T | null> {
   if (businessId !== undefined && !isCloudId(businessId)) throw new BookingApiError("Selecciona una empresa válida.", 400);
   const rows = await supabaseApiRequest<{ business_id: string; payload: T }[]>(`${management}/configuration${businessId ? `?${new URLSearchParams({ business_id: businessId })}` : ""}`, {}, true, expectedUserId);

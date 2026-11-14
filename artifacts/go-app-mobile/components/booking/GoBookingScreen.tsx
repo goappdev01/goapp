@@ -47,7 +47,6 @@ import {
   saveBusiness,
   saveBookableItem,
   saveAvailabilityWindow,
-  createOwnedBusiness as createBusiness,
 } from "@/data/booking";
 
 // ─── Tokens visuales ──────────────────────────────────────────────────────────
@@ -747,6 +746,7 @@ export function GoBookingScreen({
   const insets = useSafeAreaInsets();
   const verification = useVerification();
   const { config, updateConfig } = useBusinessConfig();
+  const selectedBusinessId = config.businessId;
 
   const [biz,        setBiz]        = useState<Business | null>(null);
   const [items,      setItems]      = useState<BookableItem[]>([]);
@@ -807,16 +807,11 @@ export function GoBookingScreen({
 
   const load = useCallback(async () => {
     setLoading(true);
-    let all   = await getBusinesses();
-    let found = all[0] ?? null;
-    if (!found) {
-      found = await createBusiness({
-        name: "Mi negocio", category: "", location: "", phone: "",
-        bookingActive: false,
-        bookingColor: "#3B82F6",
-        timezone: "Europe/Madrid",
-      });
-    }
+    setBiz(null); setItems([]); setWindows([]);
+    if (!selectedBusinessId) throw new Error("Selecciona una empresa verificada antes de configurar reservas.");
+    const all = await getBusinesses();
+    let found = all.find(row => row.id === selectedBusinessId);
+    if (!found) throw new Error("La empresa seleccionada no pertenece a esta cuenta.");
 
 
     // ── Auto-seed from template on fresh setup ────────────────────────────────
@@ -919,9 +914,9 @@ export function GoBookingScreen({
     updateConfig({ services: toSavedServices(finalItems) });
 
     setLoading(false);
-  }, []);
+  }, [selectedBusinessId]);
 
-  useEffect(() => { load().catch(error => { setLoading(false); Alert.alert("No se pudo cargar el negocio", error instanceof Error ? error.message : "Comprueba tu sesión."); }); }, []);
+  useEffect(() => { if (selectedBusinessId) load().catch(error => { setLoading(false); Alert.alert("No se pudo cargar el negocio", error instanceof Error ? error.message : "Comprueba tu sesión."); }); }, [load, selectedBusinessId]);
 
   // ── External config sync: when config changes from outside (EmpresaConfigScreen,
   // EmpresaSetupGuide), seed booking.ts if items/windows are empty ───────────
