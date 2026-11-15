@@ -295,6 +295,7 @@ type OrbitBrand = {
   fillLogo?: boolean;
   logoScale?: number;
   adminAction?: "sports-events";
+  marketCategory?: "deporte";
 };
 // Sub-intención: categoría intermedia (ej: "RÁPIDA", "DELIVERY").
 // No tiene URL propia — al pulsar entra al nivel de marcas.
@@ -560,9 +561,6 @@ const ORBIT_SECOND_LEVELS: Record<string, OrbitBrand[][]> = {
       { label: "WHOOP",       icon: "zap",          color: "#000000", url: "https://whoop.com",             logoUri: IH("whoop.com") },
       { label: "TRAINWELL",   icon: "trending-up",  color: "#3B82F6", url: "https://trainwell.net",         logoUri: IH("trainwell.net") },
     ],
-    [
-      { label: "EVENTOS DEPORTIVOS", icon: "calendar", color: "#15803d", url: "", adminAction: "sports-events" },
-    ],
   ],
   shopping: [
     [
@@ -582,6 +580,9 @@ const ORBIT_SECOND_LEVELS: Record<string, OrbitBrand[][]> = {
       { label: "ZALANDO",     icon: "tag",          color: "#FF6900", url: "https://zalando.es",            logoUri: SI("zalando") },
       { label: "MANGO",       icon: "scissors",     color: "#3D3935", url: "https://mango.com/es",          logoUri: IH("mango.com") },
       { label: "SHEIN",       icon: "shopping-bag", color: "#E63946", url: "https://shein.com/es",          logoUri: IH("shein.com") },
+    ],
+    [
+      { label: "DEPORTES", icon: "activity", color: "#15803d", url: "", marketCategory: "deporte" },
     ],
   ],
   otro: [
@@ -11779,6 +11780,7 @@ function HomeScreenContent() {
         setOrbitSubIntentKey(null);
       }
       else if (orbitSecondLayerIndex > 0) { setOrbitSecondLayerIndex(i => i - 1); }
+      else if (orbitSecondLevel === "deporte") { setOrbitSecondLevel("shopping"); setOrbitSecondLayerIndex(2); }
       else { setOrbitSecondLevel(null); }
       return;
     }
@@ -17017,6 +17019,7 @@ function HomeScreenContent() {
                 } else if (orbitSecondLevel !== null) {
                   if (orbitSubIntentKey !== null) { setOrbitSubIntentKey(null); }
                   else if (orbitSecondLayerIndex > 0) { setOrbitSecondLayerIndex(i => i - 1); }
+                  else if (orbitSecondLevel === "deporte") { setOrbitSecondLevel("shopping"); setOrbitSecondLayerIndex(2); }
                   else { setOrbitSecondLevel(null); }
                   Haptics.selectionAsync();
                 } else if (marketplaceCheckout !== null) {
@@ -17471,7 +17474,9 @@ function HomeScreenContent() {
                 const selected = categorySelected && it.key === intent.key;
                 const anySelected = categorySelected || otroSelected;
                 const dimmed = anySelected && !selected;
-                const hasSecondLevel = !!ORBIT_SECOND_LEVELS[it.key];
+                const hasSecondLevel = it.key === "deporte"
+                  ? goView.isAdminView && adminAccess.allowed && !adminAccess.checking && !!adminAccess.userId
+                  : !!ORBIT_SECOND_LEVELS[it.key];
                 return (
                   <Animated.View
                     key={it.key}
@@ -17498,8 +17503,14 @@ function HomeScreenContent() {
                       }}
                       onLongPress={hasSecondLevel ? () => {
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        if (it.key === "deporte") {
+                          if (!goView.isAdminView || !adminAccess.allowed || adminAccess.checking || !adminAccess.userId) return;
+                          setSportsEventsOpen(true);
+                          return;
+                        }
                         setOrbitSecondLevel(it.key);
                       } : undefined}
+                      delayLongPress={it.key === "deporte" ? 650 : 500}
                       icon={it.icon}
                       isComida={it.key === "comida"}
                       label={t(('intent_' + it.key) as any)}
@@ -17793,6 +17804,11 @@ function HomeScreenContent() {
                           dimmed={false}
                           onPress={() => {
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                            if (brand.marketCategory === "deporte") {
+                              setOrbitSecondLevel("deporte");
+                              setOrbitSecondLayerIndex(0);
+                              return;
+                            }
                             if (brand.adminAction === "sports-events") {
                               if (!sportsAdminAllowed) return;
                               setOrbitSecondLevel(null);

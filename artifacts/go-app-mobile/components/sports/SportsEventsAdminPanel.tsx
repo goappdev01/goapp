@@ -6,6 +6,7 @@ import { canUseSportsEvents, sportsEventRecordSchema, type SportsEventRecord } f
 import { supabaseApiRequest } from "@/data/booking";
 import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
 import { useGoView } from "@/contexts/GoViewContext";
+import { SportsEventsDemo } from "./SportsEventsDemo";
 
 const SPORTS = ["football", "basketball", "tennis", "padel", "motorsport", "rugby", "handball", "volleyball", "other"] as const;
 const SPORT_LABEL: Record<string, string> = { football: "Fútbol", basketball: "Baloncesto", tennis: "Tenis", padel: "Pádel", motorsport: "Motor", rugby: "Rugby", handball: "Balonmano", volleyball: "Voleibol", other: "Otros" };
@@ -21,9 +22,10 @@ type Kind = "offer" | "season_pass" | "saved_search";
 export function SportsEventsAdminPanel({ visible, onClose, fontScale = 1 }: { visible: boolean; onClose: () => void; fontScale?: number }) {
   const admin = useAdminAccess(), view = useGoView();
   if (!visible || !canUseSportsEvents(view.view, admin.allowed && !admin.checking, admin.userId)) return null;
-  return <SportsEventsContent key={admin.userId} onClose={onClose} fontScale={fontScale} />;
+  return <SportsEventsDemo key={admin.userId} onClose={onClose} />;
 }
 
+// Preserved for the separately authorized persistence phase. Never mounted by the demo.
 function SportsEventsContent({ onClose, fontScale }: { onClose: () => void; fontScale: number }) {
   const admin = useAdminAccess(), view = useGoView();
   const allowed = canUseSportsEvents(view.view, admin.allowed && !admin.checking, admin.userId);
