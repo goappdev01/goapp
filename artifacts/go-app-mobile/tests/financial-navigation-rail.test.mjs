@@ -63,9 +63,14 @@ function assertPlacement(f, hand, width, height, leftInset, rightInset, stacked)
   const onLeft = hand === "left";
   assert.equal(f.hosts.avoider.behavior, "height");
   assert.equal(body.direction, "ltr");
-  assert.equal(body.flexDirection, onLeft ? "row-reverse" : "row");
+  assert.equal(body.position, "relative");
+  assert.equal(body.flexDirection, undefined, "content must not share a row with the controls");
+  assert.equal(rail.position, "absolute");
+  assert.equal(rail.bottom, 0);
+  assert.equal(rail.left, onLeft ? 0 : undefined);
+  assert.equal(rail.right, onLeft ? undefined : 0);
+  assert.equal(f.hosts.rail.pointerEvents, "box-none");
   assert.equal(rail.justifyContent, "flex-end");
-  assert.equal(rail.flexShrink, 0);
   assert.equal(rail.flexDirection, stacked ? "column" : onLeft ? "row-reverse" : "row");
   assert.equal(rail.gap, 10);
   const targetWidth = stacked ? f.size : f.size * 2 + rail.gap;
@@ -77,13 +82,13 @@ function assertPlacement(f, hand, width, height, leftInset, rightInset, stacked)
   assert.equal(content.props.style.flex, 1);
   assert.equal(content.props.style.minWidth, 0);
   assert.equal(content.props.style.overflow, "hidden");
-  const contentBoundary = onLeft ? leftInset + railWidth : width - rightInset - railWidth;
-  assert.equal(onLeft ? contentBoundary - x - targetWidth : x - contentBoundary, 8);
+  assert.equal(content.props.style.width, undefined, "content fills the available safe-area width");
+  assert.equal(content.props.style.marginRight, undefined, "no permanent right gutter");
   assert.ok(height - rail.paddingBottom - targetHeight >= 0);
   assert.equal(rail.paddingBottom, Math.min(24, height - targetHeight));
 }
 
-test("financial rail mirrors the current safe edge for both hands through all four viewport shapes", async () => {
+test("financial controls overlay the full-width calculator at the safe edge for both hands", async () => {
   for (const frames of [compact, large]) {
     const f = await mountedRail();
     try {

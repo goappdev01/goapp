@@ -7,6 +7,7 @@ import {openRevenueCalculator,type CalculatorSession} from "@/data/financialCalc
 import {createFinancialDemoDocument} from "@/data/financialDemo";
 import type {FinancialDocument} from "@workspace/api-zod";
 import {FinancialRevenueTable} from "./FinancialRevenueTable";
+import {GO_NAVIGATION_OVERLAY_CLEARANCE} from "@/components/ui/GoNavigationRail";
 import {FinanceButton,financeStyles as s} from "./FinancialUI";
 
 export function FinancialPlanScreen(){
@@ -22,7 +23,7 @@ export function FinancialPlanScreen(){
  },[admin.userId,admin.allowed,admin.checking,epoch,demoActive]);
  const view=useMemo(()=>session?.snapshot(),[session,revision]);
  if(!admin.allowed||admin.checking||!admin.userId)return <View style={s.root}/>;
- return <ScrollView style={s.root} contentContainerStyle={[s.content,{paddingTop:8,gap:10}]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+ return <ScrollView style={s.root} contentContainerStyle={[s.content,{paddingTop:8,paddingBottom:GO_NAVIGATION_OVERLAY_CLEARANCE,gap:10}]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
  {demoActive&&demoDoc?<>
  <Text style={s.note}>DEMO · Datos ficticios solo en este dispositivo. Los cambios no se guardan en la nube y se perderán al salir.</Text>
  <FinanceButton label="Salir de DEMO" onPress={()=>{setDemoActive(false);setDemoDoc(null);setEpoch(v=>v+1);}}/>

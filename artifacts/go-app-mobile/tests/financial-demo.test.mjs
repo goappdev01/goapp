@@ -62,6 +62,7 @@ test('ADMIN can enter DEMO despite a failed finance access check without calling
     '@/lib/sessionEvents': { onSessionChanged: () => () => {} },
     '@/data/financialCalculatorSession': { openRevenueCalculator: async () => { calls.push('access'); throw Error('La persistencia financiera todavía no está instalada en este entorno.'); } },
     '@/data/financialDemo': demo,
+    '@/components/ui/GoNavigationRail': { GO_NAVIGATION_OVERLAY_CLEARANCE: 178 },
     './FinancialRevenueTable': { FinancialRevenueTable: 'RevenueTable' },
     './FinancialUI': { FinanceButton: 'Button', financeStyles: { root: {}, content: {}, note: {}, error: {} } },
   }).FinancialPlanScreen;
@@ -70,6 +71,7 @@ test('ADMIN can enter DEMO despite a failed finance access check without calling
   const find = predicate => { const node = all(render()).find(predicate); assert.ok(node); return node; };
   render();
   await new Promise(resolve => setImmediate(resolve));
+  assert.equal(render().props.contentContainerStyle.at(-1).paddingBottom, 178, 'scrolling clears the overlaid navigation controls');
   assert.equal(calls.length, 1);
   find(node => node.props.label === 'Probar calculadora DEMO').props.onPress();
   let table = find(node => node.type === 'RevenueTable');

@@ -9,6 +9,7 @@ const EDGE = 12;
 const GUTTER = 8;
 const BOTTOM = 24;
 const STACK_HEIGHT = GO_NAVIGATION_SIZE * 2 + GAP;
+export const GO_NAVIGATION_OVERLAY_CLEARANCE = STACK_HEIGHT + BOTTOM + 16;
 
 type Props = { controls: React.ReactNode; children: React.ReactNode };
 
@@ -24,13 +25,16 @@ export function GoNavigationRail({ controls, children }: Props) {
   return (
     <KeyboardAvoidingView behavior="height" style={styles.fill}>
       <View
-        style={[styles.body, { flexDirection: left ? "row-reverse" : "row" }]}
+        style={styles.body}
         onLayout={event => setHeight(event.nativeEvent.layout.height)}
       >
         <View style={styles.content}>{children}</View>
         <View
           testID="go-navigation-rail"
+          pointerEvents="box-none"
           style={[styles.rail, {
+            left: left ? 0 : undefined,
+            right: left ? undefined : 0,
             flexDirection: stacked ? "column" : left ? "row-reverse" : "row",
             paddingLeft: left ? EDGE : GUTTER,
             paddingRight: left ? GUTTER : EDGE,
@@ -46,7 +50,7 @@ export function GoNavigationRail({ controls, children }: Props) {
 
 const styles = StyleSheet.create({
   fill: { flex: 1 },
-  body: { flex: 1, minHeight: 0, direction: "ltr" },
+  body: { flex: 1, minHeight: 0, direction: "ltr", position: "relative" },
   content: { flex: 1, minWidth: 0, overflow: "hidden" },
-  rail: { flexShrink: 0, justifyContent: "flex-end", alignItems: "flex-end", gap: GAP },
+  rail: { position: "absolute", bottom: 0, justifyContent: "flex-end", alignItems: "flex-end", gap: GAP },
 });
