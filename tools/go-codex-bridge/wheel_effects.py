@@ -271,7 +271,7 @@ class WheelEffects:
                         cwd=workspace,env=node_environment(),stdin=subprocess.DEVNULL,
                         stdout=log,stderr=subprocess.STDOUT,timeout=600)
                 except subprocess.TimeoutExpired:
-                    self.fail("WHEEL_INSTALL_UNCERTAIN","PNPM excedió el plazo; se conserva su estado para revisar el proceso.")
+                    self._install_timeout(workspace,lock,original,"PNPM excedió el plazo.")
             return result,path
 
         result,install_log=offline_install()
@@ -290,7 +290,7 @@ class WheelEffects:
                     "--store-dir",str(store)],cwd=workspace,env=fetch_env,stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=600)
             except subprocess.TimeoutExpired:
-                self.fail("WHEEL_INSTALL_UNCERTAIN","La descarga privada excedió el plazo; se conserva su estado.")
+                self._install_timeout(workspace,lock,original,"La descarga privada excedió el plazo.")
             if fetched.returncode or original!=lock.read_bytes():
                 self.fail("WHEEL_DEPENDENCIES","No se pudieron obtener las dependencias del lockfile para este worktree.")
             result,install_log=offline_install(("--store-dir",str(store)))
@@ -298,6 +298,26 @@ class WheelEffects:
             self.fail("WHEEL_DEPENDENCIES","La recuperación offline no completó las dependencias; consulta el registro de este intento.")
         if not self._readable_packages(workspace,required):
             self.fail("WHEEL_DEPENDENCIES","El sandbox no puede leer los paquetes instalados en este worktree.")
+
+    @staticmethod
+    def installation_idle(workspace):
+        """Fail closed if a PNPM child or private import may still write packages."""
+        marker=workspace/"node_modules/.pnpm/.wheel-private-import.json"
+        try:
+            if marker.is_file() and json.loads(marker.read_text(encoding="utf8")).get("state")=="in_progress":
+                return False
+            probe=subprocess.run(["powershell.exe","-NoProfile","-NonInteractive","-Command",
+                "$ErrorActionPreference='Stop'; (Get-CimInstance Win32_Process -Filter \"Name='node.exe' OR Name='codex.exe'\" | "
+                "Where-Object {$_.CommandLine -match 'pnpm.*\\b(?:install|fetch)\\b'} | Measure-Object).Count"],
+                capture_output=True,text=True,timeout=20)
+            return probe.returncode==0 and probe.stdout.strip()=="0"
+        except (OSError,ValueError,subprocess.TimeoutExpired):
+            return False
+
+    def _install_timeout(self,workspace,lock,original,message):
+        if not self.installation_idle(workspace) or lock.read_bytes()!=original:
+            self.fail("WHEEL_INSTALL_UNCERTAIN",message+" No se puede descartar una escritura activa.")
+        self.fail("WHEEL_DEPENDENCIES",message+" La instalación terminó sin completar; conserva el checkpoint.")
 
     def _readable_packages(self,workspace,required):
         node=shutil.which("node.exe" if os.name=="nt" else "node")

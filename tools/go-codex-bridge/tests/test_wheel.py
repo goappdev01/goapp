@@ -553,6 +553,45 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(["fetch" in args for args in seen],[False,False,True,False,False])
         self.assertEqual(lock.read_text(encoding="utf8"),"lockfileVersion: '9.0'\n")
 
+    def test_private_fetch_timeout_is_individual_only_after_install_stops(self):
+        from types import SimpleNamespace
+        mobile=self.root/"artifacts/go-app-mobile"
+        (mobile/"package.json").write_text('{"name":"synthetic"}',encoding="utf8")
+        lock=self.root/"pnpm-lock.yaml"
+        lock.write_text("lockfileVersion: '9.0'\n",encoding="utf8")
+        cli=self.home/"bin/node_modules/pnpm/bin/pnpm.cjs"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("",encoding="utf8")
+        def run(args,**kwargs):
+            if args[0]=="powershell.exe":
+                return SimpleNamespace(returncode=0,stdout="0\n")
+            if "fetch" in args:
+                raise subprocess.TimeoutExpired(args,600)
+            kwargs["stdout"].write(b"ERR_PNPM_NO_OFFLINE_TARBALL\n")
+            return SimpleNamespace(returncode=1)
+        for idle,code in ((True,"WHEEL_DEPENDENCIES"),(False,"WHEEL_INSTALL_UNCERTAIN")):
+            with self.subTest(idle=idle), \
+                 patch("wheel_effects.shutil.which",side_effect=lambda name:str(self.home/"bin/pnpm.cmd") if name=="pnpm.cmd" else str(self.home/"bin/node.exe")), \
+                 patch("wheel_effects.subprocess.run",side_effect=run), \
+                 patch.object(WheelEffects,"installation_idle",return_value=idle):
+                with self.assertRaises(BridgeError) as error:
+                    WheelEffects(self.bridge.factory)._dependencies(self.root,"synthetic")
+                self.assertEqual(error.exception.code,code)
+        self.assertEqual(lock.read_text(encoding="utf8"),"lockfileVersion: '9.0'\n")
+
+    def test_readable_dependencies_are_reused_without_install(self):
+        mobile=self.root/"artifacts/go-app-mobile"
+        (mobile/"package.json").write_text('{"name":"synthetic"}',encoding="utf8")
+        (self.root/"pnpm-lock.yaml").write_text("lockfileVersion: '9.0'\n",encoding="utf8")
+        for relative in ("typescript/bin/tsc","expo/bin/cli"):
+            path=mobile/"node_modules"/relative
+            path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_text("synthetic",encoding="utf8")
+        with patch.object(WheelEffects,"_readable_packages",return_value=True), \
+             patch("wheel_effects.subprocess.run") as run:
+            WheelEffects(self.bridge.factory)._dependencies(self.root,"synthetic")
+        run.assert_not_called()
+
     def test_trello_read_failure_retries_without_disabling_or_repeating_writes(self):
         wheel=self.bridge.factory.wheel
         wheel.approve(self.decisions())

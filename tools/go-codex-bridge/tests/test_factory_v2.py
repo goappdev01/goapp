@@ -82,6 +82,59 @@ class V2WheelTests(unittest.TestCase):
         self.codex_identity="new-synthetic-codex-account"
         return w,grant,job["id"],session
 
+    def stopped_install(self):
+        b=self.bridge;w=b.factory.wheel
+        w.activate_live("1"*64)
+        cards={c["id"]:c for c in b.factory._cards()}
+        selected=w._live_selection(cards,w.live_policy())
+        with b.db() as db:
+            grant=w._verified(db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",
+                                          (selected["grant_id"],)).fetchone())
+        grant['workspace']=str(self.root.parent/("go-fabrica-a4-card-"+grant['card_id']+"-"+str(grant['attempt'])))
+        with b.db() as db:
+            db.execute("UPDATE wheel_grants SET terms=?,signature=? WHERE grant_id=?",
+                       (b.factory.canonical(grant),b.sign(grant),grant['grant_id']))
+        w._ensure_card_workspace(grant)
+        _,spec=w._subject(self.cards[grant["card_id"]])
+        job=b.prepare_text(spec["instruction"],"4",{"source":"verified-queue",
+            "card_id":grant["card_id"],"attempt":grant["attempt"],"board_id":grant["board"],
+            "list_id":grant["origin"],"comment_ids":grant["comment_ids"]})
+        with b.db() as db:
+            db.execute("INSERT INTO factory_attempts(card_id,attempt,title,instruction_sha,state,job_id,before_sha) "
+                       "VALUES(?,?,?,?,?,?,?)",(grant["card_id"],grant["attempt"],spec["title"],
+                        grant["instruction_sha"],"blocked",job["id"],self.git("rev-parse","HEAD")))
+            db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started) VALUES(?,'A','claimed','synthetic')",
+                       (grant["grant_id"],))
+        w.checkpoint(grant,"WHEEL_INSTALL_UNCERTAIN")
+        w._transition(grant,"blocked","WHEEL_INSTALL_UNCERTAIN")
+        w.pause("WHEEL_INSTALL_UNCERTAIN")
+        return w,grant,job["id"]
+
+    def test_stopped_install_reconciles_without_replaying_job_or_trello(self):
+        w,grant,job_id=self.stopped_install()
+        with patch.object(WheelEffects,"installation_idle",return_value=False):
+            self.assertFalse(w.reconcile_stopped_install())
+        self.assertEqual(w.status()["reason"],"WHEEL_INSTALL_UNCERTAIN")
+        with patch.object(WheelEffects,"installation_idle",return_value=True):
+            self.assertTrue(w.reconcile_stopped_install())
+            self.assertFalse(w.reconcile_stopped_install())
+            self.assertEqual(w.status()["reason"],"OWNER_PAUSED")
+            self.assertFalse(w.enabled())
+            with self.bridge.db() as db:
+                self.assertEqual(db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
+                                            (grant["grant_id"],)).fetchone()[0],"WHEEL_INSTALL_UNCERTAIN")
+            w.toggle(True)  # Synthetic owner action, without any real execution.
+            with patch.object(w.continuity,"_defer_question_to_trello") as conflict:
+                result=w.tick()
+            self.assertEqual(result["card_blocked"],grant["card_id"])
+            conflict.assert_called_once()
+            with patch.object(w,"_advance",return_value={"synthetic_next":True}) as advance:
+                self.assertTrue(w.tick()["synthetic_next"])
+            self.assertNotEqual(advance.call_args[0][0]["card_id"],grant["card_id"])
+        self.assertFalse(self.runs or self.changes)
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT state FROM jobs WHERE id=?",(job_id,)).fetchone()[0],"blocked")
+
     def test_frozen_owner_approval_installs_v2_activation_atomically(self):
         w,ids=self.batch(diagnostic_fallback=True)
         self.assertTrue(w.enabled())

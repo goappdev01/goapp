@@ -238,6 +238,55 @@ class Wheel:
                 "checkpoint":"WORKSPACE_MISSING","owner_activation_required":True},db)
             return True
 
+    def _stopped_install_grant(self,db):
+        rows=list(db.execute("SELECT * FROM wheel_grants WHERE state='blocked' AND reason='WHEEL_INSTALL_UNCERTAIN'"))
+        if len(rows)!=1:
+            return None
+        try:
+            g=self._verified(rows[0])
+        except (self.f.Error,OSError):
+            return None
+        workspace=Path(g["workspace"])
+        if workspace.name!="go-fabrica-a4-card-"+g["card_id"]+"-"+str(g["attempt"]):
+            return None
+        checkpoint=db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
+                              (g["grant_id"],)).fetchone()
+        attempt=db.execute("SELECT state,job_id FROM factory_attempts WHERE card_id=? AND attempt=?",
+                           (g["card_id"],g["attempt"])).fetchone()
+        job=db.execute("SELECT state,session_id FROM jobs WHERE id=?",(attempt["job_id"],)).fetchone() if attempt else None
+        stage=db.execute("SELECT letter,state,approval_id FROM wheel_stages WHERE grant_id=?",
+                         (g["grant_id"],)).fetchall()
+        if (not checkpoint or checkpoint["phase"]!="WHEEL_INSTALL_UNCERTAIN"
+                or not attempt or attempt["state"]!="blocked" or not job or job["state"]!="prepared"
+                or job["session_id"] or len(stage)!=1 or stage[0]["letter"]!="A"
+                or stage[0]["state"]!="claimed" or stage[0]["approval_id"]
+                or db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()):
+            return None
+        from wheel_effects import WheelEffects
+        if not WheelEffects.installation_idle(workspace):
+            return None
+        try:
+            state=self.b.git_state(workspace)
+        except (self.f.Error,OSError):
+            return None
+        return g if state.get("git") and not state.get("tracked_dirty") else None
+
+    def reconcile_stopped_install(self):
+        """Release only a verified stopped install; defer its Trello conflict until owner PLAY."""
+        with self.f.lock,self.b.mutex,self.b.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            control=db.execute("SELECT enabled,reason FROM wheel_control WHERE id=1").fetchone()
+            if control["enabled"] or control["reason"]!="WHEEL_INSTALL_UNCERTAIN":
+                return False
+            g=self._stopped_install_grant(db)
+            if not g:
+                return False
+            db.execute("UPDATE wheel_control SET reason='OWNER_PAUSED',retry_after=0 WHERE id=1")
+            self.b.audit("wheel_stopped_install_reconciled",{"grant":g["grant_id"],
+                "checkpoint":"WHEEL_INSTALL_UNCERTAIN","owner_activation_required":True},db)
+            return True
+
     def activation_failed(self, code):
         """Persist a sanitized activation rejection so the owner sees a real red state."""
         safe_code=str(code)[:80]
@@ -1416,6 +1465,10 @@ class Wheel:
             live=self.live_policy()
             if live:
                 self._require_codex_identity(live["codex_identity"])
+                with self.b.db() as db:
+                    stopped=self._stopped_install_grant(db)
+                if stopped and stopped["card_id"] in cards:
+                    return self.continuity.card_error(stopped,"WHEEL_DEPENDENCIES")
             trial=self._live_selection(cards,live) if live else self._trial_limit(cards)
             if trial and trial.get("paused"):
                 return trial
