@@ -61,6 +61,19 @@ test('daily and weekly views honor dates outside today and day taps notify their
   assert.equal(columns(tree)[0], 'day_2028-01-10');
 });
 
+test('embedded booking calendar fills its parent while the final card can scroll above the home indicator', () => {
+  const app = fixture();
+  const { AgendaBoard } = app.load('components/AgendaOperativa.tsx');
+  for (const showHours of [true, false]) {
+    const tree = app.render(AgendaBoard, { goLog: [], viewMode: 'dia', showHours, embedded: true, bottomContentInset: 34 });
+    const scrollInsets = nodes(tree, node => node.props.contentContainerStyle).map(node => {
+      const style = node.props.contentContainerStyle;
+      return (Array.isArray(style) ? Object.assign({}, ...style.filter(Boolean)) : style).paddingBottom;
+    });
+    assert.ok(scrollInsets.includes(46), `calendar cards stay above the home indicator when showHours=${showHours}`);
+  }
+});
+
 test('view selector shows the active view, closes its menu and preserves caller context', () => {
   const app = fixture();
   const { GoCalendarViewSelector } = app.load('components/ui/GoCalendarViewSelector.tsx');
@@ -96,7 +109,7 @@ test('panel close and container exit dispatch separate actions and have nonoverl
 });
 
 test('Reservas month panel closes without exiting or resetting its selected date; no redundant panel close at root', () => {
-  const app = fixture();
+  const app = fixture({ insets: { top: 0, right: 0, left: 0, bottom: 34 } });
   const { GoReservasConfigScreen } = app.load('components/booking/GoReservasConfigScreen.tsx');
   let exits = 0, landingExits = 0;
   const props = { navigateToDayISO: '2027-02-28', dayNightMode: 'oscuro', onClose: () => exits++, onGoToLanding: () => landingExits++ };
@@ -109,6 +122,9 @@ test('Reservas month panel closes without exiting or resetting its selected date
   app.render(GoReservasConfigScreen, props);
   let tree = app.render(GoReservasConfigScreen, props);
   assert.equal(board(tree).props.selectedDateISO, '2027-02-28');
+  const workspace = nodes(tree, node => node.props.testID === 'go-reservas-workspace')[0];
+  assert.equal(workspace.props.style[1].paddingBottom, undefined);
+  assert.equal(board(tree).props.bottomContentInset, 34);
   assert.deepEqual(closes(tree).map(node => node.props.level), ['container']);
   button(tree, 'Abrir calendario mensual').props.onPress();
   tree = app.render(GoReservasConfigScreen, props);

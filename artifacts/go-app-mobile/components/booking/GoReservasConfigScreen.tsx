@@ -695,7 +695,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
       )}
 
       {/* ── Content area ── */}
-      <View testID="go-reservas-workspace" style={[g.contentArea, viewMode === "calendario" && { paddingLeft: insets.left, paddingRight: insets.right, paddingBottom: insets.bottom }]} onLayout={onContainerLayout}>
+      <View testID="go-reservas-workspace" style={[g.contentArea, viewMode === "calendario" && { paddingLeft: insets.left, paddingRight: insets.right }]} onLayout={onContainerLayout}>
 
         {viewMode === "plano" && (
           <PlanoEmpresaScreen
@@ -744,6 +744,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             goLog={filteredLog}
             bookingProfessionalId={liveProfessionals.some(person=>person.id===selectedPro)?selectedPro:undefined}
             embedded
+            bottomContentInset={insets.bottom}
             viewMode={calInnerView}
             calViewMonth={calViewMonth}
             selectedDateISO={reservasNavSelectedDay ?? businessToday}

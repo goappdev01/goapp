@@ -352,6 +352,8 @@ export type AgendaBoardProps = {
   goChats?: Record<string, BookingChatMessage[]>;
   onSendGoChat?: (entryId: string, chatKey: string, text: string, senderType: "cliente" | "empresa") => void;
   embedded?: boolean;
+  /** Keep the final card scrollable above a home indicator without shrinking the board. */
+  bottomContentInset?: number;
   style?: ViewStyle;
   renderHeader?: (monthNavigation: React.ReactNode | null) => React.ReactNode;
   calSizeKey?: CalSizeKey;
@@ -756,6 +758,7 @@ export function AgendaBoard({
   goChats,
   onSendGoChat,
   embedded = false,
+  bottomContentInset = 0,
   style,
   renderHeader,
   calSizeKey = DEFAULT_GO_RENDER_PRESET.calSize,
@@ -2775,7 +2778,9 @@ export function AgendaBoard({
                 ref={r => { colScrollRefs.current[col.id] = r; applyPreviewOffset(col.id); queueBookingFocus(); }}
                 testID={`calendar-day-scroll-${col.id}`}
                 style={s.colScroll}
-                contentContainerStyle={{ paddingBottom: scrollToDateToken?.entryId&&scrollToDateToken.dateISO===col.dateISO?Math.max(12,(colScrollViewH.current[col.id]||Dimensions.get("window").height)/2):12 }}
+                contentContainerStyle={{ paddingBottom: scrollToDateToken?.entryId&&scrollToDateToken.dateISO===col.dateISO
+                  ? Math.max(12 + bottomContentInset,(colScrollViewH.current[col.id]||Dimensions.get("window").height)/2)
+                  : 12 + bottomContentInset }}
                 removeClippedSubviews={isPreview || (dragItem && dragItem.dateISO === col.dateISO) || scrollToDateToken?.entryId ? false : undefined}
                 onContentSizeChange={(_w, h) => { colContentH.current[col.id] = h; applyPreviewOffset(col.id); queueBookingFocus(); }}
                 onScrollBeginDrag={() => { pendingBookingFocus.current = null; dragScroll.current.verticalCommands.delete(col.id); }}
@@ -3002,7 +3007,7 @@ export function AgendaBoard({
                 onScrollBeginDrag={()=>{pendingBookingFocus.current=null;}}
                 removeClippedSubviews={scrollToDateToken?.entryId?false:undefined}
                 style={s.colScroll}
-                contentContainerStyle={[s.colContent, { justifyContent: "flex-start", gap: compactGap },scrollToDateToken?.entryId&&scrollToDateToken.dateISO===col.dateISO&&{paddingBottom:Math.max(12,(colScrollViewH.current[col.id]||Dimensions.get("window").height)/2)}]}
+                contentContainerStyle={[s.colContent, { justifyContent: "flex-start", gap: compactGap, paddingBottom: 12 + bottomContentInset },scrollToDateToken?.entryId&&scrollToDateToken.dateISO===col.dateISO&&{paddingBottom:Math.max(12 + bottomContentInset,(colScrollViewH.current[col.id]||Dimensions.get("window").height)/2)}]}
                 showsVerticalScrollIndicator={false}
                 nestedScrollEnabled
                 scrollEnabled={scrollEnabledDuringDrag}
