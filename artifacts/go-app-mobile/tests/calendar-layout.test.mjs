@@ -25,6 +25,16 @@ function renderHeader(monthNavigation, demo = false, insets = { top: 44, left: 0
 }
 const event = () => ({ stopPropagation() {} });
 
+test('workspace calendar view choices expand within the horizontal filter row and preserve selection',()=>{
+ const app=fixture(),{GoCalendarViewSelector}=app.load('components/ui/GoCalendarViewSelector.tsx');
+ const chosen=[],props={value:'semana',compact:true,inlineOptions:true,onChange:value=>chosen.push(value)};
+ let tree=app.render(GoCalendarViewSelector,props);tree.children[0].props.onPress(event());tree=app.render(GoCalendarViewSelector,props);
+ const menu=tree.children[1];assert.equal(style(tree.props.style).flexDirection,'row');assert.equal(style(menu.props.style).flexWrap,'nowrap');
+ assert.equal(style(menu.props.style).position,undefined);assert.deepEqual(texts(menu),['DÍA','SEMANA','MES']);
+ menu.children[2].props.onPress(event());assert.deepEqual(chosen,['mes_lineal']);
+ props.value='mes_lineal';tree=app.render(GoCalendarViewSelector,props);assert.deepEqual(texts(tree),['MES']);
+});
+
 test('the embedded header reuses one month navigation between MES and configuration, preserving the DEMO shortcut', () => {
   const nav = { type: 'MonthNavigation', props: {}, children: [] };
   for (const demo of [false, true]) {

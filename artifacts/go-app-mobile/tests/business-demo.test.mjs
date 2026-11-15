@@ -265,6 +265,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
         if (key === "./ProfessionalGapPolicy") return load("components/empresa/ProfessionalGapPolicy.tsx");
         // The remote-only date editor has its own real component and SQL integration tests.
         if (key === "./CalendarExceptionsSection") return componentMocks;
+        if (key === "./BusinessTrialReviewPanel") return componentMocks;
         if (key === "./CatalogComplementSelector") return { CatalogComplementSelector: () => null };
         if (key === "./BookingDiscountSection") return componentMocks;
         if (key === "./booking") return imports["@/data/booking"];
@@ -445,6 +446,48 @@ test("iPhone DEMO opens one compact booking header, two views and today's reserv
   assert.equal(button(tree,"view_mode_dividido"),undefined);
   assert.deepEqual(plain(f.store.getSnapshot()),before);assert.equal(f.writes.length,writes);
   assert.equal(ui.calls.liveAgenda,0);assert.equal(ui.calls.external,0);
+});
+
+test('workspace uses one safe-area header and keeps parent navigation outside its measured footer in live and DEMO',async()=>{
+ for(const liveMode of [false,true]){
+  const f=dataFixture(),ui=uiFixture(f,{liveMode,businessPreview:!liveMode,ownerIdentity:!liveMode,adminAllowed:!liveMode});
+  const Panel=ui.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel;
+  const props={visible:true,previewReadOnly:!liveMode,initialModulo:'reservas_config',onClose(){}};
+  ui.render(Panel,props);let tree=ui.render(Panel,props);
+  const frame=nodes(tree).find(n=>n.props.testID==='empresa-keyboard-frame');
+  assert.equal(frame.props.style[1].paddingTop,0);assert.equal(text(tree).includes('biz_panel_booking_desc'),false);
+  const operations=component(tree,liveMode?'GoReservasConfigScreen':'GoReservasDemoScreen');assert.ok(operations);
+  operations.props.onFooterHeightChange(142);tree=ui.render(Panel,props);
+  if(liveMode){
+   const navigation=component(tree,'DraggableFAB');assert.ok(navigation.props.initialBottom>=150);
+   assert.equal(navigation.props.avoidRects[0].height,142);assert.equal(navigation.props.avoidRects[0].width,390);
+  }else{assert.equal(component(tree,'GoNavigationFloating').props.protectedBottom,142-34);}
+  operations.props.onFooterHeightChange(0);tree=ui.render(Panel,props);
+  if(liveMode)assert.equal(component(tree,'DraggableFAB').props.avoidRects,undefined);
+  else assert.equal(component(tree,'GoNavigationFloating').props.protectedBottom,0);
+ }
+});
+
+test('workspace scrolling filters and floor tools retain gestures without triggering the panel exit',async()=>{
+ const f=dataFixture();await configuredSalon(f);const ui=uiFixture(f),Screen=ui.load('components/booking/GoReservasConfigScreen.tsx').GoReservasDemoScreen;
+ let closed=0;const heights=[],props={onClose:()=>closed++,onFooterHeightChange:h=>heights.push(h)};
+ ui.render(Screen,props);await turn();let tree=ui.render(Screen,props);
+ const plan=component(tree,'PlanoEmpresaScreen');plan.props.onFooterHeightChange(110);tree=ui.render(Screen,props);
+ const floating=component(tree,'DraggableFAB');assert.equal(floating.props.avoidRects[0].y,844-110);
+ const event=y=>({nativeEvent:{pageX:385,pageY:y}}),gesture=y=>({dx:140,dy:0,y0:y});
+ assert.equal(tree.props.onMoveShouldSetPanResponder(event(800),gesture(800)),false);
+ assert.equal(tree.props.onMoveShouldSetPanResponder(event(400),gesture(400)),true);
+ button(tree,'view_mode_calendario').props.onPress();ui.render(Screen,props);tree=ui.render(Screen,props);
+ assert.equal(heights.at(-1),0);assert.equal(component(tree,'DraggableFAB').props.avoidRects,undefined);
+ const strip=nodes(tree).find(n=>n.props.testID==='go-reservas-calendar-filters');assert.equal(strip.props.horizontal,true);
+ const bar=nodes(tree).find(n=>n.children.includes(strip));bar.props.onLayout({nativeEvent:{layout:{y:140,height:49}}});
+ assert.equal(tree.props.onMoveShouldSetPanResponder(event(165),gesture(165)),false);
+ const selector=component(strip,'GoCalendarViewSelector');assert.equal(selector.props.inlineOptions,true);
+ for(const label of ['filter_todos','biz_unassigned_filter',...f.store.getSnapshot().config.plantillaItems[0].staffNames]){
+  const filter=button(strip,label);assert.ok(filter,label);filter.props.onPress();tree=ui.render(Screen,props);
+  assert.ok(component(tree,'AgendaBoard'));
+ }
+ assert.equal(closed,0);assert.equal(ui.calls.external,0);
 });
 
 test("registered iPhone bookings use the same compact plan and calendar navigation", async () => {
@@ -1253,7 +1296,8 @@ test("step 3 exposes Calendar exceptions after the weekly summary, reuses one ed
  const f=dataFixture();await f.store.updateConfig({sectorId:"belleza",subId:"peluqueria",activeDays:[0,1,2,3,4],openFrom:"09:00",openTo:"13:00",timezone:"Europe/Madrid"});
  const ui=uiFixture(f),Screen=ui.load("components/empresa/EmpresaConfigScreen.tsx").EmpresaConfigScreen;
  const parent=ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:2});const step=component(parent,"StepHorario");assert.ok(step,"The real third step is mounted");
- const scroll=nodes(parent).find(node=>node.type==="ScrollView"&&node.props.ref);assert.ok(nodes(scroll).includes(step));assert.notEqual(scroll.props.scrollEnabled,false);assert.ok(scroll.props.contentContainerStyle.paddingBottom>=100);
+ const scroll=nodes(parent).find(node=>node.type==="ScrollView"&&node.props.ref);assert.ok(nodes(scroll).includes(step));assert.notEqual(scroll.props.scrollEnabled,false);
+ assert.ok(!nodes(scroll).some(node=>node.props.testID==="business-wizard-footer"),"The footer owns its space outside the scrolling form");
  const next=button(parent,"biz_next");assert.ok(next);assert.ok(!nodes(scroll).includes(next),"The existing Next control stays outside the scroll; the access stays inside");
  const before=plain(f.store.getSnapshot().config);let tree=ui.render(step.type,step.props),access=nodes(tree).find(node=>node.props?.testID==="calendar-exceptions-access");
  assert.ok(access);assert.equal(text(access),"Excepciones del calendario");assert.equal(access.props.accessibilityRole,"button");assert.equal(access.props.accessibilityState.expanded,false);assert.equal(component(tree,"CalendarExceptionsSection"),undefined);

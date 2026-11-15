@@ -7,17 +7,18 @@ type CalendarView = "dia" | "semana" | "mes_lineal";
 type Props = {
   value: CalendarView;
   compact?: boolean;
+  inlineOptions?: boolean;
   onChange: (value: CalendarView) => void;
 };
 
-export function GoCalendarViewSelector({ value, onChange, compact = false }: Props) {
+export function GoCalendarViewSelector({ value, onChange, compact = false, inlineOptions = false }: Props) {
   const { lang } = useLanguage();
   const [open, setOpen] = useState(false);
   const labels: Record<CalendarView, string> = lang === "en"
     ? { dia: "DAY", semana: "WEEK", mes_lineal: "MONTH" }
     : { dia: "DÍA", semana: "SEMANA", mes_lineal: "MES" };
   return (
-    <View style={[styles.root, compact && styles.compactRoot]}>
+    <View style={[styles.root, compact && styles.compactRoot, inlineOptions && styles.inlineRoot]}>
       <TouchableOpacity
         onPress={event => { event.stopPropagation(); setOpen(current => !current); }}
         accessibilityRole="button"
@@ -29,7 +30,7 @@ export function GoCalendarViewSelector({ value, onChange, compact = false }: Pro
         <Feather name={open ? "chevron-up" : "chevron-down"} size={14} color="#ffffff" />
       </TouchableOpacity>
       {open && (
-        <View style={[styles.options, compact && styles.compactOptions]}>
+        <View style={[styles.options, compact && !inlineOptions && styles.compactOptions, inlineOptions && styles.inlineOptions]}>
           {(["dia", "semana", "mes_lineal"] as const).map(view => (
             <TouchableOpacity
               key={view}
@@ -50,6 +51,8 @@ export function GoCalendarViewSelector({ value, onChange, compact = false }: Pro
 const styles = StyleSheet.create({
   root: { alignItems: "center" },
   compactRoot: { zIndex: 20 },
+  inlineRoot: { flexDirection: "row", flexShrink: 0, gap: 4 },
+  inlineOptions: { flexWrap: "nowrap", paddingTop: 0, gap: 4 },
   compactTrigger: { paddingHorizontal: 6, gap: 4 },
   compactOptions: { position: "absolute", top: 44, left: 0, minWidth: 180, zIndex: 20 },
   trigger: { minHeight: 44, paddingHorizontal: 12, gap: 8, flexDirection: "row", alignItems: "center", borderRadius: 16, backgroundColor: "#0e0e10" },

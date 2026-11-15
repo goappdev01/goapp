@@ -122,6 +122,7 @@ interface GoReservasConfigScreenProps {
   onDayNightModeChange?:  (m: CalDayNightMode) => void;
   handedness?:            "right" | "left";
   hideFAB?:               boolean;
+  onFooterHeightChange?:  (height: number) => void;
   navigateToDayISO?:      string | null;
   onNavigateDayConsumed?: () => void;
 }
@@ -163,7 +164,7 @@ export function GoReservasDemoScreen(props: GoReservasConfigScreenProps) {
   });
 }
 
-function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, onProposeBookingChange, onDropBooking, onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot, liveBookingMutate }: GoReservasConfigScreenProps & {
+function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, onProposeBookingChange, onDropBooking, onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, onFooterHeightChange, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot, liveBookingMutate }: GoReservasConfigScreenProps & {
   allGoLog: GoEntry[];
   setGoLog: React.Dispatch<React.SetStateAction<GoEntry[]>>;
   demoStore?: BusinessDemoStore;
@@ -178,7 +179,8 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
     await createDemoBookingRepository(demoStore).changeBooking(String(entry.reservationId),String(entry.businessId),"business",operation,{proposalId:proposal.id,acceptFinancialTerms});
   };
   const insets    = useSafeAreaInsets();
-  const { width: viewportWidth } = useWindowDimensions();
+  const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
+  const [floorFooterHeight, setFloorFooterHeight] = useState(0);
   // iPhone keeps the compact layout in landscape; tablets retain the split view.
   const isPhone = Platform.OS === "ios" ? !Platform.isPad : viewportWidth < 600;
   const { config, calendarWorkHours } = useBusinessConfig();
@@ -240,10 +242,18 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
   useEffect(() => { handednessRef.current = handedness; }, [handedness]);
   useEffect(() => { onCloseRef.current    = onClose;    }, [onClose]);
   const screenWRef = useRef(Dimensions.get("window").width);
+  screenWRef.current = viewportWidth;
+  const swipeExclusions = useRef({ footer: 0, height: viewportHeight, filters: { y: 0, height: 0 } });
+  swipeExclusions.current.height = viewportHeight;
 
   const swipeGestureRef = useRef(
     PanResponder.create({
       onMoveShouldSetPanResponder: (e, g) => {
+        const startY = g.y0 ?? e.nativeEvent.pageY;
+        const { footer, height, filters } = swipeExclusions.current;
+        // Horizontal tools own their scroll in both directions, including the thumb edge.
+        if (footer > 0 && startY >= height - footer) return false;
+        if (filters.height > 0 && startY >= filters.y && startY <= filters.y + filters.height) return false;
         const h  = handednessRef.current;
         const sw = screenWRef.current;
         const tx = e.nativeEvent.pageX;
@@ -269,6 +279,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
   ).current;
 
   const [viewMode, setViewMode] = useState<ViewMode>(isPhone ? "plano" : "split");
+  if (viewMode !== "calendario") swipeExclusions.current.filters.height = 0;
   const [todayListVisible, setTodayListVisible] = useState(false);
   const [calendarFocus, setCalendarFocus] = useState<{dateISO:string;timeHHMM:string;entryId?:string;token:number}>();
   useEffect(() => { if (isPhone && viewMode === "split") setViewMode("plano"); }, [isPhone, viewMode]);
@@ -557,6 +568,16 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
     setViewMode(m);
   };
 
+  const reportFloorFooterHeight = useCallback((height: number) => {
+    const protectedHeight = viewMode === "plano" ? height : 0;
+    swipeExclusions.current.footer = protectedHeight;
+    setFloorFooterHeight(protectedHeight);
+    onFooterHeightChange?.(protectedHeight);
+  }, [viewMode, onFooterHeightChange]);
+  useEffect(() => {
+    if (viewMode !== "plano") reportFloorFooterHeight(0);
+  }, [viewMode, reportFloorFooterHeight]);
+
   const openTodayReservation = (reservation: FloorReservation) => {
     const dateISO = (reservation as FloorReservation & { dateISO?: string }).dateISO ?? reservation.date;
     const entryId = goLog.find(entry => entry.reservationId === reservation.id)?.id;
@@ -572,14 +593,15 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
   return (
     <View style={[g.root, { backgroundColor: tk.bg }]} {...swipeGestureRef.panHandlers}>
 
-      {/* ── Header — same safe area top + CONFIG button as the normal Calendar ── */}
-      <View testID="go-reservas-compact-header" style={[g.header, { backgroundColor: tk.card, borderBottomColor: tk.border, paddingTop: insets.top + 4, paddingLeft: insets.left + 12, paddingRight: insets.right + 12 }]}>
+      {/* The panel owns its safe area; settings floats over the header's text inset. */}
+      <View testID="go-reservas-compact-header" style={[g.header, { backgroundColor: tk.card, borderBottomColor: tk.border, paddingTop: insets.top + 2, paddingLeft: insets.left + 10, paddingRight: insets.right + 8 }]}>
         <View style={g.headerLabels}>
           <Text style={[g.headerTitle, { color: tk.text }]} numberOfLines={1}>{lang === "en" ? "Operations panel" : "Panel operativo"}</Text>
           <Text style={[g.headerBusiness, { color: tk.gray }]} numberOfLines={1} ellipsizeMode="tail">{businessName}</Text>
         </View>
-        {/* CONFIG button — exact same style as the normal Calendar */}
-        <GoCloseButton level="settings" accessibilityLabel={lang === "en" ? "Booking settings" : "Configuración de reservas"} onPress={() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }}/>
+        <GoCloseButton level="settings" touchSize={44} preserveTouchSize iconSize={22} cornerRadius={14}
+          style={{ position: "absolute", top: insets.top + 2, right: insets.right + 8 }}
+          accessibilityLabel={lang === "en" ? "Booking settings" : "Configuración de reservas"} onPress={() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }}/>
       </View>
 
       {/* ── Panel de config — mismos controles que el Calendario normal ── */}
@@ -603,7 +625,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
       )}
 
       {/* ── View mode tabs ── */}
-      <View style={[g.modeTabs, { backgroundColor: tk.card, borderBottomColor: tk.border }]}>
+      <View style={[g.modeTabs, { backgroundColor: tk.card, borderBottomColor: tk.border, paddingLeft: insets.left + 8, paddingRight: insets.right + 8 }]}>
         {VIEW_MODES.filter(m => !isPhone || m.key !== "split").map(m => {
           const active = m.key === viewMode;
           return (
@@ -638,19 +660,23 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
 
       {/* ── Professional selector — solo visible en Calendario ── */}
       {viewMode === "calendario" && (
-        <View style={[g.proBar, { backgroundColor: tk.card, borderBottomColor: tk.border }]}>
-          <GoCalendarViewSelector compact value={calInnerView} onChange={setCalInnerView} />
+        <View style={[g.proBar, { backgroundColor: tk.card, borderBottomColor: tk.border, paddingLeft: insets.left, paddingRight: insets.right }]}
+          onLayout={event => { const { y, height } = event.nativeEvent.layout; swipeExclusions.current.filters = { y, height }; }}>
           <ScrollView
+            testID="go-reservas-calendar-filters"
             horizontal
             style={g.proScrollViewport}
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={g.proScroll}
           >
+            <GoCalendarViewSelector compact inlineOptions value={calInnerView} onChange={setCalInnerView} />
             {professionals.map(pro => {
               const active = pro === selectedPro;
               return (
                 <TouchableOpacity
                   key={pro}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
                   activeOpacity={0.8}
                   onPress={() => {
                     Haptics.selectionAsync().catch(() => {});
@@ -658,7 +684,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
                   }}
                   style={[g.proChip, { backgroundColor: tk.bg, borderColor: tk.border }, active && { backgroundColor: GREEN, borderColor: GREEN }]}
                 >
-                  <Text style={[g.proChipTxt, { color: tk.gray }, active && { color: "#fff" }]}>
+                  <Text numberOfLines={1} style={[g.proChipTxt, { color: tk.gray }, active && { color: "#fff" }]}>
                     {pro === "Todos" ? t("filter_todos") : pro === "Sin asignar" ? t("biz_unassigned_filter") : demoStore ? demoProfessionals.find(person => person.id === pro)?.name : liveProfessionals.find(person => person.id === pro)?.name ?? pro}
                   </Text>
                 </TouchableOpacity>
@@ -669,7 +695,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
       )}
 
       {/* ── Content area ── */}
-      <View style={g.contentArea} onLayout={onContainerLayout}>
+      <View testID="go-reservas-workspace" style={[g.contentArea, viewMode === "calendario" && { paddingLeft: insets.left, paddingRight: insets.right, paddingBottom: insets.bottom }]} onLayout={onContainerLayout}>
 
         {viewMode === "plano" && (
           <PlanoEmpresaScreen
@@ -679,6 +705,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             onClose={onClose}
             hideFAB
             embeddedInBookingPanel
+            onFooterHeightChange={reportFloorFooterHeight}
           />
         )}
 
@@ -780,7 +807,8 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
         <DraggableFAB navigation screenKey="go_reservas"
           buttonKey="main"
           initialRight={20}
-          initialBottom={insets.bottom + 24}
+          initialBottom={Math.max(insets.bottom + 24, floorFooterHeight + 8)}
+          avoidRects={floorFooterHeight > 0 ? [{ x: 0, y: viewportHeight - floorFooterHeight, width: viewportWidth, height: floorFooterHeight }] : undefined}
           maxH={168} buttonWidth={64}>
           <View ref={calendarDragOverlay} collapsable={false} style={{ gap: 8, alignItems: "center" }}>
           {/* ↑ Abre el selector mensual — solo en pestaña Calendario.
@@ -1194,16 +1222,16 @@ const g = StyleSheet.create({
 
   header:       {
     flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 12, paddingVertical: 6,
+    paddingHorizontal: 10, paddingBottom: 2,
     borderBottomWidth: 1, borderBottomColor: BORDER, backgroundColor: CARD,
   },
-  headerLabels: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingRight: 8 },
-  headerTitle:  { fontSize: 15, fontWeight: "800", color: TEXT },
+  headerLabels: { flex: 1, minWidth: 0, minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingRight: 52 },
+  headerTitle:  { flexShrink: 1, fontSize: 15, fontWeight: "800", color: TEXT },
   headerBusiness: { flex: 1, minWidth: 0, textAlign: "right", fontSize: 13, fontWeight: "600" },
 
   modeTabs: {
-    flexDirection: "row", gap: 6, backgroundColor: CARD,
-    paddingHorizontal: 10, paddingVertical: 6,
+    flexDirection: "row", gap: 4, backgroundColor: CARD,
+    paddingHorizontal: 8, paddingVertical: 2,
     borderBottomWidth: 1, borderBottomColor: BORDER,
   },
   modeTab: {
@@ -1219,16 +1247,19 @@ const g = StyleSheet.create({
     backgroundColor: CARD,
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
-    paddingLeft: 10,
   },
   proScrollViewport: { flex: 1, minWidth: 0 },
   proScroll: {
     flexDirection: "row",
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 5,
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
   },
   proChip: {
+    minHeight: 44,
+    flexShrink: 0,
+    justifyContent: "center",
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 99,
@@ -1242,7 +1273,7 @@ const g = StyleSheet.create({
     color: GRAY,
   },
 
-  contentArea:   { flex: 1 },
+  contentArea:   { flex: 1, minHeight: 0 },
 
   todayModal: { flex: 1, justifyContent: "flex-end" },
   todayBackdrop: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(0,0,0,0.55)" },

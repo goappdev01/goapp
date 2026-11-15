@@ -193,3 +193,24 @@ test('manual floor duration is explicit only in DEMO and uses the selected langu
   f.ui.setLanguage('en');page=f.ui.render(sheet.type,{...sheet.props,visible:true,el});assert.ok(text(page).includes('Manual reservation · 30 minutes'));
   page=f.ui.render(sheet.type,{...sheet.props,visible:true,el,demo:false});assert.equal(text(page).includes('30 minutes'),false);
 });
+
+test('workspace tools share a scrollable strip at every phone width without shrinking actions or changing the plan',async()=>{
+ for(const windowWidth of [320,375,390,430,844]){
+  const heights=[],data=dataFixture();data.store.getSnapshot().plan.backgroundImage='test://background';
+  const f=await setupFloor('es',{embeddedInBookingPanel:true,onFooterHeightChange:h=>heights.push(h)},{data,windowWidth});
+  const before=JSON.stringify(data.store.getSnapshot().plan);
+  const strip=nodes(f.tree).find(n=>n.props.testID==='floor-tools-scroll');assert.equal(strip.props.horizontal,true);
+  for(const label of ['Empresa','Cliente','+ Elemento','Plantilla','Guardar']){
+   const control=button(strip,label);assert.ok(control,label);
+   const style=Object.assign({},...control.props.style.filter(Boolean));assert.ok(style.minHeight>=44);assert.ok(style.minWidth>=44);
+   assert.equal(style.flexShrink,0);assert.equal(nodes(control).some(n=>n.props.adjustsFontSizeToFit),false);
+  }
+  assert.ok(nodes(strip).find(n=>n.props.accessibilityLabel==='Quitar imagen'));
+  const footer=nodes(f.tree).find(n=>n.props.testID==='floor-workspace-footer');
+  footer.props.onLayout({nativeEvent:{layout:{height:108}}});assert.deepEqual(heights,[108]);
+  button(strip,'Cliente').props.onPress();let tree=f.ui.render(f.Plano,f.opts);
+  assert.equal(button(tree,'Guardar'),undefined);assert.ok(nodes(tree).find(n=>n.props.accessibilityLabel==='Reservas activas'));
+  button(tree,'Empresa').props.onPress();tree=f.ui.render(f.Plano,f.opts);assert.ok(button(tree,'Guardar'));
+  assert.equal(JSON.stringify(data.store.getSnapshot().plan),before);assert.deepEqual(data.writes,[]);
+ }
+});

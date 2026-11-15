@@ -86,7 +86,7 @@ test('panel close and container exit dispatch separate actions and have nonoverl
   const context = { panel: true, container: true, date: '2027-02-28', scroll: 320 };
   const panel = app.render(GoCloseButton, { level: 'panel', accessibilityLabel: 'Cerrar panel', onPress: () => { context.panel = false; } });
   const exit = app.render(GoCloseButton, { level: 'container', accessibilityLabel: 'Salir', onPress: () => { context.container = false; } });
-  assert.equal(nodes(panel, node => node.type === 'Feather')[0].props.name, 'corner-up-left');
+  assert.equal(nodes(panel, node => node.type === 'Feather')[0].props.name, 'arrow-left');
   assert.equal(nodes(exit, node => node.type === 'Feather')[0].props.name, 'x');
   assert.equal(press(panel), true, 'closing an inner panel must not trigger an ancestor press handler');
   assert.deepEqual(context, { panel: false, container: true, date: '2027-02-28', scroll: 320 });
@@ -104,7 +104,7 @@ test('Reservas month panel closes without exiting or resetting its selected date
     if (!tree || typeof tree !== 'object' || (tree.type === 'Modal' && !tree.props.visible)) return [];
     return [...(predicate(tree) ? [tree] : []), ...(tree.children ?? []).flatMap(child => visibleNodes(child, predicate))];
   }
-  const closes = tree => visibleNodes(tree, node => node.type?.name === 'GoCloseButton');
+  const closes = tree => visibleNodes(tree, node => node.type?.name === 'GoCloseButton' && node.props.level !== 'settings');
   const board = tree => nodes(tree, node => node.type?.name === 'AgendaBoard')[0];
   app.render(GoReservasConfigScreen, props);
   let tree = app.render(GoReservasConfigScreen, props);

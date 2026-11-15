@@ -1570,6 +1570,8 @@ export interface PlanoEmpresaPanelProps {
   showBackButton?: boolean;
   /** The booking panel already supplies the title and its own view controls. */
   embeddedInBookingPanel?: boolean;
+  /** Lets the owner keep floating navigation clear of the actual footer bounds. */
+  onFooterHeightChange?: (height: number) => void;
 }
 
 // ── Inline reservations panel for split mode ────────────────────────────────
@@ -1616,7 +1618,7 @@ function SplitReservationsPanel({
   );
 }
 
-export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessName, templateId, onClose, onNext, hideFAB = false, showBackButton = false, embeddedInBookingPanel = false }: PlanoEmpresaPanelProps) {
+export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessName, templateId, onClose, onNext, hideFAB = false, showBackButton = false, embeddedInBookingPanel = false, onFooterHeightChange }: PlanoEmpresaPanelProps) {
   const insets = useSafeAreaInsets();
   const { t, lang } = useLanguage();
   const { config: bizConfig, demo } = useBusinessConfig();
@@ -1624,7 +1626,6 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
   const floorRepository = demo ?? { loadFloorPlan, saveFloorPlan, loadReservations, saveReservations };
   const [viewportWidth, setViewportWidth] = useState(() => Dimensions.get("window").width);
   const isCompactPhone = Platform.OS === "ios" ? !Platform.isPad : viewportWidth < 600;
-  const moveClearImageBelow = isCompactPhone && viewportWidth < 350;
 
   useEffect(() => {
     if (typeof Dimensions.addEventListener !== "function") return;
@@ -2231,6 +2232,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
       <View style={{ flex: 1 }}>
       <GestureDetector gesture={canvasComposed}>
         <View
+          testID="floor-canvas-viewport"
           style={[
             { overflow: "hidden", backgroundColor: BG },
             mode === "split" ? { flex: Math.round(splitRatio * 10) } : { flex: 1 },
@@ -2320,29 +2322,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
       )}
       </View>
 
-      {/* ── Status legend ── */}
-      <View style={s.legend}>
-        {(mode === "cliente"
-          ? (["disponible"] as FloorElementStatus[])
-          : (["disponible", "reservado", "ocupado", "bloqueado"] as FloorElementStatus[])
-        ).map(st => (
-          <View key={st} style={s.legendItem}>
-            <View style={[s.legendDot, { backgroundColor: STATUS_COLORS[st] }]} />
-            <Text style={s.legendTxt}>{mode === "cliente" && st === "disponible" ? t("floor_available_spaces") : t(floorStatusKey(st))}</Text>
-          </View>
-        ))}
-      </View>
-
-      {/* ── Selected element bar ── */}
-      <SelectedElementBar
-        el={selectedEl}
-        mode={mode}
-        onEdit={() => setShowEditor(true)}
-        onBook={handleBook}
-        onDeselect={() => setSelectedId(null)}
-      />
-
-      {/* ── GO close FAB — arrastrable con long-press ── */}
+      {/* Standalone navigation remains relative to the screen, outside the footer. */}
       {!embeddedInBookingPanel && !hideFAB && !showBackButton && (
         <DraggableFAB navigation screenKey="plano"
           buttonKey="close"
@@ -2353,17 +2333,45 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
         </DraggableFAB>
       )}
 
+      <View testID="floor-workspace-footer" onLayout={event => onFooterHeightChange?.(event.nativeEvent.layout.height)}>
+      {/* ── Status legend ── */}
+      <ScrollView horizontal={isCompactPhone} showsHorizontalScrollIndicator={false} style={s.toolbarViewport}
+        contentContainerStyle={[s.legend, isCompactPhone && s.legendCompact]}>
+        {(mode === "cliente"
+          ? (["disponible"] as FloorElementStatus[])
+          : (["disponible", "reservado", "ocupado", "bloqueado"] as FloorElementStatus[])
+        ).map(st => (
+          <View key={st} style={s.legendItem}>
+            <View style={[s.legendDot, { backgroundColor: STATUS_COLORS[st] }]} />
+            <Text style={s.legendTxt}>{mode === "cliente" && st === "disponible" ? t("floor_available_spaces") : t(floorStatusKey(st))}</Text>
+          </View>
+        ))}
+      </ScrollView>
+
+      {/* ── Selected element bar ── */}
+      <SelectedElementBar
+        el={selectedEl}
+        mode={mode}
+        onEdit={() => setShowEditor(true)}
+        onBook={handleBook}
+        onDeselect={() => setSelectedId(null)}
+      />
+
       {/* ── Bottom toolbar ── */}
-      <View style={[s.bottomBar, { paddingBottom: insets.bottom + 8 }]}>
+      <View style={[s.bottomBar, isCompactPhone && s.bottomBarCompact, { paddingLeft: insets.left + (isCompactPhone ? 8 : 14), paddingRight: insets.right + (isCompactPhone ? 8 : 14), paddingBottom: insets.bottom + (isCompactPhone ? 2 : 8) }]}>
+        <ScrollView testID="floor-tools-scroll" horizontal={isCompactPhone} scrollEnabled={isCompactPhone}
+          showsHorizontalScrollIndicator={false} style={s.toolbarViewport}
+          contentContainerStyle={isCompactPhone ? s.compactToolbarContent : undefined}>
         {/* Phones show Empresa and Cliente; larger layouts retain Dividido. */}
-        <View style={s.modeRow}>
-          <View style={s.modeBtnGroup}>
+        <View style={[s.modeRow, isCompactPhone && s.modeRowCompact]}>
+          <View style={[s.modeBtnGroup, isCompactPhone && s.modeBtnGroupCompact]}>
             {(isCompactPhone ? (["editor", "cliente"] as const) : (["editor", "cliente", "split"] as const)).map(m => (
               <TouchableOpacity
                 key={m}
                 style={[s.modeBtn, isCompactPhone && s.modeBtnCompact, mode === m && s.modeBtnActive]}
                 accessibilityRole="button"
                 accessibilityLabel={m === "editor" ? t("floor_business") : m === "cliente" ? t("floor_client") : t("view_mode_dividido")}
+                accessibilityState={{ selected: mode === m }}
                 onPress={() => {
                   setMode(m);
                   setSelectedId(null);
@@ -2380,7 +2388,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
                   size={13}
                   color={mode === m ? "#fff" : GRAY}
                 />
-                <Text style={[s.modeTxt, mode === m && s.modeTxtActive]}>
+                <Text numberOfLines={isCompactPhone ? 1 : undefined} style={[s.modeTxt, mode === m && s.modeTxtActive]}>
                   {m === "editor" ? t("floor_business") : m === "cliente" ? t("floor_client") : t("view_mode_dividido")}
                 </Text>
               </TouchableOpacity>
@@ -2419,7 +2427,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
               accessibilityRole="button" accessibilityLabel={lang === "en" ? "Choose background image" : "Elegir imagen de fondo"}>
               <Feather name="image" size={15} color={ACCENT} />
             </TouchableOpacity>
-            {plan.backgroundImage && !moveClearImageBelow && (
+            {plan.backgroundImage && (
               <TouchableOpacity style={[s.toolBtn, isCompactPhone && s.toolBtnCompact]} onPress={handleClearBackground} activeOpacity={0.8}
                 accessibilityRole="button" accessibilityLabel={t("floor_remove_image")}>
                 <Feather name="x-circle" size={15} color={DANGER} />
@@ -2434,7 +2442,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
                 accessibilityRole="button"
                 accessibilityLabel={t("floor_add_element")}
               >
-                <Text style={s.addTxtCompact} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{t("floor_add_button")}</Text>
+                <Text style={s.addTxtCompact} numberOfLines={1}>{t("floor_add_button")}</Text>
               </TouchableOpacity>
             )}
 
@@ -2458,7 +2466,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
                     accessibilityLabel={t("floor_template")}
                   >
                     <Text style={{ fontSize: 14, lineHeight: 18 }}>{contextTpl.emoji}</Text>
-                    <Text style={s.tplTxt} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{t("floor_template")}</Text>
+                    <Text style={s.tplTxt} numberOfLines={1}>{t("floor_template")}</Text>
                   </TouchableOpacity>
                 );
               }
@@ -2472,7 +2480,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
                   accessibilityLabel={t("floor_templates")}
                 >
                   <Feather name="layers" size={14} color="#7C69BE" />
-                  <Text style={s.tplTxt} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{t("floor_templates")}</Text>
+                  <Text style={s.tplTxt} numberOfLines={1}>{t("floor_templates")}</Text>
                 </TouchableOpacity>
               );
             })()}
@@ -2487,29 +2495,24 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
               activeOpacity={0.85}
               accessibilityRole="button"
               accessibilityLabel={t("floor_save")}
+              accessibilityState={{ disabled: saving || !hasChanges, busy: saving }}
             >
               <Feather name={saving ? "loader" : "save"} size={15} color={hasChanges ? "#fff" : GRAY} />
-              <Text style={[s.saveTxt, isCompactPhone && s.saveTxtCompact, !hasChanges && { color: GRAY }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>
+              <Text style={[s.saveTxt, isCompactPhone && s.saveTxtCompact, !hasChanges && { color: GRAY }]} numberOfLines={1}>
                 {saving ? "…" : t("floor_save")}
               </Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {mode === "editor" && plan.backgroundImage && moveClearImageBelow && (
-          <TouchableOpacity style={[s.toolBtn, s.toolBtnCompact, { marginBottom: 4 }]} onPress={handleClearBackground} activeOpacity={0.8}
-            accessibilityRole="button" accessibilityLabel={t("floor_remove_image")}>
-            <Feather name="x-circle" size={15} color={DANGER} />
-          </TouchableOpacity>
-        )}
-
-        {/* Row 2: client mode hint */}
+        {/* The client hint also stays in the scrolling strip on phones. */}
         {mode === "cliente" && plan.elements.some(e => e.status === "disponible" || (Boolean(demo) && e.status === "reservado")) && (
-          <View style={s.clientHint}>
+          <View style={[s.clientHint, isCompactPhone && s.clientHintCompact]}>
             <Feather name="map-pin" size={12} color={ACCENT} />
             <Text style={s.clientHintTxt}>{t("floor_client_hint")}</Text>
           </View>
         )}
+        </ScrollView>
 
         {/* SIGUIENTE — solo visible en el asistente de configuración (Paso 7 → Paso 8) */}
         {onNext && (
@@ -2522,6 +2525,7 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
             <Feather name="arrow-right" size={17} color="#fff" />
           </TouchableOpacity>
         )}
+      </View>
       </View>
 
       {/* ── Overlays ── */}
@@ -2603,16 +2607,22 @@ const s = StyleSheet.create({
 
   // Status legend
   legend:      { flexDirection: "row", backgroundColor: CARD, borderTopWidth: 1, borderTopColor: BORDER, paddingHorizontal: 16, paddingVertical: 7, gap: 14, flexWrap: "wrap" },
+  legendCompact: { flexWrap: "nowrap", paddingHorizontal: 8, paddingVertical: 3, gap: 10 },
   legendItem:  { flexDirection: "row", alignItems: "center", gap: 5 },
   legendDot:   { width: 8, height: 8, borderRadius: 4 },
   legendTxt:   { fontSize: 10, color: GRAY, fontWeight: "600" },
 
   // Bottom toolbar
   bottomBar:   { backgroundColor: CARD, borderTopWidth: 1, borderTopColor: BORDER, paddingTop: 10, paddingHorizontal: 14 },
+  bottomBarCompact: { paddingTop: 2 },
+  toolbarViewport: { flexGrow: 0, flexShrink: 0 },
+  compactToolbarContent: { flexDirection: "row", alignItems: "center", gap: 6 },
   modeRow:       { flexDirection: "row", gap: 8, alignItems: "center", marginBottom: 8 },
+  modeRowCompact: { marginBottom: 0, flexShrink: 0 },
   modeBtnGroup:  { flex: 1, flexDirection: "row", gap: 6 },
+  modeBtnGroupCompact: { flex: 0, flexDirection: "row", gap: 4 },
   modeBtn:       { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, paddingHorizontal: 6, paddingVertical: 8, borderRadius: 11, borderWidth: 1, borderColor: BORDER },
-  modeBtnCompact: { minHeight: 44 },
+  modeBtnCompact: { flex: 0, flexShrink: 0, minWidth: 92, minHeight: 44, paddingHorizontal: 10 },
   modeBtnActive: { backgroundColor: ACCENT, borderColor: ACCENT },
   modeTxt:       { fontSize: 11, fontWeight: "700", color: GRAY, letterSpacing: 0.2, flexShrink: 1, textAlign: "center" },
   modeTxtActive: { color: "#fff" },
@@ -2625,10 +2635,10 @@ const s = StyleSheet.create({
   addTxtFull:  { color: "#fff", fontWeight: "900", fontSize: 15, letterSpacing: 0.8 },
   // Editor tools
   toolsRow:    { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 4 },
-  toolsRowCompact: { flexWrap: "nowrap", gap: 5 },
+  toolsRowCompact: { flexWrap: "nowrap", gap: 6, marginBottom: 0, flexShrink: 0 },
   toolBtn:     { width: 38, height: 38, borderRadius: 10, backgroundColor: "#F3F4F6", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: BORDER },
   toolBtnCompact: { width: 44, height: 44, borderRadius: 11 },
-  compactEditorAction: { flex: 1, minWidth: 0, minHeight: 44, paddingHorizontal: 4, justifyContent: "center" },
+  compactEditorAction: { flexShrink: 0, minWidth: 88, minHeight: 44, paddingHorizontal: 10, justifyContent: "center" },
   addBtnCompact: { alignItems: "center", backgroundColor: ACCENT, borderRadius: 11 },
   addTxtCompact: { color: "#fff", fontWeight: "900", fontSize: 11, letterSpacing: 0.2, textAlign: "center" },
   tplBtn:      { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 9, borderRadius: 11, borderWidth: 1.5, borderColor: "#7C69BE44", backgroundColor: "#7C69BE11" },
@@ -2637,6 +2647,7 @@ const s = StyleSheet.create({
   saveTxt:     { color: "#fff", fontWeight: "900", fontSize: 13, letterSpacing: 0.6 },
   saveTxtCompact: { fontSize: 11, letterSpacing: 0.2, flexShrink: 1 },
   clientHint:  { flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 6, paddingHorizontal: 4, marginBottom: 4 },
+  clientHintCompact: { width: 240, flexShrink: 0, marginBottom: 0 },
   clientHintTxt: { color: ACCENT, fontSize: 12, fontWeight: "600", flex: 1 },
 
   nextStepBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: ACCENT, borderRadius: 14, paddingVertical: 13, marginTop: 8, marginBottom: 2 },
