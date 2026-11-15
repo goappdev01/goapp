@@ -333,8 +333,16 @@ class FactoryTests(unittest.TestCase):
     def test_metro_fast_forwards_from_older_ancestor_without_replacing_pinned_checkout(self):
         root=self.home/'served';cli=root/'node_modules/expo/bin/cli'
         cli.parent.mkdir(parents=True);cli.write_text('synthetic')
+        mobile=root/'artifacts/go-app-mobile'
+        mobile.mkdir(parents=True)
+        (mobile/'package.json').write_text('{"name":"mobile"}')
+        mobile_cli=mobile/'node_modules/expo/bin/cli'
+        mobile_cli.parent.mkdir(parents=True);mobile_cli.write_text('synthetic')
+        other=self.home/'other/node_modules/expo/bin/cli'
+        other.parent.mkdir(parents=True);other.write_text('synthetic')
         old,before,new='a'*40,'b'*40,'c'*40
         calls=[]
+        line=f'node "{cli}" start --port 8088 --host lan'
         def git(*args):
             calls.append(args)
             if args==('rev-parse','HEAD'):return old
@@ -345,12 +353,22 @@ class FactoryTests(unittest.TestCase):
             return ''
         def run(args,**kwargs):
             if args[0]=='powershell.exe':
-                return type('Result',(),{'returncode':0,'stdout':f'node "{cli}" start --port 8088 --host lan'})()
+                return type('Result',(),{'returncode':0,'stdout':line})()
             self.assertEqual(args[-2:],[old,new])
             return type('Result',(),{'returncode':0})()
         with patch.object(self.bridge.safety,'git_command',side_effect=lambda _root,*args:git(*args)),\
              patch('factory.subprocess.run',side_effect=run):
             self.bridge.factory._advance_served_checkout(root,before,new)
+            line=r'"C:\Program Files\nodejs\node.exe" .\node_modules\expo\bin\cli start --port 8088 --lan'
+            self.bridge.factory._advance_served_checkout(root,before,new)
+            line=f'node "{other}" start --port 8088 --lan'
+            with self.assertRaises(BridgeError) as error:
+                self.bridge.factory._advance_served_checkout(root,before,new)
+            self.assertEqual(error.exception.code,'FACTORY_METRO_UNVERIFIED')
+            line=r'node .\node_modules\expo\bin\cli start --port 8088 --lan --project-root ..\other'
+            with self.assertRaises(BridgeError) as error:
+                self.bridge.factory._advance_served_checkout(root,before,new)
+            self.assertEqual(error.exception.code,'FACTORY_METRO_UNVERIFIED')
         self.assertIn(('-c','core.hooksPath=NUL','merge','--ff-only',new),calls)
 
     def test_legacy_monitor_stops_at_incompatible_first_card(self):

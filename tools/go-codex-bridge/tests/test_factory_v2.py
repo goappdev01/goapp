@@ -342,6 +342,32 @@ class V2WheelTests(unittest.TestCase):
         self.assertFalse(restored.factory.wheel.enabled())
         self.assertFalse(self.runs or self.changes)
 
+    def test_paused_unverified_metro_rechecks_served_checkout_without_republishing(self):
+        w,ids=self.batch();w.pause('FACTORY_METRO_UNVERIFIED')
+        with self.bridge.db() as db:
+            row=db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[0],)).fetchone()
+            grant=w._verified(row)
+            db.execute("UPDATE wheel_grants SET state='blocked',reason='FACTORY_METRO_UNVERIFIED' WHERE grant_id=?",
+                       (grant['grant_id'],))
+            for letter,state in [('A','verified'),('B','claimed')]:
+                db.execute('INSERT INTO wheel_stages(grant_id,letter,state,started,approval_id) VALUES(?,?,?,?,?)',
+                           (grant['grant_id'],letter,state,'synthetic','synthetic'))
+        receipt={'main_sha':'a'*40,'served_sha':'b'*40}
+        with patch.object(self.bridge.factory,'_row',return_value={'job_id':'synthetic-job'}),\
+             patch.object(self.bridge,'job',return_value={'id':'synthetic-job','state':'completed'}),\
+             patch.object(WheelEffects,'_publications',return_value=[{'state':'verified'}]),\
+             patch.object(WheelEffects,'_reconcile_publication',return_value=True),\
+             patch.object(WheelEffects,'_published',return_value=receipt) as verified:
+            self.assertEqual(w.continuity.reconcile_published_stale(),[ids[0]])
+            self.assertEqual(w.continuity.reconcile_published_stale(),[])
+        verified.assert_called_once()
+        self.assertTrue(verified.call_args.kwargs['sync'])
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT state FROM wheel_stages WHERE grant_id=? AND letter=?',
+                                        (grant['grant_id'],'B')).fetchone()[0],'verified')
+            self.assertEqual(db.execute('SELECT reason FROM wheel_control WHERE id=1').fetchone()[0],'OWNER_PAUSED')
+        self.assertFalse(self.runs or self.changes)
+
     def test_unreleased_comment_after_verified_publication_rearms_without_repeating_work(self):
         w,ids=self.batch();w.pause('WHEEL_PRESERVATION_PUBLICATION')
         with self.bridge.db() as db:

@@ -179,18 +179,18 @@ class Continuity:
                         or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()):
                     return repaired
                 candidates=[]
-                for saved in db.execute("SELECT * FROM wheel_grants WHERE state='blocked' AND reason='FACTORY_METRO_OUTDATED'"):
+                for saved in db.execute("SELECT * FROM wheel_grants WHERE state='blocked' AND reason IN ('FACTORY_METRO_OUTDATED','FACTORY_METRO_UNVERIFIED')"):
                     grant=self.w._verified(saved)
                     if self.published_recovery(db,saved,grant):
-                        candidates.append(grant)
-            for grant in candidates:
+                        candidates.append((grant,saved["reason"]))
+            for grant,reason in candidates:
                 attempt=self.f._row(grant["card_id"],grant["attempt"])
                 try:
                     workspace=self.b.workspace("4")[0]
                     effects=WheelEffects(self.f)
                     if not effects._reconcile_publication(attempt,grant,workspace):
                         continue
-                    receipt=effects._published(attempt,workspace,sync=False)
+                    receipt=effects._published(attempt,workspace,sync=reason=="FACTORY_METRO_UNVERIFIED")
                 except (self.f.Error,OSError,KeyError,TypeError) as error:
                     self.b.audit("wheel_published_metro_still_pending",{
                         "grant":grant["grant_id"],"code":getattr(error,"code","VERIFICATION_UNAVAILABLE")})
@@ -199,7 +199,7 @@ class Continuity:
                     db.execute("BEGIN IMMEDIATE")
                     saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(grant["grant_id"],)).fetchone()
                     stage=db.execute("SELECT state FROM wheel_stages WHERE grant_id=? AND letter='B'",(grant["grant_id"],)).fetchone()
-                    if (not saved or saved["state"]!="blocked" or saved["reason"]!="FACTORY_METRO_OUTDATED"
+                    if (not saved or saved["state"]!="blocked" or saved["reason"]!=reason
                             or self.w._verified(saved)!=grant or not stage or stage["state"]!="claimed"):
                         continue
                     db.execute("UPDATE wheel_stages SET state='verified',finished=?,receipt=? WHERE grant_id=? AND letter='B' AND state='claimed'",
@@ -207,8 +207,8 @@ class Continuity:
                     db.execute("UPDATE wheel_grants SET state='ready',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
                     db.execute("UPDATE factory_attempts SET state='await_review' WHERE card_id=? AND attempt=? AND state='blocked'",
                                (grant["card_id"],grant["attempt"]))
-                    if (db.execute("SELECT reason FROM wheel_control WHERE id=1").fetchone()[0]=="FACTORY_METRO_OUTDATED"
-                            and not db.execute("SELECT 1 FROM wheel_grants WHERE state='blocked' AND reason='FACTORY_METRO_OUTDATED'").fetchone()):
+                    if (db.execute("SELECT reason FROM wheel_control WHERE id=1").fetchone()[0]==reason
+                            and not db.execute("SELECT 1 FROM wheel_grants WHERE state='blocked' AND reason=?",(reason,)).fetchone()):
                         db.execute("UPDATE wheel_control SET reason='OWNER_PAUSED',retry_after=0 WHERE id=1")
                     self.b.audit("wheel_published_metro_reconciled",{"grant":grant["grant_id"],
                         "main_sha":receipt["main_sha"],"served_sha":receipt["served_sha"],
@@ -708,7 +708,7 @@ class Continuity:
 
     def published_recovery(self,db,row,grant):
         """Resume only a verified push whose Metro receipt was never recorded."""
-        if row["state"]!="blocked" or row["reason"]!="FACTORY_METRO_OUTDATED":
+        if row["state"]!="blocked" or row["reason"] not in ("FACTORY_METRO_OUTDATED","FACTORY_METRO_UNVERIFIED"):
             return False
         stages={stage["letter"]:stage for stage in db.execute(
             "SELECT letter,state,approval_id FROM wheel_stages WHERE grant_id=?",(grant["grant_id"],))}

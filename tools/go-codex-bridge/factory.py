@@ -498,11 +498,26 @@ class Factory:
         process = subprocess.run(["powershell.exe","-NoProfile","-NonInteractive","-Command",command],
                                  capture_output=True,text=True,timeout=20)
         def is_served_checkout(line):
-            match = re.search(r'(?i)"([^"]+[\\/]expo[\\/]bin[\\/]cli(?:\.js)?)"\s+start\s+',line)
-            if not match or not re.search(r"\s--port\s+8088\b",line):
+            match = re.search(r'(?i)(?:"(?P<quoted>[^"]+)"|(?P<plain>\S+))\s+start(?=\s|$)',line)
+            if not match:
                 return False
+            token = match.group("quoted") or match.group("plain")
+            options = line[match.end():]
+            relative = re.fullmatch(r'(?i)\.[\\/]node_modules[\\/]expo[\\/]bin[\\/]cli(?:\.js)?',token)
+            if relative:
+                # The iOS source map from this listener identified root above.
+                project = root/"artifacts/go-app-mobile"
+                if not (project/"package.json").is_file():
+                    project = root
+                if not re.fullmatch(r'\s*(?:--port\s+8088\s+--lan|--lan\s+--port\s+8088)\s*',options):
+                    return False
+                candidate = project/token[2:].replace("\\","/")
+            else:
+                if not match.group("quoted") or not Path(token).is_absolute() or not re.search(r"\s--port\s+8088\b",options):
+                    return False
+                candidate = Path(token)
             try:
-                entry = Path(match[1]).resolve(strict=True)
+                entry = candidate.resolve(strict=True)
             except OSError:
                 return False
             return entry.is_file() and entry.is_relative_to(root.resolve()) and "node_modules" in entry.relative_to(root.resolve()).parts
