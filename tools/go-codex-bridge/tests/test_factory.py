@@ -116,16 +116,20 @@ class FactoryTests(unittest.TestCase):
         created={"id":"1"*24,"type":"createCard","date":"2026-11-01T12:00:00Z",
                  "idMemberCreator":OWNER,"data":{"list":{"id":other}}}
         entered={"id":"2"*24,"type":"updateCard","date":"2026-11-02T12:00:00Z",
-                 "idMemberCreator":OWNER,"data":{"list":{"id":QUEUE},"old":{"pos":1024}}}
+                 "idMemberCreator":OWNER,"data":{"list":{"id":QUEUE},"old":{"idList":other}}}
         reordered={"id":"3"*24,"type":"updateCard","date":"2026-11-03T12:00:00Z",
                    "idMemberCreator":OWNER,"data":{"list":{"id":QUEUE},"old":{"pos":2048}}}
         actions=[reordered,entered,created]
         with patch.object(self.bridge,"api",return_value=actions):
             self.assertEqual(factory._authorized_placement("a"*24),entered["id"])
+        with patch.object(self.bridge,"api",return_value=[reordered,created]):
+            with self.assertRaises(BridgeError) as error:
+                factory._authorized_placement("a"*24)
+            self.assertEqual(error.exception.code,"FACTORY_PLACEMENT_UNVERIFIED")
         left={"id":"4"*24,"type":"updateCard","date":"2026-11-04T12:00:00Z",
               "idMemberCreator":OWNER,"data":{"list":{"id":other},"old":{"idList":QUEUE}}}
         returned={"id":"5"*24,"type":"updateCard","date":"2026-11-05T12:00:00Z",
-                  "idMemberCreator":"0"*24,"data":{"list":{"id":QUEUE},"old":{"pos":4096}}}
+                  "idMemberCreator":"0"*24,"data":{"list":{"id":QUEUE},"old":{"idList":other}}}
         with patch.object(self.bridge,"api",return_value=[returned,left,*actions]):
             with self.assertRaises(BridgeError) as error:
                 factory._authorized_placement("a"*24)

@@ -309,8 +309,13 @@ class Factory:
             if not isinstance(item, dict):
                 continue
             data = item.get("data") or {}
+            if item.get("type") == "updateCard" and not (
+                data.get("listAfter") or data.get("listBefore") or "idList" in (data.get("old") or {})
+            ):
+                continue  # A change of pos is not a new entry to COLA.
             destination = (data.get("listAfter") or data.get("list") or {}).get("id")
-            before = (data.get("listBefore") or {}).get("id") or previous_list
+            before = ((data.get("listBefore") or {}).get("id")
+                      or (data.get("old") or {}).get("idList") or previous_list)
             if destination == QUEUE and before != QUEUE and item.get("type") in ("updateCard", "createCard"):
                 movements.append(item)
             if destination:
