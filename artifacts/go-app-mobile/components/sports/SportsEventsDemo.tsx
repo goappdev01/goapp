@@ -1,7 +1,9 @@
 import React, { useContext, useRef, useState } from "react";
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -64,6 +66,29 @@ type Screen =
   | { name: "offers" }
   | { name: "operations" };
 type OrbitItem = { id: string; label: string; symbol: string; color?: string };
+const crestAssets: Record<string, number> = {
+  betis: require("./crests/betis.png"),
+  celta: require("./crests/celta.png"),
+};
+function ClubCrest({ clubId, size = 50 }: { clubId: string; size?: number }) {
+  const source = crestAssets[clubId];
+  if (!source) return <View style={[s.neutralShield, { width: size, height: size, borderRadius: size / 2 }]}>
+    <Feather name="shield" size={Math.round(size * 0.58)} color="#198563" />
+  </View>;
+  const club = DEMO_CLUBS.find((c) => c.id === clubId);
+  return <Image source={source} resizeMode="contain" style={{ width: size, height: size }} accessibilityLabel={`Escudo ${club?.label ?? clubId}`} />;
+}
+function showCrestCredits() {
+  Alert.alert(
+    "Créditos de escudos",
+    "Real Betis: Greteneito, CC BY-SA 4.0, archivo original.\nCelta: Madboy74, HansenBCN, WarX y Elisardojm, CC BY-SA 3.0, PNG derivado del SVG.\nUso identificativo; sin afiliación con los clubes.",
+    [
+      { text: "Cerrar", style: "cancel" },
+      { text: "Betis", onPress: () => Linking.openURL("https://commons.wikimedia.org/wiki/File:Escudo_real_betis.png") },
+      { text: "Celta", onPress: () => Linking.openURL("https://commons.wikimedia.org/wiki/File:Escudo_RC_Celta_de_Vigo.svg") },
+    ],
+  );
+}
 const euro = (n: number) =>
   `${n.toLocaleString("es-ES", { maximumFractionDigits: 2 })} €`;
 const dateLabel = (date: string) =>
@@ -92,6 +117,7 @@ function Button({
   disabled = false,
   primary = false,
   compact = false,
+  clubId,
   accessibilityLabel,
 }: {
   label: string;
@@ -100,8 +126,12 @@ function Button({
   disabled?: boolean;
   primary?: boolean;
   compact?: boolean;
+  clubId?: string;
   accessibilityLabel?: string;
 }) {
+  const labelText = <Text numberOfLines={1} adjustsFontSizeToFit style={[s.buttonText, compact && s.compactButtonText, (selected || primary) && s.selectedText]}>
+    {label}
+  </Text>;
   return (
     <TouchableOpacity
       accessibilityRole="button"
@@ -116,9 +146,9 @@ function Button({
         disabled && { opacity: 0.42 },
       ]}
     >
-      <Text numberOfLines={1} adjustsFontSizeToFit style={[s.buttonText, compact && s.compactButtonText, (selected || primary) && s.selectedText]}>
-        {label}
-      </Text>
+      {clubId && crestAssets[clubId]
+        ? <View style={s.buttonContent}><ClubCrest clubId={clubId} size={20} />{labelText}</View>
+        : labelText}
     </TouchableOpacity>
   );
 }
@@ -276,7 +306,7 @@ function TicketCard({
   return (
     <View style={s.card}>
       <Text style={s.kicker}>{title}</Text>
-      <Text style={s.cardTitle}>{e.title}</Text>
+      <View style={s.crestHeading}><ClubCrest clubId={e.clubId} size={38} /><Text style={[s.cardTitle, s.crestHeadingText]}>{e.title}</Text></View>
       <Text style={s.body}>
         {dateLabel(e.date)} · {e.time} · {e.competition}
       </Text>
@@ -813,7 +843,10 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={s.header}>
-            <Text style={s.kicker}>EVENTOS DEPORTIVOS</Text>
+            <View style={s.headerIdentity}>
+              <Text style={s.kicker}>EVENTOS DEPORTIVOS</Text>
+              {screen.name === "sports" && <Text style={s.demoBadge}>DEMO</Text>}
+            </View>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reiniciar demo" onPress={reset} style={s.settingsButton}>
               <Feather name="settings" size={20} color="#15583e" />
             </TouchableOpacity>
@@ -825,9 +858,12 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
             keyboardShouldPersistTaps="handled"
             automaticallyAdjustKeyboardInsets
           >
-            <Text accessibilityRole="header" style={s.title}>
-              {title}
-            </Text>
+            <View style={s.crestHeading}>
+              {screen.name === "events" && <ClubCrest clubId={screen.clubId} size={38} />}
+              <Text accessibilityRole="header" style={[s.title, s.crestHeadingText]}>
+                {title}
+              </Text>
+            </View>
             <Text style={s.subtitle}>
               {screen.name === "sports" ? "Intercambia o encuentra localidades por deporte y encuentro."
                 : screen.name === "clubs" ? "Selecciona el equipo u organizador."
@@ -855,7 +891,6 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                   value={query}
                   onChange={setQuery}
                 />
-                <Text style={s.disclaimer}>Presentación local · sin entradas ni cobros reales.</Text>
                 <Orbit
                   key={query}
                   center="DEPORTES"
@@ -918,6 +953,9 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                     navigate({ name: "pass", id: "pass-madrid" });
                   }}
                 />
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel="Créditos de escudos" onPress={showCrestCredits}>
+                  <Text style={s.crestCredits}>Créditos de escudos</Text>
+                </TouchableOpacity>
               </>
             )}
             {screen.name === "clubs" && (
@@ -931,7 +969,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                   {clubCandidates.slice(0, query ? clubCandidates.length : clubLimit).map((c) =>
                     <TouchableOpacity key={c.id} accessibilityRole="button" accessibilityLabel={c.label}
                       onPress={() => navigate({ name: "events", clubId: c.id, pick })} style={s.clubTile}>
-                      <View style={s.neutralShield}><Feather name="shield" size={29} color="#198563" /></View>
+                      <ClubCrest clubId={c.id} />
                       <Text numberOfLines={2} adjustsFontSizeToFit style={s.clubName}>{c.label}</Text>
                     </TouchableOpacity>,
                   )}
@@ -974,7 +1012,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                     <Text style={s.eventDate}>
                       {dateLabel(e.date)} · {e.time}
                     </Text>
-                    <Text style={s.eventTitle}>{e.title}</Text>
+                    <View style={s.crestHeading}><ClubCrest clubId={e.clubId} size={32} /><Text style={[s.eventTitle, s.crestHeadingText]}>{e.title}</Text></View>
                     <Text style={s.eventMeta}>{e.venue}</Text>
                     <View style={s.eventFooter}>
                       <View style={s.eventRule} />
@@ -989,9 +1027,9 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
             )}
             {screen.name === "seats" && (
               <>
-                <Text style={s.cardTitle}>
-                  {demoEvent(screen.eventId).title}
-                </Text>
+                <View style={s.crestHeading}><ClubCrest clubId={demoEvent(screen.eventId).clubId} size={38} />
+                  <Text style={[s.cardTitle, s.crestHeadingText]}>{demoEvent(screen.eventId).title}</Text>
+                </View>
                 <Text style={s.body}>
                   {dateLabel(demoEvent(screen.eventId).date)} ·{" "}
                   {demoEvent(screen.eventId).time} ·{" "}
@@ -1485,6 +1523,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                     <Button
                       key={c.id}
                       label={c.label}
+                      clubId={c.id}
                       selected={filters.club === c.id}
                       onPress={() => setFilter("club", c.id)}
                     />
@@ -1792,7 +1831,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                 <Text style={s.disclaimer}>Abonos de presentación · selección por partido, sin transferencia.</Text>
                 {state.passes.map((pass) => (
                   <View key={pass.id} style={s.card}>
-                    <Text style={s.cardTitle}>{pass.title}</Text>
+                    <View style={s.crestHeading}><ClubCrest clubId={pass.clubId} size={38} /><Text style={[s.cardTitle, s.crestHeadingText]}>{pass.title}</Text></View>
                     <Text style={s.body}>
                       Asientos contiguos {pass.seats.join(", ")} · 30 encuentros
                       de muestra · restricciones por validar
@@ -1815,6 +1854,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                     <Button
                       key={c.id}
                       label={c.label}
+                      clubId={c.id}
                       selected={passClub === c.id}
                       onPress={() => setPassClub(c.id)}
                     />
@@ -1881,7 +1921,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                   eligible = events.filter((e) => !e.excluded);
                 return (
                   <>
-                    <Text style={s.cardTitle}>{pass.title}</Text>
+                    <View style={s.crestHeading}><ClubCrest clubId={pass.clubId} size={38} /><Text style={[s.cardTitle, s.crestHeadingText]}>{pass.title}</Text></View>
                     <Text style={s.body}>
                       No asistiré a los encuentros seleccionados. Se preparan
                       derechos individuales por partido, nunca una cesión del
@@ -1955,13 +1995,13 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                     </View>
                     {events.map((e) => (
                       <View key={e.id} style={s.calendarRow}>
-                        <Text style={s.body}>
+                        <View style={s.crestHeading}><ClubCrest clubId={e.clubId} size={28} /><Text style={[s.body, s.crestHeadingText]}>
                           {dateLabel(e.date)} · {e.time}
                           {"\n"}
                           {e.title}
                           {"\n"}
                           {e.competition}
-                        </Text>
+                        </Text></View>
                         <Button
                           label={
                             e.excluded
@@ -2054,6 +2094,15 @@ const s = StyleSheet.create({
     paddingTop: 10,
     minHeight: 52,
   },
+  headerIdentity: { flexDirection: "row", alignItems: "center", flexShrink: 1, gap: 8 },
+  demoBadge: {
+    color: "#256449", backgroundColor: "#e6f4ec", borderColor: "#b9ddc7",
+    borderWidth: 1, borderRadius: 7, overflow: "hidden", paddingHorizontal: 5,
+    paddingVertical: 2, fontSize: 9, fontWeight: "800", letterSpacing: 0.5,
+  },
+  crestCredits: { color: "#63716b", fontSize: 11, textDecorationLine: "underline", alignSelf: "flex-start" },
+  crestHeading: { flexDirection: "row", alignItems: "center", gap: 8 },
+  crestHeadingText: { flexShrink: 1 },
   kicker: {
     color: "#145b41",
     fontSize: 13,
@@ -2095,6 +2144,7 @@ const s = StyleSheet.create({
   },
   compactButton: { minHeight: 42, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 13 },
   compactButtonText: { fontSize: 12 },
+  buttonContent: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, flexShrink: 1 },
   selected: { backgroundColor: "#0d7954", borderColor: "#0d7954" },
   buttonText: {
     color: "#1a5940",

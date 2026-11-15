@@ -47,11 +47,13 @@ export function demoFixture({
       },
     },
     Platform: { OS: "ios" },
+    Linking: { openURL: async () => {} },
     StyleSheet: { create: (s) => s },
     useWindowDimensions: () => ({ width, height: 844, fontScale }),
     ...Object.fromEntries(
       [
         "KeyboardAvoidingView",
+        "Image",
         "Modal",
         "ScrollView",
         "Text",

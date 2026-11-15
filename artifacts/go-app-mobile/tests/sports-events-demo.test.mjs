@@ -73,10 +73,12 @@ test("short sport tap keeps social handler, long tap is ADMIN-only and never ope
 test("real TSX: discipline → club → event → multiple seats → destination → simulated acceptance", () => {
   const ui = demoFixture();
   assert.match(ui.text(), /Entradas, butacas y abonos/);
+  assert.match(ui.text(), /DEMO/);
   assert.equal(ui.find("TENGO").props.accessibilityState.selected, true);
   ui.click("TENGO");
   assert.equal(ui.find("Real Madrid"), undefined);
   ui.click("Fútbol");
+  assert.doesNotMatch(ui.text(), /\bDEMO\b/);
   assert.match(ui.text(), /2 · Elige un club/);
   ui.click("Real Madrid");
   assert.match(ui.text(), /3 · Eventos/);
@@ -105,6 +107,20 @@ test("real TSX: discipline → club → event → multiple seats → destination
   assert.match(ui.text(), /Disputada en demo/);
   ui.click("Resolver demo como invalidada");
   assert.match(ui.text(), /Invalidada en demo/);
+  assert.equal(ui.network, 0);
+});
+
+test("vetted club crests render in club and event screens; other clubs keep a neutral shield", () => {
+  const ui = demoFixture();
+  ui.click("Fútbol");
+  assert.equal(ui.find("Escudo Real Betis")?.props.source, 1);
+  assert.equal(ui.find("Escudo Real Madrid"), undefined);
+  ui.click("Ver más clubes");
+  assert.equal(ui.find("Escudo Celta")?.props.source, 1);
+  ui.click("Real Betis");
+  assert.equal(ui.find("Escudo Real Betis")?.props.source, 1);
+  ui.click("Elegir encuentro 1");
+  assert.equal(ui.find("Escudo Real Betis")?.props.source, 1);
   assert.equal(ui.network, 0);
 });
 

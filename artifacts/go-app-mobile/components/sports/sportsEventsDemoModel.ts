@@ -38,7 +38,7 @@ export type DemoClub = {
 };
 export const DEMO_CLUBS: DemoClub[] = [
   // 2026/27 Primera División, verified against the official LaLiga club list.
-  // Names are factual; the neutral UI shield is not a copied club crest.
+  // Names are factual; clubs without a separately vetted asset use a neutral shield.
   ...([
     ["real-madrid", "Real Madrid", "Madrid"],
     ["barcelona", "FC Barcelona", "Barcelona"],

@@ -39,6 +39,7 @@ test('sports orbit and private panel are guarded against non-ADMIN and unverifie
   const demo = fs.readFileSync('components/sports/SportsEventsDemo.tsx', 'utf8');
   assert.match(demo, /EVENTOS DEPORTIVOS/);
   assert.doesNotMatch(demo, /ADMIN · EVENTOS DEPORTIVOS/);
-  assert.match(demo, /Presentación local · sin entradas ni cobros reales/);
+  assert.match(demo, /screen\.name === "sports" && <Text style=\{s\.demoBadge\}>DEMO<\/Text>/);
+  assert.doesNotMatch(demo, /Presentación local · sin entradas ni cobros reales/);
   assert.doesNotMatch(demo, /supabaseApiRequest|fetch\(|AsyncStorage|ready &&|Almacenamiento todavía no activado/);
 });
