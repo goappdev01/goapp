@@ -2212,6 +2212,10 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
     if (selectedEl) setClientBookEl(selectedEl);
   }, [selectedEl]);
 
+  const visibleStatusLegend: FloorElementStatus[] = mode === "cliente"
+    ? ["disponible"] : ["disponible", "reservado", "ocupado", "bloqueado"];
+  const inlineLegend = isCompactPhone && embeddedInBookingPanel;
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
@@ -2335,18 +2339,15 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
 
       <View testID="floor-workspace-footer" onLayout={event => onFooterHeightChange?.(event.nativeEvent.layout.height)}>
       {/* ── Status legend ── */}
-      <ScrollView horizontal={isCompactPhone} showsHorizontalScrollIndicator={false} style={s.toolbarViewport}
+      {!inlineLegend && <ScrollView horizontal={isCompactPhone} showsHorizontalScrollIndicator={false} style={s.toolbarViewport}
         contentContainerStyle={[s.legend, isCompactPhone && s.legendCompact]}>
-        {(mode === "cliente"
-          ? (["disponible"] as FloorElementStatus[])
-          : (["disponible", "reservado", "ocupado", "bloqueado"] as FloorElementStatus[])
-        ).map(st => (
+        {visibleStatusLegend.map(st => (
           <View key={st} style={s.legendItem}>
             <View style={[s.legendDot, { backgroundColor: STATUS_COLORS[st] }]} />
             <Text style={s.legendTxt}>{mode === "cliente" && st === "disponible" ? t("floor_available_spaces") : t(floorStatusKey(st))}</Text>
           </View>
         ))}
-      </ScrollView>
+      </ScrollView>}
 
       {/* ── Selected element bar ── */}
       <SelectedElementBar
@@ -2512,6 +2513,14 @@ export function PlanoEmpresaScreen({ businessId: requestedBusinessId, businessNa
             <Text style={s.clientHintTxt}>{t("floor_client_hint")}</Text>
           </View>
         )}
+        {inlineLegend && <View testID="floor-inline-status-legend" style={s.legendInline}>
+          {visibleStatusLegend.map(st => (
+            <View key={st} style={s.legendItem}>
+              <View style={[s.legendDot, { backgroundColor: STATUS_COLORS[st] }]} />
+              <Text style={s.legendTxt}>{mode === "cliente" && st === "disponible" ? t("floor_available_spaces") : t(floorStatusKey(st))}</Text>
+            </View>
+          ))}
+        </View>}
         </ScrollView>
 
         {/* SIGUIENTE — solo visible en el asistente de configuración (Paso 7 → Paso 8) */}
@@ -2608,6 +2617,8 @@ const s = StyleSheet.create({
   // Status legend
   legend:      { flexDirection: "row", backgroundColor: CARD, borderTopWidth: 1, borderTopColor: BORDER, paddingHorizontal: 16, paddingVertical: 7, gap: 14, flexWrap: "wrap" },
   legendCompact: { flexWrap: "nowrap", paddingHorizontal: 8, paddingVertical: 3, gap: 10 },
+  legendInline: { flexDirection: "row", alignItems: "center", flexShrink: 0, minHeight: 44, paddingHorizontal: 8, gap: 10,
+    borderLeftWidth: 1, borderLeftColor: BORDER },
   legendItem:  { flexDirection: "row", alignItems: "center", gap: 5 },
   legendDot:   { width: 8, height: 8, borderRadius: 4 },
   legendTxt:   { fontSize: 10, color: GRAY, fontWeight: "600" },

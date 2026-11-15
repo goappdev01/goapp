@@ -200,6 +200,9 @@ test('workspace tools share a scrollable strip at every phone width without shri
   const f=await setupFloor('es',{embeddedInBookingPanel:true,onFooterHeightChange:h=>heights.push(h)},{data,windowWidth});
   const before=JSON.stringify(data.store.getSnapshot().plan);
   const strip=nodes(f.tree).find(n=>n.props.testID==='floor-tools-scroll');assert.equal(strip.props.horizontal,true);
+  const legend=nodes(strip).find(n=>n.props.testID==='floor-inline-status-legend');assert.ok(legend);
+  assert.equal(legend.props.style.minHeight,44);
+  assert.equal(nodes(f.tree).filter(n=>n.props.testID==='floor-inline-status-legend').length,1);
   for(const label of ['Empresa','Cliente','+ Elemento','Plantilla','Guardar']){
    const control=button(strip,label);assert.ok(control,label);
    const style=Object.assign({},...control.props.style.filter(Boolean));assert.ok(style.minHeight>=44);assert.ok(style.minWidth>=44);

@@ -1222,7 +1222,7 @@ const g = StyleSheet.create({
 
   header:       {
     flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 10, paddingBottom: 2,
+    paddingHorizontal: 10,
     borderBottomWidth: 1, borderBottomColor: BORDER, backgroundColor: CARD,
   },
   headerLabels: { flex: 1, minWidth: 0, minHeight: 44, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, paddingRight: 52 },
@@ -1231,7 +1231,7 @@ const g = StyleSheet.create({
 
   modeTabs: {
     flexDirection: "row", gap: 4, backgroundColor: CARD,
-    paddingHorizontal: 8, paddingVertical: 2,
+    paddingHorizontal: 8, paddingVertical: 0,
     borderBottomWidth: 1, borderBottomColor: BORDER,
   },
   modeTab: {
@@ -1254,7 +1254,7 @@ const g = StyleSheet.create({
     alignItems: "center",
     gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 0,
   },
   proChip: {
     minHeight: 44,
