@@ -91,6 +91,10 @@ class V2WheelTests(unittest.TestCase):
             grant=w._verified(db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",
                                           (selected["grant_id"],)).fetchone())
         grant['workspace']=str(self.root.parent/("go-fabrica-a4-card-"+grant['card_id']+"-"+str(grant['attempt'])))
+        subject,_=w._subject(self.cards[grant['card_id']])
+        subject['workspace']=grant['workspace']
+        subject.pop('binding',None)
+        grant['binding']=b.factory.digest(b.factory.canonical(subject))
         with b.db() as db:
             db.execute("UPDATE wheel_grants SET terms=?,signature=? WHERE grant_id=?",
                        (b.factory.canonical(grant),b.sign(grant),grant['grant_id']))
@@ -124,14 +128,13 @@ class V2WheelTests(unittest.TestCase):
                 self.assertEqual(db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
                                             (grant["grant_id"],)).fetchone()[0],"WHEEL_INSTALL_UNCERTAIN")
             w.toggle(True)  # Synthetic owner action, without any real execution.
-            with patch.object(w.continuity,"_defer_question_to_trello") as conflict:
-                result=w.tick()
+            result=w.tick()  # Only fake Trello receives the conflict comment and move.
             self.assertEqual(result["card_blocked"],grant["card_id"])
-            conflict.assert_called_once()
+            self.assertEqual(len(self.changes),2)
             with patch.object(w,"_advance",return_value={"synthetic_next":True}) as advance:
                 self.assertTrue(w.tick()["synthetic_next"])
             self.assertNotEqual(advance.call_args[0][0]["card_id"],grant["card_id"])
-        self.assertFalse(self.runs or self.changes)
+        self.assertFalse(self.runs)
         with self.bridge.db() as db:
             self.assertEqual(db.execute("SELECT state FROM jobs WHERE id=?",(job_id,)).fetchone()[0],"blocked")
 

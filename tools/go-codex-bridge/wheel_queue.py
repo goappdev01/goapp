@@ -1468,6 +1468,15 @@ class Wheel:
                 with self.b.db() as db:
                     stopped=self._stopped_install_grant(db)
                 if stopped and stopped["card_id"] in cards:
+                    with self.b.db() as db:
+                        db.execute("BEGIN IMMEDIATE")
+                        changed=db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=? "
+                                           "AND state='blocked' AND reason='WHEEL_INSTALL_UNCERTAIN'",
+                                           (stopped["grant_id"],)).rowcount
+                        if changed!=1:
+                            return {"paused":"WHEEL_INSTALL_UNCERTAIN"}
+                        self.b.audit("wheel_stopped_install_conflict_started",
+                                     {"grant":stopped["grant_id"],"programming_replayed":False},db)
                     return self.continuity.card_error(stopped,"WHEEL_DEPENDENCIES")
             trial=self._live_selection(cards,live) if live else self._trial_limit(cards)
             if trial and trial.get("paused"):
