@@ -227,15 +227,17 @@ class Continuity:
                         or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()):
                     return recovered
                 candidates=[]
-                for saved in db.execute("SELECT * FROM wheel_grants WHERE state='uncertain' AND reason='WHEEL_PRESERVATION_PUBLICATION'"):
+                recoverable=(("uncertain","WHEEL_PRESERVATION_PUBLICATION"),
+                             ("blocked","PUBLICATION_UNVERIFIED"))
+                for saved in db.execute("SELECT * FROM wheel_grants WHERE (state='uncertain' AND reason='WHEEL_PRESERVATION_PUBLICATION') OR (state='blocked' AND reason='PUBLICATION_UNVERIFIED')"):
                     grant=self.w._verified(saved)
                     stages={row["letter"]:row for row in db.execute(
                         "SELECT letter,state,approval_id,receipt FROM wheel_stages WHERE grant_id=?",(grant["grant_id"],))}
                     if (set(stages)=={"A","B","C"} and stages["A"]["state"]=="verified"
                             and stages["B"]["state"]=="verified" and stages["C"]["state"]=="claimed"
                             and not stages["C"]["approval_id"] and stages["B"]["receipt"]):
-                        candidates.append((grant,json.loads(stages["B"]["receipt"])))
-            for grant,receipt in candidates:
+                        candidates.append((grant,saved["state"],saved["reason"],json.loads(stages["B"]["receipt"])))
+            for grant,grant_state,grant_reason,receipt in candidates:
                 attempt=self.f._row(grant["card_id"],grant["attempt"])
                 effects=WheelEffects(self.f)
                 if effects._operations(attempt,"comment"):
@@ -249,7 +251,8 @@ class Continuity:
                 with self.b.db() as db:
                     db.execute("BEGIN IMMEDIATE")
                     saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(grant["grant_id"],)).fetchone()
-                    if (not saved or saved["state"]!="uncertain" or saved["reason"]!="WHEEL_PRESERVATION_PUBLICATION"
+                    if (not saved or (saved["state"],saved["reason"])!=(grant_state,grant_reason)
+                            or (grant_state,grant_reason) not in recoverable
                             or self.w._verified(saved)!=grant):
                         continue
                     removed=db.execute("DELETE FROM wheel_stages WHERE grant_id=? AND letter='C' AND state='claimed' AND approval_id IS NULL",
@@ -257,7 +260,7 @@ class Continuity:
                     if removed!=1:
                         continue
                     db.execute("UPDATE wheel_grants SET state='ready',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
-                    if db.execute("SELECT reason FROM wheel_control WHERE id=1").fetchone()[0]=="WHEEL_PRESERVATION_PUBLICATION":
+                    if db.execute("SELECT reason FROM wheel_control WHERE id=1").fetchone()[0]==grant_reason:
                         db.execute("UPDATE wheel_control SET reason='OWNER_PAUSED',retry_after=0 WHERE id=1")
                     self.b.audit("wheel_unreleased_comment_rearmed",{"grant":grant["grant_id"],
                         "repeated_cli":False,"repeated_push":False,"trello_write":False},db)

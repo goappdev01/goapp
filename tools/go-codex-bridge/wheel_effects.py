@@ -651,7 +651,7 @@ class WheelEffects:
                 "api":metro.get("api","Sin comprobación"),"operation":op["id"]}
 
     def _published_head_valid(self,workspace,receipt):
-        """A later bridge-only commit does not invalidate an already verified app push."""
+        """Accept only a first-parent chain of bridge or verified factory publications."""
         git=lambda *args:self.b.safety.git_command(workspace,*args)
         served=receipt.get("served_sha",receipt.get("main_sha",""))
         if not re.fullmatch(r"[a-f0-9]{40}",served):
@@ -664,10 +664,46 @@ class WheelEffects:
             self.fail("PUBLICATION_UNVERIFIED","MAIN cambió durante la comprobación.")
         ancestor=subprocess.run(["git","-C",str(workspace),"merge-base","--is-ancestor",served,remote],
                                 capture_output=True,timeout=20)
-        changed=git("diff","--name-only",served,remote).splitlines() if ancestor.returncode==0 else []
-        if ancestor.returncode or not changed or any(not path.startswith("tools/go-codex-bridge/") for path in changed):
+        if ancestor.returncode:
             self.fail("PUBLICATION_UNVERIFIED","MAIN contiene cambios ajenos a la publicación verificada; revisa la tarjeta.")
+        commits=git("rev-list","--first-parent","--reverse",served+".."+remote).splitlines()
+        if not commits or commits[-1]!=remote:
+            self.fail("PUBLICATION_UNVERIFIED","No se pudo verificar la secuencia de publicaciones en MAIN.")
+        previous=served
+        for sha in commits:
+            parents=git("rev-list","--parents","-n","1",sha).split()
+            if len(parents)!=2 or parents!=[sha,previous]:
+                self.fail("PUBLICATION_UNVERIFIED","MAIN contiene una publicación cuya procedencia no se pudo verificar.")
+            changed=git("diff","--name-only",previous,sha).splitlines()
+            if not changed or (not all(path.startswith("tools/go-codex-bridge/") for path in changed)
+                               and not self._verified_later_publication(sha,previous)):
+                self.fail("PUBLICATION_UNVERIFIED","MAIN contiene cambios ajenos a publicaciones verificadas; revisa la tarjeta.")
+            previous=sha
         return remote
+
+    def _verified_later_publication(self,sha,previous):
+        """The newer mobile commit must have its own signed grant and verified B receipt."""
+        with self.b.db() as db:
+            rows=db.execute("""SELECT g.*,s.receipt,a.before_sha,o.state AS operation_state,
+                                      o.action AS operation_action,o.result AS operation_result
+                               FROM wheel_stages s JOIN wheel_grants g ON g.grant_id=s.grant_id
+                               JOIN factory_attempts a ON a.card_id=g.card_id AND a.attempt=g.attempt
+                               LEFT JOIN operations o ON o.id=json_extract(s.receipt,'$.operation')
+                               WHERE s.letter='B' AND s.state='verified' AND a.before_sha=?""",
+                            (previous,)).fetchall()
+        for row in rows:
+            try:
+                receipt=json.loads(row["receipt"])
+                operation=json.loads(row["operation_result"] or "{}")
+                if (receipt.get("main_sha")==sha and receipt.get("served_sha")==sha
+                        and receipt.get("metro",{}).get("sha")==sha
+                        and row["operation_state"]=="verified" and row["operation_action"]=="publish-main"
+                        and operation.get("main_sha")==sha):
+                    self.f.wheel._verified(row)
+                    return True
+            except (ValueError,TypeError,KeyError,AttributeError,self.f.Error):
+                continue
+        return False
 
     def _snapshot(self,card_id):
         card = self.b.api("/1/cards/"+card_id,{"fields":"id,idBoard,idList,shortLink,pos,closed"})

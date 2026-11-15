@@ -272,14 +272,16 @@ function wheelText(value, fallback = "Sin verificar") {
   return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 function wheelReasonText(reason) {
-  return ({FACTORY_JOB_FAILED:"La última tarjeta quedó bloqueada; revisa su informe antes de continuar.",
+  const detail=({FACTORY_JOB_FAILED:"La última tarjeta quedó bloqueada; revisa su informe antes de continuar.",
     WHEEL_CODEX_AUTH:"La sesión de Codex no está verificada.",WHEEL_CODEX_QUOTA:"La cuota de Codex no está disponible.",
     WHEEL_CODEX_SESSION_CHANGED:"Cambió la cuenta de Codex vinculada al lote.",WHEEL_SUBJECT_CHANGED:"Cambió la cola o una instrucción desde su revisión.",
     WHEEL_BATCH_ORDER_CHANGED:"El orden de Trello cambió desde la revisión.",WHEEL_WORKSPACE_BUSY:"Hay un trabajo en curso o pendiente de conciliar.",
     WHEEL_HEAD_DEPENDENCY_BLOCKED:"La alternativa de dependencia fue rechazada antes de iniciar el ejecutor.",
     FACTORY_METRO_OUTDATED:"La publicación existe en MAIN; Metro 8088 aún no confirmó el código servido. No se repetirá el push.",
     OWNER_PAUSED:"La fábrica está pausada por el propietario.",
-    OWNER_STOPPED:"La fábrica está detenida. Revisa el lote antes de continuar."})[reason] || (reason ? "Bloqueo registrado: "+reason : "");
+    OWNER_STOPPED:"La fábrica está detenida. Revisa el lote antes de continuar.",
+    PUBLICATION_UNVERIFIED:"MAIN avanzó desde esta tarjeta y no se verificó la procedencia de todos los cambios posteriores."})[reason] || (reason ? "Revisa el motivo antes de continuar." : "");
+  return reason && reason!=="OWNER_PAUSED" ? reason+" · "+detail : detail;
 }
 function renderWheel(wheel) {
   const grants = wheel?.grants || [];

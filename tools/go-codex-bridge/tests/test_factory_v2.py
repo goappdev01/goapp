@@ -188,6 +188,7 @@ class V2WheelTests(unittest.TestCase):
         blocked=RemotePanel.activation_button({'enabled':False,'reason':'FACTORY_JOB_FAILED','batch_id':'batch','batch_state':'active'},[])
         self.assertEqual(blocked['state'],'blocked')
         self.assertIn('bloqueada',blocked['progress'].casefold())
+        self.assertIn('FACTORY_JOB_FAILED ·',blocked['reason_message'])
         finished=RemotePanel.activation_button({'enabled':False,'reason':None,'batch_id':'batch','batch_state':'completed'},[])
         self.assertEqual(finished['label'],'FÁBRICA FINALIZADA')
         self.assertTrue(finished['disabled'])
@@ -389,6 +390,27 @@ class V2WheelTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT reason FROM wheel_control WHERE id=1').fetchone()[0],'OWNER_PAUSED')
         self.assertFalse(self.runs or self.changes)
 
+    def test_blocked_comment_rearms_only_after_later_publication_is_verified(self):
+        w,ids=self.batch();w.pause('PUBLICATION_UNVERIFIED')
+        with self.bridge.db() as db:
+            grant=w._verified(db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[0],)).fetchone())
+            db.execute("UPDATE wheel_grants SET state='blocked',reason='PUBLICATION_UNVERIFIED' WHERE grant_id=?",
+                       (grant['grant_id'],))
+            for letter,state,receipt in [('A','verified','{}'),('B','verified','{"main_sha":"a"}'),('C','claimed',None)]:
+                db.execute('INSERT INTO wheel_stages(grant_id,letter,state,started,receipt) VALUES(?,?,?,?,?)',
+                           (grant['grant_id'],letter,state,'synthetic',receipt))
+        with patch.object(self.bridge.factory,'_row',return_value={'job_id':'synthetic-job'}),\
+             patch.object(WheelEffects,'_operations',return_value=[]),\
+             patch.object(WheelEffects,'_published_head_valid',side_effect=[BridgeError('PUBLICATION_UNVERIFIED','unknown'), 'b'*40]):
+            self.assertEqual(w.continuity.reconcile_unreleased_comment(),[])
+            self.assertEqual(w.status()['reason'],'PUBLICATION_UNVERIFIED')
+            self.assertEqual(w.continuity.reconcile_unreleased_comment(),[ids[0]])
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT state FROM wheel_grants WHERE grant_id=?',(grant['grant_id'],)).fetchone()[0],'ready')
+            self.assertFalse(db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter='C'",(grant['grant_id'],)).fetchone())
+        self.assertEqual(w.status()['reason'],'OWNER_PAUSED')
+        self.assertFalse(w.status()['enabled'] or self.runs or self.changes)
+
     def test_published_card_reconciles_after_bridge_only_main_commit(self):
         before,card_sha,bridge_sha='a'*40,'b'*40,'c'*40
         effect=WheelEffects(self.bridge.factory)
@@ -412,21 +434,42 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(receipt['served_sha'],bridge_sha)
         verify.assert_called_once_with(bridge_sha,before,self.root,synchronize=True)
 
-    def test_comment_accepts_only_bridge_only_main_descendants(self):
+    def test_comment_accepts_only_bridge_or_verified_factory_descendants(self):
         old,new='a'*40,'b'*40
         changed=['tools/go-codex-bridge/puente.py']
         def git(_root,*args):
             if args[:2]==('ls-remote','origin'):return new+' refs/heads/main'
             if args[:2]==('fetch','--no-tags'):return ''
             if args[:2]==('rev-parse','FETCH_HEAD'):return new
+            if args[:2]==('rev-list','--first-parent'):return new
+            if args[:2]==('rev-list','--parents'):return new+' '+old
             if args[:2]==('diff','--name-only'):return '\n'.join(changed)
             raise AssertionError(args)
         with patch.object(self.bridge.safety,'git_command',side_effect=git),\
-             patch('wheel_effects.subprocess.run',return_value=SimpleNamespace(returncode=0)):
+             patch('wheel_effects.subprocess.run',return_value=SimpleNamespace(returncode=0)),\
+             patch.object(WheelEffects,'_verified_later_publication',return_value=False) as later:
             effect=WheelEffects(self.bridge.factory)
             self.assertEqual(effect._published_head_valid(self.root,{'served_sha':old}),new)
             changed[:]=['artifacts/go-app-mobile/app/index.tsx']
             with self.assertRaises(BridgeError):effect._published_head_valid(self.root,{'served_sha':old})
+            later.return_value=True
+            self.assertEqual(effect._published_head_valid(self.root,{'served_sha':old}),new)
+
+    def test_later_factory_publication_requires_signed_grant_receipt_and_operation(self):
+        w,ids=self.batch();before,after='a'*40,'b'*40
+        with self.bridge.db() as db:
+            grant=w._verified(db.execute('SELECT * FROM wheel_grants WHERE card_id=?',(ids[0],)).fetchone())
+            db.execute("INSERT INTO factory_attempts(card_id,attempt,title,instruction_sha,state,job_id,before_sha) VALUES(?,?,?,?,?,?,?)",
+                       (grant['card_id'],grant['attempt'],'synthetic',grant['instruction_sha'],'await_review','job',before))
+            db.execute("INSERT INTO operations(id,action,state,payload,result,created) VALUES(?,?,?,?,?,?)",
+                       ('publication','publish-main','verified','{}',json.dumps({'main_sha':after}),'synthetic'))
+            db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started,receipt) VALUES(?,'B','verified','synthetic',?)",
+                       (grant['grant_id'],json.dumps({'main_sha':after,'served_sha':after,
+                           'metro':{'sha':after},'operation':'publication'})))
+        effect=WheelEffects(self.bridge.factory)
+        self.assertTrue(effect._verified_later_publication(after,before))
+        with self.bridge.db() as db:db.execute("UPDATE operations SET state='prepared' WHERE id='publication'")
+        self.assertFalse(effect._verified_later_publication(after,before))
 
     def test_signed_instruction_fallback_can_select_only_its_blocked_diagnosis_dependency(self):
         w,ids=self.batch(diagnostic_fallback=True)

@@ -33,6 +33,7 @@ class RemotePanel:
         "WHEEL_REVIEW_REQUIRED":"El bloqueo requiere revisar el lote antes de reactivarlo.",
         "WHEEL_HEAD_DEPENDENCY_BLOCKED":"La alternativa de dependencia fue rechazada antes de iniciar el ejecutor. No se ejecutó otra tarjeta.",
         "FACTORY_METRO_OUTDATED":"La tarjeta se publicó en MAIN, pero Metro 8088 aún no confirmó el código servido. Se conserva la publicación para verificarla sin repetirla.",
+        "PUBLICATION_UNVERIFIED":"MAIN avanzó desde la publicación de esta tarjeta y no se pudo verificar la procedencia de todos los cambios posteriores.",
         "OWNER_PAUSED":"La fábrica está pausada por el propietario.",
         "OWNER_STOPPED":"La fábrica está detenida. Pulsa GO para activar si la autorización sigue vigente.",
         "TRELLO_TEMPORARY_UNAVAILABLE":"Trello no respondió. La fábrica sigue activada y volverá a consultar la cola en 30 segundos.",
@@ -171,6 +172,8 @@ class RemotePanel:
             label=("FÁBRICA BLOQUEADA · REVISAR" if state=="blocked" else
                    "FÁBRICA PAUSADA · REAUTORIZAR" if wheel.get("renewal_required") else "FÁBRICA PAUSADA · ACTIVAR")
             disabled=in_flight
+        reason_detail=cls.REASON_MESSAGES.get(reason,"" if not reason else "La rueda registra un bloqueo. Revisa el lote antes de continuar.")
+        reason_label=(reason+" · "+reason_detail) if state=="blocked" and reason else reason_detail
         if state=="waiting":
             progress=cls.REASON_MESSAGES[reason]
         elif active:
@@ -180,7 +183,7 @@ class RemotePanel:
         elif state=="finished":
             progress=f"Lote finalizado · {completed}/{total} tarjetas cerradas"
         elif state in ("blocked","stopped"):
-            detail=cls.REASON_MESSAGES.get(reason,"La rueda se bloqueó después de registrar el estado anterior. Revisa el motivo antes de continuar.")
+            detail=reason_label
             progress=("Activación confirmada; "+detail[0].lower()+detail[1:]) if wheel.get("activation_confirmed") else detail
         elif state=="paused":
             progress=f"Pausada · {completed}/{total} tarjetas cerradas"
@@ -189,7 +192,7 @@ class RemotePanel:
         current=next((card for card in cards if card.get("state")=="working"),None)
         working=bool(active and current and current.get("activity",{}).get("state")=="running")
         return {"state":state,"label":label,"disabled":disabled,"progress":progress,"working":working,
-                "reason_message":cls.REASON_MESSAGES.get(reason,"" if not reason else "La rueda registra un bloqueo. Revisa el lote antes de continuar.")}
+                "reason_message":reason_label}
 
     def authorize(self,handler,mutation=False):
         config=self.config
