@@ -91,6 +91,7 @@ function Button({
   selected = false,
   disabled = false,
   primary = false,
+  compact = false,
   accessibilityLabel,
 }: {
   label: string;
@@ -98,6 +99,7 @@ function Button({
   selected?: boolean;
   disabled?: boolean;
   primary?: boolean;
+  compact?: boolean;
   accessibilityLabel?: string;
 }) {
   return (
@@ -109,15 +111,34 @@ function Button({
       onPress={onPress}
       style={[
         s.button,
+        compact && s.compactButton,
         (selected || primary) && s.selected,
         disabled && { opacity: 0.42 },
       ]}
     >
-      <Text style={[s.buttonText, (selected || primary) && s.selectedText]}>
+      <Text numberOfLines={1} adjustsFontSizeToFit style={[s.buttonText, compact && s.compactButtonText, (selected || primary) && s.selectedText]}>
         {label}
       </Text>
     </TouchableOpacity>
   );
+}
+const zoneLabel: Record<string, string> = {
+  Norte: "Fondo Norte", Este: "Lateral Este", Sur: "Fondo Sur",
+  Oeste: "Lateral Oeste", Tribuna: "Tribuna", VIP: "VIP",
+};
+/** A local, deliberately schematic stadium. Every marked zone is selectable. */
+function StadiumMap({ zone, onSelect }: { zone: string; onSelect: (zone: string) => void }) {
+  return <View style={s.stadium} accessibilityLabel="Esquema orientativo de zonas del estadio">
+    <View style={s.stadiumOval} />
+    <View style={s.stadiumField}>
+      <View style={s.stadiumMidline} /><View style={s.stadiumCircle} />
+    </View>
+    {DEMO_ZONES.map((item) => <TouchableOpacity
+      key={item} accessibilityRole="button" accessibilityLabel={`Zona ${zoneLabel[item]}`}
+      accessibilityState={{ selected: zone === item }} onPress={() => onSelect(item)}
+      style={[s.stadiumZone, s[`zone${item}` as keyof typeof s] as object, zone === item && s.stadiumZoneSelected]}
+    ><Text numberOfLines={1} adjustsFontSizeToFit style={[s.stadiumZoneText, zone === item && s.stadiumZoneTextSelected]}>{zoneLabel[item]}</Text></TouchableOpacity>)}
+  </View>;
 }
 function Field({
   label,
@@ -209,7 +230,7 @@ function Orbit({
                     },
               ]}
             >
-              <Text style={[s.orbitSymbol, { color: item.color ?? "#b6f9d7" }]}>
+              <Text style={[s.orbitSymbol, { color: item.color ?? "#1f7654" }]}>
                 {item.symbol}
               </Text>
               <Text style={s.orbitLabel}>{item.label}</Text>
@@ -261,7 +282,7 @@ function TicketCard({
       </Text>
       <Text style={s.body}>{e.venue}</Text>
       <Text style={s.seatText}>
-        Grada {ticket.zone} · sector {ticket.zone}-D · fila {ticket.row}
+        {zoneLabel[ticket.zone] ?? ticket.zone} · sector {ticket.sector ?? "A"} · fila {ticket.row}
         {"\n"}Asientos {ticket.seats.join(", ")} · {ticket.seats.length}{" "}
         localidad(es)
       </Text>
@@ -286,13 +307,16 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
     scroller = useRef<React.ComponentRef<typeof ScrollView>>(null),
     sequence = useRef(0);
   const [query, setQuery] = useState(""),
-    [month, setMonth] = useState("");
+    [month, setMonth] = useState(""),
+    [clubLimit, setClubLimit] = useState(8),
+    [eventLimit, setEventLimit] = useState(6);
   const [side, setSide] = useState<"have" | "want">("have"),
     [append, setAppend] = useState(false),
     [editIndex, setEditIndex] = useState<number | null>(null);
   const [have, setHave] = useState<DemoTicket[]>([]),
     [want, setWant] = useState<DemoTicket[]>([]);
   const [zone, setZone] = useState("Norte"),
+    [sector, setSector] = useState("A"),
     [row, setRow] = useState(3),
     [seats, setSeats] = useState<number[]>([12]);
   const [mode, setMode] = useState<DemoMode>("exchange"),
@@ -348,7 +372,9 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
     setError("");
     setNotice("");
     setQuery("");
-    setMonth("");
+    if (next.name === "events") setMonth("");
+    if (next.name === "clubs") setClubLimit(8);
+    if (next.name === "events") setEventLimit(6);
     scroller.current?.scrollTo({ y: 0, animated: false });
   };
   const back = () => {
@@ -398,6 +424,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
             setAmount("0");
             setSalePrice("75");
             setZone("Norte");
+            setSector("A");
             setRow(3);
             setSeats([12]);
             setMode("exchange");
@@ -439,11 +466,22 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
       pick: { side: target, append: add, editIndex: index },
     });
   };
+  const chooseSide = (target: "have" | "want") => {
+    setSide(target);
+    setAppend(false);
+    setEditIndex(null);
+    setStack((old) => old.map((item) =>
+      "pick" in item && item.pick
+        ? { ...item, pick: { side: target, append: false, editIndex: null } }
+        : item,
+    ));
+  };
   const selectSeat = (eventId: string) => {
     const existing = (pick.side === "have" ? have : want).find(
       (t) => t.eventId === eventId,
     );
     setZone(existing?.zone ?? "Norte");
+    setSector(existing?.sector ?? "A");
     setRow(existing?.row ?? 3);
     setSeats(existing?.seats ?? [12]);
     navigate({ name: "seats", eventId, pick });
@@ -452,6 +490,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
     const ticket = {
       eventId,
       zone,
+      sector,
       row,
       seats: [...seats].sort((a, b) => a - b),
     };
@@ -483,6 +522,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
     setEditIndex(index);
     setAppend(false);
     setZone(t.zone);
+    setSector(t.sector ?? "A");
     setRow(t.row);
     setSeats(t.seats);
     navigate({
@@ -647,29 +687,29 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
     setFilters((old) => ({ ...old, [key]: value }));
   const step =
     screen.name === "sports"
-      ? "1 · Disciplinas"
+      ? "1 · Tengo o quiero"
       : screen.name === "clubs"
-        ? "2 · Clubes / equipos"
+        ? "2 · Elige un club o equipo"
         : screen.name === "events"
           ? "3 · Eventos y fechas"
           : screen.name === "seats"
             ? "4 · Localidades"
             : screen.name === "compose" || screen.name === "summary"
-              ? "5 · Operación simulada"
-              : "Mi espacio demo";
+              ? "5 · Propuesta local"
+              : "Mi espacio";
   const title =
     screen.name === "sports"
-      ? "Elige un deporte"
+      ? "Entradas, butacas y abonos"
       : screen.name === "clubs"
         ? DEMO_SPORTS.find((s) => s.id === screen.sport)!.label
         : screen.name === "events"
           ? DEMO_CLUBS.find((c) => c.id === screen.clubId)!.label
           : screen.name === "seats"
-            ? "Elige tus localidades"
+            ? "Ubicar butaca"
             : screen.name === "compose"
               ? "TENGO ↔ QUIERO"
               : screen.name === "summary"
-                ? "Resumen del acuerdo"
+                ? "Resumen de la propuesta"
                 : screen.name === "search"
                   ? "Buscar entrada"
                   : screen.name === "detail"
@@ -681,6 +721,17 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                         : screen.name === "offers"
                           ? "Mis ofertas"
                           : "Mis operaciones";
+  const clubCandidates = screen.name === "clubs"
+    ? DEMO_CLUBS.filter((c) => c.sport === screen.sport && c.label.toLocaleLowerCase("es").includes(query.toLocaleLowerCase("es")))
+    : [];
+  const eventCandidates = screen.name === "events"
+    ? DEMO_EVENTS.filter((e) => e.clubId === screen.clubId && (!month || e.date.startsWith(month)))
+      .sort((a, b) => a.date.localeCompare(b.date))
+    : [];
+  const sideSelector = (compact: boolean) => <View style={s.sideRow}>
+    <View style={s.sideHalf}><Button label="TENGO" selected={pick.side === "have"} compact={compact} onPress={() => chooseSide("have")} /></View>
+    <View style={s.sideHalf}><Button label="QUIERO" selected={pick.side === "want"} compact={compact} onPress={() => chooseSide("want")} /></View>
+  </View>;
   const pairing = (
     opHave: DemoTicket[],
     opWant: DemoTicket[],
@@ -688,7 +739,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
   ) => (
     <View style={[s.pair, width >= 650 && { flexDirection: "row" }]}>
       <View style={s.column}>
-        <Text style={s.section}>TENGO · Tú (demo)</Text>
+        <Text style={s.section}>TENGO · Tú</Text>
         {opHave.map((t, i) => (
           <TicketCard
             key={`have-${i}`}
@@ -718,7 +769,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
         )}
       </View>
       <View style={s.column}>
-        <Text style={s.section}>QUIERO · otra parte ficticia</Text>
+        <Text style={s.section}>QUIERO · otra parte</Text>
         {opWant.map((t, i) => (
           <TicketCard
             key={`want-${i}`}
@@ -762,16 +813,11 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View style={s.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.kicker}>ADMIN · EVENTOS DEPORTIVOS</Text>
-              <Text style={s.badge}>DEMO · simulación</Text>
-            </View>
-            <Button label="Reiniciar demo" onPress={reset} />
+            <Text style={s.kicker}>EVENTOS DEPORTIVOS</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reiniciar demo" onPress={reset} style={s.settingsButton}>
+              <Feather name="settings" size={20} color="#15583e" />
+            </TouchableOpacity>
           </View>
-          <Text style={s.privacy}>
-            Espacio privado de esta cuenta ADMIN. Los ejemplos no se publican ni
-            son visibles para EMPRESA o USUARIO.
-          </Text>
           <ScrollView
             ref={scroller}
             style={{ flex: 1 }}
@@ -779,20 +825,18 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
             keyboardShouldPersistTaps="handled"
             automaticallyAdjustKeyboardInsets
           >
-            <Text style={s.kicker}>{step}</Text>
             <Text accessibilityRole="header" style={s.title}>
               {title}
             </Text>
-            {(screen.name === "clubs" ||
-              screen.name === "events" ||
-              screen.name === "seats") && (
-              <Text style={s.small}>
-                Seleccionando {pick.side === "have" ? "TENGO" : "QUIERO"}
-                {have.length || want.length
-                  ? ` · TENGO ${have.reduce((n, t) => n + t.seats.length, 0)} / QUIERO ${want.reduce((n, t) => n + t.seats.length, 0)}`
-                  : ""}
-              </Text>
-            )}
+            <Text style={s.subtitle}>
+              {screen.name === "sports" ? "Intercambia o encuentra localidades por deporte y encuentro."
+                : screen.name === "clubs" ? "Selecciona el equipo u organizador."
+                : screen.name === "events" ? "Elige un encuentro de presentación."
+                : screen.name === "seats" ? "Selecciona zona, sector, fila y asiento."
+                : "Explora y edita la propuesta local."}
+            </Text>
+            {(screen.name === "sports" || screen.name === "clubs" || screen.name === "events" || screen.name === "seats") && sideSelector(screen.name !== "sports")}
+            {screen.name !== "sports" && <Text style={s.kicker}>{step}</Text>}
             {!!error && (
               <Text accessibilityRole="alert" style={s.error}>
                 {error}
@@ -805,15 +849,13 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
             )}
             {screen.name === "sports" && (
               <>
-                <Text style={s.body}>
-                  Entradas, butacas y abonos. Elige disciplina y después club.
-                  Ejemplos sintéticos; sin inventario real.
-                </Text>
+                <Text style={s.section}>2 · Elige un deporte</Text>
                 <Field
                   label="Buscar deporte"
                   value={query}
                   onChange={setQuery}
                 />
+                <Text style={s.disclaimer}>Presentación local · sin entradas ni cobros reales.</Text>
                 <Orbit
                   key={query}
                   center="DEPORTES"
@@ -856,9 +898,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                     onPress={() => navigate({ name: "offers" })}
                   />
                 </View>
-                <Text style={s.section}>
-                  Demo guiada · un toque para empezar
-                </Text>
+                <Text style={s.section}>Ejemplos guiados</Text>
                 <Button
                   label="Intercambio 1:1"
                   onPress={() => startScenario("equal")}
@@ -882,33 +922,22 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
             )}
             {screen.name === "clubs" && (
               <>
-                <Text style={s.body}>
-                  Nombres de clubes como referencia de navegación. Sin
-                  afiliación ni acuerdos oficiales; todos los eventos y recintos
-                  son ficticios.
-                </Text>
                 <Field
                   label="Buscar club o equipo"
                   value={query}
                   onChange={setQuery}
                 />
-                <Orbit
-                  key={`${screen.sport}:${query}`}
-                  center="CLUBES"
-                  items={DEMO_CLUBS.filter(
-                    (c) =>
-                      c.sport === screen.sport &&
-                      c.label.toLowerCase().includes(query.toLowerCase()),
-                  ).map((c) => ({
-                    id: c.id,
-                    label: c.label,
-                    symbol: c.initials,
-                    color: c.color,
-                  }))}
-                  onSelect={(clubId) =>
-                    navigate({ name: "events", clubId, pick })
-                  }
-                />
+                <View style={s.clubGrid}>
+                  {clubCandidates.slice(0, query ? clubCandidates.length : clubLimit).map((c) =>
+                    <TouchableOpacity key={c.id} accessibilityRole="button" accessibilityLabel={c.label}
+                      onPress={() => navigate({ name: "events", clubId: c.id, pick })} style={s.clubTile}>
+                      <View style={s.neutralShield}><Feather name="shield" size={29} color="#198563" /></View>
+                      <Text numberOfLines={2} adjustsFontSizeToFit style={s.clubName}>{c.label}</Text>
+                    </TouchableOpacity>,
+                  )}
+                </View>
+                {!clubCandidates.length && <Text style={s.body}>No hay coincidencias.</Text>}
+                {!query && clubCandidates.length > clubLimit && <Button label="Ver más clubes" primary onPress={() => setClubLimit((n) => n + 8)} />}
                 <Button
                   label="Buscar ofertas de este deporte"
                   onPress={() => {
@@ -920,9 +949,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
             )}
             {screen.name === "events" && (
               <>
-                <Text style={s.body}>
-                  Calendario DEMO 2027 · fechas inventadas para la presentación.
-                </Text>
+                <Text style={s.disclaimer}>Fechas ilustrativas · no son calendario ni disponibilidad oficial.</Text>
                 <View style={s.wrap}>
                   {["", "2027-01", "2027-02", "2027-03"].map((m) => (
                     <Button
@@ -937,34 +964,27 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                           : "Todos"
                       }
                       selected={month === m}
-                      onPress={() => setMonth(m)}
+                      compact
+                      onPress={() => { setMonth(m); setEventLimit(6); }}
                     />
                   ))}
                 </View>
-                {DEMO_EVENTS.filter(
-                  (e) =>
-                    e.clubId === screen.clubId &&
-                    (!month || e.date.startsWith(month)),
-                ).map((e) => (
-                  <View key={e.id} style={s.card}>
-                    <Text style={s.kicker}>
+                {eventCandidates.slice(0, eventLimit).map((e) => (
+                  <View key={e.id} style={s.eventCard}>
+                    <Text style={s.eventDate}>
                       {dateLabel(e.date)} · {e.time}
                     </Text>
-                    <Text style={s.cardTitle}>{e.title}</Text>
-                    <Text style={s.body}>
-                      {e.competition} · {e.venue}
-                    </Text>
-                    <Button
-                      label={
-                        e.excluded
-                          ? "Excluido · ejemplo de restricción"
-                          : `Elegir encuentro ${e.id.split("-").at(-1)}`
-                      }
-                      disabled={e.excluded}
-                      onPress={() => selectSeat(e.id)}
-                    />
+                    <Text style={s.eventTitle}>{e.title}</Text>
+                    <Text style={s.eventMeta}>{e.venue}</Text>
+                    <View style={s.eventFooter}>
+                      <View style={s.eventRule} />
+                      <Button label={e.excluded ? "No disponible" : "Elegir encuentro"}
+                        accessibilityLabel={`Elegir encuentro ${e.id.split("-").at(-1)}`}
+                        compact primary disabled={e.excluded} onPress={() => selectSeat(e.id)} />
+                    </View>
                   </View>
                 ))}
+                {eventCandidates.length > eventLimit && <Button label="Ver más encuentros" onPress={() => setEventLimit((n) => n + 6)} />}
               </>
             )}
             {screen.name === "seats" && (
@@ -977,27 +997,27 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                   {demoEvent(screen.eventId).time} ·{" "}
                   {demoEvent(screen.eventId).venue}
                 </Text>
-                <Text style={s.notice}>
-                  Esquema ilustrativo NO OFICIAL. Los asientos son de muestra;
-                  no representan disponibilidad ni derechos de acceso.
-                </Text>
-                <View style={s.pitch}>
-                  <Text style={s.pitchText}>RECINTO DEMO</Text>
-                </View>
+                <StadiumMap zone={zone} onSelect={setZone} />
+                <Text style={s.disclaimer}>Esquema orientativo · selección local sin disponibilidad oficial.</Text>
                 <Text style={s.label}>Grada / sector</Text>
                 <View style={s.wrap}>
                   {DEMO_ZONES.map((z) => (
                     <Button
                       key={z}
-                      label={z}
+                      label={zoneLabel[z]}
                       selected={zone === z}
                       onPress={() => setZone(z)}
+                      compact
                     />
                   ))}
                 </View>
+                <Text style={s.label}>Sector</Text>
+                <View style={s.wrap}>{["A", "B", "C", "D"].map((value) =>
+                  <Button key={value} label={`Sector ${value}`} selected={sector === value} compact onPress={() => setSector(value)} />,
+                )}</View>
                 <Text style={s.label}>Fila</Text>
                 <View style={s.wrap}>
-                  {[1, 2, 3, 4, 5].map((n) => (
+                  {[1, 2, 3, 4, 5, 12].map((n) => (
                     <Button
                       key={n}
                       label={`Fila ${n}`}
@@ -1006,6 +1026,15 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                     />
                   ))}
                 </View>
+                <Field label="Número de fila (1–30)" value={String(row)} numeric onChange={(value) => { const n = Number(value); if (Number.isInteger(n) && n >= 1 && n <= 30) setRow(n); }} />
+                <Field label="Asiento inicial (1–60)" value={String(seats[0] ?? "")} numeric onChange={(value) => { const n = Number(value); if (Number.isInteger(n) && n >= 1 && n <= 60) setSeats([n]); }} />
+                <Text style={s.label}>Cantidad de localidades</Text>
+                <View style={s.wrap}>{[1, 2, 3, 4].map((count) =>
+                  <Button key={count} label={String(count)} selected={seats.length === count} compact onPress={() => {
+                    const start = Math.min(seats[0] ?? 1, 61 - count);
+                    setSeats(Array.from({ length: count }, (_, i) => start + i));
+                  }} />,
+                )}</View>
                 <Text style={s.label}>Asientos · selección múltiple</Text>
                 <View style={s.wrap}>
                   {Array.from({ length: 12 }, (_, n) => n + 1).map((n) => (
@@ -1024,18 +1053,19 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                   ))}
                 </View>
                 <Text style={s.body}>
-                  {seats.length} localidad(es) · grada {zone} · sector {zone}-D
+                  {seats.length} localidad(es) · {zoneLabel[zone]} · sector {sector}
                   · fila {row}
                 </Text>
                 <Button
                   primary
-                  label={`Usar ${seats.length} localidad(es) en ${pick.side === "have" ? "TENGO" : "QUIERO"}`}
+                  label="Guardar ubicación"
+                  accessibilityLabel={`Usar ${seats.length} localidad(es) en ${pick.side === "have" ? "TENGO" : "QUIERO"}`}
                   disabled={!seats.length}
                   onPress={() => commitTicket(screen.eventId)}
                 />
                 <Button
-                  label="Cambiar club o evento"
-                  onPress={() => browse(pick.side, pick.append, pick.editIndex)}
+                  label="Cambiar encuentro"
+                  onPress={back}
                 />
               </>
             )}
@@ -1304,12 +1334,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                         {op.conditions || "Sin condiciones adicionales"}
                       </Text>
                     </View>
-                    <Text style={s.notice}>
-                      Acceso no verificado. Aceptar este ejemplo no valida
-                      titularidad, disponibilidad ni permiso de cesión. La
-                      entrega de ambas partes requeriría un proceso oficial; no
-                      hay depósito ni garantía de atomicidad.
-                    </Text>
+                    <Text style={s.disclaimer}>Propuesta local de presentación · no se envía, cobra ni transfiere ninguna entrada.</Text>
                     {op.status === "proposal" && (
                       <Button
                         primary
@@ -1420,10 +1445,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
               })()}
             {screen.name === "search" && (
               <>
-                <Text style={s.body}>
-                  Ofertas y titulares ficticios. Filtros guardados solo durante
-                  esta sesión demo.
-                </Text>
+                <Text style={s.disclaimer}>Ofertas de presentación · filtros de esta sesión.</Text>
                 <ScrollView
                   horizontal
                   contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
@@ -1622,10 +1644,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                   {modeLabel(screen.listing.mode)} ·{" "}
                   {euro(screen.listing.price)} DEMO
                 </Text>
-                <Text style={s.body}>
-                  Titular ficticio · acceso no verificado · ninguna
-                  disponibilidad real.
-                </Text>
+                <Text style={s.disclaimer}>Oferta de presentación · sin entrada ni disponibilidad real.</Text>
                 <Button
                   primary
                   label="Elegir para QUIERO · intercambio"
@@ -1770,11 +1789,7 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
             )}
             {screen.name === "passes" && (
               <>
-                <Text style={s.body}>
-                  Cada abono es independiente de sus derechos por evento. No se
-                  transfiere el abono completo. Calendario inventado, sin
-                  importación oficial.
-                </Text>
+                <Text style={s.disclaimer}>Abonos de presentación · selección por partido, sin transferencia.</Text>
                 {state.passes.map((pass) => (
                   <View key={pass.id} style={s.card}>
                     <Text style={s.cardTitle}>{pass.title}</Text>
@@ -2004,11 +2019,6 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
                 ))}
               </>
             )}
-            <Text style={s.footer}>
-              DEMO · datos sintéticos en memoria. Se descartan al cerrar o
-              cambiar de cuenta. Sin QR, pagos, publicación ni transferencia
-              real. Acceso no verificado.
-            </Text>
           </ScrollView>
           <GoNavigationFloating
             screenKey="sports-events-demo"
@@ -2017,11 +2027,13 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
           >
             <GoCloseButton
               level="panel"
+              appearance="light"
               accessibilityLabel="Volver un nivel en Eventos Deportivos"
               onPress={back}
             />
             <GoCloseButton
               level="container"
+              appearance="light"
               accessibilityLabel="Cerrar Eventos Deportivos"
               onPress={onClose}
             />
@@ -2033,60 +2045,66 @@ export function SportsEventsDemo({ onClose }: { onClose: () => void }) {
 }
 
 const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#081510" },
+  safe: { flex: 1, backgroundColor: "#f9fbf8" },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    justifyContent: "space-between",
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: 10,
+    minHeight: 52,
   },
   kicker: {
-    color: "#8ee7b5",
-    fontSize: 11,
+    color: "#145b41",
+    fontSize: 13,
     fontWeight: "800",
-    letterSpacing: 0.8,
+    letterSpacing: 1,
   },
-  badge: { color: "#f7d77c", fontSize: 15, fontWeight: "800", marginTop: 5 },
-  privacy: {
-    color: "#9faea8",
-    fontSize: 11,
-    lineHeight: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+  settingsButton: {
+    width: 44, height: 44, borderRadius: 22, backgroundColor: "#fff",
+    borderWidth: 1, borderColor: "#dce9e1", alignItems: "center", justifyContent: "center",
+    shadowColor: "#153b2c", shadowOpacity: .08, shadowRadius: 5, elevation: 2,
   },
   content: {
     padding: 16,
-    paddingBottom: 112,
-    gap: 12,
+    paddingBottom: 136,
+    gap: 11,
     maxWidth: 950,
     width: "100%",
     alignSelf: "center",
   },
-  title: { color: "#fff", fontSize: 27, fontWeight: "800" },
-  section: { color: "#e8f7ef", fontSize: 18, fontWeight: "800", marginTop: 8 },
-  body: { color: "#c5d5cc", fontSize: 14, lineHeight: 21 },
-  small: { color: "#9eb7a9", fontSize: 12, lineHeight: 18 },
+  title: { color: "#16251f", fontSize: 30, fontWeight: "800" },
+  subtitle: { color: "#63716b", fontSize: 14, lineHeight: 20 },
+  section: { color: "#18362b", fontSize: 17, fontWeight: "800", marginTop: 8 },
+  body: { color: "#394b42", fontSize: 14, lineHeight: 21 },
+  small: { color: "#64756c", fontSize: 12, lineHeight: 18 },
+  disclaimer: { color: "#6c7972", fontSize: 11, lineHeight: 16 },
   button: {
     minHeight: 48,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    borderRadius: 16,
+    borderRadius: 15,
     borderWidth: 1,
-    borderColor: "#3a5949",
-    backgroundColor: "#152c20",
+    borderColor: "#d6e1da",
+    backgroundColor: "#fff",
     justifyContent: "center",
     alignItems: "center",
     flexShrink: 1,
+    shadowColor: "#224737", shadowOffset: { width: 0, height: 2 }, shadowOpacity: .07, shadowRadius: 4,
+    elevation: 1,
   },
-  selected: { backgroundColor: "#b5f47e", borderColor: "#b5f47e" },
+  compactButton: { minHeight: 42, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 13 },
+  compactButtonText: { fontSize: 12 },
+  selected: { backgroundColor: "#0d7954", borderColor: "#0d7954" },
   buttonText: {
-    color: "#ecf8f0",
+    color: "#1a5940",
     fontSize: 14,
     fontWeight: "700",
     textAlign: "center",
   },
-  selectedText: { color: "#102116" },
+  selectedText: { color: "#fff" },
+  sideRow: { flexDirection: "row", gap: 8, padding: 5, borderRadius: 19, backgroundColor: "#f0f6f2", borderWidth: 1, borderColor: "#e0eae3" },
+  sideHalf: { flex: 1 },
   wrap: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -2094,61 +2112,63 @@ const s = StyleSheet.create({
     alignItems: "center",
   },
   field: { gap: 6 },
-  label: { color: "#c8e1d2", fontSize: 13, fontWeight: "700" },
+  label: { color: "#315544", fontSize: 13, fontWeight: "700" },
   input: {
     minHeight: 50,
     padding: 12,
     borderRadius: 13,
     borderWidth: 1,
-    borderColor: "#41604d",
-    color: "#fff",
+    borderColor: "#ccd9d0",
+    color: "#172b20",
     fontSize: 16,
-    backgroundColor: "#10241a",
+    backgroundColor: "#fff",
   },
   card: {
     borderRadius: 19,
     padding: 14,
     borderWidth: 1,
-    borderColor: "#2f4f3d",
-    backgroundColor: "#10251b",
+    borderColor: "#e1e9e2",
+    backgroundColor: "#fff",
     gap: 10,
+    shadowColor: "#204932", shadowOpacity: .07, shadowRadius: 8, elevation: 2,
   },
-  cardTitle: { color: "#f1fff6", fontSize: 17, fontWeight: "700" },
+  cardTitle: { color: "#172c20", fontSize: 17, fontWeight: "700" },
   seatText: {
-    color: "#d0f3b9",
+    color: "#226746",
     fontSize: 15,
     lineHeight: 23,
     fontWeight: "700",
   },
   notice: {
     padding: 12,
-    backgroundColor: "#26301b",
-    color: "#eee0a7",
+    backgroundColor: "#eef6ee",
+    color: "#285944",
     borderRadius: 13,
     fontSize: 13,
     lineHeight: 20,
   },
   error: {
     padding: 12,
-    backgroundColor: "#401e20",
-    color: "#ffd0cb",
+    backgroundColor: "#fff0ef",
+    color: "#a93027",
     borderRadius: 13,
     fontSize: 14,
   },
-  status: { color: "#ecdb98", fontSize: 16, fontWeight: "800" },
+  status: { color: "#35664b", fontSize: 16, fontWeight: "800" },
   orbit: {
-    backgroundColor: "#163d2c",
-    borderWidth: 1.5,
-    borderColor: "#68ae87",
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#d8e8dc",
     borderRadius: 70,
     alignItems: "center",
     justifyContent: "center",
     padding: 7,
     gap: 3,
+    shadowColor: "#1b553b", shadowOpacity: .07, shadowRadius: 5, elevation: 2,
   },
   orbitSymbol: { fontSize: 23, fontWeight: "800" },
   orbitLabel: {
-    color: "#fff",
+    color: "#183a29",
     textAlign: "center",
     fontSize: 12,
     fontWeight: "700",
@@ -2156,36 +2176,46 @@ const s = StyleSheet.create({
   orbitRing: {
     position: "absolute",
     borderWidth: 1,
-    borderColor: "#284f3a",
+    borderColor: "#cfe5d6",
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
   },
-  orbitCenter: { color: "#c5f774", fontSize: 30, fontWeight: "900" },
-  page: { color: "#c9e4d4", padding: 8 },
-  pitch: {
-    height: 80,
-    backgroundColor: "#236144",
-    borderWidth: 2,
-    borderColor: "#8cc9a5",
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pitchText: {
-    color: "#c9efb4",
-    fontSize: 15,
-    fontWeight: "800",
-    letterSpacing: 2,
-  },
+  orbitCenter: { color: "#1f7654", fontSize: 30, fontWeight: "900" },
+  page: { color: "#315d47", padding: 8 },
+  clubGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 9 },
+  clubTile: { width: "48%", minHeight: 112, borderRadius: 18, borderWidth: 1, borderColor: "#e1ebe4", backgroundColor: "#fff", alignItems: "center", justifyContent: "center", gap: 6, padding: 9, shadowColor: "#23513c", shadowOpacity: .06, shadowRadius: 5, elevation: 1 },
+  neutralShield: { width: 50, height: 50, borderRadius: 25, alignItems: "center", justifyContent: "center", backgroundColor: "#eaf6ed" },
+  clubName: { color: "#1d3025", fontSize: 14, fontWeight: "800", textAlign: "center" },
+  eventCard: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#e2eae3", borderRadius: 18, padding: 12, gap: 4, shadowColor: "#294638", shadowOpacity: .06, shadowRadius: 7, elevation: 1 },
+  eventDate: { color: "#225a42", fontSize: 12, fontWeight: "800" },
+  eventTitle: { color: "#1a2920", fontSize: 16, fontWeight: "800" },
+  eventMeta: { color: "#66746b", fontSize: 12, lineHeight: 17 },
+  eventFooter: { flexDirection: "row", alignItems: "center", gap: 12, justifyContent: "flex-end", marginTop: 5 },
+  eventRule: { height: 1, flex: 1, backgroundColor: "#d2e4d7" },
+  stadium: { width: "100%", aspectRatio: 1.4, maxHeight: 330, borderRadius: 28, backgroundColor: "#f2f9f4", overflow: "hidden", borderWidth: 1, borderColor: "#d5e8db" },
+  stadiumOval: { position: "absolute", left: "6%", right: "6%", top: "5%", bottom: "5%", borderRadius: 170, borderWidth: 17, borderColor: "#cae7d5", backgroundColor: "#e5f3e9" },
+  stadiumField: { position: "absolute", left: "25%", right: "25%", top: "34%", bottom: "34%", borderRadius: 12, borderWidth: 2, borderColor: "#fff", backgroundColor: "#5cb870", overflow: "hidden", alignItems: "center", justifyContent: "center" },
+  stadiumMidline: { position: "absolute", top: 0, bottom: 0, left: "50%", width: 1, backgroundColor: "#fff" },
+  stadiumCircle: { width: 35, height: 35, borderRadius: 18, borderWidth: 1, borderColor: "#fff" },
+  stadiumZone: { position: "absolute", minWidth: 70, minHeight: 36, paddingHorizontal: 6, borderRadius: 18, borderWidth: 1, borderColor: "#b5d5c3", backgroundColor: "#fff", justifyContent: "center", alignItems: "center" },
+  stadiumZoneSelected: { backgroundColor: "#0d7954", borderColor: "#0d7954" },
+  stadiumZoneText: { color: "#28513b", fontSize: 11, fontWeight: "800" },
+  stadiumZoneTextSelected: { color: "#fff" },
+  zoneNorte: { left: "2%", top: "43%" },
+  zoneSur: { right: "2%", top: "43%" },
+  zoneEste: { left: "36%", bottom: "20%" },
+  zoneOeste: { left: "36%", top: "20%" },
+  zoneTribuna: { left: "35%", top: "2%" },
+  zoneVIP: { left: "42%", bottom: "2%" },
   pair: { gap: 14 },
   column: { flex: 1, gap: 12 },
   calendarRow: {
     padding: 13,
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: "#34523f",
+    borderColor: "#dce8df",
     gap: 10,
   },
-  footer: { color: "#91a89b", fontSize: 11, lineHeight: 17, marginTop: 12 },
+  footer: { color: "#718077", fontSize: 11, lineHeight: 17, marginTop: 12 },
 });

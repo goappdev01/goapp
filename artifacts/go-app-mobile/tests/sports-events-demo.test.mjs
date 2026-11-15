@@ -72,14 +72,16 @@ test("short sport tap keeps social handler, long tap is ADMIN-only and never ope
 
 test("real TSX: discipline → club → event → multiple seats → destination → simulated acceptance", () => {
   const ui = demoFixture();
-  assert.match(ui.text(), /1 · Disciplinas/);
+  assert.match(ui.text(), /Entradas, butacas y abonos/);
+  assert.equal(ui.find("TENGO").props.accessibilityState.selected, true);
+  ui.click("TENGO");
   assert.equal(ui.find("Real Madrid"), undefined);
   ui.click("Fútbol");
-  assert.match(ui.text(), /2 · Clubes/);
+  assert.match(ui.text(), /2 · Elige un club/);
   ui.click("Real Madrid");
   assert.match(ui.text(), /3 · Eventos/);
   ui.click("Elegir encuentro 2");
-  assert.match(ui.text(), /NO OFICIAL/);
+  assert.match(ui.text(), /Esquema orientativo/);
   ui.click("Asiento 11");
   ui.click("Usar 2 localidad(es) en TENGO");
   ui.click("Elegir QUIERO");
@@ -119,7 +121,7 @@ test("guided scenarios, edit, reject, cancel and reset run offline; state is dis
   ui.click("Cancelar propuesta demo");
   ui.click("Reiniciar demo");
   ui.confirmReset();
-  assert.match(ui.text(), /1 · Disciplinas/);
+  assert.match(ui.text(), /2 · Elige un deporte/);
   ui.click("Mis operaciones");
   assert.match(ui.text(), /Aún no hay operaciones/);
   ui.view.view = "BUSINESS";
@@ -243,6 +245,64 @@ test("model rejects duplicate seats, conflicting operations, invalid prices and 
   });
   assert.equal(edited.offers.at(-1).price, 0);
   assert.ok(m.DEMO_SPORTS.length >= 27);
+  assert.equal(m.DEMO_CLUBS.filter((club) => club.sport === "football").length, 20);
+});
+
+test("club search, load-more, month filters and interactive stadium keep a local seat choice", (t) => {
+  const ui = demoFixture();
+  t.after(() => ui.close());
+  ui.click("QUIERO");
+  assert.equal(ui.find("QUIERO").props.accessibilityState.selected, true);
+  ui.click("Fútbol");
+  assert.equal(ui.find("Rayo Vallecano"), undefined);
+  ui.click("Ver más clubes");
+  ui.click("Ver más clubes");
+  assert.ok(ui.find("Rayo Vallecano"));
+  ui.input("Buscar club o equipo", "Real Madrid");
+  assert.ok(ui.find("Real Madrid"));
+  assert.equal(ui.find("FC Barcelona"), undefined);
+  ui.click("Real Madrid");
+  ui.click("Enero");
+  assert.ok(ui.find("Elegir encuentro 1"));
+  assert.equal(ui.find("Elegir encuentro 3"), undefined);
+  ui.click("Febrero");
+  assert.ok(ui.find("Elegir encuentro 3"));
+  assert.equal(ui.find("Elegir encuentro 1"), undefined);
+  ui.click("Elegir encuentro 3");
+  ui.click("Volver un nivel en Eventos Deportivos");
+  assert.equal(ui.find("Febrero").props.accessibilityState.selected, true);
+  ui.click("Elegir encuentro 3");
+  ui.click("Zona Lateral Este");
+  assert.equal(ui.find("Zona Lateral Este").props.accessibilityState.selected, true);
+  ui.click("Sector B");
+  ui.input("Número de fila (1–30)", "12");
+  ui.input("Asiento inicial (1–60)", "48");
+  ui.click("2");
+  ui.click("Usar 2 localidad(es) en QUIERO");
+  assert.match(ui.text(), /Lateral Este · sector B · fila 12/);
+  assert.match(ui.text(), /Asientos 48, 49/);
+  assert.equal(ui.network, 0);
+});
+
+test("changing TENGO to QUIERO mid-route keeps the local picks and supports a difference both ways", (t) => {
+  const ui = demoFixture();
+  t.after(() => ui.close());
+  ui.click("Fútbol");
+  ui.click("QUIERO");
+  ui.click("Real Madrid");
+  ui.click("Elegir encuentro 1");
+  ui.click("Usar 1 localidad(es) en QUIERO");
+  ui.click("Elegir TENGO");
+  ui.click("Fútbol");
+  ui.click("FC Barcelona");
+  ui.click("Elegir encuentro 1");
+  ui.click("Usar 1 localidad(es) en TENGO");
+  assert.match(ui.text(), /1 propia\(s\) por 1 deseada/);
+  ui.click("25 €");
+  ui.click("Yo aportaría la diferencia");
+  ui.click("Ver resumen · propuesta demo");
+  assert.match(ui.text(), /Tú → Alex: 25/);
+  assert.equal(ui.network, 0);
 });
 
 test("back navigation retains the source/destination context and destination can use a different sport", (t) => {

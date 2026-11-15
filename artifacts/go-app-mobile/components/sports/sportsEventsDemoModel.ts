@@ -37,38 +37,32 @@ export type DemoClub = {
   color: string;
 };
 export const DEMO_CLUBS: DemoClub[] = [
-  {
-    id: "real-madrid",
-    sport: "football",
-    label: "Real Madrid",
-    city: "Madrid",
-    initials: "RM",
-    color: "#f1e4b3",
-  },
-  {
-    id: "barcelona",
-    sport: "football",
-    label: "FC Barcelona",
-    city: "Barcelona",
-    initials: "FCB",
-    color: "#d994b1",
-  },
-  {
-    id: "valencia",
-    sport: "football",
-    label: "Valencia CF",
-    city: "Valencia",
-    initials: "VCF",
-    color: "#ffba79",
-  },
-  {
-    id: "atletico",
-    sport: "football",
-    label: "Atlético de Madrid",
-    city: "Madrid",
-    initials: "ATM",
-    color: "#f89999",
-  },
+  // 2026/27 Primera División, verified against the official LaLiga club list.
+  // Names are factual; the neutral UI shield is not a copied club crest.
+  ...([
+    ["real-madrid", "Real Madrid", "Madrid"],
+    ["barcelona", "FC Barcelona", "Barcelona"],
+    ["atletico", "Atlético de Madrid", "Madrid"],
+    ["valencia", "Valencia CF", "Valencia"],
+    ["athletic", "Athletic Club", "Bilbao"],
+    ["alaves", "Deportivo Alavés", "Vitoria-Gasteiz"],
+    ["betis", "Real Betis", "Sevilla"],
+    ["celta", "Celta", "Vigo"],
+    ["deportivo", "RC Deportivo", "A Coruña"],
+    ["elche", "Elche CF", "Elche"],
+    ["espanyol", "RCD Espanyol de Barcelona", "Barcelona"],
+    ["getafe", "Getafe CF", "Getafe"],
+    ["levante", "Levante UD", "Valencia"],
+    ["malaga", "Málaga CF", "Málaga"],
+    ["osasuna", "CA Osasuna", "Pamplona"],
+    ["racing", "R. Racing Club", "Santander"],
+    ["rayo", "Rayo Vallecano", "Madrid"],
+    ["real-sociedad", "Real Sociedad", "San Sebastián"],
+    ["sevilla", "Sevilla FC", "Sevilla"],
+    ["villarreal", "Villarreal CF", "Villarreal"],
+  ] as const).map(([id, label, city]) => ({
+    id, sport: "football", label, city, initials: "", color: "#e9f4ed",
+  })),
   ...DEMO_SPORTS.filter((s) => s.id !== "football").flatMap((s) =>
     ["Madrid", "Barcelona"].map((city, i) => ({
       id: `${s.id}-${i}`,
@@ -98,20 +92,25 @@ export const DEMO_EVENTS: DemoEvent[] = DEMO_CLUBS.flatMap((club) =>
     id: `${club.id}-demo-${index + 1}`,
     clubId: club.id,
     sport: club.sport,
-    title: `${club.label} · encuentro de muestra ${index + 1}`,
-    date: new Date(Date.UTC(2027, 0, 3 + index * 7)).toISOString().slice(0, 10),
+    title: club.id === "real-madrid" && index < 3
+      ? `Real Madrid · ${["Valencia CF", "FC Barcelona", "Atlético de Madrid"][index]}`
+      : `${club.label} · encuentro de muestra ${index + 1}`,
+    date: club.id === "real-madrid" && index < 3
+      ? ["2027-01-03", "2027-01-17", "2027-02-02"][index]
+      : new Date(Date.UTC(2027, 0, 3 + index * 7)).toISOString().slice(0, 10),
     time: index % 2 ? "18:00" : "20:00",
-    venue: `Recinto ${club.city} · DEMO`,
+    venue: club.id === "real-madrid" ? "Santiago Bernabéu" : `Recinto de ${club.city}`,
     city: club.city,
     competition: index % 3 === 2 ? "Copa GO · ficticia" : "Liga GO · ficticia",
     excluded: index === 5,
   })),
 );
 export const demoEvent = (id: string) => DEMO_EVENTS.find((e) => e.id === id)!;
-export const DEMO_ZONES = ["Norte", "Este", "Sur", "Oeste"];
+export const DEMO_ZONES = ["Norte", "Este", "Sur", "Oeste", "Tribuna", "VIP"];
 export type DemoTicket = {
   eventId: string;
   zone: string;
+  sector?: string;
   row: number;
   seats: number[];
 };
@@ -255,7 +254,7 @@ export type DemoState = {
 };
 export const ticketKeys = (tickets: DemoTicket[]) =>
   tickets.flatMap((t) =>
-    t.seats.map((seat) => `${t.eventId}/${t.zone}/${t.row}/${seat}`),
+    t.seats.map((seat) => `${t.eventId}/${t.zone}/${t.sector ?? "A"}/${t.row}/${seat}`),
   );
 const active = (op: DemoOperation) =>
   ["proposal", "pending", "accepted", "external_pending", "disputed"].includes(
@@ -268,12 +267,13 @@ function validateTickets(tickets: DemoTicket[]) {
       throw new Error("Evento excluido del ejemplo: no permite propuestas.");
     if (
       !DEMO_ZONES.includes(t.zone) ||
+      (t.sector !== undefined && !["A", "B", "C", "D"].includes(t.sector)) ||
       !Number.isInteger(t.row) ||
       t.row < 1 ||
-      t.row > 5 ||
+      t.row > 30 ||
       !t.seats.length ||
       t.seats.length > 12 ||
-      t.seats.some((s) => !Number.isInteger(s) || s < 1 || s > 12)
+      t.seats.some((s) => !Number.isInteger(s) || s < 1 || s > 60)
     )
       throw new Error("Revisa las localidades demo.");
   }

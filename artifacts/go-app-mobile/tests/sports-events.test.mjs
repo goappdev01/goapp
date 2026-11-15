@@ -37,7 +37,8 @@ test('sports orbit and private panel are guarded against non-ADMIN and unverifie
   assert.match(panel, /canUseSportsEvents\(view\.view, admin\.allowed && !admin\.checking, admin\.userId\)/);
   assert.match(panel, /return <SportsEventsDemo key=\{admin.userId\} onClose=\{onClose\}/);
   const demo = fs.readFileSync('components/sports/SportsEventsDemo.tsx', 'utf8');
-  assert.match(demo, /Espacio privado de esta cuenta ADMIN/);
-  assert.match(demo.replace(/\s+/g, ' '), /no se publican ni son visibles para EMPRESA o USUARIO/);
+  assert.match(demo, /EVENTOS DEPORTIVOS/);
+  assert.doesNotMatch(demo, /ADMIN · EVENTOS DEPORTIVOS/);
+  assert.match(demo, /Presentación local · sin entradas ni cobros reales/);
   assert.doesNotMatch(demo, /supabaseApiRequest|fetch\(|AsyncStorage|ready &&|Almacenamiento todavía no activado/);
 });
