@@ -69,6 +69,24 @@ test('hours switch immediately to minutes, support returning to hours, and lead 
   assert.equal(flow.step, 'duration'); assert.equal(flow.panelOpen, true);
 });
 
+test('calendar control returns from the clock to date selection without saving a time', () => {
+  const app = fixture();
+  let flow = app.open();
+  flow.returnToDate();
+  flow = app.render();
+  assert.equal(flow.clockOpen, false);
+  assert.equal(flow.monthGridOpen, true);
+  assert.equal(flow.step, 'date');
+  assert.deepEqual(app.saves, []);
+  flow.handleDayTap('2026-10-21');
+  app.flush();
+  flow = app.render();
+  assert.equal(flow.dateISO, '2026-10-21');
+  assert.equal(flow.step, 'clock');
+  assert.equal(flow.clockOpen, true);
+  assert.deepEqual(app.saves, []);
+});
+
 for (const duration of ['15m', '30m', '1h', '2h']) {
   test(`${duration} automatically finishes a valid flow and preserves date and time`, () => {
     const app = fixture();

@@ -20520,7 +20520,7 @@ function HomeScreenContent() {
           {/* ── BOTONES FLOTANTES — zona pulgar derecho ───────────────────
               CONFIG toggle + ↑↓ fecha.
               Solo visibles cuando el panel mensual está CERRADO y GO Reservas no está activo. */}
-          {!monthGridOpen && !calReservasOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating contentRef={calendarDragOverlay} testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={(demoCustomerCalendarSelected?0:52)+((calQuickCreateOpen||calConfigVisible)?72:0)+64} protectedBottom={Math.max(0,overlayPanelHeight-insets.bottom)+10}>
+          {!monthGridOpen && !calReservasOpen && !clockOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating contentRef={calendarDragOverlay} testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={(demoCustomerCalendarSelected?0:52)+((calQuickCreateOpen||calConfigVisible)?72:0)+64} protectedBottom={Math.max(0,overlayPanelHeight-insets.bottom)+10}>
             {!demoCustomerCalendarSelected && (<TouchableOpacity
               onPress={() => {
                 Haptics.selectionAsync();
@@ -21500,12 +21500,12 @@ function HomeScreenContent() {
 
                       {!!calFlow.calError && <Text accessibilityRole="alert" style={{color:"#fde047",marginBottom:8}}>{calFlow.calError}</Text>}
                       {clockPhase === "minutes" ? (
-                        <View style={{width:FACE,gap:10}}>
+                        <View style={{width:FACE,gap:10,alignItems:"flex-end"}}>
                           <GoMinuteInput testID="calendar-clock-minute" value={calFlow.clockMinuteDraft}
                             onChangeText={calFlow.setClockMinuteDraft}
-                            style={{color:"#fff",fontSize:28,textAlign:"center",minHeight:48,borderColor:"#aaa",borderWidth:1,borderRadius:12}} />
-                          <TouchableOpacity accessibilityRole="button" onPress={()=>{Keyboard.dismiss();calFlow.commitClock();}} style={{minHeight:44,justifyContent:"center",alignItems:"center"}}>
-                            <Text style={{color:"#fff",fontWeight:"800"}}>CONTINUAR</Text>
+                            style={{color:"#fff",fontSize:28,textAlign:"center",width:72,minHeight:48,borderColor:"#aaa",borderWidth:1,borderRadius:12}} />
+                          <TouchableOpacity testID="calendar-clock-continue" accessibilityRole="button" accessibilityLabel="Continuar con la hora seleccionada" activeOpacity={0.75} onPress={()=>{Keyboard.dismiss();calFlow.commitClock();}} style={{width:156,minHeight:48,justifyContent:"center",alignItems:"center",borderRadius:13,borderWidth:1,borderColor:"#20A171",backgroundColor:"#00845A",shadowColor:"#000",shadowOffset:{width:0,height:2},shadowOpacity:0.22,shadowRadius:4,elevation:3}}>
+                            <Text style={{color:"#fff",fontWeight:"800",letterSpacing:0.5}}>CONTINUAR</Text>
                           </TouchableOpacity>
                         </View>
                       ) : <View
@@ -21550,6 +21550,19 @@ function HomeScreenContent() {
                         <View pointerEvents="none" style={{ position: "absolute", width: 8, height: 8, borderRadius: 4, backgroundColor: "#ffffff", left: CLOCK_R - 4, top: CLOCK_R - 4 }} />
                       </View>}
                     </View>
+                  </View>
+                  <View testID="calendar-clock-footer-controls" style={{flexDirection:handedness==="left"?"row-reverse":"row",alignSelf:handedness==="left"?"flex-start":"flex-end",alignItems:"center",gap:12,marginTop:14}}>
+                    {!demoCustomerCalendarSelected && <TouchableOpacity
+                      testID="calendar-clock-open-date"
+                      accessibilityRole="button"
+                      accessibilityLabel={lang==="en"?"Open calendar":"Abrir calendario"}
+                      activeOpacity={0.7}
+                      onPress={()=>{Haptics.selectionAsync();calFlow.returnToDate();}}
+                      style={{width:48,height:48,borderRadius:16,backgroundColor:"#0e0e10",borderWidth:1.5,borderColor:"rgba(255,255,255,0.60)",alignItems:"center",justifyContent:"center"}}
+                    ><Feather name="calendar" size={20} color="#ffffff" /></TouchableOpacity>}
+                    <GoCloseButton testID="calendar-clock-close" level="container" touchSize={48} preserveTouchSize cornerRadius={16} iconSize={22}
+                      onPress={()=>{Haptics.selectionAsync();exitCalendarContainer();}}
+                      accessibilityLabel={lang==="en"?"Exit Calendar":"Salir de Calendario"} />
                   </View>
                 </View>
               </Animated.View>

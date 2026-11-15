@@ -53,6 +53,43 @@ function renderFragment(node, globals = {}) {
     lang: 'es', isBusinessMode: false, demoCustomerCalendarSelected: false, calQuickCreateOpen: false, calConfigVisible: false, ...globals,
   }).tree;
 }
+test('clock minute entry and CONTINUAR remain separate accessible controls', () => {
+  const minute = nodes(renderFragment(byId('calendar-clock-minute'), { GoMinuteInput: 'GoMinuteInput', FACE: 216, calFlow: { clockMinuteDraft: '00', setClockMinuteDraft() {} } }), n => n.type === 'GoMinuteInput')[0];
+  assert.equal(minute.props.style.width, 72);
+  assert.ok(minute.props.style.minHeight >= 44);
+  const calls = [];
+  const action = renderFragment(byId('calendar-clock-continue'), {
+    Keyboard: { dismiss: () => calls.push('keyboard') },
+    calFlow: { commitClock: () => calls.push('commit') },
+  });
+  assert.equal(action.props.accessibilityRole, 'button');
+  assert.ok(action.props.style.minHeight >= 44);
+  assert.equal(action.props.style.backgroundColor, '#00845A');
+  assert.equal(nodes(action, n => n.type === 'Text')[0].props.style.color, '#fff');
+  action.props.onPress();
+  assert.deepEqual(calls, ['keyboard', 'commit']);
+});
+test('clock calendar and close controls have their own footer and mirror handedness', () => {
+  for (const [handedness, edge] of [['right', 'flex-end'], ['left', 'flex-start']]) {
+    const calls = [];
+    const tree = renderFragment(byId('calendar-clock-footer-controls'), {
+      handedness,
+      demoCustomerCalendarSelected: false,
+      Haptics: { selectionAsync: () => calls.push('haptic') },
+      calFlow: { returnToDate: () => calls.push('date') },
+      exitCalendarContainer: () => calls.push('exit'),
+    });
+    assert.equal(tree.props.style.alignSelf, edge);
+    assert.ok(tree.props.style.gap >= 8);
+    assert.ok(tree.props.style.marginTop >= 8);
+    const date = nodes(tree, n => n.props?.testID === 'calendar-clock-open-date')[0];
+    const close = nodes(tree, n => n.props?.testID === 'calendar-clock-close')[0];
+    assert.ok(date.props.style.width >= 44 && date.props.style.height >= 44);
+    assert.ok(close.props.touchSize >= 44);
+    date.props.onPress(); close.props.onPress();
+    assert.deepEqual(calls, ['haptic', 'date', 'haptic', 'exit']);
+  }
+});
 test('bottom controls emphasize RESERVAR, fit a narrow viewport and retain every action', () => {
   const calls = [];
   const tree = renderFragment(byId('calendar-actions'), {
