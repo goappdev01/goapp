@@ -6,7 +6,7 @@ import type {FinancialDocument} from "@workspace/api-zod";
 import {applyRevenueCalculatorInputs,calculatorCatalog,revenueCalculatorRows,revenueCalculatorTotals,updateRevenueCalculator,type RevenueCalculatorRow} from "@/data/financialRevenueCalculator";
 import {FinanceChoice,FinanceMultiChoice,FinanceNumber,FinanceTable,financialCount,financialMoney,financeStyles as s} from "./FinancialUI";
 
-type Props={doc:FinancialDocument;writable:boolean;onCalculate?:()=>void;update:(fn:(doc:FinancialDocument)=>FinancialDocument)=>void};
+type Props={doc:FinancialDocument;writable:boolean;demo?:boolean;onCalculate?:()=>void;update:(fn:(doc:FinancialDocument)=>FinancialDocument)=>void};
 export function revenueTableWidths(width:number,rows:RevenueCalculatorRow[]=[]){
  const fit=(values:(number|null)[],min:number,max:number)=>Math.min(max,Math.max(min,...values.map(v=>v===null?0:String(v).length*10+28)));
  return[width>=600?115:85,width>=600?165:140,fit(rows.map(r=>r.market),110,180),fit(rows.map(r=>r.share),98,160),fit(rows.map(r=>r.fee),110,220),fit(rows.map(r=>r.companies),128,190),fit(rows.map(r=>r.monthly),138,230),fit(rows.map(r=>r.annual),138,230)];
@@ -14,7 +14,7 @@ export function revenueTableWidths(width:number,rows:RevenueCalculatorRow[]=[]){
 const HEADERS=["País","Actividad","Empresas existentes","Captación (%)","Cuota/mes (€)","Empresas captadas","Ingresos/mes (€)","Ingresos/año (€)"];
 const incomeMoney=(value:number|null)=>financialMoney(value,"EUR",0);
 type Edit={activityId:string;countryCode:string;field:"share"|"fee";value:number|null};
-export function FinancialRevenueTable({doc,writable,update,onCalculate}:Props){
+export function FinancialRevenueTable({doc,writable,demo=false,update,onCalculate}:Props){
  const scenario="REAL" as const;
  const [width,setWidth]=useState(0),[calculationRevision,setCalculationRevision]=useState(0);
  const [selectedCountries,setSelectedCountries]=useState(()=>{const countries=calculatorCatalog(doc).countries;return[countries.find(c=>c.code==="ES")?.code||countries[0]?.code].filter(Boolean) as string[];});
@@ -41,7 +41,7 @@ export function FinancialRevenueTable({doc,writable,update,onCalculate}:Props){
  <View style={t.toolbar}><FinanceMultiChoice label="País" values={selectedCountries} options={catalog.countries.map(c=>({value:c.code,label:c.name}))} onChange={values=>{setSelectedCountries(values);resetBulk();}}/><FinanceMultiChoice label="Actividad" onExpandedChange={setToolsOpen} values={selectedActivities} options={catalog.activities.filter(a=>a.enabled).map(a=>({value:a.id,label:a.name}))} onChange={values=>{setSelectedActivities(values);resetBulk();}}/><TouchableOpacity accessibilityRole="button" accessibilityLabel="CALCULAR" onPress={calculate} style={[t.calculate,width<600?{width:"100%"}:{width:132}]}><Text style={t.calculateText}>CALCULAR</Text></TouchableOpacity></View>
  {selectedCountries.length>1&&<View style={t.bulk}><Text style={s.note}>Aplicar a {selectedCountries.length} países · {selectedActivities.length} actividades</Text><View style={t.toolbar}><View style={t.bulkField}><Text style={s.label}>Captación (%)</Text><FinanceNumber key={selectedCountries.join("|")+selectedActivities.join("|")+"share"} compact label="Captación para países seleccionados" placeholder="Sin cambiar" value={bulkShare} disabled={!writable} onChange={setBulkShare}/></View><View style={t.bulkField}><Text style={s.label}>Cuota/mes (€)</Text><FinanceNumber key={selectedCountries.join("|")+selectedActivities.join("|")+"fee"} compact label="Cuota para países seleccionados" placeholder="Sin cambiar" value={bulkFee} disabled={!writable} onChange={setBulkFee}/></View><TouchableOpacity accessibilityRole="button" accessibilityLabel="Aplicar a seleccionados" accessibilityState={{disabled:!writable||bulkInvalid}} disabled={!writable||bulkInvalid} onPress={applyBulk} style={[s.button,(!writable||bulkInvalid)&&{opacity:0.4}]}><Text style={s.text}>Aplicar a seleccionados</Text></TouchableOpacity></View></View>}
  {!!bulkError&&<Text accessibilityRole="alert" style={s.error}>{bulkError}</Text>}
- {toolsOpen&&<FinancialCalculatorTools doc={doc} writable={writable} update={update} scenario={scenario} rows={rows}
+ {toolsOpen&&<FinancialCalculatorTools doc={doc} writable={writable} demo={demo} update={update} scenario={scenario} rows={rows}
  onClearSelection={()=>{setSelectedCountries([]);setSelectedActivities([]);resetBulk();}} onClearSimulation={clearSimulation}/>}
  <ScrollView horizontal nestedScrollEnabled keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator contentContainerStyle={t.table} accessibilityLabel="Tabla de proyección de ingresos GO">
  <View><View style={t.header}>{HEADERS.map((label,i)=><Text key={label} style={[t.cell,t.columnHeading,{width:WIDTHS[i]}]}>{label}</Text>)}</View>

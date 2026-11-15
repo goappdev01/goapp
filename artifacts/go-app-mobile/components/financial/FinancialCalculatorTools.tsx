@@ -5,8 +5,8 @@ import {calculatorCatalog,type RevenueCalculatorRow} from "@/data/financialReven
 import {calculatorDirectResults,calculatorUnitCost,saveCalculatorActivity,saveCalculatorMarket,updateCalculatorDirectCost} from "@/data/financialCalculatorTools";
 import {FinanceButton,FinanceChoice,FinanceField,FinanceNumber,FinanceTable,financialMoney,financialCount,financeStyles as s} from "./FinancialUI";
 
-type Props={doc:FinancialDocument;writable:boolean;update:(fn:(d:FinancialDocument)=>FinancialDocument)=>void;scenario:FinancialScenario;rows:RevenueCalculatorRow[];onClearSelection:()=>void;onClearSimulation:(fields:("share"|"fee")[])=>void};
-export function FinancialCalculatorTools({doc,writable,update,scenario,rows,onClearSelection,onClearSimulation}:Props){
+type Props={doc:FinancialDocument;writable:boolean;demo?:boolean;update:(fn:(d:FinancialDocument)=>FinancialDocument)=>void;scenario:FinancialScenario;rows:RevenueCalculatorRow[];onClearSelection:()=>void;onClearSimulation:(fields:("share"|"fee")[])=>void};
+export function FinancialCalculatorTools({doc,writable,demo=false,update,scenario,rows,onClearSelection,onClearSimulation}:Props){
  const catalog=calculatorCatalog(doc),[mode,setMode]=useState<""|"catalog"|"market"|"cost"|"manage">("");
  const [activity,setActivity]=useState(catalog.activities[0]?.id||""),[country,setCountry]=useState(catalog.countries.find(c=>c.code==="ES")?.code||catalog.countries[0]?.code||"");
  const [editing,setEditing]=useState<string|undefined>(),[name,setName]=useState(""),[unit,setUnit]=useState<"empresa"|"establecimiento"|"otra">("empresa"),[enabled,setEnabled]=useState(true);
@@ -60,7 +60,7 @@ export function FinancialCalculatorTools({doc,writable,update,scenario,rows,onCl
  <FinanceChoice label="Actividad de datos base" value={activity} options={catalog.activities.map(a=>({value:a.id,label:a.name+(a.enabled?"":" · Inactiva")}))} onChange={chooseActivity}/>
  <FinanceChoice label="País de datos base" value={country} options={catalog.countries.map(c=>({value:c.code,label:c.name}))} onChange={id=>{setCountry(id);loadMarket(activity,id);setCost(calculatorUnitCost(doc,activity,id,scenario));}}/>
  {mode==="market"?<>
- <Text style={s.note}>Datos permanentes, independientes de los filtros y escenarios. Unidad: {current?.unit}. Los cambios se guardan en el mismo documento versionado.</Text>
+ <Text style={s.note}>{demo?"Datos ficticios de esta sesión. Los cambios no se guardan en la nube.":"Datos permanentes, independientes de los filtros y escenarios. Los cambios se guardan en el mismo documento versionado."} Unidad: {current?.unit}.</Text>
  <FinanceNumber label="Cantidad base" value={companies} onChange={setCompanies} disabled={!writable}/>
  <FinanceNumber label="Año de referencia" value={year} onChange={setYear} disabled={!writable}/>
  <FinanceChoice label="Fuente" value={sourceId} options={[{value:"",label:"Nueva referencia manual"},...doc.sources.map(s=>({value:s.id,label:s.organization}))]} onChange={setSourceId} disabled={!writable}/>
