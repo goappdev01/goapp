@@ -1001,6 +1001,52 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(changed.exception.code,"FACTORY_CARD_CHANGED")
         self.assertFalse(self.runs or self.changes)
 
+    def test_unstarted_card_context_recovers_same_job_and_checkpoint(self):
+        first=self.cards["a"*24]
+        first["desc"]="La instrucción vigente está en el comentario."
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        cards={c["id"]:c for c in self.bridge.factory._cards()}
+        selected=wheel._live_selection(cards,wheel.live_policy())
+        with self.bridge.db() as db:
+            saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(selected["grant_id"],)).fetchone()
+            grant=wheel._verified(saved)
+        spec=wheel._check_card(grant,cards[first["id"]])
+        self.bridge.safety.card(first["id"])
+        job=self.bridge.prepare_text(spec["instruction"],"4",{"source":"verified-queue",
+            "card_id":first["id"],"attempt":1,"board_id":BOARD,"list_id":QUEUE,
+            "comment_ids":spec["comment_ids"]})
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=?",(grant["grant_id"],))
+            db.execute("INSERT INTO factory_attempts(card_id,attempt,title,instruction_sha,state,job_id,detail) "
+                       "VALUES(?,?,?,?,?,?,?)",(first["id"],1,first["name"],spec["instruction_sha"],
+                       "blocked",job["id"],json.dumps({"blocked_reason":"CARD_CONTEXT_INVALID"})))
+            db.execute("UPDATE jobs SET state='blocked',result=? WHERE id=?",
+                       (json.dumps({"classification_reason":"CARD_CONTEXT_INVALID",
+                                    "programming_started":False}),job["id"]))
+            for letter in "AC":
+                db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started) VALUES(?,?,'claimed','now')",
+                           (grant["grant_id"],letter))
+            for phase in ("CARD_CONTEXT_INVALID","question-claimed:C"):
+                db.execute("INSERT INTO wheel_checkpoints(grant_id,phase,created,snapshot) VALUES(?,?,'now','{}')",
+                           (grant["grant_id"],phase))
+        first["comments"].append({"id":"f"*24,"text":"Cambiar ahora otra instrucción completa.",
+                                  "creatorId":OWNER,"date":"2026-11-16T23:00:00.000Z"})
+        with self.assertRaises(BridgeError):
+            wheel.reconcile_unstarted_card_context(saved,cards[first["id"]])
+        self.assertEqual(self.bridge.job(job["id"])["state"],"blocked")
+        first["comments"].pop()
+        self.assertTrue(wheel.reconcile_unstarted_card_context(saved,cards[first["id"]]))
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT state FROM jobs WHERE id=?",(job["id"],)).fetchone()[0],"prepared")
+            self.assertEqual(db.execute("SELECT state FROM factory_attempts WHERE card_id=?",(first["id"],)).fetchone()[0],"prepared")
+            self.assertFalse(db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=?",(grant["grant_id"],)).fetchone())
+            self.assertEqual([r[0] for r in db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id",
+                                                       (grant["grant_id"],))][-2:],
+                             ["CARD_CONTEXT_INVALID","question-claimed:C"])
+        self.assertEqual(wheel._live_selection(cards,wheel.live_policy())["expected"],first["id"])
+        self.assertFalse(self.runs or self.changes)
+
     def test_live_reorder_after_first_read_defers_start_and_selects_new_head(self):
         wheel=self.bridge.factory.wheel
         wheel.activate_live("f"*64)

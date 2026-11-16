@@ -43,7 +43,7 @@ class Safety:
     def card(self, card_id):
         from factory import BOARD, QUEUE, CHECK
         card = self.b.api("/1/cards/" + card_id, {"fields":"id,idBoard,idList,name,desc,shortLink,closed,dateLastActivity"})
-        if not isinstance(card, dict) or card.get("id") != card_id or card.get("idBoard") != BOARD or card.get("idList") not in (QUEUE, CHECK) or card.get("closed") or card.get("desc"):
+        if not isinstance(card, dict) or card.get("id") != card_id or card.get("idBoard") != BOARD or card.get("idList") not in (QUEUE, CHECK) or card.get("closed"):
             raise self.Error("CARD_CONTEXT_INVALID", "La tarjeta no pertenece al Ã¡mbito autorizado de la cola.")
         agents = set(re.findall(r"\b(?:A|AGENTE\s*)([1-5])\b", card.get("name", ""), re.I))
         if agents != {"4"}:

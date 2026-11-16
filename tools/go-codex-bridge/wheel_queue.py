@@ -1522,6 +1522,60 @@ class Wheel:
                 "reason":reason,"trello_write":False,"checkpoint_reused":True},db)
         return changed==1
 
+    def reconcile_unstarted_card_context(self, working, card):
+        """Reuse a prepared job when a rejected card description had no side effects."""
+        if not card or card["id"]!=working["card_id"]:
+            return False
+        with self.b.db() as db:
+            phases=[row[0] for row in db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 2",
+                                                (working["grant_id"],))]
+        if phases!=["question-claimed:C","CARD_CONTEXT_INVALID"]:
+            return False
+        grant=self._verified(working)
+        self._check_card(grant,card)
+        self.b.safety.card(grant["card_id"])
+        state=self.b.git_state(grant["workspace"])
+        if not state.get("git") or state.get("tracked_dirty"):
+            return False
+        with self.f.lock,self.b.mutex,self.b.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            current=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(grant["grant_id"],)).fetchone()
+            if not current or current["state"]!="working" or not self.live_policy(db):
+                return False
+            if (db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                    or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()):
+                return False
+            attempt=db.execute("SELECT * FROM factory_attempts WHERE card_id=? AND attempt=?",
+                               (grant["card_id"],grant["attempt"])).fetchone()
+            job=db.execute("SELECT * FROM jobs WHERE id=?",(attempt["job_id"],)).fetchone() if attempt and attempt["job_id"] else None
+            stages=list(db.execute("SELECT letter,state,approval_id,receipt FROM wheel_stages WHERE grant_id=?",
+                                   (grant["grant_id"],)))
+            phases=[row[0] for row in db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 2",
+                                                (grant["grant_id"],))]
+            if (not attempt or attempt["state"]!="blocked" or attempt["comment_operation"] or attempt["move_operation"]
+                    or not job or job["state"]!="blocked" or job["pid"] or job["session_id"]
+                    or json.loads(job["data"] or "{}").get("instruction_sha256")!=grant["instruction_sha"]
+                    or json.loads(job["data"] or "{}").get("source",{}).get("card_id")!=grant["card_id"]
+                    or json.loads(job["result"] or "{}").get("classification_reason")!="CARD_CONTEXT_INVALID"
+                    or json.loads(job["result"] or "{}").get("programming_started") is not False
+                    or phases!=["question-claimed:C","CARD_CONTEXT_INVALID"]
+                    or {(r["letter"],r["state"]) for r in stages}!={("A","claimed"),("C","claimed")}
+                    or any(r["approval_id"] or r["receipt"] for r in stages)
+                    or db.execute("SELECT 1 FROM operations WHERE action='publish-main' AND state!='verified'").fetchone()):
+                return False
+            db.execute("DELETE FROM wheel_stages WHERE grant_id=? AND letter IN ('A','C') AND state='claimed' AND approval_id IS NULL AND receipt IS NULL",
+                       (grant["grant_id"],))
+            db.execute("UPDATE jobs SET state='prepared',result=NULL,updated=? WHERE id=? AND state='blocked'",
+                       (self.f.utc(),job["id"]))
+            detail=json.loads(attempt["detail"] or "{}")
+            detail.pop("blocked_reason",None)
+            detail["recovered_preflight"]="CARD_CONTEXT_INVALID"
+            db.execute("UPDATE factory_attempts SET state='prepared',finished=NULL,detail=? WHERE card_id=? AND attempt=? AND state='blocked'",
+                       (self.f.canonical(detail),grant["card_id"],grant["attempt"]))
+            self.b.audit("wheel_unstarted_card_context_reconciled",{"grant":grant["grant_id"],
+                "job":job["id"],"checkpoint_preserved":True,"trello_write":False},db)
+            return True
+
     def _live_selection(self,cards,policy):
         with self.b.db() as db:
             working_rows=list(db.execute("SELECT * FROM wheel_grants WHERE state='working'"))
@@ -1529,6 +1583,8 @@ class Wheel:
                 self.fail("WHEEL_WORKING_CONFLICT","Hay más de una ejecución parcial que requiere conciliación.")
             working=working_rows[0] if working_rows else None
         if working:
+            if working["card_id"] in cards:
+                self.reconcile_unstarted_card_context(working,cards[working["card_id"]])
             with self.b.db() as db:
                 db.execute("BEGIN IMMEDIATE")
                 if self._preserve_unreleased_conflict(db,working):
