@@ -334,7 +334,8 @@ class RemotePanel:
                     "account_rebind_required":bool(live and wheel["reason"]=="WHEEL_CODEX_SESSION_CHANGED"),
                     "renewal_required":any(grant["state"] in ("ready","working") and grant["expires_at"]<=time.time()
                         for grant in wheel["grants"] if grant["card_id"] in {item["card_id"] for item in (batch or {}).get("cards",[])}),
-                    "current":next((card["title"] for card in cards if card["state"]=="working"),None),
+                    "current":next((card["title"] for card in cards if card["state"]=="working"
+                                    and card["activity"]["state"] in ("running","detached")),None),
                     "next":wheel["next"]["title"] if wheel["next"] else None,
                     "next_action":wheel.get("next_action"),
                     "queue_checked":wheel.get("checked"),

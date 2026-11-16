@@ -154,6 +154,8 @@ class V2WheelTests(unittest.TestCase):
                        (grant["grant_id"],))
         w.checkpoint(grant,"question-claimed:C")
         self.cards[grant["card_id"]]["idList"]=CHECK
+        self.assertIsNone(w.status()["next"])
+        self.assertIn("Checkpoint pendiente",w.status()["next_action"])
         cards={card["id"]:card for card in self.bridge.factory._cards()}
         selected=w._live_selection(cards,w.live_policy())
         self.assertNotEqual(selected["expected"],grant["card_id"])

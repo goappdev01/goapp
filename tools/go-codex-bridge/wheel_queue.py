@@ -548,11 +548,16 @@ class Wheel:
             done={s["letter"] for s in current["stages"] if s["state"]=="verified"}
             if current["job_state"]=="running":
                 phase="Ejecutando Codex"
+            elif current["job_state"]=="blocked":
+                phase="Checkpoint pendiente de conciliación"
             else:
                 phase=next((label for letter,label in (("A","Preparando ejecución"),("B","Verificando el diagnóstico" if current.get("work_kind")=="diagnosis" else "Validando y publicando"),
                     ("C","Comentando el resultado"),("D","Verificando el traslado")) if letter not in done),"Cerrando tarjeta")
             current={**current,"phase":phase}
-            if current["job_state"] in ("running","detached") or any(
+            if current["job_state"]=="blocked" and not control["enabled"]:
+                queued=[]
+                next_action="Checkpoint pendiente de conciliación; al activar se consultará la COLA viva."
+            elif current["job_state"] in ("running","detached") or any(
                     stage["state"]=="claimed" for stage in current["stages"]):
                 queued=[current]
                 next_action="Conciliar primero la ejecución u operación activa."
