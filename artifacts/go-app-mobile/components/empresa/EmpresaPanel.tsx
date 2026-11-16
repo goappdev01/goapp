@@ -51,6 +51,7 @@ import { InterpretacionScreen }   from "@/components/interpretacion/Interpretaci
 import { AgendaScreen }           from "@/components/agenda/AgendaScreen";
 import { OperativoScreen }        from "@/components/visitas/OperativoScreen";
 import { useVerification }   from "@/hooks/useVerification";
+import { useGoDockPreference } from "@/hooks/useGoDockPreference";
 import { VerifGateScreen }   from "@/components/auth/VerifGate";
 import { GoReservasConfigScreen, GoReservasDemoScreen } from "@/components/booking/GoReservasConfigScreen";
 import { GoDeportesScreen }       from "@/components/booking/GoDeportesScreen";
@@ -239,6 +240,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   const insets  = useSafeAreaInsets();
   const window = useWindowDimensions();
   const [wizardFooterHeight, setWizardFooterHeight] = useState(0);
+  const [companyNavigationHeight, setCompanyNavigationHeight] = useState(44);
   const [reservationsFooterHeight, setReservationsFooterHeight] = useState(0);
   const { t, lang } = useLanguage();
   const GATE_LABELS = useMemo(() => getGateLabels(t), [t]);
@@ -246,6 +248,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   const { isBusinessPreview, isAdminView, isOwner } = useGoView();
   const preview = previewReadOnly && isBusinessPreview;
   const panelVisible = visible && (!previewReadOnly || isBusinessPreview);
+  const { position: companyAlignment } = useGoDockPreference(handedness ?? "right", panelVisible);
   const canOpenAdmin = !previewReadOnly && isAdminView && adminAccess.allowed;
   const { config: businessConfig, resetConfig, demo: businessDemo } = useBusinessConfig();
   const demo = preview && Boolean(businessDemo);
@@ -462,6 +465,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
   const operationsPanel = modulo === "reservas_config";
   const navigationFooterReserve = operationsPanel ? reservationsFooterHeight : wizardFooterReserve;
   const fabBottom = navigationFooterReserve > 0 ? navigationFooterReserve + 8 : insets.bottom + 24;
+  const wizardHeaderReserve = modulo === "empresa_config" && demo ? companyNavigationHeight : 0;
   const navigationFooterAvoid = navigationFooterReserve > 0
     ? [{ x: 0, y: window.height - navigationFooterReserve, width: window.width, height: navigationFooterReserve }]
     : undefined;
@@ -507,7 +511,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
         behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={0}>
 
         {/* ── Drag handle — purely visual, no gesture ── */}
-        {!operationsPanel && <View style={s.handleZone}>
+        {!operationsPanel && modulo !== "empresa_config" && <View style={s.handleZone}>
           <View style={s.handlePill} />
         </View>}
 
@@ -681,7 +685,7 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
             {modulo === "orbitas"         && <OrbitasScreen     guidanceLevel={guidanceLevel} />}
             {modulo === "consumo"         && <ConsumoScreen     guidanceLevel={guidanceLevel} />}
             {modulo === "zonas"           && <ZonasScreen       guidanceLevel={guidanceLevel} />}
-            {modulo === "empresa_config"   && <EmpresaConfigScreen onManageCalendarConflicts={dateISO => { setExceptionCalendarDate(dateISO); goToModulo("reservas_config"); }} key={`ec-${businessDemo?.businessId ?? "live"}-${newEmpresaKey}`} keyboardManagedByParent startAtSteps={demo && openSelectedConfig} onOpenCompanies={demo ? openDemoBusinesses : undefined} contextNavigation={contextNavigation} onBack={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} onFinalizarConfig={() => { goHome(); if (previewReadOnly) return; if (onFinalizarWizard) { onFinalizarWizard(); } else { setActivacionVisible(true); } }} onFooterHeight={height => setWizardFooterHeight(current => current === height ? current : height)} initialStep={configInitialStep} goPrevRef={modulePrevRef} />}
+            {modulo === "empresa_config"   && <EmpresaConfigScreen onManageCalendarConflicts={dateISO => { setExceptionCalendarDate(dateISO); goToModulo("reservas_config"); }} key={`ec-${businessDemo?.businessId ?? "live"}-${newEmpresaKey}`} keyboardManagedByParent companyAlignment={companyAlignment} fontScale={window.fontScale} onCompanyNavigationHeight={setCompanyNavigationHeight} startAtSteps={demo && openSelectedConfig} onOpenCompanies={demo ? openDemoBusinesses : undefined} contextNavigation={contextNavigation} onBack={goHome} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} onFinalizarConfig={() => { goHome(); if (previewReadOnly) return; if (onFinalizarWizard) { onFinalizarWizard(); } else { setActivacionVisible(true); } }} onFooterHeight={height => setWizardFooterHeight(current => current === height ? current : height)} initialStep={configInitialStep} goPrevRef={modulePrevRef} />}
             {modulo === "reservas_config"  && (demo ? <GoReservasDemoScreen onClose={goHome} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} onProposeBookingChange={onProposeBookingChange} navigateToDayISO={exceptionCalendarDate ?? bookingChangeReturnDate} hideFAB={true} onFooterHeightChange={setReservationsFooterHeight} /> : <GoReservasConfigScreen onClose={goHome} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} onProposeBookingChange={onProposeBookingChange} navigateToDayISO={exceptionCalendarDate ?? bookingChangeReturnDate} onOpenVerificacion={previewReadOnly ? undefined : onOpenVerificacion} hideFAB={true} onFooterHeightChange={setReservationsFooterHeight} />)}
             {modulo === "deportes_screen"  && <GoDeportesScreen onClose={goHome} onOpenBooking={(_id, _label, _emoji, _color) => { goToModulo("reservas_config"); }} onOpenVerificacion={onOpenVerificacion} />}
 
@@ -709,9 +713,9 @@ export function EmpresaPanel({ visible, onClose, initialModulo, onModuloChange, 
 
         {/* ── FABs flotantes — arrastrable con long-press ──────────────────── */}
         {!configKeyboardVisible && (previewReadOnly ? (
-          <GoNavigationFloating screenKey="empresa-demo" width={hasPrevious ? 136 : 64} protectedBottom={operationsPanel ? Math.max(0, reservationsFooterHeight - insets.bottom) : wizardFooterReserve}>{fabButtons}</GoNavigationFloating>
+          <GoNavigationFloating screenKey="empresa-demo" handedness={handedness} width={hasPrevious ? 136 : 64} protectedTop={wizardHeaderReserve} protectedBottom={operationsPanel ? Math.max(0, reservationsFooterHeight - insets.bottom) : wizardFooterReserve}>{fabButtons}</GoNavigationFloating>
         ) : (
-          <DraggableFAB navigation screenKey="empresa" buttonKey="main" initialRight={20} initialBottom={fabBottom} avoidRects={navigationFooterAvoid} maxH={hasPrevious ? 138 : 64} buttonWidth={64}>
+          <DraggableFAB navigation handedness={handedness} screenKey="empresa" buttonKey="main" initialRight={20} initialBottom={fabBottom} avoidRects={navigationFooterAvoid} maxH={hasPrevious ? 138 : 64} buttonWidth={64}>
             {fabButtons}
           </DraggableFAB>
         ))}

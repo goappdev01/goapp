@@ -159,7 +159,7 @@ test("reset clears only the local configuration, plan, reservations and preferen
 });
 
 // Execute the real providers and screen callbacks with deterministic native APIs.
-function uiFixture(data, { authorized = true, businessPreview = authorized, adminView = false, adminAllowed = authorized, ownerIdentity = authorized, realCompanyManager = false, reactCompiler = false, bookingToday, realActivity = false, width = 390, isPad = false, liveMode = false, liveEntries = [], liveReservations = [], gpsAdapter, timezoneAdapter = async (_source,zone) => zone, timezoneResolver = async () => { throw Object.assign(Error("Unlinked"),{code:"BOOKING_CALENDAR_BUSINESS_NOT_LINKED"}); } } = {}) {
+function uiFixture(data, { authorized = true, businessPreview = authorized, adminView = false, adminAllowed = authorized, ownerIdentity = authorized, realCompanyManager = false, reactCompiler = false, bookingToday, realActivity = false, width = 390, height = 844, fontScale = 1, insets = { top: 44, bottom: 34, left: 0, right: 0 }, isPad = false, liveMode = false, liveEntries = [], liveReservations = [], gpsAdapter, timezoneAdapter = async (_source,zone) => zone, timezoneResolver = async () => { throw Object.assign(Error("Unlinked"),{code:"BOOKING_CALENDAR_BUSINESS_NOT_LINKED"}); } } = {}) {
   const cache = new Map(), hooks = new Map(), alerts = [], calls = { liveAgenda: 0, liveFloor: 0, external: 0, liveReservationReads: [] };
   let current, cursor = 0, effects = [], lang = "es", keyboardVisible = false, focusedInput = null, keyboardDismisses = 0;
   const keyboardListeners = new Map();
@@ -190,7 +190,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
       addListener: (event, fn) => { const listeners = keyboardListeners.get(event) ?? new Set(); listeners.add(fn); keyboardListeners.set(event, listeners); return { remove: () => listeners.delete(fn) }; },
       dismiss() { keyboardDismisses++; focusedInput?.blur(); focusedInput = null; keyboardVisible = false; for (const event of ["keyboardWillHide", "keyboardDidHide"]) for (const fn of keyboardListeners.get(event) ?? []) fn(); },
     },
-    StyleSheet: { create: v => v, absoluteFill: {}, absoluteFillObject: {} }, Dimensions: { get: () => ({ width, height: 844 }) }, useWindowDimensions: () => ({ width, height: 844 }),
+    StyleSheet: { create: v => v, absoluteFill: {}, absoluteFillObject: {} }, Dimensions: { get: () => ({ width, height, fontScale }) }, useWindowDimensions: () => ({ width, height, fontScale }),
     Platform: { OS: "ios", isPad, select: options => options.ios ?? options.default },
     Animated: { Value, View: "Animated.View", timing: () => animation, spring: () => animation, add: () => 0, sequence: () => animation, loop: () => animation },
     Easing: { in: () => 0, inOut: () => 0, quad: 0 },
@@ -198,8 +198,8 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
   }, { get: (target,key) => target[key] ?? key });
   const chain = new Proxy({}, { get: () => () => chain });
   const external = () => { calls.external++; throw new Error("External service must not run"); };
-  const storage = { getItem: async key => { if (key === "go_empresa_open_count_v1") return null; calls.liveFloor++; throw new Error("Live key read"); },
-    setItem: async key => { if (key === "go_empresa_open_count_v1") return; calls.liveFloor++; throw new Error("Live key write"); } };
+  const storage = { getItem: async key => { if (key === "go_booking_assistant_dock_v1") return data.storage.getItem(key); if (key === "go_empresa_open_count_v1") return null; calls.liveFloor++; throw new Error("Live key read"); },
+    setItem: async (key, value) => { if (key === "go_booking_assistant_dock_v1") return data.storage.setItem(key, value); if (key === "go_empresa_open_count_v1") return; calls.liveFloor++; throw new Error("Live key write"); } };
   const componentMocks = new Proxy({ __esModule: true }, { get(target,key) {
     if (key in target) return target[key];
     const component = { [key]: function() {} }[key]; target[key] = component; return component;
@@ -236,7 +236,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
     "@/hooks/useBusinessBookings": { useBusinessBookings: () => ({ entries: liveEntries, error: null, mutate: external }), mergeBusinessBookingEntries: (personal, business) => [...personal, ...business] },
     "@/hooks/useVerification": { useVerification: () => ({ status: "unverified" }) },
     "@/utils/guidance": { getGuidanceConfig: () => ({ labelOpacity: () => 0 }), swipeGuideMaxOpacity: () => 0 },
-    "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 44, bottom: 34, left: 0, right: 0 }) },
+    "react-native-safe-area-context": { useSafeAreaInsets: () => insets },
     "@expo/vector-icons": { Feather: "Feather", MaterialCommunityIcons: "MaterialCommunityIcons" },
     "expo-linear-gradient": { LinearGradient: "LinearGradient" },
     "expo-haptics": { selectionAsync: async () => {}, impactAsync: async () => {}, notificationAsync: async () => {},
@@ -259,6 +259,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
     vm.runInNewContext(compile(name, reactCompiler && ["contexts/GoBusinessConfigContext.tsx", "components/booking/GoReservasConfigScreen.tsx", "components/empresa/EmpresaConfigScreen.tsx"].includes(name)), { exports, console, Date, Set, Map, setTimeout: () => 1, clearTimeout() {},
       setInterval: () => 1, clearInterval() {}, require(key) {
         if (realCompanyManager && key === "./DemoCompanyManager") return load("components/empresa/DemoCompanyManager.tsx");
+        if (key === "@/hooks/useGoDockPreference") return load("hooks/useGoDockPreference.ts");
         if (key in imports) return imports[key];
         if (key === "@/theme/goAssistantColors") return load("theme/goAssistantColors.ts");
         if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };

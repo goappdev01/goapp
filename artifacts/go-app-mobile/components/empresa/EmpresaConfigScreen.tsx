@@ -242,6 +242,9 @@ interface EmpresaConfigScreenProps {
   onManageCalendarConflicts?: (dateISO: string) => void;
   onFinalizarConfig?:  () => void;
   onFooterHeight?: (height: number) => void;
+  onCompanyNavigationHeight?: (height: number) => void;
+  companyAlignment?: "left" | "center" | "right";
+  fontScale?: number;
   initialStep?:        number;
   onOpenCompanies?:    () => void;
   contextNavigation?:  React.ReactNode;
@@ -315,7 +318,7 @@ function useStepSave(saveRef: StepSaveRef | undefined, flush: () => Promise<void
   }, [saveRef]);
 }
 
-export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalendarConflicts, onFinalizarConfig, onFooterHeight, initialStep = 0, goPrevRef, onOpenCompanies, contextNavigation, keyboardManagedByParent = false, startAtSteps = false }: EmpresaConfigScreenProps & { goPrevRef?: React.MutableRefObject<(() => void) | null> }) {
+export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalendarConflicts, onFinalizarConfig, onFooterHeight, onCompanyNavigationHeight, companyAlignment = "right", fontScale = 1, initialStep = 0, goPrevRef, onOpenCompanies, contextNavigation, keyboardManagedByParent = false, startAtSteps = false }: EmpresaConfigScreenProps & { goPrevRef?: React.MutableRefObject<(() => void) | null> }) {
   const insets = useSafeAreaInsets();
   const { t, lang } = useLanguage();
   const STEPS = buildStepsCfg(t);
@@ -347,7 +350,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
   const scrollRef   = useRef<ScrollViewInstance>(null);
   const scrollContentRef = useRef<ViewInstance>(null);
   const slideAnim   = useRef(new Animated.Value(0)).current;
-  const headerAnim  = useRef(new Animated.Value(1)).current;
+  const [keyboardVisible, setKeyboardVisible] = useState(() => Keyboard.isVisible());
   const activeNewInput = useRef<TextInputInstance | null>(null);
   const revealProfessional = useCallback((input: TextInputInstance) => {
     activeNewInput.current = input;
@@ -400,10 +403,20 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
     {selectedPosition + 1} / {registeredCompanies.length}{registeredCompanies.length > 1 ? (lang === "en" ? " · swipe to change" : " · desliza para cambiar") : ""}
   </Text> : null;
   const companyButton = onOpenCompanies ? <TouchableOpacity testID="config-company-list" accessibilityRole="button"
-    disabled={openingCompanies} onPress={() => void openCompanies()} style={{ paddingHorizontal: 18, paddingVertical: 10 }}>
-    <Text style={{ color: BLUE, fontWeight: "700" }}>{lang === "en" ? "My businesses" : "Mis negocios"} ▾</Text>
+    accessibilityLabel={lang === "en" ? "My businesses" : "Mis negocios"}
+    accessibilityHint={lang === "en" ? "Opens the business selector" : "Abre el selector de negocios"}
+    accessibilityState={{ disabled: openingCompanies, busy: openingCompanies }}
+    disabled={openingCompanies} onPress={() => void openCompanies()} style={c.companyButton}>
+    <Text style={c.companyButtonText}>{lang === "en" ? "My businesses" : "Mis negocios"} ▾</Text>
   </TouchableOpacity> : null;
-  const companyNavigation = companyButton;
+  // Normal flow keeps the selector clear of the title and lets large text grow.
+  // EmpresaPanel owns the top safe-area inset; do not add it a second time here.
+  const companyNavigation = companyButton ? <View testID="config-company-navigation"
+    onLayout={event => onCompanyNavigationHeight?.(event.nativeEvent.layout.height)}
+    style={[c.companyNavigation, { paddingLeft: insets.left + 12, paddingRight: insets.right + 12,
+      alignItems: companyAlignment === "center" ? "center" : companyAlignment === "left" ? "flex-start" : "flex-end" }]}>
+    {companyButton}
+  </View> : null;
 
   const currentSector = SECTORS.find(s => s.id === config.sectorId) ?? null;
   const currentSub    = currentSector?.subs.find(s => s.id === config.subId) ?? null;
@@ -518,13 +531,13 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
     const onShow = Keyboard.addListener(showEvent, () => {
-      Animated.timing(headerAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+      setKeyboardVisible(true);
     });
     const onDidShow = Keyboard.addListener("keyboardDidShow", () => {
       if (activeNewInput.current?.isFocused()) revealProfessional(activeNewInput.current);
     });
     const onHide = Keyboard.addListener(hideEvent, () => {
-      Animated.timing(headerAnim, { toValue: 1, duration: 200, useNativeDriver: false }).start();
+      setKeyboardVisible(false);
     });
     return () => { onShow.remove(); onHide.remove(); onDidShow.remove(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -626,12 +639,8 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
           }}
         >
           <View ref={scrollContentRef} collapsable={false} testID="config-scroll-content">
-          {/* Header — colapsa con teclado y al hacer scroll */}
-          <Animated.View style={{
-            opacity:   headerAnim,
-            maxHeight: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 80] }),
-            overflow:  "hidden",
-          }}>
+          {/* Natural height avoids clipping large text; hide identity while typing. */}
+          {!keyboardVisible && <View>
             <View testID="config-company-swipe-header" style={c.header} {...companyHeaderPan.panHandlers}>
               <View style={{ width: 36 }} />
               <View style={c.headerCenter}>
@@ -645,7 +654,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
               </View>
               <View style={{ width: 36 }} />
             </View>
-          </Animated.View>
+          </View>}
 
           {/* Step progress pills — desplazables */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={c.stepsBar}>
@@ -658,7 +667,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
                   key={s.key}
                   activeOpacity={0.7}
                   onPress={() => animateToStep(i)}
-                  style={[c.stepPill, s.key === "espacios" && { width: 138 }]}
+                  style={[c.stepPill, { width: (s.key === "espacios" ? 138 : 92) * Math.max(1, fontScale) }]}
                 >
                   <View style={[c.stepDot, { backgroundColor: dotColor }]}>
                     {isDone
@@ -668,7 +677,6 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
                   </View>
                   <Text
                     style={[c.stepPillLabel, { color: isDone ? GREEN : (isActive ? s.color : DIM) }]}
-                    numberOfLines={2}
                   >
                     {s.label}
                   </Text>
@@ -678,17 +686,17 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
           </ScrollView>
 
           {/* Step header card — desplazable */}
-          <View style={[c.stepHeader, { borderLeftColor: step.color }]}>
-            <View style={[c.stepIconCircle, { backgroundColor: step.color + "18" }]}>
-              <Feather name={step.icon} size={24} color={step.color} />
+          <View testID="config-step-heading" style={[c.stepHeader, currentStep === 1 && c.locationHeader, { borderLeftColor: step.color }]}>
+            <View style={[c.stepIconCircle, currentStep === 1 && c.locationIcon, { backgroundColor: step.color + "18" }]}>
+              <Feather name={step.icon} size={currentStep === 1 ? 18 : 24} color={step.color} />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={c.stepTitle}>{step.title}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text accessibilityRole="header" style={[c.stepTitle, currentStep === 1 && { marginBottom: 0 }]}>{step.title}</Text>
             </View>
           </View>
 
           {/* Step content */}
-          <View style={c.content}>
+          <View style={[c.content, currentStep === 1 && { paddingTop: 6 }]}>
             {currentStep === 0 && <StepNombre onFocusField={compactFooter ? revealProfessional : undefined} />}
             {currentStep === 1 && <StepUbicacion onFocusField={compactFooter ? revealProfessional : undefined} />}
             {currentStep === 2 && <StepHorario key={config.businessId ?? "draft"} currentSector={currentSector} onManageConflicts={onManageCalendarConflicts} />}
@@ -704,7 +712,6 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
               />
             )}
           </View>
-          {contextNavigation && <View testID="config-context-management">{contextNavigation}</View>}
           </View>
         </ScrollView>
       </Animated.View>
@@ -2997,27 +3004,30 @@ const { width: SW } = Dimensions.get("window");
 
 const c = StyleSheet.create({
   root:         { flex: 1, backgroundColor: BG },
+  companyNavigation: { backgroundColor: CARD },
+  companyButton: { minHeight: 44, maxWidth: "100%", paddingHorizontal: 6, paddingVertical: 6, justifyContent: "center" },
+  companyButtonText: { color: BLUE, fontWeight: "700", flexShrink: 1 },
 
   header:       {
     flexDirection: "row", alignItems: "center",
-    paddingHorizontal: 12, paddingVertical: 12,
+    paddingHorizontal: 12, paddingVertical: 4,
     borderBottomWidth: 1, borderBottomColor: BORDER,
     backgroundColor: CARD,
   },
   backBtn:      { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  headerCenter: { flex: 1, alignItems: "center" },
-  headerTitle:  { fontSize: 15, fontFamily: "Inter_700Bold", fontWeight: "800", color: TEXT },
-  headerSub:    { fontSize: 11, fontWeight: "600", marginTop: 1 },
+  headerCenter: { flex: 1, minWidth: 0, alignItems: "center" },
+  headerTitle:  { fontSize: 15, fontFamily: "Inter_700Bold", fontWeight: "800", color: TEXT, textAlign: "center" },
+  headerSub:    { fontSize: 11, fontWeight: "600", marginTop: 1, textAlign: "center" },
 
   stepsBar:     {
     flexDirection: "row",
     backgroundColor: CARD,
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
-    paddingVertical: 10,
+    paddingVertical: 6,
     paddingHorizontal: 8,
   },
-  stepPill:     { width: 92, minHeight: 58, alignItems: "center", gap: 5, paddingHorizontal: 4 },
+  stepPill:     { width: 92, minHeight: 48, alignItems: "center", gap: 4, paddingHorizontal: 4 },
   stepDot:      { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   stepDotNum:   { fontSize: 10, fontFamily: "Inter_700Bold", fontWeight: "800", color: "#fff" },
   stepPillLabel:{ fontSize: 10, lineHeight: 13, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.2, textAlign: "center" },
@@ -3031,6 +3041,8 @@ const c = StyleSheet.create({
     shadowColor: "#000", shadowOpacity: 0.04, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2,
   },
   stepIconCircle:{ width: 48, height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  locationHeader: { gap: 8, marginTop: 6, marginBottom: 0, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 12 },
+  locationIcon: { width: 30, height: 30, borderRadius: 9 },
   stepTitle:    { fontSize: 15, fontFamily: "Inter_700Bold", fontWeight: "800", color: TEXT, marginBottom: 2 },
   stepSubtitle: { fontSize: 12, color: GRAY, lineHeight: 16 },
 

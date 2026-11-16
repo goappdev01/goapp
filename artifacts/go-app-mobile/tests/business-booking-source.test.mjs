@@ -236,26 +236,161 @@ async function wizardFixture(){
  declarations=declarations.replace('if (key === "./CalendarExceptionsSection")','if (key === "./BookingDiscountSection") return { BookingDiscountSection: () => null };\n        if (key === "./CalendarExceptionsSection")');
  const publication=await import('./helpers/module-publication-fixture.mjs');
  const scope={console,Date,Set,Map,Promise,Error,process,setImmediate,createRequire,path,vm,readFileSync:fs.readFileSync,...publication};
- vm.runInNewContext(declarations+'\nglobalThis.fixture = {dataFixture,uiFixture,button,component,nodes,text,turn,floor};',scope);
+ vm.runInNewContext(declarations+'\nglobalThis.fixture = {dataFixture,uiFixture,button,component,nodes,text,turn,floor,loadPure,storeModule,initial};',scope);
  return scope.fixture;
 }
 
 test('the existing business wizard completes all eight steps and reopens with the same company, hours and timezone',async()=>{
  const h=await wizardFixture(),f=h.dataFixture();await f.store.updateConfig({businessName:'Existing company',address:'Existing address',phone:'912345678',sectorId:'belleza',subId:'peluqueria',timezone:'Atlantic/Canary',activeDays:[0],daySchedules:{'0':{shift1:{from:'10:15',to:'14:30',active:true},shift2:{from:'16:00',to:'20:00',active:false}}},services:[{name:'Corte',duration:30,price:20,capacity:1}],plantillaItems:[{id:'pro',label:'Puesto',emoji:'',count:1,staffNames:['Profesional']}]});
  await f.store.saveFloorPlan(h.floor(f.store));const before=plain(f.store.getSnapshot().config),ui=h.uiFixture(f),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;let finished=0;
- for(let step=0;step<8;step++){const tree=ui.render(Screen,{onBack(){},startAtSteps:true,onFinalizarConfig:()=>finished++});const next=h.button(tree,step===7?'biz_finish_config':'biz_next');assert.ok(next,'Navigation for step '+step);next.props.onPress();await h.turn();}
+ for(let step=0;step<8;step++){const tree=ui.render(Screen,{onBack(){},startAtSteps:true,contextNavigation:'Cambiar contexto',onFinalizarConfig:()=>finished++});assert.equal(h.text(tree).includes('Cambiar contexto'),false);const next=h.button(tree,step===7?'biz_finish_config':'biz_next');assert.ok(next,'Navigation for step '+step);next.props.onPress();await h.turn();}
  assert.equal(finished,1);const reopened=f.make();await reopened.load();const saved=plain(reopened.getSnapshot().config);assert.deepEqual(saved.completedSteps,[0,1,2,3,4,5,6,7]);
  assert.equal(saved.businessId,before.businessId);assert.equal(saved.timezone,before.timezone);assert.deepEqual(saved.daySchedules,before.daySchedules);assert.deepEqual(saved.services,before.services);assert.equal(ui.calls.external,0);
 });
 
+const flattenStyle = value => Object.assign({}, ...[value].flat(Infinity).filter(Boolean));
+const byTestId = (h, tree, id) => h.nodes(tree).find(node => node.props.testID === id);
+
+test('business selector follows the persisted right, left and center preference across mobile sizes, keyboard and return', async () => {
+ const h = await wizardFixture();
+ const viewports = [
+  {width:320,height:568,fontScale:1,insets:{top:20,bottom:0,left:0,right:0}},
+  {width:375,height:667,fontScale:1.6,insets:{top:20,bottom:0,left:0,right:0}},
+  {width:390,height:844,fontScale:1,insets:{top:47,bottom:34,left:0,right:0}},
+  {width:430,height:932,fontScale:2,insets:{top:59,bottom:34,left:8,right:8}},
+ ];
+ for (const viewport of viewports) for (const position of ['right','left','center']) {
+  const base = position === 'left' ? 'left' : 'right', f = h.dataFixture();
+  await f.store.updateConfig({businessName:'Un negocio con nombre suficientemente largo para crecer',sectorId:'belleza',subId:'peluqueria',address:'Dirección conservada',phone:'912345678'});
+  const ui = h.uiFixture(f,viewport), Panel = ui.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel;
+  const dock = ui.load('hooks/useGoDockPreference.ts');
+  await dock.writeGoDockPreference(position,base);
+  const props = {visible:true,previewReadOnly:true,initialModulo:'empresa_config',handedness:base,onClose(){}};
+  const renderPanel = () => ui.render(Panel,props);
+  renderPanel(); await h.turn(); let panel = renderPanel();
+  let wizard = h.component(panel,'EmpresaConfigScreen');
+  assert.equal(wizard.props.companyAlignment,position);
+  assert.equal(wizard.props.fontScale,viewport.fontScale);
+  const frame = byTestId(h,panel,'empresa-keyboard-frame');
+  assert.equal(flattenStyle(frame.props.style).paddingTop,viewport.insets.top);
+  assert.equal(h.nodes(panel).some(node => flattenStyle(node.props.style).width === 40 && flattenStyle(node.props.style).height === 4),false,'No decorative handle pushes the wizard down');
+  const Screen = ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
+  const screenProps = {...wizard.props,startAtSteps:true,initialStep:1};
+  const renderScreen = () => ui.render(Screen,screenProps);
+  let tree = renderScreen(), navigation = byTestId(h,tree,'config-company-navigation');
+  assert.equal(flattenStyle(navigation.props.style).alignItems,{right:'flex-end',left:'flex-start',center:'center'}[position]);
+  assert.equal(flattenStyle(navigation.props.style).paddingLeft,viewport.insets.left+12);
+  assert.equal(flattenStyle(navigation.props.style).position,undefined,'The selector keeps its own normal-flow row');
+  const selector = byTestId(h,tree,'config-company-list');
+  assert.equal(selector.props.accessibilityRole,'button');assert.equal(selector.props.accessibilityLabel,'Mis negocios');
+  assert.ok(flattenStyle(selector.props.style).minHeight >= 44);
+  assert.equal(flattenStyle(selector.props.style).maxWidth,'100%');
+  const measuredHeight = viewport.fontScale > 1 ? 62 : 44;
+  navigation.props.onLayout({nativeEvent:{layout:{height:measuredHeight}}});
+  assert.equal(h.component(renderPanel(),'GoNavigationFloating').props.protectedTop,measuredHeight,'Floating navigation cannot enter the measured selector row');
+  const heading = byTestId(h,tree,'config-step-heading'), headingStyle = flattenStyle(heading.props.style);
+  const icon = heading.children[0], iconStyle = flattenStyle(icon.props.style);
+  assert.ok(iconStyle.height + 2 * headingStyle.paddingVertical + 2 * headingStyle.borderWidth <= 48,'The location heading fits a compact row at normal text size');
+  assert.equal(headingStyle.height,undefined,'Large text may grow without clipping');
+  assert.equal(h.nodes(heading).find(node=>node.type==='Text').props.numberOfLines,undefined);
+  const name = byTestId(h,tree,'config-business-name');
+  for (const ancestor of h.nodes(tree).filter(node=>h.nodes(node).includes(name))) {
+   assert.equal(flattenStyle(ancestor.props.style).maxHeight,undefined,'Company identity has no fixed height cap');
+   assert.notEqual(flattenStyle(ancestor.props.style).overflow,'hidden');
+  }
+  const steps = h.nodes(tree).find(node=>node.type==='ScrollView'&&node.props.horizontal);
+  const pills = steps.children.filter(node=>node?.type==='TouchableOpacity');assert.equal(pills.length,8);
+  assert.ok(pills.every(node=>flattenStyle(node.props.style).width>=92*viewport.fontScale));
+  ui.emitKeyboard('keyboardWillShow');tree=renderScreen();
+  assert.ok(byTestId(h,tree,'config-company-list'));assert.equal(byTestId(h,tree,'config-business-name'),undefined);
+  const scroll = h.nodes(tree).find(node=>node.type==='ScrollView'&&node.props.ref);
+  assert.equal(scroll.props.keyboardShouldPersistTaps,'handled');assert.equal(scroll.props.keyboardDismissMode,'interactive');
+  assert.equal(h.nodes(scroll).includes(h.button(tree,'biz_next')),false);
+  byTestId(h,tree,'config-company-list').props.onPress();await h.turn();
+  panel=renderPanel();assert.equal(h.nodes(panel).find(node=>node.type==='DemoCompanyManager').props.open,true,'Press opens the existing business list');
+  assert.equal(ui.isKeyboardVisible(),false);
+  ui.unmount(Screen);ui.unmount(Panel);
+  renderPanel();await h.turn();wizard=h.component(renderPanel(),'EmpresaConfigScreen');
+  assert.equal(wizard.props.companyAlignment,position,'Returning to configuration keeps the preference');
+  const fresh=h.uiFixture(f,viewport),FreshPanel=fresh.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel;
+  fresh.render(FreshPanel,props);await h.turn();
+  assert.equal(h.component(fresh.render(FreshPanel,props),'EmpresaConfigScreen').props.companyAlignment,position,'A new preference module hydrates the stored value');
+  assert.equal(f.store.getSnapshot().config.address,'Dirección conservada');
+  assert.equal(ui.calls.external,0);
+ }
+});
+
+test('location and all three contacts persist after compact-header navigation, with context management kept outside the eight steps', async () => {
+ const h=await wizardFixture(),f=h.dataFixture();
+ await f.store.updateConfig({businessName:'Empresa local',sectorId:'belleza',subId:'peluqueria',countryCode:'ES'});
+ const gpsAdapter={Accuracy:{Balanced:3},requestForegroundPermissionsAsync:async()=>({status:'granted'}),getCurrentPositionAsync:async()=>({coords:{latitude:40.4,longitude:-3.7}}),reverseGeocodeAsync:async()=>[{street:'Calle de prueba',streetNumber:'12',city:'Madrid',postalCode:'28001',country:'España'}]};
+ const ui=h.uiFixture(f,{gpsAdapter}),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
+ const props={onBack(){},startAtSteps:true,initialStep:1,contextNavigation:'Cambiar contexto'},back={current:null};
+ let tree=ui.render(Screen,{...props,goPrevRef:back}),location=h.component(tree,'StepUbicacion');
+ let form=ui.render(location.type,location.props);
+ h.button(form,'biz_use_current_location').props.onPress();await h.turn();
+ form=ui.render(location.type,location.props);
+ for(const [label,value] of [['biz_landline','912345678'],['Móvil','612345678'],['biz_whatsapp_business','612345679']]) {
+  const input=h.nodes(form).find(node=>node.type==='TextInput'&&node.props.accessibilityLabel===label);assert.ok(input);input.props.onChangeText(value);await h.turn();form=ui.render(location.type,location.props);
+ }
+ const before=plain(f.store.getSnapshot().config);assert.match(before.address,/Calle de prueba 12/);assert.deepEqual(before.coordinates,{latitude:40.4,longitude:-3.7});
+ assert.equal(before.phoneE164,'+34912345678');assert.equal(before.mobileE164,'+34612345678');assert.equal(before.whatsappE164,'+34612345679');
+ tree=ui.render(Screen,props);assert.equal(h.text(tree).includes('Cambiar contexto'),false);
+ back.current();tree=ui.render(Screen,props);assert.ok(h.component(tree,'StepNombre'));
+ ui.unmount(Screen);tree=ui.render(Screen,props);assert.ok(h.component(tree,'StepUbicacion'));
+ const reopened=f.make();await reopened.load();assert.deepEqual(plain(reopened.getSnapshot().config),before);
+ const activity=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;ui.unmount(activity);
+ tree=ui.render(activity,{onBack(){},contextNavigation:'Cambiar contexto'});assert.ok(byTestId(h,tree,'config-context-management'));
+ const Panel=ui.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel;let contextOpens=0;
+ const panelProps={visible:true,previewReadOnly:true,onOpenContext:()=>contextOpens++,onClose(){}};
+ ui.render(Panel,panelProps);tree=ui.render(Panel,panelProps);h.button(tree,'context_change').props.onPress();assert.equal(contextOpens,1);
+ assert.equal(ui.calls.external,0);
+});
+
+test('the header opens the actual business dropdown and selecting another company preserves both independent configurations', async () => {
+ const h=await wizardFixture(),f=h.dataFixture();
+ const catalogApi=h.loadPure('data/businessDemoCatalog.ts',{'./businessDemoStore':h.storeModule});
+ f.catalog=catalogApi.createBusinessDemoCatalog({ownerUserId:owner,storage:f.storage,initialConfig:h.initial,canUse:()=>true});
+ await f.catalog.create('Negocio Uno');const first=f.catalog.getSelectedId();f.store=f.catalog.getSelectedStore();
+ await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria',address:'Dirección Uno',phone:'912345678'});
+ let beforeFirst=plain(f.store.getSnapshot());
+ await f.catalog.create('Negocio Dos');const second=f.catalog.getSelectedId();
+ await f.catalog.getSelectedStore().updateConfig({sectorId:'belleza',subId:'peluqueria',address:'Dirección Dos',mobile:'612345678'});
+ const beforeSecond=plain(f.catalog.getSelectedStore().getSnapshot());
+ await f.catalog.select(first);f.store=f.catalog.getSelectedStore();
+ const ui=h.uiFixture(f,{realCompanyManager:true}),Panel=ui.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel,Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
+ const props={visible:true,previewReadOnly:true,initialModulo:'empresa_config',handedness:'right',onClose(){}};
+ const renderPanel=()=>ui.render(Panel,props);renderPanel();let panel=renderPanel(),wizard=h.component(panel,'EmpresaConfigScreen');
+ const dock=ui.load('hooks/useGoDockPreference.ts');await dock.writeGoDockPreference('center','right');
+ wizard=h.component(renderPanel(),'EmpresaConfigScreen');assert.equal(wizard.props.companyAlignment,'center','An already open panel responds to preference changes');
+ await dock.writeGoDockPreference('left','left');props.handedness='left';wizard=h.component(renderPanel(),'EmpresaConfigScreen');assert.equal(wizard.props.companyAlignment,'left');
+ let tree=ui.render(Screen,wizard.props);
+ const pending=gate(),write=f.storage.setItem;f.storage.setItem=async(...args)=>{await pending.promise;return write(...args);};
+ const edit=f.store.updateConfig({address:'Dirección Uno editada'});
+ byTestId(h,tree,'config-company-list').props.onPress();byTestId(h,tree,'config-company-list').props.onPress();await h.turn();
+ assert.ok(h.component(renderPanel(),'EmpresaConfigScreen'),'A pending field save must finish before opening the selector');
+ pending.resolve();await edit;await h.turn();f.storage.setItem=write;beforeFirst=plain(f.store.getSnapshot());
+ panel=renderPanel();const manager=h.component(panel,'DemoCompanyManager');assert.equal(manager.props.open,true);
+ tree=ui.render(manager.type,manager.props);assert.ok(byTestId(h,tree,'demo-company-list'));
+ assert.equal(byTestId(h,tree,'demo-company-toggle').props.accessibilityState.expanded,true);
+ assert.match(h.text(byTestId(h,tree,'demo-company-'+first)),/Negocio Uno/);
+ byTestId(h,tree,'demo-company-'+second).props.onPress();await h.turn();f.store=f.catalog.getSelectedStore();
+ assert.equal(f.catalog.getSelectedId(),second);wizard=h.component(renderPanel(),'EmpresaConfigScreen');assert.ok(wizard.props.key.includes(f.store.businessId));
+ ui.unmount(Screen);tree=ui.render(Screen,wizard.props);assert.equal(h.text(byTestId(h,tree,'config-business-name')),'Negocio Dos');
+ assert.deepEqual(plain(f.store.getSnapshot()),beforeSecond);
+ await f.catalog.select(first);assert.deepEqual(plain(f.catalog.getSelectedStore().getSnapshot()),beforeFirst);
+ assert.equal(ui.calls.external,0);
+});
+
 test('Horario habitual retries a failed server timezone read without altering weekly hours, and a late read cannot overwrite a chosen timezone',async()=>{
  const h=await wizardFixture(),f=h.dataFixture();await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria'});const before=plain(f.store.getSnapshot().config);let offline=true;
- const ui=h.uiFixture(f,{timezoneResolver:async source=>{if(offline)throw Error('Temporary server failure');return{sourceId:source,businessId:company,name:'Existing',timezone:'Atlantic/Canary'};}}),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
+ // Server retry/race checks need a live company: the preview intentionally skips the server.
+ const ui=h.uiFixture(f,{liveMode:true,timezoneResolver:async source=>{if(offline)throw Error('Temporary server failure');return{sourceId:source,businessId:company,name:'Existing',timezone:'Atlantic/Canary'};}}),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
  const step=h.component(ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:2}),'StepHorario');ui.render(step.type,step.props);await h.turn();let tree=ui.render(step.type,step.props);
  assert.ok(h.nodes(tree).some(node=>node.props?.accessibilityRole==='alert'));assert.equal(f.store.getSnapshot().config.timezone,undefined);
  offline=false;h.nodes(tree).find(node=>node.props?.testID==='business-timezone-retry').props.onPress();ui.render(step.type,step.props);await h.turn();tree=ui.render(step.type,step.props);
  assert.ok(h.text(h.nodes(tree).find(node=>node.props?.testID==='business-timezone-selector')).includes('Atlantic/Canary'));assert.deepEqual(plain(f.store.getSnapshot().config.daySchedules),before.daySchedules);
- const fresh=h.dataFixture();await fresh.store.updateConfig({sectorId:'belleza',subId:'peluqueria'});const pending=gate(),race=h.uiFixture(fresh,{timezoneResolver:source=>pending.promise.then(()=>({sourceId:source,businessId:company,name:'Existing',timezone:'Europe/Madrid'})),timezoneAdapter:async(_source,zone)=>zone}),Race=race.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
+ const fresh=h.dataFixture();await fresh.store.updateConfig({sectorId:'belleza',subId:'peluqueria'});const pending=gate(),race=h.uiFixture(fresh,{liveMode:true,timezoneResolver:source=>pending.promise.then(()=>({sourceId:source,businessId:company,name:'Existing',timezone:'Europe/Madrid'})),timezoneAdapter:async(_source,zone)=>zone}),Race=race.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
  const racedStep=h.component(race.render(Race,{onBack(){},startAtSteps:true,initialStep:2}),'StepHorario');tree=race.render(racedStep.type,racedStep.props);
  h.nodes(tree).find(node=>node.props?.testID==='business-timezone-selector').props.onPress();tree=race.render(racedStep.type,racedStep.props);h.nodes(tree).find(node=>node.props?.testID==='business-timezone-option-Atlantic/Canary').props.onPress();await h.turn();pending.resolve();await h.turn();
  assert.equal(fresh.store.getSnapshot().config.timezone,'Atlantic/Canary');
