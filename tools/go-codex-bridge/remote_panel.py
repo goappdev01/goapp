@@ -105,7 +105,7 @@ class RemotePanel:
             if not live:
                 self.w.fail("WHEEL_PERMISSION_REQUIRED","No existe una autorización continua vigente para activar esta cola.")
             reason=self.w.status().get("reason")
-            resumable={None,"OWNER_PAUSED","OWNER_STOPPED","WHEEL_CODEX_SESSION_CHANGED",
+            resumable={None,"OWNER_PAUSED","WHEEL_PAUSED","OWNER_STOPPED","WHEEL_CODEX_SESSION_CHANGED",
                        "WHEEL_CODEX_AUTH","WHEEL_CODEX_QUOTA","CREDIT_LIMIT",
                        "CREDIT_RECOVERY_REQUIRED"}
             if reason not in resumable:

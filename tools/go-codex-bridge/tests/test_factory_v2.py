@@ -762,6 +762,17 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(error.exception.code,'WHEEL_PERMISSION_REQUIRED')
         self.assertFalse(panel.w.enabled())
 
+    def test_one_owner_button_resumes_normal_wheel_pause(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("1"*64)
+        wheel.pause("WHEEL_PAUSED")
+        panel=RemotePanel(self.bridge)
+        self.assertEqual(RemotePanel.activation_button({"enabled":False,"reason":"WHEEL_PAUSED",
+            "batch_id":"live","batch_state":"active"},[])["state"],"paused")
+        self.assertTrue(panel.orbit_control("power",{"enabled":True},"synthetic-owner")["enabled"])
+        self.assertTrue(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)
+
     def test_one_owner_button_does_not_clear_review_required_block(self):
         wheel=self.bridge.factory.wheel
         wheel.activate_live("1"*64)
