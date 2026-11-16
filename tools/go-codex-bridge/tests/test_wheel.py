@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 import test_bridge as fixtures
-from factory import BOARD, QUEUE, CHECK, NAMES, OWNER, INSTALL_CARDS
+from factory import BOARD, QUEUE, CHECK, RECOVERY, NAMES, OWNER, INSTALL_CARDS
 from puente import Bridge, BridgeError
 from wheel_effects import WheelPublication, WheelEffects
 from remote_panel import RemotePanel
@@ -95,6 +95,7 @@ class WheelTests(unittest.TestCase):
         if path.endswith("/lists"):return [{"id":k,"name":v} for k,v in NAMES.items()]
         if path=="/1/lists/"+QUEUE+"/cards":return [copy.deepcopy(c) for c in self.cards.values() if c["idList"]==QUEUE]
         if path=="/1/lists/"+CHECK+"/cards":return [copy.deepcopy(c) for c in self.cards.values() if c["idList"]==CHECK]
+        if path=="/1/lists/"+RECOVERY+"/cards":return [copy.deepcopy(c) for c in self.cards.values() if c["idList"]==RECOVERY]
         if path.startswith("/1/actions/"):
             cid,text=next((c["id"],m["text"]) for c in self.cards.values() for m in c["comments"] if m["id"]==path.split("/")[-1])
             return {"data":{"card":{"id":cid},"text":text}}
@@ -224,11 +225,14 @@ class WheelTests(unittest.TestCase):
             self.assertEqual(card["idList"], CHECK)
             self.assertEqual(len(card["comments"]), 2)
             self.assertEqual(card["desc"], "")
-            guide = "\n".join(f"{i}. {step}" for i, step in enumerate(steps, 1))
             text = card["comments"][1]["text"]
+            self.assertIn("COMPROBACIÓN RÁPIDA",text)
+            self.assertIn("DÓNDE ENTRAR:",text)
+            self.assertIn("QUÉ HACER:",text)
+            self.assertIn("RESULTADO ESPERADO:",text)
             if cid in diagnosis_ids:
                 self.assertIn("Cambios mínimos propuestos",text)
-                self.assertIn(guide,text)
+                self.assertIn(steps[0],text)
                 self.assertNotIn("Publicación técnica correcta",text)
                 grant=next(g for g in wheel.status()["grants"] if g["card_id"]==cid)
                 self.assertEqual(grant["stages"][1]["receipt"]["publication"],"not_applicable")
@@ -236,7 +240,8 @@ class WheelTests(unittest.TestCase):
                     self.assertIsNone(db.execute(
                         "SELECT approval_id FROM wheel_stages JOIN wheel_grants USING(grant_id) WHERE card_id=? AND letter='B'",(cid,)).fetchone()[0])
             else:
-                self.assertIn(guide + "\n\nPublicación técnica correcta.",text)
+                self.assertIn(steps[0],text)
+                self.assertIn("Validación física pendiente del propietario.",text)
         self.assertEqual(self.git("rev-list","--count","HEAD"),str(len(ids)-len(diagnosis_ids)+1))
         self.assertEqual(len(pushes),len(ids)-len(diagnosis_ids))
         self.assertEqual(self.git("ls-remote","origin","refs/heads/main").split()[0],self.git("rev-parse","HEAD"))
@@ -904,8 +909,8 @@ class WheelTests(unittest.TestCase):
     def test_owner_live_queue_ignores_legacy_agent_title_and_materializes_once(self):
         first=self.cards["a"*24]
         first["name"]="V2-A2 antigua etiqueta"
-        first["comments"].append({"id":"f"*24,"text":"Regla adicional del propietario",
-                                  "creatorId":OWNER})
+        first["comments"].append({"id":"f"*24,"text":"Cambiar únicamente el archivo de prueba sintético.",
+                                  "creatorId":OWNER,"date":"2026-11-16T14:00:00.000Z"})
         wheel=self.bridge.factory.wheel
         wheel.activate_live("e"*64)
         self.assertTrue(wheel.enabled())
@@ -919,7 +924,8 @@ class WheelTests(unittest.TestCase):
         grant=wheel._verified(rows[0])
         self.assertEqual(grant["agent"],"4")
         self.assertEqual(grant["operations"],list("ABCD"))
-        self.assertEqual(len(grant["comment_ids"]),2)
+        self.assertEqual(grant["comment_ids"],["f"*24])
+        self.assertEqual(grant["instruction_sha"],self.bridge.factory.digest(first["comments"][-1]["text"]))
         wheel._live_selection(cards,wheel.live_policy())
         with self.bridge.db() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM wheel_grants WHERE card_id=?",
@@ -942,6 +948,84 @@ class WheelTests(unittest.TestCase):
         selected=wheel._live_selection({c["id"]:c for c in self.bridge.factory._cards()},wheel.live_policy())
         self.assertEqual(selected["expected"],"b"*24)
 
+    def test_live_instruction_uses_latest_date_only_and_rejects_result_comment(self):
+        first=self.cards["a"*24]
+        old=first["comments"][0]
+        old["date"]="2026-01-01T00:00:00.000Z"
+        history=[{"id":f"{i:024x}","text":"Cambiar una versión histórica del archivo.",
+                  "creatorId":OWNER,"date":f"2026-02-{i:02d}T00:00:00.000Z"} for i in range(1,20)]
+        latest={"id":"0"*24,"text":"Cambiar únicamente la versión vigente del archivo.",
+                "creatorId":OWNER,"date":"2026-11-16T15:00:00.000Z"}
+        first["comments"]=[latest,*reversed(history),old]  # The API order is intentionally inverted.
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        cards={c["id"]:c for c in self.bridge.factory._cards()}
+        selected=wheel._live_selection(cards,wheel.live_policy())
+        with self.bridge.db() as db:
+            grant=wheel._verified(db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",
+                                     (selected["grant_id"],)).fetchone())
+        self.assertEqual(grant["comment_ids"],[latest["id"]])
+        self.assertEqual(wheel._subject(cards[first["id"]])[1]["instruction"],latest["text"])
+        latest["text"]="Cambiar un archivo distinto al autorizado."
+        with self.assertRaises(BridgeError) as changed:
+            wheel._check_card(grant,first)
+        self.assertEqual(changed.exception.code,"WHEEL_SUBJECT_CHANGED")
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='blocked' WHERE grant_id=?",(grant["grant_id"],))
+        second=self.cards["b"*24]
+        second["comments"].append({"id":"e"*24,"text":"RESULTADO: sin instrucción nueva.",
+                                   "creatorId":OWNER,"date":"2026-11-16T16:00:00.000Z"})
+        self.assertEqual(wheel._live_selection(cards,wheel.live_policy())["waiting"],"NO_SAFE_ELIGIBLE_CARD")
+        self.assertFalse(self.runs or self.changes)
+
+    def test_live_reorder_after_first_read_defers_start_and_selects_new_head(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        original=self.bridge.factory._cards
+        calls=[0]
+        def reordered():
+            result=original()
+            calls[0]+=1
+            if calls[0]==1:
+                self.cards["b"*24]["pos"]=512
+            return result
+        with patch.object(self.bridge.factory,"_cards",side_effect=reordered),patch.object(wheel,"_advance") as advance:
+            result=wheel.tick()
+        self.assertTrue(result.get("queue_changed"),result)
+        advance.assert_not_called()
+        with patch.object(wheel,"_advance",return_value={"selected":"b"*24}) as advance:
+            self.assertEqual(wheel.tick()["selected"],"b"*24)
+        self.assertEqual(advance.call_args.args[0]["card_id"],"b"*24)
+        self.assertFalse(self.runs or self.changes)
+
+    def test_incomplete_newest_comment_is_recorded_without_stopping_next_card(self):
+        first=self.cards["a"*24]
+        first["comments"].append({"id":"f"*24,"text":"RESULTADO: pendiente de aclaración.",
+                                  "creatorId":OWNER,"date":"2026-11-16T16:00:00.000Z"})
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        cards={c["id"]:c for c in self.bridge.factory._cards()}
+        selected=wheel._live_selection(cards,wheel.live_policy())
+        self.assertEqual(selected["expected"],"b"*24)
+        with self.bridge.db() as db:
+            self.assertFalse(db.execute("SELECT 1 FROM wheel_grants WHERE card_id=?",(first["id"],)).fetchone())
+            self.assertTrue(db.execute("SELECT 1 FROM audit WHERE event='wheel_live_card_rejected'").fetchone())
+        self.assertTrue(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)
+
+    def test_latest_status_without_an_action_does_not_reuse_older_instruction(self):
+        first=self.cards["a"*24]
+        first["comments"].append({"id":"f"*24,
+                                  "text":"Objetivo pendiente de aclaración para esta tarjeta de la fábrica.",
+                                  "creatorId":OWNER,"date":"2026-11-16T16:00:00.000Z"})
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        cards={c["id"]:c for c in self.bridge.factory._cards()}
+        self.assertEqual(wheel._live_selection(cards,wheel.live_policy())["expected"],"b"*24)
+        with self.bridge.db() as db:
+            self.assertFalse(db.execute("SELECT 1 FROM wheel_grants WHERE card_id=?",(first["id"],)).fetchone())
+        self.assertFalse(self.runs or self.changes)
+
     def test_live_hosted_block_is_reported_and_moved_without_executing_codex(self):
         self.cards["a"*24]["comments"][0]["text"]="Preparar soporte real conectado al backend alojado."
         wheel=self.bridge.factory.wheel
@@ -962,7 +1046,8 @@ class WheelTests(unittest.TestCase):
         self.assertIn("card_blocked",result,str(result))
         self.assertEqual(result["card_blocked"],"a"*24)
         self.assertEqual(self.changes,[("a"*24,"C"),("a"*24,"D")])
-        self.assertEqual(self.cards["a"*24]["idList"],CHECK)
+        self.assertEqual(self.cards["a"*24]["idList"],RECOVERY)
+        self.assertTrue(self.cards["a"*24]["comments"][-1]["text"].startswith("CONFLICTO — QUÉ FALTA"))
         self.assertFalse(self.runs)
         self.assertEqual(wheel._live_selection({c["id"]:c for c in self.bridge.factory._cards()},
                                                wheel.live_policy())["expected"],"b"*24)

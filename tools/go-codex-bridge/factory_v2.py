@@ -871,7 +871,7 @@ class Continuity:
 
     def _defer_question_to_trello(self,grant,request,job,*,allow_prepared=False):
         """Use the card's C/D grants without claiming an unverified publication."""
-        valid_states=("failed","blocked","needs_review","prepared") if allow_prepared else ("failed","blocked","needs_review")
+        valid_states=("failed","blocked","needs_review","prepared","completed") if allow_prepared else ("failed","blocked","needs_review")
         if not job or job["state"] not in valid_states:
             self.w.fail("WHEEL_QUESTION_JOB_INVALID","La ejecución no tiene un bloqueo verificable.")
         text=request["question"].strip()
@@ -879,16 +879,16 @@ class Continuity:
         if self._private_question(text,operation):
             self.w.fail("WHEEL_QUESTION_PRIVATE","La pregunta requiere revisión privada antes de compartirla.")
         from wheel_effects import WheelEffects
-        from factory import CHECK
+        from factory import RECOVERY
         effects=WheelEffects(self.f)
         row=self.f._row(grant["card_id"],grant["attempt"])
         card,comments=effects._snapshot(grant["card_id"])
-        if card["idList"]!=grant["origin"] or [c["id"] for c in self.f.original_comments(card["id"],comments)]!=grant["comment_ids"]:
+        if card["idList"]!=grant["origin"] or [c["id"] for c in self.f.signed_comments(card["id"],comments,grant)]!=grant["comment_ids"]:
             self.w.fail("WHEEL_TRELLO_CHANGED","La tarjeta cambió antes de registrar la pregunta.")
-        comment=("CONFLICTO. El trabajo parcial está conservado; no hay publicación confirmada.\n\n"
-                 "1. Causa: "+text+"\n2. Solución pendiente: "+operation)
+        comment=("CONFLICTO — QUÉ FALTA\nEl trabajo parcial y su checkpoint están conservados; "
+                 "no hay publicación confirmada.\nCausa: "+text+"\nSiguiente acción: "+operation)
         for letter,action,data in (("C","comment",{"card_id":card["id"],"text":comment,"job_id":job["id"]}),
-                                   ("D","move",{"card_id":card["id"],"list_id":CHECK,"pos":"top"})):
+                                   ("D","move",{"card_id":card["id"],"list_id":RECOVERY,"pos":"top"})):
             with self.b.db() as db:
                 if db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter=?",(grant["grant_id"],letter)).fetchone():
                     self.w.fail("WHEEL_STAGE_UNCERTAIN","La operación de Trello ya tiene un intento registrado.")

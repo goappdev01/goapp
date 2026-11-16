@@ -8,7 +8,7 @@ import subprocess
 import time
 import uuid
 
-from factory import BOARD, QUEUE, CHECK, OWNER, INSTALL_CARDS, LIMIT_RE, diagnostic_instruction
+from factory import BOARD, QUEUE, CHECK, RECOVERY, OWNER, INSTALL_CARDS, LIMIT_RE, diagnostic_instruction
 from puente import process_alive
 
 STAGES = "ABCD"
@@ -129,7 +129,12 @@ class Wheel:
                         for card_id,items in dependencies.items())):
                 self.fail("WHEEL_DEPENDENCY_INVALID","Las dependencias iniciales no siguen el orden verificado de Trello.")
             for card in cards:
-                self.f._spec(card,live_queue=True,initial_card_ids=initial)
+                try:
+                    self.f._spec(card,live_queue=True,initial_card_ids=initial)
+                except self.f.Error as error:
+                    if self._system(error.code):
+                        raise
+                    self.b.audit("wheel_live_card_rejected",{"card_id":card["id"],"reason":error.code})
             refreshed=list(self._available(self.f._cards()))
             if [(card["id"],card["pos"],card["name"]) for card in refreshed] != [
                     (card["id"],card["pos"],card["name"]) for card in cards]:
@@ -1016,12 +1021,16 @@ class Wheel:
         for identifier,version in g["dependency_versions"].items():
             with self.b.db() as db:
                 fallback=self._diagnostic_fallback_valid(db,g,identifier,version,fallback_edges)
+                dependency_row=db.execute("SELECT * FROM wheel_grants WHERE card_id=? AND attempt=?",
+                                          (identifier,version["attempt"])).fetchone()
+            if not dependency_row:
+                self.fail("WHEEL_DEPENDENCY_CHANGED","Falta la autorización de la dependencia verificada.")
             card=self.b.api("/1/cards/"+identifier,{"fields":"id,idBoard,idList,name,shortLink"})
             expected_lists=(QUEUE,) if fallback else (CHECK,DONE)
             if card.get("idBoard")!=BOARD or card.get("idList") not in expected_lists or card.get("name")!=version["title"]:
                 self.fail("WHEEL_DEPENDENCY_CHANGED","La dependencia cambió después de la autorización.")
             snapshot=self.b.read_card("https://trello.com/c/"+card["shortLink"],archive=False)["data"]
-            comments=self.f.original_comments(identifier,snapshot["comments"])
+            comments=self.f.signed_comments(identifier,snapshot["comments"],self._verified(dependency_row))
             text="\n\n".join(comment["text"] for comment in comments)
             if (not snapshot["verification"].get("stable_during_read") or not snapshot["verification"].get("pagination_exhausted") or
                     any(comment.get("creatorId")!=OWNER for comment in comments) or self.f.digest(text)!=version["instruction_sha"]):
@@ -1051,8 +1060,21 @@ class Wheel:
         else:
             body=payload.get("payload",{})
             op="comment" if letter=="C" else "move"
+            conflict_move=False
+            if op=="move" and body.get("list_id")==RECOVERY:
+                with self.b.db() as db:
+                    prior=db.execute("SELECT receipt FROM wheel_stages WHERE grant_id=? AND letter='C' AND state='verified'",
+                                     (g["grant_id"],)).fetchone()
+                    receipt=json.loads(prior[0]) if prior else {}
+                    comment=db.execute("SELECT payload FROM operations WHERE id=? AND action='comment' AND state='verified'",
+                                       (receipt.get("operation"),)).fetchone()
+                written=json.loads(comment[0])["payload"] if comment else {}
+                conflict_move=(written.get("card_id")==g["card_id"] and
+                               written.get("job_id")==row["job_id"] and
+                               written.get("text","").startswith("CONFLICTO — QUÉ FALTA"))
             valid=(payload.get("action")==op and body.get("card_id")==g["card_id"] and
-                   ((op=="comment" and body.get("job_id")==row["job_id"]) or (op=="move" and body.get("list_id")==g["destination"])))
+                   ((op=="comment" and body.get("job_id")==row["job_id"]) or
+                    (op=="move" and (body.get("list_id")==g["destination"] or conflict_move))))
         if not valid:
             self.fail("WHEEL_PAYLOAD_OUTSIDE_SCOPE","La operación concreta supera el alcance preautorizado.")
         token=uuid.uuid4().hex
@@ -1112,7 +1134,15 @@ class Wheel:
                     code="WHEEL_PRESERVATION_FAILED"
                 uncertain=True
                 state="uncertain"
-        if self.continuity.active() and not uncertain and not self._system(code):
+        safe_publication_conflict=False
+        if code in ("PUBLICATION_UNCERTAIN","PUBLICATION_UNVERIFIED",
+                    "WHEEL_PUBLICATION_UNVERIFIED","FACTORY_PUBLICATION_UNVERIFIED"):
+            with self.b.db() as db:
+                safe_publication_conflict=not (db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                    or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()
+                    or db.execute("SELECT 1 FROM operations WHERE action='publish-main' "
+                                  "AND state IN ('prepared','unknown','needs_review')").fetchone())
+        if self.continuity.active() and ((not uncertain and not self._system(code)) or safe_publication_conflict):
             return self.continuity.card_error(g,code)
         self._transition(g,state,code)
         self.pause(code)
@@ -1501,6 +1531,17 @@ class Wheel:
                     if candidate and preserved["workspace"]==self._verified(candidate)["workspace"]:
                         self.pause("WHEEL_PRESERVED_WORKSPACE_BUSY")
                         return {"paused":"WHEEL_PRESERVED_WORKSPACE_BUSY"}
+            if live and trial and trial.get("independent") and not trial.get("post_move_close"):
+                with self.b.db() as db:
+                    active=db.execute("SELECT 1 FROM wheel_grants WHERE state='working'").fetchone()
+                if not active:
+                    # A new task has not started: refresh Trello once more after
+                    # authorization checks, so a recent reorder wins this turn.
+                    refreshed={c["id"]:c for c in self._available(self.f._cards())}
+                    current=self._live_selection(refreshed,live)
+                    if current.get("expected")!=trial.get("expected") or current.get("grant_id")!=trial.get("grant_id"):
+                        return {"again":True,"queue_changed":True}
+                    cards=refreshed
             with self.b.db() as db:
                 db.execute("BEGIN IMMEDIATE")
                 db.execute("UPDATE wheel_control SET checked=? WHERE id=1",(self.f.utc(),))

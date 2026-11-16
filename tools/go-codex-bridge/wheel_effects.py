@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 from safety import Safety
-from factory import BOARD, CHECK, QUEUE, OWNER, guide_has_personal_steps, normalize_guide
+from factory import BOARD, CHECK, RECOVERY, QUEUE, OWNER, GUIDE_NAVIGATION, GUIDE_ACTION, GUIDE_EXPECTATION, guide_has_personal_steps, normalize_guide
 
 
 def node_environment():
@@ -565,6 +565,16 @@ class WheelEffects:
             self.fail("WHEEL_GUIDE_INVALID", "La guía de iPhone debe indicar dónde entrar, qué hacer y qué resultado esperar, sin información privada.")
         return lines
 
+    @staticmethod
+    def _quick_check(lines):
+        def first(cue):
+            return next((line for line in lines if cue.search(line)),None)
+        return ("COMPROBACIÓN RÁPIDA\n"
+                "DÓNDE ENTRAR: "+(first(GUIDE_NAVIGATION) or "RUTA PENDIENTE DE CONFIRMAR")+"\n"
+                "QUÉ HACER: "+(first(GUIDE_ACTION) or "RUTA PENDIENTE DE CONFIRMAR")+"\n"
+                "RESULTADO ESPERADO: "+(first(GUIDE_EXPECTATION) or "RUTA PENDIENTE DE CONFIRMAR")+"\n"
+                "Validación física pendiente del propietario.")
+
     def _diagnosis(self, row, job, workspace):
         result = job.get("result") or {}
         state = self.b.git_state(workspace,check_main=True)
@@ -727,26 +737,29 @@ class WheelEffects:
             if len(matches)!=1 or card["idList"]!=comment_list:
                 self.fail("WHEEL_COMMENT_UNVERIFIED","No se pudo verificar el comentario exacto en la lista esperada.")
             return {"operation":op["id"],"comment_id":matches[0]["id"],"text_sha256":self.f.digest(matches[0]["text"])}
-        if card["idList"]!=CHECK or record["payload"].get("list_id")!=CHECK:
-            self.fail("WHEEL_MOVE_UNVERIFIED","No se confirmó la tarjeta en COMPROBAR.")
-        originals = self.f.original_comments(card["id"],comments)
+        target=record["payload"].get("list_id")
+        if target not in (CHECK,RECOVERY) or card["idList"]!=target or record["payload"].get("pos")!="top":
+            self.fail("WHEEL_MOVE_UNVERIFIED","No se confirmó la tarjeta en su destino autorizado.")
+        originals = self.f.signed_comments(card["id"],comments,grant)
         if ([comment["id"] for comment in originals]!=grant["comment_ids"] or
                 self.f.digest("\n\n".join(comment["text"] for comment in originals))!=grant["instruction_sha"]):
             self.fail("WHEEL_TRELLO_CHANGED","Cambió la instrucción original tras el traslado.")
         comment_ops = self._operations(row,"comment")
-        if (len(comment_ops)!=1 or self._trello_receipt("C",row,grant,comment_ops[0],comment_list=CHECK)
+        if target==RECOVERY and (len(comment_ops)!=1 or not json.loads(comment_ops[0]["payload"])["payload"]["text"].startswith("CONFLICTO — QUÉ FALTA")):
+            self.fail("WHEEL_COMMENT_UNVERIFIED","El traslado de conflicto carece de explicación verificada.")
+        if (len(comment_ops)!=1 or self._trello_receipt("C",row,grant,comment_ops[0],comment_list=target)
                 !=self._prior_stage(grant,"C")):
-            self.fail("WHEEL_COMMENT_UNVERIFIED","El comentario exacto no se conservó en COMPROBAR.")
-        for list_id,count in ((QUEUE,0),(CHECK,1)):
+            self.fail("WHEEL_COMMENT_UNVERIFIED","El comentario exacto no se conservó en su destino.")
+        for list_id,count in ((QUEUE,0),(target,1)):
             entries=self.b.api("/1/lists/"+list_id+"/cards",{"fields":"id,idBoard,idList,pos","filter":"open","limit":1000})
             if not isinstance(entries,list) or len(entries)>=1000:
                 self.fail("WHEEL_MOVE_UNVERIFIED","No se obtuvo la lista completa después del traslado.")
             matches=[item for item in entries if item.get("id")==card["id"]]
             if len(matches)!=count or (matches and (matches[0].get("pos")!=card["pos"] or matches[0].get("idBoard")!=BOARD)):
                 self.fail("WHEEL_MOVE_UNVERIFIED","No se confirmó una única tarjeta en la posición de destino.")
-            if list_id==CHECK and record["payload"].get("pos")=="top" and entries and entries[0].get("id")!=card["id"]:
-                self.fail("WHEEL_MOVE_UNVERIFIED","La tarjeta no quedó en primera posición de COMPROBAR.")
-        return {"operation":op["id"],"card_id":card["id"],"board":BOARD,"list_id":CHECK,"position":card["pos"]}
+            if list_id==target and record["payload"].get("pos")=="top" and entries and entries[0].get("id")!=card["id"]:
+                self.fail("WHEEL_MOVE_UNVERIFIED","La tarjeta no quedó en primera posición de su destino.")
+        return {"operation":op["id"],"card_id":card["id"],"board":BOARD,"list_id":target,"position":card["pos"]}
 
     def _operations(self,row,action):
         with self.b.db() as db:
@@ -783,12 +796,11 @@ class WheelEffects:
         if self._operations(row,action):
             self.fail("WHEEL_PRIOR_OPERATION","Existe una operación previa que requiere conciliación.")
         if letter=="C":
-            if [c["id"] for c in self.f.original_comments(card["id"],comments)]!=grant["comment_ids"]:
+            if [c["id"] for c in self.f.signed_comments(card["id"],comments,grant)]!=grant["comment_ids"]:
                 self.fail("WHEEL_TRELLO_CHANGED","Aparecieron comentarios después de la autorización.")
             lines=self._validation(job)
-            guide = "\n".join(f"{i}. {step}" for i, step in enumerate(lines, 1))
-            text = (report+"\n\nComprobación en iPhone\n"+guide if diagnosis
-                    else guide+"\n\nPublicación técnica correcta.")
+            guide=self._quick_check(lines)
+            text = report+"\n\n"+guide if diagnosis else guide
             data={"card_id":card["id"],"text":text,"job_id":job["id"]}
         else:
             prior_comment=self._prior_stage(grant,"C")

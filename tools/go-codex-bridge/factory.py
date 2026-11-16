@@ -18,6 +18,7 @@ import urllib.parse
 BOARD = "6abc770a895998672bb4294e"
 QUEUE = "6ac143de34ad352f3e74a750"
 CHECK = "6ad77a46825b5e9ca571b3a3"
+RECOVERY = "6afae8f07b89b2777981097c"
 DONE = "6ac1759ef45faba2f247d0ff"
 OWNER = "692315a454c5cfeac3e7f365"
 INSTALL_CARD = "6aedd2b6bb1b6a0f782488e8"
@@ -25,10 +26,15 @@ INSTALL_CARDS = frozenset((INSTALL_CARD, "6af01d5ec274670459675173"))
 NAMES = {
     QUEUE: "AGENTE 4-COLA DE  PROMPT PARA CODEX-PELUQUERÍAS",
     CHECK: "AGENTE 4-COMPROBAR RESPUESTAS CODEX- PELUQUERÍAS",
+    RECOVERY: "ESTUDIOS INFORMES RECUPERACIONES",
     DONE: "Prompt YA HECHOS",
 }
 LIMIT_RE = re.compile(r"usage limit|rate limit|credits? exhausted|cuota agotada|límite de uso", re.I)
 CORRECTION_RE = re.compile(r"^\s*(?:#\s*)?(?:CORRECCI[ÓO]N|AJUSTE|INSTRUCCI[ÓO]N|AMPLIACI[ÓO]N)\b", re.I)
+INSTRUCTION_CUE = re.compile(
+    r"\b(?:trabaja|corregir|reparar|ajustar|cambiar|"
+    r"modificar|implementar|a[nñ]adir|recuperar|programar|revisar|preparar|verificar|"
+    r"integrar|publicar|diagnosticar|comprobar|restaurar|separar)\b", re.I)
 
 
 def diagnostic_instruction(text):
@@ -254,9 +260,26 @@ class Factory:
         comments = snapshot["comments"]
         if not comments or any(c.get("creatorId") != OWNER for c in comments):
             raise self.Error("FACTORY_AUTHOR_INVALID", "Hay comentarios de origen no verificado.")
-        # Exclude only an exact result that this bridge actually persisted and verified.
-        # A marker in an instruction is not proof of its origin.
-        instructions = self.original_comments(card["id"], comments)
+        # Preserve signed legacy instructions while their attempt is active. New
+        # live attempts receive only the latest owner comment by creation time.
+        originals = self.original_comments(card["id"], comments)
+        latest = self.latest_comment(comments)
+        instructions = originals
+        if live_queue:
+            with self.bridge.db() as db:
+                saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
+                                 (card["id"],)).fetchone()
+            prior_grant=self.wheel._verified(saved) if saved else None
+            latest_input=self.latest_comment(originals) if originals else None
+            if (prior_grant and latest_input and latest_input["id"] in prior_grant["comment_ids"]
+                    and (latest["id"]==latest_input["id"] or saved["state"]=="working")):
+                instructions=self.signed_comments(card["id"],comments,prior_grant)
+            else:
+                if (not latest_input or latest["id"]!=latest_input["id"]
+                        or not self.instruction_complete(latest["text"])):
+                    raise self.Error("FACTORY_INSTRUCTION_MISSING",
+                                     "El comentario más reciente no contiene una instrucción vigente completa.")
+                instructions=[latest]
         if not instructions or not instructions[0]["text"].strip():
             raise self.Error("FACTORY_INSTRUCTION_MISSING", "Falta la instrucción original.")
         if not live_queue and attempt == 1 and len(instructions) != 1:
@@ -278,7 +301,7 @@ class Factory:
                                        "ON s.grant_id=g.grant_id AND s.letter='D' AND s.state='verified' "
                                        "WHERE g.card_id=? AND g.attempt=?",(card["id"],prior["attempt"])).fetchone()
                     former=json.loads(receipt["terms"]) if receipt else None
-                    if (prior["state"] not in ("closed","blocked") or not former or
+                    if (prior["state"] not in ("closed","blocked","await_review") or not former or
                             former["placement"]==placement):
                         raise self.Error("FACTORY_RETRY_INVALID","La corrección todavía no tiene un regreso autorizado a COLA.")
                     attempt=prior["attempt"]+1
@@ -297,6 +320,29 @@ class Factory:
                 "SELECT payload FROM operations WHERE action='comment' AND state='verified'")
                 if (payload := json.loads(record["payload"])).get("payload", {}).get("card_id") == card_id}
         return [comment for comment in comments if comment["text"] not in receipts]
+
+    @staticmethod
+    def latest_comment(comments):
+        return max(comments,key=lambda c:(c.get("date") or "",c["id"])) if comments else None
+
+    @staticmethod
+    def result_comment(text):
+        return bool(re.match(r"^\s*(?:CONFLICTO\b|COMPROBACI[ÓO]N (?:R[ÁA]PIDA|T[ÉE]CNICA)\b|RESULTADO\b|CHECKPOINT\b|PUBLICACI[ÓO]N T[ÉE]CNICA\b)",text,re.I))
+
+    @classmethod
+    def instruction_complete(cls,text):
+        return (isinstance(text,str) and len(text.strip())>=20
+                and not cls.result_comment(text) and bool(INSTRUCTION_CUE.search(text)))
+
+    def signed_comments(self,card_id,comments,grant):
+        originals=self.original_comments(card_id,comments)
+        by_id={comment["id"]:comment for comment in originals}
+        ids=grant["comment_ids"]
+        latest=self.latest_comment(originals)
+        if (not ids or len(ids)!=len(set(ids)) or latest is None or latest["id"] not in ids
+                or any(identifier not in by_id for identifier in ids)):
+            raise self.Error("FACTORY_INSTRUCTION_CHANGED","La instrucción autorizada ya no es la última vigente.")
+        return [by_id[identifier] for identifier in ids]
 
     def _authorized_placement(self, card_id):
         actions = self.bridge.api("/1/cards/" + card_id + "/actions",

@@ -11,7 +11,7 @@ from unittest.mock import patch
 import test_bridge as fixtures
 import test_wheel as wheel_fixtures
 from puente import Bridge,BridgeError
-from factory import normalize_guide
+from factory import CHECK, RECOVERY, normalize_guide
 from factory_v2 import Continuity
 from remote_panel import RemotePanel,private_text
 from owner_expo import OwnerExpo
@@ -760,7 +760,9 @@ class V2WheelTests(unittest.TestCase):
         w.pause('WHEEL_PRESERVATION_DIRTY')
         self.bridge.run_codex=lambda payload,session=None:self.synthetic_codex(self.bridge,payload)
         w.toggle(True)
-        with patch.object(WheelEffects,'_dependencies',return_value=None):
+        # The sandboxed test runner cannot query Win32_Process; this case checks
+        # worktree isolation, while the process guard is exercised separately.
+        with patch.object(WheelEffects,'_dependencies',return_value=None),patch.object(w,'_preflight'):
             result=w.tick()
         self.assertNotIn('paused',result,result)
         self.assertNotIn('card_blocked',result,result)
@@ -1007,6 +1009,128 @@ class V2WheelTests(unittest.TestCase):
         with self.bridge.db() as db:
             self.assertEqual(db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",
                 (grant["grant_id"],)).fetchone()[0],"working")
+        self.assertFalse(self.runs or self.changes)
+
+    def test_unverified_publication_is_preserved_and_classified_as_recovery(self):
+        w,grant,job_id,session=self.live_credit_wait()
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
+            db.execute("UPDATE wheel_control SET enabled=1,reason=NULL WHERE id=1")
+            db.execute("UPDATE factory_attempts SET state='blocked' WHERE card_id=? AND attempt=?",
+                       (grant["card_id"],grant["attempt"]))
+        result=w._finish_error(grant,"PUBLICATION_UNVERIFIED",True)
+        self.assertEqual(result["reason"],"PUBLICATION_UNVERIFIED")
+        self.assertTrue(w.enabled())
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)
+        self.assertTrue(self.cards[grant["card_id"]]["comments"][-1]["text"].startswith("CONFLICTO — QUÉ FALTA"))
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
+            self.assertEqual(db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
+                (grant["grant_id"],)).fetchone()[0],"verified:D")
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM wheel_stages WHERE grant_id=? AND state='verified'",
+                (grant["grant_id"],)).fetchone()[0],3)
+        self.assertFalse(self.runs)
+
+    def test_uncertain_git_operation_keeps_global_protection(self):
+        w,grant,job_id,_=self.live_credit_wait()
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
+            db.execute("UPDATE wheel_control SET enabled=1,reason=NULL WHERE id=1")
+            db.execute("INSERT INTO operations(id,action,state,payload,created) VALUES(?,?,?,?,?)",
+                       ("unreconciled-publication","publish-main","unknown",json.dumps({"job":job_id}),"synthetic"))
+        result=w._finish_error(grant,"PUBLICATION_UNCERTAIN",True)
+        self.assertEqual(result["blocked"],"PUBLICATION_UNCERTAIN")
+        self.assertFalse(w.enabled())
+        self.assertFalse(self.changes or self.runs)
+
+    def test_factory_publication_unverified_is_individual_when_no_write_is_pending(self):
+        w,grant,job_id,_=self.live_credit_wait()
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
+            db.execute("UPDATE wheel_control SET enabled=1,reason=NULL WHERE id=1")
+            db.execute("UPDATE factory_attempts SET state='blocked' WHERE card_id=? AND attempt=?",
+                       (grant["card_id"],grant["attempt"]))
+        result=w._finish_error(grant,"FACTORY_PUBLICATION_UNVERIFIED")
+        self.assertEqual(result["card_blocked"],grant["card_id"])
+        self.assertTrue(w.enabled())
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)
+        self.assertFalse(self.runs)
+
+    def test_verified_success_posts_quick_check_then_moves_to_check_first(self):
+        w,grant,job_id,_=self.live_credit_wait()
+        result={"exit_code":0,"response":"GO_FACTORY_EVIDENCE: "+json.dumps({"validation":wheel_fixtures.TWO_STEPS})}
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
+            db.execute("UPDATE wheel_control SET enabled=1,reason=NULL WHERE id=1")
+            db.execute("UPDATE jobs SET state='completed',result=? WHERE id=?",(json.dumps(result),job_id))
+            db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started,receipt) VALUES(?,'B','verified','synthetic',?)",
+                       (grant["grant_id"],json.dumps({"main_sha":"a"*40,"served_sha":"a"*40})))
+        row=self.bridge.factory._row(grant["card_id"],grant["attempt"])
+        job=self.bridge.job(job_id)
+        effects=WheelEffects(self.bridge.factory)
+        with patch.object(effects,"_published_head_valid",return_value="a"*40):
+            for letter in "CD":
+                with self.bridge.db() as db:
+                    db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started) VALUES(?,?,'claimed','synthetic')",
+                               (grant["grant_id"],letter))
+                receipt=effects._trello(letter,row,grant,job,Path(grant["workspace"]),
+                    lambda action,payload:w._permit(grant,letter,row,action,payload))
+                w._record_receipt(grant,letter,receipt)
+        card=self.cards[grant["card_id"]]
+        self.assertEqual(card["idList"],CHECK)
+        self.assertEqual(next(c["id"] for c in self.cards.values() if c["idList"]==CHECK),grant["card_id"])
+        comment=card["comments"][-1]["text"]
+        self.assertTrue(comment.startswith("COMPROBACIÓN RÁPIDA"))
+        for label in ("DÓNDE ENTRAR:","QUÉ HACER:","RESULTADO ESPERADO:"):
+            self.assertIn(label,comment)
+        self.assertEqual(self.changes,[(grant["card_id"],"C"),(grant["card_id"],"D")])
+        self.assertFalse(self.runs)
+
+    def test_permission_conflict_moves_to_recovery_without_replaying_job(self):
+        w,grant,job_id,session=self.live_credit_wait()
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
+            db.execute("UPDATE wheel_control SET enabled=1,reason=NULL WHERE id=1")
+            db.execute("UPDATE factory_attempts SET state='blocked' WHERE card_id=? AND attempt=?",
+                       (grant["card_id"],grant["attempt"]))
+        result=w.continuity.card_error(grant,"WHEEL_PERMISSION_REQUIRED")
+        self.assertEqual(result["reason"],"WHEEL_PERMISSION_REQUIRED")
+        self.assertTrue(w.enabled())
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM wheel_stages WHERE grant_id=? AND state='verified'",
+                (grant["grant_id"],)).fetchone()[0],3)
+        self.assertFalse(self.runs)
+
+    def test_returned_card_keeps_old_checkpoint_and_uses_only_newest_instruction(self):
+        w,old,job_id,session=self.live_credit_wait()
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='waiting_response',reason='WHEEL_PERMISSION_REQUIRED' WHERE grant_id=?",
+                       (old["grant_id"],))
+            db.execute("UPDATE factory_attempts SET state='await_review' WHERE card_id=? AND attempt=?",
+                       (old["card_id"],old["attempt"]))
+            db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started,receipt) VALUES(?,'D','verified','synthetic',?)",
+                       (old["grant_id"],json.dumps({"position":"top"})))
+            before=db.execute("SELECT COUNT(*) FROM wheel_checkpoints WHERE grant_id=?",(old["grant_id"],)).fetchone()[0]
+        latest={"id":"f"*24,"text":"Corregir únicamente la selección de la primera tarjeta viva; conservar el intento anterior.",
+                "creatorId":wheel_fixtures.OWNER,"date":"2026-11-16T18:00:00.000Z"}
+        self.cards[old["card_id"]]["comments"].append(latest)
+        with patch.object(self.bridge.factory,"_authorized_placement",return_value="new-owner-return"):
+            selected=w._live_selection({c["id"]:c for c in self.bridge.factory._cards()},w.live_policy())
+        self.assertEqual(selected["expected"],old["card_id"])
+        with self.bridge.db() as db:
+            new=w._verified(db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",
+                                       (selected["grant_id"],)).fetchone())
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM wheel_checkpoints WHERE grant_id=?",
+                                        (old["grant_id"],)).fetchone()[0],before)
+            self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
+            self.assertEqual(db.execute("SELECT state FROM factory_attempts WHERE card_id=? AND attempt=1",
+                                        (old["card_id"],)).fetchone()[0],"await_review")
+        self.assertEqual(new["attempt"],old["attempt"]+1)
+        self.assertEqual(new["comment_ids"],[latest["id"]])
+        self.assertEqual(new["instruction_sha"],self.bridge.factory.digest(latest["text"]))
+        self.assertNotEqual(new["workspace"],old["workspace"])
         self.assertFalse(self.runs or self.changes)
 
     def test_long_guide_is_repaired_without_new_cli_or_lost_words(self):
