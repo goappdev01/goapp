@@ -31,7 +31,7 @@ function fixture() {
     if(method==='GET'&&url.pathname==='/calendar')return [...remote.values()].slice(Number(url.searchParams.get('offset')),Number(url.searchParams.get('offset'))+30).map(clone);
     if(method==='GET'){if(!remote.has(id))throw Error('No encontrado');return clone(remote.get(id));}
     if(method==='PUT'){
-      const old=remote.get(id);if((old?.version||0)!==body.version)throw Error('El tablero ha cambiado');
+      const old=remote.get(id);if((old?.version||0)!==body.version)throw Object.assign(Error('El tablero ha cambiado'),{code:'BOARD_CONFLICT',status:409});
       const saved={...clone(body),version:body.version+1};remote.set(id,saved);return clone(saved);
     }
     if(method==='DELETE'){assert.equal(headers['X-GO-Confirm-Delete'],'yes');const document={...remote.get(id),removed:true,version:remote.get(id).version+1};remote.set(id,document);return {deleted:true,document};}
@@ -49,14 +49,17 @@ test('only the authorized ADMIN profile enables the shared module',()=>{
     assert.equal(contract.canUseGoBoards(profile,allowed,uid),profile==='ADMIN'&&allowed);
   assert.equal(contract.canUseGoBoards('ADMIN',true,null),false);
 });
-test('remote board access remains disabled until the database schema is verified',async()=>{
+test('local hydration and editing do not require the remote board schema',async()=>{
   const f=fixture(),store=f.make();
-  await store.loadCalendar();assert.equal(store.snapshot().remoteReady,false);
+  await store.load();assert.equal(store.snapshot().localReady,true);assert.equal(store.snapshot().remoteReady,false);
+  await store.loadCalendar();assert.equal(store.snapshot().remoteReady,true);
   await store.list();assert.equal(store.snapshot().remoteReady,true);
   const unavailable=Error('Tableros alojados no disponibles');unavailable.code='BOARD_UNAVAILABLE';
   const blocked=createBoardsStore(uid,f.storage,async()=>{throw unavailable;},()=>true);
+  await blocked.load();await blocked.save(board(1));await blocked.sync();
   await assert.rejects(()=>blocked.loadCalendar(),/no disponibles/);
   assert.equal(blocked.snapshot().remoteReady,false);
+  assert.equal(blocked.snapshot().boards.length,1);assert.equal(blocked.snapshot().pending,1);
 });
 test('dates and time are independent and never invent midnight',()=>{
   const b=board(1),c=card(b);
@@ -101,24 +104,28 @@ test('invalid or foreign task references and duplicate task IDs fail closed',()=
 test('50 real board saves, pagination, reopen and one task identity',async()=>{
   const f=fixture(),store=f.make();await store.load();
   for(let i=1;i<=50;i++)await store.save(board(i));
-  assert.equal(f.remote.size,50);await store.list();assert.equal(store.snapshot().boards.length,30);assert.equal(store.snapshot().more,true);
-  await store.list('', 'false',true);assert.equal(store.snapshot().boards.length,50);
+  await store.sync();await store.sync();
+  assert.equal(f.remote.size,50);
+  const discovery=createBoardsStore(uid,{getItem:async()=>null,setItem:async()=>{}},f.api,()=>true);await discovery.load();
+  await discovery.list();assert.equal(discovery.snapshot().boards.length,30);assert.equal(discovery.snapshot().more,true);
+  await discovery.list('', 'false',true);assert.equal(discovery.snapshot().boards.length,50);
   await store.open(uuid(1));const c=card(store.snapshot().selected);await store.change({type:'card',card:c});
   await store.change({type:'card',card:{...c,entry:{...c.entry,notes:'Título editado'}}});
+  await store.sync();await store.sync();
   const reopened=f.make();await reopened.load();await reopened.open(uuid(1));assert.equal(reopened.snapshot().selected.cards.length,1);
   assert.equal(reopened.snapshot().selected.cards[0].entry.notes,'Título editado');
 });
 test('offline changes survive restart and synchronize once when connectivity returns',async()=>{
-  const f=fixture(),store=f.make();await store.load();await store.save(board(1));f.setOnline(false);
+  const f=fixture(),store=f.make();await store.load();await store.save(board(1));await store.sync();f.setOnline(false);
   await store.change({type:'settings',patch:{name:'Sin conexión'}});assert.equal(store.snapshot().pending,1);
   const next=f.make();await next.load();await next.open(uuid(1));assert.equal(next.snapshot().selected.name,'Sin conexión');assert.equal(next.snapshot().pending,1);
   f.setOnline(true);await next.sync();assert.equal(next.snapshot().pending,0);assert.equal(f.remote.get(uuid(1)).name,'Sin conexión');assert.equal(f.remote.size,1);
 });
 test('two devices retain conflicts and resolve only after an explicit choice',async()=>{
-  const f=fixture(),first=f.make();await first.load();await first.save(board(1));
-  const second=f.make();await second.load();await second.open(uuid(1));
-  await first.change({type:'settings',patch:{name:'Dispositivo uno'}});
-  await second.change({type:'settings',patch:{name:'Dispositivo dos'}});
+  const f=fixture(),first=f.make();await first.load();await first.save(board(1));await first.sync();
+  const second=createBoardsStore(uid,{getItem:async()=>null,setItem:async()=>{}},f.api,()=>true);await second.load();await second.open(uuid(1));
+  await first.change({type:'settings',patch:{name:'Dispositivo uno'}});await first.sync();
+  await second.change({type:'settings',patch:{name:'Dispositivo dos'}});await second.sync();
   assert.equal(second.snapshot().pending,1);assert.match(second.snapshot().error,/cambiado/);
   assert.equal(f.remote.get(uuid(1)).name,'Dispositivo uno');await second.resolveConflict(false);
   assert.equal(second.snapshot().selected.name,'Dispositivo uno');assert.equal(second.snapshot().pending,0);
@@ -132,11 +139,11 @@ test('archiving, recovery, views, covers and explicit deletion remain persistent
   const f=fixture(),s=f.make();await s.load();await s.save(board(1));
   await s.change({type:'settings',patch:{archived:true,view:'month',cover:'data:image/jpeg;base64,YQ=='}});
   const next=f.make();await next.load();await next.open(uuid(1));assert.equal(next.snapshot().selected.view,'month');assert.equal(next.snapshot().selected.archived,true);
-  await next.change({type:'settings',patch:{archived:false}});await next.remove(next.snapshot().selected);assert.equal([...f.remote.values()].filter(b=>!b.removed).length,0);
+  await next.change({type:'settings',patch:{archived:false}});await next.sync();await next.remove(next.snapshot().selected);await next.sync();assert.equal([...f.remote.values()].filter(b=>!b.removed).length,0);
 });
 test('transfer changes association atomically while preserving the same task',async()=>{
   const f=fixture(),s=f.make();await s.load();await s.save(board(1));await s.change({type:'card',card:card(board(1))});
-  const source=clone(s.snapshot().selected);await s.save(board(2));const target=clone(s.snapshot().selected);await s.open(source.id);
+  await s.sync();await s.sync();const source=clone(s.snapshot().selected);await s.save(board(2));await s.sync();const target=clone(s.snapshot().selected);await s.open(source.id);
   await s.transfer('task-1',target,target.columns[0].id);
   assert.equal(f.remote.get(source.id).cards.length,0);assert.equal(f.remote.get(target.id).cards.length,1);assert.equal(f.remote.get(target.id).cards[0].entry.id,'task-1');
 });
@@ -154,9 +161,9 @@ test('the shared task engine blocks ADMIN board records in USER and BUSINESS',()
 });
 test('assistant integration requires both confirmations and the unchanged reviewed revision',async()=>{
   const actions=load('lib/goBoardsActions.ts',{'./goBoards':model}),f=fixture(),s=f.make();
-  await s.load();await s.save(board(1));const prepared=actions.prepareBoardAction(s.snapshot().selected,{type:'settings',patch:{name:'Revisado'}});
+  await s.load();await s.save(board(1));await s.sync();const prepared=actions.prepareBoardAction(s.snapshot().selected,{type:'settings',patch:{name:'Revisado'}});
   await assert.rejects(()=>actions.confirmBoardAction(s,prepared,{understood:true,approved:false}),/confirma/);
-  await actions.confirmBoardAction(s,prepared,{understood:true,approved:true});assert.equal(f.remote.get(uuid(1)).name,'Revisado');
+  await actions.confirmBoardAction(s,prepared,{understood:true,approved:true});await s.sync();assert.equal(f.remote.get(uuid(1)).name,'Revisado');
   await assert.rejects(()=>actions.confirmBoardAction(s,prepared,{understood:true,approved:true}),/cambiado/);
 });
 test('native photo cache commits its pointer only after the durable slot succeeds',async()=>{
@@ -171,7 +178,7 @@ test('native photo cache commits its pointer only after the durable slot succeed
 });
 test('deleting a board preserves its linked GO task across a second device',async()=>{
   const f=fixture(),first=f.make();await first.load();const b=board(1),c=card(b);c.calendarLinked=true;b.cards=[c];await first.save(b);
-  await first.remove(first.snapshot().selected);await first.list();assert.equal(first.snapshot().boards.length,0);
+  await first.sync();await first.remove(first.snapshot().selected);await first.sync();await first.list();assert.equal(first.snapshot().boards.length,0);
   const other=f.make();await other.load();await other.loadCalendar();
   const restored=other.allCached().reduce((entries,doc)=>model.projectBoardCalendar(doc,entries),[]);
   assert.equal(restored.length,1);assert.equal(restored[0].id,c.entry.id);
@@ -179,4 +186,106 @@ test('deleting a board preserves its linked GO task across a second device',asyn
 test('remote task removals clear only their old Calendar projection',()=>{
   const b=board(1),c=card(b);c.calendarLinked=true;b.cards=[c];const original=model.projectBoardCalendar(b,[{id:'unrelated'}]);
   const next=model.projectBoardCalendar({...b,cards:[]},original);assert.equal(next.length,1);assert.equal(next[0].id,'unrelated');
+});
+
+test('API absent from the first launch: 50 synthetic boards remain searchable and durable offline',async()=>{
+  const f=fixture();f.setOnline(false);const s=f.make();await s.load();await s.list();
+  assert.equal(s.snapshot().localReady,true);assert.equal(s.snapshot().boards.length,0);
+  for(let n=1;n<=50;n++)await s.save(board(n));await s.sync();
+  await s.open(uuid(1));await s.change({type:'column',id:uuid(999),title:'Revisar'});
+  const c=card(s.snapshot().selected);await s.change({type:'card',card:c});
+  await s.change({type:'card',card:{...c,columnId:uuid(999)}});await s.sync();
+  assert.equal(s.snapshot().boards.length,50);assert.equal(s.snapshot().pending,50);assert.equal(f.remote.size,0);
+  const restart=f.make();await restart.load();assert.equal(restart.snapshot().boards.length,50);
+  await restart.list('Proyecto 50');assert.equal(restart.snapshot().boards.length,1);
+  await restart.list('','true');assert.equal(restart.snapshot().boards.length,0);
+  await restart.list('','false');await restart.open(uuid(1));assert.equal(restart.snapshot().selected.cards.length,1);
+  assert.equal(restart.snapshot().selected.cards[0].columnId,uuid(999));assert.equal(restart.snapshot().selected.cards[0].entry.id,'task-1');
+  f.setOnline(true);await restart.sync();await restart.loadCalendar();await restart.list();assert.equal(restart.snapshot().pending,0);assert.equal(f.remote.size,50);
+  await restart.sync();assert.equal(f.remote.size,50);assert.equal(f.remote.get(uuid(1)).cards.length,1);
+});
+
+test('an unanswered API request cannot block hydration, edits, search or cached opening',async()=>{
+  const f=fixture();let release;const response=new Promise(resolve=>{release=resolve});
+  const s=createBoardsStore(uid,f.storage,()=>response,()=>true);await s.load();
+  const remote=s.list();await s.save(board(1));await s.open(uuid(1));
+  await s.change({type:'settings',patch:{name:'Edición inmediata'}});
+  assert.equal(s.snapshot().selected.name,'Edición inmediata');assert.equal(s.snapshot().pending,1);
+  const restart=createBoardsStore(uid,f.storage,()=>response,()=>true);await restart.load();
+  assert.equal(restart.snapshot().boards[0].name,'Edición inmediata');
+  release([]);await remote;await s.sync(); // Malformed remote reply is an honest sync failure, never lost local data.
+  assert.equal(s.snapshot().pending,1);assert.equal(s.snapshot().selected.name,'Edición inmediata');
+});
+
+test('local disk failure leaves the last committed board and queue intact and sends no unsaved data',async()=>{
+  const f=fixture();f.setOnline(false);let fail=false;
+  const storage={...f.storage,setItem:async(k,v)=>{if(fail)throw Error('Disco lleno');await f.storage.setItem(k,v)}};
+  const s=createBoardsStore(uid,storage,f.api,()=>true);await s.load();await s.save(board(1));await s.sync();
+  const durable=f.memory.get('go_boards_v1:ADMIN:'+uid),calls=f.calls.length;
+  fail=true;await assert.rejects(()=>s.change({type:'settings',patch:{name:'No guardado'}}),/No se ha guardado/);
+  assert.equal(s.snapshot().selected.name,'Proyecto 1');assert.equal(f.memory.get('go_boards_v1:ADMIN:'+uid),durable);assert.equal(f.calls.length,calls);
+  assert.match(s.snapshot().localError,/No se ha guardado/);fail=false;
+  f.setOnline(true);await s.loadCalendar();assert.match(s.snapshot().localError,/No se ha guardado/);
+  await s.change({type:'settings',patch:{name:'Reintento correcto'}});assert.equal(s.snapshot().localError,'');assert.equal(s.snapshot().selected.name,'Reintento correcto');
+});
+
+test('corrupt caches and foreign pending bases are preserved verbatim and cannot be overwritten',async()=>{
+  for(const raw of ['{broken',JSON.stringify({cache:{[uuid(1)]:board(1)},pending:{[uuid(1)]:{base:{...board(1),ownerUserId:foreign},next:board(1)}}})]){
+    const f=fixture();f.memory.set('go_boards_v1:ADMIN:'+uid,raw);const s=f.make();
+    await assert.rejects(()=>s.load());assert.equal(s.snapshot().localReady,false);
+    await assert.rejects(()=>s.save(board(2)),/copia local/);assert.equal(f.memory.get('go_boards_v1:ADMIN:'+uid),raw);assert.equal(f.calls.length,0);
+  }
+});
+
+test('another authorized ADMIN starts with a separate empty cache and no cross-account document access',async()=>{
+  const f=fixture();f.setOnline(false);const first=f.make();await first.load();await first.save(board(1));await first.sync();
+  const other=createBoardsStore(foreign,f.storage,f.api,()=>true);await other.load();assert.equal(other.snapshot().boards.length,0);
+  await assert.rejects(()=>other.save(board(2)),/Identidad/);assert.equal(f.memory.has('go_boards_v1:ADMIN:'+foreign),false);
+  f.remote.set(uuid(1),board(1));f.setOnline(true);await assert.rejects(()=>other.open(uuid(1)),/Identidad/);
+});
+
+test('offline deletion is durable, hidden in every filter and preserves linked tasks when synchronized',async()=>{
+  const f=fixture();f.setOnline(false);const s=f.make();await s.load();const b=board(1),c=card(b);c.calendarLinked=true;b.cards=[c];
+  await s.save(b);await s.sync();await s.remove(s.snapshot().selected);await s.sync();
+  const restart=f.make();await restart.load();await restart.list('','all');assert.equal(restart.snapshot().boards.length,0);assert.equal(restart.snapshot().pending,1);
+  assert.equal(model.projectBoardCalendar(restart.cached(b.id),[])[0].id,c.entry.id);
+  f.setOnline(true);await restart.sync();assert.equal(restart.snapshot().pending,0);assert.equal(f.remote.get(b.id).removed,true);
+  await restart.list('','all');assert.equal(restart.snapshot().boards.length,0);
+});
+
+test('an edit during an in-flight acknowledgement retains the newer content and rebases its version',async()=>{
+  const f=fixture();let respond;const s=createBoardsStore(uid,f.storage,async(route,method,body)=>{
+    if(method==='PUT')return new Promise(resolve=>{respond=()=>resolve({...clone(body),version:body.version+1})});return [];
+  },()=>true);await s.load();await s.save(board(1));
+  await s.change({type:'settings',patch:{name:'Más reciente'}});respond();await s.sync();
+  assert.equal(s.snapshot().selected.name,'Más reciente');assert.equal(s.snapshot().pending,1);assert.equal(s.snapshot().selected.version,1);
+  const next=s.sync();respond();await next;assert.equal(s.snapshot().pending,0);assert.equal(s.snapshot().selected.version,2);
+});
+
+test('a conflict remains durable after restart and resolution keeps base, local and remote checkpoints',async()=>{
+  const f=fixture(),s=f.make();await s.load();await s.save(board(1));await s.sync();
+  f.remote.set(uuid(1),{...clone(f.remote.get(uuid(1))),name:'Otro dispositivo',version:2});
+  await s.change({type:'settings',patch:{name:'Mi copia'}});await s.sync();assert.equal(s.snapshot().conflicts.length,1);
+  const restart=f.make();await restart.load();await restart.open(uuid(1));const before=f.calls.length;await restart.sync();assert.equal(f.calls.length,before);
+  const review=await restart.reviewConflict();assert.equal(review.remote.name,'Otro dispositivo');
+  await restart.resolveConflict(false,review.remote.version);assert.equal(restart.snapshot().selected.name,'Otro dispositivo');
+  const saved=JSON.parse(f.memory.get('go_boards_v1:ADMIN:'+uid));assert.equal(saved.checkpoints[0].local.name,'Mi copia');assert.equal(saved.checkpoints[0].remote.name,'Otro dispositivo');
+  assert.equal(saved.checkpoints[0].base.version,1);
+});
+
+test('a lost server acknowledgement reuses the stable ID and never silently overwrites or duplicates',async()=>{
+  const f=fixture();let lose=true;
+  const s=createBoardsStore(uid,f.storage,async(...args)=>{const result=await f.api(...args);if(args[1]==='PUT'&&lose){lose=false;throw Error('Respuesta perdida')}return result;},()=>true);
+  await s.load();await s.save(board(1));await s.sync();assert.equal(s.snapshot().pending,1);assert.equal(f.remote.size,1);
+  await s.sync();assert.equal(s.snapshot().conflicts.length,1);const review=await s.reviewConflict();
+  await s.resolveConflict(true,review.remote.version,review.local);assert.equal(s.snapshot().pending,0);assert.equal(f.remote.size,1);assert.equal(f.remote.get(uuid(1)).version,2);
+});
+
+test('conflict choices reject server or local changes made since the displayed review',async()=>{
+  const f=fixture(),s=f.make();await s.load();await s.save(board(1));await s.sync();
+  f.remote.set(uuid(1),{...clone(f.remote.get(uuid(1))),version:2});await s.change({type:'settings',patch:{name:'Mi revisión'}});await s.sync();
+  const review=await s.reviewConflict();f.remote.set(uuid(1),{...clone(f.remote.get(uuid(1))),version:3});
+  await assert.rejects(()=>s.resolveConflict(true,review.remote.version,review.local),/servidor ha cambiado/);
+  const updated=await s.reviewConflict();await s.change({type:'settings',patch:{name:'Nueva edición local'}});
+  await assert.rejects(()=>s.resolveConflict(false,updated.remote.version,updated.local),/copia local ha cambiado/);assert.equal(s.snapshot().selected.name,'Nueva edición local');assert.equal(s.snapshot().pending,1);
 });

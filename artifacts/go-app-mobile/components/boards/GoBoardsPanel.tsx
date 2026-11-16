@@ -45,7 +45,7 @@ export function GoBoardsPanel({ visible, onClose, manager, fontScale = 1, handed
   return <Appearance.Provider value={{ scale: Math.max(0.8, Math.min(1.5, fontScale)), handedness }}><BoardsContent onClose={onClose} manager={manager} /></Appearance.Provider>;
 }
 function BoardsContent({ onClose, manager }: { onClose: () => void; manager: Manager }) {
-  const { state, store, allowed, open } = manager, admin = useAdminAccess(), insets = useSafeAreaInsets();
+  const { state, store, allowed, open, refresh, legacyDetected } = manager, admin = useAdminAccess(), insets = useSafeAreaInsets();
   const appearance = React.useContext(Appearance);
   const [search, setSearch] = useState(""), [archive, setArchive] = useState("false");
   const [grid, setGrid] = useState(false), [prefsReady, setPrefsReady] = useState(false);
@@ -57,7 +57,16 @@ function BoardsContent({ onClose, manager }: { onClose: () => void; manager: Man
   const [transfer, setTransfer] = useState<BoardCard | null>(null), [transferBoard, setTransferBoard] = useState<BoardDocument | null>(null);
   const [transferSearch, setTransferSearch] = useState("");
   const [notice, setNotice] = useState(""), lock = useRef(false), valid = useRef(allowed); valid.current = allowed;
+  const [conflictReview, setConflictReview] = useState<Awaited<ReturnType<Manager["store"]["reviewConflict"]>> | null>(null);
   const doc = state.selected;
+  const reviewConflict = () => void work(async () => {
+    if (!doc || !state.conflicts.includes(doc.id)) {
+      Alert.alert("Tableros con conflicto", "Abre uno para revisar sus versiones.", [
+        { text: "Cancelar", style: "cancel" }, ...state.conflicts.map(boardId => ({ text: store.cached(boardId)?.name || "Tablero", onPress: () => void work(() => open(boardId)) }))]);
+      return;
+    }
+    setConflictReview(await store.reviewConflict());
+  });
   useEffect(() => {
     let active = true; void AsyncStorage.getItem(`go_boards_list_preferences:ADMIN:${admin.userId}`).then(raw => {
       if (!active || !raw) return; const prefs = JSON.parse(raw); if (typeof prefs.grid === "boolean") setGrid(prefs.grid);
@@ -72,10 +81,23 @@ function BoardsContent({ onClose, manager }: { onClose: () => void; manager: Man
     catch (e) { if (valid.current) setNotice((e as Error).message); }
     finally { lock.current = false; }
   };
-  useEffect(() => { const timer = setTimeout(() => { if (allowed) void work(() => store.list(search, archive)); }, 300); return () => clearTimeout(timer); }, [search, archive]);
+  useEffect(() => { const timer = setTimeout(() => { if (allowed && state.localReady) void store.list(search, archive).catch(e => store.reportError((e as Error).message)); }, 300); return () => clearTimeout(timer); }, [search, archive, state.localReady, allowed, store]);
   const confirm = (title: string, operation: () => Promise<unknown>) => Alert.alert(title, "Esta acción necesita tu confirmación.", [
     { text: "Cancelar", style: "cancel" }, { text: "Eliminar", style: "destructive", onPress: () => void work(operation) }]);
   const addTask = (columnId: string) => { if (doc) setEditor({ entry: newBoardTask(`go_board_${id()}`, doc.ownerUserId, ""), columnId, calendarLinked: false, archived: false }); };
+  const reorderBoard = async (direction: number) => {
+    if (!doc) return;
+    const index = state.boards.findIndex(b => b.id === doc.id), target = state.boards[index + direction];
+    if (!target) return;
+    const neighbor = state.boards[index + direction * 2];
+    await store.change({ type: "settings", patch: { position: neighbor ? (neighbor.position + target.position) / 2 : target.position + direction } });
+  };
+  const reorderTask = async (direction: number) => {
+    if (!doc || !editor) return;
+    const cards = doc.cards.filter(c => c.columnId === editor.columnId), index = cards.findIndex(c => c.entry.id === editor.entry.id);
+    const target = cards[index + direction]; if (!target) return;
+    await store.change({ type: "cardOrder", id: editor.entry.id, target: target.entry.id, columnId: editor.columnId });
+  };
   const archiveColumn = async (column: { id: string; title: string; archived: boolean }) => { await store.change({ type: "column", ...column }); setColumnEditor(null); };
   async function complete(card: BoardCard) {
     if (!doc) return;
@@ -116,30 +138,51 @@ function BoardsContent({ onClose, manager }: { onClose: () => void; manager: Man
     }
     await store.change({ type: "card", card: { ...card, columnId: to.columnId || to.id } });
   }
-  const close = () => { if (editor) setEditor(null); else if (boardEditor) setBoardEditor(null); else if (columnEditor) setColumnEditor(null);
+  const close = () => { if (conflictReview) setConflictReview(null); else if (editor) setEditor(null); else if (boardEditor) setBoardEditor(null); else if (columnEditor) setColumnEditor(null);
     else if (transfer) { setTransfer(null); setTransferBoard(null); } else if (doc) { store.close(); void work(() => store.list(search, archive)); } else onClose(); };
   if (!allowed) return null;
   return <Modal visible animationType="slide" onRequestClose={close}>
     <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, 8), paddingLeft: insets.left, paddingRight: insets.right }]}>
       <View style={[styles.header, { flexDirection: appearance.handedness === "left" ? "row-reverse" : "row" }]}><TouchableOpacity accessibilityLabel="Volver a Calendario y Reservas" onPress={close} style={{ padding: 12 }}><Feather name="chevron-left" size={23} color="white" /></TouchableOpacity>
-        <View style={{ flex: 1, minWidth: 0 }}><Text style={[styles.title, { fontSize: Math.max(17, 17 * appearance.scale), flexShrink: 1 }]}>{editor ? "Ficha de tarea" : boardEditor ? "Editar tablero" : columnEditor ? "Columna" : transfer ? "Mover tarea" : doc?.name || "GO Tableros"}</Text>
-          <Text style={styles.muted}>{state.pending ? `${state.pending} cambio(s) guardados en este dispositivo, pendientes de sincronizar` : "ADMIN · Tu organización privada"}</Text></View>
+        <View style={{ flex: 1, minWidth: 0 }}><Text numberOfLines={2} style={[styles.title, { fontSize: Math.max(17, 17 * appearance.scale), flexShrink: 1 }]}>{conflictReview ? "Revisar conflicto" : editor ? "Ficha de tarea" : boardEditor ? "Editar tablero" : columnEditor ? "Columna" : transfer ? "Mover tarea" : doc?.name || "GO Tableros"}</Text>
+          <Text style={styles.muted}>ADMIN · Tu organización privada</Text></View>
         <GoCloseButton level="container" accessibilityLabel="Cerrar Tablero" onPress={onClose} /></View>
-      {!!(notice || state.error) && <View style={styles.banner}><Text style={styles.text}>{notice || state.error}</Text><View style={styles.row}>
-        <Button label="Reintentar sincronización" onPress={() => void work(() => store.sync())} />
-        {state.error.includes("cambiado") && <Button label="Resolver conflicto" onPress={() => Alert.alert("Conflicto entre dispositivos", "La copia local se conserva. Elige qué versión utilizar.", [
-          { text: "Cancelar", style: "cancel" }, { text: "Usar servidor", onPress: () => void work(() => store.resolveConflict(false)) },
-          { text: "Conservar mi copia", onPress: () => void work(() => store.resolveConflict(true)) }])} />}</View></View>}
-      {!state.remoteReady ? <View style={[styles.form, { flex: 1, justifyContent: "center" }]}>
-        <Text style={styles.title}>Sincronización de Tableros pendiente</Text>
-        <Text style={styles.muted}>{state.error || "Comprobando la conexión segura con el servidor…"}</Text>
-        {state.pending > 0 && <Text style={styles.muted}>{state.pending} cambio(s) local(es) conservados. No se perderán mientras se recupera la conexión.</Text>}
-        <Button label="Reintentar conexión" disabled={state.busy} onPress={() => void work(() => store.loadCalendar())} />
+      {!!(notice || state.localError) && <ScrollView style={styles.banner} contentContainerStyle={{ padding: 12 }} accessibilityLiveRegion="polite"><Text style={styles.text}>{state.localError || notice}</Text></ScrollView>}
+      {state.localReady && !state.localError && <View style={styles.syncStatus}>
+        <Text style={[styles.muted, { flex: 1 }]}>{state.conflicts.length ? `Guardado localmente · ${state.conflicts.length} conflicto(s) por revisar`
+          : state.pending || !state.remoteReady ? "Guardado en este dispositivo · Pendiente de sincronizar"
+          : state.syncing ? "Guardado en este dispositivo · Sincronizando…" : "Sincronizado"}</Text>
+        {state.conflicts.length ? <Button label="Revisar conflictos" onPress={reviewConflict} />
+          : <TouchableOpacity accessibilityRole="button" accessibilityLabel="Reintentar sincronización" style={{ padding: 12, minHeight: 44 }} onPress={() => void refresh().catch(e => store.reportError((e as Error).message))}><Feather name="refresh-cw" size={18} color="#c4cede" /></TouchableOpacity>}
+        {!!state.error && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Detalle de sincronización" style={{ padding: 10, minHeight: 44 }} onPress={() => Alert.alert("Estado de sincronización", state.error)}><Feather name="info" size={18} color="#c4cede" /></TouchableOpacity>}
+      </View>}
+      {!state.localReady ? <View style={[styles.form, { flex: 1, justifyContent: "center" }]}>
+        <Text style={styles.muted}>{state.localError ? "La copia existente se conserva sin sobrescribirla." : "Leyendo copia local…"}</Text>
+        <Button label="Reintentar lectura local" onPress={() => void work(refresh)} />
       </View>
+      : conflictReview ? <ScrollView contentContainerStyle={styles.form}>
+        <Text style={styles.text}>Compara las copias antes de elegir. Se conservará un checkpoint de las tres versiones en este dispositivo.</Text>
+        {([["Este dispositivo", conflictReview.local], ["Servidor", conflictReview.remote], ["Base anterior", conflictReview.base]] as const).map(([label, board]) => <View key={label} style={styles.card}>
+          <Text style={styles.title}>{label} · {board.name}</Text><Text style={styles.muted}>Versión {board.version}{board.archived ? " · Archivado" : ""}{board.removed ? " · Eliminado" : ""}</Text>
+          {!!board.description && <Text style={styles.text}>{board.description}</Text>}
+          {!!board.cover && <Image source={{ uri: board.cover }} style={{ width: "100%", height: 100 }} resizeMode="cover" />}
+          {board.columns.map(column => <View key={column.id} style={{ gap: 6 }}><Text style={styles.title}>{column.title}{column.archived ? " · Archivada" : ""}</Text>
+            {board.cards.filter(c => c.columnId === column.id).map(card => <View key={card.entry.id} style={styles.card}>
+              <Text style={styles.text}>{card.entry.notes}</Text><Text style={styles.muted}>{card.entry.dateISO || "Sin fecha"}{card.entry.time ? ` · ${card.entry.time}` : ""} · {card.entry.localResolutionStatus === "done" ? "Completada" : "Pendiente"} · {card.entry.estado}{card.archived ? " · Archivada" : ""}{card.entry.deleted ? " · Eliminada" : ""} · {card.calendarLinked ? "Vinculada con Calendario" : "Privada"}</Text>
+              {!!card.entry.detail && <Text style={styles.text}>{card.entry.detail}</Text>}
+              {(card.entry.messages || []).map(message => <Text key={message.id} style={styles.text}>{message.text}</Text>)}
+            </View>)}
+          </View>)}
+        </View>)}
+        <Button label="Usar servidor" onPress={() => void work(async () => { await store.resolveConflict(false, conflictReview.remote.version, conflictReview.local); setConflictReview(null); })} />
+        <Button label="Conservar mi copia" onPress={() => void work(async () => { await store.resolveConflict(true, conflictReview.remote.version, conflictReview.local); setConflictReview(null); })} />
+        <Button label="Cancelar revisión" onPress={() => setConflictReview(null)} />
+      </ScrollView>
       : editor && doc ? <TaskEditor card={editor} board={doc} onChange={setEditor}
         onSave={card => void work(async () => { await store.change({ type: "card", card }); setEditor(null); })}
         onDelete={() => confirm("¿Eliminar tarea?", () => removeTask(editor))}
         onComplete={() => void work(async () => { await complete(editor); setEditor(null); })}
+        onReorder={direction => void work(() => reorderTask(direction))}
         onTransfer={() => { setTransfer(editor); setEditor(null); }} />
       : boardEditor ? <BoardEditor board={boardEditor} setBoard={setBoardEditor} onSave={() => void work(async () => {
           await store.save(boardEditor); setBoardEditor(null);
@@ -148,6 +191,11 @@ function BoardsContent({ onClose, manager }: { onClose: () => void; manager: Man
           <Field label="Nombre de columna" value={columnEditor.title} onChangeText={title => setColumnEditor({ ...columnEditor, title })} />
           <View style={styles.row}><Text style={styles.text}>Archivada</Text><Switch value={columnEditor.archived} onValueChange={archived => setColumnEditor({ ...columnEditor, archived })} /></View>
           <Button label="Guardar columna" onPress={() => void work(() => archiveColumn(columnEditor))} />
+          {doc && [-1, 1].map(direction => {
+            const target = doc.columns[doc.columns.findIndex(c => c.id === columnEditor.id) + direction];
+            return <Button key={direction} label={direction < 0 ? "Adelantar columna" : "Retrasar columna"} disabled={!target}
+              onPress={() => void work(() => store.change({ type: "columnOrder", id: columnEditor.id, target: target.id }))} />;
+          })}
         </KeyboardAwareScrollViewCompat>
       : transfer ? <ScrollView contentContainerStyle={styles.form}>
           <Text style={styles.text}>La tarea conserva su identificador, notas, fecha y vinculación con Calendario.</Text>
@@ -163,11 +211,14 @@ function BoardsContent({ onClose, manager }: { onClose: () => void; manager: Man
         {!doc ? <BoardList boards={state.boards} more={state.more} busy={state.busy} search={search} setSearch={setSearch} archive={archive} setArchive={setArchive}
           grid={grid} setGrid={setGrid}
           onOpen={board => void work(() => open(board.id))} onMore={() => void work(() => store.list(search, archive, true))}
+          legacyDetected={legacyDetected}
           onCreate={() => setBoardEditor(newBoard(id(), admin.userId!, "Nuevo tablero", id(), today()))} />
         : <><ScrollView horizontal style={{ flexGrow: 0 }} contentContainerStyle={{ gap: 8, padding: 10 }}>
           <Button label="Editar tablero" onPress={() => setBoardEditor(doc)} />
           <Button label={doc.archived ? "Recuperar" : "Archivar"} onPress={() => void work(() => store.change({ type: "settings", patch: { archived: !doc.archived } }))} />
           <Button label="Duplicar estructura" onPress={() => setBoardEditor(duplicateBoardStructure(doc, id(), `${doc.name} · copia`, id))} />
+          <Button label="Subir tablero" onPress={() => void work(() => reorderBoard(-1))} />
+          <Button label="Bajar tablero" onPress={() => void work(() => reorderBoard(1))} />
           <Button label="Eliminar" danger onPress={() => confirm("¿Eliminar tablero? Las tareas ya vinculadas permanecen en Calendario.", () => store.remove(doc))} />
         </ScrollView>
         {!!doc.cover && <Image source={{ uri: doc.cover }} style={{ width: "100%", height: 80 }} resizeMode="cover" />}
@@ -175,8 +226,8 @@ function BoardsContent({ onClose, manager }: { onClose: () => void; manager: Man
         {filtersOpen && <ScrollView style={{ maxHeight: 220 }} contentContainerStyle={{ gap: 8 }}><Field label="Buscar tareas" value={taskSearch} onChangeText={setTaskSearch} />
           <Field label="Filtrar fecha (AAAA-MM-DD, vacío: todas)" value={taskDateFilter} onChangeText={setTaskDateFilter} />
           <View style={styles.row}>{[["active","Pendientes"],["done","Completadas"],["all","Todas"],["archived","Archivadas"]].map(([key,label]) => <Button key={key} label={(taskFilter===key?"✓ ":"")+label} onPress={() => setTaskFilter(key)} />)}</View></ScrollView>}
-          <ScrollView horizontal style={{ maxHeight: 48 }} contentContainerStyle={{ gap: 8 }}>{views.map(([view,label]) => <Button key={view} label={(doc.view===view?"✓ ":"")+label} onPress={() => void work(() => store.change({ type: "settings", patch: { view } }))} />)}</ScrollView></View>
-        <ScrollView horizontal style={{ maxHeight: 50 }} contentContainerStyle={{ gap: 8, paddingHorizontal: 12 }}>
+          <ScrollView horizontal style={{ flexGrow: 0, flexShrink: 0 }} contentContainerStyle={{ gap: 8 }}>{views.map(([view,label]) => <Button key={view} label={(doc.view===view?"✓ ":"")+label} onPress={() => void work(() => store.change({ type: "settings", patch: { view } }))} />)}</ScrollView></View>
+        <ScrollView horizontal style={{ flexGrow: 0, maxHeight: 50 }} contentContainerStyle={{ gap: 8, paddingHorizontal: 12 }}>
           {state.boards.filter(b => b.id !== doc.id && !b.archived).map(b => <BoardDragItem key={b.id} draggable={false}
             target={{ kind: "board", id: b.id }} label={b.name} style={styles.button}><Text style={styles.muted}>Mover aquí · {b.name}</Text></BoardDragItem>)}
         </ScrollView>
@@ -189,16 +240,17 @@ function BoardsContent({ onClose, manager }: { onClose: () => void; manager: Man
   </Modal>;
 }
 
-function BoardList({ boards, busy, more, search, setSearch, archive, setArchive, onOpen, onMore, onCreate, grid, setGrid }: {
+function BoardList({ boards, busy, more, search, setSearch, archive, setArchive, onOpen, onMore, onCreate, grid, setGrid, legacyDetected }: {
   boards: BoardSummary[]; busy: boolean; more: boolean; search: string; setSearch: (s: string) => void;
   archive: string; setArchive: (s: string) => void; onOpen: (b: BoardSummary) => void; onMore: () => void; onCreate: () => void;
-  grid: boolean; setGrid: (value: boolean) => void;
+  grid: boolean; setGrid: (value: boolean) => void; legacyDetected?: boolean;
 }) {
   const dragging = useBoardDragging();
   return <><View style={styles.form}><Field label="Buscar tableros" value={search} onChangeText={setSearch} />
     <View style={styles.row}>{[["false","Activos"],["true","Archivados"],["all","Todos"]].map(([key,label]) => <Button key={key} label={(archive===key?"✓ ":"")+label} onPress={() => setArchive(key)} />)}
-      <Button label="Crear tablero" onPress={onCreate} /><Button label={grid ? "Vista lista" : "Vista mosaico"} onPress={() => setGrid(!grid)} /></View><Text style={styles.muted}>Mantén pulsado para arrastrar y ordenar.</Text></View>
-    <FlatList key={String(grid)} numColumns={grid ? 2 : 1} scrollEnabled={!dragging} data={boards} keyExtractor={item => item.id} contentContainerStyle={{ padding: 12, gap: 12 }}
+      <Button label="Crear tablero" onPress={onCreate} /><Button label={grid ? "Vista lista" : "Vista mosaico"} onPress={() => setGrid(!grid)} /></View><Text style={styles.muted}>Mantén pulsado para arrastrar y ordenar.</Text>
+      {legacyDetected && <TouchableOpacity accessibilityRole="button" onPress={() => Alert.alert("Copia antigua conservada", "Se ha detectado el almacenamiento anterior de Tableros. Sigue intacto. No puede asignarse automáticamente a esta cuenta porque no contiene propietario. Solicita revisar su recuperación antes de borrar o reinstalar GO.")}><Text style={styles.muted}>Copia antigua conservada · Información</Text></TouchableOpacity>}</View>
+    <FlatList style={{ flex: 1 }} key={String(grid)} numColumns={grid ? 2 : 1} scrollEnabled={!dragging} data={boards} keyExtractor={item => item.id} contentContainerStyle={{ padding: 12, gap: 12 }}
       renderItem={({ item }) => <BoardDragItem target={{ kind: "board", id: item.id }} label={item.name} style={{ flex: 1, margin: grid ? 4 : 0 }}>
         <TouchableOpacity onPress={() => onOpen(item)} style={[styles.board, { minHeight: 100 }]}>
           {!!item.cover && <Image source={{ uri: item.cover }} style={{ width: "100%", height: 90, borderRadius: 10, marginBottom: 8 }} resizeMode="cover" />}
@@ -218,13 +270,13 @@ function BoardContents({ board, search, filter, dateFilter, onOpen, onAdd, onCol
     && (filter === "done" ? c.entry.localResolutionStatus === "done" : filter === "active" ? c.entry.localResolutionStatus !== "done" : true)
     && `${c.entry.notes} ${c.entry.detail || ""}`.toLowerCase().includes(search.toLowerCase()));
   const card = (c: BoardCard) => <BoardDragItem key={c.entry.id} target={{ id: c.entry.id, kind: "card", columnId: c.columnId, date: c.entry.dateISO }} label={c.entry.notes}>
-    <TouchableOpacity onPress={() => onOpen(c)} style={styles.card}>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Abrir tarea ${c.entry.notes}`} onPress={() => onOpen(c)} style={styles.card}>
       <Text style={styles.text}>{c.entry.localResolutionStatus === "done" ? "✓ " : ""}{c.entry.notes}</Text>
       <Text style={styles.muted}>{c.entry.dateISO || "Sin fecha"}{c.entry.time ? ` · ${c.entry.time}` : " · Sin hora"}</Text>
       {!!c.entry.detail && <Text style={styles.muted} numberOfLines={2}>{c.entry.detail}</Text>}
       <Text style={styles.muted}>{c.calendarLinked ? "Vinculada con Calendario" : "Privada en Tablero"}</Text>
     </TouchableOpacity></BoardDragItem>;
-  if (board.view === "columns") return <ScrollView horizontal scrollEnabled={!dragging} contentContainerStyle={{ padding: 12, gap: 12 }}>
+  if (board.view === "columns") return <ScrollView style={{ flex: 1 }} horizontal scrollEnabled={!dragging} contentContainerStyle={{ padding: 12, gap: 12 }}>
     {board.columns.map(column => <BoardDragItem key={column.id} target={{ id: column.id, kind: "column", columnId: column.id }} label={column.title}
       style={{ width: 270, backgroundColor: "#121b2b", borderRadius: 12, padding: 10 }}>
       <TouchableOpacity onPress={() => onColumn(column)} style={{ padding: 8 }}><Text style={styles.title}>{column.title} · {cards.filter(c => c.columnId === column.id).length}{column.archived ? " · Archivada" : ""}</Text></TouchableOpacity>
@@ -270,13 +322,20 @@ function BoardEditor({ board, setBoard, onSave }: { board: BoardDocument; setBoa
     <Button label="Guardar tablero" disabled={!board.name.trim()} onPress={onSave} />
   </KeyboardAwareScrollViewCompat>;
 }
-function TaskEditor({ card, board, onChange, onSave, onDelete, onComplete, onTransfer }: {
-  card: BoardCard; board: BoardDocument; onChange: (card: BoardCard) => void; onSave: (card: BoardCard) => void; onDelete: () => void; onComplete: () => void; onTransfer: () => void;
+function TaskEditor({ card, board, onChange, onSave, onDelete, onComplete, onTransfer, onReorder }: {
+  card: BoardCard; board: BoardDocument; onChange: (card: BoardCard) => void; onSave: (card: BoardCard) => void; onDelete: () => void; onComplete: () => void; onTransfer: () => void; onReorder?: (direction: number) => void;
 }) {
   const [note, setNote] = useState(""), [error, setError] = useState("");
   const saved = board.cards.some(c => c.entry.id === card.entry.id);
+  const [detailsOpen, setDetailsOpen] = useState(saved);
+  const save = () => { try { const patch = boardDatePatch(card.entry.dateISO, card.entry.time);
+    setError(""); onSave({ ...card, entry: { ...card.entry, ...patch } }); } catch (e) { setError((e as Error).message); } };
   return <KeyboardAwareScrollViewCompat contentContainerStyle={styles.form} bottomOffset={20}>
     <Field label="Título de la tarea" value={card.entry.notes} onChangeText={notes => onChange({ ...card, entry: { ...card.entry, notes } })} />
+    {!!error && <Text style={{ color: "#ffb0b0" }}>{error}</Text>}
+    <Button label="Guardar tarea" disabled={!card.entry.notes.trim()} onPress={save} />
+    <Button label={detailsOpen ? "Menos opciones" : "Más opciones"} onPress={() => setDetailsOpen(!detailsOpen)} />
+    {detailsOpen && <>
     <Field label="Descripción" multiline value={card.entry.detail || ""} onChangeText={detail => onChange({ ...card, entry: { ...card.entry, detail } })} />
     <Field label="Fecha opcional (AAAA-MM-DD)" value={card.entry.dateISO} onChangeText={dateISO => onChange({ ...card, entry: { ...card.entry, dateISO, ...(dateISO ? {} : { time: "" }) } })} />
     <View style={styles.row}><Button label="Sin fecha" onPress={() => onChange(moveBoardCardDate(card, ""))} />
@@ -289,11 +348,10 @@ function TaskEditor({ card, board, onChange, onSave, onDelete, onComplete, onTra
     <Field label="Añadir nota interna" value={note} multiline onChangeText={setNote} />
     <Button label="Añadir nota" disabled={!note.trim()} onPress={() => { onChange({ ...card, entry: { ...card.entry, messages: [...(card.entry.messages || []), {
       id: id(), goId: card.entry.id, senderId: "yo", text: note.trim(), createdAt: Date.now(), deliveryMode: "internal" }] } }); setNote(""); }} />
-    {!!error && <Text style={{ color: "#ffb0b0" }}>{error}</Text>}
-    <Button label="Guardar tarea" disabled={!card.entry.notes.trim()} onPress={() => { try { const patch = boardDatePatch(card.entry.dateISO, card.entry.time);
-      setError(""); onSave({ ...card, entry: { ...card.entry, ...patch } }); } catch (e) { setError((e as Error).message); } }} />
     {saved && <View style={styles.row}><Button label={card.entry.localResolutionStatus === "done" ? "Marcar pendiente" : "Marcar completada"} onPress={onComplete} />
+      {onReorder && <><Button label="Subir tarea" onPress={() => onReorder(-1)} /><Button label="Bajar tarea" onPress={() => onReorder(1)} /></>}
       <Button label="Mover a otro tablero" onPress={onTransfer} /><Button label="Eliminar tarea" danger onPress={onDelete} /></View>}
+    </>}
   </KeyboardAwareScrollViewCompat>;
 }
 const styles = StyleSheet.create({
@@ -305,5 +363,6 @@ const styles = StyleSheet.create({
   board: { borderRadius: 16, padding: 18, borderWidth: 1, borderColor: "#58658b", backgroundColor: "#273b65" },
   card: { padding: 12, borderRadius: 10, backgroundColor: "#243047", borderWidth: 1, borderColor: "#45516b", gap: 6, marginVertical: 3 },
   day: { borderRadius: 12, borderWidth: 1, borderColor: "#45516b", backgroundColor: "#121b2b", padding: 12, gap: 8 },
-  banner: { backgroundColor: "#473b22", padding: 12, gap: 8 },
+  banner: { backgroundColor: "#473b22", flexGrow: 0, maxHeight: 128 },
+  syncStatus: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, backgroundColor: "#172234" },
 });
