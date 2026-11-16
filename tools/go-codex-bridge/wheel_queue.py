@@ -1481,9 +1481,53 @@ class Wheel:
                          "checkpoint_reused":True},db)
         return changed==1
 
+    def _preserve_unreleased_conflict(self,db,working):
+        """Isolate a blocked job whose Trello comment never left preparation."""
+        if (db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()):
+            return False
+        grant=self._verified(working)
+        attempt=db.execute("SELECT state,job_id,comment_operation,move_operation FROM factory_attempts "
+                           "WHERE card_id=? AND attempt=?",(grant["card_id"],grant["attempt"])).fetchone()
+        job=db.execute("SELECT state,pid,session_id,result FROM jobs WHERE id=?",
+                       (attempt["job_id"],)).fetchone() if attempt and attempt["job_id"] else None
+        stages=list(db.execute("SELECT letter,state,approval_id,receipt FROM wheel_stages WHERE grant_id=?",
+                               (grant["grant_id"],)))
+        checkpoint=db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
+                              (grant["grant_id"],)).fetchone()
+        operation=db.execute("SELECT action,state FROM operations WHERE id=?",
+                             (attempt["comment_operation"],)).fetchone() if attempt and attempt["comment_operation"] else None
+        if (not attempt or attempt["state"]!="blocked" or attempt["move_operation"]
+                or not job or job["state"]!="blocked" or job["pid"] or job["session_id"]
+                or not checkpoint or checkpoint["phase"]!="question-claimed:C"
+                or {(r["letter"],r["state"]) for r in stages}!={("A","claimed"),("C","claimed")}
+                or any(r["approval_id"] or r["receipt"] for r in stages)
+                or not operation or (operation["action"],operation["state"])!=("comment","prepared")):
+            return False
+        result=json.loads(job["result"] or "{}")
+        if result.get("programming_started") is not False:
+            return False
+        reason=result.get("classification_reason")
+        if not isinstance(reason,str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{2,80}",reason):
+            reason="WHEEL_UNRELEASED_CONFLICT"
+        changed=db.execute("UPDATE wheel_grants SET state='blocked',reason=? WHERE grant_id=? AND state='working'",
+                           (reason,grant["grant_id"])).rowcount
+        if changed:
+            self.b.audit("wheel_unreleased_conflict_preserved",{"grant":grant["grant_id"],
+                "reason":reason,"trello_write":False,"checkpoint_reused":True},db)
+        return changed==1
+
     def _live_selection(self,cards,policy):
         with self.b.db() as db:
-            working=db.execute("SELECT * FROM wheel_grants WHERE state='working'").fetchone()
+            working_rows=list(db.execute("SELECT * FROM wheel_grants WHERE state='working'"))
+            if len(working_rows)>1:
+                self.fail("WHEEL_WORKING_CONFLICT","Hay más de una ejecución parcial que requiere conciliación.")
+            working=working_rows[0] if working_rows else None
+        if working:
+            with self.b.db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                if self._preserve_unreleased_conflict(db,working):
+                    working=None
         if working:
             if working["card_id"] not in cards:
                 with self.b.db() as db:

@@ -138,6 +138,37 @@ class V2WheelTests(unittest.TestCase):
         with self.bridge.db() as db:
             self.assertEqual(db.execute("SELECT state FROM jobs WHERE id=?",(job_id,)).fetchone()[0],"blocked")
 
+    def test_unreleased_blocked_comment_outside_queue_preserves_history_and_yields(self):
+        w,grant,job_id=self.stopped_install()
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=?",
+                       (grant["grant_id"],))
+            db.execute("UPDATE jobs SET state='blocked',pid=NULL,session_id=NULL,result=? WHERE id=?",
+                       (json.dumps({"programming_started":False,"classification_reason":"WHEEL_DEPENDENCIES"}),job_id))
+        prepared=self.bridge.prepare_write("comment",{"card_id":grant["card_id"],
+            "text":"CONFLICTO — caso sintético", "job_id":job_id},inline_marker=True)
+        with self.bridge.db() as db:
+            db.execute("UPDATE factory_attempts SET comment_operation=? WHERE card_id=? AND attempt=?",
+                       (prepared["operation"],grant["card_id"],grant["attempt"]))
+            db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started) VALUES(?,'C','claimed','synthetic')",
+                       (grant["grant_id"],))
+        w.checkpoint(grant,"question-claimed:C")
+        self.cards[grant["card_id"]]["idList"]=CHECK
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        selected=w._live_selection(cards,w.live_policy())
+        self.assertNotEqual(selected["expected"],grant["card_id"])
+        with self.bridge.db() as db:
+            saved=db.execute("SELECT state,reason FROM wheel_grants WHERE grant_id=?",
+                             (grant["grant_id"],)).fetchone()
+            self.assertEqual(tuple(saved),("blocked","WHEEL_DEPENDENCIES"))
+            self.assertEqual(db.execute("SELECT state FROM operations WHERE id=?",
+                                        (prepared["operation"],)).fetchone()[0],"prepared")
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM wheel_stages WHERE grant_id=? AND state='claimed'",
+                                        (grant["grant_id"],)).fetchone()[0],2)
+            self.assertEqual(db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
+                                        (grant["grant_id"],)).fetchone()[0],"question-claimed:C")
+        self.assertFalse(self.runs or self.changes)
+
     def test_frozen_owner_approval_installs_v2_activation_atomically(self):
         w,ids=self.batch(diagnostic_fallback=True)
         self.assertTrue(w.enabled())
