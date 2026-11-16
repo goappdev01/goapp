@@ -716,13 +716,13 @@ class WheelEffects:
         return False
 
     def _snapshot(self,card_id):
-        card = self.b.api("/1/cards/"+card_id,{"fields":"id,idBoard,idList,shortLink,pos,closed"})
+        card = self.b.api("/1/cards/"+card_id,{"fields":"id,idBoard,idList,shortLink,pos,closed,desc"})
         if (card.get("id")!=card_id or card.get("idBoard")!=BOARD or card.get("closed")
                 or not isinstance(card.get("pos"),(int,float))):
             self.fail("WHEEL_TRELLO_CONTEXT","La tarjeta no coincide con su tablero o posición.")
         snapshot = self.b.read_card("https://trello.com/c/"+card["shortLink"],archive=False)["data"]
         if (snapshot["card"]["id"]!=card_id or snapshot["card"]["idList"]!=card["idList"] or
-                snapshot["card"].get("desc") or
+                snapshot["card"].get("desc")!=card.get("desc") or
                 not all(snapshot["verification"].get(k) for k in ("stable_during_read","pagination_exhausted"))):
             self.fail("WHEEL_TRELLO_CHANGED","La tarjeta cambió durante la lectura.")
         return card,snapshot["comments"]

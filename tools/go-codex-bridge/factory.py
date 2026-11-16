@@ -260,7 +260,8 @@ class Factory:
         check = snapshot["card"]
         if (not snapshot["verification"]["stable_during_read"] or not snapshot["verification"]["pagination_exhausted"]
                 or check.get("id") != card["id"] or check.get("idBoard") != BOARD
-                or check.get("idList") != QUEUE or check.get("desc") or check.get("name") != title):
+                or check.get("idList") != QUEUE or check.get("desc") != card.get("desc")
+                or check.get("name") != title):
             raise self.Error("FACTORY_CARD_CHANGED", "La tarjeta cambió durante la lectura.")
         try:
             placement = self._authorized_placement(card["id"])

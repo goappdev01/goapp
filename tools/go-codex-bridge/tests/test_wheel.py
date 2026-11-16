@@ -979,6 +979,28 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(wheel._live_selection(cards,wheel.live_policy())["waiting"],"NO_SAFE_ELIGIBLE_CARD")
         self.assertFalse(self.runs or self.changes)
 
+    def test_description_metadata_does_not_hide_latest_owner_instruction(self):
+        first=self.cards["a"*24]
+        first["desc"]="El prompt vigente está en el comentario; esta descripción es contexto."
+        latest={"id":"f"*24,"text":"Corregir únicamente la calculadora vigente y comprobar el resultado.",
+                "creatorId":OWNER,"date":"2026-11-16T15:00:00.000Z"}
+        first["comments"].append(latest)
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        cards={c["id"]:c for c in self.bridge.factory._cards()}
+        selected=wheel._live_selection(cards,wheel.live_policy())
+        self.assertEqual(selected["expected"],first["id"])
+        with self.bridge.db() as db:
+            grant=wheel._verified(db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",
+                                     (selected["grant_id"],)).fetchone())
+        self.assertEqual(grant["comment_ids"],[latest["id"]])
+        WheelEffects(self.bridge.factory)._snapshot(first["id"])
+        first["desc"]="Cambió la descripción durante la lectura."
+        with self.assertRaises(BridgeError) as changed:
+            wheel._subject(cards[first["id"]])
+        self.assertEqual(changed.exception.code,"FACTORY_CARD_CHANGED")
+        self.assertFalse(self.runs or self.changes)
+
     def test_live_reorder_after_first_read_defers_start_and_selects_new_head(self):
         wheel=self.bridge.factory.wheel
         wheel.activate_live("f"*64)
