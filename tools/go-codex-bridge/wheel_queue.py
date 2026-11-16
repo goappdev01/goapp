@@ -65,6 +65,7 @@ class Wheel:
             """)
         from factory_v2 import Continuity
         self.continuity=Continuity(self)
+        self.continuity.reconcile_private_question_pause()
 
     def fail(self, code, text):
         raise self.f.Error(code, text)

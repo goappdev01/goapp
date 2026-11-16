@@ -930,6 +930,84 @@ class V2WheelTests(unittest.TestCase):
         self.assertIn('no admite respuestas en vivo',response['message'])
         self.assertFalse(self.runs or self.changes)
 
+    def private_question_fixture(self,question):
+        w,grant,job_id,session=self.live_credit_wait()
+        request={"kind":"answer","question":question,"operation":"Revisar el resultado local"}
+        result={"exit_code":1,"response":"GO_FACTORY_QUESTION: "+json.dumps(request,ensure_ascii=False)}
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
+            db.execute("UPDATE wheel_control SET enabled=1,reason=NULL WHERE id=1")
+            db.execute("UPDATE factory_attempts SET state='blocked' WHERE card_id=? AND attempt=?",
+                       (grant["card_id"],grant["attempt"]))
+            db.execute("UPDATE jobs SET state='blocked',pid=NULL,result=? WHERE id=?",
+                       (json.dumps(result),job_id))
+        w.checkpoint(grant,"FACTORY_JOB_FAILED")
+        return w,grant,job_id,session,request
+
+    def test_private_answer_is_isolated_and_next_card_is_selectable(self):
+        w,grant,job_id,session,_=self.private_question_fixture("¿Dónde constan los secretos del ensayo?")
+        with patch.object(w.continuity,"_defer_question_to_trello") as trello:
+            result=w.continuity.card_error(grant,"FACTORY_JOB_FAILED")
+        self.assertEqual(result["reason"],"WHEEL_QUESTION_PRIVATE")
+        self.assertTrue(w.enabled())
+        trello.assert_not_called()
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",
+                (grant["grant_id"],)).fetchone()[0],"waiting_response")
+            self.assertEqual(db.execute("SELECT state FROM factory_questions WHERE grant_id=?",
+                (grant["grant_id"],)).fetchone()[0],"waiting")
+            self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
+            self.assertEqual(db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
+                (grant["grant_id"],)).fetchone()[0],"FACTORY_JOB_FAILED")
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM wheel_stages WHERE grant_id=? AND letter IN ('C','D')",
+                (grant["grant_id"],)).fetchone()[0],0)
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        selected=w._live_selection(cards,w.live_policy())
+        self.assertNotEqual(selected["expected"],grant["card_id"])
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='blocked' WHERE grant_id<>?",(grant["grant_id"],))
+        self.assertEqual(w._live_selection(cards,w.live_policy())["waiting"],"NO_SAFE_ELIGIBLE_CARD")
+        self.assertFalse(self.runs or self.changes)
+
+    def test_privacy_filter_uses_whole_terms_and_keeps_real_secrets_private(self):
+        check=Continuity._private_question
+        self.assertFalse(check("La secretaría confirma el ensayo", "Revisar respuesta"))
+        for text in ("Incluye secretos", "Password de acceso", "token temporal", "owner@example.invalid",
+                     "https://private.invalid", "Referencia 12345678"):
+            self.assertTrue(check(text,"Revisar respuesta"))
+
+    def test_legacy_private_pause_reconciles_once_without_activation_or_replay(self):
+        w,grant,job_id,session,request=self.private_question_fixture("¿Dónde constan los secretos del ensayo?")
+        w.continuity.question(grant,request["kind"],request["question"],request["operation"])
+        w.pause("WHEEL_QUESTION_PRIVATE")
+        restored=Bridge(self.home,self.home/'private',fixtures.TestProtector(),actor=self.bridge.actor)
+        recovered=restored.factory.wheel
+        self.assertFalse(recovered.continuity.reconcile_private_question_pause())
+        self.assertFalse(recovered.enabled())
+        self.assertEqual(recovered.status()["reason"],"OWNER_PAUSED")
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",
+                (grant["grant_id"],)).fetchone()[0],"waiting_response")
+            self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM factory_questions WHERE grant_id=?",
+                (grant["grant_id"],)).fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM wheel_stages WHERE grant_id=? AND letter IN ('C','D')",
+                (grant["grant_id"],)).fetchone()[0],0)
+        self.assertFalse(self.runs or self.changes)
+
+    def test_tampered_private_question_keeps_global_protection(self):
+        w,grant,_,_,request=self.private_question_fixture("¿Dónde constan los secretos del ensayo?")
+        w.continuity.question(grant,request["kind"],request["question"],request["operation"])
+        w.pause("WHEEL_QUESTION_PRIVATE")
+        with self.bridge.db() as db:
+            db.execute("UPDATE factory_questions SET signature='invalid' WHERE grant_id=?",(grant["grant_id"],))
+        self.assertFalse(w.continuity.reconcile_private_question_pause())
+        self.assertEqual(w.status()["reason"],"WHEEL_QUESTION_PRIVATE")
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",
+                (grant["grant_id"],)).fetchone()[0],"working")
+        self.assertFalse(self.runs or self.changes)
+
     def test_long_guide_is_repaired_without_new_cli_or_lost_words(self):
         steps=[wheel_fixtures.TWO_STEPS[0]+' '+('Revisa el nombre y la hora. '*20),wheel_fixtures.TWO_STEPS[1]]
         job={'id':'synthetic','result':{'response':'GO_FACTORY_EVIDENCE: '+json.dumps({'validation':steps})}}

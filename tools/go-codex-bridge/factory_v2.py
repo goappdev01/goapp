@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+from pathlib import Path
 import re
 import time
 import uuid
@@ -750,11 +751,18 @@ class Continuity:
                     waiting=True
             except (ValueError,KeyError,TypeError):
                 pass
+        if waiting and self._private_question(request["question"],request["operation"]):
+            # The signed question stays in the owner panel. No Trello grant is claimed.
+            self.w._transition(grant,"waiting_response","WHEEL_QUESTION_PRIVATE")
+            return {"card_blocked":grant["card_id"],"reason":"WHEEL_QUESTION_PRIVATE","again":True}
         if waiting and self.w.continuous() and all(
                 self.w._operation_authorized(grant,letter) for letter in "CD") and not self.w._expired(grant):
             try:
                 self._defer_question_to_trello(grant,request,job)
             except self.f.Error as error:
+                if error.code=="WHEEL_QUESTION_PRIVATE":
+                    self.w._transition(grant,"waiting_response",error.code)
+                    return {"card_blocked":grant["card_id"],"reason":error.code,"again":True}
                 self.w.pause(error.code)
                 return {"paused":error.code,"card_id":grant["card_id"]}
         elif (self.w.live_policy() and not waiting and job and
@@ -789,6 +797,72 @@ class Continuity:
         self.w._transition(grant,"waiting_response" if waiting else "wait_permissions" if code=="WHEEL_PERMISSION_REQUIRED" else "blocked",code)
         return {"card_blocked":grant["card_id"],"reason":code,"again":True}
 
+    @staticmethod
+    def _private_question(text,operation):
+        content=text+" "+operation
+        return not text.strip() or bool(re.search(
+            r"@|https?://|\b(?:tokens?|secrets?|secretos?|secretas?|passwords?|contraseñas?|api[_ -]?keys?|bearer)\b|\b\d{8,}\b",
+            content,re.I))
+
+    def reconcile_private_question_pause(self):
+        """Isolate one verified legacy private question without enabling the wheel."""
+        with self.f.lock,self.b.mutex,self.b.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            control=db.execute("SELECT enabled,reason FROM wheel_control WHERE id=1").fetchone()
+            if control["enabled"] or control["reason"]!="WHEEL_QUESTION_PRIVATE":
+                return False
+            rows=list(db.execute("SELECT * FROM wheel_grants WHERE state='working'"))
+            if len(rows)!=1 or db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone() or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone():
+                return False
+            try:
+                grant=self.w._verified(rows[0])
+                live=self.w.live_policy(db)
+                attempt=db.execute("SELECT state,job_id FROM factory_attempts WHERE card_id=? AND attempt=?",
+                                   (grant["card_id"],grant["attempt"])).fetchone()
+                job=db.execute("SELECT * FROM jobs WHERE id=?",(attempt["job_id"],)).fetchone() if attempt else None
+                checkpoint=db.execute("SELECT phase,snapshot FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
+                                      (grant["grant_id"],)).fetchone()
+                stages={r["letter"]:r["state"] for r in db.execute(
+                    "SELECT letter,state FROM wheel_stages WHERE grant_id=?",(grant["grant_id"],))}
+                questions=list(db.execute("SELECT * FROM factory_questions WHERE grant_id=?",(grant["grant_id"],)))
+                if (not live or grant.get("live_consent_sha256")!=live["consent_sha256"]
+                        or not attempt or attempt["state"]!="blocked" or not job or job["state"]!="blocked"
+                        or not job["session_id"] or process_alive(job["pid"])
+                        or not checkpoint or checkpoint["phase"]!="FACTORY_JOB_FAILED"
+                        or stages!={"A":"verified"} or len(questions)!=1 or questions[0]["state"]!="waiting"
+                        or not Path(grant["workspace"]).is_dir()):
+                    return False
+                snapshot=json.loads(checkpoint["snapshot"])
+                payload=json.loads(job["data"] or "{}")
+                result=json.loads(job["result"] or "{}")
+                document=json.loads(questions[0]["document"])
+                records=re.findall(r"^GO_FACTORY_QUESTION:\s*(\{[^\n]*\})\s*$",result.get("response",""),re.M)
+                if (snapshot.get("authorization",{}).get("grant_id")!=grant["grant_id"]
+                        or snapshot.get("job",{}).get("id")!=job["id"]
+                        or snapshot.get("job",{}).get("session_id")!=job["session_id"]
+                        or payload.get("agent")!="4" or payload.get("instruction_sha256")!=grant["instruction_sha"]
+                        or payload.get("source",{}).get("card_id")!=grant["card_id"]
+                        or not hmac.compare_digest(self.b.sign(document),questions[0]["signature"])
+                        or document.get("actor")!=self.b.actor or document.get("grant")!=grant["grant_id"]
+                        or document.get("card_id")!=grant["card_id"]
+                        or document.get("instruction_sha")!=grant["instruction_sha"]
+                        or len(records)!=1):
+                    return False
+                request=json.loads(records[0])
+                if (set(request)!={"kind","question","operation"}
+                        or any(request.get(key)!=document.get(key) for key in request)):
+                    return False
+            except (self.f.Error,OSError,TypeError,ValueError,KeyError):
+                return False
+            changed=db.execute("UPDATE wheel_grants SET state='waiting_response',reason='WHEEL_QUESTION_PRIVATE' "
+                               "WHERE grant_id=? AND state='working'",(grant["grant_id"],)).rowcount
+            if changed!=1:
+                return False
+            db.execute("UPDATE wheel_control SET reason='OWNER_PAUSED',retry_after=0 WHERE id=1")
+            self.b.audit("wheel_private_question_isolated",{"grant":grant["grant_id"],
+                "checkpoint":"FACTORY_JOB_FAILED","owner_activation_required":True},db)
+            return True
+
     def _defer_question_to_trello(self,grant,request,job,*,allow_prepared=False):
         """Use the card's C/D grants without claiming an unverified publication."""
         valid_states=("failed","blocked","needs_review","prepared") if allow_prepared else ("failed","blocked","needs_review")
@@ -796,7 +870,7 @@ class Continuity:
             self.w.fail("WHEEL_QUESTION_JOB_INVALID","La ejecución no tiene un bloqueo verificable.")
         text=request["question"].strip()
         operation=request["operation"].strip()
-        if (not text or re.search(r"@|https?://|(?:token|secret|password|contraseña)|\b\d{8,}\b",text+operation,re.I)):
+        if self._private_question(text,operation):
             self.w.fail("WHEEL_QUESTION_PRIVATE","La pregunta requiere revisión privada antes de compartirla.")
         from wheel_effects import WheelEffects
         from factory import CHECK
