@@ -18,6 +18,7 @@ import urllib.parse
 BOARD = "6abc770a895998672bb4294e"
 QUEUE = "6ac143de34ad352f3e74a750"
 CHECK = "6ad77a46825b5e9ca571b3a3"
+CHECK_V2 = "6afb3b7fec6d14770c06bc03"
 RECOVERY = "6afae8f07b89b2777981097c"
 DONE = "6ac1759ef45faba2f247d0ff"
 OWNER = "692315a454c5cfeac3e7f365"
@@ -26,7 +27,8 @@ INSTALL_CARDS = frozenset((INSTALL_CARD, "6af01d5ec274670459675173"))
 NAMES = {
     QUEUE: "AGENTE 4-COLA DE  PROMPT PARA CODEX-PELUQUERÍAS",
     CHECK: "AGENTE 4-COMPROBAR RESPUESTAS CODEX- PELUQUERÍAS",
-    RECOVERY: "ESTUDIOS INFORMES RECUPERACIONES",
+    CHECK_V2: "AGENTE 4-COMPROBAR V2",
+    RECOVERY: "CONFLICTOS V1",
     DONE: "Prompt YA HECHOS",
 }
 LIMIT_RE = re.compile(r"usage limit|rate limit|credits? exhausted|cuota agotada|límite de uso", re.I)
@@ -35,6 +37,22 @@ INSTRUCTION_CUE = re.compile(
     r"\b(?:trabaja|corregir|reparar|ajustar|cambiar|"
     r"modificar|implementar|a[nñ]adir|recuperar|programar|revisar|preparar|verificar|"
     r"integrar|publicar|diagnosticar|comprobar|restaurar|separar)\b", re.I)
+
+
+def work_scope(title, instruction):
+    """Conservatively identify an explicitly scoped V2 card in the V1 queue."""
+    if re.search(r"\bV2\b",title,re.I):
+        return "V2"
+    heading = [title, *[line for line in instruction.splitlines() if line.strip()][:6]]
+    if any(re.search(r"^\s*(?:#{1,4}\s*)?(?:GO\s*[-–—·/]\s*)?V2\b", line, re.I)
+           for line in heading):
+        return "V2"
+    for line in instruction.splitlines():
+        if (re.search(r"\bV2\b", line, re.I)
+                and re.search(r"\b(?:implementar|activar|desarrollar|programar|integrar|publicar)\b", line, re.I)
+                and not re.search(r"\b(?:no|sin)\s+(?:\w+\s+){0,3}V2\b", line, re.I)):
+            return "REVIEW"
+    return "V1"
 
 
 def diagnostic_instruction(text):
@@ -186,8 +204,9 @@ class Factory:
         if not isinstance(actual, list):
             raise self.Error("FACTORY_LISTS_INVALID", "No se pudieron comprobar las listas.")
         mapping = {x.get("id"): x.get("name") for x in actual if isinstance(x, dict)}
-        if any(mapping.get(k) != v for k, v in NAMES.items()):
+        if any(mapping.get(k) != v for k, v in NAMES.items() if k!=CHECK_V2):
             raise self.Error("FACTORY_LISTS_CHANGED", "Los destinos del tablero no coinciden con los verificados.")
+        return mapping
 
     def _identity(self):
         member = self.bridge.api("/1/members/me", {"fields": "id"})
@@ -310,6 +329,7 @@ class Factory:
                     attempt=prior["attempt"]
         return {"card_id": card["id"], "attempt": attempt, "agent": "4" if live_queue else matches.pop(),
                 "title": title, "instruction": text, "instruction_sha": instruction_sha,
+                "work_scope": work_scope(title,text),
                 "comment_ids": [c["id"] for c in instructions],
                 "placement": placement, "activity": check.get("dateLastActivity"),
                 "live_return":live_return}

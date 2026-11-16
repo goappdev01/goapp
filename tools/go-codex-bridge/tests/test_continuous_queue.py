@@ -95,8 +95,10 @@ class ContinuousQueueTests(unittest.TestCase):
             "operation":"Seleccionar el comportamiento de prueba"},job)
         self.assertEqual(self.cards[ids[0]]["idList"],w._verified(row)["destination"])
         self.assertEqual(self.changes,[(ids[0],"C"),(ids[0],"D")])
-        self.assertTrue(self.cards[ids[0]]["comments"][-1]["text"].startswith("CONFLICTO."))
-        self.assertIn("Solución pendiente:",self.cards[ids[0]]["comments"][-1]["text"])
+        comment=self.cards[ids[0]]["comments"][-1]["text"]
+        self.assertTrue(comment.startswith("CONFLICTO — QUÉ FALTA"))
+        self.assertIn("Pendiente y solución:",comment)
+        self.assertIn("publicación MAIN no verificada",comment)
         with self.bridge.db() as db:
             stages=[(r["letter"],r["state"]) for r in db.execute(
                 "SELECT letter,state FROM wheel_stages WHERE grant_id=? ORDER BY letter",(grant["grant_id"],))]

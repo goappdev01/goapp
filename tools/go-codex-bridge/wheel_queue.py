@@ -8,7 +8,7 @@ import subprocess
 import time
 import uuid
 
-from factory import BOARD, QUEUE, CHECK, RECOVERY, OWNER, INSTALL_CARDS, LIMIT_RE, diagnostic_instruction
+from factory import BOARD, QUEUE, CHECK, CHECK_V2, RECOVERY, OWNER, INSTALL_CARDS, LIMIT_RE, diagnostic_instruction
 from puente import process_alive
 
 STAGES = "ABCD"
@@ -62,6 +62,9 @@ class Wheel:
                 grant_id TEXT NOT NULL, letter TEXT NOT NULL, state TEXT NOT NULL,
                 started TEXT NOT NULL, finished TEXT, receipt TEXT, approval_id TEXT,
                 PRIMARY KEY(grant_id,letter));
+            CREATE TABLE IF NOT EXISTS wheel_queue_skips(
+                card_id TEXT PRIMARY KEY, grant_id TEXT, reason TEXT NOT NULL,
+                destination TEXT NOT NULL, checked TEXT NOT NULL);
             """)
         from factory_v2 import Continuity
         self.continuity=Continuity(self)
@@ -492,7 +495,8 @@ class Wheel:
                 for stage in stages:
                     if stage["receipt"]:
                         stage["receipt"] = json.loads(stage["receipt"])
-                grants.append({"card_id":row["card_id"], "attempt":row["attempt"], "title":terms["title"],
+                grants.append({"card_id":row["card_id"], "grant_id":row["grant_id"],
+                               "attempt":row["attempt"], "title":terms["title"],
                                "position":terms["position"], "operations":terms["operations"], "depends_on":terms["depends_on"],
                                "work_kind":terms.get("work_kind","implementation"),
                                "dependency_versions":terms["dependency_versions"],
@@ -509,9 +513,33 @@ class Wheel:
                        latest[dep]["attempt"]==grant["dependency_versions"][dep]["attempt"] for dep in grant["depends_on"])
         # Status uses the latest verified Trello snapshot, never old approval positions.
         preview = self.f._control().get("queue_preview", "[]")
-        first = next(iter(json.loads(preview)), None)
-        queued = [r for r in grants if first and r["card_id"]==first["card_id"] and r["state"]=="ready"
-                  and dependencies_closed(r) and r["expires_at"]>time.time()]
+        preview=json.loads(preview)
+        skipped={r["card_id"]:dict(r) for r in self._queue_skips()}
+        first=next(iter(preview),None)
+        queued=[]
+        next_action=None
+        for card in preview:
+            grant=latest.get(card["card_id"])
+            if not grant:
+                continue
+            private_pending=False
+            if grant["state"] in ("waiting_response","working"):
+                with self.b.db() as db:
+                    saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(grant["grant_id"],)).fetchone()
+                    private_pending=bool(saved and self.continuity.pending_private_question(
+                        db,saved,self._verified(saved)))
+            if private_pending and (card["card_id"] not in skipped or
+                                    skipped[card["card_id"]]["reason"]=="WHEEL_QUESTION_PENDING"):
+                queued=[grant]
+                next_action="Registrar el conflicto sin exponer la pregunta privada; conservar el checkpoint."
+                break
+            if (card["card_id"] not in skipped and grant["state"] in ("ready","working","credit_wait")
+                    and dependencies_closed(grant) and grant["expires_at"]>time.time()):
+                queued=[grant]
+                next_action=("Reanudar la sesión y el checkpoint conservados." if grant["state"]=="credit_wait"
+                             else "Continuar el intento y sus etapas verificadas." if grant["state"]=="working"
+                             else "Primera tarjeta vigente con autorización y dependencias satisfechas.")
+                break
         receipts = {s["letter"]:s["receipt"] for r in reversed(grants) for s in r["stages"] if s["receipt"]}
         publication = receipts.get("B", {})
         current=next((r for r in grants if r["state"]=="working"),None)
@@ -524,7 +552,14 @@ class Wheel:
                 phase=next((label for letter,label in (("A","Preparando ejecución"),("B","Verificando el diagnóstico" if current.get("work_kind")=="diagnosis" else "Validando y publicando"),
                     ("C","Comentando el resultado"),("D","Verificando el traslado")) if letter not in done),"Cerrando tarjeta")
             current={**current,"phase":phase}
+            if current["job_state"] in ("running","detached") or any(
+                    stage["state"]=="claimed" for stage in current["stages"]):
+                queued=[current]
+                next_action="Conciliar primero la ejecución u operación activa."
         return {**control, "enabled":bool(control["enabled"]), "grants":grants, "next":next(iter(queued),None),
+                "next_action":next_action,
+                "skipped":[{**skipped[item["card_id"]],"title":item["title"]} for item in preview
+                           if item["card_id"] in skipped],
                 "last_tests":publication.get("tests"), "last_publication":publication.get("main_sha"),
                 "metro":publication.get("metro"), "api":publication.get("api"),
                 "comment":receipts.get("C"), "move":receipts.get("D"),
@@ -564,7 +599,13 @@ class Wheel:
         subject = {k:spec[k] for k in ("card_id","attempt","agent","title","instruction_sha","comment_ids","placement")}
         if live:
             subject["live_return"]=spec["live_return"]
-        subject.update(position=card["pos"], board=BOARD, origin=QUEUE, destination=CHECK,
+        destination=CHECK_V2 if spec["work_scope"]=="V2" else CHECK
+        with self.b.db() as db:
+            saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=? AND attempt=?",
+                             (card["id"],spec["attempt"])).fetchone()
+        if saved:
+            destination=self._verified(saved)["destination"]
+        subject.update(position=card["pos"], board=BOARD, origin=QUEUE, destination=destination,
                        workspace=str(workspace), agent_settings=self.b.config["agents"]["4"],
                        owner=OWNER, publish_target="goappdev01/goapp:main",cli_settings=self.b.cli_defaults())
         if diagnostic_instruction(spec["instruction"]):
@@ -919,6 +960,11 @@ class Wheel:
             if bound!=self.f.digest(live["codex_identity"]):
                 self.fail("WHEEL_CODEX_SESSION_CHANGED","La autorización de esta tarjeta pertenece a otra cuenta Codex.")
         subject, spec=self._subject(card)
+        expected_destination=CHECK_V2 if spec["work_scope"]=="V2" else CHECK
+        if spec["work_scope"]=="REVIEW" or g["destination"]!=expected_destination:
+            self.fail("WHEEL_DESTINATION_REVIEW","El alcance V1/V2 y el destino firmado requieren revisión.")
+        if expected_destination==CHECK_V2 and self.f._lists().get(CHECK_V2)!="AGENTE 4-COMPROBAR V2":
+            self.fail("WHEEL_DESTINATION_REVIEW","La lista COMPROBAR V2 no coincide con el destino verificado.")
         with self.b.db() as db:
             active=db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",(g["grant_id"],)).fetchone()
         if live and g.get("live_consent_sha256")==live["consent_sha256"]:
@@ -1348,6 +1394,8 @@ class Wheel:
     def _live_grant(self, card, policy):
         """Materialize A/B/C/D for one freshly verified owner card, once only."""
         subject,spec=self._subject(card)
+        if spec["work_scope"]!="V1":
+            self.fail("WHEEL_SCOPE_REVIEW_REQUIRED","La cola V1 no autoriza esta instrucción V2 o de alcance ambiguo.")
         self._history_guard(card["id"],spec["attempt"],spec["instruction_sha"],
                             live_return=spec.get("live_return",False))
         diagnosis=subject.get("work_kind")=="diagnosis"
@@ -1397,6 +1445,42 @@ class Wheel:
                 "instruction_sha":spec["instruction_sha"],"operations":grant["operations"],
                 "consent_sha256":policy["consent_sha256"]},db)
 
+    def _queue_skips(self):
+        with self.b.db() as db:
+            return list(db.execute("SELECT * FROM wheel_queue_skips"))
+
+    def _record_skip(self,db,card,reason,grant=None):
+        card_id=card["id"]
+        grant_id=grant["grant_id"] if grant else None
+        previous=db.execute("SELECT grant_id,reason,destination FROM wheel_queue_skips WHERE card_id=?",
+                            (card_id,)).fetchone()
+        if previous and (previous["grant_id"],previous["reason"],previous["destination"])==(grant_id,reason,QUEUE):
+            return
+        db.execute("INSERT INTO wheel_queue_skips(card_id,grant_id,reason,destination,checked) VALUES(?,?,?,?,?) "
+                   "ON CONFLICT(card_id) DO UPDATE SET grant_id=excluded.grant_id,reason=excluded.reason,"
+                   "destination=excluded.destination,checked=excluded.checked",
+                   (card_id,grant_id,reason,QUEUE,self.f.utc()))
+        self.b.audit("wheel_queue_card_skipped",{"card_id":card_id,"grant_id":grant_id,
+                     "reason":reason,"destination":QUEUE},db)
+
+    @staticmethod
+    def _clear_skip(db,card_id):
+        db.execute("DELETE FROM wheel_queue_skips WHERE card_id=?",(card_id,))
+
+    def _yield_idle_working(self,db,working):
+        """Release only an idle lease; all job, stage and operation receipts remain."""
+        if (db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()
+                or db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND state='claimed'",
+                              (working["grant_id"],)).fetchone()):
+            return False
+        changed=db.execute("UPDATE wheel_grants SET state='ready' WHERE grant_id=? AND state='working'",
+                           (working["grant_id"],)).rowcount
+        if changed:
+            self.b.audit("wheel_idle_work_preserved",{"grant":working["grant_id"],
+                         "checkpoint_reused":True},db)
+        return changed==1
+
     def _live_selection(self,cards,policy):
         with self.b.db() as db:
             working=db.execute("SELECT * FROM wheel_grants WHERE state='working'").fetchone()
@@ -1405,11 +1489,44 @@ class Wheel:
                 with self.b.db() as db:
                     moved=db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter='D' AND state='verified'",
                                      (working["grant_id"],)).fetchone()
+                    private=db.execute("SELECT 1 FROM factory_questions WHERE grant_id=? AND state='waiting'",
+                                       (working["grant_id"],)).fetchone()
                 if not moved:
-                    return {"waiting":"WHEEL_WORKING_CARD_MISSING","open_queue":True}
-            return {"expected":working["card_id"],"grant_id":working["grant_id"],
-                    "codex_identity":policy["codex_identity"],"independent":True,
-                    "open_queue":True,"post_move_close":working["card_id"] not in cards}
+                    with self.b.db() as db:
+                        db.execute("BEGIN IMMEDIATE")
+                        if not self._yield_idle_working(db,working):
+                            return {"waiting":"WHEEL_WORKING_CARD_MISSING","open_queue":True}
+                        self.b.audit("wheel_card_left_queue_preserved",{"grant":working["grant_id"]},db)
+                    working=None
+                else:
+                    if private:
+                        self._transition(self._verified(working),"waiting_response","WHEEL_QUESTION_PRIVATE")
+                        working=None
+                    else:
+                        return {"expected":working["card_id"],"grant_id":working["grant_id"],
+                                "codex_identity":policy["codex_identity"],"independent":True,
+                                "open_queue":True,"post_move_close":True}
+            if working:
+                with self.b.db() as db:
+                    private=db.execute("SELECT 1 FROM factory_questions WHERE grant_id=? AND state='waiting'",
+                                       (working["grant_id"],)).fetchone()
+                    uncertain=private and db.execute(
+                        "SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter IN ('C','D') AND state='claimed'",
+                        (working["grant_id"],)).fetchone()
+                if uncertain:
+                    self.fail("WHEEL_STAGE_UNCERTAIN","Una operación de Trello requiere conciliación antes de continuar.")
+                with self.b.db() as db:
+                    if (db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                            or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()
+                            or db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND state='claimed'",
+                                          (working["grant_id"],)).fetchone()):
+                        return {"expected":working["card_id"],"grant_id":working["grant_id"],
+                                "codex_identity":policy["codex_identity"],"independent":True,
+                                "open_queue":True}
+        with self.b.db() as db:
+            for saved_skip in db.execute("SELECT card_id FROM wheel_queue_skips"):
+                if saved_skip["card_id"] not in cards:
+                    self._clear_skip(db,saved_skip["card_id"])
         for card in cards.values():
             with self.b.db() as db:
                 saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
@@ -1425,6 +1542,8 @@ class Wheel:
                 except self.f.Error as error:
                     if self._system(error.code):
                         raise
+                    with self.b.db() as db:
+                        self._record_skip(db,card,error.code,self._verified(saved))
                     continue
             if not saved:
                 try:
@@ -1432,8 +1551,8 @@ class Wheel:
                 except self.f.Error as error:
                     if self._system(error.code):
                         raise
-                    self.b.audit("wheel_live_card_rejected",{"card_id":card["id"],
-                        "reason":error.code})
+                    with self.b.db() as db:
+                        self._record_skip(db,card,error.code)
                     continue
                 with self.b.db() as db:
                     saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
@@ -1441,12 +1560,74 @@ class Wheel:
             if not saved:
                 continue
             grant=self._verified(saved)
+            if saved["state"] in ("waiting_response","working"):
+                with self.b.db() as db:
+                    pending=self.continuity.pending_private_question(db,saved,grant)
+                if pending:
+                    try:
+                        self._check_card(grant,card)
+                        workspace_state=self.b.git_state(grant["workspace"])
+                        if not workspace_state.get("git") or workspace_state.get("tracked_dirty"):
+                            self.fail("WHEEL_PRESERVATION_DIRTY","El trabajo parcial requiere revisión antes de mover la tarjeta.")
+                    except self.f.Error as error:
+                        if self._system(error.code) and error.code!="WHEEL_PRESERVATION_DIRTY":
+                            raise
+                        with self.b.db() as db:
+                            self._record_skip(db,card,error.code,grant)
+                        continue
+                    if working and working["grant_id"]!=grant["grant_id"]:
+                        with self.b.db() as db:
+                            db.execute("BEGIN IMMEDIATE")
+                            if not self._yield_idle_working(db,working):
+                                return {"waiting":"WHEEL_WORKING_CARD_BUSY","open_queue":True}
+                        working=None
+                    with self.b.db() as db:
+                        self._clear_skip(db,card["id"])
+                    return {"expected":card["id"],"grant_id":grant["grant_id"],
+                            "codex_identity":policy["codex_identity"],"independent":True,
+                            "open_queue":True,"defer_private_question":True}
             if saved["state"] in ("blocked","waiting_response","closed","uncertain","expired"):
+                reason={"waiting_response":"WHEEL_QUESTION_PENDING","closed":"WHEEL_CLOSED_CARD_IN_QUEUE",
+                        "uncertain":"WHEEL_STAGE_UNCERTAIN","expired":"WHEEL_EXPIRY_INVALID"}.get(
+                            saved["state"],saved["reason"] or "WHEEL_CARD_BLOCKED")
+                with self.b.db() as db:
+                    self._record_skip(db,card,reason,grant)
                 continue
             with self.b.db() as db:
+                runtime=db.execute("SELECT retry_after FROM factory_card_runtime WHERE grant_id=?",
+                                   (grant["grant_id"],)).fetchone()
+                if runtime and runtime[0]>time.time():
+                    self._record_skip(db,card,"RETRY_BACKOFF",grant)
+                    continue
                 dependencies_ready=self._dependencies_ready(db,grant,None,cards)
-            if saved["state"] not in ("ready","wait_permissions","credit_wait") or not dependencies_ready:
+                if not dependencies_ready:
+                    self._record_skip(db,card,"WHEEL_HEAD_DEPENDENCY_BLOCKED",grant)
+                    continue
+                if self._expired(grant) or not self._operation_authorized(grant,"A"):
+                    self._record_skip(db,card,"WHEEL_PERMISSION_REQUIRED",grant)
+                    continue
+            if saved["state"] not in ("ready","working","wait_permissions","credit_wait"):
+                with self.b.db() as db:
+                    self._record_skip(db,card,"WHEEL_HEAD_REVIEW_REQUIRED",grant)
                 continue
+            try:
+                _,spec=self._subject(card)
+                if spec["work_scope"]!="V1":
+                    self.fail("WHEEL_SCOPE_REVIEW_REQUIRED","La cola V1 no autoriza este alcance.")
+            except self.f.Error as error:
+                if self._system(error.code):
+                    raise
+                with self.b.db() as db:
+                    self._record_skip(db,card,error.code,grant)
+                continue
+            if working and working["grant_id"]!=grant["grant_id"]:
+                with self.b.db() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    if not self._yield_idle_working(db,working):
+                        return {"waiting":"WHEEL_WORKING_CARD_BUSY","open_queue":True}
+                working=None
+            with self.b.db() as db:
+                self._clear_skip(db,card["id"])
             return {"expected":card["id"],"grant_id":grant["grant_id"],
                     "codex_identity":policy["codex_identity"],"independent":True,"open_queue":True,
                     "resume_credit":saved["state"]=="credit_wait"}
@@ -1542,6 +1723,23 @@ class Wheel:
                     if current.get("expected")!=trial.get("expected") or current.get("grant_id")!=trial.get("grant_id"):
                         return {"again":True,"queue_changed":True}
                     cards=refreshed
+            if live and trial and trial.get("defer_private_question"):
+                with self.b.db() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    row=db.execute("SELECT * FROM wheel_grants WHERE grant_id=? AND state IN ('waiting_response','working')",
+                                   (trial["grant_id"],)).fetchone()
+                    other_working=db.execute("SELECT 1 FROM wheel_grants WHERE state='working' AND grant_id<>?",
+                                             (trial["grant_id"],)).fetchone()
+                    if (not row or other_working
+                            or trial["expected"] not in cards):
+                        return {"again":True,"queue_changed":True}
+                    grant=self._verified(row)
+                    if not self.continuity.pending_private_question(db,row,grant):
+                        return {"again":True,"queue_changed":True}
+                    db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=? AND state='waiting_response'",
+                               (grant["grant_id"],))
+                with self.b.card_workspace(grant["workspace"]):
+                    return self.continuity.defer_existing_private_question(grant)
             with self.b.db() as db:
                 db.execute("BEGIN IMMEDIATE")
                 db.execute("UPDATE wheel_control SET checked=? WHERE id=1",(self.f.utc(),))

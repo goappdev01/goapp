@@ -643,7 +643,16 @@ class Continuity:
                 return {"expected":working["card_id"],"grant_id":working["grant_id"],
                         "codex_identity":doc["codex_identity"],"independent":True,
                         "post_move_close":True,"open_queue":True}
-            return {"waiting":"WHEEL_WORKING_CARD_MISSING","again":False}
+            if not self.w._yield_idle_working(db,working):
+                return {"waiting":"WHEEL_WORKING_CARD_MISSING","again":False}
+            self.b.audit("wheel_card_left_queue_preserved",{"grant":working["grant_id"]},db)
+            working=None
+        if working and (db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()
+                or db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND state='claimed'",
+                              (working["grant_id"],)).fetchone()):
+            return {"expected":working["card_id"],"grant_id":working["grant_id"],
+                    "codex_identity":doc["codex_identity"],"independent":True,"open_queue":True}
         # Trello's current order determines the next eligible card. A saved
         # workspace remains available when its card is moved further down.
         ordered=list(cards.values())
@@ -655,25 +664,89 @@ class Continuity:
             row=db.execute("SELECT * FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
                            (card["id"],)).fetchone()
             if not row:
+                self.w._record_skip(db,card,"WHEEL_HEAD_PERMISSION_REQUIRED")
                 continue
             grant=self.w._verified(row)
             if row["state"] not in ("working","ready","wait_permissions"):
+                self.w._record_skip(db,card,row["reason"] or "WHEEL_HEAD_REVIEW_REQUIRED",grant)
                 continue
             if self.w._expired(grant) or not self.w._operation_authorized(grant,"A"):
+                self.w._record_skip(db,card,"WHEEL_PERMISSION_REQUIRED",grant)
                 continue
             runtime=db.execute("SELECT retry_after FROM factory_card_runtime WHERE grant_id=?",
                                (grant["grant_id"],)).fetchone()
             if runtime and runtime[0]>time.time():
                 if row["state"]=="working":
                     return {"waiting":"RETRY_BACKOFF","again":False}
+                self.w._record_skip(db,card,"RETRY_BACKOFF",grant)
                 continue
             if not self.w._dependencies_ready(db,grant,{"explicit_diagnostic_fallback":True,
                                                         "grant_id":grant["grant_id"]},cards):
+                self.w._record_skip(db,card,"WHEEL_HEAD_DEPENDENCY_BLOCKED",grant)
                 continue
+            if working and working["grant_id"]!=grant["grant_id"]:
+                if not self.w._yield_idle_working(db,working):
+                    return {"waiting":"WHEEL_WORKING_CARD_BUSY","again":False}
+                working=None
+            self.w._clear_skip(db,card["id"])
             return {"expected":card["id"],"grant_id":grant["grant_id"],
                     "codex_identity":doc["codex_identity"],"independent":True,
                     "explicit_diagnostic_fallback":True,"open_queue":True}
         return {"waiting":"NO_AUTHORIZED_CARD","again":False,"open_queue":True}
+
+    def pending_private_question(self,db,row,grant):
+        """A prior private question may receive only its still-authorized C/D effects."""
+        if (row["state"] not in ("waiting_response","working")
+                or (row["reason"]!="WHEEL_QUESTION_PRIVATE" and row["state"]!="working")
+                or self.w._expired(grant) or not all(self.w._operation_authorized(grant,letter)
+                                                for letter in "CD")):
+            return False
+        attempt=db.execute("SELECT job_id FROM factory_attempts WHERE card_id=? AND attempt=?",
+                           (grant["card_id"],grant["attempt"])).fetchone()
+        job=db.execute("SELECT state,session_id FROM jobs WHERE id=?",
+                       (attempt["job_id"],)).fetchone() if attempt and attempt["job_id"] else None
+        stages={stage["letter"]:stage["state"] for stage in db.execute(
+            "SELECT letter,state FROM wheel_stages WHERE grant_id=?",(grant["grant_id"],))}
+        checkpoint=db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
+                              (grant["grant_id"],)).fetchone()
+        questions=list(db.execute("SELECT document,signature,state FROM factory_questions WHERE grant_id=?",
+                                  (grant["grant_id"],)))
+        if (not job or job["state"]!="blocked" or not job["session_id"]
+                or stages not in ({"A":"verified"},{"A":"verified","C":"verified"})
+                or not checkpoint or checkpoint["phase"] not in (
+                    "FACTORY_JOB_FAILED","question-claimed:C","verified:C")
+                or len(questions)!=1 or questions[0]["state"]!="waiting"
+                or db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()):
+            return False
+        try:
+            question=json.loads(questions[0]["document"])
+            return (hmac.compare_digest(self.b.sign(question),questions[0]["signature"])
+                    and question.get("grant")==grant["grant_id"]
+                    and question.get("instruction_sha")==grant["instruction_sha"])
+        except (ValueError,TypeError,KeyError):
+            return False
+
+    def defer_existing_private_question(self,grant):
+        attempt=self.f._row(grant["card_id"],grant["attempt"])
+        job=self.b.job(attempt["job_id"])
+        try:
+            self._defer_question_to_trello(grant,{
+                "kind":"answer",
+                "question":"Pregunta privada pendiente de decisión del propietario en el puente.",
+                "operation":"Responder o denegar desde el panel privado; conservar la sesión y el checkpoint."},
+                job,allow_prepared=True)
+        except self.f.Error as error:
+            with self.b.db() as db:
+                issued=db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter IN ('C','D')",
+                                  (grant["grant_id"],)).fetchone()
+            if issued:
+                self.w.pause(error.code)
+                return {"paused":error.code,"card_id":grant["card_id"]}
+            self.w._transition(grant,"waiting_response",error.code)
+            return {"card_blocked":grant["card_id"],"reason":error.code,"again":True}
+        self.w._transition(grant,"waiting_response","WHEEL_QUESTION_PRIVATE")
+        return {"card_blocked":grant["card_id"],"reason":"WHEEL_QUESTION_PRIVATE","again":True}
 
     def resume_preserved_conflict(self,grant,row,card):
         """Finish a claimed B stage whose work was archived before an error."""
@@ -752,7 +825,19 @@ class Continuity:
             except (ValueError,KeyError,TypeError):
                 pass
         if waiting and self._private_question(request["question"],request["operation"]):
-            # The signed question stays in the owner panel. No Trello grant is claimed.
+            # Keep the actual question in the private panel. The public comment
+            # carries only a generic decision request, after C/D are verified.
+            if (self.w.continuous() and job and all(self.w._operation_authorized(grant,letter)
+                    for letter in "CD") and not self.w._expired(grant)):
+                try:
+                    self._defer_question_to_trello(grant,{
+                        "kind":request["kind"],
+                        "question":"Pregunta privada pendiente de decisión del propietario en el puente.",
+                        "operation":"Responder o denegar desde el panel privado; conservar la sesión y el checkpoint."},
+                        job,allow_prepared=True)
+                except self.f.Error as error:
+                    self.w.pause(error.code)
+                    return {"paused":error.code,"card_id":grant["card_id"]}
             self.w._transition(grant,"waiting_response","WHEEL_QUESTION_PRIVATE")
             return {"card_blocked":grant["card_id"],"reason":"WHEEL_QUESTION_PRIVATE","again":True}
         if waiting and self.w.continuous() and all(
@@ -879,19 +964,49 @@ class Continuity:
         if self._private_question(text,operation):
             self.w.fail("WHEEL_QUESTION_PRIVATE","La pregunta requiere revisión privada antes de compartirla.")
         from wheel_effects import WheelEffects
-        from factory import RECOVERY
+        from factory import CHECK, CHECK_V2, work_scope
         effects=WheelEffects(self.f)
         row=self.f._row(grant["card_id"],grant["attempt"])
         card,comments=effects._snapshot(grant["card_id"])
-        if card["idList"]!=grant["origin"] or [c["id"] for c in self.f.signed_comments(card["id"],comments,grant)]!=grant["comment_ids"]:
+        instructions=self.f.signed_comments(card["id"],comments,grant)
+        if card["idList"]!=grant["origin"] or [c["id"] for c in instructions]!=grant["comment_ids"]:
             self.w.fail("WHEEL_TRELLO_CHANGED","La tarjeta cambió antes de registrar la pregunta.")
-        comment=("CONFLICTO — QUÉ FALTA\nEl trabajo parcial y su checkpoint están conservados; "
-                 "no hay publicación confirmada.\nCausa: "+text+"\nSiguiente acción: "+operation)
+        scope=work_scope(grant["title"],"\n\n".join(c["text"] for c in instructions))
+        destination=CHECK_V2 if scope=="V2" else CHECK
+        if scope=="REVIEW" or grant["destination"]!=destination:
+            self.w.fail("WHEEL_DESTINATION_REVIEW","El alcance de la tarjeta y su destino firmado no coinciden.")
+        with self.b.db() as db:
+            completed={r["letter"] for r in db.execute(
+                "SELECT letter FROM wheel_stages WHERE grant_id=? AND state='verified'",
+                (grant["grant_id"],))}
+            checkpoint=db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? "
+                                  "AND phase NOT LIKE 'question-claimed:%' "
+                                  "AND phase NOT IN ('verified:C','verified:D') ORDER BY id DESC LIMIT 1",
+                                  (grant["grant_id"],)).fetchone()
+        progress=("Publicación MAIN verificada." if "B" in completed else
+                  "Trabajo parcial conservado; publicación MAIN no verificada.")
+        options=("Autorizar una vez / Denegar" if request.get("kind")=="permission" else
+                 "Responder en el puente / Denegar")
+        comment=("CONFLICTO — QUÉ FALTA\nCausa: "+text+"\nHecho: "+progress+
+                 "\nCheckpoint: "+(checkpoint["phase"] if checkpoint else "sin fase registrada")+
+                 "\nPendiente y solución: "+operation+"\nDecisión: "+options)
         for letter,action,data in (("C","comment",{"card_id":card["id"],"text":comment,"job_id":job["id"]}),
-                                   ("D","move",{"card_id":card["id"],"list_id":RECOVERY,"pos":"top"})):
+                                   ("D","move",{"card_id":card["id"],"list_id":destination,"pos":"top"})):
             with self.b.db() as db:
-                if db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND letter=?",(grant["grant_id"],letter)).fetchone():
-                    self.w.fail("WHEEL_STAGE_UNCERTAIN","La operación de Trello ya tiene un intento registrado.")
+                stage=db.execute("SELECT state,receipt FROM wheel_stages WHERE grant_id=? AND letter=?",
+                                 (grant["grant_id"],letter)).fetchone()
+                if stage:
+                    if letter!="C" or stage["state"]!="verified":
+                        self.w.fail("WHEEL_STAGE_UNCERTAIN","La operación de Trello ya tiene un intento registrado.")
+                    operations=effects._operations(row,action)
+                    record=json.loads(operations[0]["payload"]) if len(operations)==1 else {}
+                    prior=record.get("payload") or {}
+                    if (len(operations)!=1 or prior.get("card_id")!=card["id"]
+                            or prior.get("job_id")!=job["id"]
+                            or prior.get("text")!=comment+" "+record.get("marker","")
+                            or effects._trello_receipt("C",row,grant,operations[0])!=json.loads(stage["receipt"] or "null")):
+                        self.w.fail("WHEEL_COMMENT_UNVERIFIED","El comentario previo no coincide con su comprobante.")
+                    continue
                 db.execute("INSERT INTO wheel_stages(grant_id,letter,state,started) VALUES(?,?,'claimed',?)",
                            (grant["grant_id"],letter,self.f.utc()))
             self.w.checkpoint(grant,"question-claimed:"+letter)

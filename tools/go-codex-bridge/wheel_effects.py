@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 from safety import Safety
-from factory import BOARD, CHECK, RECOVERY, QUEUE, OWNER, GUIDE_NAVIGATION, GUIDE_ACTION, GUIDE_EXPECTATION, guide_has_personal_steps, normalize_guide
+from factory import BOARD, CHECK, CHECK_V2, RECOVERY, QUEUE, OWNER, GUIDE_NAVIGATION, GUIDE_ACTION, GUIDE_EXPECTATION, guide_has_personal_steps, normalize_guide
 
 
 def node_environment():
@@ -738,7 +738,7 @@ class WheelEffects:
                 self.fail("WHEEL_COMMENT_UNVERIFIED","No se pudo verificar el comentario exacto en la lista esperada.")
             return {"operation":op["id"],"comment_id":matches[0]["id"],"text_sha256":self.f.digest(matches[0]["text"])}
         target=record["payload"].get("list_id")
-        if target not in (CHECK,RECOVERY) or card["idList"]!=target or record["payload"].get("pos")!="top":
+        if target not in (CHECK,CHECK_V2,RECOVERY) or card["idList"]!=target or record["payload"].get("pos")!="top":
             self.fail("WHEEL_MOVE_UNVERIFIED","No se confirmó la tarjeta en su destino autorizado.")
         originals = self.f.signed_comments(card["id"],comments,grant)
         if ([comment["id"] for comment in originals]!=grant["comment_ids"] or
@@ -807,7 +807,7 @@ class WheelEffects:
             ops=self._operations(row,"comment")
             if len(ops)!=1 or self._trello_receipt("C",row,grant,ops[0])!=prior_comment:
                 self.fail("WHEEL_COMMENT_UNVERIFIED","El comentario ya no coincide con el que se verificó.")
-            data={"card_id":card["id"],"list_id":CHECK,"pos":"top"}
+            data={"card_id":card["id"],"list_id":grant["destination"],"pos":"top"}
         record=self.b.prepare_write(action,data,inline_marker=True)
         self.f._update(row["card_id"],row["attempt"],**{("comment_operation" if letter=="C" else "move_operation"):record["operation"]})
         outcome=self.b.write(record["operation"],permit("trello-write",record))

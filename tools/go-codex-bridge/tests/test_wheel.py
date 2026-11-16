@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 import test_bridge as fixtures
-from factory import BOARD, QUEUE, CHECK, RECOVERY, NAMES, OWNER, INSTALL_CARDS
+from factory import BOARD, QUEUE, CHECK, CHECK_V2, RECOVERY, NAMES, OWNER, INSTALL_CARDS
 from puente import Bridge, BridgeError
 from wheel_effects import WheelPublication, WheelEffects
 from remote_panel import RemotePanel
@@ -95,6 +95,7 @@ class WheelTests(unittest.TestCase):
         if path.endswith("/lists"):return [{"id":k,"name":v} for k,v in NAMES.items()]
         if path=="/1/lists/"+QUEUE+"/cards":return [copy.deepcopy(c) for c in self.cards.values() if c["idList"]==QUEUE]
         if path=="/1/lists/"+CHECK+"/cards":return [copy.deepcopy(c) for c in self.cards.values() if c["idList"]==CHECK]
+        if path=="/1/lists/"+CHECK_V2+"/cards":return [copy.deepcopy(c) for c in self.cards.values() if c["idList"]==CHECK_V2]
         if path=="/1/lists/"+RECOVERY+"/cards":return [copy.deepcopy(c) for c in self.cards.values() if c["idList"]==RECOVERY]
         if path.startswith("/1/actions/"):
             cid,text=next((c["id"],m["text"]) for c in self.cards.values() for m in c["comments"] if m["id"]==path.split("/")[-1])

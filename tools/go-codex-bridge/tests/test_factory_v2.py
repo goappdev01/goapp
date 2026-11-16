@@ -11,7 +11,7 @@ from unittest.mock import patch
 import test_bridge as fixtures
 import test_wheel as wheel_fixtures
 from puente import Bridge,BridgeError
-from factory import CHECK, RECOVERY, normalize_guide
+from factory import CHECK, CHECK_V2, QUEUE, normalize_guide, work_scope
 from factory_v2 import Continuity
 from remote_panel import RemotePanel,private_text
 from owner_expo import OwnerExpo
@@ -172,6 +172,8 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(paused['state'],'paused')
         self.assertEqual(paused['label'],'FÁBRICA PAUSADA · ACTIVAR')
         self.assertFalse(paused['disabled'])
+        self.assertEqual(RemotePanel.activation_button({'enabled':False,'reason':'WHEEL_PAUSED',
+            'batch_id':'batch','batch_state':'active'},[])['state'],'paused')
         preserved=RemotePanel.activation_button({'enabled':False,'reason':'OWNER_PAUSED',
             'batch_id':'batch','batch_state':'active'},
             [{'state':'working','activity':{'state':'awaiting_validation'}}])
@@ -221,6 +223,132 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(advance.call_args.args[0]['card_id'],ids[3])
         self.assertEqual(w.status()['current']['card_id'],ids[3])
         self.assertFalse(self.runs or self.changes)
+
+    def test_live_skip_is_visible_once_and_next_is_actual_eligible_card(self):
+        w=self.bridge.factory.wheel
+        w.activate_live("1"*64)
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        first=w._live_selection(cards,w.live_policy())
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='blocked',reason='WHEEL_DEPENDENCIES' WHERE grant_id=?",
+                       (first["grant_id"],))
+        second=w._live_selection(cards,w.live_policy())
+        self.assertNotEqual(first["expected"],second["expected"])
+        self.assertEqual(w.status()["next"]["card_id"],second["expected"])
+        self.assertEqual(w.status()["skipped"][0]["reason"],"WHEEL_DEPENDENCIES")
+        w._live_selection(cards,w.live_policy())
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM audit WHERE event='wheel_queue_card_skipped'").fetchone()[0],1)
+            self.assertEqual(db.execute("SELECT count(*) FROM wheel_grants WHERE card_id=?",
+                                        (second["expected"],)).fetchone()[0],1)
+        self.assertFalse(self.runs or self.changes)
+
+    def test_v1_live_policy_rejects_explicit_v2_without_starting_it(self):
+        w=self.bridge.factory.wheel
+        first=next(iter(self.cards.values()))
+        first["name"]="V2 — A4 synthetic"
+        w.activate_live("1"*64)
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        selected=w._live_selection(cards,w.live_policy())
+        self.assertNotEqual(selected["expected"],first["id"])
+        self.assertEqual(w.status()["skipped"][0]["reason"],"WHEEL_SCOPE_REVIEW_REQUIRED")
+        with self.bridge.db() as db:
+            self.assertFalse(db.execute("SELECT 1 FROM wheel_grants WHERE card_id=?",(first["id"],)).fetchone())
+        self.assertEqual(work_scope("A4 synthetic","No activar V2 en este trabajo."),"V1")
+        self.assertEqual(work_scope("V2 — A4 synthetic","Cambiar la pantalla."),"V2")
+        self.assertFalse(self.runs or self.changes)
+
+    def test_idle_partial_yields_to_reordered_head_without_losing_checkpoint(self):
+        w=self.bridge.factory.wheel
+        w.activate_live("1"*64)
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        first=w._live_selection(cards,w.live_policy())
+        with self.bridge.db() as db:
+            grant=w._verified(db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",
+                                         (first["grant_id"],)).fetchone())
+            db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=?",(grant["grant_id"],))
+        w.checkpoint(grant,"synthetic-partial")
+        self.cards[first["expected"]]["pos"]=4096
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        selected=w._live_selection(cards,w.live_policy())
+        self.assertNotEqual(selected["expected"],first["expected"])
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",
+                                        (grant["grant_id"],)).fetchone()[0],"ready")
+            self.assertEqual(db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
+                                        (grant["grant_id"],)).fetchone()[0],"synthetic-partial")
+        self.assertFalse(self.runs or self.changes)
+
+    def test_active_partial_keeps_its_lease_after_reorder(self):
+        w,grant,job_id,_=self.live_credit_wait()
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=?",(grant["grant_id"],))
+            db.execute("UPDATE jobs SET state='running' WHERE id=?",(job_id,))
+        self.cards[grant["card_id"]]["pos"]=4096
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        selected=w._live_selection(cards,w.live_policy())
+        self.assertEqual(selected["expected"],grant["card_id"])
+        self.assertEqual(w.status()["current"]["card_id"],grant["card_id"])
+        self.assertFalse(self.runs or self.changes)
+
+    def test_idle_partial_outside_queue_is_preserved_and_other_card_continues(self):
+        w=self.bridge.factory.wheel
+        w.activate_live("1"*64)
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        first=w._live_selection(cards,w.live_policy())
+        with self.bridge.db() as db:
+            grant=w._verified(db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",
+                                         (first["grant_id"],)).fetchone())
+            db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=?",(grant["grant_id"],))
+        w.checkpoint(grant,"synthetic-partial")
+        self.cards[grant["card_id"]]["idList"]=CHECK
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        selected=w._live_selection(cards,w.live_policy())
+        self.assertNotEqual(selected["expected"],grant["card_id"])
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",
+                                        (grant["grant_id"],)).fetchone()[0],"ready")
+            self.assertEqual(db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
+                                        (grant["grant_id"],)).fetchone()[0],"synthetic-partial")
+        self.assertFalse(self.runs or self.changes)
+
+    def test_v2_scope_uses_separate_signed_check_destination(self):
+        card=next(iter(self.cards.values()))
+        card["name"]="A4 V2 — synthetic"
+        subject,_=self.bridge.factory.wheel._subject(card,review=True)
+        self.assertEqual(subject["destination"],CHECK_V2)
+        self.assertFalse(self.runs or self.changes)
+
+    def test_v1_queue_does_not_require_v2_check_list(self):
+        api=self.bridge.api
+        def without_v2(path,*args,**kwargs):
+            if path.endswith("/lists"):
+                return [item for item in api(path,*args,**kwargs) if item["id"]!=CHECK_V2]
+            return api(path,*args,**kwargs)
+        self.bridge.api=without_v2
+        self.assertIn(CHECK,self.bridge.factory._lists())
+        self.assertFalse(self.runs or self.changes)
+
+    def test_v2_conflict_comment_is_verified_before_top_of_v2_check(self):
+        card=next(iter(self.cards.values()))
+        card["name"]="A4 V2 — synthetic"
+        w=self.bridge.factory.wheel
+        w.approve(self.decisions())
+        w.toggle(True)
+        self.bridge.factory._start(self.bridge.factory._spec(card))
+        with self.bridge.db() as db:
+            row=db.execute("SELECT * FROM wheel_grants WHERE card_id=?",(card["id"],)).fetchone()
+            grant=w._verified(row)
+            attempt=self.bridge.factory._row(card["id"],grant["attempt"])
+            db.execute("UPDATE wheel_grants SET state='working' WHERE grant_id=?",(grant["grant_id"],))
+            db.execute("UPDATE jobs SET state='failed',result=? WHERE id=?",
+                       (json.dumps({"response":"blocked"}),attempt["job_id"]))
+        w.continuity._defer_question_to_trello(grant,{"question":"Falta una decisión de prueba.",
+            "operation":"Revisar el resultado local."},self.bridge.job(attempt["job_id"]))
+        self.assertEqual(card["idList"],CHECK_V2)
+        self.assertEqual(next(c["id"] for c in self.cards.values() if c["idList"]==CHECK_V2),card["id"])
+        self.assertEqual(self.changes,[(card["id"],"C"),(card["id"],"D")])
+        self.assertFalse(self.runs)
 
     def test_open_queue_uses_current_order_before_a_preserved_working_card(self):
         w,ids=self.batch()
@@ -948,11 +1076,13 @@ class V2WheelTests(unittest.TestCase):
 
     def test_private_answer_is_isolated_and_next_card_is_selectable(self):
         w,grant,job_id,session,_=self.private_question_fixture("¿Dónde constan los secretos del ensayo?")
-        with patch.object(w.continuity,"_defer_question_to_trello") as trello:
-            result=w.continuity.card_error(grant,"FACTORY_JOB_FAILED")
+        result=w.continuity.card_error(grant,"FACTORY_JOB_FAILED")
         self.assertEqual(result["reason"],"WHEEL_QUESTION_PRIVATE")
         self.assertTrue(w.enabled())
-        trello.assert_not_called()
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],CHECK)
+        comment=self.cards[grant["card_id"]]["comments"][-1]["text"]
+        self.assertIn("Pregunta privada pendiente",comment)
+        self.assertNotIn("secretos del ensayo",comment)
         with self.bridge.db() as db:
             self.assertEqual(db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",
                 (grant["grant_id"],)).fetchone()[0],"waiting_response")
@@ -960,16 +1090,109 @@ class V2WheelTests(unittest.TestCase):
                 (grant["grant_id"],)).fetchone()[0],"waiting")
             self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
             self.assertEqual(db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 1",
-                (grant["grant_id"],)).fetchone()[0],"FACTORY_JOB_FAILED")
+                (grant["grant_id"],)).fetchone()[0],"verified:D")
+            self.assertTrue(db.execute("SELECT 1 FROM wheel_checkpoints WHERE grant_id=? AND phase='FACTORY_JOB_FAILED'",
+                (grant["grant_id"],)).fetchone())
             self.assertEqual(db.execute("SELECT COUNT(*) FROM wheel_stages WHERE grant_id=? AND letter IN ('C','D')",
-                (grant["grant_id"],)).fetchone()[0],0)
+                (grant["grant_id"],)).fetchone()[0],2)
         cards={card["id"]:card for card in self.bridge.factory._cards()}
         selected=w._live_selection(cards,w.live_policy())
         self.assertNotEqual(selected["expected"],grant["card_id"])
         with self.bridge.db() as db:
             db.execute("UPDATE wheel_grants SET state='blocked' WHERE grant_id<>?",(grant["grant_id"],))
         self.assertEqual(w._live_selection(cards,w.live_policy())["waiting"],"NO_SAFE_ELIGIBLE_CARD")
-        self.assertFalse(self.runs or self.changes)
+        self.assertFalse(self.runs)
+        self.assertEqual(self.changes,[(grant["card_id"],"C"),(grant["card_id"],"D")])
+
+    def test_restart_keeps_private_question_and_does_not_repeat_conflict_writes(self):
+        w,grant,job_id,session,_=self.private_question_fixture("¿Dónde constan los secretos del ensayo?")
+        self.assertEqual(w.continuity.card_error(grant,"FACTORY_JOB_FAILED")["card_blocked"],grant["card_id"])
+        restored=Bridge(self.home,self.home/"private",fixtures.TestProtector(),actor=self.bridge.actor)
+        self.bridge=self.configure(restored)
+        resumed=self.bridge.factory.wheel
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        self.assertNotEqual(resumed._live_selection(cards,resumed.live_policy())["expected"],grant["card_id"])
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT state FROM factory_questions WHERE grant_id=?",
+                                        (grant["grant_id"],)).fetchone()[0],"waiting")
+            self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
+            self.assertEqual(db.execute("SELECT count(*) FROM wheel_stages WHERE grant_id=? AND letter IN ('C','D')",
+                                        (grant["grant_id"],)).fetchone()[0],2)
+        self.assertEqual(self.changes,[(grant["card_id"],"C"),(grant["card_id"],"D")])
+        self.assertFalse(self.runs)
+
+    def test_restart_after_verified_private_comment_moves_without_duplicate(self):
+        w,grant,job_id,session,request=self.private_question_fixture("¿Dónde constan los secretos del ensayo?")
+        card=self.cards[grant["card_id"]]
+        original_pos=card["pos"]
+        w.continuity.question(grant,request["kind"],request["question"],request["operation"])
+        safe={"kind":"answer","question":"Pregunta privada pendiente de decisión del propietario en el puente.",
+              "operation":"Responder o denegar desde el panel privado; conservar la sesión y el checkpoint."}
+        w.continuity._defer_question_to_trello(grant,safe,self.bridge.job(job_id),allow_prepared=True)
+        with self.bridge.db() as db:
+            move=db.execute("SELECT move_operation FROM factory_attempts WHERE card_id=? AND attempt=?",
+                            (grant["card_id"],grant["attempt"])).fetchone()[0]
+            db.execute("DELETE FROM wheel_stages WHERE grant_id=? AND letter='D'",(grant["grant_id"],))
+            db.execute("DELETE FROM wheel_checkpoints WHERE grant_id=? AND phase IN ('question-claimed:D','verified:D')",
+                       (grant["grant_id"],))
+            db.execute("DELETE FROM operations WHERE id=?",(move,))
+            db.execute("UPDATE factory_attempts SET move_operation=NULL WHERE card_id=? AND attempt=?",
+                       (grant["card_id"],grant["attempt"]))
+        card["idList"]=QUEUE
+        card["pos"]=original_pos
+        self.changes.pop()
+        restored=Bridge(self.home,self.home/"private",fixtures.TestProtector(),actor=self.bridge.actor)
+        self.bridge=self.configure(restored)
+        self.codex_identity="synthetic-codex-account"
+        result=self.bridge.factory.wheel.tick()
+        self.assertIn("card_blocked",result,result)
+        self.assertEqual(result["card_blocked"],grant["card_id"])
+        self.assertEqual(self.changes,[(grant["card_id"],"C"),(grant["card_id"],"D")])
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
+            self.assertEqual(db.execute("SELECT state FROM factory_questions WHERE grant_id=?",
+                                        (grant["grant_id"],)).fetchone()[0],"waiting")
+        self.assertFalse(self.runs)
+
+    def test_restart_after_verified_private_move_keeps_question_and_selects_next(self):
+        w,grant,job_id,session,request=self.private_question_fixture("¿Dónde constan los secretos del ensayo?")
+        w.continuity.question(grant,request["kind"],request["question"],request["operation"])
+        safe={"kind":"answer","question":"Pregunta privada pendiente de decisión del propietario en el puente.",
+              "operation":"Responder o denegar desde el panel privado; conservar la sesión y el checkpoint."}
+        w.continuity._defer_question_to_trello(grant,safe,self.bridge.job(job_id),allow_prepared=True)
+        restored=Bridge(self.home,self.home/"private",fixtures.TestProtector(),actor=self.bridge.actor)
+        self.bridge=self.configure(restored)
+        self.codex_identity="synthetic-codex-account"
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        next_card=self.bridge.factory.wheel._live_selection(cards,self.bridge.factory.wheel.live_policy())
+        self.assertNotEqual(next_card["expected"],grant["card_id"])
+        self.assertEqual(self.changes,[(grant["card_id"],"C"),(grant["card_id"],"D")])
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT state FROM wheel_grants WHERE grant_id=?",
+                                        (grant["grant_id"],)).fetchone()[0],"waiting_response")
+            self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
+            self.assertEqual(db.execute("SELECT state FROM factory_questions WHERE grant_id=?",
+                                        (grant["grant_id"],)).fetchone()[0],"waiting")
+        self.assertFalse(self.runs)
+
+    def test_existing_private_question_is_classified_without_replaying_codex(self):
+        w,grant,job_id,session,request=self.private_question_fixture("¿Dónde constan los secretos del ensayo?")
+        w.continuity.question(grant,request["kind"],request["question"],request["operation"])
+        w._transition(grant,"waiting_response","WHEEL_QUESTION_PRIVATE")
+        self.codex_identity="synthetic-codex-account"
+        result=w.tick()
+        self.assertEqual(result["card_blocked"],grant["card_id"])
+        self.assertTrue(w.enabled())
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],CHECK)
+        self.assertNotIn("secretos del ensayo",self.cards[grant["card_id"]]["comments"][-1]["text"])
+        self.assertEqual(self.changes,[(grant["card_id"],"C"),(grant["card_id"],"D")])
+        self.assertFalse(self.runs)
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
+            self.assertEqual(db.execute("SELECT state FROM factory_questions WHERE grant_id=?",
+                                        (grant["grant_id"],)).fetchone()[0],"waiting")
+        cards={card["id"]:card for card in self.bridge.factory._cards()}
+        self.assertNotEqual(w._live_selection(cards,w.live_policy())["expected"],grant["card_id"])
 
     def test_privacy_filter_uses_whole_terms_and_keeps_real_secrets_private(self):
         check=Continuity._private_question
@@ -1021,7 +1244,7 @@ class V2WheelTests(unittest.TestCase):
         result=w._finish_error(grant,"PUBLICATION_UNVERIFIED",True)
         self.assertEqual(result["reason"],"PUBLICATION_UNVERIFIED")
         self.assertTrue(w.enabled())
-        self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],CHECK)
         self.assertTrue(self.cards[grant["card_id"]]["comments"][-1]["text"].startswith("CONFLICTO — QUÉ FALTA"))
         with self.bridge.db() as db:
             self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
@@ -1053,7 +1276,7 @@ class V2WheelTests(unittest.TestCase):
         result=w._finish_error(grant,"FACTORY_PUBLICATION_UNVERIFIED")
         self.assertEqual(result["card_blocked"],grant["card_id"])
         self.assertTrue(w.enabled())
-        self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],CHECK)
         self.assertFalse(self.runs)
 
     def test_verified_success_posts_quick_check_then_moves_to_check_first(self):
@@ -1086,7 +1309,7 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(self.changes,[(grant["card_id"],"C"),(grant["card_id"],"D")])
         self.assertFalse(self.runs)
 
-    def test_permission_conflict_moves_to_recovery_without_replaying_job(self):
+    def test_permission_conflict_moves_to_check_without_replaying_job(self):
         w,grant,job_id,session=self.live_credit_wait()
         with self.bridge.db() as db:
             db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
@@ -1096,7 +1319,7 @@ class V2WheelTests(unittest.TestCase):
         result=w.continuity.card_error(grant,"WHEEL_PERMISSION_REQUIRED")
         self.assertEqual(result["reason"],"WHEEL_PERMISSION_REQUIRED")
         self.assertTrue(w.enabled())
-        self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],CHECK)
         with self.bridge.db() as db:
             self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM wheel_stages WHERE grant_id=? AND state='verified'",

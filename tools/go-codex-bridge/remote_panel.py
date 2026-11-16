@@ -168,7 +168,7 @@ class RemotePanel:
         elif reason=="OWNER_STOPPED":
             state,label,disabled="stopped","FÁBRICA DETENIDA · REVISAR",in_flight
         else:
-            state="blocked" if reason and reason!="OWNER_PAUSED" else "paused"
+            state="blocked" if reason and reason not in ("OWNER_PAUSED","WHEEL_PAUSED") else "paused"
             label=("FÁBRICA BLOQUEADA · REVISAR" if state=="blocked" else
                    "FÁBRICA PAUSADA · REAUTORIZAR" if wheel.get("renewal_required") else "FÁBRICA PAUSADA · ACTIVAR")
             disabled=in_flight
@@ -292,7 +292,7 @@ class RemotePanel:
             state="terminada"
         elif wheel["reason"]=="OWNER_STOPPED":
             state="detenida"
-        elif wheel["reason"] and wheel["reason"]!="OWNER_PAUSED":
+        elif wheel["reason"] and wheel["reason"] not in ("OWNER_PAUSED","WHEEL_PAUSED"):
             state="bloqueada"
         else:
             state="pausada"
@@ -335,7 +335,12 @@ class RemotePanel:
                     "renewal_required":any(grant["state"] in ("ready","working") and grant["expires_at"]<=time.time()
                         for grant in wheel["grants"] if grant["card_id"] in {item["card_id"] for item in (batch or {}).get("cards",[])}),
                     "current":next((card["title"] for card in cards if card["state"]=="working"),None),
-                    "next":next((card["title"] for card in cards if card["state"] in ("ready","queued")),None)}
+                    "next":wheel["next"]["title"] if wheel["next"] else None,
+                    "next_action":wheel.get("next_action"),
+                    "queue_checked":wheel.get("checked"),
+                    "skipped":[{"card_id":item["card_id"],"title":item["title"],
+                                "reason":item["reason"],"destination":"COLA"}
+                               for item in wheel["skipped"]]}
         wheel_view["button"]=self.activation_button(wheel_view,cards)
         return {"version":__import__("puente").EXECUTOR_VERSION,"source_sha256":getattr(self.b,'loaded_code_sha256',None),"updated":self.f.utc(),
                 "wheel":wheel_view,
