@@ -272,7 +272,7 @@ test('linking a note does not drop existing distinct GO offsets or invent schedu
 test('the real GO creation connection persists one shared note/GO record and confirms through the existing queue',async()=>{
   const f=await fixture(),declaration=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='addLogEntry');assert.ok(declaration);
   const confirmations=[],day=futureEntry(),ctx={result:null,makeUid:()=> 'parent-go',t:x=>x,activeLabel:'Nota',activeColor:'#fff',activeKey:'nota',
-    place:'Lugar',date:'',dateISO:day.dateISO,time:day.time,duration:'',contactName:'',phone:'',userGoPhone:'',goVisibility:'privado',
+    place:'Lugar',date:'',dateISO:day.dateISO,time:day.time,duration:'',contactName:'',phone:'',userGoPhone:'',accountIdentity:{userId:scope.userId,phone:''},goVisibility:'privado',
     normalizePhoneForWhatsApp:n=>n,sanitizeReminders:n=>[...new Set(n)],noteIdentityRef:{current:{ready:true,scope}},
     bindAttachedNoteReminder:tools.bindAttachedNoteReminder,hasAttachedNoteReminder:tools.hasAttachedNoteReminder,
     setGoLog:fn=>{void f.store.updateGoLog(rows=>({entries:fn(rows),result:undefined}));},persistLog:()=>{},

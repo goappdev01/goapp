@@ -60,6 +60,7 @@ async function fixture({expired=false,status=200}={}){
  rn.Modal=({visible,children})=>visible?React.createElement('div',{'data-native':'Modal'},children):null;
  const password=evaluate('components/auth/PasswordInput.tsx',{'@expo/vector-icons':{Feather:native('Feather')}});
  const panel=evaluate('components/auth/LoginRegisterPanel.tsx',{
+  '@/lib/loginResponse':evaluate('lib/loginResponse.ts'),
   '@/components/debug/OwnerContextIndicator':surface,'@/lib/sessionEvents':sessionEvents,'@/lib/authSession':auth,
   '@/lib/registrationReturn':{readPendingRegistration:async()=>null,PENDING_REGISTRATION_KEY:'fictional-pending'},
   '@react-native-async-storage/async-storage':storageApi,
@@ -83,6 +84,8 @@ async function fixture({expired=false,status=200}={}){
  const Root=()=>React.createElement(mode.GoModeProvider,null,React.createElement(admin.GoAdminAccessProvider,null,React.createElement(view.GoViewProvider,null,React.createElement(business.GoBusinessAccessProvider,null,React.createElement(surface.OwnerContextSurface,null,React.createElement(wrapperScope.exports.HomeScreen))))));
 
  const gate=evaluate('components/auth/BusinessAccessGate.tsx',{
+  'expo-document-picker':{getDocumentAsync:async()=>{throw Error('Unexpected document picker in session test');}},
+  'expo-file-system/legacy':{},
   '@/contexts/GoBusinessAccessContext':business,'@/contexts/GoModeContext':mode,'@/data/businessAccess':businessData,
   '@/data/businessEnrollmentDraft':{businessEnrollmentDraftKey:()=>null,loadBusinessEnrollmentDraft:async()=>null,logBusinessEnrollmentFailure:()=>{}},
   '@/lib/authSession':auth,'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:44,bottom:34})},

@@ -78,7 +78,6 @@ type MessagesScreenProps = {
   onGoToLanding?: () => void;
   assistant?: React.ReactNode;
   recentContacts: { name: string; phone: string }[];
-  userGoPhone: string;
   onCreateGo: (params: {
     contactName: string;
     contactPhone: string;
@@ -266,7 +265,6 @@ export function MessagesScreen({
   visible,
   onClose, onDismiss, onGoToLanding, assistant, handedness = "right",
   recentContacts,
-  userGoPhone,
   onCreateGo,
   onPickDeviceContact,
   initialContact,

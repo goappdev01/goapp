@@ -28,6 +28,8 @@ import { GoMinuteInput } from "@/components/ui/GoMinuteInput";
 import { BookingApiError, changeBookingRequest as negotiateRealBooking } from "@/data/booking";
 import { readGoLog, flushGoLog, commitGoLogSnapshot, getGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
 import { onSessionChanged } from "@/lib/sessionEvents";
+import { useGoAccountIdentity } from "@/hooks/useGoAccountIdentity";
+import { normalizePhoneForWhatsApp, resolveProposalDestination, type ProposalParticipant } from "@/lib/goMessageIdentity";
 import { recordAuthTrace } from "@/lib/authTrace";
 import { clearAuthSession, restoreStoredAuthentication, consumeAuthRecoveryNotice } from "@/lib/authSession";
 import { getTaskUser, assertTaskUser } from "@/lib/goTaskAccess";
@@ -1447,87 +1449,6 @@ function getGoActivityKey(g: { intentKey?: string; isGeneric?: boolean }): GoAct
     case "viaje":    return "viaje";
     default:         return "generico";
   }
-}
-
-/**
- * Normaliza un número de teléfono para usarlo con la API de WhatsApp (wa.me).
- * - Elimina espacios, guiones, paréntesis, puntos y el símbolo "+".
- * - Si el número quedan en 9 dígitos (formato local español), añade el prefijo "34".
- * - Devuelve null si el resultado no es un número válido para WhatsApp
- *   (debe contener entre 8 y 15 dígitos según ITU-T E.164).
- */
-function normalizePhoneForWhatsApp(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const digits = String(raw).replace(/\D/g, "");
-  if (!digits) return null;
-  const withCc = digits.length === 9 ? `34${digits}` : digits;
-  if (withCc.length < 8 || withCc.length > 15) return null;
-  return withCc;
-}
-
-/**
- * Calcula el teléfono destino de una propuesta de cambio.
- * Regla bilateral: si el usuario actual es el remitente → envía al receptor, y viceversa.
- *
- * Cuando senderPhone/receiverPhone no están guardados en el entry, los DERIVA de
- * entry.kind para mantener compatibilidad con entradas antiguas:
- *   kind="received"  → yo soy el receptor  → sender = entry.phone, receiver = myPhone
- *   kind="sent"      → yo soy el remitente → sender = myPhone,      receiver = entry.phone
- *
- * Si myPhone no coincide con ninguno → targetPhone = null (no se puede determinar).
- * Siempre imprime un bloque de debug en consola para facilitar pruebas.
- */
-function resolveProposalDestination(
-  entry: { phone: string; kind: string; senderPhone?: string; receiverPhone?: string; intentLabel?: string },
-  myPhone: string,
-): { targetPhone: string | null } {
-  // ── Valores RAW (antes de normalizar) ──────────────────────────────────
-  const rawMyPhone    = myPhone         || "(vacío)";
-  const rawSender     = entry.senderPhone   || "(no guardado)";
-  const rawReceiver   = entry.receiverPhone || "(no guardado)";
-  const rawEntryPhone = entry.phone         || "(vacío)";
-
-  // ── Derivación cuando los campos no están guardados explícitamente ──────
-  const effectiveSender   = entry.senderPhone   || (entry.kind === "received" ? entry.phone : myPhone);
-  const effectiveReceiver = entry.receiverPhone  || (entry.kind === "sent"     ? entry.phone : myPhone);
-
-  // ── Normalización para comparación ─────────────────────────────────────
-  const myClean = normalizePhoneForWhatsApp(myPhone);
-  const sClean  = normalizePhoneForWhatsApp(effectiveSender);
-  const rClean  = normalizePhoneForWhatsApp(effectiveReceiver);
-
-  let targetPhone: string | null = null;
-  let matchReason = "sin_coincidencia";
-  if (myClean && sClean && rClean) {
-    if (sClean === rClean && myClean === sClean) {
-      // Autoenvío: emisor = receptor = usuario actual → destino = propio número
-      targetPhone = myClean;
-      matchReason = "senderPhone===receiverPhone===myPhone → autoenvío (self)";
-    } else if (myClean === sClean) {
-      targetPhone = rClean;
-      matchReason = "myPhone===senderPhone → destino=receiverPhone";
-    } else if (myClean === rClean) {
-      targetPhone = sClean;
-      matchReason = "myPhone===receiverPhone → destino=senderPhone";
-    } else {
-      matchReason = "myPhone no coincide con sender ni receiver";
-    }
-  } else {
-    matchReason = `normalización falló — myClean:${myClean} sClean:${sClean} rClean:${rClean}`;
-  }
-
-  // ── DEBUG: log completo del cálculo ─────────────────────────────────────
-  console.log("━━━━━━ [GO Proposal Debug] ━━━━━━");
-  console.log("  entry.kind         :", entry.kind);
-  console.log("  currentUserPhone   :", rawMyPhone, "→ normalizado:", myClean ?? "INVÁLIDO");
-  console.log("  entry.senderPhone  :", rawSender,  "→ efectivo:", effectiveSender, "→ normalizado:", sClean ?? "INVÁLIDO");
-  console.log("  entry.receiverPhone:", rawReceiver, "→ efectivo:", effectiveReceiver, "→ normalizado:", rClean ?? "INVÁLIDO");
-  console.log("  entry.phone        :", rawEntryPhone);
-  console.log("  RESULTADO          :", matchReason);
-  console.log("  destinationPhone   :", targetPhone ?? "NO DETERMINADO");
-  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
-  return { targetPhone };
 }
 
 /**
@@ -2977,42 +2898,9 @@ function HomeScreenContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [marketplaceCheckout, contactName, phone]);
 
-  // ── MI TELÉFONO GO ─────────────────────────────────────────────────────
-  // Número del propio usuario. Si el destinatario del GO coincide,
-  // el envío se hace interno (sin WhatsApp). Persiste en AsyncStorage.
-  const [userGoPhone, setUserGoPhone] = useState("");
-  const [userGoPhoneDraft, setUserGoPhoneDraft] = useState("");
-  const [phoneGoSaved, setPhoneGoSaved] = useState(false);
-  const phoneGoSavedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // ── MODO DEMO AUTOENVÍO ──────────────────────────────────────────────────
-  // Cuando está activo, las propuestas de cambio se envían al propio número
-  // en lugar de al otro participante. Solo para pruebas internas.
-  // No modifica senderPhone/receiverPhone del GO original.
-  const [demoSelfSend, setDemoSelfSend] = useState(false);
-
-  // Carga MI TELÉFONO GO + MODO DEMO en cada montaje — efecto dedicado sin
-  // guard de StrictMode para que sobreviva hot-reload, recargas de Expo Go y
-  // remontajes (en StrictMode el ref persiste pero el estado se resetea
-  // a "", por eso este efecto va separado del bloque de hidratación general).
-  useEffect(() => {
-    // Cargar teléfono — intenta clave v1 primero, luego clave legacy como fallback
-    Promise.all([
-      AsyncStorage.getItem("go_user_phone_v1"),
-      AsyncStorage.getItem("go_user_phone"),
-    ]).then(([v1, legacy]) => {
-      const raw = (v1 && v1.trim()) ? v1.trim() : (legacy && legacy.trim()) ? legacy.trim() : null;
-      if (raw) {
-        setUserGoPhone(raw);
-        setUserGoPhoneDraft(raw);
-        // Migrar a v1 si solo existía en la clave sin versión
-        if (!v1 || !v1.trim()) AsyncStorage.setItem("go_user_phone_v1", raw).catch(() => {});
-      }
-    }).catch(() => {});
-    // Cargar modo demo autoenvío
-    AsyncStorage.getItem("go_demo_self_send_enabled")
-      .then((raw) => { if (raw === "true") setDemoSelfSend(true); })
-      .catch(() => {});
-  }, []);
+  // Identity follows the existing auth session on this device, never a manually saved phone.
+  const accountIdentity = useGoAccountIdentity();
+  const userGoPhone = accountIdentity.phone;
 
   // Carga configuración de cuenta al montar. El rol ya no se hidrata aquí:
   // un rol guardado sin una sesión real no debe saltarse el acceso.
@@ -3112,19 +3000,6 @@ function HomeScreenContent() {
       context: goView.view, checking: adminAccess.checking, loaded: goView.loaded,
     });
   }, [authBootstrapComplete, modeLoaded, goAuthOpen, userAccountType, goView.view, goView.loaded, adminAccess.checking]);
-
-  // Helper: guarda MI TELÉFONO GO y muestra feedback verde 1 segundo.
-  // Se llama en blur, Enter/Done, y al cerrar Herramientas.
-  const commitUserPhone = (val?: string) => {
-    const trimmed = (val !== undefined ? val : userGoPhoneDraft).trim();
-    setUserGoPhone(trimmed);
-    AsyncStorage.setItem("go_user_phone_v1", trimmed).catch(() => {});
-    if (trimmed) {
-      setPhoneGoSaved(true);
-      if (phoneGoSavedTimer.current) clearTimeout(phoneGoSavedTimer.current);
-      phoneGoSavedTimer.current = setTimeout(() => setPhoneGoSaved(false), 1200);
-    }
-  };
 
   const [mapOpen, setMapOpen] = useState(false);
   const [calOpen, setCalOpen] = useState(false);
@@ -3530,7 +3405,7 @@ function HomeScreenContent() {
           setLandingPreviewOpening(false);
       }
     }
-    commitUserPhone(); setOptionsOpen(false);
+    setOptionsOpen(false);
     showToast(lang === "en" ? "Temporary preview. Return to Tools to activate or cancel."
       : "Vista previa temporal. Vuelve a Herramientas para activar o cancelar.");
   };
@@ -4174,7 +4049,7 @@ function HomeScreenContent() {
   const [contactView, setContactView] = useState<"none" | "recents" | "favorites">("none");
 
   // Carga FAVORITOS y RECIENTES en cada montaje — efecto dedicado sin guard
-  // de StrictMode (igual que MI TELÉFONO GO). El guard hasHydratedRef persiste
+  // de StrictMode. El guard hasHydratedRef persiste
   // entre remontajes pero el estado se resetea a [], dejando favoritos vacíos.
   useEffect(() => {
     AsyncStorage.getItem("go_fav_contacts_v1")
@@ -7668,7 +7543,6 @@ function HomeScreenContent() {
     // ── GO INTERNO (auto-envío) ───────────────────────────────────────────
     // Si el destinatario coincide con el teléfono propio del usuario,
     // se guarda directamente en el listado sin abrir WhatsApp.
-    // Caso 1 del spec: teléfono destino === userGoPhone.
     const cleanUserPhone = normalizePhoneForWhatsApp(userGoPhone);
     if (cleanUserPhone && cleanPhone === cleanUserPhone) {
       const _selfId = addLogEntry("sent", {
@@ -7766,6 +7640,7 @@ function HomeScreenContent() {
   };
 
   const injectDemoReceivedGo = () => {
+    if (!__DEV__ || !adminAccess.isOwner || !accountIdentity.userId) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     const demos = [
       { intentKey: "reunion", intentLabel: "Reunión", color: "#1e40af" },
@@ -7791,15 +7666,6 @@ function HomeScreenContent() {
       );
       return;
     }
-    if (!userGoPhone) {
-      console.log("[DEMO GO RECIBIDO] Abortado — MI TELÉFONO GO no configurado.");
-      showToast(
-        "Configura MI TELÉFONO GO en Herramientas antes de simular un GO recibido.",
-        "error",
-      );
-      return;
-    }
-
     const realSenderPhone = firstFav.phone!;
     const realSenderName  = firstFav.name  || senderName;
 
@@ -7823,7 +7689,8 @@ function HomeScreenContent() {
       phone: realSenderPhone,
       estado: "pendiente",
       createdAt: Date.now(),
-      // Telefonía bilateral: senderPhone = favorito real, receiverPhone = mi número real
+      ownerUserId: accountIdentity.userId,
+      // The simulated receiver is the authenticated account; a confirmed phone is optional.
       senderPhone:   realSenderPhone,
       receiverPhone: userGoPhone,
       direction:     "incoming",
@@ -7881,32 +7748,13 @@ function HomeScreenContent() {
   // Punto único de verdad para TODAS las rutas de propuesta:
   //   - botón PROPONER CAMBIO en el panel
   //   - arrastre de ficha en calendario
-  // Resuelve el teléfono destino, aplica MODO DEMO si está activo,
-  // imprime el debug obligatorio y abre WhatsApp.
+  // Resuelve el contacto de la otra parte sin preferencias de pruebas.
   // Devuelve true si WhatsApp se abrió, false si no había teléfono válido.
   const sendProposalViaWhatsApp = (
-    entry: { phone: string; kind: string; senderPhone?: string; receiverPhone?: string; intentLabel?: string },
+    entry: ProposalParticipant,
     waMsg: string,
   ): boolean => {
-    // 1. Resolver teléfono destino (bilateral: sender ↔ receiver)
-    let { targetPhone } = resolveProposalDestination(entry, userGoPhone);
-
-    // 2. MODO DEMO: redirigir al propio número sin tocar los datos del GO
-    if (demoSelfSend) {
-      const myClean = normalizePhoneForWhatsApp(userGoPhone);
-      if (myClean) targetPhone = myClean;
-    }
-
-    // 3. Debug obligatorio antes de abrir WhatsApp
-    console.log("PROPOSE CHANGE PHONE DEBUG", {
-      demoSelfSendEnabled: demoSelfSend,
-      currentUserPhone: userGoPhone,
-      senderPhone: (entry as any).senderPhone || "",
-      receiverPhone: (entry as any).receiverPhone || "",
-      destinationPhone: targetPhone,
-    });
-
-    // 4. Abrir WhatsApp
+    const { targetPhone } = resolveProposalDestination(entry, accountIdentity);
     if (targetPhone) {
       Linking.openURL(`https://wa.me/${targetPhone}?text=${encodeURIComponent(waMsg)}`).catch(() => {});
       return true;
@@ -9010,7 +8858,8 @@ function HomeScreenContent() {
         type: "GO",
         notes: text || "",
         isGeneric: !fsActivityKey,
-        // Telefonía bilateral para propuestas de cambio
+        ownerUserId: accountIdentity.userId ?? undefined,
+        // Optional confirmed phone data; identity comes from the session.
         senderPhone:   userGoPhone  || "",
         receiverPhone: phoneVal     || "",
         // Autoenvío si el número destino coincide con el propio número
@@ -9023,7 +8872,7 @@ function HomeScreenContent() {
         ) as "outgoing" | "self",
       };
       console.log("━━━━━━ [GO EXTERNO - Creación] ━━━━━━");
-      console.log("  senderPhone (yo)    :", userGoPhone  || "(vacío — configura MI TELÉFONO GO)");
+      console.log("  senderPhone (yo)    :", userGoPhone  || "(sin teléfono confirmado)");
       console.log("  receiverPhone       :", phoneVal     || "(vacío)");
       console.log("  GO guardado         :", JSON.stringify({
         id: entry.id, kind: entry.kind, intentLabel: entry.intentLabel,
@@ -9210,6 +9059,7 @@ function HomeScreenContent() {
       time: remindTime,
       duration: "",
       contactName: "",
+      ownerUserId: accountIdentity.userId ?? undefined,
       phone: selfPhone,
       senderPhone: selfPhone,
       receiverPhone: selfPhone,
@@ -9289,7 +9139,8 @@ function HomeScreenContent() {
       phone,
       estado: "pendiente" as const,
       createdAt: Date.now(),
-      // Telefonía bilateral para propuestas de cambio
+      ownerUserId: accountIdentity.userId ?? undefined,
+      // Optional confirmed phone data; identity comes from the session.
       senderPhone:   kind === "sent"     ? userGoPhone : phone,
       receiverPhone: kind === "received" ? userGoPhone : phone,
       // Autoenvío si el número de contacto coincide con el propio número
@@ -9345,7 +9196,7 @@ function HomeScreenContent() {
     }
     console.log("━━━━━━ [addLogEntry - Creación] ━━━━━━");
     console.log("  kind         :", kind);
-    console.log("  senderPhone  :", entry.senderPhone  || "(vacío — configura MI TELÉFONO GO)");
+    console.log("  senderPhone  :", entry.senderPhone  || "(sin teléfono confirmado)");
     console.log("  receiverPhone:", entry.receiverPhone || "(vacío)");
     console.log("  direction    :", entry.direction);
     console.log("  GO guardado  :", JSON.stringify({
@@ -12893,13 +12744,6 @@ function HomeScreenContent() {
         const raw = await AsyncStorage.getItem("go_notif_enabled_v1");
         if (raw === "off") setNotificationsGloballyEnabled(false);
       } catch {}
-      try {
-        const raw = await AsyncStorage.getItem("go_user_phone_v1");
-        if (raw && typeof raw === "string" && raw.trim()) {
-          setUserGoPhone(raw.trim());
-          setUserGoPhoneDraft(raw.trim());
-        }
-      } catch {}
       // V1 BLOQUE — Contadores de uso del cluster del listado para el
       // orden dinámico (más usado = más cerca del pulgar). Si el JSON
       // está corrupto o es de un esquema antiguo, ignoramos y partimos
@@ -14479,7 +14323,6 @@ function HomeScreenContent() {
         onClose={() => setMessagesOpen(false)}
         onDismiss={finishEntryMessageReturn}
         recentContacts={recentContacts}
-        userGoPhone={userGoPhone}
         initialContact={initialMessagesContact ?? undefined}
         initialBookingId={initialMessagesBookingId ?? undefined} initialContext={initialMessagesContext??undefined}
         onCreateGo={() => openAi(false, true)}
@@ -20162,17 +20005,11 @@ function HomeScreenContent() {
           canPreviewLanding={userLandingVisualEnabled || goView.isOwner}
           onPreviewLanding={openUserLandingPreviewFromTools} /> : undefined}
         visible={optionsOpen}
-        onClose={() => { commitUserPhone(); setOptionsOpen(false); }}
+        onClose={() => setOptionsOpen(false)}
         handedness={handedness}
         toggleHandedness={toggleHandedness}
         uiScale={uiScale}
         setUiScale={setUiScale}
-        userGoPhoneDraft={userGoPhoneDraft}
-        setUserGoPhoneDraft={setUserGoPhoneDraft}
-        phoneGoSaved={phoneGoSaved}
-        commitUserPhone={commitUserPhone}
-        demoSelfSend={demoSelfSend}
-        setDemoSelfSend={setDemoSelfSend}
         shakeAiEnabled={shakeAiEnabled}
         setShakeAiEnabled={setShakeAiEnabled}
         shakeAiSensitivity={shakeAiSensitivity}

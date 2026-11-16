@@ -138,7 +138,8 @@ for(const key of variants)test('owner preview '+key+' survives real context reva
   await f.resolveOwner();await result;await f.flush();
   assert.equal(f.live.goView.view,'USER');assert.equal(f.live.landingVisual.preview,key);
   assert.equal(f.live.landingVisual.active,'actual');assert.equal(f.live.optionsOpen,false);
-  assert.equal(f.env.mounts,1);assert.equal(f.env.unmounts,0);assert.equal(f.env.commits,1);
+  assert.equal(f.env.mounts,1);assert.equal(f.env.unmounts,0);
+  assert.equal(f.env.commits,0,'Opening a preview no longer saves a manual GO phone');
   assert.deepEqual(f.writes,[[policy.ownerViewStorageKey(alice),'USER']]);
   await f.openTools();assert.equal(f.buttons.length,0,'USER has no variant configuration, including the owner USER context');
   await settle(()=>f.live.openUserLandingPreviewFromTools());assert.equal(f.requests.length,1);
@@ -242,6 +243,8 @@ test('ADMIN dashboard Tools opens the single existing Herramientas connection, w
   '@/components/debug/OwnerContextIndicator':{OwnerContextModal:({visible,children})=>visible?React.createElement('div',null,children):null},
   '@expo/vector-icons':{Feather:native('Icon')},'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:44,bottom:34})},
   'expo-status-bar':{StatusBar:native('StatusBar')},'../DraggableFAB':{DraggableFAB:native('Fab')},
+  'expo-web-browser':{openBrowserAsync:async()=>{throw Error('Unexpected browser in tools test');}},
+  './BusinessTrialReviewPanel':{BusinessTrialReviewPanel:native('BusinessTrialReviewPanel')},
   '@/components/ui/GoNavigationRail':{GoNavigationRail:native('NavigationRail')},
   '@/contexts/LanguageContext':{useLanguage:()=>({lang:'es'})},'@/contexts/GoAdminAccessContext':{useAdminAccess:()=>currentAdmin},
   '@/contexts/GoViewContext':{useGoView:()=>currentView},

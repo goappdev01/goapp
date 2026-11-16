@@ -237,7 +237,7 @@ test("the real root installs maintenance once and authentication bootstrap uses 
   const root = readFileSync("app/_layout.tsx", "utf8"), home = readFileSync("app/index.tsx", "utf8");
   assert.equal((root.match(/startAuthSessionMaintenance\(AppState\)/g) ?? []).length, 1);
   assert.match(home, /await restoreStoredAuthentication\(\)/);
-  const boot = home.slice(home.indexOf("// Restore the stored session"), home.indexOf("// Helper: guarda MI"));
+  const boot = home.slice(home.indexOf("// Restore the stored session"), home.indexOf("  const [mapOpen, setMapOpen]"));
   assert.doesNotMatch(boot, /multiRemove|removeItem|refresh_token/);
   assert.match(boot, /onSessionChanged/);
   assert.match(home, /!adminAccess.checking && !adminAccess.unavailable/);
@@ -245,7 +245,8 @@ test("the real root installs maintenance once and authentication bootstrap uses 
 
 test("login and profile logout share ordered credential persistence; no password storage is introduced", () => {
   const auth = readFileSync("components/auth/LoginRegisterPanel.tsx", "utf8"), home = readFileSync("app/index.tsx", "utf8");
-  assert.match(auth, /await saveAuthSession\(payload\)/);
+  assert.match(auth, /await saveAuthSession\(sessionPayload\)/);
+  assert.match(auth, /const sessionPayload = loginSessionPayload\(payload\)/);
   assert.match(auth, /await clearAuthSession\(\)/); assert.match(home, /await clearAuthSession\(\)/);
   assert.doesNotMatch(auth, /setItem\("go_supabase_session_v1"/);
 });

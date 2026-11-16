@@ -121,7 +121,7 @@ test('compact handedness buttons retain selection, persistence, center base and 
     return React.createElement(HerramientasPanel, {
       visible: true, onClose() {}, handedness: hand,
       toggleHandedness: () => { toggles++; setHand(value => value === 'right' ? 'left' : 'right'); },
-      uiScale: scale, setUiScale: setScale, userGoPhoneDraft: '', userMarket: 'es', userRegion: '',
+      uiScale: scale, setUiScale: setScale, userMarket: 'es', userRegion: '',
       showToast: (...args) => errors.push(args),
     });
   }
@@ -135,6 +135,10 @@ test('compact handedness buttons retain selection, persistence, center base and 
   });
   try {
     await render();
+    for (const retired of ['CUENTA', 'my_go_phone', 'demo_mode', 'go_direct_to_number']) {
+      assert.ok(!host.textContent.includes(retired), `Retired account UI must not leave ${retired} behind`);
+    }
+    assert.ok(!f.rendered.some(({ name, props }) => name === 'TextInput' && props.keyboardType === 'phone-pad'));
     assert.ok(!host.textContent.includes('PERSONALIZACIÓN'));
     assert.ok(!host.textContent.includes('tools_show_controls'));
     assert.ok(!host.textContent.includes('tools_controls_visible_desc'));

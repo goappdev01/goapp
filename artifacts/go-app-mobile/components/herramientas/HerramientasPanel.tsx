@@ -40,12 +40,6 @@ interface HerramientasPanelProps {
   toggleHandedness: () => void;
   uiScale: "compacto" | "estandar" | "grande";
   setUiScale: (k: "compacto" | "estandar" | "grande") => void;
-  userGoPhoneDraft: string;
-  setUserGoPhoneDraft: (v: string) => void;
-  phoneGoSaved: boolean;
-  commitUserPhone: () => void;
-  demoSelfSend: boolean;
-  setDemoSelfSend: (v: boolean) => void;
   shakeAiEnabled: boolean;
   setShakeAiEnabled: (v: boolean) => void;
   shakeAiSensitivity: "baja" | "media" | "alta";
@@ -71,9 +65,6 @@ export function HerramientasPanel({
   visible, onClose, landingVariantControls,
   handedness, toggleHandedness,
   uiScale, setUiScale,
-  userGoPhoneDraft, setUserGoPhoneDraft,
-  phoneGoSaved, commitUserPhone,
-  demoSelfSend, setDemoSelfSend,
   shakeAiEnabled, setShakeAiEnabled,
   shakeAiSensitivity, setShakeAiSensitivity,
   shakeAiAction, setShakeAiAction,
@@ -577,68 +568,6 @@ export function HerramientasPanel({
             </View>
           </View>
 
-          {/* ══════════════════════════════════════════════════════════
-              4 · CUENTA / TELÉFONO
-          ══════════════════════════════════════════════════════════ */}
-          <Text style={s.familyLabel}>CUENTA</Text>
-
-          {/* Mi número GO */}
-          <View style={s.card}>
-            <View style={s.rowHeader}>
-              <View style={s.rowIconWrap}>
-                <Feather name="phone" size={13} color={BLUE} />
-              </View>
-              <Text style={s.rowTitle}>{t("my_go_phone")}</Text>
-            </View>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 }}>
-              <TextInput
-                value={userGoPhoneDraft}
-                onChangeText={setUserGoPhoneDraft}
-                onBlur={commitUserPhone}
-                onSubmitEditing={commitUserPhone}
-                placeholder={t("phone_placeholder")}
-                placeholderTextColor="#9CA3AF"
-                keyboardType="phone-pad"
-                returnKeyType="done"
-                style={[s.inlineInput, userGoPhoneDraft.trim() ? s.inlineInputFilled : undefined, { flex: 1 }]}
-              />
-              {phoneGoSaved && (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                  <Feather name="check" size={12} color="#3D9A84" />
-                  <Text style={{ color: "#3D9A84", fontSize: 10, fontWeight: "700" }}>{t("saved")}</Text>
-                </View>
-              )}
-            </View>
-            {!phoneGoSaved && !!userGoPhoneDraft.trim() && (
-              <Text style={{ color: "rgba(61,154,132,0.7)", fontSize: 10, marginTop: 8 }}>
-                {t("go_direct_to_number")}
-              </Text>
-            )}
-          </View>
-
-          {/* Autoenvío demo */}
-          <TouchableOpacity
-            onPress={() => {
-              Haptics.selectionAsync().catch(() => {});
-              const next = !demoSelfSend;
-              setDemoSelfSend(next);
-              AsyncStorage.setItem("go_demo_self_send_enabled", next ? "true" : "false").catch(() => {});
-            }}
-            activeOpacity={0.8}
-            style={[s.card, s.demoRow, demoSelfSend && s.demoRowActive]}
-          >
-            <View style={[s.rowIconWrap, { marginRight: 12 }]}>
-              <Feather name="send" size={13} color={demoSelfSend ? "#C4883A" : BLUE} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.rowTitle, demoSelfSend && { color: "#C4883A" }]}>{t("demo_mode")}</Text>
-              <Text style={s.rowSub}>{demoSelfSend ? t("demo_mode_on") : t("demo_mode_off")}</Text>
-            </View>
-            <View style={[s.toggleSwitch, demoSelfSend && { backgroundColor: "#C4883A" }]}>
-              <View style={[s.toggleThumb, { alignSelf: demoSelfSend ? "flex-end" : "flex-start" }]} />
-            </View>
-          </TouchableOpacity>
-
         </ScrollView>
 
         {/* FAB cerrar — arrastrable con long-press */}
@@ -751,13 +680,9 @@ const s = StyleSheet.create({
   dropdownTxt:  { color: "#374151", fontSize: 13, fontWeight: "600" },
   dropdownSub:  { color: "#9CA3AF", fontSize: 10, marginTop: 1 },
 
-  // Inline input (region, phone)
+  // Inline input (region)
   inlineInput:  { height: 40, flex: 1, borderRadius: 10, backgroundColor: "#F7F8FA", borderWidth: 1, borderColor: "rgba(0,0,0,0.10)", color: "#111827", fontSize: 14, fontWeight: "600", paddingHorizontal: 12 },
   inlineInputFilled: { borderWidth: 2, borderColor: "rgba(61,154,132,0.55)", backgroundColor: "rgba(61,154,132,0.04)" },
-
-  // Demo row
-  demoRow:      { flexDirection: "row", alignItems: "center" },
-  demoRowActive:{ borderColor: GOLD_BDR, backgroundColor: GOLD_BG },
 
   // Toggle switch
   toggleSwitch: { width: 48, height: 28, borderRadius: 14, backgroundColor: "#E5E7EB", justifyContent: "center", paddingHorizontal: 3 },

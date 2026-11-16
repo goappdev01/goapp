@@ -12,6 +12,7 @@ const source = fs.readFileSync('app/index.tsx', 'utf8');
 const ast = ts.createSourceFile('app/index.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const model = h.load('lib/unifiedNotes.ts');
 const tools = h.load('lib/goNoteTools.ts');
+const messageIdentity = h.load('lib/goMessageIdentity.ts');
 const navigation = h.load('lib/goNoteNavigation.ts', { './unifiedNotes': model });
 const findAll = predicate => {
   const found = [];
@@ -414,7 +415,8 @@ function goComposerFixture() {
     proposalModeRef: { current: false }, genericMode: false, activeLabelUpper: 'REUNIÓN', selectedSugerencia: null,
     notesDraft: '', place: '', coords: null, date: '15/01/2027', time: '18:00', duration: '', shareRoute: false, t: key => key,
   });
-  loadFunctions(f.ctx, ['normalizePhoneForWhatsApp', 'hasActiveGoNoteTarget', 'openLandingNote',
+  f.ctx.normalizePhoneForWhatsApp = messageIdentity.normalizePhoneForWhatsApp;
+  loadFunctions(f.ctx, ['hasActiveGoNoteTarget', 'openLandingNote',
     'canAttachNoteToGo', 'updateGoNoteContext', 'getOrStartGoNoteContext',
     'currentGoAttachmentEntry', 'currentGoAttachment', 'stageGoNote', 'openComposeGoNote', 'renderComposeGoNote', 'buildMessage']);
   return f;
