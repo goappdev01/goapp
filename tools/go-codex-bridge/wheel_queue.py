@@ -609,7 +609,11 @@ class Wheel:
             saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=? AND attempt=?",
                              (card["id"],spec["attempt"])).fetchone()
         if saved:
-            destination=self._verified(saved)["destination"]
+            previous=self._verified(saved)
+            destination=previous["destination"]
+            if live:
+                # This is an issuance fact, not a fresh Trello instruction.
+                subject["live_return"]=previous.get("live_return",False)
         subject.update(position=card["pos"], board=BOARD, origin=QUEUE, destination=destination,
                        workspace=str(workspace), agent_settings=self.b.config["agents"]["4"],
                        owner=OWNER, publish_target="goappdev01/goapp:main",cli_settings=self.b.cli_defaults())
@@ -1523,13 +1527,14 @@ class Wheel:
         return changed==1
 
     def reconcile_unstarted_card_context(self, working, card):
-        """Reuse a prepared job when a rejected card description had no side effects."""
+        """Reuse a preflight job only when no code or external effect was released."""
         if not card or card["id"]!=working["card_id"]:
             return False
         with self.b.db() as db:
             phases=[row[0] for row in db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 2",
                                                 (working["grant_id"],))]
-        if phases!=["question-claimed:C","CARD_CONTEXT_INVALID"]:
+        if len(phases)!=2 or phases[0]!="question-claimed:C" or phases[1] not in (
+                "CARD_CONTEXT_INVALID","WHEEL_SUBJECT_CHANGED"):
             return False
         grant=self._verified(working)
         self._check_card(grant,card)
@@ -1540,7 +1545,7 @@ class Wheel:
         with self.f.lock,self.b.mutex,self.b.db() as db:
             db.execute("BEGIN IMMEDIATE")
             current=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(grant["grant_id"],)).fetchone()
-            if not current or current["state"]!="working" or not self.live_policy(db):
+            if not current or current["state"] not in ("working","blocked") or not self.live_policy(db):
                 return False
             if (db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
                     or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()):
@@ -1548,32 +1553,43 @@ class Wheel:
             attempt=db.execute("SELECT * FROM factory_attempts WHERE card_id=? AND attempt=?",
                                (grant["card_id"],grant["attempt"])).fetchone()
             job=db.execute("SELECT * FROM jobs WHERE id=?",(attempt["job_id"],)).fetchone() if attempt and attempt["job_id"] else None
+            operation=db.execute("SELECT action,state FROM operations WHERE id=?",
+                                 (attempt["comment_operation"],)).fetchone() if attempt and attempt["comment_operation"] else None
             stages=list(db.execute("SELECT letter,state,approval_id,receipt FROM wheel_stages WHERE grant_id=?",
                                    (grant["grant_id"],)))
             phases=[row[0] for row in db.execute("SELECT phase FROM wheel_checkpoints WHERE grant_id=? ORDER BY id DESC LIMIT 2",
                                                 (grant["grant_id"],))]
-            if (not attempt or attempt["state"]!="blocked" or attempt["comment_operation"] or attempt["move_operation"]
+            if (not attempt or attempt["state"]!="blocked" or attempt["move_operation"]
+                    or (operation and (operation["action"],operation["state"])!=("comment","prepared"))
+                    or (attempt["comment_operation"] and not operation)
+                    or (current["state"]=="blocked" and current["reason"]!=phases[1])
                     or not job or job["state"]!="blocked" or job["pid"] or job["session_id"]
                     or json.loads(job["data"] or "{}").get("instruction_sha256")!=grant["instruction_sha"]
                     or json.loads(job["data"] or "{}").get("source",{}).get("card_id")!=grant["card_id"]
-                    or json.loads(job["result"] or "{}").get("classification_reason")!="CARD_CONTEXT_INVALID"
+                    or json.loads(job["result"] or "{}").get("classification_reason")!=phases[1]
                     or json.loads(job["result"] or "{}").get("programming_started") is not False
-                    or phases!=["question-claimed:C","CARD_CONTEXT_INVALID"]
                     or {(r["letter"],r["state"]) for r in stages}!={("A","claimed"),("C","claimed")}
                     or any(r["approval_id"] or r["receipt"] for r in stages)
                     or db.execute("SELECT 1 FROM factory_questions WHERE grant_id=? AND state='waiting'",
                                   (grant["grant_id"],)).fetchone()
                     or db.execute("SELECT 1 FROM operations WHERE action='publish-main' AND state!='verified'").fetchone()):
                 return False
+            if operation:
+                db.execute("UPDATE operations SET state='cancelled-before-release' WHERE id=? AND state='prepared'",
+                           (attempt["comment_operation"],))
+                self.b.audit("wheel_prepared_effect_cancelled",{"operation":attempt["comment_operation"],
+                    "reason":"unstarted-preflight-recovery"},db)
             db.execute("DELETE FROM wheel_stages WHERE grant_id=? AND letter IN ('A','C') AND state='claimed' AND approval_id IS NULL AND receipt IS NULL",
                        (grant["grant_id"],))
             db.execute("UPDATE jobs SET state='prepared',result=NULL,updated=? WHERE id=? AND state='blocked'",
                        (self.f.utc(),job["id"]))
             detail=json.loads(attempt["detail"] or "{}")
             detail.pop("blocked_reason",None)
-            detail["recovered_preflight"]="CARD_CONTEXT_INVALID"
+            detail["recovered_preflight"]=phases[1]
             db.execute("UPDATE factory_attempts SET state='prepared',finished=NULL,detail=? WHERE card_id=? AND attempt=? AND state='blocked'",
                        (self.f.canonical(detail),grant["card_id"],grant["attempt"]))
+            db.execute("UPDATE wheel_grants SET state='ready',reason=NULL WHERE grant_id=? AND state='blocked'",
+                       (grant["grant_id"],))
             self.b.audit("wheel_unstarted_card_context_reconciled",{"grant":grant["grant_id"],
                 "job":job["id"],"checkpoint_preserved":True,"trello_write":False},db)
             return True
@@ -1586,7 +1602,13 @@ class Wheel:
             working=working_rows[0] if working_rows else None
         if working:
             if working["card_id"] in cards:
-                self.reconcile_unstarted_card_context(working,cards[working["card_id"]])
+                try:
+                    self.reconcile_unstarted_card_context(working,cards[working["card_id"]])
+                except self.f.Error as error:
+                    if self._system(error.code):
+                        raise
+                    with self.b.db() as db:
+                        self._record_skip(db,cards[working["card_id"]],error.code,self._verified(working))
             with self.b.db() as db:
                 db.execute("BEGIN IMMEDIATE")
                 if self._preserve_unreleased_conflict(db,working):
@@ -1664,6 +1686,18 @@ class Wheel:
                 with self.b.db() as db:
                     saved=db.execute("SELECT * FROM wheel_grants WHERE card_id=? ORDER BY attempt DESC LIMIT 1",
                                      (card["id"],)).fetchone()
+            if saved and saved["state"]=="blocked":
+                try:
+                    recovered=self.reconcile_unstarted_card_context(saved,card)
+                except self.f.Error as error:
+                    if self._system(error.code):
+                        raise
+                    with self.b.db() as db:
+                        self._record_skip(db,card,error.code,self._verified(saved))
+                    continue
+                if recovered:
+                    with self.b.db() as db:
+                        saved=db.execute("SELECT * FROM wheel_grants WHERE grant_id=?",(saved["grant_id"],)).fetchone()
             if not saved:
                 continue
             grant=self._verified(saved)
