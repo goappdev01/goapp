@@ -88,3 +88,23 @@ test('repeated drag/fold cycles preserve writing, explicit destinations, GO and 
   await press(ui);await ui.destination('pending');await ui.run(()=>ui.hosts.get('unified-note-save').onPress());await ui.idle();const [loaded]=await disk.reopen();assert.equal(loaded.note.content,text);assert.equal(loaded.note.destination,'pending');assert.match(ui.container.textContent,/guardada/i);assert.equal(disk.rows.length,1);
  }finally{await ui.close();disk.close();}
 });
+
+test('shopping cart, existing arrow and trash share one floating group, preserve full content width and keep their actions independent',async()=>{
+ for(const handedness of ['left','right'])for(const width of [320,390,430]){
+  const disk=await h.diskFixture();let opened=0,deleted=0;const initial=disk.model.buildNoteEntry(disk.draft({title:'Mi nota',content:'Texto intacto'}),disk.scope);
+  const ui=await h.editorFixture({initial,handedness,onDelete:async()=>{deleted++;},ports:{viewport:{width,height:width===320?568:932,scale:3,fontScale:1.5},workspace:{x:12,y:99,width:width-24,height:width===320?330:600}}});
+  try{
+   await ui.render({onOpenShopping:()=>{opened++;}});const group=find(ui.container,'note-lateral-actions');assert.ok(group);
+   const controls=(group.childNodes||[]).map(n=>n.attributes?.['data-testid']).filter(Boolean);assert.deepEqual(controls,['note-open-shopping','note-tools-toggle','note-discard']);
+   const header=find(ui.container,'note-heading');assert.equal(find(header.parentNode,'note-discard'),undefined);
+   assert.equal(find(find(ui.container,'note-editor-footer'),'note-discard'),undefined);
+   const field=flat(ui.hosts.get('note-content').style);assert.equal(field.paddingRight,undefined);assert.equal(field.paddingLeft,undefined);
+   const pos=ui.fab.style();assert.equal(pos.left,handedness==='right'?width-24-44:0);assert.ok(pos.top>=8&&pos.top+148<=(width===320?330:600)-8);
+   await ui.run(()=>{ui.hosts.get('note-content').onFocus({target:77});ui.keyboard.show();});
+   if(!ui.hosts.has('note-open-shopping')){assert.equal(width,320);assert.equal(ui.hosts.get('note-navigation-back').accessibilityLabel,'Ocultar teclado');await ui.back();}
+   await ui.tap('note-open-shopping');assert.equal(opened,1);assert.equal(deleted,0);assert.equal(ui.keyboard.visible,false);assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,false);assert.equal(ui.hosts.get('note-content').value,'Texto intacto');
+   await press(ui);assert.equal(opened,1);assert.equal(ui.hosts.get('note-tools-toggle').accessibilityState.expanded,true);await press(ui);
+   await ui.tap('note-discard');assert.equal(deleted,0);assert.equal(ui.alerts.at(-1).title,'Eliminar nota');await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.style==='destructive').onPress());await ui.idle();assert.equal(deleted,1);assert.equal(opened,1);
+  }finally{await ui.close();disk.close();}
+ }
+});

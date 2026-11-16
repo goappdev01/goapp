@@ -8,21 +8,32 @@ import { DraggableFAB } from "@/components/DraggableFAB";
  * Keep its original storage keys: temporary keyboard clamping never overwrites them. */
 export function GoToolRailToggle({ bounds, handedness, open, onPress, disabled, testID,
   accessibilityLabel, buttonKey = "tools-toggle", freeMovement = false, verticalInset = 8, initialTop,
+  topAction, bottomAction,
 }: {
   bounds: { width: number; height: number }; handedness: "left" | "right"; open: boolean;
   onPress: () => void; disabled?: boolean; testID?: string; accessibilityLabel: string;
   buttonKey?: string; freeMovement?: boolean; verticalInset?: number; initialTop?: number;
+  topAction?:{testID:string;label:string;onPress:()=>void;disabled?:boolean};
+  bottomAction?:{testID:string;label:string;onPress:()=>void;disabled?:boolean};
 }) {
   const press = useRef({ dragging: false, suppress: false });
   const start = useCallback(() => { press.current = { dragging: true, suppress: true }; }, []);
   const end = useCallback(() => { press.current.dragging = false; }, []);
-  if (bounds.width < 44 || bounds.height < 48 + verticalInset * 2) return null;
+  const clusterHeight=48+(topAction?50:0)+(bottomAction?50:0);
+  if (bounds.width < 44 || bounds.height < clusterHeight + verticalInset * 2) return null;
+  const sideAction=(action:NonNullable<typeof topAction>,icon:"shopping-cart"|"trash-2")=><TouchableOpacity testID={action.testID} accessibilityRole="button" accessibilityLabel={action.label}
+    accessibilityState={{disabled:!!disabled||!!action.disabled}} disabled={!!disabled||!!action.disabled}
+    onPressIn={()=>{if(!press.current.dragging)press.current.suppress=false;}}
+    onPress={()=>{if(!press.current.dragging&&!press.current.suppress)action.onPress();}}
+    style={[goToolRailStyles.toggle,{height:44}]}><Feather name={icon} size={21} color={icon==="trash-2"?"#b4232f":"#326799"}/></TouchableOpacity>;
   return <DraggableFAB screenKey="note-editor" buttonKey={buttonKey} bounds={bounds}
-    boundsVerticalInset={verticalInset} buttonWidth={44} maxH={48}
-    initialTop={initialTop ?? Math.max(8, Math.min(bounds.height - 56, Math.round(bounds.height * .74)))}
+    boundsVerticalInset={verticalInset} buttonWidth={44} maxH={clusterHeight}
+    initialTop={Math.max(verticalInset,Math.min(bounds.height-clusterHeight-verticalInset,(initialTop??Math.round(bounds.height*.74))-(topAction?50:0)))}
     initialRight={handedness === "right" ? 0 : Math.max(0, bounds.width - 44)}
     fixedLeft={freeMovement ? undefined : handedness === "right" ? bounds.width - 44 : 0}
     onDragStart={start} onDragEnd={end}>
+    <View testID={topAction||bottomAction?"note-lateral-actions":undefined} style={{gap:6}}>
+    {topAction&&sideAction(topAction,"shopping-cart")}
     <TouchableOpacity testID={testID} accessibilityRole="button" accessibilityLabel={accessibilityLabel}
       accessibilityHint={freeMovement ? "Mantén pulsado medio segundo para mover la flecha" : "Mantén pulsado medio segundo para mover la flecha verticalmente"}
       accessibilityState={{ expanded: open, disabled: !!disabled }} disabled={disabled} delayLongPress={500}
@@ -34,6 +45,8 @@ export function GoToolRailToggle({ bounds, handedness, open, onPress, disabled, 
         style={[StyleSheet.absoluteFill, { borderRadius: 14 }]} />
       <Feather name={handedness === "right" ? (open ? "chevron-right" : "chevron-left") : (open ? "chevron-left" : "chevron-right")} size={22} color="#202830" />
     </TouchableOpacity>
+    {bottomAction&&sideAction(bottomAction,"trash-2")}
+    </View>
   </DraggableFAB>;
 }
 

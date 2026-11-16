@@ -1,5 +1,7 @@
 # COMPRAS V1 — implementación y validación
 
+Nota: este documento registra la entrega V1. El rediseño y sus comprobaciones actuales se describen en [compras-redesign-local.md](compras-redesign-local.md).
+
 Acceso: ámbito personal de una cuenta autenticada → Listados → botón «Notas» → pantalla «NOTA» → «COMPRAS · LISTA PERSONAL». El mismo acceso está en el editor ordinario de NOTAS abierto desde Calendario. Abrir la nota canónica guardada muestra directamente «COMPRAS». Volver conserva el borrador de la nota ordinaria y el origen de navegación.
 
 ## Implementación

@@ -67,7 +67,6 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   const toolsHeight=panel==="date"?Math.min(workspaceBounds.height||dateContentHeight,dateContentHeight):!panel?menuHeight:undefined;
   const toggleBoundsHeight=panel?Math.max(48,workspaceBounds.height-88):workspaceBounds.height;
   const toggleTop=Math.max(8,Math.min(toggleBoundsHeight-56,Math.round(workspaceBounds.height*.74)));
-  const writingInset=handedness==="right"?{paddingRight:56}:{paddingLeft:56};
   const [locations,setLocations]=useState<{latitude:number;longitude:number;label:string}[]>([]);
   const [preparing,setPreparing]=useState(false),[preparedNotice,setPreparedNotice]=useState(""),[floatingNotice,setFloatingNotice]=useState("");
   const preparation=useRef(0),draftRef=useRef(draft);draftRef.current=draft;
@@ -305,8 +304,8 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
     finally{saveLock.current=false;setBusy(false);}
   };
   const input=(id:string,label:string,value:string,onChangeText:(value:string)=>void,extra:object={})=><View style={[s.field,id.startsWith("note-exact-")&&{flex:1,minWidth:100}]}>
-    <Text style={[s.label,(id==="note-title"||id==="note-content")&&handedness==="left"&&{paddingLeft:44}]}>{label}</Text><TextInput testID={id} accessibilityLabel={label} value={value} onChangeText={onChangeText} editable={!busy&&!toolFinishing}
-      onFocus={focusToolInput} placeholderTextColor="#626974" style={[s.input,(id==="note-title"||id==="note-content")&&writingInset]} {...extra}/></View>;
+    <Text style={s.label}>{label}</Text><TextInput testID={id} accessibilityLabel={label} value={value} onChangeText={onChangeText} editable={!busy&&!toolFinishing}
+      onFocus={focusToolInput} placeholderTextColor="#626974" style={s.input} {...extra}/></View>;
   const choice=(label:string,action:()=>void,selected=false,id?:string,menu=false)=><TouchableOpacity testID={id} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{selected,disabled:busy||toolFinishing||attachmentBusy}}
     disabled={busy||toolFinishing||attachmentBusy} activeOpacity={0.78} onPress={action} style={[s.choice,selected&&s.configured,menu&&{paddingHorizontal:8}]}><LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.65)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,s.buttonSheen]}/><Text maxFontSizeMultiplier={menu?1.3:undefined} style={[s.text,s.choiceText]}>{label}</Text></TouchableOpacity>;
   const controlRow=[s.row,{flexDirection:handedness==="left"?"row" as const:"row-reverse" as const}];
@@ -359,21 +358,15 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
     <View testID="note-editor-root" style={s.root} onLayout={event=>setFrameHeight(event.nativeEvent.layout.height)}>
     <GoScreenCloseSurface testID="unified-note-screen" handedness={handedness} onClose={back} enabled={!busy&&!toolFinishing&&!attachmentBusy&&!closingSaved} scrollRefs={[scroll,toolsScroll]} style={s.root}>
       <KeyboardAvoidingView testID="KeyboardFrame" behavior="padding" style={{flex:1,paddingTop:insets.top+8,paddingHorizontal:Math.max(12,insets.left,insets.right)}}>
-        <View style={s.header}><Text testID="note-heading" accessibilityRole="header" onPress={()=>void hideKeyboard()} style={s.heading}>NOTA</Text>
-          {(goAttachment||!!initial)&&(onDiscard||onDelete)&&<TouchableOpacity testID="note-discard" accessibilityRole="button" accessibilityLabel={initial?"Eliminar nota":"Descartar borrador"} disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPress={requestDiscard}
-            style={{position:"absolute",width:44,height:44,alignItems:"center",justifyContent:"center",...(handedness==="right"?{right:0}:{left:0})}}>
-            <Feather name="trash-2" size={19} color="#b4232f"/>
-          </TouchableOpacity>}
-        </View>
+        <View style={s.header}><Text testID="note-heading" accessibilityRole="header" onPress={()=>void hideKeyboard()} style={s.heading}>NOTA</Text></View>
         <View ref={workspaceView} collapsable={false} testID="note-writing-workspace" style={s.workspace} onLayout={event=>{const {x,y,width,height}=event.nativeEvent.layout;setWorkspaceBounds(current=>Math.abs(current.width-width)<=1&&Math.abs(current.height-height)<=1&&Math.abs(current.x-x)<=1&&Math.abs(current.y-y)<=1?current:{x,y,width,height});}}>
         <ScrollView ref={scroll} testID="unified-note-scroll" style={s.writing}
           onLayout={event=>{const height=Math.max(120,Math.floor(event.nativeEvent.layout.height-110));setWritingHeight(current=>Math.abs(current-height)<=2?current:height);}}
           keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" bounces={false} alwaysBounceVertical={false} overScrollMode="never" automaticallyAdjustKeyboardInsets={false} automaticallyAdjustContentInsets={false} contentInsetAdjustmentBehavior="never" removeClippedSubviews={false} contentContainerStyle={{paddingBottom:12,gap:12}}>
           {goAttachment&&<Text testID="note-go-target" style={s.hint}>Destino · GO</Text>}
-          {!goAttachment&&onOpenShopping&&<TouchableOpacity testID="note-open-shopping" accessibilityRole="button" disabled={busy||toolFinishing||attachmentBusy||!ready} onPress={()=>{const expected=JSON.stringify(scope);void hideKeyboard().then(hidden=>{if(hidden&&latest.current.visible&&latest.current.ready&&JSON.stringify(latest.current.scope)===expected)onOpenShopping({draft:draftRef.current,saved:saved.current});});}} style={[s.choice,s.calendar]}><Text style={s.destinationText}>COMPRAS · LISTA PERSONAL</Text></TouchableOpacity>}
           {input("note-title","TÍTULO (OPCIONAL)",draft.title,title=>change({title}),{onFocus:(event:Parameters<NonNullable<TextInputProps["onFocus"]>>[0])=>{focusedToolTarget.current=null;focusedWritingTarget.current=event.target??event.nativeEvent.target??null;voice.focus("title");},maxLength:200})}
           {input("note-content","CONTENIDO",draft.content,content=>change({content}),{onFocus:(event:Parameters<NonNullable<TextInputProps["onFocus"]>>[0])=>{focusedToolTarget.current=null;focusedWritingTarget.current=event.target??event.nativeEvent.target??null;voice.focus("detail");},multiline:true,textAlignVertical:"top",scrollEnabled:true,
-            style:[s.input,s.content,writingInset,{height:writingHeight}]})}
+            style:[s.input,s.content,{height:writingHeight}]})}
           {!!initial&&<View testID="note-current-settings" style={{gap:6}}>
             {!goAttachment&&<Text style={s.hint}>{[draft.destination&&destinations.find(([key])=>key===draft.destination)?.[1],validNoteDate(draft.dateISO)&&noteDateLabel(draft.dateISO),draft.time,noteDurationLabel(draft.duration)].filter(Boolean).join(" · ")}</Text>}
             {draft.reminderMinutes!==null&&<Text style={s.hint}>{noteReminderLabel(draft.reminderMinutes,false)}</Text>}
@@ -393,12 +386,6 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
         <GoScreenCloseGuide/>
         {!!floatingNotice&&<View testID="note-floating-notice" pointerEvents="none" accessibilityRole="alert" accessibilityLiveRegion="polite" style={[s.floating,{top:insets.top+64}]}><Text style={s.text}>{floatingNotice}</Text></View>}
         <View testID="note-editor-footer" onLayout={event=>{const {height,y}=event.nativeEvent.layout;footerHeight.current=height;if(Number.isFinite(y))setFooterBottom(y+height);}} style={[s.footer,{paddingBottom:Math.max(insets.bottom,12),flexDirection:handedness==="left"?"row-reverse":"row"}]}>
-        {!goAttachment&&!initial&&onDiscard&&
-          <TouchableOpacity testID="note-discard" accessibilityRole="button" accessibilityLabel="Descartar borrador" accessibilityHint="Elimina este borrador y cierra la nota"
-            disabled={busy||toolFinishing||attachmentBusy||closingSaved} onPress={requestDiscard} activeOpacity={0.78}
-            style={{width:44,minHeight:52,flexShrink:0,alignItems:"center",justifyContent:"center",borderRadius:12}}>
-            <Feather name="trash-2" size={28} color="#b4232f"/>
-          </TouchableOpacity>}
           <TouchableOpacity testID="unified-note-save" accessibilityRole="button" disabled={busy||toolFinishing||closingSaved||attachmentBusy||preparing||voice.status!=="idle"} activeOpacity={0.78} onPress={()=>void save()} style={s.save}><LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.58)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,{borderRadius:18}]}/><Text style={s.saveText}>{busy?"GUARDANDO…":"GUARDAR"}</Text></TouchableOpacity>
           <TouchableOpacity testID="note-microphone" accessibilityRole="button" accessibilityLabel={voice.status==="listening"?"Detener escucha de GO":"Hablar con GO para preparar la nota"} accessibilityState={{selected:voice.status==="listening",disabled:busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"}}
             disabled={busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"} activeOpacity={0.78} onPress={()=>{if(draftRef.current.security){setFloatingNotice("Las notas de seguridad no están activadas y no se envían a la IA.");return;}if(!latest.current.ready){setFloatingNotice("Espera a que se verifique tu cuenta para hablar con GO.");return;}void voice.toggle();}} style={[assistantStyles.goButton,s.go,voice.status==="listening"&&assistantStyles.listening]}>
@@ -453,6 +440,8 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
       <GoToolRailToggle key={panel==="time"?"time-toggle":"tools-toggle"} buttonKey={panel==="time"?"time-toggle":"tools-toggle"}
         bounds={{width:workspaceBounds.width,height:toggleBoundsHeight}} verticalInset={panel?0:8} initialTop={panel==="time"?0:toggleTop}
         freeMovement={panel==="time"} handedness={handedness} open={toolsOpen} testID="note-tools-toggle"
+        topAction={!goAttachment&&onOpenShopping?{testID:"note-open-shopping",label:"Abrir Compras · lista personal",disabled:!ready,onPress:()=>{const expected=JSON.stringify(scope);void hideKeyboard().then(hidden=>{if(hidden&&latest.current.visible&&latest.current.ready&&JSON.stringify(latest.current.scope)===expected)onOpenShopping({draft:draftRef.current,saved:saved.current});});}}:undefined}
+        bottomAction={onDiscard||onDelete?{testID:"note-discard",label:initial?"Eliminar nota":"Descartar borrador",onPress:requestDiscard}:undefined}
         accessibilityLabel={toolsOpen?"Ocultar herramientas de la nota":"Mostrar herramientas de la nota"}
         disabled={busy||toolFinishing||attachmentBusy||closingSaved}
         onPress={()=>{if(saveLock.current||workLock.current)return;if(!toolsOpen){void openTool("");return;}if(panel){void finishTool(undefined,true);return;}toolRequest.current++;setOpeningTool("");setAwaitingTool(null);if(focusedToolTarget.current)void hideKeyboard();setToolsOpen(false);}}/>

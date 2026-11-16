@@ -671,7 +671,7 @@ test('the actual Landing satellite shows draft trash immediately, preserves norm
     assert.equal(ui.hosts.has('note-destination-selected'), false);
     const trashElement = mountedControl(ui.container, 'note-discard');
     assert.ok(trashElement);
-    assert.ok(mountedAncestor(trashElement,'data-testid','note-editor-footer'));
+    assert.ok(mountedAncestor(trashElement,'data-testid','note-lateral-actions'));
     assert.equal(mountedAncestor(trashElement,'data-testid','note-tools-panel'), null);
     assert.equal(mountedAncestor(trashElement,'data-testid','unified-note-scroll'), null);
     await ui.run(() => ui.hosts.get('note-title').onChangeText('Borrador'));
@@ -703,7 +703,7 @@ test('the actual Landing satellite shows draft trash immediately, preserves norm
   } finally { if (ui) await ui.close(); disk.close(); }
 });
 
-test('standalone draft trash shares the compact footer with keyboard, text scaling and either hand', async () => {
+test('standalone draft trash stays in the floating group, clear of the footer, with keyboard, text scaling and either hand', async () => {
   for (const handedness of ['left','right']) for (const width of [320,390,430]) for (const keyboardVisible of [false,true]) {
     const ui = await h.editorFixture({ handedness, onDiscard: async()=>{}, ports: {
       keyboardVisible, viewport: { width, height: width===320?568:932, scale:3, fontScale:1.5 },
@@ -711,19 +711,19 @@ test('standalone draft trash shares the compact footer with keyboard, text scali
     try {
       assert.equal(ui.hosts.has('note-draft-discard-row'),false);
       const footer=ui.hosts.get('note-editor-footer');
-      assert.deepEqual(footer.children.map(child=>child.props.testID||'close'),['note-discard','unified-note-save','note-microphone','note-navigation-slot']);
+      assert.deepEqual(footer.children.map(child=>child.props.testID||'close'),['unified-note-save','note-microphone','note-navigation-slot']);
       const footerStyle=Object.assign({},...footer.style.flat(Infinity).filter(Boolean));
       assert.equal(footerStyle.flexDirection,handedness==='right'?'row':'row-reverse');
-      assert.equal(ui.hosts.get('note-discard').style.width,44);
-      assert.ok(ui.hosts.get('note-discard').style.minHeight>=44);
-      assert.equal(ui.hosts.get('note-discard').children.props.size,28);
+      const trashStyle=Object.assign({},...ui.hosts.get('note-discard').style.flat(Infinity).filter(Boolean));
+      assert.equal(trashStyle.width,44);assert.ok(trashStyle.height>=44);
+      assert.equal(ui.hosts.get('note-discard').children.props.name,'trash-2');
       assert.doesNotMatch(ui.container.textContent,/DESCARTAR BORRADOR/);
       assert.equal(ui.hosts.get('note-navigation-back').touchSize,56);
       assert.equal(ui.hosts.get('unified-note-save').style.flex,1);
       const button = mountedControl(ui.container, 'note-discard');
       assert.ok(button);
-      assert.ok(mountedAncestor(button,'data-native','KeyboardFrame'));
-      assert.ok(mountedAncestor(button,'data-testid','note-editor-footer'));
+      assert.ok(mountedAncestor(button,'data-testid','note-tools-floating-layer'));
+      assert.equal(mountedAncestor(button,'data-testid','note-editor-footer'),null);
       assert.equal(mountedAncestor(button,'data-testid','note-tools-panel'),null);
       await ui.tap('note-tools-toggle');
       for(const destination of ['calendar','pending','archive'])assert.ok(ui.hosts.has('note-destination-'+destination));

@@ -39,7 +39,11 @@ async function shoppingUI(f,{handedness='right',width=390,height=844,fontScale=1
  const reorder=h.load('components/notes/ShoppingReorderSurface.tsx',{'react-native':native,'react-native-gesture-handler':gh,'@/components/boards/BoardDragSurface':board},globals);
  const keyboardHook=h.load('hooks/useGoNoteKeyboard.ts',{'react-native':native});
  const store={subscribeGoLog:f.disk.store.subscribeGoLog,getGoLogSnapshot:f.disk.store.getGoLogSnapshot};
+ const experience=h.load('lib/shoppingExperience.ts',{'./shoppingNote':f.model});
+ const icons={Feather:host('Feather'),MaterialCommunityIcons:host('Illustration')};
+ const row=h.load('components/notes/ShoppingProductRow.tsx',{'react-native':native,'@expo/vector-icons':icons,'@/lib/shoppingNote':f.model});
  const {GoShoppingNote}=h.load('components/notes/GoShoppingNote.tsx',{'react-native':native,'react-native-gesture-handler':gh,'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:44,bottom:20,left:0,right:0})},
+  '@expo/vector-icons':icons,'@/lib/shoppingExperience':experience,'./ShoppingProductRow':row,'@/hooks/useBookingVoice':{useBookingVoice:()=>({status:'idle',error:'',abort(){},start:async()=>{},stop:async()=>{}})},
   '@/components/ui/GoScreenModal':{GoScreenModal:native.Modal},'@/components/ui/GoCloseButton':{GoCloseButton:native.TouchableOpacity},'@/hooks/useGoNoteKeyboard':keyboardHook,
   '@/lib/goLogStore':store,'@/lib/unifiedNotes':f.disk.model,'@/lib/shoppingNoteStore':f.api(),'@/lib/shoppingNote':f.model,'./ShoppingReorderSurface':reorder},globals);
  const container=h.document.createElement('div'),root=h.createRoot(container);let props={visible:true,ready:true,scope:f.disk.scope,handedness,onClose:()=>calls.push(['close'])};
@@ -47,30 +51,30 @@ async function shoppingUI(f,{handedness='right',width=390,height=844,fontScale=1
  const render=async patch=>{props={...props,...patch};await h.settle(()=>root.render(React.createElement(GoShoppingNote,props)));await idle();};
  await render({});
  const tap=async id=>{assert.ok(hosts.has(id),'control exists: '+id);await h.settle(()=>hosts.get(id).onPress());await idle();};
- const input=async(key,value)=>{await h.settle(()=>hosts.get('shopping-field-'+key).onChangeText(value));await idle();};
+ const input=async(key,value)=>{if(!hosts.has('shopping-field-'+key))await tap('shopping-editor-options');await h.settle(()=>hosts.get('shopping-field-'+key).onChangeText(value));await idle();};
  return {hosts,instances,calls,alerts,frames,geometry,gestures,keyboard,container,render,idle,tap,input,run:h.settle,
   async frame(time){const pending=[...frames.values()];frames.clear();await h.settle(()=>pending.forEach(fn=>fn(time)));},close:()=>h.settle(()=>root.unmount())};
 }
 
 test('COMPRAS UI: actual add/edit/bought/filter/next controls persist offline and closing an editor retains list scroll instance',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f);const scroll=ui.instances.get('shopping-list-scroll');await ui.tap('shopping-add');await ui.input('name','Azúcar');await ui.input('quantity','2');await ui.tap('shopping-unit-paquetes');await ui.tap('shopping-save');
+  ui=await shoppingUI(f);const scroll=ui.instances.get('shopping-list-scroll');await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Azúcar');await ui.input('quantity','2');await ui.tap('shopping-unit-picker');await ui.tap('shopping-unit-paquetes');await ui.tap('shopping-save');
   const sugar=f.doc().items[0];assert.equal(sugar.quantity,2);assert.equal(sugar.category,'pantry');assert.equal(ui.instances.get('shopping-list-scroll'),scroll);assert.equal(ui.hosts.get('shopping-bought-'+sugar.id).accessibilityState.checked,false);
-  await ui.tap('shopping-add');await ui.input('name','Sal');await ui.tap('shopping-unit-paquetes');await ui.tap('shopping-save');const salt=f.doc().items.find(i=>i.name==='Sal');
+  await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Sal');await ui.tap('shopping-unit-picker');await ui.tap('shopping-unit-paquetes');await ui.tap('shopping-save');const salt=f.doc().items.find(i=>i.name==='Sal');
   await ui.tap('shopping-bought-'+sugar.id);assert.equal(f.doc().items.find(i=>i.id===sugar.id).bought,true);await ui.tap('shopping-bought-'+sugar.id);assert.equal(f.doc().items.find(i=>i.id===sugar.id).bought,false);
   await ui.tap('shopping-bought-'+sugar.id);await ui.tap('shopping-filter-bought');assert.ok(ui.hosts.has('shopping-item-'+sugar.id));assert.equal(ui.hosts.has('shopping-item-'+salt.id),false);await ui.tap('shopping-filter-all');
-  await ui.tap('shopping-next');assert.equal(ui.hosts.get('shopping-next-select-'+sugar.id).accessibilityState.checked,false);await ui.tap('shopping-next-select-'+sugar.id);await ui.tap('shopping-next-confirm');
+  await ui.tap('shopping-more');await ui.tap('shopping-next');assert.equal(ui.hosts.get('shopping-next-select-'+sugar.id).accessibilityState.checked,false);await ui.tap('shopping-next-select-'+sugar.id);await ui.tap('shopping-next-confirm');
   await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='PREPARAR').onPress());await ui.idle();assert.equal(f.doc().items.find(i=>i.id===sugar.id).bought,false);assert.equal(f.doc().items.length,2);
   await ui.tap('shopping-filter-all');await ui.tap('shopping-edit-'+sugar.id);await ui.input('store','Mercado A');await ui.input('price','2,50');await ui.input('priceQuantity','1');await ui.input('brand','Marca A');await ui.input('format','seco');await ui.tap('shopping-save');
   await ui.tap('shopping-edit-'+sugar.id);await ui.input('store','Mercado B');await ui.input('price','1,50');await ui.input('priceQuantity','500');await ui.tap('shopping-save');
-  assert.equal(f.doc().items.length,2);assert.equal(f.doc().items.find(i=>i.id===sugar.id).prices.length,2);assert.match(ui.container.textContent,/GO IA no está conectada/);
+  assert.equal(f.doc().items.length,2);assert.equal(f.doc().items.find(i=>i.id===sugar.id).prices.length,2);assert.ok(ui.hosts.has('shopping-go'));assert.ok(ui.hosts.has('shopping-route'));
   await ui.close();ui=null;await f.disk.reopen();assert.equal((await f.open()).note.shopping.items.length,2);
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 
 test('COMPRAS UI: measured long-press handles reorder only their own block, persist category order and cap/cancel edge autoscroll',async()=>{
  const f=await shoppingFixture();let ui;try{
-  await f.open();const a=await f.add('Azúcar'),b=await f.add('Sal'),bread=await f.add('Pan');ui=await shoppingUI(f);
+  await f.open();const a=await f.add('Azúcar'),b=await f.add('Sal'),bread=await f.add('Pan');ui=await shoppingUI(f);for(const item of [a,b,bread])await ui.tap('shopping-details-'+item.id);
   ui.geometry.set('shopping-position-'+a.id,[12,150,366,70]);ui.geometry.set('shopping-position-'+b.id,[12,230,366,70]);ui.geometry.set('shopping-position-'+bread.id,[12,310,366,70]);
   await ui.run(()=>ui.hosts.get('shopping-list-scroll').onContentSizeChange(390,1800));
   const pan=ui.gestures.get('shopping-drag-'+a.id);assert.equal(pan.activateAfterLongPressValue,500);assert.equal(pan.maxPointersValue,1);
@@ -81,7 +85,7 @@ test('COMPRAS UI: measured long-press handles reorder only their own block, pers
   const edge=ui.gestures.get('shopping-drag-'+a.id);await ui.run(()=>edge.onStartHandler({absoluteY:180}));await ui.run(()=>edge.onUpdateHandler({absoluteY:479}));await ui.frame(16);await ui.frame(32);
   const scrolling=ui.calls.filter(c=>c[0]==='scrollTo');assert.ok(scrolling.length>0);assert.ok(scrolling.every(c=>c[2].y>=0&&c[2].y<=1400));assert.ok(scrolling[0][2].y<=7.68);
   await ui.run(()=>edge.onFinalizeHandler({},false));const count=ui.calls.length;await ui.frame(48);assert.equal(ui.calls.length,count);assert.equal(ui.frames.size,0);
-  await ui.tap('shopping-arrange-categories');ui.geometry.set('shopping-position-produce',[12,100,366,70]);ui.geometry.set('shopping-position-bakery',[12,190,366,70]);
+  await ui.tap('shopping-more');await ui.tap('shopping-arrange-categories');ui.geometry.set('shopping-position-produce',[12,100,366,70]);ui.geometry.set('shopping-position-bakery',[12,190,366,70]);
   const category=ui.gestures.get('shopping-drag-produce');assert.equal(category.activateAfterLongPressValue,500);await ui.run(()=>category.onStartHandler({absoluteY:130}));await ui.run(()=>category.onUpdateHandler({absoluteY:220}));await ui.run(()=>category.onFinalizeHandler({},true));await ui.idle();assert.equal(f.doc().categoryOrder[0],'bakery');
   await f.disk.reopen();assert.equal(f.doc().categoryOrder[0],'bakery');
  }finally{if(ui)await ui.close();f.disk.close();}
@@ -89,7 +93,7 @@ test('COMPRAS UI: measured long-press handles reorder only their own block, pers
 
 test('COMPRAS UI: acknowledged partial draft recovers after unmount/reopen, failed save stays editable, and changing account hides private fields',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.input('name','Producto privado');await ui.input('quantity','1,');await ui.input('price','2,');await ui.close();ui=null;await f.disk.reopen();
+  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Producto privado');await ui.input('quantity','1,');await ui.input('price','2,');await ui.close();ui=null;await f.disk.reopen();
   ui=await shoppingUI(f);assert.equal(ui.hosts.get('shopping-field-name').value,'Producto privado');assert.equal(ui.hosts.get('shopping-field-quantity').value,'1,');await ui.tap('shopping-save');assert.ok(ui.hosts.has('shopping-error'));assert.equal(f.doc().items.length,0);
   await ui.input('quantity','1,5');await ui.input('price','');f.disk.failWrite(true);await ui.tap('shopping-save');assert.equal(ui.hosts.get('shopping-field-name').value,'Producto privado');assert.equal(f.doc().items.length,0);f.disk.failWrite(false);await ui.tap('shopping-save');assert.equal(f.doc().items.length,1);
   await ui.tap('shopping-edit-'+f.doc().items[0].id);await ui.render({ready:false,scope:null});assert.equal(ui.hosts.has('shopping-field-name'),false);assert.doesNotMatch(ui.container.textContent,/Producto privado/);
@@ -99,7 +103,7 @@ test('COMPRAS UI: acknowledged partial draft recovers after unmount/reopen, fail
 
 for(const viewport of [{width:320,height:568,fontScale:1},{width:390,height:844,fontScale:1.8},{width:768,height:1024,fontScale:2}])for(const handedness of ['left','right'])test(`COMPRAS UI: ${viewport.width}px font ${viewport.fontScale} ${handedness} retains keyboard-aware thumb controls and native input focus`,async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f,{...viewport,handedness});assert.equal(ui.hosts.get('shopping-thumb-controls').style[1].flexDirection,handedness==='left'?'row-reverse':'row');await ui.tap('shopping-add');
+  ui=await shoppingUI(f,{...viewport,handedness});assert.equal(ui.hosts.get('shopping-thumb-controls').style[1].flexDirection,'row');await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');
   assert.equal(ui.hosts.get('shopping-field-name').autoFocus,undefined);await ui.run(()=>ui.hosts.get('shopping-field-name').onFocus({target:123}));assert.ok(ui.calls.some(c=>c[0]==='reveal'&&c[1]===123));
   await ui.run(()=>ui.keyboard.show());assert.equal(ui.hosts.get('shopping-back').accessibilityLabel,'Ocultar teclado');assert.ok(ui.hosts.has('shopping-save'));await ui.tap('shopping-back');assert.equal(ui.keyboard.visible,false);assert.ok(ui.hosts.has('shopping-field-name'));await ui.tap('shopping-back');assert.ok(ui.hosts.has('shopping-add'));assert.ok(ui.hosts.has('shopping-resume-draft'));
  }finally{if(ui)await ui.close();f.disk.close();}
@@ -107,9 +111,42 @@ for(const viewport of [{width:320,height:568,fontScale:1},{width:390,height:844,
 
 test('COMPRAS UI: a failed readback retries the identical saved item without duplicate prices or a false stale-edit conflict',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.input('name','Azúcar');await ui.input('store','Tienda A');await ui.input('price','2,50');
+  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Azúcar');await ui.input('store','Tienda A');await ui.input('price','2,50');
   f.disk.failRead(true);await ui.tap('shopping-save');assert.ok(ui.hosts.has('shopping-field-name'));assert.ok(ui.hosts.has('shopping-error'));assert.equal(f.doc().items.length,1);
   f.disk.failRead(false);await ui.tap('shopping-save');assert.equal(ui.hosts.has('shopping-field-name'),false);assert.equal(f.doc().items.length,1);assert.equal(f.doc().items[0].prices.length,1);
+ }finally{if(ui)await ui.close();f.disk.close();}
+});
+
+test('COMPRAS redesign UI: full orbit -> optional brand -> inline weighted price -> picked totals, manual route and store switching preserve one list',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  ui=await shoppingUI(f);const list=ui.instances.get('shopping-list-scroll');await ui.tap('shopping-add');assert.ok(ui.hosts.has('shopping-eight-orbits'));
+  for(const id of ['produce','bakery','meat','other','frozen','pantry','dairy','care'])assert.ok(ui.hosts.has('shopping-orbit-'+id));assert.ok(ui.hosts.has('shopping-go-orbit'));assert.equal(ui.hosts.has('shopping-go'),false);
+  await ui.tap('shopping-orbit-produce');await ui.tap('shopping-suggestion-Manzanas');await ui.input('quantity','750');await ui.tap('shopping-unit-picker');await ui.tap('shopping-unit-g');await ui.input('brand','Mi marca');await ui.input('format','Granel');await ui.tap('shopping-save');
+  assert.equal(ui.instances.get('shopping-list-scroll'),list);const id=f.doc().items[0].id;assert.equal(f.doc().items[0].brand,'Mi marca');assert.equal(f.doc().items[0].prices.length,0);
+  await ui.tap('shopping-store');await ui.run(()=>ui.hosts.get('shopping-store-name').onChangeText('Tienda A'));await ui.tap('shopping-store-save');
+  await ui.run(()=>ui.hosts.get('shopping-price-input-'+id).onChangeText('4'));await ui.idle();await ui.run(()=>ui.hosts.get('shopping-price-input-'+id).onEndEditing());await ui.idle();
+  await ui.tap('shopping-price-unit-'+id);await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='kg').onPress());await ui.idle();assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,3);
+  await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onFocus());await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onChangeText('1,'));await ui.tap('shopping-bought-'+id);
+  assert.equal(ui.hosts.get('shopping-quantity-'+id).value,'1,');assert.equal(f.model.shoppingEstimate(f.doc(),true).totals.EUR,3);
+  await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onChangeText('500'));await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onEndEditing());await ui.idle();assert.equal(f.model.shoppingEstimate(f.doc(),true).totals.EUR,2);
+  await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onFocus());await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onChangeText('510'));await ui.tap('shopping-plus-'+id);assert.equal(ui.hosts.get('shopping-quantity-'+id).value,'511');await ui.tap('shopping-minus-'+id);assert.equal(ui.hosts.get('shopping-quantity-'+id).value,'510');await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onChangeText('500'));await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onEndEditing());await ui.idle();
+  await ui.tap('shopping-details-'+id);await ui.tap('shopping-favorite-'+id);assert.equal(f.doc().items[0].favorite,true);await ui.tap('shopping-location-'+id);await ui.run(()=>ui.hosts.get('shopping-aisle').onChangeText('Fruta junto a entrada'));await ui.tap('shopping-location-save');
+  await ui.tap('shopping-ir-'+id);assert.match(ui.container.textContent,/Fruta junto a entrada/);assert.match(ui.container.textContent,/No hay un plano interior/);await ui.tap('shopping-back');
+  await ui.tap('shopping-store');await ui.run(()=>ui.hosts.get('shopping-store-name').onChangeText('Tienda B'));await ui.tap('shopping-store-save');assert.equal(f.model.shoppingEstimate(f.doc()).unknown,1);assert.equal(ui.hosts.get('shopping-price-input-'+id).value,'');
+  await ui.tap('shopping-store');await ui.tap('shopping-store-option-Tienda A');assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,2);assert.equal(f.disk.rows.filter(r=>r.note?.shopping).length,1);
+  await ui.run(()=>ui.hosts.get('shopping-list-scroll').onScroll({nativeEvent:{contentOffset:{y:280}}}));await ui.render({visible:false});await ui.render({visible:true});assert.equal(ui.hosts.get('shopping-list-scroll').contentOffset.y,280);
+ }finally{if(ui)await ui.close();f.disk.close();}
+});
+
+test('COMPRAS redesign UI: GO runs permitted commands, history snapshots remain and returning to list retains editor draft',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  ui=await shoppingUI(f);await ui.tap('shopping-go');
+  const order=async text=>{await ui.run(()=>ui.hosts.get('shopping-command').onChangeText(text));await ui.tap('shopping-command-send');};
+  await order('Añade 2 kg de manzanas');assert.equal(f.doc().items.length,1);await order('Cantidad de manzanas a 1,5');assert.equal(f.doc().items[0].quantity,1.5);
+  await order('Marca cogido manzanas');assert.equal(f.doc().items[0].bought,true);await ui.tap('shopping-list');await ui.tap('shopping-more');await ui.tap('shopping-finish');await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='GUARDAR').onPress());await ui.idle();
+  assert.equal(f.doc().purchases.length,1);await ui.tap('shopping-history');assert.match(ui.container.textContent,/manzanas/);await ui.tap('shopping-list');
+  await ui.tap('shopping-edit-'+f.doc().items[0].id);await ui.input('brand','Pendiente');await ui.tap('shopping-list');assert.ok(ui.hosts.has('shopping-resume-draft'));await ui.tap('shopping-resume-draft');assert.equal(ui.hosts.get('shopping-field-brand').value,'Pendiente');
+  await f.disk.reopen();assert.equal(f.doc().purchases[0].items[0].quantity,1.5);
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 
