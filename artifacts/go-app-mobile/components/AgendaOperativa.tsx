@@ -69,6 +69,7 @@ import { GoCloseButton } from "./ui/GoCloseButton";
 import { goCalendarColumnHeaderStyles } from "./ui/goCalendarColumnStyles";
 import { GO_PENDING_YELLOW } from "../constants/colors";
 import { GoCalendarViewSelector } from "./ui/GoCalendarViewSelector";
+import { CalendarSearchSheet } from "./CalendarSearchSheet";
 import { businessCalendarClock, splitWorkHourEntries, workHourSlots, type WorkRange, type WorkSlot } from "@/data/businessCalendarWorkHours";
 
 export type GoEntry = {
@@ -356,6 +357,7 @@ export type AgendaBoardProps = {
   bottomContentInset?: number;
   style?: ViewStyle;
   renderHeader?: (monthNavigation: React.ReactNode | null) => React.ReactNode;
+  searchable?: boolean;
   calSizeKey?: CalSizeKey;
   viewMode?: "semana" | "mes_lineal" | "dia";
   calViewMonth?: string;
@@ -761,6 +763,7 @@ export function AgendaBoard({
   bottomContentInset = 0,
   style,
   renderHeader,
+  searchable = false,
   calSizeKey = DEFAULT_GO_RENDER_PRESET.calSize,
   viewMode = "semana",
   calViewMonth,
@@ -785,6 +788,7 @@ export function AgendaBoard({
   dragOverlayRef,
 }: AgendaBoardProps) {
   const goLog = useGoCalendarEntries(calendarEntries);
+  const [searchOpen, setSearchOpen] = useState(false);
   const dragInsets = useSafeAreaInsets();
   const dragEnabledRef = useRef(dragEnabled);
   dragEnabledRef.current = dragEnabled;
@@ -3121,10 +3125,11 @@ export function AgendaBoard({
           <TouchableOpacity onPress={event => { event.stopPropagation(); changeMonth(-1); }} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Previous month" : "Mes anterior"} style={[s.monthNavBtn, !!renderHeader && s.monthNavInlineBtn]} activeOpacity={0.7}>
             <Feather name="chevron-left" size={18} color="#ffffff" />
           </TouchableOpacity>
-          <Text style={[s.monthNavTitle, !!renderHeader && s.monthNavInlineTitle]} numberOfLines={renderHeader ? 1 : undefined} adjustsFontSizeToFit={!!renderHeader} minimumFontScale={0.6}>
+          <Text style={[s.monthNavTitle, !!renderHeader && s.monthNavInlineTitle]} numberOfLines={renderHeader ? (searchable ? 2 : 1) : undefined} adjustsFontSizeToFit={!!renderHeader} minimumFontScale={0.6}>
             {((): string => {
               const [y, m] = activeMonth.split("-").map(Number);
-              return `${monthNamesArr[m - 1]} ${y}`;
+              const month = monthNamesArr[m - 1];
+              return searchable && renderHeader ? `${month.slice(0, 3)}\n${y}` : `${month} ${y}`;
             })()}
           </Text>
           <TouchableOpacity onPress={event => { event.stopPropagation(); changeMonth(1); }} accessibilityRole="button" accessibilityLabel={lang === "en" ? "Next month" : "Mes siguiente"} style={[s.monthNavBtn, !!renderHeader && s.monthNavInlineBtn]} activeOpacity={0.7}>
@@ -3149,7 +3154,17 @@ export function AgendaBoard({
       }}
     >
 
-      {renderHeader ? renderHeader(monthNavigation) : monthNavigation}
+      {(() => {
+        const controls = searchable ? <View testID="calendar-search-header" style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "flex-end" }}>
+          {monthNavigation}
+          <TouchableOpacity testID="calendar-search-open" accessibilityRole="button" accessibilityLabel={lang === "en" ? "Search calendar" : "Buscar en Calendario"}
+            onPress={event => { event.stopPropagation(); setSearchOpen(true); }}
+            style={{ width: 44, height: 44, flexShrink: 0, alignItems: "center", justifyContent: "center" }}>
+            <Feather name="search" size={20} color="#ffffff" />
+          </TouchableOpacity>
+        </View> : monthNavigation;
+        return renderHeader ? renderHeader(controls) : controls;
+      })()}
 
       <GHScrollView
         ref={scrollViewRef}
@@ -3301,6 +3316,14 @@ export function AgendaBoard({
       {/* Float card lives outside the scroll view so it can move freely */}
       {renderFloatCard()}
       {renderDropClock()}
+
+      {searchable && searchOpen && <CalendarSearchSheet entries={goLog} archiveNotes={archiveNotes} handedness={handedness}
+        onClose={() => setSearchOpen(false)} onOpenEntry={entry => {
+          const current = currentEntriesRef.current.find(item => item.id === entry.id);
+          const archived = archiveEntriesRef.current.find(note => note.id === entry.id);
+          if (current) { setExpandedCardId(null); setExpandedBookingItem(current); }
+          else if (archived) onOpenNote?.(archived);
+        }} />}
 
       {/* One foreground detail for the same reservation or task. Calendar stays mounted. */}
       <GoEntryDetailsSheet renderNote={renderNote} onGoToLanding={onGoToLanding} renderMessageScreen={renderMessageScreen && expandedBookingItem ? () => renderMessageScreen(expandedBookingItem) : undefined} handedness={handedness} entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}

@@ -4,6 +4,14 @@ import path from "node:path";
 import vm from "node:vm";
 const require = createRequire(path.join(process.cwd(), "package.json"));
 const ts = require("typescript");
+// Exercise the shared production normalizer without loading unrelated API schemas.
+const normalizerSource = readFileSync('../../lib/api-zod/src/booking-assistant.ts', 'utf8');
+const normalizerAst = ts.createSourceFile('booking-assistant.ts', normalizerSource, ts.ScriptTarget.Latest, true);
+let normalizerExpression;
+const findNormalizer = node => { if (ts.isVariableDeclaration(node) && node.name.getText(normalizerAst) === 'normalizeBookingText') normalizerExpression = node.initializer.getText(normalizerAst); ts.forEachChild(node, findNormalizer); };
+findNormalizer(normalizerAst);
+const searchNormalizer = {};
+vm.runInNewContext(ts.transpileModule('exports.normalizeBookingText = ' + normalizerExpression, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText, { exports: searchNormalizer });
 const actualResponder = require('./tests/helpers/native-pan-responder.cjs').nativePanResponder();
 const translatedFloorLabels = {};
 vm.runInNewContext(ts.transpileModule(readFileSync("i18n/translations.ts", "utf8"), {
@@ -55,6 +63,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
     AppState: { addEventListener: (_event, listener) => { appStateListeners.add(listener); return {remove: () => appStateListeners.delete(listener)}; } },
     Linking: { openURL: async url => { urls.push(url); } },
     Alert: { alert() {} },
+    Keyboard: { dismiss() {} },
     PanResponder: actualResponder,
     Animated: { Value, View: 'Animated.View', timing: () => animation, spring: () => animation, sequence: () => animation, loop: () => animation, delay: () => animation },
   }, { get: (target, key) => target[key] ?? key });
@@ -106,6 +115,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
       cancelAnimationFrame: id => frames.delete(id),
       setTimeout: fn => {timers.push(fn);return timers.length;}, clearTimeout() {}, setInterval: () => 1, clearInterval() {},
       require(name) {
+        if (name === '@workspace/api-zod') return searchNormalizer;
         if (name in mocks) return mocks[name];
         if (name === '@/theme/goAssistantColors') return load('theme/goAssistantColors.ts');
         if (name === '@/components/ui/GoScreenModal') return {GoScreenModal: mocks['react-native'].Modal};

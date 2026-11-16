@@ -20373,6 +20373,7 @@ function HomeScreenContent() {
             {demoCustomerCalendarSelected ? (demoBookingRepository
               ? <View style={{ flex: 1 }}><DemoCustomerCalendar dragEnabled={calOpen && !monthGridOpen && !calReservasOpen && !showBookingFromCal} dragOverlayRef={calendarDragOverlay} onGoToLanding={goDirectlyToLanding} renderMessageScreen={renderEntryMessageScreen} scrollToTodayToken={calScrollToTodayToken} onOpenMessage={(entry, back) => openEntryMessage(entry, back, true)} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onDropBooking={(entry,destination)=>dropBookingProposal(entry,destination,"customer")} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
               : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
+                searchable
                 dragEnabled={calOpen && !monthGridOpen && !calReservasOpen && !showBookingFromCal}
                 dragOverlayRef={calendarDragOverlay}
                 renderHeader={monthNavigation => (<View testID="calendar-header"
@@ -20381,7 +20382,7 @@ function HomeScreenContent() {
             >
               <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}><GoCalendarViewSelector compact value={calBgViewMode} onChange={changeCalendarView} />{demoBookingRepository && <TouchableOpacity accessibilityRole="button" testID="customer-calendar-shortcut" accessibilityLabel={lang === "en" ? "Customer calendar" : "Calendario cliente"} onPress={event => { event.stopPropagation(); setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{paddingHorizontal:2,paddingVertical:8,width:44,minHeight:44,justifyContent:"center"}}><Feather name="calendar" size={14} color="#ff7474" /></TouchableOpacity>}</View>
               <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>{monthNavigation}</View>
-              <GoCloseButton level="settings" accessibilityLabel="Configuración de Calendario" onPress={() => { Haptics.selectionAsync(); setCalConfigVisible(true); }}/>
+              <GoCloseButton level="settings" touchSize={44} preserveTouchSize iconSize={22} accessibilityLabel="Configuración de Calendario" onPress={() => { Haptics.selectionAsync(); setCalConfigVisible(true); }}/>
             </View>)}
                 goLog={goLog.filter((e: any) => {
                   const id: string = e.id ?? "";

@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import vm from 'node:vm';
 const require=createRequire(import.meta.url),ts=require('typescript');
 const booking=find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='TouchableOpacity'&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='accessibilityLabel'&&a.initializer?.getText(ast)==='{t("biz_book_btn")}'));
-function render(){let booked=0,diagnostic=0;const scope={exports:{},React:{createElement:(type,props,...children)=>({type,props,children})},TouchableOpacity:'Button',Text:'Text',t:()=> 'Reservar',Haptics:{impactAsync:async()=>{},ImpactFeedbackStyle:{Medium:'medium',Heavy:'heavy'}},setShowBookingFromCal:()=>booked++,setDiagBookingOpen:()=>diagnostic++};
+function render(){let booked=0,diagnostic=0;const scope={exports:{},React:{createElement:(type,props,...children)=>({type,props,children})},TouchableOpacity:'Button',Text:'Text',GO_ASSISTANT_LABEL:{color:'#ffffff'},t:()=> 'Reservar',Haptics:{impactAsync:async()=>{},ImpactFeedbackStyle:{Medium:'medium',Heavy:'heavy'}},openCalendarReservation:()=>booked++,setDiagBookingOpen:()=>diagnostic++};
  vm.runInNewContext(transpile('exports.button=('+booking.getText(ast)+');'),scope);return{button:scope.exports.button,counts:()=>[booked,diagnostic]};}
 test('the complete booking label stays on one fitted line, centered, with both existing actions',()=>{
  const {button,counts}=render();button.props.onPress();button.props.onLongPress();assert.deepEqual(counts(),[1,1]);
