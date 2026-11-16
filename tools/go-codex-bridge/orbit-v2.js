@@ -10,7 +10,7 @@ function factoryMode(s){const wheel=s?.wheel||{};
   if(wheel.enabled)return ['programming','ACTIVO'];
   if(!wheel.live_queue_authorized)return ['blocked','BLOQUEADO'];
   if(wheel.reason&&!['OWNER_PAUSED','WHEEL_PAUSED','CREDIT_LIMIT','WHEEL_CODEX_QUOTA'].includes(wheel.reason))return ['blocked','BLOQUEADO'];
-  return ['pending','PAUSADA'];}
+  return ['pending','PAUSADO'];}
 function actualModule(key){return state?.layout?.labels?.[key]||state?.registry?.[key]?.name||key;}
 function orbitButton(key,index){const button=node('button',key?actualModule(key):'Vacío','sat'+(key?'':' empty')+(key===selected?' selected':''));button.dataset.slot=String(index);button.dataset.module=key||'';button.disabled=!key;button.type='button';button.setAttribute('aria-label',key?`${actualModule(key)}, órbita ${orbitIndex+1}, posición ${index+1}`:`Posición ${index+1} vacía`);
   if(key){button.onclick=()=>{if(drag)return;selected=key;render();};button.addEventListener('pointerdown',e=>beginHold(e,key));}return button;}
