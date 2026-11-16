@@ -1036,6 +1036,12 @@ class WheelTests(unittest.TestCase):
             wheel.reconcile_unstarted_card_context(saved,cards[first["id"]])
         self.assertEqual(self.bridge.job(job["id"])["state"],"blocked")
         first["comments"].pop()
+        with self.bridge.db() as db:
+            db.execute("INSERT INTO factory_questions(id,grant_id,document,signature,state,created) "
+                       "VALUES(?,?, '{}','test','waiting','now')",("q"*24,grant["grant_id"]))
+        self.assertFalse(wheel.reconcile_unstarted_card_context(saved,cards[first["id"]]))
+        with self.bridge.db() as db:
+            db.execute("DELETE FROM factory_questions WHERE grant_id=?",(grant["grant_id"],))
         self.assertTrue(wheel.reconcile_unstarted_card_context(saved,cards[first["id"]]))
         with self.bridge.db() as db:
             self.assertEqual(db.execute("SELECT state FROM jobs WHERE id=?",(job["id"],)).fetchone()[0],"prepared")

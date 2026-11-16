@@ -1561,6 +1561,8 @@ class Wheel:
                     or phases!=["question-claimed:C","CARD_CONTEXT_INVALID"]
                     or {(r["letter"],r["state"]) for r in stages}!={("A","claimed"),("C","claimed")}
                     or any(r["approval_id"] or r["receipt"] for r in stages)
+                    or db.execute("SELECT 1 FROM factory_questions WHERE grant_id=? AND state='waiting'",
+                                  (grant["grant_id"],)).fetchone()
                     or db.execute("SELECT 1 FROM operations WHERE action='publish-main' AND state!='verified'").fetchone()):
                 return False
             db.execute("DELETE FROM wheel_stages WHERE grant_id=? AND letter IN ('A','C') AND state='claimed' AND approval_id IS NULL AND receipt IS NULL",
