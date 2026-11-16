@@ -13,6 +13,7 @@ test('every migrated navigation callback is unchanged, no duplicates were added 
  const keys=rows=>rows.map(r=>r.file+'\n'+canonical(r.handler)).sort();const expected=[...baseline.handlers,{file:'app/index.tsx',handler:'()=>setSupportMode(active=>!active)'},{file:'components/booking-assistant/BookingAssistantScreen.tsx',handler:'back'},{file:'app/index.tsx',handler:'() => { Haptics.selectionAsync(); setCalConfigVisible(true); }'},{file:'components/booking/GoReservasConfigScreen.tsx',handler:'() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }'},{file:'components/landing/SupportAdminPanel.tsx',handler:'back'}];
  // Six controls already present in HEAD, plus the new ADMIN demo pair. Keep the exact multiset check.
  expected.push(
+  {file:'components/CalendarSearchSheet.tsx',handler:'close'},
   {file:'app/index.tsx',handler:'() => { Haptics.selectionAsync(); exitCalendarContainer(); }'},
   {file:'components/MessagesScreen.tsx',handler:'backToList'},
   {file:'components/booking-assistant/BookingAssistantScreen.tsx',handler:'() => close()'},

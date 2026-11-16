@@ -56,8 +56,6 @@ interface HerramientasPanelProps {
   setCalBgDensity: (v: "auto" | "1h" | "30min" | "15min") => void;
   calBgDayNightMode: "claro" | "oscuro" | "mixto";
   setCalBgDayNightMode: (v: "claro" | "oscuro" | "mixto") => void;
-  calConfigVisible: boolean;
-  setCalConfigVisible: (v: boolean) => void;
   guidanceLevel: number;
   setGuidanceLevel: (v: number) => void;
   effectiveGuidanceLevel: number;
@@ -81,7 +79,6 @@ export function HerramientasPanel({
   shakeAiAction, setShakeAiAction,
   calBgDensity, setCalBgDensity,
   calBgDayNightMode, setCalBgDayNightMode,
-  calConfigVisible, setCalConfigVisible,
   guidanceLevel, setGuidanceLevel,
   effectiveGuidanceLevel, autoBoost,
   showToast,
@@ -552,7 +549,7 @@ export function HerramientasPanel({
               </View>
 
               <Text style={s.subLabel}>{t("tools_light_mode")}</Text>
-              <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
                 {([
                   { key: "claro"  as const, icon: "sun",    label: t("tools_light_clear") },
                   { key: "mixto"  as const, icon: "circle", label: t("tools_light_mixed") },
@@ -577,24 +574,6 @@ export function HerramientasPanel({
                 })}
               </View>
 
-              <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                <View style={{ flex: 1, marginRight: 12 }}>
-                  <Text style={s.subRowTitle}>{t("tools_show_controls")}</Text>
-                  <Text style={s.subRowSub}>
-                    {calConfigVisible ? t("tools_controls_visible_desc") : t("tools_controls_hidden_desc")}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    setCalConfigVisible(!calConfigVisible);
-                  }}
-                  activeOpacity={0.8}
-                  style={[s.toggleSwitch, calConfigVisible && s.toggleSwitchOn]}
-                >
-                  <View style={[s.toggleThumb, { alignSelf: calConfigVisible ? "flex-end" : "flex-start" }]} />
-                </TouchableOpacity>
-              </View>
             </View>
           </View>
 

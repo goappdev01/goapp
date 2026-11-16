@@ -31,6 +31,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useGoLog } from "@/hooks/useGoLog";
+import { CONFIG_PANEL_KEYS, useConfigPanelPreference } from "@/hooks/useConfigPanelPreference";
 import type { useBusinessBookings } from "@/hooks/useBusinessBookings";
 import { getBusinessDemoProfessionals, type BusinessDemoStore } from "@/data/businessDemoStore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -423,7 +424,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
   // Calendar entries are supplied by the live wrapper or the owner-local DEMO adapter.
 
   // ── Config panel — mismos controles que el Calendario normal ──────────────
-  const [configVisible, setConfigVisible] = useState<boolean>(false);
+  const [configVisible, setConfigVisible] = useConfigPanelPreference(CONFIG_PANEL_KEYS.reservations, false, calendarStorage);
   const [calDensity,    setCalDensity]    = useState<DensityKey>("auto");
   const [calShowHours,  setCalShowHours]  = useState<boolean>(true);
   const [calSize,       setCalSize]       = useState<CalSizeKey>("GO_CAL_SMALL");

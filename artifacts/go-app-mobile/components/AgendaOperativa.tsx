@@ -1,6 +1,7 @@
 import { BookingPhaseAvailability } from "./booking/BookingPhaseAvailability";
 import type { LayoutChangeEvent, ScrollViewInstance, ViewInstance } from "react-native";
 import { useGoCalendarEntries } from "@/hooks/useGoCalendarEntries";
+import { CONFIG_PANEL_KEYS, useConfigPanelPreference } from "@/hooks/useConfigPanelPreference";
 import { GoCalendarSlot } from "@/components/ui/GoCalendarSlot";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -3663,13 +3664,7 @@ export function AgendaOperativa({
   };
 
   // ── Panel de configuración abierto/cerrado ────────────────────────
-  // Siempre cerrado al entrar: el usuario decide cuándo abrirlo.
-  // El componente nunca se desmonta, así que el useEffect resetea
-  // el estado cada vez que el Calendario se vuelve visible.
-  const [configPanelOpen, setConfigPanelOpen] = useState(false);
-  useEffect(() => {
-    if (visible) setConfigPanelOpen(false);
-  }, [visible]);
+  const [configPanelOpen, setConfigPanelOpen] = useConfigPanelPreference(CONFIG_PANEL_KEYS.agenda);
 
   // ── Token interno para scroll-to-HOY desde botón dentro del panel ──
   const [localTodayToken, setLocalTodayToken] = useState(0);
@@ -4040,6 +4035,8 @@ export function AgendaOperativa({
             activeOpacity={0.8}
             hitSlop={8}
             accessibilityLabel={configPanelOpen ? "Cerrar configuración" : "Abrir configuración"}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: configPanelOpen }}
           >
             <Feather name="chevron-up" size={12} color={configPanelOpen ? "#ffffff" : "rgba(255,255,255,0.85)"} />
             <Text style={[s.configToggleBtnText, configPanelOpen && { color: "#ffffff" }]}>CONFIG.</Text>

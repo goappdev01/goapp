@@ -96,7 +96,7 @@ test('bottom controls emphasize RESERVAR, fit a narrow viewport and retain every
     GO_GOLD: '#C8A037', GO_ASSISTANT_LABEL: { color: '#FFFFFF' }, t: key => ({ new_task_label: 'Nueva tarea', cal_today_btn: 'HOY', biz_book_btn: 'RESERVAR' })[key],
     Haptics: { selectionAsync: async () => {}, impactAsync: async () => {}, ImpactFeedbackStyle: { Medium: 'medium', Heavy: 'heavy' } },
     openCalendarNote: () => calls.push(['task', true]), setCalScrollToTodayToken: update => calls.push(['today', update(7)]),
-    setShowBookingFromCal: value => calls.push(['book', value]), setDiagBookingOpen: value => calls.push(['diagnostics', value]),
+    openCalendarReservation: () => calls.push(['book', true]), setDiagBookingOpen: value => calls.push(['diagnostics', value]),
     openAi: () => calls.push(['go']), startVoiceMode: () => calls.push(['voice']),
   });
   const actions = nodes(tree, n => n.type === 'TouchableOpacity'); assert.equal(actions.length, 4);
@@ -114,7 +114,7 @@ test('bottom controls emphasize RESERVAR, fit a narrow viewport and retain every
   assert.equal(reserve.props.delayLongPress, 800); assert.equal(go.props.delayLongPress, 400);
 });
 test('root keeps hierarchical closes and overlays the original floats without reserving calendar space', () => {
-  const globals = { insets: { right: 34 }, overlayPanelHeight: 90, calFlow: {}, Haptics: {}, closeCalendarTaskPanel() {}, setCalConfigVisible() {}, exitCalendarContainer() {} };
+  const globals = { insets: { right: 34, bottom: 0 }, overlayPanelHeight: 90, calFlow: {}, Haptics: {}, closeCalendarTaskPanel() {}, setCalConfigVisible() {}, exitCalendarContainer() {} };
   let tree = renderFragment(byId('calendar-floating-controls'), globals);
   assert.deepEqual(nodes(tree, n => n.type === 'GoCloseButton').map(n => n.props.level), ['container']);
   tree = renderFragment(byId('calendar-floating-controls'), { ...globals, calQuickCreateOpen: true });

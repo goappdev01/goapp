@@ -20,7 +20,7 @@ vm.runInNewContext(ts.transpileModule(readFileSync("i18n/translations.ts", "utf8
 
 // Run the real calendar components with deterministic native adapters. Keep hook
 // state across renders so navigation and closing are tested without remounting.
-export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, platform = "web", insets = {top:0,right:0,left:0,bottom:0} } = {}) {
+export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, platform = "web", insets = {top:0,right:0,left:0,bottom:0}, storage = { getItem: async () => null, setItem: async () => {} } } = {}) {
   const urls = [];
   class Clock extends Date {
     constructor(...args) { super(...(args.length ? args : [now ?? Date.now()])); }
@@ -74,7 +74,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
     '@/components/debug/OwnerContextIndicator': { OwnerContextModal: 'Modal' },
     '@expo/vector-icons': { Feather: 'Feather' },
     'expo-haptics': { selectionAsync: async () => {}, impactAsync: async () => {}, notificationAsync:async()=>{},NotificationFeedbackType:{Success:'success'}, ImpactFeedbackStyle: { Light: 'light' } },
-    '@react-native-async-storage/async-storage': { default: { getItem: async () => null, setItem: async () => {} } },
+    '@react-native-async-storage/async-storage': { default: storage },
     'react-native-gesture-handler': { Gesture: { Tap: gestureChain, Pan: gestureChain, Race: (...gestures) => ({gestures}), Simultaneous: (...gestures) => ({gestures}) }, GestureDetector: 'GestureDetector', ScrollView: 'GHScrollView', LegacyScrollView: 'GHScrollView' },
     'react-native-reanimated': { default: { View: 'ReAnimated.View' }, useSharedValue: value => react.useRef({ value }).current, useAnimatedStyle: fn => fn(), withSpring: value => value, withTiming: value => value, runOnJS: fn => fn, interpolateColor: () => '#000' },
     'react-native-safe-area-context': { useSafeAreaInsets: () => insets },
@@ -121,6 +121,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
         if (name === '@/components/ui/GoScreenModal') return {GoScreenModal: mocks['react-native'].Modal};
         if (name === '@/components/ui/GoScreenCloseSurface') return {GoScreenCloseSurface:'View',GoScreenCloseGuide:'Guide'};
         if (name === '@/hooks/useBusinessBookings') return load('hooks/useBusinessBookings.ts');
+        if (name === '@/hooks/useConfigPanelPreference') return load('hooks/useConfigPanelPreference.ts');
         if (name === '@/data/reservationCardPolicy') return load('data/reservationCardPolicy.ts');
         if (name === '@/data/goEntryPresentation') return load('data/goEntryPresentation.ts');
         if (name === '@/data/businessCalendarWorkHours') return load('data/businessCalendarWorkHours.ts');

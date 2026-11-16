@@ -12,6 +12,7 @@ import { createDemoBookingRepository, createDemoCatalogBookingRepository } from 
 import { DemoCustomerCalendar } from "@/components/booking/DemoCustomerCalendar";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import { useGoLog } from "@/hooks/useGoLog";
+import { CONFIG_PANEL_KEYS, useConfigPanelPreference } from "@/hooks/useConfigPanelPreference";
 import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
 import { bookingActivityEnabled, canonicalBookingActivity, visibleBookingSectors } from "@workspace/api-zod";
 import { setInternalBookingContext, getBookingParticipantIdentity } from "@/data/booking";
@@ -3213,7 +3214,7 @@ function HomeScreenContent() {
   const [remindClockError, setRemindClockError] = useState("");
   const [remindInputHeight, setRemindInputHeight] = useState(44);
   const showClassicListFilters = goView.view === "ADMIN" && adminAccess.allowed && !adminAccess.checking;
-  const [listFiltersHidden, setListFiltersHidden] = useState(false);
+  const [listFiltersHidden, setListFiltersHidden] = useConfigPanelPreference(CONFIG_PANEL_KEYS.listFiltersHidden);
   // SharedValue que indica al worklet del dragGesture si debe bajar un nivel
   // (0 = aún hay un nivel antes del cierre completo) o cerrar directamente (1).
   // Se sincroniza con listFiltersHidden vía useEffect.
@@ -4360,7 +4361,6 @@ function HomeScreenContent() {
   }
   function openCalendarNote(){
     Haptics.selectionAsync().catch(()=>{});
-    setCalConfigVisible(false);
     openQuickNoteFrom("calendar","NOTA_INTERNA","",dateISODraft||formatISODate(getToday()));
   }
   function openCalendarDayNote(selectedDateISO:string){
@@ -4690,9 +4690,8 @@ function HomeScreenContent() {
   const [calBgShowHours, setCalBgShowHours] = useState(true);
   const [calBgDensity, setCalBgDensity] = useState<"auto" | "1h" | "30min" | "15min">("auto");
   const [calBgDayNightMode, setCalBgDayNightMode] = useState<"claro" | "oscuro" | "mixto">("mixto");
-  const [calConfigVisible, setCalConfigVisible] = useState(false);
+  const [calConfigVisible, setCalConfigVisible] = useConfigPanelPreference(CONFIG_PANEL_KEYS.calendar);
   // Carga inicial unificada — mismas claves que AgendaOperativa (Calendario madre)
-  // NOTA: cal_config_visible_v1 NO se restaura — la configuración siempre arranca cerrada
   useEffect(() => {
     AsyncStorage.multiGet(["cal_density", "cal_show_hours", "cal_view", "cal_day_night_mode_v1"]).then((pairs) => {
       for (const [k, v] of pairs) {
@@ -12035,7 +12034,6 @@ function HomeScreenContent() {
   const exitCalendarContainer = () => {
     const hasTaskLayer = !!calendarTaskContextRef.current || calQuickCreateOpen;
     closeCalendarTaskPanel();
-    setCalConfigVisible(false);
     setCalReservasOpen(false);
     if (hasTaskLayer) {
       calFlow.cancel();
@@ -20185,8 +20183,6 @@ function HomeScreenContent() {
         setCalBgDensity={setCalBgDensity}
         calBgDayNightMode={calBgDayNightMode}
         setCalBgDayNightMode={setCalBgDayNightMode}
-        calConfigVisible={calConfigVisible}
-        setCalConfigVisible={setCalConfigVisible}
         guidanceLevel={guidanceLevel}
         setGuidanceLevel={setGuidanceLevel}
         effectiveGuidanceLevel={effectiveGuidanceLevel}
@@ -20380,7 +20376,7 @@ function HomeScreenContent() {
               pointerEvents={showBookingFromCal ? "none" : "auto"}
               style={{ zIndex: 20, opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top, paddingLeft: Math.max(insets.left + 8, 8), paddingRight: Math.max(insets.right + 8, 8), gap: 4, paddingBottom: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
             >
-              <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}><GoCalendarViewSelector compact value={calBgViewMode} onChange={changeCalendarView} />{demoBookingRepository && <TouchableOpacity accessibilityRole="button" testID="customer-calendar-shortcut" accessibilityLabel={lang === "en" ? "Customer calendar" : "Calendario cliente"} onPress={event => { event.stopPropagation(); setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{paddingHorizontal:2,paddingVertical:8,width:44,minHeight:44,justifyContent:"center"}}><Feather name="calendar" size={14} color="#ff7474" /></TouchableOpacity>}</View>
+              <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}><GoCalendarViewSelector compact value={calBgViewMode} onChange={changeCalendarView} />{demoBookingRepository && <TouchableOpacity accessibilityRole="button" testID="customer-calendar-shortcut" accessibilityLabel={lang === "en" ? "Customer calendar" : "Calendario cliente"} onPress={event => { event.stopPropagation(); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{paddingHorizontal:2,paddingVertical:8,width:44,minHeight:44,justifyContent:"center"}}><Feather name="calendar" size={14} color="#ff7474" /></TouchableOpacity>}</View>
               <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>{monthNavigation}</View>
               <GoCloseButton level="settings" touchSize={44} preserveTouchSize iconSize={22} accessibilityLabel="Configuración de Calendario" onPress={() => { Haptics.selectionAsync(); setCalConfigVisible(true); }}/>
             </View>)}
@@ -20537,7 +20533,7 @@ function HomeScreenContent() {
           {/* ── BOTONES FLOTANTES — zona pulgar derecho ───────────────────
               CONFIG toggle + ↑↓ fecha.
               Solo visibles cuando el panel mensual está CERRADO y GO Reservas no está activo. */}
-          {!monthGridOpen && !calReservasOpen && !clockOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating contentRef={calendarDragOverlay} testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={(demoCustomerCalendarSelected?0:52)+((calQuickCreateOpen||calConfigVisible)?72:0)+64} protectedBottom={Math.max(0,overlayPanelHeight-insets.bottom)+10}>
+          {!monthGridOpen && !calReservasOpen && !clockOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating contentRef={calendarDragOverlay} testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={(demoCustomerCalendarSelected?0:52)+((calQuickCreateOpen||(calConfigVisible&&!demoCustomerCalendarSelected))?72:0)+64} protectedBottom={Math.max(0,overlayPanelHeight-insets.bottom)+10}>
             {!demoCustomerCalendarSelected && (<TouchableOpacity
               onPress={() => {
                 Haptics.selectionAsync();
@@ -20558,7 +20554,7 @@ function HomeScreenContent() {
             >
               <Feather name="calendar" size={18} color="#ffffff" />
             </TouchableOpacity>)}
-            {(calQuickCreateOpen || calConfigVisible) && (
+            {(calQuickCreateOpen || (calConfigVisible && !demoCustomerCalendarSelected)) && (
               <GoCloseButton
                 level="panel"
                 onPress={() => {
@@ -20587,7 +20583,7 @@ function HomeScreenContent() {
             }}
           >
             {/* ── Panel de configuración — componente compartido con GO Reservas ── */}
-            {calConfigVisible && (
+            {calConfigVisible && !demoCustomerCalendarSelected && (
               <GoCalConfigPanel
                 density={calBgDensity}
                 onDensityChange={(d) => { setCalBgDensity(d); AsyncStorage.setItem("cal_density", d).catch(() => {}); }}
@@ -21115,7 +21111,7 @@ function HomeScreenContent() {
             setBookingInitialDateISO(null);
             setDemoCalendarFocus({ dateISO, timeHHMM, entryId, token: Date.now() });
             setDemoCustomerCalendarSelected(true);
-            setCalConfigVisible(false); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid();
+            setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid();
             setCalOpen(true);
           }}
           onClose={() => { setShowBookingFromCal(false); setBookingInitialDateISO(null); setDemoInitialBusinessId(undefined); }}
@@ -21824,7 +21820,7 @@ function HomeScreenContent() {
         </GoScreenHost> : undefined}
         blockPan={notesOpen || !!listBookingDetail}
         onPanelHeightChange={setOverlayPanelHeight}
-        onClose={() => { if(listNoteLayerBackRef.current?.())return;setListOpen(false); setLlamadasListOpen(false); setListMinimized(false); setListFiltersHidden(false); }}
+        onClose={() => { if(listNoteLayerBackRef.current?.())return;setListOpen(false); setLlamadasListOpen(false); setListMinimized(false); }}
         // Gesto de deslizar hacia abajo en dos niveles:
         //   1.er deslizamiento (filtros visibles) → oculta menús secundarios, fichas siguen arriba.
         //   2.º deslizamiento (filtros ya ocultos) → cierra el listado completo.
@@ -22145,6 +22141,8 @@ function HomeScreenContent() {
                 }}
                 hitSlop={6}
                 accessibilityLabel={listFiltersHidden ? t('tasks_show_menus') : t('tasks_hide_menus')}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: !listFiltersHidden }}
                 style={({ pressed }) => ({
                   width: BTN_MINI,
                   height: BTN_MINI,
@@ -25683,7 +25681,7 @@ function HomeScreenContent() {
     const target=savedNoteTarget(entry,identity.scope,Date.now());
     // The editor calls this only after its native/hosted presenter has dismissed.
     calendarTaskContextRef.current=null;setFieldSelectorOpen(false);
-    setDemoCustomerCalendarSelected(false);setCalConfigVisible(false);setCalQuickCreateOpen(false);setCalPanelOpen(false);closeMonthGrid();
+    setDemoCustomerCalendarSelected(false);setCalQuickCreateOpen(false);setCalPanelOpen(false);closeMonthGrid();
     setCalBgViewMode("semana");
     if(target.destination==="calendar"){setDateISODraft(target.dateISO);setCalBgViewMonth(target.dateISO.slice(0,7));}
     setCalScrollToDateTarget(target);setCalHighlightEntryId(entry.id);setCalOpen(true);showToast(notice,"success");

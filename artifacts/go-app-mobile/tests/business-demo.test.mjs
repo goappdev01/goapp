@@ -148,6 +148,10 @@ test("DEMO confirmation/cancellation update the same local reservation and relea
 test("calendar preferences remain inside DEMO and unrelated keys are rejected", async () => {
   const f = dataFixture(); await f.store.preferences.setItem("cal_density", "15min");
   assert.equal(await f.make().preferences.getItem("cal_density"), "15min");
+  for (const value of ["true", "false"]) {
+    await f.store.preferences.setItem("reservas_config_visible_v1", value);
+    assert.equal(await f.make().preferences.getItem("reservas_config_visible_v1"), value);
+  }
   await assert.rejects(f.store.preferences.setItem("go_log_v1", "[]"), /Preferencia ajena/);
   assert.ok([...f.reads, ...f.writes].every(key => key === storeModule.businessDemoStorageKey(owner)));
 });
@@ -260,6 +264,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
       setInterval: () => 1, clearInterval() {}, require(key) {
         if (realCompanyManager && key === "./DemoCompanyManager") return load("components/empresa/DemoCompanyManager.tsx");
         if (key === "@/hooks/useGoDockPreference") return load("hooks/useGoDockPreference.ts");
+        if (key === "@/hooks/useConfigPanelPreference") return load("hooks/useConfigPanelPreference.ts");
         if (key in imports) return imports[key];
         if (key === "@/theme/goAssistantColors") return load("theme/goAssistantColors.ts");
         if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };
@@ -703,6 +708,19 @@ test("DEMO calendar controls persist locally without altering public calendar pr
   assert.equal(component(tree,"GoCalConfigPanel").props.viewMode,"mes_lineal");
   assert.equal(f.store.getSnapshot().preferences.cal_density,"15min");
   assert.equal(f.store.getSnapshot().preferences.cal_day_night_mode_v1,"oscuro");
+  await turn();
+  assert.equal(f.store.getSnapshot().preferences.reservas_config_visible_v1,"true");
+  const reopened = uiFixture(f), ReopenedScreen = reopened.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen;
+  reopened.render(ReopenedScreen,{onClose(){},hideFAB:true}); await turn();
+  let restoredTree = reopened.render(ReopenedScreen,{onClose(){},hideFAB:true});
+  assert.ok(component(restoredTree,"GoCalConfigPanel"), "A fresh DEMO screen restores its open settings");
+  nodes(restoredTree).find(node=>node.props.accessibilityLabel === "Configuración de reservas").props.onPress(); await turn();
+  assert.equal(f.store.getSnapshot().preferences.reservas_config_visible_v1,"false");
+  const closed = uiFixture(f), ClosedScreen = closed.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen;
+  closed.render(ClosedScreen,{onClose(){},hideFAB:true}); await turn();
+  restoredTree = closed.render(ClosedScreen,{onClose(){},hideFAB:true});
+  assert.equal(component(restoredTree,"GoCalConfigPanel"),undefined, "A fresh DEMO screen also restores its closed settings");
+  assert.ok([...f.reads, ...f.writes].every(key => key === storeModule.businessDemoStorageKey(owner)));
   assert.equal(ui.calls.liveFloor,0); assert.equal(ui.calls.liveAgenda,0);
 });
 

@@ -54,7 +54,8 @@ test('the embedded header reuses one month navigation between MES and configurat
     if (demo) {
       const shortcut = nodes(tree, n => n.type === 'TouchableOpacity' && n.props.testID === 'customer-calendar-shortcut')[0];
       shortcut.props.onPress(event());
-      assert.deepEqual(calls.slice(-5), [['settings', false], ['task', false], ['panel', false], ['monthGrid'], ['demo', true]]);
+      assert.deepEqual(calls.slice(-4), [['task', false], ['panel', false], ['monthGrid'], ['demo', true]]);
+      assert.equal(calls.filter(call => call[0] === 'settings').length, 1, 'Changing calendar screens preserves the personal settings choice');
     }
   }
 });

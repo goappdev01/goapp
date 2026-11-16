@@ -136,6 +136,13 @@ test('compact handedness buttons retain selection, persistence, center base and 
   try {
     await render();
     assert.ok(!host.textContent.includes('PERSONALIZACIÓN'));
+    assert.ok(!host.textContent.includes('tools_show_controls'));
+    assert.ok(!host.textContent.includes('tools_controls_visible_desc'));
+    assert.ok(!host.textContent.includes('tools_controls_hidden_desc'));
+    const lightRow = f.latest(p => React.Children.toArray(p.children).some(child =>
+      child?.props?.children?.some?.(item => item?.props?.children === 'tools_light_clear')));
+    assert.ok(lightRow, 'The existing light-mode choices remain');
+    assert.equal(flatten(lightRow.style).marginBottom, undefined, 'No trailing gap remains for the removed switch');
     selected('Diestro');
     for (const label of ['Zurdo', 'Centro', 'Diestro']) {
       const props = option(label), style = flatten(props.style), children = React.Children.toArray(props.children);
