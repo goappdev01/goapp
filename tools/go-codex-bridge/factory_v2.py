@@ -800,9 +800,15 @@ class Continuity:
     @staticmethod
     def _private_question(text,operation):
         content=text+" "+operation
-        return not text.strip() or bool(re.search(
+        natural=bool(re.search(
             r"@|https?://|\b(?:tokens?|secrets?|secretos?|secretas?|passwords?|contraseñas?|api[_ -]?keys?|bearer)\b|\b\d{8,}\b",
             content,re.I))
+        identifier=bool(re.search(
+            r"\b[A-Za-z0-9]+_(?:secret|token|password|contraseña)\b|\b(?:secret|token|password|contraseña)_[A-Za-z0-9]+\b",
+            content,re.I) or re.search(
+            r"\b[A-Za-z][A-Za-z0-9]*(?:Secret|Token|Password)\b|\b(?:[sS]ecret|[tT]oken|[pP]assword)[A-Z][A-Za-z0-9]*\b",
+            content))
+        return not text.strip() or natural or identifier
 
     def reconcile_private_question_pause(self):
         """Isolate one verified legacy private question without enabling the wheel."""

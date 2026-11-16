@@ -973,7 +973,8 @@ class V2WheelTests(unittest.TestCase):
         check=Continuity._private_question
         self.assertFalse(check("La secretaría confirma el ensayo", "Revisar respuesta"))
         for text in ("Incluye secretos", "Password de acceso", "token temporal", "owner@example.invalid",
-                     "https://private.invalid", "Referencia 12345678"):
+                     "https://private.invalid", "Referencia 12345678", "clientSecret", "secretKey",
+                     "client_secret"):
             self.assertTrue(check(text,"Revisar respuesta"))
 
     def test_legacy_private_pause_reconciles_once_without_activation_or_replay(self):
