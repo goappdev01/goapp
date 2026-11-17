@@ -818,6 +818,40 @@ class V2WheelTests(unittest.TestCase):
             request.return_value={'account':{'type':'apiKey','email':'Alice@example.com'}}
             self.assertEqual(account_identity(request,self.bridge.sign),(None,None))
 
+    def test_owner_binding_updates_title_only_for_unstarted_cards_and_dependencies(self):
+        first, dependent='a'*24,'b'*24
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64,{dependent:[first]})
+        for card_id in (first,dependent):
+            wheel._live_grant(self.cards[card_id],wheel.live_policy())
+        wheel.pause('WHEEL_CODEX_SESSION_CHANGED')
+        self.codex_identity='another-synthetic-account'
+        self.cards[first]['name']='A4 Título actualizado'
+        panel=RemotePanel(self.bridge)
+        ticket=panel.preview('rebind',{},'synthetic-owner')
+        changes=[it['title_update'] for it in ticket['review']['pending'] if 'title_update' in it]
+        self.assertEqual([change['title'] for change in changes],['A4 Título actualizado'])
+        self.assertFalse(panel.decide(ticket['ticket'],ticket['confirmation'],'synthetic-owner')['enabled'])
+        with self.bridge.db() as db:
+            grants={row['card_id']:wheel._verified(row) for row in db.execute('SELECT * FROM wheel_grants')}
+            self.assertFalse(db.execute('SELECT 1 FROM wheel_checkpoints').fetchone())
+        self.assertEqual(grants[first]['title'],'A4 Título actualizado')
+        self.assertEqual(grants[dependent]['dependency_versions'][first],{
+            key:grants[first][key] for key in ('title','attempt','instruction_sha')})
+        wheel._check_card(grants[first],self.cards[first])
+        wheel._check_card(grants[dependent],self.cards[dependent])
+        self.assertFalse(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)
+
+    def test_account_rebind_refuses_renamed_card_with_started_checkpoint(self):
+        wheel,grant,_,_=self.live_credit_wait()
+        self.cards[grant['card_id']]['name']='A4 Título cambiado con trabajo'
+        with self.assertRaises(BridgeError) as refused:
+            wheel.continuity.review_live_rebind()
+        self.assertEqual(refused.exception.code,'WHEEL_SUBJECT_CHANGED')
+        self.assertFalse(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)
+
     def test_power_requires_separate_binding_then_can_toggle_live_wheel(self):
         wheel,grant,job_id,session=self.live_credit_wait()
         self.cards[grant['card_id']]['pos']=4096

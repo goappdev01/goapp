@@ -73,7 +73,9 @@ $('accountBind').onclick=()=>accountAction(async()=>{
   if(!$('codexAccount').open)return;
   accountReview=result;
   const detected=result.detected_account||'Cuenta no identificada';
-  $('accountConfirmText').textContent='Vincular '+detected+'. La fábrica permanecerá pausada.';
+  const renamed=(result.review.pending||[]).filter(item=>item.title_update).length;
+  const titleNote=renamed?' Se actualizará la referencia local de '+(renamed===1?'una tarjeta renombrada':renamed+' tarjetas renombradas')+'.':'';
+  $('accountConfirmText').textContent='Vincular '+detected+'. La fábrica permanecerá pausada.'+titleNote;
   $('accountConfirm').hidden=false;
   $('accountApprove').disabled=false;
   $('accountApprove').focus();

@@ -507,12 +507,21 @@ class Continuity:
             subject,spec=self.w._subject(card,review=True)
             with self.b.db() as db:
                 saved=db.execute('SELECT * FROM wheel_grants WHERE grant_id=?',(item['grant_id'],)).fetchone()
-            grant=self.w._verified(saved)
+                grant=self.w._verified(saved)
+                unstarted=self._rebind_grant_unstarted(db,saved,grant)
             subject['position']=grant['position']
             subject.pop('binding',None)
-            if (self.f.digest(self.f.canonical(subject))!=grant['binding']
-                    or spec['instruction_sha']!=grant['instruction_sha']):
-                self.w.fail('WHEEL_SUBJECT_CHANGED','La instrucción o los permisos cambiaron desde el checkpoint.')
+            binding=self.f.digest(self.f.canonical(subject))
+            if binding!=grant['binding'] or spec['instruction_sha']!=grant['instruction_sha']:
+                # A renamed, unstarted card can keep its exact instruction and
+                # permissions. Check the full original subject, not just the text.
+                original={**subject,'title':grant['title']}
+                if (unstarted and spec['work_scope']=='V1' and subject['title']!=grant['title']
+                        and self.f.digest(self.f.canonical(original))==grant['binding']):
+                    item['title_update']={'title':subject['title'],'binding':binding,
+                        'previous_version':{key:grant[key] for key in ('title','attempt','instruction_sha')}}
+                else:
+                    self.w.fail('WHEEL_SUBJECT_CHANGED','La instrucción o los permisos cambiaron desde el checkpoint.')
 
         visible_queue=[{'card_id':card['id'],'title':card['name'],'position':card['pos']} for card in cards]
         fingerprint=self.f.digest(self.f.canonical([
@@ -525,6 +534,14 @@ class Continuity:
                 'scope_unchanged':True,'starts_new_task':False,
                 'resume_exact_session':any(item['state']=='credit_wait' for item in scoped)}
 
+    @staticmethod
+    def _rebind_grant_unstarted(db,saved,grant):
+        return (saved['state']=='ready'
+                and not db.execute('SELECT 1 FROM wheel_stages WHERE grant_id=?',(grant['grant_id'],)).fetchone()
+                and not db.execute('SELECT 1 FROM wheel_checkpoints WHERE grant_id=?',(grant['grant_id'],)).fetchone()
+                and not db.execute('SELECT 1 FROM factory_attempts WHERE card_id=? AND attempt=?',
+                                   (grant['card_id'],grant['attempt'])).fetchone())
+
     def rebind_live_queue(self,review,principal):
         """Bind a verified account and preserve all pending work with the wheel paused."""
         current=self.review_live_rebind()
@@ -536,6 +553,7 @@ class Continuity:
         identity,label=self.b.codex_account()
         if not identity or self.f.digest(identity)!=review['current_identity_sha256']:
             self.w.fail('WHEEL_CODEX_SESSION_CHANGED','La cuenta Codex cambió durante la confirmación.')
+        renamed={item['card_id']:item['title_update'] for item in review['pending'] if 'title_update' in item}
         with self.f.lock,self.b.db() as db:
             db.execute('BEGIN IMMEDIATE')
             control=db.execute('SELECT enabled,account_confirmation_required FROM wheel_control WHERE id=1').fetchone()
@@ -562,6 +580,20 @@ class Continuity:
                     self.w.fail('WHEEL_SUBJECT_CHANGED','Una autorización pendiente cambió durante la confirmación.')
                 updated={**grant,'codex_identity_sha256':self.f.digest(identity),
                          'identity_rebound_at':self.f.utc()}
+                dependency_versions={**grant['dependency_versions']}
+                for dependency,version in grant['dependency_versions'].items():
+                    change=renamed.get(dependency)
+                    if change and version==change['previous_version']:
+                        dependency_versions[dependency]={**version,'title':change['title']}
+                if dependency_versions!=grant['dependency_versions']:
+                    if not self._rebind_grant_unstarted(db,saved,grant):
+                        self.w.fail('WHEEL_SUBJECT_CHANGED','Una dependencia renombrada ya tiene trabajo registrado.')
+                    updated['dependency_versions']=dependency_versions
+                if 'title_update' in item:
+                    if not self._rebind_grant_unstarted(db,saved,grant):
+                        self.w.fail('WHEEL_SUBJECT_CHANGED','La tarjeta renombrada tiene trabajo registrado.')
+                    change=item['title_update']
+                    updated.update(title=change['title'],binding=change['binding'])
                 terms=self.f.canonical(updated);signature=self.b.sign(updated)
                 old_sha=self.f.digest(saved['terms']);new_sha=self.f.digest(terms)
                 db.execute('UPDATE wheel_grants SET terms=?,signature=? WHERE grant_id=?',
