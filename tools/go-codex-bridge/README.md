@@ -47,9 +47,10 @@ carpeta del Agente 4. Pausa y revocación conservan los checkpoints.
 La publicación automática de esta vía limita el parche a los archivos móviles;
 los cambios de API alojada, SQL e infraestructura quedan conservados para
 revisión y requieren autorización y prueba adicional. 8089 continúa fijado.
-El sondeo usa el bucle existente de 60 segundos. Una incidencia de tarjeta
-comprobada se comenta como pendiente y se traslada arriba de COMPROBAR cuando
-la escritura es verificable; un efecto externo incierto pausa la rueda.
+El sondeo usa el bucle existente de 60 segundos. Cuando el trabajo está
+bloqueado y conservado, el puente verifica el comentario de incidencia antes de
+trasladar la tarjeta V1 arriba de CONFLICTOS V1. El trabajo V1 terminado va a
+COMPROBAR. Un efecto externo incierto pausa la rueda.
 
 La política `independent-v2` solo se incorpora al lote mediante la acción
 explícita Activar fábrica. Las autorizaciones A–D siguen siendo individuales.

@@ -11,7 +11,7 @@ from unittest.mock import patch
 import test_bridge as fixtures
 import test_wheel as wheel_fixtures
 from puente import Bridge,BridgeError
-from factory import CHECK, CHECK_V2, QUEUE, normalize_guide, work_scope
+from factory import CHECK, CHECK_V2, QUEUE, RECOVERY, normalize_guide, work_scope
 from factory_v2 import Continuity
 from remote_panel import RemotePanel,private_text
 from owner_expo import OwnerExpo
@@ -1123,7 +1123,7 @@ class V2WheelTests(unittest.TestCase):
         result=w.continuity.card_error(grant,"FACTORY_JOB_FAILED")
         self.assertEqual(result["reason"],"WHEEL_QUESTION_PRIVATE")
         self.assertTrue(w.enabled())
-        self.assertEqual(self.cards[grant["card_id"]]["idList"],CHECK)
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)
         comment=self.cards[grant["card_id"]]["comments"][-1]["text"]
         self.assertIn("Pregunta privada pendiente",comment)
         self.assertNotIn("secretos del ensayo",comment)
@@ -1227,7 +1227,7 @@ class V2WheelTests(unittest.TestCase):
         result=w.tick()
         self.assertEqual(result["card_blocked"],grant["card_id"])
         self.assertTrue(w.enabled())
-        self.assertEqual(self.cards[grant["card_id"]]["idList"],CHECK)
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)
         self.assertNotIn("secretos del ensayo",self.cards[grant["card_id"]]["comments"][-1]["text"])
         self.assertEqual(self.changes,[(grant["card_id"],"C"),(grant["card_id"],"D")])
         self.assertFalse(self.runs)
@@ -1288,7 +1288,7 @@ class V2WheelTests(unittest.TestCase):
         result=w._finish_error(grant,"PUBLICATION_UNVERIFIED",True)
         self.assertEqual(result["reason"],"PUBLICATION_UNVERIFIED")
         self.assertTrue(w.enabled())
-        self.assertEqual(self.cards[grant["card_id"]]["idList"],CHECK)
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)
         self.assertTrue(self.cards[grant["card_id"]]["comments"][-1]["text"].startswith("CONFLICTO — QUÉ FALTA"))
         with self.bridge.db() as db:
             self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
@@ -1320,7 +1320,7 @@ class V2WheelTests(unittest.TestCase):
         result=w._finish_error(grant,"FACTORY_PUBLICATION_UNVERIFIED")
         self.assertEqual(result["card_blocked"],grant["card_id"])
         self.assertTrue(w.enabled())
-        self.assertEqual(self.cards[grant["card_id"]]["idList"],CHECK)
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)
         self.assertFalse(self.runs)
 
     def test_verified_success_posts_quick_check_then_moves_to_check_first(self):
@@ -1353,7 +1353,7 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(self.changes,[(grant["card_id"],"C"),(grant["card_id"],"D")])
         self.assertFalse(self.runs)
 
-    def test_permission_conflict_moves_to_check_without_replaying_job(self):
+    def test_permission_conflict_moves_to_recovery_without_replaying_job(self):
         w,grant,job_id,session=self.live_credit_wait()
         with self.bridge.db() as db:
             db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
@@ -1363,7 +1363,8 @@ class V2WheelTests(unittest.TestCase):
         result=w.continuity.card_error(grant,"WHEEL_PERMISSION_REQUIRED")
         self.assertEqual(result["reason"],"WHEEL_PERMISSION_REQUIRED")
         self.assertTrue(w.enabled())
-        self.assertEqual(self.cards[grant["card_id"]]["idList"],CHECK)
+        self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)
+        self.assertEqual(self.changes,[(grant["card_id"],"C"),(grant["card_id"],"D")])
         with self.bridge.db() as db:
             self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
             self.assertEqual(db.execute("SELECT COUNT(*) FROM wheel_stages WHERE grant_id=? AND state='verified'",

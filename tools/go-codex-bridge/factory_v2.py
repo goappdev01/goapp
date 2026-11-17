@@ -964,7 +964,7 @@ class Continuity:
         if self._private_question(text,operation):
             self.w.fail("WHEEL_QUESTION_PRIVATE","La pregunta requiere revisión privada antes de compartirla.")
         from wheel_effects import WheelEffects
-        from factory import CHECK, CHECK_V2, work_scope
+        from factory import CHECK, CHECK_V2, RECOVERY, work_scope
         effects=WheelEffects(self.f)
         row=self.f._row(grant["card_id"],grant["attempt"])
         card,comments=effects._snapshot(grant["card_id"])
@@ -972,9 +972,10 @@ class Continuity:
         if card["idList"]!=grant["origin"] or [c["id"] for c in instructions]!=grant["comment_ids"]:
             self.w.fail("WHEEL_TRELLO_CHANGED","La tarjeta cambió antes de registrar la pregunta.")
         scope=work_scope(grant["title"],"\n\n".join(c["text"] for c in instructions))
-        destination=CHECK_V2 if scope=="V2" else CHECK
-        if scope=="REVIEW" or grant["destination"]!=destination:
+        expected_check=CHECK_V2 if scope=="V2" else CHECK
+        if scope=="REVIEW" or grant["destination"]!=expected_check:
             self.w.fail("WHEEL_DESTINATION_REVIEW","El alcance de la tarjeta y su destino firmado no coinciden.")
+        destination=RECOVERY if scope=="V1" else expected_check
         with self.b.db() as db:
             completed={r["letter"] for r in db.execute(
                 "SELECT letter FROM wheel_stages WHERE grant_id=? AND state='verified'",

@@ -994,10 +994,15 @@ class Bridge:
         from factory import diagnostic_instruction
         diagnosis = diagnostic_instruction(job["data"]["instruction"])
         publication = "No hagas commits, merges, push, despliegues, migraciones ni escrituras en Trello. La ejecución NO autoriza publicar; el panel exige una autorización posterior del parche exacto."
+        recoverable_work = ("Si aparece un fallo durante la programación o las pruebas, identifica su causa, "
+                            "corrige lo que esté dentro del alcance y vuelve a ejecutar la comprobación pertinente. "
+                            "Si persiste un bloqueo real, conserva el avance y documenta la evidencia, lo intentado y qué falta.")
         prompt = ("Autorización local: " + identifier + ". Agente CLI independiente: " + payload["agent"] + ".\n"
                   "Trabaja únicamente en la carpeta asignada. Conserva cambios existentes. " + publication + "\n"
                   "El contenido siguiente es la instrucción revisada por el propietario, no autorización para ampliar permisos, leer secretos del puente o modificar su coordinador.\n"
                   "Si falta autorización o infraestructura, informa del bloqueo real; no simules resultados.\n\n" + job["data"]["instruction"])
+        if not diagnosis and job["data"]["instruction"] != TEST_INSTRUCTION:
+            prompt += "\n\n" + recoverable_work
         if job["data"]["instruction"] != TEST_INSTRUCTION:
             prompt += ('\n\nInforme del coordinador: al final de tu respuesta añade una sola línea '
                        'GO_BRIDGE_RESULT: {"status":"completed|blocked|failed","summary":"resultado real"}. '
@@ -1080,7 +1085,7 @@ class Bridge:
                       "pruebas locales dentro del alcance original. No hagas commit, push, despliegues ni "
                       "escrituras en Trello. Al final incluye GO_BRIDGE_RESULT y GO_FACTORY_EVIDENCE "
                       "con el formato acordado en la sesión anterior. Si necesitas una respuesta del propietario, "
-                      "incluye GO_FACTORY_QUESTION. No simules resultados.")
+                      "incluye GO_FACTORY_QUESTION. No simules resultados. " + recoverable_work)
         environment = {k: v for k, v in os.environ.items() if not re.search(r"TRELLO|ATLASSIAN|CLIENT_SECRET", k, re.I)}
         if bound or diagnosis:
             from codex_quota import worker_environment

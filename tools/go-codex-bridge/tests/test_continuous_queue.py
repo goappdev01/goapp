@@ -6,7 +6,7 @@ import time
 import unittest
 
 import test_factory_v2
-from factory import CHECK
+from factory import CHECK, RECOVERY
 from puente import codex_resume_command, BridgeError
 from wheel_effects import WheelEffects,WheelPublication
 
@@ -78,7 +78,7 @@ class ContinuousQueueTests(unittest.TestCase):
         self.assertFalse(w.enabled())
         self.assertFalse(self.runs)
 
-    def test_question_uses_only_cd_and_moves_to_top(self):
+    def test_question_uses_only_cd_and_moves_to_top_of_recovery(self):
         w,ids=self.batch()
         self.bridge.factory._start(self.bridge.factory._spec(self.cards[ids[0]]))
         with self.bridge.db() as db:
@@ -93,7 +93,8 @@ class ContinuousQueueTests(unittest.TestCase):
         job=self.bridge.job(job_id)
         w.continuity._defer_question_to_trello(grant,{"question":"¿Qué opción debe prevalecer?",
             "operation":"Seleccionar el comportamiento de prueba"},job)
-        self.assertEqual(self.cards[ids[0]]["idList"],w._verified(row)["destination"])
+        self.assertEqual(self.cards[ids[0]]["idList"],RECOVERY)
+        self.assertEqual(next(c["id"] for c in self.cards.values() if c["idList"]==RECOVERY),ids[0])
         self.assertEqual(self.changes,[(ids[0],"C"),(ids[0],"D")])
         comment=self.cards[ids[0]]["comments"][-1]["text"]
         self.assertTrue(comment.startswith("CONFLICTO — QUÉ FALTA"))
