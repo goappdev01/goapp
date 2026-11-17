@@ -8,8 +8,7 @@ const GAP = 10;
 const EDGE = 12;
 const GUTTER = 8;
 const BOTTOM = 24;
-const STACK_HEIGHT = GO_NAVIGATION_SIZE * 2 + GAP;
-export const GO_NAVIGATION_OVERLAY_CLEARANCE = STACK_HEIGHT + BOTTOM + 16;
+export const GO_NAVIGATION_OVERLAY_CLEARANCE = GO_NAVIGATION_SIZE + BOTTOM + 16;
 
 type Props = { controls: React.ReactNode; children: React.ReactNode };
 
@@ -18,9 +17,8 @@ export function GoNavigationRail({ controls, children }: Props) {
   const hand = useContext(GoNavigationHand);
   const [height, setHeight] = useState<number>();
   const left = hand === "left";
-  // With the keyboard open in landscape, keep both targets at full size.
-  const stacked = height === undefined || height >= STACK_HEIGHT;
-  const controlHeight = stacked ? STACK_HEIGHT : GO_NAVIGATION_SIZE;
+  // The two targets share one compact row, leaving the calculator above them.
+  const controlHeight = GO_NAVIGATION_SIZE;
   const bottom = height === undefined ? BOTTOM : Math.max(0, Math.min(BOTTOM, height - controlHeight));
   return (
     <KeyboardAvoidingView behavior="height" style={styles.fill}>
@@ -35,7 +33,7 @@ export function GoNavigationRail({ controls, children }: Props) {
           style={[styles.rail, {
             left: left ? 0 : undefined,
             right: left ? undefined : 0,
-            flexDirection: stacked ? "column" : left ? "row-reverse" : "row",
+            flexDirection: left ? "row-reverse" : "row",
             paddingLeft: left ? EDGE : GUTTER,
             paddingRight: left ? GUTTER : EDGE,
             paddingBottom: bottom,

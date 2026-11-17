@@ -7,6 +7,8 @@ export type FinancialDemoState = {
   doc: FinancialDocument;
   countryCode: string;
   activityId: string;
+  selectedCountryCodes?: string[];
+  selectedActivityIds?: string[];
 };
 
 type StoredDemo = { version: 1; state: FinancialDemoState };
@@ -18,12 +20,17 @@ function validate(state: FinancialDemoState): FinancialDemoState {
   const parsed = financialDocumentSchema.safeParse(state?.doc);
   if (!parsed.success) throw new Error("La simulación local contiene datos no válidos. No se ha sobrescrito.");
   const catalog = calculatorCatalog(parsed.data);
+  const countryCode = catalog.countries.some(item => item.code === state.countryCode)
+    ? state.countryCode : catalog.countries[0]?.code ?? "ES";
+  const activityId = catalog.activities.some(item => item.id === state.activityId && item.enabled)
+    ? state.activityId : catalog.activities.find(item => item.enabled)?.id ?? "go_peluquerias";
   return {
     doc: parsed.data,
-    countryCode: catalog.countries.some(item => item.code === state.countryCode)
-      ? state.countryCode : catalog.countries[0]?.code ?? "ES",
-    activityId: catalog.activities.some(item => item.id === state.activityId && item.enabled)
-      ? state.activityId : catalog.activities.find(item => item.enabled)?.id ?? "go_peluquerias",
+    countryCode,activityId,
+    selectedCountryCodes: [...new Set(Array.isArray(state.selectedCountryCodes)?state.selectedCountryCodes:[countryCode])]
+      .filter(code=>catalog.countries.some(item=>item.code===code)),
+    selectedActivityIds: [...new Set(Array.isArray(state.selectedActivityIds)?state.selectedActivityIds:[activityId])]
+      .filter(id=>catalog.activities.some(item=>item.id===id&&item.enabled)),
   };
 }
 

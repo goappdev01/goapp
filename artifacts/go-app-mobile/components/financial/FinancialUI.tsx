@@ -20,11 +20,20 @@ export function FinanceButton({label,onPress,selected=false,disabled=false}:{lab
 export function FinanceField({label,value,onChange,placeholder,multiline=false,disabled=false}:{label:string;value:string;onChange:(v:string)=>void;placeholder?:string;multiline?:boolean;disabled?:boolean}) {
  return <View style={{minWidth:155,flexGrow:1}}><Text style={financeStyles.label}>{label}</Text><TextInput accessibilityLabel={label} editable={!disabled} value={value} onChangeText={onChange} placeholder={placeholder} placeholderTextColor="#747D8C" multiline={multiline} style={[financeStyles.input,multiline&&{minHeight:100}]}/></View>;
 }
-export function FinanceNumber({label,value,onChange,placeholder,disabled=false,compact=false}:{label:string;value:number|null;onChange:(v:number|null)=>void;placeholder?:string;disabled?:boolean;compact?:boolean}) {
- const [draft,setDraft]=useState(value===null?"":String(value));
+export function parseFinanceNumber(text:string,integer=false):number|null{
+ const input=text.trim().replace(/[\s\u00a0]/g,"");if(!input)return null;
+ const normalized=integer
+  ? /^\d{1,3}(?:\.\d{3})+$/.test(input)?input.replace(/\./g,""):input
+  : /^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(input)?input.replace(/\./g,"").replace(",","."):input.replace(",",".");
+ if(!(integer?/^\d+$/:/^-?\d+(?:\.\d*)?$/).test(normalized))return Number.NaN;
+ return Number(normalized);
+}
+export function FinanceNumber({label,value,onChange,placeholder,disabled=false,compact=false,integer=false}:{label:string;value:number|null;onChange:(v:number|null)=>void;placeholder?:string;disabled?:boolean;compact?:boolean;integer?:boolean}) {
+ const display=(current:number|null)=>current===null?"":integer?new Intl.NumberFormat("es-ES",{maximumFractionDigits:0}).format(current):String(current);
+ const [draft,setDraft]=useState(display(value));
  const focused=useRef(false),draftRef=useRef(draft),emitted=useRef(value);
- useEffect(()=>{if(!focused.current&&!Number.isNaN(value)){const text=value===null?"":String(value);draftRef.current=text;setDraft(text);}},[value]);
- const publish=(text:string)=>{draftRef.current=text;setDraft(text);const normalized=text.trim().replace(",","."),next=!normalized?null:/^-?\d+(?:\.\d*)?$/.test(normalized)?Number(normalized):Number.NaN;if(!Object.is(emitted.current,next)){emitted.current=next;onChange(next);}};
+ useEffect(()=>{if(!focused.current&&!Number.isNaN(value)){const text=display(value);draftRef.current=text;setDraft(text);}},[value,integer]);
+ const publish=(text:string)=>{draftRef.current=text;setDraft(text);const next=parseFinanceNumber(text,integer);if(!Object.is(emitted.current,next)){emitted.current=next;onChange(next);}};
  return <View style={compact?{minWidth:0,flex:1}:{minWidth:155,flexGrow:1}}>{!compact&&<Text style={financeStyles.label}>{label}</Text>}<TextInput accessibilityLabel={label} editable={!disabled} value={draft} onFocus={()=>{focused.current=true;emitted.current=value;}} onChangeText={publish} onEndEditing={event=>{publish(event.nativeEvent.text??draftRef.current);focused.current=false;}} onBlur={()=>{focused.current=false;}} placeholder={placeholder||"Sin dato"} placeholderTextColor="#747D8C" keyboardType="numbers-and-punctuation" style={[financeStyles.input,compact&&{fontSize:17,fontWeight:"500",borderWidth:1.5,borderColor:"#778397",paddingHorizontal:8}]}/></View>;
 }
 export function FinanceTable({headers,rows,valueStyle}:{headers:string[];rows:(string|number)[][];valueStyle?:TextStyle}) {
@@ -40,6 +49,6 @@ export function FinanceChoice({label,value,options,onChange,disabled=false}:{lab
 
 export function FinanceMultiChoice({label,values,options,onChange,onExpandedChange}:{label:string;values:string[];options:{value:string;label:string}[];onChange:(values:string[])=>void;onExpandedChange?:(open:boolean)=>void}){
  const [open,setOpen]=useState(false);const selected=options.filter(item=>values.includes(item.value));
- const noun=label==="País"?"países":"actividades"; const title=selected.length===options.length?(label==="País"?"Todos los países":"Todas las actividades"):selected.length===1?selected[0].label:selected.length?selected.length+" "+noun:"Seleccionar "+noun;
+ const country=label.startsWith("País");const noun=country?"países":"actividades"; const title=selected.length===options.length?(country?"Todos los países":"Todas las actividades"):selected.length===1?selected[0].label:selected.length?selected.length+" "+noun:"Seleccionar "+noun;
  return <View style={{flexGrow:1,minWidth:135,gap:6}}><Text style={financeStyles.label}>{label}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel={label} accessibilityState={{expanded:open}} onPress={()=>{setOpen(v=>!v);onExpandedChange?.(!open);}} style={financeStyles.input}><Text style={financeStyles.text}>{title} ▾</Text></TouchableOpacity>{open&&<View style={{borderRadius:10,backgroundColor:"#F6F7F9"}}><View style={financeStyles.row}><FinanceButton label="Todos" onPress={()=>onChange(options.map(item=>item.value))}/><FinanceButton label="Limpiar" onPress={()=>onChange([])}/><FinanceButton label="Listo" onPress={()=>{setOpen(false);onExpandedChange?.(false);}}/></View><ScrollView nestedScrollEnabled style={{maxHeight:225}} keyboardShouldPersistTaps="handled">{options.map(item=><TouchableOpacity key={item.value} accessibilityRole="checkbox" accessibilityLabel={item.label} accessibilityState={{checked:values.includes(item.value)}} onPress={()=>onChange(values.includes(item.value)?values.filter(v=>v!==item.value):[...values,item.value])} style={{padding:13,flexDirection:"row",gap:8}}><Text style={financeStyles.check}>{values.includes(item.value)?"☑":"☐"}</Text><Text style={financeStyles.text}>{item.label}</Text></TouchableOpacity>)}</ScrollView></View>}</View>;
 }

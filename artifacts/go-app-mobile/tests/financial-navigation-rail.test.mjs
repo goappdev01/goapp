@@ -57,7 +57,7 @@ const large = [
   [932, 430, 59, 59, 0, 21],
 ];
 
-function assertPlacement(f, hand, width, height, leftInset, rightInset, stacked) {
+function assertPlacement(f, hand, width, height, leftInset, rightInset) {
   const rail = flat(f.hosts.rail.style);
   const body = flat(f.hosts.body.style);
   const onLeft = hand === "left";
@@ -71,10 +71,10 @@ function assertPlacement(f, hand, width, height, leftInset, rightInset, stacked)
   assert.equal(rail.right, onLeft ? undefined : 0);
   assert.equal(f.hosts.rail.pointerEvents, "box-none");
   assert.equal(rail.justifyContent, "flex-end");
-  assert.equal(rail.flexDirection, stacked ? "column" : onLeft ? "row-reverse" : "row");
+  assert.equal(rail.flexDirection, onLeft ? "row-reverse" : "row");
   assert.equal(rail.gap, 10);
-  const targetWidth = stacked ? f.size : f.size * 2 + rail.gap;
-  const targetHeight = stacked ? f.size * 2 + rail.gap : f.size;
+  const targetWidth = f.size * 2 + rail.gap;
+  const targetHeight = f.size;
   const railWidth = targetWidth + rail.paddingLeft + rail.paddingRight;
   const x = (onLeft ? leftInset : width - rightInset - railWidth) + rail.paddingLeft;
   assert.equal(x, onLeft ? leftInset + 12 : width - rightInset - 12 - targetWidth);
@@ -98,7 +98,7 @@ test("financial controls overlay the full-width calculator at the safe edge for 
           const [width, height, left, right, top, bottom] = frames[index];
           const bodyHeight = height - top - bottom - 46;
           await f.layout(width - left - right, bodyHeight);
-          assertPlacement(f, hand, width, bodyHeight, left, right, true);
+          assertPlacement(f, hand, width, bodyHeight, left, right);
           f.pressBoth();
         }
       }
@@ -115,20 +115,20 @@ test("changing hands, closing the keyboard and reopening ignore old coordinates"
     await f.render("right");
     // An asymmetric safe area exercises each physical side independently.
     await f.layout(832, 112);
-    assertPlacement(f, "right", 911, 112, 59, 20, false);
+    assertPlacement(f, "right", 911, 112, 59, 20);
     await f.render("left");
-    assertPlacement(f, "left", 911, 112, 59, 20, false);
+    assertPlacement(f, "left", 911, 112, 59, 20);
     await f.layout(832, 151);
-    assertPlacement(f, "left", 911, 151, 59, 20, true);
+    assertPlacement(f, "left", 911, 151, 59, 20);
     await f.layout(832, 325);
-    assertPlacement(f, "left", 911, 325, 59, 20, true);
+    assertPlacement(f, "left", 911, 325, 59, 20);
   } finally {
     await f.unmount();
   }
   const reopened = await mountedRail();
   try {
     await reopened.render("right");
-    assertPlacement(reopened, "right", 911, 325, 20, 59, true);
+    assertPlacement(reopened, "right", 911, 325, 20, 59);
   } finally {
     await reopened.unmount();
   }

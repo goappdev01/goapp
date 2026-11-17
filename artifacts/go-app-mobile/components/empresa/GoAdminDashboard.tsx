@@ -1,5 +1,6 @@
 import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import {GoNavigationRail} from "@/components/ui/GoNavigationRail";
+import {useGoNoteKeyboard} from "@/hooks/useGoNoteKeyboard";
 import { OwnerContextModal as Modal } from "@/components/debug/OwnerContextIndicator";
 import React, { useState } from "react";
 import * as WebBrowser from "expo-web-browser";
@@ -796,6 +797,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
   const currentSec = SECTIONS.find(s => s.key === section);
 
   const financialView = section === "roadmap" && roadmapStack[roadmapStack.length - 1]?.key === "plan_financiero_y_proyecciones";
+  const financeKeyboard=useGoNoteKeyboard(financialView&&visible);
 
   const headerTitle =
     financialView            ? (lang === 'en' ? "GO income projection" : "Proyección de ingresos GO") :
@@ -810,7 +812,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
   if (!adminAccess.allowed || !goView.isAdminView) return null;
 
   const navigationButtons = <>
-    <GoCloseButton level="panel" activeOpacity={0.8} onPress={handleBack} hitSlop={8} accessibilityLabel={lang === 'en' ? "Go back one step" : "Volver al paso anterior"} style={s.fabBtn}/>
+    <GoCloseButton level="panel" activeOpacity={0.8} keyboardVisible={financialView&&financeKeyboard.visible} onPress={()=>{if(financialView&&financeKeyboard.isActive())void financeKeyboard.dismiss();else handleBack();}} hitSlop={8} accessibilityLabel={financialView&&financeKeyboard.visible?"Ocultar teclado":lang === 'en' ? "Go back one step" : "Volver al paso anterior"} style={s.fabBtn}/>
     <GoCloseButton level="container" activeOpacity={0.8} onPress={onClose} hitSlop={8} accessibilityLabel={lang === 'en' ? "Return to GO Landing" : "Volver al Landing GO"} style={s.fabBtn}/>
   </>;
   const roadmap = <GoRoadmapScreen
