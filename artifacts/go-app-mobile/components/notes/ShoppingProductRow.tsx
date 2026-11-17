@@ -37,7 +37,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
   };
   const icon=(name:React.ComponentProps<typeof Feather>["name"],label:string,onPress:()=>void,id?:string)=><TouchableOpacity testID={id} accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} style={s.icon}><Feather name={name} size={19} color="#39688f"/></TouchableOpacity>;
   const brand=item.brand??price?.brand,format=item.format??price?.format;
-  const step=item.unit==="kg"||item.unit==="litros" ? .1 : 1;
+  const step=item.unit==="kg"||item.unit==="litros" ? .1 : item.unit==="g"||item.unit==="ml" ? 50 : 1;
   const changeQuantity=(direction:number)=>{
     try{const next=Number((shoppingDecimal(quantity)!+direction*step).toFixed(3));if(next<=0)return;
       setQuantity(String(next));setError("");apply({type:"quantity",id:item.id,value:next});
@@ -51,9 +51,9 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
   </View>;
   const routeButton=<TouchableOpacity testID={"shopping-ir-"+item.id} accessibilityRole="button" accessibilityLabel={"Ir a "+item.name} disabled={disabled} onPress={onRoute} style={s.ir}><Feather name="navigation" size={20} color="#125caa"/></TouchableOpacity>;
   const boughtButton=<TouchableOpacity testID={"shopping-bought-"+item.id} accessibilityRole="checkbox" accessibilityLabel={"Cogido: "+item.name} accessibilityState={{checked:item.bought,disabled:disabled||!item.selected}} disabled={disabled||!item.selected}
-    onPress={()=>apply({type:"bought",id:item.id,value:!item.bought})} style={[s.check,item.bought&&s.checked]}><Feather name="check" size={25} color={item.bought?"#fff":"#31a522"}/></TouchableOpacity>;
+    onPress={()=>apply({type:"bought",id:item.id,value:!item.bought})} style={[s.check,item.bought&&s.checked]}><Feather name={item.bought?"check":"circle"} size={25} color={item.bought?"#fff":"#71869b"}/></TouchableOpacity>;
   const subtotalLabel=subtotal.amount===undefined?"Sin precio":money(subtotal.amount,subtotal.currency);
-  const subtotalText=<Text testID={"shopping-subtotal-"+item.id} accessibilityLabel={"Subtotal de "+item.name+": "+subtotalLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.78} style={s.total}>{subtotal.amount===undefined?"—":subtotalLabel}</Text>;
+  const subtotalText=<Text testID={"shopping-subtotal-"+item.id} accessibilityLabel={"Subtotal de "+item.name+": "+subtotalLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.72} style={s.total}>{subtotalLabel}</Text>;
   return <View testID={"shopping-item-"+item.id} style={[s.card,item.bought&&s.picked,!item.selected&&{opacity:.65}]}>
     <View testID={"shopping-product-main-row-"+item.id} style={[s.mainRow,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
       <View testID={"shopping-product-info-"+item.id} style={[s.productInfo,narrow&&{flex:1}]}>
@@ -95,7 +95,7 @@ const s=StyleSheet.create({
   row:{flexDirection:"row",gap:4,alignItems:"center"},name:{fontSize:14,fontWeight:"700",color:"#1c2f49",lineHeight:17},boughtName:{color:"#396044"},brand:{fontSize:10,color:"#587087"},meta:{fontSize:10,color:"#536a80",flexShrink:1},
   priceLine:{flexDirection:"row",alignItems:"center",minHeight:24},priceInput:{flex:1,minWidth:0,padding:0,fontSize:11,fontWeight:"600",color:"#2d4357",minHeight:27},priceUnit:{minWidth:28,minHeight:28,justifyContent:"center"},
   quantityControls:{width:94,minHeight:44,flexDirection:"row",alignItems:"center",justifyContent:"space-between",borderRadius:11,borderWidth:1,borderColor:"#d9e3ed",backgroundColor:"#fff"},quantityControlsNarrow:{width:132},step:{width:30,minHeight:44,alignItems:"center",justifyContent:"center"},quantityInput:{flex:1,minWidth:27,padding:0,textAlign:"center",fontSize:14,fontWeight:"700",color:"#1e344c"},
-  total:{width:53,fontSize:12,fontWeight:"700",color:"#21364e",textAlign:"center"},ir:{width:44,minHeight:44,borderRadius:10,alignItems:"center",justifyContent:"center",backgroundColor:"#e4f0ff"},
-  check:{width:44,minHeight:44,borderRadius:10,borderWidth:1,borderColor:"#55bc4b",backgroundColor:"#e8f8e5",alignItems:"center",justifyContent:"center"},checked:{backgroundColor:"#34b929",borderColor:"#269f1e"},
+  total:{width:65,fontSize:12,fontWeight:"700",color:"#21364e",textAlign:"center"},ir:{width:44,minHeight:44,borderRadius:10,alignItems:"center",justifyContent:"center",backgroundColor:"#e4f0ff"},
+  check:{width:44,minHeight:44,borderRadius:10,borderWidth:1,borderColor:"#a5b5c6",backgroundColor:"#fff",alignItems:"center",justifyContent:"center"},checked:{backgroundColor:"#34b929",borderColor:"#269f1e"},
   icon:{minWidth:44,minHeight:44,alignItems:"center",justifyContent:"center"},error:{fontSize:12,color:"#a33035"},
 });

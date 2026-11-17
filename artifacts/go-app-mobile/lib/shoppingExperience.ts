@@ -1,4 +1,4 @@
-import { shoppingDecimal, shoppingEditor, shoppingId, shoppingName, suggestShoppingCategory, type ShoppingCategory, type ShoppingDocument, type ShoppingItem, type ShoppingOperation, type ShoppingUnit } from "./shoppingNote";
+import { shoppingDecimal, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, suggestShoppingCategory, type ShoppingCategory, type ShoppingDocument, type ShoppingItem, type ShoppingOperation, type ShoppingUnit } from "./shoppingNote";
 
 /** The eight visual entrances cover the existing catalog without changing stored categories. */
 export const SHOPPING_ORBITS = [
@@ -56,8 +56,22 @@ type CommandResult={message:string;operations?:ShoppingOperation[];confirm?:bool
 /** Deliberately bounded local commands. No generated products, aisles, prices or remote writes. */
 export function shoppingCommand(doc:ShoppingDocument,text:string):CommandResult{
   const raw=text.trim(),normalized=shoppingName(raw);
+  if(/^(?:cuanto llevo|gasto|total de compra|cuanto he gastado)$/.test(normalized)){
+    const estimate=shoppingEstimate(doc,true),amount=Object.entries(estimate.totals).map(([currency,value])=>`${value.toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})} ${currency}`).join(" + ")||"0,00 EUR";
+    return{message:`Compra cogida con precio: ${amount}${estimate.unknown?`. ${estimate.unknown} productos sin precio.`:"."}`};
+  }
   if(/^(?:que (?:queda|falta)|pendientes|mostrar pendientes)/.test(normalized)){const pending=doc.items.filter(i=>i.selected&&!i.bought);return{message:pending.length?`Pendientes: ${pending.map(i=>`${i.name}: ${i.quantity} ${i.unit}`).join("; ")}.`:"Ya has cogido todo lo incluido en la lista."};}
   if(/^(?:ruta|gestionar ruta|recalcula(?:r)? ruta|ir a caja)$/.test(normalized))return{message:"Recorrido actualizado con los productos pendientes.",route:true};
+  const combined=raw.match(/^(?:añade|añadir|agrega)\s+(.+?)\s+y\s+(.+)$/i);
+  if(combined){
+    const numbers:Record<string,string>={un:"1",una:"1",dos:"2",tres:"3",cuatro:"4",cinco:"5",seis:"6",siete:"7",ocho:"8",nueve:"9",diez:"10"};
+    const parts=[combined[1],combined[2]].map(part=>part.replace(/^([\p{L}]+)\b/u,(word)=>numbers[shoppingName(word)]||word));
+    if(parts.every(part=>/^\d+(?:[.,]\d+)?\s+\S+/.test(part))){
+      const plans=parts.map(part=>shoppingCommand(doc,"Añade "+part));
+      if(plans.every(plan=>plan.operations?.length))return{message:"Productos añadidos a la lista.",operations:plans.flatMap(plan=>plan.operations||[])};
+    }
+    return{message:"Aclara cada producto y su cantidad antes de añadir varios a la vez."};
+  }
   const add=raw.match(/^(?:añade|añadir|agrega)\s+(?:(\d+(?:[.,]\d+)?)\s+(?:(kg|g|litros|ml|paquetes|unidades)\s+(?:de\s+)?)?)?(.+)$/i);
   if(add){const name=add[3].trim();if(!name)return{message:"Indica el producto que quieres añadir."};if(/\s+(?:y|luego|despues)\s+|[;\n]/i.test(name))return{message:"Da una orden cada vez para identificar el producto."};const matches=doc.items.filter(i=>shoppingName(i.name)===shoppingName(name));
     if(matches.length>1)return{message:"Hay varias marcas o presentaciones. Elige la fila que quieres cambiar."};

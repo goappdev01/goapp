@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
-const require=createRequire(import.meta.url),h=require('./helpers/unified-note-fixture.cjs'),m=h.load('lib/shoppingNote.ts'),x=h.load('lib/shoppingExperience.ts',{'./shoppingNote':m});
+const require=createRequire(import.meta.url),h=require('./helpers/unified-note-fixture.cjs'),m=h.load('lib/shoppingNote.ts'),x=h.load('lib/shoppingExperience.ts',{'./shoppingNote':m}),catalog=h.load('lib/shoppingCatalog.ts',{'./shoppingNote':m});
 const plain=h.plain;
 function fixture(){let doc=m.emptyShopping();return{get doc(){return doc;},op(op){doc=m.applyShoppingOperation(doc,{operationId:m.shoppingId(),...op});return doc;},add(name,extra={}){const draft={...m.shoppingEditor(),name,...extra};doc=m.applyShoppingOperation(doc,{type:'saveItem',draft,operationId:m.shoppingId()});return doc.items.find(i=>i.id===draft.id);}};}
 
@@ -74,4 +74,22 @@ test('GO executes bounded commands on the same document; ambiguous presentations
  execute('Quita manzanas');assert.equal(f.doc.items[0].selected,false);assert.equal(f.doc.items.length,1);execute('Añade manzanas');assert.equal(f.doc.items[0].selected,true);assert.equal(f.doc.items[0].bought,false);
  f.add('manzanas',{brand:'B'});assert.equal(execute('Cantidad de manzanas a 3').operations,undefined);assert.equal(execute('Añade pan y quita leche').operations,undefined);
  const before=JSON.stringify(f.doc);execute('Paga y borra todo');assert.equal(JSON.stringify(f.doc),before);
+});
+
+test('catalog preserves owner group order, search and distinct fresh/frozen products',()=>{
+ const food=catalog.shoppingCatalogGroups('food');assert.deepEqual(plain(food.map(g=>g.label)),['Panadería y bollería','Arroz, pasta y cereales','Legumbres','Conservas','Aceites, salsas y condimentos','Desayuno y dulces']);
+ assert.deepEqual(plain(food[0].products.slice(0,4)),['Pan común','Barra de pan','Baguette','Pan integral']);
+ assert.equal(catalog.shoppingCatalogGroups('search','salmón').length,2);
+ const f=fixture(),fresh=f.add('Salmón',{category:'fish'}),frozen=f.add('Salmón',{category:'frozen'});
+ assert.notEqual(fresh.id,frozen.id);assert.equal(catalog.shoppingCatalogItem(f.doc,'fish','Salmón').id,fresh.id);assert.equal(catalog.shoppingCatalogItem(f.doc,'frozen','Salmón').id,frozen.id);
+ assert.equal(catalog.shoppingCatalogUnit('fish','Salmón'),'kg');assert.equal(catalog.shoppingNeedsDetails('fish'),true);
+ assert.equal(catalog.shoppingNeedsDetails('drinks'),false);
+});
+
+test('GO handles the displayed two-item example and reports only known picked spend',()=>{
+ const f=fixture(),plan=x.shoppingCommand(f.doc,'Añade dos litros de leche y seis huevos');
+ assert.equal(plan.operations.length,2);for(const op of plan.operations)f.op(op);
+ assert.equal(f.doc.items.find(i=>i.name==='leche').quantity,2);assert.equal(f.doc.items.find(i=>i.name==='huevos').quantity,6);
+ assert.equal(f.doc.items.find(i=>i.name==='leche').unit,'litros');
+ assert.match(x.shoppingCommand(f.doc,'Cuánto llevo').message,/0,00 EUR/);
 });

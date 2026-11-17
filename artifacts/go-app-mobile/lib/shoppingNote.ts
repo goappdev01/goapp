@@ -129,7 +129,7 @@ function editorItem(d:ShoppingEditorDraft,doc:ShoppingDocument):ShoppingItem {
   const old=doc.items.find(i=>i.id===d.id),name=d.name.trim();
   if(!name)throw Error("Escribe el nombre del producto.");
   if(old?.revision!==d.expectedRevision)throw Error("El artículo cambió durante la edición. Conserva el borrador y vuelve a abrir el artículo.");
-  if(doc.items.some(i=>i.id!==d.id&&shoppingName(i.name)===shoppingName(name)&&shoppingName(i.brand??i.prices.at(-1)?.brand??"")===shoppingName(d.brand)&&shoppingName(i.format??i.prices.at(-1)?.format??"")===shoppingName(d.format)&&shoppingName(i.variety||"")===shoppingName(d.variety||"")&&i.packageQuantity===shoppingDecimal(d.packageQuantity,true)&&i.packageUnit===(d.packageQuantity.trim()?d.packageUnit:undefined)))throw Error("Ya existe esa presentación. Edita su fila para cambiar cantidad.");
+  if(doc.items.some(i=>i.id!==d.id&&i.category===d.category&&shoppingName(i.name)===shoppingName(name)&&shoppingName(i.brand??i.prices.at(-1)?.brand??"")===shoppingName(d.brand)&&shoppingName(i.format??i.prices.at(-1)?.format??"")===shoppingName(d.format)&&shoppingName(i.variety||"")===shoppingName(d.variety||"")&&i.packageQuantity===shoppingDecimal(d.packageQuantity,true)&&i.packageUnit===(d.packageQuantity.trim()?d.packageUnit:undefined)))throw Error("Ya existe esa presentación. Edita su fila para cambiar cantidad.");
   const quantity=shoppingDecimal(d.quantity||"1")!,size=shoppingDecimal(d.packageQuantity,true);
   const prices=[...(old?.prices||[])];let selectedPriceId=old?.selectedPriceId;
   if(d.price.trim()){
