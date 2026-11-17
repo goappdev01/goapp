@@ -72,7 +72,7 @@ export function shoppingCommand(doc:ShoppingDocument,text:string):CommandResult{
     }
     return{message:"Aclara cada producto y su cantidad antes de añadir varios a la vez."};
   }
-  const add=raw.match(/^(?:añade|añadir|agrega)\s+(?:(\d+(?:[.,]\d+)?)\s+(?:(kg|g|litros|ml|paquetes|unidades)\s+(?:de\s+)?)?)?(.+)$/i);
+  const add=raw.match(/^(?:añade|añadir|agrega)\s+(?:(\d+(?:[.,]\d+)?)\s+(?:(kg|g|litros|ml|docenas|paquetes|unidades)\s+(?:de\s+)?)?)?(.+)$/i);
   if(add){const name=add[3].trim();if(!name)return{message:"Indica el producto que quieres añadir."};if(/\s+(?:y|luego|despues)\s+|[;\n]/i.test(name))return{message:"Da una orden cada vez para identificar el producto."};const matches=doc.items.filter(i=>shoppingName(i.name)===shoppingName(name));
     if(matches.length>1)return{message:"Hay varias marcas o presentaciones. Elige la fila que quieres cambiar."};
     if(matches.length){const i=matches[0];if(add[2]&&add[2]!==i.unit)return{message:"La unidad es distinta. Cambia la presentación desde su fila."};return{message:`${i.name} añadido a la compra.`,operations:[{type:"select",id:i.id,value:true,operationId:shoppingId()},{type:"bought",id:i.id,value:false,operationId:shoppingId()},...(add[1]?[{type:"quantity" as const,id:i.id,value:shoppingDecimal(add[1])!,operationId:shoppingId()}]:[])]};}

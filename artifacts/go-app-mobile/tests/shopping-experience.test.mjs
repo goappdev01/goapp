@@ -93,3 +93,10 @@ test('GO handles the displayed two-item example and reports only known picked sp
  assert.equal(f.doc.items.find(i=>i.name==='leche').unit,'litros');
  assert.match(x.shoppingCommand(f.doc,'Cuánto llevo').message,/0,00 EUR/);
 });
+
+test('docenas convert consistently against unit and dozen prices without changing stored quantities',()=>{
+ const f=fixture(),eggs=f.add('Huevos',{quantity:'2',unit:'docenas'});f.op({type:'store',value:'Tienda A'});
+ f.op({type:'price',id:eggs.id,value:0.25,unit:'unidades',observationId:m.shoppingId()});assert.equal(m.shoppingSubtotal(f.doc.items[0],f.doc.store).amount,6);
+ f.op({type:'price',id:eggs.id,value:3,unit:'docenas',observationId:m.shoppingId()});assert.equal(m.shoppingSubtotal(f.doc.items[0],f.doc.store).amount,6);
+ assert.equal(f.doc.items[0].quantity,2);assert.equal(f.doc.items[0].unit,'docenas');
+});

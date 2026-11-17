@@ -8,7 +8,7 @@ export const SHOPPING_CATEGORIES = [
   ["pets", "K", "Mascotas"], ["other", "L", "Otros / sin clasificar"],
 ] as const;
 export type ShoppingCategory = typeof SHOPPING_CATEGORIES[number][0];
-export const SHOPPING_UNITS = ["unidades", "paquetes", "kg", "g", "litros", "ml"] as const;
+export const SHOPPING_UNITS = ["unidades", "docenas", "paquetes", "kg", "g", "litros", "ml"] as const;
 export type ShoppingUnit = typeof SHOPPING_UNITS[number];
 export type MeasureUnit = Exclude<ShoppingUnit, "paquetes">;
 export type ShoppingPrice = {
@@ -198,7 +198,7 @@ export function visibleShopping(doc:ShoppingDocument,filter:ShoppingFilter) {
 }
 export function normalizedShoppingPrice(p:ShoppingPrice):{value:number;unit:"kg"|"l"|"unidad"}|null {
   if(!positive(p.packageQuantity)||!p.packageUnit)return null;
-  const divisor=p.packageQuantity*(p.packageUnit==="g"||p.packageUnit==="ml"?0.001:1);
+  const divisor=p.packageQuantity*(p.packageUnit==="g"||p.packageUnit==="ml"?0.001:p.packageUnit==="docenas"?12:1);
   return {value:p.price/divisor,unit:p.packageUnit==="kg"||p.packageUnit==="g"?"kg":p.packageUnit==="litros"||p.packageUnit==="ml"?"l":"unidad"};
 }
 export function comparableShoppingPrices(prices:ShoppingPrice[]) {
@@ -218,11 +218,13 @@ export function shoppingPriceFor(item:ShoppingItem,store?:string) {
 }
 export function shoppingSubtotal(i:ShoppingItem,store?:string) {
   const p=shoppingPriceFor(i,store);let amount:number|undefined;
-  if(p){const n=normalizedShoppingPrice(p),counted=i.unit==="paquetes"||i.unit==="unidades";
-    if(counted&&i.unit===p.purchaseUnit&&i.packageQuantity===undefined)amount=i.quantity*p.price;
+  if(p){const n=normalizedShoppingPrice(p),counted=i.unit==="paquetes"||i.unit==="unidades"||i.unit==="docenas";
+    if(i.packageQuantity===undefined&&p.packageQuantity===undefined&&(i.unit==="unidades"||i.unit==="docenas")&&(p.purchaseUnit==="unidades"||p.purchaseUnit==="docenas"))
+      amount=i.quantity*(i.unit==="docenas"?12:1)*p.price/(p.purchaseUnit==="docenas"?12:1);
+    else if(counted&&i.unit===p.purchaseUnit&&i.packageQuantity===undefined)amount=i.quantity*p.price;
     else if(n){const size=counted?i.packageQuantity:i.quantity,unit=counted?i.packageUnit:i.unit;
-      const base=unit==="kg"||unit==="g"?"kg":unit==="litros"||unit==="ml"?"l":unit==="unidades"?"unidad":undefined;
-      if(size!==undefined&&base===n.unit)amount=size*(counted?i.quantity:1)*(unit==="g"||unit==="ml"?0.001:1)*n.value;}
+      const base=unit==="kg"||unit==="g"?"kg":unit==="litros"||unit==="ml"?"l":unit==="unidades"||unit==="docenas"?"unidad":undefined;
+      if(size!==undefined&&base===n.unit)amount=size*(counted?i.quantity:1)*(unit==="g"||unit==="ml"?0.001:unit==="docenas"?12:1)*n.value;}
   }
   return {amount:amount!==undefined&&Number.isFinite(amount)?Math.round((amount+Number.EPSILON)*100)/100:undefined,currency:p?.currency||"EUR"};
 }

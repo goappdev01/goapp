@@ -5,7 +5,7 @@ import { shoppingDecimal, shoppingId, shoppingName, shoppingPriceFor, shoppingSu
 
 const number=(n:number)=>n.toLocaleString("es-ES",{maximumFractionDigits:3});
 const money=(n:number,currency:string)=>n.toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" "+(currency==="EUR"?"€":currency);
-const shortUnit=(unit:string)=>({unidades:"ud",paquetes:"paq",litros:"l"} as Record<string,string>)[unit]||unit;
+const shortUnit=(unit:string)=>({unidades:"ud",docenas:"doc",paquetes:"paq",litros:"l"} as Record<string,string>)[unit]||unit;
 function productArt(item:ShoppingItem){
   const name=shoppingName(item.name);
   for(const [pattern,art] of [["leche","🥛"],["platano","🍌"],["pan","🥖"],["huevo","🥚"],["salmon","🐟"],["yogur","🥛"],["helado","🍦"],["manzana","🍎"],["tomate","🍅"],["queso","🧀"],["agua","💧"],["zumo","🧃"]] as const)
