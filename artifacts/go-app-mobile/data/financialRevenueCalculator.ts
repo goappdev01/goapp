@@ -2,6 +2,7 @@ import { calculateFinancialPlan,consolidateFinancialRows,emptyFinancialDocument,
 
 // The same twenty country codes already present in the saved GO plan. No statistics.
 const COUNTRIES="AE AU BE BR CA CH CN CO DE ES FR GB IN IT JP KR MX NL PL US".split(" ");
+const COUNTRY_NAMES:Record<string,string>={AE:"Emiratos Árabes Unidos",AU:"Australia",BE:"Bélgica",BR:"Brasil",CA:"Canadá",CH:"Suiza",CN:"China",CO:"Colombia",DE:"Alemania",ES:"España",FR:"Francia",GB:"Reino Unido",IN:"India",IT:"Italia",JP:"Japón",KR:"Corea del Sur",MX:"México",NL:"Países Bajos",PL:"Polonia",US:"Estados Unidos"};
 const ACTIVITIES=[
  {id:"go_peluquerias",name:"GO Peluquerías"},{id:"go_restaurantes",name:"GO Restaurantes"},{id:"go_imprimir",name:"GO Imprimir"},{id:"go_unas",name:"GO Uñas"},{id:"go_encargos_supermercado",name:"GO Encargos supermercado"},
 ];
@@ -12,7 +13,7 @@ const key=(activity:string,country:string)=>activity+"|"+country;
 export function calculatorCatalog(doc:FinancialDocument){
  let names:Intl.DisplayNames|undefined;try{names=new Intl.DisplayNames(["es"],{type:"region"});}catch{}
  const originals=ACTIVITIES.map(item=>doc.activities.find(a=>a.id===item.id)||doc.activities.find(a=>normal(a.name)===normal(item.name)&&!ACTIVITIES.some(original=>original.id===a.id))||{...item,unit:"empresa" as const,enabled:true}); const activities=[...originals,...doc.activities.filter(a=>!originals.some(item=>item.id===a.id))];
- const countries=(doc.countries.length?doc.countries:COUNTRIES.map(code=>({code,name:names?.of(code)||code,currency:"EUR"}))).map(c=>({...c,name:names?.of(c.code)||c.name}));
+ const countries=(doc.countries.length?doc.countries:COUNTRIES.map(code=>({code,name:COUNTRY_NAMES[code]||names?.of(code)||code,currency:"EUR"}))).map(c=>({...c,name:COUNTRY_NAMES[c.code]||names?.of(c.code)||c.name}));
  return{activities,countries};
 }
 function monthlyPrice(doc:FinancialDocument,assumptionId:string|undefined){return doc.revenues.find(r=>r.assumptionId===assumptionId&&r.kind==="monthly"&&r.year===0)||doc.revenues.find(r=>r.assumptionId===assumptionId&&r.kind==="monthly"&&r.year===doc.startYear);}

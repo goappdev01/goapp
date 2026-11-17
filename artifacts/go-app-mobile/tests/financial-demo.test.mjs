@@ -43,51 +43,61 @@ test('DEMO starts with clearly synthetic local inputs and the existing eight-col
   doc = demo.updateFinancialDemoMarket(doc, 'go_peluquerias', 'ES', 1000);
   assert.equal(esHair(doc).companies, 50);
   doc = demo.updateFinancialDemoMarket(doc, 'go_peluquerias', 'ES', Number.NaN);
-  assert.equal(esHair(doc).monthly, null, 'invalid figures display Sin dato');
+  assert.equal(esHair(doc).monthly, 1500, 'invalid drafts preserve the last valid number');
+  assert.equal(doc.markets[0].sourceId, 'go_demo_local', 'user-entered figures remain unverified local inputs');
   assert.equal(model.financialDocumentSchema.safeParse(doc).success, true);
   assert.equal(esHair(demo.createFinancialDemoDocument(2026)).monthly, 66816, 'a new DEMO has no persistent copy');
 });
 
-test('ADMIN can enter DEMO despite a failed finance access check without calling save endpoints', async () => {
-  const slots = [], effects = [], calls = [];
-  let index = 0, effectIndex = 0, pending = [], tree;
+test('ADMIN can enter persistent local DEMO despite a failed finance access check without calling save endpoints', async () => {
+  const slots = [], refs = [], effects = [], calls = [], saves = [], scrolls = [];
+  let dimensions = { width: 390, height: 844 };
+  let index = 0, refIndex = 0, effectIndex = 0, pending = [], tree;
   const admin = { userId: 'admin-synthetic', allowed: true, checking: false };
   const react = {
-    createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity) }),
+    createElement: (type, props, ...children) => { if (type === 'ScrollView' && props?.ref) props.ref.current = { scrollTo: value => scrolls.push(value) }; return { type, props: props || {}, children: children.flat(Infinity) }; },
     Fragment: 'Fragment',
     useState(initial) { const i = index++; if (!(i in slots)) slots[i] = typeof initial === 'function' ? initial() : initial; return [slots[i], next => { slots[i] = typeof next === 'function' ? next(slots[i]) : next; }]; },
     useMemo: fn => fn(),
+    useRef(value) { const i = refIndex++; return refs[i] ||= { current: value }; },
     useEffect(fn, deps) { const i = effectIndex++, previous = effects[i]; if (!previous || deps.some((value, j) => !Object.is(value, previous.deps[j]))) { const item = { deps, cleanup: null }; effects[i] = item; pending.push(() => { previous?.cleanup?.(); item.cleanup = fn(); }); } },
   };
   const screen = load('components/financial/FinancialPlanScreen.tsx', {
     react: { ...react, default: react },
-    'react-native': { View: 'View', Text: 'Text', ScrollView: 'ScrollView', ActivityIndicator: 'ActivityIndicator' },
+    'react-native': { View: 'View', Text: 'Text', ScrollView: 'ScrollView', ActivityIndicator: 'ActivityIndicator', useWindowDimensions: () => dimensions },
     'expo-router': { useNavigation: () => ({ setOptions() {} }) },
     '@/contexts/GoAdminAccessContext': { useAdminAccess: () => admin },
     '@/lib/sessionEvents': { onSessionChanged: () => () => {} },
     '@/data/financialCalculatorSession': { openRevenueCalculator: async () => { calls.push('access'); throw Object.assign(Error('La persistencia financiera todavía no está instalada en este entorno.'), { code: 'FINANCE_SETUP_REQUIRED' }); } },
-    '@/data/financialDemo': demo,
+    '@/data/financialDemoStore': { loadFinancialDemo: async () => ({ state: { doc: demo.createFinancialDemoDocument(2026), countryCode: 'ES', activityId: 'go_peluquerias' }, unsaved: false }), saveFinancialDemo: async (_owner, state) => { saves.push(state); } },
     '@/components/ui/GoNavigationRail': { GO_NAVIGATION_OVERLAY_CLEARANCE: 178 },
     './FinancialRevenueTable': { FinancialRevenueTable: 'RevenueTable' },
+    './FinancialSimpleDemoTable': { FinancialSimpleDemoTable: 'SimpleDemoTable' },
     './FinancialUI': { FinanceButton: 'Button', financeStyles: { root: {}, content: {}, note: {}, error: {} } },
   }).FinancialPlanScreen;
-  const render = () => { index = effectIndex = 0; tree = screen(); while (pending.length) pending.shift()(); return tree; };
+  const render = () => { index = refIndex = effectIndex = 0; tree = screen(); while (pending.length) pending.shift()(); return tree; };
   const all = node => !node || typeof node !== 'object' ? [] : [node, ...(node.children || []).flatMap(all)];
   const find = predicate => { const node = all(render()).find(predicate); assert.ok(node); return node; };
   render();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(render().props.contentContainerStyle.at(-1).paddingBottom, 178, 'scrolling clears the overlaid navigation controls');
+  assert.equal(render().props.contentContainerStyle.at(-1).flexGrow, 1, 'scroll content fills the current orientation');
+  dimensions = { width: 844, height: 390 }; render();
+  dimensions = { width: 390, height: 844 }; render();
+  assert.ok(scrolls.length >= 3, 'repeated rotation clears the stale scroll offset');
   assert.equal(calls.length, 1);
   assert.equal(all(render()).some(node => node.props.accessibilityRole === 'alert'), false, 'setup absence is not a red error screen');
   assert.equal(all(render()).some(node => node.children?.some(text => typeof text === 'string' && text.includes('simulación local'))), true);
   find(node => node.props.label === 'Probar calculadora DEMO').props.onPress();
-  let table = find(node => node.type === 'RevenueTable');
-  assert.equal(table.props.demo, true);
-  table.props.update(doc => calculator.updateRevenueCalculator(doc, 'go_peluquerias', 'ES', 'REAL', 'fee', 30));
-  table = find(node => node.type === 'RevenueTable');
-  assert.equal(esHair(table.props.doc).monthly, 69120);
+  await new Promise(resolve => setImmediate(resolve));
+  let table = find(node => node.type === 'SimpleDemoTable');
+  table.props.update(current => ({ ...current, doc: calculator.updateRevenueCalculator(current.doc, 'go_peluquerias', 'ES', 'REAL', 'fee', 30) }));
+  table = find(node => node.type === 'SimpleDemoTable');
+  assert.equal(esHair(table.props.state.doc).monthly, 69120);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(saves.length >= 1, 'local device save is requested');
   assert.equal(calls.length, 1, 'DEMO edits and calculation cannot call finance API');
   admin.allowed = false;
-  assert.equal(all(render()).some(node => node.type === 'RevenueTable' || node.props.label === 'Probar calculadora DEMO'), false);
+  assert.equal(all(render()).some(node => node.type === 'SimpleDemoTable' || node.props.label === 'Probar calculadora DEMO'), false);
   effects.forEach(effect => effect.cleanup?.());
 });
