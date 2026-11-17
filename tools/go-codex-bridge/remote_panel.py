@@ -24,6 +24,7 @@ class RemotePanel:
         "FACTORY_JOB_FAILED":"La última tarjeta quedó bloqueada. Revisa el expediente y la autorización antes de continuar.",
         "WHEEL_CODEX_AUTH":"La sesión de Codex no está verificada.",
         "WHEEL_CODEX_QUOTA":"La cuota de Codex no está disponible.",
+        "WHEEL_CODEX_IDENTITY_UNCERTAIN":"Comprobando la cuenta Codex antes de iniciar otro trabajo.",
         "WHEEL_CODEX_SESSION_CHANGED":"Cambió la cuenta Codex vinculada. Confirma la sesión por separado; la fábrica seguirá pausada.",
         "WHEEL_EXPIRY_INVALID":"La autorización del lote ha caducado.",
         "WHEEL_WORKSPACE_BUSY":"Hay un trabajo en curso o pendiente de conciliar.",
@@ -114,7 +115,7 @@ class RemotePanel:
                     if confirmed != identity:
                         identity, detected = (confirmed, confirmed_label) if confirmed == expected else (None, None)
                 changed = bool(expected and identity and identity != expected)
-                if changed and not control["account_confirmation_required"]:
+                if changed and not control["account_confirmation_required"] and not control["enabled"]:
                     reason = control["reason"]
                     if control["enabled"] or reason in (None,"OWNER_PAUSED","OWNER_STOPPED","WHEEL_PAUSED"):
                         reason = "WHEEL_CODEX_SESSION_CHANGED"
@@ -138,8 +139,12 @@ class RemotePanel:
             state = "pending"
             reason = "La fábrica todavía no tiene una cuenta vinculada a una autorización vigente."
         elif changed:
-            state = "changed"
-            reason = self.REASON_MESSAGES["WHEEL_CODEX_SESSION_CHANGED"]
+            state = "pending" if control["enabled"] else "changed"
+            reason = (self.REASON_MESSAGES["WHEEL_CODEX_IDENTITY_UNCERTAIN"] if control["enabled"]
+                      else self.REASON_MESSAGES["WHEEL_CODEX_SESSION_CHANGED"])
+        elif code=="WHEEL_CODEX_IDENTITY_UNCERTAIN" and control["enabled"]:
+            state = "pending"
+            reason = self.REASON_MESSAGES[code]
         elif pending:
             state = "pending"
             reason = "Confirma la sesión detectada antes de activar la fábrica."

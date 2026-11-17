@@ -2,6 +2,7 @@
 import copy
 from http import cookies
 import json
+import time
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -748,6 +749,14 @@ class V2WheelTests(unittest.TestCase):
             'reason':None,'can_bind':False,'can_change':True})
         original=self.codex_identity
         self.codex_identity='other-synthetic-account'
+        result=panel.account_state()
+        self.assertEqual(result['state'],'pending')
+        self.assertTrue(wheel.enabled())
+        self.assertTrue(wheel.tick().get('identity_retry'))
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_identity_observation SET first_seen=? WHERE id=1",(time.time()-31,))
+            db.execute("UPDATE wheel_control SET retry_after=0 WHERE id=1")
+        self.assertEqual(wheel.tick().get('paused'),'WHEEL_CODEX_SESSION_CHANGED')
         result=panel.account_state()
         self.assertEqual((result['state'],result['linked'],result['detected']),('changed',None,'ot•••@e•••'))
         self.assertTrue(result['can_bind'])

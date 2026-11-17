@@ -65,6 +65,9 @@ class Wheel:
             CREATE TABLE IF NOT EXISTS wheel_queue_skips(
                 card_id TEXT PRIMARY KEY, grant_id TEXT, reason TEXT NOT NULL,
                 destination TEXT NOT NULL, checked TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS wheel_identity_observation(
+                id INTEGER PRIMARY KEY CHECK(id=1), expected_sha256 TEXT NOT NULL,
+                candidate_sha256 TEXT NOT NULL, first_seen REAL NOT NULL);
             """)
             if not any(row["name"]=="account_confirmation_required" for row in db.execute("PRAGMA table_info(wheel_control)")):
                 db.execute("ALTER TABLE wheel_control ADD COLUMN account_confirmation_required INTEGER NOT NULL DEFAULT 0")
@@ -91,10 +94,46 @@ class Wheel:
             if confirmed != identity:
                 self.fail("WHEEL_CODEX_IDENTITY_UNCERTAIN",
                           "Las lecturas de la cuenta Codex no coinciden; se comprobará de nuevo sin iniciar trabajo.")
-            self.fail("WHEEL_CODEX_SESSION_CHANGED","Cambió la cuenta Codex autorizada; conserva la cola para revisión.")
+            if self._observe_identity_change(expected,identity):
+                self.fail("WHEEL_CODEX_SESSION_CHANGED","Cambió la cuenta Codex autorizada; conserva la cola para revisión.")
+            self.fail("WHEEL_CODEX_IDENTITY_UNCERTAIN",
+                      "Se comprobará de nuevo el cambio de cuenta antes de iniciar trabajo.")
         if quota["state"]!="available":
             self.fail("WHEEL_CODEX_QUOTA","La cuota de Codex no está disponible.")
+        if expected is not None:
+            with self.b.db() as db:
+                observation=db.execute("SELECT 1 FROM wheel_identity_observation WHERE id=1").fetchone()
+                if observation:
+                    confirmed, _ = self.b.codex_account()
+                    if confirmed!=expected:
+                        self.fail("WHEEL_CODEX_IDENTITY_UNCERTAIN",
+                                  "Las lecturas de la cuenta Codex no coinciden; se comprobará de nuevo sin iniciar trabajo.")
+                    db.execute("DELETE FROM wheel_identity_observation WHERE id=1")
+                    self.b.audit("wheel_identity_observation_cleared",{},db)
+                db.execute("UPDATE wheel_control SET reason=NULL,retry_after=0 WHERE id=1 AND enabled=1 "
+                           "AND reason='WHEEL_CODEX_IDENTITY_UNCERTAIN'")
         return identity
+
+    def _observe_identity_change(self, expected, candidate):
+        now=time.time()
+        expected_sha=self.f.digest(expected)
+        candidate_sha=self.f.digest(candidate)
+        with self.b.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0]:
+                return True
+            prior=db.execute("SELECT expected_sha256,candidate_sha256,first_seen "
+                             "FROM wheel_identity_observation WHERE id=1").fetchone()
+            if prior and prior["expected_sha256"]==expected_sha and prior["candidate_sha256"]==candidate_sha:
+                if now-prior["first_seen"]>=30:
+                    db.execute("DELETE FROM wheel_identity_observation WHERE id=1")
+                    self.b.audit("wheel_identity_change_confirmed",{"elapsed_seconds":now-prior["first_seen"]},db)
+                    return True
+                return False
+            db.execute("INSERT OR REPLACE INTO wheel_identity_observation VALUES(1,?,?,?)",
+                       (expected_sha,candidate_sha,now))
+            self.b.audit("wheel_identity_change_observed",{"confirmation_delay_seconds":30},db)
+        return False
 
     def require_confirmed_account(self, db=None):
         if db is None:
@@ -1978,7 +2017,8 @@ class Wheel:
             if error.code=="WHEEL_CODEX_IDENTITY_UNCERTAIN":
                 retry_after=time.time()+15
                 with self.b.db() as db:
-                    db.execute("UPDATE wheel_control SET retry_after=? WHERE id=1 AND enabled=1",(retry_after,))
+                    db.execute("UPDATE wheel_control SET reason=?,retry_after=? WHERE id=1 AND enabled=1",
+                               (error.code,retry_after))
                     self.b.audit("wheel_identity_check_deferred",{"retry_after":retry_after},db)
                 return {"identity_retry":True,"retry_after":retry_after}
             self.pause(error.code)

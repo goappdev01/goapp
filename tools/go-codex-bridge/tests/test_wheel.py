@@ -101,8 +101,27 @@ class WheelTests(unittest.TestCase):
         self.codex_identity="new-account"
         self.confirmed_identity="new-account"
         outcome=wheel.tick()
+        self.assertTrue(outcome.get("identity_retry"),outcome)
+        self.assertTrue(wheel.enabled())
+        with self.bridge.db() as db:
+            db.execute("UPDATE wheel_identity_observation SET first_seen=? WHERE id=1",(time.time()-31,))
+            db.execute("UPDATE wheel_control SET retry_after=0 WHERE id=1")
+        outcome=wheel.tick()
         self.assertEqual(outcome.get("paused"),"WHEEL_CODEX_SESSION_CHANGED")
         self.assertFalse(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)
+
+    def test_short_matching_mismatch_recovers_without_rebinding(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        original=self.codex_identity
+        self.codex_identity=self.confirmed_identity="temporary-account"
+        self.assertTrue(wheel.tick().get("identity_retry"))
+        self.codex_identity=self.confirmed_identity=original
+        self.assertEqual(wheel._require_codex_identity(original),original)
+        with self.bridge.db() as db:
+            self.assertFalse(db.execute("SELECT 1 FROM wheel_identity_observation WHERE id=1").fetchone())
+        self.assertTrue(wheel.enabled())
         self.assertFalse(self.runs or self.changes)
 
     def git(self,*args):
