@@ -25596,7 +25596,7 @@ function HomeScreenContent() {
   }
   function renderExistingNote(entry:GoEntry,onClose:()=>void,navigation?:{onGoToLanding?:()=>void;closeRequested?:boolean}){
     const scope=noteIdentity.scope;
-    if(entry.note?.shopping)return <GoShoppingNote key={entry.id} visible scope={scope} ready={noteIdentity.ready} handedness={handedness} onClose={onClose} closeRequested={navigation?.closeRequested}/>;
+    if(entry.note?.shopping)return <GoShoppingNote key={entry.id} visible scope={scope} ready={noteIdentity.ready} handedness={handedness} initialListId={entry.id} onClose={onClose} closeRequested={navigation?.closeRequested}/>;
     return <GoNoteEditor key={entry.id} visible initial={entry} scope={scope} ready={noteIdentity.ready} handedness={handedness}
       cached={unifiedNoteEditCache.current.get(JSON.stringify(scope)+":"+entry.id)}
       onSave={saveNoteDraft} onDelete={deleteSavedNote} renderActions={renderSavedNoteActions} onGoToLanding={navigation?.onGoToLanding} closeRequested={navigation?.closeRequested}

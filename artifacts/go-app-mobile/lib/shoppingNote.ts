@@ -133,11 +133,13 @@ function editorItem(d:ShoppingEditorDraft,doc:ShoppingDocument):ShoppingItem {
   const quantity=shoppingDecimal(d.quantity||"1")!,size=shoppingDecimal(d.packageQuantity,true);
   const prices=[...(old?.prices||[])];let selectedPriceId=old?.selectedPriceId;
   if(d.price.trim()){
-    if(!d.store.trim())throw Error("Indica el supermercado del precio observado.");
+    // A manually entered price may be useful before a supermarket is chosen.
+    // Keep its origin explicit so it never masquerades as a store observation.
+    const priceStore=d.store.trim()||"Sin supermercado";
     if(!/^[A-Z]{3}$/.test(d.currency.trim().toUpperCase()))throw Error("Usa una moneda de tres letras, por ejemplo EUR.");
     if(!shoppingDate(d.observedOn))throw Error("La fecha del precio debe ser AAAA-MM-DD y existir.");
     const size=shoppingDecimal(d.priceQuantity,true);
-    prices.push({id:d.observationId,store:d.store.trim(),price:shoppingDecimal(d.price)!,currency:d.currency.trim().toUpperCase(),observedOn:d.observedOn,
+    prices.push({id:d.observationId,store:priceStore,price:shoppingDecimal(d.price)!,currency:d.currency.trim().toUpperCase(),observedOn:d.observedOn,
       purchaseUnit:d.unit,packageQuantity:size,packageUnit:size===undefined?undefined:d.priceUnit,brand:d.brand.trim(),format:d.format.trim(),variety:d.variety?.trim()||"",product:name});
     selectedPriceId=d.observationId;
   }
@@ -166,10 +168,10 @@ export function applyShoppingOperation(current:ShoppingDocument,op:ShoppingOpera
     case "store": if(typeof op.value!=="string")throw Error("Supermercado inválido.");doc.store=op.value.trim();break;
     case "favorite": if(typeof op.value!=="boolean")throw Error("Favorito inválido.");item(op.id).favorite=op.value;break;
     case "price": {
-      const i=item(op.id);if(!doc.store)throw Error("Selecciona el supermercado para anotar este precio.");
+      const i=item(op.id);const priceStore=doc.store||"Sin supermercado";
       if(!positive(op.value)||!unitValid(op.unit)||!op.observationId)throw Error("Precio inválido.");
-      const previous=shoppingPriceFor(i,doc.store);
-      const p:ShoppingPrice={id:op.observationId,store:doc.store,price:op.value,currency:previous?.currency||"EUR",observedOn:localShoppingDate(),purchaseUnit:op.unit,
+      const previous=shoppingPriceFor(i,priceStore);
+      const p:ShoppingPrice={id:op.observationId,store:priceStore,price:op.value,currency:previous?.currency||"EUR",observedOn:localShoppingDate(),purchaseUnit:op.unit,
         brand:i.brand??previous?.brand??"",format:i.format??previous?.format??""};
       if(op.unit==="kg"||op.unit==="g"||op.unit==="litros"||op.unit==="ml"){p.packageQuantity=1;p.packageUnit=op.unit;}
       else if(i.packageQuantity!==undefined){p.packageQuantity=i.packageQuantity;p.packageUnit=i.packageUnit;}

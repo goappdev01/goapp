@@ -7,17 +7,18 @@ import { buildNoteEntry, isNoteEntry, noteDraft, noteInScope } from "./unifiedNo
 import { applyShoppingOperation, emptyShopping, legacyShoppingCandidates, shoppingEditor, shoppingId, shoppingName, suggestShoppingCategory, validateShopping, type ShoppingOperation } from "./shoppingNote";
 
 export const shoppingNoteId=(scope:TaskScope)=>"shopping_note:"+encodeURIComponent(scope.userId)+":"+encodeURIComponent(scope.context);
+const activeListKey=(scope:TaskScope)=>shoppingNoteId(scope)+":active_list";
 export class ShoppingNoteDeletedError extends Error{
   constructor(readonly noteId:string){super("La compra canónica está eliminada. Restaura la nota antes de continuar.");this.name="ShoppingNoteDeletedError";}
 }
 function assertPersonal(scope:TaskScope){if(!scope.userId||! /^(live|demo):USER$/.test(scope.context))throw Error("COMPRAS requiere una sesión en el ámbito personal de GO.");}
 async function check(scope:TaskScope,active:()=>boolean){assertPersonal(scope);await assertTaskUser(scope.userId);if(!active())throw Error("La cuenta o el contexto ha cambiado. Vuelve a abrir COMPRAS.");}
-function canonical(rows:GoEntry[],scope:TaskScope){
+function canonical(rows:GoEntry[],scope:TaskScope,listId?:string){
   const matches=rows.filter(row=>noteInScope(row,scope)&&row.note?.shopping!==undefined);
-  const active=matches.filter(row=>!row.deleted&&row.estado!=="rechazado");
-  if(new Set(matches.map(row=>row.id)).size!==matches.length||active.length>1||!active.length&&matches.length>1)throw Error("Hay más de una nota de compra especializada. Se conservan sin fusionar; revisa los datos.");
-  const entry=active[0];
-  if(!entry&&matches.length===1)throw new ShoppingNoteDeletedError(matches[0].id);
+  if(new Set(matches.map(row=>row.id)).size!==matches.length)throw Error("Hay listas duplicadas. Se conservan para revisión.");
+  const chosen=listId?matches.find(row=>row.id===listId):matches.find(row=>!row.deleted&&row.estado!=="rechazado")||matches.find(row=>row.id===shoppingNoteId(scope));
+  if(chosen&&(chosen.deleted||chosen.estado==="rechazado"))throw new ShoppingNoteDeletedError(chosen.id);
+  const entry=chosen;
   if(entry)validateShopping(entry.note!.shopping!);
   return entry;
 }
@@ -30,17 +31,20 @@ async function verified(entry:GoEntry,operationId:string|undefined,scope:TaskSco
   validateShopping(doc);await check(scope,active);return entry;
 }
 /** Creation, writes and readback all use the existing unified GO log and its serialized queue. */
-export async function openShoppingNote(scope:TaskScope,active:()=>boolean):Promise<GoEntry>{
+export async function openShoppingNote(scope:TaskScope,active:()=>boolean,listId?:string):Promise<GoEntry>{
   await check(scope,active);
+  const selected=listId||await AsyncStorage.getItem(activeListKey(scope))||undefined;
   const entry=await updateGoLog(async rows=>{
-    await check(scope,active);const found=canonical(rows,scope);if(found)return {entries:rows,result:found};
+    await check(scope,active);
+    const existingSelected=rows.some(row=>row.id===selected&&noteInScope(row,scope)&&row.note?.shopping!==undefined);
+    const found=canonical(rows,scope,existingSelected?selected:undefined);if(found)return {entries:rows,result:found};
     const id=shoppingNoteId(scope);
     if(rows.some(row=>row.id===id))throw Error("El identificador de COMPRAS ya está ocupado. No se ha modificado ninguna nota.");
     const draft={...noteDraft(),id,title:"COMPRAS",content:"Lista personal de compra",destination:"pending" as const};
     const created=buildNoteEntry(draft,scope);created.note!.shopping=emptyShopping();
     return {entries:[created,...rows],result:created};
   },()=>{if(!active())throw Error("El contexto de compra ha cambiado.");});
-  return verified(entry,undefined,scope,active);
+  const saved=await verified(entry,undefined,scope,active);await AsyncStorage.setItem(activeListKey(scope),saved.id);return saved;
 }
 /** A deleted shopping list remains in the trash until its owner explicitly confirms restoration. */
 export async function restoreShoppingNote(scope:TaskScope,active:()=>boolean,noteId:string):Promise<GoEntry>{
@@ -48,19 +52,19 @@ export async function restoreShoppingNote(scope:TaskScope,active:()=>boolean,not
   const entry=await updateGoLog(async rows=>{
     await check(scope,active);
     const matches=rows.filter(row=>noteInScope(row,scope)&&row.note?.shopping!==undefined);
-    if(matches.length!==1||matches[0].id!==noteId||rows.filter(row=>row.id===noteId).length!==1)throw Error("La lista de COMPRAS cambió. Revisa la papelera antes de restaurarla.");
-    const previous=matches[0];
+    if(rows.filter(row=>row.id===noteId).length!==1)throw Error("La lista de COMPRAS cambió. Revisa la papelera antes de restaurarla.");
+    const previous=matches.find(row=>row.id===noteId);if(!previous)throw Error("La lista no pertenece a esta cuenta.");
     if(!previous.deleted&&previous.estado!=="rechazado")throw Error("La lista ya está activa. Pulsa Reintentar.");
     validateShopping(previous.note!.shopping!);
     const restored={...previous,deleted:false,estado:"pendiente" as const};
     return {entries:rows.map(row=>row.id===noteId?restored:row),result:restored};
   },()=>{if(!active())throw Error("El contexto de compra ha cambiado.");});
-  return verified(entry,undefined,scope,active);
+  const saved=await verified(entry,undefined,scope,active);await AsyncStorage.setItem(activeListKey(scope),saved.id);return saved;
 }
-export async function runShoppingOperation(scope:TaskScope,active:()=>boolean,op:ShoppingOperation):Promise<GoEntry>{
+export async function runShoppingOperation(scope:TaskScope,active:()=>boolean,op:ShoppingOperation,listId?:string):Promise<GoEntry>{
   await check(scope,active);
   const entry=await updateGoLog(async rows=>{
-    await check(scope,active);const previous=canonical(rows,scope);if(!previous)throw Error("Abre COMPRAS antes de añadir productos.");
+    await check(scope,active);const previous=canonical(rows,scope,listId);if(!previous)throw Error("Abre COMPRAS antes de añadir productos.");
     const old=previous.note!.shopping!;let shopping;
     if(old.operations.includes(op.operationId))return {entries:rows,result:previous};
     if(op.type==="importLegacy"){
@@ -86,5 +90,42 @@ export async function oldShoppingNotes(scope:TaskScope,active:()=>boolean){
   await check(scope,active);const rows=await readGoLog();await check(scope,active);
   return rows.filter(row=>isNoteEntry(row)&&noteInScope(row,scope)&&!row.deleted&&row.estado!=="rechazado"&&!row.note?.shopping
     &&shoppingName(row.note?.title??row.notes??"")==="compras");
+}
+export async function listShoppingLists(scope:TaskScope,active:()=>boolean):Promise<GoEntry[]>{
+  await check(scope,active);const rows=await readGoLog();await check(scope,active);
+  const lists=rows.filter(row=>noteInScope(row,scope)&&row.note?.shopping!==undefined);
+  for(const row of lists)validateShopping(row.note!.shopping!);
+  return lists;
+}
+export async function createShoppingList(scope:TaskScope,active:()=>boolean,name:string):Promise<GoEntry>{
+  await check(scope,active);if(!name.trim())throw Error("Escribe un nombre para la lista.");
+  const entry=await updateGoLog(async rows=>{
+    await check(scope,active);
+    const draft={...noteDraft(),title:name.trim(),content:"Lista personal de compra",destination:"pending" as const};
+    if(rows.some(row=>row.id===draft.id))throw Error("El identificador de la lista ya existe.");
+    const created=buildNoteEntry(draft,scope);created.note!.shopping=emptyShopping();
+    return {entries:[created,...rows],result:created};
+  },()=>{if(!active())throw Error("El contexto de compra ha cambiado.");});
+  const saved=await verified(entry,undefined,scope,active);await AsyncStorage.setItem(activeListKey(scope),saved.id);return saved;
+}
+export async function renameShoppingList(scope:TaskScope,active:()=>boolean,listId:string,name:string):Promise<GoEntry>{
+  await check(scope,active);if(!name.trim())throw Error("Escribe un nombre para la lista.");
+  const entry=await updateGoLog(async rows=>{
+    await check(scope,active);const previous=canonical(rows,scope,listId);if(!previous)throw Error("Lista no disponible.");
+    const next={...previous,notes:name.trim(),note:{...previous.note!,title:name.trim(),revision:previous.note!.revision+1}};
+    return {entries:rows.map(row=>row.id===listId?next:row),result:next};
+  },()=>{if(!active())throw Error("El contexto de compra ha cambiado.");});
+  return verified(entry,undefined,scope,active);
+}
+export async function deleteShoppingList(scope:TaskScope,active:()=>boolean,listId:string):Promise<GoEntry>{
+  await check(scope,active);
+  const entry=await updateGoLog(async rows=>{
+    await check(scope,active);const previous=canonical(rows,scope,listId);if(!previous)throw Error("Lista no disponible.");
+    const next={...previous,deleted:true,estado:"rechazado" as const};
+    return {entries:rows.map(row=>row.id===listId?next:row),result:next};
+  },()=>{if(!active())throw Error("El contexto de compra ha cambiado.");});
+  await check(scope,active);const remaining=(await listShoppingLists(scope,active)).find(row=>row.id!==listId&&!row.deleted&&row.estado!=="rechazado");
+  if(remaining)await AsyncStorage.setItem(activeListKey(scope),remaining.id);else await AsyncStorage.removeItem(activeListKey(scope));
+  return entry;
 }
 export const newShoppingOperationId=shoppingId;
