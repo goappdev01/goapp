@@ -43,10 +43,11 @@ test('finish snapshots the real bought items without deleting catalog, observati
  f.op({type:'quantity',id:a.id,value:2});assert.equal(f.doc.purchases[0].items[0].quantity,1);assert.equal(f.doc.items.find(i=>i.id===b.id).bought,false);
 });
 
-test('eight orbits form a complete circle, cover all stored categories once, and place Others lower-right and Hygiene upper-left',()=>{
+test('approved eight orbits cover every stored category and place Others lower-right, Hygiene below and Congelados upper-left',()=>{
+ assert.deepEqual(plain(x.SHOPPING_ORBITS.map(o=>o.label)),['Alimentos','Bebidas','Hogar','Otros','Higiene','Favoritos','Frescos','Congelados']);
  assert.deepEqual(plain(x.SHOPPING_ORBITS.flatMap(o=>o.categories)).sort(),plain(m.SHOPPING_CATEGORIES.map(c=>c[0])).sort());
  for(const width of [320,375,390,430,768])for(const scale of [1,1.8,2]){const l=x.shoppingOrbitLayout(width,scale),center=l.size/2;
-  assert.equal(l.points.length,8);const others=l.points[3],care=l.points[7];assert.ok(others.x+l.button/2>center&&others.y+l.buttonHeight/2>l.height/2);assert.ok(care.y+l.buttonHeight/2<l.height/2);
+  assert.equal(l.points.length,8);const others=l.points[3],care=l.points[4],frozen=l.points[7];assert.ok(others.x+l.button/2>center&&others.y+l.buttonHeight/2>l.height/2);assert.ok(care.y+l.buttonHeight/2>l.height/2);assert.ok(frozen.x+l.button/2<center&&frozen.y+l.buttonHeight/2<l.height/2);
   for(const p of l.points){assert.ok(p.x>=-.01&&p.y>=-.01);assert.ok(p.x+l.button<=l.size+.01&&p.y+l.buttonHeight<=l.height+.01);}
   for(let i=0;i<8;i++)for(let j=i+1;j<8;j++){const a=l.points[i],b=l.points[j];assert.ok(a.x+l.button<=b.x||b.x+l.button<=a.x||a.y+l.buttonHeight<=b.y||b.y+l.buttonHeight<=a.y,'orbit touch targets must not overlap');}
  }

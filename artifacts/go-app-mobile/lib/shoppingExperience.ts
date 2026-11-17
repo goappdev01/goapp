@@ -1,15 +1,15 @@
 import { shoppingDecimal, shoppingEditor, shoppingId, shoppingName, suggestShoppingCategory, type ShoppingCategory, type ShoppingDocument, type ShoppingItem, type ShoppingOperation, type ShoppingUnit } from "./shoppingNote";
 
-/** Eight entrances retain all twelve existing categories and their stored order. */
+/** The eight visual entrances cover the existing catalog without changing stored categories. */
 export const SHOPPING_ORBITS = [
-  {id:"produce",label:"Fruta y verdura",icon:"food-apple-outline",categories:["produce"]},
-  {id:"bakery",label:"Panadería",icon:"bread-slice-outline",categories:["bakery"]},
-  {id:"meat",label:"Carne y pescado",icon:"fish",categories:["meat","fish"]},
-  {id:"other",label:"Otros",icon:"basket-outline",categories:["other","cleaning","pets"]},
-  {id:"frozen",label:"Congelados",icon:"snowflake",categories:["frozen"]},
-  {id:"pantry",label:"Despensa y bebidas",icon:"bottle-soda-outline",categories:["pantry","drinks"]},
-  {id:"dairy",label:"Lácteos y huevos",icon:"egg-outline",categories:["dairy"]},
-  {id:"care",label:"Higiene",icon:"hand-wash-outline",categories:["care"]},
+  {id:"food",label:"Alimentos",art:"🥖",categories:["bakery","meat","fish","dairy","pantry"]},
+  {id:"drinks",label:"Bebidas",art:"🧃",categories:["drinks"]},
+  {id:"home",label:"Hogar",art:"🏠",categories:["cleaning","pets"]},
+  {id:"other",label:"Otros",art:"•••",categories:["other"]},
+  {id:"care",label:"Higiene",art:"🧴",categories:["care"]},
+  {id:"favorites",label:"Favoritos",art:"⭐",categories:[]},
+  {id:"produce",label:"Frescos",art:"🥕",categories:["produce"]},
+  {id:"frozen",label:"Congelados",art:"❄️",categories:["frozen"]},
 ] as const;
 export const SHOPPING_SUGGESTIONS:Partial<Record<ShoppingCategory,string[]>>={
   produce:["Manzanas","Plátanos","Tomates","Patatas"],bakery:["Pan","Baguette"],meat:["Pollo","Ternera"],fish:["Merluza","Salmón"],
@@ -17,10 +17,11 @@ export const SHOPPING_SUGGESTIONS:Partial<Record<ShoppingCategory,string[]>>={
   care:["Champú","Pasta de dientes"],cleaning:["Detergente","Lavavajillas"],pets:["Pienso"],other:[],
 };
 export function shoppingOrbitLayout(width:number,fontScale=1){
-  const size=Math.min(Math.max(240,width-24),480),button=Math.min(100,Math.max(72,size*.235)),radius=(size-button)/2;
+  const size=Math.min(Math.max(240,width-24),480),button=Math.min(108,Math.max(72,size*.245)),radius=(size-button)/2;
   // Larger accessible text expands vertically; the eight entrances still surround GO on every side.
   const buttonHeight=Math.max(button,36+36*fontScale),verticalRadius=radius*buttonHeight/button,height=buttonHeight+2*verticalRadius;
-  return {size,button,buttonHeight,height,points:SHOPPING_ORBITS.map((_,i)=>{
+  const center=Math.min(142,Math.max(108,size*.34));
+  return {size,button,buttonHeight,height,center,points:SHOPPING_ORBITS.map((_,i)=>{
     const angle=(-90+i*45)*Math.PI/180;return{x:size/2+Math.cos(angle)*radius-button/2,y:height/2+Math.sin(angle)*verticalRadius-buttonHeight/2};
   })};
 }

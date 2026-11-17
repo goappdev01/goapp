@@ -67,7 +67,7 @@ export function ShoppingReorderSurface({children,enabled,onDrop,onDragging,scrol
   return <Context.Provider value={controller}><View ref={viewport} collapsable={false} testID="shopping-reorder-viewport" style={{flex:1,minHeight:0}}>
     <ScrollView ref={scrollRef} testID="shopping-list-scroll" scrollEnabled={!ghost} keyboardShouldPersistTaps="handled" scrollEventThrottle={16} contentOffset={{x:0,y:initialOffset}}
       onScroll={e=>{offset.current=e.nativeEvent.contentOffset.y;onOffsetChange?.(offset.current);}} onContentSizeChange={(_,h)=>{content.current=h;}}
-      contentContainerStyle={{padding:12,gap:10,paddingBottom:84}}>{children}</ScrollView>
+      contentContainerStyle={{padding:8,gap:6,paddingBottom:76}}>{children}</ScrollView>
     {ghost&&<View pointerEvents="none" testID="shopping-drag-ghost" style={[styles.ghost,{top:ghost.y}]}><Text style={{color:"white",fontSize:17,fontWeight:"700"}}>{ghost.label}</Text></View>}
   </View></Context.Provider>;
 }

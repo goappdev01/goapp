@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Alert, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View, type TextInputProps } from "react-native";
-import { Feather, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Feather } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { GoEntry } from "@/components/AgendaOperativa";
@@ -13,7 +14,7 @@ import type { TaskScope } from "@/lib/goTaskReminders";
 import { subscribeGoLog, getGoLogSnapshot } from "@/lib/goLogStore";
 import { noteInScope } from "@/lib/unifiedNotes";
 import { openShoppingNote, oldShoppingNotes, restoreShoppingNote, runShoppingOperation, ShoppingNoteDeletedError } from "@/lib/shoppingNoteStore";
-import { comparableShoppingPrices, legacyShoppingCandidates, normalizedShoppingPrice, shoppingEditor, shoppingEstimate, shoppingId, suggestShoppingCategory, visibleShopping,
+import { comparableShoppingPrices, legacyShoppingCandidates, normalizedShoppingPrice, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, suggestShoppingCategory, visibleShopping,
   SHOPPING_CATEGORIES, SHOPPING_UNITS, type MeasureUnit, type ShoppingDocument, type ShoppingEditorDraft, type ShoppingFilter, type ShoppingItem, type ShoppingOperation } from "@/lib/shoppingNote";
 import { SHOPPING_ORBITS, SHOPPING_SUGGESTIONS, shoppingCommand, shoppingOrbitLayout, shoppingRoute } from "@/lib/shoppingExperience";
 import { ShoppingProductRow } from "./ShoppingProductRow";
@@ -22,7 +23,7 @@ import { ShoppingReorderHandle, ShoppingReorderRow, ShoppingReorderSurface } fro
 type Props={visible:boolean;scope:TaskScope|null;ready:boolean;handedness:"left"|"right";onClose:()=>void;closeRequested?:boolean};
 type InputOperation=ShoppingOperation extends infer O?O extends ShoppingOperation?Omit<O,"operationId">:never:never;
 const decimal=(n:number)=>n.toLocaleString("es-ES",{maximumFractionDigits:3});
-const money=(n:number,currency:string)=>decimal(Math.round(n*100)/100)+" "+currency;
+const money=(n:number,currency:string)=>n.toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" "+(currency==="EUR"?"€":currency);
 // Only view position is cached; product data always comes from the verified canonical store.
 const shoppingPositions=new Map<string,number>();
 export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequested}:Props){
@@ -34,7 +35,8 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
   const [oldNotes,setOldNotes]=useState<GoEntry[]>([]),[legacy,setLegacy]=useState<GoEntry|null>(null),[legacySelected,setLegacySelected]=useState<string[]>([]);
   const [retry,setRetry]=useState(0),scroll=useRef<React.ElementRef<typeof ScrollView>>(null),editScroll=useRef<React.ElementRef<typeof ScrollView>>(null);
   const [screen,setScreen]=useState<"list"|"add">("list"),[orbit,setOrbit]=useState<string|null>(null),[more,setMore]=useState(false),[options,setOptions]=useState(false);
-  const [utility,setUtility]=useState<"store"|"route"|"history"|"assistant"|"location"|null>(null),[utilityItem,setUtilityItem]=useState<ShoppingItem|null>(null);
+  const [searchQuery,setSearchQuery]=useState("");
+  const [utility,setUtility]=useState<"store"|"route"|"map"|"history"|"assistant"|"location"|null>(null),[utilityItem,setUtilityItem]=useState<ShoppingItem|null>(null);
   const [storeName,setStoreName]=useState(""),[aisle,setAisle]=useState(""),[command,setCommand]=useState(""),[answer,setAnswer]=useState("");
   const commandLock=useRef(false),voiceIdentity=useRef("");
   const mounted=useRef(true),generation=useRef(0),lock=useRef(false),draftSequence=useRef(0),draftRef=useRef(editor);draftRef.current=editor;
@@ -44,11 +46,11 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
   const active=(expected:string,epoch:number)=>mounted.current&&latest.current.visible&&latest.current.ready&&latest.current.identity===expected&&generation.current===epoch;
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;};},[]);
   useEffect(()=>{
-    const epoch=++generation.current;setEntry(null);setEditor(null);setNext(null);setLegacy(null);setOldNotes([]);setError("");setRestoreId(null);setFilter("all");setArrange(false);setBusy(false);setScreen("list");setOrbit(null);setUtility(null);setAnswer("");setCommand("");lock.current=false;retries.current.clear();draftSequence.current++;
+    const epoch=++generation.current;setEntry(null);setEditor(null);setNext(null);setLegacy(null);setOldNotes([]);setError("");setRestoreId(null);setFilter("all");setArrange(false);setBusy(false);setScreen("list");setOrbit(null);setSearchQuery("");setUtility(null);setAnswer("");setCommand("");lock.current=false;retries.current.clear();draftSequence.current++;
     if(!visible||!ready||!scope)return;
     const expected=identity,valid=()=>active(expected,epoch);setLoading(true);
     void openShoppingNote(scope,valid).then(async row=>{
-      const old=await oldShoppingNotes(scope,valid);if(!valid())return;setEntry(row);setEditor(row.note!.shopping!.pendingEditor||null);setOldNotes(old);
+      const old=await oldShoppingNotes(scope,valid);if(!valid())return;setEntry(row);setEditor(null);setOldNotes(old);
       setDraftStatus(row.note!.shopping!.pendingEditor?"Borrador recuperado del teléfono. Revisa y guarda el producto.":"");
     }).catch(e=>{if(valid()){setError((e as Error).message);setRestoreId(e instanceof ShoppingNoteDeletedError?e.noteId:null);}}).finally(()=>{if(valid())setLoading(false);});
     return()=>{generation.current++;};
@@ -116,6 +118,7 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
   useEffect(()=>{if(utility!=="assistant")voice.abort();},[utility]);
   const button=(label:string,onPress:()=>void,testID?:string,selected=false,disabled=false)=><TouchableOpacity testID={testID} accessibilityRole="button" accessibilityState={{selected,disabled:disabled||busy}} disabled={disabled||busy} onPress={onPress}
     style={[s.button,selected&&s.chosen,(disabled||busy)&&{opacity:.45}]}><Text style={[s.buttonText,selected&&{color:"#fff"}]}>{label}</Text></TouchableOpacity>;
+  const navButton=(id:string,label:string,icon:React.ComponentProps<typeof Feather>["name"],onPress:()=>void,selected=false)=><TouchableOpacity testID={id} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{selected,disabled:busy||dragging}} disabled={busy||dragging} onPress={onPress} style={[s.navItem,selected&&s.navSelected]}><Feather name={icon} size={22} color={selected?"#fff":"#173a68"}/><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.8} style={[s.navText,selected&&{color:"#fff"}]}>{label}</Text></TouchableOpacity>;
   const checkButton=(label:string,checked:boolean,onPress:()=>void,testID?:string)=><TouchableOpacity testID={testID} accessibilityRole="checkbox" accessibilityLabel={label} accessibilityState={{checked,disabled:busy}} disabled={busy} onPress={onPress} style={[s.button,checked&&s.checked]}><Text style={s.text}>{checked?"☑":"☐"} {label}</Text></TouchableOpacity>;
   const field=(key:keyof ShoppingEditorDraft,label:string,extra:TextInputProps={})=><View style={{gap:4}}><Text style={s.label}>{label}</Text><TextInput testID={"shopping-field-"+key} accessibilityLabel={label} value={String(editor?.[key]??"")} editable={!busy} onChangeText={value=>change({[key]:value})}
     onFocus={event=>{if(event.target!==undefined)editScroll.current?.scrollResponderScrollNativeHandleToKeyboard(event.target,12,true);}} style={s.input} {...extra}/></View>;
@@ -131,9 +134,9 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
     }
   }
   const totals=doc?shoppingEstimate(doc):{totals:{},unknown:0},pickedTotals=doc?shoppingEstimate(doc,true):{totals:{},unknown:0},items=doc?.items||[];
-  const panel=!!editor||!!next||!!legacy||!!utility,adding=screen==="add";
+  const panel=!!editor||!!next||!!legacy||!!utility,adding=screen==="add",listHome=!!doc&&!panel&&!adding,orbitHome=!!doc&&adding&&!panel&&!orbit;
   const orbital=shoppingOrbitLayout(viewport.width-insets.left-insets.right,viewport.fontScale),route=doc?shoppingRoute(doc):undefined;
-  const displayTotal=(v:typeof totals)=>Object.entries(v.totals).map(([currency,value])=>money(value,currency)).join(" + ")||(v.unknown?"Pendiente":"0 EUR");
+  const displayTotal=(v:typeof totals)=>Object.entries(v.totals).map(([currency,value])=>money(value,currency)).join(" + ")||(v.unknown?"Pendiente":"0,00 €");
   const confirmRestore=()=>{
     if(!scope||!ready||!restoreId)return;
     const expected=identity,epoch=generation.current,noteId=restoreId,valid=()=>active(expected,epoch);
@@ -150,39 +153,38 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
   if(!visible)return null;
   return <GoScreenModal visible animationType="slide" onRequestClose={back}>
     <GestureHandlerRootView style={s.root}><KeyboardAvoidingView behavior={Platform.OS==="ios"?"padding":"height"} style={[s.root,{paddingTop:insets.top,paddingBottom:Math.max(8,insets.bottom),paddingHorizontal:Math.max(insets.left,insets.right)}]}>
-      <View style={s.header}><Text accessibilityRole="header" style={s.heading}>{editor?(editor.expectedRevision?"Editar producto":"Añadir producto"):next?"Habituales":legacy?"Incorporar nota":utility==="assistant"?"GO Compras":utility==="route"?"Ruta de compra":utility==="history"?"Compras realizadas":utility==="store"?"Supermercado":utility==="location"?"Ubicación manual":adding?"Añadir":"Compras"}</Text>
-        {doc&&!panel&&<View style={[s.row,{justifyContent:"space-between"}]}><TouchableOpacity testID="shopping-store" accessibilityRole="button" accessibilityLabel="Seleccionar supermercado" style={s.store} onPress={()=>{setStoreName(doc.store||"");setUtility("store");}}><Feather name="map-pin" size={15} color="#477394"/><Text numberOfLines={1} style={s.text}>{doc.store||"Seleccionar supermercado"}</Text><Feather name="chevron-down" size={15} color="#477394"/></TouchableOpacity>
-          <TouchableOpacity testID="shopping-route" accessibilityRole="button" accessibilityLabel="Ruta general de compra" style={s.smallAction} onPress={()=>openRoute()}><Feather name="navigation" size={18} color="#477394"/><Text style={s.buttonText}>Ruta</Text></TouchableOpacity></View>}
-        {doc&&!panel&&!adding&&<View testID="shopping-live-totals" accessibilityLiveRegion="polite" style={s.totals}>
-          <View style={{flex:1,gap:2}}><Text style={s.label}>Cogido · {items.filter(i=>i.selected&&i.bought).length}</Text><Text testID="shopping-picked-total" style={s.amount}>{displayTotal(pickedTotals)}</Text><Text style={s.hint}>{pickedTotals.unknown?"+ "+pickedTotals.unknown+" sin precio":"Importe conocido"}</Text></View>
-          <View style={{flex:1,gap:2}}><Text style={s.label}>Previsto · {items.filter(i=>i.selected).length}</Text><Text testID="shopping-estimate" style={s.amount}>{displayTotal(totals)}</Text><Text style={s.hint}>{totals.unknown?"+ "+totals.unknown+" sin precio":"Precios anotados"}</Text></View>
-        </View>}
+      <View style={[s.header,listHome&&s.listHeader,orbitHome&&s.orbitHeader]}>
+        {listHome?<View testID="shopping-live-totals" accessibilityLiveRegion="polite" style={s.summaryRow}>
+          <TouchableOpacity testID="shopping-store" accessibilityRole="button" accessibilityLabel="Seleccionar supermercado" style={s.storeCard} onPress={()=>{setStoreName(doc.store||"");setUtility("store");}}>
+            <Feather name="shopping-cart" size={22} color="#0879ca"/><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.75} style={s.storeName}>{doc.store||"Supermercado"}</Text><Feather name="chevron-down" size={16} color="#224b7c"/>
+          </TouchableOpacity>
+          <View style={[s.totalCard,s.currentTotal]}><Text style={s.totalLabel}>Compra</Text><Text testID="shopping-picked-total" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={s.totalAmount}>{displayTotal(pickedTotals)}</Text>{!!pickedTotals.unknown&&<Text style={s.totalUnknown}>+ {pickedTotals.unknown} sin precio</Text>}</View>
+          <View style={s.totalCard}><Text style={s.totalLabel}>Total prev.</Text><Text testID="shopping-estimate" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={s.totalAmount}>{displayTotal(totals)}</Text>{!!totals.unknown&&<Text style={s.totalUnknown}>+ {totals.unknown} sin precio</Text>}</View>
+        </View>:orbitHome?<LinearGradient colors={["#ffffff","#e9f4ff","#cfe8ff"]} style={s.orbitBanner}><View style={s.bannerCart}><Feather name="shopping-cart" size={27} color="#fff"/></View><View style={{flex:1}}><Text accessibilityRole="header" style={s.bannerTitle}>GO Compras</Text><Text style={s.bannerSubtitle}>Añadir productos</Text></View><Text style={s.bannerArt}>🧺</Text></LinearGradient>
+          :<Text accessibilityRole="header" style={s.heading}>{editor?(editor.expectedRevision?"Editar producto":"Añadir producto"):next?"Habituales":legacy?"Incorporar nota":utility==="assistant"?"GO Compras":utility==="route"?"Ruta de compra":utility==="map"?"Mapa de la tienda":utility==="history"?"Compras realizadas":utility==="store"?"Supermercado":utility==="location"?"Ubicación manual":adding?"Elegir producto":"Compras"}</Text>}
       </View>
       {!ready||!scope?<Text style={s.message}>Abre el ámbito personal de GO con tu sesión para usar Compras.</Text>:loading?<Text style={s.message}>Abriendo tu lista personal…</Text>:null}
       {!!error&&<View style={s.message}><Text testID="shopping-error" accessibilityRole="alert" style={s.error}>{error}</Text>{!doc&&restoreId&&button("Restaurar mi lista",confirmRestore,"shopping-restore",true,loading)}{!doc&&button("Reintentar",()=>setRetry(v=>v+1),"shopping-retry",false,loading)}</View>}
       {doc&&<>
       <View style={[{flex:1,minHeight:0},(panel||adding)&&{display:"none"}]}>
-        <View style={[s.row,{paddingHorizontal:12}]}>{([["pending","Pendientes"],["all","Todos"],["bought","Cogidos"]] as const).map(([key,label])=><React.Fragment key={key}>{button(label,()=>{if(!dragging)setFilter(key);},"shopping-filter-"+key,filter===key,dragging)}</React.Fragment>)}
-          <TouchableOpacity testID="shopping-more" accessibilityRole="button" accessibilityLabel="Más acciones de compra" disabled={busy||dragging} onPress={()=>setMore(v=>!v)} style={s.smallAction}><Feather name="more-horizontal" size={22} color="#477394"/></TouchableOpacity>
-        </View>
         <ShoppingReorderSurface enabled={!busy&&!panel&&!adding&&!keyboard.visible&&!loading} onDrop={reorder} onDragging={setDragging} scrollRef={scroll}
           initialOffset={shoppingPositions.get(identity)||0} onOffsetChange={offset=>shoppingPositions.set(identity,offset)}>
-          {doc.pendingEditor&&!editor&&<View style={s.details}>{button("Continuar producto sin terminar",()=>{setEditor(doc.pendingEditor!);draftRef.current=doc.pendingEditor!;},"shopping-resume-draft")}</View>}
+          {doc.pendingEditor&&!editor&&<View style={s.draftNotice}><Text style={s.hint}>Producto sin terminar</Text><View style={s.row}>{button("Continuar",()=>{setEditor(doc.pendingEditor!);draftRef.current=doc.pendingEditor!;},"shopping-resume-draft")}{button("Descartar",()=>Alert.alert("Descartar borrador","Se conservarán los productos ya guardados.",[{text:"Cancelar",style:"cancel"},{text:"DESCARTAR",style:"destructive",onPress:()=>action({type:"draft"})}]),"shopping-discard-pending-draft")}</View></View>}
           {more&&<View style={s.details}>
+            <View style={s.row}>{([["pending","Pendientes"],["all","Todos"],["bought","Cogidos"]] as const).map(([key,label])=><React.Fragment key={key}>{button(label,()=>{if(!dragging)setFilter(key);},"shopping-filter-"+key,filter===key,dragging)}</React.Fragment>)}</View>
             {button("Habituales",()=>{setNext([]);setArrange(false);},"shopping-next")}
-            {button("Favoritos",()=>{setScreen("add");setOrbit("favorites");},"shopping-favorites")}
             {button("Compras realizadas",()=>setUtility("history"),"shopping-history")}
             {button("Guardar compra",()=>Alert.alert("Guardar compra","Guardar los productos cogidos en el historial. Sus filas y precios se conservarán.",[{text:"Cancelar",style:"cancel"},{text:"GUARDAR",onPress:()=>action({type:"finish",confirmed:true})}]),"shopping-finish",false,!items.some(i=>i.selected&&i.bought))}
             {button(arrange?"Terminar orden":"Ordenar secciones",()=>setArrange(v=>!v),"shopping-arrange-categories",arrange,dragging)}
             {oldNotes.map((old,index)=><React.Fragment key={old.id}>{button("Revisar Compras antigua "+(index+1),()=>{setLegacy(old);setLegacySelected([]);},"shopping-legacy-"+index)}</React.Fragment>)}
           </View>}
           {visibleShopping(doc,filter).filter(group=>arrange||group.items.length||doc.collapsed.includes(group.category)&&items.some(i=>i.category===group.category)).map(({category,items:visibleItems})=>{
-            const definition=SHOPPING_CATEGORIES.find(c=>c[0]===category)!,collapsed=doc.collapsed.includes(category);
+            const definition=SHOPPING_CATEGORIES.find(c=>c[0]===category)!,collapsed=doc.collapsed.includes(category),showHeader=more||arrange||collapsed;
             const target={id:category,group:"categories",kind:"column" as const,label:definition[2]};
             return <View key={category} testID={"shopping-section-"+category} style={s.section}>
-              <ShoppingReorderRow target={target}><View style={s.row}>
+              {showHeader&&<ShoppingReorderRow target={target}><View style={s.row}>
                 <TouchableOpacity testID={"shopping-collapse-"+category} accessibilityRole="button" accessibilityLabel={(collapsed?"Expandir ":"Contraer ")+definition[2]} accessibilityState={{expanded:!collapsed}} disabled={busy||dragging} style={{flex:1,minHeight:44,justifyContent:"center"}} onPress={()=>action({type:"collapse",category,value:!collapsed})}><Text style={s.sectionTitle}>{definition[2]} {collapsed?"+":"−"}</Text></TouchableOpacity>
-                {arrange&&<ShoppingReorderHandle target={target}/>}</View></ShoppingReorderRow>
+                {arrange&&<ShoppingReorderHandle target={target}/>}</View></ShoppingReorderRow>}
               {!arrange&&visibleItems.map(({item})=>{const target={id:item.id,group:category,kind:"card" as const,label:item.name};return <ShoppingReorderRow key={item.id} target={target}><ShoppingProductRow item={item} doc={doc} handedness={handedness} disabled={busy||dragging} onOperation={op=>operate(op,false)} onEdit={()=>startEditor(item)} onRoute={()=>openRoute(item)} onLocation={()=>{setUtilityItem(item);setAisle(doc.locations?.find(l=>l.store===doc.store&&l.itemId===item.id)?.aisle||"");setUtility("location");}} dragHandle={filter==="all"?<ShoppingReorderHandle target={target}/>:undefined}/></ShoppingReorderRow>;})}
             </View>;
           })}
@@ -192,30 +194,35 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
       </View>
       {adding&&!panel&&<View testID="shopping-add-screen" style={{flex:1,minHeight:0}}>
         {orbit?<ScrollView testID="shopping-products-scroll" keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,gap:8}}>
-          <Text accessibilityRole="header" style={s.sectionTitle}>{orbit==="favorites"?"Favoritos":SHOPPING_ORBITS.find(o=>o.id===orbit)?.label}</Text>
-          {items.filter(i=>orbit==="favorites"?i.favorite:SHOPPING_ORBITS.find(o=>o.id===orbit)?.categories.some(c=>c===i.category)).map(i=><View key={i.id} style={[s.details,s.row]}><View style={{flex:1}}><Text style={s.product}>{i.name}</Text><Text style={s.hint}>{[i.brand??i.prices.at(-1)?.brand,i.variety,i.format,decimal(i.quantity)+" "+i.unit].filter(Boolean).join(" · ")}</Text></View>{button(i.selected&&!i.bought?"En lista":"Añadir",()=>{action({type:"select",id:i.id,value:true});action({type:"bought",id:i.id,value:false});},"shopping-reuse-"+i.id,false,i.selected&&!i.bought)}{button("Editar",()=>startEditor(i),"shopping-reuse-edit-"+i.id)}</View>)}
-          {SHOPPING_ORBITS.find(o=>o.id===orbit)?.categories.flatMap(category=>(SHOPPING_SUGGESTIONS[category]||[]).map(name=><React.Fragment key={category+name}>{button(name,()=>startEditor(undefined,name,category),"shopping-suggestion-"+name)}</React.Fragment>))}
-          {button("Otro producto",()=>startEditor(undefined,"",SHOPPING_ORBITS.find(o=>o.id===orbit)?.categories[0]),"shopping-new-product")}
-        </ScrollView>:<ScrollView testID="shopping-orbit-scroll" contentContainerStyle={{flexGrow:1,justifyContent:"flex-end",alignItems:"center",paddingBottom:8}}>
+          <Text accessibilityRole="header" style={s.sectionTitle}>{orbit==="search"?"Buscar producto":SHOPPING_ORBITS.find(o=>o.id===orbit)?.label}</Text>
+          {orbit==="search"&&<TextInput testID="shopping-product-search" accessibilityLabel="Buscar producto" value={searchQuery} onChangeText={setSearchQuery} style={s.input} placeholder="Escribe el producto" autoFocus/>}
+          {items.filter(i=>orbit==="favorites"?i.favorite:orbit==="search"?shoppingName(i.name).includes(shoppingName(searchQuery)):SHOPPING_ORBITS.find(o=>o.id===orbit)?.categories.some(c=>c===i.category)).map(i=><View key={i.id} style={[s.details,s.row]}><View style={{flex:1}}><Text style={s.product}>{i.name}</Text><Text style={s.hint}>{[i.brand??i.prices.at(-1)?.brand,i.variety,i.format,decimal(i.quantity)+" "+i.unit].filter(Boolean).join(" · ")}</Text></View>{button(i.selected&&!i.bought?"En lista":"Añadir",()=>{action({type:"select",id:i.id,value:true});action({type:"bought",id:i.id,value:false});},"shopping-reuse-"+i.id,false,i.selected&&!i.bought)}{button("Editar",()=>startEditor(i),"shopping-reuse-edit-"+i.id)}</View>)}
+          {orbit==="search"?Object.entries(SHOPPING_SUGGESTIONS).flatMap(([category,names])=>(names||[]).filter(name=>shoppingName(name).includes(shoppingName(searchQuery))).map(name=><React.Fragment key={category+name}>{button(name,()=>startEditor(undefined,name,category as ShoppingItem["category"]),"shopping-suggestion-"+name)}</React.Fragment>))
+            :SHOPPING_ORBITS.find(o=>o.id===orbit)?.categories.flatMap(category=>(SHOPPING_SUGGESTIONS[category]||[]).map(name=><React.Fragment key={category+name}>{button(name,()=>startEditor(undefined,name,category),"shopping-suggestion-"+name)}</React.Fragment>))}
+          {button("Otro producto",()=>startEditor(undefined,orbit==="search"?searchQuery:"",orbit==="search"?suggestShoppingCategory(searchQuery,doc):SHOPPING_ORBITS.find(o=>o.id===orbit)?.categories[0]),"shopping-new-product")}
+        </ScrollView>:<LinearGradient colors={["#ffffff","#f4faff","#e7f4ff"]} style={{flex:1}}><ScrollView testID="shopping-orbit-scroll" contentContainerStyle={{flexGrow:1,justifyContent:"center",alignItems:"center",paddingBottom:12}}>
+          <TouchableOpacity testID="shopping-search-open" accessibilityRole="button" accessibilityLabel="Buscar producto" onPress={()=>{setSearchQuery("");setOrbit("search");}} style={s.searchEntrance}><Feather name="search" size={18} color="#316b9a"/><Text style={s.searchEntranceText}>Buscar producto</Text></TouchableOpacity>
           <View testID="shopping-eight-orbits" style={{width:orbital.size,height:orbital.height}}>
-            <View pointerEvents="none" style={{position:"absolute",left:orbital.button/2,top:orbital.buttonHeight/2,width:orbital.size-orbital.button,height:orbital.height-orbital.buttonHeight,borderRadius:orbital.height,borderWidth:1,borderColor:"#edf2f7"}}/>
-            {SHOPPING_ORBITS.map((o,index)=><TouchableOpacity key={o.id} testID={"shopping-orbit-"+o.id} accessibilityRole="button" accessibilityLabel={o.label} onPress={()=>setOrbit(o.id)} style={[s.orbit,{left:orbital.points[index].x,top:orbital.points[index].y,width:orbital.button,minHeight:orbital.buttonHeight}]}><MaterialCommunityIcons name={o.icon} size={28} color="#527d9f"/><Text style={s.orbitLabel}>{o.label}</Text></TouchableOpacity>)}
-            <TouchableOpacity testID="shopping-go-orbit" accessibilityRole="button" accessibilityLabel="Hablar o escribir a GO Compras" onPress={go} style={[s.go,s.goOrbit,{left:(orbital.size-76)/2,top:(orbital.height-76)/2}]}><Text style={s.goText}>GO</Text><Feather name="mic" size={17} color="#fff"/></TouchableOpacity>
+            <View pointerEvents="none" style={[s.orbitRing,{left:orbital.button/2,top:orbital.buttonHeight/2,width:orbital.size-orbital.button,height:orbital.height-orbital.buttonHeight}]}/>
+            {SHOPPING_ORBITS.map((o,index)=><TouchableOpacity key={o.id} testID={"shopping-orbit-"+o.id} accessibilityRole="button" accessibilityLabel={o.label} onPress={()=>setOrbit(o.id)} style={[s.orbit,{left:orbital.points[index].x,top:orbital.points[index].y,width:orbital.button,minHeight:orbital.buttonHeight,borderRadius:orbital.buttonHeight/2}]}><Text style={[s.orbitArtwork,o.id==="other"&&s.orbitDots]}>{o.art}</Text><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.8} style={s.orbitLabel}>{o.label}</Text></TouchableOpacity>)}
+            <TouchableOpacity testID="shopping-go-orbit" accessibilityRole="button" accessibilityLabel="Hablar o escribir a GO Compras" onPress={go} style={[s.goOrbit,{left:(orbital.size-orbital.center)/2,top:(orbital.height-orbital.center)/2,width:orbital.center,height:orbital.center,borderRadius:orbital.center/2}]}><Feather name="mic" size={28} color="#10315a"/><Text style={s.goOrbitText}>GO</Text></TouchableOpacity>
           </View>
-        </ScrollView>}
+        </ScrollView></LinearGradient>}
       </View>}
       {editor&&<ScrollView ref={editScroll} testID="shopping-editor-scroll" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" contentContainerStyle={{padding:16,gap:10}}>
         {field("name","Producto",{onChangeText:name=>change({name,...(editor.category==="other"?{category:suggestShoppingCategory(name,doc)}:{})}),autoCapitalize:"sentences"})}
         <View style={s.row}><View style={{flex:1}}>{field("quantity","Cantidad",{keyboardType:"decimal-pad"})}</View>{button(editor.unit,()=>setOptions(v=>!v),"shopping-unit-picker")}</View>
         {options&&<View style={s.row}>{SHOPPING_UNITS.map(unit=><React.Fragment key={unit}>{button(unit,()=>{change({unit});setOptions(false);},"shopping-unit-"+unit,editor.unit===unit)}</React.Fragment>)}</View>}
-        {field("brand","Marca · opcional")}{field("format","Formato · opcional")}
+        {field("price","Precio · opcional",{keyboardType:"decimal-pad"})}
+        {!!editor.price.trim()&&!editor.store.trim()&&<Text style={s.hint}>Selecciona un supermercado para guardar este precio.</Text>}
         {button(more?"Menos opciones":"Más opciones",()=>setMore(v=>!v),"shopping-editor-options")}
         {more&&<>
+          {field("brand","Marca · opcional")}{field("format","Formato · opcional")}
           {field("variety","Variedad · opcional")}
           {field("packageQuantity","Tamaño del envase",{keyboardType:"decimal-pad"})}
           <View style={s.row}>{(["kg","g","litros","ml","unidades"] as MeasureUnit[]).map(unit=><React.Fragment key={unit}>{button(unit,()=>change({packageUnit:unit}),"shopping-package-unit-"+unit,editor.packageUnit===unit)}</React.Fragment>)}</View>
           <Text style={s.label}>Categoría</Text><View style={s.row}>{SHOPPING_CATEGORIES.map(([id,,label])=><React.Fragment key={id}>{button(label,()=>change({category:id}),"shopping-category-"+id,editor.category===id)}</React.Fragment>)}</View>
-          {field("store","Supermercado del precio")}{field("price","Precio observado · opcional",{keyboardType:"decimal-pad"})}
+          {field("store","Supermercado del precio")}
           {field("currency","Moneda")}{field("observedOn","Fecha de observación · AAAA-MM-DD")}
           {field("priceQuantity","Contenido al que corresponde el precio",{keyboardType:"decimal-pad"})}
           <View style={s.row}>{(["kg","g","litros","ml","unidades"] as MeasureUnit[]).map(unit=><React.Fragment key={unit}>{button(unit,()=>change({priceUnit:unit}),"shopping-price-unit-"+unit,editor.priceUnit===unit)}</React.Fragment>)}</View>
@@ -247,6 +254,7 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
           {!route.steps.length&&<Text style={s.text}>No quedan productos pendientes.</Text>}
           <Text style={s.hint}>{route.checkout?"Termina en caja: "+(route.checkout.aisle||"Caja del plano"):"Caja sin ubicación conocida."}</Text>
         </>}
+        {utility==="map"&&<View style={s.details}><Text style={s.text}>No hay plano interior de {doc.store||"esta tienda"}. Puedes guardar pasillos conocidos desde cada producto y consultar la ruta orientativa.</Text>{button("Ver ruta",()=>setUtility("route"),"shopping-map-route")}</View>}
         {utility==="history"&&<>
           {!doc.purchases?.length&&<Text style={s.hint}>Aún no has guardado una compra. Al terminar, usa «Más acciones de compra» → «Guardar compra».</Text>}
           {[...(doc.purchases||[])].reverse().map(p=><View key={p.id} style={s.details}><Text style={s.label}>{p.date} · {p.store||"Sin supermercado"}</Text>{p.items.map(i=><Text key={i.id} style={s.text}>{i.name} · {i.brand} · {decimal(i.quantity)} {i.unit}</Text>)}</View>)}
@@ -270,15 +278,21 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
         {button("INCORPORAR SELECCIONADOS",()=>Alert.alert("Incorporar productos","¿Incorporar los nombres seleccionados sin modificar la nota antigua? Revisa después sus cantidades y unidades.",[{text:"Cancelar",style:"cancel"},{text:"INCORPORAR",onPress:()=>{void operate({type:"importLegacy",sourceId:legacy.id,names:legacySelected,confirmed:true}).then(()=>setLegacy(null)).catch(()=>{});}}]),"shopping-legacy-confirm",false,!legacySelected.length)}
       </ScrollView>}
       </>}
-      <View testID="shopping-thumb-controls" style={[s.footer,{flexDirection:"row"}]}>
-        {!!doc&&<TouchableOpacity testID="shopping-list" accessibilityRole="button" accessibilityLabel="Volver a la lista de compra" disabled={busy||dragging} style={s.tab}
-          onPress={()=>{if(editor&&(draftStatus==="Guardando borrador…"||draftStatus.startsWith("Borrador pendiente"))){setError("Espera a guardar el borrador antes de volver a la lista.");return;}voice.abort();setEditor(null);draftRef.current=null;setUtility(null);setNext(null);setLegacy(null);setScreen("list");setOrbit(null);}}><Feather name="list" size={22} color="#477394"/><Text style={s.buttonText}>Lista</Text></TouchableOpacity>}
-        {!!doc&&(!adding||!!orbit||panel)&&<TouchableOpacity testID="shopping-go" accessibilityRole="button" accessibilityLabel="Hablar o escribir a GO Compras" disabled={busy||dragging} onPress={go} style={s.go}><Text style={s.goText}>GO</Text><Feather name="mic" size={15} color="#fff"/></TouchableOpacity>}
-        {!!doc&&adding&&!orbit&&!panel&&<View style={{width:64}}/>}
-        {!!doc&&!editor&&<TouchableOpacity testID="shopping-add" accessibilityRole="button" accessibilityLabel="Añadir productos por categorías" disabled={busy||dragging} style={s.tab} onPress={()=>{setUtility(null);setNext(null);setLegacy(null);setScreen("add");setOrbit(null);setMore(false);}}><Feather name="plus" size={22} color="#477394"/><Text style={s.buttonText}>Añadir</Text></TouchableOpacity>}
-        {!!doc&&editor&&<View style={{width:76}}>{button("Guardar",()=>void save(),"shopping-save",true)}</View>}
-      </View>
-    <GoNavigationFloating screenKey="shopping-navigation" safeArea={false} handedness={handedness} keyboardResponsive keyboardVisible={keyboard.visible} protectedTop={insets.top+48} protectedBottom={Math.max(8,insets.bottom)+78} initialBottom={4}>
+      {listHome&&<View testID="shopping-secondary-navigation" style={s.secondaryNav}>
+        {navButton("shopping-purchase","Compra","shopping-cart",()=>{setFilter("all");setMore(false);},true)}
+        {navButton("shopping-route","Ruta","navigation",()=>openRoute())}
+        {navButton("shopping-map","Mapa","map",()=>setUtility("map"))}
+        {navButton("shopping-favorites","Favoritos","star",()=>{setScreen("add");setOrbit("favorites");setMore(false);})}
+        {navButton("shopping-more","Más","grid",()=>setMore(value=>!value),more)}
+      </View>}
+      {!orbitHome&&!!doc&&<View testID="shopping-thumb-controls" style={[s.footer,{flexDirection:"row",paddingLeft:handedness==="left"?70:12,paddingRight:handedness==="right"?70:12}]}>
+        <TouchableOpacity testID="shopping-list" accessibilityRole="button" accessibilityLabel="Volver a la lista de compra" disabled={busy||dragging} style={s.listTab}
+          onPress={()=>{if(editor&&(draftStatus==="Guardando borrador…"||draftStatus.startsWith("Borrador pendiente"))){setError("Espera a guardar el borrador antes de volver a la lista.");return;}voice.abort();setEditor(null);draftRef.current=null;setUtility(null);setNext(null);setLegacy(null);setScreen("list");setOrbit(null);}}><Feather name="list" size={21} color="#123e72"/><Text style={s.listTabText}>Lista</Text></TouchableOpacity>
+        {listHome&&<TouchableOpacity testID="shopping-go" accessibilityRole="button" accessibilityLabel="Hablar o escribir a GO Compras" disabled={busy||dragging} onPress={go} style={s.go}><Feather name="mic" size={19} color="#fff"/><Text style={s.goText}>GO</Text></TouchableOpacity>}
+        {listHome&&<TouchableOpacity testID="shopping-add" accessibilityRole="button" accessibilityLabel="Añadir productos por categorías" disabled={busy||dragging} style={s.addTab} onPress={()=>{setUtility(null);setNext(null);setLegacy(null);setScreen("add");setOrbit(null);setSearchQuery("");setMore(false);}}><Feather name="plus" size={20} color="#fff"/><Text style={s.addTabText}>Añadir</Text></TouchableOpacity>}
+        {!!editor&&<TouchableOpacity testID="shopping-save" accessibilityRole="button" accessibilityLabel="Guardar producto" disabled={busy} onPress={()=>void save()} style={s.saveTab}><Text style={s.saveText}>GUARDAR</Text></TouchableOpacity>}
+      </View>}
+    <GoNavigationFloating screenKey="shopping-navigation" safeArea={false} handedness={handedness} keyboardResponsive keyboardVisible={keyboard.visible} protectedTop={insets.top+48} protectedBottom={Math.max(8,insets.bottom)+4} initialBottom={4}>
       <GoCloseButton testID="shopping-back" level="panel" appearance="light" touchSize={56} hitSlop={0} disabled={busy||dragging} keyboardVisible={keyboard.visible} onPress={back} accessibilityLabel={keyboard.visible?"Ocultar teclado":panel||arrange||adding?"Volver a COMPRAS":"Volver a NOTAS"}/>
     </GoNavigationFloating>
     </KeyboardAvoidingView>
@@ -286,20 +300,18 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
   </GoScreenModal>;
 }
 const s=StyleSheet.create({
-  root:{flex:1,backgroundColor:"#fff"},header:{paddingHorizontal:16,paddingTop:8,paddingBottom:10,gap:6},heading:{fontSize:19,fontWeight:"600",color:"#253f55"},
-  hint:{fontSize:12,color:"#697e90",lineHeight:18},text:{fontSize:15,color:"#304c64",flexShrink:1},label:{fontSize:12,fontWeight:"600",color:"#607b91"},
-  sectionTitle:{fontSize:13,fontWeight:"600",color:"#517594",flexShrink:1},row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:6},
-  button:{minHeight:44,minWidth:44,paddingVertical:9,paddingHorizontal:11,borderWidth:1,borderColor:"#dce7f0",borderRadius:11,backgroundColor:"#fff",justifyContent:"center"},
-  chosen:{backgroundColor:"#477ea9",borderColor:"#477ea9"},buttonText:{fontSize:13,fontWeight:"600",color:"#416b8d",textAlign:"center",flexShrink:1},checked:{backgroundColor:"#e5f0fa"},
-  input:{minHeight:48,borderWidth:1,borderColor:"#cfdeeb",backgroundColor:"#fff",borderRadius:11,fontSize:16,color:"#29465e",padding:11},
-  section:{gap:6},product:{fontSize:16,fontWeight:"600",color:"#2a4a64",flexShrink:1},details:{gap:8,padding:12,backgroundColor:"#f5f9fd",borderWidth:1,borderColor:"#e0eaf3",borderRadius:12},
-  footer:{paddingHorizontal:16,paddingTop:8,paddingBottom:4,gap:12,alignItems:"center",justifyContent:"space-between",borderTopWidth:1,borderColor:"#e2ebf3",backgroundColor:"#fff"},
-  error:{color:"#9e2929",fontSize:14},message:{padding:16,gap:8},store:{flex:1,minWidth:0,minHeight:44,flexDirection:"row",alignItems:"center",gap:6},
-  smallAction:{minHeight:44,minWidth:44,flexDirection:"row",gap:6,alignItems:"center",justifyContent:"center"},
-  totals:{flexDirection:"row",padding:10,borderRadius:12,backgroundColor:"#f0f6fc",gap:16},amount:{fontSize:18,fontWeight:"600",color:"#315e82"},
-  tab:{minWidth:76,minHeight:60,alignItems:"center",justifyContent:"center",gap:4},
-  go:{width:64,height:64,borderRadius:32,alignItems:"center",justifyContent:"center",gap:2,backgroundColor:"#477ea9",borderWidth:1,borderColor:"#3e7299",shadowColor:"#335e80",shadowOpacity:.1,shadowRadius:5,shadowOffset:{width:0,height:2}},
-  goText:{color:"#fff",fontSize:19,fontWeight:"700"},goOrbit:{position:"absolute",width:76,height:76,borderRadius:38},
-  orbit:{position:"absolute",padding:6,borderWidth:1,borderColor:"#dce7f1",borderRadius:22,backgroundColor:"#f3f8fd",gap:3,alignItems:"center",justifyContent:"center"},
-  orbitLabel:{fontSize:11,fontWeight:"500",textAlign:"center",color:"#446781"},
+  root:{flex:1,backgroundColor:"#f7fbff"},header:{paddingHorizontal:14,paddingTop:8,paddingBottom:8},listHeader:{paddingHorizontal:8,paddingTop:5,paddingBottom:7},orbitHeader:{paddingHorizontal:14,paddingTop:6,paddingBottom:4},heading:{fontSize:20,fontWeight:"700",color:"#172d51"},
+  summaryRow:{flexDirection:"row",alignItems:"stretch",gap:6},storeCard:{flex:1.5,minWidth:0,minHeight:69,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:5,paddingHorizontal:7,borderRadius:15,borderWidth:1,borderColor:"#dce5f2",backgroundColor:"#fff",shadowColor:"#284568",shadowOpacity:.1,shadowRadius:5,shadowOffset:{width:0,height:2}},storeName:{flex:1,minWidth:0,fontSize:15,fontWeight:"700",color:"#153861"},
+  totalCard:{flex:1,minWidth:0,minHeight:69,alignItems:"center",justifyContent:"center",paddingHorizontal:3,borderRadius:15,borderWidth:1,borderColor:"#e3e8f0",backgroundColor:"#f8fbff",shadowColor:"#284568",shadowOpacity:.06,shadowRadius:4,shadowOffset:{width:0,height:2}},currentTotal:{backgroundColor:"#ebf6ff",borderColor:"#d9ebfa"},totalLabel:{fontSize:11,fontWeight:"600",color:"#45617c"},totalAmount:{fontSize:17,fontWeight:"800",color:"#17477a",textAlign:"center"},totalUnknown:{fontSize:9,color:"#617486",textAlign:"center"},
+  orbitBanner:{minHeight:77,borderRadius:24,borderWidth:1,borderColor:"#dbeafa",paddingHorizontal:16,flexDirection:"row",alignItems:"center",gap:12,shadowColor:"#3474b1",shadowOpacity:.13,shadowRadius:9,shadowOffset:{width:0,height:4}},bannerCart:{width:46,height:46,borderRadius:23,backgroundColor:"#087deb",alignItems:"center",justifyContent:"center",borderWidth:2,borderColor:"#acd8ff"},bannerTitle:{fontSize:25,fontWeight:"800",color:"#133361"},bannerSubtitle:{fontSize:17,fontWeight:"700",color:"#5da0d9"},bannerArt:{fontSize:35},
+  hint:{fontSize:12,color:"#647c92",lineHeight:18},text:{fontSize:15,color:"#304c64",flexShrink:1},label:{fontSize:12,fontWeight:"600",color:"#607b91"},sectionTitle:{fontSize:14,fontWeight:"700",color:"#416d95",flexShrink:1},row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:6},
+  button:{minHeight:44,minWidth:44,paddingVertical:9,paddingHorizontal:11,borderWidth:1,borderColor:"#dce7f0",borderRadius:11,backgroundColor:"#fff",justifyContent:"center"},chosen:{backgroundColor:"#277ec1",borderColor:"#277ec1"},buttonText:{fontSize:13,fontWeight:"600",color:"#416b8d",textAlign:"center",flexShrink:1},checked:{backgroundColor:"#e5f0fa"},
+  input:{minHeight:48,borderWidth:1,borderColor:"#cfdeeb",backgroundColor:"#fff",borderRadius:11,fontSize:16,color:"#29465e",padding:11},section:{gap:5},product:{fontSize:16,fontWeight:"600",color:"#2a4a64",flexShrink:1},details:{gap:8,padding:12,backgroundColor:"#f5f9fd",borderWidth:1,borderColor:"#e0eaf3",borderRadius:12},draftNotice:{gap:4,padding:8,backgroundColor:"#f4f9ff",borderRadius:12,borderWidth:1,borderColor:"#dce9f5"},
+  searchEntrance:{minHeight:44,minWidth:170,borderRadius:22,marginBottom:13,paddingHorizontal:16,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:8,backgroundColor:"#fff",borderWidth:1,borderColor:"#dceafa"},searchEntranceText:{fontSize:14,fontWeight:"600",color:"#316b9a"},
+  orbitRing:{position:"absolute",borderRadius:400,borderWidth:3,borderColor:"#9fd3fa",backgroundColor:"transparent"},orbit:{position:"absolute",padding:4,borderWidth:2,borderColor:"#fff",backgroundColor:"#fff",gap:1,alignItems:"center",justifyContent:"center",shadowColor:"#2776b0",shadowOpacity:.22,shadowRadius:8,shadowOffset:{width:0,height:4}},orbitArtwork:{fontSize:31,lineHeight:39},orbitDots:{fontSize:29,fontWeight:"800",color:"#168beb"},orbitLabel:{fontSize:11,fontWeight:"700",textAlign:"center",color:"#17365f"},
+  goOrbit:{position:"absolute",alignItems:"center",justifyContent:"center",backgroundColor:"#f9cb55",borderWidth:5,borderColor:"#fff2ba",shadowColor:"#2875b3",shadowOpacity:.3,shadowRadius:14,shadowOffset:{width:0,height:5}},goOrbitText:{fontSize:43,fontWeight:"900",color:"#123466",lineHeight:47},
+  secondaryNav:{minHeight:68,flexDirection:"row",alignItems:"center",gap:5,paddingHorizontal:8,paddingVertical:4,backgroundColor:"#f7fbff"},navItem:{flex:1,minWidth:0,minHeight:60,borderRadius:15,backgroundColor:"#fff",borderWidth:1,borderColor:"#e6eaf0",alignItems:"center",justifyContent:"center",gap:2,shadowColor:"#244c7b",shadowOpacity:.1,shadowRadius:5,shadowOffset:{width:0,height:3}},navSelected:{backgroundColor:"#0689ed",borderColor:"#43b1fb"},navText:{fontSize:11,fontWeight:"700",color:"#173a68"},
+  footer:{minHeight:74,alignItems:"center",justifyContent:"space-between",gap:7,paddingVertical:5,backgroundColor:"#f7fbff"},listTab:{flex:1,minWidth:0,minHeight:56,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:5,borderRadius:27,borderWidth:1,borderColor:"#dce4ef",backgroundColor:"#fff",shadowColor:"#244c7b",shadowOpacity:.1,shadowRadius:5,shadowOffset:{width:0,height:3}},listTabText:{fontSize:14,fontWeight:"700",color:"#173a68"},
+  go:{width:68,height:68,borderRadius:34,alignItems:"center",justifyContent:"center",backgroundColor:"#0089ed",borderWidth:3,borderColor:"#b7eaff",shadowColor:"#1285c8",shadowOpacity:.28,shadowRadius:8,shadowOffset:{width:0,height:3}},goText:{color:"#fff",fontSize:22,fontWeight:"800"},addTab:{flex:1,minWidth:0,minHeight:56,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:3,borderRadius:27,backgroundColor:"#087def",borderWidth:1,borderColor:"#57b6ff",shadowColor:"#1376c5",shadowOpacity:.18,shadowRadius:6,shadowOffset:{width:0,height:3}},addTabText:{fontSize:14,fontWeight:"700",color:"#fff"},saveTab:{flex:1,minWidth:110,minHeight:56,borderRadius:22,alignItems:"center",justifyContent:"center",backgroundColor:"#0789e5",borderWidth:1,borderColor:"#54baff"},saveText:{fontSize:16,fontWeight:"800",color:"#fff"},
+  error:{color:"#9e2929",fontSize:14},message:{padding:16,gap:8},smallAction:{minHeight:44,minWidth:44,flexDirection:"row",gap:6,alignItems:"center",justifyContent:"center"},
 });
