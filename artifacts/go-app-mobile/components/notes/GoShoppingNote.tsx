@@ -199,7 +199,7 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
             <View style={s.row}>{([["pending","Pendientes"],["all","Todos"],["bought","Cogidos"]] as const).map(([key,label])=><React.Fragment key={key}>{button(label,()=>{if(!dragging)setFilter(key);},"shopping-filter-"+key,filter===key,dragging)}</React.Fragment>)}</View>
             {button("Habituales",()=>{setNext([]);setArrange(false);},"shopping-next")}
             {button("Compras realizadas",()=>setUtility("history"),"shopping-history")}
-            {button("Guardar compra",()=>Alert.alert("Guardar compra","Guardar los productos cogidos en el historial. Sus filas y precios se conservarán.",[{text:"Cancelar",style:"cancel"},{text:"GUARDAR",onPress:()=>action({type:"finish",confirmed:true})}]),"shopping-finish",false,!items.some(i=>i.selected&&i.bought))}
+            {button("Archivar cogidos en historial",()=>Alert.alert("Archivar compra","Los productos cogidos pasarán al historial. Sus filas y precios se conservarán.",[{text:"Cancelar",style:"cancel"},{text:"GUARDAR",onPress:()=>action({type:"finish",confirmed:true})}]),"shopping-finish",false,!items.some(i=>i.selected&&i.bought))}
             {button(arrange?"Terminar orden":"Ordenar secciones",()=>setArrange(v=>!v),"shopping-arrange-categories",arrange,dragging)}
             {oldNotes.map((old,index)=><React.Fragment key={old.id}>{button("Revisar Compras antigua "+(index+1),()=>{setLegacy(old);setLegacySelected([]);},"shopping-legacy-"+index)}</React.Fragment>)}
           </View>}
@@ -294,7 +294,7 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
         </>}
         {utility==="map"&&<View style={s.details}><Text style={s.text}>No hay plano interior de {doc.store||"esta tienda"}. Puedes guardar pasillos conocidos desde cada producto y consultar la ruta orientativa.</Text>{button("Ver ruta",()=>setUtility("route"),"shopping-map-route")}</View>}
         {utility==="history"&&<>
-          {!doc.purchases?.length&&<Text style={s.hint}>Aún no has guardado una compra. Al terminar, usa «Más acciones de compra» → «Guardar compra».</Text>}
+          {!doc.purchases?.length&&<Text style={s.hint}>Aún no hay compras archivadas. La lista actual se guarda automáticamente.</Text>}
           {[...(doc.purchases||[])].reverse().map(p=><View key={p.id} style={s.details}><Text style={s.label}>{p.date} · {p.store||"Sin supermercado"}</Text>{p.items.map(i=><Text key={i.id} style={s.text}>{i.name} · {i.brand} · {decimal(i.quantity)} {i.unit}</Text>)}</View>)}
         </>}
         {utility==="assistant"&&<>
