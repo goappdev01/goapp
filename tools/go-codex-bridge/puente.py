@@ -1688,6 +1688,21 @@ def server(bridge, open_browser=True):
     stop_factory = threading.Event()
     factory_thread=threading.Thread(target=bridge.factory.loop, args=(stop_factory,), daemon=True)
     factory_thread.start()
+    stop_owner_expo = threading.Event()
+    def poll_owner_expo():
+        last_error = None
+        while not stop_owner_expo.wait(60):
+            try:
+                from owner_expo import OwnerExpo
+                OwnerExpo(bridge).reconcile_published_main()
+                last_error = None
+            except Exception as error:
+                code = getattr(error, 'code', 'OWNER_EXPO_POLL_FAILED')
+                if code != last_error:
+                    bridge.audit('owner_expo_poll_deferred', {'reason': code})
+                    last_error = code
+    owner_expo_thread=threading.Thread(target=poll_owner_expo,daemon=True)
+    owner_expo_thread.start()
     if open_browser:
         threading.Thread(target=webbrowser.open, args=(origin,), daemon=True).start()
     print("GO Puente Codex disponible en " + origin, flush=True)
@@ -1696,8 +1711,10 @@ def server(bridge, open_browser=True):
     finally:
         stop_receiver.set()
         stop_factory.set()
+        stop_owner_expo.set()
         receiver_thread.join()
         factory_thread.join()
+        owner_expo_thread.join()
         httpd.server_close()
     return getattr(httpd,"restart_requested",False)
 

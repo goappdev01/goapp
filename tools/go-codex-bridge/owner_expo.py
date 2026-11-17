@@ -89,16 +89,47 @@ class OwnerExpo:
         with self.b.factory.lock:
             doc=self.load()
             if not doc:return {'state':'not_configured'}
+            root=proof.get('served_root')
+            if root:
+                root=str(Path(root).resolve())
+                if not (Path(root)/'artifacts/go-app-mobile/package.json').is_file():
+                    self.fail('OWNER_EXPO_PROOF','La prueba de 8088 señala otra carpeta.')
+                doc={**doc,'main_workspace':root}
             main=self.git(doc,'ls-remote','origin','refs/heads/main').split()[0]
             if main!=sha:return {'state':'superseded','sha':sha}
             if doc['sha']==sha:
-                if doc.get('pending_sha'):
-                    self.save({**doc,'pending_sha':None,'pending_reason':None})
+                self.save({**doc,'pending_sha':None,'pending_reason':None})
                 return {'state':'current','sha':sha}
             updated={**doc,'pending_sha':sha,'pending_reason':None}
             self.save(updated)
             self.b.audit('owner_expo_update_queued',{'sha':sha,'previous':doc['sha']})
             return {'state':'queued','sha':sha}
+
+    def sync_published_main(self,workspace):
+        """Reverify the live 8088 bundle before queuing a published MAIN."""
+        doc=self.load()
+        if not doc:return {'state':'not_configured'}
+        workspace=Path(workspace).resolve()
+        main=self.git(doc,'ls-remote','origin','refs/heads/main').split()[0]
+        head=subprocess.check_output(['git','-C',str(workspace),'rev-parse','HEAD'],text=True,timeout=20).strip()
+        if head!=main:return {'state':'main_not_served','sha':main}
+        proof=self.b.factory._verify_metro(main,main,workspace,port=8088)
+        queued=self.queue_verified(main,proof)
+        promotion=self.promote_if_idle() if queued.get('state')=='queued' else {'state':'not_needed'}
+        return {'queued':queued,'promotion':promotion}
+
+    def reconcile_published_main(self):
+        """Cheap bridge poll; bundle verification runs only after MAIN advances."""
+        doc=self.load()
+        if not doc or not doc.get('main_workspace'):return {'state':'not_configured'}
+        root=Path(doc['main_workspace']).resolve()
+        head=subprocess.check_output(['git','-C',str(root),'rev-parse','HEAD'],text=True,timeout=20).strip()
+        if head==doc.get('pending_sha'):
+            if doc.get('pending_reason') in (None,'OWNER_EXPO_ACTIVE') and not self.port_busy():
+                return self.promote_if_idle()
+            return {'state':'pending','sha':head}
+        if head==doc['sha']:return {'state':'current','sha':head}
+        return self.sync_published_main(root)
 
     def _record_pending(self,doc,reason):
         self.save({**doc,'pending_reason':reason})
@@ -295,10 +326,4 @@ if __name__=='__main__':
     owner=OwnerExpo(bridge)
     doc=owner.load()
     if not doc:raise SystemExit('8089 no tiene una configuración firmada.')
-    main=owner.git(doc,'ls-remote','origin','refs/heads/main').split()[0]
-    workspace=Path(options.main_workspace)
-    head=subprocess.check_output(['git','-C',str(workspace),'rev-parse','HEAD'],text=True).strip()
-    if head!=main:raise SystemExit('8088 aún no está en el último MAIN; 8089 conserva su versión.')
-    proof=bridge.factory._verify_metro(main,main,workspace,port=8088)
-    print(json.dumps({'queued':owner.queue_verified(main,proof),
-                      'promotion':owner.promote_if_idle()},ensure_ascii=False))
+    print(json.dumps(owner.sync_published_main(options.main_workspace),ensure_ascii=False))

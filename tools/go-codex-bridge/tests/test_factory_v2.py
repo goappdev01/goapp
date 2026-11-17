@@ -1830,3 +1830,30 @@ class RemoteTests(unittest.TestCase):
             start.assert_not_called()
             self.assertFalse(any(c.args[1:3]==('switch','--detach') for c in git.call_args_list))
         self.assertEqual(manager.load()['sha'],old)
+
+    def test_owner_bridge_poll_skips_unchanged_main_and_waits_for_idle_port(self):
+        manager=OwnerExpo(self.bridge)
+        old='a'*40;new='b'*40
+        root=self.bridge.home/'synthetic-main'
+        root.mkdir()
+        manager.save({'port':8089,'workspace':'synthetic','main_workspace':str(root),'sha':old})
+        with patch('owner_expo.subprocess.check_output',return_value=old),patch.object(manager,'sync_published_main') as sync:
+            self.assertEqual(manager.reconcile_published_main()['state'],'current')
+            sync.assert_not_called()
+        manager.save({**manager.load(),'pending_sha':new,'pending_reason':'OWNER_EXPO_ACTIVE'})
+        with patch('owner_expo.subprocess.check_output',return_value=new),\
+             patch.object(manager,'port_busy',side_effect=[True,False]),\
+             patch.object(manager,'promote_if_idle',return_value={'state':'verified'}) as promote:
+            self.assertEqual(manager.reconcile_published_main()['state'],'pending')
+            self.assertEqual(manager.reconcile_published_main()['state'],'verified')
+            promote.assert_called_once()
+
+    def test_owner_bridge_poll_verifies_a_new_main_only_once_queued(self):
+        manager=OwnerExpo(self.bridge)
+        root=self.bridge.home/'synthetic-main'
+        root.mkdir()
+        manager.save({'port':8089,'workspace':'synthetic','main_workspace':str(root),'sha':'a'*40})
+        with patch('owner_expo.subprocess.check_output',return_value='b'*40),\
+             patch.object(manager,'sync_published_main',return_value={'state':'queued'}) as sync:
+            self.assertEqual(manager.reconcile_published_main()['state'],'queued')
+            sync.assert_called_once_with(root)
