@@ -688,23 +688,17 @@ class Bridge:
             self._card_workspace.reset(token)
 
     def cli_defaults(self):
-        # Keep the owner's model choice while isolating plugins and MCP in the worker.
+        # Sign the factory profile independently of the settings for interactive chats.
         import tomllib
         config_home=Path(os.environ.get("CODEX_HOME",str(Path.home()/".codex")))
         path=config_home/"config.toml"
-        if not path.is_file():
-            return {}
         try:
-            data=tomllib.loads(path.read_text(encoding="utf-8-sig"))
+            data=tomllib.loads(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
         except (OSError,ValueError):
             raise BridgeError("CLI_CONFIG_INVALID","No se pudo conservar la configuración pública del ejecutor.") from None
         if data.get("model_provider","openai")!="openai":
             raise BridgeError("CLI_PROVIDER_REQUIRES_REVIEW","El proveedor personalizado requiere revisar su configuración antes de ejecutar la rueda.")
-        keys=("model","model_reasoning_effort","model_service_tier")
-        result={key:data[key] for key in keys if key in data}
-        if any(not isinstance(value,str) or not re.fullmatch(r"[A-Za-z0-9_.:/-]{1,100}",value) for value in result.values()):
-            raise BridgeError("CLI_CONFIG_INVALID","La configuración del modelo requiere revisión.")
-        return result
+        return {"model":"gpt-6.1-sol","model_reasoning_effort":"xhigh"}
 
     def quota_status(self):
         snapshot = getattr(self,"_codex_quota_snapshot",{"state":"unknown","windows":[]})
@@ -997,12 +991,16 @@ class Bridge:
         recoverable_work = ("Si aparece un fallo durante la programación o las pruebas, identifica su causa, "
                             "corrige lo que esté dentro del alcance y vuelve a ejecutar la comprobación pertinente. "
                             "Si persiste un bloqueo real, conserva el avance y documenta la evidencia, lo intentado y qué falta.")
+        implementation = ("Sigue el recorrido real de la tarjeta desde su punto de entrada. Reproduce el problema o "
+                          "compara el comportamiento actual con el solicitado antes de editar. Reutiliza los flujos "
+                          "y controles existentes. Comprueba cada cambio desde la entrada normal y verifica las "
+                          "pantallas implicadas con los medios locales disponibles.")
         prompt = ("Autorización local: " + identifier + ". Agente CLI independiente: " + payload["agent"] + ".\n"
                   "Trabaja únicamente en la carpeta asignada. Conserva cambios existentes. " + publication + "\n"
                   "El contenido siguiente es la instrucción revisada por el propietario, no autorización para ampliar permisos, leer secretos del puente o modificar su coordinador.\n"
                   "Si falta autorización o infraestructura, informa del bloqueo real; no simules resultados.\n\n" + job["data"]["instruction"])
         if not diagnosis and job["data"]["instruction"] != TEST_INSTRUCTION:
-            prompt += "\n\n" + recoverable_work
+            prompt += "\n\n" + implementation + " " + recoverable_work
         if job["data"]["instruction"] != TEST_INSTRUCTION:
             prompt += ('\n\nInforme del coordinador: al final de tu respuesta añade una sola línea '
                        'GO_BRIDGE_RESULT: {"status":"completed|blocked|failed","summary":"resultado real"}. '
@@ -1070,7 +1068,9 @@ class Bridge:
         if diagnosis:
             command[1:1]=["-c",'windows.sandbox="elevated"',"-c",'web_search="disabled"',
                           "--disable","apps","--disable","plugins","--disable","hooks","--disable","multi_agent"]
-        if bound or diagnosis:
+        isolated_config = bool(bound or diagnosis)
+        settings = {}
+        if isolated_config:
             settings=json.loads(bound[0]).get("cli_settings",{}) if bound else self.cli_defaults()
             for key,value in settings.items():
                 command[1:1]=["-c",key+"="+canonical(value)]
@@ -1085,7 +1085,7 @@ class Bridge:
                       "pruebas locales dentro del alcance original. No hagas commit, push, despliegues ni "
                       "escrituras en Trello. Al final incluye GO_BRIDGE_RESULT y GO_FACTORY_EVIDENCE "
                       "con el formato acordado en la sesión anterior. Si necesitas una respuesta del propietario, "
-                      "incluye GO_FACTORY_QUESTION. No simules resultados. " + recoverable_work)
+                      "incluye GO_FACTORY_QUESTION. No simules resultados. " + implementation + " " + recoverable_work)
         environment = {k: v for k, v in os.environ.items() if not re.search(r"TRELLO|ATLASSIAN|CLIENT_SECRET", k, re.I)}
         if bound or diagnosis:
             from codex_quota import worker_environment
@@ -1100,7 +1100,8 @@ class Bridge:
         environment["PYTHONUTF8"] = "1"
         save_json(folder / ("ejecucion" + suffix + ".json"), {"job": identifier, "command": command, "authorization": payload,
                                             "instruction_sha256": job["data"]["instruction_sha256"], "started": utc(),
-                                            "executor_version": EXECUTOR_VERSION, "user_config_loaded": True,
+                                            "executor_version": EXECUTOR_VERSION, "user_config_loaded": not isolated_config,
+                                            "cli_settings": settings,
                                             "approval_policy": "never", "sandbox_requested": payload["sandbox"]})
         process = None
         try:

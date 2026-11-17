@@ -31,11 +31,14 @@ class ExecutorTests(unittest.TestCase):
         job = self.bridge.prepare_text("Comprobación sintética sin GO", "PRUEBA")
         payload = self.bridge.execution_payload(job["id"])
         if bound:
+            terms = {"allowed_files":["file.ts"], "test_files":["test.mjs"],
+                     "cli_settings":self.bridge.cli_defaults()}
             with self.bridge.db() as db:
                 db.execute("INSERT INTO factory_attempts(card_id,attempt,title,instruction_sha,state,job_id) VALUES('synthetic-card',1,'test','sha','running',?)",(job["id"],))
                 db.execute("INSERT INTO wheel_grants VALUES('synthetic-card',1,'synthetic-grant',?,?,'working',NULL)",
-                           (json.dumps({"allowed_files":["file.ts"],"test_files":["test.mjs"]}),"fixture"))
+                           (json.dumps(terms),"fixture"))
         with patch.object(self.bridge, "git_state", return_value={"git": False}), \
+             patch.object(self.bridge, "ensure_sandbox_helper_acl"), \
              patch("puente.subprocess.Popen", return_value=process) as spawn:
             self.bridge.launch(payload, self.approval("execute", payload), False)
         return self.bridge.job(job["id"]), spawn.call_args
@@ -153,8 +156,20 @@ class ExecutorTests(unittest.TestCase):
         parent.assert_called_once()
 
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_factory_model_is_independent_of_interactive_preferences(self):
+        config_home = self.home / "synthetic-codex-home"
+        config_home.mkdir()
+        expected = {"model":"gpt-6.1-sol", "model_reasoning_effort":"xhigh"}
+        with patch.dict(os.environ, {"CODEX_HOME":str(config_home)}):
+            self.assertEqual(self.bridge.cli_defaults(), expected)
+            config = config_home / "config.toml"
+            config.write_text('model = "gpt-6-luna"\nmodel_reasoning_effort = "low"\nservice_tier = "fast"\n',
+                              encoding="utf-8")
+            self.assertEqual(self.bridge.cli_defaults(), expected)
+            config.write_text('model_provider = "custom"\n', encoding="utf-8")
+            with self.assertRaises(BridgeError) as error:
+                self.bridge.cli_defaults()
+            self.assertEqual(error.exception.code, "CLI_PROVIDER_REQUIRES_REVIEW")
 
     def test_factory_worker_uses_github_only_profile_and_keeps_credentials_out(self):
         job,args=self.run_fake('Hecho.\nGO_BRIDGE_RESULT: {"status":"completed"}',bound=True)
@@ -165,3 +180,13 @@ if __name__ == "__main__":
         self.assertEqual(env["GIT_CONFIG_VALUE_0"],"openssl");self.assertEqual(env["GCM_INTERACTIVE"],"never")
         self.assertNotIn("GITHUB_TOKEN",env);self.assertNotIn("GH_TOKEN",env)
         self.assertEqual(job["state"],"completed")
+        self.assertIn('model="gpt-6.1-sol"', command)
+        self.assertIn('model_reasoning_effort="xhigh"', command)
+        self.assertIn("--ignore-user-config", command)
+        launch = json.loads((self.home / "ejecuciones" / job["id"] / "ejecucion.json").read_text(encoding="utf-8"))
+        self.assertFalse(launch["user_config_loaded"])
+        self.assertEqual(launch["cli_settings"], {"model":"gpt-6.1-sol", "model_reasoning_effort":"xhigh"})
+
+
+if __name__ == "__main__":
+    unittest.main()
