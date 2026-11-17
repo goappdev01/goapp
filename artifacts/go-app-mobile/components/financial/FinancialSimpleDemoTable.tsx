@@ -62,30 +62,30 @@ export function FinancialSimpleDemoTable({ state, update, onCalculate }: Props) 
     <ScrollView testID="finance-results-scroll" style={d.resultsScroll} contentContainerStyle={d.resultsContent} keyboardShouldPersistTaps="never" nestedScrollEnabled>
       <Text style={d.disclaimer}>Simulación local · cifras de ejemplo o introducidas, sin verificar</Text>
       {!rows.length?<View style={d.results}><Text style={s.heading}>Sin selección</Text><Text style={s.note}>Marca países y actividades para calcular.</Text></View>:<>
-        <View style={d.results}><Text style={s.heading}>{known.length===rows.length?"Total general GO":"Total calculado · datos conocidos"}</Text>
-          <View style={s.planBar}><Text style={s.text}>Empresas captadas</Text><Text style={d.resultValue}>{financialCount(known.length?total.companies:null)}</Text></View>
-          <View style={s.planBar}><Text style={s.text}>Ingreso mensual</Text><Text style={d.resultValue}>{money(known.length?total.monthly:null)}</Text></View>
-          <View style={s.planBar}><Text style={s.text}>Ingreso anual</Text><Text style={d.resultValue}>{money(known.length?total.annual:null)}</Text></View>
+        <View style={d.results}><Text style={d.sectionTitle}>{known.length===rows.length?"Total general GO":"Total calculado · datos conocidos"}</Text>
+          <View style={d.metricRow}><Text style={d.metricLabel}>Empresas captadas</Text><Text style={d.resultValue}>{financialCount(known.length?total.companies:null)}</Text></View>
+          <View style={d.metricRow}><Text style={d.metricLabel}>Ingreso mensual</Text><Text style={d.resultValue}>{money(known.length?total.monthly:null)}</Text></View>
+          <View style={d.metricRow}><Text style={d.metricLabel}>Ingreso anual</Text><Text style={d.resultValue}>{money(known.length?total.annual:null)}</Text></View>
           {known.length<rows.length&&<Text style={s.note}>{rows.length-known.length} combinaciones sin dato completo; no se suman.</Text>}
         </View>
-        <View style={d.results}><Text style={s.heading}>Combinación en edición · {row?.country} · {row?.activity}</Text>
-          <View style={s.planBar}><Text style={s.text}>Empresas captadas</Text><Text style={d.resultValue}>{financialCount(row?.companies??null)}</Text></View>
-          <View style={s.planBar}><Text style={s.text}>Ingreso mensual</Text><Text style={d.resultValue}>{money(row?.monthly??null)}</Text></View>
-          <View style={s.planBar}><Text style={s.text}>Ingreso anual</Text><Text style={d.resultValue}>{money(row?.annual??null)}</Text></View>
+        <View style={d.results}><Text style={d.sectionTitle} numberOfLines={2}>Combinación en edición · {row?.country} · {row?.activity}</Text>
+          <View style={d.metricRow}><Text style={d.metricLabel}>Empresas captadas</Text><Text style={d.resultValue}>{financialCount(row?.companies??null)}</Text></View>
+          <View style={d.metricRow}><Text style={d.metricLabel}>Ingreso mensual</Text><Text style={d.resultValue}>{money(row?.monthly??null)}</Text></View>
+          <View style={d.metricRow}><Text style={d.metricLabel}>Ingreso anual</Text><Text style={d.resultValue}>{money(row?.annual??null)}</Text></View>
         </View>
-        <Text style={s.heading}>Desglose por país</Text><FinanceTable headers={["País","Captadas","Mensual","Anual"]} rows={countryTotals}/>
-        <Text style={s.heading}>Desglose por actividad</Text><FinanceTable headers={["Actividad","Captadas","Mensual","Anual"]} rows={activityTotals}/>
-        <Text style={s.heading}>Combinaciones seleccionadas</Text><FinanceTable headers={["País","Actividad","Captadas","Mensual","Anual"]} rows={rows.map(item=>[item.country,item.activity,financialCount(item.companies),money(item.monthly),money(item.annual)])}/>
+        <Text style={d.breakdownTitle}>Desglose por país</Text><FinanceTable headers={["País","Captadas","Mensual","Anual"]} rows={countryTotals}/>
+        <Text style={d.breakdownTitle}>Desglose por actividad</Text><FinanceTable headers={["Actividad","Captadas","Mensual","Anual"]} rows={activityTotals}/>
+        <Text style={d.breakdownTitle}>Combinaciones seleccionadas</Text><FinanceTable headers={["País","Actividad","Captadas","Mensual","Anual"]} rows={rows.map(item=>[item.country,item.activity,financialCount(item.companies),money(item.monthly),money(item.annual)])}/>
       </>}
     </ScrollView>
-    <ScrollView testID="finance-controls-scroll" style={[d.controlsScroll,{maxHeight:Math.min(430,Math.max(120,panelHeight*.52))}]} contentContainerStyle={d.controls} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled>
+    <ScrollView testID="finance-controls-scroll" style={[d.controlsScroll,{maxHeight:Math.min(430,Math.max(120,panelHeight*.6))}]} contentContainerStyle={d.controls} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" nestedScrollEnabled>
       <View style={[d.selection,viewport.width<350&&d.stacked]}>
-        <FinanceMultiChoice label="Países incluidos" values={selectedCountries} options={catalog.countries.map(item=>({value:item.code,label:item.name}))} onChange={selectCountries}/>
-        <FinanceMultiChoice label="Actividades incluidas" values={selectedActivities} options={catalog.activities.filter(item=>item.enabled).map(item=>({value:item.id,label:item.name}))} onChange={selectActivities}/>
+        <FinanceMultiChoice mobileSheet label="Países incluidos" values={selectedCountries} options={catalog.countries.map(item=>({value:item.code,label:item.name}))} onChange={selectCountries}/>
+        <FinanceMultiChoice mobileSheet label="Actividades incluidas" values={selectedActivities} options={catalog.activities.filter(item=>item.enabled).map(item=>({value:item.id,label:item.name}))} onChange={selectActivities}/>
       </View>
       {!!rows.length&&<View style={[d.selection,viewport.width<350&&d.stacked]}>
-        <FinanceChoice label="Editar país" value={state.countryCode} options={catalog.countries.filter(item=>selectedCountries.includes(item.code)).map(item=>({value:item.code,label:item.name}))} onChange={countryCode=>update(current=>({...current,countryCode}))}/>
-        <FinanceChoice label="Editar actividad" value={state.activityId} options={catalog.activities.filter(item=>selectedActivities.includes(item.id)).map(item=>({value:item.id,label:item.name}))} onChange={activityId=>update(current=>({...current,activityId}))}/>
+        <FinanceChoice mobileSheet label="Editar país" value={state.countryCode} options={catalog.countries.filter(item=>selectedCountries.includes(item.code)).map(item=>({value:item.code,label:item.name}))} onChange={countryCode=>update(current=>({...current,countryCode}))}/>
+        <FinanceChoice mobileSheet label="Editar actividad" value={state.activityId} options={catalog.activities.filter(item=>selectedActivities.includes(item.id)).map(item=>({value:item.id,label:item.name}))} onChange={activityId=>update(current=>({...current,activityId}))}/>
       </View>}
       {!creating?<TouchableOpacity accessibilityRole="button" accessibilityLabel="Nueva actividad" onPress={()=>setCreating(true)} style={d.activityLink}><Text style={d.activityLinkText}>＋ Nueva actividad</Text></TouchableOpacity>
       :<View style={d.activityEditor}><TextInput accessibilityLabel="Nombre de la nueva actividad" value={activityName} onChangeText={setActivityName} placeholder="Nombre de la actividad" maxLength={160} style={s.input} returnKeyType="done" onSubmitEditing={createActivity}/>
@@ -103,9 +103,9 @@ export function FinancialSimpleDemoTable({ state, update, onCalculate }: Props) 
 }
 
 const d=StyleSheet.create({
-  root:{flex:1,minHeight:0,alignSelf:"stretch",backgroundColor:"#F7F8FA"},resultsScroll:{flex:1,minHeight:0},resultsContent:{padding:12,gap:9,paddingBottom:16},disclaimer:{fontSize:11,color:"#677384"},
-  results:{backgroundColor:"#FFFFFF",borderColor:"#E2E6EB",borderWidth:1,borderRadius:12,padding:12,gap:8},resultValue:{color:"#20784B",fontSize:17,fontWeight:"800",fontVariant:["tabular-nums"]},
-  controlsScroll:{flexGrow:0,borderTopWidth:1,borderTopColor:"#DCE1E8",backgroundColor:"#FFFFFF"},controls:{paddingHorizontal:12,paddingTop:10,paddingBottom:GO_NAVIGATION_OVERLAY_CLEARANCE,gap:10},
-  selection:{flexDirection:"row",gap:10,alignItems:"flex-start"},stacked:{flexDirection:"column"},inputs:{gap:10},activityLink:{minHeight:44,justifyContent:"center",alignSelf:"flex-start"},activityLinkText:{color:"#205C9C",fontSize:14,fontWeight:"700"},activityEditor:{gap:8},
+  root:{flex:1,minHeight:0,alignSelf:"stretch",backgroundColor:"#F7F8FA"},resultsScroll:{flex:1,minHeight:0},resultsContent:{paddingHorizontal:10,paddingTop:6,gap:5,paddingBottom:10},disclaimer:{fontSize:10,color:"#677384"},
+  results:{backgroundColor:"#FFFFFF",borderColor:"#E2E6EB",borderWidth:1,borderRadius:10,paddingHorizontal:10,paddingVertical:7,gap:3},sectionTitle:{fontSize:13,fontWeight:"700",color:"#171B22"},breakdownTitle:{fontSize:13,fontWeight:"700",color:"#171B22",marginTop:3},metricRow:{minHeight:24,flexDirection:"row",alignItems:"center",justifyContent:"space-between",gap:6},metricLabel:{fontSize:12,color:"#344052",flexShrink:1},resultValue:{color:"#20784B",fontSize:15,fontWeight:"800",fontVariant:["tabular-nums"],textAlign:"right",flexShrink:1},
+  controlsScroll:{flexGrow:0,borderTopWidth:1,borderTopColor:"#DCE1E8",backgroundColor:"#FFFFFF"},controls:{paddingHorizontal:10,paddingTop:6,paddingBottom:GO_NAVIGATION_OVERLAY_CLEARANCE,gap:6},
+  selection:{flexDirection:"row",gap:8,alignItems:"flex-start"},stacked:{flexDirection:"column",alignItems:"stretch"},inputs:{gap:6},activityLink:{minHeight:44,justifyContent:"center",alignSelf:"flex-start"},activityLinkText:{color:"#205C9C",fontSize:13,fontWeight:"700"},activityEditor:{gap:6},
   actions:{flexDirection:"row",gap:10},action:{flex:1,minHeight:48,borderRadius:10,alignItems:"center",justifyContent:"center",paddingHorizontal:6},calculate:{backgroundColor:"#20784B"},clear:{backgroundColor:"#B53338"},cancel:{backgroundColor:"#F6F7F9",borderWidth:1,borderColor:"#CBD1DA"},actionText:{color:"#FFFFFF",fontWeight:"800",fontSize:15,textAlign:"center"},cancelText:{color:"#344052",fontWeight:"700"},
 });

@@ -176,6 +176,7 @@ test('compact DEMO edits a pair, recalculates, creates an activity and clears on
   assert.ok(all(render()).some(node => node.children?.includes('366816 EUR')), 'selected pairs aggregate once');
   width = 320;
   assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.flexDirection === 'column')), 'narrow portrait layout stacks fields');
+  assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.alignItems === 'stretch')), 'stacked selectors fill the narrow width');
   width = 844;
   assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.flexDirection === 'row')), 'landscape uses the available width');
 });

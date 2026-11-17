@@ -828,12 +828,12 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
       <SafeAreaView style={[s.root, financialView && { backgroundColor: "#FFFFFF" }]}>
 
         {/* ── Header ── */}
-        <View style={[s.header, financialView && { backgroundColor: "#FFFFFF", borderBottomColor: "#E2E6EB", paddingVertical: 8 }]}>
-          <View style={[s.iconBadge, { backgroundColor: financialView ? "#EDF1F7" : "rgba(239,68,68,0.15)" }]}>
-            <Feather name={financialView ? "pie-chart" : "shield"} size={14} color={financialView ? "#344D78" : "#ef4444"} />
-          </View>
+        <View style={[s.header, financialView && { backgroundColor: "#FFFFFF", borderBottomColor: "#E2E6EB", paddingVertical: 5, paddingLeft: 64, paddingRight: 64, minHeight: 44 }]}>
+          {!financialView && <View style={[s.iconBadge, { backgroundColor: "rgba(239,68,68,0.15)" }]}>
+            <Feather name="shield" size={14} color="#ef4444" />
+          </View>}
           <View style={{ flex: 1 }}>
-            <Text style={[s.title, financialView && { color: "#171B22", fontSize: 16 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>{headerTitle}</Text>
+            <Text style={[s.title, financialView && { color: "#171B22", fontSize: 14, textAlign: "center" }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>{headerTitle}</Text>
             {!financialView && (section !== "roadmap" || roadmapStack.length > 0) && <Text style={s.subtitle}>{headerSub}</Text>}
           </View>
 
