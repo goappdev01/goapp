@@ -284,6 +284,8 @@ class Continuity:
                             "message":"La fábrica ya estaba activada; se conservó la ejecución existente."}
             if self.review_activation()!=review:
                 self.w.fail("WHEEL_SUBJECT_CHANGED","El lote cambió desde que se mostró la autorización.")
+            if review.get('account_changed'):
+                self.w.fail('WHEEL_CODEX_SESSION_CHANGED','Confirma primero la cuenta por separado; la fábrica seguirá pausada.')
             with self.b.db() as db:
                 db.execute("BEGIN IMMEDIATE")
                 row,doc=self.w._latest_trial(db)
@@ -301,6 +303,8 @@ class Continuity:
                 if db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone():
                     self.w.fail("WHEEL_WORKSPACE_BUSY","Espera al trabajo en curso.")
                 changed=identity!=doc.get("codex_identity")
+                if changed:
+                    self.w.fail('WHEEL_CODEX_SESSION_CHANGED','Confirma primero la cuenta por separado; la fábrica seguirá pausada.')
                 if not any(item["action"]=="run" for item in review["plan"]):
                     self.w.fail("WHEEL_NO_ELIGIBLE_CARD","No hay tarjetas pendientes que puedan continuar con este lote.")
                 renewal_by_card={item["card_id"]:item for item in review["renewals"]}
@@ -377,6 +381,46 @@ class Continuity:
             self.b.audit('wheel_owner_account_bound',{'batch':row['id'],'principal':principal,'enabled':False},db)
         return {'bound':True,'enabled':False,'message':'Cuenta vinculada al lote revisado. La rueda sigue pausada y ningún intento se ha reiniciado.'}
 
+    def _verified_paused_work(self,db,saved,grant,stages):
+        """Accept only completed, checkpoint-matched stages for identity review."""
+        from wheel_effects import WheelPublication
+        if saved['state']!='ready' or stages not in (
+                {'A':'verified'},{'A':'verified','B':'verified'}):
+            self.w.fail('WHEEL_REBIND_UNCERTAIN','Una etapa parcial requiere conciliación específica.')
+        attempt=db.execute('SELECT * FROM factory_attempts WHERE card_id=? AND attempt=?',
+                           (grant['card_id'],grant['attempt'])).fetchone()
+        job=db.execute('SELECT * FROM jobs WHERE id=?',(attempt['job_id'],)).fetchone() if attempt else None
+        checkpoint=db.execute('SELECT id,snapshot FROM wheel_checkpoints WHERE grant_id=? '
+                              'ORDER BY id DESC LIMIT 1',(grant['grant_id'],)).fetchone()
+        if (not attempt or attempt['state'] not in ('pending_review','await_review')
+                or attempt['comment_operation'] or attempt['move_operation']
+                or not job or job['state'] not in ('awaiting_validation','completed')
+                or not job['session_id'] or not checkpoint):
+            self.w.fail('WHEEL_REBIND_UNCERTAIN','El intento parcial no está detenido y conservado.')
+        result=json.loads(job['result'] or '{}')
+        payload=json.loads(job['data'] or '{}')
+        snapshot=json.loads(checkpoint['snapshot'])
+        if (result.get('exit_code')!=0 or not result.get('turn_completed')
+                or result.get('credit_limited') or result.get('session_id')!=job['session_id']
+                or payload.get('instruction_sha256')!=grant['instruction_sha']
+                or (payload.get('source') or {}).get('card_id')!=grant['card_id']
+                or (snapshot.get('authorization') or {}).get('grant_id')!=grant['grant_id']
+                or (snapshot.get('job') or {}).get('id')!=job['id']
+                or (snapshot.get('job') or {}).get('session_id')!=job['session_id']):
+            self.w.fail('WHEEL_REBIND_UNCERTAIN','El trabajo y su checkpoint no coinciden.')
+        # A terminal job and its recorded session identify the former worker.
+        # A recycled PID may now belong to an unrelated process.
+        pub=WheelPublication(self.f,[])
+        try:
+            actual={'head':pub.git_command(grant['workspace'],'rev-parse','HEAD').strip(),
+                    'status':pub.git_command(grant['workspace'],'status','--porcelain'),
+                    'diff_sha256':self.f.digest(pub.git_command(grant['workspace'],'diff','--binary','HEAD'))}
+        except (OSError,self.f.Error):
+            self.w.fail('WHEEL_REBIND_UNCERTAIN','No se pudo comprobar el worktree conservado.')
+        if actual!=snapshot.get('workspace'):
+            self.w.fail('WHEEL_REBIND_UNCERTAIN','El worktree cambió desde el checkpoint.')
+        return checkpoint['id']
+
     def review_live_rebind(self):
         """Review an owner-approved identity change without starting or changing work."""
         self.f._identity()
@@ -407,13 +451,13 @@ class Continuity:
                     self.w.fail('WHEEL_GRANT_INTEGRITY','Una autorización pendiente no coincide con la identidad anterior.')
                 stages={row['letter']:row['state'] for row in db.execute(
                     'SELECT letter,state FROM wheel_stages WHERE grant_id=?',(grant['grant_id'],))}
-                if saved['state'] in ('ready','wait_permissions') and stages:
-                    self.w.fail('WHEEL_REBIND_UNCERTAIN','Una tarjeta tiene etapas previas y requiere conciliación específica.')
+                checkpoint_id=(self._verified_paused_work(db,saved,grant,stages)
+                               if saved['state'] in ('ready','wait_permissions') and stages else None)
                 pending=[letter for letter in grant['operations'] if stages.get(letter)!='verified']
                 completed=sorted(letter for letter,state in stages.items() if state=='verified')
                 item={'grant_id':grant['grant_id'],'card_id':grant['card_id'],'title':grant['title'],
                       'state':saved['state'],'completed':completed,
-                      'operations':pending,'session_sha256':None,'checkpoint_id':None}
+                      'operations':pending,'session_sha256':None,'checkpoint_id':checkpoint_id}
                 if saved['state']=='credit_wait':
                     if stages!={'A':'verified'} or not pending:
                         self.w.fail('WHEEL_REBIND_UNCERTAIN','La sesión de Codex no tiene un checkpoint reanudable.')
@@ -443,7 +487,7 @@ class Continuity:
             if sum(item['state']=='credit_wait' for item in scoped)>1:
                 self.w.fail('WHEEL_REBIND_UNCERTAIN','Hay más de una sesión de cuota pendiente.')
 
-        cards=list(self.w._available(self.f._cards()))
+        cards=list(self.w._available(self.f._cards(update_preview=False)))
         card_by_id={card['id']:card for card in cards}
         for item in scoped:
             card=card_by_id.get(item['card_id'])
@@ -523,22 +567,9 @@ class Continuity:
                 'current_identity_sha256':review['current_identity_sha256'],
                 'queue_sha256':review['queue_sha256'],'principal':principal,
                 'same_session':review['resume_exact_session']},db)
-            db.execute("UPDATE wheel_control SET enabled=0,reason=?,retry_after=0 WHERE id=1",
-                       ('CREDIT_LIMIT' if review['resume_exact_session'] else None,))
-        if review['resume_exact_session']:
-            cards=list(self.w._available(self.f._cards()))
-            credit=next(item for item in review['pending'] if item['state']=='credit_wait')
-            if not cards or cards[0]['id']!=credit['card_id']:
-                self.w.pause('OWNER_PAUSED')
-                return {'bound':True,'enabled':False,'resumed':False,
-                        'message':'Cuenta vinculada; el checkpoint espera su turno. El trabajo parcial conserva su carpeta.'}
-            resumed=self.w.resume_after_quota()
-            return {'bound':True,'enabled':self.w.enabled(),'resumed':resumed,
-                    'message':('Cuenta vinculada y sesión conservada reanudada.' if resumed else
-                               'Cuenta vinculada; la sesión se conserva y sigue pendiente de reanudación segura.')}
-        result=self.w.toggle(True)
-        return {'bound':True,'enabled':bool(result.get('enabled')),'resumed':False,
-                'message':'Cuenta vinculada y cola autorizada reanudada.'}
+            db.execute("UPDATE wheel_control SET enabled=0,reason='OWNER_PAUSED',retry_after=0 WHERE id=1")
+        return {'bound':True,'enabled':False,'resumed':False,
+                'message':'Sesión vinculada. La fábrica sigue pausada; solo ACTIVAR iniciará la cola.'}
 
     def review_recovery(self,card_id):
         if self.w.enabled():self.w.fail('WHEEL_PAUSE_REQUIRED','Pausa la fábrica para revisar la recuperación.')

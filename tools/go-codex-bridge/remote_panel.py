@@ -24,7 +24,7 @@ class RemotePanel:
         "FACTORY_JOB_FAILED":"La última tarjeta quedó bloqueada. Revisa el expediente y la autorización antes de continuar.",
         "WHEEL_CODEX_AUTH":"La sesión de Codex no está verificada.",
         "WHEEL_CODEX_QUOTA":"La cuota de Codex no está disponible.",
-        "WHEEL_CODEX_SESSION_CHANGED":"Cambió la cuenta Codex vinculada. Pulsa GO para verificarla y activar la cola autorizada.",
+        "WHEEL_CODEX_SESSION_CHANGED":"Cambió la cuenta Codex vinculada. Confirma la sesión por separado; la fábrica seguirá pausada.",
         "WHEEL_EXPIRY_INVALID":"La autorización del lote ha caducado.",
         "WHEEL_WORKSPACE_BUSY":"Hay un trabajo en curso o pendiente de conciliar.",
         "WHEEL_SUBJECT_CHANGED":"Cambió la cola o una instrucción desde su revisión.",
@@ -114,19 +114,8 @@ class RemotePanel:
             try:
                 self.w._require_codex_identity(live["codex_identity"])
             except self.f.Error as error:
-                if error.code!="WHEEL_CODEX_SESSION_CHANGED":
-                    self.w.activation_failed(error.code)
-                    raise
                 self.w.activation_failed(error.code)
-                review=self.w.continuity.review_live_rebind()
-                result=self.w.continuity.rebind_live_queue(review,principal)
-                if result.get("enabled"):
-                    return result
-                credit=next((item for item in review["pending"] if item["state"]=="credit_wait"),None)
-                if credit and review["queue"] and review["queue"][0]["card_id"]==credit["card_id"]:
-                    # Quota recovery is still pending. Never turn it into a new
-                    # execution or claim that the wheel is running.
-                    return result
+                raise
             try:
                 return self.w.toggle(True)
             except self.f.Error as error:
@@ -358,14 +347,8 @@ class RemotePanel:
                 try:
                     self.w._require_codex_identity(live["codex_identity"])
                 except self.f.Error as error:
-                    if error.code!="WHEEL_CODEX_SESSION_CHANGED":
-                        raise
-                    # A previously paused wheel can have a stale OWNER_PAUSED
-                    # reason. Route the owner's review to the existing guarded
-                    # rebind flow; the preview itself never starts the wheel.
                     self.w.activation_failed(error.code)
-                    review=self.w.continuity.review_live_rebind()
-                    action="rebind"
+                    raise
                 else:
                     cards=list(self.w._available(self.w.f._cards()))
                     review={"live_queue":True,"consent_sha256":live["consent_sha256"],
@@ -373,6 +356,8 @@ class RemotePanel:
                             "account_changed":False,"renewals":[]}
             else:
                 review=self.w.continuity.review_activation()
+                if review.get('account_changed'):
+                    self.w.fail('WHEEL_CODEX_SESSION_CHANGED','Confirma primero la cuenta con Vincular cuenta sin activar.')
         elif action=="rebind":
             if self.w.live_policy():
                 review=self.w.continuity.review_live_rebind()
@@ -397,7 +382,7 @@ class RemotePanel:
         if action=="activate":
             return RemotePanel.activation_confirmation(review)
         if action=="rebind" and review.get("live_queue_rebind"):
-            return "VINCULAR CUENTA Y REANUDAR COLA"
+            return "VINCULAR CUENTA SIN ACTIVAR"
         if action=="rebind":
             return "VINCULAR CUENTA SIN ACTIVAR"
         return "CONFIRMAR OPERACIÓN"
@@ -406,7 +391,7 @@ class RemotePanel:
     def activation_confirmation(review):
         if review.get("renewals"):
             return "REAUTORIZAR PENDIENTES Y ACTIVAR FÁBRICA"
-        return "VINCULAR CUENTA Y ACTIVAR FÁBRICA" if review.get("account_changed") else "ACTIVAR FÁBRICA"
+        return "ACTIVAR FÁBRICA"
 
     def decide(self,ticket,confirmation,principal):
         record=self.previews.pop(ticket,None)

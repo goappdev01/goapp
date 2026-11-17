@@ -213,7 +213,7 @@ class Factory:
         if not isinstance(member, dict) or member.get("id") != OWNER:
             raise self.Error("FACTORY_IDENTITY_INVALID", "La cuenta Trello conectada no es la propietaria verificada.")
 
-    def _cards(self):
+    def _cards(self, *, update_preview=True):
         cards = self.bridge.api("/1/lists/" + QUEUE + "/cards",
             {"fields": "id,idBoard,idList,name,desc,url,pos,closed,shortLink", "filter": "open", "limit": 1000})
         if not isinstance(cards, list) or len(cards) >= 1000:
@@ -238,11 +238,12 @@ class Factory:
         preview = [{"card_id": c["id"], "title": c["name"], "position":c["pos"],
                     "eligible_agent4":live or set(re.findall(r"\b(?:A|AGENTE\s*)([1-5])\b", c["name"], re.I)) == {"4"}}
                    for c in cards if c["id"] not in INSTALL_CARDS]
-        with self.bridge.db() as db:
-            db.execute("UPDATE factory_control SET queue_preview=? WHERE id=1", (self.canonical(preview),))
+        if update_preview:
+            with self.bridge.db() as db:
+                db.execute("UPDATE factory_control SET queue_preview=? WHERE id=1", (self.canonical(preview),))
         return cards
 
-    def _spec(self, card, *, live_queue=False, initial_card_ids=()):
+    def _spec(self, card, *, live_queue=False, initial_card_ids=(), archive=False):
         if card["id"] in INSTALL_CARDS:
             raise self.Error("FACTORY_SELF_CARD", "La instalación de la fábrica está excluida de su propia cola.")
         title = card["name"]
@@ -256,7 +257,7 @@ class Factory:
         short = card.get("shortLink")
         if not re.fullmatch(r"[A-Za-z0-9]{8}", str(short)):
             raise self.Error("FACTORY_CARD_INVALID", "La tarjeta carece de enlace corto válido.")
-        snapshot = self.bridge.read_card("https://trello.com/c/" + short)["data"]
+        snapshot = self.bridge.read_card("https://trello.com/c/" + short, archive=archive)["data"]
         check = snapshot["card"]
         if (not snapshot["verification"]["stable_during_read"] or not snapshot["verification"]["pagination_exhausted"]
                 or check.get("id") != card["id"] or check.get("idBoard") != BOARD
@@ -733,7 +734,7 @@ class Factory:
             return {"running": job["id"]}
         if job["state"] == "prepared":
             return {"prepared":job["id"],"authorization":"required"}
-        if job["state"] != "completed":
+        if job["state"] not in ("completed","awaiting_validation"):
             result = job.get("result") or {}
             reason = "CREDIT_LIMIT" if LIMIT_RE.search(str(result)) else "FACTORY_JOB_REQUIRES_REVIEW"
             self._update(row["card_id"],row["attempt"],state="blocked",finished=self.utc(),detail=self.canonical({"reason":reason,"agent":"4"}))
@@ -793,7 +794,7 @@ class Factory:
                     agents = set(re.findall(r"\b(?:A|AGENTE\s*)([1-5])\b",card.get("name", ""),re.I))
                     if agents != {"4"}:
                         raise self.Error("FACTORY_HEAD_AGENT_INVALID", "La primera tarjeta no corresponde al Agente 4; la cola se detiene.")
-                    spec = self._spec(card)
+                    spec = self._spec(card,archive=True)
                     previous = self._row(card["id"],spec["attempt"])
                     if previous:
                         if previous["instruction_sha"] != spec["instruction_sha"] or previous["title"] != spec["title"]:

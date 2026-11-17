@@ -576,10 +576,10 @@ class Wheel:
                  "frozen_batch":frozen,
                 "recovery_required":control["reason"] in ("CREDIT_LIMIT","CREDIT_RECOVERY_REQUIRED")}
 
-    def _subject(self, card, *, review=False):
+    def _subject(self, card, *, review=False, archive=False):
         live=self.live_policy()
         spec = self.f._spec(card,live_queue=bool(live),
-                            initial_card_ids=live["initial_card_ids"] if live else ())
+                            initial_card_ids=live["initial_card_ids"] if live else (), archive=archive)
         with self.b.card_workspace(None):
             workspace, sandbox = self.b.workspace("4")
         if live:
@@ -952,7 +952,7 @@ class Wheel:
             if attempt_state:
                 changed=db.execute(
                     "UPDATE factory_attempts SET state=?,finished=COALESCE(finished,?) "
-                    "WHERE card_id=? AND attempt=? AND state IN ('prepared','running','commenting','moving')",
+                    "WHERE card_id=? AND attempt=? AND state IN ('prepared','running','pending_review','commenting','moving')",
                     (attempt_state,self.f.utc(),g["card_id"],g["attempt"])).rowcount
                 if changed:
                     self.b.audit("factory_attempt_reconciled",{
@@ -960,7 +960,7 @@ class Wheel:
                         "reason":reason},db)
             self.b.audit("wheel_state", {"grant":g["grant_id"],"state":state,"reason":reason},db)
 
-    def _check_card(self,g,card):
+    def _check_card(self,g,card,*,archive=False):
         if not card:
             self.fail("WHEEL_CARD_CHANGED","La tarjeta dejó de estar en COLA.")
         live=self.live_policy()
@@ -968,7 +968,7 @@ class Wheel:
             bound=g.get("codex_identity_sha256",self.f.digest(live["codex_identity"]))
             if bound!=self.f.digest(live["codex_identity"]):
                 self.fail("WHEEL_CODEX_SESSION_CHANGED","La autorización de esta tarjeta pertenece a otra cuenta Codex.")
-        subject, spec=self._subject(card)
+        subject, spec=self._subject(card,archive=archive)
         expected_destination=CHECK_V2 if spec["work_scope"]=="V2" else CHECK
         if spec["work_scope"]=="REVIEW" or g["destination"]!=expected_destination:
             self.fail("WHEEL_DESTINATION_REVIEW","El alcance V1/V2 y el destino firmado requieren revisión.")
@@ -1256,7 +1256,7 @@ class Wheel:
             if self._expired(g):
                 self._transition(g,"expired","WHEEL_EXPIRY_INVALID")
                 return {"again":True}
-            spec=self._check_card(g,card)
+            spec=self._check_card(g,card,archive=letter=="A")
             if letter=="A":
                 if codex_identity:
                     self._require_codex_identity(codex_identity)

@@ -304,6 +304,7 @@ class Bridge:
         self.owner_confirmation = self.confirm_local_owner
         self.approval_actor = {**self.actor, "session": secrets.token_hex(24)}
         self.mutex = threading.RLock()
+        self._card_read_cache = {}
         self._card_workspace = contextvars.ContextVar('go_card_workspace',default=None)
         self.stopping = False
         self.oauth = None
@@ -583,6 +584,12 @@ class Bridge:
     def read_card(self, url, page_size=100, *, archive=True):
         short = self.card_short(url)
         card = self.api("/1/cards/" + short, {"fields": "id,idBoard,idList,name,desc,url,dateLastActivity"})
+        if not archive:
+            with self.mutex:
+                cached = self._card_read_cache.get(short)
+            if (cached and isinstance(card.get("dateLastActivity"), str) and card["dateLastActivity"]
+                    and cached["card"] == card and cached["data"]["verification"]["stable_during_read"]):
+                return {"data": cached["data"]}
         comments, seen, before = [], set(), None
         pages = 0
         while True:
@@ -613,6 +620,11 @@ class Bridge:
                 "verification": {"pagination_exhausted": True, "pages": pages, "stable_during_read": stable,
                     "comment_count": len(comments), "comments": [{"id": x["id"], "characters": len(x["text"]),
                         "utf8_bytes": len(x["text"].encode("utf-8")), "sha256": digest(x["text"])} for x in comments]}}
+        with self.mutex:
+            if stable:
+                self._card_read_cache[short] = {"card": dict(card), "data": data}
+            else:
+                self._card_read_cache.pop(short, None)
         return self.save_snapshot(short, data) if archive else {"data":data}
 
     def save_snapshot(self, short, data):
@@ -1207,6 +1219,14 @@ class Bridge:
         save_json(self.home / "ejecuciones" / identifier / artifact_name, result)
         with self.mutex, self.db() as connection:
             connection.execute("UPDATE jobs SET state=?,result=?,updated=? WHERE id=?", (state, canonical(result), utc(), identifier))
+            if (state=="awaiting_validation" and result.get("turn_completed")
+                    and result.get("exit_code")==0):
+                connection.execute(
+                    "UPDATE factory_attempts SET state='pending_review' "
+                    "WHERE job_id=? AND state='running' AND EXISTS ("
+                    "SELECT 1 FROM wheel_grants g JOIN wheel_stages s ON s.grant_id=g.grant_id "
+                    "WHERE g.card_id=factory_attempts.card_id AND g.attempt=factory_attempts.attempt "
+                    "AND s.letter='A' AND s.state='verified')",(identifier,))
             self.audit("execution_finished", {"job": identifier, "state": state, "exit_code": result.get("exit_code")}, connection)
 
     def recover_interrupted(self):
