@@ -13,12 +13,12 @@ import {FinanceButton,financeStyles as s} from "./FinancialUI";
 export function FinancialPlanScreen(){
  const navigation=useNavigation();
  useEffect(()=>{navigation.setOptions({orientation:"all"});return()=>navigation.setOptions({orientation:"portrait"});},[navigation]);
- const admin=useAdminAccess(),[epoch,setEpoch]=useState(0),[session,setSession]=useState<CalculatorSession|null>(null),[revision,setRevision]=useState(0),[error,setError]=useState("");
+ const admin=useAdminAccess(),[epoch,setEpoch]=useState(0),[session,setSession]=useState<CalculatorSession|null>(null),[revision,setRevision]=useState(0),[error,setError]=useState(""),[setupRequired,setSetupRequired]=useState(false);
  const [demoActive,setDemoActive]=useState(false),[demoDoc,setDemoDoc]=useState<FinancialDocument|null>(null);
  useEffect(()=>onSessionChanged(()=>{setDemoActive(false);setDemoDoc(null);setSession(null);setError("");setEpoch(v=>v+1);}),[]);
  useEffect(()=>{if(!admin.allowed||admin.checking||!admin.userId){setDemoActive(false);setDemoDoc(null);}},[admin.allowed,admin.checking,admin.userId]);
- useEffect(()=>{let active=true,off:(()=>void)|undefined,current:CalculatorSession|undefined;setSession(null);setError("");
-  if(!demoActive&&admin.allowed&&!admin.checking&&admin.userId)void openRevenueCalculator(admin.userId).then(value=>{if(!active)return;current=value;off=value.subscribe(()=>setRevision(v=>v+1));setSession(value);}).catch(cause=>{if(active)setError(cause&&typeof cause==='object'&&'message' in cause&&typeof cause.message==='string'?cause.message:"No se pudo abrir la calculadora. Vuelve a intentarlo.");});
+ useEffect(()=>{let active=true,off:(()=>void)|undefined,current:CalculatorSession|undefined;setSession(null);setError("");setSetupRequired(false);
+  if(!demoActive&&admin.allowed&&!admin.checking&&admin.userId)void openRevenueCalculator(admin.userId).then(value=>{if(!active)return;current=value;off=value.subscribe(()=>setRevision(v=>v+1));setSession(value);}).catch(cause=>{if(!active)return;if(cause&&typeof cause==='object'&&'code' in cause&&cause.code==='FINANCE_SETUP_REQUIRED')setSetupRequired(true);else setError(cause&&typeof cause==='object'&&'message' in cause&&typeof cause.message==='string'?cause.message:"No se pudo abrir la calculadora. Vuelve a intentarlo.");});
   return()=>{active=false;off?.();if(current)void current.flush();};
  },[admin.userId,admin.allowed,admin.checking,epoch,demoActive]);
  const view=useMemo(()=>session?.snapshot(),[session,revision]);
@@ -30,7 +30,8 @@ export function FinancialPlanScreen(){
  <FinancialRevenueTable doc={demoDoc} demo writable update={fn=>setDemoDoc(current=>current?fn(current):current)}/>
  </>:<>
  {!view&&<FinanceButton label="Probar calculadora DEMO" onPress={()=>{setDemoDoc(createFinancialDemoDocument());setDemoActive(true);}}/>}
- {!view&&!error&&<ActivityIndicator accessibilityLabel="Abriendo calculadora"/>}
+ {setupRequired&&<Text style={s.note}>La calculadora alojada aún no está configurada. Puedes probar la simulación local sin guardar datos.</Text>}
+ {!view&&!error&&!setupRequired&&<ActivityIndicator accessibilityLabel="Abriendo calculadora"/>}
  {!!error&&<View><Text accessibilityRole="alert" style={s.error}>{error}</Text><FinanceButton label="Reintentar" onPress={()=>setEpoch(v=>v+1)}/></View>}
  {view&&<>
  {!!view.error&&<View><Text accessibilityRole="alert" style={s.error}>{view.error}</Text>{view.canWrite&&<FinanceButton label="Reintentar guardado" onPress={()=>{void session!.flush();}}/>}</View>}

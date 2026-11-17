@@ -33,14 +33,19 @@ test('DEMO starts with clearly synthetic local inputs and the existing eight-col
   let doc = demo.createFinancialDemoDocument(2026);
   assert.equal(doc.countries.length, 20);
   assert.equal(doc.activities.length, 5);
-  assert.equal(doc.markets.length, 100);
+  assert.equal(doc.markets.length, 1, 'no market statistics are invented for other selections');
   assert.match(doc.title, /DEMO/);
   assert.ok(doc.sources.every(source => source.organization.includes('FICTICIOS')));
-  assert.deepEqual([esHair(doc).companies, esHair(doc).monthly, esHair(doc).annual], [95, 2755, 33060]);
-  doc = calculator.updateRevenueCalculator(doc, 'go_peluquerias', 'ES', 'REAL', 'share', 10);
+  assert.deepEqual([esHair(doc).companies, esHair(doc).monthly, esHair(doc).annual], [2304, 66816, 801792]);
+  assert.equal(rows(doc).find(row => row.countryCode === 'FR' && row.activityId === 'go_restaurantes').market, null);
   doc = calculator.updateRevenueCalculator(doc, 'go_peluquerias', 'ES', 'REAL', 'fee', 30);
-  assert.deepEqual([esHair(doc).companies, esHair(doc).monthly, esHair(doc).annual], [190, 5700, 68400]);
-  assert.equal(esHair(demo.createFinancialDemoDocument(2026)).monthly, 2755, 'a new DEMO has no persistent copy');
+  assert.deepEqual([esHair(doc).companies, esHair(doc).monthly, esHair(doc).annual], [2304, 69120, 829440]);
+  doc = demo.updateFinancialDemoMarket(doc, 'go_peluquerias', 'ES', 1000);
+  assert.equal(esHair(doc).companies, 50);
+  doc = demo.updateFinancialDemoMarket(doc, 'go_peluquerias', 'ES', Number.NaN);
+  assert.equal(esHair(doc).monthly, null, 'invalid figures display Sin dato');
+  assert.equal(model.financialDocumentSchema.safeParse(doc).success, true);
+  assert.equal(esHair(demo.createFinancialDemoDocument(2026)).monthly, 66816, 'a new DEMO has no persistent copy');
 });
 
 test('ADMIN can enter DEMO despite a failed finance access check without calling save endpoints', async () => {
@@ -60,7 +65,7 @@ test('ADMIN can enter DEMO despite a failed finance access check without calling
     'expo-router': { useNavigation: () => ({ setOptions() {} }) },
     '@/contexts/GoAdminAccessContext': { useAdminAccess: () => admin },
     '@/lib/sessionEvents': { onSessionChanged: () => () => {} },
-    '@/data/financialCalculatorSession': { openRevenueCalculator: async () => { calls.push('access'); throw Error('La persistencia financiera todavía no está instalada en este entorno.'); } },
+    '@/data/financialCalculatorSession': { openRevenueCalculator: async () => { calls.push('access'); throw Object.assign(Error('La persistencia financiera todavía no está instalada en este entorno.'), { code: 'FINANCE_SETUP_REQUIRED' }); } },
     '@/data/financialDemo': demo,
     '@/components/ui/GoNavigationRail': { GO_NAVIGATION_OVERLAY_CLEARANCE: 178 },
     './FinancialRevenueTable': { FinancialRevenueTable: 'RevenueTable' },
@@ -73,12 +78,14 @@ test('ADMIN can enter DEMO despite a failed finance access check without calling
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(render().props.contentContainerStyle.at(-1).paddingBottom, 178, 'scrolling clears the overlaid navigation controls');
   assert.equal(calls.length, 1);
+  assert.equal(all(render()).some(node => node.props.accessibilityRole === 'alert'), false, 'setup absence is not a red error screen');
+  assert.equal(all(render()).some(node => node.children?.some(text => typeof text === 'string' && text.includes('simulación local'))), true);
   find(node => node.props.label === 'Probar calculadora DEMO').props.onPress();
   let table = find(node => node.type === 'RevenueTable');
   assert.equal(table.props.demo, true);
   table.props.update(doc => calculator.updateRevenueCalculator(doc, 'go_peluquerias', 'ES', 'REAL', 'fee', 30));
   table = find(node => node.type === 'RevenueTable');
-  assert.equal(esHair(table.props.doc).monthly, 2850);
+  assert.equal(esHair(table.props.doc).monthly, 69120);
   assert.equal(calls.length, 1, 'DEMO edits and calculation cannot call finance API');
   admin.allowed = false;
   assert.equal(all(render()).some(node => node.type === 'RevenueTable' || node.props.label === 'Probar calculadora DEMO'), false);

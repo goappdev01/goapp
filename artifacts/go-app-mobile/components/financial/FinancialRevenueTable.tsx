@@ -1,6 +1,7 @@
 import React,{useMemo,useRef,useState} from "react";
 import {Alert,Keyboard,ScrollView,StyleSheet,Text,TouchableOpacity,View} from "react-native";
 import {clearCalculatorSimulation,selectedCalculatorRows} from "@/data/financialCalculatorTools";
+import {updateFinancialDemoMarket} from "@/data/financialDemo";
 import {FinancialCalculatorTools} from "./FinancialCalculatorTools";
 import type {FinancialDocument} from "@workspace/api-zod";
 import {applyRevenueCalculatorInputs,calculatorCatalog,revenueCalculatorRows,revenueCalculatorTotals,updateRevenueCalculator,type RevenueCalculatorRow} from "@/data/financialRevenueCalculator";
@@ -18,7 +19,7 @@ export function FinancialRevenueTable({doc,writable,demo=false,update,onCalculat
  const scenario="REAL" as const;
  const [width,setWidth]=useState(0),[calculationRevision,setCalculationRevision]=useState(0);
  const [selectedCountries,setSelectedCountries]=useState(()=>{const countries=calculatorCatalog(doc).countries;return[countries.find(c=>c.code==="ES")?.code||countries[0]?.code].filter(Boolean) as string[];});
- const [toolsOpen,setToolsOpen]=useState(false); const [selectedActivities,setSelectedActivities]=useState(()=>calculatorCatalog(doc).activities.filter(a=>a.enabled).map(a=>a.id));
+ const [toolsOpen,setToolsOpen]=useState(false); const [selectedActivities,setSelectedActivities]=useState(()=>{const activities=calculatorCatalog(doc).activities.filter(a=>a.enabled);return demo?[activities.find(a=>a.id==="go_peluquerias")?.id||activities[0]?.id].filter(Boolean) as string[]:activities.map(a=>a.id);});
  const [bulkShare,setBulkShare]=useState<number|null>(null),[bulkFee,setBulkFee]=useState<number|null>(null),[bulkError,setBulkError]=useState("");
  const edits=useRef(new Map<string,Edit>());
  const catalog=useMemo(()=>calculatorCatalog(doc),[doc]),allRows=useMemo(()=>revenueCalculatorRows(doc,scenario),[doc,scenario,calculationRevision]);
@@ -45,7 +46,7 @@ export function FinancialRevenueTable({doc,writable,demo=false,update,onCalculat
  onClearSelection={()=>{setSelectedCountries([]);setSelectedActivities([]);resetBulk();}} onClearSimulation={clearSimulation}/>}
  <ScrollView horizontal nestedScrollEnabled keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator contentContainerStyle={t.table} accessibilityLabel="Tabla de proyección de ingresos GO">
  <View><View style={t.header}>{HEADERS.map((label,i)=><Text key={label} style={[t.cell,t.columnHeading,{width:WIDTHS[i]}]}>{label}</Text>)}</View>
- {rows.map(row=><View key={row.id} style={t.row}><Text style={[t.cell,t.name,{width:WIDTHS[0]}]}>{row.country}</Text><Text style={[t.cell,t.name,{width:WIDTHS[1]}]}>{row.activity}</Text><View style={[t.cell,{width:WIDTHS[2]}]}><Text style={[s.text,{fontSize:16,fontWeight:"600"}]}>{row.market===null?"Sin dato":financialCount(row.market)}</Text>{row.marketInReview&&row.market!==null&&<Text style={s.note}>En revisión</Text>}{row.unit!=="empresa"&&<Text style={s.note}>{row.unit==="establecimiento"?"Establecimientos":"Otra unidad"}</Text>}</View>
+ {rows.map(row=><View key={row.id} style={t.row}><Text style={[t.cell,t.name,{width:WIDTHS[0]}]}>{row.country}</Text><Text style={[t.cell,t.name,{width:WIDTHS[1]}]}>{row.activity}</Text><View style={[t.cell,{width:WIDTHS[2]}]}>{demo?<FinanceNumber compact label={"Empresas potenciales · "+row.country+" · "+row.activity} value={row.market} disabled={!writable} onChange={value=>update(d=>updateFinancialDemoMarket(d,row.activityId,row.countryCode,value))}/>:<Text style={[s.text,{fontSize:16,fontWeight:"600"}]}>{row.market===null?"Sin dato":financialCount(row.market)}</Text>}{row.marketInReview&&row.market!==null&&<Text style={s.note}>En revisión</Text>}{row.unit!=="empresa"&&<Text style={s.note}>{row.unit==="establecimiento"?"Establecimientos":"Otra unidad"}</Text>}</View>
  <View style={[t.cell,{width:WIDTHS[3]}]}><FinanceNumber compact label={"Captación · "+row.country+" · "+row.activity} value={row.share} disabled={!writable} onChange={value=>edit(row,"share",value)}/></View>
  <View style={[t.cell,{width:WIDTHS[4]}]}><FinanceNumber compact label={"Cuota mensual EUR · "+row.country+" · "+row.activity} value={row.fee} disabled={!writable||!row.feeEditable} onChange={value=>edit(row,"fee",value)}/>{!row.feeEditable&&<Text style={s.note}>Falta conversión a EUR</Text>}</View>
  <Text style={[t.cell,t.result,{width:WIDTHS[5]}]}>{financialCount(row.companies)}</Text><Text style={[t.cell,t.result,{width:WIDTHS[6]}]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{incomeMoney(row.monthly)}</Text><Text style={[t.cell,t.result,{width:WIDTHS[7]}]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{incomeMoney(row.annual)}</Text></View>)}

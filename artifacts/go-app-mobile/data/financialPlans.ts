@@ -17,6 +17,8 @@ export async function financialApi<T>(path: string, userId: string, method = "GE
   } catch (error) {
     if (error instanceof BookingApiError) {
       if (error.status === 422) throw new Error("El archivo contiene datos incompatibles. Revísalo en la vista previa local antes de aplicar.");
+      if (error.status === 503 && error.code === "FINANCE_SETUP_REQUIRED")
+        throw Object.assign(new Error("La persistencia financiera todavía no está instalada en este entorno."), { code: "FINANCE_SETUP_REQUIRED" });
       const safe:Record<number,string>={400:"Revisa los datos y referencias de la operación financiera.",401:"No se ha podido comprobar tu sesión actual de GO. Vuelve a intentarlo.",403:"No tienes autorización expresa para este plan.",404:"El servicio financiero todavía no está disponible en este entorno.",409:"El plan ha cambiado. Recarga y revisa antes de guardar o revertir.",503:"La persistencia financiera todavía no está instalada en este entorno."};
       throw new Error(safe[error.status]||"No se pudo verificar la operación financiera. Inténtalo de nuevo.");
     }
