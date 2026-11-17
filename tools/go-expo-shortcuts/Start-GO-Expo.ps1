@@ -23,7 +23,8 @@ function Invoke-Git([string[]]$Arguments) {
     }
     finally { $ErrorActionPreference = $previous }
     if ($code -ne 0) { throw "Git no pudo comprobar $($Arguments[0]); no se cambia ni arranca el servidor." }
-    return ($value | Out-String).Trim()
+    # Git porcelain uses its leading status column; trimming it hides that column.
+    return ($value | Out-String).TrimEnd("`r", "`n")
 }
 
 function Get-Listener {
@@ -111,9 +112,17 @@ try {
             throw 'La configuración de 8089 señala otro worktree; no se cambia la versión.'
         }
         if ($head -ne $pinned.sha) { throw "8089 está en $($head.Substring(0,8)), distinto del SHA verificado $($pinned.sha.Substring(0,8)). Se conservan los cambios locales." }
-        if ((Invoke-Git @('status', '--porcelain=v1', '-uno')) -or
-            (Invoke-Git @('ls-files', '--others', '--exclude-standard', '--', 'artifacts/go-app-mobile'))) {
-            throw '8089 contiene cambios locales; no se arranca código distinto de la versión fijada.'
+        $tracked = Invoke-Git @('status', '--porcelain=v1', '-uno')
+        foreach ($line in ($tracked -split "`n" | Where-Object { $_.Length -ge 4 })) {
+            if ($line.Substring(3).Trim() -ne 'artifacts/go-app-mobile/expo-env.d.ts') {
+                throw '8089 contiene cambios locales; no se arranca código distinto de la versión verificada.'
+            }
+            $generated = (Get-Content -LiteralPath (Join-Path $Workspace 'artifacts/go-app-mobile/expo-env.d.ts') -Raw -Encoding UTF8).Replace("`r`n", "`n").Trim()
+            $committed = (Invoke-Git @('show', 'HEAD:artifacts/go-app-mobile/expo-env.d.ts')).Replace("`r`n", "`n").Trim()
+            if ($generated -cne $committed) { throw 'El archivo Expo generado contiene cambios reales; se conserva sin arrancar otra versión.' }
+        }
+        if (Invoke-Git @('ls-files', '--others', '--exclude-standard', '--', 'artifacts/go-app-mobile')) {
+            throw '8089 contiene archivos locales nuevos; se conservan antes de cambiar su versión.'
         }
     }
 
