@@ -56,6 +56,44 @@ async function shoppingUI(f,{handedness='right',width=390,height=844,fontScale=1
   async frame(time){const pending=[...frames.values()];frames.clear();await h.settle(()=>pending.forEach(fn=>fn(time)));},close:()=>h.settle(()=>root.unmount())};
 }
 
+test('COMPRAS: a deleted canonical list requires explicit restoration and reopens with its original products',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  const original=await f.open();await f.add('Pan');
+  await f.disk.store.updateGoLog(rows=>({entries:rows.map(row=>row.id===original.id?{...row,deleted:true,estado:'rechazado'}:row),result:null}));
+  const before=JSON.stringify(f.disk.rows),writes=f.disk.writes;
+  await assert.rejects(f.open(),error=>error?.name==='ShoppingNoteDeletedError'&&error.noteId===original.id);
+  ui=await shoppingUI(f);assert.ok(ui.hosts.has('shopping-restore'));assert.equal(ui.hosts.has('shopping-list-scroll'),false);
+  await ui.tap('shopping-retry');assert.ok(ui.hosts.has('shopping-restore'));assert.equal(JSON.stringify(f.disk.rows),before);assert.equal(f.disk.writes,writes);
+  await ui.tap('shopping-restore');assert.equal(JSON.stringify(f.disk.rows),before);
+  await ui.run(()=>ui.alerts.at(-1).buttons.find(button=>button.text==='RESTAURAR').onPress());await ui.idle();
+  assert.equal(f.disk.rows.length,1);assert.equal(f.disk.rows[0].id,original.id);assert.equal(f.disk.rows[0].deleted,false);
+  assert.equal(f.doc().items[0].name,'Pan');assert.ok(ui.hosts.has('shopping-list-scroll'));
+  await ui.close();ui=null;await f.disk.reopen();assert.equal((await f.open()).id,original.id);assert.equal(f.doc().items[0].name,'Pan');
+ }finally{if(ui)await ui.close();f.disk.close();}
+});
+
+test('COMPRAS: a valid list opens beside a trashed copy without reviving it; ambiguous active lists remain protected',async()=>{
+ const f=await shoppingFixture();try{
+  const active=await f.open();await f.add('Leche');
+  const trashed={...active,id:'old-shopping-list',deleted:true,estado:'rechazado'};
+  await f.disk.store.updateGoLog(rows=>({entries:[trashed,...rows],result:null}));
+  assert.equal((await f.open()).id,active.id);await f.run({type:'store',value:'Tienda A'});
+  assert.equal(f.disk.rows.find(row=>row.id===trashed.id).deleted,true);
+  assert.equal(f.disk.rows.find(row=>row.id===active.id).note.shopping.store,'Tienda A');
+  await assert.rejects(f.api().restoreShoppingNote(f.disk.scope,f.disk.active,trashed.id),/cambió/);
+  assert.equal(f.disk.rows.find(row=>row.id===trashed.id).deleted,true);
+  await f.disk.store.updateGoLog(rows=>({entries:[{...active,id:'another-active-list'},...rows],result:null}));
+  await assert.rejects(f.open(),/más de una/);
+ }finally{f.disk.close();}
+});
+
+test('COMPRAS UI: an item without a store price shows a pending total, never a known zero',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  await f.open();await f.add('Pan');ui=await shoppingUI(f);
+  assert.equal(ui.hosts.get('shopping-estimate').children,'Pendiente');
+ }finally{if(ui)await ui.close();f.disk.close();}
+});
+
 test('COMPRAS UI: actual add/edit/bought/filter/next controls persist offline and closing an editor retains list scroll instance',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f);const scroll=ui.instances.get('shopping-list-scroll');await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Azúcar');await ui.input('quantity','2');await ui.tap('shopping-unit-picker');await ui.tap('shopping-unit-paquetes');await ui.tap('shopping-save');

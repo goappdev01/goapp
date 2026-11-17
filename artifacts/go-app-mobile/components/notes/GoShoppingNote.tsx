@@ -12,7 +12,7 @@ import { useBookingVoice } from "@/hooks/useBookingVoice";
 import type { TaskScope } from "@/lib/goTaskReminders";
 import { subscribeGoLog, getGoLogSnapshot } from "@/lib/goLogStore";
 import { noteInScope } from "@/lib/unifiedNotes";
-import { openShoppingNote, oldShoppingNotes, runShoppingOperation } from "@/lib/shoppingNoteStore";
+import { openShoppingNote, oldShoppingNotes, restoreShoppingNote, runShoppingOperation, ShoppingNoteDeletedError } from "@/lib/shoppingNoteStore";
 import { comparableShoppingPrices, legacyShoppingCandidates, normalizedShoppingPrice, shoppingEditor, shoppingEstimate, shoppingId, suggestShoppingCategory, visibleShopping,
   SHOPPING_CATEGORIES, SHOPPING_UNITS, type MeasureUnit, type ShoppingDocument, type ShoppingEditorDraft, type ShoppingFilter, type ShoppingItem, type ShoppingOperation } from "@/lib/shoppingNote";
 import { SHOPPING_ORBITS, SHOPPING_SUGGESTIONS, shoppingCommand, shoppingOrbitLayout, shoppingRoute } from "@/lib/shoppingExperience";
@@ -28,7 +28,7 @@ const shoppingPositions=new Map<string,number>();
 export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequested}:Props){
   const insets=useSafeAreaInsets(),keyboard=useGoNoteKeyboard(visible);
   const viewport=useWindowDimensions();
-  const [entry,setEntry]=useState<GoEntry|null>(null),[error,setError]=useState(""),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false);
+  const [entry,setEntry]=useState<GoEntry|null>(null),[error,setError]=useState(""),[restoreId,setRestoreId]=useState<string|null>(null),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false);
   const [filter,setFilter]=useState<ShoppingFilter>("all"),[arrange,setArrange]=useState(false),[dragging,setDragging]=useState(false);
   const [editor,setEditor]=useState<ShoppingEditorDraft|null>(null),[draftStatus,setDraftStatus]=useState(""),[next,setNext]=useState<string[]|null>(null);
   const [oldNotes,setOldNotes]=useState<GoEntry[]>([]),[legacy,setLegacy]=useState<GoEntry|null>(null),[legacySelected,setLegacySelected]=useState<string[]>([]);
@@ -44,13 +44,13 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
   const active=(expected:string,epoch:number)=>mounted.current&&latest.current.visible&&latest.current.ready&&latest.current.identity===expected&&generation.current===epoch;
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;};},[]);
   useEffect(()=>{
-    const epoch=++generation.current;setEntry(null);setEditor(null);setNext(null);setLegacy(null);setOldNotes([]);setError("");setFilter("all");setArrange(false);setBusy(false);setScreen("list");setOrbit(null);setUtility(null);setAnswer("");setCommand("");lock.current=false;retries.current.clear();draftSequence.current++;
+    const epoch=++generation.current;setEntry(null);setEditor(null);setNext(null);setLegacy(null);setOldNotes([]);setError("");setRestoreId(null);setFilter("all");setArrange(false);setBusy(false);setScreen("list");setOrbit(null);setUtility(null);setAnswer("");setCommand("");lock.current=false;retries.current.clear();draftSequence.current++;
     if(!visible||!ready||!scope)return;
     const expected=identity,valid=()=>active(expected,epoch);setLoading(true);
     void openShoppingNote(scope,valid).then(async row=>{
       const old=await oldShoppingNotes(scope,valid);if(!valid())return;setEntry(row);setEditor(row.note!.shopping!.pendingEditor||null);setOldNotes(old);
       setDraftStatus(row.note!.shopping!.pendingEditor?"Borrador recuperado del teléfono. Revisa y guarda el producto.":"");
-    }).catch(e=>{if(valid())setError((e as Error).message);}).finally(()=>{if(valid())setLoading(false);});
+    }).catch(e=>{if(valid()){setError((e as Error).message);setRestoreId(e instanceof ShoppingNoteDeletedError?e.noteId:null);}}).finally(()=>{if(valid())setLoading(false);});
     return()=>{generation.current++;};
   },[visible,ready,identity,retry]);
   useEffect(()=>subscribeGoLog(()=>{
@@ -133,7 +133,18 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
   const totals=doc?shoppingEstimate(doc):{totals:{},unknown:0},pickedTotals=doc?shoppingEstimate(doc,true):{totals:{},unknown:0},items=doc?.items||[];
   const panel=!!editor||!!next||!!legacy||!!utility,adding=screen==="add";
   const orbital=shoppingOrbitLayout(viewport.width-insets.left-insets.right,viewport.fontScale),route=doc?shoppingRoute(doc):undefined;
-  const displayTotal=(v:typeof totals)=>Object.entries(v.totals).map(([currency,value])=>money(value,currency)).join(" + ")||"0 EUR";
+  const displayTotal=(v:typeof totals)=>Object.entries(v.totals).map(([currency,value])=>money(value,currency)).join(" + ")||(v.unknown?"Pendiente":"0 EUR");
+  const confirmRestore=()=>{
+    if(!scope||!ready||!restoreId)return;
+    const expected=identity,epoch=generation.current,noteId=restoreId,valid=()=>active(expected,epoch);
+    Alert.alert("Restaurar COMPRAS","La lista está en la papelera. ¿Quieres recuperar esta misma lista y sus productos?",[
+      {text:"Cancelar",style:"cancel"},
+      {text:"RESTAURAR",onPress:()=>{setLoading(true);void restoreShoppingNote(scope,valid,noteId)
+        .then(()=>{if(valid())setRetry(value=>value+1);})
+        .catch(e=>{if(valid())setError((e as Error).message);})
+        .finally(()=>{if(valid())setLoading(false);});}},
+    ]);
+  };
   const openRoute=(item?:ShoppingItem)=>{setUtilityItem(item||null);setUtility("route");};
   const go=()=>{setAnswer("");setUtility("assistant");};
   if(!visible)return null;
@@ -148,7 +159,7 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
         </View>}
       </View>
       {!ready||!scope?<Text style={s.message}>Abre el ámbito personal de GO con tu sesión para usar Compras.</Text>:loading?<Text style={s.message}>Abriendo tu lista personal…</Text>:null}
-      {!!error&&<View style={s.message}><Text testID="shopping-error" accessibilityRole="alert" style={s.error}>{error}</Text>{!doc&&button("Reintentar",()=>setRetry(v=>v+1),"shopping-retry")}</View>}
+      {!!error&&<View style={s.message}><Text testID="shopping-error" accessibilityRole="alert" style={s.error}>{error}</Text>{!doc&&restoreId&&button("Restaurar mi lista",confirmRestore,"shopping-restore",true,loading)}{!doc&&button("Reintentar",()=>setRetry(v=>v+1),"shopping-retry",false,loading)}</View>}
       {doc&&<>
       <View style={[{flex:1,minHeight:0},(panel||adding)&&{display:"none"}]}>
         <View style={[s.row,{paddingHorizontal:12}]}>{([["pending","Pendientes"],["all","Todos"],["bought","Cogidos"]] as const).map(([key,label])=><React.Fragment key={key}>{button(label,()=>{if(!dragging)setFilter(key);},"shopping-filter-"+key,filter===key,dragging)}</React.Fragment>)}
@@ -267,7 +278,7 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
         {!!doc&&!editor&&<TouchableOpacity testID="shopping-add" accessibilityRole="button" accessibilityLabel="Añadir productos por categorías" disabled={busy||dragging} style={s.tab} onPress={()=>{setUtility(null);setNext(null);setLegacy(null);setScreen("add");setOrbit(null);setMore(false);}}><Feather name="plus" size={22} color="#477394"/><Text style={s.buttonText}>Añadir</Text></TouchableOpacity>}
         {!!doc&&editor&&<View style={{width:76}}>{button("Guardar",()=>void save(),"shopping-save",true)}</View>}
       </View>
-    <GoNavigationFloating screenKey="shopping-navigation" safeArea={false} handedness="right" keyboardResponsive keyboardVisible={keyboard.visible} protectedTop={insets.top+48} protectedBottom={Math.max(8,insets.bottom)+78} initialBottom={4}>
+    <GoNavigationFloating screenKey="shopping-navigation" safeArea={false} handedness={handedness} keyboardResponsive keyboardVisible={keyboard.visible} protectedTop={insets.top+48} protectedBottom={Math.max(8,insets.bottom)+78} initialBottom={4}>
       <GoCloseButton testID="shopping-back" level="panel" appearance="light" touchSize={56} hitSlop={0} disabled={busy||dragging} keyboardVisible={keyboard.visible} onPress={back} accessibilityLabel={keyboard.visible?"Ocultar teclado":panel||arrange||adding?"Volver a COMPRAS":"Volver a NOTAS"}/>
     </GoNavigationFloating>
     </KeyboardAvoidingView>

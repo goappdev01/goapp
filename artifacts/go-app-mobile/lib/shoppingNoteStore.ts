@@ -7,13 +7,17 @@ import { buildNoteEntry, isNoteEntry, noteDraft, noteInScope } from "./unifiedNo
 import { applyShoppingOperation, emptyShopping, legacyShoppingCandidates, shoppingEditor, shoppingId, shoppingName, suggestShoppingCategory, validateShopping, type ShoppingOperation } from "./shoppingNote";
 
 export const shoppingNoteId=(scope:TaskScope)=>"shopping_note:"+encodeURIComponent(scope.userId)+":"+encodeURIComponent(scope.context);
+export class ShoppingNoteDeletedError extends Error{
+  constructor(readonly noteId:string){super("La compra canónica está eliminada. Restaura la nota antes de continuar.");this.name="ShoppingNoteDeletedError";}
+}
 function assertPersonal(scope:TaskScope){if(!scope.userId||! /^(live|demo):USER$/.test(scope.context))throw Error("COMPRAS requiere una sesión en el ámbito personal de GO.");}
 async function check(scope:TaskScope,active:()=>boolean){assertPersonal(scope);await assertTaskUser(scope.userId);if(!active())throw Error("La cuenta o el contexto ha cambiado. Vuelve a abrir COMPRAS.");}
 function canonical(rows:GoEntry[],scope:TaskScope){
   const matches=rows.filter(row=>noteInScope(row,scope)&&row.note?.shopping!==undefined);
-  if(matches.length>1)throw Error("Hay más de una nota de compra especializada. Se conservan sin fusionar; revisa los datos.");
-  const entry=matches[0];
-  if(entry&&(entry.deleted||entry.estado==="rechazado"))throw Error("La compra canónica está eliminada. Restaura la nota antes de continuar.");
+  const active=matches.filter(row=>!row.deleted&&row.estado!=="rechazado");
+  if(new Set(matches.map(row=>row.id)).size!==matches.length||active.length>1||!active.length&&matches.length>1)throw Error("Hay más de una nota de compra especializada. Se conservan sin fusionar; revisa los datos.");
+  const entry=active[0];
+  if(!entry&&matches.length===1)throw new ShoppingNoteDeletedError(matches[0].id);
   if(entry)validateShopping(entry.note!.shopping!);
   return entry;
 }
@@ -35,6 +39,21 @@ export async function openShoppingNote(scope:TaskScope,active:()=>boolean):Promi
     const draft={...noteDraft(),id,title:"COMPRAS",content:"Lista personal de compra",destination:"pending" as const};
     const created=buildNoteEntry(draft,scope);created.note!.shopping=emptyShopping();
     return {entries:[created,...rows],result:created};
+  },()=>{if(!active())throw Error("El contexto de compra ha cambiado.");});
+  return verified(entry,undefined,scope,active);
+}
+/** A deleted shopping list remains in the trash until its owner explicitly confirms restoration. */
+export async function restoreShoppingNote(scope:TaskScope,active:()=>boolean,noteId:string):Promise<GoEntry>{
+  await check(scope,active);
+  const entry=await updateGoLog(async rows=>{
+    await check(scope,active);
+    const matches=rows.filter(row=>noteInScope(row,scope)&&row.note?.shopping!==undefined);
+    if(matches.length!==1||matches[0].id!==noteId||rows.filter(row=>row.id===noteId).length!==1)throw Error("La lista de COMPRAS cambió. Revisa la papelera antes de restaurarla.");
+    const previous=matches[0];
+    if(!previous.deleted&&previous.estado!=="rechazado")throw Error("La lista ya está activa. Pulsa Reintentar.");
+    validateShopping(previous.note!.shopping!);
+    const restored={...previous,deleted:false,estado:"pendiente" as const};
+    return {entries:rows.map(row=>row.id===noteId?restored:row),result:restored};
   },()=>{if(!active())throw Error("El contexto de compra ha cambiado.");});
   return verified(entry,undefined,scope,active);
 }
