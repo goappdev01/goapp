@@ -84,7 +84,8 @@ function Verify-Http {
         if ($stream.ReadByte() -lt 0) { throw 'El bundle iOS está vacío.' }
     }
     finally { $response.Dispose() }
-    Write-Host "Metro ${Port}: manifiesto y bundle iOS HTTP correctos; checkout $Workspace" -ForegroundColor Green
+    $servedSha = Invoke-Git @('rev-parse', 'HEAD')
+    Write-Host "Metro ${Port}: commit $($servedSha.Substring(0,8)); manifiesto y bundle iOS HTTP correctos; checkout $Workspace" -ForegroundColor Green
 }
 
 $launchMutex = $null
