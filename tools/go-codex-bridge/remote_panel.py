@@ -109,6 +109,10 @@ class RemotePanel:
                     policy = trial[1] if trial else {}
                 control = db.execute("SELECT enabled,reason,account_confirmation_required FROM wheel_control WHERE id=1").fetchone()
                 expected = policy.get("codex_identity")
+                if expected and identity and identity != expected:
+                    confirmed, confirmed_label = self.b.codex_account()
+                    if confirmed != identity:
+                        identity, detected = (confirmed, confirmed_label) if confirmed == expected else (None, None)
                 changed = bool(expected and identity and identity != expected)
                 if changed and not control["account_confirmation_required"]:
                     reason = control["reason"]

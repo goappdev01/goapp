@@ -775,6 +775,20 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(panel.account_state()['state'],'changed')
         self.assertFalse(self.runs or self.changes)
 
+    def test_account_view_does_not_latch_one_discordant_read(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        panel=RemotePanel(self.bridge)
+        with patch.object(self.bridge,'codex_account',side_effect=[
+                ('other-account','ot•••@e•••'),
+                (self.codex_identity,'sy•••@e•••')]):
+            result=panel.account_state()
+        self.assertEqual(result['state'],'linked')
+        self.assertTrue(wheel.enabled())
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute('SELECT account_confirmation_required FROM wheel_control WHERE id=1').fetchone()[0],0)
+        self.assertFalse(self.runs or self.changes)
+
     def test_interactive_change_uses_codex_login_and_holds_pause(self):
         wheel=self.bridge.factory.wheel
         wheel.activate_live("f"*64)

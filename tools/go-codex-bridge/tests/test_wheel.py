@@ -70,6 +70,7 @@ class WheelTests(unittest.TestCase):
         self.lose_publication=False
         self.codex_state="available"
         self.codex_identity="synthetic-codex-account"
+        self.confirmed_identity=None
         self.configure(self.bridge)
 
     def test_transient_trello_read_waits_without_conflicting_or_replaying(self):
@@ -79,6 +80,29 @@ class WheelTests(unittest.TestCase):
             outcome=wheel.tick()
         self.assertTrue(outcome.get("trello_retry"),outcome)
         self.assertTrue(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)
+
+    def test_discordant_account_reads_wait_without_latching_session_change(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        original=self.codex_identity
+        self.codex_identity="transient-other-account"
+        self.confirmed_identity=original
+        outcome=wheel.tick()
+        self.assertTrue(outcome.get("identity_retry"),outcome)
+        self.assertTrue(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)
+        self.codex_identity=original
+        self.assertEqual(wheel._require_codex_identity(original),original)
+
+    def test_two_matching_new_account_reads_keep_security_block(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        self.codex_identity="new-account"
+        self.confirmed_identity="new-account"
+        outcome=wheel.tick()
+        self.assertEqual(outcome.get("paused"),"WHEEL_CODEX_SESSION_CHANGED")
+        self.assertFalse(wheel.enabled())
         self.assertFalse(self.runs or self.changes)
 
     def git(self,*args):
@@ -94,8 +118,10 @@ class WheelTests(unittest.TestCase):
             "origin_main":self.git("ls-remote","origin","refs/heads/main").split()[0]}
         b.run_codex=lambda payload:self.synthetic_codex(b,payload)
         b.codex_quota=lambda:({"state":self.codex_state},self.codex_identity)
-        b.codex_account=lambda:(self.codex_identity,
-                                self.codex_identity[:2]+"•••@e•••" if self.codex_identity else None)
+        def fake_account():
+            identity=self.codex_identity if self.confirmed_identity is None else self.confirmed_identity
+            return identity,identity[:2]+"•••@e•••" if identity else None
+        b.codex_account=fake_account
         launch=b.launch
         b.launch=lambda payload,approval:launch(payload,approval,background=False)
         b.factory._verify_metro=lambda sha,base,workspace,**kwargs: {"sha":sha,"checked_sources":2,"api":"fixture"}

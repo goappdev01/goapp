@@ -87,6 +87,10 @@ class Wheel:
         if not identity:
             self.fail("WHEEL_CODEX_AUTH","No se pudo confirmar la sesión ChatGPT del ejecutor.")
         if expected is not None and identity!=expected:
+            confirmed, _ = self.b.codex_account()
+            if confirmed != identity:
+                self.fail("WHEEL_CODEX_IDENTITY_UNCERTAIN",
+                          "Las lecturas de la cuenta Codex no coinciden; se comprobará de nuevo sin iniciar trabajo.")
             self.fail("WHEEL_CODEX_SESSION_CHANGED","Cambió la cuenta Codex autorizada; conserva la cola para revisión.")
         if quota["state"]!="available":
             self.fail("WHEEL_CODEX_QUOTA","La cuota de Codex no está disponible.")
@@ -1971,5 +1975,11 @@ class Wheel:
         except self.f.Error as error:
             if error.code in TRELLO_RETRY_CODES:
                 return self._trello_wait(error.code)
+            if error.code=="WHEEL_CODEX_IDENTITY_UNCERTAIN":
+                retry_after=time.time()+15
+                with self.b.db() as db:
+                    db.execute("UPDATE wheel_control SET retry_after=? WHERE id=1 AND enabled=1",(retry_after,))
+                    self.b.audit("wheel_identity_check_deferred",{"retry_after":retry_after},db)
+                return {"identity_retry":True,"retry_after":retry_after}
             self.pause(error.code)
             return {"paused":error.code}
