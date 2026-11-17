@@ -179,6 +179,7 @@ function fixture(kind = "provider", overrides = {}) {
       return hooks[index].value;
     },
     useCallback(callback, dependencies) { return React.useMemo(() => callback, dependencies); },
+    useContext() { return overrides.handedness ?? "right"; },
     useEffect(effect, dependencies) {
       const index = hookIndex++, previous = hooks[index];
       if (!previous || !same(previous.dependencies, dependencies)) {
@@ -190,6 +191,7 @@ function fixture(kind = "provider", overrides = {}) {
   class Value { constructor(value) { this.value = value; } setValue(value) { this.value = value; } interpolate() { return 0; } }
   const animation = { start(callback) { callback?.({ finished: true }); } };
   const native = new Proxy({ Dimensions: { get: () => ({ width: overrides.width ?? 390, height: overrides.height ?? 844 }) }, Platform: { OS: "ios" },
+    useWindowDimensions: () => ({ width: overrides.width ?? 390, height: overrides.height ?? 844, fontScale: overrides.fontScale ?? 1 }),
     StyleSheet: { create: value => value, absoluteFillObject: {} }, Alert: { alert: (...args) => alerts.push(args) },
     Keyboard: { isVisible: () => false, addListener: () => ({ remove() {} }), dismiss() {} },
     Animated: { Value, View: "Animated.View", timing: () => animation, spring: () => animation, add: () => 0 },
@@ -201,6 +203,7 @@ function fixture(kind = "provider", overrides = {}) {
   ], activeDays: [], daySchedules: {}, staffSchedules: {}, openFrom: "00:00", openTo: "00:01" };
   const timers = new Map(); let timerId = 0;
   const modules = {"@/components/ui/GoNavigationFloating":{GoNavigationFloating:"GoNavigationFloating"},"@/components/ui/GoCloseButton":{GoCloseButton:"GoCloseButton"},
+    "@/components/ui/GoNavigationHand": { GoNavigationHand: {} },
     "@workspace/api-zod": modulePublicationPolicy,
     "@/hooks/useBookingModulePublication": loadModulePublicationHook(React),
     "./CatalogComplementSelector": { CatalogComplementSelector: "CatalogComplementSelector" },
@@ -444,17 +447,17 @@ for (const kind of ["provider", "overlay"]) {
 }
 
 const flatStyle = n => Object.assign({}, ...[n.props.style].flat(Infinity).filter(Boolean));
-for (const [width,height] of [[320,568],[375,667],[390,844],[430,932]]) test(`compact services ${width}x${height} keep complete context, two rows, touch target, accurate total and unchanged Save`, async()=>{
+for (const [width,height] of [[320,568],[375,667],[390,844],[430,932]]) test(`compact services ${width}x${height} keep complete context, two rows, accurate total and compact green Save`, async()=>{
  const f=fixture("overlay",{width,height});await f.start();await f.press("Peluquería primera");
  const context=nodes(f.tree()).find(n=>n.props.testID==="booking-service-context");
  assert.equal(text(context),"Peluquería primera");assert.equal(context.props.numberOfLines,undefined);
  const header=nodes(f.tree()).filter(n=>n.type==="View"&&nodes(n).includes(context)).at(-1);assert.equal(flatStyle(header).flexDirection,"row");
- const list=nodes(f.tree()).find(n=>n.props.testID==="booking-services-list");assert.equal(flatStyle(list).paddingHorizontal,12);assert.ok(list.props.contentContainerStyle.paddingBottom>=32);
+ const list=nodes(f.tree()).find(n=>n.props.testID==="booking-services-list");assert.equal(flatStyle(list).paddingHorizontal,12);assert.equal(list.props.contentContainerStyle.paddingBottom,0);
  const card=nodes(f.tree()).find(n=>n.props.testID==="booking-service-"+firstService);
  assert.equal(flatStyle(card).flexDirection,"column");assert.equal(flatStyle(card).height,undefined);
  const rows=nodes(card).filter(n=>n.type==="View"&&flatStyle(n).flexDirection==="row"&&flatStyle(n).gap===8);assert.equal(rows.length,2);assert.ok(text(rows[0]).includes("Corte exacto"));assert.ok(text(rows[0]).includes("12"));assert.match(text(rows[1]),/13\s+min/);
  const mark=nodes(card).find(n=>flatStyle(n).width===44);assert.equal(flatStyle(mark).minHeight,44);
- const save=nodes(f.tree()).find(n=>n.props.testID==="booking-save-services");assert.equal(save.props.disabled,true);assert.equal(flatStyle(save).paddingVertical,18);const original=plain(save.props.style[0]);
+ const save=nodes(f.tree()).find(n=>n.props.testID==="booking-save-services");assert.equal(save.props.disabled,true);assert.equal(flatStyle(save).minHeight,48);assert.equal(flatStyle(save).backgroundColor,"#22c55e");assert.ok(nodes(list).includes(save));const original=plain(save.props.style[0]);
  await f.press("Corte exacto");let total=nodes(f.tree()).find(n=>n.props.testID==="booking-services-total");assert.match(text(total),/TOTAL:.*12,00.*€/);assert.match(text(total),/13\s+min/);assert.equal(flatStyle(total).flexWrap,"wrap");assert.equal(flatStyle(total).justifyContent,"space-between");
  assert.equal(nodes(f.tree()).find(n=>n.type==="CatalogComplementSelector").props.showTotal,false);
  await f.press("Lavado exacto");total=nodes(f.tree()).find(n=>n.props.testID==="booking-services-total");assert.match(text(total),/TOTAL:.*24,00.*€/);assert.match(text(total),/40\s+min/);

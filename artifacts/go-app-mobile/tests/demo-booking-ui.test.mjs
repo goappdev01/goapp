@@ -25,11 +25,13 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false,initialDat
     useRef(value){return React.useState(()=>({current:value}))[0];},
     useMemo(fn,deps){const[slots,i]=hook();if(!slots[i]||!equal(slots[i].deps,deps))slots[i]={deps,value:fn()};return slots[i].value;},
     useCallback(fn,deps){return React.useMemo(()=>fn,deps);},
+    useContext(){return "right";},
     useEffect(fn,deps){const[slots,i]=hook(),old=slots[i];if(!old||!equal(old.deps,deps)){slots[i]={deps};effects.push(()=>{old?.cleanup?.();slots[i].cleanup=fn();});}}
   };
   class Value{constructor(value){this.value=value;}setValue(value){this.value=value;}interpolate(){return 0;}stopAnimation(){}}
   const animation={start(fn){fn?.({finished:true});},stop(){}};
   const native=new Proxy({Dimensions:{get:()=>viewport},Platform:{OS:"ios",select:x=>x.ios??x.default},
+    useWindowDimensions:()=>({...viewport,fontScale:1}),
     StyleSheet:{create:x=>x,absoluteFillObject:{}},Alert:{alert(title,message){alerts.push([title,message]);}},Keyboard:{addListener:(event,fn)=>{keyboardEvents.set(event,fn);return{remove(){keyboardEvents.delete(event);}};},dismiss(){keyboardEvents.get("keyboardDidHide")?.();}},
     Animated:{Value,View:"Animated.View",spring:()=>animation,timing:()=>animation,add:()=>0},
     PanResponder:{create:config=>({panHandlers:config})}
@@ -39,10 +41,12 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false,initialDat
   const booking={BookingApiError,computeRefundInfo:()=>({isFree:true}),getAuthenticatedUserId:()=>live("getAuthenticatedUserId")};
   for(const name of ["cancelBooking","claimSlot","createHold","getAllSlots","getActivebusinesses","getBookableItems","getStaff","searchBusinesses","getMyBookings"])booking[name]=()=>live(name);
   const mocks={"@/components/ui/GoNavigationFloating":{GoNavigationFloating:"GoNavigationFloating"},"@/components/ui/GoCloseButton":{GoCloseButton:"GoCloseButton"},
+    "@/components/ui/GoNavigationHand":{GoNavigationHand:{}},
     "@workspace/api-zod":modulePublicationPolicy,
     "@/hooks/useBookingModulePublication":loadModulePublicationHook(React,{context,owner:ownerAccess}),
     "./CatalogComplementSelector":{CatalogComplementSelector:()=>null},
     "@/data/catalogAssociations":pure("data/catalogAssociations.ts",{"./booking":booking}),
+    "@/data/bookingDiscounts":pure("data/bookingDiscounts.ts",{"./booking":booking,"./catalogAssociations":pure("data/catalogAssociations.ts",{"./booking":booking})}),
     react:{...React,default:React},"react-native":native,
     "@react-native-async-storage/async-storage":{default:{getItem:()=>live("storage read"),setItem:()=>live("storage write")}},
     "expo-linear-gradient":{LinearGradient:"LinearGradient"},"@expo/vector-icons":{Feather:"Feather"},

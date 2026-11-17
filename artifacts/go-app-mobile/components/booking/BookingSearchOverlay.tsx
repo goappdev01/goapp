@@ -1,6 +1,7 @@
 import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
 import {GoCloseButton} from "@/components/ui/GoCloseButton";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import {GoNavigationHand} from "@/components/ui/GoNavigationHand";
+import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import {
@@ -17,6 +18,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
@@ -403,6 +405,14 @@ export function BookingSearchOverlay({
     : cancelBooking(id);
   const { t, lang } = useLanguage();
   const insets = useSafeAreaInsets();
+  const handedness = useContext(GoNavigationHand);
+  const { fontScale } = useWindowDimensions();
+  const [servicesGuideBottom, setServicesGuideBottom] = useState(0);
+  const servicesLayout = useRef({ sheetHeight: 0, headerBottom: 0, footerTop: Infinity, scrollOffset: 0 });
+  const updateServicesLayout = (layout: Partial<typeof servicesLayout.current>) => {
+    const metrics = Object.assign(servicesLayout.current, layout);
+    setServicesGuideBottom(Math.max(0, metrics.sheetHeight - metrics.headerBottom - metrics.footerTop + metrics.scrollOffset));
+  };
   const slideAnim = useRef(new Animated.Value(SCREEN_H)).current;
   const dragAnim  = useRef(new Animated.Value(0)).current;
   const stepAnim  = useRef(new Animated.Value(0)).current;
@@ -492,6 +502,7 @@ export function BookingSearchOverlay({
   }, []);
 
   const [step, setStep] = useState<Step>("search");
+  useEffect(() => { updateServicesLayout({ scrollOffset: 0 }); }, [step]);
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
@@ -1076,6 +1087,7 @@ export function BookingSearchOverlay({
   const beautySelection=selectedCategory==="belleza"||beauty?.subs.some(sub=>sub.id===selectedSubCategory)||visibleSectors.length===1&&visibleSectors[0].id==="belleza";
   const accentColor = selectedBusiness?bookingCategoryAccent(selectedBusiness):beautySelection?beauty?.color||"#eab308":"#00e5ff";
   const compactServices = canonicalBookingActivity(selectedBusiness?.category) === "peluqueria";
+  const servicesFooterVisible = step === "item" && compactServices && items.length > 0;
   const reviewedPlan = confirmedBooking?.timingSnapshot ?? activeHold?.timingSnapshot;
   const summaryItem = selectedItem && reviewedPlan ? { ...selectedItem,
     title: (confirmedBooking?.catalogSnapshot ?? activeHold?.catalogSnapshot)?.lines.map(line => line.name).join(" + ") || reviewedPlan.serviceDetails.map(service => service.title).join(" + "),
@@ -1107,6 +1119,24 @@ export function BookingSearchOverlay({
   const bookingAccepted=confirmedBooking?.status==="CONFIRMED"||confirmedBooking?.status==="ACCEPTED";
   const confirmationColor=bookingAccepted?"#22c55e":"#FFD700";
 
+  // Keep the original actions and drag recognizer; only Services gives them a local lane.
+  const navigationControls = (
+    <GoNavigationFloating screenKey="booking-search" width={136} safeArea={false} keyboardResponsive handedness={handedness}
+      protectedTop={servicesFooterVisible ? 0 : insets.top+8}
+      protectedBottom={servicesFooterVisible ? 0 : keyboardHeight+(keyboardVisible?12:insets.bottom+24)}>
+      <GoCloseButton level="panel" testID="booking-back" keyboardVisible={keyboardVisible} accessibilityLabel={keyboardVisible?(lang==="en"?"Hide keyboard":"Ocultar teclado"):(lang==="en"?"Back":"Volver")} hitSlop={4} style={s.fabClose} onPress={handleBackOneLevel} activeOpacity={0.7}/>
+      <GoCloseButton level="container" testID="booking-exit" accessibilityLabel={lang==="en"?"Return to GO":"Volver a GO"} hitSlop={4} style={s.fabClose} onPress={handleDismissAll} activeOpacity={0.7}/>
+    </GoNavigationFloating>
+  );
+  const saveServicesControl = (
+    <TouchableOpacity testID="booking-save-services" accessibilityRole="button" accessibilityState={{ disabled: !serviceSelection || !catalogQuote?.ready }} disabled={!serviceSelection || !catalogQuote?.ready} onPress={handleSaveServices}
+      style={compactServices
+        ? [s.servicesSaveButton, { opacity: serviceSelection && catalogQuote?.ready ? 1 : 0.45 }]
+        : [s.serviceCard, { borderColor: accentColor, opacity: serviceSelection && catalogQuote?.ready ? 1 : 0.45 }]}>
+      <Text style={compactServices ? s.servicesSaveText : s.serviceTitle}>{t("save")}</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <Modal visible={visible} transparent={false} presentationStyle="fullScreen" animationType="none" onRequestClose={handleClose}>
       <View testID="booking-overlay-frame" style={[s.overlay, {
@@ -1116,6 +1146,7 @@ export function BookingSearchOverlay({
       }]}>
         <Animated.View
           testID="booking-sheet"
+          onLayout={servicesFooterVisible ? event => updateServicesLayout({ sheetHeight: event.nativeEvent.layout.height }) : undefined}
           style={[
             s.sheet,
             { flex: 1 },
@@ -1137,7 +1168,7 @@ export function BookingSearchOverlay({
 
           {/* Header — también recibe dragHandlePan para que el arrastre hacia abajo
               funcione desde aquí (los navBtn son Views de layout, sin toques) */}
-          <View style={[s.header, step === "item" && compactServices && s.serviceHeader, step === "hold" && s.holdHeader]} {...dragHandlePan.panHandlers}>
+          <View onLayout={servicesFooterVisible ? event => updateServicesLayout({ headerBottom: event.nativeEvent.layout.y + event.nativeEvent.layout.height }) : undefined} style={[s.header, step === "item" && compactServices && s.serviceHeader, step === "hold" && s.holdHeader]} {...dragHandlePan.panHandlers}>
             {step === "item" && compactServices ? <>
               <Text testID="booking-service-context" style={[s.serviceContext, { color: accentColor }]}>{selectedBusiness?.name}</Text>
               <Text style={[s.headerTitle, s.serviceHeading]}>{t("biz_step_service_label").toUpperCase()}</Text>
@@ -1392,7 +1423,8 @@ export function BookingSearchOverlay({
                     <Text style={s.emptyText}>{t("biz_no_active_services")}</Text>
                   </View>
                 ) : (
-                  <ScrollView testID="booking-services-list" style={[s.list, compactServices && s.servicesList]} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
+                  <ScrollView testID="booking-services-list" style={[s.list, compactServices && s.servicesList]} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: compactServices ? 0 : 32 }} keyboardShouldPersistTaps="handled"
+                    onScroll={compactServices ? event => updateServicesLayout({ scrollOffset: event.nativeEvent.contentOffset.y }) : undefined} scrollEventThrottle={16}>
                     {items.filter(isCatalogService).map((item) => (
                       <TouchableOpacity
                         key={item.id}
@@ -1477,10 +1509,18 @@ export function BookingSearchOverlay({
                     </View> : <Text testID="booking-services-total" style={[s.metaBadgeText,{color:accentColor}]}>
                       {catalogQuote?.ready ? catalogBookingServices(catalogQuote).reduce((minutes, service) => minutes + service.durationMinutes, 0) : serviceSelection.item.durationMinutes} min · {(catalogQuote?.ready ? catalogQuote.totalPrice : serviceSelection.item.priceKnown === false ? null : serviceSelection.item.price) ?? (lang === "en" ? "Price to confirm" : "Precio por confirmar")} {serviceSelection.item.currency}
                     </Text>)}
-                    <TouchableOpacity testID="booking-save-services" accessibilityRole="button" disabled={!serviceSelection || !catalogQuote?.ready} onPress={handleSaveServices}
-                      style={[s.serviceCard, { borderColor: accentColor, opacity: serviceSelection && catalogQuote?.ready ? 1 : 0.45 }]}>
-                      <Text style={s.serviceTitle}>{t("save")}</Text>
-                    </TouchableOpacity>
+                    {compactServices ? (
+                      <View testID="booking-services-footer"
+                        onLayout={event => updateServicesLayout({ footerTop: event.nativeEvent.layout.y })}
+                        style={[s.servicesFooter, { flexDirection: handedness === "left" ? "row-reverse" : "row" }]}>
+                        <View testID="booking-services-save-lane" style={[s.servicesSaveLane, { flexBasis: 112 * Math.max(1, fontScale) }]}>
+                          {saveServicesControl}
+                        </View>
+                        <View testID="booking-services-navigation-lane" style={s.servicesNavigationLane}>
+                          {navigationControls}
+                        </View>
+                      </View>
+                    ) : saveServicesControl}
                   </ScrollView>
                 )}
               </View>
@@ -1981,7 +2021,7 @@ export function BookingSearchOverlay({
           {step!=="search"&&<TouchableOpacity
             activeOpacity={1}
             onPress={handleBackOneLevel}
-            style={{ position: "absolute", right: 0, top: "50%", bottom: 0, width: "25%", opacity: step === "confirmed" ? 0 : 1 }}
+            style={{ position: "absolute", right: 0, top: "50%", bottom: servicesFooterVisible ? servicesGuideBottom : 0, width: "25%", opacity: step === "confirmed" ? 0 : 1 }}
             disabled={step === "confirmed"}
           >
             <LinearGradient
@@ -1994,18 +2034,7 @@ export function BookingSearchOverlay({
 
         </Animated.View>
 
-        {/* ── Botones de navegación flotantes — inferior derecho ───────────────
-            Disposición vertical idéntica al resto de GO (memoria muscular):
-            • Arriba  (flecha simple):  retrocede un nivel
-            • Abajo   (doble flecha):   cierra el panel → Landing           */}
-        {step !== "confirmed" && (
-          <GoNavigationFloating screenKey="booking-search" width={136} safeArea={false} keyboardResponsive protectedTop={insets.top+8} protectedBottom={keyboardHeight+(keyboardVisible?12:insets.bottom+24)}>
-            {/* ↓  Retroceder un nivel — ARRIBA */}
-            <GoCloseButton level="panel" testID="booking-back" keyboardVisible={keyboardVisible} accessibilityLabel={keyboardVisible?(lang==="en"?"Hide keyboard":"Ocultar teclado"):(lang==="en"?"Back":"Volver")} hitSlop={4} style={s.fabClose} onPress={handleBackOneLevel} activeOpacity={0.7}/>
-            {/* ↓↓  Landing — ABAJO */}
-            <GoCloseButton level="container" testID="booking-exit" accessibilityLabel={lang==="en"?"Return to GO":"Volver a GO"} hitSlop={4} style={s.fabClose} onPress={handleDismissAll} activeOpacity={0.7}/>
-          </GoNavigationFloating>
-        )}
+        {step !== "confirmed" && !servicesFooterVisible && navigationControls}
 
       </View>
     </Modal>
@@ -2015,7 +2044,7 @@ export function BookingSearchOverlay({
 // ── Styles ─────────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  // Compact composition is scoped to service selection; Save keeps serviceCard.
+  // Compact composition is scoped to hairdresser service selection.
   serviceHeader: { paddingHorizontal: 12, paddingTop: 4, paddingBottom: 10, gap: 12, alignItems: "flex-start" },
   serviceContext: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: "700" },
   serviceHeading: { flexShrink: 1, textAlign: "right", letterSpacing: 1 },
@@ -2028,6 +2057,12 @@ const s = StyleSheet.create({
   serviceSelectionMark: { width: 44, minHeight: 44, alignItems: "center", justifyContent: "center" },
   servicesTotal: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8, paddingBottom: 10 },
   servicesTotalPrice: { flexShrink: 1 },
+  servicesFooter: { flexShrink: 0, flexWrap: "wrap", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 4, backgroundColor: "#070B12", zIndex: 1 },
+  servicesSaveLane: { flexGrow: 1, flexShrink: 1, minWidth: 112, alignItems: "center", justifyContent: "center" },
+  // The 136 x 64 cluster, its hit slop and drag bounds stay wholly inside this lane.
+  servicesNavigationLane: { width: 160, height: 80, flexShrink: 0 },
+  servicesSaveButton: { minWidth: 112, maxWidth: "100%", minHeight: 48, paddingHorizontal: 20, paddingVertical: 6, borderRadius: 16, backgroundColor: "#22c55e", alignItems: "center", justifyContent: "center" },
+  servicesSaveText: { fontSize: 16, fontWeight: "800", color: "#050505", textAlign: "center", flexShrink: 1 },
   overlay: {
     flex: 1,
     backgroundColor: "#070B12",
