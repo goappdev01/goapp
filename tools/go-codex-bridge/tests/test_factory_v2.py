@@ -1749,7 +1749,7 @@ class RemoteTests(unittest.TestCase):
         generated.parent.mkdir(parents=True)
         generated.write_text('generated\n',encoding='utf-8')
         with patch('owner_expo.subprocess.check_output',side_effect=[
-                ' M artifacts/go-app-mobile/expo-env.d.ts\n','generated\n']):
+                ' M artifacts/go-app-mobile/expo-env.d.ts\n','generated\n','']):
             manager.clean({'workspace':str(workspace)})
         generated.write_text('different\n',encoding='utf-8')
         with patch('owner_expo.subprocess.check_output',side_effect=[
@@ -1764,3 +1764,69 @@ class RemoteTests(unittest.TestCase):
             self.assertEqual(s['sha'],'a'*40)
             self.assertEqual(git.call_args.args[1:],('rev-parse','HEAD'))
         self.assertFalse(self.bridge.factory.wheel.enabled())
+
+    def test_owner_update_queues_only_verified_published_main(self):
+        manager=OwnerExpo(self.bridge)
+        old='a'*40;new='b'*40
+        manager.save({'port':8089,'workspace':'synthetic','sha':old})
+        with patch.object(manager,'git',return_value=new):
+            with self.assertRaises(BridgeError):manager.queue_verified(new,{'sha':new})
+            self.assertEqual(manager.queue_verified(new,{'sha':new,'checked_sources':2})['state'],'queued')
+        self.assertEqual(manager.load()['pending_sha'],new)
+        with patch.object(manager,'git',return_value=old):
+            self.assertEqual(manager.queue_verified(new,{'sha':new,'checked_sources':2})['state'],'superseded')
+
+    def test_owner_update_waits_while_owner_metro_is_active(self):
+        manager=OwnerExpo(self.bridge)
+        manager.save({'port':8089,'workspace':'synthetic','sha':'a'*40,'pending_sha':'b'*40})
+        with patch.object(manager,'port_busy',return_value=True),patch.object(manager,'git') as git:
+            self.assertEqual(manager.promote_if_idle()['reason'],'OWNER_EXPO_ACTIVE')
+            git.assert_not_called()
+        self.assertEqual(manager.load()['pending_sha'],'b'*40)
+
+    def test_owner_update_promotes_after_bundle_verification(self):
+        manager=OwnerExpo(self.bridge)
+        old='a'*40;new='b'*40
+        manager.save({'port':8089,'workspace':'synthetic','sha':old,'pending_sha':new})
+        def git(_doc,*args):
+            if args[:2]==('rev-parse','HEAD'):return old
+            if args[:2]==('rev-parse','FETCH_HEAD'):return new
+            if args[:2]==('ls-remote','origin'):return new+' refs/heads/main'
+            return ''
+        with patch.object(manager,'port_busy',return_value=False),patch.object(manager,'clean'),\
+             patch.object(manager,'git',side_effect=git),patch.object(manager,'start',side_effect=lambda doc:manager.save(doc)),\
+             patch.object(manager,'metro_ready',return_value=True),patch.object(manager,'verify',return_value={'sha':new}):
+            self.assertEqual(manager.promote_if_idle()['state'],'verified')
+        self.assertEqual(manager.load()['sha'],new)
+        self.assertIsNone(manager.load()['pending_sha'])
+
+    def test_owner_update_restores_previous_commit_after_failed_verification(self):
+        manager=OwnerExpo(self.bridge)
+        old='a'*40;new='b'*40
+        manager.save({'port':8089,'workspace':'synthetic','sha':old,'pending_sha':new})
+        switched=[]
+        def git(_doc,*args):
+            if args[:2]==('rev-parse','HEAD'):return switched[-1] if switched else old
+            if args[:2]==('rev-parse','FETCH_HEAD'):return new
+            if args[:2]==('ls-remote','origin'):return new+' refs/heads/main'
+            if args[:2]==('switch','--detach'):switched.append(args[2])
+            return ''
+        with patch.object(manager,'port_busy',return_value=False),patch.object(manager,'clean'),\
+             patch.object(manager,'git',side_effect=git),patch.object(manager,'start',side_effect=lambda doc:manager.save(doc)),\
+             patch.object(manager,'metro_ready',return_value=True),patch.object(manager,'verify',side_effect=[ValueError('bad bundle'),{'sha':old}]):
+            self.assertEqual(manager.promote_if_idle()['state'],'rolled_back')
+        self.assertEqual(switched,[new,old])
+        self.assertEqual(manager.load()['sha'],old)
+        self.assertEqual(manager.load()['pending_sha'],new)
+
+    def test_owner_update_does_not_touch_checkout_when_local_files_exist(self):
+        manager=OwnerExpo(self.bridge)
+        old='a'*40;new='b'*40
+        manager.save({'port':8089,'workspace':'synthetic','sha':old,'pending_sha':new})
+        with patch.object(manager,'port_busy',return_value=False),\
+             patch.object(manager,'clean',side_effect=ValueError('local files')),\
+             patch.object(manager,'git',return_value=old) as git,patch.object(manager,'start') as start:
+            self.assertEqual(manager.promote_if_idle()['state'],'pending')
+            start.assert_not_called()
+            self.assertFalse(any(c.args[1:3]==('switch','--detach') for c in git.call_args_list))
+        self.assertEqual(manager.load()['sha'],old)

@@ -2,11 +2,14 @@ param(
     [Parameter(Mandatory = $true)][ValidateSet(8088, 8089)][int]$Port,
     [Parameter(Mandatory = $true)][string]$Workspace,
     [string]$OwnerExpoState,
+    [string]$BridgeHome,
+    [string]$BridgePython,
+    [string]$MainWorkspace,
     [switch]$CheckOnly
 )
 
 $ErrorActionPreference = 'Stop'
-$Host.UI.RawUI.WindowTitle = if ($Port -eq 8088) { 'GO Expo 8088 · MAIN' } else { 'GO Comprobar 8089 · fijado' }
+$Host.UI.RawUI.WindowTitle = if ($Port -eq 8088) { 'GO Expo 8088 · MAIN' } else { 'GO Comprobar 8089 · verificado' }
 $mobile = Join-Path $Workspace 'artifacts\go-app-mobile'
 $cli = Join-Path $mobile 'node_modules\expo\bin\cli'
 
@@ -88,6 +91,16 @@ $ownsMutex = $false
 try {
     if (-not (Test-Path -LiteralPath $cli -PathType Leaf)) { throw "Faltan las dependencias Expo ya instaladas en $mobile." }
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git no está disponible.' }
+    if ($Port -eq 8089 -and -not (Get-Listener) -and -not $CheckOnly) {
+        if (-not $BridgeHome -or -not $BridgePython -or -not $MainWorkspace -or
+            -not (Test-Path -LiteralPath (Join-Path $BridgeHome 'owner_expo.py')) -or
+            -not (Test-Path -LiteralPath $BridgePython)) {
+            throw 'Faltan los parámetros del puente necesarios para actualizar 8089 con MAIN verificado.'
+        }
+        Write-Host 'Comprobando MAIN publicado y el bundle iOS de 8088 antes de actualizar 8089...' -ForegroundColor Cyan
+        & $BridgePython (Join-Path $BridgeHome 'owner_expo.py') sync --bridge-home $BridgeHome --main-workspace $MainWorkspace
+        if ($LASTEXITCODE -ne 0) { Write-Host 'La actualización quedó pendiente. Se conservará la última versión verificada.' -ForegroundColor Yellow }
+    }
     $head = Invoke-Git @('rev-parse', 'HEAD')
     if ($Port -eq 8089) {
         if (-not $OwnerExpoState -or -not (Test-Path -LiteralPath $OwnerExpoState -PathType Leaf)) {
@@ -97,7 +110,7 @@ try {
         if ($pinned.port -ne 8089 -or [IO.Path]::GetFullPath($pinned.workspace).TrimEnd('\') -ine [IO.Path]::GetFullPath($Workspace).TrimEnd('\')) {
             throw 'La configuración de 8089 señala otro worktree; no se cambia la versión.'
         }
-        if ($head -ne $pinned.sha) { throw "8089 está en $($head.Substring(0,8)), distinto del SHA fijado $($pinned.sha.Substring(0,8)). No se cambia la versión." }
+        if ($head -ne $pinned.sha) { throw "8089 está en $($head.Substring(0,8)), distinto del SHA verificado $($pinned.sha.Substring(0,8)). Se conservan los cambios locales." }
         if ((Invoke-Git @('status', '--porcelain=v1', '-uno')) -or
             (Invoke-Git @('ls-files', '--others', '--exclude-standard', '--', 'artifacts/go-app-mobile'))) {
             throw '8089 contiene cambios locales; no se arranca código distinto de la versión fijada.'
@@ -152,6 +165,10 @@ try {
             if ($ip -match '^100\.(?:\d{1,3}\.){2}\d{1,3}$') { $env:REACT_NATIVE_PACKAGER_HOSTNAME = $ip }
         }
     }
+    $cache = Join-Path ([IO.Path]::GetDirectoryName($PSCommandPath)) "cache-$Port"
+    New-Item -ItemType Directory -Path $cache -Force | Out-Null
+    $env:TEMP = $cache
+    $env:TMP = $cache
     Push-Location $mobile
     try {
         Write-Host "Arrancando GO Expo $Port desde $mobile" -ForegroundColor Cyan

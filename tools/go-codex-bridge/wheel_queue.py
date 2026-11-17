@@ -5,6 +5,7 @@ import math
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import subprocess
+import threading
 import time
 import uuid
 
@@ -1231,6 +1232,18 @@ class Wheel:
             self.b.audit("wheel_receipt",{"grant":g["grant_id"],"letter":letter,"receipt_sha":self.f.digest(self.f.canonical(receipt))},db)
 
         self.checkpoint(g,"verified:"+letter)
+        if (letter=="B" and receipt.get("served_sha")
+                and isinstance(receipt.get("metro"),dict)
+                and receipt["metro"].get("sha")==receipt["served_sha"]):
+            try:
+                from owner_expo import OwnerExpo
+                owner=OwnerExpo(self.b)
+                queued=owner.queue_verified(receipt["served_sha"],receipt["metro"])
+                if queued.get("state")=="queued":
+                    threading.Thread(target=owner.promote_if_idle,daemon=True).start()
+            except Exception as error:
+                # 8089 is independent: an update problem cannot undo verified MAIN or stop 8088.
+                self.b.audit("owner_expo_queue_deferred",{"reason":getattr(error,"code","OWNER_EXPO_QUEUE_FAILED")})
 
     def _finish_error(self,g,code,uncertain=False):
         if code=="CREDIT_LIMIT":
