@@ -72,6 +72,15 @@ class WheelTests(unittest.TestCase):
         self.codex_identity="synthetic-codex-account"
         self.configure(self.bridge)
 
+    def test_transient_trello_read_waits_without_conflicting_or_replaying(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        with patch.object(wheel,"_check_card",side_effect=BridgeError("NETWORK_UNCERTAIN","Synthetic read failed")):
+            outcome=wheel.tick()
+        self.assertTrue(outcome.get("trello_retry"),outcome)
+        self.assertTrue(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)
+
     def git(self,*args):
         return subprocess.check_output(["git","-C",str(self.root),*args],text=True,stderr=subprocess.PIPE).strip()
 

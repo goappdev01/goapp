@@ -1939,6 +1939,14 @@ class Wheel:
                 if error.code in CODEX_BLOCKERS:
                     self.pause(error.code)
                     return {"paused":error.code}
+                if error.code in TRELLO_RETRY_CODES:
+                    with self.b.db() as db:
+                        released_or_uncertain=(
+                            db.execute("SELECT 1 FROM operations WHERE state IN ('sending','unknown','needs_review')").fetchone()
+                            or db.execute("SELECT 1 FROM wheel_stages WHERE grant_id=? AND state='claimed'",
+                                          (g["grant_id"],)).fetchone())
+                    if not released_or_uncertain:
+                        return self._trello_wait(error.code)
                 with self.b.card_workspace(g["workspace"]):
                     return self._finish_error(g,error.code)
         except self.f.Error as error:
