@@ -66,6 +66,9 @@ class Wheel:
                 card_id TEXT PRIMARY KEY, grant_id TEXT, reason TEXT NOT NULL,
                 destination TEXT NOT NULL, checked TEXT NOT NULL);
             """)
+            if not any(row["name"]=="account_confirmation_required" for row in db.execute("PRAGMA table_info(wheel_control)")):
+                db.execute("ALTER TABLE wheel_control ADD COLUMN account_confirmation_required INTEGER NOT NULL DEFAULT 0")
+            db.execute("UPDATE wheel_control SET account_confirmation_required=1 WHERE reason='WHEEL_CODEX_SESSION_CHANGED'")
         from factory_v2 import Continuity
         self.continuity=Continuity(self)
         self.continuity.reconcile_private_question_pause()
@@ -78,6 +81,8 @@ class Wheel:
         return list("ACD" if subject.get("work_kind")=="diagnosis" else STAGES)
 
     def _require_codex_identity(self, expected=None):
+        if expected is not None:
+            self.require_confirmed_account()
         quota, identity = self.b.codex_quota()
         if not identity:
             self.fail("WHEEL_CODEX_AUTH","No se pudo confirmar la sesión ChatGPT del ejecutor.")
@@ -86,6 +91,14 @@ class Wheel:
         if quota["state"]!="available":
             self.fail("WHEEL_CODEX_QUOTA","La cuota de Codex no está disponible.")
         return identity
+
+    def require_confirmed_account(self, db=None):
+        if db is None:
+            with self.b.db() as connection:
+                return self.require_confirmed_account(connection)
+        control = db.execute("SELECT account_confirmation_required,reason FROM wheel_control WHERE id=1").fetchone()
+        if control["account_confirmation_required"] or control["reason"]=="WHEEL_CODEX_SESSION_CHANGED":
+            self.fail("WHEEL_CODEX_SESSION_CHANGED","Confirma la sesión en Cuenta Codex antes de activar la fábrica.")
 
     def enabled(self):
         with self.b.db() as db:
@@ -153,6 +166,7 @@ class Wheel:
                 db.execute("BEGIN IMMEDIATE")
                 if self.live_policy(db):
                     return self.status()
+                self.require_confirmed_account(db)
                 if db.execute("SELECT 1 FROM wheel_grants WHERE state='working'").fetchone():
                     self.fail("WHEEL_BATCH_BUSY","Hay una ejecución que debe conciliarse antes de activar.")
                 db.execute("UPDATE wheel_trials SET state='superseded' WHERE state='active'")
@@ -183,6 +197,7 @@ class Wheel:
             already_enabled=bool(db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0])
             if already_enabled:
                 return self.status()
+            self.require_confirmed_account(db)
             live=self.live_policy(db)
             batch = None if live else self._latest_trial(db)
             if live:
@@ -210,7 +225,9 @@ class Wheel:
 
     def pause(self, reason, retry_after=0):
         with self.b.db() as db:
-            db.execute("UPDATE wheel_control SET enabled=0,reason=?,retry_after=? WHERE id=1", (reason,retry_after))
+            db.execute("UPDATE wheel_control SET enabled=0,reason=?,retry_after=?,"
+                       "account_confirmation_required=MAX(account_confirmation_required,?) WHERE id=1",
+                       (reason,retry_after,int(reason=="WHEEL_CODEX_SESSION_CHANGED")))
             self.b.audit("wheel_paused", {"reason": reason}, db)
 
     def reconcile_unstarted_worktree(self):
@@ -306,7 +323,9 @@ class Wheel:
             enabled=bool(db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0])
             if enabled:
                 return
-            db.execute("UPDATE wheel_control SET reason=?,retry_after=0 WHERE id=1",(safe_code,))
+            db.execute("UPDATE wheel_control SET reason=?,retry_after=0,"
+                       "account_confirmation_required=MAX(account_confirmation_required,?) WHERE id=1",
+                       (safe_code,int(safe_code=="WHEEL_CODEX_SESSION_CHANGED")))
             self.b.audit("wheel_activation_rejected",{"code":safe_code},db)
 
     def _reconcile_live_quota_failure(self):

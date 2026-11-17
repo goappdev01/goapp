@@ -1,4 +1,5 @@
 """Read the local Codex account and usage limits without starting a model turn."""
+from contextlib import contextmanager
 import json
 import math
 import os
@@ -15,7 +16,8 @@ def worker_environment():
         key,re.I)}
 
 
-def read_quota(executable, sign):
+@contextmanager
+def account_requests(executable):
     with subprocess.Popen([executable,"-c",'model_provider="openai"',"app-server","--listen","stdio://"],
                           env=worker_environment(),stdin=subprocess.PIPE,stdout=subprocess.PIPE,
                           stderr=subprocess.DEVNULL,text=True,encoding="utf-8",
@@ -51,28 +53,52 @@ def read_quota(executable, sign):
             request(1,"initialize",{"clientInfo":{"name":"go_bridge_quota","version":"1"}})
             process.stdin.write('{"method":"initialized"}\n')
             process.stdin.flush()
-            account = request(2,"account/read",{"refreshToken":False}).get("account")
-            if not account or account.get("type")!="chatgpt" or not account.get("email"):
-                return {"state":"unauthenticated","windows":[]},None
-            response = request(3,"account/rateLimits/read",{})
-            bucket = (response.get("rateLimitsByLimitId") or {}).get("codex") or response["rateLimits"]
-            windows = []
-            for key in ("primary","secondary"):
-                window = bucket.get(key)
-                if window is None:
-                    continue
-                used = window["usedPercent"]
-                minutes = window.get("windowDurationMins")
-                if type(used) not in (int,float) or not math.isfinite(used) or not 0<=used<=100:
-                    raise ValueError("Unknown rate limit")
-                windows.append({"used_percent":used,"minutes":minutes,"resets_at":window.get("resetsAt")})
-            if not windows:
-                raise ValueError("No rate windows")
-            limited = bucket.get("rateLimitReachedType") or any(window["used_percent"]>=100 for window in windows)
-            identity = sign({"kind":"codex-chatgpt","account":account["email"].strip().casefold()})
-            return {"state":"limited" if limited else "available","windows":windows},identity
+            yield request
         finally:
             if process.poll() is None:
                 process.terminate()
             process.wait(timeout=5)
             reader.join(timeout=1)
+
+
+def account_identity(request, sign):
+    account = request(2, "account/read", {"refreshToken": False}).get("account") or {}
+    email = account.get("email")
+    if account.get("type") != "chatgpt" or not isinstance(email, str):
+        return None, None
+    email = email.strip().casefold()
+    if not re.fullmatch(r"[^@\s\x00-\x1f\x7f]{1,64}@[^@\s\x00-\x1f\x7f]{1,253}", email):
+        return None, None
+    user, domain = email.split("@")
+    # Use a display hint only. Account comparison always uses the full signed identity.
+    visible_user = user[:min(2, len(user)-1)]
+    label = visible_user + "•••@" + domain[:1] + "•••"
+    return sign({"kind":"codex-chatgpt","account":email}), label
+
+
+def read_account(executable, sign):
+    with account_requests(executable) as request:
+        return account_identity(request, sign)
+
+
+def read_quota(executable, sign):
+    with account_requests(executable) as request:
+        identity, _ = account_identity(request, sign)
+        if not identity:
+            return {"state":"unauthenticated","windows":[]},None
+        response = request(3,"account/rateLimits/read",{})
+    bucket = (response.get("rateLimitsByLimitId") or {}).get("codex") or response["rateLimits"]
+    windows = []
+    for key in ("primary","secondary"):
+        window = bucket.get(key)
+        if window is None:
+            continue
+        used = window["usedPercent"]
+        minutes = window.get("windowDurationMins")
+        if type(used) not in (int,float) or not math.isfinite(used) or not 0<=used<=100:
+            raise ValueError("Unknown rate limit")
+        windows.append({"used_percent":used,"minutes":minutes,"resets_at":window.get("resetsAt")})
+    if not windows:
+        raise ValueError("No rate windows")
+    limited = bucket.get("rateLimitReachedType") or any(window["used_percent"]>=100 for window in windows)
+    return {"state":"limited" if limited else "available","windows":windows},identity

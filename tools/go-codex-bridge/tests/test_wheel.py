@@ -94,6 +94,8 @@ class WheelTests(unittest.TestCase):
             "origin_main":self.git("ls-remote","origin","refs/heads/main").split()[0]}
         b.run_codex=lambda payload:self.synthetic_codex(b,payload)
         b.codex_quota=lambda:({"state":self.codex_state},self.codex_identity)
+        b.codex_account=lambda:(self.codex_identity,
+                                self.codex_identity[:2]+"•••@e•••" if self.codex_identity else None)
         launch=b.launch
         b.launch=lambda payload,approval:launch(payload,approval,background=False)
         b.factory._verify_metro=lambda sha,base,workspace,**kwargs: {"sha":sha,"checked_sources":2,"api":"fixture"}

@@ -718,6 +718,13 @@ class Bridge:
             return {**snapshot,"state":"stale"}
         return snapshot
 
+    def codex_account(self):
+        from codex_quota import read_account
+        try:
+            return read_account(self.config["codex_executable"],self.sign)
+        except (OSError, ValueError, TypeError, KeyError, AttributeError, subprocess.SubprocessError):
+            return None, None
+
     def codex_quota(self):
         from codex_quota import read_quota
         try:
@@ -1504,6 +1511,8 @@ def server(bridge, open_browser=True):
                     self.send(200,(bridge.home/"orbit-v2.js").read_bytes(),"text/javascript; charset=utf-8")
                 elif path == "/v2/state":
                     self.send(200,{**remote.orbit_state(),"csrf":session})
+                elif path == "/v2/account":
+                    self.send(200,remote.account_state())
                 elif path in ("/v2/verify/8088","/v2/verify/8089"):
                     self.send(200,remote.orbit_verify_metro(int(path[-4:])))
                 elif path == "/api/wheel/review":
@@ -1563,7 +1572,7 @@ def server(bridge, open_browser=True):
                     result = remote.orbit_move(body)
                 elif path == "/v2/configure":
                     result = remote.orbit_configure(body)
-                elif path in ("/v2/power","/v2/preview","/v2/decide","/v2/pause","/v2/stop"):
+                elif path in ("/v2/power","/v2/preview","/v2/decide","/v2/pause","/v2/stop","/v2/change-account"):
                     result = remote.orbit_control(path.rsplit('/',1)[-1],body,"local:"+remote.orbit_owner())
                 elif path == "/api/wheel/approve" and set(body) == {"decisions", "start_frozen_batch"}:
                     result = bridge.factory.wheel.approve(body["decisions"], start_frozen_batch=body["start_frozen_batch"])
@@ -1576,6 +1585,7 @@ def server(bridge, open_browser=True):
                     if not bridge.factory.lock.acquire(blocking=False):
                         raise BridgeError("BRIDGE_BUSY","Espera al límite seguro de la operación actual.",409)
                     try:
+                        remote.require_login_finished()
                         with bridge.mutex,bridge.db() as db:
                             busy = db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
                             sending = db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()

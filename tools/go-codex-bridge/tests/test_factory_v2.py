@@ -713,22 +713,25 @@ class V2WheelTests(unittest.TestCase):
         review=w.continuity.review_activation()
         self.assertTrue(review['account_changed'])
         self.assertTrue(all(c['action']=='run' for c in review['plan']))
-        result=w.continuity.activate(review,'synthetic-owner')
-        self.assertTrue(result['enabled'])
+        with self.assertRaises(BridgeError) as refused:
+            w.continuity.activate(review,'synthetic-owner')
+        self.assertEqual(refused.exception.code,'WHEEL_CODEX_SESSION_CHANGED')
+        panel=RemotePanel(self.bridge)
+        ticket=panel.preview('rebind',{},'synthetic-owner')
+        self.assertFalse(panel.decide(ticket['ticket'],ticket['confirmation'],'synthetic-owner')['enabled'])
         with self.bridge.db() as db:
             doc=json.loads(db.execute("SELECT document FROM wheel_trials WHERE state='active'").fetchone()[0])
             self.assertEqual(doc['codex_identity'],'another-synthetic-account')
             self.assertEqual(db.execute("SELECT count(*) FROM audit WHERE event='wheel_owner_account_bound'").fetchone()[0],1)
         self.assertFalse(self.runs or self.changes)
 
-    def test_review_play_routes_changed_account_to_owner_rebind(self):
+    def test_review_play_refuses_unconfirmed_account(self):
         wheel,grant,job_id,session=self.live_credit_wait()
         wheel.pause('OWNER_PAUSED')
         panel=RemotePanel(self.bridge)
-        ticket=panel.preview('activate',{},'synthetic-owner')
-        self.assertEqual(ticket['action'],'rebind')
-        self.assertEqual(ticket['confirmation'],'VINCULAR CUENTA Y REANUDAR COLA')
-        self.assertEqual(ticket['review']['pending'][0]['card_id'],grant['card_id'])
+        with self.assertRaises(BridgeError) as error:
+            panel.preview('activate',{},'synthetic-owner')
+        self.assertEqual(error.exception.code,'WHEEL_CODEX_SESSION_CHANGED')
         self.assertEqual(wheel.status()['reason'],'WHEEL_CODEX_SESSION_CHANGED')
         self.assertFalse(wheel.enabled())
         with self.bridge.db() as db:
@@ -736,12 +739,98 @@ class V2WheelTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT session_id FROM jobs WHERE id=?',(job_id,)).fetchone()[0],session)
         self.assertFalse(self.runs or self.changes)
 
-    def test_one_owner_button_rebinds_current_account_and_toggles_live_wheel(self):
+    def test_account_view_detects_switch_and_persists_owner_binding(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        panel=RemotePanel(self.bridge)
+        self.assertEqual(panel.account_state(),{
+            'linked':'sy•••@e•••','detected':'sy•••@e•••','state':'linked',
+            'reason':None,'can_bind':False,'can_change':True})
+        original=self.codex_identity
+        self.codex_identity='other-synthetic-account'
+        result=panel.account_state()
+        self.assertEqual((result['state'],result['linked'],result['detected']),('changed',None,'ot•••@e•••'))
+        self.assertTrue(result['can_bind'])
+        self.assertFalse(wheel.enabled())
+        self.assertEqual(wheel.status()['reason'],'WHEEL_CODEX_SESSION_CHANGED')
+
+        ticket=panel.preview('rebind',{},'synthetic-owner')
+        self.assertEqual(ticket['detected_account'],'ot•••@e•••')
+        with self.assertRaises(BridgeError):
+            panel.decide(ticket['ticket'],'ACTIVAR FÁBRICA','synthetic-owner')
+        ticket=panel.preview('rebind',{},'synthetic-owner')
+        self.assertFalse(panel.decide(ticket['ticket'],ticket['confirmation'],'synthetic-owner')['enabled'])
+        with self.assertRaises(BridgeError):
+            panel.decide(ticket['ticket'],ticket['confirmation'],'synthetic-owner')
+
+        restored=self.configure(Bridge(self.home,self.home/'private',fixtures.TestProtector(),actor=self.bridge.actor))
+        restored.factory.pause_on_startup()
+        panel=RemotePanel(restored)
+        self.assertEqual(panel.account_state()['state'],'linked')
+        self.assertFalse(restored.factory.wheel.enabled())
+        self.codex_identity=None
+        self.assertEqual(panel.account_state()['linked'],'ot•••@e•••')
+        self.assertEqual(panel.account_state()['detected'],None)
+        self.codex_identity=original
+        self.assertEqual(panel.account_state()['state'],'changed')
+        self.assertFalse(self.runs or self.changes)
+
+    def test_interactive_change_uses_codex_login_and_holds_pause(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("f"*64)
+        panel=RemotePanel(self.bridge)
+        login=SimpleNamespace(poll=lambda:None)
+        with patch("subprocess.Popen",return_value=login) as launch:
+            panel.orbit_control('change-account',{},'synthetic-owner')
+        command=launch.call_args.args[0]
+        self.assertEqual(command,[self.bridge.config["codex_executable"],"login"])
+        self.assertFalse(wheel.enabled())
+        self.assertFalse(panel.account_state()['can_bind'])
+        with self.assertRaises(BridgeError) as pending:
+            panel.preview('rebind',{},'synthetic-owner')
+        self.assertEqual(pending.exception.code,'WHEEL_CODEX_LOGIN_IN_PROGRESS')
+
+        login.poll=lambda:0
+        wheel.pause('OWNER_STOPPED')
+        self.bridge=self.configure(Bridge(self.home,self.home/'private',fixtures.TestProtector(),actor=self.bridge.actor))
+        self.bridge.factory.pause_on_startup()
+        panel=RemotePanel(self.bridge)
+        wheel=panel.w
+        with self.assertRaises(BridgeError) as blocked:
+            wheel.toggle(True)
+        self.assertEqual(blocked.exception.code,'WHEEL_CODEX_SESSION_CHANGED')
+        self.assertEqual(panel.account_state()['state'],'pending')
+        ticket=panel.preview('rebind',{},'synthetic-owner')
+        self.assertFalse(panel.decide(ticket['ticket'],ticket['confirmation'],'synthetic-owner')['enabled'])
+        self.assertEqual(panel.account_state()['state'],'linked')
+        self.assertEqual(wheel.status()['reason'],'OWNER_STOPPED')
+        self.assertFalse(self.runs or self.changes)
+
+    def test_account_probe_masks_verified_identity_and_never_refreshes_auth(self):
+        from codex_quota import account_identity
+        with patch.object(self.bridge,'sign',return_value='synthetic-fingerprint') as sign, \
+             patch('codex_quota.read_quota',side_effect=AssertionError('quota request for identity')):
+            from unittest.mock import Mock
+            request=Mock(return_value={'account':{'type':'chatgpt','email':'Alice@example.com','token':'test-secret'}})
+            self.assertEqual(account_identity(request,self.bridge.sign),('synthetic-fingerprint','al•••@e•••'))
+            request.assert_called_once_with(2,'account/read',{'refreshToken':False})
+            sign.assert_called_once_with({'kind':'codex-chatgpt','account':'alice@example.com'})
+            request.return_value={'account':{'type':'apiKey','email':'Alice@example.com'}}
+            self.assertEqual(account_identity(request,self.bridge.sign),(None,None))
+
+    def test_power_requires_separate_binding_then_can_toggle_live_wheel(self):
         wheel,grant,job_id,session=self.live_credit_wait()
         self.cards[grant['card_id']]['pos']=4096
         self.cards=dict(sorted(self.cards.items(),key=lambda item:item[1]['pos']))
         wheel.pause('OWNER_PAUSED')
         panel=RemotePanel(self.bridge)
+        with self.assertRaises(BridgeError) as error:
+            panel.orbit_control('power',{'enabled':True},'synthetic-owner')
+        self.assertEqual(error.exception.code,'WHEEL_CODEX_SESSION_CHANGED')
+        ticket=panel.orbit_control('preview',{'action':'rebind'},'synthetic-owner')
+        self.assertFalse(panel.orbit_control('decide',{'ticket':ticket['ticket'],
+            'confirmation':ticket['confirmation']},'synthetic-owner')['enabled'])
+        self.assertFalse(wheel.enabled())
         started=panel.orbit_control('power',{'enabled':True},'synthetic-owner')
         self.assertTrue(started['enabled'])
         self.assertTrue(wheel.enabled())
@@ -784,14 +873,14 @@ class V2WheelTests(unittest.TestCase):
         self.assertFalse(wheel.enabled())
         self.assertFalse(self.runs or self.changes)
 
-    def test_live_queue_rebind_requires_owner_review_and_resumes_exact_session(self):
+    def test_live_queue_rebind_requires_owner_review_and_preserves_exact_session(self):
         w,grant,job_id,session=self.live_credit_wait()
         panel=RemotePanel(self.bridge)
         ticket=panel.preview("rebind",{},"synthetic-owner")
         review=ticket["review"]
         self.assertTrue(review["live_queue_rebind"])
         self.assertTrue(review["resume_exact_session"])
-        self.assertEqual(ticket["confirmation"],"VINCULAR CUENTA Y REANUDAR COLA")
+        self.assertEqual(ticket["confirmation"],"VINCULAR CUENTA SIN ACTIVAR")
         self.assertEqual(len(review["pending"]),1)
         self.assertEqual(review["pending"][0]["card_id"],grant["card_id"])
         self.assertEqual(review["pending"][0]["completed"],[])
@@ -804,8 +893,8 @@ class V2WheelTests(unittest.TestCase):
                                          (grant["grant_id"],)).fetchone()
         with patch.object(w,"resume_after_quota",return_value=True) as resume:
             result=panel.decide(ticket["ticket"],ticket["confirmation"],"synthetic-owner")
-        self.assertTrue(result["resumed"])
-        resume.assert_called_once_with()
+        self.assertFalse(result["resumed"])
+        resume.assert_not_called()
         rebound=w.live_policy()
         self.assertEqual(rebound["codex_identity"],self.codex_identity)
         with self.bridge.db() as db:

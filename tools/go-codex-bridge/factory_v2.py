@@ -275,6 +275,7 @@ class Continuity:
             with self.b.db() as db:
                 db.execute("BEGIN IMMEDIATE")
                 row,doc=self.w._latest_trial(db)
+                self.w.require_confirmed_account(db)
                 enabled=bool(db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0])
                 if enabled:
                     if review.get("batch_id")!=row["id"] or doc.get("policy")!="independent-v2":
@@ -370,14 +371,20 @@ class Continuity:
         if not review.get('binding_only') or self.review_activation()!=original:
             self.w.fail('WHEEL_SUBJECT_CHANGED','El lote cambió desde la revisión.')
         with self.f.lock,self.b.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0]:
+                self.w.fail('WHEEL_PAUSE_REQUIRED','Pausa la fábrica antes de vincular otra cuenta.')
             if db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone():
                 self.w.fail('WHEEL_WORKSPACE_BUSY','Hay una ejecución pendiente de conciliación.')
             row,doc=self.w._latest_trial(db)
-            identity=self.w._require_codex_identity()
-            doc={**doc,'codex_identity':identity}
+            identity,label=self.b.codex_account()
+            if not identity or self.f.digest(identity)!=original['current_codex_identity_sha256']:
+                self.w.fail('WHEEL_CODEX_SESSION_CHANGED','La cuenta cambió desde la revisión.')
+            doc={**doc,'codex_identity':identity,'codex_account_label':label}
             db.execute('UPDATE wheel_trials SET document=?,signature=? WHERE id=?',
                        (self.f.canonical(doc),self.b.sign(doc),row['id']))
             db.execute('DELETE FROM factory_v2_activation WHERE batch_id=?',(row['id'],))
+            self._clear_account_block(db)
             self.b.audit('wheel_owner_account_bound',{'batch':row['id'],'principal':principal,'enabled':False},db)
         return {'bound':True,'enabled':False,'message':'Cuenta vinculada al lote revisado. La rueda sigue pausada y ningún intento se ha reiniciado.'}
 
@@ -425,18 +432,20 @@ class Continuity:
         """Review an owner-approved identity change without starting or changing work."""
         self.f._identity()
         self.f._lists()
-        current_identity=self.w._require_codex_identity()
+        current_identity,label=self.b.codex_account()
+        if not current_identity:
+            self.w.fail('WHEEL_CODEX_AUTH','No se pudo identificar la sesión ChatGPT del ejecutor.')
         live=self.w.live_policy()
         if not live:
             self.w.fail('WHEEL_LIVE_QUEUE_REQUIRED','No hay una autorización continua activa que revisar.')
-        if current_identity==live['codex_identity']:
-            self.w.fail('WHEEL_CODEX_SESSION_MATCHED','La cuenta actual ya coincide con la autorización de la cola.')
         with self.b.db() as db:
-            control=db.execute('SELECT enabled,reason FROM wheel_control WHERE id=1').fetchone()
+            db.execute('BEGIN IMMEDIATE')
+            control=db.execute('SELECT enabled,reason,account_confirmation_required FROM wheel_control WHERE id=1').fetchone()
             if control['enabled']:
                 self.w.fail('WHEEL_PAUSE_REQUIRED','Pausa la fábrica antes de revisar el cambio de cuenta.')
-            if control['reason']!='WHEEL_CODEX_SESSION_CHANGED':
-                self.w.fail('WHEEL_REBIND_STATE','La cola no está detenida por un cambio de cuenta.')
+            if (current_identity==live['codex_identity'] and not control['account_confirmation_required']
+                    and control['reason']!='WHEEL_CODEX_SESSION_CHANGED'):
+                self.w.fail('WHEEL_CODEX_SESSION_MATCHED','La cuenta actual ya coincide con la autorización de la cola.')
             if (db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
                     or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()
                     or db.execute("SELECT 1 FROM wheel_grants WHERE state='working'").fetchone()):
@@ -486,6 +495,7 @@ class Continuity:
                 scoped.append(item)
             if sum(item['state']=='credit_wait' for item in scoped)>1:
                 self.w.fail('WHEEL_REBIND_UNCERTAIN','Hay más de una sesión de cuota pendiente.')
+            db.execute("UPDATE wheel_control SET account_confirmation_required=1 WHERE id=1")
 
         cards=list(self.w._available(self.f._cards(update_preview=False)))
         card_by_id={card['id']:card for card in cards}
@@ -510,26 +520,27 @@ class Continuity:
         return {'live_queue_rebind':True,'consent_sha256':live['consent_sha256'],
                 'previous_identity_sha256':self.f.digest(live['codex_identity']),
                 'current_identity_sha256':self.f.digest(current_identity),
+                'detected_account':label,
                 'queue_sha256':fingerprint,'queue':visible_queue,'pending':scoped,
                 'scope_unchanged':True,'starts_new_task':False,
                 'resume_exact_session':any(item['state']=='credit_wait' for item in scoped)}
 
     def rebind_live_queue(self,review,principal):
-        """Rebind only after fresh owner review; resume the exact live task/queue once."""
+        """Bind a verified account and preserve all pending work with the wheel paused."""
         current=self.review_live_rebind()
         mutable=('queue_sha256','queue')
         if (not review.get('live_queue_rebind') or set(review)!=set(current)
                 or any(review[key]!=current[key] for key in current if key not in mutable)):
             self.w.fail('WHEEL_SUBJECT_CHANGED','La cola, la cuenta o el checkpoint cambió desde la revisión.')
         review=current
-        identity=self.w._require_codex_identity()
-        if self.f.digest(identity)!=review['current_identity_sha256']:
+        identity,label=self.b.codex_account()
+        if not identity or self.f.digest(identity)!=review['current_identity_sha256']:
             self.w.fail('WHEEL_CODEX_SESSION_CHANGED','La cuenta Codex cambió durante la confirmación.')
         with self.f.lock,self.b.db() as db:
             db.execute('BEGIN IMMEDIATE')
-            control=db.execute('SELECT enabled,reason FROM wheel_control WHERE id=1').fetchone()
+            control=db.execute('SELECT enabled,account_confirmation_required FROM wheel_control WHERE id=1').fetchone()
             live=self.w.live_policy(db)
-            if (control['enabled'] or control['reason']!='WHEEL_CODEX_SESSION_CHANGED' or not live
+            if (control['enabled'] or not control['account_confirmation_required'] or not live
                     or live['consent_sha256']!=review['consent_sha256']
                     or self.f.digest(live['codex_identity'])!=review['previous_identity_sha256']):
                 self.w.fail('WHEEL_SUBJECT_CHANGED','La autorización continua cambió durante la revisión.')
@@ -538,7 +549,7 @@ class Continuity:
                     or db.execute("SELECT 1 FROM wheel_grants WHERE state='working'").fetchone()):
                 self.w.fail('WHEEL_WORKSPACE_BUSY','Hay una ejecución o escritura pendiente de conciliar.')
             old_policy=db.execute('SELECT * FROM wheel_live_authorization WHERE id=1').fetchone()
-            new_policy={**live,'codex_identity':identity,'identity_rebound_at':self.f.utc(),
+            new_policy={**live,'codex_identity':identity,'codex_account_label':label,'identity_rebound_at':self.f.utc(),
                         'identity_rebound_by':self.b.sign({'tailnet_owner':principal})}
             changed_policy=db.execute('UPDATE wheel_live_authorization SET document=?,signature=? WHERE id=1 AND state=\'active\' AND signature=?',
                 (self.f.canonical(new_policy),self.b.sign(new_policy),old_policy['signature'])).rowcount
@@ -567,9 +578,16 @@ class Continuity:
                 'current_identity_sha256':review['current_identity_sha256'],
                 'queue_sha256':review['queue_sha256'],'principal':principal,
                 'same_session':review['resume_exact_session']},db)
-            db.execute("UPDATE wheel_control SET enabled=0,reason='OWNER_PAUSED',retry_after=0 WHERE id=1")
+            self._clear_account_block(db)
         return {'bound':True,'enabled':False,'resumed':False,
                 'message':'Sesión vinculada. La fábrica sigue pausada; solo ACTIVAR iniciará la cola.'}
+
+    @staticmethod
+    def _clear_account_block(db):
+        db.execute("""UPDATE wheel_control SET enabled=0,account_confirmation_required=0,
+            reason=CASE WHEN reason IS NULL OR reason IN
+                ('WHEEL_CODEX_SESSION_CHANGED','WHEEL_CODEX_AUTH','WHEEL_CODEX_QUOTA','CREDIT_LIMIT')
+                THEN 'OWNER_PAUSED' ELSE reason END,retry_after=0 WHERE id=1""")
 
     def review_recovery(self,card_id):
         if self.w.enabled():self.w.fail('WHEEL_PAUSE_REQUIRED','Pausa la fábrica para revisar la recuperación.')

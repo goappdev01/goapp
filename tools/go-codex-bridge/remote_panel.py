@@ -49,6 +49,7 @@ class RemotePanel:
         from device_probes import DeviceProbes
         self.device_probes=DeviceProbes(bridge,self.config)
         self.orbit_system_cache=None
+        self.account_login=None
 
     def orbit_owner(self):
         owner=self.config.get("owner_hash", "")
@@ -93,7 +94,100 @@ class RemotePanel:
         except (ValueError, OSError, subprocess.SubprocessError) as error:
             self.w.fail("ORBIT_V2_METRO_UNVERIFIED",str(error)[:180])
 
+    def account_login_open(self):
+        return self.account_login is not None and self.account_login.poll() is None
+
+    def account_state(self):
+        with self.f.lock:
+            identity, detected = self.b.codex_account()
+            login_open = self.account_login_open()
+            with self.b.db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                policy = self.w.live_policy(db)
+                if not policy:
+                    trial = self.w._latest_trial(db)
+                    policy = trial[1] if trial else {}
+                control = db.execute("SELECT enabled,reason,account_confirmation_required FROM wheel_control WHERE id=1").fetchone()
+                expected = policy.get("codex_identity")
+                changed = bool(expected and identity and identity != expected)
+                if changed and not control["account_confirmation_required"]:
+                    reason = control["reason"]
+                    if control["enabled"] or reason in (None,"OWNER_PAUSED","OWNER_STOPPED","WHEEL_PAUSED"):
+                        reason = "WHEEL_CODEX_SESSION_CHANGED"
+                    db.execute("UPDATE wheel_control SET enabled=0,reason=?,retry_after=0,"
+                               "account_confirmation_required=1 WHERE id=1",(reason,))
+                    self.b.audit("wheel_account_change_detected",{},db)
+                    control={**dict(control),"enabled":False,"reason":reason,"account_confirmation_required":1}
+        linked = (policy or {}).get("codex_account_label")
+        if identity and identity == expected:
+            linked = detected
+        pending = bool(control["account_confirmation_required"] or control["reason"]=="WHEEL_CODEX_SESSION_CHANGED")
+        code = control["reason"]
+        reason = None
+        if login_open:
+            state = "pending"
+            reason = "Completa el inicio de sesión en la ventana de Codex de Windows."
+        elif not identity:
+            state = "blocked"
+            reason = "No se pudo identificar la sesión de Codex. Inicia sesión y vuelve a comprobarla."
+        elif not expected:
+            state = "pending"
+            reason = "La fábrica todavía no tiene una cuenta vinculada a una autorización vigente."
+        elif changed:
+            state = "changed"
+            reason = self.REASON_MESSAGES["WHEEL_CODEX_SESSION_CHANGED"]
+        elif pending:
+            state = "pending"
+            reason = "Confirma la sesión detectada antes de activar la fábrica."
+        elif code not in (None,"OWNER_PAUSED","OWNER_STOPPED","WHEEL_PAUSED"):
+            state = "blocked"
+            reason = code + " · " + self.REASON_MESSAGES.get(code,"Revisa el bloqueo de la fábrica.")
+        else:
+            state = "linked"
+        return {"linked":linked,"detected":detected,"state":state,"reason":reason,
+                "can_bind":bool(expected and identity and (changed or pending)
+                                and not control["enabled"] and not login_open),
+                "can_change":bool(expected and not login_open)}
+
+    def change_account(self):
+        import os
+        import subprocess
+        from codex_quota import worker_environment
+        if os.name!="nt":
+            self.w.fail("WHEEL_CODEX_LOGIN_UNAVAILABLE","Abre el inicio de sesión de Codex en el equipo donde se ejecuta el puente.")
+        if not self.f.lock.acquire(blocking=False):
+            self.w.fail("WHEEL_WORKSPACE_BUSY","Espera a que termine la operación en curso antes de cambiar de cuenta.")
+        try:
+            if self.account_login_open():
+                self.w.fail("WHEEL_CODEX_LOGIN_IN_PROGRESS","Completa el inicio de sesión abierto en Windows.")
+            with self.b.db() as db:
+                db.execute("BEGIN IMMEDIATE")
+                if not self.w.live_policy(db) and not self.w._latest_trial(db):
+                    self.w.fail("WHEEL_PERMISSION_REQUIRED","Primero vincula la fábrica a una autorización vigente.")
+                if (db.execute("SELECT 1 FROM jobs WHERE state IN ('running','detached')").fetchone()
+                        or db.execute("SELECT 1 FROM operations WHERE state='sending'").fetchone()
+                        or db.execute("SELECT 1 FROM wheel_stages s JOIN wheel_grants g ON s.grant_id=g.grant_id "
+                                      "WHERE s.state='claimed' AND g.state='working'").fetchone()):
+                    self.w.fail("WHEEL_WORKSPACE_BUSY","Hay trabajo en curso o pendiente de conciliación. Pausa la fábrica y espera a que se conserve.")
+                db.execute("UPDATE wheel_control SET enabled=0,account_confirmation_required=1 WHERE id=1")
+                self.b.audit("wheel_owner_account_change_requested",{},db)
+            self.previews={key:value for key,value in self.previews.items() if value["action"]!="rebind"}
+            try:
+                self.account_login = subprocess.Popen([self.b.config["codex_executable"],"login"],
+                    cwd=self.b.home,env=worker_environment(),creationflags=subprocess.CREATE_NEW_CONSOLE)
+            except OSError:
+                self.w.fail("WHEEL_CODEX_LOGIN_UNAVAILABLE","No se abrió la ventana de Codex. Ejecuta codex login en Windows y confirma la sesión aquí.")
+        finally:
+            self.f.lock.release()
+        return {"message":"Completa el inicio de sesión en Windows. Después confirma la cuenta detectada aquí."}
+
+    def require_login_finished(self):
+        if self.account_login_open():
+            self.w.fail("WHEEL_CODEX_LOGIN_IN_PROGRESS","Completa o cierra la ventana de inicio de sesión en Windows.")
+
     def orbit_control(self,action,body,principal):
+        if action=="change-account" and not body:
+            return self.change_account()
         if action=="power" and set(body)=={"enabled"} and type(body["enabled"]) is bool:
             if not body["enabled"]:
                 if self.w.enabled():
@@ -320,7 +414,8 @@ class RemotePanel:
         wheel_view={"enabled":enabled,"state":state,"reason":wheel["reason"],"batch_id":(batch or {}).get("id"),
                     "batch_state":(batch or {}).get("state"),"activation_confirmed":activation_confirmed,
                     "live_queue_authorized":bool(live),
-                    "account_rebind_required":bool(live and wheel["reason"]=="WHEEL_CODEX_SESSION_CHANGED"),
+                    "account_rebind_required":bool(wheel["account_confirmation_required"] or
+                                                   wheel["reason"]=="WHEEL_CODEX_SESSION_CHANGED"),
                     "renewal_required":any(grant["state"] in ("ready","working") and grant["expires_at"]<=time.time()
                         for grant in wheel["grants"] if grant["card_id"] in {item["card_id"] for item in (batch or {}).get("cards",[])}),
                     "current":next((card["title"] for card in cards if card["state"]=="working"
@@ -340,6 +435,7 @@ class RemotePanel:
 
     def preview(self,action,payload,principal):
         from owner_expo import OwnerExpo
+        detected_account=None
         if action=="activate":
             live=self.w.live_policy()
             if live:
@@ -359,10 +455,15 @@ class RemotePanel:
                 if review.get('account_changed'):
                     self.w.fail('WHEEL_CODEX_SESSION_CHANGED','Confirma primero la cuenta con Vincular cuenta sin activar.')
         elif action=="rebind":
+            self.require_login_finished()
             if self.w.live_policy():
                 review=self.w.continuity.review_live_rebind()
+                detected_account=review.get("detected_account")
             else:
                 review=self.w.continuity.review_activation()
+                identity,detected_account=self.b.codex_account()
+                if not identity or self.f.digest(identity)!=review["current_codex_identity_sha256"]:
+                    self.w.fail("WHEEL_CODEX_SESSION_CHANGED","La sesión cambió mientras se preparaba la confirmación.")
                 review={**review,"binding_only":True}
         elif action in ("expo_select","expo_rollback"):
             review=OwnerExpo(self.b).review(action,payload)
@@ -375,7 +476,8 @@ class RemotePanel:
         self.previews[ticket]=record
         self.previews={key:value for key,value in self.previews.items() if value["expires"]>time.time()}
         confirmation=self.confirmation(action,review)
-        return {"ticket":ticket,"action":action,"review":review,"confirmation":confirmation}
+        return {"ticket":ticket,"action":action,"review":review,"confirmation":confirmation,
+                **({"detected_account":detected_account} if action=="rebind" else {})}
 
     @staticmethod
     def confirmation(action,review):
@@ -415,9 +517,11 @@ class RemotePanel:
                 self.w.activation_failed(error.code)
                 raise
         if action=="rebind":
-            if review.get("live_queue_rebind"):
-                return self.w.continuity.rebind_live_queue(review,principal)
-            return self.w.continuity.rebind(review,principal)
+            with self.f.lock:
+                self.require_login_finished()
+                if review.get("live_queue_rebind"):
+                    return self.w.continuity.rebind_live_queue(review,principal)
+                return self.w.continuity.rebind(review,principal)
         if action=="recover":
             return self.w.continuity.recover(review,principal)
         from owner_expo import OwnerExpo
@@ -443,6 +547,8 @@ class RemotePanel:
                 self.send(handler,(self.b.home/"orbit-v2.js").read_bytes(),"text/javascript; charset=utf-8")
             elif path=="/remote/v2/state":
                 self.send(handler,{**self.orbit_state(),"csrf":csrf})
+            elif path=="/remote/v2/account":
+                self.send(handler,self.account_state())
             elif path in ("/remote/v2/verify/8088","/remote/v2/verify/8089"):
                 self.send(handler,self.orbit_verify_metro(int(path[-4:])))
             elif path=="/remote/status":
@@ -480,7 +586,8 @@ class RemotePanel:
             result=self.orbit_move(body)
         elif path=="/remote/v2/configure":
             result=self.orbit_configure(body)
-        elif path in ("/remote/v2/power","/remote/v2/preview","/remote/v2/decide","/remote/v2/pause","/remote/v2/stop"):
+        elif path in ("/remote/v2/power","/remote/v2/preview","/remote/v2/decide","/remote/v2/pause","/remote/v2/stop",
+                      "/remote/v2/change-account"):
             result=self.orbit_control(path.rsplit('/',1)[-1],body,principal)
         else:self.w.fail("REMOTE_ACTION_INVALID","La operación no está admitida.")
         self.send(handler,result)

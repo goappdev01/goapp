@@ -2,25 +2,97 @@
 const $=id=>document.getElementById(id), remote=location.pathname==='/remote'||location.pathname.startsWith('/remote/'), base=remote?'/remote/v2':'/v2';
 const legacy=remote?'/remote/legacy':'/legacy';
 let state=null,orbitIndex=0,selected='factory',drag=null,hold=null,pending=null,requestId=0,powerBusy=false;
+let accountReview=null, accountBusy=false, accountView=null, accountRequestId=0;
 const metroProof={};
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
 function note(text){$('notice').textContent=text;}
 async function api(route,body){const r=await fetch(base+'/'+route,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json','X-GO-CSRF':state.csrf}:{},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.message||data.error||'No se pudo verificar la operación.');return data;}
 function factoryMode(s){const wheel=s?.wheel||{};
   if(wheel.enabled)return ['programming','ACTIVO'];
-  if(!wheel.live_queue_authorized)return ['blocked','BLOQUEADO'];
+  if(!wheel.live_queue_authorized||wheel.account_rebind_required)return ['blocked','BLOQUEADO'];
   if(wheel.reason&&!['OWNER_PAUSED','WHEEL_PAUSED','CREDIT_LIMIT','WHEEL_CODEX_QUOTA'].includes(wheel.reason))return ['blocked','BLOQUEADO'];
   return ['pending','PAUSADO'];}
 function actualModule(key){return state?.layout?.labels?.[key]||state?.registry?.[key]?.name||key;}
 function orbitButton(key,index){const button=node('button',key?actualModule(key):'Vacío','sat'+(key?'':' empty')+(key===selected?' selected':''));button.dataset.slot=String(index);button.dataset.module=key||'';button.disabled=!key;button.type='button';button.setAttribute('aria-label',key?`${actualModule(key)}, órbita ${orbitIndex+1}, posición ${index+1}`:`Posición ${index+1} vacía`);
   if(key){button.onclick=()=>{if(drag)return;selected=key;render();};button.addEventListener('pointerdown',e=>beginHold(e,key));}return button;}
 function renderOrbit(){const box=$('orbit');box.replaceChildren();const items=state.layout.layout[orbitIndex]||[];
-  for(let i=0;i<7;i++)box.append(orbitButton(items[i],i));
+  box.classList.toggle('account-orbit',orbitIndex===0);
+  for(let i=0;i<7;i++){
+    box.append(orbitButton(items[i],i));
+    if(i===0&&orbitIndex===0){
+      const account=node('button','Cuenta Codex','sat account-satellite');
+      account.id='openCodexAccount';account.type='button';account.setAttribute('aria-haspopup','dialog');
+      account.onclick=openAccount;box.append(account);
+    }
+  }
+  box.setAttribute('aria-label',orbitIndex===0?'Órbita principal con Cuenta Codex y Otros':'Siete accesos y botón Otros');
   const other=node('button',drag?'OTRA ÓRBITA':'OTROS','sat other');other.dataset.slot='7';other.type='button';other.setAttribute('aria-label','OTROS, elegir órbita');other.onclick=()=>showArc();box.append(other);
   const mode=factoryMode(state.operational),go=node('button',`GO\n${mode[1]}`,'go '+mode[0]);go.style.whiteSpace='pre-line';go.disabled=powerBusy;go.setAttribute('aria-label',state.operational.wheel.enabled?'Pausar fábrica':'Activar fábrica');go.onclick=()=>factoryPower();box.append(go);
   $('factoryState').textContent=mode[1];$('factoryState').className='status '+(mode[0]==='programming'?'good':mode[0]==='blocked'?'bad':'warn');$('orbitTitle').textContent=`Órbita ${orbitIndex+1} de ${state.layout.layout.length}`;
   const chooser=$('orbitChooser');chooser.replaceChildren();state.layout.layout.forEach((_,i)=>{const b=node('button',String(i+1),i===orbitIndex?'active':'');b.setAttribute('aria-label','Mostrar órbita '+(i+1));b.onclick=()=>{orbitIndex=i;render();};chooser.append(b);});
 }
+function showAccountReason(text){const reason=$('accountReason');reason.textContent=text||'';reason.hidden=!text;}
+function renderAccount(){
+  const labels={linked:'Vinculada',pending:'Pendiente de confirmación',changed:'Sesión cambiada',blocked:'Bloqueada'};
+  $('accountLinked').textContent=accountView?.linked||'Cuenta no identificada';
+  $('accountDetected').textContent=accountView?.detected||'Cuenta no identificada';
+  $('accountState').textContent=accountView?labels[accountView.state]||'Sin verificar':'Comprobando sesión…';
+  $('accountState').className='status '+(accountView?.state==='linked'?'good':accountView?.state==='blocked'?'bad':'warn');
+  $('accountBind').disabled=accountBusy||Boolean(accountReview)||!accountView?.can_bind;
+  $('accountChange').disabled=accountBusy||Boolean(accountReview)||!accountView?.can_change;
+  $('accountRefresh').disabled=accountBusy||Boolean(accountReview);
+  $('accountApprove').disabled=accountBusy;
+  $('accountCancel').disabled=accountBusy;
+  $('accountConfirm').hidden=!accountReview;
+}
+async function loadAccount(){
+  const id=++accountRequestId;
+  try{
+    const view=await api('account');
+    if(id!==accountRequestId||!$('codexAccount').open)return;
+    accountView=view;showAccountReason(view.reason);
+  }catch(error){
+    if(id!==accountRequestId||!$('codexAccount').open)return;
+    accountView={state:'blocked'};showAccountReason(error.message);
+  }
+  renderAccount();
+}
+function openAccount(){
+  accountView=null;accountReview=null;showAccountReason(null);
+  $('codexAccount').showModal();renderAccount();loadAccount();
+}
+async function accountAction(fn){
+  if(accountBusy)return;
+  accountBusy=true;renderAccount();
+  try{await fn();}
+  catch(error){showAccountReason(error.message);}
+  finally{accountBusy=false;renderAccount();}
+}
+$('accountBind').onclick=()=>accountAction(async()=>{
+  const result=await api('preview',{action:'rebind'});
+  if(!$('codexAccount').open)return;
+  accountReview=result;
+  const detected=result.detected_account||'Cuenta no identificada';
+  $('accountConfirmText').textContent='Vincular '+detected+'. La fábrica permanecerá pausada.';
+  $('accountConfirm').hidden=false;
+  $('accountApprove').disabled=false;
+  $('accountApprove').focus();
+});
+$('accountApprove').onclick=()=>accountAction(async()=>{
+  const {ticket,confirmation}=accountReview;
+  accountReview=null;
+  const result=await api('decide',{ticket,confirmation});
+  await loadAccount();await refresh();note(result.message);
+});
+$('accountCancel').onclick=()=>{accountReview=null;renderAccount();$('accountBind').focus();};
+$('accountRefresh').onclick=()=>accountAction(loadAccount);
+$('accountChange').onclick=()=>accountAction(async()=>{
+  const result=await api('change-account',{});
+  await loadAccount();await refresh();showAccountReason(result.message);
+});
+$('codexAccount').addEventListener('close',()=>{
+  ++accountRequestId;accountReview=null;$('openCodexAccount')?.focus();
+});
 function showArc(){const arc=$('arc');arc.replaceChildren();state.layout.layout.forEach((_,i)=>{const b=node('button','Órbita '+(i+1));b.dataset.orbitTarget=String(i);b.onclick=()=>{orbitIndex=i;arc.hidden=true;render();};arc.append(b);});if(state.layout.layout.length<12){const add=node('button','+ Nueva órbita');add.dataset.newOrbit=String(state.layout.layout.length);add.onclick=()=>{if(!drag){note('Para crear una órbita, mueve un acceso al símbolo +.');return;} };arc.append(add);}arc.hidden=false;}
 function renderOptions(){const select=$('moduleSelect'),target=$('targetOrbit'),position=$('targetPosition');const old=select.value||selected;select.replaceChildren();for(const [key,value] of Object.entries(state.registry))select.append(new Option(value.name,key));select.value=old in state.registry?old:Object.keys(state.registry)[0];target.replaceChildren();state.layout.layout.forEach((_,i)=>target.append(new Option('Órbita '+(i+1),String(i))));if(state.layout.layout.length<12)target.append(new Option('+ Nueva órbita',String(state.layout.layout.length)));target.value=String(orbitIndex);position.replaceChildren();for(let i=0;i<7;i++)position.append(new Option('Posición '+(i+1),String(i)));if(document.activeElement!==$('visibleName'))$('visibleName').value=state.layout.labels?.[select.value]||state.registry[select.value]?.name||'';}
 function line(parent,text,cls){parent.append(node('p',text,cls));}

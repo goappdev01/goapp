@@ -38,6 +38,12 @@ personales ni se conceden permisos sensibles de forma implícita.
 Las autorizaciones de la fábrica fijan GPT-6.1 Sol con razonamiento `xhigh`.
 El registro de cada lanzamiento conserva los parámetros enviados a Codex.
 
+**Cuenta Codex** está en la primera órbita. Muestra referencias enmascaradas
+de la sesión detectada y de la cuenta vinculada cuando se pueden verificar.
+**Cambiar cuenta** pausa la fábrica y abre el inicio de sesión oficial en Windows.
+Después, el propietario confirma **Vincular cuenta sin activar**. La vinculación
+queda firmada y la fábrica espera el botón **Activar fábrica**.
+
 La autorización continua del propietario para la cola viva de Peluquerías se
 guarda firmada en `wheel_live_authorization`. Registra tablero, lista origen y
 destino, identidad Trello, cuenta Codex, huella de la instrucción de autorización
