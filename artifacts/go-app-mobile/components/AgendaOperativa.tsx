@@ -3328,6 +3328,7 @@ export function AgendaBoard({
 
       {/* One foreground detail for the same reservation or task. Calendar stays mounted. */}
       <GoEntryDetailsSheet renderNote={renderNote} onGoToLanding={onGoToLanding} renderMessageScreen={renderMessageScreen && expandedBookingItem ? () => renderMessageScreen(expandedBookingItem) : undefined} handedness={handedness} entry={expandedBookingItem && goLog.some(entry => entry.id === expandedBookingItem.id) ? expandedBookingItem : null}
+        onDiscard={expandedBookingItem && onResolveEntry && canResolveEntry?.(expandedBookingItem) ? ()=>onResolveEntry(expandedBookingItem,"discard",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id)) : undefined}
         onClose={() => {
           setVerificationEntryId(null);
           setExpandedBookingItem(null);
@@ -3336,10 +3337,9 @@ export function AgendaBoard({
         onMessage={expandedBookingItem && onOpenMessage ? () => handleOpenMessage(expandedBookingItem) : undefined}
         >
         {expandedBookingItem && (dismissThen => <>
-          {onResolveEntry && canResolveEntry?.(expandedBookingItem) && <GoEntryMicroActions entry={expandedBookingItem}
+          {onResolveEntry && canResolveEntry?.(expandedBookingItem) && <GoEntryMicroActions entry={expandedBookingItem} layout="detail"
             onDone={!expandedBookingItem.changeProposal&&!expandedBookingItem.proposal?()=>onResolveEntry(expandedBookingItem,"done",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id)):undefined}
-            onPending={!expandedBookingItem.changeProposal&&!expandedBookingItem.proposal?()=>onResolveEntry(expandedBookingItem,"pending",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id)):undefined}
-            onDiscard={()=>onResolveEntry(expandedBookingItem,"discard",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id))}/> }
+            onPending={!expandedBookingItem.changeProposal&&!expandedBookingItem.proposal?()=>onResolveEntry(expandedBookingItem,"pending",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id)):undefined}/> }
           {bookingPolicy?.canonical ? renderReservationControls(expandedBookingItem, true, dismissThen) : <GoEntryQuickActions entry={expandedBookingItem}
             onCancel={onDeleteItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);onDeleteItem(item.id); } : undefined}
             onEdit={onProposeItem ? () => { const item=expandedBookingItem;setExpandedBookingItem(null);onProposeItem(item.id); } : undefined}

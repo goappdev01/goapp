@@ -22,6 +22,17 @@ export function entryCommunication(entry: GoEntry) {
   return { call: phone ? `tel:+${phone}` : null, whatsapp: whatsapp ? `https://wa.me/${whatsapp}` : null };
 }
 
+/** Landing and details pass the current entry, never the pending proposal's place. */
+export function entryMapsUrl(entry: Pick<GoEntry, "place">): string | null {
+  return entry.place?.trim() ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(entry.place)}` : null;
+}
+
+export async function openEntryMaps(entry: Pick<GoEntry, "place">, openURL: (url: string) => Promise<unknown>): Promise<void> {
+  const url = entryMapsUrl(entry);
+  if (!url) throw new Error("No map destination.");
+  await openURL(url);
+}
+
 export function entryIsInternal(entry: GoEntry): boolean {
   if (entry.customerBooking || entry.businessBooking || entry.kind === "received" || entry.recipients?.length) return false;
   if (entry.direction === "incoming" || entry.direction === "outgoing") return false;

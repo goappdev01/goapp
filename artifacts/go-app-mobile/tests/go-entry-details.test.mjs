@@ -13,6 +13,78 @@ const texts=tree=>nodes(tree,n=>n.type==='Text').flatMap(n=>n.children).filter(x
 const base={id:'one-reservation',reservationId:'11111111-1111-4111-8111-111111111111',businessId:'salon',type:'GO_BOOKING',customerBooking:true,slotKey:'slot',kind:'received',contactName:'Peluquería Nemesi',professionalName:'María José',phone:'+34 600 123 456',whatsapp:'0034 611 123 456',date:'26/10/2030',dateISO:'2030-10-26',time:'12:00',duration:'60min',estado:'aceptado',bookingStatus:'confirmada',color:'#00e5ff',place:'Dirección vigente'};
 const sheet=(entry,extra={},fixtureOptions={})=>{const f=fixture(fixtureOptions),c=f.load('components/GoEntryDetails.tsx');return {...f,components:c,tree:f.render(c.GoEntryDetailsSheet,{entry,onClose(){},...extra})};};
 
+test('only awaiting response becomes vivid yellow in the detail and shared change actions',()=>{
+ const f=fixture(),c=f.load('components/GoEntryDetails.tsx');
+ for(const estado of ['propuesta_pendiente','propuesto']){
+  const entry={...base,estado,changeProposal:{dateISO:'2030-10-27',time:'13:00'}};
+  const tree=f.render(c.GoEntryDetailsSheet,{entry,onClose(){}}),state=nodes(tree,n=>n.props.testID==='entry-proposal-state')[0];
+  assert.equal(texts(state),estado==='propuesto'?'CAMBIO RECIBIDO':'ESPERANDO RESPUESTA');
+  assert.equal(state.props.style.color,estado==='propuesto'?'#D1A166':'#FFD700');
+  const quick=f.render(c.GoEntryQuickActions,{entry});
+  assert.equal(nodes(quick,n=>n.type==='Text'&&texts(n).startsWith('Cambio'))[0].props.style.color,estado==='propuesto'?'#FF8C00':'#FFD700');
+ }
+});
+
+test('date and professional share a flexible row and retain full values at enlarged text sizes',()=>{
+ for(const fontScale of [1,2.8]){
+  const entry={...base,professionalName:'Profesional de prueba con un nombre excepcionalmente largo'};
+  const f=sheet(entry,{}, {viewport:{width:320,height:568,fontScale}}),row=nodes(f.tree,n=>n.props.testID==='entry-date-professional')[0];
+  const date=nodes(row,n=>n.props.testID==='entry-original-date-time')[0],professional=nodes(row,n=>n.props.testID==='entry-professional')[0];
+  assert.ok(date&&professional);assert.equal(row.props.style.flexDirection,'row');assert.equal(row.props.style.flexWrap,'wrap');
+  assert.equal(Object.assign({},...professional.props.style).marginLeft,'auto');assert.equal(Object.assign({},...professional.props.style).maxWidth,'100%');
+  for(const text of [date,professional]){assert.equal(text.props.numberOfLines,undefined);assert.equal(text.props.adjustsFontSizeToFit,undefined);}
+  assert.equal(texts(professional).replace(/\s+/g,' '),'Profesional: '+entry.professionalName);assert.equal(texts(date),'Sáb 26/10/2030 · 12:00');
+  assert.equal(texts(nodes(f.tree,n=>n.props.testID==='entry-duration')[0]),'Duración: 60 min');
+ }
+});
+
+test('compact discard stays left of message in both hands and all controls fit a narrow safe width',()=>{
+ for(const handedness of ['right','left']){
+  let discarded=0;
+  const f=sheet(base,{handedness,onDiscard:()=>discarded++,onMessage(){},onGoToLanding(){}},{viewport:{width:320,height:568,fontScale:2.8},insets:{top:47,bottom:34,left:0,right:0}});
+  const nav=nodes(f.tree,n=>n.props.testID==='entry-detail-floating-navigation')[0],scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0];
+  const group=nodes(nav,n=>n.props.testID==='entry-detail-follow-up-controls')[0],trash=nodes(group,n=>n.props.testID==='entry-discard')[0],message=nodes(group,n=>n.props.testID==='entry-message-go')[0];
+  assert.equal(group.props.style.flexDirection,'row');assert.equal(group.props.style.gap,8);
+  assert.deepEqual(group.children.map(n=>n.props.testID),['entry-discard','entry-message-go']);
+  assert.equal(trash.props.style.width,44);assert.equal(trash.props.style.height,44);assert.equal(trash.props.hitSlop,0);assert.equal(trash.props.accessibilityLabel,'Mi seguimiento: ELIMINAR');
+  assert.equal(nodes(trash,n=>n.type==='Feather')[0].props.name,'trash-2');assert.equal(nodes(trash,n=>n.type==='Text').length,0);
+  assert.equal(nodes(scroll,n=>['entry-discard','entry-message-go'].includes(n.props.testID)).length,0);
+  assert.ok(nav.props.width<=285);assert.equal(nav.props.width,44+message.props.style.width+64*2+8*3);
+  assert.equal(nav.props.initialTop,undefined);assert.equal(nav.props.initialBottom,11);
+  assert.equal(nodes(nav,n=>['Cerrar detalle','Ir directamente al Landing'].includes(n.props.accessibilityLabel)).length,2);
+  const controls=f.render(nav.type,{...nav.props,children:nav.children}),outer=nodes(controls,n=>n.type==='View'&&n.props.style?.alignItems==='flex-end'&&n.props.style?.gap===8)[0];
+  assert.equal(outer.props.style.flexDirection,handedness==='left'?'row-reverse':'row');
+  trash.props.onPress({stopPropagation(){}});assert.equal(discarded,1);
+  const actions=f.render(f.components.GoEntryMicroActions,{entry:base,layout:'detail',onDiscard(){},onDone(){},onPending(){}});
+  assert.deepEqual(nodes(actions,n=>n.type==='TouchableOpacity').map(n=>n.props.accessibilityLabel),['Mi seguimiento: PENDIENTE','Mi seguimiento: REALIZADA']);
+ }
+ const absent=sheet(base);assert.equal(nodes(absent.tree,n=>n.props.testID==='entry-discard').length,0);
+ let calls=0;const disabled=sheet(base,{onDiscard:()=>calls++,discardDisabled:true}),button=nodes(disabled.tree,n=>n.props.testID==='entry-discard')[0];
+ button.props.onPress({stopPropagation(){}});assert.equal(calls,0);assert.equal(button.props.disabled,true);
+ const closing=sheet(base,{onDiscard:()=>calls++});nodes(closing.tree,n=>n.props.accessibilityLabel==='Cerrar detalle')[0].props.onPress();nodes(closing.tree,n=>n.props.testID==='entry-discard')[0].props.onPress({stopPropagation(){}});assert.equal(calls,0);
+});
+
+test('detail trash retains the existing confirmation and only dispatches personal discard after explicit confirmation',async()=>{
+ const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+ let resolve;const find=node=>{if(ts.isVariableDeclaration(node)&&node.name.getText(ast)==='resolveEntry')resolve=node.getText(ast);ts.forEachChild(node,find);};find(ast);assert.ok(resolve);
+ const alerts=[],discarded=[],closed=[],scope={exports:{},lang:'es',canResolveEntry:()=>true,goLog:[base],Alert:{alert:(...args)=>alerts.push(args)},setLandingDetailsId:id=>closed.push(id),actionCompletion:{discard:async(entry,read)=>discarded.push([entry,read()]),decide(){assert.fail('must not change contractual or follow-up status');}}};
+ vm.runInNewContext(ts.transpileModule('const '+resolve+';exports.resolve=resolveEntry;',{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,scope);
+ const f=sheet(base,{onDiscard:()=>scope.exports.resolve(base,'discard')}),trash=nodes(f.tree,n=>n.props.testID==='entry-discard')[0];
+ trash.props.onPress({stopPropagation(){}});assert.equal(discarded.length,0);assert.equal(alerts[0][0],'Eliminar mi ficha');assert.match(alerts[0][1],/No se cancela la reserva/);
+ assert.equal(alerts[0][2][0].style,'cancel');assert.equal(alerts[0][2][0].onPress,undefined);
+ const confirm=alerts[0][2][1];assert.equal(confirm.text,'ELIMINAR');assert.equal(confirm.style,'destructive');confirm.onPress();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(discarded.length,1);assert.equal(discarded[0][0],base);assert.equal(discarded[0][1],base);assert.deepEqual(closed,[null]);
+});
+
+test('maps opening errors display the existing error and missing places never invent a destination',async()=>{
+ const f=sheet(base,{}, {openURL:async()=>{throw Error('unavailable');}}),go=nodes(f.tree,n=>n.props.testID==='entry-maps-go')[0];
+ go.props.onPress();await new Promise(resolve=>setImmediate(resolve));assert.equal(f.urls.length,1);assert.equal(f.alerts.length,1);assert.equal(f.alerts[0][1],'toast_cannot_open_maps');
+ for(const place of [undefined,'','  ']){
+  const empty=sheet({...base,place});assert.equal(nodes(empty.tree,n=>n.props.testID==='entry-maps-go').length,0);assert.equal(empty.urls.length,0);
+ }
+ let opened=0;await assert.rejects(presentation.openEntryMaps({place:''},async()=>opened++));assert.equal(opened,0);
+});
+
 test('older and new receipts expose the same compact accepted actions, including receipts with only server status',()=>{
  const f=fixture(),c=f.load('components/GoEntryDetails.tsx');
  for(const variant of [{...base,createdAt:1},{...base,createdAt:Date.now()},{...base,bookingStatus:undefined,bookingServerStatus:'CONFIRMED'},{...base,bookingStatus:undefined}]){
@@ -47,7 +119,7 @@ test('expanded sheet reserves bottom navigation outside the scroll and places GO
 test('original and proposed booking dates show full local year without changing persisted values',()=>{
  const entry={...base,estado:'propuesta_pendiente',date:'16/11/26',dateISO:'2026-11-16',time:'11:00',bookingTimeline:{timezone:'Pacific/Kiritimati',workMinutes:0,waitMinutes:0,phases:[]},changeProposal:{originalDateISO:'2026-11-16',originalTime:'11:00',date:'20/11/26',dateISO:'2026-11-20',time:'11:11',note:'Cambiar horario',proposedAt:1}};
  const snapshot=JSON.stringify(entry),f=sheet(entry),summary=nodes(f.tree,n=>n.props.testID==='entry-original-date-time')[0],proposal=nodes(f.tree,n=>n.props.testID==='entry-proposed-date-time')[0];
- assert.equal(texts(summary),'Lun 16/11/2026 · 11:00 · Duración: 60 min');assert.equal(texts(proposal).replace(/\s+/g,' '),'Propuesto: Vie 20/11/2026 · 11:11');assert.equal(JSON.stringify(entry),snapshot);
+ assert.equal(texts(summary),'Lun 16/11/2026 · 11:00');assert.equal(texts(nodes(f.tree,n=>n.props.testID==='entry-duration')[0]),'Duración: 60 min');assert.equal(texts(proposal).replace(/\s+/g,' '),'Propuesto: Vie 20/11/2026 · 11:11');assert.equal(JSON.stringify(entry),snapshot);
  const info=nodes(f.tree,n=>n.props.testID==='entry-proposal')[0];assert.equal(info.type,'View');assert.equal(info.props.onPress,undefined);assert.equal(info.props.accessibilityRole,undefined);assert.equal(info.props.style.elevation,undefined);assert.ok(info.props.style.borderColor.startsWith('rgba('));
  const presentation=f.load('data/goEntryPresentation.ts');assert.equal(presentation.formatBookingLocalDate('2026-11-16','16/11/26','es','Pacific/Kiritimati'),'Lun 16/11/2026');
  assert.equal(presentation.formatBookingLocalDate(undefined,'','es','America/Los_Angeles','2026-11-16T00:30:00Z'),'Dom 15/11/2026');

@@ -147,7 +147,7 @@ import { LandingContentViewport, LandingCardContents, LandingCompactBody } from 
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions, GoListActionRow } from "@/components/GoEntryDetails";
-import { entryHeading, entryIdentity, entryIsReservation, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand } from "@/data/goEntryPresentation";
+import { entryHeading, entryIdentity, entryIsReservation, entryMapsUrl, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand, openEntryMaps } from "@/data/goEntryPresentation";
 import { changeTask } from "@/lib/goTaskManagement";
 import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands";
 import { redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
@@ -13549,7 +13549,7 @@ function HomeScreenContent() {
     if(!entry.changeProposal&&!entry.proposal)void actionCompletion.decide(entry,status,true,read);
   };
   const followedEntry=(entry:GoEntry)=>({...entry,localResolutionStatus:actionCompletion.status(entry)});
-  const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list",listScale=1)=><GoEntryMicroActions inline={inline} layout={layout} handedness={handedness} listScale={listScale} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
+  const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list"|"detail",listScale=1)=><GoEntryMicroActions inline={inline} layout={layout} handedness={handedness} listScale={listScale} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
     onDone={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"done"):undefined}
     onPending={canResolveEntry(entry)&&!entry.changeProposal&&!entry.proposal?()=>resolveEntry(entry,"pending"):undefined}
     onDiscard={canResolveEntry(entry)?()=>resolveEntry(entry,"discard"):undefined}/>;
@@ -13798,7 +13798,7 @@ function HomeScreenContent() {
   const renderLandingOperations = (entry: typeof goLog[number]) => {
     const g = landingCurrentEntry(entry);
     const PANEL_W = landingPanels.region.width;
-    const hasPlace = !!(g.place && g.place.trim().length > 0);
+    const hasPlace = !!entryMapsUrl(g);
 
     const base = buildNextAptActions(g);
     const aHere = base.find((a) => a.k === "here");
@@ -13813,9 +13813,7 @@ function HomeScreenContent() {
       disabled: !hasPlace,
       fn: () => {
         if (!hasPlace) return;
-        Linking.openURL(
-          `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(g.place)}`,
-        ).catch(() => showToast(t('toast_cannot_open_maps'), 'error'));
+        void openEntryMaps(g, Linking.openURL).catch(() => showToast(t('toast_cannot_open_maps'), 'error'));
       },
     };
 
@@ -15475,10 +15473,12 @@ function HomeScreenContent() {
 
       </LandingContentViewport>
       <GoEntryDetailsSheet renderNote={renderExistingNote} onGoToLanding={goDirectlyToLanding} handedness={handedness} entry={landingDetailsEntry?followedEntry(landingDetailsEntry):null}
+        onDiscard={landingDetailsEntry && canResolveEntry(landingDetailsEntry) ? ()=>resolveEntry(landingDetailsEntry,"discard") : undefined}
+        discardDisabled={!!landingDetailsEntry && actionCompletion.isSaving(landingDetailsEntry)}
         closeRequested={noteDetailCloseRequested}
         onClose={() => { const edit = noteEditAfterDetailsRef.current; noteEditAfterDetailsRef.current = null; setNoteDetailCloseRequested(false); setLandingDetailsId(null); if (edit) openEntryChange(edit, "landing", true); }}
         renderMessageScreen={landingDetailsEntry ? () => renderEntryMessageScreen(landingDetailsEntry) : undefined} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry, undefined, true) : undefined}>
-        {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry)}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}</>}
+        {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry,false,"detail")}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}</>}
       </GoEntryDetailsSheet>
 
       {/* QR uses the approved fixed corner for the selected hand. */}
@@ -22617,7 +22617,7 @@ function HomeScreenContent() {
                         g.estado === "aceptado"
                           ? `${stateColor}99`
                           : isProposalEstado
-                            ? "rgba(255,140,0,0.80)"
+                            ? g.estado === "propuesta_pendiente" ? ENTRY_COLORS.pending + "CC" : "rgba(255,140,0,0.80)"
                             : g.estado === "rechazado"
                               ? "rgba(255,0,0,0.80)"
                               : "rgba(234,179,8,0.80)",
@@ -22625,7 +22625,7 @@ function HomeScreenContent() {
                     }}
                   >
                     {isProposalEstado ? (
-                      <Text numberOfLines={longState?2:1} style={{ color: ENTRY_COLORS.change, fontSize: Math.max(11,lv(11)), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textAlign: "center",flexShrink:1 }}>
+                      <Text numberOfLines={longState?2:1} style={{ color: g.estado === "propuesta_pendiente" ? ENTRY_COLORS.pending : ENTRY_COLORS.change, fontSize: Math.max(11,lv(11)), fontFamily: "Inter_700Bold", fontWeight: "800", letterSpacing: 0.3, textAlign: "center",flexShrink:1 }}>
                         {compactStateLabel}
                       </Text>
                     ) : (
@@ -25501,11 +25501,13 @@ function HomeScreenContent() {
 
   function renderListBookingDetail(entry: GoEntry) {
     return <GoEntryDetailsSheet entry={entry} handedness={handedness} onGoToLanding={goDirectlyToLanding}
+      onDiscard={canResolveEntry(entry)?()=>resolveEntry(entry,"discard"):undefined}
+      discardDisabled={actionCompletion.isSaving(entry)}
       onClose={() => setCalBookingDetailEntry(null)}
       renderMessageScreen={() => renderEntryMessageScreen(entry)}
       onMessage={() => openEntryMessage(entry, () => setCalBookingDetailEntry(entry), true)}>
       {dismissThen => <>
-        {renderEntryMicroActions(entry)}
+        {renderEntryMicroActions(entry,false,"detail")}
         {renderEntryQuickActions(entry, !(entry.customerBooking || entry.businessBooking), false, undefined,
           () => dismissThen(() => { listBookingProposalAfterDismissRef.current = entry; setListOpen(false); }))}
         {renderLinkedNotes(entry)}

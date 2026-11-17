@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { GoEntry } from "./AgendaOperativa";
-import { entryCommunication, entryDurationLabel, entryHeading, entryIdentity, entryIsInternal, entryIsReservation, entryProposalPending, formatBookingLocalDate } from "@/data/goEntryPresentation";
+import { entryCommunication, entryDurationLabel, entryHeading, entryIdentity, entryIsInternal, entryIsReservation, entryMapsUrl, entryProposalPending, formatBookingLocalDate, openEntryMaps } from "@/data/goEntryPresentation";
 import { reservationCardPolicy, GO_ENTRY_COLORS as C } from "@/data/reservationCardPolicy";
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { landingCurrentEntry } from "./landing/landingPanels";
@@ -78,7 +78,7 @@ export function GoListActionRow({actions,handedness="right",scale=1,testID="list
 }
 
 /** Personal follow-up never writes the contractual acceptance or completion of a reservation. */
-export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout,handedness="right",listScale=1}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list";handedness?:"left"|"right";listScale?:number}){
+export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout,handedness="right",listScale=1}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list"|"detail";handedness?:"left"|"right";listScale?:number}){
   const {lang}=useLanguage(),personal=!!(entry.reservationId||entry.customerBooking||entry.businessBooking);
   const [pressed,setPressed]=useState<string|null>(null);
   const list = layout === "list";
@@ -88,7 +88,7 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
     {key:"discard",text:label("ELIMINAR","DELETE"),tone:"negative" as const,run:onDiscard},
     {key:"pending",text:label("PENDIENTE","PENDING"),tone:"pending" as const,run:onPending},
     {key:"done",text:label("REALIZADA","DONE"),tone:"positive" as const,run:onDone},
-  ].filter(action=>action.run);
+  ].filter(action=>action.run && (layout!=="detail" || action.key!=="discard"));
   if(!actions.length)return null;
   if(list){
     const listActions:GoListAction[]=[];
@@ -135,7 +135,7 @@ export function GoEntryQuickActions({ entry, showState = true, compact = false, 
   return <View testID="entry-quick-actions" style={{ gap: compact ? 4 : 8 }}>
     {showState && <Text numberOfLines={1} style={{ color: canonical ? policy.stateColor : entry.localResolutionStatus==="done"?C.done:entry.localResolutionStatus==="pending"?C.pending:accepted?C.accepted:entry.estado==="rechazado"?C.destructive:C.pending, fontSize: compact ? 10 : 13, fontWeight: "800" }}>{pending ? "Original: " : ""}{state}</Text>}
     {canonical&&entry.localResolutionStatus&&<Text style={{color:entry.localResolutionStatus==="done"?C.done:C.pending,fontSize:compact?10:13}}>{lang==="en"?"My follow-up: ":"Mi seguimiento: "}{entry.localResolutionStatus==="done"?(lang==="en"?"DONE":"REALIZADA"):(lang==="en"?"PENDING":"PENDIENTE")}</Text>}
-    {pending && <Text numberOfLines={1} style={{color:"#FF8C00",fontSize:compact?10:13,fontWeight:"700"}}>{received ? (lang === "en" ? "Change received · pending" : "Cambio recibido · pendiente") : (lang === "en" ? "Change · awaiting response" : "Cambio · esperando respuesta")}</Text>}
+    {pending && <Text numberOfLines={1} style={{color:received?C.change:C.pending,fontSize:compact?10:13,fontWeight:"700"}}>{received ? (lang === "en" ? "Change received · pending" : "Cambio recibido · pendiente") : (lang === "en" ? "Change · awaiting response" : "Cambio · esperando respuesta")}</Text>}
     {active && <View style={[s.actions, compact && {flexWrap:"nowrap",gap:6}]}>
       {button(received ? (lang === "en" ? "REJECT" : "RECHAZAR") : (lang === "en" ? "CANCEL" : "CANCELAR"), "negative", received ? actions.onReject : actions.onCancel)}
       {button(internal ? (lang === "en" ? "EDIT" : "MODIFICAR") : received ? (lang === "en" ? "PROPOSE" : "PROPONER") : (lang === "en" ? "PROPOSE CHANGE" : "PROPONER CAMBIO"), "intermediate", internal ? actions.onEdit : actions.onPropose)}
@@ -150,12 +150,23 @@ export function GoEntrySummary({ entry }: { entry: GoEntry }) {
   const policy = reservationCardPolicy(entry);
   const unknown = entry.businessBooking || entry.bookingPerspective === "business" ? t("booking_customer_unknown") : lang === "en" ? "Reservation" : "Reserva";
   const professional = entry.professionalName === "Sin preferencia" ? "" : entryIdentity(entry.professionalName);
+  const duration = entryIsReservation(entry) ? entryDurationLabel(entry.duration,lang) : entry.duration;
   return <View testID="entry-summary" style={{ gap: 6 }}>
     <Text style={s.title}>{entryHeading(entry, unknown)}</Text>
     {policy.canonical && <Text style={{ color: policy.stateColor, fontWeight: "800" }}>{entryProposalPending(entry) ? (lang === "en" ? "Original reservation: " : "Reserva original: ") : ""}{t(policy.stateKey as any)}</Text>}
-    <Text testID="entry-original-date-time" style={s.text}>{[entryIsReservation(entry) ? formatBookingLocalDate(entry.dateISO, entry.date, lang, entry.bookingTimeline?.timezone, entry.bookingStartsAt || entry.startDatetime) : entry.date || entry.dateISO, entry.time, entryIsReservation(entry) ? entryDurationLabel(entry.duration,lang) : entry.duration].filter(Boolean).join(" · ")}</Text>
-    {!!professional && <Text style={s.text}>{lang === "en" ? "Professional: " : "Profesional: "}{professional}</Text>}
-    {!!entry.place && <Text style={s.secondary}>{entry.place}</Text>}
+    <View testID="entry-date-professional" style={{flexDirection:"row",flexWrap:"wrap",alignItems:"baseline",columnGap:12,rowGap:4}}>
+      <Text testID="entry-original-date-time" style={[s.text,{flexShrink:1,maxWidth:"100%"}]}>{[entryIsReservation(entry) ? formatBookingLocalDate(entry.dateISO, entry.date, lang, entry.bookingTimeline?.timezone, entry.bookingStartsAt || entry.startDatetime) : entry.date || entry.dateISO, entry.time].filter(Boolean).join(" · ")}</Text>
+      {!!professional && <Text testID="entry-professional" style={[s.text,{marginLeft:"auto",flexShrink:1,maxWidth:"100%",textAlign:"right"}]}>{lang === "en" ? "Professional: " : "Profesional: "}{professional}</Text>}
+    </View>
+    {!!duration && <Text testID="entry-duration" style={s.secondary}>{duration}</Text>}
+    {!!entry.place && <View testID="entry-address" style={{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:8}}>
+      <Text style={[s.secondary,{flexGrow:1,flexShrink:1}]}>{entry.place}</Text>
+      {entryIsReservation(entry) && !!entryMapsUrl(entry) && <TouchableOpacity testID="entry-maps-go" accessibilityRole="button" accessibilityLabel={t("go_nav")} accessibilityHint={lang==="en"?"Open this reservation's address in Google Maps":"Abrir la dirección de esta reserva en Google Maps"} activeOpacity={0.82}
+        onPress={()=>{void openEntryMaps(entry,Linking.openURL).catch(()=>Alert.alert("GO",t("toast_cannot_open_maps")));}}
+        style={{minWidth:44,minHeight:44,paddingHorizontal:12,paddingVertical:8,borderRadius:10,borderWidth:1,borderColor:"#60a5fa",alignItems:"center",justifyContent:"center"}}>
+        <Text style={{color:"#93c5fd",fontSize:14,fontWeight:"800"}}>{t("go_nav")}</Text>
+      </TouchableOpacity>}
+    </View>}
   </View>;
 }
 
@@ -189,6 +200,8 @@ export const ENTRY_DETAIL_CLOSE = Object.freeze({ headerHeight: 44, touchSize: 6
 
 type EntryDetailsProps = {
   closeRequested?: boolean;
+  onDiscard?: () => void;
+  discardDisabled?: boolean;
   renderNote?:(entry:GoEntry,onClose:()=>void,navigation?:{onGoToLanding?:()=>void;closeRequested?:boolean})=>React.ReactNode;
   entry: GoEntry | null; onClose: () => void; onMessage?: () => void; onGoToLanding?: () => void; renderMessageScreen?: () => React.ReactNode; handedness?: "right" | "left"; children?: React.ReactNode | ((dismissThen: (action: () => void) => void) => React.ReactNode);
 };
@@ -202,7 +215,7 @@ export function GoEntryDetailsSheet(props: EntryDetailsProps) {
   return props.entry ? <GoEntryDetailsSession key={props.entry.id} {...props} entry={props.entry} /> : null;
 }
 
-function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, renderMessageScreen, handedness = "right", children, closeRequested = false }: EntryDetailsProps & { entry: GoEntry }) {
+function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, onDiscard, discardDisabled = false, renderMessageScreen, handedness = "right", children, closeRequested = false }: EntryDetailsProps & { entry: GoEntry }) {
   const insets = useSafeAreaInsets(), window = useWindowDimensions(), { lang } = useLanguage();
   const [closing, setClosing] = useState(false);
   const [messagePressed,setMessagePressed]=useState(false);
@@ -251,11 +264,22 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
   const current = landingCurrentEntry(entry);
   const pending = entryProposalPending(entry);
   const hasMessage = !!onMessage && !entryIsInternal(entry);
+  const hasDiscard = !!onDiscard;
   const closeButtonCount = onGoToLanding ? 2 : 1;
-  const navigationGapWidth = (closeButtonCount + (hasMessage ? 1 : 0) - 1) * 8;
-  const navigationAvailableWidth = Math.max(0, window.width - Math.max(insets.left, insets.right, 8) * 2);
-  const messageButtonWidth = hasMessage ? Math.max(52, Math.min(132, navigationAvailableWidth - closeButtonCount * ENTRY_DETAIL_CLOSE.touchSize - navigationGapWidth)) : 0;
-  const navigationWidth = closeButtonCount * ENTRY_DETAIL_CLOSE.touchSize + navigationGapWidth + messageButtonWidth;
+  const discardWidth = hasDiscard ? 44 : 0;
+  const navigationGapWidth = (closeButtonCount + (hasMessage ? 1 : 0) + (hasDiscard ? 1 : 0) - 1) * 8;
+  // Leave room for the sheet border and the floating host's 8-point side margins.
+  const navigationAvailableWidth = Math.max(0, window.width - Math.max(insets.left, insets.right, 8) * 2 - (hasDiscard ? 3 + 2 * 8 : 0));
+  const messageButtonWidth = hasMessage ? Math.max(52, Math.min(132, navigationAvailableWidth - closeButtonCount * ENTRY_DETAIL_CLOSE.touchSize - discardWidth - navigationGapWidth)) : 0;
+  const navigationWidth = closeButtonCount * ENTRY_DETAIL_CLOSE.touchSize + navigationGapWidth + discardWidth + messageButtonWidth;
+  const discardButton = hasDiscard && <TouchableOpacity testID="entry-discard" accessibilityRole="button"
+    accessibilityLabel={((entry.reservationId||entry.customerBooking||entry.businessBooking)?(lang==="en"?"My follow-up: ":"Mi seguimiento: "):"")+(lang==="en"?"DELETE":"ELIMINAR")}
+    accessibilityHint={lang==="en"?"Hides only your card. Does not cancel the commitment.":"Oculta solo tu ficha. No cancela el compromiso."}
+    disabled={discardDisabled} accessibilityState={{disabled:discardDisabled}} hitSlop={0} activeOpacity={0.7}
+    onPress={event=>{event?.stopPropagation();if(phase.current==="open"&&!discardDisabled)onDiscard?.();}}
+    style={{width:discardWidth,height:44,borderRadius:12,borderWidth:1,borderColor:"#f87171",backgroundColor:"rgba(217,45,50,0.14)",opacity:discardDisabled?0.48:1,alignItems:"center",justifyContent:"center"}}>
+    <Feather name="trash-2" size={22} color="#f87171" />
+  </TouchableOpacity>;
   const messageButton = hasMessage && <TouchableOpacity testID="entry-message-go" accessibilityRole="button" accessibilityLabel="MENSAJE GO" activeOpacity={0.82} onPressIn={()=>setMessagePressed(true)} onPressOut={()=>setMessagePressed(false)} onPress={() => { if (phase.current !== "open") return; if (renderMessageScreen) { onMessage?.(); return; } messageAfterDismiss.current = true; dismiss(); }}
     style={{width:messageButtonWidth,height:ENTRY_DETAIL_CLOSE.touchSize,paddingHorizontal:7,paddingVertical:4,borderWidth:1.5,borderRadius:20,borderColor:"#93c5fd",backgroundColor:"rgba(147,197,253,0.14)",shadowColor:"#93c5fd",shadowOffset:{width:0,height:2},shadowOpacity:messagePressed?0.06:0.2,shadowRadius:3,elevation:messagePressed?0:2,transform:[{translateY:messagePressed?1:0}],opacity:messagePressed?0.88:1,alignItems:"center",justifyContent:"center"}}>
     <Text numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={2} style={{color:"#93c5fd",fontWeight:"800",fontSize:12,textAlign:"center"}}>MENSAJE GO</Text>
@@ -272,7 +296,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
           <GoEntrySummary entry={current} />
           <GoEntryContract entry={current} />
           {pending && <View testID="entry-proposal" style={{ borderColor: "rgba(209,161,102,0.42)", borderWidth: 1, borderRadius: 12, padding: 10, gap: 6, backgroundColor:"#171512" }}>
-            <Text style={{ color: "#D1A166", fontWeight: "800" }}>{entry.estado === "propuesto" ? (lang === "en" ? "CHANGE RECEIVED" : "CAMBIO RECIBIDO") : (lang === "en" ? "AWAITING RESPONSE" : "ESPERANDO RESPUESTA")}</Text>
+            <Text testID="entry-proposal-state" style={{ color: entry.estado === "propuesta_pendiente" ? C.pending : "#D1A166", fontWeight: "800" }}>{entry.estado === "propuesto" ? (lang === "en" ? "CHANGE RECEIVED" : "CAMBIO RECIBIDO") : (lang === "en" ? "AWAITING RESPONSE" : "ESPERANDO RESPUESTA")}</Text>
             <Text testID="entry-proposed-date-time" style={s.text}>{lang === "en" ? "Proposed: " : "Propuesto: "}{[entryIsReservation(entry) ? formatBookingLocalDate(entry.changeProposal!.dateISO, entry.changeProposal!.date, lang, entry.bookingTimeline?.timezone) : entry.changeProposal!.date || entry.changeProposal!.dateISO, entry.changeProposal!.time].filter(Boolean).join(" · ")}</Text>
             {!!entry.changeProposal!.note && <Text style={s.secondary}>{entry.changeProposal!.note}</Text>}
           </View>}
@@ -286,8 +310,8 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, rende
         </View>
         {/* The 64-point controls sit inside this reserved footer, 11 points above its border. */}
         <View testID="entry-detail-close-footer" pointerEvents="none" style={{ flexShrink: 0, height: 76, flexDirection: "row", justifyContent: handedness === "left" ? "flex-start" : "flex-end", paddingHorizontal: 6, paddingTop: 1, paddingBottom: 11 }} />
-        <GoNavigationFloating testID="entry-detail-floating-navigation" screenKey="entry-details" buttonKey={hasMessage ? "navigation-with-message-inset" : "navigation-inset"} width={navigationWidth} safeArea={false} handedness={handedness} initialBottom={11} boundsVerticalInset={11} initialTop={hasMessage ? undefined : navigationTop}>
-          {messageButton}{panelClose}{landingClose}
+        <GoNavigationFloating testID="entry-detail-floating-navigation" screenKey="entry-details" buttonKey={hasDiscard ? "navigation-with-discard-inset" : hasMessage ? "navigation-with-message-inset" : "navigation-inset"} width={navigationWidth} safeArea={false} handedness={handedness} initialBottom={11} boundsVerticalInset={11} initialTop={hasMessage || hasDiscard ? undefined : navigationTop}>
+          {hasDiscard && hasMessage ? <View testID="entry-detail-follow-up-controls" style={{flexDirection:"row",alignItems:"center",gap:8}}>{discardButton}{messageButton}</View> : <>{discardButton}{messageButton}</>}{panelClose}{landingClose}
         </GoNavigationFloating>
       </GoScreenCloseSurface>
       {renderMessageScreen?.()}

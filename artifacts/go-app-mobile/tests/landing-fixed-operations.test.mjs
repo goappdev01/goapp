@@ -38,8 +38,8 @@ test('both real Home callers put the complete operations group in a fixed slot, 
   for(let parent=card.parent;parent;parent=parent.parent)if(ts.isJsxElement(parent))
    assert.ok(!['ScrollView','Animated.ScrollView'].includes(parent.openingElement.tagName.getText(ast)),'no moving outer viewport');
  }
- assert.equal(attr(next,'footerGap').getText(ast),'PANEL_ACTION_GAP');
- assert.equal(attr(changes,'footerGap').getText(ast),'Math.round(12 * uiScaleFactor)');
+ assert.equal(attr(next,'footerGap').getText(ast),'Math.round(8 * uiScaleFactor)');
+ assert.equal(attr(changes,'footerGap').getText(ast),'Math.round(8 * uiScaleFactor)');
  const renderer=declaration('renderLandingOperations').getText(ast);
  assert.ok(!/<(?:Animated\.)?ScrollView\b/.test(renderer),'the operations renderer itself contains no vertical scroller');
 });
@@ -54,7 +54,7 @@ async function fixture(profile,card,stacked){
  const Pressable=props=>React.createElement(View,{...props,style:typeof props.style==='function'?props.style({pressed:false}):props.style},props.children);
  const native={...rn,View,ScrollView,TouchableOpacity,Pressable};
  const shared=evaluate('components/landing/LandingContentViewport.tsx',{'react-native':native});
- const scope={exports:{},React,entryPhone,entryIsInternal:presentation.entryIsInternal,entryIsReservation:presentation.entryIsReservation,renderEntryQuickActions,View,Animated:{View},Pressable,Text:rn.Text,TouchableOpacity,
+ const scope={exports:{},React,entryPhone,entryMapsUrl:presentation.entryMapsUrl,openEntryMaps:presentation.openEntryMaps,entryIsInternal:presentation.entryIsInternal,entryIsReservation:presentation.entryIsReservation,renderEntryQuickActions,View,Animated:{View},Pressable,Text:rn.Text,TouchableOpacity,
   tint:"#60a5fa",cardAccent:"#f97316",INFO_W:stacked?220:354,nextCardPanRef:{panHandlers:{onMoveShouldSetResponder:()=>false}},nextCardSlideAnim:0,nextCardDeleteConfirm:null,
   nextCardDeleteTimerRef:{current:null},setNextCardDeleteConfirm(){},startRelatedGoAction(){},LinearGradient:View,Feather:()=>null,
   landingCurrentEntry:policy.landingCurrentEntry,landingActionGrid:layout.landingActionGrid,

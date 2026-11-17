@@ -20,8 +20,8 @@ vm.runInNewContext(ts.transpileModule(readFileSync("i18n/translations.ts", "utf8
 
 // Run the real calendar components with deterministic native adapters. Keep hook
 // state across renders so navigation and closing are tested without remounting.
-export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, platform = "web", insets = {top:0,right:0,left:0,bottom:0}, storage = { getItem: async () => null, setItem: async () => {} } } = {}) {
-  const urls = [];
+export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, platform = "web", insets = {top:0,right:0,left:0,bottom:0}, storage = { getItem: async () => null, setItem: async () => {} }, openURL } = {}) {
+  const urls = [], alerts = [];
   class Clock extends Date {
     constructor(...args) { super(...(args.length ? args : [now ?? Date.now()])); }
     static now() { return now === undefined ? Date.now() : new Date(now).getTime(); }
@@ -61,8 +61,8 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
     useColorScheme: () => 'dark',
     Platform: { OS: platform },
     AppState: { addEventListener: (_event, listener) => { appStateListeners.add(listener); return {remove: () => appStateListeners.delete(listener)}; } },
-    Linking: { openURL: async url => { urls.push(url); } },
-    Alert: { alert() {} },
+    Linking: { openURL: async url => { urls.push(url); await openURL?.(url); } },
+    Alert: { alert: (...args) => alerts.push(args) },
     Keyboard: { dismiss() {} },
     PanResponder: actualResponder,
     Animated: { Value, View: 'Animated.View', timing: () => animation, spring: () => animation, sequence: () => animation, loop: () => animation, delay: () => animation },
@@ -141,6 +141,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
   }
   return {
     urls,
+    alerts,
     frameCount: () => frames.size,
     runFrame(time) { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn(time)); },
     setAppState: state => appStateListeners.forEach(listener => listener(state)),

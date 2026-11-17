@@ -127,8 +127,8 @@ test('existing storage/synchronization roundtrip preserves different authorizati
  const stored=JSON.stringify({businessId:business,businessName:'Local',activeDays:[0],openFrom:'09:00',openTo:'19:00',daySchedules:{'0':day},
   services:[{name:'Corte',duration:20,price:12,capacity:1}],plantillaItems:[{staffNames:['Ana','Luis'],staffServices:[['Corte'],['Corte']]}],
   staffSchedules:{[staffA]:{useCompanySchedule:false,daySchedules:{'0':day},gapPolicy:{allowLastMinuteGaps:true,lastMinuteMinutes:1020}},[staffB]:{useCompanySchedule:true,daySchedules:{},gapPolicy:{allowLastMinuteGaps:false,lastMinuteMinutes:360}}}});
- await scope.exports.sync(JSON.parse(stored),async()=>{},'owner');
+ await scope.exports.sync(JSON.parse(stored),async()=>{},'owner',business);
  assert.deepEqual(writes.get(staffA).gapPolicy,{allowLastMinuteGaps:true,lastMinuteMinutes:1020});assert.deepEqual(writes.get(staffB).gapPolicy,{allowLastMinuteGaps:false,lastMinuteMinutes:360});
- const before=plain([...writes.values()]);await scope.exports.sync(JSON.parse(stored),async()=>{},'owner');assert.deepEqual([...writes.values()],before);
+ const before=plain([...writes.values()]);await scope.exports.sync(JSON.parse(stored),async()=>{},'owner',business);assert.deepEqual([...writes.values()],before);
  assert.deepEqual(windows.filter(w=>w.staffId===staffA).map(w=>[w.visibleStartHour,w.visibleEndHour]),[[9,14],[16,19],[9,14],[16,19]]);assert.equal(windows.some(w=>w.staffId===staffB),false);
 });

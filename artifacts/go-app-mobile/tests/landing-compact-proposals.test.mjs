@@ -379,6 +379,12 @@ test('sent and received booking proposals keep the professional beside the origi
       assert.equal(texts(card).split('17:00').length - 1, 1);
       assert.equal(texts(card).split('12:45').length - 1, 1);
       assert.equal(texts(header).includes(estado === 'propuesto' ? 'CAMBIO RECIBIDO' : 'ESPERANDO RESPUESTA'), true);
+      const state=nodes(header,node=>node.type==='Text'&&texts(node)===(estado==='propuesto'?'CAMBIO RECIBIDO':'ESPERANDO RESPUESTA'))[0];
+      assert.equal(state.props.style.color,estado==='propuesto'?'#FF8C00':'#FFD700');
+      const pill=nodes(header,node=>node.type==='TouchableOpacity'&&nodes(node).includes(state))[0];
+      assert.equal(pill.props.style.backgroundColor,'#000000');
+      assert.equal(pill.props.style.borderColor,estado==='propuesto'?'rgba(255,140,0,0.80)':'#FFD700CC');
+      if(estado==='propuesta_pendiente')assert.ok(21/whiteContrast(state.props.style.color)>4.5,'yellow has readable contrast against the black pill');
       assert.equal(texts(booking), bookingStatus === 'pendiente' ? 'PENDIENTE DE ACEPTACIÓN' : 'CONFIRMADA');
       assert.equal(header.props.style.flexWrap, 'wrap');
       assert.equal(header.props.style.justifyContent, 'space-between');
