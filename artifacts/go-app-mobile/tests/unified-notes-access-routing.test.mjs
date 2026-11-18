@@ -81,9 +81,8 @@ function mountedAncestor(node, attribute, value) {
   return null;
 }
 
-function fixture(origin = 'calendar') {
+function fixture(origin = 'calendar', scope = { userId: 'note-user', context: 'demo:USER' }) {
   const calls = [];
-  const scope = { userId: 'note-user', context: 'demo:USER' };
   const ctx = vm.createContext({
     Date, Error, Map, Set, JSON, Promise,
     React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
@@ -147,13 +146,14 @@ function assertComposer(f, origin, expectedSeed, initial = null) {
 }
 const pressNotes = (f, origin) => valueOf(f.ctx, expression(control(`${origin === 'list' ? 'list' : 'calendar'}-notes-open`), 'onPress'))({ stopPropagation() {} });
 
-test('COMPRAS route: actual NOTAS button preserves ordinary draft and source, opens the specialized screen in the same personal scope',async()=>{
- const f=fixture('list');f.ctx.GoShoppingNote=function GoShoppingNote(){};await pressNotes(f,'list');
+for(const context of ['live:ADMIN','live:USER','demo:USER'])for(const origin of ['list','calendar'])
+test(`COMPRAS route: ${context} ${origin} NOTAS and cart preserve the draft, source and exact scope`,async()=>{
+ const f=fixture(origin,{userId:'note-user',context});f.ctx.GoShoppingNote=function GoShoppingNote(){};await pressNotes(f,origin);
  const editor=f.ctx.renderUnifiedNoteEditor(),draft={...model.noteDraft(),content:'Borrador normal que conservar'};
  const ui=await h.editorFixture();try{
   await ui.render({onOpenShopping:editor.props.onOpenShopping});await ui.run(()=>ui.hosts.get('note-content').onChangeText(draft.content));
   await ui.tap('note-open-shopping');const shopping=f.ctx.renderUnifiedNoteEditor();assert.equal(shopping.type,f.ctx.GoShoppingNote);assert.deepEqual(shopping.props.scope,f.scope);assert.equal(shopping.props.visible,true);
-  assert.equal(f.ctx.listOpen,true);shopping.props.onClose();const restored=f.ctx.renderUnifiedNoteEditor();assert.equal(restored.type,f.ctx.GoNoteEditor);assert.equal(restored.props.cached.content,draft.content);
+  assert.equal(f.ctx[origin==='list'?'listOpen':'calOpen'],true);shopping.props.onClose();const restored=f.ctx.renderUnifiedNoteEditor();assert.equal(restored.type,f.ctx.GoNoteEditor);assert.equal(restored.props.cached.content,draft.content);
  }finally{await ui.close();}
 });
 

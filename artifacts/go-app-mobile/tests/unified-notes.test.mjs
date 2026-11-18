@@ -14,7 +14,8 @@ async function shoppingFixture(){
  return {disk,model,api,open,run,doc,add};
 }
 
-async function shoppingUI(f,{handedness='right',width=390,height=844,fontScale=1,startList=true}={}){
+async function shoppingUI(f,{handedness='right',width=390,height=844,fontScale=1,startList=true,scope=f.disk.scope,ready=true,
+ adminAccess={userId:null,allowed:false,checking:false,unavailable:false},goView={view:'USER',isAdminView:false}}={}){
  const {React}=h,hosts=new Map(),instances=new Map(),geometry=new Map(),gestures=new Map(),calls=[],alerts=[],frames=new Map();let frameId=0;
  const keyboard={visible:false,focused:null,listeners:new Map(),isVisible(){return this.visible;},addListener(name,fn){const set=this.listeners.get(name)||new Set();set.add(fn);this.listeners.set(name,set);return{remove:()=>set.delete(fn)};},
   show(){this.visible=true;for(const name of ['keyboardWillShow','keyboardDidShow'])for(const fn of this.listeners.get(name)||[])fn({});},
@@ -48,8 +49,9 @@ async function shoppingUI(f,{handedness='right',width=390,height=844,fontScale=1
  const {GoShoppingNote}=h.load('components/notes/GoShoppingNote.tsx',{'react-native':native,'react-native-gesture-handler':gh,'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:44,bottom:20,left:0,right:0})},'expo-linear-gradient':{LinearGradient:native.View},
   '@expo/vector-icons':icons,'@/lib/shoppingExperience':experience,'@/lib/shoppingCatalog':catalog,'./ShoppingProductRow':row,'./ShoppingCatalogChoice':choice,'@/hooks/useBookingVoice':{useBookingVoice:()=>({status:'idle',error:'',abort(){},start:async()=>{},stop:async()=>{}})},
   '@/components/ui/GoScreenModal':{GoScreenModal:native.Modal},'@/components/ui/GoCloseButton':{GoCloseButton:native.TouchableOpacity},'@/hooks/useGoNoteKeyboard':keyboardHook,
+  '@/contexts/GoAdminAccessContext':{useAdminAccess:()=>adminAccess},'@/contexts/GoViewContext':{useGoView:()=>goView},
   '@/lib/goLogStore':store,'@/lib/unifiedNotes':f.disk.model,'@/lib/shoppingNoteStore':f.api(),'@/lib/shoppingNote':f.model,'./ShoppingReorderSurface':reorder},globals);
- const container=h.document.createElement('div'),root=h.createRoot(container);let props={visible:true,ready:true,scope:f.disk.scope,handedness,onClose:()=>calls.push(['close'])};
+ const container=h.document.createElement('div'),root=h.createRoot(container);let props={visible:true,ready,scope,handedness,onClose:()=>calls.push(['close'])};
  const idle=async()=>{for(let i=0;i<10;i++)await h.settle(()=>new Promise(setImmediate));};
  const render=async patch=>{props={...props,...patch};await h.settle(()=>root.render(React.createElement(GoShoppingNote,props)));await idle();};
  await render({});
@@ -59,6 +61,71 @@ async function shoppingUI(f,{handedness='right',width=390,height=844,fontScale=1
  return {hosts,instances,calls,alerts,frames,geometry,gestures,keyboard,container,render,idle,tap,input,run:h.settle,
   async frame(time){const pending=[...frames.values()];frames.clear();await h.settle(()=>pending.forEach(fn=>fn(time)));},close:()=>h.settle(()=>root.unmount())};
 }
+
+test('COMPRAS ADMIN: authenticated entry preserves its existing list, owner, context and products through a real UI write and reopen',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  const scope={userId:f.disk.scope.userId,context:'live:ADMIN'},adminAccess={...scope,allowed:true,checking:false,unavailable:false},goView={view:'ADMIN',isAdminView:true};
+  const draft={...f.model.shoppingEditor(),name:'Pan de ADMIN',quantity:'2'};
+  const existing=f.disk.model.buildNoteEntry(f.disk.draft({id:'existing-admin-shopping',title:'Mi compra ADMIN',destination:'pending'}),scope);
+  existing.note.shopping=f.model.applyShoppingOperation(f.model.emptyShopping(),{type:'saveItem',operationId:'seed-admin-product',draft});
+  await f.disk.store.updateGoLog(rows=>({entries:[existing,...rows],result:null}));
+  ui=await shoppingUI(f,{scope,adminAccess,goView});
+  assert.equal(ui.hosts.has('shopping-error'),false);assert.ok(ui.hosts.has('shopping-list-scroll'));assert.match(ui.container.textContent,/Pan de ADMIN/);
+  await ui.tap('shopping-bought-'+draft.id);assert.equal(f.disk.rows[0].note.shopping.items[0].bought,true);
+  await ui.close();ui=null;await f.disk.reopen();
+  ui=await shoppingUI(f,{scope,adminAccess,goView});assert.ok(ui.hosts.has('shopping-list-scroll'));assert.equal(f.disk.rows.length,1);
+  const saved=f.disk.rows[0];assert.equal(saved.id,existing.id);assert.equal(saved.ownerUserId,scope.userId);assert.equal(saved.taskContext,'live:ADMIN');
+  assert.equal(saved.note.shopping.items[0].id,draft.id);assert.equal(saved.note.shopping.items[0].quantity,2);assert.equal(saved.note.shopping.items[0].bought,true);
+ }finally{if(ui)await ui.close();f.disk.close();}
+});
+
+test('COMPRAS ADMIN: unverified, denied, wrong-identity and wrong-view entries cannot read or write',async()=>{
+ const f=await shoppingFixture();try{
+  const scope={userId:f.disk.scope.userId,context:'live:ADMIN'},allowed={userId:scope.userId,allowed:true,checking:false,unavailable:false},goView={view:'ADMIN',isAdminView:true};
+  for(const options of [
+   {adminAccess:{...allowed,allowed:false}}, {adminAccess:{...allowed,checking:true}}, {adminAccess:{...allowed,unavailable:true}},
+   {adminAccess:{...allowed,userId:'another-account'}}, {adminAccess:allowed,goView:{view:'USER',isAdminView:false}}, {adminAccess:allowed,ready:false},
+  ]){
+   const before=JSON.stringify(f.disk.rows),writes=f.disk.writes,ui=await shoppingUI(f,{scope,goView,...options});
+   try{assert.equal(ui.hosts.has('shopping-list-scroll'),false);assert.equal(ui.hosts.has('shopping-error'),false);assert.equal(f.disk.writes,writes);assert.equal(JSON.stringify(f.disk.rows),before);}
+   finally{await ui.close();}
+  }
+  await f.disk.setUser(null);const writes=f.disk.writes,ui=await shoppingUI(f,{scope,adminAccess:allowed,goView});
+  try{assert.equal(ui.hosts.has('shopping-list-scroll'),false);assert.match(ui.container.textContent,/cuenta/);assert.equal(f.disk.writes,writes);}finally{await ui.close();}
+ }finally{f.disk.close();}
+});
+
+test('COMPRAS ADMIN: permission loss hides products and rejects a stale control; restored access reopens the same data',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  const scope={userId:f.disk.scope.userId,context:'live:ADMIN'},adminAccess={userId:scope.userId,allowed:true,checking:false,unavailable:false},goView={view:'ADMIN',isAdminView:true};
+  const row=await f.open(scope,()=>true),draft={...f.model.shoppingEditor(),name:'Solo ADMIN'};
+  await f.api().runShoppingOperation(scope,()=>true,{type:'saveItem',operationId:'admin-item',draft},row.id);
+  ui=await shoppingUI(f,{scope,adminAccess,goView});const stale=ui.hosts.get('shopping-bought-'+draft.id);assert.ok(stale);
+  const before=JSON.stringify(f.disk.rows),writes=f.disk.writes;adminAccess.allowed=false;await ui.render({});
+  assert.doesNotMatch(ui.container.textContent,/Solo ADMIN/);assert.equal(ui.hosts.has('shopping-list-scroll'),false);
+  await ui.run(()=>stale.onPress());await ui.idle();assert.equal(f.disk.writes,writes);assert.equal(JSON.stringify(f.disk.rows),before);
+  adminAccess.allowed=true;await ui.render({});await ui.tap('shopping-list');assert.match(ui.container.textContent,/Solo ADMIN/);assert.equal(f.disk.rows[0].id,row.id);
+ }finally{if(ui)await ui.close();f.disk.close();}
+});
+
+test('COMPRAS ADMIN: account and personal contexts stay isolated; stale writes fail after a session switch',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  const scope={userId:f.disk.scope.userId,context:'live:ADMIN'},adminAccess={userId:scope.userId,allowed:true,checking:false,unavailable:false},goView={view:'ADMIN',isAdminView:true};
+  await f.open();await f.add('Compra personal');const personal=JSON.stringify(f.disk.rows[0]);
+  const admin=await f.open(scope,()=>true),draft={...f.model.shoppingEditor(),name:'Compra ADMIN'};
+  await f.api().runShoppingOperation(scope,()=>true,{type:'saveItem',operationId:'first-admin-item',draft},admin.id);
+  ui=await shoppingUI(f,{scope,adminAccess,goView});assert.match(ui.container.textContent,/Compra ADMIN/);assert.doesNotMatch(ui.container.textContent,/Compra personal/);
+  const stale=ui.hosts.get('shopping-bought-'+draft.id);await f.disk.setUser('second-admin');
+  const before=JSON.stringify(f.disk.rows);await ui.run(()=>stale.onPress());await ui.idle();assert.equal(JSON.stringify(f.disk.rows),before);
+  Object.assign(adminAccess,{userId:'second-admin'});const second={userId:'second-admin',context:'live:ADMIN'};await ui.render({scope:second});
+  assert.doesNotMatch(ui.container.textContent,/Compra ADMIN|Compra personal/);await ui.tap('shopping-list');assert.ok(ui.hosts.has('shopping-list-scroll'));
+  const own=await f.api().listShoppingLists(second,()=>true);assert.equal(own.length,1);assert.equal(own[0].ownerUserId,'second-admin');assert.equal(own[0].note.shopping.items.length,0);
+  await assert.rejects(f.api().runShoppingOperation(second,()=>true,{type:'bought',operationId:'foreign-edit',id:draft.id,value:true},admin.id),/Abre COMPRAS/);
+  await f.disk.setUser(scope.userId);await assert.rejects(f.open({...scope,context:'demo:ADMIN'},()=>true),/personal/);
+  assert.equal(JSON.stringify(f.disk.rows.find(row=>row.taskContext==='demo:USER')),personal);
+  assert.equal(f.disk.rows.find(row=>row.id===admin.id).note.shopping.items[0].bought,false);
+ }finally{if(ui)await ui.close();f.disk.close();}
+});
 
 test('COMPRAS: a deleted canonical list requires explicit restoration and reopens with its original products',async()=>{
  const f=await shoppingFixture();let ui;try{

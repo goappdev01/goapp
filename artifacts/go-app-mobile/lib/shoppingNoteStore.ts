@@ -11,8 +11,9 @@ const activeListKey=(scope:TaskScope)=>shoppingNoteId(scope)+":active_list";
 export class ShoppingNoteDeletedError extends Error{
   constructor(readonly noteId:string){super("La compra canónica está eliminada. Restaura la nota antes de continuar.");this.name="ShoppingNoteDeletedError";}
 }
-function assertPersonal(scope:TaskScope){if(!scope.userId||! /^(live|demo):USER$/.test(scope.context))throw Error("COMPRAS requiere una sesión en el ámbito personal de GO.");}
-async function check(scope:TaskScope,active:()=>boolean){assertPersonal(scope);await assertTaskUser(scope.userId);if(!active())throw Error("La cuenta o el contexto ha cambiado. Vuelve a abrir COMPRAS.");}
+// The screen binds ADMIN's active() guard to verified access; all store operations still check the session owner.
+function assertShoppingScope(scope:TaskScope){if(!scope.userId||! /^(live:ADMIN|(live|demo):USER)$/.test(scope.context))throw Error("COMPRAS requiere una sesión personal o ADMIN autenticada de GO.");}
+async function check(scope:TaskScope,active:()=>boolean){assertShoppingScope(scope);await assertTaskUser(scope.userId);if(!active())throw Error("La cuenta o el contexto ha cambiado. Vuelve a abrir COMPRAS.");}
 function canonical(rows:GoEntry[],scope:TaskScope,listId?:string){
   const matches=rows.filter(row=>noteInScope(row,scope)&&row.note?.shopping!==undefined);
   if(new Set(matches.map(row=>row.id)).size!==matches.length)throw Error("Hay listas duplicadas. Se conservan para revisión.");

@@ -10,6 +10,8 @@ import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoNavigationFloating } from "@/components/ui/GoNavigationFloating";
 import { useGoNoteKeyboard } from "@/hooks/useGoNoteKeyboard";
 import { useBookingVoice } from "@/hooks/useBookingVoice";
+import { useAdminAccess } from "@/contexts/GoAdminAccessContext";
+import { useGoView } from "@/contexts/GoViewContext";
 import type { TaskScope } from "@/lib/goTaskReminders";
 import { subscribeGoLog, getGoLogSnapshot } from "@/lib/goLogStore";
 import { noteInScope } from "@/lib/unifiedNotes";
@@ -28,7 +30,11 @@ const decimal=(n:number)=>n.toLocaleString("es-ES",{maximumFractionDigits:3});
 const money=(n:number,currency:string)=>n.toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" "+(currency==="EUR"?"€":currency);
 // Only view position is cached; product data always comes from the verified canonical store.
 const shoppingPositions=new Map<string,number>();
-export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequested,initialListId}:Props){
+export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClose,closeRequested,initialListId}:Props){
+  const admin=useAdminAccess(),view=useGoView();
+  // ADMIN keeps its own identity/context. Permission changes invalidate every existing active() guard.
+  const ready=scopeReady&&(scope?.context!=="live:ADMIN"||(view.view==="ADMIN"&&view.isAdminView
+    &&admin.allowed&&!admin.checking&&!admin.unavailable&&admin.userId===scope.userId));
   const insets=useSafeAreaInsets(),keyboard=useGoNoteKeyboard(visible);
   const viewport=useWindowDimensions();
   const [entry,setEntry]=useState<GoEntry|null>(null),[lists,setLists]=useState<GoEntry[]>([]),[listName,setListName]=useState(""),[error,setError]=useState(""),[restoreId,setRestoreId]=useState<string|null>(null),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false);
@@ -188,7 +194,7 @@ export function GoShoppingNote({visible,scope,ready,handedness,onClose,closeRequ
         </View><TouchableOpacity testID="shopping-active-list" accessibilityRole="button" accessibilityLabel="Gestionar listas de compra" onPress={()=>{setListName("");setUtility("lists");void refreshLists();}} style={s.activeListBar}><Text numberOfLines={1} style={s.activeListName}>{entry?.note?.title||"Compras"}</Text><Text style={s.savedLabel}>Guardado · Mis listas ›</Text></TouchableOpacity></>:orbitHome?<LinearGradient colors={["#ffffff","#e9f4ff","#cfe8ff"]} style={s.orbitBanner}><View style={s.bannerCart}><Feather name="shopping-cart" size={27} color="#fff"/></View><View style={{flex:1}}><Text accessibilityRole="header" style={s.bannerTitle}>GO Compras</Text><Text style={s.bannerSubtitle}>Añadir productos</Text></View><Text style={s.bannerArt}>🧺</Text></LinearGradient>
           :<Text accessibilityRole="header" style={s.heading}>{editor?(editor.expectedRevision?"Editar producto":"Añadir producto"):next?"Habituales":legacy?"Incorporar nota":utility==="assistant"?"GO Compras":utility==="lists"?"Mis listas":utility==="route"?"Ruta de compra":utility==="map"?"Mapa de la tienda":utility==="history"?"Compras realizadas":utility==="store"?"Supermercado":utility==="location"?"Ubicación manual":adding?"Elegir producto":"Compras"}</Text>}
       </View>
-      {!ready||!scope?<Text style={s.message}>Abre el ámbito personal de GO con tu sesión para usar Compras.</Text>:loading?<Text style={s.message}>Abriendo tu lista personal…</Text>:null}
+      {!ready||!scope?<Text style={s.message}>{scope?.context==="live:ADMIN"?"Espera a verificar tu sesión y acceso ADMIN para usar Compras.":"Abre el ámbito personal de GO con tu sesión para usar Compras."}</Text>:loading?<Text style={s.message}>Abriendo tu lista personal…</Text>:null}
       {!!error&&<View style={s.message}><Text testID="shopping-error" accessibilityRole="alert" style={s.error}>{error}</Text>{!doc&&restoreId&&button("Restaurar mi lista",confirmRestore,"shopping-restore",true,loading)}{!doc&&restoreId&&button("Crear otra lista",()=>void newList("Compras"),"shopping-create-after-delete",false,loading)}{!doc&&button("Reintentar",()=>setRetry(v=>v+1),"shopping-retry",false,loading)}</View>}
       {doc&&<>
       <View style={[{flex:1,minHeight:0},(panel||adding)&&{display:"none"}]}>
