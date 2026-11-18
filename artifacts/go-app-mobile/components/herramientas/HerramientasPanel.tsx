@@ -164,7 +164,7 @@ export function HerramientasPanel({
               </View>
               <Text style={s.rowTitle}>{t("handedness")}</Text>
             </View>
-            <View style={[s.segRow, { marginTop: 8 }]}>
+            <View style={[s.segRow, s.dockRow]}>
               {([
                 { k: "left"  as const, label: t("left_handed"),  icon: "←" },
                 { k: "center" as const, label: lang === "en" ? "Center" : "Centro", icon: null },
@@ -189,7 +189,7 @@ export function HerramientasPanel({
                     style={[s.segBtn, s.dockBtn, active && s.segBtnActive]}
                   >
                     <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} style={[s.segLabel, s.dockLabel, active && s.segLabelActive]}>{label}</Text>
-                    {icon && <Text accessible={false} style={[s.segIcon, active && s.segIconActive]}>{icon}</Text>}
+                    {icon && <Text accessible={false} numberOfLines={1} style={[s.segIcon, active && s.segIconActive]}>{icon}</Text>}
                   </TouchableOpacity>
                 );
               })}
@@ -601,19 +601,19 @@ export function HerramientasPanel({
 const s = StyleSheet.create({
   root:         { flex: 1, backgroundColor: "#F5F3EF" },
 
-  handleZone:   { paddingTop: 6, paddingBottom: 2, alignItems: "center" },
+  handleZone:   { paddingTop: 4, paddingBottom: 2, alignItems: "center" },
   handlePill:   { width: 40, height: 4, backgroundColor: "rgba(0,0,0,0.12)", borderRadius: 2 },
 
   header:       {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
-    paddingHorizontal: 16, paddingVertical: 10,
+    paddingHorizontal: 16, paddingVertical: 6,
     borderBottomWidth: 1, borderBottomColor: "rgba(0,0,0,0.08)",
     backgroundColor: "#FFFFFF", gap: 8,
   },
   headerIconWrap: { width: 32, height: 32, borderRadius: 10, backgroundColor: BLUE_BG, alignItems: "center", justifyContent: "center" },
   headerTitle:  { fontSize: 16, color: "#111827", fontFamily: "Inter_700Bold", fontWeight: "800" },
 
-  scroll:       { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
+  scroll:       { flex: 1, paddingHorizontal: 16, paddingTop: 4 },
 
   // Section family label
   familyLabel:  {
@@ -661,7 +661,8 @@ const s = StyleSheet.create({
   segIconActive:{ color: BLUE },
   segLabel:     { color: "#6B7280", fontSize: 11, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1 },
   segLabelActive: { color: "#111827" },
-  dockBtn:      { minHeight: 44, minWidth: 0, flexDirection: "row", justifyContent: "center", paddingVertical: 6, paddingHorizontal: 4, gap: 4 },
+  dockRow:      { marginTop: 4, gap: 4 },
+  dockBtn:      { minHeight: 44, minWidth: 44, flexDirection: "row", justifyContent: "center", paddingVertical: 4, paddingHorizontal: 4, gap: 4 },
   dockLabel:    { flexShrink: 1, letterSpacing: 0 },
 
   // Compact row (for country, language, region)

@@ -21,9 +21,9 @@ export function GoNavigationAppearanceControl() {
   })).current;
 
   return (
-    <View style={s.control}>
+    <View>
       <View testID="navigation-opacity-header" style={s.header}>
-        <Text style={s.label} numberOfLines={1} adjustsFontSizeToFit>OPACIDAD</Text>
+        <Text style={s.label} numberOfLines={1} adjustsFontSizeToFit>{`Opacidad · ${opacity}%`}</Text>
         <View style={s.previews}>
           {(["panel", "container", "settings"] as const).map((level, i) => (
             <GoCloseButton
@@ -38,7 +38,6 @@ export function GoNavigationAppearanceControl() {
             />
           ))}
         </View>
-        <Text style={s.value} numberOfLines={1}>{opacity}%</Text>
       </View>
       <View
         accessibilityRole="adjustable"
@@ -60,12 +59,10 @@ export function GoNavigationAppearanceControl() {
 
 // Herramientas has a fixed light surface, including when iOS uses dark mode.
 const s = StyleSheet.create({
-  control: { paddingHorizontal: 4, paddingVertical: 4, gap: 4 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 },
-  label: { color: "#17212B", fontSize: 14, flexShrink: 1 },
-  previews: { flexDirection: "row", gap: 6 },
-  value: { color: "#17212B", fontSize: 14, textAlign: "right", minWidth: 34 },
-  slider: { height: 44, justifyContent: "center" },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 4 },
+  label: { color: "#17212B", fontSize: 14, fontWeight: "700", flexShrink: 1, minWidth: 0 },
+  previews: { flexDirection: "row", flexShrink: 0, gap: 4 },
+  slider: { height: 44, marginHorizontal: 10, justifyContent: "center" },
   track: { height: 5, borderRadius: 3, backgroundColor: "#77818C" },
   thumb: { position: "absolute", marginLeft: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: "#17212B" },
   error: { color: "#9B1C1C" },
