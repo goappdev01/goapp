@@ -12,16 +12,16 @@ test('brands, varieties, package favorites and old documents survive optional-fi
  assert.deepEqual(plain(m.shoppingEstimate(old)),{totals:{},unknown:2});
 });
 
-test('weight, volume, packages and units use comparable measurements; picked and planned totals separate known/unknown prices',()=>{
- for(const [unit,quantity,priceUnit,value,extra,expected] of [
-  ['g','750','kg',4,{},3],['ml','250','litros',2,{},.5],['kg','1,5','kg',3,{},4.5],
-  ['paquetes','2','paquetes',3,{packageQuantity:'500',packageUnit:'g'},6],['unidades','3','unidades',.1,{},.3],
-  ['paquetes','2','kg',4,{packageQuantity:'500',packageUnit:'g'},4],
- ]){const f=fixture(),i=f.add('Producto',{unit,quantity,...extra});f.op({type:'store',value:'Tienda A'});f.op({type:'price',id:i.id,value,unit:priceUnit,observationId:m.shoppingId()});
-  assert.equal(m.shoppingSubtotal(f.doc.items[0],f.doc.store).amount,expected);assert.equal(m.shoppingEstimate(f.doc,true).unknown,0);
-  f.op({type:'bought',id:i.id,value:true});assert.equal(m.shoppingEstimate(f.doc,true).totals.EUR,expected);f.add('Sin precio');assert.equal(m.shoppingEstimate(f.doc).unknown,1);
+test('all presentations use whole counts and one price per product',()=>{
+ for(const unit of m.SHOPPING_UNITS){
+  const f=fixture(),item=f.add('Producto',{unit,quantity:'2'});
+  f.op({type:'price',id:item.id,value:1.5,unit,observationId:m.shoppingId()});
+  assert.equal(m.shoppingSubtotal(f.doc.items[0]).amount,3);
+  assert.throws(()=>f.op({type:'quantity',id:item.id,value:1.3}),/entera/);
+  assert.throws(()=>f.add('Fracción',{unit,quantity:'1,3'}),/entera/);
+  assert.equal(m.stepShoppingQuantity('2',1),'3');
+  assert.equal(m.stepShoppingQuantity('2',-1),'1');
  }
- const f=fixture(),i=f.add('Paquete desconocido',{unit:'paquetes'});f.op({type:'store',value:'A'});f.op({type:'price',id:i.id,value:3,unit:'kg',observationId:m.shoppingId()});assert.equal(m.shoppingEstimate(f.doc).unknown,1);
 });
 
 test('changing store never reuses another store price and correcting price retains every observation and currency',()=>{
@@ -69,7 +69,7 @@ test('map adapter follows real graph distance, preserves cold order and known ch
 
 test('GO executes bounded commands on the same document; ambiguous presentations and unsupported compound requests cannot mutate it',()=>{
  const f=fixture(),execute=text=>{const result=x.shoppingCommand(f.doc,text);for(const op of result.operations||[])f.op(op);return result;};
- execute('Añade 2 kg de manzanas');assert.equal(f.doc.items[0].quantity,2);assert.equal(f.doc.items[0].unit,'kg');execute('Cantidad de manzanas a 1,5');assert.equal(f.doc.items[0].quantity,1.5);
+ execute('Añade 2 kg de manzanas');assert.equal(f.doc.items[0].quantity,2);assert.equal(f.doc.items[0].unit,'kg');assert.match(execute('Cantidad de manzanas a 1,5').message,/entera/);assert.equal(f.doc.items[0].quantity,2);
  assert.match(execute('Qué queda').message,/manzanas/);execute('Marca cogido manzanas');assert.equal(f.doc.items[0].bought,true);assert.equal(execute('Ruta').route,true);
  execute('Quita manzanas');assert.equal(f.doc.items[0].selected,false);assert.equal(f.doc.items.length,1);execute('Añade manzanas');assert.equal(f.doc.items[0].selected,true);assert.equal(f.doc.items[0].bought,false);
  f.add('manzanas',{brand:'B'});assert.equal(execute('Cantidad de manzanas a 3').operations,undefined);assert.equal(execute('Añade pan y quita leche').operations,undefined);
@@ -95,9 +95,9 @@ test('GO handles the displayed two-item example and reports only known picked sp
  assert.match(x.shoppingCommand(f.doc,'Cuánto llevo').message,/0,00 EUR/);
 });
 
-test('docenas convert consistently against unit and dozen prices without changing stored quantities',()=>{
+test('the price of a dozen is the price of its presentation',()=>{
  const f=fixture(),eggs=f.add('Huevos',{quantity:'2',unit:'docenas'});f.op({type:'store',value:'Tienda A'});
- f.op({type:'price',id:eggs.id,value:0.25,unit:'unidades',observationId:m.shoppingId()});assert.equal(m.shoppingSubtotal(f.doc.items[0],f.doc.store).amount,6);
+ assert.throws(()=>f.op({type:'price',id:eggs.id,value:0.25,unit:'unidades',observationId:m.shoppingId()}),/presentación/);
  f.op({type:'price',id:eggs.id,value:3,unit:'docenas',observationId:m.shoppingId()});assert.equal(m.shoppingSubtotal(f.doc.items[0],f.doc.store).amount,6);
  assert.equal(f.doc.items[0].quantity,2);assert.equal(f.doc.items[0].unit,'docenas');
 });

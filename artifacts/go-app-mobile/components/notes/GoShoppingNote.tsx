@@ -16,8 +16,8 @@ import type { TaskScope } from "@/lib/goTaskReminders";
 import { subscribeGoLog, getGoLogSnapshot } from "@/lib/goLogStore";
 import { noteInScope } from "@/lib/unifiedNotes";
 import { createShoppingList, deleteShoppingList, listShoppingLists, openShoppingNote, oldShoppingNotes, renameShoppingList, restoreShoppingNote, runShoppingOperation, ShoppingNoteDeletedError } from "@/lib/shoppingNoteStore";
-import { comparableShoppingPrices, isShoppingMeasure, legacyShoppingCandidates, normalizedShoppingPrice, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, shoppingSubtotal, stepShoppingQuantity, suggestShoppingCategory, visibleShopping,
-  SHOPPING_CATEGORIES, SHOPPING_UNITS, type MeasureUnit, type ShoppingDocument, type ShoppingEditorDraft, type ShoppingFilter, type ShoppingItem, type ShoppingOperation } from "@/lib/shoppingNote";
+import { isShoppingQuantity, legacyShoppingCandidates, SHOPPING_QUANTITY_ERROR, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, shoppingPresentationPrice, shoppingSubtotal, stepShoppingQuantity, suggestShoppingCategory, visibleShopping,
+  SHOPPING_CATEGORIES, type ShoppingDocument, type ShoppingEditorDraft, type ShoppingFilter, type ShoppingItem, type ShoppingOperation } from "@/lib/shoppingNote";
 import { SHOPPING_ORBITS, shoppingCommand, shoppingOrbitLayout, shoppingRoute } from "@/lib/shoppingExperience";
 import { shoppingCatalogGroups, shoppingCatalogItem, shoppingCatalogUnit, shoppingFavorites, shoppingNeedsDetails } from "@/lib/shoppingCatalog";
 import { ShoppingProductRow } from "./ShoppingProductRow";
@@ -28,13 +28,6 @@ type Props={visible:boolean;scope:TaskScope|null;ready:boolean;handedness:"left"
 type InputOperation=ShoppingOperation extends infer O?O extends ShoppingOperation?Omit<O,"operationId">:never:never;
 const decimal=(n:number)=>n.toLocaleString("es-ES",{maximumFractionDigits:3});
 const money=(n:number,currency:string)=>n.toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" "+(currency==="EUR"?"€":currency);
-const priceBasis=(draft:ShoppingEditorDraft)=>{
-  if(draft.priceQuantity.trim())return `${draft.priceQuantity.replace(".",",")} ${draft.priceUnit}`;
-  if(draft.unit==="unidades")return "unidad";
-  if(draft.unit==="paquetes")return "envase";
-  if(draft.unit==="litros")return "litro";
-  return draft.unit==="docenas"?"docena":draft.unit;
-};
 // Only view position is cached; product data always comes from the verified canonical store.
 const shoppingPositions=new Map<string,number>();
 export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClose,closeRequested,initialListId}:Props){
@@ -57,11 +50,10 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
   const [entry,setEntry]=useState<GoEntry|null>(null),[lists,setLists]=useState<GoEntry[]>([]),[listName,setListName]=useState(""),[error,setError]=useState(""),[restoreId,setRestoreId]=useState<string|null>(null),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false);
   const [filter,setFilter]=useState<ShoppingFilter>("all"),[arrange,setArrange]=useState(false),[dragging,setDragging]=useState(false);
   const [editor,setEditor]=useState<ShoppingEditorDraft|null>(null),[draftStatus,setDraftStatus]=useState(""),[next,setNext]=useState<string[]|null>(null);
-  const [editorDetails,setEditorDetails]=useState<"product"|"price"|"history"|null>(null);
   const [repeat,setRepeat]=useState<{purchaseId:string;ids:string[]}|null>(null);
   const [oldNotes,setOldNotes]=useState<GoEntry[]>([]),[legacy,setLegacy]=useState<GoEntry|null>(null),[legacySelected,setLegacySelected]=useState<string[]>([]);
   const [retry,setRetry]=useState(0),scroll=useRef<React.ElementRef<typeof ScrollView>>(null),editScroll=useRef<React.ElementRef<typeof ScrollView>>(null);
-  const [screen,setScreen]=useState<"list"|"add">("add"),[orbit,setOrbit]=useState<string|null>(null),[subgroup,setSubgroup]=useState<string|null>(null),[more,setMore]=useState(false),[options,setOptions]=useState(false);
+  const [screen,setScreen]=useState<"list"|"add">("add"),[orbit,setOrbit]=useState<string|null>(null),[subgroup,setSubgroup]=useState<string|null>(null),[more,setMore]=useState(false);
   const [searchQuery,setSearchQuery]=useState("");
   const [utility,setUtility]=useState<"lists"|"store"|"route"|"map"|"history"|"assistant"|"location"|null>(null),[utilityItem,setUtilityItem]=useState<ShoppingItem|null>(null);
   const [storeName,setStoreName]=useState(""),[aisle,setAisle]=useState(""),[command,setCommand]=useState(""),[answer,setAnswer]=useState("");
@@ -73,7 +65,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
   const active=(expected:string,epoch:number)=>mounted.current&&latest.current.visible&&latest.current.ready&&latest.current.identity===expected&&generation.current===epoch;
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;};},[]);
   useEffect(()=>{
-    const epoch=++generation.current;setEntry(null);setLists([]);setEditor(null);setEditorDetails(null);setRepeat(null);setNext(null);setLegacy(null);setOldNotes([]);setError("");setRestoreId(null);setFilter("all");setArrange(false);setBusy(false);setScreen("add");setOrbit(null);setSubgroup(null);setSearchQuery("");setUtility(null);setAnswer("");setCommand("");lock.current=false;retries.current.clear();draftSequence.current++;
+    const epoch=++generation.current;setEntry(null);setLists([]);setEditor(null);setRepeat(null);setNext(null);setLegacy(null);setOldNotes([]);setError("");setRestoreId(null);setFilter("all");setArrange(false);setBusy(false);setScreen("add");setOrbit(null);setSubgroup(null);setSearchQuery("");setUtility(null);setAnswer("");setCommand("");lock.current=false;retries.current.clear();draftSequence.current++;
     if(!visible||!ready||!scope)return;
     const expected=identity,valid=()=>active(expected,epoch);setLoading(true);
     void openShoppingNote(scope,valid,initialListId).then(async row=>{
@@ -87,6 +79,8 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
     const row=getGoLogSnapshot().find(row=>row.id===current.id&&noteInScope(row,latest.current.scope!));if(row)setEntry(row);
   }),[]);
   const validView=visible&&ready&&scope&&entry&&noteInScope(entry,scope),doc=validView?entry.note?.shopping:undefined;
+  const editorItem=editor&&doc?.items.find(item=>item.id===editor.id);
+  const editorPrice=editorItem?shoppingPresentationPrice(editorItem,doc?.store):undefined;
   async function operate(input:InputOperation,blocking=true){
     if(!scope||!ready||!entry||!noteInScope(entry,scope))throw Error("Espera a verificar tu acceso a Compras.");
     if(blocking&&lock.current)throw Error("Espera a que termine el guardado.");
@@ -110,12 +104,12 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
   function change(patch:Partial<ShoppingEditorDraft>){const d=draftRef.current;if(d)writeDraft({...d,...patch});}
   function stepDraftQuantity(direction:-1|1){
     const draft=draftRef.current;if(!draft)return;
-    try{const quantity=stepShoppingQuantity(draft.quantity,draft.unit,direction);if(quantity!==undefined)change({quantity});}
+    try{const quantity=stepShoppingQuantity(draft.quantity,direction);if(quantity!==undefined)change({quantity});}
     catch(e){setError((e as Error).message);}
   }
   function startEditor(item?:ShoppingItem,name="",category?:ShoppingItem["category"],unit?:ShoppingItem["unit"]){
     if(busy||dragging)return;
-    setNext(null);setLegacy(null);setArrange(false);setMore(false);setOptions(false);setEditorDetails(null);
+    setNext(null);setLegacy(null);setArrange(false);setMore(false);
     const draft=shoppingEditor(item);
     writeDraft({...draft,quantity:draft.quantity.replace(".",","),...(!item?{name,category:category||suggestShoppingCategory(name,doc!),unit:unit||"unidades",store:doc?.store||""}:{})});
   }
@@ -179,6 +173,9 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
     }
   }
   const totals=doc?shoppingEstimate(doc):{totals:{},unknown:0},pickedTotals=doc?shoppingEstimate(doc,true):{totals:{},unknown:0},items=doc?.items||[];
+  const legacyCounts=items.filter(item=>item.selected&&!isShoppingQuantity(item.quantity));
+  const pendingTotalLabel=(unknown:number,legacy:number)=>
+    [unknown>legacy?`+ ${unknown-legacy} sin precio`:"",legacy?`${legacy} con cantidad por revisar`:""].filter(Boolean).join(" · ");
   const panel=!!editor||!!next||!!legacy||!!utility,adding=screen==="add",listHome=!!doc&&!panel&&!adding,orbitHome=!!doc&&adding&&!panel&&!orbit;
   const orbital=shoppingOrbitLayout(viewport.width-insets.left-insets.right,viewport.fontScale),route=doc?shoppingRoute(doc):undefined;
   const displayTotal=(v:typeof totals)=>Object.entries(v.totals).map(([currency,value])=>money(value,currency)).join(" + ")||"0,00 €";
@@ -198,7 +195,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
   async function refreshLists(){if(scope&&ready)setLists(await listShoppingLists(scope,()=>latest.current.visible&&latest.current.ready&&latest.current.identity===identity));}
   async function openList(id:string){if(!scope)return;try{const row=await openShoppingNote(scope,()=>latest.current.visible&&latest.current.ready&&latest.current.identity===identity,id);setEntry(row);setUtility(null);setScreen("list");setEditor(null);await refreshLists();}catch(e){setError((e as Error).message);}}
   async function shareList(){if(!doc)return;const title=entry?.note?.title||"Compras";
-    const lines=doc.items.filter(i=>i.selected).map(i=>{const subtotal=shoppingSubtotal(i,doc.store);return `${i.bought?"✓ ":"☐ "}${i.name} · ${i.quantity} ${i.unit}${subtotal.amount===undefined?" · Sin precio":" · "+money(subtotal.amount,subtotal.currency)}`;});
+    const lines=doc.items.filter(i=>i.selected).map(i=>{const subtotal=shoppingSubtotal(i,doc.store);return `${i.bought?"✓ ":"☐ "}${i.name} × ${decimal(i.quantity)}${!isShoppingQuantity(i.quantity)?" · Cantidad antigua":subtotal.amount===undefined?" · Sin precio":" · "+money(subtotal.amount,subtotal.currency)}`;});
     try{await Share.share({message:[title,...lines].join("\n")});}catch(e){setError((e as Error).message);}}
   async function newList(name:string){if(!scope)return;try{const row=await createShoppingList(scope,()=>latest.current.visible&&latest.current.ready&&latest.current.identity===identity,name);setEntry(row);setListName("");setScreen("add");setOrbit(null);setUtility(null);setError("");setRestoreId(null);await refreshLists();}catch(e){setError((e as Error).message);}}
   if(!visible)return null;
@@ -209,8 +206,8 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
           <TouchableOpacity testID="shopping-store" accessibilityRole="button" accessibilityLabel="Seleccionar supermercado" style={s.storeCard} onPress={()=>{setStoreName(doc.store||"");setUtility("store");}}>
             <Feather name="shopping-cart" size={22} color="#0879ca"/><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.75} style={s.storeName}>{doc.store||"Supermercado"}</Text><Feather name="chevron-down" size={16} color="#224b7c"/>
           </TouchableOpacity>
-          <View style={[s.totalCard,s.currentTotal]}><Text style={s.totalLabel}>Compra</Text><Text testID="shopping-picked-total" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={s.totalAmount}>{displayTotal(pickedTotals)}</Text>{!!pickedTotals.unknown&&<Text style={s.totalUnknown}>+ {pickedTotals.unknown} sin precio</Text>}</View>
-          <View style={s.totalCard}><Text style={s.totalLabel}>Total prev.</Text><Text testID="shopping-estimate" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={s.totalAmount}>{displayTotal(totals)}</Text>{!!totals.unknown&&<Text style={s.totalUnknown}>+ {totals.unknown} sin precio</Text>}</View>
+          <View style={[s.totalCard,s.currentTotal]}><Text style={s.totalLabel}>Compra</Text><Text testID="shopping-picked-total" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={s.totalAmount}>{displayTotal(pickedTotals)}</Text>{!!pickedTotals.unknown&&<Text style={s.totalUnknown}>{pendingTotalLabel(pickedTotals.unknown,legacyCounts.filter(item=>item.bought).length)}</Text>}</View>
+          <View style={s.totalCard}><Text style={s.totalLabel}>Total prev.</Text><Text testID="shopping-estimate" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={s.totalAmount}>{displayTotal(totals)}</Text>{!!totals.unknown&&<Text style={s.totalUnknown}>{pendingTotalLabel(totals.unknown,legacyCounts.length)}</Text>}</View>
         </View><TouchableOpacity testID="shopping-active-list" accessibilityRole="button" accessibilityLabel="Gestionar listas de compra" onPress={()=>{setListName("");setUtility("lists");void refreshLists();}} style={s.activeListBar}><Text numberOfLines={1} style={s.activeListName}>{entry?.note?.title||"Compras"}</Text><Text style={s.savedLabel}>Guardado · Mis listas ›</Text></TouchableOpacity></>:orbitHome?<LinearGradient colors={["#ffffff","#e9f4ff","#cfe8ff"]} style={s.orbitBanner}><View style={s.bannerCart}><Feather name="shopping-cart" size={27} color="#fff"/></View><View style={{flex:1}}><Text accessibilityRole="header" style={s.bannerTitle}>GO Compras</Text><Text style={s.bannerSubtitle}>Añadir productos</Text></View><Text style={s.bannerArt}>🧺</Text></LinearGradient>
           :<Text accessibilityRole="header" style={s.heading}>{editor?(editor.expectedRevision?"Editar producto":"Añadir producto"):next?"Habituales":legacy?"Incorporar nota":utility==="assistant"?"GO Compras":utility==="lists"?"Mis listas":utility==="route"?"Ruta de compra":utility==="map"?"Mapa de la tienda":utility==="history"?"Compras realizadas":utility==="store"?"Supermercado":utility==="location"?"Ubicación manual":adding?"Elegir producto":"Compras"}</Text>}
       </View>
@@ -265,39 +262,19 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
       </View>}
       {editor&&<ScrollView ref={editScroll} testID="shopping-editor-scroll" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" style={{flex:1,minHeight:0}} contentContainerStyle={{padding:12,flexGrow:1,justifyContent:"flex-end"}}><View style={s.editorCard}>
         {field("name","Producto",{onChangeText:name=>change({name,...(editor.category==="other"?{category:suggestShoppingCategory(name,doc)}:{})}),autoCapitalize:"sentences"})}
-        <View style={[s.row,{flexWrap:"nowrap"}]}><TouchableOpacity testID="shopping-editor-minus" accessibilityRole="button" accessibilityLabel="Restar cantidad" onPress={()=>stepDraftQuantity(-1)} style={s.editorStep}><Feather name="minus" size={20} color="#0876ca"/></TouchableOpacity><View style={{flex:1}}>{field("quantity","Cantidad",{keyboardType:"decimal-pad"})}</View><TouchableOpacity testID="shopping-editor-plus" accessibilityRole="button" accessibilityLabel="Sumar cantidad" onPress={()=>stepDraftQuantity(1)} style={s.editorStep}><Feather name="plus" size={20} color="#0876ca"/></TouchableOpacity>{button(editor.unit,()=>setOptions(v=>!v),"shopping-unit-picker")}</View>
-        {options&&<View style={s.row}>{SHOPPING_UNITS.map(unit=><React.Fragment key={unit}>{button(unit,()=>{change({unit});setOptions(false);},"shopping-unit-"+unit,editor.unit===unit)}</React.Fragment>)}</View>}
-        {field("price",`Precio (${editor.currency==="EUR"?"€":editor.currency}/${priceBasis(editor)}) · opcional`,{keyboardType:"decimal-pad"})}
+        <View style={[s.row,{flexWrap:"nowrap"}]}>
+          <TouchableOpacity testID="shopping-editor-minus" accessibilityRole="button" accessibilityLabel="Restar cantidad" onPress={()=>stepDraftQuantity(-1)} style={s.editorStep}><Feather name="minus" size={20} color="#0876ca"/></TouchableOpacity>
+          <View style={{flex:1}}>{field("quantity","Cantidad",{keyboardType:"number-pad",selectTextOnFocus:true,onChangeText:quantity=>{if(/^\d*$/.test(quantity))change({quantity});else setError(SHOPPING_QUANTITY_ERROR);}})}</View>
+          <TouchableOpacity testID="shopping-editor-plus" accessibilityRole="button" accessibilityLabel="Sumar cantidad" onPress={()=>stepDraftQuantity(1)} style={s.editorStep}><Feather name="plus" size={20} color="#0876ca"/></TouchableOpacity>
+        </View>
+        {editor.quantity&&!/^\d+$/.test(editor.quantity)&&<Text style={s.hint}>Cantidad anterior conservada. Escribe un número entero para guardar.</Text>}
+        {field("price","Precio por producto · opcional",{keyboardType:"decimal-pad",value:editor.pricePerPresentation?editor.price:"",placeholder:editorPrice?String(editorPrice.price).replace(".",","):"",onChangeText:price=>change({price,pricePerPresentation:true,store:doc.store||editor.store})})}
+        {editor.price&&!editor.pricePerPresentation&&<Text style={s.hint}>Precio anterior del borrador conservado. Escribe un precio nuevo si quieres sustituirlo.</Text>}
         {field("brand","Marca · opcional")}
-        {button(more?"Ocultar detalles":"Más detalles",()=>{setMore(v=>!v);setEditorDetails(null);},"shopping-editor-options")}
-        {more&&<View style={s.row}>
-          {button("Producto",()=>setEditorDetails(editorDetails==="product"?null:"product"),"shopping-details-product",editorDetails==="product")}
-          {button("Precio",()=>setEditorDetails(editorDetails==="price"?null:"price"),"shopping-details-price",editorDetails==="price")}
-          {button("Historial de precios",()=>setEditorDetails(editorDetails==="history"?null:"history"),"shopping-details-prices",editorDetails==="history")}
-        </View>}
-        {more&&editorDetails==="product"&&<>
-          {field("format","Formato · opcional")}
-          {field("variety","Variedad · opcional")}
-          {field("packageQuantity","Tamaño del envase",{keyboardType:"decimal-pad"})}
-          <View style={s.row}>{(["kg","g","litros","ml","unidades"] as MeasureUnit[]).map(unit=><React.Fragment key={unit}>{button(unit,()=>change({packageUnit:unit}),"shopping-package-unit-"+unit,editor.packageUnit===unit)}</React.Fragment>)}</View>
-          <Text style={s.label}>Categoría</Text><View style={s.row}>{SHOPPING_CATEGORIES.map(([id,,label])=><React.Fragment key={id}>{button(label,()=>change({category:id}),"shopping-category-"+id,editor.category===id)}</React.Fragment>)}</View>
-          {field("notes","Observaciones")}
-          {checkButton("Producto habitual",editor.usual,()=>change({usual:!editor.usual}),"shopping-usual")}
-          {checkButton("Favorito por marca y presentación",editor.favorite||false,()=>change({favorite:!editor.favorite}),"shopping-editor-favorite")}
+        {draftStatus.startsWith("Borrador pendiente")&&<>
+          <Text testID="shopping-draft-status" accessibilityLiveRegion="polite" style={s.hint}>{draftStatus}</Text>
+          {button("Reintentar guardar borrador",()=>writeDraft(editor),"shopping-retry-draft")}
         </>}
-        {more&&editorDetails==="price"&&<>
-          {field("store","Supermercado del precio")}
-          {field("currency","Moneda")}{field("observedOn","Fecha de observación · AAAA-MM-DD")}
-          {field("priceQuantity","Contenido al que corresponde el precio",{keyboardType:"decimal-pad"})}
-          <View style={s.row}>{(["kg","g","litros","ml","unidades"] as MeasureUnit[]).map(unit=><React.Fragment key={unit}>{button(unit,()=>change({priceUnit:unit}),"shopping-price-unit-"+unit,editor.priceUnit===unit)}</React.Fragment>)}</View>
-        </>}
-        {more&&editorDetails==="history"&&<>
-          {items.find(i=>i.id===editor.id)?.prices.map(p=>{const n=normalizedShoppingPrice(p);return <View key={p.id} testID={"shopping-price-"+p.id} style={s.details}><Text style={s.text}>{p.store} · {p.observedOn} · {money(p.price,p.currency)}/{p.purchaseUnit}</Text><Text style={s.hint}>{p.brand} · {p.format} · {n?money(n.value,p.currency)+"/"+n.unit:"Sin medida comparable"}</Text>{button("Usar para estimación",()=>action({type:"selectPrice",id:editor.id,priceId:p.id}),"shopping-use-price-"+p.id,items.find(i=>i.id===editor.id)?.selectedPriceId===p.id)}</View>;})}
-          {comparableShoppingPrices(items.find(i=>i.id===editor.id)?.prices||[]).map((group,index)=><View key={index} testID="shopping-price-comparison" style={s.details}><Text style={s.label}>Misma marca, variedad y formato</Text>{group.map(p=><Text key={p.id} style={s.text}>{p.store}: {money(normalizedShoppingPrice(p)!.value,p.currency)}/{normalizedShoppingPrice(p)!.unit} · {p.observedOn}</Text>)}</View>)}
-        </>}
-        {(more||draftStatus.startsWith("Borrador pendiente"))&&<Text testID="shopping-draft-status" accessibilityLiveRegion="polite" style={s.hint}>{draftStatus}</Text>}
-        {draftStatus.startsWith("Borrador pendiente")&&button("Reintentar guardar borrador",()=>writeDraft(editor),"shopping-retry-draft")}
-        {more&&button("Descartar borrador",()=>Alert.alert("Descartar borrador","El producto guardado y sus precios se conservarán.",[{text:"Cancelar",style:"cancel"},{text:"DESCARTAR",style:"destructive",onPress:()=>{if(doc.pendingEditor&&doc.pendingEditor.id!==editor.id){setEditor(null);draftRef.current=null;draftSequence.current++;return;}void operate({type:"draft"}).then(()=>{setEditor(null);draftRef.current=null;draftSequence.current++;}).catch(()=>{});}}]),"shopping-discard-draft")}
       </View></ScrollView>}
       {utility&&<ScrollView testID={"shopping-"+utility+"-scroll"} keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,gap:12}}>
         {utility==="lists"&&<>
@@ -344,8 +321,8 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
           </View>)}
         </>}
         {utility==="assistant"&&<>
-          <Text accessibilityRole="header" style={s.heading}>¿Qué necesitas comprar?</Text><Text style={s.assistantExample}>«Añade dos litros de leche y seis huevos»</Text>
-          <TextInput testID="shopping-command" accessibilityLabel="Orden para GO Compras" value={command} onChangeText={setCommand} onSubmitEditing={()=>void runCommand(command)} style={s.input} placeholder="Añade 2 kg de manzanas"/>
+          <Text accessibilityRole="header" style={s.heading}>¿Qué necesitas comprar?</Text><Text style={s.assistantExample}>«Añade dos botellas de leche y seis huevos»</Text>
+          <TextInput testID="shopping-command" accessibilityLabel="Orden para GO Compras" value={command} onChangeText={setCommand} onSubmitEditing={()=>void runCommand(command)} style={s.input} placeholder="Añade 2 botellas de agua"/>
           {button("Ejecutar",()=>void runCommand(command),"shopping-command-send",true,!command.trim())}
           <TouchableOpacity testID="shopping-voice" accessibilityRole="button" accessibilityLabel={voice.status==="listening"?"Detener dictado":"Hablar con GO"} onPress={()=>{if(voice.status==="listening")void voice.stop();else{voiceIdentity.current=identity;void voice.start();}}} disabled={voice.status!=="idle"&&voice.status!=="listening"} style={s.voiceButton}><Feather name="mic" size={22} color="#fff"/><Text style={s.saveText}>{voice.status==="listening"?"Detener dictado":voice.status==="idle"?"Hablar":"Preparando…"}</Text></TouchableOpacity>
           {!!voice.error&&<Text accessibilityRole="alert" style={s.error}>{voice.error}</Text>}

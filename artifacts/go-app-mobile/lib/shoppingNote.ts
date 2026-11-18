@@ -14,6 +14,7 @@ export type MeasureUnit = Exclude<ShoppingUnit, "paquetes">;
 export type ShoppingPrice = {
   id:string; store:string; price:number; currency:string; observedOn:string;
   purchaseUnit:ShoppingUnit; packageQuantity?:number; packageUnit?:MeasureUnit; brand:string; format:string; variety?:string; product?:string;
+  perPresentation?:true;
 };
 export type ShoppingItem = {
   id:string; revision:number; name:string; category:ShoppingCategory; quantity:number; unit:ShoppingUnit;
@@ -26,7 +27,7 @@ export type ShoppingEditorDraft = {
   id:string; expectedRevision?:number; name:string; category:ShoppingCategory; quantity:string; unit:ShoppingUnit;
   packageQuantity:string; packageUnit:MeasureUnit; notes:string; usual:boolean;
   store:string; price:string; currency:string; observedOn:string; priceQuantity:string; priceUnit:MeasureUnit;
-  brand:string; format:string; observationId:string; variety?:string; favorite?:boolean;
+  brand:string; format:string; observationId:string; variety?:string; favorite?:boolean; pricePerPresentation?:true;
 };
 export type ShoppingDocument = {
   version:1; categoryOrder:ShoppingCategory[]; collapsed:ShoppingCategory[]; items:ShoppingItem[];
@@ -64,20 +65,18 @@ export function shoppingDecimal(value:string, optional=false):number|undefined {
 export const isShoppingMeasure = (unit:ShoppingUnit):unit is "kg"|"g"|"litros"|"ml" =>
   unit==="kg"||unit==="g"||unit==="litros"||unit==="ml";
 
-export function stepShoppingQuantity(raw:string,unit:ShoppingUnit,direction:-1|1):string|undefined {
-  const value=shoppingDecimal(raw)!;
-  if(!isShoppingMeasure(unit)){
-    const next=direction===1?Math.floor(value)+1:Math.ceil(value)-1;
-    return next>0&&next<=1e9?String(next):undefined;
-  }
-  const [whole,fraction=""]=raw.trim().replace(",",".").split(".");
-  const precision=Math.max(unit==="kg"||unit==="litros"?1:0,fraction.length);
-  const scale=10n**BigInt(precision);
-  const delta=unit==="kg"||unit==="litros"?scale/10n:50n*scale;
-  const next=BigInt(whole+fraction.padEnd(precision,"0"))+BigInt(direction)*delta;
-  if(next<=0n||next>1000000000n*scale)return undefined;
-  const remainder=(next%scale).toString().padStart(precision,"0").replace(/0+$/,"");
-  return (next/scale).toString()+(remainder?","+remainder:"");
+export const SHOPPING_QUANTITY_ERROR="Introduce una cantidad entera de 1 a 1.000.000.000.";
+export function isShoppingQuantity(value:number):boolean {
+  return Number.isSafeInteger(value)&&value>=1&&value<=1e9;
+}
+export function shoppingQuantity(raw:string):number {
+  const value=Number(raw);
+  if(!/^\d+$/.test(raw.trim())||!isShoppingQuantity(value))throw Error(SHOPPING_QUANTITY_ERROR);
+  return value;
+}
+export function stepShoppingQuantity(raw:string,direction:-1|1):string|undefined {
+  const next=shoppingQuantity(raw)+direction;
+  return isShoppingQuantity(next)?String(next):undefined;
 }
 const categoryValid = (v:unknown):v is ShoppingCategory => SHOPPING_CATEGORIES.some(c=>c[0]===v);
 const unitValid = (v:unknown):v is ShoppingUnit => SHOPPING_UNITS.includes(v as ShoppingUnit);
@@ -149,7 +148,7 @@ function editorItem(d:ShoppingEditorDraft,doc:ShoppingDocument):ShoppingItem {
   if(!name)throw Error("Escribe el nombre del producto.");
   if(old?.revision!==d.expectedRevision)throw Error("El artículo cambió durante la edición. Conserva el borrador y vuelve a abrir el artículo.");
   if(doc.items.some(i=>i.id!==d.id&&i.category===d.category&&shoppingName(i.name)===shoppingName(name)&&shoppingName(i.brand??i.prices.at(-1)?.brand??"")===shoppingName(d.brand)&&shoppingName(i.format??i.prices.at(-1)?.format??"")===shoppingName(d.format)&&shoppingName(i.variety||"")===shoppingName(d.variety||"")&&i.packageQuantity===shoppingDecimal(d.packageQuantity,true)&&i.packageUnit===(d.packageQuantity.trim()?d.packageUnit:undefined)))throw Error("Ya existe esa presentación. Edita su fila para cambiar cantidad.");
-  const quantity=shoppingDecimal(d.quantity||"1")!,size=shoppingDecimal(d.packageQuantity,true);
+  const quantity=shoppingQuantity(d.quantity),size=shoppingDecimal(d.packageQuantity,true);
   const prices=[...(old?.prices||[])];let selectedPriceId=old?.selectedPriceId;
   if(d.price.trim()){
     // A manually entered price may be useful before a supermarket is chosen.
@@ -157,11 +156,12 @@ function editorItem(d:ShoppingEditorDraft,doc:ShoppingDocument):ShoppingItem {
     const priceStore=d.store.trim()||"Sin supermercado";
     if(!/^[A-Z]{3}$/.test(d.currency.trim().toUpperCase()))throw Error("Usa una moneda de tres letras, por ejemplo EUR.");
     if(!shoppingDate(d.observedOn))throw Error("La fecha del precio debe ser AAAA-MM-DD y existir.");
-    const explicitSize=shoppingDecimal(d.priceQuantity,true);
+    const explicitSize=d.pricePerPresentation?undefined:shoppingDecimal(d.priceQuantity,true);
     const priceSize=explicitSize??(isShoppingMeasure(d.unit)?1:size);
     const priceUnit=explicitSize!==undefined?d.priceUnit:isShoppingMeasure(d.unit)?d.unit:d.packageUnit;
     prices.push({id:d.observationId,store:priceStore,price:shoppingDecimal(d.price)!,currency:d.currency.trim().toUpperCase(),observedOn:d.observedOn,
-      purchaseUnit:d.unit,packageQuantity:priceSize,packageUnit:priceSize===undefined?undefined:priceUnit,brand:d.brand.trim(),format:d.format.trim(),variety:d.variety?.trim()||"",product:name});
+      purchaseUnit:d.unit,...(d.pricePerPresentation?{perPresentation:true as const}:{packageQuantity:priceSize,packageUnit:priceSize===undefined?undefined:priceUnit}),
+      brand:d.brand.trim(),format:d.format.trim(),variety:d.variety?.trim()||"",product:name});
     selectedPriceId=d.observationId;
   }
   return {...old,id:d.id,revision:(old?.revision||0)+1,name,category:d.category,quantity,unit:d.unit,
@@ -185,17 +185,15 @@ export function applyShoppingOperation(current:ShoppingDocument,op:ShoppingOpera
     // Status and participation do not conflict with an editor: saveItem retains their current values.
     case "bought": {if(typeof op.value!=="boolean")throw Error("Estado inválido.");item(op.id).bought=op.value;break;}
     case "select": {if(typeof op.value!=="boolean")throw Error("Selección inválida.");item(op.id).selected=op.value;break;}
-    case "quantity": {if(!positive(op.value))throw Error("La cantidad debe ser mayor que 0.");const i=item(op.id);i.quantity=op.value;i.revision++;break;}
+    case "quantity": {if(!isShoppingQuantity(op.value))throw Error(SHOPPING_QUANTITY_ERROR);const i=item(op.id);i.quantity=op.value;i.revision++;break;}
     case "store": if(typeof op.value!=="string")throw Error("Supermercado inválido.");doc.store=op.value.trim();break;
     case "favorite": if(typeof op.value!=="boolean")throw Error("Favorito inválido.");item(op.id).favorite=op.value;break;
     case "price": {
       const i=item(op.id);const priceStore=doc.store||"Sin supermercado";
-      if(!positive(op.value)||!unitValid(op.unit)||!op.observationId)throw Error("Precio inválido.");
+      if(!positive(op.value)||op.unit!==i.unit||!op.observationId)throw Error("Introduce el precio de esta presentación.");
       const previous=shoppingPriceFor(i,priceStore);
-      const p:ShoppingPrice={id:op.observationId,store:priceStore,price:op.value,currency:previous?.currency||"EUR",observedOn:localShoppingDate(),purchaseUnit:op.unit,
+      const p:ShoppingPrice={id:op.observationId,store:priceStore,price:op.value,currency:previous?.currency||"EUR",observedOn:localShoppingDate(),purchaseUnit:i.unit,perPresentation:true,
         brand:i.brand??previous?.brand??"",format:i.format??previous?.format??""};
-      if(op.unit==="kg"||op.unit==="g"||op.unit==="litros"||op.unit==="ml"){p.packageQuantity=1;p.packageUnit=op.unit;}
-      else if(i.packageQuantity!==undefined){p.packageQuantity=i.packageQuantity;p.packageUnit=i.packageUnit;}
       p.product=i.name;p.variety=i.variety||"";p.brand=i.brand??i.prices.at(-1)?.brand??"";p.format=i.format??i.prices.at(-1)?.format??"";
       i.prices.push(p);i.selectedPriceId=p.id;break;
     }
@@ -213,6 +211,7 @@ export function applyShoppingOperation(current:ShoppingDocument,op:ShoppingOpera
           && shoppingName(row.format??row.prices.at(-1)?.format??"")===shoppingName(snapshot.format??snapshot.prices.at(-1)?.format??"")
           && shoppingName(row.variety??"")===shoppingName(snapshot.variety??"")
           && row.packageQuantity===snapshot.packageQuantity&&row.packageUnit===snapshot.packageUnit);
+        if(!isShoppingQuantity((current??snapshot).quantity))throw Error("Este producto conserva una cantidad antigua. Indica una cantidad entera antes de repetirlo.");
         if(current){current.selected=true;current.bought=false;continue;}
         const restored:ShoppingItem=JSON.parse(JSON.stringify(snapshot));
         restored.revision++;
@@ -227,7 +226,7 @@ export function applyShoppingOperation(current:ShoppingDocument,op:ShoppingOpera
     case "collapse": if(!categoryValid(op.category)||typeof op.value!=="boolean")throw Error("Categoría inválida.");doc.collapsed=doc.collapsed.filter(c=>c!==op.category);if(op.value)doc.collapsed.push(op.category);break;
     case "reorderItems": {const group=doc.items.filter(i=>i.category===op.category);if(!categoryValid(op.category)||!permutation(group.map(i=>i.id),op.ids))throw Error("El bloque cambió. Repite el arrastre.");for(const i of group)i.order=op.ids.indexOf(i.id);break;}
     case "reorderCategories": if(!permutation(doc.categoryOrder,op.ids))throw Error("El orden de secciones no es válido.");doc.categoryOrder=op.ids;break;
-    case "next": if(op.confirmed!==true||!op.ids.length)throw Error("Selecciona y confirma los productos habituales.");for(const id of op.ids){const i=item(id);if(!i.usual)throw Error("Selecciona solo productos habituales.");i.bought=false;i.selected=true;}break;
+    case "next": if(op.confirmed!==true||!op.ids.length)throw Error("Selecciona y confirma los productos habituales.");for(const id of op.ids){const i=item(id);if(!i.usual)throw Error("Selecciona solo productos habituales.");if(!isShoppingQuantity(i.quantity))throw Error("Indica una cantidad entera antes de repetir «"+i.name+"».");i.bought=false;i.selected=true;}break;
     case "selectPrice": {const i=item(op.id);if(!i.prices.some(p=>p.id===op.priceId))throw Error("Precio no disponible.");i.selectedPriceId=op.priceId;break;}
     case "importLegacy": throw Error("La incorporación requiere comprobar la nota de origen en el almacén.");
     default: throw Error("Operación de compra desconocida.");
@@ -260,16 +259,18 @@ export function shoppingPriceFor(item:ShoppingItem,store?:string) {
   const selected=item.prices.find(p=>p.id===item.selectedPriceId&&equivalent(p));
   return selected||[...item.prices].reverse().find(equivalent);
 }
+export function shoppingPresentationPrice(item:ShoppingItem,store?:string):ShoppingPrice|undefined {
+  const price=shoppingPriceFor(item,store);
+  if(!price||price.purchaseUnit!==item.unit)return undefined;
+  if(price.perPresentation||price.packageQuantity===undefined)return price;
+  const sameBasis=isShoppingMeasure(item.unit)
+    ? price.packageQuantity===1&&price.packageUnit===item.unit
+    : price.packageQuantity===item.packageQuantity&&price.packageUnit===item.packageUnit;
+  return sameBasis?price:undefined;
+}
 export function shoppingSubtotal(i:ShoppingItem,store?:string) {
-  const p=shoppingPriceFor(i,store);let amount:number|undefined;
-  if(p){const n=normalizedShoppingPrice(p),counted=i.unit==="paquetes"||i.unit==="unidades"||i.unit==="docenas";
-    if(i.packageQuantity===undefined&&p.packageQuantity===undefined&&(i.unit==="unidades"||i.unit==="docenas")&&(p.purchaseUnit==="unidades"||p.purchaseUnit==="docenas"))
-      amount=i.quantity*(i.unit==="docenas"?12:1)*p.price/(p.purchaseUnit==="docenas"?12:1);
-    else if(counted&&i.unit===p.purchaseUnit&&(!n||i.packageQuantity===undefined))amount=i.quantity*p.price;
-    else if(n){const size=counted?i.packageQuantity:i.quantity,unit=counted?i.packageUnit:i.unit;
-      const base=unit==="kg"||unit==="g"?"kg":unit==="litros"||unit==="ml"?"l":unit==="unidades"||unit==="docenas"?"unidad":undefined;
-      if(size!==undefined&&base===n.unit)amount=size*(counted?i.quantity:1)*(unit==="g"||unit==="ml"?0.001:unit==="docenas"?12:1)*n.value;}
-  }
+  const p=shoppingPresentationPrice(i,store);
+  const amount=p&&isShoppingQuantity(i.quantity)?i.quantity*p.price:undefined;
   return {amount:amount!==undefined&&Number.isFinite(amount)?Math.round((amount+Number.EPSILON)*100)/100:undefined,currency:p?.currency||"EUR"};
 }
 export function shoppingEstimate(doc:ShoppingDocument,boughtOnly=false) {

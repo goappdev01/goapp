@@ -57,13 +57,7 @@ async function shoppingUI(f,{handedness='right',width=390,height=844,fontScale=1
  await render({});
  const tap=async id=>{assert.ok(hosts.has(id),'control exists: '+id);await h.settle(()=>hosts.get(id).onPress());await idle();};
  if(startList&&hosts.has('shopping-list'))await tap('shopping-list');
- const input=async(key,value)=>{
-  if(!hosts.has('shopping-field-'+key)){
-   if(!hosts.has('shopping-details-product'))await tap('shopping-editor-options');
-   await tap(['store','currency','observedOn','priceQuantity'].includes(key)?'shopping-details-price':'shopping-details-product');
-  }
-  await h.settle(()=>hosts.get('shopping-field-'+key).onChangeText(value));await idle();
- };
+ const input=async(key,value)=>{assert.ok(hosts.has("shopping-field-"+key));await h.settle(()=>hosts.get("shopping-field-"+key).onChangeText(value));await idle();};
  return {hosts,instances,calls,alerts,frames,geometry,gestures,keyboard,container,render,idle,tap,input,run:h.settle,
   async frame(time){const pending=[...frames.values()];frames.clear();await h.settle(()=>pending.forEach(fn=>fn(time)));},close:()=>h.settle(()=>root.unmount())};
 }
@@ -215,7 +209,7 @@ test('COMPRAS V1: existing shopping opens at the orbit; lists can be selected an
   await ui.tap('shopping-list');assert.ok(ui.hosts.has('shopping-list-scroll'));await ui.tap('shopping-active-list');await ui.tap('shopping-list-share');
   assert.match(ui.calls.find(call=>call[0]==='share')[1].message,/Trabajo/);
   await ui.tap('shopping-list-select-'+f.disk.rows.find(r=>r.note?.title==='COMPRAS').id);assert.match(ui.container.textContent,/Pan/);
-  await ui.tap('shopping-active-list');await ui.tap('shopping-list-share');assert.match(ui.calls.at(-1)[1].message,/☐ Pan · 1 unidades · Sin precio/);
+  await ui.tap('shopping-active-list');await ui.tap('shopping-list-share');assert.match(ui.calls.at(-1)[1].message,/☐ Pan × 1 · Sin precio/);
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 
@@ -291,16 +285,15 @@ test('COMPRAS approved main layout: compact totals, five secondary actions and p
  }
 });
 
-test('COMPRAS quick editor shows brand and sale basis while advanced groups stay closed',async()=>{
+test('COMPRAS V1 editor exposes only product, integer quantity, presentation price, brand and save',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false});assert.ok(ui.hosts.has('shopping-eight-orbits'));assert.ok(ui.hosts.has('shopping-go-orbit'));assert.ok(ui.hosts.has('shopping-thumb-controls'));
   assert.deepEqual(['food','drinks','home','other','care','favorites','produce','frozen'].map(id=>ui.hosts.get('shopping-orbit-'+id).accessibilityLabel),['Alimentos','Bebidas','Hogar','Otros','Higiene','Favoritos','Frescos','Congelados']);
   await ui.tap('shopping-orbit-food');await ui.tap('shopping-subgroup-0');assert.ok(ui.hosts.has('shopping-catalog-food-Pan común'));await ui.tap('shopping-catalog-food-Pan común');await ui.tap('shopping-edit-'+f.doc().items[0].id);
   for(const key of ['name','quantity','price','brand'])assert.ok(ui.hosts.has('shopping-field-'+key));
-  assert.match(ui.hosts.get('shopping-field-price').accessibilityLabel,/€\/unidad/);assert.ok(ui.hosts.has('shopping-save'));
-  assert.equal(ui.hosts.has('shopping-field-format'),false);
-  await ui.tap('shopping-editor-options');assert.equal(ui.hosts.has('shopping-field-format'),false);
-  await ui.tap('shopping-details-product');assert.ok(ui.hosts.has('shopping-field-format'));assert.equal(ui.hosts.has('shopping-field-store'),false);
+  assert.match(ui.hosts.get("shopping-field-price").accessibilityLabel,/Precio por producto/);assert.ok(ui.hosts.has("shopping-save"));
+  assert.equal(ui.hosts.get("shopping-field-quantity").keyboardType,"number-pad");
+  for(const id of ["shopping-field-format","shopping-field-store","shopping-unit-picker","shopping-editor-options"])assert.equal(ui.hosts.has(id),false);
   await ui.tap('shopping-save');assert.equal(f.doc().items[0].name,'Pan común');assert.ok(ui.hosts.has('shopping-item-'+f.doc().items[0].id));
   await ui.tap('shopping-add');await ui.tap('shopping-search-open');await ui.run(()=>ui.hosts.get('shopping-product-search').onChangeText('Agua'));await ui.idle();assert.ok(ui.hosts.has('shopping-catalog-drinks-Agua mineral'));
  }finally{if(ui)await ui.close();f.disk.close();}
@@ -308,15 +301,15 @@ test('COMPRAS quick editor shows brand and sale basis while advanced groups stay
 
 test('COMPRAS UI: actual add/edit/bought/filter/next controls persist offline and closing an editor retains list scroll instance',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f);const scroll=ui.instances.get('shopping-list-scroll');await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Azúcar');await ui.input('quantity','2');await ui.tap('shopping-unit-picker');await ui.tap('shopping-unit-paquetes');await ui.tap('shopping-save');
+  ui=await shoppingUI(f);const scroll=ui.instances.get('shopping-list-scroll');await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Azúcar');await ui.input('quantity','2');await ui.tap('shopping-save');
   const sugar=f.doc().items[0];assert.equal(sugar.quantity,2);assert.equal(sugar.category,'pantry');assert.equal(ui.instances.get('shopping-list-scroll'),scroll);assert.equal(ui.hosts.get('shopping-bought-'+sugar.id).accessibilityState.checked,false);
-  await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Sal');await ui.tap('shopping-unit-picker');await ui.tap('shopping-unit-paquetes');await ui.tap('shopping-save');const salt=f.doc().items.find(i=>i.name==='Sal');
+  await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Sal');await ui.tap('shopping-save');const salt=f.doc().items.find(i=>i.name==='Sal');
   await ui.tap('shopping-bought-'+sugar.id);assert.equal(f.doc().items.find(i=>i.id===sugar.id).bought,true);await ui.tap('shopping-bought-'+sugar.id);assert.equal(f.doc().items.find(i=>i.id===sugar.id).bought,false);
   await ui.tap('shopping-bought-'+sugar.id);await ui.tap('shopping-more');await ui.tap('shopping-filter-bought');assert.ok(ui.hosts.has('shopping-item-'+sugar.id));assert.equal(ui.hosts.has('shopping-item-'+salt.id),false);await ui.tap('shopping-filter-all');
   await ui.tap('shopping-next');assert.equal(ui.hosts.get('shopping-next-select-'+sugar.id).accessibilityState.checked,false);await ui.tap('shopping-next-select-'+sugar.id);await ui.tap('shopping-next-confirm');
   await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='PREPARAR').onPress());await ui.idle();assert.equal(f.doc().items.find(i=>i.id===sugar.id).bought,false);assert.equal(f.doc().items.length,2);
-  await ui.tap('shopping-filter-all');await ui.tap('shopping-edit-'+sugar.id);await ui.input('store','Mercado A');await ui.input('price','2,50');await ui.input('priceQuantity','1');await ui.input('brand','Marca A');await ui.input('format','seco');await ui.tap('shopping-save');
-  await ui.tap('shopping-edit-'+sugar.id);await ui.input('store','Mercado B');await ui.input('price','1,50');await ui.input('priceQuantity','500');await ui.tap('shopping-save');
+  await ui.tap('shopping-filter-all');await ui.tap('shopping-edit-'+sugar.id);await ui.input('price','2,50');await ui.input('brand','Marca A');await ui.tap('shopping-save');
+  await ui.tap('shopping-edit-'+sugar.id);await ui.input('price','1,50');await ui.tap('shopping-save');
   assert.equal(f.doc().items.length,2);assert.equal(f.doc().items.find(i=>i.id===sugar.id).prices.length,2);assert.ok(ui.hosts.has('shopping-go'));assert.ok(ui.hosts.has('shopping-route'));
   await ui.close();ui=null;await f.disk.reopen();assert.equal((await f.open()).note.shopping.items.length,2);
  }finally{if(ui)await ui.close();f.disk.close();}
@@ -343,9 +336,9 @@ test('COMPRAS UI: measured long-press handles reorder only their own block, pers
 
 test('COMPRAS UI: acknowledged partial draft recovers after unmount/reopen, failed save stays editable, and changing account hides private fields',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Producto privado');await ui.input('quantity','1,');await ui.input('price','2,');await ui.close();ui=null;await f.disk.reopen();
-  ui=await shoppingUI(f);assert.ok(ui.hosts.has('shopping-resume-draft'));assert.equal(ui.hosts.has('shopping-field-name'),false);await ui.tap('shopping-resume-draft');assert.equal(ui.hosts.get('shopping-field-name').value,'Producto privado');assert.equal(ui.hosts.get('shopping-field-quantity').value,'1,');await ui.tap('shopping-save');assert.ok(ui.hosts.has('shopping-error'));assert.equal(f.doc().items.length,0);
-  await ui.input('quantity','1,5');await ui.input('price','');f.disk.failWrite(true);await ui.tap('shopping-save');assert.equal(ui.hosts.get('shopping-field-name').value,'Producto privado');assert.equal(f.doc().items.length,0);f.disk.failWrite(false);await ui.tap('shopping-save');assert.equal(f.doc().items.length,1);
+  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Producto privado');await ui.input('quantity','');await ui.input('price','2,');await ui.close();ui=null;await f.disk.reopen();
+  ui=await shoppingUI(f);assert.ok(ui.hosts.has('shopping-resume-draft'));assert.equal(ui.hosts.has('shopping-field-name'),false);await ui.tap('shopping-resume-draft');assert.equal(ui.hosts.get('shopping-field-name').value,'Producto privado');assert.equal(ui.hosts.get('shopping-field-quantity').value,'');await ui.tap('shopping-save');assert.ok(ui.hosts.has('shopping-error'));assert.equal(f.doc().items.length,0);
+  await ui.input('quantity','2');await ui.input('price','');f.disk.failWrite(true);await ui.tap('shopping-save');assert.equal(ui.hosts.get('shopping-field-name').value,'Producto privado');assert.equal(f.doc().items.length,0);f.disk.failWrite(false);await ui.tap('shopping-save');assert.equal(f.doc().items.length,1);
   await ui.tap('shopping-edit-'+f.doc().items[0].id);await ui.render({ready:false,scope:null});assert.equal(ui.hosts.has('shopping-field-name'),false);assert.doesNotMatch(ui.container.textContent,/Producto privado/);
   await f.disk.setUser('other-ui-user');await ui.render({ready:true,scope:{...f.disk.scope,userId:'other-ui-user'}});assert.doesNotMatch(ui.container.textContent,/Producto privado/);assert.equal(f.disk.rows.find(r=>r.ownerUserId==='other-ui-user').note.shopping.items.length,0);
  }finally{if(ui)await ui.close();f.disk.close();}
@@ -361,29 +354,28 @@ for(const viewport of [{width:320,height:568,fontScale:1},{width:390,height:844,
 
 test('COMPRAS UI: a failed readback retries the identical saved item without duplicate prices or a false stale-edit conflict',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Azúcar');await ui.input('store','Tienda A');await ui.input('price','2,50');
+  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Azúcar');await ui.input('price','2,50');
   f.disk.failRead(true);await ui.tap('shopping-save');assert.ok(ui.hosts.has('shopping-field-name'));assert.ok(ui.hosts.has('shopping-error'));assert.equal(f.doc().items.length,1);
   f.disk.failRead(false);await ui.tap('shopping-save');assert.equal(ui.hosts.has('shopping-field-name'),false);assert.equal(f.doc().items.length,1);assert.equal(f.doc().items[0].prices.length,1);
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 
-test('COMPRAS redesign UI: full orbit -> optional brand -> inline weighted price -> picked totals, manual route and store switching preserve one list',async()=>{
+test('COMPRAS V1: catalogue, optional brand, price per product, totals, route and store switching preserve one list',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false});assert.ok(ui.hosts.has('shopping-eight-orbits'));
   for(const id of ['food','drinks','home','other','care','favorites','produce','frozen'])assert.ok(ui.hosts.has('shopping-orbit-'+id));assert.ok(ui.hosts.has('shopping-go-orbit'));
-  await ui.tap('shopping-orbit-produce');await ui.tap('shopping-subgroup-0');await ui.tap('shopping-catalog-produce-Manzanas');await ui.input('quantity','750');await ui.tap('shopping-unit-picker');await ui.tap('shopping-unit-g');await ui.input('brand','Mi marca');await ui.input('format','Granel');await ui.tap('shopping-save');
+  await ui.tap('shopping-orbit-produce');await ui.tap('shopping-subgroup-0');await ui.tap('shopping-catalog-produce-Manzanas');await ui.input('quantity','2');await ui.input('brand','Mi marca');await ui.tap('shopping-save');
   const id=f.doc().items[0].id;assert.equal(f.doc().items[0].brand,'Mi marca');assert.equal(f.doc().items[0].prices.length,0);
   await ui.tap('shopping-store');await ui.run(()=>ui.hosts.get('shopping-store-name').onChangeText('Tienda A'));await ui.tap('shopping-store-save');
   await ui.run(()=>ui.hosts.get('shopping-price-input-'+id).onChangeText('4'));await ui.idle();await ui.run(()=>ui.hosts.get('shopping-price-input-'+id).onEndEditing());await ui.idle();
-  await ui.tap('shopping-price-unit-'+id);await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='kg').onPress());await ui.idle();assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,3);
   await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onFocus());await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onChangeText('1,'));await ui.tap('shopping-bought-'+id);
-  assert.equal(ui.hosts.get('shopping-quantity-'+id).value,'1,');assert.equal(f.model.shoppingEstimate(f.doc(),true).totals.EUR,3);
-  await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onChangeText('500'));await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onEndEditing());await ui.idle();assert.equal(f.model.shoppingEstimate(f.doc(),true).totals.EUR,2);
-  await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onFocus());await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onChangeText('510'));await ui.tap('shopping-plus-'+id);assert.equal(ui.hosts.get('shopping-quantity-'+id).value,'560');await ui.tap('shopping-minus-'+id);assert.equal(ui.hosts.get('shopping-quantity-'+id).value,'510');await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onChangeText('500'));await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onEndEditing());await ui.idle();
+  assert.equal(ui.hosts.get('shopping-quantity-'+id).value,'2');assert.equal(f.model.shoppingEstimate(f.doc(),true).totals.EUR,8);
+  await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onChangeText('2'));await ui.run(()=>ui.hosts.get('shopping-quantity-'+id).onEndEditing());await ui.idle();assert.equal(f.model.shoppingEstimate(f.doc(),true).totals.EUR,8);
+  await ui.tap('shopping-plus-'+id);assert.equal(ui.hosts.get('shopping-quantity-'+id).value,'3');await ui.tap('shopping-minus-'+id);assert.equal(ui.hosts.get('shopping-quantity-'+id).value,'2');
   await ui.run(()=>ui.hosts.get('shopping-details-'+id).onLongPress());await ui.tap('shopping-favorite-'+id);assert.equal(f.doc().items[0].favorite,true);await ui.tap('shopping-location-'+id);await ui.run(()=>ui.hosts.get('shopping-aisle').onChangeText('Fruta junto a entrada'));await ui.tap('shopping-location-save');
   await ui.tap('shopping-ir-'+id);assert.match(ui.container.textContent,/Fruta junto a entrada/);assert.match(ui.container.textContent,/No hay un plano interior/);await ui.tap('shopping-back');
   await ui.tap('shopping-store');await ui.run(()=>ui.hosts.get('shopping-store-name').onChangeText('Tienda B'));await ui.tap('shopping-store-save');assert.equal(f.model.shoppingEstimate(f.doc()).unknown,1);assert.equal(ui.hosts.get('shopping-price-input-'+id).value,'');
-  await ui.tap('shopping-store');await ui.tap('shopping-store-option-Tienda A');assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,2);assert.equal(f.disk.rows.filter(r=>r.note?.shopping).length,1);
+  await ui.tap('shopping-store');await ui.tap('shopping-store-option-Tienda A');assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,8);assert.equal(f.disk.rows.filter(r=>r.note?.shopping).length,1);
   await ui.run(()=>ui.hosts.get('shopping-list-scroll').onScroll({nativeEvent:{contentOffset:{y:280}}}));await ui.render({visible:false});await ui.render({visible:true});assert.equal(ui.hosts.get('shopping-list-scroll').contentOffset.y,280);
  }finally{if(ui)await ui.close();f.disk.close();}
 });
@@ -392,11 +384,11 @@ test('COMPRAS redesign UI: GO runs permitted commands, history snapshots remain 
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f);await ui.tap('shopping-go');
   const order=async text=>{await ui.run(()=>ui.hosts.get('shopping-command').onChangeText(text));await ui.tap('shopping-command-send');};
-  await order('Añade 2 kg de manzanas');assert.equal(f.doc().items.length,1);await order('Cantidad de manzanas a 1,5');assert.equal(f.doc().items[0].quantity,1.5);
+  await order('Añade 2 kg de manzanas');assert.equal(f.doc().items.length,1);await order('Cantidad de manzanas a 1,5');assert.equal(f.doc().items[0].quantity,2);
   await order('Marca cogido manzanas');assert.equal(f.doc().items[0].bought,true);await ui.tap('shopping-list');await ui.tap('shopping-more');await ui.tap('shopping-finish');await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='GUARDAR').onPress());await ui.idle();
   assert.equal(f.doc().purchases.length,1);await ui.tap('shopping-history');assert.match(ui.container.textContent,/manzanas/);await ui.tap('shopping-list');
   await ui.tap('shopping-edit-'+f.doc().items[0].id);await ui.input('brand','Pendiente');await ui.tap('shopping-list');assert.ok(ui.hosts.has('shopping-resume-draft'));await ui.tap('shopping-resume-draft');assert.equal(ui.hosts.get('shopping-field-brand').value,'Pendiente');
-  await f.disk.reopen();assert.equal(f.doc().purchases[0].items[0].quantity,1.5);
+  await f.disk.reopen();assert.equal(f.doc().purchases[0].items[0].quantity,2);
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 
@@ -406,15 +398,15 @@ test('COMPRAS: unrelated operations and explicit legacy incorporation retain pen
   await assert.rejects(f.run({type:'draft',draft:{...f.model.shoppingEditor(),name:'Otro'}}),/otro borrador/);
   const legacy=f.disk.model.buildNoteEntry(f.disk.draft({title:'Compras',content:'Pan'}),f.disk.scope);await f.disk.store.updateGoLog(rows=>({entries:[legacy,...rows],result:null}));
   await f.run({type:'importLegacy',sourceId:legacy.id,names:['Pan'],confirmed:true});assert.equal(f.doc().pendingEditor.quantity,'2,5');
-  await f.run({type:'bought',id:sugar.id,value:true});await f.run({type:'saveItem',draft});assert.equal(f.doc().items.find(i=>i.id===sugar.id).bought,true);assert.equal(f.doc().items.find(i=>i.id===sugar.id).quantity,2.5);assert.equal(f.doc().pendingEditor,undefined);
+  await f.run({type:'bought',id:sugar.id,value:true});await assert.rejects(f.run({type:'saveItem',draft}),/entera/);assert.equal(f.doc().pendingEditor.quantity,'2,5');await f.run({type:'saveItem',draft:{...draft,quantity:'2'}});assert.equal(f.doc().items.find(i=>i.id===sugar.id).bought,true);assert.equal(f.doc().items.find(i=>i.id===sugar.id).quantity,2);assert.equal(f.doc().pendingEditor,undefined);
  }finally{f.disk.close();}
 });
 
-test('COMPRAS: weight/volume prices default to the chosen sale unit and explicit measures still normalize cost',async()=>{
+test('COMPRAS: legacy size-based observations remain stored without calculating a V1 equivalent',async()=>{
  const f=await shoppingFixture();try{
   await f.open();const milk=await f.add('Leche',{quantity:'2',unit:'litros',store:'Tienda',price:'1,50'});assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,3);
-  await f.run({type:'saveItem',draft:{...f.model.shoppingEditor(milk),store:'Tienda',price:'1,50',priceQuantity:'500',priceUnit:'ml'}});assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,6);
-  await f.add('Azúcar',{unit:'paquetes',quantity:'2',packageQuantity:'2',packageUnit:'kg',store:'Tienda',price:'1,50',priceQuantity:'500',priceUnit:'g'});assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,18);
+  await f.run({type:'saveItem',draft:{...f.model.shoppingEditor(milk),store:'Tienda',price:'1,50',priceQuantity:'500',priceUnit:'ml'}});assert.equal(f.model.shoppingEstimate(f.doc()).unknown,1);
+  await f.add('Azúcar',{unit:'paquetes',quantity:'2',packageQuantity:'2',packageUnit:'kg',store:'Tienda',price:'1,50',priceQuantity:'500',priceUnit:'g'});assert.equal(f.model.shoppingEstimate(f.doc()).unknown,2);
  }finally{f.disk.close();}
 });
 
@@ -425,7 +417,7 @@ test('COMPRAS: bottle count, package size and exact decimal steps stay separate 
   const bottle=await f.add('Agua mineral',{unit:'paquetes',packageQuantity:'1,5',packageUnit:'litros',price:'1,25'});
   ui=await shoppingUI(f);
   await ui.tap('shopping-edit-'+bottle.id);
-  assert.match(ui.hosts.get('shopping-field-price').accessibilityLabel,/€\/envase/);
+  assert.match(ui.hosts.get('shopping-field-price').accessibilityLabel,/Precio por producto/);
   await ui.tap('shopping-editor-plus');
   assert.equal(ui.hosts.get('shopping-field-quantity').value,'2');
   await ui.tap('shopping-save');await ui.tap('shopping-plus-'+bottle.id);await ui.tap('shopping-minus-'+bottle.id);
@@ -433,9 +425,8 @@ test('COMPRAS: bottle count, package size and exact decimal steps stay separate 
   const item=f.doc().items.find(i=>i.id===bottle.id);
   assert.equal(item.quantity,2);assert.equal(item.packageQuantity,1.5);assert.equal(item.unit,'paquetes');
   assert.equal(f.model.shoppingSubtotal(item).amount,2.5);
-  assert.equal(f.model.stepShoppingQuantity('0,75','kg',1),'0,85');
-  assert.equal(f.model.stepShoppingQuantity('0.1234','litros',1),'0,2234');
-  assert.equal(f.model.stepShoppingQuantity('1','unidades',-1),undefined);
+  assert.throws(()=>f.model.stepShoppingQuantity('0,75',1),/entera/);
+  assert.equal(f.model.stepShoppingQuantity('1',-1),undefined);
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 
@@ -464,6 +455,36 @@ test('COMPRAS: history stores only picked products and repeats only chosen snaps
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 
+test('COMPRAS V1 preserves fractional records and drafts until the owner explicitly supplies a whole count',async()=>{
+ const f=await shoppingFixture();let ui;
+ try {
+  await f.open();
+  const item=await f.add('Agua mineral',{unit:'litros',price:'1,50'});
+  const legacyItem={...item,quantity:1.3};
+  const pendingEditor={...f.model.shoppingEditor(legacyItem),quantity:'1,3',price:'1,50',priceQuantity:'0,5',priceUnit:'litros'};
+  await f.disk.store.updateGoLog(rows=>({entries:rows.map(row=>({
+   ...row,note:{...row.note,shopping:{...row.note.shopping,items:[legacyItem],pendingEditor}},
+  })),result:null}));
+  ui=await shoppingUI(f);
+  assert.match(ui.container.textContent,/Cantidad antigua/);
+  await ui.tap('shopping-plus-'+item.id);
+  assert.equal(f.doc().items[0].quantity,1.3);
+  await ui.tap('shopping-resume-draft');
+  assert.equal(ui.hosts.get('shopping-field-quantity').value,'1,3');
+  await ui.tap('shopping-save');
+  assert.match(ui.container.textContent,/cantidad entera/);
+  assert.equal(f.doc().pendingEditor.quantity,'1,3');
+  await ui.input('quantity','2,5');
+  assert.equal(ui.hosts.get('shopping-field-quantity').value,'1,3');
+  await ui.input('quantity','2');await ui.tap('shopping-save');
+  await f.disk.reopen();
+  assert.equal(f.doc().items[0].quantity,2);
+  assert.equal(f.doc().items[0].prices.at(-1).packageQuantity,0.5);
+  assert.equal(f.model.shoppingSubtotal(f.doc().items[0]).amount,undefined);
+  assert.equal(f.doc().pendingEditor,undefined);
+ }finally{if(ui)await ui.close();f.disk.close();}
+});
+
 test('COMPRAS: generic note mutation cannot replace the specialized document; malformed and duplicate canonical records are preserved and refused',async()=>{
  const f=await shoppingFixture();try{
   const row=await f.open();await assert.rejects(save(f.disk.api(),{...f.disk.model.noteDraft(row),content:'Texto genérico'},f.disk.scope,f.disk.active),/Abre COMPRAS/);assert.equal(f.doc().items.length,0);
@@ -489,8 +510,8 @@ test('COMPRAS: quantities, default one, exact local categories, stable IDs, dupl
   await f.open();const sugar=await f.add('Azúcar',{quantity:'2',unit:'paquetes'}),salt=await f.add('Sal',{unit:'paquetes'}),bread=await f.add('Pan'),cleaner=await f.add('Detergente');
   assert.equal(sugar.category,'pantry');assert.equal(salt.quantity,1);assert.equal(bread.category,'bakery');assert.equal(cleaner.category,'cleaning');assert.equal(sugar.packageQuantity,undefined);
   assert.equal(f.model.suggestShoppingCategory('Pan con detergente',f.doc()),'other');assert.equal(f.model.suggestShoppingCategory('producto desconocido',f.doc()),'other');
-  const edit={...f.model.shoppingEditor(sugar),quantity:'2,5',store:'Tienda A'};await f.run({type:'saveItem',draft:edit});
-  assert.equal(f.doc().items.length,4);assert.equal(f.doc().items.find(i=>i.id===sugar.id).quantity,2.5);assert.equal(f.doc().items.find(i=>i.id===sugar.id).preferredStore,'Tienda A');
+  const edit={...f.model.shoppingEditor(sugar),quantity:'3',store:'Tienda A'};await f.run({type:'saveItem',draft:edit});
+  assert.equal(f.doc().items.length,4);assert.equal(f.doc().items.find(i=>i.id===sugar.id).quantity,3);assert.equal(f.doc().items.find(i=>i.id===sugar.id).preferredStore,'Tienda A');
   await assert.rejects(f.run({type:'saveItem',draft:{...edit,quantity:'3'}}),/cambió/);
   await assert.rejects(f.add('  AZUCAR  '),/Ya existe/);
   for(const quantity of ['0','-1','NaN','1,2,3','1e4','Infinity'])await assert.rejects(f.add('Inválido',{quantity}));
@@ -534,11 +555,11 @@ test('COMPRAS: honest package and normalized price comparisons, brand/format/cur
   assert.equal(f.model.comparableShoppingPrices([{...sugar.prices[0],brand:'Otra marca'},sugar.prices[1]]).length,0);
   assert.equal(f.model.comparableShoppingPrices([{...sugar.prices[0],format:'líquido'},sugar.prices[1]]).length,0);
   assert.equal(f.model.comparableShoppingPrices([{...sugar.prices[0],currency:'USD'},sugar.prices[1]]).length,0);
-  await f.add('Sal');assert.equal(f.model.shoppingEstimate(f.doc()).unknown,1);assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,3);
-  const priceIds=sugar.prices.map(p=>p.id);await f.run({type:'quantity',id:sugar.id,value:3.5});
+  await f.add('Sal');assert.equal(f.model.shoppingEstimate(f.doc()).unknown,2);
+  const priceIds=sugar.prices.map(p=>p.id);await f.run({type:'quantity',id:sugar.id,value:3});
   sugar=f.doc().items.find(i=>i.id===sugar.id);await f.run({type:'saveItem',draft:{...f.model.shoppingEditor(sugar),store:'Tienda C',price:'1,20'}});
   sugar=f.doc().items.find(i=>i.id===sugar.id);assert.equal(sugar.prices.length,3);assert.equal(f.model.normalizedShoppingPrice(sugar.prices[2]),null);assert.deepEqual(sugar.prices.slice(0,2).map(p=>p.id),priceIds);
-  await f.run({type:'selectPrice',id:sugar.id,priceId:priceIds[0]});assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,8.75);
+  await f.run({type:'selectPrice',id:sugar.id,priceId:priceIds[0]});assert.equal(f.model.shoppingEstimate(f.doc()).unknown,2);
   await f.disk.reopen();assert.equal(f.doc().items.find(i=>i.id===sugar.id).prices.length,3);
  }finally{f.disk.close();}
 });
@@ -547,7 +568,7 @@ test('COMPRAS: partial editor recovery, real disk failure, identical readback re
  const f=await shoppingFixture();try{
   await f.open();const sugar=await f.add('Azúcar'),draft={...f.model.shoppingEditor(sugar),quantity:'1,',store:'Tienda sin terminar',price:'2,'};
   await f.run({type:'draft',draft});await f.disk.reopen();const restored=(await f.open()).note.shopping.pendingEditor;assert.equal(restored.quantity,'1,');assert.equal(restored.price,'2,');
-  await assert.rejects(f.run({type:'saveItem',draft:restored}),/número/);assert.equal(f.doc().items[0].quantity,1);
+  await assert.rejects(f.run({type:'saveItem',draft:restored}),/cantidad entera/);assert.equal(f.doc().items[0].quantity,1);
   f.disk.failWrite(true);const operation={type:'saveItem',operationId:'retry-one-item',draft:{...f.model.shoppingEditor(),name:'Sal'}};await assert.rejects(f.run(operation),/disco/);assert.equal(f.doc().items.length,1);
   f.disk.failWrite(false);await f.run(operation);await f.run(operation);assert.equal(f.doc().items.length,2);
   f.disk.failRead(true);const toggle={type:'bought',id:sugar.id,value:true,operationId:'readback-retry'};await assert.rejects(f.run(toggle),/almacenamiento/);f.disk.failRead(false);await f.run(toggle);assert.equal(f.doc().items[0].bought,true);

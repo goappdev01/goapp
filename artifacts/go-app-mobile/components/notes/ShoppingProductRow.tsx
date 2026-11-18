@@ -1,11 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, PanResponder, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { shoppingDecimal, shoppingId, shoppingName, shoppingPriceFor, shoppingSubtotal, stepShoppingQuantity, SHOPPING_UNITS, type ShoppingDocument, type ShoppingItem, type ShoppingOperation } from "@/lib/shoppingNote";
+import { isShoppingQuantity, SHOPPING_QUANTITY_ERROR, shoppingDecimal, shoppingId, shoppingName, shoppingPresentationPrice, shoppingQuantity, shoppingSubtotal, stepShoppingQuantity, type ShoppingDocument, type ShoppingItem, type ShoppingOperation } from "@/lib/shoppingNote";
 
-const number=(n:number)=>n.toLocaleString("es-ES",{maximumFractionDigits:3});
 const money=(n:number,currency:string)=>n.toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" "+(currency==="EUR"?"€":currency);
-const shortUnit=(unit:string)=>({unidades:"ud",docenas:"doc",paquetes:"paq",litros:"l"} as Record<string,string>)[unit]||unit;
 function productArt(item:ShoppingItem){
   const name=shoppingName(item.name);
   for(const [pattern,art] of [["leche","🥛"],["platano","🍌"],["pan","🥖"],["huevo","🥚"],["salmon","🐟"],["yogur","🥛"],["helado","🍦"],["manzana","🍎"],["tomate","🍅"],["queso","🧀"],["agua","💧"],["zumo","🧃"]] as const)
@@ -17,7 +15,8 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
   item:ShoppingItem;doc:ShoppingDocument;handedness:"left"|"right";disabled:boolean;
   onOperation:(op:Operation)=>Promise<unknown>;onEdit:()=>void;onRoute:()=>void;onLocation:()=>void;onRemove:()=>void;dragHandle?:React.ReactNode;
 }){
-  const price=shoppingPriceFor(item,doc.store),subtotal=shoppingSubtotal(item,doc.store);
+  const price=shoppingPresentationPrice(item,doc.store),subtotal=shoppingSubtotal(item,doc.store);
+  const legacyQuantity=!isShoppingQuantity(item.quantity);
   const narrow=useWindowDimensions().width<390;
   const [quantity,setQuantity]=useState(String(item.quantity).replace(".",",")),[value,setValue]=useState(price?String(price.price):"");
   const [details,setDetails]=useState(false),[error,setError]=useState("");
@@ -35,29 +34,29 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
   const commit=async(kind:"quantity"|"price")=>{
     if(saving.current)return;const raw=kind==="quantity"?quantity:value;
     if(kind==="price"&&!raw.trim()){priceFocused.current=false;return;}
-    try{const n=shoppingDecimal(raw)!;saving.current=true;setError("");
+    try{const n=kind==="quantity"?shoppingQuantity(raw):shoppingDecimal(raw)!;saving.current=true;setError("");
       if(kind==="quantity"&&n!==item.quantity)await onOperation({type:"quantity",id:item.id,value:n});
-      if(kind==="price"&&n!==price?.price)await onOperation({type:"price",id:item.id,value:n,unit:price?.purchaseUnit||item.unit,observationId:shoppingId()});
+      if(kind==="price"&&n!==price?.price)await onOperation({type:"price",id:item.id,value:n,unit:item.unit,observationId:shoppingId()});
       if(kind==="quantity")quantityFocused.current=false;else priceFocused.current=false;
     }catch(e){setError((e as Error).message);}finally{saving.current=false;}
   };
   const icon=(name:React.ComponentProps<typeof Feather>["name"],label:string,onPress:()=>void,id?:string)=><TouchableOpacity testID={id} accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} style={s.icon}><Feather name={name} size={19} color="#39688f"/></TouchableOpacity>;
-  const brand=item.brand??price?.brand,format=item.format??price?.format;
+  const brand=item.brand??price?.brand;
   const changeQuantity=(direction:-1|1)=>{
-    try{const next=stepShoppingQuantity(quantity,item.unit,direction);if(next===undefined)return;
-      setQuantity(next);setError("");apply({type:"quantity",id:item.id,value:shoppingDecimal(next)!});
+    try{const next=stepShoppingQuantity(quantity,direction);if(next===undefined)return;
+      setQuantity(next);setError("");apply({type:"quantity",id:item.id,value:shoppingQuantity(next)});
     }catch(e){setError((e as Error).message);}
   };
   const quantityControl=<View testID={"shopping-quantity-controls-"+item.id} style={[s.quantityControls,narrow&&s.quantityControlsNarrow]}>
     <TouchableOpacity testID={"shopping-minus-"+item.id} accessibilityRole="button" accessibilityLabel={"Restar cantidad de "+item.name} disabled={disabled} hitSlop={{left:7,right:7}} onPress={()=>changeQuantity(-1)} style={s.step}><Feather name="minus" size={18} color="#0876ca"/></TouchableOpacity>
-    <TextInput testID={"shopping-quantity-"+item.id} accessibilityLabel={"Cantidad de "+item.name+" en "+item.unit} value={quantity} keyboardType="decimal-pad" selectTextOnFocus editable={!disabled}
-      onFocus={()=>{quantityFocused.current=true;}} onChangeText={setQuantity} onEndEditing={()=>void commit("quantity")} style={s.quantityInput}/>
+    <TextInput testID={"shopping-quantity-"+item.id} accessibilityLabel={"Cantidad de "+item.name} value={quantity} keyboardType="number-pad" selectTextOnFocus editable={!disabled}
+      onFocus={()=>{quantityFocused.current=true;}} onChangeText={text=>{if(/^\d*$/.test(text)){setQuantity(text);setError("");}else setError(SHOPPING_QUANTITY_ERROR);}} onEndEditing={()=>void commit("quantity")} style={s.quantityInput}/>
     <TouchableOpacity testID={"shopping-plus-"+item.id} accessibilityRole="button" accessibilityLabel={"Sumar cantidad de "+item.name} disabled={disabled} hitSlop={{left:7,right:7}} onPress={()=>changeQuantity(1)} style={s.step}><Feather name="plus" size={18} color="#0876ca"/></TouchableOpacity>
   </View>;
   const routeButton=<TouchableOpacity testID={"shopping-ir-"+item.id} accessibilityRole="button" accessibilityLabel={"Ir a "+item.name} disabled={disabled} onPress={onRoute} style={s.ir}><Feather name="navigation" size={20} color="#125caa"/></TouchableOpacity>;
   const boughtButton=<TouchableOpacity testID={"shopping-bought-"+item.id} accessibilityRole="checkbox" accessibilityLabel={"Cogido: "+item.name} accessibilityState={{checked:item.bought,disabled:disabled||!item.selected}} disabled={disabled||!item.selected}
     onPress={()=>apply({type:"bought",id:item.id,value:!item.bought})} style={[s.check,item.bought&&s.checked]}><Feather name={item.bought?"check":"circle"} size={25} color={item.bought?"#fff":"#71869b"}/></TouchableOpacity>;
-  const subtotalLabel=subtotal.amount===undefined?"Sin precio":money(subtotal.amount,subtotal.currency);
+  const subtotalLabel=legacyQuantity?"Revisar cantidad":subtotal.amount===undefined?"Sin precio":money(subtotal.amount,subtotal.currency);
   const subtotalText=<Text testID={"shopping-subtotal-"+item.id} accessibilityLabel={"Subtotal de "+item.name+": "+subtotalLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.72} style={s.total}>{subtotalLabel}</Text>;
   return <View testID={"shopping-item-"+item.id} {...pan.panHandlers} style={[s.card,item.bought&&s.picked,!item.selected&&{opacity:.65}]}>
     <View testID={"shopping-product-main-row-"+item.id} style={[s.mainRow,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
@@ -67,10 +66,9 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
           <TouchableOpacity testID={"shopping-edit-"+item.id} accessibilityRole="button" accessibilityLabel={"Editar "+item.name} onPress={onEdit}><Text numberOfLines={2} adjustsFontSizeToFit minimumFontScale={.8} style={[s.name,item.bought&&s.boughtName]}>{item.name}</Text></TouchableOpacity>
           <View style={s.priceLine}><TextInput testID={"shopping-price-input-"+item.id} accessibilityLabel={"Precio unitario de "+item.name} placeholder="Sin precio" placeholderTextColor="#647b8e" value={value} keyboardType="decimal-pad" editable={!disabled} selectTextOnFocus
             onFocus={()=>{priceFocused.current=true;}} onChangeText={setValue} onEndEditing={()=>void commit("price")} style={s.priceInput}/>
-            {(price||value.trim())&&<TouchableOpacity testID={"shopping-price-unit-"+item.id} accessibilityRole="button" accessibilityLabel={"Unidad del precio de "+item.name} disabled={disabled} style={s.priceUnit}
-              onPress={()=>Alert.alert("Precio por",item.name,[...SHOPPING_UNITS.map(unit=>({text:unit,onPress:()=>{try{apply({type:"price",id:item.id,value:shoppingDecimal(value)!,unit,observationId:shoppingId()});}catch(e){setError((e as Error).message);}}})),{text:"Cancelar",style:"cancel"}])}><Text numberOfLines={1} style={s.meta}>{price?.currency==="EUR"||!price?"€":price.currency}/{shortUnit(price?.purchaseUnit||item.unit)}</Text></TouchableOpacity>}
+            {(price||value.trim())&&<Text style={s.meta}>{price?.currency==="EUR"||!price?"€":price.currency}</Text>}
           </View>
-          {!!brand&&<Text numberOfLines={1} style={s.brand}>{brand}{format?" · "+format:""}</Text>}
+          {!!brand&&<Text numberOfLines={1} style={s.brand}>{brand}</Text>}
         </View>
       </View>
       {!narrow&&<>{quantityControl}{subtotalText}{routeButton}{boughtButton}</>}
@@ -79,6 +77,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
     {narrow&&<View testID={"shopping-product-narrow-controls-"+item.id} style={[s.narrowControls,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>{quantityControl}{routeButton}{boughtButton}</View>}
     {removeRevealed&&<TouchableOpacity testID={"shopping-remove-"+item.id} accessibilityRole="button" accessibilityLabel={"Retirar "+item.name+" de esta lista"} onPress={()=>{setRemoveRevealed(false);onRemove();}} style={s.removeAction}><Feather name="trash-2" size={18} color="#a12b37"/><Text style={s.removeText}>Retirar de la lista</Text></TouchableOpacity>}
     {!item.selected&&<Text style={s.meta}>Guardado fuera de esta compra</Text>}
+    {legacyQuantity&&<Text style={s.meta}>Cantidad antigua. Escribe un número entero para cambiarla.</Text>}
     {!!error&&<Text accessibilityRole="alert" style={s.error}>{error}</Text>}
     {details&&<View style={{gap:6}}>
       <View style={[s.row,{flexWrap:"wrap"}]}>
@@ -88,9 +87,6 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
         {icon("trash-2","Eliminar producto",()=>Alert.alert("Eliminar producto",`Se eliminarán «${item.name}» y sus precios. Retirarlo de la compra conserva ambos.`,[{text:"Cancelar",style:"cancel"},{text:"ELIMINAR",style:"destructive",onPress:()=>apply({type:"delete",id:item.id,confirmed:true})}]),"shopping-delete-"+item.id)}
         {dragHandle}
       </View>
-      {!!item.notes&&<Text style={s.meta}>{item.notes}</Text>}
-      {price&&<Text style={s.meta}>{price.store} · precio anotado el {price.observedOn}</Text>}
-      {item.prices.map(p=><Text key={p.id} style={s.meta}>{p.observedOn} · {p.store}: {number(p.price)} {p.currency}/{p.purchaseUnit} · {p.brand} {p.format}</Text>)}
     </View>}
   </View>;
 }
@@ -99,7 +95,7 @@ const s=StyleSheet.create({
   picked:{backgroundColor:"#edf9ee",borderColor:"#8bd17e"},mainRow:{flexDirection:"row",alignItems:"center",gap:4,minHeight:62},narrowControls:{alignItems:"center",justifyContent:"flex-end",gap:8},
   productInfo:{flex:1,minWidth:86,flexDirection:"row",alignItems:"center",gap:4},artwork:{width:40,height:48,alignItems:"center",justifyContent:"center",borderRadius:10,backgroundColor:"#eff7ff"},artworkText:{fontSize:27},
   row:{flexDirection:"row",gap:4,alignItems:"center"},name:{fontSize:14,fontWeight:"700",color:"#1c2f49",lineHeight:17},boughtName:{color:"#396044"},brand:{fontSize:10,color:"#587087"},meta:{fontSize:10,color:"#536a80",flexShrink:1},
-  priceLine:{flexDirection:"row",alignItems:"center",minHeight:24},priceInput:{flex:1,minWidth:0,padding:0,fontSize:11,fontWeight:"600",color:"#2d4357",minHeight:27},priceUnit:{minWidth:28,minHeight:28,justifyContent:"center"},
+  priceLine:{flexDirection:"row",alignItems:"center",minHeight:24},priceInput:{flex:1,minWidth:0,padding:0,fontSize:11,fontWeight:"600",color:"#2d4357",minHeight:27},
   quantityControls:{width:94,minHeight:44,flexDirection:"row",alignItems:"center",justifyContent:"space-between",borderRadius:11,borderWidth:1,borderColor:"#d9e3ed",backgroundColor:"#fff"},quantityControlsNarrow:{width:132},step:{width:30,minHeight:44,alignItems:"center",justifyContent:"center"},quantityInput:{flex:1,minWidth:27,padding:0,textAlign:"center",fontSize:14,fontWeight:"700",color:"#1e344c"},
   total:{width:65,fontSize:12,fontWeight:"700",color:"#21364e",textAlign:"center"},ir:{width:44,minHeight:44,borderRadius:10,alignItems:"center",justifyContent:"center",backgroundColor:"#e4f0ff"},
   check:{width:44,minHeight:44,borderRadius:10,borderWidth:1,borderColor:"#a5b5c6",backgroundColor:"#fff",alignItems:"center",justifyContent:"center"},checked:{backgroundColor:"#34b929",borderColor:"#269f1e"},

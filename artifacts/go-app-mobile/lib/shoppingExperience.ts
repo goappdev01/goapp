@@ -1,4 +1,4 @@
-import { shoppingDecimal, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, suggestShoppingCategory, type ShoppingCategory, type ShoppingDocument, type ShoppingItem, type ShoppingOperation, type ShoppingUnit } from "./shoppingNote";
+import { SHOPPING_QUANTITY_ERROR, isShoppingQuantity, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, shoppingQuantity, suggestShoppingCategory, type ShoppingCategory, type ShoppingDocument, type ShoppingItem, type ShoppingOperation, type ShoppingUnit } from "./shoppingNote";
 
 /** The eight visual entrances cover the existing catalog without changing stored categories. */
 export const SHOPPING_ORBITS = [
@@ -74,16 +74,20 @@ export function shoppingCommand(doc:ShoppingDocument,text:string):CommandResult{
   }
   const add=raw.match(/^(?:añade|añadir|agrega)\s+(?:(\d+(?:[.,]\d+)?)\s+(?:(kg|g|litros|ml|docenas|paquetes|unidades)\s+(?:de\s+)?)?)?(.+)$/i);
   if(add){const name=add[3].trim();if(!name)return{message:"Indica el producto que quieres añadir."};if(/\s+(?:y|luego|despues)\s+|[;\n]/i.test(name))return{message:"Da una orden cada vez para identificar el producto."};const matches=doc.items.filter(i=>shoppingName(i.name)===shoppingName(name));
+    if(add[1]&&(!/^\d+$/.test(add[1])||!isShoppingQuantity(Number(add[1]))))return{message:SHOPPING_QUANTITY_ERROR};
     if(matches.length>1)return{message:"Hay varias marcas o presentaciones. Elige la fila que quieres cambiar."};
-    if(matches.length){const i=matches[0];if(add[2]&&add[2]!==i.unit)return{message:"La unidad es distinta. Cambia la presentación desde su fila."};return{message:`${i.name} añadido a la compra.`,operations:[{type:"select",id:i.id,value:true,operationId:shoppingId()},{type:"bought",id:i.id,value:false,operationId:shoppingId()},...(add[1]?[{type:"quantity" as const,id:i.id,value:shoppingDecimal(add[1])!,operationId:shoppingId()}]:[])]};}
+    if(matches.length){const i=matches[0];if(add[2]&&add[2]!==i.unit)return{message:"Esa presentación es distinta. Indica el nombre del producto tal como aparece en la lista."};return{message:`${i.name} añadido a la compra.`,operations:[{type:"select",id:i.id,value:true,operationId:shoppingId()},{type:"bought",id:i.id,value:false,operationId:shoppingId()},...(add[1]?[{type:"quantity" as const,id:i.id,value:shoppingQuantity(add[1]),operationId:shoppingId()}]:[])]};}
     const draft={...shoppingEditor(),name,quantity:add[1]||"1",unit:(add[2] as ShoppingUnit)||"unidades",category:suggestShoppingCategory(name,doc),store:doc.store||""};
     return{message:`${name} añadido.`,operations:[{type:"saveItem",draft,operationId:shoppingId()}]};}
   const quantity=raw.match(/^(?:cambia(?:r)? (?:la )?cantidad (?:de )?|cantidad (?:de )?)(.+?)\s+(?:a|por)\s+(\d+(?:[.,]\d+)?)$/i);
   const picked=raw.match(/^(?:marca(?:r)? (?:como )?cogido|cogido)\s+(.+)$/i),remove=raw.match(/^(?:quita(?:r)?|retira(?:r)?)\s+(.+)$/i);
   const name=quantity?.[1]||picked?.[1]||remove?.[1];
   if(name){const matches=doc.items.filter(i=>shoppingName(i.name)===shoppingName(name));if(matches.length!==1)return{message:matches.length?"Hay varias presentaciones. Selecciona su fila.":"No encuentro ese producto. Indica su nombre tal como aparece en la lista."};const i=matches[0];
-    if(quantity)return{message:`Cantidad de ${i.name} actualizada.`,operations:[{type:"quantity",id:i.id,value:shoppingDecimal(quantity[2])!,operationId:shoppingId()}]};
+    if(quantity){
+      if(!/^\d+$/.test(quantity[2])||!isShoppingQuantity(Number(quantity[2])))return{message:SHOPPING_QUANTITY_ERROR};
+      return{message:`Cantidad de ${i.name} actualizada.`,operations:[{type:"quantity",id:i.id,value:shoppingQuantity(quantity[2]),operationId:shoppingId()}]};
+    }
     if(picked)return{message:`${i.name} marcado como cogido.`,operations:[{type:"bought",id:i.id,value:true,operationId:shoppingId()}]};
     return{message:`${i.name} retirado de esta compra. Se conserva en tus productos.`,operations:[{type:"select",id:i.id,value:false,operationId:shoppingId()}]};}
-  return{message:"Puedes decir «Añade 2 kg de manzanas», «Cantidad de manzanas a 1,5», «Marca cogido manzanas», «Quita manzanas», «Qué queda» o «Ruta». Para varias acciones, da una orden cada vez."};
+  return{message:"Puedes decir «Añade 2 manzanas», «Cantidad de manzanas a 3», «Marca cogido manzanas», «Quita manzanas», «Qué queda» o «Ruta». Para varias acciones, da una orden cada vez."};
 }
