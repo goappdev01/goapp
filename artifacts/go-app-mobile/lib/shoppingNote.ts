@@ -24,7 +24,7 @@ export type ShoppingItem = {
 };
 /** Raw input is deliberately retained: an unfinished decimal is not a committed item. */
 export type ShoppingEditorDraft = {
-  id:string; expectedRevision?:number; name:string; category:ShoppingCategory; quantity:string; unit:ShoppingUnit;
+  id:string; expectedRevision?:number; name:string; category:ShoppingCategory; quantity:string; unit:ShoppingUnit; originalQuantity?:string;
   packageQuantity:string; packageUnit:MeasureUnit; notes:string; usual:boolean;
   store:string; price:string; currency:string; observedOn:string; priceQuantity:string; priceUnit:MeasureUnit;
   brand:string; format:string; observationId:string; variety?:string; favorite?:boolean; pricePerPresentation?:true;
@@ -65,7 +65,7 @@ export function shoppingDecimal(value:string, optional=false):number|undefined {
 export const isShoppingMeasure = (unit:ShoppingUnit):unit is "kg"|"g"|"litros"|"ml" =>
   unit==="kg"||unit==="g"||unit==="litros"||unit==="ml";
 
-export const SHOPPING_QUANTITY_ERROR="Introduce una cantidad entera de 1 a 1.000.000.000.";
+export const SHOPPING_QUANTITY_ERROR="Usa una cantidad entera mayor que cero.";
 export function isShoppingQuantity(value:number):boolean {
   return Number.isSafeInteger(value)&&value>=1&&value<=1e9;
 }
@@ -77,6 +77,13 @@ export function shoppingQuantity(raw:string):number {
 export function stepShoppingQuantity(raw:string,direction:-1|1):string|undefined {
   const next=shoppingQuantity(raw)+direction;
   return isShoppingQuantity(next)?String(next):undefined;
+}
+/** Only called for an explicit step in the editor. The proposal is saved as a draft first. */
+export function stepShoppingDraftQuantity(raw:string,direction:-1|1):string|undefined {
+  const value=Number(raw.replace(",","."));
+  if(/^\d+$/.test(raw)&&isShoppingQuantity(value))return stepShoppingQuantity(raw,direction);
+  const suggested=direction===1?Math.ceil(value):Math.floor(value);
+  return String(isShoppingQuantity(suggested)?suggested:1);
 }
 const categoryValid = (v:unknown):v is ShoppingCategory => SHOPPING_CATEGORIES.some(c=>c[0]===v);
 const unitValid = (v:unknown):v is ShoppingUnit => SHOPPING_UNITS.includes(v as ShoppingUnit);

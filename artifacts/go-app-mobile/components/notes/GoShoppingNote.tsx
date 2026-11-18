@@ -16,7 +16,7 @@ import type { TaskScope } from "@/lib/goTaskReminders";
 import { subscribeGoLog, getGoLogSnapshot } from "@/lib/goLogStore";
 import { noteInScope } from "@/lib/unifiedNotes";
 import { createShoppingList, deleteShoppingList, listShoppingLists, openShoppingNote, oldShoppingNotes, renameShoppingList, restoreShoppingNote, runShoppingOperation, ShoppingNoteDeletedError } from "@/lib/shoppingNoteStore";
-import { isShoppingQuantity, legacyShoppingCandidates, SHOPPING_QUANTITY_ERROR, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, shoppingPresentationPrice, shoppingSubtotal, stepShoppingQuantity, suggestShoppingCategory, visibleShopping,
+import { isShoppingQuantity, legacyShoppingCandidates, SHOPPING_QUANTITY_ERROR, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, shoppingPresentationPrice, shoppingSubtotal, stepShoppingDraftQuantity, suggestShoppingCategory, visibleShopping,
   SHOPPING_CATEGORIES, type ShoppingDocument, type ShoppingEditorDraft, type ShoppingFilter, type ShoppingItem, type ShoppingOperation } from "@/lib/shoppingNote";
 import { SHOPPING_ORBITS, shoppingCommand, shoppingOrbitLayout, shoppingRoute } from "@/lib/shoppingExperience";
 import { shoppingCatalogGroups, shoppingCatalogItem, shoppingCatalogUnit, shoppingFavorites, shoppingNeedsDetails } from "@/lib/shoppingCatalog";
@@ -101,25 +101,31 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
     void operate({type:"draft",draft},false).then(()=>{if(sequence===draftSequence.current)setDraftStatus("Borrador guardado en el teléfono.");})
       .catch(()=>{if(sequence===draftSequence.current)setDraftStatus("Borrador pendiente de guardar. Reintenta antes de salir.");});
   }
-  function change(patch:Partial<ShoppingEditorDraft>){const d=draftRef.current;if(d)writeDraft({...d,...patch});}
+  function change(patch:Partial<ShoppingEditorDraft>){
+    const draft=draftRef.current;if(!draft)return;
+    const originalQuantity=draft.originalQuantity??(patch.quantity!==undefined&&draft.quantity&&!/^\d+$/.test(draft.quantity)?draft.quantity:undefined);
+    writeDraft({...draft,...patch,originalQuantity});
+  }
   function stepDraftQuantity(direction:-1|1){
     const draft=draftRef.current;if(!draft)return;
-    try{const quantity=stepShoppingQuantity(draft.quantity,direction);if(quantity!==undefined)change({quantity});}
-    catch(e){setError((e as Error).message);}
+    const quantity=stepShoppingDraftQuantity(draft.quantity,direction);
+    if(quantity!==undefined)change({quantity});
   }
-  function startEditor(item?:ShoppingItem,name="",category?:ShoppingItem["category"],unit?:ShoppingItem["unit"]){
+  function startEditor(item?:ShoppingItem,name="",category?:ShoppingItem["category"],unit?:ShoppingItem["unit"],suggestedQuantity?:string){
     if(busy||dragging)return;
-    setNext(null);setLegacy(null);setArrange(false);setMore(false);
-    const draft=shoppingEditor(item);
-    writeDraft({...draft,quantity:draft.quantity.replace(".",","),...(!item?{name,category:category||suggestShoppingCategory(name,doc!),unit:unit||"unidades",store:doc?.store||""}:{})});
+    setNext(null);setLegacy(null);setArrange(false);setMore(false);setError("");
+    const pending=doc?.pendingEditor;
+    const draft=item&&pending?.id===item.id&&pending.expectedRevision===item.revision?pending:shoppingEditor(item);
+    const previous=draft.quantity.replace(".",",");
+    writeDraft({...draft,quantity:suggestedQuantity??previous,originalQuantity:draft.originalQuantity??(suggestedQuantity!==undefined&&!/^\d+$/.test(previous)?previous:undefined),...(!item?{name,category:category||suggestShoppingCategory(name,doc!),unit:unit||"unidades",store:doc?.store||""}:{})});
   }
   function back(){
     if(busy||dragging)return;
     if(keyboard.isActive()){void keyboard.dismiss();return;}
     if(utility){voice.abort();setUtility(null);setUtilityItem(null);return;}
-    if(editor&&draftStatus.startsWith("Borrador pendiente")){setError("El borrador aún no está guardado. Reintenta su guardado o descártalo expresamente.");return;}
-    if(editor&&draftStatus==="Guardando borrador…"){setError("Espera a que termine el guardado del borrador antes de volver.");return;}
-    if(editor){setEditor(null);draftRef.current=null;return;}
+    if(editor&&draftStatus.startsWith("Borrador pendiente")){setError("No se guardó el borrador. Reintenta.");return;}
+    if(editor&&draftStatus==="Guardando borrador…")return;
+    if(editor){setEditor(null);draftRef.current=null;setError("");return;}
     if(next){setNext(null);return;}if(legacy){setLegacy(null);return;}if(arrange){setArrange(false);return;}
     if(screen==="add"){if(subgroup){setSubgroup(null);return;}if(orbit){setOrbit(null);return;}setScreen("list");return;}
     onClose();
@@ -173,9 +179,8 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
     }
   }
   const totals=doc?shoppingEstimate(doc):{totals:{},unknown:0},pickedTotals=doc?shoppingEstimate(doc,true):{totals:{},unknown:0},items=doc?.items||[];
-  const legacyCounts=items.filter(item=>item.selected&&!isShoppingQuantity(item.quantity));
-  const pendingTotalLabel=(unknown:number,legacy:number)=>
-    [unknown>legacy?`+ ${unknown-legacy} sin precio`:"",legacy?`${legacy} con cantidad por revisar`:""].filter(Boolean).join(" · ");
+  const withoutPrice=totals.unknown-items.filter(item=>item.selected&&!isShoppingQuantity(item.quantity)).length;
+  const originalQuantity=editor?.originalQuantity??(editor?.quantity&&!/^\d+$/.test(editor.quantity)?editor.quantity:undefined);
   const panel=!!editor||!!next||!!legacy||!!utility,adding=screen==="add",listHome=!!doc&&!panel&&!adding,orbitHome=!!doc&&adding&&!panel&&!orbit;
   const orbital=shoppingOrbitLayout(viewport.width-insets.left-insets.right,viewport.fontScale),route=doc?shoppingRoute(doc):undefined;
   const displayTotal=(v:typeof totals)=>Object.entries(v.totals).map(([currency,value])=>money(value,currency)).join(" + ")||"0,00 €";
@@ -204,11 +209,11 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
       <View style={[s.header,listHome&&s.listHeader,orbitHome&&s.orbitHeader,!!editor&&{display:"none"}]}>
         {listHome?<><View testID="shopping-live-totals" accessibilityLiveRegion="polite" style={s.summaryRow}>
           <TouchableOpacity testID="shopping-store" accessibilityRole="button" accessibilityLabel="Seleccionar supermercado" style={s.storeCard} onPress={()=>{setStoreName(doc.store||"");setUtility("store");}}>
-            <Feather name="shopping-cart" size={22} color="#0879ca"/><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.75} style={s.storeName}>{doc.store||"Supermercado"}</Text><Feather name="chevron-down" size={16} color="#224b7c"/>
+            <Feather name="shopping-cart" size={16} color="#0879ca"/><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.75} style={s.storeName}>{doc.store||"Supermercado"}</Text><Feather name="chevron-down" size={12} color="#224b7c"/>
           </TouchableOpacity>
-          <View style={[s.totalCard,s.currentTotal]}><Text style={s.totalLabel}>Compra</Text><Text testID="shopping-picked-total" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={s.totalAmount}>{displayTotal(pickedTotals)}</Text>{!!pickedTotals.unknown&&<Text style={s.totalUnknown}>{pendingTotalLabel(pickedTotals.unknown,legacyCounts.filter(item=>item.bought).length)}</Text>}</View>
-          <View style={s.totalCard}><Text style={s.totalLabel}>Total prev.</Text><Text testID="shopping-estimate" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={s.totalAmount}>{displayTotal(totals)}</Text>{!!totals.unknown&&<Text style={s.totalUnknown}>{pendingTotalLabel(totals.unknown,legacyCounts.length)}</Text>}</View>
-        </View><TouchableOpacity testID="shopping-active-list" accessibilityRole="button" accessibilityLabel="Gestionar listas de compra" onPress={()=>{setListName("");setUtility("lists");void refreshLists();}} style={s.activeListBar}><Text numberOfLines={1} style={s.activeListName}>{entry?.note?.title||"Compras"}</Text><Text style={s.savedLabel}>Guardado · Mis listas ›</Text></TouchableOpacity></>:orbitHome?<LinearGradient colors={["#ffffff","#e9f4ff","#cfe8ff"]} style={s.orbitBanner}><View style={s.bannerCart}><Feather name="shopping-cart" size={27} color="#fff"/></View><View style={{flex:1}}><Text accessibilityRole="header" style={s.bannerTitle}>GO Compras</Text><Text style={s.bannerSubtitle}>Añadir productos</Text></View><Text style={s.bannerArt}>🧺</Text></LinearGradient>
+          <View style={[s.totalCard,s.currentTotal]}><Text style={s.totalLabel}>Compra</Text><Text testID="shopping-picked-total" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={s.totalAmount}>{displayTotal(pickedTotals)}</Text></View>
+          <View style={s.totalCard}><Text style={s.totalLabel}>Total prev.</Text><Text testID="shopping-estimate" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.7} style={s.totalAmount}>{displayTotal(totals)}</Text>{withoutPrice>0&&<Text numberOfLines={1} adjustsFontSizeToFit style={s.totalUnknown}>{withoutPrice} sin precio</Text>}</View>
+        </View><TouchableOpacity testID="shopping-active-list" accessibilityRole="button" accessibilityLabel="Gestionar listas de compra" onPress={()=>{setListName("");setUtility("lists");void refreshLists();}} style={s.activeListBar}><Text numberOfLines={1} style={s.activeListName}>{entry?.note?.title||"Compras"}</Text><Text style={s.savedLabel}>Mis listas ›</Text></TouchableOpacity></>:orbitHome?<LinearGradient colors={["#ffffff","#e9f4ff","#cfe8ff"]} style={s.orbitBanner}><View style={s.bannerCart}><Feather name="shopping-cart" size={27} color="#fff"/></View><View style={{flex:1}}><Text accessibilityRole="header" style={s.bannerTitle}>GO Compras</Text><Text style={s.bannerSubtitle}>Añadir productos</Text></View><Text style={s.bannerArt}>🧺</Text></LinearGradient>
           :<Text accessibilityRole="header" style={s.heading}>{editor?(editor.expectedRevision?"Editar producto":"Añadir producto"):next?"Habituales":legacy?"Incorporar nota":utility==="assistant"?"GO Compras":utility==="lists"?"Mis listas":utility==="route"?"Ruta de compra":utility==="map"?"Mapa de la tienda":utility==="history"?"Compras realizadas":utility==="store"?"Supermercado":utility==="location"?"Ubicación manual":adding?"Elegir producto":"Compras"}</Text>}
       </View>
       {!ready||!scope?<Text style={s.message}>{accessMessage}</Text>:loading?<Text style={s.message}>Abriendo tu lista personal…</Text>:null}
@@ -217,8 +222,8 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
       <View style={[{flex:1,minHeight:0},(panel||adding)&&{display:"none"}]}>
         <ShoppingReorderSurface enabled={!busy&&!panel&&!adding&&!keyboard.visible&&!loading} onDrop={reorder} onDragging={setDragging} scrollRef={scroll}
           initialOffset={shoppingPositions.get(identity)||0} onOffsetChange={offset=>shoppingPositions.set(identity,offset)}>
-          {doc.pendingEditor&&!editor&&<TouchableOpacity testID="shopping-resume-draft" accessibilityRole="button" onPress={()=>{setEditor(doc.pendingEditor!);draftRef.current=doc.pendingEditor!;}} style={s.draftNotice}><Text style={s.hint}>Continuar producto pendiente: {doc.pendingEditor.name||"sin nombre"}</Text></TouchableOpacity>}
           {more&&<View style={s.details}>
+            {doc.pendingEditor&&!editor&&button("Recuperar borrador",()=>{const draft=doc.pendingEditor;if(draft){setEditor(draft);draftRef.current=draft;setError("");}},"shopping-resume-draft")}
             <View style={s.row}>{([["pending","Pendientes"],["all","Todos"],["bought","Cogidos"]] as const).map(([key,label])=><React.Fragment key={key}>{button(label,()=>{if(!dragging)setFilter(key);},"shopping-filter-"+key,filter===key,dragging)}</React.Fragment>)}</View>
             {button("Habituales",()=>{setNext([]);setArrange(false);},"shopping-next")}
             {button("Compras realizadas",()=>{setRepeat(null);setUtility("history");},"shopping-history")}
@@ -233,7 +238,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
               {showHeader&&<ShoppingReorderRow target={target}><View style={s.row}>
                 <TouchableOpacity testID={"shopping-collapse-"+category} accessibilityRole="button" accessibilityLabel={(collapsed?"Expandir ":"Contraer ")+definition[2]} accessibilityState={{expanded:!collapsed}} disabled={busy||dragging} style={{flex:1,minHeight:44,justifyContent:"center"}} onPress={()=>action({type:"collapse",category,value:!collapsed})}><Text style={s.sectionTitle}>{definition[2]} {collapsed?"+":"−"}</Text></TouchableOpacity>
                 {arrange&&<ShoppingReorderHandle target={target}/>}</View></ShoppingReorderRow>}
-              {!arrange&&visibleItems.map(({item})=>{const target={id:item.id,group:category,kind:"card" as const,label:item.name};return <ShoppingReorderRow key={item.id} target={target}><ShoppingProductRow item={item} doc={doc} handedness={handedness} disabled={busy||dragging} onOperation={op=>operate(op,false)} onEdit={()=>startEditor(item)} onRemove={()=>Alert.alert("Retirar de esta lista",`¿Retirar «${item.name}»? El producto y sus precios se conservan.`,[{text:"Cancelar",style:"cancel"},{text:"RETIRAR",style:"destructive",onPress:()=>action({type:"select",id:item.id,value:false})}])} onRoute={()=>openRoute(item)} onLocation={()=>{setUtilityItem(item);setAisle(doc.locations?.find(l=>l.store===doc.store&&l.itemId===item.id)?.aisle||"");setUtility("location");}} dragHandle={filter==="all"?<ShoppingReorderHandle target={target}/>:undefined}/></ShoppingReorderRow>;})}
+              {!arrange&&visibleItems.map(({item})=>{const target={id:item.id,group:category,kind:"card" as const,label:item.name};return <ShoppingReorderRow key={item.id} target={target}><ShoppingProductRow item={item} doc={doc} handedness={handedness} disabled={busy||dragging} onOperation={op=>operate(op,false)} onEdit={quantity=>startEditor(item,undefined,undefined,undefined,quantity)} onRemove={()=>Alert.alert("Retirar de esta lista",`¿Retirar «${item.name}»? El producto y sus precios se conservan.`,[{text:"Cancelar",style:"cancel"},{text:"RETIRAR",style:"destructive",onPress:()=>action({type:"select",id:item.id,value:false})}])} onRoute={()=>openRoute(item)} onLocation={()=>{setUtilityItem(item);setAisle(doc.locations?.find(l=>l.store===doc.store&&l.itemId===item.id)?.aisle||"");setUtility("location");}} dragHandle={filter==="all"?<ShoppingReorderHandle target={target}/>:undefined}/></ShoppingReorderRow>;})}
             </View>;
           })}
           {!items.length&&<Text style={s.hint}>Tu lista está lista. Pulsa Añadir para elegir productos.</Text>}
@@ -267,7 +272,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
           <View style={{flex:1}}>{field("quantity","Cantidad",{keyboardType:"number-pad",selectTextOnFocus:true,onChangeText:quantity=>{if(/^\d*$/.test(quantity))change({quantity});else setError(SHOPPING_QUANTITY_ERROR);}})}</View>
           <TouchableOpacity testID="shopping-editor-plus" accessibilityRole="button" accessibilityLabel="Sumar cantidad" onPress={()=>stepDraftQuantity(1)} style={s.editorStep}><Feather name="plus" size={20} color="#0876ca"/></TouchableOpacity>
         </View>
-        {editor.quantity&&!/^\d+$/.test(editor.quantity)&&<Text style={s.hint}>Cantidad anterior conservada. Escribe un número entero para guardar.</Text>}
+        {originalQuantity&&<Text style={s.hint}>Antes: {originalQuantity}. Guarda para confirmar.</Text>}
         {field("price","Precio por producto · opcional",{keyboardType:"decimal-pad",value:editor.pricePerPresentation?editor.price:"",placeholder:editorPrice?String(editorPrice.price).replace(".",","):"",onChangeText:price=>change({price,pricePerPresentation:true,store:doc.store||editor.store})})}
         {editor.price&&!editor.pricePerPresentation&&<Text style={s.hint}>Precio anterior del borrador conservado. Escribe un precio nuevo si quieres sustituirlo.</Text>}
         {field("brand","Marca · opcional")}
@@ -339,7 +344,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
         {button("INCORPORAR SELECCIONADOS",()=>Alert.alert("Incorporar productos","¿Incorporar los nombres seleccionados sin modificar la nota antigua? Revisa después sus cantidades y unidades.",[{text:"Cancelar",style:"cancel"},{text:"INCORPORAR",onPress:()=>{void operate({type:"importLegacy",sourceId:legacy.id,names:legacySelected,confirmed:true}).then(()=>setLegacy(null)).catch(()=>{});}}]),"shopping-legacy-confirm",false,!legacySelected.length)}
       </ScrollView>}
       </>}
-      {listHome&&<View testID="shopping-secondary-navigation" style={s.secondaryNav}>
+      {listHome&&!keyboard.visible&&<View testID="shopping-secondary-navigation" style={s.secondaryNav}>
         {navButton("shopping-purchase","Compra","shopping-cart",()=>{setFilter("all");setMore(false);},true)}
         {navButton("shopping-route","Ruta","navigation",()=>openRoute())}
         {navButton("shopping-map","Mapa","map",()=>setUtility("map"))}
@@ -347,10 +352,11 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
         {navButton("shopping-more","Más","grid",()=>setMore(value=>!value),more)}
       </View>}
       {!!doc&&<View testID="shopping-thumb-controls" style={[s.footer,{flexDirection:"row",paddingLeft:handedness==="left"?70:12,paddingRight:handedness==="right"?70:12}]}>
-        <TouchableOpacity testID="shopping-list" accessibilityRole="button" accessibilityLabel="Volver a la lista de compra" disabled={busy||dragging} style={s.listTab}
-          onPress={()=>{if(editor&&(draftStatus==="Guardando borrador…"||draftStatus.startsWith("Borrador pendiente"))){setError("Espera a guardar el borrador antes de volver a la lista.");return;}voice.abort();setEditor(null);draftRef.current=null;setUtility(null);setNext(null);setLegacy(null);if(listHome){setListName("");setUtility("lists");void refreshLists();}else{setScreen("list");setOrbit(null);setSubgroup(null);}}}><Feather name="list" size={21} color="#123e72"/><Text style={s.listTabText}>Lista</Text></TouchableOpacity>
-        {(listHome||orbitHome)&&<TouchableOpacity testID="shopping-go" accessibilityRole="button" accessibilityLabel="Hablar o escribir a GO Compras" disabled={busy||dragging} onPress={go} style={s.go}><Feather name="mic" size={19} color="#fff"/><Text style={s.goText}>GO</Text></TouchableOpacity>}
-        {(listHome||orbitHome)&&<TouchableOpacity testID="shopping-add" accessibilityRole="button" accessibilityLabel="Volver a las categorías de productos" disabled={busy||dragging} style={s.addTab} onPress={()=>{setUtility(null);setNext(null);setLegacy(null);setScreen("add");setOrbit(null);setSubgroup(null);setSearchQuery("");setMore(false);}}><Feather name="plus" size={20} color="#fff"/><Text style={s.addTabText}>Añadir</Text></TouchableOpacity>}
+        {keyboard.visible?<TouchableOpacity testID="shopping-keyboard-done" accessibilityRole="button" accessibilityLabel="Listo, ocultar teclado"
+          onPress={()=>void keyboard.dismiss()} style={s.listTab}><Feather name="check" size={21} color="#123e72"/><Text style={s.listTabText}>Listo</Text></TouchableOpacity>:<TouchableOpacity testID="shopping-list" accessibilityRole="button" accessibilityLabel="Volver a la lista de compra" disabled={busy||dragging} style={s.listTab}
+          onPress={()=>{if(editor&&(draftStatus==="Guardando borrador…"||draftStatus.startsWith("Borrador pendiente"))){setError("Espera a guardar el borrador antes de volver a la lista.");return;}voice.abort();if(editor)setError("");setEditor(null);draftRef.current=null;setUtility(null);setNext(null);setLegacy(null);if(listHome){setListName("");setUtility("lists");void refreshLists();}else{setScreen("list");setOrbit(null);setSubgroup(null);}}}><Feather name="list" size={21} color="#123e72"/><Text style={s.listTabText}>Lista</Text></TouchableOpacity>}
+        {!keyboard.visible&&(listHome||orbitHome)&&<TouchableOpacity testID="shopping-go" accessibilityRole="button" accessibilityLabel="Hablar o escribir a GO Compras" disabled={busy||dragging} onPress={go} style={s.go}><Feather name="mic" size={19} color="#fff"/><Text style={s.goText}>GO</Text></TouchableOpacity>}
+        {!keyboard.visible&&(listHome||orbitHome)&&<TouchableOpacity testID="shopping-add" accessibilityRole="button" accessibilityLabel="Volver a las categorías de productos" disabled={busy||dragging} style={s.addTab} onPress={()=>{setUtility(null);setNext(null);setLegacy(null);setScreen("add");setOrbit(null);setSubgroup(null);setSearchQuery("");setMore(false);}}><Feather name="plus" size={20} color="#fff"/><Text style={s.addTabText}>Añadir</Text></TouchableOpacity>}
         {!!editor&&<TouchableOpacity testID="shopping-save" accessibilityRole="button" accessibilityLabel="Guardar producto" disabled={busy} onPress={()=>void save()} style={s.saveTab}><Text style={s.saveText}>GUARDAR</Text></TouchableOpacity>}
       </View>}
     <GoNavigationFloating screenKey={"shopping-"+(editor?"editor":utility?utility:next?"next":legacy?"legacy":adding?(subgroup?"products-"+orbit+"-"+shoppingName(subgroup):orbit?"groups-"+orbit:"orbit"):"list")} safeArea={false} handedness={handedness} keyboardResponsive keyboardVisible={keyboard.visible} protectedTop={insets.top+48} protectedBottom={Math.max(8,insets.bottom)+4} initialBottom={4}>
@@ -361,13 +367,13 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
   </GoScreenModal>;
 }
 const s=StyleSheet.create({
-  root:{flex:1,backgroundColor:"#f7fbff"},header:{paddingHorizontal:14,paddingTop:8,paddingBottom:8},listHeader:{paddingHorizontal:8,paddingTop:5,paddingBottom:7},orbitHeader:{paddingHorizontal:14,paddingTop:6,paddingBottom:4},heading:{fontSize:20,fontWeight:"700",color:"#172d51"},
-  summaryRow:{flexDirection:"row",alignItems:"stretch",gap:6},activeListBar:{minHeight:32,flexDirection:"row",alignItems:"center",gap:8,paddingHorizontal:5},activeListName:{fontSize:13,fontWeight:"700",color:"#173a68",flex:1},savedLabel:{fontSize:11,color:"#587087"},storeCard:{flex:1.5,minWidth:0,minHeight:69,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:5,paddingHorizontal:7,borderRadius:15,borderWidth:1,borderColor:"#dce5f2",backgroundColor:"#fff",shadowColor:"#284568",shadowOpacity:.1,shadowRadius:5,shadowOffset:{width:0,height:2}},storeName:{flex:1,minWidth:0,fontSize:15,fontWeight:"700",color:"#153861"},
-  totalCard:{flex:1,minWidth:0,minHeight:69,alignItems:"center",justifyContent:"center",paddingHorizontal:3,borderRadius:15,borderWidth:1,borderColor:"#e3e8f0",backgroundColor:"#f8fbff",shadowColor:"#284568",shadowOpacity:.06,shadowRadius:4,shadowOffset:{width:0,height:2}},currentTotal:{backgroundColor:"#ebf6ff",borderColor:"#d9ebfa"},totalLabel:{fontSize:11,fontWeight:"600",color:"#45617c"},totalAmount:{fontSize:17,fontWeight:"800",color:"#17477a",textAlign:"center"},totalUnknown:{fontSize:9,color:"#617486",textAlign:"center"},
+  root:{flex:1,backgroundColor:"#f7fbff"},header:{paddingHorizontal:14,paddingTop:8,paddingBottom:8},listHeader:{paddingHorizontal:8,paddingTop:3,paddingBottom:3},orbitHeader:{paddingHorizontal:14,paddingTop:6,paddingBottom:4},heading:{fontSize:20,fontWeight:"700",color:"#172d51"},
+  summaryRow:{flexDirection:"row",alignItems:"stretch",gap:4,paddingRight:58},activeListBar:{minHeight:32,flexDirection:"row",alignItems:"center",gap:8,paddingHorizontal:5},activeListName:{fontSize:13,fontWeight:"700",color:"#173a68",flex:1},savedLabel:{fontSize:11,color:"#587087"},storeCard:{flex:1.5,minWidth:0,minHeight:48,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:3,paddingHorizontal:5,borderRadius:15,borderWidth:1,borderColor:"#dce5f2",backgroundColor:"#fff",shadowColor:"#284568",shadowOpacity:.1,shadowRadius:5,shadowOffset:{width:0,height:2}},storeName:{flex:1,minWidth:0,fontSize:13,fontWeight:"700",color:"#153861"},
+  totalCard:{flex:1,minWidth:0,minHeight:48,alignItems:"center",justifyContent:"center",paddingHorizontal:3,borderRadius:15,borderWidth:1,borderColor:"#e3e8f0",backgroundColor:"#f8fbff",shadowColor:"#284568",shadowOpacity:.06,shadowRadius:4,shadowOffset:{width:0,height:2}},currentTotal:{backgroundColor:"#ebf6ff",borderColor:"#d9ebfa"},totalLabel:{fontSize:11,fontWeight:"600",color:"#45617c"},totalAmount:{fontSize:15,fontWeight:"800",color:"#17477a",textAlign:"center"},totalUnknown:{fontSize:9,color:"#617486",textAlign:"center"},
   orbitBanner:{minHeight:77,borderRadius:24,borderWidth:1,borderColor:"#dbeafa",paddingHorizontal:16,flexDirection:"row",alignItems:"center",gap:12,shadowColor:"#3474b1",shadowOpacity:.13,shadowRadius:9,shadowOffset:{width:0,height:4}},bannerCart:{width:46,height:46,borderRadius:23,backgroundColor:"#087deb",alignItems:"center",justifyContent:"center",borderWidth:2,borderColor:"#acd8ff"},bannerTitle:{fontSize:25,fontWeight:"800",color:"#133361"},bannerSubtitle:{fontSize:17,fontWeight:"700",color:"#5da0d9"},bannerArt:{fontSize:35},
   hint:{fontSize:12,color:"#647c92",lineHeight:18},text:{fontSize:15,color:"#304c64",flexShrink:1},label:{fontSize:12,fontWeight:"600",color:"#607b91"},sectionTitle:{fontSize:14,fontWeight:"700",color:"#416d95",flexShrink:1},row:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:6},
   button:{minHeight:44,minWidth:44,paddingVertical:9,paddingHorizontal:11,borderWidth:1,borderColor:"#dce7f0",borderRadius:11,backgroundColor:"#fff",justifyContent:"center"},chosen:{backgroundColor:"#277ec1",borderColor:"#277ec1"},buttonText:{fontSize:13,fontWeight:"600",color:"#416b8d",textAlign:"center",flexShrink:1},checked:{backgroundColor:"#e5f0fa"},
-  input:{minHeight:48,borderWidth:1,borderColor:"#cfdeeb",backgroundColor:"#fff",borderRadius:11,fontSize:16,color:"#29465e",padding:11},section:{gap:5},product:{fontSize:16,fontWeight:"600",color:"#2a4a64",flexShrink:1},details:{gap:8,padding:12,backgroundColor:"#f5f9fd",borderWidth:1,borderColor:"#e0eaf3",borderRadius:12},draftNotice:{gap:4,padding:8,backgroundColor:"#f4f9ff",borderRadius:12,borderWidth:1,borderColor:"#dce9f5"},
+  input:{minHeight:48,borderWidth:1,borderColor:"#cfdeeb",backgroundColor:"#fff",borderRadius:11,fontSize:16,color:"#29465e",padding:11},section:{gap:5},product:{fontSize:16,fontWeight:"600",color:"#2a4a64",flexShrink:1},details:{gap:8,padding:12,backgroundColor:"#f5f9fd",borderWidth:1,borderColor:"#e0eaf3",borderRadius:12},
   searchEntrance:{minHeight:44,minWidth:0,flex:1,borderRadius:22,marginBottom:13,paddingHorizontal:10,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:5,backgroundColor:"#fff",borderWidth:1,borderColor:"#dceafa"},searchEntranceText:{fontSize:13,fontWeight:"600",color:"#316b9a"},
   catalogRow:{minHeight:48,flexDirection:"row",alignItems:"center",gap:9,paddingHorizontal:11,paddingVertical:5,backgroundColor:"#fff",borderRadius:12,borderWidth:1,borderColor:"#dce7f2"},catalogIcon:{fontSize:23,width:31,textAlign:"center"},catalogName:{flex:1,minWidth:0,fontSize:15,fontWeight:"600",color:"#17365f"},catalogStatus:{fontSize:12,fontWeight:"700",color:"#1872b5"},catalogGroup:{fontSize:13,fontWeight:"700",color:"#436d91",paddingTop:9,paddingBottom:3},assistantExample:{fontSize:17,fontWeight:"600",color:"#436d91",paddingVertical:8},voiceButton:{minHeight:52,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:10,backgroundColor:"#087def",borderRadius:15},
   editorCard:{gap:10,padding:14,backgroundColor:"#fff",borderRadius:22,borderWidth:1,borderColor:"#dce7f2",shadowColor:"#264e76",shadowOpacity:.12,shadowRadius:10,shadowOffset:{width:0,height:4}},editorStep:{width:44,minHeight:48,borderRadius:11,borderWidth:1,borderColor:"#cfdeeb",backgroundColor:"#fff",alignItems:"center",justifyContent:"center",alignSelf:"flex-end"},
