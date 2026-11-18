@@ -57,7 +57,13 @@ async function shoppingUI(f,{handedness='right',width=390,height=844,fontScale=1
  await render({});
  const tap=async id=>{assert.ok(hosts.has(id),'control exists: '+id);await h.settle(()=>hosts.get(id).onPress());await idle();};
  if(startList&&hosts.has('shopping-list'))await tap('shopping-list');
- const input=async(key,value)=>{if(!hosts.has('shopping-field-'+key))await tap('shopping-editor-options');await h.settle(()=>hosts.get('shopping-field-'+key).onChangeText(value));await idle();};
+ const input=async(key,value)=>{
+  if(!hosts.has('shopping-field-'+key)){
+   if(!hosts.has('shopping-details-product'))await tap('shopping-editor-options');
+   await tap(['store','currency','observedOn','priceQuantity'].includes(key)?'shopping-details-price':'shopping-details-product');
+  }
+  await h.settle(()=>hosts.get('shopping-field-'+key).onChangeText(value));await idle();
+ };
  return {hosts,instances,calls,alerts,frames,geometry,gestures,keyboard,container,render,idle,tap,input,run:h.settle,
   async frame(time){const pending=[...frames.values()];frames.clear();await h.settle(()=>pending.forEach(fn=>fn(time)));},close:()=>h.settle(()=>root.unmount())};
 }
@@ -285,14 +291,16 @@ test('COMPRAS approved main layout: compact totals, five secondary actions and p
  }
 });
 
-test('COMPRAS approved add layout: orbital entrances and short product editor keep advanced fields behind Más opciones',async()=>{
+test('COMPRAS quick editor shows brand and sale basis while advanced groups stay closed',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false});assert.ok(ui.hosts.has('shopping-eight-orbits'));assert.ok(ui.hosts.has('shopping-go-orbit'));assert.ok(ui.hosts.has('shopping-thumb-controls'));
   assert.deepEqual(['food','drinks','home','other','care','favorites','produce','frozen'].map(id=>ui.hosts.get('shopping-orbit-'+id).accessibilityLabel),['Alimentos','Bebidas','Hogar','Otros','Higiene','Favoritos','Frescos','Congelados']);
   await ui.tap('shopping-orbit-food');await ui.tap('shopping-subgroup-0');assert.ok(ui.hosts.has('shopping-catalog-food-Pan común'));await ui.tap('shopping-catalog-food-Pan común');await ui.tap('shopping-edit-'+f.doc().items[0].id);
-  for(const key of ['name','quantity','price'])assert.ok(ui.hosts.has('shopping-field-'+key));
-  assert.equal(ui.hosts.has('shopping-field-brand'),false);assert.ok(ui.hosts.has('shopping-save'));
-  await ui.tap('shopping-editor-options');assert.ok(ui.hosts.has('shopping-field-brand'));assert.ok(ui.hosts.has('shopping-field-format'));
+  for(const key of ['name','quantity','price','brand'])assert.ok(ui.hosts.has('shopping-field-'+key));
+  assert.match(ui.hosts.get('shopping-field-price').accessibilityLabel,/€\/unidad/);assert.ok(ui.hosts.has('shopping-save'));
+  assert.equal(ui.hosts.has('shopping-field-format'),false);
+  await ui.tap('shopping-editor-options');assert.equal(ui.hosts.has('shopping-field-format'),false);
+  await ui.tap('shopping-details-product');assert.ok(ui.hosts.has('shopping-field-format'));assert.equal(ui.hosts.has('shopping-field-store'),false);
   await ui.tap('shopping-save');assert.equal(f.doc().items[0].name,'Pan común');assert.ok(ui.hosts.has('shopping-item-'+f.doc().items[0].id));
   await ui.tap('shopping-add');await ui.tap('shopping-search-open');await ui.run(()=>ui.hosts.get('shopping-product-search').onChangeText('Agua'));await ui.idle();assert.ok(ui.hosts.has('shopping-catalog-drinks-Agua mineral'));
  }finally{if(ui)await ui.close();f.disk.close();}
@@ -402,12 +410,58 @@ test('COMPRAS: unrelated operations and explicit legacy incorporation retain pen
  }finally{f.disk.close();}
 });
 
-test('COMPRAS: weight/volume estimates require measured content and changing package size uses normalized cost',async()=>{
+test('COMPRAS: weight/volume prices default to the chosen sale unit and explicit measures still normalize cost',async()=>{
  const f=await shoppingFixture();try{
-  await f.open();let milk=await f.add('Leche',{quantity:'2',unit:'litros',store:'Tienda',price:'1,50'});assert.equal(f.model.shoppingEstimate(f.doc()).unknown,1);
+  await f.open();const milk=await f.add('Leche',{quantity:'2',unit:'litros',store:'Tienda',price:'1,50'});assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,3);
   await f.run({type:'saveItem',draft:{...f.model.shoppingEditor(milk),store:'Tienda',price:'1,50',priceQuantity:'500',priceUnit:'ml'}});assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,6);
   await f.add('Azúcar',{unit:'paquetes',quantity:'2',packageQuantity:'2',packageUnit:'kg',store:'Tienda',price:'1,50',priceQuantity:'500',priceUnit:'g'});assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,18);
  }finally{f.disk.close();}
+});
+
+test('COMPRAS: bottle count, package size and exact decimal steps stay separate in the editor and list',async()=>{
+ const f=await shoppingFixture();let ui;
+ try{
+  await f.open();
+  const bottle=await f.add('Agua mineral',{unit:'paquetes',packageQuantity:'1,5',packageUnit:'litros',price:'1,25'});
+  ui=await shoppingUI(f);
+  await ui.tap('shopping-edit-'+bottle.id);
+  assert.match(ui.hosts.get('shopping-field-price').accessibilityLabel,/€\/envase/);
+  await ui.tap('shopping-editor-plus');
+  assert.equal(ui.hosts.get('shopping-field-quantity').value,'2');
+  await ui.tap('shopping-save');await ui.tap('shopping-plus-'+bottle.id);await ui.tap('shopping-minus-'+bottle.id);
+  await f.disk.reopen();
+  const item=f.doc().items.find(i=>i.id===bottle.id);
+  assert.equal(item.quantity,2);assert.equal(item.packageQuantity,1.5);assert.equal(item.unit,'paquetes');
+  assert.equal(f.model.shoppingSubtotal(item).amount,2.5);
+  assert.equal(f.model.stepShoppingQuantity('0,75','kg',1),'0,85');
+  assert.equal(f.model.stepShoppingQuantity('0.1234','litros',1),'0,2234');
+  assert.equal(f.model.stepShoppingQuantity('1','unidades',-1),undefined);
+ }finally{if(ui)await ui.close();f.disk.close();}
+});
+
+test('COMPRAS: history stores only picked products and repeats only chosen snapshots without duplicates',async()=>{
+ const f=await shoppingFixture();let ui;
+ try{
+  await f.open();
+  const a=await f.add('Agua',{price:'1,25'}),b=await f.add('Pan',{price:'2'}),pending=await f.add('Manzanas');
+  await f.run({type:'bought',id:a.id,value:true});await f.run({type:'bought',id:b.id,value:true});
+  ui=await shoppingUI(f);await ui.tap('shopping-more');await ui.tap('shopping-finish');
+  assert.match(ui.alerts.at(-1).message,/Los pendientes seguirán en la lista/);
+  await ui.run(()=>ui.alerts.at(-1).buttons.find(button=>button.text==='GUARDAR').onPress());await ui.idle();
+  const purchase=f.doc().purchases[0],historical=JSON.stringify(purchase);
+  assert.deepEqual(Array.from(purchase.items,i=>i.id),[a.id,b.id]);
+  assert.equal(f.doc().items.find(i=>i.id===pending.id).selected,true);
+  assert.equal(purchase.items[0].prices[0].price,1.25);
+  await ui.run(()=>f.run({type:'delete',id:a.id,confirmed:true}));await ui.idle();
+  await ui.tap('shopping-history');await ui.tap('shopping-history-repeat-'+purchase.id);
+  await ui.tap('shopping-history-select-'+a.id);await ui.tap('shopping-history-add');
+  await ui.run(()=>f.run({type:'repeatPurchase',purchaseId:purchase.id,ids:[a.id,a.id]}));
+  await f.disk.reopen();
+  assert.deepEqual(Array.from(f.doc().items.filter(i=>i.selected).map(i=>i.id)).sort(),[a.id,pending.id].sort());
+  assert.equal(f.doc().items.find(i=>i.id===a.id).bought,false);
+  assert.equal(f.doc().items.filter(i=>i.id===a.id).length,1);
+  assert.equal(JSON.stringify(f.doc().purchases[0]),historical);
+ }finally{if(ui)await ui.close();f.disk.close();}
 });
 
 test('COMPRAS: generic note mutation cannot replace the specialized document; malformed and duplicate canonical records are preserved and refused',async()=>{

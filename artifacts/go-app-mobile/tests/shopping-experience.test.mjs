@@ -83,6 +83,7 @@ test('catalog preserves owner group order, search and distinct fresh/frozen prod
  const f=fixture(),fresh=f.add('Salmón',{category:'fish'}),frozen=f.add('Salmón',{category:'frozen'});
  assert.notEqual(fresh.id,frozen.id);assert.equal(catalog.shoppingCatalogItem(f.doc,'fish','Salmón').id,fresh.id);assert.equal(catalog.shoppingCatalogItem(f.doc,'frozen','Salmón').id,frozen.id);
  assert.equal(catalog.shoppingCatalogUnit('fish','Salmón'),'kg');assert.equal(catalog.shoppingNeedsDetails('fish'),true);
+ assert.equal(catalog.shoppingCatalogUnit('drinks','Agua mineral'),'unidades');
  assert.equal(catalog.shoppingNeedsDetails('drinks'),false);
 });
 

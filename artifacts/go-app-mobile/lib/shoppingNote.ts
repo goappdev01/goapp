@@ -42,6 +42,7 @@ export type ShoppingOperation = { operationId:string } & (
   {type:"store"; value:string} | {type:"favorite"; id:string; value:boolean} |
   {type:"price"; id:string; value:number; unit:ShoppingUnit; observationId:string} |
   {type:"location"; id:string; aisle:string} | {type:"finish"; confirmed:true} |
+  {type:"repeatPurchase"; purchaseId:string; ids:string[]} |
   {type:"category"; id:string; category:ShoppingCategory} |
   {type:"collapse"; category:ShoppingCategory; value:boolean} |
   {type:"reorderItems"; category:ShoppingCategory; ids:string[]} |
@@ -59,6 +60,24 @@ export function shoppingDecimal(value:string, optional=false):number|undefined {
   const n=Number(s.replace(",","."));
   if(!Number.isFinite(n)||n<=0||n>1e9)throw Error("La cantidad o el precio debe ser mayor que 0 y menor o igual a 1.000.000.000.");
   return n;
+}
+export const isShoppingMeasure = (unit:ShoppingUnit):unit is "kg"|"g"|"litros"|"ml" =>
+  unit==="kg"||unit==="g"||unit==="litros"||unit==="ml";
+
+export function stepShoppingQuantity(raw:string,unit:ShoppingUnit,direction:-1|1):string|undefined {
+  const value=shoppingDecimal(raw)!;
+  if(!isShoppingMeasure(unit)){
+    const next=direction===1?Math.floor(value)+1:Math.ceil(value)-1;
+    return next>0&&next<=1e9?String(next):undefined;
+  }
+  const [whole,fraction=""]=raw.trim().replace(",",".").split(".");
+  const precision=Math.max(unit==="kg"||unit==="litros"?1:0,fraction.length);
+  const scale=10n**BigInt(precision);
+  const delta=unit==="kg"||unit==="litros"?scale/10n:50n*scale;
+  const next=BigInt(whole+fraction.padEnd(precision,"0"))+BigInt(direction)*delta;
+  if(next<=0n||next>1000000000n*scale)return undefined;
+  const remainder=(next%scale).toString().padStart(precision,"0").replace(/0+$/,"");
+  return (next/scale).toString()+(remainder?","+remainder:"");
 }
 const categoryValid = (v:unknown):v is ShoppingCategory => SHOPPING_CATEGORIES.some(c=>c[0]===v);
 const unitValid = (v:unknown):v is ShoppingUnit => SHOPPING_UNITS.includes(v as ShoppingUnit);
@@ -138,9 +157,11 @@ function editorItem(d:ShoppingEditorDraft,doc:ShoppingDocument):ShoppingItem {
     const priceStore=d.store.trim()||"Sin supermercado";
     if(!/^[A-Z]{3}$/.test(d.currency.trim().toUpperCase()))throw Error("Usa una moneda de tres letras, por ejemplo EUR.");
     if(!shoppingDate(d.observedOn))throw Error("La fecha del precio debe ser AAAA-MM-DD y existir.");
-    const size=shoppingDecimal(d.priceQuantity,true);
+    const explicitSize=shoppingDecimal(d.priceQuantity,true);
+    const priceSize=explicitSize??(isShoppingMeasure(d.unit)?1:size);
+    const priceUnit=explicitSize!==undefined?d.priceUnit:isShoppingMeasure(d.unit)?d.unit:d.packageUnit;
     prices.push({id:d.observationId,store:priceStore,price:shoppingDecimal(d.price)!,currency:d.currency.trim().toUpperCase(),observedOn:d.observedOn,
-      purchaseUnit:d.unit,packageQuantity:size,packageUnit:size===undefined?undefined:d.priceUnit,brand:d.brand.trim(),format:d.format.trim(),variety:d.variety?.trim()||"",product:name});
+      purchaseUnit:d.unit,packageQuantity:priceSize,packageUnit:priceSize===undefined?undefined:priceUnit,brand:d.brand.trim(),format:d.format.trim(),variety:d.variety?.trim()||"",product:name});
     selectedPriceId=d.observationId;
   }
   return {...old,id:d.id,revision:(old?.revision||0)+1,name,category:d.category,quantity,unit:d.unit,
@@ -180,6 +201,27 @@ export function applyShoppingOperation(current:ShoppingDocument,op:ShoppingOpera
     }
     case "location": {item(op.id);if(!doc.store)throw Error("Selecciona un supermercado.");if(typeof op.aisle!=="string")throw Error("Ubicación inválida.");doc.locations=(doc.locations||[]).filter(l=>l.store!==doc.store||l.itemId!==op.id);if(op.aisle.trim())doc.locations.push({store:doc.store,itemId:op.id,aisle:op.aisle.trim()});break;}
     case "finish": {if(op.confirmed!==true)throw Error("Confirma el cierre de la compra.");const picked=doc.items.filter(i=>i.selected&&i.bought);if(!picked.length)throw Error("No hay productos cogidos para guardar.");doc.purchases=[...(doc.purchases||[]),{id:op.operationId,date:localShoppingDate(),store:doc.store||"",items:JSON.parse(JSON.stringify(picked))}];for(const i of picked)i.selected=false;break;}
+    case "repeatPurchase": {
+      const purchase=doc.purchases?.find(row=>row.id===op.purchaseId);
+      const ids=new Set(op.ids);
+      const selected=purchase?.items.filter(row=>ids.has(row.id))??[];
+      if(!ids.size||selected.length!==ids.size)throw Error("Selecciona productos de esta compra.");
+      for(const snapshot of selected){
+        const current=doc.items.find(row=>row.id===snapshot.id)??doc.items.find(row=>
+          row.category===snapshot.category&&row.unit===snapshot.unit&&shoppingName(row.name)===shoppingName(snapshot.name)
+          && shoppingName(row.brand??row.prices.at(-1)?.brand??"")===shoppingName(snapshot.brand??snapshot.prices.at(-1)?.brand??"")
+          && shoppingName(row.format??row.prices.at(-1)?.format??"")===shoppingName(snapshot.format??snapshot.prices.at(-1)?.format??"")
+          && shoppingName(row.variety??"")===shoppingName(snapshot.variety??"")
+          && row.packageQuantity===snapshot.packageQuantity&&row.packageUnit===snapshot.packageUnit);
+        if(current){current.selected=true;current.bought=false;continue;}
+        const restored:ShoppingItem=JSON.parse(JSON.stringify(snapshot));
+        restored.revision++;
+        restored.selected=true;restored.bought=false;
+        restored.order=Math.max(-1,...doc.items.filter(row=>row.category===restored.category).map(row=>row.order))+1;
+        doc.items.push(restored);
+      }
+      break;
+    }
     case "delete": if(op.confirmed!==true)throw Error("Confirma la eliminación.");item(op.id);doc.items=doc.items.filter(i=>i.id!==op.id);break;
     case "category": {if(!categoryValid(op.category))throw Error("Categoría inválida.");const i=item(op.id);i.category=op.category;i.order=Math.max(-1,...doc.items.filter(other=>other.id!==i.id&&other.category===op.category).map(i=>i.order))+1;i.revision++;break;}
     case "collapse": if(!categoryValid(op.category)||typeof op.value!=="boolean")throw Error("Categoría inválida.");doc.collapsed=doc.collapsed.filter(c=>c!==op.category);if(op.value)doc.collapsed.push(op.category);break;
@@ -223,7 +265,7 @@ export function shoppingSubtotal(i:ShoppingItem,store?:string) {
   if(p){const n=normalizedShoppingPrice(p),counted=i.unit==="paquetes"||i.unit==="unidades"||i.unit==="docenas";
     if(i.packageQuantity===undefined&&p.packageQuantity===undefined&&(i.unit==="unidades"||i.unit==="docenas")&&(p.purchaseUnit==="unidades"||p.purchaseUnit==="docenas"))
       amount=i.quantity*(i.unit==="docenas"?12:1)*p.price/(p.purchaseUnit==="docenas"?12:1);
-    else if(counted&&i.unit===p.purchaseUnit&&i.packageQuantity===undefined)amount=i.quantity*p.price;
+    else if(counted&&i.unit===p.purchaseUnit&&(!n||i.packageQuantity===undefined))amount=i.quantity*p.price;
     else if(n){const size=counted?i.packageQuantity:i.quantity,unit=counted?i.packageUnit:i.unit;
       const base=unit==="kg"||unit==="g"?"kg":unit==="litros"||unit==="ml"?"l":unit==="unidades"||unit==="docenas"?"unidad":undefined;
       if(size!==undefined&&base===n.unit)amount=size*(counted?i.quantity:1)*(unit==="g"||unit==="ml"?0.001:unit==="docenas"?12:1)*n.value;}

@@ -43,9 +43,8 @@ export function shoppingCatalogGroups(orbit:string,query=""){
 export function shoppingCatalogItem(doc:ShoppingDocument,category:ShoppingCategory,name:string){
   return doc.items.find(item=>item.category===category&&shoppingName(item.name)===shoppingName(name));
 }
-export function shoppingCatalogUnit(category:ShoppingCategory,name:string):ShoppingUnit{
+export function shoppingCatalogUnit(category:ShoppingCategory,_name:string):ShoppingUnit{
   if(category==="produce"||category==="meat"||category==="fish")return "kg";
-  if(category==="drinks"&&/^(agua|zumo|bebida|refresco|tónica|batidos)/i.test(name))return "litros";
   return "unidades";
 }
 export function shoppingNeedsDetails(category:ShoppingCategory){return category==="produce"||category==="meat"||category==="fish";}

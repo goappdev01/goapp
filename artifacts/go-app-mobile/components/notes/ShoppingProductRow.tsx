@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, PanResponder, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { shoppingDecimal, shoppingId, shoppingName, shoppingPriceFor, shoppingSubtotal, SHOPPING_UNITS, type ShoppingDocument, type ShoppingItem, type ShoppingOperation } from "@/lib/shoppingNote";
+import { shoppingDecimal, shoppingId, shoppingName, shoppingPriceFor, shoppingSubtotal, stepShoppingQuantity, SHOPPING_UNITS, type ShoppingDocument, type ShoppingItem, type ShoppingOperation } from "@/lib/shoppingNote";
 
 const number=(n:number)=>n.toLocaleString("es-ES",{maximumFractionDigits:3});
 const money=(n:number,currency:string)=>n.toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" "+(currency==="EUR"?"€":currency);
@@ -19,7 +19,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
 }){
   const price=shoppingPriceFor(item,doc.store),subtotal=shoppingSubtotal(item,doc.store);
   const narrow=useWindowDimensions().width<390;
-  const [quantity,setQuantity]=useState(String(item.quantity)),[value,setValue]=useState(price?String(price.price):"");
+  const [quantity,setQuantity]=useState(String(item.quantity).replace(".",",")),[value,setValue]=useState(price?String(price.price):"");
   const [details,setDetails]=useState(false),[error,setError]=useState("");
   const [removeRevealed,setRemoveRevealed]=useState(false);
   const swipe=useRef({disabled,item,onOperation,onRemove});swipe.current={disabled,item,onOperation,onRemove};
@@ -28,7 +28,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
       if(gesture.dx<0)setRemoveRevealed(true);
       else void swipe.current.onOperation({type:"bought",id:swipe.current.item.id,value:!swipe.current.item.bought}).catch(e=>setError((e as Error).message));}}),[]);
   const quantityFocused=useRef(false),priceFocused=useRef(false),saving=useRef(false);
-  useEffect(()=>{if(!quantityFocused.current)setQuantity(String(item.quantity));},[item.quantity]);
+  useEffect(()=>{if(!quantityFocused.current)setQuantity(String(item.quantity).replace(".",","));},[item.quantity]);
   useEffect(()=>{if(!priceFocused.current)setValue(price?String(price.price):"");},[price?.id,doc.store]);
   useEffect(()=>{priceFocused.current=false;setValue(price?String(price.price):"");},[doc.store]);
   const apply=(op:Operation)=>{void onOperation(op).catch(e=>setError((e as Error).message));};
@@ -43,10 +43,9 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
   };
   const icon=(name:React.ComponentProps<typeof Feather>["name"],label:string,onPress:()=>void,id?:string)=><TouchableOpacity testID={id} accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} style={s.icon}><Feather name={name} size={19} color="#39688f"/></TouchableOpacity>;
   const brand=item.brand??price?.brand,format=item.format??price?.format;
-  const step=item.unit==="kg"||item.unit==="litros" ? .1 : item.unit==="g"||item.unit==="ml" ? 50 : 1;
-  const changeQuantity=(direction:number)=>{
-    try{const next=Number((shoppingDecimal(quantity)!+direction*step).toFixed(3));if(next<=0)return;
-      setQuantity(String(next));setError("");apply({type:"quantity",id:item.id,value:next});
+  const changeQuantity=(direction:-1|1)=>{
+    try{const next=stepShoppingQuantity(quantity,item.unit,direction);if(next===undefined)return;
+      setQuantity(next);setError("");apply({type:"quantity",id:item.id,value:shoppingDecimal(next)!});
     }catch(e){setError((e as Error).message);}
   };
   const quantityControl=<View testID={"shopping-quantity-controls-"+item.id} style={[s.quantityControls,narrow&&s.quantityControlsNarrow]}>

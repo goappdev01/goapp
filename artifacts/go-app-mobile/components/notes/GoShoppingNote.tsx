@@ -16,7 +16,7 @@ import type { TaskScope } from "@/lib/goTaskReminders";
 import { subscribeGoLog, getGoLogSnapshot } from "@/lib/goLogStore";
 import { noteInScope } from "@/lib/unifiedNotes";
 import { createShoppingList, deleteShoppingList, listShoppingLists, openShoppingNote, oldShoppingNotes, renameShoppingList, restoreShoppingNote, runShoppingOperation, ShoppingNoteDeletedError } from "@/lib/shoppingNoteStore";
-import { comparableShoppingPrices, legacyShoppingCandidates, normalizedShoppingPrice, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, shoppingSubtotal, suggestShoppingCategory, visibleShopping,
+import { comparableShoppingPrices, isShoppingMeasure, legacyShoppingCandidates, normalizedShoppingPrice, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, shoppingSubtotal, stepShoppingQuantity, suggestShoppingCategory, visibleShopping,
   SHOPPING_CATEGORIES, SHOPPING_UNITS, type MeasureUnit, type ShoppingDocument, type ShoppingEditorDraft, type ShoppingFilter, type ShoppingItem, type ShoppingOperation } from "@/lib/shoppingNote";
 import { SHOPPING_ORBITS, shoppingCommand, shoppingOrbitLayout, shoppingRoute } from "@/lib/shoppingExperience";
 import { shoppingCatalogGroups, shoppingCatalogItem, shoppingCatalogUnit, shoppingFavorites, shoppingNeedsDetails } from "@/lib/shoppingCatalog";
@@ -28,6 +28,13 @@ type Props={visible:boolean;scope:TaskScope|null;ready:boolean;handedness:"left"
 type InputOperation=ShoppingOperation extends infer O?O extends ShoppingOperation?Omit<O,"operationId">:never:never;
 const decimal=(n:number)=>n.toLocaleString("es-ES",{maximumFractionDigits:3});
 const money=(n:number,currency:string)=>n.toLocaleString("es-ES",{minimumFractionDigits:2,maximumFractionDigits:2})+" "+(currency==="EUR"?"€":currency);
+const priceBasis=(draft:ShoppingEditorDraft)=>{
+  if(draft.priceQuantity.trim())return `${draft.priceQuantity.replace(".",",")} ${draft.priceUnit}`;
+  if(draft.unit==="unidades")return "unidad";
+  if(draft.unit==="paquetes")return "envase";
+  if(draft.unit==="litros")return "litro";
+  return draft.unit==="docenas"?"docena":draft.unit;
+};
 // Only view position is cached; product data always comes from the verified canonical store.
 const shoppingPositions=new Map<string,number>();
 export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClose,closeRequested,initialListId}:Props){
@@ -50,6 +57,8 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
   const [entry,setEntry]=useState<GoEntry|null>(null),[lists,setLists]=useState<GoEntry[]>([]),[listName,setListName]=useState(""),[error,setError]=useState(""),[restoreId,setRestoreId]=useState<string|null>(null),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false);
   const [filter,setFilter]=useState<ShoppingFilter>("all"),[arrange,setArrange]=useState(false),[dragging,setDragging]=useState(false);
   const [editor,setEditor]=useState<ShoppingEditorDraft|null>(null),[draftStatus,setDraftStatus]=useState(""),[next,setNext]=useState<string[]|null>(null);
+  const [editorDetails,setEditorDetails]=useState<"product"|"price"|"history"|null>(null);
+  const [repeat,setRepeat]=useState<{purchaseId:string;ids:string[]}|null>(null);
   const [oldNotes,setOldNotes]=useState<GoEntry[]>([]),[legacy,setLegacy]=useState<GoEntry|null>(null),[legacySelected,setLegacySelected]=useState<string[]>([]);
   const [retry,setRetry]=useState(0),scroll=useRef<React.ElementRef<typeof ScrollView>>(null),editScroll=useRef<React.ElementRef<typeof ScrollView>>(null);
   const [screen,setScreen]=useState<"list"|"add">("add"),[orbit,setOrbit]=useState<string|null>(null),[subgroup,setSubgroup]=useState<string|null>(null),[more,setMore]=useState(false),[options,setOptions]=useState(false);
@@ -64,7 +73,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
   const active=(expected:string,epoch:number)=>mounted.current&&latest.current.visible&&latest.current.ready&&latest.current.identity===expected&&generation.current===epoch;
   useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;};},[]);
   useEffect(()=>{
-    const epoch=++generation.current;setEntry(null);setLists([]);setEditor(null);setNext(null);setLegacy(null);setOldNotes([]);setError("");setRestoreId(null);setFilter("all");setArrange(false);setBusy(false);setScreen("add");setOrbit(null);setSubgroup(null);setSearchQuery("");setUtility(null);setAnswer("");setCommand("");lock.current=false;retries.current.clear();draftSequence.current++;
+    const epoch=++generation.current;setEntry(null);setLists([]);setEditor(null);setEditorDetails(null);setRepeat(null);setNext(null);setLegacy(null);setOldNotes([]);setError("");setRestoreId(null);setFilter("all");setArrange(false);setBusy(false);setScreen("add");setOrbit(null);setSubgroup(null);setSearchQuery("");setUtility(null);setAnswer("");setCommand("");lock.current=false;retries.current.clear();draftSequence.current++;
     if(!visible||!ready||!scope)return;
     const expected=identity,valid=()=>active(expected,epoch);setLoading(true);
     void openShoppingNote(scope,valid,initialListId).then(async row=>{
@@ -99,15 +108,16 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
       .catch(()=>{if(sequence===draftSequence.current)setDraftStatus("Borrador pendiente de guardar. Reintenta antes de salir.");});
   }
   function change(patch:Partial<ShoppingEditorDraft>){const d=draftRef.current;if(d)writeDraft({...d,...patch});}
-  function stepDraftQuantity(direction:number){
+  function stepDraftQuantity(direction:-1|1){
     const draft=draftRef.current;if(!draft)return;
-    const step=(draft.unit==="kg"||draft.unit==="litros") ? 0.1 : (draft.unit==="g"||draft.unit==="ml") ? 50 : 1;
-    const current=Number(draft.quantity.replace(",","."));if(!Number.isFinite(current))return;
-    const next=Number((current+direction*step).toFixed(3));if(next>0)change({quantity:String(next)});
+    try{const quantity=stepShoppingQuantity(draft.quantity,draft.unit,direction);if(quantity!==undefined)change({quantity});}
+    catch(e){setError((e as Error).message);}
   }
   function startEditor(item?:ShoppingItem,name="",category?:ShoppingItem["category"],unit?:ShoppingItem["unit"]){
     if(busy||dragging)return;
-    setNext(null);setLegacy(null);setArrange(false);setMore(false);setOptions(false);writeDraft({...shoppingEditor(item),...(!item?{name,category:category||suggestShoppingCategory(name,doc!),unit:unit||"unidades",store:doc?.store||""}:{})});
+    setNext(null);setLegacy(null);setArrange(false);setMore(false);setOptions(false);setEditorDetails(null);
+    const draft=shoppingEditor(item);
+    writeDraft({...draft,quantity:draft.quantity.replace(".",","),...(!item?{name,category:category||suggestShoppingCategory(name,doc!),unit:unit||"unidades",store:doc?.store||""}:{})});
   }
   function back(){
     if(busy||dragging)return;
@@ -214,8 +224,8 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
           {more&&<View style={s.details}>
             <View style={s.row}>{([["pending","Pendientes"],["all","Todos"],["bought","Cogidos"]] as const).map(([key,label])=><React.Fragment key={key}>{button(label,()=>{if(!dragging)setFilter(key);},"shopping-filter-"+key,filter===key,dragging)}</React.Fragment>)}</View>
             {button("Habituales",()=>{setNext([]);setArrange(false);},"shopping-next")}
-            {button("Compras realizadas",()=>setUtility("history"),"shopping-history")}
-            {button("Archivar cogidos en historial",()=>Alert.alert("Archivar compra","Los productos cogidos pasarán al historial. Sus filas y precios se conservarán.",[{text:"Cancelar",style:"cancel"},{text:"GUARDAR",onPress:()=>action({type:"finish",confirmed:true})}]),"shopping-finish",false,!items.some(i=>i.selected&&i.bought))}
+            {button("Compras realizadas",()=>{setRepeat(null);setUtility("history");},"shopping-history")}
+            {button("Guardar compra en el historial",()=>Alert.alert("Guardar compra en el historial","Se guardarán los productos marcados como cogidos con sus precios. Los pendientes seguirán en la lista.",[{text:"Cancelar",style:"cancel"},{text:"GUARDAR",onPress:()=>action({type:"finish",confirmed:true})}]),"shopping-finish",false,!items.some(i=>i.selected&&i.bought))}
             {button(arrange?"Terminar orden":"Ordenar secciones",()=>setArrange(v=>!v),"shopping-arrange-categories",arrange,dragging)}
             {oldNotes.map((old,index)=><React.Fragment key={old.id}>{button("Revisar Compras antigua "+(index+1),()=>{setLegacy(old);setLegacySelected([]);},"shopping-legacy-"+index)}</React.Fragment>)}
           </View>}
@@ -254,32 +264,40 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
         </ScrollView></LinearGradient>}
       </View>}
       {editor&&<ScrollView ref={editScroll} testID="shopping-editor-scroll" keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" style={{flex:1,minHeight:0}} contentContainerStyle={{padding:12,flexGrow:1,justifyContent:"flex-end"}}><View style={s.editorCard}>
-        <View style={s.editorHeading}><Text style={s.editorArt}>🛒</Text><View style={{flex:1}}><Text accessibilityRole="header" numberOfLines={2} style={s.editorTitle}>{editor.name||"Nuevo producto"}</Text><Text style={s.label}>{SHOPPING_CATEGORIES.find(([id])=>id===editor.category)?.[2]||"Producto"}</Text></View></View>
         {field("name","Producto",{onChangeText:name=>change({name,...(editor.category==="other"?{category:suggestShoppingCategory(name,doc)}:{})}),autoCapitalize:"sentences"})}
         <View style={[s.row,{flexWrap:"nowrap"}]}><TouchableOpacity testID="shopping-editor-minus" accessibilityRole="button" accessibilityLabel="Restar cantidad" onPress={()=>stepDraftQuantity(-1)} style={s.editorStep}><Feather name="minus" size={20} color="#0876ca"/></TouchableOpacity><View style={{flex:1}}>{field("quantity","Cantidad",{keyboardType:"decimal-pad"})}</View><TouchableOpacity testID="shopping-editor-plus" accessibilityRole="button" accessibilityLabel="Sumar cantidad" onPress={()=>stepDraftQuantity(1)} style={s.editorStep}><Feather name="plus" size={20} color="#0876ca"/></TouchableOpacity>{button(editor.unit,()=>setOptions(v=>!v),"shopping-unit-picker")}</View>
         {options&&<View style={s.row}>{SHOPPING_UNITS.map(unit=><React.Fragment key={unit}>{button(unit,()=>{change({unit});setOptions(false);},"shopping-unit-"+unit,editor.unit===unit)}</React.Fragment>)}</View>}
-        {field("price","Precio · opcional",{keyboardType:"decimal-pad"})}
-        {!!editor.price.trim()&&!editor.store.trim()&&<Text style={s.hint}>El precio se guardará sin supermercado. Puedes elegir uno después.</Text>}
-        {button(more?"Menos opciones":"Más opciones",()=>setMore(v=>!v),"shopping-editor-options")}
-        {more&&<>
-          {field("brand","Marca · opcional")}{field("format","Formato · opcional")}
+        {field("price",`Precio (${editor.currency==="EUR"?"€":editor.currency}/${priceBasis(editor)}) · opcional`,{keyboardType:"decimal-pad"})}
+        {field("brand","Marca · opcional")}
+        {button(more?"Ocultar detalles":"Más detalles",()=>{setMore(v=>!v);setEditorDetails(null);},"shopping-editor-options")}
+        {more&&<View style={s.row}>
+          {button("Producto",()=>setEditorDetails(editorDetails==="product"?null:"product"),"shopping-details-product",editorDetails==="product")}
+          {button("Precio",()=>setEditorDetails(editorDetails==="price"?null:"price"),"shopping-details-price",editorDetails==="price")}
+          {button("Historial de precios",()=>setEditorDetails(editorDetails==="history"?null:"history"),"shopping-details-prices",editorDetails==="history")}
+        </View>}
+        {more&&editorDetails==="product"&&<>
+          {field("format","Formato · opcional")}
           {field("variety","Variedad · opcional")}
           {field("packageQuantity","Tamaño del envase",{keyboardType:"decimal-pad"})}
           <View style={s.row}>{(["kg","g","litros","ml","unidades"] as MeasureUnit[]).map(unit=><React.Fragment key={unit}>{button(unit,()=>change({packageUnit:unit}),"shopping-package-unit-"+unit,editor.packageUnit===unit)}</React.Fragment>)}</View>
           <Text style={s.label}>Categoría</Text><View style={s.row}>{SHOPPING_CATEGORIES.map(([id,,label])=><React.Fragment key={id}>{button(label,()=>change({category:id}),"shopping-category-"+id,editor.category===id)}</React.Fragment>)}</View>
+          {field("notes","Observaciones")}
+          {checkButton("Producto habitual",editor.usual,()=>change({usual:!editor.usual}),"shopping-usual")}
+          {checkButton("Favorito por marca y presentación",editor.favorite||false,()=>change({favorite:!editor.favorite}),"shopping-editor-favorite")}
+        </>}
+        {more&&editorDetails==="price"&&<>
           {field("store","Supermercado del precio")}
           {field("currency","Moneda")}{field("observedOn","Fecha de observación · AAAA-MM-DD")}
           {field("priceQuantity","Contenido al que corresponde el precio",{keyboardType:"decimal-pad"})}
           <View style={s.row}>{(["kg","g","litros","ml","unidades"] as MeasureUnit[]).map(unit=><React.Fragment key={unit}>{button(unit,()=>change({priceUnit:unit}),"shopping-price-unit-"+unit,editor.priceUnit===unit)}</React.Fragment>)}</View>
-          {field("notes","Observaciones")}
-          {checkButton("Producto habitual",editor.usual,()=>change({usual:!editor.usual}),"shopping-usual")}
-          {checkButton("Favorito por marca y presentación",editor.favorite||false,()=>change({favorite:!editor.favorite}),"shopping-editor-favorite")}
+        </>}
+        {more&&editorDetails==="history"&&<>
           {items.find(i=>i.id===editor.id)?.prices.map(p=>{const n=normalizedShoppingPrice(p);return <View key={p.id} testID={"shopping-price-"+p.id} style={s.details}><Text style={s.text}>{p.store} · {p.observedOn} · {money(p.price,p.currency)}/{p.purchaseUnit}</Text><Text style={s.hint}>{p.brand} · {p.format} · {n?money(n.value,p.currency)+"/"+n.unit:"Sin medida comparable"}</Text>{button("Usar para estimación",()=>action({type:"selectPrice",id:editor.id,priceId:p.id}),"shopping-use-price-"+p.id,items.find(i=>i.id===editor.id)?.selectedPriceId===p.id)}</View>;})}
           {comparableShoppingPrices(items.find(i=>i.id===editor.id)?.prices||[]).map((group,index)=><View key={index} testID="shopping-price-comparison" style={s.details}><Text style={s.label}>Misma marca, variedad y formato</Text>{group.map(p=><Text key={p.id} style={s.text}>{p.store}: {money(normalizedShoppingPrice(p)!.value,p.currency)}/{normalizedShoppingPrice(p)!.unit} · {p.observedOn}</Text>)}</View>)}
         </>}
-        <Text testID="shopping-draft-status" accessibilityLiveRegion="polite" style={s.hint}>{draftStatus}</Text>
+        {(more||draftStatus.startsWith("Borrador pendiente"))&&<Text testID="shopping-draft-status" accessibilityLiveRegion="polite" style={s.hint}>{draftStatus}</Text>}
         {draftStatus.startsWith("Borrador pendiente")&&button("Reintentar guardar borrador",()=>writeDraft(editor),"shopping-retry-draft")}
-        {button("Descartar borrador",()=>Alert.alert("Descartar borrador","El producto guardado y sus precios se conservarán.",[{text:"Cancelar",style:"cancel"},{text:"DESCARTAR",style:"destructive",onPress:()=>{if(doc.pendingEditor&&doc.pendingEditor.id!==editor.id){setEditor(null);draftRef.current=null;draftSequence.current++;return;}void operate({type:"draft"}).then(()=>{setEditor(null);draftRef.current=null;draftSequence.current++;}).catch(()=>{});}}]),"shopping-discard-draft")}
+        {more&&button("Descartar borrador",()=>Alert.alert("Descartar borrador","El producto guardado y sus precios se conservarán.",[{text:"Cancelar",style:"cancel"},{text:"DESCARTAR",style:"destructive",onPress:()=>{if(doc.pendingEditor&&doc.pendingEditor.id!==editor.id){setEditor(null);draftRef.current=null;draftSequence.current++;return;}void operate({type:"draft"}).then(()=>{setEditor(null);draftRef.current=null;draftSequence.current++;}).catch(()=>{});}}]),"shopping-discard-draft")}
       </View></ScrollView>}
       {utility&&<ScrollView testID={"shopping-"+utility+"-scroll"} keyboardShouldPersistTaps="handled" contentContainerStyle={{padding:16,gap:12}}>
         {utility==="lists"&&<>
@@ -311,7 +329,19 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
         {utility==="map"&&<View style={s.details}><Text style={s.text}>No hay plano interior de {doc.store||"esta tienda"}. Puedes guardar pasillos conocidos desde cada producto y consultar la ruta orientativa.</Text>{button("Ver ruta",()=>setUtility("route"),"shopping-map-route")}</View>}
         {utility==="history"&&<>
           {!doc.purchases?.length&&<Text style={s.hint}>Aún no hay compras archivadas. La lista actual se guarda automáticamente.</Text>}
-          {[...(doc.purchases||[])].reverse().map(p=><View key={p.id} style={s.details}><Text style={s.label}>{p.date} · {p.store||"Sin supermercado"}</Text>{p.items.map(i=><Text key={i.id} style={s.text}>{i.name} · {i.brand} · {decimal(i.quantity)} {i.unit}</Text>)}</View>)}
+          {[...(doc.purchases||[])].reverse().map(p=><View key={p.id} style={s.details}>
+            <Text style={s.label}>{p.date} · {p.store||"Sin supermercado"}</Text>
+            {repeat?.purchaseId===p.id?<>{p.items.map(i=><React.Fragment key={i.id}>{checkButton(
+              `${i.name} · ${decimal(i.quantity)} ${i.unit}`,repeat.ids.includes(i.id),
+              ()=>setRepeat(current=>current?.purchaseId===p.id?{purchaseId:p.id,ids:current.ids.includes(i.id)?current.ids.filter(id=>id!==i.id):[...current.ids,i.id]}:current),
+              "shopping-history-select-"+i.id)}</React.Fragment>)}
+              {button("Añadir seleccionados a la lista",()=>{const expected=identity,epoch=generation.current;void operate({type:"repeatPurchase",purchaseId:p.id,ids:repeat.ids}).then(()=>{
+                if(active(expected,epoch)){setRepeat(null);setUtility(null);setScreen("list");setFilter("pending");}
+              }).catch(()=>{});},"shopping-history-add",true,!repeat.ids.length)}
+            </>:<>{p.items.map(i=><Text key={i.id} style={s.text}>{i.name} · {i.brand} · {decimal(i.quantity)} {i.unit}</Text>)}
+              {button("Elegir productos para repetir",()=>setRepeat({purchaseId:p.id,ids:[]}),"shopping-history-repeat-"+p.id)}
+            </>}
+          </View>)}
         </>}
         {utility==="assistant"&&<>
           <Text accessibilityRole="header" style={s.heading}>¿Qué necesitas comprar?</Text><Text style={s.assistantExample}>«Añade dos litros de leche y seis huevos»</Text>
@@ -363,7 +393,7 @@ const s=StyleSheet.create({
   input:{minHeight:48,borderWidth:1,borderColor:"#cfdeeb",backgroundColor:"#fff",borderRadius:11,fontSize:16,color:"#29465e",padding:11},section:{gap:5},product:{fontSize:16,fontWeight:"600",color:"#2a4a64",flexShrink:1},details:{gap:8,padding:12,backgroundColor:"#f5f9fd",borderWidth:1,borderColor:"#e0eaf3",borderRadius:12},draftNotice:{gap:4,padding:8,backgroundColor:"#f4f9ff",borderRadius:12,borderWidth:1,borderColor:"#dce9f5"},
   searchEntrance:{minHeight:44,minWidth:0,flex:1,borderRadius:22,marginBottom:13,paddingHorizontal:10,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:5,backgroundColor:"#fff",borderWidth:1,borderColor:"#dceafa"},searchEntranceText:{fontSize:13,fontWeight:"600",color:"#316b9a"},
   catalogRow:{minHeight:48,flexDirection:"row",alignItems:"center",gap:9,paddingHorizontal:11,paddingVertical:5,backgroundColor:"#fff",borderRadius:12,borderWidth:1,borderColor:"#dce7f2"},catalogIcon:{fontSize:23,width:31,textAlign:"center"},catalogName:{flex:1,minWidth:0,fontSize:15,fontWeight:"600",color:"#17365f"},catalogStatus:{fontSize:12,fontWeight:"700",color:"#1872b5"},catalogGroup:{fontSize:13,fontWeight:"700",color:"#436d91",paddingTop:9,paddingBottom:3},assistantExample:{fontSize:17,fontWeight:"600",color:"#436d91",paddingVertical:8},voiceButton:{minHeight:52,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:10,backgroundColor:"#087def",borderRadius:15},
-  editorCard:{gap:10,padding:14,backgroundColor:"#fff",borderRadius:22,borderWidth:1,borderColor:"#dce7f2",shadowColor:"#264e76",shadowOpacity:.12,shadowRadius:10,shadowOffset:{width:0,height:4}},editorHeading:{flexDirection:"row",alignItems:"center",gap:10},editorArt:{fontSize:31,width:44,textAlign:"center"},editorTitle:{fontSize:18,fontWeight:"700",color:"#17365f"},editorStep:{width:44,minHeight:48,borderRadius:11,borderWidth:1,borderColor:"#cfdeeb",backgroundColor:"#fff",alignItems:"center",justifyContent:"center",alignSelf:"flex-end"},
+  editorCard:{gap:10,padding:14,backgroundColor:"#fff",borderRadius:22,borderWidth:1,borderColor:"#dce7f2",shadowColor:"#264e76",shadowOpacity:.12,shadowRadius:10,shadowOffset:{width:0,height:4}},editorStep:{width:44,minHeight:48,borderRadius:11,borderWidth:1,borderColor:"#cfdeeb",backgroundColor:"#fff",alignItems:"center",justifyContent:"center",alignSelf:"flex-end"},
   orbitRing:{position:"absolute",borderRadius:400,borderWidth:3,borderColor:"#9fd3fa",backgroundColor:"transparent"},orbit:{position:"absolute",padding:4,borderWidth:2,borderColor:"#fff",backgroundColor:"#fff",gap:1,alignItems:"center",justifyContent:"center",shadowColor:"#2776b0",shadowOpacity:.22,shadowRadius:8,shadowOffset:{width:0,height:4}},orbitArtwork:{fontSize:31,lineHeight:39},orbitDots:{fontSize:29,fontWeight:"800",color:"#168beb"},orbitLabel:{fontSize:11,fontWeight:"700",textAlign:"center",color:"#17365f"},
   goOrbit:{position:"absolute",alignItems:"center",justifyContent:"center",backgroundColor:"#f9cb55",borderWidth:5,borderColor:"#fff2ba",shadowColor:"#2875b3",shadowOpacity:.3,shadowRadius:14,shadowOffset:{width:0,height:5}},goOrbitText:{fontSize:43,fontWeight:"900",color:"#123466",lineHeight:47},
   secondaryNav:{minHeight:68,flexDirection:"row",alignItems:"center",gap:5,paddingHorizontal:8,paddingVertical:4,backgroundColor:"#f7fbff"},navItem:{flex:1,minWidth:0,minHeight:60,borderRadius:15,backgroundColor:"#fff",borderWidth:1,borderColor:"#e6eaf0",alignItems:"center",justifyContent:"center",gap:2,shadowColor:"#244c7b",shadowOpacity:.1,shadowRadius:5,shadowOffset:{width:0,height:3}},navSelected:{backgroundColor:"#0689ed",borderColor:"#43b1fb"},navText:{fontSize:11,fontWeight:"700",color:"#173a68"},
