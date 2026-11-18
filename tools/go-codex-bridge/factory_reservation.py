@@ -61,27 +61,31 @@ class FactoryReservation:
 
     def reserve(self, team, authorize):
         """Authorize under the write lock. Rollback includes consumption of the approval."""
-        if team not in TEAMS:
-            raise ReservationError("INVALID_TEAM", "Selecciona PC1 o PC2.")
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            current = self._row(db)
-            if current["state"] != "available":
-                if current["state"] == "recovery":
-                    raise ReservationError("RECOVERY_PENDING", "La fábrica requiere recuperación verificada.")
-                raise ReservationError(
-                    "FACTORY_BUSY",
-                    f"Fábrica ocupada. La producción está activa en {TEAMS[current['team']]}. "
-                    "Deténla de forma segura antes de cambiar de ordenador.",
-                )
-            if not authorize(db, team):
-                raise ReservationError("START_NOT_AUTHORIZED", "Confirma la ejecución en el equipo seleccionado.")
-            execution = Execution(team, uuid4().hex, current["generation"] + 1)
-            db.execute("""
-                UPDATE factory_reservation SET team=?, execution_id=?, generation=?, state='producing'
-                WHERE id=1
-            """, (execution.team, execution.execution_id, execution.generation))
-            return execution
+            return self.reserve_in(db, team, authorize)
+
+    def reserve_in(self, db, team, authorize):
+        """Reserve inside the caller's activation transaction."""
+        if team not in TEAMS:
+            raise ReservationError("INVALID_TEAM", "Selecciona PC1 o PC2.")
+        current = self._row(db)
+        if current["state"] != "available":
+            if current["state"] == "recovery":
+                raise ReservationError("RECOVERY_PENDING", "La fábrica requiere recuperación verificada.")
+            raise ReservationError(
+                "FACTORY_BUSY",
+                f"Fábrica ocupada. La producción está activa en {TEAMS[current['team']]}. "
+                "Deténla de forma segura antes de cambiar de ordenador.",
+            )
+        if not authorize(db, team):
+            raise ReservationError("START_NOT_AUTHORIZED", "Confirma la ejecución en el equipo seleccionado.")
+        execution = Execution(team, uuid4().hex, current["generation"] + 1)
+        db.execute("""
+            UPDATE factory_reservation SET team=?, execution_id=?, generation=?, state='producing'
+            WHERE id=1
+        """, (execution.team, execution.execution_id, execution.generation))
+        return execution
 
     def _owned(self, db, execution):
         row = self._row(db)
@@ -89,6 +93,12 @@ class FactoryReservation:
             execution.team, execution.execution_id, execution.generation
         ):
             raise ReservationError("NOT_EXECUTION_OWNER", "La reserva pertenece a otra ejecución.")
+        return row
+
+    def require_owner_in(self, db, execution):
+        row = self._owned(db, execution)
+        if row["state"] != "producing":
+            raise ReservationError("PRODUCTION_PAUSED", "La ejecución no admite nuevos trabajos.")
         return row
 
     def admit_work(self, execution, admit):

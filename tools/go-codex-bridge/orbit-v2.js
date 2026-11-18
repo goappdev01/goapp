@@ -8,6 +8,7 @@ const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefi
 function note(text){$('notice').textContent=text;}
 async function api(route,body){const r=await fetch(base+'/'+route,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json','X-GO-CSRF':state.csrf}:{},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.message||data.error||'No se pudo verificar la operación.');return data;}
 function factoryMode(s){const wheel=s?.wheel||{};
+  if(s?.reservation?.state==='recovery'||s?.reservation?.selected_team==='PC2')return ['blocked','BLOQUEADO'];
   if(wheel.enabled)return ['programming','ACTIVO'];
   if(!wheel.live_queue_authorized||wheel.account_rebind_required)return ['blocked','BLOQUEADO'];
   if(wheel.reason&&!['OWNER_PAUSED','WHEEL_PAUSED','CREDIT_LIMIT','WHEEL_CODEX_QUOTA'].includes(wheel.reason))return ['blocked','BLOQUEADO'];
@@ -98,8 +99,32 @@ $('codexAccount').addEventListener('close',()=>{
 function showArc(){const arc=$('arc');arc.replaceChildren();state.layout.layout.forEach((_,i)=>{const b=node('button','Órbita '+(i+1));b.dataset.orbitTarget=String(i);b.onclick=()=>{orbitIndex=i;arc.hidden=true;render();};arc.append(b);});if(state.layout.layout.length<12){const add=node('button','+ Nueva órbita');add.dataset.newOrbit=String(state.layout.layout.length);add.onclick=()=>{if(!drag){note('Para crear una órbita, mueve un acceso al símbolo +.');return;} };arc.append(add);}arc.hidden=false;}
 function renderOptions(){const select=$('moduleSelect'),target=$('targetOrbit'),position=$('targetPosition');const old=select.value||selected;select.replaceChildren();for(const [key,value] of Object.entries(state.registry))select.append(new Option(value.name,key));select.value=old in state.registry?old:Object.keys(state.registry)[0];target.replaceChildren();state.layout.layout.forEach((_,i)=>target.append(new Option('Órbita '+(i+1),String(i))));if(state.layout.layout.length<12)target.append(new Option('+ Nueva órbita',String(state.layout.layout.length)));target.value=String(orbitIndex);position.replaceChildren();for(let i=0;i<7;i++)position.append(new Option('Posición '+(i+1),String(i)));if(document.activeElement!==$('visibleName'))$('visibleName').value=state.layout.labels?.[select.value]||state.registry[select.value]?.name||'';}
 function line(parent,text,cls){parent.append(node('p',text,cls));}
+function renderTeamSelection(box,op){
+  const reservation=op.reservation||{};
+  const label=node('label','Equipo para la próxima activación');
+  const select=node('select');
+  select.setAttribute('aria-label','Equipo de producción');
+  select.append(new Option('PC1 — RAÚL','PC1'),new Option('PC2 — TESO','PC2'));
+  select.value=reservation.selected_team||'PC1';
+  select.disabled=Boolean(op.wheel.enabled||reservation.state==='producing');
+  select.onchange=async()=>{select.disabled=true;try{await api('team',{team:select.value});await refresh();note('Equipo seleccionado; la cuenta Codex no se ha cambiado.');}catch(e){note(e.message);await refresh();}};
+  label.append(select);box.append(label);
+  line(box,'Equipo realmente activo: '+(reservation.active_team||'ninguno'));
+  line(box,'Reserva: '+(reservation.state||'sin verificar'));
+  line(box,'Último checkpoint confirmado: '+(reservation.last_checkpoint||'ninguno'));
+  if(reservation.selected_team==='PC2')line(box,'PC2 requiere un ejecutor remoto autenticado antes de iniciar.','status warn');
+  const stop=node('button','Detener fábrica');
+  stop.disabled=!op.wheel.enabled&&reservation.state!=='producing';
+  stop.onclick=async()=>{if(!window.confirm('¿Detener la fábrica y conservar los trabajos pendientes?'))return;stop.disabled=true;try{await api('stop',{confirmation:'DETENER FÁBRICA'});await refresh();note('Detención solicitada. La reserva solo se libera tras verificar trabajos y checkpoint.');}catch(e){note(e.message);await refresh();}};
+  box.append(stop);
+  if(['stopping','recovery'].includes(reservation.state)){
+    const reconcile=node('button','Comprobar detención y reserva');
+    reconcile.onclick=async()=>{if(!window.confirm('¿Comprobar que no quedan efectos ni trabajos activos antes de liberar la reserva?'))return;reconcile.disabled=true;try{await api('reconcile-reservation',{confirmation:'CONCILIAR RESERVA'});await refresh();note('Reserva conciliada. Los bloqueos de la cola permanecen hasta su propia verificación.');}catch(e){note(e.message);await refresh();}};
+    box.append(reconcile);
+  }
+}
 function renderPanel(){const key=selected,box=$('panelContent'),op=state.operational;box.replaceChildren();$('panelTitle').textContent=actualModule(key);$('v1Link').href=legacy;$('v1Link').textContent='Abrir controles existentes';
-  if(key==='factory'){const mode=factoryMode(op);line(box,'Estado real: '+mode[1],mode[0]==='programming'?'status good':mode[0]==='blocked'?'status bad':'status warn');line(box,'Trabajo actual: '+(op.wheel.current||'ninguno'));line(box,'Siguiente según la última COLA verificada: '+(op.wheel.next||'ninguno'));if(op.wheel.next_action)line(box,'Motivo: '+op.wheel.next_action,'muted');for(const skipped of (op.wheel.skipped||[]).slice(0,6))line(box,'Omitida: '+skipped.title+' · '+skipped.reason+' · permanece en COLA','muted');line(box,op.wheel.button?.reason_message||'Sin bloqueo global registrado.');}
+  if(key==='factory'){const mode=factoryMode(op);renderTeamSelection(box,op);line(box,'Estado real: '+mode[1],mode[0]==='programming'?'status good':mode[0]==='blocked'?'status bad':'status warn');line(box,'Trabajo actual: '+(op.wheel.current||'ninguno'));line(box,'Siguiente según la última COLA verificada: '+(op.wheel.next||'ninguno'));if(op.wheel.next_action)line(box,'Motivo: '+op.wheel.next_action,'muted');for(const skipped of (op.wheel.skipped||[]).slice(0,6))line(box,'Omitida: '+skipped.title+' · '+skipped.reason+' · permanece en COLA','muted');line(box,op.wheel.button?.reason_message||'Sin bloqueo global registrado.');}
   else if(key==='expo'){const launches=op.expo_launches||{};for(const [id,port,label] of [['main',8088,'COLA TERMINADA'],['owner',8089,'COMPROBACIONES']]){const item=launches.links?.[id],section=node('section',undefined,'module-line');section.append(node('h3',label+' · '+port));const fresh=Date.now()<Number(launches.expires_at||0)*1000,available=Boolean(item?.available&&fresh),proof=metroProof[port],proofFresh=available&&proof&&Date.now()-proof.checked_at*1000<90000&&(port!==8089||proof.expected_sha===op.expo?.sha);line(section,available?'TCP, manifiesto, bundle y recursos: verificados desde Windows.':'Servicio sin verificación vigente.',available?'status good':'status bad');line(section,'Versión esperada: '+(port===8089?op.expo?.sha||'sin configurar':proofFresh?proof.expected_sha:'MAIN publicado; comprobar SHA'));line(section,'Versión realmente servida: '+(proofFresh?proof.served_sha:'SHA sin verificación vigente.'));line(section,'Último diagnóstico: '+(launches.checked_at?new Date(launches.checked_at*1000).toLocaleString():'pendiente'));const verify=node('button','Comprobar código servido');verify.onclick=async()=>{verify.disabled=true;try{metroProof[port]=await api('verify/'+port);note('El código de '+port+' coincide con el SHA indicado. La apertura en iPhone sigue pendiente.');renderPanel();}catch(e){delete metroProof[port];note('No se verificó '+port+': '+e.message);renderPanel();}};section.append(verify);const link=node('a','ABRIR '+label+' · '+port,'action');link.setAttribute('aria-disabled',String(!available));if(available&&item?.url&&new URL(item.url).port===String(port))link.href=item.url;section.append(link);box.append(section);}line(box,'La descarga desde Windows no acredita que GO haya abierto en iPhone. Usa el diagnóstico Safari del panel V1.','muted');}
   else if(key==='agents'){line(box,'Cuenta y cuota del ejecutor: '+(op.quota?.state||'sin verificar'));line(box,'Trabajo Codex: '+(op.cards?.find(c=>c.state==='working')?.activity?.state||'ninguno'));}
   else if(key==='trello'||key==='reviews'){for(const c of op.cards||[])line(box,`${c.title} · ${c.state} · fase ${c.phase}`);if(!op.cards?.length)line(box,'No hay lote verificado en esta vista.');}

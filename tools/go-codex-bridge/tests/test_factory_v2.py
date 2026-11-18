@@ -908,6 +908,17 @@ class V2WheelTests(unittest.TestCase):
         self.assertEqual(error.exception.code,'WHEEL_PERMISSION_REQUIRED')
         self.assertFalse(panel.w.enabled())
 
+    def test_team_selection_keeps_account_and_production_unchanged(self):
+        panel=RemotePanel(self.bridge)
+        before=self.bridge.factory.wheel.status()
+        selected=panel.orbit_control('team',{'team':'PC2'},'synthetic-owner')
+        self.assertEqual(selected['selected_team'],'PC2')
+        self.assertEqual(selected['state'],'available')
+        self.assertFalse(panel.w.enabled())
+        self.assertEqual(panel.w.status().get('account_confirmation_required'),
+                         before.get('account_confirmation_required'))
+        self.assertFalse(self.runs or self.changes)
+
     def test_one_owner_button_resumes_normal_wheel_pause(self):
         wheel=self.bridge.factory.wheel
         wheel.activate_live("1"*64)
@@ -1255,8 +1266,12 @@ class V2WheelTests(unittest.TestCase):
         request={"kind":"answer","question":question,"operation":"Revisar el resultado local"}
         result={"exit_code":1,"response":"GO_FACTORY_QUESTION: "+json.dumps(request,ensure_ascii=False)}
         with self.bridge.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.bridge.factory.reserve_local_execution(db)
             db.execute("UPDATE wheel_grants SET state='working',reason=NULL WHERE grant_id=?",(grant["grant_id"],))
-            db.execute("UPDATE wheel_control SET enabled=1,reason=NULL WHERE id=1")
+            # This fixture isolates private-question handling after a synthetic
+            # owner account confirmation and a valid PC1 reservation.
+            db.execute("UPDATE wheel_control SET enabled=1,reason=NULL,account_confirmation_required=0 WHERE id=1")
             db.execute("UPDATE factory_attempts SET state='blocked' WHERE card_id=? AND attempt=?",
                        (grant["card_id"],grant["attempt"]))
             db.execute("UPDATE jobs SET state='blocked',pid=NULL,result=? WHERE id=?",
@@ -1335,9 +1350,9 @@ class V2WheelTests(unittest.TestCase):
         self.bridge=self.configure(restored)
         self.codex_identity="synthetic-codex-account"
         result=self.bridge.factory.wheel.tick()
-        self.assertIn("card_blocked",result,result)
-        self.assertEqual(result["card_blocked"],grant["card_id"])
-        self.assertEqual(self.changes,[(grant["card_id"],"C"),(grant["card_id"],"D")])
+        self.assertEqual(result,{"paused":"RECOVERY_PENDING"})
+        self.assertEqual(self.bridge.factory.reservation.status()["state"],"recovery")
+        self.assertEqual(self.changes,[(grant["card_id"],"C")])
         with self.bridge.db() as db:
             self.assertEqual(db.execute("SELECT session_id FROM jobs WHERE id=?",(job_id,)).fetchone()[0],session)
             self.assertEqual(db.execute("SELECT state FROM factory_questions WHERE grant_id=?",
@@ -1371,6 +1386,7 @@ class V2WheelTests(unittest.TestCase):
         w._transition(grant,"waiting_response","WHEEL_QUESTION_PRIVATE")
         self.codex_identity="synthetic-codex-account"
         result=w.tick()
+        self.assertIn("card_blocked",result,result)
         self.assertEqual(result["card_blocked"],grant["card_id"])
         self.assertTrue(w.enabled())
         self.assertEqual(self.cards[grant["card_id"]]["idList"],RECOVERY)

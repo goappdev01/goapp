@@ -135,6 +135,22 @@ class Factory:
             """)
         from wheel_queue import Wheel
         self.wheel = Wheel(self)
+        from factory_reservation_runtime import ReservationRuntime
+        self.reservation = ReservationRuntime(bridge)
+
+    def reserve_local_execution(self, db):
+        from factory_reservation import ReservationError
+        try:
+            return self.reservation.activate_in(db)
+        except ReservationError as error:
+            raise self.Error(error.code, str(error)) from error
+
+    def require_local_execution(self, db):
+        from factory_reservation import ReservationError
+        try:
+            return self.reservation.require_in(db)
+        except ReservationError as error:
+            raise self.Error(error.code, str(error)) from error
 
 
     def pause_on_startup(self):
@@ -184,6 +200,9 @@ class Factory:
         if type(enabled) is not bool:
             raise self.Error("FACTORY_STATE_INVALID", "Selecciona activar o pausar.")
         with self.lock, self.bridge.db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if enabled:
+                self.reserve_local_execution(db)
             db.execute("UPDATE factory_control SET enabled=?,pause_reason=NULL,next_check=0 WHERE id=1",
                        (int(enabled),))
             self.bridge.audit("factory_toggled", {"enabled": enabled, "board": BOARD, "queue": QUEUE}, db)
@@ -778,6 +797,9 @@ class Factory:
             if not manual and not control["enabled"]:
                 return {"enabled":False}
             try:
+                if not manual:
+                    with self.bridge.db() as db:
+                        self.require_local_execution(db)
                 # This path performs GETs and local preparation only. No approve/launch/write.
                 self._identity(); self._lists(); cards = self._cards()
                 with self.bridge.db() as db:

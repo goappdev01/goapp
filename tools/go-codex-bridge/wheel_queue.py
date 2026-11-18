@@ -219,6 +219,7 @@ class Wheel:
                 db.execute("INSERT OR REPLACE INTO wheel_live_authorization VALUES(1,?,?,'active')",
                            (self.f.canonical(doc),self.b.sign(doc)))
                 db.execute("UPDATE wheel_continuity_mode SET enabled=1 WHERE id=1")
+                self.f.reserve_local_execution(db)
                 db.execute("UPDATE wheel_control SET enabled=1,reason=NULL,retry_after=0 WHERE id=1")
                 db.execute("UPDATE factory_control SET enabled=0 WHERE id=1")
                 self.b.audit("wheel_live_owner_activated",{"consent_sha256":consent_sha256,
@@ -261,6 +262,8 @@ class Wheel:
                 self.continuity.verify_activation(batch[0]["id"],batch[1])
                 if time.time()>=batch[1]["expires_at"]:
                     self.fail("WHEEL_EXPIRY_INVALID","Revisa y autoriza de nuevo las operaciones pendientes antes de activar.")
+            if enabled:
+                self.f.reserve_local_execution(db)
             db.execute("UPDATE wheel_control SET enabled=?,reason=NULL,retry_after=0 WHERE id=1", (int(enabled),))
             if enabled:
                 # Legacy observation may be enabled separately; it must never launch or
@@ -270,11 +273,21 @@ class Wheel:
         return self.status()
 
     def pause(self, reason, retry_after=0):
-        with self.b.db() as db:
-            db.execute("UPDATE wheel_control SET enabled=0,reason=?,retry_after=?,"
-                       "account_confirmation_required=MAX(account_confirmation_required,?) WHERE id=1",
-                       (reason,retry_after,int(reason=="WHEEL_CODEX_SESSION_CHANGED")))
-            self.b.audit("wheel_paused", {"reason": reason}, db)
+        with self.f.lock:
+            with self.b.db() as db:
+                db.execute("UPDATE wheel_control SET enabled=0,reason=?,retry_after=?,"
+                           "account_confirmation_required=MAX(account_confirmation_required,?) WHERE id=1",
+                           (reason,retry_after,int(reason=="WHEEL_CODEX_SESSION_CHANGED")))
+                if reason=="OWNER_STOPPED" and hasattr(self.f,"reservation"):
+                    self.f.reservation.stop_in(db)
+                self.b.audit("wheel_paused", {"reason": reason}, db)
+            if reason=="OWNER_STOPPED" and hasattr(self.f,"reservation"):
+                from factory_reservation import ReservationError
+                try:
+                    self.f.reservation.release_stopped()
+                except ReservationError:
+                    # A pending effect or checkpoint retains the exclusive reservation.
+                    pass
 
     def reconcile_unstarted_worktree(self):
         """Clear only a failed preflight that never created a card workspace or job."""
@@ -498,6 +511,7 @@ class Wheel:
             if db.execute("UPDATE jobs SET state='running',pid=NULL,updated=? WHERE id=? AND state='failed' "
                           "AND session_id=?",(self.f.utc(),job_id,session_id)).rowcount!=1:
                 raise RuntimeError("Credit recovery lost the original job")
+            self.f.require_local_execution(db)
             db.execute("UPDATE wheel_control SET enabled=1,reason=NULL,retry_after=0 WHERE id=1")
             self.b.audit("wheel_codex_session_resumed",{"grant":grant["grant_id"],"job":job_id,
                                                        "session_id":session_id},db)
@@ -995,6 +1009,7 @@ class Wheel:
                                (self.f.canonical(doc),self.b.sign(doc),frozen[0]["id"]))
                     db.execute("INSERT OR REPLACE INTO factory_v2_activation VALUES(?,?,?)",
                                (frozen[0]["id"],self.f.canonical(activation),self.b.sign(activation)))
+                    self.f.reserve_local_execution(db)
                     db.execute("UPDATE wheel_control SET enabled=1,reason=NULL,retry_after=0 WHERE id=1")
                     db.execute("UPDATE factory_control SET enabled=0 WHERE id=1")
                     self.b.audit("wheel_frozen_started",{"batch":frozen[0]["id"],"policy":"independent-v2"},db)
@@ -1874,6 +1889,12 @@ class Wheel:
     def tick(self):
         if not self.enabled():
             return {"enabled":False}
+        try:
+            with self.b.db() as db:
+                self.f.require_local_execution(db)
+        except self.f.Error as error:
+            self.pause(error.code)
+            return {"paused":error.code}
         with self.b.db() as db:
             retry_after=db.execute("SELECT retry_after FROM wheel_control WHERE id=1").fetchone()[0]
         if retry_after and time.time()<retry_after:

@@ -197,6 +197,22 @@ class RemotePanel:
     def orbit_control(self,action,body,principal):
         if action=="change-account" and not body:
             return self.change_account()
+        if action=="team" and set(body)=={"team"}:
+            from factory_reservation import ReservationError
+            try:
+                return self.f.reservation.select(body["team"])
+            except ReservationError as error:
+                self.w.fail(error.code,str(error))
+        if action=="reconcile-reservation" and body=={"confirmation":"CONCILIAR RESERVA"}:
+            from factory_reservation import ReservationError
+            try:
+                with self.f.lock:
+                    result=self.f.reservation.reconcile_stopped()
+            except ReservationError as error:
+                self.w.fail(error.code,str(error))
+            self.b.audit("factory_reservation_owner_reconciled",{"principal_hash":self.b.sign({"tailnet_owner":principal}),
+                                                             "generation":result["generation"]})
+            return result
         if action=="power" and set(body)=={"enabled"} and type(body["enabled"]) is bool:
             if not body["enabled"]:
                 if self.w.enabled():
@@ -438,6 +454,7 @@ class RemotePanel:
         wheel_view["button"]=self.activation_button(wheel_view,cards)
         return {"version":__import__("puente").EXECUTOR_VERSION,"source_sha256":getattr(self.b,'loaded_code_sha256',None),"updated":self.f.utc(),
                 "wheel":wheel_view,
+                "reservation":self.f.reservation.status(),
                 "cards":cards,"questions":pending,"quota":self.b.quota_status(),
                 "expo":expo,"expo_launches":launches,"device_diagnostics":device_diagnostics,"chat":{"state":"PENDIENTE DE COMPROBACIÓN REAL",
                 "note":"Las pruebas alojadas requieren dos sesiones de prueba autorizadas. La versión Expo comparte el backend existente."}}
@@ -595,7 +612,7 @@ class RemotePanel:
             result=self.orbit_move(body)
         elif path=="/remote/v2/configure":
             result=self.orbit_configure(body)
-        elif path in ("/remote/v2/power","/remote/v2/preview","/remote/v2/decide","/remote/v2/pause","/remote/v2/stop",
+        elif path in ("/remote/v2/power","/remote/v2/team","/remote/v2/reconcile-reservation","/remote/v2/preview","/remote/v2/decide","/remote/v2/pause","/remote/v2/stop",
                       "/remote/v2/change-account"):
             result=self.orbit_control(path.rsplit('/',1)[-1],body,principal)
         else:self.w.fail("REMOTE_ACTION_INVALID","La operación no está admitida.")

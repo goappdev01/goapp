@@ -18,6 +18,7 @@ class WheelHTTPTests(unittest.TestCase):
     def test_restart_respects_running_work_and_protected_http_routes(self):
         b=self.bridge
         (self.home/"panel.html").write_text("<title>Isolated bridge test</title>",encoding="utf8")
+        (self.home/"orbit-v2.html").write_text("<title>Isolated bridge test</title>",encoding="utf8")
         with socket.socket() as sock:
             sock.bind(("127.0.0.1",0))
             port=sock.getsockname()[1]

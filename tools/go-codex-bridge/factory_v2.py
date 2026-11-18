@@ -355,6 +355,7 @@ class Continuity:
                 db.execute("INSERT OR REPLACE INTO factory_v2_activation VALUES(?,?,?)",
                            (row["id"],self.f.canonical(activation),self.b.sign(activation)))
                 db.execute("UPDATE factory_control SET enabled=0 WHERE id=1")
+                self.f.reserve_local_execution(db)
                 db.execute("UPDATE wheel_control SET enabled=1,reason=NULL,retry_after=0 WHERE id=1")
                 if changed:
                     self.b.audit("wheel_owner_account_bound",{"batch":row["id"],"principal":principal,
