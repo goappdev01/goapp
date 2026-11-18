@@ -1470,6 +1470,11 @@ def server(bridge, open_browser=True):
         def fail(self, error):
             if isinstance(error, BridgeError):
                 self.send(error.status, {"error": error.code, "message": str(error)})
+            elif isinstance(error, sqlite3.OperationalError):
+                busy = "locked" in str(error).lower() or "busy" in str(error).lower()
+                self.send(503, {"error": "LOCAL_DATABASE_BUSY" if busy else "LOCAL_DATABASE_ERROR",
+                                "message": ("La base local de la fábrica está ocupada; la activación no se completó."
+                                            if busy else "No se pudo consultar o guardar el estado local de la fábrica.")})
             else:
                 self.send(500, {"error": "LOCAL_ERROR", "message": "La operación local no se ha completado. No se ha repetido automáticamente."})
 

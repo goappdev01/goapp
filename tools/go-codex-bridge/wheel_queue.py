@@ -2,6 +2,7 @@
 import hmac
 import json
 import math
+from contextlib import nullcontext
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import subprocess
@@ -84,9 +85,9 @@ class Wheel:
     def _operations_for(subject):
         return list("ACD" if subject.get("work_kind")=="diagnosis" else STAGES)
 
-    def _require_codex_identity(self, expected=None):
+    def _require_codex_identity(self, expected=None, db=None):
         if expected is not None:
-            self.require_confirmed_account()
+            self.require_confirmed_account(db)
         quota, identity = self.b.codex_quota()
         if not identity:
             self.fail("WHEEL_CODEX_AUTH","No se pudo confirmar la sesión ChatGPT del ejecutor.")
@@ -95,45 +96,46 @@ class Wheel:
             if confirmed != identity:
                 self.fail("WHEEL_CODEX_IDENTITY_UNCERTAIN",
                           "Las lecturas de la cuenta Codex no coinciden; se comprobará de nuevo sin iniciar trabajo.")
-            if self._observe_identity_change(expected,identity):
+            if self._observe_identity_change(expected,identity,db):
                 self.fail("WHEEL_CODEX_SESSION_CHANGED","Cambió la cuenta Codex autorizada; conserva la cola para revisión.")
             self.fail("WHEEL_CODEX_IDENTITY_UNCERTAIN",
                       "Se comprobará de nuevo el cambio de cuenta antes de iniciar trabajo.")
         if quota["state"]!="available":
             self.fail("WHEEL_CODEX_QUOTA","La cuota de Codex no está disponible.")
         if expected is not None:
-            with self.b.db() as db:
-                observation=db.execute("SELECT 1 FROM wheel_identity_observation WHERE id=1").fetchone()
+            with (self.b.db() if db is None else nullcontext(db)) as connection:
+                observation=connection.execute("SELECT 1 FROM wheel_identity_observation WHERE id=1").fetchone()
                 if observation:
                     confirmed, _ = self.b.codex_account()
                     if confirmed!=expected:
                         self.fail("WHEEL_CODEX_IDENTITY_UNCERTAIN",
                                   "Las lecturas de la cuenta Codex no coinciden; se comprobará de nuevo sin iniciar trabajo.")
-                    db.execute("DELETE FROM wheel_identity_observation WHERE id=1")
-                    self.b.audit("wheel_identity_observation_cleared",{},db)
-                db.execute("UPDATE wheel_control SET reason=NULL,retry_after=0 WHERE id=1 AND enabled=1 "
+                    connection.execute("DELETE FROM wheel_identity_observation WHERE id=1")
+                    self.b.audit("wheel_identity_observation_cleared",{},connection)
+                connection.execute("UPDATE wheel_control SET reason=NULL,retry_after=0 WHERE id=1 AND enabled=1 "
                            "AND reason='WHEEL_CODEX_IDENTITY_UNCERTAIN'")
         return identity
 
-    def _observe_identity_change(self, expected, candidate):
+    def _observe_identity_change(self, expected, candidate, db=None):
         now=time.time()
         expected_sha=self.f.digest(expected)
         candidate_sha=self.f.digest(candidate)
-        with self.b.db() as db:
-            db.execute("BEGIN IMMEDIATE")
-            if not db.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0]:
+        with (self.b.db() if db is None else nullcontext(db)) as connection:
+            if not connection.in_transaction:
+                connection.execute("BEGIN IMMEDIATE")
+            if not connection.execute("SELECT enabled FROM wheel_control WHERE id=1").fetchone()[0]:
                 return True
-            prior=db.execute("SELECT expected_sha256,candidate_sha256,first_seen "
+            prior=connection.execute("SELECT expected_sha256,candidate_sha256,first_seen "
                              "FROM wheel_identity_observation WHERE id=1").fetchone()
             if prior and prior["expected_sha256"]==expected_sha and prior["candidate_sha256"]==candidate_sha:
                 if now-prior["first_seen"]>=30:
-                    db.execute("DELETE FROM wheel_identity_observation WHERE id=1")
-                    self.b.audit("wheel_identity_change_confirmed",{"elapsed_seconds":now-prior["first_seen"]},db)
+                    connection.execute("DELETE FROM wheel_identity_observation WHERE id=1")
+                    self.b.audit("wheel_identity_change_confirmed",{"elapsed_seconds":now-prior["first_seen"]},connection)
                     return True
                 return False
-            db.execute("INSERT OR REPLACE INTO wheel_identity_observation VALUES(1,?,?,?)",
+            connection.execute("INSERT OR REPLACE INTO wheel_identity_observation VALUES(1,?,?,?)",
                        (expected_sha,candidate_sha,now))
-            self.b.audit("wheel_identity_change_observed",{"confirmation_delay_seconds":30},db)
+            self.b.audit("wheel_identity_change_observed",{"confirmation_delay_seconds":30},connection)
         return False
 
     def require_confirmed_account(self, db=None):
@@ -245,7 +247,7 @@ class Wheel:
             live=self.live_policy(db)
             batch = None if live else self._latest_trial(db)
             if live:
-                self._require_codex_identity(live["codex_identity"])
+                self._require_codex_identity(live["codex_identity"],db)
             if batch and batch[1].get("kind") == FROZEN_BATCH and batch[0]["state"] != "active":
                 self.fail("WHEEL_BATCH_START_REQUIRED", "El lote congelado requiere su confirmación conjunta de arranque.")
             if batch and batch[1].get("kind")==FROZEN_BATCH:
@@ -255,7 +257,7 @@ class Wheel:
                 if reason not in (None,"OWNER_PAUSED","WHEEL_CODEX_AUTH","WHEEL_CODEX_QUOTA",
                                   "CREDIT_LIMIT","CREDIT_RECOVERY_REQUIRED"):
                     self.fail("WHEEL_REVIEW_REQUIRED","El bloqueo requiere revisar el lote en el panel privado antes de reactivarlo.")
-                self._require_codex_identity(batch[1]["codex_identity"])
+                self._require_codex_identity(batch[1]["codex_identity"],db)
                 self.continuity.verify_activation(batch[0]["id"],batch[1])
                 if time.time()>=batch[1]["expires_at"]:
                     self.fail("WHEEL_EXPIRY_INVALID","Revisa y autoriza de nuevo las operaciones pendientes antes de activar.")

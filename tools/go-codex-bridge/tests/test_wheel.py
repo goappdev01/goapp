@@ -1359,6 +1359,33 @@ class WheelTests(unittest.TestCase):
         self.assertTrue(wheel.enabled())
         self.assertFalse(self.runs or self.changes)
 
+    def test_v2_activation_and_legacy_resume_share_paused_state_without_running_cards(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("6"*64)
+        panel=RemotePanel(self.bridge)
+        wheel.pause("OWNER_PAUSED")
+        self.assertTrue(panel.orbit_control("power",{"enabled":True},"synthetic-owner")["enabled"])
+        with self.bridge.db() as db:
+            self.assertEqual(db.execute("SELECT enabled,reason FROM wheel_control WHERE id=1").fetchone()[:],(1,None))
+        self.assertFalse(self.runs or self.changes)
+        panel.orbit_control("pause",{"confirmation":"PAUSAR FÁBRICA"},"synthetic-owner")
+        self.assertFalse(wheel.enabled())
+        self.assertTrue(wheel.toggle(True)["enabled"])  # /legacy uses the same toggle.
+        panel.orbit_control("stop",{"confirmation":"DETENER FÁBRICA"},"synthetic-owner")
+        self.assertFalse(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)
+
+    def test_paused_live_queue_rejects_unlinked_account_without_running_cards(self):
+        wheel=self.bridge.factory.wheel
+        wheel.activate_live("6"*64)
+        wheel.pause("OWNER_PAUSED")
+        self.codex_identity=self.confirmed_identity="different-synthetic-account"
+        with self.assertRaises(BridgeError) as denied:
+            RemotePanel(self.bridge).orbit_control("power",{"enabled":True},"synthetic-owner")
+        self.assertEqual(denied.exception.code,"WHEEL_CODEX_SESSION_CHANGED")
+        self.assertFalse(wheel.enabled())
+        self.assertFalse(self.runs or self.changes)
+
     def test_legacy_agent_title_requires_a_signed_live_grant(self):
         first=self.cards["a"*24]
         first["name"]="V2-A2 antigua etiqueta"
