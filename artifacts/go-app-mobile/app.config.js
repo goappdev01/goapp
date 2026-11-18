@@ -9,6 +9,13 @@ const EXPO_GO_MACHINES = {
 // Change only the Expo Go display name; retain the app/project identity.
 module.exports = ({ config }) => {
   const port = process.env.RCT_METRO_PORT;
+  // The launcher may set a process-local Expo Go label without changing app identity.
+  const localName = (port === "8088" || port === "8089")
+    ? process.env.GO_EXPO_DISPLAY_NAME?.trim()
+    : undefined;
+  if (localName) {
+    return { ...config, name: localName };
+  }
   const machine = EXPO_GO_MACHINES[hostname().toUpperCase()];
   if (machine && (port === "8088" || port === "8089")) {
     return { ...config, name: `GO APP ${port} ${machine}` };
