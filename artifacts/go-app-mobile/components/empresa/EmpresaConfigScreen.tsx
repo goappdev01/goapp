@@ -935,9 +935,6 @@ function StepUbicacion({ onFocusField }: { onFocusField?: (input: TextInputInsta
           </View>
         );
       })}
-      <Text style={{ color: GRAY, fontSize: 11, lineHeight: 16, marginBottom: 12 }}>
-        {lang === "en" ? "A valid number format does not confirm WhatsApp availability." : "Un formato válido no confirma que el número tenga WhatsApp."}
-      </Text>
     </View>
   );
 }

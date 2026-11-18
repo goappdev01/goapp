@@ -371,7 +371,7 @@ export function PerfilPanel({ visible, onClose, onLogout, onOpenEmpresa, onOpenH
                 <Feather name="chevron-right" size={16} color="#D1D5DB" />
               </TouchableOpacity>
 
-              {/* Cambiar contexto Usuario / Empresa */}
+              {/* Cambiar de usuario entre los contextos disponibles */}
               <TouchableOpacity
                 activeOpacity={0.75}
                 onPress={() => {
@@ -384,7 +384,7 @@ export function PerfilPanel({ visible, onClose, onLogout, onOpenEmpresa, onOpenH
                   <Feather name="refresh-cw" size={18} color="#C4883A" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.dockLabel}>Cambiar contexto</Text>
+                  <Text style={s.dockLabel}>Cambiar de usuario</Text>
                   <Text style={s.dockSub}>Usuario ↔ Empresa</Text>
                 </View>
                 <Feather name="chevron-right" size={16} color="#D1D5DB" />

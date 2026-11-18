@@ -243,7 +243,7 @@ async function wizardFixture(){
 test('the existing business wizard completes all eight steps and reopens with the same company, hours and timezone',async()=>{
  const h=await wizardFixture(),f=h.dataFixture();await f.store.updateConfig({businessName:'Existing company',address:'Existing address',phone:'912345678',sectorId:'belleza',subId:'peluqueria',timezone:'Atlantic/Canary',activeDays:[0],daySchedules:{'0':{shift1:{from:'10:15',to:'14:30',active:true},shift2:{from:'16:00',to:'20:00',active:false}}},services:[{name:'Corte',duration:30,price:20,capacity:1}],plantillaItems:[{id:'pro',label:'Puesto',emoji:'',count:1,staffNames:['Profesional']}]});
  await f.store.saveFloorPlan(h.floor(f.store));const before=plain(f.store.getSnapshot().config),ui=h.uiFixture(f),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;let finished=0;
- for(let step=0;step<8;step++){const tree=ui.render(Screen,{onBack(){},startAtSteps:true,contextNavigation:'Cambiar contexto',onFinalizarConfig:()=>finished++});assert.equal(h.text(tree).includes('Cambiar contexto'),false);const next=h.button(tree,step===7?'biz_finish_config':'biz_next');assert.ok(next,'Navigation for step '+step);next.props.onPress();await h.turn();}
+ for(let step=0;step<8;step++){const tree=ui.render(Screen,{onBack(){},startAtSteps:true,contextNavigation:'Cambiar contexto',onFinalizarConfig:()=>finished++});assert.equal(h.text(tree).includes('Cambiar contexto'),false);assert.equal(h.text(tree).includes('Un formato válido no confirma'),false);const next=h.button(tree,step===7?'biz_finish_config':'biz_next');assert.ok(next,'Navigation for step '+step);next.props.onPress();await h.turn();}
  assert.equal(finished,1);const reopened=f.make();await reopened.load();const saved=plain(reopened.getSnapshot().config);assert.deepEqual(saved.completedSteps,[0,1,2,3,4,5,6,7]);
  assert.equal(saved.businessId,before.businessId);assert.equal(saved.timezone,before.timezone);assert.deepEqual(saved.daySchedules,before.daySchedules);assert.deepEqual(saved.services,before.services);assert.equal(ui.calls.external,0);
 });
@@ -344,6 +344,8 @@ test('location and all three contacts persist after compact-header navigation, w
  const Panel=ui.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel;let contextOpens=0;
  const panelProps={visible:true,previewReadOnly:true,onOpenContext:()=>contextOpens++,onClose(){}};
  ui.render(Panel,panelProps);tree=ui.render(Panel,panelProps);h.button(tree,'context_change').props.onPress();assert.equal(contextOpens,1);
+ assert.match(fs.readFileSync('i18n/translations.ts','utf8'),/context_change: "Cambiar de usuario"/);
+ assert.match(fs.readFileSync('components/perfil/PerfilPanel.tsx','utf8'),/>Cambiar de usuario<\/Text>/);
  assert.equal(ui.calls.external,0);
 });
 
