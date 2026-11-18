@@ -361,27 +361,30 @@ test('compact contact rows load legacy numbers, share the country selector and p
   const step=h.component(ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:1}),'StepUbicacion');
   const form=ui.render(step.type,step.props);
   const rows=fields.map(field=>byTestId(h,form,`config-contact-${field}`));
+  assert.equal(h.text(form).includes('biz_contact'),false);
   assert.equal(h.nodes(form).filter(node=>node.props.accessibilityLabel?.startsWith('Elegir país y prefijo telefónico')).length,3);
   for(const [i,row] of rows.entries()) {
-   const [type,prefix,input]=row.children;
+   const [type,input]=row.children;
+   const [label,prefix]=type.children;
    assert.equal(row.props.style.flexDirection,'row');
    assert.equal(row.props.style.flexWrap,'wrap');
-   assert.match(h.text(type),new RegExp(['Fijo','Móvil','WhatsApp'][i]));
+   assert.equal(h.text(label),['biz_landline','Móvil','WhatsApp'][i]);
+   assert.equal(prefix.children[0].props.name,['phone','smartphone','message-circle'][i]);
    assert.equal(h.text(prefix).match(/\+34/g)?.length,1);
    assert.equal(prefix.props.style.minHeight,44);
    assert.equal(input.props.value,['912345678','612345678','612345679'][i]);
    assert.equal(input.props.keyboardType,'phone-pad');
    const inputStyle=Object.assign({},...input.props.style);
    assert.equal(inputStyle.minHeight,44);
-   assert.equal(inputStyle.flexGrow,1);
-   assert.equal(inputStyle.flexBasis,112*fontScale);
+   assert.equal(inputStyle.marginLeft,'auto');
+   assert.equal(inputStyle.flexBasis,128*fontScale);
    ui.focusInput(input);
   }
  }
  const ui=h.uiFixture(f),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
  const step=h.component(ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:1}),'StepUbicacion');
  const row=field=>byTestId(h,ui.render(step.type,step.props),`config-contact-${field}`);
- row('whatsapp').children[1].props.onPress();
+ row('whatsapp').children[0].children[1].props.onPress();
  ui.alerts.at(-1)[2].find(option=>option.text.endsWith(' +44')).onPress();
  await h.turn();
  for(const [field,pasted,national,normalized] of [
@@ -389,10 +392,10 @@ test('compact contact rows load legacy numbers, share the country selector and p
   ['mobile','07700 900123','7700900123','mobileE164'],
   ['whatsapp','0044 7700 900124','7700900124','whatsappE164'],
  ]) {
-  assert.match(h.text(row(field).children[1]),/\+44/);
-  row(field).children[2].props.onChangeText(pasted);
+  assert.match(h.text(row(field).children[0].children[1]),/\+44/);
+  row(field).children[1].props.onChangeText(pasted);
   await h.turn();
-  assert.equal(row(field).children[2].props.value,national);
+  assert.equal(row(field).children[1].props.value,national);
   const reopened=f.make();
   await reopened.load();
   assert.equal(reopened.getSnapshot().config[field],national);

@@ -803,7 +803,7 @@ function StepUbicacion({ onFocusField }: { onFocusField?: (input: TextInputInsta
   const contactInputs = useRef<Partial<Record<"phone" | "mobile" | "whatsapp", TextInputInstance | null>>>({});
   const { t, lang } = useLanguage();
   const { fontScale } = useWindowDimensions();
-  const contactInputWidth = Math.ceil(112 * Math.max(1, fontScale));
+  const contactInputWidth = Math.ceil(128 * Math.max(1, fontScale));
   const { saveDeviceCoordinates, beginLocationReturn, consumeLocationReturn, finishLocationReturn } = useOwnerBusinessDemo();
   const { config, updateConfig, demo } = useBusinessConfig();
   const [gpsBusy, setGpsBusy] = useState(false);
@@ -904,24 +904,22 @@ function StepUbicacion({ onFocusField }: { onFocusField?: (input: TextInputInsta
       <TouchableOpacity activeOpacity={0.85} disabled={gpsBusy} onPress={handleGPS} style={[c.gpsBtn, gpsBusy && { opacity: 0.5 }]}>
         <Feather name="navigation" size={15} color={GREEN} /><Text style={c.gpsBtnTxt}>{t("biz_use_current_location")}</Text>
       </TouchableOpacity>
-      <Text style={[c.sectionLabel, { marginBottom: 8 }]}>{t("biz_contact")}</Text>
       {contacts.map(contact => {
         const value = config[contact.field] ?? "";
         const checked = validateBusinessPhone(value, country, contact.kind);
-        const shortLabel = contact.field === "whatsapp" ? "WhatsApp"
-          : contact.field === "phone" && lang !== "en" ? "Fijo" : contact.label;
+        const shortLabel = contact.field === "whatsapp" ? "WhatsApp" : contact.label;
         return (
           <View key={contact.field} style={[c.sectionCard, c.contactCard]}>
             <View testID={`config-contact-${contact.field}`} style={c.contactRow}>
               <View style={c.contactType}>
-                <Feather name={contact.icon} size={15} color={contact.color} accessible={false} />
                 <Text style={c.contactLabel}>{shortLabel}</Text>
+                <TouchableOpacity accessibilityRole="button"
+                  accessibilityLabel={`${lang === "en" ? "Choose phone country and calling code" : "Elegir país y prefijo telefónico"}: ${contact.label}, ${selectedCountry.countryName}, ${selectedCountry.prefix}`}
+                  onPress={selectCountry} style={c.contactPrefix}>
+                  <Feather name={contact.icon} size={15} color={contact.color} accessible={false} />
+                  <Text style={c.contactPrefixText}>{selectedCountry.flag} {selectedCountry.prefix} ▾</Text>
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity accessibilityRole="button"
-                accessibilityLabel={`${lang === "en" ? "Choose phone country and calling code" : "Elegir país y prefijo telefónico"}: ${contact.label}, ${selectedCountry.countryName}, ${selectedCountry.prefix}`}
-                onPress={selectCountry} style={c.contactPrefix}>
-                <Text style={c.contactPrefixText}>{selectedCountry.flag} {selectedCountry.prefix} ▾</Text>
-              </TouchableOpacity>
               <TextInput ref={input => { contactInputs.current[contact.field] = input; }}
                 onFocus={() => { const input = contactInputs.current[contact.field]; if (input) onFocusField?.(input); }}
                 style={[c.nameInput, c.contactInput, { flexBasis: contactInputWidth }]} value={businessPhoneInput(value, country)}
@@ -3064,16 +3062,15 @@ const c = StyleSheet.create({
   },
   contactCard: { paddingHorizontal: 8, paddingVertical: 4, marginBottom: 6 },
   contactRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 6, rowGap: 4 },
-  contactType: { flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "100%" },
-  contactLabel: { color: TEXT, fontSize: 13, fontWeight: "700", flexShrink: 1 },
+  contactType: { alignItems: "flex-start", maxWidth: "100%" },
+  contactLabel: { color: TEXT, fontSize: 12, fontWeight: "700" },
   contactPrefix: {
-    minHeight: 44, minWidth: 44, maxWidth: "100%", justifyContent: "center",
-    paddingHorizontal: 4, borderWidth: 1, borderColor: BORDER, borderRadius: 8,
+    minHeight: 44, minWidth: 44, maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 5,
   },
-  contactPrefixText: { fontSize: 13, color: TEXT },
+  contactPrefixText: { fontSize: 13, color: TEXT, flexShrink: 1 },
   contactInput: {
-    flexGrow: 1, flexShrink: 1, minWidth: 104, minHeight: 44,
-    paddingHorizontal: 8, paddingVertical: 8, marginTop: 0,
+    flexShrink: 1, minWidth: 104, maxWidth: "100%", minHeight: 44,
+    paddingHorizontal: 8, paddingVertical: 8, marginTop: 0, marginLeft: "auto",
   },
   charCount:    { fontSize: 11, color: DIM, textAlign: "right", marginTop: 4 },
 
