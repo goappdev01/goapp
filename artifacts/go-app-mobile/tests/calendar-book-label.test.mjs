@@ -5,13 +5,23 @@ import { ast, find, transpile } from './helpers/calendar-container-fixture.mjs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 const require=createRequire(import.meta.url),ts=require('typescript');
-const booking=find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='TouchableOpacity'&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='accessibilityLabel'&&a.initializer?.getText(ast)==='{t("biz_book_btn")}'));
-function render(){let booked=0,diagnostic=0;const scope={exports:{},React:{createElement:(type,props,...children)=>({type,props,children})},TouchableOpacity:'Button',Text:'Text',GO_ASSISTANT_LABEL:{color:'#ffffff'},t:()=> 'Reservar',Haptics:{impactAsync:async()=>{},ImpactFeedbackStyle:{Medium:'medium',Heavy:'heavy'}},openCalendarReservation:()=>booked++,setDiagBookingOpen:()=>diagnostic++};
+const booking=find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='TouchableOpacity'&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='accessibilityLabel'&&a.initializer?.getText(ast)==='{t("cal_book_new_accessibility")}'));
+function render(){let booked=0,diagnostic=0;const scope={exports:{},React:{createElement:(type,props,...children)=>({type,props,children})},TouchableOpacity:'Button',Text:'Text',GO_ASSISTANT_LABEL:{color:'#ffffff'},t:key=>key==='cal_book_new_btn'?'RESERVAR +':'Iniciar otra reserva',Haptics:{impactAsync:async()=>{},ImpactFeedbackStyle:{Medium:'medium',Heavy:'heavy'}},openCalendarReservation:()=>booked++,setDiagBookingOpen:()=>diagnostic++};
  vm.runInNewContext(transpile('exports.button=('+booking.getText(ast)+');'),scope);return{button:scope.exports.button,counts:()=>[booked,diagnostic]};}
 test('the complete booking label stays on one fitted line, centered, with both existing actions',()=>{
  const {button,counts}=render();button.props.onPress();button.props.onLongPress();assert.deepEqual(counts(),[1,1]);
- const text=button.children.find(c=>c?.type==='Text');assert.equal(text.children.join(''),'RESERVAR');assert.equal(text.props.numberOfLines,1);assert.equal(text.props.adjustsFontSizeToFit,true);
+ const text=button.children.find(c=>c?.type==='Text');assert.equal(text.children.join(''),'RESERVAR +');assert.equal(text.props.numberOfLines,1);assert.equal(text.props.adjustsFontSizeToFit,true);
  assert.equal(text.props.style.textAlign,'center');assert.equal(text.props.style.textAlignVertical,'center');assert.equal(button.props.style.alignItems,'center');assert.equal(button.props.style.justifyContent,'center');
+ assert.equal(button.props.accessibilityLabel,'Iniciar otra reserva');assert.equal(text.props.style.fontSize,13);
+});
+
+test('the creation action has translated labels and high white-on-green contrast',()=>{
+ const source=fs.readFileSync('i18n/translations.ts','utf8');
+ for(const label of ['RESERVAR +','BOOK +','Iniciar otra reserva','Start another booking'])assert.ok(source.includes('"'+label+'"'));
+ const {button}=render();
+ const rgb=button.props.style.backgroundColor.slice(1).match(/../g).map(x=>parseInt(x,16)/255).map(x=>x<=.04045?x/12.92:((x+.055)/1.055)**2.4);
+ const luminance=rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;
+ assert.ok(1.05/(luminance+.05)>=4.5);
 });
 test('the real Inter Black glyph widths fit the unchanged 104-point iPhone button',()=>{
  const font=fs.readFileSync('node_modules/@expo-google-fonts/inter/900Black/Inter_900Black.ttf'),tables={};
@@ -26,7 +36,7 @@ test('the real Inter Black glyph widths fit the unchanged 104-point iPhone butto
  }assert.ok(glyph);return sum+font.readUInt16BE(tables.hmtx+4*Math.min(glyph,metrics-1))/units*size+spacing;},0);
  const {button}=render(),label=button.children.find(c=>c?.type==='Text'),s=button.props.style,p=label.props;
  const available=s.minWidth-2*s.paddingHorizontal-2*s.borderWidth;
- assert.ok(width('RESERVAR',p.style.fontSize,p.style.letterSpacing)<=available,'Fits without shrinking at the minimum actual width');
- assert.ok(width('RESERVAR',p.style.fontSize*p.maxFontSizeMultiplier*p.minimumFontScale,p.style.letterSpacing)<=available,'Fits at the permitted system font multiplier using local text fitting');
- assert.equal(s.height,52);assert.equal(s.backgroundColor,'#C8A037');
+ assert.ok(width('RESERVAR +',p.style.fontSize,p.style.letterSpacing)<=available,'Fits without shrinking at the minimum actual width');
+ assert.ok(width('RESERVAR +',p.style.fontSize*p.maxFontSizeMultiplier*p.minimumFontScale,p.style.letterSpacing)<=available,'Fits at the permitted system font multiplier using local text fitting');
+ assert.equal(s.height,52);assert.equal(s.backgroundColor,'#15803D');
 });

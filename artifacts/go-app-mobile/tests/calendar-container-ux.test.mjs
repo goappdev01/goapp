@@ -93,7 +93,7 @@ test('clock calendar and close controls have their own footer and mirror handedn
 test('bottom controls emphasize RESERVAR, fit a narrow viewport and retain every action', () => {
   const calls = [];
   const tree = renderFragment(byId('calendar-actions'), {
-    GO_GOLD: '#C8A037', GO_ASSISTANT_LABEL: { color: '#FFFFFF' }, t: key => ({ new_task_label: 'Nueva tarea', cal_today_btn: 'HOY', biz_book_btn: 'RESERVAR' })[key],
+    GO_GOLD: '#C8A037', GO_ASSISTANT_LABEL: { color: '#FFFFFF' }, t: key => ({ new_task_label: 'Nueva tarea', cal_today_btn: 'HOY', biz_book_btn: 'RESERVAR', cal_book_new_btn: 'RESERVAR +', cal_book_new_accessibility: 'Iniciar otra reserva' })[key],
     Haptics: { selectionAsync: async () => {}, impactAsync: async () => {}, ImpactFeedbackStyle: { Medium: 'medium', Heavy: 'heavy' } },
     openCalendarNote: () => calls.push(['task', true]), setCalScrollToTodayToken: update => calls.push(['today', update(7)]),
     openCalendarReservation: () => calls.push(['book', true]), setDiagBookingOpen: value => calls.push(['diagnostics', value]),
@@ -102,7 +102,7 @@ test('bottom controls emphasize RESERVAR, fit a narrow viewport and retain every
   const actions = nodes(tree, n => n.type === 'TouchableOpacity'); assert.equal(actions.length, 4);
   const [task, today, reserve, go] = actions;
   assert.equal(nodes(task, n => n.type === 'MaterialCommunityIcons')[0].props.name, 'note-edit-outline');
-  assert.equal(textOf(today), 'HOY'); assert.equal(textOf(reserve), 'RESERVAR'); assert.equal(textOf(go), 'GO');
+  assert.equal(textOf(today), 'HOY'); assert.equal(textOf(reserve), 'RESERVAR +'); assert.equal(textOf(go), 'GO');
   assert.ok(reserve.props.style.height > today.props.style.height);
   assert.ok(nodes(reserve, n => n.type === 'Text')[0].props.style.fontSize > nodes(today, n => n.type === 'Text')[0].props.style.fontSize);
   assert.ok(actions.every(action => action.props.hitSlop * 2 < tree.props.style.gap));

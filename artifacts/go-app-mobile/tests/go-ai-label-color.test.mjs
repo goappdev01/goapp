@@ -49,12 +49,12 @@ test('Landing approved white GO foreground remains present',()=>{
  assert.ok(label);assert.match(attr(label.openingElement,'style').getText(tree),/color: "#ffffff"/);
 });
 
-test('Calendar RESERVAR uses white on the approved gold',()=>{
+test('Calendar RESERVAR + uses white on green',()=>{
  const tree=parsed('app/index.tsx');
- const label=all(tree,n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(tree)==='Text'&&n.getText(tree).includes('t("biz_book_btn").toUpperCase()'))[0];
+ const label=all(tree,n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(tree)==='Text'&&n.getText(tree).includes('t("cal_book_new_btn")'))[0];
  assert.ok(label);
  assert.equal(value(attr(label.openingElement,'style'),tree).color,'#FFFFFF');
- assert.equal(value(attr(label.parent.openingElement,'style'),tree).backgroundColor,colors.GO_ASSISTANT_GOLD);
+ assert.equal(value(attr(label.parent.openingElement,'style'),tree).backgroundColor,'#15803D');
  assert.equal(style('components/booking-assistant/BookingAssistantUI.tsx','goButton').backgroundColor,colors.GO_ASSISTANT_GOLD);
  assert.equal(style('components/MessagesScreen.tsx','actionBtnGo').backgroundColor,colors.GO_ASSISTANT_GOLD);
 });

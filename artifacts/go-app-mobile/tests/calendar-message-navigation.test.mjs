@@ -63,15 +63,15 @@ const palette={exports:{}};vm.runInNewContext(transpile(readFileSync('theme/goAs
 for(const customer of [false,true])test(`${customer?'customer after booking':'personal from Landing'}: original four controls, styles and working actions remain together`,()=>{
  const calls=[];let token=3;const scope={exports:{},...palette.exports,React:{createElement:tree},View:'View',Text:'Text',TouchableOpacity:'TouchableOpacity',MaterialCommunityIcons:'Icon',
   goView:{view:'USER'},adminAccess:{},calQuickCreateOpen:false,isBusinessMode:false,demoCustomerCalendarSelected:customer,GO_GOLD:'#C8A037',lang:'es',
-  t:k=>({new_task_label:'NOTAS',cal_today_btn:'HOY',biz_book_btn:'Reservar'}[k]??k),Haptics:{selectionAsync:()=>{},impactAsync:async()=>{},ImpactFeedbackStyle:{Medium:1,Heavy:2}},
+  t:k=>({new_task_label:'NOTAS',cal_today_btn:'HOY',biz_book_btn:'Reservar',cal_book_new_btn:'RESERVAR +',cal_book_new_accessibility:'Iniciar otra reserva'}[k]??k),Haptics:{selectionAsync:()=>{},impactAsync:async()=>{},ImpactFeedbackStyle:{Medium:1,Heavy:2}},
   openCalendarNote:()=>calls.push(['notes',true]),openCalendarReservation:()=>calls.push(['reserve',true]),setCalQuickCreateOpen:v=>calls.push(['notes',v]),setCalScrollToTodayToken:fn=>{token=fn(token);},setDemoCalendarFocus:v=>calls.push(['focus',v]),
   getNow:()=>new Date(2030,2,15,11,37),getToday:()=>new Date(2030,2,15),formatISODate:()=> '2030-03-15',Date,
   setShowBookingFromCal:v=>calls.push(['reserve',v]),setDiagBookingOpen:v=>calls.push(['diagnostic',v]),openAi:()=>calls.push(['ai']),startVoiceMode:()=>calls.push(['voice'])};
  vm.runInNewContext(transpile('exports.bar=('+actions.getText(ast)+');'),scope);
- const buttons=nodes(scope.exports.bar).filter(n=>n.type==='TouchableOpacity');assert.equal(buttons.length,4);assert.equal(buttons[0].props.accessibilityLabel,'Notas');assert.deepEqual(buttons.map(n=>n.props.testID==='calendar-notes-open'?'NOTAS':label(n)),['NOTAS','HOY','RESERVAR','GO']);
+ const buttons=nodes(scope.exports.bar).filter(n=>n.type==='TouchableOpacity');assert.equal(buttons.length,4);assert.equal(buttons[0].props.accessibilityLabel,'Notas');assert.deepEqual(buttons.map(n=>n.props.testID==='calendar-notes-open'?'NOTAS':label(n)),['NOTAS','HOY','RESERVAR +','GO']);
  buttons.forEach(n=>n.props.onPress());assert.deepEqual(calls.filter(x=>x[0]!=='focus'),[['notes',true],['reserve',true],['ai']]);assert.equal(token,4);
  if(customer){const focus=calls.find(x=>x[0]==='focus')[1];assert.equal(focus.dateISO,'2030-03-15');assert.equal(focus.timeHHMM,'11:37');}
- assert.equal(buttons[0].props.style.width,44);assert.equal(buttons[1].props.style.height,42);assert.equal(buttons[2].props.style.height,52);assert.equal(buttons[2].props.style.backgroundColor,'#C8A037');assert.equal(buttons[3].props.style.width,44);
+ assert.equal(buttons[0].props.style.width,44);assert.equal(buttons[1].props.style.height,42);assert.equal(buttons[2].props.style.height,52);assert.equal(buttons[2].props.style.backgroundColor,'#15803D');assert.equal(buttons[3].props.style.width,44);
  let p=actions;while(p){if(ts.isConditionalExpression(p))assert.notEqual(p.condition.getText(ast),'demoCustomerCalendarSelected','Customer navigation must not replace the bar');p=p.parent;}
  assert.ok(!ast.text.includes('testID="calendar-new-reservation"'),'No additional replacement or duplicated reservation control');
  const customerCalendar=find(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='DemoCustomerCalendar');assert.ok(customerCalendar.getText(ast).includes('scrollToTodayToken={calScrollToTodayToken}'));

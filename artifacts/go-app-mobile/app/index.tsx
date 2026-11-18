@@ -20472,7 +20472,7 @@ function HomeScreenContent() {
               >
                 <Text style={{ color: "#4A80BD", fontSize: 9, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.2 }}>{t('cal_today_btn')}</Text>
               </TouchableOpacity>
-              {/* RESERVAR — amarillo: crear algo nuevo. Long-press → panel diagnóstico booking */}
+              {/* RESERVAR + — iniciar otra reserva. Long-press → panel diagnóstico booking */}
               <TouchableOpacity
                 onPress={openCalendarReservation}
                 onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {}); setDiagBookingOpen(true); }}
@@ -20480,10 +20480,10 @@ function HomeScreenContent() {
                 activeOpacity={0.8}
                 hitSlop={2}
                 accessibilityRole="button"
-                accessibilityLabel={t("biz_book_btn")}
-                style={{ flexGrow: 1, flexShrink: 1, minWidth: 104, maxWidth: 180, paddingHorizontal: 16, height: 52, borderRadius: 18, backgroundColor: "#C8A037", borderWidth: 1.5, borderColor: "#F8DF8B", alignItems: "center", justifyContent: "center" }}
+                accessibilityLabel={t("cal_book_new_accessibility")}
+                style={{ flexGrow: 1, flexShrink: 1, minWidth: 104, maxWidth: 180, paddingHorizontal: 8, height: 52, borderRadius: 18, backgroundColor: "#15803D", borderWidth: 1.5, borderColor: "#15803D", alignItems: "center", justifyContent: "center" }}
               >
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2} style={{ ...GO_ASSISTANT_LABEL, fontSize: 12, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.2, maxWidth: "100%", flexShrink: 1, textAlign: "center", textAlignVertical: "center", includeFontPadding: false }}>{t("biz_book_btn").toUpperCase()}</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2} style={{ ...GO_ASSISTANT_LABEL, fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0, maxWidth: "100%", flexShrink: 1, textAlign: "center", textAlignVertical: "center", includeFontPadding: false }}>{t("cal_book_new_btn")}</Text>
               </TouchableOpacity>
               {/* IA */}
               <TouchableOpacity

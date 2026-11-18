@@ -39,11 +39,11 @@ test('EMPRESA fits the real Inter glyphs in all three diameters, without moving 
  }
 });
 test('Calendar retains the original named RESERVAR button and route, without a replacement control',()=>{
- const button=find(ast,n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='TouchableOpacity'&&attr(n,'accessibilityLabel')?.getText(ast)==='{t("biz_book_btn")}');
- const calls=[],scope={exports:{},React,TouchableOpacity:'TouchableOpacity',Text:'Text',t:()=> 'Reservar',Haptics:{impactAsync:async()=>{},ImpactFeedbackStyle:{Medium:1,Heavy:2}},setShowBookingFromCal:value=>calls.push(['open',value]),setDiagBookingOpen:value=>calls.push(['diagnostic',value])};
+ const button=find(ast,n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='TouchableOpacity'&&attr(n,'accessibilityLabel')?.getText(ast)==='{t("cal_book_new_accessibility")}');
+ const calls=[],scope={exports:{},GO_ASSISTANT_LABEL:{color:'#FFFFFF'},React,TouchableOpacity:'TouchableOpacity',Text:'Text',t:key=>key==='cal_book_new_btn'?'RESERVAR +':'Iniciar otra reserva',Haptics:{impactAsync:async()=>{},ImpactFeedbackStyle:{Medium:1,Heavy:2}},openCalendarReservation:()=>calls.push(['open',true]),setShowBookingFromCal:value=>calls.push(['open',value]),setDiagBookingOpen:value=>calls.push(['diagnostic',value])};
  assert.ok(button);assert.ok(byId(ast,'calendar-actions'));assert.equal(byId(ast,'calendar-new-reservation'),undefined);
  vm.runInNewContext(compile('exports.button=('+button.getText(ast)+');'),scope);const b=scope.exports.button;
- assert.equal(text(b),'RESERVAR');assert.equal(b.props.style.borderColor,'#F8DF8B');assert.equal(b.props.style.height,52);assert.ok(b.props.style.maxWidth<=180);assert.ok(b.props.activeOpacity<1);
+ assert.equal(text(b),'RESERVAR +');assert.equal(b.props.style.borderColor,'#15803D');assert.equal(b.props.style.height,52);assert.ok(b.props.style.maxWidth<=180);assert.ok(b.props.activeOpacity<1);
  b.props.onPress();b.props.onLongPress();assert.deepEqual(calls,[['open',true],['diagnostic',true]]);
 });
 
