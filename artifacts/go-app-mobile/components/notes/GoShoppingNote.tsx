@@ -32,9 +32,19 @@ const money=(n:number,currency:string)=>n.toLocaleString("es-ES",{minimumFractio
 const shoppingPositions=new Map<string,number>();
 export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClose,closeRequested,initialListId}:Props){
   const admin=useAdminAccess(),view=useGoView();
-  // ADMIN keeps its own identity/context. Permission changes invalidate every existing active() guard.
-  const ready=scopeReady&&(scope?.context!=="live:ADMIN"||(view.view==="ADMIN"&&view.isAdminView
-    &&admin.allowed&&!admin.checking&&!admin.unavailable&&admin.userId===scope.userId));
+  const isAdminView=view.view==="ADMIN";
+  const authorizedAdmin=!!scope && view.isAdminView && admin.allowed
+    && !admin.checking && !admin.unavailable && admin.userId===scope.userId;
+  const personalScope=scope?.context==="live:USER" || scope?.context==="demo:USER";
+  // A retained scope from the previous view must never activate its lists or actions.
+  const ready=scopeReady && (isAdminView ? authorizedAdmin && scope?.context==="live:ADMIN" : view.view==="USER" && personalScope);
+  const changingScope=(isAdminView && authorizedAdmin) || (view.view==="USER" && scope?.context==="live:ADMIN");
+  const accessMessage=!scopeReady || (isAdminView && admin.checking) || changingScope
+    ? "Verificando tu acceso a Compras…"
+    : !scope ? "Inicia sesión en GO para usar Compras."
+    : isAdminView && admin.unavailable ? "No se pudo verificar el acceso ADMIN a Compras."
+    : isAdminView ? "Necesitas acceso ADMIN verificado para usar Compras."
+    : "Compras está disponible en tu perfil personal o en ADMIN.";
   const insets=useSafeAreaInsets(),keyboard=useGoNoteKeyboard(visible);
   const viewport=useWindowDimensions();
   const [entry,setEntry]=useState<GoEntry|null>(null),[lists,setLists]=useState<GoEntry[]>([]),[listName,setListName]=useState(""),[error,setError]=useState(""),[restoreId,setRestoreId]=useState<string|null>(null),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false);
@@ -69,7 +79,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
   }),[]);
   const validView=visible&&ready&&scope&&entry&&noteInScope(entry,scope),doc=validView?entry.note?.shopping:undefined;
   async function operate(input:InputOperation,blocking=true){
-    if(!scope||!ready||!entry||!noteInScope(entry,scope))throw Error("Espera a verificar tu cuenta personal.");
+    if(!scope||!ready||!entry||!noteInScope(entry,scope))throw Error("Espera a verificar tu acceso a Compras.");
     if(blocking&&lock.current)throw Error("Espera a que termine el guardado.");
     const expected=identity,epoch=generation.current,valid=()=>active(expected,epoch);
     const signature=JSON.stringify(input),operationId=retries.current.get(signature)||shoppingId();retries.current.set(signature,operationId);
@@ -194,7 +204,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
         </View><TouchableOpacity testID="shopping-active-list" accessibilityRole="button" accessibilityLabel="Gestionar listas de compra" onPress={()=>{setListName("");setUtility("lists");void refreshLists();}} style={s.activeListBar}><Text numberOfLines={1} style={s.activeListName}>{entry?.note?.title||"Compras"}</Text><Text style={s.savedLabel}>Guardado · Mis listas ›</Text></TouchableOpacity></>:orbitHome?<LinearGradient colors={["#ffffff","#e9f4ff","#cfe8ff"]} style={s.orbitBanner}><View style={s.bannerCart}><Feather name="shopping-cart" size={27} color="#fff"/></View><View style={{flex:1}}><Text accessibilityRole="header" style={s.bannerTitle}>GO Compras</Text><Text style={s.bannerSubtitle}>Añadir productos</Text></View><Text style={s.bannerArt}>🧺</Text></LinearGradient>
           :<Text accessibilityRole="header" style={s.heading}>{editor?(editor.expectedRevision?"Editar producto":"Añadir producto"):next?"Habituales":legacy?"Incorporar nota":utility==="assistant"?"GO Compras":utility==="lists"?"Mis listas":utility==="route"?"Ruta de compra":utility==="map"?"Mapa de la tienda":utility==="history"?"Compras realizadas":utility==="store"?"Supermercado":utility==="location"?"Ubicación manual":adding?"Elegir producto":"Compras"}</Text>}
       </View>
-      {!ready||!scope?<Text style={s.message}>{scope?.context==="live:ADMIN"?"Espera a verificar tu sesión y acceso ADMIN para usar Compras.":"Abre el ámbito personal de GO con tu sesión para usar Compras."}</Text>:loading?<Text style={s.message}>Abriendo tu lista personal…</Text>:null}
+      {!ready||!scope?<Text style={s.message}>{accessMessage}</Text>:loading?<Text style={s.message}>Abriendo tu lista personal…</Text>:null}
       {!!error&&<View style={s.message}><Text testID="shopping-error" accessibilityRole="alert" style={s.error}>{error}</Text>{!doc&&restoreId&&button("Restaurar mi lista",confirmRestore,"shopping-restore",true,loading)}{!doc&&restoreId&&button("Crear otra lista",()=>void newList("Compras"),"shopping-create-after-delete",false,loading)}{!doc&&button("Reintentar",()=>setRetry(v=>v+1),"shopping-retry",false,loading)}</View>}
       {doc&&<>
       <View style={[{flex:1,minHeight:0},(panel||adding)&&{display:"none"}]}>

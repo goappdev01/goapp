@@ -108,6 +108,34 @@ test('COMPRAS ADMIN: permission loss hides products and rejects a stale control;
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 
+test('COMPRAS waits for the matching scope when switching between personal and ADMIN',async()=>{
+ const f=await shoppingFixture();let ui;
+ try {
+  const personal=f.disk.scope,scope={userId:personal.userId,context:'live:ADMIN'};
+  const adminAccess={userId:scope.userId,allowed:true,checking:false,unavailable:false};
+  const goView={view:'USER',isAdminView:false};
+  await f.open();await f.add('Solo en perfil personal');
+  ui=await shoppingUI(f,{scope:personal,adminAccess,goView});
+  assert.match(ui.container.textContent,/Solo en perfil personal/);
+  const writes=f.disk.writes;
+  Object.assign(goView,{view:'ADMIN',isAdminView:true});
+  await ui.render({});
+  assert.doesNotMatch(ui.container.textContent,/Solo en perfil personal|Inicia sesión/);
+  assert.equal(ui.hosts.has('shopping-list-scroll'),false);
+  assert.equal(f.disk.writes,writes);
+  await ui.render({scope});
+  await ui.tap('shopping-list');
+  assert.ok(ui.hosts.has('shopping-list-scroll'));
+  assert.doesNotMatch(ui.container.textContent,/Solo en perfil personal/);
+  Object.assign(goView,{view:'USER',isAdminView:false});
+  await ui.render({});
+  assert.equal(ui.hosts.has('shopping-list-scroll'),false);
+  await ui.render({scope:personal});
+  await ui.tap('shopping-list');
+  assert.match(ui.container.textContent,/Solo en perfil personal/);
+ }finally{if(ui)await ui.close();f.disk.close();}
+});
+
 test('COMPRAS ADMIN: account and personal contexts stay isolated; stale writes fail after a session switch',async()=>{
  const f=await shoppingFixture();let ui;try{
   const scope={userId:f.disk.scope.userId,context:'live:ADMIN'},adminAccess={userId:scope.userId,allowed:true,checking:false,unavailable:false},goView={view:'ADMIN',isAdminView:true};
