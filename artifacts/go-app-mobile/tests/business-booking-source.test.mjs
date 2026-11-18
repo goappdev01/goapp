@@ -349,6 +349,58 @@ test('location and all three contacts persist after compact-header navigation, w
  assert.equal(ui.calls.external,0);
 });
 
+test('compact contact rows load legacy numbers, share the country selector and preserve national and international values on reload', async () => {
+ const h=await wizardFixture(), f=h.dataFixture();
+ await f.store.updateConfig({
+  businessName:'Empresa local',sectorId:'belleza',subId:'peluqueria',countryCode:'ES',
+  phone:'+34 912 345 678',mobile:'0034 612 345 678',whatsapp:'612345679',
+ });
+ const fields=['phone','mobile','whatsapp'];
+ for(const [width,fontScale] of [[320,1],[390,1],[430,2]]) {
+  const ui=h.uiFixture(f,{width,fontScale}),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
+  const step=h.component(ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:1}),'StepUbicacion');
+  const form=ui.render(step.type,step.props);
+  const rows=fields.map(field=>byTestId(h,form,`config-contact-${field}`));
+  assert.equal(h.nodes(form).filter(node=>node.props.accessibilityLabel?.startsWith('Elegir país y prefijo telefónico')).length,3);
+  for(const [i,row] of rows.entries()) {
+   const [type,prefix,input]=row.children;
+   assert.equal(row.props.style.flexDirection,'row');
+   assert.equal(row.props.style.flexWrap,'wrap');
+   assert.match(h.text(type),new RegExp(['Fijo','Móvil','WhatsApp'][i]));
+   assert.equal(h.text(prefix).match(/\+34/g)?.length,1);
+   assert.equal(prefix.props.style.minHeight,44);
+   assert.equal(input.props.value,['912345678','612345678','612345679'][i]);
+   assert.equal(input.props.keyboardType,'phone-pad');
+   const inputStyle=Object.assign({},...input.props.style);
+   assert.equal(inputStyle.minHeight,44);
+   assert.equal(inputStyle.flexGrow,1);
+   assert.equal(inputStyle.flexBasis,112*fontScale);
+   ui.focusInput(input);
+  }
+ }
+ const ui=h.uiFixture(f),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
+ const step=h.component(ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:1}),'StepUbicacion');
+ const row=field=>byTestId(h,ui.render(step.type,step.props),`config-contact-${field}`);
+ row('whatsapp').children[1].props.onPress();
+ ui.alerts.at(-1)[2].find(option=>option.text.endsWith(' +44')).onPress();
+ await h.turn();
+ for(const [field,pasted,national,normalized] of [
+  ['phone','+44 20 7946 0958','2079460958','phoneE164'],
+  ['mobile','07700 900123','7700900123','mobileE164'],
+  ['whatsapp','0044 7700 900124','7700900124','whatsappE164'],
+ ]) {
+  assert.match(h.text(row(field).children[1]),/\+44/);
+  row(field).children[2].props.onChangeText(pasted);
+  await h.turn();
+  assert.equal(row(field).children[2].props.value,national);
+  const reopened=f.make();
+  await reopened.load();
+  assert.equal(reopened.getSnapshot().config[field],national);
+  assert.equal(reopened.getSnapshot().config[normalized],'+44'+national);
+  assert.equal(reopened.getSnapshot().config.countryCode,'GB');
+ }
+});
+
 test('the header opens the actual business dropdown and selecting another company preserves both independent configurations', async () => {
  const h=await wizardFixture(),f=h.dataFixture();
  const catalogApi=h.loadPure('data/businessDemoCatalog.ts',{'./businessDemoStore':h.storeModule});
