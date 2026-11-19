@@ -291,7 +291,7 @@ function fixture(kind = "provider", overrides = {}) {
     render(); return settle();
   }
   async function start() { render(); return settle(); }
-  const back=async()=>{const control=buttons(tree).find(node=>node.props.onPress?.name==='handleBackOneLevel');assert.ok(control);control.props.onPress();render();return settle();};
+  const back=async()=>{const control=nodes(tree).find(node=>node.props.testID==='booking-back')??buttons(tree).find(node=>node.props.onPress?.name==='handleBackOneLevel');assert.ok(control);control.props.onPress();render();return settle();};
   return { api, state, calls, alerts, commands, writes, memory, navigation, hooks, start, render, settle, press, back,
     tree: () => tree, setProps: values => { props = { ...props, ...values }; return render(); },
     timers: async () => { const pending = [...timers.values()]; timers.clear(); for (const callback of pending) callback(); return settle(); } };

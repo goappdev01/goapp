@@ -434,3 +434,76 @@ test('DEMO new bookings consecutively choose time once across services, duration
  }
  assert.deepEqual(f.liveCalls,[]);
 });
+
+
+// Native layout adapter: absolute siblings painted after an action win hit testing.
+// Resolve the actual overlay props against representative iPhone sheet bounds;
+// reservation handlers, holds and persistence below are the real implementation.
+function pressAtAction(tree,action,{x,y,width,height}){
+ const ordered=nodes(tree),index=ordered.indexOf(action);
+ const px=(value,total)=>typeof value==='string'&&value.endsWith('%')?parseFloat(value)*total/100:typeof value==='number'?value:undefined;
+ let target=action;
+ for(const candidate of ordered.slice(index+1)){
+  const p=candidate.props,style=flattened(p.style);
+  if(candidate.type!=='TouchableOpacity'||!p.onPress||p.disabled||p.pointerEvents==='none'||style.pointerEvents==='none'||style.position!=='absolute')continue;
+  const w=px(style.width,width),top=px(style.top,height),bottom=px(style.bottom,height),right=px(style.right,width),left=px(style.left,width);
+  if(w===undefined||top===undefined)continue;
+  const l=left??(right===undefined?0:width-right-w),h=px(style.height,height)??height-top-(bottom??0);
+  if(x>=l&&x<=l+w&&y>=top&&y<=top+h)target=candidate;
+ }
+ return target.props.onPress();
+}
+
+test('three triples of iPhone action taps never go back to remaining hours behind the selected HOLD',async()=>{
+ const f=fixture({initialDateISO:'2030-01-07'});await f.configure();
+ await setReservableServices(f,[{name:'Corte DEMO',duration:30,price:12},{name:'Tinte DEMO',duration:60,price:20}]);
+ const dates=['07','08','09','10','11','14','15','16','17'],outcomes=[];
+ for(let round=0;round<9;round++){
+  f.props.visible=false;f.render(f.Overlay,f.props);f.props.initialDateISO='2030-01-'+dates[round];f.props.visible=true;
+  let tree=await services(f);button(tree,'Corte DEMO').props.onPress();tree=f.render(f.Overlay,f.props);
+  if(round%3===1){button(tree,'Tinte DEMO').props.onPress();tree=f.render(f.Overlay,f.props);}
+  button(tree,'save').props.onPress();tree=f.render(f.Overlay,f.props);
+  button(tree,round%3===2?'biz_no_preference':'Raul 1 GO PRUEBA').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
+  await button(tree,'09:00').props.onPress();tree=f.render(f.Overlay,f.props);const hold=f.store.getSnapshot().bookings.at(-1);
+  assert.equal(hold.status,'HOLD');assert.ok(button(tree,'BIZ_CONFIRM_BOOKING_BTN'));
+  // AsyncStorage/native writes can finish after the next availability read.
+  const cancel=f.repo.cancelBooking;let release,cancelCalls=0;const slowWrite=new Promise(resolve=>{release=resolve;});
+  f.repo.cancelBooking=async id=>{cancelCalls++;await slowWrite;return cancel(id);};
+  try{
+   const before=f.store.getSnapshot().reservations.length;
+   // First/third contacts are on the right; the middle contact is central.
+   await pressAtAction(tree,button(tree,'BIZ_CONFIRM_BOOKING_BTN'),{width:390,height:763,x:390*[.85,.5,.9][round%3],y:763*.85});
+   f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
+   outcomes.push({attempt:round+1,confirmed:f.store.getSnapshot().reservations.length===before+1&&text(tree).includes('BIZ_BOOKING_CONFIRMED'),cancelCalls,returnedToOtherHours:!!button(tree,'09:30')&&!button(tree,'09:00')});
+  }finally{release();await turn();f.repo.cancelBooking=cancel;}
+ }
+ assert.ok(outcomes.every(row=>row.confirmed&&row.cancelCalls===0),'Actual action dispatch: '+JSON.stringify(outcomes));
+ assert.equal(f.store.getSnapshot().reservations.length,9);assert.equal(new Set(f.store.getSnapshot().reservations.map(r=>r.id)).size,9);assert.deepEqual(f.liveCalls,[]);
+});
+
+
+for(const width of [320,390,430])test('iPhone '+width+': the visual swipe fade lets a lower-right hour tap reach review and keeps explicit Back',async()=>{
+ const f=fixture({viewport:{width,height:844},initialDateISO:'2030-01-07'});await f.configure();
+ let tree=await services(f);button(tree,'Corte DEMO').props.onPress();tree=f.render(f.Overlay,f.props);button(tree,'save').props.onPress();tree=f.render(f.Overlay,f.props);button(tree,'Raul 1 GO PRUEBA').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
+ const sheet=control(tree,'booking-sheet'),guide=control(tree,'booking-swipe-guide');
+ assert.equal(guide.props.pointerEvents,'none');assert.equal(typeof sheet.props.onMoveShouldSetPanResponder,'function');
+ assert.equal(sheet.props.onMoveShouldSetPanResponder({nativeEvent:{pageX:width*.9}},{dy:0,dx:0}),false,'a tap is not a close swipe');
+ await pressAtAction(tree,button(tree,'17:30'),{width,height:763,x:width*.9,y:763*.75});tree=f.render(f.Overlay,f.props);
+ assert.ok(button(tree,'BIZ_CONFIRM_BOOKING_BTN'));assert.equal(f.store.getSnapshot().bookings.length,1);assert.equal(f.store.getSnapshot().bookings[0].startDatetime.slice(11,16),'17:30');
+ control(tree,'booking-back').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
+ assert.equal(f.store.getSnapshot().bookings[0].status,'CANCELLED');assert.ok(button(tree,'17:30'),'the explicit Back action still releases the chosen hour');assert.deepEqual(f.liveCalls,[]);
+});
+
+
+test('the same lower-right action in Proponer cambio sends one proposal and preserves the original reservation',async()=>{
+ const f=fixture({initialDateISO:'2030-01-07'});await f.configure();let tree=await selectSlot(f);
+ await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();const original=f.store.getSnapshot().bookings[0],before=JSON.stringify(original),drafts=[];
+ f.props.visible=false;f.render(f.Overlay,f.props);await turn();
+ f.props.changeSelection=pure('data/bookingChangeAvailability.ts').bookingChangeSelection(f.repo.getCustomerEntries()[0],original);
+ f.props.onProposalSubmit=async draft=>{drafts.push(draft);await f.repo.changeBooking(original.id,f.store.businessId,'customer','propose',{dateISO:draft.slot.startDatetime.slice(0,10),time:draft.slot.startDatetime.slice(11,16),selection:draft.selection,acceptFinancialTerms:true});};
+ f.props.visible=true;tree=await services(f);button(tree,'save').props.onPress();tree=f.render(f.Overlay,f.props);button(tree,'Raul 1 GO PRUEBA').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
+ await button(tree,'10:00').props.onPress();tree=f.render(f.Overlay,f.props);assert.ok(button(tree,'ENVIAR PROPUESTA'));
+ await pressAtAction(tree,button(tree,'ENVIAR PROPUESTA'),{width:390,height:763,x:350,y:650});
+ assert.equal(drafts.length,1);assert.equal(f.store.getSnapshot().bookings.length,1);assert.equal(f.store.getSnapshot().reservations.length,1);
+ const {changeProposal,...saved}=f.store.getSnapshot().bookings[0];assert.deepEqual(JSON.parse(JSON.stringify(saved)),JSON.parse(before));assert.equal(changeProposal.time,'10:00');assert.deepEqual(f.liveCalls,[]);
+});

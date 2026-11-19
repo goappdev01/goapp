@@ -2060,16 +2060,12 @@ export function BookingSearchOverlay({
 
           </Animated.View>
 
-          {/* ── Guía gestual derecha — igual que EmpresaPanel/PerfilPanel ──────
-              Degradado horizontal transparente→blanco en el 25% derecho,
-              mitad inferior del sheet. Tap = retroceder un nivel;
-              swipe-down = close (capturado por rightSwipePan en el sheet).
-              Oculta en paso "confirmed" para no interferir con el botón OK. */}
-          {step!=="search"&&<TouchableOpacity
-            activeOpacity={1}
-            onPress={handleBackOneLevel}
+          {/* The fade is visual only: it must not turn a slot/confirmation tap
+              into Back. The existing navigation buttons and sheet swipe remain. */}
+          {step!=="search"&&<View
+            testID="booking-swipe-guide" pointerEvents="none"
+            accessibilityElementsHidden importantForAccessibility="no-hide-descendants"
             style={{ position: "absolute", right: 0, top: "50%", bottom: servicesFooterVisible ? servicesGuideBottom : 0, width: "25%", opacity: step === "confirmed" ? 0 : 1 }}
-            disabled={step === "confirmed"}
           >
             <LinearGradient
               colors={["transparent", "rgba(255,255,255,0.18)"]}
@@ -2077,7 +2073,7 @@ export function BookingSearchOverlay({
               end={{ x: 1, y: 0.5 }}
               style={{ flex: 1 }}
             />
-          </TouchableOpacity>}
+          </View>}
 
         </Animated.View>
 
