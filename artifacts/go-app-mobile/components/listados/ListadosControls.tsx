@@ -1,3 +1,4 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import React from "react";
 import { Pressable, Text, TouchableOpacity, View } from "react-native";
 
@@ -52,19 +53,17 @@ export function ListadosSizeControl({lang="es",size,touchSize=44,onCycleSize}: {
   </Pressable>;
 }
 
-/** Contextual entry into the existing global Tools panel; no new preference or expansion mode. */
+/** Two direct actions share the existing Listados preferences. No global navigation. */
 export function ListadosTools({lang="es",sortOrder,size,onToggleSort,onCycleSize}: {
-  lang?:string;sortOrder:"asc"|"desc";size:"compacto"|"medio"|"grande";onToggleSort:()=>void;onCycleSize:()=>void;
+  lang?:string;sortOrder:"asc"|"desc";size:ListSize;onToggleSort:()=>void;onCycleSize:()=>void;
 }) {
-  const sizeLabel=sizeLabels(lang)[size];
-  const style={minHeight:44,padding:12,borderRadius:10,borderWidth:1,borderColor:"#4A80BD",backgroundColor:"#172738",justifyContent:"center" as const};
-  return <View testID="listados-tools" style={{padding:14,gap:10,borderRadius:14,backgroundColor:"rgba(74,128,189,0.10)"}}>
-    <Text accessibilityRole="header" style={{color:"#ffffff",fontWeight:"800",fontSize:16}}>{lang==="en"?"List tools":"Herramientas de Listados"}</Text>
-    <TouchableOpacity testID="listados-sort-tool" accessibilityRole="button" onPress={onToggleSort} style={style}>
-      <Text style={{color:"#ffffff",fontSize:15}}>{lang==="en"?"Date order: ":"Orden por fecha: "}{sortOrder==="asc"?(lang==="en"?"Ascending":"Ascendente"):(lang==="en"?"Descending":"Descendente")}</Text>
+  return <View testID="listados-tools" style={{flexDirection:"row",gap:8,padding:8,borderRadius:30,backgroundColor:"#172738",borderWidth:1,borderColor:"#4A80BD"}}>
+    <TouchableOpacity testID="listados-sort-tool" accessibilityRole="button"
+      accessibilityLabel={(lang==="en"?"Date order: ":"Orden por fecha: ")+(sortOrder==="asc"?(lang==="en"?"Ascending":"Ascendente"):(lang==="en"?"Descending":"Descendente"))}
+      accessibilityHint={lang==="en"?"Reverse order":"Invertir orden"} onPress={onToggleSort}
+      style={{width:44,height:44,borderRadius:22,backgroundColor:"#1a1a1c",borderWidth:1.5,borderColor:"rgba(255,255,255,0.35)",alignItems:"center",justifyContent:"center"}}>
+      <MaterialCommunityIcons name="swap-vertical" size={24} color="#ffffff"/>
     </TouchableOpacity>
-    <TouchableOpacity testID="listados-size-tool" accessibilityRole="button" onPress={onCycleSize} style={style}>
-      <Text style={{color:"#ffffff",fontSize:15}}>{lang==="en"?"Card size: ":"Tamaño de ficha: "}{sizeLabel}</Text>
-    </TouchableOpacity>
+    <ListadosSizeControl lang={lang} size={size} onCycleSize={onCycleSize}/>
   </View>;
 }

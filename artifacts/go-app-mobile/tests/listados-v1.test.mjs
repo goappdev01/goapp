@@ -88,7 +88,7 @@ test('Listados tools use the original sort and size preference handlers; primary
  vm.runInNewContext(compile(['toggleGoSortOrder','chooseListSize','cycleListSize'].map(name=>'const '+declaration(name).getText(ast)+';').join('\n')+';exports.sort=toggleGoSortOrder;exports.size=cycleListSize;'),context);
  for(let i=0;i<3;i++){
   const tree=f.render(c.ListadosTools,{sortOrder:context.goSortOrder,size:context.listGoSize,onToggleSort:context.exports.sort,onCycleSize:context.exports.size});
-  assert.match(text(tree),/Herramientas de Listados/);const buttons=nodes(tree).filter(n=>n.type==='TouchableOpacity');assert.equal(buttons.length,2);assert.ok(buttons.every(n=>n.props.style.minHeight>=44));buttons[1].props.onPress();
+  assert.equal(text(tree),'');const buttons=nodes(expand(tree)).filter(n=>n.type==='TouchableOpacity'||n.type==='Pressable');assert.equal(buttons.length,2);buttons[1].props.onPress();
  }
  assert.equal(context.listGoSize,'compacto');assert.equal(memory.get('go_list_size_v1'),'compacto');context.exports.sort();assert.equal(memory.get('go_sort_order_v1'),'desc');
  const tools=readFileSync('components/herramientas/HerramientasPanel.tsx','utf8');assert.match(tools,/\{listTools\}/);assert.match(tools,/<GoNavigationAppearanceControl/);assert.match(tools,/toggleHandedness/);
@@ -96,9 +96,7 @@ test('Listados tools use the original sort and size preference handlers; primary
  assert.match(sheet.getText(ast),/LISTADOS/);assert.match(sheet.getText(ast),/floatingClose/);
  assert.equal(all.some(n=>ts.isVariableDeclaration(n)&&/\b(?:expandedId|allExpanded|cardMode)\b/.test(n.name.getText(ast))),false);
  assert.match(sheet.getText(ast),/clusterScroll/);assert.match(sheet.getText(ast),/list-notes-open/);
- const direct=all.find(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='ListadosSizeControl');
- assert.ok(direct);assert.match(sheet.getText(ast),/ListadosSizeControl/);
- assert.match(direct.getText(ast),/size=\{listGoSize\}/);assert.match(direct.getText(ast),/onCycleSize=\{cycleListSize\}/);
+ assert.match(sheet.getText(ast),/headerPopover/);assert.doesNotMatch(sheet.attributes.properties.find(p=>p.name?.getText(ast)==='footer').getText(ast),/ListadosSizeControl/);
  assert.doesNotMatch(sheet.getText(ast),/maximize-2|minimize-2|setAllExpanded|BTN_MINI/);
 });
 
@@ -135,10 +133,8 @@ for(const hand of ['left','right'])test(`round size control/${hand}: each touch 
  const entries=[{id:'later',dateISO:'2030-01-08',time:'10:00'},{id:'earlier',dateISO:'2030-01-07',time:'10:00'},{id:'undated',createdAt:1}];
  const ordered=()=>vm.runInNewContext(compile(['sortDir','allOrdered'].map(name=>'const '+declaration(name).getText(ast)+';').join('\n')+'allOrdered.map(e=>e.id);'),{goSortOrder:context.goSortOrder,filteredListEntries:entries,listCallsOpen:false});
  assert.deepEqual(Array.from(ordered()),['later','earlier','undated']);context.exports.sort();assert.deepEqual(Array.from(ordered()),['earlier','later','undated']);
- // It occupies the existing primary row, with no standalone footer row or dropdown.
- const mount=all.find(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='ListadosSizeControl');
- assert.equal(mount.parent.openingElement.tagName.getText(ast),'View');
- assert.match(mount.parent.getText(ast),/list-notes-open/);assert.match(mount.parent.getText(ast),/clusterScroll/);
+ // The original control is now mounted only inside the local panel.
+ assert.equal(all.some(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='ListadosSizeControl'),false);
  assert.doesNotMatch(readFileSync('components/listados/ListadosControls.tsx','utf8'),/Tamaño ·|radiogroup|setOpen|listados-size-toggle/);
 });
 

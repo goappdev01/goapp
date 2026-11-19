@@ -31,7 +31,7 @@ function fixture(width=390,height=844,hand='right',sideInsets={left:0,right:0}){
  let cursor=0;const slots=[],events=new Map(),effects=[],gestures=[],calls=[];
  const React={createElement:(type,props,...children)=>({type,props:{...props,children:children.flat(Infinity)}}),useState(initial){const i=cursor++;slots[i]??={value:initial};return[slots[i].value,value=>slots[i].value=typeof value==='function'?value(slots[i].value):value];}};
  function gesture(){const result={};const proxy=new Proxy(result,{get:(o,k)=>k in o?o[k]:(...args)=>{if(k.startsWith('on'))o[k]=args[0];else o[k+'Value']=args;return proxy;}});gestures.push(result);return proxy;}
- const scope={React,useState:React.useState,useEffect:fn=>effects.push(fn),useMemo:fn=>fn(),useCallback:fn=>fn,useSharedValue:value=>React.useState({value})[0],useAnimatedStyle:fn=>fn(),useAnimatedScrollHandler:value=>value,
+ const scope={React,useRef:()=>({current:null}),useState:React.useState,useEffect:fn=>effects.push(fn),useMemo:fn=>fn(),useCallback:fn=>fn,useSharedValue:value=>React.useState({value})[0],useAnimatedStyle:fn=>fn(),useAnimatedScrollHandler:value=>value,
   useSheetSwipeDown:()=>gesture(),useSafeAreaInsets:()=>({top:47,bottom:34,...sideInsets}),useWindowDimensions:()=>({width,height}),
   Dimensions:{get:()=>({width,height})},Keyboard:{addListener:(event,fn)=>{const listeners=events.get(event)||[];listeners.push(fn);events.set(event,listeners);return{remove(){}};}},
   Gesture:{Pan:gesture,Native:gesture,Race:(...g)=>g},runOnJS:fn=>fn,withSpring:value=>value,withTiming:(value,_config,fn)=>{fn?.(true);return value;},

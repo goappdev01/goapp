@@ -148,7 +148,7 @@ import { anchorLandingHelp, placeLandingHelpQr, placeLandingQr } from "@/compone
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
-import { ListEntryHeader, ListadosSizeControl, ListadosTools } from "@/components/listados/ListadosControls";
+import { ListEntryHeader, ListadosTools } from "@/components/listados/ListadosControls";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions, GoListActionRow } from "@/components/GoEntryDetails";
 import { entryHeading, entryIdentity, entryIsReservation, entryMapsUrl, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand, openEntryMaps } from "@/data/goEntryPresentation";
 import { changeTask } from "@/lib/goTaskManagement";
@@ -2727,6 +2727,8 @@ function HomeScreenContent() {
   // antiguo bloque "Más opciones" del CONTACTOS sheet, así que los
   // valores se preservan entre reaperturas y entre flujos.
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [listToolsOpen, setListToolsOpen] = useState(false);
+
   const [cuentaOpen, setCuentaOpen] = useState(false);
   // ── TEST COLOR FONDO — herramienta interna de diseño ───────────────────
   const [screenBgColors, setScreenBgColors] = useState<Record<string, string>>({});
@@ -9299,6 +9301,7 @@ function HomeScreenContent() {
     setListGoSize(size);
     AsyncStorage.setItem("go_list_size_v1",size).catch(()=>{});
   };
+  useEffect(() => { if (!listOpen) setListToolsOpen(false); }, [listOpen]);
   const cycleListSize = () => {
     const sizes: ListGoSize[] = ["compacto","medio","grande"];
     chooseListSize(sizes[(sizes.indexOf(listGoSize)+1)%sizes.length]);
@@ -14442,8 +14445,6 @@ function HomeScreenContent() {
   const listBookingDetail = calBookingDetailEntry ? goLog.find(entry => entry.id === calBookingDetailEntry.id) : undefined;
 
   const renderToolsPanel = (embedded=false) => (<HerramientasPanel embedded={embedded}
-        listTools={listOpen ? <ListadosTools lang={lang} sortOrder={goSortOrder} size={listGoSize}
-          onToggleSort={toggleGoSortOrder} onCycleSize={cycleListSize}/> : undefined}
         landingVariantControls={landingVariantToolsEnabled ? <LandingVariantSelector
           visual={{ ...landingVisual, busy: landingVisual.busy || landingPreviewOpening }} lang={lang}
           canPreviewLanding={userLandingVisualEnabled || goView.isOwner}
@@ -21772,13 +21773,12 @@ function HomeScreenContent() {
         onDismiss={finishListBookingProposal}
         expandToSafeTop
         floatingClose={{screenKey:"listados",handedness,label:t('tasks_close_list')}}
-        screenOverlay={optionsOpen ? renderToolsPanel(true) : undefined}
         modalOverlay={notesOpen || listBookingDetail ? <GoScreenHost registerBack={handler=>{listNoteLayerBackRef.current=handler;}}>
           {notesOpen ? renderUnifiedNoteEditor() : listBookingDetail && renderListBookingDetail(listBookingDetail)}
         </GoScreenHost> : undefined}
         blockPan={optionsOpen || notesOpen || !!listBookingDetail}
         onPanelHeightChange={setOverlayPanelHeight}
-        onClose={() => { if(optionsOpen){setOptionsOpen(false);return;}if(listNoteLayerBackRef.current?.())return;setListOpen(false); setLlamadasListOpen(false); setListMinimized(false); }}
+        onClose={() => { if(listToolsOpen){setListToolsOpen(false);return;}if(listNoteLayerBackRef.current?.())return;setListOpen(false); setLlamadasListOpen(false); setListMinimized(false); }}
         // Gesto de deslizar hacia abajo en dos niveles:
         //   1.er deslizamiento (filtros visibles) → oculta menús secundarios, fichas siguen arriba.
         //   2.º deslizamiento (filtros ya ocultos) → cierra el listado completo.
@@ -21792,9 +21792,10 @@ function HomeScreenContent() {
         compactHeader
         minimized={listMinimized}
         title={lang === "en" ? "LISTS" : "LISTADOS"}
+        headerPopover={listToolsOpen ? <ListadosTools lang={lang} sortOrder={goSortOrder} size={listGoSize} onToggleSort={toggleGoSortOrder} onCycleSize={cycleListSize}/> : undefined}
         headerRight={<GoCloseButton testID="listados-tools-toggle" level="settings" touchSize={44} preserveTouchSize iconSize={22}
           accessibilityLabel={lang==="en"?"List tools":"Herramientas de Listados"}
-          onPress={()=>{Haptics.selectionAsync().catch(()=>{});if(optionsOpen)setOptionsOpen(false);else handleOpenOptions();}}/>}
+          onPress={()=>{Haptics.selectionAsync().catch(()=>{});setListToolsOpen(open=>!open);}}/>}
         protectBrand
         paddingBottom={quickCreateKbVisible ? 0 : paddingBottom + 4}
         containerBg={screenBgColors.listados || undefined}
@@ -22261,7 +22262,6 @@ function HomeScreenContent() {
                     >
                       <MaterialCommunityIcons name="note-edit-outline" size={21} color="#ffffff" />
                     </Pressable>
-                    <ListadosSizeControl lang={lang} size={listGoSize} touchSize={BTN} onCycleSize={cycleListSize}/>
                     {clusterScroll}
                   </View>
                 )}
@@ -25153,6 +25153,7 @@ function BottomSheet({
   expandToSafeTop,
   floatingClose,
   headerRight,
+  headerPopover,
   screenOverlay,
 }: {
   visible: boolean;
@@ -25168,6 +25169,7 @@ function BottomSheet({
   // los chips de filtro del listado), sin que el scroll los empuje.
   footer?: React.ReactNode;
   headerRight?: React.ReactNode;
+  headerPopover?: React.ReactNode;
   // Full-screen local tools retain the mounted list and its scroll position.
   screenOverlay?: React.ReactNode;
   protectBrand?: boolean;
@@ -25254,6 +25256,9 @@ function BottomSheet({
   // del safe-area completo. La propia animación del teclado hace la transición suave.
   const [kbVisible, setKbVisible] = useState(false);
   const noteInsets = useSafeAreaInsets();
+  const sheetSurfaceRef = useRef<ViewInstance>(null);
+  const sheetToolsHeaderRef = useRef<ViewInstance>(null);
+  const [headerPopoverTop, setHeaderPopoverTop] = useState<number | null>(null);
   const sheetViewport=useWindowDimensions();
   const [floatingKeyboardHeight,setFloatingKeyboardHeight]=useState(0);
   const effectivePaddingBottom = noteKeyboardScroll
@@ -25530,7 +25535,7 @@ function BottomSheet({
             } : {}) }}
             pointerEvents="box-none"
           >
-              <Reanimated.View
+              <Reanimated.View ref={sheetSurfaceRef}
                 testID={noteKeyboardScroll ? "note-sheet" : expandToSafeTop?"listados-sheet":undefined}
                 style={[
                   styles.sheet,
@@ -25556,6 +25561,7 @@ function BottomSheet({
                   panelH.value = h;
                 }}
               >
+                {headerPopover && headerPopoverTop !== null && <View testID="sheet-header-popover" pointerEvents="box-none" style={{position:"absolute",top:headerPopoverTop,right:expandToSafeTop?noteInsets.right+10:18,zIndex:100}}>{headerPopover}</View>}
                 {/* Pressable interno absorbe taps para que NO se
                     propaguen al backdrop (que los interpretaría como
                     "cerrar"). No interfiere con el Pan: gesture-handler
@@ -25579,7 +25585,12 @@ function BottomSheet({
                         </View>
                       ) : (
                         <>
-                          {!!title && (headerRight ? <View testID="sheet-header-tools-row" style={{flexDirection:"row",alignItems:"center",gap:8,marginBottom:6}}>
+                          {!!title && (headerRight ? <View ref={sheetToolsHeaderRef} onLayout={() => {
+                            if (!headerPopover && !headerRight) return;
+                            sheetToolsHeaderRef.current?.measureInWindow((_x,y,_w,height) => {
+                              sheetSurfaceRef.current?.measureInWindow((_sx,sy) => setHeaderPopoverTop(y+height-sy+4));
+                            });
+                          }} testID="sheet-header-tools-row" style={{flexDirection:"row",alignItems:"center",gap:8,marginBottom:6}}>
                             <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.sheetTitle,{flex:1,minWidth:0,marginBottom:0},compactHeader&&{fontSize:14,fontWeight:"700",letterSpacing:0.8,color:"#cccccc"}]} {...titleNoTranslate}>{title}</Text>
                             <View style={{flexShrink:0}}>{headerRight}</View>
                           </View> : (
