@@ -143,7 +143,7 @@ import { SupportAdminPanel, type SupportAdminView } from "@/components/landing/S
 import { SupportTeamPanel } from "@/components/landing/SupportTeamPanel";
 import { supportGateway } from "@/data/supportGateway";
 import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, SUPPORT_ADMIN_ORBITS, GO_SUPPORT_LIVE_ENABLED, type SupportKind } from "@/lib/supportRequests";
-import { placeLandingHelpQr, placeLandingQr } from "@/components/landing/landingQrPlacement";
+import { placeMediumLandingHelp, placeLandingHelpQr, placeLandingQr } from "@/components/landing/landingQrPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
@@ -14175,9 +14175,19 @@ function HomeScreenContent() {
     sharedHelpCandidate.x + sharedHelpCandidate.width / 2 - other.x - other.width / 2,
     sharedHelpCandidate.y + sharedHelpCandidate.height / 2 - other.y - other.height / 2)
     < (sharedHelpCandidate.width + other.width) / 2);
-  const supportRect = helpOverlapsAdminSatellite
+  const legacySupportRect = helpOverlapsAdminSatellite
     ? supportOrbitRect(screen.width, screen.height, insets, handedness, 44, allCornerHelpObstacles)
     : sharedHelpCandidate;
+  const supportRect = placeMediumLandingHelp(legacySupportRect, uiScale, {
+    x: handedness === "right" ? screen.width / 2 : insets.left + 8,
+    y: insets.top + 8,
+    width: screen.width / 2 - (handedness === "right" ? insets.right : insets.left) - 8,
+    height: screen.height - insets.top - insets.bottom - 16,
+  }, [...supportObstacles, ...adminOnlyCornerObstacles, landingNavigationCloseRect,
+    { x: handedness === "left" ? screen.width - insets.right - 8 - closeQrSize - 2 * closeQrHit : insets.left + 8,
+      y: screen.height - Math.max(insets.bottom, 8) - closeQrSize - 2 * closeQrHit,
+      width: closeQrSize + 2 * closeQrHit, height: closeQrSize + 2 * closeQrHit },
+  ]) ?? legacySupportRect;
   const adminQrObstacles = [...supportObstacles.filter((_, index) => index === 0 || index > 8),
     { x: landingDisplayCloseRect.x - 8, y: landingDisplayCloseRect.y - 8,
       width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 }];

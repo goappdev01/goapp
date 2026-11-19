@@ -75,3 +75,25 @@ export function placeLandingQr({ company: _company, size, hitSlop, bounds, obsta
   }
   return best;
 }
+
+
+/** Medium only: move AYUDA, never the orbit, using complete touch rectangles. */
+export function placeMediumLandingHelp(candidate: HumanityRect, preset: string, bounds: HumanityRect,
+  obstacles: readonly HumanityRect[]): HumanityRect | null {
+  if (preset !== "estandar") return candidate;
+  const gap = 4, maxX = bounds.x + bounds.width - candidate.width, maxY = bounds.y + bounds.height - candidate.height;
+  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+  const xs = [clamp(candidate.x, bounds.x, maxX), bounds.x, maxX,
+    ...obstacles.flatMap(o => [o.x - gap - candidate.width, o.x + o.width + gap])];
+  const ys = [clamp(candidate.y, bounds.y, maxY), bounds.y, maxY,
+    ...obstacles.flatMap(o => [o.y - gap - candidate.height, o.y + o.height + gap])];
+  let best: HumanityRect | null = null, distance = Infinity;
+  for (const x of xs) for (const y of ys) {
+    if (x < bounds.x || x > maxX || y < bounds.y || y > maxY) continue;
+    if (obstacles.some(o => x < o.x + o.width + gap - .001 && x + candidate.width + gap > o.x + .001
+      && y < o.y + o.height + gap - .001 && y + candidate.height + gap > o.y + .001)) continue;
+    const score = (x - candidate.x) ** 2 + (y - candidate.y) ** 2;
+    if (score < distance) { best = { ...candidate, x, y }; distance = score; }
+  }
+  return best;
+}

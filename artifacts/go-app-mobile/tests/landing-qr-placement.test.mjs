@@ -58,8 +58,8 @@ test('the photographed 393 × 852 Landing keeps QR opposite AYUDA in both hand m
     width:button.props.style.width+slop.left+slop.right,height:button.props.style.height+slop.top+slop.bottom};
   assert.ok(f.landingCornerPair,'both targets fit without moving an active orbit');
   assert.ok(hand==='right'?help.x>qr.x+qr.width&&help.x>=300:qr.x>help.x+help.width&&help.x<=60);
-  assert.ok(help.y>=d.height*.85&&qr.y>=d.height*.85);
-  assert.equal(help.y,780,'AYUDA is 10pt lower than the approved position');
+  assert.ok(help.y>=d.height*.5&&qr.y>=d.height*.85);
+  assert.ok(help.y+help.height<=d.height-d.insets.bottom-8,'AYUDA clears the bottom safe area');
   assert.equal(f.landingQrPosition.y,780,'QR respects the bottom safe area');
   assert.ok(help.y+help.height<=d.height-8&&qr.y+qr.height<=d.height-8);
   assert.ok(!overlaps(help,qr));
