@@ -16,6 +16,7 @@ import type { CalSizeKey } from "@/constants/goSizes";
 const CAL_SIZES: CalSizeKey[] = ["GO_CAL_SMALL", "GO_CAL_MEDIUM", "GO_CAL_LARGE"];
 
 export interface GoCalConfigPanelProps {
+  handedness?: "left" | "right";
   density: DensityKey;
   onDensityChange: (d: DensityKey) => void;
   timedTaskCount?: number;
@@ -50,6 +51,7 @@ function chipTxt(active: boolean) {
 }
 
 export function GoCalConfigPanel({
+  handedness,
   density,
   onDensityChange,
   timedTaskCount = 0,
@@ -62,6 +64,7 @@ export function GoCalConfigPanel({
   viewMode,
   onViewModeChange,
 }: GoCalConfigPanelProps) {
+  const rowStyle = {flexDirection:"row",flexWrap:handedness?"wrap":"nowrap",alignItems:"center",justifyContent:handedness==="right"?"flex-end":"flex-start",gap:8} as const;
   const effectiveMin =
     density === "auto"
       ? timedTaskCount <= 3 ? 60 : timedTaskCount <= 8 ? 30 : 15
@@ -72,7 +75,7 @@ export function GoCalConfigPanel({
     <View style={{ paddingHorizontal: 4, marginHorizontal: 0, paddingTop: 10, paddingBottom: 2, gap: 8 }}>
 
       {/* VISTA */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <View testID="calendar-tools-view-row" style={rowStyle}>
         {(["dia", "semana"] as const).map((v) => {
           const isActive = viewMode === v;
           return (
@@ -120,7 +123,7 @@ export function GoCalConfigPanel({
       </View>
 
       {/* ESCALA + TAMAÑOS */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <View testID="calendar-tools-scale-row" style={rowStyle}>
         {(["auto", "1h", "30min", "15min"] as const).map((d) => {
           const isActive = density === d;
           const label =
@@ -163,7 +166,7 @@ export function GoCalConfigPanel({
       </View>
 
       {/* TEMA */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <View testID="calendar-tools-theme-row" style={rowStyle}>
         {([
           { key: "claro"  as const, icon: "sun"    as const, label: "CLARO"  },
           { key: "mixto"  as const, icon: "circle" as const, label: "MIXTO"  },

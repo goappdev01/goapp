@@ -20448,6 +20448,7 @@ function HomeScreenContent() {
             {/* ── Panel de configuración — componente compartido con GO Reservas ── */}
             {calConfigVisible && (
               <GoCalConfigPanel
+                handedness={handedness}
                 density={calBgDensity}
                 onDensityChange={(d) => { setCalBgDensity(d); AsyncStorage.setItem("cal_density", d).catch(() => {}); }}
                 timedTaskCount={goLog.filter(g => !g.deleted && g.estado !== "rechazado" && !!g.time).length}

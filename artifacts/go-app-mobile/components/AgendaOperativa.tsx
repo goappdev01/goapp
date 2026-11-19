@@ -2292,12 +2292,14 @@ export function AgendaBoard({
               ? t('biz_change_accepted')
               : _isReceived ? t('biz_change_received') : t('biz_change_proposed');
             const _headerIcon  = isAcceptedProposal ? "check-circle" : "refresh-cw";
+            const _centerProposedHeader = !isAcceptedProposal && !_isReceived;
             return (
               <View style={{ marginTop: Math.round(5 * calScale), borderRadius: 7, borderWidth: 1.5, borderColor: _proposalAlpha80, backgroundColor: "rgba(8,6,4,0.92)", padding: Math.round(8 * calScale), gap: Math.round(6 * calScale) }}>
                 {/* Header */}
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                  <Feather name={_headerIcon} size={Math.round(7 * calScale)} color={_proposalColor} />
-                  <Text style={{ color: _proposalColor, fontSize: Math.round(7 * calScale), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.8 }}>{_headerLabel}</Text>
+                <View testID={"calendar-change-header-"+item.id} style={{ flexDirection: "row", alignItems: "center", gap: _centerProposedHeader ? 0 : 4 }}>
+                  {!_centerProposedHeader && <Feather name={_headerIcon} size={Math.round(7 * calScale)} color={_proposalColor} />}
+                  <Text testID={"calendar-change-title-"+item.id} style={{ color: _proposalColor, fontSize: Math.round(7 * calScale), fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.8,
+                    ...(_centerProposedHeader ? {flex:1,minWidth:0,textAlign:"center",paddingHorizontal:4} as const : {}) }}>{_headerLabel}</Text>
                 </View>
                 <View style={{ height: 1, backgroundColor: _proposalAlpha25 }} />
                 {/* Fecha reserva */}
