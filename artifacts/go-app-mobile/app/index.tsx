@@ -4558,6 +4558,7 @@ function HomeScreenContent() {
   const [calBgDensity, setCalBgDensity] = useState<"auto" | "1h" | "30min" | "15min">("auto");
   const [calBgDayNightMode, setCalBgDayNightMode] = useState<"claro" | "oscuro" | "mixto">("mixto");
   const [calConfigVisible, setCalConfigVisible] = useConfigPanelPreference(CONFIG_PANEL_KEYS.calendar);
+  const renderCalendarToolsToggle = () => <GoCloseButton testID="calendar-tools-toggle" level="settings" touchSize={44} preserveTouchSize iconSize={22} accessibilityLabel="Configuración de Calendario" onPress={() => { Haptics.selectionAsync(); setCalConfigVisible(visible => !visible); }}/>;
   // Carga inicial unificada — mismas claves que AgendaOperativa (Calendario madre)
   useEffect(() => {
     AsyncStorage.multiGet(["cal_density", "cal_show_hours", "cal_view", "cal_day_night_mode_v1"]).then((pairs) => {
@@ -13561,9 +13562,9 @@ function HomeScreenContent() {
     if(!canResolveEntry(entry))return;
     const read=current??(()=>goLog.find(e=>e.id===entry.id));
     if(status==="discard"){
-      Alert.alert(lang==="en"?"Delete my card":"Eliminar mi ficha",lang==="en"?"Hide only your personal card? This does not cancel the reservation or remove anyone else's record.":"¿Ocultar solo tu ficha personal? No se cancela la reserva ni se elimina la ficha de otros participantes.",[
+      Alert.alert(lang==="en"?"Hide my card":"Ocultar mi ficha",lang==="en"?"Hide only your personal card? This does not cancel the reservation or remove anyone else's record.":"¿Ocultar solo tu ficha personal? No se cancela la reserva ni se elimina la ficha de otros participantes.",[
         {text:lang==="en"?"Back":"Volver",style:"cancel"},
-        {text:lang==="en"?"DELETE":"ELIMINAR",style:"destructive",onPress:()=>{void actionCompletion.discard(entry,read).then(()=>setLandingDetailsId(null)).catch(error=>Alert.alert("GO",error.message));}},
+        {text:lang==="en"?"Hide my card":"Ocultar mi ficha",style:"destructive",onPress:()=>{void actionCompletion.discard(entry,read).then(()=>setLandingDetailsId(null)).catch(error=>Alert.alert("GO",error.message));}},
       ]);return;
     }
     void actionCompletion.decide(entry,status,true,read);
@@ -20226,7 +20227,7 @@ function HomeScreenContent() {
             {/* AgendaBoard shares the existing view/settings header with month navigation. */}
             <View testID="calendar-agenda-viewport" style={{ flex: 1 }}>
             {demoCustomerCalendarSelected ? (demoBookingRepository
-              ? <View style={{ flex: 1 }}><DemoCustomerCalendar dragEnabled={calOpen && !monthGridOpen && !calReservasOpen && !showBookingFromCal} dragOverlayRef={calendarDragOverlay} onGoToLanding={goDirectlyToLanding} renderMessageScreen={renderEntryMessageScreen} scrollToTodayToken={calScrollToTodayToken} onOpenMessage={(entry, back) => openEntryMessage(entry, back, true)} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onDropBooking={(entry,destination)=>dropBookingProposal(entry,destination,"customer")} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
+              ? <View style={{ flex: 1 }}><DemoCustomerCalendar toolsControl={renderCalendarToolsToggle()} viewMode={calBgViewMode} onViewModeChange={changeCalendarView} showHours={calBgShowHours} density={calBgDensity} calSizeKey={calSize} calDayNightMode={calBgDayNightMode} dragEnabled={calOpen && !monthGridOpen && !calReservasOpen && !showBookingFromCal} dragOverlayRef={calendarDragOverlay} onGoToLanding={goDirectlyToLanding} renderMessageScreen={renderEntryMessageScreen} scrollToTodayToken={calScrollToTodayToken} onOpenMessage={(entry, back) => openEntryMessage(entry, back, true)} onResolveEntry={resolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} repository={demoBookingRepository} entries={customerBookings.entries} onProposeChange={entry=>openBookingProposal(entry)} onDropBooking={(entry,destination)=>dropBookingProposal(entry,destination,"customer")} onAcceptProposal={acceptProposal} onRejectProposal={rejectProposal} focus={demoCalendarFocus} onPersonal={() => setDemoCustomerCalendarSelected(false)} /></View>
               : <Text style={{color:"#ffffff",padding:16}}>Verificando autorización del propietario…</Text>) : (<AgendaBoard
                 searchable
                 dragEnabled={calOpen && !monthGridOpen && !calReservasOpen && !showBookingFromCal}
@@ -20237,7 +20238,7 @@ function HomeScreenContent() {
             >
               <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}><GoCalendarViewSelector compact value={calBgViewMode} onChange={changeCalendarView} />{demoBookingRepository && <TouchableOpacity accessibilityRole="button" testID="customer-calendar-shortcut" accessibilityLabel={lang === "en" ? "Customer calendar" : "Calendario cliente"} onPress={event => { event.stopPropagation(); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{paddingHorizontal:2,paddingVertical:8,width:44,minHeight:44,justifyContent:"center"}}><Feather name="calendar" size={14} color="#ff7474" /></TouchableOpacity>}</View>
               <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>{monthNavigation}</View>
-              <GoCloseButton testID="calendar-tools-toggle" level="settings" touchSize={44} preserveTouchSize iconSize={22} accessibilityLabel="Configuración de Calendario" onPress={() => { Haptics.selectionAsync(); setCalConfigVisible(visible => !visible); }}/>
+              {renderCalendarToolsToggle()}
             </View>)}
                 goLog={goLog.filter((e: any) => {
                   const id: string = e.id ?? "";
@@ -20392,7 +20393,7 @@ function HomeScreenContent() {
           {/* ── BOTONES FLOTANTES — zona pulgar derecho ───────────────────
               CONFIG toggle + ↑↓ fecha.
               Solo visibles cuando el panel mensual está CERRADO y GO Reservas no está activo. */}
-          {!monthGridOpen && !calReservasOpen && !clockOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating contentRef={calendarDragOverlay} testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={(demoCustomerCalendarSelected?0:52)+((calQuickCreateOpen||(calConfigVisible&&!demoCustomerCalendarSelected))?72:0)+64} protectedBottom={Math.max(0,overlayPanelHeight-insets.bottom)+10}>
+          {!monthGridOpen && !calReservasOpen && !clockOpen && !(calendarTaskContextRef.current && fieldSelectorOpen) && <GoNavigationFloating contentRef={calendarDragOverlay} testID="calendar-floating-controls" screenKey="personal-calendar" handedness={handedness} width={(demoCustomerCalendarSelected?0:52)+((calQuickCreateOpen||calConfigVisible)?72:0)+64} protectedBottom={Math.max(0,overlayPanelHeight-insets.bottom)+10}>
             {!demoCustomerCalendarSelected && (<TouchableOpacity
               onPress={() => {
                 Haptics.selectionAsync();
@@ -20413,7 +20414,7 @@ function HomeScreenContent() {
             >
               <Feather name="calendar" size={18} color="#ffffff" />
             </TouchableOpacity>)}
-            {(calQuickCreateOpen || (calConfigVisible && !demoCustomerCalendarSelected)) && (
+            {(calQuickCreateOpen || calConfigVisible) && (
               <GoCloseButton
                 level="panel"
                 collapsePanel={calConfigVisible && !calQuickCreateOpen}
@@ -20443,7 +20444,7 @@ function HomeScreenContent() {
             }}
           >
             {/* ── Panel de configuración — componente compartido con GO Reservas ── */}
-            {calConfigVisible && !demoCustomerCalendarSelected && (
+            {calConfigVisible && (
               <GoCalConfigPanel
                 density={calBgDensity}
                 onDensityChange={(d) => { setCalBgDensity(d); AsyncStorage.setItem("cal_density", d).catch(() => {}); }}

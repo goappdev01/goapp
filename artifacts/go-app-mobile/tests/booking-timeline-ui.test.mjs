@@ -97,7 +97,8 @@ function fixture(kind = "provider", overrides = {}) {
       if (state.availabilityError) return Response.json({error: "Disponibilidad no verificada"}, {status: state.availabilityError});
       if (parsed.searchParams.get("datesOnly") === "true") return Response.json({ version: 1, phasePolicyVersion:1, gapPolicyVersion:1, timezone: "Europe/Madrid",
         availableDates: state.availableDates ?? [today, tomorrow, "2030-10-29"], slots: [] });
-      const parameters = { date: parsed.searchParams.get("dateISO"), staffId: parsed.searchParams.get("staff_id") ?? firstStaff,
+      const unassignedRequest=calls.filter(call=>call.url.pathname.endsWith('/booking-availability')&&call.url.searchParams.get('datesOnly')!=='true'&&!call.url.searchParams.has('staff_id')).length;
+      const parameters = { date: parsed.searchParams.get("dateISO"), staffId: parsed.searchParams.get("staff_id") ?? (state.rotateUnassignedStaff && unassignedRequest%2===0?secondStaff:firstStaff),
         serviceId: parsed.searchParams.get("service_ids").split(",")[0] };
       const plans = state.plans ?? (state.pendingSlots ? await state.pendingSlots.promise : state.foldOptions && parameters.date === today
         ? [planFor({ ...parameters, fold: 0 }), planFor({ ...parameters, fold: 1 })] : [planFor(parameters)]);
@@ -608,4 +609,27 @@ test("an incomplete original record still opens the actual catalogue without gue
  const original={businessId:business,contactName:"Peluquería primera",bookingCategory:"peluqueria"},before=JSON.stringify(original),selection=changeApi.bookingChangeSelection(original);
  const f=fixture("overlay",{changeSelection:selection});await f.start();assert.ok(button(f.tree(),"Corte exacto"));assert.ok(button(f.tree(),"save").props.disabled);assert.match(text(f.tree()),/precargar/);
  await f.press("Corte exacto");await f.press("save");await f.press("Ana");assert.ok(button(f.tree(),"02:37"));assert.equal(JSON.stringify(original),before);assert.equal(posted(f).length,0);
+});
+
+
+test("repeated tap on the selected day keeps the available choices instead of clearing them",async()=>{
+ const f=fixture("overlay",{changeSelection:savedChangeSelection()});await openChangeSlots(f);
+ const day=nodes(f.tree()).find(node=>node.props.testID==='booking-date-'+today);
+ assert.ok(button(f.tree(),'02:37'));await day.props.onPress();f.render();await f.settle();
+ assert.ok(button(f.tree(),'02:37'),'the selected date must retain its loaded times');
+});
+
+test("no-preference proposals revalidate the chosen professional even if unassigned results rotate",async()=>{
+ const f=fixture("overlay",{changeSelection:savedChangeSelection(),rotateUnassignedStaff:true});await openChangeSlots(f,'biz_no_preference');
+ await f.press('02:37');assert.ok(button(f.tree(),'ENVIAR PROPUESTA'));
+ await f.press('ENVIAR PROPUESTA');assert.equal(f.navigation.length,1);assert.equal(f.navigation[0].selection.staffId,firstStaff);
+ assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);
+});
+
+test("a lost slot returns to the same selection with its real reason after the refresh finishes",async()=>{
+ const original=savedChangeSelection(),before=JSON.stringify(original),f=fixture('overlay',{changeSelection:original});await openChangeSlots(f);
+ await f.press('02:37');f.state.plans=[];await f.press('ENVIAR PROPUESTA');
+ assert.match(text(f.tree()),/Esta franja ya no está disponible. Elige otra/);
+ assert.equal(nodes(f.tree()).find(n=>n.props.testID==='booking-date-'+today).props.accessibilityState.selected,true);
+ assert.equal(JSON.stringify(original),before);assert.equal(f.navigation.length,0);assert.equal(f.writes.length,0);
 });

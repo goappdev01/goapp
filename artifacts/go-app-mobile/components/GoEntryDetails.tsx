@@ -275,12 +275,12 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, onDis
   const messageButtonWidth = hasMessage ? Math.max(52, Math.min(132, navigationAvailableWidth - closeButtonCount * ENTRY_DETAIL_CLOSE.touchSize - discardWidth - navigationGapWidth)) : 0;
   const navigationWidth = closeButtonCount * ENTRY_DETAIL_CLOSE.touchSize + navigationGapWidth + discardWidth + messageButtonWidth;
   const discardButton = hasDiscard && <TouchableOpacity testID="entry-discard" accessibilityRole="button"
-    accessibilityLabel={((entry.reservationId||entry.customerBooking||entry.businessBooking)?(lang==="en"?"My follow-up: ":"Mi seguimiento: "):"")+(lang==="en"?"DELETE":"ELIMINAR")}
+    accessibilityLabel={lang==="en"?"Hide my card":"Ocultar mi ficha"}
     accessibilityHint={lang==="en"?"Hides only your card. Does not cancel the commitment.":"Oculta solo tu ficha. No cancela el compromiso."}
     disabled={discardDisabled} accessibilityState={{disabled:discardDisabled}} hitSlop={0} activeOpacity={0.7}
     onPress={event=>{event?.stopPropagation();if(phase.current==="open"&&!discardDisabled)onDiscard?.();}}
     style={{width:discardWidth,height:44,borderRadius:12,borderWidth:1,borderColor:"#f87171",backgroundColor:"rgba(217,45,50,0.14)",opacity:discardDisabled?0.48:1,alignItems:"center",justifyContent:"center"}}>
-    <Feather name="trash-2" size={22} color="#f87171" />
+    <Feather name="eye-off" size={22} color="#f87171" />
   </TouchableOpacity>;
   const messageButton = hasMessage && <TouchableOpacity testID="entry-message-go" accessibilityRole="button" accessibilityLabel="MENSAJE GO" activeOpacity={0.82} onPressIn={()=>setMessagePressed(true)} onPressOut={()=>setMessagePressed(false)} onPress={() => { if (phase.current !== "open") return; if (renderMessageScreen) { onMessage?.(); return; } messageAfterDismiss.current = true; dismiss(); }}
     style={{width:messageButtonWidth,height:ENTRY_DETAIL_CLOSE.touchSize,paddingHorizontal:7,paddingVertical:4,borderWidth:1.5,borderRadius:20,borderColor:"#93c5fd",backgroundColor:"rgba(147,197,253,0.14)",shadowColor:"#93c5fd",shadowOffset:{width:0,height:2},shadowOpacity:messagePressed?0.06:0.2,shadowRadius:3,elevation:messagePressed?0:2,transform:[{translateY:messagePressed?1:0}],opacity:messagePressed?0.88:1,alignItems:"center",justifyContent:"center"}}>
@@ -299,7 +299,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, onDis
           <GoEntryContract entry={current} />
           {pending && <View testID="entry-proposal" style={{ borderColor: "rgba(209,161,102,0.42)", borderWidth: 1, borderRadius: 12, padding: 10, gap: 6, backgroundColor:"#171512" }}>
             <Text testID="entry-proposal-state" style={{ color: entry.estado === "propuesta_pendiente" ? C.pending : "#D1A166", fontWeight: "800" }}>{entry.estado === "propuesto" ? (lang === "en" ? "CHANGE RECEIVED" : "CAMBIO RECIBIDO") : (lang === "en" ? "AWAITING RESPONSE" : "ESPERANDO RESPUESTA")}</Text>
-            <Text testID="entry-proposed-date-time" style={s.text}>{lang === "en" ? "Proposed: " : "Propuesto: "}{[entryIsReservation(entry) ? formatBookingLocalDate(entry.changeProposal!.dateISO, entry.changeProposal!.date, lang, entry.bookingTimeline?.timezone) : entry.changeProposal!.date || entry.changeProposal!.dateISO, entry.changeProposal!.time].filter(Boolean).join(" · ")}</Text>
+            <Text testID="entry-proposed-date-time" style={s.text}>{[entryIsReservation(entry) ? formatBookingLocalDate(entry.changeProposal!.dateISO, entry.changeProposal!.date, lang, entry.bookingTimeline?.timezone) : entry.changeProposal!.date || entry.changeProposal!.dateISO, entry.changeProposal!.time].filter(Boolean).join(" · ")}</Text>
             {entry.changeProposal!.selection && <View testID="entry-proposed-selection" style={{gap:4}}>
               <Text style={s.text}>{entry.changeProposal!.selection!.catalogSnapshot.lines.map(line=>line.name).join(" + ")}</Text>
               <Text style={s.secondary}>{entry.changeProposal!.selection!.professionalName || (lang==="en"?"No preference":"Sin preferencia")} · {entry.changeProposal!.selection!.durationMinutes} min · {entry.changeProposal!.selection!.catalogSnapshot.totalPrice.toFixed(2)} {entry.changeProposal!.selection!.catalogSnapshot.currency}</Text>

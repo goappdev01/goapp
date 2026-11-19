@@ -7,7 +7,14 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import type { DemoBookingRepository } from "@/data/demoBookingRepository";
 
 /** Customer projection of the owner-local repository; never mounted with the personal agenda hooks. */
-export function DemoCustomerCalendar({ repository, focus, scrollToTodayToken, onPersonal, onGoToLanding, entries: suppliedEntries, onProposeChange, onDropBooking, onAcceptProposal, onRejectProposal, onOpenMessage,renderMessageScreen,onResolveEntry,canResolveEntry,handedness,dragEnabled,dragOverlayRef }: {
+export function DemoCustomerCalendar({ repository, focus, scrollToTodayToken, onPersonal, onGoToLanding, entries: suppliedEntries, onProposeChange, onDropBooking, onAcceptProposal, onRejectProposal, onOpenMessage,renderMessageScreen,onResolveEntry,canResolveEntry,handedness,dragEnabled,dragOverlayRef,toolsControl,viewMode,onViewModeChange,showHours=true,density="30min",calSizeKey,calDayNightMode }: {
+  toolsControl?: React.ReactNode;
+  viewMode?: "semana" | "mes_lineal" | "dia";
+  onViewModeChange?: (view:"semana"|"mes_lineal"|"dia")=>void;
+  showHours?: boolean;
+  density?: React.ComponentProps<typeof AgendaBoard>["density"];
+  calSizeKey?: React.ComponentProps<typeof AgendaBoard>["calSizeKey"];
+  calDayNightMode?: React.ComponentProps<typeof AgendaBoard>["calDayNightMode"];
   dragEnabled?: boolean;
   dragOverlayRef?: React.RefObject<ViewInstance | null>;
   onOpenMessage?: (entry:GoEntry,returnTo?:()=>void)=>void;
@@ -46,16 +53,19 @@ export function DemoCustomerCalendar({ repository, focus, scrollToTodayToken, on
     catch { Alert.alert(lang === "en" ? "Could not cancel" : "No se pudo cancelar", lang === "en" ? "The reservation was not changed." : "La reserva no se ha modificado."); }
   };
   return <View style={{ flex: 1 }} testID="demo-customer-calendar">
-    <View style={{ paddingHorizontal: 16, paddingBottom: 8, paddingTop: insets.top + 8, gap: 8 }}>
-      <Text style={{ color: "#ff7474", fontSize: 12, fontWeight: "700" }}>{lang === "en" ? "Customer calendar" : "Calendario cliente"}</Text>
+    <View testID="customer-calendar-header" style={{ paddingLeft: Math.max(16,insets.left+8),paddingRight:Math.max(16,insets.right+8), paddingBottom: 8, paddingTop: insets.top + 8, gap: 4 }}>
+      <View style={{flexDirection:"row",alignItems:"center",gap:8}}>
+        <Text style={{ flex:1,minWidth:0,color: "#ff7474", fontSize: 12, fontWeight: "700" }}>{lang === "en" ? "Customer calendar" : "Calendario cliente"}</Text>
+        {toolsControl}
+      </View>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-        <GoCalendarViewSelector value={view} onChange={setView} />
+        <GoCalendarViewSelector compact value={viewMode ?? view} onChange={onViewModeChange ?? setView} />
         <TouchableOpacity onPress={onPersonal} accessibilityRole="button" style={{ padding: 8 }}>
           <Text style={{ color: "#ffffff", fontSize: 12 }}>{lang === "en" ? "Personal calendar" : "Calendario personal"}</Text>
         </TouchableOpacity>
       </View>
     </View>
-    <AgendaBoard dragEnabled={dragEnabled} dragOverlayRef={dragOverlayRef} onDropBooking={onDropBooking} onGoToLanding={onGoToLanding} renderMessageScreen={renderMessageScreen} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} goLog={suppliedEntries ?? entries} embedded viewMode={view} calViewMonth={month} showHours density="30min"
+    <AgendaBoard dragEnabled={dragEnabled} dragOverlayRef={dragOverlayRef} onDropBooking={onDropBooking} onGoToLanding={onGoToLanding} renderMessageScreen={renderMessageScreen} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} goLog={suppliedEntries ?? entries} embedded viewMode={viewMode ?? view} calViewMonth={month} showHours={showHours} density={density} calSizeKey={calSizeKey} calDayNightMode={calDayNightMode}
       selectedDateISO={focus?.dateISO} scrollToTodayToken={scrollToTodayToken} scrollToDateToken={focus} highlightEntryId={focus?.entryId}
       onChangeMonth={direction => { const [year, value] = month.split("-").map(Number); const date = new Date(year, value - 1 + direction, 1, 12); setMonth(String(date.getFullYear()) + "-" + String(date.getMonth() + 1).padStart(2, "0")); }}
       onDeleteItem={id=>Alert.alert("GO",lang==="en"?"Cancel this reservation?":"¿Cancelar esta reserva?",[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Cancel reservation":"Cancelar reserva",style:"destructive",onPress:()=>void cancel(id)}])} onProposeItem={id=>{const entry=(suppliedEntries ?? entries).find(e=>e.id===id);if(entry)onProposeChange?.(entry);}}

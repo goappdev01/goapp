@@ -203,3 +203,18 @@ test('exiting month navigation never calls a stale creation callback', () => {
   assert.equal(scope.calOpen, false); assert.ok(calls.some(call => call[0] === 'closeMonth'));
   assert.ok(!calls.some(call => call[0] === 'saveCal' || call[0] === 'cancelFlow'));
 });
+
+
+test('customer calendar shares the single tools toggle and panel close without exposing personal shortcuts',()=>{
+ const customer=find(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='DemoCustomerCalendar');
+ const slot=customer.attributes.properties.find(p=>p.name?.getText(ast)==='toolsControl');assert.equal(slot.initializer.expression.getText(ast),'renderCalendarToolsToggle()');
+ assert.equal((source.match(/testID="calendar-tools-toggle"/g)||[]).length,1);
+ assert.match(declaration('renderCalendarToolsToggle'),/setCalConfigVisible\(visible => !visible\)/);
+ const panel=find(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='GoCalConfigPanel');
+ let condition=panel.parent;while(condition&&!ts.isBinaryExpression(condition))condition=condition.parent;assert.equal(condition.left.getText(ast),'calConfigVisible');
+ for(const handedness of ['left','right']){
+  let open=true,exits=0;const floats=renderFragment(byId('calendar-floating-controls'),{handedness,demoCustomerCalendarSelected:true,calConfigVisible:open,insets:{bottom:34},overlayPanelHeight:120,Haptics:{selectionAsync(){}},setCalConfigVisible:v=>{open=v;},exitCalendarContainer:()=>exits++});
+  const close=nodes(floats,n=>n.type==='GoCloseButton'&&n.props.level==='panel')[0];assert.ok(close);assert.equal(close.props.collapsePanel,true);close.props.onPress();assert.equal(open,false);assert.equal(exits,0);
+  assert.equal(nodes(floats,n=>n.type==='TouchableOpacity').length,0);assert.equal(floats.props.width,136);
+ }
+});

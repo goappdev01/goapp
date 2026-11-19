@@ -46,8 +46,8 @@ test('compact discard stays left of message in both hands and all controls fit a
   const group=nodes(nav,n=>n.props.testID==='entry-detail-follow-up-controls')[0],trash=nodes(group,n=>n.props.testID==='entry-discard')[0],message=nodes(group,n=>n.props.testID==='entry-message-go')[0];
   assert.equal(group.props.style.flexDirection,'row');assert.equal(group.props.style.gap,8);
   assert.deepEqual(group.children.map(n=>n.props.testID),['entry-discard','entry-message-go']);
-  assert.equal(trash.props.style.width,44);assert.equal(trash.props.style.height,44);assert.equal(trash.props.hitSlop,0);assert.equal(trash.props.accessibilityLabel,'Mi seguimiento: ELIMINAR');
-  assert.equal(nodes(trash,n=>n.type==='Feather')[0].props.name,'trash-2');assert.equal(nodes(trash,n=>n.type==='Text').length,0);
+  assert.equal(trash.props.style.width,44);assert.equal(trash.props.style.height,44);assert.equal(trash.props.hitSlop,0);assert.equal(trash.props.accessibilityLabel,'Ocultar mi ficha');
+  assert.equal(nodes(trash,n=>n.type==='Feather')[0].props.name,'eye-off');assert.equal(nodes(trash,n=>n.type==='Text').length,0);
   assert.equal(nodes(scroll,n=>['entry-discard','entry-message-go'].includes(n.props.testID)).length,0);
   assert.ok(nav.props.width<=285);assert.equal(nav.props.width,44+message.props.style.width+64*2+8*3);
   assert.equal(nav.props.initialTop,undefined);assert.equal(nav.props.initialBottom,11);
@@ -70,9 +70,9 @@ test('detail trash retains the existing confirmation and only dispatches persona
  const alerts=[],discarded=[],closed=[],scope={exports:{},lang:'es',canResolveEntry:()=>true,goLog:[base],Alert:{alert:(...args)=>alerts.push(args)},setLandingDetailsId:id=>closed.push(id),actionCompletion:{discard:async(entry,read)=>discarded.push([entry,read()]),decide(){assert.fail('must not change contractual or follow-up status');}}};
  vm.runInNewContext(ts.transpileModule('const '+resolve+';exports.resolve=resolveEntry;',{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,scope);
  const f=sheet(base,{onDiscard:()=>scope.exports.resolve(base,'discard')}),trash=nodes(f.tree,n=>n.props.testID==='entry-discard')[0];
- trash.props.onPress({stopPropagation(){}});assert.equal(discarded.length,0);assert.equal(alerts[0][0],'Eliminar mi ficha');assert.match(alerts[0][1],/No se cancela la reserva/);
+ trash.props.onPress({stopPropagation(){}});assert.equal(discarded.length,0);assert.equal(alerts[0][0],'Ocultar mi ficha');assert.match(alerts[0][1],/No se cancela la reserva/);
  assert.equal(alerts[0][2][0].style,'cancel');assert.equal(alerts[0][2][0].onPress,undefined);
- const confirm=alerts[0][2][1];assert.equal(confirm.text,'ELIMINAR');assert.equal(confirm.style,'destructive');confirm.onPress();await new Promise(resolve=>setImmediate(resolve));
+ const confirm=alerts[0][2][1];assert.equal(confirm.text,'Ocultar mi ficha');assert.equal(confirm.style,'destructive');confirm.onPress();await new Promise(resolve=>setImmediate(resolve));
  assert.equal(discarded.length,1);assert.equal(discarded[0][0],base);assert.equal(discarded[0][1],base);assert.deepEqual(closed,[null]);
 });
 
@@ -119,7 +119,7 @@ test('expanded sheet reserves bottom navigation outside the scroll and places GO
 test('original and proposed booking dates show full local year without changing persisted values',()=>{
  const entry={...base,estado:'propuesta_pendiente',date:'16/11/26',dateISO:'2026-11-16',time:'11:00',bookingTimeline:{timezone:'Pacific/Kiritimati',workMinutes:0,waitMinutes:0,phases:[]},changeProposal:{originalDateISO:'2026-11-16',originalTime:'11:00',date:'20/11/26',dateISO:'2026-11-20',time:'11:11',note:'Cambiar horario',proposedAt:1}};
  const snapshot=JSON.stringify(entry),f=sheet(entry),summary=nodes(f.tree,n=>n.props.testID==='entry-original-date-time')[0],proposal=nodes(f.tree,n=>n.props.testID==='entry-proposed-date-time')[0];
- assert.equal(texts(summary),'Lun 16/11/2026 · 11:00');assert.equal(texts(nodes(f.tree,n=>n.props.testID==='entry-duration')[0]),'Duración: 60 min');assert.equal(texts(proposal).replace(/\s+/g,' '),'Propuesto: Vie 20/11/2026 · 11:11');assert.equal(JSON.stringify(entry),snapshot);
+ assert.equal(texts(summary),'Lun 16/11/2026 · 11:00');assert.equal(texts(nodes(f.tree,n=>n.props.testID==='entry-duration')[0]),'Duración: 60 min');assert.equal(texts(proposal).replace(/\s+/g,' '),'Vie 20/11/2026 · 11:11');assert.equal(JSON.stringify(entry),snapshot);
  const info=nodes(f.tree,n=>n.props.testID==='entry-proposal')[0];assert.equal(info.type,'View');assert.equal(info.props.onPress,undefined);assert.equal(info.props.accessibilityRole,undefined);assert.equal(info.props.style.elevation,undefined);assert.ok(info.props.style.borderColor.startsWith('rgba('));
  const presentation=f.load('data/goEntryPresentation.ts');assert.equal(presentation.formatBookingLocalDate('2026-11-16','16/11/26','es','Pacific/Kiritimati'),'Lun 16/11/2026');
  assert.equal(presentation.formatBookingLocalDate(undefined,'','es','America/Los_Angeles','2026-11-16T00:30:00Z'),'Dom 15/11/2026');
@@ -344,4 +344,16 @@ test('the existing proposal detail distinguishes changed services, professional,
  const entry={...original,estado:'propuesto',changeProposal:{dateISO:'2030-10-27',date:'27/10/2030',time:'13:30',originalDateISO:base.dateISO,originalTime:base.time,selection}},before=JSON.stringify(entry),f=sheet(entry);
  const proposed=nodes(f.tree,n=>n.props.testID==='entry-proposed-selection')[0];assert.ok(proposed);assert.match(texts(proposed),/Tinte/);assert.match(texts(proposed),/Luis/);assert.match(texts(proposed),/90/);assert.match(texts(proposed),/32.00/);
  assert.match(texts(f.tree),/Corte original/);assert.match(texts(f.tree),/12.00/);assert.equal(JSON.stringify(entry),before);
+});
+
+
+test('proposal detail shows only its dynamic date and time below the existing status',()=>{
+ for(const fontScale of [1,2.8]){
+  const entry={...base,estado:'propuesta_pendiente',changeProposal:{dateISO:'2030-11-23',date:'23/11/2030',time:'10:30',originalDateISO:base.dateISO,originalTime:base.time}};
+  const before=JSON.stringify(entry),f=sheet(entry,{}, {viewport:{width:320,height:568,fontScale}});
+  const proposed=nodes(f.tree,n=>n.props.testID==='entry-proposed-date-time')[0];
+  assert.equal(texts(proposed),'Sáb 23/11/2030 · 10:30');assert.equal(proposed.props.numberOfLines,undefined);
+  assert.equal(texts(nodes(f.tree,n=>n.props.testID==='entry-proposal-state')[0]),'ESPERANDO RESPUESTA');
+  assert.doesNotMatch(texts(proposed),/Propuesto:|Proposed:/);assert.equal(JSON.stringify(entry),before);
+ }
 });

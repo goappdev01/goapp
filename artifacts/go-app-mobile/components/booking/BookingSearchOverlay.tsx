@@ -714,7 +714,8 @@ export function BookingSearchOverlay({
     if (!selectedBusiness || !selectedItem) return;
     const generation = ++slotGeneration.current;
     const scope = currentSlotScope.current;
-    setSlots([]); setSlotError("");
+    // Preserve a failed revalidation's explanation when returning from review.
+    setSlots([]);
     setLoadingSlots(true);
     // Pass staffId so the slot engine uses staff-specific AvailabilityWindows when
     // they exist (created by syncWithBookingSystem). Falls back to business-level
@@ -801,12 +802,13 @@ export function BookingSearchOverlay({
     if(!changeSelection)setSelectedStaff(null);
     else setSelectedStaff(current=>current && current!=="none" && staffList.length
       ? staffList.find(person=>person.id===current.id&&staffSupportsBookingServices(person,catalogBookingServices(catalogQuote!).map(service=>service.id))) ?? null : current);
-    setSlots([]);setProposalReview(null);
+    setSlots([]);setProposalReview(null);setSlotError("");setSlotTakenError(false);
     goToStep("professional", "forward");
   };
 
   const handleSelectStaff = (staff: Staff | "none") => {
     Haptics.selectionAsync().catch(() => {});
+    setSlotError("");setSlotTakenError(false);
     setSelectedStaff(staff);
     goToStep("slots", "forward");
   };
@@ -843,8 +845,10 @@ export function BookingSearchOverlay({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
       if (changeSelection) {
-        setSlotTakenError(false);
-        const staffId=selectedStaff && selectedStaff!=="none"?selectedStaff.id:undefined;
+        setSlotTakenError(false);setSlotError("");
+        // "No preference" can return a different professional on every read.
+        // Revalidate the chosen plan, rather than asking for another assignment.
+        const staffId=selectedStaff && selectedStaff!=="none"?selectedStaff.id:slot.staffId;
         const fresh=demoRepository
           ? await demoRepository.getAllSlots(selectedBusiness.id,selectedItem.id,selectedDate,staffId,selectedServices.map(service=>service.id))
           : (await getTimelineAvailability(selectedBusiness.id,selectedServices.map(service=>service.id),selectedDate,staffId)).slots;
@@ -858,7 +862,7 @@ export function BookingSearchOverlay({
         const quote=useDatedDiscounts && selected.startInstant?await quoteBookingDiscount(catalogQuote,selected.startInstant):catalogQuote;
         if(scope!==currentSlotScope.current)return;
         setProposalReview({slot:selected,selection:{serviceIds:selectedServices.map(service=>service.id),staffId,
-          professionalName:selectedStaff && selectedStaff!=="none"?selectedStaff.name:undefined,
+          professionalName:staffList.find(person=>person.id===staffId)?.name ?? (selectedStaff && selectedStaff!=="none"?selectedStaff.name:undefined),
           durationMinutes:(Date.parse(selected.endInstant??selected.endDatetime)-Date.parse(selected.startInstant??selected.startDatetime))/60000,
           catalogSnapshot:quote}});
         goToStep("hold","forward");
@@ -929,8 +933,9 @@ export function BookingSearchOverlay({
         if(!fresh.some(candidate=>candidate.isAvailable&&!candidate.isBlocked
           && (candidate.startInstant??candidate.startDatetime)===(slot.startInstant??slot.startDatetime)
           && candidate.staffId===slot.staffId&&candidate.endDatetime===slot.endDatetime)){
-          setSlotTakenError(true);setProposalReview(null);goToStep("slots","back");setSlots(fresh);
-          throw Error(lang==="en"?"That slot is no longer available. Choose another.":"Esta franja ya no está disponible. Elige otra.");
+          setSlotTakenError(true);setProposalReview(null);setSlots(fresh);
+          setSlotError(lang==="en"?"That slot is no longer available. Choose another.":"Esta franja ya no está disponible. Elige otra.");
+          goToStep("slots","back");return;
         }
         if(!onProposalSubmit)throw Error("No se puede enviar la propuesta en este contexto.");
         await onProposalSubmit(proposalReview);
@@ -1723,8 +1728,9 @@ export function BookingSearchOverlay({
                         key={d}
                         disabled={!demoRepository && (availableDates === null || !availableDates.includes(d))}
                         onPress={() => {
+                          if (d === selectedDate) return;
                           Haptics.selectionAsync().catch(() => {});
-                          setSlots([]); setActiveHold(null); setSelectedDate(d);
+                          setSlots([]); setActiveHold(null); setSlotError("");setSlotTakenError(false);setSelectedDate(d);
                         }}
                         style={[
                           s.dayChip,

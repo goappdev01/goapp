@@ -32,7 +32,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false,initialDat
   const animation={start(fn){fn?.({finished:true});},stop(){}};
   const native=new Proxy({Dimensions:{get:()=>viewport},Platform:{OS:"ios",select:x=>x.ios??x.default},
     useWindowDimensions:()=>({...viewport,fontScale:1}),
-    StyleSheet:{create:x=>x,absoluteFillObject:{}},Alert:{alert(title,message){alerts.push([title,message]);}},Keyboard:{addListener:(event,fn)=>{keyboardEvents.set(event,fn);return{remove(){keyboardEvents.delete(event);}};},dismiss(){keyboardEvents.get("keyboardDidHide")?.();}},
+    StyleSheet:{create:x=>x,absoluteFillObject:{}},Alert:{alert(title,message){alerts.push([title,message]);}},Keyboard:{isVisible:()=>false,addListener:(event,fn)=>{keyboardEvents.set(event,fn);return{remove(){keyboardEvents.delete(event);}};},dismiss(){keyboardEvents.get("keyboardDidHide")?.();}},
     Animated:{Value,View:"Animated.View",spring:()=>animation,timing:()=>animation,add:()=>0},
     PanResponder:{create:config=>({panHandlers:config})}
   },{get:(target,key)=>target[key]??key});
@@ -71,6 +71,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false,initialDat
     // local pricing policy here so the parent flow uses the reviewed quote.
     const selector=nodes(tree).find(node=>node.props.repository && node.props.rootIds);
     const next=selector?selector.props.businessId+'|'+selector.props.rootIds.join(','):'';
+    if(!selector)catalogueScope='';
     if(selector && next!==catalogueScope){catalogueScope=next;const config=store.getSnapshot().config;
       const ids=selector.props.rootIds,catalog=config.services.map(service=>({id:store.businessId+'_service_'+Array.from(service.name.normalize('NFKC').trim().toLowerCase()).map(c=>c.codePointAt(0).toString(16)).join('_'),businessId:store.businessId,title:service.name,durationMinutes:service.duration,price:service.price,active:true,visible:true,currency:'EUR'}));
       selector.props.onChange(ids.length?pure('data/bookingServices.ts').localCatalogQuote(store.businessId,[...catalog,...(config.catalogProducts??[])],config.catalogAssociations??[],ids):null);
@@ -331,4 +332,55 @@ test('a saved pending reservation keeps its real status, yellow presentation and
  await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();tree=f.render(f.Overlay,f.props);
  const state=control(tree,'booking-confirmed-state');assert.equal(text(state),'BOOKING_STATE_PENDING');assert.equal(state.props.style.color,'#FFD700');
  await button(tree,'biz_ok_view_calendar').props.onPress();assert.ok(f.navigation[0][2]);assert.equal(f.store.getSnapshot().bookings.length,1);
+});
+
+
+test('consecutive DEMO proposals retain services, professional and date through back/forward and a lost slot without moving the original',async()=>{
+ const f=fixture({initialDateISO:'2030-01-07'});await f.configure();
+ await setReservableServices(f,[{name:'Corte DEMO',duration:30,price:12},{name:'Tinte DEMO',duration:60,price:20}]);
+ const config=f.store.getSnapshot().config;
+ await f.store.updateConfig({plantillaItems:config.plantillaItems.map(item=>({...item,count:2,staffNames:['Raul 1 GO PRUEBA','Lucía DEMO'],staffServices:[['Corte DEMO','Tinte DEMO'],['Corte DEMO','Tinte DEMO']]}))});
+ const plan=f.store.getSnapshot().plan;await f.store.saveFloorPlan({...plan,elements:[...plan.elements,{...plan.elements[0],id:'puesto-lucia',label:'Lucía DEMO',x:60}]});
+ const items=await f.repo.getBookableItems(f.store.businessId),staff=await f.repo.getStaff(f.store.businessId);
+ const hold=await f.repo.createHold({businessId:f.store.businessId,bookableItemId:items[0].id,customerId:owner,staffId:staff[0].id,startDatetime:'2030-01-07T09:00:00',endDatetime:'2030-01-07T09:30:00',unitsReserved:1,peopleCount:1});
+ assert.equal(hold.ok,true);const saved=await f.repo.claimSlot({...hold.booking,status:'CONFIRMED'});assert.equal(saved.ok,true);
+ const original=JSON.stringify(saved.booking),drafts=[];
+ const render=()=>f.render(f.Overlay,f.props);
+ const refresh=async()=>{render();await turn();render();await turn();return render();};
+ for(let round=0;round<3;round++){
+  f.props.visible=false;render();await turn();
+  const entry=f.repo.getCustomerEntries()[0];
+  f.props.changeSelection=pure('data/bookingChangeAvailability.ts').bookingChangeSelection(entry,saved.booking);
+  f.props.visible=true;f.props.onProposalSubmit=async draft=>{
+   await f.repo.changeBooking(saved.booking.id,f.store.businessId,'customer','propose',{dateISO:draft.slot.startDatetime.slice(0,10),time:draft.slot.startDatetime.slice(11,16),selection:draft.selection,acceptFinancialTerms:true});drafts.push(draft);
+  };
+  let tree=await refresh();assert.ok(button(tree,'save'));
+  if(round===1){button(tree,'Tinte DEMO').props.onPress();tree=await refresh();}
+  assert.notEqual(button(tree,'save').props.disabled,true,'ready quote round '+round);button(tree,'save').props.onPress();tree=await refresh();
+  assert.ok(button(tree,round===1?'Lucía DEMO':'Raul 1 GO PRUEBA'),'professional round '+round+': '+text(tree));button(tree,round===1?'Lucía DEMO':'Raul 1 GO PRUEBA').props.onPress();tree=await refresh();
+  const date=nodes(tree).find(n=>n.props.testID==='booking-date-2030-01-07');date.props.onPress();tree=await refresh();
+  let slot=nodes(tree).find(n=>n.type==='TouchableOpacity'&&typeof n.props.key==='string'&&n.props.key.includes('T'));
+  assert.ok(slot,'DEMO offers actual repository slots');await slot.props.onPress();tree=await refresh();assert.ok(button(tree,'ENVIAR PROPUESTA'));
+  if(round===2){
+   const available=f.repo.getAllSlots;
+   f.repo.getAllSlots=async(...args)=>(await available(...args)).map(slot=>({...slot,isAvailable:false}));
+   await button(tree,'ENVIAR PROPUESTA').props.onPress();tree=await refresh();
+   assert.match(text(tree),/Esta franja ya no está disponible/);assert.equal(drafts.length,2);
+   assert.equal(nodes(tree).find(n=>n.props.testID==='booking-date-2030-01-07').props.accessibilityState.selected,true);
+   f.repo.getAllSlots=available;
+   nodes(tree).find(n=>n.props.testID==='booking-date-2030-01-08').props.onPress();tree=await refresh();
+   nodes(tree).find(n=>n.props.testID==='booking-date-2030-01-07').props.onPress();tree=await refresh();
+   slot=nodes(tree).find(n=>n.type==='TouchableOpacity'&&typeof n.props.key==='string'&&n.props.key.includes('T'));await slot.props.onPress();tree=await refresh();
+  }
+  // Revisiting time preserves the current services, staff and chosen date.
+  if(round===2){button(tree,'biz_change_time').props.onPress();tree=await refresh();slot=nodes(tree).find(n=>n.type==='TouchableOpacity'&&typeof n.props.key==='string'&&n.props.key.includes('T'));await slot.props.onPress();tree=await refresh();}
+  await button(tree,'ENVIAR PROPUESTA').props.onPress();tree=await refresh();
+  assert.equal(drafts.length,round+1);assert.equal(f.store.getSnapshot().bookings.length,1);
+  const after=f.store.getSnapshot().bookings[0];const {changeProposal,changeHistory,...unchanged}=after;
+  const {changeProposal:oldProposal,changeHistory:oldHistory,...originalFields}=JSON.parse(original);
+  assert.deepEqual(unchanged,originalFields);assert.equal(changeProposal.proposedBy,'customer');
+  assert.equal(drafts[round].selection.staffId,staff[round===1?1:0].id);
+  assert.equal(drafts[round].selection.serviceIds.length,round===1?2:1);
+ }
+ assert.deepEqual(f.liveCalls,[]);
 });
