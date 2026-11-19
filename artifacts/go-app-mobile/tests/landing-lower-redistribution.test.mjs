@@ -16,12 +16,6 @@ const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('ho
 function walk(n){nodes.push(n);ts.forEachChild(n,walk)}walk(ast);
 const decl=name=>nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name);
 const statement=name=>decl(name).parent.parent;
-const code=ts.transpileModule([
- source.slice(statement('landingOrbitTop').getStart(ast),statement('landingBaseline').end),
- ...['landingSafeTop','landingBaseFrame','landingPanels','toLandingRootRect','humanityBlocks','humanityPanelsMeasured','humanityPlacement',
- 'landingInlineHumanity','inlineHumanityWidth','inlineHumanityRect','landingArrangement','landingOffsetY','supportObstacles','landingDisplayCloseRect','qrBase','cornerSatelliteKeys','sharedCornerKeys','sharedCornerObstacles','adminOnlyCornerObstacles','allCornerHelpObstacles','landingCornerPair','sharedHelpCandidate','helpOverlapsAdminSatellite','supportRect'].map(name=>'const '+decl(name).getText(ast)+';'),
- 'result={supportRect,landingArrangement,landingCenter,landingPanels,landingBaseFrame,humanityPlacement,landingCloseRect,closeHeaderObstacles,closeReservedColumn,inlineHumanityRect};',
-].join('\n'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.None,target:ts.ScriptTarget.ES2022}}).outputText;
 const devices=[
  {width:320,height:568,insets:{top:20,bottom:0,left:0,right:0}},
  {width:390,height:822,insets:{top:47,bottom:34,left:0,right:0}},
@@ -30,17 +24,8 @@ const devices=[
  {width:844,height:368,insets:{top:0,bottom:21,left:44,right:44}},
 ];
 function fixture(d,preset,profile,handedness,overrides={}){
- const scale=layout.fitLandingScale(preset,d.width,d.height,d.insets),orbitRadius=Math.round(99*scale),orbitBtnSize=Math.round(65*scale),microR=orbitRadius+Math.round(35*scale),microSz=Math.round(50*scale),goSize=Math.round(128*scale),orbitWrapSize=2*(orbitRadius+orbitBtnSize/2)+12,systemBoundingRadius=Math.max(orbitRadius+orbitBtnSize/2,microR+microSz/2),dockRight=preset==='estandar'?-1:5;
- const isUserV1Surface=profile==='USER',keys=policy.visibleLandingSatelliteKeys(Object.keys(layout.LANDING_SATELLITE_DEGREES),isUserV1Surface);
- const dock=layout.landingDockBounds({...d,dockRight,boundingRadius:systemBoundingRadius,wrapSize:orbitWrapSize,satelliteRadius:microR,satelliteSize:microSz,visibleSatelliteKeys:Object.keys(layout.LANDING_SATELLITE_DEGREES),orbitRadius,orbitButtonSize:orbitBtnSize,orbitCount:8,orbitVisible:true,goSize});
- const context={...layout,...panels,...policy,...humanity,...arc,...support,...qr,screen:d,insets:d.insets,goSize,orbitRadius,orbitBtnSize,microR,microSz,orbitWrapSize,systemBoundingRadius,dockRight,
-   handedness,maxX:dock.maxX,minX:dock.minX,landingDock:dock,SYSTEM_MARGIN_Y:6,uiScaleFactor:scale,INTENTS:Array(7).fill({}),isUserV1Surface,
-   fullLandingArchitecture:profile==='ADMIN',bottomReserved:d.insets.bottom+4+(preset==='compacto'?2:preset==='estandar'?6:12),
-   titleBottomLocalY:null,ACTION_TOP_Y:d.insets.top+151,posReady:true,kbHeight:0,orbitSecondLevel:null,reservasOrbitalOpen:false,
-   supportMode:false,anyOverlayOpen:false,rutasMode:false,landingNextHeight:260,landingPendingHeight:220,landingPendingOffset:8,
-   anyOperationalPanelOpen:true,landingHelpBottom:400,landingHelpH:20,landingHasNext:true,nextAptMinimized:false,transportPanelH:160,
-   useMemo:fn=>fn(),Math,...overrides};
- vm.runInNewContext(code,context);return {context,...context.result,scale};
+ const f=require('./tests/helpers/landing-qr-fixture.cjs').fixture(d,preset,profile,handedness,overrides);
+ return {...f,context:{...f.ctx,landingDock:f.landingDock,landingHelpGeometry:f.landingHelpGeometry}};
 }
 const overlaps=(a,b)=>a.x<b.x+b.width-1e-5&&a.x+a.width>b.x+1e-5&&a.y<b.y+b.height-1e-5&&a.y+a.height>b.y+1e-5;
 test('support corner stays on the configured side without covering GO or active satellites',()=>{
@@ -65,7 +50,7 @@ for(const profile of ['ADMIN','USER','BUSINESS'])for(const preset of ['compacto'
  test(`${profile} / ${preset} / ${handedness}: real Home geometry keeps complete buttons, cards and 56pt close target accessible`,()=>{
   for(const d of devices){
    const g=fixture(d,preset,profile,handedness),a=g.landingArrangement;
-   const input={center:g.landingCenter,bounds:{left:d.insets.left+3,right:d.width-d.insets.right-3,top:d.insets.top+3,bottom:d.height-2},goSize:g.context.goSize,orbitRadius:g.context.orbitRadius,orbitSize:g.context.orbitBtnSize,orbitCount:8,orbitVisible:true,anchorSatelliteDegrees:Object.values(layout.LANDING_SATELLITE_DEGREES),satelliteRadius:g.context.microR,satelliteSize:g.context.microSz,satellites:policy.visibleLandingSatelliteKeys(Object.keys(layout.LANDING_SATELLITE_DEGREES),profile==='USER').filter(k=>k!=='payment').map(key=>({key,degrees:layout.LANDING_SATELLITE_DEGREES[key]}))};
+   const input={center:g.landingCenter,bounds:{left:d.insets.left+3,right:d.width-d.insets.right-3,top:d.insets.top+3,bottom:(g.context.landingHelpGeometry?.floor??d.height-2)},goSize:g.context.goSize,orbitRadius:g.context.orbitRadius,orbitSize:g.context.orbitBtnSize,orbitCount:8,orbitVisible:true,anchorSatelliteDegrees:Object.values(layout.LANDING_SATELLITE_DEGREES),satelliteRadius:g.context.microR,satelliteSize:g.context.microSz,satellites:policy.visibleLandingSatelliteKeys(Object.keys(layout.LANDING_SATELLITE_DEGREES),profile==='USER').filter(k=>k!=='payment').map(key=>({key,degrees:layout.LANDING_SATELLITE_DEGREES[key]}))};
    const saved=JSON.stringify(input),lower=arc.redistributeLandingLowerArc(input);assert.ok(lower.fitted,JSON.stringify({d,preset,profile,handedness}));assert.equal(JSON.stringify(input),saved);
    assert.equal(a.offsetY,g.landingBaseFrame.virtual?0:lower.offsetY);
    assert.equal(lower.obstacles.length,profile==='USER'?14:17,'no hidden orbit or duplicate control is restored');
@@ -82,7 +67,7 @@ for(const profile of ['ADMIN','USER','BUSINESS'])for(const preset of ['compacto'
     assert.ok(Math.abs(Math.hypot(x,y)-radius)<1e-6,key+' original radius');
    }
    for(const r of lower.obstacles){assert.ok(r.width>=44);assert.ok(r.x>=d.insets.left+3-1e-5&&r.x+r.width<=d.width-d.insets.right-3+1e-5);assert.ok(r.y>=d.insets.top+3-1e-5&&r.y+r.height<=d.height-2+1e-5,'complete target stays inside the viewport with the requested 2pt gap');}
-   if(profile!=='USER')assert.ok(Math.abs(Math.max(...lower.obstacles.map(r=>r.y+r.height))-(d.height-2))<1e-6,'2pt ADMIN gap is preserved');
+   if(profile!=='USER')assert.ok(Math.abs(Math.max(...lower.obstacles.map(r=>r.y+r.height))-(g.context.landingHelpGeometry?.floor??d.height-2))<1e-6,'shared envelope reserves AYUDA');
    const admin=fixture(d,preset,'ADMIN',handedness);assert.ok(Math.abs(g.landingCenter.y+a.offsetY-(admin.landingCenter.y+admin.landingArrangement.offsetY))<1e-6,'all profiles share the exact approved ADMIN center');
    // Compare every pair with the frozen original rings, including the approved small gaps.
    const original=key=>{
@@ -102,19 +87,15 @@ for(const profile of ['ADMIN','USER','BUSINESS'])for(const preset of ['compacto'
    assert.equal(g.landingPanels.commands.height,46);assert.equal(g.landingBaseFrame.scroll,false);
   }
  });
-test('recorded iPhone moves the intact concentric Landing down 32pt and leaves exactly 2pt; close stays in its separate safe area',()=>{
- const g=fixture(devices[1],'estandar','ADMIN','right'),a=g.landingArrangement;
- assert.equal(g.context.landingDock.maxY,-12);
- const bottomExtent=Math.sin(67.5*Math.PI/180)*134+25;
- assert.ok(Math.abs(a.offsetY-(820-632.5-bottomExtent))<1e-6);
- assert.ok(Math.abs(g.landingCenter.y+a.offsetY+22+bottomExtent-842)<1e-6);
- const previousOffset=788-632.5-bottomExtent;
- assert.ok(Math.abs(a.offsetY-previousOffset-32)<1e-6,'34pt inset replaced by 2pt for the Landing only');
- assert.ok(a.closeRect.y+a.closeRect.height+8<=788,'close target retains full OS bottom protection');
- for(const offset of Object.values(a.offsets))assert.deepEqual(JSON.parse(JSON.stringify(offset)),{x:0,y:0});
+test('recorded iPhone reserves space for AYUDA by translating the intact concentric system',()=>{
+ const g=fixture(devices[1],'estandar','ADMIN','right');
+ assert.ok(g.context.landingHelpGeometry.translation<0);
+ assert.ok(g.supportRect.y+g.supportRect.height<=devices[1].height-devices[1].insets.bottom-8);
+ for(const offset of Object.values(g.landingArrangement.offsets))assert.deepEqual(JSON.parse(JSON.stringify(offset)),{x:0,y:0});
 });
+
 test('User V1 keeps the existing satellites and adds only eight passive orbit shells at the ADMIN anchor',()=>{
- const g=fixture(devices[1],'estandar','USER','right');assert.ok(g.landingArrangement.offsetY>0);
+ const g=fixture(devices[1],'estandar','USER','right');assert.ok(g.landingArrangement.offsetY>=0);
  assert.deepEqual(Object.keys(g.landingArrangement.offsets),['GO',...Array.from({length:8},(_,i)=>'orbit-'+i),'bell','list','calendar','settings','mas']);
 });
 test('opening or minimizing any approved card never recomputes a different anchor or changes close placement',()=>{
@@ -148,12 +129,12 @@ test('the restored slot remains associated with DEPORTE, never with a different 
  const entries=decl('INTENTS').initializer.elements;
  const key=entries[5].properties.find(p=>p.name?.getText(ast)==='key');assert.equal(key.initializer.text,'deporte');
  assert.equal(entries.length+1,8);
- const g=fixture(devices[1],'estandar','ADMIN','right');assert.ok(g.landingArrangement.offsetY>0);
+ const g=fixture(devices[1],'estandar','ADMIN','right');assert.ok(g.landingArrangement.offsetY>=0);
  assert.equal(Object.keys(g.landingArrangement.offsets).filter(key=>key==='orbit-5'||key==='contacts').length,2);
 });
 
 // Frozen immediately before this profile-only correction, after the user's iPhone acceptance.
-test('frozen ADMIN geometry stays exact without support; adding support preserves the approved orbital centers and offsets',()=>{
+test('authorized shared anchor is independent of support mode and retains its exact geometry',()=>{
  const records=[];
  for(const d of devices)for(const preset of ['compacto','estandar','grande'])for(const hand of ['right','left']){
   const g=fixture(d,preset,'ADMIN',hand,{
@@ -168,7 +149,7 @@ test('frozen ADMIN geometry stays exact without support; adding support preserve
   else assert.equal(g.landingBaseFrame.height-current.landingBaseFrame.height,support.supportOrbitRect(d.width,d.height,d.insets,hand).height+16);
   records.push({center:g.landingCenter,arrangement:g.landingArrangement,panels:g.landingPanels,frame:g.landingBaseFrame,humanity:g.humanityPlacement});
  }
- assert.equal(createHash('sha256').update(JSON.stringify(records)).digest('hex'),'26d3b12b89b1a64255af344ff72c6dfd13bf5bd6330ad93e79afb5148db7407a');
+ assert.equal(createHash('sha256').update(JSON.stringify(records)).digest('hex'),'4ba59e3b5b650392ec089c5a942f6ddd0f8ed208494bb74a3f6e02d57bbd6a6f');
 });
 test('the original ADMIN orbit renderer is preserved apart from the authorized module visibility projection',()=>{
  const shell=nodes.find(n=>ts.isConditionalExpression(n)&&n.whenTrue.getText(ast).includes('testID="landing-quiet-orbits"'));

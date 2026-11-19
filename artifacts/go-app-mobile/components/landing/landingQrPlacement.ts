@@ -77,23 +77,34 @@ export function placeLandingQr({ company: _company, size, hitSlop, bounds, obsta
 }
 
 
-/** Medium only: move AYUDA, never the orbit, using complete touch rectangles. */
-export function placeMediumLandingHelp(candidate: HumanityRect, preset: string, bounds: HumanityRect,
-  obstacles: readonly HumanityRect[]): HumanityRect | null {
-  if (preset !== "estandar") return candidate;
-  const gap = 4, maxX = bounds.x + bounds.width - candidate.width, maxY = bounds.y + bounds.height - candidate.height;
-  const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
-  const xs = [clamp(candidate.x, bounds.x, maxX), bounds.x, maxX,
-    ...obstacles.flatMap(o => [o.x - gap - candidate.width, o.x + o.width + gap])];
-  const ys = [clamp(candidate.y, bounds.y, maxY), bounds.y, maxY,
-    ...obstacles.flatMap(o => [o.y - gap - candidate.height, o.y + o.height + gap])];
-  let best: HumanityRect | null = null, distance = Infinity;
-  for (const x of xs) for (const y of ys) {
-    if (x < bounds.x || x > maxX || y < bounds.y || y > maxY) continue;
-    if (obstacles.some(o => x < o.x + o.width + gap - .001 && x + candidate.width + gap > o.x + .001
-      && y < o.y + o.height + gap - .001 && y + candidate.height + gap > o.y + .001)) continue;
-    const score = (x - candidate.x) ** 2 + (y - candidate.y) ** 2;
-    if (score < distance) { best = { ...candidate, x, y }; distance = score; }
+/** AYUDA is a lower satellite of the effective orbit. Only a shared vertical
+ * translation is permitted; every existing orbital offset and size is retained. */
+export function anchorLandingHelp({ center, radius, size, hand, bounds, orbit }: {
+  center: { x: number; y: number }; radius: number; size: number; hand: "left" | "right";
+  bounds: HumanityRect; orbit: readonly HumanityRect[];
+}): { help: HumanityRect; lift: number } | null {
+  const gap = 4, right = bounds.x + bounds.width, bottom = bounds.y + bounds.height;
+  const preferredX = center.x + (hand === "right" ? 1 : -1) * radius * Math.SQRT1_2 - size / 2;
+  const minX = hand === "right" ? Math.max(bounds.x, center.x - size / 2) : bounds.x;
+  const maxX = hand === "right" ? right - size : Math.min(right - size, center.x - size / 2);
+  const overlap = (a: HumanityRect, b: HumanityRect) => a.x < b.x + b.width + gap - .001
+    && a.x + a.width + gap > b.x + .001 && a.y < b.y + b.height + gap - .001 && a.y + a.height + gap > b.y + .001;
+  const xs = [Math.max(minX, Math.min(maxX, preferredX)), minX, maxX,
+    ...orbit.flatMap(o => [o.x - gap - size, o.x + o.width + gap])];
+  let best: { help: HumanityRect; lift: number } | null = null, score = Infinity;
+  for (const x of xs) {
+    if (x < minX || x > maxX) continue;
+    const y = Math.max(center.y + radius * Math.SQRT1_2 - size / 2,
+      ...orbit.filter(o => x < o.x + o.width + gap && x + size + gap > o.x).map(o => o.y + o.height + gap));
+    for (const target of [Math.min(y, bottom - size)]) {
+      const lift = Math.max(0, y - target, ...orbit.map(o => o.y + o.height - bottom)), help = { x, y: y - lift, width: size, height: size };
+      if (help.y < bounds.y || help.y + size > bottom || help.y + size / 2 < center.y - lift) continue;
+      const moved = orbit.map(o => ({ ...o, y: o.y - lift }));
+      if (moved.some(o => o.y < bounds.y || o.y + o.height > bottom)) continue;
+      if (moved.some(o => overlap(help, o))) continue;
+      const cost = lift * lift + (x - preferredX) ** 2;
+      if (cost < score) { best = { help, lift }; score = cost; }
+    }
   }
   return best;
 }

@@ -143,7 +143,7 @@ import { SupportAdminPanel, type SupportAdminView } from "@/components/landing/S
 import { SupportTeamPanel } from "@/components/landing/SupportTeamPanel";
 import { supportGateway } from "@/data/supportGateway";
 import { supportOrbitRect, SUPPORT_ORBIT_ACTIONS, SUPPORT_ADMIN_ORBITS, GO_SUPPORT_LIVE_ENABLED, type SupportKind } from "@/lib/supportRequests";
-import { placeMediumLandingHelp, placeLandingHelpQr, placeLandingQr } from "@/components/landing/landingQrPlacement";
+import { anchorLandingHelp, placeLandingHelpQr, placeLandingQr } from "@/components/landing/landingQrPlacement";
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
@@ -12153,13 +12153,41 @@ function HomeScreenContent() {
   //   left anchor center X            = SYSTEM_MARGIN_X + SBR
   //   → minX = (SYSTEM_MARGIN_X + SBR) - (screen.width - SYSTEM_MARGIN_X - SBR)
   //          = 2*SYSTEM_MARGIN_X + 2*SBR - screen.width
-  const landingDock = landingDockBounds({ width: screen.width, insets, dockRight,
+  const baseLandingDock = landingDockBounds({ width: screen.width, insets, dockRight,
     boundingRadius: systemBoundingRadius, wrapSize: orbitWrapSize,
     satelliteRadius: microR, satelliteSize: microSz,
     // ADMIN geometry is the shared reference; visibility never moves the central GO.
     visibleSatelliteKeys: Object.keys(LANDING_SATELLITE_DEGREES),
     orbitRadius, orbitButtonSize: orbitBtnSize, orbitCount: rutasMode ? 8 : INTENTS.length + 1,
     orbitVisible: true, goSize });
+  // Reserve AYUDA as part of the scaled orbital envelope before laying out content.
+  const landingHelpGeometry = (() => {
+    const center = { x: screen.width - dockRight - systemBoundingRadius + (handedness === "right" ? baseLandingDock.maxX : baseLandingDock.minX),
+      y: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + baseLandingDock.maxY };
+    const bounds = { left: insets.left + 3, right: screen.width - insets.right - 3,
+      top: insets.top + 8, bottom: screen.height - insets.bottom - 8 };
+    const reference = redistributeLandingLowerArc({ center, bounds, goSize, orbitRadius, orbitSize: orbitBtnSize,
+      orbitCount: INTENTS.length + 1, orbitVisible: true, satelliteRadius: microR, satelliteSize: microSz,
+      satellites: Object.entries(LANDING_SATELLITE_DEGREES).filter(([key]) => key !== "payment").map(([key,degrees]) => ({key,degrees})) });
+    const tryAnchor = (dx: number) => anchorLandingHelp({ center: { x: center.x + dx, y: center.y + reference.offsetY }, radius: microR,
+      size: Math.max(44, screen.width < 440 ? 48 : 60), hand: handedness,
+      bounds: { x: insets.left + 8, y: bounds.top, width: screen.width - insets.left - insets.right - 16,
+        height: bounds.bottom - bounds.top }, orbit: reference.obstacles.map(o => ({ ...o, x: o.x + dx })) });
+    let translationX = 0, anchored = tryAnchor(0);
+    // Authorized short-landscape exception only after vertical fitting fails.
+    if (!anchored && screen.width > screen.height) for (let inward = 1; inward <= 18; inward++) {
+      const dx = handedness === "right" ? -inward : inward;
+      const fit = tryAnchor(dx);
+      if (fit) { anchored = fit; translationX = dx; break; }
+    }
+    if (!anchored) return null;
+    return { help: anchored.help, translationX, translation: reference.offsetY - anchored.lift,
+      floor: Math.max(...reference.obstacles.map(o => o.y + o.height)) - anchored.lift };
+  })();
+  const landingDock = landingHelpGeometry && !anyOverlayOpen && !rutasMode
+    ? { ...baseLandingDock, minX: baseLandingDock.minX + landingHelpGeometry.translationX,
+      maxX: baseLandingDock.maxX + landingHelpGeometry.translationX,
+      maxY: baseLandingDock.maxY + landingHelpGeometry.translation } : baseLandingDock;
   const maxX = anyOverlayOpen ? SYSTEM_MARGIN_X : landingDock.maxX;
   const minX = anyOverlayOpen ? Math.min(0, Math.round(2 * SYSTEM_MARGIN_X + 2 * systemBoundingRadius - screen.width)) : landingDock.minX;
   // V1 PROMPT 12 · MODO COMPACTO de próxima cita.
@@ -14094,7 +14122,7 @@ function HomeScreenContent() {
     if (anyOverlayOpen || rutasMode || orbitSecondLevel !== null || reservasOrbitalOpen || landingBaseFrame.virtual) return unchanged;
     const arc = redistributeLandingLowerArc({ center: landingCenter,
       bounds: { left: insets.left + 3, right: screen.width - insets.right - 3,
-        top: insets.top + 3, bottom: screen.height - 2 },
+        top: insets.top + 3, bottom: landingHelpGeometry?.floor ?? screen.height - 2 },
       goSize, orbitRadius, orbitSize: orbitBtnSize, orbitCount: INTENTS.length + 1,
       orbitVisible: true, satelliteRadius: microR, satelliteSize: microSz,
       anchorSatelliteDegrees: Object.values(LANDING_SATELLITE_DEGREES),
@@ -14130,7 +14158,7 @@ function HomeScreenContent() {
   ];
   const landingLowerOffsets = landingArrangement.offsets;
   const landingDisplayCloseRect = landingArrangement.closeRect;
-  const landingNavigationCloseRect = placeLandingClose({...landingDisplayCloseRect,x:handedness==="right"?landingDisplayCloseRect.x-24:landingDisplayCloseRect.x,y:landingDisplayCloseRect.y-24,width:64,height:64},{x:insets.left,y:insets.top,width:screen.width-insets.left-insets.right,height:screen.height-insets.top-insets.bottom},[...landingOrbitObstacles,...closeHeaderObstacles,...closeReservedColumn]) ?? {x:Math.max(insets.left,Math.min(screen.width-insets.right-64,landingDisplayCloseRect.x)),y:Math.max(insets.top,Math.min(screen.height-insets.bottom-64,landingDisplayCloseRect.y)),width:64,height:64};
+  const landingNavigationCloseRect = placeLandingClose({...landingDisplayCloseRect,x:handedness==="right"?landingDisplayCloseRect.x-24:landingDisplayCloseRect.x,y:landingDisplayCloseRect.y-24,width:64,height:64},{x:insets.left,y:insets.top,width:screen.width-insets.left-insets.right,height:screen.height-insets.top-insets.bottom},[...landingOrbitObstacles,...closeHeaderObstacles,...closeReservedColumn,...(landingHelpGeometry?[{...landingHelpGeometry.help,y:landingHelpGeometry.help.y+landingOffsetY}]:[])]) ?? {x:Math.max(insets.left,Math.min(screen.width-insets.right-64,landingDisplayCloseRect.x)),y:Math.max(insets.top,Math.min(screen.height-insets.bottom-64,landingDisplayCloseRect.y)),width:64,height:64};
   const qrBase = {
     company: { x: landingCenter.x + Math.cos(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
       y: landingCenter.y + landingOffsetY + Math.sin(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
@@ -14178,16 +14206,9 @@ function HomeScreenContent() {
   const legacySupportRect = helpOverlapsAdminSatellite
     ? supportOrbitRect(screen.width, screen.height, insets, handedness, 44, allCornerHelpObstacles)
     : sharedHelpCandidate;
-  const supportRect = placeMediumLandingHelp(legacySupportRect, uiScale, {
-    x: handedness === "right" ? screen.width / 2 : insets.left + 8,
-    y: insets.top + 8,
-    width: screen.width / 2 - (handedness === "right" ? insets.right : insets.left) - 8,
-    height: screen.height - insets.top - insets.bottom - 16,
-  }, [...supportObstacles, ...adminOnlyCornerObstacles, landingNavigationCloseRect,
-    { x: handedness === "left" ? screen.width - insets.right - 8 - closeQrSize - 2 * closeQrHit : insets.left + 8,
-      y: screen.height - Math.max(insets.bottom, 8) - closeQrSize - 2 * closeQrHit,
-      width: closeQrSize + 2 * closeQrHit, height: closeQrSize + 2 * closeQrHit },
-  ]) ?? legacySupportRect;
+  const supportRect = landingHelpGeometry
+    ? { ...landingHelpGeometry.help, y: landingHelpGeometry.help.y + landingArrangement.offsetY }
+    : legacySupportRect;
   const adminQrObstacles = [...supportObstacles.filter((_, index) => index === 0 || index > 8),
     { x: landingDisplayCloseRect.x - 8, y: landingDisplayCloseRect.y - 8,
       width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 }];
