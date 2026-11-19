@@ -157,12 +157,13 @@ test('the original ADMIN orbit renderer is preserved apart from the authorized m
  const renderer=shell.whenFalse.getText(ast);
  assert.equal((renderer.match(/visibleOrbitalBookingCategories/g)||[]).length,2);
  // Remove only the two catalogue projections and their empty-selection guard.
- // The pre-recovery hash still protects every position, colour, size and handler.
+ // Published 31ec52a baseline: normalize only the authorized position reflection; all colours, sizes and handlers remain protected.
  const unchangedRenderer=renderer
   .replace('visibleOrbitalBookingCategories.find(c => c.id === reservasOrbitalCat);','RESERVAS_ORBITAL_CATS.find(c => c.id === reservasOrbitalCat)!;')
   .replace(/\r?\n[ \t]*if \(!activeCat\) return null;/,'')
-  .replace('visibleOrbitalBookingCategories.map','RESERVAS_ORBITAL_CATS.map');
- assert.equal(createHash('sha256').update(unchangedRenderer).digest('hex'),'6efc8e73210cfb019f29b3500998eab9538f10065c6108ec7908d69a5d723d79');
+  .replace('visibleOrbitalBookingCategories.map','RESERVAS_ORBITAL_CATS.map')
+  .replace(/left: compactLandingActive && compactLandingGeometry\.mirrored \? orbitWrapSize - (x|ox|mx) - (orbitBtnVisualSize|microSz) : \1,/g,'left: $1,');
+ assert.equal(createHash('sha256').update(unchangedRenderer).digest('hex'),'12013a225e7d1b0872e6bf3f2be51d55a68c685a7ed9e7360ab024d4782ccbf6');
  const compile=text=>ts.transpileModule(text,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
  for(const fullLandingArchitecture of [true,false]){
   const matched=vm.runInNewContext(compile('result='+shell.condition.getText(ast)),{supportMode:false,fullLandingArchitecture,anyOverlayOpen:false,rutasMode:false,reservasOrbitalOpen:false,orbitSecondLevel:null});
@@ -176,7 +177,7 @@ test('USUARIO and EMPRESA mount exactly eight original-color passive shells with
  const output=ts.transpileModule(setup+'\nresult='+shell.whenTrue.getText(ast),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None,jsx:ts.JsxEmit.React}}).outputText;
  const colors=vm.runInNewContext(ts.transpileModule(setup+'\nresult=INTENTS.map(it=>it.color)',{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,{});
  for(const preset of ['compacto','estandar','grande']){
-  const g=fixture(devices[1],preset,'ADMIN','right'),ctx={supportMode:false,React:react,View:'View',PremiumOrbitBtn:'PremiumOrbitBtn',StyleSheet:{absoluteFill:{position:'absolute',top:0,left:0,right:0,bottom:0}},orbitWrapSize:g.context.orbitWrapSize,orbitRadiusVisual:g.context.orbitRadius,orbitBtnVisualSize:g.context.orbitBtnSize};
+  const g=fixture(devices[1],preset,'ADMIN','right'),ctx={compactLandingActive:false,supportMode:false,React:react,View:'View',PremiumOrbitBtn:'PremiumOrbitBtn',StyleSheet:{absoluteFill:{position:'absolute',top:0,left:0,right:0,bottom:0}},orbitWrapSize:g.context.orbitWrapSize,orbitRadiusVisual:g.context.orbitRadius,orbitBtnVisualSize:g.context.orbitBtnSize};
   vm.runInNewContext(output,ctx);const tree=ctx.result,orbits=tree.children[0];
   assert.equal(tree.props.pointerEvents,'none');assert.equal(tree.props.accessible,false);assert.equal(tree.props.accessibilityElementsHidden,true);assert.equal(tree.props.importantForAccessibility,'no-hide-descendants');assert.equal(orbits.length,8);
   for(let i=0;i<8;i++){

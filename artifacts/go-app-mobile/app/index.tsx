@@ -1,3 +1,4 @@
+import { useGoDockPreference } from "@/hooks/useGoDockPreference";
 import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
 import {GoNavigationHand} from "@/components/ui/GoNavigationHand";
 import { GO_ASSISTANT_GOLD, GO_ASSISTANT_LABEL } from "@/theme/goAssistantColors";
@@ -152,7 +153,7 @@ import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions, GoListAc
 import { entryHeading, entryIdentity, entryIsReservation, entryMapsUrl, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand, openEntryMaps } from "@/data/goEntryPresentation";
 import { changeTask } from "@/lib/goTaskManagement";
 import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands";
-import { redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
+import { compactLandingOrbit, redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
 import { splitLandingAppointments, landingPanelFrames, landingScrollPanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
 import { fitLandingScale, landingPresetScale, landingDockBounds, landingContentFrame,
   landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES } from "@/components/landing/landingResponsiveLayout";
@@ -3411,6 +3412,7 @@ function HomeScreenContent() {
   // al pulgar); "left" = zurdo (a la izquierda). Persistido en
   // AsyncStorage para que se respete entre sesiones.
   const [handedness, setHandedness] = useState<"right" | "left">("right");
+  const { position: landingAlignment } = useGoDockPreference(handedness, true);
   // ── TIPO MENSAJE DE GO ────────────────────────────────────────────
   // Un GoMessage siempre pertenece a un GO (goId).
   // deliveryMode = "whatsapp"  → se abrió WhatsApp con el texto
@@ -12160,8 +12162,8 @@ function HomeScreenContent() {
     visibleSatelliteKeys: Object.keys(LANDING_SATELLITE_DEGREES),
     orbitRadius, orbitButtonSize: orbitBtnSize, orbitCount: rutasMode ? 8 : INTENTS.length + 1,
     orbitVisible: true, goSize });
-  // Reserve AYUDA as part of the scaled orbital envelope before laying out content.
-  const landingHelpGeometry = (() => {
+  // Preserve the existing upper content frames; visible orbital fitting is independent below.
+  const landingContentGeometry = (() => {
     const center = { x: screen.width - dockRight - systemBoundingRadius + (handedness === "right" ? baseLandingDock.maxX : baseLandingDock.minX),
       y: screen.height - insets.bottom - SYSTEM_MARGIN_Y - orbitWrapSize / 2 + baseLandingDock.maxY };
     const bounds = { left: insets.left + 3, right: screen.width - insets.right - 3,
@@ -12184,10 +12186,10 @@ function HomeScreenContent() {
     return { help: anchored.help, translationX, translation: reference.offsetY - anchored.lift,
       floor: Math.max(...reference.obstacles.map(o => o.y + o.height)) - anchored.lift };
   })();
-  const landingDock = landingHelpGeometry && !anyOverlayOpen && !rutasMode
-    ? { ...baseLandingDock, minX: baseLandingDock.minX + landingHelpGeometry.translationX,
-      maxX: baseLandingDock.maxX + landingHelpGeometry.translationX,
-      maxY: baseLandingDock.maxY + landingHelpGeometry.translation } : baseLandingDock;
+  const landingDock = landingContentGeometry && !anyOverlayOpen && !rutasMode
+    ? { ...baseLandingDock, minX: baseLandingDock.minX + landingContentGeometry.translationX,
+      maxX: baseLandingDock.maxX + landingContentGeometry.translationX,
+      maxY: baseLandingDock.maxY + landingContentGeometry.translation } : baseLandingDock;
   const maxX = anyOverlayOpen ? SYSTEM_MARGIN_X : landingDock.maxX;
   const minX = anyOverlayOpen ? Math.min(0, Math.round(2 * SYSTEM_MARGIN_X + 2 * systemBoundingRadius - screen.width)) : landingDock.minX;
   // V1 PROMPT 12 · MODO COMPACTO de próxima cita.
@@ -13480,7 +13482,7 @@ function HomeScreenContent() {
       );
     }
     // ── OrbitalDockWrapper (draggable) ──────────────────────────────────
-    // Outer View: static absolute layer anchored bottom-right.
+    // Normal Landing uses the jointly fitted absolute center. Other layers retain their original anchor.
     //   bottom: insets.bottom + SYSTEM_MARGIN_Y
     //   right:  SYSTEM_MARGIN_X
     //   size:   systemBoundingRadius * 2 (full bounding box)
@@ -13494,8 +13496,10 @@ function HomeScreenContent() {
         pointerEvents="box-none"
         style={{
           position: "absolute",
-          bottom: insets.bottom + SYSTEM_MARGIN_Y - landingOffsetY,
-          right: dockRight,
+          ...(compactLandingActive ? {
+            left: compactLandingGeometry.center.x - systemBoundingRadius,
+            top: compactLandingGeometry.center.y - systemBoundingRadius,
+          } : { bottom: insets.bottom + SYSTEM_MARGIN_Y - landingOffsetY, right: dockRight }),
           width: systemBoundingRadius * 2,
           height: systemBoundingRadius * 2,
         }}
@@ -13504,13 +13508,13 @@ function HomeScreenContent() {
           style={{
             position: "absolute",
             left: systemBoundingRadius - orbitWrapSize / 2,
-            top: systemBoundingRadius * 2 - orbitWrapSize,
+            top: compactLandingActive ? systemBoundingRadius - orbitWrapSize / 2 : systemBoundingRadius * 2 - orbitWrapSize,
             width: orbitWrapSize,
             height: orbitWrapSize,
             opacity: posReady ? 1 : 0,
             transform: [
-              { translateX: pan.x },
-              { translateY: pan.y },
+              { translateX: compactLandingActive ? 0 : pan.x },
+              { translateY: compactLandingActive ? 0 : pan.y },
               { translateY: kbOrbitTranslate },
               { translateX: overlayDX },
               { translateY: overlayDY },
@@ -14122,7 +14126,7 @@ function HomeScreenContent() {
     if (anyOverlayOpen || rutasMode || orbitSecondLevel !== null || reservasOrbitalOpen || landingBaseFrame.virtual) return unchanged;
     const arc = redistributeLandingLowerArc({ center: landingCenter,
       bounds: { left: insets.left + 3, right: screen.width - insets.right - 3,
-        top: insets.top + 3, bottom: landingHelpGeometry?.floor ?? screen.height - 2 },
+        top: insets.top + 3, bottom: landingContentGeometry?.floor ?? screen.height - 2 },
       goSize, orbitRadius, orbitSize: orbitBtnSize, orbitCount: INTENTS.length + 1,
       orbitVisible: true, satelliteRadius: microR, satelliteSize: microSz,
       anchorSatelliteDegrees: Object.values(LANDING_SATELLITE_DEGREES),
@@ -14156,9 +14160,40 @@ function HomeScreenContent() {
     ...(humanityPlacement ? [{...humanityPlacement,y:humanityPlacement.y+landingOffsetY}]
       : landingInlineHumanity ? [{...inlineHumanityRect,y:inlineHumanityRect.y+landingOffsetY}] : []),
   ];
+  const compactLandingActive = !anyOverlayOpen && !rutasMode && orbitSecondLevel === null && !reservasOrbitalOpen;
+  const landingControlHand = compactLandingActive ? (landingAlignment === "left" ? "left" : "right") : handedness;
+  const compactLandingGeometry = compactLandingOrbit({
+    goSize, orbitRadius, orbitSize: orbitBtnSize, orbitCount: INTENTS.length + 1, orbitVisible: true,
+    satelliteRadius: microR, satelliteSize: microSz,
+    satellites: visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface)
+      .filter(key => key !== "payment").map(key => ({ key, degrees: LANDING_SATELLITE_DEGREES[key] })),
+    helpSize: Math.max(44, screen.width < 440 ? 48 : 60), alignment: landingAlignment,
+    obstacles: [...supportObstacles.slice(((landingArrangement as {obstacles?:HumanityRect[]}).obstacles ?? landingOrbitObstacles.slice(1)).length),
+      { x: landingControlHand === "left" ? screen.width - insets.right - 8 - closeQrSize - 2 * closeQrHit : insets.left + 8,
+        y: screen.height - Math.max(insets.bottom, 8) - closeQrSize - 2 * closeQrHit,
+        width: closeQrSize + 2 * closeQrHit, height: closeQrSize + 2 * closeQrHit }],
+    preferredCenterX: landingAlignment === "center" && landingBaseFrame.virtual
+      ? landingBaseFrame.left + landingBaseFrame.width / 2 < screen.width / 2
+        ? (toLandingRootRect(landingPanels.commands).x + landingPanels.commands.width + 2 + screen.width - insets.right - 4) / 2
+        : (insets.left + 4 + toLandingRootRect(landingPanels.commands).x - 2) / 2
+      : undefined,
+    bounds: { left: insets.left + 4, right: screen.width - insets.right - 4,
+      top: insets.top + 4, bottom: screen.height - insets.bottom - SYSTEM_MARGIN_Y },
+  });
   const landingLowerOffsets = landingArrangement.offsets;
   const landingDisplayCloseRect = landingArrangement.closeRect;
-  const landingNavigationCloseRect = placeLandingClose({...landingDisplayCloseRect,x:handedness==="right"?landingDisplayCloseRect.x-24:landingDisplayCloseRect.x,y:landingDisplayCloseRect.y-24,width:64,height:64},{x:insets.left,y:insets.top,width:screen.width-insets.left-insets.right,height:screen.height-insets.top-insets.bottom},[...landingOrbitObstacles,...closeHeaderObstacles,...closeReservedColumn,...(landingHelpGeometry?[{...landingHelpGeometry.help,y:landingHelpGeometry.help.y+landingOffsetY}]:[])]) ?? {x:Math.max(insets.left,Math.min(screen.width-insets.right-64,landingDisplayCloseRect.x)),y:Math.max(insets.top,Math.min(screen.height-insets.bottom-64,landingDisplayCloseRect.y)),width:64,height:64};
+  const landingNavigationCloseRect = (() => {
+    const bounds = { x: insets.left, y: insets.top, width: screen.width-insets.left-insets.right, height: screen.height-insets.top-insets.bottom };
+    const preferred = { ...landingDisplayCloseRect, x: handedness === "right" ? landingDisplayCloseRect.x-24 : landingDisplayCloseRect.x, y: landingDisplayCloseRect.y-24, width: 64, height: 64 };
+    const obstacles = [...(compactLandingActive?[...compactLandingGeometry.obstacles,...compactLandingGeometry.fixedObstacles]:landingOrbitObstacles),...closeHeaderObstacles,...closeReservedColumn,...(compactLandingActive?[compactLandingGeometry.help]:landingContentGeometry?[{...landingContentGeometry.help,y:landingContentGeometry.help.y+landingOffsetY}]:[])];
+    const normal = placeLandingClose(preferred, bounds, obstacles, compactLandingActive ? 0 : 8);
+    if (normal) return normal;
+    if (compactLandingActive) {
+      const small = placeLandingClose({ ...preferred, x: preferred.x+10, y: preferred.y+10, width: 44, height: 44 }, bounds, obstacles, 0);
+      if (small) return small;
+    }
+    return { ...preferred, x: Math.max(insets.left,Math.min(screen.width-insets.right-64,landingDisplayCloseRect.x)), y:Math.max(insets.top,Math.min(screen.height-insets.bottom-64,landingDisplayCloseRect.y)) };
+  })();
   const qrBase = {
     company: { x: landingCenter.x + Math.cos(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
       y: landingCenter.y + landingOffsetY + Math.sin(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
@@ -14206,14 +14241,14 @@ function HomeScreenContent() {
   const legacySupportRect = helpOverlapsAdminSatellite
     ? supportOrbitRect(screen.width, screen.height, insets, handedness, 44, allCornerHelpObstacles)
     : sharedHelpCandidate;
-  const supportRect = landingHelpGeometry
-    ? { ...landingHelpGeometry.help, y: landingHelpGeometry.help.y + landingArrangement.offsetY }
+  const supportRect = compactLandingActive ? compactLandingGeometry.help : landingContentGeometry
+    ? { ...landingContentGeometry.help, y: landingContentGeometry.help.y + landingArrangement.offsetY }
     : legacySupportRect;
   const adminQrObstacles = [...supportObstacles.filter((_, index) => index === 0 || index > 8),
     { x: landingDisplayCloseRect.x - 8, y: landingDisplayCloseRect.y - 8,
       width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 }];
   const pairedLandingQr = isUserV1Surface && !helpOverlapsAdminSatellite && !!landingCornerPair?.qr;
-  const landingQrPosition = { x: handedness === "left" ? screen.width - insets.right - 8 - closeQrSize - closeQrHit : insets.left + 8 + closeQrHit,
+  const landingQrPosition = { x: landingControlHand === "left" ? screen.width - insets.right - 8 - closeQrSize - closeQrHit : insets.left + 8 + closeQrHit,
     y: screen.height - Math.max(insets.bottom, 8) - closeQrSize - closeQrHit };
 
   // Keep the approved header reservation: relocating QR must not shift panels or confirmations.
@@ -17153,7 +17188,7 @@ function HomeScreenContent() {
                 const y = orbitWrapSize / 2 + Math.sin(angle) * orbitRadiusVisual - orbitBtnVisualSize / 2;
                 const active = !!it.onPress;
                 return <View key={it.key} testID={`landing-quiet-orbit-${i}`} pointerEvents={active?"auto":"none"}
-                  style={{ position: "absolute", left: x, top: y }}>
+                  style={{ position: "absolute", left: compactLandingActive && compactLandingGeometry.mirrored ? orbitWrapSize - x - orbitBtnVisualSize : x, top: y }}>
                   <PremiumOrbitBtn color={it.color} selected={false} dimmed={supportMode && !active} onPress={()=>it.onPress?.()}
                     icon={it.icon as "circle"} label={it.label} accessibilityLabel={it.title}
                     size={orbitBtnVisualSize} iconSize={active?Math.round(24*uiScaleFactor):0} labelSize={active?Math.max(8,Math.round(10*uiScaleFactor)):0}
@@ -17319,7 +17354,7 @@ function HomeScreenContent() {
                   const isSearchSelected = goSearchOpen && goSearchSub?.id === key;
                   const isSearchDimmed   = goSearchOpen && goSearchSub?.id !== key;
                   return (
-                    <Animated.View key={key} style={{ position: "absolute", left: x, top: y, opacity: orbitsAnim, transform: [{ scale: orbitsAnim }] }}>
+                    <Animated.View key={key} style={{ position: "absolute", left: compactLandingActive && compactLandingGeometry.mirrored ? orbitWrapSize - x - orbitBtnVisualSize : x, top: y, opacity: orbitsAnim, transform: [{ scale: orbitsAnim }] }}>
                       <View style={isSearchDimmed ? { opacity: 0.18 } : undefined}>
                         <PremiumOrbitBtn
                           color={color} selected={isSearchSelected} dimmed={false}
@@ -17409,7 +17444,7 @@ function HomeScreenContent() {
                     key={it.key}
                     style={{
                       position: "absolute",
-                      left: x,
+                      left: compactLandingActive && compactLandingGeometry.mirrored ? orbitWrapSize - x - orbitBtnVisualSize : x,
                       top: y,
                       opacity: orbitsAnim,
                       transform: [{ scale: orbitsAnim }],
@@ -17469,7 +17504,7 @@ function HomeScreenContent() {
                   <Animated.View
                     style={{
                       position: "absolute",
-                      left: ox,
+                      left: compactLandingActive && compactLandingGeometry.mirrored ? orbitWrapSize - ox - orbitBtnVisualSize : ox,
                       top: oy,
                       opacity: orbitsAnim,
                       transform: [{ scale: orbitsAnim }],
@@ -18098,7 +18133,7 @@ function HomeScreenContent() {
                 return (
                   <Animated.View
                     key={`ck_${cs.step}`}
-                    style={{ position: "absolute", left: mx, top: my, opacity }}
+                    style={{ position: "absolute", left: compactLandingActive && compactLandingGeometry.mirrored ? orbitWrapSize - mx - microSz : mx, top: my, opacity }}
                   >
                     <TouchableOpacity
                       onPress={() => { Haptics.selectionAsync(); cs.action(); }}
@@ -18389,7 +18424,7 @@ function HomeScreenContent() {
                       key={s.key}
                       style={{
                         position: "absolute",
-                        left: mx,
+                        left: compactLandingActive && compactLandingGeometry.mirrored ? orbitWrapSize - mx - microSz : mx,
                         top: my,
                         alignItems: "center",
                         opacity: finalOpacity,
@@ -24705,7 +24740,7 @@ function HomeScreenContent() {
           Tap → closeTopLayer() baja exactamente una capa.
           Excluido cuando listOpen: el panel de listados ya tiene sus
           propios botones de cierre (↓ y ↓↓) en el footer inferior.    */}
-      <GoNavigationFloating screenKey="landing-back" handedness={handedness} pointerEvents={rutasMode ||
+      <GoNavigationFloating screenKey="landing-back" width={landingNavigationCloseRect.width} height={landingNavigationCloseRect.height} handedness={handedness} pointerEvents={rutasMode ||
           (anyOverlayOpen && !listOpen) ||
           pedidoTrackingOpen ||
           empresaOpen ||
@@ -24722,7 +24757,7 @@ function HomeScreenContent() {
           isActivelyCreating ||
           kbHeight > 0
             ? "box-none"
-            : "none"} initialBottom={bottomReserved+orbitWrapSize-50} initialTop={Math.max(0,landingNavigationCloseRect.y-insets.top)} initialRight={handedness==="right"?screen.width-insets.right-landingNavigationCloseRect.x-64:landingNavigationCloseRect.x-insets.left}><Animated.View style={{opacity:listOpen?0:backBtnAnim,transform:[{scale:backBtnAnim.interpolate({inputRange:[0,1],outputRange:[0.70,1]})}]}}><GoCloseButton level="panel" onPress={() => { Haptics.selectionAsync(); closeTopLayer(); }} activeOpacity={0.8} hitSlop={8} style={{
+            : "none"} initialBottom={bottomReserved+orbitWrapSize-50} initialTop={Math.max(0,landingNavigationCloseRect.y-insets.top)} initialRight={handedness==="right"?screen.width-insets.right-landingNavigationCloseRect.x-landingNavigationCloseRect.width:landingNavigationCloseRect.x-insets.left}><Animated.View style={{opacity:listOpen?0:backBtnAnim,transform:[{scale:backBtnAnim.interpolate({inputRange:[0,1],outputRange:[0.70,1]})}]}}><GoCloseButton preserveTouchSize touchSize={landingNavigationCloseRect.width} level="panel" onPress={() => { Haptics.selectionAsync(); closeTopLayer(); }} activeOpacity={0.8} hitSlop={0} style={{
             width: 40,
             height: 40,
             borderRadius: 20,

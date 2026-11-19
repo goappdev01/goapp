@@ -33,8 +33,7 @@ export function landingCommandSlots(frame: HumanityRect) {
 export const LANDING_COMMAND_ORDER = ["changes", "visit", "task"] as const;
 
 /** Prefer the frozen close position, changing only the minimum needed for its touch area. */
-export function placeLandingClose(preferred: HumanityRect, bounds: HumanityRect, obstacles: readonly HumanityRect[]) {
-  const hitSlop = 8;
+export function placeLandingClose(preferred: HumanityRect, bounds: HumanityRect, obstacles: readonly HumanityRect[], hitSlop = 8) {
   const valid = (rect: HumanityRect) => {
     const touch = { x: rect.x - hitSlop, y: rect.y - hitSlop, width: rect.width + hitSlop * 2, height: rect.height + hitSlop * 2 };
     if (touch.x < bounds.x || touch.y < bounds.y || touch.x + touch.width > bounds.x + bounds.width || touch.y + touch.height > bounds.y + bounds.height) return false;
