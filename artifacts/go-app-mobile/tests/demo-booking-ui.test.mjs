@@ -11,12 +11,13 @@ const turn=async()=>{for(let i=0;i<15;i++)await new Promise(resolve=>setTimeout(
 const compile=name=>ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 function pure(name,imports={}){const exports={};vm.runInNewContext(compile(name),{exports,require:key=>{if(key in imports)return imports[key];throw Error("Unexpected dependency "+key);},Date,Intl,Map,Set});return exports;}
 const storeModule=pure("data/businessDemoStore.ts"),repoModule=pure("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":pure("data/bookingServices.ts")});
-function fixture({real=false,sectors,context="USER",ownerAccess=false,initialDateISO,viewport={width:390,height:844},insets={top:47,bottom:34,left:0,right:0}}={}){
+function fixture({clock,real=false,sectors,context="USER",ownerAccess=false,initialDateISO,viewport={width:390,height:844},insets={top:47,bottom:34,left:0,right:0}}={}){
   const keyboardEvents=new Map();
   const memory=new Map(),liveCalls=[],navigation=[],alerts=[],hooks=new Map(),cache=new Map();
   const initial={businessName:"",address:"",cartaUrl:"",sectorId:null,subId:null,plantillaItems:[],activeDays:[],openFrom:"09:00",openTo:"18:00",daySchedules:{},services:[],paymentPolicy:0,approvalPolicy:0,cancelPolicy:0,bookingEnabled:false,completedSteps:[],paymentMethod:null,isBusinessActive:false,staffSchedules:{}};
   const store=storeModule.createBusinessDemoStore({ownerUserId:owner,storage:{getItem:async key=>memory.get(key)??null,setItem:async(key,value)=>memory.set(key,value)},canUse:()=>true,initialConfig:initial});
-  const repo=repoModule.createDemoBookingRepository(store,{now:()=>Date.parse("2030-01-07T08:00:00")});
+  const repo=repoModule.createDemoBookingRepository(store,{now:()=>clock?.now ?? Date.parse("2030-01-07T08:00:00")});
+  class ScenarioDate extends Date {constructor(...args){super(...(args.length?args:[clock?.now ?? Date.now()]));}static now(){return clock?.now ?? Date.now();}}
   let current,cursor=0,effects=[];
   const hook=()=>[current,cursor++];
   const equal=(a,b)=>a&&b&&a.length===b.length&&a.every((x,i)=>Object.is(x,b[i]));
@@ -64,7 +65,7 @@ function fixture({real=false,sectors,context="USER",ownerAccess=false,initialDat
   };
   function load(name){if(cache.has(name))return cache.get(name);const exports={};cache.set(name,exports);
     vm.runInNewContext(compile(name),{exports,require:key=>key in mocks?mocks[key]:key==="@/components/booking/MyBookingsList"?load("components/booking/MyBookingsList.tsx"):(()=>{throw Error("Unexpected UI dependency "+key);})(),
-      console:{log(){},warn(){}},Error,Date,Intl,Map,Set,setTimeout:fn=>setTimeout(fn,0),clearTimeout,setInterval,clearInterval});return exports;}
+      console:{log(){},warn(){}},Error,Date:ScenarioDate,Intl,Map,Set,setTimeout:fn=>setTimeout(fn,0),clearTimeout,setInterval,clearInterval});return exports;}
   let catalogueScope = "";
   function render(fn,props){current=hooks.get(fn)??[];hooks.set(fn,current);cursor=0;effects=[];const tree=fn(props);for(const effect of effects)effect();
     // The selector's async transport is exercised separately. Resolve its real
@@ -381,6 +382,55 @@ test('consecutive DEMO proposals retain services, professional and date through 
   assert.deepEqual(unchanged,originalFields);assert.equal(changeProposal.proposedBy,'customer');
   assert.equal(drafts[round].selection.staffId,staff[round===1?1:0].id);
   assert.equal(drafts[round].selection.serviceIds.length,round===1?2:1);
+ }
+ assert.deepEqual(f.liveCalls,[]);
+});
+
+
+const reviewWatcher=tree=>nodes(tree).find(n=>n.type?.name==='HoldCountdown');
+async function expireReview(f,clock,watcher){clock.now+=301000;watcher?.props.onExpire();f.render(f.Overlay,f.props);await turn();return f.render(f.Overlay,f.props);}
+test('DEMO new booking: a queued expiry cannot cancel the just-confirmed reservation or return to other hours',async()=>{
+ const clock={now:Date.parse('2030-01-07T08:00:00')},f=fixture({clock,initialDateISO:'2030-01-07'});await f.configure();let tree=await selectSlot(f);const watcher=reviewWatcher(tree);
+ await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();tree=f.render(f.Overlay,f.props);assert.equal(f.store.getSnapshot().bookings[0].status,'CONFIRMED');
+ tree=await expireReview(f,clock,watcher);assert.match(text(tree),/BIZ_BOOKING_CONFIRMED/);assert.equal(f.store.getSnapshot().bookings[0].status,'CONFIRMED');assert.equal(f.store.getSnapshot().reservations.length,1);assert.deepEqual(f.liveCalls,[]);
+});
+test('DEMO new booking: an expired local hold is revalidated internally for the same still-free time, without a second selection',async()=>{
+ const clock={now:Date.parse('2030-01-07T08:00:00')},f=fixture({clock,initialDateISO:'2030-01-07'});await f.configure();let tree=await selectSlot(f);const watcher=reviewWatcher(tree),start=f.store.getSnapshot().bookings[0].startDatetime;
+ tree=await expireReview(f,clock,watcher);assert.ok(button(tree,'BIZ_CONFIRM_BOOKING_BTN'),'selected time stays in review');
+ await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();tree=f.render(f.Overlay,f.props);assert.match(text(tree),/BIZ_BOOKING_CONFIRMED/);
+ const confirmed=f.store.getSnapshot().bookings.filter(b=>b.status==='CONFIRMED');assert.equal(confirmed.length,1);assert.equal(confirmed[0].startDatetime,start);assert.equal(f.store.getSnapshot().reservations.length,1);assert.deepEqual(f.liveCalls,[]);
+});
+
+
+test('DEMO new booking: an uncertain confirmation keeps its original id across expiry and retries idempotently',async()=>{
+ const clock={now:Date.parse('2030-01-07T08:00:00')},f=fixture({clock,initialDateISO:'2030-01-07'});await f.configure();
+ const create=f.repo.createHold,claim=f.repo.claimSlot;let holds=0,lost=true;
+ f.repo.createHold=async input=>{holds++;return create(input);};
+ f.repo.claimSlot=async input=>{const result=await claim(input);if(lost){lost=false;throw Error('Respuesta perdida después de confirmar');}return result;};
+ let tree=await selectSlot(f),watcher=reviewWatcher(tree);await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();tree=f.render(f.Overlay,f.props);
+ assert.equal(f.store.getSnapshot().bookings.filter(b=>b.status==='CONFIRMED').length,1);assert.ok(button(tree,'BIZ_CONFIRM_BOOKING_BTN'));
+ tree=await expireReview(f,clock,watcher);await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();tree=f.render(f.Overlay,f.props);
+ assert.match(text(tree),/BIZ_BOOKING_CONFIRMED/);assert.equal(holds,1);assert.equal(f.store.getSnapshot().reservations.length,1);assert.equal(f.store.getSnapshot().bookings.filter(b=>b.status==='CONFIRMED').length,1);
+});
+test('DEMO new booking: a genuinely occupied expired selection requires another hour and preserves the competing booking',async()=>{
+ const clock={now:Date.parse('2030-01-07T08:00:00')},f=fixture({clock,initialDateISO:'2030-01-07'});await f.configure();let tree=await selectSlot(f),watcher=reviewWatcher(tree);
+ const old=f.store.getSnapshot().bookings[0];tree=await expireReview(f,clock,watcher);
+ const {id,status,holdExpiresAt,paymentStatus,...selection}=old;const other=await f.repo.createHold(selection);assert.equal(other.ok,true);await f.repo.claimSlot({...other.booking,status:'CONFIRMED'});
+ await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
+ assert.match(text(tree),/biz_slot_taken_error/);assert.equal(button(tree,'09:00'),undefined);assert.equal(button(tree,'BIZ_CONFIRM_BOOKING_BTN'),undefined);
+ assert.equal(f.store.getSnapshot().bookings.find(b=>b.id===other.booking.id).status,'CONFIRMED');assert.equal(f.store.getSnapshot().reservations.length,1);assert.deepEqual(f.liveCalls,[]);
+});
+test('DEMO new bookings consecutively choose time once across services, duration, preference and re-entry',async()=>{
+ const clock={now:Date.parse('2030-01-07T08:00:00')},f=fixture({clock,initialDateISO:'2030-01-07'});await f.configure();await setReservableServices(f,[{name:'Corte DEMO',duration:30,price:12},{name:'Tinte DEMO',duration:60,price:20}]);
+ for(let round=0;round<3;round++){
+  f.props.visible=false;f.render(f.Overlay,f.props);f.props.initialDateISO='2030-01-0'+(7+round);f.props.visible=true;
+  let tree=await services(f);button(tree,'Corte DEMO').props.onPress();tree=f.render(f.Overlay,f.props);
+  if(round===1){button(tree,'Tinte DEMO').props.onPress();tree=f.render(f.Overlay,f.props);}
+  button(tree,'save').props.onPress();tree=f.render(f.Overlay,f.props);
+  button(tree,round===2?'biz_no_preference':'Raul 1 GO PRUEBA').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
+  await button(tree,'09:00').props.onPress();tree=f.render(f.Overlay,f.props);assert.ok(button(tree,'BIZ_CONFIRM_BOOKING_BTN'));assert.equal(button(tree,'09:00'),undefined);
+  await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();tree=f.render(f.Overlay,f.props);assert.match(text(tree),/BIZ_BOOKING_CONFIRMED/);
+  assert.equal(f.store.getSnapshot().bookings.filter(b=>b.status==='CONFIRMED').length,round+1);assert.equal(f.store.getSnapshot().reservations.length,round+1);
  }
  assert.deepEqual(f.liveCalls,[]);
 });

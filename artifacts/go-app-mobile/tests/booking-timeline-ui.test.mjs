@@ -71,6 +71,10 @@ function fixture(kind = "provider", overrides = {}) {
     pendingServices: new Map(), pendingStaff: new Map(), pendingSlots: null,
     foldOptions: false, loseReplyOnce: false, ...overrides,
   };
+  class ScenarioClock extends Clock {
+    constructor(...args){ super(...(args.length?args:[state.now ?? fixedNow])); }
+    static now(){ return state.now ?? fixedNow; }
+  }
   const memory = new Map([["go_bookings_v1", "[]"], ["go_log_v1", "[]"], ["go_bookable_items_v1", "[]"]]);
   const storage = { getItem: async key => memory.get(key) ?? null,
     setItem: async (key, value) => { writes.push(key); memory.set(key, value); } };
@@ -127,6 +131,8 @@ function fixture(kind = "provider", overrides = {}) {
       assert.equal(body.starts_at, body.expected_plan.startsAt);
       const ids = body.expected_quote?.serviceIds ?? body.service_ids;
       if (body.expected_quote) { assert.equal(body.expected_quote.ready, true); assert.deepEqual(body.selected_ids, []); }
+      if(state.pendingConfirmation) await state.pendingConfirmation.promise;
+      if(state.confirmStatus) return Response.json({code:"BOOKING_CONFLICT",error:"La franja ya está ocupada por otra reserva."},{status:state.confirmStatus});
       let row = commands.get(body.request_key);
       if (!row) {
         row = { id: bookingId, business_id: body.business_id, service_id: ids[0], staff_id: body.staff_id, catalog_snapshot: body.expected_quote,
@@ -146,7 +152,7 @@ function fixture(kind = "provider", overrides = {}) {
   };
   const auth = { readAuthSession: async () => ({ access_token: "test-only", user: { id: user } }),
     fetchWithAuth: fetch, AuthSessionRequiredError: class extends Error {} };
-  const apiScope = { exports: {}, Headers, URLSearchParams, Intl, Date: Clock, fetch,
+  const apiScope = { exports: {}, Headers, URLSearchParams, Intl, Date: ScenarioClock, fetch,
     process: { env: { EXPO_PUBLIC_API_URL: "https://timeline.test.invalid/api" } }, console: { log() {}, warn() {}, error() {} },
     require(name) {
       if (name === "react-native") return { Platform: { OS: "ios" } };
@@ -236,7 +242,7 @@ function fixture(kind = "provider", overrides = {}) {
       PEOPLE_SECTORS: new Set(["belleza"]), SUB_TO_SECTOR: { peluqueria: "belleza" } },
     "@/data/goSectorTranslations": { trSector: value => value }, "@/lib/businessIcons": { getBusinessIcon: () => "✂️" },
   };
-  const uiScope = { exports: {}, Date: Clock, Intl, Map, Set, __DEV__: false, console: { log() {}, warn() {}, error() {} },
+  const uiScope = { exports: {}, Date: ScenarioClock, Intl, Map, Set, __DEV__: false, console: { log() {}, warn() {}, error() {} },
     setTimeout: callback => { timers.set(++timerId, callback); return timerId; }, clearTimeout: id => timers.delete(id),
     setInterval: () => 0, clearInterval() {},
     require(name) { if (name in modules) return modules[name]; throw new Error("Unexpected UI dependency " + name); } };
@@ -632,4 +638,63 @@ test("a lost slot returns to the same selection with its real reason after the r
  assert.match(text(f.tree()),/Esta franja ya no está disponible. Elige otra/);
  assert.equal(nodes(f.tree()).find(n=>n.props.testID==='booking-date-'+today).props.accessibilityState.selected,true);
  assert.equal(JSON.stringify(original),before);assert.equal(f.navigation.length,0);assert.equal(f.writes.length,0);
+});
+
+
+const holdWatcher=f=>nodes(f.tree()).find(n=>n.type?.name==='HoldCountdown');
+async function letReviewExpire(f,watcher){
+ f.state.now=watcher?Date.parse(watcher.props.expiresAt)+1000:fixedNow+301000;
+ watcher?.props.onExpire();f.render();await f.settle();
+}
+test('new reservation: a late hold expiry cannot replace a confirmed booking with the residual availability list',async()=>{
+ const f=fixture('overlay');await openOverlaySlots(f);await f.press('02:37');const watcher=holdWatcher(f);
+ await f.press('BIZ_CONFIRM_BOOKING_BTN');assert.equal(f.navigation.length,1);
+ await letReviewExpire(f,watcher);
+ assert.match(text(f.tree()),/BIZ_BOOKING_CONFIRMED/);assert.equal(button(f.tree(),'02:37'),undefined);assert.equal(posted(f).length,1);assert.equal(f.commands.size,1);
+});
+test('new reservation: expiry while authoritative confirmation is pending keeps the chosen time in review',async()=>{
+ const f=fixture('overlay');await openOverlaySlots(f);await f.press('02:37');const watcher=holdWatcher(f),pending=deferred();f.state.pendingConfirmation=pending;
+ const confirmation=button(f.tree(),'BIZ_CONFIRM_BOOKING_BTN').props.onPress();f.render();await f.settle();
+ await letReviewExpire(f,watcher);assert.match(text(f.tree()),/biz_confirm_booking_title/);assert.equal(button(f.tree(),'02:37'),undefined,'no second time picker during confirmation');
+ pending.resolve();await confirmation;f.render();await f.settle();assert.match(text(f.tree()),/BIZ_BOOKING_CONFIRMED/);assert.equal(f.commands.size,1);
+});
+test('new reservation: review expiry alone does not require choosing an otherwise valid remote time twice',async()=>{
+ const f=fixture('overlay');await openOverlaySlots(f);await f.press('02:37');const watcher=holdWatcher(f);
+ await letReviewExpire(f,watcher);assert.ok(button(f.tree(),'BIZ_CONFIRM_BOOKING_BTN'),'the same selected time stays in review');
+ await f.press('BIZ_CONFIRM_BOOKING_BTN');assert.equal(posted(f).length,1);assert.equal(posted(f)[0].body.starts_at,planFor().startsAt);
+});
+
+
+test('new reservation: a delayed press from an obsolete slot cannot overwrite the new day selection',async()=>{
+ const f=fixture('overlay');await openOverlaySlots(f);const old=button(f.tree(),'02:37');
+ const day=nodes(f.tree()).find(n=>n.props.testID==='booking-date-'+tomorrow);day.props.onPress();f.render();await f.settle();assert.ok(button(f.tree(),'11:37'));
+ await old.props.onPress();f.render();await f.settle();assert.ok(button(f.tree(),'11:37'),'obsolete touch is ignored, current day remains');
+ await f.press('11:37');assert.ok(button(f.tree(),'BIZ_CONFIRM_BOOKING_BTN'));
+});
+test('new reservation: two rapid deliveries of a slot touch start only one review operation',async()=>{
+ const f=fixture('overlay');await openOverlaySlots(f);const slot=button(f.tree(),'02:37'),create=f.api.createHold;let holds=0;
+ f.api.createHold=async input=>{holds++;return create(input);};
+ await slot.props.onPress();await slot.props.onPress();f.render();await f.settle();
+ assert.equal(holds,1);assert.ok(button(f.tree(),'BIZ_CONFIRM_BOOKING_BTN'));
+});
+
+
+test('new reservation: a late review response after changing day cannot replace the new availability',async()=>{
+ const f=fixture('overlay');await openOverlaySlots(f);const old=button(f.tree(),'02:37'),pending=deferred(),create=f.api.createHold;
+ f.api.createHold=async input=>{const result=await create(input);await pending.promise;return result;};
+ const selection=old.props.onPress();f.render();await f.settle();
+ nodes(f.tree()).find(n=>n.props.testID==='booking-date-'+tomorrow).props.onPress();f.render();await f.settle();
+ pending.resolve();await selection;f.render();await f.settle();assert.ok(button(f.tree(),'11:37'));assert.equal(posted(f).length,0);assert.equal(f.navigation.length,0);
+});
+test('new reservation: duplicate confirmation events dispatch only one command and one completion',async()=>{
+ const f=fixture('overlay');await openOverlaySlots(f);await f.press('02:37');const confirm=button(f.tree(),'BIZ_CONFIRM_BOOKING_BTN');
+ await confirm.props.onPress();await confirm.props.onPress();f.render();await f.settle();
+ assert.equal(posted(f).length,1);assert.equal(f.commands.size,1);assert.equal(f.navigation.length,1);
+});
+test('new reservation: a real authoritative conflict asks for a new time and never claims confirmation',async()=>{
+ const f=fixture('overlay');await openOverlaySlots(f);await f.press('02:37');f.state.confirmStatus=409;f.state.plans=[];
+ await f.press('BIZ_CONFIRM_BOOKING_BTN');assert.match(text(f.tree()),/biz_slot_taken_error/);assert.equal(f.commands.size,0);assert.equal(f.navigation.length,0);assert.equal(button(f.tree(),'BIZ_CONFIRM_BOOKING_BTN'),undefined);
+ f.state.confirmStatus=0;f.state.plans=undefined;
+ nodes(f.tree()).find(n=>n.props.testID==='booking-date-'+tomorrow).props.onPress();f.render();await f.settle();await f.press('11:37');await f.press('BIZ_CONFIRM_BOOKING_BTN');
+ assert.equal(f.commands.size,1);assert.equal(f.navigation.length,1);assert.equal(posted(f).at(-1).body.starts_at,planFor({date:tomorrow}).startsAt);
 });

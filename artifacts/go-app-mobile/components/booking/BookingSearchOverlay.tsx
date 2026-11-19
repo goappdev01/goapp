@@ -219,65 +219,6 @@ function withSelectedBookingDate(days: string[], selectedDate: string): string[]
   return [...days, selectedDate].sort();
 }
 
-// ── Hold Countdown ─────────────────────────────────────────────────────────────
-
-function HoldCountdown({
-  expiresAt,
-  onExpire,
-  accentColor,
-}: {
-  expiresAt: string;
-  onExpire: () => void;
-  accentColor: string;
-}) {
-  const [remaining, setRemaining] = useState(0);
-  const barAnim = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    const tick = () => {
-      const secs = Math.max(
-        0,
-        Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 1000)
-      );
-      setRemaining(secs);
-      if (secs === 0) onExpire();
-    };
-    tick();
-    const id = setInterval(tick, 500);
-    return () => clearInterval(id);
-  }, [expiresAt, onExpire]);
-
-  const pct = remaining / 15;
-  const color = remaining > 8 ? accentColor : remaining > 4 ? "#f59e0b" : "#ef4444";
-
-  // V1: timer is silent — it only fires onExpire, no visual countdown shown
-  return null;
-}
-
-const hc = StyleSheet.create({
-  wrap: {
-    gap: 8,
-    marginBottom: 4,
-  },
-  track: {
-    height: 3,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 2,
-    overflow: "hidden",
-  },
-  bar: {
-    height: 3,
-    borderRadius: 2,
-  },
-  text: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.8,
-    textAlign: "center",
-    textTransform: "uppercase",
-  },
-});
-
 // ── Breadcrumb strip ────────────────────────────────────────────────────────────
 
 function BreadcrumbStrip({
@@ -422,7 +363,7 @@ export function BookingSearchOverlay({
   const slideAnim = useRef(new Animated.Value(SCREEN_H)).current;
   const dragAnim  = useRef(new Animated.Value(0)).current;
   const stepAnim  = useRef(new Animated.Value(0)).current;
-  const prevStep  = useRef<Step>("search");
+  const currentStep = useRef<Step>("search");
 
   const handleCloseRef   = useRef<() => void>(() => {});
   const handleBackRef    = useRef<() => void>(() => {});
@@ -508,6 +449,7 @@ export function BookingSearchOverlay({
   }, []);
 
   const [step, setStep] = useState<Step>("search");
+  currentStep.current = step;
   useEffect(() => { updateServicesLayout({ scrollOffset: 0 }); }, [step]);
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -530,11 +472,15 @@ export function BookingSearchOverlay({
   const [selectedStaff, setSelectedStaff] = useState<Staff | null | "none">(null);
   const [selectedDate, setSelectedDate] = useState(isValidBookingDateISO(initialDateISO) ? initialDateISO : formatISODate(getToday()));
   const selectionScope = `${selectedBusiness?.id ?? ""}|${selectedServiceIds.join(",")}|${selectedStaff && selectedStaff !== "none" ? selectedStaff.id : "any"}`;
-  const currentSlotScope = useRef(""); currentSlotScope.current = `${selectionScope}|${selectedServices.map(service=>service.id).join(",")}|${catalogQuote?.selectedAssociationIds.join(",") ?? ""}|${catalogQuote?.totalPrice ?? ""}|${selectedDate}|${visible}|${step}`;
+  const slotScope = `${selectionScope}|${selectedServices.map(service=>service.id).join(",")}|${catalogQuote?.selectedAssociationIds.join(",") ?? ""}|${catalogQuote?.totalPrice ?? ""}|${selectedDate}|${visible}|${step}`;
+  const currentSlotScope = useRef(""); currentSlotScope.current = slotScope;
   const [slots, setSlots] = useState<SlotWithStatus[]>([]);
   useEffect(() => () => { currentSlotScope.current = ""; slotGeneration.current++; }, []);
   const [loadingSlots, setLoadingSlots] = useState(false);
-  const [activeHold, setActiveHold] = useState<Booking | null>(null);
+  const [activeHold, setActiveHoldState] = useState<Booking | null>(null);
+  const currentHold = useRef<Booking | null>(null);
+  const submittedHoldId = useRef<string | null>(null);
+  const setActiveHold = (hold: Booking | null) => { currentHold.current=hold; setActiveHoldState(hold); };
   const [proposalReview, setProposalReview] = useState<BookingProposalDraft | null>(null);
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -557,7 +503,7 @@ export function BookingSearchOverlay({
       stiffness: 260,
       mass: 0.8,
     }).start();
-    prevStep.current = next;
+    currentStep.current = next;
   };
 
   useEffect(() => {
@@ -711,9 +657,9 @@ export function BookingSearchOverlay({
   }, [selectedBusiness, demoRepository, changeSelection]);
 
   const loadSlots = useCallback(async () => {
-    if (!selectedBusiness || !selectedItem) return;
+    if (!selectedBusiness || !selectedItem || currentHold.current || slotScope !== currentSlotScope.current) return;
     const generation = ++slotGeneration.current;
-    const scope = currentSlotScope.current;
+    const scope = slotScope;
     // Preserve a failed revalidation's explanation when returning from review.
     setSlots([]);
     setLoadingSlots(true);
@@ -756,7 +702,7 @@ export function BookingSearchOverlay({
         setSlots([]); setSlotError(error instanceof Error ? error.message : "No se pudo consultar la disponibilidad.");
       }
     } finally { if (generation === slotGeneration.current && scope === currentSlotScope.current) setLoadingSlots(false); }
-  }, [selectedBusiness, selectedItem, selectedDate, selectedStaff, selectedServices, demoRepository, changeSelection, lang]);
+  }, [selectedBusiness, selectedItem, selectedDate, selectedStaff, selectedServices, demoRepository, changeSelection, lang, slotScope]);
 
   useEffect(() => {
     let current = true;
@@ -839,9 +785,10 @@ export function BookingSearchOverlay({
   };
   const reviewingSlot = useRef(false);
   const handleSelectSlot = async (slot: AvailableSlot) => {
-    if (!selectedBusiness || !selectedItem || reviewingSlot.current) return;
+    if (!selectedBusiness || !selectedItem || reviewingSlot.current || currentStep.current !== "slots"
+      || slotScope !== currentSlotScope.current || (!changeSelection && currentHold.current)) return;
     reviewingSlot.current = true;
-    const scope = currentSlotScope.current;
+    const scope = slotScope;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
       if (changeSelection) {
@@ -956,7 +903,10 @@ export function BookingSearchOverlay({
       hasSelectedBusiness: !!selectedBusiness,
       hasSelectedItem: !!selectedItem,
     });
-    if (!activeHold || !selectedBusiness || !selectedItem || confirmInFlight.current) return;
+    if (!activeHold || !selectedBusiness || !selectedItem || confirmInFlight.current
+      || currentHold.current?.id !== activeHold.id || slotScope !== currentSlotScope.current) return;
+    const confirmationScope=slotScope;
+    let reviewHold=activeHold;
     confirmInFlight.current = true;
     try {
       setConfirming(true);
@@ -975,15 +925,33 @@ export function BookingSearchOverlay({
       // y lo reemplaza en storage (upsert). Si otro booking coincide, devuelve ok:false.
       let result;
       try {
-        result = await (demoRepository?.claimSlot ?? claimSlot)({
-          ...activeHold,
-          status: "CONFIRMED",
-          holdExpiresAt: undefined,
-        });
+        // A local HOLD may expire while its chosen slot is still free. Renew the
+        // same selection internally; remote review IDs stay stable for retries.
+        // Never replace an ID after an uncertain confirmation attempt.
+        if (demoRepository && !demoRepository.store.serverBookings && reviewHold.holdExpiresAt
+          && Date.parse(reviewHold.holdExpiresAt) <= Date.now() && submittedHoldId.current !== reviewHold.id) {
+          const {id,status,holdExpiresAt,paymentStatus,...selection}=reviewHold;
+          const renewed=await demoRepository.createHold(selection);
+          if (confirmationScope !== currentSlotScope.current || currentHold.current?.id !== reviewHold.id) {
+            if(renewed.ok)void cancelSelectedBooking(renewed.booking.id).catch(()=>{});
+            return;
+          }
+          if(renewed.ok){reviewHold=renewed.booking;setActiveHold(reviewHold);}else result=renewed;
+        }
+        if(!result){
+          submittedHoldId.current=reviewHold.id;
+          result = await (demoRepository?.claimSlot ?? claimSlot)({
+            ...reviewHold,
+            status: "CONFIRMED",
+            holdExpiresAt: undefined,
+          });
+        }
+        if (confirmationScope !== currentSlotScope.current || currentHold.current?.id !== reviewHold.id) return;
       } catch (error) {
+        if (confirmationScope !== currentSlotScope.current || currentHold.current?.id !== reviewHold.id) return;
         setConfirming(false);
         if (error instanceof BookingApiError && error.code === "CATALOG_QUOTE_STALE") {
-          cancelSelectedBooking(activeHold.id).catch(() => {});
+          cancelSelectedBooking(reviewHold.id).catch(() => {});
           setActiveHold(null);
           goToStep("slots", "back");
           Alert.alert(lang === "en" ? "Price changed" : "El precio ha cambiado",
@@ -994,7 +962,7 @@ export function BookingSearchOverlay({
           error instanceof BookingApiError &&
           (error.status === 409 || ["23P01","BOOKING_CONFLICT","BOOKING_OUTSIDE_AVAILABILITY","BOOKING_STAFF_UNAVAILABLE","BOOKING_GAP_NOT_MULTIPLE"].includes(error.code ?? ""))
         ) {
-          cancelSelectedBooking(activeHold.id).catch(() => {});
+          cancelSelectedBooking(reviewHold.id).catch(() => {});
           setActiveHold(null);
           setSlotTakenError(true);
           goToStep("slots", "back");
@@ -1012,8 +980,11 @@ export function BookingSearchOverlay({
       setConfirming(false);
 
       if (!result.ok) {
-        // Slot ya ocupado por otra reserva — mostrar error, cancelar HOLD y volver a slots
-        cancelSelectedBooking(activeHold.id).catch(() => {});
+        // Expired local drafts already release capacity; cancelling one would
+        // incorrectly project an unconfirmed draft into reservation history.
+        const expiredLocalHold=demoRepository && !demoRepository.store.serverBookings && reviewHold.holdExpiresAt
+          && Date.parse(reviewHold.holdExpiresAt)<=Date.now();
+        if(!expiredLocalHold)void cancelSelectedBooking(reviewHold.id).catch(() => {});
         setActiveHold(null);
         setSlotTakenError(true);
         goToStep("slots", "back");
@@ -1031,10 +1002,8 @@ export function BookingSearchOverlay({
       const proIdForLog =
         selectedStaff === null || selectedStaff === "none" ? undefined :
         selectedStaff.id;
-      if (demoRepository) {
-        // The local repository already projected this reservation to both DEMO calendars.
-        setActiveHold(null);
-      } else {
+      setActiveHold(null);
+      if (!demoRepository) {
         onBookingConfirmed?.(confirmed, selectedBusiness, selectedItem, proNameForLog);
         if (!canonicalCustomerBookings) syncBookingToGoLog(confirmed, selectedBusiness, selectedItem, proNameForLog, proIdForLog).catch(() => {});
       }
@@ -1044,13 +1013,6 @@ export function BookingSearchOverlay({
       confirmInFlight.current = false;
       setConfirming(false);
     }
-  };
-
-  const handleHoldExpired = () => {
-    if (activeHold) cancelSelectedBooking(activeHold.id);
-    setActiveHold(null);
-    goToStep("slots", "back");
-    loadSlots();
   };
 
   const handleBack = () => {
@@ -1959,14 +1921,7 @@ export function BookingSearchOverlay({
                     </View>
                   )}
 
-                  {/* Silent hold expiry watcher — no visual countdown in V1 */}
-                  {activeHold?.holdExpiresAt && (
-                    <HoldCountdown
-                      expiresAt={activeHold.holdExpiresAt}
-                      onExpire={handleHoldExpired}
-                      accentColor={accentColor}
-                    />
-                  )}
+                  {/* Confirmation revalidates the selected slot; expiry never navigates. */}
                   </View>
 
                   {/* Preserve the approved gap while space permits; long content scrolls
