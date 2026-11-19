@@ -153,7 +153,7 @@ import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions, GoListAc
 import { entryHeading, entryIdentity, entryIsReservation, entryMapsUrl, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand, openEntryMaps } from "@/data/goEntryPresentation";
 import { changeTask } from "@/lib/goTaskManagement";
 import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands";
-import { compactLandingOrbit, redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
+import { compactLandingOrbit, landingOrbitSafeBounds, redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
 import { splitLandingAppointments, landingPanelFrames, landingScrollPanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
 import { fitLandingScale, landingPresetScale, landingDockBounds, landingContentFrame,
   landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES } from "@/components/landing/landingResponsiveLayout";
@@ -3896,6 +3896,8 @@ function HomeScreenContent() {
   // o cambios provocados por el teclado en Android (modo "resize").
   const landingWindow = useWindowDimensions();
   const [landingSurfaceSize, setLandingSurfaceSize] = useState<{ width: number; height: number } | null>(null);
+  const landingSurfaceRef = useRef<ViewInstance>(null);
+  const [landingSurfaceOrigin, setLandingSurfaceOrigin] = useState({ x: 0, y: 0 });
   const [pendingContentH, setPendingContentH] = useState(0);
   const [pendingHeaderH, setPendingHeaderH] = useState(0);
   const [transportPanelH, setTransportPanelH] = useState(0);
@@ -14162,24 +14164,25 @@ function HomeScreenContent() {
   ];
   const compactLandingActive = !anyOverlayOpen && !rutasMode && orbitSecondLevel === null && !reservasOrbitalOpen;
   const landingControlHand = compactLandingActive ? (landingAlignment === "left" ? "left" : "right") : handedness;
+  const compactLandingBounds = landingOrbitSafeBounds({
+    surface: { ...screen, ...landingSurfaceOrigin }, viewport: landingWindow, insets,
+  });
   const compactLandingGeometry = compactLandingOrbit({
     goSize, orbitRadius, orbitSize: orbitBtnSize, orbitCount: INTENTS.length + 1, orbitVisible: true,
     satelliteRadius: microR, satelliteSize: microSz,
     satellites: visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface)
       .filter(key => key !== "payment").map(key => ({ key, degrees: LANDING_SATELLITE_DEGREES[key] })),
-    helpSize: Math.max(44, screen.width < 440 ? 48 : 60), alignment: landingAlignment,
+    helpSize: microSz, alignment: landingAlignment,
     obstacles: [...supportObstacles.slice(((landingArrangement as {obstacles?:HumanityRect[]}).obstacles ?? landingOrbitObstacles.slice(1)).length),
-      { x: landingControlHand === "left" ? screen.width - insets.right - 8 - closeQrSize - 2 * closeQrHit : insets.left + 8,
-        y: screen.height - Math.max(Math.min(insets.bottom, 12), 8) - closeQrSize - 2 * closeQrHit,
+      { x: landingControlHand === "left" ? compactLandingBounds.right - 8 - closeQrSize - 2 * closeQrHit : compactLandingBounds.left + 8,
+        y: compactLandingBounds.bottom - closeQrSize - 2 * closeQrHit,
         width: closeQrSize + 2 * closeQrHit, height: closeQrSize + 2 * closeQrHit }],
     preferredCenterX: landingAlignment === "center" && landingBaseFrame.virtual
       ? landingBaseFrame.left + landingBaseFrame.width / 2 < screen.width / 2
         ? (toLandingRootRect(landingPanels.commands).x + landingPanels.commands.width + 2 + screen.width - insets.right - 4) / 2
         : (insets.left + 4 + toLandingRootRect(landingPanels.commands).x - 2) / 2
       : undefined,
-    bounds: { left: insets.left + 4, right: screen.width - insets.right - 4,
-      // The compact circular dock can use the lower inset; retain clearance above the home indicator.
-      top: insets.top + 4, bottom: screen.height - Math.min(insets.bottom, 12) - SYSTEM_MARGIN_Y },
+    bounds: compactLandingBounds,
   });
   const landingLowerOffsets = landingArrangement.offsets;
   const landingDisplayCloseRect = landingArrangement.closeRect;
@@ -14245,12 +14248,13 @@ function HomeScreenContent() {
   const supportRect = compactLandingActive ? compactLandingGeometry.help : landingContentGeometry
     ? { ...landingContentGeometry.help, y: landingContentGeometry.help.y + landingArrangement.offsetY }
     : legacySupportRect;
+  const toggleLandingHelp = () => setSupportMode(active => !active);
   const adminQrObstacles = [...supportObstacles.filter((_, index) => index === 0 || index > 8),
     { x: landingDisplayCloseRect.x - 8, y: landingDisplayCloseRect.y - 8,
       width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 }];
   const pairedLandingQr = isUserV1Surface && !helpOverlapsAdminSatellite && !!landingCornerPair?.qr;
-  const landingQrPosition = { x: landingControlHand === "left" ? screen.width - insets.right - 8 - closeQrSize - closeQrHit : insets.left + 8 + closeQrHit,
-    y: screen.height - Math.max(Math.min(insets.bottom, 12), 8) - closeQrSize - closeQrHit };
+  const landingQrPosition = { x: landingControlHand === "left" ? compactLandingBounds.right - 8 - closeQrSize - closeQrHit : compactLandingBounds.left + 8 + closeQrHit,
+    y: compactLandingBounds.bottom - closeQrSize - closeQrHit };
 
   // Keep the approved header reservation: relocating QR must not shift panels or confirmations.
   const landingHeaderControls = [
@@ -14474,9 +14478,12 @@ function HomeScreenContent() {
   return (
     <GoNavigationHand.Provider value={handedness}>
     <GestureDetector gesture={universalSwipeGesture}>
-    <View style={[styles.root, { paddingTop }]} onLayout={(e) => {
+    <View ref={landingSurfaceRef} style={[styles.root, { paddingTop }]} onLayout={(e) => {
       const { width, height } = e.nativeEvent.layout;
       setLandingSurfaceSize(prev => prev?.width === width && prev?.height === height ? prev : { width, height });
+      landingSurfaceRef.current?.measureInWindow((x, y) => {
+        setLandingSurfaceOrigin(prev => prev.x === x && prev.y === y ? prev : { x, y });
+      });
     }}>
       {/* Status bar — dark-content sobre paneles claros, light sobre el fondo oscuro GO */}
       <StatusBar
@@ -24720,10 +24727,17 @@ function HomeScreenContent() {
 
 
       {!anyOverlayOpen && !goAuthOpen && !empresaOpen && !adminDashOpen && !rutasMode && kbHeight === 0 && (
-        <View testID="landing-support-orbit" style={{position:"absolute",left:supportRect.x,top:supportRect.y,width:supportRect.width,height:supportRect.height,zIndex:100,
-          alignItems:"center",paddingTop:!supportMode&&landingCornerPair?1:0}}>
-          {supportMode ? <GoCloseButton level="container" preserveTouchSize touchSize={supportRect.width} accessibilityLabel="Salir del modo ayuda" onPress={()=>setSupportMode(active=>!active)}/> : <PremiumOrbitBtn color="#4A80BD" selected={false} onPress={()=>setSupportMode(active=>!active)} icon="message-circle"
-            label="AYUDA" accessibilityLabel="AYÚDANOS A MEJORAR" size={supportRect.width-(landingCornerPair?1:0)} iconSize={22} labelSize={8} labelSpacing={0} paddingH={6}/>}
+        <View testID="landing-support-orbit" style={{position:"absolute",left:supportRect.x,top:supportRect.y,width:supportRect.width,height:supportRect.height,alignItems:"center",justifyContent:"center",zIndex:100,
+          paddingTop:!compactLandingActive&&!supportMode&&landingCornerPair?1:0}}>
+          {supportMode ? <GoCloseButton level="container" preserveTouchSize touchSize={supportRect.width} accessibilityLabel="Salir del modo ayuda" onPress={toggleLandingHelp}/> : (
+            <TouchableOpacity testID="landing-help-button" accessibilityRole="button" accessibilityLabel="AYÚDANOS A MEJORAR" onPress={toggleLandingHelp} activeOpacity={1}
+              style={{width:supportRect.width,height:supportRect.height,alignItems:"center",justifyContent:"center"}}>
+              <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                <PremiumOrbitBtn color="#4A80BD" selected={false} onPress={toggleLandingHelp} icon="message-circle"
+                  label="AYUDA" size={compactLandingActive ? compactLandingGeometry.helpVisualSize : supportRect.width-(landingCornerPair?1:0)} iconSize={compactLandingActive ? Math.round(22*uiScaleFactor) : 22} labelSize={compactLandingActive ? Math.max(8,Math.round(8*uiScaleFactor)) : 8} labelSpacing={0} paddingH={compactLandingActive ? Math.round(6*uiScaleFactor) : 6}/>
+              </View>
+            </TouchableOpacity>
+          )}
         </View>
       )}
       {/* HUMANITY retains its original slot whenever it fits. */}

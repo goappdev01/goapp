@@ -50,6 +50,21 @@ export function redistributeLandingLowerArc(input: Input) {
 }
 
 
+/** Window safe edges expressed in the measured Landing surface coordinates.
+ * A navigator may already exclude an inset: never subtract it a second time.
+ * The safe bottom itself is the floor; there is no preset-dependent lift. */
+export function landingOrbitSafeBounds({ surface, viewport, insets }: {
+  surface: Rect; viewport: { width: number; height: number };
+  insets: { left: number; right: number; top: number; bottom: number };
+}): Bounds {
+  return {
+    left: Math.max(0, insets.left - surface.x),
+    right: Math.min(surface.width, viewport.width - insets.right - surface.x),
+    top: Math.max(0, insets.top - surface.y) + 4,
+    bottom: Math.min(surface.height, viewport.height - insets.bottom - surface.y),
+  };
+}
+
 /** Pack AYUDA into the corner between VIAJE and RESERVAS. The same relative
  * geometry is mirrored as a unit; labels/icons are never visually flipped. */
 export function compactLandingOrbit(input: Omit<Input, "center" | "bounds"> & {
@@ -60,7 +75,7 @@ export function compactLandingOrbit(input: Omit<Input, "center" | "bounds"> & {
   const travel = canonical.find(n => n.key === "orbit-3")!;
   const reservations = canonical.find(n => n.key === "calendar")!;
   const help = { x: travel.x + travel.radius + gap,
-    y: reservations.y + reservations.radius + gap, width: input.helpSize, height: input.helpSize };
+    y: reservations.y + reservations.radius + gap, width: Math.max(44, input.helpSize), height: Math.max(44, input.helpSize) };
   const mirrored = input.alignment === "left";
   if (mirrored) help.x = -help.x - help.width;
   const nodes = mirrored ? canonical.map(n => ({ ...n, x: -n.x })) : canonical;
@@ -69,13 +84,17 @@ export function compactLandingOrbit(input: Omit<Input, "center" | "bounds"> & {
   const all = [...relative, help];
   const left = Math.min(...all.map(r => r.x)), right = Math.max(...all.map(r => r.x + r.width));
   const top = Math.min(...all.map(r => r.y)), bottom = Math.max(...all.map(r => r.y + r.height));
-  const center = { x: input.alignment === "left" ? input.bounds.left - left
-    : input.alignment === "right" ? input.bounds.right - right
-    : (input.preferredCenterX ?? (input.bounds.left + input.bounds.right) / 2) - (left + right) / 2,
-    y: input.bounds.bottom - bottom };
+  // Keep the existing side breathing room when it fits. On narrow surfaces
+  // consume only that decorative margin before changing any circle's size.
+  const sideGap = Math.max(0, Math.min(4, (input.bounds.right-input.bounds.left-(right-left))/2));
+  const bounds = { ...input.bounds, left: input.bounds.left+sideGap, right: input.bounds.right-sideGap };
+  const center = { x: input.alignment === "left" ? bounds.left - left
+    : input.alignment === "right" ? bounds.right - right
+    : (input.preferredCenterX ?? (bounds.left + bounds.right) / 2) - (left + right) / 2,
+    y: bounds.bottom - bottom };
   const preferred = { ...center }, fixed = input.obstacles ?? [];
-  const minCx = input.bounds.left - left, maxCx = input.bounds.right - right;
-  const minCy = input.bounds.top - top, maxCy = input.bounds.bottom - bottom;
+  const minCx = bounds.left - left, maxCx = bounds.right - right;
+  const minCy = bounds.top - top, maxCy = bounds.bottom - bottom;
   const clear = (cx: number, cy: number) => all.every(r => fixed.every(o =>
     cx + r.x + r.width + gap <= o.x + .001 || cx + r.x >= o.x + o.width + gap - .001
     || cy + r.y + r.height + gap <= o.y + .001 || cy + r.y >= o.y + o.height + gap - .001));
@@ -90,8 +109,8 @@ export function compactLandingOrbit(input: Omit<Input, "center" | "bounds"> & {
     center.x=cx; center.y=cy; found=true; break;
   } if (found) break; }
   const move = <T extends Rect>(r: T): T => ({ ...r, x: r.x + center.x, y: r.y + center.y });
-  return { center, help: move(help), obstacles: relative.map(move), mirrored, gap, fixedObstacles: fixed,
-    fitted: found && right - left <= input.bounds.right - input.bounds.left + .001
-      && bottom - top <= input.bounds.bottom - input.bounds.top + .001,
+  return { center, help: move(help), helpVisualSize: input.helpSize, obstacles: relative.map(move), mirrored, gap, fixedObstacles: fixed, bounds,
+    fitted: found && right - left <= bounds.right - bounds.left + .001
+      && bottom - top <= bounds.bottom - bounds.top + .001,
     frame: { x: center.x + left, y: center.y + top, width: right - left, height: bottom - top } };
 }

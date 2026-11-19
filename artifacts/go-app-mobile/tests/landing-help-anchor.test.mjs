@@ -14,18 +14,17 @@ for(const profile of ['USER','ADMIN','BUSINESS'])for(const preset of ['compacto'
  for(const d of devicesToCheck)for(const savedHand of alignment==='center'?['left','right']:[alignment]){
   const f=frame(d,preset,profile,alignment,savedHand),g=f.compactLandingGeometry,h=g.help;
   assert.ok(g.fitted,JSON.stringify({d,profile,preset,alignment}));assert.deepEqual(plain(h),plain(f.supportRect));
-  assert.equal(h.width,d.width<440?48:60);assert.equal(h.height,h.width);
+  assert.equal(g.helpVisualSize,f.ctx.microSz);assert.equal(h.width,Math.max(44,f.ctx.microSz));assert.equal(h.height,h.width);
   const travel=g.obstacles.find(n=>n.key==='orbit-3'),reservations=g.obstacles.find(n=>n.key==='calendar');assert.ok(travel&&reservations);
   assert.ok(Math.abs(h.y-reservations.y-reservations.height-2)<.001);
   assert.ok(Math.abs(alignment==='left'?travel.x-h.x-h.width-2:h.x-travel.x-travel.width-2)<.001);
   for(const r of g.obstacles)assert.ok(!overlap(h,r,1.99),'AYUDA touch area is independent of '+r.key);
   assert.ok(distance(h,travel)<=h.width*.3,'AYUDA stays visually close to VIAJE');assert.ok(distance(h,reservations)<=h.width*.15);
-  assert.ok(g.frame.x>=d.insets.left+4-.001&&g.frame.x+g.frame.width<=d.width-d.insets.right-4+.001);
+  assert.ok(g.frame.x>=g.bounds.left-.001&&g.frame.x+g.frame.width<=g.bounds.right+.001);
   assert.ok(g.frame.y>=d.insets.top+4-.001);
-  const bottomGap=d.height-Math.min(d.insets.bottom,12)-g.frame.y-g.frame.height;
-  assert.ok(bottomGap>=6-.001);
-  if(bottomGap>6.001){
-   assert.equal(d.width,320);assert.equal(preset,'grande','only the narrow QR constraint can require more bottom space');
+  const bottomGap=g.bounds.bottom-g.frame.y-g.frame.height;
+  assert.ok(bottomGap>=-.001);
+  if(bottomGap>.001){
    assert.ok([...g.obstacles,h].some(r=>g.fixedObstacles.some(o=>overlap({...r,y:r.y+.1},o,1.999))),'even 0.1pt lower would overlap an existing fixed target');
   }
   const count=(f.landingArrangement.obstacles??f.landingOrbitObstacles.slice(1)).length,fixed=f.supportObstacles.slice(count);
@@ -45,7 +44,7 @@ test('left reflects every orbital center without mirroring text; center does not
   const r=frame(d,preset,'ADMIN','right').compactLandingGeometry,l=frame(d,preset,'ADMIN','left').compactLandingGeometry,c=frame(d,preset,'ADMIN','center').compactLandingGeometry;
   assert.equal(r.mirrored,false);assert.equal(l.mirrored,true);assert.equal(c.mirrored,false);
   for(const right of [...r.obstacles,{...r.help,key:'help'}]){const left=[...l.obstacles,{...l.help,key:'help'}].find(n=>n.key===right.key);assert.ok(Math.abs((right.x+right.width/2-r.center.x)+(left.x+left.width/2-l.center.x))<.001);assert.ok(Math.abs((right.y-r.center.y)-(left.y-l.center.y))<.001);assert.equal(right.width,left.width);}
-  if(d.width<d.height)assert.ok(c.frame.x>d.insets.left+4||Math.abs(c.frame.width-(d.width-d.insets.left-d.insets.right-8))<1);
+  if(d.width<d.height){const dx=d.width/2-c.frame.width/2-c.frame.x;if(Math.abs(dx)>.001)assert.ok([...c.obstacles,c.help].some(r=>c.fixedObstacles.some(o=>overlap({...r,x:r.x+dx},o,1.99))),'only a real fixed target can prevent exact centering');}
  }
  const mirroredExpressions=nodes.filter(n=>ts.isPropertyAssignment(n)&&n.name.getText(ast)==='left'&&n.initializer.getText(ast).startsWith('compactLandingActive && compactLandingGeometry.mirrored'));
  assert.ok(mirroredExpressions.length>=4);
@@ -60,7 +59,9 @@ test('upper content frames, cards and Humanity are unchanged from published 31ec
 });
 test('real AYUDA, VIAJE and RESERVAS callbacks retain their independent actions',()=>{
  const help=nodes.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='label'&&n.initializer?.text==='AYUDA').parent;
- const helpAction=help.properties.find(n=>n.name?.getText(ast)==='onPress').initializer.expression.getText(ast);
+ const helpAction=decl('toggleLandingHelp').initializer.getText(ast);
+ assert.equal(help.properties.find(n=>n.name?.getText(ast)==='onPress').initializer.expression.getText(ast),'toggleLandingHelp');
+ const helpButton=nodes.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='testID'&&n.initializer?.text==='landing-help-button').parent;assert.equal(helpButton.properties.find(n=>n.name?.getText(ast)==='onPress').initializer.expression.getText(ast),'toggleLandingHelp');
  let support=false;const helpFn=vm.runInNewContext(transpile('result='+helpAction),{result:null,setSupportMode:fn=>{support=fn(support);}});helpFn();assert.equal(support,true);helpFn();assert.equal(support,false);
  const primary=nodes.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='label'&&n.initializer?.getText(ast).includes("'intent_' + it.key")).parent;
  const primaryAction=primary.properties.find(n=>n.name?.getText(ast)==='onPress').initializer.expression.getText(ast);
@@ -72,13 +73,50 @@ test('real AYUDA, VIAJE and RESERVAS callbacks retain their independent actions'
 });
 
 
-test('modern iPhone lowers the complete dock by 22pt without resizing or changing its internal geometry',()=>{
- const d={width:393,height:852,insets:{top:59,bottom:34,left:0,right:0}};
- for(const profile of ['USER','ADMIN','BUSINESS'])for(const preset of ['compacto','estandar','grande'])for(const alignment of ['right','left','center']){
-  const f=frame(d,preset,profile,alignment),g=f.compactLandingGeometry;
-  assert.ok(g.fitted);assert.ok(Math.abs(g.frame.y+g.frame.height-(d.height-18))<.001);
-  const ctx=f.ctx, qr=g.fixedObstacles.at(-1);
-  const old=ctx.compactLandingOrbit({goSize:ctx.goSize,orbitRadius:ctx.orbitRadius,orbitSize:ctx.orbitBtnSize,orbitCount:8,orbitVisible:true,satelliteRadius:ctx.microR,satelliteSize:ctx.microSz,satellites:ctx.visibleLandingSatelliteKeys(Object.keys(ctx.LANDING_SATELLITE_DEGREES),ctx.isUserV1Surface).filter(key=>key!=='payment').map(key=>({key,degrees:ctx.LANDING_SATELLITE_DEGREES[key]})),helpSize:g.help.width,alignment,bounds:{left:4,right:d.width-4,top:d.insets.top+4,bottom:d.height-34-6},obstacles:[...g.fixedObstacles.slice(0,-1),{...qr,y:qr.y-22}]});
-  for(const r of [...g.obstacles,{...g.help,key:'help'}]){const p=[...old.obstacles,{...old.help,key:'help'}].find(v=>v.key===r.key);assert.ok(Math.abs(r.x-p.x)<.001);assert.ok(Math.abs(r.y-p.y-22)<.001);assert.equal(r.width,p.width);assert.equal(r.height,p.height);}
+test('safe floor comes from the real surface/window intersection, without subtracting insets twice',()=>{
+ const {landingOrbitSafeBounds}=req('./helpers/landing-qr-fixture.cjs').load('components/landing/landingLowerArc.ts');
+ const viewport={width:393,height:852},insets={left:0,right:0,top:59,bottom:34};
+ const full=landingOrbitSafeBounds({surface:{x:0,y:0,...viewport},viewport,insets});assert.equal(full.bottom,818);
+ const clipped=landingOrbitSafeBounds({surface:{x:0,y:0,width:393,height:818},viewport,insets});assert.equal(clipped.bottom,818);
+ const inner=landingOrbitSafeBounds({surface:{x:0,y:59,width:393,height:759},viewport,insets});assert.equal(inner.bottom,759);assert.equal(inner.top,4);
+ const landscape=landingOrbitSafeBounds({surface:{x:44,y:0,width:756,height:347},viewport:{width:844,height:368},insets:{left:44,right:44,top:0,bottom:21}});assert.equal(landscape.left,0);assert.equal(landscape.right,756);assert.equal(landscape.bottom,347);
+});
+
+test('size and hand changes recompute AYUDA synchronously from the same effective scale and keep the lowest valid anchor',()=>{
+ const device={width:393,height:852,insets:{top:59,bottom:34,left:0,right:0}};
+ const attrs=nodes.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='label'&&n.initializer?.text==='AYUDA').parent;
+ const prop=(name,scope)=>vm.runInNewContext(transpile('result='+attrs.properties.find(p=>p.name?.getText(ast)===name).initializer.expression.getText(ast)),{...scope,result:null});
+ for(const profile of ['USER','ADMIN','BUSINESS'])for(const alignment of ['right','left','center','left','right']){
+  let prior=0;
+  for(const preset of ['compacto','estandar','grande']){
+   const f=frame(device,preset,profile,alignment),g=f.compactLandingGeometry;
+   const scope={...f,...f.ctx,compactLandingActive:true};
+   const size=prop('size',scope);assert.equal(size,Math.round(50*f.scale));assert.ok(size>prior);prior=size;
+   assert.ok(Math.abs(size/f.ctx.goSize-50/128)<.008,'AYUDA/GO proportion only differs by whole-point rounding');
+   assert.equal(f.supportRect.width,Math.max(44,size));assert.equal(prop('iconSize',scope),Math.round(22*f.scale));
+   assert.equal(prop('labelSize',scope),Math.max(8,Math.round(8*f.scale)));
+   assert.ok(Math.abs(g.frame.y+g.frame.height-g.bounds.bottom)<.001,'no unused space below the real envelope');
+   assert.equal(g.bounds.bottom,818,'system safe bottom is preserved without an extra lift');
+  }
+ }
+});
+
+test('actual root measurement records its window origin without writing a preference',()=>{
+ const attr=nodes.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='ref'&&n.initializer?.expression?.getText(ast)==='landingSurfaceRef').parent;
+ const onLayout=attr.properties.find(n=>n.name?.getText(ast)==='onLayout').initializer.expression.getText(ast);
+ let size=null,origin={x:0,y:0};const fn=vm.runInNewContext(transpile('result='+onLayout),{result:null,setLandingSurfaceSize:change=>{size=change(size);},setLandingSurfaceOrigin:change=>{origin=change(origin);},landingSurfaceRef:{current:{measureInWindow:cb=>cb(0,59)}}});
+ fn({nativeEvent:{layout:{width:393,height:759}}});assert.deepEqual(plain(size),{width:393,height:759});assert.deepEqual(plain(origin),{x:0,y:59});
+});
+
+
+test('all 27 combinations fit a navigator surface that already excludes system insets',()=>{
+ const insets={top:59,bottom:34,left:0,right:0};
+ for(const surface of [{width:393,height:818,x:0,y:0},{width:393,height:759,x:0,y:59}]){
+  for(const profile of ['USER','ADMIN','BUSINESS'])for(const preset of ['compacto','estandar','grande'])for(const alignment of ['right','left','center']){
+   const f=fixture({...surface,insets},preset,profile,alignment==='left'?'left':'right',{landingAlignment:alignment,landingWindow:{width:393,height:852},landingSurfaceOrigin:{x:surface.x,y:surface.y}}),g=f.compactLandingGeometry;
+   assert.ok(g.fitted);assert.ok(Math.abs(g.frame.y+g.frame.height-surface.height)<.001,'the navigator has already protected the lower inset');
+   assert.equal(g.helpVisualSize,Math.round(50*f.scale));
+   for(const r of [...g.obstacles,g.help])assert.ok(r.y+r.height<=surface.height+.001&&r.x>=-.001&&r.x+r.width<=surface.width+.001);
+  }
  }
 });
