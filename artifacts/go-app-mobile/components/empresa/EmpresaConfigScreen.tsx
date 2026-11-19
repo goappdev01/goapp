@@ -1187,21 +1187,21 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
     <View>
       <View style={c.sectionCard}>
         <Text accessibilityRole="header" style={{ fontSize: 16, fontWeight: "700", color: TEXT, marginBottom: 12 }}>{lang === "en" ? "REGULAR WEEKLY HOURS" : "HORARIO HABITUAL"}</Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <View testID="business-timezone-summary" style={{ flex: 1, minWidth: 0, gap: 2 }}>
-            <Text style={{ color: GRAY, fontSize: 12, fontWeight: "700" }}>{lang === "en" ? "TIME ZONE" : "ZONA HORARIA"}</Text>
-            <Text style={{ color: TEXT, fontSize: 14, fontWeight: "600" }}>{displayedTimezone ? timezoneName(displayedTimezone) : (lang === "en" ? "Not set" : "Sin definir")}</Text>
-            {!!displayedTimezone && <Text style={{ color: TEXT, fontSize: 12 }}>{displayedTimezone}</Text>}
-          </View>
+        <View testID="business-timezone-row" style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+          <Text testID="business-timezone-summary" numberOfLines={1} ellipsizeMode="tail"
+            accessibilityLabel={displayedTimezone ? timezoneName(displayedTimezone) : (lang === "en" ? "Not set" : "Sin definir")}
+            style={{ flex: 1, minWidth: 0, color: TEXT, fontSize: 14, fontWeight: "600" }}>
+            {displayedTimezone ? timezoneName(displayedTimezone) : (lang === "en" ? "Not set" : "Sin definir")}
+          </Text>
         <TouchableOpacity testID="business-timezone-selector" accessibilityRole="button" accessibilityLabel={lang === "en" ? "Business time zone" : "Zona horaria del negocio"}
           accessibilityState={{ expanded: timezonePickerOpen, disabled: timezoneSaving }} disabled={timezoneSaving} activeOpacity={0.75}
-          onPress={() => setTimezonePickerOpen(open => !open)} style={{ minHeight: 44, padding: 8, flexDirection: "row", alignItems: "center", gap: 6 }}>
+          onPress={() => setTimezonePickerOpen(open => !open)} style={{ flexShrink: 0, minHeight: 44, padding: 8, flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Text style={{ fontSize: 13, color: TEXT, fontWeight: "600" }}>{timezoneSaving ? (lang === "en" ? "Saving…" : "Guardando…") : (lang === "en" ? "Adjust" : "Ajustar")}</Text>
           <Feather name={timezonePickerOpen ? "chevron-up" : "chevron-down"} size={18} color={TEXT} />
         </TouchableOpacity>
         </View>
-        {locationTimezone && locationTimezone !== businessTimezone(timezone) && <Text testID="business-timezone-detected" style={{ color: TEXT, fontSize: 12, marginBottom: 8 }}>
-          {timezone ? `${lang === "en" ? "Location indicates" : "La ubicación indica"} ${locationTimezone}.`
+        {locationTimezone && locationTimezone !== businessTimezone(timezone) && (timezone || timezonePickerOpen) && <Text testID="business-timezone-detected" style={{ color: TEXT, fontSize: 12, marginBottom: 8 }}>
+          {timezone ? `${lang === "en" ? "Location indicates" : "La ubicación indica"} ${timezoneName(locationTimezone)}.`
             : (lang === "en" ? "Confirm the zone in Adjust." : "Confirma la zona en Ajustar.")}
         </Text>}
         {!timezone && detected && detected.status !== "resolved" && detected.status !== "missing" && <Text style={{ color: TEXT, fontSize: 12, marginBottom: 8 }}>
