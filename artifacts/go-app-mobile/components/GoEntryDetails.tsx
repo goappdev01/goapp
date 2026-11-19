@@ -300,6 +300,10 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, onDis
           {pending && <View testID="entry-proposal" style={{ borderColor: "rgba(209,161,102,0.42)", borderWidth: 1, borderRadius: 12, padding: 10, gap: 6, backgroundColor:"#171512" }}>
             <Text testID="entry-proposal-state" style={{ color: entry.estado === "propuesta_pendiente" ? C.pending : "#D1A166", fontWeight: "800" }}>{entry.estado === "propuesto" ? (lang === "en" ? "CHANGE RECEIVED" : "CAMBIO RECIBIDO") : (lang === "en" ? "AWAITING RESPONSE" : "ESPERANDO RESPUESTA")}</Text>
             <Text testID="entry-proposed-date-time" style={s.text}>{lang === "en" ? "Proposed: " : "Propuesto: "}{[entryIsReservation(entry) ? formatBookingLocalDate(entry.changeProposal!.dateISO, entry.changeProposal!.date, lang, entry.bookingTimeline?.timezone) : entry.changeProposal!.date || entry.changeProposal!.dateISO, entry.changeProposal!.time].filter(Boolean).join(" · ")}</Text>
+            {entry.changeProposal!.selection && <View testID="entry-proposed-selection" style={{gap:4}}>
+              <Text style={s.text}>{entry.changeProposal!.selection!.catalogSnapshot.lines.map(line=>line.name).join(" + ")}</Text>
+              <Text style={s.secondary}>{entry.changeProposal!.selection!.professionalName || (lang==="en"?"No preference":"Sin preferencia")} · {entry.changeProposal!.selection!.durationMinutes} min · {entry.changeProposal!.selection!.catalogSnapshot.totalPrice.toFixed(2)} {entry.changeProposal!.selection!.catalogSnapshot.currency}</Text>
+            </View>}
             {!!entry.changeProposal!.note && <Text style={s.secondary}>{entry.changeProposal!.note}</Text>}
           </View>}
           </View>

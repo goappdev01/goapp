@@ -1,5 +1,5 @@
 import type { GoEntry } from "@/components/AgendaOperativa";
-import type { Business, BookableItem, Staff, SlotWithStatus, Booking } from "./booking";
+import type { Business, BookableItem, Staff, SlotWithStatus, Booking, BookingChangeChoice, BookingChangeProposal } from "./booking";
 import type { BookingService } from "./bookingServices";
 import type { BookingTimeline } from "./bookingTimeline";
 
@@ -7,18 +7,43 @@ import type { BookingTimeline } from "./bookingTimeline";
 export type BookingChangeSelection = {
   business: Business; item: BookableItem; services: BookingService[]; staff?: Staff;
   durationMinutes: number; timeline?: BookingTimeline;
+  rootIds?: string[]; selectedAssociationIds?: string[]; totalPrice?: number;
 };
+export type BookingProposalDraft = { slot: SlotWithStatus; selection: BookingChangeChoice };
 
-export function bookingChangeSelection(entry: GoEntry, original?: Pick<Booking, "timingSnapshot">): BookingChangeSelection {
+export function bookingProposalDescription(proposal: Pick<BookingChangeProposal,"selection">, lang:"es"|"en"):string {
+  const choice=proposal.selection;
+  if(!choice)return lang==="en"?"The existing payment is preserved. No charge or refund will be made.":"Se conserva el pago existente. No se realizará ningún cobro ni devolución.";
+  return [choice.catalogSnapshot.lines.map(line=>line.name).join(" + "),
+    choice.professionalName || (lang==="en"?"No preference":"Sin preferencia"),
+    `${choice.durationMinutes} min · ${choice.catalogSnapshot.totalPrice.toFixed(2)} ${choice.catalogSnapshot.currency}`,
+    lang==="en"?"Accepting applies this selection. Recorded payments are preserved; no charge or refund is made.":"Aceptar aplica esta selección. Los pagos registrados se conservan; no se realiza ningún cobro ni devolución."].join("\n");
+}
+
+/** The published remote negotiation contract accepts time only. Never silently drop a changed choice. */
+export function timeOnlyBookingProposal(original: BookingChangeSelection, draft: BookingProposalDraft): boolean {
+  const same=(a:unknown,b:unknown)=>JSON.stringify(a)===JSON.stringify(b);
+  return same(original.services.map(service=>service.id),draft.selection.serviceIds)
+    && original.staff?.id===draft.selection.staffId && original.durationMinutes===draft.selection.durationMinutes
+    && same(original.rootIds ?? original.services.map(service=>service.id),draft.selection.catalogSnapshot.rootIds)
+    && same(original.selectedAssociationIds ?? [],draft.selection.catalogSnapshot.selectedAssociationIds)
+    && (original.totalPrice===undefined || original.totalPrice===draft.selection.catalogSnapshot.totalPrice)
+    && (!original.timeline || bookingChangeSlots(original,[draft.slot]).length===1);
+}
+
+export function bookingChangeSelection(entry: GoEntry, original?: Partial<Booking>): BookingChangeSelection {
   const timeline = entry.bookingTimeline ?? original?.timingSnapshot;
-  const ids = timeline?.serviceIds ?? entry.bookingServices?.map(service => service.id) ?? (entry.serviceId ? [entry.serviceId] : []);
-  const minutes = timeline?.totalDurationMinutes ?? (Date.parse(entry.endDatetime ?? "") - Date.parse(entry.startDatetime ?? "")) / 60000;
-  if (!entry.businessId || !ids.length || ids.some(id => !id) || !Number.isFinite(minutes) || minutes <= 0)
+  const ids = entry.bookingServices?.length ? entry.bookingServices.map(service=>service.id) : original?.services?.length ? original.services.map(service=>service.id) : entry.serviceId ? [entry.serviceId] : original?.bookableItemId ? [original.bookableItemId] : timeline?.serviceIds ?? [];
+  const elapsed = timeline?.totalDurationMinutes ?? (Date.parse(entry.endDatetime || original?.endInstant || original?.endDatetime || "") - Date.parse(entry.startDatetime || original?.startInstant || original?.startDatetime || "")) / 60000;
+  // Unknown legacy metadata never drives availability: Services resolves the actual selection first.
+  const minutes = Number.isFinite(elapsed)&&elapsed>0?elapsed:0;
+  if (!entry.businessId)
     throw Error("No se puede consultar la disponibilidad de esta reserva. Actualízala e inténtalo de nuevo.");
   const services = ids.map(id => entry.bookingServices?.find(service => service.id === id)
+    ?? original?.services?.find(service=>service.id===id)
     ?? timeline?.serviceDetails.find(service => service.id === id)
     ?? { id, title: entry.intentLabel || "Reserva", durationMinutes: minutes, price: 0 });
-  const staffId = entry.staffId ?? entry.professionalId ?? timeline?.staffId ?? undefined;
+  const staffId = entry.staffId ?? entry.professionalId ?? original?.staffId ?? timeline?.staffId ?? undefined;
   return {
     business: { id: entry.businessId, name: entry.contactName || "", location: entry.place || "", phone: "",
       category: entry.bookingCategory || "peluqueria", bookingActive: true, bookingColor: entry.color || "#4A80BD",
@@ -29,6 +54,9 @@ export function bookingChangeSelection(entry: GoEntry, original?: Pick<Booking, 
     services: services.map(service => ({ ...service, price: service.price ?? 0 })),
     staff: staffId ? { id: staffId, businessId: entry.businessId, name: entry.professionalName || "Profesional asignado", active: true } : undefined,
     durationMinutes: minutes, timeline,
+    rootIds: entry.bookingCatalog?.rootIds?.length ? entry.bookingCatalog.rootIds : original?.catalogSnapshot?.rootIds?.length ? original.catalogSnapshot.rootIds : ids,
+    selectedAssociationIds: entry.bookingCatalog?.selectedAssociationIds ?? original?.catalogSnapshot?.selectedAssociationIds,
+    totalPrice: entry.bookingCatalog?.totalPrice ?? entry.bookingTotalPrice ?? original?.catalogSnapshot?.totalPrice ?? original?.totalPrice ?? timeline?.totalPrice,
   };
 }
 

@@ -61,7 +61,7 @@ import { summarizeBookingServices, staffSupportsBookingServices, type BookingSer
 import { compactTimelineOptions, timelineOptionLabel } from "@/data/bookingTimeline";
 import { bookingActivityEnabled, canonicalBookingActivity, visibleBookingSectors } from "@workspace/api-zod";
 import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
-import { bookingChangeSlots, type BookingChangeSelection } from "@/data/bookingChangeAvailability";
+import { type BookingProposalDraft, type BookingChangeSelection } from "@/data/bookingChangeAvailability";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -359,9 +359,9 @@ const bc = StyleSheet.create({
 // ── Main overlay ───────────────────────────────────────────────────────────────
 
 export type BookingSearchOverlayProps = {
-  /** Reuse the existing day/slot UI without creating a HOLD or changing the service/staff. */
+  /** Prefill the normal booking flow; its final action negotiates the original reservation. */
   changeSelection?: BookingChangeSelection;
-  onChangeSlotSelected?: (slot: SlotWithStatus) => void;
+  onProposalSubmit?: (draft: BookingProposalDraft) => Promise<void>;
   /** Owner-authorized local test data. Never falls back to live booking or agenda writes. */
   demoRepository?: DemoBookingRepository;
   initialBusinessId?: string;
@@ -401,7 +401,7 @@ export function BookingSearchOverlay({
   initialDateISO,
   onDemoGoToBooking,
   changeSelection,
-  onChangeSlotSelected,
+  onProposalSubmit,
 }: BookingSearchOverlayProps) {
   const { publication, internalAccess } = useBookingModulePublication(visible, !!demoRepository);
   const visibleSectors = visibleBookingSectors(SECTORS, publication, internalAccess);
@@ -530,11 +530,12 @@ export function BookingSearchOverlay({
   const [selectedStaff, setSelectedStaff] = useState<Staff | null | "none">(null);
   const [selectedDate, setSelectedDate] = useState(isValidBookingDateISO(initialDateISO) ? initialDateISO : formatISODate(getToday()));
   const selectionScope = `${selectedBusiness?.id ?? ""}|${selectedServiceIds.join(",")}|${selectedStaff && selectedStaff !== "none" ? selectedStaff.id : "any"}`;
-  const currentSlotScope = useRef(""); currentSlotScope.current = `${selectionScope}|${selectedDate}|${visible}`;
+  const currentSlotScope = useRef(""); currentSlotScope.current = `${selectionScope}|${selectedServices.map(service=>service.id).join(",")}|${catalogQuote?.selectedAssociationIds.join(",") ?? ""}|${catalogQuote?.totalPrice ?? ""}|${selectedDate}|${visible}|${step}`;
   const [slots, setSlots] = useState<SlotWithStatus[]>([]);
   useEffect(() => () => { currentSlotScope.current = ""; slotGeneration.current++; }, []);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [activeHold, setActiveHold] = useState<Booking | null>(null);
+  const [proposalReview, setProposalReview] = useState<BookingProposalDraft | null>(null);
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
   const [confirming, setConfirming] = useState(false);
   const confirmInFlight = useRef(false);
@@ -573,15 +574,15 @@ export function BookingSearchOverlay({
       setSelectedServiceIds([]); setSelectedServices([]); setAvailableDates(null); setSlotError("");
       setStaffList([]);
       setSelectedStaff(null);
-      setActiveHold(null);
+      setActiveHold(null); setProposalReview(null); setCatalogQuote(null);
       setConfirmedBooking(null);
       dragAnim.setValue(0);
       stepAnim.setValue(0);
-      // A change is scoped to the original reservation, never a new service or professional.
+      // Same business and the same Services > Professional > Slots > Review steps as Reservar.
       if (changeSelection) {
-        setSelectedBusiness(changeSelection.business); setSelectedItem(changeSelection.item);
-        setSelectedServices(changeSelection.services); setSelectedServiceIds(changeSelection.services.map(service => service.id));
-        setSelectedStaff(changeSelection.staff ?? "none"); setSlots([]); setStep("slots");
+        setSelectedBusiness(changeSelection.business); setSelectedItem(null);
+        setSelectedServices(changeSelection.services); setSelectedServiceIds(changeSelection.rootIds ?? changeSelection.services.map(service => service.id));
+        setSelectedStaff(changeSelection.staff ?? "none"); setSlots([]); setStep("item");
       } else if (demoRepository) {
         demoRepository.getActiveBusinesses().then(all => {
           if (!current) return;
@@ -670,11 +671,18 @@ export function BookingSearchOverlay({
   }, [publication, internalAccess]);
 
   useEffect(() => {
-    if (!selectedBusiness || changeSelection) return;
+    if (!selectedBusiness) return;
     let current = true;
     setItems([]); setStaffList([]);
     (demoRepository ? demoRepository.getBookableItems(selectedBusiness.id) : getBookableItems(selectedBusiness.id, true)).then((its) => {
-      if (current) setItems(its.filter((i) => i.active && i.visible));
+      if (current) {
+        const available=its.filter(i=>i.active&&i.visible);setItems(available);
+        if(changeSelection){
+          const roots=changeSelection.rootIds ?? changeSelection.services.map(service=>service.id);
+          if(!roots.length || roots.some(id=>!available.some(item=>item.id===id)))setSlotError(lang==="en"?"Some original items cannot be preselected. Review the catalogue; the original booking is unchanged.":"No se pueden precargar todos los elementos originales. Revisa el catálogo; la reserva original se conserva.");
+          setSelectedServiceIds(ids=>ids.filter(id=>available.some(item=>item.id===id)));
+        }
+      }
     }).catch((error) => {
       if (!current) return;
       setItems([]);
@@ -700,7 +708,7 @@ export function BookingSearchOverlay({
       setStaffList(clean);
     }).catch(() => {});
     return () => { current = false; };
-  }, [selectedBusiness, demoRepository]);
+  }, [selectedBusiness, demoRepository, changeSelection]);
 
   const loadSlots = useCallback(async () => {
     if (!selectedBusiness || !selectedItem) return;
@@ -741,11 +749,7 @@ export function BookingSearchOverlay({
     // No second schedule filter: live results already validate the full sequence
     // against company, professional and resource windows in the database.
 
-    const compatible = changeSelection ? bookingChangeSlots(changeSelection, raw) : raw;
-    if (changeSelection && raw.length && !compatible.length) setSlotError(lang === "en"
-      ? "No verified slots match the original duration and assigned resources. Choose another day or contact the business."
-      : "No hay franjas verificadas para la duración y los recursos originales. Elige otro día o consulta con la empresa.");
-    setSlots(compatible);
+    setSlots(raw);
     } catch (error) {
       if (generation === slotGeneration.current && scope === currentSlotScope.current) {
         setSlots([]); setSlotError(error instanceof Error ? error.message : "No se pudo consultar la disponibilidad.");
@@ -794,7 +798,10 @@ export function BookingSearchOverlay({
       const services = catalogBookingServices(catalogQuote);
       setSelectedItem({ ...serviceSelection.item, price: catalogQuote.totalPrice, durationMinutes: services.reduce((minutes, service) => minutes + service.durationMinutes, 0) }); setSelectedServices(services);
     }
-    setSelectedStaff(null); setSlots([]);
+    if(!changeSelection)setSelectedStaff(null);
+    else setSelectedStaff(current=>current && current!=="none" && staffList.length
+      ? staffList.find(person=>person.id===current.id&&staffSupportsBookingServices(person,catalogBookingServices(catalogQuote!).map(service=>service.id))) ?? null : current);
+    setSlots([]);setProposalReview(null);
     goToStep("professional", "forward");
   };
 
@@ -836,17 +843,25 @@ export function BookingSearchOverlay({
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
       if (changeSelection) {
-        // Refresh the exact server plan before asking for proposal consent; never create a hold.
-        const fresh = demoRepository
-          ? await demoRepository.getAllSlots(selectedBusiness.id, selectedItem.id, selectedDate, changeSelection.staff?.id, selectedServices.map(service => service.id))
-          : (await getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), selectedDate, changeSelection.staff?.id)).slots;
-        if (scope !== currentSlotScope.current) return;
-        const available = bookingChangeSlots(changeSelection, fresh);
-        setSlots(available);
-        const selected = available.find(candidate => (candidate.startInstant ?? candidate.startDatetime) === (slot.startInstant ?? slot.startDatetime)
-          && candidate.staffId === slot.staffId && candidate.endDatetime === slot.endDatetime);
-        if (!selected) { setSlotError(lang === "en" ? "That slot is no longer available. Choose another." : "Esta franja ya no está disponible. Elige otra."); return; }
-        onChangeSlotSelected?.(selected);
+        setSlotTakenError(false);
+        const staffId=selectedStaff && selectedStaff!=="none"?selectedStaff.id:undefined;
+        const fresh=demoRepository
+          ? await demoRepository.getAllSlots(selectedBusiness.id,selectedItem.id,selectedDate,staffId,selectedServices.map(service=>service.id))
+          : (await getTimelineAvailability(selectedBusiness.id,selectedServices.map(service=>service.id),selectedDate,staffId)).slots;
+        if(scope!==currentSlotScope.current)return;
+        setSlots(fresh);
+        const selected=fresh.find(candidate=>candidate.isAvailable&&!candidate.isBlocked
+          && (candidate.startInstant??candidate.startDatetime)===(slot.startInstant??slot.startDatetime)
+          && candidate.staffId===slot.staffId && candidate.endDatetime===slot.endDatetime);
+        if(!selected){setSlotError(lang==="en"?"That slot is no longer available. Choose another.":"Esta franja ya no está disponible. Elige otra.");return;}
+        if(!catalogQuote?.ready)throw Error("Revisa los servicios y el precio antes de proponer.");
+        const quote=useDatedDiscounts && selected.startInstant?await quoteBookingDiscount(catalogQuote,selected.startInstant):catalogQuote;
+        if(scope!==currentSlotScope.current)return;
+        setProposalReview({slot:selected,selection:{serviceIds:selectedServices.map(service=>service.id),staffId,
+          professionalName:selectedStaff && selectedStaff!=="none"?selectedStaff.name:undefined,
+          durationMinutes:(Date.parse(selected.endInstant??selected.endDatetime)-Date.parse(selected.startInstant??selected.startDatetime))/60000,
+          catalogSnapshot:quote}});
+        goToStep("hold","forward");
         return;
       }
       const staffId = slot.staffId ?? (selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined);
@@ -901,6 +916,28 @@ export function BookingSearchOverlay({
   };
 
   const handleConfirm = async () => {
+    if(changeSelection){
+      if(!proposalReview || !selectedBusiness || !selectedItem || confirmInFlight.current)return;
+      const scope=currentSlotScope.current;confirmInFlight.current=true;setConfirming(true);setSlotError("");
+      try {
+        const staffId=proposalReview.selection.staffId;
+        const fresh=demoRepository
+          ? await demoRepository.getAllSlots(selectedBusiness.id,selectedItem.id,selectedDate,staffId,selectedServices.map(service=>service.id))
+          : (await getTimelineAvailability(selectedBusiness.id,selectedServices.map(service=>service.id),selectedDate,staffId)).slots;
+        if(scope!==currentSlotScope.current)return;
+        const slot=proposalReview.slot;
+        if(!fresh.some(candidate=>candidate.isAvailable&&!candidate.isBlocked
+          && (candidate.startInstant??candidate.startDatetime)===(slot.startInstant??slot.startDatetime)
+          && candidate.staffId===slot.staffId&&candidate.endDatetime===slot.endDatetime)){
+          setSlotTakenError(true);setProposalReview(null);goToStep("slots","back");setSlots(fresh);
+          throw Error(lang==="en"?"That slot is no longer available. Choose another.":"Esta franja ya no está disponible. Elige otra.");
+        }
+        if(!onProposalSubmit)throw Error("No se puede enviar la propuesta en este contexto.");
+        await onProposalSubmit(proposalReview);
+      } catch(error){if(scope===currentSlotScope.current)setSlotError(error instanceof Error?error.message:"No se pudo enviar la propuesta. La reserva original se conserva.");}
+      finally{confirmInFlight.current=false;setConfirming(false);}
+      return;
+    }
     console.log("[ENTER_FUNCTION] BookingSearchOverlay.handleConfirm ENTERED", {
       hasActiveHold: !!activeHold,
       holdId:        activeHold?.id,
@@ -1012,7 +1049,12 @@ export function BookingSearchOverlay({
   };
 
   const handleBack = () => {
-    if (changeSelection) { onClose(); return; }
+    if(changeSelection){
+      if(step==="hold"){setProposalReview(null);goToStep("slots","back");return;}
+      if(step==="slots"){goToStep("professional","back");return;}
+      if(step==="professional"){goToStep("item","back");return;}
+      onClose();return;
+    }
     if (step === "item") { goToStep("search", "back"); if (!demoRepository) onProviderSelected?.(null); }
     else if (step === "slots") goToStep("item", "back");
     else if (step === "hold") {
@@ -1068,7 +1110,7 @@ export function BookingSearchOverlay({
     setSelectedServiceIds([]); setSelectedServices([]); setSlots([]); setAvailableDates(null);
     setStaffList([]);
     setSelectedStaff(null);
-    setActiveHold(null);
+    setActiveHold(null);setProposalReview(null);
     setConfirmedBooking(null);
     setConfirming(false);
     dragAnim.setValue(0);
@@ -1089,7 +1131,7 @@ export function BookingSearchOverlay({
   //    no existe un paso intermedio "limpiar búsqueda")
   const handleBackOneLevel = () => {
     if (keyboardVisible || Keyboard.isVisible()) { Keyboard.dismiss(); return; }
-    if (changeSelection) { handleClose(); return; }
+    if(changeSelection){handleBack();return;}
     Haptics.selectionAsync().catch(() => {});
     if (step === "confirmed") { handleClose(); return; }
     if (step === "hold") {
@@ -1121,12 +1163,14 @@ export function BookingSearchOverlay({
   const accentColor = selectedBusiness?bookingCategoryAccent(selectedBusiness):beautySelection?beauty?.color||"#eab308":"#00e5ff";
   const compactServices = canonicalBookingActivity(selectedBusiness?.category) === "peluqueria";
   const servicesFooterVisible = step === "item" && compactServices && items.length > 0;
-  const reviewedPlan = confirmedBooking?.timingSnapshot ?? activeHold?.timingSnapshot;
+  const reviewedSlot = proposalReview?.slot ?? activeHold;
+  const reviewedQuote = proposalReview?.selection.catalogSnapshot ?? activeHold?.catalogSnapshot;
+  const reviewedPlan = confirmedBooking?.timingSnapshot ?? reviewedSlot?.timingSnapshot;
   const summaryItem = selectedItem && reviewedPlan ? { ...selectedItem,
-    title: (confirmedBooking?.catalogSnapshot ?? activeHold?.catalogSnapshot)?.lines.map(line => line.name).join(" + ") || reviewedPlan.serviceDetails.map(service => service.title).join(" + "),
+    title: (confirmedBooking?.catalogSnapshot ?? reviewedQuote)?.lines.map(line => line.name).join(" + ") || reviewedPlan.serviceDetails.map(service => service.title).join(" + "),
     durationMinutes: reviewedPlan.totalClientMinutes,
-    price: (confirmedBooking?.catalogSnapshot ?? activeHold?.catalogSnapshot)?.totalPrice ?? reviewedPlan.totalPrice ?? selectedItem.price,
-  } : selectedItem;
+    price: (confirmedBooking?.catalogSnapshot ?? reviewedQuote)?.totalPrice ?? reviewedPlan.totalPrice ?? selectedItem.price,
+  } : selectedItem && proposalReview ? {...selectedItem,price:reviewedQuote?.totalPrice ?? selectedItem.price,durationMinutes:proposalReview.selection.durationMinutes} : selectedItem;
 
   // Sheet compacto (sin flex:1) siempre en el paso "search" y cuando el teclado está visible.
   // El paso "search" se autoajusta a su contenido real (categorías + recientes + buscador).
@@ -1217,10 +1261,10 @@ export function BookingSearchOverlay({
                 <Text testID="booking-professional-heading" style={[s.headerTitle,s.stepHeading]}>{lang==="en"?"Choose your professional":"Elige tu profesional"}</Text>
               )}
               {step === "slots" && (
-                <Text style={s.headerTitle}>{changeSelection ? (lang === "en" ? "Propose a change" : "Proponer cambio") : t("biz_step_datetime_label").toUpperCase()}</Text>
+                <Text style={s.headerTitle}>{t("biz_step_datetime_label").toUpperCase()}</Text>
               )}
               {step === "hold" && (
-                <Text style={[s.headerTitle, { color: "#f59e0b" }]}>{t("accion_confirmar").toUpperCase()}</Text>
+                <Text style={[s.headerTitle, { color: "#f59e0b" }]}>{changeSelection?(lang==="en"?"REVIEW PROPOSAL":"REVISAR PROPUESTA"):t("accion_confirmar").toUpperCase()}</Text>
               )}
               {step === "confirmed" && (
                 <Text style={[s.headerTitle, { color: confirmationColor }]}>{t(bookingAccepted?"biz_booked_label":"booking_state_pending").toUpperCase()}</Text>
@@ -1449,6 +1493,7 @@ export function BookingSearchOverlay({
             {/* ── STEP: SELECT ITEM ── */}
             {step === "item" && (
               <View style={s.stepWrap}>
+                {changeSelection && !!slotError && <Text accessibilityRole="alert" style={s.emptyText}>{slotError}</Text>}
                 {!compactServices && <BreadcrumbStrip business={selectedBusiness} item={null} accentColor={accentColor} />}
                 {items.length === 0 ? (
                   <View style={s.emptyWrap}>
@@ -1531,7 +1576,7 @@ export function BookingSearchOverlay({
                         </>}
                       </TouchableOpacity>
                     ))}
-                    {selectedBusiness && <CatalogComplementSelector businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} repository={demoRepository} accentColor={accentColor} showTotal={!compactServices} />}
+                    {selectedBusiness && <CatalogComplementSelector initialSelected={changeSelection && JSON.stringify(selectedServiceIds)===JSON.stringify(changeSelection.rootIds ?? changeSelection.services.map(service=>service.id))?changeSelection.selectedAssociationIds:undefined} businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} repository={demoRepository} accentColor={accentColor} showTotal={!compactServices} />}
                     {serviceSelection && (compactServices ? <View testID="booking-services-total" style={s.servicesTotal}>
                       <Text style={[s.serviceTitle, s.servicesTotalPrice, { color: accentColor }]}>
                         TOTAL: {((catalogQuote?.ready ? catalogQuote.totalPrice : serviceSelection.item.priceKnown === false ? null : serviceSelection.item.price) == null)
@@ -1791,7 +1836,7 @@ export function BookingSearchOverlay({
             )}
 
             {/* ── STEP: HOLD ── */}
-            {step === "hold" && activeHold && selectedBusiness && selectedItem && (
+            {step === "hold" && reviewedSlot && selectedBusiness && selectedItem && (
               <View style={s.stepWrap}>
                 <ScrollView
                   testID="booking-review-scroll"
@@ -1801,7 +1846,7 @@ export function BookingSearchOverlay({
                 >
                   <View style={s.holdDetails}>
                   <View style={[s.promptWrap, s.holdPrompt]}>
-                    <Text style={s.promptText}>{t("biz_confirm_booking_title")}</Text>
+                    <Text style={s.promptText}>{changeSelection?(lang==="en"?"Review change proposal":"Revisar propuesta de cambio"):t("biz_confirm_booking_title")}</Text>
                   </View>
 
                   {/* Summary card */}
@@ -1812,8 +1857,8 @@ export function BookingSearchOverlay({
                         {selectedBusiness.name}
                       </Text>
                       <Text style={s.summaryServiceName}>{trSector(summaryItem!.title, lang)}</Text>
-                      {activeHold.catalogSnapshot?.originalTotal !== undefined && (() => {
-                        const quote = activeHold.catalogSnapshot;
+                      {reviewedQuote?.originalTotal !== undefined && (() => {
+                        const quote = reviewedQuote;
                         const money = new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: quote.currency });
                         return <View style={{ gap: 3, marginTop: 6 }}>
                           <Text style={s.summaryRowText}>{lang === "en" ? "Original price" : "Precio original"} · {money.format(quote.originalTotal ?? quote.totalPrice)}</Text>
@@ -1834,13 +1879,13 @@ export function BookingSearchOverlay({
                       <View style={s.summaryRow}>
                         <Feather name="calendar" size={15} color="rgba(255,255,255,0.40)" />
                         <Text style={s.summaryRowText}>
-                          {formatDateLabel(activeHold.startDatetime.slice(0, 10), t)}
+                          {formatDateLabel(reviewedSlot.startDatetime.slice(0, 10), t)}
                         </Text>
                       </View>
                       <View style={s.summaryRow}>
                         <Feather name="clock" size={15} color="rgba(255,255,255,0.40)" />
                         <Text style={s.summaryRowText}>
-                          {formatTime(activeHold.startDatetime)} — {formatTime(activeHold.endDatetime)}
+                          {formatTime(reviewedSlot.startDatetime)} — {formatTime(reviewedSlot.endDatetime)}
                           {"  ·  "}{summaryItem!.durationMinutes} min
                         </Text>
                       </View>
@@ -1856,10 +1901,11 @@ export function BookingSearchOverlay({
                   </View>
 
                   {/* Cancellation Policy — solo si el negocio tiene una política explícita */}
-                  {selectedBusiness.cancellationPolicy ? (() => {
+                  {changeSelection ? <View style={{gap:6}}><Text style={s.policyNote}>{lang==="en"?"Only a proposal is sent. The original reservation and recorded payments remain unchanged until agreement.":"Solo se envía una propuesta. La reserva original y los pagos registrados se mantienen hasta el acuerdo."}</Text>
+                    {(!demoRepository||demoRepository.store.serverBookings)&&<Text style={s.policyNote}>{lang==="en"?"This server currently negotiates date/time only. Changes to services, professional or price cannot be sent yet.":"Este servidor solo negocia fecha y hora. Los cambios de servicios, profesional o precio todavía no pueden enviarse."}</Text>}</View> : selectedBusiness.cancellationPolicy ? (() => {
                     const policy = selectedBusiness.cancellationPolicy;
                     const price  = summaryItem!.price;
-                    const info   = computeRefundInfo(policy, activeHold, price);
+                    const info   = computeRefundInfo(policy, activeHold!, price);
                     return (
                       <View style={[
                         s.policyCard,
@@ -1908,7 +1954,7 @@ export function BookingSearchOverlay({
                   )}
 
                   {/* Silent hold expiry watcher — no visual countdown in V1 */}
-                  {activeHold.holdExpiresAt && (
+                  {activeHold?.holdExpiresAt && (
                     <HoldCountdown
                       expiresAt={activeHold.holdExpiresAt}
                       onExpire={handleHoldExpired}
@@ -1922,6 +1968,7 @@ export function BookingSearchOverlay({
                   <View style={s.holdSpacer} />
 
                 <View style={s.holdActions}>
+                  {!!slotError && <Text accessibilityRole="alert" style={s.policyNote}>{slotError}</Text>}
                   <TouchableOpacity
                     style={[s.confirmBtn, { backgroundColor: `${accentColor}15`, borderColor: accentColor }]}
                     onPress={handleConfirm}
@@ -1932,7 +1979,7 @@ export function BookingSearchOverlay({
                       <ActivityIndicator color={accentColor} />
                     ) : (
                       <Text style={[s.confirmBtnText, { color: accentColor }]}>
-                        {t("biz_confirm_booking_btn").toUpperCase()}
+                        {changeSelection?(lang==="en"?"SEND PROPOSAL":"ENVIAR PROPUESTA"):t("biz_confirm_booking_btn").toUpperCase()}
                       </Text>
                     )}
                   </TouchableOpacity>

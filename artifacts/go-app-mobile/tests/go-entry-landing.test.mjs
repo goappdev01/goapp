@@ -6,10 +6,11 @@ function find(n,p){if(p(n))return n;let r;ts.forEachChild(n,c=>{if(!r)r=find(c,p
 const decl=name=>find(ast,n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name).getText(ast);
 const compile=text=>ts.transpileModule(text,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText;
 const helper={exports:{}};vm.runInNewContext(compile(fs.readFileSync('data/goEntryPresentation.ts','utf8')),helper);
+const noteTools={exports:{}};vm.runInNewContext(compile(fs.readFileSync('lib/goNoteTools.ts','utf8')),noteTools);
 const panels={exports:{}};vm.runInNewContext(compile(fs.readFileSync('components/landing/landingPanels.ts','utf8')),panels);
 function fixture(){
  const calls=[],alerts=[],ref={current:null},context={exports:{},entryIsInternal:helper.exports.entryIsInternal,internalEntryCommand:helper.exports.internalEntryCommand,landingCurrentEntry:panels.exports.landingCurrentEntry,
-  lang:'es',setLandingDetailsId:id=>calls.push(['detail',id]),setCalOpen:v=>calls.push(['calendar',v]),openBookingProposal:(...args)=>calls.push(['booking',...args]),
+  lang:'es',landingDetailsId:null,isGoNoteReminderTarget:noteTools.exports.isGoNoteReminderTarget,setLandingDetailsId:id=>calls.push(['detail',id]),setCalOpen:v=>calls.push(['calendar',v]),openBookingProposal:(...args)=>calls.push(['booking',...args]),
   showToast:(...args)=>calls.push(['toast',...args]),Alert:{alert:(...args)=>alerts.push(args)},_validateProposalSlot:()=>({valid:true}),calFlow:{open:draft=>{context.draft=draft;}},
   changeTask:async(...args)=>calls.push(['task',...args]),currentReceivedIdRef:ref,proposalReturnRef:{current:null},formatISODate(){throw Error('existing date is required')},getToday(){},sendSuggestChangeFromCal:result=>calls.push(['proposal',result]),softDeleteGo:id=>calls.push(['cancel',id])};
  vm.runInNewContext(compile(`const ${decl('openEntryChange')};const ${decl('cancelEntryFromDetails')};exports.open=openEntryChange;exports.cancel=cancelEntryFromDetails;`),context);

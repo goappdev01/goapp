@@ -7,7 +7,7 @@ import vm from 'node:vm';
 const ts=createRequire(path.join(process.cwd(),'package.json'))('typescript');
 const plain=v=>JSON.parse(JSON.stringify(v));
 const compile=file=>ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
-function fixture(showTotal=true){
+function fixture(showTotal=true,initialSelected){
  const calls=[],listeners=new Set();let business='business-A',roots=['tinte'];
  const sample=selected=>({version:1,businessId:business,rootIds:roots,selectedAssociationIds:selected,ready:true,missingRequired:[],currency:'EUR',totalPrice:selected.includes('ampolla-link')?37:30,serviceIds:['tinte'],
   lines:[{itemId:'tinte',name:'Tinte',kind:'service',quantity:1,durationMinutes:30,unitPrice:30,charge:30,currency:'EUR'}],
@@ -20,7 +20,7 @@ function fixture(showTotal=true){
  const scope={exports:{},require:n=>{if(n==='react')return {...React,default:React};if(n==='react-native')return native;if(n==='@/data/catalogAssociations')return data;if(n==='@/contexts/LanguageContext')return{useLanguage:()=>({lang:'es'})};if(n==='@/lib/sessionEvents')return{onSessionChanged:cb=>{listeners.add(cb);return()=>listeners.delete(cb)}};throw Error(n)}};
  vm.runInNewContext(compile('components/booking/CatalogComplementSelector.tsx'),scope);
  let latest;const changed=q=>{latest=q};
- const render=()=>{cursor=0;dirty=false;tree=scope.exports.CatalogComplementSelector({businessId:business,rootIds:roots,onChange:changed,showTotal});const pending=effects;effects=[];for(const e of pending)e()};
+ const render=()=>{cursor=0;dirty=false;tree=scope.exports.CatalogComplementSelector({businessId:business,rootIds:roots,onChange:changed,showTotal,initialSelected});const pending=effects;effects=[];for(const e of pending)e()};
  const settle=async()=>{for(let n=0;n<10;n++){if(dirty)render();await new Promise(r=>setImmediate(r));if(!dirty)return}throw Error('Non-settling selector')};
  const walk=node=>!node||typeof node!=='object'?[]:[node,...(node.children??[]).flatMap(walk)];
  return {data,calls,sample,start:settle,settle,tree:()=>tree,latest:()=>latest,nodes:()=>walk(tree),press:async()=>{walk(tree).find(n=>n.props.accessibilityRole==='checkbox').props.onPress();await settle()},change:async(b,r)=>{business=b;roots=r;dirty=true;await settle()},session:async()=>{for(const cb of listeners)cb();await settle()}};
@@ -37,4 +37,10 @@ test('hiding duplicate summary preserves quote and extras while other usages kee
  const hasTotal=f=>f.nodes().some(n=>n.type==='Text'&&n.children.includes('Total revisado'));
  assert.equal(hasTotal(f),false);await f.press();assert.equal(f.latest().totalPrice,37);assert.equal(hasTotal(f),false);
  const original=fixture();await original.start();assert.equal(hasTotal(original),true);
+});
+
+test('a proposal preloads saved optional choices in the same selector and clears them on a session change',async()=>{
+ const f=fixture(true,['ampolla-link']);await f.start();assert.deepEqual(f.calls.at(-1).body.selectedIds,['ampolla-link']);assert.equal(f.latest().totalPrice,37);
+ await f.press();assert.deepEqual(f.calls.at(-1).body.selectedIds,[]);assert.equal(f.latest().totalPrice,30);
+ await f.session();assert.deepEqual(f.calls.at(-1).body.selectedIds,[]);
 });

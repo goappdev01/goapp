@@ -246,7 +246,7 @@ function fixture(kind = "provider", overrides = {}) {
   props = kind === "provider" ? { visible: true, proveedor: { name: "Peluquería primera", businessId: business,
     rating: "", distance: "", slots: 0, subId: "peluqueria", subLabel: "Peluquería", subColor: "#4A80BD", subIcon: "scissors" },
     onClose: () => navigation.push("close"), onBookingConfirmed: (...args) => navigation.push(args) }
-    : { visible: true, canonicalCustomerBookings: true, changeSelection: overrides.changeSelection, onChangeSlotSelected: slot => navigation.push(plain(slot)), onClose: () => navigation.push("close"),
+    : { visible: true, canonicalCustomerBookings: true, changeSelection: overrides.changeSelection, onProposalSubmit: async draft => { if(state.submitError)throw Error(state.submitError);navigation.push(plain(draft)); }, onClose: () => navigation.push("close"),
       onBookingConfirmed: (...args) => navigation.push(args) };
   let catalogueScope = "";
   function render() {
@@ -479,43 +479,71 @@ function savedChangeSelection() {
  bookingTimeline:plan,bookingServices:plan.serviceDetails,contactName:"Peluquería primera",professionalName:"Ana",
  bookingCategory:"peluqueria",intentLabel:"Corte exacto",startDatetime:plan.startsAt,endDatetime:plan.endsAt});
 }
-test("change proposal locks original business/services/staff and selects a verified instant without a HOLD or write",async()=>{
- const selection=savedChangeSelection(),before=JSON.stringify(selection),f=fixture("overlay",{changeSelection:selection});await f.start();
- assert.match(text(f.tree()),/Proponer cambio/);assert.match(text(f.tree()),/reserva original/);
- assert.equal(button(f.tree(),"save"),undefined);assert.equal(button(f.tree(),"Sin preferencia"),undefined);
+async function openChangeSlots(f,person="Ana") {
+ await f.start();
+ assert.ok(button(f.tree(),"save"),"the shared Services and Products step is the entry point");
+ await f.press("save");
+ const selected=buttons(f.tree()).find(node=>node.props.accessibilityState?.selected&&text(node).includes(person));
+ if(person==="Ana")assert.ok(selected,"original professional is preselected");
+ await f.press(person);return f.tree();
+}
+test("proposal starts at the same services catalogue, keeps the original selection, and uses normal review without a HOLD",async()=>{
+ const selection=savedChangeSelection(),before=JSON.stringify(selection),f=fixture("overlay",{changeSelection:selection});
+ await openChangeSlots(f);
  const request=actualSlots(f).at(-1).url;assert.equal(request.searchParams.get("business_id"),business);
  assert.equal(request.searchParams.get("service_ids"),firstService);assert.equal(request.searchParams.get("staff_id"),firstStaff);
- await f.press("02:37");assert.equal(f.navigation.length,1);assert.equal(f.navigation[0].startInstant,planFor().startsAt);
- assert.equal(actualSlots(f).length,2);assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);assert.equal(JSON.stringify(selection),before);
- await f.back();assert.equal(f.navigation.at(-1),"close");
+ await f.press("02:37");assert.match(text(f.tree()),/Revisar propuesta de cambio/);assert.match(text(f.tree()),/ENVIAR PROPUESTA/);
+ assert.match(text(f.tree()),/13\s+min/);assert.equal(f.navigation.length,0);assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);
+ await f.press("ENVIAR PROPUESTA");assert.equal(f.navigation.length,1);assert.equal(f.navigation[0].slot.startInstant,planFor().startsAt);
+ assert.deepEqual(f.navigation[0].selection.serviceIds,[firstService]);assert.equal(actualSlots(f).length,3);
+ assert.equal(changeApi.timeOnlyBookingProposal(selection,f.navigation[0]),true,"unchanged services/professional/price use the existing remote time-only contract");
+ for(const patch of [{staffId:secondStaff},{serviceIds:[secondService]},{durationMinutes:27},{catalogSnapshot:{...f.navigation[0].selection.catalogSnapshot,totalPrice:99}}])assert.equal(changeApi.timeOnlyBookingProposal(selection,{...f.navigation[0],selection:{...f.navigation[0].selection,...patch}}),false);
+ assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);assert.equal(JSON.stringify(selection),before);
+ await f.back();assert.ok(button(f.tree(),"02:37"));await f.back();assert.ok(button(f.tree(),"Ana"));await f.back();assert.ok(button(f.tree(),"save"));
 });
 for(const reason of ["closed day or holiday","full agenda","break or insufficient service duration"]){
- test(`change proposal offers no invented hours for server-unavailable ${reason}`,async()=>{
-  const f=fixture("overlay",{changeSelection:savedChangeSelection(),plans:[],availableDates:[tomorrow]});await f.start();
+ test("proposal offers no invented hours for server-unavailable "+reason,async()=>{
+  const f=fixture("overlay",{changeSelection:savedChangeSelection(),plans:[],availableDates:[tomorrow]});await openChangeSlots(f);
   assert.match(text(f.tree()),/biz_no_availability_day/);assert.equal(button(f.tree(),"02:37"),undefined);
   assert.equal(buttons(f.tree()).find(node=>node.props.key===today).props.disabled,true);
   const next=buttons(f.tree()).find(node=>node.props.key===tomorrow);assert.equal(next.props.disabled,false);
   f.state.plans=undefined;await next.props.onPress();f.render();await f.settle();assert.ok(button(f.tree(),"11:37"));assert.equal(posted(f).length,0);
  });
 }
-test("change availability lost before selection refresh preserves the original and allows another slot",async()=>{
- const f=fixture("overlay",{changeSelection:savedChangeSelection()});await f.start();f.state.plans=[];
- await f.press("02:37");assert.equal(f.navigation.length,0);assert.match(text(f.tree()),/ya no está disponible/);assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);
- f.state.plans=undefined;const next=buttons(f.tree()).find(node=>node.props.key===tomorrow);await next.props.onPress();f.render();await f.settle();await f.press("11:37");assert.equal(f.navigation.length,1);
+test("changing professional and replacing/removing services uses the same catalogue, duration and availability parameters",async()=>{
+ const f=fixture("overlay",{changeSelection:savedChangeSelection()});await f.start();
+ await f.press("Corte exacto");await f.press("Lavado exacto");await f.press("save");await f.press("Bea");
+ assert.equal(actualSlots(f).at(-1).url.searchParams.get("service_ids"),secondService);
+ assert.equal(actualSlots(f).at(-1).url.searchParams.get("staff_id"),secondStaff);
+ await f.press("02:37");assert.match(text(f.tree()),/27\s+min/);assert.match(text(f.tree()),/Bea/);
+ await f.press("ENVIAR PROPUESTA");assert.deepEqual(f.navigation[0].selection.serviceIds,[secondService]);assert.equal(f.navigation[0].selection.durationMinutes,27);assert.equal(f.navigation[0].selection.staffId,secondStaff);
+ assert.equal(posted(f).length,0);
 });
-test("change availability permission/network failure never falls back to local times",async()=>{
- for(const status of [403,503]){const f=fixture("overlay",{changeSelection:savedChangeSelection(),availabilityError:status});await f.start();
+test("adding a service reviews the new combined duration and price instead of filtering by the original contract",async()=>{
+ const f=fixture("overlay",{changeSelection:savedChangeSelection()});await f.start();await f.press("Lavado exacto");await f.press("save");
+ const plan=planFor();plan.endsAt=new Date(Date.parse(plan.startsAt)+40*60000).toISOString();plan.totalClientMinutes=plan.totalDurationMinutes=40;
+ plan.serviceIds=[firstService,secondService];plan.serviceDetails=[{id:firstService,title:"Corte exacto",durationMinutes:13,price:12},{id:secondService,title:"Lavado exacto",durationMinutes:27,price:12}];
+ f.state.plans=[plan];await f.press("Ana");await f.press("02:37");assert.match(text(f.tree()),/40\s+min/);assert.match(text(f.tree()),/24\s*€/);
+ await f.press("ENVIAR PROPUESTA");assert.deepEqual(f.navigation[0].selection.serviceIds,[firstService,secondService]);assert.equal(f.navigation[0].selection.catalogSnapshot.totalPrice,24);
+ assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);
+});
+test("lost availability during review keeps the original intact and asks for another slot",async()=>{
+ const f=fixture("overlay",{changeSelection:savedChangeSelection()});await openChangeSlots(f);await f.press("02:37");f.state.plans=[];
+ await f.press("ENVIAR PROPUESTA");assert.equal(f.navigation.length,0);assert.match(text(f.tree()),/ya no está disponible|No se pudo enviar|biz_slot_taken_error/);assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);
+ f.state.plans=undefined;const next=buttons(f.tree()).find(node=>node.props.key===tomorrow);await next.props.onPress();f.render();await f.settle();await f.press("11:37");await f.press("ENVIAR PROPUESTA");assert.equal(f.navigation.length,1);
+});
+test("proposal availability permission/network failure never falls back to local times",async()=>{
+ for(const status of [403,503]){const f=fixture("overlay",{changeSelection:savedChangeSelection(),availabilityError:status});await openChangeSlots(f);
  assert.match(text(f.tree()),/Disponibilidad no verificada|consultar la disponibilidad/);assert.equal(button(f.tree(),"02:37"),undefined);assert.equal(f.navigation.length,0);assert.equal(f.writes.length,0);}
 });
-test("changed duration, professional or resource contract is not advertised as the saved reservation",async()=>{
- for(const mutate of [p=>{p.endsAt=new Date(Date.parse(p.endsAt)+60000).toISOString();},p=>{p.staffId=secondStaff;},p=>{p.phases[0].resources=[{resourceId:"other-resource",quantity:1,occupancy:"booking"}];}]){
- const plan=planFor();mutate(plan);const f=fixture("overlay",{changeSelection:savedChangeSelection(),plans:[plan]});await f.start();
- assert.equal(button(f.tree(),"02:37"),undefined);assert.match(text(f.tree()),/duración y los recursos originales/);assert.equal(posted(f).length,0);}
+test("an unsupported negotiation remains on the existing review and never claims success or creates a booking",async()=>{
+ const f=fixture("overlay",{changeSelection:savedChangeSelection(),submitError:"Este servidor no admite esos cambios"});await openChangeSlots(f);await f.press("02:37");await f.press("ENVIAR PROPUESTA");
+ assert.equal(f.navigation.length,0);assert.ok(button(f.tree(),"ENVIAR PROPUESTA"));assert.match(text(f.tree()),/No se pudo enviar|no admite/);assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);
 });
 test("proposal selection keeps repeated DST times tied to the exact server instant",async()=>{
- const f=fixture("overlay",{changeSelection:savedChangeSelection(),foldOptions:true});await f.start();
+ const f=fixture("overlay",{changeSelection:savedChangeSelection(),foldOptions:true});await openChangeSlots(f);
  const slots=buttons(f.tree()).filter(node=>text(node).includes("02:37"));assert.equal(slots.length,2);
- await slots[1].props.onPress();f.render();await f.settle();assert.equal(f.navigation[0].startInstant,planFor({fold:1}).startsAt);assert.equal(posted(f).length,0);
+ await slots[1].props.onPress();f.render();await f.settle();await f.press("ENVIAR PROPUESTA");assert.equal(f.navigation[0].slot.startInstant,planFor({fold:1}).startsAt);assert.equal(posted(f).length,0);
 });
 
 test("proposal adapter carries exact instant/revision/proposal ID; conflict or missing backend writes no local success",async()=>{
@@ -538,7 +566,7 @@ test("server acceptance conflict is reported and rejection/confirmed agreement u
  assert.equal(confirmed.id,bookingId);assert.equal(confirmed.startInstant,next.startsAt);assert.equal(f.writes.length,0);assert.equal(posted(f).length,0);
 });
 test("closing during proposal refresh discards a late response without proposing or creating a booking",async()=>{
- const f=fixture("overlay",{changeSelection:savedChangeSelection()});await f.start();const pending=deferred();f.state.pendingSlots=pending;
+ const f=fixture("overlay",{changeSelection:savedChangeSelection()});await openChangeSlots(f);const pending=deferred();f.state.pendingSlots=pending;
  const slot=button(f.tree(),"02:37"),selection=slot.props.onPress();f.setProps({visible:false});await f.settle();pending.resolve([planFor()]);await selection;await f.settle();
  assert.equal(f.navigation.length,0);assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);
 });
@@ -546,9 +574,20 @@ test("closing during proposal refresh discards a late response without proposing
 test("registered local aliases preserve the already-loaded remote timing/resource contract without new catalogue or data writes",()=>{
  const plan=planFor(),entry={businessId:"registered-local-business",serviceId:"local-service",staffId:"local-professional",bookingServices:[{id:"local-service",title:"Corte",durationMinutes:13,price:12}],startDatetime:"2030-10-27T02:37:00",endDatetime:"2030-10-27T02:50:00"};
  const selection=changeApi.bookingChangeSelection(entry,{timingSnapshot:plan});
- assert.equal(selection.timeline,plan);assert.equal(selection.services[0].id,firstService);assert.equal(selection.staff.id,"local-professional");
+ assert.equal(selection.timeline,plan);assert.equal(selection.services[0].id,"local-service");assert.equal(selection.staff.id,"local-professional");
  const slot={startDatetime:entry.startDatetime,endDatetime:entry.endDatetime,startInstant:plan.startsAt,endInstant:plan.endsAt,staffId:"local-professional",timingSnapshot:plan,isAvailable:true,isBlocked:false};
  assert.equal(changeApi.bookingChangeSlots(selection,[slot]).length,1);
  const changed=structuredClone(plan);changed.phases[0].resources=[{resourceId:"another",quantity:1,occupancy:"booking"}];
  assert.equal(changeApi.bookingChangeSlots(selection,[{...slot,timingSnapshot:changed}]).length,0);
+});
+
+test("remote adapter rejects changed services/professional explicitly before any request, rather than dropping them",async()=>{
+ const f=fixture("overlay");await assert.rejects(f.api.changeBookingRequest(bookingId,"propose",{dateISO:today,time:"02:37",selection:{serviceIds:[secondService],staffId:secondStaff,durationMinutes:27,catalogSnapshot:{}}},user),error=>error.code==="BOOKING_CHANGE_SELECTION_UNSUPPORTED");
+ assert.equal(f.calls.length,0);assert.equal(f.writes.length,0);
+});
+
+test("an incomplete original record still opens the actual catalogue without guessed services or times",async()=>{
+ const original={businessId:business,contactName:"Peluquería primera",bookingCategory:"peluqueria"},before=JSON.stringify(original),selection=changeApi.bookingChangeSelection(original);
+ const f=fixture("overlay",{changeSelection:selection});await f.start();assert.ok(button(f.tree(),"Corte exacto"));assert.ok(button(f.tree(),"save").props.disabled);assert.match(text(f.tree()),/precargar/);
+ await f.press("Corte exacto");await f.press("save");await f.press("Ana");assert.ok(button(f.tree(),"02:37"));assert.equal(JSON.stringify(original),before);assert.equal(posted(f).length,0);
 });

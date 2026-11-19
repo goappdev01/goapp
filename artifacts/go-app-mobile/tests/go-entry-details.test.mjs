@@ -337,3 +337,11 @@ test('calendar compact cards omit follow-up; expanded personal actions and conte
  tree=f.render(AgendaBoard,props);nodes(tree,n=>n.props.testID==='entry-details-modal')[0]?.props.onDismiss();f.runTimers();assert.equal(typeof returnTo,'function');tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,0);
  returnTo();tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,1);assert.equal(props.selectedDateISO,base.dateISO);
 });
+
+test('the existing proposal detail distinguishes changed services, professional, duration and price from the intact original',()=>{
+ const original={...base,bookingServices:[{id:'cut',title:'Corte original',durationMinutes:30,price:12}],bookingTotalPrice:12,bookingCurrency:'EUR'};
+ const selection={serviceIds:['colour','wash'],staffId:'another',professionalName:'Luis',durationMinutes:90,catalogSnapshot:{lines:[{name:'Tinte'},{name:'Lavado'}],totalPrice:32,currency:'EUR'}};
+ const entry={...original,estado:'propuesto',changeProposal:{dateISO:'2030-10-27',date:'27/10/2030',time:'13:30',originalDateISO:base.dateISO,originalTime:base.time,selection}},before=JSON.stringify(entry),f=sheet(entry);
+ const proposed=nodes(f.tree,n=>n.props.testID==='entry-proposed-selection')[0];assert.ok(proposed);assert.match(texts(proposed),/Tinte/);assert.match(texts(proposed),/Luis/);assert.match(texts(proposed),/90/);assert.match(texts(proposed),/32.00/);
+ assert.match(texts(f.tree),/Corte original/);assert.match(texts(f.tree),/12.00/);assert.equal(JSON.stringify(entry),before);
+});

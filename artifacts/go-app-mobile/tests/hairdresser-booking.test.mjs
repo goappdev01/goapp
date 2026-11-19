@@ -111,7 +111,7 @@ test('the actual Home selectors show the same booking in My reservations, Calend
 test('proposing or cancelling a client draft preserves the existing Calendar layer and its scroll context',()=>{
  const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),nodes=[];(function walk(n){nodes.push(n);ts.forEachChild(n,walk)})(ast);
  const fn=nodes.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='openBookingProposal');
- for(const opened of [true,false]){const calls=[],context={calOpen:opened,demoBookingRepository:undefined,customerBookings:{bookings:[]},bookingChangeSelection:changeAvailability.bookingChangeSelection,setBookingProposal:value=>context.selection=value,setCalOpen:value=>calls.push(value),lang:'es'};
+ for(const opened of [true,false]){const calls=[],context={calOpen:opened,demoBookingRepository:undefined,customerBookings:{bookings:[]},proposalRepository:()=>undefined,bookingChangeSelection:changeAvailability.bookingChangeSelection,setBookingProposal:value=>context.selection=value,setCalOpen:value=>calls.push(value),lang:'es'};
   vm.runInNewContext(ts.transpileModule('('+fn.initializer.getText(ast)+')({id:"booking",businessId:"business",serviceId:"cut",dateISO:"2030-01-07",time:"10:00",startDatetime:"2030-01-07T10:00:00",endDatetime:"2030-01-07T10:30:00"});',{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,context);
   assert.deepEqual(calls,[]);assert.equal(context.calOpen,opened);assert.equal(context.selection.dateISO,'2030-01-07');assert.equal(context.selection.selection.item.id,'cut');
  }
@@ -151,12 +151,12 @@ for(const bookingSource of ['canonical','DEMO'])test(bookingSource+' customer Ca
  const scope={exports:{},Date:Clock,lang:'es',calOpen:true,showToast:(...args)=>toasts.push(args),Alert:{alert:(...args)=>alerts.push(args)},
   setCalOpen:value=>calendarStates.push(value),getToday:()=>new Clock(),formatISODate:d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-'),
   formatDayLabel:()=> 'Martes 8', BookingApiError: class extends Error {},
-  demoBookingRepository:f.repo,bookingChangeSelection:changeAvailability.bookingChangeSelection,setTimeout:callback=>callback(),setBookingProposal:value=>{scope.bookingProposal=value;},customerBookings:{entries:[entry],bookings:[booking],mutate:(selected,operation,input)=>{
+  ownerDemo:{catalog:null},demoBookingRepository:f.repo,bookingChangeSelection:changeAvailability.bookingChangeSelection,timeOnlyBookingProposal:changeAvailability.timeOnlyBookingProposal,setTimeout:callback=>callback(),setBookingProposal:value=>{scope.bookingProposal=value;},customerBookings:{entries:[entry],bookings:[booking],mutate:(selected,operation,input)=>{
     assert.equal(selected.id,entry.id);const promise=f.repo.changeBooking(selected.reservationId,selected.businessId,'customer',operation,input);
     mutations.push({operation,input,promise});return promise;
   }},goLog:[],
  };
- const code=['isGoDateTimePast','showBookingChangeError','runCustomerBooking','confirmBookingDraft','openBookingProposal','dropBookingProposal'].map(name=>'const '+decl(name).getText(ast)+';').join('\n')+'\nexports.propose='+calendarHandler.initializer.expression.getText(ast)+';exports.drop=dropBookingProposal;exports.select='+all.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='onChangeSlotSelected').initializer.expression.getText(ast)+';';
+ const code=['isGoDateTimePast','showBookingChangeError','runCustomerBooking','proposalRepository','confirmBookingDraft','openBookingProposal','dropBookingProposal'].map(name=>'const '+decl(name).getText(ast)+';').join('\n')+'\nexports.propose='+calendarHandler.initializer.expression.getText(ast)+';exports.drop=dropBookingProposal;exports.submit='+all.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='onProposalSubmit').initializer.expression.getText(ast)+';exports.close='+all.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='onClose'&&n.initializer?.expression?.getText(ast).includes('const actor=bookingProposal?.actor')).initializer.expression.getText(ast)+';';
  vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,scope);
  const cal=calendarFixture({now:'2030-01-07T08:00:00'}),{AgendaBoard}=cal.load('components/AgendaOperativa.tsx');
  const props={goLog:[entry],viewMode:'dia',selectedDateISO:entry.dateISO,onProposeItem:scope.exports.propose,onDeleteItem:()=>{throw Error('Propose must not cancel the booking')}};
@@ -174,18 +174,14 @@ for(const bookingSource of ['canonical','DEMO'])test(bookingSource+' customer Ca
  propose.props.onPress();nodes(tree).find(node=>node.props.testID==="entry-details-modal").props.onDismiss();
  assert.ok(scope.bookingProposal,"the calendar opens the scoped availability selector");assert.equal(scope.bookingProposal.dateISO,entry.dateISO);assert.equal(scope.bookingProposal.selection.item.id,f.service.id);
  assert.deepEqual(calendarStates,[]);assert.equal(mutations.length,0);assert.deepEqual(plain(f.store.getSnapshot()),before);
- const firstSlots=await f.repo.getAllSlots(entry.businessId,f.service.id,'2030-01-07',f.staff.id);
- const first=firstSlots.find(slot=>slot.isAvailable && slot.startDatetime.slice(11,16)==='12:00');assert.ok(first);scope.exports.select(first);
- assert.equal(alerts.at(-1)[0],'Confirmar propuesta de cambio');assert.equal(mutations.length,0);assert.deepEqual(plain(f.store.getSnapshot()),before);
- alerts.at(-1)[2].find(button=>button.style==='cancel').onPress();assert.equal(mutations.length,0);assert.deepEqual(plain(f.store.getSnapshot()),before);
- const alertCount=alerts.length;
+ scope.exports.close();assert.equal(scope.bookingProposal,null);assert.equal(mutations.length,0);assert.deepEqual(plain(f.store.getSnapshot()),before);
  scope.exports.drop(entry,{dateISO:'2030-01-08',time:'17:30'},'customer');
- assert.equal(scope.bookingProposal.dateISO,'2030-01-08','drag also opens verified availability');assert.equal(alerts.length,alertCount,'an arbitrary drop is not sent directly');
- const slots=await f.repo.getAllSlots(entry.businessId,f.service.id,'2030-01-08',f.staff.id);
- const chosen=slots.find(slot=>slot.isAvailable && slot.startDatetime.slice(11,16)==='17:30');assert.ok(chosen);scope.exports.select(chosen);
- assert.match(alerts.at(-1)[1],/2030-01-08 · 17:30/);
- alerts.at(-1)[2].find(button=>button.text==='Confirmar propuesta').onPress();
- assert.equal(mutations.length,1);assert.equal(mutations[0].operation,'propose');assert.equal(mutations[0].input.acceptFinancialTerms,true);await mutations[0].promise;
+ assert.equal(scope.bookingProposal.dateISO,'2030-01-08','drag also opens the same services flow');assert.equal(alerts.length,0);
+ const professional=(await f.repo.getStaff(entry.businessId))[1],catalogSnapshot=await f.repo.quoteCatalog(entry.businessId,[f.service.id]);
+ const slots=await f.repo.getAllSlots(entry.businessId,f.service.id,'2030-01-08',professional.id);
+ const chosen=slots.find(slot=>slot.isAvailable && slot.startDatetime.slice(11,16)==='17:30');assert.ok(chosen);
+ await scope.exports.submit({slot:chosen,selection:{serviceIds:[f.service.id],staffId:professional.id,professionalName:professional.name,durationMinutes:30,catalogSnapshot}});
+ assert.equal(mutations.length,1);assert.equal(mutations[0].operation,'propose');assert.equal(mutations[0].input.acceptFinancialTerms,true);assert.equal(mutations[0].input.selection.staffId,professional.id);await mutations[0].promise;assert.equal(scope.bookingProposal,null);
  const saved=f.store.getSnapshot().bookings[0];assert.equal(saved.id,booking.id);assert.equal(saved.startDatetime,booking.startDatetime);assert.equal(saved.paymentStatus,booking.paymentStatus);
  assert.equal(saved.changeProposal.time,'17:30');assert.equal(saved.changeProposal.dateISO,'2030-01-08');assert.equal(f.store.getSnapshot().bookings.length,1);
 });

@@ -138,3 +138,60 @@ test('saved phased DEMO configuration cannot be falsely booked by the legacy con
  await f.store.transformConfig(config=>({...config,services:config.services.map((service,index)=>index?service:{...service,timing:{version:1,mode:'phases',resourcesConfigured:true,phases:[{id:'work',name:'',kind:'work',durationMinutes:service.duration,resources:[]}]}})}));
  await assert.rejects(f.repo.claimSlot({...input,status:'CONFIRMED'}),/motor de servidor/);assert.equal(f.repo.getCustomerEntries().length,0);
 });
+
+async function changedChoice(f,indices=[0,1],professional=1){
+ const services=await f.repo.getBookableItems(f.store.businessId),staff=await f.repo.getStaff(f.store.businessId);
+ const catalogSnapshot=await f.repo.quoteCatalog(f.store.businessId,indices.map(index=>services[index].id));
+ return {serviceIds:catalogSnapshot.serviceIds,staffId:staff[professional].id,professionalName:staff[professional].name,durationMinutes:indices.reduce((sum,index)=>sum+services[index].durationMinutes,0),catalogSnapshot};
+}
+test("full DEMO proposal persists changed services/professional/price without a hold; acceptance reuses the same booking",async()=>{
+ const f=fixture();await configured(f);const result=await confirm(f,await inputFor(f)),original=result.booking,choice=await changedChoice(f),before=plain(original);
+ const p=await f.repo.changeBooking(original.id,f.store.businessId,"customer","propose",{dateISO:"2030-01-07",time:"12:00",selection:choice,acceptFinancialTerms:true});
+ assert.equal(p.startDatetime,original.startDatetime);assert.equal(p.staffId,original.staffId);assert.equal(p.changeProposal.originalDuration,"30");assert.equal(p.changeProposal.duration,"90");assert.equal(p.changeProposal.selection.catalogSnapshot.totalPrice,32);
+ const available=await f.repo.getAllSlots(f.store.businessId,choice.serviceIds[0],"2030-01-07",choice.staffId,choice.serviceIds);assert.equal(available.find(slot=>slot.startDatetime.endsWith("T12:00:00")).isAvailable,true,"a proposal consumes no second slot");
+ const reopened=f.make();await reopened.load();assert.deepEqual(plain(reopened.getSnapshot().bookings[0].changeProposal.selection),plain(p.changeProposal.selection));assert.equal(reopened.getSnapshot().bookings.length,1);
+ const accepted=await f.repo.changeBooking(original.id,f.store.businessId,"business","accept",{proposalId:p.changeProposal.id,acceptFinancialTerms:true});
+ assert.equal(accepted.id,original.id);assert.equal(accepted.staffId,choice.staffId);assert.equal(accepted.services.length,2);assert.equal(accepted.totalPrice,32);assert.ok(accepted.endDatetime.endsWith("T13:30:00"));assert.equal(accepted.paymentStatus,before.paymentStatus);
+ const data=f.store.getSnapshot();for(const key of ["bookings","reservations","entries"])assert.equal(data[key].length,1);assert.equal(data.reservations[0].durationMinutes,90);assert.equal(f.repo.getCustomerEntries()[0].professionalName,choice.professionalName);
+});
+test("rejection and counterproposal keep original services and professional until the other participant accepts",async()=>{
+ const f=fixture();await configured(f);const original=(await confirm(f,await inputFor(f))).booking,choice=await changedChoice(f);
+ let p=await f.repo.changeBooking(original.id,f.store.businessId,"customer","propose",{dateISO:"2030-01-07",time:"12:00",selection:choice,acceptFinancialTerms:true});
+ const rejected=await f.repo.changeBooking(original.id,f.store.businessId,"business","reject",{proposalId:p.changeProposal.id});assert.equal(rejected.bookableItemId,original.bookableItemId);assert.equal(rejected.staffId,original.staffId);assert.equal(rejected.startDatetime,original.startDatetime);
+ p=await f.repo.changeBooking(original.id,f.store.businessId,"customer","propose",{dateISO:"2030-01-07",time:"12:00",selection:choice,acceptFinancialTerms:true});
+ const alternative=await changedChoice(f,[1],2);p=await f.repo.changeBooking(original.id,f.store.businessId,"business","propose",{dateISO:"2030-01-07",time:"14:00",selection:alternative,acceptFinancialTerms:true});
+ assert.equal(p.staffId,original.staffId);assert.equal(p.bookableItemId,original.bookableItemId);assert.equal(p.changeProposal.proposedBy,"business");
+ const accepted=await f.repo.changeBooking(original.id,f.store.businessId,"customer","accept",{proposalId:p.changeProposal.id,acceptFinancialTerms:true});assert.equal(accepted.staffId,alternative.staffId);assert.equal(accepted.services.length,1);assert.equal(accepted.totalPrice,20);assert.ok(accepted.endDatetime.endsWith("T15:00:00"));assert.equal(f.store.getSnapshot().bookings.length,1);
+});
+test("full proposal acceptance rechecks occupation and current catalogue without changing the original on failure",async()=>{
+ for(const change of ["occupied","price"]){
+  const f=fixture();await configured(f);const original=(await confirm(f,await inputFor(f))).booking,choice=await changedChoice(f);
+  const p=await f.repo.changeBooking(original.id,f.store.businessId,"customer","propose",{dateISO:"2030-01-07",time:"12:00",selection:choice,acceptFinancialTerms:true});
+  if(change==="occupied")assert.equal((await confirm(f,await inputFor(f,1,"12:00",1))).ok,true);
+  else await f.store.transformConfig(config=>({...config,services:config.services.map(service=>service.name==="Tinte DEMO"?{...service,price:21}:service)}));
+  const before=JSON.stringify(f.store.getSnapshot());await assert.rejects(f.repo.changeBooking(original.id,f.store.businessId,"business","accept",{proposalId:p.changeProposal.id,acceptFinancialTerms:true}));assert.equal(JSON.stringify(f.store.getSnapshot()),before);
+  assert.equal(f.store.getSnapshot().bookings.find(row=>row.id===original.id).startDatetime,original.startDatetime);
+ }
+});
+test("full proposals obey closed days, pauses, assigned-service permissions and owner access",async()=>{
+ const f=fixture();await configured(f);const original=(await confirm(f,await inputFor(f))).booking,choice=await changedChoice(f);
+ const command={dateISO:"2030-01-06",time:"12:00",selection:choice,acceptFinancialTerms:true};
+ await assert.rejects(f.repo.changeBooking(original.id,f.store.businessId,"customer","propose",command));
+ await f.store.updateConfig({daySchedules:{"0":{shift1:{active:true,from:"09:00",to:"12:00"},shift2:{active:true,from:"13:00",to:"18:00"}}}});
+ await assert.rejects(f.repo.changeBooking(original.id,f.store.businessId,"customer","propose",{...command,dateISO:"2030-01-07",time:"11:30"}),/cerrado|disponible/);
+ await assert.rejects(f.repo.changeBooking(original.id,f.store.businessId,"customer","propose",{...command,dateISO:"2030-01-07",time:"14:00",selection:{...choice,staffId:"foreign"}}),/profesional/i);
+ f.allow(false);await assert.rejects(f.repo.changeBooking(original.id,f.store.businessId,"customer","propose",{...command,dateISO:"2030-01-07",time:"14:00"}));f.allow(true);assert.equal(f.store.getSnapshot().bookings.length,1);assert.equal(f.store.getSnapshot().bookings[0].changeProposal,undefined);
+});
+
+test("full proposal retries do not duplicate bookings/history, and a paid amount cannot be changed without financial review",async()=>{
+ const f=fixture();await configured(f);const original=(await confirm(f,await inputFor(f))).booking,choice=await changedChoice(f);
+ const command={dateISO:"2030-01-07",time:"12:00",selection:choice,acceptFinancialTerms:true};
+ const p=await f.repo.changeBooking(original.id,f.store.businessId,"customer","propose",command),retry=await f.repo.changeBooking(original.id,f.store.businessId,"customer","propose",command);
+ assert.equal(retry.changeProposal.id,p.changeProposal.id);
+ const acceptance={proposalId:p.changeProposal.id,acceptFinancialTerms:true};await f.repo.changeBooking(original.id,f.store.businessId,"business","accept",acceptance);await f.repo.changeBooking(original.id,f.store.businessId,"business","accept",acceptance);
+ assert.equal(f.store.getSnapshot().bookings.length,1);assert.equal(f.store.getSnapshot().bookings[0].changeHistory.filter(event=>event.outcome==="accepted").length,1);
+ const paid=fixture();await configured(paid);const input=await inputFor(paid);input.catalogSnapshot=await paid.repo.quoteCatalog(paid.store.businessId,[input.bookableItemId]);const b=(await confirm(paid,input)).booking;
+ await paid.store.transactBookings(data=>{data.bookings[0].paymentStatus="paid";});const before=JSON.stringify(paid.store.getSnapshot());
+ await assert.rejects(paid.repo.changeBooking(b.id,paid.store.businessId,"customer","propose",{...command,selection:await changedChoice(paid)}),/pagos registrados/);
+ assert.equal(JSON.stringify(paid.store.getSnapshot()),before);
+});

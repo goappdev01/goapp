@@ -86,6 +86,7 @@ export function useCustomerBookings(repository: DemoBookingRepository | undefine
         date?: string;
         time?: string;
         startsAt?: string;
+        selection?: import("@/data/booking").BookingChangeChoice;
         proposalId?: string;
         acceptFinancialTerms?: boolean;
     } = {}) => {

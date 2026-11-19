@@ -2,7 +2,7 @@ import { summarizeBookingServices, bookingServiceIds, staffSupportsBookingServic
 import { localCatalogQuote } from "./bookingServices";
 import type { CatalogAssociation, CatalogQuote } from "./catalogAssociations";
 import type { BusinessConfig } from "@/contexts/GoBusinessConfigContext";
-import type { Business, BookableItem, Staff, SlotWithStatus, Booking } from "./booking";
+import type { Business, BookableItem, Staff, SlotWithStatus, Booking, BookingChangeInput } from "./booking";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import type { BusinessDemoStore, BusinessDemoData, DemoBooking, DemoReservation } from "./businessDemoStore";
 import { getBusinessDemoSetupState, isValidDemoLocalDate, isValidDemoLocalInterval, getBusinessDemoProfessionals, getBusinessDemoShifts, businessDemoProfessionalElement, businessDemoElementRequiresReview } from "./businessDemoStore";
@@ -157,7 +157,7 @@ function createLocalDemoBookingRepository(store: BusinessDemoStore, options: Rep
     });
   };
   // Negotiation is metadata on the existing booking, never another booking or occupied slot.
-  const changeBooking = (id:string, businessId:string, actor:"customer"|"business", operation:"propose"|"accept"|"reject", input:{dateISO?:string;date?:string;time?:string;proposalId?:string;acceptFinancialTerms?:boolean} = {}) => store.transactBookings(data => {
+  const changeBooking = (id:string, businessId:string, actor:"customer"|"business", operation:"propose"|"accept"|"reject", input:BookingChangeInput = {}) => store.transactBookings(data => {
     requireBusiness(businessId);
     if(actor!=="customer" && actor!=="business")throw new Error("Participante no válido.");
     const reservation=data.reservations.find(r=>r.id===id || store.reservationBookingId(r)===id);
@@ -181,37 +181,58 @@ function createLocalDemoBookingRepository(store: BusinessDemoStore, options: Rep
       if(previous.financialAcceptanceRequired && (!previous.proposerAcceptedFinancialTerms || !input.acceptFinancialTerms))throw new Error("Las condiciones económicas requieren aceptación expresa. No se ha modificado el pago.");
     }
     const dateISO=operation==="propose"?input.dateISO:previous!.dateISO,timeHHMM=operation==="propose"?input.time:previous!.time;
-    const duration=(Date.parse(booking.endDatetime)-Date.parse(booking.startDatetime))/60000;
+    const choice=operation==="propose"?input.selection:previous?.selection;
+    const serviceIds=choice?.serviceIds ?? bookingServiceIds(booking);
+    requireSupportedTiming(data.config,serviceIds);
+    const selected=summarizeBookingServices(servicesFor(data.config),serviceIds),item=selected.item;
+    if(choice && booking.paymentStatus!=="none" && (booking.catalogSnapshot?.totalPrice ?? booking.totalPrice)!==choice.catalogSnapshot.totalPrice)
+      throw Error("La reserva tiene pagos registrados. Cambiar su importe requiere revisión económica; se conserva el contrato original.");
+    if(choice){
+      const quote=quoteFor(data.config,choice.catalogSnapshot.rootIds,choice.catalogSnapshot.selectedAssociationIds);
+      if(JSON.stringify(quote)!==JSON.stringify(choice.catalogSnapshot)||JSON.stringify(quote.serviceIds)!==JSON.stringify(serviceIds)||choice.durationMinutes!==item.durationMinutes)
+        throw Error("El catálogo o la duración han cambiado. Revisa la propuesta; la reserva original se conserva.");
+      selected.services=quote.lines.filter(line=>line.kind==="service").map(line=>({id:line.itemId,title:line.name,durationMinutes:line.durationMinutes,price:line.charge,priceKnown:true,currency:line.currency}));
+    }
+    const staffId=choice?choice.staffId:booking.staffId;
+    const member=staffFor(data.config).find(person=>person.id===staffId);
+    if(staffId && !member)throw Error("El profesional propuesto ya no está disponible.");
+    const originalDuration=(Date.parse(booking.endDatetime)-Date.parse(booking.startDatetime))/60000;
+    const duration=choice?choice.durationMinutes:originalDuration;
     if(!dateISO || !dateValid(dateISO) || !timeHHMM || !/^([01]\d|2[0-3]):[0-5]\d$/.test(timeHHMM))throw new Error("Elige una fecha y hora válidas.");
     const startDatetime=dateISO+"T"+timeHHMM+":00",end=new Date(Date.parse(startDatetime)+duration*60000);
     const endDatetime=end.getFullYear()+"-"+String(end.getMonth()+1).padStart(2,"0")+"-"+String(end.getDate()).padStart(2,"0")+"T"+String(end.getHours()).padStart(2,"0")+":"+String(end.getMinutes()).padStart(2,"0")+":00";
     if(!isValidDemoLocalInterval(startDatetime,endDatetime,duration) || Date.parse(startDatetime)<=now() || endDatetime.slice(0,10)!==dateISO)throw new Error("Elige una hora futura válida.");
-    requireSupportedTiming(data.config,bookingServiceIds(booking));
-    const serviceIds=bookingServiceIds(booking),item=summarizeBookingServices(servicesFor(data.config),serviceIds).item,member=staffFor(data.config).find(person=>person.id===booking.staffId);
     if (!item || item.durationMinutes !== duration) throw new Error("El servicio ya no admite la duración original de la reserva.");
     const start = minutes(timeHHMM);
     const covers = (shift: { from: number; to: number }) => start >= shift.from && start + duration <= shift.to;
     if (!companyShifts(data.config, dateISO).some(covers)) {
       throw new Error("El establecimiento está cerrado en la fecha u hora seleccionada");
     }
-    if (booking.staffId && (!member || !professionalShifts(data.config, dateISO, member).some(covers)
-      || data.bookings.some(other => other.id !== booking.id && other.staffId === booking.staffId
+    if (staffId && (!member || !professionalShifts(data.config, dateISO, member).some(covers)
+      || data.bookings.some(other => other.id !== booking.id && other.staffId === staffId
         && blocks(other, now()) && overlap(other, { startDatetime, endDatetime })))) {
       throw new Error("El profesional asignado a esta reserva no está disponible en la fecha y hora seleccionadas");
     }
-    if (!freeResource(data,item,{startDatetime,endDatetime},member,booking.id,booking.elementId,serviceIds)) {
+    const resource=freeResource(data,item,{startDatetime,endDatetime},member,booking.id,staffId===booking.staffId?booking.elementId:undefined,serviceIds);
+    if (!resource) {
       throw new Error("El servicio o el puesto reservado no dispone de capacidad durante todo el intervalo.");
     }
     if(operation==="propose"){
-      const financialAcceptanceRequired=booking.paymentStatus!=="none";
+      const financialAcceptanceRequired=booking.paymentStatus!=="none" || !!choice;
       if(financialAcceptanceRequired && !input.acceptFinancialTerms)throw new Error("Confirma las condiciones económicas. No se ha realizado ningún cobro ni devolución.");
-      if(previous?.proposedBy===actor && previous.dateISO===dateISO && previous.time===timeHHMM)return clone(booking);
+      if(previous?.proposedBy===actor && previous.dateISO===dateISO && previous.time===timeHHMM && JSON.stringify(previous.selection)===JSON.stringify(choice && {...clone(choice),staffId:resource.staff?.id,professionalName:resource.staff?.name}))return clone(booking);
       history("countered");
       booking.changeProposal={id:"demo_change_"+now()+"_"+Math.random().toString(36).slice(2),proposedBy:actor,dateISO,date:input.date ?? dateISO,time:timeHHMM,duration:String(duration),proposedAt:now(),
-        originalDateISO:booking.startDatetime.slice(0,10),originalDate:reservation?.date ?? booking.startDatetime.slice(0,10),originalTime:booking.startDatetime.slice(11,16),originalDuration:String(duration),
-        originalStartDatetime:booking.startDatetime,originalEndDatetime:booking.endDatetime,financialAcceptanceRequired,proposerAcceptedFinancialTerms:!!input.acceptFinancialTerms};
+        originalDateISO:booking.startDatetime.slice(0,10),originalDate:reservation?.date ?? booking.startDatetime.slice(0,10),originalTime:booking.startDatetime.slice(11,16),originalDuration:String(originalDuration),
+        originalStartDatetime:booking.startDatetime,originalEndDatetime:booking.endDatetime,financialAcceptanceRequired,proposerAcceptedFinancialTerms:!!input.acceptFinancialTerms,
+        ...(choice?{selection:{...clone(choice),staffId:resource.staff?.id,professionalName:resource.staff?.name}}:{})};
     }else{
       history("accepted");booking.startDatetime=startDatetime;booking.endDatetime=endDatetime;
+      if(choice){
+        booking.bookableItemId=serviceIds[0];booking.services=clone(selected.services);booking.catalogSnapshot=clone(choice.catalogSnapshot);
+        booking.totalPrice=choice.catalogSnapshot.totalPrice;booking.currency=choice.catalogSnapshot.currency;
+        booking.staffId=resource.staff?.id;booking.professionalName=resource.staff?.name;booking.elementId=resource.elementId;booking.serviceTitle=item.title;
+      }
       booking.slotKey=store.businessId+"|"+(booking.staffId ?? "any")+"|"+dateISO+"|"+timeHHMM+"|"+endDatetime.slice(11,16);
       delete booking.changeProposal;
     }

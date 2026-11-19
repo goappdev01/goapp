@@ -1,3 +1,4 @@
+import { bookingProposalDescription } from "@/data/bookingChangeAvailability";
 /**
  * GoReservasConfigScreen — Panel Operativo GO Reservas
  * ═══════════════════════════════════════════════════════════════════════════
@@ -764,7 +765,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             onConfirmBooking={liveBookingMutate?id=>{const entry=allGoLog.find(e=>e.id===id);if(!entry)return;Alert.alert(lang==="en"?"Accept reservation":"Aceptar reserva",lang==="en"?"Confirm this reservation without changing its financial conditions.":"Confirmar esta reserva sin modificar sus condiciones económicas.",[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Accept":"Aceptar",onPress:()=>void liveBookingMutate(entry,"confirm").catch(error=>Alert.alert("GO",error.message))}]);}:undefined}
             onDeleteItem={handleDeleteItem}
             onProposeItem={onProposeBookingChange ? id=>{const entry=allGoLog.find(e=>e.id===id);if(entry)onProposeBookingChange(entry);} : undefined}
-            onAcceptProposal={demoStore || liveBookingMutate ? id=>{const entry=allGoLog.find(e=>e.id===id),proposal=entry?.changeProposal as import("@/data/booking").BookingChangeProposal|undefined;if(!entry || !proposal)return;Alert.alert(lang==="en"?"Accept proposal":"Aceptar propuesta",lang==="en"?"Keep existing financial conditions. No charge or refund is made.":"Se mantienen las condiciones económicas. No se realiza ningún cobro ni devolución.",[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Accept":"Aceptar",onPress:()=>void respondToDemoProposal(entry,"accept",true).catch(error=>Alert.alert("GO",error.message))}]);} : undefined}
+            onAcceptProposal={demoStore || liveBookingMutate ? id=>{const entry=allGoLog.find(e=>e.id===id),proposal=entry?.changeProposal as import("@/data/booking").BookingChangeProposal|undefined;if(!entry || !proposal)return;Alert.alert(lang==="en"?"Accept proposal":"Aceptar propuesta",bookingProposalDescription(proposal,lang),[{text:lang==="en"?"Back":"Volver",style:"cancel"},{text:lang==="en"?"Accept":"Aceptar",onPress:()=>void respondToDemoProposal(entry,"accept",true).catch(error=>Alert.alert("GO",error.message))}]);} : undefined}
             onRejectProposal={demoStore || liveBookingMutate ? id=>{const entry=allGoLog.find(e=>e.id===id),proposal=entry?.changeProposal as import("@/data/booking").BookingChangeProposal|undefined;if(entry && proposal)void respondToDemoProposal(entry,"reject").catch(error=>Alert.alert("GO",error.message));} : undefined}
             onProposeProposal={onProposeBookingChange ? id=>{const entry=allGoLog.find(e=>e.id===id);if(entry)onProposeBookingChange(entry);} : undefined}
             onChangeMonth={dir => {

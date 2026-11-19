@@ -199,6 +199,7 @@ export type GoEntry = {
   // Al aceptar: dateISO/date/time se actualizan al nuevo slot, se borra changeProposal.
   // Al rechazar: se restauran los valores originales, se borra changeProposal.
   changeProposal?: {
+    selection?: import("@/data/booking").BookingChangeChoice;
     id?: string;
     dateISO: string;
     date: string;

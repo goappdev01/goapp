@@ -4,16 +4,17 @@ import { quoteCatalog, toggleCatalogOption, type CatalogQuote } from "@/data/cat
 import { useLanguage } from "@/contexts/LanguageContext";
 import { onSessionChanged } from "@/lib/sessionEvents";
 
-export function CatalogComplementSelector({ businessId, rootIds, onChange, repository,accentColor="#65b883", showTotal = true }: { businessId: string; rootIds: string[]; accentColor?:string; showTotal?: boolean; onChange: (quote: CatalogQuote | null) => void; repository?: import("@/data/demoBookingRepository").DemoBookingRepository }) {
+export function CatalogComplementSelector({ businessId, rootIds, onChange, repository,accentColor="#65b883", showTotal = true, initialSelected }: { businessId: string; rootIds: string[]; accentColor?:string; showTotal?: boolean; initialSelected?:string[]; onChange: (quote: CatalogQuote | null) => void; repository?: import("@/data/demoBookingRepository").DemoBookingRepository }) {
   const { lang } = useLanguage(); const label = (es: string, en: string) => lang === "en" ? en : es;
-  const [selected, setSelected] = useState<string[]>([]), [quote, setQuote] = useState<CatalogQuote | null>(null), [error, setError] = useState("");
+  const [selected, setSelected] = useState<string[]>(initialSelected ?? []), [quote, setQuote] = useState<CatalogQuote | null>(null), [error, setError] = useState("");
   const [sessionRevision, setSessionRevision] = useState(0);
   useEffect(() => onSessionChanged(() => setSessionRevision(value => value + 1)), []);
   const scope = businessId + "|" + rootIds.join(",") + "|" + sessionRevision;
   const [selectionScope, setSelectionScope] = useState(scope);
-  const selection = selectionScope === scope ? selected : [];
+  const initialSelection = sessionRevision===0 ? initialSelected ?? [] : [];
+  const selection = selectionScope === scope ? selected : initialSelection;
   const currentQuote = selectionScope === scope && quote?.businessId === businessId && JSON.stringify(quote.rootIds) === JSON.stringify(rootIds) ? quote : null;
-  useEffect(() => { setSelected([]); setSelectionScope(scope); }, [scope]);
+  useEffect(() => { setSelected(initialSelection); setSelectionScope(scope); }, [scope, initialSelected?.join(",")]);
   useEffect(() => {
     let current = true; onChange(null); setQuote(null); setError("");
     if (!rootIds.length) return () => { current = false; };

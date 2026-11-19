@@ -94,7 +94,7 @@ export function withRegisteredBookingAuthority(base:DemoBookingRepository, store
   const change:DemoBookingRepository["changeBooking"]=async(id,businessId,actor,operation,input={})=>{
     if(businessId!==store.businessId)throw new Error("Reserva de otra empresa.");
     const source=await sourceFor(store),row=await known(id,source);
-    return save(await changeBookingRequest(row.id,operation,{...input,expectedRevision:row.changeRevision},store.ownerUserId),source);
+    return save(await changeBookingRequest(row.id,operation,{...input,expectedRevision:row.changeRevision,proposalId:input.proposalId ?? row.changeProposal?.id},store.ownerUserId),source);
   };
   return {...base,
     getStaff:async id=>{
