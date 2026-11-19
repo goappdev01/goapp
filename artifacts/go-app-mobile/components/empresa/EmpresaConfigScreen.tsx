@@ -1000,14 +1000,17 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
   const detected = timezoneDetection?.scope === timezoneScope ? timezoneDetection.result : undefined;
   const locationTimezone = detected?.status === "resolved" ? detected.timezone : undefined;
   const provisionalTimezone = deviceTimezone();
+  // Display and checked state share this value; a visual fallback never writes configuration.
+  const displayedTimezone = businessTimezone(timezone) ?? locationTimezone ?? provisionalTimezone;
+  const timezoneName = (zone: string) => zone === "Europe/Madrid" ? (lang === "en" ? "Mainland Spain" : "España peninsular")
+    : zone === "Atlantic/Canary" ? (lang === "en" ? "Canary Islands" : "Islas Canarias")
+    : zone === "UTC" ? (lang === "en" ? "Universal time" : "Tiempo universal")
+    : zone.split("/").slice(1).join(" · ").replace(/_/g, " ") || zone;
   const autoTimezoneAttempt = useRef("");
   useEffect(() => { timezoneMounted.current = true; return () => { timezoneMounted.current = false; }; }, []);
-  const timezoneOptions = [
-    { value: "Europe/Madrid", label: lang === "en" ? "Europe/Madrid — Mainland Spain" : "Europe/Madrid — España peninsular" },
-    { value: "Atlantic/Canary", label: lang === "en" ? "Atlantic/Canary — Canary Islands" : "Atlantic/Canary — Islas Canarias" },
-    ...[...new Set([timezone, locationTimezone, provisionalTimezone].filter((zone): zone is string => !!businessTimezone(zone)))]
-      .filter(zone => !["Europe/Madrid", "Atlantic/Canary"].includes(zone)).map(zone => ({ value: zone, label: zone })),
-  ];
+  const timezoneOptions = [...new Set(["Europe/Madrid", "Atlantic/Canary", timezone, locationTimezone, provisionalTimezone]
+    .map(zone => businessTimezone(zone)).filter((zone): zone is string => !!zone))]
+    .map(value => ({ value, label: timezoneName(value) }));
   const selectTimezone = async (wanted: string, automatic = false) => {
     if (timezoneBusy.current || timezoneContext.current.scope !== timezoneScope) return;
     if (automatic && (timezoneContext.current.saved?.trim() || demo?.getSnapshot().config.timezone?.trim())) return;
@@ -1185,31 +1188,35 @@ function StepHorario({ currentSector, onManageConflicts }: { currentSector: Sect
       <View style={c.sectionCard}>
         <Text accessibilityRole="header" style={{ fontSize: 16, fontWeight: "700", color: TEXT, marginBottom: 12 }}>{lang === "en" ? "REGULAR WEEKLY HOURS" : "HORARIO HABITUAL"}</Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <Text testID="business-timezone-summary" style={{ flex: 1, minWidth: 0, color: TEXT, fontSize: 13 }}>
-            {timezone ? `${lang === "en" ? "Time zone" : "Zona horaria"} · ${timezone}`
-              : `${lang === "en" ? "Provisional (device)" : "Provisional (dispositivo)"} · ${provisionalTimezone ?? (lang === "en" ? "Unavailable" : "No disponible")}`}
-          </Text>
+          <View testID="business-timezone-summary" style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <Text style={{ color: GRAY, fontSize: 12, fontWeight: "700" }}>{lang === "en" ? "TIME ZONE" : "ZONA HORARIA"}</Text>
+            <Text style={{ color: TEXT, fontSize: 14, fontWeight: "600" }}>{displayedTimezone ? timezoneName(displayedTimezone) : (lang === "en" ? "Not set" : "Sin definir")}</Text>
+            {!!displayedTimezone && <Text style={{ color: TEXT, fontSize: 12 }}>{displayedTimezone}</Text>}
+          </View>
         <TouchableOpacity testID="business-timezone-selector" accessibilityRole="button" accessibilityLabel={lang === "en" ? "Business time zone" : "Zona horaria del negocio"}
           accessibilityState={{ expanded: timezonePickerOpen, disabled: timezoneSaving }} disabled={timezoneSaving} activeOpacity={0.75}
           onPress={() => setTimezonePickerOpen(open => !open)} style={{ minHeight: 44, padding: 8, flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Text style={{ fontSize: 13, color: BLUE, fontWeight: "600" }}>{timezoneSaving ? (lang === "en" ? "Saving…" : "Guardando…") : (lang === "en" ? "Adjust" : "Ajustar")}</Text>
+          <Text style={{ fontSize: 13, color: TEXT, fontWeight: "600" }}>{timezoneSaving ? (lang === "en" ? "Saving…" : "Guardando…") : (lang === "en" ? "Adjust" : "Ajustar")}</Text>
           <Feather name={timezonePickerOpen ? "chevron-up" : "chevron-down"} size={18} color={TEXT} />
         </TouchableOpacity>
         </View>
         {locationTimezone && locationTimezone !== businessTimezone(timezone) && <Text testID="business-timezone-detected" style={{ color: TEXT, fontSize: 12, marginBottom: 8 }}>
-          {`${lang === "en" ? "Business location" : "Ubicación del negocio"} · ${locationTimezone}. `}
-          {timezone ? (lang === "en" ? "The saved zone is kept. Review it in Adjust." : "Se conserva la zona guardada. Revísala en Ajustar.")
-            : (lang === "en" ? "Confirm in Adjust if it cannot be saved automatically; existing appointments are kept." : "Confirma en Ajustar si no puede guardarse automáticamente; se conservan las citas existentes.")}
+          {timezone ? `${lang === "en" ? "Location indicates" : "La ubicación indica"} ${locationTimezone}.`
+            : (lang === "en" ? "Confirm the zone in Adjust." : "Confirma la zona en Ajustar.")}
         </Text>}
-        {!timezone && detected && detected.status !== "resolved" && <Text style={{ color: TEXT, fontSize: 12, marginBottom: 8 }}>
-          {lang === "en" ? "Confirm the business location or use Adjust. The provisional zone is not saved." : "Confirma la ubicación del negocio o usa Ajustar. La zona provisional no se guarda."}
+        {!timezone && detected && detected.status !== "resolved" && detected.status !== "missing" && <Text style={{ color: TEXT, fontSize: 12, marginBottom: 8 }}>
+          {detected.status === "ambiguous" ? (lang === "en" ? "Ambiguous location. Adjust the zone." : "Ubicación ambigua. Ajusta la zona.")
+            : (lang === "en" ? "Could not detect the zone. Use Adjust." : "No se pudo detectar la zona. Usa Ajustar.")}
         </Text>}
         {timezonePickerOpen && <View testID="business-timezone-options" accessibilityRole="radiogroup" style={{ marginBottom: 12, gap: 8 }}>
           {timezoneOptions.map(option => <TouchableOpacity key={option.value} testID={`business-timezone-option-${option.value}`} accessibilityRole="radio"
-            accessibilityState={{ checked: timezone === option.value, disabled: timezoneSaving }} disabled={timezoneSaving} onPress={() => { void selectTimezone(option.value); }} activeOpacity={0.75}
-            style={{ minHeight: 48, padding: 12, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: timezone === option.value ? 2 : 1, borderColor: timezone === option.value ? color : BORDER, borderRadius: 12, backgroundColor: CARD }}>
-            <Feather name={timezone === option.value ? "check-circle" : "circle"} size={18} color={timezone === option.value ? color : TEXT} />
-            <Text style={{ flex: 1, color: TEXT, fontSize: 14, fontWeight: timezone === option.value ? "700" : "500" }}>{option.label}</Text>
+            accessibilityState={{ checked: displayedTimezone === option.value, disabled: timezoneSaving }} disabled={timezoneSaving} onPress={() => { void selectTimezone(option.value); }} activeOpacity={0.75}
+            style={{ minHeight: 48, padding: 12, flexDirection: "row", alignItems: "center", gap: 10, borderWidth: displayedTimezone === option.value ? 2 : 1, borderColor: displayedTimezone === option.value ? color : BORDER, borderRadius: 12, backgroundColor: CARD }}>
+            <Feather name={displayedTimezone === option.value ? "check-circle" : "circle"} size={18} color={displayedTimezone === option.value ? color : TEXT} />
+            <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+              <Text style={{ color: TEXT, fontSize: 14, fontWeight: displayedTimezone === option.value ? "700" : "500" }}>{option.label}</Text>
+              <Text style={{ color: TEXT, fontSize: 12 }}>{option.value}</Text>
+            </View>
           </TouchableOpacity>)}
         </View>}
         {timezoneLoading && <Text accessibilityRole="progressbar" style={{ color: TEXT }}>{lang === "en" ? "Loading saved time zone…" : "Consultando la zona horaria guardada…"}</Text>}
