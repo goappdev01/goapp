@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Text, TouchableOpacity, View } from "react-native";
 
 /** Native flex measures the available width; only these two labels shrink, never the whole card. */
@@ -25,12 +25,45 @@ export function ListEntryHeader({id,title,status,statusColor,followUp,scale=1,la
   </View>;
 }
 
+type ListSize = "compacto" | "medio" | "grande";
+const sizeLabels = (lang:string) => lang === "en"
+  ? {compacto:"Small",medio:"Medium",grande:"Large"}
+  : {compacto:"Pequeño",medio:"Mediano",grande:"Grande"};
+
+/** Direct access shares the list's existing preference; only disclosure is local. */
+export function ListadosSizeControl({lang="es",size,handedness="right",onSelectSize}: {
+  lang?:string;size:ListSize;handedness?:"left"|"right";onSelectSize:(size:ListSize)=>void;
+}) {
+  const [open,setOpen] = useState(false);
+  const labels = sizeLabels(lang);
+  return <View testID="listados-size-direct" style={{gap:4,marginBottom:4}}>
+    {open && <View accessibilityRole="radiogroup" accessibilityLabel={lang==="en"?"Card size":"Tamaño de las fichas"}
+      style={{flexDirection:"row",gap:6}}>
+      {(["compacto","medio","grande"] as const).map(value => <TouchableOpacity key={value}
+        testID={"listados-size-"+value} accessibilityRole="radio" accessibilityLabel={labels[value]}
+        accessibilityState={{checked:size===value}} onPress={()=>{onSelectSize(value);setOpen(false);}}
+        style={{flex:1,minWidth:0,minHeight:44,paddingHorizontal:6,paddingVertical:8,borderRadius:10,
+          borderWidth:size===value?2:1,borderColor:size===value?"#ffffff":"#4A80BD",backgroundColor:"#172738",justifyContent:"center"}}>
+        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={1.6}
+          style={{color:"#ffffff",fontWeight:"700",fontSize:13,textAlign:"center"}}>{labels[value]}{size===value?" ✓":""}</Text>
+      </TouchableOpacity>)}
+    </View>}
+    <TouchableOpacity testID="listados-size-toggle" accessibilityRole="button"
+      accessibilityLabel={(lang==="en"?"Card size: ":"Tamaño de las fichas: ")+labels[size]}
+      accessibilityState={{expanded:open}} onPress={()=>setOpen(value=>!value)}
+      style={{alignSelf:handedness==="left"?"flex-start":"flex-end",maxWidth:"100%",minHeight:44,
+        paddingHorizontal:12,paddingVertical:8,borderRadius:10,borderWidth:1,borderColor:"#4A80BD",backgroundColor:"#172738",justifyContent:"center"}}>
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={1.6}
+        style={{color:"#ffffff",fontWeight:"700",fontSize:14}}>{lang==="en"?"Size · ":"Tamaño · "}{labels[size]} {open?"▴":"▾"}</Text>
+    </TouchableOpacity>
+  </View>;
+}
+
 /** Contextual entry into the existing global Tools panel; no new preference or expansion mode. */
 export function ListadosTools({lang="es",sortOrder,size,onToggleSort,onCycleSize}: {
   lang?:string;sortOrder:"asc"|"desc";size:"compacto"|"medio"|"grande";onToggleSort:()=>void;onCycleSize:()=>void;
 }) {
-  const sizeLabel=lang==="en"?{compacto:"Small",medio:"Medium",grande:"Large"}[size]
-    :{compacto:"Pequeño",medio:"Medio",grande:"Grande"}[size];
+  const sizeLabel=sizeLabels(lang)[size];
   const style={minHeight:44,padding:12,borderRadius:10,borderWidth:1,borderColor:"#4A80BD",backgroundColor:"#172738",justifyContent:"center" as const};
   return <View testID="listados-tools" style={{padding:14,gap:10,borderRadius:14,backgroundColor:"rgba(74,128,189,0.10)"}}>
     <Text accessibilityRole="header" style={{color:"#ffffff",fontWeight:"800",fontSize:16}}>{lang==="en"?"List tools":"Herramientas de Listados"}</Text>

@@ -147,7 +147,7 @@ import { placeLandingHelpQr, placeLandingQr } from "@/components/landing/landing
 import { LandingContentViewport, LandingCardContents, LandingCompactBody } from "@/components/landing/LandingContentViewport";
 import { LandingVisitOutline, LandingEntryOutline, LANDING_VISIT_FRAME, LANDING_ENTRY_FRAME, LANDING_VISIT_VISUAL } from "@/components/landing/LandingVisitOutline";
 import { reservationCardPolicy, GO_ENTRY_COLORS as ENTRY_COLORS } from "@/data/reservationCardPolicy";
-import { ListEntryHeader, ListadosTools } from "@/components/listados/ListadosControls";
+import { ListEntryHeader, ListadosSizeControl, ListadosTools } from "@/components/listados/ListadosControls";
 import { GoEntryDetailsSheet, GoEntryQuickActions, GoEntryMicroActions, GoListActionRow } from "@/components/GoEntryDetails";
 import { entryHeading, entryIdentity, entryIsReservation, entryMapsUrl, entryMessageContext, entryIsInternal, entryPhone, internalEntryCommand, openEntryMaps } from "@/data/goEntryPresentation";
 import { changeTask } from "@/lib/goTaskManagement";
@@ -9289,12 +9289,14 @@ function HomeScreenContent() {
     });
   };
 
-  const cycleListSize = () => {
+  const chooseListSize = (size: ListGoSize) => {
     Haptics.selectionAsync().catch(()=>{});
+    setListGoSize(size);
+    AsyncStorage.setItem("go_list_size_v1",size).catch(()=>{});
+  };
+  const cycleListSize = () => {
     const sizes: ListGoSize[] = ["compacto","medio","grande"];
-    const next=sizes[(sizes.indexOf(listGoSize)+1)%sizes.length];
-    setListGoSize(next);
-    AsyncStorage.setItem("go_list_size_v1",next).catch(()=>{});
+    chooseListSize(sizes[(sizes.indexOf(listGoSize)+1)%sizes.length]);
   };
   const toggleGoSortOrder = () => {
     const next = goSortOrder === "asc" ? "desc" : "asc";
@@ -22148,6 +22150,8 @@ function HomeScreenContent() {
                 {showClassicListFilters && !listFiltersHidden && !quickCreateOpen && (
                   <>{categoryFilterRow}{typeFilterRow}</>
                 )}
+                {!quickCreateOpen && <ListadosSizeControl lang={lang} size={listGoSize} handedness={handedness}
+                  onSelectSize={chooseListSize}/>}
                 {/* Botones de acción (cluster) — ocultos en modo creación */}
                 {!quickCreateOpen && (
                   <View

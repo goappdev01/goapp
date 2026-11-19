@@ -70,10 +70,10 @@ export function GoListActionRow({actions,handedness="right",scale=1,testID="list
         onPress={event=>{event?.stopPropagation?.();action.onPress();}}
         style={{flex:1,flexBasis:0,flexShrink:1,minWidth:0,minHeight:Math.max(44,Math.round(44*scale)),paddingHorizontal:4,paddingVertical:8,
           ...goActionVisual(action.tone,!!action.selected,!!inactive),
-          ...(action.tone==="pending"?{backgroundColor:"#887400"}:{}),
+          ...(action.tone==="pending"?{backgroundColor:"#FACC15"}:{}),
           ...(action.selected?{borderWidth:2,borderColor:"#ffffff"}:{}),alignItems:"center",justifyContent:"center"}}>
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.8}
-          style={{color:"#FFFFFF",fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",alignSelf:"stretch",width:"100%",minWidth:0}}>{action.label}{action.selected?" ✓":""}</Text>
+          style={{color:goActionTextColor(action.tone),fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",alignSelf:"stretch",width:"100%",minWidth:0}}>{action.label}{action.selected?" ✓":""}</Text>
       </TouchableOpacity>;
     })}
   </View>;
