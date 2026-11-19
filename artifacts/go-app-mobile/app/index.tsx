@@ -14370,6 +14370,40 @@ function HomeScreenContent() {
   const renderEntryMessageScreen = (entry: GoEntry) => messageEntryId === entry.id ? messagesScreen : null;
   const listBookingDetail = calBookingDetailEntry ? goLog.find(entry => entry.id === calBookingDetailEntry.id) : undefined;
 
+  const renderToolsPanel = (embedded=false) => (<HerramientasPanel embedded={embedded}
+        listTools={listOpen ? <ListadosTools lang={lang} sortOrder={goSortOrder} size={listGoSize}
+          onToggleSort={toggleGoSortOrder} onCycleSize={cycleListSize}/> : undefined}
+        landingVariantControls={landingVariantToolsEnabled ? <LandingVariantSelector
+          visual={{ ...landingVisual, busy: landingVisual.busy || landingPreviewOpening }} lang={lang}
+          canPreviewLanding={userLandingVisualEnabled || goView.isOwner}
+          onPreviewLanding={openUserLandingPreviewFromTools} /> : undefined}
+        visible={optionsOpen}
+        onClose={() => setOptionsOpen(false)}
+        handedness={handedness}
+        toggleHandedness={toggleHandedness}
+        uiScale={uiScale}
+        setUiScale={setUiScale}
+        shakeAiEnabled={shakeAiEnabled}
+        setShakeAiEnabled={setShakeAiEnabled}
+        shakeAiSensitivity={shakeAiSensitivity}
+        setShakeAiSensitivity={setShakeAiSensitivity}
+        shakeAiAction={shakeAiAction}
+        setShakeAiAction={setShakeAiAction}
+        calBgDensity={calBgDensity}
+        setCalBgDensity={setCalBgDensity}
+        calBgDayNightMode={calBgDayNightMode}
+        setCalBgDayNightMode={setCalBgDayNightMode}
+        guidanceLevel={guidanceLevel}
+        setGuidanceLevel={setGuidanceLevel}
+        effectiveGuidanceLevel={effectiveGuidanceLevel}
+        autoBoost={autoBoost}
+        showToast={showToast}
+        userMarket={userMarket}
+        setUserMarket={setUserMarket}
+        userRegion={userRegion}
+        setUserRegion={setUserRegion}
+      />);
+
   return (
     <GoNavigationHand.Provider value={handedness}>
     <GestureDetector gesture={universalSwipeGesture}>
@@ -20020,39 +20054,7 @@ function HomeScreenContent() {
         }}
       />
 
-      <HerramientasPanel
-        listTools={listOpen ? <ListadosTools lang={lang} sortOrder={goSortOrder} size={listGoSize}
-          onToggleSort={toggleGoSortOrder} onCycleSize={cycleListSize}/> : undefined}
-        landingVariantControls={landingVariantToolsEnabled ? <LandingVariantSelector
-          visual={{ ...landingVisual, busy: landingVisual.busy || landingPreviewOpening }} lang={lang}
-          canPreviewLanding={userLandingVisualEnabled || goView.isOwner}
-          onPreviewLanding={openUserLandingPreviewFromTools} /> : undefined}
-        visible={optionsOpen}
-        onClose={() => setOptionsOpen(false)}
-        handedness={handedness}
-        toggleHandedness={toggleHandedness}
-        uiScale={uiScale}
-        setUiScale={setUiScale}
-        shakeAiEnabled={shakeAiEnabled}
-        setShakeAiEnabled={setShakeAiEnabled}
-        shakeAiSensitivity={shakeAiSensitivity}
-        setShakeAiSensitivity={setShakeAiSensitivity}
-        shakeAiAction={shakeAiAction}
-        setShakeAiAction={setShakeAiAction}
-        calBgDensity={calBgDensity}
-        setCalBgDensity={setCalBgDensity}
-        calBgDayNightMode={calBgDayNightMode}
-        setCalBgDayNightMode={setCalBgDayNightMode}
-        guidanceLevel={guidanceLevel}
-        setGuidanceLevel={setGuidanceLevel}
-        effectiveGuidanceLevel={effectiveGuidanceLevel}
-        autoBoost={autoBoost}
-        showToast={showToast}
-        userMarket={userMarket}
-        setUserMarket={setUserMarket}
-        userRegion={userRegion}
-        setUserRegion={setUserRegion}
-      />
+      {!listOpen && renderToolsPanel()}
 
 
       {/* MAP MODAL */}
@@ -21695,12 +21697,13 @@ function HomeScreenContent() {
         onDismiss={finishListBookingProposal}
         expandToSafeTop
         floatingClose={{screenKey:"listados",handedness,label:t('tasks_close_list')}}
+        screenOverlay={optionsOpen ? renderToolsPanel(true) : undefined}
         modalOverlay={notesOpen || listBookingDetail ? <GoScreenHost registerBack={handler=>{listNoteLayerBackRef.current=handler;}}>
           {notesOpen ? renderUnifiedNoteEditor() : listBookingDetail && renderListBookingDetail(listBookingDetail)}
         </GoScreenHost> : undefined}
-        blockPan={notesOpen || !!listBookingDetail}
+        blockPan={optionsOpen || notesOpen || !!listBookingDetail}
         onPanelHeightChange={setOverlayPanelHeight}
-        onClose={() => { if(listNoteLayerBackRef.current?.())return;setListOpen(false); setLlamadasListOpen(false); setListMinimized(false); }}
+        onClose={() => { if(optionsOpen){setOptionsOpen(false);return;}if(listNoteLayerBackRef.current?.())return;setListOpen(false); setLlamadasListOpen(false); setListMinimized(false); }}
         // Gesto de deslizar hacia abajo en dos niveles:
         //   1.er deslizamiento (filtros visibles) → oculta menús secundarios, fichas siguen arriba.
         //   2.º deslizamiento (filtros ya ocultos) → cierra el listado completo.
@@ -21714,11 +21717,14 @@ function HomeScreenContent() {
         compactHeader
         minimized={listMinimized}
         title={lang === "en" ? "LISTS" : "LISTADOS"}
+        headerRight={<GoCloseButton testID="listados-tools-toggle" level="settings" touchSize={44} preserveTouchSize iconSize={22}
+          accessibilityLabel={lang==="en"?"List tools":"Herramientas de Listados"}
+          onPress={()=>{Haptics.selectionAsync().catch(()=>{});if(optionsOpen)setOptionsOpen(false);else handleOpenOptions();}}/>}
         protectBrand
         paddingBottom={quickCreateKbVisible ? 0 : paddingBottom + 4}
         containerBg={screenBgColors.listados || undefined}
         footer={
-          // La navegación principal conserva su distribución; orden y tamaño viven en Herramientas.
+          // Tamaño directo en la fila existente; orden permanece en Herramientas.
           (() => {
             // Construimos el orden VISUAL del cluster según la mano, sin
             // recurrir a row-reverse (que despista al revisar el layout).
@@ -21877,7 +21883,7 @@ function HomeScreenContent() {
             const filterButtonsForRight = [...filterDefs].reverse().map(renderFilterBtn);
             const filterButtonsForLeft  = filterDefs.map(renderFilterBtn);
             // Los filtros y la navegación principal mantienen su orden y lateralidad.
-            // Orden y tamaño se conservan en la sección contextual de Herramientas.
+            // Orden permanece en Herramientas; tamaño usa la preferencia compartida.
             const clusterRight = [
               ...filterButtonsForRight,
             ];
@@ -22151,8 +22157,6 @@ function HomeScreenContent() {
                 {showClassicListFilters && !listFiltersHidden && !quickCreateOpen && (
                   <>{categoryFilterRow}{typeFilterRow}</>
                 )}
-                {!quickCreateOpen && <ListadosSizeControl lang={lang} size={listGoSize} handedness={handedness}
-                  onSelectSize={chooseListSize}/>}
                 {/* Botones de acción (cluster) — ocultos en modo creación */}
                 {!quickCreateOpen && (
                   <View
@@ -22182,6 +22186,7 @@ function HomeScreenContent() {
                     >
                       <MaterialCommunityIcons name="note-edit-outline" size={21} color="#ffffff" />
                     </Pressable>
+                    <ListadosSizeControl lang={lang} size={listGoSize} touchSize={BTN} onCycleSize={cycleListSize}/>
                     {clusterScroll}
                   </View>
                 )}
@@ -25065,6 +25070,8 @@ function BottomSheet({
   blockPan,
   expandToSafeTop,
   floatingClose,
+  headerRight,
+  screenOverlay,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -25078,6 +25085,9 @@ function BottomSheet({
   // controles que tienen que estar siempre al alcance del pulgar (p.ej.
   // los chips de filtro del listado), sin que el scroll los empuje.
   footer?: React.ReactNode;
+  headerRight?: React.ReactNode;
+  // Full-screen local tools retain the mounted list and its scroll position.
+  screenOverlay?: React.ReactNode;
   protectBrand?: boolean;
   // compactHeader: condensa la cabecera (título pequeño, subtítulo reducido)
   // sin alterar el ScrollView ni el footer. Independiente de `compact`.
@@ -25408,7 +25418,7 @@ function BottomSheet({
             el backdrop superior vacío — para que el swipe ↓ se detecte
             desde cualquier punto de la pantalla, no solo desde el panel. */}
         <GestureDetector gesture={Gesture.Race(rightZoneGesture, dragGesture)}>
-        <View style={{ flex: 1, justifyContent: noteKeyboardScroll ? "flex-start" : "flex-end" }}>
+        <View pointerEvents={screenOverlay?"none":"auto"} accessibilityElementsHidden={!!screenOverlay} importantForAccessibility={screenOverlay?"no-hide-descendants":"auto"} style={{ flex: 1, justifyContent: noteKeyboardScroll ? "flex-start" : "flex-end" }}>
           <AnimatedPressable
             style={[
               { position: "absolute", top: 0, left: 0, right: 0, bottom: 0 },
@@ -25487,7 +25497,10 @@ function BottomSheet({
                         </View>
                       ) : (
                         <>
-                          {!!title && (
+                          {!!title && (headerRight ? <View testID="sheet-header-tools-row" style={{flexDirection:"row",alignItems:"center",gap:8,marginBottom:6}}>
+                            <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.sheetTitle,{flex:1,minWidth:0,marginBottom:0},compactHeader&&{fontSize:14,fontWeight:"700",letterSpacing:0.8,color:"#cccccc"}]} {...titleNoTranslate}>{title}</Text>
+                            <View style={{flexShrink:0}}>{headerRight}</View>
+                          </View> : (
                             <Text
                               style={[
                                 styles.sheetTitle,
@@ -25497,7 +25510,7 @@ function BottomSheet({
                             >
                               {title}
                             </Text>
-                          )}
+                          ))}
                           {subtitle ? (
                             <Text
                               style={[
@@ -25579,13 +25592,14 @@ function BottomSheet({
           </SheetKeyboardFrame>
         </View>
         </GestureDetector>
-        {floatingClose&&!modalOverlay&&noteFooterHeight>0&&<View testID={floatingClose.screenKey+"-floating-close"} pointerEvents="box-none" style={{position:"absolute",top:noteInsets.top+8,left:noteInsets.left,right:noteInsets.right,bottom:(kbVisible?floatingKeyboardHeight:noteInsets.bottom)+noteFooterHeight+20,zIndex:50}}>
+        {floatingClose&&!modalOverlay&&!screenOverlay&&noteFooterHeight>0&&<View testID={floatingClose.screenKey+"-floating-close"} pointerEvents="box-none" style={{position:"absolute",top:noteInsets.top+8,left:noteInsets.left,right:noteInsets.right,bottom:(kbVisible?floatingKeyboardHeight:noteInsets.bottom)+noteFooterHeight+20,zIndex:50}}>
           <DraggableFAB navigation handedness={floatingClose.handedness} screenKey={floatingClose.screenKey} buttonKey={"close-"+floatingClose.handedness} buttonWidth={64} maxH={64}
             bounds={{width:sheetViewport.width-noteInsets.left-noteInsets.right,height:Math.max(80,sheetViewport.height-noteInsets.top-8-(kbVisible?floatingKeyboardHeight:noteInsets.bottom)-noteFooterHeight-20)}}
             initialBottom={8} initialRight={14}>
             <GoCloseButton level="panel" accessibilityLabel={floatingClose.label} onPress={onClose}/>
           </DraggableFAB>
         </View>}
+        {screenOverlay && <View testID="sheet-screen-overlay" accessibilityViewIsModal style={{position:"absolute",top:0,right:0,bottom:0,left:0,zIndex:1000}}>{screenOverlay}</View>}
       </Modal>
     );
   }

@@ -98,51 +98,48 @@ test('Listados tools use the original sort and size preference handlers; primary
  assert.match(sheet.getText(ast),/clusterScroll/);assert.match(sheet.getText(ast),/list-notes-open/);
  const direct=all.find(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='ListadosSizeControl');
  assert.ok(direct);assert.match(sheet.getText(ast),/ListadosSizeControl/);
- assert.match(direct.getText(ast),/size=\{listGoSize\}/);assert.match(direct.getText(ast),/onSelectSize=\{chooseListSize\}/);
+ assert.match(direct.getText(ast),/size=\{listGoSize\}/);assert.match(direct.getText(ast),/onCycleSize=\{cycleListSize\}/);
  assert.doesNotMatch(sheet.getText(ast),/maximize-2|minimize-2|setAllExpanded|BTN_MINI/);
 });
 
-for(const hand of ['left','right'])test(`direct size control/${hand}: all three real sizes, shared preference, close/reopen and restored order`,async()=>{
+for(const hand of ['left','right'])test(`round size control/${hand}: each touch cycles immediately, restores preference and actual order`,async()=>{
  const f=fixture({platform:'ios',viewport:{width:320,height:568,fontScale:2.8}}),c=f.load('components/listados/ListadosControls.tsx'),memory=new Map();
- const context={listGoSize:'medio',goSortOrder:'asc',setListGoSize:v=>{context.listGoSize=v;},setGoSortOrder:v=>{context.goSortOrder=v;},
+ const context={listGoSize:'compacto',goSortOrder:'asc',setListGoSize:v=>{context.listGoSize=v;},setGoSortOrder:v=>{context.goSortOrder=v;},
   AsyncStorage:{setItem:async(k,v)=>memory.set(k,v),getItem:async k=>memory.get(k)},
   Haptics:{selectionAsync:async()=>{},impactAsync:async()=>{},ImpactFeedbackStyle:{Medium:'medium'}},setSortFeedbackVisible(){},setTimeout(){},exports:{}};
- vm.runInNewContext(compile(['chooseListSize','toggleGoSortOrder'].map(name=>'const '+declaration(name).getText(ast)+';').join('\n')+';exports.choose=chooseListSize;exports.sort=toggleGoSortOrder;'),context);
- const render=()=>f.render(c.ListadosSizeControl,{size:context.listGoSize,handedness:hand,onSelectSize:context.exports.choose});
- const button=(tree,id)=>nodes(tree).find(n=>n.props.testID===id);
- const fonts=[];
- for(const size of ['compacto','medio','grande']){
-  let tree=render(),toggle=button(tree,'listados-size-toggle');assert.equal(toggle.props.style.minHeight,44);
-  assert.equal(toggle.props.style.alignSelf,hand==='left'?'flex-start':'flex-end');assert.equal(toggle.props.accessibilityState.expanded,false);
-  toggle.props.onPress();tree=render();const choices=nodes(tree).filter(n=>n.props.accessibilityRole==='radio');assert.equal(choices.length,3);
-  assert.deepEqual(choices.map(n=>n.props.accessibilityLabel),['Pequeño','Mediano','Grande']);
-  assert.ok(choices.every(n=>n.props.style.minHeight>=44&&n.props.style.minWidth===0&&n.props.style.flex===1));
-  assert.equal(choices.filter(n=>n.props.accessibilityState.checked).length,1);
-  button(tree,'listados-size-'+size).props.onPress();tree=render();
-  assert.equal(context.listGoSize,size);assert.equal(memory.get('go_list_size_v1'),size);
-  assert.equal(nodes(tree).filter(n=>n.props.accessibilityRole==='radio').length,0);
-  const row=card({hand,size:context.listGoSize}).tree;
-  fonts.push(nodes(row).find(n=>n.props.testID==='list-title-one').props.style.fontSize);
+ vm.runInNewContext(compile(['chooseListSize','cycleListSize','toggleGoSortOrder'].map(name=>'const '+declaration(name).getText(ast)+';').join('\n')+';exports.cycle=cycleListSize;exports.sort=toggleGoSortOrder;'),context);
+ const render=()=>f.render(c.ListadosSizeControl,{size:context.listGoSize,onCycleSize:context.exports.cycle});
+ const fonts={};
+ for(const size of ['medio','grande','compacto']){
+  const tree=render();assert.equal(tree.type,'Pressable');
+  const style=tree.props.style({pressed:false});assert.equal(style.width,44);assert.equal(style.height,44);assert.equal(style.borderRadius,999);assert.equal(tree.props.hitSlop,0);
+  assert.equal(nodes(tree).filter(n=>n.type==='Pressable').length,1);assert.equal(nodes(tree).filter(n=>n.type==='Text').length,0);
+  assert.equal(nodes(tree).some(n=>n.props.accessibilityRole==='radio'||n.props.accessibilityRole==='radiogroup'),false);
+  const circles=nodes(tree).filter(n=>n.props.testID?.startsWith('listados-size-circle-'));
+  assert.deepEqual(circles.map(n=>n.props.style.width),[5,8,12]);assert.equal(circles.filter(n=>n.props.style.opacity===1).length,1);
+  assert.equal(circles.find(n=>n.props.style.opacity===1).props.testID,'listados-size-circle-'+context.listGoSize);
+  tree.props.onPress();assert.equal(context.listGoSize,size);assert.equal(memory.get('go_list_size_v1'),size);
+  const actualCard=card({hand,size:context.listGoSize}).tree;
+  fonts[size]=nodes(actualCard).find(n=>n.props.testID==='list-title-one').props.style.fontSize;
  }
- assert.ok(fonts[2]>fonts[1]&&fonts[1]>=fonts[0],'the preference changes the real card typography');
- // Disclosure can also close without changing a selection.
- button(render(),'listados-size-toggle').props.onPress();button(render(),'listados-size-toggle').props.onPress();
- assert.equal(button(render(),'listados-size-toggle').props.accessibilityState.expanded,false);
- assert.equal(memory.get('go_list_size_v1'),'grande');context.exports.sort();assert.equal(memory.get('go_sort_order_v1'),'desc');
- // Execute the existing hydration blocks, not a copy of their preference logic.
- context.listGoSize='compacto';context.goSortOrder='asc';
+ assert.ok(fonts.grande>fonts.medio&&fonts.medio>=fonts.compacto);
+ context.exports.sort();assert.equal(memory.get('go_sort_order_v1'),'desc');
+ // Execute the same storage hydration on a fresh screen.
+ context.listGoSize='grande';context.goSortOrder='asc';
  for(const key of ['go_list_size_v1','go_sort_order_v1']){
   const restore=all.find(n=>ts.isTryStatement(n)&&n.tryBlock.statements.some(s=>s.getText(ast).includes('await AsyncStorage.getItem("'+key+'")')));
-  assert.ok(restore);await vm.runInNewContext(compile('(async()=>{'+restore.getText(ast)+'})()'),context);
+  await vm.runInNewContext(compile('(async()=>{'+restore.getText(ast)+'})()'),context);
  }
- assert.equal(context.listGoSize,'grande');assert.equal(context.goSortOrder,'desc');
+ assert.equal(context.listGoSize,'compacto');assert.equal(context.goSortOrder,'desc');
+ assert.match(render().props.accessibilityLabel,/Pequeño/);assert.match(render().props.accessibilityHint,/Mediano/);
  const entries=[{id:'later',dateISO:'2030-01-08',time:'10:00'},{id:'earlier',dateISO:'2030-01-07',time:'10:00'},{id:'undated',createdAt:1}];
  const ordered=()=>vm.runInNewContext(compile(['sortDir','allOrdered'].map(name=>'const '+declaration(name).getText(ast)+';').join('\n')+'allOrdered.map(e=>e.id);'),{goSortOrder:context.goSortOrder,filteredListEntries:entries,listCallsOpen:false});
- assert.deepEqual(Array.from(ordered()),['later','earlier','undated']);context.exports.sort();
- assert.deepEqual(Array.from(ordered()),['earlier','later','undated']);
- // A newly mounted direct control displays the same restored preference.
- const fresh=fixture({platform:'ios'}),freshControls=fresh.load('components/listados/ListadosControls.tsx');
- assert.match(text(fresh.render(freshControls.ListadosSizeControl,{size:context.listGoSize,onSelectSize:context.exports.choose})),/Grande/);
+ assert.deepEqual(Array.from(ordered()),['later','earlier','undated']);context.exports.sort();assert.deepEqual(Array.from(ordered()),['earlier','later','undated']);
+ // It occupies the existing primary row, with no standalone footer row or dropdown.
+ const mount=all.find(n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='ListadosSizeControl');
+ assert.equal(mount.parent.openingElement.tagName.getText(ast),'View');
+ assert.match(mount.parent.getText(ast),/list-notes-open/);assert.match(mount.parent.getText(ast),/clusterScroll/);
+ assert.doesNotMatch(readFileSync('components/listados/ListadosControls.tsx','utf8'),/Tamaño ·|radiogroup|setOpen|listados-size-toggle/);
 });
 
 test('large text and long contractual states remain in the allocated header row with the full accessible label',()=>{

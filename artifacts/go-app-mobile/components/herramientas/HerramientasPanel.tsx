@@ -33,6 +33,7 @@ const GOLD_BG = "rgba(196,136,58,0.10)";
 const GOLD_BDR= "rgba(196,136,58,0.35)";
 
 interface HerramientasPanelProps {
+  embedded?: boolean;
   listTools?: React.ReactNode;
   landingVariantControls?: React.ReactNode;
   visible: boolean;
@@ -63,7 +64,7 @@ interface HerramientasPanelProps {
 }
 
 export function HerramientasPanel({
-  visible, onClose, landingVariantControls, listTools,
+  visible, onClose, landingVariantControls, listTools, embedded=false,
   handedness, toggleHandedness,
   uiScale, setUiScale,
   shakeAiEnabled, setShakeAiEnabled,
@@ -122,13 +123,7 @@ export function HerramientasPanel({
   const currentLang    = LANG_META.find(m => m.code === lang);
   const currentCountry = COUNTRY_CONFIGS[userMarket];
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="fullScreen"
-      onRequestClose={onClose}
-    >
+  const content = (<>
       <View style={[s.root, { paddingTop: insets.top }]} {...rightSwipePan.panHandlers}>
 
         <View style={s.handleZone}>
@@ -596,7 +591,10 @@ export function HerramientasPanel({
         onClose={() => setDevPanelVisible(false)}
       />
 
-    </Modal>
+    </>);
+  // Listados already owns the native presenter; keep its tools in that same host.
+  return embedded ? <View testID="listados-tools-layer" style={{flex:1}}>{content}</View> : (
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>{content}</Modal>
   );
 }
 

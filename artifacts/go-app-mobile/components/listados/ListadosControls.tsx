@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Text, TouchableOpacity, View } from "react-native";
+import React from "react";
+import { Pressable, Text, TouchableOpacity, View } from "react-native";
 
 /** Native flex measures the available width; only these two labels shrink, never the whole card. */
 export function ListEntryHeader({id,title,status,statusColor,followUp,scale=1,lang="es"}: {
@@ -30,33 +30,26 @@ const sizeLabels = (lang:string) => lang === "en"
   ? {compacto:"Small",medio:"Medium",grande:"Large"}
   : {compacto:"Pequeño",medio:"Mediano",grande:"Grande"};
 
-/** Direct access shares the list's existing preference; only disclosure is local. */
-export function ListadosSizeControl({lang="es",size,handedness="right",onSelectSize}: {
-  lang?:string;size:ListSize;handedness?:"left"|"right";onSelectSize:(size:ListSize)=>void;
+/** The original three-circle control cycles the existing preference in one touch. */
+export function ListadosSizeControl({lang="es",size,touchSize=44,onCycleSize}: {
+  lang?:string;size:ListSize;touchSize?:number;onCycleSize:()=>void;
 }) {
-  const [open,setOpen] = useState(false);
-  const labels = sizeLabels(lang);
-  return <View testID="listados-size-direct" style={{gap:4,marginBottom:4}}>
-    {open && <View accessibilityRole="radiogroup" accessibilityLabel={lang==="en"?"Card size":"Tamaño de las fichas"}
-      style={{flexDirection:"row",gap:6}}>
-      {(["compacto","medio","grande"] as const).map(value => <TouchableOpacity key={value}
-        testID={"listados-size-"+value} accessibilityRole="radio" accessibilityLabel={labels[value]}
-        accessibilityState={{checked:size===value}} onPress={()=>{onSelectSize(value);setOpen(false);}}
-        style={{flex:1,minWidth:0,minHeight:44,paddingHorizontal:6,paddingVertical:8,borderRadius:10,
-          borderWidth:size===value?2:1,borderColor:size===value?"#ffffff":"#4A80BD",backgroundColor:"#172738",justifyContent:"center"}}>
-        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={1.6}
-          style={{color:"#ffffff",fontWeight:"700",fontSize:13,textAlign:"center"}}>{labels[value]}{size===value?" ✓":""}</Text>
-      </TouchableOpacity>)}
-    </View>}
-    <TouchableOpacity testID="listados-size-toggle" accessibilityRole="button"
-      accessibilityLabel={(lang==="en"?"Card size: ":"Tamaño de las fichas: ")+labels[size]}
-      accessibilityState={{expanded:open}} onPress={()=>setOpen(value=>!value)}
-      style={{alignSelf:handedness==="left"?"flex-start":"flex-end",maxWidth:"100%",minHeight:44,
-        paddingHorizontal:12,paddingVertical:8,borderRadius:10,borderWidth:1,borderColor:"#4A80BD",backgroundColor:"#172738",justifyContent:"center"}}>
-      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={1.6}
-        style={{color:"#ffffff",fontWeight:"700",fontSize:14}}>{lang==="en"?"Size · ":"Tamaño · "}{labels[size]} {open?"▴":"▾"}</Text>
-    </TouchableOpacity>
-  </View>;
+  const diameter=Math.max(44,touchSize),labels=sizeLabels(lang);
+  const next=({compacto:"medio",medio:"grande",grande:"compacto"} as const)[size];
+  return <Pressable testID="listados-size-direct" accessibilityRole="button"
+    accessibilityLabel={(lang==="en"?"Card size: ":"Tamaño de ficha: ")+labels[size]}
+    accessibilityHint={(lang==="en"?"Change to ":"Cambiar a ")+labels[next]} onPress={onCycleSize} hitSlop={0}
+    style={({pressed})=>({width:diameter,height:diameter,borderRadius:999,flexShrink:0,backgroundColor:"#1a1a1c",
+      borderWidth:1.5,borderColor:"rgba(255,255,255,0.35)",alignItems:"center",justifyContent:"center",
+      transform:[{scale:pressed?0.95:1}]})}>
+    <View style={{flexDirection:"row",alignItems:"center",gap:3}} pointerEvents="none" accessible={false}>
+      {(["compacto","medio","grande"] as const).map((value,index)=>{
+        const diameter=[5,8,12][index];
+        return <View key={value} testID={"listados-size-circle-"+value} style={{width:diameter,height:diameter,
+          borderRadius:diameter/2,backgroundColor:"#ffffff",opacity:size===value?1:0.4}}/>;
+      })}
+    </View>
+  </Pressable>;
 }
 
 /** Contextual entry into the existing global Tools panel; no new preference or expansion mode. */

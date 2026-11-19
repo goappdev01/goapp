@@ -73,3 +73,25 @@ test('read projection carries the real establishment category without changing s
  const before=JSON.stringify([booking,business,item]),row=scope.exports.customerBookingEntry(booking,business,item,'Profesional');
  assert.equal(row.bookingCategory,'peluqueria');assert.equal(row.reservationId,'original');assert.equal(row.bookingStatus,'confirmada');assert.equal(row.estado,'aceptado');assert.equal(JSON.stringify([booking,business,item]),before);
 });
+
+
+for(const width of [320,375,390,430])for(const hand of ['left','right'])test(`Listados header tools/${width}/${hand} stays in a reserved safe row without a floating duplicate`,()=>{
+ const gear={type:'GoCloseButton',props:{testID:'listados-tools-toggle',touchSize:44},children:[]};
+ const f=fixture(width,844,hand),tree=f.render({headerRight:gear});
+ const row=nodes(tree).find(n=>n.props.testID==='sheet-header-tools-row');assert.ok(row);
+ assert.equal(row.props.style.flexDirection,'row');assert.equal(row.props.style.alignItems,'center');assert.equal(row.props.style.position,undefined);
+ const title=nodes(row).find(n=>n.type==='Text');assert.equal(style(title.props.style).flex,1);assert.equal(style(title.props.style).minWidth,0);assert.equal(title.props.numberOfLines,1);
+ assert.equal(nodes(row).filter(n=>n.props.testID==='listados-tools-toggle').length,1);assert.equal(row.props.style.gap,8);
+});
+
+
+test('opening tools retains the real list scroll and footer underneath an exclusive full-screen local layer',()=>{
+ const f=fixture(),before=f.render(),scroll=nodes(before).find(n=>n.props.testID==='listados-scroll');
+ scroll.props.onScroll({nativeEvent:{contentOffset:{y:140}}});
+ const open=f.render({screenOverlay:'existing-tools',blockPan:true});
+ const layer=nodes(open).find(n=>n.props.testID==='sheet-screen-overlay');assert.ok(layer);assert.equal(layer.props.accessibilityViewIsModal,true);assert.equal(layer.props.style.top,0);assert.equal(layer.props.style.bottom,0);
+ assert.ok(nodes(open).find(n=>n.props.testID==='listados-scroll'),'list stays mounted; tools do not use the replacement modalOverlay branch');
+ assert.ok(nodes(open).find(n=>n.props.pointerEvents==='none'&&n.props.accessibilityElementsHidden===true&&n.props.importantForAccessibility==='no-hide-descendants'));
+ assert.equal(nodes(open).some(n=>n.props.testID==='listados-floating-close'),false);
+ const closed=f.render();assert.equal(nodes(closed).some(n=>n.props.testID==='sheet-screen-overlay'),false);assert.ok(nodes(closed).find(n=>n.props.testID==='listados-scroll'));
+});
