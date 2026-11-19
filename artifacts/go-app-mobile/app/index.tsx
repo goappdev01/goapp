@@ -20456,12 +20456,14 @@ function HomeScreenContent() {
               />
             )}
             {/* Acciones principales: Nueva tarea · HOY · RESERVAR · GO */}
-            <View testID="calendar-actions" style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingLeft: isBusinessMode ? 0 : 4, paddingRight: isBusinessMode ? 2 : 6, paddingTop: 2, marginBottom: 0 }}>
+            <View testID="calendar-actions" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingHorizontal: 2, paddingTop: 2, marginBottom: 0 }}>
               {goView.view === "ADMIN" && adminAccess.allowed && !adminAccess.checking && <TouchableOpacity
                 accessibilityRole="button" accessibilityLabel="Tablero" onPress={() => setBoardsOpen(true)}
                 style={{ minHeight: 44, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: "#a78bfa", justifyContent: "center" }}>
                 <Text style={{ color: "#ffffff", fontSize: 12 }}>Tablero</Text>
               </TouchableOpacity>}
+              {/* Keep reservation and AI together; only the existing ADMIN shortcut may wrap. */}
+              <View testID="calendar-primary-actions" style={{ flexDirection: "row", alignItems: "center", gap: 5, flexGrow: 1, flexBasis: calQuickCreateOpen ? 222 : 271, minWidth: calQuickCreateOpen ? 222 : 271 }}>
               {/* NUEVA TAREA */}
               {!calQuickCreateOpen && (
                 <TouchableOpacity
@@ -20488,9 +20490,9 @@ function HomeScreenContent() {
                 }}
                 activeOpacity={0.7}
                 hitSlop={2}
-                style={{ paddingHorizontal: 10, height: 42, borderRadius: 21, backgroundColor: "rgba(74,128,189,0.12)", borderWidth: 1.5, borderColor: "rgba(74,128,189,0.55)", alignItems: "center", justifyContent: "center" }}
+                style={{ width: 44, height: 44, paddingHorizontal: 4, borderRadius: 22, backgroundColor: "rgba(74,128,189,0.12)", borderWidth: 1.5, borderColor: "rgba(74,128,189,0.55)", alignItems: "center", justifyContent: "center" }}
               >
-                <Text style={{ color: "#4A80BD", fontSize: 9, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.2 }}>{t('cal_today_btn')}</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} style={{ color: "#4A80BD", fontSize: 9, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 1.2 }}>{t('cal_today_btn')}</Text>
               </TouchableOpacity>
               {/* RESERVAR + — iniciar otra reserva. Long-press → panel diagnóstico booking */}
               <TouchableOpacity
@@ -20501,9 +20503,9 @@ function HomeScreenContent() {
                 hitSlop={2}
                 accessibilityRole="button"
                 accessibilityLabel={t("cal_book_new_accessibility")}
-                style={{ flexGrow: 1, flexShrink: 1, minWidth: 104, maxWidth: 180, paddingHorizontal: 8, height: 52, borderRadius: 18, backgroundColor: "#15803D", borderWidth: 1.5, borderColor: "#15803D", alignItems: "center", justifyContent: "center" }}
+                style={{ flexGrow: 1, flexShrink: 1, minWidth: 104, paddingHorizontal: 5, height: 60, borderRadius: 18, backgroundColor: "#15803D", borderWidth: 1.5, borderColor: "#15803D", alignItems: "center", justifyContent: "center" }}
               >
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2} style={{ ...GO_ASSISTANT_LABEL, fontSize: 13, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0, maxWidth: "100%", flexShrink: 1, textAlign: "center", textAlignVertical: "center", includeFontPadding: false }}>{t("cal_book_new_btn")}</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2} style={{ ...GO_ASSISTANT_LABEL, fontSize: 14, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0, maxWidth: "100%", flexShrink: 1, textAlign: "center", textAlignVertical: "center", includeFontPadding: false }}>{t("cal_book_new_btn")}</Text>
               </TouchableOpacity>
               {/* IA */}
               <TouchableOpacity
@@ -20512,11 +20514,13 @@ function HomeScreenContent() {
                 delayLongPress={400}
                 activeOpacity={0.8}
                 hitSlop={2}
+                accessibilityRole="button"
                 accessibilityLabel={lang === "en" ? "Open GO (hold for voice)" : "Abrir GO (mantén para voz)"}
-                style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: GO_GOLD, alignItems: "center", justifyContent: "center", shadowColor: GO_GOLD, shadowOpacity: 0.55, shadowRadius: 10, elevation: 6 }}
+                style={{ width: "22%", minWidth: 64, maxWidth: 76, aspectRatio: 1, flexShrink: 0, borderRadius: 38, backgroundColor: GO_GOLD, alignItems: "center", justifyContent: "center", shadowColor: GO_GOLD, shadowOpacity: 0.55, shadowRadius: 10, elevation: 6 }}
               >
-                <Text style={{ ...GO_ASSISTANT_LABEL, fontSize: 15, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.4 }}>GO</Text>
+                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={1.4} style={{ ...GO_ASSISTANT_LABEL, fontSize: 24, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.4 }}>GO</Text>
               </TouchableOpacity>
+              </View>
             </View>
 
               {/* Acceso empresarial secundario: conserva su acción. */}

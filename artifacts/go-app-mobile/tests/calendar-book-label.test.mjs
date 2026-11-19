@@ -12,7 +12,7 @@ test('the complete booking label stays on one fitted line, centered, with both e
  const {button,counts}=render();button.props.onPress();button.props.onLongPress();assert.deepEqual(counts(),[1,1]);
  const text=button.children.find(c=>c?.type==='Text');assert.equal(text.children.join(''),'RESERVAR +');assert.equal(text.props.numberOfLines,1);assert.equal(text.props.adjustsFontSizeToFit,true);
  assert.equal(text.props.style.textAlign,'center');assert.equal(text.props.style.textAlignVertical,'center');assert.equal(button.props.style.alignItems,'center');assert.equal(button.props.style.justifyContent,'center');
- assert.equal(button.props.accessibilityLabel,'Iniciar otra reserva');assert.equal(text.props.style.fontSize,13);
+ assert.equal(button.props.accessibilityLabel,'Iniciar otra reserva');assert.equal(text.props.style.fontSize,14);
 });
 
 test('the creation action has translated labels and high white-on-green contrast',()=>{
@@ -38,5 +38,11 @@ test('the real Inter Black glyph widths fit the unchanged 104-point iPhone butto
  const available=s.minWidth-2*s.paddingHorizontal-2*s.borderWidth;
  assert.ok(width('RESERVAR +',p.style.fontSize,p.style.letterSpacing)<=available,'Fits without shrinking at the minimum actual width');
  assert.ok(width('RESERVAR +',p.style.fontSize*p.maxFontSizeMultiplier*p.minimumFontScale,p.style.letterSpacing)<=available,'Fits at the permitted system font multiplier using local text fitting');
- assert.equal(s.height,52);assert.equal(s.backgroundColor,'#15803D');
+ assert.equal(s.height,60);assert.equal(s.backgroundColor,'#15803D');
+ const primary=find(n=>ts.isJsxElement(n)&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='testID'&&a.initializer?.text==='calendar-primary-actions'));
+ const assistant=find(n=>ts.isJsxElement(n)&&n.openingElement.tagName.getText(ast)==='TouchableOpacity'&&n.openingElement.attributes.properties.some(a=>a.name?.getText(ast)==='onPress'&&a.getText(ast).includes('openAi()')),primary);
+ const scope={exports:{},React:{createElement:(type,props,...children)=>({type,props,children})},TouchableOpacity:'Button',Text:'Text',lang:'es',GO_GOLD:'#C8A037',GO_ASSISTANT_LABEL:{color:'#fff'}};
+ vm.runInNewContext(transpile('exports.go=('+assistant.getText(ast)+');'),scope);
+ const go=scope.exports.go,labelGo=go.children.find(c=>c?.type==='Text');
+ assert.ok(width('GO',labelGo.props.style.fontSize*labelGo.props.maxFontSizeMultiplier,labelGo.props.style.letterSpacing)<=go.props.style.minWidth-8,'The real enlarged GO glyphs retain a margin inside the smallest circle');
 });

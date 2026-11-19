@@ -105,13 +105,47 @@ test('bottom controls emphasize RESERVAR, fit a narrow viewport and retain every
   assert.equal(textOf(today), 'HOY'); assert.equal(textOf(reserve), 'RESERVAR +'); assert.equal(textOf(go), 'GO');
   assert.ok(reserve.props.style.height > today.props.style.height);
   assert.ok(nodes(reserve, n => n.type === 'Text')[0].props.style.fontSize > nodes(today, n => n.type === 'Text')[0].props.style.fontSize);
-  assert.ok(actions.every(action => action.props.hitSlop * 2 < tree.props.style.gap));
-  const minimumWidth = 44 + 52 + reserve.props.style.minWidth + 44 + 3 * tree.props.style.gap + 10;
-  assert.ok(minimumWidth <= 320 - 36);
+  const primary = nodes(tree, n => n.props.testID === 'calendar-primary-actions')[0];
+  assert.ok(actions.every(action => action.props.hitSlop * 2 < primary.props.style.gap));
+  const minimumWidth = task.props.style.width + today.props.style.width + reserve.props.style.minWidth + go.props.style.minWidth + 3 * primary.props.style.gap;
+  const sheet = find(n => ts.isPropertyAssignment(n) && n.name.getText(ast) === 'sheet');
+  const sheetStyle = evaluate('exports.style = (' + sheet.initializer.getText(ast) + ')', { BACKGROUND_MASTER: { baseColor: '#000' } }).style;
+  assert.ok(minimumWidth <= 320 - 2 * sheetStyle.paddingHorizontal - 2 * tree.props.style.paddingHorizontal);
+  assert.equal(reserve.props.style.height, 60);
+  assert.equal(go.props.style.maxWidth, 76); assert.equal(go.props.style.aspectRatio, 1);
+  assert.ok(go.props.style.minWidth > reserve.props.style.height);
   for (const action of actions) action.props.onPress();
   reserve.props.onLongPress(); go.props.onLongPress();
   assert.deepEqual(calls, [['task', true], ['today', 8], ['book', true], ['go'], ['diagnostics', true], ['voice']]);
   assert.equal(reserve.props.delayLongPress, 800); assert.equal(go.props.delayLongPress, 400);
+});
+
+test('the real bottom composition keeps GO taller and RESERVAR wider across iPhone widths, safe insets, handedness and ADMIN wrapping',()=>{
+  const sheet=find(n=>ts.isPropertyAssignment(n)&&n.name.getText(ast)==='sheet');
+  const sheetStyle=evaluate('exports.style=('+sheet.initializer.getText(ast)+')',{BACKGROUND_MASTER:{baseColor:'#000'}}).style;
+  for(const handedness of ['left','right'])for(const calQuickCreateOpen of [false,true])for(const admin of [false,true]){
+    const tree=renderFragment(byId('calendar-actions'),{handedness,calQuickCreateOpen,goView:{view:admin?'ADMIN':'USER'},adminAccess:{allowed:admin,checking:false},GO_GOLD:'#C8A037',GO_ASSISTANT_LABEL:{color:'#FFFFFF'},t:key=>key,Haptics:{},openCalendarNote(){},openCalendarReservation(){},setBoardsOpen(){}});
+    const group=nodes(tree,n=>n.props.testID==='calendar-primary-actions')[0],buttons=nodes(group,n=>n.type==='TouchableOpacity');
+    const reserve=buttons.at(-2),go=buttons.at(-1),secondary=buttons.slice(0,-2);
+    assert.equal(go.props.accessibilityRole,'button');assert.equal(go.props.style.backgroundColor,'#C8A037');
+    assert.equal(tree.props.style.flexWrap,'wrap');assert.equal(group.props.style.flexWrap,undefined,'The main actions never split onto separate rows');
+    for(const [width,safe] of [[320,0],[375,0],[390,0],[430,0],[568,88],[844,118]]){
+      const available=width-safe-2*sheetStyle.paddingHorizontal-2*tree.props.style.paddingHorizontal;
+      // The ADMIN control is a separate flex item; if its enlarged label cannot fit beside
+      // the intact primary group, native wrapping moves only that item to the prior line.
+      for(const adminWidth of admin?[66,100]:[0]){
+        const remaining=available-(adminWidth?adminWidth+tree.props.style.gap:0);
+        const groupWidth=remaining>=group.props.style.minWidth?remaining:available;
+        assert.ok(groupWidth>=group.props.style.minWidth);
+        const diameter=Math.min(go.props.style.maxWidth,Math.max(go.props.style.minWidth,groupWidth*parseFloat(go.props.style.width)/100));
+        const reserveWidth=groupWidth-secondary.reduce((sum,button)=>sum+button.props.style.width,0)-diameter-(buttons.length-1)*group.props.style.gap;
+        assert.ok(diameter>reserve.props.style.height&&diameter>=64&&diameter<=76);
+        assert.ok(reserveWidth>=reserve.props.style.minWidth&&reserveWidth>diameter,'Reservation retains the horizontal emphasis');
+        assert.ok(buttons.every(button=>button.props.hitSlop*2<group.props.style.gap),'Touch targets do not overlap');
+        assert.equal(go.props.style.aspectRatio,1);assert.ok(go.props.style.borderRadius>=diameter/2);
+      }
+    }
+  }
 });
 test('root keeps hierarchical closes and overlays the original floats without reserving calendar space', () => {
   const globals = { insets: { right: 34, bottom: 0 }, overlayPanelHeight: 90, calFlow: {}, Haptics: {}, closeCalendarTaskPanel() {}, setCalConfigVisible() {}, exitCalendarContainer() {} };
