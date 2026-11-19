@@ -17,7 +17,7 @@ for(const profile of ['ADMIN','BUSINESS','USER'])for(const preset of ['compacto'
    assert.ok(visual.x!==f.closeQrX||visual.y!==f.closeQrY,'the former header location is not used');
    const touch={x:visual.x-slop.left,y:visual.y-slop.top,width:p.width+slop.left+slop.right,height:p.height+slop.top+slop.bottom};
    assert.ok(touch.x>=d.insets.left+8&&touch.x+touch.width<=d.width-d.insets.right-8);
-   assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=d.height-Math.max(d.insets.bottom,8));
+   assert.ok(touch.y>=d.insets.top+8&&touch.y+touch.height<=d.height-Math.max(Math.min(d.insets.bottom,12),8));
    const root=r=>f.toLandingRootRect(r),move=r=>({...r,y:r.y+f.landingOffsetY});
    const commands=move(root(f.landingPanels.commands));
    const active=f.compactLandingGeometry.obstacles;
@@ -58,8 +58,8 @@ test('the photographed 393 Ãƒâ€” 852 Landing keeps QR opposite AYUDA in b
   assert.ok(f.landingCornerPair,'both targets fit without moving an active orbit');
   assert.ok(hand==='right'?help.x>qr.x+qr.width&&help.x>=300:qr.x>help.x+help.width&&help.x<=60);
   assert.ok(help.y>=d.height*.5&&qr.y>=d.height*.85);
-  assert.ok(help.y+help.height<=d.height-d.insets.bottom-8,'AYUDA clears the bottom safe area');
-  assert.equal(f.landingQrPosition.y,780,'QR respects the bottom safe area');
+  assert.ok(help.y+help.height<=d.height-18,'AYUDA retains clearance above the home indicator');
+  assert.equal(f.landingQrPosition.y,802,'QR follows the lowered dock with the same home indicator clearance');
   assert.ok(help.y+help.height<=d.height-8&&qr.y+qr.height<=d.height-8);
   assert.ok(!overlaps(help,qr));
   assert.deepEqual(JSON.parse(JSON.stringify(f.landingArrangement.offsets)),

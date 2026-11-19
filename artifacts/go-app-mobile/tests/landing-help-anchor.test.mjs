@@ -22,7 +22,7 @@ for(const profile of ['USER','ADMIN','BUSINESS'])for(const preset of ['compacto'
   assert.ok(distance(h,travel)<=h.width*.3,'AYUDA stays visually close to VIAJE');assert.ok(distance(h,reservations)<=h.width*.15);
   assert.ok(g.frame.x>=d.insets.left+4-.001&&g.frame.x+g.frame.width<=d.width-d.insets.right-4+.001);
   assert.ok(g.frame.y>=d.insets.top+4-.001);
-  const bottomGap=d.height-d.insets.bottom-g.frame.y-g.frame.height;
+  const bottomGap=d.height-Math.min(d.insets.bottom,12)-g.frame.y-g.frame.height;
   assert.ok(bottomGap>=6-.001);
   if(bottomGap>6.001){
    assert.equal(d.width,320);assert.equal(preset,'grande','only the narrow QR constraint can require more bottom space');
@@ -69,4 +69,16 @@ test('real AYUDA, VIAJE and RESERVAS callbacks retain their independent actions'
  const action=calendarDef.properties.find(n=>n.name?.getText(ast)==='onPress').initializer.getText(ast);
  const calendarFn=vm.runInNewContext(transpile('result='+action),{result:null,Haptics:{selectionAsync(){}},setOtrosOpen(){},openCal(){calendar++;}});calendarFn();assert.equal(calendar,1);assert.equal(intent,'viaje');
  assert.ok(source.includes('useGoDockPreference(handedness, true)'),'Landing reuses the stored left/center/right preference');
+});
+
+
+test('modern iPhone lowers the complete dock by 22pt without resizing or changing its internal geometry',()=>{
+ const d={width:393,height:852,insets:{top:59,bottom:34,left:0,right:0}};
+ for(const profile of ['USER','ADMIN','BUSINESS'])for(const preset of ['compacto','estandar','grande'])for(const alignment of ['right','left','center']){
+  const f=frame(d,preset,profile,alignment),g=f.compactLandingGeometry;
+  assert.ok(g.fitted);assert.ok(Math.abs(g.frame.y+g.frame.height-(d.height-18))<.001);
+  const ctx=f.ctx, qr=g.fixedObstacles.at(-1);
+  const old=ctx.compactLandingOrbit({goSize:ctx.goSize,orbitRadius:ctx.orbitRadius,orbitSize:ctx.orbitBtnSize,orbitCount:8,orbitVisible:true,satelliteRadius:ctx.microR,satelliteSize:ctx.microSz,satellites:ctx.visibleLandingSatelliteKeys(Object.keys(ctx.LANDING_SATELLITE_DEGREES),ctx.isUserV1Surface).filter(key=>key!=='payment').map(key=>({key,degrees:ctx.LANDING_SATELLITE_DEGREES[key]})),helpSize:g.help.width,alignment,bounds:{left:4,right:d.width-4,top:d.insets.top+4,bottom:d.height-34-6},obstacles:[...g.fixedObstacles.slice(0,-1),{...qr,y:qr.y-22}]});
+  for(const r of [...g.obstacles,{...g.help,key:'help'}]){const p=[...old.obstacles,{...old.help,key:'help'}].find(v=>v.key===r.key);assert.ok(Math.abs(r.x-p.x)<.001);assert.ok(Math.abs(r.y-p.y-22)<.001);assert.equal(r.width,p.width);assert.equal(r.height,p.height);}
+ }
 });

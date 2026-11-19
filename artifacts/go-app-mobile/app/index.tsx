@@ -14170,7 +14170,7 @@ function HomeScreenContent() {
     helpSize: Math.max(44, screen.width < 440 ? 48 : 60), alignment: landingAlignment,
     obstacles: [...supportObstacles.slice(((landingArrangement as {obstacles?:HumanityRect[]}).obstacles ?? landingOrbitObstacles.slice(1)).length),
       { x: landingControlHand === "left" ? screen.width - insets.right - 8 - closeQrSize - 2 * closeQrHit : insets.left + 8,
-        y: screen.height - Math.max(insets.bottom, 8) - closeQrSize - 2 * closeQrHit,
+        y: screen.height - Math.max(Math.min(insets.bottom, 12), 8) - closeQrSize - 2 * closeQrHit,
         width: closeQrSize + 2 * closeQrHit, height: closeQrSize + 2 * closeQrHit }],
     preferredCenterX: landingAlignment === "center" && landingBaseFrame.virtual
       ? landingBaseFrame.left + landingBaseFrame.width / 2 < screen.width / 2
@@ -14178,7 +14178,8 @@ function HomeScreenContent() {
         : (insets.left + 4 + toLandingRootRect(landingPanels.commands).x - 2) / 2
       : undefined,
     bounds: { left: insets.left + 4, right: screen.width - insets.right - 4,
-      top: insets.top + 4, bottom: screen.height - insets.bottom - SYSTEM_MARGIN_Y },
+      // The compact circular dock can use the lower inset; retain clearance above the home indicator.
+      top: insets.top + 4, bottom: screen.height - Math.min(insets.bottom, 12) - SYSTEM_MARGIN_Y },
   });
   const landingLowerOffsets = landingArrangement.offsets;
   const landingDisplayCloseRect = landingArrangement.closeRect;
@@ -14249,7 +14250,7 @@ function HomeScreenContent() {
       width: landingDisplayCloseRect.width + 16, height: landingDisplayCloseRect.height + 16 }];
   const pairedLandingQr = isUserV1Surface && !helpOverlapsAdminSatellite && !!landingCornerPair?.qr;
   const landingQrPosition = { x: landingControlHand === "left" ? screen.width - insets.right - 8 - closeQrSize - closeQrHit : insets.left + 8 + closeQrHit,
-    y: screen.height - Math.max(insets.bottom, 8) - closeQrSize - closeQrHit };
+    y: screen.height - Math.max(Math.min(insets.bottom, 12), 8) - closeQrSize - closeQrHit };
 
   // Keep the approved header reservation: relocating QR must not shift panels or confirmations.
   const landingHeaderControls = [
