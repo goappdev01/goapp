@@ -487,6 +487,24 @@ async function openChangeSlots(f,person="Ana") {
  if(person==="Ana")assert.ok(selected,"original professional is preselected");
  await f.press(person);return f.tree();
 }
+test("change slot notice uses two uppercase lines and the selected business name, without staff or demo filler",async()=>{
+ for(const [name,width,fontScale] of [['Go peluquería 2',320,1],['Peluquería Primera',390,1],['Peluquería de nombre muy largo con varias palabras para conservar íntegramente',320,1.8]]){
+  const selection=savedChangeSelection();selection.business.name=name;
+  const before=JSON.stringify(selection),f=fixture('overlay',{changeSelection:selection,width,fontScale});await openChangeSlots(f);
+  const notice=nodes(f.tree()).find(n=>n.props.testID==='booking-change-slot-notice');assert.ok(notice);
+  assert.equal(text(notice),`LA RESERVA ACTUAL SE MANTIENE\nHASTA LA ACEPTACIÓN DE ${name.toLocaleUpperCase('es')}`);
+  assert.equal(text(notice).split('\n').length,2);assert.doesNotMatch(text(notice),/Ana|Datos de prueba|Elige una franja/);
+  assert.equal(notice.props.numberOfLines,undefined,'Long names may wrap without clipping');assert.notEqual(notice.props.allowFontScaling,false);
+  assert.equal(flatStyle(notice).height,undefined);assert.equal(JSON.stringify(selection),before);
+  assert.equal(posted(f).length,0);assert.equal(f.navigation.length,0);
+ }
+});
+
+test("normal new booking slots do not display a change-proposal notice",async()=>{
+ const f=fixture('overlay');await openOverlaySlots(f);
+ assert.equal(nodes(f.tree()).find(n=>n.props.testID==='booking-change-slot-notice'),undefined);
+});
+
 test("proposal starts at the same services catalogue, keeps the original selection, and uses normal review without a HOLD",async()=>{
  const selection=savedChangeSelection(),before=JSON.stringify(selection),f=fixture("overlay",{changeSelection:selection});
  await openChangeSlots(f);

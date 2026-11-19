@@ -10,7 +10,7 @@ const walk=p=>readdirSync(p,{withFileTypes:true}).flatMap(e=>e.isDirectory()?['n
 const canonical=handler=>ts.createPrinter({removeComments:true}).printFile(ts.createSourceFile('callback.ts','const callback='+handler,ts.ScriptTarget.Latest,true));
 test('every migrated navigation callback is unchanged, no duplicates were added and sorting arrows remain untouched',()=>{
  const actual=[];for(const file of [...walk('components'),'app/index.tsx']){const ast=ts.createSourceFile(file,readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);(function visit(n){if(!file.endsWith('GoNavigationAppearanceControl.tsx')&&ts.isJsxSelfClosingElement(n)&&n.tagName.getText(ast)==='GoCloseButton'){const h=n.attributes.properties.find(p=>p.name?.getText(ast)==='onPress');if(h)actual.push({file:file.replace(/\\/g,'/'),handler:h.initializer.expression.getText(ast)});}ts.forEachChild(n,visit);})(ast);}
- const keys=rows=>rows.map(r=>r.file+'\n'+canonical(r.handler)).sort();const expected=[...baseline.handlers,{file:'app/index.tsx',handler:'()=>setSupportMode(active=>!active)'},{file:'components/booking-assistant/BookingAssistantScreen.tsx',handler:'back'},{file:'app/index.tsx',handler:'() => { Haptics.selectionAsync(); setCalConfigVisible(true); }'},{file:'components/booking/GoReservasConfigScreen.tsx',handler:'() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }'},{file:'components/landing/SupportAdminPanel.tsx',handler:'back'}];
+ const keys=rows=>rows.map(r=>r.file+'\n'+canonical(r.handler)).sort();const expected=[...baseline.handlers,{file:'app/index.tsx',handler:'()=>setSupportMode(active=>!active)'},{file:'components/booking-assistant/BookingAssistantScreen.tsx',handler:'back'},{file:'app/index.tsx',handler:'() => { Haptics.selectionAsync(); setCalConfigVisible(visible => !visible); }'},{file:'components/booking/GoReservasConfigScreen.tsx',handler:'() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }'},{file:'components/landing/SupportAdminPanel.tsx',handler:'back'}];
  // Six controls already present in HEAD, plus the new ADMIN demo pair. Keep the exact multiset check.
  expected.push(
   {file:'components/CalendarSearchSheet.tsx',handler:'close'},
@@ -42,6 +42,22 @@ async function fixture({hand='right',width=390,height=600,stored=new Map(),navig
  const render=async change=>{props={...props,...change};await settle(()=>root.render(React.createElement(handContext.GoNavigationHand.Provider,{value:hand},React.createElement(fab.DraggableFAB,props,children))));};await render({});
  return{hosts,styles,gestures,calls,stored,props,settle,render,hand:async value=>{hand=value;await render({});},gesture:()=>gestures.at(-1),style:()=>styles.at(-1)(),press:async(label,pressIn=true)=>settle(()=>{const p=hosts.get(label);if(pressIn)p.onPressIn?.();p.onPress({stopPropagation(){calls.push('stop');}});}),close:()=>settle(()=>root.unmount()),button,native,async floating(options){await settle(()=>root.render(React.createElement(handContext.GoNavigationHand.Provider,{value:hand},React.createElement(floating.GoNavigationFloating,{screenKey:'floating-test',width:136,handedness:hand,...options},children))));}};
 }
+
+test('an expanded Calendar panel uses a down arrow and restores the default back icon without changing keyboard, settings or exit semantics',async()=>{
+ let icon,button,presses=0,stops=0;
+ const native={...life.rn,TouchableOpacity:props=>{button=props;return React.createElement('div',null,props.children);},StyleSheet:{create:x=>x}};
+ const Button=evaluate('components/ui/GoCloseButton.tsx',{'react-native':native,'@expo/vector-icons':{Feather:props=>{icon=props.name;return null;}}}).GoCloseButton;
+ const root=createRoot(document.createElement('div'));
+ const render=props=>React.act(async()=>root.render(React.createElement(Button,{level:'panel',accessibilityLabel:'Panel navigation',onPress:()=>presses++,...props})));
+ try{
+  await render({});assert.equal(icon,'arrow-left');
+  await render({collapsePanel:true});assert.equal(icon,'arrow-down');button.onPress({stopPropagation(){stops++;}});assert.equal(presses,1);assert.equal(stops,1);
+  await render({collapsePanel:false});assert.equal(icon,'arrow-left');
+  await render({keyboardVisible:true});assert.equal(icon,'arrow-down');
+  await render({level:'settings',collapsePanel:true});assert.equal(icon,'settings');
+  await render({level:'container',collapsePanel:true});assert.equal(icon,'x');
+ }finally{await React.act(async()=>root.unmount());}
+});
 
 test('smoke icon-only navigation shares a readable 64pt square, retain callbacks, disabled states and non-overlapping touch areas',async()=>{
  const f=await fixture();try{for(const label of ['Original back','Original exit']){const p=f.hosts.get(label),s=flat(p.style);assert.equal(s.width,64);assert.equal(s.height,64);assert.equal(s.borderRadius,21);assert.equal(s.flexDirection,'column');assert.equal(s.paddingVertical,0);assert.equal(p.accessibilityState.disabled,false);assert.ok(p.hitSlop<=2);}assert.equal(flat(f.hosts.get('Original back').style).backgroundColor,'rgba(60,68,78,0.75)');assert.equal(flat(f.hosts.get('Original exit').style).backgroundColor,'rgba(60,68,78,0.75)');await f.press('Original back');await f.press('Original exit');assert.deepEqual(f.calls,['stop','back','stop','exit']);assert.ok(!f.hosts.get('Original back').children?.props?.children?.includes?.('ATRÁS'));}finally{await f.close();}

@@ -174,6 +174,27 @@ for (const [file, component, label, key, extra] of [
   assert.equal(nodes(tree).some(node => node.props?.level === 'panel' && node.props.accessibilityLabel === 'Cerrar configuración'), false);
 });
 
+test('Calendar tools production handlers toggle twice, close only settings and persist the same existing preference',async()=>{
+ const d=disk(),api=loadPreference(d.storage);
+ const state=find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)==='[calConfigVisible, setCalConfigVisible]').getText(ast);
+ const attr=(node,name)=>node.attributes.properties.find(a=>a.name?.getText(ast)===name)?.initializer;
+ const settings=find(n=>ts.isJsxSelfClosingElement(n)&&attr(n,'testID')?.text==='calendar-tools-toggle');
+ const close=find(n=>ts.isJsxSelfClosingElement(n)&&attr(n,'onPress')?.expression?.getText(ast).includes('else setCalConfigVisible(false)'));
+ let current;
+ const scope={exports:{},React,...api,Haptics:{selectionAsync(){}},calQuickCreateOpen:false,closeCalendarTaskPanel(){throw Error('Do not close the task');},capture:value=>{current=value;}};
+ vm.runInNewContext(transpile(`exports.Probe=function(){const ${state};capture({expanded:calConfigVisible,toggle:${attr(settings,'onPress').expression.getText(ast)},close:${attr(close,'onPress').expression.getText(ast)}});return null;};`),scope);
+ const root=createRoot(document.createElement('div'));
+ try{
+  await act(()=>root.render(React.createElement(scope.exports.Probe)));assert.equal(current.expanded,false);
+  await act(()=>current.toggle());assert.equal(current.expanded,true);
+  await act(()=>current.toggle());assert.equal(current.expanded,false);
+  await act(()=>{current.toggle();current.toggle();});assert.equal(current.expanded,false,'Rapid taps use the latest preference value');
+  await act(()=>current.toggle());assert.equal(current.expanded,true);
+  await act(()=>current.close());assert.equal(current.expanded,false);await tick();
+  assert.equal(d.values.get(api.CONFIG_PANEL_KEYS.calendar),'false');assert.ok(d.writes.every(([key])=>key===api.CONFIG_PANEL_KEYS.calendar));
+ }finally{await act(()=>root.unmount());}
+});
+
 test('Calendar and Listados production handlers persist manual choices and leave them intact on exit', async () => {
   const d = disk(), api = loadPreference(d.storage);
   const state = name => find(node => ts.isVariableDeclaration(node) && node.name.getText(ast) === name).getText(ast);

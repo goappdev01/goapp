@@ -20235,7 +20235,7 @@ function HomeScreenContent() {
             >
               <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}><GoCalendarViewSelector compact value={calBgViewMode} onChange={changeCalendarView} />{demoBookingRepository && <TouchableOpacity accessibilityRole="button" testID="customer-calendar-shortcut" accessibilityLabel={lang === "en" ? "Customer calendar" : "Calendario cliente"} onPress={event => { event.stopPropagation(); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{paddingHorizontal:2,paddingVertical:8,width:44,minHeight:44,justifyContent:"center"}}><Feather name="calendar" size={14} color="#ff7474" /></TouchableOpacity>}</View>
               <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>{monthNavigation}</View>
-              <GoCloseButton level="settings" touchSize={44} preserveTouchSize iconSize={22} accessibilityLabel="Configuración de Calendario" onPress={() => { Haptics.selectionAsync(); setCalConfigVisible(true); }}/>
+              <GoCloseButton testID="calendar-tools-toggle" level="settings" touchSize={44} preserveTouchSize iconSize={22} accessibilityLabel="Configuración de Calendario" onPress={() => { Haptics.selectionAsync(); setCalConfigVisible(visible => !visible); }}/>
             </View>)}
                 goLog={goLog.filter((e: any) => {
                   const id: string = e.id ?? "";
@@ -20414,6 +20414,7 @@ function HomeScreenContent() {
             {(calQuickCreateOpen || (calConfigVisible && !demoCustomerCalendarSelected)) && (
               <GoCloseButton
                 level="panel"
+                collapsePanel={calConfigVisible && !calQuickCreateOpen}
                 onPress={() => {
                   Haptics.selectionAsync();
                   if (calQuickCreateOpen) closeCalendarTaskPanel();

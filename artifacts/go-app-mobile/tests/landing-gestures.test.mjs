@@ -129,7 +129,7 @@ test('calendar header remains laid out but invisible and untouchable throughout 
   assert.ok(selector, "the existing view selector stays inside the protected calendar header");
   assert.ok(selector.attributes.properties.some(attr => attr.name?.getText(home) === "value"
     && attr.initializer?.getText(home) === "{calBgViewMode}"));
-  assert.ok(opening.parent.getText(home).includes('setCalConfigVisible(true)'));
+  assert.ok(opening.parent.getText(home).includes('setCalConfigVisible(visible => !visible)'));
   for (const showBookingFromCal of [false, true, false]) {
     const context = { showBookingFromCal, insets: { top: 44 } };
     const style = vm.runInNewContext(`(${attribute('style')})`, context);

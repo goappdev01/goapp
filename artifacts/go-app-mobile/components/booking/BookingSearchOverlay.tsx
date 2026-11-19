@@ -1163,6 +1163,7 @@ export function BookingSearchOverlay({
   const accentColor = selectedBusiness?bookingCategoryAccent(selectedBusiness):beautySelection?beauty?.color||"#eab308":"#00e5ff";
   const compactServices = canonicalBookingActivity(selectedBusiness?.category) === "peluqueria";
   const servicesFooterVisible = step === "item" && compactServices && items.length > 0;
+  const proposalBusinessName = (selectedBusiness?.name || changeSelection?.business.name || "").trim().toLocaleUpperCase(lang);
   const reviewedSlot = proposalReview?.slot ?? activeHold;
   const reviewedQuote = proposalReview?.selection.catalogSnapshot ?? activeHold?.catalogSnapshot;
   const reviewedPlan = confirmedBooking?.timingSnapshot ?? reviewedSlot?.timingSnapshot;
@@ -1673,10 +1674,9 @@ export function BookingSearchOverlay({
               <View style={s.stepWrap}>
                 <BreadcrumbStrip business={selectedBusiness} item={selectedItem} accentColor={accentColor} />
 
-                {changeSelection && <Text style={[s.emptyText, { marginHorizontal: 20, marginBottom: 12 }]}>
-                  {lang === "en" ? "Choose an available slot. Your original booking remains unchanged until agreement." : "Elige una franja disponible. La reserva original se mantiene hasta el acuerdo."}
-                  {changeSelection.staff ? ` · ${changeSelection.staff.name}` : ""}
-                  {demoRepository && !demoRepository.store.serverBookings ? (lang === "en" ? " · Local test data" : " · Datos de prueba locales") : ""}
+                {changeSelection && <Text testID="booking-change-slot-notice" style={[s.emptyText, { marginHorizontal: 16, marginBottom: 10, fontSize: 12, lineHeight: 18, fontWeight: "700" }]}>
+                  {lang === "en" ? `THE CURRENT BOOKING REMAINS\nUNTIL ACCEPTED${proposalBusinessName ? " BY " + proposalBusinessName : ""}`
+                    : `LA RESERVA ACTUAL SE MANTIENE\nHASTA LA ACEPTACIÓN${proposalBusinessName ? " DE " + proposalBusinessName : ""}`}
                 </Text>}
 
                 {/* ── ERROR: slot ya reservado — claimSlot o isSlotOccupied detectaron conflicto ── */}

@@ -169,6 +169,27 @@ test('root keeps hierarchical closes and overlays the original floats without re
   assert.deepEqual(nodes(demoTree, n => n.type === 'GoCloseButton').map(n => n.props.level), ['container']);
   assert.equal(nodes(demoTree, n => n.type === 'TouchableOpacity').length, 0, 'DEMO keeps its container exit without exposing the personal calendar shortcut');
 });
+test('Calendar tools toggle and downward panel close are coherent without leaving Calendar or closing another panel',()=>{
+  for(const handedness of ['left','right']){
+    let expanded=false,exits=0,taskCloses=0;
+    const setCalConfigVisible=update=>{expanded=typeof update==='function'?update(expanded):update;};
+    const globals={handedness,insets:{right:0,bottom:34},overlayPanelHeight:90,calFlow:{},Haptics:{selectionAsync(){}},setCalConfigVisible,
+      closeCalendarTaskPanel:()=>taskCloses++,exitCalendarContainer:()=>exits++};
+    const tools=find(n=>ts.isJsxSelfClosingElement(n)&&n.attributes.properties.some(a=>a.name?.getText(ast)==='testID'&&a.initializer?.text==='calendar-tools-toggle'));
+    const toggle=renderFragment(tools,globals);
+    toggle.props.onPress();assert.equal(expanded,true);
+    let floats=renderFragment(byId('calendar-floating-controls'),{...globals,calConfigVisible:expanded});
+    let panel=nodes(floats,n=>n.type==='GoCloseButton'&&n.props.level==='panel')[0];
+    assert.equal(panel.props.collapsePanel,true);panel.props.onPress();assert.equal(expanded,false);assert.equal(exits,0);assert.equal(taskCloses,0);
+    toggle.props.onPress();assert.equal(expanded,true);toggle.props.onPress();assert.equal(expanded,false);
+    floats=renderFragment(byId('calendar-floating-controls'),{...globals,calConfigVisible:expanded,calQuickCreateOpen:true});
+    panel=nodes(floats,n=>n.type==='GoCloseButton'&&n.props.level==='panel')[0];assert.equal(panel.props.collapsePanel,false,'The existing task back arrow is restored');
+    panel.props.onPress();assert.equal(taskCloses,1);assert.equal(exits,0);
+    floats=renderFragment(byId('calendar-floating-controls'),{...globals,calConfigVisible:true,calQuickCreateOpen:true});
+    panel=nodes(floats,n=>n.type==='GoCloseButton'&&n.props.level==='panel')[0];assert.equal(panel.props.collapsePanel,false);panel.props.onPress();assert.equal(taskCloses,2,'Nested task priority remains intact');
+  }
+});
+
 test('the shared note editor is embedded in Calendar and the former task layer is absent', () => {
   const call = find(n => ts.isCallExpression(n) && n.getText(ast) === 'renderUnifiedNoteEditor()');
   let modal = call?.parent;
