@@ -164,7 +164,8 @@ test('the existing list and badges use explicit Pending and separate DEMO propos
  const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),all=[];(function walk(n){all.push(n);ts.forEachChild(n,walk)})(ast);
  const declaration=name=>all.find(n=>ts.isVariableDeclaration(n)&&n.name.getText(ast)===name).getText(ast);
  const raw=[entry({id:'elapsed',estado:'aceptado'}),entry({id:'future',dateISO:'2030-01-08',estado:'pendiente'}),entry({id:'unassigned',dateISO:'',time:'',estado:'pendiente'})],pending=entry({id:'demo',demoLocal:true}),proposal=entry({id:'proposal',demoLocal:true,estado:'propuesta_pendiente',changeProposal:{dateISO:'2030-01-08',time:'13:00'}}),context={exports:{},goLog:raw,mergeCompletionEntries:core.mergeCompletionEntries,actionCompletion:{candidates:[pending,proposal],status:e=>e.id==='demo'?'pending':undefined}};
- const code=['resolutionEntries','countPendiente','countPropuesta','listEntries'].map(n=>'const '+declaration(n)+';').join('\n')+'\nexports.result={countPendiente,countPropuesta,listEntries};';
+ const pendingRule=all.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='isPendingListEntry').getText(ast);context.isEditableListNote=()=>false;
+ const code=pendingRule+';'+['resolutionEntries','countPendiente','countPropuesta'].map(n=>'const '+declaration(n)+';').join('\n')+'\nexports.result={countPendiente,countPropuesta,listEntries:resolutionEntries};';
  vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,context);
  assert.equal(context.exports.result.countPendiente,2,'one explicit decision and the existing undated task; elapsed/future actions never move automatically');assert.equal(context.exports.result.countPropuesta,1);assert.equal(context.exports.result.listEntries.length,5);assert.equal(new Set(context.exports.result.listEntries.map(e=>e.id)).size,5);assert.equal(raw[0].estado,'aceptado');assert.equal(raw[1].estado,'pendiente');
 });
@@ -313,4 +314,15 @@ test('Calendar excludes the discarded personal card only and keeps the other par
  const hook=load('hooks/useGoCalendarEntries.ts',{'./useActionCompletion':{useCompletionDocument:()=>({doc})},'@/lib/goActionCompletion':core,react:{useState:()=>[owner,()=>{}],useEffect(){}},'@/lib/goTaskAccess':{getTaskUser:async()=>owner,isPersonalTask:()=>true},'@/lib/sessionEvents':{onSessionChanged:()=>()=>{}}});
  assert.deepEqual(hook.useGoCalendarEntries([e,other]).map(row=>row.id),['two']);
  doc=core.emptyCompletionDocument({...S,context:'live:BUSINESS:salon-one'});assert.equal(hook.useGoCalendarEntries([e,other]).length,2);assert.equal(JSON.stringify([e,other]),before);
+});
+
+test('Listados can persist personal follow-up during a valid proposal without accepting/rejecting it or touching its original contract',async()=>{
+ const row=entry({reservationId:'reservation',businessId:'salon',bookingStatus:'confirmada',changeProposal:{dateISO:'2030-01-08',time:'13:00',originalDateISO:'2030-01-07',originalTime:'09:00',originalDuration:'30min'}}),before=JSON.stringify(row),other=entry({id:'other'}),f=storageFixture();
+ f.api.setCompletionSource(S,[row,other]);
+ for(const status of ['pending','done','pending']){
+  await f.api.decideCompletion(S,row,status,()=>true,now,true,()=>row);
+  const fresh=storageFixture(f.memory),doc=await fresh.api.readCompletionDocument(S);
+  assert.equal(core.completionDecision(row,doc).status,status);assert.equal(core.completionDecision(other,doc),undefined);assert.equal(core.nextCompletionReminder(row,doc,now),null);assert.equal(JSON.stringify(row),before);
+ }
+ assert.equal((await f.api.readCompletionDocument(S)).records[core.completionKey(row)].history.length,3);
 });

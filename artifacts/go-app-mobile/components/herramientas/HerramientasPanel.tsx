@@ -33,6 +33,7 @@ const GOLD_BG = "rgba(196,136,58,0.10)";
 const GOLD_BDR= "rgba(196,136,58,0.35)";
 
 interface HerramientasPanelProps {
+  listTools?: React.ReactNode;
   landingVariantControls?: React.ReactNode;
   visible: boolean;
   onClose: () => void;
@@ -62,7 +63,7 @@ interface HerramientasPanelProps {
 }
 
 export function HerramientasPanel({
-  visible, onClose, landingVariantControls,
+  visible, onClose, landingVariantControls, listTools,
   handedness, toggleHandedness,
   uiScale, setUiScale,
   shakeAiEnabled, setShakeAiEnabled,
@@ -154,6 +155,7 @@ export function HerramientasPanel({
         >
 
           {landingVariantControls}
+          {listTools}
           <GoNavigationAppearanceControl/>
           <View style={s.card}>
 

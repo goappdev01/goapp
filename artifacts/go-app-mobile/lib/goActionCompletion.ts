@@ -135,7 +135,7 @@ export function nextCompletionReminder(entry: CompletionEntry,doc: CompletionDoc
 export function recordCompletion(doc: CompletionDocument,e: CompletionEntry,status: Resolution,now: number,explicit = false): CompletionDocument {
   if (!completionEligible(e)) throw new Error("La acción ya no está disponible.");
   const key=completionKey(e),old=doc.records[key] || {history:[]},schedule=completionSchedule(e);
-  if(explicit && (!ownedCompletionEntry(e,doc.scope) || e.changeProposal || e.proposal))throw new Error("Esta acción no permite confirmar su seguimiento en este contexto.");
+  if(explicit && !ownedCompletionEntry(e,doc.scope))throw new Error("Esta acción no permite confirmar su seguimiento en este contexto.");
   if (old.decision?.schedule===schedule && old.decision.status===status) return doc;
   if(!explicit && !awaitingCompletion(e,doc,now) && !pendingCompletion(e,doc))throw new Error("La acción todavía no necesita confirmación.");
   const decision={status,schedule,at:now};

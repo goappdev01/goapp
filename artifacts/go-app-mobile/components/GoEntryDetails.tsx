@@ -69,9 +69,11 @@ export function GoListActionRow({actions,handedness="right",scale=1,testID="list
         disabled={action.disabled} activeOpacity={0.7}
         onPress={event=>{event?.stopPropagation?.();action.onPress();}}
         style={{flex:1,flexBasis:0,flexShrink:1,minWidth:0,minHeight:Math.max(44,Math.round(44*scale)),paddingHorizontal:4,paddingVertical:8,
-          ...goActionVisual(action.tone,!!action.selected,!!inactive),alignItems:"center",justifyContent:"center"}}>
-        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5} maxFontSizeMultiplier={1.8}
-          style={{color:goActionTextColor(action.tone),fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",alignSelf:"stretch",width:"100%",minWidth:0}}>{action.label}</Text>
+          ...goActionVisual(action.tone,!!action.selected,!!inactive),
+          ...(action.tone==="pending"?{backgroundColor:"#887400"}:{}),
+          ...(action.selected?{borderWidth:2,borderColor:"#ffffff"}:{}),alignItems:"center",justifyContent:"center"}}>
+        <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.8}
+          style={{color:"#FFFFFF",fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",alignSelf:"stretch",width:"100%",minWidth:0}}>{action.label}{action.selected?" ✓":""}</Text>
       </TouchableOpacity>;
     })}
   </View>;
@@ -83,7 +85,7 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
   const [pressed,setPressed]=useState<string|null>(null);
   const list = layout === "list";
   const label=(es:string,en:string)=>lang==="en"?en:es;
-  const selected=(key:string)=>key==="pending"?entry.localResolutionStatus!=="done":entry.localResolutionStatus==="done";
+  const selected=(key:string)=>key==="pending"?entry.localResolutionStatus==="pending":entry.localResolutionStatus==="done";
   const actions=[
     {key:"discard",text:label("ELIMINAR","DELETE"),tone:"negative" as const,run:onDiscard},
     {key:"pending",text:label("PENDIENTE","PENDING"),tone:"pending" as const,run:onPending},
@@ -123,7 +125,7 @@ export function GoEntryQuickActions({ entry, showState = true, compact = false, 
   const { lang, t } = useLanguage(), policy = reservationCardPolicy(entry);
   const [pressed,setPressed]=useState<string|null>(null);
   const canonical = policy.canonical;
-  const active = canonical ? policy.active : !entry.deleted && entry.estado !== "rechazado" && entry.localResolutionStatus !== "done";
+  const active = canonical ? policy.active : !entry.deleted && entry.estado !== "rechazado" && (entryProposalPending(entry) || entry.localResolutionStatus !== "done");
   const received = canonical ? policy.received : entryProposalPending(entry) && entry.estado === "propuesto";
   const internal = entryIsInternal(entry);
   const accepted = entry.estado === "aceptado" || entry.bookingStatus === "confirmada" || ["CONFIRMED","ACCEPTED"].includes(entry.bookingServerStatus ?? "");

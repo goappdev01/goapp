@@ -11,7 +11,7 @@ test('Listados closes its detail and sheet before dispatching the existing reser
  assert.ok(detail&&finish);
  const calls=[],entry={id:'booking-1',reservationId:'real-booking'};
  const scope={React:{Fragment:'Fragment',createElement:(type,props,...children)=>({type,props,children})},
-  GoEntryDetailsSheet:'Details',handedness:'right',goDirectlyToLanding(){},renderEntryMessageScreen(){},openEntryMessage(){},
+  GoEntryDetailsSheet:'Details',canResolveEntry:()=>false,actionCompletion:{isSaving:()=>false},handedness:'right',goDirectlyToLanding(){},renderEntryMessageScreen(){},openEntryMessage(){},
   setCalBookingDetailEntry:value=>calls.push(['close-detail',value]),renderEntryMicroActions:()=>null,
   renderEntryQuickActions:(_entry,_state,_compact,_edit,propose)=>({type:'QuickActions',propose}),renderLinkedNotes:()=>null,
   listBookingProposalAfterDismissRef:{current:null},setListOpen:value=>calls.push(['close-list',value]),
