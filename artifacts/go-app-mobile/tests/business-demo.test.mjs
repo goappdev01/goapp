@@ -163,7 +163,7 @@ test("reset clears only the local configuration, plan, reservations and preferen
 });
 
 // Execute the real providers and screen callbacks with deterministic native APIs.
-function uiFixture(data, { authorized = true, businessPreview = authorized, adminView = false, adminAllowed = authorized, ownerIdentity = authorized, realCompanyManager = false, reactCompiler = false, bookingToday, realActivity = false, width = 390, height = 844, fontScale = 1, insets = { top: 44, bottom: 34, left: 0, right: 0 }, isPad = false, liveMode = false, liveEntries = [], liveReservations = [], gpsAdapter, timezoneAdapter = async (_source,zone) => zone, timezoneResolver = async () => { throw Object.assign(Error("Unlinked"),{code:"BOOKING_CALENDAR_BUSINESS_NOT_LINKED"}); } } = {}) {
+function uiFixture(data, { authorized = true, businessPreview = authorized, adminView = false, adminAllowed = authorized, ownerIdentity = authorized, realCompanyManager = false, reactCompiler = false, bookingToday, realActivity = false, width = 390, height = 844, fontScale = 1, insets = { top: 44, bottom: 34, left: 0, right: 0 }, isPad = false, liveMode = false, unlinkedDraft = false, liveEntries = [], liveReservations = [], gpsAdapter, timezoneAdapter = async (_source,zone) => zone, timezoneResolver = async () => { throw Object.assign(Error("Unlinked"),{code:"BOOKING_CALENDAR_BUSINESS_NOT_LINKED"}); } } = {}) {
   const cache = new Map(), hooks = new Map(), alerts = [], calls = { liveAgenda: 0, liveFloor: 0, external: 0, liveReservationReads: [] };
   let current, cursor = 0, effects = [], lang = "es", keyboardVisible = false, focusedInput = null, keyboardDismisses = 0;
   const keyboardListeners = new Map();
@@ -208,7 +208,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
     if (key in target) return target[key];
     const component = { [key]: function() {} }[key]; target[key] = component; return component;
   } });
-  const configApi = () => reactCompiler ? load("contexts/GoBusinessConfigContext.tsx").useBusinessConfig() : ({ config: liveMode ? { ...data.store.getSnapshot().config, businessId: "live-business" } : data.store.getSnapshot().config, loaded: true, demo: liveMode ? undefined : data.store,
+  const configApi = () => reactCompiler ? load("contexts/GoBusinessConfigContext.tsx").useBusinessConfig() : ({ config: liveMode || unlinkedDraft ? { ...data.store.getSnapshot().config, businessId: unlinkedDraft ? undefined : "live-business" } : data.store.getSnapshot().config, loaded: true, demo: liveMode || unlinkedDraft ? undefined : data.store,
     updateConfig: patch => data.store.updateConfig(patch), resetConfig: () => data.store.reset(),
     resetToSubActivity: (sectorId,subId) => data.store.transformConfig(config => ({ ...config, sectorId, subId })),
   });
@@ -1348,11 +1348,11 @@ test('the timezone selector has real dark readable choices, saves immediately, s
  const f=dataFixture();await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria'});const ui=uiFixture(f),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
  const parent=ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:2}),step=component(parent,'StepHorario'),before=plain(f.store.getSnapshot().config);let tree=ui.render(step.type,step.props);
  const byId=(tree,id)=>nodes(tree).find(n=>n.props?.testID===id);assert.equal(nodes(tree).some(n=>n.type==='TextInput'&&n.props.accessibilityLabel==='Zona horaria del negocio'),false);
- assert.equal(text(byId(tree,'business-timezone-selector')),'Seleccionar zona horaria');byId(tree,'business-timezone-selector').props.onPress();tree=ui.render(step.type,step.props);
+ assert.match(text(byId(tree,'business-timezone-summary')),/Provisional/);byId(tree,'business-timezone-selector').props.onPress();tree=ui.render(step.type,step.props);
  for(const value of ['Europe/Madrid','Atlantic/Canary']){const option=byId(tree,'business-timezone-option-'+value);assert.ok(option);assert.equal(option.props.accessibilityRole,'radio');assert.ok(option.props.style.minHeight>=44);const label=nodes(option).find(n=>n.type==='Text');const hex=label.props.style.color;assert.match(hex,/^#[0-9a-f]{6}$/i);const rgb=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(c=>c<=0.04045?c/12.92:((c+0.055)/1.055)**2.4);assert.ok(1.05/(0.2126*rgb[0]+0.7152*rgb[1]+0.0722*rgb[2]+0.05)>=4.5,'Readable contrast on white');}
- byId(tree,'business-timezone-option-Europe/Madrid').props.onPress();await turn();tree=ui.render(step.type,step.props);assert.ok(text(byId(tree,'business-timezone-selector')).includes('España peninsular'));
+ byId(tree,'business-timezone-option-Europe/Madrid').props.onPress();await turn();tree=ui.render(step.type,step.props);assert.ok(text(byId(tree,'business-timezone-summary')).includes('Europe/Madrid'));
  ui.unmount(step.type);const restored=f.make();await restored.load();assert.equal(restored.getSnapshot().config.timezone,'Europe/Madrid');
- const again=ui.render(step.type,step.props);assert.ok(text(byId(again,'business-timezone-selector')).includes('Europe/Madrid'));
+ const again=ui.render(step.type,step.props);assert.ok(text(byId(again,'business-timezone-summary')).includes('Europe/Madrid'));
  const after=plain(restored.getSnapshot().config);delete after.timezone;assert.deepEqual(after,before);
 });
 test('DEMO timezone selection stays in the owner store, never calls production, and preserves other companies',async()=>{
@@ -1392,11 +1392,119 @@ test('an unlinked preview company does not resolve a fake registered timezone on
  const ui=uiFixture(f,{timezoneResolver:async()=>{resolutions++;return {sourceId:before.businessId,businessId:owner,timezone:'Europe/Madrid',name:'Wrong remote match'};}}),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
  const parent=ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:2}),step=component(parent,'StepHorario');ui.render(step.type,step.props);
  await turn();const tree=ui.render(step.type,step.props);
- assert.equal(text(nodes(tree).find(n=>n.props?.testID==='business-timezone-selector')),'Seleccionar zona horaria');
+ assert.equal(text(nodes(tree).find(n=>n.props?.testID==='business-timezone-selector')),'Ajustar');
  assert.equal(component(tree,'CalendarExceptionsSection'),undefined);
  assert.equal(resolutions,0,'A local draft must not seek a cloud identity');
  const again=f.make();await again.load();
  assert.deepEqual(plain(again.getSnapshot().config),before);
+});
+
+function timezoneStep(f, options = {}) {
+ const ui=uiFixture(f,options),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;
+ const step=component(ui.render(Screen,{onBack(){},startAtSteps:true,initialStep:2}),'StepHorario');
+ return {ui,step,render:()=>ui.render(step.type,step.props)};
+}
+const timezoneNode=(tree,id)=>nodes(tree).find(n=>n.props?.testID===id);
+
+test('automatic timezone resolves a new unlinked company draft without registering it or contacting the backend',async()=>{
+ const f=dataFixture();await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria',coordinates:{latitude:40.71,longitude:-74}});let remote=0;
+ const view=timezoneStep(f,{unlinkedDraft:true,gpsAdapter:{reverseGeocodeAsync:async()=>[{timezone:'America/New_York'}]},
+  timezoneResolver:async()=>{remote++;throw Error('No registration');},timezoneAdapter:async()=>{remote++;throw Error('No remote write');}});
+ view.render();await turn();view.render();await turn();view.render();await turn();
+ assert.equal(f.store.getSnapshot().config.timezone,'America/New_York');assert.equal(remote,0);
+ const restored=f.make();await restored.load();assert.equal(restored.getSnapshot().config.timezone,'America/New_York');
+});
+
+test('automatic timezone uses commercial coordinates, persists only the missing local zone and preserves another owner and all other data',async()=>{
+ const shared=new Map(),a=dataFixture(owner,shared),b=dataFixture(other,shared);
+ await a.store.updateConfig({sectorId:'belleza',subId:'peluqueria',coordinates:{latitude:28.46,longitude:-16.25},address:'Negocio en Tenerife'});
+ await b.store.updateConfig({sectorId:'belleza',subId:'peluqueria',timezone:'America/New_York'});
+ const before=plain(a.store.getSnapshot()),points=[];
+ const view=timezoneStep(a,{gpsAdapter:{async reverseGeocodeAsync(point){points.push(point);return[{timezone:'Atlantic/Canary'}];},requestForegroundPermissionsAsync(){throw Error('No new permission');},getCurrentPositionAsync(){throw Error('Owner may be travelling');}}});
+ view.render();await turn();view.render();await turn();const tree=view.render();
+ assert.equal(a.store.getSnapshot().config.timezone,'Atlantic/Canary');
+ assert.equal(b.store.getSnapshot().config.timezone,'America/New_York');
+ const after=plain(a.store.getSnapshot());delete after.config.timezone;assert.deepEqual(after.config,before.config);assert.deepEqual(after.bookings,before.bookings);assert.deepEqual(after.reservations,before.reservations);
+ assert.deepEqual(plain(points),[{latitude:28.46,longitude:-16.25}]);
+ assert.match(text(timezoneNode(tree,'business-timezone-summary')),/Atlantic\/Canary/);
+ assert.equal(timezoneNode(tree,'business-timezone-options'),undefined,'The usual form stays compact');
+ const restored=a.make();await restored.load();assert.equal(restored.getSnapshot().config.timezone,'Atlantic/Canary');
+});
+
+test('automatic timezone never overwrites a saved zone, even for a travelling owner or a conflicting business location',async()=>{
+ const f=dataFixture();await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria',timezone:'Europe/Madrid',coordinates:{latitude:34.05,longitude:-118.24}});
+ const before=plain(f.store.getSnapshot());const view=timezoneStep(f,{gpsAdapter:{reverseGeocodeAsync:async()=>[{timezone:'America/Los_Angeles'}]}});
+ view.render();await turn();view.render();await turn();const tree=view.render();
+ assert.deepEqual(plain(f.store.getSnapshot()),before);
+ assert.match(text(timezoneNode(tree,'business-timezone-detected')),/America\/Los_Angeles.*Se conserva la zona guardada/);
+ timezoneNode(tree,'business-timezone-selector').props.onPress();const options=view.render();
+ assert.ok(timezoneNode(options,'business-timezone-option-America/Los_Angeles'),'A controlled manual correction can use the detected IANA zone');
+});
+
+test('automatic timezone keeps device zone provisional without commercial location and offers the existing manual fallback on lookup failure',async()=>{
+ const f=dataFixture();await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria'});const view=timezoneStep(f);view.render();await turn();view.render();await turn();let tree=view.render();
+ assert.equal(f.store.getSnapshot().config.timezone,undefined);assert.match(text(timezoneNode(tree,'business-timezone-summary')),/Provisional/);
+ await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria',coordinates:{latitude:40.42,longitude:-3.7}});tree=view.render();await turn();view.render();await turn();tree=view.render();
+ assert.equal(f.store.getSnapshot().config.timezone,undefined);
+ timezoneNode(tree,'business-timezone-selector').props.onPress();tree=view.render();timezoneNode(tree,'business-timezone-option-Europe/Madrid').props.onPress();await turn();
+ assert.equal(f.store.getSnapshot().config.timezone,'Europe/Madrid');
+});
+
+test('automatic timezone requires explicit review for legacy appointments and never rewrites their date or DST instants',async()=>{
+ const f=dataFixture();await f.store.saveFloorPlan(floor(f.store));await f.store.saveReservations(f.store.planId,[reservation(f.store)]);
+ await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria',coordinates:{latitude:28.46,longitude:-16.25}});const before=plain(f.store.getSnapshot());
+ const view=timezoneStep(f,{gpsAdapter:{reverseGeocodeAsync:async()=>[{timezone:'Atlantic/Canary'}]}});
+ view.render();await turn();view.render();await turn();const tree=view.render();
+ assert.deepEqual(plain(f.store.getSnapshot()),before);assert.equal(before.config.timezone,undefined);
+ assert.match(text(timezoneNode(tree,'business-timezone-detected')),/Confirma en Ajustar/);
+ timezoneNode(tree,'business-timezone-selector').props.onPress();timezoneNode(view.render(),'business-timezone-option-Atlantic/Canary').props.onPress();await turn();
+ assert.equal(f.store.getSnapshot().config.timezone,'Atlantic/Canary');assert.deepEqual(plain(f.store.getSnapshot().bookings),before.bookings);assert.deepEqual(plain(f.store.getSnapshot().reservations),before.reservations);
+});
+
+test('automatic timezone discards a late commercial lookup after manual choice, location edit or unmount',async()=>{
+ for(const mode of ['manual','location','unmount']){
+  const f=dataFixture();await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria',coordinates:{latitude:28.46,longitude:-16.25}});let resolve;
+  const pending=new Promise(yes=>{resolve=yes;});const view=timezoneStep(f,{gpsAdapter:{reverseGeocodeAsync:()=>pending}});let tree=view.render();
+  if(mode==='manual'){timezoneNode(tree,'business-timezone-selector').props.onPress();timezoneNode(view.render(),'business-timezone-option-Europe/Madrid').props.onPress();await turn();}
+  if(mode==='location'){await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria',coordinates:undefined,address:''});view.render();}
+  if(mode==='unmount')view.ui.unmount(view.step.type);
+  resolve([{timezone:'Atlantic/Canary'}]);await turn();
+  if(mode!=='unmount'){view.render();await turn();view.render();}
+  assert.equal(f.store.getSnapshot().config.timezone,mode==='manual'?'Europe/Madrid':undefined,mode);
+ }
+});
+
+test('automatic timezone reports local persistence failure and revoked access without claiming a saved zone',async()=>{
+ for(const revoked of [false,true]){
+  const f=dataFixture();await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria',coordinates:{latitude:40.42,longitude:-3.7}});
+  const view=timezoneStep(f,{gpsAdapter:{reverseGeocodeAsync:async()=>[{timezone:'Europe/Madrid'}]}});
+  if(revoked)f.authorize(false);else f.failWrites(true);
+  view.render();await turn();view.render();await turn();const tree=view.render();
+  assert.equal(f.store.getSnapshot().config.timezone,undefined);
+  assert.ok(nodes(tree).some(n=>n.props?.accessibilityRole==='alert'&&text(n).length>0));
+ }
+});
+
+test('automatic timezone cannot apply a pending result to a different business or account context',async()=>{
+ const a=dataFixture(),b=dataFixture(other);
+ await a.store.updateConfig({sectorId:'belleza',subId:'peluqueria',coordinates:{latitude:28.46,longitude:-16.25}});
+ await b.store.updateConfig({sectorId:'belleza',subId:'peluqueria',timezone:'America/New_York',coordinates:{latitude:40.71,longitude:-74}});
+ const originalStore=a.store;let resolve;const pending=new Promise(yes=>{resolve=yes;});
+ const view=timezoneStep(a,{gpsAdapter:{reverseGeocodeAsync:point=>point.latitude===28.46?pending:Promise.resolve([{timezone:'America/New_York'}])}});
+ view.render();a.store=b.store;view.render();resolve([{timezone:'Atlantic/Canary'}]);await turn();view.render();await turn();view.render();
+ assert.equal(originalStore.getSnapshot().config.timezone,undefined);assert.equal(b.store.getSnapshot().config.timezone,'America/New_York');
+});
+
+test('automatic timezone preserves remote authority and shows actual backend errors without a local-success fallback',async()=>{
+ for(const linked of [false,true]){
+  const f=dataFixture();await f.store.updateConfig({sectorId:'belleza',subId:'peluqueria',coordinates:{latitude:28.46,longitude:-16.25}});let writes=0;
+  const view=timezoneStep(f,{liveMode:true,gpsAdapter:{reverseGeocodeAsync:async()=>[{timezone:'Atlantic/Canary'}]},
+   timezoneResolver:async source=>{if(!linked)throw Error('Servidor no disponible');return{sourceId:source,businessId:owner,timezone:'Europe/Madrid',name:'Empresa vinculada'};},timezoneAdapter:async()=>{writes++;throw Error('No automatic remote change');}});
+  view.render();await turn();view.render();await turn();const tree=view.render();
+  assert.equal(writes,0);assert.equal(f.store.getSnapshot().config.timezone,linked?'Europe/Madrid':undefined);
+  if(!linked)assert.ok(nodes(tree).some(n=>n.props?.accessibilityRole==='alert'&&/Servidor no disponible|No se pudo recuperar la zona horaria/.test(text(n))));
+  else assert.match(text(timezoneNode(tree,'business-timezone-detected')),/Se conserva la zona guardada/);
+ }
 });
 
 test("Horarios and the existing calendar tools share one default-on business setting across reopening", async () => {
