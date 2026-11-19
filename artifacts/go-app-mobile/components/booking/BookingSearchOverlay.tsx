@@ -61,6 +61,7 @@ import { summarizeBookingServices, staffSupportsBookingServices, type BookingSer
 import { compactTimelineOptions, timelineOptionLabel } from "@/data/bookingTimeline";
 import { bookingActivityEnabled, canonicalBookingActivity, visibleBookingSectors } from "@workspace/api-zod";
 import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
+import { bookingChangeSlots, type BookingChangeSelection } from "@/data/bookingChangeAvailability";
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("window");
 
@@ -358,6 +359,9 @@ const bc = StyleSheet.create({
 // ── Main overlay ───────────────────────────────────────────────────────────────
 
 export type BookingSearchOverlayProps = {
+  /** Reuse the existing day/slot UI without creating a HOLD or changing the service/staff. */
+  changeSelection?: BookingChangeSelection;
+  onChangeSlotSelected?: (slot: SlotWithStatus) => void;
   /** Owner-authorized local test data. Never falls back to live booking or agenda writes. */
   demoRepository?: DemoBookingRepository;
   initialBusinessId?: string;
@@ -396,6 +400,8 @@ export function BookingSearchOverlay({
   initialBusinessId,
   initialDateISO,
   onDemoGoToBooking,
+  changeSelection,
+  onChangeSlotSelected,
 }: BookingSearchOverlayProps) {
   const { publication, internalAccess } = useBookingModulePublication(visible, !!demoRepository);
   const visibleSectors = visibleBookingSectors(SECTORS, publication, internalAccess);
@@ -526,6 +532,7 @@ export function BookingSearchOverlay({
   const selectionScope = `${selectedBusiness?.id ?? ""}|${selectedServiceIds.join(",")}|${selectedStaff && selectedStaff !== "none" ? selectedStaff.id : "any"}`;
   const currentSlotScope = useRef(""); currentSlotScope.current = `${selectionScope}|${selectedDate}|${visible}`;
   const [slots, setSlots] = useState<SlotWithStatus[]>([]);
+  useEffect(() => () => { currentSlotScope.current = ""; slotGeneration.current++; }, []);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [activeHold, setActiveHold] = useState<Booking | null>(null);
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
@@ -570,8 +577,12 @@ export function BookingSearchOverlay({
       setConfirmedBooking(null);
       dragAnim.setValue(0);
       stepAnim.setValue(0);
-      // Cargar negocios recientes
-      if (demoRepository) {
+      // A change is scoped to the original reservation, never a new service or professional.
+      if (changeSelection) {
+        setSelectedBusiness(changeSelection.business); setSelectedItem(changeSelection.item);
+        setSelectedServices(changeSelection.services); setSelectedServiceIds(changeSelection.services.map(service => service.id));
+        setSelectedStaff(changeSelection.staff ?? "none"); setSlots([]); setStep("slots");
+      } else if (demoRepository) {
         demoRepository.getActiveBusinesses().then(all => {
           if (!current) return;
           const available = all.filter(businessVisible);
@@ -607,7 +618,7 @@ export function BookingSearchOverlay({
       }).start();
     }
     return () => { current = false; };
-  }, [visible, demoRepository, initialBusinessId, initialDateISO]);
+  }, [visible, demoRepository, initialBusinessId, initialDateISO, changeSelection]);
 
   useEffect(() => {
     if (!visible || step !== "search") return;
@@ -653,13 +664,13 @@ export function BookingSearchOverlay({
       setSelectedCategory(null); setSelectedSubCategory(null);
     }
     if (selectedSubCategory && !visibleSectors.some(sector => sector.subs.some(sub => sub.id === selectedSubCategory))) setSelectedSubCategory(null);
-    if (selectedBusiness && !businessVisible(selectedBusiness)) {
+    if (!changeSelection && selectedBusiness && !businessVisible(selectedBusiness)) {
       setSelectedBusiness(null); setSelectedItem(null); setSelectedServiceIds([]); setStep("search");
     }
   }, [publication, internalAccess]);
 
   useEffect(() => {
-    if (!selectedBusiness) return;
+    if (!selectedBusiness || changeSelection) return;
     let current = true;
     setItems([]); setStaffList([]);
     (demoRepository ? demoRepository.getBookableItems(selectedBusiness.id) : getBookableItems(selectedBusiness.id, true)).then((its) => {
@@ -712,7 +723,9 @@ export function BookingSearchOverlay({
       selectedDate,
       staffId,
       selectedServices.map(service => service.id),
-    ) : await getAllSlots(selectedBusiness.id, selectedItem.id, selectedDate, staffId, selectedServices.map(service => service.id));
+    ) : changeSelection
+      ? (await getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), selectedDate, staffId)).slots
+      : await getAllSlots(selectedBusiness.id, selectedItem.id, selectedDate, staffId, selectedServices.map(service => service.id));
     if (generation !== slotGeneration.current || scope !== currentSlotScope.current) return;
     console.log("[loadSlots] slots totales →", raw.length,
       "| disponibles →", raw.filter(s => s.isAvailable).length,
@@ -728,13 +741,17 @@ export function BookingSearchOverlay({
     // No second schedule filter: live results already validate the full sequence
     // against company, professional and resource windows in the database.
 
-    setSlots(raw);
+    const compatible = changeSelection ? bookingChangeSlots(changeSelection, raw) : raw;
+    if (changeSelection && raw.length && !compatible.length) setSlotError(lang === "en"
+      ? "No verified slots match the original duration and assigned resources. Choose another day or contact the business."
+      : "No hay franjas verificadas para la duración y los recursos originales. Elige otro día o consulta con la empresa.");
+    setSlots(compatible);
     } catch (error) {
       if (generation === slotGeneration.current && scope === currentSlotScope.current) {
         setSlots([]); setSlotError(error instanceof Error ? error.message : "No se pudo consultar la disponibilidad.");
       }
     } finally { if (generation === slotGeneration.current && scope === currentSlotScope.current) setLoadingSlots(false); }
-  }, [selectedBusiness, selectedItem, selectedDate, selectedStaff, selectedServices, demoRepository]);
+  }, [selectedBusiness, selectedItem, selectedDate, selectedStaff, selectedServices, demoRepository, changeSelection, lang]);
 
   useEffect(() => {
     let current = true;
@@ -818,6 +835,20 @@ export function BookingSearchOverlay({
     const scope = currentSlotScope.current;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     try {
+      if (changeSelection) {
+        // Refresh the exact server plan before asking for proposal consent; never create a hold.
+        const fresh = demoRepository
+          ? await demoRepository.getAllSlots(selectedBusiness.id, selectedItem.id, selectedDate, changeSelection.staff?.id, selectedServices.map(service => service.id))
+          : (await getTimelineAvailability(selectedBusiness.id, selectedServices.map(service => service.id), selectedDate, changeSelection.staff?.id)).slots;
+        if (scope !== currentSlotScope.current) return;
+        const available = bookingChangeSlots(changeSelection, fresh);
+        setSlots(available);
+        const selected = available.find(candidate => (candidate.startInstant ?? candidate.startDatetime) === (slot.startInstant ?? slot.startDatetime)
+          && candidate.staffId === slot.staffId && candidate.endDatetime === slot.endDatetime);
+        if (!selected) { setSlotError(lang === "en" ? "That slot is no longer available. Choose another." : "Esta franja ya no está disponible. Elige otra."); return; }
+        onChangeSlotSelected?.(selected);
+        return;
+      }
       const staffId = slot.staffId ?? (selectedStaff && selectedStaff !== "none" ? selectedStaff.id : undefined);
       console.log("[BOOKING_CHECK_INPUT] handleSelectSlot →", {
         businessId:    selectedBusiness.id,
@@ -981,6 +1012,7 @@ export function BookingSearchOverlay({
   };
 
   const handleBack = () => {
+    if (changeSelection) { onClose(); return; }
     if (step === "item") { goToStep("search", "back"); if (!demoRepository) onProviderSelected?.(null); }
     else if (step === "slots") goToStep("item", "back");
     else if (step === "hold") {
@@ -1057,6 +1089,7 @@ export function BookingSearchOverlay({
   //    no existe un paso intermedio "limpiar búsqueda")
   const handleBackOneLevel = () => {
     if (keyboardVisible || Keyboard.isVisible()) { Keyboard.dismiss(); return; }
+    if (changeSelection) { handleClose(); return; }
     Haptics.selectionAsync().catch(() => {});
     if (step === "confirmed") { handleClose(); return; }
     if (step === "hold") {
@@ -1184,7 +1217,7 @@ export function BookingSearchOverlay({
                 <Text testID="booking-professional-heading" style={[s.headerTitle,s.stepHeading]}>{lang==="en"?"Choose your professional":"Elige tu profesional"}</Text>
               )}
               {step === "slots" && (
-                <Text style={s.headerTitle}>{t("biz_step_datetime_label").toUpperCase()}</Text>
+                <Text style={s.headerTitle}>{changeSelection ? (lang === "en" ? "Propose a change" : "Proponer cambio") : t("biz_step_datetime_label").toUpperCase()}</Text>
               )}
               {step === "hold" && (
                 <Text style={[s.headerTitle, { color: "#f59e0b" }]}>{t("accion_confirmar").toUpperCase()}</Text>
@@ -1594,6 +1627,12 @@ export function BookingSearchOverlay({
             {step === "slots" && (
               <View style={s.stepWrap}>
                 <BreadcrumbStrip business={selectedBusiness} item={selectedItem} accentColor={accentColor} />
+
+                {changeSelection && <Text style={[s.emptyText, { marginHorizontal: 20, marginBottom: 12 }]}>
+                  {lang === "en" ? "Choose an available slot. Your original booking remains unchanged until agreement." : "Elige una franja disponible. La reserva original se mantiene hasta el acuerdo."}
+                  {changeSelection.staff ? ` · ${changeSelection.staff.name}` : ""}
+                  {demoRepository && !demoRepository.store.serverBookings ? (lang === "en" ? " · Local test data" : " · Datos de prueba locales") : ""}
+                </Text>}
 
                 {/* ── ERROR: slot ya reservado — claimSlot o isSlotOccupied detectaron conflicto ── */}
                 {slotTakenError && (

@@ -2870,7 +2870,7 @@ const bookingUpdateListeners=new Set<()=>void>();
 export function subscribeBookingUpdates(listener:()=>void){bookingUpdateListeners.add(listener);return()=>{bookingUpdateListeners.delete(listener);};}
 export function notifyBookingUpdated(){for(const listener of bookingUpdateListeners)listener();}
 /** No local-success fallback: real negotiation requires an authenticated server transaction. */
-export async function changeBookingRequest(id:string,operation:"propose"|"accept"|"reject"|"cancel"|"confirm",input:{dateISO?:string;date?:string;time?:string;proposalId?:string;expectedRevision?:number;acceptFinancialTerms?:boolean},expectedUserId:string):Promise<Booking>{
+export async function changeBookingRequest(id:string,operation:"propose"|"accept"|"reject"|"cancel"|"confirm",input:{dateISO?:string;date?:string;time?:string;startsAt?:string;proposalId?:string;expectedRevision?:number;acceptFinancialTerms?:boolean},expectedUserId:string):Promise<Booking>{
  if(!isRemoteBookingId(id))throw new BookingApiError("Esta reserva necesita su repositorio original.",400);
  try{
   if(!["cancel","reject"].includes(operation)){await requireRemoteGapPolicy(expectedUserId);await requireRemotePhasePolicy(expectedUserId);}

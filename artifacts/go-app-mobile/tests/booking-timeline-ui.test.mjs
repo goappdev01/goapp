@@ -94,12 +94,13 @@ function fixture(kind = "provider", overrides = {}) {
     if (parsed.pathname.endsWith("/booking-gap-policy"))return Response.json(1);
     if (parsed.pathname.endsWith("/booking-phase-policy"))return Response.json(1);
     if (parsed.pathname.endsWith("/booking-availability")) {
+      if (state.availabilityError) return Response.json({error: "Disponibilidad no verificada"}, {status: state.availabilityError});
       if (parsed.searchParams.get("datesOnly") === "true") return Response.json({ version: 1, phasePolicyVersion:1, gapPolicyVersion:1, timezone: "Europe/Madrid",
-        availableDates: [today, tomorrow, "2030-10-29"], slots: [] });
+        availableDates: state.availableDates ?? [today, tomorrow, "2030-10-29"], slots: [] });
       const parameters = { date: parsed.searchParams.get("dateISO"), staffId: parsed.searchParams.get("staff_id") ?? firstStaff,
         serviceId: parsed.searchParams.get("service_ids").split(",")[0] };
-      const plans = state.pendingSlots ? await state.pendingSlots.promise : state.foldOptions && parameters.date === today
-        ? [planFor({ ...parameters, fold: 0 }), planFor({ ...parameters, fold: 1 })] : [planFor(parameters)];
+      const plans = state.plans ?? (state.pendingSlots ? await state.pendingSlots.promise : state.foldOptions && parameters.date === today
+        ? [planFor({ ...parameters, fold: 0 }), planFor({ ...parameters, fold: 1 })] : [planFor(parameters)]);
       return Response.json({ version: 1, phasePolicyVersion:1, gapPolicyVersion:1, timezone: "Europe/Madrid", availableDates: [parameters.date], slots: plans });
     }
     if (parsed.pathname.endsWith("/booking-discounts/prices")) {
@@ -135,6 +136,10 @@ function fixture(kind = "provider", overrides = {}) {
       }
       if (state.loseReplyOnce) { state.loseReplyOnce = false; throw new TypeError("Reply lost after isolated commit"); }
       return Response.json([row], { status: 201 });
+    }
+    if (parsed.pathname.endsWith("/bookings/" + bookingId + "/change")) {
+      if(state.changeStatus) return Response.json({code:state.changeCode,error:"La reserva original se conserva."},{status:state.changeStatus});
+      return Response.json(state.changeReply);
     }
     throw new Error("Unexpected HTTP route " + parsed.pathname);
   };
@@ -214,6 +219,7 @@ function fixture(kind = "provider", overrides = {}) {
     "expo-haptics": { selectionAsync: async () => {}, impactAsync: async () => {}, notificationAsync: async () => {},
       ImpactFeedbackStyle: { Medium: "medium", Light: "light" }, NotificationFeedbackType: { Success: "success" } },
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34, left: 0, right: 0 }) },
+    "@/data/bookingChangeAvailability":loadPure("data/bookingChangeAvailability.ts"),
     "@/data/customerBookingProjection":loadPure("data/customerBookingProjection.ts"),
     "@/data/booking": api, "@/data/bookingServices": services, "@/data/bookingTimeline": timeline,
     "@/data/goRecentBusinesses": { getRecentBusinessIds: async () => [business, otherBusiness], recordBusinessVisit: async () => {} },
@@ -240,7 +246,7 @@ function fixture(kind = "provider", overrides = {}) {
   props = kind === "provider" ? { visible: true, proveedor: { name: "Peluquería primera", businessId: business,
     rating: "", distance: "", slots: 0, subId: "peluqueria", subLabel: "Peluquería", subColor: "#4A80BD", subIcon: "scissors" },
     onClose: () => navigation.push("close"), onBookingConfirmed: (...args) => navigation.push(args) }
-    : { visible: true, canonicalCustomerBookings: true, onClose: () => navigation.push("close"),
+    : { visible: true, canonicalCustomerBookings: true, changeSelection: overrides.changeSelection, onChangeSlotSelected: slot => navigation.push(plain(slot)), onClose: () => navigation.push("close"),
       onBookingConfirmed: (...args) => navigation.push(args) };
   let catalogueScope = "";
   function render() {
@@ -464,4 +470,85 @@ for (const [width,height] of [[320,568],[375,667],[390,844],[430,932]]) test(`co
  await f.press("Corte exacto");total=nodes(f.tree()).find(n=>n.props.testID==="booking-services-total");assert.match(text(total),/TOTAL:.*12,00.*€/);assert.match(text(total),/27\s+min/);
  assert.deepEqual(plain(nodes(f.tree()).find(n=>n.props.testID==="booking-save-services").props.style[0]),original);
  await f.press("save");assert.ok(button(f.tree(),"Ana"));assert.equal(posted(f).length,0);
+});
+
+// Execute the shared production selector with authoritative HTTP responses, without writes.
+const changeApi = loadPure("data/bookingChangeAvailability.ts");
+function savedChangeSelection() {
+ const plan=planFor();return changeApi.bookingChangeSelection({businessId:business,serviceId:firstService,staffId:firstStaff,
+ bookingTimeline:plan,bookingServices:plan.serviceDetails,contactName:"Peluquería primera",professionalName:"Ana",
+ bookingCategory:"peluqueria",intentLabel:"Corte exacto",startDatetime:plan.startsAt,endDatetime:plan.endsAt});
+}
+test("change proposal locks original business/services/staff and selects a verified instant without a HOLD or write",async()=>{
+ const selection=savedChangeSelection(),before=JSON.stringify(selection),f=fixture("overlay",{changeSelection:selection});await f.start();
+ assert.match(text(f.tree()),/Proponer cambio/);assert.match(text(f.tree()),/reserva original/);
+ assert.equal(button(f.tree(),"save"),undefined);assert.equal(button(f.tree(),"Sin preferencia"),undefined);
+ const request=actualSlots(f).at(-1).url;assert.equal(request.searchParams.get("business_id"),business);
+ assert.equal(request.searchParams.get("service_ids"),firstService);assert.equal(request.searchParams.get("staff_id"),firstStaff);
+ await f.press("02:37");assert.equal(f.navigation.length,1);assert.equal(f.navigation[0].startInstant,planFor().startsAt);
+ assert.equal(actualSlots(f).length,2);assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);assert.equal(JSON.stringify(selection),before);
+ await f.back();assert.equal(f.navigation.at(-1),"close");
+});
+for(const reason of ["closed day or holiday","full agenda","break or insufficient service duration"]){
+ test(`change proposal offers no invented hours for server-unavailable ${reason}`,async()=>{
+  const f=fixture("overlay",{changeSelection:savedChangeSelection(),plans:[],availableDates:[tomorrow]});await f.start();
+  assert.match(text(f.tree()),/biz_no_availability_day/);assert.equal(button(f.tree(),"02:37"),undefined);
+  assert.equal(buttons(f.tree()).find(node=>node.props.key===today).props.disabled,true);
+  const next=buttons(f.tree()).find(node=>node.props.key===tomorrow);assert.equal(next.props.disabled,false);
+  f.state.plans=undefined;await next.props.onPress();f.render();await f.settle();assert.ok(button(f.tree(),"11:37"));assert.equal(posted(f).length,0);
+ });
+}
+test("change availability lost before selection refresh preserves the original and allows another slot",async()=>{
+ const f=fixture("overlay",{changeSelection:savedChangeSelection()});await f.start();f.state.plans=[];
+ await f.press("02:37");assert.equal(f.navigation.length,0);assert.match(text(f.tree()),/ya no está disponible/);assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);
+ f.state.plans=undefined;const next=buttons(f.tree()).find(node=>node.props.key===tomorrow);await next.props.onPress();f.render();await f.settle();await f.press("11:37");assert.equal(f.navigation.length,1);
+});
+test("change availability permission/network failure never falls back to local times",async()=>{
+ for(const status of [403,503]){const f=fixture("overlay",{changeSelection:savedChangeSelection(),availabilityError:status});await f.start();
+ assert.match(text(f.tree()),/Disponibilidad no verificada|consultar la disponibilidad/);assert.equal(button(f.tree(),"02:37"),undefined);assert.equal(f.navigation.length,0);assert.equal(f.writes.length,0);}
+});
+test("changed duration, professional or resource contract is not advertised as the saved reservation",async()=>{
+ for(const mutate of [p=>{p.endsAt=new Date(Date.parse(p.endsAt)+60000).toISOString();},p=>{p.staffId=secondStaff;},p=>{p.phases[0].resources=[{resourceId:"other-resource",quantity:1,occupancy:"booking"}];}]){
+ const plan=planFor();mutate(plan);const f=fixture("overlay",{changeSelection:savedChangeSelection(),plans:[plan]});await f.start();
+ assert.equal(button(f.tree(),"02:37"),undefined);assert.match(text(f.tree()),/duración y los recursos originales/);assert.equal(posted(f).length,0);}
+});
+test("proposal selection keeps repeated DST times tied to the exact server instant",async()=>{
+ const f=fixture("overlay",{changeSelection:savedChangeSelection(),foldOptions:true});await f.start();
+ const slots=buttons(f.tree()).filter(node=>text(node).includes("02:37"));assert.equal(slots.length,2);
+ await slots[1].props.onPress();f.render();await f.settle();assert.equal(f.navigation[0].startInstant,planFor({fold:1}).startsAt);assert.equal(posted(f).length,0);
+});
+
+test("proposal adapter carries exact instant/revision/proposal ID; conflict or missing backend writes no local success",async()=>{
+ for(const [status,code] of [[409,"BOOKING_CONFLICT"],[403,"FORBIDDEN"],[501,"NOT_IMPLEMENTED"]]){
+  const f=fixture("overlay",{changeStatus:status,changeCode:code}),input={dateISO:today,time:"02:37",startsAt:planFor().startsAt,expectedRevision:7,proposalId:bookingId,acceptFinancialTerms:true};
+  await assert.rejects(f.api.changeBookingRequest(bookingId,"propose",input,user),error=>error.status===status);
+  const command=f.calls.find(call=>call.url.pathname.endsWith("/change"));assert.deepEqual(command.body,{operation:"propose",...input});
+  assert.equal(f.writes.length,0);assert.equal(posted(f).length,0);
+ }
+});
+test("server acceptance conflict is reported and rejection/confirmed agreement use only the original reservation endpoint",async()=>{
+ const f=fixture("overlay",{changeStatus:409,changeCode:"BOOKING_CONFLICT"});
+ await assert.rejects(f.api.changeBookingRequest(bookingId,"accept",{expectedRevision:7,proposalId:bookingId,acceptFinancialTerms:true},user),error=>error.code==="BOOKING_CONFLICT");
+ assert.equal(f.writes.length,0);
+ f.state.changeStatus=0;
+ const original={id:bookingId,business_id:business,service_id:firstService,staff_id:firstStaff,customer_id:user,starts_at:planFor().startsAt,ends_at:planFor().endsAt,status:"CONFIRMED",business_timezone:"Europe/Madrid"};
+ f.state.changeReply=original;const rejected=await f.api.changeBookingRequest(bookingId,"reject",{expectedRevision:7,proposalId:bookingId},user);assert.equal(rejected.id,bookingId);assert.equal(rejected.startInstant,original.starts_at);
+ const next=planFor({date:tomorrow});f.state.changeReply={...original,starts_at:next.startsAt,ends_at:next.endsAt,timing_snapshot:next};
+ const confirmed=await f.api.changeBookingRequest(bookingId,"accept",{expectedRevision:8,proposalId:bookingId,acceptFinancialTerms:true},user);
+ assert.equal(confirmed.id,bookingId);assert.equal(confirmed.startInstant,next.startsAt);assert.equal(f.writes.length,0);assert.equal(posted(f).length,0);
+});
+test("closing during proposal refresh discards a late response without proposing or creating a booking",async()=>{
+ const f=fixture("overlay",{changeSelection:savedChangeSelection()});await f.start();const pending=deferred();f.state.pendingSlots=pending;
+ const slot=button(f.tree(),"02:37"),selection=slot.props.onPress();f.setProps({visible:false});await f.settle();pending.resolve([planFor()]);await selection;await f.settle();
+ assert.equal(f.navigation.length,0);assert.equal(posted(f).length,0);assert.equal(f.writes.length,0);
+});
+
+test("registered local aliases preserve the already-loaded remote timing/resource contract without new catalogue or data writes",()=>{
+ const plan=planFor(),entry={businessId:"registered-local-business",serviceId:"local-service",staffId:"local-professional",bookingServices:[{id:"local-service",title:"Corte",durationMinutes:13,price:12}],startDatetime:"2030-10-27T02:37:00",endDatetime:"2030-10-27T02:50:00"};
+ const selection=changeApi.bookingChangeSelection(entry,{timingSnapshot:plan});
+ assert.equal(selection.timeline,plan);assert.equal(selection.services[0].id,firstService);assert.equal(selection.staff.id,"local-professional");
+ const slot={startDatetime:entry.startDatetime,endDatetime:entry.endDatetime,startInstant:plan.startsAt,endInstant:plan.endsAt,staffId:"local-professional",timingSnapshot:plan,isAvailable:true,isBlocked:false};
+ assert.equal(changeApi.bookingChangeSlots(selection,[slot]).length,1);
+ const changed=structuredClone(plan);changed.phases[0].resources=[{resourceId:"another",quantity:1,occupancy:"booking"}];
+ assert.equal(changeApi.bookingChangeSlots(selection,[{...slot,timingSnapshot:changed}]).length,0);
 });

@@ -25,6 +25,7 @@ import { ownedCompletionEntry, completionEligible, completionSchedule, mergeComp
 import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, type NoteReminderDraft } from "@/lib/goNoteTools";
 import { saveGoNoteReminder, changeGoNoteReminder, confirmAttachedGoNoteReminder } from "@/lib/goNoteReminder";
 import { GoMinuteInput } from "@/components/ui/GoMinuteInput";
+import { bookingChangeSelection, type BookingChangeSelection } from "@/data/bookingChangeAvailability";
 import { BookingApiError, changeBookingRequest as negotiateRealBooking } from "@/data/booking";
 import { readGoLog, flushGoLog, commitGoLogSnapshot, getGoLogSnapshot, updateGoLog } from "@/lib/goLogStore";
 import { onSessionChanged } from "@/lib/sessionEvents";
@@ -4553,6 +4554,8 @@ function HomeScreenContent() {
   const [monthGridOpen, setMonthGridOpen] = useState(false);
   const [reservasNavDay, setReservasNavDay] = useState<string | null>(null);
   const [showBookingFromCal, setShowBookingFromCal] = useState(false);
+  const [bookingProposal, setBookingProposal] = useState<{ entry: GoEntry; actor: "customer" | "business"; dateISO: string; selection: BookingChangeSelection; repository?: import("@/data/demoBookingRepository").DemoBookingRepository } | null>(null);
+  useEffect(() => { setBookingProposal(null); }, [goView.view, adminAccess.userId, demoBookingRepository]);
   const [bookingInitialDateISO, setBookingInitialDateISO] = useState<string | null>(null);
   // Personal calendar context: identical entry to RESERVAR, regardless of account role.
   const openCalendarReservation = (dateISO?: unknown) => {
@@ -7851,7 +7854,7 @@ function HomeScreenContent() {
   const bookingContextRef=useRef({view:goView.view,businessId:ownerDemo.demo?.businessId ?? bCfg.businessId,ownerId:adminAccess.userId});
   bookingContextRef.current={view:goView.view,businessId:ownerDemo.demo?.businessId ?? bCfg.businessId,ownerId:adminAccess.userId};
   const returnToBookingCompany=()=>{if(bookingContextRef.current.view==="BUSINESS"){if(ownerDemo.demo)setEmpresaDemoRoute("reservations");else setEmpresaModulo("reservas_config");setTimeout(()=>setEmpresaOpen(true),350);}};
-  const showBookingChangeError = (error: Error) => {
+  const showBookingChangeError = (error: Error, retry?: () => void) => {
     const reasons: Record<string, string> = {
       BOOKING_CONFLICT: "El profesional asignado a esta reserva no está disponible en la fecha y hora seleccionadas",
       BOOKING_OUTSIDE_AVAILABILITY: "El establecimiento está cerrado en la fecha u hora seleccionada",
@@ -7860,33 +7863,43 @@ function HomeScreenContent() {
       BOOKING_RESOURCE_CONFLICT: "Un recurso necesario ya está ocupado durante el servicio.",
     };
     const reason = error instanceof BookingApiError && error.code ? reasons[error.code] : undefined;
-    Alert.alert("GO", reason || error.message);
+    Alert.alert("GO", reason ? reason + (lang === "en" ? ". The original reservation remains unchanged. Choose another slot." : ". La reserva original se mantiene. Elige otra franja.") : error.message, reason && retry ? [
+      { text: lang === "en" ? "Cancel" : "Cancelar", style: "cancel" },
+      { text: lang === "en" ? "Choose another slot" : "Elegir otra franja", onPress: retry },
+    ] : undefined);
   };
   const runCustomerBooking = (entry:CustomerBookingEntry,operation:"cancel"|"propose"|"accept"|"reject",input:Parameters<typeof customerBookings.mutate>[2]={}) => {
     void customerBookings.mutate(entry,operation,input).then(()=>showToast(lang==="en"?"Reservation updated":"Reserva actualizada","success"))
-      .catch(showBookingChangeError);
+      .catch(error => showBookingChangeError(error, operation === "propose" || operation === "accept" ? () => openBookingProposal(entry) : undefined));
   };
-  const confirmBookingDraft = (entry:GoEntry,result:Pick<CalFlowResult,"dateISO"|"dateDraft"|"time">,actor:"customer"|"business"="customer",fromDrop=false) => {
-    const restoreCompany = () => { if (actor === "business" && !fromDrop) returnToBookingCompany(); };
+  const confirmBookingDraft = (entry:GoEntry,result:Pick<CalFlowResult,"dateISO"|"dateDraft"|"time"> & { startsAt?: string },actor:"customer"|"business"="customer") => {
+    const restoreCompany = () => { if (actor === "business") returnToBookingCompany(); };
     Alert.alert(lang==="en"?"Confirm change proposal":"Confirmar propuesta de cambio",result.dateISO+" · "+result.time+"\n"+(lang==="en"?"The original reservation remains unchanged until agreement. Existing payments and financial conditions remain unchanged; no charge or refund is made.":"La reserva original se mantiene hasta el acuerdo. Se conservan los pagos y condiciones económicas; no se realiza ningún cobro ni devolución."),[
       {text:lang==="en"?"Cancel":"Cancelar",style:"cancel",onPress:restoreCompany},
       {text:lang==="en"?"Confirm proposal":"Confirmar propuesta",onPress:()=>{
-        const input={dateISO:result.dateISO,date:result.dateDraft,time:result.time,acceptFinancialTerms:true};
+        const input={dateISO:result.dateISO,date:result.dateDraft,time:result.time,startsAt:result.startsAt,acceptFinancialTerms:true};
         if(actor==="customer")runCustomerBooking(entry as CustomerBookingEntry,"propose",input);
-        else if(ownerDemo.demo && entry.businessId===ownerDemo.demo.businessId && bookingContextRef.current.view==="BUSINESS" && bookingContextRef.current.businessId===entry.businessId)void createDemoBookingRepository(ownerDemo.demo).changeBooking(String(entry.reservationId),String(entry.businessId),"business","propose",input).then(()=>{showToast(lang==="en"?"Proposal saved":"Propuesta guardada","success");restoreCompany();}).catch(error=>{showBookingChangeError(error);restoreCompany();});
-        else if(entry.businessBooking && entry.ownerUserId && bookingContextRef.current.view==="BUSINESS" && bookingContextRef.current.businessId===entry.businessId)void negotiateRealBooking(String(entry.reservationId),"propose",{...input,expectedRevision:entry.bookingChangeRevision??0,proposalId:entry.changeProposal?.id},entry.ownerUserId).then(()=>{showToast(lang==="en"?"Proposal saved":"Propuesta guardada","success");restoreCompany();}).catch(error=>{showBookingChangeError(error);restoreCompany();});
+        else if(ownerDemo.demo && entry.businessId===ownerDemo.demo.businessId && bookingContextRef.current.view==="BUSINESS" && bookingContextRef.current.businessId===entry.businessId)void createDemoBookingRepository(ownerDemo.demo).changeBooking(String(entry.reservationId),String(entry.businessId),"business","propose",input).then(()=>{showToast(lang==="en"?"Proposal saved":"Propuesta guardada","success");restoreCompany();}).catch(error=>{showBookingChangeError(error,()=>openBookingProposal(entry,actor));restoreCompany();});
+        else if(entry.businessBooking && entry.ownerUserId && bookingContextRef.current.view==="BUSINESS" && bookingContextRef.current.businessId===entry.businessId)void negotiateRealBooking(String(entry.reservationId),"propose",{...input,expectedRevision:entry.bookingChangeRevision??0,proposalId:entry.changeProposal?.id},entry.ownerUserId).then(()=>{showToast(lang==="en"?"Proposal saved":"Propuesta guardada","success");restoreCompany();}).catch(error=>{showBookingChangeError(error,()=>openBookingProposal(entry,actor));restoreCompany();});
         else Alert.alert("GO",lang==="en"?"The company context changed.":"Ha cambiado el contexto de empresa.");
       }}]);
   };
   const openBookingProposal = (entry:GoEntry,actor:"customer"|"business"="customer",initial?:{dateISO:string;time:string}) => {
-    const keepCalendar=actor==="customer" && calOpen;
-    const open=()=>{setCalOpen(true);calFlow.open({startAt:"date",initialDateISO:initial?.dateISO ?? entry.dateISO,initialDateDraft:entry.date,initialTime:initial?.time ?? entry.time,initialDuration:entry.duration,skipDuration:true,
-      validate:r=>!r.time || isGoDateTimePast(r.dateISO,r.time)?(lang==="en"?"Choose a future date and time.":"Elige una fecha y hora futuras."):null,
-      onSave:result=>{if(!keepCalendar)setCalOpen(false);confirmBookingDraft(entry,result,actor);},onCancel:()=>{if(!keepCalendar)setCalOpen(false);if(actor==="business")returnToBookingCompany();}});};
+    const open=()=>{
+      try {
+        const original = (actor === "customer" ? customerBookings.bookings : ownerDemo.demo?.getSnapshot().bookings ?? [])
+          .find(booking => booking.id === entry.bookingId || booking.id === entry.reservationId);
+        const selection = bookingChangeSelection(entry, original);
+        if(actor === "business") selection.business.name = bCfg.businessName;
+        const repository = actor === "customer" ? demoBookingRepository
+          : ownerDemo.demo && entry.businessId === ownerDemo.demo.businessId ? createDemoBookingRepository(ownerDemo.demo) : undefined;
+        setBookingProposal({entry,actor,dateISO:initial?.dateISO ?? entry.dateISO ?? formatISODate(getToday()),selection,repository});
+      } catch(error) { showBookingChangeError(error as Error); if(actor === "business") returnToBookingCompany(); }
+    };
     if(actor==="business"){bookingReturnDateRef.current=entry.dateISO;setEmpresaOpen(false);setTimeout(open,350);}else open();
   };
   const dropBookingProposal = (entry:GoEntry, destination:{dateISO:string;time:string}, actor:"customer"|"business") => {
-    confirmBookingDraft(entry, {...destination,dateDraft:formatDayLabel(new Date(destination.dateISO+"T00:00:00"))},actor,true);
+    openBookingProposal(entry,actor,destination);
   };
   const respondCustomerBooking = (entry:CustomerBookingEntry,operation:"accept"|"reject") => {
     const proposal=entry.changeProposal as import("@/data/booking").BookingChangeProposal|undefined;if(!proposal)return;
@@ -7895,7 +7908,7 @@ function HomeScreenContent() {
   };
   const sendSuggestChangeFromCal = (calResult: CalFlowResult) => {
     const bookingEntry=customerBookings.entries.find(entry=>entry.id===currentReceivedIdRef.current);
-    if(bookingEntry){confirmBookingDraft(bookingEntry,calResult);calFlow.cancel();if(proposalReturnRef.current!=="calendar")setCalOpen(false);return;}
+    if(bookingEntry){calFlow.cancel();openBookingProposal(bookingEntry,"customer",{dateISO:calResult.dateISO,time:calResult.time});return;}
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
     const id = currentReceivedIdRef.current;
@@ -20936,6 +20949,22 @@ function HomeScreenContent() {
         })()}
 
 
+        <BookingSearchOverlay
+          key={"change_" + (bookingProposal?.entry.reservationId ?? "closed")}
+          visible={!!bookingProposal}
+          changeSelection={bookingProposal?.selection}
+          initialDateISO={bookingProposal?.dateISO}
+          demoRepository={bookingProposal?.repository}
+          onClose={() => { const actor=bookingProposal?.actor; setBookingProposal(null); if(actor==="business")returnToBookingCompany(); }}
+          onChangeSlotSelected={slot => {
+            if(!bookingProposal)return;
+            const {entry,actor}=bookingProposal;
+            setBookingProposal(null);
+            // Preserve the server instant as well as local wall time, including DST folds.
+            const dateISO=slot.startDatetime.slice(0,10),time=slot.startDatetime.slice(11,16);
+            setTimeout(()=>confirmBookingDraft(entry,{dateISO,time,dateDraft:formatDayLabel(new Date(dateISO+"T00:00:00")),startsAt:slot.startInstant},actor),350);
+          }}
+        />
         {/* ── GO BOOKING — búsqueda de proveedor y reserva ──────────── */}
         <BookingSearchOverlay
           key={demoBookingRepository ? "demo_" + demoBookingRepository.ownerUserId : "real"}
