@@ -8,13 +8,11 @@ const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefi
 function note(text){$('notice').textContent=text;}
 async function api(route,body){const r=await fetch(base+'/'+route,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers:body?{'Content-Type':'application/json','X-GO-CSRF':state.csrf}:{},body:body?JSON.stringify(body):undefined});const data=await r.json();if(!r.ok)throw Error(data.message||data.error||'No se pudo verificar la operación.');return data;}
 function factoryMode(s){const wheel=s?.wheel||{};
-  if(s?.reservation?.state==='recovery'||s?.reservation?.selected_team==='PC2')return ['blocked','BLOQUEADO'];
+  if(s?.reservation?.state==='recovery'||s?.reservation?.selected_team==='PC2')return ['blocked','PARADO'];
   if(wheel.enabled)return ['programming','ACTIVO'];
-  if(!wheel.live_queue_authorized||wheel.account_rebind_required)return ['blocked','BLOQUEADO'];
-  if(wheel.reason&&!['OWNER_PAUSED','WHEEL_PAUSED','CREDIT_LIMIT','WHEEL_CODEX_QUOTA'].includes(wheel.reason))return ['blocked','BLOQUEADO'];
+  if(!wheel.live_queue_authorized||wheel.account_rebind_required)return ['blocked','PARADO'];
+  if(wheel.reason&&!['OWNER_PAUSED','WHEEL_PAUSED','CREDIT_LIMIT','WHEEL_CODEX_QUOTA'].includes(wheel.reason))return ['blocked','PARADO'];
   return ['pending','PAUSADO'];}
-// Presentation only: retain the coordinator's blocked state and safety decisions.
-function factoryOrbitMode(s){const [kind,label]=factoryMode(s);return [kind,kind==='blocked'?'PARADO':label];}
 function actualModule(key){return state?.layout?.labels?.[key]||state?.registry?.[key]?.name||key;}
 function orbitButton(key,index){const button=node('button',key?actualModule(key):'Vacío','sat'+(key?'':' empty')+(key===selected?' selected':''));button.dataset.slot=String(index);button.dataset.module=key||'';button.disabled=!key;button.type='button';button.setAttribute('aria-label',key?`${actualModule(key)}, órbita ${orbitIndex+1}, posición ${index+1}`:`Posición ${index+1} vacía`);
   if(key){button.onclick=()=>{if(drag)return;selected=key;render();};button.addEventListener('pointerdown',e=>beginHold(e,key));}return button;}
@@ -30,7 +28,7 @@ function renderOrbit(){const box=$('orbit');box.replaceChildren();const items=st
   }
   box.setAttribute('aria-label',orbitIndex===0?'Órbita principal con Cuenta Codex y Otros':'Siete accesos y botón Otros');
   const other=node('button',drag?'OTRA ÓRBITA':'OTROS','sat other');other.dataset.slot='7';other.type='button';other.setAttribute('aria-label','OTROS, elegir órbita');other.onclick=()=>showArc();box.append(other);
-  const mode=factoryOrbitMode(state.operational),go=node('button',`GO\n${mode[1]}`,'go '+mode[0]);go.style.whiteSpace='pre-line';go.disabled=powerBusy;go.setAttribute('aria-label',state.operational.wheel.enabled?'Pausar fábrica':'Activar fábrica');go.onclick=()=>factoryPower();box.append(go);
+  const mode=factoryMode(state.operational),go=node('button',`GO\n${mode[1]}`,'go '+mode[0]);go.style.whiteSpace='pre-line';go.disabled=powerBusy;go.setAttribute('aria-label',state.operational.wheel.enabled?'Pausar fábrica':'Activar fábrica');go.onclick=()=>factoryPower();box.append(go);
   $('factoryState').textContent=mode[1];$('factoryState').className='status '+(mode[0]==='programming'?'good':mode[0]==='blocked'?'bad':'warn');$('orbitTitle').textContent=`Órbita ${orbitIndex+1} de ${state.layout.layout.length}`;
   const chooser=$('orbitChooser');chooser.replaceChildren();state.layout.layout.forEach((_,i)=>{const b=node('button',String(i+1),i===orbitIndex?'active':'');b.setAttribute('aria-label','Mostrar órbita '+(i+1));b.onclick=()=>{orbitIndex=i;render();};chooser.append(b);});
 }
