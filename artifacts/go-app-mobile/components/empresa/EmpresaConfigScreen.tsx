@@ -786,6 +786,14 @@ function StepNombre({ onFocusField }: { onFocusField?: (input: TextInputInstance
   const nameInput = useRef<TextInputInstance>(null);
   const { t } = useLanguage();
   const { config, updateConfig } = useBusinessConfig();
+  const [name,setName]=useState(config.businessName ?? "");
+  const pendingName=useRef<string|null>(null);
+  useEffect(()=>{
+    const stored=config.businessName ?? "";
+    // Queued DEMO commits may acknowledge earlier keystrokes. Never feed them
+    // back into the native editor while a newer local value awaits its commit.
+    if(pendingName.current===null||stored===pendingName.current){pendingName.current=null;setName(stored);}
+  },[config.businessName]);
   return (
     <View>
       <View style={c.sectionCard}>
@@ -796,15 +804,15 @@ function StepNombre({ onFocusField }: { onFocusField?: (input: TextInputInstance
           style={c.nameInput}
           autoCorrect={false}
           spellCheck={false}
-          value={config.businessName ?? ""}
-          onChangeText={v => updateConfig({ businessName: v })}
+          value={name}
+          onChangeText={v => {pendingName.current=v;setName(v);updateConfig({ businessName: v });}}
           placeholder={t("biz_name_placeholder")}
           placeholderTextColor={DIM}
           returnKeyType="done"
           maxLength={60}
         />
-        {(config.businessName?.length ?? 0) > 0 && (
-          <Text style={c.charCount}>{config.businessName!.length}/60</Text>
+        {name.length > 0 && (
+          <Text style={c.charCount}>{name.length}/60</Text>
         )}
       </View>
     </View>
