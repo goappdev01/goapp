@@ -19,3 +19,14 @@ test('removing the old panel reservation lowers only the whole orbit and retains
 test('both real information frames use the safe measured height, not just a maximum scroll height',()=>{
  assert.match(source,/height: changesCardSpace.availableHeight/);assert.match(source,/height: nextCardAvailableHeight/);assert.doesNotMatch(source,/confirmationHeight: landingHasCompletion/);
 });
+
+const panels=evaluate('components/landing/landingPanels.ts');
+test('information starts at the real local iOS inset with no obsolete QR or title lane',()=>{
+ const panel={x:18,y:120,width:354,height:320};
+ const result=panels.landingScrollPanelSpace({panel,frame:{virtual:false},insets:{top:59},titleBottom:0,controls:[]});
+ assert.equal(panel.y+panel.height-result.availableHeight,63);
+ assert.match(source,/landingInformationInsets = \{ top: Math.max\(0, insets.top - landingSurfaceOrigin.y\)/);
+ assert.match(source,/landingInformationControls = landingInlineHumanity \? \[inlineHumanityRect\] : \[\]/);
+ const viewport=fs.readFileSync('components/landing/LandingContentViewport.tsx','utf8');
+ assert.match(viewport,/contentInsetAdjustmentBehavior="never"/);assert.match(viewport,/scrollRef.current\?\.scrollTo\(\{y:0,animated:false\}\)/);
+});

@@ -102,10 +102,12 @@ export function LandingCardContents(props: LandingCardProps) {
 function BoundedLandingCardContents(props: LandingCardProps) {
   const moved = React.useRef(false), start = React.useRef({ x: 0, y: 0 });
   const maxHeight = Math.max(1, props.boundedHeight!);
+  const scrollRef = React.useRef<import("react-native").ScrollViewInstance>(null);
+  React.useEffect(() => { scrollRef.current?.scrollTo({y:0,animated:false}); }, [props.scrollKey]);
   const body = <View testID="landing-card-body" style={[props.contentContainerStyle, { flexShrink: 0 }]}
     onLayout={event => props.onHeight(event.nativeEvent.layout.height)}>{props.children}</View>;
   return <CompactBodySpace.Provider value={Infinity}>
-    <ScrollView key={props.scrollKey} testID="landing-panel-scroll"
+    <ScrollView ref={scrollRef} key={props.scrollKey} contentInsetAdjustmentBehavior="never" automaticallyAdjustContentInsets={false} testID="landing-panel-scroll"
       style={{ maxHeight, flexGrow: 0, flexShrink: 1, minHeight: 0 }}
       contentContainerStyle={{ flexGrow: 0 }} bounces={false} alwaysBounceVertical={false}
       overScrollMode="never" directionalLockEnabled nestedScrollEnabled

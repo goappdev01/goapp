@@ -96,7 +96,7 @@ export function landingScrollPanelSpace({ panel, frame, insets, titleBottom, con
   const x = panel.x + (frame.virtual ? frame.left : 0);
   const floor = panel.y + panel.height + (frame.virtual ? frame.top : 0) + offsetY;
   const obstacles = controls.filter(rect => rect.x < x + panel.width && rect.x + rect.width > x);
-  const safeTop = Math.max(insets.top + 8, titleBottom + 8);
+  const safeTop = Math.max(insets.top + 4, titleBottom > 0 ? titleBottom + 4 : 0);
   // The summary already excludes the header buttons horizontally; share that free lane.
   const top = Math.max(safeTop + (confirmationHeight > 0 ? confirmationHeight + confirmationGap : 0),
     ...obstacles.map(rect => rect.y + rect.height + 8));

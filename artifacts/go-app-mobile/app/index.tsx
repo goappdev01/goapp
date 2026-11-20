@@ -14244,6 +14244,8 @@ function HomeScreenContent() {
       : undefined,
     bounds: compactLandingBounds,
   });
+  const landingInformationInsets = { top: Math.max(0, insets.top - landingSurfaceOrigin.y) };
+  const landingInformationControls = landingInlineHumanity ? [inlineHumanityRect] : [];
   const landingHasActionSelector = actionCompletion.unresolved.length + actionCompletion.pending.length > 0
     || !!actionCompletion.error || !!actionCompletion.savingCount || !!actionCompletion.failedDecisions?.length;
   // Selectors follow the actual rendered footprint; none of these values feed orbital placement.
@@ -14869,8 +14871,8 @@ function HomeScreenContent() {
       {landingInlineHumanity && renderLandingHumanity(inlineHumanityRect)}
       <LandingContentViewport frame={landingFrame} offsetY={landingOffsetY} closingGesture={universalSwipeGesture}>
       {landingActionsOpen && (() => {
-        const space = landingScrollPanelSpace({panel:landingDisplayPanels.region,frame:landingFrame,insets,
-          titleBottom:titleBottomLocalY ?? 0,controls:closeHeaderObstacles,offsetY:landingOffsetY});
+        const space = landingScrollPanelSpace({panel:landingDisplayPanels.region,frame:landingFrame,insets:landingInformationInsets,
+          titleBottom:0,controls:landingInformationControls,offsetY:landingOffsetY});
         const floor=landingDisplayPanels.region.y+landingDisplayPanels.region.height;
         const height=space.availableHeight;
         return renderLandingActionCompletion({x:landingDisplayPanels.region.x,y:floor-height,
@@ -14967,7 +14969,7 @@ function HomeScreenContent() {
           ? landingFrame.baseline + landingFrame.height - landingDisplayPanels.changes.y - landingDisplayPanels.changes.height
           : screen.height - landingDisplayPanels.changes.y - landingDisplayPanels.changes.height;
         const changesCardSpace = landingScrollPanelSpace({ panel: landingDisplayPanels.changes, frame: landingFrame,
-          insets, titleBottom: titleBottomLocalY ?? 0, controls: closeHeaderObstacles, offsetY: landingOffsetY });
+          insets: landingInformationInsets, titleBottom: 0, controls: landingInformationControls, offsetY: landingOffsetY });
 
         // Resolver datos de visualización según tipo
         let cardAccent   = ACCENT;
@@ -15027,7 +15029,7 @@ function HomeScreenContent() {
 
             <LandingCardContents staticBody intrinsicBody={item.kind === "cambio"}
               boundedHeight={Math.max(1, changesCardSpace.availableHeight - Math.round(8 * uiScaleFactor))}
-              scrollKey={item.kind === "cambio" ? item.g.id : item.booking.id}
+              scrollKey={"changes:" + (item.kind === "cambio" ? item.g.id : item.booking.id)}
               onOpen={item.kind === "cambio" ? () => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); setLandingDetailsId(item.g.id); } : undefined}
               adaptiveBody={{ ...changesCardSpace, frameVerticalInset: 3 }}
               footer={item.kind === "cambio" && renderLandingOperations(item.g).content}
@@ -15233,7 +15235,7 @@ function HomeScreenContent() {
         const PANEL_W = landingDisplayPanels.next.width;
         const INFO_W = PANEL_W;
         const nextCardSpace = landingScrollPanelSpace({ panel: landingDisplayPanels.next, frame: landingFrame,
-          insets, titleBottom: titleBottomLocalY ?? 0, controls: closeHeaderObstacles, offsetY: landingOffsetY, });
+          insets: landingInformationInsets, titleBottom: 0, controls: landingInformationControls, offsetY: landingOffsetY, });
         const nextCardAvailableHeight = nextCardSpace.availableHeight;
         const headerObstacles = nextCardSpace.headerObstacles;
         const PANEL_ACTION_GAP = Math.round(12 * uiScaleFactor);
@@ -15279,7 +15281,7 @@ function HomeScreenContent() {
             {entryIsInternal(g) && <LandingEntryOutline testID="landing-task-outline" scale={uiScaleFactor} color={nextCardDeleteConfirm === g.id ? "#ef4444" : tint} />}
             <LandingCardContents staticBody intrinsicBody={entryIsInternal(g) || entryIsReservation(g)}
               boundedHeight={Math.max(1, nextCardAvailableHeight - Math.round(8 * uiScaleFactor))}
-              scrollKey={g.id}
+              scrollKey={nextPanelKind + ":" + g.id}
               onOpen={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); setLandingDetailsId(g.id); }}
               adaptiveBody={{ availableHeight: nextCardAvailableHeight, frameVerticalInset: Math.round((entryIsInternal(g) || entryIsReservation(g) ? 6 : 10) * uiScaleFactor) + Math.round((entryIsInternal(g) ? 8 : 14) * uiScaleFactor) + 3, width: PANEL_W, headerObstacles }}
               footer={operations.content}
