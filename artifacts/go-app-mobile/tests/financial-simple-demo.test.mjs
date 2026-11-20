@@ -108,7 +108,7 @@ test('Spanish grouped company counts survive a restart and use the existing fina
   assert.deepEqual(Array.from(restored.selectedActivityIds), [activityId]);
 });
 
-test('compact DEMO edits a pair, recalculates, creates an activity and clears only its scenario', () => {
+test('compact DEMO edits independent activity blocks, appends activities and restores selected pairs', async () => {
   let state = { doc: demo.createFinancialDemoDocument(2026), countryCode: 'ES', activityId: 'go_peluquerias' };
   const pessimistic = model.newFinancialAssumption('pessimistic', 'go_peluquerias', 'ES', 'PESIMISTA', 2026);
   state.doc = { ...state.doc, assumptions: [...state.doc.assumptions, pessimistic] };
@@ -130,7 +130,10 @@ test('compact DEMO edits a pair, recalculates, creates an activity and clears on
   }).FinancialSimpleDemoTable;
   const render = () => { stateIndex = 0; tree = screen({ state, update: edit => { state = edit(state); }, onCalculate: () => calculations++ }); return tree; };
   const all = node => !node || typeof node !== 'object' ? [] : [node, ...(node.children || []).flatMap(all)];
-  const find = predicate => { const found = all(render()).find(predicate); assert.ok(found, 'expected visible control'); return found; };
+  const find = predicate => { const nodes=all(render()),active=nodes.find(n=>n.props.testID==='finance-pair-'+state.countryCode+'|'+state.activityId);const found=all(active).find(predicate)||nodes.find(predicate); assert.ok(found, 'expected visible control'); return found; };
+  const block=(country,activity)=>find(n=>n.props.testID==='finance-pair-'+country+'|'+activity);
+  const field=(country,activity,label)=>all(block(country,activity)).find(n=>n.type==='Number'&&n.props.label===label);
+  const blocks=()=>all(render()).filter(n=>n.props.testID?.startsWith('finance-pair-'));
 
   assert.equal(find(node => node.type === 'MultiChoice' && node.props.label === 'Países incluidos').props.options.find(item => item.value === 'FR').label, 'Francia');
   assert.deepEqual(Array.from(find(node => node.type === 'MultiChoice' && node.props.label === 'Actividades incluidas').props.values), ['go_peluquerias']);
@@ -144,7 +147,25 @@ test('compact DEMO edits a pair, recalculates, creates an activity and clears on
   find(node => node.props.accessibilityLabel === 'CALCULAR').props.onPress();
   assert.equal(calculations, 1);
   assert.ok(all(render()).some(node => node.children?.includes('69120 EUR')));
+  assert.equal(blocks().length,1);
+  find(n=>n.type==='MultiChoice'&&n.props.label==='Actividades incluidas').props.onChange(['go_peluquerias','go_restaurantes']);
+  assert.equal(blocks().length,2);
+  assert.equal(field('ES','go_restaurantes','Empresas existentes').props.value,79508);
+  field('ES','go_restaurantes','Empresas existentes').props.onChange(60000);
+  field('ES','go_restaurantes','Captación (%)').props.onChange(5);
+  field('ES','go_restaurantes','Cuota mensual (€)').props.onChange(100);
+  find(n=>n.props.accessibilityLabel==='CALCULAR').props.onPress();
+  assert.equal(row(state.doc).monthly,69120);assert.equal(row(state.doc,'ES','go_restaurantes').monthly,300000);
+  assert.ok(all(render()).some(n=>n.children?.includes('369120 EUR')));assert.ok(all(render()).some(n=>n.children?.includes('4429440 EUR')));
+  find(n=>n.props.accessibilityLabel==='Nueva actividad').props.onPress();
+  find(n=>n.type==='Choice'&&n.props.label==='Añadir actividad existente').props.onChange('go_unas');
+  assert.equal(blocks().length,3);assert.equal(new Set(blocks().map(n=>n.props.testID)).size,3);
+  field('ES','go_unas','Empresas existentes').props.onChange(100);field('ES','go_unas','Captación (%)').props.onChange(2);field('ES','go_unas','Cuota mensual (€)').props.onChange(10);
+  assert.ok(all(render()).some(n=>n.children?.includes('369140 EUR')));
+  find(n=>n.type==='MultiChoice'&&n.props.label==='Actividades incluidas').props.onChange(['go_peluquerias']);
+  block('ES','go_peluquerias').props.onTouchStart();
   find(node => node.props.accessibilityLabel === 'LIMPIAR').props.onPress();
+  assert.equal(row(state.doc,'ES','go_restaurantes').monthly,300000,'LIMPIAR preserves other pairs');
   assert.equal(row(state.doc).share, 0);
   assert.equal(row(state.doc).fee, 0);
   assert.equal(row(state.doc).monthly, 0);
@@ -154,7 +175,7 @@ test('compact DEMO edits a pair, recalculates, creates an activity and clears on
   find(node => node.props.accessibilityLabel === 'Nombre de la nueva actividad').props.onChangeText('Nuevo servicio');
   find(node => node.props.accessibilityLabel === 'GUARDAR ACTIVIDAD').props.onPress();
   assert.equal(state.doc.activities.find(item => item.id === state.activityId).name, 'Nuevo servicio');
-  assert.deepEqual(Array.from(state.selectedActivityIds), [state.activityId], 'new activity becomes the sole included activity');
+  assert.deepEqual(Array.from(state.selectedActivityIds), ['go_peluquerias',state.activityId], 'new activity appends without hiding prior blocks');
   assert.equal(find(node => node.type === 'Number' && node.props.label === 'Empresas existentes').props.value, null);
   find(node => node.props.accessibilityLabel === 'LIMPIAR').props.onPress();
   assert.equal(row(state.doc, 'ES', state.activityId).market, null);
@@ -164,14 +185,14 @@ test('compact DEMO edits a pair, recalculates, creates an activity and clears on
   find(node => node.type === 'Number' && node.props.label === 'Empresas existentes').props.onChange(Number.NaN);
   assert.equal(row(state.doc, 'ES', state.activityId).market, 250, 'invalid text cannot erase the last valid count');
   const beforeInvalid=calculations;find(node=>node.props.accessibilityLabel==='CALCULAR').props.onPress();assert.equal(calculations,beforeInvalid,'invalid draft cannot calculate using a hidden previous value');assert.ok(all(render()).some(node=>node.props.accessibilityRole==='alert'));
-  assert.equal(find(node=>node.type==='Table'&&node.props.headers[0]==='País').props.rows[0][2],'Sin dato','invalid pair is excluded from totals');
+  assert.equal(find(node=>node.type==='Table'&&node.props.headers[0]==='País').props.rows[0][2],'0 EUR','invalid pair is excluded while the cleared neighbouring pair remains valid');
   find(node => node.type === 'Number' && node.props.label === 'Empresas existentes').props.onChange(60000);
   find(node => node.type === 'Number' && node.props.label === 'Captación (%)').props.onChange(5);
   find(node => node.type === 'Number' && node.props.label === 'Cuota mensual (€)').props.onChange(100);
   assert.ok(all(render()).some(node => node.children?.includes('300000 EUR')), 'the new activity calculates without including unselected ones');
   state.doc = calc.updateRevenueCalculator(state.doc, 'go_peluquerias', 'ES', 'REAL', 'share', 5);
   state.doc = calc.updateRevenueCalculator(state.doc, 'go_peluquerias', 'ES', 'REAL', 'fee', 29);
-  assert.ok(all(render()).some(node => node.children?.includes('300000 EUR')), 'unselected historical figures do not enter the total');
+  assert.ok(all(render()).some(node => node.children?.includes('366816 EUR')), 'previous included activities keep contributing independently');
   find(node => node.type === 'MultiChoice' && node.props.label === 'Países incluidos').props.onChange([]);
   assert.deepEqual(Array.from(state.selectedCountryCodes), []);
   assert.ok(all(render()).some(node => node.children?.includes('Sin selección')));
@@ -181,10 +202,23 @@ test('compact DEMO edits a pair, recalculates, creates an activity and clears on
   assert.ok(all(render()).some(node => node.children?.includes('366816 EUR')), 'selected pairs aggregate once');
   const previousEditor=find(node=>node.type==='Number'&&node.props.label==='Empresas existentes');
   const oldCountry=state.countryCode,oldActivity=state.activityId;
-  find(node=>node.type==='Choice'&&node.props.label==='Editar país').props.onChange('FR');
+  block('FR',oldActivity).props.onTouchStart();
   previousEditor.props.onChange(61000);
   assert.equal(row(state.doc,oldCountry,oldActivity).market,61000,'late final text belongs to the pair that owned the input');
   assert.equal(row(state.doc,'FR',oldActivity).market,null,'changing country cannot redirect a late edit');
+  const customId=oldActivity;
+  field('FR',customId,'Empresas existentes').props.onChange(100);
+  field('FR',customId,'Captación (%)').props.onChange(10);field('FR',customId,'Cuota mensual (€)').props.onChange(20);
+  field('FR','go_peluquerias','Empresas existentes').props.onChange(1000);
+  field('FR','go_peluquerias','Captación (%)').props.onChange(5);field('FR','go_peluquerias','Cuota mensual (€)').props.onChange(50);
+  find(n=>n.props.accessibilityLabel==='CALCULAR').props.onPress();
+  assert.equal(blocks().length,4);assert.ok(all(render()).some(n=>n.children?.includes('374516 EUR')));assert.ok(all(render()).some(n=>n.children?.includes('4494192 EUR')));
+  find(n=>n.type==='MultiChoice'&&n.props.label==='Actividades incluidas').props.onChange(['go_peluquerias']);
+  assert.equal(blocks().length,2);assert.ok(all(render()).some(n=>n.children?.includes('69316 EUR')));
+  find(n=>n.type==='MultiChoice'&&n.props.label==='Actividades incluidas').props.onChange(['go_peluquerias',customId]);
+  assert.equal(blocks().length,4);assert.equal(new Set(blocks().map(n=>n.props.testID)).size,4);assert.equal(field('FR',customId,'Empresas existentes').props.value,100);
+  await openStore().saveFinancialDemo('multi-block-ui-owner',state);state=(await openStore().loadFinancialDemo('multi-block-ui-owner')).state;
+  assert.equal(blocks().length,4);assert.equal(field('FR',customId,'Cuota mensual (€)').props.value,20);assert.ok(all(render()).some(n=>n.children?.includes('374516 EUR')));
   width = 320;
   assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.flexDirection === 'column')), 'narrow portrait layout stacks fields');
   assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.alignItems === 'stretch')), 'stacked selectors fill the narrow width');
