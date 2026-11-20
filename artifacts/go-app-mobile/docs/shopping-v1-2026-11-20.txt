@@ -1,0 +1,90 @@
+GO COMPRAS V1 — checkpoint técnico parcial, 20/11/2026
+
+Base inspeccionada: origin/main 00e2f4469cb7419f4f8cac523129561b6df7f9cb.
+Antecedentes de implementación: 7333f8c y 343fc17, además de la separación
+de contextos e2a2b39. No se accedió ni se modificó Trello.
+
+Contraste previo con MAIN (no representa validación física):
+1 Parcial: nombre limitado a dos líneas, precio pequeño y cantidad antes del precio.
+2 Parcial: retirada segura existente; papelera oculta y swipe izquierdo solo revelaba otra acción.
+3 Ya correcto: check gris/verde y escritura local.
+4 Parcial: resumen existente, reserva lateral innecesaria, avisos dentro del total.
+5 Parcial: campos mínimos existentes; marca al final y precio/cantidad en filas diferentes.
+6 Parcial: hook de teclado y ATRÁS/abajo existentes; taps manejados podían activar botones al cerrar teclado.
+7 Ya correcto: enteros nuevos, conservación y corrección explícita de valores antiguos.
+8 Parcial: algunas correspondencias específicas y fallback incorrecto de categoría.
+9 Parcial: navegación ATRÁS existente; faltaba X propia de Compras.
+10 Pendiente: accesos encima de las órbitas.
+11 Pendiente: orden por categoría sin agrupación global de comprados arriba.
+12 Pendiente: selección inmediata y vuelta a lista.
+13 Parcial: nombre pequeño en lista y ausente en Landing/catálogo.
+14 Pendiente: órbita centrada verticalmente en su espacio.
+15 Parcial: Share.share existente con productos seleccionados; faltaban marcas/unidades/estados explícitos.
+   No hay receptor/importador de documentos ShoppingDocument entre cuentas.
+16 Parcial, CONFLICTO de diagnóstico nativo: almacenamiento con cola y readback ya implementados;
+   no se ha demostrado la causa de la pérdida de las tres listas del propietario.
+17 Pendiente, dependiente de preservar/investigar 16 antes de reclasificar o migrar.
+
+Cambios independientes implementados:
+- Nombre completo, precio enmarcado/centrado de 20 pt y campo de 44 pt mínimo;
+  precio/cantidad/check reflejados por mano, papelera visible de retirada segura.
+- Swipe derecho selecciona, izquierdo confirma retirada; un contacto no ejecuta
+  una pulsación residual. Protección conservada al remontar fichas por agrupación.
+- Comprados arriba y pendientes abajo, sin modificar el orden persistido, cantidades,
+  precios o historial; retirados dejan de aparecer en la compra habitual.
+- Alta compacta con marca arriba y precio/cantidad juntos cuando caben, reflejada.
+- ScrollViews consumen el primer tap exterior con teclado; se conserva cambio de
+  foco entre TextInput y el hook común ATRÁS/abajo. X utiliza flotantes existentes.
+- Nombre activo visible en Landing/catálogo y centrado en lista. Resumen aprovecha
+  ancho; total solo título, importe y número de productos; ausencias siguen en cálculos/accesibilidad.
+- Órbita existente alineada abajo y al lado de la mano, sin cambiar radios ni IA;
+  Buscar/Mis listas debajo. Safe areas existentes y scroll para dimensiones insuficientes.
+- Selección temporal múltiple, GUARDAR atómico e idempotente sobre la lista identificada;
+  no salida automática; confirmación al abandonar una selección sin guardar.
+- Correspondencias centralizadas por producto normalizado, nunca categoría;
+  icono neutral identificable (specific=false) si no hay dibujo fiable. De 202 nombres
+  únicos del catálogo actual, 145 tienen representación específica y 57 usan paquete
+  neutral. No se descargaron imágenes ni se añadió dependencia/servicio.
+- Compartición nativa del título y todos los artículos de la compra activa con
+  marca, cantidad, unidad y estado; sin historial, borradores ni identificadores privados.
+
+Persistencia: evidencia y límite importante
+-----------------------------------------
+Se reproduce en pruebas una sustitución silenciosa: openShoppingNote ignoraba un
+identificador activo inexistente y abría otra lista o creaba COMPRAS. Ahora lo
+rechaza sin escribir registros ni cambiar el identificador, y permite abrir
+explícitamente las listas propias aún presentes. No se presenta esa ruta como
+causa demostrada de desaparición de registros ni como recuperación de las tres listas.
+La cola goLogStore, identidad, formato version:1, claves y datos históricos no se migraron.
+
+GET http://localhost:8088/json/list devolvió [] durante esta intervención.
+No hubo acceso al AsyncStorage del iPhone. No se leyó go_log_v1 nativo ni su clave
+de lista activa, no se creó copia de esos datos y no se ejecutó recuperación real.
+No se borró almacenamiento, caché, sesión o app; pruebas solo con discos temporales.
+
+CONFLICTOS PENDIENTES (no declarar tarjeta completa)
+-------------------------------------------------
+16: hace falta acceso de inspección de la sesión real en primer plano a TESO 8088
+para preservar/leer go_log_v1 y shopping_note:<usuario>:live%3AADMIN:active_list,
+comparar registros/contextos/papelera y determinar qué ocurrió con las tres listas.
+No adoptar automáticamente registros sin propietario/contexto ni inventar datos.
+17: se mantiene la clasificación previa, OTRO y favoritos actuales sin migración.
+Las ocho categorías nuevas, catálogo personal por cuenta y FAVORITOS independiente
+siguen pendientes hasta resolver la prioridad de conservación del punto 16.
+15B: Compras usa Share.share, sin transporte/receptor de listas GO→GO con aceptación.
+No se ha creado ni simulado entrega, importación remota, API o sincronización.
+
+Verificación técnica
+--------------------
+41 regresiones COMPRAS de unified-notes.test.mjs pasan.
+22 pruebas de shopping-experience + shopping-v1-consolidation pasan (11 nuevas).
+Incluyen tres listas ADMIN, concurrencia, cuenta ajena, papelera, recarga desde
+almacenamiento temporal, selección múltiple, retry tras readback fallido, gestos,
+agrupación, marcas/unidades en 30 productos compartidos e identificador activo huérfano.
+TypeScript sin errores y git diff --check. Publicación y bundle se verifican después
+del commit; el SHA y estado de Metro se comunican en la entrega de esta intervención.
+
+Estas pruebas usan React real con adaptadores de controles nativos y almacenamiento
+en archivos temporales. No validan Yoga, hit-testing, teclado, compartir por WhatsApp
+ni geometría visual real del iPhone. Queda comprobación física del propietario.
+8089, PC1, puente, Tailscale, API, backend, permisos e infraestructura no intervenidos.

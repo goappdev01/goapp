@@ -37,6 +37,7 @@ export type ShoppingDocument = {
   checkouts?:{store:string; x:number; y:number}[];
 };
 export type ShoppingOperation = { operationId:string } & (
+  {type:"addCatalog"; products:{name:string;category:ShoppingCategory;id?:string}[]} |
   {type:"saveItem"; draft:ShoppingEditorDraft} | {type:"draft"; draft?:ShoppingEditorDraft} |
   {type:"bought"; id:string; value:boolean} | {type:"select"; id:string; value:boolean} |
   {type:"quantity"; id:string; value:number} | {type:"delete"; id:string; confirmed:true} |
@@ -187,6 +188,28 @@ export function applyShoppingOperation(current:ShoppingDocument,op:ShoppingOpera
   const item=(id:string)=>{const i=doc.items.find(i=>i.id===id);if(!i)throw Error("El producto ya no está disponible.");return i;};
   const permutation=(before:string[],after:string[])=>before.length===after.length&&new Set(after).size===after.length&&after.every(id=>before.includes(id));
   switch(op.type){
+    case "addCatalog": {
+      if(!Array.isArray(op.products)||!op.products.length)throw Error("Selecciona productos antes de guardar.");
+      const seen=new Set<string>();
+      for(const product of op.products){
+        if(!categoryValid(product.category)||!product.name?.trim())throw Error("Producto de catálogo inválido.");
+        const key=product.id||product.category+":"+shoppingName(product.name);
+        if(seen.has(key))continue;seen.add(key);
+        const matches=doc.items.filter(i=>product.id?i.id===product.id:i.category===product.category&&shoppingName(i.name)===shoppingName(product.name));
+        if(matches.length>1)throw Error("Hay varias presentaciones de «"+product.name+"». Elige la presentación guardada.");
+        const existing=matches[0];
+        if(product.id&&!existing)throw Error("El producto guardado cambió. Revisa la selección.");
+        if(existing){
+          if(existing.selected)continue;
+          if(!isShoppingQuantity(existing.quantity))throw Error("Corrige la cantidad antigua de «"+existing.name+"» antes de añadirlo.");
+          existing.selected=true;existing.bought=false;
+        }else{
+          const draft={...shoppingEditor(),name:product.name,category:product.category};
+          doc.items.push(editorItem(draft,doc));
+        }
+      }
+      break;
+    }
     case "draft": if(op.draft){validateEditorShape(op.draft);if(doc.pendingEditor&&doc.pendingEditor.id!==op.draft.id)throw Error("Hay otro borrador pendiente. Recupéralo o descártalo antes de editar otro producto.");}doc.pendingEditor=op.draft;break;
     case "saveItem": {const next=editorItem(op.draft,doc);doc.items=doc.items.some(i=>i.id===next.id)?doc.items.map(i=>i.id===next.id?next:i):[...doc.items,next];if(doc.pendingEditor?.id===next.id)delete doc.pendingEditor;break;}
     // Status and participation do not conflict with an editor: saveItem retains their current values.
@@ -245,6 +268,13 @@ export function visibleShopping(doc:ShoppingDocument,filter:ShoppingFilter) {
   let number=0;
   return doc.categoryOrder.map(category=>({category,items:doc.collapsed.includes(category)?[]:doc.items.filter(i=>i.category===category&&(filter==="all"||i.selected&&(filter==="bought"?i.bought:!i.bought)))
     .sort((a,b)=>a.order-b.order||a.id.localeCompare(b.id)).map(item=>({item,number:++number}))}));
+}
+/** Presentation only: never rewrite the user's ordering or duplicate catalog entries. */
+export function groupedShopping(doc:ShoppingDocument,filter:ShoppingFilter){
+  return [true,false].flatMap(bought=>visibleShopping(doc,filter).map(group=>({
+    ...group,key:(bought?"bought:":"pending:")+group.category,
+    items:group.items.filter(({item})=>item.selected&&item.bought===bought),
+  })));
 }
 export function normalizedShoppingPrice(p:ShoppingPrice):{value:number;unit:"kg"|"l"|"unidad"}|null {
   if(!positive(p.packageQuantity)||!p.packageUnit)return null;

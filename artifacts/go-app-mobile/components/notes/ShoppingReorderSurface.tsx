@@ -6,7 +6,7 @@ import { boardDropTarget } from "@/components/boards/BoardDragSurface";
 type Target={id:string;group:string;kind:"card"|"column";label:string};
 type Rect={x:number;y:number;width:number;height:number};
 type Drag={source:Target;rect:Rect;targets:(Target&Rect)[];y:number;startY:number;offset:number;hit?:Target};
-type Controller={register:(target:Target,node:ViewInstance|null)=>void;begin:(target:Target,y:number)=>void;move:(y:number)=>void;end:(cancel?:boolean)=>void;enabled:boolean;active?:string;hit?:string};
+type Controller={register:(target:Target,node:ViewInstance|null,previous?:ViewInstance|null)=>void;begin:(target:Target,y:number)=>void;move:(y:number)=>void;end:(cancel?:boolean)=>void;enabled:boolean;active?:string;hit?:string};
 const Context=createContext<Controller|null>(null);
 /** Same native long-press Pan and board target geometry as GO. Scroll motion is capped at 240 pt/s. */
 export function ShoppingReorderSurface({children,enabled,onDrop,onDragging,scrollRef,initialOffset=0,onOffsetChange}: {
@@ -43,7 +43,7 @@ export function ShoppingReorderSurface({children,enabled,onDrop,onDragging,scrol
     frame.current=requestAnimationFrame(tick);
   };
   const controller:Controller={enabled,active:ghost?.id,hit:ghost?.hit,
-    register(target,node){if(node)registry.current.set(target.id,{target,node});else registry.current.delete(target.id);},
+    register(target,node,previous){if(node)registry.current.set(target.id,{target,node});else if(registry.current.get(target.id)?.node===previous)registry.current.delete(target.id);},
     begin(target,y){
       if(!live.current.enabled||current.current)return;
       const source=registry.current.get(target.id);if(!source)return;
@@ -65,7 +65,7 @@ export function ShoppingReorderSurface({children,enabled,onDrop,onDragging,scrol
   useEffect(()=>{if(!enabled)finish(true);},[enabled]);
   useEffect(()=>()=>{epoch.current++;if(frame.current!==null)cancelAnimationFrame(frame.current);current.current=null;},[]);
   return <Context.Provider value={controller}><View ref={viewport} collapsable={false} testID="shopping-reorder-viewport" style={{flex:1,minHeight:0}}>
-    <ScrollView ref={scrollRef} testID="shopping-list-scroll" scrollEnabled={!ghost} keyboardShouldPersistTaps="handled" scrollEventThrottle={16} contentOffset={{x:0,y:initialOffset}}
+    <ScrollView ref={scrollRef} testID="shopping-list-scroll" scrollEnabled={!ghost} keyboardShouldPersistTaps="never" scrollEventThrottle={16} contentOffset={{x:0,y:initialOffset}}
       onScroll={e=>{offset.current=e.nativeEvent.contentOffset.y;onOffsetChange?.(offset.current);}} onContentSizeChange={(_,h)=>{content.current=h;}}
       contentContainerStyle={{padding:8,gap:6,paddingBottom:76}}>{children}</ScrollView>
     {ghost&&<View pointerEvents="none" testID="shopping-drag-ghost" style={[styles.ghost,{top:ghost.y}]}><Text style={{color:"white",fontSize:17,fontWeight:"700"}}>{ghost.label}</Text></View>}
@@ -73,8 +73,7 @@ export function ShoppingReorderSurface({children,enabled,onDrop,onDragging,scrol
 }
 export function ShoppingReorderRow({target,children}:{target:Target;children:React.ReactNode}){
   const ctx=useContext(Context),node=useRef<ViewInstance|null>(null);
-  useEffect(()=>()=>ctx?.register(target,null),[target.id]);
-  return <View ref={ref=>{node.current=ref;ctx?.register(target,ref);}} collapsable={false} testID={"shopping-position-"+target.id}
+  return <View ref={ref=>{const previous=node.current;node.current=ref;ctx?.register(target,ref,previous);}} collapsable={false} testID={"shopping-position-"+target.id}
     style={ctx?.active===target.id?{opacity:.45}:undefined}>{children}
     {ctx?.hit===target.id&&ctx.active!==target.id&&<View pointerEvents="none" testID={"shopping-drop-target-"+target.id} style={styles.target}/>}</View>;
 }

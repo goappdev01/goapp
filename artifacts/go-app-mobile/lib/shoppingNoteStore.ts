@@ -38,6 +38,7 @@ export async function openShoppingNote(scope:TaskScope,active:()=>boolean,listId
   const entry=await updateGoLog(async rows=>{
     await check(scope,active);
     const existingSelected=rows.some(row=>row.id===selected&&noteInScope(row,scope)&&row.note?.shopping!==undefined);
+    if(selected&&!existingSelected)throw Error("No se encuentra la lista activa guardada. Se conservan los registros y su identificador; no se ha creado una lista de sustitución.");
     const found=canonical(rows,scope,existingSelected?selected:undefined);if(found)return {entries:rows,result:found};
     const id=shoppingNoteId(scope);
     if(rows.some(row=>row.id===id))throw Error("El identificador de COMPRAS ya está ocupado. No se ha modificado ninguna nota.");
