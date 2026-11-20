@@ -165,7 +165,7 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     const outside = getPan(tree);
     outside._onStart(pickup);
     outside._onUpdate(slotOne);
-    outside._onFinalize({ ...slotOne, absoluteY: boardY + 10 }, true);
+    outside._onFinalize({ ...slotOne, absoluteY: -1 }, true);
     tree = render();
     assert.deepEqual(moves, [], "releasing above the board leaves the task untouched");
     assert.deepEqual(fallback, []);

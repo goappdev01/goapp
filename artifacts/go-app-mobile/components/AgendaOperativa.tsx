@@ -1501,11 +1501,13 @@ export function AgendaBoard({
   const updateDragTarget = (absX: number, absY: number) => {
     const dragged = dragItemRef.current;
     if (!dragged || dropConsumed.current) return;
-    let foundColumn = isValidDragPoint({ x: absX, y: absY }) ? columnAtScreenX(absX) : undefined;
+    const targetPoint=dragGridPoint({x:absX,y:absY});
+    const targetY=targetPoint?.y ?? absY;
+    let foundColumn = targetPoint && isValidDragPoint(targetPoint) ? columnAtScreenX(absX) : undefined;
     if (foundColumn) {
       const layout = layoutForDrop(foundColumn.id);
       const destination = noteEntryDestination(dragged);
-      if (!layout || !columnContainsY(absY, layout)
+      if (!layout || !columnContainsY(targetY, layout)
         || (foundColumn.isNotes && (destination === "archive" || !canMoveNoteFromCalendar(dragged.id)))
         || (destination === "archive" && (!canRestoreArchive(dragged.id) || (!foundColumn.dateISO && !foundColumn.isRetrasados)))
         || (foundColumn.isRetrasados && destination && destination !== "archive" && destination !== "pending" && !canMoveNoteFromCalendar(dragged.id))) {
@@ -1513,7 +1515,7 @@ export function AgendaBoard({
       }
     }
     const found = foundColumn?.id ?? null;
-    const slotStart = foundColumn && !getDragEdges({ x: absX, y: absY }).day ? slotAtScreenY(foundColumn, absY) : null;
+    const slotStart = foundColumn && !getDragEdges({ x: absX, y: absY }).day ? slotAtScreenY(foundColumn, targetY) : null;
     const nextSlot=slotStart==null?null:{columnId:foundColumn!.id,start:slotStart};
     setDragTargetSlot(previous=>previous?.columnId===nextSlot?.columnId&&previous?.start===nextSlot?.start?previous:nextSlot);
     setDragTargetColId((prev) => {
@@ -1559,11 +1561,32 @@ export function AgendaBoard({
     return !columnsViewportHeight.current
       || (point.x >= bounds.left && point.x < bounds.right && point.y >= bounds.top && point.y < bounds.bottom);
   };
+  // The active contact may pass the grid edge while still on the safe screen.
+  // Project only its target onto the visible time grid; the floating card keeps
+  // following the raw finger. Never project through another control or panel.
+  const dragGridPoint = (point:DragPoint,bounds=dragBounds()):DragPoint|null => {
+    const {height}=Dimensions.get("window");
+    if(!dragItemRef.current || !dragEnabledRef.current || isOverDragOverlay(point)
+      || !Number.isFinite(point.x) || !Number.isFinite(point.y)
+      || point.x<bounds.left || point.x>=bounds.right
+      || point.y<dragInsets.top || point.y>=height-dragInsets.bottom)return null;
+    const column=columnAtScreenX(point.x),viewport=column && dayViewport(column);
+    if(!viewport)return isValidDragPoint(point,bounds)?point:null;
+    let top=Math.max(bounds.top,viewport.top),bottom=Math.min(bounds.bottom,viewport.top+viewport.height);
+    const starts=timeSlotStarts.current[column!.id],rows=timeSlotLayouts.current[column!.id],offset=colScrollY.current[column!.id]??0;
+    // Exclude content padding from the target when the first/last time row is
+    // visible, so reaching 00:00/24:00 still selects a real slot.
+    const first=starts?.length?rows?.[starts[0]]:undefined,last=starts?.length?rows?.[starts[starts.length-1]]:undefined;
+    if(first && first.y>=offset && first.y<offset+viewport.height)top=Math.max(top,viewport.top+first.y-offset);
+    if(last && last.y+last.h>offset && last.y+last.h<=offset+viewport.height)bottom=Math.min(bottom,viewport.top+last.y+last.h-offset);
+    if(bottom<=top)return null;
+    return {x:point.x,y:Math.max(top,Math.min(bottom-.001,point.y))};
+  };
   const getDragEdges = (point: DragPoint): { day?: number; vertical?: number; horizontal?: number; id?: string; max?: number } => {
     const bounds = dragBounds();
-    if(dragItemRef.current)traceCalendarDrag({phase:"edge",x:point.x,y:point.y,top:bounds.top,bottom:bounds.bottom,left:bounds.left,right:bounds.right,enabled:dragEnabledRef.current,overlay:isOverDragOverlay(point)});
-    if (!columnsViewportHeight.current || !dragEnabledRef.current || isOverDragOverlay(point) || !Number.isFinite(point.x) || !Number.isFinite(point.y)
-      || point.x < bounds.left || point.x >= bounds.right || point.y < bounds.top-12 || point.y >= bounds.bottom+12) return {};
+    const targetPoint=dragGridPoint(point,bounds);
+    if(dragItemRef.current)traceCalendarDrag({phase:"edge",x:point.x,y:point.y,targetY:targetPoint?.y,targetable:!!targetPoint,top:bounds.top,bottom:bounds.bottom,left:bounds.left,right:bounds.right,enabled:dragEnabledRef.current,overlay:isOverDragOverlay(point)});
+    if (!columnsViewportHeight.current || !targetPoint) return {};
     const { left, right, top, bottom } = bounds;
     const { x, y } = point;
     const bandX = Math.min(DRAG_EDGE_SIZE, (right - left) / 4);
@@ -1579,7 +1602,7 @@ export function AgendaBoard({
       const visibleTop = Math.max(top, viewport.top);
       const visibleBottom = Math.min(bottom, viewport.top + viewport.height);
       const band = Math.min(DRAG_EDGE_SIZE, (visibleBottom - visibleTop) / 3);
-      if (band > 0 && y >= visibleTop-12 && y < visibleBottom+12) {
+      if (band > 0) {
         const vertical = y < visibleTop + band ? -1 : y >= visibleBottom - band ? 1 : 0;
         if (vertical) {
           const max = Math.max(0, (colContentH.current[id] || 0) - viewport.height);
@@ -1722,14 +1745,14 @@ export function AgendaBoard({
       return;
     }
     dropConsumed.current = true;
-    const point = { x: absX, y: absY };
-    const targetCol = isValidDragPoint(point) && !getDragEdges(point).day ? columnAtScreenX(absX) : undefined;
+    const rawPoint = { x: absX, y: absY },point=dragGridPoint(rawPoint);
+    const targetCol = point && isValidDragPoint(point) && !getDragEdges(rawPoint).day ? columnAtScreenX(absX) : undefined;
     const targetLayout = targetCol && layoutForDrop(targetCol.id);
-    if (!targetCol || !targetLayout || !columnContainsY(absY, targetLayout)) {
+    if (!point || !targetCol || !targetLayout || !columnContainsY(point.y, targetLayout)) {
       jsCancelDrag();
       return;
     }
-    const slotStart = slotAtScreenY(targetCol, absY);
+    const slotStart = slotAtScreenY(targetCol, point.y);
     if (targetCol.dateISO && showHoursRef.current && slotStart === null) {
       jsCancelDrag();
       return;

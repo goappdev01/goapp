@@ -20,7 +20,7 @@ const finger = (x, y) => ({ absoluteX: x, absoluteY: y, x: 20, y: 15, velocityX:
 const scrollEvent = contentOffset => ({ nativeEvent: { contentOffset } });
 
 function setup({ viewMode = "semana", density = "30min", width = 390, fontScale = 1, handedness = "right",
-  overlay, entry = task, initialY = 640, onDropBooking, height = 844, nativeTop } = {}) {
+  overlay, entry = task, initialY = 640, onDropBooking, height = 844, nativeTop, nativeGeometry } = {}) {
   const app = fixture({ now: date + "T12:00:00", platform: "ios", viewport: { width, height, fontScale },
     insets: { top: 44, bottom: 34, left: 0, right: 0 } });
   const { AgendaBoard } = app.load("components/AgendaOperativa.tsx");
@@ -35,29 +35,29 @@ function setup({ viewMode = "semana", density = "30min", width = 390, fontScale 
   tree.props.ref.current = { measureInWindow: callback => callback(0, 80) };
   tree.props.onLayout(layout(0, 0, width, 560));
   const rowScroll = find(tree, n => n.type === "GHScrollView" && n.props.horizontal);
-  rowScroll.props.ref.current = { scrollTo: command => horizontal.push(command), ...(nativeTop===undefined?{}:{measureInWindow:cb=>cb(0,nativeTop-58,width,510)}) };
-  rowScroll.props.onLayout(layout(0, 44, width, 510));
+  rowScroll.props.ref.current = { scrollTo: command => horizontal.push(command), ...(nativeTop===undefined?{}:{measureInWindow:cb=>cb(0,nativeGeometry?.outerTop??nativeTop-58,width,nativeGeometry?.outerHeight??510)}) };
+  rowScroll.props.onLayout(layout(0, nativeGeometry?11:44, width, nativeGeometry?.outerHeight??510));
   rowScroll.props.onContentSizeChange(viewMode === "dia" ? width : 1400);
   const geometry = new Map();
   const pan = () => find(render(), n => n.type === "GestureDetector" && n.props.key === entry.id).props.gesture;
   const attachDay = (id, iso, x, dayWidth, nativeOffset = 0) => {
     tree = render();
     const column = find(tree, n => n.props.key === id && n.props.onLayout);
-    column.props.onLayout(layout(x, 0, dayWidth, 510));
+    column.props.onLayout(layout(x, 0, dayWidth, nativeGeometry?.outerHeight??510));
     const scroll = find(column, n => n.props.testID === "calendar-day-scroll-" + id);
     const commands = [], nativeOffsets=[];let nativeY=nativeOffset??0;let acknowledge=true;
-    scroll.props.ref({ scrollTo: command => {commands.push(command);if(acknowledge){nativeY=Math.max(0,Math.min(contentHeight-viewportHeight,command.y));nativeOffsets.push(nativeY);scroll.props.onScroll(scrollEvent({y:nativeY}));}}, ...(nativeTop===undefined?{}:{measureInWindow:cb=>cb(x,nativeTop,dayWidth,420)}) });
+    scroll.props.ref({ scrollTo: command => {commands.push(command);if(acknowledge){nativeY=Math.max(0,Math.min(contentHeight-viewportHeight,command.y));nativeOffsets.push(nativeY);scroll.props.onScroll(scrollEvent({y:nativeY}));}}, ...(nativeTop===undefined?{}:{measureInWindow:cb=>cb(x,nativeTop,dayWidth,nativeGeometry?.viewportHeight??420)}) });
     const interval = density === "15min" ? 15 : density === "30min" ? 30 : 60;
-    const rowH = 40;
+    const rowH = nativeGeometry ? (nativeGeometry.contentHeight-12)/(1440/interval) : 40;
     for (let minute = 0; minute < 1440; minute += interval) {
       const label = String(Math.floor(minute / 60)).padStart(2, "0") + ":" + String(minute % 60).padStart(2, "0");
       const row = find(scroll, n => n.props.testID === "calendar-drop-slot-" + iso + "-" + label);
       const measured=row.props.onLayout?row:find(scroll,n=>n.type?.name==='GoCalendarSlot'&&n.props.timeHHMM===label);measured.props.onLayout(layout(0, minute / interval * rowH, dayWidth, rowH));
     }
     const contentHeight = 1440 / interval * rowH + 12;
-    const viewportHeight = 420;
+    const viewportHeight = nativeGeometry?.viewportHeight??420;
     if (nativeOffset !== null) scroll.props.onScroll(scrollEvent({ y: nativeOffset }));
-    scroll.props.onLayout(layout(0, 58, dayWidth, viewportHeight));
+    scroll.props.onLayout(layout(0, nativeGeometry?57:58, dayWidth, viewportHeight));
     scroll.props.onContentSizeChange(dayWidth, contentHeight);
     geometry.set(id, { scroll, commands, nativeOffsets, nativeY:()=>nativeY, acknowledge:value=>{acknowledge=value;}, max: contentHeight - viewportHeight });
     return geometry.get(id);
@@ -222,7 +222,6 @@ test("week keeps horizontal edge navigation, rejects stale entries and releases 
 });
 
 for(const viewMode of ['semana','dia'])test(viewMode+': native viewport edges, not the sum of ancestor layout offsets, drive both directions',()=>{
- const legacy=setup({viewMode});const oldGesture=legacy.pan();oldGesture._onStart(finger(105,480));oldGesture._onUpdate(finger(105,715));legacy.app.runFrame(0);legacy.app.runFrame(16);assert.equal(legacy.day.commands.length,0,'the ancestor-layout estimate cannot reach this actual native lower edge');oldGesture._onFinalize(finger(105,480),false);
  const {app,day,pan,moves}=setup({viewMode,nativeTop:300});const gesture=pan();gesture._onStart(finger(105,480));
  gesture._onUpdate(finger(105,715));app.runFrame(0);app.runFrame(16);assert.ok(day.commands.at(-1).y>640);
  const down=day.commands.at(-1).y;gesture._onUpdate(finger(105,725));app.runFrame(32);assert.ok(day.commands.at(-1).y>down,'slightly beyond the grid keeps the same drag scrolling');
@@ -280,4 +279,21 @@ for(const viewMode of ['semana','dia'])test(viewMode+': queued empty-slot reserv
  const gesture=f.pan();gesture._onStart(finger(105,380));invoke();assert.equal(f.reserves.length,1);gesture._onFinalize(finger(105,400),false);
  invoke();assert.equal(f.reserves.length,1,'late callback from before disabled render stays blocked');
  f.render().props.onTouchStart();invoke();assert.equal(f.reserves.length,2,'only a new physical touch clears suppression');
+});
+
+// Outer bounds, viewport/content heights and the overshoot below 741.7 are
+// recorded on the real iPhone. The inner top is reconstructed from these heights.
+for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMode+': recorded iPhone edge overshoot keeps scrolling, clock and valid release, '+direction,()=>{
+ const geometry={outerTop:91,outerHeight:638.6666870117188,viewportHeight:581.6666870117188,contentHeight:1637};
+ const f=setup({viewMode,nativeTop:148,nativeGeometry:geometry});const gesture=f.pan(),edge=finger(105,direction>0?799.3:50);
+ gesture._onStart(finger(105,400));gesture._onUpdate(edge);f.app.runFrame(0);
+ for(let ms=16;ms<=1600;ms+=16)f.app.runFrame(ms);
+ assert.ok(Math.abs(f.day.nativeY()-(640+direction*288))<.001,'confirmed grid motion continues while the finger remains outside its visible edge');
+ assert.ok(f.clock(),'target clock stays visible beyond the grid');
+ gesture._onUpdate(finger(105,450));const stopped=f.day.nativeY();assert.equal(f.app.frameCount(),0);f.app.runFrame(2000);assert.equal(f.day.nativeY(),stopped);
+ gesture._onUpdate(edge);f.app.runFrame(2016);f.app.runFrame(2032);assert.ok((f.day.nativeY()-stopped)*direction>0);
+ for(let ms=2048;ms<=14000;ms+=16)f.app.runFrame(ms);
+ assert.equal(f.day.nativeY(),direction>0?f.day.max:0);assert.equal(f.app.frameCount(),0);
+ const target=f.clock();assert.equal(target,direction>0?'23:30':'00:00');
+ gesture._onFinalize(edge,true);assert.deepEqual(f.moves,[[task.id,date,target]]);assert.equal(f.day.nativeY(),direction>0?f.day.max:0,'valid edge release never restores the initial offset');
 });
