@@ -149,7 +149,17 @@ export function GoEntryQuickActions({ entry, showState = true, compact = false, 
   </View>;
 }
 
-export function GoEntrySummary({ entry }: { entry: GoEntry }) {
+export function GoEntryMapsAction({entry}:{entry:GoEntry}){
+ const {lang,t}=useLanguage();
+ if(!entryIsReservation(entry)||!entryMapsUrl(entry))return null;
+ return <TouchableOpacity testID="entry-maps-go" accessibilityRole="button" accessibilityLabel={t("go_nav").toUpperCase()} accessibilityHint={lang==="en"?"Open this reservation's address in Google Maps":"Abrir la dirección de esta reserva en Google Maps"} activeOpacity={0.82}
+        onPress={()=>{void openEntryMaps(entry,url=>Linking.openURL(url)).catch(()=>Alert.alert("GO",t("toast_cannot_open_maps")));}}
+        style={{minWidth:112,minHeight:52,paddingHorizontal:12,paddingVertical:8,borderRadius:10,borderWidth:1,borderColor:"#60a5fa",alignItems:"center",justifyContent:"center"}}>
+        <Text style={{color:"#93c5fd",fontSize:16,fontWeight:"800"}}>{t("go_nav")}</Text>
+      </TouchableOpacity>;
+}
+
+export function GoEntrySummary({ entry, showMaps=true }: { entry: GoEntry; showMaps?:boolean }) {
   const { lang, t } = useLanguage();
   const policy = reservationCardPolicy(entry);
   const unknown = entry.businessBooking || entry.bookingPerspective === "business" ? t("booking_customer_unknown") : lang === "en" ? "Reservation" : "Reserva";
@@ -165,11 +175,7 @@ export function GoEntrySummary({ entry }: { entry: GoEntry }) {
     {!!duration && <Text testID="entry-duration" style={s.secondary}>{duration}</Text>}
     {!!entry.place && <View testID="entry-address" style={{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:8}}>
       <Text style={[s.secondary,{flexGrow:1,flexShrink:1}]}>{entry.place}</Text>
-      {entryIsReservation(entry) && !!entryMapsUrl(entry) && <TouchableOpacity testID="entry-maps-go" accessibilityRole="button" accessibilityLabel={t("go_nav")} accessibilityHint={lang==="en"?"Open this reservation's address in Google Maps":"Abrir la dirección de esta reserva en Google Maps"} activeOpacity={0.82}
-        onPress={()=>{void openEntryMaps(entry,url=>Linking.openURL(url)).catch(()=>Alert.alert("GO",t("toast_cannot_open_maps")));}}
-        style={{minWidth:44,minHeight:44,paddingHorizontal:12,paddingVertical:8,borderRadius:10,borderWidth:1,borderColor:"#60a5fa",alignItems:"center",justifyContent:"center"}}>
-        <Text style={{color:"#93c5fd",fontSize:14,fontWeight:"800"}}>{t("go_nav")}</Text>
-      </TouchableOpacity>}
+      {showMaps && <GoEntryMapsAction entry={entry}/>}
     </View>}
   </View>;
 }
@@ -298,7 +304,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, onDis
         <View testID="entry-detail-close-gesture" style={{ height: ENTRY_DETAIL_CLOSE.headerHeight, alignItems: "center", justifyContent: "center" }}><View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: "rgba(255,255,255,0.35)" }} /></View>
         <ScrollView ref={scroll} testID="entry-details-scroll" style={{ flex: 1 }} onLayout={event => { const { y, height } = event.nativeEvent.layout; setNavigationGeometry(value => ({ ...value, y, height })); }} onScroll={event => setNavigationGeometry(value => ({ ...value, offset: event.nativeEvent.contentOffset.y }))} scrollEventThrottle={32} keyboardShouldPersistTaps="handled" bounces={false} alwaysBounceVertical={false} overScrollMode="never" directionalLockEnabled contentContainerStyle={{ flexGrow:1, paddingHorizontal: 18, paddingBottom: 8, gap: 8 }}>
           <View testID="entry-details-information" onLayout={event => { const { y, height } = event.nativeEvent.layout; setNavigationGeometry(value => ({ ...value, summaryEnd: y + height })); }} style={{ gap: 8 }}>
-          <GoEntrySummary entry={current} />
+          <GoEntrySummary entry={current} showMaps={false} />
           <GoEntryContract entry={current} />
           {pending && <View testID="entry-proposal" style={{ borderColor: "rgba(209,161,102,0.42)", borderWidth: 1, borderRadius: 12, padding: 10, gap: 6, backgroundColor:"#171512" }}>
             <Text testID="entry-proposal-state" style={{ color: entry.estado === "propuesta_pendiente" ? C.pending : "#D1A166", fontWeight: "800" }}>{entry.estado === "propuesto" ? (lang === "en" ? "CHANGE RECEIVED" : "CAMBIO RECIBIDO") : (lang === "en" ? "AWAITING RESPONSE" : "ESPERANDO RESPUESTA")}</Text>
@@ -313,6 +319,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, onDis
           <View testID="entry-details-actions" onLayout={event => setNavigationGeometry(value => ({ ...value, actionsTop: event.nativeEvent.layout.y }))} style={{marginTop:"auto",paddingTop:8,gap:8}}>
           <GoEntryCommunication entry={entry} />
           {typeof children === "function" ? children(dismissThen) : children}
+          <View style={{alignItems:handedness==="left"?"flex-start":"flex-end"}}><GoEntryMapsAction entry={current}/></View>
           </View>
         </ScrollView>
         <GoScreenCloseGuide testID="entry-detail-swipe-guide" />

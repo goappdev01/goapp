@@ -300,6 +300,7 @@ const bc = StyleSheet.create({
 // ── Main overlay ───────────────────────────────────────────────────────────────
 
 export type BookingSearchOverlayProps = {
+  thumbSearch?: boolean;
   /** Prefill the normal booking flow; its final action negotiates the original reservation. */
   changeSelection?: BookingChangeSelection;
   onProposalSubmit?: (draft: BookingProposalDraft) => Promise<void>;
@@ -341,6 +342,7 @@ export function BookingSearchOverlay({
   initialBusinessId,
   initialDateISO,
   onDemoGoToBooking,
+  thumbSearch = false,
   changeSelection,
   onProposalSubmit,
 }: BookingSearchOverlayProps) {
@@ -1173,87 +1175,7 @@ export function BookingSearchOverlay({
       <GoCloseButton level="container" testID="booking-exit" accessibilityLabel={lang==="en"?"Return to GO":"Volver a GO"} hitSlop={4} style={s.fabClose} onPress={handleDismissAll} activeOpacity={0.7}/>
     </GoNavigationFloating>
   );
-  const saveServicesControl = (
-    <TouchableOpacity testID="booking-save-services" accessibilityRole="button" accessibilityState={{ disabled: !serviceSelection || !catalogQuote?.ready }} disabled={!serviceSelection || !catalogQuote?.ready} onPress={handleSaveServices}
-      style={compactServices
-        ? [s.servicesSaveButton, { opacity: serviceSelection && catalogQuote?.ready ? 1 : 0.45 }]
-        : [s.serviceCard, { borderColor: accentColor, opacity: serviceSelection && catalogQuote?.ready ? 1 : 0.45 }]}>
-      <Text style={compactServices ? s.servicesSaveText : s.serviceTitle}>{t("save")}</Text>
-    </TouchableOpacity>
-  );
-
-  return (
-    <Modal visible={visible} transparent={false} presentationStyle="fullScreen" animationType="none" onRequestClose={handleClose}>
-      <View testID="booking-overlay-frame" style={[s.overlay, {
-        paddingTop: insets.top,
-        paddingBottom: keyboardVisible ? keyboardHeight : insets.bottom,
-        paddingLeft: insets.left, paddingRight: insets.right,
-      }]}>
-        <Animated.View
-          testID="booking-sheet"
-          onLayout={servicesFooterVisible ? event => updateServicesLayout({ sheetHeight: event.nativeEvent.layout.height }) : undefined}
-          style={[
-            s.sheet,
-            { flex: 1 },
-            { transform: [{ translateY: Animated.add(slideAnim, dragAnim) }] },
-          ]}
-          {...rightSwipePan.panHandlers}
-        >
-          {/* Accent glow border — softer intensity */}
-          <View
-            testID="booking-frame-border"
-            style={[s.glowBorder, { borderColor: accentColor + "99", shadowColor: accentColor }]}
-            pointerEvents="none"
-          />
-
-          {/* Drag handle */}
-          <View style={s.handleZone} {...dragHandlePan.panHandlers}>
-            <View style={s.handlePill} />
-          </View>
-
-          {/* Header — también recibe dragHandlePan para que el arrastre hacia abajo
-              funcione desde aquí (los navBtn son Views de layout, sin toques) */}
-          <View onLayout={servicesFooterVisible ? event => updateServicesLayout({ headerBottom: event.nativeEvent.layout.y + event.nativeEvent.layout.height }) : undefined} style={[s.header, step === "item" && compactServices && s.serviceHeader, step === "hold" && s.holdHeader]} {...dragHandlePan.panHandlers}>
-            {step === "item" && compactServices ? <>
-              <Text testID="booking-service-context" style={[s.serviceContext, { color: accentColor }]}>{selectedBusiness?.name}</Text>
-              <Text style={[s.headerTitle, s.serviceHeading]}>{t("biz_step_service_label").toUpperCase()}</Text>
-            </> : <>
-            <View style={[s.navBtn, step === "hold" && s.holdNavSpacer]} />
-
-            <View style={s.headerCenter}>
-              {step === "search" && (
-                <Text testID="booking-search-heading" style={[s.headerTitle,s.stepHeading]}>{lang==="en"?"Find your business":"Busca tu empresa"}</Text>
-              )}
-              {step === "item" && <Text style={s.headerTitle}>{t("biz_step_service_label").toUpperCase()}</Text>}
-              {step === "professional" && (
-                <Text testID="booking-professional-heading" style={[s.headerTitle,s.stepHeading]}>{lang==="en"?"Choose your professional":"Elige tu profesional"}</Text>
-              )}
-              {step === "slots" && (
-                <Text style={s.headerTitle}>{t("biz_step_datetime_label").toUpperCase()}</Text>
-              )}
-              {step === "hold" && (
-                <Text style={[s.headerTitle, { color: "#f59e0b" }]}>{changeSelection?(lang==="en"?"REVIEW PROPOSAL":"REVISAR PROPUESTA"):t("accion_confirmar").toUpperCase()}</Text>
-              )}
-              {step === "confirmed" && (
-                <Text style={[s.headerTitle, { color: confirmationColor }]}>{t(bookingAccepted?"biz_booked_label":"booking_state_pending").toUpperCase()}</Text>
-              )}
-            </View>
-
-            <View style={[s.navBtn, step === "hold" && s.holdNavSpacer]} />
-            </>}
-          </View>
-
-          {/* Animated step content */}
-          <Animated.View
-            style={[s.stepContainer, { flex: 1 }, { transform: [{ translateX: stepAnim }] }]}
-          >
-            {/* ── STEP: SEARCH ── */}
-            {step === "search" && (
-              <View style={[s.stepWrap, s.searchStepInner]}>
-
-                {/* ── Dock de interacción — primero en DOM → fondo visual con column-reverse ── */}
-                <View style={[s.actionDock, { paddingBottom: keyboardVisible ? 8 : 16 }]}>
-
+  const searchCategories = <>
                   {/* Grid de categorías / subcategorías — prioridad principal */}
                   {!keyboardVisible && query.length === 0 && (
                     <>
@@ -1349,6 +1271,89 @@ export function BookingSearchOverlay({
                     </>
                   )}
 
+  </>;
+  const saveServicesControl = (
+    <TouchableOpacity testID="booking-save-services" accessibilityRole="button" accessibilityState={{ disabled: !serviceSelection || !catalogQuote?.ready }} disabled={!serviceSelection || !catalogQuote?.ready} onPress={handleSaveServices}
+      style={compactServices
+        ? [s.servicesSaveButton, { opacity: serviceSelection && catalogQuote?.ready ? 1 : 0.45 }]
+        : [s.serviceCard, { borderColor: accentColor, opacity: serviceSelection && catalogQuote?.ready ? 1 : 0.45 }]}>
+      <Text style={compactServices ? s.servicesSaveText : s.serviceTitle}>{t("save")}</Text>
+    </TouchableOpacity>
+  );
+
+  return (
+    <Modal visible={visible} transparent={false} presentationStyle="fullScreen" animationType="none" onRequestClose={handleClose}>
+      <View testID="booking-overlay-frame" style={[s.overlay, {
+        paddingTop: insets.top,
+        paddingBottom: keyboardVisible ? keyboardHeight : insets.bottom,
+        paddingLeft: insets.left, paddingRight: insets.right,
+      }]}>
+        <Animated.View
+          testID="booking-sheet"
+          onLayout={servicesFooterVisible ? event => updateServicesLayout({ sheetHeight: event.nativeEvent.layout.height }) : undefined}
+          style={[
+            s.sheet,
+            { flex: 1 },
+            { transform: [{ translateY: Animated.add(slideAnim, dragAnim) }] },
+          ]}
+          {...rightSwipePan.panHandlers}
+        >
+          {/* Accent glow border — softer intensity */}
+          <View
+            testID="booking-frame-border"
+            style={[s.glowBorder, { borderColor: accentColor + "99", shadowColor: accentColor }]}
+            pointerEvents="none"
+          />
+
+          {/* Drag handle */}
+          <View style={s.handleZone} {...dragHandlePan.panHandlers}>
+            <View style={s.handlePill} />
+          </View>
+
+          {/* Header — también recibe dragHandlePan para que el arrastre hacia abajo
+              funcione desde aquí (los navBtn son Views de layout, sin toques) */}
+          <View onLayout={servicesFooterVisible ? event => updateServicesLayout({ headerBottom: event.nativeEvent.layout.y + event.nativeEvent.layout.height }) : undefined} style={[s.header, step === "item" && compactServices && s.serviceHeader, step === "hold" && s.holdHeader]} {...dragHandlePan.panHandlers}>
+            {step === "item" && compactServices ? <>
+              <Text testID="booking-service-context" style={[s.serviceContext, { color: accentColor }]}>{selectedBusiness?.name}</Text>
+              <Text style={[s.headerTitle, s.serviceHeading]}>{t("biz_step_service_label").toUpperCase()}</Text>
+            </> : <>
+            <View style={[s.navBtn, step === "hold" && s.holdNavSpacer]} />
+
+            <View style={s.headerCenter}>
+              {step === "search" && (
+                <Text testID="booking-search-heading" style={[s.headerTitle,s.stepHeading]}>{lang==="en"?"Find your business":"Busca tu empresa"}</Text>
+              )}
+              {step === "item" && <Text style={s.headerTitle}>{t("biz_step_service_label").toUpperCase()}</Text>}
+              {step === "professional" && (
+                <Text testID="booking-professional-heading" style={[s.headerTitle,s.stepHeading]}>{lang==="en"?"Choose your professional":"Elige tu profesional"}</Text>
+              )}
+              {step === "slots" && (
+                <Text style={s.headerTitle}>{t("biz_step_datetime_label").toUpperCase()}</Text>
+              )}
+              {step === "hold" && (
+                <Text style={[s.headerTitle, { color: "#f59e0b" }]}>{changeSelection?(lang==="en"?"REVIEW PROPOSAL":"REVISAR PROPUESTA"):t("accion_confirmar").toUpperCase()}</Text>
+              )}
+              {step === "confirmed" && (
+                <Text style={[s.headerTitle, { color: confirmationColor }]}>{t(bookingAccepted?"biz_booked_label":"booking_state_pending").toUpperCase()}</Text>
+              )}
+            </View>
+
+            <View style={[s.navBtn, step === "hold" && s.holdNavSpacer]} />
+            </>}
+          </View>
+
+          {/* Animated step content */}
+          <Animated.View
+            style={[s.stepContainer, { flex: 1 }, { transform: [{ translateX: stepAnim }] }]}
+          >
+            {/* ── STEP: SEARCH ── */}
+            {step === "search" && (
+              <View style={[s.stepWrap, s.searchStepInner, thumbSearch && {flexDirection:"column-reverse"}]}>
+
+                {/* ── Dock de interacción — primero en DOM → fondo visual con column-reverse ── */}
+                <View style={[s.actionDock, { paddingBottom: keyboardVisible ? 8 : thumbSearch ? 104 : 16 }]}>
+
+                  {!thumbSearch && searchCategories}
                   {/* Accesos rápidos — negocios recientes (acceso secundario, debajo de categorías) */}
                   {query.length === 0 && recentBizs.length > 0 && (
                     <View style={s.recentSection}>
@@ -1394,6 +1399,7 @@ export function BookingSearchOverlay({
                     )}
                   </View>
 
+                  {thumbSearch && searchCategories}
                 </View>
 
                 {/* Resultados — segundo en DOM → aparece ENCIMA del dock con column-reverse */}
@@ -1559,7 +1565,7 @@ export function BookingSearchOverlay({
                       <View testID="booking-services-footer"
                         onLayout={event => updateServicesLayout({ footerTop: event.nativeEvent.layout.y })}
                         style={[s.servicesFooter, { flexDirection: handedness === "left" ? "row-reverse" : "row" }]}>
-                        <View testID="booking-services-save-lane" style={[s.servicesSaveLane, { flexBasis: 112 * Math.max(1, fontScale) }]}>
+                        <View testID="booking-services-save-lane" style={[s.servicesSaveLane, { flexBasis: 112 * Math.max(1, fontScale),minWidth:128,alignItems:handedness==="left"?"flex-start":"flex-end",paddingHorizontal:8 }]}>
                           {saveServicesControl}
                         </View>
                         <View testID="booking-services-navigation-lane" style={s.servicesNavigationLane}>
@@ -1772,7 +1778,7 @@ export function BookingSearchOverlay({
                       showsVerticalScrollIndicator={false}
                       contentContainerStyle={{ paddingBottom: 32 }}
                     >
-                      <View style={s.slotsGrid}>
+                      <View style={[s.slotsGrid,{justifyContent:handedness==="left"?"flex-start":"flex-end"}]}>
                         {available.map((sl, idx) => {
                           const isPartial = sl.availableUnits < sl.totalUnits && sl.totalUnits > 1;
                           return (

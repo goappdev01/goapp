@@ -21126,6 +21126,7 @@ function HomeScreenContent() {
         />
         {/* ── GO BOOKING — búsqueda de proveedor y reserva ──────────── */}
         <BookingSearchOverlay
+          thumbSearch={goView.view === "USER"}
           key={demoBookingRepository ? "demo_" + demoBookingRepository.ownerUserId : "real"}
           visible={showBookingFromCal && !adminAccess.checking && (!demoInitialBusinessId || !!demoBookingRepository)}
           initialDateISO={bookingInitialDateISO ?? undefined}
