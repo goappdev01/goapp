@@ -15,12 +15,30 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
   const [details,setDetails]=useState(false),[error,setError]=useState("");
   const localContact=useRef({consumed:false,released:false}),swipeContact=contact??localContact.current;
   const swipe=useRef({disabled,item,onOperation,onRemove});swipe.current={disabled,item,onOperation,onRemove};
-  const pan=useMemo(()=>PanResponder.create({onMoveShouldSetPanResponder:(_,gesture)=>!swipe.current.disabled&&!quantityFocused.current&&!priceFocused.current&&Math.abs(gesture.dx)>22&&Math.abs(gesture.dx)>Math.abs(gesture.dy)*1.6,
-    onPanResponderGrant:()=>{swipeContact.consumed=true;},
-    onPanResponderRelease:(_,gesture)=>{if(swipeContact.released||swipe.current.disabled||Math.abs(gesture.dy)>45||Math.abs(gesture.dx)<60)return;swipeContact.released=true;
-      if(gesture.dx<0)swipe.current.onRemove();
-      else void swipe.current.onOperation({type:"bought",id:swipe.current.item.id,value:true}).catch(e=>setError((e as Error).message));}}),[]);
   const quantityFocused=useRef(false),priceFocused=useRef(false),saving=useRef(false);
+  const activation=useRef({dx:0,dy:0});
+  const pan=useMemo(()=>{
+    const claim=(_:unknown,gesture:{dx:number;dy:number;numberActiveTouches?:number})=>{
+      if(swipeContact.consumed||swipe.current.disabled||quantityFocused.current||priceFocused.current||gesture.numberActiveTouches!==undefined&&gesture.numberActiveTouches!==1)return false;
+      if(Math.abs(gesture.dx)<=22||Math.abs(gesture.dx)<=Math.abs(gesture.dy)*1.6)return false;
+      // RN resets dx/dy when granting the responder. Retain the recognized prefix.
+      activation.current={dx:gesture.dx,dy:gesture.dy};return true;
+    };
+    return PanResponder.create({
+      onStartShouldSetPanResponderCapture:()=>{activation.current={dx:0,dy:0};swipeContact.consumed=false;swipeContact.released=false;return false;},
+      onMoveShouldSetPanResponderCapture:claim,onMoveShouldSetPanResponder:claim,
+      onPanResponderGrant:()=>{swipeContact.consumed=true;},
+      onPanResponderTerminationRequest:()=>!swipeContact.consumed,
+      onPanResponderTerminate:()=>{swipeContact.released=true;},
+      onPanResponderRelease:(_,gesture)=>{
+        const dx=activation.current.dx+gesture.dx,dy=activation.current.dy+gesture.dy;
+        if(swipeContact.released||swipe.current.disabled||Math.abs(dy)>45||Math.abs(dx)<60||Math.abs(dx)<=Math.abs(dy)*1.6)return;
+        swipeContact.released=true;
+        if(dx<0)swipe.current.onRemove();
+        else void swipe.current.onOperation({type:"bought",id:swipe.current.item.id,value:true}).catch(e=>setError((e as Error).message));
+      },
+    });
+  },[]);
   useEffect(()=>{if(!quantityFocused.current){setQuantity(String(item.quantity).replace(".",","));setError("");}},[item.quantity]);
   useEffect(()=>{if(!priceFocused.current)setValue(price?String(price.price):"");},[price?.id,doc.store]);
   useEffect(()=>{priceFocused.current=false;setValue(price?String(price.price):"");},[doc.store]);
@@ -39,7 +57,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
       saving.current=false;
     }
   };
-  const icon=(name:React.ComponentProps<typeof Feather>["name"],label:string,onPress:()=>void,id?:string)=><TouchableOpacity testID={id} accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={()=>{if(!swipeContact.consumed)onPress();}} style={s.icon}><Feather name={name} size={19} color="#39688f"/></TouchableOpacity>;
+  const icon=(name:React.ComponentProps<typeof Feather>["name"],label:string,onPress:()=>void,id?:string)=><TouchableOpacity testID={id} accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={()=>{if(!swipeContact.consumed)onPress();}} style={s.icon}><Feather name={name} size={19} color={name==="trash-2"?"#c52e38":"#39688f"}/></TouchableOpacity>;
   const brand=item.brand??price?.brand;
   const changeQuantity=(direction:-1|1)=>{
     if(legacyQuantity){onEdit(stepShoppingDraftQuantity(quantity||String(item.quantity),direction));return;}
@@ -61,7 +79,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
     onPress={()=>{if(!swipeContact.consumed)apply({type:"bought",id:item.id,value:!item.bought});}} style={[s.check,item.bought&&s.checked]}><Feather name="check" size={24} color={item.bought?"#fff":"#64748b"}/></TouchableOpacity>;
   return <View testID={"shopping-item-"+item.id} onTouchStart={()=>{swipeContact.consumed=false;swipeContact.released=false;}} {...pan.panHandlers} style={[s.card,item.bought&&s.picked,!item.selected&&{opacity:.65}]}>
     <View testID={"shopping-product-info-"+item.id} style={s.productInfo}>
-      <TouchableOpacity testID={"shopping-details-"+item.id} accessibilityRole="button" accessibilityLabel={"Editar "+item.name} accessibilityHint="Mantener pulsado muestra más acciones" onPress={()=>onEdit()} onLongPress={()=>setDetails(v=>!v)} style={s.artwork}><Text style={s.artworkText}>{shoppingProductArt(item.name).art}</Text></TouchableOpacity>
+      <TouchableOpacity testID={"shopping-details-"+item.id} accessibilityRole="button" accessibilityLabel={"Editar "+item.name} accessibilityHint="Mantener pulsado muestra más acciones" onPress={()=>{if(!swipeContact.consumed)onEdit();}} onLongPress={()=>setDetails(v=>!v)} style={s.artwork}><Text style={s.artworkText}>{shoppingProductArt(item.name).art}</Text></TouchableOpacity>
       <View style={{flex:1,minWidth:0}}>
       <TouchableOpacity testID={"shopping-edit-"+item.id} accessibilityRole="button" accessibilityLabel={"Editar "+item.name} onPress={()=>onEdit()}>
         <Text lineBreakStrategyIOS="standard" style={[s.name,item.bought&&s.boughtName]}>{item.name}</Text>
@@ -73,7 +91,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
     <View testID={"shopping-product-main-row-"+item.id} style={[s.mainRow,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
       <View style={s.priceBlock}>
           <View style={s.priceLine}><TextInput testID={"shopping-price-input-"+item.id} accessibilityLabel={"Precio unitario de "+item.name} placeholder="Sin precio" placeholderTextColor="#647b8e" value={value} keyboardType="decimal-pad" editable={!disabled} selectTextOnFocus
-            onFocus={()=>{priceFocused.current=true;}} onChangeText={setValue} onEndEditing={()=>void commit("price")} style={s.priceInput}/>
+            onFocus={()=>{priceFocused.current=true;}} onChangeText={setValue} onEndEditing={()=>void commit("price")} style={[s.priceInput,!value.trim()&&s.missingPrice]}/>
             {(price||value.trim())&&<Text style={s.meta}>{price?.currency==="EUR"||!price?"€":price.currency}</Text>}
           </View>
 
@@ -97,9 +115,10 @@ const s=StyleSheet.create({
   card:{paddingHorizontal:6,paddingVertical:5,gap:5,borderRadius:15,borderWidth:1,borderColor:"#e1e7f0",backgroundColor:"#fff",shadowColor:"#284568",shadowOpacity:.08,shadowRadius:5,shadowOffset:{width:0,height:2}},
   picked:{backgroundColor:"#edf9ee",borderColor:"#8bd17e"},mainRow:{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:4,minHeight:44},
   productInfo:{paddingHorizontal:4,flexDirection:"row",alignItems:"center",gap:6},artwork:{width:40,height:44,alignItems:"center",justifyContent:"center",borderRadius:10,backgroundColor:"#eff7ff"},artworkText:{fontSize:26},
-  row:{flexDirection:"row",gap:4,alignItems:"center"},name:{fontSize:16,fontWeight:"700",color:"#1c2f49"},boughtName:{color:"#396044"},brand:{fontSize:10,color:"#587087"},meta:{fontSize:10,color:"#536a80",flexShrink:1},
+  row:{flexDirection:"row",gap:4,alignItems:"center"},name:{fontSize:18,fontWeight:"800",color:"#1c2f49"},boughtName:{color:"#396044"},brand:{fontSize:10,color:"#587087"},meta:{fontSize:10,color:"#536a80",flexShrink:1},
   priceBlock:{flex:1,minWidth:88,justifyContent:"center",borderWidth:1,borderColor:"#b9cadd",borderRadius:11,backgroundColor:"#f6faff",paddingHorizontal:4},
   priceLine:{flexDirection:"row",alignItems:"center",justifyContent:"center",minHeight:44},priceInput:{flex:1,minWidth:0,padding:0,textAlign:"center",fontSize:20,fontWeight:"700",color:"#2d4357",minHeight:44},
+  missingPrice:{fontSize:13,fontWeight:"400",color:"#647b8e"},
   quantityControls:{width:94,minHeight:44,flexDirection:"row",alignItems:"center",justifyContent:"space-between",borderRadius:11,borderWidth:1,borderColor:"#d9e3ed",backgroundColor:"#fff"},step:{width:30,minHeight:44,alignItems:"center",justifyContent:"center"},quantityInput:{flex:1,minWidth:27,padding:0,textAlign:"center",fontSize:14,fontWeight:"700",color:"#1e344c"},legacyQuantity:{flex:1,minHeight:44,justifyContent:"center"},
   total:{fontSize:12,fontWeight:"700",color:"#21364e"},ir:{width:44,minHeight:44,borderRadius:10,alignItems:"center",justifyContent:"center",backgroundColor:"#e4f0ff"},
   check:{width:44,minHeight:44,borderRadius:10,borderWidth:1,borderColor:"#a5b5c6",backgroundColor:"#f1f5f9",alignItems:"center",justifyContent:"center"},checked:{backgroundColor:"#217a34",borderColor:"#1d6a2e"},

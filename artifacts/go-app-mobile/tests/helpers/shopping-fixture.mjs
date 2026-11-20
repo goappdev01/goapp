@@ -10,7 +10,7 @@ export async function shoppingFixture(){
  return {disk,model,api,open,run,doc,add};
 }
 
-export async function shoppingUI(f,{handedness='right',width=390,height=844,fontScale=1,startList=true,scope=f.disk.scope,ready=true,
+export async function shoppingUI(f,{handedness='right',width=390,height=844,fontScale=1,startList=true,nativeResponder=false,scope=f.disk.scope,ready=true,
  adminAccess={userId:null,allowed:false,checking:false,unavailable:false},goView={view:'USER',isAdminView:false}}={}){
  const {React}=h,hosts=new Map(),instances=new Map(),geometry=new Map(),gestures=new Map(),calls=[],alerts=[],frames=new Map();let frameId=0;
  const keyboard={visible:false,focused:null,listeners:new Map(),isVisible(){return this.visible;},addListener(name,fn){const set=this.listeners.get(name)||new Set();set.add(fn);this.listeners.set(name,set);return{remove:()=>set.delete(fn)};},
@@ -25,7 +25,7 @@ export async function shoppingUI(f,{handedness='right',width=390,height=844,font
   return React.createElement('div',{'data-native':name,'data-testid':p.testID},p.children);
  });
  const native={...h.rn,View:host('View'),Text:host('Text'),TouchableOpacity:host('Button'),TextInput:host('Input'),ScrollView:host('ScrollView'),KeyboardAvoidingView:host('KeyboardFrame'),Modal:host('Modal'),Keyboard:keyboard,
-  PanResponder:{create:handlers=>({panHandlers:handlers})},Share:{share:async payload=>{calls.push(['share',payload]);return {action:'sharedAction'};}},
+  PanResponder:nativeResponder?require("./native-pan.cjs").nativePan():{create:handlers=>({panHandlers:handlers})},Share:{share:async payload=>{calls.push(['share',payload]);return {action:'sharedAction'};}},
   useWindowDimensions:()=>({width,height,fontScale,scale:3}),Alert:{alert:(title,message,buttons)=>alerts.push({title,message,buttons})}};
  native.TextInput.State={currentlyFocusedInput:()=>keyboard.focused};
  const gh={GestureHandlerRootView:native.View,GestureDetector:({gesture,children})=>{gestures.set(children.props.testID,gesture);return children;},Gesture:{Pan:()=>{
@@ -44,7 +44,7 @@ export async function shoppingUI(f,{handedness='right',width=390,height=844,font
  const choice=h.load('components/notes/ShoppingCatalogChoice.tsx',{'react-native':native});
  const {GoShoppingNote}=h.load('components/notes/GoShoppingNote.tsx',{'react-native':native,'react-native-gesture-handler':gh,'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:44,bottom:20,left:0,right:0})},'expo-linear-gradient':{LinearGradient:native.View},
   '@expo/vector-icons':icons,'@/lib/shoppingProductArt':h.load('lib/shoppingProductArt.ts',{'./shoppingNote':f.model}),'@/lib/shoppingShare':h.load('lib/shoppingShare.ts',{'./shoppingNote':f.model}),'@/lib/shoppingExperience':experience,'@/lib/shoppingCatalog':catalog,'./ShoppingProductRow':row,'./ShoppingCatalogChoice':choice,'@/hooks/useBookingVoice':{useBookingVoice:()=>({status:'idle',error:'',abort(){},start:async()=>{},stop:async()=>{}})},
-  '@/components/ui/GoNavigationFloating':{GoNavigationFloating:({children,...props})=>React.createElement(native.View,{...props,testID:'shopping-navigation-frame'},children)},'@/components/ui/GoScreenModal':{GoScreenModal:native.Modal},'@/components/ui/GoCloseButton':{GoCloseButton:native.TouchableOpacity},'@/hooks/useGoNoteKeyboard':keyboardHook,
+  '@/components/ui/GoNavigationFloating':{GoNavigationFloating:({children,...props})=>React.createElement(native.View,{...props,testID:'shopping-navigation-frame'},children)},'@/components/ui/GoScreenModal':{GoScreenModal:native.Modal},'@/components/ui/GoCloseButton':{GoCloseButton:native.TouchableOpacity,GO_NAVIGATION_SIZE:64},'@/hooks/useGoNoteKeyboard':keyboardHook,
   '@/contexts/GoAdminAccessContext':{useAdminAccess:()=>adminAccess},'@/contexts/GoViewContext':{useGoView:()=>goView},
   '@/lib/goLogStore':store,'@/lib/unifiedNotes':f.disk.model,'@/lib/shoppingNoteStore':f.api(),'@/lib/shoppingNote':f.model,'./ShoppingReorderSurface':reorder},globals);
  const container=h.document.createElement('div'),root=h.createRoot(container);let props={visible:true,ready,scope,handedness,onClose:()=>calls.push(['close'])};

@@ -88,3 +88,69 @@ Estas pruebas usan React real con adaptadores de controles nativos y almacenamie
 en archivos temporales. No validan Yoga, hit-testing, teclado, compartir por WhatsApp
 ni geometría visual real del iPhone. Queda comprobación física del propietario.
 8089, PC1, puente, Tailscale, API, backend, permisos e infraestructura no intervenidos.
+
+CONTINUACIÓN — corrección integral posterior a c831447
+----------------------------------------------------
+Base de esta intervención: origin/main c831447fb5a0753724057fd534da0722cf368a42.
+Se conserva el trabajo anterior; cambian únicamente dos componentes de presentación
+y los adaptadores/pruebas relacionados. No cambia modelo, claves ni almacén persistido.
+
+Puntos 1–6 de la nueva instrucción:
+- Indicador pequeño «Lista activa: <nombre>» en el encabezado existente.
+- Suprimida la reserva fija de 76 puntos BAJO las acciones. Lista/GO/Añadir se
+  apoyan en el borde seguro; herramientas auxiliares y ATRÁS/X comparten una fila
+  cuya reserva se deriva de los dos controles existentes de 64 puntos y su separación.
+  El anclaje de los flotantes usa la altura medida de las acciones, no una elevación
+  independiente de las órbitas. Radios y botones orbitales no cambian.
+- La navegación Compra/Ruta/Mapa/Favoritos/Más reutiliza esa misma zona, adaptable
+  mediante flex-wrap. Las medidas de órbitas, cabecera, productos y controles se
+  comunican al mecanismo existente de evitación de flotantes. No se guardan estas
+  correcciones temporales como una nueva posición elegida por el usuario.
+- Mis listas conserva un solo scroll, alineación inferior para contenido corto,
+  filas compactas de acciones y nombre de lista activa. Crear, renombrar, compartir,
+  cambiar/restaurar y enviar una lista a papelera mantienen sus operaciones anteriores.
+- Papeleras de producto rojas; nombre completo de 18 puntos y negrita; «Sin precio»
+  secundario de 13 puntos, conservando campo táctil de 44 y edición directa.
+- Título, importe y número de productos de TOTAL PREVISTO centrados. Más proporción
+  de ancho al supermercado, texto de una línea a 15 puntos sin reducirlo a letra mínima.
+
+Punto 7: defecto reproducido y corregido
+El PanResponder instalado reinicia dx/dy al conceder el responder. La ficha descartaba
+la distancia ya recorrida para activar el gesto y luego exigía otros 60 puntos.
+Prueba reproducida: movimiento inicial de 40 + otros 30 = recorrido real de 70;
+el callback de liberación recibía solo 30 y no ejecutaba ninguna acción en ambos sentidos.
+El test anterior de callbacks ficticios omitía esa transición y por eso aprobaba.
+
+Ahora se conserva el prefijo de activación y se suma al recorrido posterior al grant;
+se mantiene el umbral de 60, el rechazo de verticales y el filtro por eje. La captura
+horizontal reclama el gesto frente a controles hijos y conserva su propiedad hasta
+el final; cancelar nunca aplica una acción. Se mantiene la protección por identidad
+contra pulsaciones residuales al reagrupar comprados/pendientes.
+
+shopping-native-swipe.test.mjs transpila y ejecuta PanResponder.js y TouchHistoryMath.js
+REALES de React Native con el preset Expo YA instalado. Los dos casos fallaron sobre
+el componente anterior y pasan tras la reparación. También se prueban movimientos
+cortos/verticales, edición de precio, terminación y pulsación posterior legítima.
+Esto verifica la integración JS de React Native; NO ejecuta UIKit ni valida el gesto
+físico del iPhone, que sigue pendiente del propietario.
+
+Puntos 8–9: CONFLICTO parcial de conservación, sin migración
+El propietario dejó GO abierto y /json/list detectó su iPhone. Se intentó el canal CDP
+existente con Runtime.enable/Runtime.evaluate de solo lectura: no hubo respuesta de
+Runtime; el WebSocket se cerró, incluido un cierre anormal 1006. La presencia del
+dispositivo en el inventario NO se ha presentado como acceso a su AsyncStorage.
+No se leyó ni copió go_log_v1 real; no se pudo determinar si las tres listas aún existen
+ocultas. No se escribieron, adoptaron, borraron ni reconstruyeron sus registros.
+
+Según la prohibición expresa de reclasificar sin preservar datos, las ocho categorías,
+FAVORITOS orbital independiente y OTRO por categoría siguen PENDIENTES. No se declara
+terminado el punto 8. Hace falta una sesión CDP/inspector que permita lectura de Runtime
+y del almacén existente para preservar los registros y continuar el diagnóstico.
+No se modifica configuración, autenticación ni infraestructura para forzar ese acceso.
+
+Verificación de esta continuación:
+67 pruebas dirigidas: 41 COMPRAS, 11 consolidación, 7 pie/lateralidad/geometría,
+4 presentación y 4 sobre la implementación JS real de PanResponder.
+TypeScript y git diff --check correctos antes de publicar. Se verificará el bundle iOS
+de 8088 contra el commit publicado y se comunicará el SHA. 8089 permanece intacto.
+La corrección visual y el gesto requieren nueva comprobación física en el iPhone.

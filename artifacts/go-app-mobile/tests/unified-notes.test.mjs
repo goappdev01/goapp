@@ -224,7 +224,7 @@ test('COMPRAS shows long product names on their own row and keeps compact contro
    assert.deepEqual(controlIds,['shopping-quantity-controls-','shopping-ir-','shopping-bought-'].map(prefix=>prefix+item.id));
    assert.ok(ui.hosts.has('shopping-product-info-'+item.id));
    assert.equal(ui.hosts.get('shopping-price-input-'+item.id).placeholder,'Sin precio');
-   assert.ok(ui.hosts.get('shopping-thumb-controls').style[1].paddingBottom>=76,'floating pair has its own footer space');
+   assert.equal(ui.hosts.get('shopping-navigation-space').style.height,64,'floating pair shares the auxiliary dock');
    const checkbox=()=>ui.hosts.get('shopping-bought-'+item.id);
    assert.equal(checkbox().children.props.name,'check');assert.equal(checkbox().style[0].minHeight,44);
    await ui.tap('shopping-bought-'+item.id);assert.equal(checkbox().accessibilityState.checked,true);assert.equal(checkbox().children.props.name,'check');await ui.tap('shopping-bought-'+item.id);assert.equal(f.doc().items[0].bought,false);
@@ -299,7 +299,7 @@ test('COMPRAS UI: acknowledged partial draft recovers after unmount/reopen, fail
 
 for(const viewport of [{width:320,height:568,fontScale:1},{width:390,height:844,fontScale:1.8},{width:768,height:1024,fontScale:2}])for(const handedness of ['left','right'])test(`COMPRAS UI: ${viewport.width}px font ${viewport.fontScale} ${handedness} retains keyboard-aware thumb controls and native input focus`,async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f,{...viewport,handedness});assert.equal(ui.hosts.get('shopping-thumb-controls').style[1].flexDirection,handedness==='left'?'row-reverse':'row');await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');
+  ui=await shoppingUI(f,{...viewport,handedness});assert.equal(ui.hosts.get('shopping-primary-actions').style[1].flexDirection,handedness==='left'?'row-reverse':'row');await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');
   assert.equal(ui.hosts.get('shopping-field-name').autoFocus,undefined);await ui.run(()=>ui.hosts.get('shopping-field-name').onFocus({target:123}));assert.ok(ui.calls.some(c=>c[0]==='reveal'&&c[1]===123));
   await ui.run(()=>ui.keyboard.show());assert.equal(ui.hosts.get('shopping-back').accessibilityLabel,'Ocultar teclado');assert.ok(ui.hosts.has('shopping-save'));await ui.tap('shopping-keyboard-done');assert.equal(ui.keyboard.visible,false);assert.ok(ui.hosts.has('shopping-field-name'));
   await ui.run(()=>ui.keyboard.show());await ui.tap('shopping-back');assert.equal(ui.keyboard.visible,false);await ui.tap('shopping-back');assert.ok(ui.hosts.has('shopping-products-scroll'));await ui.tap('shopping-back');assert.ok(ui.hosts.has('shopping-eight-orbits'));await ui.tap('shopping-back');assert.ok(ui.hosts.has('shopping-add'));await ui.tap('shopping-more');assert.ok(ui.hosts.has('shopping-resume-draft'));
