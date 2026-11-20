@@ -221,8 +221,8 @@ test('compact DEMO edits independent activity blocks, appends activities and res
   await openStore().saveFinancialDemo('multi-block-ui-owner',state);state=(await openStore().loadFinancialDemo('multi-block-ui-owner')).state;
   assert.equal(blocks().length,4);assert.equal(field('FR',customId,'Cuota mensual (€)').props.value,20);assert.ok(all(render()).some(n=>n.children?.includes('374516 EUR')));
   width = 320;
-  assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.flexDirection === 'column')), 'narrow portrait layout stacks fields');
-  assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.alignItems === 'stretch')), 'stacked selectors fill the narrow width');
+  assert.equal(find(n=>n.type==='MultiChoice'&&n.props.label==='Países incluidos').props.displayLabel,'Países');assert.equal(find(n=>n.type==='MultiChoice'&&n.props.label==='Actividades incluidas').props.displayLabel,'Actividades');
+  assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.alignSelf === 'stretch')), 'paired selectors keep their full column height');
   find(node=>node.type==='MultiChoice'&&node.props.label==='Países incluidos').props.onChange(['CH']);
   find(node=>node.type==='MultiChoice'&&node.props.label==='Actividades incluidas').props.onChange(['go_restaurantes']);
   assert.ok(all(render()).some(node=>node.children?.includes('Dato oficial · estimación Eurostat (e)')));
@@ -263,3 +263,5 @@ test('legacy Spain-only local state can add an existing catalog country and pers
  assert.deepEqual(Array.from(rows,r=>r.market).sort((a,b)=>a-b),[40,80,100,60000]);assert.equal(snapshotRow(state.doc).reference.companies,79508);
  const other=(await openStore().loadFinancialDemo('different-owner')).state;assert.equal(snapshotRow(other.doc).market,79508);
 });
+
+test('responsive breakdown keeps its three result columns in one row and avoids duplicate country titles',()=>{const react={createElement:(type,props,...children)=>({type,props:props||{},children:children.flat(Infinity)})};const ui=load('components/financial/FinancialUI.tsx',{react:{...react,default:react},'react-native':{StyleSheet:{create:v=>v},View:'View',Text:'Text'}});const all=n=>!n||typeof n!=='object'?[]:[n,...(n.children||[]).flatMap(all)];const table=ui.FinanceTable({responsive:true,headers:['País','Actividad','Captadas','Mensual','Anual'],rows:[['España','GO Peluquerías','2304','66.816 €','801.792 €']]});const cells=all(table),row=cells.find(n=>n.props.testID==='finance-result-metrics');assert.equal(row.props.style.flexDirection,'row');assert.equal(row.children.length,3);assert.ok(cells.some(n=>n.children.includes('GO Peluquerías'))||cells.some(n=>n.children.join('').includes('España · GO Peluquerías')));const country=ui.FinanceTable({responsive:true,hideRowTitle:true,headers:['País','Captadas','Mensual','Anual'],rows:[['España','2304','66.816 €','801.792 €']]});assert.equal(all(country).some(n=>n.children.includes('España')),false);});

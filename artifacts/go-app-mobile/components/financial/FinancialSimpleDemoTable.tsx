@@ -64,7 +64,7 @@ export function FinancialSimpleDemoTable({ state, update, onCalculate }: Props) 
   };
   return <View style={d.root}>
     <ScrollView testID="finance-results-scroll" style={d.resultsScroll} contentContainerStyle={d.resultsContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-      <Text style={d.disclaimer}>Simulación guardada en este dispositivo · ingresos hipotéticos</Text>
+      <Text style={d.disclaimer}>Simulación local · ingresos hipotéticos. Las 46.086 peluquerías de España son un ejemplo.</Text>
       {!rows.length?<View style={d.results}><Text style={s.heading}>Sin selección</Text><Text style={s.note}>Marca países y actividades para calcular.</Text></View>:<>
         <View style={d.results}><Text style={d.sectionTitle}>{known.length===rows.length?"Total general GO":"Total calculado · datos conocidos"}</Text>
           <View style={d.metricRow}><Text style={d.metricLabel}>Empresas captadas</Text><Text style={d.resultValue}>{financialCount(known.length?total.companies:null)}</Text></View>
@@ -72,14 +72,14 @@ export function FinancialSimpleDemoTable({ state, update, onCalculate }: Props) 
           <View style={d.metricRow}><Text style={d.metricLabel}>Ingreso anual</Text><Text style={d.resultValue}>{money(known.length?total.annual:null)}</Text></View>
           {known.length<rows.length&&<Text style={s.note}>{rows.length-known.length} combinaciones sin dato completo; no se suman.</Text>}
         </View>
-        <Text style={d.breakdownTitle}>Desglose por país</Text><FinanceTable responsive headers={["País","Captadas","Mensual","Anual"]} rows={countryTotals}/>
+        <View style={d.breakdownHeading}><Text style={[d.breakdownTitle,{flex:1}]}>Desglose por país</Text>{selectedCountries.length===1&&<Text style={[d.sectionTitle,{flexShrink:1,textAlign:"right"}]}>{catalog.countries.find(c=>c.code===selectedCountries[0])?.name}</Text>}</View><FinanceTable responsive hideRowTitle={selectedCountries.length===1} headers={["País","Captadas","Mensual","Anual"]} rows={countryTotals}/>
         <Text style={d.breakdownTitle}>Desglose por actividad</Text><FinanceTable responsive headers={["Actividad","Captadas","Mensual","Anual"]} rows={activityTotals}/>
-        <Text style={d.breakdownTitle}>Combinaciones seleccionadas</Text><FinanceTable responsive headers={["País","Actividad","Captadas","Mensual","Anual"]} rows={rows.map(item=>[item.country,item.activity+" · "+originLabel(item.marketOrigin,item.reference?.estimated),financialCount(item.companies),money(item.monthly),money(item.annual)])}/>
+        <Text style={d.breakdownTitle}>Combinaciones seleccionadas</Text><FinanceTable responsive headers={["País","Actividad","Captadas","Mensual","Anual"]} rows={rows.map(item=>[item.country,item.activity,financialCount(item.companies),money(item.monthly),money(item.annual)])}/>
       </>}
 
-      <View style={[d.selection,(viewport.width<360||viewport.fontScale>1.3)&&d.stacked]}>
-        <View style={{flex:1,minWidth:0,alignSelf:"stretch",justifyContent:"flex-end"}}><FinanceMultiChoice mobileSheet label="Países incluidos" values={selectedCountries} options={catalog.countries.map(item=>({value:item.code,label:item.name}))} onChange={selectCountries}/></View>
-        <View style={{flex:1,minWidth:0,alignSelf:"stretch",justifyContent:"flex-end"}}><FinanceMultiChoice mobileSheet label="Actividades incluidas" values={selectedActivities} options={catalog.activities.filter(item=>item.enabled).map(item=>({value:item.id,label:item.name}))} onChange={selectActivities}/></View>
+      <View style={d.selection}>
+        <View style={{flex:1,minWidth:0,alignSelf:"stretch",justifyContent:"flex-end"}}><FinanceMultiChoice mobileSheet displayLabel="Países" label="Países incluidos" values={selectedCountries} options={catalog.countries.map(item=>({value:item.code,label:item.name}))} onChange={selectCountries}/></View>
+        <View style={{flex:1,minWidth:0,alignSelf:"stretch",justifyContent:"flex-end"}}><FinanceMultiChoice mobileSheet displayLabel="Actividades" label="Actividades incluidas" values={selectedActivities} options={catalog.activities.filter(item=>item.enabled).map(item=>({value:item.id,label:item.name}))} onChange={selectActivities}/></View>
       </View>
       {!creating?<TouchableOpacity accessibilityRole="button" accessibilityLabel="Nueva actividad" onPress={()=>setCreating(true)} style={d.activityLink}><Text style={d.activityLinkText}>＋ Nueva actividad</Text></TouchableOpacity>
       :<View style={d.activityEditor}><FinanceChoice mobileSheet label="Añadir actividad existente" value="" options={catalog.activities.filter(item=>item.enabled&&!selectedActivities.includes(item.id)).map(item=>({value:item.id,label:item.name}))} onChange={activityId=>{selectActivities([...selectedActivities,activityId]);setCreating(false);}}/><TextInput accessibilityLabel="Nombre de la nueva actividad" value={activityName} onChangeText={setActivityName} placeholder="Nombre de la actividad" maxLength={160} style={s.input} returnKeyType="done" onSubmitEditing={createActivity}/>
@@ -90,7 +90,7 @@ export function FinancialSimpleDemoTable({ state, update, onCalculate }: Props) 
         const key=item.countryCode+"|"+item.activityId;
         return <View key={key} testID={"finance-pair-"+key} style={[d.results,d.inputs,key===pairKey&&d.activePair]} onTouchStart={()=>activatePair(item.countryCode,item.activityId)}>
           <Text style={d.sectionTitle}>{item.activity} · {item.country}</Text>
-          <Text style={s.note}>{originLabel(item.marketOrigin,item.reference?.estimated)}</Text>
+          {item.marketOrigin!=="example"&&<Text style={s.note}>{originLabel(item.marketOrigin,item.reference?.estimated)}</Text>}
           {item.reference&&<Text selectable style={s.note}>Referencia: {financialCount(item.reference.companies)} empresas · {item.reference.source.organization} · {item.reference.source.year} · {item.reference.source.scope}{item.reference.estimated?" · estimación (e)":""}</Text>}
           <View testID="finance-inputs-row" style={d.compactFields}>
             <View style={[d.compactField,{flex:1.15}]}><Text style={d.fieldLabel}>Empresas</Text><FinanceNumber compact integer label="Empresas existentes" value={item.market} onChange={value=>editMarket(item.countryCode,item.activityId,value)} placeholder="Sin dato"/></View>
@@ -110,6 +110,6 @@ export function FinancialSimpleDemoTable({ state, update, onCalculate }: Props) 
 const d=StyleSheet.create({
   root:{flex:1,minHeight:0,alignSelf:"stretch",backgroundColor:"#F7F8FA"},resultsScroll:{flex:1,minHeight:0},resultsContent:{paddingHorizontal:10,paddingTop:6,gap:6,paddingBottom:GO_NAVIGATION_OVERLAY_CLEARANCE},disclaimer:{fontSize:10,color:"#677384"},
   results:{backgroundColor:"#FFFFFF",borderColor:"#E2E6EB",borderWidth:1,borderRadius:10,paddingHorizontal:10,paddingVertical:7,gap:3},sectionTitle:{fontSize:13,fontWeight:"700",color:"#171B22"},breakdownTitle:{fontSize:13,fontWeight:"700",color:"#171B22",marginTop:3},metricRow:{minHeight:24,flexDirection:"row",alignItems:"center",justifyContent:"space-between",gap:6},metricLabel:{fontSize:12,color:"#344052",flexShrink:1},resultValue:{color:"#20784B",fontSize:15,fontWeight:"800",fontVariant:["tabular-nums"],textAlign:"right",flexShrink:1},
-  compactFields:{flexDirection:"row",gap:6,alignItems:"flex-end"},compactField:{flex:1,minWidth:0},fieldLabel:{color:"#505A69",fontSize:12,marginBottom:4},activePair:{borderColor:"#8195B3"},selection:{flexDirection:"row",gap:8,alignItems:"flex-end"},stacked:{flexDirection:"column",alignItems:"stretch"},inputs:{gap:6},activityLink:{minHeight:44,justifyContent:"center",alignSelf:"flex-start"},activityLinkText:{color:"#205C9C",fontSize:13,fontWeight:"700"},activityEditor:{gap:6},
+  breakdownHeading:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",gap:8},compactFields:{flexDirection:"row",gap:6,alignItems:"flex-end"},compactField:{flex:1,minWidth:0},fieldLabel:{color:"#505A69",fontSize:12,marginBottom:4},activePair:{borderColor:"#8195B3"},selection:{flexDirection:"row",gap:8,alignItems:"flex-end"},stacked:{flexDirection:"column",alignItems:"stretch"},inputs:{gap:6},activityLink:{minHeight:44,justifyContent:"center",alignSelf:"flex-start"},activityLinkText:{color:"#205C9C",fontSize:13,fontWeight:"700"},activityEditor:{gap:6},
   actionBar:{padding:8,backgroundColor:"#FFFFFF",borderTopWidth:1,borderColor:"#DCE1E8"},actions:{flexDirection:"row",gap:10},action:{flex:1,minHeight:48,borderRadius:10,alignItems:"center",justifyContent:"center",paddingHorizontal:6},calculate:{backgroundColor:"#20784B"},clear:{backgroundColor:"#B53338"},cancel:{backgroundColor:"#F6F7F9",borderWidth:1,borderColor:"#CBD1DA"},actionText:{color:"#FFFFFF",fontWeight:"800",fontSize:15,textAlign:"center"},cancelText:{color:"#344052",fontWeight:"700"},
 });
