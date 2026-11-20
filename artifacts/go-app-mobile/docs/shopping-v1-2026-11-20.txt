@@ -154,3 +154,51 @@ Verificación de esta continuación:
 TypeScript y git diff --check correctos antes de publicar. Se verificará el bundle iOS
 de 8088 contra el commit publicado y se comunicará el SHA. 8089 permanece intacto.
 La corrección visual y el gesto requieren nueva comprobación física en el iPhone.
+
+CONTINUACIÓN — ergonomía visual de Landing, IA, Lista y Mis listas
+-----------------------------------------------------------------
+Base: origin/main a16c8fc98174eb180a6fa9dda66564abca9b1214.
+Esta intervención es exclusivamente visual. No modifica ShoppingProductRow,
+gestos, catálogo, modelos, operaciones de compra ni almacenamiento. No investiga
+ni declara resueltas aquí las incidencias pendientes de categorías o recuperación.
+
+- IA: título interior de 16, ejemplo secundario de 13, campo de 14 y acciones
+  de al menos 44 puntos, agrupadas en una fila adaptable. El formulario ocupa la
+  zona inferior del scroll; al aparecer el teclado se conserva el contenido y
+  el mecanismo de cierre existente. Ejecutar y los callbacks de voz no cambian.
+- Landing: se reutilizan los dos botones flotantes existentes en columna de
+  64 × 136 en el lateral correspondiente. La columna comparte altura con las
+  dos filas inferiores, sin añadir una fila vertical ni elevar las órbitas
+  mediante desplazamientos. También se usa en Lista, IA y Mis listas; el editor
+  y los selectores hijos conservan su agrupación horizontal anterior.
+- Buscar productos/Mis listas: ancho calculado descontando safe areas y la
+  columna flotante. onTextLayout mide etiquetas y palabras con la misma fuente;
+  se eligen una o dos líneas por palabras completas o una columna si hace falta.
+  Las mediciones son locales, efímeras, invisibles y ajenas a accesibilidad;
+  no se guardan preferencias ni se transmite información.
+- Mis listas: campos a 14, filas de al menos 44, etiquetas más cortas y Eliminar
+  lista diferenciado en rojo. Se conserva un único scroll y el acceso a todas
+  las listas; nombres y estado Activa permanecen visibles.
+- Lista: columna flotante separada del menú, con anchos táctiles adaptados al
+  tamaño de fuente. No cambia el tamaño ni la lógica de las fichas.
+- Supermercado: fuente específica de 12, interlineado de 16 y hasta dos líneas;
+  los importes mantienen su tipografía y cálculos anteriores.
+- La evitación compartida de flotantes recibe las medidas del formulario,
+  cabecera, órbitas y controles. El contenido desplazable se intersecta con su
+  viewport nativo: lo que queda fuera de pantalla no puede crear obstáculos
+  falsos sobre el dock, incluso con listas largas u orientación horizontal.
+- No se crea ni se reserva espacio para el engranaje externo de Expo Go.
+  No se modifica el motor global de flotantes ni sus claves/preferencias.
+
+Pruebas: 72 casos dirigidos superados (41 regresiones COMPRAS, 11 consolidación,
+7 distribución inferior, 4 presentación y 9 de esta ergonomía visual).
+Incluyen lateralidad, 320/390/844 puntos, texto ampliado, medición/reflujo de
+etiquetas, teclado, navegación, ejecución de comando, llamada al inicio de voz,
+once listas conservadas y recorte de obstáculos a la ventana visible.
+TypeScript y git diff --check correctos. El bundle iOS de 8088 se comprobará tras
+publicar; SHA y resultado se comunican en la entrega.
+
+Las pruebas de interfaz usan adaptadores nativos y geometría controlada; no son
+una validación visual ni de hit-testing en iPhone. La voz se comprueba como
+conexión al callback existente, sin simular una transcripción física exitosa.
+Queda la comprobación física del propietario. 8089 y servicios externos intactos.

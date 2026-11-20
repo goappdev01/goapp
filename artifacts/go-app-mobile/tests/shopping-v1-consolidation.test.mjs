@@ -84,7 +84,7 @@ test('narrow layout keeps complete product name, centered large price, mirrored 
    assert.equal(ui.hosts.get('shopping-edit-'+item.id).children.props.numberOfLines,undefined);
    const price=ui.hosts.get('shopping-price-input-'+item.id),priceStyle=Object.assign({},...price.style.filter(Boolean));assert.equal(priceStyle.textAlign,'center');assert.ok(priceStyle.fontSize<=14);assert.ok(priceStyle.minHeight>=44);
    assert.equal(ui.hosts.get('shopping-product-main-row-'+item.id).style[1].flexDirection,handedness==='left'?'row-reverse':'row');
-   assert.ok(ui.hosts.get('shopping-thumb-controls').style.paddingBottom<=4);assert.equal(ui.hosts.get('shopping-navigation-space').style.height,64);
+   assert.ok(ui.hosts.get('shopping-thumb-controls').style[0].paddingBottom<=4);assert.equal(ui.hosts.get('shopping-navigation-space').style.height,136);
    await ui.run(()=>{price.onFocus();price.onChangeText('2,75');ui.keyboard.show();});ui.keyboard.focused={blur:()=>ui.hosts.get('shopping-price-input-'+item.id).onEndEditing()};
    assert.equal(ui.hosts.get('shopping-back').keyboardVisible,true);await ui.tap('shopping-back');await ui.idle();assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,2.75);assert.equal(ui.calls.some(c=>c[0]==='close'),false);
   }finally{await ui?.close();f.disk.close();}

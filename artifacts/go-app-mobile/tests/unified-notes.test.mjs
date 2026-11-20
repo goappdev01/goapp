@@ -224,7 +224,7 @@ test('COMPRAS shows long product names on their own row and keeps compact contro
    assert.deepEqual(controlIds,['shopping-quantity-controls-','shopping-ir-','shopping-bought-'].map(prefix=>prefix+item.id));
    assert.ok(ui.hosts.has('shopping-product-info-'+item.id));
    assert.equal(ui.hosts.get('shopping-price-input-'+item.id).placeholder,'Sin precio');
-   assert.equal(ui.hosts.get('shopping-navigation-space').style.height,64,'floating pair shares the auxiliary dock');
+   assert.equal(ui.hosts.get('shopping-navigation-space').style.height,136,'floating pair shares the auxiliary dock');
    const checkbox=()=>ui.hosts.get('shopping-bought-'+item.id);
    assert.equal(checkbox().children.props.name,'check');assert.equal(checkbox().style[0].minHeight,44);
    await ui.tap('shopping-bought-'+item.id);assert.equal(checkbox().accessibilityState.checked,true);assert.equal(checkbox().children.props.name,'check');await ui.tap('shopping-bought-'+item.id);assert.equal(f.doc().items[0].bought,false);

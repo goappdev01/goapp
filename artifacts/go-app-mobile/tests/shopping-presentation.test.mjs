@@ -9,8 +9,8 @@ test('Landing identifies the active list compactly and updates it after explicit
   assert.ok(ui.hosts.get('shopping-orbit-active-list').style.fontSize<=13);assert.match(ui.container.textContent,/GO ComprasAñadir productos/);
   await ui.tap('shopping-manage-lists');await ui.run(()=>ui.hosts.get('shopping-list-name').onChangeText('Trabajo'));await ui.tap('shopping-list-create');
   assert.equal(ui.hosts.get('shopping-orbit-active-list').children.join(''),'Lista activa: Trabajo');
-  assert.equal(ui.hosts.get('shopping-thumb-controls').style.paddingBottom,4);
-  assert.equal(ui.hosts.get('shopping-shortcut-row').style.flex,1);
+  assert.equal(ui.hosts.get('shopping-thumb-controls').style[0].paddingBottom,4);
+  assert.equal(ui.hosts.get('shopping-shortcut-row').style[0].flex,1);
  }finally{await ui?.close();f.disk.close();}
 });
 
@@ -46,11 +46,11 @@ test('product name dominates missing price; price keeps its touch area and only 
  }finally{await ui?.close();f.disk.close();}
 });
 
-test('TOTAL PREVISTO centers all three lines and gives the supermarket a readable single line',async()=>{
+test('TOTAL PREVISTO centers all three lines and gives long supermarket names a compact two-line label',async()=>{
  const f=await shoppingFixture();let ui;try{
   await f.open();await f.add('Pan',{price:'2,50'});await f.run({type:'store',value:'Mi supermercado'});ui=await shoppingUI(f);
   const card=ui.hosts.get('shopping-total-card');assert.equal(card.style.alignItems,'center');assert.equal(card.style.justifyContent,'center');assert.ok(card.style.paddingVertical>=5);
   for(const id of ['shopping-total-title','shopping-estimate','shopping-total-products'])assert.equal(ui.hosts.get(id).style.textAlign,'center');
-  assert.equal(ui.hosts.get('shopping-store-title').numberOfLines,1);assert.equal(ui.hosts.get('shopping-store-title').style.fontSize,15);
+  assert.equal(ui.hosts.get('shopping-store-title').numberOfLines,2);assert.equal(ui.hosts.get('shopping-store-title').style.fontSize,12);
  }finally{await ui?.close();f.disk.close();}
 });
