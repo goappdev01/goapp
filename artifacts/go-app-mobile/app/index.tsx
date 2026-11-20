@@ -3031,6 +3031,8 @@ function HomeScreenContent() {
   const calendarDragOverlay = useRef<ViewInstance>(null);
   const [boardsOpen, setBoardsOpen] = useState(false);
   const [calendarHeaderSides,setCalendarHeaderSides]=useState({left:0,right:44});
+  const [calendarHeaderWidth,setCalendarHeaderWidth]=useState(0);
+  const [calendarBoardSize,setCalendarBoardSize]=useState({width:96,height:44});
   const [sportsEventsOpen, setSportsEventsOpen] = useState(false);
   // ── Flujo universal de calendario — hook sin lógica de módulo ──────────
   // Todos los módulos (normal, mover, propuesta, QD, reservas nav, etc.)
@@ -4588,8 +4590,8 @@ function HomeScreenContent() {
   const [calBgDayNightMode, setCalBgDayNightMode] = useState<"claro" | "oscuro" | "mixto">("mixto");
   const [calConfigVisible, setCalConfigVisible] = useConfigPanelPreference(CONFIG_PANEL_KEYS.calendar);
   const renderAdminCalendarBoard = () => goView.view === "ADMIN" && adminAccess.allowed && !adminAccess.checking && (
-    <TouchableOpacity testID="calendar-admin-board" accessibilityRole="button" accessibilityLabel="Tablero" onPress={() => setBoardsOpen(true)} style={{minHeight:44,minWidth:72,alignItems:"center",justifyContent:"center"}}>
-      <View style={{paddingHorizontal:8,paddingVertical:4,borderRadius:8,borderWidth:1,borderColor:"#ffffff"}}><Text style={{color:"#ffffff",fontSize:12}}>Tablero</Text></View>
+    <TouchableOpacity testID="calendar-admin-board" accessibilityRole="button" accessibilityLabel="Tablero" onPress={() => setBoardsOpen(true)} onLayout={event=>{const {width,height}=event.nativeEvent.layout;setCalendarBoardSize(old=>old.width===width&&old.height===height?old:{width,height});}} style={{minHeight:44,minWidth:72,alignItems:"center",justifyContent:"center",transform:calBgViewMode==="mes_lineal"?[]:[{translateX:Math.max(Math.max(insets.left+8,8)+calendarHeaderSides.left+4+calendarBoardSize.width/2,Math.min((calendarHeaderWidth||landingWindow.width)/2,(calendarHeaderWidth||landingWindow.width)-Math.max(insets.right+8,8)-calendarHeaderSides.right-4-calendarBoardSize.width/2))-(calendarHeaderWidth||landingWindow.width)/2}]}}>
+      <View style={{paddingHorizontal:10,paddingVertical:1,borderRadius:8,borderWidth:1,borderColor:"#ffffff",flexShrink:0}}><Text numberOfLines={1} style={{color:"#ffffff",fontSize:12,lineHeight:16,flexShrink:0}}>Tablero</Text></View>
     </TouchableOpacity>
   );
   const renderCalendarToolsToggle = () => <GoCloseButton testID="calendar-tools-toggle" level="settings" touchSize={44} preserveTouchSize iconSize={22} accessibilityLabel="Configuración de Calendario" onPress={() => { Haptics.selectionAsync(); setCalConfigVisible(visible => !visible); }}/>;
@@ -20384,8 +20386,9 @@ function HomeScreenContent() {
                 dragEnabled={calOpen && !monthGridOpen && !calReservasOpen && !showBookingFromCal}
                 dragOverlayRef={calendarDragOverlay}
                 renderHeader={monthNavigation => (<View testID="calendar-header"
+              onLayout={event=>{const width=event.nativeEvent.layout.width;setCalendarHeaderWidth(old=>old===width?old:width);}}
               pointerEvents={showBookingFromCal ? "none" : "auto"}
-              style={{ zIndex: 20, opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top, paddingLeft: Math.max(insets.left + 8, 8), paddingRight: Math.max(insets.right + 8, 8), gap: 4, paddingBottom: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
+              style={{ zIndex: 20, opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top, paddingLeft: Math.max(insets.left + 8, 8), paddingRight: Math.max(insets.right + 8, 8), gap: 4, paddingBottom: goView.view==="ADMIN"&&adminAccess.allowed?4:0, minHeight:goView.view==="ADMIN"&&adminAccess.allowed?insets.top+Math.max(44,calendarBoardSize.height)+4:undefined, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
             >
               <View onLayout={event=>{const width=event.nativeEvent.layout.width;setCalendarHeaderSides(old=>old.left===width?old:{...old,left:width});}} style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}><GoCalendarViewSelector compact value={calBgViewMode} onChange={changeCalendarView} />{demoBookingRepository && <TouchableOpacity accessibilityRole="button" testID="customer-calendar-shortcut" accessibilityLabel={lang === "en" ? "Customer calendar" : "Calendario cliente"} onPress={event => { event.stopPropagation(); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{paddingHorizontal:2,paddingVertical:8,width:44,minHeight:44,justifyContent:"center"}}><Feather name="calendar" size={14} color="#ff7474" /></TouchableOpacity>}</View>
               <View testID="calendar-header-center" style={{flex:1,minWidth:0,flexDirection:"row",flexWrap:"wrap",alignItems:"center",justifyContent:"center"}}>
@@ -20393,7 +20396,7 @@ function HomeScreenContent() {
                 {monthNavigation}
               </View>
               <View onLayout={event=>{const width=event.nativeEvent.layout.width;setCalendarHeaderSides(old=>old.right===width?old:{...old,right:width});}}>{renderCalendarToolsToggle()}</View>
-              {calBgViewMode !== "mes_lineal" && <View testID="calendar-admin-board-overlay" pointerEvents="box-none" style={{position:"absolute",top:insets.top,width:72,height:44,left:Math.max(Math.max(insets.left+8,8)+calendarHeaderSides.left+4,Math.min((screen.width-72)/2,screen.width-Math.max(insets.right+8,8)-calendarHeaderSides.right-76)),alignItems:"center",justifyContent:"center"}}>{renderAdminCalendarBoard()}</View>}
+              {calBgViewMode !== "mes_lineal" && <View testID="calendar-admin-board-overlay" pointerEvents="box-none" style={{position:"absolute",top:insets.top,left:0,right:0,height:Math.max(44,calendarBoardSize.height),alignItems:"center",justifyContent:"center"}}>{renderAdminCalendarBoard()}</View>}
 
             </View>)}
                 goLog={goLog.filter((e: any) => {
