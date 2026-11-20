@@ -152,6 +152,7 @@ test('compact DEMO edits independent activity blocks, appends activities and res
   find(n=>n.type==='MultiChoice'&&n.props.label==='Actividades incluidas').props.onChange(['go_peluquerias','go_restaurantes']);
   assert.equal(blocks().length,2);
   assert.equal(field('ES','go_restaurantes','Empresas existentes').props.value,79508);
+  const sourceLine=all(block('ES','go_restaurantes')).find(n=>n.props.testID==='finance-source-line');assert.equal(sourceLine.props.style.flexDirection,'row');assert.ok(all(sourceLine).some(n=>n.children?.includes('Dato oficial verificado')));assert.ok(all(sourceLine).some(n=>n.children?.includes('Eurostat')));assert.equal(all(block('ES','go_restaurantes')).some(n=>n.children?.some(c=>typeof c==='string'&&/^(Referencia:|Captadas:)/.test(c))),false,'editing blocks do not repeat source paragraphs or result summaries');
   field('ES','go_restaurantes','Empresas existentes').props.onChange(60000);
   field('ES','go_restaurantes','Captación (%)').props.onChange(5);
   field('ES','go_restaurantes','Cuota mensual (€)').props.onChange(100);
@@ -225,7 +226,7 @@ test('compact DEMO edits independent activity blocks, appends activities and res
   assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.alignSelf === 'stretch')), 'paired selectors keep their full column height');
   find(node=>node.type==='MultiChoice'&&node.props.label==='Países incluidos').props.onChange(['CH']);
   find(node=>node.type==='MultiChoice'&&node.props.label==='Actividades incluidas').props.onChange(['go_restaurantes']);
-  assert.ok(all(render()).some(node=>node.children?.includes('Dato oficial · estimación Eurostat (e)')));
+  assert.ok(all(render()).some(node=>node.children?.includes('Estimación oficial (e)')));
   width = 844;
   assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.flexDirection === 'row')), 'landscape uses the available width');
 });

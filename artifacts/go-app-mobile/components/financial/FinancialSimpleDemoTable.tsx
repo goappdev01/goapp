@@ -90,14 +90,15 @@ export function FinancialSimpleDemoTable({ state, update, onCalculate }: Props) 
         const key=item.countryCode+"|"+item.activityId;
         return <View key={key} testID={"finance-pair-"+key} style={[d.results,d.inputs,key===pairKey&&d.activePair]} onTouchStart={()=>activatePair(item.countryCode,item.activityId)}>
           <Text style={d.sectionTitle}>{item.activity} · {item.country}</Text>
-          {item.marketOrigin!=="example"&&<Text style={s.note}>{originLabel(item.marketOrigin,item.reference?.estimated)}</Text>}
-          {item.reference&&<Text selectable style={s.note}>Referencia: {financialCount(item.reference.companies)} empresas · {item.reference.source.organization} · {item.reference.source.year} · {item.reference.source.scope}{item.reference.estimated?" · estimación (e)":""}</Text>}
+          {item.marketOrigin!=="example"&&<View testID="finance-source-line" style={d.breakdownHeading}>
+            <Text style={[s.note,{flexShrink:1}]}>{item.marketOrigin==="official"&&item.reference?.estimated?"Estimación oficial (e)":originLabel(item.marketOrigin)}</Text>
+            {item.marketOrigin==="official"&&item.reference&&<Text style={[s.note,{textAlign:"right"}]}>{item.reference.source.organization}</Text>}
+          </View>}
           <View testID="finance-inputs-row" style={d.compactFields}>
             <View style={[d.compactField,{flex:1.15}]}><Text style={d.fieldLabel}>Empresas</Text><FinanceNumber compact integer label="Empresas existentes" value={item.market} onChange={value=>editMarket(item.countryCode,item.activityId,value)} placeholder="Sin dato"/></View>
             <View style={d.compactField}><Text style={d.fieldLabel}>Captación %</Text><FinanceNumber compact label="Captación (%)" value={item.share} onChange={value=>editAssumption(item.countryCode,item.activityId,"share",value)}/></View>
             <View style={d.compactField}><Text style={d.fieldLabel}>Cuota €/mes</Text><FinanceNumber compact label="Cuota mensual (€)" value={item.fee} disabled={!item.feeEditable} onChange={value=>editAssumption(item.countryCode,item.activityId,"fee",value)}/></View>
           </View>
-          <Text style={s.note}>Captadas: {financialCount(item.companies)} · Mensual: {money(item.monthly)} · Anual: {money(item.annual)}</Text>
         </View>;
       })}
       {!!error&&<Text accessibilityRole="alert" style={s.error}>{error}</Text>}
