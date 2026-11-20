@@ -19,7 +19,7 @@
  *   • Taps cortos pasan a los hijos normalmente (TouchableOpacity funciona)
  */
 import React, { useCallback, useEffect, useMemo, useContext, useRef } from "react";
-import {GoNavigationHand} from "@/components/ui/GoNavigationHand";
+import {GoNavigationHand,GoFloatingPreferenceScope} from "@/components/ui/GoNavigationHand";
 import { Dimensions, StyleSheet } from "react-native";
 import Animated, {
   runOnJS,
@@ -100,7 +100,13 @@ export function DraggableFAB({
   const { width: SW, height: SH } = bounds || Dimensions.get("window");
   const insets = useSafeAreaInsets();
   const preferredHand=useContext(GoNavigationHand),hand=handedness??preferredHand;
-  const storageKey = `fab_pos:${screenKey}:${buttonKey}`+(navigation?":"+hand:"");
+  const scopeContext=useContext(GoFloatingPreferenceScope ?? GoNavigationHand);
+  const preferenceScope=typeof GoFloatingPreferenceScope!=="undefined" ? scopeContext : undefined;
+  const storageEnabled=preferenceScope!==null;
+  const desiredPosition=useRef<{l:number;t:number;h:number}|null>(null);
+  const legacyKey = `fab_pos:${screenKey}:${buttonKey}`+(navigation?":"+hand:"");
+  const storageKey=legacyKey+(typeof preferenceScope==="string"?":owner:"+encodeURIComponent(preferenceScope):"");
+  const activeStorageKey=useRef(storageKey);activeStorageKey.current=storageKey;
   const dragPress=useRef({active:false,suppress:false});
   const markNavigationDrag=useCallback(()=>{dragPress.current={active:true,suppress:true};},[]);
   const finishNavigationDrag=useCallback(()=>{dragPress.current.active=false;},[]);
@@ -147,13 +153,16 @@ export function DraggableFAB({
   // ── Persist ──────────────────────────────────────────────────────────────
   useEffect(() => {
     let active=true;
-    if(navigation){posL.value=initLeft;posT.value=initTop;hasDragged.value=false;}
+    desiredPosition.current=null;
+    if(navigation||preferenceScope!==undefined){posL.value=initLeft;posT.value=initTop;hasDragged.value=false;}
+    if(!storageEnabled)return;
     AsyncStorage.getItem(storageKey).then(async(raw) => {
-      if(!raw&&navigation&&hand==="right")raw=await AsyncStorage.getItem(`fab_pos:${screenKey}:${buttonKey}`);
+      if(!raw&&navigation&&hand==="right"&&preferenceScope===undefined)raw=await AsyncStorage.getItem(`fab_pos:${screenKey}:${buttonKey}`);
       if (!active||!raw) return;
       try {
         const { l, t, h } = JSON.parse(raw) as { l: number; t: number; h?:number };
         if (!Number.isFinite(l) || !Number.isFinite(t) || hasDragged.value) return;
+        desiredPosition.current={l,t,h:typeof h==="number"?h:currentBoundsHeight.current};
         const nextL=Math.max(minL,Math.min(maxL,l));
         const restored=keyboardResponsive&&typeof h==="number"&&Number.isFinite(h)?t+currentBoundsHeight.current-h:t;
         const nextT=Math.max(minT,Math.min(maxT,restored));
@@ -165,12 +174,18 @@ export function DraggableFAB({
       }
     }).catch(() => console.info("[fab-preference]", { code: "READ_FAILED" }));
     return()=>{active=false;};
-  }, [storageKey]);
+  }, [storageKey,storageEnabled]);
 
-  useEffect(()=>{if(!avoidRects?.length||isDragging.value||clearAt(posL.value,posT.value))return;
-    const safe=settleClearPosition(posL.value,posT.value,initLeft,initTop,buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects);
+  useEffect(()=>{
+    if(isDragging.value)return;
+    if(!navigation){if(!avoidRects?.length||clearAt(posL.value,posT.value))return;
+      const safe=settleClearPosition(posL.value,posT.value,initLeft,initTop,buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects);posL.value=safe.x;posT.value=safe.y;return;}
+    const preferred=desiredPosition.current;
+    const l=Math.max(minL,Math.min(maxL,preferred?.l ?? initLeft));
+    const t=Math.max(minT,Math.min(maxT,preferred ? preferred.t+(keyboardResponsive?SH-preferred.h:0) : initTop));
+    const safe=settleClearPosition(l,t,l,t,buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects??[]);
     posL.value=safe.x;posT.value=safe.y;
-  },[bounds?.width,bounds?.height,JSON.stringify(avoidRects)]);
+  },[storageKey,minL,maxL,minT,maxT,initLeft,initTop,buttonWidth,maxH,JSON.stringify(avoidRects)]);
 
   useEffect(() => {
     if (bounds) return; // Keep the chosen position while the keyboard temporarily clamps its display.
@@ -180,9 +195,11 @@ export function DraggableFAB({
 
   const savePos = useCallback(
     (l: number, t: number) => {
+      if(!storageEnabled||activeStorageKey.current!==storageKey)return;
+      desiredPosition.current={l,t,h:currentBoundsHeight.current};
       AsyncStorage.setItem(storageKey, JSON.stringify(keyboardResponsive&&bounds?{l,t,h:currentBoundsHeight.current}:{l,t})).catch(() => console.info("[fab-preference]", { code: "WRITE_FAILED" }));
     },
-    [storageKey,keyboardResponsive,!!bounds]
+    [storageKey,storageEnabled,keyboardResponsive,!!bounds]
   );
 
   // ── Gesture ──────────────────────────────────────────────────────────────
@@ -213,13 +230,14 @@ export function DraggableFAB({
         })
         .onEnd(() => {
           "worklet";
+          if(navigation)runOnJS(savePos)(posL.value,posT.value);
           if(avoidRects?.length){
             const target=settleClearPosition(posL.value,posT.value,originL.value,originT.value,
               buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects);
             posL.value=withSpring(target.x);
             posT.value=withSpring(target.y);
-            runOnJS(savePos)(target.x,target.y);
-          }else runOnJS(savePos)(posL.value,posT.value);
+            if(!navigation)runOnJS(savePos)(target.x,target.y);
+          }else if(!navigation)runOnJS(savePos)(posL.value,posT.value);
           isDragging.value = false;
           scale.value = withSpring(1, { damping: 14, stiffness: 160 });
           shadowOp.value = 0.18;

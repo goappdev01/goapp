@@ -1,6 +1,6 @@
 import { useGoDockPreference } from "@/hooks/useGoDockPreference";
 import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
-import {GoNavigationHand} from "@/components/ui/GoNavigationHand";
+import {GoNavigationHand,GoFloatingPreferenceScope} from "@/components/ui/GoNavigationHand";
 import { GO_ASSISTANT_GOLD, GO_ASSISTANT_LABEL } from "@/theme/goAssistantColors";
 import { GoScreenHost } from "@/components/ui/GoScreenModal";
 import type { ScrollViewInstance, ViewInstance } from "react-native";
@@ -14546,6 +14546,7 @@ function HomeScreenContent() {
 
   return (
     <GoNavigationHand.Provider value={handedness}>
+    <GoFloatingPreferenceScope.Provider value={completionIdentity.scope ? JSON.stringify(completionIdentity.scope) : null}>
     <GestureDetector gesture={universalSwipeGesture}>
     <View ref={landingSurfaceRef} style={[styles.root, { paddingTop }]} onLayout={(e) => {
       const { width, height } = e.nativeEvent.layout;
@@ -24849,6 +24850,7 @@ function HomeScreenContent() {
       onOpenAdmin={handleOpenAdmin}
       onSelectOwnerView={handleSelectOwnerView}
     />
+    </GoFloatingPreferenceScope.Provider>
     </GoNavigationHand.Provider>
   );
 

@@ -4,14 +4,14 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import vm from "node:vm";
 const require = createRequire(import.meta.url), ts = require("typescript");
-function fixture(saved = new Map(), getItem = async key => saved.get(key) ?? null) {
-  let cursor = 0, callbacks = {}, size;
-  const values = [], effects = [];
+function fixture(saved = new Map(), getItem = async key => saved.get(key) ?? null, identity) {
+  let cursor = 0, callbacks = {}, size; const scopeContext={};
+  const values = [], effects = [],cleanups=[],writes=[];
   const react = {
-    default: { createElement(type, props, ...children) { return { type, props: { ...props, children } }; } },
-    useContext:()=>"right",useRef:value=>{const i=cursor++;return values[i]??={current:value};},useMemo: fn => fn(), useCallback: fn => fn,
+    default: { Children:{map:(children,fn)=>[children].map(fn)},isValidElement:()=>false,createElement(type, props, ...children) { return { type, props: { ...props, children } }; } },
+    useContext:context=>identity&&context===scopeContext?identity.current:"right",useRef:value=>{const i=cursor++;return values[i]??={current:value};},useMemo: fn => fn(), useCallback: fn => fn,
     useEffect(fn, deps) { const i = cursor++, old = values[i];
-      if (!old || deps.some((d,k) => d !== old[k])) { values[i] = deps; effects.push(fn); }
+      if (!old || deps.some((d,k) => d !== old[k])) { values[i] = deps; effects.push(()=>{cleanups[i]?.();cleanups[i]=fn();}); }
     },
   };
   const animation = {
@@ -24,8 +24,8 @@ function fixture(saved = new Map(), getItem = async key => saved.get(key) ?? nul
     for (const name of ["onStart", "onUpdate", "onEnd", "onFinalize"]) chain[name] = fn => { callbacks[name] = fn; return chain; };
     return chain;
   }
-  const storage = { getItem, setItem: async (key, raw) => saved.set(key, raw) };
-  const modules = {"@/components/ui/GoNavigationHand":{GoNavigationHand:{}}, react, "react-native": { Dimensions: { get: () => ({ width: 390, height: 844 }) }, StyleSheet: { create: x => x } },
+  const storage = { getItem, setItem: async (key, raw) => {writes.push({key,raw});saved.set(key, raw);} };
+  const modules = {"@/components/ui/GoNavigationHand":{GoNavigationHand:{},GoFloatingPreferenceScope:identity?scopeContext:undefined}, react, "react-native": { Dimensions: { get: () => ({ width: 390, height: 844 }) }, StyleSheet: { create: x => x } },
     "react-native-reanimated": animation, "react-native-gesture-handler": { Gesture: { Pan: pan }, GestureDetector: "GestureDetector" },
     "@react-native-async-storage/async-storage": { default: storage }, "expo-haptics": { selectionAsync() {}, impactAsync() {}, ImpactFeedbackStyle: { Light: "light" } },
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: 47, bottom: 34, left: 0, right: 0 }) }
@@ -34,7 +34,7 @@ function fixture(saved = new Map(), getItem = async key => saved.get(key) ?? nul
   vm.runInNewContext(ts.transpileModule(readFileSync("components/DraggableFAB.tsx", "utf8"), {
     compilerOptions: { esModuleInterop: false, alwaysStrict: false, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React }
   }).outputText, context);
-  return { saved, get gesture() { return callbacks; },
+  return { saved,writes, get gesture() { return callbacks; },
     render(height = 500, options = {}) {
       cursor = 0; size = { width: 390, height };
       const tree = context.exports.DraggableFAB({ screenKey: "booking-assistant", buttonKey: "close", initialBottom: 12, maxH: 44, buttonWidth: 44, bounds: size, children: "close",...options });
@@ -90,4 +90,24 @@ for(const hand of ['left','right'])test(`Listados/${hand}: homologated long-pres
  const moved=f.render(500,options),key='fab_pos:listados:close-'+hand;assert.equal(JSON.parse(saved.get(key)).t,moved.top);assert.equal(moved.top,start.top-110);
  const reopened=fixture(saved);reopened.render(500,options);await reopened.settled();assert.equal(reopened.render(500,options).top,moved.top);assert.equal(reopened.render(100,options).top,48);assert.equal(reopened.render(500,options).top,moved.top);
  f.gesture.onStart({translationX:0,translationY:0});f.gesture.onUpdate({translationX:999,translationY:999});const limited=f.render(100,options);assert.ok(limited.left<=338);assert.ok(limited.top<=48);f.gesture.onFinalize();assert.equal(closed,0);
+});
+
+for(const hand of ['left','right'])test('temporary footer avoidance restores the chosen position and never writes safety moves / '+hand,async()=>{
+ const saved=new Map(),identity={current:'user-a/live:BUSINESS'},opts={navigation:true,handedness:hand,screenKey:'wizard',buttonKey:'main',initialRight:20};
+ const f=fixture(saved,undefined,identity);f.render(500,opts);await f.settled();
+ f.gesture.onStart({translationX:0,translationY:0});f.gesture.onUpdate({translationX:hand==='right'?-80:80,translationY:-40});f.gesture.onEnd();
+ const chosen=f.render(500,opts),persisted=JSON.stringify([...saved]),writeCount=f.writes.length;assert.equal(saved.size,1);
+ const obstacle={...opts,avoidRects:[{x:0,y:chosen.top-10,width:390,height:200}]};
+ f.render(500,obstacle);const moved=f.render(500,obstacle);assert.ok(moved.top+44<=chosen.top-12);
+ assert.equal(JSON.stringify([...saved]),persisted);assert.equal(f.writes.length,writeCount);f.render(500,opts);assert.equal(f.render(500,opts).top,chosen.top);
+ const reopen=fixture(saved,undefined,identity);reopen.render(500,opts);await reopen.settled();assert.equal(reopen.render(500,opts).top,chosen.top);
+ for(let step=0;step<8;step++){reopen.render(500,obstacle);reopen.render(500,opts);assert.equal(reopen.render(500,opts).top,chosen.top);}assert.equal(JSON.stringify([...saved]),persisted);
+ identity.current='user-b/live:BUSINESS';reopen.render(500,opts);await reopen.settled();assert.notEqual(reopen.render(500,opts).top,chosen.top);assert.equal(JSON.stringify([...saved]),persisted);
+});
+
+test('a late read from another identity cannot overwrite the current position',async()=>{
+ const waiting=new Map(),identity={current:'account-a/USER'},f=fixture(new Map(),key=>new Promise(resolve=>waiting.set(key,resolve)),identity),opts={navigation:true};
+ f.render(500,opts);const old=[...waiting.keys()][0];identity.current='account-b/USER';const initial=f.render(500,opts);const current=[...waiting.keys()].at(-1);
+ waiting.get(old)(JSON.stringify({l:30,t:40}));waiting.get(current)(null);await f.settled();
+ assert.equal(f.render(500,opts).top,initial.top);assert.equal(f.writes.length,0);
 });
