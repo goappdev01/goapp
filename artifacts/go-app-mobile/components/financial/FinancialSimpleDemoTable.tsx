@@ -8,7 +8,7 @@ import { FinanceChoice, FinanceMultiChoice, FinanceNumber, FinanceTable, financi
 import { GO_NAVIGATION_OVERLAY_CLEARANCE } from "@/components/ui/GoNavigationRail";
 
 type Props = { state: FinancialDemoState; update: (fn: (current: FinancialDemoState) => FinancialDemoState) => void; onCalculate?: () => void };
-const money = (value: number | null) => financialMoney(value, "EUR");
+const money = (value: number | null) => financialMoney(value, "EUR", 0);
 const originLabel=(origin:string|undefined,estimated=false)=>origin==="official"?estimated?"Dato oficial · estimación Eurostat (e)":"Dato oficial verificado":origin==="manual"?"Estimación introducida":origin==="example"?"Ejemplo simulado":"Sin dato";
 
 /** The selected country × activity pairs share the existing financial engine and local document. */
