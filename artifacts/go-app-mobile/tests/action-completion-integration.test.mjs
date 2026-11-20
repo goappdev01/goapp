@@ -92,7 +92,7 @@ test('DEMO change draft has zero effects; final proposal keeps the original rese
 
 function uiFixture(model){
  const state=[],effects=[];let cursor=0;const calls=[];
- const react={__esModule:true,Fragment:'Fragment',createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),useState(initial){const i=cursor++;if(!(i in state))state[i]=typeof initial==='function'?initial():initial;return[state[i],value=>state[i]=typeof value==='function'?value(state[i]):value];},useEffect(fn){effects.push(fn);}};react.default=react;
+ const react={__esModule:true,Fragment:'Fragment',createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),useState(initial){const i=cursor++;if(!(i in state))state[i]=typeof initial==='function'?initial():initial;return[state[i],value=>state[i]=typeof value==='function'?value(state[i]):value];},useEffect(fn){effects.push(fn);},useRef(value){const i=cursor++;if(!(i in state))state[i]={current:value};return state[i];}};react.default=react;
  const native=Object.fromEntries(['View','Text','TouchableOpacity','Modal','ScrollView','TextInput','Switch'].map(n=>[n,n]));
  native.Platform={OS:'ios'};
  const component=load('components/landing/LandingActionCompletion.tsx',{react,'react-native':native,'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:47,bottom:34,left:0,right:0})},'@/components/ui/GoCloseButton':{GoCloseButton:'GoCloseButton'},'@/lib/goActionCompletion':core});

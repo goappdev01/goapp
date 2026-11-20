@@ -14223,6 +14223,7 @@ function HomeScreenContent() {
   const landingControlHand = compactLandingActive ? (landingAlignment === "left" ? "left" : "right") : handedness;
   const compactLandingBounds = landingOrbitSafeBounds({
     surface: { ...screen, ...landingSurfaceOrigin }, viewport: landingWindow, insets,
+    calibration: screen.height > screen.width ? 20 : 0,
   });
   const compactLandingGeometry = compactLandingOrbit({
     goSize, orbitRadius, orbitSize: orbitBtnSize, orbitCount: INTENTS.length + 1, orbitVisible: true,
@@ -15021,7 +15022,6 @@ function HomeScreenContent() {
               ...panelSideStyle,
               width: PANEL_W,
               bottom: contentBottom(panelBottom),
-              height: changesCardSpace.availableHeight,
               zIndex: 6,
               gap: Math.round(4 * uiScaleFactor),
               ...(item.kind === "cambio" ? { paddingBottom: Math.round(LANDING_ENTRY_FRAME.bottomGap * uiScaleFactor) } : {}),
@@ -15276,7 +15276,6 @@ function HomeScreenContent() {
               bottom: contentBottom(landingFrame.virtual
                 ? landingFrame.baseline + landingFrame.height - landingDisplayPanels.next.y - landingDisplayPanels.next.height
                 : screen.height - landingDisplayPanels.next.y - landingDisplayPanels.next.height),
-              height: nextCardAvailableHeight,
               zIndex: 5,
               ...(entryIsReservation(g) ? { paddingBottom: Math.round(LANDING_VISIT_FRAME.bottomGap * uiScaleFactor) } : {}),
               ...(entryIsInternal(g) ? { paddingBottom: Math.round(LANDING_ENTRY_FRAME.bottomGap * uiScaleFactor) } : {}),

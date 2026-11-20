@@ -116,9 +116,9 @@ export function landingActionPanelFrames(panels: ReturnType<typeof landingPanelF
 export function landingActionsBesideNote(nodes: readonly (HumanityRect & {key:string})[], bounds:{left:number;right:number;top:number;bottom:number}, mirrored=false): HumanityRect | null {
  const note=nodes.find(n=>n.key==='bell');if(!note)return null;
  const gap=6,height=44;
- const available=mirrored?bounds.right-note.x-note.width-gap:note.x-bounds.left-gap;
+ const available=mirrored?bounds.right-note.x-note.width-gap:note.x-Math.max(18,bounds.left)-gap;
  const width=Math.min(104,available);if(width<64)return null;
- const rect={x:mirrored?note.x+note.width+gap:note.x-gap-width,y:note.y+(note.height-height)/2,width,height};
+ const rect={x:mirrored?bounds.right-width:Math.max(18,bounds.left),y:note.y+(note.height-height)/2,width,height};
  const clear = () => rect.y>=bounds.top && rect.y+height<=bounds.bottom && !nodes.some(n=>{const cx=n.x+n.width/2,cy=n.y+n.height/2;
   const dx=cx-Math.max(rect.x,Math.min(cx,rect.x+width)),dy=cy-Math.max(rect.y,Math.min(cy,rect.y+height));
   return Math.hypot(dx,dy)<n.width/2+gap-0.01;});

@@ -52,16 +52,17 @@ export function redistributeLandingLowerArc(input: Input) {
 
 /** Window safe edges expressed in the measured Landing surface coordinates.
  * A navigator may already exclude an inset: never subtract it a second time.
- * The safe bottom itself is the floor; there is no preset-dependent lift. */
-export function landingOrbitSafeBounds({ surface, viewport, insets }: {
-  surface: Rect; viewport: { width: number; height: number };
+ * Defaults to the safe floor. The explicitly authorized portrait calibration
+ * may descend further, retaining an 8pt physical edge clearance. */
+export function landingOrbitSafeBounds({ surface, viewport, insets, calibration = 0 }: {
+  calibration?: number; surface: Rect; viewport: { width: number; height: number };
   insets: { left: number; right: number; top: number; bottom: number };
 }): Bounds {
   return {
     left: Math.max(0, insets.left - surface.x),
     right: Math.min(surface.width, viewport.width - insets.right - surface.x),
     top: Math.max(0, insets.top - surface.y) + 4,
-    bottom: Math.min(surface.height, viewport.height - insets.bottom - surface.y),
+    bottom: Math.min(surface.height - (calibration ? 8 : 0), viewport.height - surface.y - (calibration ? 8 : 0), viewport.height - insets.bottom - surface.y + calibration),
   };
 }
 

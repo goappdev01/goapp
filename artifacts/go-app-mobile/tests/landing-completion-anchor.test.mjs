@@ -51,7 +51,7 @@ for(const width of [284,339,354,394])test('two selector rows share a stable card
 });
 async function mountCard({width=354,fontScale=1,feedback='GO conserva tu solicitud. No se han podido confirmar todos los avisos del teléfono',error='',visible=true}={}){
  let props=[];const host=name=>p=>{props.push({...p,native:name});if(name==='Modal'&&!p.visible)return null;return React.createElement('div',{},p.children)};
- const native={...rn,PixelRatio:{getFontScale:()=>fontScale},KeyboardAvoidingView:host('KeyboardAvoidingView'),Modal:host('Modal'),View:host('View'),Text:host('Text'),ScrollView:host('ScrollView'),TextInput:host('TextInput'),Switch:host('Switch'),TouchableOpacity:host('TouchableOpacity')};
+ const native={...rn,PanResponder:{create:h=>({panHandlers:{onMoveShouldSetResponder:h.onMoveShouldSetPanResponder,onResponderRelease:h.onPanResponderRelease}})},PixelRatio:{getFontScale:()=>fontScale},KeyboardAvoidingView:host('KeyboardAvoidingView'),Modal:host('Modal'),View:host('View'),Text:host('Text'),ScrollView:host('ScrollView'),TextInput:host('TextInput'),Switch:host('Switch'),TouchableOpacity:host('TouchableOpacity')};
  const core=evaluate('lib/goActionCompletion.ts'),ui=evaluate('components/landing/LandingActionCompletion.tsx',{'react-native':native,'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:59,bottom:34,left:0,right:0})},'@/components/ui/GoCloseButton':{GoCloseButton:host('GoCloseButton')},'@/lib/goActionCompletion':core});
  const entries=[{id:'a',notes:'Acción real',dateISO:'2026-11-20',time:'10:00'},{id:'b',notes:'Segunda acción',dateISO:'2026-11-21',time:'11:00'}],calls=[];
  const model={scope:{userId:'a',context:'demo:USER'},doc:{preferences:{defaultDurationMinutes:60,reminderMinutes:1440,pendingAlerts:true},records:{}},unresolved:entries,pending:[],selected:'a',savingCount:0,failedDecisions:[],feedback,error,setSelected:id=>calls.push(['selected',id]),decide:(e,s)=>calls.push([s,e.id]),isSaving:()=>false};
@@ -64,9 +64,9 @@ for(const width of [284,339,354,394])for(const fontScale of [1,1.3,2])test('comp
   assert.deepEqual(buttons.map(p=>p.accessibilityLabel),['PROPONER CAMBIO','PENDIENTE','REALIZADO']);
   assert.ok(buttons.every(p=>p.style.height>=44&&p.style.height<=72));assert.ok(buttons.reduce((n,p)=>n+p.style.width,16)<=width);
   for(const b of buttons)await React.act(()=>b.onPress());assert.deepEqual(f.calls,[['change','a'],['pending','a'],['done','a']]);
-  assert.match(f.container.textContent,/1 \/ 2/);assert.doesNotMatch(f.container.textContent,/Confirma tus acciones|GO conserva|permisos|capacidad de notificaciones/);
+  assert.match(f.container.textContent,/1º/);assert.doesNotMatch(f.container.textContent,/Confirma tus acciones|GO conserva|permisos|capacidad de notificaciones/);
   const card=f.props.find(p=>p.testID==='completion-inline-card');assert.equal(card.style.maxHeight,450);assert.equal(card.style.height,undefined,'short content uses intrinsic height');
-  const details=f.props.find(p=>p.testID==='completion-action-details');assert.ok(details.style.height>=60,"stable entry area while paging");
+  const details=f.props.find(p=>p.testID==='completion-action-details');assert.equal(details.style.height,undefined);assert.ok(details.style.maxHeight>=80);
  }finally{await f.close()}
 });
 test('real persistence errors remain visible and a closed panel renders no controls',async()=>{
@@ -115,4 +115,16 @@ test('relocated ACCIONES remains inside its native hit-testing parent and keeps 
   const parent=hosts.find(p=>p.testID==='landing-panel-commands').style,button=hosts.find(p=>p.testID==='landing-command-actions');
   assert.ok(parent.top+parent.height>=504);assert.ok(parent.left<=25);assert.equal(button.style.height,44);await React.act(()=>button.onPress());assert.equal(pressed,1);
  }finally{await React.act(()=>root.unmount())}
+});
+
+test('actions swipe uses the existing horizontal thresholds and selects the next real entry',async()=>{
+ const f=await mountCard();try{
+  const c=f.props.find(p=>p.testID==='action-completion-controls');
+  assert.equal(c.onMoveShouldSetResponder(null,{dx:5,dy:0}),false);
+  assert.equal(c.onMoveShouldSetResponder(null,{dx:25,dy:30}),false);
+  assert.equal(c.onMoveShouldSetResponder(null,{dx:-25,dy:1}),true);
+  await React.act(()=>c.onResponderRelease(null,{dx:-25,dy:1}));assert.deepEqual(f.calls,[['selected','b']]);
+  const pending=f.props.find(p=>p.accessibilityLabel==='PENDIENTE'),change=f.props.find(p=>p.accessibilityLabel==='PROPONER CAMBIO');
+  assert.equal(pending.children.props.style.color,'#ffffff');assert.equal(change.style.backgroundColor,'#C25300');
+ }finally{await f.close()}
 });

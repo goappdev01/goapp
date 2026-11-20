@@ -1,6 +1,6 @@
-import React,{useEffect,useState} from "react";
+import React,{useEffect,useState,useRef} from "react";
 import {useSafeAreaInsets} from "react-native-safe-area-context";
-import {KeyboardAvoidingView,Modal,PixelRatio,Platform,ScrollView,Switch,Text,TextInput,TouchableOpacity,View} from "react-native";
+import {PanResponder,KeyboardAvoidingView,Modal,PixelRatio,Platform,ScrollView,Switch,Text,TextInput,TouchableOpacity,View} from "react-native";
 import type {useActionCompletion} from "@/hooks/useActionCompletion";
 import type {CompletionEntry} from "@/lib/goActionCompletion";
 import {GoCloseButton} from "@/components/ui/GoCloseButton";
@@ -54,6 +54,11 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
  useEffect(()=>{if(model.selected && model.pending.some(e=>e.id===model.selected))setTab("pending");},[model.selected]);
  useEffect(()=>{if(model.doc){setDuration(String(model.doc.preferences.defaultDurationMinutes));setHours(String(model.doc.preferences.reminderMinutes/60));}},[model.doc?.preferences]);
  useEffect(()=>{if(entry && model.doc)setActionHours(String((model.doc.records[completionKey(entry)]?.reminderMinutes ?? model.doc.preferences.reminderMinutes)/60));},[entry?.id,model.doc]);
+ const navigationRef=useRef({rows,index,select:model.setSelected});navigationRef.current={rows,index,select:model.setSelected};
+ const [swipe]=useState(()=>PanResponder?.create?.({
+  onMoveShouldSetPanResponder:(_e,g)=>navigationRef.current.rows.length>1&&Math.abs(g.dx)>8&&Math.abs(g.dx)>Math.abs(g.dy)*1.4,
+  onPanResponderRelease:(_e,g)=>{const n=navigationRef.current;const next=n.index+(g.dx < -20?1:g.dx>20?-1:0);if(next!==n.index&&next>=0&&next<n.rows.length)n.select(n.rows[next].id);}
+ }));
  if(visible===false)return null;
  const document=model.doc;
  const position=anchorAbove?{bottom:"100%" as const,marginBottom:LANDING_COMPLETION_PANEL_GAP}:{top:frame.y};
@@ -68,19 +73,23 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
  const {side,gap:decisionGap,height:decisionHeight}=completionDecisionLayout(expanded?modalWidth-26:frame.width-18,fontScale);
  const card={backgroundColor:"#0e1624",borderColor:"rgba(251,146,60,0.48)",borderWidth:1,borderRadius:18};
  const button={minHeight:44,paddingHorizontal:8,justifyContent:"center" as const,flexShrink:1};
- const arrow={...button,width:44,flexShrink:0,alignItems:"center" as const,borderRadius:12,borderWidth:1,borderColor:"#43536a",backgroundColor:"#1e293b",opacity:rows.length<2?0.35:1};
  const text={color:"#ffffff",fontSize:12,fontWeight:"700" as const};
- const controls=(showSettings=false)=> <View testID="action-completion-controls" style={{gap:6}}>
+ const controls=(showSettings=false)=> <View testID="action-completion-controls" {...swipe?.panHandlers} style={{gap:6}}>
   <View style={{flexDirection:"row",alignItems:"center",justifyContent:"space-between",gap:4}}>
    <TouchableOpacity style={button} onPress={()=>setTab("unresolved")}><Text style={{...text,color:tab==="unresolved"?"#ffffff":"#aeb7c6"}}>{label("Por confirmar","To confirm")} · {model.unresolved.length}</Text></TouchableOpacity>
    <TouchableOpacity style={button} onPress={()=>setTab("pending")}><Text style={{...text,color:tab==="pending"?"#facc15":"#aeb7c6"}}>{label("Pendientes","Pending")} · {model.pending.length}</Text></TouchableOpacity>
+   <View testID="completion-pagination" style={{flexDirection:"row",alignItems:"center"}}>
+    <Text testID="completion-counter" accessibilityLabel={(index+1)+" / "+rows.length} style={{color:"#fff",fontSize:11}}>{index+1}º</Text>
+    <TouchableOpacity accessibilityLabel={label("Acción anterior","Previous action")} disabled={index===0} onPress={()=>model.setSelected(rows[index-1].id)} style={{minHeight:44,width:22,alignItems:"center",justifyContent:"center",opacity:index===0?0.3:1}}><Text style={text}>‹</Text></TouchableOpacity>
+    <TouchableOpacity accessibilityLabel={label("Acción siguiente","Next action")} disabled={index>=rows.length-1} onPress={()=>model.setSelected(rows[index+1].id)} style={{minHeight:44,width:22,alignItems:"center",justifyContent:"center",opacity:index>=rows.length-1?0.3:1}}><Text style={text}>›</Text></TouchableOpacity>
+   </View>
   </View>
-  {entry?<><ScrollView key={entry.id} testID="completion-action-details" nestedScrollEnabled bounces={false} style={{height:Math.round(60*fontScale),flexGrow:0,flexShrink:0}} contentContainerStyle={{gap:4}}>
+  {entry?<><ScrollView key={entry.id} testID="completion-action-details" nestedScrollEnabled bounces={false} style={{maxHeight:Math.round(80*fontScale),flexGrow:0,flexShrink:0}} contentContainerStyle={{gap:4}}>
     <Text testID="completion-action-identity" style={{...text,fontSize:13,lineHeight:18}}>{entry.notes || entry.intentLabel || label("Acción","Action")}{entry.contactName?" · "+entry.contactName:""}</Text>
     <Text style={{color:"#cbd5e1",fontSize:12,lineHeight:17}}>{entry.dateISO} · {entry.time}{entry.professionalName?" · "+entry.professionalName:""}</Text>
    </ScrollView>
    <View style={{flexDirection:"row",justifyContent:"space-between",gap:decisionGap}}>
-    {([{status:"change",color:"#ef9c5c",background:"#ae4d13",ink:"#ffffff",es:"PROPONER\nCAMBIO",en:"PROPOSE\nCHANGE"}, {status:"pending",color:"#f2ce6c",background:"#e6b83d",ink:"#241b07",es:"PENDIENTE",en:"PENDING"}, {status:"done",color:"#43b77a",background:"#167346",ink:"#ffffff",es:"REALIZADO",en:"DONE"}] as const).map(action=><TouchableOpacity key={action.status}
+    {([{status:"change",color:"#ef9c5c",background:"#C25300",ink:"#ffffff",es:"PROPONER\nCAMBIO",en:"PROPOSE\nCHANGE"}, {status:"pending",color:"#f2ce6c",background:"#927000",ink:"#ffffff",es:"PENDIENTE",en:"PENDING"}, {status:"done",color:"#43b77a",background:"#167346",ink:"#ffffff",es:"REALIZADO",en:"DONE"}] as const).map(action=><TouchableOpacity key={action.status}
       accessibilityRole="button" accessibilityLabel={(en?action.en:action.es).replace("\n"," ")} disabled={model.isSaving?.(entry) ?? false}
       onPress={()=>{if(action.status==="change"){setExpanded(false);onPropose(entry);}else void model.decide(entry,action.status);}}
       style={{width:side,height:decisionHeight,minWidth:44,minHeight:44,borderRadius:14,borderWidth:1,borderColor:action.color,
@@ -88,11 +97,7 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
       <Text numberOfLines={action.status==="change"?2:1} adjustsFontSizeToFit minimumFontScale={0.85} style={{width:"100%",color:action.ink,fontSize:12,fontWeight:"700",textAlign:"center"}}>{en?action.en:action.es}</Text>
      </TouchableOpacity>)}
    </View>
-   <View testID="completion-pagination" style={{flexDirection:"row",alignItems:"center",justifyContent:"space-between",gap:8}}>
-    <TouchableOpacity style={arrow} accessibilityRole="button" accessibilityLabel={label("Acción anterior","Previous action")} disabled={rows.length<2} onPress={()=>model.setSelected(rows[(index+rows.length-1)%rows.length].id)}><Text style={{...text,fontSize:24,lineHeight:28}}>‹</Text></TouchableOpacity>
-    <Text testID="completion-counter" style={{color:"#f8fafc",fontSize:12,fontWeight:"700",fontVariant:["tabular-nums"],textAlign:"center",backgroundColor:"#26354b",borderWidth:1,borderColor:"#566b88",borderRadius:10,paddingHorizontal:12,paddingVertical:6,flexShrink:1}}>{index+1} / {rows.length}</Text>
-    <TouchableOpacity style={arrow} accessibilityRole="button" accessibilityLabel={label("Acción siguiente","Next action")} disabled={rows.length<2} onPress={()=>model.setSelected(rows[(index+1)%rows.length].id)}><Text style={{...text,fontSize:24,lineHeight:28}}>›</Text></TouchableOpacity>
-   </View>
+
   </>:<Text style={text}>{label("No hay acciones en este grupo.","No actions in this group.")}</Text>}
   <View style={{flexDirection:"row",justifyContent:"space-between"}}>
    <TouchableOpacity style={button} onPress={()=>{if(visible!==undefined){setSettings(true);setExpanded(true);}else{setSettings(!settings);if(compact)setExpanded(true);}}}><Text style={text}>{label("Recordatorios y duración","Reminders and duration")}</Text></TouchableOpacity>
