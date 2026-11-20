@@ -14230,7 +14230,10 @@ function HomeScreenContent() {
     satellites: visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface)
       .filter(key => key !== "payment").map(key => ({ key, degrees: LANDING_SATELLITE_DEGREES[key] })),
     helpSize: microSz, alignment: landingAlignment,
-    obstacles: [...supportObstacles.slice(((landingArrangement as {obstacles?:HumanityRect[]}).obstacles ?? landingOrbitObstacles.slice(1)).length),
+    // Only painted controls constrain the orbit. Legacy information/selector rectangles
+    // are laid out AFTER this footprint and must not push it upwards.
+    obstacles: [...closeHeaderObstacles,
+      ...(landingInlineHumanity ? [inlineHumanityRect] : []),
       { x: landingControlHand === "left" ? compactLandingBounds.right - 8 - closeQrSize - 2 * closeQrHit : compactLandingBounds.left + 8,
         y: compactLandingBounds.bottom - closeQrSize - 2 * closeQrHit,
         width: closeQrSize + 2 * closeQrHit, height: closeQrSize + 2 * closeQrHit }],
@@ -15011,6 +15014,7 @@ function HomeScreenContent() {
               ...panelSideStyle,
               width: PANEL_W,
               bottom: contentBottom(panelBottom),
+              height: changesCardSpace.availableHeight,
               zIndex: 6,
               gap: Math.round(4 * uiScaleFactor),
               ...(item.kind === "cambio" ? { paddingBottom: Math.round(LANDING_ENTRY_FRAME.bottomGap * uiScaleFactor) } : {}),
@@ -15265,6 +15269,7 @@ function HomeScreenContent() {
               bottom: contentBottom(landingFrame.virtual
                 ? landingFrame.baseline + landingFrame.height - landingDisplayPanels.next.y - landingDisplayPanels.next.height
                 : screen.height - landingDisplayPanels.next.y - landingDisplayPanels.next.height),
+              height: nextCardAvailableHeight,
               zIndex: 5,
               ...(entryIsReservation(g) ? { paddingBottom: Math.round(LANDING_VISIT_FRAME.bottomGap * uiScaleFactor) } : {}),
               ...(entryIsInternal(g) ? { paddingBottom: Math.round(LANDING_ENTRY_FRAME.bottomGap * uiScaleFactor) } : {}),
