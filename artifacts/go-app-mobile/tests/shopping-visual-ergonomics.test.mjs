@@ -12,23 +12,23 @@ test('shortcut reflow uses measured full labels and whole words, without shrinki
 for(const hand of ['left','right'])test(`Landing ${hand}: vertical existing navigator shares the lower dock; measured labels retain complete words`,async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false,handedness:hand,width:390,fontScale:1.4});
-  const nav=ui.hosts.get('shopping-navigation-frame');assert.equal(nav.width,64);assert.equal(nav.height,136);assert.equal(nav.initialBottom,0);assert.equal(nav.handedness,hand);
+  const nav=ui.hosts.get('shopping-navigation-frame');assert.equal(nav.width,64);assert.equal(nav.height,136);assert.equal(nav.initialBottom,132);assert.equal(nav.handedness,hand);
   assert.equal(ui.hosts.get('shopping-floating-buttons').style.flexDirection,'column');
-  assert.equal(style(ui.hosts.get('shopping-thumb-controls').style).flexDirection,hand==='left'?'row-reverse':'row');
+  assert.equal(style(ui.hosts.get('shopping-thumb-controls').style).flexDirection,undefined);
   assert.equal(ui.hosts.get('shopping-navigation-row').style[1].minHeight,0,'no extra row elevates the orbits to make room for navigation');
   await ui.run(()=>{for(const [key,width] of Object.entries({search:140,lists:70,searchWord:80,listWord:38}))ui.hosts.get('shopping-label-measure-'+key).onTextLayout({nativeEvent:{lines:[{width}]}});});
-  assert.equal(ui.hosts.get('shopping-search-label').children,'Buscar\nproductos');assert.equal(ui.hosts.get('shopping-lists-label').children,'Mis listas');
-  assert.equal(ui.hosts.get('shopping-search-label').adjustsFontSizeToFit,undefined);
+  assert.equal(ui.hosts.get('shopping-search-label').children,'Buscar productos');assert.equal(ui.hosts.get('shopping-lists-label').children,'Mis listas');
+  assert.equal(ui.hosts.get('shopping-search-label').minimumFontScale,.85);
   await ui.tap('shopping-search-open');assert.equal(ui.hosts.get('shopping-floating-buttons').style.flexDirection,hand==='left'?'row-reverse':'row','product selector retains its existing horizontal navigation');
   await ui.tap('shopping-back');await ui.tap('shopping-manage-lists');assert.ok(ui.hosts.has('shopping-list-create'));
  }finally{await ui?.close();f.disk.close();}
 });
 
-test('narrow iPhone and enlarged measured words switch shortcuts to a clean single column',async()=>{
+test('narrow iPhone keeps its two shortcuts in one row with icons above whole-word labels',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false,width:320,fontScale:1.8});
   await ui.run(()=>{for(const [key,width] of Object.entries({search:210,lists:120,searchWord:120,listWord:60}))ui.hosts.get('shopping-label-measure-'+key).onTextLayout({nativeEvent:{lines:[{width}]}});});
-  assert.equal(style(ui.hosts.get('shopping-shortcut-row').style).flexDirection,'column');assert.equal(style(ui.hosts.get('shopping-search-open').style).flexBasis,'auto');
+  assert.equal(style(ui.hosts.get('shopping-shortcut-row').style).flexDirection,'row');assert.equal(style(ui.hosts.get('shopping-search-open').style).flexDirection,'column');
   assert.equal(ui.hosts.get('shopping-search-label').children,'Buscar\nproductos');assert.ok(style(ui.hosts.get('shopping-search-open').style).minHeight>=44);
  }finally{await ui?.close();f.disk.close();}
 });
@@ -64,7 +64,7 @@ test('short landscape viewport clips the orbital bounds before checking floating
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false,width:844,height:390});
   ui.geometry.set('shopping-layout-frame',[0,0,844,390]);ui.geometry.set('shopping-add-screen',[0,100,844,130]);
-  ui.geometry.set('shopping-eight-orbits',[352,100,480,480]);ui.geometry.set('shopping-list-viewport',[0,0,0,0]);
+  ui.geometry.set('shopping-eight-orbits',[352,100,480,480]);ui.geometry.set('shopping-orbit-other',[352,100,90,480]);ui.geometry.set('shopping-list-viewport',[0,0,0,0]);
   await ui.run(()=>ui.hosts.get('shopping-add-screen').onLayout());
   assert.ok(ui.hosts.get('shopping-navigation-frame').avoidRects.some(rect=>rect.x===352&&rect.y===8&&rect.height===130));
  }finally{await ui?.close();f.disk.close();}

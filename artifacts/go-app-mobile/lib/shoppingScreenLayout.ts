@@ -6,6 +6,21 @@ export function initialShoppingShortcutText(fontScale:number):ShoppingShortcutTe
   return {search:16*glyph,lists:10*glyph,searchWord:9*glyph,listWord:6*glyph};
 }
 
+export type ShoppingLandingText=ShoppingShortcutText&{actionList:number;actionAdd:number};
+export function initialShoppingLandingText(fontScale:number):ShoppingLandingText{
+  return {...initialShoppingShortcutText(fontScale),actionList:5*14*.65*fontScale,actionAdd:6*14*.65*fontScale};
+}
+
+/** Two full-width rows. Move icons above labels before squeezing their words. */
+export function shoppingLandingRows(width:number,text:ShoppingLandingText){
+  const half=Math.max(44,(width-5)/2),shortcutIconAbove=Math.max(text.searchWord,text.listWord)+35>half;
+  const decoration=shortcutIconAbove?12:35;
+  const actionWidth=Math.max(44,(width-68-14)/2);
+  return {shortcutIconAbove,searchLines:text.search+decoration<=half?1:2,
+    listLines:text.lists+decoration<=half?1:2,
+    actionsIconAbove:Math.max(text.actionList,text.actionAdd)+21+5+16>actionWidth};
+}
+
 /** Reserve the existing icon, padding and gap, then keep complete words legible. */
 export function shoppingShortcutLayout(width:number,text:ShoppingShortcutText){
   const decoration=18+5+12,half=Math.max(0,(width-8)/2);

@@ -202,3 +202,32 @@ Las pruebas de interfaz usan adaptadores nativos y geometría controlada; no son
 una validación visual ni de hit-testing en iPhone. La voz se comprueba como
 conexión al callback existente, sin simular una transcripción física exitosa.
 Queda la comprobación física del propietario. 8089 y servicios externos intactos.
+
+CONTINUACIÓN — dos filas completas en el Landing, flotantes sin columna reservada
+-------------------------------------------------------------------------------
+Base: origin/main 28878999f846455a3deab668d813fedb14250c49.
+Causa verificada: el overlay vertical aún tenía un espaciador de 64 × 136 dentro
+del pie. Esa columna estrechaba ambas filas y el flex-wrap permitía aislar Añadir.
+
+Se elimina ese espaciador SOLO en el Landing. Buscar productos/Mis listas usan
+una fila completa; Lista/GO/Añadir usan otra completa con flex-wrap desactivado.
+Los dos botones laterales de acción son flexibles y conservan un mínimo táctil
+de 44; GO mantiene sus dimensiones. Las medidas nativas de etiquetas deciden si
+conviene poner el icono arriba, manteniendo todos los botones en sus filas y sin
+partir palabras. El ajuste tipográfico eventual está limitado al 85 %.
+
+ATRÁS/X siguen en columna mediante GoNavigationFloating, fuera del flujo.
+El anclaje inicial descuenta la altura MEDIDA de las dos filas; las preferencias
+elegidas, claves y mecanismo común de recolocación temporal no se modifican.
+Se protegen los nueve controles orbitales medidos, incluido OTROS y el GO central,
+en vez del rectángulo que también contenía decoración. Sus bounds se siguen
+recortando al viewport. Ambas filas completas son obstáculos para los flotantes.
+No se cambian radios, puntos orbitales ni se aplica traslación a las órbitas.
+
+Las otras pantallas mantienen su distribución anterior. No cambia ningún dato,
+modelo, gesto de producto, precio, categoría, favorito, IA o almacenamiento.
+24 pruebas dirigidas pasan (8 nuevas, 7 del pie y 9 de ergonomía), con controles,
+navegación y lateralidad a 320/390/430 puntos y texto ampliado. TypeScript y
+git diff --check correctos. Son pruebas con adaptadores y medidas controladas:
+no certifican la interacción táctil real ni la posición física exacta del iPhone.
+Se verifica el bundle iOS de 8088 tras publicar; SHA en la entrega. 8089 intacto.
