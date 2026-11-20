@@ -20382,7 +20382,11 @@ function HomeScreenContent() {
               style={{ zIndex: 20, opacity: showBookingFromCal ? 0 : 1, paddingTop: insets.top, paddingLeft: Math.max(insets.left + 8, 8), paddingRight: Math.max(insets.right + 8, 8), gap: 4, paddingBottom: 0, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
             >
               <View style={{ flexDirection: "row", alignItems: "center", flexShrink: 0 }}><GoCalendarViewSelector compact value={calBgViewMode} onChange={changeCalendarView} />{demoBookingRepository && <TouchableOpacity accessibilityRole="button" testID="customer-calendar-shortcut" accessibilityLabel={lang === "en" ? "Customer calendar" : "Calendario cliente"} onPress={event => { event.stopPropagation(); setCalQuickCreateOpen(false); setCalPanelOpen(false); closeMonthGrid(); setDemoCustomerCalendarSelected(true); }} style={{paddingHorizontal:2,paddingVertical:8,width:44,minHeight:44,justifyContent:"center"}}><Feather name="calendar" size={14} color="#ff7474" /></TouchableOpacity>}</View>
-              <View style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center" }}>{monthNavigation}</View>
+              <View testID="calendar-header-center" style={{ flex: 1, minWidth: 0, flexDirection: "row", flexWrap:"wrap", alignItems: "center",justifyContent:"center",gap:4 }}>              {goView.view === "ADMIN" && adminAccess.allowed && !adminAccess.checking && <TouchableOpacity
+                testID="calendar-admin-board" accessibilityRole="button" accessibilityLabel="Tablero" onPress={() => setBoardsOpen(true)}
+                style={{ minHeight: 44, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: "#a78bfa", justifyContent: "center" }}>
+                <Text style={{ color: "#ffffff", fontSize: 12 }}>Tablero</Text>
+              </TouchableOpacity>}{monthNavigation}</View>
               {renderCalendarToolsToggle()}
             </View>)}
                 goLog={goLog.filter((e: any) => {
@@ -20607,12 +20611,8 @@ function HomeScreenContent() {
             )}
             {/* Acciones principales: Nueva tarea · HOY · RESERVAR · GO */}
             <View testID="calendar-actions" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingHorizontal: 2, paddingTop: 2, marginBottom: 0 }}>
-              {goView.view === "ADMIN" && adminAccess.allowed && !adminAccess.checking && <TouchableOpacity
-                accessibilityRole="button" accessibilityLabel="Tablero" onPress={() => setBoardsOpen(true)}
-                style={{ minHeight: 44, paddingHorizontal: 10, borderRadius: 12, borderWidth: 1, borderColor: "#a78bfa", justifyContent: "center" }}>
-                <Text style={{ color: "#ffffff", fontSize: 12 }}>Tablero</Text>
-              </TouchableOpacity>}
-              {/* Keep reservation and AI together; only the existing ADMIN shortcut may wrap. */}
+
+              {/* Keep reservation and AI together; the ADMIN shortcut lives in the header. */}
               <View testID="calendar-primary-actions" style={{ flexDirection: "row", alignItems: "center", gap: 5, flexGrow: 1, flexBasis: calQuickCreateOpen ? 222 : 271, minWidth: calQuickCreateOpen ? 222 : 271 }}>
               {/* NUEVA TAREA */}
               {!calQuickCreateOpen && (
