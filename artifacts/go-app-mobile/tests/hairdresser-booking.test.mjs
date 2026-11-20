@@ -156,7 +156,7 @@ for(const bookingSource of ['canonical','DEMO'])test(bookingSource+' customer Ca
     mutations.push({operation,input,promise});return promise;
   }},goLog:[],
  };
- const code=['isGoDateTimePast','showBookingChangeError','runCustomerBooking','proposalRepository','confirmBookingDraft','openBookingProposal','dropBookingProposal'].map(name=>'const '+decl(name).getText(ast)+';').join('\n')+'\nexports.propose='+calendarHandler.initializer.expression.getText(ast)+';exports.drop=dropBookingProposal;exports.submit='+all.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='onProposalSubmit').initializer.expression.getText(ast)+';exports.close='+all.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='onClose'&&n.initializer?.expression?.getText(ast).includes('const actor=bookingProposal?.actor')).initializer.expression.getText(ast)+';';
+ const code=['isGoDateTimePast','showBookingChangeError','runCustomerBooking','proposalRepository','persistBookingProposal','confirmBookingDraft','openBookingProposal','dropBookingProposal'].map(name=>'const '+decl(name).getText(ast)+';').join('\n')+'\nexports.propose='+calendarHandler.initializer.expression.getText(ast)+';exports.drop=dropBookingProposal;exports.submit='+all.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='onProposalSubmit').initializer.expression.getText(ast)+';exports.close='+all.find(n=>ts.isJsxAttribute(n)&&n.name.getText(ast)==='onClose'&&n.initializer?.expression?.getText(ast).includes('const actor=bookingProposal?.actor')).initializer.expression.getText(ast)+';';
  vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022}}).outputText,scope);
  const cal=calendarFixture({now:'2030-01-07T08:00:00'}),{AgendaBoard}=cal.load('components/AgendaOperativa.tsx');
  const props={goLog:[entry],viewMode:'dia',selectedDateISO:entry.dateISO,onProposeItem:scope.exports.propose,onDeleteItem:()=>{throw Error('Propose must not cancel the booking')}};
@@ -176,12 +176,20 @@ for(const bookingSource of ['canonical','DEMO'])test(bookingSource+' customer Ca
  assert.deepEqual(calendarStates,[]);assert.equal(mutations.length,0);assert.deepEqual(plain(f.store.getSnapshot()),before);
  scope.exports.close();assert.equal(scope.bookingProposal,null);assert.equal(mutations.length,0);assert.deepEqual(plain(f.store.getSnapshot()),before);
  scope.exports.drop(entry,{dateISO:'2030-01-08',time:'17:30'},'customer');
- assert.equal(scope.bookingProposal.dateISO,'2030-01-08','drag also opens the same services flow');assert.equal(alerts.length,0);
+ assert.equal(scope.bookingProposal,null,'a calendar drop never opens services');assert.equal(alerts.length,1);assert.equal(mutations.length,0);
+ assert.deepEqual(plain(f.store.getSnapshot()),before,'confirmation is required before any proposal');
+ // Cancelling does nothing. A later drop may be confirmed once, without navigation.
+ assert.equal(alerts[0][2][0].style,'cancel');
+ scope.exports.drop(entry,{dateISO:'2030-01-08',time:'17:30'},'customer');
+ alerts[1][2][1].onPress();alerts[1][2][1].onPress();assert.equal(mutations.length,1);
+ await mutations[0].promise;assert.equal(scope.bookingProposal,null);assert.equal(mutations[0].input.time,'17:30');assert.equal(mutations[0].input.selection,undefined);
+ assert.equal(f.store.getSnapshot().bookings[0].startDatetime,booking.startDatetime);
+ scope.exports.propose(entry.id);assert.ok(scope.bookingProposal,'manual Propose change still opens the original full flow');
  const professional=(await f.repo.getStaff(entry.businessId))[1],catalogSnapshot=await f.repo.quoteCatalog(entry.businessId,[f.service.id]);
  const slots=await f.repo.getAllSlots(entry.businessId,f.service.id,'2030-01-08',professional.id);
  const chosen=slots.find(slot=>slot.isAvailable && slot.startDatetime.slice(11,16)==='17:30');assert.ok(chosen);
  await scope.exports.submit({slot:chosen,selection:{serviceIds:[f.service.id],staffId:professional.id,professionalName:professional.name,durationMinutes:30,catalogSnapshot}});
- assert.equal(mutations.length,1);assert.equal(mutations[0].operation,'propose');assert.equal(mutations[0].input.acceptFinancialTerms,true);assert.equal(mutations[0].input.selection.staffId,professional.id);await mutations[0].promise;assert.equal(scope.bookingProposal,null);
+ assert.equal(mutations.length,2);assert.equal(mutations[1].operation,'propose');assert.equal(mutations[1].input.acceptFinancialTerms,true);assert.equal(mutations[1].input.selection.staffId,professional.id);await mutations[1].promise;assert.equal(scope.bookingProposal,null);
  const saved=f.store.getSnapshot().bookings[0];assert.equal(saved.id,booking.id);assert.equal(saved.startDatetime,booking.startDatetime);assert.equal(saved.paymentStatus,booking.paymentStatus);
  assert.equal(saved.changeProposal.time,'17:30');assert.equal(saved.changeProposal.dateISO,'2030-01-08');assert.equal(f.store.getSnapshot().bookings.length,1);
 });

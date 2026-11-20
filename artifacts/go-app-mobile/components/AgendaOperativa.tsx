@@ -1,3 +1,4 @@
+import { traceCalendarDrag } from "./calendarDragDiagnostics";
 import { BookingPhaseAvailability } from "./booking/BookingPhaseAvailability";
 import type { LayoutChangeEvent, ScrollViewInstance, ViewInstance } from "react-native";
 import { useGoCalendarEntries } from "@/hooks/useGoCalendarEntries";
@@ -1429,6 +1430,7 @@ export function AgendaBoard({
     refreshDragMeasurements();
     if (!dragEnabledRef.current || dragItemRef.current) return;
     pendingBookingFocus.current = null;
+    traceCalendarDrag({phase:"start",x,y});
     const pickup = { x, y };
     dragScroll.current.pickup = pickup;
     dragOverlayRef?.current?.measureInWindow((x, y, width, height) => {
@@ -1525,6 +1527,7 @@ export function AgendaBoard({
   updateDragTargetRef.current = updateDragTarget;
 
   const scrollDragColumn = (id: string, offset: number) => {
+    traceCalendarDrag({phase:"request",requested:offset,confirmed:colScrollY.current[id],contentHeight:colContentH.current[id],viewportHeight:colScrollViewH.current[id]});
     const previous=dragScroll.current.verticalCommands.get(id) ?? colScrollY.current[id] ?? 0;
     if(offset!==previous) dragScroll.current.verticalDirections.set(id,Math.sign(offset-previous));
     dragScroll.current.verticalCommands.set(id, offset);
@@ -1558,6 +1561,7 @@ export function AgendaBoard({
   };
   const getDragEdges = (point: DragPoint): { day?: number; vertical?: number; horizontal?: number; id?: string; max?: number } => {
     const bounds = dragBounds();
+    if(dragItemRef.current)traceCalendarDrag({phase:"edge",x:point.x,y:point.y,top:bounds.top,bottom:bounds.bottom,left:bounds.left,right:bounds.right,enabled:dragEnabledRef.current,overlay:isOverDragOverlay(point)});
     if (!columnsViewportHeight.current || !dragEnabledRef.current || isOverDragOverlay(point) || !Number.isFinite(point.x) || !Number.isFinite(point.y)
       || point.x < bounds.left || point.x >= bounds.right || point.y < bounds.top-12 || point.y >= bounds.bottom+12) return {};
     const { left, right, top, bottom } = bounds;
@@ -1695,6 +1699,7 @@ export function AgendaBoard({
   };
 
   const finishDrag = (restoreViewport: boolean) => {
+    if(dragItemRef.current)traceCalendarDrag({phase:"finish",restored:restoreViewport});
     if (restoreViewport) restoreDragViewport();
     clearEdgeScroll();
     floatOp.value = withTiming(0, { duration: 120 });
@@ -2833,6 +2838,7 @@ export function AgendaBoard({
                 onScroll={event => {
                   const offset = event.nativeEvent.contentOffset.y;
                   const commanded = dragScroll.current.verticalCommands.get(col.id);
+                  if(dragItemRef.current)traceCalendarDrag({phase:"native",nativeOffset:offset,confirmed:colScrollY.current[col.id],requested:commanded,contentHeight:colContentH.current[col.id],viewportHeight:colScrollViewH.current[col.id]});
                   // Integrate requests independently; the clock follows only
                   // confirmed native offsets. Delayed echoes cannot rewind them.
                   if (commanded !== undefined && dragItemRef.current) {

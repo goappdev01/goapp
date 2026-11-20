@@ -7874,15 +7874,8 @@ function HomeScreenContent() {
     const store=ownerDemo.catalog?.getStores().find(store=>store.businessId===entry.businessId);
     return store?createDemoBookingRepository(store):demoBookingRepository;
   };
-  const confirmBookingDraft = async (entry:GoEntry,draft:BookingProposalDraft,actor:"customer"|"business"="customer") => {
-    const original=(actor==="customer"?customerBookings.bookings:ownerDemo.demo?.getSnapshot().bookings ?? [])
-      .find(booking=>booking.id===entry.bookingId || booking.id===entry.reservationId);
-    const context=bookingChangeSelection(entry,original);
+  const persistBookingProposal = async (entry:GoEntry,input:Parameters<typeof customerBookings.mutate>[2],actor:"customer"|"business") => {
     const repository=proposalRepository(entry,actor);
-
-    const input={dateISO:draft.slot.startDatetime.slice(0,10),date:draft.slot.startDatetime.slice(0,10),time:draft.slot.startDatetime.slice(11,16),
-      startsAt:draft.slot.startInstant,acceptFinancialTerms:true,
-      ...(!timeOnlyBookingProposal(context,draft)?{selection:draft.selection}:{})};
     if(actor==="customer")await customerBookings.mutate(entry as CustomerBookingEntry,"propose",input);
     else if(repository && bookingContextRef.current.view==="BUSINESS" && bookingContextRef.current.businessId===entry.businessId)
       await repository.changeBooking(String(entry.reservationId),String(entry.businessId),"business","propose",input);
@@ -7890,6 +7883,16 @@ function HomeScreenContent() {
       await negotiateRealBooking(String(entry.reservationId),"propose",{...input,expectedRevision:entry.bookingChangeRevision??0,proposalId:entry.changeProposal?.id},entry.ownerUserId);
     else throw Error(lang==="en"?"The company context changed.":"Ha cambiado el contexto de empresa.");
     showToast(lang==="en"?"Proposal saved":"Propuesta guardada","success");
+  };
+  const confirmBookingDraft = async (entry:GoEntry,draft:BookingProposalDraft,actor:"customer"|"business"="customer") => {
+    const original=(actor==="customer"?customerBookings.bookings:ownerDemo.demo?.getSnapshot().bookings ?? [])
+      .find(booking=>booking.id===entry.bookingId || booking.id===entry.reservationId);
+    const context=bookingChangeSelection(entry,original);
+
+    const input={dateISO:draft.slot.startDatetime.slice(0,10),date:draft.slot.startDatetime.slice(0,10),time:draft.slot.startDatetime.slice(11,16),
+      startsAt:draft.slot.startInstant,acceptFinancialTerms:true,
+      ...(!timeOnlyBookingProposal(context,draft)?{selection:draft.selection}:{})};
+    await persistBookingProposal(entry,input,actor);
   };
   const openBookingProposal = (entry:GoEntry,actor:"customer"|"business"="customer",initial?:{dateISO:string;time:string}) => {
     const open=()=>{
@@ -7905,7 +7908,18 @@ function HomeScreenContent() {
     if(actor==="business"){bookingReturnDateRef.current=entry.dateISO;setEmpresaOpen(false);setTimeout(open,350);}else open();
   };
   const dropBookingProposal = (entry:GoEntry, destination:{dateISO:string;time:string}, actor:"customer"|"business") => {
-    openBookingProposal(entry,actor,destination);
+    // Dropping already chose the date/time. Only the explicit "Propose change"
+    // action opens the services flow; a drop stays inside the calendar.
+    let submitted=false;
+    Alert.alert(lang==="en"?"Confirm change proposal":"Confirmar propuesta de cambio",
+      destination.dateISO+" · "+destination.time+"\n"+(lang==="en"?"The original reservation remains unchanged until agreement.":"La reserva original se mantiene hasta el acuerdo."),[
+      {text:lang==="en"?"Cancel":"Cancelar",style:"cancel"},
+      {text:lang==="en"?"Confirm proposal":"Confirmar propuesta",onPress:()=>{
+        if(submitted)return;submitted=true;
+        void persistBookingProposal(entry,{dateISO:destination.dateISO,date:destination.dateISO,time:destination.time,acceptFinancialTerms:true},actor)
+          .catch(error=>showBookingChangeError(error));
+      }},
+    ]);
   };
   const respondCustomerBooking = (entry:CustomerBookingEntry,operation:"accept"|"reject") => {
     const proposal=entry.changeProposal as import("@/data/booking").BookingChangeProposal|undefined;if(!proposal)return;
