@@ -317,3 +317,14 @@ test('column transitions do not build booking/render console payloads during a h
  assert.equal(labels.filter(label=>label==='[CALENDAR_RENDER_ITEMS]'||label==='[BOOKING_CARD_SOURCE]').length,0,'booking/render diagnostic objects must stay out of the active render path');
  gesture._onFinalize(finger(185,405),false);f.render();assert.ok(labels.includes('[CALENDAR_RENDER_ITEMS]'),'normal diagnostic behavior is retained outside a drag');
 });
+
+for(const y of [305,715])for(const direction of [-1,1])test('week lateral travel stays continuous across days at vertical edge/'+y+'/'+direction,()=>{
+ const f=setup({nativeTop:300});
+ for(let i=1;i<=5;i++)f.attachDay('day_2027-01-0'+(i+1),'2027-01-0'+(i+1),10+i*186,176,i%2?640:f.day.max);
+ const initial=direction<0?600:0;f.rowScroll.props.onScroll(scrollEvent({x:initial}));
+ const gesture=f.pan(),edge=finger(direction<0?20:370,y);
+ gesture._onStart(finger(105,480));gesture._onUpdate(edge);f.app.runFrame(0);
+ for(let ms=16;ms<=768;ms+=16){f.app.runFrame(ms);assert.equal(f.horizontal.length,ms/16,'lateral movement cannot yield to the vertical edge or pause on a new day');assert.ok(Math.abs(f.horizontal.at(-1).x-(initial+direction*600*ms/1000))<.001);}
+ gesture._onUpdate(finger(195,480));const count=f.horizontal.length;f.app.runFrame(800);assert.equal(f.horizontal.length,count,'leaving the side stops lateral motion');
+ gesture._onFinalize(finger(195,480),false);assert.equal(f.app.frameCount(),0);
+});

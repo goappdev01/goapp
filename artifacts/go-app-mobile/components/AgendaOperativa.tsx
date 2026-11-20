@@ -1595,7 +1595,7 @@ export function AgendaBoard({
     if(bottom<=top)return null;
     return {x:point.x,y:Math.max(top,Math.min(bottom-.001,point.y))};
   };
-  const getDragEdges = (point: DragPoint): { day?: number; vertical?: number; horizontal?: number; id?: string; max?: number } => {
+  const getDragEdges = (point: DragPoint): { day?: number; vertical?: number; horizontal?: number; horizontalMax?: number; id?: string; max?: number } => {
     const bounds = dragBounds();
     const targetPoint=dragGridPoint(point,bounds);
     if(dragItemRef.current)traceCalendarDrag({phase:"edge",x:point.x,y:point.y,targetY:targetPoint?.y,targetable:!!targetPoint,top:bounds.top,bottom:bounds.bottom,left:bounds.left,right:bounds.right,enabled:dragEnabledRef.current,overlay:isOverDragOverlay(point)});
@@ -1610,6 +1610,7 @@ export function AgendaBoard({
     }
     const column = columnAtScreenX(x);
     const viewport = column && dayViewport(column);
+    let verticalEdge: { vertical?: number; id?: string; max?: number } = {};
     if (column && viewport && dragScroll.current.previewOffset === null) {
       const id = column.id;
       const visibleTop = Math.max(top, viewport.top);
@@ -1620,16 +1621,15 @@ export function AgendaBoard({
         if (vertical) {
           const max = Math.max(0, (colContentH.current[id] || 0) - viewport.height);
           const offset = Math.max(0, colScrollY.current[id] || 0);
-          return colScrollRefs.current[id] && (vertical < 0 ? offset > 0 : offset < max)
-            ? { vertical, id, max } : {};
+          if (colScrollRefs.current[id] && (vertical < 0 ? offset > 0 : offset < max)) verticalEdge = { vertical, id, max };
         }
       }
     }
     if (side) {
       const max = Math.max(0, horizontalSize.current.content - horizontalSize.current.viewport);
-      if (scrollViewRef.current && (side < 0 ? scrollX.current > 0 : scrollX.current < max)) return { horizontal: side, max };
+      if (scrollViewRef.current && (side < 0 ? scrollX.current > 0 : scrollX.current < max)) return { ...verticalEdge, horizontal: side, horizontalMax: max };
     }
-    return {};
+    return verticalEdge;
   };
   const previewAdjacentDay = (direction: number) => {
     const { origin, column } = dayPreviewRef.current;
@@ -1688,8 +1688,10 @@ export function AgendaBoard({
       const next = Math.max(0, Math.min(edge.max ?? 0, bounded));
       scrollDragColumn(edge.id, next);
       updateDragTargetRef.current(drag.point.x, drag.point.y);
-    } else if (elapsed > 0 && edge.horizontal) {
-      const next = Math.max(0, Math.min(edge.max ?? 0, scrollX.current + edge.horizontal * DRAG_HORIZONTAL_SPEED * elapsed / 1000));
+    }
+    // A vertical edge must not suspend lateral travel at each day column.
+    if (elapsed > 0 && edge.horizontal) {
+      const next = Math.max(0, Math.min(edge.horizontalMax ?? 0, scrollX.current + edge.horizontal * DRAG_HORIZONTAL_SPEED * Math.min(elapsed, 32) / 1000));
       if (drag.initialX === null) drag.initialX = scrollX.current;
       drag.horizontalCommand = next;
       scrollX.current = next;
