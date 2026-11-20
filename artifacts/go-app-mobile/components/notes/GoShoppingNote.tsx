@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, Keyboard, KeyboardAvoidingView, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View, type TextInputProps } from "react-native";
+import { Alert, Keyboard, KeyboardAvoidingView, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View, type TextInputProps, type ViewInstance } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -49,6 +49,18 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
     : "Compras está disponible en tu perfil personal o en ADMIN.";
   const insets=useSafeAreaInsets(),keyboard=useGoNoteKeyboard(visible);
   const viewport=useWindowDimensions();
+  const frameRef=useRef<ViewInstance>(null),footerRef=useRef<ViewInstance>(null),shortcutsRef=useRef<ViewInstance>(null);
+  const obstacleMeasure=useRef(0);
+  const [navigationObstacles,setNavigationObstacles]=useState<{x:number;y:number;width:number;height:number}[]>([]);
+  const measureNavigationObstacles=()=>{const token=++obstacleMeasure.current;frameRef.current?.measureInWindow((fx,fy)=>{
+    const nodes=[shortcutsRef.current,footerRef.current].filter((node):node is ViewInstance=>!!node);
+    if(!nodes.length)return;
+    const rects:{x:number;y:number;width:number;height:number}[]=[];let remaining=nodes.length;
+    nodes.forEach(node=>node.measureInWindow((x,y,width,height)=>{
+      rects.push({x:x-fx,y:y-fy-insets.top-48,width,height:Math.max(0,height-(node===footerRef.current?76:0))});
+      if(!--remaining&&mounted.current&&token===obstacleMeasure.current)setNavigationObstacles(old=>JSON.stringify(old)===JSON.stringify(rects)?old:rects);
+    }));
+  });};
   const [entry,setEntry]=useState<GoEntry|null>(null),[lists,setLists]=useState<GoEntry[]>([]),[listName,setListName]=useState(""),[error,setError]=useState(""),[restoreId,setRestoreId]=useState<string|null>(null),[loading,setLoading]=useState(false),[busy,setBusy]=useState(false);
   const [filter,setFilter]=useState<ShoppingFilter>("all"),[arrange,setArrange]=useState(false),[dragging,setDragging]=useState(false);
   const [editor,setEditor]=useState<ShoppingEditorDraft|null>(null),[draftStatus,setDraftStatus]=useState(""),[next,setNext]=useState<string[]|null>(null);
@@ -199,6 +211,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
   const withoutPrice=totals.unknown-items.filter(item=>item.selected&&!isShoppingQuantity(item.quantity)).length;
   const originalQuantity=editor?.originalQuantity??(editor?.quantity&&!/^\d+$/.test(editor.quantity)?editor.quantity:undefined);
   const panel=!!editor||!!next||!!legacy||!!utility,adding=screen==="add",listHome=!!doc&&!panel&&!adding,orbitHome=!!doc&&adding&&!panel&&!orbit;
+  useEffect(()=>{measureNavigationObstacles();},[keyboard.visible,viewport.width,viewport.height,viewport.fontScale,handedness,screen,orbit,utility,editor?.id]);
   const orbital=shoppingOrbitLayout(viewport.width-insets.left-insets.right,viewport.fontScale),route=doc?shoppingRoute(doc):undefined;
   const displayTotal=(v:typeof totals)=>Object.entries(v.totals).map(([currency,value])=>money(value,currency)).join(" + ")||"0,00 €";
   const confirmRestore=()=>{
@@ -221,7 +234,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
   async function newList(name:string){if(!scope)return;try{const row=await createShoppingList(scope,()=>latest.current.visible&&latest.current.ready&&latest.current.identity===identity,name);setEntry(row);setListName("");setScreen("add");setOrbit(null);setUtility(null);setError("");setRestoreId(null);await refreshLists();}catch(e){setError((e as Error).message);}}
   if(!visible)return null;
   return <GoScreenModal visible animationType="slide" onRequestClose={back}>
-    <GestureHandlerRootView style={s.root}><KeyboardAvoidingView behavior={Platform.OS==="ios"?"padding":"height"} style={[s.root,{paddingTop:insets.top,paddingBottom:Math.max(8,insets.bottom),paddingHorizontal:Math.max(insets.left,insets.right)}]}>
+    <GestureHandlerRootView style={s.root}><View testID="shopping-layout-frame" ref={frameRef} collapsable={false} style={s.root} onLayout={measureNavigationObstacles}><KeyboardAvoidingView behavior={Platform.OS==="ios"?"padding":"height"} style={[s.root,{paddingTop:insets.top,paddingBottom:Math.max(8,insets.bottom),paddingHorizontal:Math.max(insets.left,insets.right)}]}>
       <View style={[s.header,listHome&&s.listHeader,orbitHome&&s.orbitHeader,!!editor&&{display:"none"}]}>
         {listHome?<><View testID="shopping-live-totals" accessibilityLiveRegion="polite" style={s.summaryRow}>
           <TouchableOpacity testID="shopping-store" accessibilityRole="button" accessibilityLabel="Seleccionar supermercado" style={s.storeCard} onPress={()=>{setStoreName(doc.store||"");setUtility("store");}}>
@@ -280,7 +293,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
             {SHOPPING_ORBITS.map((o,index)=><TouchableOpacity key={o.id} testID={"shopping-orbit-"+o.id} accessibilityRole="button" accessibilityLabel={o.label} onPress={()=>{setSubgroup(null);setOrbit(o.id);}} style={[s.orbit,{left:orbital.points[index].x,top:orbital.points[index].y,width:orbital.button,minHeight:orbital.buttonHeight,borderRadius:orbital.buttonHeight/2}]}><Text style={[s.orbitArtwork,o.id==="other"&&s.orbitDots]}>{o.art}</Text><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={.8} style={s.orbitLabel}>{o.label}</Text></TouchableOpacity>)}
             <TouchableOpacity testID="shopping-go-orbit" accessibilityRole="button" accessibilityLabel="Hablar o escribir a GO Compras" onPress={go} style={[s.goOrbit,{left:(orbital.size-orbital.center)/2,top:(orbital.height-orbital.center)/2,width:orbital.center,height:orbital.center,borderRadius:orbital.center/2}]}><Feather name="mic" size={28} color="#10315a"/><Text style={s.goOrbitText}>GO</Text></TouchableOpacity>
           </View>
-          <View style={{flexDirection:"row",gap:8,alignItems:"center"}}><TouchableOpacity testID="shopping-search-open" accessibilityRole="button" accessibilityLabel="Buscar producto" onPress={()=>{setSearchQuery("");setSubgroup(null);setOrbit("search");}} style={s.searchEntrance}><Feather name="search" size={18} color="#316b9a"/><Text style={s.searchEntranceText}>Buscar producto</Text></TouchableOpacity><TouchableOpacity testID="shopping-manage-lists" accessibilityRole="button" accessibilityLabel="Mis listas de compra" onPress={()=>{setListName("");setUtility("lists");void refreshLists();}} style={s.searchEntrance}><Feather name="list" size={18} color="#316b9a"/><Text style={s.searchEntranceText}>Mis listas</Text></TouchableOpacity></View>
+          <View testID="shopping-shortcut-row" ref={shortcutsRef} collapsable={false} onLayout={measureNavigationObstacles} style={{flexDirection:handedness==="left"?"row-reverse":"row",gap:8,alignItems:"center",alignSelf:"stretch"}}><TouchableOpacity testID="shopping-search-open" accessibilityRole="button" accessibilityLabel="Buscar producto" onPress={()=>{setSearchQuery("");setSubgroup(null);setOrbit("search");}} style={s.searchEntrance}><Feather name="search" size={18} color="#316b9a"/><Text style={s.searchEntranceText}>Buscar producto</Text></TouchableOpacity><TouchableOpacity testID="shopping-manage-lists" accessibilityRole="button" accessibilityLabel="Mis listas de compra" onPress={()=>{setListName("");setUtility("lists");void refreshLists();}} style={s.searchEntrance}><Feather name="list" size={18} color="#316b9a"/><Text style={s.searchEntranceText}>Mis listas</Text></TouchableOpacity></View>
         </ScrollView></LinearGradient>}
       </View>}
       {editor&&<ScrollView ref={editScroll} testID="shopping-editor-scroll" keyboardShouldPersistTaps="never" keyboardDismissMode="interactive" style={{flex:1,minHeight:0}} contentContainerStyle={{padding:12,flexGrow:1,justifyContent:"flex-end"}}><View style={s.editorCard}>
@@ -371,7 +384,7 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
         {navButton("shopping-favorites","Favoritos","star",()=>{setScreen("add");setSubgroup(null);setOrbit("favorites");setMore(false);})}
         {navButton("shopping-more","Más","grid",()=>setMore(value=>!value),more)}
       </View>}
-      {!!doc&&<View testID="shopping-thumb-controls" style={[s.footer,{flexDirection:"row",paddingLeft:viewport.width<375?12:handedness==="left"?144:12,paddingRight:viewport.width<375?12:handedness==="right"?144:12,paddingBottom:viewport.width<375?76:5}]}>
+      {!!doc&&<View ref={footerRef} collapsable={false} onLayout={measureNavigationObstacles} testID="shopping-thumb-controls" style={[s.footer,{flexDirection:handedness==="left"?"row-reverse":"row",paddingHorizontal:12,paddingBottom:76}]}>
         {keyboard.visible?<TouchableOpacity testID="shopping-keyboard-done" accessibilityRole="button" accessibilityLabel="Listo, ocultar teclado"
           onPress={()=>void keyboard.dismiss()} style={s.listTab}><Feather name="check" size={21} color="#123e72"/><Text style={s.listTabText}>Listo</Text></TouchableOpacity>:<TouchableOpacity testID="shopping-list" accessibilityRole="button" accessibilityLabel="Volver a la lista de compra" disabled={busy||dragging} style={s.listTab}
           onPress={()=>leaveCatalog(()=>{if(editor&&(draftStatus==="Guardando borrador…"||draftStatus.startsWith("Borrador pendiente"))){setError("Espera a guardar el borrador antes de volver a la lista.");return;}voice.abort();if(editor)setError("");setEditor(null);draftRef.current=null;setUtility(null);setNext(null);setLegacy(null);if(listHome){setListName("");setUtility("lists");void refreshLists();}else{setScreen("list");setOrbit(null);setSubgroup(null);}})}><Feather name="list" size={21} color="#123e72"/><Text style={s.listTabText}>Lista</Text></TouchableOpacity>}
@@ -380,11 +393,11 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
         {adding&&!!orbit&&!panel&&<TouchableOpacity testID="shopping-catalog-save" accessibilityRole="button" accessibilityLabel={"Guardar "+catalogSelection.length+" productos en "+(entry?.note?.title||"Compras")} disabled={busy||!catalogSelection.length} onPress={()=>void saveCatalog()} style={[s.saveTab,(busy||!catalogSelection.length)&&{opacity:.45}]}><Text style={s.saveText}>GUARDAR {catalogSelection.length||""}</Text></TouchableOpacity>}
         {!!editor&&<TouchableOpacity testID="shopping-save" accessibilityRole="button" accessibilityLabel="Guardar producto" disabled={busy} onPress={()=>void save()} style={s.saveTab}><Text style={s.saveText}>GUARDAR</Text></TouchableOpacity>}
       </View>}
-    <GoNavigationFloating screenKey={"shopping-"+(editor?"editor":utility?utility:next?"next":legacy?"legacy":adding?(subgroup?"products-"+orbit+"-"+shoppingName(subgroup):orbit?"groups-"+orbit:"orbit"):"list")} width={136} safeArea={false} handedness={handedness} keyboardResponsive keyboardVisible={keyboard.visible} protectedTop={insets.top+48} protectedBottom={Math.max(8,insets.bottom)+4} initialBottom={4}>
+    <GoNavigationFloating screenKey={"shopping-"+(editor?"editor":utility?utility:next?"next":legacy?"legacy":adding?(subgroup?"products-"+orbit+"-"+shoppingName(subgroup):orbit?"groups-"+orbit:"orbit"):"list")} width={136} avoidRects={navigationObstacles} safeArea={false} handedness={handedness} keyboardResponsive keyboardVisible={keyboard.visible} protectedTop={insets.top+48} protectedBottom={Math.max(8,insets.bottom)+4} initialBottom={4}>
       <GoCloseButton testID="shopping-back" level="panel" appearance="light" touchSize={56} hitSlop={0} disabled={busy||dragging} keyboardVisible={keyboard.visible} onPress={back} accessibilityLabel={keyboard.visible?"Ocultar teclado":panel||arrange||adding?"Volver a COMPRAS":"Volver a NOTAS"}/>
       <GoCloseButton testID="shopping-close" level="container" appearance="light" touchSize={64} hitSlop={0} disabled={busy||dragging} onPress={()=>{if(keyboard.isActive()){void keyboard.dismiss();return;}if(editor&&(draftStatus==="Guardando borrador…"||draftStatus.startsWith("Borrador pendiente"))){setError("Espera a guardar el borrador antes de cerrar.");return;}leaveCatalog(onClose);}} accessibilityLabel="Cerrar Compras y volver al Landing"/>
     </GoNavigationFloating>
-    </KeyboardAvoidingView>
+    </KeyboardAvoidingView></View>
     </GestureHandlerRootView>
   </GoScreenModal>;
 }
@@ -402,7 +415,7 @@ const s=StyleSheet.create({
   orbitRing:{position:"absolute",borderRadius:400,borderWidth:3,borderColor:"#9fd3fa",backgroundColor:"transparent"},orbit:{position:"absolute",padding:4,borderWidth:2,borderColor:"#fff",backgroundColor:"#fff",gap:1,alignItems:"center",justifyContent:"center",shadowColor:"#2776b0",shadowOpacity:.22,shadowRadius:8,shadowOffset:{width:0,height:4}},orbitArtwork:{fontSize:31,lineHeight:39},orbitDots:{fontSize:29,fontWeight:"800",color:"#168beb"},orbitLabel:{fontSize:11,fontWeight:"700",textAlign:"center",color:"#17365f"},
   goOrbit:{position:"absolute",alignItems:"center",justifyContent:"center",backgroundColor:"#f9cb55",borderWidth:5,borderColor:"#fff2ba",shadowColor:"#2875b3",shadowOpacity:.3,shadowRadius:14,shadowOffset:{width:0,height:5}},goOrbitText:{fontSize:43,fontWeight:"900",color:"#123466",lineHeight:47},
   secondaryNav:{minHeight:68,flexDirection:"row",alignItems:"center",gap:5,paddingHorizontal:8,paddingVertical:4,backgroundColor:"#f7fbff"},navItem:{flex:1,minWidth:0,minHeight:60,borderRadius:15,backgroundColor:"#fff",borderWidth:1,borderColor:"#e6eaf0",alignItems:"center",justifyContent:"center",gap:2,shadowColor:"#244c7b",shadowOpacity:.1,shadowRadius:5,shadowOffset:{width:0,height:3}},navSelected:{backgroundColor:"#0689ed",borderColor:"#43b1fb"},navText:{fontSize:11,fontWeight:"700",color:"#173a68"},
-  footer:{minHeight:74,alignItems:"center",justifyContent:"space-between",gap:7,paddingVertical:5,backgroundColor:"#f7fbff"},listTab:{flex:1,minWidth:0,minHeight:56,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:5,borderRadius:27,borderWidth:1,borderColor:"#dce4ef",backgroundColor:"#fff",shadowColor:"#244c7b",shadowOpacity:.1,shadowRadius:5,shadowOffset:{width:0,height:3}},listTabText:{fontSize:14,fontWeight:"700",color:"#173a68"},
-  go:{width:68,height:68,borderRadius:34,alignItems:"center",justifyContent:"center",backgroundColor:"#0089ed",borderWidth:3,borderColor:"#b7eaff",shadowColor:"#1285c8",shadowOpacity:.28,shadowRadius:8,shadowOffset:{width:0,height:3}},goText:{color:"#fff",fontSize:22,fontWeight:"800"},addTab:{flex:1,minWidth:0,minHeight:56,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:3,borderRadius:27,backgroundColor:"#087def",borderWidth:1,borderColor:"#57b6ff",shadowColor:"#1376c5",shadowOpacity:.18,shadowRadius:6,shadowOffset:{width:0,height:3}},addTabText:{fontSize:14,fontWeight:"700",color:"#fff"},saveTab:{flex:1,minWidth:110,minHeight:56,borderRadius:22,alignItems:"center",justifyContent:"center",backgroundColor:"#0789e5",borderWidth:1,borderColor:"#54baff"},saveText:{fontSize:16,fontWeight:"800",color:"#fff"},
+  footer:{minHeight:74,flexWrap:"wrap",alignItems:"center",justifyContent:"flex-end",gap:7,paddingVertical:5,backgroundColor:"#f7fbff"},listTab:{flexShrink:0,minWidth:44,minHeight:56,paddingHorizontal:12,paddingVertical:8,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:5,borderRadius:27,borderWidth:1,borderColor:"#dce4ef",backgroundColor:"#fff",shadowColor:"#244c7b",shadowOpacity:.1,shadowRadius:5,shadowOffset:{width:0,height:3}},listTabText:{fontSize:14,fontWeight:"700",color:"#173a68"},
+  go:{width:68,height:68,borderRadius:34,alignItems:"center",justifyContent:"center",backgroundColor:"#0089ed",borderWidth:3,borderColor:"#b7eaff",shadowColor:"#1285c8",shadowOpacity:.28,shadowRadius:8,shadowOffset:{width:0,height:3}},goText:{color:"#fff",fontSize:22,fontWeight:"800"},addTab:{flexShrink:0,minWidth:44,minHeight:56,paddingHorizontal:12,paddingVertical:8,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:3,borderRadius:27,backgroundColor:"#087def",borderWidth:1,borderColor:"#57b6ff",shadowColor:"#1376c5",shadowOpacity:.18,shadowRadius:6,shadowOffset:{width:0,height:3}},addTabText:{fontSize:14,fontWeight:"700",color:"#fff"},saveTab:{flexShrink:0,minWidth:110,minHeight:56,paddingHorizontal:14,paddingVertical:8,borderRadius:22,alignItems:"center",justifyContent:"center",backgroundColor:"#0789e5",borderWidth:1,borderColor:"#54baff"},saveText:{fontSize:16,fontWeight:"800",color:"#fff"},
   error:{color:"#9e2929",fontSize:14},message:{padding:16,gap:8},smallAction:{minHeight:44,minWidth:44,flexDirection:"row",gap:6,alignItems:"center",justifyContent:"center"},
 });
