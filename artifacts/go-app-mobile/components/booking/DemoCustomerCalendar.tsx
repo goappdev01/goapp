@@ -53,18 +53,15 @@ export function DemoCustomerCalendar({ repository, focus, scrollToTodayToken, on
     catch { Alert.alert(lang === "en" ? "Could not cancel" : "No se pudo cancelar", lang === "en" ? "The reservation was not changed." : "La reserva no se ha modificado."); }
   };
   return <View style={{ flex: 1 }} testID="demo-customer-calendar">
-    <View testID="customer-calendar-header" style={{ paddingLeft: Math.max(16,insets.left+8),paddingRight:Math.max(16,insets.right+8), paddingBottom: 8, paddingTop: insets.top + 8, gap: 4 }}>
-      <View style={{flexDirection:"row",alignItems:"center",gap:8}}>
-        <Text style={{ flex:1,minWidth:0,color: "#ff7474", fontSize: 12, fontWeight: "700" }}>{lang === "en" ? "Customer calendar" : "Calendario cliente"}</Text>
-        {toolsControl}
-      </View>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+    <View testID="customer-calendar-header" style={{paddingLeft:Math.max(16,insets.left+8)+(handedness==="left"&&toolsControl?52:0),paddingRight:Math.max(16,insets.right+8)+(handedness!=="left"&&toolsControl?52:0),paddingTop:insets.top+8,paddingBottom:8}}>
+      <View style={{flexDirection:"row",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",minHeight:44}}>
         <GoCalendarViewSelector compact value={viewMode ?? view} onChange={onViewModeChange ?? setView} />
-        <TouchableOpacity onPress={onPersonal} accessibilityRole="button" style={{ padding: 8 }}>
-          <Text style={{ color: "#ffffff", fontSize: 12 }}>{lang === "en" ? "Personal calendar" : "Calendario personal"}</Text>
+        <TouchableOpacity onPress={onPersonal} accessibilityRole="button" style={{padding:8,minHeight:44,justifyContent:"center"}}>
+          <Text style={{color:"#ffffff",fontSize:12}}>{lang === "en" ? "Personal calendar" : "Calendario personal"}</Text>
         </TouchableOpacity>
       </View>
     </View>
+    {toolsControl && <View testID="customer-calendar-tools-overlay" pointerEvents="box-none" style={{position:"absolute",top:insets.top+8,...(handedness==="left"?{left:Math.max(8,insets.left+8)}:{right:Math.max(8,insets.right+8)}),width:44,height:44,zIndex:20}}>{toolsControl}</View>}
     <AgendaBoard dragEnabled={dragEnabled} dragOverlayRef={dragOverlayRef} onDropBooking={onDropBooking} onGoToLanding={onGoToLanding} renderMessageScreen={renderMessageScreen} onOpenMessage={onOpenMessage} onResolveEntry={onResolveEntry} canResolveEntry={canResolveEntry} handedness={handedness} goLog={suppliedEntries ?? entries} embedded viewMode={viewMode ?? view} calViewMonth={month} showHours={showHours} density={density} calSizeKey={calSizeKey} calDayNightMode={calDayNightMode}
       selectedDateISO={focus?.dateISO} scrollToTodayToken={scrollToTodayToken} scrollToDateToken={focus} highlightEntryId={focus?.entryId}
       onChangeMonth={direction => { const [year, value] = month.split("-").map(Number); const date = new Date(year, value - 1 + direction, 1, 12); setMonth(String(date.getFullYear()) + "-" + String(date.getMonth() + 1).padStart(2, "0")); }}

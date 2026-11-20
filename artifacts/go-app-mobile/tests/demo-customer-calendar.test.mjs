@@ -27,10 +27,24 @@ test('customer header reserves a safe non-overlapping lane for the existing tool
   const gear={type:'ExistingGear',props:{testID:'calendar-tools-toggle',touchSize:44},children:[]};
   const tree=ui({top:47,bottom:34,left:44,right:21}).render({repository:f.repo,onPersonal(){},handedness,toolsControl:gear,viewMode:'dia',onViewModeChange(){},showHours:false,density:'15min',calSizeKey:'grande',calDayNightMode:'claro'});
   const header=nodes(tree).find(n=>n.props.testID==='customer-calendar-header');
-  assert.equal(header.props.style.paddingLeft,52);assert.equal(header.props.style.paddingRight,29);assert.equal(header.props.style.paddingTop,55);
-  const titleLane=header.children[0];assert.equal(titleLane.props.style.flexDirection,'row');assert.equal(titleLane.children[0].props.style.flex,1);assert.equal(titleLane.children[0].props.style.minWidth,0);
-  assert.equal(nodes(header).filter(n=>n.props.testID==='calendar-tools-toggle').length,1);assert.equal(titleLane.children[1],gear);
+  assert.equal(header.props.style.paddingLeft,handedness==='left'?104:52);assert.equal(header.props.style.paddingRight,handedness==='right'?81:29);assert.equal(header.props.style.paddingTop,55);
+  const titleLane=header.children[0];assert.equal(titleLane.props.style.flexDirection,'row');assert.equal(titleLane.props.style.minHeight,44);assert.equal(titleLane.props.style.flexWrap,'wrap');assert.equal(header.children.length,1,'no title row or empty spacer remains');
+  assert.equal(nodes(header).filter(n=>n.props.testID==='calendar-tools-toggle').length,0);const overlay=nodes(tree).find(n=>n.props.testID==='customer-calendar-tools-overlay');assert.equal(overlay.props.style.position,'absolute');assert.equal(overlay.props.style.top,55);assert.equal(overlay.props.style.width,44);assert.equal(overlay.props.style.height,44);assert.equal(overlay.children[0],gear);assert.equal(nodes(tree).filter(n=>n.props.testID==='calendar-tools-toggle').length,1);assert.equal(overlay.props.style[handedness],handedness==='left'?52:29);assert.ok(!JSON.stringify(header).includes('Calendario cliente'));
   const agenda=board(tree);assert.equal(agenda.props.viewMode,'dia');assert.equal(agenda.props.showHours,false);assert.equal(agenda.props.density,'15min');assert.equal(agenda.props.calSizeKey,'grande');assert.equal(agenda.props.calDayNightMode,'claro');
   const selector=nodes(header).find(n=>n.type==='Selector');assert.equal(selector.props.value,'dia');assert.equal(selector.props.compact,true);
+ }
+});
+
+test('overlay stays inside the safe header lane at iPhone widths without adding another row',async()=>{
+ const f=await data();
+ for(const width of [320,390,430])for(const hand of ['left','right'])for(const mode of ['dia','semana','mes_lineal']){
+  let calls=0;const gear={type:'ExistingGear',props:{testID:'calendar-tools-toggle',onPress:()=>calls++},children:[]};
+  const tree=ui({top:59,bottom:34,left:0,right:0}).render({repository:f.repo,onPersonal(){},handedness:hand,toolsControl:gear,viewMode:mode});
+  const header=nodes(tree).find(n=>n.props.testID==='customer-calendar-header'),overlay=nodes(tree).find(n=>n.props.testID==='customer-calendar-tools-overlay');
+  assert.equal(header.children.length,1);assert.equal(overlay.props.style.top,67);assert.equal(overlay.props.style[hand],8);
+  const l=header.props.style.paddingLeft,r=header.props.style.paddingRight;
+  if(hand==='left')assert.ok(l>=overlay.props.style.left+44);else assert.ok(width-r<=width-overlay.props.style.right-44);
+  assert.ok(width-l-r>200);assert.equal(board(tree).props.viewMode,mode);
+  gear.props.onPress();gear.props.onPress();assert.equal(calls,2);
  }
 });
