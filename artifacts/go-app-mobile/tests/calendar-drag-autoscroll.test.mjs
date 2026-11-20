@@ -20,9 +20,9 @@ const finger = (x, y) => ({ absoluteX: x, absoluteY: y, x: 20, y: 15, velocityX:
 const scrollEvent = contentOffset => ({ nativeEvent: { contentOffset } });
 
 function setup({ viewMode = "semana", density = "30min", width = 390, fontScale = 1, handedness = "right",
-  overlay, entry = task, initialY = 640, onDropBooking, height = 844, nativeTop, nativeGeometry } = {}) {
+  overlay, entry = task, initialY = 640, onDropBooking, height = 844, nativeTop, nativeGeometry, onLog } = {}) {
   const app = fixture({ now: date + "T12:00:00", platform: "ios", viewport: { width, height, fontScale },
-    insets: { top: 44, bottom: 34, left: 0, right: 0 } });
+    insets: { top: 44, bottom: 34, left: 0, right: 0 }, onLog });
   const { AgendaBoard } = app.load("components/AgendaOperativa.tsx");
   const moves = [], horizontal = [], reserves=[];
   const props = {
@@ -82,12 +82,12 @@ for (const [density, width, fontScale, handedness] of [
     gesture._onUpdate(lower);
     app.runFrame(0); app.runFrame(16);
     const first = day.commands.at(-1).y;
-    assert.ok(Math.abs(first - initialY - 3.52) < .001);
+    assert.ok(Math.abs(first - initialY - 3.696) < .001);
     day.scroll.props.onScroll(scrollEvent({ y: initialY })); // delayed native echo
     gesture._onUpdate(finger(105, 599));
     app.runFrame(32);
     const second = day.commands.at(-1).y;
-    assert.ok(Math.abs(second - first - 3.52) < .001, "closer to the edge never accelerates");
+    assert.ok(Math.abs(second - first - 3.696) < .001, "closer to the edge never accelerates");
     for (let ms = 48; ms <= 480; ms += 16) app.runFrame(ms);
     const later = day.commands.at(-1).y;
     const laterSlot = clock();
@@ -101,7 +101,7 @@ for (const [density, width, fontScale, handedness] of [
     assert.equal(day.commands.at(-1).y, later);
     gesture._onUpdate(finger(105, 189));
     app.runFrame(512); app.runFrame(528);
-    assert.ok(Math.abs(day.commands.at(-1).y - later + 3.52) < .001);
+    assert.ok(Math.abs(day.commands.at(-1).y - later + 3.696) < .001);
     gesture._onUpdate(central);
     const interval = density === "15min" ? 15 : density === "30min" ? 30 : 60;
     const minute = Math.floor((central.absoluteY - 182 + day.commands.at(-1).y) / 40) * interval;
@@ -245,11 +245,11 @@ for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMo
  assert.equal(clock(),target);gesture._onFinalize(finger(105,480),true);assert.deepEqual(moves,[[task.id,date,target]]);
 });
 
-for(const viewMode of ['semana','dia'])test(viewMode+': effective speed stays 220pt/s at a slower JS cadence, with bounded stalls and exact limits',()=>{
+for(const viewMode of ['semana','dia'])test(viewMode+': effective speed stays 231pt/s at a slower JS cadence, with bounded stalls and exact limits',()=>{
  const {app,day,pan}=setup({viewMode,nativeTop:300});const gesture=pan();gesture._onStart(finger(105,480));gesture._onUpdate(finger(105,715));app.runFrame(0);
  for(let time=50;time<=1000;time+=50)app.runFrame(time);
- assert.ok(Math.abs(day.commands.at(-1).y-860)<.001,'elapsed time is not discarded at every 32ms');
- app.runFrame(1500);assert.ok(Math.abs(day.commands.at(-1).y-882)<.001,'long JS stalls never cause a jump of several hours');
+ assert.ok(Math.abs(day.commands.at(-1).y-871)<.001,'elapsed time is not discarded at every 32ms');
+ app.runFrame(1500);assert.ok(Math.abs(day.commands.at(-1).y-894.1)<.001,'long JS stalls never cause a jump of several hours');
  for(let time=1550;time<=10000;time+=50)app.runFrame(time);
  assert.equal(day.commands.at(-1).y,day.max);assert.equal(app.frameCount(),0);
  gesture._onUpdate(finger(105,305));app.runFrame(10100);for(let time=10150;time<=25000;time+=50)app.runFrame(time);
@@ -262,7 +262,7 @@ for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMo
  assert.equal(scroll.props.scrollEnabled,false,'the active card owns the touch; native manual scrolling yields only after activation');
  f.day.acknowledge(!scroll.props.scrollEnabled);gesture._onUpdate(finger(105,direction>0?715:305));f.app.runFrame(0);
  for(let ms=16;ms<=2400;ms+=16)f.app.runFrame(ms);
- assert.ok(Math.abs(f.day.nativeY()-(640+direction*528))<.001);
+ assert.ok(Math.abs(f.day.nativeY()-(640+direction*554.4))<.001);
  assert.equal(f.day.nativeOffsets.length,150);assert.ok(f.day.nativeOffsets.every((y,i,a)=>i===0||(y-a[i-1])*direction>0));
  gesture._onUpdate(finger(105,480));assert.equal(f.app.frameCount(),0);gesture._onFinalize(finger(105,480),true);
  const minutes=Math.floor((180+f.day.nativeY())/40)*30;assert.equal(f.moves[0][2],String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0'));
@@ -270,8 +270,8 @@ for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMo
 for(const viewMode of ['semana','dia'])test(viewMode+': a blocked native scroller cannot fake clock progress or queue an unlimited jump',()=>{
  const f=setup({viewMode,nativeTop:300});const gesture=f.pan();gesture._onStart(finger(105,480));gesture._onUpdate(finger(105,715));
  const before=f.clock();f.day.acknowledge(false);f.app.runFrame(0);for(let ms=16;ms<=2400;ms+=16)f.app.runFrame(ms);
- assert.equal(f.day.nativeY(),640);assert.equal(f.clock(),before);assert.ok(f.day.commands.at(-1).y<=662.001);
- f.day.acknowledge(true);f.app.runFrame(2416);assert.ok(f.day.nativeY()>640);assert.ok(f.day.nativeY()<=662.001);gesture._onFinalize(finger(105,480),false);
+ assert.equal(f.day.nativeY(),640);assert.equal(f.clock(),before);assert.ok(f.day.commands.at(-1).y<=663.101);
+ f.day.acknowledge(true);f.app.runFrame(2416);assert.ok(f.day.nativeY()>640);assert.ok(f.day.nativeY()<=663.101);gesture._onFinalize(finger(105,480),false);
 });
 for(const viewMode of ['semana','dia'])test(viewMode+': queued empty-slot reservation and tap cannot escape a drag release; a fresh touch remains legitimate',()=>{
  const f=setup({viewMode});const tree=f.render();const slot=find(tree,n=>n.type?.name==='GoCalendarSlot'&&n.props.onLongPress);
@@ -288,7 +288,7 @@ for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMo
  const f=setup({viewMode,nativeTop:148,nativeGeometry:geometry});const gesture=f.pan(),edge=finger(105,direction>0?799.3:50);
  gesture._onStart(finger(105,400));gesture._onUpdate(edge);f.app.runFrame(0);
  for(let ms=16;ms<=1600;ms+=16)f.app.runFrame(ms);
- assert.ok(Math.abs(f.day.nativeY()-(640+direction*352))<.001,'confirmed grid motion continues while the finger remains outside its visible edge');
+ assert.ok(Math.abs(f.day.nativeY()-(640+direction*369.6))<.001,'confirmed grid motion continues while the finger remains outside its visible edge');
  assert.ok(f.clock(),'target clock stays visible beyond the grid');
  gesture._onUpdate(finger(105,450));const stopped=f.day.nativeY();assert.equal(f.app.frameCount(),0);f.app.runFrame(2000);assert.equal(f.day.nativeY(),stopped);
  gesture._onUpdate(edge);f.app.runFrame(2016);f.app.runFrame(2032);assert.ok((f.day.nativeY()-stopped)*direction>0);
@@ -296,4 +296,24 @@ for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMo
  assert.equal(f.day.nativeY(),direction>0?f.day.max:0);assert.equal(f.app.frameCount(),0);
  const target=f.clock();assert.equal(target,direction>0?'23:30':'00:00');
  gesture._onFinalize(edge,true);assert.deepEqual(f.moves,[[task.id,date,target]]);assert.equal(f.day.nativeY(),direction>0?f.day.max:0,'valid edge release never restores the initial offset');
+});
+
+for(const handedness of ['left','right'])test('week column seam/'+handedness+': crossing the measured gap never clears the destination or clock',()=>{
+ const f=setup({handedness});const nextDate='2027-01-02';f.attachDay('day_'+nextDate,nextDate,196,176,640);
+ const gesture=f.pan();gesture._onStart(finger(105,380));
+ for(const x of [185,186.5,188,189.9,190,191,193,195.9,196,205,193,190,189,187,185,191]){
+  gesture._onUpdate(finger(x,405));assert.equal(f.clock(),'10:30','a column gap must not temporarily lose the selected time');
+  const tree=f.render(),id='day_'+(x<191?date:nextDate),column=find(tree,n=>n.props.key===id&&n.props.onLayout);
+  const style=Object.assign({},...column.props.style.flat(Infinity).filter(Boolean));assert.equal(style.borderColor,'#22c55e','nearest day at x='+x+' expected '+id);
+ }
+ gesture._onFinalize(finger(191,405),true);assert.deepEqual(f.moves,[[task.id,nextDate,'10:30']]);assert.equal(f.app.frameCount(),0);
+});
+
+test('column transitions do not build booking/render console payloads during a held drag',()=>{
+ const labels=[],f=setup({onLog:label=>labels.push(label)});assert.ok(labels.includes('[CALENDAR_RENDER_ITEMS]'));
+ f.attachDay('day_2027-01-02','2027-01-02',196,176,640);labels.length=0;
+ const gesture=f.pan();gesture._onStart(finger(105,380));labels.length=0;
+ for(const x of [185,188,190,195,205,189,185]){gesture._onUpdate(finger(x,405));f.render();}
+ assert.equal(labels.filter(label=>label==='[CALENDAR_RENDER_ITEMS]'||label==='[BOOKING_CARD_SOURCE]').length,0,'booking/render diagnostic objects must stay out of the active render path');
+ gesture._onFinalize(finger(185,405),false);f.render();assert.ok(labels.includes('[CALENDAR_RENDER_ITEMS]'),'normal diagnostic behavior is retained outside a drag');
 });

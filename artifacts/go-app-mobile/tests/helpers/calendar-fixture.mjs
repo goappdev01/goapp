@@ -20,7 +20,7 @@ vm.runInNewContext(ts.transpileModule(readFileSync("i18n/translations.ts", "utf8
 
 // Run the real calendar components with deterministic native adapters. Keep hook
 // state across renders so navigation and closing are tested without remounting.
-export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, platform = "web", insets = {top:0,right:0,left:0,bottom:0}, storage = { getItem: async () => null, setItem: async () => {} }, openURL } = {}) {
+export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, platform = "web", insets = {top:0,right:0,left:0,bottom:0}, storage = { getItem: async () => null, setItem: async () => {} }, openURL, onLog = () => {} } = {}) {
   const urls = [], alerts = [];
   class Clock extends Date {
     constructor(...args) { super(...(args.length ? args : [now ?? Date.now()])); }
@@ -110,7 +110,7 @@ export function fixture({ now, viewport = {width:390,height:844,fontScale:1}, pl
       compilerOptions: { esModuleInterop: false, alwaysStrict: false, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 },
     }).outputText;
     vm.runInNewContext(code, {
-      exports, console: { log() {}, warn() {}, error: console.error }, Date: Clock, Set, Map,
+      exports, console: { log: label => onLog(label), warn() {}, error: console.error }, Date: Clock, Set, Map,
       requestAnimationFrame: fn => { const id = ++frameId; frames.set(id, fn); return id; },
       cancelAnimationFrame: id => frames.delete(id),
       setTimeout: fn => {timers.push(fn);return timers.length;}, clearTimeout() {}, setInterval: () => 1, clearInterval() {},

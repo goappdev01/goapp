@@ -310,7 +310,7 @@ export type BookingChatMessage = {
 };
 
 const DRAG_EDGE_SIZE = 48;
-const DRAG_VERTICAL_SPEED = 220; // points per second, independent of finger position
+const DRAG_VERTICAL_SPEED = 231; // points per second, independent of finger position
 const DRAG_HORIZONTAL_SPEED = 600;
 const DRAG_DAY_HOLD_MS = 550;
 type DragPoint = { x: number; y: number };
@@ -1462,10 +1462,22 @@ export function AgendaBoard({
     const x = absX - boardX.current;
     if (x < 0 || (horizontalSize.current.viewport > 0 && x >= horizontalSize.current.viewport)) return;
     const relX = x + scrollX.current;
-    const column = allColumnsRef.current.find(col => {
+    let column = allColumnsRef.current.find(col => {
       const layout = colLayouts.current[col.id];
       return layout && relX >= layout.x && relX < layout.x + layout.w;
     });
+    // During a week drag, the measured gutter between two consecutive days
+    // belongs to its nearest neighbor. Crossing it must not clear the clock,
+    // rebuild an empty target and generate a second selection pulse.
+    if(!column && dragItemRef.current && viewMode==="semana" && showHoursRef.current){
+      const columns=allColumnsRef.current;
+      for(let i=1;i<columns.length;i++){
+        const left=columns[i-1],right=columns[i],a=colLayouts.current[left.id],b=colLayouts.current[right.id];
+        if(!left.dateISO || !right.dateISO || !a || !b)continue;
+        const end=a.x+a.w;
+        if(relX>=end && relX<b.x){column=relX<(end+b.x)/2?left:right;break;}
+      }
+    }
     const preview = dayPreviewRef.current;
     return preview.column && column?.id === preview.origin?.id ? preview.column : column;
   };
@@ -2005,7 +2017,7 @@ export function AgendaBoard({
     const reservation=entryIsReservation(item);
     const compactPendingMetadata = isPendingColumn && !isExpanded && !isBookingCard;
 
-    if (_isRawBookingType) {
+    if (_isRawBookingType && !dragItemRef.current) {
       if (!_hasRequiredSlotFields) {
         console.warn("[MISSING_STAFF_OR_SLOT_BLOCKED]", {
           sourceFile:     "AgendaOperativa.tsx",
@@ -2798,7 +2810,7 @@ export function AgendaBoard({
             const { inside, outside } = workRanges
               ? splitWorkHourEntries(timedItems, workRanges)
               : { inside: timedItems, outside: [] };
-            console.log("[CALENDAR_RENDER_ITEMS]", items.length, items.map(i => ({ id: (i as any).id, source: (i as any).source, slotKey: (i as any).slotKey, time: (i as any).time, staffId: (i as any).staffId })));
+            if(!dragItemRef.current)console.log("[CALENDAR_RENDER_ITEMS]", items.length, items.map(i => ({ id: (i as any).id, source: (i as any).source, slotKey: (i as any).slotKey, time: (i as any).time, staffId: (i as any).staffId })));
             const slotIntervalMin = getEffectiveDensityMin(density, timedItems.length);
             const SLOT_H = slotIntervalMin === 60 ? 50 : slotIntervalMin === 30 ? 36 : 28;
             const START_H = 0, END_H = 24;
