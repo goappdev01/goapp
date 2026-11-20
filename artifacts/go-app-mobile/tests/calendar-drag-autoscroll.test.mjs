@@ -82,12 +82,12 @@ for (const [density, width, fontScale, handedness] of [
     gesture._onUpdate(lower);
     app.runFrame(0); app.runFrame(16);
     const first = day.commands.at(-1).y;
-    assert.ok(Math.abs(first - initialY - 2.88) < .001);
+    assert.ok(Math.abs(first - initialY - 3.52) < .001);
     day.scroll.props.onScroll(scrollEvent({ y: initialY })); // delayed native echo
     gesture._onUpdate(finger(105, 599));
     app.runFrame(32);
     const second = day.commands.at(-1).y;
-    assert.ok(Math.abs(second - first - 2.88) < .001, "closer to the edge never accelerates");
+    assert.ok(Math.abs(second - first - 3.52) < .001, "closer to the edge never accelerates");
     for (let ms = 48; ms <= 480; ms += 16) app.runFrame(ms);
     const later = day.commands.at(-1).y;
     const laterSlot = clock();
@@ -101,7 +101,7 @@ for (const [density, width, fontScale, handedness] of [
     assert.equal(day.commands.at(-1).y, later);
     gesture._onUpdate(finger(105, 189));
     app.runFrame(512); app.runFrame(528);
-    assert.ok(Math.abs(day.commands.at(-1).y - later + 2.88) < .001);
+    assert.ok(Math.abs(day.commands.at(-1).y - later + 3.52) < .001);
     gesture._onUpdate(central);
     const interval = density === "15min" ? 15 : density === "30min" ? 30 : 60;
     const minute = Math.floor((central.absoluteY - 182 + day.commands.at(-1).y) / 40) * interval;
@@ -237,7 +237,7 @@ for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMo
   if(frame%40===0)day.scroll.props.onScrollBeginDrag();
   day.scroll.props.onScroll(scrollEvent({y:commanded-direction*.75}));
   app.runFrame(frame*8);
-  assert.ok(Math.abs(day.commands.at(-1).y-(640+direction*step*frame))<.001,'native echo must not rewind the next frame');
+  assert.ok(Math.abs(day.commands.at(-1).y-Math.max(0,Math.min(day.max,640+direction*step*frame)))<.001,'native echo must not rewind the next frame');
  }
  const offset=day.commands.at(-1).y;assert.ok(Math.abs(offset-640)>=350,'several hours stay reachable during the same hold');
  gesture._onUpdate(finger(105,480));assert.equal(app.frameCount(),0);app.runFrame(3016);assert.equal(day.commands.at(-1).y,offset);
@@ -245,11 +245,11 @@ for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMo
  assert.equal(clock(),target);gesture._onFinalize(finger(105,480),true);assert.deepEqual(moves,[[task.id,date,target]]);
 });
 
-for(const viewMode of ['semana','dia'])test(viewMode+': effective speed stays 180pt/s at a slower JS cadence, with bounded stalls and exact limits',()=>{
+for(const viewMode of ['semana','dia'])test(viewMode+': effective speed stays 220pt/s at a slower JS cadence, with bounded stalls and exact limits',()=>{
  const {app,day,pan}=setup({viewMode,nativeTop:300});const gesture=pan();gesture._onStart(finger(105,480));gesture._onUpdate(finger(105,715));app.runFrame(0);
  for(let time=50;time<=1000;time+=50)app.runFrame(time);
- assert.ok(Math.abs(day.commands.at(-1).y-820)<.001,'elapsed time is not discarded at every 32ms');
- app.runFrame(1500);assert.ok(Math.abs(day.commands.at(-1).y-838)<.001,'long JS stalls never cause a jump of several hours');
+ assert.ok(Math.abs(day.commands.at(-1).y-860)<.001,'elapsed time is not discarded at every 32ms');
+ app.runFrame(1500);assert.ok(Math.abs(day.commands.at(-1).y-882)<.001,'long JS stalls never cause a jump of several hours');
  for(let time=1550;time<=10000;time+=50)app.runFrame(time);
  assert.equal(day.commands.at(-1).y,day.max);assert.equal(app.frameCount(),0);
  gesture._onUpdate(finger(105,305));app.runFrame(10100);for(let time=10150;time<=25000;time+=50)app.runFrame(time);
@@ -262,7 +262,7 @@ for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMo
  assert.equal(scroll.props.scrollEnabled,false,'the active card owns the touch; native manual scrolling yields only after activation');
  f.day.acknowledge(!scroll.props.scrollEnabled);gesture._onUpdate(finger(105,direction>0?715:305));f.app.runFrame(0);
  for(let ms=16;ms<=2400;ms+=16)f.app.runFrame(ms);
- assert.ok(Math.abs(f.day.nativeY()-(640+direction*432))<.001);
+ assert.ok(Math.abs(f.day.nativeY()-(640+direction*528))<.001);
  assert.equal(f.day.nativeOffsets.length,150);assert.ok(f.day.nativeOffsets.every((y,i,a)=>i===0||(y-a[i-1])*direction>0));
  gesture._onUpdate(finger(105,480));assert.equal(f.app.frameCount(),0);gesture._onFinalize(finger(105,480),true);
  const minutes=Math.floor((180+f.day.nativeY())/40)*30;assert.equal(f.moves[0][2],String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0'));
@@ -270,8 +270,8 @@ for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMo
 for(const viewMode of ['semana','dia'])test(viewMode+': a blocked native scroller cannot fake clock progress or queue an unlimited jump',()=>{
  const f=setup({viewMode,nativeTop:300});const gesture=f.pan();gesture._onStart(finger(105,480));gesture._onUpdate(finger(105,715));
  const before=f.clock();f.day.acknowledge(false);f.app.runFrame(0);for(let ms=16;ms<=2400;ms+=16)f.app.runFrame(ms);
- assert.equal(f.day.nativeY(),640);assert.equal(f.clock(),before);assert.ok(f.day.commands.at(-1).y<=658.001);
- f.day.acknowledge(true);f.app.runFrame(2416);assert.ok(f.day.nativeY()>640);assert.ok(f.day.nativeY()<=658.001);gesture._onFinalize(finger(105,480),false);
+ assert.equal(f.day.nativeY(),640);assert.equal(f.clock(),before);assert.ok(f.day.commands.at(-1).y<=662.001);
+ f.day.acknowledge(true);f.app.runFrame(2416);assert.ok(f.day.nativeY()>640);assert.ok(f.day.nativeY()<=662.001);gesture._onFinalize(finger(105,480),false);
 });
 for(const viewMode of ['semana','dia'])test(viewMode+': queued empty-slot reservation and tap cannot escape a drag release; a fresh touch remains legitimate',()=>{
  const f=setup({viewMode});const tree=f.render();const slot=find(tree,n=>n.type?.name==='GoCalendarSlot'&&n.props.onLongPress);
@@ -288,7 +288,7 @@ for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMo
  const f=setup({viewMode,nativeTop:148,nativeGeometry:geometry});const gesture=f.pan(),edge=finger(105,direction>0?799.3:50);
  gesture._onStart(finger(105,400));gesture._onUpdate(edge);f.app.runFrame(0);
  for(let ms=16;ms<=1600;ms+=16)f.app.runFrame(ms);
- assert.ok(Math.abs(f.day.nativeY()-(640+direction*288))<.001,'confirmed grid motion continues while the finger remains outside its visible edge');
+ assert.ok(Math.abs(f.day.nativeY()-(640+direction*352))<.001,'confirmed grid motion continues while the finger remains outside its visible edge');
  assert.ok(f.clock(),'target clock stays visible beyond the grid');
  gesture._onUpdate(finger(105,450));const stopped=f.day.nativeY();assert.equal(f.app.frameCount(),0);f.app.runFrame(2000);assert.equal(f.day.nativeY(),stopped);
  gesture._onUpdate(edge);f.app.runFrame(2016);f.app.runFrame(2032);assert.ok((f.day.nativeY()-stopped)*direction>0);

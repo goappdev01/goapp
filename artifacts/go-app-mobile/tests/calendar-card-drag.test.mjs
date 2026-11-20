@@ -130,6 +130,13 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     assert.ok(clockStyle.left >= 12 && clockStyle.left + clockStyle.width <= width - 12,
       "the clock stays inside the iPhone or iPad side edges");
     assert.equal(style(float(tree).props.style).left, pickup.absoluteX - boardX - pickup.x);
+    const tilt = tree => style(float(tree).props.style).transform.find(value=>value.rotate).rotate;
+    assert.equal(tilt(tree),'3deg','vertical/stationary drag keeps the lifted lean');
+    pan._onUpdate({...pickup,velocityX:-300});assert.equal(tilt(render()),'-5deg');
+    pan._onUpdate({...pickup,velocityX:0});assert.equal(tilt(render()),'-3deg','a stationary finger preserves the lean direction');
+    pan._onUpdate({...pickup,velocityX:300});assert.equal(tilt(render()),'5deg');
+    pan._onUpdate({...pickup,velocityX:0});assert.equal(tilt(render()),'3deg');
+
     assert.equal(horizontal(tree).props.scrollEnabled, true, "do not reset the native scroll while it owns a touch sequence");
     assert.equal(dayScroll(tree).props.scrollEnabled, false);
     getTap(tree)._onEnd(pickup, false);

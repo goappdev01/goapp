@@ -310,7 +310,7 @@ export type BookingChatMessage = {
 };
 
 const DRAG_EDGE_SIZE = 48;
-const DRAG_VERTICAL_SPEED = 180; // points per second, independent of finger position
+const DRAG_VERTICAL_SPEED = 220; // points per second, independent of finger position
 const DRAG_HORIZONTAL_SPEED = 600;
 const DRAG_DAY_HOLD_MS = 550;
 type DragPoint = { x: number; y: number };
@@ -1121,7 +1121,8 @@ export function AgendaBoard({
   const floatT  = useSharedValue(0);
   const floatOp = useSharedValue(0);
   const floatSc = useSharedValue(1);
-  const floatRot = useSharedValue(0); // slight tilt à la Trello/iOS drag
+  const floatRot = useSharedValue(0); // lifted-card tilt during the active drag
+  const floatTiltDirection = useSharedValue(1);
   const lastAbsX = useSharedValue(0); // captured in onFinalize for drop detection
   const lastAbsY = useSharedValue(0);
   // Captured once at long-press start: finger Y relative to the float card top,
@@ -1923,8 +1924,9 @@ export function AgendaBoard({
         floatT.value = e.absoluteY - fingerOffsetY.value - boardTopShared.value;
         floatOp.value = withSpring(1, { damping: 10, stiffness: 320 });
         floatSc.value = withSpring(1.06, { damping: 9, stiffness: 300 });
-        // Start neutral — tilt builds dynamically in onUpdate
-        floatRot.value = withSpring(0, { damping: 8, stiffness: 200 });
+        // Keep the lifted-card feel even for a stationary/vertical drag.
+        floatTiltDirection.value = 1;
+        floatRot.value = withSpring(3, { damping: 12, stiffness: 200 });
         lastAbsX.value = e.absoluteX;
         lastAbsY.value = e.absoluteY;
         runOnJS(startThis)(e.absoluteX, e.absoluteY);
@@ -1934,16 +1936,12 @@ export function AgendaBoard({
         floatT.value = e.absoluteY - fingerOffsetY.value - boardTopShared.value;
         lastAbsX.value = e.absoluteX;
         lastAbsY.value = e.absoluteY;
-        // Bidirectional tilt — increased to ±5° for a more physical feel.
-        // velocityX threshold 50 px/s filters micro-jitter while staying responsive.
-        // Intermediate speed (50–300): scale tilt proportionally for smoothness.
-        const vx = e.velocityX;
-        const maxTilt = 5;
-        const tilt = vx > 300 ? maxTilt
-          : vx < -300 ? -maxTilt
-          : vx > 50   ? (vx / 300) * maxTilt
-          : vx < -50  ? (vx / 300) * maxTilt
-          : 0;
+        // A subtle 3-degree lean persists under a stationary finger. Sideways
+        // motion adds at most 2 degrees; the dead zone avoids direction jitter.
+        const vx = Number.isFinite(e.velocityX) ? e.velocityX : 0;
+        const direction = vx < -50 ? -1 : vx > 50 ? 1 : floatTiltDirection.value;
+        floatTiltDirection.value = direction;
+        const tilt = direction * (3 + Math.min(2, Math.abs(vx) / 150));
         floatRot.value = withSpring(tilt, { damping: 12, stiffness: 200 });
         // Column highlight runs on JS thread (acceptable ~1 frame lag)
         runOnJS(updateThis)(e.absoluteX,e.absoluteY);
