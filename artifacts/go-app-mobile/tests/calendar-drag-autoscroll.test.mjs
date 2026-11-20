@@ -20,7 +20,7 @@ const finger = (x, y) => ({ absoluteX: x, absoluteY: y, x: 20, y: 15, velocityX:
 const scrollEvent = contentOffset => ({ nativeEvent: { contentOffset } });
 
 function setup({ viewMode = "semana", density = "30min", width = 390, fontScale = 1, handedness = "right",
-  overlay, entry = task, initialY = 640, onDropBooking, height = 844 } = {}) {
+  overlay, entry = task, initialY = 640, onDropBooking, height = 844, nativeTop } = {}) {
   const app = fixture({ now: date + "T12:00:00", platform: "ios", viewport: { width, height, fontScale },
     insets: { top: 44, bottom: 34, left: 0, right: 0 } });
   const { AgendaBoard } = app.load("components/AgendaOperativa.tsx");
@@ -35,7 +35,7 @@ function setup({ viewMode = "semana", density = "30min", width = 390, fontScale 
   tree.props.ref.current = { measureInWindow: callback => callback(0, 80) };
   tree.props.onLayout(layout(0, 0, width, 560));
   const rowScroll = find(tree, n => n.type === "GHScrollView" && n.props.horizontal);
-  rowScroll.props.ref.current = { scrollTo: command => horizontal.push(command) };
+  rowScroll.props.ref.current = { scrollTo: command => horizontal.push(command), ...(nativeTop===undefined?{}:{measureInWindow:cb=>cb(0,nativeTop-58,width,510)}) };
   rowScroll.props.onLayout(layout(0, 44, width, 510));
   rowScroll.props.onContentSizeChange(viewMode === "dia" ? width : 1400);
   const geometry = new Map();
@@ -46,7 +46,7 @@ function setup({ viewMode = "semana", density = "30min", width = 390, fontScale 
     column.props.onLayout(layout(x, 0, dayWidth, 510));
     const scroll = find(column, n => n.props.testID === "calendar-day-scroll-" + id);
     const commands = [];
-    scroll.props.ref({ scrollTo: command => commands.push(command) });
+    scroll.props.ref({ scrollTo: command => commands.push(command), ...(nativeTop===undefined?{}:{measureInWindow:cb=>cb(x,nativeTop,dayWidth,420)}) });
     const interval = density === "15min" ? 15 : density === "30min" ? 30 : 60;
     const rowH = 40;
     for (let minute = 0; minute < 1440; minute += interval) {
@@ -219,4 +219,13 @@ test("week keeps horizontal edge navigation, rejects stale entries and releases 
   stale._onFinalize(nearRight, true);
   assert.equal(moves.length, 1);
   assert.equal(app.frameCount(), 0);
+});
+
+for(const viewMode of ['semana','dia'])test(viewMode+': native viewport edges, not the sum of ancestor layout offsets, drive both directions',()=>{
+ const legacy=setup({viewMode});const oldGesture=legacy.pan();oldGesture._onStart(finger(105,480));oldGesture._onUpdate(finger(105,715));legacy.app.runFrame(0);legacy.app.runFrame(16);assert.equal(legacy.day.commands.length,0,'the ancestor-layout estimate cannot reach this actual native lower edge');oldGesture._onFinalize(finger(105,480),false);
+ const {app,day,pan,moves}=setup({viewMode,nativeTop:300});const gesture=pan();gesture._onStart(finger(105,480));
+ gesture._onUpdate(finger(105,715));app.runFrame(0);app.runFrame(16);assert.ok(day.commands.at(-1).y>640);
+ const down=day.commands.at(-1).y;gesture._onUpdate(finger(105,725));app.runFrame(32);assert.ok(day.commands.at(-1).y>down,'slightly beyond the grid keeps the same drag scrolling');
+ gesture._onUpdate(finger(105,295));app.runFrame(48);const up=day.commands.at(-1).y;app.runFrame(64);assert.ok(day.commands.at(-1).y<up);
+ gesture._onUpdate(finger(105,480));assert.equal(app.frameCount(),0);gesture._onFinalize(finger(105,480),false);assert.equal(app.frameCount(),0);assert.equal(moves.length,0);
 });

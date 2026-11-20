@@ -1182,6 +1182,20 @@ export function AgendaBoard({
   const scrollViewRef = useRef<any>(null);
   // Refs for each column's inner vertical ScrollView (hourly mode)
   const colScrollRefs    = useRef<Record<string, any>>({});
+  const measuredDragViewports = useRef<Record<string, {top:number;height:number}>>({});
+  const measuredDragBounds = useRef<{left:number;right:number;top:number;bottom:number}|null>(null);
+  const refreshDragMeasurements = () => {
+    scrollViewRef.current?.measureInWindow?.((x:number,y:number,width:number,height:number) => {
+      if (!(width>0 && height>0)) return;
+      measuredDragBounds.current={left:x,right:x+width,top:y,bottom:y+height};
+      if(dragScroll.current.point) jsUpdateTargetRef.current(dragScroll.current.point.x,dragScroll.current.point.y);
+    });
+    for(const [id,node] of Object.entries(colScrollRefs.current)) node?.measureInWindow?.((_x:number,top:number,_w:number,height:number) => {
+      if (!(height>0)) return;
+      measuredDragViewports.current[id]={top,height};
+      if(dragScroll.current.point) jsUpdateTargetRef.current(dragScroll.current.point.x,dragScroll.current.point.y);
+    });
+  };
   const colScrollViewportTop = useRef<Record<string, number>>({});
   const timeSlotLayouts = useRef<Record<string, Record<number, { y: number; h: number }>>>({});
   const timeSlotStarts = useRef<Record<string, number[]>>({});
@@ -1408,6 +1422,9 @@ export function AgendaBoard({
 
   // Called when long press fires — record which item is being dragged
   const jsStartDrag = useCallback((item: GoEntry, x: number, y: number) => {
+    measuredDragBounds.current=null;
+    measuredDragViewports.current={};
+    refreshDragMeasurements();
     if (!dragEnabledRef.current || dragItemRef.current) return;
     pendingBookingFocus.current = null;
     const pickup = { x, y };
@@ -1449,6 +1466,8 @@ export function AgendaBoard({
   };
   const dayViewport = (column: Column) => {
     if (!column.dateISO || !showHoursRef.current) return null;
+    const measured=measuredDragViewports.current[column.id];
+    if(measured) return measured;
     const layout = layoutForDrop(column.id);
     const offset = colScrollViewportTop.current[column.id];
     const height = colScrollViewH.current[column.id];
@@ -1520,6 +1539,8 @@ export function AgendaBoard({
   };
   const dragBounds = () => {
     const { width, height } = Dimensions.get("window");
+    const measured=measuredDragBounds.current;
+    if(measured) return {left:Math.max(measured.left,dragInsets.left),right:Math.min(measured.right,width-dragInsets.right),top:Math.max(measured.top,dragInsets.top),bottom:Math.min(measured.bottom,height-dragInsets.bottom)};
     return {
       left: Math.max(boardX.current, dragInsets.left),
       right: Math.min(boardX.current + horizontalSize.current.viewport, width - dragInsets.right),
@@ -1534,7 +1555,8 @@ export function AgendaBoard({
   };
   const getDragEdges = (point: DragPoint): { day?: number; vertical?: number; horizontal?: number; id?: string; max?: number } => {
     const bounds = dragBounds();
-    if (!columnsViewportHeight.current || !isValidDragPoint(point, bounds)) return {};
+    if (!columnsViewportHeight.current || !dragEnabledRef.current || isOverDragOverlay(point) || !Number.isFinite(point.x) || !Number.isFinite(point.y)
+      || point.x < bounds.left || point.x >= bounds.right || point.y < bounds.top-12 || point.y >= bounds.bottom+12) return {};
     const { left, right, top, bottom } = bounds;
     const { x, y } = point;
     const bandX = Math.min(DRAG_EDGE_SIZE, (right - left) / 4);
@@ -1550,7 +1572,7 @@ export function AgendaBoard({
       const visibleTop = Math.max(top, viewport.top);
       const visibleBottom = Math.min(bottom, viewport.top + viewport.height);
       const band = Math.min(DRAG_EDGE_SIZE, (visibleBottom - visibleTop) / 3);
-      if (band > 0 && y >= visibleTop && y < visibleBottom) {
+      if (band > 0 && y >= visibleTop-12 && y < visibleBottom+12) {
         const vertical = y < visibleTop + band ? -1 : y >= visibleBottom - band ? 1 : 0;
         if (vertical) {
           const max = Math.max(0, (colContentH.current[id] || 0) - viewport.height);
