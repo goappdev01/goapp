@@ -1251,13 +1251,13 @@ test('all eight business steps share one compact safe-area footer and keep navig
   const tree=ui.render();
   const footer=nodes(tree).find(n=>n.props.testID==='business-wizard-footer');
   assert.ok(footer,`step ${step+1} footer`);
-  const style=Object.assign({},...footer.props.style);
-  assert.equal(style.height,96,`step ${step+1} shares 62pt bar plus 34pt safe area`);
-  assert.equal(style.paddingBottom,40);
+  const style=Object.assign({},...(Array.isArray(footer.props.style)?footer.props.style:[footer.props.style]));
+  assert.equal(style.height,106,`step ${step+1} reserves the floating CTA and safe area`);assert.equal(style.position,"absolute");assert.equal(style.backgroundColor,undefined);
+  assert.equal(style.paddingBottom,42);
   const action=nodes(footer).find(n=>n.type==='TouchableOpacity');
   assert.ok(action,`step ${step+1} action`);
-  assert.equal(Object.assign({},...action.props.style).minHeight,44);
-  assert.equal(nodes(tree).find(n=>n.type==='ScrollView'&&n.props.ref).props.contentContainerStyle.paddingBottom,64);
+  assert.equal(Object.assign({},...action.props.style).minHeight,56);
+  assert.equal(nodes(tree).find(n=>n.type==='ScrollView'&&n.props.ref).props.contentContainerStyle.paddingBottom,118);
   assert.ok(text(action).includes(step===7?'biz_finish_config':'biz_next'));
  }
  const panel=uiFixture(f),Panel=panel.load('components/empresa/EmpresaPanel.tsx').EmpresaPanel;

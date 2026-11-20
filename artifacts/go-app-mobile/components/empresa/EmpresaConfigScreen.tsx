@@ -354,8 +354,21 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
   const slideAnim   = useRef(new Animated.Value(0)).current;
   const [keyboardVisible, setKeyboardVisible] = useState(() => Keyboard.isVisible());
   const activeNewInput = useRef<TextInputInstance | null>(null);
+  const scrollOffset=useRef(0),revealSequence=useRef(0);
+  const activeReveal=useRef<((input:TextInputInstance)=>void)|null>(null);
+  const revealNameField = useCallback((input: TextInputInstance) => {
+    activeNewInput.current = input;activeReveal.current=revealNameField;
+    const sequence=++revealSequence.current;
+    scrollRef.current?.measureInWindow((_x,top,_w,height)=>{
+      input.measureInWindow((_ix,y,_iw,inputHeight)=>{
+        if(sequence!==revealSequence.current||activeNewInput.current!==input||!input.isFocused())return;
+        const delta=y<top+12?y-top-12:y+inputHeight>top+height-12?y+inputHeight-(top+height-12):0;
+        if(Math.abs(delta)>1)scrollRef.current?.scrollTo({y:Math.max(0,scrollOffset.current+delta),animated:false});
+      });
+    });
+  }, []);
   const revealProfessional = useCallback((input: TextInputInstance) => {
-    activeNewInput.current = input;
+    activeNewInput.current = input;activeReveal.current=revealProfessional;
     const content = scrollContentRef.current;
     if (content) input.measureLayout(content, (_x, y) => {
       scrollRef.current?.scrollTo({ y: Math.max(0, y - 24), animated: true });
@@ -536,7 +549,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
       setKeyboardVisible(true);
     });
     const onDidShow = Keyboard.addListener("keyboardDidShow", () => {
-      if (activeNewInput.current?.isFocused()) revealProfessional(activeNewInput.current);
+      if (activeNewInput.current?.isFocused()) activeReveal.current?.(activeNewInput.current);
     });
     const onHide = Keyboard.addListener(hideEvent, () => {
       setKeyboardVisible(false);
@@ -625,14 +638,15 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
       }]}>
         <ScrollView
           ref={scrollRef}
-          onLayout={compactFooter ? () => { if (activeNewInput.current?.isFocused()) revealProfessional(activeNewInput.current); } : undefined}
+          onLayout={compactFooter ? () => { if (activeNewInput.current?.isFocused()) activeReveal.current?.(activeNewInput.current); } : undefined}
           style={{ flex: 1 }}
-          contentContainerStyle={{ paddingBottom: 64 }}
+          contentContainerStyle={{ paddingBottom: 84 + (keyboardVisible ? 0 : insets.bottom) }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
           scrollEventThrottle={60}
           onScroll={(e) => {
+            scrollOffset.current=e.nativeEvent.contentOffset.y;
             if (currentStep === 1 && !contactSectionSeen) {
               if (e.nativeEvent.contentOffset.y >= 80) {
                 setContactSectionSeen(true);
@@ -699,7 +713,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
 
           {/* Step content */}
           <View style={[c.content, currentStep === 1 && { paddingTop: 6 }]}>
-            {currentStep === 0 && <StepNombre onFocusField={compactFooter ? revealProfessional : undefined} />}
+            {currentStep === 0 && <StepNombre onFocusField={compactFooter ? revealNameField : undefined} />}
             {currentStep === 1 && <StepUbicacion onFocusField={compactFooter ? revealProfessional : undefined} />}
             {currentStep === 2 && <StepHorario key={config.businessId ?? "draft"} currentSector={currentSector} onManageConflicts={onManageCalendarConflicts} />}
             {currentStep === 3 && <StepServicios currentSector={currentSector} saveRef={stepSaveRef} />}
@@ -720,18 +734,18 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
 
       {/* ── Footer navigation — solo avance; retroceso via FAB flotante ── */}
       <View testID="business-wizard-footer" onLayout={event => onFooterHeight?.(event.nativeEvent.layout.height)}
-        style={[c.footer, { height: 62 + insets.bottom, paddingBottom: insets.bottom + 6, justifyContent: "flex-end" }]}>
+        pointerEvents="box-none" style={{position:"absolute",left:0,right:0,bottom:0,height:72+(keyboardVisible?0:insets.bottom),paddingBottom:8+(keyboardVisible?0:insets.bottom),paddingHorizontal:20,flexDirection:"row",alignItems:"flex-end",justifyContent:companyAlignment==="left"?"flex-start":"flex-end"}}>
         <TouchableOpacity
           activeOpacity={canProceed ? 0.88 : 1}
           onPress={canProceed && !isAdvancing ? goNext : undefined}
           disabled={isAdvancing}
-          style={[c.nextBtn, {
+          style={[c.nextBtn, { minHeight:56,paddingVertical:14,paddingHorizontal:28,
             backgroundColor: canProceed ? GREEN : "rgba(0,0,0,0.10)",
             borderWidth: canProceed ? 0 : 1,
             borderColor: "rgba(0,0,0,0.10)",
           }]}
         >
-          <Text style={[c.nextBtnTxt, { color: canProceed ? "#fff" : "rgba(0,0,0,0.30)" }]}>
+          <Text style={[c.nextBtnTxt, {fontSize:18, color: canProceed ? "#fff" : "rgba(0,0,0,0.30)" }]}>
             {isLast ? t("biz_finish_config") : t("biz_next")}
           </Text>
           <Feather
@@ -780,6 +794,8 @@ function StepNombre({ onFocusField }: { onFocusField?: (input: TextInputInstance
           ref={nameInput}
           onFocus={() => { if (nameInput.current) onFocusField?.(nameInput.current); }}
           style={c.nameInput}
+          autoCorrect={false}
+          spellCheck={false}
           value={config.businessName ?? ""}
           onChangeText={v => updateConfig({ businessName: v })}
           placeholder={t("biz_name_placeholder")}
