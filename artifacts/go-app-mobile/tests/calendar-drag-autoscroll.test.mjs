@@ -24,10 +24,10 @@ function setup({ viewMode = "semana", density = "30min", width = 390, fontScale 
   const app = fixture({ now: date + "T12:00:00", platform: "ios", viewport: { width, height, fontScale },
     insets: { top: 44, bottom: 34, left: 0, right: 0 } });
   const { AgendaBoard } = app.load("components/AgendaOperativa.tsx");
-  const moves = [], horizontal = [];
+  const moves = [], horizontal = [], reserves=[];
   const props = {
     goLog: [entry], viewMode, density, handedness, selectedDateISO: date, calViewMonth: "2027-01",
-    onMoveItem: (...args) => moves.push(args), onDropBooking,
+    onMoveItem: (...args) => moves.push(args), onDropBooking, onReserveAtTime:(...args)=>reserves.push(args),
     dragOverlayRef: overlay ? { current: { measureInWindow: callback => callback(...overlay) } } : undefined,
   };
   const render = () => app.render(AgendaBoard, props);
@@ -45,27 +45,27 @@ function setup({ viewMode = "semana", density = "30min", width = 390, fontScale 
     const column = find(tree, n => n.props.key === id && n.props.onLayout);
     column.props.onLayout(layout(x, 0, dayWidth, 510));
     const scroll = find(column, n => n.props.testID === "calendar-day-scroll-" + id);
-    const commands = [];
-    scroll.props.ref({ scrollTo: command => commands.push(command), ...(nativeTop===undefined?{}:{measureInWindow:cb=>cb(x,nativeTop,dayWidth,420)}) });
+    const commands = [], nativeOffsets=[];let nativeY=nativeOffset??0;let acknowledge=true;
+    scroll.props.ref({ scrollTo: command => {commands.push(command);if(acknowledge){nativeY=Math.max(0,Math.min(contentHeight-viewportHeight,command.y));nativeOffsets.push(nativeY);scroll.props.onScroll(scrollEvent({y:nativeY}));}}, ...(nativeTop===undefined?{}:{measureInWindow:cb=>cb(x,nativeTop,dayWidth,420)}) });
     const interval = density === "15min" ? 15 : density === "30min" ? 30 : 60;
     const rowH = 40;
     for (let minute = 0; minute < 1440; minute += interval) {
       const label = String(Math.floor(minute / 60)).padStart(2, "0") + ":" + String(minute % 60).padStart(2, "0");
       const row = find(scroll, n => n.props.testID === "calendar-drop-slot-" + iso + "-" + label);
-      row.props.onLayout(layout(0, minute / interval * rowH, dayWidth, rowH));
+      const measured=row.props.onLayout?row:find(scroll,n=>n.type?.name==='GoCalendarSlot'&&n.props.timeHHMM===label);measured.props.onLayout(layout(0, minute / interval * rowH, dayWidth, rowH));
     }
     const contentHeight = 1440 / interval * rowH + 12;
     const viewportHeight = 420;
     if (nativeOffset !== null) scroll.props.onScroll(scrollEvent({ y: nativeOffset }));
     scroll.props.onLayout(layout(0, 58, dayWidth, viewportHeight));
     scroll.props.onContentSizeChange(dayWidth, contentHeight);
-    geometry.set(id, { scroll, commands, max: contentHeight - viewportHeight });
+    geometry.set(id, { scroll, commands, nativeOffsets, nativeY:()=>nativeY, acknowledge:value=>{acknowledge=value;}, max: contentHeight - viewportHeight });
     return geometry.get(id);
   };
   const day = attachDay("day_" + date, date, 10, viewMode === "dia" ? width - 24 : 176, initialY);
   const clock = () => find(render(), n => n.props.testID === "calendar-drop-time")?.children[0];
   const preview = () => find(render(), n => n.props.testID === "calendar-drag-day-preview");
-  return { app, props, day, pan, clock, preview, render, moves, horizontal, rowScroll, attachDay };
+  return { app, props, day, pan, clock, preview, render, moves, reserves, horizontal, rowScroll, attachDay };
 }
 
 for (const [density, width, fontScale, handedness] of [
@@ -255,4 +255,29 @@ for(const viewMode of ['semana','dia'])test(viewMode+': effective speed stays 18
  assert.equal(day.commands.at(-1).y,day.max);assert.equal(app.frameCount(),0);
  gesture._onUpdate(finger(105,305));app.runFrame(10100);for(let time=10150;time<=25000;time+=50)app.runFrame(time);
  assert.equal(day.commands.at(-1).y,0);assert.equal(app.frameCount(),0);gesture._onFinalize(finger(105,480),false);
+});
+
+for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMode+': confirmed grid offset advances across multiple hours, '+direction,()=>{
+ const f=setup({viewMode,nativeTop:300});const gesture=f.pan();gesture._onStart(finger(105,480));
+ const tree=f.render(),scroll=find(tree,n=>n.props.testID==='calendar-day-scroll-day_'+date);
+ assert.equal(scroll.props.scrollEnabled,false,'the active card owns the touch; native manual scrolling yields only after activation');
+ f.day.acknowledge(!scroll.props.scrollEnabled);gesture._onUpdate(finger(105,direction>0?715:305));f.app.runFrame(0);
+ for(let ms=16;ms<=2400;ms+=16)f.app.runFrame(ms);
+ assert.ok(Math.abs(f.day.nativeY()-(640+direction*432))<.001);
+ assert.equal(f.day.nativeOffsets.length,150);assert.ok(f.day.nativeOffsets.every((y,i,a)=>i===0||(y-a[i-1])*direction>0));
+ gesture._onUpdate(finger(105,480));assert.equal(f.app.frameCount(),0);gesture._onFinalize(finger(105,480),true);
+ const minutes=Math.floor((180+f.day.nativeY())/40)*30;assert.equal(f.moves[0][2],String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0'));
+});
+for(const viewMode of ['semana','dia'])test(viewMode+': a blocked native scroller cannot fake clock progress or queue an unlimited jump',()=>{
+ const f=setup({viewMode,nativeTop:300});const gesture=f.pan();gesture._onStart(finger(105,480));gesture._onUpdate(finger(105,715));
+ const before=f.clock();f.day.acknowledge(false);f.app.runFrame(0);for(let ms=16;ms<=2400;ms+=16)f.app.runFrame(ms);
+ assert.equal(f.day.nativeY(),640);assert.equal(f.clock(),before);assert.ok(f.day.commands.at(-1).y<=658.001);
+ f.day.acknowledge(true);f.app.runFrame(2416);assert.ok(f.day.nativeY()>640);assert.ok(f.day.nativeY()<=658.001);gesture._onFinalize(finger(105,480),false);
+});
+for(const viewMode of ['semana','dia'])test(viewMode+': queued empty-slot reservation and tap cannot escape a drag release; a fresh touch remains legitimate',()=>{
+ const f=setup({viewMode});const tree=f.render();const slot=find(tree,n=>n.type?.name==='GoCalendarSlot'&&n.props.onLongPress);
+ assert.ok(slot);const invoke=()=>slot.props.onLongPress(date,'14:00');invoke();assert.equal(f.reserves.length,1);
+ const gesture=f.pan();gesture._onStart(finger(105,380));invoke();assert.equal(f.reserves.length,1);gesture._onFinalize(finger(105,400),false);
+ invoke();assert.equal(f.reserves.length,1,'late callback from before disabled render stays blocked');
+ f.render().props.onTouchStart();invoke();assert.equal(f.reserves.length,2,'only a new physical touch clears suppression');
 });

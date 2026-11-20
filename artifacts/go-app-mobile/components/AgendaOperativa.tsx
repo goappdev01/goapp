@@ -1234,6 +1234,7 @@ export function AgendaBoard({
     initialY: new Map<string, number>(),
     horizontalCommand: null as number | null,
     verticalCommands: new Map<string, number>(),
+    verticalDirections: new Map<string, number>(),
   });
   const clearEdgeScroll = useCallback(() => {
     const drag = dragScroll.current;
@@ -1247,6 +1248,7 @@ export function AgendaBoard({
     drag.initialX = drag.horizontalCommand = null;
     drag.initialY.clear();
     drag.verticalCommands.clear();
+    drag.verticalDirections.clear();
   }, []);
   useEffect(() => () => {
     clearEdgeScroll();
@@ -1523,8 +1525,9 @@ export function AgendaBoard({
   updateDragTargetRef.current = updateDragTarget;
 
   const scrollDragColumn = (id: string, offset: number) => {
+    const previous=dragScroll.current.verticalCommands.get(id) ?? colScrollY.current[id] ?? 0;
+    if(offset!==previous) dragScroll.current.verticalDirections.set(id,Math.sign(offset-previous));
     dragScroll.current.verticalCommands.set(id, offset);
-    colScrollY.current[id] = offset;
     colScrollRefs.current[id]?.scrollTo({ y: offset, animated: false });
   };
   const applyPreviewOffset = (id: string) => {
@@ -1635,9 +1638,14 @@ export function AgendaBoard({
         previewAdjacentDayRef.current(edge.day);
       }
     } else if (elapsed > 0 && edge.id && edge.vertical) {
-      const current = colScrollY.current[edge.id] || 0;
+      const current = drag.verticalCommands.get(edge.id) ?? colScrollY.current[edge.id] ?? 0;
       if (edge.id !== drag.previewId && !drag.initialY.has(edge.id)) drag.initialY.set(edge.id, current);
-      const next = Math.max(0, Math.min(edge.max ?? 0, current + edge.vertical * DRAG_VERTICAL_SPEED * elapsed / 1000));
+      const confirmed=colScrollY.current[edge.id] ?? 0;
+      // At most 100ms of unacknowledged motion, never several invisible hours.
+      const pendingLimit=confirmed+edge.vertical*DRAG_VERTICAL_SPEED*.1;
+      const requested=current+edge.vertical*DRAG_VERTICAL_SPEED*elapsed/1000;
+      const bounded=edge.vertical>0?Math.min(requested,pendingLimit):Math.max(requested,pendingLimit);
+      const next = Math.max(0, Math.min(edge.max ?? 0, bounded));
       scrollDragColumn(edge.id, next);
       updateDragTargetRef.current(drag.point.x, drag.point.y);
     } else if (elapsed > 0 && edge.horizontal) {
@@ -1851,14 +1859,18 @@ export function AgendaBoard({
     </View>;
   };
 
-  // Keep the native scroll recognizers mounted and enabled throughout an iOS touch.
-  // A swipe can win before the pan activates. After activation the card owns the touch.
+  // Keep horizontal/native navigation available. A vertical day viewport
+  // yields manual scrolling only after its card pan has actually activated;
+  // programmatic scrollTo remains responsible for moving the time grid.
   const scrollEnabledDuringDrag = Platform.OS === "ios" || !dragItem;
-  const makeEntryTapGesture = (drag: ReturnType<typeof Gesture.Pan>, open: () => void) => Gesture.Tap()
+  const makeEntryTapGesture = (drag: ReturnType<typeof Gesture.Pan>, open: () => void) => {
+    const guardedOpen=()=>{if(!dragPressEntryId.current && !dragItemRef.current) open();};
+    return Gesture.Tap()
     .maxDuration(350)
     .maxDistance(10)
     .requireExternalGestureToFail(drag)
-    .onEnd((_event, success) => { if (success) runOnJS(open)(); });
+    .onEnd((_event, success) => { if (success) runOnJS(guardedOpen)(); });
+  };
 
   const makeEntryDragGesture = (item: GoEntry) => {
     const startThis = (x: number, y: number) => jsStartDragRef.current(item, x, y);
@@ -2005,6 +2017,7 @@ export function AgendaBoard({
       }
     }
     const tapThis    = () => {
+      if (dragPressEntryId.current || dragItemRef.current) return;
       Haptics.selectionAsync().catch(() => {});
       if (isSelecting) {
         toggleSelect(item.id);
@@ -2424,7 +2437,6 @@ export function AgendaBoard({
               Inner buttons claim their own touches; tapping the gap between them
               falls through to this wrapper which toggles the card open/closed. ── */}
           <TouchableOpacity activeOpacity={1} style={s.cardFooter}
-            onPressIn={() => { if (!dragItemRef.current) dragPressEntryId.current = null; }}
             onPress={() => { if (dragPressEntryId.current !== item.id) tapThis(); }}>
             {reservationCardPolicy(item).canonical && renderReservationControls(item)}
             {onChangeEstado && !reservationCardPolicy(item).canonical && (
@@ -2438,7 +2450,7 @@ export function AgendaBoard({
                     <TouchableOpacity
                       key={opt.key}
                       onPress={() => {
-                        if (isActive) return;
+                        if (isActive || dragPressEntryId.current || dragItemRef.current) return;
                         const resolved = resolveEstado(item.estado, opt.key);
                         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
                         onChangeEstado(item.id, resolved);
@@ -2816,16 +2828,20 @@ export function AgendaBoard({
                 onScrollBeginDrag={() => { pendingBookingFocus.current = null; if (!dragItemRef.current) dragScroll.current.verticalCommands.delete(col.id); }}
                 showsVerticalScrollIndicator={false}
                 nestedScrollEnabled
-                scrollEnabled={scrollEnabledDuringDrag}
+                scrollEnabled={!dragItem}
                 scrollEventThrottle={16}
                 onScroll={event => {
                   const offset = event.nativeEvent.contentOffset.y;
                   const commanded = dragScroll.current.verticalCommands.get(col.id);
-                  // While the card owns this gesture, the RAF command is the
-                  // offset authority. Even a subpixel delayed native echo must
-                  // not rewind it (especially at 120Hz). Normal/manual scroll
-                  // resumes as soon as finishDrag clears the command map.
-                  if (commanded !== undefined && dragItemRef.current) return;
+                  // Integrate requests independently; the clock follows only
+                  // confirmed native offsets. Delayed echoes cannot rewind them.
+                  if (commanded !== undefined && dragItemRef.current) {
+                    const confirmed=colScrollY.current[col.id] ?? 0;
+                    if ((offset-confirmed)*(dragScroll.current.verticalDirections.get(col.id) ?? Math.sign(commanded-confirmed)) < 0) return;
+                    colScrollY.current[col.id]=offset;
+                    if(dragScroll.current.point) updateDragTargetRef.current(dragScroll.current.point.x,dragScroll.current.point.y);
+                    return;
+                  }
                   if (commanded !== undefined && Math.abs(offset - commanded) > 1) return;
                   dragScroll.current.verticalCommands.delete(col.id);
                   colScrollY.current[col.id] = offset;
@@ -2980,7 +2996,7 @@ export function AgendaBoard({
                   // Measure the direct child of the scroll content for either row shape.
                   const slot = hasSlotTap ? (
                     <GoCalendarSlot key={slotStart} dateISO={slotDateISO} timeHHMM={label} onLayout={measureSlot}
-                      disabled={isSelecting || !!dragItem} onPress={onCreateTaskAtTime} onLongPress={onReserveAtTime}>
+                      disabled={isSelecting || !!dragItem} onPress={onCreateTaskAtTime ? (day,time)=>{if(!dragPressEntryId.current && !dragItemRef.current) onCreateTaskAtTime(day,time);} : undefined} onLongPress={onReserveAtTime ? (day,time)=>{if(!dragPressEntryId.current && !dragItemRef.current) onReserveAtTime(day,time);} : undefined}>
                       {row}
                     </GoCalendarSlot>
                   ) : row;
@@ -3171,6 +3187,7 @@ export function AgendaBoard({
   return (
     <View
       ref={boardViewRef}
+      onTouchStart={() => {if(!dragItemRef.current) dragPressEntryId.current=null;}}
       style={[{ flex: 1 }, style]}
       onLayout={(event?: LayoutChangeEvent) => {
         const layout = event?.nativeEvent?.layout;

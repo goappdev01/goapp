@@ -131,7 +131,7 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
       "the clock stays inside the iPhone or iPad side edges");
     assert.equal(style(float(tree).props.style).left, pickup.absoluteX - boardX - pickup.x);
     assert.equal(horizontal(tree).props.scrollEnabled, true, "do not reset the native scroll while it owns a touch sequence");
-    assert.equal(dayScroll(tree).props.scrollEnabled, true);
+    assert.equal(dayScroll(tree).props.scrollEnabled, false);
     getTap(tree)._onEnd(pickup, false);
     pan._onUpdate(slotOne);
     tree = render();
@@ -181,6 +181,8 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
     assert.deepEqual(proposals, task.customerBooking ? [[task.id, date, secondTarget]] : []);
     assert.equal(detail(tree), false);
     assert.equal(float(tree), undefined);
+    getTap(tree)._onEnd(slotTwo,true);tree=render();assert.equal(detail(tree),false,"late tap after successful drag cannot open details");
+
 
     if (task.customerBooking) {
       const nextDate = "2027-01-02";
@@ -200,5 +202,6 @@ for (const [device, width, height, boardX, task, density = "30min"] of [
       assert.deepEqual(proposals, [[task.id,date,secondTarget],[task.id,nextDate,firstTarget]]);
       assert.deepEqual(fallback, []);
     }
+    tree=render();tree.props.onTouchStart();getTap(tree)._onEnd(pickup,true);assert.equal(detail(render()),true,"new voluntary tap remains available");
   });
 }
