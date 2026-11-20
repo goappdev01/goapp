@@ -135,6 +135,9 @@ test('compact DEMO edits a pair, recalculates, creates an activity and clears on
   assert.equal(find(node => node.type === 'MultiChoice' && node.props.label === 'Países incluidos').props.options.find(item => item.value === 'FR').label, 'Francia');
   assert.deepEqual(Array.from(find(node => node.type === 'MultiChoice' && node.props.label === 'Actividades incluidas').props.values), ['go_peluquerias']);
   assert.equal(find(node => node.type === 'Number' && node.props.label === 'Empresas existentes').props.value, 46086);
+  assert.equal(all(render()).filter(node=>node.type==='ScrollView').length,1,'form and results share one scroll');
+  assert.ok(find(node=>node.props.testID==='finance-sticky-actions'));
+  assert.ok(all(render()).filter(node=>node.type==='Table').every(node=>node.props.responsive),'breakdowns do not need horizontal scrolling');
   assert.equal(find(node => node.type === 'Table' && node.props.headers[0] === 'País').props.rows[0][0], 'España', 'country totals use complete names');
   find(node => node.type === 'Number' && node.props.label === 'Cuota mensual (€)').props.onChange(30);
   assert.equal(row(state.doc).monthly, 69120);
@@ -160,6 +163,8 @@ test('compact DEMO edits a pair, recalculates, creates an activity and clears on
   assert.equal(row(state.doc, 'ES', state.activityId).market, 250);
   find(node => node.type === 'Number' && node.props.label === 'Empresas existentes').props.onChange(Number.NaN);
   assert.equal(row(state.doc, 'ES', state.activityId).market, 250, 'invalid text cannot erase the last valid count');
+  const beforeInvalid=calculations;find(node=>node.props.accessibilityLabel==='CALCULAR').props.onPress();assert.equal(calculations,beforeInvalid,'invalid draft cannot calculate using a hidden previous value');assert.ok(all(render()).some(node=>node.props.accessibilityRole==='alert'));
+  assert.equal(find(node=>node.type==='Table'&&node.props.headers[0]==='País').props.rows[0][2],'Sin dato','invalid pair is excluded from totals');
   find(node => node.type === 'Number' && node.props.label === 'Empresas existentes').props.onChange(60000);
   find(node => node.type === 'Number' && node.props.label === 'Captación (%)').props.onChange(5);
   find(node => node.type === 'Number' && node.props.label === 'Cuota mensual (€)').props.onChange(100);
@@ -174,9 +179,52 @@ test('compact DEMO edits a pair, recalculates, creates an activity and clears on
   find(node => node.type === 'MultiChoice' && node.props.label === 'Actividades incluidas').props.onChange([state.activityId, 'go_peluquerias']);
   assert.equal(find(node => node.type === 'Table' && node.props.headers[0] === 'País').props.rows.length, 2);
   assert.ok(all(render()).some(node => node.children?.includes('366816 EUR')), 'selected pairs aggregate once');
+  const previousEditor=find(node=>node.type==='Number'&&node.props.label==='Empresas existentes');
+  const oldCountry=state.countryCode,oldActivity=state.activityId;
+  find(node=>node.type==='Choice'&&node.props.label==='Editar país').props.onChange('FR');
+  previousEditor.props.onChange(61000);
+  assert.equal(row(state.doc,oldCountry,oldActivity).market,61000,'late final text belongs to the pair that owned the input');
+  assert.equal(row(state.doc,'FR',oldActivity).market,null,'changing country cannot redirect a late edit');
   width = 320;
   assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.flexDirection === 'column')), 'narrow portrait layout stacks fields');
   assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.alignItems === 'stretch')), 'stacked selectors fill the narrow width');
+  find(node=>node.type==='MultiChoice'&&node.props.label==='Países incluidos').props.onChange(['CH']);
+  find(node=>node.type==='MultiChoice'&&node.props.label==='Actividades incluidas').props.onChange(['go_restaurantes']);
+  assert.ok(all(render()).some(node=>node.children?.includes('Dato oficial · estimación Eurostat (e)')));
   width = 844;
   assert.ok(all(render()).some(node => [node.props.style].flat().some(style => style?.flexDirection === 'row')), 'landscape uses the available width');
+});
+
+const snapshotRow=(doc,countryCode='ES',activityId='go_restaurantes')=>calc.revenueCalculatorRows(doc,'REAL',true).find(r=>r.countryCode===countryCode&&r.activityId===activityId);
+test('static owner-provided Eurostat 2024 snapshot covers only matching GO countries and scope',()=>{
+ const d=demo.createFinancialDemoDocument(2026),before=JSON.stringify(d);
+ const expected={BE:34565,CH:13049,DE:141777,ES:79508,FR:184484,IT:161871,NL:35390,PL:46581};
+ const rows=calc.revenueCalculatorRows(d,'REAL',true).filter(r=>r.activityId==='go_restaurantes');
+ assert.equal(rows.filter(r=>r.market!==null).length,8);
+ for(const [code,value] of Object.entries(expected)){const r=rows.find(r=>r.countryCode===code);assert.equal(r.market,value);assert.equal(r.marketOrigin,'official');assert.equal(r.reference.source.year,2024);assert.equal(r.reference.estimated,code==='CH');}
+ assert.equal(rows.some(r=>r.countryCode==='EU27'),false);assert.equal(rows.find(r=>r.countryCode==='GB').market,null);
+ assert.equal(snapshotRow(d,'ES','go_imprimir').market,null,'GO Imprimir is not the whole of CNAE 18');
+ assert.equal(snapshotRow(d,'ES','go_peluquerias').marketOrigin,'example','existing synthetic input is never labelled official');
+ assert.equal(snapshotRow(d,'FR','go_peluquerias').market,null);assert.equal(JSON.stringify(d),before);
+ assert.equal(calc.SPAIN_ALTERNATIVE_RESTAURANTS.companies,70997);
+});
+test('reference remains immutable when an old year differs or a manual simulation overrides it',()=>{
+ let d=demo.createFinancialDemoDocument(2026);d.markets.push({...d.markets[0],activityId:'go_restaurantes',companies:999});
+ assert.equal(snapshotRow(d).market,79508,'snapshot wins over a different-year nonmanual entry');
+ d=demo.updateFinancialDemoMarket(d,'go_restaurantes','ES',60000);
+ d=calc.updateRevenueCalculator(d,'go_restaurantes','ES','REAL','share',5);d=calc.updateRevenueCalculator(d,'go_restaurantes','ES','REAL','fee',100);
+ const r=snapshotRow(d);assert.equal(r.marketOrigin,'manual');assert.equal(r.reference.companies,79508);assert.deepEqual([r.companies,r.monthly,r.annual],[3000,300000,3600000]);
+ assert.equal(snapshotRow(d,'FR').market,184484);assert.equal(calc.RESTAURANTS_2024.ES,79508);
+});
+test('legacy Spain-only local state can add an existing catalog country and persist four distinct pairs',async()=>{
+ const owner='catalog-pairs';let d=demo.createFinancialDemoDocument(2026);d.countries=d.countries.filter(c=>c.code==='ES');
+ await openStore().saveFinancialDemo(owner,{doc:d,countryCode:'ES',activityId:'go_restaurantes'});
+ let state=(await openStore().loadFinancialDemo(owner)).state;assert.ok(state.doc.countries.some(c=>c.code==='FR'));
+ d=state.doc;for(const [country,activity,market,fee] of [['ES','go_restaurantes',60000,100],['FR','go_restaurantes',100,10],['ES','go_unas',40,29],['FR','go_unas',80,30]]){
+ d=demo.updateFinancialDemoMarket(d,activity,country,market);d=calc.updateRevenueCalculator(d,activity,country,'REAL','share',5);d=calc.updateRevenueCalculator(d,activity,country,'REAL','fee',fee);}
+ await openStore().saveFinancialDemo(owner,{doc:d,countryCode:'FR',activityId:'go_unas',selectedCountryCodes:['ES','FR'],selectedActivityIds:['go_restaurantes','go_unas']});
+ state=(await openStore().loadFinancialDemo(owner)).state;const rows=calc.revenueCalculatorRows(state.doc,'REAL',true).filter(r=>state.selectedCountryCodes.includes(r.countryCode)&&state.selectedActivityIds.includes(r.activityId));
+ assert.equal(rows.length,4);assert.equal(calc.revenueCalculatorTotals(rows).monthly,300228);assert.equal(calc.revenueCalculatorTotals(rows).annual,3602736);
+ assert.deepEqual(Array.from(rows,r=>r.market).sort((a,b)=>a-b),[40,80,100,60000]);assert.equal(snapshotRow(state.doc).reference.companies,79508);
+ const other=(await openStore().loadFinancialDemo('different-owner')).state;assert.equal(snapshotRow(other.doc).market,79508);
 });

@@ -19,13 +19,13 @@ const key = (userId: string) => "go_finance_demo_v1:" + encodeURIComponent(userI
 function validate(state: FinancialDemoState): FinancialDemoState {
   const parsed = financialDocumentSchema.safeParse(state?.doc);
   if (!parsed.success) throw new Error("La simulación local contiene datos no válidos. No se ha sobrescrito.");
-  const catalog = calculatorCatalog(parsed.data);
+  const catalog = calculatorCatalog(parsed.data,true);
   const countryCode = catalog.countries.some(item => item.code === state.countryCode)
     ? state.countryCode : catalog.countries[0]?.code ?? "ES";
   const activityId = catalog.activities.some(item => item.id === state.activityId && item.enabled)
     ? state.activityId : catalog.activities.find(item => item.enabled)?.id ?? "go_peluquerias";
   return {
-    doc: parsed.data,
+    doc: {...parsed.data,countries:catalog.countries},
     countryCode,activityId,
     selectedCountryCodes: [...new Set(Array.isArray(state.selectedCountryCodes)?state.selectedCountryCodes:[countryCode])]
       .filter(code=>catalog.countries.some(item=>item.code===code)),

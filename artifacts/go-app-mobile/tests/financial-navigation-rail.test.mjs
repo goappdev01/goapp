@@ -25,16 +25,17 @@ async function mountedRail() {
     "react-native-keyboard-controller": {KeyboardAvoidingView: avoider},
     "./GoCloseButton": {GO_NAVIGATION_SIZE},
     "./GoNavigationHand": handContext,
+    "../DraggableFAB": {DraggableFAB: props => {hosts.draggable=props;return React.createElement(Host,props);}},
   });
   const root = createRoot(document.createElement("div"));
   const calls = [];
   let controls;
-  const render = hand => React.act(async () => {
+  const render = (hand,draggable=false) => React.act(async () => {
     controls = React.createElement(React.Fragment, null,
       React.createElement("button", {onClick: () => calls.push("back")}, "VOLVER"),
       React.createElement("button", {onClick: () => calls.push("close")}, "CERRAR"));
     root.render(React.createElement(handContext.GoNavigationHand.Provider, {value: hand},
-      React.createElement(GoNavigationRail, {controls}, React.createElement("div", null, "Tabla"))));
+      React.createElement(GoNavigationRail, {controls,...(draggable?{draggableScreenKey:"financial_calculator",reservedBottom:64}:{})}, React.createElement("div", null, "Tabla"))));
   });
   const layout = (width, height) => React.act(async () => {
     hosts.body.onLayout({nativeEvent: {layout: {width, height}}});
@@ -133,3 +134,5 @@ test("changing hands, closing the keyboard and reopening ignore old coordinates"
     await reopened.unmount();
   }
 });
+
+test('calculator opts into the existing draggable memory and reserves its action bar through keyboard and rotation',async()=>{const f=await mountedRail();try{for(const hand of ['left','right'])for(const [width,height] of [[320,650],[844,280],[390,180],[390,650]]){await f.render(hand,true);await f.layout(width,height);const p=f.hosts.draggable;assert.equal(p.screenKey,'financial_calculator');assert.equal(p.navigation,true);assert.equal(p.keyboardResponsive,true);assert.equal(p.bounds.width,width);assert.equal(p.bounds.height,height);assert.equal(p.initialBottom,72);assert.equal(p.avoidRects[0].y,height-64);assert.equal(p.avoidRects[0].height,64);assert.ok(height-p.initialBottom-p.maxH>=0);assert.equal(p.children.props.style.flexDirection,hand==='left'?'row-reverse':'row');}}finally{await f.unmount();}});

@@ -4,7 +4,7 @@ import { calculatorCatalog } from "./financialRevenueCalculator";
 /** Initial synthetic example. The local store subsequently preserves user edits. */
 export function createFinancialDemoDocument(startYear = new Date().getFullYear()): FinancialDocument {
   const doc = emptyFinancialDocument("Calculadora DEMO · datos ficticios", startYear);
-  const catalog = calculatorCatalog(doc);
+  const catalog = calculatorCatalog(doc,true);
   doc.activities = catalog.activities;
   doc.countries = catalog.countries;
   const today = new Date().toISOString().slice(0, 10);
@@ -23,7 +23,7 @@ export function createFinancialDemoDocument(startYear = new Date().getFullYear()
 
 /** Saves a local, unverified input without accepting an incomplete numeric draft. */
 export function updateFinancialDemoMarket(doc: FinancialDocument, activityId: string, countryCode: string, value: number | null): FinancialDocument {
-  const catalog = calculatorCatalog(doc);
+  const catalog = calculatorCatalog(doc,true);
   const activity = catalog.activities.find(item => item.id === activityId);
   if (!activity || !catalog.countries.some(item => item.code === countryCode)) return doc;
   if (value === null || !Number.isSafeInteger(value) || value < 0 || value > 1e12) return doc;
@@ -40,6 +40,6 @@ export function updateFinancialDemoMarket(doc: FinancialDocument, activityId: st
     sourceId, updatedOn: today, verification: "NO_VERIFICADO" as const,
     notes: "Cantidad introducida en este dispositivo",
   };
-  return { ...doc, sources: doc.sources.some(item => item.id === sourceId) ? doc.sources : [...doc.sources, source],
+  return { ...doc, activities:catalog.activities,countries:catalog.countries,sources: doc.sources.some(item => item.id === sourceId) ? doc.sources : [...doc.sources, source],
     markets: existing ? doc.markets.map(item => item === existing ? market : item) : [...doc.markets, market] };
 }

@@ -10,21 +10,43 @@ const normal=(value:string)=>value.normalize("NFD").replace(/[\u0300-\u036f]/g,"
 const valid=(value:number|null|undefined,max:number)=>typeof value==="number"&&Number.isFinite(value)&&value>=0&&value<=max?value:null;
 const capturedCompanies=(market:number|null,share:number|null)=>valid(market,1e12)!==null&&valid(share,100)!==null?Math.round(market!*share!/100):null;
 const key=(activity:string,country:string)=>activity+"|"+country;
-export function calculatorCatalog(doc:FinancialDocument){
+// Owner-supplied static Eurostat snapshot. Enterprises, not premises or employees.
+// Only existing GO countries are exposed; the EU aggregate is deliberately absent.
+export const RESTAURANTS_2024 = Object.freeze({BE:34565,BG:12268,CZ:44743,DK:8757,DE:141777,EE:2228,IE:9735,EL:39348,FR:184484,HR:7816,IT:161871,CY:3142,LV:2218,LT:3287,LU:1772,HU:18851,MT:1848,NL:35390,AT:27576,BA:4113,FI:10284,MK:3308,NO:7963,PL:46581,PT:35576,RO:16103,RS:12358,SK:11283,SI:4578,ES:79508,SE:24344,CH:13049});
+export const RESTAURANTS_SOURCE = {year:2024,organization:"Eurostat",scope:"NACE I5610 · Empresas",url:"https://ec.europa.eu/eurostat/databrowser/bookmark/b6a2701c-d715-43ae-a583-fbdd771d13ec?createdAt=2026-07-03T00%3A39%3A51Z&lang=en"} as const;
+// Different definition; retained only as an unused alternative, never mixed into calculations.
+export const SPAIN_ALTERNATIVE_RESTAURANTS = {companies:70997,year:2024,organization:"Mercasa/DIRCE",scope:"Restauración · metodología distinta",url:"https://www.mercasa.es/wp-content/uploads/2025/12/Mercasa_Alimentacion-en-Espana_2025_v2.pdf"} as const;
+export function calculatorCatalog(doc:FinancialDocument,includeAvailable=false){
  let names:Intl.DisplayNames|undefined;try{names=new Intl.DisplayNames(["es"],{type:"region"});}catch{}
  const originals=ACTIVITIES.map(item=>doc.activities.find(a=>a.id===item.id)||doc.activities.find(a=>normal(a.name)===normal(item.name)&&!ACTIVITIES.some(original=>original.id===a.id))||{...item,unit:"empresa" as const,enabled:true}); const activities=[...originals,...doc.activities.filter(a=>!originals.some(item=>item.id===a.id))];
- const countries=(doc.countries.length?doc.countries:COUNTRIES.map(code=>({code,name:COUNTRY_NAMES[code]||names?.of(code)||code,currency:"EUR"}))).map(c=>({...c,name:COUNTRY_NAMES[c.code]||names?.of(c.code)||c.name}));
+ const available=COUNTRIES.map(code=>({code,name:COUNTRY_NAMES[code]||names?.of(code)||code,currency:"EUR"}));
+ const countries=(includeAvailable?[...doc.countries,...available.filter(c=>!doc.countries.some(old=>old.code===c.code))]:doc.countries.length?doc.countries:available).map(c=>({...c,name:COUNTRY_NAMES[c.code]||names?.of(c.code)||c.name}));
  return{activities,countries};
 }
 function monthlyPrice(doc:FinancialDocument,assumptionId:string|undefined){return doc.revenues.find(r=>r.assumptionId===assumptionId&&r.kind==="monthly"&&r.year===0)||doc.revenues.find(r=>r.assumptionId===assumptionId&&r.kind==="monthly"&&r.year===doc.startYear);}
 function euroRate(doc:FinancialDocument,countryCode:string){const currency=doc.countries.find(c=>c.code===countryCode)?.currency||"EUR";return currency==="EUR"?1:doc.fxRates.find(f=>f.currency===currency&&f.baseCurrency==="EUR"&&f.year===doc.startYear)?.rate??null;}
-export type RevenueCalculatorRow={id:string;activityId:string;countryCode:string;activity:string;country:string;market:number|null;marketUsable:boolean;marketInReview:boolean;unit:string;share:number|null;fee:number|null;feeEditable:boolean;companies:number|null;monthly:number|null;annual:number|null;projection:FinancialProjection};
+export type RevenueCalculatorRow={id:string;activityId:string;countryCode:string;activity:string;country:string;market:number|null;marketUsable:boolean;marketInReview:boolean;unit:string;share:number|null;fee:number|null;feeEditable:boolean;companies:number|null;monthly:number|null;annual:number|null;projection:FinancialProjection;marketOrigin?:"official"|"manual"|"example"|"missing";reference?:{companies:number;estimated:boolean;source:typeof RESTAURANTS_SOURCE}};
 /** A full-portfolio, twelve-month income view through the existing engine. It never changes the saved growth, costs, currencies or annual exceptions. */
-export function revenueCalculatorRows(doc:FinancialDocument,scenario:FinancialScenario):RevenueCalculatorRow[]{
- const catalog=calculatorCatalog(doc),view=emptyFinancialDocument("Proyección de ingresos GO",doc.startYear);view.horizon=1;view.activities=catalog.activities.filter(a=>a.enabled);view.countries=catalog.countries.map(c=>({...c,currency:"EUR"}));
+export function revenueCalculatorRows(doc:FinancialDocument,scenario:FinancialScenario,useReferenceSnapshot=false):RevenueCalculatorRow[]{
+ const catalog=calculatorCatalog(doc,useReferenceSnapshot),view=emptyFinancialDocument("Proyección de ingresos GO",doc.startYear);view.horizon=1;view.activities=catalog.activities.filter(a=>a.enabled);view.countries=catalog.countries.map(c=>({...c,currency:"EUR"}));
  const marketMap=new Map<string,FinancialDocument["markets"][number]>();for(const item of doc.markets){const k=key(item.activityId,item.countryCode),old=marketMap.get(k);if(!old||item.referenceYear>old.referenceYear)marketMap.set(k,item);}
  const assumptions=new Map(doc.assumptions.filter(a=>a.scenario===scenario).map(a=>[key(a.activityId,a.countryCode),a]));
- const inputs=catalog.countries.flatMap(country=>catalog.activities.filter(a=>a.enabled).map(activity=>{const id=key(activity.id,country.code),assumption=assumptions.get(id),market=marketMap.get(id),price=monthlyPrice(doc,assumption?.id),rate=euroRate(doc,country.code);return{id,activityId:activity.id,countryCode:country.code,activity:activity.name,country:country.name,market:market?.companies??null,marketUsable:valid(market?.companies,1e12)!==null,marketInReview:market?.verification==="CONFLICTO",unit:market?.unit||activity.unit,share:assumption?.penetrationPct??null,fee:price?.value==null||rate===null?null:price.value*rate,feeEditable:rate!==null};}));
+ const inputs=catalog.countries.flatMap(country=>catalog.activities.filter(a=>a.enabled).map(activity=>{
+  const id=key(activity.id,country.code),assumption=assumptions.get(id),market=marketMap.get(id);
+  const price=monthlyPrice(doc,assumption?.id),rate=euroRate(doc,country.code);
+  const count=useReferenceSnapshot&&activity.id==="go_restaurantes"&&activity.unit==="empresa"
+   ?RESTAURANTS_2024[country.code as keyof typeof RESTAURANTS_2024]:undefined;
+  const reference=count===undefined?undefined:{companies:count,estimated:country.code==="CH",source:RESTAURANTS_SOURCE};
+  const manual=market?.sourceId==="go_demo_local";
+  const usesReference=!!reference&&!manual;
+  const effective=usesReference?reference!.companies:market?.companies??null;
+  const marketOrigin:RevenueCalculatorRow["marketOrigin"]=effective===null?"missing":usesReference?"official"
+   :market?.sourceId==="go_demo_synthetic"?"example":market?.verification==="VERIFICADO"?"official":"manual";
+  return{id,activityId:activity.id,countryCode:country.code,activity:activity.name,country:country.name,
+   market:effective,marketOrigin,reference,marketUsable:valid(effective,1e12)!==null,
+   marketInReview:!usesReference&&market?.verification==="CONFLICTO",unit:usesReference?"empresa":market?.unit||activity.unit,
+   share:assumption?.penetrationPct??null,fee:price?.value==null||rate===null?null:price.value*rate,feeEditable:rate!==null};
+ }));
  for(const [i,row] of inputs.entries()){const id="calculator_"+i;view.assumptions.push({...newFinancialAssumption(id,row.activityId,row.countryCode,scenario,doc.startYear),marketCompanies:null,newCompanies:capturedCompanies(row.market,row.share),penetrationPct:valid(row.share,100),churnPct:0,acquisitionTiming:"start",costsConfirmed:true});view.revenues.push({id:"calculator_fee_"+i,assumptionId:id,year:0,name:"Cuota hipotética EUR",kind:"monthly",value:valid(row.fee,1e12)});}
  const projections=calculateFinancialPlan(view);
  return inputs.map((row,index)=>{const projection=projections[index],known=row.marketUsable&&row.market!==null&&valid(row.share,100)!==null&&valid(row.fee,1e12)!==null;const annual=known?projection.original.recurring:null;return{...row,companies:capturedCompanies(row.market,row.share),monthly:annual===null?null:annual/12,annual,projection:{...projection,complete:known&&annual!==null,consolidated:projection.consolidated?{...projection.consolidated,revenue:annual}:null}};});

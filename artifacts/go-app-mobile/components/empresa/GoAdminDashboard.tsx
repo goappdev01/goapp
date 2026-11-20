@@ -871,7 +871,7 @@ export function GoAdminDashboard({ visible, onClose, onOpenContext, onOpenTools 
 
         {/* ── Sub-sections ── */}
         {section === "roadmap" && (!financialView || visible) && (
-          financialView ? <GoNavigationRail controls={navigationButtons}>{roadmap}</GoNavigationRail> : roadmap
+          financialView ? <GoNavigationRail controls={navigationButtons} draggableScreenKey="financial_calculator" reservedBottom={64}>{roadmap}</GoNavigationRail> : roadmap
         )}
 
         {section === "modulos_empresa" && (
