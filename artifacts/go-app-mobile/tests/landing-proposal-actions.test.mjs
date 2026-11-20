@@ -38,15 +38,23 @@ test('ordinary/accepted entries preserve identity, and missing original values n
  const empty=policy.landingCurrentEntry(blank);assert.equal(empty.time,'');assert.equal(empty.dateISO,'');assert.equal(empty.place,'','an empty original is not replaced with the proposed destination');
 });
 const labels={here:'Aquí',late:'Tarde',change:'Cambiar',go_nav:'Ir',call:'Llamar',whatsapp_intro:'GO',at_time:'a las __TIME__'};
+// Execute the installed RN method, including its receiver-dependent validation.
+function nativeLinking(fail=false){
+ const urls=[],source=fs.readFileSync('node_modules/react-native/Libraries/Linking/Linking.js','utf8');
+ const method=source.match(/  openURL\(url: string\): Promise<void> \{[\s\S]*?\n  \}/)?.[0];assert.ok(method);
+ const scope={exports:{},Platform:{OS:'ios'},nullthrows:x=>x,NativeLinkingManager:{openURL:async url=>{if(fail)throw Error('Native URL opening failed');urls.push(url);}}};
+ vm.runInNewContext(ts.transpileModule('class NativeLinking { validations=0; _validateURL(url:string){this.validations++;if(!url)throw Error("Missing URL");}'+method+'};exports.linking=new NativeLinking();',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText,scope);
+ return{linking:scope.exports.linking,urls};
+}
 const text=node=>typeof node==='string'||typeof node==='number'?String(node):Array.isArray(node)?node.map(text).join(''):node?.props?text(node.props.children):'';
-async function mountOperations(g,stacked=false){
+async function mountOperations(g,stacked=false,linking){
  const buttons=new Map(),urls=[],sheets=[],calendar=[],gps=[],toasts=[],refs={current:null};
  const TouchableOpacity=props=>{const label=props.accessibilityLabel||text(props.children);buttons.set(label,props);return React.createElement('button',{'data-testid':label,disabled:!!props.accessibilityState?.disabled},props.children)};
  const context={exports:{},React,entryPhone,entryMapsUrl:presentation.entryMapsUrl,openEntryMaps:presentation.openEntryMaps,renderEntryQuickActions,View:rn.View,Text:rn.Text,TouchableOpacity,LinearGradient:rn.View,Feather:()=>null,
   landingCurrentEntry:policy.landingCurrentEntry,landingActionGrid:layout.landingActionGrid,
   landingPanels:{region:{width:stacked?220:354}},landingPanelInsets:{left:0,right:0},landingStackTransport:stacked,landingFrame:{virtual:stacked},uiScaleFactor:1,uiScale:'estandar',handedness:'right',
   aquiSendingId:null,setAquiSendingId:id=>gps.push(id),Location:{getForegroundPermissionsAsync:async()=>({status:'granted'}),getLastKnownPositionAsync:async()=>({coords:{latitude:1,longitude:2}})},
-  Linking:{openURL:async url=>urls.push(url)},normalizePhoneForWhatsApp:n=>n.replace(/\D/g,''),resolveIntentLabel:e=>e.intentLabel,t:k=>labels[k]??k,
+  Linking:linking??{openURL:async url=>urls.push(url)},normalizePhoneForWhatsApp:n=>n.replace(/\D/g,''),resolveIntentLabel:e=>e.intentLabel,t:k=>labels[k]??k,
   Haptics:{selectionAsync:()=>Promise.resolve()},setLateSheetGo:e=>sheets.push(e),snoozeGoReminder(){throw Error('Must not change a reminder during render')},currentReceivedIdRef:refs,proposalReturnRef:{current:null},setCalOpen(){},calFlow:{open:v=>calendar.push(v)},formatISODate:()=>{throw Error('Must use the original date')},getToday(){},sendSuggestChangeFromCal(){},setTransportPanelH(){},showToast:msg=>toasts.push(msg)};
  const code=`const ${decl(ast,'buildNextAptActions').getText(ast)};const ${decl(ast,'renderLandingOperations').getText(ast)};exports.render=renderLandingOperations;`;
  vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,context);
@@ -92,6 +100,24 @@ test('detail IR and Landing Ir open the exact same current address, never the pr
    assert.equal(JSON.stringify(g),snapshot);
   }finally{await landing.close();}
  }
+});
+
+test('Calendar and Next Visit preserve the actual RN Linking receiver and the same business destination',async()=>{
+ const nodes=(n,p)=>n&&typeof n==='object'?[...(p(n)?[n]:[]),...(n.children??[]).flatMap(x=>nodes(x,p))]:[];
+ for(const [businessId,place] of [['salon-a','Calle Prueba 1, Madrid'],['salon-a','Calle Nueva 25, Murcia'],['salon-b','Avenida del Mar 3 & local #2, Málaga']]){
+  const g={...entry(),businessId,estado:'aceptado',changeProposal:undefined,place},before=JSON.stringify(g),native=nativeLinking();
+  await assert.rejects(presentation.openEntryMaps(g,native.linking.openURL),/undefined|_validateURL/,'the detached callback fails before any native launch');assert.equal(native.urls.length,0);
+  const landing=await mountOperations(g,false,native.linking),f=calendarFixture({linking:native.linking}),api=f.load('components/GoEntryDetails.tsx');
+  try{await landing.press('Ir');const tree=f.render(api.GoEntryDetailsSheet,{entry:g,onClose(){}});nodes(tree,n=>n.props.testID==='entry-maps-go')[0].props.onPress();await new Promise(r=>setImmediate(r));assert.equal(native.urls.length,2);assert.equal(native.urls[0],native.urls[1]);assert.equal(new URL(native.urls[1]).searchParams.get('query'),place);assert.ok(native.urls.every(url=>url.startsWith('https://www.google.com/maps/')),'same existing HTTPS handler also supports the web fallback without a Google app install check');assert.equal(f.alerts.length,0);assert.equal(JSON.stringify(g),before);}finally{await landing.close();}
+ }
+});
+test('an open Calendar detail uses the updated business projection and keeps genuine native failures visible',async()=>{
+ const nodes=(n,p)=>n&&typeof n==='object'?[...(p(n)?[n]:[]),...(n.children??[]).flatMap(x=>nodes(x,p))]:[];
+ const native=nativeLinking(),f=calendarFixture({linking:native.linking}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');
+ const g={...entry(),estado:'aceptado',changeProposal:undefined,place:'Dirección anterior'},props={goLog:[g],viewMode:'dia',selectedDateISO:g.dateISO};
+ let tree=f.render(AgendaBoard,props);nodes(tree,n=>n.props.testID?.startsWith('calendar-entry-open-'))[0].props.onAccessibilityTap();f.render(AgendaBoard,props);
+ props.goLog=[{...g,place:'Dirección actual guardada'}];tree=f.render(AgendaBoard,props);nodes(tree,n=>n.props.testID==='entry-maps-go')[0].props.onPress();await new Promise(r=>setImmediate(r));assert.equal(new URL(native.urls[0]).searchParams.get('query'),'Dirección actual guardada');
+ const broken=nativeLinking(true),detail=calendarFixture({linking:broken.linking}),api=detail.load('components/GoEntryDetails.tsx');tree=detail.render(api.GoEntryDetailsSheet,{entry:g,onClose(){}});nodes(tree,n=>n.props.testID==='entry-maps-go')[0].props.onPress();await new Promise(r=>setImmediate(r));assert.equal(detail.alerts.length,1);assert.equal(broken.urls.length,0);
 });
 test('one shared operational UI preserves all approved button styles and transport handlers',()=>{
  for(const name of ['renderActBtn','transportControls','row1Btns','row2Btns','actionRows']){assert.equal(typeof approved.declarations[name],'string',name);assert.equal(compact(decl(ast,name).getText(ast).replace(/onPress=\{\(event\) => \{\s*event\?\.stopPropagation\(\);/g,'onPress={() => {')),compact(approved.declarations[name]),name);}

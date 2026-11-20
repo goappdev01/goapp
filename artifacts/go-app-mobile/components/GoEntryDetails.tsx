@@ -164,7 +164,7 @@ export function GoEntrySummary({ entry }: { entry: GoEntry }) {
     {!!entry.place && <View testID="entry-address" style={{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:8}}>
       <Text style={[s.secondary,{flexGrow:1,flexShrink:1}]}>{entry.place}</Text>
       {entryIsReservation(entry) && !!entryMapsUrl(entry) && <TouchableOpacity testID="entry-maps-go" accessibilityRole="button" accessibilityLabel={t("go_nav")} accessibilityHint={lang==="en"?"Open this reservation's address in Google Maps":"Abrir la dirección de esta reserva en Google Maps"} activeOpacity={0.82}
-        onPress={()=>{void openEntryMaps(entry,Linking.openURL).catch(()=>Alert.alert("GO",t("toast_cannot_open_maps")));}}
+        onPress={()=>{void openEntryMaps(entry,url=>Linking.openURL(url)).catch(()=>Alert.alert("GO",t("toast_cannot_open_maps")));}}
         style={{minWidth:44,minHeight:44,paddingHorizontal:12,paddingVertical:8,borderRadius:10,borderWidth:1,borderColor:"#60a5fa",alignItems:"center",justifyContent:"center"}}>
         <Text style={{color:"#93c5fd",fontSize:14,fontWeight:"800"}}>{t("go_nav")}</Text>
       </TouchableOpacity>}

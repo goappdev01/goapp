@@ -13923,7 +13923,7 @@ function HomeScreenContent() {
       disabled: !hasPlace,
       fn: () => {
         if (!hasPlace) return;
-        void openEntryMaps(g, Linking.openURL).catch(() => showToast(t('toast_cannot_open_maps'), 'error'));
+        void openEntryMaps(g, url=>Linking.openURL(url)).catch(() => showToast(t('toast_cannot_open_maps'), 'error'));
       },
     };
 
