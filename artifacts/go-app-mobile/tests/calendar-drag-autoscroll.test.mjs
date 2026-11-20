@@ -82,12 +82,12 @@ for (const [density, width, fontScale, handedness] of [
     gesture._onUpdate(lower);
     app.runFrame(0); app.runFrame(16);
     const first = day.commands.at(-1).y;
-    assert.ok(Math.abs(first - initialY - 1.92) < .001);
+    assert.ok(Math.abs(first - initialY - 2.88) < .001);
     day.scroll.props.onScroll(scrollEvent({ y: initialY })); // delayed native echo
     gesture._onUpdate(finger(105, 599));
     app.runFrame(32);
     const second = day.commands.at(-1).y;
-    assert.ok(Math.abs(second - first - 1.92) < .001, "closer to the edge never accelerates");
+    assert.ok(Math.abs(second - first - 2.88) < .001, "closer to the edge never accelerates");
     for (let ms = 48; ms <= 480; ms += 16) app.runFrame(ms);
     const later = day.commands.at(-1).y;
     const laterSlot = clock();
@@ -101,7 +101,7 @@ for (const [density, width, fontScale, handedness] of [
     assert.equal(day.commands.at(-1).y, later);
     gesture._onUpdate(finger(105, 189));
     app.runFrame(512); app.runFrame(528);
-    assert.ok(Math.abs(day.commands.at(-1).y - later + 1.92) < .001);
+    assert.ok(Math.abs(day.commands.at(-1).y - later + 2.88) < .001);
     gesture._onUpdate(central);
     const interval = density === "15min" ? 15 : density === "30min" ? 30 : 60;
     const minute = Math.floor((central.absoluteY - 182 + day.commands.at(-1).y) / 40) * interval;
@@ -228,4 +228,31 @@ for(const viewMode of ['semana','dia'])test(viewMode+': native viewport edges, n
  const down=day.commands.at(-1).y;gesture._onUpdate(finger(105,725));app.runFrame(32);assert.ok(day.commands.at(-1).y>down,'slightly beyond the grid keeps the same drag scrolling');
  gesture._onUpdate(finger(105,295));app.runFrame(48);const up=day.commands.at(-1).y;app.runFrame(64);assert.ok(day.commands.at(-1).y<up);
  gesture._onUpdate(finger(105,480));assert.equal(app.frameCount(),0);gesture._onFinalize(finger(105,480),false);assert.equal(app.frameCount(),0);assert.equal(moves.length,0);
+});
+
+for(const viewMode of ['semana','dia'])for(const direction of [-1,1])test(viewMode+': sustained '+direction+' scroll ignores delayed subpixel native echoes',()=>{
+ const {app,day,pan,moves,clock}=setup({viewMode,nativeTop:300});const gesture=pan();gesture._onStart(finger(105,480));gesture._onUpdate(finger(105,direction>0?715:305));
+ app.runFrame(0);app.runFrame(8);const step=Math.abs(day.commands.at(-1).y-640);
+ for(let frame=2;frame<=375;frame++){
+  const commanded=day.commands.at(-1).y;
+  if(frame%40===0)day.scroll.props.onScrollBeginDrag();
+  day.scroll.props.onScroll(scrollEvent({y:commanded-direction*.75}));
+  app.runFrame(frame*8);
+  assert.ok(Math.abs(day.commands.at(-1).y-(640+direction*step*frame))<.001,'native echo must not rewind the next frame');
+ }
+ const offset=day.commands.at(-1).y;assert.ok(Math.abs(offset-640)>=350,'several hours stay reachable during the same hold');
+ gesture._onUpdate(finger(105,480));assert.equal(app.frameCount(),0);app.runFrame(3016);assert.equal(day.commands.at(-1).y,offset);
+ const minutes=Math.floor((180+offset)/40)*30,target=String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0');
+ assert.equal(clock(),target);gesture._onFinalize(finger(105,480),true);assert.deepEqual(moves,[[task.id,date,target]]);
+});
+
+for(const viewMode of ['semana','dia'])test(viewMode+': effective speed stays 180pt/s at a slower JS cadence, with bounded stalls and exact limits',()=>{
+ const {app,day,pan}=setup({viewMode,nativeTop:300});const gesture=pan();gesture._onStart(finger(105,480));gesture._onUpdate(finger(105,715));app.runFrame(0);
+ for(let time=50;time<=1000;time+=50)app.runFrame(time);
+ assert.ok(Math.abs(day.commands.at(-1).y-820)<.001,'elapsed time is not discarded at every 32ms');
+ app.runFrame(1500);assert.ok(Math.abs(day.commands.at(-1).y-838)<.001,'long JS stalls never cause a jump of several hours');
+ for(let time=1550;time<=10000;time+=50)app.runFrame(time);
+ assert.equal(day.commands.at(-1).y,day.max);assert.equal(app.frameCount(),0);
+ gesture._onUpdate(finger(105,305));app.runFrame(10100);for(let time=10150;time<=25000;time+=50)app.runFrame(time);
+ assert.equal(day.commands.at(-1).y,0);assert.equal(app.frameCount(),0);gesture._onFinalize(finger(105,480),false);
 });

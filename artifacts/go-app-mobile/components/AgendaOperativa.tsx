@@ -309,7 +309,7 @@ export type BookingChatMessage = {
 };
 
 const DRAG_EDGE_SIZE = 48;
-const DRAG_VERTICAL_SPEED = 120; // points per second, independent of finger position
+const DRAG_VERTICAL_SPEED = 180; // points per second, independent of finger position
 const DRAG_HORIZONTAL_SPEED = 600;
 const DRAG_DAY_HOLD_MS = 550;
 type DragPoint = { x: number; y: number };
@@ -1626,7 +1626,7 @@ export function AgendaBoard({
     drag.frame = null;
     if (!drag.point || !dragItemRef.current || dropConsumed.current) return;
     const edge = getDragEdgesRef.current(drag.point);
-    const elapsed = drag.lastFrame === null ? 0 : Math.max(0, Math.min(32, now - drag.lastFrame));
+    const elapsed = drag.lastFrame === null ? 0 : Math.max(0, Math.min(edge.vertical ? 100 : 32, now - drag.lastFrame));
     drag.lastFrame = now;
     if (edge.day && !drag.dayTriggered) {
       if (drag.daySince === null) drag.daySince = now;
@@ -2813,7 +2813,7 @@ export function AgendaBoard({
                   : 12 + bottomContentInset }}
                 removeClippedSubviews={isPreview || (dragItem && dragItem.dateISO === col.dateISO) || scrollToDateToken?.entryId ? false : undefined}
                 onContentSizeChange={(_w, h) => { colContentH.current[col.id] = h; applyPreviewOffset(col.id); queueBookingFocus(); }}
-                onScrollBeginDrag={() => { pendingBookingFocus.current = null; dragScroll.current.verticalCommands.delete(col.id); }}
+                onScrollBeginDrag={() => { pendingBookingFocus.current = null; if (!dragItemRef.current) dragScroll.current.verticalCommands.delete(col.id); }}
                 showsVerticalScrollIndicator={false}
                 nestedScrollEnabled
                 scrollEnabled={scrollEnabledDuringDrag}
@@ -2821,6 +2821,11 @@ export function AgendaBoard({
                 onScroll={event => {
                   const offset = event.nativeEvent.contentOffset.y;
                   const commanded = dragScroll.current.verticalCommands.get(col.id);
+                  // While the card owns this gesture, the RAF command is the
+                  // offset authority. Even a subpixel delayed native echo must
+                  // not rewind it (especially at 120Hz). Normal/manual scroll
+                  // resumes as soon as finishDrag clears the command map.
+                  if (commanded !== undefined && dragItemRef.current) return;
                   if (commanded !== undefined && Math.abs(offset - commanded) > 1) return;
                   dragScroll.current.verticalCommands.delete(col.id);
                   colScrollY.current[col.id] = offset;
