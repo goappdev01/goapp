@@ -357,3 +357,16 @@ test('proposal detail shows only its dynamic date and time below the existing st
   assert.doesNotMatch(texts(proposed),/Propuesto:|Proposed:/);assert.equal(JSON.stringify(entry),before);
  }
 });
+
+test('cancelled Calendar detail keeps the eye-off personal action while follow-up and contractual cancellation stay unavailable',()=>{
+ const f=fixture({now:'2030-10-26T08:00:00'}),core=f.load('lib/goActionCompletion.ts'),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');
+ const entry={...base,ownerUserId:'A',actionContext:'live:USER',bookingStatus:'cancelada',bookingServerStatus:'CANCELLED'},before=JSON.stringify(entry),scope={userId:'A',context:'live:USER'},resolved=[];
+ const canResolveEntry=e=>core.ownedCompletionEntry(e,scope)&&core.completionHideEligible(e);
+ const props={goLog:[entry],viewMode:'dia',selectedDateISO:entry.dateISO,canResolveEntry,onResolveEntry:(e,status,read)=>resolved.push([e.id,status,read().id])};
+ let tree=f.render(AgendaBoard,props);nodes(tree,n=>n.props.testID?.startsWith('calendar-entry-open-'))[0].props.onAccessibilityTap();tree=f.render(AgendaBoard,props);
+ const eye=nodes(tree,n=>n.props.testID==='entry-discard')[0];assert.ok(eye);assert.equal(nodes(eye,n=>n.type==='Feather')[0].props.name,'eye-off');
+ assert.equal(nodes(tree,n=>n.props.accessibilityLabel==='Mi seguimiento: REALIZADA').length,0);assert.equal(nodes(tree,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE').length,0);
+ eye.props.onPress({stopPropagation(){}});assert.deepEqual(resolved,[[entry.id,'discard',entry.id]]);assert.equal(JSON.stringify(entry),before);
+ assert.equal(canResolveEntry({...entry,ownerUserId:'B'}),false);
+ props.goLog=[];tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,0);
+});

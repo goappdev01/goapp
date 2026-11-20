@@ -29,7 +29,7 @@ function card({entry=base,hand='right',size='medio',width=390,fontScale=1,follow
   INTENTS:[],RESERVAS_ORBITAL_CATS:[],t:key=>translations[key]??key,localizeLabel:x=>x,displayContact:(name,phone)=>name||phone,
   Haptics:{selectionAsync:async()=>{}},canResolveEntry:e=>!e.deleted,
   actionCompletion:{status:()=>followUp,failedDecisions:failed?[{id:'failure',entry}]:[],retryDecision:record('retry')},
-  openListSavedNote:()=>false,setCalBookingDetailEntry:record('detail'),renderLinkedNotes:()=>null,
+  openListSavedNote:()=>false,retirePersonalEntry:record('retire'),setCalBookingDetailEntry:record('detail'),renderLinkedNotes:()=>null,
   renderEntryMicroActions:e=>f.render(c.GoEntryMicroActions,{entry:{...e,localResolutionStatus:followUp},layout:'list',handedness:hand,
     onDone:record('done'),onPending:record('pending'),onDiscard:record('discard')}),
   altSlotsEntry:null,TRASH_DISPLAY_LIMIT:50,pendingUndos:{},completionKey:f.load("lib/goActionCompletion.ts").completionKey,
@@ -145,3 +145,5 @@ test('large text and long contractual states remain in the allocated header row 
   assert.equal(line.props.style.flexWrap,'nowrap');const label=nodes(line).find(n=>n.props.accessibilityLabel==='PENDIENTE DE ACEPTACIÓN');assert.equal(label.props.numberOfLines,1);assert.equal(label.props.adjustsFontSizeToFit,true);assert.equal(nodes(line).find(n=>n.props.testID==='list-title-long').props.accessibilityLabel,title);
  }
 });
+
+test('Deleted card trash dispatches personal retirement rather than cancelling or mutating the shared booking',()=>{const entry={...base,deleted:true,bookingStatus:'cancelada'},before=JSON.stringify(entry),f=card({entry});const button=nodes(f.tree).find(n=>n.props.testID==='retire-personal-entry-'+entry.id);assert.ok(button);assert.equal(button.props.accessibilityLabel,'Retirar de Eliminadas');assert.equal(nodes(button).find(n=>n.type==='Feather').props.name,'trash-2');button.props.onPress({stopPropagation(){}});assert.equal(f.calls[0][0],'retire');assert.equal(JSON.stringify(entry),before);});

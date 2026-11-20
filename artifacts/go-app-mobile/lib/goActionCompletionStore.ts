@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getTaskUser } from "./goTaskAccess";
 import { completionStorageKey, emptyCompletionDocument, positiveMinutes, sameCompletionScope, completionKey,
-  completionSchedule, recordCompletion, discardCompletion, ownedCompletionEntry, type CompletionScope, type CompletionDocument, type CompletionEntry, type Resolution } from "./goActionCompletion";
+  completionSchedule, recordCompletion, discardCompletion, retireCompletion, ownedCompletionEntry, type CompletionScope, type CompletionDocument, type CompletionEntry, type Resolution } from "./goActionCompletion";
 const snapshots=new Map<string,CompletionDocument>(),queues=new Map<string,Promise<unknown>>(),listeners=new Set<()=>void>();
 let source: {scope:CompletionScope; entries:CompletionEntry[]} | null=null;
 const focusListeners=new Set<(id:string)=>void>();
@@ -23,6 +23,7 @@ export async function readCompletionDocument(scope:CompletionScope):Promise<Comp
     || !positiveMinutes(doc.preferences?.defaultDurationMinutes) || !positiveMinutes(doc.preferences?.reminderMinutes)
     || typeof doc.preferences.pendingAlerts!=="boolean"
     || Object.values(doc.records).some(r=>!r || !Array.isArray(r.history) || r.history.some(d=>!validDecision(d))
+      || r.retired!==undefined && (!r.retired || !Number.isFinite(r.retired.at))
       || r.discarded!==undefined && (!r.discarded || typeof r.discarded.schedule!=="string" || !Number.isFinite(r.discarded.at))
       || r.decision!==undefined && !validDecision(r.decision)
       || r.reminderMinutes!==undefined && !positiveMinutes(r.reminderMinutes)
@@ -61,4 +62,12 @@ export function discardCompletionEntry(scope:CompletionScope,entry:CompletionEnt
     if(!current || !ownedCompletionEntry(current,scope) || completionKey(current)!==completionKey(entry) || completionSchedule(current)!==completionSchedule(entry))throw new Error("La ficha ha cambiado. Revisa sus datos.");
     return discardCompletion(doc,current,Date.now());
   });
+}
+
+export function retireCompletionEntry(scope:CompletionScope,entry:CompletionEntry,active:()=>boolean,currentEntry:()=>CompletionEntry|undefined):Promise<CompletionDocument>{
+ return updateCompletionDocument(scope,active,doc=>{
+  const current=currentEntry();
+  if(!current || !ownedCompletionEntry(current,scope) || completionKey(current)!==completionKey(entry) || completionSchedule(current)!==completionSchedule(entry))throw new Error("La ficha ha cambiado. Revisa sus datos.");
+  return retireCompletion(doc,current,Date.now());
+ });
 }

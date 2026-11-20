@@ -22,7 +22,7 @@ import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
 import { useActionCompletion } from "@/hooks/useActionCompletion";
 import { LandingActionCompletion, completionFrame, completionPanelFrame, LANDING_COMPLETION_PANEL_GAP, type CompletionFrame } from "@/components/landing/LandingActionCompletion";
-import { completionKey, ownedCompletionEntry, completionEligible, completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
+import { completionKey, ownedCompletionEntry, completionEligible, completionHideEligible, completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
 import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, type NoteReminderDraft } from "@/lib/goNoteTools";
 import { saveGoNoteReminder, changeGoNoteReminder, confirmAttachedGoNoteReminder } from "@/lib/goNoteReminder";
 import { GoMinuteInput } from "@/components/ui/GoMinuteInput";
@@ -3444,6 +3444,8 @@ function HomeScreenContent() {
   const customerBookings=useCustomerBookings(demoBookingRepository,goView.loaded && goView.view==="USER" && !adminAccess.checking && (!adminAccess.isOwner || ownerDemo.loaded));
   const completionEntries=useMemo(()=>mergeCustomerBookingEntries(personalGoLog,customerBookings.entries,goView.view==="USER").filter(entry=>canReadBoardTask(entry)&&!isArchivedNote(entry)&&noteDocument(entry)?.destination!=="go"&&(!noteDocument(entry)||completionIdentity.ready&&!!completionIdentity.scope&&noteInScope(entry,completionIdentity.scope))),[personalGoLog,customerBookings.entries,goView.view,adminAccess.allowed,adminAccess.checking,completionIdentity.ready,completionIdentity.scope?.userId,completionIdentity.scope?.context]);
   const actionCompletion = useActionCompletion(completionEntries);
+  const personalVisibilitySource=useRef({entries:completionEntries,personal:personalGoLog,candidates:actionCompletion.candidates});
+  personalVisibilitySource.current={entries:completionEntries,personal:personalGoLog,candidates:actionCompletion.candidates};
   const goLog=useMemo(()=>completionEntries.filter(entry=>!actionCompletion.isDiscarded(entry)),[completionEntries,actionCompletion.isDiscarded]);
   const [landingDetailsId, setLandingDetailsId] = useState<string | null>(null);
   const [landingCompletionHeight, setLandingCompletionHeight] = useState(44);
@@ -12434,12 +12436,13 @@ function HomeScreenContent() {
     const scope = noteIdentity.scope;
     const archive = noteIdentity.ready && scope ? personalGoLog.filter(entry =>
       isArchivedNote(entry) && noteInScope(entry, scope) && canReadBoardTask(entry) && !actionCompletion.isDiscarded(entry)) : [];
-    const entries = mergeCompletionEntries([...goLog, ...archive], actionCompletion.candidates.filter(entry =>
+    const entries = mergeCompletionEntries([...goLog, ...archive, ...(listFilter==="papelera"?actionCompletion.trashEntries:[])], actionCompletion.candidates.filter(entry =>
       actionCompletion.status(entry) === "pending" || !!entry.changeProposal));
 
     return entries.filter(entry => {
-      if (listFilter === "reservas") return entry.customerBooking === true && customerBookings.entries.some(row => row.id === entry.id);
-      const inTrash = !!(entry.deleted || entry.estado === "rechazado");
+      if(actionCompletion.isRetired(entry) || listFilter!=="papelera"&&actionCompletion.isDiscarded(entry))return false;
+      if (listFilter === "reservas") return !entry.deleted && entry.estado!=="rechazado" && entry.customerBooking === true && customerBookings.entries.some(row => row.id === entry.id);
+      const inTrash = !!(entry.deleted || entry.estado === "rechazado" || actionCompletion.isDiscarded(entry));
       if ((listFilter === "papelera") !== inTrash) return false;
       if (!inTrash) {
         if (isBusinessMode && entry.id.startsWith("go_booking_cli_")) return false;
@@ -12457,7 +12460,7 @@ function HomeScreenContent() {
       return listTypeFilter === "todos" || type === listTypeFilter;
     });
   }, [listOpen, noteIdentity.ready, noteIdentity.scope, personalGoLog, goLog, actionCompletion.candidates, actionCompletion.status,
-    actionCompletion.isDiscarded, listFilter, customerBookings.entries, isBusinessMode, isUserMode, listActivityFilter, listCallsOpen, listTypeFilter]);
+    actionCompletion.isDiscarded, actionCompletion.isRetired, actionCompletion.trashEntries, listFilter, customerBookings.entries, isBusinessMode, isUserMode, listActivityFilter, listCallsOpen, listTypeFilter]);
 
   const listItemCount = listFilter === "papelera" ? Math.min(filteredListEntries.length, TRASH_DISPLAY_LIMIT) : filteredListEntries.length;
 
@@ -13608,9 +13611,9 @@ function HomeScreenContent() {
           .then(() => setLandingDetailsId(null)).catch(error => Alert.alert("GO", error.message));
       } }]);
   };
-  const canResolveEntry=(entry:GoEntry)=>!!actionCompletion.scope&&actionCompletion.active(actionCompletion.scope)&&ownedCompletionEntry(entry,actionCompletion.scope)&&completionEligible(entry);
+  const canResolveEntry=(entry:GoEntry)=>!!actionCompletion.scope&&actionCompletion.active(actionCompletion.scope)&&ownedCompletionEntry(entry,actionCompletion.scope)&&completionHideEligible(entry);
   const resolveEntry=(entry:GoEntry,status:"done"|"pending"|"discard",current?:()=>GoEntry|undefined)=>{
-    if(!canResolveEntry(entry))return;
+    if(!canResolveEntry(entry) || status!=="discard"&&!completionEligible(entry))return;
     const read=current??(()=>goLog.find(e=>e.id===entry.id));
     if(status==="discard"){
       Alert.alert(lang==="en"?"Hide my card":"Ocultar mi ficha",lang==="en"?"Hide only your personal card? This does not cancel the reservation or remove anyone else's record.":"¿Ocultar solo tu ficha personal? No se cancela la reserva ni se elimina la ficha de otros participantes.",[
@@ -13620,10 +13623,21 @@ function HomeScreenContent() {
     }
     void actionCompletion.decide(entry,status,true,read);
   };
+  const retirePersonalEntry=(entry:GoEntry)=>{
+    const scope=actionCompletion.scope;if(!scope||!actionCompletion.active(scope))return;
+    if(!ownedCompletionEntry(entry,scope)){Alert.alert("GO",lang==="en"?"The card owner cannot be verified.":"No se puede verificar el propietario de esta ficha.");return;}
+    Alert.alert(lang==="en"?"Remove from Deleted":"Retirar de Eliminadas",lang==="en"?"Hide this card from your personal Deleted list? The shared reservation and other participants are not changed.":"¿Retirar esta ficha de tus Eliminadas? La reserva compartida y las fichas de otros participantes se conservan.",[
+      {text:lang==="en"?"Back":"Volver",style:"cancel"},
+      {text:lang==="en"?"Remove from Deleted":"Retirar de Eliminadas",style:"destructive",onPress:()=>{
+        const read=()=>{const latest=personalVisibilitySource.current;return mergeCompletionEntries([...latest.entries,...latest.personal],latest.candidates).find(row=>completionKey(row)===completionKey(entry)&&ownedCompletionEntry(row,scope));};
+        void actionCompletion.retire(entry,read).catch(error=>Alert.alert("GO",error.message));
+      }},
+    ]);
+  };
   const followedEntry=(entry:GoEntry)=>({...entry,localResolutionStatus:actionCompletion.status(entry)});
   const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list"|"detail",listScale=1)=><GoEntryMicroActions inline={inline} layout={layout} handedness={handedness} listScale={listScale} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
-    onDone={canResolveEntry(entry)?()=>resolveEntry(entry,"done"):undefined}
-    onPending={canResolveEntry(entry)?()=>resolveEntry(entry,"pending"):undefined}
+    onDone={canResolveEntry(entry)&&completionEligible(entry)?()=>resolveEntry(entry,"done"):undefined}
+    onPending={canResolveEntry(entry)&&completionEligible(entry)?()=>resolveEntry(entry,"pending"):undefined}
     onDiscard={canResolveEntry(entry)?()=>resolveEntry(entry,"discard"):undefined}/>;
   const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false, editNote?:()=>void, propose?:()=>void) => <GoEntryQuickActions entry={followedEntry(entry)} showState={showState} compact={compact}
     onCancel={() => cancelEntryFromDetails(entry)} onEdit={editNote||(()=>openEntryChange(entry))} onPropose={propose??(()=>openEntryChange(entry))}
@@ -21872,7 +21886,7 @@ function HomeScreenContent() {
               { k: "aceptado" as const,  icon: "check" as const,      label: t('status_accepted'),  color: "#16a34a", iconOn: "#ffffff", count: 0 },
               { k: "pendiente" as const, icon: "mail" as const,       label: t('status_pending_label'),   color: "#eab308", iconOn: "#0a0a0a", count: countPendiente },
               { k: "propuesta" as const, icon: "refresh-cw" as const, label: t('tasks_proposals'), color: "#f97316", iconOn: "#ffffff", count: countPropuesta },
-              { k: "papelera" as const,  icon: "trash-2" as const,    label: t('tasks_trash'),     color: "#dc2626", iconOn: "#ffffff", count: 0 },
+              { k: "papelera" as const,  icon: "trash-2" as const,    label: t('tasks_trash'),     color: "#dc2626", iconOn: "#ffffff", count: actionCompletion.trashEntries.length },
             ];
             const renderFilterBtn = (f: typeof filterDefs[number]) => {
               const active = listFilter === f.k;
@@ -22511,29 +22525,7 @@ function HomeScreenContent() {
                     onPress={() => {if(openListSavedNote(g))return;Haptics.selectionAsync().catch(()=>{});setCalBookingDetailEntry(g);}}
                     onLongPress={() => {
                           if (isPapelaraView) {
-                            Alert.alert(
-                              t('delete_permanently'),
-                              t('confirm_perm_delete_go').replace('__LABEL__', g.intentLabel),
-                              [
-                                { text: t('cancel'), style: "cancel" },
-                                {
-                                  text: t('delete'),
-                                  style: "destructive",
-                                  onPress: () => {
-                                    Haptics.notificationAsync(
-                                      Haptics.NotificationFeedbackType.Warning,
-                                    ).catch(() => {});
-                                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                                    setGoLog((prev) => {
-                                      const next = prev.filter((e) => e.id !== g.id);
-                                      persistLog(next);
-                                      return next;
-                                    });
-                                    showToast(t('toast_permanent_delete'), 'warning');
-                                  },
-                                },
-                              ],
-                            );
+                            retirePersonalEntry(g);
                           } else {
                             openProposalFromList(g);
                           }
@@ -22692,7 +22684,7 @@ function HomeScreenContent() {
                           </Text>
                         )}
 </React.Fragment>)}
-                    {canResolveEntry(g) && renderEntryMicroActions(g,false,"list",listScale)}
+                    {isPapelaraView ? <TouchableOpacity testID={"retire-personal-entry-"+g.id} accessibilityRole="button" accessibilityLabel={lang==="en"?"Remove from Deleted":"Retirar de Eliminadas"} onPress={event=>{event.stopPropagation();retirePersonalEntry(g);}} style={{minWidth:44,minHeight:44,alignSelf:handedness==="left"?"flex-start":"flex-end",alignItems:"center",justifyContent:"center"}}><Feather name="trash-2" size={22} color="#ef4444"/></TouchableOpacity> : canResolveEntry(g) && renderEntryMicroActions(g,false,"list",listScale)}
                     {actionCompletion.failedDecisions.filter(job=>completionKey(job.entry)===completionKey(g)).map(job=><View key={job.id} style={{gap:4}}>
                       <Text accessibilityRole="alert" style={{color:"#ffb4b4",fontSize:12}}>{lang==="en"?"Follow-up was not saved.":"No se ha guardado el seguimiento."}</Text>
                       <TouchableOpacity accessibilityRole="button" onPress={()=>{void actionCompletion.retryDecision(job.id);}} style={{minHeight:44,justifyContent:"center"}}>

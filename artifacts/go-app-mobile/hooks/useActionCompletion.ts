@@ -5,8 +5,8 @@ import { useOwnerBusinessDemo } from "@/contexts/OwnerBusinessDemoContext";
 import { createDemoBookingRepository, createDemoCatalogBookingRepository } from "@/data/demoBookingRepository";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import { subscribeCompletions,getCompletionDocument,readCompletionDocument,updateCompletionDocument,
- setCompletionSource,clearCompletionSource,getCompletionSource,decideCompletion,discardCompletionEntry,onCompletionFocus } from "@/lib/goActionCompletionStore";
-import { awaitingCompletion,pendingCompletion,completionDecision,completionDiscarded,completionKey,ownedCompletionEntry,positiveMinutes,
+ setCompletionSource,clearCompletionSource,getCompletionSource,decideCompletion,discardCompletionEntry,retireCompletionEntry,onCompletionFocus } from "@/lib/goActionCompletionStore";
+import { awaitingCompletion,pendingCompletion,completionDecision,completionDiscarded,completionRetired,personalTrashEntries,completionKey,ownedCompletionEntry,positiveMinutes,
  completionStorageKey,completionSchedule,sameCompletionScope as sameScope,type CompletionEntry,type CompletionScope,type CompletionPreferences } from "@/lib/goActionCompletion";
 import { refreshActiveNativeTaskReminders,refreshNativeTaskReminders,registerActionCompletionRuntime } from "@/lib/goTaskReminderRuntime";
 import { completionNotificationPolicy } from "@/lib/goActionCompletionNotifications";
@@ -136,10 +136,17 @@ export function useActionCompletion(entries:GoEntry[]) {
    await discardCompletionEntry(scope,entry,()=>state.active(scope),currentEntry);
    await refreshNativeTaskReminders(scope).catch(()=>{if(state.active(scope))setFeedback("Ficha descartada. Revisa los avisos del teléfono.");});
  };
+ const retire=async(entry:GoEntry,currentEntry:()=>GoEntry|undefined)=>{
+   const scope=state.scope;if(!scope || !state.active(scope))throw new Error("La cuenta o el calendario han cambiado.");
+   await retireCompletionEntry(scope,entry,()=>state.active(scope),currentEntry);
+   void refreshNativeTaskReminders(scope).catch(()=>{});
+ };
+ const isRetired=useCallback((entry:GoEntry)=>!!state.doc && completionRetired(entry,state.doc),[state.doc]);
+ const trashEntries=useMemo(()=>state.doc?personalTrashEntries(candidates,state.doc):[],[candidates,state.doc]);
  const isDiscarded=useCallback((entry:GoEntry)=>!!state.doc && completionDiscarded(entry,state.doc),[state.doc]);
  const status=useCallback((e:GoEntry)=>{
    const job=state.scope?writes.current.get(writeKey(state.scope,e)):undefined;
    return job?.phase==="saving"?job.status:state.doc?completionDecision(e,state.doc)?.status:undefined;
  },[state.doc,scopeKey,writeRevision]);
- return {...state,now,candidates,unresolved,pending,selected,setSelected,decide,discard,isDiscarded,configure,status,busy,feedback,isSaving,savingCount,failedDecisions,retryDecision};
+ return {...state,now,candidates,unresolved,pending,selected,setSelected,decide,discard,retire,isRetired,trashEntries,isDiscarded,configure,status,busy,feedback,isSaving,savingCount,failedDecisions,retryDecision};
 }

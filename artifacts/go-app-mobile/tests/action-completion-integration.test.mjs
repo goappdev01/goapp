@@ -326,3 +326,59 @@ test('Listados can persist personal follow-up during a valid proposal without ac
  }
  assert.equal((await f.api.readCompletionDocument(S)).records[core.completionKey(row)].history.length,3);
 });
+
+test('cancelled DEMO booking can hide and retire only its personal card, surviving reload and changed projections',async()=>{
+ const demo=await demoFixture(),original=demo.repo.getCustomerEntries()[0];
+ await demo.repo.cancelCustomerEntry(String(original.reservationId),String(original.businessId));
+ const e=demo.repo.getCustomerEntries().find(r=>r.reservationId===original.reservationId);
+ assert.equal(e.bookingStatus,'cancelada');assert.equal(core.completionEligible(e),false);assert.equal(core.completionHideEligible(e),true);
+ const before=JSON.stringify(demo.store.getSnapshot()),C={userId:S.userId,context:'demo:USER'},P={userId:S.userId,context:'demo:BUSINESS:'+demo.store.businessId},f=storageFixture();
+ await f.api.discardCompletionEntry(C,e,()=>true,()=>e);
+ let restart=storageFixture(f.memory),doc=await restart.api.readCompletionDocument(C);
+ assert.deepEqual(plain(core.personalTrashEntries([e,e],doc).map(r=>r.id)),[e.id]);
+ await Promise.all([restart.api.retireCompletionEntry(C,e,()=>true,()=>e),restart.api.retireCompletionEntry(C,e,()=>true,()=>e)]);
+ assert.equal(restart.writes.length,1,'duplicate confirmations persist once');
+ restart=storageFixture(f.memory);doc=await restart.api.readCompletionDocument(C);
+ assert.equal(core.completionRetired(e,doc),true);assert.equal(core.personalTrashEntries([e],doc).length,0);
+ const rehydrated={...e,id:'new-projection-id',time:'15:30'};assert.equal(core.completionDiscarded(rehydrated,doc),true,'stable reservation identity keeps retirement after sync');
+ assert.equal(core.nextCompletionReminder(e,doc,now),null);
+ const provider=demo.store.getSnapshot().entries.find(r=>r.reservationId===e.reservationId);assert.ok(provider);assert.equal(core.completionDiscarded(provider,await restart.api.readCompletionDocument(P)),false);
+ const B={userId:'another-user',context:C.context};assert.equal(core.completionDiscarded({...e,ownerUserId:B.userId},await restart.api.readCompletionDocument(B)),false);
+ assert.equal(JSON.stringify(demo.store.getSnapshot()),before,'no shared record or cancellation is modified');
+});
+test('legacy deleted/rejected cards retire by owner and context without removing history or other cards',async()=>{
+ for(const extra of [{deleted:true},{estado:'rechazado'}]){
+  const f=storageFixture(),e=entry({...extra,reservationId:'old',businessId:'salon'}),other=entry({id:'other',deleted:true}),before=JSON.stringify(e);
+  const doc=await f.api.retireCompletionEntry(S,e,()=>true,()=>e);
+  assert.equal(core.completionDiscarded(e,doc),true);assert.deepEqual(plain(core.personalTrashEntries([e,other],doc).map(r=>r.id)),['other']);assert.equal(JSON.stringify(e),before);
+  assert.equal(core.completionDiscarded({...e,businessId:'another-salon'},doc),false);
+ }
+});
+test('retiring rejects missing ownership, changed identity/schedule, non-trash cards and scope switches',async()=>{
+ const f=storageFixture(),e=entry({deleted:true,reservationId:'r',businessId:'salon'});
+ for(const current of [undefined,{...e,ownerUserId:'other'},{...e,actionContext:'live:BUSINESS:salon'},{...e,reservationId:'different'},{...e,time:'11:00'}])await assert.rejects(f.api.retireCompletionEntry(S,e,()=>true,()=>current));
+ await assert.rejects(f.api.retireCompletionEntry(S,entry(),()=>true,()=>entry()),/Eliminadas/);
+ await assert.rejects(f.api.retireCompletionEntry(S,e,()=>false,()=>e));f.user('other');await assert.rejects(f.api.retireCompletionEntry(S,e,()=>true,()=>e));assert.equal(f.writes.length,0);
+});
+test('failed retirement does not disappear optimistically and retry preserves all prior personal history',async()=>{
+ const f=storageFixture(),e=entry();f.api.setCompletionSource(S,[e]);await f.api.decideCompletion(S,e,'done',()=>true,now,true,()=>e);await f.api.discardCompletionEntry(S,e,()=>true,()=>e);
+ const old=f.memory.set.bind(f.memory);f.memory.set=()=>{throw Error('storage unavailable');};await assert.rejects(f.api.retireCompletionEntry(S,e,()=>true,()=>e),/storage unavailable/);
+ let doc=await f.api.readCompletionDocument(S);assert.equal(core.completionRetired(e,doc),false);assert.equal(core.personalTrashEntries([e],doc).length,1);
+ f.memory.set=old;await f.api.retireCompletionEntry(S,e,()=>true,()=>e);doc=await storageFixture(f.memory).api.readCompletionDocument(S);
+ assert.equal(doc.records[core.completionKey(e)].history.length,1);assert.equal(core.completionRetired(e,doc),true);
+});
+
+test('real application handlers allow cancelled-card hiding and the Deleted filter retires it only after confirmation',async()=>{
+ const source=fs.readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),decl={};
+ const names=['canResolveEntry','resolveEntry','retirePersonalEntry','filteredListEntries'];(function visit(n){if(ts.isVariableDeclaration(n)&&names.includes(n.name.getText(ast)))decl[n.name.getText(ast)]=n.initializer.getText(ast);ts.forEachChild(n,visit);})(ast);
+ const e=entry({type:'GO_BOOKING',reservationId:'cancelled',businessId:'salon',customerBooking:true,bookingStatus:'cancelada',bookingServerStatus:'CANCELLED'}),before=JSON.stringify(e),f=storageFixture();
+ let doc=await f.api.readCompletionDocument(S);const alerts=[];
+ const model={scope:S,active:()=>true,status:()=>undefined,candidates:[e],isDiscarded:r=>core.completionDiscarded(r,doc),isRetired:r=>core.completionRetired(r,doc),get trashEntries(){return core.personalTrashEntries([e],doc);},discard:async(r,read)=>{doc=await f.api.discardCompletionEntry(S,r,()=>true,read);},retire:async(r,read)=>{doc=await f.api.retireCompletionEntry(S,r,()=>true,read);},decide(){assert.fail('cancelled hide must never decide or cancel a reservation');}};
+ const context={exports:{},personalVisibilitySource:{current:{entries:[e],personal:[],candidates:[e]}},actionCompletion:model,completionHideEligible:core.completionHideEligible,completionEligible:core.completionEligible,ownedCompletionEntry:core.ownedCompletionEntry,completionKey:core.completionKey,mergeCompletionEntries:core.mergeCompletionEntries,completionEntries:[e],personalGoLog:[],get goLog(){return [e].filter(r=>!model.isDiscarded(r));},lang:'es',Alert:{alert:(...a)=>alerts.push(a)},setLandingDetailsId(){},listOpen:true,noteIdentity:{ready:false,scope:S},useMemo:fn=>fn(),listFilter:'todos',customerBookings:{entries:[e]},isBusinessMode:false,isUserMode:true,listActivityFilter:'todas',listCallsOpen:false,listTypeFilter:'todos',canReadBoardTask:()=>true,isArchivedNote:()=>false,noteInScope:()=>false,isPendingListEntry:()=>false,getGoActivityKey:()=>''};
+ vm.runInNewContext(ts.transpileModule(names.filter(n=>n!=='filteredListEntries').map(n=>'const '+n+'='+decl[n]+';').join(';')+'exports.can=canResolveEntry;exports.resolve=resolveEntry;exports.retire=retirePersonalEntry;exports.filter=()=>'+decl.filteredListEntries+';',{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context);
+ assert.equal(context.exports.can(e),true);context.exports.resolve(e,'done');assert.equal(alerts.length,0);
+ context.exports.resolve(e,'discard');assert.equal(alerts[0][0],'Ocultar mi ficha');assert.equal(context.exports.filter().length,1);alerts[0][2].at(-1).onPress();await new Promise(r=>setImmediate(r));assert.equal(context.exports.filter().length,0);
+ context.listFilter='reservas';assert.equal(context.exports.filter().length,0);context.listFilter='papelera';assert.equal(context.exports.filter().length,1);
+ context.exports.retire(e);assert.equal(alerts.at(-1)[0],'Retirar de Eliminadas');context.personalVisibilitySource.current={entries:[{...e,time:'11:00'}],personal:[],candidates:[]};alerts.at(-1)[2].at(-1).onPress();await new Promise(r=>setImmediate(r));assert.equal(context.exports.filter().length,1,'an updated card during confirmation is not retired using an old render');assert.equal(alerts.at(-1)[0],'GO');context.personalVisibilitySource.current={entries:[e],personal:[],candidates:[e]};context.exports.retire(e);assert.equal(context.exports.filter().length,1);alerts.at(-1)[2].at(-1).onPress();await new Promise(r=>setImmediate(r));assert.equal(context.exports.filter().length,0);
+ doc=await storageFixture(f.memory).api.readCompletionDocument(S);assert.equal(context.exports.filter().length,0);assert.equal(JSON.stringify(e),before);
+});

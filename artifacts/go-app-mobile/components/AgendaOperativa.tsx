@@ -3425,7 +3425,7 @@ export function AgendaBoard({
         onMessage={expandedBookingItem && onOpenMessage ? () => handleOpenMessage(expandedBookingItem) : undefined}
         >
         {expandedBookingItem && (dismissThen => <>
-          {onResolveEntry && canResolveEntry?.(expandedBookingItem) && <GoEntryMicroActions entry={expandedBookingItem} layout="detail"
+          {onResolveEntry && canResolveEntry?.(expandedBookingItem) && !expandedBookingItem.deleted && expandedBookingItem.estado!=="rechazado" && expandedBookingItem.bookingStatus!=="cancelada" && <GoEntryMicroActions entry={expandedBookingItem} layout="detail"
             onDone={!expandedBookingItem.changeProposal&&!expandedBookingItem.proposal?()=>onResolveEntry(expandedBookingItem,"done",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id)):undefined}
             onPending={!expandedBookingItem.changeProposal&&!expandedBookingItem.proposal?()=>onResolveEntry(expandedBookingItem,"pending",()=>currentEntriesRef.current.find(e=>e.id===expandedBookingItem.id)):undefined}/> }
           {bookingPolicy?.canonical ? renderReservationControls(expandedBookingItem, true, dismissThen) : <GoEntryQuickActions entry={expandedBookingItem}

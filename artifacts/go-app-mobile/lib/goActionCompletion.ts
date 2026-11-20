@@ -8,6 +8,7 @@ export type CompletionEntry = GoEntry & {
 export type CompletionPreferences = { defaultDurationMinutes: number; reminderMinutes: number; pendingAlerts: boolean };
 export type Decision = { status: Resolution; schedule: string; at: number };
 export type CompletionRecord = {
+  retired?: { at: number };
   discarded?: { schedule: string; at: number };
   decision?: Decision; history: Decision[]; reminderMinutes?: number; remindAt?: number; alerts?: boolean;
 };
@@ -92,16 +93,35 @@ export function completionEligible(entry: CompletionEntry): boolean {
   return !entry.deleted && entry.estado!=="rechazado" && entry.bookingStatus!=="cancelada"
     && !(entry as GoEntry & {scheduled?:boolean}).scheduled;
 }
+/** Visibility is independent of contractual cancellation and personal follow-up. */
+export function completionHideEligible(entry:CompletionEntry):boolean {
+  return completionEligible(entry) || entry.bookingStatus==="cancelada"
+    && !!(entry.reservationId || entry.customerBooking || entry.businessBooking || entry.type==="GO_BOOKING" || entry.type==="GO_RESERVA");
+}
+export function completionRetired(entry:CompletionEntry,doc:CompletionDocument):boolean {
+  return ownedCompletionEntry(entry,doc.scope) && !!doc.records[completionKey(entry)]?.retired;
+}
+export function personalTrashEntries(entries:CompletionEntry[],doc:CompletionDocument):CompletionEntry[] {
+  return mergeCompletionEntries(entries,[]).filter(e=>ownedCompletionEntry(e,doc.scope)&&!completionRetired(e,doc)
+    && (!!e.deleted || e.estado==="rechazado" || completionDiscarded(e,doc)));
+}
+export function retireCompletion(doc:CompletionDocument,entry:CompletionEntry,at:number):CompletionDocument {
+  if(!ownedCompletionEntry(entry,doc.scope))throw new Error("No puedes retirar esta ficha en este contexto.");
+  if(completionRetired(entry,doc))return doc;
+  if(!entry.deleted && entry.estado!=="rechazado" && !completionDiscarded(entry,doc))throw new Error("La ficha no está en Eliminadas.");
+  const key=completionKey(entry),old=doc.records[key]||{history:[]};
+  return {...doc,records:{...doc.records,[key]:{...old,retired:{at}}}};
+}
 export function completionDecision(entry: CompletionEntry, doc: CompletionDocument): Decision | undefined {
   const d=doc.records[completionKey(entry)]?.decision;
   return d?.schedule===completionSchedule(entry)?d:undefined;
 }
 /** A personal display preference, never a cancellation or a shared booking update. */
 export function completionDiscarded(entry: CompletionEntry, doc: CompletionDocument): boolean {
-  return ownedCompletionEntry(entry,doc.scope) && doc.records[completionKey(entry)]?.discarded?.schedule===completionSchedule(entry);
+  return completionRetired(entry,doc) || ownedCompletionEntry(entry,doc.scope) && doc.records[completionKey(entry)]?.discarded?.schedule===completionSchedule(entry);
 }
 export function discardCompletion(doc: CompletionDocument, entry: CompletionEntry, at: number): CompletionDocument {
-  if(!ownedCompletionEntry(entry,doc.scope) || entry.deleted)throw new Error("No puedes descartar esta ficha en este contexto.");
+  if(!ownedCompletionEntry(entry,doc.scope) || entry.deleted && !completionHideEligible(entry))throw new Error("No puedes descartar esta ficha en este contexto.");
   if(completionDiscarded(entry,doc))return doc;
   const key=completionKey(entry),old=doc.records[key] || {history:[]};
   return {...doc,records:{...doc.records,[key]:{...old,discarded:{schedule:completionSchedule(entry),at}}}};
