@@ -148,6 +148,7 @@ test('compact DEMO edits independent activity blocks, appends activities and res
   assert.equal(calculations, 1);
   assert.ok(all(render()).some(node => node.children?.includes('69120 EUR')));
   assert.equal(blocks().length,1);
+  const inputRow=find(n=>n.props.testID==='finance-inputs-row');assert.equal(inputRow.props.style.flexDirection,'row');assert.equal(inputRow.children.length,3);assert.ok(all(inputRow).filter(n=>n.type==='Number').every(n=>n.props.compact));assert.ok(all(inputRow).some(n=>n.children?.includes('Empresas')));
   find(n=>n.type==='MultiChoice'&&n.props.label==='Actividades incluidas').props.onChange(['go_peluquerias','go_restaurantes']);
   assert.equal(blocks().length,2);
   assert.equal(field('ES','go_restaurantes','Empresas existentes').props.value,79508);

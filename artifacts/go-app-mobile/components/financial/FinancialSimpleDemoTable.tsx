@@ -92,10 +92,10 @@ export function FinancialSimpleDemoTable({ state, update, onCalculate }: Props) 
           <Text style={d.sectionTitle}>{item.activity} · {item.country}</Text>
           <Text style={s.note}>{originLabel(item.marketOrigin,item.reference?.estimated)}</Text>
           {item.reference&&<Text selectable style={s.note}>Referencia: {financialCount(item.reference.companies)} empresas · {item.reference.source.organization} · {item.reference.source.year} · {item.reference.source.scope}{item.reference.estimated?" · estimación (e)":""}</Text>}
-          <FinanceNumber integer label="Empresas existentes" value={item.market} onChange={value=>editMarket(item.countryCode,item.activityId,value)} placeholder="Sin dato"/>
-          <View style={[d.selection,(viewport.width<360||viewport.fontScale>1.3)&&d.stacked]}>
-            <FinanceNumber label="Captación (%)" value={item.share} onChange={value=>editAssumption(item.countryCode,item.activityId,"share",value)}/>
-            <FinanceNumber label="Cuota mensual (€)" value={item.fee} disabled={!item.feeEditable} onChange={value=>editAssumption(item.countryCode,item.activityId,"fee",value)}/>
+          <View testID="finance-inputs-row" style={d.compactFields}>
+            <View style={[d.compactField,{flex:1.15}]}><Text style={d.fieldLabel}>Empresas</Text><FinanceNumber compact integer label="Empresas existentes" value={item.market} onChange={value=>editMarket(item.countryCode,item.activityId,value)} placeholder="Sin dato"/></View>
+            <View style={d.compactField}><Text style={d.fieldLabel}>Captación %</Text><FinanceNumber compact label="Captación (%)" value={item.share} onChange={value=>editAssumption(item.countryCode,item.activityId,"share",value)}/></View>
+            <View style={d.compactField}><Text style={d.fieldLabel}>Cuota €/mes</Text><FinanceNumber compact label="Cuota mensual (€)" value={item.fee} disabled={!item.feeEditable} onChange={value=>editAssumption(item.countryCode,item.activityId,"fee",value)}/></View>
           </View>
           <Text style={s.note}>Captadas: {financialCount(item.companies)} · Mensual: {money(item.monthly)} · Anual: {money(item.annual)}</Text>
         </View>;
@@ -110,6 +110,6 @@ export function FinancialSimpleDemoTable({ state, update, onCalculate }: Props) 
 const d=StyleSheet.create({
   root:{flex:1,minHeight:0,alignSelf:"stretch",backgroundColor:"#F7F8FA"},resultsScroll:{flex:1,minHeight:0},resultsContent:{paddingHorizontal:10,paddingTop:6,gap:6,paddingBottom:GO_NAVIGATION_OVERLAY_CLEARANCE},disclaimer:{fontSize:10,color:"#677384"},
   results:{backgroundColor:"#FFFFFF",borderColor:"#E2E6EB",borderWidth:1,borderRadius:10,paddingHorizontal:10,paddingVertical:7,gap:3},sectionTitle:{fontSize:13,fontWeight:"700",color:"#171B22"},breakdownTitle:{fontSize:13,fontWeight:"700",color:"#171B22",marginTop:3},metricRow:{minHeight:24,flexDirection:"row",alignItems:"center",justifyContent:"space-between",gap:6},metricLabel:{fontSize:12,color:"#344052",flexShrink:1},resultValue:{color:"#20784B",fontSize:15,fontWeight:"800",fontVariant:["tabular-nums"],textAlign:"right",flexShrink:1},
-  activePair:{borderColor:"#8195B3"},selection:{flexDirection:"row",gap:8,alignItems:"flex-end"},stacked:{flexDirection:"column",alignItems:"stretch"},inputs:{gap:6},activityLink:{minHeight:44,justifyContent:"center",alignSelf:"flex-start"},activityLinkText:{color:"#205C9C",fontSize:13,fontWeight:"700"},activityEditor:{gap:6},
+  compactFields:{flexDirection:"row",gap:6,alignItems:"flex-end"},compactField:{flex:1,minWidth:0},fieldLabel:{color:"#505A69",fontSize:12,marginBottom:4},activePair:{borderColor:"#8195B3"},selection:{flexDirection:"row",gap:8,alignItems:"flex-end"},stacked:{flexDirection:"column",alignItems:"stretch"},inputs:{gap:6},activityLink:{minHeight:44,justifyContent:"center",alignSelf:"flex-start"},activityLinkText:{color:"#205C9C",fontSize:13,fontWeight:"700"},activityEditor:{gap:6},
   actionBar:{padding:8,backgroundColor:"#FFFFFF",borderTopWidth:1,borderColor:"#DCE1E8"},actions:{flexDirection:"row",gap:10},action:{flex:1,minHeight:48,borderRadius:10,alignItems:"center",justifyContent:"center",paddingHorizontal:6},calculate:{backgroundColor:"#20784B"},clear:{backgroundColor:"#B53338"},cancel:{backgroundColor:"#F6F7F9",borderWidth:1,borderColor:"#CBD1DA"},actionText:{color:"#FFFFFF",fontWeight:"800",fontSize:15,textAlign:"center"},cancelText:{color:"#344052",fontWeight:"700"},
 });
