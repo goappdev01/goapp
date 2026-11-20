@@ -30,3 +30,19 @@ test('information starts at the real local iOS inset with no obsolete QR or titl
  const viewport=fs.readFileSync('components/landing/LandingContentViewport.tsx','utf8');
  assert.match(viewport,/contentInsetAdjustmentBehavior="never"/);assert.match(viewport,/scrollRef.current\?\.scrollTo\(\{y:0,animated:false\}\)/);
 });
+
+test('ACCIONES fits beside NOTA and releases a full selector row at iPhone widths and all three sizes',()=>{
+ const layout=evaluate('components/landing/landingResponsiveLayout.ts');
+ for(const width of [320,390,430])for(const preset of ['compacto','estandar','grande'])for(const alignment of ['right','left','center']){
+  const insets={left:0,right:0,top:59,bottom:34},scale=layout.fitLandingScale(preset,width,822,insets),r=Math.round(99*scale),size=Math.round(50*scale);
+  const geom=orbital.compactLandingOrbit({goSize:Math.round(128*scale),orbitRadius:r,orbitSize:Math.round(65*scale),orbitCount:8,orbitVisible:true,satelliteRadius:r+Math.round(35*scale),satelliteSize:size,helpSize:size,alignment,
+   satellites:Object.entries(layout.LANDING_SATELLITE_DEGREES).filter(([key])=>key!=='payment').map(([key,degrees])=>({key,degrees})),bounds:{left:0,right:width,top:59,bottom:788}});
+  const slot=panels.landingActionsBesideNote(geom.obstacles,geom.bounds,geom.mirrored);assert.ok(slot,width+'/'+preset+'/'+alignment);
+  assert.ok(slot.width>=64&&slot.height>=44);assert.ok(slot.x>=0&&slot.x+slot.width<=width);
+  const note=geom.obstacles.find(n=>n.key==='bell');assert.ok(geom.mirrored?slot.x>=note.x+note.width:slot.x+slot.width<=note.x);
+  assert.ok(Math.abs(geom.frame.y+geom.frame.height-788)<.001,'complete orbit reaches the safe floor');
+  const base={commands:{x:18,y:300,width:width-36,height:46},region:{x:18,y:63,width:width-36,height:229}};
+  const old=panels.landingActionPanelFrames(base,geom.frame.y-8,true),next=panels.landingActionPanelFrames(base,geom.frame.y-8,false);
+  assert.equal(next.region.height-old.region.height,54);assert.equal(next.commands.y-old.commands.y,54);
+ }
+});

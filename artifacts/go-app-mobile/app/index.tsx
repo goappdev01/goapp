@@ -154,7 +154,7 @@ import { entryHeading, entryIdentity, entryIsReservation, entryMapsUrl, entryMes
 import { changeTask } from "@/lib/goTaskManagement";
 import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands";
 import { compactLandingOrbit, landingOrbitSafeBounds, redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
-import { splitLandingAppointments, landingPanelFrames, landingActionPanelFrames, landingScrollPanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
+import { splitLandingAppointments, landingPanelFrames, landingActionPanelFrames, landingActionsBesideNote, landingScrollPanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
 import { fitLandingScale, landingPresetScale, landingDockBounds, landingContentFrame,
   landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES } from "@/components/landing/landingResponsiveLayout";
 import {
@@ -14251,8 +14251,13 @@ function HomeScreenContent() {
   // Selectors follow the actual rendered footprint; none of these values feed orbital placement.
   const landingSelectorFloor = landingBaseFrame.virtual ? undefined
     : (compactLandingActive ? compactLandingGeometry.frame.y - landingOffsetY : landingOrbitTop) - 8;
+  const landingActionsRootRect = compactLandingActive && !landingBaseFrame.virtual
+    ? landingActionsBesideNote(compactLandingGeometry.obstacles,compactLandingBounds,compactLandingGeometry.mirrored) : null;
+  const landingActionsSlot = landingActionsRootRect ? {...landingActionsRootRect,
+    x:landingActionsRootRect.x-(landingBaseFrame.virtual?landingBaseFrame.left:0),
+    y:landingActionsRootRect.y-landingOffsetY-(landingBaseFrame.virtual?landingBaseFrame.top:0)} : undefined;
   const landingDisplayPanels = landingActionPanelFrames(landingPanels, landingSelectorFloor,
-    landingHasActionSelector && (landingHasNext || landingHasChanges));
+    !landingActionsSlot && landingHasActionSelector && (landingHasNext || landingHasChanges));
   const landingLowerOffsets = landingArrangement.offsets;
   const landingDisplayCloseRect = landingArrangement.closeRect;
   const landingNavigationCloseRect = (() => {
@@ -14879,7 +14884,7 @@ function HomeScreenContent() {
           width:landingDisplayPanels.region.width,height});
       })()}
       {!anyOverlayOpen && !isActivelyCreating && !rutasMode && kbHeight === 0 && (
-        <LandingPanelCommands frame={landingDisplayPanels.commands} commands={[
+        <LandingPanelCommands frame={landingDisplayPanels.commands} actionsSlot={landingActionsSlot} commands={[
           { key: "visit", heading: t('next_fem'), title: t('word_visit').toUpperCase(),
             color: LANDING_VISIT_VISUAL.color, count: nextGroups.visit.length,
             expanded: !cambiosOpen && !nextAptMinimized && nextPanelKind === "visit",

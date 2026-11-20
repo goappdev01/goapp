@@ -111,3 +111,18 @@ export function landingActionPanelFrames(panels: ReturnType<typeof landingPanelF
  const region={...panels.region,height:Math.max(1,commands.y-8-panels.region.y)};
  return {commands,region,next:region,changes:region};
 }
+
+/** Reuse the free outer lane beside NOTA; never move a satellite to make room. */
+export function landingActionsBesideNote(nodes: readonly (HumanityRect & {key:string})[], bounds:{left:number;right:number;top:number;bottom:number}, mirrored=false): HumanityRect | null {
+ const note=nodes.find(n=>n.key==='bell');if(!note)return null;
+ const gap=6,height=44;
+ const available=mirrored?bounds.right-note.x-note.width-gap:note.x-bounds.left-gap;
+ const width=Math.min(104,available);if(width<64)return null;
+ const rect={x:mirrored?note.x+note.width+gap:note.x-gap-width,y:note.y+(note.height-height)/2,width,height};
+ const clear = () => rect.y>=bounds.top && rect.y+height<=bounds.bottom && !nodes.some(n=>{const cx=n.x+n.width/2,cy=n.y+n.height/2;
+  const dx=cx-Math.max(rect.x,Math.min(cx,rect.x+width)),dy=cy-Math.max(rect.y,Math.min(cy,rect.y+height));
+  return Math.hypot(dx,dy)<n.width/2+gap-0.01;});
+ // Stay beside NOTA, raising only enough to clear the neighbouring upper orbit.
+ for(let lift=0;lift<=height/2;lift++){rect.y=note.y+(note.height-height)/2-lift;if(clear())return {...rect};}
+ return null;
+}

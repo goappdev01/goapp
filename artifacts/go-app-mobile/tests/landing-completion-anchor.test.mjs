@@ -106,3 +106,13 @@ test('the narrow landscape decision row fits three accessible targets without ov
  const ui=evaluate('components/landing/LandingActionCompletion.tsx',{'react-native-safe-area-context':{useSafeAreaInsets:()=>({})},'@/lib/goActionCompletion':evaluate('lib/goActionCompletion.ts')});
  for(const width of [144,162,180,268,336]){const row=ui.completionDecisionLayout(width);assert.ok(row.side>=44);assert.ok(row.side*3+row.gap*2<=width+.001);}
 });
+
+test('relocated ACCIONES remains inside its native hit-testing parent and keeps its handler',async()=>{
+ let hosts=[],pressed=0;const native={...rn,View:p=>{hosts.push(p);return React.createElement('div',{},p.children)},TouchableOpacity:p=>{hosts.push(p);return React.createElement('button',{},p.children)}};
+ const ui=evaluate('components/landing/LandingPanelCommands.tsx',{'react-native':native,'./landingPanels':policy});
+ const root=createRoot(document.createElement('div'));
+ try{await React.act(()=>root.render(React.createElement(ui.LandingPanelCommands,{frame:{x:18,y:400,width:354,height:46},actionsSlot:{x:25,y:460,width:100,height:44},commands:[{key:'changes',heading:'CAMBIOS',title:'PROPUESTOS',color:'#f97316',count:2,expanded:false,onPress(){}},{key:'actions',heading:'',title:'ACCIONES',color:'#f97316',count:3,expanded:false,onPress(){pressed++}}]})));
+  const parent=hosts.find(p=>p.testID==='landing-panel-commands').style,button=hosts.find(p=>p.testID==='landing-command-actions');
+  assert.ok(parent.top+parent.height>=504);assert.ok(parent.left<=25);assert.equal(button.style.height,44);await React.act(()=>button.onPress());assert.equal(pressed,1);
+ }finally{await React.act(()=>root.unmount())}
+});
