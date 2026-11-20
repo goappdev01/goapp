@@ -11,7 +11,7 @@ test('Listados closes its detail and sheet before dispatching the existing reser
  assert.ok(detail&&finish);
  const calls=[],entry={id:'booking-1',reservationId:'real-booking'};
  const scope={React:{Fragment:'Fragment',createElement:(type,props,...children)=>({type,props,children})},
-  GoEntryDetailsSheet:'Details',canResolveEntry:()=>false,actionCompletion:{isSaving:()=>false},handedness:'right',goDirectlyToLanding(){},renderEntryMessageScreen(){},openEntryMessage(){},
+  GoEntryDetailsSheet:'Details',canResolveEntry:()=>false,actionCompletion:{isSaving:()=>false,isDiscarded:()=>false},handedness:'right',goDirectlyToLanding(){},renderEntryMessageScreen(){},openEntryMessage(){},
   setCalBookingDetailEntry:value=>calls.push(['close-detail',value]),renderEntryMicroActions:()=>null,
   renderEntryQuickActions:(_entry,_state,_compact,_edit,propose)=>({type:'QuickActions',propose}),renderLinkedNotes:()=>null,
   listBookingProposalAfterDismissRef:{current:null},setListOpen:value=>calls.push(['close-list',value]),
@@ -94,4 +94,10 @@ test('opening tools retains the real list scroll and footer underneath an exclus
  assert.ok(nodes(open).find(n=>n.props.pointerEvents==='none'&&n.props.accessibilityElementsHidden===true&&n.props.importantForAccessibility==='no-hide-descendants'));
  assert.equal(nodes(open).some(n=>n.props.testID==='listados-floating-close'),false);
  const closed=f.render();assert.equal(nodes(closed).some(n=>n.props.testID==='sheet-screen-overlay'),false);assert.ok(nodes(closed).find(n=>n.props.testID==='listados-scroll'));
+});
+
+test('opening a hidden Deleted card connects its footer and personal ELIMINAR to the same retirement operation',()=>{
+ const entry={id:'hidden',ownerUserId:'owner',deleted:true},calls=[],detail=all.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='renderListBookingDetail');
+ const scope={exports:{},React:{Fragment:'Fragment',createElement:(type,props,...children)=>({type,props:props||{},children})},GoEntryDetailsSheet:'Details',handedness:'right',goDirectlyToLanding(){},actionCompletion:{scope:{userId:'owner'},active:()=>true,isDiscarded:()=>true,isSaving:()=>false},ownedCompletionEntry:()=>true,canResolveEntry:()=>false,removeListEntry:e=>calls.push(e.id),setCalBookingDetailEntry(){},renderEntryMessageScreen(){},openEntryMessage(){},renderEntryMicroActions:(_entry,_inline,_layout,_scale,discard)=>({type:'Personal',props:{onDiscard:discard}}),renderEntryQuickActions:()=>null,renderLinkedNotes:()=>null};
+ vm.runInNewContext(compile(detail.getText(ast)+';exports.open=renderListBookingDetail;'),scope);const sheet=scope.exports.open(entry);assert.equal(sheet.props.discardFromTrash,true);sheet.props.onDiscard();const content=sheet.children[0](()=>{}),personal=content.children.find(n=>n?.type==='Personal');personal.props.onDiscard();assert.deepEqual(calls,['hidden','hidden']);
 });

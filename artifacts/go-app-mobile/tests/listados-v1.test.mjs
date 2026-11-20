@@ -18,7 +18,7 @@ function expand(t){if(!t||typeof t!=='object')return t;if(Array.isArray(t))retur
 const base={id:'one',ownerUserId:'owner',actionContext:'live:USER',type:'GO_BOOKING',customerBooking:true,reservationId:'original',businessId:'salon',serviceId:'service',
  bookingStatus:'confirmada',bookingServerStatus:'CONFIRMED',estado:'aceptado',kind:'received',intentLabel:'Corte',contactName:'Peluquería con un nombre muy largo',professionalName:'María José',
  dateISO:'2030-01-07',date:'7/1/2030',time:'10:30',duration:'30min'};
-function card({entry=base,hand='right',size='medio',width=390,fontScale=1,followUp,failed=false}={}){
+function card({entry=base,hand='right',size='medio',width=390,fontScale=1,followUp,failed=false,noteEditor=false}={}){
  const f=fixture({viewport:{width,height:844,fontScale}}),c=f.load('components/GoEntryDetails.tsx'),controls=f.load('components/listados/ListadosControls.tsx');
  const presentation=f.load('data/goEntryPresentation.ts'),policy=f.load('data/reservationCardPolicy.ts'),translations=f.load('i18n/translations.ts').translations.es;
  const calls=[],record=name=>(...args)=>calls.push([name,...args]);
@@ -29,7 +29,7 @@ function card({entry=base,hand='right',size='medio',width=390,fontScale=1,follow
   INTENTS:[],RESERVAS_ORBITAL_CATS:[],t:key=>translations[key]??key,localizeLabel:x=>x,displayContact:(name,phone)=>name||phone,
   Haptics:{selectionAsync:async()=>{}},canResolveEntry:e=>!e.deleted,
   actionCompletion:{status:()=>followUp,failedDecisions:failed?[{id:'failure',entry}]:[],retryDecision:record('retry')},
-  openListSavedNote:()=>false,retirePersonalEntry:record('retire'),setCalBookingDetailEntry:record('detail'),renderLinkedNotes:()=>null,
+  openListSavedNote:()=>noteEditor,retirePersonalEntry:record('retire'),removeListEntry:record('retire'),setCalBookingDetailEntry:record('detail'),renderLinkedNotes:()=>null,
   renderEntryMicroActions:e=>f.render(c.GoEntryMicroActions,{entry:{...e,localResolutionStatus:followUp},layout:'list',handedness:hand,
     onDone:record('done'),onPending:record('pending'),onDiscard:record('discard')}),
   altSlotsEntry:null,TRASH_DISPLAY_LIMIT:50,pendingUndos:{},completionKey:f.load("lib/goActionCompletion.ts").completionKey,
@@ -147,3 +147,5 @@ test('large text and long contractual states remain in the allocated header row 
 });
 
 test('Deleted card trash dispatches personal retirement rather than cancelling or mutating the shared booking',()=>{const entry={...base,deleted:true,bookingStatus:'cancelada'},before=JSON.stringify(entry),f=card({entry});const button=nodes(f.tree).find(n=>n.props.testID==='retire-personal-entry-'+entry.id);assert.ok(button);assert.equal(button.props.accessibilityLabel,'Retirar de Eliminadas');assert.equal(nodes(button).find(n=>n.type==='Feather').props.name,'trash-2');button.props.onPress({stopPropagation(){}});assert.equal(f.calls[0][0],'retire');assert.equal(JSON.stringify(entry),before);});
+
+test('Deleted entries open their personal retirement detail instead of a separate note editor',()=>{const entry={...base,deleted:true},f=card({entry,noteEditor:true});nodes(f.tree).find(n=>n.props.testID==='list-entry-card-'+entry.id).props.onPress();assert.equal(f.calls[0][0],'detail');const swipe=nodes(f.tree).find(n=>n.type==='SwipeableRow');swipe.props.onSwipeLeft();assert.equal(f.calls.at(-1)[0],'retire');assert.equal(swipe.props.leftIcon,'trash-2');});

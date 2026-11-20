@@ -370,3 +370,5 @@ test('cancelled Calendar detail keeps the eye-off personal action while follow-u
  assert.equal(canResolveEntry({...entry,ownerUserId:'B'}),false);
  props.goLog=[];tree=f.render(AgendaBoard,props);assert.equal(nodes(tree,n=>n.props.testID==='entry-details-overlay').length,0);
 });
+
+test('Deleted detail reuses its bottom control as personal retirement without changing the normal eye-off action',()=>{let retired=0;const entry={...base,deleted:true,bookingStatus:'cancelada'},before=JSON.stringify(entry),f=sheet(entry,{discardFromTrash:true,onDiscard:()=>retired++});const button=nodes(f.tree,n=>n.props.testID==='entry-discard')[0];assert.equal(button.props.accessibilityLabel,'Retirar de Eliminadas');assert.equal(nodes(button,n=>n.type==='Feather')[0].props.name,'trash-2');button.props.onPress({stopPropagation(){}});assert.equal(retired,1);assert.equal(JSON.stringify(entry),before);const normal=sheet(base,{onDiscard(){}});assert.equal(nodes(nodes(normal.tree,n=>n.props.testID==='entry-discard')[0],n=>n.type==='Feather')[0].props.name,'eye-off');});
