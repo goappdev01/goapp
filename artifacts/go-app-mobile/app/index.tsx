@@ -13664,7 +13664,7 @@ function HomeScreenContent() {
     onDone={canResolveEntry(entry)&&completionEligible(entry)?()=>resolveEntry(entry,"done"):undefined}
     onPending={canResolveEntry(entry)&&completionEligible(entry)?()=>resolveEntry(entry,"pending"):undefined}
     onDiscard={discard??(canResolveEntry(entry)?()=>layout==="list"?removeListEntry(entry):resolveEntry(entry,"discard"):undefined)}/>;
-  const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false, editNote?:()=>void, propose?:()=>void) => <GoEntryQuickActions entry={followedEntry(entry)} showState={showState} compact={compact}
+  const renderEntryQuickActions = (entry: GoEntry, showState = true, compact = false, editNote?:()=>void, propose?:()=>void, stateOnly=false) => <GoEntryQuickActions entry={followedEntry(entry)} showState={showState} compact={compact} stateOnly={stateOnly}
     onCancel={() => cancelEntryFromDetails(entry)} onEdit={editNote||(()=>openEntryChange(entry))} onPropose={propose??(()=>openEntryChange(entry))}
     onAccept={() => { if (entry.changeProposal) acceptProposal(entry.id); else if (!entry.customerBooking && !entry.businessBooking) updateLogStatus(entry.id, "aceptado"); }}
     onConfirm={entry.businessBooking && entry.ownerUserId ? () => {
@@ -15038,7 +15038,7 @@ function HomeScreenContent() {
               onOpen={item.kind === "cambio" ? () => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); setLandingDetailsId(item.g.id); } : undefined}
               adaptiveBody={{ ...changesCardSpace, frameVerticalInset: 3 }}
               footer={item.kind === "cambio" && renderLandingOperations(item.g).content}
-              footerGap={Math.round(8 * uiScaleFactor)} overflowing={false} onHeight={() => {}}
+              footerGap={Math.round(3 * uiScaleFactor)} overflowing={false} onHeight={() => {}}
               contentContainerStyle={{ gap: Math.round(12 * uiScaleFactor) }}
               headerGap={Math.round(4 * uiScaleFactor)}
               bodyFrame={(body) => (
@@ -15290,7 +15290,7 @@ function HomeScreenContent() {
               onOpen={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); setLandingDetailsId(g.id); }}
               adaptiveBody={{ availableHeight: nextCardAvailableHeight, frameVerticalInset: Math.round((entryIsInternal(g) || entryIsReservation(g) ? 6 : 10) * uiScaleFactor) + Math.round((entryIsInternal(g) ? 8 : 14) * uiScaleFactor) + 3, width: PANEL_W, headerObstacles }}
               footer={operations.content}
-              footerGap={Math.round(8 * uiScaleFactor)} overflowing={false} onHeight={() => {}}
+              footerGap={Math.round(3 * uiScaleFactor)} overflowing={false} onHeight={() => {}}
               contentContainerStyle={{ gap: PANEL_ACTION_GAP }}
               bodyFrame={(body) => (
               <Animated.View
@@ -15329,7 +15329,7 @@ function HomeScreenContent() {
                   paddingHorizontal: Math.round(12 * uiScaleFactor),
                   paddingVertical: Math.round(14 * uiScaleFactor),
                   paddingTop: Math.round((entryIsInternal(g) || entryIsReservation(g) ? 6 : 10) * uiScaleFactor),
-                  ...(entryIsInternal(g) ? { paddingBottom: Math.round(8 * uiScaleFactor) } : {}),
+                  ...((entryIsInternal(g)||entryIsReservation(g)) ? { paddingBottom: Math.round(3 * uiScaleFactor) } : {}),
                   borderRadius: Math.round(14 * uiScaleFactor),
                   borderWidth: 1.5,
                   borderColor: entryIsReservation(g) || entryIsInternal(g) ? "transparent" : nextCardDeleteConfirm === g.id ? "#ef4444" : tint,
@@ -15482,6 +15482,7 @@ function HomeScreenContent() {
                         );
                       })()}
                     </View>
+                    <View testID="landing-date-status" style={{flexShrink:0,alignItems:"flex-end"}}>{renderEntryQuickActions(g,true,true,undefined,undefined,true)}</View>
                   </View>
                   {renderEntryMicroActions(g, true)}
                 </>}
@@ -15523,7 +15524,7 @@ function HomeScreenContent() {
                     );
                   })() },
                 ]}
-                actions={renderEntryQuickActions(g, true, true)}
+                actions={renderEntryQuickActions(g, false, true)}
               />
 
               {/* Botones de acción — cuadrícula dinámica (2 o 3 cols)

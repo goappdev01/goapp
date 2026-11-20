@@ -121,7 +121,7 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
 }
 
 /** Callers supply the same existing commands used in Calendar. This component never mutates a record. */
-export function GoEntryQuickActions({ entry, showState = true, compact = false, ...actions }: { entry: GoEntry; showState?: boolean; compact?: boolean } & GoEntryActionCallbacks) {
+export function GoEntryQuickActions({ entry, showState = true, compact = false, stateOnly = false, ...actions }: { entry: GoEntry; showState?: boolean; compact?: boolean; stateOnly?: boolean } & GoEntryActionCallbacks) {
   const { lang, t } = useLanguage(), policy = reservationCardPolicy(entry);
   const [pressed,setPressed]=useState<string|null>(null);
   const canonical = policy.canonical;
@@ -134,8 +134,10 @@ export function GoEntryQuickActions({ entry, showState = true, compact = false, 
     : accepted ? (lang === "en" ? "ACCEPTED" : "ACEPTADA") : entry.estado === "rechazado" ? (lang === "en" ? "CANCELLED" : "CANCELADA") : (lang === "en" ? "PENDING" : "PENDIENTE");
   const pending = entryProposalPending(entry);
   const button = (label: string, tone: GoListAction["tone"], callback?: () => void) => callback && <TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} activeOpacity={compact?0.72:0.82} onPressIn={compact?undefined:()=>setPressed(label)} onPressOut={compact?undefined:()=>setPressed(null)} onPress={event => { event?.stopPropagation(); callback(); }} style={[s.action, compact && s.compactAction, goActionVisual(tone,false,false,pressed===label)]}><Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{ color:"#FFFFFF", fontSize: compact ? 10 : 12, fontWeight: "800", textAlign: "center" }}>{label}</Text></TouchableOpacity>;
+  const stateLabel = <Text numberOfLines={1} style={{ color: canonical ? policy.stateColor : entry.localResolutionStatus==="done"?C.done:entry.localResolutionStatus==="pending"?C.pending:accepted?C.accepted:entry.estado==="rechazado"?C.destructive:C.pending, fontSize: compact ? 10 : 13, fontWeight: "800" }}>{pending ? "Original: " : ""}{state}</Text>;
+  if(stateOnly)return stateLabel;
   return <View testID="entry-quick-actions" style={{ gap: compact ? 4 : 8 }}>
-    {showState && <Text numberOfLines={1} style={{ color: canonical ? policy.stateColor : entry.localResolutionStatus==="done"?C.done:entry.localResolutionStatus==="pending"?C.pending:accepted?C.accepted:entry.estado==="rechazado"?C.destructive:C.pending, fontSize: compact ? 10 : 13, fontWeight: "800" }}>{pending ? "Original: " : ""}{state}</Text>}
+    {showState && stateLabel}
     {canonical&&entry.localResolutionStatus&&<Text style={{color:entry.localResolutionStatus==="done"?C.done:C.pending,fontSize:compact?10:13}}>{lang==="en"?"My follow-up: ":"Mi seguimiento: "}{entry.localResolutionStatus==="done"?(lang==="en"?"DONE":"REALIZADA"):(lang==="en"?"PENDING":"PENDIENTE")}</Text>}
     {pending && <Text numberOfLines={1} style={{color:received?C.change:C.pending,fontSize:compact?10:13,fontWeight:"700"}}>{received ? (lang === "en" ? "Change received · pending" : "Cambio recibido · pendiente") : (lang === "en" ? "Change · awaiting response" : "Cambio · esperando respuesta")}</Text>}
     {active && <View style={[s.actions, compact && {flexWrap:"nowrap",gap:6}]}>
