@@ -167,13 +167,13 @@ test("notification failure after persistence never rolls back or falsely reports
  }finally{await f.close();}
 });
 
-test("ES/EN decision labels remain whole, centered and accessible; square controls adapt only their own area",async()=>{
+test("ES/EN decision labels remain whole, centered and accessible; compact controls keep the fixed orange/yellow/green order",async()=>{
  for(const lang of ["es","en"])for(const width of [320,390,430])for(const fontScale of [1,1.3,2,3]){
   const f=await fixture({width,fontScale,lang});try{
    const layout=f.ui.completionDecisionLayout(width-52,fontScale);
    assert.ok(layout.columns>=1&&layout.columns<=3);assert.ok(layout.side>=44);assert.ok(layout.side*layout.columns+8*(layout.columns-1)<=width-52+.001);
    for(const label of lang==="es"?["REALIZADO","PENDIENTE","PROPONER CAMBIO"]:["DONE","PENDING","PROPOSE CHANGE"]){
-    const props=f.buttons.get(label);assert.ok(props,label);assert.equal(props.style.width,props.style.height);assert.ok(props.style.minHeight>=44);
+    const props=f.buttons.get(label);assert.ok(props,label);assert.equal(props.style.height,layout.height);assert.ok(props.style.height<=72);assert.ok(props.style.minHeight>=44);
     const text=props.children.props;assert.equal(text.style.textAlign,"center");assert.equal(text.style.width,"100%");assert.equal(text.adjustsFontSizeToFit,true);
     assert.equal(text.numberOfLines,label.includes(" ")?2:1);assert.equal(text.children,label.replace(" ","\n"));
    }

@@ -103,7 +103,7 @@ const nodes=(n,p=()=>true)=>!n||typeof n!=='object'?[]:[...(p(n)?[n]:[]),...(n.c
 test('real confirmation buttons dispatch exactly one personal decision or open the existing draft',()=>{
  const e=entry(),calls=[],model={scope:S,doc:core.emptyCompletionDocument(S),candidates:[e],unresolved:[e],pending:[],selected:null,decide:(e,s)=>calls.push([e.id,s]),setSelected(){},configure(){},busy:false};const ui=uiFixture(model),tree=ui.render();
  const choices=nodes(tree,n=>['REALIZADO','PENDIENTE','PROPONER CAMBIO'].includes(n.props.accessibilityLabel));assert.equal(choices.length,6,'same controls exist in the inline area and hidden modal');
- for(const label of ['REALIZADO','PENDIENTE','PROPONER CAMBIO']){const b=choices.find(n=>n.props.accessibilityLabel===label);assert.equal(b.props.style.width,b.props.style.height);assert.ok(b.props.style.minHeight>=44);b.props.onPress();}
+ for(const label of ['REALIZADO','PENDIENTE','PROPONER CAMBIO']){const b=choices.find(n=>n.props.accessibilityLabel===label);assert.equal(b.props.style.height,48);assert.ok(b.props.style.width>=44);assert.ok(b.props.style.minHeight>=44);b.props.onPress();}
  assert.deepEqual(calls,[['one','done'],['one','pending']]);assert.deepEqual(ui.calls,[['propose','one']]);assert.equal(e.changeProposal,undefined);
 });
 test('multiple unresolved/pending actions are reviewed individually and never disappear on a tab or close',()=>{

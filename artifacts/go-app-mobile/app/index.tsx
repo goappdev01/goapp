@@ -21,7 +21,7 @@ import { orbitAccountLabelSize } from "@/lib/orbitAccountLabel";
 import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
 import { useActionCompletion } from "@/hooks/useActionCompletion";
-import { LandingActionCompletion, completionFrame, completionPanelFrame, LANDING_COMPLETION_PANEL_GAP, type CompletionFrame } from "@/components/landing/LandingActionCompletion";
+import { LandingActionCompletion, type CompletionFrame } from "@/components/landing/LandingActionCompletion";
 import { completionKey, ownedCompletionEntry, completionEligible, completionHideEligible, completionSchedule, mergeCompletionEntries, type CompletionEntry } from "@/lib/goActionCompletion";
 import { bindAttachedNoteReminder, effectiveNoteReminderEntry, goNoteReminderMinutes, hasAttachedNoteReminder, isGoNoteReminderTarget, noteReminderLabel, type NoteReminderDraft } from "@/lib/goNoteTools";
 import { saveGoNoteReminder, changeGoNoteReminder, confirmAttachedGoNoteReminder } from "@/lib/goNoteReminder";
@@ -154,7 +154,7 @@ import { entryHeading, entryIdentity, entryIsReservation, entryMapsUrl, entryMes
 import { changeTask } from "@/lib/goTaskManagement";
 import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands";
 import { compactLandingOrbit, landingOrbitSafeBounds, redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
-import { splitLandingAppointments, landingPanelFrames, landingScrollPanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
+import { splitLandingAppointments, landingPanelFrames, landingActionPanelFrames, landingScrollPanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
 import { fitLandingScale, landingPresetScale, landingDockBounds, landingContentFrame,
   landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES } from "@/components/landing/landingResponsiveLayout";
 import {
@@ -3468,9 +3468,9 @@ function HomeScreenContent() {
   personalVisibilitySource.current={entries:completionEntries,personal:personalGoLog,candidates:actionCompletion.candidates};
   const goLog=useMemo(()=>completionEntries.filter(entry=>!actionCompletion.isDiscarded(entry)),[completionEntries,actionCompletion.isDiscarded]);
   const [landingDetailsId, setLandingDetailsId] = useState<string | null>(null);
-  const [landingCompletionHeight, setLandingCompletionHeight] = useState(44);
+  const [landingActionsOpen, setLandingActionsOpen] = useState(false);
   const landingDetailsEntry = goLog.find(entry => entry.id === landingDetailsId) ?? null;
-  useEffect(() => { setLandingDetailsId(null); }, [goView.view, completionIdentity.scope?.userId, completionIdentity.scope?.context]);
+  useEffect(() => { setLandingDetailsId(null); setLandingActionsOpen(false); }, [goView.view, completionIdentity.scope?.userId, completionIdentity.scope?.context]);
   const [receivedDetailOpen, setReceivedDetailOpen] = useState(false);
   const [receivedDetailGo, setReceivedDetailGo] = useState<typeof goLog[number] | null>(null);
 
@@ -4682,7 +4682,7 @@ function HomeScreenContent() {
     messagesOpen || humanityOpen || notesOpen || optionsOpen || respondOpen ||
     empresaOpen || mapOpen || listOpen || suggestOpen || proposalListOpen ||
     cancelOpen || cancelSuccessOpen || receivedDetailOpen || !!lateSheetGo ||
-    cambiosOpen || sugerirOpen || quickCreateOpen || calAddOpen ||
+    landingActionsOpen || cambiosOpen || sugerirOpen || quickCreateOpen || calAddOpen ||
     calQuickCreateOpen || advancedOpen || reservasOrbitalOpen ||
     goSearchOpen || goProveedorOpen || pedidoTrackingOpen ||
     historialPedidosOpen || calReservasOpen || calPanelOpen ||
@@ -11738,7 +11738,8 @@ function HomeScreenContent() {
     if (notesOpen)                 { setNotesOpen(false);            return; }
     if (proposalListOpen)          { setProposalListOpen(false);     return; }
     // ── 6. PRÓXIMA VISITA Y/O CAMBIOS ABIERTOS ──────────────────────────
-    if (!nextAptMinimized || cambiosOpen) {
+    if (!nextAptMinimized || cambiosOpen || landingActionsOpen) {
+      setLandingActionsOpen(false);
       if (!nextAptMinimized) setNextAptMinimized(true);
       if (cambiosOpen) setCambiosOpen(false);
       return;
@@ -14210,6 +14211,7 @@ function HomeScreenContent() {
     landingInlineHumanity, inlineHumanityRect.x, inlineHumanityRect.y, inlineHumanityRect.width,
     inlineHumanityRect.height, closeQrX, closeQrY, closeQrSize, closeQrHit, closeHeaderHeight]);
   const landingOffsetY = landingArrangement.offsetY;
+
   const supportObstacles = [
     ...((landingArrangement as {obstacles?:HumanityRect[]}).obstacles ?? landingOrbitObstacles.slice(1)).map(rect=>({...rect,circular:true})),
     ...[landingPanels.commands, landingPanels.region].map(rect=>{const root=toLandingRootRect(rect);return {...root,y:root.y+landingOffsetY};}),
@@ -14239,6 +14241,13 @@ function HomeScreenContent() {
       : undefined,
     bounds: compactLandingBounds,
   });
+  const landingHasActionSelector = actionCompletion.unresolved.length + actionCompletion.pending.length > 0
+    || !!actionCompletion.error || !!actionCompletion.savingCount || !!actionCompletion.failedDecisions?.length;
+  // Selectors follow the actual rendered footprint; none of these values feed orbital placement.
+  const landingSelectorFloor = landingBaseFrame.virtual ? undefined
+    : (compactLandingActive ? compactLandingGeometry.frame.y - landingOffsetY : landingOrbitTop) - 8;
+  const landingDisplayPanels = landingActionPanelFrames(landingPanels, landingSelectorFloor,
+    landingHasActionSelector && (landingHasNext || landingHasChanges));
   const landingLowerOffsets = landingArrangement.offsets;
   const landingDisplayCloseRect = landingArrangement.closeRect;
   const landingNavigationCloseRect = (() => {
@@ -14316,9 +14325,6 @@ function HomeScreenContent() {
     { x: closeQrX, y: closeQrY - landingOffsetY, width: closeQrSize, height: closeQrSize },
     ...(landingInlineHumanity ? [inlineHumanityRect] : []),
   ];
-  const landingHasCompletion = !!actionCompletion.scope && (!!actionCompletion.error && !actionCompletion.doc
-    || !!actionCompletion.doc && !!(actionCompletion.unresolved.length || actionCompletion.pending.length
-      || actionCompletion.savingCount || actionCompletion.failedDecisions?.length));
   const renderLandingHumanity = (placement: HumanityRect & { globe: number }) => (
         <TouchableOpacity
           activeOpacity={0.82}
@@ -14400,14 +14406,13 @@ function HomeScreenContent() {
           </Text>
         </TouchableOpacity>
   );
-  const landingCompletionAnchored = (landingHasChanges && cambiosOpen) || (landingHasNext && !cambiosOpen && !nextAptMinimized);
-  const renderLandingActionCompletion = (frame: CompletionFrame, anchorAbove = false) =>
+  const renderLandingActionCompletion = (frame: CompletionFrame) =>
     !anyOverlayOpen && !rutasMode && !goAuthOpen && authBootstrapComplete && <LandingActionCompletion
         model={actionCompletion} lang={lang} availableWidth={screen.width-insets.left-insets.right}
-        frame={frame} anchorAbove={anchorAbove}
-        onCompactHeight={height => setLandingCompletionHeight(previous => previous === height ? previous : height)}
-        onPendingList={()=>{setListFilter("pendiente");setListOpen(true);}}
+        frame={frame} visible={landingActionsOpen}
+        onPendingList={()=>{setLandingActionsOpen(false);setListFilter("pendiente");setListOpen(true);}}
         onPropose={entry=>{
+          setLandingActionsOpen(false);
           const scope=actionCompletion.scope;if(!scope || !actionCompletion.active(scope))return;
           const current=actionCompletion.candidates.find(candidate=>candidate.id===entry.id);
           if(!current || completionSchedule(current)!==completionSchedule(entry))return;
@@ -14860,12 +14865,21 @@ function HomeScreenContent() {
 
       {landingInlineHumanity && renderLandingHumanity(inlineHumanityRect)}
       <LandingContentViewport frame={landingFrame} offsetY={landingOffsetY} closingGesture={universalSwipeGesture}>
+      {landingActionsOpen && (() => {
+        const space = landingScrollPanelSpace({panel:landingDisplayPanels.region,frame:landingFrame,insets,
+          titleBottom:titleBottomLocalY ?? 0,controls:closeHeaderObstacles,offsetY:landingOffsetY});
+        const floor=landingDisplayPanels.region.y+landingDisplayPanels.region.height;
+        const height=space.availableHeight;
+        return renderLandingActionCompletion({x:landingDisplayPanels.region.x,y:floor-height,
+          width:landingDisplayPanels.region.width,height});
+      })()}
       {!anyOverlayOpen && !isActivelyCreating && !rutasMode && kbHeight === 0 && (
-        <LandingPanelCommands frame={landingPanels.commands} commands={[
+        <LandingPanelCommands frame={landingDisplayPanels.commands} commands={[
           { key: "visit", heading: t('next_fem'), title: t('word_visit').toUpperCase(),
             color: LANDING_VISIT_VISUAL.color, count: nextGroups.visit.length,
             expanded: !cambiosOpen && !nextAptMinimized && nextPanelKind === "visit",
             onPress: () => {
+              setLandingActionsOpen(false);
               setCambiosOpen(false);
               setNextAptMinimized(!cambiosOpen && !nextAptMinimized && nextPanelKind === "visit");
               setNextPanelKind("visit");
@@ -14881,6 +14895,7 @@ function HomeScreenContent() {
             color: readableOnDark(nextGroups.task[0]?.g.color || intent.color), count: nextGroups.task.length,
             expanded: !cambiosOpen && !nextAptMinimized && nextPanelKind === "task",
             onPress: () => {
+              setLandingActionsOpen(false);
               setCambiosOpen(false);
               setNextAptMinimized(!cambiosOpen && !nextAptMinimized && nextPanelKind === "task");
               setNextPanelKind("task");
@@ -14895,6 +14910,7 @@ function HomeScreenContent() {
           { key: "changes", heading: "CAMBIOS", title: "PROPUESTOS", color: "#f97316", count: allPendientes.length,
             expanded: cambiosOpen,
             onPress: () => {
+              setLandingActionsOpen(false);
               setNextAptMinimized(true);
               setCambiosOpen(open => !open);
               setCambiosCardIdx(0);
@@ -14906,6 +14922,10 @@ function HomeScreenContent() {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
               startRelatedGoAction(item.g);
             } },
+          { key: "actions", heading: "", title: lang === "en" ? "ACTIONS" : "ACCIONES", color: "#f97316",
+            count: actionCompletion.unresolved.length + actionCompletion.pending.length, available: landingHasActionSelector,
+            expanded: landingActionsOpen,
+            onPress: () => { setNextAptMinimized(true); setCambiosOpen(false); setLandingActionsOpen(open => !open); } },
         ]} />
       )}
 
@@ -14938,14 +14958,13 @@ function HomeScreenContent() {
         // ── ESTADO ABIERTO — panel con tarjeta + swipe ────────────────
         const BTN_H   = Math.round(Math.min(80, Math.max(56, 64 * uiScaleFactor)));
         const BTN_W   = uiScale === "grande" ? Math.round(BTN_H * 1.18) : Math.round(BTN_H * 1.28);
-        const PANEL_W = landingPanels.changes.width;
-        const panelSideStyle = { left: landingPanels.changes.x };
+        const PANEL_W = landingDisplayPanels.changes.width;
+        const panelSideStyle = { left: landingDisplayPanels.changes.x };
         const panelBottom = landingFrame.virtual
-          ? landingFrame.baseline + landingFrame.height - landingPanels.changes.y - landingPanels.changes.height
-          : screen.height - landingPanels.changes.y - landingPanels.changes.height;
-        const changesCardSpace = landingScrollPanelSpace({ panel: landingPanels.changes, frame: landingFrame,
-          insets, titleBottom: titleBottomLocalY ?? 0, controls: closeHeaderObstacles, offsetY: landingOffsetY,
-          confirmationHeight: landingHasCompletion ? landingCompletionHeight : 0, confirmationGap: LANDING_COMPLETION_PANEL_GAP });
+          ? landingFrame.baseline + landingFrame.height - landingDisplayPanels.changes.y - landingDisplayPanels.changes.height
+          : screen.height - landingDisplayPanels.changes.y - landingDisplayPanels.changes.height;
+        const changesCardSpace = landingScrollPanelSpace({ panel: landingDisplayPanels.changes, frame: landingFrame,
+          insets, titleBottom: titleBottomLocalY ?? 0, controls: closeHeaderObstacles, offsetY: landingOffsetY });
 
         // Resolver datos de visualización según tipo
         let cardAccent   = ACCENT;
@@ -15165,10 +15184,6 @@ function HomeScreenContent() {
             </LandingCardContents>
 
             {/* botón de cierre eliminado — lo gestiona el botón único flotante */}
-          {renderLandingActionCompletion(completionPanelFrame({
-              panelX: toLandingRootRect(landingPanels.changes).x, panelWidth: PANEL_W, width: screen.width,
-              left: insets.left, right: insets.right, edgeWidth: closeHeaderHeight + 20, controls: closeHeaderObstacles,
-            }), true)}
           </View>
         );
       })()}
@@ -15210,12 +15225,11 @@ function HomeScreenContent() {
         // Diestro → derecha (right), zurdo → izquierda (left).
         // Se usa el inset del mismo lado donde se ancla el panel.
         const PANEL_EDGE = Math.max(18, (handedness === "right" ? landingPanelInsets.right : landingPanelInsets.left) + 18);
-        const panelSideStyle = { left: landingPanels.next.x };
-        const PANEL_W = landingPanels.next.width;
+        const panelSideStyle = { left: landingDisplayPanels.next.x };
+        const PANEL_W = landingDisplayPanels.next.width;
         const INFO_W = PANEL_W;
-        const nextCardSpace = landingScrollPanelSpace({ panel: landingPanels.next, frame: landingFrame,
-          insets, titleBottom: titleBottomLocalY ?? 0, controls: closeHeaderObstacles, offsetY: landingOffsetY,
-          confirmationHeight: landingHasCompletion ? landingCompletionHeight : 0, confirmationGap: LANDING_COMPLETION_PANEL_GAP });
+        const nextCardSpace = landingScrollPanelSpace({ panel: landingDisplayPanels.next, frame: landingFrame,
+          insets, titleBottom: titleBottomLocalY ?? 0, controls: closeHeaderObstacles, offsetY: landingOffsetY, });
         const nextCardAvailableHeight = nextCardSpace.availableHeight;
         const headerObstacles = nextCardSpace.headerObstacles;
         const PANEL_ACTION_GAP = Math.round(12 * uiScaleFactor);
@@ -15249,8 +15263,8 @@ function HomeScreenContent() {
               ...panelSideStyle,
               width: PANEL_W,
               bottom: contentBottom(landingFrame.virtual
-                ? landingFrame.baseline + landingFrame.height - landingPanels.next.y - landingPanels.next.height
-                : screen.height - landingPanels.next.y - landingPanels.next.height),
+                ? landingFrame.baseline + landingFrame.height - landingDisplayPanels.next.y - landingDisplayPanels.next.height
+                : screen.height - landingDisplayPanels.next.y - landingDisplayPanels.next.height),
               zIndex: 5,
               ...(entryIsReservation(g) ? { paddingBottom: Math.round(LANDING_VISIT_FRAME.bottomGap * uiScaleFactor) } : {}),
               ...(entryIsInternal(g) ? { paddingBottom: Math.round(LANDING_ENTRY_FRAME.bottomGap * uiScaleFactor) } : {}),
@@ -15510,10 +15524,6 @@ function HomeScreenContent() {
             </LandingCardContents>
 
             {/* botón cerrar Landing eliminado */}
-          {renderLandingActionCompletion(completionPanelFrame({
-              panelX: toLandingRootRect(landingPanels.next).x, panelWidth: PANEL_W, width: screen.width,
-              left: insets.left, right: insets.right, edgeWidth: closeHeaderHeight + 20, controls: closeHeaderObstacles,
-            }), true)}
           </View>
         );
       })()}
@@ -16588,13 +16598,6 @@ function HomeScreenContent() {
         </>
       )}
 
-      {!landingCompletionAnchored && renderLandingActionCompletion(completionFrame({width:screen.width,left:insets.left,right:insets.right,
-          safeTop:Math.max(insets.top+8,closeQrY+closeQrSize+8,(titleBottomLocalY ?? 0)+8),
-          commandsTop:toLandingRootRect(landingPanels.commands).y+landingOffsetY,
-          header:{x:handedness==="right"?insets.left+closeHeaderHeight+20:closeQrX+closeQrSize+closeQrHit+8,
-            y:closeQrY,width:Math.max(44,screen.width-insets.left-insets.right-closeHeaderHeight-closeQrSize-closeQrHit-52),height:44},
-          open:anyOperationalPanelOpen,
-          openHeight:Math.min(landingPanels.region.height,Math.max(landingNextHeight,landingPendingHeight+landingPendingOffset))}))}
       {/* FIXED LOCATION ROW — removed. Map/Search/AQUÍ now live in the MAPA orbital satellite sub-layer. */}
       {false && (
       <Animated.View

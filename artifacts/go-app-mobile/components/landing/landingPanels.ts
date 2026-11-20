@@ -102,3 +102,12 @@ export function landingScrollPanelSpace({ panel, frame, insets, titleBottom, con
     ...obstacles.map(rect => rect.y + rect.height + 8));
   return { availableHeight: Math.max(1, floor - top), width: panel.width, headerObstacles: [] };
 }
+
+/** A second selector row uses only the information area; orbital geometry is untouched. */
+export function landingActionPanelFrames(panels: ReturnType<typeof landingPanelFrames>, safeBottom = panels.commands.y+panels.commands.height, secondRow = true) {
+ const bottom=safeBottom;
+ const height=secondRow?100:46;
+ const commands={...panels.commands,y:bottom-height,height};
+ const region={...panels.region,height:Math.max(1,commands.y-8-panels.region.y)};
+ return {commands,region,next:region,changes:region};
+}

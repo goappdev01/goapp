@@ -30,15 +30,16 @@ async function mountCommands(counts){
  let state,clean;const actions=[],animations=[];
  Object.assign(ctx,{useState:React.useState,React,LandingPanelCommands:ctx.exports.LandingPanelCommands,
   LANDING_VISIT_VISUAL:load('components/landing/LandingVisitOutline.tsx',{react:React,'react-native':native}).LANDING_VISIT_VISUAL,
-  capture:v=>state=v,captureClean:fn=>clean=fn,nextGroups:{visit:[{g:{id:'visit-1',type:'GO_BOOKING',color:'#60a5fa'}}],task:[{g:{id:'task-1',type:'TAREA',color:'#a855f7'}},{g:{id:'task-2',type:'TAREA_INTERNA',color:'#a855f7'}}]},allPendientes:[{kind:'cambio',g:{id:'change-1'}}],
+  lang:"es",actionCompletion:{unresolved:[],pending:[]},landingHasActionSelector:false,capture:v=>state=v,captureClean:fn=>clean=fn,nextGroups:{visit:[{g:{id:'visit-1',type:'GO_BOOKING',color:'#60a5fa'}}],task:[{g:{id:'task-1',type:'TAREA',color:'#a855f7'}},{g:{id:'task-2',type:'TAREA_INTERNA',color:'#a855f7'}}]},allPendientes:[{kind:'cambio',g:{id:'change-1'}}],
   t:k=>({next_fem:'PRÓXIMA',word_visit:'visita',task:'TAREA'})[k]??k,readableOnDark:c=>c,intent:{color:'#ffffff'},
   LayoutAnimation:{configureNext(){animations.push(true)},Presets:{easeInEaseOut:{}}},Haptics:{selectionAsync:()=>Promise.resolve(),impactAsync:()=>Promise.resolve(),ImpactFeedbackStyle:{Medium:'medium'}},startRelatedGoAction:g=>actions.push(g.id)});
- const hooks=['nextAptMinimized','nextPanelKind','cambiosOpen','nextCardIdx','cambiosCardIdx'].map(name=>'const '+find(ast,n=>ts.isVariableDeclaration(n)&&ts.isArrayBindingPattern(n.name)&&n.name.elements[0]?.name.getText(ast)===name).getText(ast)+';').join('\n');
- const closePanels=find(declaration('closeTopLayer'),n=>ts.isIfStatement(n)&&n.expression.getText(ast)==='!nextAptMinimized || cambiosOpen');assert.ok(closePanels);
- const fixture=`function Fixture(){clearButtons();${hooks}\n capture({nextAptMinimized,nextPanelKind,cambiosOpen,nextCardIdx});captureClean(()=>{${closePanels.getText(ast)}});return React.createElement(LandingPanelCommands,{frame:{x:18,y:350,width:354,height:46},commands:${commandsExpression}});}exports.Fixture=Fixture;`;
+ const hooks=['nextAptMinimized','nextPanelKind','cambiosOpen','nextCardIdx','cambiosCardIdx','landingActionsOpen'].map(name=>'const '+find(ast,n=>ts.isVariableDeclaration(n)&&ts.isArrayBindingPattern(n.name)&&n.name.elements[0]?.name.getText(ast)===name).getText(ast)+';').join('\n');
+ const closePanels=find(declaration('closeTopLayer'),n=>ts.isIfStatement(n)&&n.expression.getText(ast)==='!nextAptMinimized || cambiosOpen || landingActionsOpen');assert.ok(closePanels);
+ const fixture=`function Fixture(){clearButtons();${hooks}\n capture({nextAptMinimized,nextPanelKind,cambiosOpen,nextCardIdx,landingActionsOpen});captureClean(()=>{${closePanels.getText(ast)}});return React.createElement(LandingPanelCommands,{frame:{x:18,y:350,width:354,height:100},commands:${commandsExpression}});}exports.Fixture=Fixture;`;
  vm.runInNewContext(ts.transpileModule(fixture,{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React}}).outputText,ctx);
  const makeEntries=counts=>{
   ctx.nextGroups={visit:Array.from({length:counts.visit},(_,i)=>({g:{id:'visit-'+(i+1),type:'GO_BOOKING',color:'#60a5fa'}})),task:Array.from({length:counts.task},(_,i)=>({g:{id:'task-'+(i+1),type:'TAREA',color:'#a855f7'}}))};
+  ctx.actionCompletion={unresolved:Array.from({length:counts.actions??0},(_,i)=>({id:"action-"+i})),pending:[]};ctx.landingHasActionSelector=!!counts.actions;
   ctx.allPendientes=Array.from({length:counts.changes},(_,i)=>({kind:'cambio',g:{id:'change-'+(i+1)}}));
  };
  ctx.clearButtons=()=>buttons.clear();
