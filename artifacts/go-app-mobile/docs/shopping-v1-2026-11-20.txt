@@ -347,3 +347,14 @@ pasos, cuatro anchos, tres escalas, espejo, compactación de ficha/campo y regre
 de acciones/teclado. TypeScript y diff --check antes de publicar; MAIN y bundle iOS
 8088 se verifican después. 8089 intacto. Validación visual/táctil física pendiente
 del propietario; las pruebas usan adaptadores y no equivalen a iPhone real.
+
+AJUSTE 21/11/2026 — texto ajustado dentro de los botones existentes
+-----------------------------------------------------------------
+Base: origin/main 986a33bd413b249593787bbca809829e9d3c2447.
+Las etiquetas aún permitían saltos de línea aunque el botón tenía anchura medida.
+Se activa una sola línea con ajuste nativo de fuente al espacio interior efectivo,
+contracción y centrado para Crear lista, Renombrar, Compartir, Eliminar lista y
+Lista. Se mantienen anchuras, posiciones, radios y acciones. Sin cambios de datos.
+20 pruebas dirigidas superadas, incluida fuente ampliada en ancho 320 y estabilidad
+del arco al editar; TypeScript y diff --check antes de publicar. Bundle iOS 8088
+verificado después; 8089 intacto. Comprobación física del texto pendiente en iPhone.

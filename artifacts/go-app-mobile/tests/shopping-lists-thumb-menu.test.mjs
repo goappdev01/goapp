@@ -42,3 +42,15 @@ test('native text measurements produce individually fitted pills and a fifth Lis
   for(const style of [flat(choice.style),flat(ui.hosts.get('shopping-list-name').style)]){assert.equal(style.width,366*.7);assert.ok(Math.abs(style.marginLeft-366*.3)<.001);assert.equal(style.borderRadius,27);}
  }finally{await ui?.close();f.disk.close();}
 });
+
+test('pill labels fit a single line inside their existing button without altering the measured arc',async()=>{
+ const f=await shoppingFixture();let ui;try{
+  ui=await shoppingUI(f,{width:320,fontScale:2,startList:false});await ui.tap('shopping-manage-lists');
+  const flat=s=>Object.assign({},...s.filter(Boolean));
+  const ids=['shopping-list-create','shopping-list-rename','shopping-list-share','shopping-list-delete'];
+  const before=ids.map((_,i)=>({...ui.hosts.get('shopping-lists-action-'+i).style}));
+  for(const id of ids){const label=ui.hosts.get(id+'-label');assert.equal(label.numberOfLines,1);assert.equal(label.adjustsFontSizeToFit,true);assert.equal(label.minimumFontScale,.7);assert.equal(flat(label.style).flexShrink,1);assert.equal(flat(label.style).maxWidth,'100%');}
+  await ui.run(()=>ui.hosts.get('shopping-list-name').onChangeText('Texto de prueba'));
+  for(let i=0;i<4;i++)assert.deepEqual({...ui.hosts.get('shopping-lists-action-'+i).style},before[i]);
+ }finally{await ui?.close();f.disk.close();}
+});
