@@ -57,6 +57,8 @@ function settleClearPosition(x:number,y:number,originX:number,originY:number,wid
 
 interface DraggableFABProps {
   navigation?:boolean;
+  /** Explicit screen opt-in: a voluntary navigation position wins over obstacle avoidance. */
+  allowUserOverlap?:boolean;
   keyboardResponsive?:boolean;
   handedness?:"left"|"right";
   screenKey: string;
@@ -93,6 +95,7 @@ export function DraggableFAB({
   onDragEnd,
   avoidRects,
   navigation=false,
+  allowUserOverlap=false,
   keyboardResponsive=false,
   handedness,
   children,
@@ -166,7 +169,7 @@ export function DraggableFAB({
         const nextL=Math.max(minL,Math.min(maxL,l));
         const restored=keyboardResponsive&&typeof h==="number"&&Number.isFinite(h)?t+currentBoundsHeight.current-h:t;
         const nextT=Math.max(minT,Math.min(maxT,restored));
-        if(avoidRects?.length){const safe=settleClearPosition(nextL,nextT,initLeft,initTop,buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects);
+        if(avoidRects?.length&&!(navigation&&allowUserOverlap)){const safe=settleClearPosition(nextL,nextT,initLeft,initTop,buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects);
           posL.value=safe.x;posT.value=safe.y;}
         else{posL.value=bounds?l:nextL;posT.value=bounds?restored:nextT;}
       } catch {
@@ -174,7 +177,7 @@ export function DraggableFAB({
       }
     }).catch(() => console.info("[fab-preference]", { code: "READ_FAILED" }));
     return()=>{active=false;};
-  }, [storageKey,storageEnabled]);
+  }, [storageKey,storageEnabled,allowUserOverlap]);
 
   useEffect(()=>{
     if(isDragging.value)return;
@@ -183,9 +186,9 @@ export function DraggableFAB({
     const preferred=desiredPosition.current;
     const l=Math.max(minL,Math.min(maxL,preferred?.l ?? initLeft));
     const t=Math.max(minT,Math.min(maxT,preferred ? preferred.t+(keyboardResponsive?SH-preferred.h:0) : initTop));
-    const safe=settleClearPosition(l,t,l,t,buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects??[]);
+    const safe=allowUserOverlap&&preferred?{x:l,y:t}:settleClearPosition(l,t,l,t,buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects??[]);
     posL.value=safe.x;posT.value=safe.y;
-  },[storageKey,minL,maxL,minT,maxT,initLeft,initTop,buttonWidth,maxH,JSON.stringify(avoidRects)]);
+  },[storageKey,minL,maxL,minT,maxT,initLeft,initTop,buttonWidth,maxH,allowUserOverlap,JSON.stringify(avoidRects)]);
 
   useEffect(() => {
     if (bounds) return; // Keep the chosen position while the keyboard temporarily clamps its display.
@@ -231,7 +234,7 @@ export function DraggableFAB({
         .onEnd(() => {
           "worklet";
           if(navigation)runOnJS(savePos)(posL.value,posT.value);
-          if(avoidRects?.length){
+          if(avoidRects?.length&&!(navigation&&allowUserOverlap)){
             const target=settleClearPosition(posL.value,posT.value,originL.value,originT.value,
               buttonWidth,maxH,minL,maxL,minT,maxT,avoidRects);
             posL.value=withSpring(target.x);
@@ -257,7 +260,7 @@ export function DraggableFAB({
           if(dragStarted.value&&onDragEnd)runOnJS(onDragEnd)();
           dragStarted.value=false;
         }),
-    [minL, maxL, minT, maxT, savePos, onDragStart, onDragEnd, avoidRects, buttonWidth, maxH, fixed,navigation,markNavigationDrag,finishNavigationDrag]
+    [minL, maxL, minT, maxT, savePos, onDragStart, onDragEnd, avoidRects, buttonWidth, maxH, fixed,navigation,allowUserOverlap,markNavigationDrag,finishNavigationDrag]
   );
 
   // ── Animated style ───────────────────────────────────────────────────────

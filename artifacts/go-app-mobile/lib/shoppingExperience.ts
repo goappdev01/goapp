@@ -17,11 +17,11 @@ export const SHOPPING_SUGGESTIONS:Partial<Record<ShoppingCategory,string[]>>={
   care:["Champú","Pasta de dientes"],cleaning:["Detergente","Lavavajillas"],pets:["Pienso"],other:[],
 };
 export function shoppingOrbitLayout(width:number,fontScale=1){
-  const size=Math.min(Math.max(240,width-24),480),button=Math.min(108,Math.max(72,size*.245)),radius=(size-button)/2;
+  const size=Math.min(Math.max(240,width-24),480),button=Math.min(108,Math.max(72,size*.245)),radius=(size-button)/2*.95;
   // Larger accessible text expands vertically; the eight entrances still surround GO on every side.
   const buttonHeight=Math.max(button,36+36*fontScale),verticalRadius=radius*buttonHeight/button,height=buttonHeight+2*verticalRadius;
   const center=Math.min(142,Math.max(108,size*.34));
-  return {size,button,buttonHeight,height,center,points:SHOPPING_ORBITS.map((_,i)=>{
+  return {size,button,buttonHeight,height,center,radius,verticalRadius,points:SHOPPING_ORBITS.map((_,i)=>{
     const angle=(-90+i*45)*Math.PI/180;return{x:size/2+Math.cos(angle)*radius-button/2,y:height/2+Math.sin(angle)*verticalRadius-buttonHeight/2};
   })};
 }

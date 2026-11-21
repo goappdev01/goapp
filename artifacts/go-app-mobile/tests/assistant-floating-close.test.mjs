@@ -111,3 +111,17 @@ test('a late read from another identity cannot overwrite the current position',a
  waiting.get(old)(JSON.stringify({l:30,t:40}));waiting.get(current)(null);await f.settled();
  assert.equal(f.render(500,opts).top,initial.top);assert.equal(f.writes.length,0);
 });
+
+for(const hand of ['left','right'])test('Compras voluntary navigation placement survives obstacles, reopening and keyboard clamping / '+hand,async()=>{
+ const saved=new Map(),identity={current:'shopper-a/live:ADMIN'},opts={navigation:true,keyboardResponsive:true,allowUserOverlap:true,handedness:hand,screenKey:'shopping-orbit',buttonKey:'navigation',buttonWidth:64,maxH:136,avoidRects:[{x:0,y:400,width:390,height:200}]};
+ const f=fixture(saved,undefined,identity);f.render(600,opts);await f.settled();
+ const initial=f.render(600,opts);assert.ok(initial.top+136<=398,'default placement still avoids occupied controls');
+ f.gesture.onStart({translationX:0,translationY:0});f.gesture.onUpdate({translationX:0,translationY:180});f.gesture.onEnd();f.gesture.onFinalize();
+ const chosen=f.render(600,opts);assert.ok(chosen.top>400,'voluntary movement is no longer bounced upwards');
+ const persisted=JSON.stringify([...saved]),writes=f.writes.length;
+ f.render(600,{...opts,avoidRects:[{x:0,y:350,width:390,height:250}]});assert.equal(f.render(600,opts).top,chosen.top);assert.equal(f.writes.length,writes);
+ const reopen=fixture(saved,undefined,identity);reopen.render(600,opts);await reopen.settled();assert.equal(reopen.render(600,opts).top,chosen.top);
+ const small=reopen.render(300,opts);assert.ok(small.top>=8&&small.top+136<=292);reopen.render(600,opts);assert.equal(reopen.render(600,opts).top,chosen.top);assert.equal(JSON.stringify([...saved]),persisted);
+ f.gesture.onStart({translationX:0,translationY:0});f.gesture.onUpdate({translationX:0,translationY:-50});f.gesture.onFinalize();assert.equal(f.render(600,opts).top,chosen.top);assert.equal(f.writes.length,writes,'cancel does not save a different preference');
+ identity.current='shopper-b/live:ADMIN';reopen.render(600,opts);await reopen.settled();assert.notEqual(reopen.render(600,opts).top,chosen.top);assert.equal(JSON.stringify([...saved]),persisted);
+});

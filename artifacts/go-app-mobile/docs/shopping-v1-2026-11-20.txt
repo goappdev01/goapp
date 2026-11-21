@@ -231,3 +231,26 @@ navegación y lateralidad a 320/390/430 puntos y texto ampliado. TypeScript y
 git diff --check correctos. Son pruebas con adaptadores y medidas controladas:
 no certifican la interacción táctil real ni la posición física exacta del iPhone.
 Se verifica el bundle iOS de 8088 tras publicar; SHA en la entrega. 8089 intacto.
+
+CONTINUACIÓN 21/11/2026 — posición voluntaria de flotantes y órbita algo más compacta
+---------------------------------------------------------------------------------
+Base: origin/main c352a97a3b85bcec979fea052bf007a4b7029944.
+La columna sí se podía arrastrar, pero la recolocación por obstáculos la devolvía
+hacia arriba al soltar o rehidratar. Se añade una opción al mecanismo compartido,
+desactivada por defecto y habilitada SOLO en el Landing de Compras: una posición
+elegida voluntariamente gana sobre los obstáculos. El arrastre y el guardado siguen
+siendo los existentes. Los límites visibles y la adaptación al teclado se conservan.
+Sin posición elegida, se mantiene la búsqueda de una posición inicial sin obstáculos.
+Cancelar el gesto no guarda otra posición; no se cambian claves, usuarios o contextos.
+Las demás pantallas mantienen la protección anterior.
+
+El radio de los satélites se reduce un 5 %. Se conservan tamaños de GO y satélites,
+orden, funciones y rectángulos táctiles; el aro decorativo acompaña el radio efectivo.
+No se alteran las dos filas inferiores, categorías, precios, listas ni datos.
+
+32 pruebas dirigidas superadas: 11 de flotantes (incluidas elección, reapertura,
+teclado, cancelación y separación de cuentas), 1 del host real de navegación,
+8 del Landing, 11 de experiencia de Compras y 1 de geometría compacta en varios
+anchos y escalas de texto. TypeScript y git diff --check correctos. Estas pruebas
+son técnicas con adaptadores; queda validación física del arrastre en iPhone.
+Publicación y bundle iOS 8088 se verifican tras el commit; 8089 intacto.

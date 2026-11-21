@@ -43,6 +43,17 @@ async function fixture({hand='right',width=390,height=600,stored=new Map(),navig
  return{hosts,styles,gestures,calls,stored,props,settle,render,hand:async value=>{hand=value;await render({});},gesture:()=>gestures.at(-1),style:()=>styles.at(-1)(),press:async(label,pressIn=true)=>settle(()=>{const p=hosts.get(label);if(pressIn)p.onPressIn?.();p.onPress({stopPropagation(){calls.push('stop');}});}),close:()=>settle(()=>root.unmount()),button,native,async floating(options){await settle(()=>root.render(React.createElement(handContext.GoNavigationHand.Provider,{value:hand},React.createElement(floating.GoNavigationFloating,{screenKey:'floating-test',width:136,handedness:hand,...options},children))));}};
 }
 
+test('Compras host forwards voluntary-position override without changing the default obstacle protection',async()=>{
+ const f=await fixture();try{
+  const options={width:64,height:136,safeArea:false,initialBottom:12,allowUserOverlap:true,avoidRects:[{x:0,y:400,width:390,height:200}]};
+  await f.floating(options);const start=f.style().top,g=f.gesture();
+  await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:0,translationY:180});g._onEnd();g._onFinalize();});
+  const chosen=f.style().top;assert.ok(chosen>400);assert.ok(chosen>start);assert.ok(chosen+136<=600);
+  await f.floating({...options,allowUserOverlap:false});assert.ok(f.style().top+136<=398,'the default policy still avoids the obstacle');
+  await f.floating(options);assert.equal(f.style().top,chosen,'the same saved choice is recovered without another drag');
+ }finally{await f.close();}
+});
+
 test('an expanded Calendar panel uses a down arrow and restores the default back icon without changing keyboard, settings or exit semantics',async()=>{
  let icon,button,presses=0,stops=0;
  const native={...life.rn,TouchableOpacity:props=>{button=props;return React.createElement('div',null,props.children);},StyleSheet:{create:x=>x}};

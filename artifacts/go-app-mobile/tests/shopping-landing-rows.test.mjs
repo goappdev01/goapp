@@ -13,8 +13,9 @@ for(const handedness of ['left','right'])for(const width of [320,390,430])test(`
   for(const id of ['shopping-list','shopping-add']){const s=flat(ui.hosts.get(id).style);assert.equal(s.flex,1);assert.ok(s.minHeight>=44);assert.equal(s.minWidth,44);}
   assert.equal(flat(ui.hosts.get('shopping-shortcut-row').style).flexWrap,'nowrap');assert.equal(ui.hosts.get('shopping-search-open').style[0].fontSize,undefined);
   assert.equal(ui.hosts.get('shopping-navigation-frame').width,64);assert.equal(ui.hosts.get('shopping-navigation-frame').height,136);assert.equal(ui.hosts.get('shopping-floating-buttons').style.flexDirection,'column');
+  assert.equal(ui.hosts.get('shopping-navigation-frame').allowUserOverlap,true);
   await ui.run(()=>ui.hosts.get('shopping-thumb-controls').onLayout({nativeEvent:{layout:{height:124}}}));assert.equal(ui.hosts.get('shopping-navigation-frame').initialBottom,132);
-  await ui.tap('shopping-go');assert.ok(ui.hosts.has('shopping-command'));await ui.tap('shopping-back');
+  await ui.tap('shopping-go');assert.ok(ui.hosts.has('shopping-command'));assert.equal(ui.hosts.get('shopping-navigation-frame').allowUserOverlap,false);await ui.tap('shopping-back');
   await ui.tap('shopping-orbit-other');assert.ok(ui.hosts.has('shopping-products-scroll'));await ui.tap('shopping-back');
   await ui.tap('shopping-search-open');assert.ok(ui.hosts.has('shopping-product-search'));await ui.tap('shopping-back');
   await ui.tap('shopping-manage-lists');assert.ok(ui.hosts.has('shopping-list-create'));await ui.tap('shopping-back');
