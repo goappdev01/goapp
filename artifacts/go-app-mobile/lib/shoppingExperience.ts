@@ -20,7 +20,8 @@ export function shoppingOrbitLayout(width:number,_fontScale=1,_handedness:"left"
   const fitsInside=2*(inner-favoriteDiameter/2-clearance)>=64;
   const desiredCenter=Math.min(142,Math.max(88,size*.34));
   const center=fitsInside?Math.min(desiredCenter,2*(inner-favoriteDiameter/2-clearance)):desiredCenter;
-  const favoriteRadius=fitsInside?inner:radius*Math.cos(theta)+delta;
+  // The outer tangent keeps the satellite outside the category ring.
+  const favoriteRadius=Math.max(radius+clearance,radius*Math.cos(theta)+delta);
   // Bisector between DESPENSA (112.5 degrees) and HIGIENE (157.5 degrees).
   const favoriteAngle=3*Math.PI/4;
   const favoriteX=size/2+Math.cos(favoriteAngle)*favoriteRadius-favoriteDiameter/2;
@@ -37,9 +38,9 @@ const orbitalLines:Record<string,string[]>={
   care:["HIGIENE,","DROGUERÍA Y","PERFUMERÍA"],home:["OTROS","(HOGAR)"],
 };
 export function shoppingOrbitTypography(id:string,diameter:number){
-  const lines=orbitalLines[id]??[id],icon=Math.max(18,Math.min(31,diameter*.28));
+  const lines=orbitalLines[id]??[id],icon=Math.max(16,Math.min(26,diameter*.24));
   const contentWidth=diameter*.8,maxLinesHeight=diameter-icon-12;
-  const fontSize=Math.min(11,diameter*.14,contentWidth/(Math.max(...lines.map(line=>line.length))*.67),maxLinesHeight/(lines.length*1.12));
+  const fontSize=.9*Math.min(11,diameter*.14,contentWidth/(Math.max(...lines.map(line=>line.length))*.67),maxLinesHeight/(lines.length*1.12));
   return {lines,text:lines.join("\n"),fontSize,lineHeight:fontSize*1.12,icon,contentWidth,labelHeight:maxLinesHeight};
 }
 

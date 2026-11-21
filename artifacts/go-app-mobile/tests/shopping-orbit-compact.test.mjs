@@ -10,11 +10,11 @@ test('joint circular ring and small integrated satellite fit iPhones without ext
   const circles=[...l.points.map(p=>({x:p.x+l.button/2,y:p.y+l.button/2,r:l.button/2})),{x:l.size/2,y:l.size/2,r:l.center/2},{x:l.favorite.x+l.favorite.diameter/2,y:l.favorite.y+l.favorite.diameter/2,r:l.favorite.diameter/2}];
   for(const c of circles){assert.ok(c.x-c.r>=-.001&&c.y-c.r>=-.001);assert.ok(c.x+c.r<=l.size+.001&&c.y+c.r<=l.height+.001);}
   for(let i=0;i<circles.length;i++)for(let j=i+1;j<circles.length;j++){const a=circles[i],b=circles[j];assert.ok(Math.hypot(a.x-b.x,a.y-b.y)>=a.r+b.r+1.99,`paths ${i}/${j} separated at ${width}/${scale}/${hand}`);}
-  assert.ok(circles[9].x<l.size/2&&circles[9].y>l.size/2);const a=circles[5],b=circles[6],f=circles[9];assert.ok(Math.abs(Math.hypot(f.x-a.x,f.y-a.y)-Math.hypot(f.x-b.x,f.y-b.y))<.001,'satellite equidistant from Despensa and Higiene');
+  assert.ok(circles[9].x<l.size/2&&circles[9].y>l.size/2);const a=circles[5],b=circles[6],f=circles[9];assert.ok(Math.hypot(f.x-l.size/2,f.y-l.size/2)>l.radius,'favorite outside the ring');assert.ok(Math.abs(Math.hypot(f.x-a.x,f.y-a.y)-Math.hypot(f.x-b.x,f.y-b.y))<.001,'satellite equidistant from Despensa and Higiene');
  }
 });
 test('controlled category lines preserve every word, fit typography to diameter, and keep short names larger',()=>{
- for(const width of [320,375,390,430]){const l=x.shoppingOrbitLayout(width);for(const o of x.SHOPPING_ORBITS){const t=x.shoppingOrbitTypography(o.id,l.button);assert.equal(t.text.replace(/\s+/g,' '),o.label);assert.ok(t.fontSize>0);assert.ok(t.lineHeight*t.lines.length<=t.labelHeight+.01);assert.ok(t.icon>=18);}
+ for(const width of [320,375,390,430]){const l=x.shoppingOrbitLayout(width);for(const o of x.SHOPPING_ORBITS){const t=x.shoppingOrbitTypography(o.id,l.button);assert.equal(t.text.replace(/\s+/g,' '),o.label);assert.ok(t.fontSize>0);assert.ok(t.lineHeight*t.lines.length<=t.labelHeight+.01);assert.ok(t.icon>=16&&t.icon<Math.max(18,Math.min(31,l.button*.28)));}
   assert.ok(x.shoppingOrbitTypography('care',l.button).fontSize<x.shoppingOrbitTypography('drinks',l.button).fontSize);
  }
 });
