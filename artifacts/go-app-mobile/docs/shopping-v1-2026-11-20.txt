@@ -311,3 +311,21 @@ renombrado, compartir y confirmación de papelera; regresiones del Landing/lista
 Son pruebas con adaptadores, sin validación táctil física. TypeScript/diff --check
 antes de publicar. Verificación posterior del SHA y bundle iOS 8088; 8089 intacto.
 El propietario debe confirmar en iPhone el alcance, el arco y el arrastre hacia abajo.
+
+AJUSTE 21/11/2026 — arco limitado al alcance y acabado de Lista
+-----------------------------------------------------------
+Base: origin/main d0e6d75c346f1e718a4085c53e972c8158481304.
+La primera versión utilizaba todo el ancho para el recorrido del arco; por eso
+Eliminar lista llegaba hasta el extremo contrario al pulgar. Ahora los cuatro
+botones quedan íntegramente dentro del 70 % del ancho disponible más próximo a
+la mano activa; el 30 % opuesto queda libre. Se refleja para zurdos. La anchura
+del botón se adapta a ese límite y al texto ampliado, sin recortar etiquetas.
+Las cuatro acciones reutilizan el estilo de Lista (radio 27, altura mínima 56,
+borde y sombra); conservan estados y distinción de eliminación. Lista queda con
+la misma anchura y alineada bajo el último botón del arco, solo en Mis listas.
+Sin cambios en callbacks, flotantes, posiciones guardadas, listas ni almacenamiento.
+27 pruebas dirigidas superadas: cuatro anchos, tres escalas, límite 70 %, espejo,
+alineación/estilo de Lista y regresiones de creación, teclado, renombrado, compartir
+y papelera. TypeScript y diff --check antes de publicar; SHA/bundle iOS 8088 se
+verifican después. 8089 intacto. La aprobación visual y táctil física queda al
+propietario en iPhone; los adaptadores automatizados no la sustituyen.

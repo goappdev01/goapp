@@ -38,10 +38,10 @@ export function clipShoppingContent(content:Rect,viewport:Rect):Rect{
     height:Math.max(0,Math.min(content.y+content.height,viewport.y+viewport.height)-y)};
 }
 
-/** A compact thumb arc within the measured container; large type relaxes the arc. */
+/** Thumb arc within the nearest 70% of the measured container; large type relaxes the arc. */
 export function shoppingThumbMenu(availableWidth:number,fontScale:number,handedness:"left"|"right"){
-  const available=Math.max(0,availableWidth),width=Math.min(available,Math.max(168,168*fontScale));
-  const travel=Math.max(0,available-width);
+  const available=Math.max(0,availableWidth),reach=available*.7,width=Math.min(reach,Math.max(168,168*fontScale));
+  const travel=Math.max(0,reach-width);
   const positions=[1,.6,.2,0];
-  return {width,offsets:positions.map(position=>travel*(handedness==="left"?1-position:position))};
+  return {width,offsets:positions.map(position=>handedness==="left"?travel*(1-position):available-reach+travel*position)};
 }
