@@ -476,3 +476,5 @@ Pendiente en iPhone: legibilidad real de las etiquetas, tacto en los huecos,
 Favoritos separado de ATRÁS/X, escalas grandes y regreso entre vistas. Las 212
 presentaciones, personalizaciones y la incidencia de las tres listas ADMIN no se
 modifican. No se declara recuperación de esas listas ni corrección de gestos ajenos.
+
+2026-11-21 — Ajuste solicitado tras prueba física: Landing permite conservar posiciones voluntarias de los flotantes sobre zonas antes excluidas, dentro de límites seguros. Reutiliza arrastre y preferencias existentes; no cambia claves ni almacenamiento. Favoritos pasa de 44 a 50 pt en iPhone habitual (adaptable a anchos muy pequeños), con estrella 25 pt, en bisectriz izquierda entre Despensa e Higiene, equidistante. Sin fila adicional ni cambio de datos. 18 pruebas de órbitas/filas + 2 dirigidas del reconocedor (esquina inferior, obstáculos, remount y lateralidad), TypeScript y diff check correctos. Pendiente comprobación visual/táctil del propietario.

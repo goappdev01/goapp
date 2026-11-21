@@ -9,11 +9,11 @@ export const SHOPPING_SUGGESTIONS:Partial<Record<ShoppingCategory,string[]>>={
   care:["Champú","Pasta de dientes"],cleaning:["Detergente","Lavavajillas"],pets:["Pienso"],other:[],
 };
 /** Joint circular geometry: typography never changes the ring's height. */
-export function shoppingOrbitLayout(width:number,_fontScale=1,handedness:"left"|"right"="right"){
+export function shoppingOrbitLayout(width:number,_fontScale=1,_handedness:"left"|"right"="right"){
   const size=Math.max(0,Math.min(width-24,480));
   const ratio=.22+.025*Math.max(0,Math.min(1,(size-296)/80));
   const button=Math.min(112,size*ratio),radius=(size-button)/2,buttonHeight=button,height=size;
-  const favoriteDiameter=44,clearance=2,theta=Math.PI/8;
+  const favoriteDiameter=Math.max(44,Math.min(50,button*.85)),clearance=2,theta=Math.PI/8;
   const separation=button/2+favoriteDiameter/2+clearance;
   const delta=Math.sqrt(Math.max(0,separation**2-(radius*Math.sin(theta))**2));
   const inner=radius*Math.cos(theta)-delta;
@@ -21,9 +21,10 @@ export function shoppingOrbitLayout(width:number,_fontScale=1,handedness:"left"|
   const desiredCenter=Math.min(142,Math.max(88,size*.34));
   const center=fitsInside?Math.min(desiredCenter,2*(inner-favoriteDiameter/2-clearance)):desiredCenter;
   const favoriteRadius=fitsInside?inner:radius*Math.cos(theta)+delta;
-  const favoriteAngle=fitsInside?0:Math.PI/4;
+  // Bisector between DESPENSA (112.5 degrees) and HIGIENE (157.5 degrees).
+  const favoriteAngle=3*Math.PI/4;
   const favoriteX=size/2+Math.cos(favoriteAngle)*favoriteRadius-favoriteDiameter/2;
-  const favorite={x:handedness==="left"?size-favoriteDiameter-favoriteX:favoriteX,y:size/2+Math.sin(favoriteAngle)*favoriteRadius-favoriteDiameter/2,diameter:favoriteDiameter};
+  const favorite={x:favoriteX,y:size/2+Math.sin(favoriteAngle)*favoriteRadius-favoriteDiameter/2,diameter:favoriteDiameter};
   return {size,button,buttonHeight,height,center,radius,verticalRadius:radius,favorite,points:SHOPPING_ORBITS.map((_,i)=>{
     // One global rotation creates a real gap at the dominant-side middle of the ring.
     const angle=(-112.5+i*45)*Math.PI/180;

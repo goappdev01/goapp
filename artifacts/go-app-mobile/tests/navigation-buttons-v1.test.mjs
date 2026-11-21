@@ -174,3 +174,16 @@ test('Calendar exit reaches the sheet edge without counting the iPhone bottom in
   }finally{await f.close();}
  }
 });
+
+
+test('Compras Landing chosen lower corner survives obstacles, rerender and remount for each hand',async()=>{
+ for(const hand of ['right','left']){
+  const stored=new Map(),initialProps={screenKey:'shopping-orbit',buttonKey:'navigation',buttonWidth:56,maxH:120,bounds:{width:390,height:600},allowUserOverlap:true,avoidRects:[{x:0,y:400,width:390,height:200}]};
+  let f=await fixture({hand,stored,initialProps});let chosen;
+  try{const g=f.gesture();await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:hand==='right'?2000:-2000,translationY:2000});g._onEnd();g._onFinalize();});
+   chosen={left:f.style().left,top:f.style().top};assert.equal(chosen.top,472);assert.equal(chosen.left,hand==='right'?326:8);
+   await f.render({avoidRects:[{x:0,y:350,width:390,height:250}]});assert.equal(f.style().left,chosen.left);assert.equal(f.style().top,chosen.top);
+  }finally{await f.close();}
+  f=await fixture({hand,stored,initialProps});try{assert.equal(f.style().left,chosen.left);assert.equal(f.style().top,chosen.top);}finally{await f.close();}
+ }
+});
