@@ -48,3 +48,14 @@ export function shoppingThumbMenu(availableWidth:number,fontScale:number,handedn
   widths.forEach((width,i)=>right.push(Math.min(i?right[i-1]:available,available-reach+Math.max(0,reach-width)*positions[i])));
   return {widths,offsets:right.map((x,i)=>handedness==="left"?available-widths[i]-x:x),formWidth:reach,formLeft:handedness==="left"?0:available-reach};
 }
+
+/** Tight conservative bands protect circular hit areas without excluding their entire square. */
+export function shoppingCircleObstacles(circle:Rect):Rect[]{
+  const radius=Math.min(circle.width,circle.height)/2,cx=circle.x+circle.width/2,cy=circle.y+circle.height/2;
+  if(radius<=0)return [];
+  return Array.from({length:6},(_,index)=>{
+    const y=cy-radius+index*radius/3,height=radius/3;
+    const nearest=Math.max(0,Math.max(y-cy,cy-y-height)),halfWidth=Math.sqrt(Math.max(0,radius**2-nearest**2));
+    return {x:cx-halfWidth,y,width:halfWidth*2,height};
+  });
+}

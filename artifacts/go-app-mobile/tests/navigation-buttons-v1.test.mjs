@@ -187,3 +187,18 @@ test('Compras Landing chosen lower corner survives obstacles, rerender and remou
   f=await fixture({hand,stored,initialProps});try{assert.equal(f.style().left,chosen.left);assert.equal(f.style().top,chosen.top);}finally{await f.close();}
  }
 });
+
+
+test('Compras circle safety temporarily clears an obstructed saved choice without rewriting it or blocking lower clear positions',async()=>{
+ const circle=evaluate('lib/shoppingScreenLayout.ts');for(const hand of ['left','right']){
+  const key='fab_pos:shopping-orbit:navigation:'+hand,preferred={l:hand==='right'?326:8,t:450},raw=JSON.stringify(preferred),stored=new Map([[key,raw]]);
+  const initialProps={screenKey:'shopping-orbit',buttonKey:'navigation',buttonWidth:56,maxH:120,allowUserOverlap:false,avoidRects:circle.shoppingCircleObstacles({x:hand==='right'?280:20,y:420,width:90,height:90})};
+  let f=await fixture({hand,stored,initialProps});try{
+   const clear=()=>initialProps.avoidRects.every(r=>f.style().left>=r.x+r.width+2||f.style().left+56<=r.x-2||f.style().top>=r.y+r.height+2||f.style().top+120<=r.y-2);
+   assert.ok(clear());assert.notDeepEqual({l:f.style().left,t:f.style().top},preferred);assert.equal(stored.get(key),raw);
+   await f.render({avoidRects:[]});assert.equal(f.style().left,preferred.l);assert.equal(f.style().top,preferred.t);assert.equal(stored.get(key),raw);
+   await f.render({avoidRects:circle.shoppingCircleObstacles({x:100,y:200,width:90,height:90})});const g=f.gesture();await f.settle(()=>{g._onStart({translationX:0,translationY:0});g._onUpdate({translationX:hand==='right'?2000:-2000,translationY:2000});g._onEnd();g._onFinalize();});assert.equal(f.style().top,472);assert.equal(f.style().left,preferred.l);
+  }finally{await f.close();}
+  f=await fixture({hand,stored,initialProps:{...initialProps,avoidRects:[]}});try{assert.equal(f.style().top,472);assert.equal(f.style().left,preferred.l);}finally{await f.close();}
+ }
+});

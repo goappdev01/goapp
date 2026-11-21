@@ -15,7 +15,7 @@ test('seven-circle ring and two integrated satellites fit iPhones without extra 
  }
 });
 test('controlled category lines preserve every word, fit typography to diameter, and keep short names larger',()=>{
- for(const width of [320,375,390,430]){const l=x.shoppingOrbitLayout(width);for(const o of x.SHOPPING_ORBITS){const t=x.shoppingOrbitTypography(o.id,l.button);assert.equal(t.text.replace(/\s+/g,' '),o.label);assert.ok(t.fontSize>0);assert.ok(t.lineHeight*t.lines.length<=t.labelHeight+.01);assert.ok(t.icon>=18);}
+ for(const width of [320,375,390,430]){const l=x.shoppingOrbitLayout(width);for(const o of x.SHOPPING_ORBITS){const t=x.shoppingOrbitTypography(o.id,l.button);assert.equal(t.text.replace(/\s+/g,' '),o.label);assert.ok(t.fontSize>0);assert.ok(t.lineHeight*t.lines.length<=t.labelHeight+.01);assert.ok(t.icon>=16&&t.icon<Math.min(34,l.button*.30));}
   assert.ok(x.shoppingOrbitTypography('care',l.button).fontSize<=x.shoppingOrbitTypography('drinks',l.button).fontSize);
  }
 });

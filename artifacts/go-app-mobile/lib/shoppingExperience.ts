@@ -41,11 +41,21 @@ const orbitalLines:Record<string,string[]>={
   bakery:["PANADERÍA","Y PASTAS"],dairy:["LÁCTEOS Y","REFRIGERADOS"],pantry:["DESPENSA"],
   care:["HIGIENE Y","PERFUMERÍA"],home:["OTROS","(HOGAR)"],
 };
-export function shoppingOrbitTypography(id:string,diameter:number){
-  const lines=orbitalLines[id]??[id],icon=Math.max(18,Math.min(34,diameter*.30));
-  const contentWidth=diameter*.8,maxLinesHeight=diameter-icon-12;
-  const fontSize=Math.min(12,diameter*.14,contentWidth/(Math.max(...lines.map(line=>line.length))*.67),maxLinesHeight/(lines.length*1.12));
-  return {lines,text:lines.join("\n"),fontSize,lineHeight:fontSize*1.12,icon,contentWidth,labelHeight:maxLinesHeight};
+/** Fixed interior zones use circle chords, not the square's transparent corners. */
+export function shoppingOrbitTypography(id:string,diameter:number,fontScale=1){
+  const lines=orbitalLines[id]??[id],radius=Math.max(0,diameter/2-3);
+  const chord=(top:number,bottom:number)=>2*Math.sqrt(Math.max(0,radius**2-Math.max(Math.abs(top-diameter/2),Math.abs(bottom-diameter/2))**2));
+  const iconTop=diameter*.14,usableHeight=diameter*.66,iconHeight=usableHeight*.4;
+  const iconWidth=chord(iconTop,iconTop+iconHeight),icon=Math.min(25,iconHeight*.82,iconWidth/2.25);
+  const gap=Math.max(2,diameter*.035),labelTop=iconTop+iconHeight+gap,labelHeight=diameter*.8-labelTop;
+  const lineHeight=Math.min(diameter*.16,labelHeight/lines.length),blockTop=labelTop+(labelHeight-lineHeight*lines.length)/2;
+  const labelRows=lines.map((text,index)=>{
+    const top=blockTop+index*lineHeight,width=chord(top,top+lineHeight);
+    const fontSize=Math.min(Math.min(13,diameter*.145)*Math.max(1,Math.min(1.4,fontScale)),lineHeight*.84,width/(text.length*.7));
+    return {text,top,width,left:(diameter-width)/2,height:lineHeight,fontSize};
+  });
+  return {lines,text:lines.join("\n"),icon,iconTop,iconHeight,iconWidth,labelRows,labelTop,labelHeight,
+    fontSize:Math.min(...labelRows.map(row=>row.fontSize)),lineHeight,contentWidth:Math.min(...labelRows.map(row=>row.width))};
 }
 
 export type ShoppingIndoorMap={store:string; nodes:{id:string;aisle?:string}[]; edges:{from:string;to:string;distance:number}[];

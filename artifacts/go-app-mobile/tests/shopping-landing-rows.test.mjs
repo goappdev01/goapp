@@ -13,7 +13,7 @@ for(const handedness of ['left','right'])for(const width of [320,390,430])test(`
   for(const id of ['shopping-manage-lists','shopping-list']){const s=flat(ui.hosts.get(id).style);assert.equal(s.flex,1);assert.ok(s.minHeight>=44);assert.equal(s.minWidth,44);}
   assert.equal(flat(ui.hosts.get('shopping-shortcut-row').style).flexWrap,'nowrap');assert.equal(ui.hosts.get('shopping-search-open').style[0].fontSize,undefined);
   assert.equal(ui.hosts.get('shopping-navigation-frame').width,56);assert.equal(ui.hosts.get('shopping-navigation-frame').height,120);assert.equal(ui.hosts.get('shopping-floating-buttons').style.flexDirection,'column');
-  assert.equal(ui.hosts.get('shopping-navigation-frame').allowUserOverlap,true);
+  assert.equal(ui.hosts.get('shopping-navigation-frame').allowUserOverlap,false);
   await ui.run(()=>ui.hosts.get('shopping-thumb-controls').onLayout({nativeEvent:{layout:{height:124}}}));assert.equal(ui.hosts.get('shopping-navigation-frame').initialBottom,132);
   await ui.tap('shopping-go');assert.ok(ui.hosts.has('shopping-command'));assert.equal(ui.hosts.get('shopping-navigation-frame').allowUserOverlap,false);await ui.tap('shopping-back');
   await ui.tap('shopping-orbit-home');assert.ok(ui.hosts.has('shopping-products-scroll'));await ui.tap('shopping-back');
@@ -33,7 +33,7 @@ test('native label measurements choose icon placement while keeping all Landing 
  assert.equal(layout.shoppingLandingRows(296,{search:210,lists:120,searchWord:120,listWord:60,actionList:80,actionAdd:100}).actionsIconAbove,true);
 });
 
-test('floating avoidance protects real orbital controls and the complete lower rows, not the decorative ring frame',async()=>{
+test('Landing floats avoid circle hit areas without excluding their square corners or the lower rows',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false});
   ui.geometry.set('shopping-layout-frame',[0,0,390,844]);ui.geometry.set('shopping-add-screen',[0,160,390,540]);
@@ -41,10 +41,11 @@ test('floating avoidance protects real orbital controls and the complete lower r
   ui.geometry.set('shopping-shortcut-row',[12,700,366,44]);ui.geometry.set('shopping-primary-actions',[12,752,366,68]);ui.geometry.set('shopping-list-viewport',[0,0,0,0]);
   await ui.run(()=>ui.hosts.get('shopping-thumb-controls').onLayout({nativeEvent:{layout:{height:124}}}));
   const rects=ui.hosts.get('shopping-navigation-frame').avoidRects;
-  assert.ok(rects.some(r=>r.x===248&&r.y===344&&r.width===90&&r.height===90),'OTROS is protected');
-  assert.ok(rects.some(r=>r.x===12&&r.y===608&&r.width===366&&r.height===44),'both shortcuts share the entire width');
-  assert.ok(rects.some(r=>r.x===12&&r.y===660&&r.width===366&&r.height===68),'the whole action row is protected');
-  assert.equal(rects.some(r=>r.x===12&&r.y===108&&r.width===366&&r.height===366),false,'decorative full frame is not an interactive obstacle');
+  const home=rects.filter(r=>r.y>=344&&r.y<434&&r.x>=248&&r.x<=338);assert.equal(home.length,6);assert.ok(home.some(r=>r.width===90),'the widest part of OTROS remains protected');
+  assert.equal(rects.some(r=>r.x===12&&r.y===608&&r.width===366),false,'shortcuts no longer forbid a voluntary lower placement');
+  assert.equal(rects.some(r=>r.x===12&&r.y===660&&r.width===366),false,'the footer does not become an excluded column or row');
+  assert.equal(rects.some(r=>r.x===12&&r.y===108&&r.width===366&&r.height===366),false,'decorative full frame is not an obstacle');
+
  }finally{await ui?.close();f.disk.close();}
 });
 
