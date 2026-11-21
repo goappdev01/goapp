@@ -43,7 +43,7 @@ test('product name dominates missing price; price keeps its touch area and only 
   const trash=ui.hosts.get('shopping-trash-'+item.id);assert.equal(h.React.Children.toArray(trash.children)[0].props.color,'#c52e38');assert.ok(trash.style.minHeight>=44);
   await ui.run(()=>{ui.hosts.get('shopping-details-'+item.id).onLongPress();price().onChangeText('2,50');});
   assert.equal(flatten(price().style).fontSize,20);assert.equal(h.React.Children.toArray(ui.hosts.get('shopping-delete-'+item.id).children)[0].props.color,'#c52e38');
-  assert.equal(h.React.Children.toArray(ui.hosts.get('shopping-favorite-'+item.id).children)[0].props.color,'#39688f');
+  assert.equal(h.React.Children.toArray(ui.hosts.get('shopping-favorite-'+item.id).children)[0].props.color,'#64748b');
   await ui.run(()=>price().onEndEditing());await ui.idle();assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,2.5);
  }finally{await ui?.close();f.disk.close();}
 });

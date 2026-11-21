@@ -38,11 +38,12 @@ export async function shoppingUI(f,{handedness='right',width=390,height=844,font
  const reorder=h.load('components/notes/ShoppingReorderSurface.tsx',{'react-native':native,'react-native-gesture-handler':gh,'@/components/boards/BoardDragSurface':board},globals);
  const keyboardHook=h.load('hooks/useGoNoteKeyboard.ts',{'react-native':native});
  const store={subscribeGoLog:f.disk.store.subscribeGoLog,getGoLogSnapshot:f.disk.store.getGoLogSnapshot};
- const experience=h.load('lib/shoppingExperience.ts',{'./shoppingNote':f.model});
+ const taxonomy=h.load('lib/shoppingTaxonomy.ts',{'./shoppingNote':f.model});
+ const experience=h.load('lib/shoppingExperience.ts',{'./shoppingNote':f.model,'./shoppingTaxonomy':taxonomy});
  const icons={Feather:host('Feather'),MaterialCommunityIcons:host('Illustration')};
  const swipe=h.load('components/ui/SwipeableRow.tsx',{'react-native':native,'react-native-gesture-handler':gh,'@expo/vector-icons':icons});
  const row=h.load('components/notes/ShoppingProductRow.tsx',{'react-native':native,'@expo/vector-icons':icons,'@/components/ui/SwipeableRow':swipe,'@/lib/shoppingNote':f.model,'@/lib/shoppingProductArt':h.load('lib/shoppingProductArt.ts',{'./shoppingNote':f.model})});
- const catalog=h.load('lib/shoppingCatalog.ts',{'./shoppingNote':f.model});
+ const catalog=h.load('lib/shoppingCatalog.ts',{'./shoppingNote':f.model,'./shoppingTaxonomy':taxonomy});
  const choice=h.load('components/notes/ShoppingCatalogChoice.tsx',{'react-native':native});
  const {GoShoppingNote}=h.load('components/notes/GoShoppingNote.tsx',{'react-native':native,'react-native-gesture-handler':gh,'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:44,bottom:20,left:0,right:0})},'expo-linear-gradient':{LinearGradient:native.View},
   '@expo/vector-icons':icons,'@/lib/shoppingScreenLayout':h.load('lib/shoppingScreenLayout.ts'),'@/lib/shoppingProductArt':h.load('lib/shoppingProductArt.ts',{'./shoppingNote':f.model}),'@/lib/shoppingShare':h.load('lib/shoppingShare.ts',{'./shoppingNote':f.model}),'@/lib/shoppingExperience':experience,'@/lib/shoppingCatalog':catalog,'./ShoppingProductRow':row,'./ShoppingCatalogChoice':choice,'@/hooks/useBookingVoice':{useBookingVoice:()=>({status:'idle',error:'',abort(){},start:async()=>{calls.push(['voice-start']);},stop:async()=>{calls.push(['voice-stop']);}})},

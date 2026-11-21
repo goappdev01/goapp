@@ -70,6 +70,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
       </TouchableOpacity>
       {!!brand&&<Text numberOfLines={1} style={s.brand}>{brand}</Text>}
     </View>
+      <TouchableOpacity testID={"shopping-favorite-"+item.id} accessibilityRole="checkbox" accessibilityLabel={"Favorito: "+item.name} accessibilityState={{checked:!!item.favorite}} disabled={disabled} onPress={()=>{if(!swipeContact.consumed)apply({type:"favorite",id:item.id,value:!item.favorite});}} style={[s.icon,item.favorite&&{backgroundColor:"#fff3c4",borderRadius:12}]}><Feather name="star" size={21} color={item.favorite?"#9b6b00":"#64748b"}/></TouchableOpacity>
       {icon("trash-2","Retirar "+item.name+" de esta lista",onRemove,"shopping-trash-"+item.id)}
     </View>
     <View testID={"shopping-product-main-row-"+item.id} style={[s.mainRow,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
@@ -86,7 +87,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
     {!!error&&<Text accessibilityRole="alert" style={s.error}>{error}</Text>}
     {details&&<View style={{gap:6}}>
       <View style={[s.row,{flexWrap:"wrap"}]}>
-        {icon("star",item.favorite?"Quitar favorito":"Guardar favorito",()=>apply({type:"favorite",id:item.id,value:!item.favorite}),"shopping-favorite-"+item.id)}<Text style={s.meta}>{item.favorite?"Favorito · ":""}{item.usual?"Habitual":"Ocasional"}</Text>
+        <Text style={s.meta}>{item.favorite?"Favorito · ":""}{item.usual?"Habitual":"Ocasional"}</Text>
         {icon("map-pin","Anotar pasillo de "+item.name,onLocation,"shopping-location-"+item.id)}
         {icon(item.selected?"archive":"plus",item.selected?"Retirar de esta compra":"Incluir en esta compra",()=>apply({type:"select",id:item.id,value:!item.selected}),"shopping-select-"+item.id)}
         {icon("trash-2","Eliminar producto",()=>Alert.alert("Eliminar producto",`Se eliminarán «${item.name}» y sus precios. Retirarlo de la compra conserva ambos.`,[{text:"Cancelar",style:"cancel"},{text:"ELIMINAR",style:"destructive",onPress:()=>apply({type:"delete",id:item.id,confirmed:true})}]),"shopping-delete-"+item.id)}

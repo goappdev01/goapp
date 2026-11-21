@@ -37,15 +37,15 @@ test('checked items form a stable global upper block across categories; removal 
 
 test('category multiselection stays on screen, saves once, reports active list, and does not lose unsaved choices silently',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f,{startList:false});await ui.tap('shopping-orbit-food');await ui.tap('shopping-subgroup-0');
-  await ui.tap('shopping-catalog-food-Pan común');await ui.tap('shopping-catalog-food-Baguette');
-  assert.equal(f.doc().items.length,0);assert.equal(ui.hosts.get('shopping-catalog-food-Pan común').accessibilityState.checked,true);
-  await ui.tap('shopping-back');assert.match(ui.alerts.at(-1).message,/todavía no/);assert.ok(ui.hosts.has('shopping-catalog-food-Baguette'));
+  ui=await shoppingUI(f,{startList:false});await ui.tap('shopping-orbit-bakery');await ui.tap('shopping-subgroup-0');
+  await ui.tap('shopping-catalog-bakery-Pan común');await ui.tap('shopping-catalog-bakery-Baguette');
+  assert.equal(f.doc().items.length,0);assert.equal(ui.hosts.get('shopping-catalog-bakery-Pan común').accessibilityState.checked,true);
+  await ui.tap('shopping-back');assert.match(ui.alerts.at(-1).message,/todavía no/);assert.ok(ui.hosts.has('shopping-catalog-bakery-Baguette'));
   await ui.run(()=>ui.alerts.at(-1).buttons[0].onPress?.());
   const save=ui.hosts.get('shopping-catalog-save');await ui.run(()=>{save.onPress();save.onPress();});await ui.idle();
-  assert.equal(f.doc().items.length,2);assert.ok(ui.hosts.has('shopping-catalog-food-Pan común'));assert.match(ui.container.textContent,/Selección guardada en «COMPRAS»/);
+  assert.equal(f.doc().items.length,2);assert.ok(ui.hosts.has('shopping-catalog-bakery-Pan común'));assert.match(ui.container.textContent,/Selección guardada en «COMPRAS»/);
   assert.equal(ui.hosts.get('shopping-catalog-save').disabled,true);
-  await ui.tap('shopping-catalog-food-Pan integral');await ui.tap('shopping-close');assert.equal(ui.calls.some(c=>c[0]==='close'),false);
+  await ui.tap('shopping-catalog-bakery-Pan integral');await ui.tap('shopping-close');assert.equal(ui.calls.some(c=>c[0]==='close'),false);
   await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='DESCARTAR').onPress());assert.equal(ui.calls.filter(c=>c[0]==='close').length,1);assert.equal(f.doc().items.length,2);
  }finally{await ui?.close();f.disk.close();}
 });
@@ -54,7 +54,7 @@ test('catalog save targets the identified active list and retries a failed readb
  const f=await shoppingFixture();let ui;try{
   const first=await f.open(),second=await f.api().createShoppingList(f.disk.scope,f.disk.active,'Viaje');
   ui=await shoppingUI(f,{startList:false});assert.equal(ui.hosts.get('shopping-orbit-active-list').children.join(''),'Lista activa: Viaje');
-  await ui.tap('shopping-orbit-food');await ui.tap('shopping-subgroup-0');await ui.tap('shopping-catalog-food-Pan común');
+  await ui.tap('shopping-orbit-bakery');await ui.tap('shopping-subgroup-0');await ui.tap('shopping-catalog-bakery-Pan común');
   f.disk.failRead(true);await ui.tap('shopping-catalog-save');assert.ok(ui.hosts.has('shopping-error'));
   assert.equal(f.disk.rows.find(r=>r.id===second.id).note.shopping.items.length,1);assert.equal(f.disk.rows.find(r=>r.id===first.id).note.shopping.items.length,0);
   f.disk.failRead(false);await ui.tap('shopping-catalog-save');assert.equal(f.disk.rows.find(r=>r.id===second.id).note.shopping.items.length,1);
@@ -97,7 +97,7 @@ test('full share includes long purchase, units, brands, states, no history or pr
   await f.run({type:'bought',id:f.doc().items[0].id,value:true});
   const text=share.shoppingShareText('Mi lista',f.doc());assert.match(text,/✓ Comprado · Producto 0 · Marca 0 × 1 unidades/);assert.match(text,/☐ Pendiente · Producto 29/);assert.equal(text.split('\n').length,31);
   assert.equal(text.includes(f.disk.scope.userId),false);assert.equal(text.includes(f.doc().items[0].id),false);assert.match(share.shoppingShareText('Vacía',m.emptyShopping()),/Lista vacía/);
-  ui=await shoppingUI(f);await ui.tap('shopping-active-list');await ui.tap('shopping-list-share');assert.equal(ui.calls.find(c=>c[0]==='share')[1].message,share.shoppingShareText('COMPRAS',f.doc()));
+  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.tap('shopping-manage-lists');await ui.tap('shopping-list-share');assert.equal(ui.calls.find(c=>c[0]==='share')[1].message,share.shoppingShareText('COMPRAS',f.doc()));
  }finally{await ui?.close();f.disk.close();}
 });
 

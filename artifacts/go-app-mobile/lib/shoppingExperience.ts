@@ -1,16 +1,8 @@
+import {SHOPPING_ENTRANCES} from "./shoppingTaxonomy";
 import { SHOPPING_QUANTITY_ERROR, isShoppingQuantity, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, shoppingQuantity, suggestShoppingCategory, type ShoppingCategory, type ShoppingDocument, type ShoppingItem, type ShoppingOperation, type ShoppingUnit } from "./shoppingNote";
 
 /** The eight visual entrances cover the existing catalog without changing stored categories. */
-export const SHOPPING_ORBITS = [
-  {id:"food",label:"Alimentos",art:"🥖",categories:["bakery","meat","fish","dairy","pantry"]},
-  {id:"drinks",label:"Bebidas",art:"🧃",categories:["drinks"]},
-  {id:"home",label:"Hogar",art:"🏠",categories:["cleaning","pets"]},
-  {id:"other",label:"Otros",art:"•••",categories:["other"]},
-  {id:"care",label:"Higiene",art:"🧴",categories:["care"]},
-  {id:"favorites",label:"Favoritos",art:"⭐",categories:[]},
-  {id:"produce",label:"Frescos",art:"🥕",categories:["produce"]},
-  {id:"frozen",label:"Congelados",art:"❄️",categories:["frozen"]},
-] as const;
+export const SHOPPING_ORBITS = SHOPPING_ENTRANCES;
 export const SHOPPING_SUGGESTIONS:Partial<Record<ShoppingCategory,string[]>>={
   produce:["Manzanas","Plátanos","Tomates","Patatas"],bakery:["Pan","Baguette"],meat:["Pollo","Ternera"],fish:["Merluza","Salmón"],
   dairy:["Leche","Huevos","Yogur","Queso"],frozen:["Guisantes congelados","Helados"],pantry:["Arroz","Pasta","Aceite"],drinks:["Agua","Zumo"],
@@ -19,7 +11,7 @@ export const SHOPPING_SUGGESTIONS:Partial<Record<ShoppingCategory,string[]>>={
 export function shoppingOrbitLayout(width:number,fontScale=1){
   const size=Math.min(Math.max(240,width-24),480),button=Math.min(108,Math.max(72,size*.245)),radius=(size-button)/2*.95;
   // Larger accessible text expands vertically; the eight entrances still surround GO on every side.
-  const buttonHeight=Math.max(button,36+36*fontScale),verticalRadius=radius*buttonHeight/button,height=buttonHeight+2*verticalRadius;
+  const buttonHeight=Math.max(button,44+36*fontScale),verticalRadius=radius*buttonHeight/button,height=buttonHeight+2*verticalRadius;
   const center=Math.min(142,Math.max(108,size*.34));
   return {size,button,buttonHeight,height,center,radius,verticalRadius,points:SHOPPING_ORBITS.map((_,i)=>{
     const angle=(-90+i*45)*Math.PI/180;return{x:size/2+Math.cos(angle)*radius-button/2,y:height/2+Math.sin(angle)*verticalRadius-buttonHeight/2};

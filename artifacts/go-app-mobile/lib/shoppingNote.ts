@@ -20,14 +20,14 @@ export type ShoppingItem = {
   id:string; revision:number; name:string; category:ShoppingCategory; quantity:number; unit:ShoppingUnit;
   packageQuantity?:number; packageUnit?:MeasureUnit; bought:boolean; usual:boolean; selected:boolean;
   order:number; notes:string; preferredStore?:string; prices:ShoppingPrice[]; selectedPriceId?:string;
-  brand?:string; variety?:string; format?:string; favorite?:boolean;
+  brand?:string; variety?:string; format?:string; favorite?:boolean; customCatalog?:boolean; catalogHidden?:boolean; catalogStamp?:number;
 };
 /** Raw input is deliberately retained: an unfinished decimal is not a committed item. */
 export type ShoppingEditorDraft = {
   id:string; expectedRevision?:number; name:string; category:ShoppingCategory; quantity:string; unit:ShoppingUnit; originalQuantity?:string;
   packageQuantity:string; packageUnit:MeasureUnit; notes:string; usual:boolean;
   store:string; price:string; currency:string; observedOn:string; priceQuantity:string; priceUnit:MeasureUnit;
-  brand:string; format:string; observationId:string; variety?:string; favorite?:boolean; pricePerPresentation?:true;
+  brand:string; format:string; observationId:string; variety?:string; favorite?:boolean; pricePerPresentation?:true; catalogOnly?:boolean; customCatalog?:boolean;
 };
 export type ShoppingDocument = {
   version:1; categoryOrder:ShoppingCategory[]; collapsed:ShoppingCategory[]; items:ShoppingItem[];
@@ -37,11 +37,11 @@ export type ShoppingDocument = {
   checkouts?:{store:string; x:number; y:number}[];
 };
 export type ShoppingOperation = { operationId:string } & (
-  {type:"addCatalog"; products:{name:string;category:ShoppingCategory;id?:string}[]} |
+  {type:"addCatalog"; products:{name:string;category:ShoppingCategory;id?:string;sourceListId?:string}[]} |
   {type:"saveItem"; draft:ShoppingEditorDraft} | {type:"draft"; draft?:ShoppingEditorDraft} |
   {type:"bought"; id:string; value:boolean} | {type:"select"; id:string; value:boolean} |
   {type:"quantity"; id:string; value:number} | {type:"delete"; id:string; confirmed:true} |
-  {type:"store"; value:string} | {type:"favorite"; id:string; value:boolean} |
+  {type:"catalogVisibility";id:string;hidden:boolean} | {type:"store"; value:string} | {type:"favorite"; id:string; value:boolean} |
   {type:"price"; id:string; value:number; unit:ShoppingUnit; observationId:string} |
   {type:"location"; id:string; aisle:string} | {type:"finish"; confirmed:true} |
   {type:"repeatPurchase"; purchaseId:string; ids:string[]} |
@@ -113,6 +113,7 @@ export function validateShopping(doc:ShoppingDocument):void {
       ||!categoryValid(item.category)||!positive(item.quantity)||!unitValid(item.unit)||!Number.isFinite(item.order)
       ||[item.bought,item.usual,item.selected].some(v=>typeof v!=="boolean")||typeof item.notes!=="string"||!Array.isArray(item.prices))throw Error("Hay un artículo inválido. No se ha cambiado la lista.");
     if([item.brand,item.variety,item.format].some(v=>v!==undefined&&typeof v!=="string")||item.favorite!==undefined&&typeof item.favorite!=="boolean")throw Error("La presentación guardada no es válida.");
+    if([item.customCatalog,item.catalogHidden].some(v=>v!==undefined&&typeof v!=="boolean")||item.catalogStamp!==undefined&&!Number.isFinite(item.catalogStamp))throw Error("El catálogo personal no es válido.");
     ids.add(item.id); checkSize(item.packageQuantity,item.packageUnit);
     const priceIds=new Set<string>();
     for(const p of item.prices){
@@ -125,6 +126,7 @@ export function validateShopping(doc:ShoppingDocument):void {
   if(doc.pendingEditor)validateEditorShape(doc.pendingEditor);
 }
 function validateEditorShape(d:ShoppingEditorDraft) {
+  if([d?.customCatalog,d?.catalogOnly].some(v=>v!==undefined&&typeof v!=="boolean"))throw Error("El catálogo del borrador no es válido.");
   if(!d||!d.id||!d.observationId||!categoryValid(d.category)||!unitValid(d.unit)||!unitValid(d.packageUnit)||d.packageUnit as string==="paquetes"
     ||!unitValid(d.priceUnit)||d.priceUnit as string==="paquetes"||typeof d.usual!=="boolean"||d.variety!==undefined&&typeof d.variety!=="string"||d.favorite!==undefined&&typeof d.favorite!=="boolean"
     ||[d.name,d.quantity,d.packageQuantity,d.notes,d.store,d.price,d.currency,d.observedOn,d.priceQuantity,d.brand,d.format].some(v=>typeof v!=="string"))throw Error("El borrador no es válido.");
@@ -147,7 +149,7 @@ export function shoppingEditor(item?:ShoppingItem):ShoppingEditorDraft {
   const last=item?.prices.find(p=>p.id===item.selectedPriceId)||item?.prices.at(-1);
   return {id:item?.id||shoppingId(),expectedRevision:item?.revision,name:item?.name||"",category:item?.category||"other",quantity:String(item?.quantity??1),unit:item?.unit||"unidades",
     packageQuantity:item?.packageQuantity===undefined?"":String(item.packageQuantity),packageUnit:item?.packageUnit||"kg",notes:item?.notes||"",usual:item?.usual??true,
-    store:item?.preferredStore||"",price:"",currency:last?.currency||"EUR",observedOn:localShoppingDate(),priceQuantity:"",priceUnit:"kg",brand:item?.brand??last?.brand??"",format:item?.format??last?.format??"",variety:item?.variety||"",favorite:item?.favorite||false,observationId:shoppingId()};
+    store:item?.preferredStore||"",price:"",currency:last?.currency||"EUR",observedOn:localShoppingDate(),priceQuantity:"",priceUnit:"kg",brand:item?.brand??last?.brand??"",format:item?.format??last?.format??"",variety:item?.variety||"",favorite:item?.favorite||false,customCatalog:item?.customCatalog,observationId:shoppingId()};
 }
 export function localShoppingDate(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
 function editorItem(d:ShoppingEditorDraft,doc:ShoppingDocument):ShoppingItem {
@@ -173,9 +175,9 @@ function editorItem(d:ShoppingEditorDraft,doc:ShoppingDocument):ShoppingItem {
     selectedPriceId=d.observationId;
   }
   return {...old,id:d.id,revision:(old?.revision||0)+1,name,category:d.category,quantity,unit:d.unit,
-    packageQuantity:size,packageUnit:size===undefined?undefined:d.packageUnit,bought:old?.bought??false,usual:d.usual,selected:old?.selected??true,
+    packageQuantity:size,packageUnit:size===undefined?undefined:d.packageUnit,bought:old?.bought??false,usual:d.usual,selected:old?.selected??!d.catalogOnly,
     order:old?.category===d.category?old.order:Math.max(-1,...doc.items.filter(i=>i.category===d.category).map(i=>i.order))+1,notes:d.notes,preferredStore:d.store.trim(),prices,selectedPriceId,
-    brand:d.brand.trim(),format:d.format.trim(),variety:d.variety?.trim()||"",favorite:d.favorite??old?.favorite??false};
+    brand:d.brand.trim(),format:d.format.trim(),variety:d.variety?.trim()||"",favorite:d.favorite??old?.favorite??false,...((d.customCatalog||old?.customCatalog)?{customCatalog:true,catalogStamp:Date.now()}:{} )};
 }
 export function legacyShoppingCandidates(content:string):string[] {
   return [...new Set(content.split(/\r?\n/).map(s=>s.replace(/^\s*(?:[-•*]|\d+[.)])?\s*(?:\[[ xX]\])?\s*/,"").trim()).filter(Boolean))];
@@ -216,6 +218,7 @@ export function applyShoppingOperation(current:ShoppingDocument,op:ShoppingOpera
     case "bought": {if(typeof op.value!=="boolean")throw Error("Estado inválido.");item(op.id).bought=op.value;break;}
     case "select": {if(typeof op.value!=="boolean")throw Error("Selección inválida.");item(op.id).selected=op.value;break;}
     case "quantity": {if(!isShoppingQuantity(op.value))throw Error(SHOPPING_QUANTITY_ERROR);const i=item(op.id);i.quantity=op.value;i.revision++;break;}
+    case "catalogVisibility": {if(typeof op.hidden!=="boolean")throw Error("Visibilidad inválida.");const i=item(op.id);i.catalogHidden=op.hidden;i.catalogStamp=Date.now();i.revision++;break;}
     case "store": if(typeof op.value!=="string")throw Error("Supermercado inválido.");doc.store=op.value.trim();break;
     case "favorite": if(typeof op.value!=="boolean")throw Error("Favorito inválido.");item(op.id).favorite=op.value;break;
     case "price": {

@@ -66,8 +66,14 @@ export async function restoreShoppingNote(scope:TaskScope,active:()=>boolean,not
 export async function runShoppingOperation(scope:TaskScope,active:()=>boolean,op:ShoppingOperation,listId?:string):Promise<GoEntry>{
   await check(scope,active);
   const entry=await updateGoLog(async rows=>{
-    await check(scope,active);const previous=canonical(rows,scope,listId);if(!previous)throw Error("Abre COMPRAS antes de añadir productos.");
+    await check(scope,active);const catalogWrite=op.type==="catalogVisibility"||(op.type==="saveItem"||op.type==="draft")&&op.draft?.catalogOnly===true;
+    if(catalogWrite&&listId&&rows.filter(row=>row.id===listId).length!==1)throw Error("La lista del catálogo cambió o está duplicada. Se conserva sin modificar.");
+    const previous=catalogWrite&&listId?rows.find(row=>row.id===listId&&noteInScope(row,scope)&&row.note?.shopping):canonical(rows,scope,listId);if(previous)validateShopping(previous.note!.shopping!);if(!previous)throw Error("Abre COMPRAS antes de añadir productos.");
     const old=previous.note!.shopping!;let shopping;
+    if(op.type==="saveItem"&&op.draft.catalogOnly&&!op.draft.expectedRevision){
+      const d=op.draft;const duplicate=rows.filter(row=>noteInScope(row,scope)&&row.note?.shopping).flatMap(row=>row.note!.shopping!.items).find(i=>i.id!==d.id&&!i.catalogHidden&&i.category===d.category&&shoppingName(i.name)===shoppingName(d.name)&&shoppingName(i.brand??"")===shoppingName(d.brand)&&shoppingName(i.format??"")===shoppingName(d.format)&&shoppingName(i.variety??"")===shoppingName(d.variety??"")&&i.unit===d.unit);
+      if(duplicate)throw Error("Este producto ya está en tu catálogo. Selecciónalo o edita su ficha, sin duplicarlo.");
+    }
     if(old.operations.includes(op.operationId))return {entries:rows,result:previous};
     if(op.type==="importLegacy"){
       if(op.confirmed!==true||!op.names.length)throw Error("Selecciona y confirma los productos a incorporar.");
@@ -82,6 +88,20 @@ export async function runShoppingOperation(scope:TaskScope,active:()=>boolean,op
         shopping=applyShoppingOperation(shopping,{type:"saveItem",operationId:op.operationId+":"+index,draft});
       }
       shopping={...shopping,operations:[...shopping.operations,op.operationId].slice(-200)};
+    }else if(op.type==="addCatalog"&&op.products.some(p=>p.sourceListId)){
+      const prepared:typeof old=JSON.parse(JSON.stringify(old));
+      const products=op.products.map(product=>{
+        if(!product.sourceListId)return product;
+        const source=rows.find(row=>row.id===product.sourceListId&&noteInScope(row,scope)&&row.note?.shopping);
+        if(!source||rows.filter(row=>row.id===product.sourceListId).length!==1)throw Error("El catálogo no pertenece a esta cuenta o contexto.");validateShopping(source.note!.shopping!);
+        const item=source.note!.shopping!.items.find(item=>item.id===product.id);
+        if(!item||item.catalogHidden||item.name!==product.name||item.category!==product.category)throw Error("El producto personalizado cambió. Revisa el catálogo.");
+        const equivalent=prepared.items.find(i=>i.id===item.id||i.category===item.category&&shoppingName(i.name)===shoppingName(item.name)&&shoppingName(i.brand??"")===shoppingName(item.brand??"")&&shoppingName(i.format??"")===shoppingName(item.format??"")&&shoppingName(i.variety??"")===shoppingName(item.variety??"")&&i.unit===item.unit&&i.packageQuantity===item.packageQuantity&&i.packageUnit===item.packageUnit);
+        if(equivalent)return {...product,id:equivalent.id};
+        prepared.items.push({...JSON.parse(JSON.stringify(item)),selected:false,bought:false,order:Math.max(-1,...prepared.items.map(i=>i.order))+1});
+        return product;
+      });
+      shopping=applyShoppingOperation(prepared,{...op,products});
     }else shopping=applyShoppingOperation(old,op);
     const next={...previous,note:{...previous.note!,revision:previous.note!.revision+1,operationId:op.operationId,shopping}};
     return {entries:rows.map(row=>row.id===next.id?next:row),result:next};

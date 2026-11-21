@@ -5,6 +5,9 @@ const save=async(api,...args)=>{const result=await api.saveUnifiedNote(...args);
 const move=async(api,...args)=>{const result=await api.moveUnifiedNote(...args);await result.reminderSync;return result;};
 
 import {shoppingFixture,shoppingUI} from './helpers/shopping-fixture.mjs';
+// OTRO now saves a definition first; these purchase regressions explicitly add it next.
+async function saveShopping(ui,f){await ui.tap('shopping-save');if(ui.hosts.has('shopping-field-name')||!ui.hosts.has('shopping-products-scroll'))return;const item=f.doc().items.findLast(i=>i.customCatalog&&!i.selected);if(item&&ui.hosts.has('shopping-custom-choice-'+item.id)){await ui.tap('shopping-custom-choice-'+item.id);await ui.tap('shopping-catalog-save');await ui.tap('shopping-list');}}
+
 
 test('COMPRAS ADMIN: authenticated entry preserves its existing list, owner, context and products through a real UI write and reopen',async()=>{
  const f=await shoppingFixture();let ui;try{
@@ -150,10 +153,10 @@ test('COMPRAS V1: existing shopping opens at the orbit; lists can be selected an
   await f.open();await f.add('Pan');ui=await shoppingUI(f,{startList:false});assert.ok(ui.hosts.has('shopping-eight-orbits'));assert.ok(ui.hosts.has('shopping-add-screen'));
   await ui.tap('shopping-manage-lists');assert.ok(ui.hosts.has('shopping-list-create'));
   await ui.run(()=>ui.hosts.get('shopping-list-name').onChangeText('Trabajo'));await ui.tap('shopping-list-create');assert.ok(ui.hosts.has('shopping-eight-orbits'));
-  await ui.tap('shopping-list');assert.ok(ui.hosts.has('shopping-list-scroll'));await ui.tap('shopping-active-list');await ui.tap('shopping-list-share');
+  await ui.tap('shopping-list');assert.ok(ui.hosts.has('shopping-list-scroll'));await ui.tap('shopping-add');await ui.tap('shopping-manage-lists');await ui.tap('shopping-list-share');
   assert.match(ui.calls.find(call=>call[0]==='share')[1].message,/Trabajo/);
   await ui.tap('shopping-list-select-'+f.disk.rows.find(r=>r.note?.title==='COMPRAS').id);assert.match(ui.container.textContent,/Pan/);
-  await ui.tap('shopping-active-list');await ui.tap('shopping-list-share');assert.match(ui.calls.at(-1)[1].message,/☐ Pendiente · Pan × 1 unidades/);
+  await ui.tap('shopping-add');await ui.tap('shopping-manage-lists');await ui.tap('shopping-list-share');assert.match(ui.calls.at(-1)[1].message,/☐ Pendiente · Pan × 1 unidades/);
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 
@@ -170,10 +173,10 @@ test('COMPRAS V1: deleting the last list offers restoration or a separate new li
 
 test('COMPRAS V1: catalog right swipe adds once and leaves the next tap usable',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f,{startList:false});await ui.tap('shopping-orbit-food');await ui.tap('shopping-subgroup-0');
-  const swipe=ui.hosts.get('shopping-catalog-food-Pan común-swipe');assert.equal(swipe.onMoveShouldSetPanResponder(null,{dx:4,dy:70}),false);
+  ui=await shoppingUI(f,{startList:false});await ui.tap('shopping-orbit-bakery');await ui.tap('shopping-subgroup-0');
+  const swipe=ui.hosts.get('shopping-catalog-bakery-Pan común-swipe');assert.equal(swipe.onMoveShouldSetPanResponder(null,{dx:4,dy:70}),false);
   await ui.run(()=>swipe.onPanResponderRelease(null,{dx:75,dy:2}));await ui.idle();assert.equal(f.doc().items.length,0);await ui.tap('shopping-catalog-save');await ui.tap('shopping-list');assert.equal(f.doc().items.length,1);
-  await ui.tap('shopping-add');await ui.tap('shopping-orbit-food');await ui.tap('shopping-subgroup-0');await ui.tap('shopping-catalog-food-Pan común');await ui.tap('shopping-list');await ui.tap('shopping-edit-'+f.doc().items[0].id);
+  await ui.tap('shopping-add');await ui.tap('shopping-orbit-bakery');await ui.tap('shopping-subgroup-0');await ui.tap('shopping-catalog-bakery-Pan común');await ui.tap('shopping-list');await ui.tap('shopping-edit-'+f.doc().items[0].id);
   assert.ok(ui.hosts.has('shopping-field-name'));assert.equal(ui.hosts.get('shopping-field-name').value,'Pan común');
  }finally{if(ui)await ui.close();f.disk.close();}
 });
@@ -186,7 +189,7 @@ test('COMPRAS V1: horizontal gestures do not claim vertical scroll and touch edi
   await ui.run(()=>{const g=gesture();g.onBeginHandler();g.onStartHandler();g.onEndHandler({translationX:75,velocityX:0},true);g.onFinalizeHandler({},true);});await ui.idle();assert.equal(f.doc().items.find(i=>i.id===pan.id).bought,true);
   await ui.run(()=>{const g=gesture();g.onBeginHandler();g.onStartHandler();g.onEndHandler({translationX:-80,velocityX:0},true);g.onFinalizeHandler({},true);});assert.equal(ui.alerts.at(-1).title,'Retirar de esta lista');
   await ui.tap('shopping-details-'+gel.id);assert.equal(ui.hosts.get('shopping-field-name').value,'Gel');assert.equal(ui.alerts.length,1);
-  await ui.tap('shopping-save');assert.equal(f.doc().pendingEditor.name,'Otro');
+  await saveShopping(ui,f);assert.equal(f.doc().pendingEditor.name,'Otro');
   await ui.run(()=>gesture().onBeginHandler());await ui.tap('shopping-trash-'+pan.id);await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='RETIRAR').onPress());await ui.idle();assert.equal(f.doc().items.find(i=>i.id===pan.id).selected,false);
  }finally{if(ui)await ui.close();f.disk.close();}
 });
@@ -217,17 +220,17 @@ test('COMPRAS shows long product names on their own row and keeps compact contro
    assert.deepEqual(h.React.Children.toArray(ui.hosts.get('shopping-secondary-navigation').children).map(child=>child.props.testID),['shopping-purchase','shopping-route','shopping-map','shopping-favorites','shopping-more']);
    assert.equal(ui.hosts.get('shopping-product-main-row-'+item.id).style[1].flexDirection,direction);
    assert.equal(ui.hosts.get('shopping-live-totals').style.paddingRight,undefined);
-   const text=ui.hosts.get('shopping-edit-'+item.id).children;
-   assert.equal(text.props.numberOfLines,undefined);assert.equal(text.props.children,item.name);
+   const text=h.React.Children.toArray(ui.hosts.get('shopping-edit-'+item.id).children)[0];
+   assert.equal(text.props.numberOfLines,undefined);assert.equal(h.React.Children.toArray(text.props.children).join(""),item.name);
    assert.equal(text.props.adjustsFontSizeToFit,undefined);
    const controlIds=h.React.Children.toArray(ui.hosts.get('shopping-product-main-row-'+item.id).children).map(child=>child.props.testID).filter(Boolean);
    assert.deepEqual(controlIds,['shopping-quantity-controls-','shopping-ir-','shopping-bought-'].map(prefix=>prefix+item.id));
    assert.ok(ui.hosts.has('shopping-product-info-'+item.id));
    assert.equal(ui.hosts.get('shopping-price-input-'+item.id).placeholder,'Sin precio');
-   assert.equal(ui.hosts.get('shopping-navigation-space').style.height,136,'floating pair shares the auxiliary dock');
+   assert.equal(ui.hosts.has('shopping-navigation-space'),false,'floats reserve no product-list column');
    const checkbox=()=>ui.hosts.get('shopping-bought-'+item.id);
-   assert.equal(checkbox().children.props.name,'check');assert.equal(checkbox().style[0].minHeight,44);
-   await ui.tap('shopping-bought-'+item.id);assert.equal(checkbox().accessibilityState.checked,true);assert.equal(checkbox().children.props.name,'check');await ui.tap('shopping-bought-'+item.id);assert.equal(f.doc().items[0].bought,false);
+   assert.equal(h.React.Children.toArray(checkbox().children)[0].props.name,'check');assert.equal(checkbox().style[0].minHeight,44);
+   await ui.tap('shopping-bought-'+item.id);assert.equal(checkbox().accessibilityState.checked,true);assert.equal(h.React.Children.toArray(checkbox().children)[0].props.name,'check');await ui.tap('shopping-bought-'+item.id);assert.equal(f.doc().items[0].bought,false);
    const quantity=()=>ui.hosts.get('shopping-quantity-'+item.id);
    await ui.run(()=>{quantity().onFocus();quantity().onChangeText('3');ui.keyboard.show();});
    ui.keyboard.focused={blur:()=>quantity().onEndEditing()};
@@ -241,28 +244,28 @@ test('COMPRAS shows long product names on their own row and keeps compact contro
 test('COMPRAS V1 editor exposes only product, integer quantity, presentation price, brand and save',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false});assert.ok(ui.hosts.has('shopping-eight-orbits'));assert.ok(ui.hosts.has('shopping-go-orbit'));assert.ok(ui.hosts.has('shopping-thumb-controls'));
-  assert.deepEqual(['food','drinks','home','other','care','favorites','produce','frozen'].map(id=>ui.hosts.get('shopping-orbit-'+id).accessibilityLabel),['Alimentos','Bebidas','Hogar','Otros','Higiene','Favoritos','Frescos','Congelados']);
-  await ui.tap('shopping-orbit-food');await ui.tap('shopping-subgroup-0');assert.ok(ui.hosts.has('shopping-catalog-food-Pan común'));await ui.tap('shopping-catalog-food-Pan común');await ui.tap('shopping-catalog-save');await ui.tap('shopping-list');await ui.tap('shopping-edit-'+f.doc().items[0].id);
+  assert.deepEqual(['produce','protein','drinks','bakery','dairy','pantry','care','home','favorites'].map(id=>ui.hosts.get('shopping-orbit-'+id).accessibilityLabel),['FRUTAS Y VERDURAS','CARNICERÍA Y PESCADERÍA','BEBIDAS','PANADERÍA Y REPOSTERÍA','LÁCTEOS Y REFRIGERADOS','DESPENSA','HIGIENE, DROGUERÍA Y PERFUMERÍA','OTROS (HOGAR)','FAVORITOS']);
+  await ui.tap('shopping-orbit-bakery');await ui.tap('shopping-subgroup-0');assert.ok(ui.hosts.has('shopping-catalog-bakery-Pan común'));await ui.tap('shopping-catalog-bakery-Pan común');await ui.tap('shopping-catalog-save');await ui.tap('shopping-list');await ui.tap('shopping-edit-'+f.doc().items[0].id);
   for(const key of ['name','quantity','price','brand'])assert.ok(ui.hosts.has('shopping-field-'+key));
   assert.match(ui.hosts.get("shopping-field-price").accessibilityLabel,/Precio por producto/);assert.ok(ui.hosts.has("shopping-save"));
   assert.equal(ui.hosts.get("shopping-field-quantity").keyboardType,"number-pad");
   for(const id of ["shopping-field-format","shopping-field-store","shopping-unit-picker","shopping-editor-options"])assert.equal(ui.hosts.has(id),false);
-  await ui.tap('shopping-save');assert.equal(f.doc().items[0].name,'Pan común');assert.ok(ui.hosts.has('shopping-item-'+f.doc().items[0].id));
+  await saveShopping(ui,f);assert.equal(f.doc().items[0].name,'Pan común');assert.ok(ui.hosts.has('shopping-item-'+f.doc().items[0].id));
   await ui.tap('shopping-add');await ui.tap('shopping-search-open');await ui.run(()=>ui.hosts.get('shopping-product-search').onChangeText('Agua'));await ui.idle();assert.ok(ui.hosts.has('shopping-catalog-drinks-Agua mineral'));
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 
 test('COMPRAS UI: actual add/edit/bought/filter/next controls persist offline and closing an editor retains list scroll instance',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f);const scroll=ui.instances.get('shopping-list-scroll');await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Azúcar');await ui.input('quantity','2');await ui.tap('shopping-save');
+  ui=await shoppingUI(f);const scroll=ui.instances.get('shopping-list-scroll');await ui.tap('shopping-add');await ui.tap('shopping-orbit-pantry');await ui.tap('shopping-new-product');await ui.input('name','Azúcar');await ui.input('quantity','2');await saveShopping(ui,f);
   const sugar=f.doc().items[0];assert.equal(sugar.quantity,2);assert.equal(sugar.category,'pantry');assert.equal(ui.instances.get('shopping-list-scroll'),scroll);assert.equal(ui.hosts.get('shopping-bought-'+sugar.id).accessibilityState.checked,false);
-  await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Sal');await ui.tap('shopping-save');const salt=f.doc().items.find(i=>i.name==='Sal');
+  await ui.tap('shopping-add');await ui.tap('shopping-orbit-pantry');await ui.tap('shopping-new-product');await ui.input('name','Sal');await saveShopping(ui,f);const salt=f.doc().items.find(i=>i.name==='Sal');
   await ui.tap('shopping-bought-'+sugar.id);assert.equal(f.doc().items.find(i=>i.id===sugar.id).bought,true);await ui.tap('shopping-bought-'+sugar.id);assert.equal(f.doc().items.find(i=>i.id===sugar.id).bought,false);
   await ui.tap('shopping-bought-'+sugar.id);await ui.tap('shopping-more');await ui.tap('shopping-filter-bought');assert.ok(ui.hosts.has('shopping-item-'+sugar.id));assert.equal(ui.hosts.has('shopping-item-'+salt.id),false);await ui.tap('shopping-filter-all');
   await ui.tap('shopping-next');assert.equal(ui.hosts.get('shopping-next-select-'+sugar.id).accessibilityState.checked,false);await ui.tap('shopping-next-select-'+sugar.id);await ui.tap('shopping-next-confirm');
   await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='PREPARAR').onPress());await ui.idle();assert.equal(f.doc().items.find(i=>i.id===sugar.id).bought,false);assert.equal(f.doc().items.length,2);
-  await ui.tap('shopping-filter-all');await ui.tap('shopping-edit-'+sugar.id);await ui.input('price','2,50');await ui.input('brand','Marca A');await ui.tap('shopping-save');
-  await ui.tap('shopping-edit-'+sugar.id);await ui.input('price','1,50');await ui.tap('shopping-save');
+  await ui.tap('shopping-filter-all');await ui.tap('shopping-edit-'+sugar.id);await ui.input('price','2,50');await ui.input('brand','Marca A');await saveShopping(ui,f);
+  await ui.tap('shopping-edit-'+sugar.id);await ui.input('price','1,50');await saveShopping(ui,f);
   assert.equal(f.doc().items.length,2);assert.equal(f.doc().items.find(i=>i.id===sugar.id).prices.length,2);assert.ok(ui.hosts.has('shopping-go'));assert.ok(ui.hosts.has('shopping-route'));
   await ui.close();ui=null;await f.disk.reopen();assert.equal((await f.open()).note.shopping.items.length,2);
  }finally{if(ui)await ui.close();f.disk.close();}
@@ -289,9 +292,9 @@ test('COMPRAS UI: measured long-press handles reorder only their own block, pers
 
 test('COMPRAS UI: acknowledged partial draft recovers after unmount/reopen, failed save stays editable, and changing account hides private fields',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Producto privado');await ui.input('quantity','');await ui.input('price','2,');await ui.close();ui=null;await f.disk.reopen();
-  ui=await shoppingUI(f);assert.equal(ui.hosts.has('shopping-resume-draft'),false);assert.equal(ui.hosts.has('shopping-field-name'),false);await ui.tap('shopping-more');await ui.tap('shopping-resume-draft');assert.equal(ui.hosts.get('shopping-field-name').value,'Producto privado');assert.equal(ui.hosts.get('shopping-field-quantity').value,'');await ui.tap('shopping-save');assert.ok(ui.hosts.has('shopping-error'));assert.equal(f.doc().items.length,0);
-  await ui.input('quantity','2');await ui.input('price','');f.disk.failWrite(true);await ui.tap('shopping-save');assert.equal(ui.hosts.get('shopping-field-name').value,'Producto privado');assert.equal(f.doc().items.length,0);f.disk.failWrite(false);await ui.tap('shopping-save');assert.equal(f.doc().items.length,1);
+  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.tap('shopping-orbit-pantry');await ui.tap('shopping-new-product');await ui.input('name','Producto privado');await ui.input('quantity','');await ui.input('price','2,');await ui.close();ui=null;await f.disk.reopen();
+  ui=await shoppingUI(f);assert.equal(ui.hosts.has('shopping-resume-draft'),false);assert.equal(ui.hosts.has('shopping-field-name'),false);await ui.tap('shopping-more');await ui.tap('shopping-resume-draft');assert.equal(ui.hosts.get('shopping-field-name').value,'Producto privado');assert.equal(ui.hosts.get('shopping-field-quantity').value,'');await saveShopping(ui,f);assert.ok(ui.hosts.has('shopping-error'));assert.equal(f.doc().items.length,0);
+  await ui.input('quantity','2');await ui.input('price','');f.disk.failWrite(true);await saveShopping(ui,f);assert.equal(ui.hosts.get('shopping-field-name').value,'Producto privado');assert.equal(f.doc().items.length,0);f.disk.failWrite(false);await saveShopping(ui,f);assert.equal(f.doc().items.length,1);
   await ui.tap('shopping-edit-'+f.doc().items[0].id);await ui.render({ready:false,scope:null});assert.equal(ui.hosts.has('shopping-field-name'),false);assert.doesNotMatch(ui.container.textContent,/Producto privado/);
   await f.disk.setUser('other-ui-user');await ui.render({ready:true,scope:{...f.disk.scope,userId:'other-ui-user'}});assert.doesNotMatch(ui.container.textContent,/Producto privado/);assert.equal(f.disk.rows.find(r=>r.ownerUserId==='other-ui-user').note.shopping.items.length,0);
  }finally{if(ui)await ui.close();f.disk.close();}
@@ -299,7 +302,7 @@ test('COMPRAS UI: acknowledged partial draft recovers after unmount/reopen, fail
 
 for(const viewport of [{width:320,height:568,fontScale:1},{width:390,height:844,fontScale:1.8},{width:768,height:1024,fontScale:2}])for(const handedness of ['left','right'])test(`COMPRAS UI: ${viewport.width}px font ${viewport.fontScale} ${handedness} retains keyboard-aware thumb controls and native input focus`,async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f,{...viewport,handedness});assert.equal(ui.hosts.get('shopping-primary-actions').style[1].flexDirection,handedness==='left'?'row-reverse':'row');await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');
+  ui=await shoppingUI(f,{...viewport,handedness});assert.equal(ui.hosts.get('shopping-primary-actions').style[1].flexDirection,handedness==='left'?'row-reverse':'row');await ui.tap('shopping-add');await ui.tap('shopping-orbit-pantry');await ui.tap('shopping-new-product');
   assert.equal(ui.hosts.get('shopping-field-name').autoFocus,undefined);await ui.run(()=>ui.hosts.get('shopping-field-name').onFocus({target:123}));assert.ok(ui.calls.some(c=>c[0]==='reveal'&&c[1]===123));
   await ui.run(()=>ui.keyboard.show());assert.equal(ui.hosts.get('shopping-back').accessibilityLabel,'Ocultar teclado');assert.ok(ui.hosts.has('shopping-save'));await ui.tap('shopping-keyboard-done');assert.equal(ui.keyboard.visible,false);assert.ok(ui.hosts.has('shopping-field-name'));
   await ui.run(()=>ui.keyboard.show());await ui.tap('shopping-back');assert.equal(ui.keyboard.visible,false);await ui.tap('shopping-back');assert.ok(ui.hosts.has('shopping-products-scroll'));await ui.tap('shopping-back');assert.ok(ui.hosts.has('shopping-eight-orbits'));await ui.tap('shopping-back');assert.ok(ui.hosts.has('shopping-add'));await ui.tap('shopping-more');assert.ok(ui.hosts.has('shopping-resume-draft'));
@@ -308,17 +311,17 @@ for(const viewport of [{width:320,height:568,fontScale:1},{width:390,height:844,
 
 test('COMPRAS UI: a failed readback retries the identical saved item without duplicate prices or a false stale-edit conflict',async()=>{
  const f=await shoppingFixture();let ui;try{
-  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.tap('shopping-orbit-other');await ui.tap('shopping-new-product');await ui.input('name','Azúcar');await ui.input('price','2,50');
-  f.disk.failRead(true);await ui.tap('shopping-save');assert.ok(ui.hosts.has('shopping-field-name'));assert.ok(ui.hosts.has('shopping-error'));assert.equal(f.doc().items.length,1);
-  f.disk.failRead(false);await ui.tap('shopping-save');assert.equal(ui.hosts.has('shopping-field-name'),false);assert.equal(f.doc().items.length,1);assert.equal(f.doc().items[0].prices.length,1);
+  ui=await shoppingUI(f);await ui.tap('shopping-add');await ui.tap('shopping-orbit-pantry');await ui.tap('shopping-new-product');await ui.input('name','Azúcar');await ui.input('price','2,50');
+  f.disk.failRead(true);await saveShopping(ui,f);assert.ok(ui.hosts.has('shopping-field-name'));assert.ok(ui.hosts.has('shopping-error'));assert.equal(f.doc().items.length,1);
+  f.disk.failRead(false);await saveShopping(ui,f);assert.equal(ui.hosts.has('shopping-field-name'),false);assert.equal(f.doc().items.length,1);assert.equal(f.doc().items[0].prices.length,1);
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 
 test('COMPRAS V1: catalogue, optional brand, price per product, totals, route and store switching preserve one list',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false});assert.ok(ui.hosts.has('shopping-eight-orbits'));
-  for(const id of ['food','drinks','home','other','care','favorites','produce','frozen'])assert.ok(ui.hosts.has('shopping-orbit-'+id));assert.ok(ui.hosts.has('shopping-go-orbit'));
-  await ui.tap('shopping-orbit-produce');await ui.tap('shopping-subgroup-0');await ui.tap('shopping-catalog-produce-Manzanas');await ui.tap('shopping-catalog-save');await ui.tap('shopping-list');await ui.tap('shopping-edit-'+f.doc().items[0].id);await ui.input('quantity','2');await ui.input('brand','Mi marca');await ui.tap('shopping-save');
+  for(const id of ['produce','protein','drinks','bakery','dairy','pantry','care','home','favorites'])assert.ok(ui.hosts.has('shopping-orbit-'+id));assert.ok(ui.hosts.has('shopping-go-orbit'));
+  await ui.tap('shopping-orbit-produce');await ui.tap('shopping-subgroup-0');await ui.tap('shopping-catalog-produce-Manzanas');await ui.tap('shopping-catalog-save');await ui.tap('shopping-list');await ui.tap('shopping-edit-'+f.doc().items[0].id);await ui.input('quantity','2');await ui.input('brand','Mi marca');await saveShopping(ui,f);
   const id=f.doc().items[0].id;assert.equal(f.doc().items[0].brand,'Mi marca');assert.equal(f.doc().items[0].prices.length,0);
   await ui.tap('shopping-store');await ui.run(()=>ui.hosts.get('shopping-store-name').onChangeText('Tienda A'));await ui.tap('shopping-store-save');
   await ui.run(()=>ui.hosts.get('shopping-price-input-'+id).onChangeText('4'));await ui.idle();await ui.run(()=>ui.hosts.get('shopping-price-input-'+id).onEndEditing());await ui.idle();
@@ -374,7 +377,7 @@ test('COMPRAS: bottle count, package size and exact decimal steps stay separate 
   assert.match(ui.hosts.get('shopping-field-price').accessibilityLabel,/Precio por producto/);
   await ui.tap('shopping-editor-plus');
   assert.equal(ui.hosts.get('shopping-field-quantity').value,'2');
-  await ui.tap('shopping-save');await ui.tap('shopping-plus-'+bottle.id);await ui.tap('shopping-minus-'+bottle.id);
+  await saveShopping(ui,f);await ui.tap('shopping-plus-'+bottle.id);await ui.tap('shopping-minus-'+bottle.id);
   await f.disk.reopen();
   const item=f.doc().items.find(i=>i.id===bottle.id);
   assert.equal(item.quantity,2);assert.equal(item.packageQuantity,1.5);assert.equal(item.unit,'paquetes');
@@ -423,7 +426,7 @@ test('COMPRAS V1 preserves fractional records and drafts until the owner explici
   assert.doesNotMatch(ui.container.textContent,/Cantidad antigua|Continuar producto pendiente/);
   await ui.tap('shopping-quantity-'+item.id);
   assert.equal(ui.hosts.get('shopping-field-quantity').value,'1,3');
-  await ui.tap('shopping-save');
+  await saveShopping(ui,f);
   assert.match(ui.container.textContent,/cantidad entera/);
   assert.equal(f.doc().pendingEditor.quantity,'1,3');
   await ui.input('quantity','2,5');
@@ -436,7 +439,7 @@ test('COMPRAS V1 preserves fractional records and drafts until the owner explici
   assert.equal(f.doc().pendingEditor.originalQuantity,'1,3');
   await ui.run(()=>ui.keyboard.show());await ui.tap('shopping-keyboard-done');
   assert.equal(ui.keyboard.visible,false);assert.equal(f.doc().items[0].quantity,1.3);
-  await ui.tap('shopping-save');
+  await saveShopping(ui,f);
   assert.doesNotMatch(ui.container.textContent,/Antes: 1,3|cantidad entera/);
   await f.disk.reopen();
   assert.equal(f.doc().items[0].quantity,2);

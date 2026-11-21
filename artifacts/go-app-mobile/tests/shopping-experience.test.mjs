@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
-const require=createRequire(import.meta.url),h=require('./helpers/unified-note-fixture.cjs'),m=h.load('lib/shoppingNote.ts'),x=h.load('lib/shoppingExperience.ts',{'./shoppingNote':m}),catalog=h.load('lib/shoppingCatalog.ts',{'./shoppingNote':m});
+const require=createRequire(import.meta.url),h=require('./helpers/unified-note-fixture.cjs'),m=h.load('lib/shoppingNote.ts'),taxonomy=h.load('lib/shoppingTaxonomy.ts',{'./shoppingNote':m}),x=h.load('lib/shoppingExperience.ts',{'./shoppingNote':m,'./shoppingTaxonomy':taxonomy}),catalog=h.load('lib/shoppingCatalog.ts',{'./shoppingNote':m,'./shoppingTaxonomy':taxonomy});
 const plain=h.plain;
 function fixture(){let doc=m.emptyShopping();return{get doc(){return doc;},op(op){doc=m.applyShoppingOperation(doc,{operationId:m.shoppingId(),...op});return doc;},add(name,extra={}){const draft={...m.shoppingEditor(),name,...extra};doc=m.applyShoppingOperation(doc,{type:'saveItem',draft,operationId:m.shoppingId()});return doc.items.find(i=>i.id===draft.id);}};}
 
@@ -43,9 +43,9 @@ test('finish snapshots the real bought items without deleting catalog, observati
  f.op({type:'quantity',id:a.id,value:2});assert.equal(f.doc.purchases[0].items[0].quantity,1);assert.equal(f.doc.items.find(i=>i.id===b.id).bought,false);
 });
 
-test('approved eight orbits cover every stored category and place Others lower-right, Hygiene below and Congelados upper-left',()=>{
- assert.deepEqual(plain(x.SHOPPING_ORBITS.map(o=>o.label)),['Alimentos','Bebidas','Hogar','Otros','Higiene','Favoritos','Frescos','Congelados']);
- assert.deepEqual(plain(x.SHOPPING_ORBITS.flatMap(o=>o.categories)).sort(),plain(m.SHOPPING_CATEGORIES.map(c=>c[0])).sort());
+test('eight presentation entrances preserve all legacy storage keys and disjoint orbit targets',()=>{
+ assert.deepEqual(plain(x.SHOPPING_ORBITS.map(o=>o.label)),['FRUTAS Y VERDURAS','CARNICERÍA Y PESCADERÍA','BEBIDAS','PANADERÍA Y REPOSTERÍA','LÁCTEOS Y REFRIGERADOS','DESPENSA','HIGIENE, DROGUERÍA Y PERFUMERÍA','OTROS (HOGAR)']);
+ assert.equal(m.SHOPPING_CATEGORIES.length,12,'storage retains all twelve legacy categories');
  for(const width of [320,375,390,430,768])for(const scale of [1,1.8,2]){const l=x.shoppingOrbitLayout(width,scale),center=l.size/2;
   assert.equal(l.points.length,8);const others=l.points[3],care=l.points[4],frozen=l.points[7];assert.ok(others.x+l.button/2>center&&others.y+l.buttonHeight/2>l.height/2);assert.ok(care.y+l.buttonHeight/2>l.height/2);assert.ok(frozen.x+l.button/2<center&&frozen.y+l.buttonHeight/2<l.height/2);
   for(const p of l.points){assert.ok(p.x>=-.01&&p.y>=-.01);assert.ok(p.x+l.button<=l.size+.01&&p.y+l.buttonHeight<=l.height+.01);}
@@ -77,8 +77,8 @@ test('GO executes bounded commands on the same document; ambiguous presentations
 });
 
 test('catalog preserves owner group order, search and distinct fresh/frozen products',()=>{
- const food=catalog.shoppingCatalogGroups('food');assert.deepEqual(plain(food.map(g=>g.label)),['Panadería y bollería','Arroz, pasta y cereales','Legumbres','Conservas','Aceites, salsas y condimentos','Desayuno y dulces']);
- assert.deepEqual(plain(food[0].products.slice(0,4)),['Pan común','Barra de pan','Baguette','Pan integral']);
+ const pantry=catalog.shoppingCatalogGroups('pantry');assert.deepEqual(plain(pantry.map(g=>g.label)),['Arroz, pasta y cereales','Legumbres','Conservas','Aceites, salsas y condimentos','Desayuno y dulces']);assert.ok(catalog.shoppingCatalogGroups('bakery').some(g=>g.label==='Panadería y bollería'));
+ assert.deepEqual(plain(catalog.shoppingCatalogGroups("bakery")[0].products.slice(0,4)),['Pan común','Barra de pan','Baguette','Pan integral']);
  assert.equal(catalog.shoppingCatalogGroups('search','salmón').length,2);
  const f=fixture(),fresh=f.add('Salmón',{category:'fish'}),frozen=f.add('Salmón',{category:'frozen'});
  assert.notEqual(fresh.id,frozen.id);assert.equal(catalog.shoppingCatalogItem(f.doc,'fish','Salmón').id,fresh.id);assert.equal(catalog.shoppingCatalogItem(f.doc,'frozen','Salmón').id,frozen.id);

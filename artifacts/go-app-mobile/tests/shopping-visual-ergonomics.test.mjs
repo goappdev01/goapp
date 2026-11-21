@@ -24,12 +24,12 @@ for(const hand of ['left','right'])test(`Landing ${hand}: vertical existing navi
  }finally{await ui?.close();f.disk.close();}
 });
 
-test('narrow iPhone keeps its two shortcuts in one row with icons above whole-word labels',async()=>{
+test('narrow iPhone keeps one full-width search shortcut above the three fixed actions',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false,width:320,fontScale:1.8});
   await ui.run(()=>{for(const [key,width] of Object.entries({search:210,lists:120,searchWord:120,listWord:60}))ui.hosts.get('shopping-label-measure-'+key).onTextLayout({nativeEvent:{lines:[{width}]}});});
-  assert.equal(style(ui.hosts.get('shopping-shortcut-row').style).flexDirection,'row');assert.equal(style(ui.hosts.get('shopping-search-open').style).flexDirection,'column');
-  assert.equal(ui.hosts.get('shopping-search-label').children,'Buscar\nproductos');assert.ok(style(ui.hosts.get('shopping-search-open').style).minHeight>=44);
+  assert.equal(style(ui.hosts.get('shopping-shortcut-row').style).flexDirection,'row');assert.equal(style(ui.hosts.get('shopping-search-open').style).flexDirection,'row');
+  assert.equal(ui.hosts.get('shopping-search-label').children,'Buscar productos');assert.ok(style(ui.hosts.get('shopping-search-open').style).minHeight>=44);
  }finally{await ui?.close();f.disk.close();}
 });
 
@@ -64,7 +64,7 @@ test('short landscape viewport clips the orbital bounds before checking floating
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false,width:844,height:390});
   ui.geometry.set('shopping-layout-frame',[0,0,844,390]);ui.geometry.set('shopping-add-screen',[0,100,844,130]);
-  ui.geometry.set('shopping-eight-orbits',[352,100,480,480]);ui.geometry.set('shopping-orbit-other',[352,100,90,480]);ui.geometry.set('shopping-list-viewport',[0,0,0,0]);
+  ui.geometry.set('shopping-eight-orbits',[352,100,480,480]);ui.geometry.set('shopping-orbit-home',[352,100,90,480]);ui.geometry.set('shopping-list-viewport',[0,0,0,0]);
   await ui.run(()=>ui.hosts.get('shopping-add-screen').onLayout());
   assert.ok(ui.hosts.get('shopping-navigation-frame').avoidRects.some(rect=>rect.x===352&&rect.y===8&&rect.height===130));
  }finally{await ui?.close();f.disk.close();}

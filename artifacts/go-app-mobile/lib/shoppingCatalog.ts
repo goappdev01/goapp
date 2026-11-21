@@ -1,10 +1,12 @@
+export {shoppingEntrance} from "./shoppingTaxonomy";
+import {shoppingEntrance,shoppingItemEntrance} from "./shoppingTaxonomy";
 import type { ShoppingCategory, ShoppingDocument, ShoppingItem, ShoppingUnit } from "./shoppingNote";
 import { shoppingName } from "./shoppingNote";
 
 type Group = { orbit:string; label:string; category:ShoppingCategory; products:readonly string[] };
 const group=(orbit:string,label:string,category:ShoppingCategory,names:string):Group=>({orbit,label,category,products:names.split("|")});
 /** Presentation catalog. Names and order follow the owner's V1 list; no prices or brands. */
-export const SHOPPING_CATALOG:readonly Group[]=[
+export const LEGACY_SHOPPING_CATALOG:readonly Group[]=[
   group("food","Panadería y bollería","bakery","Pan común|Barra de pan|Baguette|Pan integral|Pan de molde|Pan sin gluten|Panecillos|Tostadas|Picos|Croissants|Magdalenas|Galletas|Bollería"),
   group("food","Arroz, pasta y cereales","pantry","Arroz blanco|Arroz integral|Macarrones|Espaguetis|Fideos|Lasaña|Cuscús|Avena|Cereales de desayuno|Harina"),
   group("food","Legumbres","pantry","Lentejas|Garbanzos|Alubias|Judías verdes|Guisantes|Habas|Legumbres cocidas"),
@@ -34,9 +36,24 @@ export const SHOPPING_CATALOG:readonly Group[]=[
   group("frozen","Preparados","frozen","Pizza|Lasaña|Patatas fritas|Verduras salteadas"),
   group("frozen","Postres","frozen","Helado|Polos|Tartas congeladas"),
 ];
+/** Every original presentation survives; category is the unchanged storage key. */
+export const SHOPPING_CATALOG=LEGACY_SHOPPING_CATALOG.flatMap(g=>{
+ const grouped=new Map<string,string[]>();for(const name of g.products){const orbit=shoppingEntrance(name,g.category)??"review";const names=grouped.get(orbit)??[];names.push(name);grouped.set(orbit,names);}
+ return [...grouped].map(([orbit,products])=>({...g,orbit,products,label:(orbit==="review"?"Por revisar · ":"")+g.label+(g.category==="frozen"?" · Congelados":"")}));
+});
+const knownPresentations=new Set(LEGACY_SHOPPING_CATALOG.flatMap(g=>g.products.map(name=>g.category+":"+shoppingName(name))));
+export function shoppingPersonalCatalog(documents:readonly {id:string;items:ShoppingItem[]}[],orbit:string,query=""){
+ const latest=new Map<string,{item:ShoppingItem;sourceListId:string}>();
+ for(const doc of documents)for(const item of doc.items){
+  if(!item.customCatalog&&!item.brand&&!item.format&&!item.variety&&knownPresentations.has(item.category+":"+shoppingName(item.name)))continue;
+  const previous=latest.get(item.id);if(!previous||(item.catalogStamp??0)>(previous.item.catalogStamp??0)||(item.catalogStamp??0)===(previous.item.catalogStamp??0)&&item.revision>previous.item.revision)latest.set(item.id,{item,sourceListId:doc.id});
+ }
+ return [...latest.values()].filter(({item})=>!item.catalogHidden&&(orbit==="search"|| (orbit==="review"?!shoppingItemEntrance(item):shoppingItemEntrance(item)===orbit))&&(!query||shoppingName(item.name).includes(shoppingName(query))));
+}
 export function shoppingCatalogGroups(orbit:string,query=""){
   const q=shoppingName(query);
   return SHOPPING_CATALOG.filter(g=>orbit==="search"||g.orbit===orbit)
+    .sort((a,b)=>orbit==="produce"?Number(b.category==="produce")-Number(a.category==="produce"):0)
     .map(g=>({...g,products:q?g.products.filter(name=>shoppingName(name).includes(q)):g.products}))
     .filter(g=>g.products.length);
 }

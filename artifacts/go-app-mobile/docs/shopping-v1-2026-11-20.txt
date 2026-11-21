@@ -358,3 +358,72 @@ Lista. Se mantienen anchuras, posiciones, radios y acciones. Sin cambios de dato
 20 pruebas dirigidas superadas, incluida fuente ampliada en ancho 320 y estabilidad
 del arco al editar; TypeScript y diff --check antes de publicar. Bundle iOS 8088
 verificado después; 8089 intacto. Comprobación física del texto pendiente en iPhone.
+
+REORGANIZACIÓN 21/11/2026 — catálogo compatible y navegación definitiva
+-------------------------------------------------------------------
+Base: origin/main dbfcdf08670eb320bcd6ea9e13050f6007ea6b99.
+Ya correctos: precios/presentaciones, cantidades enteras nuevas, multiselección,
+cola serializada y readback, varias listas, favoritos persistidos por producto,
+retirada sin borrar historial, IA de Compras y flotantes compartidos. Se reutilizan.
+Parcial: categorías visuales antiguas, favoritos ocupando una de ocho órbitas,
+OTRO limitado a una entrada, estrella oculta en detalles y navegación redundante.
+Pendiente real independiente: las tres listas ADMIN desaparecidas del iPhone no
+se han podido localizar ni recuperar con datos reales del dispositivo.
+
+Cambios: ocho entradas exactas FRUTAS Y VERDURAS / CARNICERÍA Y PESCADERÍA /
+BEBIDAS / PANADERÍA Y REPOSTERÍA / LÁCTEOS Y REFRIGERADOS / DESPENSA /
+HIGIENE, DROGUERÍA Y PERFUMERÍA / OTROS (HOGAR). Favoritos es un acceso circular
+separado del conjunto de ocho y del GO central. Se conservan ancho de satélites,
+tamaño/acción del GO central y radio aprobado; solo la altura mínima de etiquetas
+se adapta cuando hace falta para los nombres completos. El acceso extra queda
+en flujo debajo del aro, con scroll en pantallas cortas, sin tapar controles.
+
+La correspondencia es de lectura: se mantienen las doce claves internas V1 y las
+212 presentaciones originales, sin migración ni cambio automático de IDs, unidades,
+precios o registros. Congelados conserva su categoría de almacenamiento y se muestra
+como información adicional en los grupos nuevos. Cuatro entradas ambiguas quedan
+accesibles en Buscar → Productos por revisar: Bebé, Productos de temporada,
+Producto personalizado y Croquetas (con su condición de congelado). No se reclasifica
+un alimento dudoso como Hogar ni se descarga/genera otra colección de imágenes.
+El icono sigue resolviéndose por el nombre específico del producto existente.
+
+Cada categoría termina con OTRO. Guardar crea una definición personal en los mismos
+registros de Compras, inicialmente fuera de la compra; después se selecciona y usa
+GUARDAR del catálogo para incorporarla. Los opcionales customCatalog/catalogHidden/
+catalogStamp y catalogOnly del borrador no invalidan documentos antiguos. No cambian
+versión, claves de almacenamiento ni listas existentes al abrir. Los propios y
+presentaciones personalizadas se leen de las listas del mismo propietario/contexto.
+Importar a otra lista es una operación explícita y atómica: conserva el ID y la
+presentación, no toca el origen, y no duplica una presentación ya presente en destino.
+Cada lista conserva su estado independiente. Editar apunta al registro de origen;
+quitar del catálogo confirma y oculta su definición sin retirar compras ni snapshots.
+Incluso si la lista origen está en papelera, esa acción no la restaura. Las referencias
+de otro usuario/contexto y registros duplicados se rechazan, sin reparación silenciosa.
+
+Estrella visible a la izquierda de la papelera roja: alterna favoritos sin confirmar,
+sin seleccionar/comprar ni abrir editor. El gesto existente no se reprograma aquí.
+No se declara corregida ninguna incidencia táctil física pendiente.
+
+Landing: una búsqueda de ancho completo; debajo MIS LISTAS | GO | LISTA. El orden
+visual se mantiene explícitamente en ambas manos; flotantes y anclajes respetan
+lateralidad. AÑADIR solo queda en la lista para volver al catálogo. Se retira el enlace
+Mis listas de la cabecera, conservando nombre real, supermercado e importes.
+El Landing usa la protección común de obstáculos reales para que los flotantes no
+tapen botones: una posición temporal segura no sobrescribe la preferencia elegida.
+Mis listas y listado mantienen sus reglas anteriores. No hay columna reservada.
+
+108 pruebas dirigidas únicas superadas (67 catálogo/ergonomía y 41 regresiones
+COMPRAS en unified-notes), además de comprobación focal tras el último ajuste de
+clasificación. Incluyen conservación 212/212, congelados, revisión, OTRO en ocho,
+creación/edición/ocultación, reutilización entre listas, disco temporal/reapertura,
+cuentas/contextos, favoritos, duplicados, historial, recuperación no destructiva,
+selección múltiple, cantidades, precios, totales, voz/IA existentes y ambos modos.
+Las pruebas actualizan los contratos de navegación que esta instrucción sustituye;
+no equivalen a validación física del iPhone. TypeScript y diff --check antes del commit;
+GitHub y bundle iOS 8088 se verifican tras publicar. 8089 congelado intacto. Sin cambios
+de backend, API, infraestructura, puente, Trello ni nueva sincronización remota.
+
+Validación pendiente del propietario: legibilidad de ocho etiquetas y Favoritos,
+scroll en iPhone estrecho/texto ampliado, accesos inferiores, flotantes, estrellas,
+OTRO tras reinicio real de Expo y preservación de sus listas reales. No se ejecutó
+ninguna migración de clasificación persistida ni borrado/restablecimiento del teléfono.
