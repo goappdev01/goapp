@@ -27,11 +27,11 @@ test('all eight submenus finish with OTRO; custom catalog saves independently, s
   await ui.tap('shopping-orbit-bakery');await ui.tap('shopping-new-product');await ui.input('name','Pan especial de prueba');await ui.input('price','2,50');await ui.tap('shopping-save');
   const item=f.doc().items.find(i=>i.name==='Pan especial de prueba');assert.equal(item.selected,false);assert.equal(item.customCatalog,true);assert.ok(ui.hosts.has('shopping-custom-'+item.id));
   await ui.tap('shopping-custom-choice-'+item.id);await ui.tap('shopping-catalog-save');assert.equal(f.doc().items[0].selected,true);
-  await ui.run(()=>f.run({type:'select',id:item.id,value:false}));await ui.idle();assert.ok(ui.hosts.has('shopping-custom-'+item.id));
+  await ui.run(()=>f.run({type:'select',id:item.id,value:false}));await ui.idle();await ui.tap('shopping-orbit-bakery');assert.ok(ui.hosts.has('shopping-custom-'+item.id));
   await ui.close();ui=null;await f.disk.reopen();const saved=await f.open();assert.equal(saved.id,original.id);assert.equal(saved.note.shopping.items[0].id,item.id);
   const second=await f.api().createShoppingList(f.disk.scope,f.disk.active,'Segunda');ui=await shoppingUI(f,{startList:false});await ui.tap('shopping-orbit-bakery');assert.ok(ui.hosts.has('shopping-custom-'+item.id));await ui.tap('shopping-custom-choice-'+item.id);await ui.tap('shopping-catalog-save');
   const secondSaved=await f.open();assert.equal(secondSaved.id,second.id);assert.equal(secondSaved.note.shopping.items[0].id,item.id);assert.equal(secondSaved.note.shopping.items[0].prices[0].price,2.5);assert.equal(secondSaved.note.shopping.items.length,1);
-  await ui.tap('shopping-custom-edit-'+item.id);await ui.input('name','Pan especial corregido');await ui.tap('shopping-save');assert.ok(ui.container.textContent.includes('Pan especial corregido'));
+  await ui.tap('shopping-orbit-bakery');await ui.tap('shopping-custom-edit-'+item.id);await ui.input('name','Pan especial corregido');await ui.tap('shopping-save');assert.ok(ui.container.textContent.includes('Pan especial corregido'));
   await ui.tap('shopping-custom-remove-'+item.id);await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='QUITAR').onPress());await ui.idle();assert.equal(ui.hosts.has('shopping-custom-'+item.id),false);const retained=(await f.open()).note.shopping.items[0];assert.equal(retained.selected,true);assert.equal(retained.prices.length,1);
  }finally{await ui?.close();f.disk.close();}
 });
@@ -88,7 +88,7 @@ test('pasta selection reuses stored pantry identity, while cookies remain select
   ui=await shoppingUI(f,{startList:false});await ui.tap('shopping-orbit-bakery-hit');
   const subgroup=[...ui.hosts].find(([id,p])=>id.startsWith('shopping-subgroup-')&&p.accessibilityLabel==='Pasta alimenticia');assert.ok(subgroup);await ui.tap(subgroup[0]);
   await ui.tap('shopping-catalog-bakery-Macarrones');await ui.tap('shopping-catalog-save');const saved=f.doc().items.filter(i=>i.name==='Macarrones');assert.equal(saved.length,1);assert.equal(saved[0].id,old.id);assert.equal(saved[0].category,'pantry');assert.equal(saved[0].selected,true);
-  await ui.tap('shopping-back');await ui.tap('shopping-back');await ui.tap('shopping-orbit-pantry-hit');
+  await ui.tap('shopping-orbit-pantry-hit');
   const cookies=[...ui.hosts].find(([id,p])=>id.startsWith('shopping-subgroup-')&&p.accessibilityLabel==='Galletas y repostería');assert.ok(cookies);await ui.tap(cookies[0]);assert.ok(ui.hosts.has('shopping-catalog-pantry-Galletas'));
  }finally{await ui?.close();f.disk.close();}
 });

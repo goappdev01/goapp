@@ -35,7 +35,7 @@ test('checked items form a stable global upper block across categories; removal 
  }finally{f.disk.close();}
 });
 
-test('category multiselection stays on screen, saves once, reports active list, and does not lose unsaved choices silently',async()=>{
+test('category multiselection saves once to the active list, returns to Landing, and protects unsaved choices',async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false});await ui.tap('shopping-orbit-bakery');await ui.tap('shopping-subgroup-0');
   await ui.tap('shopping-catalog-bakery-Pan común');await ui.tap('shopping-catalog-bakery-Baguette');
@@ -43,9 +43,9 @@ test('category multiselection stays on screen, saves once, reports active list, 
   await ui.tap('shopping-back');assert.match(ui.alerts.at(-1).message,/todavía no/);assert.ok(ui.hosts.has('shopping-catalog-bakery-Baguette'));
   await ui.run(()=>ui.alerts.at(-1).buttons[0].onPress?.());
   const save=ui.hosts.get('shopping-catalog-save');await ui.run(()=>{save.onPress();save.onPress();});await ui.idle();
-  assert.equal(f.doc().items.length,2);assert.ok(ui.hosts.has('shopping-catalog-bakery-Pan común'));assert.match(ui.container.textContent,/Selección guardada en «COMPRAS»/);
-  assert.equal(ui.hosts.get('shopping-catalog-save').disabled,true);
-  await ui.tap('shopping-catalog-bakery-Pan integral');await ui.tap('shopping-close');assert.equal(ui.calls.some(c=>c[0]==='close'),false);
+  assert.equal(f.doc().items.length,2);assert.ok(ui.hosts.has('shopping-seven-orbits'));assert.match(ui.container.textContent,/Selección guardada en «COMPRAS»/);
+  assert.equal(ui.hosts.has('shopping-catalog-save'),false);
+  await ui.tap('shopping-orbit-bakery');await ui.tap('shopping-subgroup-0');await ui.tap('shopping-catalog-bakery-Pan integral');await ui.tap('shopping-close');assert.equal(ui.calls.some(c=>c[0]==='close'),false);
   await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='DESCARTAR').onPress());assert.equal(ui.calls.filter(c=>c[0]==='close').length,1);assert.equal(f.doc().items.length,2);
  }finally{await ui?.close();f.disk.close();}
 });

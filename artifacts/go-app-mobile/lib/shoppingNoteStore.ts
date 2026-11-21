@@ -4,7 +4,7 @@ import type { TaskScope } from "./goTaskReminders";
 import { assertTaskUser } from "./goTaskAccess";
 import { readGoLog, updateGoLog } from "./goLogStore";
 import { buildNoteEntry, isNoteEntry, noteDraft, noteInScope } from "./unifiedNotes";
-import { applyShoppingOperation, emptyShopping, legacyShoppingCandidates, shoppingEditor, shoppingId, shoppingName, suggestShoppingCategory, validateShopping, type ShoppingOperation } from "./shoppingNote";
+import { applyShoppingOperation, emptyShopping, legacyShoppingCandidates, shoppingEditor, shoppingId, shoppingName, sameShoppingPresentation, suggestShoppingCategory, validateShopping, type ShoppingOperation } from "./shoppingNote";
 
 export const shoppingNoteId=(scope:TaskScope)=>"shopping_note:"+encodeURIComponent(scope.userId)+":"+encodeURIComponent(scope.context);
 const activeListKey=(scope:TaskScope)=>shoppingNoteId(scope)+":active_list";
@@ -88,20 +88,20 @@ export async function runShoppingOperation(scope:TaskScope,active:()=>boolean,op
         shopping=applyShoppingOperation(shopping,{type:"saveItem",operationId:op.operationId+":"+index,draft});
       }
       shopping={...shopping,operations:[...shopping.operations,op.operationId].slice(-200)};
-    }else if(op.type==="addCatalog"&&op.products.some(p=>p.sourceListId)){
+    }else if(op.type==="addCatalog"&&op.products.some(p=>p.sourceListId)||op.type==="favorite"&&"product" in op&&op.product.sourceListId){
       const prepared:typeof old=JSON.parse(JSON.stringify(old));
-      const products=op.products.map(product=>{
+      const products=(op.type==="addCatalog"?op.products:[op.product]).map(product=>{
         if(!product.sourceListId)return product;
         const source=rows.find(row=>row.id===product.sourceListId&&noteInScope(row,scope)&&row.note?.shopping);
         if(!source||rows.filter(row=>row.id===product.sourceListId).length!==1)throw Error("El catálogo no pertenece a esta cuenta o contexto.");validateShopping(source.note!.shopping!);
         const item=source.note!.shopping!.items.find(item=>item.id===product.id);
         if(!item||item.catalogHidden||item.name!==product.name||item.category!==product.category)throw Error("El producto personalizado cambió. Revisa el catálogo.");
-        const equivalent=prepared.items.find(i=>i.id===item.id||i.category===item.category&&shoppingName(i.name)===shoppingName(item.name)&&shoppingName(i.brand??"")===shoppingName(item.brand??"")&&shoppingName(i.format??"")===shoppingName(item.format??"")&&shoppingName(i.variety??"")===shoppingName(item.variety??"")&&i.unit===item.unit&&i.packageQuantity===item.packageQuantity&&i.packageUnit===item.packageUnit);
+        const equivalent=prepared.items.find(i=>sameShoppingPresentation(i,item));
         if(equivalent)return {...product,id:equivalent.id};
         prepared.items.push({...JSON.parse(JSON.stringify(item)),selected:false,bought:false,order:Math.max(-1,...prepared.items.map(i=>i.order))+1});
         return product;
       });
-      shopping=applyShoppingOperation(prepared,{...op,products});
+      shopping=applyShoppingOperation(prepared,op.type==="addCatalog"?{...op,products}:{...op,product:products[0]});
     }else shopping=applyShoppingOperation(old,op);
     const next={...previous,note:{...previous.note!,revision:previous.note!.revision+1,operationId:op.operationId,shopping}};
     return {entries:rows.map(row=>row.id===next.id?next:row),result:next};

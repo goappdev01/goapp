@@ -36,12 +36,15 @@ export type ShoppingDocument = {
   locations?:{store:string; itemId:string; aisle:string; x?:number; y?:number}[];
   checkouts?:{store:string; x:number; y:number}[];
 };
+/** Same canonical presentation comparison used by catalog imports and favorite controls. */
+export function sameShoppingPresentation(a:ShoppingItem,b:ShoppingItem){return a.id===b.id||a.category===b.category&&shoppingName(a.name)===shoppingName(b.name)&&shoppingName(a.brand??"")===shoppingName(b.brand??"")&&shoppingName(a.format??"")===shoppingName(b.format??"")&&shoppingName(a.variety??"")===shoppingName(b.variety??"")&&a.unit===b.unit&&a.packageQuantity===b.packageQuantity&&a.packageUnit===b.packageUnit;}
+export type ShoppingCatalogReference={name:string;category:ShoppingCategory;id?:string;sourceListId?:string};
 export type ShoppingOperation = { operationId:string } & (
-  {type:"addCatalog"; products:{name:string;category:ShoppingCategory;id?:string;sourceListId?:string}[]} |
+  {type:"addCatalog"; products:ShoppingCatalogReference[]} |
   {type:"saveItem"; draft:ShoppingEditorDraft} | {type:"draft"; draft?:ShoppingEditorDraft} |
   {type:"bought"; id:string; value:boolean} | {type:"select"; id:string; value:boolean} |
   {type:"quantity"; id:string; value:number} | {type:"delete"; id:string; confirmed:true} |
-  {type:"catalogVisibility";id:string;hidden:boolean} | {type:"store"; value:string} | {type:"favorite"; id:string; value:boolean} |
+  {type:"catalogVisibility";id:string;hidden:boolean} | {type:"store"; value:string} | {type:"favorite"; id:string; value:boolean} | {type:"favorite"; product:ShoppingCatalogReference; value:boolean} |
   {type:"price"; id:string; value:number; unit:ShoppingUnit; observationId:string} |
   {type:"location"; id:string; aisle:string} | {type:"finish"; confirmed:true} |
   {type:"repeatPurchase"; purchaseId:string; ids:string[]} |
@@ -220,7 +223,17 @@ export function applyShoppingOperation(current:ShoppingDocument,op:ShoppingOpera
     case "quantity": {if(!isShoppingQuantity(op.value))throw Error(SHOPPING_QUANTITY_ERROR);const i=item(op.id);i.quantity=op.value;i.revision++;break;}
     case "catalogVisibility": {if(typeof op.hidden!=="boolean")throw Error("Visibilidad inválida.");const i=item(op.id);i.catalogHidden=op.hidden;i.catalogStamp=Date.now();i.revision++;break;}
     case "store": if(typeof op.value!=="string")throw Error("Supermercado inválido.");doc.store=op.value.trim();break;
-    case "favorite": if(typeof op.value!=="boolean")throw Error("Favorito inválido.");item(op.id).favorite=op.value;break;
+    case "favorite": {
+      if(typeof op.value!=="boolean")throw Error("Favorito inválido.");
+      if("product" in op){
+        const p=op.product;if(!p||!categoryValid(p.category)||!p.name?.trim())throw Error("Producto de catálogo inválido.");
+        const matches=doc.items.filter(i=>p.id?i.id===p.id:i.category===p.category&&shoppingName(i.name)===shoppingName(p.name));
+        if(matches.length>1)throw Error("Hay varias presentaciones. Elige el producto guardado.");
+        if(matches[0])matches[0].favorite=op.value;
+        else{if(p.id)throw Error("El producto guardado cambió. Revisa el catálogo.");doc.items.push(editorItem({...shoppingEditor(),name:p.name,category:p.category,catalogOnly:true,favorite:op.value},doc));}
+      }else item(op.id).favorite=op.value;
+      break;
+    }
     case "price": {
       const i=item(op.id);const priceStore=doc.store||"Sin supermercado";
       if(!positive(op.value)||op.unit!==i.unit||!op.observationId)throw Error("Introduce el precio de esta presentación.");
