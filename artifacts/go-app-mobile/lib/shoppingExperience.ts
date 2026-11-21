@@ -8,14 +8,38 @@ export const SHOPPING_SUGGESTIONS:Partial<Record<ShoppingCategory,string[]>>={
   dairy:["Leche","Huevos","Yogur","Queso"],frozen:["Guisantes congelados","Helados"],pantry:["Arroz","Pasta","Aceite"],drinks:["Agua","Zumo"],
   care:["Champú","Pasta de dientes"],cleaning:["Detergente","Lavavajillas"],pets:["Pienso"],other:[],
 };
-export function shoppingOrbitLayout(width:number,fontScale=1){
-  const size=Math.min(Math.max(240,width-24),480),button=Math.min(108,Math.max(72,size*.245)),radius=(size-button)/2*.95;
-  // Larger accessible text expands vertically; the eight entrances still surround GO on every side.
-  const buttonHeight=Math.max(button,44+36*fontScale),verticalRadius=radius*buttonHeight/button,height=buttonHeight+2*verticalRadius;
-  const center=Math.min(142,Math.max(108,size*.34));
-  return {size,button,buttonHeight,height,center,radius,verticalRadius,points:SHOPPING_ORBITS.map((_,i)=>{
-    const angle=(-90+i*45)*Math.PI/180;return{x:size/2+Math.cos(angle)*radius-button/2,y:height/2+Math.sin(angle)*verticalRadius-buttonHeight/2};
+/** Joint circular geometry: typography never changes the ring's height. */
+export function shoppingOrbitLayout(width:number,_fontScale=1,handedness:"left"|"right"="right"){
+  const size=Math.max(0,Math.min(width-24,480));
+  const ratio=.22+.025*Math.max(0,Math.min(1,(size-296)/80));
+  const button=Math.min(112,size*ratio),radius=(size-button)/2,buttonHeight=button,height=size;
+  const favoriteDiameter=44,clearance=2,theta=Math.PI/8;
+  const separation=button/2+favoriteDiameter/2+clearance;
+  const delta=Math.sqrt(Math.max(0,separation**2-(radius*Math.sin(theta))**2));
+  const inner=radius*Math.cos(theta)-delta;
+  const fitsInside=2*(inner-favoriteDiameter/2-clearance)>=64;
+  const desiredCenter=Math.min(142,Math.max(88,size*.34));
+  const center=fitsInside?Math.min(desiredCenter,2*(inner-favoriteDiameter/2-clearance)):desiredCenter;
+  const favoriteRadius=fitsInside?inner:radius*Math.cos(theta)+delta;
+  const favoriteAngle=fitsInside?0:Math.PI/4;
+  const favoriteX=size/2+Math.cos(favoriteAngle)*favoriteRadius-favoriteDiameter/2;
+  const favorite={x:handedness==="left"?size-favoriteDiameter-favoriteX:favoriteX,y:size/2+Math.sin(favoriteAngle)*favoriteRadius-favoriteDiameter/2,diameter:favoriteDiameter};
+  return {size,button,buttonHeight,height,center,radius,verticalRadius:radius,favorite,points:SHOPPING_ORBITS.map((_,i)=>{
+    // One global rotation creates a real gap at the dominant-side middle of the ring.
+    const angle=(-112.5+i*45)*Math.PI/180;
+    return{x:size/2+Math.cos(angle)*radius-button/2,y:size/2+Math.sin(angle)*radius-button/2};
   })};
+}
+const orbitalLines:Record<string,string[]>={
+  produce:["FRUTAS Y","VERDURAS"],protein:["CARNICERÍA","Y PESCADERÍA"],drinks:["BEBIDAS"],
+  bakery:["PANADERÍA Y","REPOSTERÍA"],dairy:["LÁCTEOS Y","REFRIGERADOS"],pantry:["DESPENSA"],
+  care:["HIGIENE,","DROGUERÍA Y","PERFUMERÍA"],home:["OTROS","(HOGAR)"],
+};
+export function shoppingOrbitTypography(id:string,diameter:number){
+  const lines=orbitalLines[id]??[id],icon=Math.max(18,Math.min(31,diameter*.28));
+  const contentWidth=diameter*.8,maxLinesHeight=diameter-icon-12;
+  const fontSize=Math.min(11,diameter*.14,contentWidth/(Math.max(...lines.map(line=>line.length))*.67),maxLinesHeight/(lines.length*1.12));
+  return {lines,text:lines.join("\n"),fontSize,lineHeight:fontSize*1.12,icon,contentWidth,labelHeight:maxLinesHeight};
 }
 
 export type ShoppingIndoorMap={store:string; nodes:{id:string;aisle?:string}[]; edges:{from:string;to:string;distance:number}[];

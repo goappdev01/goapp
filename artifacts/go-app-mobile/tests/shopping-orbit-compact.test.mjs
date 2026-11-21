@@ -1,12 +1,33 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
-const require=createRequire(import.meta.url),h=require('./helpers/unified-note-fixture.cjs'),m=h.load('lib/shoppingNote.ts'),taxonomy=h.load('lib/shoppingTaxonomy.ts',{'./shoppingNote':m}),x=h.load('lib/shoppingExperience.ts',{'./shoppingNote':m,'./shoppingTaxonomy':taxonomy});
-test('shopping satellites move five percent closer without resizing GO or satellite widths; label height adapts',()=>{
- for(const width of [320,375,390,430,844])for(const fontScale of [1,1.4,1.8,2]){
-  const r=x.shoppingOrbitLayout(width,fontScale),size=Math.min(Math.max(240,width-24),480),button=Math.min(108,Math.max(72,size*.245));
-  const buttonHeight=Math.max(button,44+36*fontScale),oldRadius=(size-button)/2;
-  assert.equal(r.size,size);assert.equal(r.button,button);assert.equal(r.buttonHeight,buttonHeight);assert.equal(r.center,Math.min(142,Math.max(108,size*.34)));
-  assert.equal(r.radius,oldRadius*.95);assert.equal(r.verticalRadius,oldRadius*.95*buttonHeight/button);
-  for(const p of r.points){assert.ok(p.x>=-1e-8&&p.y>=-1e-8);assert.ok(p.x+button<=size+.001&&p.y+buttonHeight<=r.height+.001);}
-  for(let i=0;i<8;i++)for(let j=i+1;j<8;j++){const a=r.points[i],b=r.points[j];assert.ok(a.x+button<=b.x||b.x+button<=a.x||a.y+buttonHeight<=b.y||b.y+buttonHeight<=a.y,'neighboring touch rectangles remain separate');}
+import {shoppingFixture,shoppingUI} from './helpers/shopping-fixture.mjs';
+const h=createRequire(import.meta.url)('./helpers/unified-note-fixture.cjs'),m=h.load('lib/shoppingNote.ts'),taxonomy=h.load('lib/shoppingTaxonomy.ts',{'./shoppingNote':m}),x=h.load('lib/shoppingExperience.ts',{'./shoppingNote':m,'./shoppingTaxonomy':taxonomy});
+const flat=s=>Object.assign({},...(Array.isArray(s)?s.flat(Infinity).filter(Boolean):[s]));
+test('joint circular ring and small integrated satellite fit iPhones without extra height or shape changes for large text',()=>{
+ for(const width of [240,280,320,375,390,430,480,844])for(const scale of [1,1.4,1.8,2])for(const hand of ['left','right']){
+  const l=x.shoppingOrbitLayout(width,scale,hand),base=x.shoppingOrbitLayout(width,1,hand);
+  assert.equal(l.buttonHeight,l.button);assert.equal(l.height,l.size);assert.equal(l.height,base.height);assert.equal(l.button,base.button);assert.equal(l.center,base.center);
+  assert.ok(l.favorite.diameter>=44&&l.favorite.diameter<l.button);
+  const circles=[...l.points.map(p=>({x:p.x+l.button/2,y:p.y+l.button/2,r:l.button/2})),{x:l.size/2,y:l.size/2,r:l.center/2},{x:l.favorite.x+22,y:l.favorite.y+22,r:22}];
+  for(const c of circles){assert.ok(c.x-c.r>=-.001&&c.y-c.r>=-.001);assert.ok(c.x+c.r<=l.size+.001&&c.y+c.r<=l.height+.001);}
+  for(let i=0;i<circles.length;i++)for(let j=i+1;j<circles.length;j++){const a=circles[i],b=circles[j];assert.ok(Math.hypot(a.x-b.x,a.y-b.y)>=a.r+b.r+1.99,`paths ${i}/${j} separated at ${width}/${scale}/${hand}`);}
+  if(width>=320){assert.ok(Math.abs(circles[9].y-l.height/2)<.001);assert.ok(hand==='right'?circles[9].x>l.size/2:circles[9].x<l.size/2);}
  }
+});
+test('controlled category lines preserve every word, fit typography to diameter, and keep short names larger',()=>{
+ for(const width of [320,375,390,430]){const l=x.shoppingOrbitLayout(width);for(const o of x.SHOPPING_ORBITS){const t=x.shoppingOrbitTypography(o.id,l.button);assert.equal(t.text.replace(/\s+/g,' '),o.label);assert.ok(t.fontSize>0);assert.ok(t.lineHeight*t.lines.length<=t.labelHeight+.01);assert.ok(t.icon>=18);}
+  assert.ok(x.shoppingOrbitTypography('care',l.button).fontSize<x.shoppingOrbitTypography('drinks',l.button).fontSize);
+ }
+});
+for(const handedness of ['left','right'])test(`SVG circular control wiring ${handedness}: transparent corners, separate favourite, existing navigation and unchanged data`,async()=>{
+ const f=await shoppingFixture();let ui;try{
+  ui=await shoppingUI(f,{startList:false,width:390,fontScale:1.8,handedness});const before=JSON.stringify(f.doc()),frame=ui.hosts.get('shopping-eight-orbits');
+  const geometry=x.shoppingOrbitLayout(390,1.8,handedness);assert.equal(frame.style.height,geometry.size);
+  for(const id of [...x.SHOPPING_ORBITS.map(o=>o.id),'favorites']){const button=ui.hosts.get('shopping-orbit-'+id),s=flat(button.style),hit=ui.hosts.get('shopping-orbit-'+id+'-hit');assert.equal(s.width,s.height);assert.equal(s.borderRadius,s.width/2);assert.equal(s.minHeight,s.height);assert.equal(s.maxHeight,s.height);assert.equal(button.pointerEvents,'box-none');assert.equal(button.onPress,undefined);assert.equal(hit.r+hit.strokeWidth/2,s.width/2);assert.equal(hit.cx,s.width/2);assert.equal(typeof hit.onPress,'function');assert.ok(s.width>=44);}
+  const favorite=flat(ui.hosts.get('shopping-orbit-favorites').style);assert.equal(favorite.width,44);assert.ok(favorite.width<geometry.button);assert.equal(favorite.top,geometry.favorite.y);assert.equal(favorite.position,'absolute');
+  const favoriteContent=h.React.Children.toArray(ui.hosts.get('shopping-orbit-favorites').children);assert.equal(favoriteContent[0].props.pointerEvents,'box-none');const strings=node=>typeof node==='string'?[node]:h.React.isValidElement(node)?h.React.Children.toArray(node.props.children).flatMap(strings):[];assert.deepEqual(favoriteContent.flatMap(strings),['⭐']);assert.equal(ui.hosts.get('shopping-orbit-favorites').accessibilityLabel,'FAVORITOS');
+  await ui.tap('shopping-orbit-favorites-hit');assert.ok(ui.hosts.has('shopping-products-scroll'));await ui.tap('shopping-back');await ui.tap('shopping-orbit-produce-hit');assert.ok(ui.hosts.has('shopping-new-product'));await ui.tap('shopping-back');
+  assert.equal(JSON.stringify(f.doc()),before);assert.equal(ui.hosts.get('shopping-floating-buttons').style.flexDirection,'column');assert.equal(ui.hosts.has('shopping-navigation-space'),false);assert.equal(ui.hosts.has('shopping-add'),false);assert.ok(ui.hosts.has('shopping-search-open'));
+  assert.deepEqual(h.React.Children.toArray(ui.hosts.get('shopping-primary-actions').children).map(n=>n.props.testID).filter(Boolean),['shopping-manage-lists','shopping-go','shopping-list']);
+  await ui.tap('shopping-go-orbit-hit');assert.ok(ui.hosts.has('shopping-command'));await ui.tap('shopping-back');await ui.tap('shopping-close');assert.ok(ui.calls.some(c=>c[0]==='close'));
+ }finally{await ui?.close();f.disk.close();}
 });

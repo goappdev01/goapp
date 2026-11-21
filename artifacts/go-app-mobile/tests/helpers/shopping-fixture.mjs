@@ -44,9 +44,10 @@ export async function shoppingUI(f,{handedness='right',width=390,height=844,font
  const swipe=h.load('components/ui/SwipeableRow.tsx',{'react-native':native,'react-native-gesture-handler':gh,'@expo/vector-icons':icons});
  const row=h.load('components/notes/ShoppingProductRow.tsx',{'react-native':native,'@expo/vector-icons':icons,'@/components/ui/SwipeableRow':swipe,'@/lib/shoppingNote':f.model,'@/lib/shoppingProductArt':h.load('lib/shoppingProductArt.ts',{'./shoppingNote':f.model})});
  const catalog=h.load('lib/shoppingCatalog.ts',{'./shoppingNote':f.model,'./shoppingTaxonomy':taxonomy});
+ const orbitControl=h.load('components/notes/ShoppingOrbitControl.tsx',{'react-native':native,'react-native-svg':{__esModule:true,default:host('Svg'),Circle:host('Circle')}});
  const choice=h.load('components/notes/ShoppingCatalogChoice.tsx',{'react-native':native});
  const {GoShoppingNote}=h.load('components/notes/GoShoppingNote.tsx',{'react-native':native,'react-native-gesture-handler':gh,'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:44,bottom:20,left:0,right:0})},'expo-linear-gradient':{LinearGradient:native.View},
-  '@expo/vector-icons':icons,'@/lib/shoppingScreenLayout':h.load('lib/shoppingScreenLayout.ts'),'@/lib/shoppingProductArt':h.load('lib/shoppingProductArt.ts',{'./shoppingNote':f.model}),'@/lib/shoppingShare':h.load('lib/shoppingShare.ts',{'./shoppingNote':f.model}),'@/lib/shoppingExperience':experience,'@/lib/shoppingCatalog':catalog,'./ShoppingProductRow':row,'./ShoppingCatalogChoice':choice,'@/hooks/useBookingVoice':{useBookingVoice:()=>({status:'idle',error:'',abort(){},start:async()=>{calls.push(['voice-start']);},stop:async()=>{calls.push(['voice-stop']);}})},
+  '@expo/vector-icons':icons,'@/lib/shoppingScreenLayout':h.load('lib/shoppingScreenLayout.ts'),'@/lib/shoppingProductArt':h.load('lib/shoppingProductArt.ts',{'./shoppingNote':f.model}),'@/lib/shoppingShare':h.load('lib/shoppingShare.ts',{'./shoppingNote':f.model}),'@/lib/shoppingExperience':experience,'@/lib/shoppingCatalog':catalog,'./ShoppingOrbitControl':orbitControl,'./ShoppingProductRow':row,'./ShoppingCatalogChoice':choice,'@/hooks/useBookingVoice':{useBookingVoice:()=>({status:'idle',error:'',abort(){},start:async()=>{calls.push(['voice-start']);},stop:async()=>{calls.push(['voice-stop']);}})},
   '@/components/ui/GoNavigationFloating':{GoNavigationFloating:({children,...props})=>React.createElement(native.View,{...props,testID:'shopping-navigation-frame'},children)},'@/components/ui/GoScreenModal':{GoScreenModal:native.Modal},'@/components/ui/GoCloseButton':{GoCloseButton:native.TouchableOpacity,GO_NAVIGATION_SIZE:64},'@/hooks/useGoNoteKeyboard':keyboardHook,
   '@/contexts/GoAdminAccessContext':{useAdminAccess:()=>adminAccess},'@/contexts/GoViewContext':{useGoView:()=>goView},
   '@/lib/goLogStore':store,'@/lib/unifiedNotes':f.disk.model,'@/lib/shoppingNoteStore':f.api(),'@/lib/shoppingNote':f.model,'./ShoppingReorderSurface':reorder},globals);
@@ -54,7 +55,7 @@ export async function shoppingUI(f,{handedness='right',width=390,height=844,font
  const idle=async()=>{for(let i=0;i<10;i++)await h.settle(()=>new Promise(setImmediate));};
  const render=async patch=>{props={...props,...patch};await h.settle(()=>root.render(React.createElement(GoShoppingNote,props)));await idle();};
  await render({});
- const tap=async id=>{assert.ok(hosts.has(id),'control exists: '+id);await h.settle(()=>hosts.get(id).onPress());await idle();};
+ const tap=async id=>{assert.ok(hosts.has(id),'control exists: '+id);await h.settle(()=>(hosts.get(id).onPress??hosts.get(id).onAccessibilityTap)());await idle();};
  if(startList&&hosts.has('shopping-list'))await tap('shopping-list');
  const input=async(key,value)=>{assert.ok(hosts.has("shopping-field-"+key));await h.settle(()=>hosts.get("shopping-field-"+key).onChangeText(value));await idle();};
  return {hosts,instances,calls,alerts,frames,geometry,gestures,keyboard,container,render,idle,tap,input,run:h.settle,

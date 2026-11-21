@@ -427,3 +427,52 @@ Validación pendiente del propietario: legibilidad de ocho etiquetas y Favoritos
 scroll en iPhone estrecho/texto ampliado, accesos inferiores, flotantes, estrellas,
 OTRO tras reinicio real de Expo y preservación de sus listas reales. No se ejecutó
 ninguna migración de clasificación persistida ni borrado/restablecimiento del teléfono.
+
+CORRECCIÓN VISUAL 21/11/2026 — círculos y satélite Favoritos integrado
+------------------------------------------------------------------
+Base: origin/main 21d634639679b9093df878bf605d4e164552ce2e.
+Causa: buttonHeight dependía de la escala de texto mientras el ancho permanecía
+fijo; eso producía óvalos. Favoritos era un hermano en el flujo después del anillo,
+añadiendo una fila y altura. No se cambia clasificación ni ningún dato persistido.
+
+Geometría conjunta: ocho diámetros iguales, ancho=alto y radio=D/2, GO circular,
+anillo circular sin expansión vertical por texto. Diámetros, radio y GO se calculan
+juntos sobre el ancho seguro. Una rotación global de 22,5 grados conserva el orden
+y abre el hueco lateral. Favoritos usa 44 puntos, estrella sin texto visible y nombre
+accesible. En iPhone usual se inserta entre las dos órbitas del lateral dominante,
+a la izquierda de la columna derecha ATRÁS/X (reflejado para zurdos). No es otra
+fila ni aumenta la altura del anillo. En anchos extremadamente pequeños se usa un
+hueco diagonal exterior dentro del mismo marco, sin agrandar la pantalla.
+
+Texto: saltos controlados únicamente entre palabras, tamaño proporcional por
+categoría (los nombres cortos no se reducen como los largos), interlineado compacto
+y ajuste al área disponible. Los títulos dentro del círculo permiten incremento
+hasta 1,4× y se ajustan antes de romper palabras; las categorías abiertas y los
+nombres accesibles conservan el texto completo. Los iconos existentes se mantienen.
+El GO conserva su color, borde y acción; su diámetro solo se reduce cuando lo exige
+el espacio lateral, principalmente en el iPhone más estrecho.
+
+Para no convertir las esquinas transparentes en áreas que capturen otro círculo,
+ShoppingOrbitControl reutiliza react-native-svg ya instalado: solo Circle recibe
+onPress; contenedores View y Svg usan box-none y el contenido decorativo none.
+Se verificó en el código nativo instalado que RNSVGRenderable comprueba el contorno
+con CGPathContainsPoint, y que BoxNone de RN Fabric descarta el contenedor como
+objetivo. No se añade motor de gestos ni dependencia. Sigue pendiente comprobarlo
+físicamente; los adaptadores de tests no ejecutan UIKit.
+
+La navegación inferior, ATRÁS/X, sus claves/preferencias y la protección común de
+obstáculos reales no cambian. Los círculos siguen midiéndose como obstáculos para
+los flotantes. BUSCAR PRODUCTOS y MIS LISTAS | GO | LISTA permanecen en sus filas;
+AÑADIR solo sigue en la lista. No hay columna reservada ni cambios de almacenamiento.
+
+34 pruebas dirigidas finales de geometría, contornos/acciones configurados,
+lectura completa, ambas manos, tres anchos UI y varias escalas, navegación inferior,
+catálogo y favoritos; también pasaron las regresiones de experiencia existentes.
+TypeScript y git diff --check correctos. Se revisó además un esquema PNG de la
+geometría calculada: no es una captura del runtime nativo ni validación física.
+MAIN y bundle iOS 8088 se verifican después del commit; 8089 queda intacto.
+
+Pendiente en iPhone: legibilidad real de las etiquetas, tacto en los huecos,
+Favoritos separado de ATRÁS/X, escalas grandes y regreso entre vistas. Las 212
+presentaciones, personalizaciones y la incidencia de las tres listas ADMIN no se
+modifican. No se declara recuperación de esas listas ni corrección de gestos ajenos.
