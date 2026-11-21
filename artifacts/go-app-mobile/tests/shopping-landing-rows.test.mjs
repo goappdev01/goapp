@@ -37,7 +37,7 @@ test('floating avoidance protects real orbital controls and the complete lower r
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false});
   ui.geometry.set('shopping-layout-frame',[0,0,390,844]);ui.geometry.set('shopping-add-screen',[0,160,390,540]);
-  ui.geometry.set('shopping-eight-orbits',[12,200,366,366]);ui.geometry.set('shopping-orbit-home',[248,436,90,90]);
+  ui.geometry.set('shopping-seven-orbits',[12,200,366,366]);ui.geometry.set('shopping-orbit-home',[248,436,90,90]);
   ui.geometry.set('shopping-shortcut-row',[12,700,366,44]);ui.geometry.set('shopping-primary-actions',[12,752,366,68]);ui.geometry.set('shopping-list-viewport',[0,0,0,0]);
   await ui.run(()=>ui.hosts.get('shopping-thumb-controls').onLayout({nativeEvent:{layout:{height:124}}}));
   const rects=ui.hosts.get('shopping-navigation-frame').avoidRects;
@@ -60,7 +60,7 @@ for(const handedness of ['left','right'])for(const width of [320,390,430])test(`
   assert.equal(ui.hosts.get('shopping-close').touchSize,64);assert.equal(ui.hosts.get('shopping-close').preserveTouchSize,false);
   assert.equal(ui.hosts.get('shopping-navigation-frame').screenKey,'shopping-list');assert.equal(ui.hosts.get('shopping-navigation-frame').allowUserOverlap,true);
   await ui.run(()=>ui.hosts.get('shopping-thumb-controls').onLayout({nativeEvent:{layout:{height:120}}}));assert.equal(ui.hosts.get('shopping-navigation-frame').initialBottom,128);
-  await ui.tap('shopping-add');const title=ui.hosts.get('shopping-banner-title');assert.equal(title.children,'GO\nCompras');assert.equal(title.style.textAlign,'center');
+  await ui.tap('shopping-add');const title=ui.hosts.get('shopping-banner-title');assert.equal(title.children,'GO Compras');assert.equal(title.style.textAlign,'center');
   assert.equal(ui.hosts.get('shopping-close').touchSize,56);assert.equal(ui.hosts.get('shopping-close').preserveTouchSize,true);
   assert.equal(ui.hosts.get('shopping-back').touchSize,56);assert.equal(ui.hosts.get('shopping-back').iconSize,26);
  }finally{await ui?.close();f.disk.close();}

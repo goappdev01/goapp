@@ -39,7 +39,7 @@ export const LEGACY_SHOPPING_CATALOG:readonly Group[]=[
 /** Every original presentation survives; category is the unchanged storage key. */
 export const SHOPPING_CATALOG=LEGACY_SHOPPING_CATALOG.flatMap(g=>{
  const grouped=new Map<string,string[]>();for(const name of g.products){const orbit=shoppingEntrance(name,g.category)??"review";const names=grouped.get(orbit)??[];names.push(name);grouped.set(orbit,names);}
- return [...grouped].map(([orbit,products])=>({...g,orbit,products,label:(orbit==="review"?"Por revisar · ":"")+g.label+(g.category==="frozen"?" · Congelados":"")}));
+ return [...grouped].map(([orbit,products])=>({...g,orbit,products,label:(orbit==="review"?"Por revisar · ":"")+(g.category==="bakery"?(orbit==="pantry"?"Galletas y repostería":"Panadería"):orbit==="bakery"&&g.category==="pantry"?"Pasta alimenticia":g.label==="Arroz, pasta y cereales"?"Arroz y cereales":g.label)+(g.category==="frozen"?" · Congelados":"")}));
 });
 const knownPresentations=new Set(LEGACY_SHOPPING_CATALOG.flatMap(g=>g.products.map(name=>g.category+":"+shoppingName(name))));
 export function shoppingPersonalCatalog(documents:readonly {id:string;items:ShoppingItem[]}[],orbit:string,query=""){

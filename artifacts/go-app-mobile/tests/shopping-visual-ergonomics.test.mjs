@@ -64,7 +64,7 @@ test('short landscape viewport clips the orbital bounds before checking floating
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false,width:844,height:390});
   ui.geometry.set('shopping-layout-frame',[0,0,844,390]);ui.geometry.set('shopping-add-screen',[0,100,844,130]);
-  ui.geometry.set('shopping-eight-orbits',[352,100,480,480]);ui.geometry.set('shopping-orbit-home',[352,100,90,480]);ui.geometry.set('shopping-list-viewport',[0,0,0,0]);
+  ui.geometry.set('shopping-seven-orbits',[352,100,480,480]);ui.geometry.set('shopping-orbit-home',[352,100,90,480]);ui.geometry.set('shopping-list-viewport',[0,0,0,0]);
   await ui.run(()=>ui.hosts.get('shopping-add-screen').onLayout());
   assert.ok(ui.hosts.get('shopping-navigation-frame').avoidRects.some(rect=>rect.x===352&&rect.y===8&&rect.height===130));
  }finally{await ui?.close();f.disk.close();}

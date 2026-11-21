@@ -2,45 +2,49 @@ import {SHOPPING_ENTRANCES} from "./shoppingTaxonomy";
 import { SHOPPING_QUANTITY_ERROR, isShoppingQuantity, shoppingEditor, shoppingEstimate, shoppingId, shoppingName, shoppingQuantity, suggestShoppingCategory, type ShoppingCategory, type ShoppingDocument, type ShoppingItem, type ShoppingOperation, type ShoppingUnit } from "./shoppingNote";
 
 /** The eight visual entrances cover the existing catalog without changing stored categories. */
-export const SHOPPING_ORBITS = SHOPPING_ENTRANCES;
+export const SHOPPING_ORBITS = SHOPPING_ENTRANCES.filter(o=>o.id!=="home");
+export {SHOPPING_ENTRANCES};
 export const SHOPPING_SUGGESTIONS:Partial<Record<ShoppingCategory,string[]>>={
   produce:["Manzanas","Plátanos","Tomates","Patatas"],bakery:["Pan","Baguette"],meat:["Pollo","Ternera"],fish:["Merluza","Salmón"],
   dairy:["Leche","Huevos","Yogur","Queso"],frozen:["Guisantes congelados","Helados"],pantry:["Arroz","Pasta","Aceite"],drinks:["Agua","Zumo"],
   care:["Champú","Pasta de dientes"],cleaning:["Detergente","Lavavajillas"],pets:["Pienso"],other:[],
 };
-/** Joint circular geometry: typography never changes the ring's height. */
+/** Seven equal circles; satellites are outer circle intersections with positive clearance.
+ * Fit their combined bounds to the viewport instead of compressing a floating-control column. */
 export function shoppingOrbitLayout(width:number,_fontScale=1,_handedness:"left"|"right"="right"){
-  const size=Math.max(0,Math.min(width-24,480));
-  const ratio=.22+.025*Math.max(0,Math.min(1,(size-296)/80));
-  const button=Math.min(112,size*ratio),radius=(size-button)/2,buttonHeight=button,height=size;
-  const favoriteDiameter=Math.max(44,Math.min(50,button*.85)),clearance=2,theta=Math.PI/8;
-  const separation=button/2+favoriteDiameter/2+clearance;
-  const delta=Math.sqrt(Math.max(0,separation**2-(radius*Math.sin(theta))**2));
-  const inner=radius*Math.cos(theta)-delta;
-  const fitsInside=2*(inner-favoriteDiameter/2-clearance)>=64;
-  const desiredCenter=Math.min(142,Math.max(88,size*.34));
-  const center=fitsInside?Math.min(desiredCenter,2*(inner-favoriteDiameter/2-clearance)):desiredCenter;
-  // The outer tangent keeps the satellite outside the category ring.
-  const favoriteRadius=Math.max(radius+clearance,radius*Math.cos(theta)+delta);
-  // Bisector between DESPENSA (112.5 degrees) and HIGIENE (157.5 degrees).
-  const favoriteAngle=3*Math.PI/4;
-  const favoriteX=size/2+Math.cos(favoriteAngle)*favoriteRadius-favoriteDiameter/2;
-  const favorite={x:favoriteX,y:size/2+Math.sin(favoriteAngle)*favoriteRadius-favoriteDiameter/2,diameter:favoriteDiameter};
-  return {size,button,buttonHeight,height,center,radius,verticalRadius:radius,favorite,points:SHOPPING_ORBITS.map((_,i)=>{
-    // One global rotation creates a real gap at the dominant-side middle of the ring.
-    const angle=(-112.5+i*45)*Math.PI/180;
-    return{x:size/2+Math.cos(angle)*radius-button/2,y:size/2+Math.sin(angle)*radius-button/2};
-  })};
+  const size=Math.max(0,Math.min(width-24,480)),clearance=2;
+  const satelliteDiameter=Math.max(44,Math.min(60,size*.15)),halfStep=Math.PI/7;
+  const angle=(index:number)=>(-90-180/7+index*360/7)*Math.PI/180;
+  const calculate=(radius:number)=>{
+    const button=radius*.74,center=Math.max(0,Math.min(radius*1.2,radius*1.26-clearance*2));
+    const points=SHOPPING_ORBITS.map((_,i)=>({x:Math.cos(angle(i))*radius,y:Math.sin(angle(i))*radius}));
+    const satellite=(after:number)=>{
+      const direction=angle(after)+halfStep,separation=(button+satelliteDiameter)/2+clearance;
+      const distance=radius*Math.cos(halfStep)+Math.sqrt(Math.max(0,separation**2-(radius*Math.sin(halfStep))**2));
+      return {x:Math.cos(direction)*distance,y:Math.sin(direction)*distance,diameter:satelliteDiameter};
+    };
+    const favorite=satellite(1),home=satellite(5);
+    const circles=[...points.map(p=>({...p,r:button/2})),{x:0,y:0,r:center/2},... [favorite,home].map(p=>({...p,r:p.diameter/2}))];
+    const minX=Math.min(...circles.map(c=>c.x-c.r)),maxX=Math.max(...circles.map(c=>c.x+c.r));
+    const minY=Math.min(...circles.map(c=>c.y-c.r)),maxY=Math.max(...circles.map(c=>c.y+c.r));
+    return {button,center,points,favorite,home,minX,minY,width:maxX-minX,height:maxY-minY};
+  };
+  let low=0,high=size;
+  for(let n=0;n<36;n++){const mid=(low+high)/2,g=calculate(mid);if(g.width<=size&&g.height<=size)low=mid;else high=mid;}
+  const g=calculate(low),centerX=-g.minX+(size-g.width)/2,centerY=-g.minY;
+  const satellite=(p:typeof g.favorite)=>({x:centerX+p.x-p.diameter/2,y:centerY+p.y-p.diameter/2,diameter:p.diameter});
+  return {size,height:g.height,button:g.button,buttonHeight:g.button,center:g.center,centerX,centerY,radius:low,verticalRadius:low,
+    favorite:satellite(g.favorite),home:satellite(g.home),points:g.points.map(p=>({x:centerX+p.x-g.button/2,y:centerY+p.y-g.button/2}))};
 }
 const orbitalLines:Record<string,string[]>={
   produce:["FRUTAS Y","VERDURAS"],protein:["CARNICERÍA","Y PESCADERÍA"],drinks:["BEBIDAS"],
-  bakery:["PANADERÍA Y","REPOSTERÍA"],dairy:["LÁCTEOS Y","REFRIGERADOS"],pantry:["DESPENSA"],
-  care:["HIGIENE,","DROGUERÍA Y","PERFUMERÍA"],home:["OTROS","(HOGAR)"],
+  bakery:["PANADERÍA","Y PASTAS"],dairy:["LÁCTEOS Y","REFRIGERADOS"],pantry:["DESPENSA"],
+  care:["HIGIENE Y","PERFUMERÍA"],home:["OTROS","(HOGAR)"],
 };
 export function shoppingOrbitTypography(id:string,diameter:number){
-  const lines=orbitalLines[id]??[id],icon=Math.max(16,Math.min(26,diameter*.24));
+  const lines=orbitalLines[id]??[id],icon=Math.max(18,Math.min(34,diameter*.30));
   const contentWidth=diameter*.8,maxLinesHeight=diameter-icon-12;
-  const fontSize=.9*Math.min(11,diameter*.14,contentWidth/(Math.max(...lines.map(line=>line.length))*.67),maxLinesHeight/(lines.length*1.12));
+  const fontSize=Math.min(12,diameter*.14,contentWidth/(Math.max(...lines.map(line=>line.length))*.67),maxLinesHeight/(lines.length*1.12));
   return {lines,text:lines.join("\n"),fontSize,lineHeight:fontSize*1.12,icon,contentWidth,labelHeight:maxLinesHeight};
 }
 
