@@ -155,7 +155,7 @@ function nativeVoiceFixture(options = {}) {
     received, deleted, requests, diagnostics, reads, audio, recorder, clock, api, preset, options, permissionRequests,
     render() {
       cursor = 0;
-      const value = hook.useBookingVoice((text, zone) => { received.push({ text, zone }); options.onText?.(text, zone); }, options.note ? {requireTranscriptionReady:true} : undefined);
+      const value = hook.useBookingVoice((text, zone) => { received.push({ text, zone }); options.onText?.(text, zone); }, options.voiceOptions??(options.note ? {requireTranscriptionReady:true} : undefined));
       effects.splice(0).forEach(effect => effect());
       return value;
     },
@@ -380,4 +380,10 @@ test('a timeout while reading the response is classified as a timeout, without l
   clock.fire(55000);
   await failure;
   assert.equal(clock.timers.size, 0);
+});
+
+test('central voice reuses capture with its own consent and ADMIN transport; it never falls through to booking uploads',async()=>{
+ const calls=[];const f=nativeVoiceFixture({voiceOptions:{requireTranscriptionReady:true,beforeStart:async()=>calls.push('consent'),capabilities:async()=>{calls.push('central-capabilities');return{transcription:true};},transcribe:async body=>{calls.push('central-transcribe');assert.equal(body.mime,'audio/m4a');return{text:'Hablemos de ciencia'};}}});
+ await f.render().start();await f.render().stop();assert.equal(f.received[0].text,'Hablemos de ciencia');assert.equal(f.requests.length,0);assert.ok(calls.includes('central-transcribe'));assert.equal(calls[0],'consent');
+ const denied=nativeVoiceFixture({voiceOptions:{beforeStart:async()=>{throw Error('Consentimiento requerido');}}});await denied.render().start();assert.equal(denied.permissionRequests.length,0);assert.equal(denied.recorder.starts,0);assert.equal(denied.render().error,'Consentimiento requerido');
 });

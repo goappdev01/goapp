@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import bookingAssistantRouter from "./booking-assistant";
+import centralAssistantRouter from "./central-assistant";
 import supabaseRouter from "./supabase";
 import bookingVerificationRouter from "./bookingVerification";
 import bookingNegotiationRouter from "./bookingNegotiation";
@@ -25,6 +26,7 @@ router.use("/supabase/boards", boardsRouter);
 router.use("/supabase/sports-events", sportsEventsRouter);
 router.use("/supabase/support", supportRouter);
 router.use("/booking-assistant", bookingAssistantRouter);
+router.use("/central-assistant", centralAssistantRouter);
 router.use("/supabase/manage", managementRouter);
 router.use("/supabase", modulePublicationRouter);
 router.use("/supabase", bookingVerificationRouter);

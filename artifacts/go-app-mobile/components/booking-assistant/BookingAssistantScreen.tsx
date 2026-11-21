@@ -33,7 +33,7 @@ import {
 } from "@/hooks/useBookingAssistant";
 import { useGoActions } from "@/hooks/useGoActions";
 import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
-import { useBookingVoice } from "@/hooks/useBookingVoice";
+import { useBookingVoice, type BookingVoiceOptions } from "@/hooks/useBookingVoice";
 import { ListeningIndicator, listeningPlacement } from "./ListeningIndicator";
 import { BookingAssistantPanels } from "./BookingAssistantPanels";
 import {
@@ -49,7 +49,7 @@ import {
 
 export interface BookingAssistantProps {
   /** Read-only consultation; no booking/task dispatcher or automatic draft replacement. */
-  consultation?:{scopeKey:string;title:string;sourceText:string;respond?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;onAcceptDraft?:(draft:string,baseline:string)=>void};
+  consultation?:{scopeKey:string;title:string;sourceText:string;cancelRequest?:number;controls?:React.ReactNode;messages?:{id:string|number;role:string;text:string}[];voiceOptions?:BookingVoiceOptions;errorMessage?:(error:unknown)=>string;onInterrupt?:()=>void;navigationKey?:string;introduction?:string;respond?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;onAcceptDraft?:(draft:string,baseline:string)=>void};
   uiScale?: "compacto" | "estandar" | "grande";
   visible: boolean;
   listenRequest?: number;
@@ -81,7 +81,8 @@ export function BookingAssistantScreen({
   const [headerHeight, setHeaderHeight] = useState(68);
   const zoneIdentity = useAssistantZoneScope();
   const a = useBookingAssistant({ visible, scope: consultation?null:zoneIdentity.scope, scopeReady: !consultation&&zoneIdentity.ready,
-    introduction:consultation?"Consulta sobre "+consultation.title.toLowerCase()+". Tu borrador permanece en AYUDA.":undefined });
+    introduction:consultation?(consultation.introduction??"Consulta sobre "+consultation.title.toLowerCase()+". Tu borrador permanece en AYUDA."):undefined });
+  const conversationMessages=consultation?.messages??a.messages;
   const go = useGoActions(a, !consultation&&zoneIdentity.ready ? zoneIdentity.scope : null);
   const [consultationDraft,setConsultationDraft]=useState<string|null>(null),consultationFlight=useRef(false),consultationEpoch=useRef(0);
   const consultationCurrent=useRef({visible,key:consultation?.scopeKey});consultationCurrent.current={visible,key:consultation?.scopeKey};
@@ -107,7 +108,8 @@ export function BookingAssistantScreen({
       setInput("");
       void go.dispatch(text, aiEnabled);
     }
-  },{requireTranscriptionReady:!!consultation});
+  },{requireTranscriptionReady:!!consultation,...consultation?.voiceOptions});
+  useEffect(()=>{if(consultation?.cancelRequest===undefined)return;consultationEpoch.current++;consultationFlight.current=false;a.setBusy("");},[consultation?.cancelRequest]);
   useEffect(()=>{if(!consultation)return;consultationEpoch.current++;consultationFlight.current=false;setConsultationDraft(null);return()=>{consultationEpoch.current++;};},[visible,consultation?.scopeKey]);
   useEffect(() => {
     if (!visible) {
@@ -116,7 +118,7 @@ export function BookingAssistantScreen({
       return;
     }
     let cancelled = false;
-    assistantApi<{ interpretation: boolean }>("/capabilities")
+    (consultation?.voiceOptions?Promise.resolve({interpretation:false}):assistantApi<{ interpretation: boolean }>("/capabilities"))
       .then((c) => {
         if (!cancelled) setAiEnabled(c.interpretation);
       })
@@ -176,7 +178,7 @@ export function BookingAssistantScreen({
       if(epoch!==consultationEpoch.current||!consultationCurrent.current.visible||consultationCurrent.current.key!==key)return;
       if(typeof result.answer!=="string"||!result.answer.trim()||result.answer.length>8000||result.draft!==undefined&&(typeof result.draft!=="string"||result.draft.length>4000))throw Error("Respuesta inválida");
       a.say(text,"user");a.say(result.answer);setConsultationDraft(consultation.onAcceptDraft?result.draft??null:null);setInput("");
-    }catch{if(epoch===consultationEpoch.current&&consultationCurrent.current.visible)a.setNotice("No se pudo completar la consulta. Conservamos el texto.");}
+    }catch(error){if(epoch===consultationEpoch.current&&consultationCurrent.current.visible)a.setNotice(consultation.errorMessage?.(error)??"No se pudo completar la consulta. Conservamos el texto.");}
     finally{if(epoch===consultationEpoch.current){consultationFlight.current=false;a.setBusy("");}}
   }
   function close(toLanding = false) {
@@ -250,7 +252,7 @@ export function BookingAssistantScreen({
   }
   const listening = voice.status === "listening";
   const indicatorActive = visible && listening && !voice.error && !a.busy && !a.panel;
-  const indicatorPlacement = conversationMeasurement.messages === a.messages.length
+  const indicatorPlacement = conversationMeasurement.messages === conversationMessages.length
     ? listeningPlacement(conversationLayout.width, conversationLayout.height, conversationMeasurement.height, keyboardVisible) : null;
   const voiceText = listening
     ? voice.transcript || "GO está escuchando… Toca GO para terminar."
@@ -260,7 +262,7 @@ export function BookingAssistantScreen({
         ? "Transcribiendo…"
         : "";
   const micDisabled =
-    !listening && (!!a.busy || voice.status === "preparing" || voice.status === "transcribing");
+    !listening && ((!!a.busy&&!consultation?.onInterrupt) || voice.status === "preparing" || voice.status === "transcribing");
   const saving = ["Guardando en GO…", "Confirmando reserva…", "Cancelando reserva…"].includes(a.busy);
   const panelState = { ...a, reset };
   const dock = (
@@ -278,6 +280,7 @@ export function BookingAssistantScreen({
                   onPress={() => {
                     if (listening) void voice.stop();
                     else {
+                      if(consultation?.onInterrupt){consultationEpoch.current++;consultationFlight.current=false;a.setBusy("");consultation.onInterrupt();}
                       if(consultation)setVoiceAttempt(value=>value+1);
                       const isZone = a.panel === "zone";
                       if (!isZone) a.setPanel(null);
@@ -371,10 +374,11 @@ export function BookingAssistantScreen({
           >
             <View testID="assistant-conversation-content" style={{ gap: s.conversation.gap,paddingBottom:consultation?82:0 }} onLayout={event => {
               const height = event.nativeEvent.layout.height + s.conversation.padding + s.conversation.paddingBottom;
-              setConversationMeasurement(previous => previous.height === height && previous.messages === a.messages.length
-                ? previous : { height, messages: a.messages.length });
+              setConversationMeasurement(previous => previous.height === height && previous.messages === conversationMessages.length
+                ? previous : { height, messages: conversationMessages.length });
             }}>
-            {a.messages.map((message) => (
+            {consultation?.controls}
+            {conversationMessages.map((message) => (
               <View
                 key={message.id}
                 style={[
@@ -735,7 +739,7 @@ export function BookingAssistantScreen({
               scrollEnabled
               multiline
               maxLength={2000}
-              onFocus={() => voice.abort()}
+              onFocus={() => {voice.abort();consultation?.onInterrupt?.();}}
               editable={!a.busy}
             />
             {consultation?<GoSendButton testID="support-assistant-send" onPress={send} disabled={!input.trim()||!!a.busy||!consultation.respond}/>:<IconButton
@@ -747,8 +751,8 @@ export function BookingAssistantScreen({
           </View>
           {!consultation && dock}
           </View>
-          {consultation&&<GoNavigationFloating screenKey="support-assistant" safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} keyboardResponsive protectedBottom={footerHeight+(keyboardVisible?10:0)} width={goSize+72} height={Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
-            {dock}<GoCloseButton level="panel" appearance="light" keyboardVisible={keyboardVisible} disabled={saving} accessibilityLabel={keyboardVisible?"Ocultar teclado":"Volver a AYUDA"} onPress={consultationBack}/>
+          {consultation&&<GoNavigationFloating screenKey={consultation.navigationKey??"support-assistant"} safeArea={false} handedness={handedness} keyboardVisible={keyboardVisible} keyboardResponsive protectedBottom={footerHeight+(keyboardVisible?10:0)} width={goSize+72} height={Math.max(64,goSize)}><View testID="support-assistant-thumb-controls" style={{flexDirection:handedness==="left"?"row-reverse":"row",alignItems:"flex-end",gap:8}}>
+            {dock}<GoCloseButton level="panel" appearance="light" keyboardVisible={keyboardVisible} disabled={saving} accessibilityLabel={keyboardVisible?"Ocultar teclado":consultation.navigationKey?"Volver a GO":"Volver a AYUDA"} onPress={consultationBack}/>
           </View></GoNavigationFloating>}
           </View>
         </KeyboardAvoidingView>

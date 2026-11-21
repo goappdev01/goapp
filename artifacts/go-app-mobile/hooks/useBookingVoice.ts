@@ -30,7 +30,9 @@ type SpeechWindow = {
   SpeechRecognition?: new () => Recognition;
   webkitSpeechRecognition?: new () => Recognition;
 };
-export function useBookingVoice(onText: (text: string, zone: boolean) => void, options?: { requireTranscriptionReady?: boolean }) {
+export type BookingVoiceOptions={requireTranscriptionReady?:boolean;capabilities?:()=>Promise<{transcription:boolean}>;transcribe?:(body:{audio:string;mime:string})=>Promise<{text:string}>;beforeStart?:()=>Promise<void>};
+export function useBookingVoice(onText: (text: string, zone: boolean) => void, options?: BookingVoiceOptions) {
+  const optionsRef=useRef(options);optionsRef.current=options;
   const recorderStatus = useRef<(event: { hasError: boolean; isFinished: boolean; mediaServicesDidReset?: boolean; url?: string | null }) => void>(() => {});
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY, event => recorderStatus.current(event));
   const [status, setStatus] = useState<
@@ -106,6 +108,8 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void, o
       setTranscript("");
       setError("");
       changeStatus("preparing");
+      try{await optionsRef.current?.beforeStart?.();}catch(error){if(generation.current===token){setError(error instanceof Error?error.message:"No se pudo iniciar la voz. Puedes escribir.");changeStatus("idle");}return;}
+      if(generation.current!==token)return;
       if (Platform.OS === "web") {
         const scope = globalThis as unknown as SpeechWindow;
         const Constructor =
@@ -165,7 +169,7 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void, o
       try {
         if (options?.requireTranscriptionReady) {
           stage = "availability";
-          const capabilities = await assistantApi<{ transcription: boolean }>("/capabilities");
+          const capabilities = await (optionsRef.current?.capabilities?.()??assistantApi<{ transcription: boolean }>("/capabilities"));
           if (generation.current !== token) return;
           if (!capabilities.transcription) {
             setError("El servicio de dictado de GO no está configurado o no está disponible. No se ha iniciado una grabación. Puedes escribir mientras se restablece el servicio.");
@@ -260,7 +264,7 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void, o
       }
       stage = "backend";
       publicFailure = "Tu voz se ha grabado, pero no he podido procesarla ahora. Puedes escribir o intentarlo de nuevo.";
-      const capabilities = await assistantApi<{ transcription: boolean }>("/capabilities");
+      const capabilities = await (optionsRef.current?.capabilities?.()??assistantApi<{ transcription: boolean }>("/capabilities"));
       if (generation.current !== token) return;
       if (capabilities.transcription !== true) {
         publicFailure = "Tu voz se ha grabado, pero el dictado no está disponible ahora. Puedes escribir tu solicitud.";
@@ -281,10 +285,7 @@ export function useBookingVoice(onText: (text: string, zone: boolean) => void, o
       if (generation.current !== token) return;
       stage = "transcription";
       publicFailure = "Tu voz se ha grabado, pero no he podido transcribirla ahora. Puedes escribir o intentarlo de nuevo.";
-      const result = await assistantApi<{ text: string }>("/transcribe", {
-        audio,
-        mime: "audio/m4a",
-      });
+      const result = await (optionsRef.current?.transcribe?.({audio,mime:"audio/m4a"})??assistantApi<{text:string}>("/transcribe",{audio,mime:"audio/m4a"}));
       if (generation.current !== token) return;
       if (typeof result.text !== "string") throw new Error("INVALID_TRANSCRIPTION");
       if (generation.current === token && result.text.trim())
