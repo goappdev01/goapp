@@ -38,10 +38,13 @@ export function clipShoppingContent(content:Rect,viewport:Rect):Rect{
     height:Math.max(0,Math.min(content.y+content.height,viewport.y+viewport.height)-y)};
 }
 
-/** Thumb arc within the nearest 70% of the measured container; large type relaxes the arc. */
-export function shoppingThumbMenu(availableWidth:number,fontScale:number,handedness:"left"|"right"){
-  const available=Math.max(0,availableWidth),reach=available*.7,width=Math.min(reach,Math.max(168,168*fontScale));
-  const travel=Math.max(0,reach-width);
-  const positions=[1,.6,.2,0];
-  return {width,offsets:positions.map(position=>handedness==="left"?travel*(1-position):available-reach+travel*position)};
+/** Compact text-sized pills follow the thumb arc inside the nearest 70%. */
+export function shoppingThumbMenu(availableWidth:number,fontScale:number,handedness:"left"|"right",measuredText?:readonly number[]){
+  const available=Math.max(0,availableWidth),reach=available*.7;
+  const labels=["Crear lista","Renombrar","Compartir","Eliminar lista","Lista"];
+  const widths=labels.map((label,i)=>Math.min(reach,Math.max(44,(measuredText?.[i]??label.length*14*.62*fontScale)+24+(i===4?26:0))));
+  const positions=[1,.82,.58,.28,0];
+  const right:number[]=[];
+  widths.forEach((width,i)=>right.push(Math.min(i?right[i-1]:available,available-reach+Math.max(0,reach-width)*positions[i])));
+  return {widths,offsets:right.map((x,i)=>handedness==="left"?available-widths[i]-x:x),formWidth:reach,formLeft:handedness==="left"?0:available-reach};
 }

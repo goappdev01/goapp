@@ -329,3 +329,21 @@ alineación/estilo de Lista y regresiones de creación, teclado, renombrado, com
 y papelera. TypeScript y diff --check antes de publicar; SHA/bundle iOS 8088 se
 verifican después. 8089 intacto. La aprobación visual y táctil física queda al
 propietario en iPhone; los adaptadores automatizados no la sustituyen.
+
+AJUSTE 21/11/2026 — anchura por texto y arco completo de cinco pasos
+-----------------------------------------------------------------
+Base: origin/main 87e8a6c91de995790d8cbbabd2fd94a586a646c2.
+El ancho común (168 × escala) aún dejaba relleno excesivo. Se sustituye por
+anchuras individuales: medición nativa de cada etiqueta + 24 puntos de padding,
+con decoración del icono solo para Lista. Estimación conservadora en primer frame;
+las medidas nativas la reemplazan. Se preserva mínimo táctil, texto ampliado y
+límite del 70 % por mano. El arco tiene cinco posiciones, incluida Lista al final,
+y no vuelve hacia la derecha al aumentar la longitud de una etiqueta.
+COMPRAS/listas activas y Nombre de la lista pasan al 70 % accesible, con radio 27;
+conservan textos, selección, edición y desplazamiento. No se alteran callbacks,
+listas, almacenamiento ni flotantes elegidos por el usuario.
+28 pruebas dirigidas superadas, con anchuras distintas medidas, arco de cinco
+pasos, cuatro anchos, tres escalas, espejo, compactación de ficha/campo y regresión
+de acciones/teclado. TypeScript y diff --check antes de publicar; MAIN y bundle iOS
+8088 se verifican después. 8089 intacto. Validación visual/táctil física pendiente
+del propietario; las pruebas usan adaptadores y no equivalen a iPhone real.
