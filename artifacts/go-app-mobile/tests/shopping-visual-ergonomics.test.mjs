@@ -12,7 +12,7 @@ test('shortcut reflow uses measured full labels and whole words, without shrinki
 for(const hand of ['left','right'])test(`Landing ${hand}: vertical existing navigator shares the lower dock; measured labels retain complete words`,async()=>{
  const f=await shoppingFixture();let ui;try{
   ui=await shoppingUI(f,{startList:false,handedness:hand,width:390,fontScale:1.4});
-  const nav=ui.hosts.get('shopping-navigation-frame');assert.equal(nav.width,64);assert.equal(nav.height,136);assert.equal(nav.initialBottom,132);assert.equal(nav.handedness,hand);
+  const nav=ui.hosts.get('shopping-navigation-frame');assert.equal(nav.width,56);assert.equal(nav.height,120);assert.equal(nav.initialBottom,132);assert.equal(nav.handedness,hand);
   assert.equal(ui.hosts.get('shopping-floating-buttons').style.flexDirection,'column');
   assert.equal(style(ui.hosts.get('shopping-thumb-controls').style).flexDirection,undefined);
   assert.equal(ui.hosts.get('shopping-navigation-row').style[1].minHeight,0,'no extra row elevates the orbits to make room for navigation');

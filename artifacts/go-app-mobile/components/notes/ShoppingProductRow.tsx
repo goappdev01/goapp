@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, PanResponder, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import {SwipeableRow} from "@/components/ui/SwipeableRow";
+import React, { useEffect, useRef, useState } from "react";
+import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { shoppingProductArt } from "@/lib/shoppingProductArt";
 import { Feather } from "@expo/vector-icons";
 import { isShoppingQuantity, SHOPPING_QUANTITY_ERROR, shoppingDecimal, shoppingId, shoppingPresentationPrice, shoppingQuantity, stepShoppingDraftQuantity, stepShoppingQuantity, type ShoppingDocument, type ShoppingItem, type ShoppingOperation } from "@/lib/shoppingNote";
@@ -14,37 +15,14 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
   const [quantity,setQuantity]=useState(String(item.quantity).replace(".",",")),[value,setValue]=useState(price?String(price.price):"");
   const [details,setDetails]=useState(false),[error,setError]=useState("");
   const localContact=useRef({consumed:false,released:false}),swipeContact=contact??localContact.current;
-  const swipe=useRef({disabled,item,onOperation,onRemove});swipe.current={disabled,item,onOperation,onRemove};
   const quantityFocused=useRef(false),priceFocused=useRef(false),saving=useRef(false);
-  const activation=useRef({dx:0,dy:0});
-  const pan=useMemo(()=>{
-    const claim=(_:unknown,gesture:{dx:number;dy:number;numberActiveTouches?:number})=>{
-      if(swipeContact.consumed||swipe.current.disabled||quantityFocused.current||priceFocused.current||gesture.numberActiveTouches!==undefined&&gesture.numberActiveTouches!==1)return false;
-      if(Math.abs(gesture.dx)<=22||Math.abs(gesture.dx)<=Math.abs(gesture.dy)*1.6)return false;
-      // RN resets dx/dy when granting the responder. Retain the recognized prefix.
-      activation.current={dx:gesture.dx,dy:gesture.dy};return true;
-    };
-    return PanResponder.create({
-      onStartShouldSetPanResponderCapture:()=>{activation.current={dx:0,dy:0};swipeContact.consumed=false;swipeContact.released=false;return false;},
-      onMoveShouldSetPanResponderCapture:claim,onMoveShouldSetPanResponder:claim,
-      onPanResponderGrant:()=>{swipeContact.consumed=true;},
-      onPanResponderTerminationRequest:()=>!swipeContact.consumed,
-      onPanResponderTerminate:()=>{swipeContact.released=true;},
-      onPanResponderRelease:(_,gesture)=>{
-        const dx=activation.current.dx+gesture.dx,dy=activation.current.dy+gesture.dy;
-        if(swipeContact.released||swipe.current.disabled||Math.abs(dy)>45||Math.abs(dx)<60||Math.abs(dx)<=Math.abs(dy)*1.6)return;
-        swipeContact.released=true;
-        if(dx<0)swipe.current.onRemove();
-        else void swipe.current.onOperation({type:"bought",id:swipe.current.item.id,value:true}).catch(e=>setError((e as Error).message));
-      },
-    });
-  },[]);
+  const [editing,setEditing]=useState(false);
   useEffect(()=>{if(!quantityFocused.current){setQuantity(String(item.quantity).replace(".",","));setError("");}},[item.quantity]);
   useEffect(()=>{if(!priceFocused.current)setValue(price?String(price.price):"");},[price?.id,doc.store]);
   useEffect(()=>{priceFocused.current=false;setValue(price?String(price.price):"");},[doc.store]);
   const apply=(op:Operation)=>{void onOperation(op).catch(e=>setError((e as Error).message));};
   const commit=async(kind:"quantity"|"price")=>{
-    if(saving.current)return;const raw=kind==="quantity"?quantity:value;
+    setEditing(false);if(saving.current)return;const raw=kind==="quantity"?quantity:value;
     if(kind==="price"&&!raw.trim()){priceFocused.current=false;return;}
     if(kind==="quantity"&&(!raw.trim()||raw===String(item.quantity).replace(".",","))){
       quantityFocused.current=false;setQuantity(String(item.quantity).replace(".",","));return;
@@ -71,17 +49,23 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
       accessibilityLabel={`Corregir cantidad de ${item.name}: ${quantity}`} disabled={disabled} onPress={()=>{if(!swipeContact.consumed)onEdit();}} style={s.legacyQuantity}>
       <Text numberOfLines={1} style={s.quantityInput}>{quantity}</Text>
     </TouchableOpacity>:<TextInput testID={"shopping-quantity-"+item.id} accessibilityLabel={"Cantidad de "+item.name} value={quantity} keyboardType="number-pad" selectTextOnFocus editable={!disabled}
-      onFocus={()=>{quantityFocused.current=true;}} onChangeText={text=>{if(/^\d*$/.test(text)){setQuantity(text);setError("");}else setError(SHOPPING_QUANTITY_ERROR);}} onEndEditing={()=>void commit("quantity")} style={s.quantityInput}/>}
+      onFocus={()=>{quantityFocused.current=true;setEditing(true);}} onChangeText={text=>{if(/^\d*$/.test(text)){setQuantity(text);setError("");}else setError(SHOPPING_QUANTITY_ERROR);}} onEndEditing={()=>void commit("quantity")} style={s.quantityInput}/>}
     <TouchableOpacity testID={"shopping-plus-"+item.id} accessibilityRole="button" accessibilityLabel={"Sumar cantidad de "+item.name} disabled={disabled} hitSlop={{left:7,right:7}} onPress={()=>{if(!swipeContact.consumed)changeQuantity(1);}} style={s.step}><Feather name="plus" size={18} color="#0876ca"/></TouchableOpacity>
   </View>;
   const routeButton=<TouchableOpacity testID={"shopping-ir-"+item.id} accessibilityRole="button" accessibilityLabel={"Ir a "+item.name} disabled={disabled} onPress={()=>{if(!swipeContact.consumed)onRoute();}} style={s.ir}><Feather name="navigation" size={20} color="#125caa"/></TouchableOpacity>;
   const boughtButton=<TouchableOpacity testID={"shopping-bought-"+item.id} accessibilityRole="checkbox" accessibilityLabel={"Cogido: "+item.name} accessibilityState={{checked:item.bought,disabled:disabled||!item.selected}} disabled={disabled||!item.selected}
     onPress={()=>{if(!swipeContact.consumed)apply({type:"bought",id:item.id,value:!item.bought});}} style={[s.check,item.bought&&s.checked]}><Feather name="check" size={24} color={item.bought?"#fff":"#64748b"}/></TouchableOpacity>;
-  return <View testID={"shopping-item-"+item.id} onTouchStart={()=>{swipeContact.consumed=false;swipeContact.released=false;}} {...pan.panHandlers} style={[s.card,item.bought&&s.picked,!item.selected&&{opacity:.65}]}>
+  return <SwipeableRow testID={"shopping-item-"+item.id+"-swipe"} disabled={disabled||editing}
+    onContactStart={()=>{swipeContact.consumed=false;swipeContact.released=false;}}
+    onSwipeStart={()=>{swipeContact.consumed=true;}}
+    onSwipeRight={()=>{swipeContact.released=true;apply({type:"bought",id:item.id,value:true});}}
+    onSwipeLeft={()=>{swipeContact.released=true;onRemove();}}
+    leftLabel="RETIRAR" leftIcon="trash-2" leftColor="#c52e38" rightLabel="COMPRADO" rightIcon="check" rightColor="#217a34" borderRadius={15}>
+    <View testID={"shopping-item-"+item.id} style={[s.card,item.bought&&s.picked,!item.selected&&{opacity:.65}]}>
     <View testID={"shopping-product-info-"+item.id} style={s.productInfo}>
-      <TouchableOpacity testID={"shopping-details-"+item.id} accessibilityRole="button" accessibilityLabel={"Editar "+item.name} accessibilityHint="Mantener pulsado muestra más acciones" onPress={()=>{if(!swipeContact.consumed)onEdit();}} onLongPress={()=>setDetails(v=>!v)} style={s.artwork}><Text style={s.artworkText}>{shoppingProductArt(item.name).art}</Text></TouchableOpacity>
+      <TouchableOpacity testID={"shopping-details-"+item.id} accessibilityRole="button" accessibilityLabel={"Editar "+item.name} accessibilityHint="Mantener pulsado muestra más acciones" onPress={()=>{if(!swipeContact.consumed)onEdit();}} onLongPress={()=>{if(!swipeContact.consumed)setDetails(v=>!v);}} style={s.artwork}><Text style={s.artworkText}>{shoppingProductArt(item.name).art}</Text></TouchableOpacity>
       <View style={{flex:1,minWidth:0}}>
-      <TouchableOpacity testID={"shopping-edit-"+item.id} accessibilityRole="button" accessibilityLabel={"Editar "+item.name} onPress={()=>onEdit()}>
+      <TouchableOpacity testID={"shopping-edit-"+item.id} accessibilityRole="button" accessibilityLabel={"Editar "+item.name} onPress={()=>{if(!swipeContact.consumed)onEdit();}}>
         <Text lineBreakStrategyIOS="standard" style={[s.name,item.bought&&s.boughtName]}>{item.name}</Text>
       </TouchableOpacity>
       {!!brand&&<Text numberOfLines={1} style={s.brand}>{brand}</Text>}
@@ -91,7 +75,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
     <View testID={"shopping-product-main-row-"+item.id} style={[s.mainRow,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>
       <View style={s.priceBlock}>
           <View style={s.priceLine}><TextInput testID={"shopping-price-input-"+item.id} accessibilityLabel={"Precio unitario de "+item.name} placeholder="Sin precio" placeholderTextColor="#647b8e" value={value} keyboardType="decimal-pad" editable={!disabled} selectTextOnFocus
-            onFocus={()=>{priceFocused.current=true;}} onChangeText={setValue} onEndEditing={()=>void commit("price")} style={[s.priceInput,!value.trim()&&s.missingPrice]}/>
+            onFocus={()=>{priceFocused.current=true;setEditing(true);}} onChangeText={setValue} onEndEditing={()=>void commit("price")} style={[s.priceInput,!value.trim()&&s.missingPrice]}/>
             {(price||value.trim())&&<Text style={s.meta}>{price?.currency==="EUR"||!price?"€":price.currency}</Text>}
           </View>
 
@@ -109,7 +93,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
         {dragHandle}
       </View>
     </View>}
-  </View>;
+  </View></SwipeableRow>;
 }
 const s=StyleSheet.create({
   card:{paddingHorizontal:6,paddingVertical:5,gap:5,borderRadius:15,borderWidth:1,borderColor:"#e1e7f0",backgroundColor:"#fff",shadowColor:"#284568",shadowOpacity:.08,shadowRadius:5,shadowOffset:{width:0,height:2}},

@@ -65,14 +65,14 @@ test('catalog save targets the identified active list and retries a failed readb
 test('swipe owns its contact: right selects once, left and trash share safe removal, vertical scroll is not claimed',async()=>{
  const f=await shoppingFixture();let ui;try{
   await f.open();const milk=await f.add('Leche');ui=await shoppingUI(f);
-  const row=()=>ui.hosts.get('shopping-item-'+milk.id);
-  assert.equal(row().onMoveShouldSetPanResponder(null,{dx:10,dy:80}),false);
-  await ui.run(()=>{row().onPanResponderGrant();row().onPanResponderRelease(null,{dx:85,dy:1});});await ui.idle();assert.equal(f.doc().items[0].bought,true);
+  const row=()=>ui.gestures.get('shopping-item-'+milk.id+'-swipe').pan;
+  assert.deepEqual(Array.from(row().failOffsetYValue),[-15,15]);
+  await ui.run(()=>{const g=row();g.onBeginHandler();g.onStartHandler();g.onEndHandler({translationX:85,velocityX:0},true);g.onFinalizeHandler({},true);});await ui.idle();assert.equal(f.doc().items[0].bought,true);
   await ui.tap('shopping-bought-'+milk.id);assert.equal(f.doc().items[0].bought,true,'residual release cannot toggle the check');
-  await ui.run(()=>row().onTouchStart());await ui.tap('shopping-bought-'+milk.id);assert.equal(f.doc().items[0].bought,false,'next physical touch works');
-  await ui.run(()=>{row().onPanResponderGrant();row().onPanResponderRelease(null,{dx:-85,dy:1});});assert.equal(ui.alerts.length,1);
+  await ui.run(()=>row().onBeginHandler());await ui.tap('shopping-bought-'+milk.id);assert.equal(f.doc().items[0].bought,false,'next physical touch works');
+  await ui.run(()=>{const g=row();g.onBeginHandler();g.onStartHandler();g.onEndHandler({translationX:-85,velocityX:0},true);g.onFinalizeHandler({},true);});assert.equal(ui.alerts.length,1);
   await ui.run(()=>ui.alerts.at(-1).buttons[0].onPress?.());assert.equal(f.doc().items[0].selected,true);
-  await ui.run(()=>row().onTouchStart());await ui.tap('shopping-trash-'+milk.id);await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='RETIRAR').onPress());await ui.idle();
+  await ui.run(()=>row().onBeginHandler());await ui.tap('shopping-trash-'+milk.id);await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='RETIRAR').onPress());await ui.idle();
   assert.equal(ui.hosts.has('shopping-item-'+milk.id),false);assert.equal(f.doc().items.length,1);assert.equal(f.doc().items[0].selected,false);
  }finally{await ui?.close();f.disk.close();}
 });
@@ -81,10 +81,10 @@ test('narrow layout keeps complete product name, centered large price, mirrored 
  for(const handedness of ['left','right']){
   const f=await shoppingFixture();let ui;try{
    await f.open();const item=await f.add('Leche de una presentación con un nombre muy largo');ui=await shoppingUI(f,{width:320,handedness});
-   assert.equal(ui.hosts.get('shopping-edit-'+item.id).children.props.numberOfLines,undefined);
+   assert.equal(h.React.Children.toArray(ui.hosts.get('shopping-edit-'+item.id).children)[0].props.numberOfLines,undefined);
    const price=ui.hosts.get('shopping-price-input-'+item.id),priceStyle=Object.assign({},...price.style.filter(Boolean));assert.equal(priceStyle.textAlign,'center');assert.ok(priceStyle.fontSize<=14);assert.ok(priceStyle.minHeight>=44);
    assert.equal(ui.hosts.get('shopping-product-main-row-'+item.id).style[1].flexDirection,handedness==='left'?'row-reverse':'row');
-   assert.ok(ui.hosts.get('shopping-thumb-controls').style[0].paddingBottom<=4);assert.equal(ui.hosts.get('shopping-navigation-space').style.height,136);
+   assert.ok(ui.hosts.get('shopping-thumb-controls').style[0].paddingBottom<=4);assert.equal(ui.hosts.has('shopping-navigation-space'),false);
    await ui.run(()=>{price.onFocus();price.onChangeText('2,75');ui.keyboard.show();});ui.keyboard.focused={blur:()=>ui.hosts.get('shopping-price-input-'+item.id).onEndEditing()};
    assert.equal(ui.hosts.get('shopping-back').keyboardVisible,true);await ui.tap('shopping-back');await ui.idle();assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,2.75);assert.equal(ui.calls.some(c=>c[0]==='close'),false);
   }finally{await ui?.close();f.disk.close();}

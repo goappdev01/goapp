@@ -181,13 +181,13 @@ test('COMPRAS V1: catalog right swipe adds once and leaves the next tap usable',
 test('COMPRAS V1: horizontal gestures do not claim vertical scroll and touch edits the selected product despite another draft',async()=>{
  const f=await shoppingFixture();let ui;try{
   await f.open();const pan=await f.add('Pan'),gel=await f.add('Gel');await f.run({type:'draft',draft:{...f.model.shoppingEditor(),name:'Otro',category:'other'}});
-  ui=await shoppingUI(f);const row=ui.hosts.get('shopping-item-'+pan.id);
-  assert.equal(row.onMoveShouldSetPanResponder(null,{dx:5,dy:60}),false);
-  await ui.run(()=>row.onPanResponderRelease(null,{dx:75,dy:1}));await ui.idle();assert.equal(f.doc().items.find(i=>i.id===pan.id).bought,true);
-  await ui.run(()=>{row.onTouchStart();row.onPanResponderRelease(null,{dx:-80,dy:1});});assert.equal(ui.alerts.at(-1).title,'Retirar de esta lista');
+  ui=await shoppingUI(f);const gesture=()=>ui.gestures.get('shopping-item-'+pan.id+'-swipe').pan;
+  assert.deepEqual(Array.from(gesture().failOffsetYValue),[-15,15]);
+  await ui.run(()=>{const g=gesture();g.onBeginHandler();g.onStartHandler();g.onEndHandler({translationX:75,velocityX:0},true);g.onFinalizeHandler({},true);});await ui.idle();assert.equal(f.doc().items.find(i=>i.id===pan.id).bought,true);
+  await ui.run(()=>{const g=gesture();g.onBeginHandler();g.onStartHandler();g.onEndHandler({translationX:-80,velocityX:0},true);g.onFinalizeHandler({},true);});assert.equal(ui.alerts.at(-1).title,'Retirar de esta lista');
   await ui.tap('shopping-details-'+gel.id);assert.equal(ui.hosts.get('shopping-field-name').value,'Gel');assert.equal(ui.alerts.length,1);
   await ui.tap('shopping-save');assert.equal(f.doc().pendingEditor.name,'Otro');
-  await ui.tap('shopping-trash-'+pan.id);await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='RETIRAR').onPress());await ui.idle();assert.equal(f.doc().items.find(i=>i.id===pan.id).selected,false);
+  await ui.run(()=>gesture().onBeginHandler());await ui.tap('shopping-trash-'+pan.id);await ui.run(()=>ui.alerts.at(-1).buttons.find(b=>b.text==='RETIRAR').onPress());await ui.idle();assert.equal(f.doc().items.find(i=>i.id===pan.id).selected,false);
  }finally{if(ui)await ui.close();f.disk.close();}
 });
 

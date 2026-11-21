@@ -12,7 +12,7 @@ for(const handedness of ['left','right'])for(const width of [320,390,430])test(`
   const ids=h.React.Children.toArray(actions.children).map(node=>node.props.testID).filter(Boolean);assert.deepEqual(ids,['shopping-list','shopping-go','shopping-add']);
   for(const id of ['shopping-list','shopping-add']){const s=flat(ui.hosts.get(id).style);assert.equal(s.flex,1);assert.ok(s.minHeight>=44);assert.equal(s.minWidth,44);}
   assert.equal(flat(ui.hosts.get('shopping-shortcut-row').style).flexWrap,'nowrap');assert.equal(ui.hosts.get('shopping-search-open').style[0].fontSize,undefined);
-  assert.equal(ui.hosts.get('shopping-navigation-frame').width,64);assert.equal(ui.hosts.get('shopping-navigation-frame').height,136);assert.equal(ui.hosts.get('shopping-floating-buttons').style.flexDirection,'column');
+  assert.equal(ui.hosts.get('shopping-navigation-frame').width,56);assert.equal(ui.hosts.get('shopping-navigation-frame').height,120);assert.equal(ui.hosts.get('shopping-floating-buttons').style.flexDirection,'column');
   assert.equal(ui.hosts.get('shopping-navigation-frame').allowUserOverlap,true);
   await ui.run(()=>ui.hosts.get('shopping-thumb-controls').onLayout({nativeEvent:{layout:{height:124}}}));assert.equal(ui.hosts.get('shopping-navigation-frame').initialBottom,132);
   await ui.tap('shopping-go');assert.ok(ui.hosts.has('shopping-command'));assert.equal(ui.hosts.get('shopping-navigation-frame').allowUserOverlap,false);await ui.tap('shopping-back');
@@ -45,5 +45,23 @@ test('floating avoidance protects real orbital controls and the complete lower r
   assert.ok(rects.some(r=>r.x===12&&r.y===608&&r.width===366&&r.height===44),'both shortcuts share the entire width');
   assert.ok(rects.some(r=>r.x===12&&r.y===660&&r.width===366&&r.height===68),'the whole action row is protected');
   assert.equal(rects.some(r=>r.x===12&&r.y===108&&r.width===366&&r.height===366),false,'decorative full frame is not an interactive obstacle');
+ }finally{await ui?.close();f.disk.close();}
+});
+
+for(const handedness of ['left','right'])for(const width of [320,390,430])test(`Product list ${width} ${handedness}: full-width menu and a single Lista/GO/Añadir row`,async()=>{
+ const f=await shoppingFixture();let ui;try{
+  await f.open();await f.add('Leche');ui=await shoppingUI(f,{width,handedness,fontScale:width===320?1.8:1});
+  assert.equal(ui.hosts.has('shopping-navigation-space'),false);assert.equal(ui.hosts.get('shopping-dock-content').style,undefined);
+  const row=ui.hosts.get('shopping-primary-actions');assert.equal(flat(row.style).flexWrap,'nowrap');assert.equal(flat(row.style).flexDirection,handedness==='left'?'row-reverse':'row');
+  assert.deepEqual(h.React.Children.toArray(row.children).map(c=>c.props.testID),['shopping-list','shopping-go','shopping-add']);
+  assert.equal(ui.hosts.get('shopping-secondary-navigation').children.length,5);
+  for(const id of ['shopping-list','shopping-add'])assert.equal(flat(ui.hosts.get(id).style).flex,1);
+  assert.equal(ui.hosts.get('shopping-navigation-frame').width,64);assert.equal(ui.hosts.get('shopping-navigation-frame').height,136);
+  assert.equal(ui.hosts.get('shopping-close').touchSize,64);assert.equal(ui.hosts.get('shopping-close').preserveTouchSize,false);
+  assert.equal(ui.hosts.get('shopping-navigation-frame').screenKey,'shopping-list');assert.equal(ui.hosts.get('shopping-navigation-frame').allowUserOverlap,true);
+  await ui.run(()=>ui.hosts.get('shopping-thumb-controls').onLayout({nativeEvent:{layout:{height:120}}}));assert.equal(ui.hosts.get('shopping-navigation-frame').initialBottom,128);
+  await ui.tap('shopping-add');const title=ui.hosts.get('shopping-banner-title');assert.equal(title.children,'GO\nCompras');assert.equal(title.style.textAlign,'center');
+  assert.equal(ui.hosts.get('shopping-close').touchSize,56);assert.equal(ui.hosts.get('shopping-close').preserveTouchSize,true);
+  assert.equal(ui.hosts.get('shopping-back').touchSize,56);assert.equal(ui.hosts.get('shopping-back').iconSize,26);
  }finally{await ui?.close();f.disk.close();}
 });

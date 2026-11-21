@@ -254,3 +254,32 @@ teclado, cancelación y separación de cuentas), 1 del host real de navegación,
 anchos y escalas de texto. TypeScript y git diff --check correctos. Estas pruebas
 son técnicas con adaptadores; queda validación física del arrastre en iPhone.
 Publicación y bundle iOS 8088 se verifican tras el commit; 8089 intacto.
+
+CONTINUACIÓN 21/11/2026 — gesto compartido y fila inferior de la lista
+-----------------------------------------------------------------
+Base: origin/main b17084630052033f551930671c3e4f3340be80f2.
+Compras aún utilizaba PanResponder JS, mientras Listados ya reconocía el gesto
+horizontal con RNGH Pan + Native simultáneos, activación horizontal 8 y fallo
+vertical 15. Se extrae SwipeableRow de index.tsx sin cambiar sus valores por defecto
+y se reutiliza en ambos módulos. Derecha marca comprado; izquierda abre la misma
+confirmación de retirada que la papelera. No borra catálogo ni historial.
+La edición activa de precio/cantidad deshabilita el pan. El contacto consumido
+continúa protegiendo las pulsaciones al reagruparse una ficha; un contacto nuevo
+restaura los botones. No hay un tercer motor de gestos.
+
+La lista también reservaba una columna de 64 puntos para la navegación flotante.
+Se elimina esa reserva del dock de la lista: menú a todo el ancho y Lista/GO/Añadir
+en una sola fila flexible, reflejada según lateralidad. Se conservan claves y
+posiciones voluntarias de los flotantes; el inicio automático usa la altura
+medida del dock y no sobrescribe elecciones del usuario.
+En el Landing orbital, GO queda centrado encima de Compras. ATRÁS/X pasan de
+64 a 56 puntos solo en ese Landing, con iconos 26; resto de pantallas intacto.
+
+53 pruebas dirigidas superadas (52 de Listados/Compras y una integración específica
+adicional del editor): ambas direcciones, confirmación/cancelación, check,
+pulsación residual/nueva, edición, menús completos, anchos 320/390/430, lateralidad
+y ausencia de reserva de columna. Son pruebas React con adaptadores de controles,
+no una validación del reconocimiento nativo en iPhone. TypeScript y diff --check
+se comprueban antes del commit. La publicación y el bundle iOS 8088 se verifican
+después; 8089 permanece intacto. El propietario debe validar físicamente el gesto,
+la fila, la posición de flotantes y el título. Sin cambios de datos/categorías.

@@ -16,7 +16,7 @@ function swipe(){
  class Value{setValue(n){commands.push(n);}stopAnimation(fn){fn();}interpolate(){return 0;}}
  const Gesture={Pan(){const data={};const chain=new Proxy(data,{get:(o,k)=>k in o?o[k]:(...a)=>{o[k]=k.startsWith('on')?a[0]:a;return chain;}});return chain;},Native:()=>({}),Simultaneous:(pan,native)=>({pan,native})};
  const context={exports:{},React,useRef:v=>{const i=index++;return refs[i]??(refs[i]={current:v});},useMemo:f=>f(),Animated:{Value,View:'AnimatedView',timing:()=>({start:f=>animations.push(f)}),spring:()=>({start(){}})},Gesture,GestureDetector:'GestureDetector',View:'View',Text:'Text',Feather:'Feather',StyleSheet:{absoluteFill:{}},setTimeout:f=>timers.push(f)};
- vm.runInNewContext(compile(fn('SwipeableRow').getText(ast)+';exports.Row=SwipeableRow;'),context);
+ vm.runInNewContext(compile(fs.readFileSync('components/ui/SwipeableRow.tsx','utf8').replace(/^import .*$/gm,'').replace('export function','function')+';exports.Row=SwipeableRow;'),context);
  const props={onSwipeLeft:()=>calls.push('left-original'),onSwipeRight:()=>calls.push('right'),children:React.createElement('Pressable',{testID:'card',onPress:()=>calls.push('open'),onLongPress:()=>calls.push('long')},React.createElement('TouchableOpacity',{testID:'trash',onPress:()=>calls.push('trash')}))};
  const render=extra=>{index=0;const tree=context.exports.Row({...props,...extra});return{tree,pan:nodes(tree).find(n=>n.type==='GestureDetector').props.gesture.pan,press:id=>nodes(tree).find(n=>n.props.testID===id).props.onPress()};};
  return{render,animations,timers,calls,commands};

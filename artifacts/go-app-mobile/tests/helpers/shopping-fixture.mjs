@@ -27,11 +27,12 @@ export async function shoppingUI(f,{handedness='right',width=390,height=844,font
  const native={...h.rn,View:host('View'),Text:host('Text'),TouchableOpacity:host('Button'),TextInput:host('Input'),ScrollView:host('ScrollView'),KeyboardAvoidingView:host('KeyboardFrame'),Modal:host('Modal'),Keyboard:keyboard,
   PanResponder:nativeResponder?require("./native-pan.cjs").nativePan():{create:handlers=>({panHandlers:handlers})},Share:{share:async payload=>{calls.push(['share',payload]);return {action:'sharedAction'};}},
   useWindowDimensions:()=>({width,height,fontScale,scale:3}),Alert:{alert:(title,message,buttons)=>alerts.push({title,message,buttons})}};
+ native.Animated={Value:class{constructor(v){this.value=v;}setValue(v){this.value=v;}stopAnimation(fn){fn?.(this.value);}interpolate(){return 0;}},View:host('AnimatedView'),timing:(value,options)=>({start:fn=>{calls.push(['animate',options]);value.setValue(options.toValue);fn?.({finished:true});}}),spring:(value,options)=>({start:fn=>{value.setValue(options.toValue);fn?.({finished:true});}})};
  native.TextInput.State={currentlyFocusedInput:()=>keyboard.focused};
  const gh={GestureHandlerRootView:native.View,GestureDetector:({gesture,children})=>{gestures.set(children.props.testID,gesture);return children;},Gesture:{Pan:()=>{
-  const pan={};for(const key of ['enabled','activateAfterLongPress','maxPointers','runOnJS'])pan[key]=value=>{pan[key+'Value']=value;return pan;};
-  for(const key of ['onStart','onUpdate','onFinalize'])pan[key]=fn=>{pan[key+'Handler']=fn;return pan;};return pan;
- }}};
+  const pan={};for(const key of ['enabled','activateAfterLongPress','maxPointers','runOnJS','cancelsTouchesInView','activeOffsetX','failOffsetY'])pan[key]=value=>{pan[key+'Value']=value;return pan;};
+  for(const key of ['onBegin','onStart','onUpdate','onEnd','onFinalize'])pan[key]=fn=>{pan[key+'Handler']=fn;return pan;};return pan;
+ },Native:()=>({native:true}),Simultaneous:(pan,native)=>({pan,native})}};
  const globals={requestAnimationFrame:fn=>{frames.set(++frameId,fn);return frameId;},cancelAnimationFrame:id=>frames.delete(id)};
  const board=h.load('components/boards/BoardDragSurface.tsx',{'react-native':native});
  const reorder=h.load('components/notes/ShoppingReorderSurface.tsx',{'react-native':native,'react-native-gesture-handler':gh,'@/components/boards/BoardDragSurface':board},globals);
@@ -39,7 +40,8 @@ export async function shoppingUI(f,{handedness='right',width=390,height=844,font
  const store={subscribeGoLog:f.disk.store.subscribeGoLog,getGoLogSnapshot:f.disk.store.getGoLogSnapshot};
  const experience=h.load('lib/shoppingExperience.ts',{'./shoppingNote':f.model});
  const icons={Feather:host('Feather'),MaterialCommunityIcons:host('Illustration')};
- const row=h.load('components/notes/ShoppingProductRow.tsx',{'react-native':native,'@expo/vector-icons':icons,'@/lib/shoppingNote':f.model,'@/lib/shoppingProductArt':h.load('lib/shoppingProductArt.ts',{'./shoppingNote':f.model})});
+ const swipe=h.load('components/ui/SwipeableRow.tsx',{'react-native':native,'react-native-gesture-handler':gh,'@expo/vector-icons':icons});
+ const row=h.load('components/notes/ShoppingProductRow.tsx',{'react-native':native,'@expo/vector-icons':icons,'@/components/ui/SwipeableRow':swipe,'@/lib/shoppingNote':f.model,'@/lib/shoppingProductArt':h.load('lib/shoppingProductArt.ts',{'./shoppingNote':f.model})});
  const catalog=h.load('lib/shoppingCatalog.ts',{'./shoppingNote':f.model});
  const choice=h.load('components/notes/ShoppingCatalogChoice.tsx',{'react-native':native});
  const {GoShoppingNote}=h.load('components/notes/GoShoppingNote.tsx',{'react-native':native,'react-native-gesture-handler':gh,'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:44,bottom:20,left:0,right:0})},'expo-linear-gradient':{LinearGradient:native.View},

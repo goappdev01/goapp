@@ -1,3 +1,5 @@
+import {createRequire} from 'node:module';
+const h=createRequire(import.meta.url)('./helpers/unified-note-fixture.cjs');
 import test from 'node:test';import assert from 'node:assert/strict';
 import {shoppingFixture,shoppingUI} from './helpers/shopping-fixture.mjs';
 const flatten=style=>Object.assign({},...(Array.isArray(style)?style.filter(Boolean):[style]));
@@ -6,7 +8,7 @@ test('Landing identifies the active list compactly and updates it after explicit
  const f=await shoppingFixture();let ui;try{
   await f.open();ui=await shoppingUI(f,{startList:false});
   assert.equal(ui.hosts.get('shopping-orbit-active-list').children.join(''),'Lista activa: COMPRAS');
-  assert.ok(ui.hosts.get('shopping-orbit-active-list').style.fontSize<=13);assert.match(ui.container.textContent,/GO ComprasAñadir productos/);
+  assert.ok(ui.hosts.get('shopping-orbit-active-list').style.fontSize<=13);assert.match(ui.container.textContent,/GO\s+ComprasAñadir productos/);
   await ui.tap('shopping-manage-lists');await ui.run(()=>ui.hosts.get('shopping-list-name').onChangeText('Trabajo'));await ui.tap('shopping-list-create');
   assert.equal(ui.hosts.get('shopping-orbit-active-list').children.join(''),'Lista activa: Trabajo');
   assert.equal(ui.hosts.get('shopping-thumb-controls').style[0].paddingBottom,4);
@@ -34,14 +36,14 @@ test('Mis listas is a compact bottom-aligned scroll with paired actions; keyboar
 test('product name dominates missing price; price keeps its touch area and only product trash icons become red',async()=>{
  const f=await shoppingFixture();let ui;try{
   await f.open();const item=await f.add('Manzanas de una presentación con nombre largo');ui=await shoppingUI(f);
-  const text=ui.hosts.get('shopping-edit-'+item.id).children;
+  const text=h.React.Children.toArray(ui.hosts.get('shopping-edit-'+item.id).children)[0];
   const price=()=>ui.hosts.get('shopping-price-input-'+item.id);
   assert.equal(text.props.numberOfLines,undefined);assert.ok(flatten(text.props.style).fontSize>flatten(price().style).fontSize);
   assert.equal(flatten(price().style).fontSize,13);assert.ok(flatten(price().style).minHeight>=44);
-  const trash=ui.hosts.get('shopping-trash-'+item.id);assert.equal(trash.children.props.color,'#c52e38');assert.ok(trash.style.minHeight>=44);
+  const trash=ui.hosts.get('shopping-trash-'+item.id);assert.equal(h.React.Children.toArray(trash.children)[0].props.color,'#c52e38');assert.ok(trash.style.minHeight>=44);
   await ui.run(()=>{ui.hosts.get('shopping-details-'+item.id).onLongPress();price().onChangeText('2,50');});
-  assert.equal(flatten(price().style).fontSize,20);assert.equal(ui.hosts.get('shopping-delete-'+item.id).children.props.color,'#c52e38');
-  assert.equal(ui.hosts.get('shopping-favorite-'+item.id).children.props.color,'#39688f');
+  assert.equal(flatten(price().style).fontSize,20);assert.equal(h.React.Children.toArray(ui.hosts.get('shopping-delete-'+item.id).children)[0].props.color,'#c52e38');
+  assert.equal(h.React.Children.toArray(ui.hosts.get('shopping-favorite-'+item.id).children)[0].props.color,'#39688f');
   await ui.run(()=>price().onEndEditing());await ui.idle();assert.equal(f.model.shoppingEstimate(f.doc()).totals.EUR,2.5);
  }finally{await ui?.close();f.disk.close();}
 });
