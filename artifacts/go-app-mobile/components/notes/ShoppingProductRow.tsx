@@ -70,7 +70,7 @@ export function ShoppingProductRow({item,doc,handedness,disabled,onOperation,onE
       </TouchableOpacity>
       {!!brand&&<Text numberOfLines={1} style={s.brand}>{brand}</Text>}
     </View>
-      <TouchableOpacity testID={"shopping-favorite-"+item.id} accessibilityRole="checkbox" accessibilityLabel={"Favorito: "+item.name} accessibilityState={{checked:!!item.favorite}} disabled={disabled} onPress={()=>{if(!swipeContact.consumed)apply({type:"favorite",id:item.id,value:!item.favorite});}} style={[s.icon,item.favorite&&{backgroundColor:"#fff3c4",borderRadius:12}]}><Feather name="star" size={21} color={item.favorite?"#9b6b00":"#64748b"}/></TouchableOpacity>
+      <TouchableOpacity testID={"shopping-favorite-"+item.id} accessibilityRole="checkbox" accessibilityLabel={"Favorito: "+item.name} accessibilityState={{checked:!!item.favorite}} disabled={disabled} onPress={()=>{if(!swipeContact.consumed)apply({type:"favorite",id:item.id,value:!item.favorite});}} style={[s.icon,item.favorite&&{backgroundColor:"#fff3c4",borderRadius:12}]}><Text allowFontScaling={false} style={{fontSize:26,color:"#FFD600",textShadowColor:"#A66D00",textShadowOffset:{width:0,height:0},textShadowRadius:1}}>{item.favorite?"★":"☆"}</Text></TouchableOpacity>
       {icon("trash-2","Retirar "+item.name+" de esta lista",onRemove,"shopping-trash-"+item.id)}
     </View>
     <View testID={"shopping-product-main-row-"+item.id} style={[s.mainRow,{flexDirection:handedness==="left"?"row-reverse":"row"}]}>

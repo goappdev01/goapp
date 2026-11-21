@@ -17,7 +17,7 @@ export function ShoppingCatalogChoice({name,art,status,checked=false,disabled=fa
         <Text style={{flex:1,minWidth:0,fontSize:15,fontWeight:"600",color:"#17365f"}}>{name}</Text>
       </TouchableOpacity>
       {!!onToggleFavorite&&<View onTouchStart={()=>{latest.current.favoriteContact=true;}}><TouchableOpacity testID={testID+"-favorite"} accessibilityRole="checkbox" accessibilityLabel={"Favorito: "+name} accessibilityState={{checked:favorite,disabled:favoriteDisabled}} disabled={favoriteDisabled}
-        onPressIn={()=>{latest.current.favoriteContact=true;}} onPress={()=>{if(!latest.current.consumed)onToggleFavorite();}} style={{width:44,minHeight:44,alignItems:"center",justifyContent:"center"}}><Text allowFontScaling={false} style={{fontSize:26,color:favorite?"#9b6b00":"#64748b"}}>{favorite?"★":"☆"}</Text></TouchableOpacity></View>}
+        onPressIn={()=>{latest.current.favoriteContact=true;}} onPress={()=>{if(!latest.current.consumed)onToggleFavorite();}} style={{width:44,minHeight:44,alignItems:"center",justifyContent:"center"}}><Text allowFontScaling={false} style={{fontSize:26,color:"#FFD600",textShadowColor:"#A66D00",textShadowOffset:{width:0,height:0},textShadowRadius:1}}>{favorite?"★":"☆"}</Text></TouchableOpacity></View>}
       <TouchableOpacity testID={testID+"-select"} accessible={false} disabled={disabled} onPressIn={()=>{latest.current.favoriteContact=false;}} onPress={choose} style={{minHeight:44,justifyContent:"center"}}><Text style={{fontSize:12,fontWeight:"700",color:"#1872b5"}}>{checked?"✓ ":"☐ "}{status}</Text></TouchableOpacity>
     </View>
   </View>;
