@@ -283,3 +283,31 @@ no una validación del reconocimiento nativo en iPhone. TypeScript y diff --chec
 se comprueban antes del commit. La publicación y el bundle iOS 8088 se verifican
 después; 8089 permanece intacto. El propietario debe validar físicamente el gesto,
 la fila, la posición de flotantes y el título. Sin cambios de datos/categorías.
+
+CONTINUACIÓN 21/11/2026 — Mis listas, alcance del pulgar y arco de acciones
+---------------------------------------------------------------------
+Base: origin/main de26db18f55e9dbddd207eb26f0a17a467f8e0c3.
+La pantalla Mis listas aún reservaba 136 puntos para la columna flotante y no
+habilitaba la elección libre que ya tenían el Landing y la lista de productos.
+Se elimina la reserva del pie solo en Mis listas; Lista conserva su botón habitual.
+El inicio automático del flotante utiliza el pie medido. Se habilita la misma
+opción allowUserOverlap del motor existente: no cambia claves ni coordenadas
+guardadas, lateralidad, límites de pantalla o adaptación al teclado. La posición
+voluntaria puede bajar sin que la protección del formulario la devuelva arriba.
+
+Se retira el párrafo “Guardado en este dispositivo…”; la confirmación de eliminar
+sigue explicando la papelera. Crear, Renombrar, Compartir y Eliminar conservan sus
+callbacks. Se presentan en un arco escalonado inferior, reflejado para zurdos,
+con anchura calculada sobre el contenedor medido. Texto grande ensancha los botones
+y reduce el arco; el scroll conserva acceso a listas numerosas y al teclado.
+Se mantiene el anclaje inferior del formulario, ahora sin el falso pie alto.
+La preferencia del propietario por menús próximos al pulgar y en arco queda
+registrada como referencia para futuras pantallas; este cambio solo afecta Mis listas.
+No se alteran almacenamiento, listas reales, productos ni preferencias de otras vistas.
+
+41 pruebas de integración/layout superadas: arco en cuatro anchos y tres escalas,
+ambas manos, ausencia de reserva/texto, motor libre por contexto, teclado, creación,
+renombrado, compartir y confirmación de papelera; regresiones del Landing/lista/IA.
+Son pruebas con adaptadores, sin validación táctil física. TypeScript/diff --check
+antes de publicar. Verificación posterior del SHA y bundle iOS 8088; 8089 intacto.
+El propietario debe confirmar en iPhone el alcance, el arco y el arrastre hacia abajo.

@@ -16,12 +16,12 @@ test('Landing identifies the active list compactly and updates it after explicit
  }finally{await ui?.close();f.disk.close();}
 });
 
-test('Mis listas is a compact bottom-aligned scroll with paired actions; keyboard, rename, share and trash confirmation keep records',async()=>{
+test('Mis listas is a compact bottom-aligned scroll with thumb-arc actions; keyboard, rename, share and trash confirmation keep records',async()=>{
  const f=await shoppingFixture();let ui;try{
   const first=await f.open(),second=await f.api().createShoppingList(f.disk.scope,f.disk.active,'Familia');
   ui=await shoppingUI(f,{startList:false,width:320});await ui.tap('shopping-manage-lists');
   const scroll=ui.hosts.get('shopping-lists-scroll');assert.equal(scroll.contentContainerStyle.justifyContent,'flex-end');assert.equal(scroll.contentContainerStyle.gap,6);assert.equal(scroll.contentContainerStyle.flexGrow,1);
-  assert.equal(ui.hosts.get('shopping-lists-editor').children.filter(Boolean).length,4);
+  assert.equal(ui.hosts.get('shopping-lists-editor').children.filter(Boolean).length,2);
   for(const id of ['shopping-list-create','shopping-list-rename','shopping-list-share','shopping-list-delete'])assert.ok(ui.hosts.get(id).style[0].minHeight>=44);
   await ui.run(()=>{ui.hosts.get('shopping-list-name').onChangeText('Oficina');ui.hosts.get('shopping-list-name').onFocus({target:123});ui.keyboard.show();});
   assert.ok(ui.calls.some(c=>c[0]==='reveal'&&c[1]===123));await ui.tap('shopping-back');assert.equal(ui.keyboard.visible,false);assert.equal(ui.hosts.get('shopping-list-name').value,'Oficina');
