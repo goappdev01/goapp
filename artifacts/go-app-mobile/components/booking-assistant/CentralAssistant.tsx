@@ -14,7 +14,7 @@ export function CentralAssistant({userId,...props}:BookingAssistantProps&{userId
   const model=useMemo(()=>new CentralConversation(userId,{
     read:key=>AsyncStorage.getItem(key),write:(key,value)=>AsyncStorage.setItem(key,value),remove:key=>AsyncStorage.removeItem(key),
     respond:(messages,signal)=>centralAssistantApi(userId,"/respond",{messages,consent:true},signal),
-    speak:(text,onError)=>{try{Speech.speak(text,{language:"es-ES",onError});}catch{onError();}},stop:()=>{void Speech.stop().catch(()=>{});},
+    speak:(text,onStart,onDone,onError)=>{try{Speech.speak(text,{language:"es-ES",onStart,onDone,onStopped:onDone,onError});}catch{onError();}},stop:()=>{void Speech.stop().catch(()=>{});},
   }),[userId]);
   useEffect(()=>model.subscribe(render),[model]);
   useEffect(()=>{if(!props.visible){model.setConsent(false);return;}if(!model.ready)void model.restore();let current=true;
@@ -39,7 +39,7 @@ export function CentralAssistant({userId,...props}:BookingAssistantProps&{userId
     </View>
     {!!model.notice&&<Text accessibilityLiveRegion="polite">{model.notice}</Text>}
   </View>;
-  return <BookingAssistantScreen {...props} consultation={{scopeKey:"central:"+userId,cancelRequest,title:"Conversa con GO",introduction:"Conversa sobre cualquier tema. Esta fase no ejecuta acciones.",navigationKey:"central-assistant",sourceText:"",controls,
+  return <BookingAssistantScreen {...props} consultation={{scopeKey:"central:"+userId,cancelRequest,title:"Conversa con GO",introduction:"Conversa sobre cualquier tema. Esta fase no ejecuta acciones.",navigationKey:"central-assistant",sourceText:"",controls,speaking:model.speaking,completed:model.completed,
     messages:[{id:"intro",role:"assistant",text:"Puedes escribir, corregir o continuar una conversación. Autoriza el envío antes de usar OpenAI."},...model.messages.map((m,i)=>({...m,id:i}))],
     respond:text=>model.respond(text),errorMessage:error=>error instanceof Error?error.message:"No se pudo completar la consulta. Conservamos el texto.",onInterrupt:()=>model.interrupt(),
     voiceOptions:{requireTranscriptionReady:true,beforeStart:async()=>{if(Platform.OS==="web")throw Error("El dictado central no está habilitado en este navegador. Puedes escribir.");if(!model.consent)throw Error("Autoriza el envío a OpenAI antes de utilizar el dictado. Puedes escribir.");},

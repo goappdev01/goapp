@@ -19,6 +19,8 @@ import { useGoNoteVoice } from "@/hooks/useGoNoteVoice";
 import { GoNoteAttachmentMenu } from "./GoNoteAttachmentMenu";
 import { useGoNoteKeyboard } from "@/hooks/useGoNoteKeyboard";
 import { s as assistantStyles } from "@/components/booking-assistant/BookingAssistantUI";
+import { GoAiIdentity } from "@/components/ai/GoAiIdentity";
+import { assistantActivity } from "@/lib/goAiVisualState";
 import { prepareGoNote } from "@/lib/goNotePreparation";
 import { appendNoteDictation, noteReminderLabel } from "@/lib/goNoteTools";
 import { importNoteFile } from "@/lib/goNoteFiles";
@@ -388,8 +390,8 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
         <View testID="note-editor-footer" onLayout={event=>{const {height,y}=event.nativeEvent.layout;footerHeight.current=height;if(Number.isFinite(y))setFooterBottom(y+height);}} style={[s.footer,{paddingBottom:Math.max(insets.bottom,12),flexDirection:handedness==="left"?"row-reverse":"row"}]}>
           <TouchableOpacity testID="unified-note-save" accessibilityRole="button" disabled={busy||toolFinishing||closingSaved||attachmentBusy||preparing||voice.status!=="idle"} activeOpacity={0.78} onPress={()=>void save()} style={s.save}><LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.58)","rgba(255,255,255,0.02)"]} style={[StyleSheet.absoluteFill,{borderRadius:18}]}/><Text style={s.saveText}>{busy?"GUARDANDO…":"GUARDAR"}</Text></TouchableOpacity>
           <TouchableOpacity testID="note-microphone" accessibilityRole="button" accessibilityLabel={voice.status==="listening"?"Detener escucha de GO":"Hablar con GO para preparar la nota"} accessibilityState={{selected:voice.status==="listening",disabled:busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"}}
-            disabled={busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"} activeOpacity={0.78} onPress={()=>{if(draftRef.current.security){setFloatingNotice("Las notas de seguridad no están activadas y no se envían a la IA.");return;}if(!latest.current.ready){setFloatingNotice("Espera a que se verifique tu cuenta para hablar con GO.");return;}void voice.toggle();}} style={[assistantStyles.goButton,s.go,voice.status==="listening"&&assistantStyles.listening]}>
-            <LinearGradient pointerEvents="none" colors={["rgba(255,255,255,0.50)","rgba(255,255,255,0.00)"]} style={[StyleSheet.absoluteFill,{borderRadius:32}]}/><Feather name={voice.status==="listening"?"square":"mic"} size={22} color="#FFFFFF"/><Text style={[s.goText,assistantStyles.goLabel]}>{voice.status==="listening"?"Parar":"GO"}</Text></TouchableOpacity>
+            disabled={busy||attachmentBusy||preparing||voice.status==="preparing"||voice.status==="transcribing"} activeOpacity={0.78} onPress={()=>{if(draftRef.current.security){setFloatingNotice("Las notas de seguridad no están activadas y no se envían a la IA.");return;}if(!latest.current.ready){setFloatingNotice("Espera a que se verifique tu cuenta para hablar con GO.");return;}void voice.toggle();}} style={[assistantStyles.goButton,s.go,{backgroundColor:"transparent",borderWidth:0,overflow:"visible",padding:0,gap:0}]}>
+            <GoAiIdentity testID="note-go-identity" size={58} activity={assistantActivity({voice:voice.status,busy:preparing||busy,error:!!voice.error})}/></TouchableOpacity>
           <View testID="note-navigation-slot" pointerEvents="none" accessibilityElementsHidden style={{width:initial&&onGoToLanding?136:64,height:64}}/>
         </View>
       </KeyboardAvoidingView>

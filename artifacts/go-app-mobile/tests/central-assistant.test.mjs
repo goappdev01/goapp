@@ -3,9 +3,9 @@ const require=createRequire(import.meta.url),h=require('./helpers/unified-note-f
 const contract=h.load('../../lib/api-zod/src/central-assistant.ts',{zod:require('zod')});
 const {CentralConversation}=h.load('lib/centralConversation.ts',{'@workspace/api-zod':contract},{AbortController});
 const idle=()=>new Promise(setImmediate);
-function fixture(){const disk=new Map(),sent=[],spoken=[],stops=[];let response=async()=>({answer:'Respuesta general sobre astronomía'});
- const deps={read:async k=>disk.get(k)??null,write:async(k,v)=>{disk.set(k,v);},remove:async k=>{disk.delete(k);},respond:async(m,s)=>{sent.push({messages:JSON.parse(JSON.stringify(m)),signal:s});return response(m,s);},speak:t=>spoken.push(t),stop:()=>stops.push(true)};
- return{disk,sent,spoken,stops,model:id=>new CentralConversation(id,deps),setResponse:fn=>response=fn};}
+function fixture(){const disk=new Map(),sent=[],spoken=[],stops=[],speechCallbacks=[];let response=async()=>({answer:'Respuesta general sobre astronomía'});
+ const deps={read:async k=>disk.get(k)??null,write:async(k,v)=>{disk.set(k,v);},remove:async k=>{disk.delete(k);},respond:async(m,s)=>{sent.push({messages:JSON.parse(JSON.stringify(m)),signal:s});return response(m,s);},speak:(t,onStart,onDone,onError)=>{spoken.push(t);speechCallbacks.push({onStart,onDone,onError});},stop:()=>stops.push(true)};
+ return{disk,sent,spoken,stops,speechCallbacks,model:id=>new CentralConversation(id,deps),setResponse:fn=>response=fn};}
 
 test('general context requires consent; only typed conversation is passed and no action tools exist',async()=>{
  const f=fixture(),a=f.model('ADMIN-A');await a.restore();await assert.rejects(()=>a.respond('Hola'),/Autoriza/);assert.equal(f.sent.length,0);
@@ -21,6 +21,14 @@ test('remember is opt-in, scoped by account, restores text without restoring tra
 test('interruption or withdrawal aborts and discards delayed response and speech, then permits a new turn',async()=>{
  const f=fixture(),a=f.model('A');await a.restore();a.setConsent(true);a.setVoice(true);let release;f.setResponse(()=>new Promise(r=>release=r));const pending=a.respond('Primero');a.setConsent(false);assert.equal(f.sent[0].signal.aborted,true);release({answer:'Respuesta tardía'});await assert.rejects(()=>pending,/interrumpida/);assert.equal(a.messages.length,0);assert.equal(f.spoken.length,0);
  f.setResponse(async()=>({answer:'Ahora sí'}));a.setConsent(true);await a.respond('Continúa');assert.deepEqual(f.spoken,['Ahora sí']);
+});
+test('speaking indicator follows actual audio callbacks and ignores a stopped old utterance',async()=>{
+ const f=fixture(),a=f.model('A');await a.restore();a.setConsent(true);a.setVoice(true);await a.respond('Hola');
+ assert.equal(a.speaking,false);f.speechCallbacks[0].onStart();assert.equal(a.speaking,true);
+ f.speechCallbacks[0].onDone();assert.equal(a.speaking,false);assert.equal(a.completed,true);
+ await a.respond('Otra consulta');f.speechCallbacks[1].onStart();assert.equal(a.speaking,true);
+ a.interrupt();assert.equal(a.speaking,false);assert.equal(a.completed,false);f.speechCallbacks[1].onStart();assert.equal(a.speaking,false);
+ await a.respond('Tercera consulta');a.setVoice(false);f.speechCallbacks[2].onStart();assert.equal(a.speaking,false);
 });
 test('provider failure preserves context and cannot manufacture a reply or erase remembered text',async()=>{
  const f=fixture(),a=f.model('A');await a.restore();a.setConsent(true);await a.respond('Historia');f.setResponse(async()=>{throw Error('Sin conexión');});await assert.rejects(()=>a.respond('Continúa'),/conexión/);assert.equal(a.messages.length,2);assert.equal(a.busy,false);

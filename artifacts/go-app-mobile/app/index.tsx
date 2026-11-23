@@ -64,6 +64,7 @@ import * as Contacts from "expo-contacts/legacy";
 import { ContactPlacesPanel } from "@/components/contactos/ContactPlacesPanel";
 import * as Haptics from "expo-haptics";
 import * as Speech from "expo-speech";
+import { GoAiIdentity } from "@/components/ai/GoAiIdentity";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Linking from "expo-linking";
 import * as Location from "expo-location";
@@ -20484,16 +20485,16 @@ function HomeScreenContent() {
               </TouchableOpacity>
               {/* IA */}
               <TouchableOpacity
-                onPress={() => { Haptics.selectionAsync(); openAi(); }}
+                onPress={() => { if (voiceActiveRef.current) return; Haptics.selectionAsync(); openAi(); }}
                 onLongPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); startVoiceMode(); }}
-                delayLongPress={400}
+                delayLongPress={500}
                 activeOpacity={0.8}
                 hitSlop={2}
                 accessibilityRole="button"
                 accessibilityLabel={lang === "en" ? "Open GO (hold for voice)" : "Abrir GO (mantén para voz)"}
-                style={{ width: "22%", minWidth: 64, maxWidth: 76, aspectRatio: 1, flexShrink: 0, borderRadius: 38, backgroundColor: GO_GOLD, alignItems: "center", justifyContent: "center", shadowColor: GO_GOLD, shadowOpacity: 0.55, shadowRadius: 10, elevation: 6 }}
+                style={{ width: "22%", minWidth: 64, maxWidth: 76, aspectRatio: 1, flexShrink: 0, borderRadius: 38, alignItems: "center", justifyContent: "center", shadowColor: GO_GOLD, shadowOpacity: 0.35, shadowRadius: 10, elevation: 6 }}
               >
-                <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} maxFontSizeMultiplier={1.4} style={{ ...GO_ASSISTANT_LABEL, fontSize: 24, fontFamily: "Inter_900Black", fontWeight: "900", letterSpacing: 0.4 }}>GO</Text>
+                <GoAiIdentity size={64} activity={voiceActive ? voicePhase === "listening" ? "listening" : voicePhase === "sending" ? "executing" : "processing" : "available"}/>
               </TouchableOpacity>
               </View>
             </View>

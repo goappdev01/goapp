@@ -35,6 +35,8 @@ import { useGoActions } from "@/hooks/useGoActions";
 import { useAssistantZoneScope } from "@/hooks/useAssistantZoneScope";
 import { useBookingVoice, type BookingVoiceOptions } from "@/hooks/useBookingVoice";
 import { ListeningIndicator, listeningPlacement } from "./ListeningIndicator";
+import { GoAiIdentity } from "@/components/ai/GoAiIdentity";
+import { assistantActivity } from "@/lib/goAiVisualState";
 import { BookingAssistantPanels } from "./BookingAssistantPanels";
 import {
   Action,
@@ -49,7 +51,7 @@ import {
 
 export interface BookingAssistantProps {
   /** Read-only consultation; no booking/task dispatcher or automatic draft replacement. */
-  consultation?:{scopeKey:string;title:string;sourceText:string;cancelRequest?:number;controls?:React.ReactNode;messages?:{id:string|number;role:string;text:string}[];voiceOptions?:BookingVoiceOptions;errorMessage?:(error:unknown)=>string;onInterrupt?:()=>void;navigationKey?:string;introduction?:string;respond?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;onAcceptDraft?:(draft:string,baseline:string)=>void};
+  consultation?:{scopeKey:string;title:string;sourceText:string;cancelRequest?:number;controls?:React.ReactNode;messages?:{id:string|number;role:string;text:string}[];voiceOptions?:BookingVoiceOptions;errorMessage?:(error:unknown)=>string;onInterrupt?:()=>void;navigationKey?:string;introduction?:string;respond?:(question:string,source:string)=>Promise<{answer:string;draft?:string}>;onAcceptDraft?:(draft:string,baseline:string)=>void;speaking?:boolean;completed?:boolean};
   uiScale?: "compacto" | "estandar" | "grande";
   visible: boolean;
   listenRequest?: number;
@@ -251,6 +253,7 @@ export function BookingAssistantScreen({
     });
   }
   const listening = voice.status === "listening";
+  const goActivity = assistantActivity({voice:voice.status,busy:a.busy,speaking:consultation?.speaking,completed:consultation?.completed,error:!!voice.error});
   const indicatorActive = visible && listening && !voice.error && !a.busy && !a.panel;
   const indicatorPlacement = conversationMeasurement.messages === conversationMessages.length
     ? listeningPlacement(conversationLayout.width, conversationLayout.height, conversationMeasurement.height, keyboardVisible) : null;
@@ -287,16 +290,9 @@ export function BookingAssistantScreen({
                       void voice.start(isZone);
                     }
                   }}
-                  style={[s.dockButton, s.goButton, { width: goSize, minWidth: goSize, maxWidth: goSize, minHeight: goSize, height: goSize, borderRadius: goSize / 2, paddingVertical: goSize === 48 ? 2 : 6, gap: goSize === 48 ? 2 : 4 },consultation&&{marginHorizontal:0}, listening && s.listening]}
+                  style={[s.dockButton, s.goButton, { width: goSize, minWidth: goSize, maxWidth: goSize, minHeight: goSize, height: goSize, borderRadius: goSize / 2, paddingVertical:0, gap:0, backgroundColor:"transparent", borderWidth:0, overflow:"visible" },consultation&&{marginHorizontal:0}]}
                 >
-                  <Feather
-                    name={listening ? "square" : "mic"}
-                    size={goSize === 48 ? 18 : 25}
-                    color="#FFFFFF"
-                  />
-                  <Text style={[s.dockLabel, s.goLabel]}>
-                    {listening ? "Parar" : "GO"}
-                  </Text>
+                  <GoAiIdentity size={goSize} activity={goActivity} expression={a.phase==="review"?"confirmation":"friendly"}/>
                 </TouchableOpacity>
 
       {!consultation&&(voice.status === "preparing" || voice.status === "transcribing") && <TouchableOpacity
