@@ -42,7 +42,9 @@ test('assistant GO renders shared identity from observable voice state without c
  const tree=parsed('components/booking-assistant/BookingAssistantScreen.tsx');
  const face=all(tree,n=>ts.isJsxSelfClosingElement(n)&&n.tagName.getText(tree)==='GoAiIdentity')[0];assert.ok(face);
  assert.match(attr(face,'activity').getText(tree),/goActivity/);
+ assert.match(attr(face,'expression').getText(tree),/informative/);
  assert.match(face.parent.openingElement.getText(tree),/onPress/);
+ assert.match(tree.getText(),/setConsultationFailed\(true\)/);
 });
 
 for(const handedness of ['left','right'])for(const width of [320,390,768])test(`real Note GO rests without a microphone at ${width}px, ${handedness}`,async()=>{

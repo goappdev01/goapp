@@ -87,6 +87,7 @@ export function BookingAssistantScreen({
   const conversationMessages=consultation?.messages??a.messages;
   const go = useGoActions(a, !consultation&&zoneIdentity.ready ? zoneIdentity.scope : null);
   const [consultationDraft,setConsultationDraft]=useState<string|null>(null),consultationFlight=useRef(false),consultationEpoch=useRef(0);
+  const [consultationFailed,setConsultationFailed]=useState(false);
   const consultationCurrent=useRef({visible,key:consultation?.scopeKey});consultationCurrent.current={visible,key:consultation?.scopeKey};
   const [input, setInput] = useState("");
   const [keyboardVisible, setKeyboardVisible] = useState(false);
@@ -112,7 +113,7 @@ export function BookingAssistantScreen({
     }
   },{requireTranscriptionReady:!!consultation,...consultation?.voiceOptions});
   useEffect(()=>{if(consultation?.cancelRequest===undefined)return;consultationEpoch.current++;consultationFlight.current=false;a.setBusy("");},[consultation?.cancelRequest]);
-  useEffect(()=>{if(!consultation)return;consultationEpoch.current++;consultationFlight.current=false;setConsultationDraft(null);return()=>{consultationEpoch.current++;};},[visible,consultation?.scopeKey]);
+  useEffect(()=>{if(!consultation)return;consultationEpoch.current++;consultationFlight.current=false;setConsultationDraft(null);setConsultationFailed(false);return()=>{consultationEpoch.current++;};},[visible,consultation?.scopeKey]);
   useEffect(() => {
     if (!visible) {
       a.invalidate();
@@ -175,12 +176,12 @@ export function BookingAssistantScreen({
     if(!consultation||consultationFlight.current||!text.trim())return;
     if(!consultation.respond){a.setNotice("GO no puede procesar esta consulta ahora. Tu borrador sigue intacto.");return;}
     const key=consultation.scopeKey,source=consultation.sourceText,epoch=++consultationEpoch.current;
-    consultationFlight.current=true;a.setBusy("Consultando GO…");a.setNotice("");
+    consultationFlight.current=true;setConsultationFailed(false);a.setBusy("Consultando GO…");a.setNotice("");
     try{const result=await consultation.respond(text,source);
       if(epoch!==consultationEpoch.current||!consultationCurrent.current.visible||consultationCurrent.current.key!==key)return;
       if(typeof result.answer!=="string"||!result.answer.trim()||result.answer.length>8000||result.draft!==undefined&&(typeof result.draft!=="string"||result.draft.length>4000))throw Error("Respuesta inválida");
       a.say(text,"user");a.say(result.answer);setConsultationDraft(consultation.onAcceptDraft?result.draft??null:null);setInput("");
-    }catch(error){if(epoch===consultationEpoch.current&&consultationCurrent.current.visible)a.setNotice(consultation.errorMessage?.(error)??"No se pudo completar la consulta. Conservamos el texto.");}
+    }catch(error){if(epoch===consultationEpoch.current&&consultationCurrent.current.visible){setConsultationFailed(true);a.setNotice(consultation.errorMessage?.(error)??"No se pudo completar la consulta. Conservamos el texto.");}}
     finally{if(epoch===consultationEpoch.current){consultationFlight.current=false;a.setBusy("");}}
   }
   function close(toLanding = false) {
@@ -253,7 +254,7 @@ export function BookingAssistantScreen({
     });
   }
   const listening = voice.status === "listening";
-  const goActivity = assistantActivity({voice:voice.status,busy:a.busy,speaking:consultation?.speaking,completed:consultation?.completed,error:!!voice.error});
+  const goActivity = assistantActivity({voice:voice.status,busy:a.busy,speaking:consultation?.speaking,completed:consultation?.completed,error:!!voice.error||consultationFailed});
   const indicatorActive = visible && listening && !voice.error && !a.busy && !a.panel;
   const indicatorPlacement = conversationMeasurement.messages === conversationMessages.length
     ? listeningPlacement(conversationLayout.width, conversationLayout.height, conversationMeasurement.height, keyboardVisible) : null;
@@ -292,7 +293,7 @@ export function BookingAssistantScreen({
                   }}
                   style={[s.dockButton, s.goButton, { width: goSize, minWidth: goSize, maxWidth: goSize, minHeight: goSize, height: goSize, borderRadius: goSize / 2, paddingVertical:0, gap:0, backgroundColor:"transparent", borderWidth:0, overflow:"visible" },consultation&&{marginHorizontal:0}]}
                 >
-                  <GoAiIdentity size={goSize} activity={goActivity} expression={a.phase==="review"?"confirmation":"friendly"}/>
+                  <GoAiIdentity size={goSize} activity={goActivity} expression={a.phase==="review"?"confirmation":consultation?"informative":"friendly"}/>
                 </TouchableOpacity>
 
       {!consultation&&(voice.status === "preparing" || voice.status === "transcribing") && <TouchableOpacity
