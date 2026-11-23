@@ -10,6 +10,20 @@ export const LANDING_SATELLITE_DEGREES: Record<string, number> = {
   bell: -112.5, list: -67.5, map: -22.5, calendar: 22.5,
   contacts: 67.5, messages: 112.5, settings: 157.5, payment: 157.5, mas: 202.5,
 };
+
+/** The outer, upper-right gap adjacent to FOOD and MAP. Keep their rectangular
+ * touch areas 4pt clear (a circular visual gap alone does not protect taps).
+ * Coordinates are relative to GO's centre; artwork scales, touch stays >=44pt. */
+export function landingShoppingShortcut(scale: number, orbitRadius: number, orbitSize: number,
+  satelliteRadius: number, satelliteSize: number) {
+  const visualSize = Math.max(34, Math.round(42 * scale));
+  const touchSize = Math.max(44, visualSize);
+  const foodRight = orbitRadius * Math.SQRT1_2 + Math.max(44, orbitSize) / 2;
+  const mapTop = -satelliteRadius * Math.sin(Math.PI / 8) - Math.max(44, satelliteSize) / 2;
+  return { x: foodRight + touchSize / 2 + 4,
+    y: mapTop - touchSize / 2 - 4,
+    touchSize, visualSize };
+}
 export function landingPresetScale(preset: LandingPreset) {
   return preset === "compacto" ? 0.83 : preset === "grande" ? 1.12 : 1;
 }

@@ -158,7 +158,8 @@ import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands"
 import { compactLandingOrbit, landingOrbitSafeBounds, redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
 import { splitLandingAppointments, landingPanelFrames, landingActionPanelFrames, landingActionsBesideNote, landingScrollPanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
 import { fitLandingScale, landingPresetScale, landingDockBounds, landingContentFrame,
-  landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES } from "@/components/landing/landingResponsiveLayout";
+  landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES, landingShoppingShortcut } from "@/components/landing/landingResponsiveLayout";
+import { LandingShoppingCart } from "@/components/landing/LandingShoppingCart";
 import {
   hasFullLandingArchitecture,
   isUserV1Landing,
@@ -4055,15 +4056,18 @@ function HomeScreenContent() {
   type UnifiedNoteOrigin = "landing" | "calendar" | "list";
   const [unifiedNoteInitial,setUnifiedNoteInitial]=useState<GoEntry|null>(null);
   const [unifiedNoteSeed,setUnifiedNoteSeed]=useState<{destination?:NoteDestination;dateISO?:string;time?:string;title?:string;content?:string;toolsOpen?:boolean;confirmSchedule?:boolean;linkedEntryId?:string;goDraftId?:string;shopping?:boolean}>({});
+  const shoppingFromLanding=useRef(false);
   const unifiedNoteOriginRef=useRef<UnifiedNoteOrigin>("landing");
   const listNoteLayerBackRef=useRef<(() => boolean)|null>(null);
   const unifiedNoteCache=useRef<{scope:string;draft:UnifiedNoteDraft}|null>(null);
   const unifiedNoteEditCache=useRef(new Map<string,UnifiedNoteDraft>());
   const openUnifiedNote=(entry:GoEntry,seed:typeof unifiedNoteSeed={},origin:UnifiedNoteOrigin="landing")=>{
+    shoppingFromLanding.current=false;
     unifiedNoteOriginRef.current=origin;
     setUnifiedNoteInitial(entry);setUnifiedNoteSeed(seed);setNotesOpen(true);
   };
   function openUnifiedNoteComposer(seed:typeof unifiedNoteSeed={},origin:UnifiedNoteOrigin="landing"){
+    shoppingFromLanding.current=false;
     unifiedNoteOriginRef.current=origin;
     setUnifiedNoteInitial(null);setUnifiedNoteSeed(seed);setNotesOpen(true);
   }
@@ -4164,6 +4168,10 @@ function HomeScreenContent() {
   function openLandingNote() {
     if (hasActiveGoNoteTarget()) openComposeGoNote();
     else openUnifiedNoteComposer();
+  }
+  function openLandingShopping() {
+    openUnifiedNoteComposer({ shopping: true });
+    shoppingFromLanding.current=true;
   }
   function updateGoNoteContext(context: GoNoteContext | null) {
     goNoteContextRef.current = context;
@@ -11879,6 +11887,11 @@ function HomeScreenContent() {
   // (orbitWrapSize) no cambia.
   const microR   = orbitRadius + Math.round(35 * uiScaleFactor);
   const microSz  = Math.round(50 * uiScaleFactor);
+  const shoppingShortcut = landingShoppingShortcut(uiScaleFactor, orbitRadius, orbitBtnSize, microR, microSz);
+  const shoppingShortcutVisible = !supportMode && !rutasMode && orbitSecondLevel === null
+    && !reservasOrbitalOpen && !categorySelected && !otroSelected && !isActivelyCreating && !anyOverlayOpen;
+  const shoppingLandingNode = shoppingShortcutVisible ? [{ key: "shopping-direct", x: shoppingShortcut.x,
+    y: shoppingShortcut.y, size: shoppingShortcut.touchSize }] : [];
   const systemBoundingRadius = Math.max(
     orbitRadius + orbitBtnSize / 2,
     microR + microSz / 2,
@@ -13681,6 +13694,9 @@ function HomeScreenContent() {
     addLandingOrbitObstacle(-90 + i * 360 / (INTENTS.length + 1), orbitRadius, orbitBtnSize);
   for (const key of visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface))
     addLandingOrbitObstacle(LANDING_SATELLITE_DEGREES[key], microR, microSz);
+  if (shoppingShortcutVisible) landingOrbitObstacles.push({ x: landingCenter.x + shoppingShortcut.x - shoppingShortcut.touchSize / 2,
+    y: landingCenter.y + shoppingShortcut.y - shoppingShortcut.touchSize / 2,
+    width: shoppingShortcut.touchSize, height: shoppingShortcut.touchSize });
   const closeColumnWidth = landingContentWidth(screen.width, screen.height, insets, systemBoundingRadius);
   const closeHeaderHeight = Math.max(44, Math.round(32 * uiScaleFactor), fullLandingArchitecture ? Math.round(56 * uiScaleFactor) + 16 - 20 : 0);
   const closeHeaderObstacles: HumanityRect[] = fullLandingArchitecture ? [{
@@ -14014,6 +14030,7 @@ function HomeScreenContent() {
       anchorSatelliteDegrees: Object.values(LANDING_SATELLITE_DEGREES),
       satellites: visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface)
         .filter(key => key !== "payment").map(key => ({ key, degrees: LANDING_SATELLITE_DEGREES[key] })),
+      additionalControls: shoppingLandingNode,
       });
     if (!arc.fitted) return unchanged;
     const move = (rect: HumanityRect) => ({ ...rect, y: rect.y + arc.offsetY });
@@ -14028,7 +14045,8 @@ function HomeScreenContent() {
   }, [anyOverlayOpen, rutasMode, orbitSecondLevel, reservasOrbitalOpen,
     screen.width, screen.height, insets.left, insets.right, insets.top, insets.bottom,
     landingDock.maxY, landingCenter.x, landingCenter.y, goSize, orbitRadius, orbitBtnSize, microR, microSz,
-    isUserV1Surface, handedness, landingBaseFrame.virtual, landingCloseRect.x, landingCloseRect.y,
+    isUserV1Surface, handedness, shoppingShortcutVisible, shoppingShortcut.x, shoppingShortcut.y, shoppingShortcut.touchSize,
+    landingBaseFrame.virtual, landingCloseRect.x, landingCloseRect.y,
     landingPanels.commands.x, landingPanels.commands.y, landingPanels.commands.width,
     landingPanels.region.y, landingPanels.region.height, landingBaseFrame.left, landingBaseFrame.top,
     humanityPlacement?.x, humanityPlacement?.y, humanityPlacement?.width, humanityPlacement?.height,
@@ -14054,6 +14072,7 @@ function HomeScreenContent() {
     satelliteRadius: microR, satelliteSize: microSz,
     satellites: visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface)
       .filter(key => key !== "payment").map(key => ({ key, degrees: LANDING_SATELLITE_DEGREES[key] })),
+    additionalControls: shoppingLandingNode,
     helpSize: microSz, alignment: landingAlignment,
     // Only painted controls constrain the orbit. Legacy information/selector rectangles
     // are laid out AFTER this footprint and must not push it upwards.
@@ -18710,6 +18729,28 @@ function HomeScreenContent() {
               </>
             );
           })()}
+
+          {shoppingShortcutVisible && <TouchableOpacity
+            testID="landing-shopping-shortcut"
+            accessibilityRole="button"
+            accessibilityLabel={lang === "en" ? "Open GO Shopping" : "Abrir GO Compras"}
+            accessibilityHint={lang === "en" ? "Opens the shopping product orbit" : "Abre la órbita de productos"}
+            activeOpacity={0.8}
+            onPress={() => { Haptics.selectionAsync().catch(() => {}); openLandingShopping(); }}
+            style={{ position: "absolute",
+              left: compactLandingActive && compactLandingGeometry.mirrored
+                ? orbitWrapSize / 2 - shoppingShortcut.x - shoppingShortcut.touchSize / 2
+                : orbitWrapSize / 2 + shoppingShortcut.x - shoppingShortcut.touchSize / 2,
+              top: orbitWrapSize / 2 + shoppingShortcut.y - shoppingShortcut.touchSize / 2,
+              width: shoppingShortcut.touchSize, height: shoppingShortcut.touchSize,
+              borderRadius: shoppingShortcut.touchSize / 2, borderWidth: 1.5, borderColor: "#B8EDFF",
+              shadowColor: "#37BFE3", shadowOpacity: 0.42, shadowRadius: 8,
+              shadowOffset: { width: 0, height: 3 }, elevation: 7, overflow: "hidden", zIndex: 5 }}>
+            <LinearGradient colors={["#227BBE", "#145384", "#0B315A"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <LandingShoppingCart size={shoppingShortcut.visualSize - 2} />
+            </LinearGradient>
+          </TouchableOpacity>}
 
         </Animated.View>
       )}
@@ -24711,12 +24752,12 @@ function HomeScreenContent() {
   function renderUnifiedNoteEditor(){
     const scope=noteIdentity.scope;
     if(unifiedNoteSeed.shopping||unifiedNoteInitial?.note?.shopping)return <GoShoppingNote visible={notesOpen} scope={scope} ready={noteIdentity.ready} handedness={handedness}
-      onClose={()=>{if(unifiedNoteSeed.shopping)setUnifiedNoteSeed(seed=>({...seed,shopping:false}));else{setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}}/>;
+      onClose={()=>{if(shoppingFromLanding.current){shoppingFromLanding.current=false;setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}else if(unifiedNoteSeed.shopping)setUnifiedNoteSeed(seed=>({...seed,shopping:false}));else{setNotesOpen(false);setUnifiedNoteInitial(null);setUnifiedNoteSeed({});}}}/>;
     const {linkedEntryId,goDraftId}=unifiedNoteSeed;
     const goAttachment=!!goDraftId || unifiedNoteInitial?.note?.destination==="go";
     const cacheId=goDraftId ? "compose:"+goDraftId+":"+(unifiedNoteInitial?.id ?? "new") : unifiedNoteInitial?.id ?? (linkedEntryId ? "linked:"+linkedEntryId : undefined);
     return <GoNoteEditor key={cacheId} visible={notesOpen} initial={unifiedNoteInitial} handedness={handedness} ready={noteIdentity.ready} scope={scope}
-      onOpenShopping={state=>{cacheNoteDraft(state,cacheId);setUnifiedNoteSeed(seed=>({...seed,shopping:true}));}}
+      onOpenShopping={state=>{shoppingFromLanding.current=false;cacheNoteDraft(state,cacheId);setUnifiedNoteSeed(seed=>({...seed,shopping:true}));}}
       initialToolsOpen={unifiedNoteSeed.toolsOpen===true}
       confirmScheduleOnSave={unifiedNoteSeed.confirmSchedule===true}
       goAttachment={goAttachment}
