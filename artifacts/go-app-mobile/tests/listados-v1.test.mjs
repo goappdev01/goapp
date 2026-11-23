@@ -89,6 +89,10 @@ test('internal-task category stays content-width and retains its full accessible
  assert.equal(badge.props.accessible,true);
  assert.equal(badge.props.accessibilityLabel,'Tarea interna');
  assert.equal(text(badge),'TAREA INT');
+ const meta=nodes(internal).find(n=>n.props.testID==='list-header-meta-internal');
+ assert.ok(nodes(meta).includes(badge));
+ assert.ok(nodes(meta).some(n=>n.props.testID==='list-follow-up-internal'));
+ assert.equal(nodes(internal).filter(n=>n.props.testID==='list-category-badge-internal').length,1);
  const external=card({entry:{...entry,id:'external',type:'TAREA'}}).tree;
  assert.equal(nodes(external).find(n=>n.props.testID==='list-category-badge-external').props.style.alignSelf,undefined);
 });

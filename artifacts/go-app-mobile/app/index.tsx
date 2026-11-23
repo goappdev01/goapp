@@ -22351,6 +22351,7 @@ function HomeScreenContent() {
                     <Text style={{color:"#ffffff",fontSize:lv(8),fontFamily:"Inter_700Bold",fontWeight:"800",letterSpacing:0.4}}>{label}</Text>
                   </View>;
                 })() : null;
+                const internalTaskBadge = (g as any).type === "TAREA_INTERNA" ? listCategoryBadge : null;
                 const hasListInfo = !compactProposal && !!(g.date || g.time || g.recipients?.length
                   || (!entryIsReservation(g) && (g.contactName || g.phone))
                   || ((g as any).type === "GO_BOOKING" && (g as any).professionalName));
@@ -22415,8 +22416,8 @@ function HomeScreenContent() {
                       title={entryIsReservation(g)?entryHeading(g,lang==="en"?"Reservation":"Reserva"):g.notes?.trim() || g.intentLabel}
                       status={entryIsReservation(g)?(reservationCardPolicy(g).stateKey==="booking_state_accepted"?t("status_confirmed"):t(reservationCardPolicy(g).stateKey as Parameters<typeof t>[0])).toUpperCase():statusLabel.toUpperCase()}
                       statusColor={entryIsReservation(g)?reservationCardPolicy(g).stateColor:stateColor}
-                      followUp={actionCompletion.status(g)}/>
-                    {listCategoryBadge}
+                      followUp={actionCompletion.status(g)} categoryBadge={internalTaskBadge}/>
+                    {!internalTaskBadge && listCategoryBadge}
 
                     {/* ── FILA 2: INFO + ESTADO + BADGE ── */}
                     {hasListInfo && <View style={{ flexDirection: "row", alignItems: "center", gap: lv(8),...(entryIsReservation(g)?{flexWrap:"wrap"}: {}) }}>
