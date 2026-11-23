@@ -21,6 +21,7 @@ export function assistantActivity(input: {
 
 export function visibleExpression(activity: GoAiActivity, requested: GoAiExpression): GoAiExpression {
   if (activity === "available" || activity === "closing") return "friendly";
+  if (requested === "serious") return "serious";
   if (activity === "error") return "attention";
   if (activity === "completed") return "positive";
   return requested;

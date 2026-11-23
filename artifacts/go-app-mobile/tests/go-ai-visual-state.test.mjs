@@ -24,6 +24,8 @@ test('indicators follow capture, analysis, playback and authorized action states
 });
 test('explicit serious and confirmation contexts take precedence over playful expression',()=>{
  assert.equal(visibleExpression('listening','serious'),'serious');
+ assert.equal(visibleExpression('error','serious'),'serious');
+ assert.equal(visibleExpression('completed','serious'),'serious');
  assert.equal(visibleExpression('processing','confirmation'),'confirmation');
  assert.equal(visibleExpression('error','wink'),'attention');
  assert.equal(visibleExpression('completed','wink'),'positive');
