@@ -81,6 +81,18 @@ test('generic tasks open the full detail without inventing a confirmed reservati
  nodes(f.tree).find(n=>n.props.accessibilityRole==='button'&&text(n)==='Reintentar').props.onPress();assert.equal(f.calls.at(-1)[0],'retry');
 });
 
+test('internal-task category stays content-width and retains its full accessible meaning',()=>{
+ const entry={...base,id:'internal',type:'TAREA_INTERNA',customerBooking:false,reservationId:undefined,estado:'pendiente',notes:'COMPRAS'};
+ const internal=card({entry}).tree;
+ const badge=nodes(internal).find(n=>n.props.testID==='list-category-badge-internal');
+ assert.equal(badge.props.style.alignSelf,'flex-start');
+ assert.equal(badge.props.accessible,true);
+ assert.equal(badge.props.accessibilityLabel,'Tarea interna');
+ assert.equal(text(badge),'TAREA INT');
+ const external=card({entry:{...entry,id:'external',type:'TAREA'}}).tree;
+ assert.equal(nodes(external).find(n=>n.props.testID==='list-category-badge-external').props.style.alignSelf,undefined);
+});
+
 test('Listados tools use the original sort and size preference handlers; primary navigation and global tools remain',()=>{
  const f=fixture(),c=f.load('components/listados/ListadosControls.tsx'),calls=[],memory=new Map();
  const context={goSortOrder:'asc',listGoSize:'compacto',setGoSortOrder:v=>{context.goSortOrder=v;},setListGoSize:v=>{context.listGoSize=v;},

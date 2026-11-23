@@ -12,15 +12,24 @@ const compile=s=>ts.transpileModule(s,{compilerOptions:{target:ts.ScriptTarget.E
 const nodes=n=>Array.isArray(n)?n.flatMap(nodes):n&&typeof n==='object'?[n,...nodes(n.children??n.props?.children)]:[];
 function swipe(){
  const refs=[],animations=[],timers=[],commands=[],calls=[];let index=0;
- const React={createElement:(type,props,...children)=>({type,props:{...props,children:children.flat(Infinity)},children:children.flat(Infinity)}),Children:{map:(n,f)=>n==null?null:(Array.isArray(n)?n:[n]).map(f)},isValidElement:n=>!!n&&typeof n==='object'&&'type' in n,cloneElement:(n,p)=>({...n,props:{...n.props,...p},children:p.children??n.children})};
+ const React={Fragment:'Fragment',createElement:(type,props,...children)=>({type,props:{...props,children:children.flat(Infinity)},children:children.flat(Infinity)}),Children:{map:(n,f)=>n==null?null:(Array.isArray(n)?n:[n]).map(f)},isValidElement:n=>!!n&&typeof n==='object'&&'type' in n,cloneElement:(n,p,...children)=>({...n,props:{...n.props,...p,...(children.length?{children:children.flat(Infinity)}:{})},children:children.length?children.flat(Infinity):p.children??n.children})};
  class Value{setValue(n){commands.push(n);}stopAnimation(fn){fn();}interpolate(){return 0;}}
  const Gesture={Pan(){const data={};const chain=new Proxy(data,{get:(o,k)=>k in o?o[k]:(...a)=>{o[k]=k.startsWith('on')?a[0]:a;return chain;}});return chain;},Native:()=>({}),Simultaneous:(pan,native)=>({pan,native})};
  const context={exports:{},React,useRef:v=>{const i=index++;return refs[i]??(refs[i]={current:v});},useMemo:f=>f(),Animated:{Value,View:'AnimatedView',timing:()=>({start:f=>animations.push(f)}),spring:()=>({start(){}})},Gesture,GestureDetector:'GestureDetector',View:'View',Text:'Text',Feather:'Feather',StyleSheet:{absoluteFill:{}},setTimeout:f=>timers.push(f)};
  vm.runInNewContext(compile(fs.readFileSync('components/ui/SwipeableRow.tsx','utf8').replace(/^import .*$/gm,'').replace('export function','function')+';exports.Row=SwipeableRow;'),context);
  const props={onSwipeLeft:()=>calls.push('left-original'),onSwipeRight:()=>calls.push('right'),children:React.createElement('Pressable',{testID:'card',onPress:()=>calls.push('open'),onLongPress:()=>calls.push('long')},React.createElement('TouchableOpacity',{testID:'trash',onPress:()=>calls.push('trash')}))};
  const render=extra=>{index=0;const tree=context.exports.Row({...props,...extra});return{tree,pan:nodes(tree).find(n=>n.type==='GestureDetector').props.gesture.pan,press:id=>nodes(tree).find(n=>n.props.testID===id).props.onPress()};};
- return{render,animations,timers,calls,commands};
+ return{render,animations,timers,calls,commands,React};
 }
+test('a fragment inside a swipable card receives only children while nested presses stay guarded',()=>{
+ const f=swipe(),{React}=f;
+ const child=React.createElement('Pressable',{testID:'card',onPress:()=>f.calls.push('open')},
+  React.createElement(React.Fragment,{},React.createElement('TouchableOpacity',{testID:'nested',onPress:()=>f.calls.push('nested')})));
+ const row=f.render({children:child}),fragment=nodes(row.tree).find(n=>n.type===React.Fragment);
+ assert.deepEqual(Object.keys(fragment.props),['children']);
+ row.pan.onBegin();row.pan.onStart();row.press('nested');assert.deepEqual(f.calls,[]);
+ row.pan.onBegin();row.press('nested');row.press('card');assert.deepEqual(f.calls,['nested','open']);
+});
 test('one left swipe owns its release, dispatches once and permits a genuinely new tap',()=>{
  const f=swipe(),row=f.render(),p=row.pan;
  assert.deepEqual(Array.from(p.activeOffsetX[0]),[-8,8]);assert.deepEqual(Array.from(p.failOffsetY[0]),[-15,15]);assert.equal(p.cancelsTouchesInView[0],true);

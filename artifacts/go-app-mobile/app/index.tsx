@@ -22343,7 +22343,11 @@ function HomeScreenContent() {
                     : entryType === "TAREA" ? "#f59e0b"
                     : entryType === "LLAMADA" ? "#3b82f6"
                     : g.isGeneric ? "#a78bfa" : "#6ee7b7";
-                  return <View testID={"list-category-badge-" + g.id} style={{paddingHorizontal:lv(5),paddingVertical:lv(2),borderRadius:lv(4),backgroundColor:color+"18",borderWidth:1,borderColor:color+"80"}}>
+                  return <View testID={"list-category-badge-" + g.id}
+                    accessible={entryType === "TAREA_INTERNA"}
+                    accessibilityLabel={entryType === "TAREA_INTERNA" ? t('label_task_internal') : undefined}
+                    style={{paddingHorizontal:lv(5),paddingVertical:lv(2),borderRadius:lv(4),backgroundColor:color+"18",borderWidth:1,borderColor:color+"80",
+                      ...(entryType === "TAREA_INTERNA" ? {alignSelf:"flex-start" as const} : {})}}>
                     <Text style={{color:"#ffffff",fontSize:lv(8),fontFamily:"Inter_700Bold",fontWeight:"800",letterSpacing:0.4}}>{label}</Text>
                   </View>;
                 })() : null;

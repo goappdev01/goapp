@@ -131,7 +131,17 @@ export function SwipeableRow({
   const guardedChildren=(nodes:React.ReactNode):React.ReactNode=>React.Children.map(nodes,child=>{
     if(!React.isValidElement<{children?:React.ReactNode;onPress?:(...args:any[])=>void;onLongPress?:(...args:any[])=>void;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void}>(child))return child;
     const guard=(fn:((...args:any[])=>void)|undefined)=>fn?(...args:any[])=>{if(!swipeContact.current.active&&!swipeContact.current.suppress)fn(...args);}:undefined;
-    return React.cloneElement(child,{onPress:guard(child.props.onPress),onLongPress:guard(child.props.onLongPress),onDone:guard(child.props.onDone),onPending:guard(child.props.onPending),onDiscard:guard(child.props.onDiscard),...(child.props.children?{children:guardedChildren(child.props.children)}:{})});
+    // Fragments accept only key and children. Passing even an undefined onPress
+    // to a fragment produces a React Native warning in proposal cards.
+    if(child.type===React.Fragment)return React.cloneElement(child,{children:guardedChildren(child.props.children)});
+    const props:{children?:React.ReactNode;onPress?:(...args:any[])=>void;onLongPress?:(...args:any[])=>void;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void}={};
+    if(child.props.onPress)props.onPress=guard(child.props.onPress);
+    if(child.props.onLongPress)props.onLongPress=guard(child.props.onLongPress);
+    if(child.props.onDone)props.onDone=guard(child.props.onDone);
+    if(child.props.onPending)props.onPending=guard(child.props.onPending);
+    if(child.props.onDiscard)props.onDiscard=guard(child.props.onDiscard);
+    if(child.props.children)props.children=guardedChildren(child.props.children);
+    return Object.keys(props).length?React.cloneElement(child,props):child;
   });
 
   // Gesture.Native() permite que los TouchableOpacity internos (checkbox,
