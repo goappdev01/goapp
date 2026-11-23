@@ -354,6 +354,13 @@ test("the existing setup screen advances through all eight steps and saves progr
     assert.ok(button(tree,step === 7 ? "biz_finish_config" : "biz_next"));
     button(tree,step === 7 ? "biz_finish_config" : "biz_next").props.onPress(); await turn();
   }
+  assert.equal(finished,0);
+  tree = ui.render(Screen,{ onBack() {}, onFinalizarConfig: () => finished++ });
+  assert.ok(nodes(tree).some(node => node.props?.testID === "business-payment-preview-methods"));
+  nodes(tree).find(node => node.props?.testID === "payment-preview-next").props.onPress();
+  tree = ui.render(Screen,{ onBack() {}, onFinalizarConfig: () => finished++ });
+  assert.ok(nodes(tree).some(node => node.props?.testID === "business-payment-preview-bank"));
+  nodes(tree).find(node => node.props?.testID === "payment-preview-finish").props.onPress();
   assert.equal(finished,1); assert.deepEqual(plain(f.store.getSnapshot().config.completedSteps),[0,1,2,3,4,5,6,7]);
   assert.equal(ui.calls.external,0); assert.equal(ui.calls.liveFloor,0);
 });
@@ -398,6 +405,8 @@ test("GO Empresa opens its existing two booking paths and keeps the split on iPa
     const page=ui.render(Wizard,wizard.props);assert.ok(button(page,step===7?"biz_finish_config":"biz_next"));
     button(page,step===7?"biz_finish_config":"biz_next").props.onPress();await turn();
   }
+  let paymentPage=ui.render(Wizard,wizard.props);nodes(paymentPage).find(node=>node.props?.testID==="payment-preview-next").props.onPress();
+  paymentPage=ui.render(Wizard,wizard.props);nodes(paymentPage).find(node=>node.props?.testID==="payment-preview-finish").props.onPress();
   tree=render();assertHome(tree);
   button(tree,"biz_panel_daily").props.onPress();tree=render();
   const operations=component(tree,"GoReservasDemoScreen");assert.ok(operations);assert.equal(operations.props.hideFAB,true);

@@ -24549,19 +24549,14 @@ function HomeScreenContent() {
         guidanceLevel={effectiveGuidanceLevel}
         onOpenVerificacion={() => { setEmpresaOpen(false); setVerificacionOpen(true); }}
         onFinalizarWizard={() => {
-          // Cerrar EmpresaPanel ANTES de abrir ActivacionCobrosScreen.
-          // Dos Modales full-screen en paralelo fallan silenciosamente en iOS/Expo 54:
-          // el segundo nunca aparece porque el primero sigue montado.
+          // The post-wizard payment preview is visual only. Finishing it must not
+          // launch the legacy payment activation flow or choose a payment method.
           setEmpresaOpen(false);
           setEmpresaModulo("home");
           dismissEmpresaHint();
-          if (!bCfg.paymentMethod) {
-            setActivacionInitialScreen(2);
-            // Esperar a que la animación de cierre de EmpresaPanel termine (~350 ms)
-            setTimeout(() => setActivacionCobrosOpen(true), 350);
-          } else {
-            updateBizCfg({ isBusinessActive: true, bookingEnabled: true });
-          }
+          // Preserve the existing publication path for an already configured
+          // business; a preview must never invent or select a payment method.
+          if (bCfg.paymentMethod) updateBizCfg({ isBusinessActive: true, bookingEnabled: true });
         }}
       />}
 
@@ -24572,9 +24567,8 @@ function HomeScreenContent() {
           onClose={() => { setEmpresaOpenState(false); setEmpresaDemoRoute("home"); }} onOpenContext={openOwnerContextSelector} />
       </GoBusinessPreviewProvider>}
 
-      {/* ── ACTIVACIÓN COBROS — se renderiza aquí (nivel raíz) para evitar
-          el problema de Modales anidados en iOS/Expo 54. Se muestra tras
-          completar el wizard de 8 pasos de EmpresaConfigScreen. ── */}
+      {/* Legacy activation modal remains separate from the eight-step wizard
+          and its visual post-wizard payment preview. */}
       {businessAccess.allowed && !goView.isOwner && goView.view === "BUSINESS" && !adminAccess.checking && <ActivacionCobrosScreen
         visible={activacionCobrosOpen}
         initialScreen={activacionInitialScreen}

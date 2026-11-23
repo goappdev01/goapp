@@ -242,10 +242,17 @@ async function wizardFixture(){
 
 test('the existing business wizard completes all eight steps and reopens with the same company, hours and timezone',async()=>{
  const h=await wizardFixture(),f=h.dataFixture();await f.store.updateConfig({businessName:'Existing company',address:'Existing address',phone:'912345678',sectorId:'belleza',subId:'peluqueria',timezone:'Atlantic/Canary',activeDays:[0],daySchedules:{'0':{shift1:{from:'10:15',to:'14:30',active:true},shift2:{from:'16:00',to:'20:00',active:false}}},services:[{name:'Corte',duration:30,price:20,capacity:1}],plantillaItems:[{id:'pro',label:'Puesto',emoji:'',count:1,staffNames:['Profesional']}]});
- await f.store.saveFloorPlan(h.floor(f.store));const before=plain(f.store.getSnapshot().config),ui=h.uiFixture(f),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;let finished=0;
+ await f.store.saveFloorPlan(h.floor(f.store));const before=plain(f.store.getSnapshot().config),ui=h.uiFixture(f),Screen=ui.load('components/empresa/EmpresaConfigScreen.tsx').EmpresaConfigScreen;let finished=0,closed=0;
  for(let step=0;step<8;step++){const tree=ui.render(Screen,{onBack(){},startAtSteps:true,contextNavigation:'Cambiar contexto',onFinalizarConfig:()=>finished++});assert.equal(h.text(tree).includes('Cambiar contexto'),false);assert.equal(h.text(tree).includes('Un formato válido no confirma'),false);const next=h.button(tree,step===7?'biz_finish_config':'biz_next');assert.ok(next,'Navigation for step '+step);next.props.onPress();await h.turn();}
- assert.equal(finished,1);const reopened=f.make();await reopened.load();const saved=plain(reopened.getSnapshot().config);assert.deepEqual(saved.completedSteps,[0,1,2,3,4,5,6,7]);
- assert.equal(saved.businessId,before.businessId);assert.equal(saved.timezone,before.timezone);assert.deepEqual(saved.daySchedules,before.daySchedules);assert.deepEqual(saved.services,before.services);assert.equal(ui.calls.external,0);
+ assert.equal(finished,0);let preview=ui.render(Screen,{onBack:()=>closed++,startAtSteps:true,onFinalizarConfig:()=>finished++});assert.ok(byTestId(h,preview,'business-payment-preview-methods'));
+ assert.equal(h.text(preview).includes('Configuración de pagos pendiente'),true);assert.equal(h.nodes(preview).some(node=>node.type==='TextInput'),false);
+ byTestId(h,preview,'payment-preview-close').props.onPress();assert.equal(closed,1);assert.equal(finished,0);
+ ui.setLanguage('en');preview=ui.render(Screen,{onBack:()=>closed++,startAtSteps:true,onFinalizarConfig:()=>finished++});assert.ok(h.text(preview).includes('Payment methods'));ui.setLanguage('es');
+ byTestId(h,preview,'payment-preview-next').props.onPress();preview=ui.render(Screen,{onBack(){},startAtSteps:true,onFinalizarConfig:()=>finished++});assert.ok(byTestId(h,preview,'business-payment-preview-bank'));
+ byTestId(h,preview,'payment-preview-back').props.onPress();preview=ui.render(Screen,{onBack(){},startAtSteps:true,onFinalizarConfig:()=>finished++});assert.ok(byTestId(h,preview,'business-payment-preview-methods'));
+ byTestId(h,preview,'payment-preview-next').props.onPress();preview=ui.render(Screen,{onBack(){},startAtSteps:true,onFinalizarConfig:()=>finished++});byTestId(h,preview,'payment-preview-finish').props.onPress();assert.equal(finished,1);
+ const reopened=f.make();await reopened.load();const saved=plain(reopened.getSnapshot().config);assert.deepEqual(saved.completedSteps,[0,1,2,3,4,5,6,7]);
+ assert.equal(saved.businessId,before.businessId);assert.equal(saved.timezone,before.timezone);assert.deepEqual(saved.daySchedules,before.daySchedules);assert.deepEqual(saved.services,before.services);assert.equal(saved.paymentMethod,before.paymentMethod);assert.equal(saved.bookingEnabled,before.bookingEnabled);assert.equal(ui.calls.external,0);
 });
 
 const flattenStyle = value => Object.assign({}, ...[value].flat(Infinity).filter(Boolean));

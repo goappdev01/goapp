@@ -340,6 +340,9 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
   const stepSaveRef = useRef<(() => Promise<void>) | null>(null);
 
   const [currentStep,    setCurrentStep]    = useState(() => resumeLocation?.step ?? Math.min(Math.max(initialStep, 0), STEPS.length - 1));
+  // Visual handoff after the eight saved steps. No banking value is collected or persisted here.
+  const [paymentPreview, setPaymentPreview] = useState<"methods" | "bank" | null>(null);
+  const previewFinishBusy = useRef(false);
   useLayoutEffect(() => {
     if (phase === "steps" && (currentStep === 0 || currentStep === 1)) Keyboard.dismiss();
   }, [phase, currentStep]);
@@ -502,7 +505,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
         const alreadyDone = Array.isArray(config.completedSteps) ? config.completedSteps : [];
         if (!alreadyDone.includes(currentStep)) updateConfig({ completedSteps: [...alreadyDone, currentStep] });
       }
-      if (isLast) { onFinalizarConfig ? onFinalizarConfig() : onBack(); } else { animateToStep(currentStep + 1); }
+      if (isLast) { setPaymentPreview("methods"); } else { animateToStep(currentStep + 1); }
     } catch (error) {
       Alert.alert(lang === "en" ? "Configuration incomplete" : "Configuración incompleta",
         error instanceof Error ? error.message : (lang === "en" ? "Could not save the configuration." : "No se pudo guardar la configuración."));
@@ -517,6 +520,8 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
   // Steps / paso 0                → volver a activity (selección de actividad)
   // Steps / paso N>0              → paso N-1
   const goPrev = () => {
+    if (paymentPreview === "bank") { setPaymentPreview("methods"); return; }
+    if (paymentPreview === "methods") { setPaymentPreview(null); return; }
     if (phase === "activity") {
       if (localSector !== null) {
         setLocalSector(null);
@@ -566,6 +571,55 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
       <Text style={{ color: BLUE }}>{lang === "en" ? "Retry" : "Reintentar"}</Text>
     </TouchableOpacity>}
   </View>;
+
+  // Future backend integration boundary: the preview has no payment provider, API or financial fields.
+  // Completing or closing it never changes the saved eight-step configuration.
+  if (paymentPreview) {
+    const english = lang === "en";
+    const methods = paymentPreview === "methods";
+    const finishPreview = () => {
+      if (previewFinishBusy.current) return;
+      previewFinishBusy.current = true;
+      (onFinalizarConfig ?? onBack)();
+    };
+    return <View style={c.root} testID={methods ? "business-payment-preview-methods" : "business-payment-preview-bank"}>
+      {companyNavigation}
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 18, paddingBottom: 106 + insets.bottom }} showsVerticalScrollIndicator={false}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text accessibilityRole="header" style={{ color: TEXT, fontSize: 23, fontWeight: "800" }}>
+              {methods ? (english ? "Payment methods" : "Métodos de pago") : (english ? "Banking setup" : "Configuración bancaria")}
+            </Text>
+            <Text style={{ color: GRAY, fontSize: 13, marginTop: 5, lineHeight: 19 }}>
+              {english ? "Payment setup pending" : "Configuración de pagos pendiente"}
+            </Text>
+          </View>
+          <TouchableOpacity testID="payment-preview-close" accessibilityRole="button" accessibilityLabel={english ? "Close payment preview" : "Cerrar vista de pagos"} onPress={onBack}
+            style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, alignItems: "center", justifyContent: "center" }}>
+            <Feather name="x" size={21} color={TEXT} />
+          </TouchableOpacity>
+        </View>
+        {methods ? <View style={{ marginTop: 24, gap: 12 }}>
+          {([
+            { icon: "credit-card", title: english ? "Card / gateway" : "Tarjeta / pasarela", detail: english ? "Future integration" : "Integración futura" },
+            { icon: "repeat", title: english ? "Bank transfer" : "Transferencia bancaria", detail: english ? "Future integration" : "Integración futura" },
+          ] as const).map(option => <View key={option.icon} style={{ backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 16, padding: 16, minHeight: 82, flexDirection: "row", alignItems: "center", gap: 14 }}>
+            <View style={{ width: 46, height: 46, borderRadius: 13, backgroundColor: "#EAF5F2", alignItems: "center", justifyContent: "center" }}><Feather name={option.icon} size={22} color={GREEN} /></View>
+            <View style={{ flex: 1, minWidth: 0 }}><Text style={{ color: TEXT, fontSize: 16, fontWeight: "700" }}>{option.title}</Text><Text style={{ color: GRAY, fontSize: 12, marginTop: 3 }}>{option.detail}</Text></View>
+          </View>)}
+        </View> : <View style={{ marginTop: 24, backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 16, padding: 18 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 16 }}><Feather name="briefcase" size={22} color={GREEN} /><Text style={{ color: TEXT, fontSize: 16, fontWeight: "700", flexShrink: 1 }}>{english ? "Business account" : "Cuenta del negocio"}</Text></View>
+          <Text style={{ color: GRAY, fontSize: 13 }}>{english ? "Account holder" : "Titular"}</Text><Text style={{ color: TEXT, fontSize: 16, marginBottom: 16 }}>—</Text>
+          <Text style={{ color: GRAY, fontSize: 13 }}>{english ? "Bank account" : "Cuenta bancaria"}</Text><Text style={{ color: TEXT, fontSize: 16, marginBottom: 16 }}>—</Text>
+          <Text style={{ color: GOLD, fontSize: 14, fontWeight: "700" }}>{english ? "Pending activation" : "Pendiente de activación"}</Text>
+        </View>}
+      </ScrollView>
+      <View testID="business-payment-preview-footer" onLayout={event => onFooterHeight?.(event.nativeEvent.layout.height)} style={{ paddingHorizontal: 20, paddingTop: 10, paddingBottom: insets.bottom + 12, backgroundColor: CARD, borderTopWidth: 1, borderTopColor: BORDER, flexDirection: "row", gap: 12 }}>
+        <TouchableOpacity testID="payment-preview-back" accessibilityRole="button" onPress={goPrev} style={{ minHeight: 48, flex: 1, borderRadius: 12, borderWidth: 1, borderColor: BORDER, alignItems: "center", justifyContent: "center" }}><Text style={{ color: TEXT, fontWeight: "700" }}>{english ? "Back" : "Atrás"}</Text></TouchableOpacity>
+        <TouchableOpacity testID={methods ? "payment-preview-next" : "payment-preview-finish"} accessibilityRole="button" onPress={methods ? () => setPaymentPreview("bank") : finishPreview} style={{ minHeight: 48, flex: 1, borderRadius: 12, backgroundColor: GREEN, alignItems: "center", justifyContent: "center" }}><Text style={{ color: "#fff", fontWeight: "800" }}>{methods ? (english ? "Next" : "Adelante") : (english ? "Finish" : "Finalizar")}</Text></TouchableOpacity>
+      </View>
+    </View>;
+  }
 
   // ── Fase previa: selección de sector y actividad ────────────────────────────
   if (phase === "activity") {
