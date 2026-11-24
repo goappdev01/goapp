@@ -161,6 +161,34 @@ test("reset clears only the local configuration, plan, reservations and preferen
   assert.equal(f.store.getSnapshot().plan, null); assert.equal(f.store.getSnapshot().entries.length, 0);
   assert.equal(f.store.getSnapshot().reservations.length, 0); assert.deepEqual(plain(f.store.getSnapshot().preferences), {});
 });
+test("fictional clients persist only in the owner DEMO document and reset to their seeds", async () => {
+  const shared=new Map(),f=dataFixture(owner,shared),another=dataFixture(other,shared);
+  assert.equal(f.store.getSnapshot().demoClients.length,3);
+  assert.ok(f.store.getSnapshot().demoClients.every(client=>client.name.includes("DEMO")));
+  const id=f.store.getSnapshot().demoClients[0].id;
+  await f.store.updateDemoClient(id,{favorite:false,observations:"Solo prueba DEMO",servicePreferences:"Peinado natural"});
+  const reopened=f.make();await reopened.load();
+  assert.equal(reopened.getSnapshot().demoClients[0].observations,"Solo prueba DEMO");
+  assert.equal(reopened.getSnapshot().demoClients[0].favorite,false);
+  await another.store.load();assert.notEqual(another.store.getSnapshot().demoClients[0].observations,"Solo prueba DEMO");
+  await assert.rejects(f.store.updateDemoClient("real-customer",{favorite:true}),/Ficha DEMO/);
+  await assert.rejects(f.store.updateDemoClient(id,{observations:"x".repeat(501)}),/Ficha DEMO/);
+  f.failWrites(true);await assert.rejects(f.store.updateDemoClient(id,{favorite:true}),/storage failure/);
+  assert.equal(f.store.getSnapshot().demoClients[0].favorite,false);
+  f.failWrites(false);await f.store.reset();
+  assert.equal(f.store.getSnapshot().demoClients[0].favorite,true);
+  assert.equal(f.store.getSnapshot().demoClients[0].observations,"Cliente habitual.");
+  assert.ok([...f.reads,...f.writes].every(key=>key===storeModule.businessDemoStorageKey(owner)));
+});
+test("older DEMO documents gain fictional clients without losing saved company data", async () => {
+  const f=dataFixture();await f.store.updateConfig({businessName:"Empresa DEMO conservada"});
+  const key=storeModule.businessDemoStorageKey(owner),old=JSON.parse(f.shared.get(key));
+  delete old.demoClients;f.shared.set(key,JSON.stringify(old));
+  const reopened=f.make();await reopened.load();
+  assert.equal(reopened.getSnapshot().config.businessName,"Empresa DEMO conservada");
+  assert.equal(reopened.getSnapshot().demoClients.length,3);
+  assert.equal(f.shared.get(key),JSON.stringify(old),"Loading does not rewrite the older document");
+});
 
 // Execute the real providers and screen callbacks with deterministic native APIs.
 function uiFixture(data, { authorized = true, businessPreview = authorized, adminView = false, adminAllowed = authorized, ownerIdentity = authorized, realCompanyManager = false, reactCompiler = false, bookingToday, realActivity = false, width = 390, height = 844, fontScale = 1, insets = { top: 44, bottom: 34, left: 0, right: 0 }, isPad = false, liveMode = false, unlinkedDraft = false, liveEntries = [], liveReservations = [], gpsAdapter, timezoneAdapter = async (_source,zone) => zone, timezoneResolver = async () => { throw Object.assign(Error("Unlinked"),{code:"BOOKING_CALENDAR_BUSINESS_NOT_LINKED"}); } } = {}) {
@@ -534,17 +562,19 @@ test("registered iPhone bookings use the same compact plan and calendar navigati
   assert.deepEqual(plain(f.store.getSnapshot()),before);assert.equal(f.writes.length,writes);
 });
 
-test("live daily operations open business clients without exposing the view in DEMO", async () => {
+test("daily operations keep real clients read-only and expose only fictional clients in DEMO", async () => {
   const f=dataFixture();await f.store.updateConfig({businessName:"Negocio registrado"});
   const live=uiFixture(f,{width:393,liveMode:true}),Live=live.load("components/booking/GoReservasConfigScreen.tsx").GoReservasConfigScreen;
   let tree=live.render(Live,{onClose(){},hideFAB:true});
   const clientsTab=button(tree,"Clientes");assert.ok(clientsTab);
   clientsTab.props.onPress();tree=live.render(Live,{onClose(){},hideFAB:true});
   const clients=component(tree,"BusinessClientsScreen");assert.ok(clients);
-  assert.equal(clients.props.bookings.length,0);assert.equal(clients.props.authorized,false);
+  assert.equal(clients.props.mode,"real");assert.equal(clients.props.bookings.length,0);assert.equal(clients.props.authorized,false);
   const demo=uiFixture(f),Demo=demo.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen;
   tree=demo.render(Demo,{onClose(){},hideFAB:true});
-  assert.equal(button(tree,"Clientes"),undefined);
+  assert.ok(button(tree,"Clientes"));button(tree,"Clientes").props.onPress();tree=demo.render(Demo,{onClose(){},hideFAB:true});
+  const fictional=component(tree,"BusinessClientsScreen");assert.equal(fictional.props.mode,"demo");
+  assert.equal(fictional.props.demoClients.length,3);assert.ok(fictional.props.demoClients.every(client=>client.name.includes("DEMO")));
 });
 
 test("the business entry shows the same two paths for live and sports businesses without activating backend services", async () => {
@@ -720,31 +750,44 @@ test("NEXT in the DEMO floor waits for persistence even when the floor has no un
 });
 test("DEMO calendar controls persist locally without altering public calendar preferences", async () => {
   const f=dataFixture(),ui=uiFixture(f),Screen=ui.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen;
-  let tree=ui.render(Screen,{onClose(){},hideFAB:true}); nodes(tree).find(node=>node.props.accessibilityLabel === "Configuración de reservas").props.onPress();
+  let tree=ui.render(Screen,{onClose(){},hideFAB:true});
+  const settings=tree=>nodes(tree).find(node=>node.props.accessibilityLabel === "Configuración de reservas");
+  assert.equal(settings(tree),undefined,"Plano has no calendar tools");
+  button(tree,"view_mode_calendario").props.onPress();tree=ui.render(Screen,{onClose(){},hideFAB:true});
+  settings(tree).props.onPress();
   tree=ui.render(Screen,{onClose(){},hideFAB:true}); const panel=component(tree,"GoCalConfigPanel");
   panel.props.onDensityChange("15min"); panel.props.onDayNightModeChange("oscuro"); await turn();
   panel.props.onViewModeChange("mes_lineal");
   tree=ui.render(Screen,{onClose(){},hideFAB:true});
   assert.equal(component(tree,"GoCalConfigPanel").props.viewMode,"mes_lineal");
-  nodes(tree).find(node=>node.props.accessibilityLabel === "Configuración de reservas").props.onPress();
+  settings(tree).props.onPress();
   tree=ui.render(Screen,{onClose(){},hideFAB:true});
-  nodes(tree).find(node=>node.props.accessibilityLabel === "Configuración de reservas").props.onPress();
+  settings(tree).props.onPress();
   tree=ui.render(Screen,{onClose(){},hideFAB:true});
   assert.equal(component(tree,"GoCalConfigPanel").props.viewMode,"mes_lineal");
   assert.equal(f.store.getSnapshot().preferences.cal_density,"15min");
   assert.equal(f.store.getSnapshot().preferences.cal_day_night_mode_v1,"oscuro");
-  await turn();
-  assert.equal(f.store.getSnapshot().preferences.reservas_config_visible_v1,"true");
+  button(tree,"Clientes").props.onPress();tree=ui.render(Screen,{onClose(){},hideFAB:true});await turn();
+  assert.equal(settings(tree),undefined);assert.equal(component(tree,"GoCalConfigPanel"),undefined);
+  assert.equal(f.store.getSnapshot().preferences.reservas_config_visible_v1,"false");
+  button(tree,"view_mode_calendario").props.onPress();tree=ui.render(Screen,{onClose(){},hideFAB:true});
+  assert.ok(settings(tree));assert.equal(component(tree,"GoCalConfigPanel"),undefined);
+  settings(tree).props.onPress();tree=ui.render(Screen,{onClose(){},hideFAB:true});
+  assert.ok(component(tree,"GoCalConfigPanel"));
   const reopened = uiFixture(f), ReopenedScreen = reopened.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen;
   reopened.render(ReopenedScreen,{onClose(){},hideFAB:true}); await turn();
   let restoredTree = reopened.render(ReopenedScreen,{onClose(){},hideFAB:true});
-  assert.ok(component(restoredTree,"GoCalConfigPanel"), "A fresh DEMO screen restores its open settings");
-  nodes(restoredTree).find(node=>node.props.accessibilityLabel === "Configuración de reservas").props.onPress(); await turn();
+  assert.equal(settings(restoredTree),undefined,"Fresh Plano has no calendar tools");
+  button(restoredTree,"view_mode_calendario").props.onPress();restoredTree=reopened.render(ReopenedScreen,{onClose(){},hideFAB:true});
+  assert.ok(settings(restoredTree));assert.equal(component(restoredTree,"GoCalConfigPanel"),undefined);
+  settings(restoredTree).props.onPress();restoredTree=reopened.render(ReopenedScreen,{onClose(){},hideFAB:true});
+  assert.ok(component(restoredTree,"GoCalConfigPanel"));
+  settings(restoredTree).props.onPress(); await turn();
   assert.equal(f.store.getSnapshot().preferences.reservas_config_visible_v1,"false");
   const closed = uiFixture(f), ClosedScreen = closed.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen;
   closed.render(ClosedScreen,{onClose(){},hideFAB:true}); await turn();
   restoredTree = closed.render(ClosedScreen,{onClose(){},hideFAB:true});
-  assert.equal(component(restoredTree,"GoCalConfigPanel"),undefined, "A fresh DEMO screen also restores its closed settings");
+  assert.equal(component(restoredTree,"GoCalConfigPanel"),undefined, "A fresh DEMO screen keeps calendar tools closed in Plano");
   assert.ok([...f.reads, ...f.writes].every(key => key === storeModule.businessDemoStorageKey(owner)));
   assert.equal(ui.calls.liveFloor,0); assert.equal(ui.calls.liveAgenda,0);
 });

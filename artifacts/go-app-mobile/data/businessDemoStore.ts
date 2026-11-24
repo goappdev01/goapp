@@ -9,14 +9,21 @@ export type DemoReservation = FloorReservation & {
   changeProposal?: GoEntry["changeProposal"]; services?: Booking["services"];
 };
 export type DemoBooking = Booking & { elementId?: string; professionalName?: string; serviceTitle?: string; createdAt?: number; source?: "floor" | "customer"; serverBookingId?: string };
+export type DemoBusinessClient = { id: string; name: string; favorite: boolean; observations: string; servicePreferences: string };
 type Storage = { getItem: (key: string) => Promise<string | null>; setItem: (key: string, value: string) => Promise<void> };
 export type BusinessDemoData = {
   version: 1; ownerUserId: string; config: BusinessConfig; plan: FloorPlan | null;
   reservations: DemoReservation[]; bookings: DemoBooking[]; entries: GoEntry[]; preferences: Record<string, string>;
+  demoClients: DemoBusinessClient[];
 };
 const queues = new Map<string, Promise<unknown>>();
 const revisions = new Map<string, number>();
 const preferenceKeys = new Set(["cal_density", "cal_show_hours", "go_cal_size_v1", "cal_day_night_mode_v1", "go_business_calendar_work_hours", "reservas_config_visible_v1"]);
+const demoClientSeeds: DemoBusinessClient[] = [
+  { id: "demo-client-sol", name: "Cliente Sol · DEMO", favorite: true, observations: "Cliente habitual.", servicePreferences: "Corte corto." },
+  { id: "demo-client-luna", name: "Cliente Luna · DEMO", favorite: false, observations: "Prefiere atención por la mañana.", servicePreferences: "Peinado natural." },
+  { id: "demo-client-brisa", name: "Cliente Brisa · DEMO", favorite: false, observations: "", servicePreferences: "" },
+];
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const stamp = (dateISO: string, time: string) => `${dateISO}T${time}:00`;
 const overlaps = (a: Booking, b: Booking) => a.startDatetime < b.endDatetime && a.endDatetime > b.startDatetime;
@@ -251,7 +258,7 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
   const businessId = `demo_business_${suffix}`, planId = `demo_plan_${suffix}`;
   const configKeys = ["businessName", "timezone", "address", "cartaUrl", "sectorId", "subId", "plantillaItems", "activeDays", "openFrom", "openTo", "daySchedules", "services", "paymentPolicy", "bookingDepositPercent", "approvalPolicy", "cancelPolicy", "bookingEnabled", "completedSteps", "paymentMethod", "phone", "whatsapp", "staffSchedules", "countryCode", "mobile", "coordinates", "phoneE164", "mobileE164", "whatsappE164"] as const;
   const freshConfig = (): BusinessConfig => ({ ...clone(options.initialConfig), businessId, isBusinessActive: false });
-  const fresh = (): BusinessDemoData => ({ version: 1, ownerUserId, config: freshConfig(), plan: null, reservations: [], bookings: [], entries: [], preferences: {} });
+  const fresh = (): BusinessDemoData => ({ version: 1, ownerUserId, config: freshConfig(), plan: null, reservations: [], bookings: [], entries: [], preferences: {}, demoClients: clone(demoClientSeeds) });
   let snapshot = fresh(), loaded = false, observedRevision = -1;
   const listeners = new Set<() => void>();
   const assertAllowed = () => { if (!canUse()) throw new Error("El contexto DEMO ya no está autorizado. Vuelve a seleccionar EMPRESA o USUARIO."); };
@@ -323,6 +330,13 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
         || !Array.isArray(parsed.reservations) || !Array.isArray(parsed.entries) || !parsed.preferences || typeof parsed.preferences !== "object"
         || parsed.bookings !== undefined && !Array.isArray(parsed.bookings)) throw new Error("Los datos DEMO no se pueden leer. Se conservan sin sobrescribir.");
       if (parsed.plan) { assertBusiness(parsed.plan.businessId); assertPlan(parsed.plan.id); }
+      const clients = parsed.demoClients ?? clone(demoClientSeeds);
+      if (!Array.isArray(clients) || clients.length !== demoClientSeeds.length || clients.some((client, index) =>
+        !client || client.id !== demoClientSeeds[index].id || client.name !== demoClientSeeds[index].name
+        || typeof client.favorite !== "boolean" || typeof client.observations !== "string" || client.observations.length > 500
+        || typeof client.servicePreferences !== "string" || client.servicePreferences.length > 500
+        || Object.keys(client).some(field => !["id", "name", "favorite", "observations", "servicePreferences"].includes(field))))
+        throw new Error("Las fichas DEMO no se pueden leer. Se conservan sin sobrescribir.");
       for (const reservation of parsed.reservations) { assertPlan(reservation.planId); if (reservation.customerId !== undefined && reservation.customerId !== ownerUserId) throw new Error("Reserva DEMO de otra identidad."); }
       for (const entry of parsed.entries) { const value = entry as GoEntry & { ownerUserId?: string }; if (value.ownerUserId !== undefined && value.ownerUserId !== ownerUserId || value.businessId !== undefined && value.businessId !== businessId) throw new Error("Ficha DEMO de otra empresa o identidad."); }
       // Preserve IDs already persisted by earlier builds of the same DEMO company.
@@ -332,7 +346,7 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
       }
       const bookings = parsed.bookings ?? parsed.reservations.filter(r => r.dateISO).map(bookingForReservation);
       for (const booking of bookings) { assertBusiness(booking.businessId); if (booking.customerId !== ownerUserId) throw new Error("Reserva DEMO de otra identidad."); }
-      const data = { ...parsed, bookings, config: cleanConfig(parsed.config) };
+      const data = { ...parsed, bookings, demoClients: clients, config: cleanConfig(parsed.config) };
       reconcileBusinessDemoProfessionalPlan(data);
       return data;
   };
@@ -501,6 +515,15 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
       getItem: (name: string) => enqueue(async () => { if (!preferenceKeys.has(name)) throw new Error("Preferencia ajena al entorno DEMO."); await ensureLoaded(true); assertAllowed(); return snapshot.preferences[name] ?? null; }),
       setItem: (name: string, value: string) => simpleChange(data => { if (!preferenceKeys.has(name)) throw new Error("Preferencia ajena al entorno DEMO."); data.preferences[name] = value; return data; }),
     },
+    updateDemoClient: (id: string, patch: Partial<Pick<DemoBusinessClient, "favorite" | "observations" | "servicePreferences">>) => simpleChange(data => {
+      if (!demoClientSeeds.some(client => client.id === id) || !patch || Object.keys(patch).some(key => !["favorite", "observations", "servicePreferences"].includes(key))
+        || patch.favorite !== undefined && typeof patch.favorite !== "boolean"
+        || patch.observations !== undefined && (typeof patch.observations !== "string" || patch.observations.length > 500)
+        || patch.servicePreferences !== undefined && (typeof patch.servicePreferences !== "string" || patch.servicePreferences.length > 500))
+        throw new Error("Ficha DEMO no válida.");
+      data.demoClients = data.demoClients.map(client => client.id === id ? { ...client, ...patch } : client);
+      return data;
+    }),
   };
   return api;
 }

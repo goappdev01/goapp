@@ -431,6 +431,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
 
   // ── Config panel — mismos controles que el Calendario normal ──────────────
   const [configVisible, setConfigVisible] = useConfigPanelPreference(CONFIG_PANEL_KEYS.reservations, false, calendarStorage);
+  useEffect(() => { if (viewMode !== "calendario" && configVisible) setConfigVisible(false); }, [viewMode, configVisible, setConfigVisible]);
   const [calDensity,    setCalDensity]    = useState<DensityKey>("auto");
   const [calShowHours,  setCalShowHours]  = useState<boolean>(true);
   const [calSize,       setCalSize]       = useState<CalSizeKey>("GO_CAL_SMALL");
@@ -606,13 +607,13 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
           <Text style={[g.headerTitle, { color: tk.text }]} numberOfLines={1}>{lang === "en" ? "Operations panel" : "Panel operativo"}</Text>
           <Text style={[g.headerBusiness, { color: tk.gray }]} numberOfLines={1} ellipsizeMode="tail">{businessName}</Text>
         </View>
-        <GoCloseButton level="settings" touchSize={44} preserveTouchSize iconSize={22} cornerRadius={14}
+        {viewMode === "calendario" && <GoCloseButton level="settings" touchSize={44} preserveTouchSize iconSize={22} cornerRadius={14}
           style={{ position: "absolute", top: insets.top + 2, right: insets.right + 8 }}
-          accessibilityLabel={lang === "en" ? "Booking settings" : "Configuración de reservas"} onPress={() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }}/>
+          accessibilityLabel={lang === "en" ? "Booking settings" : "Configuración de reservas"} onPress={() => { Haptics.selectionAsync(); setConfigVisible(v => !v); }}/>}
       </View>
 
       {/* ── Panel de config — mismos controles que el Calendario normal ── */}
-      {configVisible && (
+      {viewMode === "calendario" && configVisible && (
         <View style={{ backgroundColor: tk.card, borderBottomWidth: 1, borderBottomColor: tk.border, paddingHorizontal: 12, paddingBottom: 10 }}>
           <GoCalConfigPanel
             density={calDensity}
@@ -633,7 +634,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
 
       {/* ── View mode tabs ── */}
       <View style={[g.modeTabs, { backgroundColor: tk.card, borderBottomColor: tk.border, paddingLeft: insets.left + 8, paddingRight: insets.right + 8 }]}>
-        {VIEW_MODES.filter(m => (!isPhone || m.key !== "split") && (!demoStore || m.key !== "clientes")).map(m => {
+        {VIEW_MODES.filter(m => !isPhone || m.key !== "split").map(m => {
           const active = m.key === viewMode;
           return (
             <TouchableOpacity
@@ -789,7 +790,9 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
           />
         )}
 
-        {viewMode === "clientes" && !demoStore && <BusinessClientsScreen businessId={config.businessId} bookings={liveClientsRead?.bookings ?? []} loading={liveClientsRead?.loading ?? false} error={liveClientsRead?.error ?? ""} authorized={liveClientsRead?.authorized ?? false} isDark={isDark} />}
+        {viewMode === "clientes" && (demoStore
+          ? <BusinessClientsScreen mode="demo" isDark={isDark} demoClients={demoStore.getSnapshot().demoClients} onUpdateDemoClient={demoStore.updateDemoClient} />
+          : <BusinessClientsScreen mode="real" businessId={config.businessId} bookings={liveClientsRead?.bookings ?? []} loading={liveClientsRead?.loading ?? false} error={liveClientsRead?.error ?? ""} authorized={liveClientsRead?.authorized ?? false} isDark={isDark} />)}
 
       </View>
 

@@ -44,7 +44,7 @@ const screen = () => { const f = fixture(), Component = f.load('components/empre
 
 test('client screen searches authorized receipts, opens a minimal detail and never offers unsaved editing', () => {
   const { f, Component } = screen();
-  const props = { businessId: business, authorized: true, loading: false, error: '', isDark: false,
+  const props = { mode: 'real', businessId: business, authorized: true, loading: false, error: '', isDark: false,
     bookings: [row('one', business, client, 'Ana', '2030-01-01T10:00:00'), row('two', business, client, 'Ana', '2030-02-01T10:00:00')] };
   let tree = f.render(Component, props);
   assert.equal(nodes(tree, node => node.props?.testID === `business-client-${client}`).length, 1);
@@ -61,9 +61,36 @@ test('client screen searches authorized receipts, opens a minimal detail and nev
 });
 
 test('empty, failed and unauthorized client reads do not expose an old list', () => {
-  const props = { businessId: business, bookings: [row('one', business, client, 'Ana', '2030-01-01T10:00:00')], loading: false, error: '', authorized: true, isDark: false };
+  const props = { mode: 'real', businessId: business, bookings: [row('one', business, client, 'Ana', '2030-01-01T10:00:00')], loading: false, error: '', authorized: true, isDark: false };
   for (const changes of [{ bookings: [] }, { error: 'network failed' }, { authorized: false }]) {
     const { f, Component } = screen(); const tree = f.render(Component, { ...props, ...changes });
     assert.equal(nodes(tree, node => node.props?.testID === `business-client-${client}`).length, 0);
   }
+});
+
+test('DEMO clients search, filter favorites and edit or clear separate fields', async () => {
+  const { f, Component } = screen();
+  let clients = [
+    { id: 'demo-one', name: 'Cliente Sol · DEMO', favorite: true, observations: 'Habitual', servicePreferences: 'Corte corto' },
+    { id: 'demo-two', name: 'Cliente Luna · DEMO', favorite: false, observations: '', servicePreferences: '' },
+  ];
+  const update = async (id, patch) => { clients = clients.map(client => client.id === id ? { ...client, ...patch } : client); };
+  const render = () => f.render(Component, { mode: 'demo', demoClients: clients, onUpdateDemoClient: update, isDark: false });
+  let tree = render();
+  assert.ok(text(tree).includes('Clientes ficticios'));
+  assert.equal(nodes(tree, node => node.props?.testID?.startsWith('business-client-demo-') && !node.props.testID.includes('favorite')).length, 2);
+  nodes(tree, node => node.props?.testID === 'business-clients-favorites-filter')[0].props.onPress();tree = render();
+  assert.equal(nodes(tree, node => node.props?.testID === 'business-client-demo-two').length, 0);
+  nodes(tree, node => node.props?.testID === 'business-clients-favorites-filter')[0].props.onPress();tree = render();
+  await nodes(tree, node => node.props?.testID === 'business-client-favorite-demo-two')[0].props.onPress();tree = render();
+  assert.equal(clients[1].favorite, true);
+  nodes(tree, node => node.props?.testID === 'business-client-demo-two')[0].props.onPress();tree = render();
+  nodes(tree, node => node.props?.testID === 'business-client-observations')[0].props.onChangeText('Solo demostración');
+  nodes(tree, node => node.props?.testID === 'business-client-preferences')[0].props.onChangeText('Peinado natural');tree = render();
+  await nodes(tree, node => node.props?.testID === 'business-client-save')[0].props.onPress();tree = render();
+  assert.equal(clients[1].observations, 'Solo demostración');assert.equal(clients[1].servicePreferences, 'Peinado natural');
+  await nodes(tree, node => node.props?.testID === 'business-client-clear-observations')[0].props.onPress();tree = render();
+  assert.equal(clients[1].observations, '');assert.equal(clients[1].servicePreferences, 'Peinado natural');
+  await nodes(tree, node => node.props?.testID === 'business-client-clear-preferences')[0].props.onPress();
+  assert.equal(clients[1].servicePreferences, '');
 });

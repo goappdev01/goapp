@@ -23,7 +23,7 @@ export function businessClientsFromBookings(bookings: Booking[], businessId: str
   return [...clients.values()].sort((a, b) => b.lastBookingAt.localeCompare(a.lastBookingAt) || a.id.localeCompare(b.id));
 }
 
-export function searchBusinessClients(clients: BusinessClient[], query: string): BusinessClient[] {
+export function searchBusinessClients<T extends { id: string; name: string }>(clients: T[], query: string): T[] {
   const term = query.trim().toLocaleLowerCase();
   return term ? clients.filter(client => client.name.toLocaleLowerCase().includes(term) || client.id.toLowerCase().includes(term)) : clients;
 }
