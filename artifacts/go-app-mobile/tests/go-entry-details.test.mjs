@@ -297,6 +297,27 @@ test('accepted booking separates verified paid amount from agreed advance and mo
   assert.match(texts(nodes(mode.tree,n=>n.props.testID==='entry-contract-payment-summary')[0]),/Pagado\s*·\s*0\s*%.*Pendiente\s*·\s*100\s*%/);
  }
 });
+test('accepted detail groups heading and three service lines without shrinking text or removing scroll',()=>{
+ const entry={...base,bookingCatalog:{totalPrice:85,currency:'EUR',lines:[
+  {itemId:'dye',name:'Tinte',charge:45,currency:'EUR'},
+  {itemId:'treatment',name:'Tratamiento',charge:30,currency:'EUR'},
+  {itemId:'extra',name:'Ampolla',charge:10,currency:'EUR'}]}};
+ for(const viewport of [{width:320,height:568,fontScale:1},{width:390,height:844,fontScale:1},{width:390,height:844,fontScale:2.8}]){
+  const f=sheet(entry,{}, {viewport}),tree=f.tree;
+  const summary=nodes(tree,n=>n.props.testID==='entry-summary')[0],contract=nodes(tree,n=>n.props.testID==='entry-contract')[0];
+  const info=nodes(tree,n=>n.props.testID==='entry-details-information')[0],scroll=nodes(tree,n=>n.props.testID==='entry-details-scroll')[0];
+  assert.equal(summary.props.style.gap,3);assert.equal(info.props.style.gap,4);assert.equal(contract.props.style.gap,4);
+  assert.equal(scroll.props.style.flex,1);assert.equal(scroll.props.alwaysBounceVertical,false);
+  const labels=nodes(contract,n=>n.type==='Text');for(const name of ['Tinte','Tratamiento','Ampolla'])assert.ok(texts(contract).includes(name));
+  assert.equal(labels.filter(node=>node.props.style===undefined).length,0);
+  assert.equal(nodes(contract,n=>n.props.testID==='entry-contract-total-row')[0].props.style.marginTop,4);
+  const go=nodes(contract,n=>n.props.testID==='entry-maps-go')[0];assert.ok(go);
+  assert.equal(go.props.style.minWidth,76);assert.equal(go.props.style.minHeight,48);
+  assert.equal(nodes(tree,n=>n.props.testID==='entry-maps-go').length,1);
+  assert.ok(labels.every(node=>node.props.numberOfLines===undefined),'long names remain readable at large text sizes');
+ }
+ const unrelated=sheet({...entry,bookingStatus:'pendiente'});assert.equal(nodes(unrelated.tree,n=>n.props.testID==='entry-summary')[0].props.style.gap,6);assert.equal(nodes(unrelated.tree,n=>n.props.testID==='entry-contract')[0].props.style.gap,8);
+});
 for(const type of ['GO_BOOKING','TAREA_INTERNA'])test(`${type}: opening/closing repeatedly preserves closed card geometry, day and canonical record`,()=>{
  const f=fixture({now:'2030-10-26T08:00:00'}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');
  const entry={...base,type,...(type==='TAREA_INTERNA'?{customerBooking:false,kind:'sent',phone:'',contactName:'',notes:'Tarea registrada'}:{})};
