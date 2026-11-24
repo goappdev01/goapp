@@ -1036,6 +1036,12 @@ test("a hair business sets a partial booking percentage without altering free or
   const split=()=>{const row=component(page(),"BookingDepositSplitRow");assert.ok(row);return row.type(row.props);};
   const input=nodes(split()).find(node=>node.type==="TextInput"&&node.props.accessibilityLabel==="Porcentaje al reservar");
   assert.ok(input);assert.equal(input.props.maxLength,2);
+  const columns=split().children;
+  for(const column of columns){
+    assert.equal(column.props.style.flex,1);
+    assert.equal(column.children[0].props.style.textAlign,"center");
+    assert.equal(column.children[1].props.style.justifyContent,"center");
+  }
   assert.equal(nodes(split()).filter(node=>node.type==="TextInput").length,1,"the venue percentage is read-only");
   for(const [booking,venue] of [["10","90 %"],["30","70 %"],["50","50 %"],["99","1 %"]]){
     nodes(split()).find(node=>node.props?.testID==="booking-deposit-percent").props.onChangeText(booking);

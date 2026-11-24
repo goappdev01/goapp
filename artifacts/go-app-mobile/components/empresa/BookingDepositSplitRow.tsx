@@ -14,21 +14,21 @@ export function BookingDepositSplitRow({ value, onChangeText, lang }: {
   const venueLabel = lang === "en" ? "At the venue" : "En el local";
   const field = { minHeight: 44, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 10,
     backgroundColor: "#FFFFFF", flexDirection: "row" as const, alignItems: "center" as const,
-    justifyContent: "flex-end" as const, paddingHorizontal: 10 };
+    justifyContent: "center" as const, paddingHorizontal: 8 };
   return <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 10 }}>
     <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-      <Text style={{ color: "#111827", fontSize: 13, fontWeight: "600" }}>{bookingLabel}</Text>
+      <Text style={{ color: "#111827", fontSize: 13, fontWeight: "600", textAlign: "center" }}>{bookingLabel}</Text>
       <View style={field}>
         <TextInput testID="booking-deposit-percent" accessibilityLabel={lang === "en" ? "Percentage at booking" : "Porcentaje al reservar"}
           keyboardType="number-pad" value={value} onChangeText={onChangeText} maxLength={2}
           placeholder="1–99" placeholderTextColor="#6B7280"
-          style={{ color: "#111827", fontSize: 17, fontWeight: "600", flex: 1, minWidth: 0,
+          style={{ color: "#111827", fontSize: 17, fontWeight: "600", width: 46,
             textAlign: "right", paddingVertical: 0 }} />
         <Text style={{ color: "#111827", fontSize: 16, marginLeft: 4 }}>%</Text>
       </View>
     </View>
     <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
-      <Text style={{ color: "#111827", fontSize: 13, fontWeight: "600" }}>{venueLabel}</Text>
+      <Text style={{ color: "#111827", fontSize: 13, fontWeight: "600", textAlign: "center" }}>{venueLabel}</Text>
       <View testID="booking-venue-percent" accessibilityLabel={`${venueLabel}: ${venuePercent === null ? "—" : `${venuePercent} %`}`}
         style={field}>
         <Text style={{ color: "#111827", fontSize: 17, fontWeight: "600" }}>
