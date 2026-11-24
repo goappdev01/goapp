@@ -52,7 +52,7 @@ export async function saveGoNoteReminder(entry: GoEntry, draft: NoteReminderDraf
     return { saved, message: draft.minutes === null ? "" : describeReminders(saved, reports) };
   } catch {
     // The note is already saved. Do not report a failed save or repeat creation.
-    return { saved, message: draft.minutes === null ? "" : "Nota guardada. No he podido confirmar el aviso en el teléfono. Revisa sus permisos y vuelve a intentarlo." };
+    return { saved, message: "Alarma no activada" };
   }
 }
 

@@ -94,35 +94,25 @@ export function reminderTaskInstant(entry: GoEntry): number {
   return date.getTime();
 }
 export function reminderOffsets(entry: GoEntry): number[] {
-  return [...new Set((entry.reminders || []).filter(validMinutes))].sort((a, b) => b - a);
+  return [...new Set((entry.reminders || []).filter(n => validMinutes(n) || entry.goAlarmReminder === true && n === 0))].sort((a, b) => b - a);
 }
 export function describeReminders(entry: GoEntry, reports: NativeReminderReport[] = []): string {
   const offsets = reminderOffsets(entry);
-  const failure = reports.some(report => report.status === "failed" && (!report.taskId || report.taskId === entry.id));
-  if (!offsets.length) return "La tarea «" + entry.notes + "» no tiene avisos asociados explícitamente."
-    + (failure ? " No he podido confirmar la cancelación en el teléfono. Vuelve a intentarlo." : "");
+  if (!offsets.length || entry.notificationsEnabled === false || entry.deleted || entry.estado === "rechazado"
+    || reports.some(report => report.status === "failed" && !report.taskId)) return "Alarma no activada";
   let instant: number;
-  try { instant = reminderTaskInstant(entry); } catch (error) { return (error as Error).message; }
-  const messages: Record<string, string> = {
-    scheduled: "Notificación local programada en el teléfono; GO puede estar cerrado.",
-    quiet: "Notificación local programada sin sonido o con entrega discreta según los permisos.",
-    denied: "Guardado, pero no programado: permite las notificaciones de GO en los ajustes del teléfono.",
-    muted: "Guardado; las alertas están silenciadas y no se ha programado una notificación.",
-    past: "No programado: la hora del aviso ya ha pasado.", invalid: "No programado: revisa la fecha y hora de la tarea.",
-    capacity: "Guardado, pero el teléfono no admite más avisos pendientes. No está activado.",
-    unsupported: "Guardado; este entorno no permite programar una notificación del teléfono.",
-    failed: "Guardado, pero no he podido confirmar su programación en el teléfono. Inténtalo de nuevo.",
-    inactive: "Guardado; vuelve al contexto de esta tarea para comprobar su programación.",
-  };
-  const lines = offsets.map(minutes => {
-    const report = reports.find(item => item.taskId === entry.id && item.minutes === minutes);
-    const at = new Date(report?.at ?? instant - minutes * 60000);
-    const state = report?.status === "failed" ? messages.failed : entry.notificationsEnabled === false ? messages.muted : report ? messages[report.status]
-      : "El aviso está guardado, pero su programación en el teléfono no está comprobada.";
-    return minutes + " min antes · " + at.toLocaleDateString("es-ES") + " · "
-      + at.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" }) + "\n" + state;
-  });
-  return "Avisos de «" + entry.notes + "»:\n" + lines.join("\n");
+  try { instant = reminderTaskInstant(entry); } catch { return "Alarma no activada"; }
+  return offsets.every(minutes => {
+    const matching = reports.filter(item => item.taskId === entry.id && item.minutes === minutes && !item.completion);
+    if (matching.length !== 1 || !["scheduled", "quiet"].includes(matching[0].status)
+      || matching[0].at !== instant - minutes * 60000 || matching[0].at! <= Date.now()) return false;
+    try {
+      const signature: unknown = JSON.parse(matching[0].signature || "null");
+      return Array.isArray(signature) && signature.length === 4 && signature[0] === matching[0].at
+        && signature[1] === Intl.DateTimeFormat().resolvedOptions().timeZone && signature[2] === (entry.notes || "Tarea")
+        && typeof signature[3] === "boolean" && (entry.reminderSound !== false || signature[3] === false);
+    } catch { return false; }
+  }) ? "Alarma activa" : "Alarma no activada";
 }
 export async function changeReminder(command: ReminderCommand, expected: ReminderTask, scope: TaskScope,
   active: () => boolean, confirmed = false): Promise<ReminderTask> {

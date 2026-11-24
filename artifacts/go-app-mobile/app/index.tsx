@@ -37,7 +37,10 @@ import { recordAuthTrace } from "@/lib/authTrace";
 import { clearAuthSession, restoreStoredAuthentication, consumeAuthRecoveryNotice } from "@/lib/authSession";
 import { getTaskUser, assertTaskUser } from "@/lib/goTaskAccess";
 import { isNativeReminderTask } from "@/lib/goNativeReminderScheduler";
-import { isNativeTaskScopeActive, suspendNativeTaskReminders, refreshActiveNativeTaskReminders } from "@/lib/goTaskReminderRuntime";
+import { describeReminders } from "@/lib/goTaskReminders";
+import { recordAlarmReconciliation } from "@/lib/goAlarmIncidents";
+import { isNativeTaskScopeActive, suspendNativeTaskReminders, refreshActiveNativeTaskReminders, refreshNativeTaskReminders } from "@/lib/goTaskReminderRuntime";
+import { GoAlarmStatus } from "@/components/notes/GoAlarmStatus";
 import { onTaskNotificationFocus } from "@/lib/goTaskNotificationFocus";
 import { Feather, Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { GoReservasConfigScreen } from "@/components/booking/GoReservasConfigScreen";
@@ -8931,8 +8934,14 @@ function HomeScreenContent() {
   };
 
   // ── RECORDATORIO — crea GO self y cierra el sheet ────────────────────────
-  const createReminder = () => {
-    if (!remindTime) return;
+  const reminderSaveLock = useRef(false);
+  const createReminder = async () => {
+    if (!remindTime || reminderSaveLock.current) return;
+    const identity = noteIdentityRef.current, expected = identity.scope;
+    if (!identity.ready || !expected) { showToast("Alarma no activada", "info"); return; }
+    const active = () => noteIdentityRef.current.ready && noteIdentityRef.current.scope?.userId === expected.userId
+      && noteIdentityRef.current.scope?.context === expected.context;
+    reminderSaveLock.current = true;
     const selfPhone = userGoPhone || "";
     const entry: typeof goLog[number] = {
       id: makeUid(),
@@ -8946,7 +8955,12 @@ function HomeScreenContent() {
       time: remindTime,
       duration: "",
       contactName: "",
-      ownerUserId: accountIdentity.userId ?? undefined,
+      ownerUserId: expected.userId,
+      taskContext: expected.context,
+      goAlarmReminder: true,
+      reminders: [0],
+      notificationsEnabled: true,
+      reminderSound: remindAlertType === "despertador",
       phone: selfPhone,
       senderPhone: selfPhone,
       receiverPhone: selfPhone,
@@ -8955,17 +8969,22 @@ function HomeScreenContent() {
       notes: remindText.trim() || t('label_reminder_text'),
       createdAt: Date.now(),
     } as typeof goLog[number];
-    setGoLog((prev) => {
-      const next = [entry, ...prev].slice(0, 200);
-      persistLog(next);
-      return next;
-    });
-    setRemindOpen(false);
-    setRemindText("");
-    setRemindTime("");
-    setRemindPreset(null);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    showToast(t('toast_reminder_saved'), 'success');
+    try {
+      await assertTaskUser(expected.userId);
+      await updateGoLog(async rows => {
+        await assertTaskUser(expected.userId);
+        if (!active()) throw new Error("GO_ALARM_inactive");
+        return { entries: [entry, ...rows], result: entry };
+      }, () => { if (!active()) throw new Error("GO_ALARM_inactive"); });
+      if (!active()) return;
+      setGoLog(getGoLogSnapshot());
+      setRemindOpen(false); setRemindText(""); setRemindTime(""); setRemindPreset(null);
+      const reports = await refreshNativeTaskReminders(expected, true);
+      if (active()) showToast(describeReminders(entry, reports), "info");
+    } catch {
+      await recordAlarmReconciliation([{ taskId: "", minutes: 0, status: "failed", cause: "persistence" }], expected.context, Platform.OS);
+      if (active()) showToast("Alarma no activada", "info");
+    } finally { reminderSaveLock.current = false; }
   };
 
   const addLogEntry = (
@@ -9109,8 +9128,7 @@ function HomeScreenContent() {
         && noteIdentityRef.current.scope?.context === reminder.scope.context;
       void confirmAttachedGoNoteReminder(entry.id,reminder,active).then(message=>{
         if (active()) Alert.alert(lang === "en" ? "Note reminder" : "Aviso de la nota",message);
-      }).catch(()=>{ if (active()) showToast(lang === "en" ? "The note reminder could not be confirmed. Check it before relying on it."
-        : "No se ha podido confirmar el aviso de la nota. Revísalo antes de contar con él.","warning"); });
+      }).catch(()=>{ if (active()) showToast("Alarma no activada","info"); });
     }
     return entry.id;
   };
@@ -10453,6 +10471,7 @@ function HomeScreenContent() {
       const now = new Date();
       const todayISO = now.toISOString().slice(0, 10);
       goLog.forEach((g) => {
+        if (Platform.OS !== "web" && isNativeReminderTask(g)) return;
         if (g.deleted || g.estado !== "aceptado") return;
         if (!g.dateISO || !g.time) return;
         if (g.dateISO !== todayISO) return;
@@ -15533,7 +15552,8 @@ function HomeScreenContent() {
         closeRequested={noteDetailCloseRequested}
         onClose={() => { const edit = noteEditAfterDetailsRef.current; noteEditAfterDetailsRef.current = null; setNoteDetailCloseRequested(false); setLandingDetailsId(null); if (edit) openEntryChange(edit, "landing", true); }}
         renderMessageScreen={landingDetailsEntry ? () => renderEntryMessageScreen(landingDetailsEntry) : undefined} onMessage={landingDetailsEntry ? ()=>openEntryMessage(landingDetailsEntry, undefined, true) : undefined}>
-        {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry,false,"detail")}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}</>}
+        {landingDetailsEntry && <>{renderEntryMicroActions(landingDetailsEntry,false,"detail")}{renderEntryQuickActions(landingDetailsEntry, !(landingDetailsEntry.customerBooking || landingDetailsEntry.businessBooking))}
+          {isNativeReminderTask(landingDetailsEntry) && <GoAlarmStatus entry={landingDetailsEntry} scope={noteIdentity.ready ? noteIdentity.scope : null}/>}</>}
       </GoEntryDetailsSheet>
 
       {/* QR uses the approved fixed corner for the selected hand. */}
@@ -24808,9 +24828,9 @@ function HomeScreenContent() {
     const identity=noteIdentityRef.current,expected=identity.scope;
     if(!identity.ready||!expected||!noteInScope(result.entry,expected))return;
     void result.reminderSync.then(receipt=>{
-      if(receipt.phase!=="warning"||!noteIdentityRef.current.ready||noteIdentityRef.current.scope?.userId!==expected.userId||noteIdentityRef.current.scope.context!==expected.context
+      if(receipt.phase==="superseded"||!receipt.message||!noteIdentityRef.current.ready||noteIdentityRef.current.scope?.userId!==expected.userId||noteIdentityRef.current.scope.context!==expected.context
         ||!noteReminderOperationCurrent(expected,result.entry.id,result.entry.note!.operationId))return;
-      showToast(receipt.message,"warning");
+      showToast(receipt.message,"info");
     });
   }
   function renderSavedNoteActions(entry:GoEntry,onEdit:()=>void){

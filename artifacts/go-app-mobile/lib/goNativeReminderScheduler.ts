@@ -6,7 +6,8 @@ import { taskInScope, reminderOffsets, reminderTaskInstant, type ReminderTask, t
 export const NATIVE_REMINDER_PREFIX = "go-task-reminder-v1:";
 export type NativeReminderStatus = "scheduled" | "quiet" | "denied" | "muted" | "past" | "invalid"
   | "capacity" | "unsupported" | "failed" | "inactive";
-export type NativeReminderReport = { taskId: string; minutes: number; status: NativeReminderStatus; at?: number; identifier?: string };
+export type NativeReminderReport = { taskId: string; minutes: number; status: NativeReminderStatus; at?: number; identifier?: string; signature?: string;
+  cause?: string; completion?: { key: string; schedule: string } };
 export type NativeReminderRequest = {
   identifier: string; taskId: string; minutes: number; at: number; scope: TaskScope;
   title: string; sound: boolean; signature: string;
@@ -31,7 +32,7 @@ type Desired = NativeReminderRequest & { report: NativeReminderReport };
 
 /** These personal tasks use the OS queue instead of Landing's polling timers. */
 export function isNativeReminderTask(entry: GoEntry): boolean {
-  return (isPersonalTask(entry) || isExplicitGoNote(entry) || hasAttachedNoteReminder(entry)) && !!(entry as GoEntry & { ownerUserId?: string }).ownerUserId
+  return (isPersonalTask(entry) || isExplicitGoNote(entry) || entry.goAlarmReminder === true || hasAttachedNoteReminder(entry)) && !!(entry as GoEntry & { ownerUserId?: string }).ownerUserId
     && Array.isArray(entry.reminders);
 }
 // An explicitly saved GO Nota can contain a list title/bullets without becoming a different record.
@@ -41,7 +42,7 @@ function isExplicitGoNote(entry: GoEntry): boolean {
 }
 export function nativeReminderTaskInScope(entry: ReminderTask, scope: TaskScope): boolean {
   if(entry.note?.version===1&&entry.note.destination!=="calendar")return false;
-  return taskInScope(entry, scope) || ((isExplicitGoNote(entry) || hasAttachedNoteReminder(entry))
+  return taskInScope(entry, scope) || ((isExplicitGoNote(entry) || entry.goAlarmReminder === true || hasAttachedNoteReminder(entry))
     && (entry as ReminderTask & { ownerUserId?: string }).ownerUserId === scope.userId && entry.taskContext === scope.context);
 }
 export function nativeReminderIdentifier(scope: TaskScope, taskId: string, minutes: number): string {
@@ -62,13 +63,25 @@ function scopeOf(request: NativeRequest): TaskScope | null {
 
 /** Pure serialized controller. The operating system owns delivery after scheduling. */
 export function createNativeReminderScheduler(ports: NativeReminderPorts) {
+  // Preserve the failing bridge operation, never its potentially private error message.
+  let lastFailure = "reconcile";
+  const originalPorts = ports;
+  const guarded = { ...ports };
+  for (const name of ["readTasks", "readCompletionRequests", "scopeValid", "permissions", "pending", "schedule", "cancel", "dismiss", "delivered"] as const) {
+    const operation = ports[name];
+    if (operation) (guarded as any)[name] = async (...args: unknown[]) => {
+      try { return await (originalPorts[name] as Function)(...args); }
+      catch { lastFailure = name; throw new Error("GO_ALARM_" + name); }
+    };
+  }
+  ports = guarded;
   let current: TaskScope | null = null, mode: Mode = "sound", generation = 0;
   let queue: Promise<unknown> = Promise.resolve();
   let observed: NativeRequest[] = [];
   function enqueue(job: () => Promise<NativeReminderReport[]>): Promise<NativeReminderReport[]> {
     const result = queue.then(job, job).catch(() => {
       const reports = failures(observed);
-      return reports.length ? reports : [{ taskId: "", minutes: 0, status: "failed" as const }];
+      return reports.length ? reports : [{ taskId: "", minutes: 0, status: "failed" as const, cause: lastFailure }];
     });
     queue = result.catch(() => undefined);
     return result;
@@ -106,8 +119,8 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
     const delivered = await ports.delivered();
     observed = [...observed, ...delivered.filter(managed)];
     if (!fresh(epoch, expected)) return [];
-    let verified = false;
-    try { verified = expected !== null && await valid(epoch, expected); } catch { /* Unverifiable identity must clear private OS payloads. */ }
+    let verified = false, verificationFailed = false;
+    try { verified = expected !== null && await valid(epoch, expected); } catch { verificationFailed = true; }
     if (!fresh(epoch, expected)) return [];
     // Never depend on foreground handlers for privacy: remove the OS's stored payload.
     try {
@@ -115,7 +128,9 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
       if (!fresh(epoch, expected)) return [];
       await clear(delivered, "delivered", item => verified && sameScope(scopeOf(item), expected));
     } catch { return failures([...pending, ...delivered]); }
-    if (!fresh(epoch, expected) || !verified || !expected) return [];
+    if (!fresh(epoch, expected)) return [];
+    if (verificationFailed) return [{ taskId: "", minutes: 0, status: "failed", cause: "scopeValid" }];
+    if (!verified || !expected) return [];
 
     const entries = await ports.readTasks();
     if (!await valid(epoch, expected)) return [];
@@ -147,7 +162,7 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
         if (!Number.isFinite(at)) { report.status = "invalid"; continue; }
         if (at <= ports.now()) { report.status = "past"; continue; }
         desired.push({ identifier, taskId: entry.id, minutes, at, scope: { ...expected },
-          title: entry.notes || "Tarea", sound: selectedMode === "sound", signature: "", report });
+          title: entry.notes || "Tarea", sound: selectedMode === "sound" && entry.reminderSound !== false, signature: "", report });
       }
     }
     if (ports.readCompletionRequests) {
@@ -166,7 +181,7 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
       for (const request of completions) {
         if (request.at <= ports.now() || !sameScope(request.scope, expected)) continue;
         const report: NativeReminderReport = { taskId: request.taskId, minutes: 0, at: request.at,
-          identifier: request.identifier, status: "failed" };
+          identifier: request.identifier, status: "failed", completion: request.completion };
         reports.push(report);
         if (selectedMode === "silent") { report.status = "muted"; continue; }
         desired.push({ ...request, sound: selectedMode === "sound", report });
@@ -206,7 +221,7 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
       });
       if (!await valid(epoch, expected)) return [];
     } catch {
-      retained.forEach(item => { item.report.status = "failed"; });
+      retained.forEach(item => { item.report.status = "failed"; item.report.cause = lastFailure; });
       const oldFailures = failures([...pending, ...delivered]);
       for (const failed of oldFailures) {
         const existing = reports.find(report => report.identifier === failed.identifier);
@@ -231,10 +246,12 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
           if (scheduledId !== item.identifier) {
             if (scheduledId.startsWith(NATIVE_REMINDER_PREFIX)) await ports.cancel(scheduledId);
             item.report.status = "failed";
+            item.report.cause = "identifier_mismatch";
             continue;
           }
         } catch {
           item.report.status = "failed";
+          item.report.cause = lastFailure;
           if (!fresh(epoch, expected)) return reports;
           continue;
         }
@@ -246,14 +263,20 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
     if (confirm.length) try {
       const confirmed = await ports.pending();
       if (!await valid(epoch, expected)) { for(const item of confirm)await ports.cancel(item.identifier);return []; }
-      for (const item of confirm) item.report.status = confirmed.some(request => matches(request, item))
-        ? permission === "quiet" || selectedMode === "visual" ? "quiet" : "scheduled" : "failed";
-    } catch { confirm.forEach(item => { item.report.status = "failed"; }); }
+      for (const item of confirm) {
+        item.report.status = confirmed.some(request => matches(request, item))
+          ? permission === "quiet" || selectedMode === "visual" ? "quiet" : "scheduled" : "failed";
+        if (item.report.status === "failed") item.report.cause = "readback_mismatch";
+        else item.report.signature = item.signature;
+      }
+    } catch { confirm.forEach(item => { item.report.status = "failed"; item.report.cause = lastFailure; }); }
     return reports;
   }
   function matches(request: NativeRequest, desired: NativeReminderRequest) {
     return request.identifier === desired.identifier && request.data.signature === desired.signature
-      && request.data.taskId === desired.taskId && request.data.minutes === desired.minutes;
+      && request.data.taskId === desired.taskId && request.data.minutes === desired.minutes
+      && (desired.completion ? request.data.goActionCompletion === true && request.data.completionKey === desired.completion.key
+        && request.data.completionSchedule === desired.completion.schedule : request.data.goActionCompletion !== true);
   }
   function failures(requests: NativeRequest[]): NativeReminderReport[] {
     const results = new Map<string, NativeReminderReport>();
@@ -264,17 +287,17 @@ export function createNativeReminderScheduler(ports: NativeReminderPorts) {
         if (typeof parts[2] === "string") taskId = parts[2];
         if (typeof parts[3] === "number") minutes = parts[3];
       } catch { /* Preserve a failure result even for an obsolete malformed ID. */ }
-      results.set(item.identifier, { taskId, minutes, identifier: item.identifier, status: "failed" });
+      results.set(item.identifier, { taskId, minutes, identifier: item.identifier, status: "failed", cause: lastFailure });
     }
     return [...results.values()];
   }
-  function setScope(scope: TaskScope | null, nextMode: Mode = "sound"): Promise<NativeReminderReport[]> {
+  function setScope(scope: TaskScope | null, nextMode: Mode = "sound", requestPermission = false): Promise<NativeReminderReport[]> {
     const same = scope === null ? current === null : sameScope(current, scope);
     if (!same || mode !== nextMode) generation++;
     current = scope ? { ...scope } : null;
     mode = nextMode;
     const epoch = generation, expected = current;
-    return enqueue(() => reconcile(epoch, expected, nextMode, false));
+    return enqueue(() => reconcile(epoch, expected, nextMode, requestPermission));
   }
   function refresh(scope: TaskScope, options: { requestPermission?: boolean; mode?:Mode } = {}): Promise<NativeReminderReport[]> {
     if (!sameScope(current, scope)) return Promise.resolve([]);

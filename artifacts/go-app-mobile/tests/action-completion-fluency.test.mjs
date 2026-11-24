@@ -45,7 +45,8 @@ async function fixture({blocked=true,failTask=0,fontScale=1,width=390,nativeFail
  };
  const access={getTaskUser:async()=>scope.userId};
  const store=load("lib/goActionCompletionStore.ts",{"./goActionCompletion":core,"./goTaskAccess":access,"@react-native-async-storage/async-storage":{__esModule:true,default:storage}});
- const runtime={registerActionCompletionRuntime:()=>()=>{},refreshNativeTaskReminders:async()=>[],refreshActiveNativeTaskReminders:()=>{
+ const emptyReports=[];
+ const runtime={subscribeNativeReminderReports:()=>()=>{},getNativeReminderReports:()=>emptyReports,registerActionCompletionRuntime:()=>()=>{},refreshNativeTaskReminders:async()=>[],refreshActiveNativeTaskReminders:()=>{
   refreshes++;return nativeFailure?Promise.reject(Error("OS notification failure")):nativeGate.promise;
  }};
  const native={AppState:{addEventListener:()=>({remove(){}})},Platform:{OS:"ios"},PixelRatio:{getFontScale:()=>fontScale}};
@@ -163,7 +164,7 @@ test("notification failure after persistence never rolls back or falsely reports
  const f=await fixture({blocked:false,nativeFailure:true});try{
   await f.press("REALIZADO");await f.finish();assert.equal(f.model.failedDecisions.length,0);
   assert.equal(core.completionDecision(f.entries[0],await f.freshStore().readCompletionDocument(S)).status,"done");
-  assert.match(f.model.feedback,/Decisiones guardadas/);
+  assert.equal(f.model.feedback,"Alarma no activada");
  }finally{await f.close();}
 });
 

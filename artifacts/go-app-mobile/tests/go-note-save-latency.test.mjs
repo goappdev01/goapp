@@ -34,7 +34,7 @@ test('verified data save does not await a held OS queue; pending notification st
 test('the real editor closes an edited tool and permits further editing while native work remains pending',async()=>{
  const f=await h.performanceFixture();let ui,release;try{await f.prime(1);const initial=f.rows[0],api=f.api();f.block('pending',new Promise(r=>release=r));let result;
   ui=await h.editorFixture({initial,scope:f.scope,ports:{noteProgress:f.noteProgress},onSave:async draft=>{result=await api.saveUnifiedNote(draft,f.scope,f.active);return result;}});await ui.tool('duration');await ui.tap('note-duration-2h');await ui.tap('note-duration-apply');await wait(ui,()=>ui.hosts.has('note-primary-controls'));
-  assert.equal(f.rows[0].note.schedule.duration,'2h');assert.equal(ui.hosts.get('unified-note-save').disabled,false);assert.equal(ui.hosts.get('note-content').editable,true);assert.match(ui.hosts.get('note-reminder-sync-status').children,/comprobando/);await write(ui,'note-content','Sigo escribiendo sin esperar al sistema');assert.equal(ui.hosts.get('note-content').value,'Sigo escribiendo sin esperar al sistema');
+  assert.equal(f.rows[0].note.schedule.duration,'2h');assert.equal(ui.hosts.get('unified-note-save').disabled,false);assert.equal(ui.hosts.get('note-content').editable,true);assert.equal(ui.hosts.get('note-reminder-sync-status').children,'Alarma no activada');await write(ui,'note-content','Sigo escribiendo sin esperar al sistema');assert.equal(ui.hosts.get('note-content').value,'Sigo escribiendo sin esperar al sistema');
   release();await ui.run(()=>result.reminderSync);assert.equal(f.os.size,1);assert.equal(f.rows.length,1);
  }finally{release?.();if(ui)await ui.close();f.close();}
 });
@@ -63,7 +63,7 @@ test('a persisted silent-mode change during a shared flight is reconciled before
 });
 
 test('failed notification cancellation is a warning after verified data, and an idempotent retry cancels without another note',async()=>{
- const f=await h.performanceFixture();try{await f.prime(1);const api=f.api(),draft={...f.model.noteDraft(f.rows[0]),reminderMinutes:null};f.failCancel(true);const result=await api.saveUnifiedNote(draft,f.scope,f.active);assert.equal(f.rows[0].note.reminderMinutes,null);const receipt=await result.reminderSync;assert.equal(receipt.phase,'warning');assert.equal(f.os.size,1);assert.match(receipt.message,/No se ha confirmado/);const writes=f.writes;
+ const f=await h.performanceFixture();try{await f.prime(1);const api=f.api(),draft={...f.model.noteDraft(f.rows[0]),reminderMinutes:null};f.failCancel(true);const result=await api.saveUnifiedNote(draft,f.scope,f.active);assert.equal(f.rows[0].note.reminderMinutes,null);const receipt=await result.reminderSync;assert.equal(receipt.phase,'warning');assert.equal(f.os.size,1);assert.equal(receipt.message,'Alarma no activada');const writes=f.writes;
   f.failCancel(false);const retry=await api.saveUnifiedNote(draft,f.scope,f.active);assert.equal((await retry.reminderSync).phase,'ready');assert.equal(f.os.size,0);assert.equal(f.rows.length,1);assert.equal(f.writes,writes);
  }finally{f.close();}
 });
@@ -95,7 +95,7 @@ test('the actual Home save callback preserves the separate legacy draft and does
 
 test('the actual Home observer warns on a late native failure only for the current note operation and account',async()=>{
  const f=await h.performanceFixture();let release;try{await f.prime();f.permission({granted:false,canAskAgain:false,ios:{status:1}});const home=homeCallbacks(f),draft=f.draft({destination:'calendar',dateISO:'2027-12-30',time:'18:30',reminderMinutes:15});
-  let result=await home.ctx.save(draft);assert.equal((await result.reminderSync).phase,'warning');await h.pause(0);assert.equal(home.calls.length,1);assert.equal(home.calls[0][1],'warning');assert.match(home.calls[0][0],/Nota guardada/);assert.equal(f.rows.length,1);
+  let result=await home.ctx.save(draft);assert.equal((await result.reminderSync).phase,'warning');await h.pause(0);assert.equal(home.calls.length,1);assert.equal(home.calls[0][1],'info');assert.equal(home.calls[0][0],'Alarma no activada');assert.equal(f.rows.length,1);
   home.calls.length=0;f.block('pending',new Promise(r=>release=r));result=await home.ctx.save({...f.model.noteDraft(result.entry),time:'19:30'});home.ctx.noteIdentityRef.current={ready:true,scope:{...f.scope,userId:'another-account'}};release();await result.reminderSync;await h.pause(0);assert.equal(home.calls.length,0,'No cross-account notification feedback');
  }finally{release?.();f.close();}
 });

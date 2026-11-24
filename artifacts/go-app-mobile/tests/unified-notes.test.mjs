@@ -639,7 +639,10 @@ test('protected saves and forged file associations are rejected before any ordin
 
 test('optional values do not prevent saving; calendar requires a real date/time; alerts stay unprogrammed outside calendar',async()=>{
  const f=await h.diskFixture();try{for(const patch of [{destination:'calendar'},{dateISO:'2027-02-30'},{time:'24:00'},{time:'03:60'},{reminderMinutes:-1}])await assert.rejects(save(f.api(),f.draft(patch),f.scope,f.active));
-  const result=await save(f.api(),f.draft({reminderMinutes:15}),f.scope,f.active);assert.match(result.message,/sin programar/);assert.equal(f.osRequests.size,0);assert.equal(f.rows[0].note.reminderMinutes,15);
+  const result=await save(f.api(),f.draft({reminderMinutes:15}),f.scope,f.active);
+  assert.equal(result.message,'Nota guardada en ARCHIVO.');
+  const receipt=await result.reminderSync;assert.equal(receipt.message,'Alarma no activada');
+  assert.equal(f.osRequests.size,0);assert.equal(f.rows[0].note.reminderMinutes,15);assert.equal(f.rows[0].notificationsEnabled,false);
  }finally{f.close();}
 });
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Keyboard, KeyboardAvoidingView, Linking, Platform, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View, type TextInputProps } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -12,6 +12,7 @@ import { GoScreenCloseGuide, GoScreenCloseSurface } from "@/components/ui/GoScre
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import {GoNavigationFloating} from "@/components/ui/GoNavigationFloating";
 import { GoNoteReminderPicker } from "./GoNoteReminderPicker";
+import { GoAlarmStatus } from "./GoAlarmStatus";
 import { GoNoteDatePicker, noteDateLabel } from "./GoNoteDatePicker";
 import { GoNoteTimePicker, GoNoteDurationPicker, noteDurationLabel } from "./GoNoteSchedulePicker";
 import { GoNoteToolFooter, type NoteToolEdit } from "./GoNoteToolFooter";
@@ -27,7 +28,7 @@ import { importNoteFile } from "@/lib/goNoteFiles";
 import { noteDraft, noteId, validNoteDate, validNoteTime, validateNote, type NoteDestination, type UnifiedNoteDraft } from "@/lib/unifiedNotes";
 import type { GoEntry } from "@/components/AgendaOperativa";
 import type { TaskScope } from "@/lib/goTaskReminders";
-import { getNoteReminderProgress, subscribeNoteReminderProgress, startNoteSaveTrace, type NoteSaveTrace } from "@/lib/goNoteSaveProgress";
+import { startNoteSaveTrace, type NoteSaveTrace } from "@/lib/goNoteSaveProgress";
 
 type Props = { visible:boolean; initial?:GoEntry|null; seed?:{title?:string;content?:string;destination?:NoteDestination;dateISO?:string;time?:string};
   scope:TaskScope|null; ready:boolean; handedness:"left"|"right"; cached?:UnifiedNoteDraft; onClose:(state?:{draft:UnifiedNoteDraft;saved:boolean})=>void;
@@ -73,8 +74,6 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
   const [preparing,setPreparing]=useState(false),[preparedNotice,setPreparedNotice]=useState(""),[floatingNotice,setFloatingNotice]=useState("");
   const preparation=useRef(0),draftRef=useRef(draft);draftRef.current=draft;
   const saveLock=useRef(false),workLock=useRef(false),session=useRef(""),latest=useRef({scope,ready,visible,id:draft.id});latest.current={scope,ready,visible,id:draft.id};
-  const readReminderProgress=useCallback(()=>scope&&draft.original?.note?getNoteReminderProgress(scope,draft.id,draft.original.note.operationId):null,[scope?.userId,scope?.context,draft.id,draft.original?.note?.operationId]);
-  const reminderProgress=useSyncExternalStore(subscribeNoteReminderProgress,readReminderProgress,()=>null);
   const saved=useRef(false),wasVisible=useRef(false),operation=useRef({value:"",id:noteId()});
   const lastScope=useRef(scope);
   const revealToolInput=useCallback(()=>{if(focusedToolTarget.current)toolsScroll.current?.scrollResponderScrollNativeHandleToKeyboard(focusedToolTarget.current,footerHeight.current+16,true);},[]);
@@ -376,7 +375,7 @@ export function GoNoteEditor({visible,initial,seed,scope,ready,handedness,onClos
             {!!draft.attachments.length&&<Text style={s.hint}>{draft.attachments.map(a=>a.name).join(" · ")}</Text>}
             {renderActions&&<View testID="note-existing-actions" pointerEvents={busy||toolFinishing?"none":"auto"} style={{backgroundColor:"#0e0e10",padding:10,borderRadius:12,gap:10}}>{renderActions(initial,()=>setToolsOpen(true))}</View>}
           </View>}
-          {!!reminderProgress?.message&&<Text testID="note-reminder-sync-status" accessibilityLiveRegion="polite" style={reminderProgress.phase==="warning"?s.warning:s.hint}>{reminderProgress.message}</Text>}
+          {!!draft.original && <GoAlarmStatus entry={draft.original} scope={scope}/>}
           {voice.status!=="idle"&&<Text style={s.hint}>{voice.status==="listening"?"Escuchando…":voice.status==="transcribing"?"Transcribiendo…":"Comprobando dictado…"}</Text>}
           {preparing&&<Text accessibilityLiveRegion="polite" style={s.hint}>Preparando borrador…</Text>}
           {!!preparedNotice&&<Text accessibilityLiveRegion="polite" style={s.hint}>{preparedNotice}</Text>}

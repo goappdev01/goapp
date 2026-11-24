@@ -76,7 +76,7 @@ export function useTaskReminders(a: ReturnType<typeof useBookingAssistant>, scop
     const report = await refreshNativeTaskReminders(value.scope, true);
     await assertReminderScope(value.scope, () => active(value.scope));
     draft.current = null;
-    a.say((command.operation === "replace" ? "He actualizado el aviso asociado a tu tarea.\n" : "He guardado el aviso asociado a tu tarea.\n") + describeReminders(saved, report));
+    a.say(describeReminders(saved, report));
   }
   async function handle(text: string): Promise<boolean> {
     const command = parseReminderCommand(text, localToday());
@@ -111,7 +111,7 @@ export function useTaskReminders(a: ReturnType<typeof useBookingAssistant>, scop
           const report = await refreshNativeTaskReminders(owner);
           await assertReminderScope(owner, () => active(owner));
           a.check(token); draft.current = null;
-          a.say("Aviso eliminado. La tarea «" + saved.notes + "» se conserva.\n" + describeReminders(saved, report)); return;
+          a.say(describeReminders(saved, report)); return;
         } else if (value.phase === "task") {
           const index = n.match(/^(?:la |el |numero |opcion )?(\d+)$/);
           const choice = index ? value.entries[Number(index[1]) - 1]

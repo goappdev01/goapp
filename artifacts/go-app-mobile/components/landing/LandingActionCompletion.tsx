@@ -131,7 +131,9 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
     <TouchableOpacity accessibilityRole="button" accessibilityLabel={label("Reintentar guardado de ","Retry saving ")+(failure.entry.notes || failure.entry.intentLabel || failure.entry.id)} style={button} onPress={()=>void model.retryDecision(failure.id)}><Text style={text}>{label("Reintentar guardado","Retry save")}</Text></TouchableOpacity>
    </View>)}
   </View>}
+  {!!entry&&<Text testID="completion-alarm-status" accessibilityLiveRegion="polite" style={{color:"#cbd5e1",fontSize:12}}>{model.alarmStatus?.(entry) ?? "Alarma no activada"}</Text>}
   {!!model.error&&<Text accessibilityLiveRegion="polite" style={{color:"#facc15",fontSize:12}}>{model.error}</Text>}
+  {!!model.feedback&&<Text accessibilityLiveRegion="polite" style={{color:"#facc15",fontSize:12}}>{model.feedback}</Text>}
  </View>;
  return <>
   <View testID="landing-action-completion" pointerEvents="box-none" onLayout={event=>{if(anchorAbove)onCompactHeight?.(event.nativeEvent.layout.height);}} style={{position:"absolute",left:frame.x,...position,width:frame.width,...(anchorAbove?{minHeight:44}:{height:Math.max(0,frame.height),justifyContent:"flex-end"}),zIndex:90}}>

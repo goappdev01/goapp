@@ -150,7 +150,8 @@ test("all completion reminders share the existing OS capacity, permissions and c
  const ports={platform:"ios",readTasks:async()=>[],readCompletionRequests:s=>policy.requests(s),scopeValid:async s=>state.user===s.userId,
    permissions:async()=>state.permission,now:()=>clock,pending:async()=>[...os.values()],delivered:async()=>[],
    cancel:async id=>{os.delete(id);},dismiss:async()=>{},schedule:async r=>{
-    calls.push(r);os.set(r.identifier,{identifier:r.identifier,data:{taskId:r.taskId,minutes:r.minutes,signature:r.signature}});return r.identifier;}};
+    calls.push(r);os.set(r.identifier,{identifier:r.identifier,data:{taskId:r.taskId,minutes:r.minutes,signature:r.signature,
+      ...(r.completion?{goActionCompletion:true,completionKey:r.completion.key,completionSchedule:r.completion.schedule}:{})}});return r.identifier;}};
  const scheduler=controller.createNativeReminderScheduler(ports);
  let report=await scheduler.setScope(S);assert.ok(report.length);assert.ok(report.every(r=>r.status==="denied"));assert.equal(os.size,0);
  state.permission="allowed";report=await scheduler.refresh(S);assert.equal(report.length,8);assert.ok(report.every(r=>r.status==="scheduled"));assert.equal(os.size,8);
@@ -176,7 +177,7 @@ test("confirmation area adapts its frame without moving protected content",()=>{
 function confirmationView({width=390,fontScale=1,inset=0,compact=false}={}){
  const state=[];let cursor=0;
  const react={__esModule:true,Fragment:"Fragment",createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),
-  useEffect(){},useState(initial){const i=cursor++;if(!(i in state))state[i]=initial;return[state[i],value=>state[i]=value];}};react.default=react;
+  useEffect(){},useRef(value){const i=cursor++;if(!(i in state))state[i]={current:value};return state[i];},useState(initial){const i=cursor++;if(!(i in state))state[i]=initial;return[state[i],value=>state[i]=value];}};react.default=react;
  const native=Object.fromEntries(["View","Text","TouchableOpacity","Modal","ScrollView","KeyboardAvoidingView","TextInput","Switch"].map(name=>[name,name]));
  native.Platform={OS:"ios"};native.PixelRatio={getFontScale:()=>fontScale};
  const ui=load("components/landing/LandingActionCompletion.tsx",{react,"react-native":native,

@@ -87,16 +87,16 @@ test('past or undated notes keep their selection but never schedule a past/fabri
   for(const override of [{dateISO:'2001-01-02'},{time:''},{dateISO:''}]){
     const f=await fixture();const result=await f.api().saveGoNoteReminder(futureEntry(override),{scope,minutes:15},f.active);
     assert.equal(f.os.size,0);assert.equal(f.calls.schedule.length,0);assert.deepEqual(JSON.parse(f.raw)[0].reminders,[15]);
-    assert.ok(/pasado|fecha|hora/.test(result.message));
+    assert.equal(result.message,'Alarma no activada');
   }
 });
 test('permission denial is explicit, preserves the note, and never claims scheduling succeeded',async()=>{
   const f=await fixture({permission:'denied'});const result=await f.api().saveGoNoteReminder(futureEntry(),{scope,minutes:5},f.active);
-  assert.equal(f.os.size,0);assert.equal(JSON.parse(f.raw).length,1);assert.match(result.message,/no programado|permite las notificaciones/i);
+  assert.equal(f.os.size,0);assert.equal(JSON.parse(f.raw).length,1);assert.equal(result.message,'Alarma no activada');
 });
 test('web fallback is explicit; Android and iOS use the same existing native scheduler',async()=>{
   const web=await fixture({platform:'web'});const result=await web.api().saveGoNoteReminder(futureEntry(),{scope,minutes:60},web.active);
-  assert.equal(web.os.size,0);assert.match(result.message,/no permite programar/);
+  assert.equal(web.os.size,0);assert.equal(result.message,'Alarma no activada');
   const android=await fixture({platform:'android'});await android.api().saveGoNoteReminder(futureEntry(),{scope,minutes:60},android.active);assert.equal(android.os.size,1);
 });
 test('a note containing a list title and bullets still uses the note queue without altering the separate Lists classifier',async()=>{
@@ -211,7 +211,7 @@ async function persistLinkedGo(f, extra = {}, minutes = 15) {
 for(const platform of ['ios','android'])test(platform+': attached note and GO share one persisted request; edit/remove/re-enable never create another task',async()=>{
   const f=await fixture({platform});const entry=await persistLinkedGo(f);
   const message=await f.api().confirmAttachedGoNoteReminder(entry.id,{scope,minutes:15},f.active);
-  assert.match(message,/programada/i);assert.equal(f.os.size,1);assert.equal(f.calls.schedule[0].taskId,'parent-go');
+  assert.equal(message,'Alarma activa');assert.equal(f.os.size,1);assert.equal(f.calls.schedule[0].taskId,'parent-go');
   assert.equal(f.model.isNativeReminderTask(entry),true,'native GO is excluded from the legacy polling engine');
   assert.equal(tools.goNoteReminderMinutes(entry),15);assert.equal(JSON.parse(f.raw).length,1);
   await f.reopen();await f.scheduler.refresh(scope);assert.equal(f.calls.schedule.length,1,'Reload keeps the same OS identifier');
@@ -266,7 +266,7 @@ test('linked notes cannot cross users/businesses, and identity switches cancel t
 test('linking a note does not drop existing distinct GO offsets or invent scheduling after a denied permission',async()=>{
   const f=await fixture({permission:'denied'});const entry=await persistLinkedGo(f,{reminders:[180,60,15]},30);
   const message=await f.api().confirmAttachedGoNoteReminder(entry.id,{scope,minutes:30},f.active);
-  assert.deepEqual(plain(entry.reminders),[180,60,30,15]);assert.equal(f.os.size,0);assert.match(message,/no programado|permite las notificaciones/i);
+  assert.deepEqual(plain(entry.reminders),[180,60,30,15]);assert.equal(f.os.size,0);assert.equal(message,'Alarma no activada');
   assert.ok(f.calls.permissions.includes(true));assert.equal(JSON.parse(f.raw).length,1);
 });
 test('the real GO creation connection persists one shared note/GO record and confirms through the existing queue',async()=>{

@@ -21,7 +21,6 @@ export function GoNoteReminderPicker({ value, onChange, english = false, busy = 
   const toolValid=valid&&/^\d{1,4}$/.test(hours)&&/^\d{1,2}$/.test(minutes)&&total>0;
   const invalid="Introduce un aviso entre un minuto y un año, con minutos de 00 a 59.";
   useEffect(()=>{onPendingChange?.({changed:touched&&(!toolValid||total!==value),value:toolValid?total:undefined,error:toolValid?undefined:invalid});},[hours,minutes,touched,value,onPendingChange]);
-  const at = dateISO && time ? Date.parse(`${dateISO}T${time}:00`) : NaN;
   return <View testID="note-reminder-picker" style={[{ marginTop: 10, gap: 10, padding: 12,
     borderRadius: 12, backgroundColor: light ? "rgba(240,243,245,0.94)" : "#1a1a1c", borderWidth: 1, borderColor: light ? border : "rgba(251,191,36,0.40)" },unified&&{marginTop:0,padding:0,gap:8,borderWidth:0,backgroundColor:"transparent"}]}>
     <Text style={{ color: foreground, fontSize: 13, fontWeight: "700" }}>{english ? "REMIND ME BEFORE" : "AVISARME ANTES"}</Text>
@@ -36,13 +35,9 @@ export function GoNoteReminderPicker({ value, onChange, english = false, busy = 
               color: foreground, fontSize: 22, textAlign: "center", paddingHorizontal: 10 }} />
         </View>)}
     </View>
-    <Text accessibilityLiveRegion="polite" style={{ color: warning, fontSize: 12 }}>{valid
+    <Text accessibilityLiveRegion="polite" style={{ color: valid ? foreground : warning, fontSize: 12 }}>{valid
       ? total ? noteReminderLabel(total, english) : english ? "No reminder" : "Sin aviso"
       : english ? "Enter valid hours and minutes from 00 to 59." : "Introduce horas válidas y minutos entre 00 y 59."}</Text>
-    {(!unified||!Number.isFinite(at)||at<=Date.now())&&<Text style={{ color: light ? "#515d69" : "rgba(255,255,255,0.75)", fontSize: 12 }}>{!Number.isFinite(at)
-      ? english ? "Choose a date and time to schedule it. Your interval is retained." : "Elige fecha y hora para programar el aviso. El intervalo se conserva."
-      : at <= Date.now() ? english ? "Choose a future date and time to schedule it." : "Elige una fecha y hora futuras para programar el aviso."
-        : english ? "The notification also requires permission on this phone." : "La notificación también requiere permiso en este teléfono."}</Text>}
     {!!error && <Text accessibilityRole="alert" style={{ color: warning, fontSize: 12 }}>{error}</Text>}
     {unified?<GoNoteToolFooter testID="note-reminder-confirm" removeID="note-reminder-none" handedness={handedness} disabled={busy} onSave={()=>{if(!toolValid){setError(invalid);return;}onChange(total);}} onRemove={value!==null?()=>onChange(null):undefined} removeLabel="QUITAR AVISO"/>:<View style={{ flexDirection: "row", gap: 10, flexWrap: light ? "wrap" : undefined }}>
       <TouchableOpacity testID="note-reminder-none" accessibilityRole="button" disabled={busy} onPress={() => onChange(null)}

@@ -18,7 +18,7 @@ test("reported create-then-remind sequence keeps one calendar task and its origi
  await f.render().dispatch("Pon un recordatorio a la tarea de hacer la compra una hora antes",false);
  assert.equal(f.saved.length,1);assert.equal(f.saved[0].id,original.id);assert.equal(f.saved[0].dateISO,original.dateISO);
  assert.equal(f.saved[0].time,"17:00");assert.deepEqual(f.saved[0].reminders,[60],f.notice);
- assert.match(f.messages.at(-1).text,/16:00/);assert.match(f.messages.at(-1).text,/programación en el teléfono no está comprobada/);
+ assert.equal(f.messages.at(-1).text,"Alarma no activada");
 });
 test("contextual references use the stable last task; concurrent and repeated commands do not duplicate",async()=>{
  for(const text of ["Pon un recordatorio una hora antes","Avísame una hora antes","Pon un aviso a esa tarea una hora antes","Pon un recordatorio a la que acabas de crear una hora antes"]){
@@ -30,9 +30,9 @@ test("contextual references use the stable last task; concurrent and repeated co
 });
 test("query, edit and explicitly confirmed removal retain the task",async()=>{
  const f=fixture([task()],"A");await f.render().dispatch("Pon un recordatorio a la compra una hora antes",false);
- await f.render().dispatch("¿Qué avisos tiene la compra?",false);assert.match(f.messages.at(-1).text,/16:00/);
+ await f.render().dispatch("¿Qué avisos tiene la compra?",false);assert.equal(f.messages.at(-1).text,"Alarma no activada");
  await f.render().dispatch("Cambia el aviso de la compra a 30 minutos antes",false);assert.deepEqual(f.saved[0].reminders,[30],f.notice);
- assert.match(f.messages.at(-1).text,/16:30/);await f.render().dispatch("Elimina el aviso de la compra",false);
+ assert.equal(f.messages.at(-1).text,"Alarma no activada");await f.render().dispatch("Elimina el aviso de la compra",false);
  assert.deepEqual(f.saved[0].reminders,[30]);assert.match(f.messages.at(-1).text,/Confirmas/);
  await f.render().dispatch("sí, pero después",false);assert.deepEqual(f.saved[0].reminders,[30]);
  await f.render().dispatch("confirmo",false);assert.deepEqual(f.saved[0].reminders,[]);assert.equal(f.saved[0].notificationsEnabled,false);
@@ -41,7 +41,7 @@ test("query, edit and explicitly confirmed removal retain the task",async()=>{
 test("store and screen restart retain associations; an unknown pronoun requires a task title",async()=>{
  const f=fixture([task()],"A");await f.render().dispatch("Pon un aviso a la compra una hora antes",false);
  const reopened=fixture(plain(await f.reopenStore().readGoLog()),"A");
- await reopened.render().dispatch("¿Qué avisos tiene la compra?",false);assert.match(reopened.messages.at(-1).text,/16:00/);
+ await reopened.render().dispatch("¿Qué avisos tiene la compra?",false);assert.equal(reopened.messages.at(-1).text,"Alarma no activada");
  const fresh=reopened.screen(); const writes=reopened.writes;await fresh.render().dispatch("Avísame dos horas antes",false);
  assert.equal(reopened.writes,writes);assert.match(fresh.messages.at(-1).text,/qué tarea/);
  await fresh.render().dispatch("Hacer la compra",false);assert.deepEqual(reopened.saved[0].reminders,[120,60]);assert.equal(reopened.saved.length,1);
@@ -78,9 +78,9 @@ test("IA and manual hour edits recompute the relative reminder and reset obsolet
  const f=fixture([task("buy",{reminders:[60],firedReminderMins:[60],snoozeUntil:123})],"A");
  await f.render().dispatch("Cambia la compra a las 18:00",false);await f.render().manager.confirm();
  assert.equal(f.saved.length,1);assert.equal(f.saved[0].time,"18:00");assert.deepEqual(f.saved[0].reminders,[60]);
- assert.deepEqual(f.saved[0].firedReminderMins,[]);assert.equal(f.saved[0].snoozeUntil,undefined);assert.match(f.reminders.describeReminders(f.saved[0]),/17:00/);
+ assert.deepEqual(f.saved[0].firedReminderMins,[]);assert.equal(f.saved[0].snoozeUntil,undefined);assert.equal(f.reminders.describeReminders(f.saved[0]),"Alarma no activada");
  const base=await f.store.readGoLog();await f.store.commitGoLogSnapshot(base,base.map(e=>({...e,time:"19:00",firedReminderMins:[60]})));
- assert.deepEqual(f.saved[0].firedReminderMins,[]);assert.match(f.reminders.describeReminders(f.saved[0]),/18:00/);
+ assert.deepEqual(f.saved[0].firedReminderMins,[]);assert.equal(f.reminders.describeReminders(f.saved[0]),"Alarma no activada");
 });
 test("user, company and DEMO isolation reject foreign or unverifiable legacy tasks",async()=>{
  const demo={userId:"A",context:"demo:USER"},business={userId:"A",context:"demo:BUSINESS:company1"};
@@ -136,7 +136,7 @@ test("the mandatory contextual order attaches 16:00 on 13 October to the origina
  const f=fixture([],"A");await f.render().dispatch("crea una tarea Hacer la compra el 13/10/2026 a las 17:00",false);
  const original=f.saved[0];await f.render().dispatch("Pon un recordatorio una hora antes",true);
  assert.equal(f.saved.length,1);assert.equal(f.saved[0].id,original.id);assert.equal(f.saved[0].dateISO,"2026-10-13");assert.equal(f.saved[0].time,"17:00");
- assert.deepEqual(f.saved[0].reminders,[60]);assert.match(f.messages.at(-1).text,/13\/10\/2026.*16:00/);assert.equal(f.bookingRequests.length,0);
+ assert.deepEqual(f.saved[0].reminders,[60]);assert.equal(f.messages.at(-1).text,"Alarma no activada");assert.equal(f.bookingRequests.length,0);
 });
 test("a conversational identifier survives a manual title change without selecting another task",async()=>{
  const f=fixture([],"A");await f.render().dispatch("crea una tarea Hacer la compra el 13/10/2026 a las 17:00",false);const id=f.saved[0].id;
@@ -152,7 +152,7 @@ test("missing reminders are never falsely acknowledged as removed and repeated c
 });
 test("muted task preferences are respected rather than silently activating an alert",async()=>{
  const f=fixture([task("buy",{notificationsEnabled:false})],"A");await f.render().dispatch("Pon un aviso a la compra 5 minutos antes",false);
- assert.deepEqual(f.saved[0].reminders,[5]);assert.equal(f.saved[0].notificationsEnabled,false);assert.match(f.messages.at(-1).text,/silenciadas/);
+ assert.deepEqual(f.saved[0].reminders,[5]);assert.equal(f.saved[0].notificationsEnabled,false);assert.equal(f.messages.at(-1).text,"Alarma no activada");
  assert.doesNotMatch(f.messages.at(-1).text,/alerta activada|notificación activada/i);
 });
 
@@ -176,10 +176,12 @@ test("adding again after deleting the last reminder restores only automatic sile
  await f.store.updateGoLog(rows=>({entries:rows.map(e=>({...e,notificationsEnabled:false})),result:null}));
  await f.render().dispatch("Pon un aviso a la compra 15 minutos antes",false);assert.equal(f.saved[0].notificationsEnabled,false);
 });
-test("description confirms only OS-verified schedules, displays actual date, and exposes cancellation failure truthfully",()=>{
- const f=fixture([task("buy",{reminders:[60]})],"A"),actual=new Date("2026-10-13T18:00:00").getTime();
- assert.doesNotMatch(f.reminders.describeReminders(f.saved[0]),/Notificación local programada/);
- assert.match(f.reminders.describeReminders(f.saved[0],[{taskId:"buy",minutes:60,status:"scheduled",at:actual}]),/18:00[\s\S]*Notificación local programada/);
- assert.match(f.reminders.describeReminders({...f.saved[0],notificationsEnabled:false},[{taskId:"buy",minutes:60,status:"failed"}]),/no he podido confirmar/);
- assert.match(f.reminders.describeReminders({...f.saved[0],reminders:[]},[{taskId:"buy",minutes:60,status:"failed"}]),/cancelación/);
+test("description confirms only the actual OS-verified schedule and keeps cancellation failure inactive",()=>{
+ const f=fixture([task("buy",{reminders:[60]})],"A"),actual=f.reminders.reminderTaskInstant(f.saved[0])-60*60000;
+ assert.equal(f.reminders.describeReminders(f.saved[0]),"Alarma no activada");
+ assert.equal(f.reminders.describeReminders(f.saved[0],[{taskId:"buy",minutes:60,status:"scheduled",at:actual}]),"Alarma no activada");
+ const signature=JSON.stringify([actual,Intl.DateTimeFormat().resolvedOptions().timeZone,f.saved[0].notes||"Tarea",true]);
+ assert.equal(f.reminders.describeReminders(f.saved[0],[{taskId:"buy",minutes:60,status:"scheduled",at:actual,signature}]),"Alarma activa");
+ assert.equal(f.reminders.describeReminders({...f.saved[0],notificationsEnabled:false},[{taskId:"buy",minutes:60,status:"failed"}]),"Alarma no activada");
+ assert.equal(f.reminders.describeReminders({...f.saved[0],reminders:[]},[{taskId:"buy",minutes:60,status:"failed"}]),"Alarma no activada");
 });

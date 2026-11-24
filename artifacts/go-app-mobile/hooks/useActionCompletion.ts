@@ -7,8 +7,10 @@ import type { GoEntry } from "@/components/AgendaOperativa";
 import { subscribeCompletions,getCompletionDocument,readCompletionDocument,updateCompletionDocument,
  setCompletionSource,clearCompletionSource,getCompletionSource,decideCompletion,discardCompletionEntry,retireCompletionEntry,onCompletionFocus } from "@/lib/goActionCompletionStore";
 import { awaitingCompletion,pendingCompletion,completionDecision,completionDiscarded,completionRetired,personalTrashEntries,completionKey,ownedCompletionEntry,positiveMinutes,
+ nextCompletionReminder,
  completionStorageKey,completionSchedule,sameCompletionScope as sameScope,type CompletionEntry,type CompletionScope,type CompletionPreferences } from "@/lib/goActionCompletion";
-import { refreshActiveNativeTaskReminders,refreshNativeTaskReminders,registerActionCompletionRuntime } from "@/lib/goTaskReminderRuntime";
+import { refreshActiveNativeTaskReminders,refreshNativeTaskReminders,registerActionCompletionRuntime,
+ subscribeNativeReminderReports,getNativeReminderReports } from "@/lib/goTaskReminderRuntime";
 import { completionNotificationPolicy } from "@/lib/goActionCompletionNotifications";
 
 type CompletionWrite = {
@@ -23,6 +25,7 @@ export function useCompletionDocument() {
  const [error,setError]=useState("");
  const key=JSON.stringify(scope),active=useRef(key);active.current=key;
  const doc=useSyncExternalStore(subscribeCompletions,()=>scope?getCompletionDocument(scope):null,()=>null);
+ useEffect(()=>{if(doc)setError("");},[doc]);
  useEffect(()=>{setError("");if(scope)void readCompletionDocument(scope).catch(e=>{if(active.current===key)setError(String(e.message));});},[key]);
  return {scope,doc,error,active:(expected:CompletionScope)=>active.current===JSON.stringify(expected)};
 }
@@ -30,6 +33,15 @@ export function useActionCompletion(entries:GoEntry[]) {
  const state=useCompletionDocument(),demo=useOwnerBusinessDemo();
  const [revision,render]=useState(0),[now,setNow]=useState(Date.now),[selected,setSelected]=useState<string|null>(null);
  const [feedback,setFeedback]=useState(""),[busy,setBusy]=useState(false);
+ const reports=useSyncExternalStore(subscribeNativeReminderReports,()=>getNativeReminderReports(state.scope),()=>getNativeReminderReports(null));
+ const alarmStatus=(entry:CompletionEntry)=>{
+   if(!state.doc || !state.active(state.scope!))return "Alarma no activada";
+   const at=nextCompletionReminder(entry,state.doc,Date.now());
+   const own=reports.filter(report=>report.taskId===entry.id && report.minutes===0 && report.completion?.key===completionKey(entry)
+     && report.completion.schedule===completionSchedule(entry) && report.at===at);
+   return at!==null && at>Date.now() && own.length===1 && ["scheduled","quiet"].includes(own[0].status)
+     && !reports.some(report=>!report.taskId && report.status==="failed") ? "Alarma activa" : "Alarma no activada";
+ };
  // UI transitions are per action. The existing store still commits before publishing.
  const writes=useRef(new Map<string,CompletionWrite>());
  const [writeRevision,renderWrites]=useState(0);
@@ -57,11 +69,7 @@ export function useActionCompletion(entries:GoEntry[]) {
  useEffect(()=>{
    const s=state.scope;if(!s)return;
    setCompletionSource(s,candidates);
-   void refreshNativeTaskReminders(s).then(reports=>{
-     if(!state.active(s))return;
-     const failures=reports.filter(r=>r.minutes===0 && ["denied","failed","capacity","unsupported","inactive","invalid"].includes(r.status));
-     if(failures.length)setFeedback("GO conserva tu solicitud. No se han podido confirmar todos los avisos del teléfono; revisa los permisos y la capacidad de notificaciones.");
-   }).catch(()=>{if(state.active(s))setFeedback("No se han podido verificar los avisos del teléfono. La solicitud permanece en GO.");});
+   void refreshNativeTaskReminders(s).catch(()=>{if(state.active(s))setFeedback("Alarma no activada");});
    return()=>clearCompletionSource(s);
  },[state.scope?.userId,state.scope?.context,candidates]);
  useEffect(()=>registerActionCompletionRuntime(completionNotificationPolicy),[]);
@@ -71,7 +79,7 @@ export function useActionCompletion(entries:GoEntry[]) {
    const stop=onCompletionFocus(id=>setSelected(id));
    return()=>{clearInterval(timer);app.remove();stop();};
  },[]);
- useEffect(()=>{setSelected(null);setFeedback("");},[state.scope?.userId,state.scope?.context]);
+ useEffect(()=>{setSelected(null);setFeedback("");setBusy(false);},[state.scope?.userId,state.scope?.context]);
  const scopeKey=state.scope?completionStorageKey(state.scope):null;
  const currentWrites=[...writes.current.values()].filter(job=>scopeKey===completionStorageKey(job.scope));
  const jobFor=(entry:CompletionEntry)=>state.scope?writes.current.get(writeKey(state.scope,entry)):undefined;
@@ -95,11 +103,7 @@ export function useActionCompletion(entries:GoEntry[]) {
      renderWrites(n=>n+1);
      // One notification refresh after the current batch drains. It never blocks the next action.
      if(state.active(job.scope) && ![...writes.current.values()].some(other=>sameScope(other.scope,job.scope) && other.phase==="saving")){
-       void refreshActiveNativeTaskReminders().catch(()=>{
-         if(state.active(job.scope))setFeedback([...writes.current.values()].some(other=>sameScope(other.scope,job.scope) && other.phase==="failed")
-           ?"No se han podido verificar los avisos del teléfono. Las decisiones no guardadas siguen disponibles para reintento."
-           :"Decisiones guardadas. No se han podido verificar todos los avisos del teléfono.");
-       });
+       void refreshActiveNativeTaskReminders().catch(()=>{if(state.active(job.scope))setFeedback("Alarma no activada");});
      }
    });
    return job.promise;
@@ -121,15 +125,10 @@ export function useActionCompletion(entries:GoEntry[]) {
      const key=entry?completionKey(entry):null,old=key?doc.records[key] || {history:[]}:null;
      return {...doc,preferences:prefs,records:key?{...doc.records,[key]:{...old!,...(minutes!==undefined?{reminderMinutes:minutes,remindAt:Date.now()+minutes*60000}:{}),...(alerts!==undefined?{alerts}:{})}}:doc.records};
     });
-    const reports=await refreshNativeTaskReminders(s,true);
-    const relevant=reports.filter(r=>r.minutes===0);
-    setFeedback(relevant.some(r=>["failed","denied","unsupported","capacity"].includes(r.status))
-      ?"Configuración guardada. El teléfono no ha confirmado todos los avisos; GO conserva las solicitudes."
-      :relevant.some(r=>r.status==="muted")?"Avisos silenciados; las acciones permanecen registradas."
-      :relevant.some(r=>r.status==="quiet")?"Avisos programados según el modo discreto del teléfono."
-      :relevant.length?"Avisos verificados en el teléfono.":"Configuración guardada. Los avisos desactivados no eliminan las acciones; la programación se verificará en este calendario.");
-   }catch(e){setFeedback(e instanceof Error?e.message:"No se pudo guardar la configuración.");}
-   finally{setBusy(false);}
+    await refreshNativeTaskReminders(s,true);
+    if(state.active(s))setFeedback("");
+   }catch{if(state.active(s))setFeedback("No se pudo guardar la configuración o activar la alarma.");}
+   finally{if(state.active(s))setBusy(false);}
  };
  const discard=async(entry:GoEntry,currentEntry:()=>GoEntry|undefined)=>{
    const scope=state.scope;if(!scope || !state.active(scope))throw new Error("La cuenta o el calendario han cambiado.");
@@ -148,5 +147,5 @@ export function useActionCompletion(entries:GoEntry[]) {
    const job=state.scope?writes.current.get(writeKey(state.scope,e)):undefined;
    return job?.phase==="saving"?job.status:state.doc?completionDecision(e,state.doc)?.status:undefined;
  },[state.doc,scopeKey,writeRevision]);
- return {...state,now,candidates,unresolved,pending,selected,setSelected,decide,discard,retire,isRetired,trashEntries,isDiscarded,configure,status,busy,feedback,isSaving,savingCount,failedDecisions,retryDecision};
+ return {...state,now,candidates,unresolved,pending,selected,setSelected,decide,discard,retire,isRetired,trashEntries,isDiscarded,configure,status,alarmStatus,busy,feedback,isSaving,savingCount,failedDecisions,retryDecision};
 }

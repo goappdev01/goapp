@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import vm from 'node:vm';
 import {supportFiles} from './helpers/support-files.mjs';
+import {alarmFixture,alarmScope,alarmTask} from './helpers/alarm-reliability-fixture.mjs';
 const ts=createRequire(import.meta.url)('typescript');
 const compile=file=>ts.transpileModule(readFileSync(file,'utf8'),{compilerOptions:{esModuleInterop:false,alwaysStrict:false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React}}).outputText;
 const port={exports:{}};vm.runInNewContext(compile('lib/supportRequests.ts'),port);const api=port.exports;
@@ -33,6 +34,190 @@ function fixture(gateway,options={}){let cursor=0,slots=[],effects=[];const file
  return{props,events,navigation,files,picker,speech,local,recovery:recovery.exports,unmount:()=>slots.forEach(s=>s?.cleanup?.()),foreground:()=>{if(lifecycle.enabled)lifecycle.refresh();},sessionChanged:()=>lifecycle.invalidate(),get voice(){return voiceProps;},render(p=props){cursor=0;effects=[];const tree=scope.exports.LandingSupport(p);for(const run of effects)run();return tree;}};
 }
 const tick=()=>new Promise(setImmediate);
+
+test('alarm success and restart use OS readback and retain the confirmed schedule without cancel/recreate',async()=>{
+ const f=alarmFixture();assert.equal(await f.status(),'Alarma no activada');await f.start();assert.equal(await f.status(),'Alarma activa');
+ const id=[...f.os.keys()][0];await f.restart();assert.equal(await f.status(),'Alarma activa');assert.equal([...f.os.keys()][0],id);
+ assert.equal(f.calls.filter(call=>call[0]==='schedule').length,1);assert.equal(f.calls.filter(call=>call[0]==='cancel').length,0);
+});
+
+test('denied permissions stay inactive, persist a private incident and ask only on the explicit native flow',async()=>{
+ const f=alarmFixture();f.state.permission={granted:false,canAskAgain:true,ios:{status:1}};
+ await f.start();assert.equal(await f.status(),'Alarma no activada');assert.equal(f.os.size,0);assert.equal(f.calls.length,0);
+ assert.ok(f.incidents().some(row=>row.cause==='denied'&&row.retry==='waiting_change'&&row.support==='local_only'));
+ f.state.permissionResult={granted:true,canAskAgain:false,ios:{status:2}};await f.refresh(true);
+ assert.equal(await f.status(),'Alarma activa');assert.equal(f.calls.filter(row=>row[0]==='permission').length,1);
+ assert.ok(f.incidents().some(row=>row.cause==='denied'&&row.retry==='resolved'));
+});
+
+test('a changed title or sound option cannot reuse the previous native receipt before reconciliation',async()=>{
+ const f=alarmFixture();await f.start();assert.equal(await f.status(),'Alarma activa');
+ await f.edit({notes:'UPDATED NOTE TEXT'});assert.equal(await f.status(),'Alarma no activada');
+ await f.refresh();assert.equal(await f.status(),'Alarma activa');
+ assert.equal([...f.os.values()][0].content.body,'UPDATED NOTE TEXT');
+ await f.edit({reminderSound:false});assert.equal(await f.status(),'Alarma no activada');
+ await f.refresh();assert.equal(await f.status(),'Alarma activa');
+ assert.equal([...f.os.values()][0].content.sound,false);assert.equal(f.os.size,1);
+});
+
+test('a permanently denied native flow never loops prompts or creates a request',async()=>{
+ const f=alarmFixture();f.state.permission={granted:false,canAskAgain:false,ios:{status:1}};await f.start();await f.refresh(true);await f.refresh(true);
+ assert.equal(await f.status(),'Alarma no activada');assert.equal(f.calls.length,0);assert.equal(f.os.size,0);
+});
+
+test('transient activation errors retry once and ambiguous OS success never produces a duplicate',async()=>{
+ const f=alarmFixture();await f.start();await f.edit({time:'18:00'});f.state.ambiguousSchedule=1;
+ await f.refresh();assert.equal(await f.status(),'Alarma activa');assert.equal(f.os.size,1);
+ assert.equal(f.calls.filter(row=>row[0]==='schedule').length,2);
+ const failure=f.incidents().find(row=>row.cause==='schedule');assert.equal(failure.retry,'resolved');assert.equal(failure.attempts,1);
+});
+
+test('persistent activation failures remain inactive after the bounded retry and recover on a later refresh',async()=>{
+ const f=alarmFixture();await f.start();await f.edit({time:'18:00'});f.state.failSchedule=20;
+ await f.refresh();assert.equal(await f.status(),'Alarma no activada');assert.equal(f.os.size,0);
+ assert.equal(f.calls.filter(row=>row[0]==='schedule').length,3);
+ assert.ok(f.incidents().some(row=>row.cause==='schedule'&&row.attempts===2&&row.retry==='waiting_foreground'));
+ f.state.failSchedule=0;await f.refresh();assert.equal(await f.status(),'Alarma activa');assert.equal(f.os.size,1);
+ const log=f.disk.get('go_alarm_incidents_v1');for(const secret of ['PRIVATE','private-owner','private-task','2035-10-13','live:USER'])assert.equal(log.includes(secret),false);
+});
+
+test('a missing native readback, unsupported environment and preferences failure never activate an alarm',async()=>{
+ for(const reason of ['readback','web','preferences']){const f=alarmFixture(reason==='web'?'web':'ios');
+  if(reason==='readback')f.state.omitReadback=true;if(reason==='preferences')f.state.failPreferences=true;
+  await f.start();assert.equal(await f.status(),'Alarma no activada');
+  assert.ok(f.incidents().some(row=>row.cause===({readback:'readback_mismatch',web:'unsupported',preferences:'preferences'}[reason])));
+  if(reason==='preferences'){f.state.failPreferences=false;await f.refresh();assert.equal(await f.status(),'Alarma activa');}
+ }
+});
+
+test('editing invalidates the receipt immediately; cancellation and a failed cancellation cannot claim active',async()=>{
+ const f=alarmFixture();await f.start();await f.edit({time:'18:00'});
+ const changed=f.refresh();assert.equal(f.runtime.getNativeReminderReports(alarmScope).length,0);await changed;assert.equal(await f.status(),'Alarma activa');
+ await f.edit({reminders:[],notificationsEnabled:false});f.state.failCancel=true;await f.refresh();
+ assert.equal(await f.status(),'Alarma no activada');assert.equal(f.os.size,1);assert.ok(f.incidents().some(row=>row.cause==='cancel'&&row.retry==='waiting_foreground'));
+ f.state.failCancel=false;await f.refresh();assert.equal(f.os.size,0);assert.equal(await f.status(),'Alarma no activada');
+ assert.equal((await f.store.readGoLog()).length,1);
+});
+
+test('interrupted native scheduling is fenced on logout; unfinished attempts survive a process restart locally',async()=>{
+ const f=alarmFixture();let release;f.state.scheduleGate=new Promise(resolve=>{release=resolve;});const opening=f.start();
+ for(let i=0;i<30&&!f.calls.length;i++)await tick();assert.equal(f.calls[0][0],'schedule');
+ assert.ok(f.incidents().some(row=>row.cause==='activation'&&row.retry==='in_progress'));
+ const recovered=f.load('lib/goAlarmIncidents.ts');await recovered.recordAlarmAttempt(alarmScope.context,'ios');
+ assert.ok(f.incidents().some(row=>row.cause==='interrupted'&&row.retry==='waiting_foreground'));
+ const closing=f.runtime.suspendNativeTaskReminders();release();await opening;await closing;
+ assert.equal(f.os.size,0);assert.equal(f.runtime.getNativeReminderReports(alarmScope).length,0);
+});
+
+test('repeated and concurrent refreshes reuse one request; expired and duplicated task records cannot claim active',async()=>{
+ const f=alarmFixture();await f.start();await Promise.all([f.refresh(),f.refresh(),f.refresh()]);
+ assert.equal(f.os.size,1);assert.equal(f.calls.filter(row=>row[0]==='schedule').length,1);
+ f.advance(4*86400000);assert.equal(await f.status(),'Alarma no activada');await f.refresh();assert.equal(f.os.size,0);
+ const g=alarmFixture();await g.start();await g.store.updateGoLog(rows=>({entries:[...rows,...rows],result:null}));await g.refresh();
+ assert.equal(await g.status(),'Alarma no activada');assert.equal(g.os.size,0);
+});
+
+test('RECUÉRDAME schedules the explicitly owned alarm at its actual time and preserves the selected silent mode',async()=>{
+ const f=alarmFixture();await f.store.updateGoLog(()=>({entries:[alarmTask({type:undefined,goAlarmReminder:true,reminderSound:false,reminders:[0]})],result:null}));
+ await f.start();assert.equal(await f.status(),'Alarma activa');const request=[...f.os.values()][0];
+ assert.equal(request.content.sound,false);assert.equal(JSON.parse(request.content.data.signature)[0],new Date('2035-10-13T17:00:00').getTime());
+ assert.equal(request.content.data.minutes,0);
+});
+
+test('the real Landing and note alarm controls render only the two binary states, without a yellow diagnostics notice',async()=>{
+ const f=alarmFixture(),R={createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),
+  useState:value=>[typeof value==='function'?value():value,()=>{}],useRef:value=>({current:value}),useEffect(){},useCallback:fn=>fn,useSyncExternalStore:(_,snapshot)=>snapshot()};
+ const native=new Proxy({Platform:{OS:'ios'},PixelRatio:{getFontScale:()=>1}},{get:(target,key)=>target[key]??key});
+ const ui=f.load('components/landing/LandingActionCompletion.tsx',{react:{...R,default:R},'react-native':native,
+  'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:0,bottom:0,left:0,right:0})},'@/components/ui/GoCloseButton':{GoCloseButton:'Close'},
+  '@/lib/goActionCompletion':f.module('lib/goActionCompletion.ts')});
+ const note=f.load('components/notes/GoAlarmStatus.tsx',{react:{...R,default:R},'react-native':native,
+  '@/lib/goTaskReminders':f.reminders,'@/lib/goTaskReminderRuntime':f.runtime});
+ const picker=f.load('components/notes/GoNoteReminderPicker.tsx',{react:{...R,default:R},'react-native':native,
+  '@/lib/goNoteTools':f.module('lib/goNoteTools.ts'),'./GoNoteToolFooter':{GoNoteToolFooter:'Footer'}});
+ for(const unified of [false,true])for(const dateISO of ['', '2035-10-13']){
+  const selection=picker.GoNoteReminderPicker({value:15,onChange(){},dateISO,time:'17:00',unified});
+  assert.doesNotMatch(text(selection),/permis|notificaci|notification|phone|programar|schedule|intervalo se conserva/i);
+ }
+ const model={scope:alarmScope,doc:{preferences:{defaultDurationMinutes:60,reminderMinutes:60},records:{}},unresolved:[alarmTask()],pending:[],failedDecisions:[],savingCount:0};
+ for(const active of [false,true,false]){
+  if(active)await f.start();else if(f.os.size){f.state.permission={granted:false,canAskAgain:false,ios:{status:1}};await f.refresh();}
+  const status=await f.status(),tree=ui.LandingActionCompletion({model:{...model,alarmStatus:()=>status},frame:{x:0,y:0,width:360,height:280},onPendingList(){},onPropose(){}});
+  assert.equal(text(nodes(tree).find(node=>node.props.testID==='completion-alarm-status')),status);
+  assert.equal(text(note.GoAlarmStatus({entry:alarmTask(),scope:alarmScope})),status);
+  assert.doesNotMatch(text(tree),/conserva tu solicitud|permisos|servidor|notificacion|confirmar todos|diagn[oó]stic/i);
+  assert.equal(nodes(tree).find(node=>node.props.testID==='completion-alarm-status').props.style.color,'#cbd5e1');
+ }
+});
+
+test('completion alarms require the current action schedule and actual native metadata, including after an edit at the same reminder time',async()=>{
+ const f=alarmFixture(),store=f.module('lib/goActionCompletionStore.ts'),core=f.module('lib/goActionCompletion.ts');
+ const entry=alarmTask({duration:'30min'});store.setCompletionSource(alarmScope,[entry]);
+ f.runtime.registerActionCompletionRuntime(f.module('lib/goActionCompletionNotifications.ts').completionNotificationPolicy);
+ const at=new Date('2035-10-14T19:00:00').getTime();
+ await store.updateCompletionDocument(alarmScope,()=>true,doc=>({...doc,records:{[core.completionKey(entry)]:{history:[],remindAt:at}}}));
+ await f.start();
+ const R={useState:value=>[typeof value==='function'?value():value,()=>{}],useRef:value=>({current:value}),useEffect(){},useMemo:fn=>fn(),useCallback:fn=>fn,useSyncExternalStore:(_,get)=>get()};
+ const hook=f.load('hooks/useActionCompletion.ts',{react:R,'react-native':{},'@/hooks/useAssistantZoneScope':{useAssistantZoneScope:()=>({ready:true,scope:alarmScope})},
+  '@/contexts/OwnerBusinessDemoContext':{useOwnerBusinessDemo:()=>({demo:null,catalog:null})},'@/data/demoBookingRepository':{},
+  '@/lib/goActionCompletionStore':store,'@/lib/goActionCompletion':core,'@/lib/goTaskReminderRuntime':f.runtime,'@/lib/goActionCompletionNotifications':{}});
+ assert.equal(hook.useActionCompletion([entry]).alarmStatus(entry),'Alarma activa');
+ const changed={...entry,time:'18:00'};store.setCompletionSource(alarmScope,[changed]);
+ assert.equal(hook.useActionCompletion([changed]).alarmStatus(changed),'Alarma no activada');
+ await f.refresh();assert.equal(hook.useActionCompletion([changed]).alarmStatus(changed),'Alarma activa');
+ assert.equal([...f.os.values()].filter(row=>row.content.data.goActionCompletion===true).length,8);
+ await store.updateCompletionDocument(alarmScope,()=>true,doc=>({...doc,records:{...doc.records,[core.completionKey(changed)]:{...doc.records[core.completionKey(changed)],alerts:false}}}));
+ assert.equal(hook.useActionCompletion([changed]).alarmStatus(changed),'Alarma no activada');await f.refresh();
+ assert.equal([...f.os.values()].some(row=>row.content.data.goActionCompletion===true),false);
+});
+
+test('journal writes serialize, deduplicate and stay bounded; corrupted journal and local storage failure never fake support delivery',async()=>{
+ const f=alarmFixture();f.disk.set('go_alarm_incidents_v1','broken JSON');
+ await Promise.all(Array.from({length:6},()=>f.journal.recordAlarmReconciliation([{taskId:'PRIVATE',minutes:60,status:'denied'}],alarmScope.context,'ios')));
+ assert.equal(f.incidents().length,1);assert.equal(f.incidents()[0].attempts,6);assert.equal(f.incidents()[0].support,'local_only');
+ const g=alarmFixture();g.state.failJournal=true;await g.start();assert.equal(await g.status(),'Alarma activa');
+ assert.equal(g.disk.has('go_alarm_incidents_v1'),false);assert.ok(g.warnings.length);assert.ok(g.journal.getLocalAlarmIncidents().length);g.state.failJournal=false;await g.refresh();
+ assert.ok(g.incidents().every(row=>row.support==='local_only'));assert.ok(f.warnings.some(message=>message.includes('rebuilding')));
+ for(let i=0;i<90;i++){
+  await f.journal.recordAlarmReconciliation([{taskId:'PRIVATE',minutes:0,status:'denied'}],alarmScope.context,'ios');
+  await f.journal.recordAlarmReconciliation([],alarmScope.context,'ios');
+ }
+ assert.ok(f.incidents().length<=80);
+});
+
+test('the actual RECUÉRDAME save awaits persistence, requests the native flow and ignores a concurrent SAVE tap',async()=>{
+ const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),all=[];
+ (function walk(node){all.push(node);ts.forEachChild(node,walk);})(ast);
+ const create=all.find(node=>ts.isVariableDeclaration(node)&&node.name.getText(ast)==='createReminder').initializer.getText(ast);
+ for(const denied of [false,true]){
+  const f=alarmFixture(),toasts=[],closed=[];await f.start();if(denied)f.state.permission={granted:false,canAskAgain:false,ios:{status:1}};
+  const context={exports:{},reminderSaveLock:{current:false},remindTime:'19:00',noteIdentityRef:{current:{ready:true,scope:alarmScope}},
+   userGoPhone:'',makeUid:()=> 'standalone-created',remindDateLabel:'13/10/2035',remindDateISO:'2035-10-13',remindText:'PRIVATE STANDALONE TEXT',remindAlertType:'discreta',t:value=>value,
+   assertTaskUser:f.module('lib/goTaskAccess.ts').assertTaskUser,updateGoLog:f.store.updateGoLog,getGoLogSnapshot:f.store.getGoLogSnapshot,setGoLog(){},
+   setRemindOpen:value=>closed.push(value),setRemindText(){},setRemindTime(){},setRemindPreset(){},showToast:(...args)=>toasts.push(args),
+   refreshNativeTaskReminders:f.runtime.refreshNativeTaskReminders,describeReminders:f.reminders.describeReminders,recordAlarmReconciliation:f.journal.recordAlarmReconciliation,Platform:{OS:'ios'}};
+  vm.runInNewContext(ts.transpileModule('exports.create='+create,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
+  await Promise.all([context.exports.create(),context.exports.create()]);const rows=await f.store.readGoLog();
+  assert.equal(rows.length,2);assert.equal(rows.filter(row=>row.id==='standalone-created').length,1);assert.equal(closed.length,1);
+  assert.equal(rows[0].goAlarmReminder,true);assert.deepEqual(Array.from(rows[0].reminders),[0]);assert.equal(rows[0].taskContext,alarmScope.context);
+  assert.equal(toasts.at(-1)[0],denied?'Alarma no activada':'Alarma activa');
+  assert.equal([...f.os.values()].filter(row=>row.content.data.taskId==='standalone-created').length,denied?0:1);
+ }
+});
+
+test('the existing start-time polling leaves native alarms to the OS and preserves ordinary GO alerts',()=>{
+ const source=readFileSync('app/index.tsx','utf8'),ast=ts.createSourceFile('home.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX),all=[];
+ (function walk(node){all.push(node);ts.forEachChild(node,walk);})(ast);
+ const check=all.find(node=>ts.isVariableDeclaration(node)&&node.name.getText(ast)==='check'&&node.initializer?.getText(ast).includes('reminderNotifiedRef.current.has'));
+ const f=alarmFixture(),scheduler=f.module('lib/goNativeReminderScheduler.ts'),date=new Date('2035-10-12T12:00:00'),due=new Date(date.getTime()+5*60000),toasts=[];
+ class Clock extends Date{constructor(...args){super(...(args.length?args:[date.getTime()]));}}
+ const hour=String(due.getHours()).padStart(2,'0')+':'+String(due.getMinutes()).padStart(2,'0'),day=date.toISOString().slice(0,10);
+ const context={Date:Clock,goLog:[alarmTask({estado:'aceptado',dateISO:day,time:hour}),{id:'ordinary-go',estado:'aceptado',dateISO:day,time:hour}],
+  Platform:{OS:'ios'},isNativeReminderTask:scheduler.isNativeReminderTask,reminderNotifiedRef:{current:new Set()},resolveIntentLabel:entry=>entry.id,
+  showToast:value=>toasts.push(value),t:()=> '__LABEL__',Haptics:{notificationAsync:()=>Promise.resolve(),NotificationFeedbackType:{Warning:1}}};
+ vm.runInNewContext(ts.transpileModule('const check='+check.initializer.getText(ast)+';check();',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,context);
+ assert.deepEqual(toasts,['ordinary-go']);
+});
 
 test('actual support draft and PDF recover after unmount; clearing text preserves the file and another business stays empty',async()=>{
  const f=fixture();let tree=f.render();await tick();tree=f.render();

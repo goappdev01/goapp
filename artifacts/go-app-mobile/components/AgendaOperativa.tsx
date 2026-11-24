@@ -82,6 +82,8 @@ export type GoEntry = {
   attachedNoteId?: string;
   attachedNote?: string;
   goNoteReminder?: boolean;
+  goAlarmReminder?: boolean;
+  reminderSound?: boolean;
   taskContext?: string;
   actionContext?: string;
   startDatetime?: string;

@@ -14,6 +14,7 @@ async function performanceFixture({storePath='lib/unifiedNoteStore.ts',runtimePa
  const adapter=h.load('lib/goNativeNotificationAdapter.ts',{'react-native':{Platform:{OS:'ios'}},'expo-notifications':native});
  const storage={...f.storage,multiGet:async keys=>Promise.all(keys.map(async key=>[key,await f.storage.getItem(key)]))};
  const runtimeImports={'@react-native-async-storage/async-storage':storage,'./goLogStore':f.store,'./goNoteTools':tools,'./goTaskAccess':f.access,'./goTaskReminders':reminders,'./goNativeReminderScheduler':scheduler,'./goNativeNotificationAdapter':adapter,'./goTaskNotificationFocus':h.load('lib/goTaskNotificationFocus.ts')};
+ runtimeImports['./goAlarmIncidents']=h.load('lib/goAlarmIncidents.ts',{'@react-native-async-storage/async-storage':storage});
  const runtime=h.load(runtimePath,runtimeImports,{performance});
  const noteProgress=h.load('lib/goNoteSaveProgress.ts',{}, {performance});
  const apiImports={'@react-native-async-storage/async-storage':f.storage,'./goTaskAccess':f.access,'./goLogStore':f.store,'./goNoteFiles':f.fileApi,'./unifiedNotes':f.model,'./goTaskReminders':reminders,'./goTaskReminderRuntime':runtime,'./goNoteSaveProgress':noteProgress};

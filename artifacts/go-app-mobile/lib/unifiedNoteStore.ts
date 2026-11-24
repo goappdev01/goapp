@@ -58,34 +58,33 @@ export async function saveUnifiedNote(draft: UnifiedNoteDraft, scope: TaskScope,
   await check();
   const verifiedAt=now();performance.duration("identityChecksMs",identityCheckMs);performance.duration("attachmentsMs",filesVerified-validated);performance.duration("writeAndQueueMs",persisted-filesVerified);performance.duration("readbackMs",verifiedAt-persisted);performance.mark("dataReady");
   let message="Nota guardada en "+({pending:"PENDIENTES",calendar:"CALENDARIO",archive:"ARCHIVO",go:"GO"}[draft.destination])+".";
-  if(draft.reminderMinutes!==null&&draft.destination!=="calendar")message+=" El aviso se conserva sin programar hasta elegir CALENDARIO, fecha y hora.";
   const hasReminderEffect=!goAttachment&&!!(saved.reminders?.length||draft.original?.reminders?.length||draft.reminderMinutes!==null);
-  setNoteReminderProgress(scope,saved.id,{operationId:draft.operationId,phase:"pending",message:hasReminderEffect?"Nota guardada · comprobando avisos…":""});
+  setNoteReminderProgress(scope,saved.id,{operationId:draft.operationId,phase:"pending",message:hasReminderEffect?"Alarma no activada":""});
   const current=()=>active()&&noteReminderOperationCurrent(scope,saved.id,draft.operationId)
     &&noteDocument(getGoLogSnapshot().find(row=>row.id===saved.id))?.operationId===draft.operationId;
   // Storage and readback are already acknowledged. OS reconciliation continues
   // in the existing serialized queue and cannot hold the editor for 15–20 s.
   const reminderSync:Promise<NoteReminderReceipt>=Promise.resolve().then(async()=>{
-    const start=now();let warning=false,feedback="Avisos comprobados.",details=message;
+    const start=now();let warning=false,feedback="Alarma no activada",details=message;
     try{
       const reports=goAttachment ? [] : await refreshNativeTaskReminders(scope,draft.destination==="calendar"&&!!draft.time&&draft.reminderMinutes!==null);
       await check();
       const own=reports.filter(report=>!report.taskId||report.taskId===saved.id);
       warning=own.some(report=>["failed","denied","capacity","unsupported","invalid","inactive"].includes(report.status));
       if(draft.destination==="calendar"&&draft.reminderMinutes!==null){
-        warning ||= !draft.time||!own.some(report=>report.minutes===draft.reminderMinutes&&["scheduled","quiet","muted","past"].includes(report.status));
+        warning ||= !draft.time||!own.some(report=>report.minutes===draft.reminderMinutes&&["scheduled","quiet"].includes(report.status));
         // Detailed receipt remains available to callers that need it; no long report in the editor.
         details+=" "+describeReminders(saved,reports);
       }
-      if(warning)feedback="Nota guardada. No se ha confirmado el aviso; puedes revisarlo en la nota.";
-    }catch{warning=true;feedback="Nota guardada. No se han podido comprobar los avisos del teléfono.";}
+      feedback=describeReminders(saved,reports);
+    }catch{warning=true;feedback="Alarma no activada";}
     const elapsedMs=now()-start;performance.duration("notificationMs",elapsedMs);performance.mark("notificationsSettled");
     if(!current())return {phase:"superseded",message:"",elapsedMs};
     const phase=warning?"warning":"ready";
-    setNoteReminderProgress(scope,saved.id,{operationId:draft.operationId,phase,message:warning?feedback:""});
-    return {phase,message:warning?feedback:"",elapsedMs,details};
+    setNoteReminderProgress(scope,saved.id,{operationId:draft.operationId,phase,message:hasReminderEffect?feedback:""});
+    return {phase,message:hasReminderEffect?feedback:"",elapsedMs,details};
   });
-  const notice="Guardada en "+({pending:"Pendientes",calendar:"Calendario",archive:"Archivo",go:"GO"}[draft.destination])+(hasReminderEffect?" · comprobando avisos":"");
+  const notice="Guardada en "+({pending:"Pendientes",calendar:"Calendario",archive:"Archivo",go:"GO"}[draft.destination])+(hasReminderEffect?" · Alarma no activada":"");
   return {entry:saved,message,notice,reminderSync,performance,timings:{validationMs:validated-started,attachmentsMs:filesVerified-validated,persistenceMs:persisted-filesVerified,verificationMs:verifiedAt-persisted,totalMs:verifiedAt-started,identityCheckMs}};
 }
 export async function moveUnifiedNote(entry:GoEntry,destination:NoteDestination,scope:TaskScope,active:()=>boolean, schedule?:{dateISO:string;time:string;duration?:string}) {
