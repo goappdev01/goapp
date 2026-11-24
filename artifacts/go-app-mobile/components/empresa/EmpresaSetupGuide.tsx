@@ -45,6 +45,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { trSector } from "@/data/goSectorTranslations";
 import type { Lang } from "@/i18n/translations";
 import { parsePartialBookingPercent } from "@/data/bookingServices";
+import { BookingDepositSplitRow } from "./BookingDepositSplitRow";
 
 // ─── Storage ────────────────────────────────────────────────────────────────
 
@@ -838,14 +839,8 @@ function Step3ReservaPublicacion({
     <View style={g.stepBody}>
       {/* ── Booking policy ── */}
       <PolicyRow title={t("biz_booking_type")} opts={PAYMENT_OPTS}  value={payment}  onChange={setPayment}  color={GOLD}   />
-      {payment === 2 && <View style={g.sectionCard}>
-        <Text style={g.policyLabel}>{t("biz_partial_payment")} · {lang === "en" ? "% at booking" : "% al reservar"}</Text>
-        <TextInput accessibilityLabel={lang === "en" ? "Percentage at booking" : "Porcentaje al reservar"} keyboardType="number-pad" value={depositPercent}
-          onChangeText={setDepositPercent} maxLength={2} placeholder="1–99" style={{ minHeight: 44, color: TEXT, borderWidth: 1, borderColor: BORDER, borderRadius: 10, paddingHorizontal: 12, marginTop: 8 }} />
-        <Text style={g.policySub}>{/^\d{1,2}$/.test(depositPercent) && Number(depositPercent) >= 1 && Number(depositPercent) <= 99
-          ? (lang === "en" ? `${100 - Number(depositPercent)}% at the venue` : `${100 - Number(depositPercent)} % en el establecimiento`)
-          : (lang === "en" ? "Enter an integer from 1 to 99." : "Indica un entero del 1 al 99.")}</Text>
-        <Text style={g.policySub}>{lang === "en" ? "Payment collection is not active; this split does not yet apply to real bookings." : "El cobro no está activo; este reparto aún no se aplica a reservas reales."}</Text>
+      {payment === 2 && <View style={[g.sectionCard, { paddingVertical: 10 }]}>
+        <BookingDepositSplitRow lang={lang} value={depositPercent} onChangeText={setDepositPercent} />
       </View>}
       <PolicyRow title={t("biz_approval")}     opts={APPROVAL_OPTS} value={approval} onChange={setApproval} color={BLUE}   />
 

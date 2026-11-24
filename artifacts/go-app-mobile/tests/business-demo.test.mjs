@@ -268,6 +268,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
         if (key in imports) return imports[key];
         if (key === "@/theme/goAssistantColors") return load("theme/goAssistantColors.ts");
         if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };
+        if (key === "./BookingDepositSplitRow") return load("components/empresa/BookingDepositSplitRow.tsx");
         if (key === "./ServiceComplementManager") return { ServiceAssociatedProducts: () => null,
           useServiceComplementCatalog: () => ({ items: [], relations: [], error: "", loading: false, busy: false }) };
         if (key === "./ProfessionalGapPolicy") return load("components/empresa/ProfessionalGapPolicy.tsx");
@@ -1032,8 +1033,17 @@ test("a hair business sets a partial booking percentage without altering free or
   const f=dataFixture();await configuredSalon(f);
   const ui=configurationUI(f,5),{page}=ui.enterStep("StepReservas");
   component(page(),"PolicySection").props.onChange(2);await turn();page();
-  const input=nodes(page()).find(node=>node.type==="TextInput"&&node.props.accessibilityLabel==="Porcentaje al reservar");
-  assert.ok(input);input.props.onChangeText("20");page();
+  const split=()=>{const row=component(page(),"BookingDepositSplitRow");assert.ok(row);return row.type(row.props);};
+  const input=nodes(split()).find(node=>node.type==="TextInput"&&node.props.accessibilityLabel==="Porcentaje al reservar");
+  assert.ok(input);assert.equal(input.props.maxLength,2);
+  assert.equal(nodes(split()).filter(node=>node.type==="TextInput").length,1,"the venue percentage is read-only");
+  for(const [booking,venue] of [["10","90 %"],["30","70 %"],["50","50 %"],["99","1 %"]]){
+    nodes(split()).find(node=>node.props?.testID==="booking-deposit-percent").props.onChangeText(booking);
+    assert.equal(text(nodes(split()).find(node=>node.props?.testID==="booking-venue-percent")),venue);
+  }
+  nodes(split()).find(node=>node.props?.testID==="booking-deposit-percent").props.onChangeText("0");
+  assert.equal(text(nodes(split()).find(node=>node.props?.testID==="booking-venue-percent")),"—");
+  nodes(split()).find(node=>node.props?.testID==="booking-deposit-percent").props.onChangeText("20");page();
   button(ui.render(),"biz_next").props.onPress();await turn();
   const saved=(await f.make().load()).config;
   assert.equal(saved.paymentPolicy,2);assert.equal(saved.bookingDepositPercent,20);

@@ -84,6 +84,7 @@ import {
 } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { CatalogAssociationManager } from "./CatalogAssociationManager";
+import { BookingDepositSplitRow } from "./BookingDepositSplitRow";
 import { parsePartialBookingPercent } from "@/data/bookingServices";
 import { ServiceAssociatedProducts, useServiceComplementCatalog } from "./ServiceComplementManager";
 import { isStableBookingId, serializeServiceConfiguration, validateBookingResources,
@@ -2856,20 +2857,13 @@ function StepReservas({ saveRef }: { saveRef: StepSaveRef }) {
         color={GOLD}
       />
 
-      {policyDraft === 2 && <View style={c.sectionCard}>
-        <Text style={c.policyLabel}>{lang === "en" ? "% at booking" : "% al reservar"}</Text>
-        <TextInput accessibilityLabel={lang === "en" ? "Percentage at booking" : "Porcentaje al reservar"}
-          keyboardType="number-pad" value={percentDraft} onChangeText={value => {
+      {policyDraft === 2 && <View style={[c.sectionCard, { paddingVertical: 10 }]}>
+        <BookingDepositSplitRow lang={lang} value={percentDraft} onChangeText={value => {
             setPercentDraft(value);
             let percent: number;
             try { percent = parsePartialBookingPercent(value); } catch { return; }
             updateConfig({ paymentPolicy: 2, bookingDepositPercent: percent });
-          }} maxLength={2}
-          style={[c.svcNameInput, { minHeight: 44, marginTop: 8 }]} placeholder="1–99" placeholderTextColor={DIM} />
-        <Text style={c.policySub}>{/^\d{1,2}$/.test(percentDraft) && Number(percentDraft) >= 1 && Number(percentDraft) <= 99
-          ? (lang === "en" ? `${100 - Number(percentDraft)}% at the venue` : `${100 - Number(percentDraft)} % en el establecimiento`)
-          : (lang === "en" ? "Enter an integer from 1 to 99." : "Indica un entero del 1 al 99.")}</Text>
-        <Text style={c.policySub}>{lang === "en" ? "Payment collection is not active. This split does not yet apply to real bookings." : "El cobro no está activo. Este reparto aún no se aplica a reservas reales."}</Text>
+          }} />
       </View>}
 
       {sinPago ? (
