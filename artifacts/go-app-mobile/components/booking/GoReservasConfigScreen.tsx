@@ -47,9 +47,10 @@ import { AgendaBoard } from "@/components/AgendaOperativa";
 import type { GoEntry, DensityKey, CalDayNightMode } from "@/components/AgendaOperativa";
 import { GoCalConfigPanel } from "@/components/GoCalConfigPanel";
 import { BusinessWorkHoursSwitch } from "@/components/ui/BusinessWorkHoursSwitch";
+import { BusinessClientsScreen } from "@/components/empresa/BusinessClientsScreen";
 import { businessCalendarClock, businessWorkHoursForDate } from "@/data/businessCalendarWorkHours";
 import type { CalendarException } from "@/data/calendarExceptions";
-import type { AvailabilityWindow } from "@/data/booking";
+import type { AvailabilityWindow, Booking } from "@/data/booking";
 import { GoCloseButton } from "@/components/ui/GoCloseButton";
 import { GoCalendarViewSelector } from "@/components/ui/GoCalendarViewSelector";
 import type { CalSizeKey } from "@/constants/goSizes";
@@ -98,12 +99,13 @@ function getCurrentYearMonth(): string {
 
 // ─── View modes ───────────────────────────────────────────────────────────────
 
-type ViewMode = "plano" | "split" | "calendario";
+type ViewMode = "plano" | "split" | "calendario" | "clientes";
 
 const VIEW_MODES: { key: ViewMode; icon: keyof typeof Feather.glyphMap; label: string }[] = [
   { key: "plano",      icon: "map",      label: "Plano"      },
   { key: "split",      icon: "layout",   label: "Dividido"   },
   { key: "calendario", icon: "calendar", label: "Calendario" },
+  { key: "clientes", icon: "users", label: "Clientes" },
 ];
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -150,7 +152,9 @@ export function GoReservasConfigScreen(props: GoReservasConfigScreenProps) {
   const bookings=useBusinessBookings(config.businessId,true);
   const allGoLog=useMemo(()=>mergeBusinessBookingEntries(personalGoLog,bookings.entries),[personalGoLog,bookings.entries]);
   useEffect(()=>{if(bookings.error)Alert.alert("GO",bookings.error);},[bookings.error]);
-  return useGoReservasContent({ ...props, allGoLog, setGoLog,liveBookingMutate:bookings.mutate });
+  return useGoReservasContent({ ...props, allGoLog, setGoLog,liveBookingMutate:bookings.mutate,
+    liveClientsRead:{ bookings:bookings.bookings, loading:bookings.loading, error:bookings.error,
+      authorized:!!bookings.ownerId && bookings.businessId===config.businessId } });
 }
 export function GoReservasDemoScreen(props: GoReservasConfigScreenProps) {
   const { demo } = useBusinessConfig();
@@ -166,12 +170,13 @@ export function GoReservasDemoScreen(props: GoReservasConfigScreenProps) {
   });
 }
 
-function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, onProposeBookingChange, onDropBooking, onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, onFooterHeightChange, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot, liveBookingMutate }: GoReservasConfigScreenProps & {
+function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, onProposeBookingChange, onDropBooking, onClose, onOpenVerificacion, onOpenCalendarPanel, onOpenGo, onCreateTaskAtTime, onGoToLanding, dayNightMode, onDayNightModeChange, handedness = "right", hideFAB = false, onFooterHeightChange, navigateToDayISO, onNavigateDayConsumed, allGoLog, setGoLog, demoStore, demoSnapshot, liveBookingMutate, liveClientsRead }: GoReservasConfigScreenProps & {
   allGoLog: GoEntry[];
   setGoLog: React.Dispatch<React.SetStateAction<GoEntry[]>>;
   demoStore?: BusinessDemoStore;
   demoSnapshot?: unknown;
   liveBookingMutate?: ReturnType<typeof useBusinessBookings>["mutate"];
+  liveClientsRead?: { bookings:Booking[]; loading:boolean; error:string; authorized:boolean };
 }) {
   const respondToDemoProposal=async(entry:GoEntry,operation:"accept"|"reject",acceptFinancialTerms=false)=>{
     if(!demoStore && liveBookingMutate)return liveBookingMutate(entry,operation,{proposalId:entry.changeProposal?.id,acceptFinancialTerms});
@@ -628,7 +633,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
 
       {/* ── View mode tabs ── */}
       <View style={[g.modeTabs, { backgroundColor: tk.card, borderBottomColor: tk.border, paddingLeft: insets.left + 8, paddingRight: insets.right + 8 }]}>
-        {VIEW_MODES.filter(m => !isPhone || m.key !== "split").map(m => {
+        {VIEW_MODES.filter(m => (!isPhone || m.key !== "split") && (!demoStore || m.key !== "clientes")).map(m => {
           const active = m.key === viewMode;
           return (
             <TouchableOpacity
@@ -639,7 +644,7 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             >
               {!isPhone && <Feather name={m.icon} size={14} color={active ? "#fff" : tk.gray} />}
               <Text style={[g.modeTabTxt, { color: tk.gray }, active && { color: "#fff" }]} adjustsFontSizeToFit minimumFontScale={0.8} numberOfLines={1}>
-                {m.key === "plano" ? t("view_mode_plano") : m.key === "split" ? t("view_mode_dividido") : t("view_mode_calendario")}
+                {m.key === "plano" ? t("view_mode_plano") : m.key === "split" ? t("view_mode_dividido") : m.key === "calendario" ? t("view_mode_calendario") : lang === "en" ? "Clients" : "Clientes"}
               </Text>
             </TouchableOpacity>
           );
@@ -783,6 +788,8 @@ function useGoReservasContent({ onOpenMessage,onResolveEntry,canResolveEntry, on
             }}
           />
         )}
+
+        {viewMode === "clientes" && !demoStore && <BusinessClientsScreen businessId={config.businessId} bookings={liveClientsRead?.bookings ?? []} loading={liveClientsRead?.loading ?? false} error={liveClientsRead?.error ?? ""} authorized={liveClientsRead?.authorized ?? false} isDark={isDark} />}
 
       </View>
 

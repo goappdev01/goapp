@@ -22,8 +22,8 @@ test('business calendar uses the one canonical ID, incoming proposal, current re
  }finally{await f.close();}
 });
 test('business/account changes reject retained callbacks without a write and remove the prior scope',async()=>{
- const f=await fixture();try{const previous=f.model,entry=previous.entries[0];await f.switchCompany(secondCompany);assert.ok(f.model.entries.every(e=>e.businessId===secondCompany));await assert.rejects(previous.mutate(entry,'cancel'),/identidad|empresa/);assert.equal(f.calls.length,0);
- const old=f.model,otherEntry=old.entries[0];await f.switchUser(other);assert.equal(f.model.entries.length,0);await assert.rejects(old.mutate(otherEntry,'cancel'),/identidad|empresa/);assert.equal(f.calls.length,0);
+ const f=await fixture();try{const previous=f.model,entry=previous.entries[0];assert.equal(previous.bookings[0].businessId,company);await f.switchCompany(secondCompany);assert.ok(f.model.entries.every(e=>e.businessId===secondCompany));assert.ok(f.model.bookings.every(e=>e.businessId===secondCompany));await assert.rejects(previous.mutate(entry,'cancel'),/identidad|empresa/);assert.equal(f.calls.length,0);
+ const old=f.model,otherEntry=old.entries[0];await f.switchUser(other);assert.equal(f.model.entries.length,0);assert.equal(f.model.bookings.length,0);await assert.rejects(old.mutate(otherEntry,'cancel'),/identidad|empresa/);assert.equal(f.calls.length,0);
  }finally{await f.close();}
 });
 test('business canonical merge drops stale cloud mirrors but keeps unrelated GO actions; it writes no local booking copy',async()=>{

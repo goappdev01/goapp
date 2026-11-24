@@ -534,6 +534,19 @@ test("registered iPhone bookings use the same compact plan and calendar navigati
   assert.deepEqual(plain(f.store.getSnapshot()),before);assert.equal(f.writes.length,writes);
 });
 
+test("live daily operations open business clients without exposing the view in DEMO", async () => {
+  const f=dataFixture();await f.store.updateConfig({businessName:"Negocio registrado"});
+  const live=uiFixture(f,{width:393,liveMode:true}),Live=live.load("components/booking/GoReservasConfigScreen.tsx").GoReservasConfigScreen;
+  let tree=live.render(Live,{onClose(){},hideFAB:true});
+  const clientsTab=button(tree,"Clientes");assert.ok(clientsTab);
+  clientsTab.props.onPress();tree=live.render(Live,{onClose(){},hideFAB:true});
+  const clients=component(tree,"BusinessClientsScreen");assert.ok(clients);
+  assert.equal(clients.props.bookings.length,0);assert.equal(clients.props.authorized,false);
+  const demo=uiFixture(f),Demo=demo.load("components/booking/GoReservasConfigScreen.tsx").GoReservasDemoScreen;
+  tree=demo.render(Demo,{onClose(){},hideFAB:true});
+  assert.equal(button(tree,"Clientes"),undefined);
+});
+
 test("the business entry shows the same two paths for live and sports businesses without activating backend services", async () => {
   const f=dataFixture();await configuredSalon(f);await f.store.updateConfig({sectorId:"deportes",subId:"padel"});
   const before=plain(f.store.getSnapshot()),ui=uiFixture(f,{businessPreview:false,ownerIdentity:false,adminAllowed:false});
