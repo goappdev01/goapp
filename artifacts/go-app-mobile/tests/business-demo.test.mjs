@@ -268,6 +268,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
         if (key in imports) return imports[key];
         if (key === "@/theme/goAssistantColors") return load("theme/goAssistantColors.ts");
         if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };
+        if (key === "./ServiceComplementManager") return { ServiceComplementManager: () => null };
         if (key === "./ProfessionalGapPolicy") return load("components/empresa/ProfessionalGapPolicy.tsx");
         // The remote-only date editor has its own real component and SQL integration tests.
         if (key === "./CalendarExceptionsSection") return componentMocks;
@@ -1025,6 +1026,17 @@ test("Next commits a focused professional name before validating and advancing t
   assert.ok(component(ui.render(),"StepReservas"));ui.unmount(step.type);await turn();
   const restored=await f.make().load();assert.equal(restored.config.plantillaItems[0].count,5);assert.equal(restored.config.plantillaItems[0].staffNames[4],"Profesional adicional");
   assert.deepEqual(plain(restored.plan.elements.slice(0,before.elements.length)),before.elements);assert.equal(restored.plan.elements.length,5);assert.equal(restored.config.plantillaItems[0].id,"original-posts");
+});
+test("a hair business sets a partial booking percentage without altering free or full modes",async()=>{
+  const f=dataFixture();await configuredSalon(f);
+  const ui=configurationUI(f,5),{page}=ui.enterStep("StepReservas");
+  component(page(),"PolicySection").props.onChange(2);await turn();page();
+  const input=nodes(page()).find(node=>node.type==="TextInput"&&node.props.accessibilityLabel==="Porcentaje al reservar");
+  assert.ok(input);input.props.onChangeText("20");page();
+  button(ui.render(),"biz_next").props.onPress();await turn();
+  const saved=(await f.make().load()).config;
+  assert.equal(saved.paymentPolicy,2);assert.equal(saved.bookingDepositPercent,20);
+  assert.equal(100-saved.bookingDepositPercent,80);
 });
 test("closing the professional page commits its focused name and specialties without requiring blur",async()=>{
   const f=dataFixture();await configuredSalon(f);const ui=configurationUI(f,4),{step,page}=ui.enterStep("StepEspacios");

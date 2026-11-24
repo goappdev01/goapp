@@ -1,4 +1,4 @@
-import { summarizeBookingServices, bookingServiceIds, staffSupportsBookingServices } from "./bookingServices";
+import { summarizeBookingServices, bookingServiceIds, staffSupportsBookingServices, bookingPaymentTerms } from "./bookingServices";
 import { localCatalogQuote } from "./bookingServices";
 import type { CatalogAssociation, CatalogQuote } from "./catalogAssociations";
 import type { BusinessConfig } from "@/contexts/GoBusinessConfigContext";
@@ -44,6 +44,7 @@ function createLocalDemoBookingRepository(store: BusinessDemoStore, options: Rep
     location: data.config.address || (data.config.coordinates ? `${data.config.coordinates.latitude}, ${data.config.coordinates.longitude}` : ""),
     phone: data.config.phoneE164 ?? data.config.phone ?? "", whatsapp: data.config.whatsappE164 ?? data.config.whatsapp,
     bookingActive: true, bookingColor: "#3D9A84", timezone: data.config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Europe/Madrid", createdAt: "",
+    paymentPolicy: data.config.paymentPolicy, bookingDepositPercent: data.config.bookingDepositPercent,
   }) : null;
   const requireBusiness = (id: string) => { if (id !== store.businessId) throw new Error("DEMO no puede consultar empresas reales."); };
   const resourceOptions = (data: BusinessDemoData, service: BookableItem, member?: Staff, serviceIds = [service.id]) => {
@@ -145,8 +146,11 @@ function createLocalDemoBookingRepository(store: BusinessDemoStore, options: Rep
       if (conflict) return { ok:false, conflict:clone(conflict) };
       throw new Error("Esta hora o puesto no está disponible en el horario configurado.");
     }
+    const paymentTerms = bookingPaymentTerms(acceptedQuote?.totalPrice ?? selection.item.price, data.config.paymentPolicy, data.config.bookingDepositPercent);
+    if (existing?.paymentTermsSnapshot && JSON.stringify(existing.paymentTermsSnapshot) !== JSON.stringify(paymentTerms))
+      throw Error("Las condiciones de pago cambiaron. Revisa el importe antes de confirmar.");
     const id = existing?.id ?? `demo_booking_${store.businessId}_${now()}_${Math.random().toString(36).slice(2,10)}`;
-    const booking: DemoBooking = { ...clone(input), ...(participant ? {receipt:{...input.receipt,customerName:participant.name,customerPhone:participant.phone}} : {}), id, customerId:store.ownerUserId, paymentStatus:"none", elementId:existing?.elementId ?? resource.elementId,
+    const booking: DemoBooking = { ...clone(input), ...(participant ? {receipt:{...input.receipt,customerName:participant.name,customerPhone:participant.phone}} : {}), id, customerId:store.ownerUserId, paymentStatus:"none", paymentTermsSnapshot:paymentTerms, elementId:existing?.elementId ?? resource.elementId,
       staffId:existing?.staffId ?? resource.staff?.id, professionalName:existing?.professionalName ?? resource.staff?.name,
       ...(serviceIds.length > 1 || acceptedQuote ? { services: clone(selection.services) } : {}),
       ...(acceptedQuote ? { catalogSnapshot: clone(acceptedQuote) } : {}),

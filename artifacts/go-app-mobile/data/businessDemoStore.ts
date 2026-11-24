@@ -249,7 +249,7 @@ export function createBusinessDemoStore(options: { ownerUserId: string; storage:
   const key = businessDemoStorageKey(ownerUserId, options.companyId);
   const suffix = ownerUserId.toLowerCase() + (options.companyId ? "_" + options.companyId.toLowerCase() : "");
   const businessId = `demo_business_${suffix}`, planId = `demo_plan_${suffix}`;
-  const configKeys = ["businessName", "timezone", "address", "cartaUrl", "sectorId", "subId", "plantillaItems", "activeDays", "openFrom", "openTo", "daySchedules", "services", "paymentPolicy", "approvalPolicy", "cancelPolicy", "bookingEnabled", "completedSteps", "paymentMethod", "phone", "whatsapp", "staffSchedules", "countryCode", "mobile", "coordinates", "phoneE164", "mobileE164", "whatsappE164"] as const;
+  const configKeys = ["businessName", "timezone", "address", "cartaUrl", "sectorId", "subId", "plantillaItems", "activeDays", "openFrom", "openTo", "daySchedules", "services", "paymentPolicy", "bookingDepositPercent", "approvalPolicy", "cancelPolicy", "bookingEnabled", "completedSteps", "paymentMethod", "phone", "whatsapp", "staffSchedules", "countryCode", "mobile", "coordinates", "phoneE164", "mobileE164", "whatsappE164"] as const;
   const freshConfig = (): BusinessConfig => ({ ...clone(options.initialConfig), businessId, isBusinessActive: false });
   const fresh = (): BusinessDemoData => ({ version: 1, ownerUserId, config: freshConfig(), plan: null, reservations: [], bookings: [], entries: [], preferences: {} });
   let snapshot = fresh(), loaded = false, observedRevision = -1;
@@ -524,7 +524,8 @@ export function getBusinessDemoSetupState(config: BusinessConfig, plan?: FloorPl
     schedule,
     !!config.services?.length && config.services.every(service => !!service.name?.trim() && Number.isFinite(service.duration) && service.duration > 0 && Number.isFinite(service.price) && service.price >= 0 && (service.capacity === undefined || Number.isInteger(service.capacity) && service.capacity > 0)),
     !!config.plantillaItems?.some(item => item.count > 0),
-    marked.has(5) && [config.paymentPolicy,config.approvalPolicy,config.cancelPolicy].every((value,index) => Number.isInteger(value) && value >= 0 && value <= (index === 2 ? 2 : 1)),
+    marked.has(5) && [config.paymentPolicy,config.approvalPolicy,config.cancelPolicy].every((value,index) => Number.isInteger(value) && value >= 0 && value <= (index === 0 || index === 2 ? 2 : 1))
+      && (config.paymentPolicy !== 2 || Number.isInteger(config.bookingDepositPercent) && config.bookingDepositPercent! >= 1 && config.bookingDepositPercent! <= 99),
     plan === undefined ? marked.has(6) : !!plan?.elements.length && plan.businessId === config.businessId,
     marked.has(7),
   ];

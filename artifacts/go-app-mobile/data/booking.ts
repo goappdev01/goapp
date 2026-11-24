@@ -38,6 +38,9 @@ export type Business = {
   timezone: string;
   createdAt: string;
   cancellationPolicy?: CancellationPolicy;
+  /** Local preview only until the booking server can freeze payment terms. */
+  paymentPolicy?: number;
+  bookingDepositPercent?: number;
   bookingResources?: { id: string; name: string; capacity: number; active?: boolean }[];
   bookingBlocks?: { startsAt: string; endsAt: string }[];
 };
@@ -93,6 +96,7 @@ export type BookingChangeProposal = {
 };
 export type BookingChangeEvent = { proposal: BookingChangeProposal; outcome: "accepted" | "rejected" | "countered" | "cancelled"; actor: "customer" | "business"; at: number };
 export type Booking = {
+  paymentTermsSnapshot?: import("./bookingServices").BookingPaymentTerms;
   registeredSourceId?: string; // Owner-scoped registration hint; verified again by the server.
   totalPrice?: number | null;
   currency?: string;

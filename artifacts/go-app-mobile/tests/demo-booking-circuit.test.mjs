@@ -11,7 +11,45 @@ const plain=value=>JSON.parse(JSON.stringify(value));
 function load(name,imports={}) { const exports={}; const text=ts.transpileModule(readFileSync(name,"utf8"),{compilerOptions:{ esModuleInterop: false, alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
   vm.runInNewContext(text,{exports,require:key=>{if(key in imports)return imports[key];throw Error("External/runtime dependency forbidden: "+key);},console,Date,Intl,Set,Map});return exports; }
 const storeModule=load("data/businessDemoStore.ts");
-const repoModule=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":load("data/bookingServices.ts")});
+const paymentMath=load("data/bookingServices.ts");
+const repoModule=load("data/demoBookingRepository.ts",{"./businessDemoStore":storeModule,"./bookingServices":paymentMath});
+
+test('booking percentages use exact cents, free/full retain their old modes, and invalid partial values fail', () => {
+ for(const [percent,expected] of [[20,247],[50,618],[75,926]]) {
+  const terms=paymentMath.bookingPaymentTerms(12.35,2,percent);
+  assert.equal(terms.dueAtBookingCents,expected);assert.equal(terms.dueAtVenueCents,1235-expected);
+  assert.equal(terms.bookingPercent+terms.venuePercent,100);
+  assert.equal(terms.requestedCents,0);assert.equal(terms.confirmedCents,0);
+ }
+ assert.equal(paymentMath.bookingPaymentTerms(12.35,0).dueAtBookingCents,0);
+ assert.equal(paymentMath.bookingPaymentTerms(12.35,1).dueAtBookingCents,1235);
+ for(const value of ['','0','100','-1','25.5','abc'])assert.throws(()=>paymentMath.parsePartialBookingPercent(value));
+ assert.equal(paymentMath.parsePartialBookingPercent('20'),20);
+ assert.throws(()=>paymentMath.bookingPaymentTerms(12.35,2,0));
+ assert.throws(()=>paymentMath.bookingPaymentTerms(12.35,2,100));
+});
+
+test('a local confirmed booking freezes its split; a changed HOLD must be reviewed again',async()=>{
+ const f=fixture();await configured(f);await f.store.updateConfig({paymentPolicy:2,bookingDepositPercent:20});
+ const hold=await f.repo.createHold(await inputFor(f));assert.equal(hold.ok,true);
+ const original=plain(hold.booking.paymentTermsSnapshot);assert.equal(original.bookingPercent,20);
+ await f.store.updateConfig({bookingDepositPercent:75});
+ await assert.rejects(f.repo.claimSlot({...hold.booking,status:'CONFIRMED'}),/condiciones de pago cambiaron/);
+ await f.store.updateConfig({bookingDepositPercent:20});
+ const confirmed=await f.repo.claimSlot({...hold.booking,status:'CONFIRMED'});assert.equal(confirmed.ok,true);
+ await f.store.updateConfig({bookingDepositPercent:50});
+ const reopened=f.make();await reopened.load();
+ assert.deepEqual(plain(reopened.getSnapshot().bookings[0].paymentTermsSnapshot),original);
+ assert.equal(reopened.getSnapshot().bookings[0].paymentStatus,'none');
+});
+test('partial booking percentages remain scoped to each local business owner',async()=>{
+ const shared=new Map(),a=fixture(owner,shared),b=fixture(other,shared);
+ await a.store.updateConfig({paymentPolicy:2,bookingDepositPercent:20});
+ await b.store.updateConfig({paymentPolicy:2,bookingDepositPercent:75});
+ const reopenedA=a.make(),reopenedB=b.make();await reopenedA.load();await reopenedB.load();
+ assert.equal(reopenedA.getSnapshot().config.bookingDepositPercent,20);
+ assert.equal(reopenedB.getSnapshot().config.bookingDepositPercent,75);
+});
 
 test('a newly confirmed booking and the same persisted booking reopened retain identical compact Landing actions',async()=>{
  const f=fixture();await configured(f);const hold=await f.repo.createHold(await inputFor(f));assert.equal(hold.ok,true);assert.equal((await f.repo.claimSlot({...hold.booking,status:'CONFIRMED'})).ok,true);

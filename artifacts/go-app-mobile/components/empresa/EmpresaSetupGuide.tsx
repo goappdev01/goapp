@@ -8,6 +8,7 @@ import type { ScrollViewInstance } from "react-native";
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Alert,
   Animated,
   Dimensions,
   Easing,
@@ -43,6 +44,7 @@ import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { trSector } from "@/data/goSectorTranslations";
 import type { Lang } from "@/i18n/translations";
+import { parsePartialBookingPercent } from "@/data/bookingServices";
 
 // ─── Storage ────────────────────────────────────────────────────────────────
 
@@ -61,6 +63,7 @@ export type SetupState = {
   openTo?: string;
   services?: SavedService[];
   paymentPolicy?: number;
+  bookingDepositPercent?: number;
   approvalPolicy?: number;
   cancelPolicy?: number;
 };
@@ -737,6 +740,7 @@ function buildPaymentOpts(t: (k: any) => string): PolicyOpt[] {
   return [
     { label: t("biz_free_booking"), sub: t("biz_no_prepay"),        icon: "gift"        },
     { label: t("biz_prepay"),       sub: t("biz_prepay_required"),  icon: "credit-card" },
+    { label: t("biz_partial_payment"), sub: t("biz_partial_payment_desc"), icon: "percent" },
   ];
 }
 function buildApprovalOpts(t: (k: any) => string): PolicyOpt[] {
@@ -794,17 +798,19 @@ function PolicyRow({ title, opts, value, onChange, color }: {
 function Step3ReservaPublicacion({
   isVerified,
   payment, setPayment,
+  depositPercent, setDepositPercent,
   approval, setApproval,
   cancel, setCancel,
   onOpenVerificacion,
 }: {
   isVerified?: boolean;
   payment: number;  setPayment:  (v: number) => void;
+  depositPercent: string; setDepositPercent: (v: string) => void;
   approval: number; setApproval: (v: number) => void;
   cancel: number;   setCancel:   (v: number) => void;
   onOpenVerificacion?: () => void;
 }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [copied, setCopied] = useState(false);
 
   const sinPago = payment === 0;
@@ -832,6 +838,15 @@ function Step3ReservaPublicacion({
     <View style={g.stepBody}>
       {/* ── Booking policy ── */}
       <PolicyRow title={t("biz_booking_type")} opts={PAYMENT_OPTS}  value={payment}  onChange={setPayment}  color={GOLD}   />
+      {payment === 2 && <View style={g.sectionCard}>
+        <Text style={g.policyLabel}>{t("biz_partial_payment")} · {lang === "en" ? "% at booking" : "% al reservar"}</Text>
+        <TextInput accessibilityLabel={lang === "en" ? "Percentage at booking" : "Porcentaje al reservar"} keyboardType="number-pad" value={depositPercent}
+          onChangeText={setDepositPercent} maxLength={2} placeholder="1–99" style={{ minHeight: 44, color: TEXT, borderWidth: 1, borderColor: BORDER, borderRadius: 10, paddingHorizontal: 12, marginTop: 8 }} />
+        <Text style={g.policySub}>{/^\d{1,2}$/.test(depositPercent) && Number(depositPercent) >= 1 && Number(depositPercent) <= 99
+          ? (lang === "en" ? `${100 - Number(depositPercent)}% at the venue` : `${100 - Number(depositPercent)} % en el establecimiento`)
+          : (lang === "en" ? "Enter an integer from 1 to 99." : "Indica un entero del 1 al 99.")}</Text>
+        <Text style={g.policySub}>{lang === "en" ? "Payment collection is not active; this split does not yet apply to real bookings." : "El cobro no está activo; este reparto aún no se aplica a reservas reales."}</Text>
+      </View>}
       <PolicyRow title={t("biz_approval")}     opts={APPROVAL_OPTS} value={approval} onChange={setApproval} color={BLUE}   />
 
       {sinPago ? (
@@ -940,6 +955,7 @@ export function EmpresaSetupGuide({
 
   // ── Reservas y Publicación (Step 3) — estado local sembrado desde contexto ───
   const [paymentPolicy,  setPaymentPolicy]  = useState<number>(bConfig.paymentPolicy);
+  const [depositPercent, setDepositPercent] = useState(String(bConfig.bookingDepositPercent ?? ""));
   const [approvalPolicy, setApprovalPolicy] = useState<number>(bConfig.approvalPolicy);
   const [cancelPolicy,   setCancelPolicy]   = useState<number>(bConfig.cancelPolicy);
 
@@ -984,10 +1000,11 @@ export function EmpresaSetupGuide({
       openTo,
       services: services.filter(s => s.name.trim()).map(({ name, duration, price }) => ({ name, duration, price })),
       paymentPolicy,
+      bookingDepositPercent: paymentPolicy === 2 && /^\d{1,2}$/.test(depositPercent) && Number(depositPercent) >= 1 && Number(depositPercent) <= 99 ? Number(depositPercent) : bConfig.bookingDepositPercent,
       approvalPolicy,
       cancelPolicy,
     });
-  }, [updateConfig, activeDays, openFrom, openTo, services, paymentPolicy, approvalPolicy, cancelPolicy]);
+  }, [updateConfig, activeDays, openFrom, openTo, services, paymentPolicy, depositPercent, bConfig.bookingDepositPercent, approvalPolicy, cancelPolicy]);
 
   const buildConfigSnapshot = useCallback((): Partial<SetupState> => ({
     sectorId:      selectedSector?.id,
@@ -999,12 +1016,19 @@ export function EmpresaSetupGuide({
       .filter(s => s.name.trim())
       .map(({ name, duration, price }) => ({ name, duration, price })),
     paymentPolicy,
+    bookingDepositPercent: paymentPolicy === 2 && /^\d{1,2}$/.test(depositPercent) && Number(depositPercent) >= 1 && Number(depositPercent) <= 99 ? Number(depositPercent) : bConfig.bookingDepositPercent,
     approvalPolicy,
     cancelPolicy,
-  }), [selectedSector, bConfig.subId, activeDays, openFrom, openTo, services, paymentPolicy, approvalPolicy, cancelPolicy]);
+  }), [selectedSector, bConfig.subId, bConfig.bookingDepositPercent, activeDays, openFrom, openTo, services, paymentPolicy, depositPercent, approvalPolicy, cancelPolicy]);
 
+  const validPartialPayment = () => {
+    if (currentStep !== 3 || paymentPolicy !== 2) return true;
+    try { parsePartialBookingPercent(depositPercent); return true; }
+    catch (error) { Alert.alert("Porcentaje no válido", error instanceof Error ? error.message : String(error)); return false; }
+  };
   const handleNext = async () => {
     await hapticNextStep();
+    if (!validPartialPayment()) return;
 
     // Sincroniza horario/servicios/políticas con el contexto global
     syncToContext();
@@ -1025,6 +1049,7 @@ export function EmpresaSetupGuide({
 
   const handleSkipStep = async () => {
     await Haptics.selectionAsync().catch(() => {});
+    if (!validPartialPayment()) return;
     syncToContext();
     const snapshot = buildConfigSnapshot();
     const updated: SetupState = { ...setupState, ...snapshot, firstOpenDone: true };
@@ -1036,6 +1061,8 @@ export function EmpresaSetupGuide({
   };
 
   const handleClose = async () => {
+    if (currentStep === 3 && paymentPolicy === 2 && !/^\d{1,2}$/.test(depositPercent)) { onClose(); return; }
+    if (currentStep === 3 && paymentPolicy === 2 && (Number(depositPercent) < 1 || Number(depositPercent) > 99)) { onClose(); return; }
     syncToContext();
     const snapshot = buildConfigSnapshot();
     const updated: SetupState = { ...setupState, ...snapshot, firstOpenDone: true };
@@ -1155,6 +1182,8 @@ export function EmpresaSetupGuide({
               isVerified={isVerified}
               payment={paymentPolicy}
               setPayment={setPaymentPolicy}
+              depositPercent={depositPercent}
+              setDepositPercent={setDepositPercent}
               approval={approvalPolicy}
               setApproval={setApprovalPolicy}
               cancel={cancelPolicy}

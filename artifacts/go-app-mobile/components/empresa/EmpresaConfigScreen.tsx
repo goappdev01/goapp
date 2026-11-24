@@ -84,6 +84,7 @@ import {
 } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { CatalogAssociationManager } from "./CatalogAssociationManager";
+import { parsePartialBookingPercent } from "@/data/bookingServices";
 import { ServiceComplementManager } from "./ServiceComplementManager";
 import { isStableBookingId, serializeServiceConfiguration, validateBookingResources,
   validateBusinessTimezone, validateServiceTiming, type BookingResource } from "@/data/serviceTiming";
@@ -226,6 +227,7 @@ function buildPaymentOptsCfg(t: (k: any) => string) {
   return [
     { label: t("biz_free_booking"), sub: t("biz_no_prepay"),       icon: "gift"        },
     { label: t("biz_prepay"),       sub: t("biz_prepay_required"), icon: "credit-card" },
+    { label: t("biz_partial_payment"), sub: t("biz_partial_payment_desc"), icon: "percent" },
   ] as const;
 }
 
@@ -773,7 +775,7 @@ export function EmpresaConfigScreen({ onBack, onOpenVerificacion, onManageCalend
             {currentStep === 2 && <StepHorario key={config.businessId ?? "draft"} currentSector={currentSector} onManageConflicts={onManageCalendarConflicts} />}
             {currentStep === 3 && <StepServicios currentSector={currentSector} saveRef={stepSaveRef} />}
             {currentStep === 4 && <StepEspacios currentSector={currentSector} saveRef={stepSaveRef} onRevealProfessional={revealProfessional} />}
-            {currentStep === 5 && <StepReservas />}
+            {currentStep === 5 && <StepReservas saveRef={stepSaveRef} />}
             {currentStep === 6 && <StepPlano currentSector={currentSector} onOpenEditor={() => setPlanoEditorOpen(true)} />}
             {currentStep === 7 && (
               <StepPublicar
@@ -2824,22 +2826,47 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
 // PASO 5 — RESERVAS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function StepReservas() {
-  const { t } = useLanguage();
+function StepReservas({ saveRef }: { saveRef: StepSaveRef }) {
+  const { t, lang } = useLanguage();
   const { config, updateConfig } = useBusinessConfig();
+  const [policyDraft, setPolicyDraft] = useState(config.paymentPolicy);
+  const [percentDraft, setPercentDraft] = useState(String(config.bookingDepositPercent ?? ""));
+  useEffect(() => { setPolicyDraft(config.paymentPolicy); setPercentDraft(String(config.bookingDepositPercent ?? "")); }, [config.businessId]);
+  useEffect(() => {
+    saveRef.current = async () => {
+      if (policyDraft === 2) updateConfig({ paymentPolicy: 2, bookingDepositPercent: parsePartialBookingPercent(percentDraft) });
+    };
+    return () => { saveRef.current = null; };
+  }, [saveRef, policyDraft, percentDraft, updateConfig]);
   const PAYMENT_OPTS = buildPaymentOptsCfg(t);
   const CANCEL_OPTS  = buildCancelOptsCfg(t);
-  const sinPago = config.paymentPolicy === 0;
+  const sinPago = policyDraft === 0;
 
   return (
     <View>
       <PolicySection
         title={t("biz_booking_type")}
         opts={PAYMENT_OPTS}
-        value={config.paymentPolicy}
-        onChange={v => updateConfig({ paymentPolicy: v })}
+        value={policyDraft}
+        onChange={v => { setPolicyDraft(v); if (v !== 2) updateConfig({ paymentPolicy: v }); }}
         color={GOLD}
       />
+
+      {policyDraft === 2 && <View style={c.sectionCard}>
+        <Text style={c.policyLabel}>{lang === "en" ? "% at booking" : "% al reservar"}</Text>
+        <TextInput accessibilityLabel={lang === "en" ? "Percentage at booking" : "Porcentaje al reservar"}
+          keyboardType="number-pad" value={percentDraft} onChangeText={value => {
+            setPercentDraft(value);
+            let percent: number;
+            try { percent = parsePartialBookingPercent(value); } catch { return; }
+            updateConfig({ paymentPolicy: 2, bookingDepositPercent: percent });
+          }} maxLength={2}
+          style={[c.svcNameInput, { minHeight: 44, marginTop: 8 }]} placeholder="1–99" placeholderTextColor={DIM} />
+        <Text style={c.policySub}>{/^\d{1,2}$/.test(percentDraft) && Number(percentDraft) >= 1 && Number(percentDraft) <= 99
+          ? (lang === "en" ? `${100 - Number(percentDraft)}% at the venue` : `${100 - Number(percentDraft)} % en el establecimiento`)
+          : (lang === "en" ? "Enter an integer from 1 to 99." : "Indica un entero del 1 al 99.")}</Text>
+        <Text style={c.policySub}>{lang === "en" ? "Payment collection is not active. This split does not yet apply to real bookings." : "El cobro no está activo. Este reparto aún no se aplica a reservas reales."}</Text>
+      </View>}
 
       {sinPago ? (
         <View style={[c.sectionCard, { flexDirection: "row", alignItems: "center", gap: 12 }]}>
@@ -3002,7 +3029,7 @@ function StepPublicar({
     {
       icon:  "shield",
       label: t("biz_cfg_step_bookings"),
-      value: ([t("biz_free_booking"), t("biz_prepay")] as const)[config.paymentPolicy ?? 0] ?? t("biz_not_configured"),
+      value: ([t("biz_free_booking"), t("biz_prepay"), t("biz_partial_payment")] as const)[config.paymentPolicy ?? 0] ?? t("biz_not_configured"),
       ok:    true,
       step:  5,
     },

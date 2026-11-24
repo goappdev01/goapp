@@ -57,7 +57,7 @@ import { syncBookingToGoLog } from "@/lib/goLogBridge";
 import { formatISODate, getToday } from "@/lib/time";
 import { useLanguage } from "@/contexts/LanguageContext";
 import type { DemoBookingRepository } from "@/data/demoBookingRepository";
-import { summarizeBookingServices, staffSupportsBookingServices, type BookingService } from "@/data/bookingServices";
+import { bookingPaymentTerms, summarizeBookingServices, staffSupportsBookingServices, type BookingService } from "@/data/bookingServices";
 import { compactTimelineOptions, timelineOptionLabel } from "@/data/bookingTimeline";
 import { bookingActivityEnabled, canonicalBookingActivity, visibleBookingSectors } from "@workspace/api-zod";
 import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
@@ -1135,6 +1135,12 @@ export function BookingSearchOverlay({
   const proposalBusinessName = (selectedBusiness?.name || changeSelection?.business.name || "").trim().toLocaleUpperCase(lang);
   const reviewedSlot = proposalReview?.slot ?? activeHold;
   const reviewedQuote = proposalReview?.selection.catalogSnapshot ?? activeHold?.catalogSnapshot;
+  // Only the local booking adapter can preserve these terms today. Cloud bookings
+  // must wait for a server-owned immutable payment snapshot before showing a split.
+  const paymentTerms = confirmedBooking ? confirmedBooking.paymentTermsSnapshot
+    : demoRepository && reviewedQuote && selectedBusiness?.paymentPolicy !== undefined
+      ? bookingPaymentTerms(reviewedQuote.totalPrice, selectedBusiness.paymentPolicy, selectedBusiness.bookingDepositPercent)
+      : undefined;
   const reviewedPlan = confirmedBooking?.timingSnapshot ?? reviewedSlot?.timingSnapshot;
   const summaryItem = selectedItem && reviewedPlan ? { ...selectedItem,
     title: (confirmedBooking?.catalogSnapshot ?? reviewedQuote)?.lines.map(line => line.name).join(" + ") || reviewedPlan.serviceDetails.map(service => service.title).join(" + "),
@@ -1832,6 +1838,13 @@ export function BookingSearchOverlay({
                       </Text>
                       <Text style={s.summaryServiceName}>{trSector(summaryItem!.title, lang)}</Text>
                       {reviewedQuote && <CatalogQuoteBreakdown quote={reviewedQuote} accentColor={accentColor} />}
+                      {paymentTerms && <View style={{ gap: 3, marginTop: 6 }}>
+                        <Text style={s.summaryRowText}>{lang === "en" ? "Due at booking" : "Previsto al reservar"} ({paymentTerms.bookingPercent} %) · {(paymentTerms.dueAtBookingCents / 100).toFixed(2)} €</Text>
+                        <Text style={s.summaryRowText}>{lang === "en" ? "Due at the venue" : "Previsto en el establecimiento"} ({paymentTerms.venuePercent} %) · {(paymentTerms.dueAtVenueCents / 100).toFixed(2)} €</Text>
+                        <Text style={s.summaryRowText}>{lang === "en" ? "Payment requested" : "Pago solicitado"} · 0,00 € · {lang === "en" ? "unavailable" : "no disponible"}</Text>
+                        <Text style={s.summaryRowText}>{lang === "en" ? "Payment confirmed" : "Pago confirmado"} · 0,00 €</Text>
+                        <Text style={s.summaryRowText}>{lang === "en" ? "Total outstanding" : "Total pendiente"} · {(paymentTerms.totalCents / 100).toFixed(2)} €</Text>
+                      </View>}
                       {reviewedQuote?.originalTotal !== undefined && (() => {
                         const quote = reviewedQuote;
                         const money = new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: quote.currency });

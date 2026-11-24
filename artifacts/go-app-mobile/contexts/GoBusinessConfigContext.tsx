@@ -104,6 +104,7 @@ export type BusinessConfig = {
   daySchedules:     Record<string, DaySchedule>;
   services:         SavedService[];
   paymentPolicy:    number;
+  bookingDepositPercent?: number; // Only used when paymentPolicy === 2.
   approvalPolicy:   number;
   cancelPolicy:     number;
   bookingEnabled:   boolean;

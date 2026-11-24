@@ -1,6 +1,34 @@
 import type { BookableItem, Booking, Staff } from "./booking";
 import type { CatalogAssociation, CatalogQuote } from "./catalogAssociations";
 
+/** The agreed split is a price snapshot, never proof that money moved. */
+export type BookingPaymentTerms = {
+  bookingPercent: number; venuePercent: number; totalCents: number;
+  dueAtBookingCents: number; dueAtVenueCents: number;
+  requestedCents: 0; confirmedCents: 0;
+};
+export function parsePartialBookingPercent(value: string): number {
+  if (!/^\d{1,2}$/.test(value.trim()) || Number(value.trim()) < 1 || Number(value.trim()) > 99)
+    throw Error("Indica un porcentaje entero entre 1 y 99.");
+  return Number(value.trim());
+}
+export function bookingDepositPercent(policy: number, partialPercent?: number): number {
+  if (policy === 0) return 0;
+  if (policy === 1) return 100;
+  if (policy === 2 && Number.isInteger(partialPercent) && partialPercent! >= 1 && partialPercent! <= 99) return partialPercent!;
+  throw Error("La política de pago parcial necesita un porcentaje entre 1 y 99.");
+}
+export function bookingPaymentTerms(total: number, policy: number, partialPercent?: number): BookingPaymentTerms {
+  if (!Number.isFinite(total) || total < 0 || Math.round(total * 100) / 100 !== total)
+    throw Error("El precio total no es válido en céntimos.");
+  const totalCents = Math.round(total * 100);
+  if (!Number.isSafeInteger(totalCents)) throw Error("El precio total supera el límite permitido.");
+  const bookingPercent = bookingDepositPercent(policy, partialPercent);
+  const dueAtBookingCents = Math.round(totalCents * bookingPercent / 100);
+  return { bookingPercent, venuePercent: 100 - bookingPercent, totalCents, dueAtBookingCents,
+    dueAtVenueCents: totalCents - dueAtBookingCents, requestedCents: 0, confirmedCents: 0 };
+}
+
 export type BookingService = Pick<BookableItem, "id" | "title" | "durationMinutes" | "price" | "currency" | "priceKnown">;
 /** Storage-independent rules for the existing local catalogue adapter. */
 export function localCatalogQuote(businessId: string, catalog: BookableItem[], relations: CatalogAssociation[], roots: string[], selected: string[] = []): CatalogQuote {
