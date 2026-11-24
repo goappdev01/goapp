@@ -178,13 +178,17 @@ export function GoEntrySummary({ entry, showMaps=true }: { entry: GoEntry; showM
   const accepted = entryIsReservation(entry) && policy.stateKey === "booking_state_accepted";
   const unknown = entry.businessBooking || entry.bookingPerspective === "business" ? t("booking_customer_unknown") : lang === "en" ? "Reservation" : "Reserva";
   const professional = entry.professionalName === "Sin preferencia" ? "" : entryIdentity(entry.professionalName);
+  const professionalBesideStatus = accepted && policy.canonical && !!professional;
   const duration = entryIsReservation(entry) ? entryDurationLabel(entry.duration,lang) : entry.duration;
   return <View testID="entry-summary" style={{ gap: accepted ? 3 : 6 }}>
     <Text style={s.title}>{entryHeading(entry, unknown)}</Text>
-    {policy.canonical && <Text style={{ color: policy.stateColor, fontWeight: "800" }}>{entryProposalPending(entry) ? (lang === "en" ? "Original reservation: " : "Reserva original: ") : ""}{t(policy.stateKey as any)}</Text>}
+    {policy.canonical && <View testID="entry-status-professional" style={{flexDirection:"row",flexWrap:"wrap",alignItems:"baseline",justifyContent:"space-between",columnGap:8,rowGap:2}}>
+      <Text style={{ color: policy.stateColor, fontWeight: "800" }}>{entryProposalPending(entry) ? (lang === "en" ? "Original reservation: " : "Reserva original: ") : ""}{t(policy.stateKey as any)}</Text>
+      {professionalBesideStatus && <Text testID="entry-professional" style={[s.text,{flexShrink:1,maxWidth:"100%",textAlign:"right"}]}>{lang === "en" ? "Professional: " : "Profesional: "}{professional}</Text>}
+    </View>}
     <View testID="entry-date-professional" style={{flexDirection:"row",flexWrap:"wrap",alignItems:"baseline",columnGap:12,rowGap:4}}>
       <Text testID="entry-original-date-time" style={[s.text,{flexShrink:1,maxWidth:"100%"}]}>{[entryIsReservation(entry) ? formatBookingLocalDate(entry.dateISO, entry.date, lang, entry.bookingTimeline?.timezone, entry.bookingStartsAt || entry.startDatetime) : entry.date || entry.dateISO, entry.time].filter(Boolean).join(" · ")}</Text>
-      {!!professional && <Text testID="entry-professional" style={[s.text,{marginLeft:"auto",flexShrink:1,maxWidth:"100%",textAlign:"right"}]}>{lang === "en" ? "Professional: " : "Profesional: "}{professional}</Text>}
+      {!!professional && !professionalBesideStatus && <Text testID="entry-professional" style={[s.text,{marginLeft:"auto",flexShrink:1,maxWidth:"100%",textAlign:"right"}]}>{lang === "en" ? "Professional: " : "Profesional: "}{professional}</Text>}
     </View>
     {!!duration && <Text testID="entry-duration" style={s.secondary}>{duration}</Text>}
     {!!entry.place && <View testID="entry-address" style={{flexDirection:"row",flexWrap:"wrap",alignItems:"center",gap:8}}>

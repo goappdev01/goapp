@@ -25,17 +25,27 @@ test('only awaiting response becomes vivid yellow in the detail and shared chang
  }
 });
 
-test('date and professional share a flexible row and retain full values at enlarged text sizes',()=>{
+test('accepted status and professional share a flexible row while date keeps its own row',()=>{
  for(const fontScale of [1,2.8]){
   const entry={...base,professionalName:'Profesional de prueba con un nombre excepcionalmente largo'};
-  const f=sheet(entry,{}, {viewport:{width:320,height:568,fontScale}}),row=nodes(f.tree,n=>n.props.testID==='entry-date-professional')[0];
-  const date=nodes(row,n=>n.props.testID==='entry-original-date-time')[0],professional=nodes(row,n=>n.props.testID==='entry-professional')[0];
+  const f=sheet(entry,{}, {viewport:{width:320,height:568,fontScale}}),row=nodes(f.tree,n=>n.props.testID==='entry-status-professional')[0];
+  const dateRow=nodes(f.tree,n=>n.props.testID==='entry-date-professional')[0];
+  const date=nodes(dateRow,n=>n.props.testID==='entry-original-date-time')[0],professional=nodes(row,n=>n.props.testID==='entry-professional')[0];
   assert.ok(date&&professional);assert.equal(row.props.style.flexDirection,'row');assert.equal(row.props.style.flexWrap,'wrap');
-  assert.equal(Object.assign({},...professional.props.style).marginLeft,'auto');assert.equal(Object.assign({},...professional.props.style).maxWidth,'100%');
+  assert.equal(nodes(row,n=>n.type==='Text').length,2);
+  assert.equal(nodes(dateRow,n=>n.props.testID==='entry-professional').length,0);
+  assert.equal(Object.assign({},...professional.props.style).maxWidth,'100%');
   for(const text of [date,professional]){assert.equal(text.props.numberOfLines,undefined);assert.equal(text.props.adjustsFontSizeToFit,undefined);}
   assert.equal(texts(professional).replace(/\s+/g,' '),'Profesional: '+entry.professionalName);assert.equal(texts(date),'Sáb 26/10/2030 · 12:00');
   assert.equal(texts(nodes(f.tree,n=>n.props.testID==='entry-duration')[0]),'Duración: 60 min');
  }
+});
+
+test('other reservation states keep the professional beside the date',()=>{
+ const entry={...base,estado:'pendiente',bookingStatus:'pendiente'};
+ const f=sheet(entry),dateRow=nodes(f.tree,n=>n.props.testID==='entry-date-professional')[0];
+ assert.equal(nodes(dateRow,n=>n.props.testID==='entry-professional').length,1);
+ assert.equal(nodes(f.tree,n=>n.props.testID==='entry-professional').length,1);
 });
 
 test('compact discard stays left of message in both hands and all controls fit a narrow safe width',()=>{
