@@ -7,143 +7,180 @@ import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { onSessionChanged } from "@/lib/sessionEvents";
 
-/** Adds optional zero-duration catalogue products to an existing service.
- * The server's catalogue quote and booking snapshot remain the price authority. */
-export function ServiceComplementManager({ businessId, demo, beforeOpen }: { businessId?: string; demo: boolean; beforeOpen: () => Promise<void> }) {
-  const { lang } = useLanguage();
-  const label = (es: string, en: string) => lang === "en" ? en : es;
+type Catalog = { items: BookableItem[]; relations: CatalogAssociation[] };
+const empty: Catalog = { items: [], relations: [] };
+const sameName = (a: string, b: string) => a.trim().toLocaleLowerCase() === b.trim().toLocaleLowerCase();
+
+/** The existing catalogue is read once for the whole service step. */
+export function useServiceComplementCatalog(businessId: string | undefined, demo: boolean, enabled: boolean) {
   const { demo: store } = useBusinessConfig();
   const local = demo && store?.businessId === businessId ? store : undefined;
-  const [open, setOpen] = useState(false), [items, setItems] = useState<BookableItem[]>([]), [relations, setRelations] = useState<CatalogAssociation[]>([]);
-  const [source, setSource] = useState(""), [editing, setEditing] = useState(""), [name, setName] = useState(""), [price, setPrice] = useState("");
+  const [catalog, setCatalog] = useState<Catalog>(empty);
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState("");
-  const epoch = useRef(0), inFlight = useRef(false);
-  useEffect(() => onSessionChanged(() => { epoch.current++; setOpen(false); setItems([]); setRelations([]); setSource(""); setEditing(""); setName(""); setPrice(""); }), []);
-  useEffect(() => { epoch.current++; setOpen(false); setItems([]); setRelations([]); setSource(""); setEditing(""); setName(""); setPrice(""); setError(""); }, [businessId]);
-
-  const manage = (operation: "list" | "create" | "update" | "delete", input: object = {}) => local
-    ? createDemoBookingRepository(local).manageAssociations(operation, input)
-    : manageAssociations<CatalogAssociation[]>(businessId!, operation, input);
-  const load = useCallback(async () => {
-    if (!businessId || demo && !local || !demo && !isCloudId(businessId)) return;
-    const ticket = epoch.current;
+  const generation = useRef(0), accountEpoch = useRef(0), scope = useRef(businessId), queue = useRef<Promise<unknown>>(Promise.resolve());
+  scope.current = businessId;
+  useEffect(() => onSessionChanged(() => { accountEpoch.current++; generation.current++; setCatalog(empty); setError(""); }), []);
+  const read = useCallback(async (): Promise<Catalog> => {
+    if (!businessId || demo && !local || !demo && !isCloudId(businessId)) throw Error("Guarda primero la empresa para añadir productos asociados.");
+    const ticket = ++generation.current, epoch = accountEpoch.current;
     setLoading(true);
     try {
-      const [catalogue, edges] = await Promise.all([
+      const [items, relations] = await Promise.all([
         local ? createDemoBookingRepository(local).getCatalogItems(businessId) : getOwnedBookableItems(businessId),
         local ? createDemoBookingRepository(local).manageAssociations("list") : manageAssociations<CatalogAssociation[]>(businessId, "list"),
       ]);
-      if (ticket !== epoch.current) return;
-      setItems(catalogue.filter(item => item.businessId === businessId));
-      setRelations(edges.filter(edge => edge.business_id === businessId));
-    } finally { if (ticket === epoch.current) setLoading(false); }
+      if (scope.current !== businessId || epoch !== accountEpoch.current) throw Error("La cuenta o empresa cambió; vuelve a abrir sus servicios.");
+      const next = { items: items.filter(item => item.businessId === businessId), relations: relations.filter(edge => edge.business_id === businessId) };
+      if (ticket === generation.current) setCatalog(next);
+      return next;
+    } finally { if (scope.current === businessId && ticket === generation.current) setLoading(false); }
   }, [businessId, demo, local]);
-  useEffect(() => { if (open) void load().catch(e => setError(e instanceof Error ? e.message : String(e))); }, [open, load]);
-
-  const run = async (work: () => Promise<void>) => {
-    if (inFlight.current) return;
-    inFlight.current = true; const ticket = epoch.current;
-    setBusy(true); setError("");
-    try { await work(); if (ticket === epoch.current) await load(); }
-    catch (e) { if (ticket === epoch.current) { await load().catch(() => {}); setError(e instanceof Error ? e.message : String(e)); } }
-    finally { inFlight.current = false; if (ticket === epoch.current) setBusy(false); }
-  };
-  const resetDraft = () => { setEditing(""); setName(""); setPrice(""); };
-  const services = items.filter(item => item.catalogKind !== "product" && item.active && item.visible);
-  const selectedService = services.find(item => item.id === source);
-  const supplements = relations.filter(edge => edge.source_id === source && items.some(item => item.id === edge.target_id && item.catalogKind === "product"))
-    .sort((a, b) => (a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER));
-  const productFor = (edge: CatalogAssociation) => items.find(item => item.id === edge.target_id)!;
-  const save = () => void run(async () => {
-    if (!selectedService || !businessId) throw Error(label("Elige un servicio guardado.", "Select a saved service."));
-    const title = name.trim(), supplement = parseEuroSupplement(price);
-    if (!title) throw Error(label("Escribe el nombre del complemento.", "Enter the supplement name."));
-    if (supplements.some(edge => edge.id !== editing && productFor(edge).title.toLocaleLowerCase() === title.toLocaleLowerCase()))
-      throw Error(label("Ese complemento ya existe para el servicio.", "This supplement already exists for the service."));
-    if (editing) {
-      const edge = supplements.find(row => row.id === editing), item = edge && productFor(edge);
-      if (!edge || !item || item.businessId !== businessId || item.currency !== "EUR") throw Error(label("El complemento ha cambiado. Vuelve a abrirlo.", "The supplement changed. Open it again."));
-      if (relations.some(row => row.id !== edge.id && row.target_id === item.id && row.active))
-        throw Error(label("Este producto está compartido por otros servicios. Edítalo desde el catálogo general.", "This product is shared by other services. Edit it in the main catalogue."));
-      const updated = { ...item, title, price: supplement };
-      if (local) await createDemoBookingRepository(local).saveCatalogProduct(updated);
-      else await saveBookableItem(updated);
-    } else {
-      // A failed association leaves a recoverable catalogue product; reuse it on retry.
-      const orphan = items.find(item => item.catalogKind === "product" && item.businessId === businessId
-        && item.catalogMetadata?.goAddonFor === source && item.title === title && item.price === supplement
-        && !relations.some(edge => edge.target_id === item.id));
-      let targetId = orphan?.id;
-      if (!targetId) {
-        const product = { businessId, title, type: "product", catalogKind: "product" as const, durationMinutes: 0,
-          price: supplement, currency: "EUR", customerCapacity: 1, unitQuantity: 1, paymentRequired: false,
-          active: true, visible: true, catalogMetadata: { goAddonFor: source } };
-        if (local) {
-          targetId = `${businessId}_product_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-          await createDemoBookingRepository(local).saveCatalogProduct({ ...product, id: targetId });
-        } else targetId = (await createBookableItem(product)).id;
-      }
-      await manage("create", { sourceId: source, targetId, mode: "optional" });
-    }
-    resetDraft();
-  });
-  const reorder = (index: number, direction: -1 | 1) => void run(async () => {
-    if (!local || !source || index + direction < 0 || index + direction >= supplements.length) return;
-    const ordered = supplements.map(edge => edge.id);
-    [ordered[index], ordered[index + direction]] = [ordered[index + direction], ordered[index]];
-    await local.transformConfig(config => {
-      const ranks = new Map(ordered.map((id, position) => [id, (position + 1) * 10]));
-      return { ...config, catalogAssociations: (config.catalogAssociations ?? []).map(edge => edge.business_id === businessId && edge.source_id === source && ranks.has(edge.id)
-        ? { ...edge, sort_order: ranks.get(edge.id), revision: edge.revision + 1 } : edge) };
+  useEffect(() => {
+    generation.current++; setCatalog(empty); setError("");
+    const epoch = accountEpoch.current;
+    if (enabled && businessId) void read().catch(e => { if (epoch === accountEpoch.current) setError(e instanceof Error ? e.message : String(e)); });
+  }, [enabled, businessId, read]);
+  useEffect(() => { if (!enabled || !local) return; return local.subscribe(() => {
+    const epoch = accountEpoch.current;
+    void read().catch(e => { if (epoch === accountEpoch.current) setError(e instanceof Error ? e.message : String(e)); });
+  }); }, [enabled, local, read]);
+  const mutate = useCallback((work: (fresh: Catalog) => Promise<void>): Promise<void> => {
+    const operation = queue.current.then(async () => {
+      const current = businessId, epoch = accountEpoch.current;
+      setBusy(true); setError("");
+      try {
+        const fresh = await read();
+        if (scope.current !== current || epoch !== accountEpoch.current) throw Error("La cuenta o empresa cambió; no se guardó el producto.");
+        await work(fresh);
+        if (scope.current === current) await read();
+      } catch (e) { if (scope.current === current && epoch === accountEpoch.current) setError(e instanceof Error ? e.message : String(e)); throw e; }
+      finally { if (scope.current === current) setBusy(false); }
     });
-  });
-  const button = (title: string, onPress: () => void, selected = false, disabled = false, accessibilityLabel = title) => <TouchableOpacity accessibilityRole="button" accessibilityLabel={accessibilityLabel}
-    accessibilityState={{ selected, disabled: busy || disabled }} disabled={busy || disabled} onPress={onPress}
-    style={{ minHeight: 44, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, borderWidth: 1,
-      borderColor: selected ? "#008754" : "#9CA3AF", backgroundColor: selected ? "#E7F5ED" : "#FFFFFF", justifyContent: "center" }}>
-    <Text style={{ color: "#111827", fontWeight: selected ? "700" : "500" }}>{title}</Text>
-  </TouchableOpacity>;
+    queue.current = operation.catch(() => {});
+    return operation;
+  }, [businessId, read]);
+  const associate = (operation: "create" | "delete", input: object) => local
+    ? createDemoBookingRepository(local).manageAssociations(operation, input)
+    : manageAssociations(businessId!, operation, input);
+  const saveProduct = (item: BookableItem) => local ? createDemoBookingRepository(local).saveCatalogProduct(item) : saveBookableItem(item);
+  const createProduct = async (item: Omit<BookableItem, "id">): Promise<string> => {
+    if (local) {
+      const id = `${businessId}_product_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      await createDemoBookingRepository(local).saveCatalogProduct({ ...item, id });
+      return id;
+    }
+    return (await createBookableItem(item)).id;
+  };
+  return { ...catalog, loading, busy, error, mutate, associate, saveProduct, createProduct };
+}
 
-  return <View style={{ gap: 8, paddingVertical: 8 }}>
-    {button(label("Complementos por servicio", "Supplements by service"), () => {
-      if (open) { setOpen(false); resetDraft(); return; }
-      void run(async () => { await beforeOpen(); setOpen(true); });
-    }, open)}
-    {!!error && <Text accessibilityRole="alert" style={{ color: "#B91C1C" }}>{error}</Text>}
-    {open && <View style={{ gap: 10 }}>
-      {loading && <Text style={{ color: "#374151" }}>{label("Cargando servicios…", "Loading services…")}</Text>}
-      {!loading && !services.length && <Text style={{ color: "#374151" }}>{label("Guarda primero un servicio principal.", "Save a main service first.")}</Text>}
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>{services.map(service => <React.Fragment key={service.id}>
-        {button(service.title, () => { setSource(service.id); resetDraft(); }, source === service.id)}
-      </React.Fragment>)}</View>
-      {selectedService && <View style={{ gap: 8 }}>
-        <Text style={{ color: "#111827", fontWeight: "700" }}>{label("Complementos opcionales de", "Optional supplements for")} {selectedService.title}</Text>
-        {supplements.map((edge, index) => {
-          const item = productFor(edge);
-          return <View key={edge.id} style={{ padding: 8, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 10, gap: 4 }}>
-            <Text style={{ color: "#111827" }}>{item.title} · {item.price.toFixed(2)} €{edge.active ? "" : label(" · inactivo", " · inactive")}</Text>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-              {button(label("Editar", "Edit"), () => { setEditing(edge.id); setName(item.title); setPrice(item.price.toFixed(2)); }, false, false, label("Editar ", "Edit ") + item.title)}
-              {button(edge.active ? label("Desactivar", "Deactivate") : label("Activar", "Activate"), () => void run(async () => { await manage("update", { id: edge.id, revision: edge.revision, active: !edge.active }); }), false, false, (edge.active ? label("Desactivar ", "Deactivate ") : label("Activar ", "Activate ")) + item.title)}
-              {button(label("Quitar", "Remove"), () => void run(async () => { await manage("delete", { id: edge.id, revision: edge.revision }); if (editing === edge.id) resetDraft(); }), false, false, label("Quitar ", "Remove ") + item.title)}
-              {local && button("↑", () => reorder(index, -1), false, index === 0, label("Subir ", "Move up ") + item.title)}
-              {local && button("↓", () => reorder(index, 1), false, index === supplements.length - 1, label("Bajar ", "Move down ") + item.title)}
-            </View>
-          </View>;
-        })}
-        {!local && supplements.length > 1 && <Text style={{ color: "#6B7280" }}>{label("El orden manual espera la actualización del catálogo del servidor.", "Manual ordering awaits the server catalogue update.")}</Text>}
-        <TextInput accessibilityLabel={label("Nombre del complemento", "Supplement name")} value={name} onChangeText={setName}
-          placeholder={label("Nombre del complemento", "Supplement name")} placeholderTextColor="#6B7280"
-          style={{ minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderColor: "#9CA3AF", borderRadius: 10, color: "#111827" }} />
-        <TextInput accessibilityLabel={label("Suplemento en euros", "Supplement in euros")} value={price} onChangeText={setPrice}
-          keyboardType="decimal-pad" placeholder="0,00 €" placeholderTextColor="#6B7280"
-          style={{ minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderColor: "#9CA3AF", borderRadius: 10, color: "#111827" }} />
-        <Text style={{ color: "#6B7280" }}>{label("Escribe 0,00 si es gratuito. Un producto complementario no añade minutos ni cambia la capacidad.", "Enter 0.00 if free. A product supplement adds no time and does not change capacity.")}</Text>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          {button(editing ? label("Guardar complemento", "Save supplement") : label("Añadir complemento", "Add supplement"), save)}
-          {editing && button(label("Cancelar edición", "Cancel editing"), resetDraft)}
-        </View>
-      </View>}
-    </View>}
+type CatalogController = ReturnType<typeof useServiceComplementCatalog>;
+
+function ProductRow({ id, serviceName, initialName, initialPrice, onSave, onDelete }: {
+  id: string; serviceName: string; initialName?: string; initialPrice?: number;
+  onSave: (name: string, price: string) => Promise<void>; onDelete: () => Promise<void> | void;
+}) {
+  const { lang } = useLanguage();
+  const label = (es: string, en: string) => lang === "en" ? en : es;
+  const [name, setName] = useState(initialName ?? ""), [price, setPrice] = useState(initialPrice === undefined ? "" : initialPrice.toFixed(2));
+  const [saving, setSaving] = useState(false), [error, setError] = useState("");
+  const latest = useRef({ name, price }); latest.current = { name, price };
+  const saved = useRef(initialName === undefined ? "" : JSON.stringify([initialName, initialPrice?.toFixed(2)]));
+  const commit = async () => {
+    if (saving) return;
+    const draft = latest.current;
+    if (!draft.name.trim() && !draft.price.trim()) return;
+    if (!draft.name.trim() || !draft.price.trim()) { setError(label("Completa nombre y precio.", "Enter a name and price.")); return; }
+    const signature = JSON.stringify([draft.name.trim(), draft.price]);
+    if (signature === saved.current) return;
+    setSaving(true); setError("");
+    try { await onSave(draft.name, draft.price); saved.current = signature; }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  };
+  return <View testID={`associated-product-${id}`} style={{ gap: 3 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <TextInput accessibilityLabel={label("Nombre del producto asociado de ", "Associated product name for ") + serviceName}
+        value={name} editable={!saving} onChangeText={setName} onBlur={() => { void commit(); }} onSubmitEditing={() => { void commit(); }}
+        placeholder={label("Producto", "Product")} placeholderTextColor="#6B7280" returnKeyType="done"
+        style={{ flex: 1, minWidth: 72, minHeight: 44, color: "#111827", borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 9, paddingHorizontal: 9, backgroundColor: "#FFFFFF" }} />
+      <TextInput accessibilityLabel={label("Precio de ", "Price for ") + (name.trim() || serviceName)}
+        value={price} editable={!saving} onChangeText={setPrice} onBlur={() => { void commit(); }} onSubmitEditing={() => { void commit(); }}
+        keyboardType="decimal-pad" placeholder="0,00" placeholderTextColor="#6B7280" returnKeyType="done"
+        style={{ width: 70, minHeight: 44, color: "#111827", textAlign: "right", borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 9, paddingHorizontal: 5, backgroundColor: "#FFFFFF" }} />
+      <Text style={{ color: "#111827" }}>€</Text>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={label("Eliminar ", "Remove ") + (name.trim() || label("fila", "row"))}
+        onPress={() => { void Promise.resolve(onDelete()).catch(e => setError(e instanceof Error ? e.message : String(e))); }} disabled={saving}
+        style={{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }}>
+        <Text style={{ color: "#6B7280", fontSize: 22 }}>×</Text>
+      </TouchableOpacity>
+    </View>
+    {!!error && <Text accessibilityRole="alert" style={{ color: "#B91C1C", fontSize: 12 }}>{error}</Text>}
+  </View>;
+}
+
+export function ServiceAssociatedProducts({ serviceName, catalog, beforeSave }: {
+  serviceName: string; catalog: CatalogController; beforeSave: () => Promise<void>;
+}) {
+  const { lang } = useLanguage();
+  const label = (es: string, en: string) => lang === "en" ? en : es;
+  const [drafts, setDrafts] = useState<string[]>([]);
+  useEffect(() => onSessionChanged(() => setDrafts([])), []);
+  const matching = catalog.items.find(item => item.catalogKind !== "product" && sameName(item.title, serviceName));
+  const source = matching;
+  const edges = catalog.relations.filter(edge => edge.source_id === source?.id && edge.mode === "optional" && edge.active
+    && catalog.items.some(item => item.id === edge.target_id && item.catalogKind === "product"))
+    .sort((a, b) => (a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER));
+  const save = async (id: string | null, draftId: string | null, name: string, price: string) => {
+    const title = name.trim(), value = parseEuroSupplement(price);
+    if (!title) throw Error(label("Escribe el nombre del producto.", "Enter the product name."));
+    await beforeSave();
+    await catalog.mutate(async fresh => {
+      const root = fresh.items.find(item => item.catalogKind !== "product" && sameName(item.title, serviceName));
+      if (!root) throw Error(label("El servicio aún se está guardando. Inténtalo de nuevo.", "The service is still being saved. Try again."));
+      const current = id ? fresh.relations.find(edge => edge.id === id && edge.source_id === root.id) : undefined;
+      if (id && !current) throw Error(label("El producto cambió. Vuelve a abrir la ficha.", "The product changed. Reopen the service."));
+      const duplicate = fresh.relations.some(edge => edge.id !== id && edge.source_id === root.id && edge.active
+        && fresh.items.some(item => item.id === edge.target_id && sameName(item.title, title)));
+      if (duplicate) throw Error(label("Ese producto ya está asociado a este servicio.", "That product is already associated with this service."));
+      if (current) {
+        const item = fresh.items.find(row => row.id === current.target_id && row.catalogKind === "product");
+        if (!item || item.businessId !== root.businessId) throw Error(label("Producto no disponible.", "Product unavailable."));
+        if (fresh.relations.some(edge => edge.id !== current.id && edge.target_id === item.id && edge.active))
+          throw Error(label("Producto compartido: edítalo en el catálogo general.", "Shared product: edit it in the main catalogue."));
+        await catalog.saveProduct({ ...item, title, price: value });
+      } else {
+        const orphan = fresh.items.find(item => item.catalogKind === "product" && item.businessId === root.businessId
+          && item.catalogMetadata?.goAddonFor === root.id && sameName(item.title, title) && item.price === value
+          && !fresh.relations.some(edge => edge.target_id === item.id));
+        const targetId = orphan?.id ?? await catalog.createProduct({ businessId: root.businessId, title, type: "product", catalogKind: "product",
+          durationMinutes: 0, price: value, currency: "EUR", customerCapacity: 1, unitQuantity: 1,
+          paymentRequired: false, active: true, visible: true, catalogMetadata: { goAddonFor: root.id } });
+        await catalog.associate("create", { sourceId: root.id, targetId, mode: "optional" });
+      }
+    });
+    if (draftId) setDrafts(current => current.filter(value => value !== draftId));
+  };
+  const remove = async (edge: CatalogAssociation) => {
+    await catalog.mutate(async fresh => {
+      const current = fresh.relations.find(row => row.id === edge.id && row.source_id === source?.id);
+      if (!current) throw Error(label("El producto ya cambió. Reabre la ficha.", "The product changed. Reopen the service."));
+      await catalog.associate("delete", { id: current.id, revision: current.revision });
+    });
+  };
+  return <View style={{ gap: 5, paddingTop: 7 }}>
+    <Text style={{ color: "#111827", fontSize: 13, fontWeight: "600" }}>{label("Productos asociados", "Associated products")}</Text>
+    {edges.map(edge => {
+      const item = catalog.items.find(row => row.id === edge.target_id)!;
+      return <ProductRow key={edge.id} id={edge.id} serviceName={serviceName} initialName={item.title} initialPrice={item.price}
+        onSave={(name, price) => save(edge.id, null, name, price)} onDelete={() => remove(edge)} />;
+    })}
+    {drafts.map(id => <ProductRow key={id} id={id} serviceName={serviceName}
+      onSave={(name, price) => save(null, id, name, price)} onDelete={() => setDrafts(current => current.filter(value => value !== id))} />)}
+    <TouchableOpacity testID="add-associated-product" accessibilityRole="button" accessibilityLabel={label("Añadir producto asociado a ", "Add associated product to ") + serviceName}
+      onPress={() => setDrafts(current => [...current, `draft_${Date.now()}_${Math.random().toString(36).slice(2)}`])}
+      style={{ width: 44, height: 44, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 9, alignItems: "center", justifyContent: "center" }}>
+      <Text style={{ color: "#2563EB", fontSize: 25, lineHeight: 30 }}>+</Text>
+    </TouchableOpacity>
   </View>;
 }

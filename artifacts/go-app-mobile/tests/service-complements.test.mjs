@@ -37,7 +37,7 @@ async function fixture() {
   const native = name => value => { const id = React.useId(); props.set(id, { ...value, native: name });
     return React.createElement('div', { 'data-prop-id': id }, value.children); };
   const components = Object.fromEntries(['View', 'Text', 'TextInput', 'TouchableOpacity'].map(name => [name, native(name)]));
-  const { ServiceComplementManager } = load('components/empresa/ServiceComplementManager.tsx', {
+  const { ServiceAssociatedProducts, useServiceComplementCatalog } = load('components/empresa/ServiceComplementManager.tsx', {
     react: React, 'react-native': components, '@/data/booking': cloud, '@/data/catalogAssociations': associations,
     '@/data/demoBookingRepository': repositories, '@/contexts/GoBusinessConfigContext': { useBusinessConfig: () => ({ demo: store }) },
     '@/contexts/LanguageContext': { useLanguage: () => ({ lang: 'es' }) }, '@/lib/sessionEvents': { onSessionChanged: () => () => {} },
@@ -46,14 +46,20 @@ async function fixture() {
   const descendants = node => [node, ...node.childNodes.flatMap(descendants)];
   const visible = () => descendants(container).filter(node => node.attributes?.['data-prop-id']).map(node => props.get(node.attributes['data-prop-id']));
   const settle = async (fn = () => {}) => React.act(async () => { await fn(); for (let i = 0; i < 12; i++) await new Promise(resolve => setImmediate(resolve)); });
-  await settle(() => root.render(React.createElement(ServiceComplementManager, { businessId: store.businessId, demo: true,
-    beforeOpen: async () => { calls.flush++; } })));
+  function InlineProducts() {
+    const catalog = useServiceComplementCatalog(store.businessId, true, true);
+    return React.createElement(ServiceAssociatedProducts, { serviceName: 'Corte', catalog, beforeSave: async () => { calls.flush++; } });
+  }
+  await settle(() => root.render(React.createElement(InlineProducts)));
   const press = async title => { const button = visible().find(value => value.native === 'TouchableOpacity' && value.accessibilityLabel === title);
     assert.ok(button, title); await settle(() => button.onPress()); };
-  const field = title => { const input = visible().find(value => value.native === 'TextInput' && value.accessibilityLabel === title);
+  const field = title => { const input = visible().filter(value => value.native === 'TextInput' && value.accessibilityLabel === title).at(-1);
     assert.ok(input, title); return input; };
   return { store, memory, owner, options, calls, container, visible, settle, press,
     edit: async (title, value) => settle(() => field(title).onChangeText(value)),
+    rename: async (oldName, newName) => { const input = visible().find(value => value.native === 'TextInput' && value.value === oldName);
+      assert.ok(input, oldName); await settle(() => input.onChangeText(newName)); await settle(() => input.onBlur()); },
+    blur: async title => settle(() => field(title).onBlur()),
     close: async () => settle(() => root.unmount()) };
 }
 
@@ -72,37 +78,41 @@ test('a supplement from another company cannot appear in or be selected for a se
   assert.throws(() => services.localCatalogQuote('business-a', [root, foreign], [edge], [root.id], [edge.id]));
 });
 
-test('one service supports zero, multiple, editable and removable priced supplements without touching cloud', async () => {
+test('inline service rows add, edit and remove multiple optional products without touching cloud', async () => {
   const f = await fixture();
   try {
-    await f.press('Complementos por servicio'); await f.press('Corte');
-    assert.equal(f.calls.flush, 1);
+    assert.match(f.container.textContent, /Productos asociados/);
+    assert.doesNotMatch(f.container.textContent, /Complementos por servicio|Incluido|Recomendado/);
     const repo = repositories.createDemoBookingRepository(f.store), root = (await repo.getBookableItems(f.store.businessId))[0];
     assert.equal((await repo.quoteCatalog(f.store.businessId, [root.id])).totalPrice, 20);
-    await f.edit('Nombre del complemento', 'Mascarilla'); await f.press('Añadir complemento');
-    assert.match(f.container.textContent, /Indica un suplemento válido/);
+    await f.press('Añadir producto asociado a Corte');
+    await f.edit('Nombre del producto asociado de Corte', 'Mascarilla'); await f.blur('Nombre del producto asociado de Corte');
+    assert.match(f.container.textContent, /Completa nombre y precio/);
     assert.equal(f.store.getSnapshot().config.catalogProducts?.length ?? 0, 0);
-    await f.edit('Suplemento en euros', '5,25'); await f.press('Añadir complemento');
-    await f.edit('Nombre del complemento', 'Ampolla'); await f.edit('Suplemento en euros', '0,00'); await f.press('Añadir complemento');
+    await f.edit('Precio de Mascarilla', '5,25'); await f.blur('Precio de Mascarilla');
+    await f.press('Añadir producto asociado a Corte');
+    await f.edit('Nombre del producto asociado de Corte', 'Ampolla'); await f.edit('Precio de Ampolla', '0,00'); await f.blur('Precio de Ampolla');
+    await f.press('Añadir producto asociado a Corte');
+    await f.edit('Nombre del producto asociado de Corte', 'Tratamiento'); await f.edit('Precio de Tratamiento', '8,00'); await f.blur('Precio de Tratamiento');
     const saved = f.store.getSnapshot().config;
-    assert.equal(saved.catalogAssociations.length, 2);
+    assert.equal(saved.catalogAssociations.length, 3);
     assert.ok(saved.catalogAssociations.every(edge => edge.source_id === root.id && edge.mode === 'optional'));
     assert.deepEqual(JSON.parse(JSON.stringify(saved.catalogProducts.map(item => [item.title, item.price, item.durationMinutes, item.customerCapacity]))),
-      [['Mascarilla', 5.25, 0, 1], ['Ampolla', 0, 0, 1]]);
+      [['Mascarilla', 5.25, 0, 1], ['Ampolla', 0, 0, 1], ['Tratamiento', 8, 0, 1]]);
     const plain = await repo.quoteCatalog(f.store.businessId, [root.id]);
-    assert.equal(plain.totalPrice, 20); assert.equal(plain.options.length, 2);
+    assert.equal(plain.totalPrice, 20); assert.equal(plain.options.length, 3);
     const both = await repo.quoteCatalog(f.store.businessId, [root.id], plain.options.map(option => option.associationId));
-    assert.equal(both.totalPrice, 25.25); assert.equal(both.lines.length, 3);
-    await f.press('Bajar Mascarilla');
-    assert.equal((await repo.quoteCatalog(f.store.businessId, [root.id])).options[0].name, 'Ampolla');
-    await f.press('Editar Mascarilla'); await f.edit('Suplemento en euros', '7,10'); await f.press('Guardar complemento');
-    assert.equal((await repo.quoteCatalog(f.store.businessId, [root.id], both.selectedAssociationIds)).totalPrice, 27.1);
-    assert.equal(both.totalPrice, 25.25, 'the accepted quote remains an immutable value after a catalogue edit');
-    await f.press('Quitar Ampolla');
-    assert.equal((await repo.quoteCatalog(f.store.businessId, [root.id])).options.length, 1);
+    assert.equal(both.totalPrice, 33.25); assert.equal(both.lines.length, 4);
+    await f.edit('Precio de Mascarilla', '7,10'); await f.blur('Precio de Mascarilla');
+    assert.equal((await repo.quoteCatalog(f.store.businessId, [root.id], both.selectedAssociationIds)).totalPrice, 35.1);
+    assert.equal(both.totalPrice, 33.25, 'the accepted quote remains an immutable value after a catalogue edit');
+    await f.rename('Mascarilla', 'Mascarilla hidratante');
+    assert.ok((await repo.quoteCatalog(f.store.businessId, [root.id])).options.some(option => option.name === 'Mascarilla hidratante'));
+    await f.press('Eliminar Ampolla');
+    assert.equal((await repo.quoteCatalog(f.store.businessId, [root.id])).options.length, 2);
     const reopened = stores.createBusinessDemoStore(f.options); await reopened.load();
-    assert.equal(reopened.getSnapshot().config.catalogAssociations.length, 1);
-    assert.equal(reopened.getSnapshot().config.catalogProducts.length, 2, 'removal preserves historical product data');
+    assert.equal(reopened.getSnapshot().config.catalogAssociations.length, 2);
+    assert.equal(reopened.getSnapshot().config.catalogProducts.length, 3, 'removal preserves historical product data');
   } finally { await f.close(); }
 });
 
@@ -126,10 +136,14 @@ test('a real company saves one optional association through the existing owned c
   const props = new Map(), native = name => value => { const id = React.useId(); props.set(id, { ...value, native: name });
     return React.createElement('div', { 'data-prop-id': id }, value.children); };
   const components = Object.fromEntries(['View', 'Text', 'TextInput', 'TouchableOpacity'].map(name => [name, native(name)]));
-  const component = load('components/empresa/ServiceComplementManager.tsx', { react: React, 'react-native': components,
+  const { ServiceAssociatedProducts, useServiceComplementCatalog } = load('components/empresa/ServiceComplementManager.tsx', { react: React, 'react-native': components,
     '@/data/booking': remote, '@/data/catalogAssociations': api, '@/data/demoBookingRepository': {},
     '@/contexts/GoBusinessConfigContext': { useBusinessConfig: () => ({ demo: null }) },
-    '@/contexts/LanguageContext': { useLanguage: () => ({ lang: 'es' }) }, '@/lib/sessionEvents': { onSessionChanged: () => () => {} } }).ServiceComplementManager;
+    '@/contexts/LanguageContext': { useLanguage: () => ({ lang: 'es' }) }, '@/lib/sessionEvents': { onSessionChanged: () => () => {} } });
+  function InlineProducts() {
+    const owned = useServiceComplementCatalog(businessId, false, true);
+    return React.createElement(ServiceAssociatedProducts, { serviceName: 'Corte', catalog: owned, beforeSave: async () => {} });
+  }
   const container = document.createElement('div'), root = createRoot(container);
   const descendants = node => [node, ...node.childNodes.flatMap(descendants)];
   const visible = () => descendants(container).filter(node => node.attributes?.['data-prop-id']).map(node => props.get(node.attributes['data-prop-id']));
@@ -139,9 +153,11 @@ test('a real company saves one optional association through the existing owned c
   const edit = async (title, value) => { const field = visible().find(input => input.native === 'TextInput' && input.accessibilityLabel === title);
     assert.ok(field, title); await settle(() => field.onChangeText(value)); };
   try {
-    await settle(() => root.render(React.createElement(component, { businessId, demo: false, beforeOpen: async () => {} })));
-    await press('Complementos por servicio'); await press('Corte');
-    await edit('Nombre del complemento', 'Ampolla'); await edit('Suplemento en euros', '2,50'); await press('Añadir complemento');
+    await settle(() => root.render(React.createElement(InlineProducts)));
+    await press('Añadir producto asociado a Corte');
+    await edit('Nombre del producto asociado de Corte', 'Ampolla'); await edit('Precio de Ampolla', '2,50');
+    const price = visible().find(input => input.native === 'TextInput' && input.accessibilityLabel === 'Precio de Ampolla');
+    await settle(() => price.onBlur());
     assert.equal(writes.length, 2);
     assert.equal(writes[0][0], 'product'); assert.equal(writes[0][1].price, 2.5);
     assert.equal(writes[0][1].durationMinutes, 0); assert.equal(writes[0][1].currency, 'EUR');

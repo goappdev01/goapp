@@ -268,7 +268,8 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
         if (key in imports) return imports[key];
         if (key === "@/theme/goAssistantColors") return load("theme/goAssistantColors.ts");
         if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };
-        if (key === "./ServiceComplementManager") return { ServiceComplementManager: () => null };
+        if (key === "./ServiceComplementManager") return { ServiceAssociatedProducts: () => null,
+          useServiceComplementCatalog: () => ({ items: [], relations: [], error: "", loading: false, busy: false }) };
         if (key === "./ProfessionalGapPolicy") return load("components/empresa/ProfessionalGapPolicy.tsx");
         // The remote-only date editor has its own real component and SQL integration tests.
         if (key === "./CalendarExceptionsSection") return componentMocks;

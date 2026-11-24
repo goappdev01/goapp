@@ -85,7 +85,7 @@ import {
 import { useLanguage } from "@/contexts/LanguageContext";
 import { CatalogAssociationManager } from "./CatalogAssociationManager";
 import { parsePartialBookingPercent } from "@/data/bookingServices";
-import { ServiceComplementManager } from "./ServiceComplementManager";
+import { ServiceAssociatedProducts, useServiceComplementCatalog } from "./ServiceComplementManager";
 import { isStableBookingId, serializeServiceConfiguration, validateBookingResources,
   validateBusinessTimezone, validateServiceTiming, type BookingResource } from "@/data/serviceTiming";
 import { readServiceWorkWait, serviceWorkWaitTotal, updateServiceWorkWait, type ServiceWorkWaitDraft } from "@/data/serviceWorkWait";
@@ -2545,6 +2545,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     if (error) throw new Error(error);
     await flush();
   }, [flush]);
+  const associatedCatalog = useServiceComplementCatalog(config.businessId, !!demo, config.subId === "peluqueria");
   useStepSave(saveRef, flushServices);
   useEffect(() => {
     for (const id of invalidTiming.current.keys()) if (!localSvcs.some(service => service.id === id)) invalidTiming.current.delete(id);
@@ -2673,8 +2674,8 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     <View>
       <View style={c.sectionCard}>
         <Text style={c.sectionLabel}>{t("biz_services_offered")}</Text>
-        {config.subId === "peluqueria" && <ServiceComplementManager businessId={config.businessId} demo={!!demo} beforeOpen={flushServices} />}
-        <CatalogAssociationManager businessId={config.businessId} demo={!!demo} beforeOpen={flushServices} />
+        {config.subId === "peluqueria" && !!associatedCatalog.error &&
+          <Text accessibilityRole="alert" style={{ color: "#B91C1C", fontSize: 12 }}>{associatedCatalog.error}</Text>}
 
         {localSvcs.map((svc, idx) => (
           <View key={svc.id} testID={"service-card-" + idx} style={[c.svcRow, { borderColor: color }]}>
@@ -2688,9 +2689,9 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               placeholderTextColor={DIM}
               returnKeyType="done"
             />
-            <TextInput style={[c.svcNameInput, { fontSize: 13 }]} value={svc.description ?? ""} onChangeText={description => patchSvc(svc.id, { description })}
+            {(config.subId !== "peluqueria" || svc.description !== undefined) && <TextInput style={[c.svcNameInput, { fontSize: 13 }]} value={svc.description ?? ""} onChangeText={description => patchSvc(svc.id, { description })}
               accessibilityLabel={config.subId === "peluqueria" ? (lang === "en" ? "Service description (optional)" : "Descripción del servicio (opcional)") : (lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)")}
-              onBlur={() => { void flush().catch(() => {}); }} placeholder={config.subId === "peluqueria" ? (lang === "en" ? "Service description (optional)" : "Descripción del servicio (opcional)") : (lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)")} placeholderTextColor={DIM} />
+              onBlur={() => { void flush().catch(() => {}); }} placeholder={config.subId === "peluqueria" ? (lang === "en" ? "Service description (optional)" : "Descripción del servicio (opcional)") : (lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)")} placeholderTextColor={DIM} />}
             <View style={c.svcMeta}>
               {!isTimingOpen(svc) && <View style={c.numBox}>
                 <TextInput
@@ -2737,6 +2738,8 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
                 </TouchableOpacity>
               )}
             </View>
+            {config.subId === "peluqueria" && !!svc.name.trim() &&
+              <ServiceAssociatedProducts serviceName={svc.name} catalog={associatedCatalog} beforeSave={flushServices} />}
             <ServiceTimingEditor service={svc} resources={config.bookingResources ?? []} expanded={isTimingOpen(svc)}
               onExpandedChange={expanded => setTimingOpen(previous => ({ ...previous, [svc.id]: expanded }))}
               onApply={patch => patchSvc(svc.id, patch)}
@@ -2748,6 +2751,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
           <Feather name="plus" size={14} color={BLUE} />
           <Text style={c.addBtnTxt}>{t("biz_add_service_btn")}</Text>
         </TouchableOpacity>
+        <CatalogAssociationManager businessId={config.businessId} demo={!!demo} beforeOpen={flushServices} />
       </View>
 
       {!demo && <BookingResourcesEditor resources={config.bookingResources ?? []} services={localSvcs}
