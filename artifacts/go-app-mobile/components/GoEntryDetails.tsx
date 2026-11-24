@@ -153,14 +153,23 @@ export function GoEntryQuickActions({ entry, showState = true, compact = false, 
   </View>;
 }
 
-export function GoEntryMapsAction({entry}:{entry:GoEntry}){
+export function GoEntryMapsAction({entry,compact=false}:{entry:GoEntry;compact?:boolean}){
  const {lang,t}=useLanguage();
  if(!entryIsReservation(entry)||!entryMapsUrl(entry))return null;
  return <TouchableOpacity testID="entry-maps-go" accessibilityRole="button" accessibilityLabel={t("go_nav").toUpperCase()} accessibilityHint={lang==="en"?"Open this reservation's address in Google Maps":"Abrir la dirección de esta reserva en Google Maps"} activeOpacity={0.82}
         onPress={()=>{void openEntryMaps(entry,url=>Linking.openURL(url)).catch(()=>Alert.alert("GO",t("toast_cannot_open_maps")));}}
-        style={{minWidth:112,minHeight:52,paddingHorizontal:12,paddingVertical:8,borderRadius:10,borderWidth:1,borderColor:"#60a5fa",alignItems:"center",justifyContent:"center"}}>
-        <Text style={{color:"#93c5fd",fontSize:16,fontWeight:"800"}}>{t("go_nav")}</Text>
+        style={{minWidth:compact?64:112,minHeight:compact?44:52,paddingHorizontal:12,paddingVertical:8,borderRadius:10,borderWidth:1,borderColor:"#60a5fa",alignItems:"center",justifyContent:"center"}}>
+        <Text style={{color:"#93c5fd",fontSize:compact?14:16,fontWeight:"800"}}>{t("go_nav")}</Text>
       </TouchableOpacity>;
+}
+
+function bookingTotal(entry:GoEntry){
+  return entry.bookingCatalog?.totalPrice ?? entry.bookingTimeline?.totalPrice ?? entry.bookingTotalPrice;
+}
+function mapsBesideAcceptedTotal(entry:GoEntry){
+  const total=bookingTotal(entry);
+  return entryIsReservation(entry) && reservationCardPolicy(entry).stateKey==="booking_state_accepted"
+    && total != null && Number.isFinite(total) && !!entryMapsUrl(entry);
 }
 
 export function GoEntrySummary({ entry, showMaps=true }: { entry: GoEntry; showMaps?:boolean }) {
@@ -190,14 +199,31 @@ export function GoEntryContract({ entry }: { entry: GoEntry }) {
   const quote = entry.bookingCatalog;
   const services = entry.bookingServices ?? entry.bookingTimeline?.serviceDetails;
   const money = (amount: number, currency?: string) => `${amount.toFixed(2)} ${currency || ""}`.trim();
-  const total = quote?.totalPrice ?? entry.bookingTimeline?.totalPrice ?? entry.bookingTotalPrice;
+  const total = bookingTotal(entry);
   const currency = quote?.currency ?? entry.bookingTimeline?.currency ?? entry.bookingCurrency;
+  const accepted = entryIsReservation(entry) && reservationCardPolicy(entry).stateKey==="booking_state_accepted";
+  const totalCents = total != null && Number.isFinite(total) && total >= 0 ? Math.round(total * 100) : undefined;
+  // A payment policy or status alone is not proof of a collection. The agreed
+  // snapshot must carry a matching, explicit confirmed amount as well.
+  const terms = entry.bookingPaymentTerms;
+  const confirmedCents = entry.bookingPaymentStatus === "paid" && terms && totalCents !== undefined
+    && terms.totalCents === totalCents && Number.isSafeInteger(terms.confirmedCents)
+    && terms.confirmedCents > 0 && terms.confirmedCents <= totalCents ? terms.confirmedCents : 0;
+  const agreedMoney = (cents:number) => new Intl.NumberFormat(lang==="en"?"en-GB":"es-ES",{style:"currency",currency:currency||"EUR"}).format(cents/100);
+  const paidPercent = totalCents ? Math.round(confirmedCents * 100 / totalCents) : 0;
   return <View testID="entry-contract" style={{ gap: 8 }}>
     {(entry.customerBooking || entry.businessBooking || entry.bookingPerspective || services?.length || quote) && <Text style={s.label}>{lang === "en" ? "Booked services" : "Servicios contratados"}</Text>}
     {quote ? quote.lines.map(line => <Text key={line.itemId} style={s.text}>{line.name} · {line.included ? (lang === "en" ? "Included" : "Incluido") : money(line.charge, line.currency)}</Text>)
       : services?.length ? services.map((service, index) => <Text key={`${service.id}-${index}`} style={s.text}>{service.title}{(!("priceKnown" in service) || service.priceKnown !== false) && service.price != null ? " · " + money(service.price, service.currency) : ""}</Text>)
       : !!entryIdentity(entry.notes || entry.intentLabel) && <Text style={s.text}>{entryIdentity(entry.notes || entry.intentLabel)}</Text>}
-    {total != null && Number.isFinite(total) && <Text style={s.label}>{lang === "en" ? "Total: " : "Total: "}{money(total, currency)}</Text>}
+    {totalCents !== undefined && <View testID="entry-contract-total-row" style={{flexDirection:"row",flexWrap:"wrap",alignItems:"center",justifyContent:"space-between",gap:8}}>
+      <Text style={[s.label,{flexShrink:1,minWidth:0}]}>{accepted ? (lang==="en"?"Total · ":"Total · ")+agreedMoney(totalCents) : "Total: "+money(total!, currency)}</Text>
+      {mapsBesideAcceptedTotal(entry) && <GoEntryMapsAction entry={entry} compact/>}
+    </View>}
+    {accepted && totalCents !== undefined && totalCents > 0 && <View testID="entry-contract-payment-summary" style={{gap:4}}>
+      <Text style={{color:confirmedCents>0?"#22C55E":"#FFFFFF",fontSize:15,fontWeight:"700"}}>{lang==="en"?"Paid":"Pagado"} · {paidPercent} % · {agreedMoney(confirmedCents)}</Text>
+      <Text style={{color:"#FACC15",fontSize:15,fontWeight:"700"}}>{lang==="en"?"Outstanding":"Pendiente"} · {100-paidPercent} % · {agreedMoney(totalCents-confirmedCents)}</Text>
+    </View>}
     {!!entry.detail && <Text selectable style={s.text}>{entry.detail}</Text>}
     {!!entry.bookingMessageToStaff && <Text style={s.secondary}>{entry.bookingMessageToStaff}</Text>}
     {!!entry.bookingTimeline && <View style={{ gap: 5 }}>
@@ -323,7 +349,7 @@ function GoEntryDetailsSession({ entry, onClose, onMessage, onGoToLanding, onDis
           <View testID="entry-details-actions" onLayout={event => setNavigationGeometry(value => ({ ...value, actionsTop: event.nativeEvent.layout.y }))} style={{marginTop:"auto",paddingTop:8,gap:8}}>
           <GoEntryCommunication entry={entry} />
           {typeof children === "function" ? children(dismissThen) : children}
-          <View style={{alignItems:handedness==="left"?"flex-start":"flex-end"}}><GoEntryMapsAction entry={current}/></View>
+          {!mapsBesideAcceptedTotal(current) && <View style={{alignItems:handedness==="left"?"flex-start":"flex-end"}}><GoEntryMapsAction entry={current}/></View>}
           </View>
         </ScrollView>
         <GoScreenCloseGuide testID="entry-detail-swipe-guide" />

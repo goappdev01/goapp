@@ -53,7 +53,7 @@ export function CatalogComplementSelector({ businessId, rootIds, onChange, repos
       disabled={option.mode === "included"} onPress={() => setSelected(toggleCatalogOption(currentQuote, option.associationId))}
       style={{ minHeight: 44, borderWidth: 1, borderRadius: 10, borderColor:option.mode==="included"?"#666666":option.selected?accentColor:accentColor+"90",backgroundColor:option.selected&&option.mode!=="included"?accentColor+"18":"transparent", padding: 10 }}>
       <Text style={{ color: "white" }}>{option.selected ? "✓ " : "□ "}{option.name}{option.mode !== "included"&&<Text style={{color:accentColor}}>{` · ${option.price.toFixed(2)} ${option.currency}`}</Text>}</Text>
-      <Text style={{ color: "#ccc" }}>{option.mode === "included" ? label("Incluido · sin cargo adicional", "Included · no extra charge") : option.mode === "recommended" ? label("Recomendado · puedes continuar sin añadirlo", "Recommended · you can continue without it") : label("Opcional · solo se añade si lo aceptas", "Optional · added only if accepted")}</Text>
+      {option.mode !== "optional" && <Text style={{ color: "#ccc" }}>{option.mode === "included" ? label("Incluido · sin cargo adicional", "Included · no extra charge") : label("Recomendado · puedes continuar sin añadirlo", "Recommended · you can continue without it")}</Text>}
     </TouchableOpacity>)}
     {currentQuote && <CatalogQuoteBreakdown quote={currentQuote} showTotal={showTotal} accentColor={accentColor} />}
   </View>;

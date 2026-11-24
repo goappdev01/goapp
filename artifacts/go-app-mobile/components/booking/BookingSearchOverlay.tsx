@@ -1951,22 +1951,7 @@ export function BookingSearchOverlay({
                         )}
                       </View>
                     );
-                  })() : (
-                    <View style={[s.policyCard, { borderColor: paymentTerms?.bookingPercent || !paymentTerms ? "rgba(245,158,11,0.35)" : "rgba(34,197,94,0.20)" }]}>
-                      <View style={s.policyRow}>
-                        <Feather name={paymentTerms?.bookingPercent || !paymentTerms ? "info" : "check-circle"} size={13} color={paymentTerms?.bookingPercent || !paymentTerms ? "#FACC15" : "#22C55E"} />
-                        <Text style={[s.policyLabel, { color: paymentTerms?.bookingPercent || !paymentTerms ? "#FACC15" : "#22C55E" }]}>
-                          {paymentTerms?.bookingPercent ? (lang === "en" ? "Advance amount planned" : "Importe previsto al reservar")
-                            : paymentTerms ? t("biz_no_advance_payment") : (lang === "en" ? "Payment terms unavailable" : "Condiciones de pago no disponibles")}
-                        </Text>
-                      </View>
-                      <Text style={[s.policyNote, simpleHairConfirmation && { color: "#FFFFFF" }]}>
-                        {paymentTerms?.bookingPercent
-                          ? (lang === "en" ? "No payment has been collected. Ask the business about cancellation terms." : "No se ha cobrado. Consulta al establecimiento las condiciones de cancelación.")
-                          : (lang === "en" ? "Ask the business about cancellation terms." : "Consulta al establecimiento las condiciones de cancelación.")}
-                      </Text>
-                    </View>
-                  )}
+                  })() : null}
 
                   {/* Confirmation revalidates the selected slot; expiry never navigates. */}
                   </View>

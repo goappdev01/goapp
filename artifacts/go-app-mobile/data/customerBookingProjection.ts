@@ -23,6 +23,7 @@ export function customerBookingEntry(booking: Booking, business: Business, item:
         bookingCatalog: booking.catalogSnapshot,
         bookingServices: booking.services,
         bookingTotalPrice: booking.totalPrice, bookingCurrency: booking.currency,
+        bookingPaymentTerms: booking.paymentTermsSnapshot, bookingPaymentStatus: booking.paymentStatus,
         contactName: business.name || booking.receipt?.businessName || "", phone: business.phone || booking.receipt?.businessPhone || "", whatsapp:business.whatsapp || booking.receipt?.businessWhatsapp, date: start.dateISO, dateISO: start.dateISO, time: start.time, startTime: start.time, endTime: end.time,
         duration: String((Date.parse(booking.endInstant ?? booking.endDatetime) - Date.parse(booking.startInstant ?? booking.startDatetime)) / 60000) + "min", notes: booking.receipt?.serviceName || item.title,
         bookingStatus: cancelled ? "cancelada" : booking.status === "COMPLETED" ? "completada" : ["CONFIRMED", "ACCEPTED"].includes(booking.status) ? "confirmada" : "pendiente",

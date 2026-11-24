@@ -173,7 +173,7 @@ test('international phones normalize + and 00; malformed or absent numbers offer
 });
 test('the same receipt projects client vs business identity and never calls the company from its client card',()=>{
  const f=fixture(),project=f.load('data/customerBookingProjection.ts').customerBookingEntry,biz=f.load('hooks/useBusinessBookings.ts').businessBookingEntry;
- const booking={id:base.reservationId,businessId:'salon',customerId:'client',bookableItemId:'cut',startDatetime:'2030-10-26T12:00:00Z',endDatetime:'2030-10-26T13:00:00Z',status:'CONFIRMED',receipt:{customerName:'María López',customerPhone:'+34600123456',businessName:'Peluquería Nemesi',staffName:'Raúl 2'},services:[{id:'cut',title:'Corte',durationMinutes:60,price:25,currency:'EUR'}]};
+ const booking={id:base.reservationId,businessId:'salon',customerId:'client',bookableItemId:'cut',startDatetime:'2030-10-26T12:00:00Z',endDatetime:'2030-10-26T13:00:00Z',status:'CONFIRMED',paymentStatus:'none',paymentTermsSnapshot:{totalCents:2500,bookingPercent:10,venuePercent:90,dueAtBookingCents:250,dueAtVenueCents:2250,requestedCents:0,confirmedCents:0},receipt:{customerName:'María López',customerPhone:'+34600123456',businessName:'Peluquería Nemesi',staffName:'Raúl 2'},services:[{id:'cut',title:'Corte',durationMinutes:60,price:25,currency:'EUR'}]};
  const business={id:'salon',name:'Peluquería Nemesi',phone:'+34910123456',whatsapp:'+34699123456',timezone:'UTC',location:'Calle registrada'};
  const user=project(booking,business,{title:'Corte'}),company=biz(booking,business,'owner');
  assert.equal(user.contactName,business.name);assert.equal(company.contactName,'María López');
@@ -181,6 +181,7 @@ test('the same receipt projects client vs business identity and never calls the 
  assert.equal(user.phone,business.phone);assert.equal(user.whatsapp,business.whatsapp);
  assert.equal(user.professionalName,'Raúl 2');assert.equal(user.time,company.time);assert.equal(user.dateISO,company.dateISO);
  assert.equal(company.reservationId,user.reservationId);assert.equal(company.bookingServices[0].title,'Corte');
+ assert.equal(user.bookingPaymentTerms.totalCents,2500);assert.equal(company.bookingPaymentTerms.totalCents,2500);assert.equal(user.bookingPaymentStatus,'none');
  assert.equal(biz({...booking,receipt:{customerName:'María López'}},business,'owner').phone,'','no authorized customer phone means no fallback to company');
  assert.equal(project(booking,{...business,phone:'+34910123457'},{title:'Corte'}).phone,'+34910123457');
 });
@@ -272,6 +273,29 @@ test('contract shows only booked snapshot lines, included items are not charged 
  const f=sheet(entry),text=texts(f.tree);assert.ok(text.includes('Tinte'));assert.ok(text.includes('Mascarilla'));assert.ok(text.includes('Incluido'));assert.ok(text.includes('45.00 EUR'));assert.ok(!text.includes('No contratado'));
  assert.ok(text.includes(entry.detail));const scroll=nodes(f.tree,n=>n.props.testID==='entry-details-scroll')[0];assert.equal(scroll.props.bounces,false);assert.equal(scroll.props.alwaysBounceVertical,false);assert.equal(scroll.props.style.flex,1);
  const gesture=nodes(f.tree,n=>n.props.testID==='entry-details-sheet')[0];assert.equal(scroll.props.onResponderRelease,undefined);assert.ok(gesture.props.onClose);assert.equal(gesture.props.scrollRefs.length,1);
+});
+test('accepted booking separates verified paid amount from agreed advance and moves IR beside the total',async()=>{
+ const quote={totalPrice:75,currency:'EUR',lines:[{itemId:'main',name:'Tinte',charge:65,currency:'EUR'},{itemId:'extra',name:'Ampolla',charge:10,currency:'EUR'}]};
+ const terms={totalCents:7500,bookingPercent:10,venuePercent:90,dueAtBookingCents:750,dueAtVenueCents:6750,requestedCents:0,confirmedCents:0};
+ const entry={...base,bookingCatalog:quote,bookingPaymentTerms:terms,bookingPaymentStatus:'none'};
+ const f=sheet(entry),contract=nodes(f.tree,n=>n.props.testID==='entry-contract')[0],total=nodes(contract,n=>n.props.testID==='entry-contract-total-row')[0],summary=nodes(contract,n=>n.props.testID==='entry-contract-payment-summary')[0];
+ assert.ok(total&&summary);assert.equal(nodes(f.tree,n=>n.props.testID==='entry-maps-go').length,1);
+ assert.ok(nodes(total,n=>n.props.testID==='entry-maps-go').length===1,'IR sits on the total row');
+ assert.match(texts(total),/Total\s*·\s*75,00\s*€/);assert.match(texts(summary),/Pagado\s*·\s*0\s*%\s*·\s*0,00\s*€/);assert.match(texts(summary),/Pendiente\s*·\s*100\s*%\s*·\s*75,00\s*€/);
+ const rows=nodes(summary,n=>n.type==='Text');assert.equal(rows[0].props.style.color,'#FFFFFF');assert.equal(rows[1].props.style.color,'#FACC15');
+ nodes(total,n=>n.props.testID==='entry-maps-go')[0].props.onPress();await new Promise(resolve=>setImmediate(resolve));assert.equal(f.urls.length,1);
+ const unverified=sheet({...entry,bookingPaymentStatus:'paid'});assert.match(texts(nodes(unverified.tree,n=>n.props.testID==='entry-contract-payment-summary')[0]),/Pagado\s*·\s*0\s*%/,'status alone does not prove collection');
+ const verified=sheet({...entry,bookingPaymentStatus:'paid',bookingPaymentTerms:{...terms,confirmedCents:750}});
+ const settled=nodes(verified.tree,n=>n.props.testID==='entry-contract-payment-summary')[0],amounts=nodes(settled,n=>n.type==='Text');
+ assert.match(texts(settled),/Pagado\s*·\s*10\s*%\s*·\s*7,50\s*€/);assert.match(texts(settled),/Pendiente\s*·\s*90\s*%\s*·\s*67,50\s*€/);
+ assert.equal(amounts[0].props.style.color,'#22C55E');assert.equal(amounts[1].props.style.color,'#FACC15');
+ const mismatched=sheet({...entry,bookingPaymentStatus:'paid',bookingPaymentTerms:{...terms,totalCents:7400,confirmedCents:750}});
+ assert.match(texts(nodes(mismatched.tree,n=>n.props.testID==='entry-contract-payment-summary')[0]),/Pagado\s*·\s*0\s*%/);
+ const free=sheet({...entry,bookingCatalog:{...quote,totalPrice:0}});assert.equal(nodes(free.tree,n=>n.props.testID==='entry-contract-payment-summary').length,0);
+ for(const bookingPercent of [0,100]){
+  const mode=sheet({...entry,bookingPaymentTerms:{...terms,bookingPercent,venuePercent:100-bookingPercent,dueAtBookingCents:7500*bookingPercent/100,dueAtVenueCents:7500*(100-bookingPercent)/100}});
+  assert.match(texts(nodes(mode.tree,n=>n.props.testID==='entry-contract-payment-summary')[0]),/Pagado\s*·\s*0\s*%.*Pendiente\s*·\s*100\s*%/);
+ }
 });
 for(const type of ['GO_BOOKING','TAREA_INTERNA'])test(`${type}: opening/closing repeatedly preserves closed card geometry, day and canonical record`,()=>{
  const f=fixture({now:'2030-10-26T08:00:00'}),{AgendaBoard}=f.load('components/AgendaOperativa.tsx');

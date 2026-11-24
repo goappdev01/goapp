@@ -235,6 +235,8 @@ export type GoEntry = {
   bookingServices?: import("@/data/booking").Booking["services"];
   bookingTotalPrice?: number | null;
   bookingCurrency?: string;
+  bookingPaymentTerms?: import("@/data/bookingServices").BookingPaymentTerms;
+  bookingPaymentStatus?: import("@/data/booking").Booking["paymentStatus"];
   bookingPerspective?: "customer" | "business";
   bookingStatus?: "pendiente" | "confirmada" | "cancelada" | "cambio_pendiente" | "completada";
   // ── TELEFONÍA BILATERAL ─────────────────────────────────────────

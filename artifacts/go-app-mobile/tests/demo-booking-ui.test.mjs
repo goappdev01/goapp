@@ -236,7 +236,8 @@ test('long review keeps complete data and both actions in one scroll, changes ti
   await button(tree,'09:00').props.onPress();tree=f.render(f.Overlay,f.props);
   const review=control(tree,'booking-review-scroll'),reviewNodes=nodes(review);
   assert.ok(review,'the complete review has a scroll viewport');
-  for(const value of [businessName,'Raul 1 GO PRUEBA','09:00','10:45','biz_no_advance_payment'])assert.ok(text(review).includes(value),value);
+  for(const value of [businessName,'Raul 1 GO PRUEBA','09:00','10:45'])assert.ok(text(review).includes(value),value);
+  assert.doesNotMatch(text(review),/biz_no_advance_payment|Importe previsto al reservar|No se ha cobrado/);
   const breakdown=reviewNodes.find(node=>node.type==='CatalogQuoteBreakdown');
   assert.equal(breakdown.props.individual,true);
   assert.deepEqual(JSON.parse(JSON.stringify(breakdown.props.quote.lines.map(line=>[line.name,line.charge]))),selectedServices.map(service=>[service.name,service.price]));
