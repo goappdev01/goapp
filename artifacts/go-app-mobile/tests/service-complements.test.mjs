@@ -27,6 +27,14 @@ const cloud = { isCloudId: () => false, getOwnedBookableItems: async () => { thr
 const associations = load('data/catalogAssociations.ts', { './booking': cloud });
 const content = node => typeof node === 'string' ? node : Array.isArray(node) ? node.map(content).join('') : content(node?.props?.children ?? '');
 
+test('service configuration shows inline associated products without the separate catalogue panel', () => {
+  const screen = fs.readFileSync('components/empresa/EmpresaConfigScreen.tsx', 'utf8');
+  assert.match(screen, /<ServiceAssociatedProducts\b/);
+  assert.doesNotMatch(screen, /<CatalogAssociationManager\b/);
+  assert.doesNotMatch(screen, /import\s+\{\s*CatalogAssociationManager\s*\}/);
+  assert.match(fs.readFileSync('components/empresa/CatalogAssociationManager.tsx', 'utf8'), /export function CatalogAssociationManager\b/);
+});
+
 async function fixture() {
   const memory = new Map(), owner = '11111111-1111-4111-8111-111111111111';
   const options = { ownerUserId: owner, storage: { getItem: async key => memory.get(key) ?? null, setItem: async (key, value) => memory.set(key, value) },

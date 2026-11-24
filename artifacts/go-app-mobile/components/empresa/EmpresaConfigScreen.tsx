@@ -83,7 +83,6 @@ import {
   type StaffScheduleConfig,
 } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
-import { CatalogAssociationManager } from "./CatalogAssociationManager";
 import { BookingDepositSplitRow } from "./BookingDepositSplitRow";
 import { parsePartialBookingPercent } from "@/data/bookingServices";
 import { ServiceAssociatedProducts, useServiceComplementCatalog } from "./ServiceComplementManager";
@@ -2755,7 +2754,6 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
           <Feather name="plus" size={14} color={BLUE} />
           <Text style={c.addBtnTxt}>{t("biz_add_service_btn")}</Text>
         </TouchableOpacity>
-        <CatalogAssociationManager businessId={config.businessId} demo={!!demo} beforeOpen={flushServices} />
       </View>
 
       {!demo && <BookingResourcesEditor resources={config.bookingResources ?? []} services={localSvcs}
