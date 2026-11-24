@@ -1840,6 +1840,12 @@ export function BookingSearchOverlay({
                       </Text>
                       <Text style={s.summaryServiceName}>{trSector(summaryItem!.title, lang)}</Text>
                       {reviewedQuote && <CatalogQuoteBreakdown quote={reviewedQuote} showTotal={!simpleHairConfirmation} accentColor={accentColor} />}
+                      {simpleHairConfirmation && <View testID="booking-review-total" style={[s.summaryRow, { marginTop: 6 }]}>
+                        <Feather name="tag" size={15} color={accentColor} />
+                        <Text style={[s.summaryRowText, { color: accentColor, fontWeight: "800" }]}>
+                          {`Total · ${new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: reviewedQuote?.currency ?? "EUR" }).format(summaryItem!.price)}`}
+                        </Text>
+                      </View>}
                       {paymentTerms && paymentTerms.bookingPercent > 0 && paymentTerms.bookingPercent < 100
                         ? <PartialPaymentSummary terms={paymentTerms} lang={lang} />
                         : paymentTerms && <View style={{ gap: 3, marginTop: 6 }}>
@@ -1881,13 +1887,11 @@ export function BookingSearchOverlay({
                           {"  ·  "}{summaryItem!.durationMinutes} min
                         </Text>
                       </View>
-                      {(simpleHairConfirmation || summaryItem!.price > 0) && (
+                      {!simpleHairConfirmation && summaryItem!.price > 0 && (
                         <View style={s.summaryRow}>
                           <Feather name="tag" size={15} color="rgba(255,255,255,0.40)" />
                           <Text style={[s.summaryRowText, { color: accentColor, fontWeight: "800" }]}>
-                            {simpleHairConfirmation
-                              ? `Total · ${new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: reviewedQuote?.currency ?? "EUR" }).format(summaryItem!.price)}`
-                              : `${summaryItem!.price}€`}
+                            {summaryItem!.price}€
                           </Text>
                         </View>
                       )}

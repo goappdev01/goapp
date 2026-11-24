@@ -659,6 +659,10 @@ test('hair reservation review keeps one heading and one dynamic total while pres
  assert.equal(headings.length,1);assert.doesNotMatch(text(tree),/biz_confirm_booking_title|ACCION_CONFIRMAR/);
  assert.equal(nodes(tree).find(n=>n.type==='CatalogQuoteBreakdown').props.showTotal,false);
  assert.equal((text(tree).match(/Total ·/g)??[]).length,1);assert.match(text(tree),/Total · 12,00/);
+ const reviewNodes=nodes(tree),breakdownIndex=reviewNodes.findIndex(n=>n.type==='CatalogQuoteBreakdown');
+ const totalIndex=reviewNodes.findIndex(n=>n.props?.testID==='booking-review-total');
+ assert.ok(breakdownIndex>=0 && totalIndex>breakdownIndex,'services are followed by the single total');
+ assert.equal(reviewNodes[totalIndex].children.filter(n=>n.type==='Text').length,1);
  assert.ok(confirmation(f));await f.press('BIZ_CONFIRM_BOOKING_BTN');assert.equal(posted(f).length,1);
 });
 test('new reservation: expiry while authoritative confirmation is pending keeps the chosen time in review',async()=>{
