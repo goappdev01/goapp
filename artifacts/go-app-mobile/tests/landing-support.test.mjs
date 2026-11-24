@@ -128,7 +128,7 @@ test('the real Landing and note alarm controls render only the two binary states
  const f=alarmFixture(),R={createElement:(type,props,...children)=>({type,props:props??{},children:children.flat(Infinity)}),
   useState:value=>[typeof value==='function'?value():value,()=>{}],useRef:value=>({current:value}),useEffect(){},useCallback:fn=>fn,useSyncExternalStore:(_,snapshot)=>snapshot()};
  const native=new Proxy({Platform:{OS:'ios'},PixelRatio:{getFontScale:()=>1}},{get:(target,key)=>target[key]??key});
- const ui=f.load('components/landing/LandingActionCompletion.tsx',{react:{...R,default:R},'react-native':native,
+ const ui=f.load('components/landing/LandingActionCompletion.tsx',{react:{...R,default:R},'react-native':native,'@/constants/colors':f.module('constants/colors.ts'),
   'react-native-safe-area-context':{useSafeAreaInsets:()=>({top:0,bottom:0,left:0,right:0})},'@/components/ui/GoCloseButton':{GoCloseButton:'Close'},
   '@/lib/goActionCompletion':f.module('lib/goActionCompletion.ts')});
  const note=f.load('components/notes/GoAlarmStatus.tsx',{react:{...R,default:R},'react-native':native,

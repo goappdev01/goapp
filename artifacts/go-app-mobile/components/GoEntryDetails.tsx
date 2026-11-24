@@ -11,6 +11,7 @@ import { reservationCardPolicy, GO_ENTRY_COLORS as C } from "@/data/reservationC
 import { GoCloseButton } from "./ui/GoCloseButton";
 import { landingCurrentEntry } from "./landing/landingPanels";
 import { GoScreenCloseSurface, GoScreenCloseGuide } from "@/components/ui/GoScreenCloseSurface";
+import { GO_PENDING_ACTION_YELLOW, GO_PENDING_ACTION_LABEL_BG } from "../constants/colors";
 
 export function GoEntryCommunication({ entry }: { entry: GoEntry }) {
   const { lang } = useLanguage();
@@ -70,17 +71,18 @@ export function GoListActionRow({actions,handedness="right",scale=1,testID="list
         onPress={event=>{event?.stopPropagation?.();action.onPress();}}
         style={{flex:1,flexBasis:0,flexShrink:1,minWidth:0,minHeight:Math.max(44,Math.round(44*scale)),paddingHorizontal:4,paddingVertical:8,
           ...goActionVisual(action.tone,!!action.selected,!!inactive),
-          ...(action.tone==="pending"?{backgroundColor:"#FACC15"}:{}),
+          ...(action.tone==="pending"?{backgroundColor:GO_PENDING_ACTION_YELLOW}:{}),
           ...(action.selected?{borderWidth:2,borderColor:"#ffffff"}:{}),alignItems:"center",justifyContent:"center"}}>
         <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.8}
-          style={{color:goActionTextColor(action.tone),fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",alignSelf:"stretch",width:"100%",minWidth:0}}>{action.label}{action.selected?" ✓":""}</Text>
+          style={{color:action.tone==="pending"?"#FFFFFF":goActionTextColor(action.tone),fontSize:Math.max(12,Math.round(13*scale)),fontWeight:"800",textAlign:"center",minWidth:0,
+            ...(action.tone==="pending"?{alignSelf:"center" as const,maxWidth:"100%" as const,backgroundColor:GO_PENDING_ACTION_LABEL_BG,borderRadius:3,paddingHorizontal:2,overflow:"hidden" as const}:{alignSelf:"stretch" as const,width:"100%" as const})}}>{action.label}{action.selected?" ✓":""}</Text>
       </TouchableOpacity>;
     })}
   </View>;
 }
 
 /** Personal follow-up never writes the contractual acceptance or completion of a reservation. */
-export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout,handedness="right",listScale=1}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list"|"detail";handedness?:"left"|"right";listScale?:number}){
+export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=false,inline=false,layout,handedness="right",listScale=1,pendingYellow=false}:{entry:GoEntry;onDone?:()=>void;onPending?:()=>void;onDiscard?:()=>void;disabled?:boolean;inline?:boolean;layout?:"list"|"detail";handedness?:"left"|"right";listScale?:number;pendingYellow?:boolean}){
   const {lang}=useLanguage(),personal=!!(entry.reservationId||entry.customerBooking||entry.businessBooking);
   const [pressed,setPressed]=useState<string|null>(null);
   const list = layout === "list";
@@ -113,9 +115,11 @@ export function GoEntryMicroActions({entry,onDone,onPending,onDiscard,disabled=f
       onPress={event=>{event?.stopPropagation();action.run?.();}}
       style={{flex:1,minWidth:0,minHeight:inline?36:44,paddingHorizontal:4,paddingVertical:6,...goActionVisual(action.tone,action.key==="discard"?false:selected(action.key),
         action.key!=="discard"&&!!onDone&&!!onPending&&!selected(action.key),pressed===action.key),
+        ...(pendingYellow&&action.key==="pending"?{backgroundColor:GO_PENDING_ACTION_YELLOW}:{}),
         opacity:disabled?0.48:pressed===action.key?0.88:1,alignItems:"center",justifyContent:"center"}}>
       <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} maxFontSizeMultiplier={1.2}
-        style={{color:goActionTextColor(action.tone),fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1}}>{action.text}</Text>
+        style={{color:pendingYellow&&action.key==="pending"?"#FFFFFF":goActionTextColor(action.tone),fontSize:inline?10:12,fontWeight:"800",textAlign:"center",flexShrink:1,
+          ...(pendingYellow&&action.key==="pending"?{backgroundColor:GO_PENDING_ACTION_LABEL_BG,borderRadius:3,paddingHorizontal:2,overflow:"hidden" as const}:{})}}>{action.text}</Text>
     </TouchableOpacity>)}
   </View>;
 }

@@ -1,4 +1,6 @@
 export const GO_PENDING_YELLOW = "#FFD700";
+export const GO_PENDING_ACTION_YELLOW = "#FACC15";
+export const GO_PENDING_ACTION_LABEL_BG = "#4A3800";
 
 const colors = {
   light: {

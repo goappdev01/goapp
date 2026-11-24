@@ -84,7 +84,7 @@ function fixture(lang = 'es', overrides = {}) {
   }) };
   const hosts = Object.fromEntries(['BottomSheet', 'View', 'Text', 'TextInput', 'TouchableOpacity', 'Pressable',
     'ScrollView', 'SwipeableRow', 'Feather', 'MaterialCommunityIcons', 'LinearGradient', 'Image'].map(name => [name, name]));
-  const context = { ...hosts, exports:{}, React, Date, Math,lang,ENTRY_COLORS:colorContext.exports.GO_ENTRY_COLORS,reservationCardPolicy:colorContext.exports.reservationCardPolicy,entryIsReservation:presentationContext.exports.entryIsReservation,entryHeading:presentationContext.exports.entryHeading,canResolveEntry:()=>false, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""},
+  const context = { ...hosts, exports:{}, React, Date, Math,lang,GO_PENDING_ACTION_YELLOW:'#FACC15',GO_PENDING_ACTION_LABEL_BG:'#4A3800',ENTRY_COLORS:colorContext.exports.GO_ENTRY_COLORS,reservationCardPolicy:colorContext.exports.reservationCardPolicy,entryIsReservation:presentationContext.exports.entryIsReservation,entryHeading:presentationContext.exports.entryHeading,canResolveEntry:()=>false, goView:{view:"USER"},customerBookings:{entries:[],loading:false,error:""},
     mergeCompletionEntries: completionContext.exports.mergeCompletionEntries, useMemo: fn => fn(), adminAccess: { allowed: false, checking: false },
     noteDocument: noteContext.exports.noteDocument, isGoNoteReminderTarget: toolsContext.exports.isGoNoteReminderTarget,
     actionCompletion: { candidates: [], status: () => undefined }, noteIdentity: {ready:false}, personalGoLog: [], renderLinkedNotes: () => null, listBookingDetail: undefined, notesOpen: false, openListNote() {}, openListSavedNote: () => false,

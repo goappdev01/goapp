@@ -235,9 +235,16 @@ test('PENDIENTE uses readable yellow in selected and muted states while PROPONER
     const row=f.render(c.GoListActionRow,{actions:[{key:'pending',label:'PENDIENTE',tone:'pending',selectable:true,selected,onPress(){}}]});
     const button=nodes(row,n=>n.type==='TouchableOpacity')[0],text=nodes(button,n=>n.type==='Text')[0];
     assert.equal(button.props.style.backgroundColor,'#FACC15');
-    assert.equal(text.props.style.color,'#181818');
-    assert.ok((luminance(button.props.style.backgroundColor)+.05)/(luminance(text.props.style.color)+.05)>=4.5);
+    assert.equal(text.props.style.color,'#FFFFFF');
+    assert.equal(text.props.style.backgroundColor,'#4A3800');
+    assert.ok((luminance(text.props.style.color)+.05)/(luminance(text.props.style.backgroundColor)+.05)>=4.5);
   }
+  const landing=f.render(c.GoEntryMicroActions,{entry:{...base,localResolutionStatus:'pending'},pendingYellow:true,onDone(){},onPending(){},onDiscard(){}});
+  const landingPending=nodes(landing,n=>n.props.accessibilityLabel==='Mi seguimiento: PENDIENTE')[0];
+  assert.equal(landingPending.props.style.backgroundColor,'#FACC15');
+  const landingLabel=nodes(landingPending,n=>n.type==='Text')[0];
+  assert.equal(landingLabel.props.style.color,'#FFFFFF');
+  assert.equal(landingLabel.props.style.backgroundColor,'#4A3800');
   const proposal=f.render(c.GoListActionRow,{actions:[{key:'propose',label:'PROPONER',tone:'intermediate',onPress(){}}]});
   assert.equal(nodes(proposal,n=>n.type==='TouchableOpacity')[0].props.style.backgroundColor,'#C25300');
 });

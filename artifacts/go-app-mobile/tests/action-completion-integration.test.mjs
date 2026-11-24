@@ -5,7 +5,7 @@ const require=createRequire(path.join(process.cwd(),'package.json')),ts=require(
 process.env.TZ='Europe/Madrid';
 let now=Date.parse('2030-01-07T12:00:00+01:00');
 class Clock extends Date{constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
-function load(file,modules={}){const context={exports:{},Date:Clock,Intl,Map,Set,console,require:n=>{if(n in modules)return modules[n];throw Error('Unexpected dependency '+n);}};
+function load(file,modules={}){const context={exports:{},Date:Clock,Intl,Map,Set,console,require:n=>{if(n in modules)return modules[n];if(n==='@/constants/colors')return load('constants/colors.ts');throw Error('Unexpected dependency '+n);}};
  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{ alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,context);return context.exports;}
 const core=load('lib/goActionCompletion.ts'),plain=x=>JSON.parse(JSON.stringify(x));
 const S={userId:'11111111-1111-4111-8111-111111111111',context:'live:USER'},entry=(extra={})=>({id:'one',ownerUserId:'11111111-1111-4111-8111-111111111111',actionContext:'live:USER',dateISO:'2030-01-07',date:'Lunes 7',time:'09:00',duration:'30min',estado:'aceptado',intentLabel:'Cita',notes:'Revisión',...extra});
@@ -104,6 +104,10 @@ test('real confirmation buttons dispatch exactly one personal decision or open t
  const e=entry(),calls=[],model={scope:S,doc:core.emptyCompletionDocument(S),candidates:[e],unresolved:[e],pending:[],selected:null,decide:(e,s)=>calls.push([e.id,s]),setSelected(){},configure(){},busy:false};const ui=uiFixture(model),tree=ui.render();
  const choices=nodes(tree,n=>['REALIZADO','PENDIENTE','PROPONER CAMBIO'].includes(n.props.accessibilityLabel));assert.equal(choices.length,6,'same controls exist in the inline area and hidden modal');
  for(const label of ['REALIZADO','PENDIENTE','PROPONER CAMBIO']){const b=choices.find(n=>n.props.accessibilityLabel===label);assert.equal(b.props.style.height,48);assert.ok(b.props.style.width>=44);assert.ok(b.props.style.minHeight>=44);b.props.onPress();}
+ const pending=choices.find(n=>n.props.accessibilityLabel==='PENDIENTE');
+ assert.equal(pending.props.style.backgroundColor,'#FACC15');
+ assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.color.toUpperCase(),'#FFFFFF');
+ assert.equal(nodes(pending,n=>n.type==='Text')[0].props.style.backgroundColor,'#4A3800');
  assert.deepEqual(calls,[['one','done'],['one','pending']]);assert.deepEqual(ui.calls,[['propose','one']]);assert.equal(e.changeProposal,undefined);
 });
 test('multiple unresolved/pending actions are reviewed individually and never disappear on a tab or close',()=>{

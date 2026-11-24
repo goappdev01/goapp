@@ -13514,7 +13514,7 @@ function HomeScreenContent() {
     if(entry.deleted||entry.estado==="rechazado"||actionCompletion.isDiscarded(entry)){retirePersonalEntry(entry);return;}
     resolveEntry(entry,"discard",()=>{const latest=personalVisibilitySource.current;return mergeCompletionEntries([...latest.entries,...latest.personal],latest.candidates).find(row=>completionKey(row)===completionKey(entry)&&row.ownerUserId===entry.ownerUserId);});
   };
-  const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list"|"detail",listScale=1,discard?:()=>void)=><GoEntryMicroActions inline={inline} layout={layout} handedness={handedness} listScale={listScale} entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
+  const renderEntryMicroActions=(entry:GoEntry,inline=false,layout?:"list"|"detail",listScale=1,discard?:()=>void)=><GoEntryMicroActions inline={inline} layout={layout} handedness={handedness} listScale={listScale} pendingYellow entry={followedEntry(entry)} disabled={actionCompletion.isSaving(entry)}
     onDone={canResolveEntry(entry)&&completionEligible(entry)?()=>resolveEntry(entry,"done"):undefined}
     onPending={canResolveEntry(entry)&&completionEligible(entry)?()=>resolveEntry(entry,"pending"):undefined}
     onDiscard={discard??(canResolveEntry(entry)?()=>layout==="list"?removeListEntry(entry):resolveEntry(entry,"discard"):undefined)}/>;
@@ -22556,8 +22556,8 @@ function HomeScreenContent() {
                         marginTop: lv(4),
                         borderRadius: lv(10),
                         borderWidth: 1,
-                        borderColor: "rgba(255,140,0,0.35)",
-                        backgroundColor: "rgba(255,140,0,0.07)",
+                        borderColor: ENTRY_COLORS.change + "B3",
+                        backgroundColor: "#1a1a1c",
                         overflow: "hidden",
                         paddingHorizontal: lv(9),
                         paddingVertical: lv(7),
@@ -22565,7 +22565,7 @@ function HomeScreenContent() {
                       }}>
                         {/* Reserva actual */}
                         <View testID={"go-proposal-current-" + g.id} style={{ gap: lv(2) }}>
-                          <Text style={{ color: "rgba(255,255,255,0.72)", fontSize: Math.max(10,lv(10)), fontWeight: "700", letterSpacing: 0.4 }}>
+                          <Text style={{ color: ENTRY_COLORS.change, fontSize: Math.max(10,lv(10)), fontWeight: "700", letterSpacing: 0.4 }}>
                             {t('tasks_current_booking').toUpperCase()}
                           </Text>
                           <View testID={"go-proposal-current-details-" + g.id} style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: lv(8) }}>
@@ -22583,7 +22583,7 @@ function HomeScreenContent() {
                           </View>
                         </View>
                         {/* Separador */}
-                        <View style={{ height: 1, backgroundColor: "rgba(255,140,0,0.25)" }} />
+                        <View style={{ height: 1, backgroundColor: ENTRY_COLORS.change + "66" }} />
                         {/* Propuesta cambio */}
                         <View testID={"go-proposal-next-" + g.id} style={{ gap: lv(2) }}>
                           <Text style={{ color: ENTRY_COLORS.change, fontSize: Math.max(10,lv(10)), fontWeight: "700", letterSpacing: 0.4 }}>

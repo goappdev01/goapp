@@ -5,7 +5,7 @@ const require=createRequire(path.join(process.cwd(),"package.json")),ts=require(
 process.env.TZ="Europe/Madrid";
 let clock=Date.parse("2026-10-20T13:30:00+02:00");
 class Clock extends Date {constructor(...a){super(...(a.length?a:[clock]));} static now(){return clock;}}
-function load(file,deps={}){const context={exports:{},Date:Clock,Intl,console,require:n=>{if(n in deps)return deps[n];throw Error("Unexpected import "+n);}};
+function load(file,deps={}){const context={exports:{},Date:Clock,Intl,console,require:n=>{if(n in deps)return deps[n];if(n==="@/constants/colors")return load("constants/colors.ts");throw Error("Unexpected import "+n);}};
  vm.runInNewContext(ts.transpileModule(fs.readFileSync(file,"utf8"),{compilerOptions:{ alwaysStrict: false,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText,context);return context.exports;}
 const core=load("lib/goActionCompletion.ts"),S={userId:"A",context:"live:USER"},B={userId:"B",context:"live:USER"};
 const action=(extra={})=>({id:"task",type:"TAREA_INTERNA",kind:"sent",dateISO:"2026-10-20",date:"20/10",time:"12:00",duration:"1h",estado:"aceptado",ownerUserId:"A",actionContext:"live:USER",intentLabel:"Contacto",notes:"Revisar cita",...extra});
@@ -237,13 +237,13 @@ test("decision controls fit narrow iPhone and landscape widths with larger text,
 });
 
 test("enabled status labels and the counter meet 4.5:1 text contrast",()=>{
- const luminance=hex=>{const rgb=hex.slice(1).match(/../g).map(value=>parseInt(value,16)/255).map(value=>value<=.04045?value/12.92:((value+.055)/1.055)**2.4);return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};
+ const luminance=hex=>{const full=hex.length===4?'#'+[...hex.slice(1)].map(value=>value+value).join(''):hex;const rgb=full.slice(1).match(/../g).map(value=>parseInt(value,16)/255).map(value=>value<=.04045?value/12.92:((value+.055)/1.055)**2.4);return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;};
  const contrast=(a,b)=>{const x=luminance(a),y=luminance(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
  const card=byId(confirmationView().render(),"completion-inline-card"),fills=[];
  for(const label of ["REALIZADO","PENDIENTE","PROPONER CAMBIO"]){
   const button=byLabel(card,label),text=viewNodes(button,node=>node.type==="Text")[0];fills.push(button.props.style.backgroundColor);
-  assert.ok(contrast(text.props.style.color,button.props.style.backgroundColor)>=4.5,label);
+  assert.ok(contrast(text.props.style.color,text.props.style.backgroundColor??button.props.style.backgroundColor)>=4.5,label);
  }
  assert.equal(new Set(fills).size,3);const counter=byId(card,"completion-counter");
- assert.ok(contrast(counter.props.style.color,counter.props.style.backgroundColor)>=4.5);
+ assert.ok(contrast(counter.props.style.color,counter.props.style.backgroundColor??card.props.style.backgroundColor)>=4.5);
 });

@@ -40,6 +40,19 @@ function card({entry=base,hand='right',size='medio',width=390,fontScale=1,follow
  return {tree:expand(context.render(entry,0)),calls,fixture:f,context};
 }
 
+test('change proposal keeps its booking details on a dark card with a fine orange outline', () => {
+ const entry={...base,estado:'propuesto',changeProposal:{dateISO:'2030-01-08',date:'8/1/2030',time:'11:45',originalDateISO:base.dateISO,originalTime:base.time}};
+ const tree=card({entry}).tree,proposal=nodes(tree).find(n=>n.props.testID==='go-proposal-dates-one');
+ assert.ok(proposal);
+ assert.equal(proposal.props.style.backgroundColor,'#1a1a1c');
+ assert.equal(proposal.props.style.borderWidth,1);
+ assert.equal(proposal.props.style.borderColor,'#FF8C00B3');
+ assert.match(text(proposal),/RESERVA ACTUAL/);
+ assert.match(text(proposal),/PROPUESTA DE CAMBIO/);
+ assert.match(text(proposal),/10:30/);
+ assert.match(text(proposal),/11:45/);
+});
+
 for(const width of [320,375,390,430])for(const hand of ['left','right'])for(const size of ['compacto','medio','grande'])test(`${width}/${hand}/${size}: actual card keeps one personal row, one title/status line and unmarked persisted follow-up`,()=>{
  const {tree,calls}=card({width,hand,size,fontScale:2.8});
  const header=nodes(tree).find(n=>n.props.testID==='list-header-line-one'),title=nodes(header).find(n=>n.props.testID==='list-title-one');

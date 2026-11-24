@@ -5,6 +5,7 @@ import type {useActionCompletion} from "@/hooks/useActionCompletion";
 import type {CompletionEntry} from "@/lib/goActionCompletion";
 import {GoCloseButton} from "@/components/ui/GoCloseButton";
 import {completionKey} from "@/lib/goActionCompletion";
+import {GO_PENDING_ACTION_YELLOW,GO_PENDING_ACTION_LABEL_BG} from "@/constants/colors";
 type Model=ReturnType<typeof useActionCompletion>;
 export type CompletionFrame={x:number;y:number;width:number;height:number};
 /** Clear separation from the rendered global outline, independent of text and UI scale. */
@@ -89,12 +90,12 @@ export function LandingActionCompletion({model,frame,onPropose,onPendingList,lan
     <Text style={{color:"#cbd5e1",fontSize:12,lineHeight:17}}>{entry.dateISO} · {entry.time}{entry.professionalName?" · "+entry.professionalName:""}</Text>
    </ScrollView>
    <View style={{flexDirection:"row",justifyContent:"space-between",gap:decisionGap}}>
-    {([{status:"change",color:"#ef9c5c",background:"#C25300",ink:"#ffffff",es:"PROPONER\nCAMBIO",en:"PROPOSE\nCHANGE"}, {status:"pending",color:"#f2ce6c",background:"#927000",ink:"#ffffff",es:"PENDIENTE",en:"PENDING"}, {status:"done",color:"#43b77a",background:"#167346",ink:"#ffffff",es:"REALIZADO",en:"DONE"}] as const).map(action=><TouchableOpacity key={action.status}
+    {([{status:"change",color:"#ef9c5c",background:"#C25300",ink:"#ffffff",es:"PROPONER\nCAMBIO",en:"PROPOSE\nCHANGE"}, {status:"pending",color:"#f2ce6c",background:GO_PENDING_ACTION_YELLOW,ink:"#ffffff",es:"PENDIENTE",en:"PENDING"}, {status:"done",color:"#43b77a",background:"#167346",ink:"#ffffff",es:"REALIZADO",en:"DONE"}] as const).map(action=><TouchableOpacity key={action.status}
       accessibilityRole="button" accessibilityLabel={(en?action.en:action.es).replace("\n"," ")} disabled={model.isSaving?.(entry) ?? false}
       onPress={()=>{if(action.status==="change"){setExpanded(false);onPropose(entry);}else void model.decide(entry,action.status);}}
       style={{width:side,height:decisionHeight,minWidth:44,minHeight:44,borderRadius:14,borderWidth:1,borderColor:action.color,
        backgroundColor:action.background,alignItems:"center",justifyContent:"center",padding:4,opacity:model.isSaving?.(entry)?0.45:1}}>
-      <Text numberOfLines={action.status==="change"?2:1} adjustsFontSizeToFit minimumFontScale={0.85} style={{width:"100%",color:action.ink,fontSize:12,fontWeight:"700",textAlign:"center"}}>{en?action.en:action.es}</Text>
+      <Text numberOfLines={action.status==="change"?2:1} adjustsFontSizeToFit minimumFontScale={0.85} style={{width:action.status==="pending"?undefined:"100%",maxWidth:"100%",color:action.ink,fontSize:12,fontWeight:"700",textAlign:"center",...(action.status==="pending"?{backgroundColor:GO_PENDING_ACTION_LABEL_BG,borderRadius:3,paddingHorizontal:2,overflow:"hidden" as const}:{})}}>{en?action.en:action.es}</Text>
      </TouchableOpacity>)}
    </View>
 

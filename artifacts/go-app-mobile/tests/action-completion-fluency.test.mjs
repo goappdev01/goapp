@@ -15,7 +15,7 @@ class Clock extends Date {constructor(...args){super(...(args.length?args:[NOW])
 const S={userId:"11111111-1111-4111-8111-111111111111",context:"live:USER"};
 const compile=source=>ts.transpileModule(source,{compilerOptions:{ alwaysStrict: false,target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
 function load(file,imports={},reactCompiled=false){
- const context={exports:{},Error,Date:Clock,Intl,Map,Set,console,Promise,setTimeout,clearTimeout,setInterval,clearInterval,require:name=>{if(name in imports)return imports[name];if(name==="react/compiler-runtime")return require(name);throw Error("Unexpected import "+name);}};
+ const context={exports:{},Error,Date:Clock,Intl,Map,Set,console,Promise,setTimeout,clearTimeout,setInterval,clearInterval,require:name=>{if(name in imports)return imports[name];if(name==="@/constants/colors")return load("constants/colors.ts");if(name==="react/compiler-runtime")return require(name);throw Error("Unexpected import "+name);}};
   let source=fs.readFileSync(file,"utf8");
  if(reactCompiled){const expoRequire=createRequire(require.resolve("babel-preset-expo"));source=require("@babel/core").transformSync(source,{filename:file,babelrc:false,configFile:false,parserOpts:{sourceType:"module",plugins:["typescript","jsx"]},plugins:[[expoRequire("babel-plugin-react-compiler"),{target:"19"}]]}).code;}
  vm.runInNewContext(compile(source),context,{filename:file});return context.exports;
@@ -175,7 +175,7 @@ test("ES/EN decision labels remain whole, centered and accessible; compact contr
    assert.ok(layout.columns>=1&&layout.columns<=3);assert.ok(layout.side>=44);assert.ok(layout.side*layout.columns+8*(layout.columns-1)<=width-52+.001);
    for(const label of lang==="es"?["REALIZADO","PENDIENTE","PROPONER CAMBIO"]:["DONE","PENDING","PROPOSE CHANGE"]){
     const props=f.buttons.get(label);assert.ok(props,label);assert.equal(props.style.height,layout.height);assert.ok(props.style.height<=72);assert.ok(props.style.minHeight>=44);
-    const text=props.children.props;assert.equal(text.style.textAlign,"center");assert.equal(text.style.width,"100%");assert.equal(text.adjustsFontSizeToFit,true);
+    const text=props.children.props;assert.equal(text.style.textAlign,"center");assert.equal(text.style.width,label==="PENDIENTE"||label==="PENDING"?undefined:"100%");assert.equal(text.style.maxWidth,"100%");assert.equal(text.adjustsFontSizeToFit,true);
     assert.equal(text.numberOfLines,label.includes(" ")?2:1);assert.equal(text.children,label.replace(" ","\n"));
    }
   }finally{await f.close();}
