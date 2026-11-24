@@ -4,10 +4,21 @@ import { quoteCatalog, toggleCatalogOption, type CatalogQuote } from "@/data/cat
 import { useLanguage } from "@/contexts/LanguageContext";
 import { onSessionChanged } from "@/lib/sessionEvents";
 
-export function CatalogQuoteBreakdown({ quote, showTotal = true, accentColor = "#65b883" }: { quote: CatalogQuote; showTotal?: boolean; accentColor?: string }) {
+export function CatalogQuoteBreakdown({ quote, showTotal = true, accentColor = "#65b883", individual = false }: { quote: CatalogQuote; showTotal?: boolean; accentColor?: string; individual?: boolean }) {
   const { lang } = useLanguage();
   const money = new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: quote.currency });
   const roots = new Set(quote.rootIds);
+  if (individual) return <View testID="booking-review-service-lines" style={{ gap: 4 }}>
+    {quote.lines.map(line => <View key={line.itemId} testID={`booking-review-line-${line.itemId}`}
+      style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+      <Text style={{ color: "#FFFFFF", fontSize: 15, fontWeight: "600", flex: 1, minWidth: 0 }}>
+        {roots.has(line.itemId) ? line.name : `↳ ${line.name}`}
+      </Text>
+      <Text style={{ color: "#FFFFFF", fontSize: 15, fontWeight: "700", flexShrink: 0 }}>
+        {line.included ? (lang === "en" ? "Included" : "Incluido") : money.format(line.charge)}
+      </Text>
+    </View>)}
+  </View>;
   const principal = quote.lines.filter(line => roots.has(line.itemId)).reduce((cents, line) => cents + Math.round(line.charge * 100), 0) / 100;
   const extras = quote.lines.filter(line => !roots.has(line.itemId));
   return <View style={{ gap: 3 }}>

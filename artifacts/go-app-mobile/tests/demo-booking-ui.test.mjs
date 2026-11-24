@@ -45,7 +45,8 @@ function fixture({clock,real=false,sectors,context="USER",ownerAccess=false,init
     "@/components/ui/GoNavigationHand":{GoNavigationHand:{}},
     "@workspace/api-zod":modulePublicationPolicy,
     "@/hooks/useBookingModulePublication":loadModulePublicationHook(React,{context,owner:ownerAccess}),
-    "./CatalogComplementSelector":{CatalogComplementSelector:()=>null},
+    "./CatalogComplementSelector":{CatalogComplementSelector:()=>null,CatalogQuoteBreakdown:"CatalogQuoteBreakdown"},
+    "./PartialPaymentSummary":{PartialPaymentSummary:"PartialPaymentSummary"},
     "@/data/catalogAssociations":pure("data/catalogAssociations.ts",{"./booking":booking}),
     "@/data/bookingDiscounts":pure("data/bookingDiscounts.ts",{"./booking":booking,"./catalogAssociations":pure("data/catalogAssociations.ts",{"./booking":booking})}),
     react:{...React,default:React},"react-native":native,
@@ -235,9 +236,12 @@ test('long review keeps complete data and both actions in one scroll, changes ti
   await button(tree,'09:00').props.onPress();tree=f.render(f.Overlay,f.props);
   const review=control(tree,'booking-review-scroll'),reviewNodes=nodes(review);
   assert.ok(review,'the complete review has a scroll viewport');
-  for(const value of [businessName,...selectedServices.map(service=>service.name),'Raul 1 GO PRUEBA','09:00','10:45','biz_no_advance_payment'])assert.ok(text(review).includes(value),value);
+  for(const value of [businessName,'Raul 1 GO PRUEBA','09:00','10:45','biz_no_advance_payment'])assert.ok(text(review).includes(value),value);
+  const breakdown=reviewNodes.find(node=>node.type==='CatalogQuoteBreakdown');
+  assert.equal(breakdown.props.individual,true);
+  assert.deepEqual(JSON.parse(JSON.stringify(breakdown.props.quote.lines.map(line=>[line.name,line.charge]))),selectedServices.map(service=>[service.name,service.price]));
   assert.match(text(review),/105\s+min/,'the full computed duration remains visible');
-  assert.match(text(review),/40\s*€/,'the full total remains visible');
+  assert.match(text(review),/Total · 40,00\s*€/,'the full total remains visible once');
   assert.ok(reviewNodes.filter(node=>node.type==='Text').every(node=>node.props.numberOfLines==null),'no review field is truncated');
   const confirm=button(tree,'BIZ_CONFIRM_BOOKING_BTN'),change=button(tree,'biz_change_time');
   assert.ok(reviewNodes.includes(confirm)&&reviewNodes.includes(change),'both controls scroll with the complete review');

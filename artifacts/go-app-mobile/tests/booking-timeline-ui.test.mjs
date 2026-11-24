@@ -658,6 +658,9 @@ test('hair reservation review keeps one heading and one dynamic total while pres
  const headings=nodes(tree).filter(n=>n.type==='Text'&&text(n)==='biz_confirm_booking_btn');
  assert.equal(headings.length,1);assert.doesNotMatch(text(tree),/biz_confirm_booking_title|ACCION_CONFIRMAR/);
  assert.equal(nodes(tree).find(n=>n.type==='CatalogQuoteBreakdown').props.showTotal,false);
+ assert.equal(nodes(tree).find(n=>n.type==='CatalogQuoteBreakdown').props.individual,true);
+ assert.equal(nodes(tree).filter(n=>n.props?.testID==='booking-review-total').length,1);
+ assert.ok(nodes(tree).find(n=>n.type==='GoNavigationFloating').props.avoidRects?.length,'floating navigation avoids the confirmation actions');
  assert.equal((text(tree).match(/Total ·/g)??[]).length,1);assert.match(text(tree),/Total · 12,00/);
  const reviewNodes=nodes(tree),breakdownIndex=reviewNodes.findIndex(n=>n.type==='CatalogQuoteBreakdown');
  const totalIndex=reviewNodes.findIndex(n=>n.props?.testID==='booking-review-total');

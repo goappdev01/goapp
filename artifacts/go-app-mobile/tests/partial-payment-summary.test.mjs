@@ -40,10 +40,10 @@ test('partial reservation review has one gold rectangle, two amounts and a thin 
     assert.equal(tree.props.style.borderWidth, 1);
     assert.equal(lines.length, 4);
     assert.equal(bookingRow.props.accessibilityLabel, `Al reservar · ${booking} % · ${bookingAmount}`);
-    assert.equal(venueRow.props.accessibilityLabel, `En el establecimiento · ${venue} % · ${venueAmount}`);
+    assert.equal(venueRow.props.accessibilityLabel, `En el local · ${venue} % · ${venueAmount}`);
     assert.equal(bookingRow.props.style.flexDirection, 'row');
-    assert.equal(venueRow.props.style.flexDirection, 'column');
-    assert.equal(venueRow.children[0].props.numberOfLines, 1, 'the full venue label stays on its own line');
+    assert.equal(venueRow.props.style.flexDirection, 'row');
+    assert.equal(venueRow.children[0].props.numberOfLines, 1, 'the short venue label stays intact');
     assert.equal(terms.dueAtBookingCents + terms.dueAtVenueCents, terms.totalCents);
     assert.ok(lines.every(line => line.props.style.color === '#FACC15'));
     assert.equal(nodes(tree).filter(node => node.type === 'View' && node.props.style.height === 1).length, 1);

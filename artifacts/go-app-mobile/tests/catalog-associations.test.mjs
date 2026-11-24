@@ -23,7 +23,7 @@ function fixture(showTotal=true,initialSelected){
  const render=()=>{cursor=0;dirty=false;tree=scope.exports.CatalogComplementSelector({businessId:business,rootIds:roots,onChange:changed,showTotal,initialSelected});const pending=effects;effects=[];for(const e of pending)e()};
  const settle=async()=>{for(let n=0;n<10;n++){if(dirty)render();await new Promise(r=>setImmediate(r));if(!dirty)return}throw Error('Non-settling selector')};
  const walk=node=>!node||typeof node!=='object'?[]:typeof node.type==='function'?walk(node.type({...node.props,children:node.children})):[node,...(node.children??[]).flatMap(walk)];
- return {data,calls,sample,start:settle,settle,tree:()=>tree,latest:()=>latest,nodes:()=>walk(tree),breakdown:quote=>walk(scope.exports.CatalogQuoteBreakdown({quote})),press:async()=>{walk(tree).find(n=>n.props.accessibilityRole==='checkbox').props.onPress();await settle()},change:async(b,r)=>{business=b;roots=r;dirty=true;await settle()},session:async()=>{for(const cb of listeners)cb();await settle()}};
+ return {data,calls,sample,start:settle,settle,tree:()=>tree,latest:()=>latest,nodes:()=>walk(tree),breakdown:(quote,options={})=>walk(scope.exports.CatalogQuoteBreakdown({quote,...options})),press:async()=>{walk(tree).find(n=>n.props.accessibilityRole==='checkbox').props.onPress();await settle()},change:async(b,r)=>{business=b;roots=r;dirty=true;await settle()},session:async()=>{for(const cb of listeners)cb();await settle()}};
 }
 test('the review lists principal, each selected supplement and the agreed total in cents',()=>{
  const f=fixture(),quote={...f.sample(['first','free']),businessId:'business-A',rootIds:['tinte'],currency:'EUR',totalPrice:25.25,
@@ -31,6 +31,18 @@ test('the review lists principal, each selected supplement and the agreed total 
  const rows=f.breakdown(quote).filter(node=>node.type==='Text').map(node=>node.children.join(''));
  assert.match(rows[0],/Servicios principales.*20,00/);assert.match(rows[1],/Mascarilla.*5,25/);
  assert.match(rows[2],/Ampolla.*0,00/);assert.match(rows[3],/Total antes de confirmar.*25,25/);
+});
+test('compact reservation review keeps one agreed price per service and complement, including seven services',()=>{
+ const f=fixture(),serviceLines=Array.from({length:7},(_,i)=>({itemId:`service-${i}`,name:`Servicio ${i+1}`,kind:'service',charge:i+1,included:false}));
+ const quote={...f.sample([]),rootIds:serviceLines.map(line=>line.itemId),totalPrice:38.5,
+  lines:[...serviceLines,{itemId:'extra',name:'Ampolla',kind:'product',charge:10.5,included:false}]};
+ const nodes=f.breakdown(quote,{individual:true,showTotal:false});
+ const rows=nodes.filter(node=>node.props.testID?.startsWith('booking-review-line-'));
+ assert.equal(rows.length,8);
+ assert.deepEqual(rows.map(row=>row.children.filter(node=>node.type==='Text').map(node=>node.children.join(''))),
+  [...serviceLines.map((line,i)=>[line.name,`${i+1},00 €`]),['↳ Ampolla','10,50 €']]);
+ assert.equal(nodes.filter(node=>node.type==='Text').length,16,'no grouped subtotal or duplicated total');
+ assert.equal(rows.reduce((sum,row)=>sum+Number(row.children[1].children.join('').replace(/[^0-9,]/g,'').replace(',','.')),0),quote.totalPrice);
 });
 test('real selector never adds an optional product until its checkbox is pressed',async()=>{const f=fixture();await f.start();assert.equal(f.calls.length,1);assert.deepEqual(f.calls[0].body.selectedIds,[]);assert.equal(f.latest().totalPrice,30);assert.equal(f.nodes().find(n=>n.props.accessibilityRole==='checkbox').props.accessibilityState.checked,false);await f.press();assert.deepEqual(f.calls.at(-1).body.selectedIds,['ampolla-link']);assert.equal(f.latest().totalPrice,37);await f.press();assert.deepEqual(f.calls.at(-1).body.selectedIds,[]);assert.equal(f.latest().totalPrice,30)});
 test('recommended extra never blocks booking and remains voluntary with a touch target',async()=>{const f=fixture();await f.change('business-A',['recommended']);assert.equal(f.latest().ready,true);assert.equal(f.latest().totalPrice,30);assert.equal(f.nodes().find(n=>n.props.accessibilityRole==='checkbox').props.style.minHeight,44);await f.press();assert.equal(f.latest().ready,true);assert.equal(f.latest().totalPrice,37);await f.press();assert.equal(f.latest().totalPrice,30)});

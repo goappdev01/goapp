@@ -356,7 +356,7 @@ export function BookingSearchOverlay({
   const { t, lang } = useLanguage();
   const insets = useSafeAreaInsets();
   const handedness = useContext(GoNavigationHand);
-  const { fontScale } = useWindowDimensions();
+  const { fontScale, width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [servicesGuideBottom, setServicesGuideBottom] = useState(0);
   const servicesLayout = useRef({ sheetHeight: 0, headerBottom: 0, footerTop: Infinity, scrollOffset: 0 });
   const updateServicesLayout = (layout: Partial<typeof servicesLayout.current>) => {
@@ -1149,6 +1149,18 @@ export function BookingSearchOverlay({
     durationMinutes: reviewedPlan.totalClientMinutes,
     price: (confirmedBooking?.catalogSnapshot ?? reviewedQuote)?.totalPrice ?? reviewedPlan.totalPrice ?? selectedItem.price,
   } : selectedItem && proposalReview ? {...selectedItem,price:reviewedQuote?.totalPrice ?? selectedItem.price,durationMinutes:proposalReview.selection.durationMinutes} : selectedItem;
+  const discountDetails = reviewedQuote?.originalTotal !== undefined && (() => {
+    const quote = reviewedQuote;
+    const money = new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: quote.currency });
+    const detailStyle = [s.summaryRowText, simpleHairConfirmation && { color: "#FFFFFF" }];
+    return <View style={{ gap: 3, marginTop: 6 }}>
+      <Text style={detailStyle}>{lang === "en" ? "Original price" : "Precio original"} · {money.format(quote.originalTotal ?? quote.totalPrice)}</Text>
+      {quote.lines.filter(line => line.discountBasisPoints !== undefined).map(line =>
+        <Text key={line.itemId} style={detailStyle}>{line.name} · {line.discountBasisPoints! / 100} % · −{money.format(line.discountAmount ?? 0)}</Text>)}
+      <Text style={detailStyle}>{lang === "en" ? "Total discount" : "Descuento total"} · −{money.format(quote.discountTotal ?? 0)}</Text>
+      {!simpleHairConfirmation && <Text style={[s.summaryRowText, {color:accentColor}]}>{lang === "en" ? "Final price" : "Precio final"} · {money.format(quote.totalPrice)}</Text>}
+    </View>;
+  })();
 
   // Sheet compacto (sin flex:1) siempre en el paso "search" y cuando el teclado está visible.
   // El paso "search" se autoajusta a su contenido real (categorías + recientes + buscador).
@@ -1178,7 +1190,8 @@ export function BookingSearchOverlay({
   const navigationControls = (
     <GoNavigationFloating screenKey="booking-search" width={136} safeArea={false} keyboardResponsive handedness={handedness}
       protectedTop={servicesFooterVisible ? 0 : insets.top+8}
-      protectedBottom={servicesFooterVisible ? 0 : keyboardHeight+(keyboardVisible?12:insets.bottom+24)}>
+      protectedBottom={servicesFooterVisible ? 0 : keyboardHeight+(keyboardVisible?12:insets.bottom+24)}
+      avoidRects={step === "hold" ? [{ x: 0, y: Math.max(0, windowHeight-insets.top-insets.bottom-32-174), width: windowWidth, height: 174 }] : undefined}>
       <GoCloseButton level="panel" testID="booking-back" keyboardVisible={keyboardVisible} accessibilityLabel={keyboardVisible?(lang==="en"?"Hide keyboard":"Ocultar teclado"):(lang==="en"?"Back":"Volver")} hitSlop={4} style={s.fabClose} onPress={handleBackOneLevel} activeOpacity={0.7}/>
       <GoCloseButton level="container" testID="booking-exit" accessibilityLabel={lang==="en"?"Return to GO":"Volver a GO"} hitSlop={4} style={s.fabClose} onPress={handleDismissAll} activeOpacity={0.7}/>
     </GoNavigationFloating>
@@ -1828,25 +1841,36 @@ export function BookingSearchOverlay({
                 >
                   <View style={s.holdDetails}>
                   <View style={[s.promptWrap, s.holdPrompt]} {...(simpleHairConfirmation ? dragHandlePan.panHandlers : {})}>
-                    <Text style={s.promptText}>{changeSelection?(lang==="en"?"Review change proposal":"Revisar propuesta de cambio"):t(simpleHairConfirmation ? "biz_confirm_booking_btn" : "biz_confirm_booking_title")}</Text>
+                    <Text style={[s.promptText, simpleHairConfirmation && { fontSize: 20, lineHeight: 25 }]}>{changeSelection?(lang==="en"?"Review change proposal":"Revisar propuesta de cambio"):t(simpleHairConfirmation ? "biz_confirm_booking_btn" : "biz_confirm_booking_title")}</Text>
                   </View>
 
                   {/* Summary card */}
                   <View style={[s.summaryCard, { borderColor: `${accentColor}30` }]}>
                     <View style={[s.summaryAccentBar, { backgroundColor: accentColor }]} />
-                    <View style={s.summaryBody}>
+                    <View style={[s.summaryBody, simpleHairConfirmation && { padding: 16, gap: 5 }]}>
                       <Text style={[s.summaryBizLabel, { color: accentColor }]}>
                         {selectedBusiness.name}
                       </Text>
-                      <Text style={s.summaryServiceName}>{trSector(summaryItem!.title, lang)}</Text>
-                      {reviewedQuote && <CatalogQuoteBreakdown quote={reviewedQuote} showTotal={!simpleHairConfirmation} accentColor={accentColor} />}
+                      {!simpleHairConfirmation && <Text style={s.summaryServiceName}>{trSector(summaryItem!.title, lang)}</Text>}
+                      {reviewedQuote && <CatalogQuoteBreakdown quote={reviewedQuote} showTotal={!simpleHairConfirmation} individual={simpleHairConfirmation} accentColor={accentColor} />}
+                      {simpleHairConfirmation && !reviewedQuote && <View testID="booking-review-service-lines" style={{ gap: 4 }}>
+                        {(reviewedPlan?.serviceDetails?.length ? reviewedPlan.serviceDetails : [selectedItem]).map(service =>
+                          <View key={service.id} style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
+                            <Text style={{ color: "#FFFFFF", fontSize: 15, fontWeight: "600", flex: 1, minWidth: 0 }}>{service.title}</Text>
+                            <Text style={{ color: "#FFFFFF", fontSize: 15, fontWeight: "700" }}>
+                              {service.price == null ? (lang === "en" ? "No price" : "Sin precio")
+                                : new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: service.currency ?? "EUR" }).format(service.price)}
+                            </Text>
+                          </View>)}
+                      </View>}
+                      {simpleHairConfirmation && discountDetails}
                       {simpleHairConfirmation && <View testID="booking-review-total" style={[s.summaryRow, { marginTop: 6 }]}>
                         <Feather name="tag" size={15} color={accentColor} />
                         <Text style={[s.summaryRowText, { color: accentColor, fontWeight: "800" }]}>
                           {`Total · ${new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: reviewedQuote?.currency ?? "EUR" }).format(summaryItem!.price)}`}
                         </Text>
                       </View>}
-                      {paymentTerms && paymentTerms.bookingPercent > 0 && paymentTerms.bookingPercent < 100
+                      {paymentTerms && (simpleHairConfirmation || paymentTerms.bookingPercent > 0 && paymentTerms.bookingPercent < 100)
                         ? <PartialPaymentSummary terms={paymentTerms} lang={lang} />
                         : paymentTerms && <View style={{ gap: 3, marginTop: 6 }}>
                         <Text style={s.summaryRowText}>{lang === "en" ? "Due at booking" : "Previsto al reservar"} ({paymentTerms.bookingPercent} %) · {(paymentTerms.dueAtBookingCents / 100).toFixed(2)} €</Text>
@@ -1855,34 +1879,24 @@ export function BookingSearchOverlay({
                         <Text style={s.summaryRowText}>{lang === "en" ? "Payment confirmed" : "Pago confirmado"} · 0,00 €</Text>
                         <Text style={s.summaryRowText}>{lang === "en" ? "Total outstanding" : "Total pendiente"} · {(paymentTerms.totalCents / 100).toFixed(2)} €</Text>
                       </View>}
-                      {reviewedQuote?.originalTotal !== undefined && (() => {
-                        const quote = reviewedQuote;
-                        const money = new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: quote.currency });
-                        return <View style={{ gap: 3, marginTop: 6 }}>
-                          <Text style={s.summaryRowText}>{lang === "en" ? "Original price" : "Precio original"} · {money.format(quote.originalTotal ?? quote.totalPrice)}</Text>
-                          {quote.lines.filter(line => line.discountBasisPoints !== undefined).map(line =>
-                            <Text key={line.itemId} style={s.summaryRowText}>{line.name} · {line.discountBasisPoints! / 100} % · −{money.format(line.discountAmount ?? 0)}</Text>)}
-                          <Text style={s.summaryRowText}>{lang === "en" ? "Total discount" : "Descuento total"} · −{money.format(quote.discountTotal ?? 0)}</Text>
-                          {!simpleHairConfirmation && <Text style={[s.summaryRowText, {color:accentColor}]}>{lang === "en" ? "Final price" : "Precio final"} · {money.format(quote.totalPrice)}</Text>}
-                        </View>;
-                      })()}
+                      {!simpleHairConfirmation && discountDetails}
                       {/* Profesional — siempre visible si fue elegido */}
                       {proLabel && (
                         <View style={[s.summaryRow, { marginTop: 6 }]}>
                           <Feather name="user" size={15} color="rgba(255,255,255,0.40)" />
-                          <Text style={s.summaryRowText}>{proLabel}</Text>
+                          <Text style={[s.summaryRowText, simpleHairConfirmation && { color: "#FFFFFF" }]}>{proLabel}</Text>
                         </View>
                       )}
-                      <View style={s.summaryDivider} />
+                      <View style={[s.summaryDivider, simpleHairConfirmation && { marginVertical: 2 }]} />
                       <View style={s.summaryRow}>
                         <Feather name="calendar" size={15} color="rgba(255,255,255,0.40)" />
-                        <Text style={s.summaryRowText}>
+                        <Text style={[s.summaryRowText, simpleHairConfirmation && { color: "#FFFFFF" }]}>
                           {formatDateLabel(reviewedSlot.startDatetime.slice(0, 10), t)}
                         </Text>
                       </View>
                       <View style={s.summaryRow}>
                         <Feather name="clock" size={15} color="rgba(255,255,255,0.40)" />
-                        <Text style={s.summaryRowText}>
+                        <Text style={[s.summaryRowText, simpleHairConfirmation && { color: "#FFFFFF" }]}>
                           {formatTime(reviewedSlot.startDatetime)} — {formatTime(reviewedSlot.endDatetime)}
                           {"  ·  "}{summaryItem!.durationMinutes} min
                         </Text>
@@ -1928,7 +1942,7 @@ export function BookingSearchOverlay({
                           </Text>
                         </View>
                         {policy.freeUntilHours > 0 && (
-                          <Text style={s.policyNote}>
+                          <Text style={[s.policyNote, simpleHairConfirmation && { color: "#FFFFFF" }]}>
                             {info.isFree
                               ? t("biz_refund_free_until").replace("__H__", String(policy.freeUntilHours))
                               : t("biz_refund_cancel_window_passed").replace("__H__", String(policy.freeUntilHours))
@@ -1938,15 +1952,18 @@ export function BookingSearchOverlay({
                       </View>
                     );
                   })() : (
-                    <View style={[s.policyCard, { borderColor: "rgba(34,197,94,0.20)" }]}>
+                    <View style={[s.policyCard, { borderColor: paymentTerms?.bookingPercent || !paymentTerms ? "rgba(245,158,11,0.35)" : "rgba(34,197,94,0.20)" }]}>
                       <View style={s.policyRow}>
-                        <Feather name="check-circle" size={13} color="#22C55E" />
-                        <Text style={[s.policyLabel, { color: "#22C55E" }]}>
-                          {t("biz_no_advance_payment")}
+                        <Feather name={paymentTerms?.bookingPercent || !paymentTerms ? "info" : "check-circle"} size={13} color={paymentTerms?.bookingPercent || !paymentTerms ? "#FACC15" : "#22C55E"} />
+                        <Text style={[s.policyLabel, { color: paymentTerms?.bookingPercent || !paymentTerms ? "#FACC15" : "#22C55E" }]}>
+                          {paymentTerms?.bookingPercent ? (lang === "en" ? "Advance amount planned" : "Importe previsto al reservar")
+                            : paymentTerms ? t("biz_no_advance_payment") : (lang === "en" ? "Payment terms unavailable" : "Condiciones de pago no disponibles")}
                         </Text>
                       </View>
-                      <Text style={s.policyNote}>
-                        {t("biz_cancel_modify_free")}
+                      <Text style={[s.policyNote, simpleHairConfirmation && { color: "#FFFFFF" }]}>
+                        {paymentTerms?.bookingPercent
+                          ? (lang === "en" ? "No payment has been collected. Ask the business about cancellation terms." : "No se ha cobrado. Consulta al establecimiento las condiciones de cancelación.")
+                          : (lang === "en" ? "Ask the business about cancellation terms." : "Consulta al establecimiento las condiciones de cancelación.")}
                       </Text>
                     </View>
                   )}
