@@ -15,6 +15,25 @@ const photos = {
   gazpacho: () => require("../assets/catalog-demo/gazpacho.jpg"),
   "churros-chocolate": () => require("../assets/catalog-demo/churros-chocolate.jpg"),
 } as const;
+type ExampleId = keyof typeof photos;
+
+/** Stable references stored only in the isolated DEMO configuration. */
+const EXAMPLE_PREFIX = "demo-catalog:";
+export const demoCatalogPhotoExamples: ReadonlyArray<{ id: ExampleId; title: string; group: "Peluquerías" | "Restaurantes" }> = [
+  { id: "corte-caballero", title: "Corte caballero", group: "Peluquerías" },
+  { id: "corte-senora", title: "Corte señora", group: "Peluquerías" },
+  { id: "tinte-coloracion", title: "Tinte / coloración", group: "Peluquerías" },
+  { id: "peinado-secado", title: "Peinado y secado", group: "Peluquerías" },
+  { id: "mechas-tratamiento", title: "Mechas / tratamiento", group: "Peluquerías" },
+  { id: "paella-valenciana", title: "Paella valenciana", group: "Restaurantes" },
+  { id: "tortilla-patatas", title: "Tortilla de patatas", group: "Restaurantes" },
+  { id: "croquetas", title: "Croquetas", group: "Restaurantes" },
+  { id: "patatas-bravas", title: "Patatas bravas", group: "Restaurantes" },
+  { id: "gazpacho", title: "Gazpacho", group: "Restaurantes" },
+  { id: "churros-chocolate", title: "Churros con chocolate", group: "Restaurantes" },
+];
+export const demoCatalogExampleSource = (id: ExampleId): number => photos[id]();
+export const demoCatalogExampleReference = (id: ExampleId): string => `${EXAMPLE_PREFIX}${id}`;
 
 const demoTitlePhoto: Record<string, keyof typeof photos> = {
   "corte caballero": "corte-caballero", "corte senora": "corte-senora",
@@ -35,6 +54,10 @@ export function demoCatalogPhotoSource(item: Pick<BookableItem, "id" | "business
   const bundledDemo = item.businessId.startsWith("demo_biz_") || item.businessId === "nemesi_molina";
   if (!ownerDemo && !bundledDemo) return undefined;
   if (item.photoUri === "none") return undefined;
+  if (ownerDemo && item.photoUri?.startsWith(EXAMPLE_PREFIX)) {
+    const id = item.photoUri.slice(EXAMPLE_PREFIX.length);
+    return Object.prototype.hasOwnProperty.call(photos, id) ? photos[id as ExampleId]() : undefined;
+  }
   if (ownerDemo && item.photoUri?.startsWith("data:image/jpeg;base64,")) return { uri: item.photoUri };
   if (ownerDemo && item.photoUri?.startsWith("data:image/png;base64,")) return { uri: item.photoUri };
   if (item.photoUri) return undefined;

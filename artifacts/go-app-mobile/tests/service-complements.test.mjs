@@ -41,7 +41,7 @@ async function fixture() {
     canUse: () => true, initialConfig: { services: [], plantillaItems: [], activeDays: [], completedSteps: [], staffSchedules: {} } };
   const store = stores.createBusinessDemoStore(options);
   await store.updateConfig({ services: [{ name: 'Corte', duration: 30, price: 20 }], subId: 'peluqueria' });
-  const props = new Map(), calls = { flush: 0 };
+  const props = new Map(), photoButtons = new Map(), calls = { flush: 0 };
   const native = name => value => { const id = React.useId(); props.set(id, { ...value, native: name });
     return React.createElement('div', { 'data-prop-id': id }, value.children); };
   const components = Object.fromEntries(['View', 'Text', 'TextInput', 'TouchableOpacity'].map(name => [name, native(name)]));
@@ -49,6 +49,7 @@ async function fixture() {
     react: React, 'react-native': components, '@/data/booking': cloud, '@/data/catalogAssociations': associations,
     '@/data/demoBookingRepository': repositories, '@/contexts/GoBusinessConfigContext': { useBusinessConfig: () => ({ demo: store }) },
     '@/contexts/LanguageContext': { useLanguage: () => ({ lang: 'es' }) }, '@/lib/sessionEvents': { onSessionChanged: () => () => {} },
+    './CatalogPhotoButton': { CatalogPhotoButton: value => { photoButtons.set(value.id, value); return React.createElement('div'); } },
   });
   const container = document.createElement('div'), root = createRoot(container);
   const descendants = node => [node, ...node.childNodes.flatMap(descendants)];
@@ -63,7 +64,7 @@ async function fixture() {
     assert.ok(button, title); await settle(() => button.onPress()); };
   const field = title => { const input = visible().filter(value => value.native === 'TextInput' && value.accessibilityLabel === title).at(-1);
     assert.ok(input, title); return input; };
-  return { store, memory, owner, options, calls, container, visible, settle, press,
+  return { store, memory, owner, options, calls, container, visible, settle, press, photoButtons,
     edit: async (title, value) => settle(() => field(title).onChangeText(value)),
     rename: async (oldName, newName) => { const input = visible().find(value => value.native === 'TextInput' && value.value === oldName);
       assert.ok(input, oldName); await settle(() => input.onChangeText(newName)); await settle(() => input.onBlur()); },
@@ -124,6 +125,29 @@ test('inline service rows add, edit and remove multiple optional products withou
   } finally { await f.close(); }
 });
 
+test('an associated DEMO product keeps an example photo through save, replacement and reopen', async () => {
+  const f = await fixture();
+  try {
+    await f.press('Añadir producto asociado a Corte');
+    const draftId = [...f.photoButtons.keys()].find(id => id.startsWith('draft_'));
+    assert.ok(draftId);
+    await f.settle(() => f.photoButtons.get(draftId).onChange('demo-catalog:croquetas'));
+    await f.edit('Nombre del producto asociado de Corte', 'Ampolla');
+    await f.edit('Precio de Ampolla', '5,00');
+    await f.blur('Precio de Ampolla');
+    const edge = f.store.getSnapshot().config.catalogAssociations[0];
+    assert.equal(f.store.getSnapshot().config.catalogProducts[0].photoUri, 'demo-catalog:croquetas');
+    await f.settle(() => f.photoButtons.get(edge.id).onChange('demo-catalog:gazpacho'));
+    assert.equal(f.store.getSnapshot().config.catalogProducts[0].photoUri, 'demo-catalog:gazpacho');
+    const reopened = stores.createBusinessDemoStore(f.options); await reopened.load();
+    const repo = repositories.createDemoBookingRepository(reopened);
+    assert.equal((await repo.getCatalogItems(reopened.businessId)).find(item => item.id === edge.target_id).photoUri, 'demo-catalog:gazpacho');
+    assert.equal((await repo.quoteCatalog(reopened.businessId, [edge.source_id], [edge.id])).totalPrice, 25);
+    await f.settle(() => f.photoButtons.get(edge.id).onChange('none'));
+    assert.equal(f.store.getSnapshot().config.catalogProducts[0].photoUri, 'none');
+  } finally { await f.close(); }
+});
+
 test('a real company saves one optional association through the existing owned catalogue APIs', async () => {
   const businessId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const sourceId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -147,7 +171,8 @@ test('a real company saves one optional association through the existing owned c
   const { ServiceAssociatedProducts, useServiceComplementCatalog } = load('components/empresa/ServiceComplementManager.tsx', { react: React, 'react-native': components,
     '@/data/booking': remote, '@/data/catalogAssociations': api, '@/data/demoBookingRepository': {},
     '@/contexts/GoBusinessConfigContext': { useBusinessConfig: () => ({ demo: null }) },
-    '@/contexts/LanguageContext': { useLanguage: () => ({ lang: 'es' }) }, '@/lib/sessionEvents': { onSessionChanged: () => () => {} } });
+    '@/contexts/LanguageContext': { useLanguage: () => ({ lang: 'es' }) }, '@/lib/sessionEvents': { onSessionChanged: () => () => {} },
+    './CatalogPhotoButton': { CatalogPhotoButton: () => null } });
   function InlineProducts() {
     const owned = useServiceComplementCatalog(businessId, false, true);
     return React.createElement(ServiceAssociatedProducts, { serviceName: 'Corte', catalog: owned, beforeSave: async () => {} });

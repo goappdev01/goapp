@@ -6,6 +6,7 @@ import { createDemoBookingRepository } from "@/data/demoBookingRepository";
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { onSessionChanged } from "@/lib/sessionEvents";
+import { CatalogPhotoButton } from "./CatalogPhotoButton";
 
 type Catalog = { items: BookableItem[]; relations: CatalogAssociation[] };
 const empty: Catalog = { items: [], relations: [] };
@@ -71,30 +72,31 @@ export function useServiceComplementCatalog(businessId: string | undefined, demo
     }
     return (await createBookableItem(item)).id;
   };
-  return { ...catalog, loading, busy, error, mutate, associate, saveProduct, createProduct };
+  return { ...catalog, businessId, demo: !!local, loading, busy, error, mutate, associate, saveProduct, createProduct };
 }
 
 type CatalogController = ReturnType<typeof useServiceComplementCatalog>;
 
-function ProductRow({ id, serviceName, initialName, initialPrice, onSave, onDelete }: {
-  id: string; serviceName: string; initialName?: string; initialPrice?: number;
-  onSave: (name: string, price: string) => Promise<void>; onDelete: () => Promise<void> | void;
+function ProductRow({ id, serviceName, initialName, initialPrice, initialPhotoUri, demoBusinessId, onSave, onDelete }: {
+  id: string; serviceName: string; initialName?: string; initialPrice?: number; initialPhotoUri?: string; demoBusinessId?: string;
+  onSave: (name: string, price: string, photoUri?: string) => Promise<void>; onDelete: () => Promise<void> | void;
 }) {
   const { lang } = useLanguage();
   const label = (es: string, en: string) => lang === "en" ? en : es;
   const [name, setName] = useState(initialName ?? ""), [price, setPrice] = useState(initialPrice === undefined ? "" : initialPrice.toFixed(2));
+  const [photoUri, setPhotoUri] = useState(initialPhotoUri);
   const [saving, setSaving] = useState(false), [error, setError] = useState("");
-  const latest = useRef({ name, price }); latest.current = { name, price };
-  const saved = useRef(initialName === undefined ? "" : JSON.stringify([initialName, initialPrice?.toFixed(2)]));
+  const latest = useRef({ name, price, photoUri }); latest.current = { name, price, photoUri };
+  const saved = useRef(initialName === undefined ? "" : JSON.stringify([initialName, initialPrice?.toFixed(2), initialPhotoUri]));
   const commit = async () => {
     if (saving) return;
     const draft = latest.current;
     if (!draft.name.trim() && !draft.price.trim()) return;
     if (!draft.name.trim() || !draft.price.trim()) { setError(label("Completa nombre y precio.", "Enter a name and price.")); return; }
-    const signature = JSON.stringify([draft.name.trim(), draft.price]);
+    const signature = JSON.stringify([draft.name.trim(), draft.price, draft.photoUri]);
     if (signature === saved.current) return;
     setSaving(true); setError("");
-    try { await onSave(draft.name, draft.price); saved.current = signature; }
+    try { await onSave(draft.name, draft.price, draft.photoUri); saved.current = signature; }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setSaving(false); }
   };
@@ -104,6 +106,8 @@ function ProductRow({ id, serviceName, initialName, initialPrice, onSave, onDele
         value={name} editable={!saving} onChangeText={setName} onBlur={() => { void commit(); }} onSubmitEditing={() => { void commit(); }}
         placeholder={label("Producto", "Product")} placeholderTextColor="#6B7280" returnKeyType="done"
         style={{ flex: 1, minWidth: 72, minHeight: 44, color: "#111827", borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 9, paddingHorizontal: 9, backgroundColor: "#FFFFFF" }} />
+      {demoBusinessId && <CatalogPhotoButton id={id} businessId={demoBusinessId} title={name} type="product" photoUri={photoUri} demo
+        onChange={value => { latest.current = { ...latest.current, photoUri: value }; setPhotoUri(value); if (initialName !== undefined) return commit(); }} />}
       <TextInput accessibilityLabel={label("Precio de ", "Price for ") + (name.trim() || serviceName)}
         value={price} editable={!saving} onChangeText={setPrice} onBlur={() => { void commit(); }} onSubmitEditing={() => { void commit(); }}
         keyboardType="decimal-pad" placeholder="0,00" placeholderTextColor="#6B7280" returnKeyType="done"
@@ -131,7 +135,7 @@ export function ServiceAssociatedProducts({ serviceName, catalog, beforeSave }: 
   const edges = catalog.relations.filter(edge => edge.source_id === source?.id && edge.mode === "optional" && edge.active
     && catalog.items.some(item => item.id === edge.target_id && item.catalogKind === "product"))
     .sort((a, b) => (a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER));
-  const save = async (id: string | null, draftId: string | null, name: string, price: string) => {
+  const save = async (id: string | null, draftId: string | null, name: string, price: string, photoUri?: string) => {
     const title = name.trim(), value = parseEuroSupplement(price);
     if (!title) throw Error(label("Escribe el nombre del producto.", "Enter the product name."));
     await beforeSave();
@@ -146,16 +150,17 @@ export function ServiceAssociatedProducts({ serviceName, catalog, beforeSave }: 
       if (current) {
         const item = fresh.items.find(row => row.id === current.target_id && row.catalogKind === "product");
         if (!item || item.businessId !== root.businessId) throw Error(label("Producto no disponible.", "Product unavailable."));
-        if (fresh.relations.some(edge => edge.id !== current.id && edge.target_id === item.id && edge.active))
+        if (fresh.relations.some(edge => edge.id !== current.id && edge.target_id === item.id && edge.active)
+          && (item.title !== title || item.price !== value))
           throw Error(label("Producto compartido: edítalo en el catálogo general.", "Shared product: edit it in the main catalogue."));
-        await catalog.saveProduct({ ...item, title, price: value });
+        await catalog.saveProduct({ ...item, title, price: value, ...(photoUri !== undefined ? { photoUri } : {}) });
       } else {
         const orphan = fresh.items.find(item => item.catalogKind === "product" && item.businessId === root.businessId
           && item.catalogMetadata?.goAddonFor === root.id && sameName(item.title, title) && item.price === value
           && !fresh.relations.some(edge => edge.target_id === item.id));
         const targetId = orphan?.id ?? await catalog.createProduct({ businessId: root.businessId, title, type: "product", catalogKind: "product",
           durationMinutes: 0, price: value, currency: "EUR", customerCapacity: 1, unitQuantity: 1,
-          paymentRequired: false, active: true, visible: true, catalogMetadata: { goAddonFor: root.id } });
+          paymentRequired: false, active: true, visible: true, catalogMetadata: { goAddonFor: root.id }, ...(photoUri !== undefined ? { photoUri } : {}) });
         await catalog.associate("create", { sourceId: root.id, targetId, mode: "optional" });
       }
     });
@@ -172,11 +177,13 @@ export function ServiceAssociatedProducts({ serviceName, catalog, beforeSave }: 
     <Text style={{ color: "#111827", fontSize: 13, fontWeight: "600" }}>{label("Productos asociados", "Associated products")}</Text>
     {edges.map(edge => {
       const item = catalog.items.find(row => row.id === edge.target_id)!;
-      return <ProductRow key={edge.id} id={edge.id} serviceName={serviceName} initialName={item.title} initialPrice={item.price}
-        onSave={(name, price) => save(edge.id, null, name, price)} onDelete={() => remove(edge)} />;
+      return <ProductRow key={edge.id} id={edge.id} serviceName={serviceName} initialName={item.title} initialPrice={item.price} initialPhotoUri={item.photoUri}
+        demoBusinessId={catalog.demo ? catalog.businessId : undefined}
+        onSave={(name, price, photoUri) => save(edge.id, null, name, price, photoUri)} onDelete={() => remove(edge)} />;
     })}
     {drafts.map(id => <ProductRow key={id} id={id} serviceName={serviceName}
-      onSave={(name, price) => save(null, id, name, price)} onDelete={() => setDrafts(current => current.filter(value => value !== id))} />)}
+      demoBusinessId={catalog.demo ? catalog.businessId : undefined}
+      onSave={(name, price, photoUri) => save(null, id, name, price, photoUri)} onDelete={() => setDrafts(current => current.filter(value => value !== id))} />)}
     <TouchableOpacity testID="add-associated-product" accessibilityRole="button" accessibilityLabel={label("Añadir producto asociado a ", "Add associated product to ") + serviceName}
       onPress={() => setDrafts(current => [...current, `draft_${Date.now()}_${Math.random().toString(36).slice(2)}`])}
       style={{ width: 44, height: 44, borderWidth: 1, borderColor: "#D1D5DB", borderRadius: 9, alignItems: "center", justifyContent: "center" }}>

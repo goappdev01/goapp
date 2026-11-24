@@ -192,12 +192,13 @@ test("older DEMO documents gain fictional clients without losing saved company d
 test("DEMO catalogue photos survive reopen and reset without touching real storage", async () => {
   const shared=new Map([["go_bookable_items_v1","REAL"]]),f=dataFixture(owner,shared);
   const photo="data:image/jpeg;base64,/9j/FAKE_DEMO";
-  await f.store.updateConfig({services:[{name:"Corte caballero",duration:30,price:15,photoUri:photo}]});
+  const example="demo-catalog:paella-valenciana";
+  await f.store.updateConfig({services:[{name:"Corte caballero",duration:30,price:15,photoUri:example}]});
   const repo=bookingRepositoryModule.createDemoBookingRepository(f.store),product={id:f.store.businessId+"_product_demo",businessId:f.store.businessId,title:"Paella valenciana",type:"product",catalogKind:"product",durationMinutes:0,price:12,currency:"EUR",customerCapacity:1,unitQuantity:1,paymentRequired:false,active:true,visible:true,photoUri:photo};
   await repo.saveCatalogProduct(product);
   const reopened=f.make();await reopened.load();
   const items=await bookingRepositoryModule.createDemoBookingRepository(reopened).getCatalogItems(reopened.businessId);
-  assert.equal(items.find(item=>item.title==="Corte caballero").photoUri,photo);
+  assert.equal(items.find(item=>item.title==="Corte caballero").photoUri,example);
   assert.equal(items.find(item=>item.title==="Paella valenciana").photoUri,photo);
   assert.equal(shared.get("go_bookable_items_v1"),"REAL");
   await reopened.reset();assert.equal(reopened.getSnapshot().config.services.length,0);

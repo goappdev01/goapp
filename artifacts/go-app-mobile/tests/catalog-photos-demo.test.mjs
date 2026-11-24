@@ -23,21 +23,43 @@ test("eleven verified DEMO JPEGs are bundled locally and resolve only for DEMO c
   assert.equal(photos.demoCatalogPhotoSource({...item,title:"Sin foto"}),undefined);
   assert.equal(photos.demoCatalogPhotoSource({...item,photoUri:"https://example.com/other.jpg"}),undefined);
   assert.equal(photos.demoCatalogPhotoSource({...item,photoUri:"data:image/jpeg;base64,/9j/TEST"}).uri,"data:image/jpeg;base64,/9j/TEST");
+  assert.equal(photos.demoCatalogPhotoExamples.length,11);
+  for(let i=0;i<names.length;i++) assert.match(photos.demoCatalogPhotoSource({...item,title:"Otro servicio",photoUri:photos.demoCatalogExampleReference(names[i])}),new RegExp(names[i]));
+  assert.equal(photos.demoCatalogPhotoSource({...item,photoUri:"demo-catalog:missing"}),undefined);
+  assert.equal(photos.demoCatalogPhotoSource({...item,businessId:"real-company",photoUri:photos.demoCatalogExampleReference("gazpacho")}),undefined);
 });
 
-test("DEMO photo control accepts gallery and camera, replaces and removes without a server call",async()=>{
+test("DEMO photo control offers all eleven local examples without requesting personal permissions",async()=>{
   const alerts=[],changes=[],calls=[];
-  const React={createElement:(type,props,...children)=>({type,props:{...props,children}})};
+  let open=false;
+  const React={createElement:(type,props,...children)=>({type,props:{...props,children:children.flat(Infinity)}}),useState:()=>[open,value=>{open=value;}]};
+  const nodes=tree=>!tree||typeof tree!=="object"?[]:[tree,...(tree.props?.children??[]).flatMap(nodes)];
   let asset={base64:"/9j/PHOTO",mimeType:"image/jpeg"};
-  const picker={requestCameraPermissionsAsync:async()=>({granted:true}),requestMediaLibraryPermissionsAsync:async()=>({granted:true}),launchCameraAsync:async()=>{calls.push("camera");return{canceled:false,assets:[asset]};},launchImageLibraryAsync:async()=>{calls.push("gallery");return{canceled:false,assets:[asset]};}};
-  const {CatalogPhotoButton}=load("components/empresa/CatalogPhotoButton.tsx",{react:React,"react-native":{Alert:{alert:(...args)=>alerts.push(args)},TouchableOpacity:"button",View:"view"},"@expo/vector-icons":{Feather:"icon"},"expo-image":{Image:"image"},"expo-image-picker":picker,"@/data/demoCatalogPhotos":{demoCatalogPhotoSource:item=>item.photoUri&&item.photoUri!=="none"?{uri:item.photoUri}:undefined}});
+  const picker={requestCameraPermissionsAsync:async()=>{calls.push("camera permission");return{granted:true};},requestMediaLibraryPermissionsAsync:async()=>{calls.push("gallery permission");return{granted:true};},launchCameraAsync:async()=>{calls.push("camera");return{canceled:false,assets:[asset]};},launchImageLibraryAsync:async()=>{calls.push("gallery");return{canceled:false,assets:[asset]};}};
+  const {CatalogPhotoButton,CatalogExampleGallery}=load("components/empresa/CatalogPhotoButton.tsx",{react:React,"react-native":{Alert:{alert:(...args)=>alerts.push(args)},TouchableOpacity:"button",View:"view",Text:"text",Modal:"modal",ScrollView:"scroll"},"@expo/vector-icons":{Feather:"icon"},"expo-image":{Image:"image"},"expo-image-picker":picker,"@/data/demoCatalogPhotos":photos});
   const props={id:"service",businessId:"demo_business_owner",title:"Corte",type:"peluqueria",demo:true,onChange:value=>changes.push(value)};
-  CatalogPhotoButton(props).props.onPress();alerts.at(-1)[2][0].onPress();await new Promise(setImmediate);assert.deepEqual(calls,["gallery"]);assert.deepEqual(changes,["data:image/jpeg;base64,/9j/PHOTO"]);
-  CatalogPhotoButton({...props,photoUri:changes[0]}).props.onPress();alerts.at(-1)[2][1].onPress();await new Promise(setImmediate);assert.deepEqual(calls,["gallery","camera"]);
-  alerts.at(-1)[2][2].onPress();assert.equal(changes.at(-1),"none");
-  asset={base64:"/9j/PHOTO",mimeType:"image/png"};CatalogPhotoButton(props).props.onPress();alerts.at(-1)[2][0].onPress();await new Promise(setImmediate);assert.match(alerts.at(-1)[1],/JPEG o PNG/);
-  assert.equal(changes.length,3);
-  assert.equal(CatalogPhotoButton({...props,demo:false}).props.disabled,true);
+  const button=tree=>nodes(tree).find(node=>node.props.testID==="catalog-photo-service");
+  button(CatalogPhotoButton(props)).props.onPress();
+  assert.deepEqual(Array.from(alerts.at(-1)[2],option=>option.text),["Imágenes de ejemplo","Galería","Cámara","Cancelar"]);
+  alerts.at(-1)[2][0].onPress();assert.equal(open,true);assert.deepEqual(calls,[]);
+  assert.equal(nodes(CatalogPhotoButton(props)).some(node=>node.type===CatalogExampleGallery),true);
+  const gallery=CatalogExampleGallery({visible:true,onSelect:value=>changes.push(value),onClose:()=>{open=false;}});
+  assert.equal(gallery.props.visible,true);
+  const choices=nodes(gallery).filter(node=>node.props.testID?.startsWith("catalog-example-"));
+  assert.equal(choices.length,11);
+  assert.equal(nodes(gallery).filter(node=>node.type==="text").some(node=>node.props.children.includes("Peluquerías")),true);
+  assert.equal(nodes(gallery).filter(node=>node.type==="text").some(node=>node.props.children.includes("Restaurantes")),true);
+  for(const name of names)assert.ok(choices.some(node=>node.props.testID===`catalog-example-${name}`));
+  choices.find(node=>node.props.testID==="catalog-example-gazpacho").props.onPress();assert.equal(changes.at(-1),"demo-catalog:gazpacho");
+  nodes(gallery).find(node=>node.props.testID==="catalog-examples-close").props.onPress();assert.equal(open,false);
+  assert.equal(nodes(CatalogPhotoButton(props)).some(node=>node.type===CatalogExampleGallery),false);
+  const selected=CatalogPhotoButton({...props,photoUri:changes.at(-1)});button(selected).props.onPress();
+  assert.deepEqual(Array.from(alerts.at(-1)[2],option=>option.text),["Imágenes de ejemplo","Galería","Cámara","Eliminar","Cancelar"]);
+  alerts.at(-1)[2][1].onPress();await new Promise(setImmediate);assert.deepEqual(calls,["gallery permission","gallery"]);assert.equal(changes.at(-1),"data:image/jpeg;base64,/9j/PHOTO");
+  button(CatalogPhotoButton({...props,photoUri:changes.at(-1)})).props.onPress();alerts.at(-1)[2][2].onPress();await new Promise(setImmediate);assert.deepEqual(calls,["gallery permission","gallery","camera permission","camera"]);
+  alerts.at(-1)[2][3].onPress();await new Promise(setImmediate);assert.equal(changes.at(-1),"none");
+  asset={base64:"/9j/PHOTO",mimeType:"image/png"};button(CatalogPhotoButton(props)).props.onPress();alerts.at(-1)[2][1].onPress();await new Promise(setImmediate);assert.match(alerts.at(-1)[1],/JPEG o PNG/);
+  assert.equal(button(CatalogPhotoButton({...props,demo:false})).props.disabled,true);
 });
 
 test("client photo toggle keeps its device preference and leaves cards without images compact",async()=>{
@@ -54,4 +76,6 @@ test("client photo toggle keeps its device preference and leaves cards without i
   assert.equal(module.CatalogItemPhoto({item,enabled:true}),null);
   assert.equal(module.CatalogItemPhoto({...{item,enabled:false}}),null);
   assert.equal(module.CatalogItemPhoto({item:{...item,title:"Croquetas"},enabled:true}).type,"image");
+  assert.match(module.CatalogItemPhoto({item:{...item,photoUri:"demo-catalog:churros-chocolate"},enabled:true}).props.source,/churros-chocolate/);
+  assert.equal(module.CatalogItemPhoto({item:{...item,photoUri:"demo-catalog:churros-chocolate"},enabled:false}),null);
 });
