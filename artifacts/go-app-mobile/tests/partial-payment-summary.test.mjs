@@ -24,7 +24,6 @@ function load(file, jsx = false) {
 const { bookingPaymentTerms } = load('data/bookingServices.ts');
 const { PartialPaymentSummary } = load('components/booking/PartialPaymentSummary.tsx', true);
 const nodes = node => node && typeof node === 'object' ? [node, ...node.children.flatMap(nodes)] : [];
-const content = node => node.children.map(value => typeof value === 'string' ? value : content(value)).join('');
 
 test('partial reservation review has one gold rectangle, two amounts and a thin separator', () => {
   for (const [booking, venue, bookingAmount, venueAmount] of [
@@ -35,15 +34,19 @@ test('partial reservation review has one gold rectangle, two amounts and a thin 
     const terms = bookingPaymentTerms(55, 2, booking);
     const tree = PartialPaymentSummary({ terms, lang: 'es' });
     const lines = nodes(tree).filter(node => node.type === 'Text');
+    const bookingRow = nodes(tree).find(node => node.props.testID === 'partial-payment-booking-row');
+    const venueRow = nodes(tree).find(node => node.props.testID === 'partial-payment-venue-row');
     assert.equal(tree.props.testID, 'partial-payment-summary');
     assert.equal(tree.props.style.borderWidth, 1);
-    assert.equal(lines.length, 2);
-    assert.equal(content(lines[0]), `Al reservar · ${booking} % · ${bookingAmount}`);
-    assert.equal(content(lines[1]), `En el establecimiento · ${venue} % · ${venueAmount}`);
+    assert.equal(lines.length, 4);
+    assert.equal(bookingRow.props.accessibilityLabel, `Al reservar · ${booking} % · ${bookingAmount}`);
+    assert.equal(venueRow.props.accessibilityLabel, `En el establecimiento · ${venue} % · ${venueAmount}`);
+    assert.equal(bookingRow.props.style.flexDirection, 'row');
+    assert.equal(venueRow.props.style.flexDirection, 'row');
     assert.equal(terms.dueAtBookingCents + terms.dueAtVenueCents, terms.totalCents);
     assert.ok(lines.every(line => line.props.style.color === '#FACC15'));
     assert.equal(nodes(tree).filter(node => node.type === 'View' && node.props.style.height === 1).length, 1);
-    assert.doesNotMatch(lines.map(content).join(' '), /Previsto|Pago solicitado|Pago confirmado|Total pendiente|no disponible/i);
+    assert.doesNotMatch([bookingRow, venueRow].map(row => row.props.accessibilityLabel).join(' '), /Previsto|Pago solicitado|Pago confirmado|Total pendiente|no disponible/i);
     assert.equal(terms.confirmedCents, 0);
   }
 });

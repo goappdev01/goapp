@@ -1132,6 +1132,7 @@ export function BookingSearchOverlay({
   const beautySelection=selectedCategory==="belleza"||beauty?.subs.some(sub=>sub.id===selectedSubCategory)||visibleSectors.length===1&&visibleSectors[0].id==="belleza";
   const accentColor = selectedBusiness?bookingCategoryAccent(selectedBusiness):beautySelection?beauty?.color||"#eab308":"#00e5ff";
   const compactServices = canonicalBookingActivity(selectedBusiness?.category) === "peluqueria";
+  const simpleHairConfirmation = step === "hold" && compactServices && !changeSelection;
   const servicesFooterVisible = step === "item" && compactServices && items.length > 0;
   const proposalBusinessName = (selectedBusiness?.name || changeSelection?.business.name || "").trim().toLocaleUpperCase(lang);
   const reviewedSlot = proposalReview?.slot ?? activeHold;
@@ -1319,7 +1320,7 @@ export function BookingSearchOverlay({
 
           {/* Header — también recibe dragHandlePan para que el arrastre hacia abajo
               funcione desde aquí (los navBtn son Views de layout, sin toques) */}
-          <View onLayout={servicesFooterVisible ? event => updateServicesLayout({ headerBottom: event.nativeEvent.layout.y + event.nativeEvent.layout.height }) : undefined} style={[s.header, step === "item" && compactServices && s.serviceHeader, step === "hold" && s.holdHeader]} {...dragHandlePan.panHandlers}>
+          {!simpleHairConfirmation && <View onLayout={servicesFooterVisible ? event => updateServicesLayout({ headerBottom: event.nativeEvent.layout.y + event.nativeEvent.layout.height }) : undefined} style={[s.header, step === "item" && compactServices && s.serviceHeader, step === "hold" && s.holdHeader]} {...dragHandlePan.panHandlers}>
             {step === "item" && compactServices ? <>
               <Text testID="booking-service-context" style={[s.serviceContext, { color: accentColor }]}>{selectedBusiness?.name}</Text>
               <Text style={[s.headerTitle, s.serviceHeading]}>{t("biz_step_service_label").toUpperCase()}</Text>
@@ -1347,7 +1348,7 @@ export function BookingSearchOverlay({
 
             <View style={[s.navBtn, step === "hold" && s.holdNavSpacer]} />
             </>}
-          </View>
+          </View>}
 
           {/* Animated step content */}
           <Animated.View
@@ -1826,8 +1827,8 @@ export function BookingSearchOverlay({
                   contentContainerStyle={s.holdContent}
                 >
                   <View style={s.holdDetails}>
-                  <View style={[s.promptWrap, s.holdPrompt]}>
-                    <Text style={s.promptText}>{changeSelection?(lang==="en"?"Review change proposal":"Revisar propuesta de cambio"):t("biz_confirm_booking_title")}</Text>
+                  <View style={[s.promptWrap, s.holdPrompt]} {...(simpleHairConfirmation ? dragHandlePan.panHandlers : {})}>
+                    <Text style={s.promptText}>{changeSelection?(lang==="en"?"Review change proposal":"Revisar propuesta de cambio"):t(simpleHairConfirmation ? "biz_confirm_booking_btn" : "biz_confirm_booking_title")}</Text>
                   </View>
 
                   {/* Summary card */}
@@ -1838,7 +1839,7 @@ export function BookingSearchOverlay({
                         {selectedBusiness.name}
                       </Text>
                       <Text style={s.summaryServiceName}>{trSector(summaryItem!.title, lang)}</Text>
-                      {reviewedQuote && <CatalogQuoteBreakdown quote={reviewedQuote} accentColor={accentColor} />}
+                      {reviewedQuote && <CatalogQuoteBreakdown quote={reviewedQuote} showTotal={!simpleHairConfirmation} accentColor={accentColor} />}
                       {paymentTerms && paymentTerms.bookingPercent > 0 && paymentTerms.bookingPercent < 100
                         ? <PartialPaymentSummary terms={paymentTerms} lang={lang} />
                         : paymentTerms && <View style={{ gap: 3, marginTop: 6 }}>
@@ -1856,7 +1857,7 @@ export function BookingSearchOverlay({
                           {quote.lines.filter(line => line.discountBasisPoints !== undefined).map(line =>
                             <Text key={line.itemId} style={s.summaryRowText}>{line.name} · {line.discountBasisPoints! / 100} % · −{money.format(line.discountAmount ?? 0)}</Text>)}
                           <Text style={s.summaryRowText}>{lang === "en" ? "Total discount" : "Descuento total"} · −{money.format(quote.discountTotal ?? 0)}</Text>
-                          <Text style={[s.summaryRowText, {color:accentColor}]}>{lang === "en" ? "Final price" : "Precio final"} · {money.format(quote.totalPrice)}</Text>
+                          {!simpleHairConfirmation && <Text style={[s.summaryRowText, {color:accentColor}]}>{lang === "en" ? "Final price" : "Precio final"} · {money.format(quote.totalPrice)}</Text>}
                         </View>;
                       })()}
                       {/* Profesional — siempre visible si fue elegido */}
@@ -1880,11 +1881,13 @@ export function BookingSearchOverlay({
                           {"  ·  "}{summaryItem!.durationMinutes} min
                         </Text>
                       </View>
-                      {summaryItem!.price > 0 && (
+                      {(simpleHairConfirmation || summaryItem!.price > 0) && (
                         <View style={s.summaryRow}>
                           <Feather name="tag" size={15} color="rgba(255,255,255,0.40)" />
                           <Text style={[s.summaryRowText, { color: accentColor, fontWeight: "800" }]}>
-                            {summaryItem!.price}€
+                            {simpleHairConfirmation
+                              ? `Total · ${new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: reviewedQuote?.currency ?? "EUR" }).format(summaryItem!.price)}`
+                              : `${summaryItem!.price}€`}
                           </Text>
                         </View>
                       )}

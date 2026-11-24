@@ -218,7 +218,8 @@ function fixture(kind = "provider", overrides = {}) {
     "@/components/ui/GoNavigationHand": { GoNavigationHand: {} },
     "@workspace/api-zod": modulePublicationPolicy,
     "@/hooks/useBookingModulePublication": loadModulePublicationHook(React),
-    "./CatalogComplementSelector": { CatalogComplementSelector: "CatalogComplementSelector" },
+    "./CatalogComplementSelector": { CatalogComplementSelector: "CatalogComplementSelector", CatalogQuoteBreakdown: "CatalogQuoteBreakdown" },
+    "./PartialPaymentSummary": { PartialPaymentSummary: "PartialPaymentSummary" },
     "@/data/catalogAssociations": catalogScope.exports, "@/data/bookingDiscounts":discountScope.exports,
     react: { ...React, default: React }, "react-native": native,
     "@react-native-async-storage/async-storage": { default: storage },
@@ -652,10 +653,18 @@ test('new reservation: a late hold expiry cannot replace a confirmed booking wit
  await letReviewExpire(f,watcher);
  assert.match(text(f.tree()),/BIZ_BOOKING_CONFIRMED/);assert.equal(button(f.tree(),'02:37'),undefined);assert.equal(posted(f).length,1);assert.equal(f.commands.size,1);
 });
+test('hair reservation review keeps one heading and one dynamic total while preserving confirmation',async()=>{
+ const f=fixture('overlay');await openOverlaySlots(f);await f.press('02:37');const tree=f.tree();
+ const headings=nodes(tree).filter(n=>n.type==='Text'&&text(n)==='biz_confirm_booking_btn');
+ assert.equal(headings.length,1);assert.doesNotMatch(text(tree),/biz_confirm_booking_title|ACCION_CONFIRMAR/);
+ assert.equal(nodes(tree).find(n=>n.type==='CatalogQuoteBreakdown').props.showTotal,false);
+ assert.equal((text(tree).match(/Total ·/g)??[]).length,1);assert.match(text(tree),/Total · 12,00/);
+ assert.ok(confirmation(f));await f.press('BIZ_CONFIRM_BOOKING_BTN');assert.equal(posted(f).length,1);
+});
 test('new reservation: expiry while authoritative confirmation is pending keeps the chosen time in review',async()=>{
  const f=fixture('overlay');await openOverlaySlots(f);await f.press('02:37');const watcher=holdWatcher(f),pending=deferred();f.state.pendingConfirmation=pending;
  const confirmation=button(f.tree(),'BIZ_CONFIRM_BOOKING_BTN').props.onPress();f.render();await f.settle();
- await letReviewExpire(f,watcher);assert.match(text(f.tree()),/biz_confirm_booking_title/);assert.equal(button(f.tree(),'02:37'),undefined,'no second time picker during confirmation');
+ await letReviewExpire(f,watcher);assert.match(text(f.tree()),/biz_confirm_booking_btn/);assert.equal(button(f.tree(),'02:37'),undefined,'no second time picker during confirmation');
  pending.resolve();await confirmation;f.render();await f.settle();assert.match(text(f.tree()),/BIZ_BOOKING_CONFIRMED/);assert.equal(f.commands.size,1);
 });
 test('new reservation: review expiry alone does not require choosing an otherwise valid remote time twice',async()=>{
