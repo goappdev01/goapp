@@ -47,6 +47,8 @@ function fixture({clock,real=false,sectors,context="USER",ownerAccess=false,init
     "@/hooks/useBookingModulePublication":loadModulePublicationHook(React,{context,owner:ownerAccess}),
     "./CatalogComplementSelector":{CatalogComplementSelector:()=>null,CatalogQuoteBreakdown:"CatalogQuoteBreakdown"},
     "./PartialPaymentSummary":{PartialPaymentSummary:"PartialPaymentSummary"},
+    "./CatalogPhotoView":{CatalogItemPhoto:"CatalogItemPhoto",CatalogPhotoToggle:"CatalogPhotoToggle",useCatalogPhotoPreference:()=>{const [showPhotos,choose]=React.useState(false);return{showPhotos,choose};}},
+    "@/data/demoCatalogPhotos":{demoCatalogPhotoSource:()=>undefined},
     "@/data/catalogAssociations":pure("data/catalogAssociations.ts",{"./booking":booking}),
     "@/data/bookingDiscounts":pure("data/bookingDiscounts.ts",{"./booking":booking,"./catalogAssociations":pure("data/catalogAssociations.ts",{"./booking":booking})}),
     react:{...React,default:React},"react-native":native,
@@ -185,6 +187,21 @@ test('the shared summary and saved selection use the reviewed voluntary product 
  control(tree,'booking-save-services').props.onPress();tree=f.render(f.Overlay,f.props);button(tree,'Raul 1 GO PRUEBA').props.onPress();f.render(f.Overlay,f.props);await turn();tree=f.render(f.Overlay,f.props);
  await button(tree,'09:00').props.onPress();tree=f.render(f.Overlay,f.props);await button(tree,'BIZ_CONFIRM_BOOKING_BTN').props.onPress();
  assert.equal(f.store.getSnapshot().bookings[0].catalogSnapshot.totalPrice,19);assert.equal(f.store.getSnapshot().bookings[0].endDatetime,'2030-01-07T09:30:00');
+});
+test("switching catalogue photos preserves the selected service and price",async()=>{
+ const f=fixture();await f.configure();
+ const item=(await f.repo.getBookableItems(f.store.businessId))[0];
+ let tree=await services(f),toggle=nodes(tree).find(node=>node.type==="CatalogPhotoToggle");
+ assert.equal(toggle.props.showPhotos,false);
+ control(tree,"booking-service-"+item.id).props.onPress();tree=f.render(f.Overlay,f.props);
+ toggle=nodes(tree).find(node=>node.type==="CatalogPhotoToggle");toggle.props.choose(true);tree=f.render(f.Overlay,f.props);
+ assert.equal(control(tree,"booking-service-"+item.id).props.accessibilityState.checked,true);
+ assert.equal(nodes(tree).find(node=>node.type==="CatalogItemPhoto").props.enabled,true);
+ assert.match(text(control(tree,"booking-services-total")),/12/);
+ nodes(tree).find(node=>node.type==="CatalogPhotoToggle").props.choose(false);tree=f.render(f.Overlay,f.props);
+ assert.equal(control(tree,"booking-service-"+item.id).props.accessibilityState.checked,true);
+ assert.equal(nodes(tree).find(node=>node.type==="CatalogItemPhoto").props.enabled,false);
+ assert.deepEqual(f.liveCalls,[]);
 });
 test("multi-service UI keeps selection marked, supports deselection and waits for Guardar",async()=>{
   const f=fixture();await f.configure();await setReservableServices(f,[{name:"Corte DEMO",duration:30,price:12},{name:"Tinte DEMO",duration:60,price:20}]);

@@ -6,6 +6,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { onSessionChanged } from "@/lib/sessionEvents";
 import { useBusinessConfig } from "@/contexts/GoBusinessConfigContext";
 import { createDemoBookingRepository } from "@/data/demoBookingRepository";
+import { CatalogPhotoButton } from "./CatalogPhotoButton";
 
 export function CatalogAssociationManager({ businessId, demo, beforeOpen }: { businessId?: string; demo: boolean; beforeOpen?: () => Promise<void> }) {
   const { lang } = useLanguage(); const label = (es: string, en: string) => lang === "en" ? en : es;
@@ -16,7 +17,7 @@ export function CatalogAssociationManager({ businessId, demo, beforeOpen }: { bu
     : manageAssociations(businessId!, operation, input);
   const [open, setOpen] = useState(false), [items, setItems] = useState<BookableItem[]>([]), [relations, setRelations] = useState<CatalogAssociation[]>([]);
   const [source, setSource] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false), [loading, setLoading] = useState(false);
-  const [name, setName] = useState(""), [price, setPrice] = useState("");
+  const [name, setName] = useState(""), [price, setPrice] = useState(""), [photoUri, setPhotoUri] = useState<string | undefined>();
   const scope = useRef(businessId); scope.current = businessId;
   const inFlight = useRef(false);
   const generation = useRef(0), accountEpoch = useRef(0);
@@ -33,7 +34,7 @@ export function CatalogAssociationManager({ businessId, demo, beforeOpen }: { bu
   useEffect(() => { if (!open || !local) return; return local.subscribe(() => { void load().catch(e => setError(e.message)); }); }, [open, local, load]);
   useEffect(() => { setItems([]); setRelations([]); setSource(""); setError(""); if (open) void load().catch(e => setError(e.message)); }, [businessId, open, load]);
   const editingProduct = items.find(item => item.id === source && item.catalogKind === "product");
-  useEffect(() => { setName(editingProduct?.title ?? ""); setPrice(editingProduct ? String(editingProduct.price) : ""); }, [editingProduct?.id]);
+  useEffect(() => { setName(editingProduct?.title ?? ""); setPrice(editingProduct ? String(editingProduct.price) : ""); setPhotoUri(editingProduct?.photoUri); }, [editingProduct?.id, editingProduct?.photoUri]);
   const action = async (operation: () => Promise<unknown>) => {
     if (inFlight.current) return; inFlight.current = true; const current = businessId, epoch = accountEpoch.current; setBusy(true); setError("");
     try { await operation(); if (scope.current === current && epoch === accountEpoch.current) await load(); } catch (e) { if (scope.current === current && epoch === accountEpoch.current) setError(e instanceof Error ? e.message : String(e)); }
@@ -72,16 +73,17 @@ export function CatalogAssociationManager({ businessId, demo, beforeOpen }: { bu
           </View>;
         })}
         <Text style={{ color: "#111827" }}>{editingProduct ? label("Editar producto del catálogo", "Edit catalogue product") : label("Añadir un producto al catálogo existente", "Add a product to the existing catalogue")}</Text>
-        {editingProduct && button(label("Nuevo producto", "New product"), () => { setSource(""); setName(""); setPrice(""); })}
-        <TextInput accessibilityLabel={label("Nombre del producto", "Product name")} value={name} onChangeText={setName} placeholder={label("Nombre", "Name")} placeholderTextColor="#6B7280" style={{ color: "#111827", minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderColor: "#9CA3AF", borderRadius: 10, backgroundColor: "#F3F4F6" }} />
+        {editingProduct && button(label("Nuevo producto", "New product"), () => { setSource(""); setName(""); setPrice(""); setPhotoUri(undefined); })}
+        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}><TextInput accessibilityLabel={label("Nombre del producto", "Product name")} value={name} onChangeText={setName} placeholder={label("Nombre", "Name")} placeholderTextColor="#6B7280" style={{ flex: 1, minWidth: 0, color: "#111827", minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderColor: "#9CA3AF", borderRadius: 10, backgroundColor: "#F3F4F6" }} />
+          {!!local && <CatalogPhotoButton id={editingProduct?.id ?? "new-product"} businessId={businessId!} title={name} type="product" photoUri={photoUri} demo onChange={setPhotoUri} />}</View>
         <TextInput accessibilityLabel={label("Precio del producto", "Product price")} value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholder="0,00 EUR" placeholderTextColor="#6B7280" style={{ color: "#111827", minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderColor: "#9CA3AF", borderRadius: 10, backgroundColor: "#F3F4F6" }} />
         {button(editingProduct ? label("Guardar cambios del producto", "Save product changes") : label("Guardar producto", "Save product"), () => void action(async () => {
           const value = price.replace(",", ".");
           if (!name.trim() || !/^\d+(\.\d{1,2})?$/.test(value) || items.some(item => item.id !== editingProduct?.id && item.title.toLocaleLowerCase() === name.trim().toLocaleLowerCase())) throw Error(label("Revisa nombre y precio. No dupliques un elemento existente.", "Check the name and price. Do not duplicate an existing item."));
-          if (local) await createDemoBookingRepository(local).saveCatalogProduct({ ...(editingProduct ?? { id: `${businessId}_product_${Date.now()}_${Math.random().toString(36).slice(2)}`, businessId: businessId!, type: "product", catalogKind: "product", durationMinutes: 0, currency: "EUR", customerCapacity: 1, unitQuantity: 1, paymentRequired: false, active: true, visible: true }), title: name.trim(), price: Number(value) });
+          if (local) await createDemoBookingRepository(local).saveCatalogProduct({ ...(editingProduct ?? { id: `${businessId}_product_${Date.now()}_${Math.random().toString(36).slice(2)}`, businessId: businessId!, type: "product", catalogKind: "product", durationMinutes: 0, currency: "EUR", customerCapacity: 1, unitQuantity: 1, paymentRequired: false, active: true, visible: true }), title: name.trim(), price: Number(value), photoUri });
           else if (editingProduct) await saveBookableItem({ ...editingProduct, title: name.trim(), price: Number(value) });
           else await createBookableItem({ businessId: businessId!, title: name.trim(), type: "product", catalogKind: "product", durationMinutes: 0, price: Number(value), currency: "EUR", customerCapacity: 1, unitQuantity: 1, paymentRequired: false, active: true, visible: true });
-          setName(""); setPrice("");
+          if (!editingProduct) { setName(""); setPrice(""); setPhotoUri(undefined); }
         }))}
       </>}
     </>}

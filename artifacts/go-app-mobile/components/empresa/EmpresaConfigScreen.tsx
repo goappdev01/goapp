@@ -87,6 +87,7 @@ import { CatalogAssociationManager } from "./CatalogAssociationManager";
 import { BookingDepositSplitRow } from "./BookingDepositSplitRow";
 import { parsePartialBookingPercent } from "@/data/bookingServices";
 import { ServiceAssociatedProducts, useServiceComplementCatalog } from "./ServiceComplementManager";
+import { CatalogPhotoButton } from "./CatalogPhotoButton";
 import { isStableBookingId, serializeServiceConfiguration, validateBookingResources,
   validateBusinessTimezone, validateServiceTiming, type BookingResource } from "@/data/serviceTiming";
 import { readServiceWorkWait, serviceWorkWaitTotal, updateServiceWorkWait, type ServiceWorkWaitDraft } from "@/data/serviceWorkWait";
@@ -2529,10 +2530,11 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
 
   type LocalSvc = SavedService & { id: string };
   const serializeServices = (svcs: LocalSvc[]) => svcs.filter(service => service.name.trim())
-    .map(({ name, description, duration, price, capacity, timing }) => ({ name, duration, price, capacity, ...(description ? { description } : {}), ...(timing ? { timing } : {}) }));
+    .map(({ name, description, duration, price, capacity, timing, photoUri }) => ({ name, duration, price, capacity, ...(description ? { description } : {}), ...(timing ? { timing } : {}), ...(demo && photoUri ? { photoUri } : {}) }));
   const saveServices = useCallback((services: SavedService[]) => {
     const checked = serializeServiceConfiguration(services, { resources: config.bookingResources ?? [] });
-    return demo ? demo.updateConfig({ services: checked }) : updateConfig({ services: checked });
+    const withDemoPhotos = demo ? checked.map((service, index) => ({ ...service, ...(services[index]?.photoUri ? { photoUri: services[index].photoUri } : {}) })) : checked;
+    return demo ? demo.updateConfig({ services: withDemoPhotos }) : updateConfig({ services: checked });
   }, [demo, updateConfig, config.bookingResources]);
   const { draft: localSvcs, setValue: setLocalSvcs, flush } = useConfigArrayDraft<LocalSvc, SavedService>(
     config.services, services => services.length > 0
@@ -2680,9 +2682,9 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
 
         {localSvcs.map((svc, idx) => (
           <View key={svc.id} testID={"service-card-" + idx} style={[c.svcRow, { borderColor: color }]}>
-            <TextInput
+            <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}><TextInput
               testID={"service-name-" + idx}
-              style={[c.svcNameInput, { textAlign: "center" }]}
+              style={[c.svcNameInput, { textAlign: "center", flex: 1, minWidth: 0 }]}
               value={trSector(svc.name, lang)}
               onChangeText={v => patchSvc(svc.id, { name: v })}
               onBlur={() => { void flush().catch(() => {}); }}
@@ -2690,6 +2692,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               placeholderTextColor={DIM}
               returnKeyType="done"
             />
+            {!!demo && <CatalogPhotoButton id={svc.id} businessId={demo.businessId} title={svc.name} type={config.subId ?? ""} photoUri={svc.photoUri} demo onChange={value => patchSvc(svc.id, { photoUri: value })} />}</View>
             {(config.subId !== "peluqueria" || svc.description !== undefined) && <TextInput style={[c.svcNameInput, { fontSize: 13 }]} value={svc.description ?? ""} onChangeText={description => patchSvc(svc.id, { description })}
               accessibilityLabel={config.subId === "peluqueria" ? (lang === "en" ? "Service description (optional)" : "Descripción del servicio (opcional)") : (lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)")}
               onBlur={() => { void flush().catch(() => {}); }} placeholder={config.subId === "peluqueria" ? (lang === "en" ? "Service description (optional)" : "Descripción del servicio (opcional)") : (lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)")} placeholderTextColor={DIM} />}

@@ -189,6 +189,21 @@ test("older DEMO documents gain fictional clients without losing saved company d
   assert.equal(reopened.getSnapshot().demoClients.length,3);
   assert.equal(f.shared.get(key),JSON.stringify(old),"Loading does not rewrite the older document");
 });
+test("DEMO catalogue photos survive reopen and reset without touching real storage", async () => {
+  const shared=new Map([["go_bookable_items_v1","REAL"]]),f=dataFixture(owner,shared);
+  const photo="data:image/jpeg;base64,/9j/FAKE_DEMO";
+  await f.store.updateConfig({services:[{name:"Corte caballero",duration:30,price:15,photoUri:photo}]});
+  const repo=bookingRepositoryModule.createDemoBookingRepository(f.store),product={id:f.store.businessId+"_product_demo",businessId:f.store.businessId,title:"Paella valenciana",type:"product",catalogKind:"product",durationMinutes:0,price:12,currency:"EUR",customerCapacity:1,unitQuantity:1,paymentRequired:false,active:true,visible:true,photoUri:photo};
+  await repo.saveCatalogProduct(product);
+  const reopened=f.make();await reopened.load();
+  const items=await bookingRepositoryModule.createDemoBookingRepository(reopened).getCatalogItems(reopened.businessId);
+  assert.equal(items.find(item=>item.title==="Corte caballero").photoUri,photo);
+  assert.equal(items.find(item=>item.title==="Paella valenciana").photoUri,photo);
+  assert.equal(shared.get("go_bookable_items_v1"),"REAL");
+  await reopened.reset();assert.equal(reopened.getSnapshot().config.services.length,0);
+  assert.equal(reopened.getSnapshot().config.catalogProducts?.length??0,0);
+  assert.ok(f.writes.every(key=>key.startsWith(storeModule.businessDemoStorageKey(owner))));
+});
 
 // Execute the real providers and screen callbacks with deterministic native APIs.
 function uiFixture(data, { authorized = true, businessPreview = authorized, adminView = false, adminAllowed = authorized, ownerIdentity = authorized, realCompanyManager = false, reactCompiler = false, bookingToday, realActivity = false, width = 390, height = 844, fontScale = 1, insets = { top: 44, bottom: 34, left: 0, right: 0 }, isPad = false, liveMode = false, unlinkedDraft = false, liveEntries = [], liveReservations = [], gpsAdapter, timezoneAdapter = async (_source,zone) => zone, timezoneResolver = async () => { throw Object.assign(Error("Unlinked"),{code:"BOOKING_CALENDAR_BUSINESS_NOT_LINKED"}); } } = {}) {
@@ -296,6 +311,7 @@ function uiFixture(data, { authorized = true, businessPreview = authorized, admi
         if (key in imports) return imports[key];
         if (key === "@/theme/goAssistantColors") return load("theme/goAssistantColors.ts");
         if (key === "./CatalogAssociationManager") return { CatalogAssociationManager: () => null };
+        if (key === "./CatalogPhotoButton") return { CatalogPhotoButton: () => null };
         if (key === "./BookingDepositSplitRow") return load("components/empresa/BookingDepositSplitRow.tsx");
         if (key === "./ServiceComplementManager") return { ServiceAssociatedProducts: () => null,
           useServiceComplementCatalog: () => ({ items: [], relations: [], error: "", loading: false, busy: false }) };

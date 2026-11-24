@@ -71,6 +71,8 @@ const LEGACY_PLANTILLA_KEY  = "go_plantilla_items_v1";
 
 export type SavedService = {
   description?: string;
+  /** Local-only catalogue photo in DEMO; never submitted with real settings. */
+  photoUri?: string;
   name:      string;
   duration:  number;
   price:     number;

@@ -47,6 +47,8 @@ export type Business = {
 
 export type BookableItem = {
   description?: string;
+  /** DEMO-only image reference; live images require a protected server contract. */
+  photoUri?: string;
   catalogMetadata?: Record<string, unknown>;
   catalogKind?: "service" | "product";
   id: string;

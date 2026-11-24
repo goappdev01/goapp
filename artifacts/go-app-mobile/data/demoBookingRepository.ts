@@ -31,6 +31,7 @@ function createLocalDemoBookingRepository(store: BusinessDemoStore, options: Rep
       const id = serviceId(service.name); if (seen.has(id)) return false; seen.add(id); return true;
     }).map(service => ({ id: serviceId(service.name), businessId: store.businessId, title: service.name,
       ...(service.description ? { description: service.description } : {}),
+      ...(service.photoUri ? { photoUri: service.photoUri } : {}),
       type: config.subId ?? config.sectorId ?? "demo", durationMinutes: service.duration, customerCapacity: service.capacity ?? 1,
       unitQuantity: 1, price: service.price, currency: "EUR", priceKnown: true, paymentRequired: false, active: true, visible: true }));
   };

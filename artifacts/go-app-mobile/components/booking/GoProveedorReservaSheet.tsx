@@ -50,6 +50,7 @@ import { getBusinessIcon } from "@/lib/businessIcons";
 import { bookingActivityEnabled } from "@workspace/api-zod";
 import { useBookingModulePublication } from "@/hooks/useBookingModulePublication";
 import { BookingSearchOverlay } from "./BookingSearchOverlay";
+import { CatalogItemPhoto, CatalogPhotoToggle, useCatalogPhotoPreference } from "./CatalogPhotoView";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type ProveedorData = {
@@ -186,6 +187,7 @@ function LocalProveedorReservaSheet({
   const insets = useSafeAreaInsets();
   const { config } = useBusinessConfig();
   const { t } = useLanguage();
+  const { showPhotos, choose: choosePhotoView } = useCatalogPhotoPreference();
 
   // ── Refs para auto-scroll entre pasos ─────────────────────────────────────
   const scrollRef  = useRef<ScrollViewInstance>(null);
@@ -1626,6 +1628,7 @@ function LocalProveedorReservaSheet({
             <Text style={{ fontSize: 11, fontFamily: "Inter_700Bold", fontWeight: "800", color: "rgba(255,255,255,0.38)", letterSpacing: 1.4, marginBottom: 12 }}>
               1 · SERVICIO
             </Text>
+            <CatalogPhotoToggle showPhotos={showPhotos} choose={choosePhotoView} />
             {allServices.length === 0 ? (
               <View style={{ backgroundColor: "#0E0E0E", borderRadius: 18, padding: 20, alignItems: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.09)" }}>
                 <Text style={{ fontSize: 13, color: "rgba(255,255,255,0.38)", textAlign: "center" }}>
@@ -1663,6 +1666,7 @@ function LocalProveedorReservaSheet({
                       {active && (
                         <View style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, backgroundColor: color, borderTopLeftRadius: 18, borderBottomLeftRadius: 18 }} />
                       )}
+                      {realItems[i] && <CatalogItemPhoto item={realItems[i]} enabled={showPhotos} />}
                       <View style={{ flex: 1, gap: 3, paddingLeft: active ? 8 : 0 }}>
                         <Text style={{ fontSize: 13, fontFamily: "Inter_700Bold", fontWeight: "800", color: "#FFFFFF" }}>{svc.title}</Text>
                         <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.50)" }}>

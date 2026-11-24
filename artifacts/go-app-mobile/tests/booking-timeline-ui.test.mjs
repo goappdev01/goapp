@@ -220,6 +220,8 @@ function fixture(kind = "provider", overrides = {}) {
     "@/hooks/useBookingModulePublication": loadModulePublicationHook(React),
     "./CatalogComplementSelector": { CatalogComplementSelector: "CatalogComplementSelector", CatalogQuoteBreakdown: "CatalogQuoteBreakdown" },
     "./PartialPaymentSummary": { PartialPaymentSummary: "PartialPaymentSummary" },
+    "./CatalogPhotoView": { CatalogPhotoToggle: () => null, CatalogItemPhoto: () => null, useCatalogPhotoPreference: () => ({ showPhotos: false, choose() {} }) },
+    "@/data/demoCatalogPhotos": { demoCatalogPhotoSource: () => undefined },
     "@/data/catalogAssociations": catalogScope.exports, "@/data/bookingDiscounts":discountScope.exports,
     react: { ...React, default: React }, "react-native": native,
     "@react-native-async-storage/async-storage": { default: storage },

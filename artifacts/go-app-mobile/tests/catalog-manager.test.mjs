@@ -17,7 +17,7 @@ test('the existing service-step manager creates, edits and deletes voluntary ass
  const native={View:props=>React.createElement('div',null,props.children),Text:props=>React.createElement('span',null,props.children),TextInput:props=>{inputs.set(props.accessibilityLabel,props);return React.createElement('input',{value:props.value,readOnly:true});},TouchableOpacity:props=>{buttons.set(text(props.children),props);return React.createElement('button',{disabled:props.disabled},props.children);}};
  const api={isCloudId:()=>false,createBookableItem:()=>{throw Error('No cloud writes');},saveBookableItem:()=>{throw Error('No cloud writes');}};
  const associations=load('data/catalogAssociations.ts',{'./booking':api});
- const {CatalogAssociationManager}=load('components/empresa/CatalogAssociationManager.tsx',{'react':React,'react-native':native,'@/data/booking':api,'@/data/catalogAssociations':associations,'@/data/demoBookingRepository':repositories,'@/contexts/GoBusinessConfigContext':{useBusinessConfig:()=>({demo:store})},'@/contexts/LanguageContext':{useLanguage:()=>({lang:'es'})},'@/lib/sessionEvents':{onSessionChanged:()=>()=>{}}});
+ const {CatalogAssociationManager}=load('components/empresa/CatalogAssociationManager.tsx',{'react':React,'react-native':native,'@/data/booking':api,'@/data/catalogAssociations':associations,'@/data/demoBookingRepository':repositories,'@/contexts/GoBusinessConfigContext':{useBusinessConfig:()=>({demo:store})},'@/contexts/LanguageContext':{useLanguage:()=>({lang:'es'})},'@/lib/sessionEvents':{onSessionChanged:()=>()=>{}},'./CatalogPhotoButton':{CatalogPhotoButton:()=>null}});
  const container=document.createElement('div'),root=createRoot(container);
  const settle=async fn=>React.act(async()=>{await fn?.();for(let i=0;i<12;i++)await new Promise(resolve=>setImmediate(resolve));});
  try{
@@ -42,7 +42,7 @@ async function catalogueFixture({lang='es',catalogue=[],failure,beforeFailure,de
   createBookableItem:async()=>{calls.writes++;throw Error('Unexpected write');},saveBookableItem:async()=>{calls.writes++;throw Error('Unexpected write');}};
  const {CatalogAssociationManager}=load('components/empresa/CatalogAssociationManager.tsx',{'react':React,'react-native':Object.fromEntries(['View','Text','TextInput','TouchableOpacity'].map(name=>[name,native(name)])),
   '@/data/booking':api,'@/data/catalogAssociations':{manageAssociations:async()=>[],associationMode:value=>value},'@/data/demoBookingRepository':{},
-  '@/contexts/GoBusinessConfigContext':{useBusinessConfig:()=>({demo:null})},'@/contexts/LanguageContext':{useLanguage:()=>({lang})},'@/lib/sessionEvents':{onSessionChanged:()=>()=>{}}});
+  '@/contexts/GoBusinessConfigContext':{useBusinessConfig:()=>({demo:null})},'@/contexts/LanguageContext':{useLanguage:()=>({lang})},'@/lib/sessionEvents':{onSessionChanged:()=>()=>{}},'./CatalogPhotoButton':{CatalogPhotoButton:()=>null}});
  const container=document.createElement('div'),root=createRoot(container),descendants=node=>[node,...node.childNodes.flatMap(descendants)];
  const visible=()=>descendants(container).filter(node=>node.attributes?.['data-prop-id']).map(node=>props.get(node.attributes['data-prop-id']));
  const settle=async(fn=()=>{})=>React.act(async()=>{await fn();for(let i=0;i<12;i++)await new Promise(resolve=>setImmediate(resolve));});

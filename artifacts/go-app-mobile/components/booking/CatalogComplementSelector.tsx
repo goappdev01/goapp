@@ -3,6 +3,8 @@ import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
 import { quoteCatalog, toggleCatalogOption, type CatalogQuote } from "@/data/catalogAssociations";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { onSessionChanged } from "@/lib/sessionEvents";
+import { CatalogItemPhoto } from "./CatalogPhotoView";
+import type { BookableItem } from "@/data/booking";
 
 export function CatalogQuoteBreakdown({ quote, showTotal = true, accentColor = "#65b883", individual = false }: { quote: CatalogQuote; showTotal?: boolean; accentColor?: string; individual?: boolean }) {
   const { lang } = useLanguage();
@@ -28,9 +30,15 @@ export function CatalogQuoteBreakdown({ quote, showTotal = true, accentColor = "
   </View>;
 }
 
-export function CatalogComplementSelector({ businessId, rootIds, onChange, repository,accentColor="#65b883", showTotal = true, initialSelected }: { businessId: string; rootIds: string[]; accentColor?:string; showTotal?: boolean; initialSelected?:string[]; onChange: (quote: CatalogQuote | null) => void; repository?: import("@/data/demoBookingRepository").DemoBookingRepository }) {
+export function CatalogComplementSelector({ businessId, rootIds, onChange, repository,accentColor="#65b883", showTotal = true, initialSelected, showPhotos = false }: { businessId: string; rootIds: string[]; accentColor?:string; showTotal?: boolean; initialSelected?:string[]; showPhotos?: boolean; onChange: (quote: CatalogQuote | null) => void; repository?: import("@/data/demoBookingRepository").DemoBookingRepository }) {
   const { lang } = useLanguage(); const label = (es: string, en: string) => lang === "en" ? en : es;
   const [selected, setSelected] = useState<string[]>(initialSelected ?? []), [quote, setQuote] = useState<CatalogQuote | null>(null), [error, setError] = useState("");
+  const [photoItems, setPhotoItems] = useState<BookableItem[]>([]);
+  useEffect(() => {
+    let current = true; setPhotoItems([]);
+    if (repository && showPhotos) void repository.getCatalogItems(businessId).then(items => { if (current) setPhotoItems(items); }).catch(() => {});
+    return () => { current = false; };
+  }, [repository, businessId, showPhotos]);
   const [sessionRevision, setSessionRevision] = useState(0);
   useEffect(() => onSessionChanged(() => setSessionRevision(value => value + 1)), []);
   const scope = businessId + "|" + rootIds.join(",") + "|" + sessionRevision;
@@ -52,7 +60,10 @@ export function CatalogComplementSelector({ businessId, rootIds, onChange, repos
     {currentQuote?.options.map(option => <TouchableOpacity key={option.associationId} accessibilityRole="checkbox" accessibilityState={{ checked: option.selected, disabled: option.mode === "included" }}
       disabled={option.mode === "included"} onPress={() => setSelected(toggleCatalogOption(currentQuote, option.associationId))}
       style={{ minHeight: 44, borderWidth: 1, borderRadius: 10, borderColor:option.mode==="included"?"#666666":option.selected?accentColor:accentColor+"90",backgroundColor:option.selected&&option.mode!=="included"?accentColor+"18":"transparent", padding: 10 }}>
-      <Text style={{ color: "white" }}>{option.selected ? "✓ " : "□ "}{option.name}{option.mode !== "included"&&<Text style={{color:accentColor}}>{` · ${option.price.toFixed(2)} ${option.currency}`}</Text>}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        {photoItems.find(item => item.id === option.itemId) && <CatalogItemPhoto item={photoItems.find(item => item.id === option.itemId)!} enabled={showPhotos} />}
+        <Text style={{ color: "white", flex: 1 }}>{option.selected ? "✓ " : "□ "}{option.name}{option.mode !== "included"&&<Text style={{color:accentColor}}>{` · ${option.price.toFixed(2)} ${option.currency}`}</Text>}</Text>
+      </View>
       {option.mode !== "optional" && <Text style={{ color: "#ccc" }}>{option.mode === "included" ? label("Incluido · sin cargo adicional", "Included · no extra charge") : label("Recomendado · puedes continuar sin añadirlo", "Recommended · you can continue without it")}</Text>}
     </TouchableOpacity>)}
     {currentQuote && <CatalogQuoteBreakdown quote={currentQuote} showTotal={showTotal} accentColor={accentColor} />}

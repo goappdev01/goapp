@@ -23,6 +23,8 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { CatalogComplementSelector, CatalogQuoteBreakdown } from "./CatalogComplementSelector";
+import { CatalogItemPhoto, CatalogPhotoToggle, useCatalogPhotoPreference } from "./CatalogPhotoView";
+import { demoCatalogPhotoSource } from "@/data/demoCatalogPhotos";
 import { PartialPaymentSummary } from "./PartialPaymentSummary";
 import { catalogBookingServices, isCatalogService, type CatalogQuote } from "@/data/catalogAssociations";
 import { getBookingDiscountPrices, quoteBookingDiscount, type BookingDiscountPrices } from "@/data/bookingDiscounts";
@@ -354,6 +356,7 @@ export function BookingSearchOverlay({
     ? demoRepository.cancelBooking(id).catch(() => undefined)
     : cancelBooking(id);
   const { t, lang } = useLanguage();
+  const { showPhotos, choose: choosePhotoView } = useCatalogPhotoPreference();
   const insets = useSafeAreaInsets();
   const handedness = useContext(GoNavigationHand);
   const { fontScale, width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -1490,6 +1493,7 @@ export function BookingSearchOverlay({
               <View style={s.stepWrap}>
                 {changeSelection && !!slotError && <Text accessibilityRole="alert" style={s.emptyText}>{slotError}</Text>}
                 {!compactServices && <BreadcrumbStrip business={selectedBusiness} item={null} accentColor={accentColor} />}
+                <CatalogPhotoToggle showPhotos={showPhotos} choose={choosePhotoView} />
                 {items.length === 0 ? (
                   <View style={s.emptyWrap}>
                     <Feather name="package" size={32} color="rgba(255,255,255,0.08)" />
@@ -1504,10 +1508,11 @@ export function BookingSearchOverlay({
                         testID={"booking-service-" + item.id}
                         accessibilityRole="checkbox"
                         accessibilityState={{ checked: selectedServiceIds.includes(item.id) }}
-                        style={[s.serviceCard, compactServices && s.compactServiceCard, { borderColor: selectedServiceIds.includes(item.id) ? accentColor : `${accentColor}90`, borderWidth:selectedServiceIds.includes(item.id)?2:1, backgroundColor:selectedServiceIds.includes(item.id)?`${accentColor}18`:"rgba(255,255,255,0.04)" }]}
+                        style={[s.serviceCard, compactServices && s.compactServiceCard, { borderColor: selectedServiceIds.includes(item.id) ? accentColor : `${accentColor}90`, borderWidth:selectedServiceIds.includes(item.id)?2:1, backgroundColor:selectedServiceIds.includes(item.id)?`${accentColor}18`:"rgba(255,255,255,0.04)", paddingLeft: showPhotos && demoCatalogPhotoSource(item) ? 72 : undefined, minHeight: showPhotos && demoCatalogPhotoSource(item) ? 72 : undefined }]}
                         onPress={() => handleSelectItem(item)}
                         activeOpacity={0.72}
                       >
+                        <CatalogItemPhoto item={item} enabled={showPhotos} absolute />
                         {compactServices ? <>
                         <View style={s.compactServiceRow}>
                           <Text style={[s.serviceTitle, s.compactServiceName]}>{trSector(item.title, lang)}</Text>
@@ -1571,7 +1576,7 @@ export function BookingSearchOverlay({
                         </>}
                       </TouchableOpacity>
                     ))}
-                    {selectedBusiness && <CatalogComplementSelector initialSelected={changeSelection && JSON.stringify(selectedServiceIds)===JSON.stringify(changeSelection.rootIds ?? changeSelection.services.map(service=>service.id))?changeSelection.selectedAssociationIds:undefined} businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} repository={demoRepository} accentColor={accentColor} showTotal={!compactServices} />}
+                    {selectedBusiness && <CatalogComplementSelector initialSelected={changeSelection && JSON.stringify(selectedServiceIds)===JSON.stringify(changeSelection.rootIds ?? changeSelection.services.map(service=>service.id))?changeSelection.selectedAssociationIds:undefined} businessId={selectedBusiness.id} rootIds={selectedServiceIds} onChange={setCatalogQuote} repository={demoRepository} accentColor={accentColor} showTotal={!compactServices} showPhotos={showPhotos} />}
                     {serviceSelection && (compactServices ? <View testID="booking-services-total" style={s.servicesTotal}>
                       <Text style={[s.serviceTitle, s.servicesTotalPrice, { color: accentColor }]}>
                         TOTAL: {((catalogQuote?.ready ? catalogQuote.totalPrice : serviceSelection.item.priceKnown === false ? null : serviceSelection.item.price) == null)
