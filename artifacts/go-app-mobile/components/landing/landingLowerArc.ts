@@ -7,7 +7,6 @@ type Input = {
   orbitRadius: number; orbitSize: number; orbitCount: number; orbitVisible: boolean;
   satelliteRadius: number; satelliteSize: number;
   satellites: readonly { key: string; degrees: number }[];
-  additionalControls?: readonly { key: string; x: number; y: number; size: number }[];
   /** Geometry-only reference; omitted satellite slots never create controls or hitboxes. */
   anchorSatelliteDegrees?: readonly number[];
 };
@@ -27,8 +26,6 @@ export function landingOrbitNodes(input: Omit<Input, "bounds">) {
   if (input.orbitVisible) for (let i = 0; i < input.orbitCount; i++)
     add(`orbit-${i}`, -90 + i * 360 / input.orbitCount, input.orbitRadius, input.orbitSize);
   for (const satellite of input.satellites) add(satellite.key, satellite.degrees, input.satelliteRadius, input.satelliteSize);
-  for (const control of input.additionalControls ?? []) nodes.push({ key: control.key,
-    x: center.x + control.x, y: center.y + control.y, radius: Math.max(44, control.size) / 2 });
   return nodes;
 }
 

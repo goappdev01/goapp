@@ -158,7 +158,7 @@ import { LandingPanelCommands } from "@/components/landing/LandingPanelCommands"
 import { compactLandingOrbit, landingOrbitSafeBounds, redistributeLandingLowerArc } from "@/components/landing/landingLowerArc";
 import { splitLandingAppointments, landingPanelFrames, landingActionPanelFrames, landingActionsBesideNote, landingScrollPanelSpace, placeLandingClose, landingCurrentEntry } from "@/components/landing/landingPanels";
 import { fitLandingScale, landingPresetScale, landingDockBounds, landingContentFrame,
-  landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES, landingShoppingShortcut } from "@/components/landing/landingResponsiveLayout";
+  landingContentWidth, landingActionGrid, landingContentBottom, clampLandingControlBottom, LANDING_SATELLITE_DEGREES, landingShoppingShortcut, fitLandingShoppingShortcut } from "@/components/landing/landingResponsiveLayout";
 import { LandingShoppingCart } from "@/components/landing/LandingShoppingCart";
 import {
   hasFullLandingArchitecture,
@@ -11890,8 +11890,6 @@ function HomeScreenContent() {
   const shoppingShortcut = landingShoppingShortcut(uiScaleFactor, orbitRadius, orbitBtnSize, microR, microSz);
   const shoppingShortcutVisible = !supportMode && !rutasMode && orbitSecondLevel === null
     && !reservasOrbitalOpen && !categorySelected && !otroSelected && !isActivelyCreating && !anyOverlayOpen;
-  const shoppingLandingNode = shoppingShortcutVisible ? [{ key: "shopping-direct", x: shoppingShortcut.x,
-    y: shoppingShortcut.y, size: shoppingShortcut.touchSize }] : [];
   const systemBoundingRadius = Math.max(
     orbitRadius + orbitBtnSize / 2,
     microR + microSz / 2,
@@ -13694,9 +13692,6 @@ function HomeScreenContent() {
     addLandingOrbitObstacle(-90 + i * 360 / (INTENTS.length + 1), orbitRadius, orbitBtnSize);
   for (const key of visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface))
     addLandingOrbitObstacle(LANDING_SATELLITE_DEGREES[key], microR, microSz);
-  if (shoppingShortcutVisible) landingOrbitObstacles.push({ x: landingCenter.x + shoppingShortcut.x - shoppingShortcut.touchSize / 2,
-    y: landingCenter.y + shoppingShortcut.y - shoppingShortcut.touchSize / 2,
-    width: shoppingShortcut.touchSize, height: shoppingShortcut.touchSize });
   const closeColumnWidth = landingContentWidth(screen.width, screen.height, insets, systemBoundingRadius);
   const closeHeaderHeight = Math.max(44, Math.round(32 * uiScaleFactor), fullLandingArchitecture ? Math.round(56 * uiScaleFactor) + 16 - 20 : 0);
   const closeHeaderObstacles: HumanityRect[] = fullLandingArchitecture ? [{
@@ -14030,7 +14025,6 @@ function HomeScreenContent() {
       anchorSatelliteDegrees: Object.values(LANDING_SATELLITE_DEGREES),
       satellites: visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface)
         .filter(key => key !== "payment").map(key => ({ key, degrees: LANDING_SATELLITE_DEGREES[key] })),
-      additionalControls: shoppingLandingNode,
       });
     if (!arc.fitted) return unchanged;
     const move = (rect: HumanityRect) => ({ ...rect, y: rect.y + arc.offsetY });
@@ -14045,7 +14039,7 @@ function HomeScreenContent() {
   }, [anyOverlayOpen, rutasMode, orbitSecondLevel, reservasOrbitalOpen,
     screen.width, screen.height, insets.left, insets.right, insets.top, insets.bottom,
     landingDock.maxY, landingCenter.x, landingCenter.y, goSize, orbitRadius, orbitBtnSize, microR, microSz,
-    isUserV1Surface, handedness, shoppingShortcutVisible, shoppingShortcut.x, shoppingShortcut.y, shoppingShortcut.touchSize,
+    isUserV1Surface, handedness,
     landingBaseFrame.virtual, landingCloseRect.x, landingCloseRect.y,
     landingPanels.commands.x, landingPanels.commands.y, landingPanels.commands.width,
     landingPanels.region.y, landingPanels.region.height, landingBaseFrame.left, landingBaseFrame.top,
@@ -14072,7 +14066,6 @@ function HomeScreenContent() {
     satelliteRadius: microR, satelliteSize: microSz,
     satellites: visibleLandingSatelliteKeys(Object.keys(LANDING_SATELLITE_DEGREES), isUserV1Surface)
       .filter(key => key !== "payment").map(key => ({ key, degrees: LANDING_SATELLITE_DEGREES[key] })),
-    additionalControls: shoppingLandingNode,
     helpSize: microSz, alignment: landingAlignment,
     // Only painted controls constrain the orbit. Legacy information/selector rectangles
     // are laid out AFTER this footprint and must not push it upwards.
@@ -14115,6 +14108,20 @@ function HomeScreenContent() {
       if (small) return small;
     }
     return { ...preferred, x: Math.max(insets.left,Math.min(screen.width-insets.right-64,landingDisplayCloseRect.x)), y:Math.max(insets.top,Math.min(screen.height-insets.bottom-64,landingDisplayCloseRect.y)) };
+  })();
+  const landingShoppingRect = (() => {
+    if (!shoppingShortcutVisible || !compactLandingGeometry.fitted) return null;
+    const list = compactLandingGeometry.obstacles.find(rect => rect.key === "list");
+    const food = compactLandingGeometry.obstacles.find(rect => rect.key === "orbit-1");
+    if (!list || !food) return null;
+    const size = shoppingShortcut.touchSize;
+    const preferred = { x: compactLandingGeometry.center.x
+      + (compactLandingGeometry.mirrored ? -shoppingShortcut.x : shoppingShortcut.x) - size / 2,
+      y: compactLandingGeometry.center.y + shoppingShortcut.y - size / 2,
+      width: size, height: size };
+    return fitLandingShoppingShortcut(preferred, compactLandingGeometry.bounds,
+      [...compactLandingGeometry.obstacles, ...compactLandingGeometry.fixedObstacles,
+        compactLandingGeometry.help, landingNavigationCloseRect], list, food);
   })();
   const qrBase = {
     company: { x: landingCenter.x + Math.cos(LANDING_SATELLITE_DEGREES.mas * Math.PI / 180) * microR - Math.max(44, microSz) / 2,
@@ -18730,7 +18737,7 @@ function HomeScreenContent() {
             );
           })()}
 
-          {shoppingShortcutVisible && <TouchableOpacity
+          {shoppingShortcutVisible && landingShoppingRect && <TouchableOpacity
             testID="landing-shopping-shortcut"
             accessibilityRole="button"
             accessibilityLabel={lang === "en" ? "Open GO Shopping" : "Abrir GO Compras"}
@@ -18738,18 +18745,14 @@ function HomeScreenContent() {
             activeOpacity={0.8}
             onPress={() => { Haptics.selectionAsync().catch(() => {}); openLandingShopping(); }}
             style={{ position: "absolute",
-              left: compactLandingActive && compactLandingGeometry.mirrored
-                ? orbitWrapSize / 2 - shoppingShortcut.x - shoppingShortcut.touchSize / 2
-                : orbitWrapSize / 2 + shoppingShortcut.x - shoppingShortcut.touchSize / 2,
-              top: orbitWrapSize / 2 + shoppingShortcut.y - shoppingShortcut.touchSize / 2,
+              left: orbitWrapSize / 2 + landingShoppingRect.x - compactLandingGeometry.center.x,
+              top: orbitWrapSize / 2 + landingShoppingRect.y - compactLandingGeometry.center.y,
               width: shoppingShortcut.touchSize, height: shoppingShortcut.touchSize,
-              borderRadius: shoppingShortcut.touchSize / 2, borderWidth: 1.5, borderColor: "#B8EDFF",
-              shadowColor: "#37BFE3", shadowOpacity: 0.42, shadowRadius: 8,
-              shadowOffset: { width: 0, height: 3 }, elevation: 7, overflow: "hidden", zIndex: 5 }}>
-            <LinearGradient colors={["#227BBE", "#145384", "#0B315A"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-              style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-              <LandingShoppingCart size={shoppingShortcut.visualSize - 2} />
-            </LinearGradient>
+              borderRadius: shoppingShortcut.touchSize / 2, borderWidth: 1.5, borderColor: "#747474",
+              backgroundColor: "#080808", alignItems: "center", justifyContent: "center",
+              shadowColor: "#000000", shadowOpacity: 0.3, shadowRadius: 5,
+              shadowOffset: { width: 0, height: 2 }, elevation: 5, zIndex: 5 }}>
+            <LandingShoppingCart size={shoppingShortcut.visualSize - 2} />
           </TouchableOpacity>}
 
         </Animated.View>

@@ -12,7 +12,7 @@ export class ShoppingNoteDeletedError extends Error{
   constructor(readonly noteId:string){super("La compra canónica está eliminada. Restaura la nota antes de continuar.");this.name="ShoppingNoteDeletedError";}
 }
 // The screen binds ADMIN's active() guard to verified access; all store operations still check the session owner.
-function assertShoppingScope(scope:TaskScope){if(!scope.userId||! /^(live:ADMIN|(live|demo):USER)$/.test(scope.context))throw Error("COMPRAS requiere una sesión personal o ADMIN autenticada de GO.");}
+function assertShoppingScope(scope:TaskScope){if(!scope.userId||! /^(live:ADMIN|(live|demo):USER|live:BUSINESS|demo:BUSINESS:[^:]+)$/.test(scope.context))throw Error("COMPRAS requiere una sesión autenticada de GO.");}
 async function check(scope:TaskScope,active:()=>boolean){assertShoppingScope(scope);await assertTaskUser(scope.userId);if(!active())throw Error("La cuenta o el contexto ha cambiado. Vuelve a abrir COMPRAS.");}
 function canonical(rows:GoEntry[],scope:TaskScope,listId?:string){
   const matches=rows.filter(row=>noteInScope(row,scope)&&row.note?.shopping!==undefined);

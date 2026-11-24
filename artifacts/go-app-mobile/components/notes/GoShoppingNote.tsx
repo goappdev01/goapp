@@ -43,15 +43,18 @@ export function GoShoppingNote({visible,scope,ready:scopeReady,handedness,onClos
   const authorizedAdmin=!!scope && view.isAdminView && admin.allowed
     && !admin.checking && !admin.unavailable && admin.userId===scope.userId;
   const personalScope=scope?.context==="live:USER" || scope?.context==="demo:USER";
+  const businessScope=scope?.context==="live:BUSINESS" || /^demo:BUSINESS:[^:]+$/.test(scope?.context??"");
   // A retained scope from the previous view must never activate its lists or actions.
-  const ready=scopeReady && (isAdminView ? authorizedAdmin && scope?.context==="live:ADMIN" : view.view==="USER" && personalScope);
-  const changingScope=(isAdminView && authorizedAdmin) || (view.view==="USER" && scope?.context==="live:ADMIN");
+  const ready=scopeReady && (isAdminView ? authorizedAdmin && scope?.context==="live:ADMIN"
+    : view.view==="USER" ? personalScope : view.view==="BUSINESS" && businessScope);
+  const changingScope=scopeReady && !!scope && (isAdminView && authorizedAdmin && scope.context!=="live:ADMIN"
+    || view.view==="USER" && !personalScope || view.view==="BUSINESS" && !businessScope);
   const accessMessage=!scopeReady || (isAdminView && admin.checking) || changingScope
     ? "Verificando tu acceso a Compras…"
     : !scope ? "Inicia sesión en GO para usar Compras."
     : isAdminView && admin.unavailable ? "No se pudo verificar el acceso ADMIN a Compras."
     : isAdminView ? "Necesitas acceso ADMIN verificado para usar Compras."
-    : "Compras está disponible en tu perfil personal o en ADMIN.";
+    : "No se pudo verificar el acceso a Compras en este perfil.";
   const insets=useSafeAreaInsets(),keyboard=useGoNoteKeyboard(visible);
   const viewport=useWindowDimensions();
   const frameRef=useRef<ViewInstance>(null),actionsRef=useRef<ViewInstance>(null),shortcutsRef=useRef<ViewInstance>(null),orbitRef=useRef<ViewInstance>(null),headerRef=useRef<ViewInstance>(null),listViewportRef=useRef<ViewInstance>(null),utilityContentRef=useRef<ViewInstance>(null),utilityViewportRef=useRef<ViewInstance>(null),orbitViewportRef=useRef<ViewInstance>(null);

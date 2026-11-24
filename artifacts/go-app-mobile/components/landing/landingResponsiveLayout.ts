@@ -11,18 +11,56 @@ export const LANDING_SATELLITE_DEGREES: Record<string, number> = {
   contacts: 67.5, messages: 112.5, settings: 157.5, payment: 157.5, mas: 202.5,
 };
 
-/** The outer, upper-right gap adjacent to FOOD and MAP. Keep their rectangular
- * touch areas 4pt clear (a circular visual gap alone does not protect taps).
- * Coordinates are relative to GO's centre; artwork scales, touch stays >=44pt. */
+/** Cart in the outer wedge between LIST and FOOD. Existing orbital centers and
+ * sizes are inputs only: the cart never participates in their layout. */
 export function landingShoppingShortcut(scale: number, orbitRadius: number, orbitSize: number,
   satelliteRadius: number, satelliteSize: number) {
   const visualSize = Math.max(34, Math.round(42 * scale));
   const touchSize = Math.max(44, visualSize);
-  const foodRight = orbitRadius * Math.SQRT1_2 + Math.max(44, orbitSize) / 2;
-  const mapTop = -satelliteRadius * Math.sin(Math.PI / 8) - Math.max(44, satelliteSize) / 2;
-  return { x: foodRight + touchSize / 2 + 4,
-    y: mapTop - touchSize / 2 - 4,
-    touchSize, visualSize };
+  const foodX = orbitRadius * Math.SQRT1_2, foodY = -foodX;
+  const listX = satelliteRadius * Math.cos(3 * Math.PI / 8);
+  const listY = -satelliteRadius * Math.sin(3 * Math.PI / 8);
+  const foodRight = foodX + Math.max(44, orbitSize) / 2;
+  const mapRight = satelliteRadius * Math.cos(Math.PI / 8) + Math.max(44, satelliteSize) / 2;
+  // Keep the cart within the original outer footprint, especially at compact scale.
+  const x = Math.min(foodRight + touchSize / 2 + 4, mapRight - touchSize / 2);
+  // Equal center distances make the visual spacing to LIST and FOOD balanced.
+  const balancedY = (foodX ** 2 + foodY ** 2 - listX ** 2 - listY ** 2 - 2 * x * (foodX - listX))
+    / (2 * (foodY - listY));
+  // At compact scale there is no horizontal gap beside FOOD's touch box.
+  const y = x - touchSize / 2 < foodRight
+    ? Math.min(balancedY, foodY - Math.max(44, orbitSize) / 2 - touchSize / 2 - 4)
+    : balancedY;
+  return { x, y, touchSize, visualSize };
+}
+
+type ShoppingRect = { x: number; y: number; width: number; height: number };
+/** Move only the new cart when a frozen orbit or floating close occupies its ideal spot. */
+export function fitLandingShoppingShortcut(preferred: ShoppingRect,
+  bounds: { left: number; right: number; top: number; bottom: number },
+  obstacles: readonly ShoppingRect[], list: ShoppingRect, food: ShoppingRect): ShoppingRect | null {
+  const gap = 2, size = preferred.width;
+  const within = (r: ShoppingRect) => r.x >= bounds.left && r.x + size <= bounds.right
+    && r.y >= bounds.top && r.y + size <= bounds.bottom;
+  const clear = (r: ShoppingRect) => within(r) && obstacles.every(o =>
+    r.x + size + gap <= o.x || o.x + o.width + gap <= r.x
+    || r.y + size + gap <= o.y || o.y + o.height + gap <= r.y);
+  if (clear(preferred)) return preferred;
+  const xs = [preferred.x, bounds.left, bounds.right - size,
+    ...obstacles.flatMap(o => [o.x - size - gap, o.x + o.width + gap])];
+  const ys = [preferred.y, bounds.top, bounds.bottom - size,
+    ...obstacles.flatMap(o => [o.y - size - gap, o.y + o.height + gap])];
+  let best: ShoppingRect | null = null, bestScore = Infinity;
+  for (const x of xs) for (const y of ys) {
+    const r = { x, y, width: size, height: size };
+    if (!clear(r)) continue;
+    const centerDistance = (other: ShoppingRect) => Math.hypot(x + size / 2 - other.x - other.width / 2,
+      y + size / 2 - other.y - other.height / 2);
+    const score = Math.hypot(x - preferred.x, y - preferred.y)
+      + Math.abs(centerDistance(list) - centerDistance(food)) * 0.35;
+    if (score < bestScore) { best = r; bestScore = score; }
+  }
+  return best;
 }
 export function landingPresetScale(preset: LandingPreset) {
   return preset === "compacto" ? 0.83 : preset === "grande" ? 1.12 : 1;
