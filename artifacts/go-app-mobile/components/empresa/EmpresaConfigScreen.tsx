@@ -84,6 +84,7 @@ import {
 } from "@/contexts/GoBusinessConfigContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { CatalogAssociationManager } from "./CatalogAssociationManager";
+import { ServiceComplementManager } from "./ServiceComplementManager";
 import { isStableBookingId, serializeServiceConfiguration, validateBookingResources,
   validateBusinessTimezone, validateServiceTiming, type BookingResource } from "@/data/serviceTiming";
 import { readServiceWorkWait, serviceWorkWaitTotal, updateServiceWorkWait, type ServiceWorkWaitDraft } from "@/data/serviceWorkWait";
@@ -2670,6 +2671,7 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
     <View>
       <View style={c.sectionCard}>
         <Text style={c.sectionLabel}>{t("biz_services_offered")}</Text>
+        {config.subId === "peluqueria" && <ServiceComplementManager businessId={config.businessId} demo={!!demo} beforeOpen={flushServices} />}
         <CatalogAssociationManager businessId={config.businessId} demo={!!demo} beforeOpen={flushServices} />
 
         {localSvcs.map((svc, idx) => (
@@ -2685,8 +2687,8 @@ function StepServicios({ currentSector, saveRef }: { currentSector: Sector | nul
               returnKeyType="done"
             />
             <TextInput style={[c.svcNameInput, { fontSize: 13 }]} value={svc.description ?? ""} onChangeText={description => patchSvc(svc.id, { description })}
-              accessibilityLabel={lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)"}
-              onBlur={() => { void flush().catch(() => {}); }} placeholder={lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)"} placeholderTextColor={DIM} />
+              accessibilityLabel={config.subId === "peluqueria" ? (lang === "en" ? "Service description (optional)" : "Descripción del servicio (opcional)") : (lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)")}
+              onBlur={() => { void flush().catch(() => {}); }} placeholder={config.subId === "peluqueria" ? (lang === "en" ? "Service description (optional)" : "Descripción del servicio (opcional)") : (lang === "en" ? "Complementary service (optional)" : "Servicio complementario (opcional)")} placeholderTextColor={DIM} />
             <View style={c.svcMeta}>
               {!isTimingOpen(svc) && <View style={c.numBox}>
                 <TextInput

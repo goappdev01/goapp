@@ -2,7 +2,15 @@ import { supabaseApiRequest, type BookableItem } from "./booking";
 export type AssociationMode = "included" | "optional" | "recommended";
 /** Old required components are part of the main price, never a new charge. */
 export const associationMode = (mode: string): AssociationMode => mode === "required" ? "included" : mode as AssociationMode;
-export type CatalogAssociation = { id: string; business_id: string; source_id: string; target_id: string; mode: AssociationMode; active: boolean; revision: number };
+export type CatalogAssociation = { id: string; business_id: string; source_id: string; target_id: string; mode: AssociationMode; active: boolean; revision: number; sort_order?: number };
+/** A blank supplement is not free: zero must be entered explicitly. */
+export function parseEuroSupplement(value: string): number {
+  const normalized = value.trim().replace(",", ".");
+  if (!/^\d{1,8}(?:\.\d{1,2})?$/.test(normalized)) throw Error("Indica un suplemento válido en euros, con un máximo de dos decimales.");
+  const cents = Math.round(Number(normalized) * 100);
+  if (!Number.isSafeInteger(cents) || cents > 9999999999) throw Error("El suplemento supera el límite permitido.");
+  return cents / 100;
+}
 export type CatalogLine = { itemId: string; name: string; kind: "service" | "product"; durationMinutes: number; quantity: number; unitPrice: number; charge: number; included: boolean; currency: string;
   originalCharge?: number; discountAmount?: number; discountBasisPoints?: number };
 export type CatalogOption = { associationId: string; sourceId: string; itemId: string; name: string; kind: "service" | "product"; price: number; currency: string; mode: AssociationMode; selected: boolean };

@@ -14,7 +14,8 @@ export function localCatalogQuote(businessId: string, catalog: BookableItem[], r
   for (let i = 0; i < ids.length; i++) {
     if (ids.length > 64) throw Error("Selección demasiado extensa.");
     find(ids[i]);
-    for (const edge of relations.filter(row => row.business_id === businessId && row.source_id === ids[i] && row.active)) {
+    for (const edge of relations.filter(row => row.business_id === businessId && row.source_id === ids[i] && row.active)
+      .sort((a, b) => (a.sort_order ?? Number.MAX_SAFE_INTEGER) - (b.sort_order ?? Number.MAX_SAFE_INTEGER))) {
       const mode = (edge.mode as string) === "required" ? "included" : edge.mode;
       let item: BookableItem;
       try { item = find(edge.target_id); } catch (error) { if (mode === "included" || selected.includes(edge.id)) throw error; continue; }

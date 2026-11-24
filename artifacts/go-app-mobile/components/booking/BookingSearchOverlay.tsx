@@ -22,7 +22,7 @@ import {
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { CatalogComplementSelector } from "./CatalogComplementSelector";
+import { CatalogComplementSelector, CatalogQuoteBreakdown } from "./CatalogComplementSelector";
 import { catalogBookingServices, isCatalogService, type CatalogQuote } from "@/data/catalogAssociations";
 import { getBookingDiscountPrices, quoteBookingDiscount, type BookingDiscountPrices } from "@/data/bookingDiscounts";
 import * as Haptics from "expo-haptics";
@@ -1831,6 +1831,7 @@ export function BookingSearchOverlay({
                         {selectedBusiness.name}
                       </Text>
                       <Text style={s.summaryServiceName}>{trSector(summaryItem!.title, lang)}</Text>
+                      {reviewedQuote && <CatalogQuoteBreakdown quote={reviewedQuote} accentColor={accentColor} />}
                       {reviewedQuote?.originalTotal !== undefined && (() => {
                         const quote = reviewedQuote;
                         const money = new Intl.NumberFormat(lang === "en" ? "en-GB" : "es-ES", { style: "currency", currency: quote.currency });
