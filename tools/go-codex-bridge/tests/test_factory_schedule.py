@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import Mock
 
 from factory_schedule import FactorySchedule
+from remote_panel import RemotePanel
 
 
 class ScheduleError(Exception):
@@ -25,6 +26,10 @@ class Bridge:
     def __init__(self, path):
         self.path=Path(path)
         self.events=[]
+        self.account_id="a"*64
+
+    def codex_account(self):
+        return self.account_id,"a•••@e•••"
 
     @contextmanager
     def db(self):
@@ -49,8 +54,11 @@ class Panel:
         self.f=Mock(lock=threading.RLock(),utc=lambda:dt.datetime.now(dt.timezone.utc).isoformat())
         self.w=Mock()
         self.w.enabled.return_value=False
+        self.w.live_policy.return_value={"codex_identity":self.b.account_id}
         self.w.fail.side_effect=lambda code,message: (_ for _ in ()).throw(ScheduleError(code,message))
         self.orbit_control=Mock(return_value={"enabled":True})
+        self.schedule_accounts=Mock(return_value={"accounts":[
+            {"id":self.b.account_id,"label":"a•••@e•••","authorized":True,"session_active":True}]})
 
 
 class FactoryScheduleTests(unittest.TestCase):
@@ -64,13 +72,15 @@ class FactoryScheduleTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def schedule(self):
-        return self.scheduler.set(self.due.isoformat(),"PROGRAMAR ACTIVACIÓN","test-owner")
+        return self.scheduler.set(self.due.isoformat(),"PROGRAMAR ACTIVACIÓN",
+                                  "test-owner",self.panel.b.account_id)
 
     def test_explicit_confirmation_and_persistent_single_schedule(self):
         with self.assertRaises(ScheduleError):
-            self.scheduler.set(self.due.isoformat(),"", "test-owner")
+            self.scheduler.set(self.due.isoformat(),"", "test-owner",self.panel.b.account_id)
         self.assertEqual(self.scheduler.status()["state"],"none")
         self.assertEqual(self.schedule()["state"],"scheduled")
+        self.assertEqual(self.scheduler.status()["account"],"a•••@e•••")
         self.assertEqual(FactorySchedule(self.panel).status()["state"],"scheduled")
         with self.assertRaises(ScheduleError) as error:
             self.schedule()
@@ -99,6 +109,36 @@ class FactoryScheduleTests(unittest.TestCase):
         self.assertFalse(self.scheduler.tick(self.due.timestamp()+1))
         self.assertEqual(self.scheduler.status()["reason"],"WHEEL_CODEX_SESSION_CHANGED")
         self.panel.orbit_control.assert_called_once()
+
+    def test_selected_account_must_match_session_and_live_binding(self):
+        self.schedule()
+        self.panel.b.account_id="b"*64
+        self.assertFalse(self.scheduler.tick(self.due.timestamp()+1))
+        self.assertEqual(self.scheduler.status()["reason"],"FACTORY_SCHEDULE_ACCOUNT_MISMATCH")
+        self.panel.orbit_control.assert_not_called()
+        self.panel.b.account_id="a"*64
+        self.schedule()
+        self.panel.w.live_policy.return_value={"codex_identity":"b"*64}
+        self.assertFalse(self.scheduler.tick(self.due.timestamp()+1))
+        self.assertEqual(self.scheduler.status()["reason"],"FACTORY_SCHEDULE_ACCOUNT_UNBOUND")
+        self.panel.orbit_control.assert_not_called()
+
+    def test_unrecognized_account_cannot_be_scheduled(self):
+        with self.assertRaises(ScheduleError) as error:
+            self.scheduler.set(self.due.isoformat(),"PROGRAMAR ACTIVACIÓN",
+                               "test-owner","b"*64)
+        self.assertEqual(error.exception.code,"FACTORY_SCHEDULE_ACCOUNT_UNKNOWN")
+        self.assertEqual(self.scheduler.status()["state"],"none")
+
+    def test_account_selector_only_lists_bound_and_codex_detected(self):
+        self.panel.w.live_policy.return_value={"codex_identity":"b"*64,
+                                               "codex_account_label":"b•••@e•••"}
+        accounts=RemotePanel.schedule_accounts(self.panel)["accounts"]
+        self.assertEqual([item["id"] for item in accounts],["b"*64,"a"*64])
+        self.assertTrue(accounts[0]["authorized"])
+        self.assertFalse(accounts[1]["authorized"])
+        self.assertTrue(accounts[1]["session_active"])
+        self.assertNotIn("password",str(accounts).lower())
 
     def test_cancel_and_pause_keep_factory_idle(self):
         self.schedule()
@@ -131,6 +171,24 @@ class FactoryScheduleTests(unittest.TestCase):
             self.scheduler.tick(self.due.timestamp()+1)
         self.assertEqual(error.exception.code,"FACTORY_SCHEDULE_INVALID")
         self.panel.orbit_control.assert_not_called()
+
+    def test_legacy_schedule_preserved_but_cannot_start_without_account(self):
+        legacy=Panel(Path(self.tmp.name)/"legacy.sqlite3")
+        due=self.due.isoformat()
+        with legacy.b.db() as db:
+            db.execute("""CREATE TABLE factory_activation_schedule (
+                id INTEGER PRIMARY KEY, due_utc TEXT, state TEXT, principal_hash TEXT,
+                signature TEXT, reason TEXT, updated TEXT)""")
+            owner=legacy.b.sign({"scheduled_by":"test-owner"})
+            signature=legacy.b.sign({"kind":"factory-activation-v1","due_utc":due,
+                                     "state":"scheduled","principal_hash":owner})
+            db.execute("INSERT INTO factory_activation_schedule VALUES(1,?,?,?,?,?,?)",
+                       (due,"scheduled",owner,signature,None,"synthetic"))
+        scheduler=FactorySchedule(legacy)
+        self.assertTrue(scheduler.status()["account_required"])
+        self.assertFalse(scheduler.tick(self.due.timestamp()+1))
+        self.assertEqual(scheduler.status()["reason"],"FACTORY_SCHEDULE_ACCOUNT_REQUIRED")
+        legacy.orbit_control.assert_not_called()
 
 
 if __name__=="__main__":

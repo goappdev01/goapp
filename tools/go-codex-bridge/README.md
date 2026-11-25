@@ -129,10 +129,20 @@ La programación admite una fecha futura dentro de 30 días. La interfaz cerrada
 no afecta al temporizador mientras el puente continúe activo. Ninguna
 programación se crea al instalar o reiniciar el servicio.
 
+Cada programación exige elegir una cuenta de producción reconocida por Codex:
+la vinculada a la autorización vigente o la sesión autenticada detectada en el
+equipo. Solo se conservan la identidad firmada y su etiqueta enmascarada;
+no se almacenan credenciales ni se cambia de cuenta automáticamente. Al llegar
+la hora, la sesión detectada y la vinculación vigente deben coincidir con la
+cuenta seleccionada antes de llamar al control de activación. Una programación
+anterior sin cuenta elegida se conserva, pero no puede iniciar producción: hay
+que cancelarla y crear otra.
+
 Para preparar una producción con otra cuenta: pausar, abrir «Cuenta Codex»,
 iniciar sesión con la cuenta deseada y «Vincular cuenta sin activar». Verificar
-que figura vinculada y que hay cuota; después introducir fecha y hora en
-«Programar activación» y confirmar. El dueño puede cancelar desde la misma
+que figura vinculada y que hay cuota; después elegirla en «Cuenta de
+producción», introducir fecha y hora en «Programar activación» y confirmar.
+El dueño puede cancelar desde la misma
 órbita. Si la cuenta, autorización o cuota cambian antes de la hora, el arranque
 queda fallido y se muestra el motivo; hay que volver a programarlo expresamente.
 

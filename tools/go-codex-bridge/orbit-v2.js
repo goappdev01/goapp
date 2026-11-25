@@ -4,6 +4,7 @@ const legacy=remote?'/remote/legacy':'/legacy';
 let state=null,orbitIndex=0,selected='factory',drag=null,hold=null,pending=null,requestId=0,powerBusy=false;
 let accountReview=null, accountBusy=false, accountView=null, accountRequestId=0;
 let scheduleDraft='';
+let scheduleAccounts=null, scheduleAccountsLoading=false, scheduleSelected='';
 const metroProof={};
 const node=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
 function note(text){$('notice').textContent=text;}
@@ -86,12 +87,14 @@ $('accountApprove').onclick=()=>accountAction(async()=>{
   const {ticket,confirmation}=accountReview;
   accountReview=null;
   const result=await api('decide',{ticket,confirmation});
+  scheduleAccounts=null;scheduleSelected='';
   await loadAccount();await refresh();note(result.message);
 });
 $('accountCancel').onclick=()=>{accountReview=null;renderAccount();$('accountBind').focus();};
 $('accountRefresh').onclick=()=>accountAction(loadAccount);
 $('accountChange').onclick=()=>accountAction(async()=>{
   const result=await api('change-account',{});
+  scheduleAccounts=null;scheduleSelected='';
   await loadAccount();await refresh();showAccountReason(result.message);
 });
 $('codexAccount').addEventListener('close',()=>{
@@ -138,14 +141,34 @@ function renderSchedule(box,op){
   const label=node('label','Programar activación · fecha y hora local');
   const input=node('input');input.type='datetime-local';input.value=scheduleDraft;
   input.oninput=()=>{scheduleDraft=input.value;};label.append(input);section.append(label);
+  const accountLabel=node('label','Cuenta de producción');
+  const account=node('select');account.setAttribute('aria-label','Cuenta de producción para esta activación');
+  account.style.width='100%';account.style.maxWidth='100%';
+  account.append(new Option(scheduleAccountsLoading?'Comprobando cuentas…':'Selecciona una cuenta reconocida',''));
+  for(const item of scheduleAccounts||[]){
+    const suffix=item.authorized?' · vinculada':item.session_active?' · sesión actual; vincular antes del arranque':'';
+    account.append(new Option(item.label+suffix,item.id));
+  }
+  account.value=(scheduleAccounts||[]).some(item=>item.id===scheduleSelected)?scheduleSelected:'';
+  account.disabled=!scheduleAccounts?.length;
+  account.onchange=()=>{scheduleSelected=account.value;};
+  accountLabel.append(account);section.append(accountLabel);
+  const reload=node('button','Comprobar cuentas');reload.type='button';
+  reload.disabled=scheduleAccountsLoading;
+  reload.onclick=()=>loadScheduleAccounts(true);section.append(reload);
+  if(scheduleAccounts===null&&!scheduleAccountsLoading)loadScheduleAccounts(false);
+  if(scheduleAccounts!==null&&!scheduleAccounts.length)line(section,'Codex no reconoce una cuenta elegible en este equipo.','status warn');
+  if(schedule.account)line(section,'Cuenta elegida para esta programación: '+schedule.account,'muted');
   const submit=node('button','Programar activación');submit.type='button';
-  submit.disabled=Boolean(op.wheel.enabled||schedule.state==='scheduled'||schedule.state==='firing');
+  submit.disabled=Boolean(op.wheel.enabled||schedule.state==='scheduled'||schedule.state==='firing'||!scheduleAccounts?.length);
   submit.onclick=async()=>{
+    const choice=(scheduleAccounts||[]).find(item=>item.id===account.value);
+    if(!choice){note('Selecciona una cuenta de producción reconocida por Codex.');return;}
     const date=new Date(input.value);
     if(!input.value||Number.isNaN(date.getTime())||date.getFullYear()!==Number(input.value.slice(0,4))||date.getMonth()+1!==Number(input.value.slice(5,7))||date.getDate()!==Number(input.value.slice(8,10))||date.getHours()!==Number(input.value.slice(11,13))||date.getMinutes()!==Number(input.value.slice(14,16))){note('Selecciona una fecha y hora local válida.');return;}
-    if(!window.confirm('Programar ACTIVAR para '+date.toLocaleString()+'? El puente comprobará cuenta, cuota y permisos al llegar la hora.'))return;
+    if(!window.confirm('Programar ACTIVAR para '+date.toLocaleString()+' con '+choice.label+'? La sesión deberá coincidir al llegar la hora.'))return;
     submit.disabled=true;
-    try{await api('schedule',{due_utc:date.toISOString(),confirmation:'PROGRAMAR ACTIVACIÓN'});scheduleDraft='';await refresh();note('Activación programada. La fábrica continúa pausada.');}
+    try{await api('schedule',{due_utc:date.toISOString(),account_id:choice.id,confirmation:'PROGRAMAR ACTIVACIÓN'});scheduleDraft='';await refresh();note('Activación programada para '+choice.label+'. La fábrica continúa pausada.');}
     catch(e){note(e.message);submit.disabled=false;}
   };section.append(submit);
   if(schedule.state==='scheduled'){
@@ -154,6 +177,14 @@ function renderSchedule(box,op){
     section.append(cancel);
   }
   box.append(section);
+}
+async function loadScheduleAccounts(force){
+  if(scheduleAccountsLoading)return;
+  if(force)scheduleAccounts=null;
+  scheduleAccountsLoading=true;
+  try{scheduleAccounts=(await api('schedule-accounts')).accounts||[];}
+  catch(e){scheduleAccounts=[];note('No se pudieron comprobar las cuentas: '+e.message);}
+  finally{scheduleAccountsLoading=false;if(state&&selected==='factory')renderPanel();}
 }
 function renderPanel(){const key=selected,box=$('panelContent'),op=state.operational;box.replaceChildren();$('panelTitle').textContent=actualModule(key);$('v1Link').href=legacy;$('v1Link').textContent='Abrir controles existentes';
   if(key==='factory'){const mode=factoryMode(op);renderTeamSelection(box,op);renderSchedule(box,op);line(box,'Estado real: '+mode[1],mode[0]==='programming'?'status good':mode[0]==='blocked'?'status bad':'status warn');line(box,'Trabajo actual: '+(op.wheel.current||'ninguno'));line(box,'Siguiente según la última COLA verificada: '+(op.wheel.next||'ninguno'));if(op.wheel.next_action)line(box,'Motivo: '+op.wheel.next_action,'muted');for(const skipped of (op.wheel.skipped||[]).slice(0,6))line(box,'Omitida: '+skipped.title+' · '+skipped.reason+' · permanece en COLA','muted');line(box,op.wheel.button?.reason_message||'Sin bloqueo global registrado.');}

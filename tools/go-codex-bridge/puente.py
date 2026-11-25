@@ -1518,6 +1518,8 @@ def server(bridge, open_browser=True):
                     self.send(200,{**remote.orbit_state(),"csrf":session})
                 elif path == "/v2/account":
                     self.send(200,remote.account_state())
+                elif path == "/v2/schedule-accounts":
+                    self.send(200,remote.schedule_accounts())
                 elif path in ("/v2/verify/8088","/v2/verify/8089"):
                     self.send(200,remote.orbit_verify_metro(int(path[-4:])))
                 elif path == "/api/wheel/review":

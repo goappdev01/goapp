@@ -160,6 +160,23 @@ class RemotePanel:
                                 and not control["enabled"] and not login_open),
                 "can_change":bool(expected and not login_open)}
 
+    def schedule_accounts(self):
+        """Only a signed live binding or Codex's current authenticated account."""
+        with self.f.lock:
+            live=self.w.live_policy()
+            detected_id,detected_label=self.b.codex_account()
+        linked_id=live.get("codex_identity") if live else None
+        accounts=[]
+        if linked_id:
+            label=(live.get("codex_account_label") or
+                   (detected_label if detected_id==linked_id else "Cuenta vinculada · "+linked_id[:8]))
+            accounts.append({"id":linked_id,"label":label,"authorized":True,
+                             "session_active":detected_id==linked_id})
+        if detected_id and detected_id!=linked_id:
+            accounts.append({"id":detected_id,"label":detected_label or "Sesión Codex detectada",
+                             "authorized":False,"session_active":True})
+        return {"accounts":accounts}
+
     def change_account(self):
         import os
         import subprocess
@@ -199,8 +216,8 @@ class RemotePanel:
     def orbit_control(self,action,body,principal):
         if action=="change-account" and not body:
             return self.change_account()
-        if action=="schedule" and set(body)=={"due_utc","confirmation"}:
-            return self.schedule.set(body["due_utc"],body["confirmation"],principal)
+        if action=="schedule" and set(body)=={"due_utc","confirmation","account_id"}:
+            return self.schedule.set(body["due_utc"],body["confirmation"],principal,body["account_id"])
         if action=="cancel-schedule" and set(body)=={"confirmation"}:
             return self.schedule.cancel(body["confirmation"])
         if action=="team" and set(body)=={"team"}:
@@ -584,6 +601,8 @@ class RemotePanel:
                 self.send(handler,{**self.orbit_state(),"csrf":csrf})
             elif path=="/remote/v2/account":
                 self.send(handler,self.account_state())
+            elif path=="/remote/v2/schedule-accounts":
+                self.send(handler,self.schedule_accounts())
             elif path in ("/remote/v2/verify/8088","/remote/v2/verify/8089"):
                 self.send(handler,self.orbit_verify_metro(int(path[-4:])))
             elif path=="/remote/status":
